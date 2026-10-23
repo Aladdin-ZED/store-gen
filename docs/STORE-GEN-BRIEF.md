@@ -20,6 +20,29 @@ SaaS that generates and runs complete stores**, with high quality standards ever
    whose products can also have their own landing pages). Landing pages keep every feature they have today
    (sections, Offers v2, pixels, exports, thank-you upsell…) and get more features on top.
 
+8. **Generation that never looks AI-made (added 2026-10-23):** every generator (page design, store theme, logo,
+   copy, images, offers) must produce upgraded, smooth, creative, *special* results at an expert senior UI/UX level,
+   never a generic "AI vibe". Generation is **dynamic, not fixed**: no two stores or pages should share a repetitive
+   layout or copy style.
+9. **Every basic and advanced feature a store or a landing page needs**, including integrations ("the linking part"):
+   Google Sheets and the other tools a COD seller connects (delivery companies, WhatsApp, ad platforms, feeds,
+   webhooks…).
+10. **Team agents and accounting:** managing the store's agents (call-center / confirmation teammates: assignment,
+   performance, commissions) and accounting ("comptabilité") of every detail the owner handles: revenue, product cost,
+   delivery fees, COD cash collected and remitted, ad spend, expenses, profit.
+11. **Integrated AI that is fast and gets better over time:** the AI must be fast and smooth everywhere, and learn from
+   the up-to-date data on the server, so quality improves with use and more AI features can be added later.
+12. **Domains: stores on subdomains.** The main domain (the app's domain) is the platform. When someone signs up and
+   creates a store, the store gets its own **subdomain** of the main domain (custom domains later). The temporary
+   Hostinger domain cannot do this, so the design must work on it now and switch to subdomains on a real domain.
+13. **Platform administration on the main domain:** full control over every store. Each store has a **profile** in the
+   platform admin with all its stats, logs, orders, teammates and every detail. The platform admin **approves new
+   accounts** and has every other feature this level needs.
+14. **Brainstorm every part:** go beyond the general view the owner gave; specialise each step into the best advanced,
+   futuristic features and vibe.
+15. **Admin and generated design at expert level:** raise the design level of the admin and of everything generated to
+   that of an expert senior UI/UX designer.
+
 ## Starting point (what already exists and can be reused)
 
 - Theme engine (11 archetypes, OKLCH palettes, contrast + no-orange guards) and a landing renderer with 27
