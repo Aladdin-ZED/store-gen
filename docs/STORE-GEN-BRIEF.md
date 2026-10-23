@@ -42,6 +42,13 @@ SaaS that generates and runs complete stores**, with high quality standards ever
    futuristic features and vibe.
 15. **Admin and generated design at expert level:** raise the design level of the admin and of everything generated to
    that of an expert senior UI/UX designer.
+16. **Highest quality bar, rethought with the strongest model (added 2026-10-24):** the owner switched the build session
+   to Claude Fable 5.1 and asked to rethink and improve every part to reach the best possible result, *especially* the
+   design/UI/UX of generated stores and landing pages, the depth of the AI's thinking, and the other powerful features.
+   Method: a baseline audit of today's generated output (docs/saas/research/design-baseline.md), an explicit **elevation
+   pass** over every spec that raises ceilings (not only fixes findings), measurable quality targets, then adversarial
+   review. The AI layer gets a "Director" tier (strongest model at high effort) for design blueprints and critique when
+   the owner enables cloud AI.
 
 ## Starting point (what already exists and can be reused)
 

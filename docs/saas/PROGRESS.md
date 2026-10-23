@@ -20,6 +20,22 @@ running, and how to restart it. Newest state at the top of "Running now".
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **Phase 1d Fable rethink (AI + features)** — started 2026-10-24 ~00:45. Task `wjqy0ncln`, run `wf_ba647c5b-5cb`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\fable-rethink-wf_ba647c5b-5cb.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_ba647c5b-5cb"})`.
+  Output: docs/saas/research/rethink-ai.md, docs/saas/research/rethink-features.md (inputs of Phase 2b ELEVATE).
+
+- **Phase 1c design baseline audit** — started 2026-10-24 ~00:40 (Fable 5.1). Task `wos2qnru9`, run `wf_21efd09c-0c8`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\design-baseline-audit-wf_21efd09c-0c8.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_21efd09c-0c8"})`.
+  Output: qa/saas-baseline/ (html, shots, index.json; git-ignored) + docs/saas/research/design-baseline.md.
+
+- **Plan change 2026-10-24 (owner item 16, Fable 5.1):** after Phase 2a finishes, run **Phase 2b ELEVATE** (Fable, xhigh/max):
+  one elevation architect per spec file (core + 6 parts) raises the quality ceiling using design-baseline.md, the
+  rethink docs (docs/saas/research/rethink-*.md) and the anti-slop rubric copied at qa/ref/anti-slop-frontend-rubric.md
+  (owner rules win over it: no orange ever). Then Phase 2c reviews (operator, principal engineer, premium designer,
+  security, AI/design-quality lens) → 2d revise + critic loop → R1 build.
+
 - **Phase 2a spec writing** — started 2026-10-24 ~00:10. Task `wf817bkqi`, run `wf_7baa2790-029`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\store-saas-spec-write-wf_7baa2790-029.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_7baa2790-029"})`.
