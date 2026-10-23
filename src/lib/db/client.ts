@@ -2,6 +2,7 @@ import "server-only";
 import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import * as schema from "./schema";
+import { databaseUrl } from "./url";
 
 /**
  * Single pooled connection for the process (Hostinger shared plans cap connections per user —
@@ -12,7 +13,7 @@ declare global {
 }
 
 function create() {
-  const url = process.env.DATABASE_URL;
+  const url = databaseUrl();
   if (!url) throw new Error("DATABASE_URL is not set");
   const pool = mysql.createPool({
     uri: url,

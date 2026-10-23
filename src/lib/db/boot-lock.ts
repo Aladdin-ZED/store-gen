@@ -9,6 +9,7 @@
  * skipped: that process runs it. Framework-free (instrumentation and CLI scripts).
  */
 import mysql from "mysql2/promise";
+import { databaseUrl } from "./url";
 
 export interface BootLockOptions {
   databaseUrl?: string;
@@ -19,7 +20,7 @@ export interface BootLockOptions {
 export type BootLockResult<T> = { ran: true; value: T } | { ran: false };
 
 export async function withBootLock<T>(fn: () => Promise<T>, opts: BootLockOptions = {}): Promise<BootLockResult<T>> {
-  const url = opts.databaseUrl ?? process.env.DATABASE_URL;
+  const url = databaseUrl(opts.databaseUrl ?? process.env.DATABASE_URL);
   if (!url) throw new Error("DATABASE_URL is not set");
   const conn = await mysql.createConnection({ uri: url, charset: "utf8mb4_unicode_ci", timezone: "Z", connectTimeout: 10_000 });
   try {

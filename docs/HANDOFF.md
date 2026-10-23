@@ -1,4 +1,10 @@
-# COD Studio: project handoff
+# Store Gen: project handoff
+
+> **This repo is Store Gen** (`Aladdin-ZED/store-gen`). It was cloned on 2026-10-23 from COD Studio
+> (`Aladdin-ZED/Landing-page-gen`, live at myrizq.shop) to grow into a **multi-tenant store-generator SaaS**.
+> Read **docs/STORE-GEN-BRIEF.md** for the goals. The two projects are separate: different repo, local folder,
+> Hostinger website, database and secrets. **Never deploy Store Gen to myrizq.shop.** Everything below about
+> COD Studio's code and lessons still applies, but the deployment target is the Store Gen site in §4.
 
 Everything a new session (or a new engineer) needs to continue this project without the original chat.
 Last updated 2026-10-23, at commit `b995a48` plus this document.
@@ -15,8 +21,8 @@ COD Studio has two parts:
 | | |
 |---|---|
 | Owner | COD seller, Morocco first (Arabic/Darija + French, MAD), Europe later. Writes in non-native English: answer plainly. |
-| Live site | **https://myrizq.shop** on Hostinger Business (managed Node.js) |
-| Real repo | **https://github.com/Aladdin-ZED/Landing-page-gen** (`main`; this PC pushes as `Aladdin-ZED`) |
+| Live site | **https://lightgreen-hippopotamus-140853.hostingersite.com** (Store Gen, temporary Hostinger domain only). COD Studio itself stays on myrizq.shop. |
+| Repo | **https://github.com/Aladdin-ZED/store-gen** (`main`; this PC pushes as `Aladdin-ZED`). Local folder `C:\Users\SICO\store-gen`. |
 | Stack | Next.js 16.4 (App Router, Turbopack), React 19.3, TS strict, Zod v4, Drizzle + mysql2 on MariaDB 10.4, Tailwind v4 (admin, precompiled), shadcn/ui |
 | Docs | `docs/ARCHITECTURE.md`, `docs/DESIGN.md`, `docs/SECTIONS.md`, **`docs/OFFERS.md`** (Offers v2 spec, the contract for offers/items/options/pixels), `docs/DEPLOY-HOSTINGER.md`, `docs/GOOGLE-SHEETS-SETUP.md`, `README.md` |
 
@@ -38,8 +44,8 @@ COD Studio has two parts:
 
 ## 3. Local development (Windows PC)
 
-- `npm run dev` runs `scripts/dev.mjs`: next dev on **port 3400** plus the admin Tailwind watcher. Port 3400 is
-  the owner's dev server: don't kill it. Use other ports (3401+) for test servers.
+- `npm run dev` runs `scripts/dev.mjs`: next dev on **port 3450** for Store Gen (COD Studio's own dev server uses
+  3400; don't kill either) plus the admin Tailwind watcher. Use ports 3451+ for test servers.
 - Database: XAMPP MariaDB 10.4 at 127.0.0.1:3306, user `root`, no password, `max_allowed_packet` 1 MB.
   `CREATE USER` crashes it, so use root. Start it detached:
   `Start-Process C:\xampp\mysql\bin\mysqld.exe --defaults-file=C:\xampp\mysql\bin\my.ini --standalone`.
@@ -62,19 +68,19 @@ COD Studio has two parts:
 
 | | |
 |---|---|
-| Website | `myrizq.shop`. It was renamed from `maroon-kangaroo-224471.hostingersite.com` on 2026-10-17, and the old address no longer resolves. |
-| hPanel user | `u641677794` · Node **22** · preset Next.js · build `npm run build` · output `.next` (Hostinger applies `output: standalone` itself) |
-| Database | `u641677794_codstudio02` / user `u641677794_codadmin02` on **127.0.0.1** (localhost can resolve to ::1) |
-| Env vars | DATABASE_URL, APP_SECRET (**never change after launch**), ADMIN_GATE, SETUP_TOKEN, PUBLIC_URL (**= https://myrizq.shop**), TRUSTED_PROXY_HOPS=1, BEHIND_CLOUDFLARE=0, CRON_KEY, APP_TIMEZONE=Africa/Casablanca. The values are in the local git-ignored `.env.hostinger`. Comments at its top give the admin link, the cron line and the steps. |
-| Admin | Hidden: `/admin` answers 404 until the owner opens `https://myrizq.shop/<ADMIN_GATE>`, which sets the gate cookie and redirects. |
-| Cron | hPanel → Advanced → Cron Jobs, every 5 min: `curl -fsS --max-time 110 "https://myrizq.shop/api/cron/tick?key=<CRON_KEY>" > /dev/null` |
+| Website | `lightgreen-hippopotamus-140853.hostingersite.com`, created 2026-10-23 through the Hostinger API. Use only the temporary domain until the owner says otherwise. |
+| hPanel user | `u641677794` (same hosting account as COD Studio) · Node **22** · build `npm run build` · output `.next` |
+| Database | `u641677794_storegen` / user `u641677794_storegen`. Created by `hosting_databases_setup-website`, which wrote DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD/DATABASE_URL into the site's env with a platform-generated password nobody has seen. The host is written as `localhost`; `src/lib/db/url.ts` connects over 127.0.0.1 instead. |
+| Env vars | The 6 DB keys above + APP_SECRET (**never change after launch**), ADMIN_GATE, SETUP_TOKEN, PUBLIC_URL (**= the site URL**), TRUSTED_PROXY_HOPS=1, BEHIND_CLOUDFLARE=0, CRON_KEY, APP_TIMEZONE. The non-DB values are in the local git-ignored `.env.hostinger` of this folder. Comments at its top give the steps, the admin link and the cron line. `hosting_nodejs_replace-environment-variables` is a FULL replace and would delete the DB keys (their values can't be read back), so never use it without recreating the database. |
+| Local dev | `.env.local` points at the local database `cod_storegen` (XAMPP), with its own secrets. |
+| Admin | Hidden: `/admin` answers 404 until the owner opens `<site>/<ADMIN_GATE>`. |
+| Cron | hPanel → Advanced → Cron Jobs, every 5 min: `curl -fsS --max-time 110 "<site>/api/cron/tick?key=<CRON_KEY>" > /dev/null` |
 
 ### Why git pushes do not deploy
 
-Hostinger's GitHub app is installed on another GitHub account, **aladdinzed35**. Creating the site from the
-public repo URL made a **snapshot copy** there (`aladdinzed35/landingPage-gen`, one "Initial commit").
-Hostinger watches that copy, so pushes to `Aladdin-ZED/Landing-page-gen` never reach it. To make pushes
-auto-deploy, the owner would have to give `Aladdin-ZED` push access to that copy, or connect the right repo.
+Hostinger's GitHub app is installed on another GitHub account, **aladdinzed35**, which can't see
+`Aladdin-ZED/store-gen`. The Store Gen site has no git link: it is deployed only by archive builds (below).
+(COD Studio's site has an old snapshot link to `aladdinzed35/landingPage-gen`.)
 
 ### How to deploy (working method, about 2 minutes)
 
@@ -83,7 +89,7 @@ reconnects it in the Claude connector settings.
 
 1. Commit and push to `origin main`.
 2. Run `git archive --format=zip -o app.zip HEAD`. It contains tracked files only, so no secrets.
-3. Hostinger MCP: `hosting_files_generate-upload-url` {username `u641677794`, domain `myrizq.shop`}. It
+3. Hostinger MCP: `hosting_files_generate-upload-url` {username `u641677794`, domain `lightgreen-hippopotamus-140853.hostingersite.com`}. It
    returns url, auth_key and rest_auth_key.
 4. `UP_URL=… UP_AUTH=… UP_REST=… bash scripts/deploy/hostinger-upload.sh app.zip cod-<random hex>.zip`
    uploads over TUS into public_html. Use a random file name.
@@ -152,9 +158,11 @@ so it's safe. It would rebuild the old snapshot only if the last build came from
 
 ## 6. Status and open items (2026-10-23)
 
-Live and verified: Offers v2, per-page pixels, order outputs, PHP/WhatsApp exports, domain myrizq.shop.
+Store Gen: the site, database and secrets exist. The first deploy of the cloned code is the next step (after the
+owner adds the 8 env keys). Then comes the SaaS upgrade in docs/STORE-GEN-BRIEF.md.
 
-The owner still has to:
+COD Studio (myrizq.shop, separate project). Live and verified: Offers v2, per-page pixels, order outputs,
+PHP/WhatsApp exports. The owner still has to do these on myrizq.shop:
 - **Republish the live page** in the admin. Its HTML still has 9 links to the old maroon-kangaroo domain
   (canonical, og/twitter image, JSON-LD).
 - Verify the Meta **Conversions API token** with "Send test event" (Settings → Pixels → RIZQ), then **remove the

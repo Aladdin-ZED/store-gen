@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import mysql, { type PoolConnection, type RowDataPacket } from "mysql2/promise";
 import { ByteLru } from "./lru";
+import { databaseUrl } from "@/lib/db/url";
 
 export const CHUNK_SIZE = 512 * 1024;
 /** files above this size are served from the disk cache instead of the memory cache */
@@ -133,7 +134,7 @@ function singleFlight<T>(flights: Map<string, Promise<T>>, key: string, load: ()
 function readPool(): mysql.Pool {
   const r = state().read;
   if (!r.pool) {
-    const url = process.env.DATABASE_URL;
+    const url = databaseUrl();
     if (!url) throw new Error("DATABASE_URL is not set");
     r.pool = mysql.createPool({
       uri: url,

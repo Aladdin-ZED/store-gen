@@ -15,6 +15,7 @@ import { db } from "@/lib/db/client";
 import { pages, pageVersions, settings } from "@/lib/db/schema";
 import { validateDoc } from "@/lib/page/validate";
 import { runUpgradeCheck, upgradeCheckOk, upgradeCheckSummary } from "./upgrade-check";
+import { databaseUrl as normalizeDatabaseUrl } from "@/lib/db/url";
 
 /** The document schema the stored checksums are computed on. */
 export const DOC_SCHEMA = 2;
@@ -47,7 +48,7 @@ export async function syncPublishedChecksums(): Promise<{ skipped: boolean; page
 }
 
 /** The upgrade dry run over the live database: read-only, logs only (never blocks or fails the boot). */
-export async function bootUpgradeCheck(databaseUrl = process.env.DATABASE_URL): Promise<void> {
+export async function bootUpgradeCheck(databaseUrl: string | undefined = normalizeDatabaseUrl()): Promise<void> {
   if (!databaseUrl) return;
   const conn = await mysql.createConnection({ uri: databaseUrl, charset: "utf8mb4_unicode_ci", timezone: "Z", connectTimeout: 10_000 });
   try {

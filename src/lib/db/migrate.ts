@@ -11,6 +11,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { readMigrationFiles, type MigrationConfig } from "drizzle-orm/migrator";
 import { migrate } from "drizzle-orm/mysql2/migrator";
 import mysql from "mysql2/promise";
+import { databaseUrl } from "./url";
 
 const MIGRATIONS_TABLE = "__drizzle_migrations";
 
@@ -33,7 +34,7 @@ export interface MigrationResult {
 
 export async function runMigrations(opts: MigrationOptions = {}): Promise<MigrationResult> {
   const started = Date.now();
-  const url = opts.databaseUrl ?? process.env.DATABASE_URL;
+  const url = databaseUrl(opts.databaseUrl ?? process.env.DATABASE_URL);
   if (!url) throw new Error("DATABASE_URL is not set");
 
   const config: MigrationConfig = {

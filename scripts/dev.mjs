@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `npm run dev`: next dev on port 3400 plus the admin Tailwind watcher (scripts/build-admin-css.mjs),
+ * `npm run dev`: next dev on port 3450 plus the admin Tailwind watcher (scripts/build-admin-css.mjs),
  * so admin class-name edits restyle live. Extra arguments are passed to `next dev`.
  */
 import { spawn } from "node:child_process";
@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const children = [
   spawn(process.execPath, ["scripts/build-admin-css.mjs", "--watch"], { stdio: "inherit" }),
-  spawn(process.execPath, [require.resolve("next/dist/bin/next"), "dev", "-p", "3400", ...process.argv.slice(2)], {
+  spawn(process.execPath, [require.resolve("next/dist/bin/next"), "dev", "-p", "3450", ...process.argv.slice(2)], {
     stdio: "inherit",
   }),
 ];
