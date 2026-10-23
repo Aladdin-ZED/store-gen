@@ -15,6 +15,10 @@ SaaS that generates and runs complete stores**, with high quality standards ever
    maximally modern and precise design, autonomy, natural ar/fr/en copy, never invented data).
 6. **Deployed separately** on Hostinger, **using only the temporary domain**:
    https://lightgreen-hippopotamus-140853.hostingersite.com. It must never be deployed to myrizq.shop.
+7. **Store or landing page, the user chooses (added 2026-10-23):** landing pages stay a first-class product,
+   not a leftover. Each tenant picks what they run: a full store, standalone COD landing pages, or both (a store
+   whose products can also have their own landing pages). Landing pages keep every feature they have today
+   (sections, Offers v2, pixels, exports, thank-you upsell…) and get more features on top.
 
 ## Starting point (what already exists and can be reused)
 
