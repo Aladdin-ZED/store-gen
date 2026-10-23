@@ -70,8 +70,8 @@ COD Studio has two parts:
 |---|---|
 | Website | `lightgreen-hippopotamus-140853.hostingersite.com`, created 2026-10-23 through the Hostinger API. Use only the temporary domain until the owner says otherwise. |
 | hPanel user | `u641677794` (same hosting account as COD Studio) · Node **22** · build `npm run build` · output `.next` |
-| Database | `u641677794_storegen` / user `u641677794_storegen`. Created by `hosting_databases_setup-website`, which wrote DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD/DATABASE_URL into the site's env with a platform-generated password nobody has seen. The host is written as `localhost`; `src/lib/db/url.ts` connects over 127.0.0.1 instead. |
-| Env vars | The 6 DB keys above + APP_SECRET (**never change after launch**), ADMIN_GATE, SETUP_TOKEN, PUBLIC_URL (**= the site URL**), TRUSTED_PROXY_HOPS=1, BEHIND_CLOUDFLARE=0, CRON_KEY, APP_TIMEZONE. The non-DB values are in the local git-ignored `.env.hostinger` of this folder. Comments at its top give the steps, the admin link and the cron line. `hosting_nodejs_replace-environment-variables` is a FULL replace and would delete the DB keys (their values can't be read back), so never use it without recreating the database. |
+| Database | `u641677794_storegen` / user `u641677794_storegen` (created by `hosting_databases_setup-website`). On 2026-10-23 Claude reset its password through the API (`hosting_databases_change-password`) so the full env set could be written in one call: all 6 DB keys (host 127.0.0.1) are now also in the local `.env.hostinger`. |
+| Env vars | 14 keys, set 2026-10-23: the 6 DB keys + APP_SECRET (**never change after launch**), ADMIN_GATE, SETUP_TOKEN, PUBLIC_URL (**= the site URL**), TRUSTED_PROXY_HOPS=1, BEHIND_CLOUDFLARE=0, CRON_KEY, APP_TIMEZONE. All values are in the local git-ignored `.env.hostinger` of this folder (comments at its top give the admin link and the cron line). `hosting_nodejs_replace-environment-variables` is a FULL replace: always send all 14 keys from `.env.hostinger`, then rebuild (PUBLIC_URL is read at build time too). |
 | Local dev | `.env.local` points at the local database `cod_storegen` (XAMPP), with its own secrets. |
 | Admin | Hidden: `/admin` answers 404 until the owner opens `<site>/<ADMIN_GATE>`. |
 | Cron | hPanel → Advanced → Cron Jobs, every 5 min: `curl -fsS --max-time 110 "<site>/api/cron/tick?key=<CRON_KEY>" > /dev/null` |
@@ -158,8 +158,10 @@ so it's safe. It would rebuild the old snapshot only if the last build came from
 
 ## 6. Status and open items (2026-10-23)
 
-Store Gen: the site, database and secrets exist. The first deploy of the cloned code is the next step (after the
-owner adds the 8 env keys). Then comes the SaaS upgrade in docs/STORE-GEN-BRIEF.md.
+Store Gen: **first version deployed 2026-10-23** (commit `3598537`: the cloned code + next 16.4.3 / zod 4.6.6 security
+patches; build 01a16abd, Turbopack, live smoke test green). `/` answers 404 until a page is published (by design).
+Owner steps left: open `<site>/<ADMIN_GATE>` → /admin/setup with SETUP_TOKEN to create the owner account, and add the
+cron job (both in the `.env.hostinger` comments). Next: the SaaS upgrade in docs/STORE-GEN-BRIEF.md (spec: docs/STORE-SAAS.md).
 
 COD Studio (myrizq.shop, separate project). Live and verified: Offers v2, per-page pixels, order outputs,
 PHP/WhatsApp exports. The owner still has to do these on myrizq.shop:
