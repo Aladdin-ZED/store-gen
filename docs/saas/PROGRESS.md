@@ -9,7 +9,7 @@ running, and how to restart it. Newest state at the top of "Running now".
 |---|---|---|---|
 | 0 | First deploy of the cloned code | live site, build 01a16abd | **done** 2026-10-23 |
 | 1 | Understand: subsystem maps | docs/saas/TENANCY-MAP.md | **done** 2026-10-23 (run wf_2ff1c4b9-e11) |
-| 1b | Research + brainstorm (owner items 8-15): domains/subdomains, COD ops+agents+accounting+integrations, AI learning loop, generative design, platform admin, storefront/landing | docs/saas/research/*.md + docs/saas/RESEARCH.md | running |
+| 1b | Research + brainstorm (owner items 8-15): domains/subdomains, COD ops+agents+accounting+integrations, AI learning loop, generative design, platform admin, storefront/landing | docs/saas/research/*.md + docs/saas/RESEARCH.md | **done** 2026-10-24 |
 | 2 | Spec: architect → reviews (COD operator, principal engineer, premium designer, security) → revision → critic | docs/STORE-SAAS.md | todo (first attempt wf_1620a313-a04 was stopped on purpose to add owner items 8-15: do NOT resume it, relaunch with the research as input) |
 | 3 | Build phase 0: core tenancy (schema, migration, store scope, auth/memberships, routing) | code | todo |
 | 4 | Build phase 1: parallel tracks (store pages, landing+, brand kit/logo, team/invites, platform admin, storage) | code | todo |
@@ -20,7 +20,15 @@ running, and how to restart it. Newest state at the top of "Running now".
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
-- **Phase 1b research** — started 2026-10-23 ~23:45. Task `w1pqiuxkb`, run `wf_b99045d6-630`.
+- **Phase 2a spec writing** — started 2026-10-24 ~00:10. Task `wf817bkqi`, run `wf_7baa2790-029`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\store-saas-spec-write-wf_7baa2790-029.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_7baa2790-029"})`.
+  Output: docs/STORE-SAAS.md (core, lead architect) then docs/saas/spec/{platform,storefront,landing,operations,ai,design}.md.
+  Next after it: Phase 2b = reviews (operator, principal engineer, premium designer, security, AI/design lens) over core +
+  parts → revisions (core integrates "Requests to the core") → critic loop.
+
+- **Phase 1b research** — DONE 2026-10-24 ~00:05 (7 agents, 0 errors). docs/saas/RESEARCH.md + docs/saas/research/*.md.
+  Run `wf_b99045d6-630`, task `w1pqiuxkb`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\store-saas-research-wf_b99045d6-630.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_b99045d6-630"})`.
   Next after it: relaunch the spec workflow (Phase 2) with RESEARCH.md as input; routing decision changed to
