@@ -26,11 +26,11 @@ Weights = share of total work. Update the "done" column when a stage moves.
 | Stage | Weight | Done in stage | Contributes |
 |---|---|---|---|
 | Research + full spec | 12% | 100% | 12.0% |
-| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | 20% (C0a done; 5 tracks running) | 3.6% |
+| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | 31% (C0a done = 15 pts; tracks 6/22 steps of 60 pts; integration+verify+deploy 25 pts left) | 5.6% |
 | R1 product (platform console + approvals + store profiles, landing+, call center, AI Director, design genome, onboarding wow) | 35% | 0% | 0% |
 | R2 full stores + accounting + logo designer | 22% | 0% | 0% |
 | R3 growth, custom domains, carrier APIs, learning AI | 13% | 0% | 0% |
-| **Total** | 100% | | **≈ 16%** |
+| **Total** | 100% | | **≈ 18%** |
 
 Milestones: R1.0 live ≈ 30% · R1 live ≈ 65% · R2 live ≈ 87% · R3 live = 100%. Owner inputs needed later: real domain +
 Cloudflare (subdomains, before public sign-ups), optional Claude API key + monthly cap, a carrier statement sample (R2), legal
