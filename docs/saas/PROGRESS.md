@@ -22,6 +22,11 @@ running, and how to restart it. Newest state at the top of "Running now".
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **Phase 2c round 2 RESUMED** — 2026-10-24 ~08:25 after a session usage limit (reset 08:20) killed all round-2 agents.
+  Round 1 is done and committed (5750823): 6 reviews, 7 revisions, critic r1 = 0 blockers, 5 majors (2 cross, 2 operations,
+  1 landing), 15 minors, 84 claims checked. New task `wr7x91yx5`, same run `wf_04544af2-2aa` (finished agents replay from cache).
+  If it dies again: resume the same run id again. Next after it: R1.0 build.
+
 - **Phase 2c REVIEW → REVISE → CRITIC** — started 2026-10-24 ~04:20 (Fable 5.1). Task `w9ig7imm0`, run `wf_04544af2-2aa`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\store-saas-review-wf_04544af2-2aa.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_04544af2-2aa"})`.
