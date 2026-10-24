@@ -22,6 +22,12 @@ running, and how to restart it. Newest state at the top of "Running now".
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **Phase 2b ELEVATE** — started 2026-10-24 ~02:25 (Fable 5.1). Task `wsbd0jhy1`, run `wf_c7874943-a15`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\store-saas-elevate-wf_c7874943-a15.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_c7874943-a15"})`.
+  Stages: core-integrate (STORE-SAAS.md rev 2, appendix Q request decisions) → 6 parallel part elevations (rev 2; design at
+  max effort) → core-reconcile (rev 2.1). Next after it: Phase 2c reviews → revise → critic loop → R1 build.
+
 - **Phase 1d Fable rethink (AI + features)** — DONE 2026-10-24 ~01:15 (2 agents, 0 errors): docs/saas/research/rethink-ai.md (~560 lines), rethink-features.md (927 lines). Was: started 2026-10-24 ~00:45. Task `wjqy0ncln`, run `wf_ba647c5b-5cb`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\fable-rethink-wf_ba647c5b-5cb.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_ba647c5b-5cb"})`.
