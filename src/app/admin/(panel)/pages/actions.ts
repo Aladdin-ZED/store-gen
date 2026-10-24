@@ -1,11 +1,12 @@
 "use server";
 /**
- * Pages screen mutations. Each one: requireUser(permission) → validate the id → mutate → audit
- * (inside the data helpers) → revalidate the screens that show pages.
+ * Pages screen mutations. Each one: requireUser(permission) → store #1's write ctx (the seam, §K.1 T4) → validate
+ * the id → mutate the store's page → audit (inside the data helpers) → revalidate the screens that show pages.
  */
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { adminAction, fail, type ActionResult } from "@/lib/admin-data/action";
+import { legacyWriteCtx } from "@/lib/admin-data/legacy-store";
 import { archivePage, deletePage, duplicatePage, restoreArchivedPage, setHomePage, unpublishPage } from "@/lib/admin-data/pages";
 import { publishPage, PublishError } from "@/lib/render/publish.server";
 
@@ -18,8 +19,9 @@ function refresh() {
 }
 
 export async function duplicatePageAction(id: string): Promise<ActionResult<{ id: string; slug: string }>> {
-  return adminAction("pages.write", async ({ actor }) => {
-    const created = (await duplicatePage(PageId.parse(id), actor)) ?? fail("This page no longer exists.");
+  return adminAction("pages.write", async () => {
+    const { scope, actor } = await legacyWriteCtx("pages.write");
+    const created = (await duplicatePage(scope, PageId.parse(id), actor)) ?? fail("This page no longer exists.");
     refresh();
     return created;
   });
@@ -42,40 +44,45 @@ export async function publishPageAction(id: string): Promise<ActionResult<{ slug
 }
 
 export async function unpublishPageAction(id: string): Promise<ActionResult<null>> {
-  return adminAction("pages.publish", async ({ actor }) => {
-    if (!(await unpublishPage(PageId.parse(id), actor))) fail("This page isn't live.");
+  return adminAction("pages.publish", async () => {
+    const { scope, actor } = await legacyWriteCtx("pages.publish");
+    if (!(await unpublishPage(scope, PageId.parse(id), actor))) fail("This page isn't live.");
     refresh();
     return null;
   });
 }
 
 export async function setHomePageAction(id: string | null): Promise<ActionResult<null>> {
-  return adminAction("pages.publish", async ({ actor }) => {
-    if (!(await setHomePage(id === null ? null : PageId.parse(id), actor))) fail("Archived pages can't be the home page.");
+  return adminAction("pages.publish", async () => {
+    const { scope, actor } = await legacyWriteCtx("pages.publish");
+    if (!(await setHomePage(scope, id === null ? null : PageId.parse(id), actor))) fail("Archived pages can't be the home page.");
     refresh();
     return null;
   });
 }
 
 export async function archivePageAction(id: string): Promise<ActionResult<null>> {
-  return adminAction("pages.write", async ({ actor }) => {
-    if (!(await archivePage(PageId.parse(id), actor))) fail("This page is already archived.");
+  return adminAction("pages.write", async () => {
+    const { scope, actor } = await legacyWriteCtx("pages.write");
+    if (!(await archivePage(scope, PageId.parse(id), actor))) fail("This page is already archived.");
     refresh();
     return null;
   });
 }
 
 export async function restorePageAction(id: string): Promise<ActionResult<null>> {
-  return adminAction("pages.write", async ({ actor }) => {
-    if (!(await restoreArchivedPage(PageId.parse(id), actor))) fail("This page isn't archived.");
+  return adminAction("pages.write", async () => {
+    const { scope, actor } = await legacyWriteCtx("pages.write");
+    if (!(await restoreArchivedPage(scope, PageId.parse(id), actor))) fail("This page isn't archived.");
     refresh();
     return null;
   });
 }
 
 export async function deletePageAction(id: string): Promise<ActionResult<null>> {
-  return adminAction("pages.write", async ({ actor }) => {
-    if (!(await deletePage(PageId.parse(id), actor))) fail("This page no longer exists.");
+  return adminAction("pages.write", async () => {
+    const { scope, actor } = await legacyWriteCtx("pages.write");
+    if (!(await deletePage(scope, PageId.parse(id), actor))) fail("This page no longer exists.");
     refresh();
     return null;
   });

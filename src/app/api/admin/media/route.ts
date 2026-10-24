@@ -18,6 +18,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { livePagesUsing } from "@/lib/admin-data/assets";
+import { legacyGuard } from "@/lib/admin-data/legacy-store";
 import { audit } from "@/lib/audit";
 import { hasAdminAccess } from "@/lib/auth";
 import { unknownPageResponse } from "@/lib/auth/unknown-page";
@@ -174,12 +175,15 @@ export async function DELETE(req: NextRequest): Promise<Response> {
   if (hidden) return hidden;
   const g = await adminGuard(req, "media.write");
   if (!g.ok) return g.response;
+  // store #1's write ctx (the legacy panel, §K.1 T4): the live-page check reads that store's pages only
+  const sg = await legacyGuard(req, "media.write");
+  if (!sg.ok) return sg.response;
   const id = req.nextUrl.searchParams.get("id") ?? "";
   if (!ASSET_ID_RE.test(id)) return json({ ok: false, error: "invalid" }, 400);
   const force = req.nextUrl.searchParams.get("force") === "1";
   try {
     // what visitors see right now: live versions (immutable HTML) and the store logo on every page
-    const [live, store] = await Promise.all([livePagesUsing(id, 50), getSetting("store", { fresh: true })]);
+    const [live, store] = await Promise.all([livePagesUsing(sg.ctx.scope, id, 50), getSetting("store", { fresh: true })]);
     const storeLogo = store.logo?.id === id;
     if (!force && (live.length || storeLogo)) {
       const where = live.length ? `${live.length === 1 ? "a live page" : `${live.length} live pages`}` : "your store logo";

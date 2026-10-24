@@ -68,6 +68,8 @@ async function main() {
   const { pixelUsage, invalidatePixelUsage, usageCount } = await import("@/lib/pixels/usage.server");
   const { restoreVersion, duplicateAsPage } = await import("@/lib/editor/pages.server");
   const { duplicatePage } = await import("@/lib/admin-data/pages");
+  const { LEGACY_STORE_ID } = await import("@/lib/admin-data/legacy-store");
+  const { systemCtx, systemScope } = await import("@/lib/jobs/scope");
   const { trackingRefs } = await import("@/lib/pixels/library");
 
   // empty test tables (throwaway database only)
@@ -76,6 +78,9 @@ async function main() {
   invalidatePixelUsage();
 
   const owner = { id: newId(), email: "owner@px.test", name: "Owner", role: "owner" as const };
+  // the store repositories write through a scope: store #1's, as the legacy panel does (§K.1 T4)
+  const store1 = systemScope(systemCtx("qa.pixels_publish"), LEGACY_STORE_ID);
+  const ownerActor = { kind: "user" as const, userId: owner.id, impersonatorId: null, ip: null };
   const editor = { id: newId(), email: "editor@px.test", name: "Editor", role: "editor" as const };
   for (const u of [owner, editor]) await db.insert(users).values({ ...u, passwordHash: "x" });
   const session = (u: typeof owner | typeof editor) => ({ ...u, totpEnabled: false, sessionId: "s", platformRole: "none" as const, locale: null, lastStoreId: null });
@@ -193,14 +198,14 @@ async function main() {
   ok("restore: content restored, current pixels kept", r1.doc.product.name === "Ancienne version" && JSON.stringify(r1.doc.tracking) === JSON.stringify({ tiktokPixelId: [TT_1] }), r1.doc.tracking);
   const r2 = await restoreVersion(session(owner), { pageId: pR, versionId: vOld, baseUpdatedAt: r1.updatedAt, pixels: true });
   ok("restore: opt-in restores its pixels", JSON.stringify(r2.doc.tracking) === JSON.stringify({ metaPixelId: [META_A] }), r2.doc.tracking);
-  const dup = await duplicatePage(pA, { id: owner.id, ip: null });
+  const dup = await duplicatePage(store1, pA, ownerActor);
   const [dupRow] = await db.select().from(pages).where(eq(pages.id, dup!.id));
   ok("duplicate: same ids, copiedFrom = source page", JSON.stringify(dupRow!.draft.tracking) === JSON.stringify({ metaPixelId: [META_A], copiedFrom: "Argan" }), dupRow!.draft.tracking);
-  const dup2 = await duplicateAsPage(session(owner), { pageId: pR });
+  const dup2 = await duplicateAsPage(store1, ownerActor, { pageId: pR });
   const [dup2Row] = await db.select().from(pages).where(eq(pages.id, dup2.id));
   eq2("builder duplicate: copiedFrom too", dup2Row!.draft.tracking.copiedFrom, "Restore me");
   const pNone = await insertPage("Organic", "organic", docWith({ none: true }));
-  const dup3 = await duplicatePage(pNone, { id: owner.id, ip: null });
+  const dup3 = await duplicatePage(store1, pNone, ownerActor);
   const [dup3Row] = await db.select().from(pages).where(eq(pages.id, dup3!.id));
   eq2("duplicate without ids: answer kept, no copiedFrom", dup3Row!.draft.tracking, { none: true });
 

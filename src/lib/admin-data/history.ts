@@ -1,19 +1,25 @@
 import "server-only";
 /**
- * Version history across all pages — the "last generated landing pages" store: generations, saves,
+ * Version history across the store's pages — the "last generated landing pages" store: generations, saves,
  * publishes, restores and imports, newest first. Restore makes a version the page's draft again
  * (recorded as a new "restore" version, the replaced draft kept as a "Before restore" autosave, so
  * nothing is ever lost).
+ *
+ * Multi-tenant (docs/STORE-SAAS.md §E.3, ADM-19, ADM-20): the scope's store only, every version joined to its page
+ * inside the same store; a version id of another store answers like a missing one; writes take a `WriteScope` and a
+ * duplicate always lands in the caller's store.
  */
 import { and, count, desc, eq, ne, type SQL } from "drizzle-orm";
-import { audit } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { pages, pageVersions, users } from "@/lib/db/schema";
 import { EditorError, restoreVersion as restoreDraft } from "@/lib/editor/pages.server";
 import type { PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
-import { createPageFromDoc, type Actor } from "./pages";
+import { byId, inStore, whereStore } from "@/lib/tenancy/sql";
+import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
+import { createPageFromDoc } from "./pages";
+import { affected, auditIn, type Actor } from "./store-audit";
 
 export { EditorError };
 
@@ -49,7 +55,10 @@ export interface VersionFilters {
   pageSize?: number;
 }
 
-export async function listVersions(filters: VersionFilters = {}): Promise<{ items: VersionItem[]; total: number; page: number; pageSize: number }> {
+/** The version's page, inside the scope's store. */
+const pageOfVersion = (scope: StoreScope) => and(eq(pages.id, pageVersions.pageId), inStore(pages, scope));
+
+export async function listVersions(scope: StoreScope, filters: VersionFilters = {}): Promise<{ items: VersionItem[]; total: number; page: number; pageSize: number }> {
   const page = Math.max(1, Math.floor(filters.page ?? 1));
   const pageSize = Math.min(60, Math.max(1, Math.floor(filters.pageSize ?? 24)));
   const where: SQL[] = [];
@@ -57,7 +66,7 @@ export async function listVersions(filters: VersionFilters = {}): Promise<{ item
   if (filters.kind) where.push(eq(pageVersions.kind, filters.kind));
   else if (!filters.includeAutosave) where.push(ne(pageVersions.kind, "autosave"));
   if (filters.starred) where.push(eq(pageVersions.starred, true));
-  const cond = where.length ? and(...where) : undefined;
+  const cond = whereStore(pageVersions, scope, ...where);
 
   const [rows, [total]] = await Promise.all([
     db
@@ -76,13 +85,13 @@ export async function listVersions(filters: VersionFilters = {}): Promise<{ item
         publishedVersionId: pages.publishedVersionId,
       })
       .from(pageVersions)
-      .innerJoin(pages, eq(pages.id, pageVersions.pageId))
+      .innerJoin(pages, pageOfVersion(scope))
       .leftJoin(users, eq(users.id, pageVersions.createdBy))
       .where(cond)
       .orderBy(desc(pageVersions.createdAt), desc(pageVersions.id))
       .limit(pageSize)
       .offset((page - 1) * pageSize),
-    db.select({ n: count() }).from(pageVersions).innerJoin(pages, eq(pages.id, pageVersions.pageId)).where(cond),
+    db.select({ n: count() }).from(pageVersions).innerJoin(pages, pageOfVersion(scope)).where(cond),
   ]);
 
   const items = rows.map((r): VersionItem => {
@@ -108,30 +117,31 @@ export async function listVersions(filters: VersionFilters = {}): Promise<{ item
   return { items, total: Number(total?.n ?? 0), page, pageSize };
 }
 
-/** Version counts per kind (filter chips). */
-export async function versionKindCounts(pageId?: string): Promise<Record<VersionKind, number> & { starred: number }> {
-  const where = pageId ? eq(pageVersions.pageId, pageId) : undefined;
+/** Version counts per kind of the store (filter chips), optionally of one of its pages. */
+export async function versionKindCounts(scope: StoreScope, pageId?: string): Promise<Record<VersionKind, number> & { starred: number }> {
+  const ofPage = pageId ? eq(pageVersions.pageId, pageId) : undefined;
   const [rows, [starred]] = await Promise.all([
-    db.select({ kind: pageVersions.kind, n: count() }).from(pageVersions).where(where).groupBy(pageVersions.kind),
-    db.select({ n: count() }).from(pageVersions).where(and(where, eq(pageVersions.starred, true))),
+    db.select({ kind: pageVersions.kind, n: count() }).from(pageVersions).where(whereStore(pageVersions, scope, ofPage)).groupBy(pageVersions.kind),
+    db.select({ n: count() }).from(pageVersions).where(whereStore(pageVersions, scope, ofPage, eq(pageVersions.starred, true))),
   ]);
   const out = { generation: 0, save: 0, publish: 0, restore: 0, import: 0, autosave: 0, starred: Number(starred?.n ?? 0) };
   for (const r of rows) out[r.kind] = Number(r.n);
   return out;
 }
 
-export async function setVersionStarred(id: string, starred: boolean): Promise<boolean> {
-  const res = await db.update(pageVersions).set({ starred }).where(eq(pageVersions.id, id));
-  const head = Array.isArray(res) ? res[0] : res;
-  return ((head as { affectedRows?: number }).affectedRows ?? 0) === 1;
+/** Star or unstar one of the store's versions (audited); false when it is missing or another store's. */
+export async function setVersionStarred(scope: WriteScope, id: string, starred: boolean, actor: Actor): Promise<boolean> {
+  const ok = affected(await db.update(pageVersions).set({ starred }).where(byId(pageVersions, scope, id))) === 1;
+  if (ok) await auditIn(scope, actor, starred ? "page.version_starred" : "page.version_unstarred", { target: id });
+  return ok;
 }
 
-async function getVersion(id: string) {
+async function getVersion(scope: StoreScope, id: string) {
   const [row] = await db
     .select({ id: pageVersions.id, pageId: pageVersions.pageId, kind: pageVersions.kind, doc: pageVersions.doc, createdAt: pageVersions.createdAt, pageName: pages.name })
     .from(pageVersions)
-    .innerJoin(pages, eq(pages.id, pageVersions.pageId))
-    .where(eq(pageVersions.id, id))
+    .innerJoin(pages, pageOfVersion(scope))
+    .where(byId(pageVersions, scope, id))
     .limit(1);
   return row ?? null;
 }
@@ -153,29 +163,31 @@ const shortDate = (d: Date) => d.toISOString().slice(0, 16).replace("T", " ") + 
  * compare-and-swap on updatedAt (a builder tab with the page open sees a conflict, never a silent
  * overwrite). Throws EditorError ("not_found" | "invalid" | "conflict") with a readable message.
  */
-export async function restoreVersion(id: string, user: SessionUser, actor: Actor): Promise<{ pageId: string }> {
+export async function restoreVersion(scope: WriteScope, id: string, user: SessionUser, actor: Actor): Promise<{ pageId: string }> {
+  // the version and its page are the store's (checked here); the builder's restore then works on those two ids
   const [v] = await db
     .select({ pageId: pageVersions.pageId, updatedAt: pages.updatedAt })
     .from(pageVersions)
-    .innerJoin(pages, eq(pages.id, pageVersions.pageId))
-    .where(eq(pageVersions.id, id))
+    .innerJoin(pages, pageOfVersion(scope))
+    .where(byId(pageVersions, scope, id))
     .limit(1);
   if (!v) throw new EditorError("not_found", "This version no longer exists.");
   await restoreDraft(user, { pageId: v.pageId, versionId: id, baseUpdatedAt: v.updatedAt.getTime() });
-  await audit("page.version_restored", { userId: actor.id, target: v.pageId, meta: { versionId: id }, ip: actor.ip });
+  await auditIn(scope, actor, "page.version_restored", { target: v.pageId, meta: { versionId: id } });
   return { pageId: v.pageId };
 }
 
-/** Start a brand-new draft page from any version. */
-export async function duplicateVersionAsPage(id: string, actor: Actor): Promise<{ id: string; slug: string } | null> {
-  const v = await getVersion(id);
+/** Start a brand-new draft page of the store from any of its versions. */
+export async function duplicateVersionAsPage(scope: WriteScope, id: string, actor: Actor): Promise<{ id: string; slug: string } | null> {
+  const v = await getVersion(scope, id);
   if (!v) return null;
   const { doc } = validateDoc(v.doc);
   if (!doc) return null;
   const created = await createPageFromDoc(
+    scope,
     { name: `${v.pageName} (${KIND_LABEL[v.kind]} copy)`, doc, versionLabel: `Copied from “${v.pageName}” · ${KIND_LABEL[v.kind]} of ${shortDate(v.createdAt)}`, copiedFrom: v.pageName },
     actor,
   );
-  await audit("page.version_duplicated", { userId: actor.id, target: created.id, meta: { versionId: id, from: v.pageId }, ip: actor.ip });
+  await auditIn(scope, actor, "page.version_duplicated", { target: created.id, meta: { versionId: id, from: v.pageId } });
   return created;
 }

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Screen } from "@/components/admin/common/screen";
 import { GenerateWizard } from "@/components/generate/wizard";
 import { previewAssetsFor } from "@/lib/admin-data/assets";
-import { can, requireUser } from "@/lib/auth";
+import { legacyStoreCtx } from "@/lib/admin-data/legacy-store";
 import { storeInfo } from "@/lib/render/publish.server";
 import { getSetting } from "@/lib/settings";
 
@@ -15,9 +15,9 @@ const WIZARD_LOCALES = new Set(["ar", "fr", "en"]);
  * directions → a draft page in the builder. Everything heavy runs in the admin's browser.
  */
 export default async function GeneratePage() {
-  const user = await requireUser({ permission: "pages.write" });
+  const ctx = await legacyStoreCtx({ permission: "pages.write" });
   const [ai, defaults, store] = await Promise.all([getSetting("ai"), getSetting("defaults"), storeInfo()]);
-  const storeAssets = await previewAssetsFor([], [store.logo]);
+  const storeAssets = await previewAssetsFor(ctx.scope, [], [store.logo]);
   const locale = WIZARD_LOCALES.has(defaults.locale) ? (defaults.locale as "ar" | "fr" | "en") : "ar";
 
   return (
@@ -33,7 +33,7 @@ export default async function GeneratePage() {
         }}
         store={store}
         storeAssets={storeAssets}
-        canUpload={can(user.role, "media.write")}
+        canUpload={ctx.can("media.write")}
       />
     </Screen>
   );

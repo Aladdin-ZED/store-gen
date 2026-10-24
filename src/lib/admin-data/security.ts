@@ -1,8 +1,12 @@
 import "server-only";
 /**
  * Account security helpers for Settings → Security / Team: the signed-in devices of a user,
- * revoking one of them, temporary passwords for invited users, the audit log with user names, and
+ * revoking one of them, temporary passwords for invited users, the store's audit log with user names, and
  * the owner's view of the proxy headers the client IP is read from.
+ *
+ * Multi-tenant (docs/STORE-SAAS.md §E.3, §F.5, ADM-25): the audit log is the scope's store only, and its target labels
+ * resolve only the store's own pages and members (never a name from another store). Devices and sessions are the
+ * signed-in user's own (no store).
  */
 import { randomInt } from "node:crypto";
 import { and, desc, eq, gt, inArray, like, lt, type SQL } from "drizzle-orm";
@@ -11,9 +15,11 @@ import { audit } from "@/lib/audit";
 import { adminIpAllowlist } from "@/lib/auth/config";
 import { allowlistAddress } from "@/lib/auth/gate";
 import { db } from "@/lib/db/client";
-import { auditLog, pages, sessions, users } from "@/lib/db/schema";
+import { auditLog, pages, sessions, storeMembers, users } from "@/lib/db/schema";
 import { deleteSession } from "@/lib/auth/session";
 import { clientIpReport, type ClientIpReport } from "@/lib/security/ip";
+import { inStore, whereStore } from "@/lib/tenancy/sql";
+import type { StoreScope } from "@/lib/tenancy/types";
 
 export interface DeviceSession {
   id: string;
@@ -101,8 +107,11 @@ export interface AuditRow {
 export const AUDIT_AREAS = ["auth", "page", "orders", "blocklist", "media", "settings", "export"] as const;
 export type AuditArea = (typeof AUDIT_AREAS)[number];
 
-/** Audit entries (newest first, keyset-paginated) with the acting user resolved. */
-export async function auditPage(opts: { beforeId?: number; area?: AuditArea; userId?: string; limit?: number }): Promise<{ items: AuditRow[]; nextBefore: number | null }> {
+/** The store's audit entries (newest first, keyset-paginated) with the acting user resolved. */
+export async function auditPage(
+  scope: StoreScope,
+  opts: { beforeId?: number; area?: AuditArea; userId?: string; limit?: number },
+): Promise<{ items: AuditRow[]; nextBefore: number | null }> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
   const where: SQL[] = [];
   if (opts.beforeId !== undefined) where.push(lt(auditLog.id, opts.beforeId));
@@ -112,11 +121,11 @@ export async function auditPage(opts: { beforeId?: number; area?: AuditArea; use
     .select({ id: auditLog.id, action: auditLog.action, target: auditLog.target, meta: auditLog.meta, createdAt: auditLog.createdAt, userId: auditLog.userId, name: users.name, email: users.email })
     .from(auditLog)
     .leftJoin(users, eq(users.id, auditLog.userId))
-    .where(where.length ? and(...where) : undefined)
+    .where(whereStore(auditLog, scope, ...where))
     .orderBy(desc(auditLog.id))
     .limit(limit + 1);
   const page = rows.slice(0, limit);
-  const labels = await targetLabels(page);
+  const labels = await targetLabels(scope, page);
   return {
     items: page.map((e) => ({
       id: e.id,
@@ -133,8 +142,8 @@ export async function auditPage(opts: { beforeId?: number; area?: AuditArea; use
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
-/** Names for page and user ids found in audit targets (one query per kind). */
-async function targetLabels(rows: { action: string; target: string | null }[]): Promise<Map<string, string>> {
+/** Names for the store's page and member ids found in audit targets (one query per kind). */
+async function targetLabels(scope: StoreScope, rows: { action: string; target: string | null }[]): Promise<Map<string, string>> {
   const pageIds = new Set<string>();
   const userIds = new Set<string>();
   for (const r of rows) {
@@ -143,8 +152,14 @@ async function targetLabels(rows: { action: string; target: string | null }[]): 
     else if (r.action.startsWith("auth.")) userIds.add(r.target);
   }
   const [pageRows, userRows] = await Promise.all([
-    pageIds.size ? db.select({ id: pages.id, name: pages.name }).from(pages).where(inArray(pages.id, [...pageIds])) : Promise.resolve([]),
-    userIds.size ? db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, [...userIds])) : Promise.resolve([]),
+    pageIds.size ? db.select({ id: pages.id, name: pages.name }).from(pages).where(whereStore(pages, scope, inArray(pages.id, [...pageIds]))) : Promise.resolve([]),
+    userIds.size
+      ? db
+          .select({ id: users.id, name: users.name })
+          .from(users)
+          .innerJoin(storeMembers, eq(storeMembers.userId, users.id))
+          .where(and(inStore(storeMembers, scope), inArray(users.id, [...userIds])))
+      : Promise.resolve([]),
   ]);
   return new Map([...pageRows, ...userRows].map((r) => [r.id, r.name]));
 }

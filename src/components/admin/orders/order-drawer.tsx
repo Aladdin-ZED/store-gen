@@ -54,12 +54,15 @@ export function OrderDrawer({
   orderId,
   onOpenChange,
   canWrite,
+  canBlock = canWrite,
   actions,
   onChanged,
 }: {
   orderId: string | null;
   onOpenChange: (open: boolean) => void;
   canWrite: boolean;
+  /** blocklist.write (owner, admin, manager); defaults to canWrite */
+  canBlock?: boolean;
   actions: OrderDrawerActions;
   /** a mutation succeeded (refresh the list) */
   onChanged: () => void;
@@ -321,7 +324,7 @@ export function OrderDrawer({
               </Block>
             </div>
 
-            {canWrite && (
+            {canBlock && (
               <div className="flex items-center justify-between gap-2 border-t border-border/70 bg-muted/30 px-5 py-3">
                 <span className="text-xs text-muted-foreground">
                   Updated <RelativeTime iso={order.updatedAt} />

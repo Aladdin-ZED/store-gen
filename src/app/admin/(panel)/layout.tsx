@@ -7,10 +7,24 @@ import { AdminProviders } from "@/components/admin/shell/providers";
 import { Topbar } from "@/components/admin/shell/topbar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { navCounts } from "@/lib/admin-data/dashboard";
+import { legacyStoreCtx } from "@/lib/admin-data/legacy-store";
 import { can, getCspNonce, requireUser } from "@/lib/auth";
+import { AuthError } from "@/lib/auth/errors";
 import { publicOrigin } from "@/lib/render/publish.server";
 import { getSetting } from "@/lib/settings";
+import { SeamError } from "@/lib/tenancy/seam";
 import { searchAction } from "./actions";
+
+/** Store #1's sidebar badges when the user is one of its members with orders.read (pages guard themselves). */
+async function storeCounts() {
+  try {
+    const ctx = await legacyStoreCtx({ throwOnFail: true });
+    return ctx.can("orders.read") ? await navCounts(ctx.scope) : null;
+  } catch (err) {
+    if (err instanceof AuthError || err instanceof SeamError) return null;
+    throw err;
+  }
+}
 
 /*
  * The studio shell: inset sidebar (role-aware), frosted top bar with ⌘K, theme and toasts.
@@ -21,7 +35,7 @@ export default async function PanelLayout({ children }: { children: ReactNode })
   const [nonce, store, counts, jar] = await Promise.all([
     getCspNonce(),
     getSetting("store"),
-    can(user.role, "orders.read") ? navCounts() : Promise.resolve(null),
+    storeCounts(),
     cookies(),
   ]);
   const sidebarOpen = jar.get("sidebar_state")?.value !== "false";

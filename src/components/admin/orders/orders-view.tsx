@@ -35,6 +35,10 @@ export interface OrdersViewProps {
   blocked: { items: BlockRow[]; total: number; page: number; pageSize: number } | null;
   pages: { id: string; name: string }[];
   canWrite: boolean;
+  /** blocklist.write (owner, admin, manager); defaults to canWrite */
+  canBlock?: boolean;
+  /** orders.export: the CSV button; defaults to shown */
+  canExport?: boolean;
   sheetConnected: boolean;
   actions: OrderDrawerActions & BlocklistActions & { retryFailed: () => Promise<ActionResult<{ sent: number; failed: number }>> };
 }
@@ -80,19 +84,22 @@ export function OrdersView(props: OrdersViewProps) {
             { value: "blocked", label: "Blocklist", count: tabCounts.blocked, icon: <BanIcon /> },
           ]}
         />
-        {((tab === "orders" && tabCounts.orders > 0) || (tab === "leads" && tabCounts.leads > 0)) && <ExportButton leads={tab === "leads"} />}
+        {props.canExport !== false && ((tab === "orders" && tabCounts.orders > 0) || (tab === "leads" && tabCounts.leads > 0)) && (
+          <ExportButton leads={tab === "leads"} />
+        )}
       </div>
 
       {tab === "orders" && props.orders && (
         <OrdersPanel {...props} orders={props.orders} openId={openId} onOpen={openOrder} />
       )}
       {tab === "leads" && props.leads && <LeadsPanel leads={props.leads} pages={props.pages} />}
-      {tab === "blocked" && props.blocked && <BlocklistPanel blocked={props.blocked} canWrite={canWrite} actions={props.actions} />}
+      {tab === "blocked" && props.blocked && <BlocklistPanel blocked={props.blocked} canWrite={props.canBlock ?? canWrite} actions={props.actions} />}
 
       <OrderDrawer
         orderId={openId}
         onOpenChange={(o) => !o && openOrder(null)}
         canWrite={canWrite}
+        canBlock={props.canBlock ?? canWrite}
         actions={props.actions}
         onChanged={() => router.refresh()}
       />

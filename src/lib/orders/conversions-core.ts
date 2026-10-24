@@ -577,7 +577,15 @@ export interface TestEventInput {
   currency: string;
   /** customer country (phone), e.g. "MA" */
   country: string;
+  /** the platform's name (`platform.brand.name`, PIX-09): the test product and user agent say who sent the event */
+  brand?: string;
 }
+
+/** `platform.brand.name`'s default (src/lib/settings/keys/platform.ts). */
+export const DEFAULT_BRAND = "Store Gen";
+
+/** "Store Gen" → "Store-Gen": a user-agent product token (RFC 9110 token characters only). */
+const uaToken = (brand: string) => brand.replace(/[^A-Za-z0-9!#$%&'*+.^_`|~-]+/g, "-").replace(/^-+|-+$/g, "") || "Store-Gen";
 
 export interface TestEventResult {
   ok: boolean;
@@ -600,6 +608,7 @@ export interface TestEventResult {
 /** A synthetic Purchase sent with the test event code (it lands in Test events only, never in reports). */
 export async function sendTestEvent(input: TestEventInput): Promise<TestEventResult> {
   const orderId = `TEST-${randomBytes(4).toString("hex").toUpperCase()}`;
+  const brand = input.brand?.replace(/[\u0000-\u001f\u007f]/g, " ").trim() || DEFAULT_BRAND;
   const c: PurchaseConversion = {
     orderId,
     eventId: purchaseEventId(orderId),
@@ -610,9 +619,9 @@ export async function sendTestEvent(input: TestEventInput): Promise<TestEventRes
     currency: input.currency,
     qty: 1,
     contentId: "test-product",
-    contentName: "Test product (COD Studio)",
+    contentName: `Test product (${brand})`.slice(0, 160),
     customer: { phone: input.country === "MA" ? "+212600000000" : "+33600000000", email: null, name: "Test Client", city: null, country: input.country },
-    client: { ip: null, ua: "Mozilla/5.0 (compatible; COD-Studio-test-event/1.0)" },
+    client: { ip: null, ua: `Mozilla/5.0 (compatible; ${uaToken(brand)}-test-event/1.0)` },
     sourceUrl: cleanUrl(input.siteUrl),
     pixels: { meta: [], tiktok: [] },
   };

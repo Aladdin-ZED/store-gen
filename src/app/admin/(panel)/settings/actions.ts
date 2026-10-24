@@ -7,6 +7,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { adminAction, fail, type ActionResult } from "@/lib/admin-data/action";
+import { legacyReadCtx } from "@/lib/admin-data/legacy-store";
 import { auditPage, AUDIT_AREAS, revokeDeviceSession, temporaryPassword, type AuditRow } from "@/lib/admin-data/security";
 import {
   can,
@@ -183,6 +184,7 @@ export async function loadAuditAction(opts: { beforeId?: number; area?: string }
     const parsed = z
       .object({ beforeId: z.number().int().positive().optional(), area: z.enum(AUDIT_AREAS).optional() })
       .parse({ beforeId: opts.beforeId, area: opts.area || undefined });
-    return auditPage({ ...parsed, limit: 50 });
+    const { scope } = await legacyReadCtx("audit.read");
+    return auditPage(scope, { ...parsed, limit: 50 });
   });
 }

@@ -4,7 +4,7 @@ import { Screen } from "@/components/admin/common/screen";
 import { StorageChip, StorageNotice } from "@/components/admin/common/storage-notice";
 import { MediaLibrary } from "@/components/admin/media/media-library";
 import { mediaCounts } from "@/lib/admin-data/assets";
-import { can, requireUser } from "@/lib/auth";
+import { legacyStoreCtx } from "@/lib/admin-data/legacy-store";
 import { getDbUsage } from "@/lib/db/usage";
 import { assetToJson, listAssets } from "@/lib/media";
 import { getSetting } from "@/lib/settings";
@@ -13,8 +13,8 @@ import { getAssetUsageAction, setAssetAltAction } from "./actions";
 export const metadata: Metadata = { title: "Media" };
 
 export default async function MediaPage() {
-  const user = await requireUser({ permission: "pages.read" });
-  const [first, counts, ai, storage] = await Promise.all([listAssets({ page: 1, pageSize: 48 }), mediaCounts(), getSetting("ai"), getDbUsage()]);
+  const ctx = await legacyStoreCtx({ permission: "media.read" });
+  const [first, counts, ai, storage] = await Promise.all([listAssets({ page: 1, pageSize: 48 }), mediaCounts(ctx.scope), getSetting("ai"), getDbUsage()]);
 
   return (
     <Screen wide>
@@ -28,7 +28,7 @@ export default async function MediaPage() {
       <MediaLibrary
         initial={{ items: first.items.map(assetToJson), total: first.total }}
         counts={counts}
-        canWrite={can(user.role, "media.write")}
+        canWrite={ctx.can("media.write")}
         ai={{ enabled: ai.enabled, tier: ai.tier, bgRemoval: ai.bgRemoval }}
         setAlt={setAssetAltAction}
         usage={getAssetUsageAction}

@@ -1,6 +1,7 @@
 /**
- * Calendar-day helpers in the store time zone (APP_TIMEZONE, Morocco by default), shared by the
- * dashboard and the order filters so "today" means the merchant's today, not UTC's.
+ * Calendar-day helpers in a store's time zone, shared by the dashboard and the order filters so "today" means the
+ * merchant's today, not UTC's. Callers pass `stores.timezone` (ADM-23); STATS_TZ (APP_TIMEZONE, Morocco by default)
+ * is only the fallback when no store is at hand.
  */
 import { dayKey, STATS_TZ } from "@/lib/stats";
 

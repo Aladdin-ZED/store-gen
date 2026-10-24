@@ -1,23 +1,21 @@
 "use server";
 /**
- * Generator → page. "Use this direction" creates a draft page from the chosen direction and stores
+ * Generator → page. "Use this direction" creates a draft page of the store from the chosen direction and stores
  * all three directions as "generation" versions, so the alternatives stay one click away in History.
  *
  * The documents come from the browser (the generator is pure and runs client-side): each one is
- * validated and repaired with validateDoc, size-capped, and must only reference assets that exist.
- * Pixels belong to pages (docs/OFFERS.md §A): the docs carry the wizard's "Ad tracking for this page"
- * answer (the page's pixels, or `tracking.none`) and the page is created with exactly that — the save
- * never adds store pixels. The v1 flag `pixels: "chosen"` is accepted and ignored (one release).
+ * validated and repaired with validateDoc, size-capped, and must only reference assets of the store's own
+ * library (docs/STORE-SAAS.md §E.3 rule 5). Pixels belong to pages (docs/OFFERS.md §A): the docs carry the wizard's
+ * "Ad tracking for this page" answer (the page's pixels, or `tracking.none`) and the page is created with exactly
+ * that — the save never adds store pixels. The v1 flag `pixels: "chosen"` is accepted and ignored (one release).
+ * The insert itself is the store repository's (`createPageFromDirections`, GEN-01: store id from the scope only).
  */
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { adminAction, fail, type ActionResult } from "@/lib/admin-data/action";
-import { docChecksum, slugify, uniqueSlug } from "@/lib/admin-data/pages";
-import { audit } from "@/lib/audit";
-import { db } from "@/lib/db/client";
-import { newId, newPublicKey } from "@/lib/db/ids";
-import { pages, pageVersions } from "@/lib/db/schema";
-import { getAssetsByIds } from "@/lib/media";
+import { countStoreAssets } from "@/lib/admin-data/assets";
+import { legacyWriteCtx } from "@/lib/admin-data/legacy-store";
+import { createPageFromDirections, slugify } from "@/lib/admin-data/pages";
 import { Archetype, type PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
 import { collectAssetIds } from "@/landing/context";
@@ -40,18 +38,6 @@ const Input = z
 
 export type CreateFromDirectionsInput = z.input<typeof Input>;
 
-const cleanName = (s: string) => s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
-
-/** mysql2 error code, looking through drizzle's wrapping (`cause`). */
-function dbErrorCode(err: unknown): string | undefined {
-  for (let e: unknown = err, depth = 0; e && typeof e === "object" && depth < 4; depth++) {
-    const code = (e as { code?: unknown }).code;
-    if (typeof code === "string") return code;
-    e = (e as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
-
 /**
  * Base for the page address: the product name when it has Latin letters, else the category
  * ("skincare", "organic-food") — an Arabic-only name would otherwise give "page-7".
@@ -59,7 +45,8 @@ function dbErrorCode(err: unknown): string | undefined {
 const slugBase = (name: string, category: string) => (slugify(name) !== "page" ? name : category);
 
 export async function createFromDirectionsAction(input: CreateFromDirectionsInput): Promise<ActionResult<{ id: string; slug: string }>> {
-  return adminAction("pages.write", async ({ actor }) => {
+  return adminAction("pages.write", async () => {
+    const { scope, actor } = await legacyWriteCtx("pages.write");
     const { name, chosen, directions } = Input.parse(input);
 
     // each doc keeps the tracking the wizard answered (pixels or "No pixel"): nothing is added here
@@ -72,68 +59,15 @@ export async function createFromDirectionsAction(input: CreateFromDirectionsInpu
       docs.push({ label: d.label, doc });
     }
 
-    // photos are uploaded before generating: a missing asset means it was deleted meanwhile
+    // photos are uploaded before generating: a missing asset was deleted meanwhile (another store's id reads as missing)
     const ids = [...new Set(docs.flatMap((d) => collectAssetIds(d.doc)))];
-    if (ids.length) {
-      const found = await getAssetsByIds(ids);
-      if (found.length < ids.length) fail("Some photos are no longer in the media library — add them again.");
-    }
+    if (ids.length && (await countStoreAssets(scope, ids)) < ids.length) fail("Some photos are no longer in the media library — add them again.");
 
     const page = docs[chosen]!;
-    const id = newId();
-    const now = Date.now();
-    // the chosen direction is saved last so it is the newest version (= the draft)
-    const order = [...docs.keys()].filter((i) => i !== chosen).concat(chosen);
-
-    const insert = (slug: string) =>
-      db.transaction(async (tx) => {
-        await tx.insert(pages).values({
-          id,
-          slug,
-          name: cleanName(name) || "Untitled page",
-          status: "draft",
-          locale: page.doc.locale,
-          publicKey: newPublicKey(),
-          draft: page.doc,
-          createdBy: actor.id,
-          createdAt: new Date(now),
-          updatedAt: new Date(now),
-        });
-        await tx.insert(pageVersions).values(
-          order.map((i, n) => ({
-            id: newId(),
-            pageId: id,
-            kind: "generation" as const,
-            label: `Direction ${i + 1} · ${docs[i]!.label}${i === chosen ? " (chosen)" : ""}`.slice(0, 160),
-            doc: docs[i]!.doc,
-            checksum: docChecksum(docs[i]!.doc),
-            createdBy: actor.id,
-            createdAt: new Date(now - (order.length - 1 - n)),
-          })),
-        );
-      });
-
-    // another page may take the same free address between the check and the insert: retry
-    let slug = "";
-    for (let attempt = 0; ; attempt++) {
-      slug = await uniqueSlug(slugBase(name, page.doc.product.category));
-      try {
-        await insert(slug);
-        break;
-      } catch (err) {
-        if (dbErrorCode(err) !== "ER_DUP_ENTRY" || attempt >= 2) throw err;
-      }
-    }
-
-    await audit("page.generated", {
-      userId: actor.id,
-      target: id,
-      meta: { archetypes: docs.map((d) => d.doc.theme.archetype), chosen: page.doc.theme.archetype, locale: page.doc.locale },
-      ip: actor.ip,
-    });
+    const created = await createPageFromDirections(scope, { name, slugBase: slugBase(name, page.doc.product.category), chosen, directions: docs }, actor);
     revalidatePath("/admin/pages");
     revalidatePath("/admin/history");
     revalidatePath("/admin");
-    return { id, slug };
+    return created;
   });
 }

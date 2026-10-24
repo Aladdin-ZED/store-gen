@@ -1,6 +1,7 @@
 import "server-only";
 /**
- * Orders public API (server only). The wire contract lives in ./contract (isomorphic).
+ * Orders public API (server only). The wire contract lives in ./contract (isomorphic). The store-side repositories
+ * (./admin) take the scope first: reads a `StoreScope`, writes a `WriteScope` (docs/STORE-SAAS.md §E.3, D71).
  */
 export * from "./contract";
 export { createOrder, decoyResponse, upsellTokenFor, type CreateOrderContext, type CreateOrderResult } from "./create";
@@ -24,6 +25,8 @@ export {
   blockFromOrder,
   unblock,
   ordersCsv,
+  leadsCsv,
+  maskCustomer,
   isOrderStatus,
   ORDER_STATUS_IDS,
   type OrderRecord,

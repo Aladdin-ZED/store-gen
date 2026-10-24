@@ -6,8 +6,8 @@ import { Screen } from "@/components/admin/common/screen";
 import { PagesView } from "@/components/admin/pages/pages-view";
 import { Button } from "@/components/ui/button";
 import { previewAssetsFor } from "@/lib/admin-data/assets";
+import { legacyStoreCtx } from "@/lib/admin-data/legacy-store";
 import { listPages, pageCounts, type PageFilters } from "@/lib/admin-data/pages";
-import { can, requireUser } from "@/lib/auth";
 import { publicOrigin, storeInfo } from "@/lib/render/publish.server";
 import {
   archivePageAction,
@@ -28,7 +28,7 @@ const STATUSES = new Set(["published", "draft", "archived"]);
 const SORTS = new Set(["updated", "name", "orders"]);
 
 export default async function PagesPage({ searchParams }: { searchParams: SearchParams }) {
-  const user = await requireUser({ permission: "pages.read" });
+  const ctx = await legacyStoreCtx({ permission: "pages.read" });
   const sp = await searchParams;
   const status = one(sp.status);
   const sort = one(sp.sort);
@@ -39,8 +39,9 @@ export default async function PagesPage({ searchParams }: { searchParams: Search
   };
   const focus = one(sp.focus);
 
-  const [pages, counts, store] = await Promise.all([listPages(filters), pageCounts(), storeInfo()]);
+  const [pages, counts, store] = await Promise.all([listPages(ctx.scope, filters), pageCounts(ctx.scope), storeInfo()]);
   const assets = await previewAssetsFor(
+    ctx.scope,
     pages.flatMap((p) => (p.doc ? [p.doc] : [])),
     [store.logo],
   );
@@ -56,7 +57,7 @@ export default async function PagesPage({ searchParams }: { searchParams: Search
             : "Every landing page you generate lives here: drafts, live pages and the archive."
         }
         actions={
-          can(user.role, "pages.write") && (
+          ctx.can("pages.write") && (
             <Button asChild variant="brand" className="h-9 rounded-full px-4">
               <Link href="/admin/generate">
                 <SparklesIcon />
@@ -74,9 +75,9 @@ export default async function PagesPage({ searchParams }: { searchParams: Search
         origin={publicOrigin() ?? null}
         focusId={focus || undefined}
         can={{
-          write: can(user.role, "pages.write"),
-          publish: can(user.role, "pages.publish"),
-          export: can(user.role, "export.create"),
+          write: ctx.can("pages.write"),
+          publish: ctx.can("pages.publish"),
+          export: ctx.can("export.create"),
         }}
         actions={{
           duplicate: duplicatePageAction,

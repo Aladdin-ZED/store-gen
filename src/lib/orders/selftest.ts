@@ -11,10 +11,14 @@
  *     rules (locks ignore the payload, allow lists), distinct choices, choice-price differences,
  *     shared groups, extras scope, bump item, "stale" on a fallback version, order snapshots.
  *  6. version choice (chooseOrderVersion) and the versionDoc repair fallback (orderDocOf).
+ *  7. store-side customer fields per scope (maskCustomer, D70): masked under a staff impersonation scope, unchanged
+ *     for member, public, system and platform scopes; a partial row keeps its shape.
  */
+import { maskCustomer } from "@/lib/admin-data/mask";
 import { getFixture } from "@/lib/page/fixtures";
 import { emptySelection, orderTotals } from "@/lib/page/pricing";
 import { PageDoc, type PageDoc as PageDocT } from "@/lib/page/schema";
+import type { StoreScope } from "@/lib/tenancy/types";
 import { orderText } from "./text";
 import { parseOrderPayload, toSelectionInput, UNIT_FIELD_RE, VARIANT_FIELD_RE, variantText, type OrderPayloadV1, type OrderPayloadV2 } from "./contract";
 import { validateOrder, type ValidationResult } from "./validate";
@@ -398,6 +402,37 @@ ok("a total that differs from the one shown is logged (current version)", parity
   eq("v1: current is v1 → current", chooseOrderVersion("V1NEW", rows.slice(0, 2), {}, now), { versionId: "V1NEW", fallback: false });
   eq("v1: no v1 version → current + fallback", chooseOrderVersion("V2B", rows.slice(2), {}, now), { versionId: "V2B", fallback: true });
   eq("the window is 72 h", STALE_WINDOW_MS, 72 * h);
+}
+
+/* 7 · customer fields per scope ------------------------------------------- */
+{
+  // test scopes: the seam mints the real ones (src/lib/tenancy/seam.ts); only `kind` and `storeId` are read here
+  const scopeOf = (kind: StoreScope["kind"]) => Object.freeze({ storeId: "0000000000000000000000000A", kind }) as unknown as StoreScope;
+  const row = {
+    id: "MA-7KQ2XW",
+    name: "Salma Benali",
+    phone: "+212612345634",
+    city: "Casablanca",
+    address: "12 rue des Orangers",
+    note: "Appeler après 18 h",
+    email: "salma@example.com",
+    total: 299,
+  };
+  for (const kind of ["member", "public", "system", "platform"] as const) {
+    eq(`mask: ${kind} scope → the row unchanged`, maskCustomer(scopeOf(kind), row), row);
+  }
+  const masked = maskCustomer(scopeOf("impersonation"), row);
+  eq("mask: impersonation → name, phone, address, note, e-mail masked; city and the rest kept", masked, {
+    ...row,
+    name: "Salma B.",
+    phone: "+2126 ••••••34",
+    address: "Casablanca · address hidden",
+    note: "Hidden",
+    email: "Hidden",
+  });
+  ok("mask: no canary survives impersonation", !JSON.stringify(masked).includes("Benali") && !JSON.stringify(masked).includes("612345634") && !JSON.stringify(masked).includes("Orangers"));
+  eq("mask: a partial row keeps its shape (blocklist phone)", maskCustomer(scopeOf("impersonation"), { phone: "+212612345634" }), { phone: "+2126 ••••••34" });
+  eq("mask: null fields stay null", maskCustomer(scopeOf("impersonation"), { name: null, phone: null, email: null }), { name: null, phone: null, email: null });
 }
 
 async function asyncChecks() {

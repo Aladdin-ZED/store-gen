@@ -3,8 +3,8 @@ import { PageHeader } from "@/components/admin/common/page-header";
 import { Screen } from "@/components/admin/common/screen";
 import { ExportsView } from "@/components/admin/exports/exports-view";
 import { listExports } from "@/lib/admin-data/exports";
+import { legacyStoreCtx } from "@/lib/admin-data/legacy-store";
 import { redirectPastLastPage } from "@/lib/admin-data/paging";
-import { can, requireUser } from "@/lib/auth";
 import { revokeExportAction } from "./actions";
 
 export const metadata: Metadata = { title: "Exports" };
@@ -13,11 +13,11 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
 export default async function ExportsPage({ searchParams }: { searchParams: SearchParams }) {
-  const user = await requireUser({ permission: "pages.read" });
+  const ctx = await legacyStoreCtx({ permission: "pages.read" });
   const sp = await searchParams;
   const activeOnly = one(sp.active) === "1";
   const page = Math.max(1, Math.min(10_000, Number.parseInt(one(sp.page), 10) || 1));
-  const list = await listExports({ active: activeOnly, page, pageSize: 30 });
+  const list = await listExports(ctx.scope, { active: activeOnly, page, pageSize: 30 });
   redirectPastLastPage("/admin/exports", sp, list);
 
   return (
@@ -32,7 +32,7 @@ export default async function ExportsPage({ searchParams }: { searchParams: Sear
         page={list.page}
         pageSize={list.pageSize}
         activeOnly={activeOnly}
-        canExport={can(user.role, "export.create")}
+        canExport={ctx.can("export.create")}
         revoke={revokeExportAction}
       />
     </Screen>

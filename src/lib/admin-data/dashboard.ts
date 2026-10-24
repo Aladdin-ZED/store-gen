@@ -1,20 +1,24 @@
 import "server-only";
 /**
- * Dashboard data in one call: KPIs (today / 7 days vs the previous 7), a 30-day series, top pages,
+ * Dashboard data of one store in one call: KPIs (today / 7 days vs the previous 7), a 30-day series, top pages,
  * recent orders, Google Sheets sync health, the setup checklist and the database size.
  *
- * Funnel numbers (orders, revenue, unique visitors) come from stats_daily, which is bucketed by the
- * store's calendar day and excludes bot (honeypot) orders. Revenue is the value of orders placed,
- * before cancellations — COD revenue is only certain once delivered.
+ * Funnel numbers (orders, revenue, unique visitors) come from the store's stats (T3's `getPageStats(scope, …)`),
+ * bucketed by the store's calendar day and excluding bot (honeypot) and test orders. Revenue is the value of orders
+ * placed, before cancellations — COD revenue is only certain once delivered. Every query is scoped (§E.3); customer
+ * names come back masked under an impersonation scope (D70).
  */
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, ne } from "drizzle-orm";
 import { cronKeySecret } from "@/lib/auth/config";
 import { db } from "@/lib/db/client";
 import { orders, pages } from "@/lib/db/schema";
 import { getDbUsage, type DbUsage } from "@/lib/db/usage";
-import { getSettings } from "@/lib/settings";
+import { getStoreSetting } from "@/lib/settings";
 import { getSheetsConfig, isSheetsConfigured } from "@/lib/sheets";
 import { getPageStats, type StatsRow } from "@/lib/stats";
+import { inStore, whereStore } from "@/lib/tenancy/sql";
+import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
+import { maskCustomer } from "./mask";
 import { addDays, dayKey, dayStart } from "./time";
 
 export interface Kpi {
@@ -87,15 +91,21 @@ const sumRows = (rows: StatsRow[]) =>
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export async function getSheetHealth(): Promise<SheetHealth> {
+/** The store's sheet queue (ADM-03): its own orders only. */
+export async function getSheetHealth(scope: StoreScope): Promise<SheetHealth> {
   const [cfg, counts, [oldest], [lastFailed]] = await Promise.all([
     getSheetsConfig(),
-    db.select({ s: orders.sheetStatus, n: count() }).from(orders).groupBy(orders.sheetStatus),
-    db.select({ at: orders.createdAt }).from(orders).where(eq(orders.sheetStatus, "pending")).orderBy(asc(orders.createdAt)).limit(1),
+    db.select({ s: orders.sheetStatus, n: count() }).from(orders).where(inStore(orders, scope)).groupBy(orders.sheetStatus),
+    db
+      .select({ at: orders.createdAt })
+      .from(orders)
+      .where(whereStore(orders, scope, eq(orders.sheetStatus, "pending")))
+      .orderBy(asc(orders.createdAt))
+      .limit(1),
     db
       .select({ error: orders.sheetError })
       .from(orders)
-      .where(and(eq(orders.sheetStatus, "failed"), isNotNull(orders.sheetError)))
+      .where(whereStore(orders, scope, eq(orders.sheetStatus, "failed"), isNotNull(orders.sheetError)))
       .orderBy(desc(orders.updatedAt))
       .limit(1),
   ]);
@@ -114,16 +124,18 @@ export async function getSheetHealth(): Promise<SheetHealth> {
   };
 }
 
-export async function getDashboard(user: { totpEnabled: boolean }): Promise<DashboardData> {
-  const today = dayKey();
+/** `store` is the scope's own row (the seam's ctx.store): its name, currency, calendar and home page (ADM-04, ADM-05). */
+export async function getDashboard(scope: StoreScope, store: StoreRow, user: { totpEnabled: boolean }): Promise<DashboardData> {
+  const tz = store.timezone;
+  const today = dayKey(new Date(), tz);
   const from30 = addDays(today, -29);
   const from14 = addDays(today, -13);
   const weekStart = addDays(today, -6);
 
-  const [stats, settings, sheet, storage, recent, pipelineRows, publishedCount, pageTotal] = await Promise.all([
-    getPageStats({ from: from30, to: today }),
-    getSettings(["defaults", "store", "home"]),
-    getSheetHealth(),
+  const [stats, contacts, sheet, storage, recent, pipelineRows, publishedCount, pageTotal] = await Promise.all([
+    getPageStats(scope, { from: from30, to: today }),
+    getStoreSetting(scope, "store"),
+    getSheetHealth(scope),
     getDbUsage(),
     db
       .select({
@@ -139,17 +151,18 @@ export async function getDashboard(user: { totpEnabled: boolean }): Promise<Dash
         riskScore: orders.riskScore,
       })
       .from(orders)
-      .leftJoin(pages, eq(pages.id, orders.pageId))
-      .where(ne(orders.sheetStatus, "disabled"))
+      .leftJoin(pages, and(eq(pages.id, orders.pageId), inStore(pages, scope)))
+      // "disabled" = honeypot and test orders (D54): never in the store's numbers
+      .where(whereStore(orders, scope, ne(orders.sheetStatus, "disabled")))
       .orderBy(desc(orders.createdAt))
       .limit(8),
     db
       .select({ status: orders.status, n: count() })
       .from(orders)
-      .where(and(gte(orders.createdAt, dayStart(weekStart)), ne(orders.sheetStatus, "disabled")))
+      .where(whereStore(orders, scope, gte(orders.createdAt, dayStart(weekStart, tz)), ne(orders.sheetStatus, "disabled"), eq(orders.isTest, false)))
       .groupBy(orders.status),
-    db.select({ n: count() }).from(pages).where(eq(pages.status, "published")),
-    db.select({ n: count() }).from(pages).where(ne(pages.status, "archived")),
+    db.select({ n: count() }).from(pages).where(whereStore(pages, scope, eq(pages.status, "published"))),
+    db.select({ n: count() }).from(pages).where(whereStore(pages, scope, ne(pages.status, "archived"))),
   ]);
 
   const days = stats.days;
@@ -162,16 +175,18 @@ export async function getDashboard(user: { totpEnabled: boolean }): Promise<Dash
   const conv = (r: { orders: number; uniques: number }) => (r.uniques ? r.orders / r.uniques : 0);
 
   // top pages over 7 days, by orders then visitors
-  const weekStats = await getPageStats({ from: weekStart, to: today });
+  const weekStats = await getPageStats(scope, { from: weekStart, to: today });
   const topIds = weekStats.pages.slice(0, 6).map((p) => p.pageId);
-  const statusRows = topIds.length ? await db.select({ id: pages.id, status: pages.status }).from(pages).where(inArray(pages.id, topIds)) : [];
+  const statusRows = topIds.length
+    ? await db.select({ id: pages.id, status: pages.status }).from(pages).where(whereStore(pages, scope, inArray(pages.id, topIds)))
+    : [];
   const statusBy = new Map(statusRows.map((r) => [r.id, r.status]));
 
-  const store = settings.store;
-  const homeSet = !!settings.home.pageId;
+  const homeSet = !!store.homePageId;
+  const named = store.name.trim() !== "" && store.name !== "My store";
 
   const checklist: ChecklistItem[] = [
-    { id: "store", done: store.storeName.trim() !== "" && store.storeName !== "My store" && !!(store.phone || store.whatsapp), href: "/admin/settings/store" },
+    { id: "store", done: named && !!(contacts.phone || contacts.whatsapp), href: "/admin/settings/store" },
     { id: "sheets", done: sheet.connected && sheet.enabled, href: "/admin/settings/sheets" },
     { id: "twofactor", done: user.totpEnabled, href: "/admin/settings/security" },
     { id: "publish", done: Number(publishedCount[0]?.n ?? 0) > 0, href: "/admin/pages" },
@@ -180,7 +195,7 @@ export async function getDashboard(user: { totpEnabled: boolean }): Promise<Dash
   ];
 
   return {
-    currency: settings.defaults.currency,
+    currency: store.currency,
     today,
     kpis: {
       ordersToday: { value: todayRow?.orders ?? 0, previous: yesterday?.orders ?? 0 },
@@ -202,7 +217,7 @@ export async function getDashboard(user: { totpEnabled: boolean }): Promise<Dash
       revenue: p.revenue,
       conversion: p.conversionRate,
     })),
-    recentOrders: recent.map((o) => ({
+    recentOrders: recent.map((row) => maskCustomer(scope, row)).map((o) => ({
       id: o.id,
       name: o.name,
       city: o.city,
@@ -221,11 +236,11 @@ export async function getDashboard(user: { totpEnabled: boolean }): Promise<Dash
   };
 }
 
-/** Sidebar badges: orders waiting for a first call, sync failures. */
-export async function navCounts(): Promise<{ newOrders: number; syncFailed: number }> {
+/** Sidebar badges of the store: orders waiting for a first call, sync failures (ADM-08). */
+export async function navCounts(scope: StoreScope): Promise<{ newOrders: number; syncFailed: number }> {
   const [[n], [f]] = await Promise.all([
-    db.select({ n: count() }).from(orders).where(and(eq(orders.status, "new"), ne(orders.sheetStatus, "disabled"))),
-    db.select({ n: count() }).from(orders).where(eq(orders.sheetStatus, "failed")),
+    db.select({ n: count() }).from(orders).where(whereStore(orders, scope, eq(orders.status, "new"), ne(orders.sheetStatus, "disabled"))),
+    db.select({ n: count() }).from(orders).where(whereStore(orders, scope, eq(orders.sheetStatus, "failed"))),
   ]);
   return { newOrders: Number(n?.n ?? 0), syncFailed: Number(f?.n ?? 0) };
 }

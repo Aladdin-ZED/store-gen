@@ -4,10 +4,9 @@ import { Screen } from "@/components/admin/common/screen";
 import { HistoryView } from "@/components/admin/history/history-view";
 import { previewAssetsFor } from "@/lib/admin-data/assets";
 import { listVersions, VERSION_KINDS, versionKindCounts, type VersionKind } from "@/lib/admin-data/history";
+import { legacyStoreCtx } from "@/lib/admin-data/legacy-store";
 import { pageOptions } from "@/lib/admin-data/pages";
 import { redirectPastLastPage } from "@/lib/admin-data/paging";
-import { STATS_TZ } from "@/lib/admin-data/time";
-import { can, requireUser } from "@/lib/auth";
 import { storeInfo } from "@/lib/render/publish.server";
 import { duplicateVersionAction, restoreVersionAction, starVersionAction } from "./actions";
 
@@ -21,7 +20,7 @@ const PAGE_SIZE = 24;
 const requestTime = () => Date.now();
 
 export default async function HistoryPage({ searchParams }: { searchParams: SearchParams }) {
-  const user = await requireUser({ permission: "pages.read" });
+  const ctx = await legacyStoreCtx({ permission: "pages.read" });
   const sp = await searchParams;
   const kindParam = one(sp.kind);
   const kind = (VERSION_KINDS as readonly string[]).includes(kindParam) ? (kindParam as VersionKind) : undefined;
@@ -29,13 +28,14 @@ export default async function HistoryPage({ searchParams }: { searchParams: Sear
   const page = Math.max(1, Math.min(10_000, Number.parseInt(one(sp.page), 10) || 1));
 
   const [list, counts, pages, store] = await Promise.all([
-    listVersions({ kind, pageId, starred: one(sp.starred) === "1", page, pageSize: PAGE_SIZE }),
-    versionKindCounts(pageId),
-    pageOptions({ includeArchived: true }),
+    listVersions(ctx.scope, { kind, pageId, starred: one(sp.starred) === "1", page, pageSize: PAGE_SIZE }),
+    versionKindCounts(ctx.scope, pageId),
+    pageOptions(ctx.scope, { includeArchived: true }),
     storeInfo(),
   ]);
   redirectPastLastPage("/admin/history", sp, list);
   const assets = await previewAssetsFor(
+    ctx.scope,
     list.items.flatMap((v) => (v.doc ? [v.doc] : [])),
     [store.logo],
   );
@@ -44,7 +44,7 @@ export default async function HistoryPage({ searchParams }: { searchParams: Sear
     <Screen wide>
       <PageHeader
         title="History"
-        description="Every generation, save and publish across all pages. Restore any of them, or start a new page from one."
+        description="Every generation, save and publish across your pages. Restore any of them, or start a new page from one."
       />
       <HistoryView
         items={list.items}
@@ -55,10 +55,10 @@ export default async function HistoryPage({ searchParams }: { searchParams: Sear
         pages={pages.map((p) => ({ id: p.id, name: p.name }))}
         assets={assets}
         store={store}
-        canWrite={can(user.role, "pages.write")}
+        canWrite={ctx.can("pages.write")}
         actions={{ star: starVersionAction, restore: restoreVersionAction, duplicate: duplicateVersionAction }}
         now={requestTime()}
-        timeZone={STATS_TZ}
+        timeZone={ctx.store.timezone}
       />
     </Screen>
   );

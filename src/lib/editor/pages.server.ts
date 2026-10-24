@@ -12,6 +12,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, lt, ne, notInArray } from "drizzle-orm";
 import { createPageFromDoc } from "@/lib/admin-data/pages";
+import type { Actor } from "@/lib/admin-data/store-audit";
 import { can, type SessionUser } from "@/lib/auth";
 import { isGatePath } from "@/lib/auth/gate";
 import { db } from "@/lib/db/client";
@@ -23,6 +24,7 @@ import { PageDoc, type PageDoc as PageDocT } from "@/lib/page/schema";
 import { sanitizeDeep, validateDoc } from "@/lib/page/validate";
 import { invalidatePublished, isServableSlug, storeInfo } from "@/lib/render/publish.server";
 import { getSetting } from "@/lib/settings";
+import type { WriteScope } from "@/lib/tenancy/types";
 import { collectAssetIds } from "@/landing/context";
 import type { ActionErrorCode, EditorAsset, EditorBootstrap, EditorPageMeta, PageStatus, VersionKind, VersionSummary } from "./types";
 import { jsonBytes, MAX_DOC_BYTES } from "./types";
@@ -378,8 +380,8 @@ export async function renameVersion(pageId: string, versionId: string, label: st
   if (affectedRows(res) === 0 && !(await versionRow(pageId, versionId))) throw new EditorError("not_found", "This version no longer exists.");
 }
 
-/** New draft page from the current draft or one of its versions. */
-export async function duplicateAsPage(user: SessionUser, input: { pageId: string; versionId?: string; name?: string }): Promise<{ id: string; slug: string }> {
+/** New draft page of the scope's store from the current draft or one of its versions. */
+export async function duplicateAsPage(scope: WriteScope, actor: Actor, input: { pageId: string; versionId?: string; name?: string }): Promise<{ id: string; slug: string }> {
   const row = await pageRow(input.pageId);
   if (!row) throw new EditorError("not_found", "This page no longer exists.");
   let source: unknown = row.draft;
@@ -392,7 +394,7 @@ export async function duplicateAsPage(user: SessionUser, input: { pageId: string
   }
   const { doc } = validateDoc(source);
   if (!doc) throw new EditorError("invalid", "This content is damaged and cannot be duplicated.");
-  return createPageFromDoc({ name: input.name ?? `${row.name} (copy)`, doc, versionLabel, copiedFrom: row.name }, { id: user.id });
+  return createPageFromDoc(scope, { name: input.name ?? `${row.name} (copy)`, doc, versionLabel, copiedFrom: row.name }, actor);
 }
 
 /* ------------------------------------------------------------------ */

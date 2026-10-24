@@ -9,7 +9,10 @@
  */
 import { unstable_rethrow } from "next/navigation";
 import type { z } from "zod";
+import { ActionError } from "@/lib/admin-data/action";
+import { legacyWriteCtx } from "@/lib/admin-data/legacy-store";
 import { unpublishPage as unpublishPageRow } from "@/lib/admin-data/pages";
+import { auditIn } from "@/lib/admin-data/store-audit";
 import { audit } from "@/lib/audit";
 import { AuthError, getRequestContext, requireUser, type Permission, type SessionUser } from "@/lib/auth";
 import { errorSummary } from "@/lib/orders/log";
@@ -80,6 +83,8 @@ async function run<S extends z.ZodType, T extends object>(
         : fail("auth", "Your session has ended. Sign in again in a new tab, then retry.");
     }
     if (err instanceof EditorError) return fail(err.code, err.message, err.extra);
+    // a refusal of store #1's seam (legacyWriteCtx: read-only store, plan, unavailable)
+    if (err instanceof ActionError) return fail("forbidden", err.message);
     if (err instanceof PublishError) {
       if (err.code === "conflict") return changedElsewhere(err.serverUpdatedAt ?? 0);
       return fail(err.code === "not_found" ? "not_found" : "publish_failed", err.message, {
@@ -174,9 +179,10 @@ export async function renameVersion(raw: z.input<typeof RenameVersionInput>): Pr
 
 /** New draft page from this page (or one of its versions). */
 export async function duplicatePage(raw: z.input<typeof DuplicatePageInput>): Promise<ActionResult<{ pageId: string; slug: string }>> {
-  return run("pages.write", DuplicatePageInput, raw, async (user, input) => {
-    const created = await duplicateAsPage(user, input);
-    await audit("page.duplicated", { userId: user.id, target: created.id, meta: { from: input.pageId, versionId: input.versionId ?? null }, ip: await ip() });
+  return run("pages.write", DuplicatePageInput, raw, async (_user, input) => {
+    const { scope, actor } = await legacyWriteCtx("pages.write");
+    const created = await duplicateAsPage(scope, actor, input);
+    await auditIn(scope, actor, "page.duplicated", { target: created.id, meta: { from: input.pageId, versionId: input.versionId ?? null } });
     return { ok: true, pageId: created.id, slug: created.slug };
   });
 }
@@ -245,11 +251,12 @@ export async function publish(raw: z.input<typeof PublishInput>): Promise<
  * is its own (adopt it) or another save's (keep its own, so the next save reports the conflict).
  */
 export async function unpublish(raw: z.input<typeof UnpublishInput>): Promise<ActionResult<{ page: EditorPageMeta; draftChangedElsewhere: boolean }>> {
-  return run("pages.publish", UnpublishInput, raw, async (user, { pageId, baseUpdatedAt }) => {
+  return run("pages.publish", UnpublishInput, raw, async (_user, { pageId, baseUpdatedAt }) => {
+    const { scope, actor } = await legacyWriteCtx("pages.publish");
     const before = await currentMeta(pageId);
     if (!before) return fail("not_found", "This page no longer exists.");
-    // unpublishPageRow invalidates the serving cache and writes the audit entry
-    await unpublishPageRow(pageId, { id: user.id, ip: await ip() });
+    // unpublishPageRow (store-scoped) invalidates the serving cache and writes the audit entry
+    await unpublishPageRow(scope, pageId, actor);
     const page = await currentMeta(pageId);
     if (!page) return fail("not_found", "This page no longer exists.");
     return { ok: true, page, draftChangedElsewhere: baseUpdatedAt !== undefined && baseUpdatedAt !== before.updatedAt };
