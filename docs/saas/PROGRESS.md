@@ -13,8 +13,8 @@ running, and how to restart it. Newest state at the top of "Running now".
 | 2a | Spec writing: core contract + 6 part specs | docs/STORE-SAAS.md, docs/saas/spec/*.md | **done** 2026-10-24 |
 | 2b | ELEVATE (owner item 16, Fable): core rev 2 integrates requests + rethink; 6 parts rev 2 raise ceilings; core rev 2.1 | same files | **done** 2026-10-24 (commit a2e9fc2) |
 | 2c | Reviews (6 lenses) → per-file revisers → critic loop | same files + §P | **done** 2026-10-24 (56db6eb) |
-| 2d | Integrate critic r2 residuals (single integrator) + confirming critic | same files | running |
-| 3 | Build phase 0: core tenancy (schema, migration, store scope, auth/memberships, routing) | code | todo |
+| 2d | Integrate critic r2 residuals (single integrator) + confirming critic | same files | **done** 2026-10-24 (efd8849) |
+| 3 | R1.0 core tenancy: C0a contract step → tracks T1 DATA, T2 AUTH, T3 EDGE, T4 SCOPE + C0b (worktrees) → integration → verify → deploy | code | C0a running |
 | 4 | Build phase 1: parallel tracks (store pages, landing+, brand kit/logo, team/invites, platform admin, storage) | code | todo |
 | 5 | Adversarial verification incl. cross-tenant attack tests, fix loop | tests + fixes | todo |
 | 6 | Deploy to the Store Gen site (archive method, HANDOFF §4) + live smoke | live | todo |
@@ -23,7 +23,18 @@ running, and how to restart it. Newest state at the top of "Running now".
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
-- **Phase 2d INTEGRATE (critic r2 residuals)** — started 2026-10-24 ~10:05. Task `wnqnfawnz`, run `wf_a623cd7c-cd2`.
+- **Phase 3 R1.0 / C0a (contract step on main)** — started 2026-10-24 ~10:55. Task `wsg3i2bv6`, run `wf_490a4c68-dd8`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\r1-0-c0a-wf_490a4c68-dd8.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_490a4c68-dd8"})`.
+  Sequential agents A1 types/permissions/pure helpers → A2 schema.ts + drizzle/0004 + settings registries → A3 minimal seam,
+  typed cross-track stubs, extension skeletons, package.json scripts, maintainer build note in core §K.1 → A4 verify (tsc, npm
+  test, 0004 on empty DB twice, /app/<h> renders through the seam on port 3451) → spec tidy (10 wording minors, rev 6).
+  Works directly in the main tree; the LEAD commits after reviewing (agents do not commit).
+  Next: lead reviews + commits C0a, writes the ownership baseline, creates worktrees C:\Users\SICO\sg-wt\{t1,t2,t3,t4,c0b}
+  (node_modules junction, own .env.local DB cod_wt_<track>, test DB prefix cod_test_<track>_*), launches the 5 tracks.
+
+- **Phase 2d INTEGRATE (critic r2 residuals)** — DONE 2026-10-24 ~10:50 (commit efd8849): 22/22 applied; confirming critic ready.
+  Was: started 2026-10-24 ~10:05. Task `wnqnfawnz`, run `wf_a623cd7c-cd2`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\store-saas-spec-integrate-wf_49308093-160.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_a623cd7c-cd2", args: {issuesFile: "C:\\Users\\SICO\\store-gen\\qa\\saas-baseline\\critic-r2-issues.json", count: 22}})`.
   One sequential integrator applies the 22 issues (7 majors = cross-file drift) across all 7 spec files, then a confirming
