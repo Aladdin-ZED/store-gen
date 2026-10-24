@@ -1323,10 +1323,13 @@ Owner = the part spec allowed to refine its columns (§D.9).
 | 0004 | `signup_reviews` | P* | platform | approval queue rows |
 | 0004 | `identity_links` | P | platform | hashed duplicate/ban signals |
 | 0004 | `protected_brands` | P | platform | brand deny list |
-| 0004 | `legal_documents`, `legal_acceptances` | P | platform | ToS/Privacy/AUP/DPA + store templates; acceptances |
-| 0004 | `notifications`, `notification_reads` | P (opt. store) | platform | notification centre |
+| 0004 | `legal_documents` | P | platform | ToS/Privacy/AUP/DPA + store templates |
+| 0004 (CCR r1.0-t1-3) | `legal_acceptances` | P (opt. store) | platform | acceptances; `store_id` is the store whose policy was accepted (PLA-§2.1) |
+| 0004 | `notifications` | P (opt. store) | platform | notification centre |
+| 0004 (CCR r1.0-t1-3) | `notification_reads` | P | platform | read marks; no `store_id`, the rows hang off the notification |
 | 0004 | `flags`, `flag_overrides` | P | platform | release/ops flags and kill switches |
 | 0004 | `asset_refs` | T | core | asset usage index (§G.5) |
+| **0004** (CCR r1.0-t1-1) | `platform_usage` | P | core | platform counters (AI cost cap, mail caps, D69 sandboxes per day, pending media bytes); moved from 0005 because R1.0 charges it |
 | **0004** (rev 3, ENGC-1) | `page_slug_history` | T | landing | old slugs → 308 (LP-20, LAN Q7); cut with 0004 because T3's slug route reads it in R1.0 |
 | **0004** (rev 3, SEC-7) | `preview_tokens` | T | core | one row per minted `/preview/<token>` (`jti`, store, page, audience, expiry, `revoked_at`, `opened`), so a 72-hour link is store-bound and revocable |
 | 0005 | `store_health` | P* | platform (rules per track, §I.7) | the one health snapshot both audiences read (D53, PLA Q.1, SF-03) |
@@ -1343,7 +1346,6 @@ Owner = the part spec allowed to refine its columns (§D.9).
 | 0005 | `ai_batch_items`, `ai_eval_runs` | P (opt. store) / P | ai | batch item queue; eval gate runs (AI R2) |
 | 0005 | `ai_usage_daily` | T | ai | AI usage rollups (the console reads it cross-store through `src/lib/ai/platform/**`, D64) |
 | 0005 | `platform_notes` | P (opt. store) | platform | staff notes |
-| 0005 | `platform_usage` | P | core | platform counters (AI cost cap, mail caps) |
 | 0005 | `job_runs`, `cron_cursors` | P (opt. store) | core | job runner |
 | 0005 | `error_events` | P (opt. store) | core | error ring |
 | 0005 | `outbox` | P (opt. store) | core | async deliveries (§H.1) |
@@ -1469,6 +1471,14 @@ export const storeUsage = mysqlTable("store_usage", {
   period: varchar("period", { length: 10 }).notNull(),                 // "total" | "YYYY-MM" | "YYYY-MM-DD" (rev 3, ENGC-17: created wide, never MODIFYed)
   value: bigint("value", { mode: "number" }).notNull().default(0), updatedAt: updatedAt(),
 }, (t) => [primaryKey({ columns: [t.storeId, t.metric, t.period] })]);
+
+// CCR r1.0-t1-1: moved from 0005 because R1.0 charges it (D69 sandboxes per day, pending media bytes, the transitionStore refund);
+// period born varchar(13) for the hourly mail counter "YYYY-MM-DDTHH" (never MODIFYed, like store_usage, ENGC-17)
+export const platformUsage = mysqlTable("platform_usage", {
+  metric: varchar("metric", { length: 32 }).notNull(),
+  period: varchar("period", { length: 13 }).notNull(),                 // "total" | "YYYY-MM" | "YYYY-MM-DD" | "YYYY-MM-DDTHH"
+  value: bigint("value", { mode: "number" }).notNull().default(0), updatedAt: updatedAt(),
+}, (t) => [primaryKey({ columns: [t.metric, t.period] })]);
 
 // rev 3 (ENGC-1): cut in 0004 because T3's slug route consults it in R1.0 (§C.4.1); the columns are landing's to refine (§D.9)
 export const pageSlugHistory = mysqlTable("page_slug_history", {
@@ -1751,10 +1761,7 @@ export const platformNotes = mysqlTable("platform_notes", {
   id: id26().primaryKey(), storeId: storeRefOpt(), userId: id26("user_id"), authorId: id26("author_id").notNull(),
   body: text("body").notNull(), pinned: boolean("pinned").notNull().default(false), createdAt: createdAt(), updatedAt: updatedAt(),
 }, (t) => [index("pn_store_idx").on(t.storeId, t.createdAt), index("pn_user_idx").on(t.userId, t.createdAt)]);
-export const platformUsage = mysqlTable("platform_usage", {
-  metric: varchar("metric", { length: 32 }).notNull(), period: varchar("period", { length: 7 }).notNull(),
-  value: bigint("value", { mode: "number" }).notNull().default(0), updatedAt: updatedAt(),
-}, (t) => [primaryKey({ columns: [t.metric, t.period] })]);
+// platform_usage moved to 0004 (CCR r1.0-t1-1; §D.4, after store_usage)
 export const jobRuns = mysqlTable("job_runs", {
   id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
   job: varchar("job", { length: 48 }).notNull(), storeId: storeRefOpt(), tickId: char("tick_id", { length: 26 }),
@@ -2132,7 +2139,7 @@ dump before every R1 deploy (§H.10).
 **two guarded type changes** (rev 3, ENGC-17) written in the 0004 style (`MODIFY` only while the column still has the
 old type), both on columns that exist since 0000: `leads.phone` → NULL-able in 0005 (LAN Q2) and `orders.page_id` →
 NULL-able in 0006. Nothing created in 0004 or 0005 is altered or renamed later (`store_usage.period` is born
-`varchar(10)`, `agent_profiles.commission_rule_ids` is born as the JSON array). None needs a backfill beyond defaults.
+`varchar(10)`, `platform_usage.period` is born `varchar(13)` in 0004 (CCR r1.0-t1-1), `agent_profiles.commission_rule_ids` is born as the JSON array). None needs a backfill beyond defaults.
 `test:migrate` (§J.2) runs 0005 twice and interrupted like 0004.
 
 **Boot checks for store docs (R2, STO-R3):** the published-checksum boot task (`src/lib/db/boot-tasks.ts`) and
@@ -2191,6 +2198,7 @@ boot task of §D.8 re-seals them in the background (`test:migrate` asserts it). 
 | `home` | — | no | `admin-data/pages.ts:60-65,280-282,332`, publish, dashboard | **removed**: `stores.home_page_id` (SET-07, PUB-05) | core / R1 |
 | `doc_schema` | P | no | `db/boot-tasks.ts:22-46` | unchanged platform marker (DB-19) | core |
 | `tenancy_v1` | P | no | — | conversion marker (§D.8) | core / R1 |
+| `legal_seed` | P | no | `db/boot-tasks.ts` (`seedLegalTemplates`) | the last `LEGAL_SEED_VERSION` seeded (§H.4 step 5; 0 = none; CCR r1.0-t1-3) | core / R1 |
 | `platform` | P | no | — | brand (name "Store Gen", support WhatsApp, console accent), signup (mode, thresholds, allowed markets, the sandbox ceilings `pendingMediaMiB`, **`pendingMediaMiBBeforeSubmit` 20, `pendingMediaTotalMiB` 5,000, `pendingStoresPerDay` 50** (rev 3, D69), `pendingMembersMax`), new-store defaults, `allowSellerBrandOrange: false` (D37), extra reserved handles, analytics k (5), the health and lifecycle tunables (PLA-§2.4) | platform / R1 |
 | `platform_ai` | P | no | — | `enabled` (false until a key and a cap exist, D40); **`classes`** per task class (D55): `director_interactive` (`claude-opus-5-5`, `medium`), `director_deep` (`claude-fable-5-1`, `high`), `worker` (`claude-sonnet-5-5`, `low`), `fast` (`claude-haiku-5-5`, `low`), each `{ model, effort, maxTokens, timeoutMs, fastMode: false, fallbacks, batch }`; `prices` per model id (USD/MTok incl. cache write 5 m / 1 h, cache read, batch); `caps` (`monthlyUsd`, `dailyUsdPerStore`, `storeDailyCapPct`, `directorPassesPerStorePerDay` 30, `deepPassesPerStorePerDay` 5, `concurrentDirector` 4, `concurrentWorker` 8, and **rev 3** `pendingSharePct` 10, `pendingDailyFloor` 10, `directorSharePct` 60; D69, AI R28/R30); `directorAutoDefault: false` (the platform default behind `store_ai.director = null`, settable only with a passing `preference` eval run, AI QUAL-11); `promptVersions` per task; `evalGate` (`judgeModel`, `jury` per class, `minWinRateLowerBound` 0.50, `maxDiversityDrop` 0.02, `maxCostIncrease` 0.20, `canary` slice and promotion thresholds, AI-§M.5); `patternLibrary`; `retentionNotice: "30d"` (Fable 5.1 requires 30-day retention, shown in the store's AI settings, rethink-ai §9.12). The key itself lives in `platform_ai_secret` | ai / R1 |
 | `platform_ai_secret` | P | **yes** | — | `{ apiKey?, setAt?, setBy? }`, set only through `platformAction("ai.platform", …, { stepUp: true })`; `redactSetting` shows "set / not set"; env `ANTHROPIC_API_KEY` is the fallback when empty (AI R6) | ai / R1 |
@@ -3117,7 +3125,7 @@ and env-alias warnings); (2) migrations; (3) media storage check (§G.2); (4) ex
 `convertLegacyStore()` (`tenancy_v1`, §D.8), seed `protected_brands`, seed the **legal templates from code** (PLA Q.13:
 `LEGAL_SEED_VERSION: number` and `LEGAL_SEED: { kind; locale; title; body; summary }[]` in
 `src/lib/platform/data/legal/index.ts`; each inserted as version 1 draft with `INSERT IGNORE` on `ld_kind_loc_ver_uq`,
-`needs_legal_review = 1`; marker `legal_seed_v<LEGAL_SEED_VERSION>`; R1.0 ships `LEGAL_SEED_VERSION = 0` and `[]`, P1
+`needs_legal_review = 1`; marker: the platform key `legal_seed` holding the last seeded version, written last (CCR r1.0-t1-3: one key, since the registry cannot declare a key per version); R1.0 ships `LEGAL_SEED_VERSION = 0` and `[]`, P1
 owns the file from R1), seed the **release/ops flags** from `src/lib/flags/registry.ts` (§D.4, marker-free `INSERT
 IGNORE` + `archived` marking), `syncPromptVersions()` from `src/lib/ai/platform/prompt-versions.ts` (AI R8: idempotent
 upsert of the prompt registry into `prompt_versions`, marker-free, so the console and the eval gate always find their

@@ -178,6 +178,13 @@ PHP/WhatsApp exports. The owner still has to do these on myrizq.shop:
   Visitor IP check.
 - Connect Google Sheets (`docs/GOOGLE-SHEETS-SETUP.md`). Optional: admin on `studio.myrizq.shop` + `ADMIN_HOST`.
 
+**R1.0 integration hazard (CCR r1.0-t1-3 item 7, from the T1 merge on 2026-10-24):** main now contains 0004 and the
+store #1 conversion. The first boot of this tree on a database with data migrates it and deletes the moved legacy
+`settings` keys (`store`, `defaults`, `sheets`, `pixel_library`, `pixel_health`, `tracking_secrets`, `turnstile`, `ai`,
+`home`, `pixels`); single-tenant `getSetting(<moved key>)` readers then get defaults until T3 / T4 are merged. Until
+then: do not start the 3450 dev server on a database with real data (use a copy), and do not deploy main to Hostinger.
+The tenancy dry run (`scripts/qa/upgrade-dry-run.ts`) reports leftover legacy keys once the marker exists.
+
 Suggested next engineering items:
 - Show "Sent to Meta ✓ / skipped (risk N)" per order in the admin order drawer.
 - Don't write a kept default no-cost extra ("Sans emballage") into the Sheets Variante or thank-you text.

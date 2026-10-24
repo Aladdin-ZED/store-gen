@@ -23,4 +23,11 @@ export const messages: Partial<BaseMessages> = {
   "error.server": "Un problème est survenu de notre côté. Veuillez réessayer.",
   "error.session_ended": "Votre session a expiré. Reconnectez-vous.",
   "error.platform_2fa_required": "Activez la validation en deux étapes pour ouvrir la console.",
+  // T1 lifecycle and handle refusals (CCR r1.0-t1-2; mapped in seam.ts actionFailure by T2)
+  "error.status_changed": "Cette boutique vient d'être modifiée par quelqu'un d'autre. Vérifiez son état actuel et réessayez.",
+  "error.handle_format": "Utilisez 3 à 30 lettres minuscules, chiffres ou tirets, en commençant et en terminant par une lettre ou un chiffre.",
+  "error.handle_reserved": "Cette adresse est réservée. Choisissez-en une autre.",
+  "error.handle_protected": "Cette adresse contient une marque protégée. Utilisez votre propre marque, ou contactez le support Store Gen si cette marque vous appartient.",
+  "error.handle_unavailable": "Cette adresse n'est pas disponible. Choisissez-en une autre.",
+  "error.handle_too_soon": "Vous pouvez changer l'adresse de votre boutique une fois tous les 30 jours.",
 };

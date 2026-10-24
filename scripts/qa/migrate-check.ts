@@ -616,7 +616,9 @@ interface BootResult {
 
 function bootOk(label: string, r: BootResult, applied: number): void {
   check(`${label}: migrations ${applied ? `applied ${applied}` : "up to date"}`, r.migrate.applied === applied && r.migrate.total === 5, r.migrate);
-  check(`${label}: every boot task ran and succeeded`, r.boot.ran && r.boot.steps.length === 4 && r.boot.steps.every((s) => s.ok), r.boot.steps);
+  // §H.4 step 5 in order; "legal templates" joined with CCR r1.0-t1-3 item 1 (a no-op while LEGAL_SEED_VERSION = 0)
+  const names = ["published checksums", "store #1 conversion", "protected brands", "legal templates", "flags"];
+  check(`${label}: every boot task ran and succeeded`, r.boot.ran && r.boot.steps.map((s) => s.name).join("|") === names.join("|") && r.boot.steps.every((s) => s.ok), r.boot.steps);
   check(`${label}: tenancy gate 0 problems`, r.tenancy.mode === "tenancy" && r.tenancy.problems.length === 0, r.tenancy.problems);
   check(`${label}: offers upgrade gate passes`, r.offersOk);
 }
@@ -675,8 +677,8 @@ async function tenantSetMatchesDocument(): Promise<void> {
     const table = /`([a-z_]+)`/.exec(cells[1] ?? "")?.[1];
     if (table) docLevels[table] = /store_id varchar\(26\) NULL/.test(cells[3] ?? "") ? "P-opt" : "T";
   }
-  // the document's level where it differs from the schema, recorded in TABLE_LEVELS and CCR r1.0-t1-3
-  const DRIFT: Record<string, string> = { legal_acceptances: "P", notification_reads: "P-opt" };
+  // the document's level where it differs from the schema (empty since CCR r1.0-t1-3 item 2 fixed §D.3)
+  const DRIFT: Record<string, string> = {};
   const mismatches: string[] = [];
   for (const [table, level] of Object.entries(docLevels)) {
     const code = TABLE_LEVELS[table];
@@ -685,7 +687,7 @@ async function tenantSetMatchesDocument(): Promise<void> {
   }
   const zeroThree = new Set(["users", "sessions", "settings", "rate_limits", "media_chunks", "stats_visitors"]);
   for (const table of Object.keys(TABLE_LEVELS)) if (!docLevels[table] && !zeroThree.has(table)) mismatches.push(`${table}: in TABLE_LEVELS, not a 0004 row of §D.2 / §D.3`);
-  check(`(e) TABLE_LEVELS = the §D.2 / §D.3 rows (${Object.keys(docLevels).length} tables, drift recorded: ${Object.keys(DRIFT).join(", ")})`, !mismatches.length, mismatches);
+  check(`(e) TABLE_LEVELS = the §D.2 / §D.3 rows (${Object.keys(docLevels).length} tables, drift recorded: ${Object.keys(DRIFT).join(", ") || "none"})`, !mismatches.length, mismatches);
 }
 
 async function legacyAssertions(dbName: string, fixture: Fixture): Promise<void> {

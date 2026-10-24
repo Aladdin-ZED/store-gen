@@ -10,7 +10,7 @@
  */
 import type { z } from "zod";
 import { def, redactFields } from "./fields";
-import { DocSchemaMarker, TenancyV1Marker } from "./keys/markers";
+import { DocSchemaMarker, LegalSeedMarker, TenancyV1Marker } from "./keys/markers";
 import { PlatformSettingSchema } from "./keys/platform";
 import { PlatformDesign } from "./keys/platform-design";
 import { PlatformAi } from "./keys/platform_ai";
@@ -23,6 +23,8 @@ export const PLATFORM_SETTINGS = {
   doc_schema: def({ schema: DocSchemaMarker, secret: false, defaults: () => 0 }),
   /** the store #1 conversion marker, written last (core, §D.8) */
   tenancy_v1: def({ schema: TenancyV1Marker, secret: false, defaults: () => null }),
+  /** the last legal seed version applied at boot, written last (core, §H.4 step 5; CCR r1.0-t1-3) */
+  legal_seed: def({ schema: LegalSeedMarker, secret: false, defaults: () => 0 }),
   /** brand, signup, new-store defaults, reserved handles, analytics k, health and lifecycle tunables (platform, P1) */
   platform: def({ schema: PlatformSettingSchema, secret: false, defaults: () => ({}) }),
   /** AI classes, prices, caps, eval gate (ai, P7) */

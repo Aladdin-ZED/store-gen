@@ -121,7 +121,7 @@ interface Row {
 const keyWhere = (r: Row) => (r.storeId === null ? "metric = ? AND period = ?" : "store_id = ? AND metric = ? AND period = ?");
 const keyParams = (r: Row) => (r.storeId === null ? [r.metric, r.period] : [r.storeId, r.metric, r.period]);
 
-/** A missing `platform_usage` table (cut in 0005, needed by R1.0: CCR r1.0-t1-1) fails with a readable message. */
+/** A missing `platform_usage` table (0004 not applied yet; cut in 0004 by CCR r1.0-t1-1) fails with a readable message. */
 function rethrow(err: unknown, r: Row): never {
   if (r.table === "platform_usage" && (err as { errno?: number } | null)?.errno === 1146) {
     throw new Error("usage: the platform_usage table does not exist yet (docs/saas/ccr/r1.0-t1-1.md)");

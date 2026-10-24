@@ -279,9 +279,8 @@ export type TableLevel = "T" | "P*" | "P-opt" | "P" | "root";
 /**
  * Every table of the schema up to 0004 with its §D.3 level (the 0000 tables per §D.2). A new table is added here in
  * the release that cuts it; test:migrate compares this list with the §D.3 rows of the document.
- * Recorded drift (docs/saas/ccr/r1.0-t1-3.md): §D.3 lists `legal_acceptances` as P, but PLA-§2.1 gave it an optional
- * store_id (the store whose policy was accepted), so it is P (opt. store) here; §D.3 groups `notification_reads` with
- * `notifications` as P (opt. store), but the read rows carry no store_id (they hang off the notification), so P here.
+ * No recorded drift: CCR r1.0-t1-3 item 2 split the §D.3 rows of `legal_acceptances` (P (opt. store), PLA-§2.1) and
+ * `notification_reads` (P, no store_id) to match the schema; CCR r1.0-t1-1 moved `platform_usage` (P) to 0004.
  */
 export const TABLE_LEVELS: Readonly<Record<string, TableLevel>> = {
   // 0000-0003 (§D.2)
@@ -310,6 +309,7 @@ export const TABLE_LEVELS: Readonly<Record<string, TableLevel>> = {
   plans: "P",
   store_entitlements: "P*",
   store_usage: "T",
+  platform_usage: "P", // CCR r1.0-t1-1: cut in 0004, not 0005
   store_subscriptions: "P*",
   platform_invites: "P",
   waitlist: "P",

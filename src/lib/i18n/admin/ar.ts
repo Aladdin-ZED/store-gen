@@ -23,4 +23,11 @@ export const messages: Partial<BaseMessages> = {
   "error.server": "حدث خطأ من جهتنا. يرجى المحاولة مرة أخرى.",
   "error.session_ended": "انتهت جلستك. سجّل الدخول من جديد.",
   "error.platform_2fa_required": "فعّل التحقق بخطوتين لفتح لوحة الإدارة.",
+  // T1 lifecycle and handle refusals (CCR r1.0-t1-2; mapped in seam.ts actionFailure by T2)
+  "error.status_changed": "غيّر شخص آخر حالة هذا المتجر قبل لحظات. تحقّق من حالته الحالية ثم أعد المحاولة.",
+  "error.handle_format": "استعمل من 3 إلى 30 حرفًا لاتينيًا صغيرًا أو رقمًا أو شرطة، يبدأ وينتهي بحرف أو رقم.",
+  "error.handle_reserved": "هذا العنوان محجوز. اختر عنوانًا آخر.",
+  "error.handle_protected": "يحتوي هذا العنوان على علامة تجارية محمية. استعمل علامتك الخاصة، أو تواصل مع دعم Store Gen إذا كانت العلامة ملكك.",
+  "error.handle_unavailable": "هذا العنوان غير متاح. اختر عنوانًا آخر.",
+  "error.handle_too_soon": "يمكنك تغيير عنوان متجرك مرة واحدة كل 30 يومًا.",
 };

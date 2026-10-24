@@ -794,6 +794,19 @@ export const storeUsage = mysqlTable(
   (t) => [primaryKey({ columns: [t.storeId, t.metric, t.period] }), storeFk("store_usage", t.storeId)],
 );
 
+/** Platform counters (§D.7; D69): "YYYY-MM", "YYYY-MM-DD", the hour "YYYY-MM-DDTHH" or "total". */
+export const platformUsage = mysqlTable(
+  "platform_usage",
+  {
+    metric: varchar("metric", { length: 32 }).notNull(),
+    /** rev 3 (D69; CCR r1.0-t1-1): created wide for the hourly mail counter, never MODIFYed (like store_usage, ENGC-17) */
+    period: varchar("period", { length: 13 }).notNull(),
+    value: bigint("value", { mode: "number" }).notNull().default(0),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.metric, t.period] })],
+);
+
 /** Manual subscriptions (billing-ready, §A.4). */
 export const storeSubscriptions = mysqlTable(
   "store_subscriptions",

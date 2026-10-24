@@ -23,4 +23,11 @@ export const messages = {
   "error.server": "Something went wrong on our side. Please try again.",
   "error.session_ended": "Your session has ended. Sign in again.",
   "error.platform_2fa_required": "Turn on two-step verification to open the console.",
+  // T1 lifecycle and handle refusals (CCR r1.0-t1-2; mapped in seam.ts actionFailure by T2)
+  "error.status_changed": "This store was changed by someone else a moment ago. Check the latest state and try again.",
+  "error.handle_format": "Use 3 to 30 lowercase letters, digits or hyphens, starting and ending with a letter or digit.",
+  "error.handle_reserved": "This address is reserved. Choose another one.",
+  "error.handle_protected": "This address contains a protected brand name. Use your own brand, or contact Store Gen support if you own that brand.",
+  "error.handle_unavailable": "This address is not available. Choose another one.",
+  "error.handle_too_soon": "You can change your store address once every 30 days.",
 } as const satisfies Record<string, string>;

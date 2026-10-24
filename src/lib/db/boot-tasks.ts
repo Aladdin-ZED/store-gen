@@ -18,19 +18,22 @@ import "server-only";
  *    staff disabled stays disabled, nothing is deleted), marker-free.
  *  - seedFlags(): the release / ops / experiment flags declared in src/lib/flags/registry.ts, INSERT IGNORE (console
  *    edits are never overwritten), undeclared ones marked `archived`, never deleted; the kill switches are 0004's.
- *  - not yet: the legal templates (P1's src/lib/platform/data/legal, CCR r1.0-t1-3) and syncPromptVersions (P7,
- *    R1 product) join this list with their files.
+ *  - seedLegalTemplates(): the legal templates of src/lib/platform/data/legal (P1's from R1 product), marker
+ *    `legal_seed` = LEGAL_SEED_VERSION (CCR r1.0-t1-3); each entry inserted as version 1 draft, needs_legal_review,
+ *    INSERT IGNORE on ld_kind_loc_ver_uq, the marker last. R1.0 ships version 0 and no entry, so it is a no-op.
+ *  - not yet: syncPromptVersions (P7, R1 product) joins this list with its file.
  * Step 6 never writes: bootUpgradeCheck() (Offers v2 dry run) and bootTenancyCheck() (./upgrade-check.ts).
  */
 import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, isNotNull, ne, notInArray } from "drizzle-orm";
 import mysql from "mysql2/promise";
 import { db } from "@/lib/db/client";
-import { flags, pages, pageVersions, protectedBrands, stores } from "@/lib/db/schema";
+import { flags, legalDocuments, pages, pageVersions, protectedBrands, stores } from "@/lib/db/schema";
 import { FLAG_DEFS } from "@/lib/flags/registry";
 import { systemCtx, systemScope } from "@/lib/jobs/scope";
 import { errorSummary } from "@/lib/orders/log";
 import { validateDoc } from "@/lib/page/validate";
+import { LEGAL_SEED, LEGAL_SEED_VERSION } from "@/lib/platform/data/legal";
 import { PROTECTED_BRANDS } from "@/lib/platform/data/protected-brands";
 import { getPlatformSetting, setPlatformSetting, type PlatformActor } from "@/lib/settings";
 import { byId, whereStore } from "@/lib/tenancy/sql";
@@ -87,6 +90,29 @@ export async function seedProtectedBrands(): Promise<number> {
   const { loadHandleLists } = await import("./store-handles");
   await loadHandleLists({ fresh: true });
   return res.affectedRows;
+}
+
+/**
+ * The legal templates from code (§H.4 step 5, PLA Q.13; CCR r1.0-t1-3): when LEGAL_SEED_VERSION is above the
+ * `legal_seed` marker, every entry goes in as version 1 draft with needs_legal_review, INSERT IGNORE on
+ * ld_kind_loc_ver_uq (an existing row is never overwritten), then the marker is written last.
+ */
+export async function seedLegalTemplates(): Promise<{ skipped: boolean; inserted: number; version: number }> {
+  if ((await getPlatformSetting("legal_seed", { fresh: true })) >= LEGAL_SEED_VERSION) return { skipped: true, inserted: 0, version: LEGAL_SEED_VERSION };
+  let inserted = 0;
+  if (LEGAL_SEED.length) {
+    // tenancy: platform legal_documents is a P table (§D.3)
+    const [res] = await db
+      .insert(legalDocuments)
+      .ignore()
+      .values(
+        LEGAL_SEED.map((d) => ({ id: newId(), kind: d.kind, locale: d.locale, version: 1, title: d.title, body: d.body, summary: d.summary, status: "draft" as const, needsLegalReview: true })),
+      );
+    inserted = res.affectedRows;
+  }
+  // the marker is written last: an interrupted run starts over on the next boot
+  await setPlatformSetting("legal_seed", LEGAL_SEED_VERSION, SYSTEM);
+  return { skipped: false, inserted, version: LEGAL_SEED_VERSION };
 }
 
 /** The declared release / ops / experiment flags (§D.4, PLA-§12.2): inserted once, undeclared ones archived. */
@@ -162,6 +188,10 @@ export async function runBootTasks(opts: { lockTimeoutSec?: number } = {}): Prom
       await step("protected brands", async () => {
         const n = await seedProtectedBrands();
         return n ? `protected brands: ${n} term(s) added.` : null;
+      });
+      await step("legal templates", async () => {
+        const r = await seedLegalTemplates();
+        return r.skipped ? null : `legal templates: seed v${r.version}, ${r.inserted} draft(s) added.`;
       });
       await step("flags", async () => {
         const r = await seedFlags();

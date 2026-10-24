@@ -137,6 +137,13 @@ CREATE TABLE IF NOT EXISTS `store_usage` (
 	CONSTRAINT `store_usage_store_id_metric_period_pk` PRIMARY KEY(`store_id`,`metric`,`period`),
 	CONSTRAINT `fk_store_usage_store` FOREIGN KEY (`store_id`) REFERENCES `stores`(`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `platform_usage` (
+	`metric` varchar(32) NOT NULL,
+	`period` varchar(13) NOT NULL,
+	`value` bigint NOT NULL DEFAULT 0,
+	`updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+	CONSTRAINT `platform_usage_metric_period_pk` PRIMARY KEY(`metric`,`period`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `store_subscriptions` (
 	`id` varchar(26) NOT NULL,
 	`store_id` varchar(26) NOT NULL,
