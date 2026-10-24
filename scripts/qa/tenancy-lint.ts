@@ -7,6 +7,7 @@
  *   npx tsx scripts/qa/tenancy-lint.ts --summary         (counts only: per rule, per kind, the top files)
  *   npx tsx scripts/qa/tenancy-lint.ts --rule L2,L2b     (only these rules)
  *   npx tsx scripts/qa/tenancy-lint.ts --json            (one JSON document on stdout)
+ *   npx tsx scripts/qa/tenancy-lint.ts --timing          (also print the time of each phase on stderr)
  *
  * Each violation prints as `file:line rule message`, then the counts per rule, the `// tenancy: platform` and
  * `// tenancy: public-key` annotations per directory, and the pins of scripts/qa/tenancy-allow.json (rule PIN: a
@@ -1587,18 +1588,22 @@ function main(): number {
   const ruleArg = args.find((a, i) => args[i - 1] === "--rule");
   const only = ruleArg ? new Set(ruleArg.split(",").map((r) => r.trim())) : null;
   const t0 = Date.now();
+  const phases: [string, number][] = [];
+  const mark = (name: string) => phases.push([name, Date.now()]);
 
   const allow = AllowFile.parse(JSON.parse(readFileSync(ALLOW_FILE, "utf8")));
   const cfg = REAL_CONFIG(allow);
   const tenant = tenantTablesFromSchema();
   const virtual = new Map(Object.entries(FIXTURES).map(([f, t]) => [`${ROOT}/${f}`, t]));
   const { program, host } = buildProgram(virtual);
+  mark("program");
   const isFixture = (sf: ts.SourceFile) => rel(sf.fileName).includes(FX);
   const files = program.getSourceFiles().filter((sf) => !sf.isDeclarationFile && rel(sf.fileName).startsWith("src/"));
 
   // 1. self-check on the fixtures
   const self = new Lint(program, host, FIXTURE_CONFIG(cfg), tenant);
   self.run(files.filter(isFixture));
+  mark("self-check");
   const got = new Map<string, string[]>();
   for (const v of self.violations) got.set(`${v.file}:${v.line}`, [...(got.get(`${v.file}:${v.line}`) ?? []), v.rule].sort());
   const want = expectedFromMarkers();
@@ -1617,6 +1622,14 @@ function main(): number {
   // 2. the real tree
   const lint = new Lint(program, host, cfg, tenant);
   lint.run(files.filter((sf) => !isFixture(sf)));
+  mark("tree");
+  if (args.includes("--timing")) {
+    let prev = t0;
+    for (const [name, at] of phases) {
+      console.error(`  ${name.padEnd(11)}${((at - prev) / 1000).toFixed(1)} s`);
+      prev = at;
+    }
+  }
   const violations = lint.violations
     .filter((v) => !only || only.has(v.rule))
     .sort((a, b) => (a.file === b.file ? a.line - b.line || a.rule.localeCompare(b.rule) : a.file < b.file ? -1 : 1));
