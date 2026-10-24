@@ -3,21 +3,24 @@
  * Writing never throws: an audit failure must not break the action being audited, so it is
  * reported to the server log instead. IPs are stored as keyed hashes, never raw.
  *
- * Multi-tenant (docs/STORE-SAAS.md §F.5): a row carries the store it concerns (NULL = a platform or auth event) and
- * the actor kind; `auditFrom(ctx, …)` derives both from a seam context. Tenants read only their store's rows
- * (`listStoreAudit`), staff every row (`listPlatformAudit`). C0a writes the scope columns; T1 owns the file and
- * implements the two list functions (§K.1).
+ * Multi-tenant (docs/STORE-SAAS.md §F.5, SE-04): a row carries the store it concerns (NULL = a platform or auth
+ * event), the actor kind and, for "View as store", the staff member behind it; `auditFrom(ctx, …)` derives all three
+ * from a seam context. Tenants read only their store's rows (`listStoreAudit`), platform actions on their store
+ * included but never with the staff IP hash; staff read every row (`listPlatformAudit`). Meta is redacted and kept
+ * under 4 KB. Retention (400 days, then rolled up) is a job (OS-11).
  */
 import "server-only";
-import { and, desc, eq, lt, type SQL } from "drizzle-orm";
+import { and, desc, eq, like, lt, or, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 import { db } from "@/lib/db/client";
-import { auditLog } from "@/lib/db/schema";
+import { auditLog, users } from "@/lib/db/schema";
 import { errorSummary } from "@/lib/orders/log";
 import { hashIp } from "@/lib/security/crypto";
+import { whereStore } from "@/lib/tenancy/sql";
 import type { Actor, PlatformCtx, StoreCtx, SystemCtx } from "@/lib/tenancy/types";
 
-/** Known actions (dot-namespaced). Other areas may log their own namespaced actions too. */
-export type AuditAction =
+/** Today's auth and settings events (platform rows: `store_id` NULL, §F.5). */
+type AuthAction =
   | "auth.login.success"
   | "auth.login.mfa_pending"
   | "auth.login.failure"
@@ -41,8 +44,95 @@ export type AuditAction =
   | "auth.user.disabled"
   | "auth.user.enabled"
   | "auth.sessions.revoked"
-  | "settings.updated"
-  | (string & {});
+  | "auth.legal.accepted"
+  | "auth.step_up" // meta { method: "totp" | "password" } (SEC-17)
+  | "auth.account.deleted" // self-service, no meta (SEC-20)
+  | "settings.updated"; // the single-tenant settings API until R1.0 removes it
+
+/** Store events (`store_id` set). */
+type StoreAction =
+  | "store.created"
+  | "store.mode_changed"
+  | "store.handle_renamed"
+  | "store.closed"
+  | "store.reopened"
+  | "store.deletion_scheduled"
+  | "store.purged"
+  | "store.export_requested"
+  | "store.export_downloaded"
+  | `store.member.${"invited" | "accepted" | "revoked" | "role_changed" | "suspended" | "removed"}`
+  | "store.settings.updated"
+  | "store.2fa_required_changed"
+  | "store.milestone.reached"
+  | `store.review.${string}` // submitted, answered (platform); the storefront review events (R2)
+  | "store.appeal.submitted"
+  | `store.request.${"created" | "withdrawn"}`
+  | `store.preview_link.${"created" | "revoked"}`
+  | `store.onboarding.${"completed" | "skipped"}`
+  | "store.health.snoozed"
+  | "store.delivery.updated"
+  | "store.policies.updated"
+  | "store.landing_settings.updated"
+  | "store.inventory.adjusted"
+  | `store.catalog.${string}`
+  | `store.storefront.${string}`
+  | `store.coupon.${string}`
+  | `store.ai.${"settings_updated" | "voice_updated" | "memory_added" | "memory_deleted" | "proposal_executed"}`
+  | "store.brand.updated"
+  | "store.theme.activated"
+  | "store.brand_term.refused"; // meta { field }, never the matched term (D76)
+
+/** Operations, landing and design events of a store (`store_id` set). */
+type StoreAreaAction =
+  | `orders.${"status_forced" | "exported" | "test_deleted" | "carrier_exported" | "refunded"}`
+  | `integrations.${"sheets.connected" | "sheets.disconnected" | "telegram.changed" | "conversions.changed" | "outbox.replayed"}`
+  | `callcenter.${"settings.updated" | "calls_opened" | "label_mapped"}`
+  | `finance.${"costs.updated" | "ad_spend.updated" | "settings.updated" | "period_closed" | "period_reopened"}`
+  | "commissions.rule_changed"
+  | `payouts.${"approved" | "paid"}`
+  | "webhooks.endpoint_changed"
+  | "carriers.account_changed"
+  | `api_keys.${"created" | "revoked"}`
+  | `blocklist.${"added" | "removed"}`
+  | `page.${"proof_attested" | "fact_attested" | "countdown_extended" | "test_link_created" | "slug_moved" | "attached" | "detached" | "copied_out" | "copied_in" | "scheduled_publish"}`
+  | `page.publish.${"design_override" | "budget_override"}`
+  | `lead.${"phone_revealed" | "converted"}`
+  | `campaign.${"created" | "shared" | "share_revoked"}`
+  | `link.${"created" | "paused"}`
+  | `experiment.${"started" | "stopped" | "applied"}`;
+
+/** Platform (staff) events; a row about one store also carries its `store_id`. */
+type PlatformAction =
+  | `platform.signup.${"approved" | "rejected" | "info_requested" | "reopened" | "snoozed" | "bulk_approved"}`
+  | `platform.store.${"restricted" | "suspended" | "restored" | "closed" | "deletion_cancelled" | "purge_requested" | "purge_confirmed" | "messaged"}`
+  | `platform.impersonation.${"started" | "ended" | "write_refused"}`
+  | "platform.pii.revealed"
+  | `platform.user.${"banned" | "unbanned" | "2fa_reset" | "reset_link" | "signed_out" | "deleted"}`
+  | `platform.plan.${"changed" | "updated" | "created"}`
+  | "platform.entitlement.set"
+  | "platform.flag.changed"
+  | "platform.kill.changed"
+  | `platform.staff.${"changed" | "invited" | "signed_out_all"}`
+  | "platform.backup.downloaded"
+  | `platform.request.${"resolved" | "cancelled"}`
+  | "platform.stores.exported"
+  | `platform.note.${"added" | "edited" | "deleted" | "pinned"}`
+  | "platform.outbox.replayed"
+  | `platform.domains.${"rerender" | "step"}`
+  | "platform.order.lookup"
+  | `platform.invite.${"created" | "revoked"}`
+  | `platform.waitlist.${"invited" | "dropped"}`
+  | `platform.brand_term.${"saved" | "deleted"}`
+  | `platform.legal.${"saved" | "reviewed" | "published" | "retired"}`
+  | "platform.settings.updated"
+  | "platform.audit.exported"
+  | "platform.breakglass.reviewed"
+  | "platform.design.changed"
+  | "platform.abuse.reported" // meta { storeId, reason }, no reporter data
+  | `platform.ai.${"settings_changed" | "key_set" | "key_removed" | "model_changed" | "model_emergency_switch" | "prompt_activated" | "prompt_rolled_back" | "cap_changed" | "eval_started" | "batch_canceled" | "transport_changed" | "director_default_changed"}`;
+
+/** Known actions (dot-namespaced, §F.5). Other areas may log their own namespaced actions too. */
+export type AuditAction = AuthAction | StoreAction | StoreAreaAction | PlatformAction | (string & {});
 
 export interface AuditDetails {
   userId?: string | null;
@@ -59,12 +149,20 @@ export interface AuditEntry {
   action: string;
   target: string | null;
   meta: Record<string, unknown> | null;
+  /** null in a tenant's listing for platform and impersonation rows (never the staff IP hash, §F.5) */
   ipHash: string | null;
   createdAt: Date;
+  storeId: string | null;
+  actorKind: Actor["kind"];
+  impersonatorId: string | null;
+  /** display name of `userId` (a staff member's name on platform rows), null when unknown or deleted */
+  actorName: string | null;
+  impersonatorName: string | null;
 }
 
 const SENSITIVE_KEY = /pass|secret|token|otp|cookie|authorization|recovery|^code$|private.?key|api.?key/i;
-const MAX_META_CHARS = 4000;
+/** §F.5: meta ≤ 4 KB, counted in UTF-8 bytes (Arabic text is 2 bytes a character) */
+const MAX_META_BYTES = 4096;
 
 function sanitize(value: unknown, depth = 0): unknown {
   if (value === null || typeof value === "number" || typeof value === "boolean") return value;
@@ -85,8 +183,8 @@ function sanitize(value: unknown, depth = 0): unknown {
 function sanitizeMeta(meta: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
   if (!meta) return null;
   const clean = sanitize(meta) as Record<string, unknown>;
-  const json = JSON.stringify(clean);
-  return json.length <= MAX_META_CHARS ? clean : { truncated: true, size: json.length };
+  const size = Buffer.byteLength(JSON.stringify(clean), "utf8");
+  return size <= MAX_META_BYTES ? clean : { truncated: true, size };
 }
 
 /** Who and which store a row is about (§F.5). Without it: a platform-level row of a user actor (today's rows). */
@@ -123,32 +221,6 @@ export async function audit(action: AuditAction, details: AuditDetails & { scope
   }
 }
 
-/** Newest-first page of audit entries (keyset pagination via `beforeId`). */
-export async function listAuditEntries(
-  opts: { limit?: number; beforeId?: number; userId?: string; action?: string } = {},
-): Promise<AuditEntry[]> {
-  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
-  const filters: SQL[] = [];
-  if (opts.beforeId !== undefined) filters.push(lt(auditLog.id, opts.beforeId));
-  if (opts.userId) filters.push(eq(auditLog.userId, opts.userId));
-  if (opts.action) filters.push(eq(auditLog.action, opts.action));
-  const rows = await db
-    .select()
-    .from(auditLog)
-    .where(filters.length ? and(...filters) : undefined)
-    .orderBy(desc(auditLog.id))
-    .limit(limit);
-  return rows.map((r) => ({
-    id: r.id,
-    userId: r.userId,
-    action: r.action,
-    target: r.target,
-    meta: r.meta ?? null,
-    ipHash: r.ip,
-    createdAt: r.createdAt,
-  }));
-}
-
 /**
  * One audit row from a seam context: a store ctx writes its store and actor (an impersonation row names both
  * identities, §B.8), a platform ctx its staff member (pass `storeId` for an action on one store), a system ctx the
@@ -170,16 +242,97 @@ export async function auditFrom(ctx: StoreCtx | PlatformCtx | SystemCtx, action:
   }
 }
 
-/** A store's own rows (store_id = ctx.store.id), newest first, keyset by `beforeId`; `area` = the action prefix. T1. */
-export async function listStoreAudit(ctx: StoreCtx, opts: { beforeId?: number; limit?: number; area?: string }): Promise<AuditEntry[]> {
-  void ctx;
-  void opts;
-  throw new Error("not implemented: T1 (listStoreAudit)");
+/* ------------------------------------------------------------------ */
+/* reading                                                             */
+/* ------------------------------------------------------------------ */
+
+const actorUser = alias(users, "audit_actor");
+const impersonatorUser = alias(users, "audit_impersonator");
+const ACTOR_KINDS: readonly Actor["kind"][] = ["user", "platform", "impersonation", "system", "api"];
+/** an action prefix: dot-separated lowercase words, e.g. "orders" or "store.member" */
+const AREA_RE = /^[a-z0-9_]{1,40}(?:\.[a-z0-9_]{1,40}){0,3}$/;
+
+const pageSize = (limit: number | undefined) => Math.min(Math.max(Math.trunc(limit ?? 50), 1), 200);
+
+/** `action = area` or `action LIKE 'area.%'`, the LIKE wildcards in `area` escaped. */
+function inArea(area: string): SQL {
+  return or(eq(auditLog.action, area), like(auditLog.action, `${area.replace(/[\\%_]/g, "\\$&")}.%`))!;
 }
 
-/** Every row (staff, `audit.platform`), optionally one store's or one actor kind's. T1. */
-export async function listPlatformAudit(ctx: PlatformCtx, opts: { storeId?: string; actorKind?: string; beforeId?: number }): Promise<AuditEntry[]> {
-  void ctx;
-  void opts;
-  throw new Error("not implemented: T1 (listPlatformAudit)");
+async function selectEntries(where: SQL | undefined, limit: number, tenantView: boolean): Promise<AuditEntry[]> {
+  const rows = await db
+    .select({ row: auditLog, actorName: actorUser.name, impersonatorName: impersonatorUser.name })
+    .from(auditLog)
+    .leftJoin(actorUser, eq(actorUser.id, auditLog.userId))
+    .leftJoin(impersonatorUser, eq(impersonatorUser.id, auditLog.impersonatorId))
+    .where(where)
+    .orderBy(desc(auditLog.id))
+    .limit(limit);
+  return rows.map(({ row: r, actorName, impersonatorName }) => ({
+    id: r.id,
+    userId: r.userId,
+    action: r.action,
+    target: r.target,
+    meta: r.meta ?? null,
+    // a tenant never sees the network hash of the staff behind a platform or impersonation row (§F.5)
+    ipHash: tenantView && (r.actorKind === "platform" || r.actorKind === "impersonation") ? null : r.ip,
+    createdAt: r.createdAt,
+    storeId: r.storeId,
+    actorKind: r.actorKind,
+    impersonatorId: r.impersonatorId,
+    actorName: actorName ?? null,
+    impersonatorName: impersonatorName ?? null,
+  }));
+}
+
+/**
+ * Newest-first page of every audit entry (keyset pagination via `beforeId`): the single-tenant security page.
+ * @deprecated platform-wide; tenant screens use listStoreAudit, the console listPlatformAudit.
+ */
+export async function listAuditEntries(opts: { limit?: number; beforeId?: number; userId?: string; action?: string } = {}): Promise<AuditEntry[]> {
+  const filters: SQL[] = [];
+  if (opts.beforeId !== undefined) filters.push(lt(auditLog.id, opts.beforeId));
+  if (opts.userId) filters.push(eq(auditLog.userId, opts.userId));
+  if (opts.action) filters.push(eq(auditLog.action, opts.action));
+  return selectEntries(filters.length ? and(...filters) : undefined, pageSize(opts.limit), false);
+}
+
+/**
+ * A store's own rows (store_id = the ctx's store), newest first, keyset by `beforeId`; `area` = an action prefix
+ * ("orders", "store.member"). Platform and impersonation rows on the store are included, with the staff member's
+ * name and without the IP hash. Needs `audit.read`.
+ */
+export async function listStoreAudit(ctx: StoreCtx, opts: { beforeId?: number; limit?: number; area?: string } = {}): Promise<AuditEntry[]> {
+  if (!ctx.can("audit.read")) throw new Error("forbidden: audit.read");
+  if (ctx.scope.storeId !== ctx.store.id) throw new Error("tenancy: the ctx scope and store disagree");
+  if (opts.area !== undefined && !AREA_RE.test(opts.area)) return [];
+  const where = whereStore(
+    auditLog,
+    ctx.scope,
+    opts.beforeId !== undefined ? lt(auditLog.id, opts.beforeId) : undefined,
+    opts.area !== undefined ? inArea(opts.area) : undefined,
+  );
+  return selectEntries(where, pageSize(opts.limit), true);
+}
+
+/**
+ * Every row (staff with `audit.platform`), newest first, keyset by `beforeId`; optionally one store's rows, one actor
+ * kind's, or one action area's.
+ */
+export async function listPlatformAudit(
+  ctx: PlatformCtx,
+  opts: { storeId?: string; actorKind?: string; beforeId?: number; limit?: number; area?: string } = {},
+): Promise<AuditEntry[]> {
+  if (!ctx.can("audit.platform")) throw new Error("forbidden: audit.platform");
+  if (opts.area !== undefined && !AREA_RE.test(opts.area)) return [];
+  const filters: SQL[] = [];
+  if (opts.storeId !== undefined) filters.push(eq(auditLog.storeId, opts.storeId));
+  if (opts.actorKind !== undefined) {
+    const kind = ACTOR_KINDS.find((k) => k === opts.actorKind);
+    if (!kind) return [];
+    filters.push(eq(auditLog.actorKind, kind));
+  }
+  if (opts.beforeId !== undefined) filters.push(lt(auditLog.id, opts.beforeId));
+  if (opts.area !== undefined) filters.push(inArea(opts.area));
+  return selectEntries(filters.length ? and(...filters) : undefined, pageSize(opts.limit), false);
 }
