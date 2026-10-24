@@ -155,6 +155,7 @@ export const messages = {
   "error.is_staff": "This is a team account. Remove its team role first.",
   "error.member_2fa_required": "This store requires two-step verification. Turn it on to continue.",
   "error.platform_read_only": "Changes are paused for maintenance. Try again shortly.",
+  "error.closed": "This is closed for now. Try again a little later.",
   "error.impersonation_member": "You're a member of this store. Open it from your stores.",
   "error.impersonation_state": "This store can't be viewed in its current state.",
 
@@ -427,6 +428,8 @@ export const messages = {
   "team.invite.open_store": "Open the store",
   "team.invite.invalid_title": "This invitation link doesn't work",
   "team.invite.invalid": "It may have expired, been used or been revoked. Ask the person who invited you for a new one.",
+  "team.invite.closed_title": "Invitations are paused",
+  "team.invite.closed": "New members can't join stores right now. Try your link again a little later.",
   "team.invite.sign_in_first": "An account already uses this email. Sign in to accept the invitation.",
 
   /* ---- notifications this track sends (PLA-§18.2; P1 owns the kinds from P0) ---- */

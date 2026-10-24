@@ -152,6 +152,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "error.is_staff": "هذا حساب ضمن الفريق. أزل دوره أولًا.",
   "error.member_2fa_required": "يتطلب هذا المتجر التحقق بخطوتين. فعّله للمتابعة.",
   "error.platform_read_only": "التعديلات متوقفة مؤقتًا للصيانة. أعد المحاولة بعد قليل.",
+  "error.closed": "هذا مغلق حاليًا. أعد المحاولة بعد قليل.",
   "error.impersonation_member": "أنت عضو في هذا المتجر. افتحه من متاجرك.",
   "error.impersonation_state": "لا يمكن عرض هذا المتجر في حالته الحالية.",
 
@@ -424,6 +425,8 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "team.invite.open_store": "افتح المتجر",
   "team.invite.invalid_title": "رابط الدعوة هذا لا يعمل",
   "team.invite.invalid": "ربما انتهت صلاحيته أو استُخدم أو أُلغي. اطلب رابطًا جديدًا من الشخص الذي دعاك.",
+  "team.invite.closed_title": "الدعوات متوقفة مؤقتًا",
+  "team.invite.closed": "لا يمكن الانضمام إلى المتاجر حاليًا. جرّب رابطك مرة أخرى بعد قليل.",
   "team.invite.sign_in_first": "يوجد حساب يستخدم هذا البريد. سجّل الدخول لقبول الدعوة.",
 
   /* ---- الإشعارات ---- */

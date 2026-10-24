@@ -152,6 +152,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "error.is_staff": "C'est un compte de l'équipe. Retirez d'abord son rôle.",
   "error.member_2fa_required": "Cette boutique exige la validation en deux étapes. Activez-la pour continuer.",
   "error.platform_read_only": "Les modifications sont suspendues pour maintenance. Réessayez sous peu.",
+  "error.closed": "C'est fermé pour le moment. Réessayez un peu plus tard.",
   "error.impersonation_member": "Vous êtes membre de cette boutique. Ouvrez-la depuis vos boutiques.",
   "error.impersonation_state": "Cette boutique ne peut pas être consultée dans son état actuel.",
 
@@ -424,6 +425,8 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "team.invite.open_store": "Ouvrir la boutique",
   "team.invite.invalid_title": "Ce lien d'invitation ne fonctionne pas",
   "team.invite.invalid": "Il a peut-être expiré, déjà servi ou été révoqué. Demandez un nouveau lien à la personne qui vous a invité.",
+  "team.invite.closed_title": "Les invitations sont en pause",
+  "team.invite.closed": "Il n'est pas possible de rejoindre une boutique pour le moment. Réessayez votre lien un peu plus tard.",
   "team.invite.sign_in_first": "Un compte utilise déjà cet e-mail. Connectez-vous pour accepter l'invitation.",
 
   /* ---- notifications ---- */

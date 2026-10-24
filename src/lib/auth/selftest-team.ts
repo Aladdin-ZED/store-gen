@@ -291,6 +291,40 @@ async function cases(c: mysql.Connection): Promise<void> {
   ok("leave: a suspended co-owner doesn't count", (await caught(invites.leaveStore(ownerA))) === "last_owner:team.leave.last_owner");
   await invites.setMemberStatus(ownerA, { userId: coOwner, status: "active" });
 
+  /* the inviter is re-checked at acceptance: no escalation through a stale link */
+  const inviterId = await addMember(A.storeId, "admin", "inviter.a@example.ma");
+  const inviterCtx = await ctxOf(inviterId, A.handle);
+  const staleManager = await invites.createInvite(inviterCtx, { email: "stale.manager@example.ma", role: "manager" });
+  const stillAgent = await invites.createInvite(inviterCtx, { email: "still.agent@example.ma", role: "agent" });
+  const goneAgent = await invites.createInvite(inviterCtx, { email: "gone.agent@example.ma", role: "agent" });
+  await invites.changeMemberRole(ownerA, { userId: inviterId, role: "manager" }); // a manager invites agents only
+  ok(
+    "accept: an inviter demoted below the invited role → invalid, nothing written",
+    (await caught(invites.acceptInvite(tokenOf(staleManager.url), { email: "", name: "Stale", password: PASSWORD, locale: "fr" }))) === "invalid:team.invite.invalid" &&
+      !(await one("SELECT id FROM users WHERE email = 'stale.manager@example.ma'")) &&
+      (await one<{ accepted_at: Date | null }>("SELECT accepted_at FROM store_invites WHERE id = ?", [staleManager.inviteId]))?.accepted_at === null,
+  );
+  ok("accept: a role the demoted inviter still grants works", (await invites.acceptInvite(tokenOf(stillAgent.url), { email: "", name: "Still", password: PASSWORD, locale: "fr" })).role === "agent");
+  await invites.removeMember(ownerA, { userId: inviterId });
+  ok("accept: a removed inviter's link → invalid", (await caught(invites.acceptInvite(tokenOf(goneAgent.url), { email: "", name: "Gone", password: PASSWORD, locale: "fr" }))) === "invalid:team.invite.invalid");
+
+  /* step-up expiry on a real session row (§B.7: 5 minutes) */
+  const ownerSession = await createSession(A.userId, { mfaPassed: true, ip: "203.0.113.20", ua: UA });
+  const asOwner = <T>(fn: () => Promise<T>, path: string | null = null) => runAsIdentity({ sessionToken: ownerSession.token, path }, fn);
+  const stepTarget = await addMember(A.storeId, "editor", "step.target@example.ma");
+  await c.query("UPDATE sessions SET step_up_at = UTC_TIMESTAMP(3) - INTERVAL 301 SECOND WHERE id = ?", [ownerSession.id]);
+  const staleCtx = (await asOwner(() => seam.requireStoreMember({ handle: A.handle, throwOnFail: true }))) as WriteCtx;
+  ok("step-up: 5 min 1 s old → stepUpUntil in the past", !!staleCtx.stepUpUntil && staleCtx.stepUpUntil.getTime() < Date.now(), staleCtx.stepUpUntil);
+  ok("step-up: an expired one refuses a promotion to admin", (await caught(invites.changeMemberRole(staleCtx, { userId: stepTarget, role: "admin" }))) === "seam:step_up");
+  const staleAction = await asOwner(() => teamActions.changeMemberRoleAction({ userId: stepTarget, role: "admin" }), `/app/${A.handle}/team`);
+  ok("step-up: the action answers step_up and writes nothing", !staleAction.ok && staleAction.error === "step_up" && (await one<{ role: string }>("SELECT role FROM store_members WHERE store_id = ? AND user_id = ?", [A.storeId, stepTarget]))?.role === "editor", staleAction);
+  await c.query("UPDATE sessions SET step_up_at = UTC_TIMESTAMP(3) - INTERVAL 240 SECOND WHERE id = ?", [ownerSession.id]);
+  const freshAction = await asOwner(() => teamActions.changeMemberRoleAction({ userId: stepTarget, role: "admin" }), `/app/${A.handle}/team`);
+  ok("step-up: 4 min old still counts", freshAction.ok && (await one<{ role: string }>("SELECT role FROM store_members WHERE store_id = ? AND user_id = ?", [A.storeId, stepTarget]))?.role === "admin", freshAction);
+  await c.query("UPDATE sessions SET step_up_at = NULL WHERE id = ?", [ownerSession.id]);
+  const noStep = await asOwner(() => teamActions.changeMemberRoleAction({ userId: stepTarget, role: "owner" }), `/app/${A.handle}/team`);
+  ok("step-up: none at all → step_up", !noStep.ok && noStep.error === "step_up", noStep);
+
   /* ---------------------------------------------------------------- */
   /* view as store (§B.8, PLA Q.31)                                    */
   /* ---------------------------------------------------------------- */

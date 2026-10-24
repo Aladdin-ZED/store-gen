@@ -5,7 +5,7 @@ import { getCspNonce, getSignedInUser, LOGIN_PATH } from "@/lib/auth";
 import { storeHomePath } from "@/lib/auth/landing";
 import { authTranslator } from "@/lib/auth/i18n";
 import { viewerLocale } from "@/lib/auth/locale";
-import { platformTurnstileKeys } from "@/lib/auth/platform-config";
+import { killSwitchTripped, platformTurnstileKeys } from "@/lib/auth/platform-config";
 import { inviteLanding, type InvitePreview } from "@/lib/tenancy/invites";
 import { AuthHeading } from "../../_components/auth-heading";
 import { Monogram } from "../../_components/kit";
@@ -17,8 +17,9 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /**
- * §B.5: one page, six states. The bound e-mail is never shown in full and never sent to the browser; an unknown,
- * used, revoked or expired link all read the same.
+ * §B.5: one page, six states (the two form states read "paused" while `signups_enabled` is off, §H.8). The bound
+ * e-mail is never shown in full and never sent to the browser; an unknown, used, revoked or expired link all read the
+ * same.
  */
 export default async function InvitePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -90,7 +91,16 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
     );
   }
 
-  const [widget, nonce] = await Promise.all([platformTurnstileKeys(), getCspNonce()]);
+  const [widget, nonce, closed] = await Promise.all([platformTurnstileKeys(), getCspNonce(), killSwitchTripped("signups_enabled")]);
+  if (closed) {
+    // §H.8: the signups_enabled kill switch closes the accept form too
+    return (
+      <>
+        <AuthHeading title={t("team.invite.closed_title")}>{t("team.invite.closed")}</AuthHeading>
+        {heading}
+      </>
+    );
+  }
   return (
     <>
       <AuthHeading title={t("team.invite.title", { store: preview.storeName })}>

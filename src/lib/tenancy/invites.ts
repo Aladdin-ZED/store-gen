@@ -22,7 +22,7 @@ import { alias } from "drizzle-orm/mysql-core";
 import { audit, auditFrom } from "@/lib/audit";
 import { AuthRefusal, FieldsError } from "@/lib/auth/errors";
 import { ACTIVE_STORE_ROLES, ROLE_RANK, canManageMember, invitableRoles, isStoreRole, type StoreRole } from "@/lib/auth/permissions";
-import { isT1Stub } from "@/lib/auth/platform-config";
+import { isT1Stub, killSwitchTripped } from "@/lib/auth/platform-config";
 import { ACCOUNT_REFUSED, EmailInput, getUserById, insertAccount, normalizeEmail, prepareAccount } from "@/lib/auth/users";
 import { db } from "@/lib/db/client";
 import { newId, newToken } from "@/lib/db/ids";
@@ -86,6 +86,8 @@ const JOINABLE: ReadonlySet<StoreStatus> = new Set(["pending", "active", "restri
 
 /** The one answer for an unknown, used, revoked or expired link (no oracle on which). */
 export const INVITE_INVALID = "team.invite.invalid";
+/** The answer while the `signups_enabled` kill switch is off (§H.8). */
+export const INVITE_CLOSED = "team.invite.closed";
 
 export const hashInviteToken = (token: string): string => createHash("sha256").update(token, "utf8").digest("hex");
 
@@ -308,7 +310,8 @@ export async function inviteLanding(token: string, viewer: { id: string; email: 
 
 /**
  * Idempotent for an existing member (no second membership, the role unchanged); the limits are checked again inside
- * the transaction, after the member rows are locked. A new account is created with the invited e-mail (whatever the
+ * the transaction, after the member rows are locked, and so is the inviter (still active, the role still in their
+ * `invitableRoles`: a demoted or removed inviter's links stop working). A new account is created with the invited e-mail (whatever the
  * form sent: D10) in the same transaction, `users` first; an e-mail that already has an account must sign in.
  */
 export async function acceptInvite(
@@ -317,6 +320,8 @@ export async function acceptInvite(
 ): Promise<{ storeHandle: string; role: StoreRole; userId: string; joined: boolean; createdAccount: boolean }> {
   const invite = await liveInvite(token);
   if (!invite) throw new AuthRefusal("invalid", INVITE_INVALID);
+  // §H.8: `signups_enabled` off closes the invite-accept form too (the link stays usable once it is back on)
+  if (await killSwitchTripped("signups_enabled")) throw new AuthRefusal("closed", INVITE_CLOSED);
   const store = await getStoreById(invite.storeId);
   if (!store) throw new AuthRefusal("invalid", INVITE_INVALID);
   const scope: WriteScope = publicScope(store);
@@ -343,6 +348,9 @@ export async function acceptInvite(
       }
     }
     const team = await lockTeam(tx, scope);
+    // no escalation through a stale link: the inviter must still be an active member who could invite this role
+    const inviter = team.find((m) => m.userId === invite.invitedBy);
+    if (!inviter || inviter.status !== "active" || !invitableRoles(inviter.role).includes(invite.role)) throw new AuthRefusal("invalid", INVITE_INVALID);
     const now = new Date();
     const [cas] = await tx
       .update(storeInvites)
