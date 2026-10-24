@@ -26,7 +26,9 @@ import {
   type MediaFileMeta,
 } from "@/lib/media";
 import { KEY_RE } from "@/lib/media/keys";
+import { effectiveHost } from "@/lib/edge/host";
 import { spendMediaTokens } from "@/lib/media/throttle";
+import { hstsValue } from "@/lib/security/headers";
 import { clientIp } from "@/lib/security/ip";
 import { mediaServable, resolveMediaKey } from "@/lib/tenancy/public";
 
@@ -151,7 +153,7 @@ async function serve(req: NextRequest, ctx: Params, head: boolean): Promise<Resp
   return new Response(await openMediaRange(meta, start, end), { status, headers });
 }
 
-async function handle(req: NextRequest, ctx: Params, head: boolean): Promise<Response> {
+async function answer(req: NextRequest, ctx: Params, head: boolean): Promise<Response> {
   try {
     return await serve(req, ctx, head);
   } catch (err) {
@@ -160,6 +162,13 @@ async function handle(req: NextRequest, ctx: Params, head: boolean): Promise<Res
     // transient (database) failure: never let a CDN cache it
     return unavailable(503, 5);
   }
+}
+
+/** Every answer gets the HSTS of the request's host class in production (§F.6; /media/* never passes the proxy). */
+async function handle(req: NextRequest, ctx: Params, head: boolean): Promise<Response> {
+  const res = await answer(req, ctx, head);
+  if (process.env.NODE_ENV === "production") res.headers.set("Strict-Transport-Security", hstsValue(effectiveHost(req.headers).cls));
+  return res;
 }
 
 export function GET(req: NextRequest, ctx: Params): Promise<Response> {

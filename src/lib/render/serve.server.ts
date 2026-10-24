@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 import { IS_PROD, isInternalHost, normalizeHost, publicSiteOrigin } from "@/lib/auth/config";
 import { requestHost } from "@/lib/auth/gate";
 import { gonePageResponse, unavailablePageResponse, unknownPageResponse } from "@/lib/auth/unknown-page";
-import { effectiveHost, type HostClass } from "@/lib/edge/host";
+import { effectiveHost } from "@/lib/edge/host";
 import { platformUrl } from "@/lib/edge/env";
 import { baseSecurityHeaders } from "@/lib/security/headers";
 import { storeHosts, type StoreAddress } from "@/lib/urls";
@@ -246,13 +246,15 @@ export async function documentResponse(req: Request, docu: ServeDocument, opts: 
  * public one) or an absolute canonical URL built by `storeUrl()` from the configuration, never from the request.
  */
 export function permanentRedirect(req: Request, location: string): Response {
-  const headers = new Headers(baseSecurityHeaders({ frame: "deny", cls: classOf(req) }));
+  const eff = effectiveHost(req.headers);
+  const headers = new Headers(baseSecurityHeaders({ frame: "deny", cls: eff.cls }));
   headers.set("Location", location);
   headers.set("Cache-Control", "public, max-age=300");
+  // ENGC-2, as for documents: a store host's 308 (renamed handle, upper-case slug) cached under the apex URL
+  // would send every other store's visitors of that path to this store
+  if (eff.via === "edge") headers.set("CDN-Cache-Control", "no-store");
   return new Response(null, { status: 308, headers });
 }
-
-const classOf = (req: Request): HostClass => effectiveHost(req.headers).cls;
 
 /** The neutral public 404, byte for byte the proxy's answer for un-gated admin URLs (with the host class's HSTS). */
 export function notFoundResponse(req: Request): Response {
