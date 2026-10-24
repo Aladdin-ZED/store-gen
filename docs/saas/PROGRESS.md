@@ -40,6 +40,11 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **Phase 3 R1.0 / TRACKS RELAUNCHED** 2026-10-24 ~12:58 as task `wji9seiv8` (same run `wf_ddc6f9d4-22c`, same script): the
+  first launch died at ~12:50 on a network outage (ENOTFOUND; all 3 immediate retries of every first step failed). Script now
+  has 6 retries per step and a FIRST ACTION note so each agent continues from the partial uncommitted work in its worktree.
+  If the whole run dies again on ENOTFOUND: wait for the network (curl https://api.anthropic.com/ answers 404), then resume the
+  same run id the same way.
 - **Phase 3 R1.0 / TRACKS** — started 2026-10-24 ~12:30. Task `wkeu546qq`, run `wf_ddc6f9d4-22c`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\r1-0-tracks-wf_ddc6f9d4-22c.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_ddc6f9d4-22c"})` (finished steps replay; a chain resumes at its
