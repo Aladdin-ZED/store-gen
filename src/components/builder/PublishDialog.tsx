@@ -3,6 +3,10 @@
  * Publish with a pre-flight checklist: blocking errors (fix first), warnings (honesty & quality),
  * an explicit confirmation when example reviews/numbers remain, then a calm success state.
  *
+ * The checklist runs in the store's context (LAN Q15: the server preload's store facts + the clock, the pixels and
+ * the store's links). The server is the gate (§M.1): a refusal (`budget_blocked`, `honesty_blocked`,
+ * `design_blocked`) lists every `GateItem` here, refusals first, then the notes, each with its fix; never a toast.
+ *
  * Pixels (docs/OFFERS.md §A.4): PX's "Pixels that will fire" block sits under the checklist with
  * the draft's and the live version's tracking; when it reports that the page sends no ad events
  * (`onNeedsConfirm(true)`), the publish button reads "Publish without pixels" — that click is the
@@ -17,7 +21,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { publish } from "@/lib/editor/actions";
+import { checkContextOf } from "@/lib/editor/check-context";
 import { buildChecklist, type CheckFix, type CheckItem, type Checklist } from "@/lib/editor/checklist";
+import type { LeftTab } from "@/lib/editor/store";
+import { messageOf } from "@/lib/i18n/admin";
+import { useT } from "@/lib/i18n/admin/client";
+import type { GateItem } from "@/lib/tenancy/types";
 import { cn } from "@/lib/utils";
 import { useEditor, useEditorStore } from "./context";
 import { useEnv } from "./env";
@@ -33,11 +42,13 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const store = useEditorStore();
   const doc = useEditor((s) => s.doc);
   const page = useEditor((s) => s.page);
-  const { storeHealth, user } = useEnv();
+  const { storeHealth, check, user } = useEnv();
   const { flush, call } = usePersistence();
   const [phase, setPhase] = useState<Phase>("check");
   const [confirmReal, setConfirmReal] = useState(false);
   const [serverIssues, setServerIssues] = useState<{ path: string; message: string; sectionId?: string }[]>([]);
+  /** the publish gates' items of the last refusal (§M.1) */
+  const [gateItems, setGateItems] = useState<GateItem[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   /** PX block: publishing now means publishing without any ad pixel */
@@ -47,13 +58,24 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   // checked only while the dialog is open (validating every section on each keystroke is wasted
   // work); the last result stays on screen while the dialog fades out
   const isPublished = page.status === "published";
-  const live = useMemo<Checklist | null>(() => (open ? buildChecklist(doc, storeHealth, undefined, { library: null, health: {}, live: isPublished }) : null), [open, doc, storeHealth, isPublished]);
+  const storeView = useStore();
+  const live = useMemo<Checklist | null>(
+    () =>
+      open
+        ? buildChecklist(
+            doc,
+            checkContextOf(check, { store: storeHealth, pixels: { library: null, health: {}, live: isPublished }, appHref: (path) => storeView.href(path) }),
+          )
+        : null,
+    [open, doc, check, storeHealth, isPublished, storeView],
+  );
   const [kept, setKept] = useState<Checklist>(NOTHING);
   if (live && live !== kept) setKept(live);
   const list = live ?? kept;
   const needsConfirm = list.sampleSectionIds.length > 0;
   const blocked = list.errors.length > 0 || (needsConfirm && !confirmReal) || !user.canPublish;
-  const storeView = useStore();
+  const gateHard = gateItems.filter((i) => i.level === "hard");
+  const gateSoft = gateItems.filter((i) => i.level === "soft");
   // the page's public address in its store (storeUrl: "/s/<h>/<slug>" on the platform host, P mode)
   const url = storeView.live(page.slug);
 
@@ -61,6 +83,7 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     setPhase("check");
     setConfirmReal(false);
     setServerIssues([]);
+    setGateItems([]);
     setFailure(null);
   };
 
@@ -80,6 +103,7 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const run = async () => {
     setFailure(null);
     setServerIssues([]);
+    setGateItems([]);
     setPhase("publishing");
     if (needsConfirm && confirmReal) {
       // the merchant confirmed the remaining content is real: record it in the page
@@ -113,6 +137,7 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       }
       setFailure(res.message);
       setServerIssues(res.issues ?? []);
+      setGateItems(res.items ?? []);
       return;
     }
     const st = store.getState();
@@ -179,7 +204,13 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               </div>
 
               <div className="bld-scroll max-h-[min(60vh,28rem)] overflow-y-auto px-6 py-4">
-                {list.errors.length === 0 && list.warnings.length === 0 ? (
+                {gateItems.length ? (
+                  <>
+                    <GateGroup title="The server refused to publish" items={gateHard} tone="error" onFix={goFix} />
+                    <GateGroup title="Notes from the server" items={gateSoft} tone="warning" onFix={goFix} />
+                  </>
+                ) : null}
+                {list.errors.length === 0 && list.warnings.length === 0 && !gateItems.length ? (
                   <div className="flex items-center gap-3 rounded-xl bg-emerald-500/10 px-3.5 py-3 text-[13px] text-emerald-800 dark:text-emerald-300">
                     <Check className="size-4" />
                     Everything looks good.
@@ -278,6 +309,42 @@ function CheckGroup({ title, items, tone, onFix }: { title: string; items: Check
       </ul>
     </div>
   );
+}
+
+const LEFT_TABS: ReadonlySet<string> = new Set<LeftTab>(["sections", "theme", "product", "offers", "form", "seo"]);
+
+/** Where a gate item's fix leads in the builder (a section, else a known tab); null when it has no target here. */
+function gateFix(item: GateItem): CheckFix | null {
+  const sectionId = item.fix?.sectionId ?? item.sectionId;
+  if (sectionId) return { sectionId };
+  const tab = item.fix?.tab;
+  return tab && LEFT_TABS.has(tab) ? { tab: tab as LeftTab } : null;
+}
+
+/** The gate's own words when the admin catalog has them, else a plain line by the gate that raised it. */
+const GATE_FALLBACK: Record<string, string> = {
+  budget: "This page is too heavy for shoppers' phones",
+  honesty: "This content can't go live as it is",
+  design: "The design needs a change",
+};
+
+/** One row per gate item (§M.1 rule 2): the title and detail from the item's message keys, with its fix. */
+function GateGroup({ title, items, tone, onFix }: { title: string; items: GateItem[]; tone: "error" | "warning"; onFix: (fix: CheckFix | undefined) => void }) {
+  const t = useT();
+  if (!items.length) return null;
+  const rows: CheckItem[] = items.map((item, i) => {
+    const known = messageOf(item.title) !== undefined;
+    const prefix = item.id.split(":")[0] ?? "";
+    return {
+      // one gate may raise the same id on several fields: the row index keeps the keys unique
+      id: `${item.id}:${i}`,
+      level: tone,
+      title: known ? t(item.title, item.vars) : (GATE_FALLBACK[prefix] ?? "This needs a change before publishing"),
+      detail: item.detail && messageOf(item.detail) !== undefined ? t(item.detail, item.vars) : undefined,
+      fix: gateFix(item) ?? undefined,
+    };
+  });
+  return <CheckGroup title={title} items={rows} tone={tone} onFix={onFix} />;
 }
 
 /** Check mark drawn inside a soft ring. */

@@ -9,12 +9,14 @@
  * "Ad tracking for this page" answer (the page's pixels, or `tracking.none`) and the page is created with exactly
  * that — the save never adds store pixels. The v1 flag `pixels: "chosen"` is accepted and ignored (one release).
  * The insert itself is the store repository's (`createPageFromDirections`, GEN-01: store id from the scope only).
+ * The merchant's facts are recorded as the new page's attested facts (`recordFacts`, ENGP-8).
  */
 import { z } from "zod";
 import { fail } from "@/lib/admin-data/action";
 import { countStoreAssets } from "@/lib/admin-data/assets";
 import { createPageFromDirections, slugify } from "@/lib/admin-data/pages";
 import { revalidateStore } from "@/lib/admin-data/shell";
+import { recordFacts } from "@/lib/editor/facts.server";
 import { Archetype, type PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
 import { storeAction } from "@/lib/tenancy/seam";
@@ -23,6 +25,8 @@ import { collectAssetIds } from "@/landing/context";
 
 /** A generated document is ~30–60 KB of JSON; anything far beyond that is not from the generator. */
 const MAX_DOC_CHARS = 400_000;
+/** The Details step takes at most 5 facts (MAX_FACTS); a little slack for an older open tab. */
+const MAX_WIZARD_FACTS = 6;
 
 const Input = z
   .object({
@@ -32,6 +36,8 @@ const Input = z
       .array(z.object({ archetype: Archetype, label: z.string().trim().min(1).max(40), doc: z.unknown() }))
       .min(1)
       .max(3),
+    /** the merchant's facts as typed in Details ("3 couleurs"): recorded as the page's attested facts (ENGP-8) */
+    facts: z.array(z.string().trim().max(200)).max(MAX_WIZARD_FACTS).default([]),
     /** @deprecated v1 flag ("the docs carry the wizard's pixel choices"): accepted and ignored, one release */
     pixels: z.literal("chosen").optional(),
   })
@@ -47,7 +53,7 @@ const slugBase = (name: string, category: string) => (slugify(name) !== "page" ?
 
 export async function createFromDirectionsAction(input: CreateFromDirectionsInput): Promise<ActionResult<{ id: string; slug: string }>> {
   return storeAction("pages.write", async ({ scope, actor, store }) => {
-    const { name, chosen, directions } = Input.parse(input);
+    const { name, chosen, directions, facts } = Input.parse(input);
 
     // each doc keeps the tracking the wizard answered (pixels or "No pixel"): nothing is added here
     const docs: { label: string; doc: PageDoc }[] = [];
@@ -65,6 +71,8 @@ export async function createFromDirectionsAction(input: CreateFromDirectionsInpu
 
     const page = docs[chosen]!;
     const created = await createPageFromDirections(scope, { name, slugBase: slugBase(name, page.doc.product.category), chosen, directions: docs }, actor);
+    // the gate judges the facts the seller gave (§M.1 rule 2): "3 couleurs" typed here is never a refusal later
+    await recordFacts(scope, created.id, facts, actor);
     revalidateStore(store.handle, "/pages", "/history", "");
     return created;
   });

@@ -32,8 +32,10 @@ import { STORE_RESERVED_SLUGS } from "@/lib/tenancy/handles";
 import { byId, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreCtx, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { collectAssetIds } from "@/landing/context";
-import type { ActionErrorCode, EditorAsset, EditorBootstrap, EditorPageMeta, PageStatus, VersionKind, VersionSummary } from "./types";
+import type { ActionErrorCode, EditorAsset, EditorBootstrap, EditorPageMeta, PageKind, PageStatus, VersionKind, VersionSummary } from "./types";
 import { jsonBytes, MAX_DOC_BYTES } from "./types";
+import { CHECK_SETTING_KEYS, loadCheckContext } from "./check-context.server";
+import { recordSlugMove, releaseOldSlug } from "./slug-history";
 
 export const AUTOSAVE_EVERY_MS = 10 * 60_000;
 export const AUTOSAVE_KEEP = 20;
@@ -67,9 +69,10 @@ async function pageRow(scope: StoreScope, id: string) {
   return row ?? null;
 }
 
-function metaOf(row: { id: string; name: string; slug: string; status: PageStatus; publishedVersionId: string | null; updatedAt: Date }): EditorPageMeta {
+function metaOf(row: { id: string; kind: PageKind; name: string; slug: string; status: PageStatus; publishedVersionId: string | null; updatedAt: Date }): EditorPageMeta {
   return {
     id: row.id,
+    kind: row.kind,
     name: row.name,
     slug: row.slug,
     status: row.status,
@@ -140,7 +143,8 @@ async function versionRow(scope: StoreScope, pageId: string, versionId: string) 
 /**
  * Everything the builder needs to open a page. A draft that no longer validates at page level is
  * replaced by the newest version that does (reported in `notices`); null when the page is unknown or another store's.
- * `ctx` is the seam's: the member's grants, the store's identity and AI choices fill the builder.
+ * `ctx` is the seam's: the member's grants, the store's identity and AI choices fill the builder, and the store's
+ * facts the checklist reads (`check`, LAN Q15).
  */
 export async function loadBootstrap(ctx: Pick<StoreCtx, "scope" | "store" | "user" | "can">, pageId: string): Promise<EditorBootstrap | null> {
   const { scope, user } = ctx;
@@ -172,14 +176,14 @@ export async function loadBootstrap(ctx: Pick<StoreCtx, "scope" | "store" | "use
 
   const [store, settings, versions, published] = await Promise.all([
     storeInfoOf(scope, ctx.store),
-    getStoreSettings(scope, ["store", "store_ai"]),
+    getStoreSettings(scope, [...CHECK_SETTING_KEYS, "store_ai"]),
     listVersionSummaries(scope, pageId),
     row.publishedVersionId
       ? db.select({ checksum: pageVersions.checksum }).from(pageVersions).where(byId(pageVersions, scope, row.publishedVersionId)).limit(1)
       : Promise.resolve([] as { checksum: string }[]),
   ]);
   const { store: storeSettings, store_ai: ai } = settings;
-  const assets = await assetsFor(scope, doc, [store.logo]);
+  const [assets, check] = await Promise.all([assetsFor(scope, doc, [store.logo]), loadCheckContext(scope, ctx.store, row, doc, settings)]);
 
   return {
     page: metaOf(row),
@@ -193,6 +197,7 @@ export async function loadBootstrap(ctx: Pick<StoreCtx, "scope" | "store" | "use
       hasEmail: !!storeSettings.email,
       hasAddress: !!storeSettings.address,
     },
+    check,
     versions: versions.items,
     hasMoreVersions: versions.hasMore,
     user: {
@@ -450,13 +455,14 @@ export async function slugProblem(scope: StoreScope, slug: string, pageId: strin
 /**
  * Rename and/or move a page. Moving a published page changes its live address, so the slug is only
  * written here; the caller re-publishes (the thank-you link inside the published HTML follows the slug).
- * `updated_at` is left alone: it is the draft's concurrency token, and neither changes the draft.
+ * A page that was ever published keeps its old address as a 308 for 12 months (`recordSlugMove`, LAN Q22;
+ * `historyKept`). `updated_at` is left alone: it is the draft's concurrency token, and neither changes the draft.
  */
 export async function updateMeta(
   scope: WriteScope,
   pageId: string,
   patch: { name?: string; slug?: string },
-): Promise<{ page: EditorPageMeta; slugChanged: boolean; previousSlug: string }> {
+): Promise<{ page: EditorPageMeta; slugChanged: boolean; previousSlug: string; historyKept: boolean }> {
   const row = await pageRow(scope, pageId);
   if (!row) throw new EditorError("not_found", "This page no longer exists.");
   const slugChanged = patch.slug !== undefined && patch.slug !== row.slug;
@@ -467,7 +473,7 @@ export async function updateMeta(
   const set: Partial<typeof pages.$inferInsert> = {};
   if (patch.name !== undefined && patch.name !== row.name) set.name = patch.name;
   if (slugChanged) set.slug = patch.slug!;
-  if (!Object.keys(set).length) return { page: metaOf(row), slugChanged: false, previousSlug: row.slug };
+  if (!Object.keys(set).length) return { page: metaOf(row), slugChanged: false, previousSlug: row.slug, historyKept: false };
   try {
     await db.update(pages).set(set).where(byId(pages, scope, pageId));
   } catch (err) {
@@ -477,14 +483,16 @@ export async function updateMeta(
     }
     throw err;
   }
+  const historyKept = slugChanged ? await recordSlugMove(scope, pageId, row.slug) : false;
   const next = await pageRow(scope, pageId);
   if (slugChanged) invalidatePublished();
-  return { page: metaOf(next!), slugChanged, previousSlug: row.slug };
+  return { page: metaOf(next!), slugChanged, previousSlug: row.slug, historyKept };
 }
 
-/** Restore a previous slug (used when re-publishing after a move fails). */
+/** Restore a previous slug (used when re-publishing after a move fails): the page is back at it, so it is no old address. */
 export async function revertSlug(scope: WriteScope, pageId: string, slug: string): Promise<void> {
   await db.update(pages).set({ slug }).where(byId(pages, scope, pageId));
+  await releaseOldSlug(scope, slug);
   invalidatePublished();
 }
 

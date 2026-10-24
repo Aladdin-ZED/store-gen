@@ -15,10 +15,9 @@ import { isChoicePick, isFixedPick, LIMITS, optionPhotoCount, type PageDoc } fro
 import { variantIssues } from "@/lib/page/variant-presets";
 import { pixelChecks, type PixelCheckContext } from "@/lib/pixels/checklist";
 import { validateDoc } from "@/lib/page/validate";
-import { isLandingCheckContext, type LandingCheckContext } from "./check-context";
+import type { LandingCheckContext } from "./check-context";
 import { assetRefsIn, fieldLabel, sectionIssues, valuesOfKind } from "./fields";
 import type { LeftTab } from "./store";
-import type { StoreHealth } from "./types";
 
 export interface CheckFix {
   tab?: LeftTab;
@@ -27,7 +26,7 @@ export interface CheckFix {
   href?: string;
 }
 
-/** Store-relative fix link (the builder resolves it under /app/<handle>; the context form builds it with ctx.appHref). */
+/** Store-relative fix link, made absolute under /app/<handle> by `ctx.appHref`. */
 const STORE_SETTINGS = "/settings/general" as const;
 
 /** A checklist entry (spec name: ChecklistItem). */
@@ -52,20 +51,21 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 const NO_PIXEL_CONTEXT: PixelCheckContext = { library: null, health: {}, live: false };
 
+/** Live countdowns further away than this read as invented (LAN-§3.2 `urgency:far`). */
+const FAR_COUNTDOWN_MS = 30 * 86_400_000;
+/** A live stock figure untouched for longer than this reads as stale (LAN-§3.2 `urgency:stock-stale`, LD36). */
+const STALE_STOCK_MS = 14 * 86_400_000;
+
 /**
- * The context form (LAN Q15, frozen at C0a) runs today's checks over `ctx.store`, `ctx.now` and `ctx.pixels`;
- * T4 / P3 add the store-fact rules (zones, policies, confirmation, honesty facts) behind it.
+ * The checklist of `doc` in its store (LAN Q15): the page's own checks over `ctx.store`, `ctx.now` and `ctx.pixels`,
+ * and the store-fact rules over the rest of the context (the live version's countdown and stock, LP-21). Item ids
+ * equal the publish gate's, so the dialog never shows an item for the first time (§M.5).
  */
-export function buildChecklist(doc: PageDoc, ctx: LandingCheckContext): Checklist;
-/** @deprecated the positional form; T4 moves its two callers to the context (LAN Q15) */
-export function buildChecklist(doc: PageDoc, store: StoreHealth, now?: number, pixels?: PixelCheckContext): Checklist;
-export function buildChecklist(doc: PageDoc, storeOrCtx: StoreHealth | LandingCheckContext, nowArg?: number, pixelsArg?: PixelCheckContext): Checklist {
-  const ctx = isLandingCheckContext(storeOrCtx) ? storeOrCtx : null;
-  const store: StoreHealth = ctx ? ctx.store : (storeOrCtx as StoreHealth);
-  const now = (ctx ? ctx.now : nowArg) ?? Date.now();
-  const pixels = (ctx ? ctx.pixels : pixelsArg) ?? NO_PIXEL_CONTEXT;
-  // the context builds the store's absolute link; the positional form keeps it store-relative (the builder resolves it)
-  const storeSettings = ctx ? ctx.appHref(STORE_SETTINGS) : STORE_SETTINGS;
+export function buildChecklist(doc: PageDoc, ctx: LandingCheckContext): Checklist {
+  const store = ctx.store;
+  const now = ctx.now ?? Date.now();
+  const pixels = ctx.pixels ?? NO_PIXEL_CONTEXT;
+  const storeSettings = ctx.appHref(STORE_SETTINGS);
   const errors: CheckItem[] = [];
   const warnings: CheckItem[] = [];
   const add = (item: CheckItem) => (item.level === "error" ? errors : warnings).push(item);
@@ -212,6 +212,38 @@ export function buildChecklist(doc: PageDoc, storeOrCtx: StoreHealth | LandingCh
     }
   }
   if (doc.offers.urgency.stockLeft === 0) add({ id: "urgency:stock", level: "warning", title: "Stock left is set to 0", fix: { tab: "offers" } });
+
+  /* ---- honest time and stock against the live page (LP-21, LD18, LD36) ---- */
+  const live = ctx.published;
+  const liveEnd = live?.countdownEnd ? Date.parse(live.countdownEnd) : NaN;
+  const draftEnd = end ? Date.parse(end) : NaN;
+  if (Number.isFinite(liveEnd) && Number.isFinite(draftEnd) && draftEnd > liveEnd) {
+    if (liveEnd <= now) {
+      add({
+        id: "honesty:countdown_reset",
+        level: "error",
+        title: "The countdown already ended on the live page",
+        detail: "Starting it again would tell shoppers the offer ends when it already did. Remove the countdown, or keep the ended date.",
+        fix: { tab: "offers" },
+      });
+    } else {
+      add({ id: "urgency:extended", level: "warning", title: "The countdown ends later than on the live page", detail: "Shoppers who saw the earlier end will see it move. Publishing records the change.", fix: { tab: "offers" } });
+    }
+  }
+  if (Number.isFinite(draftEnd) && draftEnd - now > FAR_COUNTDOWN_MS) {
+    add({ id: "urgency:far", level: "warning", title: "The countdown ends more than 30 days from now", detail: "A countdown this long rarely reads as real. Use the real end date of the offer.", fix: { tab: "offers" } });
+  }
+  const liveStock = live?.stockLeft;
+  const stockSince = live?.stockChangedAt ? Date.parse(live.stockChangedAt) : NaN;
+  if (liveStock !== undefined && liveStock > 0 && doc.offers.urgency.stockLeft === liveStock && Number.isFinite(stockSince) && now - stockSince > STALE_STOCK_MS) {
+    add({
+      id: "urgency:stock-stale",
+      level: "warning",
+      title: `“${liveStock} left” hasn't changed in over 14 days`,
+      detail: "Update the stock to what you really have, or remove it.",
+      fix: { tab: "offers" },
+    });
+  }
 
   /* ---- store identity (legal & contact pages) ---- */
   if (!store.hasPhone && !store.hasEmail) {

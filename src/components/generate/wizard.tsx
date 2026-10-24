@@ -819,6 +819,8 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
           name,
           chosen: index,
           directions: directions.map((d) => ({ archetype: d.archetype, label: d.label, doc: d.doc })),
+          // the merchant's facts become the page's attested facts: the checklist and the publish gate read them (ENGP-8)
+          facts,
           // the page's tracking answer (or the Details step's store-pixel ticks) is final
           ...((pagePixels ? !!details.tracking : !!pixelStore.summary) ? { pixels: "chosen" as const } : {}),
         }),
@@ -833,7 +835,7 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
       setCopyJob(null);
       router.push(storeView.href(`/pages/${res.id}/edit`));
     },
-    [built.directions, copyState.state, stopCopy, name, router, storeView, pixelStore.summary, pagePixels, details.tracking],
+    [built.directions, copyState.state, stopCopy, name, facts, router, storeView, pixelStore.summary, pagePixels, details.tracking],
   );
 
   /* ---- navigation ---- */

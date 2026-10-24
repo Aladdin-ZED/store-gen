@@ -4,9 +4,10 @@
  * active panel. On narrow screens the panel floats over the canvas instead of pushing it.
  */
 import { AnimatePresence, motion } from "motion/react";
+import { useMemo } from "react";
 import { BadgePercent, ClipboardList, Layers, Package, Palette, Plus, Search, type LucideIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { LeftTab } from "@/lib/editor/store";
+import { tabsFor, type LeftTab } from "@/lib/editor/store";
 import { cn } from "@/lib/utils";
 import { useEditor, useEditorApi } from "./context";
 // Sections is where the builder opens; the other panels are code-split (prefetched once idle)
@@ -36,7 +37,11 @@ export const LEFT_PANEL_WIDTH = 324;
 
 export function LeftRail({ overlay }: { overlay: boolean }) {
   const api = useEditorApi();
-  const tab = useEditor((s) => s.leftTab);
+  const kind = useEditor((s) => s.page.kind);
+  const tabs = useMemo(() => TABS.filter((t) => tabsFor(kind).includes(t.id)), [kind]);
+  const chosen = useEditor((s) => s.leftTab);
+  // a tab the page's kind has no panel for (a fix link, a stale choice) opens Sections
+  const tab = tabs.some((t) => t.id === chosen) ? chosen : "sections";
   const open = useEditor((s) => s.leftOpen);
   const Panel = PANELS[tab];
 
@@ -58,7 +63,7 @@ export function LeftRail({ overlay }: { overlay: boolean }) {
             Add a section
           </TooltipContent>
         </Tooltip>
-        {TABS.map(({ id, label, icon: Icon }) => {
+        {tabs.map(({ id, label, icon: Icon }) => {
           const active = open && tab === id;
           return (
             <Tooltip key={id}>

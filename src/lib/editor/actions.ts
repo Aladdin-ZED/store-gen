@@ -18,7 +18,7 @@ import { errorSummary } from "@/lib/orders/log";
 import type { PageDoc } from "@/lib/page/schema";
 import { publishPage, PublishError } from "@/lib/render/publish.server";
 import { storeAction } from "@/lib/tenancy/seam";
-import type { ActionResult as SeamResult, StoreCtx, WriteCtx, WritePermission } from "@/lib/tenancy/types";
+import type { ActionResult as SeamResult, GateItem, StoreCtx, WriteCtx, WritePermission } from "@/lib/tenancy/types";
 import {
   createVersion as createVersionRow,
   currentMeta,
@@ -73,8 +73,34 @@ const REFUSED: Record<string, string> = {
   step_up: "Confirm it's you, then try again.",
 };
 
+/** The publish gates' refusal codes (§M.1): their result carries `items`, listed one per row by the publish dialog. */
+const GATE_CODES = new Set<string>(["budget_blocked", "honesty_blocked", "design_blocked"]);
+type GateCode = "budget_blocked" | "honesty_blocked" | "design_blocked";
+
+const GATE_MESSAGE: Record<GateCode, string> = {
+  budget_blocked: "This page is too heavy to publish yet. Fix the items below, then publish again.",
+  honesty_blocked: "Some content can't go live as it is. Fix the items below, then publish again.",
+  design_blocked: "The design needs a change before it goes live. Fix the items below, then publish again.",
+};
+
+const isGateItems = (v: unknown): v is GateItem[] =>
+  Array.isArray(v) && v.every((i) => !!i && typeof (i as GateItem).id === "string" && ((i as GateItem).level === "hard" || (i as GateItem).level === "soft"));
+
+/** A gate refusal as the builder's failure (from the seam's result, or thrown by the publisher inside the body). */
+function gateFailure(code: GateCode, items: unknown): ActionFailure {
+  return fail(code, GATE_MESSAGE[code], { items: isGateItems(items) ? items.slice(0, 40) : [] });
+}
+
+/** A refusal thrown by `publishPage` (T3): any error with a gate `code` and its `items` (CCR r1.0-t4-12). */
+function thrownGate(err: unknown): ActionFailure | null {
+  if (!err || typeof err !== "object") return null;
+  const { code, items } = err as { code?: unknown; items?: unknown };
+  return typeof code === "string" && GATE_CODES.has(code) ? gateFailure(code as GateCode, items) : null;
+}
+
 /** The builder's answer for a failed seam call (the body never reached, or a mapped error). */
 function seamFailure(res: Extract<SeamResult<unknown>, { ok: false }>): ActionFailure {
+  if (GATE_CODES.has(res.error)) return gateFailure(res.error as GateCode, res.items);
   if (res.message === "error.session_ended") return fail("auth", "Your session has ended. Sign in again in a new tab, then retry.");
   if (res.error === "forbidden") return fail("forbidden", "You don't have permission to do this.");
   if (res.error === "not_found") return fail("not_found", "This page isn't available in this store.");
@@ -86,6 +112,8 @@ function seamFailure(res: Extract<SeamResult<unknown>, { ok: false }>): ActionFa
 /** Errors of the body as builder failures (inside the seam call, so they never reach its generic mapping). */
 function bodyFailure(err: unknown): ActionFailure {
   if (err instanceof EditorError) return fail(err.code, err.message, err.extra);
+  const gate = thrownGate(err);
+  if (gate) return gate;
   if (err instanceof PublishError) {
     if (err.code === "conflict") return changedElsewhere(err.serverUpdatedAt ?? 0);
     return fail(err.code === "not_found" ? "not_found" : "publish_failed", err.message, {
@@ -253,12 +281,17 @@ export async function updatePageMeta(raw: z.input<typeof UpdatePageMetaInput>): 
       target: input.pageId,
       meta: { name: input.name !== undefined, slug: res.slugChanged ? { from: res.previousSlug, to: input.slug } : null, republished: !!republished },
     });
+    // the old address keeps answering (308) for 12 months (LAN-§15.1, LAN-§23.6)
+    if (res.historyKept) await auditIn(scope, actor, "page.slug_moved", { target: input.pageId, meta: { from: res.previousSlug, to: input.slug } });
     const page = (await currentMeta(scope, input.pageId)) ?? res.page;
     return { ok: true, page, republished };
   });
 }
 
-/** Publish the saved draft (the client flushes its autosave first). */
+/**
+ * Publish the saved draft (the client flushes its autosave first). A refusal of the publish gates (§M.1) answers its
+ * code with every item, which the publish dialog lists with one fix each.
+ */
 export async function publish(raw: z.input<typeof PublishInput>): Promise<
   ActionResult<{ page: EditorPageMeta; version: VersionSummary | null; warnings: number; skippedSections: string[] }>
 > {

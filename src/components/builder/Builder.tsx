@@ -27,7 +27,7 @@ import { TopBar } from "./topbar/TopBar";
 const OVERLAY_BELOW = 1180;
 
 export function Builder({ boot }: { boot: EditorBootstrap }) {
-  const env = useMemo<BuilderEnv>(() => ({ store: boot.store, storeHealth: boot.storeHealth, user: boot.user, ai: boot.ai }), [boot]);
+  const env = useMemo<BuilderEnv>(() => ({ store: boot.store, storeHealth: boot.storeHealth, check: boot.check, user: boot.user, ai: boot.ai }), [boot]);
   return (
     <MotionConfig reducedMotion="user">
       <EditorProvider boot={boot}>

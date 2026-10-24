@@ -214,8 +214,30 @@ function createPersistence(store: EditorStore, owner: Owner): Persistence & { st
   };
 }
 
+/**
+ * On a shared device (LND-29): the copies another member left, and the pre-store copies ("bld:unsaved:<page>:<tab>"),
+ * are deleted when this member opens the builder. The member's own copies in their other stores stay.
+ */
+function purgeForeignBackups(owner: Owner): void {
+  const userId = owner.split(":")[1];
+  try {
+    const foreign: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(BACKUP_PREFIX)) continue;
+      // "<storeId>:<userId>:<pageId>:<tab>"
+      const parts = key.slice(BACKUP_PREFIX.length).split(":");
+      if (parts.length !== 4 || parts[1] !== userId) foreign.push(key);
+    }
+    for (const key of foreign) removeBackup(key);
+  } catch {
+    // storage unavailable: nothing to purge
+  }
+}
+
 /** Offer the unsaved edits an earlier session of this page left in the browser (the newest copy). */
 function offerRecovery(store: EditorStore, owner: Owner): () => void {
+  purgeForeignBackups(owner);
   const s = store.getState();
   const current = JSON.stringify(s.doc);
   const copies = readBackups(owner, s.page.id).filter((b) => {
