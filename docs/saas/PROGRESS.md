@@ -14,7 +14,7 @@ running, and how to restart it. Newest state at the top of "Running now".
 | 2b | ELEVATE (owner item 16, Fable): core rev 2 integrates requests + rethink; 6 parts rev 2 raise ceilings; core rev 2.1 | same files | **done** 2026-10-24 (commit a2e9fc2) |
 | 2c | Reviews (6 lenses) → per-file revisers → critic loop | same files + §P | **done** 2026-10-24 (56db6eb) |
 | 2d | Integrate critic r2 residuals (single integrator) + confirming critic | same files | **done** 2026-10-24 (efd8849) |
-| 3 | R1.0 core tenancy: C0a contract step → tracks T1 DATA, T2 AUTH, T3 EDGE, T4 SCOPE + C0b (worktrees) → integration → verify → deploy | code | C0a running |
+| 3 | R1.0 core tenancy: C0a contract step → tracks T1 DATA, T2 AUTH, T3 EDGE, T4 SCOPE + C0b (worktrees) → integration → verify → deploy | code | C0a done; tracks running |
 | 4 | Build phase 1: parallel tracks (store pages, landing+, brand kit/logo, team/invites, platform admin, storage) | code | todo |
 | 5 | Adversarial verification incl. cross-tenant attack tests, fix loop | tests + fixes | todo |
 | 6 | Deploy to the Store Gen site (archive method, HANDOFF §4) + live smoke | live | todo |
@@ -26,11 +26,11 @@ Weights = share of total work. Update the "done" column when a stage moves.
 | Stage | Weight | Done in stage | Contributes |
 |---|---|---|---|
 | Research + full spec | 12% | 100% | 12.0% |
-| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | 10% (C0a 3/4 sub-steps) | 1.8% |
+| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | 20% (C0a done; 5 tracks running) | 3.6% |
 | R1 product (platform console + approvals + store profiles, landing+, call center, AI Director, design genome, onboarding wow) | 35% | 0% | 0% |
 | R2 full stores + accounting + logo designer | 22% | 0% | 0% |
 | R3 growth, custom domains, carrier APIs, learning AI | 13% | 0% | 0% |
-| **Total** | 100% | | **≈ 14%** |
+| **Total** | 100% | | **≈ 16%** |
 
 Milestones: R1.0 live ≈ 30% · R1 live ≈ 65% · R2 live ≈ 87% · R3 live = 100%. Owner inputs needed later: real domain +
 Cloudflare (subdomains, before public sign-ups), optional Claude API key + monthly cap, a carrier statement sample (R2), legal
@@ -40,7 +40,20 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
-- **Phase 3 R1.0 / C0a (contract step on main)** — started 2026-10-24 ~10:55. Task `wsg3i2bv6`, run `wf_490a4c68-dd8`.
+- **Phase 3 R1.0 / TRACKS** — started 2026-10-24 ~12:30. Task `wkeu546qq`, run `wf_ddc6f9d4-22c`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\r1-0-tracks-wf_ddc6f9d4-22c.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_ddc6f9d4-22c"})` (finished steps replay; a chain resumes at its
+  first unfinished step; each finished step is also COMMITTED on its branch, so work is never lost).
+  5 parallel chains in worktrees C:\Users\SICO\sg-wt\{t1,t2,t3,t4,c0b} (branches r1.0/<t>, DBs cod_wt_<t>, test DBs cod_test_<t>_*):
+  T1 DATA 4 steps · T2 AUTH 4 · T3 EDGE 4 · T4 SCOPE 6 · C0b 4. Heavy commands serialized by C:\Users\SICO\sg-wt\heavy.mjs
+  (lock dir C:\Users\SICO\sg-wt\.heavy-lock; stale after 20 min or dead pid). Track reports: docs/saas/ccr/r1.0-<t>-report.md
+  (in each worktree). Next: R1.0 integration in main: merge T1 → T2 → C0b → T3 → T4, apply CCRs, delete adminAction/adminGuard
+  + deprecated overloads + stubs, lint into npm test, gate:offline into prebuild, npm run gate, attack suite, fix loop, deploy.
+  Worktree removal later: ALWAYS `cmd //c "rmdir <wt>\node_modules"` first (junction), then `git worktree remove --force`.
+
+- **Phase 3 R1.0 / C0a** — DONE 2026-10-24 ~12:15 (commit 776d24c; independently re-verified: tsc, npm test, test:php
+  2650/2650, smoke 13/13). Baseline manifest docs/saas/ownership-baseline.json (5bbef59).
+  Was: started 2026-10-24 ~10:55. Task `wsg3i2bv6`, run `wf_490a4c68-dd8`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\r1-0-c0a-wf_490a4c68-dd8.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_490a4c68-dd8"})`.
   Sequential agents A1 types/permissions/pure helpers → A2 schema.ts + drizzle/0004 + settings registries → A3 minimal seam,
