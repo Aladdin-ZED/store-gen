@@ -20,7 +20,7 @@ running, and how to restart it. Newest state at the top of "Running now".
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
-- **Phase 1d Fable rethink (AI + features)** — started 2026-10-24 ~00:45. Task `wjqy0ncln`, run `wf_ba647c5b-5cb`.
+- **Phase 1d Fable rethink (AI + features)** — DONE 2026-10-24 ~01:15 (2 agents, 0 errors): docs/saas/research/rethink-ai.md (~560 lines), rethink-features.md (927 lines). Was: started 2026-10-24 ~00:45. Task `wjqy0ncln`, run `wf_ba647c5b-5cb`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\fable-rethink-wf_ba647c5b-5cb.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_ba647c5b-5cb"})`.
   Output: docs/saas/research/rethink-ai.md, docs/saas/research/rethink-features.md (inputs of Phase 2b ELEVATE).
