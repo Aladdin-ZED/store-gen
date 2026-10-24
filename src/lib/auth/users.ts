@@ -1,18 +1,29 @@
 /**
- * User records: lookup, creation (incl. the first owner), password, 2FA reset and privilege changes.
+ * User records: lookup, creation, password, 2FA reset and privilege changes.
  * Every privilege-affecting change revokes the user's sessions so it takes effect immediately.
+ *
+ * Two generations live here until the R1.0 integration: today's single-tenant /admin team functions (`createUser`,
+ * `setUserRole`, `setUserDisabled`, `resetUserPassword`, the owner form of `resetUserTwoFactor`), kept for their
+ * callers, and the platform functions of PLA Q.19 (`createAccount`, `banUser`, `unbanUser`, `resetUserTwoFactor(ctx,
+ * …)`, `createPasswordResetLink`) that the console and the public flows call. The staff functions take a
+ * `PlatformCtx` and re-check `users.manage` with a fresh step-up themselves (PLA-§11.2: a reason, never oneself,
+ * never a staff account: those change only through the staff screens of PLA-§14).
  */
 import "server-only";
-import { asc, count, eq, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, asc, count, eq, isNull } from "drizzle-orm";
+import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js/max";
 import { z } from "zod";
-import { audit } from "@/lib/audit";
+import { audit, auditFrom } from "@/lib/audit";
 import { db } from "@/lib/db/client";
-import { newId } from "@/lib/db/ids";
-import { users } from "@/lib/db/schema";
-import { AuthInputError } from "./errors";
-import { checkPasswordPolicy, hashPassword, verifyPassword } from "./password";
+import { newId, newToken } from "@/lib/db/ids";
+import { passwordResets, users } from "@/lib/db/schema";
+import { notify } from "@/lib/platform/notify";
+import type { MessageKey, PlatformCtx } from "@/lib/tenancy/types";
+import { platformOrigin } from "@/lib/urls";
+import { AuthInputError, AuthRefusal, FieldsError } from "./errors";
+import { checkPasswordPolicy, hashPassword, passwordProblem, verifyPassword } from "./password";
 import { isRole, type Role } from "./permissions";
-import type { PlatformCtx } from "@/lib/tenancy/types";
 import { revokeUserSessions } from "./session";
 
 export type UserRow = typeof users.$inferSelect;
@@ -109,11 +120,8 @@ function dbErrorCode(err: unknown): string | undefined {
   return undefined;
 }
 
-const isDuplicate = (err: unknown) => dbErrorCode(err) === "ER_DUP_ENTRY";
-const isLockConflict = (err: unknown) => {
-  const code = dbErrorCode(err);
-  return code === "ER_LOCK_DEADLOCK" || code === "ER_LOCK_WAIT_TIMEOUT";
-};
+/** ER_DUP_ENTRY, looking through drizzle's wrapping (a duplicate e-mail, handle or token). */
+export const isDuplicate = (err: unknown) => dbErrorCode(err) === "ER_DUP_ENTRY";
 
 /** Creates a user (owner action). Throws AuthInputError on invalid input or a taken email. */
 export async function createUser(input: NewUserInput, actor: { id: string; ip?: string | null }): Promise<UserSummary> {
@@ -127,33 +135,6 @@ export async function createUser(input: NewUserInput, actor: { id: string; ip?: 
   await audit("auth.user.created", { userId: actor.id, target: values.id, meta: { role: values.role }, ip: actor.ip });
   const created = await getUserById(values.id);
   return toSummary(created!);
-}
-
-/**
- * Creates the first owner — only while the users table is empty. The `FOR UPDATE` read takes a
- * next-key lock on the empty table, so two concurrent setups serialise and the second sees one row.
- * Returns null when a user already exists.
- */
-export async function createFirstOwner(input: Omit<NewUserInput, "role">): Promise<UserSummary | null> {
-  const values = await prepareUser({ ...input, role: "owner" });
-  let created: boolean;
-  try {
-    created = await db.transaction(async (tx) => {
-      const [rows] = (await tx.execute(sql`SELECT COUNT(*) AS n FROM users FOR UPDATE`)) as unknown as [
-        { n: number | string }[],
-      ];
-      if (Number(rows[0]?.n ?? 0) > 0) return false;
-      await tx.insert(users).values(values);
-      return true;
-    });
-  } catch (err) {
-    // Two simultaneous setups share the gap lock and InnoDB aborts one as a deadlock: that one lost the race.
-    if (isLockConflict(err) && (await countUsers()) > 0) return null;
-    throw err;
-  }
-  if (!created) return null;
-  const row = await getUserById(values.id);
-  return row ? toSummary(row) : null;
 }
 
 /**
@@ -209,11 +190,7 @@ export function resetUserTwoFactor(ctx: PlatformCtx, userId: string, reason: str
 /** @deprecated today's owner reset in tenant settings (AUTH-09: deleted in R1.0); the platform overload is `users.manage` ↑ */
 export function resetUserTwoFactor(actor: { id: string; ip?: string | null }, userId: string): Promise<void>;
 export async function resetUserTwoFactor(actor: PlatformCtx | { id: string; ip?: string | null }, userId: string, reason?: string): Promise<void> {
-  if (!("id" in actor)) {
-    // platform reset (§B.7): reason required, audit platform.user.2fa_reset + a notification to the user; T2
-    void reason;
-    throw new Error("not implemented: T2 (resetUserTwoFactor)");
-  }
+  if (!("id" in actor)) return resetTwoFactorAsStaff(actor, userId, reason ?? "");
   if (userId === actor.id) throw new AuthInputError("Turn off your own two-step verification in Security.");
   const user = await getUserById(userId);
   if (!user) throw new AuthInputError("User not found.");
@@ -284,30 +261,171 @@ export async function setUserDisabled(
 }
 
 /* ------------------------------------------------------------------ */
-/* Platform user functions (PLA Q.19; T2 implements, C0a typed stubs)  */
+/* Accounts (PLA Q.19: signup, store invites and staff invites)        */
 /* ------------------------------------------------------------------ */
 
-function notImplemented(fn: string, ...args: unknown[]): never {
-  void args;
-  throw new Error(`not implemented: T2 (${fn})`);
+export type AccountLocale = "ar" | "fr" | "en";
+
+export interface NewAccount {
+  email: string;
+  name: string;
+  password: string;
+  /** E.164, or a national number of `phoneCountry` (the signup form formats it as typed) */
+  phone?: string;
+  locale: AccountLocale;
 }
 
-/** `users.manage` ↑: disabled = 1 with reason and time, every session revoked; audit platform.user.banned. */
-export async function banUser(ctx: PlatformCtx, userId: string, input: { reason: string; note?: string }): Promise<void> {
-  return notImplemented("banUser", ctx, userId, input);
+/** The one answer for a duplicate e-mail (and, in signup, handle): no field named, no oracle (§B.2 step 7). */
+export const ACCOUNT_REFUSED: MessageKey = "auth.signup.refused";
+
+/** E.164 of a phone input, null when empty; throws FieldsError for a number libphonenumber-js refuses. */
+export function parseAccountPhone(input: string | undefined, defaultCountry: CountryCode = "MA"): string | null {
+  const raw = input?.trim() ?? "";
+  if (!raw) return null;
+  const parsed = raw.length <= 32 ? parsePhoneNumberFromString(raw, defaultCountry) : undefined;
+  if (!parsed?.isValid()) throw new FieldsError({ phone: "auth.phone_invalid" });
+  return parsed.number;
 }
 
-/** audit platform.user.unbanned. */
-export async function unbanUser(ctx: PlatformCtx, userId: string, note?: string): Promise<void> {
-  return notImplemented("unbanUser", ctx, userId, note);
+/**
+ * Validates and hashes a new account (the password policy, scrypt through the semaphore). Never a role: no legacy
+ * role beyond the column default, no platform role, no membership. Throws FieldsError (`email`, `name`, `password`,
+ * `phone` → message keys) or AuthBusyError.
+ */
+export async function prepareAccount(input: NewAccount, opts: { phoneCountry?: CountryCode } = {}): Promise<typeof users.$inferInsert> {
+  const fields: Record<string, MessageKey> = {};
+  const email = EmailInput.safeParse(input.email);
+  if (!email.success) fields.email = "auth.email_invalid";
+  const name = NameInput.safeParse(input.name);
+  if (!name.success) fields.name = "auth.name_invalid";
+  const problem = passwordProblem(input.password, email.success ? email.data : null);
+  if (problem) fields.password = `auth.password.${problem}`;
+  let phone: string | null = null;
+  try {
+    phone = parseAccountPhone(input.phone, opts.phoneCountry);
+  } catch (err) {
+    if (!(err instanceof FieldsError)) throw err;
+    Object.assign(fields, err.fields);
+  }
+  const locale = input.locale === "ar" || input.locale === "fr" || input.locale === "en" ? input.locale : null;
+  if (!locale) fields.locale = "auth.locale_invalid";
+  if (Object.keys(fields).length || !email.success || !name.success) throw new FieldsError(fields);
+  return {
+    id: newId(),
+    email: email.data,
+    name: name.data,
+    passwordHash: await hashPassword(input.password),
+    phone,
+    locale,
+    createdAt: new Date(),
+  };
 }
 
-/** `users.manage` ↑ with a reason: a single-use 60-minute `password_resets` link, shown once (§B.9). */
-export async function createPasswordResetLink(ctx: PlatformCtx, userId: string, reason: string): Promise<{ url: string; expiresAt: Date }> {
-  return notImplemented("createPasswordResetLink", ctx, userId, reason);
+type Executor = Pick<typeof db, "insert">;
+
+/** Inserts a prepared account (inside the caller's transaction when given). A taken e-mail → AuthRefusal("invalid", ACCOUNT_REFUSED). */
+export async function insertAccount(values: typeof users.$inferInsert, executor: Executor = db): Promise<void> {
+  try {
+    await executor.insert(users).values(values);
+  } catch (err) {
+    if (isDuplicate(err)) throw new AuthRefusal("invalid", ACCOUNT_REFUSED);
+    throw err;
+  }
 }
 
 /** Password policy + the scrypt semaphore; the signup, invite and staff-invite flows share it. Never sets a role. */
 export async function createAccount(input: { email: string; name: string; password: string; phone?: string; locale: "ar" | "fr" | "en" }): Promise<{ userId: string }> {
-  return notImplemented("createAccount", input);
+  const values = await prepareAccount(input);
+  await insertAccount(values);
+  await audit("auth.user.created", { userId: values.id, target: values.id, meta: { via: "account" } });
+  return { userId: values.id };
+}
+
+/* ------------------------------------------------------------------ */
+/* Platform user functions (PLA Q.19, PLA-§11.2)                       */
+/* ------------------------------------------------------------------ */
+
+const REASON_MIN = 3;
+const REASON_MAX = 200;
+
+/** A staff reason: trimmed, 3-200 characters, control characters dropped. */
+export function staffReason(input: unknown): string {
+  const value = typeof input === "string" ? input.normalize("NFKC").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim() : "";
+  if ([...value].length < REASON_MIN || [...value].length > REASON_MAX) throw new FieldsError({ reason: "auth.staff.reason_required" });
+  return value;
+}
+
+/**
+ * The guards every PLA-§11.2 action shares: `users.manage` with a fresh step-up, a target that exists, is not the
+ * actor and holds no platform role (a staff account changes only through the staff screens of PLA-§14).
+ */
+async function staffTarget(ctx: PlatformCtx, userId: string): Promise<UserRow> {
+  if (!ctx.can("users.manage")) throw new AuthRefusal("forbidden");
+  if (!ctx.stepUpFresh) throw new AuthRefusal("step_up");
+  if (userId === ctx.user.id) throw new AuthRefusal("forbidden", "auth.staff.not_yourself");
+  const user = typeof userId === "string" && userId.length === 26 ? await getUserById(userId) : null;
+  if (!user) throw new AuthRefusal("not_found");
+  if (user.platformRole !== "none") throw new AuthRefusal("is_staff");
+  return user;
+}
+
+/** `users.manage` ↑: disabled = 1 with reason and time, every session revoked; audit platform.user.banned. */
+export async function banUser(ctx: PlatformCtx, userId: string, input: { reason: string; note?: string }): Promise<void> {
+  const target = await staffTarget(ctx, userId);
+  const reason = staffReason(input.reason);
+  const note = typeof input.note === "string" ? input.note.trim().slice(0, 500) : "";
+  await db.update(users).set({ disabled: true, disabledReason: reason, disabledAt: new Date() }).where(eq(users.id, target.id));
+  const revoked = await revokeUserSessions(target.id);
+  await auditFrom(ctx, "platform.user.banned", { target: target.id, meta: { reason, ...(note ? { note } : {}), sessions: revoked } });
+}
+
+/** audit platform.user.unbanned. */
+export async function unbanUser(ctx: PlatformCtx, userId: string, note?: string): Promise<void> {
+  const target = await staffTarget(ctx, userId);
+  if (!target.disabled) return;
+  await db.update(users).set({ disabled: false, disabledReason: null, disabledAt: null }).where(eq(users.id, target.id));
+  const clean = typeof note === "string" ? note.trim().slice(0, 500) : "";
+  await auditFrom(ctx, "platform.user.unbanned", { target: target.id, meta: clean ? { note: clean } : null });
+}
+
+/**
+ * §B.7 2FA reset (platform-only, `users.manage` ↑, a reason): TOTP off, recovery codes cleared, every session revoked,
+ * audit platform.user.2fa_reset and a notification to the user. A no-op answer for a user without 2FA is refused
+ * as `invalid`, so the console never shows "done" for nothing.
+ */
+async function resetTwoFactorAsStaff(ctx: PlatformCtx, userId: string, reasonInput: string): Promise<void> {
+  const target = await staffTarget(ctx, userId);
+  const reason = staffReason(reasonInput);
+  if (!target.totpEnabled && !target.totpSecretEnc) throw new AuthRefusal("invalid", "auth.staff.no_2fa");
+  await db.update(users).set({ totpEnabled: false, totpSecretEnc: null, recoveryCodes: null }).where(eq(users.id, target.id));
+  await revokeUserSessions(target.id);
+  await auditFrom(ctx, "platform.user.2fa_reset", { target: target.id, meta: { reason } });
+  await notify({ audience: "user", userId: target.id, storeId: null }, "user.2fa_reset", {}, { link: "/app/account/two-factor", severity: "warn" });
+}
+
+/** A single-use reset link lives this long (§B.9). */
+export const PASSWORD_RESET_TTL_MS = 60 * 60_000;
+
+export const hashResetToken = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
+
+/**
+ * `users.manage` ↑ with a reason: a single-use 60-minute `password_resets` link, shown once (§B.9). Earlier unused
+ * links of the user are voided, so only the newest one works. Audit platform.user.reset_link (never the token).
+ */
+export async function createPasswordResetLink(ctx: PlatformCtx, userId: string, reason: string): Promise<{ url: string; expiresAt: Date }> {
+  const target = await staffTarget(ctx, userId);
+  const why = staffReason(reason);
+  if (target.disabled) throw new AuthRefusal("invalid", "auth.staff.user_banned");
+  const token = newToken(32);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + PASSWORD_RESET_TTL_MS);
+  await db.transaction(async (tx) => {
+    await tx
+      .update(passwordResets)
+      .set({ usedAt: now })
+      .where(and(eq(passwordResets.userId, target.id), isNull(passwordResets.usedAt)));
+    await tx.insert(passwordResets).values({ id: newId(), userId: target.id, tokenHash: hashResetToken(token), createdBy: ctx.user.id, reason: why, expiresAt });
+  });
+  await auditFrom(ctx, "platform.user.reset_link", { target: target.id, meta: { reason: why, expiresAt } });
+  return { url: `${platformOrigin()}/reset/${token}`, expiresAt };
 }

@@ -1,33 +1,42 @@
 /**
- * Auth public API. Every admin page, server action and admin route handler MUST call requireUser().
+ * Auth public API (docs/STORE-SAAS.md §B, §E.2).
  *
- *   const user = await requireUser();                                      // page: redirects when signed out
- *   const user = await requireUser({ permission: "pages.write" });          // page: + permission (→ /admin/forbidden)
- *   const user = await requireUser({ permission: "orders.write", throwOnFail: true }); // action / route handler
+ *   const user = await requireUser();                                      // account pages (/app/account/**, /app/new): no gate
+ *   const user = await requireUser({ permission: "pages.write" });          // today's /admin: gate + legacy role (→ /admin/forbidden)
+ *   const user = await requireUser({ permission: "orders.write", throwOnFail: true }); // today's /admin action / route handler
+ *   export async function saveProfile(input: unknown) { return userAction((ctx) => updateProfile(ctx, input)); }
+ *   export async function signup(form: FormData) { return publicAction("signup", (ctx) => signupAccount(read(form), ctx), { … }); }
  *
- * requireUser() also re-verifies the admin gate (signed cookie + IP allowlist) and answers 404
- * like an unknown URL when it is missing, so admin code never runs for un-gated visitors.
+ * Two generations until the R1.0 integration deletes today's /admin:
+ *  - with the legacy `permission` option, or on a request that holds the admin gate, `requireUser` behaves as it always
+ *    did: the gate (signed cookie + IP allowlist, 404 like an unknown URL without it) and the legacy role;
+ *  - without either it is the §E.2 account guard: a signed-in session with MFA passed and no gate (tenants never hold
+ *    it, §B.7), sending the signed-out to `/login` and a pending second factor to `/login/verify`.
+ * Store data never comes through here: store pages and actions pass the store seam (src/lib/tenancy/seam.ts).
  */
 import "server-only";
 import { cache } from "react";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
+import { verifiedRequestPath } from "@/lib/edge/path-sig";
+import type { AdminLocale } from "@/lib/i18n/admin";
+import { getRequestIdentity } from "@/lib/tenancy/context";
+import type { ActionResult, PlatformCtx, UserCtx } from "@/lib/tenancy/types";
+import { limits } from "./attempts";
 import { clearSessionCookie, readSessionToken, setSessionCookie } from "./cookies";
 import { AuthError, AuthInputError } from "./errors";
-import { limits } from "./attempts";
-import { FORBIDDEN_PATH, loginUrl, verifyUrl } from "./paths";
+import { FORBIDDEN_PATH, loginUrl, signInUrl, signInVerifyUrl, verifyUrl } from "./paths";
 import { legacyCan as can, type Permission, type PlatformRole, type Role } from "./permissions";
+import type { PublicActionCtx, PublicActionOpts } from "./public-action";
 import { assertAdminAccess, getRequestContext, getRequestedAdminPath, hasAdminAccess } from "./request";
 import { deleteSessionByToken, revokeUserSessions, rotateSession, validateSessionToken } from "./session";
 import { changeUserPassword } from "./users";
-import type { AdminLocale } from "@/lib/i18n/admin";
-import type { BurstScope } from "@/lib/security/burst-limit";
-import type { ActionResult, PlatformCtx, UserCtx } from "@/lib/tenancy/types";
 
 export type { Role, Permission } from "./permissions";
 // legacy single-tenant API (`can` = legacyCan) until T2/T4 move the callers; new code imports `can` from ./permissions
 export { legacyCan as can, ROLES, PERMISSIONS, ROLE_LABELS, isRole, permissionsFor, homePathFor } from "./permissions";
-export { AuthError, AuthInputError, type AuthErrorCode } from "./errors";
+export { AuthBusyError, AuthError, AuthInputError, AuthRefusal, FieldsError, type AuthErrorCode } from "./errors";
 export {
   ADMIN_HOME_PATH,
   LOGIN_PATH,
@@ -37,8 +46,17 @@ export {
   FORBIDDEN_PATH,
   SECURITY_SETTINGS_PATH,
   TWO_FACTOR_OFF_NOTICE,
+  SIGN_IN_PATH,
+  SIGN_IN_VERIFY_PATH,
+  SIGNUP_PATH,
+  APP_HOME_PATH,
+  NEW_STORE_PATH,
+  ACCOUNT_PATH,
   safeAdminPath,
+  safeAppPath,
   loginUrl,
+  signInUrl,
+  signInVerifyUrl,
 } from "./paths";
 export { assertAdminAccess, hasAdminAccess, getCspNonce, getRequestContext, type RequestContext } from "./request";
 export { revokeUserSessions, purgeExpiredSessions } from "./session";
@@ -59,14 +77,16 @@ export {
   type UserSummary,
   type NewUserInput,
 } from "./users";
-export { checkPasswordPolicy, hashPassword, PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH } from "./password";
+export { checkPasswordPolicy, hashPassword, passwordProblem, withScryptSlot, PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH, type PasswordProblem } from "./password";
 export { getTwoFactorStatus, type TwoFactorStatus } from "./mfa";
+export { landingPathFor, listMemberships, isUsableMembership, storeHomePath, type MembershipSummary } from "./landing";
+export type { BurstName, PublicActionCtx, PublicActionOpts } from "./public-action";
 
 export interface SessionUser {
   id: string;
   email: string;
   name: string;
-  /** @deprecated the single-tenant role of today's /admin; store roles come from the membership (STORE-SAAS §E.1, removed by T2) */
+  /** @deprecated the single-tenant role of today's /admin; store roles come from the membership (STORE-SAAS §E.1, removed with today's /admin) */
   role: Role;
   totpEnabled: boolean;
   sessionId: string;
@@ -91,8 +111,8 @@ interface AuthState {
   pending: PendingMfa | null;
 }
 
-const resolveAuthState = cache(async (): Promise<AuthState> => {
-  if (!(await hasAdminAccess())) return { user: null, pending: null };
+/** The session cookie's state, without the gate. Cached per request. */
+const resolveSessionState = cache(async (): Promise<AuthState> => {
   const session = await validateSessionToken(await readSessionToken());
   if (!session) return { user: null, pending: null };
   if (session.user.totpEnabled && !session.mfaPassed) {
@@ -105,28 +125,48 @@ const resolveAuthState = cache(async (): Promise<AuthState> => {
     // 2FA was turned off while this login was half-way: make the user start over.
     return { user: null, pending: null };
   }
-  return {
-    user: { ...session.user, sessionId: session.id, lastStoreId: session.lastStoreId },
-    pending: null,
-  };
+  return { user: { ...session.user, sessionId: session.id, lastStoreId: session.lastStoreId }, pending: null };
 });
 
-/** Returns the current user or null (no redirect). Cached per request. */
+/** Today's /admin: the same state behind the gate. Cached per request. */
+const resolveAuthState = cache(async (): Promise<AuthState> => {
+  if (!(await hasAdminAccess())) return { user: null, pending: null };
+  return resolveSessionState();
+});
+
+/** Returns the current /admin user or null (no redirect; needs the gate). Cached per request. */
 export async function getSessionUser(): Promise<SessionUser | null> {
   return (await resolveAuthState()).user;
 }
 
-/** The half-finished sign-in waiting for its second factor, if any. Cached per request. */
+/** The signed-in user of the platform host or null, gate or not (`/app`, the public auth pages). Cached per request. */
+export async function getSignedInUser(): Promise<SessionUser | null> {
+  return (await resolveSessionState()).user;
+}
+
+/** The half-finished sign-in waiting for its second factor, if any (the cookie decides; the caller checks its area). */
 export async function getPendingMfa(): Promise<PendingMfa | null> {
-  return (await resolveAuthState()).pending;
+  return (await resolveSessionState()).pending;
 }
 
 /**
- * Pages: redirects to /admin/login (or the 2FA step) when unauthenticated, to /admin/forbidden
- * when the permission is missing. Actions/route handlers: pass { throwOnFail: true } to get an
- * AuthError instead of a redirect.
+ * Account pages (no permission, no gate): redirect to `/login` (or `/login/verify`) when signed out, `throwOnFail` for an
+ * AuthError instead. Today's /admin (a `permission`, or the gate on the request): the gate, the legacy role and the
+ * /admin sign-in pages, exactly as before.
  */
 export async function requireUser(opts: { permission?: Permission; throwOnFail?: boolean } = {}): Promise<SessionUser> {
+  const identity = getRequestIdentity();
+  if (identity) return requireIdentityUser(opts);
+  if (opts.permission || (await hasAdminAccess())) return requireGatedUser(opts);
+  const { user, pending } = await resolveSessionState();
+  if (user) return user;
+  if (opts.throwOnFail) throw new AuthError(pending ? "mfa_required" : "unauthenticated");
+  const back = verifiedRequestPath(await headers());
+  redirect(pending ? signInVerifyUrl(back) : signInUrl(back));
+}
+
+/** Today's /admin guard: the gate (404 without it), the session, the legacy role. */
+async function requireGatedUser(opts: { permission?: Permission; throwOnFail?: boolean }): Promise<SessionUser> {
   await assertAdminAccess();
   const { user, pending } = await resolveAuthState();
 
@@ -136,6 +176,27 @@ export async function requireUser(opts: { permission?: Permission; throwOnFail?:
     redirect(pending ? verifyUrl(back) : loginUrl(back));
   }
 
+  if (opts.permission && !can(user.role, opts.permission)) {
+    if (opts.throwOnFail) throw new AuthError("forbidden");
+    redirect(FORBIDDEN_PATH);
+  }
+  return user;
+}
+
+/**
+ * requireUser inside runAsIdentity (tests, docs/STORE-SAAS.md §E.4): the identity stands for the session and the
+ * request, so there is no gate cookie to check; the legacy permission option keeps its meaning.
+ */
+async function requireIdentityUser(opts: { permission?: Permission; throwOnFail?: boolean }): Promise<SessionUser> {
+  // dynamic: the seam imports admin-data/action, which imports this module
+  const { requireSessionUser } = await import("@/lib/tenancy/seam");
+  let user: SessionUser;
+  try {
+    user = await requireSessionUser();
+  } catch (err) {
+    if (opts.throwOnFail || !(err instanceof AuthError)) throw err;
+    redirect(err.code === "mfa_required" ? signInVerifyUrl(null) : signInUrl(null));
+  }
   if (opts.permission && !can(user.role, opts.permission)) {
     if (opts.throwOnFail) throw new AuthError("forbidden");
     redirect(FORBIDDEN_PATH);
@@ -164,7 +225,7 @@ export async function rotateCurrentSession(user: SessionUser, opts: { revokeOthe
   const fresh = await rotateSession({ id: user.sessionId, userId: user.id }, { mfaPassed: true, ...ctx });
   await setSessionCookie(fresh.token, fresh.cookieExpiresAt);
   if (opts.revokeOthers) {
-    const revoked = await revokeUserSessions(user.id, { exceptId: fresh.id });
+    const revoked = await revokeUserSessions(user.id, { exceptSessionId: fresh.id });
     if (revoked > 0) await audit("auth.sessions.revoked", { userId: user.id, target: user.id, meta: { count: revoked }, ip: ctx.ip });
   }
   return { ...user, sessionId: fresh.id };
@@ -173,7 +234,7 @@ export async function rotateCurrentSession(user: SessionUser, opts: { revokeOthe
 /** Signs out every other device of the current user. Returns how many sessions ended. */
 export async function revokeOtherSessions(): Promise<number> {
   const user = await requireUser({ throwOnFail: true });
-  const revoked = await revokeUserSessions(user.id, { exceptId: user.sessionId });
+  const revoked = await revokeUserSessions(user.id, { exceptSessionId: user.sessionId });
   const { ip } = await getRequestContext();
   await audit("auth.sessions.revoked", { userId: user.id, target: user.id, meta: { count: revoked }, ip });
   return revoked;
@@ -193,30 +254,27 @@ export async function changePassword(currentPassword: string, newPassword: strin
 }
 
 /* ------------------------------------------------------------------ */
-/* §E.2 user and public entry points (T2; C0a typed stubs)             */
+/* §E.2 user and public entry points                                   */
 /* ------------------------------------------------------------------ */
+/* Their bodies live in their own modules, loaded on first use: they import the store seam, which imports        */
+/* admin-data/action, which imports this module (the same reason requireIdentityUser loads the seam lazily).     */
 
-/** The in-memory burst limiter's names (src/lib/security/burst-limit.ts) a public form passes. */
-export type BurstName = BurstScope;
-
-function notImplemented(fn: string, ...args: unknown[]): never {
-  void args;
-  throw new Error(`not implemented: T2 (${fn})`);
-}
-
-/** Account pages (/app/account/**): the session only, no store, no permission; same-origin first and the §E.2 error mapping. */
+/** Account pages (/app/account/**, /app/new): same-origin first, the session only (no store, no permission, no gate), the §E.2 error mapping. */
 export async function userAction<T>(fn: (ctx: UserCtx) => Promise<T>): Promise<ActionResult<T>> {
-  return notImplemented("userAction", fn);
+  const { runUserAction } = await import("./user-action");
+  return runUserAction(fn);
 }
 
-/** §B.7: a TOTP code refreshes `sessions.step_up_at` (bucket p:mfa:stepup:<userId> 5 / 15 min); the console's step-up sheet. */
+/** §B.7: a TOTP code refreshes `sessions.step_up_at` (bucket p:mfa:stepup:<userId> 5 / 15 min); the console's and the tenant's step-up sheet. */
 export async function stepUpAction(code: string): Promise<ActionResult<{ until: string }>> {
-  return notImplemented("stepUpAction", code);
+  const { stepUpWithTotp } = await import("./step-up");
+  return stepUpWithTotp(code);
 }
 
 /** rev 4 (PLA Q4.8, §B.7): the tenant step-up without TOTP (bucket p:password:<userId>, the scrypt semaphore); refused under impersonation. */
 export async function stepUpWithPasswordAction(password: string): Promise<ActionResult<{ until: string }>> {
-  return notImplemented("stepUpWithPasswordAction", password);
+  const { stepUpWithPassword } = await import("./step-up");
+  return stepUpWithPassword(password);
 }
 
 /**
@@ -224,14 +282,12 @@ export async function stepUpWithPasswordAction(password: string): Promise<Action
  * refuses `owns_store` (the user owns a non-purged store) and `is_staff`.
  */
 export async function deleteUserAccount(ctx: UserCtx | PlatformCtx, target?: { userId: string; reason: string }): Promise<void> {
-  return notImplemented("deleteUserAccount", ctx, target);
+  const { deleteAccount } = await import("./account-deletion");
+  return deleteAccount(ctx, target);
 }
 
-/** Public forms (/signup, /invite, /reset, /report): Turnstile, the burst limit, the DB buckets, generic answers. */
-export async function publicAction<T>(
-  name: string,
-  fn: (ctx: { ip: string; ua: string }) => Promise<T>,
-  opts: { turnstile: "required" | "when-configured" | "challenge"; burst: BurstName },
-): Promise<ActionResult<T>> {
-  return notImplemented("publicAction", name, fn, opts);
+/** Public forms (/signup, /invite, /reset, /report, /login): same-origin, the burst limit, the DB bucket, Turnstile, generic answers. */
+export async function publicAction<T>(name: string, fn: (ctx: PublicActionCtx) => Promise<T>, opts: PublicActionOpts): Promise<ActionResult<T>> {
+  const run = await import("./public-action");
+  return run.publicAction(name, fn, opts);
 }

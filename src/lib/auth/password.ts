@@ -4,9 +4,70 @@
  * Encoded form (PHC-like, self-describing so parameters can evolve):
  *   $scrypt$ln=16,r=8,p=1$<salt base64>$<hash base64>
  * N = 2^ln = 65536, r = 8, p = 1 → 64 MiB per hash; runs on the libuv pool (async) so it never blocks the event loop.
+ *
+ * Every derivation passes the scrypt semaphore (docs/STORE-SAAS.md §B.3): at most 2 at once, 16 waiting, 4 s of
+ * waiting at most, then `AuthBusyError` (HTTP 503, the generic busy message). Sign-in, signup, invite acceptance,
+ * reset, password change and the step-up all hash through it, so a burst of sign-ups can never hold 64 MiB per
+ * request on a 1 GB plan; unknown e-mails burn the dummy hash inside it too.
  */
 import "server-only";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { SCRYPT_CONCURRENCY, SCRYPT_QUEUE_MAX, SCRYPT_WAIT_MS } from "./config";
+import { AuthBusyError } from "./errors";
+
+interface ScryptWaiter {
+  grant(): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+declare global {
+  var __sgScrypt: { active: number; waiting: ScryptWaiter[] } | undefined;
+}
+
+/** One process-wide gate (globalThis: the RSC and route-handler layers may load this module twice). */
+const scryptGate = () => (globalThis.__sgScrypt ??= { active: 0, waiting: [] });
+
+function releaseSlot(): void {
+  const gate = scryptGate();
+  const next = gate.waiting.shift();
+  if (next) next.grant(); // hand the slot over: `active` is unchanged
+  else gate.active = Math.max(0, gate.active - 1);
+}
+
+/** Runs `fn` holding one scrypt slot. Throws AuthBusyError when 16 already wait or the wait passes 4 s. */
+export async function withScryptSlot<T>(fn: () => Promise<T>): Promise<T> {
+  const gate = scryptGate();
+  if (gate.active < SCRYPT_CONCURRENCY) {
+    gate.active++;
+  } else {
+    if (gate.waiting.length >= SCRYPT_QUEUE_MAX) throw new AuthBusyError();
+    await new Promise<void>((resolve, reject) => {
+      const waiter: ScryptWaiter = {
+        grant: () => {
+          clearTimeout(waiter.timer);
+          resolve();
+        },
+        timer: setTimeout(() => {
+          const at = gate.waiting.indexOf(waiter);
+          if (at !== -1) gate.waiting.splice(at, 1);
+          reject(new AuthBusyError());
+        }, SCRYPT_WAIT_MS),
+      };
+      gate.waiting.push(waiter);
+    });
+  }
+  try {
+    return await fn();
+  } finally {
+    releaseSlot();
+  }
+}
+
+/** For tests: the semaphore's running and waiting counts. */
+export function scryptSlotState(): { active: number; waiting: number } {
+  const gate = scryptGate();
+  return { active: gate.active, waiting: gate.waiting.length };
+}
 
 const CURRENT = { ln: 16, r: 8, p: 1 } as const;
 const KEY_LEN = 32;
@@ -50,11 +111,12 @@ const b64 = (buf: Buffer) => buf.toString("base64").replace(/=+$/, "");
 
 function derive(password: string, salt: Buffer, ln: number, r: number, p: number, keyLen: number): Promise<Buffer> {
   const N = 2 ** ln;
-  return new Promise((resolve, reject) => {
-    scrypt(password.normalize("NFKC"), salt, keyLen, { N, r, p, maxmem: 128 * N * r * 2 }, (err, key) =>
-      err ? reject(err) : resolve(key),
-    );
-  });
+  return withScryptSlot(
+    () =>
+      new Promise<Buffer>((resolve, reject) => {
+        scrypt(password.normalize("NFKC"), salt, keyLen, { N, r, p, maxmem: 128 * N * r * 2 }, (err, key) => (err ? reject(err) : resolve(key)));
+      }),
+  );
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -134,25 +196,37 @@ const COMMON_PASSWORDS = new Set([
   "maroc12345",
 ]);
 
-/**
- * Returns a user-facing problem with the password, or null when acceptable.
- * Length-based (NIST 800-63B style) — no composition rules — plus a few cheap checks.
- */
-export function checkPasswordPolicy(password: string, email?: string | null): string | null {
+/** What is wrong with a password (the forms tick these off live; `auth.password.<problem>` is the message key). */
+export type PasswordProblem = "too_short" | "too_long" | "contains_email" | "common" | "repetitive";
+
+/** Length-based (NIST 800-63B style) — no composition rules — plus a few cheap checks. Null when acceptable. */
+export function passwordProblem(password: string, email?: string | null): PasswordProblem | null {
   const value = password.normalize("NFKC");
   const length = [...value].length;
-  if (length < PASSWORD_MIN_LENGTH) return `Use at least ${PASSWORD_MIN_LENGTH} characters.`;
-  if (length > PASSWORD_MAX_LENGTH) return `Use at most ${PASSWORD_MAX_LENGTH} characters.`;
+  if (length < PASSWORD_MIN_LENGTH) return "too_short";
+  if (length > PASSWORD_MAX_LENGTH) return "too_long";
 
   const lower = value.toLowerCase();
   if (email) {
     const normalizedEmail = email.normalize("NFKC").trim().toLowerCase();
     const local = normalizedEmail.split("@")[0] ?? "";
-    if (lower.includes(normalizedEmail) || (local.length >= 4 && lower.includes(local))) {
-      return "Don't include your email address in your password.";
-    }
+    if (lower.includes(normalizedEmail) || (local.length >= 4 && lower.includes(local))) return "contains_email";
   }
-  if (COMMON_PASSWORDS.has(lower)) return "This password is too common. Choose something less predictable.";
-  if (new Set(value).size < 4) return "Use a less repetitive password.";
+  if (COMMON_PASSWORDS.has(lower)) return "common";
+  if (new Set(value).size < 4) return "repetitive";
   return null;
+}
+
+const PROBLEM_TEXT: Record<PasswordProblem, string> = {
+  too_short: `Use at least ${PASSWORD_MIN_LENGTH} characters.`,
+  too_long: `Use at most ${PASSWORD_MAX_LENGTH} characters.`,
+  contains_email: "Don't include your email address in your password.",
+  common: "This password is too common. Choose something less predictable.",
+  repetitive: "Use a less repetitive password.",
+};
+
+/** Returns a user-facing problem with the password (English, today's /admin forms), or null when acceptable. */
+export function checkPasswordPolicy(password: string, email?: string | null): string | null {
+  const problem = passwordProblem(password, email);
+  return problem ? PROBLEM_TEXT[problem] : null;
 }

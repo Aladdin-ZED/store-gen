@@ -1,26 +1,378 @@
 "use client";
 /**
- * Settings → Security for the signed-in user: password change, two-step verification status
- * (enrolment itself lives on /admin/two-factor with its QR code and recovery codes) and the
- * devices signed in to this account, each revocable. Owners also get the visitor-IP check: the
- * proxy headers of their own request and the address the app reads from them.
+ * Security of the signed-in account (docs/STORE-SAAS.md §B.7, §B.9; PLA-§22.5), three exports:
+ *
+ *   AccountSecurityPanel  `/app/account/security`: password change, two-step status, the signed-in devices; in the
+ *                         viewer's language (ar / fr / en)
+ *   StepUpDialog          the step-up sheet (§B.7, SEC-17): a TOTP code when the account has one, else the password
+ *                         ("sudo mode"); fresh for 5 minutes, then the refused action is retried
+ *   SecurityPanel         today's /admin Settings → Security (English, legacy props) until the R1.0 integration
+ *                         deletes that page
  */
-import { GlobeIcon, KeyRoundIcon, LaptopIcon, Loader2Icon, LogOutIcon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldIcon, SmartphoneIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { KeyRoundIcon, LaptopIcon, Loader2Icon, LogOutIcon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldIcon, SmartphoneIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { logout } from "@/lib/auth/actions";
-import { TWO_FACTOR_PATH } from "@/lib/auth/paths";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { logout, stepUpPasswordAction, stepUpTotpAction } from "@/lib/auth/actions";
+import { useAuthT } from "@/lib/auth/i18n/client";
+import { ACCOUNT_TWO_FACTOR_PATH } from "@/lib/auth/paths";
 import type { DeviceSession, NetworkView } from "@/lib/admin-data/security";
+import type { ActionResult as SeamResult } from "@/lib/tenancy/types";
 import { cn } from "@/lib/utils";
+import { PasswordField } from "@/app/(public)/_components/form-ui";
+import { Pill, Section } from "@/app/(public)/_components/kit";
+import { OtpField } from "@/app/(public)/_components/otp-field";
+import { useRunAction } from "@/app/(public)/_components/run-action";
+import { DateText, When } from "@/app/(public)/_components/when";
 import { ConfirmDialog } from "../common/confirm-dialog";
 import { StatusChip } from "../common/status-chip";
 import { RelativeTime } from "../common/time";
 import { runAction, type ActionResult } from "../lib/action-result";
 import { fullDate, shortDate } from "../lib/format";
 import { Field, SettingsSection, TextInput } from "./form-kit";
+
+/* ------------------------------------------------------------------ */
+/* Step-up sheet                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `const stepUp = useStepUp(user.totpEnabled)`: `stepUp.guard(() => action(input))` runs the action and, when it
+ * answers `step_up`, opens the sheet and runs it once more after a fresh proof. Render `{stepUp.sheet}` once.
+ */
+export function useStepUp(totp: boolean) {
+  const [retry, setRetry] = useState<null | (() => Promise<void>)>(null);
+  const guard = useCallback(async <T,>(run: () => Promise<SeamResult<T>>, after?: (r: SeamResult<T>) => void | Promise<void>): Promise<SeamResult<T>> => {
+    const r = await run();
+    if (!r.ok && r.error === "step_up") {
+      setRetry(() => async () => {
+        const again = await run();
+        await after?.(again);
+      });
+    } else {
+      await after?.(r);
+    }
+    return r;
+  }, []);
+  const sheet = (
+    <StepUpDialog
+      open={retry !== null}
+      totp={totp}
+      onOpenChange={(open) => !open && setRetry(null)}
+      onVerified={async () => {
+        const next = retry;
+        setRetry(null);
+        await next?.();
+      }}
+    />
+  );
+  return { guard, sheet };
+}
+
+export function StepUpDialog({ open, totp, onOpenChange, onVerified }: { open: boolean; totp: boolean; onOpenChange: (open: boolean) => void; onVerified: () => void | Promise<void> }) {
+  const t = useAuthT();
+  const run = useRunAction();
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // React events bubble through the portal: never let this submit reach a form the sheet was opened from
+    e.stopPropagation();
+    setBusy(true);
+    try {
+      const res = await run(totp ? stepUpTotpAction(code) : stepUpPasswordAction(password), { quiet: ["invalid", "totp_required"] });
+      if (res.ok) {
+        setCode("");
+        setPassword("");
+        setError(null);
+        await onVerified();
+      } else if (res.error === "invalid" || res.error === "totp_required") {
+        setError(res.message ?? "error.invalid");
+        setCode("");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) setError(null);
+        onOpenChange(o);
+      }}
+    >
+      <DialogContent className="sm:max-w-sm">
+        <form onSubmit={submit} className="grid gap-5">
+          <DialogHeader>
+            <DialogTitle>{t("auth.step_up.title")}</DialogTitle>
+            <DialogDescription>{t(totp ? "auth.step_up.lead_totp" : "auth.step_up.lead_password")}</DialogDescription>
+          </DialogHeader>
+          {totp ? (
+            <div dir="ltr">
+              <OtpField label={t("auth.verify.code")} name="code" value={code} onChange={setCode} error={error ? t(error) : undefined} autoFocus disabled={busy} />
+            </div>
+          ) : (
+            <PasswordField
+              label={t("auth.field.password")}
+              toggleLabel={t("auth.field.show_password")}
+              name="password"
+              autoComplete="current-password"
+              autoFocus
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              error={error ? t(error) : undefined}
+            />
+          )}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+              {t("account.cancel")}
+            </Button>
+            <Button type="submit" variant="brand" disabled={busy || (totp ? code.length !== 6 : !password)}>
+              {busy && <Loader2Icon aria-hidden="true" className="animate-spin" />}
+              {t("auth.step_up.confirm")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* /app/account/security                                               */
+/* ------------------------------------------------------------------ */
+
+export interface AccountDevice {
+  id: string;
+  device: string;
+  createdAt: string;
+  lastSeenAt: string;
+  current: boolean;
+  impersonating: boolean;
+}
+
+function deviceIcon(label: string) {
+  if (/iOS|Android/.test(label)) return SmartphoneIcon;
+  if (/Windows|macOS|Linux/.test(label)) return LaptopIcon;
+  return MonitorSmartphoneIcon;
+}
+
+export function AccountSecurityPanel({
+  email,
+  twoFactor,
+  devices,
+  notice,
+  actions,
+}: {
+  email: string;
+  twoFactor: { enabled: boolean; recoveryCodesRemaining: number };
+  devices: AccountDevice[];
+  /** a whitelisted notice key (back from the two-step page) */
+  notice: string | null;
+  actions: {
+    changePassword: (input: { current: string; next: string }) => Promise<SeamResult<null>>;
+    revokeSession: (id: string) => Promise<SeamResult<null>>;
+    signOutOthers: () => Promise<SeamResult<{ count: number }>>;
+  };
+}) {
+  const t = useAuthT();
+  return (
+    <div className="grid gap-6">
+      {notice && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {t(notice)}
+        </p>
+      )}
+      <PasswordSection email={email} save={actions.changePassword} />
+      <TwoFactorSection {...twoFactor} />
+      <DevicesSection devices={devices} revoke={actions.revokeSession} signOutOthers={actions.signOutOthers} />
+      <p className="text-xs text-muted-foreground">{t("account.security.footnote")}</p>
+    </div>
+  );
+}
+
+function PasswordSection({ email, save }: { email: string; save: (input: { current: string; next: string }) => Promise<SeamResult<null>> }) {
+  const t = useAuthT();
+  const run = useRunAction();
+  const router = useRouter();
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const local: Record<string, string> = {};
+    if (!current) local.current = "account.security.current_required";
+    if (next !== confirm) local.confirm = "auth.reset.mismatch";
+    setErrors(local);
+    if (Object.keys(local).length) return;
+    setSaving(true);
+    try {
+      const res = await run(save({ current, next }), { success: "account.security.password_changed", quiet: ["invalid"] });
+      if (res.ok) {
+        setCurrent("");
+        setNext("");
+        setConfirm("");
+        router.refresh();
+      } else if (res.error === "invalid") {
+        const field = res.items?.[0]?.field;
+        setErrors({ [field === "password" ? "current" : "next"]: res.message ?? "error.invalid" });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Section title={t("account.security.password")} description={t("account.security.password_lead")}>
+      <form onSubmit={submit} noValidate className="grid gap-4">
+        {/* lets password managers attach the new password to the right account */}
+        <input type="email" name="username" autoComplete="username" value={email} readOnly hidden />
+        <div className="grid gap-4 sm:grid-cols-3">
+          <PasswordField label={t("account.security.current")} toggleLabel={t("auth.field.show_password")} name="current" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} error={errors.current ? t(errors.current) : undefined} />
+          <PasswordField label={t("auth.field.new_password")} toggleLabel={t("auth.field.show_password")} name="next" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} error={errors.next ? t(errors.next) : undefined} />
+          <PasswordField label={t("auth.field.confirm_password")} toggleLabel={t("auth.field.show_password")} name="confirm" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} error={errors.confirm ? t(errors.confirm) : undefined} />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">{t("auth.field.password_hint")}</p>
+          <Button type="submit" variant="brand" disabled={saving || !current || !next}>
+            {saving && <Loader2Icon aria-hidden="true" className="animate-spin" />}
+            {t("account.security.change_password")}
+          </Button>
+        </div>
+      </form>
+    </Section>
+  );
+}
+
+function TwoFactorSection({ enabled, recoveryCodesRemaining }: { enabled: boolean; recoveryCodesRemaining: number }) {
+  const t = useAuthT();
+  const low = enabled && recoveryCodesRemaining <= 3;
+  return (
+    <Section
+      title={t("account.security.two_factor")}
+      description={t(enabled ? "account.security.two_factor_on_lead" : "account.security.two_factor_off_lead")}
+      aside={<Pill tone={enabled ? "success" : "warn"}>{t(enabled ? "account.security.on" : "account.security.off")}</Pill>}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className={cn("flex size-10 items-center justify-center rounded-[10px]", enabled ? "bg-success/12 text-success-ink dark:text-success" : "bg-foreground/[0.05] text-muted-foreground")}>
+            {enabled ? <ShieldCheckIcon aria-hidden="true" className="size-5" /> : <ShieldIcon aria-hidden="true" className="size-5" />}
+          </span>
+          <p className={cn("text-sm", low ? "font-medium text-warn-ink dark:text-warn" : "text-muted-foreground")}>
+            {enabled ? t("account.security.codes_left", { count: recoveryCodesRemaining }) : t("account.security.apps")}
+          </p>
+        </div>
+        <Button asChild variant={enabled ? "outline" : "brand"}>
+          <Link href={`${ACCOUNT_TWO_FACTOR_PATH}?from=settings`}>
+            <KeyRoundIcon aria-hidden="true" />
+            {t(enabled ? "account.security.manage_codes" : "account.security.set_up")}
+          </Link>
+        </Button>
+      </div>
+    </Section>
+  );
+}
+
+function DevicesSection({ devices, revoke, signOutOthers }: { devices: AccountDevice[]; revoke: (id: string) => Promise<SeamResult<null>>; signOutOthers: () => Promise<SeamResult<{ count: number }>> }) {
+  const t = useAuthT();
+  const run = useRunAction();
+  const router = useRouter();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirmAll, setConfirmAll] = useState(false);
+  const others = devices.filter((d) => !d.current).length;
+
+  const end = async (id: string) => {
+    setBusy(id);
+    try {
+      const res = await run(revoke(id), { success: "account.security.device_signed_out" });
+      if (res.ok) router.refresh();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Section
+      title={t("account.security.devices")}
+      description={t("account.security.devices_lead")}
+      aside={
+        others > 0 ? (
+          <Button variant="outline" size="sm" onClick={() => setConfirmAll(true)}>
+            <LogOutIcon aria-hidden="true" className="rtl:rotate-180" />
+            {t("account.security.sign_out_others")}
+          </Button>
+        ) : undefined
+      }
+    >
+      <ul className="divide-y divide-[color-mix(in_oklab,var(--foreground)_8%,transparent)] rounded-[8px] border border-[color-mix(in_oklab,var(--foreground)_8%,transparent)]">
+        {devices.map((d) => {
+          const Icon = deviceIcon(d.device);
+          return (
+            <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-[8px]", d.current ? "bg-brand/10 text-brand" : "bg-foreground/[0.05] text-muted-foreground")}>
+                  <Icon aria-hidden="true" className="size-[1.05rem]" />
+                </span>
+                <div className="grid min-w-0 gap-0.5">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                    <bdi dir="ltr">{d.device}</bdi>
+                    {d.current && <Pill tone="brand">{t("account.security.this_device")}</Pill>}
+                    {d.impersonating && <Pill tone="violet">{t("account.security.viewing_store")}</Pill>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("account.security.active")} <When iso={d.lastSeenAt} /> · {t("account.security.since")} <DateText iso={d.createdAt} />
+                  </p>
+                </div>
+              </div>
+              {d.current ? (
+                <form action={logout}>
+                  <Button type="submit" variant="ghost" size="sm">
+                    <LogOutIcon aria-hidden="true" className="rtl:rotate-180" />
+                    {t("app.bar.sign_out")}
+                  </Button>
+                </form>
+              ) : (
+                <Button variant="ghost" size="sm" disabled={busy === d.id} onClick={() => void end(d.id)}>
+                  {busy === d.id ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : <LogOutIcon aria-hidden="true" className="rtl:rotate-180" />}
+                  {t("app.bar.sign_out")}
+                </Button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {others === 0 && <p className="text-xs text-muted-foreground">{t("account.security.only_this")}</p>}
+
+      <ConfirmDialog
+        open={confirmAll}
+        onOpenChange={setConfirmAll}
+        icon={<LogOutIcon />}
+        title={t("account.security.sign_out_others_title", { count: others })}
+        description={t("account.security.sign_out_others_lead")}
+        confirmLabel={t("account.security.sign_out_others_confirm")}
+        pendingLabel={t("account.security.signing_out")}
+        onConfirm={async () => {
+          const res = await run(signOutOthers(), { success: (d) => t("account.security.signed_out_count", { count: d.count }) });
+          if (!res.ok) return false;
+          router.refresh();
+        }}
+      />
+    </Section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Legacy: today's /admin Settings → Security (deleted at integration)  */
+/* ------------------------------------------------------------------ */
 
 interface PasswordInput {
   current: string;
@@ -30,6 +382,7 @@ interface PasswordInput {
 
 const EMPTY: PasswordInput = { current: "", next: "", confirm: "" };
 
+/** @deprecated today's /admin page; the account page uses AccountSecurityPanel */
 export function SecurityPanel({
   email,
   minLength,
@@ -42,7 +395,7 @@ export function SecurityPanel({
   email: string;
   minLength: number;
   twoFactor: { enabled: boolean; recoveryCodesRemaining: number };
-  /** back from /admin/two-factor after turning it off there */
+  /** back from the two-step page after turning it off there */
   twoFactorTurnedOff?: boolean;
   sessions: DeviceSession[];
   /** owners only: the visitor-IP check */
@@ -55,15 +408,15 @@ export function SecurityPanel({
 }) {
   return (
     <>
-      <PasswordCard email={email} minLength={minLength} save={actions.changePassword} />
-      <TwoFactorCard {...twoFactor} turnedOff={twoFactorTurnedOff && !twoFactor.enabled} />
-      <SessionsCard sessions={sessions} revoke={actions.revokeSession} revokeOthers={actions.revokeOthers} />
-      {network && <NetworkCard network={network} />}
+      <LegacyPasswordCard email={email} minLength={minLength} save={actions.changePassword} />
+      <LegacyTwoFactorCard {...twoFactor} turnedOff={twoFactorTurnedOff && !twoFactor.enabled} />
+      <LegacySessionsCard sessions={sessions} revoke={actions.revokeSession} revokeOthers={actions.revokeOthers} />
+      {network && <LegacyNetworkCard network={network} />}
     </>
   );
 }
 
-function PasswordCard({ email, minLength, save }: { email: string; minLength: number; save: (input: PasswordInput) => Promise<ActionResult<null>> }) {
+function LegacyPasswordCard({ email, minLength, save }: { email: string; minLength: number; save: (input: PasswordInput) => Promise<ActionResult<null>> }) {
   const router = useRouter();
   const [values, setValues] = useState(EMPTY);
   const [errors, setErrors] = useState<Partial<Record<keyof PasswordInput, string>>>({});
@@ -78,18 +431,13 @@ function PasswordCard({ email, minLength, save }: { email: string; minLength: nu
     e.preventDefault();
     const next: typeof errors = {};
     if (!values.current) next.current = "Enter your current password.";
-    // same rules as the server policy (checkPasswordPolicy); the server stays the authority
-    const lower = values.next.normalize("NFKC").toLowerCase();
-    const address = email.normalize("NFKC").trim().toLowerCase();
-    const local = address.split("@")[0] ?? "";
     if ([...values.next.normalize("NFKC")].length < minLength) next.next = `Use at least ${minLength} characters.`;
-    else if (lower.includes(address) || (local.length >= 4 && lower.includes(local))) next.next = "Don't include your email address in your password.";
     if (values.next !== values.confirm) next.confirm = "The two new passwords don't match.";
     setErrors(next);
     if (Object.keys(next).length) return;
     setSaving(true);
     try {
-      const ok = await runAction(save(values), { success: "Password changed — other devices were signed out" });
+      const ok = await runAction(save(values), { success: "Password changed. Other devices were signed out." });
       if (ok !== undefined) {
         setValues(EMPTY);
         router.refresh();
@@ -99,39 +447,23 @@ function PasswordCard({ email, minLength, save }: { email: string; minLength: nu
     }
   };
 
-  const length = values.next.length;
-  const strength = length === 0 ? 0 : length < minLength ? 1 : length < 14 ? 2 : length < 20 ? 3 : 4;
-
   return (
-    <SettingsSection title="Password" description="Changing it signs you out everywhere else." style={{ ["--i" as string]: 1 }}>
+    <SettingsSection title="Password" description="Changing it signs you out everywhere else.">
       <form onSubmit={submit} noValidate className="grid gap-4">
-        {/* lets password managers attach the new password to the right account */}
         <input type="email" name="username" autoComplete="username" value={email} readOnly hidden />
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Current password" error={errors.current}>
             {(fp) => <TextInput {...fp} type="password" autoComplete="current-password" value={values.current} onChange={(e) => set("current", e.target.value)} />}
           </Field>
-          <Field label="New password" error={errors.next} hint={`${minLength}+ characters — a short sentence works well.`}>
+          <Field label="New password" error={errors.next} hint={`${minLength}+ characters. A short sentence works well.`}>
             {(fp) => <TextInput {...fp} type="password" autoComplete="new-password" value={values.next} onChange={(e) => set("next", e.target.value)} />}
           </Field>
           <Field label="Repeat new password" error={errors.confirm}>
             {(fp) => <TextInput {...fp} type="password" autoComplete="new-password" value={values.confirm} onChange={(e) => set("confirm", e.target.value)} />}
           </Field>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2" aria-hidden="true">
-            {[1, 2, 3, 4].map((i) => (
-              <span
-                key={i}
-                className={cn(
-                  "h-1 w-8 rounded-full transition-colors duration-500",
-                  i <= strength ? (strength === 1 ? "bg-warn" : strength === 2 ? "bg-emerald-400" : "bg-emerald-600") : "bg-foreground/10",
-                )}
-              />
-            ))}
-            <span className="ms-1 text-xs text-muted-foreground">{["", "Too short", "Good", "Strong", "Excellent"][strength]}</span>
-          </div>
-          <Button type="submit" className="rounded-full px-4" disabled={saving || !values.current || !values.next}>
+        <div className="flex justify-end">
+          <Button type="submit" disabled={saving || !values.current || !values.next}>
             {saving && <Loader2Icon className="animate-spin" />}
             Change password
           </Button>
@@ -141,46 +473,19 @@ function PasswordCard({ email, minLength, save }: { email: string; minLength: nu
   );
 }
 
-function TwoFactorCard({ enabled, recoveryCodesRemaining, turnedOff }: { enabled: boolean; recoveryCodesRemaining: number; turnedOff: boolean }) {
-  const low = enabled && recoveryCodesRemaining <= 3;
+function LegacyTwoFactorCard({ enabled, recoveryCodesRemaining, turnedOff }: { enabled: boolean; recoveryCodesRemaining: number; turnedOff: boolean }) {
   return (
     <SettingsSection
       title="Two-step verification"
-      description={
-        enabled
-          ? "Every sign-in asks for a code from your authenticator app, so a leaked password alone can't open the studio."
-          : "Add a 6-digit code from your phone to every sign-in. It takes a minute and protects your orders and customers' data."
-      }
-      aside={
-        <StatusChip tone={enabled ? "emerald" : "warn"} pulse={!enabled}>
-          {enabled ? "On" : "Off"}
-        </StatusChip>
-      }
-      style={{ ["--i" as string]: 2 }}
+      description={enabled ? "Every sign-in asks for a code from your authenticator app." : "Add a 6-digit code from your phone to every sign-in."}
+      aside={<StatusChip tone={enabled ? "brand" : "warn"}>{enabled ? "On" : "Off"}</StatusChip>}
     >
-      <div
-        className={cn(
-          "flex flex-wrap items-center justify-between gap-4 rounded-2xl p-4 ring-1 ring-inset",
-          enabled ? "bg-emerald-500/[0.06] ring-emerald-500/15" : "adm-aurora ring-brand/20",
-        )}
-      >
-        <div className="flex items-center gap-3">
-          <span className={cn("flex size-11 items-center justify-center rounded-2xl", enabled ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-brand text-brand-foreground")}>
-            {enabled ? <ShieldCheckIcon className="size-5" /> : <ShieldIcon className="size-5" />}
-          </span>
-          <div className="grid gap-0.5" role={turnedOff ? "status" : undefined}>
-            <p className="text-sm font-medium">{enabled ? "Authenticator app connected" : turnedOff ? "Two-step verification turned off" : "Not protected yet"}</p>
-            <p className={cn("text-xs", low ? "font-medium text-warn-ink" : "text-muted-foreground")}>
-              {enabled
-                ? `${recoveryCodesRemaining} recovery code${recoveryCodesRemaining === 1 ? "" : "s"} left${low ? " — generate new ones soon" : ""}`
-                : turnedOff
-                  ? "Your password alone protects this account now. Turn it back on any time."
-                  : "Works with Google Authenticator, 1Password, Microsoft Authenticator, Aegis…"}
-            </p>
-          </div>
-        </div>
-        <Button asChild variant={enabled ? "outline" : "brand"} className="rounded-full px-4">
-          <Link href={`${TWO_FACTOR_PATH}?from=settings`}>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <p className="text-sm text-muted-foreground" role={turnedOff ? "status" : undefined}>
+          {enabled ? `${recoveryCodesRemaining} recovery codes left` : turnedOff ? "Two-step verification turned off." : "Not protected yet."}
+        </p>
+        <Button asChild variant="outline">
+          <Link href={`${ACCOUNT_TWO_FACTOR_PATH}?from=settings`}>
             <KeyRoundIcon />
             {enabled ? "Manage codes" : "Set up now"}
           </Link>
@@ -190,109 +495,64 @@ function TwoFactorCard({ enabled, recoveryCodesRemaining, turnedOff }: { enabled
   );
 }
 
-function deviceIcon(label: string) {
-  if (/iOS|Android/.test(label)) return SmartphoneIcon;
-  if (/Windows|macOS|Linux/.test(label)) return LaptopIcon;
-  return MonitorSmartphoneIcon;
-}
-
-function SessionsCard({
-  sessions,
-  revoke,
-  revokeOthers,
-}: {
-  sessions: DeviceSession[];
-  revoke: (id: string) => Promise<ActionResult<null>>;
-  revokeOthers: () => Promise<ActionResult<{ count: number }>>;
-}) {
+function LegacySessionsCard({ sessions, revoke, revokeOthers }: { sessions: DeviceSession[]; revoke: (id: string) => Promise<ActionResult<null>>; revokeOthers: () => Promise<ActionResult<{ count: number }>> }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
   const others = sessions.filter((s) => !s.current).length;
-
-  const end = async (id: string) => {
-    setBusy(id);
-    try {
-      const ok = await runAction(revoke(id), { success: "Device signed out" });
-      if (ok !== undefined) router.refresh();
-    } finally {
-      setBusy(null);
-    }
-  };
-
   return (
     <SettingsSection
       title="Signed-in devices"
-      description="Sessions last 30 days and end after a week without use. Sign out anything you don't recognise."
+      description="Sessions last 30 days and end after a week without use."
       aside={
         others > 0 ? (
-          <Button variant="outline" size="sm" className="rounded-full" onClick={() => setConfirmAll(true)}>
+          <Button variant="outline" size="sm" onClick={() => setConfirmAll(true)}>
             <LogOutIcon />
             Sign out other devices
           </Button>
         ) : undefined
       }
-      style={{ ["--i" as string]: 3 }}
     >
       <ul className="grid gap-2">
-        <AnimatePresence initial={false}>
-          {sessions.map((s) => {
-            const Icon = deviceIcon(s.device);
-            return (
-              <motion.li
-                key={s.id}
-                layout
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, x: -12, transition: { duration: 0.2 } }}
-                className={cn(
-                  "flex flex-wrap items-center justify-between gap-3 rounded-2xl p-3.5 ring-1 ring-inset",
-                  s.current ? "bg-brand/[0.04] ring-brand/20" : "ring-foreground/[0.07]",
-                )}
+        {sessions.map((s) => (
+          <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] border p-3">
+            <p className="text-sm">
+              <span className="font-medium">{s.device}</span>
+              {s.current && " · this device"}
+              <span className="text-xs text-muted-foreground">
+                {" "}
+                · active <RelativeTime iso={s.lastSeenAt} /> · since{" "}
+                <time dateTime={s.createdAt} title={fullDate(s.createdAt)} suppressHydrationWarning>
+                  {shortDate(s.createdAt)}
+                </time>
+              </span>
+            </p>
+            {!s.current && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy === s.id}
+                onClick={async () => {
+                  setBusy(s.id);
+                  try {
+                    if ((await runAction(revoke(s.id), { success: "Device signed out" })) !== undefined) router.refresh();
+                  } finally {
+                    setBusy(null);
+                  }
+                }}
               >
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", s.current ? "bg-brand/12 text-brand" : "bg-foreground/[0.05] text-muted-foreground")}>
-                    <Icon className="size-[1.1rem]" />
-                  </span>
-                  <div className="grid min-w-0 gap-0.5">
-                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                      {s.device}
-                      {s.current && <StatusChip tone="brand">This device</StatusChip>}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Active <RelativeTime iso={s.lastSeenAt} /> · since{" "}
-                      <time dateTime={s.createdAt} title={fullDate(s.createdAt)} suppressHydrationWarning>
-                        {shortDate(s.createdAt)}
-                      </time>
-                    </p>
-                  </div>
-                </div>
-                {s.current ? (
-                  <form action={logout}>
-                    <Button type="submit" variant="ghost" size="sm" className="rounded-full">
-                      <LogOutIcon />
-                      Sign out
-                    </Button>
-                  </form>
-                ) : (
-                  <Button variant="ghost" size="sm" className="rounded-full" disabled={busy === s.id} onClick={() => void end(s.id)}>
-                    {busy === s.id ? <Loader2Icon className="animate-spin" /> : <LogOutIcon />}
-                    Sign out
-                  </Button>
-                )}
-              </motion.li>
-            );
-          })}
-        </AnimatePresence>
+                Sign out
+              </Button>
+            )}
+          </li>
+        ))}
       </ul>
-      {others === 0 && <p className="text-xs text-muted-foreground">Only this device is signed in to your account.</p>}
-
       <ConfirmDialog
         open={confirmAll}
         onOpenChange={setConfirmAll}
         icon={<LogOutIcon />}
         title={`Sign out ${others} other device${others === 1 ? "" : "s"}?`}
-        description="They will need your password (and two-step code) to come back. This device stays signed in."
+        description="They will need your password (and two-step code) to come back."
         confirmLabel="Sign them out"
         pendingLabel="Signing out…"
         onConfirm={async () => {
@@ -305,84 +565,14 @@ function SessionsCard({
   );
 }
 
-/**
- * Owners only: the visitor address the app reads from the proxy headers of this very request
- * (TRUSTED_PROXY_HOPS). On the live site it must be the owner's own public IP: one more public
- * proxy in front of the host's (a CDN) would make it that proxy's address, and every visitor would
- * then share one rate-limit bucket.
- */
-function NetworkCard({ network }: { network: NetworkView }) {
-  const used = network.hops.find((h) => h.used);
-  const source = network.viaCloudflare
-    ? "from CF-Connecting-IP (the used hop is a Cloudflare address)"
-    : used
-      ? `from X-Forwarded-For, hop ${used.publicHop ?? "–"}`
-      : network.realIp
-        ? "from X-Real-IP"
-        : "no proxy header: every visitor would share this address";
+function LegacyNetworkCard({ network }: { network: NetworkView }) {
   return (
-    <SettingsSection
-      title="Visitor IP check"
-      description="Rate limits and blocked IPs work per visitor address, read from your host's proxy headers. Open this page on your live site: the address below must be your own public IP."
-      aside={
-        <StatusChip tone="neutral" dot={false} className="font-mono">
-          TRUSTED_PROXY_HOPS={network.trustedHops}
-        </StatusChip>
-      }
-      style={{ ["--i" as string]: 4 }}
-    >
-      <div className="flex items-center gap-3 rounded-2xl bg-brand/[0.04] p-3.5 ring-1 ring-brand/20 ring-inset">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand/12 text-brand">
-          <GlobeIcon className="size-[1.1rem]" />
-        </span>
-        <div className="grid min-w-0 gap-0.5">
-          <p className="text-xs text-muted-foreground">Your IP as the app sees it</p>
-          <p className="font-mono text-[0.95rem] font-medium break-all">{network.clientIp}</p>
-          <p className="text-xs text-muted-foreground">{source}</p>
-        </div>
-      </div>
-
-      <div className="grid gap-2">
-        <p className="text-xs text-muted-foreground">X-Forwarded-For as received, oldest entry first; the last one was added by the proxy next to the app.</p>
-        {network.hops.length ? (
-          <ol className="flex flex-wrap items-center gap-2">
-            {network.hops.map((hop, i) => (
-              <li
-                key={`${i}-${hop.value}`}
-                className={cn(
-                  "flex min-w-0 items-center gap-2 rounded-xl px-3 py-1.5 ring-1 ring-inset",
-                  hop.used ? "bg-brand/[0.06] ring-brand/30" : hop.internal ? "bg-foreground/[0.03] ring-foreground/[0.06]" : "ring-foreground/[0.08]",
-                )}
-              >
-                <code className={cn("font-mono text-[0.8rem] break-all", hop.internal && "text-muted-foreground")}>{hop.value}</code>
-                <span className={cn("text-xs whitespace-nowrap tabular-nums", hop.used ? "font-medium text-brand" : "text-muted-foreground")}>
-                  {hop.internal ? "internal, skipped" : `hop ${hop.publicHop}${hop.used ? " · used" : ""}`}
-                </span>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="text-sm text-muted-foreground">Not sent{network.realIp ? `; X-Real-IP is ${network.realIp}.` : "."}</p>
-        )}
-      </div>
-
-      <p className="text-xs leading-relaxed text-pretty text-muted-foreground">
-        <code className="font-mono text-foreground">TRUSTED_PROXY_HOPS</code> is the number of public proxies in front of the app (internal 10.x, 192.168.x,
-        127.x… hops are skipped). Your IP listed as hop 2? Set it to 2 in the host&apos;s environment variables and redeploy, never higher than your IP&apos;s hop.
+    <SettingsSection title="Visitor IP check" description="The address the app reads from your host's proxy headers. On the live site it must be your own public IP.">
+      <p className="font-mono text-sm">{network.clientIp}</p>
+      <p className="text-xs text-muted-foreground">
+        TRUSTED_PROXY_HOPS={network.trustedHops}
+        {network.hops.length ? ` · X-Forwarded-For: ${network.hops.map((h) => h.value).join(", ")}` : ""}
       </p>
-      {network.allowlistSet && (
-        <p className="text-xs leading-relaxed text-pretty text-muted-foreground">
-          <code className="font-mono text-foreground">ADMIN_IP_ALLOWLIST</code> is matched against{" "}
-          <code className="font-mono text-foreground">{network.allowlistIp ?? "nothing"}</code>, the last entry above, whatever{" "}
-          <code className="font-mono text-foreground">TRUSTED_PROXY_HOPS</code> says.
-        </p>
-      )}
-      {network.behindCloudflare && !network.viaCloudflare && (
-        <p className="text-xs leading-relaxed text-pretty text-muted-foreground">
-          <code className="font-mono text-foreground">BEHIND_CLOUDFLARE=1</code>, but this request did not come through a Cloudflare address: CF-Connecting-IP was
-          ignored.
-        </p>
-      )}
     </SettingsSection>
   );
 }

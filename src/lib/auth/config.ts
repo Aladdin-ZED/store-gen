@@ -35,21 +35,51 @@ export const GATE_TTL_MS = 30 * DAY;
 /** A gate cookie older than this is re-issued on the next admin request (sliding lifetime). */
 export const GATE_RENEW_AFTER_MS = DAY;
 
+/*
+ * Sign-in buckets (docs/STORE-SAAS.md §B.3; all `p:`). Refusals come from the IP and the account-network buckets
+ * only; the account-wide bucket raises the Turnstile challenge and never refuses (SEC-22: five networks must not lock
+ * an account out). The account buckets are cleared by a full sign-in; unknown e-mails consume them too.
+ */
 export const LOGIN_WINDOW_SEC = 15 * 60;
 /** attempts per IP per window (all outcomes) */
 export const LOGIN_IP_LIMIT = 10;
-/** attempts per account (email) per window — cleared on full sign-in; applies to unknown emails too */
-export const LOGIN_ACCOUNT_LIMIT = 5;
+/** attempts per account and network (`p:login:acctnet`): past it, "too many attempts" for this network only */
+export const LOGIN_ACCTNET_LIMIT = 5;
+/** attempts per account across networks (`p:login:acct`): a challenge threshold only, never a refusal */
+export const LOGIN_ACCT_LIMIT = 20;
+/** past this many failures in either account bucket the form needs a Turnstile token (when the widget is configured) */
+export const LOGIN_CHALLENGE_AFTER = 3;
 
 export const MFA_WINDOW_SEC = 15 * 60;
 export const MFA_USER_LIMIT = 5;
 export const MFA_IP_LIMIT = 10;
+/** TOTP step-ups per user per window (`p:mfa:stepup`, §B.7) */
+export const MFA_STEPUP_LIMIT = 5;
+/** password checks of the current user per window (`p:password`: password change and the tenant step-up, §B.7) */
+export const PASSWORD_CHECK_LIMIT = 5;
 
 export const SETUP_WINDOW_SEC = 15 * 60;
 export const SETUP_IP_LIMIT = 5;
 
-/** Brand shown in authenticator apps. */
-export const TOTP_ISSUER = "COD Studio";
+/** The scrypt semaphore (§B.3): hashes running at once, waiting, and the longest wait before `AuthBusyError`. */
+export const SCRYPT_CONCURRENCY = 2;
+export const SCRYPT_QUEUE_MAX = 16;
+export const SCRYPT_WAIT_MS = 4_000;
+
+/** Authenticator label until the platform brand setting is readable (`platform.brand.name`, §B.7). */
+export const TOTP_ISSUER = "Store Gen";
+
+/**
+ * The device marker (§B.1, PLA Q.3): 128 random bits, base64url, set by T3's proxy on area-`auth` GET responses
+ * (and by `publicAction` when a form arrives without one). It carries no user data; T2 only reads it for the
+ * `device` identity link. Same name and `__Host-` rule as the session cookie.
+ */
+export const DEVICE_COOKIE = IS_PROD ? "__Host-sgd" : "sgd";
+export const DEVICE_MARKER_RE = /^[A-Za-z0-9_-]{22}$/;
+export const DEVICE_COOKIE_MAX_AGE_SEC = 400 * 24 * 60 * 60;
+
+/** The platform day of the daily sandbox ceiling (`pending_stores`, D69): the owner's market time, never the server's. */
+export const PLATFORM_TIMEZONE = "Africa/Casablanca";
 
 const SECRET_TOKEN_RE = /^[A-Za-z0-9_-]{8,128}$/;
 

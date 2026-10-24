@@ -17,9 +17,9 @@ import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import { decrypt, encrypt } from "@/lib/security/crypto";
 import { limits } from "./attempts";
-import { TOTP_ISSUER } from "./config";
 import { AuthInputError } from "./errors";
 import { verifyPassword } from "./password";
+import { brandName } from "./platform-config";
 import { findRecoveryCode, generateRecoveryCodes, normalizeRecoveryCode } from "./recovery";
 import { formatSecretForDisplay, generateTotpSecret, otpauthUri, totpQrDataUrl, verifyTotp } from "./totp";
 import { getUserById, type UserRow } from "./users";
@@ -133,7 +133,8 @@ export async function beginTotpEnrollment(userId: string, ctx: { ip?: string | n
   if (result.affectedRows !== 1) throw new AuthInputError("Two-step verification is already on.");
 
   await audit("auth.2fa.enrollment_started", { userId: user.id, target: user.id, ip: ctx.ip });
-  const uri = otpauthUri({ secret, account: user.email, issuer: TOTP_ISSUER });
+  // the issuer is the platform brand (§B.7); the HKDF salt and the purpose totp:<userId> never change (AUTH-28)
+  const uri = otpauthUri({ secret, account: user.email, issuer: await brandName() });
   return { secretDisplay: formatSecretForDisplay(secret), otpauthUri: uri, qrDataUrl: await totpQrDataUrl(uri) };
 }
 
