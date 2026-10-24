@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { assertAdminAccess, getPendingMfa, getRequestContext, homePathFor, LOGIN_PATH, safeAdminPath, TWO_FACTOR_PATH } from "@/lib/auth";
+import { assertAdminAccess, getPendingMfa, getRequestContext, landingPathFor, LOGIN_PATH, safeAppPath, TWO_FACTOR_PATH } from "@/lib/auth";
 import { clearSessionCookie, setSessionCookie } from "@/lib/auth/cookies";
 import { completeSecondFactor } from "@/lib/auth/login";
 import { normalizeRecoveryCode } from "@/lib/auth/recovery";
@@ -15,7 +15,7 @@ export async function verifyAction(_prev: FormState, data: FormData): Promise<Fo
 
   const method = field(data, "method", 16) === "recovery" ? "recovery" : "totp";
   const code = field(data, "code", 64);
-  const next = safeAdminPath(field(data, "next", 512));
+  const next = safeAppPath(field(data, "next", 512));
 
   if (method === "totp" && !normalizeTotpInput(code)) {
     return formError(undefined, { code: "Enter the 6-digit code from your authenticator app." });
@@ -46,5 +46,5 @@ export async function verifyAction(_prev: FormState, data: FormData): Promise<Fo
   await setSessionCookie(result.session.token, result.session.cookieExpiresAt);
   // A spent recovery code deserves a look at the remaining ones.
   if (result.method === "recovery") redirect(`${TWO_FACTOR_PATH}?notice=recovery-used`);
-  redirect(next ?? homePathFor(result.role));
+  redirect(next ?? landingPathFor(result.memberships, result.lastStoreId, result.platformRole));
 }

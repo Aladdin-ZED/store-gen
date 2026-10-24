@@ -6,8 +6,9 @@ import { cookies, headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { clientIp } from "@/lib/security/ip";
 import { getRequestIdentity, identityHeaders } from "@/lib/tenancy/context";
-import { ADMIN_PATH_HEADER, GATE_COOKIE, NONCE_HEADER } from "./config";
+import { ADMIN_PATH_HEADER, DEVICE_COOKIE, GATE_COOKIE, NONCE_HEADER } from "./config";
 import { hasGateAccess } from "./gate";
+import { deviceMarkerFromCookieHeader, isDeviceMarker } from "./identity";
 import { safeAdminPath } from "./paths";
 
 export interface RequestContext {
@@ -25,6 +26,14 @@ export async function getRequestContext(): Promise<RequestContext> {
     ip: clientIp(h),
     ua: (h.get("user-agent") ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 300),
   };
+}
+
+/** The `__Host-sgd` device marker of the request (set by T3's proxy, PLA Q.3), or null; inside runAsIdentity from its Cookie header. */
+export async function getDeviceMarker(): Promise<string | null> {
+  const identity = getRequestIdentity();
+  if (identity) return deviceMarkerFromCookieHeader(identityHeaders(identity)?.get("cookie"));
+  const value = (await cookies()).get(DEVICE_COOKIE)?.value;
+  return isDeviceMarker(value) ? value : null;
 }
 
 /**

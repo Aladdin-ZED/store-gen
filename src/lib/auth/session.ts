@@ -7,7 +7,7 @@
  */
 import "server-only";
 import { createHash } from "node:crypto";
-import { and, desc, eq, lt, ne, or, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lt, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { sessions, users } from "@/lib/db/schema";
 import { newToken } from "@/lib/db/ids";
@@ -88,7 +88,7 @@ function meta(client: ClientMeta | undefined) {
 
 export async function createSession(
   userId: string,
-  opts: { mfaPassed: boolean } & ClientMeta,
+  opts: { mfaPassed: boolean; lastStoreId?: string | null } & ClientMeta,
 ): Promise<IssuedSession> {
   const token = newToken(32);
   const id = hashSessionToken(token);
@@ -106,6 +106,7 @@ export async function createSession(
     lastSeenAt: new Date(now),
     ip,
     ua,
+    lastStoreId: opts.lastStoreId ?? null,
   });
   await pruneUserSessions(userId);
 
@@ -194,7 +195,9 @@ export async function rotateSession(
   old: { id: string; userId: string },
   opts: { mfaPassed: boolean } & ClientMeta,
 ): Promise<IssuedSession> {
-  const fresh = await createSession(old.userId, opts);
+  // the store-picker hint survives a rotation; the step-up and a staff view-as never do
+  const [prev] = await db.select({ lastStoreId: sessions.lastStoreId }).from(sessions).where(eq(sessions.id, old.id)).limit(1);
+  const fresh = await createSession(old.userId, { ...opts, lastStoreId: prev?.lastStoreId ?? null });
   await deleteSession(old.id);
   return fresh;
 }
@@ -219,6 +222,52 @@ export async function revokeUserSessions(userId: string, opts: { exceptSessionId
   const where = except ? and(eq(sessions.userId, userId), ne(sessions.id, except)) : eq(sessions.userId, userId);
   const [result] = await db.delete(sessions).where(where);
   return result.affectedRows;
+}
+
+/**
+ * The step-up of a session (§B.7: a TOTP code or, for tenants, the password), fresh for 5 minutes. Only a fully
+ * signed-in session can be stepped up. Returns false when the row is gone.
+ */
+export async function markSessionStepUp(sessionId: string, at: Date = new Date()): Promise<boolean> {
+  const [result] = await db
+    .update(sessions)
+    .set({ stepUpAt: at })
+    .where(and(eq(sessions.id, sessionId), eq(sessions.mfaPassed, true)));
+  return result.affectedRows === 1;
+}
+
+/** The store picker hint of a session (§B.4); never an authorisation, the seam checks the membership on every request. */
+export async function setSessionLastStore(sessionId: string, storeId: string | null): Promise<void> {
+  await db.update(sessions).set({ lastStoreId: storeId }).where(eq(sessions.id, sessionId));
+}
+
+/** One signed-in device of the account pages (§B.9: devices, "sign out other sessions"). */
+export interface DeviceSession {
+  id: string;
+  createdAt: Date;
+  lastSeenAt: Date;
+  /** the stored user agent (≤ 300 chars, control characters stripped); describe it, never render it as HTML */
+  ua: string | null;
+  current: boolean;
+  /** a staff session currently viewing a store (§B.8) */
+  impersonating: boolean;
+}
+
+/** The live, fully signed-in sessions of a user, newest activity first. */
+export async function listUserSessions(userId: string, currentId: string | null): Promise<DeviceSession[]> {
+  const rows = await db
+    .select({ id: sessions.id, createdAt: sessions.createdAt, lastSeenAt: sessions.lastSeenAt, ua: sessions.ua, impersonationId: sessions.impersonationId })
+    .from(sessions)
+    .where(and(eq(sessions.userId, userId), eq(sessions.mfaPassed, true), gt(sessions.expiresAt, new Date())))
+    .orderBy(desc(sessions.lastSeenAt))
+    .limit(MAX_SESSIONS_PER_USER);
+  return rows.map((r) => ({ id: r.id, createdAt: r.createdAt, lastSeenAt: r.lastSeenAt, ua: r.ua, current: r.id === currentId, impersonating: r.impersonationId !== null }));
+}
+
+/** Ends one session of `userId` (another user's session id matches nothing). */
+export async function revokeUserSession(userId: string, sessionId: string): Promise<boolean> {
+  const [result] = await db.delete(sessions).where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)));
+  return result.affectedRows === 1;
 }
 
 /** Keeps the newest MAX_SESSIONS_PER_USER sessions of a user and drops expired ones. */

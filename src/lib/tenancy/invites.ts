@@ -8,7 +8,15 @@ import "server-only";
  *
  * Signatures frozen at C0a; T2 implements the bodies (§K.1).
  */
+import { desc, eq } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
+import { auditFrom } from "@/lib/audit";
+import { AuthRefusal } from "@/lib/auth/errors";
 import type { StoreRole } from "@/lib/auth/permissions";
+import { db } from "@/lib/db/client";
+import { storeInvites, storeMembers, users } from "@/lib/db/schema";
+import { PLATFORM_READ_ONLY, memberWriteScope, platformReadOnly } from "./seam";
+import { whereStore } from "./sql";
 import type { StoreCtx, StoreScope } from "./types";
 
 export interface InviteSummary {
@@ -78,17 +86,101 @@ export async function acceptInvite(token: string, as: { userId: string } | NewAc
   return notImplemented("acceptInvite", token, as);
 }
 
-/** PLA Q.19: the member's own membership; the last owner is refused; audit store.member.removed with `self: true`. */
+/** "salma.b@gmail.com" → "s•••@gmail.com" (the PLA-§7.2 rule; an invite list never shows the full address). */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  if (at <= 0) return "•••";
+  return `${email.slice(0, 1)}•••${email.slice(at)}`;
+}
+
+/**
+ * PLA Q.19: the member's own membership; the last owner is refused (`last_owner`: transfer ownership or close the
+ * store instead); audit store.member.removed with `self: true`. Refused under impersonation and while the platform
+ * is read-only. The store's owner rows are locked first, so two owners leaving at once can't both go.
+ *
+ *   export async function leaveStoreAction() { return storeAction(null, (ctx) => leaveStore(ctx)); }
+ */
 export async function leaveStore(ctx: StoreCtx): Promise<void> {
-  return notImplemented("leaveStore", ctx);
+  const scope = memberWriteScope(ctx);
+  if (await platformReadOnly()) throw new AuthRefusal("read_only", PLATFORM_READ_ONLY);
+  const role = await db.transaction(async (tx) => {
+    const owners = await tx
+      .select({ userId: storeMembers.userId, status: storeMembers.status })
+      .from(storeMembers)
+      .where(whereStore(storeMembers, scope, eq(storeMembers.role, "owner")))
+      .for("update");
+    const [mine] = await tx
+      .select({ role: storeMembers.role })
+      .from(storeMembers)
+      .where(whereStore(storeMembers, scope, eq(storeMembers.userId, ctx.user.id)))
+      .for("update");
+    if (!mine) throw new AuthRefusal("not_found");
+    if (mine.role === "owner" && !owners.some((o) => o.userId !== ctx.user.id && o.status === "active")) throw new AuthRefusal("last_owner", "team.leave.last_owner");
+    await tx.delete(storeMembers).where(whereStore(storeMembers, scope, eq(storeMembers.userId, ctx.user.id)));
+    return mine.role;
+  });
+  await auditFrom(ctx, "store.member.removed", { target: ctx.user.id, meta: { self: true, role } });
 }
 
 /** PLA Q.11: the console (platformScope) and the health job (systemScope) read a store's members through the scope. */
 export async function listMembersByScope(scope: StoreScope): Promise<MemberSummary[]> {
-  return notImplemented("listMembersByScope", scope);
+  const rows = await db
+    .select({
+      userId: storeMembers.userId,
+      name: users.name,
+      email: users.email,
+      role: storeMembers.role,
+      status: storeMembers.status,
+      totpEnabled: users.totpEnabled,
+      joinedAt: storeMembers.joinedAt,
+      lastActiveAt: storeMembers.lastActiveAt,
+      invitedBy: storeMembers.invitedBy,
+    })
+    .from(storeMembers)
+    .innerJoin(users, eq(users.id, storeMembers.userId))
+    .where(whereStore(storeMembers, scope))
+    .orderBy(storeMembers.joinedAt)
+    .limit(500);
+  return rows;
+}
+
+const INVITE_LIST_MAX = 100;
+
+/** The state of an invite row at `now`. */
+export function inviteState(row: { acceptedAt: Date | null; revokedAt: Date | null; expiresAt: Date }, now = Date.now()): InviteSummary["state"] {
+  if (row.acceptedAt) return "accepted";
+  if (row.revokedAt) return "revoked";
+  return row.expiresAt.getTime() <= now ? "expired" : "pending";
 }
 
 /** PLA Q.11: pending and recent invites of a store, e-mails masked. */
 export async function listInvitesByScope(scope: StoreScope): Promise<InviteSummary[]> {
-  return notImplemented("listInvitesByScope", scope);
+  const inviter = alias(users, "inviter");
+  const rows = await db
+    .select({
+      id: storeInvites.id,
+      emailNorm: storeInvites.emailNorm,
+      role: storeInvites.role,
+      invitedById: storeInvites.invitedBy,
+      invitedByName: inviter.name,
+      expiresAt: storeInvites.expiresAt,
+      acceptedAt: storeInvites.acceptedAt,
+      revokedAt: storeInvites.revokedAt,
+      createdAt: storeInvites.createdAt,
+    })
+    .from(storeInvites)
+    .leftJoin(inviter, eq(inviter.id, storeInvites.invitedBy))
+    .where(whereStore(storeInvites, scope))
+    .orderBy(desc(storeInvites.createdAt))
+    .limit(INVITE_LIST_MAX);
+  const now = Date.now();
+  return rows.map((r) => ({
+    id: r.id,
+    emailMasked: maskEmail(r.emailNorm),
+    role: r.role,
+    invitedBy: { userId: r.invitedById, name: r.invitedByName ?? "" },
+    expiresAt: r.expiresAt,
+    state: inviteState(r, now),
+    createdAt: r.createdAt,
+  }));
 }

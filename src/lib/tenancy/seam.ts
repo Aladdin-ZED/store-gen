@@ -39,7 +39,7 @@ import { ActionError } from "@/lib/admin-data/action";
 import { auditFrom } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth";
 import { readSessionToken } from "@/lib/auth/cookies";
-import { AuthError, AuthInputError } from "@/lib/auth/errors";
+import { AuthBusyError, AuthError, AuthInputError, AuthRefusal, FieldsError } from "@/lib/auth/errors";
 import { isAdminIpAllowed } from "@/lib/auth/gate";
 import { IMPERSONATION_MEMBERSHIP, STORE_STEP_UP_PERMISSIONS, storeGrant, storeGrantAll } from "@/lib/auth/grant";
 import { LOGIN_PATH, STORE_2FA_ENROL_PATH, VERIFY_PATH } from "@/lib/auth/paths";
@@ -95,6 +95,26 @@ export function mintScope<K extends StoreScope["kind"]>(kind: K, storeId: string
   return Object.freeze({ storeId, kind }) as unknown as StoreScope & { readonly kind: K };
 }
 
+/**
+ * The scope of a store row the calling transaction has just inserted (signup, `/app/new`, setup; §B.2 step 7, §B.11):
+ * its creator writes the store's first tenant rows (the owner membership, the review row, the legal acceptances)
+ * before any member context can exist. Caller: src/lib/auth/stores.ts only.
+ */
+export function newStoreScope(storeId: string): WriteScope {
+  return mintScope("member", storeId);
+}
+
+/**
+ * The write scope of a member's own context, for the few member writes that need no permission key (leaving a
+ * store, PLA Q.19): an impersonation scope is refused (`impersonation_read_only`), any other non-member scope
+ * `forbidden`. The second narrowing site of D71 beside `storeAction`'s, and like it only in this file.
+ */
+export function memberWriteScope(ctx: StoreCtx): WriteScope {
+  if (ctx.impersonation || ctx.scope.kind === "impersonation") throw new SeamError("impersonation_read_only");
+  if (ctx.scope.kind !== "member" || ctx.membership.synthetic) throw new SeamError("forbidden");
+  return ctx.scope as WriteScope;
+}
+
 /* ------------------------------------------------------------------ */
 /* Errors and results                                                  */
 /* ------------------------------------------------------------------ */
@@ -124,11 +144,18 @@ export const PLATFORM_READ_ONLY: MessageKey = "error.platform_read_only";
 
 /**
  * Today's adminAction mapping (src/lib/admin-data/action.ts) on the §E.2 codes: input problems → `invalid` with
- * their message, refusals → their code, anything else → `server` (logged without request data; never a raw DB
- * message). Next control-flow errors must be rethrown by the caller first (`unstable_rethrow`).
+ * their message (field problems also as one `items` entry per field), refusals → their code, a full scrypt semaphore
+ * → `busy`, anything else → `server` (logged without request data; never a raw DB message). Next control-flow errors
+ * must be rethrown by the caller first (`unstable_rethrow`).
  */
 export function actionFailure(err: unknown, area: string): Extract<ActionResult<never>, { ok: false }> {
   if (err instanceof SeamError) return err.messageKey ? { ok: false, error: err.code, message: err.messageKey } : { ok: false, error: err.code };
+  if (err instanceof AuthRefusal) return err.messageKey ? { ok: false, error: err.code, message: err.messageKey } : { ok: false, error: err.code };
+  if (err instanceof FieldsError) {
+    const items = Object.entries(err.fields).map(([field, title]) => ({ id: `field:${field}`, level: "hard" as const, title, field }));
+    return { ok: false, error: "invalid", message: items[0]?.title ?? "error.invalid", items };
+  }
+  if (err instanceof AuthBusyError) return { ok: false, error: "busy" };
   if (err instanceof AuthError) return err.code === "forbidden" ? { ok: false, error: "forbidden" } : { ok: false, error: "forbidden", message: "error.session_ended" };
   if (err instanceof CsrfError) return { ok: false, error: "forbidden" };
   if (err instanceof EntitlementError) return { ok: false, error: "feature_off" };
