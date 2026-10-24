@@ -11,6 +11,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { safeEqual, sign } from "@/lib/security/crypto";
+import { isCloudflareIp, isInternalIp } from "@/lib/security/ip";
 import {
   GATE_RENEW_AFTER_MS,
   GATE_TTL_MS,
@@ -95,9 +96,23 @@ export function gateCookieOptions() {
  * the one appended by the proxy in front of the app (Next only fills the header when it is absent),
  * i.e. the address that actually connected. Behind a second proxy layer (an extra CDN) that hop is
  * the CDN, and the allowlist fails closed.
+ *
+ * Behind Cloudflare (docs/STORE-SAAS.md §B.7, rev 3 SEC-14): with BEHIND_CLOUDFLARE=1 and the right-most
+ * public hop inside Cloudflare's published ranges, the visitor is CF-Connecting-IP (Cloudflare overwrites it,
+ * and only a Cloudflare edge can be that hop); a Cloudflare hop without the header fails closed (null). Any
+ * other hop keeps today's rule, so a forged CF-Connecting-IP sent straight to the origin is never read. The
+ * Worker's `x-sg-ip` is never read either: the console never runs on store hosts.
  */
 export function allowlistAddress(headers: Headers): string | null {
   const hops = (headers.get("x-forwarded-for") ?? "").split(",");
+  if (process.env.BEHIND_CLOUDFLARE === "1") {
+    for (let i = hops.length - 1; i >= 0; i--) {
+      const hop = normalizeIp(hops[i]);
+      if (!hop || isInternalIp(hop)) continue;
+      if (isCloudflareIp(hop)) return normalizeIp(headers.get("cf-connecting-ip"));
+      break;
+    }
+  }
   for (let i = hops.length - 1; i >= 0; i--) {
     const hop = normalizeIp(hops[i]);
     if (hop) return hop;

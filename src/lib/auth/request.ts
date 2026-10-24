@@ -5,6 +5,7 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { clientIp } from "@/lib/security/ip";
+import { getRequestIdentity, identityHeaders } from "@/lib/tenancy/context";
 import { ADMIN_PATH_HEADER, GATE_COOKIE, NONCE_HEADER } from "./config";
 import { hasGateAccess } from "./gate";
 import { safeAdminPath } from "./paths";
@@ -16,8 +17,10 @@ export interface RequestContext {
   ua: string;
 }
 
+/** The caller's IP and user agent; inside runAsIdentity (tests, §E.4) from the identity's headers. */
 export async function getRequestContext(): Promise<RequestContext> {
-  const h = await headers();
+  const identity = getRequestIdentity();
+  const h = identity ? (identityHeaders(identity) ?? new Headers()) : await headers();
   return {
     ip: clientIp(h),
     ua: (h.get("user-agent") ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 300),

@@ -9,16 +9,20 @@ import "server-only";
  * and reads one store's data only through `platformScope(ctx, storeId)` + the normal repositories (§E.3 rule 6). A
  * platform scope is not a WriteScope (D71): no write repository accepts it.
  *
- * C0a's minimal working body (§K.1): the console gate, the session, `platform_role ≠ none`, TOTP mandatory for staff,
- * the permission matrix with its release, step-up freshness (`sessions.step_up_at` within 5 minutes) for the
- * STEP_UP_PERMISSIONS and `{ stepUp: true }` actions. T2 hardens it in place (assertSameOrigin for actions, the IP
- * allowlist behind Cloudflare, the enrolment redirect of §B.7, platform_read_only, buckets).
+ * `requirePlatform`: the console gate (signed cookie, the IP allowlist, read behind Cloudflare by
+ * `allowlistAddress()`, and ADMIN_HOST when set), the session with MFA passed, `platform_role ≠ none`, TOTP
+ * mandatory for staff (a staff member without it is sent to the account's enrolment page and cannot open the
+ * console before), the permission matrix with its release, and the step-up freshness (`sessions.step_up_at` within
+ * 5 minutes) behind the "Verified" chip. `platformAction` adds same-origin first (SEC-11), the `platform_read_only`
+ * kill switch (every write refused with `read_only` except `kill.manage` and the read-only keys of
+ * PLATFORM_READ_ONLY_OK) and the step-up of STEP_UP_PERMISSIONS / `{ stepUp: true }`. `platformAction` reads no
+ * store from `x-sg-path`: posted from a tenant route it still answers for the platform only (§B.8 note 2).
  */
-import { eq } from "drizzle-orm";
 import { headers as requestHeaders } from "next/headers";
 import { notFound, redirect, unstable_rethrow } from "next/navigation";
 import { AuthError } from "@/lib/auth/errors";
-import { LOGIN_PATH, TWO_FACTOR_PATH, VERIFY_PATH } from "@/lib/auth/paths";
+import { PLATFORM_READ_ONLY_OK } from "@/lib/auth/grant";
+import { CONSOLE_2FA_ENROL_PATH, LOGIN_PATH, VERIFY_PATH } from "@/lib/auth/paths";
 import {
   PLATFORM_PERMISSIONS,
   STEP_UP_PERMISSIONS,
@@ -31,16 +35,24 @@ import {
   type PlatformRole,
 } from "@/lib/auth/permissions";
 import { assertAdminAccess } from "@/lib/auth/request";
-import { db } from "@/lib/db/client";
-import { sessions, users } from "@/lib/db/schema";
-import { checkSameOrigin } from "@/lib/security/csrf";
 import { clientIp } from "@/lib/security/ip";
-import { getRequestIdentity } from "@/lib/tenancy/context";
-import { SeamError, actionFailure, guardResponse, mintScope, requireSessionUser } from "@/lib/tenancy/seam";
+import { getRequestIdentity, identityHeaders } from "@/lib/tenancy/context";
+import {
+  PLATFORM_READ_ONLY,
+  STEP_UP_TTL_MS,
+  SeamError,
+  actionFailure,
+  assertActionOrigin,
+  guardResponse,
+  isSafeMethod,
+  isSameOriginMutation,
+  mintScope,
+  platformReadOnly,
+  requireSession,
+} from "@/lib/tenancy/seam";
 import type { ActionResult, PlatformCtx, StoreScope } from "@/lib/tenancy/types";
 
-/** A step-up (TOTP, or the tenant password re-entry) stays fresh this long (§B.7). */
-export const STEP_UP_TTL_MS = 5 * 60_000;
+export { STEP_UP_TTL_MS };
 
 /** The 2FA refusal of a staff member without TOTP (pages: the enrolment page). */
 const NO_TOTP = "error.platform_2fa_required";
@@ -54,19 +66,13 @@ function grantPlatform(role: PlatformRole, p: PlatformPermission): boolean {
 async function resolvePlatform(permission: PlatformPermission | undefined): Promise<PlatformCtx> {
   const identity = getRequestIdentity();
   if (!identity) await assertAdminAccess(); // the console gate: notFound() like any unknown URL
-  const user = await requireSessionUser(identity);
-  const [row] = await db.select({ platformRole: users.platformRole }).from(users).where(eq(users.id, user.id)).limit(1);
-  const role = row?.platformRole;
-  if (!role || !isPlatformRole(role)) throw new SeamError("not_found");
+  const { user, stepUpAt } = await requireSession(identity);
+  const role = user.platformRole;
+  if (role === "none" || !isPlatformRole(role)) throw new SeamError("not_found");
   if (!user.totpEnabled) throw new SeamError("forbidden", NO_TOTP);
 
-  let stepUpAt: Date | null = null;
-  if (!user.sessionId.startsWith("ctx:")) {
-    const [s] = await db.select({ stepUpAt: sessions.stepUpAt }).from(sessions).where(eq(sessions.id, user.sessionId)).limit(1);
-    stepUpAt = s?.stepUpAt ?? null;
-  }
   const stepUpUntil = stepUpAt ? new Date(stepUpAt.getTime() + STEP_UP_TTL_MS) : null;
-  const h = identity ? (identity.headers ? new Headers(identity.headers) : null) : await requestHeaders();
+  const h = identity ? identityHeaders(identity) : await requestHeaders();
   const ctx: PlatformCtx = {
     user,
     role,
@@ -88,7 +94,7 @@ export async function requirePlatform(opts: { permission?: PlatformPermission; t
     unstable_rethrow(err);
     if (err instanceof AuthError) redirect(err.code === "mfa_required" ? VERIFY_PATH : LOGIN_PATH);
     if (err instanceof SeamError) {
-      if (err.messageKey === NO_TOTP) redirect(TWO_FACTOR_PATH);
+      if (err.messageKey === NO_TOTP) redirect(CONSOLE_2FA_ENROL_PATH);
       notFound();
     }
     throw err;
@@ -97,9 +103,14 @@ export async function requirePlatform(opts: { permission?: PlatformPermission; t
 
 const needsStepUp = (permission: PlatformPermission, stepUp: boolean | undefined) => stepUp === true || STEP_UP_PERMISSIONS.has(permission);
 
+/** A write under `permission` while `platform_read_only` is on (§H.8)? */
+const refusedReadOnly = async (permission: PlatformPermission) => !PLATFORM_READ_ONLY_OK.has(permission) && (await platformReadOnly());
+
 export async function platformAction<T>(permission: PlatformPermission, fn: (ctx: PlatformCtx) => Promise<T>, opts: { stepUp?: boolean } = {}): Promise<ActionResult<T>> {
   try {
+    await assertActionOrigin();
     const ctx = await requirePlatform({ permission, throwOnFail: true });
+    if (await refusedReadOnly(permission)) return { ok: false, error: "read_only", message: PLATFORM_READ_ONLY };
     if (needsStepUp(permission, opts.stepUp) && !ctx.stepUpFresh) return { ok: false, error: "step_up" };
     return { ok: true, data: await fn(ctx) };
   } catch (err) {
@@ -111,9 +122,11 @@ export async function platformAction<T>(permission: PlatformPermission, fn: (ctx
 /** Route handlers under src/app/api/admin/**: the gate first (404), same-origin for state-changing methods, then the role. */
 export async function platformGuard(req: Request, permission: PlatformPermission): Promise<{ ok: true; ctx: PlatformCtx } | { ok: false; response: Response }> {
   if (!getRequestIdentity()) await assertAdminAccess();
-  if (!checkSameOrigin(req)) return { ok: false, response: guardResponse("forbidden", 403) };
+  const safe = isSafeMethod(req);
+  if (!safe && !isSameOriginMutation(req)) return { ok: false, response: guardResponse("forbidden", 403) };
   try {
     const ctx = await requirePlatform({ permission, throwOnFail: true });
+    if (!safe && (await refusedReadOnly(permission))) return { ok: false, response: guardResponse("read_only", 403) };
     if (needsStepUp(permission, undefined) && !ctx.stepUpFresh) return { ok: false, response: guardResponse("step_up", 403) };
     return { ok: true, ctx };
   } catch (err) {

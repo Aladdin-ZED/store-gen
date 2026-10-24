@@ -48,6 +48,10 @@ export interface ValidSession {
   expiresAt: Date;
   /** the store this session last opened (a store-picker hint, never an authorisation; §B.4) */
   lastStoreId: string | null;
+  /** the `impersonation_sessions` row this staff session views a store through (§B.8); the seam re-checks it */
+  impersonationId: string | null;
+  /** the last step-up (TOTP or password) of this session, fresh for 5 minutes (§B.7) */
+  stepUpAt: Date | null;
   user: {
     id: string;
     email: string;
@@ -131,6 +135,8 @@ export async function validateSessionToken(token: string | null | undefined): Pr
       expiresAt: sessions.expiresAt,
       lastSeenAt: sessions.lastSeenAt,
       lastStoreId: sessions.lastStoreId,
+      impersonationId: sessions.impersonationId,
+      stepUpAt: sessions.stepUpAt,
       email: users.email,
       name: users.name,
       role: users.role,
@@ -166,6 +172,8 @@ export async function validateSessionToken(token: string | null | undefined): Pr
     createdAt: row.createdAt,
     expiresAt,
     lastStoreId: row.lastStoreId,
+    impersonationId: row.impersonationId,
+    stepUpAt: row.stepUpAt,
     user: {
       id: row.userId,
       email: row.email,

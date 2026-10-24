@@ -21,6 +21,7 @@ import { assertAdminAccess, getRequestContext, getRequestedAdminPath, hasAdminAc
 import { deleteSessionByToken, revokeUserSessions, rotateSession, validateSessionToken } from "./session";
 import { changeUserPassword } from "./users";
 import type { AdminLocale } from "@/lib/i18n/admin";
+import { getRequestIdentity } from "@/lib/tenancy/context";
 import type { BurstScope } from "@/lib/security/burst-limit";
 import type { ActionResult, PlatformCtx, UserCtx } from "@/lib/tenancy/types";
 
@@ -127,6 +128,8 @@ export async function getPendingMfa(): Promise<PendingMfa | null> {
  * AuthError instead of a redirect.
  */
 export async function requireUser(opts: { permission?: Permission; throwOnFail?: boolean } = {}): Promise<SessionUser> {
+  const identity = getRequestIdentity();
+  if (identity) return requireIdentityUser(opts);
   await assertAdminAccess();
   const { user, pending } = await resolveAuthState();
 
@@ -136,6 +139,27 @@ export async function requireUser(opts: { permission?: Permission; throwOnFail?:
     redirect(pending ? verifyUrl(back) : loginUrl(back));
   }
 
+  if (opts.permission && !can(user.role, opts.permission)) {
+    if (opts.throwOnFail) throw new AuthError("forbidden");
+    redirect(FORBIDDEN_PATH);
+  }
+  return user;
+}
+
+/**
+ * requireUser inside runAsIdentity (tests, docs/STORE-SAAS.md §E.4): the identity stands for the session and the
+ * request, so there is no gate cookie to check; the legacy permission option keeps its meaning.
+ */
+async function requireIdentityUser(opts: { permission?: Permission; throwOnFail?: boolean }): Promise<SessionUser> {
+  // dynamic: the seam imports admin-data/action, which imports this module
+  const { requireSessionUser } = await import("@/lib/tenancy/seam");
+  let user: SessionUser;
+  try {
+    user = await requireSessionUser();
+  } catch (err) {
+    if (opts.throwOnFail || !(err instanceof AuthError)) throw err;
+    redirect(err.code === "mfa_required" ? verifyUrl(null) : loginUrl(null));
+  }
   if (opts.permission && !can(user.role, opts.permission)) {
     if (opts.throwOnFail) throw new AuthError("forbidden");
     redirect(FORBIDDEN_PATH);

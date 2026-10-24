@@ -12,6 +12,12 @@ export const FORBIDDEN_PATH = "/admin/forbidden";
 export const SECURITY_SETTINGS_PATH = "/admin/settings/security";
 /** Notice the Security settings page shows after two-step verification was turned off there. */
 export const TWO_FACTOR_OFF_NOTICE = "two-factor-off";
+/** The account's two-step enrolment page (docs/STORE-SAAS.md §B.7; `/app/account/**`, no store). */
+export const ACCOUNT_TWO_FACTOR_PATH = "/app/account/two-factor";
+/** Where the seam sends a member of a store with "require 2FA for members" who has no TOTP yet (D12). */
+export const STORE_2FA_ENROL_PATH = `${ACCOUNT_TWO_FACTOR_PATH}?for=store`;
+/** Where `requirePlatform` sends a staff member without TOTP: the console stays closed until enrolment (§B.7). */
+export const CONSOLE_2FA_ENROL_PATH = `${ACCOUNT_TWO_FACTOR_PATH}?for=console`;
 
 /** Pages that must never be used as a post-login destination (loops / stale flows). */
 const NON_DESTINATIONS = [LOGIN_PATH, SETUP_PATH, FORBIDDEN_PATH];
