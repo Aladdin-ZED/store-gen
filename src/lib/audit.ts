@@ -2,6 +2,11 @@
  * Append-only audit log (admin security events, settings changes, publishing…).
  * Writing never throws: an audit failure must not break the action being audited, so it is
  * reported to the server log instead. IPs are stored as keyed hashes, never raw.
+ *
+ * Multi-tenant (docs/STORE-SAAS.md §F.5): a row carries the store it concerns (NULL = a platform or auth event) and
+ * the actor kind; `auditFrom(ctx, …)` derives both from a seam context. Tenants read only their store's rows
+ * (`listStoreAudit`), staff every row (`listPlatformAudit`). C0a writes the scope columns; T1 owns the file and
+ * implements the two list functions (§K.1).
  */
 import "server-only";
 import { and, desc, eq, lt, type SQL } from "drizzle-orm";
@@ -9,6 +14,7 @@ import { db } from "@/lib/db/client";
 import { auditLog } from "@/lib/db/schema";
 import { errorSummary } from "@/lib/orders/log";
 import { hashIp } from "@/lib/security/crypto";
+import type { Actor, PlatformCtx, StoreCtx, SystemCtx } from "@/lib/tenancy/types";
 
 /** Known actions (dot-namespaced). Other areas may log their own namespaced actions too. */
 export type AuditAction =
@@ -83,7 +89,14 @@ function sanitizeMeta(meta: Record<string, unknown> | null | undefined): Record<
   return json.length <= MAX_META_CHARS ? clean : { truncated: true, size: json.length };
 }
 
-export async function audit(action: AuditAction, details: AuditDetails = {}): Promise<void> {
+/** Who and which store a row is about (§F.5). Without it: a platform-level row of a user actor (today's rows). */
+export interface AuditScope {
+  storeId: string | null;
+  actorKind: Actor["kind"];
+  impersonatorId?: string | null;
+}
+
+export async function audit(action: AuditAction, details: AuditDetails & { scope?: AuditScope } = {}): Promise<void> {
   try {
     let ipHash: string | null = null;
     if (details.ip) {
@@ -100,6 +113,9 @@ export async function audit(action: AuditAction, details: AuditDetails = {}): Pr
       meta: sanitizeMeta(details.meta),
       ip: ipHash,
       createdAt: new Date(),
+      storeId: details.scope?.storeId ?? null,
+      actorKind: details.scope?.actorKind ?? "user",
+      impersonatorId: details.scope?.impersonatorId ?? null,
     });
   } catch (err) {
     // the failed INSERT's message would carry the entry's meta (e-mails, names): code only
@@ -131,4 +147,39 @@ export async function listAuditEntries(
     ipHash: r.ip,
     createdAt: r.createdAt,
   }));
+}
+
+/**
+ * One audit row from a seam context: a store ctx writes its store and actor (an impersonation row names both
+ * identities, §B.8), a platform ctx its staff member (pass `storeId` for an action on one store), a system ctx the
+ * job. Never throws, like `audit`.
+ */
+export async function auditFrom(ctx: StoreCtx | PlatformCtx | SystemCtx, action: AuditAction, details: AuditDetails & { storeId?: string | null } = {}): Promise<void> {
+  const { storeId, ...rest } = details;
+  if ("store" in ctx) {
+    await audit(action, {
+      ...rest,
+      userId: rest.userId ?? ctx.actor.userId,
+      ip: rest.ip ?? ctx.actor.ip,
+      scope: { storeId: ctx.store.id, actorKind: ctx.actor.kind, impersonatorId: ctx.actor.impersonatorId },
+    });
+  } else if ("job" in ctx) {
+    await audit(action, { ...rest, scope: { storeId: storeId ?? null, actorKind: "system" } });
+  } else {
+    await audit(action, { ...rest, userId: rest.userId ?? ctx.user.id, ip: rest.ip ?? ctx.actor.ip, scope: { storeId: storeId ?? null, actorKind: "platform" } });
+  }
+}
+
+/** A store's own rows (store_id = ctx.store.id), newest first, keyset by `beforeId`; `area` = the action prefix. T1. */
+export async function listStoreAudit(ctx: StoreCtx, opts: { beforeId?: number; limit?: number; area?: string }): Promise<AuditEntry[]> {
+  void ctx;
+  void opts;
+  throw new Error("not implemented: T1 (listStoreAudit)");
+}
+
+/** Every row (staff, `audit.platform`), optionally one store's or one actor kind's. T1. */
+export async function listPlatformAudit(ctx: PlatformCtx, opts: { storeId?: string; actorKind?: string; beforeId?: number }): Promise<AuditEntry[]> {
+  void ctx;
+  void opts;
+  throw new Error("not implemented: T1 (listPlatformAudit)");
 }

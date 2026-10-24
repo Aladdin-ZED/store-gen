@@ -6,6 +6,11 @@
  *
  *   const store = await getSetting("store");
  *   await updateSetting("ai", { tier: "full" }, { id: user.id, ip });
+ *
+ * Multi-tenant API (docs/STORE-SAAS.md §D.10): store keys in `store_settings` through a StoreScope, platform keys in
+ * `settings`; the registries are ./store-registry.ts and ./platform-registry.ts. Signatures frozen at C0a, bodies
+ * T1's (§K.1): until T1 merges they throw "not implemented: T1", and today's single-tenant getSetting / setSetting /
+ * updateSetting below keep working for their callers (deleted in R1.0; lint L3 forbids them afterwards).
  */
 import "server-only";
 import { eq, inArray } from "drizzle-orm";
@@ -14,9 +19,14 @@ import { db } from "@/lib/db/client";
 import { settings } from "@/lib/db/schema";
 import { errorSummary } from "@/lib/orders/log";
 import { decrypt, encrypt } from "@/lib/security/crypto";
+import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
+import type { PlatformSettingInput, PlatformSettingKey, PlatformSettingValue } from "./platform-registry";
 import { SETTINGS, isMaskedSecret, settingSchema, type SettingInput, type SettingKey, type SettingValue } from "./schemas";
+import type { StoreSettingInput, StoreSettingKey, StoreSettingValue } from "./store-registry";
 
 export * from "./schemas";
+export type { PlatformSettingInput, PlatformSettingKey, PlatformSettingValue } from "./platform-registry";
+export type { StoreSettingInput, StoreSettingKey, StoreSettingValue } from "./store-registry";
 
 const TTL_MS = 30_000;
 
@@ -163,4 +173,58 @@ export async function updateSetting<K extends SettingKey>(
 export function invalidateSettings(key?: SettingKey): void {
   if (key) cache().delete(key);
   else cache().clear();
+}
+
+/* ------------------------------------------------------------------ */
+/* Multi-tenant API (§D.10): typed stubs until T1 merges               */
+/* ------------------------------------------------------------------ */
+
+/** The staff member writing a platform key (audited with actor kind "platform"). */
+export interface PlatformActor {
+  id: string;
+  ip?: string | null;
+}
+
+function notImplemented(fn: string, ...args: unknown[]): never {
+  void args;
+  throw new Error(`not implemented: T1 (${fn})`);
+}
+
+/**
+ * A store key, validated (a bad row falls back to the defaults); cached 30 s under `${storeId}:${key}`. Secret keys
+ * open with envelope v2 (scope store:<storeId>, purpose settings:<key>), legacy `purpose_v = 0` rows with openLegacy.
+ */
+export async function getStoreSetting<K extends StoreSettingKey>(scope: StoreScope, key: K, opts?: { fresh?: boolean }): Promise<StoreSettingValue<K>> {
+  return notImplemented("getStoreSetting", scope, key, opts);
+}
+
+/** Several store keys in one query. */
+export async function getStoreSettings<K extends StoreSettingKey>(scope: StoreScope, keys: readonly K[]): Promise<{ [P in K]: StoreSettingValue<P> }> {
+  return notImplemented("getStoreSettings", scope, keys);
+}
+
+/** Replaces a store key; audit `store.settings.updated` with the store id. Throws ZodError when invalid. */
+export async function setStoreSetting<K extends StoreSettingKey>(scope: WriteScope, key: K, input: StoreSettingInput<K>, actor: SettingsActor): Promise<StoreSettingValue<K>> {
+  return notImplemented("setStoreSetting", scope, key, input, actor);
+}
+
+/** Shallow merge; a sensitive field submitted as the mask keeps its stored secret. */
+export async function updateStoreSetting<K extends StoreSettingKey>(scope: WriteScope, key: K, patch: Partial<StoreSettingInput<K>>, actor: SettingsActor): Promise<StoreSettingValue<K>> {
+  return notImplemented("updateStoreSetting", scope, key, patch, actor);
+}
+
+/** Drops one key or every key of a store from this process's cache (invalidateStore calls it). No-op until T1 caches. */
+export function invalidateStoreSettings(storeId: string, key?: StoreSettingKey): void {
+  void storeId;
+  void key;
+}
+
+/** A platform key, cached 30 s under `p:${key}`; secrets with envelope v2 scope `platform`. */
+export async function getPlatformSetting<K extends PlatformSettingKey>(key: K, opts?: { fresh?: boolean }): Promise<PlatformSettingValue<K>> {
+  return notImplemented("getPlatformSetting", key, opts);
+}
+
+/** Platform code only (a platformAction); audit `platform.settings.updated`. */
+export async function setPlatformSetting<K extends PlatformSettingKey>(key: K, input: PlatformSettingInput<K>, actor: PlatformActor): Promise<PlatformSettingValue<K>> {
+  return notImplemented("setPlatformSetting", key, input, actor);
 }

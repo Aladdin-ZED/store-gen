@@ -15,6 +15,7 @@ import { isChoicePick, isFixedPick, LIMITS, optionPhotoCount, type PageDoc } fro
 import { variantIssues } from "@/lib/page/variant-presets";
 import { pixelChecks, type PixelCheckContext } from "@/lib/pixels/checklist";
 import { validateDoc } from "@/lib/page/validate";
+import { isLandingCheckContext, type LandingCheckContext } from "./check-context";
 import { assetRefsIn, fieldLabel, sectionIssues, valuesOfKind } from "./fields";
 import type { LeftTab } from "./store";
 import type { StoreHealth } from "./types";
@@ -50,7 +51,18 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 const NO_PIXEL_CONTEXT: PixelCheckContext = { library: null, health: {}, live: false };
 
-export function buildChecklist(doc: PageDoc, store: StoreHealth, now = Date.now(), pixels: PixelCheckContext = NO_PIXEL_CONTEXT): Checklist {
+/**
+ * The context form (LAN Q15, frozen at C0a) runs today's checks over `ctx.store`, `ctx.now` and `ctx.pixels`;
+ * T4 / P3 add the store-fact rules (zones, policies, confirmation, honesty facts) behind it.
+ */
+export function buildChecklist(doc: PageDoc, ctx: LandingCheckContext): Checklist;
+/** @deprecated the positional form; T4 moves its two callers to the context (LAN Q15) */
+export function buildChecklist(doc: PageDoc, store: StoreHealth, now?: number, pixels?: PixelCheckContext): Checklist;
+export function buildChecklist(doc: PageDoc, storeOrCtx: StoreHealth | LandingCheckContext, nowArg?: number, pixelsArg?: PixelCheckContext): Checklist {
+  const ctx = isLandingCheckContext(storeOrCtx) ? storeOrCtx : null;
+  const store: StoreHealth = ctx ? ctx.store : (storeOrCtx as StoreHealth);
+  const now = (ctx ? ctx.now : nowArg) ?? Date.now();
+  const pixels = (ctx ? ctx.pixels : pixelsArg) ?? NO_PIXEL_CONTEXT;
   const errors: CheckItem[] = [];
   const warnings: CheckItem[] = [];
   const add = (item: CheckItem) => (item.level === "error" ? errors : warnings).push(item);

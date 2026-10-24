@@ -1,6 +1,7 @@
 # Store Gen SaaS: core contract (tenancy, identity, routing, data, security, storage, jobs, shell, releases)
 
-Status: **core contract, revision 5 (critic r2 integrated)** (2026-10-24, lead architect). **Revision 5** applies the
+Status: **core contract, revision 6 (wording tidy)** (2026-10-24, lead architect). **Revision 6** tidies the confirming critic's wording minors (W1 … W10, drift only, no decision changed),
+one line per item in **§P.4**. **Revision 5** applies the
 final critic's 22 issues against the revision-4 set (CRIT2-1 … CRIT2-22: 7 majors, 15 minors, mostly drift between this
 document and parts revised in parallel) here and in every part they name, one line per id in **§P.3**. Reviewed twice. Round
 1: the six reviewer passes (OPS, ENGC, ENGP, UX, SEC, QUAL) found 4 blockers, ~45 majors and ~40 minors against
@@ -11,8 +12,8 @@ every round-1 resolution, resolves the critic's findings in the body and decides
 OPE-§R2, AI-§V, DES-§30). This document is the contract every build agent follows for everything cross-cutting: the
 tenant model, identity, routing and domains, the full table list, the store-scope seam, security, storage, jobs, the
 admin shell, tests, releases and file ownership. Product depth lives in six part specs written on top of it:
-`docs/saas/spec/platform.md`, `storefront.md`, `landing.md`, `operations.md`, `ai.md`, `design.md` (all at revision 5,
-critic r2 integrated).
+`docs/saas/spec/platform.md`, `storefront.md`, `landing.md`, `operations.md`, `ai.md`, `design.md` (revision 6, wording tidy,
+except `operations.md`, which stays at revision 5, critic r2 integrated).
 A part spec may refine the columns of the tables this document assigns to it (§D.9) and add product behaviour; it may
 not rename tables, change `store_id` rules, change a seam signature (§E) or move a file between tracks (§K). Each part
 spec ends with a section "Requests to the core"; **revision 2 decided every first-round request in appendix §Q.1-Q.6
@@ -133,7 +134,7 @@ marked **deviates R-Dx** or **refines R-Dx** changes or sharpens a settled decis
 | D6 | Platform role is a column `users.platform_role` (default `none`), not a table. | `validateSessionToken` already joins `users` (`src/lib/auth/session.ts:118-134`): zero extra queries. |
 | D7 | **Entitlements:** `entitlement(store, key)` = override > boost > plan > platform default, **then a lifecycle state cap** (§A.5). There is no "pending plan". **Refines R-D12, R-D15.** | Approval is one status change, not a plan swap; the plan a store has survives approval and restrictions. |
 | D8 | Plans `beta` (default for every store), `pro`, `internal` are seeded with starting limits (§A.4), editable in the console. No prices. Orders are never blocked by a quota. | Lead default; R-D15. |
-| D9 | **Signup mode default is derived:** `invite` while S mode is off (temporary domain), `approval` once `STORE_ROOT_DOMAIN` + `EDGE_KEY` are set **and the platform Turnstile widget (`platform_turnstile`) is configured** (rev 5, CRIT2-13: until it is, the default stays `invite`). The console can override, **but never to `approval` or `open` while `platform_turnstile` is unset** (the setting write is refused with `turnstile_required`). | R-D5 and the lead default; no manual switch to forget on domain day; owner summary item 20 promises a human check once public sign-ups open, and D69's refusal only bites when a widget exists, so without one bots could take the 50 daily sandboxes. |
+| D9 | **Signup mode default is derived:** `invite` while S mode is off (temporary domain), `approval` once `STORE_ROOT_DOMAIN` + `EDGE_KEY` are set **and the domain check V13 "human check ready" has passed** (§C.10 step 3: `platform_turnstile` configured, the new hostnames among its hostnames and a verified test token on `/signup`; rev 5, CRIT2-13, one rule since rev 6: until V13 passes, the default stays `invite`). The console can override, **but never to `approval` or `open` while `platform_turnstile` is unset** (the setting write is refused with `turnstile_required`). | R-D5 and the lead default; no manual switch to forget on domain day; owner summary item 20 promises a human check once public sign-ups open, and D69's refusal only bites when a widget exists, so without one bots could take the 50 daily sandboxes. |
 | D10 | **Invites are bound to the invited e-mail.** 32-byte link token, sha256 at rest, shown once, 7 days, single use, revocable; R1 hands the link over by copy (R-D51). | A forwarded or leaked link can't be redeemed by a different account; the inviter never sees a password (AUTH-07). |
 | D11 | **Password reset in R1 = a staff-made one-time link** (`password_resets`, 60 min, hashed), sent by the staff member over WhatsApp. Never a temporary password. R2 self-service e-mail uses the same table. | No e-mail exists yet (R-D51); closes AUTH-08. |
 | D12 | **"Require 2FA for members" is enforced in the seam from R1** (column `stores.require_member_2fa`, UI in R1). **Deviates** from RESEARCH placing TN-13 in R3. | The check lives in `requireStoreMember`, which freezes in R1.0; adding it later means reopening the frozen seam. It is ~10 lines. |
@@ -656,8 +657,8 @@ Signup modes (platform setting `platform.signup.mode`): `closed` (no form; conso
 platform invite code is required, §B.6) · `approval` (anyone; the store starts `pending`) · `waitlist` (e-mail + phone
 only, saved to `waitlist`; staff promote entries to invites) · `open` (approval mode, but the store starts `active`
 when `autoApprove(mode, score, { trustedCreator, setting })` says so, PLA Q.9). Default when no value is stored:
-`invite` if S mode is off, `approval` if it is on **and `platform_turnstile` is configured**, else `invite` (D9 rev 5,
-CRIT2-13). **`approval` and `open` require a configured `platform_turnstile`:** the console's mode write is refused
+`invite` if S mode is off, `approval` if it is on **and the domain check V13 has passed** (§C.10 step 3: a configured
+`platform_turnstile`, the new hostnames and a verified test token), else `invite` (D9 rev 5, CRIT2-13; one rule, rev 6). **`approval` and `open` require a configured `platform_turnstile`:** the console's mode write is refused
 (`turnstile_required`) without it, and `signupAction` treats a stored `approval` / `open` value with no widget (the
 widget deleted later) as `invite` and raises the platform alarm `signup_unguarded`.
 
@@ -1231,8 +1232,8 @@ Cache Rule, Worker + secret + route, Hostinger CDN off, TLS mode Full strict). T
    "console"`), a cookie-less `HEAD https://<root>/admin` answers the neutral 404, and `consoleHref()` links point at
    `ADMIN_HOST`), **and V13 "human check ready"** (rev 5, CRIT2-13: `platform_turnstile` is configured with the new
    domain among its hostnames and a test token verifies on `/signup`; the Domains page shows the check and links the
-   Turnstile settings); then the signup mode default flips to `approval` (D9), with the D69 ceilings in force. Without
-   V13 the default stays `invite`.
+   Turnstile settings); then the signup mode default flips to `approval` (D9, §B.2: the same one rule), with the D69 ceilings in force.
+   Until V13 passes, the default stays `invite`, whatever else is configured.
 4. The cron URL, Meta/TikTok domains, Turnstile hostnames and Sheets links are updated by the owner (checklist in the
    console).
 
@@ -3042,7 +3043,7 @@ slot 9 may use, PLA Q.18):
 | 1 | `sheets.push` (IN-01; `integrations.ts`, P5) | push | tick | 18 s | ordered by **oldest pending order first** (rev 3, ENGC-33; not plain round-robin) over stores matching the **`pending_sheets` predicate** = bound and enabled and (`sheet_status` pending / failed past backoff, or `sheet_dirty > 0`, or a pull due); **≤ 3 Sheets calls per store per tick** (one read, one append, one batchUpdate; the read also serves the pull, OPE Q.11); platform bucket `p:sheets:sa` 50 / 60 s for the shared service account (R-D24). **Capacity (rev 3):** `floor(50 / 3)` ≈ **16 stores per tick** when every one has work, i.e. a store is served every `ceil(active / 16)` ticks; the backlog alarm of §H.5 scales with that figure, and the remedy past ~40 active Sheets stores is the per-store `sheets_sa` (OPE Q.3d, R2) |
 | 2 | `sheets.pull` (P5) | pull | tick | 12 s | `s:<sid>:sheets:pull` ≤ 1 per 290 s per store, round-robin cursor; stores served by slot 1's read are skipped |
 | 3 | `outbox` (core drainer; handlers `capi`, `telegram` P5; `webhook` S5 R2; `carrier`, `whatsapp` D2 R3; `mail` S5 R2; `push` D5 R3) | drain | tick | 13 s shared | `perStorePerTick` per handler (`capi` 20, `telegram` 10, `webhook` 20, `carrier` ≤ 50 shipments), then the next store |
-| 4 | `renders` (§H.3, P8) | render | tick | 12 s | ≤ 10 pages per store per tick **and ≤ 4 s of CPU per tick** (rev 3, ENGC-11); reason `product` handled by `republishAttached` (P3/S1, R2) |
+| 4 | `renders` (§H.3, P8) | render | tick | 12 s | ≤ 10 pages per store per tick **and ≤ 4 s of CPU per tick** (rev 3, ENGC-11); every render job of an attached page (`pages.product_id` set), whatever its reason, handled by `republishAttached` (P3/S1, R2), which picks `sync` vs in place by diff (§H.3, rev 5 CRIT2-17) |
 | 4b | `ai.batches` (`ai.ts`, P7; AI R8) | poll / ingest / submit Message Batches | tick | 8 s | items across stores in one batch; ingestion idempotent per item, resumes next tick; **skipped** (not failed) when `ai_generation_enabled` is off for submission (open batches still ingested, §H.8) |
 | 4c | `ai.jobs` (`ai.ts`, P7; D56, §H.12) | orphan recovery **and the batch hand-off** of driverless `ai_jobs` stages | tick | **1 s guaranteed + the leftover of slots 1-5, up to 5 s** (rev 4, AI R41: DB writes only) | marks orphans (a `running` job with `heartbeat_at` older than 60 s has its stage re-claimed once, `stage_attempts`, then `failed` with the instant result kept) and expires `queued` rows nobody polled for 30 min; **the cron never runs a model call inside the tick** (rev 4, AI R41 option b: a ≤ 90 s stage cannot fit a slot without starving slots 5-9, and at the tick's tail the 95 s it needs is never left once slot 9 has run): a job with no live lease, no poll and no `after()` for 60 s has its next stage submitted as a **one-item Message Batch** (`batch:<stage>`, collected by slot 4b, milliseconds of tick time), so the cron is still the third driver of a stage-resumable job; the poll request is the primary driver (AI-§B.13) |
 | 5 | `exports`, `backup`, `purge` (§F.9, §H.6, §H.9; P8), `imports.commit` (S3, R2) | tick | 11 s shared | one job row at a time, resumable cursor; `imports.commit` in slices of 2,000 rows |
@@ -3076,8 +3077,8 @@ budgets of the registered jobs exceed 95 s or a job declares no budget.
   the `pixels` chunk when the store render context's `purchaseInBrowser` is false, i.e. `triggerFor(page) !== "order"`,
   zero runtime bytes, runtime config v2 unchanged); **a BiRefNet mask landing for an asset whose live pages render it
   with an estimated cutout (`cutout`, 0005, rev 3 UX-39 / DES-R22: enqueued by the media pipeline, the re-render swaps
-  `framed-stage` → `cutout-stage` in place; P8 handler, DES-§4.11)**; product price/options change for attached landings
-  (`product`, R2, R-D42); verified reviews changed on a page (`reviews`, 0007, STO-R6); a runtime fix that needs live
+  `framed-stage` → `cutout-stage` in place; P8 handler, DES-§4.11)**; a product change for attached landings
+  (`product`, R2, R-D42; any job of an attached page runs through `republishAttached`, by diff, below); verified reviews changed on a page (`reviews`, 0007, STO-R6); a runtime fix that needs live
   pages rebuilt (`runtime`, owner action in the console).
 - The `renders` job claims jobs (lease pattern of §H.1), renders through `renderAndCommit` with the store context of
   **now** (base, origin, identity, Turnstile, resolver, `addons`, `purchaseInBrowser`) and the **published version's
@@ -3087,11 +3088,12 @@ budgets of the registered jobs exceed 95 s or a job declares no budget.
   `runtime_v = 1`, which no Store Gen page has, is skipped and listed for a manual republish); no new version row is
   created (a re-render is not a publish, and 600-900 KB per version would eat the 3 GB quota). Then
   `invalidateStore(storeId)` for the render cache, and a Worker purge when edge caching exists (OS-12).
-- **The one exception (D50 refined, LAN Q24; narrowed in rev 3, STO-R41 / ENGP-10):** reason `product` is handled by
-  `republishAttached(scope, pageId)` (P3/S1, R2), which publishes a version of kind `sync` (a real publish: new row,
-  checksum, gates) **only for a `prices` or `options` change**, because the server prices orders from the version doc;
-  a `stock_transition` or `content` change of the product re-renders the attached pages **in place** like every other
-  reason (no version row; `product_rev` rewritten). `sync` versions are pruned first under `versions_kept_per_page`.
+- **The one exception (D50 refined, LAN Q24; narrowed in rev 3, STO-R41 / ENGP-10; restated rev 6):** every render job of
+  an attached page, **whatever its reason**, is handled by `republishAttached(scope, pageId)` (P3/S1, R2), which
+  publishes a version of kind `sync` (a real publish: new row, checksum, gates) **only when the materialised mirror's
+  priced fields differ from the published version doc** (the server prices orders from the version doc); when they do
+  not (a stock transition or content change alone) the attached page re-renders **in place** like every other page (no
+  version row; `product_rev` rewritten). `sync` versions are pruned first under `versions_kept_per_page`.
   **Rev 5 (CRIT2-17): the branch is chosen by diff, never by the job's reason or change kind.** `render_jobs` carries no
   change column and dedupes one pending job per page across **every** reason, so a pending stock, content, address or
   `store_info` job may absorb a later price change. Therefore every render job of a page with `pages.product_id` set
@@ -3940,6 +3942,15 @@ context) **live in that track's row below**, not in C0: C0a only fixes their sig
 | `docs/DESIGN.md` (b) | **DG-01 (DESIGN v3)**, written by the design lead during C0 (docs only), so no build agent reads the old bible (GEN-14); its budgets table is the §M.2 source |
 | `src/lib/page/schema.ts` (a; frozen contract, one additive change) | the DES-§4.1 constants (`GRAMMARS`, `COLOR_STRATEGIES`, `TREATMENTS`, `LADDERS`, `DEPTHS`, `MASKS`, `EASE_FAMILIES`, `REVEALS`), the `ThemeLook` object and `look: ThemeLook.optional()` in `ThemeSpec` with **no default** (DES-R1), **as DES-§4.5.1 now writes it** (rev 4, DES N6: `ThemeLook.em` includes `"none"` for G26 `none`, `ThemeLook.locks` adds `"G23"`, max 7 entries; DESIGN v3 §2.5 lists `data-emphasis="none"` and P6's `THEME_ATTR_VALUES` follows it, `theme:check` keeps the two equal); render-check and the published-checksum boot task must show 0 changed checksums on existing docs — the one PageDoc v2 change of R1, additive and optional |
 
+**Maintainer build note (2026-10-24).** Three build decisions for C0: (1) the "extension skeletons" row and every R1.0
+`package.json` script entry are done in **C0a**, not C0b, so no track touches `package.json` or a shared skeleton (C0b
+keeps the tenancy lint, `test:ownership` and its baseline, DESIGN v3, the `Bucket` builders with the deprecated
+`rateLimit` overload, and the `budgets.json` compositions); (2) C0a writes every frozen cross-track signature as a
+**typed stub that compiles**: it throws `not implemented: <track>` or returns the documented safe default, and where
+the stub lives in an existing file that has a working function with another signature, the old function keeps working
+for its callers (a deprecated overload or an adapter), so `main` typechecks and behaves as before; (3) the **minimal
+working seam** (~150 lines) is real, not a stub, so every track runs its pages end to end on XAMPP from C0a's merge.
+
 C0a exit: `tsc` green (the deprecated `rateLimit` overload keeps today's callers compiling); today's `npm test` green;
 `drizzle/0004` applies on an empty `cod_test_*` DB; one page under `/app/<h>` renders through the minimal seam on
 XAMPP. C0b exit: `test:tenancy-lint` runs standalone and reports today's violations, `test:ownership` is green.
@@ -4134,7 +4145,7 @@ AI-§R, DES-§26 and STO-§27): no file has two owners in one phase; the prose o
 reveal component (P6) is now one owner per file (P6 the component, P2 the step); the one file with two owners inside it
 (`src/lib/design/types.ts`: frozen shapes + P6 exports) is split into `types.frozen.ts` (maintainer) and `types.ts`
 (P6, re-exporting); files the parts named in rev 4 got their row (P3 `selftest-checklist.ts` and `pages/**`, P2
-`scripts/qa/e2e/*.ts`, P7 `render-cases/ai.ts` / `wow-demo/steps/ai.ts`, the R2 / R3 rows of §K.4 / §K.5). Imports of
+`scripts/qa/e2e/{pulse,admin-perf}.ts` (two named files, not the whole `e2e/` directory: P7 owns `e2e/wizard.ts`), P7 `render-cases/ai.ts` / `wow-demo/steps/ai.ts`, the R2 / R3 rows of §K.4 / §K.5). Imports of
 another track's finished module in merge order (P3 → P4's `window.ts` and `CallingWindowEditor`; S4 → S1's
 `product-picker.tsx` and v3 functions) are reads, never shared ownership. **Rev 5 (CRIT2-6):** imports of a track that
 merges **later** are imports of its **P0 stub**, never of a finished module: P2 (merging second) builds against P6's
@@ -4257,7 +4268,7 @@ serialised `EffectiveWindow` as they are)) and the `stores.catalog_version` bump
 changes, `store` / `policies` setting writes **and (rev 4, STO C6) every `ops` write that changes `callingWindow`,
 `windowOverrides` or closed dates (P4's `saveOpsSettingsAction` / `saveCallingWindowAction`: the store footer, the
 contact hours and `#sg-config.checkout.callWindow` are rendered from it) and P8's `cutout` render handler, once per store
-whose active products' `asset_refs` contain the asset (STO-D47)**, `republishAttached` as the `product` render handler for `prices` / `options` changes only (LAN Q24, STO-R41),
+whose active products' `asset_refs` contain the asset (STO-D47)**, `republishAttached` as the handler of every render job of an attached page whatever its reason, `sync` vs in place chosen by diff of the mirror's priced fields against the published doc (LAN Q24, STO-R41; §H.3, CRIT2-17),
 **(rev 2.1, STO-R25)** the import line of `src/lib/render/prepublish/storefront.ts` in `prepublish.ts` and the
 `registerBudgetProfile(kind, profile)` calls for the STO-§6.1 kinds (D66, §M.2; the storefront file also registers
 `storefront:*` items under the three codes, STO-§23.6), `src/storefront/{types,schema,kinds,fold}.ts` as frozen
@@ -5277,6 +5288,31 @@ DES-§30.1, PLA-§R "Critic round 2 (revision 5)", STO-§30.3, OPE-§R2.1). One 
 **Rejected in this round: none.** Three findings were applied in the alternative the finding offered (CRIT2-4 option b,
 CRIT2-7 option b, CRIT2-18 option 1) and one with a change (CRIT2-5: migration 0004, not 0005, with the reason above).
 Re-freeze of the landing chunk: **still not needed** (no rev 5 change touches the frozen chunk).
+
+### P.4 Wording tidy (revision 6)
+
+The confirming critic's ten wording minors (drift only; no decision changes). One line per item: what changed, where.
+
+- **W1**: `createProduct(ctx, { facts })` / `setThemeDraft(ctx, direction)` are the only spellings (core unchanged); the
+  stale `scope` forms were fixed in LAN-§4 (store-mode onboarding) and STO-§4.5.
+- **W2**: the AI Director's `photoQuality` advice uses design's slot-relative H13 rule (DS54), not a fixed ≥ 1,600 px.
+  Where: AI-§A.8.4 (images paragraph).
+- **W3**: `republishAttached` handles every render job of an attached page whatever its reason and picks `sync` vs in
+  place by diff (CRIT2-17); no text ties it to `prices` / `options` only. Where: §H.2 slot 4 row, §H.3 triggers bullet and
+  "The one exception", §K.4 S1 contract-step list.
+- **W4**: PLA-§15.2's alarm catalogue lists `signup_unguarded` and names the refusal code `turnstile_required`.
+- **W5**: one signup-default rule: `invite` until V13 "human check ready" passes (a configured `platform_turnstile`, the
+  new hostnames, a verified test token), then `approval`. Where: D9, §B.2, §C.10 step 3; PLA-§3.1 mode table, §16.3.
+- **W6**: rev 5 notes on AI-§B.13 step 3 and the ai review rows OPS-11, ENGP-2 (both rounds), QUAL-10 (round 1) and the
+  requests R21 / R27, so no rev 4 wording contradicts "`advanceJob` has no cron driver", the configured-window rule or
+  `test:ai-eval` in `test:slow`.
+- **W7**: the landing glossary's report link is `reportUrl(store, path)` with `?p=`, on live, test and preview renders
+  (§C.6). Where: LAN-§0 glossary.
+- **W8**: DES DS4: the builder's `texture` override no longer wins; `data-texture` is always `none`; an owner-chosen
+  `grain` is ignored with a one-line builder notice. Where: DES-§0 DS4, DES-§4.5.2 precedence bullet, DES-§4.10.1 grain paragraph.
+- **W9**: P2's e2e files are `scripts/qa/e2e/{pulse,admin-perf}.ts`, not the `e2e/*.ts` glob (P7 owns `e2e/wizard.ts`).
+  Where: §K.2 closing paragraph.
+- **W10**: LAN-§27.4 N2 carries a rev 5 note: `calling-window.json` became `src/lib/callcenter/window.fixtures.ts` (P4).
 
 ---
 

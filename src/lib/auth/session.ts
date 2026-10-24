@@ -19,7 +19,8 @@ import {
   SESSION_IDLE_TTL_MS,
   SESSION_TOUCH_INTERVAL_MS,
 } from "./config";
-import type { Role } from "./permissions";
+import { isAdminLocale, type AdminLocale } from "@/lib/i18n/admin";
+import type { PlatformRole, Role } from "./permissions";
 
 /** newToken(32) → 43 base64url chars */
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
@@ -45,12 +46,18 @@ export interface ValidSession {
   mfaPassed: boolean;
   createdAt: Date;
   expiresAt: Date;
+  /** the store this session last opened (a store-picker hint, never an authorisation; §B.4) */
+  lastStoreId: string | null;
   user: {
     id: string;
     email: string;
     name: string;
+    /** @deprecated the single-tenant role (STORE-SAAS §E.1: SessionUser loses it once T2 moves its callers) */
     role: Role;
     totpEnabled: boolean;
+    platformRole: PlatformRole | "none";
+    /** admin UI locale; null = the browser's */
+    locale: AdminLocale | null;
   };
 }
 
@@ -123,10 +130,13 @@ export async function validateSessionToken(token: string | null | undefined): Pr
       createdAt: sessions.createdAt,
       expiresAt: sessions.expiresAt,
       lastSeenAt: sessions.lastSeenAt,
+      lastStoreId: sessions.lastStoreId,
       email: users.email,
       name: users.name,
       role: users.role,
       totpEnabled: users.totpEnabled,
+      platformRole: users.platformRole,
+      locale: users.locale,
       disabled: users.disabled,
     })
     .from(sessions)
@@ -155,7 +165,16 @@ export async function validateSessionToken(token: string | null | undefined): Pr
     mfaPassed: row.mfaPassed,
     createdAt: row.createdAt,
     expiresAt,
-    user: { id: row.userId, email: row.email, name: row.name, role: row.role, totpEnabled: row.totpEnabled },
+    lastStoreId: row.lastStoreId,
+    user: {
+      id: row.userId,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      totpEnabled: row.totpEnabled,
+      platformRole: row.platformRole,
+      locale: isAdminLocale(row.locale) ? row.locale : null,
+    },
   };
 }
 
@@ -183,11 +202,13 @@ export async function deleteSessionByToken(token: string | null | undefined): Pr
   return id;
 }
 
-/** Ends every session of a user (role change, disable, password reset…), optionally keeping one. */
-export async function revokeUserSessions(userId: string, opts: { exceptId?: string } = {}): Promise<number> {
-  const where = opts.exceptId
-    ? and(eq(sessions.userId, userId), ne(sessions.id, opts.exceptId))
-    : eq(sessions.userId, userId);
+/**
+ * Ends every session of a user (role change, disable, password reset…), optionally keeping one.
+ * `exceptSessionId` is the PLA Q.19 name of `exceptId` (both accepted until T2 moves the callers).
+ */
+export async function revokeUserSessions(userId: string, opts: { exceptSessionId?: string; exceptId?: string } = {}): Promise<number> {
+  const except = opts.exceptSessionId ?? opts.exceptId;
+  const where = except ? and(eq(sessions.userId, userId), ne(sessions.id, except)) : eq(sessions.userId, userId);
   const [result] = await db.delete(sessions).where(where);
   return result.affectedRows;
 }

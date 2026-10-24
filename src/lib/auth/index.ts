@@ -16,13 +16,17 @@ import { clearSessionCookie, readSessionToken, setSessionCookie } from "./cookie
 import { AuthError, AuthInputError } from "./errors";
 import { limits } from "./attempts";
 import { FORBIDDEN_PATH, loginUrl, verifyUrl } from "./paths";
-import { can, type Permission, type Role } from "./permissions";
+import { legacyCan as can, type Permission, type PlatformRole, type Role } from "./permissions";
 import { assertAdminAccess, getRequestContext, getRequestedAdminPath, hasAdminAccess } from "./request";
 import { deleteSessionByToken, revokeUserSessions, rotateSession, validateSessionToken } from "./session";
 import { changeUserPassword } from "./users";
+import type { AdminLocale } from "@/lib/i18n/admin";
+import type { BurstScope } from "@/lib/security/burst-limit";
+import type { ActionResult, PlatformCtx, UserCtx } from "@/lib/tenancy/types";
 
 export type { Role, Permission } from "./permissions";
-export { can, ROLES, PERMISSIONS, ROLE_LABELS, isRole, permissionsFor, homePathFor } from "./permissions";
+// legacy single-tenant API (`can` = legacyCan) until T2/T4 move the callers; new code imports `can` from ./permissions
+export { legacyCan as can, ROLES, PERMISSIONS, ROLE_LABELS, isRole, permissionsFor, homePathFor } from "./permissions";
 export { AuthError, AuthInputError, type AuthErrorCode } from "./errors";
 export {
   ADMIN_HOME_PATH,
@@ -39,6 +43,10 @@ export {
 export { assertAdminAccess, hasAdminAccess, getCspNonce, getRequestContext, type RequestContext } from "./request";
 export { revokeUserSessions, purgeExpiredSessions } from "./session";
 export {
+  banUser,
+  unbanUser,
+  createPasswordResetLink,
+  createAccount,
   createUser,
   listUsers,
   countUsers,
@@ -58,9 +66,16 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
+  /** @deprecated the single-tenant role of today's /admin; store roles come from the membership (STORE-SAAS §E.1, removed by T2) */
   role: Role;
   totpEnabled: boolean;
   sessionId: string;
+  /** staff role of the console (§A.3.3); "none" for every seller */
+  platformRole: PlatformRole | "none";
+  /** admin UI locale (§I.5); null = the browser's */
+  locale: AdminLocale | null;
+  /** the store this session last opened: a store-picker hint, never an authorisation (§B.4) */
+  lastStoreId: string | null;
 }
 
 /** A signed-in user who still owes the second factor. */
@@ -91,7 +106,7 @@ const resolveAuthState = cache(async (): Promise<AuthState> => {
     return { user: null, pending: null };
   }
   return {
-    user: { ...session.user, sessionId: session.id },
+    user: { ...session.user, sessionId: session.id, lastStoreId: session.lastStoreId },
     pending: null,
   };
 });
@@ -175,4 +190,48 @@ export async function changePassword(currentPassword: string, newPassword: strin
   if (!rl.ok) throw new AuthInputError("Too many attempts. Wait a few minutes and try again.");
   await changeUserPassword(user.id, currentPassword, newPassword, { keepSessionId: user.sessionId, ip: ctx.ip });
   await rotateCurrentSession(user);
+}
+
+/* ------------------------------------------------------------------ */
+/* §E.2 user and public entry points (T2; C0a typed stubs)             */
+/* ------------------------------------------------------------------ */
+
+/** The in-memory burst limiter's names (src/lib/security/burst-limit.ts) a public form passes. */
+export type BurstName = BurstScope;
+
+function notImplemented(fn: string, ...args: unknown[]): never {
+  void args;
+  throw new Error(`not implemented: T2 (${fn})`);
+}
+
+/** Account pages (/app/account/**): the session only, no store, no permission; same-origin first and the §E.2 error mapping. */
+export async function userAction<T>(fn: (ctx: UserCtx) => Promise<T>): Promise<ActionResult<T>> {
+  return notImplemented("userAction", fn);
+}
+
+/** §B.7: a TOTP code refreshes `sessions.step_up_at` (bucket p:mfa:stepup:<userId> 5 / 15 min); the console's step-up sheet. */
+export async function stepUpAction(code: string): Promise<ActionResult<{ until: string }>> {
+  return notImplemented("stepUpAction", code);
+}
+
+/** rev 4 (PLA Q4.8, §B.7): the tenant step-up without TOTP (bucket p:password:<userId>, the scrypt semaphore); refused under impersonation. */
+export async function stepUpWithPasswordAction(password: string): Promise<ActionResult<{ until: string }>> {
+  return notImplemented("stepUpWithPasswordAction", password);
+}
+
+/**
+ * rev 4 (PLA Q4.7, §F.9): self-service (UserCtx, no target) or staff (PlatformCtx + `users.manage` ↑ + target);
+ * refuses `owns_store` (the user owns a non-purged store) and `is_staff`.
+ */
+export async function deleteUserAccount(ctx: UserCtx | PlatformCtx, target?: { userId: string; reason: string }): Promise<void> {
+  return notImplemented("deleteUserAccount", ctx, target);
+}
+
+/** Public forms (/signup, /invite, /reset, /report): Turnstile, the burst limit, the DB buckets, generic answers. */
+export async function publicAction<T>(
+  name: string,
+  fn: (ctx: { ip: string; ua: string }) => Promise<T>,
+  opts: { turnstile: "required" | "when-configured" | "challenge"; burst: BurstName },
+): Promise<ActionResult<T>> {
+  return notImplemented("publicAction", name, fn, opts);
 }

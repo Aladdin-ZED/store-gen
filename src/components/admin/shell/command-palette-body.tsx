@@ -30,7 +30,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { logout } from "@/lib/auth/actions";
-import { can, type Role } from "@/lib/auth/permissions";
+import { legacyCan as can, type Role } from "@/lib/auth/permissions";
 import type { SearchHit } from "@/lib/admin-data/search";
 import { Kbd } from "./kbd";
 import { navFor } from "./nav";

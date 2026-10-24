@@ -1,6 +1,6 @@
 # Store Gen SaaS part spec: platform console and the tenant SaaS layer
 
-Status: **part spec, revision 5 (critic r2 integrated)** (2026-10-24, platform part architect; revision 5 applies the
+Status: **part spec, revision 6 (wording tidy)** (revision 6 fixes the confirming critic's wording minors that name this file, one line per item in **PLA-§R "Wording tidy (revision 6)"**; revision 5 integrated critic r2) (2026-10-24, platform part architect; revision 5 applies the
 final critic's issues that name this file, CRIT2-6, CRIT2-13, CRIT2-14, CRIT2-18, CRIT2-19, listed in **PLA-§R "Critic
 round 2 (revision 5)"**, against core revision 5; revision 4 integrated the round-2 review; revision 3
 integrated the round-1 review, revision 2 was the elevated spec of the same day). Built on `docs/STORE-SAAS.md`
@@ -638,7 +638,7 @@ export const OnboardingSchema = z.object({
 |---|---|---|---|
 | `closed` | "Sign-ups are closed for now" + the support WhatsApp button when set | — | staff invites still work (`/invite/staff/<token>`, PD13) |
 | `invite` (default while S mode is off, **and while `platform_turnstile` is unset even in S mode**, core D9 rev 5, CRIT2-13) | the two-step form with an "Invite code" field first | `pending`, or `active` when the code has `auto_approve` | codes `SG-` + 12 Crockford chars (core §B.6) |
-| `approval` (default once S mode is on **and `platform_turnstile` is configured**, core D9 rev 5) | the two-step form | `pending` | Turnstile **required** (rev 3, PD68: a missing or invalid token is refused with `auth.signup.challenge`, never scored; **rev 5, CRIT2-13: the mode itself needs a configured widget**, `savePlatformSettingsAction` refuses `approval` / `open` without one with `turnstile_required`, and a stored mode whose widget was removed falls back to `invite` with the alarm `signup_unguarded`, core §B.2, §H.5) |
+| `approval` (default once S mode is on **and the domain check V13 has passed**, i.e. a configured `platform_turnstile`, the new hostnames and a verified test token, core D9 / §B.2 / §C.10, one rule since rev 6) | the two-step form | `pending` | Turnstile **required** (rev 3, PD68: a missing or invalid token is refused with `auth.signup.challenge`, never scored; **rev 5, CRIT2-13: the mode itself needs a configured widget**, `savePlatformSettingsAction` refuses `approval` / `open` without one with `turnstile_required`, and a stored mode whose widget was removed falls back to `invite` with the alarm `signup_unguarded`, core §B.2, §H.5) |
 | `waitlist` | e-mail + phone (+ optional "What do you sell?") | — | a `waitlist` row; staff promote rows to single-use codes (§3.3) |
 | `open` | the two-step form, Turnstile **required** (a configured widget is a precondition of the mode, rev 5 CRIT2-13) | `active` when PD3 auto-approval passes, else `pending` | — |
 
@@ -2253,7 +2253,7 @@ Job `platform.alarms` (every tick, ≤ 1 s): evaluates `getHealth()`'s cheap sub
 alarm sends `staff.alarm` (`vars: { alarm, value }`, dedupe `alarm:<code>:<YYYY-MM-DDTHH>`) to `platform_staff` with
 `minRole: "admin"` and appears in Needs attention; a recovered alarm sends nothing (the panel shows "Recovered 14:20").
 
-Alarm codes (rev 2 complete list; the first eight are revision 1's, the rest core §H.5 rev 2 and PD57):
+Alarm codes (rev 2 complete list, extended in rev 3, rev 4 and rev 6; the first eight are revision 1's, the rest core §H.5 rev 2 and PD57):
 `no_tick` (10 min) · `outbox_dead` (any kind) · `db_70` / `db_85` · ~~`disk_low` (< 2 GiB)~~ (rev 4: replaced by
 `data_dir_70` / `data_dir_85`, below) · `inodes_high` (> 300,000) · `error_spike` (> 50 of one code in an hour) ·
 `sheets_backlog` (a store beyond the scaled threshold, below) · `commerce_quiet` (§5.3 rule) ·
@@ -2270,7 +2270,10 @@ platform-wide in an hour, or ≥ 3 on one store in 24 h) · **(rev 4, core §H.5
 `edge_bad_key` (≥ 10 unverifiable `x-sg-edge` in a minute) · `gate_mismatch` (the build was not made from the commit
 the offline gate passed) · `pool_wait` (pool wait p95 > 500 ms over 5 min) · `tick_lag` (event-loop lag p95 > 250 ms
 during a tick) · `health_stale` and `health_job_slow` with the measured-cycle rules of PLA-§6.3.4 (PD78) ·
-`sheets_backlog` with the scaled threshold `max(15, 5 × ceil(activeSheetsStores / 16))` min. The AI alarms are raised
+`sheets_backlog` with the scaled threshold `max(15, 5 × ceil(activeSheetsStores / 16))` min · **(rev 6, core §H.5 rev 5,
+CRIT2-13)** `signup_unguarded` (red: a stored `approval` / `open` signup mode with no configured `platform_turnstile`,
+so `signupAction` treats it as `invite`, core §B.2; PLA-§3.1). It pairs with the refusal code `turnstile_required`
+(not an alarm: `savePlatformSettingsAction` refuses `approval` / `open` without a configured widget). The AI alarms are raised
 by P7's `aiHealth()` flags and only relayed here, so one notification path exists; the machinery alarms (`no_tick`,
 `pool_wait`, `tick_lag`, `edge_*`, `gate_mismatch`, `data_dir_*`) are computed from `getHealth()` (P8's data), the
 store-level ones from `store_health` and `platform_usage` (P1).
@@ -2325,7 +2328,7 @@ console or store page; both answers are recorded with the check); **(rev 5, CRIT
 test widget verifies against `/signup`; until V13 passes the signup default stays `invite`, core §C.10 step 3), and V4 now expects the neutral
 404 for a wrong `x-sg-edge` (core §C.10
 step 3). When every V check has passed, a banner offers "Switch sign-up to approval" (the D9 default flips by itself
-once both env vars are set; this button only clears an explicit override), and the D69 ceilings card of PLA-§3.2 is
+once both env vars are set **and V13 has passed**, core D9 / §B.2 rev 6; this button only clears an explicit override), and the D69 ceilings card of PLA-§3.2 is
 linked from the banner because they become the sandbox's only bound once anyone may sign up.
 
 ### PLA-§16.4 R2 (OS-12, OS-13, S6)
@@ -4523,6 +4526,17 @@ line per id: what changed, where.
 - **CRIT2-18** (minor): the console's `tick.skipped24h` counts ticks skipped by the tick lease (core §H.2: a
   `cron_cursors` lease row replaced `platformLock("tick")`). Where: PLA-§15.1 Cron panel.
 - **CRIT2-19** (minor): the non-existent `qa:e2e` is `test:e2e`. Where: PLA-§22.2 (store-mode onboarding note).
+
+### Wording tidy (revision 6)
+
+The confirming critic's wording minors that name this file (drift only, no decision changed; core §P.4 holds the same
+items as W1 … W10). One line per item: what changed, where.
+
+- **W4**: the alarm catalogue lists `signup_unguarded` (rev 6 entry) and names the refusal code `turnstile_required`
+  next to it. Where: PLA-§15.2.
+- **W5**: one signup-default rule with core D9 / §B.2 / §C.10: `invite` until V13 passes (a configured
+  `platform_turnstile`, the new hostnames, a verified test token), then `approval`. Where: PLA-§3.1 `approval` row,
+  PLA-§16.3 banner sentence.
 
 ---
 

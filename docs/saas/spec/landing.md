@@ -1,6 +1,6 @@
 # Store Gen SaaS part spec: landing pages (first-class), delivery promise, thank-you, tracking, leads, WhatsApp, links, campaigns, experiments
 
-Status: **part spec, revision 5 (critic r2 integrated)** (2026-10-24, landing part architect). Revision 5 applies the
+Status: **part spec, revision 6 (wording tidy)** (revision 6 fixes the confirming critic's wording minors that name this file, one line per item in **LAN-§30.2**; revision 5 integrated critic r2) (2026-10-24, landing part architect). Revision 5 applies the
 final critic's issues that name this file (CRIT2-1, CRIT2-4, CRIT2-17, CRIT2-19, CRIT2-21; **LAN-§30.1**) against core
 revision 5; revision 4 applied the round 2 review. Revision 2 was reviewed
 by the operations, engineering, UX, security and quality reviewers; every finding that names this file or crosses it is
@@ -185,7 +185,8 @@ counted before the delivery window on pages the shopper sees before the call (LD
 (operations' `DEFAULT_WINDOW` until the owner edits it) and is **empty** when it has no callable range in the next 14
 days; **"no hours"** (rev 5, CRIT2-1) = empty **or** not yet saved by the owner (`!shopperPromiseAllowed(w)`, i.e.
 `configured: false`), the one state this part renders as nothing (`noShopperHours`, LAN-§2.3). **report link** = the absolute "Report this
-store" link `platformOrigin() + "/report/<handle>"` every live landing surface carries (core D76, LAN-§3.9).
+store" link `ctx.links.report = reportUrl(store, path)` = `platformOrigin() + "/report/<handle>?p=<path>"`, carried by
+every live, test and preview render of a landing surface and absent in every export (core D76, §C.6, LAN-§3.9).
 
 ---
 
@@ -1022,7 +1023,7 @@ and fr), zero in each export fixture; no report href contains `?o=`, `s=`, `sg-t
 - **Onboarding in `store` mode (R2; rev 4 restates core §A.2 and PLA-§22.2 PD60 rev 3, CRIT5).** The primary rule is
   the core's: **onboarding in `store` mode creates no landing page.** The reveal shows three PDP folds built
   synchronously by S1's `productAsPageDoc(product, { …sctx, direction })`, the action creates the product and the theme
-  draft (`createProduct(scope, facts)`, `setThemeDraft(scope, direction)`, frozen at the R2 contract step, core §K.4),
+  draft (`createProduct(ctx, { facts })`, `setThemeDraft(ctx, direction)`, both on the `WriteCtx`, frozen at the R2 contract step, core §A.2 / §K.4, PLA Q3.8),
   and `landing.inStoreMode` **stays `false`**; this part contributes nothing to that path. `landing` and `both` modes
   keep the landing reveal of PLA-§22.2 (`onboarding.pageId`). **Fallback only:** should any path still create a
   landing page for a `store`-mode shop (a later "Make a sales page" from the product, an import, a future onboarding
@@ -3079,7 +3080,7 @@ document's side is in the body; each row names the file and section that must ch
 | # | Finding | Contradiction and the change it needs | Owner (file, section) |
 |---|---|---|---|
 | N1 | CRIT1 (OPS-1) | Core §K.2 P0 and §Q.8 LAN R1 freeze `zonesForCheckout` "keyed by the posted `City.value`, built on the server from the slugs", while core D68, the §K.2 P0 operations line ("so landing's `assist` and the storefront's `checkout` / `pdp` chunks bundle it by source import"), OPE OD47 and STO-D43 / STO-§14.4 say the browser tables carry slugs and the chunks bundle `cityKey()`. Keep the P0 shape: D68 → "the browser zone tables are `zonesForCheckout`'s value-keyed `ZoneTable`; no chunk bundles `cityKey()`, which stays pure and isomorphic for server use and tests"; core §I.7 `zones.feeMismatchTop5` → "built from P3's slug-keyed `zoneFeesFor(scope, keys)` over the top-5 `CityKey`s of `opsAggregates`" (never the browser table); core §J.1 `test:delivery` row adds the key-shape case; OPE OD47 / OPE-§10.1: drop "the `assist` chunk, which bundles the pure `cityKey()`"; STO-D43, STO-§2 city-key row, §12.3, §14.4: `#sg-config` embeds the `ZoneTable` unchanged and the chunk looks up `table.city[entry.v] ?? table.star` (the city list's `s` slug is then not needed for zones); the server paths (STO-§15.7, §16.2 step 13) are unchanged; P4's `scripts/qa/fixtures/city-key.json` gains `"zoneTableKey": "value"` and the `buildZoneTable` case of LAN-§7.1 | core D68, §K.2 P0, §I.7, §J.1; operations.md OD47, OPE-§10.1; storefront.md STO-D43, STO-§2, §12.3, §14.4; `scripts/qa/fixtures/city-key.json` (P4) |
-| N2 | CRIT3 (OPS-11) | One window shape: OPE-§2.9 `WeekRanges` (7-slot array, "index 0 = Monday") and OPE-§5.5 `EffectiveWindow.days: Range[][]` vs core D73 / §D.10 "ISO weekdays 1-7": operations fixes **one** container, recommended `days: Record<1 \| 2 \| 3 \| 4 \| 5 \| 6 \| 7, Range[]>` so "ISO 1-7" is literally true and matches `checkout.calendar.workdays`; the "index 0 = Monday" wording of OPE-§R OPS-11 goes. OPE-§5.5 and OD57 still say `store.confirmation.hours` / `policies.contact.hours` "become read-only mirrors written by `saveOpsSettingsAction`", against core D73 / §P OPS-11 ("removed, not mirrored"): remove the mirror writes. `saveCallingWindowAction` enqueues `enqueueRenders(scope, "all-live", "store_info")` so the thank-you HTML re-bakes the window (LAN-§8.2). Export `DEFAULT_WINDOW` (`src/lib/callcenter/defaults.ts`) for the card's "starting hours" line, and add the shared window fixture `scripts/qa/fixtures/calling-window.json` read by `test:ops`, `test:delivery` and `test:landing-addons`. This part needs no change for either container (it never reads `days`) | operations.md OPE-§2.9, §5.5, OD57, OPE-§R; `scripts/qa/fixtures/calling-window.json` (P4) |
+| N2 | CRIT3 (OPS-11) | One window shape: OPE-§2.9 `WeekRanges` (7-slot array, "index 0 = Monday") and OPE-§5.5 `EffectiveWindow.days: Range[][]` vs core D73 / §D.10 "ISO weekdays 1-7": operations fixes **one** container, recommended `days: Record<1 \| 2 \| 3 \| 4 \| 5 \| 6 \| 7, Range[]>` so "ISO 1-7" is literally true and matches `checkout.calendar.workdays`; the "index 0 = Monday" wording of OPE-§R OPS-11 goes. OPE-§5.5 and OD57 still say `store.confirmation.hours` / `policies.contact.hours` "become read-only mirrors written by `saveOpsSettingsAction`", against core D73 / §P OPS-11 ("removed, not mirrored"): remove the mirror writes. `saveCallingWindowAction` enqueues `enqueueRenders(scope, "all-live", "store_info")` so the thank-you HTML re-bakes the window (LAN-§8.2). Export `DEFAULT_WINDOW` (`src/lib/callcenter/defaults.ts`) for the card's "starting hours" line, and add the shared window fixture `scripts/qa/fixtures/calling-window.json` read by `test:ops`, `test:delivery` and `test:landing-addons`. This part needs no change for either container (it never reads `days`). **Rev 5 note (CRIT2-1):** the shared window fixture `scripts/qa/fixtures/calling-window.json` became P4's `src/lib/callcenter/window.fixtures.ts` (with a `configured: false` case); the JSON name is withdrawn | operations.md OPE-§2.9, §5.5, OD57, OPE-§R; `src/lib/callcenter/window.fixtures.ts` (P4; rev 4 named `scripts/qa/fixtures/calling-window.json`) |
 | N3 | ENGP-6, ENGP-5 | Core §M.2's `budget:F1` soft cell still lists "or form height > 1,100 px in default state" while this part's `form:F1` is the one form-height item (LAN-§3.2, §3.4 F1 row); two notes with two ids for one measurement. Drop the clause; `budget:F1` keeps the position (soft > 3,000, hard `top × 0.8 > 3,000`) | core §M.2 |
 | N4 | CRIT15 (SEC-18) | Nobody rendered the "Report this store" link on landing pages. The maintainer adds `links.report` to the render context's `ctx.links` (live, test, preview; undefined in every export mode) and the Shell (`src/landing/document.tsx`) renders the fallback `<p class="lp-report">` when the document has no visible footer; design.md DES-§4.5.4: the footer's `legalLinks(ctx)` appends the link when `ctx.links.report` is set and `scripts/qa/render-cases/design.ts` asserts it; platform.md PLA-§24.2 still says store hosts **308** to `/report/*`, against core §B.1 / §Q.8 PLA Q3.4 (A\*: store hosts answer 404, the link is absolute): align, and name the landing renderers of LAN-§3.9 (P6 footer + Shell fallback, P3 thank-you / tracking / legal, S1 store chrome) | core §H.13 render context, `src/landing/document.tsx` (maintainer); design.md DES-§4.5.4; platform.md PLA-§24.2 |
 | N5 | SEC-5 | PLA-§Q.3 Q3.3 and PLA-§7.2 list `listLeads` / `getLead` among **operations'** read functions; the leads repository is **this part's** `src/lib/leads/read.ts` (LAN-§10.2), which calls `maskIfImpersonation`. Name it there so P1's spy test and the canary suite cover the right file | platform.md PLA-§7.2, PLA-§Q.3 Q3.3; operations.md (no lead reads) |
@@ -3315,3 +3316,15 @@ every file). One line per id: what changed, where.
   row, §3.4 K1 … K8 row.
 - **CRIT2-21** (minor): `src/app/app/[store]/pages/**` outside `(editor)` listed in P3's ownership; LP-14's section files
   are D4's (one owner per file), D3 owns `video-hero.ts` and the rules. Where: LAN-§20.2, §26.1, §26.3.
+
+### LAN-§30.2 Wording tidy (revision 6)
+
+The confirming critic's wording minors that name this file (drift only, no decision changed; core §P.4 holds the same
+items as W1 … W10). One line per item: what changed, where.
+
+- **W1**: store-mode onboarding names `createProduct(ctx, { facts })` / `setThemeDraft(ctx, direction)` (the `WriteCtx`
+  forms of core §A.2 / §K.4, PLA Q3.8), not `(scope, …)`. Where: LAN-§4 "Onboarding in `store` mode".
+- **W7**: the glossary's report link is `ctx.links.report = reportUrl(store, path)` with `?p=`, on live, test and preview
+  renders, absent in exports (core §C.6). Where: LAN-§0 glossary.
+- **W10**: rev 5 note on the N2 request row: `scripts/qa/fixtures/calling-window.json` became P4's
+  `src/lib/callcenter/window.fixtures.ts`. Where: LAN-§27.4 N2.

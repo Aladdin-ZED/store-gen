@@ -18,6 +18,11 @@ import "server-only";
  * a stranger that a phone number ordered. It still runs after the per-IP limit.
  * Sheet sync is the caller's job (after() in the route handler) when `sync` is true, and so are the
  * server-side Purchase events (`conversion`, see ./conversions).
+ *
+ * One order insert (docs/STORE-SAAS.md D72): `createOrderRow(draft, ctx)` is the only insert of an order row in the
+ * codebase; T3 extracts it in R1.0 from step 9 below (the id retry on ER_DUP_ENTRY, is_test, sheet_status, rev and
+ * the confirm_state defaults, upsell_token_hash, the order_events "created" row, the INSERT IGNORE outbox items and
+ * the runOrderHooks("created", "afterCommit", …) call inside after()). Signature frozen at C0a.
  */
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
@@ -37,6 +42,7 @@ import { orderVersion, resolvePageKey, type PageTarget } from "./resolve";
 import { scoreRisk } from "./risk";
 import { checkCaptcha } from "./turnstile";
 import { validateOrder } from "./validate";
+import type { Actor, WriteScope } from "@/lib/tenancy/types";
 
 export interface CreateOrderContext {
   ip: string;
@@ -62,6 +68,37 @@ export interface CreateOrderResult {
   retryAfter?: number;
   /** server-side Purchase event of a newly stored order (send after responding) */
   conversion?: PurchaseConversion;
+}
+
+/** The order's own columns; the id, the store, the test flag, the upsell hash and the timestamps are createOrderRow's. */
+export type OrderDraft = Omit<typeof orders.$inferInsert, "id" | "storeId" | "isTest" | "upsellTokenHash" | "createdAt" | "updatedAt">;
+
+export interface CreateOrderRowCtx {
+  scope: WriteScope;
+  /** resolveTestToken(store, token).test (D54): is_test, flag "test", sheet_status "disabled", no CAPI, no bumpOrderStats */
+  test: boolean;
+  /** mint the one-click upsell token for the new order (the page's upsell is on) */
+  upsell: boolean;
+  /** the shopper (public path) or the member placing a manual order (OP-08) */
+  actor: Actor;
+  /** the built Purchase event or null, handed to runOrderHooks("created") inside after() */
+  conversion: PurchaseConversion | null;
+  now?: Date;
+}
+
+export interface CreatedOrderRow {
+  orderId: string;
+  /** shown once to the shopper (thank-you upsell), only its hash is stored */
+  upsellToken: string | null;
+  /** the idem key already had an order in this store: that order, nothing inserted */
+  replayed: boolean;
+}
+
+/** D72: the one insert of an order row (public v2 path, P4's manual orders, the R2 v3 paths). T3. */
+export async function createOrderRow(draft: OrderDraft, ctx: CreateOrderRowCtx): Promise<CreatedOrderRow> {
+  void draft;
+  void ctx;
+  throw new Error("not implemented: T3 (createOrderRow)");
 }
 
 const DUPLICATE_WINDOW_MS = 12 * 3600_000;

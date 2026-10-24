@@ -20,6 +20,11 @@ import "server-only";
  *
  * After an unpublish, a slug change, a page deletion, a "home" or Settings → Store change, call
  * invalidatePublished() (re-exported here from ./cache.server).
+ *
+ * Multi-tenant (docs/STORE-SAAS.md §K.1, §M.1, PUB-*): the scoped overloads `publishPage(scope, pageId, opts)`,
+ * `unpublishPage(scope, pageId, actor)` and `renderAndCommit(scope, pageId, doc, opts)` are frozen at C0a; T3
+ * implements them (the store render context, runPrePublishChecks before the version row, first_published_at with
+ * COALESCE) and moves the callers. Until then they throw "not implemented: T3"; the single-tenant forms keep working.
  */
 import { createHash } from "node:crypto";
 import { and, desc, eq, sql, type SQL } from "drizzle-orm";
@@ -39,6 +44,7 @@ import { collectAssetIds, liveAssetResolver, liveLinks, type AssetResolver, type
 import type { DocumentUrls } from "@/landing/document";
 import { cacheGet, cacheSet, invalidatePublished } from "./cache.server";
 import { renderLandingHtml, renderLegalHtml, renderThankYouHtml, type RenderedHtml, type RenderIssue } from "./core";
+import type { Actor, WriteScope } from "@/lib/tenancy/types";
 
 export { invalidatePublished } from "./cache.server";
 
@@ -173,7 +179,21 @@ const sha256hex = (s: string) => createHash("sha256").update(s, "utf8").digest("
  * The version always holds exactly the draft whose stamp is checked in the transaction: the row is
  * locked (FOR UPDATE) and its updated_at compared with the one read before rendering.
  */
-export async function publishPage(pageId: string, userId: string, opts: PublishOptions = {}): Promise<PublishResult> {
+/** The scoped publish's options (T3): who publishes (audited in the page's store) and the draft stamp. */
+export interface ScopedPublishOptions extends PublishOptions {
+  actor: Actor;
+}
+
+const scopedNotImplemented = (fn: string): never => {
+  throw new Error(`not implemented: T3 (${fn}, scoped)`);
+};
+
+export function publishPage(scope: WriteScope, pageId: string, opts: ScopedPublishOptions): Promise<PublishResult>;
+/** @deprecated single-tenant; T3 moves the callers to the scoped overload */
+export function publishPage(pageId: string, userId: string, opts?: PublishOptions): Promise<PublishResult>;
+export async function publishPage(...args: [WriteScope, string, ScopedPublishOptions] | [string, string, PublishOptions?]): Promise<PublishResult> {
+  if (typeof args[0] !== "string") return scopedNotImplemented("publishPage");
+  const [pageId, userId, opts = {}] = args as [string, string, PublishOptions?];
   for (let attempt = 1; ; attempt++) {
     const res = await publishOnce(pageId, userId, opts.expectedUpdatedAt);
     if (res !== "retry") return res;
@@ -183,6 +203,17 @@ export async function publishPage(pageId: string, userId: string, opts: PublishO
       throw draftChanged(row?.updatedAt.getTime() ?? Date.now());
     }
   }
+}
+
+/**
+ * Takes a page offline in its store (the version rows stay; publish listeners get "unpublished", §M.1). T3; today's
+ * unpublish lives in src/lib/admin-data/pages.ts (T4 moves it onto this one).
+ */
+export async function unpublishPage(scope: WriteScope, pageId: string, actor: Actor): Promise<boolean> {
+  void scope;
+  void pageId;
+  void actor;
+  return scopedNotImplemented("unpublishPage");
 }
 
 async function publishOnce(pageId: string, userId: string, expectedUpdatedAt: number | undefined): Promise<PublishResult | "retry"> {
@@ -298,7 +329,12 @@ const tooHeavy = (bytes: number, limit: number | null) =>
  * the page row locked FOR UPDATE and checked against `draft` (publishPage) or `baseVersionId`
  * (pixels-only updates). Shared by every publish path.
  */
-export async function renderAndCommit(pageId: string, doc: PageDoc, opts: CommitOptions): Promise<CommitResult | "retry"> {
+export function renderAndCommit(scope: WriteScope, pageId: string, doc: PageDoc, opts: CommitOptions): Promise<CommitResult | "retry">;
+/** @deprecated single-tenant; T3 moves the publish paths and the render queue to the scoped overload */
+export function renderAndCommit(pageId: string, doc: PageDoc, opts: CommitOptions): Promise<CommitResult | "retry">;
+export async function renderAndCommit(...args: [WriteScope, string, PageDoc, CommitOptions] | [string, PageDoc, CommitOptions]): Promise<CommitResult | "retry"> {
+  if (typeof args[0] !== "string") return scopedNotImplemented("renderAndCommit");
+  const [pageId, doc, opts] = args as [string, PageDoc, CommitOptions];
   const [page] = await db.select({ id: pages.id, slug: pages.slug, publicKey: pages.publicKey }).from(pages).where(eq(pages.id, pageId)).limit(1);
   if (!page) throw new PublishError("not_found", "Page not found.");
   const slug = opts.draft?.slug ?? page.slug;
@@ -580,14 +616,13 @@ export async function getPublishedBySlug(slug: string): Promise<PublishedPage | 
   return cacheSet("published", slug, await loadBy(eq(pages.slug, slug)));
 }
 
-/** The page served at "/": settings "home".pageId, else the page flagged isHome, else the most recently published page. */
+/** The page served at "/": settings "home".pageId, else the most recently published page. */
 export async function getHomePublished(): Promise<PublishedPage | null> {
   const hit = cacheGet<PublishedPage | null>("published", HOME_KEY);
   if (hit) return hit.value;
   const { home } = await getSettings(["home"]);
   let value: PublishedPage | null = null;
   if (home.pageId) value = await loadBy(eq(pages.id, home.pageId));
-  if (!value) value = await loadBy(eq(pages.isHome, true));
   if (!value) {
     const [latest] = await db
       .select({ id: pages.id })

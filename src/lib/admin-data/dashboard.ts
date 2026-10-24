@@ -168,7 +168,7 @@ export async function getDashboard(user: { totpEnabled: boolean }): Promise<Dash
   const statusBy = new Map(statusRows.map((r) => [r.id, r.status]));
 
   const store = settings.store;
-  const homeSet = !!settings.home.pageId || (await db.select({ n: count() }).from(pages).where(eq(pages.isHome, true)))[0]!.n > 0;
+  const homeSet = !!settings.home.pageId;
 
   const checklist: ChecklistItem[] = [
     { id: "store", done: store.storeName.trim() !== "" && store.storeName !== "My store" && !!(store.phone || store.whatsapp), href: "/admin/settings/store" },

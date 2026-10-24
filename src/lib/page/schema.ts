@@ -528,6 +528,87 @@ export type Divider = z.infer<typeof Divider>;
 /** Font ids are keys of the font manifest (src/lib/theme/fonts.ts). */
 export const FontId = z.string().regex(/^[a-z0-9-]{2,48}$/);
 
+/*
+ * Design genome vocabulary carried by `ThemeSpec.look` (docs/saas/spec/design.md DES-§4.1, DES-§4.5.1; CCR
+ * DES-R1). Part of the doc contract, so the design modules import these from here.
+ */
+export const GRAMMARS = ["editorial-column", "poster", "gallery-led", "stage", "specimen", "catalogue", "split-tension", "cinematic", "quiet-luxe"] as const;
+export const COLOR_STRATEGIES = ["ink+one", "duotone", "color-field", "tonal", "dark-luxe", "high-key", "mono+signal"] as const;
+export const TREATMENTS = ["cutout-stage", "framed-stage", "full-bleed-crop", "framed", "tight-detail", "tonal-duotone", "grid-contact"] as const;
+export const LADDERS = ["crisp", "soft", "round", "mixed"] as const;
+export const DEPTHS = ["flat", "hairline", "tonal", "ambient", "directional"] as const;
+export const MASKS = ["arch", "circle", "pill", "rounded", "rect", "cut", "blob"] as const;
+export const EASE_FAMILIES = ["expo", "quint", "quart", "critical", "soft-spring", "mask"] as const; // soft-spring: playground only (DS28)
+export const REVEALS = ["fade-rise", "blur-in", "mask-wipe", "scale-in", "line-draw"] as const;
+export type Grammar = (typeof GRAMMARS)[number];
+export type ColorStrategy = (typeof COLOR_STRATEGIES)[number];
+export type Treatment = (typeof TREATMENTS)[number];
+export type Ladder = (typeof LADDERS)[number];
+export type Depth = (typeof DEPTHS)[number];
+export type Mask = (typeof MASKS)[number];
+export type EaseFamily = (typeof EASE_FAMILIES)[number];
+export type Reveal = (typeof REVEALS)[number];
+
+/**
+ * The compiled design genome of a page (DES-§4.5.1). Optional in ThemeSpec with no .default(): documents
+ * without it validate and checksum exactly as before (DS2), and an absent look renders today's output.
+ */
+export const ThemeLook = z
+  .object({
+    v: z.literal(1),
+    g: z.enum(GRAMMARS),
+    grid: z.object({
+      c: z.union([z.literal(4), z.literal(8), z.literal(12)]),
+      s: z.enum(["1:1", "5:7", "4:8", "3:9", "golden"]),
+      m: z.enum(["narrow", "wide", "offset"]),
+      w: z.number().int().min(1080).max(1440),
+      u: z.union([z.literal(4), z.literal(8)]),
+    }),
+    type: z.object({
+      rm: z.number().min(1.125).max(1.25),
+      rd: z.number().min(1.2).max(1.5),
+      dmax: z.number().int().min(48).max(160),
+      w: z.number().int().min(100).max(900),
+      wAr: z.number().int().min(100).max(900),
+      tk: z.number().min(0).max(0.03),
+      dc: z.enum(["none", "uppercase"]),
+      lb: z.enum(["mono", "smallcaps", "plain"]),
+      nu: z.enum(["lining", "oldstyle"]),
+    }),
+    cs: z.enum(COLOR_STRATEGIES),
+    area: z.number().min(0.03).max(0.35),
+    hc: z.boolean(),
+    ladder: z.enum(LADDERS),
+    corner: z.enum(["circle", "squircle"]),
+    hair: z.object({ w: z.union([z.literal(0), z.literal(1), z.literal(1.5)]), s: z.number().min(0.08).max(0.3) }),
+    depth: z.enum(DEPTHS),
+    glass: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+    mask: z.enum(MASKS),
+    img: z.enum(TREATMENTS),
+    dens: z.enum(["airy", "balanced", "dense"]),
+    space: z.number().min(0.75).max(1.6),
+    align: z.enum(["start", "mixed", "center-statement"]),
+    mo: z.object({
+      f: z.enum(EASE_FAMILIES),
+      d: z.number().int().min(180).max(900),
+      r: z.array(z.enum(REVEALS)).min(1).max(2),
+      st: z.number().int().min(30).max(80),
+      sc: z.boolean(),
+      scope: z.enum(["heads", "hero", "none"]), // reveal scope (G35, R5); heads = hero + section heads only
+    }),
+    kit: z.object({
+      gl: z.enum(["dot", "spark", "diamond", "none"]),
+      nb: z.enum(["none", "plain", "padded"]),
+      cap: z.enum(["mono", "smallcaps", "italic-serif", "plain"]),
+    }),
+    em: z.enum(["none", "swoosh", "highlight", "color", "italic"]), // "none" (G26): no emphasised word in the hero title
+    btn: z.enum(["solid", "pill", "soft", "outline", "underline", "glow"]),
+    gid: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/).optional(), // design_genomes id (learning join, ai.md AI-§G.4)
+    locks: z.array(z.enum(["G1", "G2", "G4", "G9", "G18", "G23", "G28"])).max(7).optional(), // "Lock for this page" (DES-§15.4); absent = none
+  })
+  .strict();
+export type ThemeLook = z.infer<typeof ThemeLook>;
+
 export const ThemeSpec = z.object({
   archetype: Archetype,
   /** deterministic seed for every procedural choice (illustrations, rotations, blobs) */
@@ -559,6 +640,8 @@ export const ThemeSpec = z.object({
   dividers: z.array(Divider).max(4).default([]), // empty → archetype family
   /** 0..2 multiplier on decorative illustration density */
   ornament: z.number().min(0).max(2).default(1),
+  /** the compiled design genome (DES-R1); optional with no default, so a doc without it is unchanged */
+  look: ThemeLook.optional(),
 });
 export type ThemeSpec = z.infer<typeof ThemeSpec>;
 

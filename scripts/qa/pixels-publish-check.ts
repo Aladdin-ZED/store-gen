@@ -78,7 +78,7 @@ async function main() {
   const owner = { id: newId(), email: "owner@px.test", name: "Owner", role: "owner" as const };
   const editor = { id: newId(), email: "editor@px.test", name: "Editor", role: "editor" as const };
   for (const u of [owner, editor]) await db.insert(users).values({ ...u, passwordHash: "x" });
-  const session = (u: typeof owner | typeof editor) => ({ ...u, totpEnabled: false, sessionId: "s" });
+  const session = (u: typeof owner | typeof editor) => ({ ...u, totpEnabled: false, sessionId: "s", platformRole: "none" as const, locale: null, lastStoreId: null });
 
   const fx = getFixture("massage");
   const base = validateDoc(fx.doc).doc!;

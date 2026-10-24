@@ -1,6 +1,6 @@
 # Store Gen SaaS part spec: storefront (store mode, catalog, page kinds, cart and COD checkout, payload v3, SEO, speed, accessibility, "both" mode)
 
-Status: **part spec, revision 5 (critic r2 integrated)** (2026-10-24, storefront part architect). Revision 5 applies
+Status: **part spec, revision 6 (wording tidy)** (revision 6 fixes the confirming critic's wording minors that name this file, one line per item in **STO-§30.4**; revision 5 integrated critic r2) (2026-10-24, storefront part architect). Revision 5 applies
 the final critic's issues that name this file (CRIT2-9, CRIT2-17, CRIT2-20; **STO-§30.3**) against core revision 5;
 revision 4 integrated review round 2. Revision 2 was
 the elevated spec; revision 3 resolved every round-1 review finding that names this file or its cross-file side;
@@ -726,8 +726,8 @@ with `{ via: "onboarding" }`); `setThemeDraft` hands the direction's genome to S
 **draft** `store_themes` version (design owns the table; S1 calls `src/lib/design/store-theme.server.ts`, never writes
 it) and records the drawn PDP family as the `@product` template draft's `productDetail` variant (`ensureTemplateSet`
 creates the row first); nothing is published. Platform's `useDirectionAction` calls both and renders the three reveal
-folds with `productAsPageDoc(product, { …sctx, direction })` (core §A.2's "`createProduct(scope, facts)` /
-`setThemeDraft(scope, direction)`" are these functions: a write needs the `StoreCtx` for the audit actor, STO-§29.5).
+folds with `productAsPageDoc(product, { …sctx, direction })` (core §A.2 / §K.4 and PLA Q3.8 name them `createProduct(ctx, { facts })` /
+`setThemeDraft(ctx, direction)`, both on the `WriteCtx`: a write needs the `StoreCtx` for the audit actor, STO-§29.5).
 
 `saveProduct` order: `checkProductDoc` → content and SEO schemas → `assertOwned` → `deriveProduct` → one transaction
 (`UPDATE products … WHERE id = ? AND store_id = ? AND rev = ?` compare-and-set; 0 rows → `conflict`; slug change →
@@ -4293,6 +4293,15 @@ line per id: what changed, where.
   DPR 2, mobile-only bleed with a framed desktop fallback) for `cinematic-bleed` and `immersive`;
   `CatalogShape.wideImages` redefined; `checkHomeDoc` fixtures (a 1,200 px phone photo passes, a 700 px one skips the
   family). Where: STO-§9.3, §9.5, §11.1, §11.3 H12, §12.8.
+
+### STO-§30.4 Wording tidy (revision 6)
+
+The confirming critic's wording minors that name this file (drift only, no decision changed; core §P.4 holds the same
+items as W1 … W10). One line per item: what changed, where.
+
+- **W1**: the onboarding paragraph no longer quotes `createProduct(scope, facts)` / `setThemeDraft(scope, direction)` as
+  core §A.2's names; it states the `WriteCtx` forms `createProduct(ctx, { facts })` / `setThemeDraft(ctx, direction)` of
+  core §A.2 / §K.4 and PLA Q3.8. Where: STO-§4.5 (after the signatures).
 
 ## STO-§31 Elevation changes (rev 2)
 

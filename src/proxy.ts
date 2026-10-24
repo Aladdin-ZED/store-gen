@@ -13,11 +13,15 @@
  *     could drive the admin with the owner's cookies.
  *  Everything else passes through untouched (landing route handlers set their own headers), minus
  *  any client-sent copy of the internal request headers.
+ *  5. Every forwarded request carries the signed request path (x-sg-path, x-sg-rid, x-sg-path-sig;
+ *     src/lib/edge/path-sig.ts, STORE-SAAS §C.3 step 2): the store seam reads a store action's store
+ *     from it (C0a; T3 folds it into the host-class proxy).
  *
  * The app re-checks the gate itself (requireUser / assertAdminAccess) — this is the outer wall.
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { ADMIN_PATH_HEADER, GATE_COOKIE, IS_PROD, NONCE_HEADER, adminHost, publicSiteOrigin } from "@/lib/auth/config";
+import { stampRequestPath } from "@/lib/edge/path-sig";
 import {
   adminAreaOf,
   gateCookieOptions,
@@ -39,12 +43,17 @@ function unknownUrl(req: NextRequest): NextResponse {
   return new NextResponse(body, { status: 404, headers: UNKNOWN_PAGE_HEADERS });
 }
 
-/** Pass-through that never lets a client-supplied internal header reach the app. */
-function passThrough(req: NextRequest): NextResponse {
-  if (!INTERNAL_HEADERS.some((name) => req.headers.has(name))) return NextResponse.next();
+/** The request headers the app sees: client copies of the internal headers removed, the signed path set. */
+function forwardHeaders(req: NextRequest): Headers {
   const headers = new Headers(req.headers);
   for (const name of INTERNAL_HEADERS) headers.delete(name);
-  return NextResponse.next({ request: { headers } });
+  stampRequestPath(headers, `${req.nextUrl.pathname}${req.nextUrl.search}`);
+  return headers;
+}
+
+/** Pass-through that never lets a client-supplied internal header reach the app. */
+function passThrough(req: NextRequest): NextResponse {
+  return NextResponse.next({ request: { headers: forwardHeaders(req) } });
 }
 
 /**
@@ -110,7 +119,7 @@ export function proxy(req: NextRequest): NextResponse {
   const headers = adminSecurityHeaders(nonce, { dev: !IS_PROD });
 
   // Internal headers are always overwritten, never trusted from the client.
-  const requestHeaders = new Headers(req.headers);
+  const requestHeaders = forwardHeaders(req);
   requestHeaders.set(NONCE_HEADER, nonce);
   requestHeaders.set("Content-Security-Policy", headers["Content-Security-Policy"]!);
   requestHeaders.set(ADMIN_PATH_HEADER, `${pathname}${req.nextUrl.search}`.slice(0, 512));

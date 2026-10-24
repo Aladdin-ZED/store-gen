@@ -12,6 +12,7 @@ import { users } from "@/lib/db/schema";
 import { AuthInputError } from "./errors";
 import { checkPasswordPolicy, hashPassword, verifyPassword } from "./password";
 import { isRole, type Role } from "./permissions";
+import type { PlatformCtx } from "@/lib/tenancy/types";
 import { revokeUserSessions } from "./session";
 
 export type UserRow = typeof users.$inferSelect;
@@ -204,7 +205,15 @@ export async function resetUserPassword(
  * all of that user's sessions, so their next sign-in asks for the password only. Never for the
  * actor's own account: that goes through disableTwoFactor, which asks for the password and a code.
  */
-export async function resetUserTwoFactor(actor: { id: string; ip?: string | null }, userId: string): Promise<void> {
+export function resetUserTwoFactor(ctx: PlatformCtx, userId: string, reason: string): Promise<void>;
+/** @deprecated today's owner reset in tenant settings (AUTH-09: deleted in R1.0); the platform overload is `users.manage` ↑ */
+export function resetUserTwoFactor(actor: { id: string; ip?: string | null }, userId: string): Promise<void>;
+export async function resetUserTwoFactor(actor: PlatformCtx | { id: string; ip?: string | null }, userId: string, reason?: string): Promise<void> {
+  if (!("id" in actor)) {
+    // platform reset (§B.7): reason required, audit platform.user.2fa_reset + a notification to the user; T2
+    void reason;
+    throw new Error("not implemented: T2 (resetUserTwoFactor)");
+  }
   if (userId === actor.id) throw new AuthInputError("Turn off your own two-step verification in Security.");
   const user = await getUserById(userId);
   if (!user) throw new AuthInputError("User not found.");
@@ -272,4 +281,33 @@ export async function setUserDisabled(
   if (!result) return;
   if (disabled) await revokeUserSessions(userId);
   await audit(disabled ? "auth.user.disabled" : "auth.user.enabled", { userId: actor.id, target: userId, ip: actor.ip });
+}
+
+/* ------------------------------------------------------------------ */
+/* Platform user functions (PLA Q.19; T2 implements, C0a typed stubs)  */
+/* ------------------------------------------------------------------ */
+
+function notImplemented(fn: string, ...args: unknown[]): never {
+  void args;
+  throw new Error(`not implemented: T2 (${fn})`);
+}
+
+/** `users.manage` ↑: disabled = 1 with reason and time, every session revoked; audit platform.user.banned. */
+export async function banUser(ctx: PlatformCtx, userId: string, input: { reason: string; note?: string }): Promise<void> {
+  return notImplemented("banUser", ctx, userId, input);
+}
+
+/** audit platform.user.unbanned. */
+export async function unbanUser(ctx: PlatformCtx, userId: string, note?: string): Promise<void> {
+  return notImplemented("unbanUser", ctx, userId, note);
+}
+
+/** `users.manage` ↑ with a reason: a single-use 60-minute `password_resets` link, shown once (§B.9). */
+export async function createPasswordResetLink(ctx: PlatformCtx, userId: string, reason: string): Promise<{ url: string; expiresAt: Date }> {
+  return notImplemented("createPasswordResetLink", ctx, userId, reason);
+}
+
+/** Password policy + the scrypt semaphore; the signup, invite and staff-invite flows share it. Never sets a role. */
+export async function createAccount(input: { email: string; name: string; password: string; phone?: string; locale: "ar" | "fr" | "en" }): Promise<{ userId: string }> {
+  return notImplemented("createAccount", input);
 }

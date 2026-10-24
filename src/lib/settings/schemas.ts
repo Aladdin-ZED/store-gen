@@ -1,39 +1,24 @@
 /**
  * Typed settings registry: one zod schema + default per key, and which keys are stored encrypted.
  * Isomorphic (no I/O) so admin forms can validate with the same schemas before submitting.
+ *
+ * @deprecated as a registry from R1.0 (docs/STORE-SAAS.md §D.10): the platform and store registries
+ * (./platform-registry.ts, ./store-registry.ts) replace SETTINGS once T1's scoped settings API and T4's callers
+ * land; SETTINGS keeps today's single-tenant admin compiling until then. The pixel and tracking schemas below
+ * are re-exported from their key files, so both registries read one definition.
  */
 import { z } from "zod";
 import { AssetRef, Locale, Market, Money, Tracking } from "@/lib/page/schema";
-import { ID_HELP } from "@/lib/pixels/form";
-import { PIXEL_ID_RE, PIXEL_PLATFORMS } from "@/lib/pixels/ids";
+import { def, httpsUrl, isMaskedSecret, maskSecret, optional, optionalText, phone, redactFields, text } from "./fields";
+import { PixelHealthSettings } from "./keys/pixel_health";
+import { PixelLibrarySettings } from "./keys/pixel_library";
+import { TrackingSecretsSettings } from "./keys/tracking_secrets";
+import { TurnstileSetting } from "./keys/turnstile";
 
-const text = (max: number) =>
-  z
-    .string()
-    .transform((v) => v.replace(/[\u0000-\u001f\u007f]/g, " ").trim())
-    .pipe(z.string().max(max));
-
-const optionalText = (max: number) =>
-  text(max)
-    .optional()
-    .transform((v) => (v ? v : undefined));
-
-/** International phone, digits with optional leading + (spaces/dashes/dots allowed on input). */
-const phone = z
-  .string()
-  .transform((v) => v.replace(/[\s().-]/g, ""))
-  .pipe(z.string().regex(/^\+?[0-9]{6,15}$/, { error: "Enter a valid phone number." }));
-
-const httpsUrl = z
-  .url({ protocol: /^https$/, error: "Use a full https:// link." })
-  .max(300);
-
-/** Optional field where an empty form value ("") means "not set". */
-const optional = <T extends z.ZodType>(schema: T) =>
-  z.union([z.literal("").transform(() => undefined), schema]).optional();
-
-/** Opaque API token / secret (Meta CAPI, TikTok Events API, Turnstile…). */
-const secretToken = z.string().trim().regex(/^[A-Za-z0-9_\-.:|=+/]{8,512}$/, { error: "This doesn't look like a valid token." });
+export { isMaskedSecret, maskSecret };
+export { PIXEL_LIBRARY_UI_MAX, PixelLibraryEntry, PixelLibrarySettings, PixelTestWindow } from "./keys/pixel_library";
+export { PixelHealth, PixelHealthEntry, PixelHealthSettings } from "./keys/pixel_health";
+export { TestEventCode, TrackingSecretsSettings } from "./keys/tracking_secrets";
 
 export const StoreSettings = z.object({
   /**
@@ -91,101 +76,13 @@ export const SheetsSettings = z.object({
  */
 export const PixelsSettings = Tracking;
 
-/* ------------------------------------------------------------------ */
-/* Pixel library (§A.2): every pixel the store knows, labels, test windows */
-/* ------------------------------------------------------------------ */
-
-/** A per-page, time-boxed test window: events of THIS page carry the pixel's test code until `until`. */
-export const PixelTestWindow = z.object({ pageId: z.string().length(26), until: z.iso.datetime({ offset: true }) });
-export type PixelTestWindow = z.infer<typeof PixelTestWindow>;
-
-export const PixelLibraryEntry = z
-  .object({
-    platform: z.enum(PIXEL_PLATFORMS),
-    /** canonical (normalizePixelId); immutable once saved */
-    id: z.string(),
-    /** "Compte principal", "BM backup 2" */
-    label: z.string().trim().max(40).default(""),
-    addedAt: z.iso.datetime({ offset: true }),
-    /** expired windows are pruned on every write */
-    tests: z.array(PixelTestWindow).max(5).default([]),
-  })
-  .superRefine((e, c) => {
-    if (!PIXEL_ID_RE[e.platform].test(e.id)) c.addIssue({ code: "custom", message: ID_HELP[e.platform], path: ["id"] });
-  });
-export type PixelLibraryEntry = z.infer<typeof PixelLibraryEntry>;
-
-/** The UI adds up to 100; the schema keeps headroom so the migration never drops an id. */
-export const PIXEL_LIBRARY_UI_MAX = 100;
-export const PixelLibrarySettings = z
-  .object({ v: z.literal(1).default(1), pixels: z.array(PixelLibraryEntry).max(200).default([]) })
-  .refine((l) => new Set(l.pixels.map((p) => `${p.platform}:${p.id}`)).size === l.pixels.length, { error: "Duplicate pixel." });
-
-/** Last server outcome of a pixel (no personal data). */
-export const PixelHealthEntry = z.object({
-  at: z.iso.datetime({ offset: true }),
-  state: z.enum(["ok", "refused", "unverified"]),
-  code: z.enum(["token", "permission", "pixel", "rate", "network", "other"]).optional(),
-  testMode: z.boolean(),
-});
-export type PixelHealthEntry = z.infer<typeof PixelHealthEntry>;
-/** key "platform:id" */
-export const PixelHealthSettings = z.record(z.string().max(80), PixelHealthEntry);
-/** Spec name (§A.2). */
-export const PixelHealth = PixelHealthSettings;
-export type PixelHealth = z.infer<typeof PixelHealthSettings>;
-
-/** A platform's "Test events" code (Meta Events Manager / TikTok Events Manager), e.g. TEST12345. */
-export const TestEventCode = z.string().trim().regex(/^[A-Z0-9]{4,20}$/, { error: "4–20 capital letters and digits, e.g. TEST12345." });
-
-/** Server credentials keyed by pixel id (each pixel optional; at most a few per store). */
-const perPixel = <T extends z.ZodType>(platform: "meta" | "tiktok", value: T) =>
-  z
-    .record(z.string().regex(PIXEL_ID_RE[platform]), value)
-    .refine((o) => Object.keys(o).length <= 200, { error: "Too many pixels." })
-    .default({});
-
-/**
- * Server-side event credentials (stored encrypted). Tokens and test codes are per pixel id — a
- * Conversions API token / Events API token belongs to one pixel (dataset). A test code is a stored
- * value: it is attached to an event only inside an active test window of that event's page (pixel
- * library, §A.2). The single-value fields are how they were stored before multi-pixel support: the
- * library migration copies them into the per-pixel maps; they stay stored (rollback only), are never
- * read by this build, and are deleted in the cleanup release.
- */
-export const TrackingSecretsSettings = z.object({
-  /** Meta Conversions API access token per Meta pixel id */
-  metaTokens: perPixel("meta", secretToken),
-  /** Meta "Test events" code per Meta pixel id — only while testing */
-  metaTestCodes: perPixel("meta", TestEventCode),
-  /** TikTok Events API access token per TikTok pixel code */
-  tiktokTokens: perPixel("tiktok", secretToken),
-  /** TikTok "Test events" code per TikTok pixel code — only while testing */
-  tiktokTestCodes: perPixel("tiktok", TestEventCode),
-  /** legacy single Meta token (any Meta pixel without its own) */
-  metaCapiToken: optional(secretToken),
-  /** legacy single Meta test code */
-  metaTestEventCode: optional(TestEventCode),
-  /** legacy single TikTok token (any TikTok pixel without its own) */
-  tiktokToken: optional(secretToken),
-  /** legacy single TikTok test code */
-  tiktokTestEventCode: optional(TestEventCode),
-  /** kept for a later Snap Conversions API; not used */
-  snapToken: optional(secretToken),
-  /** kept for a later GA4 Measurement Protocol; not used */
-  ga4ApiSecret: optional(secretToken),
-});
-
 export const AiSettings = z.object({
   enabled: z.boolean().default(true),
   tier: z.enum(["lite", "full"]).default("lite"),
   bgRemoval: z.boolean().default(true),
 });
 
-export const TurnstileSettings = z.object({
-  siteKey: optional(z.string().trim().regex(/^[A-Za-z0-9_-]{10,100}$/)),
-  secretKey: optional(secretToken),
-});
+export const TurnstileSettings = TurnstileSetting;
 
 export const HomeSettings = z.object({
   /** page shown at "/" (null → none) */
@@ -195,18 +92,6 @@ export const HomeSettings = z.object({
     .nullable()
     .default(null),
 });
-
-interface SettingDef<S extends z.ZodType> {
-  schema: S;
-  /** whole value stored as an AES-GCM envelope (settings.encrypted = true) */
-  secret: boolean;
-  /** value used when the row is missing or unreadable (computed lazily: may read env) */
-  defaults: () => z.input<S>;
-  /** fields shown masked in admin UIs (see redactSetting) */
-  sensitive?: readonly string[];
-}
-
-const def = <S extends z.ZodType>(d: SettingDef<S>) => d;
 
 export const SETTINGS = {
   store: def({ schema: StoreSettings, secret: false, defaults: () => ({}) }),
@@ -251,30 +136,10 @@ export function isSettingKey(value: unknown): value is SettingKey {
   return typeof value === "string" && Object.hasOwn(SETTINGS, value);
 }
 
-/** Masked secret preview, e.g. "••••3f9a" (never the full value). */
-export function maskSecret(value: string): string {
-  return value.length <= 8 ? "••••" : `••••${value.slice(-4)}`;
-}
-
 /**
  * Copy of a value that is safe to send to the browser: sensitive fields are replaced by a mask.
  * Forms should treat an untouched masked field as "keep the stored secret" (see updateSetting()).
  */
 export function redactSetting<K extends SettingKey>(key: K, value: SettingValue<K>): SettingValue<K> {
-  const sensitive: readonly string[] = SETTINGS[key].sensitive ?? [];
-  if (!sensitive.length) return value;
-  const copy: Record<string, unknown> = { ...(value as Record<string, unknown>) };
-  for (const field of sensitive) {
-    const v = copy[field];
-    if (typeof v === "string" && v) copy[field] = maskSecret(v);
-    // a map of secrets (e.g. a token per pixel id): every value masked, keys kept
-    else if (v && typeof v === "object" && !Array.isArray(v))
-      copy[field] = Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, s]) => [k, typeof s === "string" && s ? maskSecret(s) : s]));
-  }
-  return copy as SettingValue<K>;
-}
-
-/** True when a submitted field is the mask produced by redactSetting (i.e. unchanged). */
-export function isMaskedSecret(value: unknown): boolean {
-  return typeof value === "string" && /^••••[^•]{0,4}$/.test(value);
+  return redactFields(value, SETTINGS[key].sensitive);
 }

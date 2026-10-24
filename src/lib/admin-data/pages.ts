@@ -3,6 +3,9 @@ import "server-only";
  * Pages for the admin: the library list (with 7-day funnel numbers and "unpublished changes"),
  * and the page-level mutations used by the Pages screen (duplicate, unpublish, archive, restore,
  * delete, home page). Call these only after requireUser() with the right permission.
+ *
+ * Multi-tenant (docs/STORE-SAAS.md §E.3, §K.1): T4 moves every function onto a StoreScope; `listPagesForConsole(scope)`
+ * (the console and the health job, PLA Q.11, SEC-18) is frozen at C0a and throws "not implemented: T4" until then.
  */
 import { createHash } from "node:crypto";
 import { and, asc, count, desc, eq, gte, inArray, like, ne, or, sql, type SQL } from "drizzle-orm";
@@ -16,6 +19,7 @@ import { invalidatePublished } from "@/lib/render/cache.server";
 import { isServableSlug, RESERVED_SLUGS } from "@/lib/render/publish.server";
 import { getSetting, setSetting } from "@/lib/settings";
 import { deletePageStats } from "@/lib/stats";
+import type { StoreScope } from "@/lib/tenancy/types";
 import { addDays, dayKey } from "./time";
 
 export type PageStatus = "draft" | "published" | "archived";
@@ -58,10 +62,9 @@ export const docChecksum = (doc: unknown) => createHash("sha256").update(JSON.st
 const likeEscape = (s: string) => s.replace(/[\\%_]/g, (m) => "\\" + m);
 
 export async function homePageId(): Promise<string | null> {
+  // the pages.is_home flag is gone (0004 copies it to stores.home_page_id); setHomePage always wrote the setting too
   const home = await getSetting("home");
-  if (home.pageId) return home.pageId;
-  const [flagged] = await db.select({ id: pages.id }).from(pages).where(eq(pages.isHome, true)).limit(1);
-  return flagged?.id ?? null;
+  return home.pageId ?? null;
 }
 
 export async function listPages(filters: PageFilters = {}): Promise<PageListItem[]> {
@@ -79,7 +82,6 @@ export async function listPages(filters: PageFilters = {}): Promise<PageListItem
       name: pages.name,
       status: pages.status,
       locale: pages.locale,
-      isHome: pages.isHome,
       draft: pages.draft,
       createdAt: pages.createdAt,
       updatedAt: pages.updatedAt,
@@ -279,7 +281,6 @@ export async function unpublishPage(id: string, actor: Actor): Promise<boolean> 
 async function clearHomeIf(id: string, actor: Actor): Promise<void> {
   const home = await getSetting("home");
   if (home.pageId === id) await setSetting("home", { pageId: null }, actor);
-  await db.update(pages).set({ isHome: false }).where(and(eq(pages.id, id), eq(pages.isHome, true)));
 }
 
 export async function archivePage(id: string, actor: Actor): Promise<boolean> {
@@ -325,10 +326,6 @@ export async function setHomePage(id: string | null, actor: Actor): Promise<bool
     const page = await getPageRow(id);
     if (!page || page.status === "archived") return false;
   }
-  await db.transaction(async (tx) => {
-    await tx.update(pages).set({ isHome: false }).where(eq(pages.isHome, true));
-    if (id) await tx.update(pages).set({ isHome: true }).where(eq(pages.id, id));
-  });
   await setSetting("home", { pageId: id }, actor);
   invalidatePublished();
   await audit("page.home_set", { userId: actor.id, target: id ?? "auto", ip: actor.ip });
@@ -344,4 +341,26 @@ export function affected(res: unknown): number {
   const head = Array.isArray(res) ? res[0] : res;
   const n = (head as { affectedRows?: number } | undefined)?.affectedRows;
   return typeof n === "number" ? n : 0;
+}
+
+/** One page of a store as the console's Pages strip and the health job read it (PLA-§7.5; rev 3 SEC-18: name, seoTitle). */
+export interface ConsolePageRow {
+  id: string;
+  name: string;
+  /** the published document's SEO title (null when unset or never published) */
+  seoTitle: string | null;
+  slug: string;
+  status: PageStatus;
+  updatedAt: Date;
+  lastPublishedAt: Date | null;
+  views30d: number;
+  orders30d: number;
+  versionsKept: number;
+  storedBytes: number;
+}
+
+/** Read-only, through any scope (platformScope for the console, systemScope for the health job). T4. */
+export async function listPagesForConsole(scope: StoreScope): Promise<ConsolePageRow[]> {
+  void scope;
+  throw new Error("not implemented: T4 (listPagesForConsole)");
 }

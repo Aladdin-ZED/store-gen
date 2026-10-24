@@ -3,6 +3,11 @@ import "server-only";
  * Privacy-friendly page analytics: daily counters per page (stats_daily) + short-lived unique-visitor
  * markers (stats_visitors, sha256(vid) truncated, purged after 2 days). No cookies, no IPs stored.
  * Days are calendar days in APP_TIMEZONE (Morocco by default).
+ *
+ * Multi-tenant (docs/STORE-SAAS.md §K.1, STAT-01…04): the scoped overloads `recordEvent(scope, …)`,
+ * `bumpOrderStats(scope, …)` and `getPageStats(scope, range)` are frozen at C0a; T3 implements them (store
+ * timezone days, `store_id` rows, `is_test` skipped) and moves the callers. Until then they throw
+ * "not implemented: T3" and the single-tenant forms below keep working.
  */
 import { createHash } from "node:crypto";
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
@@ -13,6 +18,7 @@ import type { z } from "zod";
 import type { EventPayload } from "@/lib/orders/contract";
 import { hashIp } from "@/lib/security/crypto";
 import { rateLimit, rateLimitReached } from "@/lib/security/rate-limit";
+import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 
 export const STATS_TZ = process.env.APP_TIMEZONE || "Africa/Casablanca";
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -68,7 +74,18 @@ const UNIQUES_PER_NETWORK = 50;
  * Count an analytics beacon for a resolved page. "view" → views (+ unique visitor), "form_start" →
  * unique form starts per visitor/day. Other event types are accepted but not stored.
  */
-export async function recordEvent(pageId: string, e: Pick<z.output<typeof EventPayload>, "type" | "vid">, ip: string): Promise<void> {
+type StatsEvent = Pick<z.output<typeof EventPayload>, "type" | "vid">;
+
+const scopedNotImplemented = (fn: string): never => {
+  throw new Error(`not implemented: T3 (${fn}, scoped)`);
+};
+
+export function recordEvent(scope: WriteScope, pageId: string, e: StatsEvent, ip: string): Promise<void>;
+/** @deprecated single-tenant; T3 moves the event route to the scoped overload */
+export function recordEvent(pageId: string, e: StatsEvent, ip: string): Promise<void>;
+export async function recordEvent(...args: [WriteScope, string, StatsEvent, string] | [string, StatsEvent, string]): Promise<void> {
+  if (typeof args[0] !== "string") return scopedNotImplemented("recordEvent");
+  const [pageId, e, ip] = args as [string, StatsEvent, string];
   if (e.type !== "view" && e.type !== "form_start") return;
   const net = hashIp(ip);
   const gate = await rateLimit(`evt:ip:${net}`, EVENT_LIMIT, 600);
@@ -89,7 +106,14 @@ export async function recordEvent(pageId: string, e: Pick<z.output<typeof EventP
 }
 
 /** Orders / revenue counters (called on order creation and upsell acceptance). */
-export async function bumpOrderStats(pageId: string, at: Date, d: { orders?: number; revenue?: number }): Promise<void> {
+export function bumpOrderStats(scope: WriteScope, pageId: string, at: Date, d: { orders?: number; revenue?: number }): Promise<void>;
+/** @deprecated single-tenant; T3 moves the order and upsell paths to the scoped overload */
+export function bumpOrderStats(pageId: string, at: Date, d: { orders?: number; revenue?: number }): Promise<void>;
+export async function bumpOrderStats(
+  ...args: [WriteScope, string, Date, { orders?: number; revenue?: number }] | [string, Date, { orders?: number; revenue?: number }]
+): Promise<void> {
+  if (typeof args[0] !== "string") return scopedNotImplemented("bumpOrderStats");
+  const [pageId, at, d] = args as [string, Date, { orders?: number; revenue?: number }];
   await bump(pageId, dayKey(at), { orders: d.orders ?? 0, revenue: Math.round((d.revenue ?? 0) * 100) / 100 });
 }
 
@@ -142,7 +166,14 @@ function addDays(day: string, n: number): string {
  * Funnel stats for a day range (inclusive, "YYYY-MM-DD", max 366 days) — totals, a gap-free daily
  * series, and per-page rows. Optionally restricted to some pages.
  */
-export async function getPageStats(range: { from: string; to: string }, opts: { pageIds?: string[] } = {}): Promise<PageStats> {
+export function getPageStats(scope: StoreScope, range: { from: string; to: string }, opts?: { pageIds?: string[] }): Promise<PageStats>;
+/** @deprecated single-tenant; T3 moves the dashboard and the console to the scoped overload */
+export function getPageStats(range: { from: string; to: string }, opts?: { pageIds?: string[] }): Promise<PageStats>;
+export async function getPageStats(
+  ...args: [StoreScope, { from: string; to: string }, { pageIds?: string[] }?] | [{ from: string; to: string }, { pageIds?: string[] }?]
+): Promise<PageStats> {
+  if ("storeId" in args[0]) return scopedNotImplemented("getPageStats");
+  const [range, opts = {}] = args as [{ from: string; to: string }, { pageIds?: string[] }?];
   let { from, to } = range;
   if (!DAY_RE.test(from) || !DAY_RE.test(to)) throw new Error("invalid stats range");
   if (from > to) [from, to] = [to, from];

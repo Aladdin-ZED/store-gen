@@ -11,7 +11,7 @@ import "server-only";
  */
 import { and, eq } from "drizzle-orm";
 import { audit } from "@/lib/audit";
-import { can, type Role } from "@/lib/auth/permissions";
+import { legacyCan as can, type Role } from "@/lib/auth/permissions";
 import { db } from "@/lib/db/client";
 import { pages, pageVersions, users } from "@/lib/db/schema";
 import { ownToken, savedTestCode, type TrackingSecrets } from "@/lib/orders/conversions-core";

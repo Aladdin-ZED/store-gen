@@ -64,3 +64,43 @@ export function safeEqual(a: string, b: string): boolean {
 export function hashIp(ip: string): string {
   return hmac(rateKeyIp(ip), "ip");
 }
+
+/* ------------------------------------------------------------------ */
+/* Envelopes v2 (docs/STORE-SAAS.md §F.3, SET-02, SET-12)              */
+/* ------------------------------------------------------------------ */
+/*
+ * Per-store keys: a ciphertext copied from store A's row to store B's fails to open (another key and AAD). The HKDF
+ * salt "cod-studio" and every existing purpose string are frozen. encrypt()/decrypt() above keep working for the v1
+ * purposes that never change ("totp:<userId>", gate and session signing). Signatures frozen at C0a; T1 implements
+ * seal / open / hmacBytes (§K.1) and until then they throw "not implemented: T1".
+ */
+
+export type CryptoScope = { store: string } | "platform";
+
+/** "v2.k1.<iv>.<tag>.<ct>": key = HKDF-SHA256(APP_SECRET, "cod-studio", "<scope>:<purpose>:k1"), AAD = the same info string. */
+export function seal(plain: string, scope: CryptoScope, purpose: string): string {
+  void plain;
+  void scope;
+  void purpose;
+  throw new Error("not implemented: T1 (seal)");
+}
+
+/** v2 only; a v1 envelope opens only through openLegacy. */
+export function open(envelope: string, scope: CryptoScope, purpose: string): string {
+  void envelope;
+  void scope;
+  void purpose;
+  throw new Error("not implemented: T1 (open)");
+}
+
+/** Today's decrypt() (v1), for the store #1 conversion and TOTP. */
+export function openLegacy(envelope: string, purpose: string): string {
+  return decrypt(envelope, purpose);
+}
+
+/** HMAC of bytes with a purpose-bound key (per-store media ids, D21). */
+export function hmacBytes(data: Uint8Array, purpose: string): string {
+  void data;
+  void purpose;
+  throw new Error("not implemented: T1 (hmacBytes)");
+}

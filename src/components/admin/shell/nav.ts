@@ -13,7 +13,7 @@ import {
   SparklesIcon,
   type LucideIcon,
 } from "lucide-react";
-import { can, type Permission, type Role } from "@/lib/auth/permissions";
+import { legacyCan as can, type Permission, type Role } from "@/lib/auth/permissions";
 
 export interface NavItem {
   id: "dashboard" | "pages" | "generate" | "orders" | "media" | "history" | "exports" | "settings";
