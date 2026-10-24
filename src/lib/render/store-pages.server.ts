@@ -18,6 +18,7 @@ import { db } from "@/lib/db/client";
 import { pages, pageSlugHistory, pageVersions, storeSettings } from "@/lib/db/schema";
 import type { PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
+import { inStore } from "@/lib/tenancy/sql";
 import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { storePageLinks, type LegalKind } from "@/landing/context";
 import { cacheGet, cacheSet } from "./cache.server";
@@ -66,7 +67,7 @@ async function loadPublished(scope: StoreScope, where: SQL): Promise<PublishedPa
     })
     .from(pages)
     .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
-    .where(and(eq(pages.storeId, scope.storeId), where, eq(pages.status, "published")))
+    .where(and(inStore(pages, scope), where, eq(pages.status, "published")))
     .limit(1);
   if (!row || !row.html || !row.csp || !row.etag || !row.thankYouHtml || !row.thankYouCsp) return null;
   return {
@@ -123,7 +124,7 @@ export async function slugHistoryTarget(scope: StoreScope, store: StoreRow, slug
         .select({ slug: pages.slug })
         .from(pageSlugHistory)
         .innerJoin(pages, and(eq(pages.id, pageSlugHistory.pageId), eq(pages.storeId, pageSlugHistory.storeId)))
-        .where(and(eq(pageSlugHistory.storeId, scope.storeId), eq(pageSlugHistory.slug, slug), gt(pageSlugHistory.until, sql`UTC_TIMESTAMP(3)`), eq(pages.status, "published")))
+        .where(and(inStore(pageSlugHistory, scope), eq(pageSlugHistory.slug, slug), gt(pageSlugHistory.until, sql`UTC_TIMESTAMP(3)`), eq(pages.status, "published")))
         .limit(1);
       return row && row.slug !== slug && isStoreSlug(row.slug) ? { slug: row.slug } : null;
     },
@@ -138,7 +139,7 @@ export async function countSlugHit(scope: StoreScope, slug: string): Promise<voi
     await db
       .update(pageSlugHistory)
       .set({ hits: sql`${pageSlugHistory.hits} + 1` })
-      .where(and(eq(pageSlugHistory.storeId, scope.storeId), eq(pageSlugHistory.slug, slug)));
+      .where(and(inStore(pageSlugHistory, scope), eq(pageSlugHistory.slug, slug)));
   } catch {
     // a lost hit is not worth a failed redirect
   }
@@ -159,7 +160,7 @@ async function legalSource(scope: StoreScope, store: StoreRow, themeSlug: string
       const [latest] = await db
         .select({ id: pages.id })
         .from(pages)
-        .where(and(eq(pages.storeId, scope.storeId), eq(pages.status, "published")))
+        .where(and(inStore(pages, scope), eq(pages.status, "published")))
         .orderBy(desc(pages.updatedAt))
         .limit(1);
       return latest ? loadPublished(scope, eq(pages.id, latest.id)) : null;
@@ -173,7 +174,7 @@ async function factsUpdatedAt(scope: StoreScope): Promise<Date | null> {
   const [row] = await db
     .select({ at: sql<Date | string | null>`MAX(${storeSettings.updatedAt})` })
     .from(storeSettings)
-    .where(and(eq(storeSettings.storeId, scope.storeId), sql`${storeSettings.key} IN ('store', 'policies')`));
+    .where(and(inStore(storeSettings, scope), sql`${storeSettings.key} IN ('store', 'policies')`));
   const at = row?.at ? new Date(row.at) : null;
   return at && Number.isFinite(at.getTime()) ? at : null;
 }
@@ -217,7 +218,7 @@ export async function storeHasPublishedPage(scope: StoreScope, store: StoreRow):
       const [row] = await db
         .select({ id: pages.id })
         .from(pages)
-        .where(and(eq(pages.storeId, scope.storeId), eq(pages.status, "published")))
+        .where(and(inStore(pages, scope), eq(pages.status, "published")))
         .limit(1);
       return row ? { yes: true as const } : null;
     },
@@ -243,7 +244,7 @@ export async function listSitemapPages(scope: StoreScope, store: StoreRow): Prom
         .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
         .where(
           and(
-            eq(pages.storeId, scope.storeId),
+            inStore(pages, scope),
             eq(pages.status, "published"),
             // seo.noindex pages stay out (JSON read in SQL: the version docs are not loaded)
             sql`COALESCE(JSON_UNQUOTE(JSON_EXTRACT(${pageVersions.doc}, '$.seo.noindex')), 'false') <> 'true'`,

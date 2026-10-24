@@ -1,12 +1,14 @@
 /**
- * The order hand-off between the landing form and the thank-you page (sessionStorage "lp-order"):
- * survives a refresh of the thank-you page. Read back defensively: storage is user-controlled, so
- * every field is type-checked and bounded (≤ 22 groups × 4 parts × 40 characters).
+ * The order hand-off between the landing form and the thank-you page (sessionStorage "lp-order", or
+ * "lp:<handle>:order" on a store page under /s/<handle>, core skey): survives a refresh of the thank-you page.
+ * Read back defensively: storage is user-controlled, so every field is type-checked and bounded (≤ 22 groups
+ * × 4 parts × 40 characters).
  */
 import type { W } from "./core";
-import { sget, sset } from "./core";
+import { sget, skey, sset } from "./core";
 
-export const ORDER_KEY = "lp-order";
+/** The storage key name (core skey: "lp-order" outside /s/<handle>). */
+export const ORDER_KEY = "order";
 export const ORDER_ID_RE = /^[A-Za-z0-9-]{4,40}$/;
 
 /** One line of the order as the thank-you page draws it: identical units counted. */
@@ -76,7 +78,7 @@ function groups(v: unknown): OrderGroup[] | undefined {
 
 export function readOrder(win: W): OrderRecord | null {
   try {
-    const o = JSON.parse(sget(win, "sessionStorage", ORDER_KEY) || "null") as Record<string, unknown> | null;
+    const o = JSON.parse(sget(win, "sessionStorage", skey(win, ORDER_KEY)) || "null") as Record<string, unknown> | null;
     if (!o || typeof o !== "object" || typeof o.orderId !== "string" || !ORDER_ID_RE.test(o.orderId)) return null;
     const token = s(o.upsellToken, 128);
     return {
@@ -100,5 +102,5 @@ export function readOrder(win: W): OrderRecord | null {
 }
 
 export function writeOrder(win: W, rec: OrderRecord): boolean {
-  return sset(win, "sessionStorage", ORDER_KEY, JSON.stringify(rec));
+  return sset(win, "sessionStorage", skey(win, ORDER_KEY), JSON.stringify(rec));
 }

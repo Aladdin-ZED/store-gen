@@ -10,14 +10,14 @@ import "server-only";
  * public API like every store document, SEC-2). The frozen runtime chunk is untouched: endpoint strings are opaque
  * to it. P3 re-exports it from src/lib/testing/render.server.ts in R1 product.
  */
+import { TEST_PARAM } from "@/lib/tenancy/public";
 import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { validateDoc } from "@/lib/page/validate";
 import { renderLandingHtml, renderThankYouHtml, type RenderedHtml } from "./core";
 import type { PublishedPage } from "./store-pages.server";
 import { loadStoreRenderContext, PUBLIC_ENDPOINTS, storeAssetResolver, storeDocumentUrls, storeRenderOptions } from "./store-context.server";
 
-/** The query parameter of a test link. */
-export const TEST_PARAM = "sg-test";
+export { TEST_PARAM };
 
 /** `path` + `?sg-test=<token>` (the token is base36 + base64url: nothing to escape, encoded anyway). */
 const withToken = (path: string, token: string) => `${path}${path.includes("?") ? "&" : "?"}${TEST_PARAM}=${encodeURIComponent(token)}`;

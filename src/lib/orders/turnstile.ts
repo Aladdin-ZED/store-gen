@@ -1,6 +1,10 @@
 import "server-only";
 /**
- * Optional Cloudflare Turnstile check for public order submissions.
+ * Optional Cloudflare Turnstile check for public order submissions, with the keys of the target's store
+ * (docs/STORE-SAAS.md §D.10, SET-09): the store's own widget keys (custom domains, R3), else the platform widget
+ * (`platform_turnstile`, whose hostnames cover the platform and every store subdomain). The rule is the one the
+ * renderer embeds the widget by (src/lib/render/store-context.server.ts), so a page is checked with the secret of
+ * the site key it carries.
  *
  * Enforcement rule: a missing token is only rejected when the page's published HTML actually embeds
  * the widget (site key present in the stored HTML). Pages published before Turnstile was configured
@@ -14,13 +18,28 @@ import "server-only";
  * (risk.ts UNPROTECTED_MIN_SCORE).
  * A Cloudflare outage never blocks sales (token marked "unverified").
  */
-import { getSetting } from "@/lib/settings";
+import { getPlatformSetting, getStoreSettings } from "@/lib/settings";
+import type { StoreScope } from "@/lib/tenancy/types";
 import type { CaptchaState } from "./risk";
 import { versionEmbedsSiteKey, type PageTarget } from "./resolve";
 
 const VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 export type CaptchaOutcome = CaptchaState | "failed";
+
+/** A widget's key pair (both set, or Turnstile is off for the store). */
+export interface TurnstileKeys {
+  siteKey: string;
+  secretKey: string;
+}
+
+/** The keys the store's documents embed: its own pair, else the platform widget's; null when neither is configured. */
+export async function turnstileKeysFor(scope: StoreScope): Promise<TurnstileKeys | null> {
+  const { turnstile } = await getStoreSettings(scope, ["turnstile"] as const);
+  if (turnstile.siteKey && turnstile.secretKey) return { siteKey: turnstile.siteKey, secretKey: turnstile.secretKey };
+  const platform = await getPlatformSetting("platform_turnstile");
+  return platform.siteKey && platform.secretKey ? { siteKey: platform.siteKey, secretKey: platform.secretKey } : null;
+}
 
 export async function verifyTurnstile(secret: string, token: string, ip: string): Promise<"ok" | "failed" | "unverified"> {
   try {
@@ -40,18 +59,23 @@ export async function verifyTurnstile(secret: string, token: string, ip: string)
   }
 }
 
+/**
+ * The captcha outcome of an order on `target` (a page of the scope's store). `opts.keys` passes the store's keys
+ * when the caller already has them (null: Turnstile is off); otherwise they are read for the store.
+ */
 export async function checkCaptcha(
-  target: PageTarget,
+  scope: StoreScope,
+  target: Pick<PageTarget, "kind" | "versionId">,
   token: string | null | undefined,
   ip: string,
-  opts: { noOrigin?: boolean } = {},
+  opts: { noOrigin?: boolean; keys?: TurnstileKeys | null } = {},
 ): Promise<CaptchaOutcome> {
-  const cfg = await getSetting("turnstile");
-  if (!cfg.secretKey || !cfg.siteKey) return "off";
+  const cfg = opts.keys !== undefined ? opts.keys : await turnstileKeysFor(scope);
+  if (!cfg) return "off";
   const t = typeof token === "string" ? token.trim() : "";
   if (!t || t.length > 2048) {
     if (target.kind === "export") return opts.noOrigin ? "failed" : "unprotected";
-    return (await versionEmbedsSiteKey(target.versionId, cfg.siteKey)) ? "failed" : "missing";
+    return (await versionEmbedsSiteKey(scope, target.versionId, cfg.siteKey)) ? "failed" : "missing";
   }
   return verifyTurnstile(cfg.secretKey, t, ip);
 }

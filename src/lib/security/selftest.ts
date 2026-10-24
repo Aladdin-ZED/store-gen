@@ -16,9 +16,14 @@
  *     page's one inline style, HSTS), an empty body for every method but GET, never re-encoded.
  *  7. documentOrigins (production): the landing CSP only names PUBLIC_URL's host and its www twin;
  *     X-Forwarded-Host / a foreign Host never get in.
- * Later R1.0 steps add the served-document `connect-src` / `form-action` rule (SEC-2, render) and `originAllowed`
- * (SEC-23, export origins); T2's `allowlistAddress()` behind Cloudflare (SEC-14) and `p:login:acct` (SEC-22)
- * join when their code merges.
+ *  8. Served store documents (§C.9, SEC-2): every kind (landing, thank-you, legal, test, preview) on the platform,
+ *     legacy and store (Worker) hosts carries no bare 'self' and no bare app origin in connect-src / form-action,
+ *     only `<serving origin>/api/public/` plus the pixel hosts; with no usable origin the same-origin part is dropped.
+ *  9. Web storage on the shared origin (§C.9, LND-12 … 14): the runtime's storage names carry the store under
+ *     /s/<handle> (one derivation, core skey), so two stores' UTM, visitor id, order hand-off and hashed
+ *     advanced-matching data never meet; outside /s/ today's names stay.
+ * The export allow-list rule (`originAllowed`, SEC-23) is proven by test:public-api; T2's `allowlistAddress()` behind
+ * Cloudflare (SEC-14) and `p:login:acct` (SEC-22) join when their code merges.
  */
 import Module from "node:module";
 import type { PlatformUiArea } from "./headers";
@@ -467,6 +472,134 @@ async function main(): Promise<void> {
   } finally {
     console.warn = warn;
   }
+
+  /* 8. Served store documents: connect-src / form-action (SEC-2) -------------------------------- */
+  console.log("served store documents (SEC-2)");
+  const { documentResponse } = await import("@/lib/render/serve.server");
+  const { buildLandingCsp } = await import("@/lib/render/csp");
+  const stored = buildLandingCsp({
+    mode: "live",
+    scriptHashes: ["sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="],
+    styleHashes: ["sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="],
+    pixels: { meta: true, tiktok: true },
+    turnstile: true,
+  });
+  const directive = (csp: string, name: string) =>
+    (new RegExp(`(?:^|;)\\s*${name}\\s+([^;]*)`).exec(csp)?.[1] ?? "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+  /** a source that unlocks a whole app origin: 'self', one of our hosts without a path, a scheme, "*" (vendor hosts are fine) */
+  const appHosts = new Set([PLATFORM, CONSOLE, STORE, LEGACY]);
+  const bare = (v: string) => {
+    const origin = /^https?:\/\/([^/]+)\/?$/i.exec(v);
+    return v.toLowerCase() === "'self'" || v === "*" || /^https?:$/i.test(v) || (!!origin && appHosts.has(origin[1]!.toLowerCase()));
+  };
+  const docKinds = ["landing", "thanks", "legal", "test", "preview"] as const;
+  const shopAddress = { id: "01JAAAAAAAAAAAAAAAAAAAAAAA", handle: "shop1", primaryDomain: null };
+  const served = async (headers: Record<string, string>, url: string) => {
+    const out: Record<string, string> = {};
+    for (const kind of docKinds) {
+      const res = await documentResponse(new Request(url, { headers }), { html: "<!DOCTYPE html><title>x</title>", csp: stored, etag: "a".repeat(64) }, { kind, store: shopAddress });
+      out[kind] = res.headers.get("content-security-policy") ?? "";
+    }
+    return out;
+  };
+  const noBareSource = (label: string, policies: Record<string, string>, api: string) => {
+    for (const [kind, csp] of Object.entries(policies)) {
+      for (const name of ["connect-src", "form-action"]) {
+        const values = directive(csp, name);
+        check(`${label} ${kind}: ${name} has no bare 'self' or app origin`, values.length > 0 && !values.some(bare), values.join(" "));
+      }
+      check(`${label} ${kind}: connect-src names ${api}`, directive(csp, "connect-src").includes(api), csp);
+      check(`${label} ${kind}: the pixel hosts stay`, directive(csp, "connect-src").some((v) => v.includes("facebook")), csp);
+    }
+  };
+  noBareSource("platform host", await served({ host: PLATFORM }, `https://${PLATFORM}/s/shop1/argan`), `https://${PLATFORM}/api/public/`);
+  {
+    // the legacy host 308s every page (§C.4); a document served there anyway is reported once as off PUBLIC_URL
+    const quiet = console.warn;
+    console.warn = () => undefined;
+    try {
+      noBareSource("legacy host", await served({ host: LEGACY }, `https://${LEGACY}/argan`), `https://${PLATFORM}/api/public/`);
+    } finally {
+      console.warn = quiet;
+    }
+  }
+  {
+    const prev = { root: env.STORE_ROOT_DOMAIN, key: env.EDGE_KEY };
+    env.STORE_ROOT_DOMAIN = PLATFORM;
+    env.EDGE_KEY = EDGE_KEY;
+    try {
+      const viaEdge = await served(worker(), `https://${PLATFORM}/argan`);
+      noBareSource("store host (Worker)", viaEdge, `https://${STORE}/api/public/`);
+      check("store host: the platform's public API is not listed", !directive(viaEdge.landing!, "connect-src").includes(`https://${PLATFORM}/api/public/`), viaEdge.landing);
+      const forged = await served(worker({ key: "x".repeat(40) }), `https://${PLATFORM}/argan`);
+      check("a forged Worker header set never names the store host", !Object.values(forged).some((c) => c.includes(STORE)), forged.landing);
+    } finally {
+      if (prev.root === undefined) delete env.STORE_ROOT_DOMAIN;
+      else env.STORE_ROOT_DOMAIN = prev.root;
+      if (prev.key === undefined) delete env.EDGE_KEY;
+      else env.EDGE_KEY = prev.key;
+    }
+  }
+  {
+    const prev = env.PLATFORM_URL;
+    delete env.PLATFORM_URL;
+    try {
+      const none = await served({ host: "shop.ma; script-src *" }, `https://${PLATFORM}/argan`);
+      for (const [kind, csp] of Object.entries(none)) {
+        check(
+          `no usable origin ${kind}: the same-origin part is dropped (never a bare 'self')`,
+          !directive(csp, "connect-src").some(bare) && directive(csp, "form-action").join(" ") === "'none'",
+          csp,
+        );
+      }
+    } finally {
+      env.PLATFORM_URL = prev;
+    }
+  }
+
+  /* 9. Web storage names per store (§C.9) ------------------------------------------------------ */
+  console.log("web storage names per store (§C.9)");
+  const core = await import("@/landing/runtime/core");
+  const tracking = await import("@/landing/runtime/tracking");
+  const orderStore = await import("@/landing/runtime/order-store");
+  const pixels = await import("@/landing/runtime/pixels");
+  type W = import("@/landing/runtime/core").W;
+  const memory = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, String(v)), removeItem: (k: string) => void m.delete(k), keys: () => [...m.keys()].sort() };
+  };
+  const session = memory();
+  const local = memory();
+  const win = (path: string, search = "") => ({ location: { pathname: path, search }, sessionStorage: session, localStorage: local, crypto: globalThis.crypto }) as unknown as W;
+  eq("skey: a store page in P mode", core.skey(win("/s/atlas-argan/argan"), "utm"), "lp:atlas-argan:utm");
+  eq("skey: the store home shares the prefix", core.skey(win("/s/atlas-argan"), "vid"), "lp:atlas-argan:vid");
+  eq("skey: the thank-you page shares it", core.skey(win("/s/atlas-argan/argan/merci"), "order"), "lp:atlas-argan:order");
+  eq("skey: outside /s/ today's names stay", [core.skey(win("/argan"), "utm"), core.skey(win("/"), "wa"), core.skey(win("srcdoc"), "px-u")], ["lp-utm", "lp-wa", "lp-px-u"]);
+  eq("skey: not a handle: today's name", [core.skey(win("/s/ab/x"), "utm"), core.skey(win("/s/Atlas/x"), "utm"), core.skey(win("/sx/atlas-argan"), "utm")], ["lp-utm", "lp-utm", "lp-utm"]);
+  const utmA = tracking.captureUtm(win("/s/atlas-argan/argan", "?utm_source=fb&fbclid=AAA"));
+  const utmB = tracking.captureUtm(win("/s/baraka-home/argan"));
+  eq("captureUtm: store A's attribution", utmA, { source: "fb", fbclid: "AAA" });
+  eq("captureUtm: store B never reads store A's session attribution", utmB, {});
+  eq("captureUtm: a later page of store A keeps its attribution", tracking.captureUtm(win("/s/atlas-argan/serum")), { source: "fb", fbclid: "AAA" });
+  eq("captureUtm: ScCid and utm_* map to their payload keys, values trimmed", tracking.captureUtm(win("/x", "?ScCid=%20s1%20&utm_term=t")), { term: "t", sccid: "s1" });
+  const ctx = (path: string) => ({ win: win(path), doc: { cookie: "" } }) as unknown as import("@/landing/runtime/core").Ctx;
+  const vidA = tracking.visitorId(ctx("/s/atlas-argan/argan"));
+  const vidB = tracking.visitorId(ctx("/s/baraka-home/argan"));
+  check("visitorId: one id per store", vidA !== vidB && tracking.visitorId(ctx("/s/atlas-argan/x")) === vidA);
+  const rec = { orderId: "CMD-7K3Q9X", name: "Amina", total: 199, currency: "MAD", bundleLabel: "x1", items: "x1", qty: 1, eventId: "e1", ts: 1, pageKey: "pk_atlas_argan_1" };
+  orderStore.writeOrder(win("/s/atlas-argan/argan"), rec);
+  eq("order hand-off: store A's thank-you page reads it", orderStore.readOrder(win("/s/atlas-argan/argan/merci"))?.orderId, "CMD-7K3Q9X");
+  eq("order hand-off: store B's thank-you page does not", orderStore.readOrder(win("/s/baraka-home/argan/merci")), null);
+  session.setItem(core.skey(win("/s/atlas-argan/argan"), pixels.PX_USER_KEY), JSON.stringify({ ph: "a".repeat(64), phE: "b".repeat(64) }));
+  check("advanced matching: store A's hashes stay store A's", pixels.readUser(win("/s/atlas-argan/argan/merci"))?.ph === "a".repeat(64) && pixels.readUser(win("/s/baraka-home/argan/merci")) === null);
+  eq(
+    "the per-store names in storage",
+    [...session.keys(), ...local.keys()].filter((k) => k.startsWith("lp:")),
+    ["lp:atlas-argan:order", "lp:atlas-argan:px-u", "lp:atlas-argan:utm", "lp:atlas-argan:vid", "lp:baraka-home:vid"],
+  );
 }
 
 main().then(

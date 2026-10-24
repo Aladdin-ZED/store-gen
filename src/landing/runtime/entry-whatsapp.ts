@@ -12,12 +12,15 @@
  * floating glass card keeps a one-tap "open WhatsApp again" until the message is sent.
  *
  * Data: #lp-config (public page data) + #lp-wa (number, endpoint, localized labels). Text is inserted
- * with textContent only.
+ * with textContent only. The hand-off to the thank-you page is sessionStorage "lp-wa" (core skey: per store
+ * under /s/<handle>, where stores share an origin).
  */
 import type { WaLabels } from "../../lib/export/whatsapp";
 import { composeWaMessage } from "../../lib/export/whatsapp";
 import type { Locale } from "../../lib/page/schema";
 import type { LandingRuntimeConfig } from "./config";
+import type { W } from "./core";
+import { skey } from "./core";
 import type { Sel } from "./money";
 import { fmtCents, offerOf } from "./money";
 import { selText, unitsText } from "./units-text";
@@ -31,7 +34,7 @@ interface Handoff {
 (() => {
   const d = document;
   const w = window;
-  const KEY = "lp-wa";
+  const KEY = skey(w as W, "wa");
   const data = <T>(id: string): T | null => {
     const el = d.getElementById(id);
     if (!el) return null;

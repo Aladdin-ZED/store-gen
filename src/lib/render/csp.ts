@@ -184,16 +184,16 @@ export function buildLandingCsp(input: LandingCspInput): string {
  * Narrows a stored live policy to the origin(s) the document is served from: in connect-src and
  * form-action, 'self' becomes "<origin>/api/public/" for each origin. A same-origin script — any
  * sub-resource of a pixel loader — can still call the public API, but can no longer fetch, beacon
- * or post to /admin/**, /api/admin/** or anything else the admin's cookies unlock. Every other
+ * or post to /admin/**, /api/admin/**, /app/** or anything else the viewer's cookies unlock. Every other
  * directive is copied unchanged. Applies to policies stored before this rule too (served per request).
  *
- * `origins`: where the browser may be showing the document (PUBLIC_URL's origin, the request's own
- * host). With none usable the policy is returned as is: a page that cannot reach its own API would
- * silently stop taking orders.
+ * `origins`: where the browser may be showing the document (the platform origin, the request's own
+ * host, the store's own host behind the Worker). With none usable (a request whose Host is no host), the
+ * same-origin part is dropped rather than kept (docs/STORE-SAAS.md §C.9, SEC-2: never a bare 'self'): such a
+ * document cannot post, which is the safe failure.
  */
 export function scopeToPublicApi(csp: string, origins: readonly string[]): string {
   const sources = [...new Set(origins.map((o) => o.toLowerCase()).filter((o) => ORIGIN.test(o)))].map(publicApiSource);
-  if (!sources.length) return csp;
   return csp
     .split(";")
     .map((part) => part.trim())
@@ -202,7 +202,8 @@ export function scopeToPublicApi(csp: string, origins: readonly string[]): strin
       const [name = "", ...values] = part.split(/\s+/);
       const isSelf = (v: string) => v.toLowerCase() === "'self'";
       if (!SCOPED_DIRECTIVES.has(name.toLowerCase()) || !values.some(isSelf)) return part;
-      return [name, ...new Set([...sources, ...values.filter((v) => !isSelf(v))])].join(" ");
+      const kept = [...new Set([...sources, ...values.filter((v) => !isSelf(v))])];
+      return [name, ...(kept.length ? kept : ["'none'"])].join(" ");
     })
     .join("; ");
 }

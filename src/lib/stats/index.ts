@@ -21,6 +21,7 @@ import type { EventPayload } from "@/lib/orders/contract";
 import { hashIp } from "@/lib/security/crypto";
 import { rateLimit, rateLimitReached } from "@/lib/security/rate-limit";
 import { getStoreById } from "@/lib/tenancy/public";
+import { inStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 
 /** The single-tenant day zone (APP_TIMEZONE); store days use the store's own timezone (storeTimeZone). */
@@ -238,7 +239,7 @@ export async function getPageStats(
   if (addDays(from, 366) < to) from = addDays(to, -366);
 
   const where = and(
-    scope ? eq(statsDaily.storeId, scope.storeId) : undefined,
+    scope ? inStore(statsDaily, scope) : undefined,
     gte(statsDaily.day, from),
     lte(statsDaily.day, to),
     opts.pageIds?.length ? inArray(statsDaily.pageId, opts.pageIds) : undefined,
@@ -294,9 +295,9 @@ export async function deletePageStats(...args: [WriteScope, string] | [string]):
     const [own] = await db
       .select({ pageId: pages.id })
       .from(pages)
-      .where(and(eq(pages.storeId, scope.storeId), eq(pages.id, pageId)))
+      .where(and(inStore(pages, scope), eq(pages.id, pageId)))
       .limit(1);
-    await db.delete(statsDaily).where(and(eq(statsDaily.storeId, scope.storeId), eq(statsDaily.pageId, pageId)));
+    await db.delete(statsDaily).where(and(inStore(statsDaily, scope), eq(statsDaily.pageId, pageId)));
     if (own) await db.delete(statsVisitors).where(eq(statsVisitors.pageId, pageId));
     return;
   }

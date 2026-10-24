@@ -1,9 +1,21 @@
 /**
- * Origin policy for the public API (pure — no I/O, no framework imports).
- *  - live pages: same-origin only (Origin, when sent, must be one of our hosts)
- *  - exports: Origin must be in that export's allow-list → reflected in Access-Control-Allow-Origin
- *    (never "*", never credentials)
+ * Origin policy for the public API (docs/STORE-SAAS.md §C.9; no I/O and no framework imports, so the admin's export
+ * dialog can prove its allow-list entries with the same matcher; the addressing environment is read at call time
+ * and reads as unset in a browser, where the server re-checks every entry anyway).
+ *  - live pages: the Origin, when sent, must be one of the target STORE's hosts (`storeHosts(store)`: the platform
+ *    host, its subdomain in S mode, its verified custom domains (R3), the legacy hosts), never a reflected Host
+ *    outside development. In S / C mode store A's page posting store B's page key is refused (V6); in P mode every
+ *    store shares the platform origin, so the Origin cannot tell A's page from B's and host-level isolation begins
+ *    with S mode (SEC-23: tenant JS is forbidden, so no first-party cross-store post exists).
+ *  - exports: the Origin must be on that export's allow-list → reflected in Access-Control-Allow-Origin
+ *    (never "*", never credentials). An entry naming the platform's own namespace (the platform, legacy and
+ *    console hosts, the store root domain and every name under it) is never honoured (SEC-23), and a wildcard
+ *    must cover one registrable domain that is not shared by unrelated sites (R-D8).
+ * Requests without Origin (non-browser clients) pass, flagged `noOrigin` for the risk score, unless Sec-Fetch-Site
+ * says the browser sent them from another site.
  */
+import { adminHostName, hostOf, isIpLiteral, legacyPlatformHosts, platformHost, storeRootDomain } from "@/lib/edge/env";
+import { storeHosts, type StoreAddress } from "@/lib/urls";
 
 interface ParsedOrigin {
   scheme: string;
@@ -51,8 +63,8 @@ const SHARED_HOSTING_SUFFIXES = new Set([
 /** Cloud zones where every level below is shared between customers (bucket / region endpoints). */
 const SHARED_HOSTING_ZONES = ["amazonaws.com", "windows.net", "azure.com", "googleusercontent.com"];
 
-/** Is `name` a namespace shared by unrelated sites (public suffix, shared hosting, IP literal)? */
-export function sharedSuffix(name: string): boolean {
+/** A public suffix, a shared hosting namespace or an IP literal (static lists only). */
+function publicNamespace(name: string): boolean {
   const n = name.toLowerCase().replace(/:\d+$/, "");
   if (n.startsWith("[") || /^[\d.]+$/.test(n)) return true;
   const labels = n.split(".");
@@ -63,63 +75,134 @@ export function sharedSuffix(name: string): boolean {
 }
 
 /**
- * A wildcard must cover one registrable domain: "*.shop.ma" is fine, while "*.com", "*.ma",
- * "*.co.ma", "*.netlify.app" or an IP literal would let unrelated sites call the API with CORS.
+ * The registrable domain of a host (no Public Suffix List here): its last two labels, or three under a registry
+ * second level or a shared hosting suffix ("shop.co.ma", "site.hostingersite.com"), so the platform's temporary
+ * Hostinger host never claims every other Hostinger site.
+ */
+export function registrableDomain(host: string): string {
+  const labels = host.toLowerCase().replace(/:\d+$/, "").split(".");
+  if (labels.length <= 2) return labels.join(".");
+  const two = labels.slice(-2).join(".");
+  return publicNamespace(two) ? labels.slice(-3).join(".") : two;
+}
+
+/**
+ * The zones the platform owns (SEC-23): STORE_ROOT_DOMAIN and PLATFORM_HOST's registrable domain (none for an IP
+ * or single-label platform host such as localhost in development: that host alone is the platform's).
+ */
+function platformZones(): string[] {
+  const zones = new Set<string>();
+  const root = storeRootDomain();
+  if (root) zones.add(root);
+  const platform = platformHost()?.replace(/:\d+$/, "");
+  if (platform && platform.includes(".") && !isIpLiteral(platform)) zones.add(registrableDomain(platform));
+  return [...zones];
+}
+
+const within = (host: string, zone: string) => host === zone || host.endsWith(`.${zone}`);
+
+/** `host` is the platform's own (platform, legacy or console host, or a name in a platform zone). */
+function platformOwned(host: string): boolean {
+  const h = hostOf(host) ?? host.toLowerCase();
+  const bare = h.replace(/:\d+$/, "");
+  if (h === platformHost() || h === adminHostName() || legacyPlatformHosts().has(h)) return true;
+  return platformZones().some((z) => within(bare, z));
+}
+
+/**
+ * Is `name` a namespace shared by unrelated sites (public suffix, shared hosting, IP literal), or one of the
+ * platform's own zones (STORE_ROOT_DOMAIN, PLATFORM_HOST's registrable domain: every store lives under them)?
+ */
+export function sharedSuffix(name: string): boolean {
+  const n = name.toLowerCase().replace(/:\d+$/, "");
+  return publicNamespace(n) || platformZones().includes(n);
+}
+
+/**
+ * A wildcard must cover one registrable domain of the seller: "*.shop.ma" is fine, while "*.com", "*.ma",
+ * "*.co.ma", "*.netlify.app", an IP literal or anything at or under the platform's zones would let unrelated
+ * sites (or every store) call the API with CORS.
  */
 function wildcardBaseOk(host: string): boolean {
-  return !sharedSuffix(host);
+  if (sharedSuffix(host)) return false;
+  const bare = host.toLowerCase().replace(/:\d+$/, "");
+  return !platformZones().some((z) => within(bare, z));
+}
+
+export type ExportOriginProblem = "invalid" | "shared_suffix" | "platform";
+
+/**
+ * Why an allow-list entry can never be honoured, or null when it can (SEC-23): `invalid` (not an http(s) origin,
+ * a bare host or a wildcard), `shared_suffix` (a wildcard over a shared namespace), `platform` (the platform,
+ * legacy or console host, the store root domain or a name under it, the platform's registrable domain). The
+ * export save refuses such entries (`settings.write` → invalid) and `originAllowed` skips them at check time.
+ */
+export function exportOriginProblem(raw: string): ExportOriginProblem | null {
+  const entry = raw.trim().toLowerCase();
+  const wildcard = entry.replace(/^[a-z][a-z0-9+.-]*:\/\//, "").startsWith("*.");
+  const e = parseOrigin(entry.replace("*.", ""));
+  if (!e) return "invalid";
+  if (wildcard) {
+    if (publicNamespace(e.host)) return "shared_suffix";
+    return wildcardBaseOk(e.host) ? null : "platform";
+  }
+  return platformOwned(e.host) ? "platform" : null;
 }
 
 /**
  * Does `origin` match an allow-list entry? Entries are origins ("https://shop.ma"), bare hosts
- * ("shop.ma" → any scheme) or wildcard subdomains ("https://*.shop.ma", "*.shop.ma").
+ * ("shop.ma" → any scheme) or wildcard subdomains ("https://*.shop.ma", "*.shop.ma"). Entries that
+ * `exportOriginProblem` refuses never match, and neither does an origin of the platform's own namespace.
  */
 export function originAllowed(origin: string, allowed: readonly string[]): boolean {
   const o = parseOrigin(origin);
-  if (!o) return false;
+  if (!o || platformOwned(o.host)) return false;
   for (const raw of allowed) {
     const entry = raw.trim().toLowerCase();
+    if (exportOriginProblem(entry)) continue;
     const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//.test(entry);
     const wildcard = entry.replace(/^[a-z][a-z0-9+.-]*:\/\//, "").startsWith("*.");
-    const e = parseOrigin(entry.replace("*.", ""));
-    if (!e) continue;
-    if (wildcard && !wildcardBaseOk(e.host)) continue;
+    const e = parseOrigin(entry.replace("*.", ""))!;
     if (hasScheme && e.scheme !== o.scheme) continue;
     if (wildcard ? o.host.endsWith(`.${e.host}`) : o.host === e.host) return true;
   }
   return false;
 }
 
-/** Hosts this app answers on (Host / X-Forwarded-Host / PUBLIC_URL). */
-function selfHosts(headers: Headers): Set<string> {
-  const hosts = new Set<string>();
-  const add = (v: string | null | undefined) => {
-    const first = v?.split(",")[0]?.trim().toLowerCase();
-    if (first) hosts.add(first);
-  };
-  add(headers.get("x-forwarded-host"));
-  add(headers.get("host"));
-  if (process.env.PUBLIC_URL) {
-    try {
-      add(new URL(process.env.PUBLIC_URL).host);
-    } catch {
-      // malformed PUBLIC_URL: host headers still apply
-    }
+/** What an Origin is checked against: the target's store (null: no store resolved) and an export's allow-list. */
+export interface OriginTarget {
+  store: StoreAddress | null;
+  /** origins allowed to call the API cross-origin (exports only; null for live pages) */
+  allowedOrigins: readonly string[] | null;
+}
+
+const firstHost = (v: string | null) => hostOf(v?.split(",")[0]);
+
+/**
+ * The hosts a live page of the target may post from: `storeHosts(store)`, or with no store resolved the hosts
+ * every store shares (the platform and legacy hosts). In development only, the request's own Host and
+ * X-Forwarded-Host too (LAN devices, tunnels); production never reflects them (§C.9).
+ */
+function ownHosts(headers: Headers, store: StoreAddress | null): ReadonlySet<string> {
+  const hosts = new Set<string>(store ? storeHosts(store) : legacyPlatformHosts());
+  if (!store) {
+    const platform = platformHost();
+    if (platform) hosts.add(platform);
+  }
+  if (process.env.NODE_ENV !== "production") {
+    for (const h of [firstHost(headers.get("host")), firstHost(headers.get("x-forwarded-host"))]) if (h) hosts.add(h);
   }
   return hosts;
 }
 
-export type OriginVerdict =
-  | { ok: true; cors: string | null; noOrigin: boolean }
-  | { ok: false };
+export type OriginVerdict = { ok: true; cors: string | null; noOrigin: boolean } | { ok: false };
 
 /**
- * Origin policy for public POSTs.
- *  - live pages: same-origin only (Origin, when sent, must be one of our hosts)
- *  - exports: Origin must be in that export's allow-list → reflected in Access-Control-Allow-Origin
- * Requests without Origin (non-browser clients) pass, flagged `noOrigin` for the risk score.
+ * Origin policy for public POSTs (§C.9): a live page's Origin must be one of its store's hosts (and the fetch not
+ * cross-site); an export's Origin must be on its allow-list (→ CORS). No Origin passes, flagged `noOrigin`,
+ * unless Sec-Fetch-Site shows a browser request from another site.
  */
-export function checkOrigin(req: Request, allowedOrigins: readonly string[] | null): OriginVerdict {
+export function checkOrigin(req: Request, target: OriginTarget): OriginVerdict {
   const origin = req.headers.get("origin");
   const site = req.headers.get("sec-fetch-site");
   if (!origin) {
@@ -128,8 +211,10 @@ export function checkOrigin(req: Request, allowedOrigins: readonly string[] | nu
   }
   const o = parseOrigin(origin);
   if (!o) return { ok: false };
-  if (selfHosts(req.headers).has(o.host)) return { ok: true, cors: null, noOrigin: false };
-  if (allowedOrigins && originAllowed(origin, allowedOrigins)) return { ok: true, cors: origin, noOrigin: false };
+  if (ownHosts(req.headers, target.store).has(hostOf(o.host) ?? o.host)) {
+    return site === "cross-site" ? { ok: false } : { ok: true, cors: null, noOrigin: false };
+  }
+  if (target.allowedOrigins && originAllowed(origin, target.allowedOrigins)) return { ok: true, cors: origin, noOrigin: false };
   return { ok: false };
 }
 

@@ -39,6 +39,7 @@ import { validateDoc, type DocIssue } from "@/lib/page/validate";
 import { getSetting } from "@/lib/settings";
 import { STORE_RESERVED_SLUGS } from "@/lib/tenancy/handles";
 import { getStoreById } from "@/lib/tenancy/public";
+import { inStore } from "@/lib/tenancy/sql";
 import type { Actor, GateItem, StoreRow, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { buildTheme } from "@/lib/theme";
 import { collectAssetIds, liveAssetResolver, liveLinks, type AssetResolver, type StoreInfo } from "@/landing/context";
@@ -317,7 +318,7 @@ async function publishedDoc(scope: StoreScope, versionId: string | null): Promis
   const [row] = await db
     .select({ doc: pageVersions.doc })
     .from(pageVersions)
-    .where(and(eq(pageVersions.storeId, scope.storeId), eq(pageVersions.id, versionId)))
+    .where(and(inStore(pageVersions, scope), eq(pageVersions.id, versionId)))
     .limit(1);
   return row?.doc ? validateDoc(row.doc).doc : null;
 }
@@ -333,7 +334,7 @@ async function liveIdsInStore(scope: StoreScope, pageId: string): Promise<Tracki
     .select({ doc: pageVersions.doc, status: pages.status })
     .from(pages)
     .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
-    .where(and(eq(pages.storeId, scope.storeId), eq(pages.id, pageId)))
+    .where(and(inStore(pages, scope), eq(pages.id, pageId)))
     .limit(1);
   if (!row || row.status !== "published") return null;
   return idsOnly((row.doc as { tracking?: Record<string, unknown> } | null)?.tracking ?? null);
@@ -362,7 +363,7 @@ async function publishInStore(scope: WriteScope, pageId: string, opts: ScopedPub
       const [row] = await db
         .select({ updatedAt: pages.updatedAt })
         .from(pages)
-        .where(and(eq(pages.storeId, scope.storeId), eq(pages.id, pageId)))
+        .where(and(inStore(pages, scope), eq(pages.id, pageId)))
         .limit(1);
       throw draftChanged(row?.updatedAt.getTime() ?? Date.now());
     }
@@ -373,7 +374,7 @@ async function publishInStoreOnce(scope: WriteScope, pageId: string, opts: Scope
   const [page] = await db
     .select({ id: pages.id, slug: pages.slug, draft: pages.draft, updatedAt: pages.updatedAt })
     .from(pages)
-    .where(and(eq(pages.storeId, scope.storeId), eq(pages.id, pageId)))
+    .where(and(inStore(pages, scope), eq(pages.id, pageId)))
     .limit(1);
   if (!page) throw notFound();
   const readStamp = page.updatedAt.getTime();
@@ -425,7 +426,7 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
   const [page] = await db
     .select({ id: pages.id, slug: pages.slug, publicKey: pages.publicKey, publishedVersionId: pages.publishedVersionId })
     .from(pages)
-    .where(and(eq(pages.storeId, scope.storeId), eq(pages.id, pageId)))
+    .where(and(inStore(pages, scope), eq(pages.id, pageId)))
     .limit(1);
   if (!page) throw notFound();
   const slug = opts.draft?.slug ?? page.slug;
@@ -465,7 +466,7 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
   if (packetLimit && heaviest > packetLimit) throw tooHeavy(heaviest, packetLimit);
 
   let publishedAt = new Date();
-  const inPage = and(eq(pages.storeId, scope.storeId), eq(pages.id, page.id));
+  const inPage = and(inStore(pages, scope), eq(pages.id, page.id));
   const committed = await db
     .transaction(async (tx) => {
       const [locked] = await tx
@@ -506,7 +507,7 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
         createdBy: actor.userId,
         createdAt: publishedAt,
       });
-      const inVersion = and(eq(pageVersions.storeId, scope.storeId), eq(pageVersions.id, versionId));
+      const inVersion = and(inStore(pageVersions, scope), eq(pageVersions.id, versionId));
       await tx.update(pageVersions).set({ html: landing.html }).where(inVersion);
       await tx.update(pageVersions).set({ thankYouHtml: thanks.html }).where(inVersion);
       await tx
@@ -549,7 +550,7 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
  * the page is not live in this store (another store's id included).
  */
 export async function unpublishPage(scope: WriteScope, pageId: string, actor: Actor): Promise<boolean> {
-  const live = and(eq(pages.storeId, scope.storeId), eq(pages.id, pageId), eq(pages.status, "published"));
+  const live = and(inStore(pages, scope), eq(pages.id, pageId), eq(pages.status, "published"));
   const [row] = await db.select({ versionId: pages.publishedVersionId }).from(pages).where(live).limit(1);
   if (!row) return false;
   const res = await db.update(pages).set({ status: "draft" }).where(live);

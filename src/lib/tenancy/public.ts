@@ -8,6 +8,7 @@ import "server-only";
  *   const found = await resolveStoreHandle(params.store);          // the store routes: current, renamed (308) or gone (410)
  *   const target = await resolvePublicTarget(pageKey, { purpose: "order" });
  *   const { test } = resolveTestToken(target.store, url.searchParams.get("sg-test"));
+ *   const upsell = await resolveUpsellOrder(orderId);               // the one-click upsell's order → its store
  *
  * Caches (§E.5): the `stores` ScopedCache (2,000 rows, 15 s; `invalidateStore` drops a row at once), a handle
  * index (15 s, verified against the row on every hit, so a rename is seen at the next invalidation) and the misses
@@ -149,7 +150,7 @@ export async function resolveStoreByHandle(handle: string): Promise<StoreRow | n
 }
 
 /** The scope of a resolved public target (kind "public": a WriteScope, so the public order path can insert). */
-export function publicScope(store: StoreRow): StoreScope & { readonly kind: "public" } {
+export function publicScope(store: StoreRow): PublicScope {
   return mintScope("public", store.id);
 }
 
@@ -210,6 +211,12 @@ const TARGET_STATES: ReadonlySet<StoreStatus> = new Set(["pending", "active", "r
 
 type KeyTarget = { storeId: string; base: Omit<PageTarget, "doc"> };
 
+/** The public scope's type: a WriteScope, so the public write path (orders, leads, beacons) can insert with it. */
+export type PublicScope = StoreScope & { readonly kind: "public" };
+
+/** A resolved page key: the store, its public scope and the published document (the order, lead and event APIs). */
+export type PublicPageTarget = PublicTarget & PageTarget & { scope: PublicScope };
+
 const pageKeys = scopedCache<KeyTarget | null>({ name: "public-keys", maxEntries: 2_000, ttlMs: 15_000 });
 
 async function lookupPageKey(pageKey: string): Promise<KeyTarget | null> {
@@ -221,7 +228,7 @@ async function lookupPageKey(pageKey: string): Promise<KeyTarget | null> {
     .limit(1);
   if (page) {
     if (page.status !== "published" || !page.versionId) return null;
-    return { storeId: page.storeId, base: { kind: "page", pageId: page.id, versionId: page.versionId, exportId: null, exportMode: null, allowedOrigins: [], source: "live" } };
+    return { storeId: page.storeId, base: { kind: "page", storeId: page.storeId, pageId: page.id, versionId: page.versionId, exportId: null, exportMode: null, allowedOrigins: [], source: "live" } };
   }
   // tenancy: public-key exportKey (exports.public_key is unique across stores)
   const [exp] = await db
@@ -234,6 +241,7 @@ async function lookupPageKey(pageKey: string): Promise<KeyTarget | null> {
     storeId: exp.storeId,
     base: {
       kind: "export",
+      storeId: exp.storeId,
       pageId: exp.pageId,
       versionId: exp.versionId,
       exportId: exp.id,
@@ -252,7 +260,7 @@ async function lookupPageKey(pageKey: string): Promise<KeyTarget | null> {
  * Null for an unknown key, an unpublished page, a revoked export, and a store that is closed, deleted or rejected;
  * pending, restricted and suspended stores return their target and `publicApiAnswer` decides.
  */
-export async function resolvePublicTarget(pageKey: string, opts: { purpose?: ResolvePurpose } = {}): Promise<(PublicTarget & PageTarget) | null> {
+export async function resolvePublicTarget(pageKey: string, opts: { purpose?: ResolvePurpose } = {}): Promise<PublicPageTarget | null> {
   if (!PAGE_KEY_RE.test(pageKey)) return null;
   const purpose = opts.purpose ?? "order";
   const found = purpose === "event" ? await pageKeys.getOrLoad(P, pageKey, () => lookupPageKey(pageKey)) : await lookupPageKey(pageKey);
@@ -260,14 +268,57 @@ export async function resolvePublicTarget(pageKey: string, opts: { purpose?: Res
   if (purpose === "order" && found.base.kind === "export" && found.base.exportMode !== "connected") return null;
   const store = await getStoreById(found.storeId);
   if (!store || !TARGET_STATES.has(store.status)) return null;
-  const doc = await versionDoc(found.base.versionId);
+  const scope = publicScope(store);
+  const doc = await versionDoc(scope, found.base.versionId);
   if (!doc) return null;
-  return { ...found.base, doc, store, scope: publicScope(store) };
+  return { ...found.base, doc, store, scope };
+}
+
+/* ------------------------------------------------------------------ */
+/* One-click upsell orders, export allow-lists                         */
+/* ------------------------------------------------------------------ */
+
+/** The upsell's order as the public upsell API sees it before the token check (ORD-17). */
+export interface UpsellOrderTarget extends PublicTarget {
+  scope: PublicScope;
+  orderId: string;
+  /** the connected export the order came from (its allow-list decides CORS), else null */
+  exportId: string | null;
+}
+
+/**
+ * ORD-17: the order id posted by the thank-you page's one-click upsell → its store, for stores whose public APIs
+ * may answer (pending, active, restricted, suspended; `publicApiAnswer(status, "upsell")` decides). The order is
+ * protected by its single-use upsell token, which `acceptUpsell` checks inside the store; an unknown id and
+ * another store's id are the same null for every later step.
+ */
+export async function resolveUpsellOrder(orderId: string): Promise<UpsellOrderTarget | null> {
+  if (!ORDER_ID_RE.test(orderId)) return null;
+  // tenancy: public-key orderId (the upsell token's order; order ids are unique across stores, D28)
+  const [row] = await db.select({ storeId: orders.storeId, exportId: orders.exportId }).from(orders).where(eq(orders.id, orderId)).limit(1);
+  if (!row) return null;
+  const store = await getStoreById(row.storeId);
+  if (!store || !TARGET_STATES.has(store.status)) return null;
+  return { store, scope: publicScope(store), orderId, exportId: row.exportId };
+}
+
+/**
+ * The union of the allow-lists of every active (non-revoked) export, for CORS preflights: an OPTIONS request
+ * carries no page key, so this is all a preflight can be checked against (the POST then checks its own export's
+ * list). Origins only, never a store id; `originAllowed` still refuses the platform's own namespace (SEC-23).
+ */
+export async function listActiveExportOrigins(): Promise<string[]> {
+  // tenancy: platform cors-preflight (the active exports' allow-lists of every store; origins only)
+  const rows = await db.select({ origins: exportsTable.allowedOrigins }).from(exportsTable).where(isNull(exportsTable.revokedAt));
+  return [...new Set(rows.flatMap((r) => (Array.isArray(r.origins) ? r.origins.filter((o): o is string => typeof o === "string") : [])))];
 }
 
 /* ------------------------------------------------------------------ */
 /* Signed links: order tracking (LAN-§9.1), test orders (D54)          */
 /* ------------------------------------------------------------------ */
+
+/** The query parameter of a test link (D54): the store pages render a test document, the order and lead APIs mark it. */
+export const TEST_PARAM = "sg-test";
 
 /** Tracking links live 90 days (LAN-§9.1); test links 2 hours (D54). */
 export const TRACK_LINK_TTL_SEC = 90 * 86_400;

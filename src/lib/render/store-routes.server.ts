@@ -39,6 +39,7 @@ import {
   resolveStoreHandle,
   resolveTestToken,
 } from "@/lib/tenancy/public";
+import { inStore } from "@/lib/tenancy/sql";
 import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { addressMode, platformOrigin, storePath, storeUrl, type StoreAddress } from "@/lib/urls";
 import { isLegalKind } from "@/landing/context";
@@ -339,7 +340,7 @@ export async function servePreview(req: Request, token: string): Promise<Respons
     const [page] = await db
       .select({ id: pages.id, slug: pages.slug, publicKey: pages.publicKey, draft: pages.draft })
       .from(pages)
-      .where(and(eq(pages.storeId, scope.storeId), eq(pages.id, opened.pageId)))
+      .where(and(inStore(pages, scope), eq(pages.id, opened.pageId)))
       .limit(1);
     if (!page) return notFoundResponse(req);
     const doc = validateDoc(page.draft).doc ?? (await getPublishedPage(scope, store, page.slug).then((p) => (p ? validateDoc(p.doc).doc : null)));

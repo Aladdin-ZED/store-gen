@@ -11,7 +11,9 @@
  *    `/s/<h>/policies/<kind>?p=`), the canonical at the store's origin, and no aggregateRating in the JSON-LD even
  *    when the doc carries a rating;
  *  - runtime size budgets (docs/OFFERS.md §F.9, src/landing/runtime/budgets.json): every chunk and the
- *    heaviest page (every optional chunk + landing, in one document) at most the recorded gzip + 5%.
+ *    heaviest page (every optional chunk + landing, in one document) at most the recorded gzip + 5%, except the
+ *    frozen `landing` chunk (docs/STORE-SAAS.md header freeze rule, ENGC-10): tolerance 0 against its recorded
+ *    budget, and its bytes equal to the pin `src/landing/runtime/landing.sha256` (sha256 hex of the chunk text).
  *
  *   npx tsx scripts/qa/render-check.ts        (exit code 1 on any failure)
  */
@@ -134,9 +136,15 @@ async function main() {
   for (const [name, size] of Object.entries(sizes)) {
     const budget = budgets[name];
     if (typeof budget !== "number") fail(`runtime ${name}: no budget in budgets.json`);
-    else if (size > budget * 1.05) fail(`runtime ${name} is ${size} B gzip — over its ${budget} B budget + 5%`);
+    else if (name === "landing" ? size > budget : size > budget * 1.05) fail(`runtime ${name} is ${size} B gzip — over its ${budget} B budget${name === "landing" ? " (frozen: tolerance 0)" : " + 5%"}`);
   }
-  console.log(`runtime budgets: ${Object.entries(sizes).map(([k, v]) => `${k} ${v}/${budgets[k]}`).join(" · ")}`);
+  // the frozen landing chunk: byte-identical to its pin (any change re-records size and pin through the maintainer)
+  const pinFile = join(__dirname, "..", "..", "src", "landing", "runtime", "landing.sha256");
+  const pin = (readFileSync(pinFile, "utf8").trim().split(/\s+/)[0] ?? "").toLowerCase();
+  const landingSha = createHash("sha256").update(runtimeChunks.landing, "utf8").digest("hex");
+  if (!/^[0-9a-f]{64}$/.test(pin)) fail("src/landing/runtime/landing.sha256 holds no sha256");
+  else if (landingSha !== pin) fail(`runtime landing changed: sha256 ${landingSha} ≠ the pin ${pin} (frozen chunk: re-measure and re-record through the maintainer)`);
+  console.log(`runtime budgets: ${Object.entries(sizes).map(([k, v]) => `${k} ${v}/${budgets[k]}`).join(" · ")} · landing sha256 ${landingSha.slice(0, 12)}`);
   console.log(failures ? `${failures} FAILURE(S)` : "ALL OK");
   process.exit(failures ? 1 : 0);
 }

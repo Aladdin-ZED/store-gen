@@ -22,14 +22,15 @@
  * Optional chunk "pixels" (§F.9): the renderer embeds it only on pages with pixels outside previews.
  *
  * Advanced matching: once the phone number is valid, its SHA-256 hashes (+ name, e-mail, country;
- * never the clear values) are kept in sessionStorage "lp-px-u" → TikTok identify() right away; on the
+ * never the clear values) are kept in sessionStorage "lp-px-u" ("lp:<handle>:px-u" on a store page under
+ * /s/<handle>, core skey: never shared by two stores of one origin) → TikTok identify() right away; on the
  * thank-you page Meta init user data, TikTok identify() and Snap init get them before the Purchase,
  * then they are deleted.
  */
 import { round2 } from "../../lib/page/money";
 import { PIXEL_EVENTS, pixelIdList, purchaseEventId, type PixelPlatform, type PixelStep } from "../../lib/pixels/ids";
 import type { Content, Ctx, PixelOrder, W } from "./core";
-import { getForm, report, sget, sset } from "./core";
+import { getForm, report, sget, skey, sset } from "./core";
 import { normalizePhone } from "./phone";
 
 type Fn = (...a: unknown[]) => void;
@@ -72,8 +73,8 @@ const TTQ_METHODS =
     " ",
   );
 
-/** sessionStorage key of the hashed customer data (advanced matching) */
-export const PX_USER_KEY = "lp-px-u";
+/** sessionStorage key name of the hashed customer data (advanced matching; core skey adds the store) */
+export const PX_USER_KEY = "px-u";
 const LEAD_DELAY_MS = 1200;
 const HEX64 = /^[a-f0-9]{64}$/;
 
@@ -221,7 +222,7 @@ export async function hashUser(win: W, e164: string, name: string, email: string
 
 export function readUser(win: W): UserHashes | null {
   try {
-    const o = JSON.parse(sget(win, "sessionStorage", PX_USER_KEY) || "null") as Record<string, unknown> | null;
+    const o = JSON.parse(sget(win, "sessionStorage", skey(win, PX_USER_KEY)) || "null") as Record<string, unknown> | null;
     if (!o || typeof o !== "object" || typeof o.ph !== "string" || !HEX64.test(o.ph) || typeof o.phE !== "string" || !HEX64.test(o.phE)) return null;
     const u: UserHashes = { ph: o.ph, phE: o.phE };
     for (const k of ["fn", "ln", "em", "co"] as const) {
@@ -401,7 +402,7 @@ export function pixels(c: Ctx): void {
   c.sub("purchase", (o) => {
     send("purchase", { value: o.value, qty: o.qty, currency: o.currency, orderId: o.orderId, contents: o.contents || [], name: o.name || p.name });
     try {
-      win.sessionStorage.removeItem(PX_USER_KEY);
+      win.sessionStorage.removeItem(skey(win, PX_USER_KEY));
     } catch {
       /* storage blocked */
     }
@@ -464,7 +465,7 @@ export function pixels(c: Ctx): void {
       hashUser(win, phone.e164, name, email, cfg.phone.country)
         .then((u) => {
           if (key !== lastContact) return;
-          sset(win, "sessionStorage", PX_USER_KEY, JSON.stringify(u));
+          sset(win, "sessionStorage", skey(win, PX_USER_KEY), JSON.stringify(u));
           if (on("tiktok") && w.ttq) guard(() => w.ttq!.identify({ phone_number: u.phE, ...(u.em ? { email: u.em } : {}) }));
         })
         .catch(() => undefined); // no WebCrypto (http): no advanced matching

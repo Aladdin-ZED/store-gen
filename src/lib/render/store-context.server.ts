@@ -18,11 +18,12 @@ import "server-only";
  * Settings come through T1's scoped API (`getStoreSettings`, `getPlatformSetting`); until T1 merges those are the
  * C0a stubs and a render answers `server`. Serving stored HTML never needs this module.
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { assets } from "@/lib/db/schema";
 import type { PageDoc } from "@/lib/page/schema";
 import { getPlatformSetting, getStoreSettings } from "@/lib/settings";
+import { inStore } from "@/lib/tenancy/sql";
 import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { addressMode, mediaUrl, platformOrigin, storeBase, storeOrigin, storePath, type StoreAddress } from "@/lib/urls";
 import { noAddons, type RenderAddons } from "@/landing/addons/types";
@@ -126,7 +127,7 @@ export async function storeAssetRows(scope: StoreScope, ids: readonly string[]):
   const wanted = [...new Set(ids.filter((id) => typeof id === "string" && /^[a-f0-9]{16,64}$/.test(id)))];
   const out: (typeof assets.$inferSelect)[] = [];
   for (let i = 0; i < wanted.length; i += 500) {
-    out.push(...(await db.select().from(assets).where(and(eq(assets.storeId, scope.storeId), inArray(assets.id, wanted.slice(i, i + 500))))));
+    out.push(...(await db.select().from(assets).where(and(inStore(assets, scope), inArray(assets.id, wanted.slice(i, i + 500))))));
   }
   return out;
 }

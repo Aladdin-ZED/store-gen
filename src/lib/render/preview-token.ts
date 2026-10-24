@@ -22,6 +22,7 @@ import { newId } from "@/lib/db/ids";
 import { pages, previewTokens } from "@/lib/db/schema";
 import { open, seal } from "@/lib/security/crypto";
 import { SeamError } from "@/lib/tenancy/seam";
+import { inStore } from "@/lib/tenancy/sql";
 import type { Actor, StoreScope } from "@/lib/tenancy/types";
 import { previewUrl } from "@/lib/urls";
 
@@ -73,7 +74,7 @@ export async function mintPreviewToken(
   const [page] = await db
     .select({ id: pages.id })
     .from(pages)
-    .where(and(eq(pages.storeId, scope.storeId), eq(pages.id, v.pageId)))
+    .where(and(inStore(pages, scope), eq(pages.id, v.pageId)))
     .limit(1);
   if (!page) throw new SeamError("not_found");
 
@@ -116,7 +117,7 @@ export async function revokePreviewToken(scope: StoreScope, tokenId: string, act
   const res = await db
     .update(previewTokens)
     .set({ revokedAt: new Date() })
-    .where(and(eq(previewTokens.storeId, scope.storeId), eq(previewTokens.id, tokenId), isNull(previewTokens.revokedAt)));
+    .where(and(inStore(previewTokens, scope), eq(previewTokens.id, tokenId), isNull(previewTokens.revokedAt)));
   const n = (Array.isArray(res) ? (res[0] as { affectedRows?: number }) : (res as { affectedRows?: number }))?.affectedRows ?? 0;
   if (n !== 1) throw new SeamError("not_found");
   await audit("store.preview_link.revoked", { userId: actor?.userId ?? null, ip: actor?.ip ?? null, target: tokenId, scope: auditScope(scope, actor) });

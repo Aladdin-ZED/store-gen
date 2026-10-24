@@ -114,9 +114,10 @@ export function $$<E extends Element = HTMLElement>(root: ParentNode, sel: strin
 
 /** Boolean attribute toggle (present = on). */
 export function flag(el: Element, name: string, on: boolean): void {
-  if (on) {
-    if (!el.hasAttribute(name)) el.setAttribute(name, "");
-  } else if (el.hasAttribute(name)) el.removeAttribute(name);
+  if (on !== el.hasAttribute(name)) {
+    if (on) el.setAttribute(name, "");
+    else el.removeAttribute(name);
+  }
 }
 
 /** `hidden` without touching the DOM when it already matches. */
@@ -158,6 +159,17 @@ export function getForm(c: Pick<Ctx, "doc">): HTMLFormElement | null {
 }
 
 type StoreKind = "localStorage" | "sessionStorage";
+
+/**
+ * The web-storage name of a runtime key ("utm", "vid", "order", "px-u", "wa"; docs/STORE-SAAS.md §C.9). On a
+ * store page in P mode (/s/<handle> and below) every store shares the platform origin, so the name carries the
+ * store: "lp:<handle>:<key>"; anywhere else (a store's own host, exports, the preview) it stays "lp-<key>". The
+ * one place the prefix is derived; tracking, pixels, the order hand-off and the WhatsApp bridge all call it.
+ */
+export function skey(win: W, key: string): string {
+  const m = /^\/s\/([a-z0-9-]{3,30})(?:\/|$)/.exec(win.location.pathname);
+  return (m ? "lp:" + m[1] + ":" : "lp-") + key;
+}
 
 /** Storage access that never throws (private mode, blocked site data, sandboxed previews). */
 export function sget(win: W, kind: StoreKind, key: string): string | null {
@@ -215,7 +227,7 @@ export function setStatus(el: Element | null, text: string, tone: "error" | "inf
 export function disable(el: Element | null, off: boolean): void {
   if (!el) return;
   if (el.tagName === "BUTTON") (el as HTMLButtonElement).disabled = off;
-  el.setAttribute("aria-disabled", off ? "true" : "false");
+  el.setAttribute("aria-disabled", String(off));
 }
 
 /** A radio / checkbox is on, a select or text control has a value. */
