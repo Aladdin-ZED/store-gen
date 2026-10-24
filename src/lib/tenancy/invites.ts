@@ -172,7 +172,7 @@ const cleanNote = (note: unknown): string | null => {
 
 /**
  * `members.invite` (the caller runs it through storeAction with the `s:<sid>:invite` 20/day bucket);
- * `role ∈ invitableRoles(inviter)`, the `invites` feature, `members_max` / `agents_max`, ≤ 20 pending. Answers the
+ * `role ∈ invitableRoles(inviter)`, ↑ step-up for `admin` / `owner` (as changeMemberRole), the `invites` feature, `members_max` / `agents_max`, ≤ 20 pending. Answers the
  * same for any e-mail (no enumeration); the raw token exists only in the returned URL.
  */
 export async function createInvite(ctx: StoreCtx, input: { email: string; role: StoreRole; note?: string }): Promise<{ inviteId: string; url: string /* shown once */; expiresAt: Date }> {
@@ -185,6 +185,10 @@ export async function createInvite(ctx: StoreCtx, input: { email: string; role: 
   if (!isStoreRole(role) || !invitableRoles(ctx.membership.role).includes(role)) fields.role = "team.invite.role_not_allowed";
   if (Object.keys(fields).length || !email.success || !isStoreRole(role)) throw new FieldsError(fields);
   const note = cleanNote(input.note);
+  // §B.7 (review r1.0-t2 F1): an invite for admin/owner hands out the same rank as a role change, so it asks the same
+  // fresh step-up (a stolen session cookie alone must not mint a second owner that survives a password change).
+  const stepUp = role === "admin" || role === "owner";
+  if (stepUp) assertStepUp(ctx);
   await assertInvitesFeature(scope);
 
   const token = newToken(32);
@@ -203,7 +207,10 @@ export async function createInvite(ctx: StoreCtx, input: { email: string; role: 
       storeValues(scope, { id: inviteId, emailNorm: email.data, role, tokenHash: hashInviteToken(token), note, invitedBy: ctx.user.id, expiresAt, createdAt: now }),
     );
   });
-  await auditFrom(ctx, "store.member.invited", { target: inviteId, meta: { role, email: maskEmail(email.data) } });
+  await auditFrom(ctx, "store.member.invited", {
+    target: inviteId,
+    meta: { role, email: maskEmail(email.data), ...(stepUp ? { stepUp: ctx.user.totpEnabled ? "totp" : "password" } : {}) },
+  });
 
   const url = inviteUrl(token);
   const m = mailer();
@@ -507,6 +514,8 @@ export async function listMembersByScope(scope: StoreScope): Promise<MemberSumma
     .where(whereStore(storeMembers, scope))
     .orderBy(storeMembers.joinedAt)
     .limit(500);
+  // PD35 (review r1.0-t2 F6): seller contact data is masked to staff; under "view as store" the e-mails leave masked
+  if (scope.kind === "impersonation") return rows.map((r) => ({ ...r, email: maskEmail(r.email) }));
   return rows;
 }
 

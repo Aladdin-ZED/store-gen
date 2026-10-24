@@ -17,7 +17,8 @@ import { z } from "zod";
 import { audit, auditFrom } from "@/lib/audit";
 import { db } from "@/lib/db/client";
 import { newId, newToken } from "@/lib/db/ids";
-import { passwordResets, users } from "@/lib/db/schema";
+import { passwordResets, storeMembers, stores, users } from "@/lib/db/schema";
+import { LEGACY_STORE_ID } from "@/lib/db/store-handles";
 import { notify } from "@/lib/platform/notify";
 import type { MessageKey, PlatformCtx } from "@/lib/tenancy/types";
 import { platformOrigin } from "@/lib/urls";
@@ -123,11 +124,21 @@ function dbErrorCode(err: unknown): string | undefined {
 /** ER_DUP_ENTRY, looking through drizzle's wrapping (a duplicate e-mail, handle or token). */
 export const isDuplicate = (err: unknown) => dbErrorCode(err) === "ER_DUP_ENTRY";
 
-/** Creates a user (owner action). Throws AuthInputError on invalid input or a taken email. */
+/**
+ * Creates a user (owner action). Throws AuthInputError on invalid input or a taken email. The user also joins the
+ * legacy store (when it exists) with the 0004 role mapping: today's /admin admits only its members (review r1.0-t2 F2).
+ */
 export async function createUser(input: NewUserInput, actor: { id: string; ip?: string | null }): Promise<UserSummary> {
   const values = await prepareUser(input);
   try {
-    await db.insert(users).values(values);
+    await db.transaction(async (tx) => {
+      await tx.insert(users).values(values);
+      const [legacy] = await tx.select({ id: stores.id }).from(stores).where(eq(stores.id, LEGACY_STORE_ID)).limit(1); // tenancy: platform today's /admin team (legacy store only)
+      if (legacy) {
+        const role = values.role === "owner" ? "owner" : values.role === "editor" ? "editor" : "agent";
+        await tx.insert(storeMembers).values({ storeId: LEGACY_STORE_ID, userId: values.id, role, status: "active", invitedBy: actor.id }); // tenancy: platform today's /admin team (legacy store only)
+      }
+    });
   } catch (err) {
     if (isDuplicate(err)) throw new AuthInputError("A user with this email already exists.", "email");
     throw err;
@@ -364,7 +375,8 @@ async function staffTarget(ctx: PlatformCtx, userId: string): Promise<UserRow> {
   if (!ctx.stepUpFresh) throw new AuthRefusal("step_up");
   if (userId === ctx.user.id) throw new AuthRefusal("forbidden", "auth.staff.not_yourself");
   const user = typeof userId === "string" && userId.length === 26 ? await getUserById(userId) : null;
-  if (!user) throw new AuthRefusal("not_found");
+  // a deleted account is anonymised for good (review r1.0-t2 F5): no ban, unban, reset link or 2FA reset brings it back
+  if (!user || user.disabledReason === "deleted") throw new AuthRefusal("not_found");
   if (user.platformRole !== "none") throw new AuthRefusal("is_staff");
   return user;
 }

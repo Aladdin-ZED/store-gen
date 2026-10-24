@@ -2,12 +2,10 @@
 /**
  * Actions shared by the public sign-in pages (docs/STORE-SAAS.md §B.1, §I.5).
  */
-import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { getSignedInUser } from "@/lib/auth";
 import { LOCALE_COOKIE, localeCookieOptions } from "@/lib/auth/locale";
-import { db } from "@/lib/db/client";
-import { users } from "@/lib/db/schema";
+import { updateOwnLocale } from "@/lib/auth/profile";
 import { isAdminLocale } from "@/lib/i18n/admin";
 import { assertActionOrigin } from "@/lib/tenancy/seam";
 
@@ -17,5 +15,5 @@ export async function setLocaleAction(locale: unknown): Promise<void> {
   if (!isAdminLocale(locale)) return;
   (await cookies()).set(LOCALE_COOKIE, locale, localeCookieOptions());
   const user = await getSignedInUser();
-  if (user && user.locale !== locale) await db.update(users).set({ locale }).where(eq(users.id, user.id));
+  if (user) await updateOwnLocale(user, locale);
 }

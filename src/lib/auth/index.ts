@@ -16,9 +16,13 @@
  */
 import "server-only";
 import { cache } from "react";
+import { and, eq } from "drizzle-orm";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
+import { db } from "@/lib/db/client";
+import { storeMembers } from "@/lib/db/schema";
+import { LEGACY_STORE_ID } from "@/lib/db/store-handles";
 import { verifiedRequestPath } from "@/lib/edge/path-sig";
 import type { AdminLocale } from "@/lib/i18n/admin";
 import { getRequestIdentity } from "@/lib/tenancy/context";
@@ -26,9 +30,10 @@ import type { ActionResult, PlatformCtx, UserCtx } from "@/lib/tenancy/types";
 import { limits } from "./attempts";
 import { clearSessionCookie, readSessionToken, setSessionCookie } from "./cookies";
 import { AuthError, AuthInputError } from "./errors";
-import { FORBIDDEN_PATH, loginUrl, signInUrl, signInVerifyUrl, verifyUrl } from "./paths";
+import { CONSOLE_2FA_ENROL_PATH, FORBIDDEN_PATH, loginUrl, signInUrl, signInVerifyUrl, verifyUrl } from "./paths";
 import { legacyCan as can, type Permission, type PlatformRole, type Role } from "./permissions";
 import type { PublicActionCtx, PublicActionOpts } from "./public-action";
+import { ADMIN_PATH_HEADER } from "./config";
 import { assertAdminAccess, getRequestContext, getRequestedAdminPath, hasAdminAccess } from "./request";
 import { deleteSessionByToken, revokeUserSessions, rotateSession, validateSessionToken } from "./session";
 import { changeUserPassword } from "./users";
@@ -165,7 +170,39 @@ export async function requireUser(opts: { permission?: Permission; throwOnFail?:
   redirect(pending ? signInVerifyUrl(back) : signInUrl(back));
 }
 
-/** Today's /admin guard: the gate (404 without it), the session, the legacy role. */
+/** An active membership of the legacy store (TENANCY-MAP §2.4: today's /admin users got one in 0004). Cached per request. */
+const hasLegacyMembership = cache(async (userId: string): Promise<boolean> => {
+  const [row] = await db
+    .select({ userId: storeMembers.userId })
+    .from(storeMembers)
+    .where(and(eq(storeMembers.storeId, LEGACY_STORE_ID), eq(storeMembers.userId, userId), eq(storeMembers.status, "active"))) // tenancy: platform today's /admin entry check (review r1.0-t2 F2)
+    .limit(1);
+  return !!row;
+});
+
+/**
+ * Who may use today's /admin until T4 deletes it (review r1.0-t2 F2, §B.7): its queries are unscoped, so the gate
+ * and the legacy `users.role` are not enough (every new account carries the column default `editor`). An active
+ * member of the legacy store passes as before; staff without that membership pass only with TOTP on; any other
+ * account is refused. `null` = allowed; `enrol` = staff who must turn on 2FA first; `refused` = a plain 404.
+ */
+export async function legacyAdminRefusal(user: Pick<SessionUser, "id" | "platformRole" | "totpEnabled">): Promise<null | "enrol" | "refused"> {
+  if (await hasLegacyMembership(user.id)) return null;
+  if (user.platformRole !== "none") return user.totpEnabled ? null : "enrol";
+  return "refused";
+}
+
+/** The legacy-admin entry check for one request: only inside the admin area (the proxy stamps ADMIN_PATH_HEADER there). */
+async function assertLegacyAdmin(user: SessionUser, opts: { throwOnFail?: boolean }, inAdminArea: boolean): Promise<void> {
+  if (!inAdminArea) return;
+  const refusal = await legacyAdminRefusal(user);
+  if (!refusal) return;
+  if (opts.throwOnFail) throw new AuthError("forbidden");
+  if (refusal === "enrol") redirect(CONSOLE_2FA_ENROL_PATH);
+  notFound();
+}
+
+/** Today's /admin guard: the gate (404 without it), the session, the legacy-admin entry check, the legacy role. */
 async function requireGatedUser(opts: { permission?: Permission; throwOnFail?: boolean }): Promise<SessionUser> {
   await assertAdminAccess();
   const { user, pending } = await resolveAuthState();
@@ -175,6 +212,9 @@ async function requireGatedUser(opts: { permission?: Permission; throwOnFail?: b
     const back = await getRequestedAdminPath();
     redirect(pending ? verifyUrl(back) : loginUrl(back));
   }
+
+  // the gate cookie also rides along on /app requests (account pages): the entry check is for the admin area only
+  await assertLegacyAdmin(user, opts, opts.permission !== undefined || (await headers()).has(ADMIN_PATH_HEADER));
 
   if (opts.permission && !can(user.role, opts.permission)) {
     if (opts.throwOnFail) throw new AuthError("forbidden");
@@ -197,6 +237,8 @@ async function requireIdentityUser(opts: { permission?: Permission; throwOnFail?
     if (opts.throwOnFail || !(err instanceof AuthError)) throw err;
     redirect(err.code === "mfa_required" ? signInVerifyUrl(null) : signInUrl(null));
   }
+  // the legacy permission option means today's /admin: the same entry check as requireGatedUser
+  await assertLegacyAdmin(user, opts, opts.permission !== undefined);
   if (opts.permission && !can(user.role, opts.permission)) {
     if (opts.throwOnFail) throw new AuthError("forbidden");
     redirect(FORBIDDEN_PATH);

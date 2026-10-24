@@ -28,7 +28,7 @@ import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
-import { identityLinks, legalAcceptances, legalDocuments, signupReviews, waitlist } from "@/lib/db/schema";
+import { identityLinks, legalAcceptances, legalDocuments, signupReviews, storeMembers, waitlist } from "@/lib/db/schema";
 import { mailer } from "@/lib/mail";
 import { errorSummary } from "@/lib/orders/log";
 import { notify } from "@/lib/platform/notify";
@@ -487,6 +487,16 @@ export const NewStoreFormInput = z.object({
 });
 export type NewStoreForm = z.input<typeof NewStoreFormInput>;
 
+/** An active owner membership anywhere (the invite-mode rule of /app/new). */
+async function ownsAStore(userId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ storeId: storeMembers.storeId })
+    .from(storeMembers)
+    .where(and(eq(storeMembers.userId, userId), eq(storeMembers.role, "owner"), eq(storeMembers.status, "active"))) // tenancy: platform the account's own memberships (PLA-§3.1)
+    .limit(1);
+  return !!row;
+}
+
 export type NewStoreOutcome = { kind: "created"; storeId: string; handle: string; storeStatus: "pending" | "active" } | { kind: "closed" } | { kind: "capped" };
 
 /**
@@ -499,9 +509,13 @@ export async function createAdditionalStore(ctx: UserCtx, rawForm: NewStoreForm,
   const ip = ctx.actor.ip ?? "0.0.0.0";
   const env = await signupEnv(envOverrides);
   if (env.killed) return { kind: "closed" };
+  const effective = env.mode;
+  // the PLA-§3.1 mode table (review r1.0-t2 F4): closed = console invites only, waitlist = no store; in invite mode an
+  // account that owns no store needs a platform code (the signup form), so only existing owners open more here
+  if (effective.mode === "closed" || effective.mode === "waitlist") return { kind: "closed" };
+  if (effective.mode === "invite" && !(await ownsAStore(ctx.user.id))) return { kind: "closed" };
   if (!(await limits.storeCreate(ctx.user.id)).ok) throw new AuthRefusal("rate_limited");
   const setting = env.setting;
-  const effective = env.mode;
 
   const fields: Record<string, MessageKey> = {};
   const store = await checkStoreFields(form, setting, fields);

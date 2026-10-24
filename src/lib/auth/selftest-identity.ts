@@ -302,6 +302,19 @@ async function cases(c: mysql.Connection): Promise<void> {
   const challenged = await loginAccount({ email: "login.test@example.ma", password: PASSWORD }, { ip: "192.0.2.30", ua: UA });
   ok("login: past 3 failures with a widget → challenge", !challenged.ok && challenged.error === "challenge", challenged);
   ok("login: the challenge consumed no account budget", (await peekBucket(buckets.loginAcctNet("login.test@example.ma", "192.0.2.30"))) === 3);
+  {
+    // review r1.0-t2 F3: parallel guesses from 4 networks can't all read the old count; at most 3 skip the challenge
+    await users.createAccount({ email: "race.test@example.ma", name: "Race Test", password: PASSWORD, locale: "fr" });
+    const burst = await Promise.all(
+      Array.from({ length: 16 }, (_, i) => loginAccount({ email: "race.test@example.ma", password: "wrong-password-123" }, { ip: `192.0.2.${50 + (i % 4)}`, ua: UA })),
+    );
+    const unchallenged = burst.filter((r) => !r.ok && r.error !== "challenge").length;
+    const acctAfter = await peekBucket(buckets.loginAcct("race.test@example.ma"));
+    ok("login: 16 parallel guesses from 4 networks → at most 3 unchallenged", unchallenged <= 3 && burst.every((r) => !r.ok) && burst.filter((r) => !r.ok && r.error === "challenge").length === 16 - unchallenged, burst.map((r) => (r.ok ? "ok" : r.error)));
+    ok("login: the challenged ones gave their charge back", acctAfter === unchallenged, { acctAfter, unchallenged });
+    const next = await loginAccount({ email: "race.test@example.ma", password: "wrong-password-123" }, { ip: "192.0.2.54", ua: UA });
+    ok("login: after the burst a fresh network is challenged too (3 failures on the account)", acctAfter < 3 || (!next.ok && next.error === "challenge"), next);
+  }
   delete env.TURNSTILE_SITE_KEY;
   delete env.TURNSTILE_SECRET_KEY;
   (await import("@/lib/settings")).invalidatePlatformSettings("platform_turnstile");
@@ -417,6 +430,21 @@ async function cases(c: mysql.Connection): Promise<void> {
   await createAdditionalStore(userCtx(aSessionUser), { storeName: "Atlas Trois", handle: "atlas-trois" }, { ua: UA, deviceId: null }, inviteEnv);
   await createAdditionalStore(userCtx(aSessionUser), { storeName: "Atlas Quatre", handle: "atlas-quatre" }, { ua: UA, deviceId: null }, inviteEnv);
   ok("/app/new: 3 per day", (await caught(createAdditionalStore(userCtx(aSessionUser), { storeName: "Atlas Cinq", handle: "atlas-cinq" }, { ua: UA, deviceId: null }, inviteEnv))) === "rate_limited");
+  {
+    // review r1.0-t2 F4: /app/new follows the PLA-§3.1 mode table
+    const noStore = await users.createAccount({ email: "no.store@example.ma", name: "No Store", password: PASSWORD, locale: "fr" });
+    const noStoreSession = await createSession(noStore.userId, { mfaPassed: true, ip: "192.0.2.61", ua: UA });
+    const noStoreCtx = userCtx(sessionUser({ id: noStore.userId, email: "no.store@example.ma", name: "No Store" }, noStoreSession.id));
+    const pendingBefore = Number((await one<{ n: number }>("SELECT COUNT(*) AS n FROM stores"))?.n);
+    const closedNew = await createAdditionalStore(noStoreCtx, { storeName: "Closed Mode", handle: "closed-mode-store" }, { ua: UA, deviceId: null }, { mode: mode("closed"), setting, ...counter });
+    const waitNew = await createAdditionalStore(noStoreCtx, { storeName: "Waitlist Mode", handle: "waitlist-mode" }, { ua: UA, deviceId: null }, { mode: mode("waitlist"), setting, ...counter });
+    const inviteNew = await createAdditionalStore(noStoreCtx, { storeName: "Invite Mode", handle: "invite-mode-store" }, { ua: UA, deviceId: null }, inviteEnv);
+    ok("/app/new: closed and waitlist modes → closed", closedNew.kind === "closed" && waitNew.kind === "closed", { closedNew, waitNew });
+    ok("/app/new: invite mode, an account owning no store → closed", inviteNew.kind === "closed", inviteNew);
+    ok("/app/new: the refused ones created nothing and charged no daily bucket", Number((await one<{ n: number }>("SELECT COUNT(*) AS n FROM stores"))?.n) === pendingBefore && (await peekBucket(buckets.storeCreate(noStore.userId))) === 0);
+    const approvalNew = await createAdditionalStore(noStoreCtx, { storeName: "Approval Mode", handle: "approval-mode-store" }, { ua: UA, deviceId: null }, approvalEnv);
+    ok("/app/new: approval mode still opens a store for any account", approvalNew.kind === "created", approvalNew);
+  }
 
   /* ---------------------------------------------------------------- */
   /* the console's user functions (PLA Q.19, PLA-§11.2)                */
@@ -531,6 +559,21 @@ async function cases(c: mysql.Connection): Promise<void> {
   ok("publicAction: the device marker from the cookie", dev.ok && dev.data === dm, dev);
   const noOrigin = await runAsIdentity({ ...anyone, headers: { host: "localhost:3451" } }, () => publicAction("report", async () => 1, { turnstile: "when-configured", burst: "report" }));
   ok("publicAction: no Origin → forbidden", !noOrigin.ok && noOrigin.error === "forbidden");
+  {
+    // review r1.0-t2 F8: with ADMIN_HOST set, the platform host's own actions still pass the origin check
+    env.ADMIN_HOST = "studio.storegen.test";
+    const post = (hdrs: Record<string, string>) => seam.isSameOriginMutation(new Request("http://localhost/", { method: "POST", headers: hdrs }));
+    const platformOk = post({ origin: "http://localhost:3451", host: "localhost:3451", "sec-fetch-site": "same-origin" });
+    const adminOk = post({ origin: "http://studio.storegen.test", host: "studio.storegen.test", "sec-fetch-site": "same-origin" });
+    const crossSite = post({ origin: "http://localhost:3451", host: "localhost:3451", "sec-fetch-site": "same-site" });
+    const foreign = post({ origin: "http://shop.storegen.test", host: "shop.storegen.test", "sec-fetch-site": "same-origin" });
+    const nullOrigin = post({ origin: "null", host: "localhost:3451", "sec-fetch-site": "same-origin" });
+    const missing = post({ host: "localhost:3451", "sec-fetch-site": "same-origin" });
+    const viaAction = await asToken(ownerSession.token, () => auth.userAction(async () => 1), { origin: "http://localhost:3451", host: "localhost:3451", "sec-fetch-site": "same-origin" });
+    delete env.ADMIN_HOST;
+    ok("origin (ADMIN_HOST set): the platform host and the admin host pass", platformOk && adminOk && viaAction.ok, { platformOk, adminOk, viaAction });
+    ok("origin (ADMIN_HOST set): same-site, another host, Origin null, no Origin → refused", !crossSite && !foreign && !nullOrigin && !missing, { crossSite, foreign, nullOrigin, missing });
+  }
 
   /* ---------------------------------------------------------------- */
   /* members: leaveStore, the scoped reads, require 2FA                */
@@ -590,6 +633,46 @@ async function cases(c: mysql.Connection): Promise<void> {
   await auth.deleteUserAccount(adminCtx, { userId: victim.userId, reason: "spam signups" });
   const staffDel = await one<{ actor_kind: string; meta: string }>("SELECT actor_kind, meta FROM audit_log WHERE action = 'platform.user.deleted' AND target = ?", [victim.userId]);
   ok("delete (staff): platform.user.deleted with the reason, no e-mail", staffDel?.actor_kind === "platform" && staffDel.meta.includes("spam signups") && !staffDel.meta.includes("spam.account@"), staffDel);
+  {
+    // review r1.0-t2 F5: staff can't bring a deleted account back (unban, ban, reset link, 2FA reset)
+    const results = [
+      await caught(users.unbanUser(adminCtx, victim.userId, "appeal")),
+      await caught(users.banUser(adminCtx, victim.userId, { reason: "Fraud reports" })),
+      await caught(users.createPasswordResetLink(adminCtx, victim.userId, "lost access")),
+      await caught(users.resetUserTwoFactor(adminCtx, victim.userId, "lost phone")),
+    ];
+    const still = await one<{ disabled: number; disabled_reason: string }>("SELECT disabled, disabled_reason FROM users WHERE id = ?", [victim.userId]);
+    ok("delete: unban / ban / reset link / 2FA reset on a deleted account → not_found", results.every((r) => r === "not_found"), results);
+    ok("delete: the deleted marker stays", still?.disabled === 1 && still.disabled_reason === "deleted", still);
+    ok("delete: no reset link was issued", !(await one("SELECT id FROM password_resets WHERE user_id = ?", [victim.userId])));
+  }
+  {
+    // review r1.0-t2 F2: today's /admin (the legacy permission option) admits only active legacy-store members and
+    // staff with TOTP; a tenant account (users.role defaults to 'editor') is refused
+    const LEGACY = "00000000000000000000000001";
+    await c.query(
+      "INSERT INTO stores (id, handle, name, mode, status, plan_id, market, currency, timezone, default_locale, brand_seed, created_at, updated_at) VALUES (?, 'legacy-one', 'Legacy One', 'landing', 'active', 'internal', 'MA', 'MAD', 'Africa/Casablanca', 'ar', 'a1b2c3d4e5f60718', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))",
+      [LEGACY],
+    );
+    const legacyGuard = async (email: string, prep: (userId: string) => Promise<void>) => {
+      const acc = await users.createAccount({ email, name: email.split("@")[0]!, password: PASSWORD, locale: "fr" });
+      await prep(acc.userId);
+      const ses = await createSession(acc.userId, { mfaPassed: true, ip: "192.0.2.90", ua: UA });
+      return caught(asToken(ses.token, () => auth.requireUser({ permission: "orders.read", throwOnFail: true })));
+    };
+    const tenantRole = await one<{ role: string }>("SELECT role FROM users WHERE id = ?", [a.userId]);
+    ok("legacy /admin: a tenant account carries the legacy column default", tenantRole?.role === "editor", tenantRole);
+    ok("legacy /admin: a tenant account → forbidden", (await legacyGuard("tenant.only@example.ma", async () => undefined)) === "auth:forbidden");
+    ok("legacy /admin: an owner of another store → forbidden", (await caught(asToken(ownerSession.token, () => auth.requireUser({ permission: "orders.read", throwOnFail: true })))) === "auth:forbidden");
+    ok("legacy /admin: an active legacy member → in", (await legacyGuard("legacy.member@example.ma", async (id) => void (await c.query("INSERT INTO store_members (store_id, user_id, role, status) VALUES (?, ?, 'editor', 'active')", [LEGACY, id])))) === "ok");
+    ok("legacy /admin: a suspended legacy member → forbidden", (await legacyGuard("legacy.suspended@example.ma", async (id) => void (await c.query("INSERT INTO store_members (store_id, user_id, role, status) VALUES (?, ?, 'editor', 'suspended')", [LEGACY, id])))) === "auth:forbidden");
+    ok("legacy /admin: staff without TOTP → forbidden", (await legacyGuard("staff.nototp@example.ma", async (id) => void (await c.query("UPDATE users SET platform_role = 'support' WHERE id = ?", [id])))) === "auth:forbidden");
+    ok("legacy /admin: staff with TOTP → in", (await legacyGuard("staff.totp@example.ma", async (id) => void (await c.query("UPDATE users SET platform_role = 'support', totp_enabled = 1 WHERE id = ?", [id])))) === "ok");
+    ok("legacy /admin: the account guard (no permission) is unchanged for a tenant", (await caught(asToken(ownerSession.token, () => auth.requireUser({ throwOnFail: true })))) === "ok");
+    const created = await auth.createUser({ email: "legacy.new@example.ma", name: "Legacy New", role: "editor", password: PASSWORD }, { id: a.userId, ip: null });
+    const createdMember = await one<{ role: string; status: string }>("SELECT role, status FROM store_members WHERE store_id = ? AND user_id = ?", [LEGACY, created.id]);
+    ok("legacy /admin: createUser also joins the legacy store", createdMember?.role === "editor" && createdMember.status === "active", createdMember);
+  }
 
   /* ---------------------------------------------------------------- */
   /* mail                                                              */

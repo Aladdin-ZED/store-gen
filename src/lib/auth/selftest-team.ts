@@ -310,6 +310,18 @@ async function cases(c: mysql.Connection): Promise<void> {
   ok("role: an admin can't touch an owner", (await caught(invites.changeMemberRole(admin, { userId: A.userId, role: "viewer" }))) === "seam:forbidden");
   ok("role: an admin manages below admin", (await caught(invites.changeMemberRole(admin, { userId: managerId, role: "editor" }))) === "ok");
   ok("role: an admin can't invite an admin", (await caught(invites.createInvite(admin, { email: "adm@x.ma", role: "admin" }))) === "fields:role");
+  /* review r1.0-t2 F1: an admin/owner invite asks the same step-up as the role change (a stolen cookie alone mints no owner) */
+  ok("invite: admin without a fresh step-up → step_up", (await caught(invites.createInvite(ownerA, { email: "stolen.admin@example.ma", role: "admin" }))) === "seam:step_up");
+  ok("invite: owner without a fresh step-up → step_up", (await caught(invites.createInvite(ownerA, { email: "stolen.owner@example.ma", role: "owner" }))) === "seam:step_up");
+  ok("invite: the refused invites wrote nothing", !(await one("SELECT id FROM store_invites WHERE store_id = ? AND email_norm IN ('stolen.admin@example.ma', 'stolen.owner@example.ma')", [A.storeId])));
+  ok("invite: roles below admin need no step-up", (await caught(invites.createInvite(ownerA, { email: "plain.editor@example.ma", role: "editor" }))) === "ok");
+  const steppedInvite = await invites.createInvite(ownerStepped, { email: "real.admin@example.ma", role: "admin" });
+  const inviteAudit = await one<{ meta: string }>("SELECT meta FROM audit_log WHERE action = 'store.member.invited' AND target = ?", [steppedInvite.inviteId]);
+  ok("invite: admin after a step-up, the method audited", inviteAudit?.meta.includes('"stepUp":"password"') && inviteAudit.meta.includes('"role":"admin"'), inviteAudit);
+  {
+    const unstepped = await runAsIdentity({ userId: A.userId, path: `/app/${A.handle}/team` }, () => teamActions.createInviteAction({ email: "stolen.owner2@example.ma", role: "owner" }));
+    ok("invite: createInviteAction answers step_up for an owner invite", !unstepped.ok && unstepped.error === "step_up", unstepped);
+  }
 
   await invites.setMemberStatus(ownerA, { userId: managerId, status: "suspended" });
   ok("suspend: the next request is refused", (await caught(ctxOf(managerId, A.handle))) === "seam:not_found");
@@ -446,6 +458,13 @@ async function cases(c: mysql.Connection): Promise<void> {
   ok("seam: the synthetic read-only membership, scope kind impersonation", viewCtx.scope.kind === "impersonation" && viewCtx.membership.synthetic === "impersonation" && viewCtx.actor.kind === "impersonation" && viewCtx.impersonation?.id === row?.id, { kind: viewCtx.scope.kind, m: viewCtx.membership });
   ok("seam: only for that store", (await caught(asStaff(() => seam.requireStoreMember({ handle: B.handle, throwOnFail: true })))) === "seam:not_found");
   ok("view as: team reads work", (await invites.listInvites(viewCtx)).length > 0);
+  {
+    // review r1.0-t2 F6 (PD35): staff see members' e-mails masked under "view as store"; the owner sees them in full
+    const viewed = await invites.listMembersByScope(viewCtx.scope);
+    const own = await invites.listMembersByScope((await ctxOf(A.userId, A.handle)).scope);
+    ok("view as: member e-mails masked", viewed.length > 0 && viewed.every((m) => m.email.includes("•••")) && !viewed.some((m) => m.email === "owner.aa@example.ma"), viewed.map((m) => m.email));
+    ok("view as: the store's own members still see full e-mails", own.some((m) => m.email === "owner.aa@example.ma"));
+  }
   ok("view as: team writes refused", (await caught(invites.createInvite(viewCtx, { email: "imp@x.ma", role: "viewer" }))) === "seam:impersonation_read_only" && (await caught(invites.leaveStore(viewCtx))) === "seam:impersonation_read_only");
   const refused = await asStaff(() => teamActions.createInviteAction({ email: "imp2@x.ma", role: "agent" }), `/app/${A.handle}/team`);
   ok("storeAction under impersonation → impersonation_read_only", !refused.ok && refused.error === "impersonation_read_only", refused);

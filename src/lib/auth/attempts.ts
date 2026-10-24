@@ -66,7 +66,10 @@ export const limits = {
   storeCreate: (userId: string) => rateLimit(buckets.storeCreate(userId), 3, DAY),
 } satisfies Record<string, (key: string) => Promise<RateResult>>;
 
-/** The two account buckets of a sign-in attempt (§B.3): charged together, after the challenge check. */
+/**
+ * The two account buckets of a sign-in attempt (§B.3): charged together, before the challenge decision, which reads
+ * the charged counts (review r1.0-t2 F3: a decision on peeked counts let parallel guesses skip the challenge).
+ */
 export const loginAccountLimits = {
   acctNet: (email: string, ip: string) => rateLimit(buckets.loginAcctNet(email, ip), LOGIN_ACCTNET_LIMIT, LOGIN_WINDOW_SEC),
   acct: (email: string) => rateLimit(buckets.loginAcct(email), LOGIN_ACCT_LIMIT, LOGIN_WINDOW_SEC),
@@ -94,6 +97,15 @@ export async function peekBucket(bucket: string): Promise<number> {
     { count: number | string }[],
   ];
   return Number(rows[0]?.count ?? 0);
+}
+
+/** Gives one attempt back to each live bucket (never below 0): a sign-in answered `challenge` costs no account budget. */
+export async function refundBuckets(bucketNames: readonly string[]): Promise<void> {
+  const keys = bucketNames.map((b) => b.slice(0, 191));
+  if (keys.length === 0) return;
+  await db.execute(
+    sql`UPDATE rate_limits SET count = GREATEST(0, count - 1) WHERE bucket IN (${sql.join(keys.map((k) => sql`${k}`), sql`, `)}) AND reset_at > UTC_TIMESTAMP(3)`,
+  );
 }
 
 export async function clearBucket(bucket: string): Promise<void> {

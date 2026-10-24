@@ -38,6 +38,7 @@ import { ZodError } from "zod";
 import { ActionError } from "@/lib/admin-data/action";
 import { auditFrom } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth";
+import { adminHost } from "@/lib/auth/config";
 import { readSessionToken } from "@/lib/auth/cookies";
 import { AuthBusyError, AuthError, AuthInputError, AuthRefusal, FieldsError } from "@/lib/auth/errors";
 import { isAdminIpAllowed } from "@/lib/auth/gate";
@@ -49,6 +50,7 @@ import { getUserById } from "@/lib/auth/users";
 import { db } from "@/lib/db/client";
 import { impersonationSessions, storeMembers } from "@/lib/db/schema";
 import { appPathHandle } from "@/lib/edge/areas";
+import { hostOf, platformHost } from "@/lib/edge/env";
 import { effectiveHost } from "@/lib/edge/host";
 import { verifiedRequestPath } from "@/lib/edge/path-sig";
 import { isAdminLocale } from "@/lib/i18n/admin";
@@ -220,9 +222,31 @@ export async function assertActionOrigin(identity: RequestIdentity | null = getR
   if (h && !isSameOriginMutation(new Request("http://localhost/", { method: "POST", headers: h }))) throw new CsrfError();
 }
 
-/** The §C.9 mutation rule for a state-changing request: an `Origin` header, and `checkSameOrigin` agrees. */
+/**
+ * The §C.9 mutation rule for a state-changing request: an `Origin` header, and `checkSameOrigin` agrees. Interim
+ * (review r1.0-t2 F8, until T3's strict csrf.ts and the switch to `assertSameOrigin(h)` of CCR r1.0-t2-1): today's
+ * csrf.ts accepts only ADMIN_HOST once that is set, which refused every tenant, account and public action on the
+ * platform host; the §C.9 hosts (PLATFORM_HOST, ADMIN_HOST) pass here too, with the Sec-Fetch-Site and `Origin: null`
+ * refusals kept.
+ */
 export function isSameOriginMutation(req: Request): boolean {
-  return req.headers.get("origin") !== null && checkSameOrigin(req);
+  const origin = req.headers.get("origin");
+  if (origin === null) return false;
+  if (checkSameOrigin(req)) return true;
+  const site = req.headers.get("sec-fetch-site");
+  if (site !== null && site !== "same-origin") return false;
+  if (origin === "null") return false;
+  let host: string | null;
+  try {
+    const u = new URL(origin);
+    host = u.protocol === "https:" || u.protocol === "http:" ? hostOf(u.host) : null;
+  } catch {
+    return false;
+  }
+  if (!host) return false;
+  const platform = platformHost();
+  const admin = hostOf(adminHost());
+  return host === platform || host === admin;
 }
 
 /**

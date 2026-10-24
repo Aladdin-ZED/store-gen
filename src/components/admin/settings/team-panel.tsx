@@ -738,6 +738,7 @@ export function StoreTeamPanel({
         roles={invitable}
         readOnly={readOnly}
         create={actions.createInvite}
+        guard={stepUp.guard}
         onCreated={(c) => {
           setInviting(false);
           setCreated(c);
@@ -799,6 +800,7 @@ function StoreInviteDialog({
   roles,
   readOnly,
   create,
+  guard,
   onCreated,
 }: {
   open: boolean;
@@ -806,6 +808,8 @@ function StoreInviteDialog({
   roles: StoreRole[];
   readOnly: boolean;
   create: StoreTeamActions["createInvite"];
+  /** the panel's step-up guard: an admin/owner invite answers `step_up` (§B.7) and is sent again after the proof */
+  guard: ReturnType<typeof useStepUp>["guard"];
   onCreated: (c: { url: string; expiresAt: string; emailMasked: string }) => void;
 }) {
   const t = useAuthT();
@@ -822,19 +826,21 @@ function StoreInviteDialog({
     if (!chosen) return;
     setSaving(true);
     try {
-      const res = await run(create({ email, role: chosen, note: note || undefined }), { quiet: ["invalid"] });
-      if (res.ok) {
-        const typed = email.trim();
-        const at = typed.lastIndexOf("@");
-        onCreated({ url: res.data.url, expiresAt: res.data.expiresAt, emailMasked: at > 0 ? `${typed.slice(0, 1)}•••${typed.slice(at)}` : typed });
-        setEmail("");
-        setNote("");
-        setRole(null);
-        setErrors({});
-      } else if (res.error === "invalid") {
-        const fields = (res.items ?? []).flatMap((i) => (i.field ? [[i.field, i.title] as const] : []));
-        setErrors(fields.length ? Object.fromEntries(fields) : { email: res.message ?? "error.invalid" });
-      }
+      const input = { email, role: chosen, note: note || undefined };
+      await guard(() => run(create(input), { quiet: ["invalid", "step_up"] }), (res) => {
+        if (res.ok) {
+          const typed = email.trim();
+          const at = typed.lastIndexOf("@");
+          onCreated({ url: res.data.url, expiresAt: res.data.expiresAt, emailMasked: at > 0 ? `${typed.slice(0, 1)}•••${typed.slice(at)}` : typed });
+          setEmail("");
+          setNote("");
+          setRole(null);
+          setErrors({});
+        } else if (res.error === "invalid") {
+          const fields = (res.items ?? []).flatMap((i) => (i.field ? [[i.field, i.title] as const] : []));
+          setErrors(fields.length ? Object.fromEntries(fields) : { email: res.message ?? "error.invalid" });
+        }
+      });
     } finally {
       setSaving(false);
     }

@@ -52,3 +52,12 @@ export async function updateOwnProfile(ctx: UserCtx, input: unknown): Promise<Pr
   await audit("auth.user.profile_updated", { userId: ctx.user.id, target: ctx.user.id, meta: { locale: parsed.data.locale, phone: phone !== null }, ip: ctx.actor.ip });
   return { name: name.data, email: ctx.user.email, phone, locale: parsed.data.locale };
 }
+
+/**
+ * The language menu's account half (review r1.0-t2 F9, §E.3 rule 7: src/app holds no db import): the signed-in
+ * user's own `users.locale`, only when it changes.
+ */
+export async function updateOwnLocale(user: { id: string; locale: "ar" | "fr" | "en" | null }, locale: "ar" | "fr" | "en"): Promise<void> {
+  if (user.locale === locale) return;
+  await db.update(users).set({ locale }).where(eq(users.id, user.id));
+}

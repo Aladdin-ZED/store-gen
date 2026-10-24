@@ -16,7 +16,7 @@ import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db/client";
 import { sessions, users } from "@/lib/db/schema";
-import { buckets, clearBucket, limits, loginAccountLimits, peekBucket } from "./attempts";
+import { buckets, clearBucket, limits, loginAccountLimits, refundBuckets } from "./attempts";
 import { LOGIN_CHALLENGE_AFTER } from "./config";
 import { AuthBusyError } from "./errors";
 import { recordLoginLinks } from "./identity";
@@ -78,18 +78,22 @@ export async function loginAccount(
       return { ok: false, error: "rate_limited", retryAfter: ipLimit.retryAfter };
     }
 
-    // the challenge first, on the counts so far: answering it costs no account budget
-    const [netCount, acctCount] = await Promise.all([peekBucket(buckets.loginAcctNet(email, ctx.ip)), peekBucket(buckets.loginAcct(email))]);
-    if (netCount >= LOGIN_CHALLENGE_AFTER || acctCount >= LOGIN_CHALLENGE_AFTER) {
+    // charge both account buckets first and decide the challenge on the charged counts, so parallel guesses can't all
+    // read the old count (review r1.0-t2 F3); an attempt past LOGIN_CHALLENGE_AFTER earlier failures without a passing
+    // token gives both charges back: answering the challenge costs no account budget
+    const [netLimit, acctLimit] = await Promise.all([loginAccountLimits.acctNet(email, ctx.ip), loginAccountLimits.acct(email)]);
+    if (netLimit.count > LOGIN_CHALLENGE_AFTER || acctLimit.count > LOGIN_CHALLENGE_AFTER) {
       const widget = await platformTurnstileKeys();
       if (widget) {
         const check = await checkPlatformTurnstile(input.turnstileToken, ctx.ip, widget);
         // a Cloudflare outage lets the attempt through: the account-network bucket still bounds it
-        if (check === "missing" || check === "failed") return { ok: false, error: "challenge" };
+        if (check === "missing" || check === "failed") {
+          await refundBuckets([buckets.loginAcctNet(email, ctx.ip), buckets.loginAcct(email)]);
+          return { ok: false, error: "challenge" };
+        }
       }
     }
 
-    const [netLimit] = await Promise.all([loginAccountLimits.acctNet(email, ctx.ip), loginAccountLimits.acct(email)]);
     if (!netLimit.ok) {
       if (netLimit.count === netLimit.limit + 1) await audit("auth.login.locked", { target: email, meta: { scope: "network" }, ip: ctx.ip });
       return { ok: false, error: "rate_limited", retryAfter: netLimit.retryAfter };
