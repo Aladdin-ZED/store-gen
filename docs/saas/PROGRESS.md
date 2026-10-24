@@ -12,7 +12,8 @@ running, and how to restart it. Newest state at the top of "Running now".
 | 1b | Research + brainstorm (owner items 8-15): domains/subdomains, COD ops+agents+accounting+integrations, AI learning loop, generative design, platform admin, storefront/landing | docs/saas/research/*.md + docs/saas/RESEARCH.md | **done** 2026-10-24 |
 | 2a | Spec writing: core contract + 6 part specs | docs/STORE-SAAS.md, docs/saas/spec/*.md | **done** 2026-10-24 |
 | 2b | ELEVATE (owner item 16, Fable): core rev 2 integrates requests + rethink; 6 parts rev 2 raise ceilings; core rev 2.1 | same files | **done** 2026-10-24 (commit a2e9fc2) |
-| 2c | Reviews (6 lenses: operator, 2× principal engineer, premium designer, security, AI/design-quality) → per-file revisers → critic loop | same files + §P | running |
+| 2c | Reviews (6 lenses) → per-file revisers → critic loop | same files + §P | **done** 2026-10-24 (56db6eb) |
+| 2d | Integrate critic r2 residuals (single integrator) + confirming critic | same files | running |
 | 3 | Build phase 0: core tenancy (schema, migration, store scope, auth/memberships, routing) | code | todo |
 | 4 | Build phase 1: parallel tracks (store pages, landing+, brand kit/logo, team/invites, platform admin, storage) | code | todo |
 | 5 | Adversarial verification incl. cross-tenant attack tests, fix loop | tests + fixes | todo |
@@ -21,6 +22,16 @@ running, and how to restart it. Newest state at the top of "Running now".
 ## Running now
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
+
+- **Phase 2d INTEGRATE (critic r2 residuals)** — started 2026-10-24 ~10:05. Task `wnqnfawnz`, run `wf_a623cd7c-cd2`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\store-saas-spec-integrate-wf_49308093-160.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_a623cd7c-cd2", args: {issuesFile: "C:\\Users\\SICO\\store-gen\\qa\\saas-baseline\\critic-r2-issues.json", count: 22}})`.
+  One sequential integrator applies the 22 issues (7 majors = cross-file drift) across all 7 spec files, then a confirming
+  critic. (A first launch wf_49308093-160 was stopped at once: it had a placeholder instead of the issues; it edited nothing.)
+  Next after it: R1.0 build (core §K.1: contract step C0, then tracks T1-T4).
+
+- **Phase 2c REVIEW** — DONE 2026-10-24 ~10:00 (commit 56db6eb): 196 findings (9 B / 103 M / 84 m), 787 resolutions, 92 reasoned
+  rejections; core rev 4 (5,496 lines), parts rev 4; critic r2: 0 blockers, 7 majors + 15 minors, 94/96 claims verified.
 
 - **Phase 2c round 2 RESUMED** — 2026-10-24 ~08:25 after a session usage limit (reset 08:20) killed all round-2 agents.
   Round 1 is done and committed (5750823): 6 reviews, 7 revisions, critic r1 = 0 blockers, 5 majors (2 cross, 2 operations,
