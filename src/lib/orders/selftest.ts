@@ -433,6 +433,10 @@ ok("a total that differs from the one shown is logged (current version)", parity
   ok("mask: no canary survives impersonation", !JSON.stringify(masked).includes("Benali") && !JSON.stringify(masked).includes("612345634") && !JSON.stringify(masked).includes("Orangers"));
   eq("mask: a partial row keeps its shape (blocklist phone)", maskCustomer(scopeOf("impersonation"), { phone: "+212612345634" }), { phone: "+2126 ••••••34" });
   eq("mask: null fields stay null", maskCustomer(scopeOf("impersonation"), { name: null, phone: null, email: null }), { name: null, phone: null, email: null });
+  // the number as typed (orders.phone_raw) shows what the E.164 one shows, alone too (test:tenancy found it unmasked)
+  eq("mask: the typed phone is masked like the phone", maskCustomer(scopeOf("impersonation"), { phone: "+212612345634", phoneRaw: "0612345634" }), { phone: "+2126 ••••••34", phoneRaw: "+2126 ••••••34" });
+  ok("mask: a typed phone alone keeps no middle digits", !maskCustomer(scopeOf("impersonation"), { phoneRaw: "0612345634" }).phoneRaw!.includes("1234"));
+  eq("mask: the typed phone is unchanged for a member", maskCustomer(scopeOf("member"), { phoneRaw: "0612345634" }), { phoneRaw: "0612345634" });
 }
 
 async function asyncChecks() {

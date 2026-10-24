@@ -13,12 +13,11 @@ import { unstable_rethrow } from "next/navigation";
 import type { z } from "zod";
 import { unpublishPage as unpublishPageRow } from "@/lib/admin-data/pages";
 import { auditIn } from "@/lib/admin-data/store-audit";
-import type { StorePermission } from "@/lib/auth/permissions";
 import { errorSummary } from "@/lib/orders/log";
 import type { PageDoc } from "@/lib/page/schema";
 import { publishPage, PublishError } from "@/lib/render/publish.server";
 import { storeAction } from "@/lib/tenancy/seam";
-import type { ActionResult as SeamResult, GateItem, StoreCtx, WriteCtx, WritePermission } from "@/lib/tenancy/types";
+import type { ActionResult as SeamResult, GateItem, StoreCtx, WriteCtx } from "@/lib/tenancy/types";
 import {
   createVersion as createVersionRow,
   currentMeta,
@@ -148,25 +147,19 @@ function guarded<S extends z.ZodType, T extends object, C extends StoreCtx>(sche
 
 const answer = <T extends object>(res: SeamResult<ActionResult<T>>): ActionResult<T> => (res.ok ? res.data : seamFailure(res));
 
-/** A builder action that only reads: the seam with `permission` (StoreCtx). */
-async function runRead<S extends z.ZodType, T extends object>(
-  permission: StorePermission,
-  schema: S,
-  raw: unknown,
-  body: (ctx: StoreCtx, input: z.output<S>) => Promise<ActionResult<T>>,
-): Promise<ActionResult<T>> {
-  return answer(await storeAction(permission, guarded(schema, raw, body)));
-}
+/*
+ * Every action reads `return storeAction(<key>, reads|writes(schema, raw, body)).then(answer)`: the seam call opens
+ * the body (lint L9, AUTH-31), `reads` types the ctx a read key gives (StoreCtx), `writes` the one a write key gives
+ * (WriteCtx: a read-only view can never reach the body), `answer` turns a refusal into the builder's failure.
+ */
 
-/** A builder action that writes: the seam with a write key (WriteCtx: a read-only view can never reach the body). */
-async function runWrite<S extends z.ZodType, T extends object>(
-  permission: WritePermission,
-  schema: S,
-  raw: unknown,
-  body: (ctx: WriteCtx, input: z.output<S>) => Promise<ActionResult<T>>,
-): Promise<ActionResult<T>> {
-  return answer(await storeAction(permission, guarded(schema, raw, body)));
-}
+/** The body of a builder action that only reads. */
+const reads = <S extends z.ZodType, T extends object>(schema: S, raw: unknown, body: (ctx: StoreCtx, input: z.output<S>) => Promise<ActionResult<T>>) =>
+  guarded<S, T, StoreCtx>(schema, raw, body);
+
+/** The body of a builder action that writes. */
+const writes = <S extends z.ZodType, T extends object>(schema: S, raw: unknown, body: (ctx: WriteCtx, input: z.output<S>) => Promise<ActionResult<T>>) =>
+  guarded<S, T, WriteCtx>(schema, raw, body);
 
 /* ------------------------------------------------------------------ */
 /* actions                                                             */
@@ -174,79 +167,79 @@ async function runWrite<S extends z.ZodType, T extends object>(
 
 /** Fresh bootstrap of a page (reload after a conflict). */
 export async function loadPage(raw: z.input<typeof PageRefInput>): Promise<ActionResult<{ boot: EditorBootstrap }>> {
-  return runRead("pages.read", PageRefInput, raw, async (ctx, { pageId }) => {
+  return storeAction("pages.read", reads(PageRefInput, raw, async (ctx, { pageId }) => {
     const boot = await loadBootstrap(ctx, pageId);
     return boot ? { ok: true, boot } : fail("not_found", "This page no longer exists.");
-  });
+  })).then(answer);
 }
 
 /** Autosave / manual save of the draft with optimistic concurrency. */
 export async function saveDraft(raw: z.input<typeof SaveDraftInput>): Promise<ActionResult<{ updatedAt: number; version: VersionSummary | null }>> {
-  return runWrite("pages.write", SaveDraftInput, raw, async ({ scope, user, actor }, input) => {
+  return storeAction("pages.write", writes(SaveDraftInput, raw, async ({ scope, user, actor }, input) => {
     const res = await saveDraftRow(scope, user, input);
     if (res.version || res.forced) {
       await auditIn(scope, actor, res.forced ? "page.draft_overwritten" : "page.autosaved", { target: input.pageId, meta: res.version ? { versionId: res.version.id } : null });
     }
     return { ok: true, updatedAt: res.updatedAt, version: res.version };
-  });
+  })).then(answer);
 }
 
 /** Named snapshot of the current (saved) draft (`reuse`: the newest version when it is identical). */
 export async function createVersion(raw: z.input<typeof CreateVersionInput>): Promise<ActionResult<{ version: VersionSummary; created: boolean }>> {
-  return runWrite("pages.write", CreateVersionInput, raw, async ({ scope, user, actor }, input) => {
+  return storeAction("pages.write", writes(CreateVersionInput, raw, async ({ scope, user, actor }, input) => {
     const { version, created } = await createVersionRow(scope, user, input.pageId, input.kind, input.label ?? null, { reuse: input.reuse });
     if (created) await auditIn(scope, actor, "page.version_created", { target: input.pageId, meta: { versionId: version.id, kind: input.kind } });
     return { ok: true, version, created };
-  });
+  })).then(answer);
 }
 
 export async function listVersions(raw: z.input<typeof ListVersionsInput>): Promise<ActionResult<{ versions: VersionSummary[]; hasMore: boolean }>> {
-  return runRead("pages.read", ListVersionsInput, raw, async ({ scope }, input) => {
+  return storeAction("pages.read", reads(ListVersionsInput, raw, async ({ scope }, input) => {
     const res = await listVersionSummaries(scope, input.pageId, { before: input.before, limit: input.limit });
     return { ok: true, versions: res.items, hasMore: res.hasMore };
-  });
+  })).then(answer);
 }
 
 /** A version's document + its asset rows (versions drawer thumbnail). */
 export async function getVersionPreview(raw: z.input<typeof VersionRefInput>): Promise<ActionResult<{ doc: PageDoc; assets: Record<string, EditorAsset> }>> {
-  return runRead("pages.read", VersionRefInput, raw, async ({ scope }, input) => {
+  return storeAction("pages.read", reads(VersionRefInput, raw, async ({ scope }, input) => {
     const res = await versionPreview(scope, input.pageId, input.versionId);
     return res ? { ok: true, ...res } : fail("not_found", "This version cannot be previewed.");
-  });
+  })).then(answer);
 }
 
 export async function restoreVersion(
   raw: z.input<typeof RestoreVersionInput>,
 ): Promise<ActionResult<{ doc: PageDoc; updatedAt: number; versions: VersionSummary[]; assets: Record<string, EditorAsset> }>> {
-  return runWrite("pages.write", RestoreVersionInput, raw, async ({ scope, user, actor }, input) => {
+  return storeAction("pages.write", writes(RestoreVersionInput, raw, async ({ scope, user, actor }, input) => {
     const res = await restoreVersionRow(scope, user, input);
     await auditIn(scope, actor, "page.version_restored", { target: input.pageId, meta: { versionId: input.versionId } });
     return { ok: true, ...res };
-  });
+  })).then(answer);
 }
 
 export async function starVersion(raw: z.input<typeof StarVersionInput>): Promise<ActionResult> {
-  return runWrite("pages.write", StarVersionInput, raw, async ({ scope }, input) => {
+  return storeAction("pages.write", writes(StarVersionInput, raw, async ({ scope }, input) => {
     await setVersionStar(scope, input.pageId, input.versionId, input.starred);
     return { ok: true };
-  });
+  })).then(answer);
 }
 
 export async function renameVersion(raw: z.input<typeof RenameVersionInput>): Promise<ActionResult> {
-  return runWrite("pages.write", RenameVersionInput, raw, async ({ scope, actor }, input) => {
+  return storeAction("pages.write", writes(RenameVersionInput, raw, async ({ scope, actor }, input) => {
     await renameVersionRow(scope, input.pageId, input.versionId, input.label);
     await auditIn(scope, actor, "page.version_renamed", { target: input.pageId, meta: { versionId: input.versionId } });
     return { ok: true };
-  });
+  })).then(answer);
 }
 
 /** New draft page of the store from this page (or one of its versions). */
 export async function duplicatePage(raw: z.input<typeof DuplicatePageInput>): Promise<ActionResult<{ pageId: string; slug: string }>> {
-  return runWrite("pages.write", DuplicatePageInput, raw, async ({ scope, actor }, input) => {
+  return storeAction("pages.write", writes(DuplicatePageInput, raw, async ({ scope, actor }, input) => {
     const created = await duplicateAsPage(scope, actor, input);
     await auditIn(scope, actor, "page.duplicated", { target: created.id, meta: { from: input.pageId, versionId: input.versionId ?? null } });
     return { ok: true, pageId: created.id, slug: created.slug };
-  });
+  })).then(answer);
 }
 
 /**
@@ -255,7 +248,7 @@ export async function duplicatePage(raw: z.input<typeof DuplicatePageInput>): Pr
  * put back, so a live page never ends up half-moved.
  */
 export async function updatePageMeta(raw: z.input<typeof UpdatePageMetaInput>): Promise<ActionResult<{ page: EditorPageMeta; republished: VersionSummary | null }>> {
-  return runWrite("pages.write", UpdatePageMetaInput, raw, async (ctx, input) => {
+  return storeAction("pages.write", writes(UpdatePageMetaInput, raw, async (ctx, input) => {
     const { scope, actor } = ctx;
     if (input.name === undefined && input.slug === undefined) return fail("invalid", "Nothing to change.");
     const before = await currentMeta(scope, input.pageId);
@@ -285,7 +278,7 @@ export async function updatePageMeta(raw: z.input<typeof UpdatePageMetaInput>): 
     if (res.historyKept) await auditIn(scope, actor, "page.slug_moved", { target: input.pageId, meta: { from: res.previousSlug, to: input.slug } });
     const page = (await currentMeta(scope, input.pageId)) ?? res.page;
     return { ok: true, page, republished };
-  });
+  })).then(answer);
 }
 
 /**
@@ -295,7 +288,7 @@ export async function updatePageMeta(raw: z.input<typeof UpdatePageMetaInput>): 
 export async function publish(raw: z.input<typeof PublishInput>): Promise<
   ActionResult<{ page: EditorPageMeta; version: VersionSummary | null; warnings: number; skippedSections: string[] }>
 > {
-  return runWrite("pages.publish", PublishInput, raw, async ({ scope, actor }, { pageId, baseUpdatedAt }) => {
+  return storeAction("pages.publish", writes(PublishInput, raw, async ({ scope, actor }, { pageId, baseUpdatedAt }) => {
     // the store's publish (T3) checks the stamp before rendering and again under a row lock when it writes
     // (PublishError "conflict" → changedElsewhere), so only the draft this editor saved goes live
     const res = await publishPage(scope, pageId, { actor, expectedUpdatedAt: baseUpdatedAt });
@@ -308,7 +301,7 @@ export async function publish(raw: z.input<typeof PublishInput>): Promise<
       warnings: res.issues.filter((i) => i.level === "warning").length,
       skippedSections: res.renderIssues.map((i) => i.sectionId),
     };
-  });
+  })).then(answer);
 }
 
 /**
@@ -317,7 +310,7 @@ export async function publish(raw: z.input<typeof PublishInput>): Promise<
  * is its own (adopt it) or another save's (keep its own, so the next save reports the conflict).
  */
 export async function unpublish(raw: z.input<typeof UnpublishInput>): Promise<ActionResult<{ page: EditorPageMeta; draftChangedElsewhere: boolean }>> {
-  return runWrite("pages.publish", UnpublishInput, raw, async ({ scope, actor }, { pageId, baseUpdatedAt }) => {
+  return storeAction("pages.publish", writes(UnpublishInput, raw, async ({ scope, actor }, { pageId, baseUpdatedAt }) => {
     const before = await currentMeta(scope, pageId);
     if (!before) return fail("not_found", "This page no longer exists.");
     // unpublishPageRow (store-scoped) invalidates the serving cache and writes the audit entry
@@ -325,5 +318,5 @@ export async function unpublish(raw: z.input<typeof UnpublishInput>): Promise<Ac
     const page = await currentMeta(scope, pageId);
     if (!page) return fail("not_found", "This page no longer exists.");
     return { ok: true, page, draftChangedElsewhere: baseUpdatedAt !== undefined && baseUpdatedAt !== before.updatedAt };
-  });
+  })).then(answer);
 }

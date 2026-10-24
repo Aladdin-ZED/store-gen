@@ -213,6 +213,22 @@ export async function loadBootstrap(ctx: Pick<StoreCtx, "scope" | "store" | "use
   };
 }
 
+/**
+ * The full-page preview's source (`/app/<h>/preview/<id>[?v=]`): the page's slug and its draft, or the document of one
+ * of its versions. Both are looked up in the scope's store, so another store's page or version answers null.
+ */
+export async function previewSource(scope: StoreScope, pageId: string, versionId: string | null): Promise<{ slug: string; doc: unknown } | null> {
+  const [page] = await db.select({ slug: pages.slug, draft: pages.draft }).from(pages).where(byId(pages, scope, pageId)).limit(1);
+  if (!page) return null;
+  if (!versionId) return { slug: page.slug, doc: page.draft };
+  const [v] = await db
+    .select({ doc: pageVersions.doc })
+    .from(pageVersions)
+    .where(and(byId(pageVersions, scope, versionId), eq(pageVersions.pageId, pageId)))
+    .limit(1);
+  return v ? { slug: page.slug, doc: v.doc } : null;
+}
+
 /** A version's document (repaired) and the asset rows to preview it. */
 export async function versionPreview(scope: StoreScope, pageId: string, versionId: string): Promise<{ doc: PageDocT; assets: Record<string, EditorAsset> } | null> {
   const v = await versionRow(scope, pageId, versionId);

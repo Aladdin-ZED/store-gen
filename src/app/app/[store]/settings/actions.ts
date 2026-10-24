@@ -130,14 +130,17 @@ export async function saveAiAction(input: SettingInput<"ai">): Promise<ActionRes
 /** Settings → Anti-spam: the store's own Turnstile widget (without one, the platform's applies). Both keys or none. */
 export async function saveTurnstileAction(input: Partial<SettingInput<"turnstile">>): Promise<ActionResult<{ siteKey?: string; secretKey?: string }>> {
   return storeAction("settings.write", async (ctx) => {
-    const v = TurnstileSettings.partial().parse(input);
+    // the form sends the stored secret back as its mask ("••••a1b2"): kept as is, never validated as a token
+    const masked = isMaskedSecret(input?.secretKey);
+    const v = TurnstileSettings.partial().parse(masked ? { ...input, secretKey: undefined } : input);
     // both keys or none: check the merged result before writing anything
     const { turnstile: current } = await getStoreSettings(ctx.scope, ["turnstile"]);
     const pick = (next: string | undefined, stored: string | undefined) => (next === undefined || isMaskedSecret(next) ? stored : next.trim() || undefined);
     if (!!pick(v.siteKey, current.siteKey) !== !!pick(v.secretKey, current.secretKey)) {
       fail("Add both keys — the site key and the secret key work together.");
     }
-    const saved = await updateStoreSetting(ctx.scope, "turnstile", v, settingsActor(ctx.actor));
+    // a masked secret reaches updateStoreSetting as the mask, which keeps the stored one (§D.10)
+    const saved = await updateStoreSetting(ctx.scope, "turnstile", masked ? { ...v, secretKey: input.secretKey } : v, settingsActor(ctx.actor));
     invalidatePublished();
     refreshSettings(ctx.store.handle);
     return redactStoreSetting("turnstile", saved);

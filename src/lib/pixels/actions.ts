@@ -42,7 +42,7 @@ import { PublishError, publishTrackingOnly } from "@/lib/render/publish.server";
 import { getStoreSetting, getStoreSettings } from "@/lib/settings";
 import { storeAction } from "@/lib/tenancy/seam";
 import { byId } from "@/lib/tenancy/sql";
-import type { ActionResult, StoreCtx, WriteCtx } from "@/lib/tenancy/types";
+import type { ActionResult, StoreCtx, WritePermission } from "@/lib/tenancy/types";
 import { storeUrl } from "@/lib/urls";
 
 const Platform = z.enum(PIXEL_PLATFORMS);
@@ -86,18 +86,21 @@ const EntryInput = z.object({
   testCode: z.string().max(40).optional(),
 });
 
+/** The keys an entry save needs: a token or a test code is an integration secret (sensitive), on top of pixels.manage. */
+function entryKeys(input: unknown): WritePermission[] {
+  const peek = EntryInput.safeParse(input);
+  const secret = !peek.success || peek.data.token !== undefined || peek.data.testCode !== undefined;
+  return secret ? ["pixels.manage", "integrations.manage"] : ["pixels.manage"];
+}
+
 /** Add (≤ 100) or edit a pixel: label, token ("" remove · mask keep · new replace), test code. */
 export async function savePixelEntryAction(input: z.input<typeof EntryInput>): Promise<ActionResult<{ created: boolean; view: PixelLibraryView }>> {
-  const peek = EntryInput.safeParse(input);
-  // a token or a test code is an integration secret (sensitive): integrations.manage on top of pixels.manage
-  const secret = !peek.success || peek.data.token !== undefined || peek.data.testCode !== undefined;
-  const save = async (ctx: WriteCtx) => {
+  return storeAction(entryKeys(input), async (ctx) => {
     const v = EntryInput.parse(input);
     const res = await guarded(() => savePixelEntry(ctx.scope, v, ctx.actor));
     refresh(ctx.store);
     return { created: res.created, view: await viewOf(ctx, { fresh: true }) };
-  };
-  return secret ? storeAction(["pixels.manage", "integrations.manage"], save) : storeAction("pixels.manage", save);
+  });
 }
 
 /** Delete a pixel (refused `pixel_in_use` while any draft, live page or export uses it). */
