@@ -102,7 +102,7 @@ export function TextField({ label, name, error, hint, labelAside, endAdornment, 
   );
 }
 
-export function PasswordField(props: Omit<FieldProps, "type" | "endAdornment">) {
+export function PasswordField({ toggleLabel = "Show password", ...props }: Omit<FieldProps, "type" | "endAdornment"> & { /** the visibility toggle's label, localised by the form */ toggleLabel?: string }) {
   const [visible, setVisible] = useState(false);
   return (
     <TextField
@@ -117,7 +117,7 @@ export function PasswordField(props: Omit<FieldProps, "type" | "endAdornment">) 
           variant="ghost"
           size="icon-sm"
           // A toggle keeps one label; its pressed state says whether the password is visible.
-          aria-label="Show password"
+          aria-label={toggleLabel}
           aria-pressed={visible}
           onClick={() => setVisible((v) => !v)}
           className="text-muted-foreground hover:text-foreground"

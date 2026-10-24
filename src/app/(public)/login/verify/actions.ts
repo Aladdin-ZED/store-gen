@@ -1,15 +1,21 @@
 "use server";
-
+/**
+ * `/login/verify` (docs/STORE-SAAS.md §B.3): the TOTP or recovery step of a password sign-in. Too many wrong codes end
+ * the pending session (password again); a spent recovery code opens the two-step page so the remaining ones get a look.
+ */
 import { redirect } from "next/navigation";
-import { assertAdminAccess, getPendingMfa, getRequestContext, landingPathFor, LOGIN_PATH, safeAppPath, TWO_FACTOR_PATH } from "@/lib/auth";
+import { getPendingMfa, getRequestContext, landingPathFor, safeAppPath } from "@/lib/auth";
 import { clearSessionCookie, setSessionCookie } from "@/lib/auth/cookies";
 import { completeSecondFactor } from "@/lib/auth/login";
+import { ACCOUNT_TWO_FACTOR_PATH, LOGIN_PATH } from "@/lib/auth/paths";
 import { normalizeRecoveryCode } from "@/lib/auth/recovery";
+import { getDeviceMarker } from "@/lib/auth/request";
 import { normalizeTotpInput } from "@/lib/auth/totp";
+import { assertActionOrigin } from "@/lib/tenancy/seam";
 import { field, formError, type FormState } from "../../_lib/form-state";
 
 export async function verifyAction(_prev: FormState, data: FormData): Promise<FormState> {
-  await assertAdminAccess();
+  await assertActionOrigin();
   const pending = await getPendingMfa();
   if (!pending) redirect(`${LOGIN_PATH}?notice=mfa-expired`);
 
@@ -17,34 +23,23 @@ export async function verifyAction(_prev: FormState, data: FormData): Promise<Fo
   const code = field(data, "code", 64);
   const next = safeAppPath(field(data, "next", 512));
 
-  if (method === "totp" && !normalizeTotpInput(code)) {
-    return formError(undefined, { code: "Enter the 6-digit code from your authenticator app." });
-  }
-  if (method === "recovery" && !normalizeRecoveryCode(code)) {
-    return formError(undefined, { code: "Recovery codes look like XXXX-XXXX-XXXX." });
-  }
+  if (method === "totp" && !normalizeTotpInput(code)) return formError(undefined, { code: "auth.verify.code_format" });
+  if (method === "recovery" && !normalizeRecoveryCode(code)) return formError(undefined, { code: "auth.verify.recovery_format" });
 
   const result = await completeSecondFactor(
     { sessionId: pending.sessionId, userId: pending.userId },
     { method, code },
-    await getRequestContext(),
+    { ...(await getRequestContext()), deviceId: await getDeviceMarker() },
   );
 
   if (!result.ok) {
-    if (result.error === "invalid") {
-      return formError(
-        method === "totp"
-          ? "That code didn't work. Wait for a fresh code and try again."
-          : "That recovery code didn't work. Check it and try again.",
-      );
-    }
+    if (result.error === "invalid") return formError(method === "totp" ? "auth.verify.code_wrong" : "auth.verify.recovery_wrong");
     // locked or expired: the pending session is gone, start over from the password step
     await clearSessionCookie();
     redirect(`${LOGIN_PATH}?notice=${result.error === "locked" ? "mfa-locked" : "mfa-expired"}`);
   }
 
   await setSessionCookie(result.session.token, result.session.cookieExpiresAt);
-  // A spent recovery code deserves a look at the remaining ones.
-  if (result.method === "recovery") redirect(`${TWO_FACTOR_PATH}?notice=recovery-used`);
+  if (result.method === "recovery") redirect(`${ACCOUNT_TWO_FACTOR_PATH}?notice=recovery-used`);
   redirect(next ?? landingPathFor(result.memberships, result.lastStoreId, result.platformRole));
 }

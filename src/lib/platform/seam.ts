@@ -22,7 +22,7 @@ import { headers as requestHeaders } from "next/headers";
 import { notFound, redirect, unstable_rethrow } from "next/navigation";
 import { AuthError } from "@/lib/auth/errors";
 import { PLATFORM_READ_ONLY_OK } from "@/lib/auth/grant";
-import { CONSOLE_2FA_ENROL_PATH, LOGIN_PATH, VERIFY_PATH } from "@/lib/auth/paths";
+import { CONSOLE_2FA_ENROL_PATH, loginUrl, verifyUrl } from "@/lib/auth/paths";
 import {
   PLATFORM_PERMISSIONS,
   STEP_UP_PERMISSIONS,
@@ -34,7 +34,7 @@ import {
   type PlatformPermissionDef,
   type PlatformRole,
 } from "@/lib/auth/permissions";
-import { assertAdminAccess } from "@/lib/auth/request";
+import { assertAdminAccess, getRequestedAdminPath } from "@/lib/auth/request";
 import { clientIp } from "@/lib/security/ip";
 import { getRequestIdentity, identityHeaders } from "@/lib/tenancy/context";
 import {
@@ -92,7 +92,10 @@ export async function requirePlatform(opts: { permission?: PlatformPermission; t
   } catch (err) {
     if (opts.throwOnFail) throw err;
     unstable_rethrow(err);
-    if (err instanceof AuthError) redirect(err.code === "mfa_required" ? VERIFY_PATH : LOGIN_PATH);
+    if (err instanceof AuthError) {
+      const back = getRequestIdentity() ? null : await getRequestedAdminPath();
+      redirect(err.code === "mfa_required" ? verifyUrl(back) : loginUrl(back));
+    }
     if (err instanceof SeamError) {
       if (err.messageKey === NO_TOTP) redirect(CONSOLE_2FA_ENROL_PATH);
       notFound();

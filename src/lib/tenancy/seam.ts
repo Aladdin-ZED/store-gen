@@ -42,7 +42,7 @@ import { readSessionToken } from "@/lib/auth/cookies";
 import { AuthBusyError, AuthError, AuthInputError, AuthRefusal, FieldsError } from "@/lib/auth/errors";
 import { isAdminIpAllowed } from "@/lib/auth/gate";
 import { IMPERSONATION_MEMBERSHIP, STORE_STEP_UP_PERMISSIONS, storeGrant, storeGrantAll } from "@/lib/auth/grant";
-import { LOGIN_PATH, STORE_2FA_ENROL_PATH, VERIFY_PATH } from "@/lib/auth/paths";
+import { STORE_2FA_ENROL_PATH, signInUrl, signInVerifyUrl } from "@/lib/auth/paths";
 import { canPlatform, permissionDef, type StorePermission } from "@/lib/auth/permissions";
 import { validateSessionToken } from "@/lib/auth/session";
 import { getUserById } from "@/lib/auth/users";
@@ -518,6 +518,12 @@ async function finish(r: Resolved): Promise<StoreCtx> {
   return r.ctx;
 }
 
+/** The page a signed-out visitor comes back to after signing in (the proxy-signed path, never a header from the client). */
+async function backPath(): Promise<string | null> {
+  const identity = getRequestIdentity();
+  return identity ? identity.path : verifiedRequestPath(await requestHeaders());
+}
+
 /**
  * The member context of a page, layout or route. Pages (no throwOnFail): signed out → the sign-in page, MFA pending
  * → its step, a member owing 2FA → the enrolment page, any other refusal → the neutral 404. With throwOnFail:
@@ -531,7 +537,10 @@ export async function requireStoreMember(opts: RequireStoreOpts = {}): Promise<S
     return await finish(r);
   } catch (err) {
     if (opts.throwOnFail) throw err;
-    if (err instanceof AuthError) redirect(err.code === "mfa_required" ? VERIFY_PATH : LOGIN_PATH);
+    if (err instanceof AuthError) {
+      const back = await backPath();
+      redirect(err.code === "mfa_required" ? signInVerifyUrl(back) : signInUrl(back));
+    }
     if (err instanceof SeamError && err.messageKey === MEMBER_2FA_REQUIRED) redirect(STORE_2FA_ENROL_PATH);
     if (err instanceof SeamError || err instanceof EntitlementError) notFound();
     throw err;

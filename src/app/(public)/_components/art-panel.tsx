@@ -1,12 +1,11 @@
-import { BrandMark, Wordmark } from "@/components/admin/shell/brand-mark";
+import { BrandMark } from "@/components/admin/shell/brand-mark";
 import { cn } from "@/lib/utils";
 
 /*
- * Art for the auth screens: "the stage". The brand mark's arch, drawn as a set of concentric
- * hairline arches rising out of the panel's lower edge, lit from inside by one soft jade light, with
- * the order dot resting in it. A faint dot grid and film grain sit behind. Seeded by the UTC day,
- * so the composition shifts slightly from one day to the next but is stable within a day.
- * Pure SVG, no client JS.
+ * Art for the sign-in screens: "the stage". The brand mark's arch drawn as concentric hairline arches rising out of
+ * the panel's lower edge, lit from inside by one product-tinted radial, with the order dot resting in it, over a
+ * faint dot field. No grain and no mesh gradient (D60). Seeded by the UTC day, so the composition shifts slightly
+ * from one day to the next but is stable within a day. Pure SVG, no client JS; the art is always dark.
  */
 
 function mulberry32(seed: number) {
@@ -36,9 +35,11 @@ interface Stage {
   dotY: number;
 }
 
-function buildStage(seed: number, full: boolean, width: number, height: number): Stage {
+function buildStage(seed: number, full: boolean, width: number, height: number, rtl: boolean): Stage {
   const rand = mulberry32(seed);
-  const cx = full ? width * (0.7 + rand() * 0.06) : width * (0.8 + rand() * 0.06);
+  const along = full ? 0.7 + rand() * 0.06 : 0.8 + rand() * 0.06;
+  // the stage sits at the inline end, so it mirrors with the page
+  const cx = width * (rtl ? 1 - along : along);
   const baseY = height + 4;
   const innerR = full ? 112 + rand() * 16 : 46;
   const step = full ? 24 + rand() * 6 : 15;
@@ -46,14 +47,13 @@ function buildStage(seed: number, full: boolean, width: number, height: number):
   const springY = full ? height * (0.6 + rand() * 0.05) : height * 0.62;
   const arches = Array.from({ length: count }, (_, i) => {
     const r = innerR + i * step;
-    const top = springY;
     return {
-      d: `M${r1(cx - r)},${baseY} V${r1(top)} A${r1(r)},${r1(r)} 0 0 1 ${r1(cx + r)},${r1(top)} V${baseY}`,
+      d: `M${r1(cx - r)},${baseY} V${r1(springY)} A${r1(r)},${r1(r)} 0 0 1 ${r1(cx + r)},${r1(springY)} V${baseY}`,
       // the innermost lines carry the light; the outer ones fade into the field
       opacity: r1(1 - (i / count) * 0.85),
     };
   });
-  const dotY = full ? springY + (baseY - springY) * 0.42 : springY + (baseY - springY) * 0.46;
+  const dotY = springY + (baseY - springY) * (full ? 0.42 : 0.46);
   return { cx, springY, baseY, arches, innerR, dotY };
 }
 
@@ -61,26 +61,34 @@ export function ArtPanel({
   variant,
   idPrefix,
   seed,
+  brand,
+  headline,
+  footnote,
+  rtl = false,
   className,
 }: {
   variant: "full" | "band";
   idPrefix: string;
   /** composition seed (see daySeed) */
   seed: number;
+  /** the platform brand (`platform.brand.name`) */
+  brand: string;
+  headline?: string;
+  footnote?: [string, string];
+  rtl?: boolean;
   className?: string;
 }) {
   const full = variant === "full";
   const width = 720;
   const height = full ? 960 : 240;
-  const stage = buildStage(seed * 2654435761, full, width, height);
+  const stage = buildStage(seed * 2654435761, full, width, height, rtl);
   const id = (name: string) => `${idPrefix}-${name}`;
 
   return (
     <aside
-      aria-label="COD Studio"
+      aria-label={brand}
       className={cn(
         "relative isolate overflow-hidden bg-(--auth-ink) text-(--auth-paper)",
-        // a hairline keeps the clipped arches' edge deliberate where the form column is dark too
         full ? "flex-col justify-between border-e border-white/[0.07] p-10 xl:p-14" : "flex h-28 items-end px-6 pb-5 sm:px-10",
         className,
       )}
@@ -90,13 +98,13 @@ export function ArtPanel({
         focusable="false"
         className="pointer-events-none absolute inset-0 -z-10 size-full"
         viewBox={`0 0 ${width} ${height}`}
-        preserveAspectRatio={full ? "xMidYMax slice" : "xMaxYMid slice"}
+        preserveAspectRatio={full ? "xMidYMax slice" : rtl ? "xMinYMid slice" : "xMaxYMid slice"}
       >
         <defs>
-          {/* the stage light, centred in the arch */}
+          {/* the stage light: one tinted radial, ≤ 10 % at its edge (D60) */}
           <radialGradient id={id("light")} cx={stage.cx} cy={stage.dotY} r={stage.innerR * (full ? 3.2 : 3.6)} gradientUnits="userSpaceOnUse">
-            <stop offset="0" style={{ stopColor: "var(--auth-glow)", stopOpacity: 0.55 }} />
-            <stop offset="0.35" style={{ stopColor: "var(--auth-glow)", stopOpacity: 0.16 }} />
+            <stop offset="0" style={{ stopColor: "var(--auth-glow)", stopOpacity: 0.42 }} />
+            <stop offset="0.35" style={{ stopColor: "var(--auth-glow)", stopOpacity: 0.1 }} />
             <stop offset="1" style={{ stopColor: "var(--auth-glow)", stopOpacity: 0 }} />
           </radialGradient>
           {/* arch strokes are lit near the light and fall off toward the field */}
@@ -105,10 +113,6 @@ export function ArtPanel({
             <stop offset="0.45" style={{ stopColor: "var(--auth-paper)", stopOpacity: 0.28 }} />
             <stop offset="1" style={{ stopColor: "var(--auth-paper)", stopOpacity: 0.06 }} />
           </radialGradient>
-          <linearGradient id={id("tone")} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" style={{ stopColor: "var(--auth-ink-2)", stopOpacity: 0.9 }} />
-            <stop offset="0.6" style={{ stopColor: "var(--auth-ink-2)", stopOpacity: 0 }} />
-          </linearGradient>
           <radialGradient id={id("grid-fade")} cx={stage.cx} cy={stage.springY} r={full ? 620 : 420} gradientUnits="userSpaceOnUse">
             <stop offset="0" stopColor="#fff" stopOpacity="1" />
             <stop offset="1" stopColor="#fff" stopOpacity="0" />
@@ -122,15 +126,9 @@ export function ArtPanel({
           <filter id={id("dot-glow")} x="-200%" y="-200%" width="500%" height="500%">
             <feGaussianBlur stdDeviation={full ? 10 : 6} />
           </filter>
-          <filter id={id("grain")} x="0" y="0" width="100%" height="100%">
-            <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch" />
-            <feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.5 0" />
-          </filter>
         </defs>
 
         <rect width={width} height={height} className="fill-(--auth-ink)" />
-        {/* a quiet second tone falling from the top so the field has depth */}
-        <rect width={width} height={height} fill={`url(#${id("tone")})`} />
         <rect width={width} height={height} fill={`url(#${id("dots")})`} mask={`url(#${id("grid-mask")})`} />
         <rect width={width} height={height} fill={`url(#${id("light")})`} />
 
@@ -141,27 +139,24 @@ export function ArtPanel({
         </g>
 
         {/* the order dot, resting in the arch */}
-        <circle cx={stage.cx} cy={stage.dotY} r={full ? 22 : 12} className="fill-(--auth-glow)" opacity="0.7" filter={`url(#${id("dot-glow")})`} />
+        <circle cx={stage.cx} cy={stage.dotY} r={full ? 22 : 12} className="fill-(--auth-glow)" opacity="0.6" filter={`url(#${id("dot-glow")})`} />
         <circle cx={stage.cx} cy={stage.dotY} r={full ? 9 : 5} className="fill-(--auth-accent)" />
-        <circle cx={stage.cx} cy={stage.dotY - (full ? 3 : 1.6)} r={full ? 3 : 1.6} className="fill-(--auth-paper)" opacity="0.55" />
-
-        <rect width={width} height={height} filter={`url(#${id("grain")})`} opacity="0.03" />
       </svg>
 
       <div className="flex items-center gap-2.5">
         <BrandMark tone="ink" />
-        <Wordmark className="text-(--auth-paper)" />
+        <span className="text-[0.95rem] leading-none font-semibold tracking-[-0.02em]">{brand}</span>
       </div>
 
-      {full && (
+      {full && headline && (
         <>
-          <p className="max-w-[28rem] font-display text-[2.6rem] leading-[1.06] font-semibold tracking-[-0.04em] text-balance xl:text-[3rem]">
-            Landing pages, <span className="whitespace-nowrap text-(--auth-accent)">art-directed</span> from your product photos.
-          </p>
-          <p className="flex items-center justify-between gap-6 text-xs text-(--auth-paper)/55">
-            <span>Private workspace</span>
-            <span>Cash on delivery · Arabic and French</span>
-          </p>
+          <p className="max-w-[28rem] text-[2.5rem] leading-[1.08] font-semibold tracking-[-0.035em] text-balance xl:text-[2.85rem]">{headline}</p>
+          {footnote && (
+            <p className="flex items-center justify-between gap-6 text-xs text-(--auth-paper)/55">
+              <span>{footnote[0]}</span>
+              <span>{footnote[1]}</span>
+            </p>
+          )}
         </>
       )}
     </aside>
