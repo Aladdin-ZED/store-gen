@@ -287,7 +287,7 @@ async function main() {
     const signedOut = await get(port, pathA);
     check(
       "signed out → the sign-in page",
-      signedOut.status >= 300 && signedOut.status < 400 && (signedOut.location ?? "").includes("/admin/login") && !signedOut.body.includes(s.a.name),
+      signedOut.status >= 300 && signedOut.status < 400 && (signedOut.location ?? "").includes(`/login?next=${encodeURIComponent(pathA)}`) && !(signedOut.location ?? "").includes("/admin/") && !signedOut.body.includes(s.a.name),
       `status ${signedOut.status} → ${signedOut.location ?? "-"}`,
     );
   } finally {

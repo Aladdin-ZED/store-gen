@@ -40,6 +40,12 @@ export const BURST_LIMITS = {
   upsell: { limit: 40, windowSec: 60 },
   /** cron key guesses: the database keeps 60 per 10 min per network; the real job calls twice */
   cron: { limit: 30, windowSec: 600 },
+  /** public auth forms (publicAction, §B.1 / §B.2 step 1): the DB buckets keep 5/h (signup, report) and 10/15 min (invite, reset, login per IP) */
+  signup: { limit: 20, windowSec: 600 },
+  invite: { limit: 30, windowSec: 600 },
+  reset: { limit: 30, windowSec: 600 },
+  report: { limit: 20, windowSec: 600 },
+  login: { limit: 60, windowSec: 600 },
 } as const;
 
 export type BurstScope = keyof typeof BURST_LIMITS;

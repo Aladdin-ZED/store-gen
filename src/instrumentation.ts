@@ -39,6 +39,10 @@ export async function register(): Promise<void> {
     else if (line.level === "warn") console.warn(`[boot] ${line.text}`);
     else console.info(`[boot] ${line.text}`);
   }
+  // §E.4 (CCR r1.0-t2-3): marks the test identity context as misconfigured for this process at start-up, so the
+  // first request never logs it again (it never throws)
+  const { identityContextMisconfigured } = await import("./lib/tenancy/context");
+  identityContextMisconfigured();
 
   if (!process.env.DATABASE_URL) {
     console.error("[boot] DATABASE_URL is not set — skipping migrations.");

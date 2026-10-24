@@ -153,6 +153,16 @@ async function cases(c: mysql.Connection): Promise<void> {
   /* ---------------------------------------------------------------- */
   const A = await newStore("aa");
   const B = await newStore("bb");
+  // A is approved (the team cases need more than the pending cap of 2 seats, §A.5.2); B stays pending
+  await c.query("UPDATE stores SET status = 'active' WHERE id = ?", [A.storeId]);
+  {
+    // the seat limits read the live, locked membership rows (CCR r1.0-t2-9 item 7): a pending store holds 2 seats
+    const P = await newStore("seats");
+    const ownerP = await ctxOf(P.userId, P.handle);
+    await addMember(P.storeId, "editor", "seat.two@example.ma");
+    ok("seats: a pending store's third member → quota (members_max 2 while pending)", (await caught(invites.createInvite(ownerP, { email: "seat.three@example.ma", role: "agent" }))) === "quota");
+    ok("seats: nothing written for the refused invite", !(await one("SELECT id FROM store_invites WHERE store_id = ? AND email_norm = 'seat.three@example.ma'", [P.storeId])));
+  }
   const ownerA = await ctxOf(A.userId, A.handle);
   const managerId = await addMember(A.storeId, "manager", "manager.a@example.ma");
   const agentId = await addMember(A.storeId, "agent", "agent.a@example.ma");
@@ -246,6 +256,28 @@ async function cases(c: mysql.Connection): Promise<void> {
   ok("a closed store takes no one", (await invites.previewInvite(tokenOf(lastB))) === null && (await caught(invites.acceptInvite(tokenOf(lastB), { email: "", name: "C", password: PASSWORD, locale: "en" }))) === "invalid:team.invite.invalid");
   await c.query("UPDATE stores SET status = 'pending' WHERE id = ?", [B.storeId]);
 
+  /* §H.8 kill switches over the real flags rows (T1 merged; the integration check of the T2 report) */
+  const { invalidateFlags } = await import("@/lib/tenancy/entitlements");
+  const setKill = async (key: string, value: boolean) => {
+    await c.query("INSERT INTO flags (`key`, kind, default_value) VALUES (?, 'kill', ?) ON DUPLICATE KEY UPDATE default_value = VALUES(default_value)", [key, JSON.stringify(value)]);
+    invalidateFlags();
+  };
+  const paused = await invites.createInvite(ownerA, { email: "paused@example.ma", role: "agent" });
+  await setKill("signups_enabled", false);
+  ok(
+    "kill: signups_enabled off → the accept answers closed and writes nothing",
+    (await caught(invites.acceptInvite(tokenOf(paused.url), { email: "", name: "Paused", password: PASSWORD, locale: "fr" }))) === "closed:team.invite.closed" &&
+      !(await one("SELECT id FROM users WHERE email = 'paused@example.ma'")) &&
+      (await one<{ accepted_at: Date | null }>("SELECT accepted_at FROM store_invites WHERE id = ?", [paused.inviteId]))?.accepted_at === null,
+  );
+  ok("kill: the paused link still previews (the page shows the paused notice)", (await invites.previewInvite(tokenOf(paused.url))) !== null);
+  await setKill("signups_enabled", true);
+  ok("kill: switched back on, the same link works", (await invites.acceptInvite(tokenOf(paused.url), { email: "", name: "Paused", password: PASSWORD, locale: "fr" })).joined);
+  await setKill("platform_read_only", true);
+  const readOnly = await runAsIdentity({ userId: A.userId, path: `/app/${A.handle}/team` }, () => teamActions.createInviteAction({ email: "ro@example.ma", role: "agent" }));
+  ok("kill: platform_read_only → a store write answers read_only, nothing written", !readOnly.ok && readOnly.error === "read_only" && !(await one("SELECT id FROM store_invites WHERE email_norm = 'ro@example.ma'")), readOnly);
+  await setKill("platform_read_only", false);
+
   /* the actions through the store seam (the store from the signed path, D2) */
   const viaAction = await runAsIdentity({ userId: A.userId, path: `/app/${A.handle}/team` }, () => teamActions.createInviteAction({ email: "action@example.ma", role: "agent" }));
   ok("createInviteAction: the store from the signed path", viaAction.ok && viaAction.data.url.includes("/invite/"), viaAction);
@@ -324,6 +356,52 @@ async function cases(c: mysql.Connection): Promise<void> {
   await c.query("UPDATE sessions SET step_up_at = NULL WHERE id = ?", [ownerSession.id]);
   const noStep = await asOwner(() => teamActions.changeMemberRoleAction({ userId: stepTarget, role: "owner" }), `/app/${A.handle}/team`);
   ok("step-up: none at all → step_up", !noStep.ok && noStep.error === "step_up", noStep);
+
+  /* the owner's close reads the seam's stepUpUntil (T1 review fix 3 refuses it while null; filled from sessions.step_up_at) */
+  const { transitionStore, LifecycleError } = await import("@/lib/tenancy/lifecycle");
+  const { HandleError } = await import("@/lib/tenancy/handles");
+  const C = await newStore("closer");
+  const closerSession = await createSession(C.userId, { mfaPassed: true, ip: "203.0.113.21", ua: UA });
+  const asCloser = <T>(fn: () => Promise<T>, path: string | null = null) => runAsIdentity({ sessionToken: closerSession.token, path }, fn);
+  const statusOf = async (storeId: string) => (await one<{ status: string }>("SELECT status FROM stores WHERE id = ?", [storeId]))?.status;
+  const closeAction = () => seam.storeAction("store.close", (ctx) => transitionStore(ctx, ctx.store.id, "closed", { reason: "owner_request" }));
+  const closeFrom = await statusOf(C.storeId);
+  const noCloseStep = await asCloser(closeAction, `/app/${C.handle}/settings`);
+  ok("owner close: no step-up → step_up, the store unchanged", !noCloseStep.ok && noCloseStep.error === "step_up" && (await statusOf(C.storeId)) === closeFrom, { noCloseStep, closeFrom });
+  await c.query("UPDATE sessions SET step_up_at = UTC_TIMESTAMP(3) - INTERVAL 301 SECOND WHERE id = ?", [closerSession.id]);
+  const staleCloser = (await asCloser(() => seam.requireStoreMember({ handle: C.handle, throwOnFail: true }))) as WriteCtx;
+  const staleClose = await transitionStore(staleCloser, C.storeId, "closed", { reason: "owner_request" }).then(
+    () => "ok",
+    (e: unknown) => (e instanceof LifecycleError ? e.code : `other:${String(e)}`),
+  );
+  ok("owner close: a stale stepUpUntil → LifecycleError step_up (the lifecycle's own check)", staleClose === "step_up" && (await statusOf(C.storeId)) === closeFrom, staleClose);
+  await c.query("UPDATE sessions SET step_up_at = UTC_TIMESTAMP(3) - INTERVAL 60 SECOND WHERE id = ?", [closerSession.id]);
+  const freshCloser = (await asCloser(() => seam.requireStoreMember({ handle: C.handle, throwOnFail: true }))) as WriteCtx;
+  ok("owner close: the seam fills stepUpUntil from step_up_at + 5 min", !!freshCloser.stepUpUntil && Math.abs(freshCloser.stepUpUntil.getTime() - (Date.now() + 240_000)) < 5_000, freshCloser.stepUpUntil);
+  const freshClose = await asCloser(closeAction, `/app/${C.handle}/settings`);
+  ok("owner close: a fresh step-up → closed through storeAction", freshClose.ok && (await statusOf(C.storeId)) === "closed", freshClose);
+  ok("owner close: audited with the step-up method", !!(await one("SELECT id FROM audit_log WHERE store_id = ? AND action = 'store.closed'", [C.storeId])));
+
+  /* actionFailure maps T1's typed refusals (CCR r1.0-t1-2) */
+  const mapped = (e: unknown) => {
+    const r = seam.actionFailure(e, "selftest");
+    return r.error;
+  };
+  ok(
+    "actionFailure: LifecycleError codes pass through",
+    mapped(new LifecycleError("status_changed", "x")) === "status_changed" && mapped(new LifecycleError("step_up", "x")) === "step_up" && mapped(new LifecycleError("not_found", "x")) === "not_found",
+  );
+  ok(
+    "actionFailure: HandleError → handle_<problem> / handle_<code> / conflict",
+    mapped(new HandleError("invalid", "protected")) === "handle_protected" &&
+      mapped(new HandleError("invalid", "reserved")) === "handle_reserved" &&
+      mapped(new HandleError("invalid")) === "handle_format" &&
+      mapped(new HandleError("unavailable")) === "handle_unavailable" &&
+      mapped(new HandleError("too_soon", null, new Date())) === "handle_too_soon" &&
+      mapped(new HandleError("status_changed")) === "conflict" &&
+      mapped(new HandleError("forbidden")) === "forbidden",
+  );
+  ok("actionFailure: every mapped code has its error.<code> text in ar / fr / en", ["status_changed", "handle_format", "handle_reserved", "handle_protected", "handle_unavailable", "handle_too_soon"].every((code) => (["en", "fr", "ar"] as const).every((l) => authT(`error.${code}`, undefined, l) !== `error.${code}` && (l === "en" || authT(`error.${code}`, undefined, l) !== authT(`error.${code}`, undefined, "en")))));
 
   /* ---------------------------------------------------------------- */
   /* view as store (§B.8, PLA Q.31)                                    */

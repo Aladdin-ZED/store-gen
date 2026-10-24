@@ -2,9 +2,12 @@
  * French catalog (docs/STORE-SAAS.md §I.5): a partial of the English one, every missing key falls back to `en`.
  * From P0, one spread per track file `./fr/<track>.ts`.
  */
+import { messages as identity } from "@/lib/auth/i18n/fr";
 import type { BaseMessages } from "./index";
 
 export const messages: Partial<BaseMessages> = {
+  // T2 identity surfaces (CCR r1.0-t2-9 item 1); the core keys below win on a clash
+  ...identity,
   "error.invalid": "Certains champs sont à corriger.",
   "error.not_found": "Cet élément n'existe pas ou n'est plus disponible.",
   "error.forbidden": "Votre rôle ne permet pas cette action.",

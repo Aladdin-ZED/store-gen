@@ -60,7 +60,8 @@ import { rateLimit } from "@/lib/security/rate-limit";
 import { getRequestIdentity, identityHeaders, type RequestIdentity } from "./context";
 import type { FeatureKey } from "./entitlement-keys";
 import { EntitlementError, QuotaError, activeKillSwitches, assertFeature } from "./entitlements";
-import { isHandle } from "./handles";
+import { HandleError, isHandle } from "./handles";
+import { LifecycleError } from "./lifecycle";
 import { whereStore } from "./sql";
 import type {
   ActionErrorCode,
@@ -160,6 +161,13 @@ export function actionFailure(err: unknown, area: string): Extract<ActionResult<
   if (err instanceof CsrfError) return { ok: false, error: "forbidden" };
   if (err instanceof EntitlementError) return { ok: false, error: "feature_off" };
   if (err instanceof QuotaError) return { ok: false, error: "quota" };
+  // T1's typed refusals (CCR r1.0-t1-2): the close / reopen sheets and the rename sheet show why
+  if (err instanceof LifecycleError) return { ok: false, error: err.code };
+  if (err instanceof HandleError) {
+    if (err.code === "invalid") return { ok: false, error: `handle_${err.problem ?? "format"}` };
+    if (err.code === "unavailable" || err.code === "too_soon") return { ok: false, error: `handle_${err.code}` };
+    return { ok: false, error: err.code === "status_changed" ? "conflict" : err.code };
+  }
   if (err instanceof ActionError || err instanceof AuthInputError) return { ok: false, error: "invalid", message: err.message };
   if (err instanceof ZodError) return { ok: false, error: "invalid", message: err.issues[0]?.message ?? "Some fields are invalid." };
   console.error(`[${area}]`, errorSummary(err));

@@ -31,7 +31,8 @@ import { mailer } from "@/lib/mail";
 import { errorSummary } from "@/lib/orders/log";
 import { notify } from "@/lib/platform/notify";
 import { appHref, platformOrigin } from "@/lib/urls";
-import { assertFeature, assertWithin } from "./entitlements";
+import { USAGE_METRICS } from "./entitlement-keys";
+import { QuotaError, assertFeature, entitlement } from "./entitlements";
 import { getStoreById, publicScope } from "./public";
 import { PLATFORM_READ_ONLY, SeamError, assertStepUp, memberWriteScope, platformReadOnly } from "./seam";
 import { byId, storeValues, whereStore } from "./sql";
@@ -121,15 +122,21 @@ function warnLimitStub(): void {
   console.warn("[team] members_max / agents_max and the invites feature are not enforced until T1's entitlements merge");
 }
 
-/** `assertWithin` for the seat gauges; a QuotaError propagates (`quota`, the limit sheet). */
-async function assertSeats(scope: StoreScope, role: StoreRole, opts: { seatHeld?: boolean } = {}): Promise<void> {
-  try {
-    if (!opts.seatHeld) await assertWithin(scope, { metric: "members", period: "total" }, 1);
-    if (role === "agent") await assertWithin(scope, { metric: "agents", period: "total" }, 1);
-  } catch (err) {
-    if (!isT1Stub(err)) throw err;
-    warnLimitStub();
-  }
+type TeamRow = { userId: string; role: StoreRole; status: "active" | "suspended" };
+
+/**
+ * The seat limits (`members_max`, `agents_max`) against the live, locked membership rows (CCR r1.0-t2-9 item 7): the
+ * `members` / `agents` gauges of `store_usage` are only recomputed nightly (usage.reconcile), so a gauge read here
+ * would never refuse. Counted like the gauges (`src/lib/db/usage.ts`): every membership, active and suspended; agents
+ * by role. A QuotaError propagates (`quota`, the limit sheet).
+ */
+async function assertSeats(scope: StoreScope, role: StoreRole, team: readonly TeamRow[], opts: { seatHeld?: boolean } = {}): Promise<void> {
+  const within = async (metric: "members" | "agents", used: number) => {
+    const limit = (await entitlement(scope, USAGE_METRICS[metric].limit)) as number | null;
+    if (limit !== null && used + 1 > limit) throw new QuotaError({ metric, period: "total" }, limit, used);
+  };
+  if (!opts.seatHeld) await within("members", team.length);
+  if (role === "agent") await within("agents", team.filter((m) => m.role === "agent").length);
 }
 
 async function assertInvitesFeature(scope: StoreScope): Promise<void> {
@@ -142,7 +149,7 @@ async function assertInvitesFeature(scope: StoreScope): Promise<void> {
 }
 
 /** The store's member rows, locked for the rest of the transaction (concurrent team writes queue here). */
-async function lockTeam(tx: Tx, scope: StoreScope): Promise<{ userId: string; role: StoreRole; status: "active" | "suspended" }[]> {
+async function lockTeam(tx: Tx, scope: StoreScope): Promise<TeamRow[]> {
   return tx
     .select({ userId: storeMembers.userId, role: storeMembers.role, status: storeMembers.status })
     .from(storeMembers)
@@ -185,13 +192,13 @@ export async function createInvite(ctx: StoreCtx, input: { email: string; role: 
   const now = new Date();
   const expiresAt = new Date(now.getTime() + INVITE_TTL_MS);
   await db.transaction(async (tx) => {
-    await lockTeam(tx, scope);
+    const team = await lockTeam(tx, scope);
     const [pending] = await tx
       .select({ n: count() })
       .from(storeInvites)
       .where(whereStore(storeInvites, scope, isNull(storeInvites.acceptedAt), isNull(storeInvites.revokedAt), gt(storeInvites.expiresAt, now)));
     if ((pending?.n ?? 0) >= PENDING_INVITES_MAX) throw new AuthRefusal("quota", "team.invite.pending_cap");
-    await assertSeats(scope, role);
+    await assertSeats(scope, role, team);
     await tx.insert(storeInvites).values(
       storeValues(scope, { id: inviteId, emailNorm: email.data, role, tokenHash: hashInviteToken(token), note, invitedBy: ctx.user.id, expiresAt, createdAt: now }),
     );
@@ -359,7 +366,7 @@ export async function acceptInvite(
     if (cas.affectedRows !== 1) throw new AuthRefusal("invalid", INVITE_INVALID);
     const existing = team.find((m) => m.userId === userId);
     if (existing) return { joined: false, role: existing.role };
-    await assertSeats(scope, invite.role);
+    await assertSeats(scope, invite.role, team);
     await tx.insert(storeMembers).values(storeValues(scope, { userId, role: invite.role, status: "active" as const, invitedBy: invite.invitedBy, joinedAt: now }));
     return { joined: true, role: invite.role };
   });
@@ -414,7 +421,7 @@ export async function changeMemberRole(ctx: WriteCtx, input: { userId: string; r
     if (target.role === role) return null;
     if (target.role === "owner" && target.status === "active" && !otherActiveOwner(team, userId)) throw new AuthRefusal("last_owner", "team.leave.last_owner");
     // the member already holds a seat: only the agents gauge can refuse a role change
-    if (role === "agent") await assertSeats(ctx.scope, "agent", { seatHeld: true });
+    if (role === "agent") await assertSeats(ctx.scope, "agent", team, { seatHeld: true });
     await tx.update(storeMembers).set({ role }).where(whereStore(storeMembers, ctx.scope, eq(storeMembers.userId, userId)));
     return target.role;
   });

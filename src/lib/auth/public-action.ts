@@ -29,12 +29,8 @@ import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE_SEC, IS_PROD } from "./config";
 import { deviceMarkerFromCookieHeader, isDeviceMarker } from "./identity";
 import { checkPlatformTurnstile, type HumanCheck } from "./turnstile";
 
-/**
- * The burst limiter's names (src/lib/security/burst-limit.ts) plus the auth forms'. The auth names have no in-memory
- * window yet (the file has no R1.0 owner, CCR r1.0-t2-4 asks for them): until they exist, those forms run on their
- * DB buckets alone and pick the window up the day it lands, with no change here.
- */
-export type BurstName = BurstScope | "signup" | "invite" | "reset" | "report" | "login";
+/** The burst limiter's names (src/lib/security/burst-limit.ts), the auth forms' included (CCR r1.0-t2-4). */
+export type BurstName = BurstScope;
 
 export interface PublicActionCtx {
   ip: string;

@@ -26,7 +26,8 @@
  *      (in one process, each run stopping at the first unit no earlier run stopped at), and once by a process that
  *      crashed between two pixel writes, resumed by the next boot.
  *  (e) the tenant tables of schema.ts equal the §D.2 / §D.3 rows of the document (ENGC-31; TABLE_LEVELS).
- *  (f) 10 parallel accepts of one invite → pending T2 (acceptInvite is T2's; reported, not counted).
+ *  (f) SEC-24 on the converted database: 10 parallel accepts of one invite → one membership, one consumed invite and 9
+ *      refusals (added at the T2 merge, CCR r1.0-t1-3 item 5).
  *  (g) first_published_at backfill is checked in (b); the publish → unpublish → republish half is pending T3.
  *  (h) the system seam over the converted database: forEachStore round robin, budget, a throwing store, states,
  *      `pending_sheets` ordering, a `where` whose table does not exist yet.
@@ -504,6 +505,32 @@ async function childMain(task: string): Promise<unknown> {
     return { tenant, console: consoleRows, usage: [before, afterReject, afterAppeal, afterApprove] };
   }
 
+  if (task === "invite-race") {
+    // (f) SEC-24 on the converted database: store #1's owner invites one agent, 10 accepts race for the one link
+    const { createInvite, acceptInvite } = await import("@/lib/tenancy/invites");
+    const { AuthRefusal } = await import("@/lib/auth/errors");
+    const { mintScope } = await import("@/lib/tenancy/seam");
+    const owner = {
+      user: { id: U_OWNER, name: "Test user 1", email: "user1@example.ma", locale: null },
+      store: { id: STORE1, name: "Nour Beauté", defaultLocale: "fr" },
+      membership: { role: "owner", status: "active", synthetic: false },
+      scope: mintScope("member", STORE1),
+      actor: { kind: "user", userId: U_OWNER, impersonatorId: null, ip: null },
+      impersonation: null,
+      stepUpUntil: null,
+      can: () => true,
+    } as unknown as Parameters<typeof createInvite>[0];
+    const invite = await createInvite(owner, { email: "race.f@example.ma", role: "agent" });
+    const token = invite.url.slice(invite.url.lastIndexOf("/") + 1);
+    const raced = await Promise.allSettled(Array.from({ length: 10 }, (_, i) => acceptInvite(token, { email: "", name: `Racer ${i}`, password: "Argan-Coop-Essaouira-2026", locale: "fr" })));
+    return {
+      inviteId: invite.inviteId,
+      won: raced.filter((r) => r.status === "fulfilled").length,
+      refused: raced.filter((r) => r.status === "rejected" && r.reason instanceof AuthRefusal && r.reason.code === "invalid").length,
+      other: raced.filter((r) => r.status === "rejected" && !(r.reason instanceof AuthRefusal)).map((r) => String((r as PromiseRejectedResult).reason)),
+    };
+  }
+
   if (task === "settings-unreadable") {
     // review fix: a stored row that does not open is never replaced by a merge into the defaults
     const { updateStoreSetting, SettingUnreadableError } = await import("@/lib/settings");
@@ -957,6 +984,18 @@ async function main(): Promise<void> {
       [["nour-beaut", STORE1, "renamed"]],
     );
 
+    console.log("(f) concurrent invite accepts");
+    {
+      const f = await child<{ inviteId: string; won: number; refused: number; other: string[] }>("invite-race", "cod_test_t1_legacy");
+      same("(f) SEC-24: 10 parallel accepts of one invite → 1 accepted, 9 refused with the one invalid answer", [f.won, f.refused, f.other], [1, 9, []]);
+      const members = await query("cod_test_t1_legacy", "SELECT m.role FROM store_members m JOIN users u ON u.id = m.user_id WHERE m.store_id = ? AND u.email = 'race.f@example.ma'", [STORE1]);
+      same("(f) SEC-24: one account, one membership with the invited role", members.map((r) => r.role), ["agent"]);
+      const inv = await query("cod_test_t1_legacy", "SELECT accepted_at IS NOT NULL AS consumed, accepted_by IS NOT NULL AS by_set FROM store_invites WHERE id = ?", [f.inviteId]);
+      same("(f) SEC-24: the invite consumed once", inv.map((r) => [Number(r.consumed), Number(r.by_set)]), [[1, 1]]);
+      const accepted = await query("cod_test_t1_legacy", "SELECT COUNT(*) AS n FROM audit_log WHERE store_id = ? AND action = 'store.member.accepted' AND target = ?", [STORE1, f.inviteId]);
+      same("(f) SEC-24: one store.member.accepted audit row", Number(accepted[0]?.n), 1);
+    }
+
     console.log("(h) system seam");
     {
       const conn = await connect("cod_test_t1_legacy");
@@ -1088,7 +1127,6 @@ async function main(): Promise<void> {
       same("(c) setup: the second boot writes no audit row", s2.audit.length, s1.audit.length);
     }
 
-    pending.push("(f) 10 parallel accepts of one invite → one membership: acceptInvite is T2's (a stub until T2 merges)");
     pending.push("(g) publish → unpublish → republish keeps first_published_at: publishPage(scope, …) is T3's (a stub until T3 merges)");
   } finally {
     rmSync(folder, { recursive: true, force: true });

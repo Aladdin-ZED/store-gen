@@ -4,7 +4,11 @@
  * spread per track file `./en/<track>.ts` (each track owns the keys under its own prefix). Values: ICU-lite `{var}`
  * placeholders and `{n, plural, one {…} other {…}}`; no em-dash and no "Step n" label (§I.8 rule 8).
  */
+import { messages as identity } from "@/lib/auth/i18n/en";
+
 export const messages = {
+  // T2 identity surfaces (CCR r1.0-t2-9 item 1, supersedes the tables of r1.0-t2-5); the core keys below win on a clash
+  ...identity,
   "error.invalid": "Some fields need a fix.",
   "error.not_found": "This item doesn't exist or is no longer available.",
   "error.forbidden": "Your role doesn't allow this action.",

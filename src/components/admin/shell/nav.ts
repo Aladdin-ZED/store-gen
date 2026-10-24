@@ -26,7 +26,7 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", href: "/admin", icon: LayoutGridIcon, permission: "pages.read", keywords: ["home", "overview", "kpi"] },
+  { id: "dashboard", label: "Dashboard", href: "/admin/dashboard", icon: LayoutGridIcon, permission: "pages.read", keywords: ["home", "overview", "kpi"] },
   { id: "pages", label: "Pages", href: "/admin/pages", icon: PanelsTopLeftIcon, permission: "pages.read", keywords: ["landing", "site"] },
   { id: "generate", label: "Generate", href: "/admin/generate", icon: SparklesIcon, permission: "pages.write", keywords: ["new", "create", "ai"] },
   { id: "orders", label: "Orders", href: "/admin/orders", icon: ReceiptTextIcon, permission: "orders.read", keywords: ["commandes", "leads", "blocklist"] },

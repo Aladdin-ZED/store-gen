@@ -3219,6 +3219,7 @@ tasks during the deploy that renames it).
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | optional | defaults of `platform_turnstile` |
 | `ANTHROPIC_API_KEY` | optional | the **fallback** when the console secret `platform_ai_secret.apiKey` is empty (AI R6); unset and no console key = cloud AI off (D40); the monthly cap lives in `platform_ai` |
 | `NEXT_PUBLIC_OFFERS_FEATURES` | optional | build-time (inlined into client bundles by Next, `src/lib/page/features.ts:36`): a change needs a **rebuild**, the one env key that does (rev 5, CRIT2-8); entitlements layer on top |
+| `SMTP_URL`, `MAIL_FROM` | optional | the R1 mail transport (§B.10, `src/lib/mail/index.ts`; CCR r1.0-t2-4): `smtps://<user>:<password>@smtp.hostinger.com:465` (or `smtp://…:587` with STARTTLS) and `"Store Gen <no-reply@your-domain>"`; both unset = mail off (`mailer().enabled === false`, links shown to copy); a pair that does not parse is logged once, never its values, and mail stays off |
 | `SG_TEST_CONTEXT` | tests only | never set in production (§E.4) |
 
 Hostinger's `hosting_nodejs_replace-environment-variables` is a **full replace**: the R1.0 deploy sends the 14 current

@@ -2,9 +2,12 @@
  * Arabic catalog (docs/STORE-SAAS.md §I.5; `dir="rtl"`): a partial of the English one, every missing key falls back
  * to `en`. From P0, one spread per track file `./ar/<track>.ts`.
  */
+import { messages as identity } from "@/lib/auth/i18n/ar";
 import type { BaseMessages } from "./index";
 
 export const messages: Partial<BaseMessages> = {
+  // T2 identity surfaces (CCR r1.0-t2-9 item 1); the core keys below win on a clash
+  ...identity,
   "error.invalid": "بعض الحقول تحتاج إلى تصحيح.",
   "error.not_found": "هذا العنصر غير موجود أو لم يعد متاحًا.",
   "error.forbidden": "دورك لا يسمح بهذا الإجراء.",

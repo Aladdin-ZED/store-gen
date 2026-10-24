@@ -296,12 +296,15 @@ async function cases(c: mysql.Connection): Promise<void> {
   ok("login: the account-wide bucket never refuses (no lock-out across networks)", afterMany.ok, afterMany);
   env.TURNSTILE_SITE_KEY = "1x00000000000000000000AA";
   env.TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA";
+  // T1's platform settings cache 30 s: the env defaults of platform_turnstile are read again after a change
+  (await import("@/lib/settings")).invalidatePlatformSettings("platform_turnstile");
   for (let i = 0; i < 3; i++) await loginAccount({ email: "login.test@example.ma", password: "wrong-password-123" }, { ip: "192.0.2.30", ua: UA });
   const challenged = await loginAccount({ email: "login.test@example.ma", password: PASSWORD }, { ip: "192.0.2.30", ua: UA });
   ok("login: past 3 failures with a widget → challenge", !challenged.ok && challenged.error === "challenge", challenged);
   ok("login: the challenge consumed no account budget", (await peekBucket(buckets.loginAcctNet("login.test@example.ma", "192.0.2.30"))) === 3);
   delete env.TURNSTILE_SITE_KEY;
   delete env.TURNSTILE_SECRET_KEY;
+  (await import("@/lib/settings")).invalidatePlatformSettings("platform_turnstile");
   for (let i = 0; i < 11; i++) await loginAccount({ email: `ip${i}@example.ma`, password: PASSWORD }, { ip: "192.0.2.40", ua: UA });
   const ipBlocked = await loginAccount({ email: "login.test@example.ma", password: PASSWORD }, { ip: "192.0.2.40", ua: UA });
   ok("login: past 10 per IP → rate_limited", !ipBlocked.ok && ipBlocked.error === "rate_limited");
@@ -350,7 +353,9 @@ async function cases(c: mysql.Connection): Promise<void> {
   ok("signup: the rollback kept the code and refunded the slot", (await one<{ uses: number }>("SELECT uses FROM platform_invites WHERE id = ?", [five.id]))?.uses === 0 && slots === 1, slots);
   ok("signup: the rollback left no store", !(await one("SELECT id FROM stores WHERE handle = 'atlas-ac'")));
   const dupHandle = await caught(signupAccount(form("ad", { handle: "atlas-aa", inviteCode: five.code }), pub(5), inviteEnv));
-  ok("signup: a taken handle → the same sentence, slot refunded", dupHandle === `invalid:${users.ACCOUNT_REFUSED}` && slots === 1, { dupHandle, slots });
+  // with T1 merged, checkHandleAvailable answers before the transaction ("Not available", never why: §C.7); a handle
+  // taken between that check and the insert still gets the one sentence through the unique index
+  ok("signup: a taken handle → handle not available before any charge", dupHandle === "fields:handle" && slots === 1, { dupHandle, slots });
   ok("signup: the rollback left no user", !(await userRow("salma.ad@gmail.com")));
 
   const single = await createPlatformInvite(adminCtx, { label: "Race", usesMax: 1 });
