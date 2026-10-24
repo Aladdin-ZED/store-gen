@@ -19,6 +19,23 @@ running, and how to restart it. Newest state at the top of "Running now".
 | 5 | Adversarial verification incl. cross-tenant attack tests, fix loop | tests + fixes | todo |
 | 6 | Deploy to the Store Gen site (archive method, HANDOFF §4) + live smoke | live | todo |
 
+## Progress toward "everything live" (owner asked 2026-10-24; report this % in every update)
+
+Weights = share of total work. Update the "done" column when a stage moves.
+
+| Stage | Weight | Done in stage | Contributes |
+|---|---|---|---|
+| Research + full spec | 12% | 100% | 12.0% |
+| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | 10% (C0a 3/4 sub-steps) | 1.8% |
+| R1 product (platform console + approvals + store profiles, landing+, call center, AI Director, design genome, onboarding wow) | 35% | 0% | 0% |
+| R2 full stores + accounting + logo designer | 22% | 0% | 0% |
+| R3 growth, custom domains, carrier APIs, learning AI | 13% | 0% | 0% |
+| **Total** | 100% | | **≈ 14%** |
+
+Milestones: R1.0 live ≈ 30% · R1 live ≈ 65% · R2 live ≈ 87% · R3 live = 100%. Owner inputs needed later: real domain +
+Cloudflare (subdomains, before public sign-ups), optional Claude API key + monthly cap, a carrier statement sample (R2), legal
+review of terms/privacy (before public launch).
+
 ## Running now
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
