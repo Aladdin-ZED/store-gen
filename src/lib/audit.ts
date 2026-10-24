@@ -268,21 +268,42 @@ async function selectEntries(where: SQL | undefined, limit: number, tenantView: 
     .where(where)
     .orderBy(desc(auditLog.id))
     .limit(limit);
-  return rows.map(({ row: r, actorName, impersonatorName }) => ({
-    id: r.id,
-    userId: r.userId,
-    action: r.action,
-    target: r.target,
-    meta: r.meta ?? null,
-    // a tenant never sees the network hash of the staff behind a platform or impersonation row (§F.5)
-    ipHash: tenantView && (r.actorKind === "platform" || r.actorKind === "impersonation") ? null : r.ip,
-    createdAt: r.createdAt,
-    storeId: r.storeId,
-    actorKind: r.actorKind,
-    impersonatorId: r.impersonatorId,
-    actorName: actorName ?? null,
-    impersonatorName: impersonatorName ?? null,
-  }));
+  return rows.map(({ row: r, actorName, impersonatorName }) => {
+    const entry: AuditEntry = {
+      id: r.id,
+      userId: r.userId,
+      action: r.action,
+      target: r.target,
+      meta: r.meta ?? null,
+      ipHash: r.ip,
+      createdAt: r.createdAt,
+      storeId: r.storeId,
+      actorKind: r.actorKind,
+      impersonatorId: r.impersonatorId,
+      actorName: actorName ?? null,
+      impersonatorName: impersonatorName ?? null,
+    };
+    return tenantView ? tenantAuditEntry(entry) : entry;
+  });
+}
+
+/**
+ * What a store's own listing may show of one row (pure; §F.5, PLA-§8.1). On a platform or impersonation row the
+ * staff member is a display name only: no IP hash, no user id, no impersonator id. A staff or job note (`meta.note`
+ * of a platform, impersonation or system row) reaches the store only when it was shown to the store
+ * (`meta.noteShown: true`, the lifecycle's "show this note to the store" toggle, default off); the store's own rows
+ * are left alone.
+ */
+export function tenantAuditEntry(entry: AuditEntry): AuditEntry {
+  const staff = entry.actorKind === "platform" || entry.actorKind === "impersonation";
+  let meta = entry.meta;
+  if ((staff || entry.actorKind === "system") && meta && "note" in meta && meta.noteShown !== true) {
+    const { note: _hidden, ...rest } = meta;
+    void _hidden;
+    meta = rest;
+  }
+  if (!staff) return meta === entry.meta ? entry : { ...entry, meta };
+  return { ...entry, meta, ipHash: null, userId: null, impersonatorId: null };
 }
 
 /**
@@ -300,7 +321,8 @@ export async function listAuditEntries(opts: { limit?: number; beforeId?: number
 /**
  * A store's own rows (store_id = the ctx's store), newest first, keyset by `beforeId`; `area` = an action prefix
  * ("orders", "store.member"). Platform and impersonation rows on the store are included, with the staff member's
- * name and without the IP hash. Needs `audit.read`.
+ * name only (no IP hash, user id or impersonator id) and without a staff note the store was not shown
+ * (tenantAuditEntry). Needs `audit.read`.
  */
 export async function listStoreAudit(ctx: StoreCtx, opts: { beforeId?: number; limit?: number; area?: string } = {}): Promise<AuditEntry[]> {
   if (!ctx.can("audit.read")) throw new Error("forbidden: audit.read");

@@ -31,7 +31,7 @@ import "server-only";
  * each unit of work through `opts.checkpoint`). Until step 2 has run, getStoreSetting reads `purpose_v = 0` rows with
  * openLegacy, so store #1's Turnstile and CAPI secrets work from the first request (ENGC-19).
  */
-import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { collectAssetIds } from "@/landing/context";
 import { audit } from "@/lib/audit";
 import { pool } from "@/lib/db/client";
@@ -45,7 +45,7 @@ import { SERVER_PLATFORMS, type PixelPlatform } from "@/lib/pixels/ids";
 import { pixelKey } from "@/lib/pixels/library";
 import { collectPixels, migrationLabel } from "@/lib/pixels/migrate";
 import { openLegacy, seal } from "@/lib/security/crypto";
-import { getPlatformSetting, getStoreSetting, invalidateSettings, setPlatformSetting, setStoreSetting, type PlatformActor, type SettingsActor } from "@/lib/settings";
+import { getPlatformSetting, getStoreSetting, invalidateSettings, setPlatformSetting, updateStoreSetting, type PlatformActor, type SettingsActor } from "@/lib/settings";
 import { BrandSetting } from "@/lib/settings/keys/brand";
 import type { PixelHealthEntry } from "@/lib/settings/keys/pixel_health";
 import type { PixelLibraryEntry } from "@/lib/settings/keys/pixel_library";
@@ -299,6 +299,45 @@ const CODE_KEY = { meta: "metaTestCodes", tiktok: "tiktokTestCodes" } as const;
 const LEGACY_TOKEN = { meta: "metaCapiToken", tiktok: "tiktokToken" } as const;
 const LEGACY_CODE = { meta: "metaTestEventCode", tiktok: "tiktokTestEventCode" } as const;
 
+type TrackingSecrets = Awaited<ReturnType<typeof getStoreSetting<"tracking_secrets">>>;
+type SecretMapKey = (typeof TOKEN_KEY)[PixelPlatformServer] | (typeof CODE_KEY)[PixelPlatformServer];
+type PixelPlatformServer = keyof typeof TOKEN_KEY;
+
+/**
+ * The legacy token and test code copied to every library id of their platform without its own (pure): the patch of
+ * the per-id maps, the counts, and the ids that received a token (their pixel health starts unverified).
+ */
+function copyLegacySecrets(
+  secrets: TrackingSecrets,
+  entries: readonly PixelLibraryEntry[],
+): { patch: Partial<Record<SecretMapKey, Record<string, string>>>; tokensCopied: number; testCodesDeactivated: number; copied: { platform: PixelPlatform; id: string }[] } {
+  const patch: Partial<Record<SecretMapKey, Record<string, string>>> = {};
+  let tokensCopied = 0;
+  let testCodesDeactivated = 0;
+  const copied: { platform: PixelPlatform; id: string }[] = [];
+  for (const platform of SERVER_PLATFORMS) {
+    const tokens = { ...(secrets[TOKEN_KEY[platform]] ?? {}) } as Record<string, string>;
+    const codes = { ...(secrets[CODE_KEY[platform]] ?? {}) } as Record<string, string>;
+    const legacyToken = secrets[LEGACY_TOKEN[platform]];
+    const legacyCode = secrets[LEGACY_CODE[platform]];
+    for (const e of entries) {
+      if (e.platform !== platform) continue;
+      if (!tokens[e.id] && legacyToken) {
+        tokens[e.id] = legacyToken;
+        tokensCopied++;
+        copied.push({ platform, id: e.id });
+      }
+      if (!codes[e.id] && legacyCode) {
+        codes[e.id] = legacyCode;
+        testCodesDeactivated++;
+      } else if (codes[e.id]) testCodesDeactivated++;
+    }
+    patch[TOKEN_KEY[platform]] = tokens;
+    patch[CODE_KEY[platform]] = codes;
+  }
+  return { patch, tokensCopied, testCodesDeactivated, copied };
+}
+
 /**
  * Step 3d: the pixel library migration (docs/OFFERS.md §A.6) for store #1 only, the same rules as
  * src/lib/pixels/migrate.server.ts over this store's rows: ids from the legacy `pixels` key first, then every draft,
@@ -343,44 +382,42 @@ async function migratePixels(scope: WriteScope, r: ConvertResult, checkpoint: (u
     tests: [],
   }));
 
-  const next = { ...secrets };
-  let tokensCopied = 0;
-  let testCodesDeactivated = 0;
-  const copied: { platform: PixelPlatform; id: string }[] = [];
-  for (const platform of SERVER_PLATFORMS) {
-    const tokens = { ...(secrets[TOKEN_KEY[platform]] ?? {}) } as Record<string, string>;
-    const codes = { ...(secrets[CODE_KEY[platform]] ?? {}) } as Record<string, string>;
-    const legacyToken = secrets[LEGACY_TOKEN[platform]];
-    const legacyCode = secrets[LEGACY_CODE[platform]];
-    for (const e of entries) {
-      if (e.platform !== platform) continue;
-      if (!tokens[e.id] && legacyToken) {
-        tokens[e.id] = legacyToken;
-        tokensCopied++;
-        copied.push({ platform, id: e.id });
-      }
-      if (!codes[e.id] && legacyCode) {
-        codes[e.id] = legacyCode;
-        testCodesDeactivated++;
-      } else if (codes[e.id]) testCodesDeactivated++;
-    }
-    next[TOKEN_KEY[platform]] = tokens;
-    next[CODE_KEY[platform]] = codes;
-  }
+  const planned = copyLegacySecrets(secrets, entries);
 
   // health before the secrets: a rerun after the secrets were written finds no token left to copy, so it would
-  // never write the health of the ids an interrupted run copied tokens to
-  if (copied.length) {
-    const health: Record<string, PixelHealthEntry> = { ...(await getStoreSetting(scope, "pixel_health", { fresh: true })) };
-    for (const c of copied) health[pixelKey(c.platform, c.id)] = { at, state: "unverified", testMode: false };
-    await setStoreSetting(scope, "pixel_health", health, SYSTEM);
+  // never write the health of the ids an interrupted run copied tokens to. Both writes merge under the row lock
+  // (updateStoreSetting): the process serves requests meanwhile, and an order's pixel health or an owner's CAPI token
+  // written since the read above must survive
+  if (planned.copied.length) {
+    const added: Record<string, PixelHealthEntry> = {};
+    for (const c of planned.copied) added[pixelKey(c.platform, c.id)] = { at, state: "unverified", testMode: false };
+    await updateStoreSetting(scope, "pixel_health", added, SYSTEM);
     await checkpoint("pixels:health");
   }
+  let tokensCopied = planned.tokensCopied;
+  let testCodesDeactivated = planned.testCodesDeactivated;
   if (tokensCopied || testCodesDeactivated) {
-    await setStoreSetting(scope, "tracking_secrets", next, SYSTEM);
+    await updateStoreSetting(
+      scope,
+      "tracking_secrets",
+      (current) => {
+        // the same copy on the value under the lock: only the maps' missing ids are filled, every other field and id kept
+        const locked = copyLegacySecrets(current, entries);
+        tokensCopied = locked.tokensCopied;
+        testCodesDeactivated = locked.testCodesDeactivated;
+        return locked.patch;
+      },
+      SYSTEM,
+    );
     await checkpoint("pixels:secrets");
   }
-  await setStoreSetting(scope, "pixel_library", { v: 1, pixels: entries }, SYSTEM);
+  // the marker of this step; a pixel the owner added since the check above is kept after the migrated ones
+  await updateStoreSetting(
+    scope,
+    "pixel_library",
+    (current) => ({ v: 1 as const, pixels: [...entries, ...current.pixels.filter((p) => !entries.some((e) => e.platform === p.platform && e.id === p.id))] }),
+    SYSTEM,
+  );
   await audit("pixels.library_migrated", { meta: { entries: entries.length, tokensCopied, testCodesDeactivated }, scope: { storeId: STORE1, actorKind: "system" } });
   r.pixels = { ran: true, entries: entries.length, tokensCopied, testCodesDeactivated };
 }
@@ -391,11 +428,16 @@ function docAssetIds(raw: unknown, owned: ReadonlySet<string>): string[] {
   return doc ? collectAssetIds(doc).filter((id) => owned.has(id)) : [];
 }
 
-/** One owner's `asset_refs` rows replaced in one transaction (§G.5's statement pair). */
-async function replaceRefs(ownerKind: "page" | "page_version" | "brand", ownerId: string, ids: readonly string[], live: boolean): Promise<number> {
+/**
+ * One owner's `asset_refs` rows replaced in one transaction (§G.5's statement pair). `idsOf` reads the owner's
+ * document on the transaction's connection (a page draft or the brand row with FOR UPDATE), so an editor save that
+ * lands while the conversion runs is either seen or waits: the refs never go back to an older draft.
+ */
+async function replaceRefs(ownerKind: "page" | "page_version" | "brand", ownerId: string, idsOf: (conn: PoolConnection) => Promise<readonly string[]>, live: boolean): Promise<number> {
   const conn = await pool().getConnection();
   try {
     await conn.beginTransaction();
+    const ids = await idsOf(conn);
     await conn.query("DELETE FROM asset_refs WHERE store_id = ? AND owner_kind = ? AND owner_id = ?", [STORE1, ownerKind, ownerId]);
     if (ids.length) {
       await conn.query("INSERT IGNORE INTO asset_refs (store_id, asset_id, owner_kind, owner_id, live, updated_at) VALUES ?", [
@@ -416,18 +458,36 @@ async function replaceRefs(ownerKind: "page" | "page_version" | "brand", ownerId
 async function refsAndGauges(scope: WriteScope, r: ConvertResult, checkpoint: (unit: string) => Promise<void>): Promise<void> {
   const [assetRows] = await pool().query<RowDataPacket[]>("SELECT id FROM assets WHERE store_id = ?", [STORE1]);
   const owned = new Set(assetRows.map((a) => String(a.id)));
-  const [pageRows] = await pool().query<RowDataPacket[]>("SELECT id, draft, published_version_id FROM pages WHERE store_id = ? ORDER BY id", [STORE1]);
+  const [pageRows] = await pool().query<RowDataPacket[]>("SELECT id FROM pages WHERE store_id = ? ORDER BY id", [STORE1]);
   for (const page of pageRows) {
-    r.assetRefs += await replaceRefs("page", String(page.id), docAssetIds(page.draft, owned), false);
-    if (page.published_version_id) {
-      const [[version]] = await pool().query<RowDataPacket[]>("SELECT id, doc FROM page_versions WHERE store_id = ? AND id = ?", [STORE1, page.published_version_id]);
-      if (version) r.assetRefs += await replaceRefs("page_version", String(version.id), docAssetIds(version.doc, owned), true);
+    const pageId = String(page.id);
+    const live: { versionId: string | null } = { versionId: null };
+    r.assetRefs += await replaceRefs(
+      "page",
+      pageId,
+      async (conn) => {
+        const [[row]] = await conn.query<RowDataPacket[]>("SELECT draft, published_version_id FROM pages WHERE store_id = ? AND id = ? FOR UPDATE", [STORE1, pageId]);
+        live.versionId = row?.published_version_id ? String(row.published_version_id) : null;
+        return row ? docAssetIds(row.draft, owned) : [];
+      },
+      false,
+    );
+    if (live.versionId) {
+      // a publish version never changes: a plain read
+      const [[version]] = await pool().query<RowDataPacket[]>("SELECT id, doc FROM page_versions WHERE store_id = ? AND id = ?", [STORE1, live.versionId]);
+      if (version) r.assetRefs += await replaceRefs("page_version", String(version.id), async () => docAssetIds(version.doc, owned), true);
     }
-    await checkpoint(`refs:${String(page.id)}`);
+    await checkpoint(`refs:${pageId}`);
   }
+  const brandLogo = async (conn: PoolConnection): Promise<string[]> => {
+    const [[row]] = await conn.query<RowDataPacket[]>("SELECT value, encrypted FROM store_settings WHERE store_id = ? AND `key` = 'brand' FOR UPDATE", [STORE1]);
+    const value = row && !row.encrypted ? parseJson(row.value) : null;
+    const logo = isObj(value) && isObj(value.logo) && typeof value.logo.primary === "string" ? value.logo.primary : null;
+    return logo && owned.has(logo) ? [logo] : [];
+  };
   const brand = await storeRow("brand");
   const logo = isObj(brand?.value.logo) && typeof brand.value.logo.primary === "string" ? brand.value.logo.primary : null;
-  if (logo && owned.has(logo)) r.assetRefs += await replaceRefs("brand", "brand", [logo], true);
+  if (logo && owned.has(logo)) r.assetRefs += await replaceRefs("brand", "brand", brandLogo, true);
 
   const gauges = await recomputeStoreGauges(scope);
   for (const [k, v] of Object.entries(gauges)) r.gauges[k] = v.after;

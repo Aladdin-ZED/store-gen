@@ -4,9 +4,14 @@ import "server-only";
  * (§A.5.1, ALLOWED_TRANSITIONS) and who may take it, writes the row with a compare-and-set on the old status, then
  * (after the commit) audits, sends exactly one notification of the edge's kind to the store's owners and admins
  * (§I.4, PLA Q.27; callers never send a second one), calls `invalidateStore(storeId)` and `markHealthDirty(storeId)`,
- * and refunds the shared `pending_media_bytes` on any transition out of `pending` (D69).
+ * refunds the store's media bytes from the shared `pending_media_bytes` on any transition out of `pending` and charges
+ * them again on any transition into it (rejected → pending on appeal, a staff reopen to pending; D69).
  *
  *   await transitionStore(ctx, storeId, "restricted", { reason: "fake_orders", note, notify: { showNote: false } });
+ *
+ * The audit row carries `{ from, to, reason, note?, noteShown?, stepUp? }`; a staff note the store was not shown never
+ * reaches the store's Activity listing (`tenantAuditEntry`, src/lib/audit.ts). An owner's close needs a fresh tenant
+ * step-up (`StoreCtx.stepUpUntil` later than now, §B.7 rev 3, SEC-17) and its `store.closed` row names the method.
  *
  * Refusals throw `LifecycleError` with an action error code (`not_found`, `forbidden`, `step_up`, `invalid`, and the
  * console's `status_changed` when someone else changed the store meanwhile, PLA-§8.0). The R1 product hooks of the
@@ -26,8 +31,13 @@ import { notify } from "@/lib/platform/notify";
 import { errorSummary } from "@/lib/orders/log";
 import { appHref } from "@/lib/urls";
 import { invalidateStore } from "./cache";
-import { refundPlatformUsage } from "./usage";
+import { chargePlatformUsage, refundPlatformUsage } from "./usage";
 import type { PlatformCtx, StoreCtx, StoreStatus, SystemCtx } from "./types";
+
+export type StepUpMethod = "totp" | "password";
+
+/** §B.7: a tenant or staff step-up is fresh for 5 minutes. */
+const STEP_UP_TTL_MS = 5 * 60_000;
 
 export interface TransitionOpts {
   /** a status_reason code (≤ 40 chars) */
@@ -35,6 +45,11 @@ export interface TransitionOpts {
   /** staff note (≤ 500 chars); shown to the store only with notify.showNote */
   note?: string;
   notify?: { showNote: boolean };
+  /**
+   * The owner's close: the method of the fresh step-up (§F.5 rev 4 `meta.stepUp`). When omitted, the method of the
+   * user's last `auth.step_up` row inside the step-up window is used (none found: the row has no stepUp).
+   */
+  stepUp?: StepUpMethod;
   /**
    * closed → scheduled_deletion by a job only: when the purge may run (default now + 24 h). The executed purge request
    * passes now (PLA-§8.1: "execution moves the store to scheduled_deletion with purge_after = now").
@@ -141,8 +156,8 @@ export interface TransitionFacts {
 }
 
 /**
- * Who may take `facts.from → facts.to` and when (pure). Throws LifecycleError. Owners: close (store.close) and
- * reopen within 30 days when the store was closed from active or restricted. Staff: the permission of the edge
+ * Who may take `facts.from → facts.to` and when (pure). Throws LifecycleError. Owners: close (store.close, with a
+ * fresh step-up) and reopen within 30 days when the store was closed from active or restricted. Staff: the permission of the edge
  * (step-up where ↑). Jobs: the scheduled deletion once `purge_after` has passed (or with `purgeAt`), the purge 24 h
  * later, the rejected purge after 30 days.
  */
@@ -153,6 +168,8 @@ export function checkTransition(ctx: Ctx, storeId: string, facts: TransitionFact
   if (kind === "owner") {
     const store = ctx as StoreCtx;
     if (!edge.owner || store.store.id !== storeId || !store.can("store.close")) throw new LifecycleError("forbidden", `the owner cannot take ${facts.from} → ${facts.to}`);
+    // §B.7 (rev 3, SEC-17): closing the store is a sensitive action, a stolen session alone must not do it
+    if (edge.to === "closed" && !(store.stepUpUntil && store.stepUpUntil.getTime() > facts.now.getTime())) throw new LifecycleError("step_up", "closing the store needs a fresh step-up");
   } else if (kind === "staff") {
     const staff = ctx as PlatformCtx;
     if (!edge.staff || !staff.can(edge.staff.permission)) throw new LifecycleError("forbidden", `staff need ${edge.staff?.permission ?? "a job"} for ${facts.from} → ${facts.to}`);
@@ -216,6 +233,30 @@ async function closedFrom(storeId: string): Promise<StoreStatus | null> {
 }
 
 const userIdOf = (ctx: Ctx): string | null => ("job" in ctx ? null : ctx.user.id);
+
+/**
+ * The audit meta of one transition (pure). `noteShown` records the "show this note to the store" toggle next to any
+ * note, so a store's listing can drop a staff note it was never shown (tenantAuditEntry, PLA-§8.1).
+ */
+export function lifecycleAuditMeta(from: StoreStatus, to: StoreStatus, opts: Pick<TransitionOpts, "reason" | "notify">, note: string | null, stepUp: StepUpMethod | null = null): Record<string, unknown> {
+  return { from, to, reason: opts.reason, ...(note ? { note, noteShown: opts.notify?.showNote === true } : {}), ...(stepUp ? { stepUp } : {}) };
+}
+
+/** The method of the user's last step-up inside the window ending at `until` (the `auth.step_up` row, §F.5). */
+async function stepUpMethodOf(userId: string, until: Date | null): Promise<StepUpMethod | null> {
+  if (!until) return null;
+  const [rows] = await pool().query<RowDataPacket[]>(
+    "SELECT meta FROM audit_log WHERE user_id = ? AND action = 'auth.step_up' AND created_at >= ? ORDER BY id DESC LIMIT 1",
+    [userId, new Date(until.getTime() - STEP_UP_TTL_MS - 1000)],
+  );
+  const raw = rows[0]?.meta;
+  try {
+    const meta = (typeof raw === "string" ? JSON.parse(raw) : raw) as { method?: unknown } | null;
+    return meta?.method === "totp" || meta?.method === "password" ? meta.method : null;
+  } catch {
+    return null;
+  }
+}
 
 /** The column changes of `from → to` beyond status, reason, note and who/when. Pure. */
 export function transitionColumns(from: StoreStatus, to: StoreStatus, now: Date, opts: { purgeAt?: Date; userId: string | null }): Record<string, Date | string | null> {
@@ -306,7 +347,16 @@ async function afterCommit(ctx: Ctx, storeId: string, store: StoreFacts, to: Sto
   const action = edge.audit[kind];
   // drop every cached view first (store row, entitlements, settings, render; §E.6) so the next request sees `to`
   await step("invalidateStore", () => invalidateStore(storeId));
-  if (action) await step("audit", () => auditFrom(ctx, action, { storeId, target: storeId, meta: { from, to, reason: opts.reason, ...(note ? { note } : {}) } }));
+  if (action) {
+    await step("audit", async () => {
+      let stepUp: StepUpMethod | null = null;
+      if (kind === "owner" && to === "closed") {
+        const owner = ctx as StoreCtx;
+        stepUp = opts.stepUp ?? (await stepUpMethodOf(owner.user.id, owner.stepUpUntil).catch(() => null));
+      }
+      await auditFrom(ctx, action, { storeId, target: storeId, meta: lifecycleAuditMeta(from, to, opts, note, stepUp) });
+    });
+  }
   if (edge.notify) {
     const kindOf = edge.notify;
     await step("notify", () =>
@@ -317,12 +367,16 @@ async function afterCommit(ctx: Ctx, storeId: string, store: StoreFacts, to: Sto
     );
   }
   await step("markHealthDirty", () => markHealthDirty(storeId));
-  if (from === "pending") {
-    // D69: the store's bytes leave the shared sandbox budget (usage.reconcile recomputes it nightly anyway)
-    await step("refund pending_media_bytes", async () => {
+  if (from === "pending" || to === "pending") {
+    // D69: the store's bytes leave the shared sandbox budget when it leaves pending, and join it again when it
+    // re-enters pending (an appeal, a staff reopen), so the next exit never refunds bytes it no longer holds there
+    // (R1.0 has no usage.reconcile job to repair a drift)
+    await step(from === "pending" ? "refund pending_media_bytes" : "charge pending_media_bytes", async () => {
       const [rows] = await pool().query<RowDataPacket[]>("SELECT value FROM store_usage WHERE store_id = ? AND metric = 'media_bytes' AND period = 'total'", [storeId]);
       const bytes = Number(rows[0]?.value ?? 0);
-      if (bytes > 0) await refundPlatformUsage("pending_media_bytes", "total", bytes);
+      if (bytes <= 0) return;
+      if (from === "pending") await refundPlatformUsage("pending_media_bytes", "total", bytes);
+      else await chargePlatformUsage("pending_media_bytes", "total", bytes, { allowOver: true });
     });
   }
 }

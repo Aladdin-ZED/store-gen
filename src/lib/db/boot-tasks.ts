@@ -27,7 +27,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, isNotNull, ne, notInArray } from "drizzle-orm";
 import mysql from "mysql2/promise";
-import { db } from "@/lib/db/client";
+import type { RowDataPacket } from "mysql2/promise";
+import { db, pool } from "@/lib/db/client";
 import { flags, legalDocuments, pages, pageVersions, protectedBrands, stores } from "@/lib/db/schema";
 import { FLAG_DEFS } from "@/lib/flags/registry";
 import { systemCtx, systemScope } from "@/lib/jobs/scope";
@@ -39,6 +40,7 @@ import { getPlatformSetting, setPlatformSetting, type PlatformActor } from "@/li
 import { byId, whereStore } from "@/lib/tenancy/sql";
 import { withBootLock } from "./boot-lock";
 import { newId } from "./ids";
+import { pendingMigrationCount } from "./migrate";
 import { runTenancyCheck, runUpgradeCheck, tenancyCheckOk, tenancyCheckSummary, upgradeCheckOk, upgradeCheckSummary } from "./upgrade-check";
 import { databaseUrl as normalizeDatabaseUrl } from "./url";
 
@@ -153,11 +155,18 @@ export interface BootStep {
 
 /**
  * Step 5 of §H.4 in the process that gets the boot lock (`{ ran: false }` in the others, which skip it). Each task
- * is isolated and logged; never throws.
+ * is isolated and logged; never throws. Under the lock it first confirms that every migration on disk is applied: a
+ * process that gave up on the migration lock while another one is still inside 0004 must not convert a half-migrated
+ * schema (and write the marker), so it answers `{ ran: false }` and leaves the tasks to the process that migrates.
  */
-export async function runBootTasks(opts: { lockTimeoutSec?: number } = {}): Promise<{ ran: boolean; steps: BootStep[] }> {
+export async function runBootTasks(opts: { lockTimeoutSec?: number; migrationsFolder?: string } = {}): Promise<{ ran: boolean; steps: BootStep[] }> {
   try {
     const res = await withBootLock(async () => {
+      const pendingMigrations = await pendingMigrationCount(async (q, params) => (await pool().query<RowDataPacket[]>(q, params))[0], { migrationsFolder: opts.migrationsFolder });
+      if (pendingMigrations > 0) {
+        console.warn(`[boot] ${pendingMigrations} migration(s) not applied yet; the one-time tasks are left to the process that migrates.`);
+        return null;
+      }
       const steps: BootStep[] = [];
       const step = async (name: string, fn: () => Promise<string | null>) => {
         const started = Date.now();
@@ -199,7 +208,7 @@ export async function runBootTasks(opts: { lockTimeoutSec?: number } = {}): Prom
       });
       return steps;
     }, { timeoutSec: opts.lockTimeoutSec });
-    return res.ran ? { ran: true, steps: res.value } : { ran: false, steps: [] };
+    return res.ran && res.value ? { ran: true, steps: res.value } : { ran: false, steps: [] };
   } catch (err) {
     console.error("[boot] one-time tasks failed:", errorSummary(err));
     return { ran: false, steps: [] };

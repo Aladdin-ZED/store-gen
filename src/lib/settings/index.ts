@@ -247,16 +247,33 @@ function readRow(label: string, row: StoredRow, unseal: (envelope: string) => st
   }
 }
 
-function decodeStore<K extends StoreSettingKey>(storeId: string, key: K, row: StoredRow | undefined): StoreSettingValue<K> {
-  if (!row) return storeDefaults(key);
+/**
+ * A stored row that exists but does not open (a wrong APP_SECRET, a damaged envelope): updateStoreSetting refuses to
+ * merge into the defaults and overwrite it, since the row may still be recoverable (the conversion keeps a v1 row that
+ * does not open for the same reason). Answered as `server` by actionFailure; the message never holds the value.
+ */
+export class SettingUnreadableError extends Error {
+  constructor(readonly key: string) {
+    super(`settings: the stored "${key}" cannot be read; not overwritten`);
+    this.name = "SettingUnreadableError";
+  }
+}
+
+/** One stored row decoded: `absent` (no row), `unreadable` (a row that does not open), else `ok` (valid or defaults). */
+function readStoreRow<K extends StoreSettingKey>(storeId: string, key: K, row: StoredRow | undefined): { state: "absent" | "unreadable" | "ok"; value: StoreSettingValue<K> } {
+  if (!row) return { state: "absent", value: storeDefaults(key) };
   const read = readRow(`${storeId}:${key}`, row, (envelope) =>
     row.purposeV === 0 ? openLegacy(envelope, sealPurpose(key)) : open(envelope, { store: storeId }, sealPurpose(key)),
   );
-  if (!read) return storeDefaults(key);
+  if (!read) return { state: "unreadable", value: storeDefaults(key) };
   const parsed = storeSettingSchema(key).safeParse(read.raw);
-  if (parsed.success) return parsed.data;
+  if (parsed.success) return { state: "ok", value: parsed.data };
   console.error(`[settings] stored "${storeId}:${key}" failed validation; using defaults`);
-  return storeDefaults(key);
+  return { state: "ok", value: storeDefaults(key) };
+}
+
+function decodeStore<K extends StoreSettingKey>(storeId: string, key: K, row: StoredRow | undefined): StoreSettingValue<K> {
+  return readStoreRow(storeId, key, row).value;
 }
 
 function decodePlatform<K extends PlatformSettingKey>(key: K, row: StoredRow | undefined): PlatformSettingValue<K> {
@@ -374,9 +391,16 @@ function isDeadlock(err: unknown): boolean {
 /**
  * Shallow merge into the stored value; a sensitive field submitted as the mask keeps its stored secret. The read and
  * the write share one transaction holding the row lock, so two concurrent patches of one key (pixel health from
- * parallel orders, two tabs) never lose each other's fields. Throws ZodError when the merge is invalid.
+ * parallel orders, two tabs) never lose each other's fields. Throws ZodError when the merge is invalid, and
+ * SettingUnreadableError (nothing written) when the stored row exists but does not open. `patch` may be a function of
+ * the current value, called under the row lock (the conversion merges nested maps with it).
  */
-export async function updateStoreSetting<K extends StoreSettingKey>(scope: WriteScope, key: K, patch: Partial<StoreSettingInput<K>>, actor: SettingsActor): Promise<StoreSettingValue<K>> {
+export async function updateStoreSetting<K extends StoreSettingKey>(
+  scope: WriteScope,
+  key: K,
+  patch: Partial<StoreSettingInput<K>> | ((current: StoreSettingValue<K>) => Partial<StoreSettingInput<K>>),
+  actor: SettingsActor,
+): Promise<StoreSettingValue<K>> {
   assertStoreKey(key);
   for (let attempt = 1; ; attempt++) {
     try {
@@ -386,8 +410,12 @@ export async function updateStoreSetting<K extends StoreSettingKey>(scope: Write
           .from(storeSettings)
           .where(whereStore(storeSettings, scope, eq(storeSettings.key, key)))
           .for("update");
-        const merged: Record<string, unknown> = { ...(decodeStore(scope.storeId, key, row) as Record<string, unknown>) };
-        for (const [field, v] of Object.entries(patch as Record<string, unknown>)) {
+        const current = readStoreRow(scope.storeId, key, row);
+        // merging a patch into the defaults would replace a stored secret the patch left masked
+        if (current.state === "unreadable") throw new SettingUnreadableError(key);
+        const merged: Record<string, unknown> = { ...(current.value as Record<string, unknown>) };
+        const fields = typeof patch === "function" ? patch(structuredClone(current.value)) : patch;
+        for (const [field, v] of Object.entries(fields as Record<string, unknown>)) {
           if (v === undefined || isMaskedSecret(v)) continue;
           merged[field] = v;
         }

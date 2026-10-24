@@ -82,17 +82,40 @@ export function foldBrand(value: string): string {
 }
 
 /**
+ * Every reading of a handle a person could take for a brand (pure): foldBrand (1→i), then 1→l instead, each with and
+ * without the two-letter look-alikes vv→w and rn→m. "paypa1-shop" reads "paypal-shop", "vvhatsapp" reads "whatsapp".
+ * CCR r1.0-m-1 asks PLA-§3.4.2 brandTokens and P1's checkBrandTerms to fold the same way.
+ */
+export function brandFoldings(value: string): string[] {
+  const base = value.normalize("NFKC").toLowerCase().normalize("NFD").replace(/\p{M}+/gu, "");
+  const out = new Set<string>();
+  for (const one of ["i", "l"]) {
+    const single = base.replace(/[013457@$]/g, (c) => (c === "1" ? one : (LOOKALIKE[c] ?? c)));
+    out.add(single);
+    const w = single.replace(/vv/g, "w");
+    const m = single.replace(/rn/g, "m");
+    out.add(w).add(m).add(w.replace(/rn/g, "m"));
+  }
+  return [...out];
+}
+
+/**
  * true when `handle` uses a protected term: `exact` = a hyphen-separated part, or the whole handle without hyphens,
  * equals the term; `substring` = the handle without hyphens contains it (`skeleton` rows match like `exact` until
- * R3). Both sides are folded, so "face-b00k" is "facebook". Pure.
+ * R3). Both sides are folded, so "face-b00k" is "facebook"; the handle is tested under each of its brandFoldings
+ * ("paypa1-shop", "vvhatsapp-ma"), and any one matching refuses it. Pure.
  */
 export function handleUsesBrand(handle: string, terms: readonly BrandTerm[]): boolean {
-  const parts = foldBrand(handle).split("-").filter(Boolean);
-  const joined = parts.join("");
+  const readings = brandFoldings(handle).map((f) => {
+    const parts = f.split("-").filter(Boolean);
+    return { parts, joined: parts.join("") };
+  });
   for (const t of terms) {
     const term = foldBrand(t.term).replace(/[^a-z0-9]+/g, "");
     if (term.length < 2) continue;
-    if (t.match === "substring" ? joined.includes(term) : parts.includes(term) || joined === term) return true;
+    for (const { parts, joined } of readings) {
+      if (t.match === "substring" ? joined.includes(term) : parts.includes(term) || joined === term) return true;
+    }
   }
   return false;
 }

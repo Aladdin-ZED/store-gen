@@ -76,6 +76,7 @@ async function main(): Promise<void> {
   const H = await import("./handles");
   const C = await import("./cache");
   const URLS = await import("@/lib/urls");
+  const A = await import("@/lib/audit");
 
   const now = new Date("2026-10-24T12:00:00.000Z");
   const caps = E.DEFAULT_PENDING_CAPS;
@@ -267,8 +268,9 @@ async function main(): Promise<void> {
   {
     const user = { id: "01J0USER000000000000000000" } as never;
     const actor = { kind: "user", userId: "01J0USER000000000000000000", impersonatorId: null, ip: null } as const;
-    const ownerCtx = (storeId: string, canClose = true) =>
-      ({ user, store: { id: storeId }, membership: { role: "owner", status: "active" }, scope: { storeId, kind: "member" }, actor, impersonation: null, stepUpUntil: null, can: (p: string) => canClose && p === "store.close" }) as never;
+    const fresh = new Date(now.getTime() + 60_000);
+    const ownerCtx = (storeId: string, canClose = true, stepUpUntil: Date | null = fresh) =>
+      ({ user, store: { id: storeId }, membership: { role: "owner", status: "active" }, scope: { storeId, kind: "member" }, actor, impersonation: null, stepUpUntil, can: (p: string) => canClose && p === "store.close" }) as never;
     const staff = (perms: string[], stepUpFresh: boolean) => ({ user, role: "admin", actor: { ...actor, kind: "platform" }, can: (p: string) => perms.includes(p), stepUpFresh, stepUpUntil: null }) as never;
     const job = { job: "lifecycle", actor: { kind: "system", userId: null, impersonatorId: null, ip: null } } as never;
     const facts = (from: string, to: string, extra: Partial<Parameters<typeof L.checkTransition>[2]> = {}) =>
@@ -313,6 +315,10 @@ async function main(): Promise<void> {
     // owners
     allowed("owner closes an active store", () => L.checkTransition(ownerCtx(STORE_A), STORE_A, facts("active", "closed")));
     allowed("owner closes a pending store", () => L.checkTransition(ownerCtx(STORE_A), STORE_A, facts("pending", "closed")));
+    // §B.7 rev 3 (SEC-17): the owner's close needs a fresh tenant step-up
+    refused("owner close without a step-up", "step_up", () => L.checkTransition(ownerCtx(STORE_A, true, null), STORE_A, facts("active", "closed")));
+    refused("owner close with an expired step-up", "step_up", () => L.checkTransition(ownerCtx(STORE_A, true, now), STORE_A, facts("pending", "closed")));
+    allowed("owner reopen needs no step-up", () => L.checkTransition(ownerCtx(STORE_A, true, null), STORE_A, facts("closed", "active", { closedFrom: "active", purgeAfter: new Date(now.getTime() + 86_400_000) })));
     refused("owner of B cannot close A", "forbidden", () => L.checkTransition(ownerCtx(STORE_B), STORE_A, facts("active", "closed")));
     refused("a member without store.close cannot close", "forbidden", () => L.checkTransition(ownerCtx(STORE_A, false), STORE_A, facts("active", "closed")));
     refused("owner cannot restrict", "forbidden", () => L.checkTransition(ownerCtx(STORE_A), STORE_A, facts("active", "restricted")));
@@ -352,6 +358,33 @@ async function main(): Promise<void> {
     allowed("a rejected store is purged after 30 days", () => L.checkTransition(job, STORE_A, facts("rejected", "purged", { statusChangedAt: new Date(now.getTime() - 30 * 86_400_000) })));
     refused("a job cannot approve", "forbidden", () => L.checkTransition(job, STORE_A, facts("pending", "active")));
 
+    // the audit meta (PLA-§8.1): the toggle recorded next to the note, the owner's step-up method
+    eq("audit meta: a note records the toggle (off)", L.lifecycleAuditMeta("active", "restricted", { reason: "fake_orders" }, "ring X"), { from: "active", to: "restricted", reason: "fake_orders", note: "ring X", noteShown: false });
+    eq("audit meta: a note shown to the store", L.lifecycleAuditMeta("active", "restricted", { reason: "fake_orders", notify: { showNote: true } }, "fix your pages"), { from: "active", to: "restricted", reason: "fake_orders", note: "fix your pages", noteShown: true });
+    eq("audit meta: no note, no toggle", L.lifecycleAuditMeta("active", "suspended", { reason: "abuse", notify: { showNote: true } }, null), { from: "active", to: "suspended", reason: "abuse" });
+    eq("audit meta: the owner's close names the step-up", L.lifecycleAuditMeta("active", "closed", { reason: "owner" }, null, "password"), { from: "active", to: "closed", reason: "owner", stepUp: "password" });
+
+    // a store's Activity listing (tenantAuditEntry, §F.5): a staff note the store was not shown never reaches it, and
+    // the staff member is a name only
+    const row = (actorKind: "user" | "platform" | "impersonation" | "system", meta: Record<string, unknown> | null) => ({
+      id: 1, userId: "01J0STAFF00000000000000000", action: "platform.store.restricted", target: STORE_A, meta, ipHash: "iphash", createdAt: now, storeId: STORE_A,
+      actorKind, impersonatorId: actorKind === "impersonation" ? "01J0STAFF00000000000000001" : null, actorName: "Staff Name", impersonatorName: actorKind === "impersonation" ? "Imp Name" : null,
+    });
+    const hidden = A.tenantAuditEntry(row("platform", L.lifecycleAuditMeta("active", "restricted", { reason: "fake_orders" }, "linked to banned account X")));
+    eq("tenant view: a staff note with the toggle off is dropped", hidden.meta, { from: "active", to: "restricted", reason: "fake_orders", noteShown: false });
+    eq("tenant view: the staff member is a name only", [hidden.userId, hidden.impersonatorId, hidden.ipHash, hidden.actorName], [null, null, null, "Staff Name"]);
+    eq(
+      "tenant view: a note shown to the store stays",
+      A.tenantAuditEntry(row("platform", L.lifecycleAuditMeta("active", "restricted", { reason: "fake_orders", notify: { showNote: true } }, "fix your pages"))).meta?.note,
+      "fix your pages",
+    );
+    eq("tenant view: a legacy staff row without the toggle hides its note", A.tenantAuditEntry(row("platform", { from: "active", to: "restricted", note: "x" })).meta, { from: "active", to: "restricted" });
+    eq("tenant view: a job's note follows the same rule", A.tenantAuditEntry(row("system", { note: "x", noteShown: false })).meta, { noteShown: false });
+    const imp = A.tenantAuditEntry(row("impersonation", { note: "x" }));
+    eq("tenant view: impersonation rows: ids dropped, names kept, note hidden", [imp.userId, imp.impersonatorId, imp.ipHash, imp.actorName, imp.impersonatorName, imp.meta], [null, null, null, "Staff Name", "Imp Name", {}]);
+    const own = A.tenantAuditEntry(row("user", { note: "my own note" }));
+    eq("tenant view: the store's own rows are untouched", [own.userId, own.ipHash, own.meta], ["01J0STAFF00000000000000000", "iphash", { note: "my own note" }]);
+
     // columns
     const at = now.getTime();
     eq("close: closed_at + purge_after 30 d", L.transitionColumns("active", "closed", now, { userId: null }), { closed_at: now, purge_after: new Date(at + 30 * 86_400_000) });
@@ -377,7 +410,8 @@ async function main(): Promise<void> {
     eq("the ADMIN_GATE value, case-insensitively", H.handleProblem("gate-secret-path", {}, lists), "reserved");
     delete env.ADMIN_GATE;
     eq("ADMIN_GATE unset: free", H.handleProblem("gate-secret-path", {}, lists), null);
-    const protectedOnes = ["meta-support", "facebook-ma", "face-b00k", "my-instagram-shop", "cih-bank", "cihbank", "bank-of-nour", "visa-ma", "store-gen", "amana", "paypal-help", "jumia-deals", "c1h-pay"];
+    // the multi-folding (1→i and 1→l, vv→w, rn→m): the review's probe handles were free before
+    const protectedOnes = ["meta-support", "facebook-ma", "face-b00k", "my-instagram-shop", "cih-bank", "cihbank", "bank-of-nour", "visa-ma", "store-gen", "amana", "paypal-help", "jumia-deals", "c1h-pay", "paypa1-shop", "goog1e-store", "app1e", "cashp1us", "vvhatsapp-ma"];
     for (const h of protectedOnes) eq(`protected ${h}`, H.handleProblem(h, {}, lists), "protected");
     const free = ["metal-art", "visage-beauty", "pineapple-juice", "posters-ma", "nour-shop", "governor-tea", "policeman-toys"];
     for (const h of free) eq(`not protected ${h}`, H.handleProblem(h, {}, lists), null);
@@ -392,6 +426,9 @@ async function main(): Promise<void> {
     check("handleUsesBrand: exact not inside a part", !H.handleUsesBrand("cmiel", [{ term: "cmi", match: "exact" }]));
     check("handleUsesBrand: substring inside", H.handleUsesBrand("cmiel", [{ term: "cmi", match: "substring" }]));
     eq("foldBrand", H.foldBrand("F4ceB00K$"), "facebooks");
+    eq("brandFoldings: 1 as i and as l, each with and without vv→w and rn→m", H.brandFoldings("vv1rn").sort(), ["vvim", "vvirn", "vvlm", "vvlrn", "wim", "wirn", "wlm", "wlrn"]);
+    check("brandFoldings: paypa1 reads paypal", H.brandFoldings("paypa1").includes("paypal") && H.brandFoldings("paypa1").includes("paypai"));
+    check("brandFoldings: vvhatsapp reads whatsapp, rnicrosoft reads microsoft", H.brandFoldings("vvhatsapp").includes("whatsapp") && H.brandFoldings("rnicrosoft").includes("microsoft"));
     check("the default snapshot is the seeded list", H.handleLists().terms.length > 30 && H.handleLists().at === 0);
 
     const h = (current: boolean, history: { storeId: string; reservedUntil: Date } | null, ownStoreId: string | null = null) => H.handleFree({ current, history, now, ownStoreId });

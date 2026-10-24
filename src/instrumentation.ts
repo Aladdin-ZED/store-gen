@@ -5,7 +5,8 @@
  *  1. configuration warnings (never secret values): auth (an unusable APP_SECRET is logged as an error, since every
  *     order fails with it), addressing and the edge (§C.1, §H.7), the data directory, env aliases, the test context
  *     (§E.4); the gate SHA the build was cleared by (§H.10)
- *  2. pending database migrations (serialised across processes with a DB lock)
+ *  2. pending database migrations (serialised across processes with a DB lock); a process that times out on the lock
+ *     skips steps 5 and 6, which the process holding it runs
  *  3. the media storage check: arrives with the filesystem backend (§G.2, src/lib/media/storage/check.ts); while
  *     media lives in the database there is nothing to check
  *  4. expired sessions purged
@@ -45,11 +46,14 @@ export async function register(): Promise<void> {
   }
 
   // 2. migrations
+  let migrationsSettled = true;
   try {
     const { runMigrations } = await import("./lib/db/migrate");
     const result = await runMigrations();
     if (result.status === "lock-timeout") {
-      console.warn("[boot] another process held the migration lock for too long; skipped migrations this time.");
+      // that process may still be inside 0004: it runs steps 5 and 6 itself once it has migrated
+      migrationsSettled = false;
+      console.warn("[boot] another process held the migration lock for too long; skipped migrations and the one-time tasks this time.");
     } else if (result.status === "applied") {
       console.info(`[boot] applied ${result.applied} migration(s) in ${result.durationMs} ms.`);
     } else {
@@ -71,8 +75,8 @@ export async function register(): Promise<void> {
     console.error("[boot] session cleanup failed:", err instanceof Error ? err.message : err);
   }
 
-  // 5. and 6., in the background
-  void bootTasks();
+  // 5. and 6., in the background (not after a lock timeout; runBootTasks also refuses while a migration is pending)
+  if (migrationsSettled) void bootTasks();
 }
 
 /** Steps 5 and 6: the one-time tasks in the process that gets the boot lock, then the read-only checks. Never throws. */

@@ -82,6 +82,7 @@ const MISSING_ASSET = "510d3fcf85d14964f90772e18eb4b536"; // used by the argan d
 const META_STORE = "333333333333333";
 const META_P1 = "111111111111111";
 const META_P3 = "222222222222222";
+const META_RACE = "444444444444444";
 const TIKTOK_P3 = "CTESTPIXEL0000000001";
 const FIXTURE_NOW = "2026-09-01T10:00:00.000Z";
 const at = (day: number, hour = 10) => new Date(Date.UTC(2026, 8, day, hour, 0, 0));
@@ -413,6 +414,106 @@ async function childMain(task: string): Promise<unknown> {
       userRefused = true;
     }
     return { all, again, thrown, budget1, budget2, other, sheets, outbox, tickRefused, userRefused };
+  }
+
+  if (task === "boot-tasks-only") {
+    // a process that gave up on the migration lock while another one is inside 0004 (review fix: runBootTasks
+    // checks that every migration on disk is applied before it converts anything)
+    const { runBootTasks } = await import("@/lib/db/boot-tasks");
+    const boot = await runBootTasks();
+    const conn = await readConn();
+    try {
+      const [marker] = (await conn.query("SELECT COUNT(*) AS n FROM settings WHERE `key` = 'tenancy_v1'")) as unknown as [Row[]];
+      return { boot, marker: Number(marker[0]?.n ?? 0) };
+    } finally {
+      await conn.end();
+    }
+  }
+
+  if (task === "convert-race") {
+    // writes that land while the background conversion runs (review fix): an owner's CAPI token saved between the
+    // conversion's read of tracking_secrets and its write, an editor save of another page's draft between the read of
+    // the page list and that page's asset_refs
+    await runMigrations();
+    const { updateStoreSetting, getStoreSetting } = await import("@/lib/settings");
+    const { convertLegacyStore } = await import("@/lib/tenancy/convert.server");
+    const actor = { id: "system", kind: "system" as const };
+    const conn = await readConn();
+    try {
+      await convertLegacyStore({
+        checkpoint: async (unit) => {
+          if (unit === "pixels:health") {
+            await updateStoreSetting(scope(), "tracking_secrets", (cur) => ({ metaTokens: { ...cur.metaTokens, [META_RACE]: "EAARACETOKEN0000000001" } }), actor);
+          }
+          if (unit === `refs:${P1}`) {
+            const [[p1]] = (await conn.query("SELECT draft FROM pages WHERE id = ?", [P1])) as unknown as [Row[]];
+            await conn.query("UPDATE pages SET draft = ? WHERE id = ?", [p1!.draft, P2]);
+          }
+        },
+      });
+      const secrets = await getStoreSetting(scope(), "tracking_secrets", { fresh: true });
+      const refs = async (owner: string) =>
+        ((await conn.query("SELECT asset_id FROM asset_refs WHERE store_id = ? AND owner_kind = 'page' AND owner_id = ? ORDER BY asset_id", [STORE1, owner])) as unknown as [Row[]])[0].map((r) => String(r.asset_id));
+      return { metaTokenIds: Object.keys(secrets.metaTokens).sort(), raceToken: secrets.metaTokens[META_RACE] === "EAARACETOKEN0000000001", p1Refs: await refs(P1), p2Refs: await refs(P2) };
+    } finally {
+      await conn.end();
+    }
+  }
+
+  if (task === "lifecycle") {
+    // §A.5 over the database (review fixes): a staff note reaches the store's Activity listing only when it was shown
+    // to the store; the shared pending_media_bytes budget follows a store out of pending and back in
+    const { transitionStore } = await import("@/lib/tenancy/lifecycle");
+    const { listStoreAudit, listPlatformAudit } = await import("@/lib/audit");
+    const { mintScope } = await import("@/lib/tenancy/seam");
+    const { platformUsageValue } = await import("@/lib/tenancy/usage");
+    const staff = {
+      user: { id: U_OWNER },
+      role: "super_admin",
+      actor: { kind: "platform", userId: U_OWNER, impersonatorId: null, ip: null },
+      can: () => true,
+      stepUpFresh: true,
+      stepUpUntil: null,
+    } as unknown as Parameters<typeof transitionStore>[0];
+    const active = argOf("active")!;
+    const pendingStore = argOf("pending")!;
+    await transitionStore(staff, active, "restricted", { reason: "fake_orders", note: "linked to banned account X, fake-order ring", notify: { showNote: false } });
+    await transitionStore(staff, active, "active", { reason: "resolved", note: "thanks for fixing the pages", notify: { showNote: true } });
+    const owner = {
+      user: { id: U_OWNER },
+      store: { id: active },
+      membership: { role: "owner", status: "active" },
+      scope: mintScope("member", active),
+      actor: { kind: "user", userId: U_OWNER, impersonatorId: null, ip: null },
+      impersonation: null,
+      stepUpUntil: null,
+      can: () => true,
+    } as unknown as Parameters<typeof listStoreAudit>[0];
+    const pick = (rows: { action: string; meta: Record<string, unknown> | null; userId: string | null; actorName: string | null }[]) =>
+      rows.filter((r) => r.action.startsWith("platform.store.")).map((r) => ({ action: r.action, note: r.meta?.note ?? null, userId: r.userId, actorName: r.actorName }));
+    const tenant = pick(await listStoreAudit(owner, { area: "platform.store" }));
+    const consoleRows = pick(await listPlatformAudit(staff as never, { storeId: active, area: "platform.store" }));
+
+    const before = await platformUsageValue("pending_media_bytes", "total");
+    await transitionStore(staff, pendingStore, "rejected", { reason: "incomplete" });
+    const afterReject = await platformUsageValue("pending_media_bytes", "total");
+    await transitionStore(staff, pendingStore, "pending", { reason: "appeal" });
+    const afterAppeal = await platformUsageValue("pending_media_bytes", "total");
+    await transitionStore(staff, pendingStore, "active", { reason: "approved" });
+    const afterApprove = await platformUsageValue("pending_media_bytes", "total");
+    return { tenant, console: consoleRows, usage: [before, afterReject, afterAppeal, afterApprove] };
+  }
+
+  if (task === "settings-unreadable") {
+    // review fix: a stored row that does not open is never replaced by a merge into the defaults
+    const { updateStoreSetting, SettingUnreadableError } = await import("@/lib/settings");
+    let refused = "no";
+    try {
+      await updateStoreSetting(scope(), "turnstile", { siteKey: "0x4AAAAAAANEWSITEKEY", secretKey: "••••KEY0" }, { id: "system", kind: "system" });
+    } catch (err) {
+      refused = err instanceof SettingUnreadableError ? "unreadable" : String(err);
+    }
+    return { refused };
   }
 
   throw new Error(`unknown child task "${task}"`);
@@ -881,6 +982,38 @@ async function main(): Promise<void> {
       same("(h) pending_sheets: Sheets on and an order to push, the oldest pending order first", j.sheets!.seen, [id26("ST", 2), STORE1]);
       same("(h) pending_outbox before 0005: nothing to visit, done", [j.outbox!.visited, j.outbox!.done], [0, true]);
       check('(h) the job name "tick" and a non-system actor are refused', j.tickRefused && j.userRefused);
+
+      // the lifecycle over the database (review fixes)
+      {
+        const conn = await connect("cod_test_t1_legacy");
+        try {
+          await conn.query("INSERT INTO store_usage (store_id, metric, period, value) VALUES (?, 'media_bytes', 'total', 1000)", [id26("ST", 4)]);
+          await conn.query("INSERT INTO platform_usage (metric, period, value) VALUES ('pending_media_bytes', 'total', 5000) ON DUPLICATE KEY UPDATE value = 5000");
+        } finally {
+          await conn.end();
+        }
+        const lc = await child<{ tenant: Row[]; console: Row[]; usage: number[] }>("lifecycle", "cod_test_t1_legacy", {}, ["--active", id26("ST", 2), "--pending", id26("ST", 4)]);
+        same("(h) lifecycle: the store's Activity hides a staff note it was not shown, shows the one it was; staff are a name only", lc.tenant, [
+          { action: "platform.store.restored", note: "thanks for fixing the pages", userId: null, actorName: "Test user 1" },
+          { action: "platform.store.restricted", note: null, userId: null, actorName: "Test user 1" },
+        ]);
+        same("(h) lifecycle: the console audit keeps both notes", lc.console.map((r) => r.note), ["thanks for fixing the pages", "linked to banned account X, fake-order ring"]);
+        same("(h) lifecycle: pending_media_bytes refunded on reject, charged again on appeal, refunded once on approval", lc.usage, [5000, 4000, 5000, 4000]);
+      }
+
+      // a row that does not open is never overwritten by a merge into the defaults (review fix)
+      {
+        const conn = await connect("cod_test_t1_legacy");
+        try {
+          await conn.query("UPDATE store_settings SET value = ? WHERE store_id = ? AND `key` = 'turnstile'", [JSON.stringify("v2.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCCCCCCCCCCCCCCCCCCCC"), STORE1]);
+        } finally {
+          await conn.end();
+        }
+        const before = (await query("cod_test_t1_legacy", "SELECT value, purpose_v FROM store_settings WHERE store_id = ? AND `key` = 'turnstile'", [STORE1]))[0];
+        const su = await child<{ refused: string }>("settings-unreadable", "cod_test_t1_legacy");
+        const after = (await query("cod_test_t1_legacy", "SELECT value, purpose_v FROM store_settings WHERE store_id = ? AND `key` = 'turnstile'", [STORE1]))[0];
+        check("(h) settings: updateStoreSetting refuses a row that does not open and leaves it as stored", su.refused === "unreadable" && JSON.stringify(after) === JSON.stringify(before), { su, before, after });
+      }
     }
 
     console.log("(d) legacy database, 0004 interrupted");
@@ -888,6 +1021,11 @@ async function main(): Promise<void> {
       const name = `cod_test_t1_int_${n}`;
       await legacyDb(name, full, encrypt, folder);
       const totalStatements = await partial0004(name, n);
+      if (n === 40) {
+        // the second process of a two-process boot: 0004 is still running elsewhere (review fix)
+        const early = await child<{ boot: { ran: boolean }; marker: number }>("boot-tasks-only", name);
+        check("(d) the boot tasks refuse to run while a migration is pending (no conversion, no marker)", early.boot.ran === false && early.marker === 0, early);
+      }
       const r = await child<BootResult>("boot", name);
       bootOk(`(d) 0004 cut after ${n}: resumed boot`, r, 1);
       same(`(d) 0004 cut after ${n} of ${totalStatements} statements, resumed = the clean run`, diffSnapshots(bRef, await snapshot(name, true, since)), []);
@@ -913,6 +1051,15 @@ async function main(): Promise<void> {
       const r = await child<BootResult>("boot", name);
       bootOk("(d) the next boot resumes it", r, 0);
       same("(d) crashed then resumed by a new process = the clean run", diffSnapshots(bRef, await snapshot(name, true, since)), []);
+    }
+
+    console.log("(d) writes during the background conversion");
+    {
+      const name = "cod_test_t1_conv_race";
+      await legacyDb(name, full, encrypt, folder);
+      const race = await child<{ metaTokenIds: string[]; raceToken: boolean; p1Refs: string[]; p2Refs: string[] }>("convert-race", name);
+      check("(d) an owner's CAPI token saved during the pixel migration survives it", race.raceToken && race.metaTokenIds.includes(META_RACE) && race.metaTokenIds.includes(META_P1), race.metaTokenIds);
+      check("(d) an editor save during the asset_refs step: the refs follow the newer draft", race.p2Refs.length > 0 && JSON.stringify(race.p2Refs) === JSON.stringify(race.p1Refs), race);
     }
 
     console.log("(c) the owner's setup only");

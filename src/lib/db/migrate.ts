@@ -93,3 +93,21 @@ async function appliedCount(conn: mysql.Connection): Promise<number> {
   ];
   return Number(counted[0]?.n ?? 0);
 }
+
+/**
+ * How many migrations on disk the database has not recorded yet (drizzle's own rule: a file is pending when its
+ * folderMillis is later than the newest `created_at` in __drizzle_migrations; no table = all pending). `query` runs
+ * one statement on any connection. runBootTasks uses it to leave the one-time tasks to the process that migrates
+ * when this one gave up on the migration lock (§H.4).
+ */
+export async function pendingMigrationCount(
+  query: (sql: string, params?: unknown[]) => Promise<Record<string, unknown>[]>,
+  opts: { migrationsFolder?: string } = {},
+): Promise<number> {
+  const files = readMigrationFiles({ migrationsFolder: opts.migrationsFolder ?? path.join(process.cwd(), "drizzle"), migrationsTable: MIGRATIONS_TABLE });
+  const [t] = await query("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", [MIGRATIONS_TABLE]);
+  if (Number(t?.n ?? 0) === 0) return files.length;
+  const [last] = await query(`SELECT MAX(created_at) AS at FROM \`${MIGRATIONS_TABLE}\``);
+  const at = last?.at == null ? null : Number(last.at);
+  return files.filter((f) => at === null || at < f.folderMillis).length;
+}
