@@ -11,8 +11,8 @@ running, and how to restart it. Newest state at the top of "Running now".
 | 1 | Understand: subsystem maps | docs/saas/TENANCY-MAP.md | **done** 2026-10-23 (run wf_2ff1c4b9-e11) |
 | 1b | Research + brainstorm (owner items 8-15): domains/subdomains, COD ops+agents+accounting+integrations, AI learning loop, generative design, platform admin, storefront/landing | docs/saas/research/*.md + docs/saas/RESEARCH.md | **done** 2026-10-24 |
 | 2a | Spec writing: core contract + 6 part specs | docs/STORE-SAAS.md, docs/saas/spec/*.md | **done** 2026-10-24 |
-| 2b | ELEVATE (owner item 16, Fable): core rev 2 integrates requests + rethink; 6 parts rev 2 raise ceilings; core rev 2.1 | same files | running |
-| 2c | Reviews (operator, principal engineer, premium designer, security, AI/design-quality) → revise → critic loop | same files + §P | todo |
+| 2b | ELEVATE (owner item 16, Fable): core rev 2 integrates requests + rethink; 6 parts rev 2 raise ceilings; core rev 2.1 | same files | **done** 2026-10-24 (commit a2e9fc2) |
+| 2c | Reviews (6 lenses: operator, 2× principal engineer, premium designer, security, AI/design-quality) → per-file revisers → critic loop | same files + §P | running |
 | 3 | Build phase 0: core tenancy (schema, migration, store scope, auth/memberships, routing) | code | todo |
 | 4 | Build phase 1: parallel tracks (store pages, landing+, brand kit/logo, team/invites, platform admin, storage) | code | todo |
 | 5 | Adversarial verification incl. cross-tenant attack tests, fix loop | tests + fixes | todo |
@@ -22,7 +22,14 @@ running, and how to restart it. Newest state at the top of "Running now".
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
-- **Phase 2b ELEVATE** — started 2026-10-24 ~02:25 (Fable 5.1). Task `wsbd0jhy1`, run `wf_c7874943-a15`.
+- **Phase 2c REVIEW → REVISE → CRITIC** — started 2026-10-24 ~04:20 (Fable 5.1). Task `w9ig7imm0`, run `wf_04544af2-2aa`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\store-saas-review-wf_04544af2-2aa.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_04544af2-2aa"})`.
+  Stages: 6 reviewers (OPS, ENGC, ENGP, UX, SEC, QUAL) → 6 part revisers in parallel → core reviser (cross-file + §P) →
+  critic (≤ 2 rounds, each followed by a fix round). Next after it: R1.0 build (contract step, then 4 parallel tracks).
+
+- **Phase 2b ELEVATE** — DONE 2026-10-24 ~04:15 (8 agents, 0 errors; commit a2e9fc2): core rev 2.1 (4,299 lines), parts rev 2
+  (19.9k lines). Was: started 2026-10-24 ~02:25 (Fable 5.1). Task `wsbd0jhy1`, run `wf_c7874943-a15`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\store-saas-elevate-wf_c7874943-a15.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_c7874943-a15"})`.
   Stages: core-integrate (STORE-SAAS.md rev 2, appendix Q request decisions) → 6 parallel part elevations (rev 2; design at
