@@ -5,13 +5,17 @@ by the operations, engineering, UX, security and quality reviewers; every findin
 decided in **LAN-§29** (one row per finding id) and applied in the body; the changes other files must make to stay
 consistent are listed in **LAN-§27.3**. **Revision 4** answers the round 2 review (the critic's consistency findings
 CRIT1, CRIT3, CRIT5, CRIT11, CRIT12, CRIT15, CRIT17 and the re-check of every round 1 id) in **LAN-§30** (one line per
-finding id) and re-aligns this document with the core's **revision 3** decisions D68 … D76 and its appendix **core §Q.8**
-(the parts' round 1 requests as decided: LAN R1 … R25); the round 2 requests to the core and the sibling parts are
-**LAN-§27.4**. Where a sentence of this document still disagrees with core revision 3, the core wins (LAN-§30 names the
-seven places the critic found and how each was aligned).
+finding id) and re-aligns this document with the core's **revision 3** decisions D68 … D76, its review decisions
+**core §P** and its appendix **core §Q.8** (the parts' round 1 requests as decided: LAN R1 … R25); the contradictions
+revision 4 found between this text and core §P / §Q.8, and the round 2 notes to the sibling parts, are **LAN-§27.4**;
+what changed is **LAN-§28.2**. Where a sentence of this document still disagrees with core revision 3, the core wins:
+LAN-§30 names the seven places the critic found, the eleven further places the re-check found (tolerance 0 on the
+frozen chunk, the prefix regex, `test:delivery`'s file, the leads masking of D70, `WriteScope`, `originFrom`, the v3
+order functions' owner, the tracking fetch's `Origin` under `no-referrer`, `landing:fee_mismatch`, the §M.2 bands, the
+N8 origin rule) and how each was aligned.
 Built on `docs/STORE-SAAS.md` **revision 3** (the core contract, cited as **core §X**; its appendix **core §Q.3** decides
 every request of revision 1, all 38 accepted, Q12 and Q13 with the changes recorded in LAN-§27; **core §Q.8** decides
-the round 1 requests LAN R1 … R25, with LAN R3 and LAN R5 accepted with a change that revision 4 applies) and on the settled
+the round 1 requests LAN R1 … R25, with LAN R3, LAN R5 and LAN R18 accepted with a change that revision 4 applies) and on the settled
 decisions of `docs/saas/RESEARCH.md` §2 (cited as **R-D1 … R-D53**). It covers every landing feature id **LP-01 … LP-17**
 of RESEARCH §3.4, the landing items the Fable rethink raised (`docs/saas/research/rethink-features.md` §3, cited **rf §x**),
 seven operator-grade additions **LP-18 … LP-24**, and the signature features the core assigned to this track (**SF-01**
@@ -29,9 +33,11 @@ This document may refine only the tables core §D.9 assigns to the landing part 
 `short_links`, `page_slug_history`, `experiments`, `experiment_arms`, `experiment_exposures`, `page_schedules`,
 `saved_blocks`, `saved_block_uses`, the `leads` columns of 0005 except `is_test`) and the schemas of the store settings
 core §D.10 gives it (`policies`, `checkout` R1 part, `landing`). Everything else it needed was requested in revision 1
-and is now part of the core (LAN-§27 lists each request with its core decision). Where this document and core revision 2
+and is now part of the core (LAN-§27 lists each request with its core decision). Where this document and the core
 disagree, the core wins; revision 2 of this document was aligned line by line with core §A.2, §A.3, §A.4, §C.4, §D.2,
-§D.5, §D.6, §D.9, §D.10, §E.2, §E.8, §H.2, §H.3, §H.13, §I.1, §I.3, §I.4, §I.7, §J, §K.2, §L.2, §M and §Q.3.
+§D.5, §D.6, §D.9, §D.10, §E.2, §E.8, §H.2, §H.3, §H.13, §I.1, §I.3, §I.4, §I.7, §J, §K.2, §L.2, §M and §Q.3, and
+revision 4 again with core revision 3's header freeze rule, D68 … D76, §A.2, §B.8, §C.4, §C.9, §E.1, §I.7, §J.1, §K.2
+P0 / P3, §K.4, §K.5, §M.1, §M.2, §M.4, §P and §Q.8 (LAN-§30).
 
 Inputs: `docs/STORE-GEN-BRIEF.md` items 1, 7, 8, 9, 14, 15, 16 · `docs/HANDOFF.md` §2 (owner rules), §4, §5 · core
 revision 2 · RESEARCH §2-§4 · `docs/saas/TENANCY-MAP.md` (§5.5-§5.10, §8.2, §8.3, §9.2; item ids PUB-xx, LND-xx, ORD-xx,
@@ -50,8 +56,9 @@ plus one platform path (`/kit/<token>`, proxy area `kit`, core §C.3).
 
 Reading order for a build agent: LAN-§0 (decisions) → LAN-§1 (your feature rows) → LAN-§3.4 … §3.8 (the quality contract
 every landing page meets) → the track you own (LAN-§26) → the sections your files touch → LAN-§5 (runtime add-ons and
-budgets, if you touch shopper pages) → LAN-§25 (tests you must keep green) → LAN-§27 (how each request was decided) →
-LAN-§28 (what changed in this revision and why).
+budgets, if you touch shopper pages) → LAN-§25 (tests you must keep green) → LAN-§1.4 (which command proves your
+feature ids) → LAN-§27 (how each request was decided; §27.4 the round 2 contradictions) → LAN-§28 (what changed in each
+revision and why) → LAN-§29 / §30 (the review decisions; §30 is current where they differ).
 
 ### Owner summary (plain English)
 
@@ -105,6 +112,11 @@ LAN-§28 (what changed in this revision and why).
     three angles, one short link per channel with tracking tags, a pixel plan, a read-only link for your media buyer,
     and results per angle down to delivered orders. Everything in it is built from your page and your settings, never
     from free text.
+18. **New in revision 4.** Every page, thank-you page, tracking page and legal page carries a small "Report this store"
+    link to the platform, so shoppers can flag a fake shop. When the platform's support team views your shop, they see
+    your leads with names masked, like your orders. The thank-you page's "we call you today from 14:30" always reads the
+    same calling hours your call center works with (the hours you see beside your caller phone), and the city keys of
+    your zones are checked by one shared test with the call center and the store checkout.
 
 ---
 
@@ -115,11 +127,11 @@ core rule and say why.
 
 | # | Decision | Why |
 |---|---|---|
-| LD1 | **Frozen means frozen.** PageDoc v2 (`src/lib/page/schema.ts`; the one additive, optional, default-free change of R1 is design's `ThemeSpec.look`, core header), runtime config v2 (`src/landing/runtime/config.ts:105-145`), payload v2 (`src/lib/orders/contract.ts:84-98`), the PHP export and the `landing` (24,200 B today, `src/landing/runtime/budgets.json:3`) and `thanks` (6,650 B) chunks are not changed by this part. **Rev 3 (ENGP-26):** the one R1 edit to the frozen chunk is T3's per-store storage-key prefix (core §C.9, R1.0); T3 re-measures the chunk after that edit, writes the measured gz size into `budgets.json.landing` and the sha256 into the storefront pin (STO-§14.1), and render-check's +5 % rule stays the gate; "frozen" means behaviour and contracts, the byte count is the re-measured one. Every new shopper behaviour ships in an **add-on chunk** (LAN-§5, core D62 / §H.13) that reads its own JSON data block, the DOM, the `lp:order` event (`src/landing/runtime/form.ts:19,324-331`) and the `lp-order` hand-off (`src/landing/runtime/order-store.ts:9`). | R-D43; the landing chunk is within 30 B of its budget (HANDOFF §6); open tabs and exports depend on the contracts. |
+| LD1 | **Frozen means frozen.** PageDoc v2 (`src/lib/page/schema.ts`; the one additive, optional, default-free change of R1 is design's `ThemeSpec.look`, core header), runtime config v2 (`src/landing/runtime/config.ts:105-145`), payload v2 (`src/lib/orders/contract.ts:84-98`), the PHP export and the `landing` (24,200 B today, `src/landing/runtime/budgets.json:3`) and `thanks` (6,650 B) chunks are not changed by this part. **Rev 3 (ENGP-26), aligned by rev 4 with the core's header freeze rule (LAN R18 accepted with a change):** the one R1 edit to the frozen chunk is T3's per-store storage-key prefix (core §C.9, R1.0), derived once in `core.ts`; T3 re-measures the chunk after that edit: if it still fits 24,200 B the figure stands, otherwise the maintainer records the measured value in `budgets.json.landing` and in core §P as an explicit re-freeze for the owner (expected ≤ +60 B); from the R1.0 integration render-check enforces the `landing` chunk with **tolerance 0** against the recorded budget **and** the recorded sha256 (`src/landing/runtime/landing.sha256`, written by T3, maintainer-owned afterwards; the storefront's STO-§14.1 assertion reads the same pin), while every other chunk and page cap keeps the +5 % rule. Rev 3's "the +5 % rule stays the gate" is withdrawn for this chunk. Every new shopper behaviour ships in an **add-on chunk** (LAN-§5, core D62 / §H.13) that reads its own JSON data block, the DOM, the `lp:order` event (`src/landing/runtime/form.ts:19,324-331`) and the `lp-order` hand-off (`src/landing/runtime/order-store.ts:9`). | R-D43; the landing chunk is within 30 B of its budget (HANDOFF §6); open tabs and exports depend on the contracts. |
 | LD2 | **Two R1 add-on chunks, not one per feature:** `assist` on landing pages (delivery line, WhatsApp order, idem capture) and `assist-ty` on thank-you pages (confirm on WhatsApp, expectation block, tracking link); `track` on the tracking page. Accepted by the core (§K.2 P3 row names `addons/**` "replaces the single `entry-delivery.ts` of rev 1"). | The three landing features are small (≈ 2.4 KB gz together) and usually on together; one script tag means one CSP hash and one budget line instead of three; thank-you code never ships to the landing page. |
 | LD3 | Page-level add-on settings the frozen doc can't hold live in the store settings `landing` and `checkout` in R1-R2; from R3 a versioned `pages.addons` / `page_versions.addons` JSON (core §D.2 0007, Q4 accepted) holds what must be charged from the version (upsell chain prices) or tested (experiment arms). | The doc schema is frozen; a price charged after an order must come from the version the shopper saw (OFFERS D8, `src/lib/orders/upsell.ts:3-4`). |
 | LD4 | **Delivery zones are owner-typed and empty by default.** In R1 a landing page shows the zone's **ETA** and **the page's own fee** (`offers.shippingFee`, offer `free`), never the zone fee; a checklist note `delivery:fee_mismatch` (LAN-§3.2) tells the owner when the zone fees and the page fee disagree for the main cities. **Rev 3 (OPS-13):** zone fees are charged by store checkout (R2, storefront.md) **and by landing pages that opt in to "Charge delivery by city" (LP-16, now R2, LAN-§20.4; on by default for attached landings in `both` mode)**, through one fee rule (`storeDeliveryFee`, STO-§15.9), so a `both` store never quotes two fees for one city. | R-D22; the landing pricing is frozen with the runtime and the PHP export (`src/lib/page/pricing.ts:329-349`); "Casa 20 / autres villes 35" is the Moroccan norm and a landing-only seller needs it (OPS-13). |
-| LD4a | **City keys are the operations slugs everywhere (rev 3, OPS-1).** `delivery_zones.cities`, `ZoneTable`, `zoneLineFor`, `carrier_rates.city_key`, `orders.city_key`, `opsAggregates(dims: city)` and `city_refusal` all use `CityKey` = `cityKey(City.value)` of OPE-§10.1 (`"casablanca"`, `"fes"`, `"ksar-el-kebir"`); the `*` zone covers "Autre" and every unlisted city (`cityKey("Autre") → null` → the `*` zone). The order form keeps posting `City.value` ("Fès"); the **server** converts once with the shared `cityKey()` (P4's P0 stub, `src/lib/orders/address.ts`) when it builds the zone table and when it reads an order; the browser never computes a slug: the `lp-assist` / `#sg-config` table is keyed by the posted value (LAN-§7.1). | Revision 2 stored `City.value` in zones while operations keyed everything on the slug, so `zoneLineFor(scope, "fes")` could never match `["Fès"]` and three tracks would have built three keys (OPS-1). |
+| LD4a | **City keys are the operations slugs in every store and API (rev 3, OPS-1).** `delivery_zones.cities`, `zoneLineFor`, `zoneForCity`, `zoneFeesFor`, `carrier_rates.city_key`, `orders.city_key`, `opsAggregates(dims: city)` and `city_refusal` all use `CityKey` = `cityKey(City.value)` of OPE-§10.1 (`"casablanca"`, `"fes"`, `"ksar-el-kebir"`); the `*` zone covers "Autre" and every unlisted city (`cityKey("Autre") → null` → the `*` zone). The order form keeps posting `City.value` ("Fès"); the **server** converts once with the shared `cityKey()` (P4's P0 stub, `src/lib/orders/address.ts`) when it builds the zone table and when it reads an order; the browser never computes a slug: the `lp-assist` / `#sg-config` table is keyed by the posted value (LAN-§7.1). **Rev 4 (CRIT1): one table shape for both browser consumers.** `zonesForCheckout(scope): Promise<ZoneTable>` is the one producer of the browser table (P3's P0 stub; the shape core §K.2 P0 and core §Q.8 LAN R1 accepted: "keyed by the posted `City.value`, built on the server from the slugs"); P3's `assist` and S1's `#sg-config` embed that object unchanged, so **no browser chunk bundles `cityKey()`** (the frozen landing chunk and `assist` stay free of the fold table) and the slug never travels to the browser for a zone lookup. Core D68's sentence that the browser tables "store slugs" and that `assist`, `checkout` and `pdp` "convert with the same function" contradicts core §K.2 P0 and is asked to be reworded (LAN-§27.4 N1), with OPE OD47 and STO-D43 / STO-§14.4 aligned; the shared fixture `scripts/qa/fixtures/city-key.json` asserts the key shape (`zoneTableKey: "value"`) so `test:delivery`, `test:catalog` and `test:ops` fail together on drift. | Revision 2 stored `City.value` in zones while operations keyed everything on the slug, so `zoneLineFor(scope, "fes")` could never match `["Fès"]` and three tracks would have built three keys (OPS-1); revision 3's fix still let one P0 function carry two table shapes for its two consumers (CRIT1). |
 | LD5 | **ETA as dates ships in R1** (raised from R3 ST-17 by rf §1.6): one pure module `src/lib/delivery/eta.ts` computes the window in the store time zone with working days, a cut-off hour, a holiday list **and, rev 3 (OPS-12), the confirmation lead** (`checkout.calendar.confirmationLeadDays`, the working days the team usually needs before the confirmation call); the `assist` chunk bundles the same module; every date carries the word "estimated" and, when the store confirms by phone, "after confirmation by phone"; the tracking page recomputes from `confirmed_at` with a zero lead, and the first promise is never later than the second. | Baymard: dates, not speeds; one implementation for server texts and the page avoids two promises; a COD order ships only after the call, so a window counted from the browsing moment was often already broken when the agent confirmed (OPS-12). |
 | LD6 | **A not-served city blocks the form in the browser** (submit hidden, WhatsApp shown) **but the server never refuses an order for a zone**: it accepts and adds the flag `zone_not_served`. | Orders are never blocked by configuration on the server (core §A.4 spirit); old tabs, exports and a mis-set zone must not lose orders. |
 | LD7 | **Thank-you add-ons are computed in the browser** from `lp-order` (order id, first name, offer, total) and the `assist-ty` data block (store numbers, hours, templates). The confirm text never contains more than those four values. | The thank-you HTML is static per version; `lp-order` is the only per-order data on the page (`order-store.ts:28-40`). |
@@ -144,9 +156,9 @@ core rule and say why.
 | LD26 | Shopper strings ship in ar (Darija-friendly) / fr / en in R1; owners override texts through message templates. Landing admin screens are `en` in R1 except the **Leads inbox and every template agents send** (ar/fr/en), because agents use them (core D36). | Owner rule 4; agents are Moroccan. |
 | LD27 | **No tenant code:** chunks, data blocks and experiment arms are generated by the platform; owner text is inserted with `textContent` only; templates are plain text with `{var}` placeholders. | PUB-25, core §C.9 (shared origin until S mode). |
 | LD28 | **Exports keep what needs no server:** the delivery line and the thank-you blocks ship in every export; the tracking link only in connected exports (absolute URL to the store's tracking page); WhatsApp order, test links and experiments are live-only. | Static and PHP exports have no platform API; connected exports already post to it (`src/lib/export/server.ts:104-111`). |
-| LD29 | **`policies` is the single source of every promise** (legal pages, thank-you steps, FAQ defaults, AI prompt and guard, call script, tracking "your rights" line) **and `ops.callingWindow` is the single source of every "when we call" statement (rev 3, OPS-11)**: the thank-you `{when}`, the template variable `confirm_hours`, the contact legal page's hours and the tracking help hours all derive from `callingWindowFor(scope)` (P0 stub, P4 implements over `ops.callingWindow`, ISO weekdays 1-7); `store.confirmation.hours` and `policies.contact.hours` are **removed** (LAN-§2.3), and the thank-you card edits the one window with the same component as `/team/callcenter`. Morocco's 7-day withdrawal right (Law 31-08) is shown as a note **[needs legal review]**, never as an invented store policy. | GEN-08; ai.md AI-§D.2 rule 3 consumes it; core D39; three independent "hours" with two weekday conventions let the thank-you promise a call at 09:30 on a Friday while the ladder only called from 14:30 (OPS-11). |
+| LD29 | **`policies` is the single source of every promise** (legal pages, thank-you steps, FAQ defaults, AI prompt and guard, call script, tracking "your rights" line) **and `ops.callingWindow` is the single source of every "when we call" statement (rev 3, OPS-11)**: the thank-you `{when}`, the template variable `confirm_hours`, the contact legal page's hours and the tracking help hours all derive from `callingWindowFor(scope): Promise<EffectiveWindow>` (P0 stub, P4 implements over `ops.callingWindow`, ISO weekdays 1-7, core D73; **rev 4, CRIT3: never `null`**, the type is operations' `EffectiveWindow` re-exported unchanged, and this part never indexes its `days` itself: it calls only P4's pure `nextCallableAt`, `rangesForDay` and `hoursText`, so the weekday shape operations fixes reaches every consumer without a second convention); `store.confirmation.hours` and `policies.contact.hours` are **removed** (no mirrors, core D73), and the thank-you card edits the one window with the same component as `/team/callcenter`. Morocco's 7-day withdrawal right (Law 31-08) is shown as a note **[needs legal review]**, never as an invented store policy. | GEN-08; ai.md AI-§D.2 rule 3 consumes it; core D39; three independent "hours" with two weekday conventions let the thank-you promise a call at 09:30 on a Friday while the ladder only called from 14:30 (OPS-11). |
 | LD30 | **Releases:** R1 (P3) wave 1 = LP-01…LP-06, LP-20…LP-22; wave 2 = LP-11, LP-12, LP-18, LP-19. R2 = LP-07, LP-08, LP-23 (S1) **and LP-16 (R2 contract step + S1, rev 3 OPS-13)**. R3 (D3) = LP-09…LP-15, LP-24. LP-17 later. Accepted by the core (§L.2 rows LP-11, LP-12, LP-18 … LP-24; §K.2 P3 waves; merge order P3 wave 2 after P6); the LP-16 move is a rev 3 request (LAN-§27.3). | rf §3.2 raises; each raise is S; the R1 exit criteria (core §K.2) do not depend on wave 2 except the wow demo (core exit criterion 12), which needs the test link and the address card. |
-| LD31 | **The quality contract is enforced by three gates in one registry, and this part owns the honesty gate.** `src/lib/render/prepublish.ts` (core §M.1) runs `budget` (core, DB C2, C3, F1, F5, R1, R4, R5, K2, I1), `design` (P6, DB N1, N2, N8 and the hard rows of C, T, K, I, R, RTL) and `landing` (P3, `src/lib/render/prepublish/landing.ts`: DB D1, D2, I4, I5, LP-21, sample proof, promises, and rev 3 the password-field rule). A failing check answers `{ ok: false, error: "budget_blocked" \| "design_blocked" \| "honesty_blocked", items: GateItem[] }`; honesty has **no warn mode** (the `mode` switch can never soften a hard honesty item; which honesty items are hard and which are notes is decided by rule, LAN-§6.4, never by mode). LAN-§3.4 maps every baseline target to its gate, owner and test. **Rev 3 (ENGP-1):** the check also accepts a `StorePageDoc` (R2) and evaluates the landing sections hosted on store pages with the bound product's facts (LAN-§3.2.1). | design-baseline §4: the checklist runs only in the browser today (`src/lib/editor/checklist.ts:69-227`); nothing server-side refused a 27-section, 170 KB page with invented stats. Core D51, D52. |
+| LD31 | **The quality contract is enforced by three gates in one registry, and this part owns the honesty gate.** `src/lib/render/prepublish.ts` (core §M.1) runs `budget` (core, DB C2, C3, F1, F5, R1, R4, R5, K2, I1), `design` (P6, DB N1, N2, N8 and the hard rows of C, T, K, I, R, RTL) and `landing` (P3, `src/lib/render/prepublish/landing.ts`: DB D1, D2, I4, I5, LP-21, sample proof, promises, and rev 3 the password-field rule). A failing check answers `{ ok: false, error: "budget_blocked" \| "design_blocked" \| "honesty_blocked", items: GateItem[] }`; honesty has **no warn mode** (the `mode` switch can never soften a hard honesty item; which honesty items are hard and which are notes is decided by rule, LAN-§6.4, never by mode). LAN-§3.4 maps every baseline target to its gate, owner and test. **Rev 3 (ENGP-1):** the check also accepts a `StorePageDoc` (R2) and evaluates the landing sections hosted on store pages with the bound product's facts (LAN-§3.2.1); **rev 4:** which kinds reach it is design's `KIND_GATES` table behind `gateInputFor(doc, ctx)` (core §M.1 rule 2, DES-§8.13), and the field origins it reads come from the core's one builder `originFrom(prev, doc)` (core §M.1 rule 2), never from a landing-side copy. | design-baseline §4: the checklist runs only in the browser today (`src/lib/editor/checklist.ts:69-227`); nothing server-side refused a 27-section, 170 KB page with invented stats. Core D51, D52. |
 | LD32 | **The order form is the part of the page this track owns, and it carries the fold and form targets:** order form within the first 3,000 px at 390 (DB F1; DES-§5.2 I2 = 3.0 screens), default-state height ≤ 1,100 px (offer → name → phone → city → address when the store requires it → submit; note behind a disclosure), per-piece options only when the product declares variants and single-value pickers hidden (DB F2), visible input boundaries at ≥ 3:1 on every variant (DB F3), the post-purchase upsell only on the thank-you page (DB F4; the Offers v2 **order bump** stays a frozen pre-submit feature, generator default off, one compact row ≤ 56 px), no kicker on the form heading, ≤ 4 reveal nodes, no frosted glass inside the form, exactly one primary button, **touch ergonomics fixed (rev 3, UX-37: 52-56 px controls, 16 px text, 12 px gaps)**. **Rev 3 (ENGP-5, ENGP-6):** the height model gives the form a fixed **1.1-screen** entry with no density, spacing or line-height multiplier (its internal layout does not scale with page density), and `form:F1` is **soft at 1,100 px and hard only when the estimate's lower band (× 0.8) exceeds 1,400 px**; the Playwright `form` step measures the render against 1,100 px. | design-baseline §3.9, §5.9: the form sat on screen 14-17 and was 2,840 px tall; the `minimal` variant had underline-only inputs; "Trente secondes, on s'occupe du reste" was contradicted by a 2,800 px form; rev 2's hard 1,100 px on a 1.3-screen × airy × spacing estimate (≈ 1,316 px) refused every quiet-luxe page by construction (ENGP-5). |
 | LD33 | **Every number on a landing page traces to one merchant field, and the same fact never shows two values** (DB D1, D2): `auditNumbers(doc, facts)` (LAN-§6.4) classifies every numeral in visible text and in numeric section data against `allowedNumbers` (`src/lib/ai/guard.ts:52`: facts, price, compare-at, units, fee, delivery days, policy windows, countdown end, stock typed by the owner); anything else is `honesty:D1`; two values for one fact class is `honesty:D1` too. Stats, counters, ratings and review counts never render from a library (`honesty:D2`). **Rev 3 (ENGP-8): hard and soft by origin and class.** A finding is **hard** when the text was generated (origin `generated`), when the numeral belongs to a proof class (stat, counter, rating, review count, stock, price, compare-at, savings, countdown) or when it is a conflict; an owner-typed numeral of class `fact` / `other` ("3 couleurs", "100 % coton", "50 ml", "XL 2024") is a **soft** item with a one-tap attestation "this is a fact about my product" that records it as an attested fact of the page (audit `page.fact_attested`, the same audit-backed source the gate reads for the wizard's merchant facts; PageDoc v2 stays frozen), so the owner is never refused for her own product facts. | design-baseline §3.7: "30 s" vs "40 s" vs "30 s et c'est prêt" on one blender page; "+9 400 pièces" vs "1 000 colis"; "4,7 (312)" on every hero. Owner rule 4 bans invented prices, ratings, stock and reviews, not the seller's own "3 couleurs" (ENGP-8). |
 | LD34 | **Kicker-free COD surfaces.** The order form, the thank-you page, the tracking page and every add-on UI render no eyebrow label (`PageCopy.form.kicker`, `src/lib/ai/copy-schema.ts:148`, is kept optional and ignored by the renderer); their headings are the title alone. This frees the page kicker budget (≤ ⌈sections/3⌉, ra §9.9, DES-§3.2, rubric §4.7) for the sections that need one. | ra §1.3 finding: a required kicker in 15 sections is the "eyebrow above every section" tell (design-baseline §3.5: ~22 label pills per page). |
@@ -167,7 +179,10 @@ a valid `sg-test` token (LD16). **city key** = the `CityKey` slug of OPE-§10.1 
 in storage and APIs (LD4a); **city value** = `City.value` of `src/lib/markets/cities-ma.ts` ("Fès"), what the form posts
 and what `orders.city` stores. **confirmation lead** = `checkout.calendar.confirmationLeadDays`, the working days
 counted before the delivery window on pages the shopper sees before the call (LD5). **calling window** =
-`ops.callingWindow` read through `callingWindowFor(scope)` (LD29).
+`ops.callingWindow` read through `callingWindowFor(scope)` as operations' `EffectiveWindow` (LD29); it always exists
+(operations' `DEFAULT_WINDOW` until the owner edits it) and is **empty** when it has no callable range in the next 14
+days, which is the only "no hours" state this part renders as nothing. **report link** = the absolute "Report this
+store" link `platformOrigin() + "/report/<handle>"` every live landing surface carries (core D76, LAN-§3.9).
 
 ---
 
@@ -180,12 +195,12 @@ is merged). Acceptance here is the summary; the section holds the full list.
 
 | ID | Feature | Rel. | Track | Scope | Acceptance (summary) | Spec |
 |---|---|---|---|---|---|---|
-| LP-01 | Keep every landing feature, store-scoped, **and meet the quality contract** | R1.0 + R1 | T3, T4 (R1.0), P3 (+ P6 for section-plan targets) | The TENANCY-MAP §8.3 inventory, each item's tenancy behaviour; frozen contracts; the DB §5 targets mapped in LAN-§3.4, the order-form contract LAN-§3.5, the COD invariants LAN-§3.7 | Every row of LAN-§3.1 has its test green; `test:money`, `test:offers`, `test:php`, render-check budgets unchanged; the two-store attack suite covers pages, versions, leads, exports, media refs; `qa:publish-gates` refuses the design-baseline worst page (`budget_blocked`) and a sample-review page (`honesty_blocked`) and passes the §6 keep-list pages; the 41-page render set passes F1-F4 on every form variant | LAN-§3 |
+| LP-01 | Keep every landing feature, store-scoped, **and meet the quality contract** | R1.0 + R1 | T3, T4 (R1.0), P3 (+ P6 for section-plan targets) | The TENANCY-MAP §8.3 inventory, each item's tenancy behaviour; frozen contracts; the DB §5 targets mapped in LAN-§3.4, the order-form contract LAN-§3.5, the COD invariants LAN-§3.7; **rev 4:** the report link on every live landing surface (LAN-§3.9) | Every row of LAN-§3.1 has its test green; `test:money`, `test:offers`, `test:php`, render-check budgets unchanged (the `landing` chunk at tolerance 0 against its recorded budget and sha256); the two-store attack suite covers pages, versions, leads, exports, media refs; `qa:publish-gates` refuses the design-baseline worst page (`budget_blocked`) and a sample-review page (`honesty_blocked`) and passes the §6 keep-list pages; the 41-page render set passes F1-F4 on every form variant; every live landing, thank-you, tracking and legal fixture carries exactly one report link to the platform origin and no export does | LAN-§3 |
 | LP-02 | Block publishing sample and material-less proof, library figures and contradictory numbers | R1 | P3 | Proof sections with `sample: true` → publish error; proof material (two images, a video, ≥ 3 assets, merchant credits, anchored hotspots) required; `auditNumbers` (D1, D2); attestation on clearing; no `aggregateRating` JSON-LD (T3) | Publish of a doc with a visible sample proof section answers `{ ok: false, error: "honesty_blocked", items: [{ id: "honesty:sample", sectionId }] }`; the blender fixture ("30 s" / "40 s") answers `honesty:D1` naming both fields; a `beforeAfter` with one image answers `honesty:I4`; clearing `sample` writes `page.proof_attested`; render of any Store Gen page has no `aggregateRating` | LAN-§6 |
 | LP-03 | Delivery promise line by city | R1 | P3 | `delivery_zones` editor (slug city keys, LD4a), store calendar with the confirmation lead (LD5), ETA as dates (raised), line in the form, not-served handling, server texts | Empty zones → no line anywhere (render-check); ETA selftest green on cut-off, weekend, holiday, Ramadan time-zone and lead cases; "Fès picked in the form → zone found, ETA shown" (`test:delivery`); the line's fee equals the page's charged fee on 100 % of fixtures; the thank-you window is never later than the tracking window on the confirmation day | LAN-§7 |
 | LP-04 | Thank-you: confirm on WhatsApp + expectation block + tracking link | R1 | P3 | `assist-ty` chunk, store confirmation numbers, the calling window (`callingWindowFor`, LD29), templates, policy-driven steps | The prefilled text contains the order id; the expectation block shows the store's real number or nothing; `{when}` equals `nextCallableAt` of the same window the queue uses; the tracking link opens the order's status without a lookup | LAN-§8 |
 | LP-05 | Order tracking page | R1 | P3 | `/track` with three proofs, status timeline, carrier label and reference when operations stored them (rev 3, OPS-9), change/cancel requests before shipping, `noindex`, rate limits | Identical answers for unknown order / wrong digits (status, body, timing class); no full phone or address in any response; a request writes one `order_events` row and one notification | LAN-§9 |
-| LP-06 | Abandoned-lead recovery inbox | R1 | P3 | Leads per store with selection, statuses, assignment, one-tap WhatsApp, attribution, consent per market, retention | A lead is listed ≤ 2 s after the beacon; recovered/converted attribution matches LD12 on the fixture set; EU store pages carry no `endpoints.lead`; leads > 30 days are purged | LAN-§10 |
+| LP-06 | Abandoned-lead recovery inbox | R1 | P3 | Leads per store with selection, statuses, assignment, one-tap WhatsApp, attribution, consent per market, retention | A lead is listed ≤ 2 s after the beacon; recovered/converted attribution matches LD12 on the fixture set; EU store pages carry no `endpoints.lead`; leads > 30 days are purged; under an impersonating session the inbox, the lead sheet and ⌘K show masked names and notes (rev 4, core D70) | LAN-§10 |
 | LP-07 | Attach a landing to a catalog product | R2 | S1 | `pages.product_id`; mirrored items; own offers with override chips; `noindex` + canonical to the PDP by default; republish on product change | A product price change republishes every live attached landing as a `sync` version in ≤ 1 cron tick; no attached landing can publish a compare-at that is not real | LAN-§17 |
 | LP-08 | Campaign vs inherit theme mode | R2 | S1 (+ S2) | `pages.theme_mode` (`store` / `campaign`), brand-radius warning (design.md DS15) | An inherit page re-renders in place on a brand change; a campaign page keeps its genes | LAN-§17.6 |
 | LP-09 | Experiments (Fair test + Auto-optimize) | R3 | D3 | One engine for landing and store pages; mSPRT; Thompson; in-page and URL-split arms; guardrails | 10,000 simulated A/A tests give ≤ 5 % false "decided" under daily peeking; a price difference between arms is refused; no flicker (arm chosen before first paint) | LAN-§18 |
@@ -221,6 +236,49 @@ is merged). Acceptance here is the summary; the section holds the full list.
 | **SF-03** Store Health (rules) | PL-18 raised | `src/lib/health/rules/landing.ts`: setup, trust and conversion rules of LAN-§23.7 | P1 engine and job, P2 ring | every rule has a fixture with and without `minN`; no rule reads another store | LAN-§23.7 |
 | **SF-06** Pulse (contributor) | — | `src/lib/pulse/contributors/landing.ts`: `leadsDue`, `leadsNew`, `waIntentsNew` | P2 route, poller, registry | the contributor answers in ≤ 50 ms and a failure omits its keys | LAN-§23.8 |
 
+### LAN-§1.4 Proven by: one command per feature id (rev 4, CRIT17)
+
+Every feature id of LAN-§1.1 … §1.3 names the command and the fixture or harness step that proves its acceptance
+cell; a track knows which suite covers which id, and a row whose command is red blocks the release named in its row.
+`npm test` = offline (LAN-§25.1), `test:db` = DB-backed (§25.2), `e2e` = a production build (§25.3), `local` = the
+optional `qa/e2e` Playwright harness on the owner's PC (calibration and screenshots, never the only proof of a hard
+rule). Each test file cites the ids it proves in its header comment (`// proves: LP-03, SF-08`), and
+`scripts/qa/delivery-check.ts`, `kit-check.ts`, `tracking-check.ts` and `leads-check.ts` print them in their summary
+line, so the map is checkable by grep.
+
+| Id | Proven by (command · fixture or step) |
+|---|---|
+| LP-01 | `npm test`: render-check (`scripts/qa/render-cases/landing.ts`: the LAN-§3.1 rows, the order-form contract per variant, the `landing` chunk at tolerance 0, the report link), `test:money`, `test:offers`, `test:php`, `test:prepublish` (`landing.fixtures.ts`), `test:cod-invariants`; `test:db`: `test:tenancy` (`scripts/qa/tenancy-cases/landing.ts`); `e2e`: `qa:publish-gates` |
+| LP-02 | `npm test`: `test:prepublish` (sample review → `honesty:sample`, one-image before/after → `I4`, blender → `D1`, library "4,7 (312)" → `D2`), `test:honesty`; render-check (no `aggregateRating`) |
+| LP-03 | `npm test`: `test:delivery` (`scripts/qa/delivery-check.ts` over `scripts/qa/fixtures/city-key.json`: "Fès picked in the form", the lead grid, the key-shape case), render-check (zones empty → no data block; fee parity on `duo` / `tshirt`); `local`: step `delivery` |
+| LP-04 | `npm test`: `test:landing-addons` (`assist-ty` text = `waConfirmText` for the same order; `{when}` = `nextCallableAt` on the shared window fixture), render-check (`thanks-page` cap, byte identity with blocks off); `local`: step `thank-you` |
+| LP-05 | `test:db`: `test:tracking` (`scripts/qa/tracking-check.ts`: five failure classes byte-identical, 11th lookup refused, request → one event + one notification, no phone digits beyond 4); `e2e`: `qa:headers` (`/track` row) |
+| LP-06 | `test:db`: `test:leads` (`scripts/qa/leads-check.ts`: the LD12 fixture set, intents, purge, the impersonation canary on `listLeadRows`); `test:tenancy` role matrix |
+| LP-07 | `npm test` (R2): `test:catalog` (S1: `sync` republish within one tick, compare-at refused when not real) |
+| LP-08 | `npm test` (R2): render-check inherit vs campaign fixture after a brand change |
+| LP-09 | `npm test` (R3): `test:experiments` (2,000 seeded A/A; 10,000 in `test:slow`); render-check arms fixture |
+| LP-10 | `test:db` (R3): `test:leads`-style chain fixture in `scripts/qa/chain-check.ts` (D3) |
+| LP-11 | `npm test`: `test:wa-price` (`duo`, `tshirt`, `colors`); `test:db`: `test:leads` (refs, 72 h dedupe); `local`: step `wa-order` |
+| LP-12 | `npm test`: `test:links` (query rule, typed targets, open-redirect fixtures, S-mode origins); `e2e`: `qa:headers` (`go` 308 / 410 rows) |
+| LP-13 | `test:db` (R3): `scripts/qa/schedules-check.ts` (D3; one tick, catch-up once) |
+| LP-14 | `local` (R3): Playwright network log (no video bytes before interaction) + render-check poster-as-LCP fixture |
+| LP-15 | `test:db` (R3): SQL fixtures in `scripts/qa/analytics-check.ts` (D3; n < 20 hides) |
+| LP-16 | `npm test` (R2): `test:money` and `test:php` v3 cases, `test:catalog` PDP = attached landing per zone, `test:php` `export:runtime_v3_unsupported` |
+| LP-17 | own acceptance when scheduled |
+| LP-18 | `npm test`: `test:kit` (`scripts/qa/kit-check.ts`, 60 eval fixtures, Cloud AI off, < 300 ms), `test:links`; `test:db`: staleness after a republish |
+| LP-19 | `npm test`: `test:test-orders` (`src/lib/testing/selftest.ts`); `e2e`: `test:public-api` (test order skips CAPI / Sheets / stats), `qa:wow-demo` step `landing-test-order` (revenue stays 0) |
+| LP-20 | `test:db`: `test:tenancy` slug-history cases (308 with a byte-identical query, no cross-store redirect) |
+| LP-21 | `npm test`: `test:prepublish` (`honesty:countdown_reset` refuses, `countdown_extended` audits), checklist fixtures (`src/lib/editor/selftest-checklist.ts`), `test:generator` (no `countdownEnd` / `stockLeft` written) |
+| LP-22 | `test:db`: vitals SQL fixture in `scripts/qa/leads-check.ts` (`getPageVitals`, n < 20 hides) |
+| LP-23 | `test:db` (R2): `scripts/qa/copy-check.ts` (S1; B's asset ids only) |
+| LP-24 | `test:db` (R3): `scripts/qa/saved-blocks-check.ts` (D3) |
+| SF-01 | = LP-18 + `qa:wow-demo` address-card step |
+| SF-03 | `npm test`: `test:health` (P1's harness imports `src/lib/health/rules/landing.ts` fixtures with and without `minN`) |
+| SF-05 | = LP-19 |
+| SF-06 | `npm test`: `test:pulse` (contributor shape, ≤ 50 ms, failure omits keys) |
+| SF-08 | = LP-03 + `test:catalog` (R2) on the same `city-key.json` |
+| SF-10 | = LP-09 |
+
 ---
 
 ## LAN-§2 Data: refined tables, new tables, settings keys
@@ -234,7 +292,21 @@ them. Revision 2 changes no column of revision 1; it records each table's core d
 things** (LAN-§29): `delivery_zones.cities` holds `CityKey` slugs (OPS-1) and `short_links` stores its destination as a
 typed reference instead of a path string (SEC-6); it also records that `orders.is_test`, `leads.is_test`,
 `orders_store_test_idx` and `page_slug_history` must be cut in **0004** (ENGC-1), because T3's R1.0 code reads and
-writes them before 0005 exists.
+writes them before 0005 exists (core revision 3 did so: core §D.2, §D.4, §Q.8 LAN R8). **Revision 4 changes no
+column.** It adds two rules core revision 3 made binding:
+
+- **Write capability is a type (core D71, lint L6).** Every function of this part that inserts, updates or deletes a
+  tenant table takes a `WriteScope` (or a `StoreCtx` whose `scope` is one): `saveZones`, `upsertLead` and the lead
+  repositories behind the inbox actions, `markLeadConverted`, the WhatsApp-intent insert, `createShortLink` /
+  `pauseShortLink` / `resumeShortLink`, the campaign service, `recordSlugMove`, `recordFacts`, the `page.fact_attested`
+  / `page.proof_attested` writers, `mintTestLink` (its audit row), the `links.flush` and `leads.followups` jobs and the
+  order hook (system scopes); every read (`listZones`, `zoneLineFor`, `zonesForCheckout`, `factsFor`,
+  `getPageVitals`, `resolveLinkTarget`, `listLeadRows`, `confirmationLeadSuggestion`) takes a `StoreScope`, so the
+  impersonation and platform scopes reach the reads and never the writes.
+- **Masking is a property of the scope (core D70, SEC-5).** The leads repository is this part's
+  (`src/lib/leads/read.ts`, LAN-§10.2): it returns every row through P1's `maskIfImpersonation(scope, row)`, so the
+  inbox, the lead sheet, ⌘K and the pulse render masked names and notes under "View as store" with no per-component
+  work, like operations' order and customer repositories.
 
 ### LAN-§2.1 Tables this part refines (core §D.9)
 
@@ -493,18 +565,34 @@ confirmation: z.object({
 ```
 
 The calling hours live once, in operations' `ops.callingWindow` (OPE-§2.9), read through the P0 stub
-`callingWindowFor(scope): Promise<CallingWindow>` (`src/lib/callcenter/window.ts`, P4 implements; the stub answers
-`null` = "no window set", which every consumer renders as nothing):
+`callingWindowFor(scope): Promise<EffectiveWindow>` (`src/lib/callcenter/window.server.ts`, P4 implements; core D73,
+§K.2 P0; **rev 4, CRIT3: the stub never answers `null`**, revision 3's `CallingWindow | null` is withdrawn because
+operations owns the type and `ops.callingWindow` always has a value, `DEFAULT_WINDOW` until the owner edits it):
 
 ```ts
-// consumed shape (defined by operations, re-exported by src/lib/delivery/types.ts for this part's bundles)
-export interface CallingWindow { tz: string; days: Record<1 | 2 | 3 | 4 | 5 | 6 | 7, { from: string /* HH:MM */; to: string }[]>; closedDates: string[]; openOverrideUntil: string | null }   // ISO weekdays 1-7, like checkout.calendar.workdays
+// src/lib/delivery/types.ts re-exports operations' types for this part's bundles; it declares no window type of its own
+export type { EffectiveWindow, Range } from "@/lib/callcenter/window";          // OPE-§5.5: tz, days (ISO weekdays 1-7, core D73), closedDates, overrides, openOverrideUntil
+export { nextCallableAt, rangesForDay, hoursText } from "@/lib/callcenter/window";   // P4's pure, isomorphic helpers (assist-ty bundles nextCallableAt + rangesForDay)
+// src/lib/landing/hours.ts (P3, pure): the only window logic of this part, built on rangesForDay, never on `days` directly
+export function windowIsEmpty(w: EffectiveWindow, now: Date, horizonDays = 14): boolean;                       // no callable range in the next 14 store days
+export function weekHoursText(w: EffectiveWindow, locale: Locale, dateLocale: string, now: Date): string;   // "lun.-sam. 09:30-13:00, 14:30-21:00 · ven. 09:30-12:15, 14:30-21:00", equal days grouped
 ```
 
+This part **never reads `w.days` by index or key**: every computation goes through `nextCallableAt`, `rangesForDay`
+and `hoursText` (P4) or `weekHoursText` (P3, over `rangesForDay` for the next seven store days), so the ISO convention
+lives in one file (`window.ts`) whatever container operations settles on for `days` (CRIT3 asks operations for
+`Record<1 … 7, Range[]>`, LAN-§27.4 N2; this part needs no change either way). "No hours" = `windowIsEmpty(w, now)`:
+every consumer then renders nothing (no `{when}`, no hours line), never a default sentence. The default window is a
+real setting (the queue's ladder runs on it, OPE-§5.1), so the thank-you may promise from it; the "After the order"
+card shows those hours directly under the caller phone (LAN-§8.4), so the owner sees the promise she makes in the same
+place she types the number that calls.
+
 Consumers in this part: the thank-you `{when}` (`nextCallableAt`, LAN-§8.3), the `confirmation_call` claim of
-`honesty:promise` (LAN-§6.3), the contact legal page's hours line and the tracking `help.hours` (LAN-§9.2), the kit's
-call script header (LAN-§13.3). The "After the order" card (LAN-§8.4) edits the window with operations' own component, so
-an owner sees one set of hours in the thank-you preview and in `/team/callcenter`.
+`honesty:promise` (LAN-§6.3), the contact legal page's hours line (`weekHoursText`) and the tracking `help.hours`
+(`hoursText`, LAN-§9.2), the kit's call script header (`weekHoursText`, LAN-§13.3). The "After the order" card
+(LAN-§8.4) edits the window with operations' own component, so an owner sees one set of hours in the thank-you preview
+and in `/team/callcenter`. `test:delivery` and `test:ops` read one window fixture (`scripts/qa/fixtures/calling-window.json`,
+P4's, keyed the way operations' type is) so the thank-you `{when}` and the queue's `isCallable` agree on every case.
 
 Message template kinds this part defines in `message_templates` (operations' table, core §D.5; defaults in
 `src/lib/landing/templates.ts`, ar/fr/en, LAN-§24.2): `customer_confirm` (thank-you prefill), `wa_order` (WhatsApp order
@@ -568,7 +656,7 @@ export interface LandingCheckContext {
   saas: true;                                   // always true in Store Gen; keeps the function usable by fixtures
   zones: { enabled: boolean; count: number; hasMarketList: boolean; feesByTopCity: Record<CityKey, number | null> };   // rev 3: the five main cities' zone fees for delivery:fee_mismatch
   policiesReviewed: boolean;                    // policies.reviewedAt set
-  confirmation: { callerPhone: boolean; whatsapp: boolean; callingWindow: boolean };   // rev 3: callingWindowFor(scope) !== null
+  confirmation: { callerPhone: boolean; whatsapp: boolean; callingWindow: boolean };   // rev 4 (CRIT3): !windowIsEmpty(await callingWindowFor(scope), now); the stub never answers null
   waOrder: boolean;                             // landing.waOrder.enabled
   addressMode: "required" | "optional";         // rev 3 (UX-31): the resolved checkout.addressMode (market default applied)
   leadDays: number;                             // rev 3 (OPS-12): checkout.calendar.confirmationLeadDays ?? 0
@@ -590,7 +678,7 @@ item appears (core §M.5). The editor's server preload builds `facts`, `origin` 
 | `honesty:sample` (per section) | **error** (proof types) / warning (others) | LD17: `reviews`, `socialProof`, `stats`, `beforeAfter` visible with `sample: true` | the section |
 | `honesty:I4` (per section) | **error** | a visible proof section without its material: `beforeAfter` with < 2 distinct asset ids, `video` without `src` or `url`, `gallery` / `socialProof:ugc` / `lookbook` with < 3 distinct assets, a photo credit whose name is not in `doc.product.credits` (merchant-typed) | the section |
 | `honesty:I5` (per section) | **error** | `showcase:hotspots` (or any variant with callouts) whose anchors were not placed by the owner (`data.hotspots[].anchor.by !== "owner"`) | the section |
-| `honesty:D1` (per field) | **error** when the field is generated text, the numeral is of a proof class (stat, counter, rating, review count, stock, price, compare-at, savings, countdown) or two different values describe one number class; **warning with a one-tap attestation** when the numeral is owner-typed and of class `fact` / `other` (rev 3, ENGP-8; LAN-§6.4) | the field; the warning's fix opens `FactAttestSheet` ("«3 couleurs» is a fact about my product") |
+| `honesty:D1` (per field) | **error** when the field is generated text, the numeral is of a proof class (stat, counter, rating, review count, stock, price, compare-at, savings, countdown) or two different values describe one number class; **warning with a one-tap attestation** when the numeral is owner-typed and of class `fact` / `other` (rev 3, ENGP-8) | a numeral in visible text that is not in `allowedNumbersFor(doc, store)`, or two values of one number class on one page (`auditNumbers`, LAN-§6.4) | the field; the warning's fix opens `FactAttestSheet` ("«3 couleurs» is a fact about my product") |
 | `honesty:D2` (per section) | **error** | `stats`, `socialProof:counter`, `reviews:summary` or `product.rating` rendering a library default or an unattested value | the section / Product tab |
 | `honesty:password_field` (per field) | **error** (rev 3, SEC-18) | a `fields` option group, form extra field or any rendered control whose label or type is a password, one-time code, card number, CVV or bank identifier (`input[type=password]`, `autocomplete` starting `cc-` or `one-time-code`, labels matching the LAN-§6.4 `SENSITIVE_FIELD_RE` in ar/fr/en): never legitimate on a COD page | the option group / Form tab |
 | `honesty:rating_unattested` | warning | `product.rating` set; the builder asks the attestation when the value is typed (LAN-§6.1) | Product tab |
@@ -605,9 +693,9 @@ item appears (core §M.5). The editor's server preload builds `facts`, `origin` 
 | `delivery:lead-unset` | warning (rev 3, OPS-12) | zones on with ETA days and `confirmationLeadDays` null ("How long until you usually confirm by phone? The delivery window counts it") | `appHref("/settings/delivery#lead")` |
 | `policies:unreviewed` | warning | `policies.reviewedAt` is null ("The thank-you page and the AI only promise what your policies say") | `appHref("/settings/policies")` |
 | `thanks:no-caller` | warning | thank-you expectation on and no `confirmation.callerPhone` | `appHref("/settings/general")` |
-| `thanks:no-window` | warning (rev 3, OPS-11) | thank-you expectation on and `callingWindowFor(scope)` null ("Set your calling hours so the thank-you page can say when you call") | `appHref("/settings/checkout#calling-window")` |
+| `thanks:no-window` | warning (rev 3, OPS-11; rev 4 condition, CRIT3) | thank-you expectation on and the calling window has no callable range in the next 14 days (`windowIsEmpty`, LAN-§2.3: every day closed, or closed dates covering the horizon) ("Your calling hours are closed for the next two weeks, so the thank-you page can't say when you call") | `appHref("/settings/checkout#calling-window")` |
 | `wa:no-number` | error | `landing.waOrder.enabled` and neither `form.whatsapp.number` nor `store.whatsapp` | `appHref("/settings/general")` |
-| `form:F1` | **warning at > 1,100 px, error only when the estimate's lower band exceeds 1,400 px** (`estimate × 0.8 > 1,400`, rev 3 ENGP-5 / ENGP-6; the message says "estimated", `vars.estimated = 1`) | the form's default-state height from the height model's multiplier-free `orderForm` entry (LAN-§3.5 OF2; `src/lib/design/heights.ts`, DES-§5.3) | Form tab |
+| `form:F1` | **warning at > 1,100 px, error only when the estimate's lower band exceeds 1,400 px** (`estimate × 0.8 > 1,400`, rev 3 ENGP-5 / ENGP-6, the core's `HEIGHT_BAND = 0.8` constant of `budget-limits.ts`; the message says "estimated", `vars.estimated = 1`) | the form's default-state height from the height model's multiplier-free `orderForm` entry (LAN-§3.5 OF2; `src/lib/design/heights.ts`, DES-§5.3). **Rev 4:** this is the **one** item for the form's height; core §M.2's `budget:F1` row keeps the form's **position** (soft > 3,000 px, hard when `top × 0.8 > 3,000`) and its soft cell's "or form height > 1,100 px" clause is asked to go (LAN-§27.4 N3), so one measurement never yields two notes with two ids | Form tab |
 | `form:F2` … `form:F4` | **error** (F3) / warning (F2 single-value picker) | the order-form contract of LAN-§3.5 | Form tab |
 | `store:contact`, `store:legal` | warning | unchanged rules, fix links through `appHref` | — |
 
@@ -632,10 +720,10 @@ export type HonestyGateId =
   | "form:F1" | "form:F3";                                   // form rows live here because P3 owns the form section
 export interface LandingGateInputs {
   zones: DeliveryZoneRow[]; policies: StorePolicyFacts; confirmation: ConfirmationValue; checkout: CheckoutValue; landing: LandingValue;
-  callingWindow: CallingWindow | null;                                            // rev 3 (OPS-11): callingWindowFor(scope)
+  callingWindow: EffectiveWindow;                                                 // rev 4 (CRIT3): callingWindowFor(scope), never null; "no hours" = windowIsEmpty(w, ctx.now)
   attested: ReadonlySet<string>;                                                  // "<sectionId>" | "rating" from audit page.proof_attested
   attestedFacts: ReadonlySet<string>;                                             // rev 3 (ENGP-8): normalised numerals from audit page.fact_attested (factsFor(scope, pageId), incl. the wizard's merchant facts)
-  origin: ReadonlyMap<string, "generated" | "owner">;                             // rev 3 (ENGP-8): per text-field path, from the version's provenance block + the builder's edit marks (the same map design's GateInput.origin uses, DES-§8.1)
+  origin: ReadonlyMap<string, "generated" | "owner">;                             // rev 4: folded from the core's one builder originFrom(prev, doc) (core §M.1 rule 2): cloud | local | engine | library → "generated", owner → "owner"; the same map design's GateInput.origin reads, never rebuilt here
   product?: { doc: ProductDoc; facts: string[] } | null;                          // rev 3 (ENGP-1): the bound product for a StorePageDoc section (STO-§6.2 `bind`)
 }
 export function landingGateItems(ctx: PrePublishCtx, inputs: LandingGateInputs): GateItem[];   // pure over its inputs, ≤ 40 ms; accepts PageDoc and StorePageDoc (below)
@@ -663,15 +751,21 @@ registerPublishListener("landing", async (ctx) => { /* kit staleness (offers_has
   or `form`). The six utility kinds made by `defaultTemplate` (`product`, `collection`, `search`, `cart`, `checkout`,
   `not_found`) host no landing section and yield 0 items. `test:prepublish` carries one fixture per store kind (S1
   supplies the docs, P3 the expected items: `home` with a sample `reviews` section → `honesty:sample`; `page` with
-  "94 %" → `honesty:D1`; the six utility defaults → 0 items).
+  "94 %" → `honesty:D1`; the six utility defaults → 0 items). **Rev 4:** the core's registry calls this check for the
+  kinds design's `KIND_GATES` table lists behind `gateInputFor(doc, ctx)` (core §M.1 rule 2, DES-§8.13); the
+  `honesty:password_field` row also runs on utility kinds through the storefront's mirror
+  `storefront:form_field_foreign` (core D76), so a checkout page can never ask for a card number either.
 - `GateItem.title` / `detail` are message keys (`landing.gate.<id>`, LAN-§6.5, ar/fr/en, `test:i18n-coverage`); `vars`
   carry the measured value and the limit ("3 photos needed, 1 given"); `fix` deep-links the builder tab or section.
 - The check runs in `block` mode for publish and every export (an export is a publish to someone else's server, core
   §M.1 rule 5) and in `warn` mode on re-renders (notes only, never a refusal of a live page).
 - `prev` (the live version's doc) comes from `ctx.prev`; `attested` and `attestedFacts` are read from the audit log
   (`page.proof_attested` and `page.fact_attested` rows of this page, `factsFor(scope, pageId)` in
-  `src/lib/landing/honesty/facts.server.ts`, cached 60 s per store); `origin` from the version's provenance block
-  (`generation_source`, the generated field paths) and the builder's edit marks.
+  `src/lib/landing/honesty/facts.server.ts`, cached 60 s per store); `origin` from the core's shared builder
+  `originFrom(prev, doc)` (`src/lib/render/prepublish.ts`, core §M.1 rule 2: the version's provenance block,
+  `generation_source`, the generated field paths and the builder's edit marks), folded to `generated` / `owner` as typed
+  above; the checklist's `LandingCheckContext.origin` (LAN-§3.2) is the same fold of the same builder's output, served
+  by the editor preload, so the panel and the gate classify a field identically.
 - `test:prepublish` (core, `src/lib/render/selftest-prepublish.ts`) imports this part's fixtures
   (`src/lib/render/prepublish/landing.fixtures.ts`): a sample-review page, a one-image before/after, a still "video",
   the blender "30 s / 40 s" page, "4,7 (312)" from the library, a moved-back countdown, a countdown in two sections,
@@ -695,19 +789,25 @@ and "Not set" as a real state (never a default promise):
 | Returns and exchange | accepted?, window, who pays, condition text | `returns`, `exchange` | legal returns page, FAQ, AI guard |
 | Refund | method, within days | `refund` | legal returns page |
 | Warranty | months, text | `warranty` | FAQ, AI guard |
-| Contact | channels; the hours line is read-only here ("Your calling hours: Mon-Sat 09:30-19:00 · edit in After the order"), from `callingWindowFor(scope)` (rev 3, OPS-11) | `contact.channels` | legal contact page, tracking help (hours from the calling window) |
+| Contact | channels; the hours line is read-only here ("Your calling hours: Mon-Sat 09:30-13:00, 14:30-21:00 · edit in After the order"), `weekHoursText(await callingWindowFor(scope), …)` (rev 3, OPS-11; rev 4 the P3 helper of LAN-§2.3) | `contact.channels` | legal contact page (`weekHoursText`), tracking help (`hoursText`, today's ranges) |
 | Your own lines | ≤ 6 lines ar/fr/en, ≤ 140 chars each | `extras` | AI prompt (ai.md AI-§F.2 row "Store policies"), FAQ |
 
 - A Morocco note sits under Returns: "Moroccan law 31-08 gives buyers of distance sales a withdrawal period (7 days in
   general). Your legal pages show it. Needs legal review." The returns legal page shows the law's line from the legal
   template (core D39), not from the store's answer.
+- **Brand terms at every write (rev 4, core D76, the P0 stub `checkBrandTerms(kind, value)` of P1):** `savePoliciesAction`
+  runs it on every free-text field of the setting (`extras[].text`, `returns.condition`, `warranty.text`, each locale):
+  `exact` refuses for non-staff with `brand_protected` (the limit-sheet variant, audit `store.brand_term.refused`),
+  `near` saves and lets P1 write the console flag; the nightly `platform:brand_term_live` rule (P1) also reads the
+  legal pages this part renders.
 - Saving sets `reviewedAt` and enqueues `render_jobs` reason `store_info` for live pages whose thank-you or legal pages
   change (LAN-§8.5). The legal pages render on request (they read the facts at serve time, PUB-03), so they change at once.
 - `policyLines(facts, locale): string[]` (≤ 6 lines, ≤ 300 tokens; consumed by ai.md AI-§F.2) and
   `policyAllows(facts, claim)` with `claim ∈ "delivery_time" | "free_delivery" | "return_window" | "exchange" | "inspection" | "warranty" | "refund"`
   (consumed by `src/lib/ai/guard-policies.ts`, ai.md AI-§D.2 rule 3) live in `src/lib/policies/index.ts` (pure, P3).
 - Legal content: `src/landing/legal/content.ts` gains a `returns` kind and reads `StorePolicyFacts` (request Q16 moves
-  `src/landing/legal/**` to P3 for R1 product; T3 delivers the route and the store facts in R1.0).
+  `src/landing/legal/**` to P3 for R1 product; T3 delivers the route and the store facts in R1.0). Every legal page
+  renders the report link in its footer row (LAN-§3.9, rev 4, CRIT15).
 
 Acceptance: an unset answer never produces a sentence on any page or in any AI output (fixture: every card unset → the
 legal pages show the visible-gap lines, the thank-you shows no inspection step, the guard rejects "livraison gratuite");
@@ -725,11 +825,11 @@ who enforces it, where this track contributes, and the test that proves it on la
 
 | Target (DB) | Rule on a landing page | Gate / owner | What this track builds | Proven by |
 |---|---|---|---|---|
-| N1, N2, N8 novelty | genome `d ≥ 0.40` in the niche, `≥ 0.25` platform-wide, `d_page ≥ 0.30` vs the store's last 10 pages; headline shingle share ≤ 25 % | `design` hard (core §M.4), P6 | nothing; the kit's `ad.brief` angles reuse the structure tags P6 produces | `test:design`, `test:design-db`, `qa:wow-demo` (two stores from the same photos `d ≥ 0.25`) |
+| N1, N2, N8 novelty | genome `d ≥ τ_niche(n)` in the niche (0.40 at ≤ 20 stores falling to 0.30 at ≥ 100), `≥ 0.25` platform-wide, `d_page ≥ 0.30` vs the store's last 5 published pages of the same product; headline shingle share ≤ 25 % | `design` hard (core §M.4), P6; **rev 4:** N8 is hard on generated lines only (origin `cloud`, `local`, `engine`) and soft on owner-typed and copy-library lines (core §M.4, §M.1 rule 2), so an owner's own headline is never refused for sounding like the niche | nothing; the kit's `ad.brief` angles reuse the structure tags P6 produces | `test:design`, `test:design-db`, `qa:wow-demo` (two stores from the same photos `d ≥ 0.25`) |
 | N3 … N7 variety | ≥ 60 distinct orders per 100 pages, no 4-section subsequence > 50 %, hero family ≤ 30 % per niche, product and locale enter the RNG | engine, P6 (DES-§5 grammar replaces `TEMPLATES`, `src/lib/generator/plan.ts:90-97`) | the order form keeps its 4 variants and never forces a position: I2 (form ≤ 3.0 screens) is a grammar invariant, not a fixed slot | `qa:design-corpus` (140 plans) |
 | C1 hero families | ≥ 6 families, one ≤ 30 % per niche | engine, P6 (`quiet`, `cinema`, `index` added to `src/landing/sections/hero/index.tsx:108-145`) | — | `qa:design-corpus` |
-| **C2 fold contract** | product image, price, one primary CTA and the COD line inside the first 844 px at 390 for every hero family and locale | `budget:C2` hard, core + the hero family's declared fold layout (P6) | the **COD line** is this part's string (`form.reassurance` / "خلّص ملي توصلك" / "Vous ne payez qu'à la réception") and must be rendered by the hero price block, not only in the form; the sticky bar never counts as the fold CTA | `qa:publish-gates` (Playwright 390 × 844, ar and fr, every hero family) |
-| **C3 length** | 8-14 in-flow sections, ≤ 12,000 px at 390 soft; > 16 sections or > 15,000 px hard; form starts ≤ 3,000 px | `budget:C3`, `budget:F1` hard, core; the height model DES-§5.3 | the form's height entry in the model: **1.1 screens in the F1 default state, multiplier-free** (rev 3, ENGP-5; LAN-§3.5 OF2 gives the additive terms), declared through `features.h` of `orderForm` with `fixed: true` so `estimateHeights` skips the density / spacing / G21 multipliers for it; the thank-you page ≤ 3 screens | `test:prepublish` (a 27-section fixture refused), `qa:publish-gates` |
+| **C2 fold contract** | product image, price, one primary CTA and the COD line inside the first 844 px at 390 for every hero family and locale | `budget:C2` hard, core + the hero family's declared fold layout (P6); **rev 4 (core §M.2 bands):** hard when a fold item's estimated top × 0.9 > 844 px (> 938 px), a soft `estimated` note in 760-938 px; the server decides from the model alone | the **COD line** is this part's string (`form.reassurance` / "خلّص ملي توصلك" / "Vous ne payez qu'à la réception") and must be rendered by the hero price block, not only in the form; the sticky bar never counts as the fold CTA | `test:prepublish` (the model's `FoldReport` per hero family × ar / fr); `qa:publish-gates` (Playwright 390 × 844) is the **calibration** check of the model, never the measurer (core §M.2) |
+| **C3 length** | 8-14 in-flow sections, ≤ 12,000 px at 390 soft; > 16 sections (exact) or estimated height × 0.8 > 15,000 px (> 18,750 px estimated) hard, 15,000-18,750 px a soft `estimated` note (core §M.2 rev 3); form starts ≤ 3,000 px (hard when `top × 0.8 > 3,000`) | `budget:C3`, `budget:F1` hard, core; the height model DES-§5.3 | the form's height entry in the model: **1.1 screens in the F1 default state, multiplier-free** (rev 3, ENGP-5; LAN-§3.5 OF2 gives the additive terms), declared through `features.h` of `orderForm` with `fixed: true` so `estimateHeights` skips the density / spacing / G21 multipliers for it; the thank-you page ≤ 3 screens | `test:prepublish` (a 27-section fixture refused), `qa:publish-gates` |
 | C4 composition devices | ≥ 1 full-bleed moment, ≥ 1 boundary crossing, ≥ 1 quiet screen | Q, P6 | the order form may be the boundary-crossing element (`split` variant: the product photo crossing the panel edge, DESIGN.md §1.2) | `qa:design-corpus` |
 | C5 opener grammar, kickers | ≥ 5 opener structures; eyebrow on ≤ 30 % of sections; kicker budget ⌈n/3⌉ | Q, P6 + P7 (`PageCopy` kickers optional, `src/lib/ai/copy-schema.ts:113-151`) | LD34: no kicker on the form, thank-you, tracking, add-ons | `test:copylib`, render-check (form heading has no `.lp-kicker`) |
 | C6, C7 alignment, density | ≤ 2 centred sections; A-B-A-C density | Q, P6 | the form is start-aligned on mobile (labels above inputs, DB F3, rubric §4.6) | render-check |
@@ -759,7 +859,7 @@ who enforces it, where this track contributes, and the test that proves it on la
 | D5 specificity | ≥ 50 % of hero and benefit sentences carry a fact, a number, a sensory verb or a COD fact | Q, P6 | the delivery line and the COD line are COD facts the detector counts (DES-§9.6) | `test:design` |
 | D6 lexicon | hype guard; ≤ 1 "!" per page | `design` hard on the list, P6 + P7 | this part's copy has 0 "!" and 0 em/en dashes (LAN-§24.2) | `test:copylib` grep |
 | RTL1 … RTL8 | ranges, timers, phones in `<bdi dir="ltr">`; dual/plural forms; no rotated Arabic; price cluster one unit; addresses LTR; clip gate; logical properties; ar + fr at 390 and 1440 in CI | `design` hard (RTL1-7), P6 + **P3 for its HTML** | the countdown day label already uses `Intl.PluralRules` forms (`src/landing/runtime/countdown.ts:8-11`); the WhatsApp tab (`whatsappFloat:tab`) is removed from the pools by P6 (RTL3); the tracking page, thank-you and the delivery line pass RTL1, RTL4, RTL5 by construction | render-check ar fixtures; `qa:headers`; Playwright ar steps |
-| **F1 form position and size** | top ≤ 3,000 px at 390; height ≤ 1,100 px default state | `budget:F1` hard (position), core; **`form:F1` (height), P3: soft > 1,100 px, hard when `estimate × 0.8 > 1,400 px`** (rev 3, ENGP-5 / ENGP-6: the model's accepted error is 20-25 %, so a hard refusal needs the lower band over the limit; the render is measured by Playwright) | LAN-§3.5 OF2 | height model (`test:prepublish`: every variant × density × locale passes in the default state; the 2,840 px baseline form refused) + Playwright `form` step (rendered default-state height ≤ 1,100 on the 41-page set) |
+| **F1 form position and size** | top ≤ 3,000 px at 390; height ≤ 1,100 px default state | `budget:F1` (position), core: soft > 3,000 px, hard when `top × 0.8 > 3,000 px` (rev 4, the core's §M.2 band; its "or form height" soft clause is asked to go, LAN-§27.4 N3); **`form:F1` (height, the one height item), P3: soft > 1,100 px, hard when `estimate × 0.8 > 1,400 px`** (rev 3, ENGP-5 / ENGP-6: the model's accepted error is 20-25 %, so a hard refusal needs the lower band over the limit; the render is measured by Playwright) | LAN-§3.5 OF2 | height model (`test:prepublish`: every variant × density × locale passes in the default state; the 2,840 px baseline form refused) + Playwright `form` step (rendered default-state height ≤ 1,100 on the 41-page set) |
 | **F2 options** | per-piece options only with declared variants; one-value pickers hidden; per-piece rows collapsed behind a summary | **P3** (hard in the renderer: a one-value group is never rendered) | LAN-§3.5 | render-check `duo`, `tshirt`, `colors` fixtures |
 | **F3 inputs** | visible boundaries ≥ 3:1 on every variant | **`form:F3` hard, P3** | LAN-§3.5 (`minimal` loses underline-only fields) | render-check contrast on `.lp-of__f input` per variant |
 | **F4 upsell** | post-purchase upsell on the thank-you page only | **P3** (the thank-you owns it; the frozen bump is pre-submit by definition, LD32) | LAN-§3.5, LAN-§8 | render-check: no `.lp-upsell` in the form |
@@ -804,7 +904,7 @@ These documents are this part's HTML (no section plan), so their budgets are set
 
 | Surface | Budget | Notes |
 |---|---|---|
-| Thank-you page | ≤ 3 screens at 390; **0 aurora, 0 grain (rev 3, UX-38):** the hero's colour moment is `.lp-ty__tint`, a flat accent slab (`--lp-accent-soft`) or one product-tinted radial at ≤ 10 % alpha derived from the theme's accent, no mesh, no noise texture (`.lp-ty__aurora` of `ThankYou.tsx:347` is removed; render-check asserts 0 `.lp-ty__aurora` / `adm-aurora` / `adm-grain` and no `filter: url(#noise)` in the thank-you CSS); 0 glass; ≤ 8 reveal nodes (today 5, `src/landing/thankyou/ThankYou.tsx`); one primary action (the upsell "add" while its window runs, else the confirm pill); the timeline shows verbs, never "1 / 2 / 3" labels; order id, total and phone in `<bdi dir="ltr">` with `tabular-nums`; the recap is a `<dl>`; the legal links a hairline-separated row | the add-on blocks (LAN-§8) add ≤ 2 elements inside existing regions, never a new section; HTML with all blocks off is byte-identical to today's **except** the colour-moment element (`.lp-ty__aurora` → `.lp-ty__tint`), covered by an updated render-check golden |
+| Thank-you page | ≤ 3 screens at 390; **0 aurora, 0 grain (rev 3, UX-38):** the hero's colour moment is `.lp-ty__tint`, a flat accent slab (`--lp-accent-soft`) or one product-tinted radial at ≤ 10 % alpha derived from the theme's accent, no mesh, no noise texture (`.lp-ty__aurora` of `ThankYou.tsx:347` is removed; render-check asserts 0 `.lp-ty__aurora` / `adm-aurora` / `adm-grain` and no `filter: url(#noise)` in the thank-you CSS); 0 glass; ≤ 8 reveal nodes (today 5, `src/landing/thankyou/ThankYou.tsx`); one primary action (the upsell "add" while its window runs, else the confirm pill); the timeline shows verbs, never "1 / 2 / 3" labels; order id, total and phone in `<bdi dir="ltr">` with `tabular-nums`; the recap is a `<dl>`; the legal links a hairline-separated row | the add-on blocks (LAN-§8) add ≤ 2 elements inside existing regions, never a new section; HTML with all blocks off is byte-identical to today's **except** the colour-moment element (`.lp-ty__aurora` → `.lp-ty__tint`) and, rev 4, the report link in the legal row (LAN-§3.9), both covered by an updated render-check golden |
 | Tracking page | one column ≤ 560 px; the timeline uses the accent for done steps and a muted hairline for future ones (no decorative dots: the step marker is a 10 px filled circle only for the current step); 0 glass, 0 aurora, ≤ 4 reveals (none under reduced motion); actions as a vertical list of three text buttons with one primary; ids LTR | the theme is the order's version theme (the shopper sees the look she ordered from), transactional register (DES-§11.1) |
 | Delivery line, WhatsApp order line, not-served state | one `<p>` each, `aria-live="polite"`, height/opacity ≤ 180 ms; the not-served WhatsApp button is a `.lp-btn--soft`, the page's one soft button | no icon triplets, no chips over photos, no middle dots beyond one per line (DES-§3.2) |
 | Test banner | a 36 px top band in `--lp-warn` ink on `--lp-soft` with the text `test.banner` (LAN-§24.2); not fixed (scrolls away), never covers the hero CTA | rendered by the Shell from `RenderAddons.banner = "test"` (core §H.13) |
@@ -848,6 +948,42 @@ the `qa/e2e/steps/landing-*.mjs` names of rev 2 are withdrawn; `qa/` is git-igno
 
 The run passes with Cloud AI **off** and the model cache empty: nothing in this part's path calls a model.
 
+### LAN-§3.9 "Report this store" on every landing surface (rev 4, CRIT15; core D76, §B.1 `/report/<handle>`, PLA-§24.2)
+
+The core promises that every public page carries a "Report this store" link (core owner summary 20, D76); the R1
+product is landing pages, so this part names the renderer of each landing surface. The link is static HTML (no
+script, no CSP change: a navigation, not a `connect-src` or `form-action` target), one per document:
+
+| Surface | Renderer (file owner) | Where on the page |
+|---|---|---|
+| Landing page with a visible footer | P6's footer section: `legalLinks(ctx)` (`src/landing/sections/footer/parts.tsx`) appends the link as the last legal link when `ctx.links.report` is set (DES-§4.5.4) | the footer's legal row |
+| Landing page whose footer is hidden or absent (`hidden: true`, a section plan without `footer`) | the Shell (`src/landing/document.tsx`, maintainer) renders `<p class="lp-report">` after the last in-flow section, before the floating layers | a 12 px muted line with `padding-block-end` that clears the sticky bar |
+| Thank-you page | P3, `src/landing/thankyou/ThankYou.tsx` | the hairline-separated legal row (LAN-§3.6) |
+| Tracking page | P3, the `/track` document (`src/app/s/[store]/track/route.ts` + `src/lib/tracking/**`) | under the rights line |
+| Legal pages (`/policies/<kind>`) | P3, `src/landing/legal/**` | the footer row |
+| Store pages (R2) | S1's store chrome, `footer.report` (STO-§24) | the store footer |
+
+- **href** = `ctx.links.report` = `platformOrigin() + "/report/" + handle + "?p=" + encodeURIComponent(path)`, where
+  `path` is the served document's path **without** its query or fragment (`storePath(store, "/<slug>")`, the
+  thank-you path without `?o=`, `/track` without `?o=&s=`, `/policies/<kind>`), so the link never carries an order id,
+  a signed tracking parameter, an idem fragment or a `sg-test` token (the `?p=` rule of PLA-§24.2: same host, query
+  stripped). Absolute because `/report/*` lives on the platform host only and store hosts answer 404 for it (core §B.1,
+  §C.4: no 308). `rel="nofollow"`, same tab, no `target`.
+- **Text** = shopper copy `lp.report` (LAN-§24.2; the same wording as the storefront's `footer.report`, Darija-friendly
+  Arabic), in the page locale; ink `--lp-muted` at ≥ 4.5:1, never the accent; a link, not a CTA (it counts in no
+  `budget:R1` total, has no `data-hero-cta`).
+- **Modes:** `live`, `test` and `preview` documents carry it; **exports never do** (static, connected, PHP and WhatsApp
+  exports run on the seller's own server, where the platform has no standing; `ctx.links.report` is undefined in every
+  export mode, LAN-§16).
+- `ctx.links.report` is produced by the maintainer's render context next to the legal URLs `ctx.links` already holds
+  (`src/lib/render/**`; request LAN-§27.4 N4), so P3 and P6 read one value and nobody concatenates the platform origin
+  in a section.
+
+Acceptance (render-check, `scripts/qa/render-cases/landing.ts`): exactly one `a[href^="<platformOrigin>/report/<h>"]`
+on each live fixture (landing with footer, landing with the footer hidden, thank-you, tracking, every legal kind, ar
+and fr), zero in each export fixture; no report href contains `?o=`, `s=`, `sg-test` or `#`; `qa:headers` asserts
+`/report/<h>` on a store host answers the neutral 404.
+
 ---
 
 ## LAN-§4 Landing pages in each store mode (core §A.2)
@@ -873,21 +1009,27 @@ The run passes with Cloud AI **off** and the model cache empty: nothing in this 
   `modeAllows(mode, "landing", { landingInStoreMode })`. A switch never unpublishes a page; it only hides.
 - Generation in `both` mode: Create → "Landing page" offers "From a product" (R2, LAN-§17.2) or "From photos" (today's
   wizard).
-- **Onboarding in `store` mode (R2, PD60; rev 3, OPS-14).** The mode-aware onboarding reveals a landing page for the
-  first product in every mode (PLA-§22.2) while the store blueprint runs as a detached job. In `store` mode that page
-  would otherwise be hidden by the mode and serve the store's 404 once published. Rule: when `useDirectionAction` creates
-  a landing page (`onboarding.pageId`) for a store whose mode is `store`, it sets **`landing.inStoreMode = true`** in the
-  same action (through `setStoreSetting`, audited `store.landing_settings.updated` with `reason: "onboarding"`), so the
-  nav group "Landing pages" shows, `modeAllows(mode, "landing", { landingInStoreMode: true })` serves `/<slug>`, and the
-  `done` step says "Your first page is a sales page for «{product}». Your store home is being built; both will be live
-  under your address." The owner may untick "also use landing pages" later through the mode-switch sheet, which then
-  lists that page with its views like any other.
+- **Onboarding in `store` mode (R2; rev 4 restates core §A.2 and PLA-§22.2 PD60 rev 3, CRIT5).** The primary rule is
+  the core's: **onboarding in `store` mode creates no landing page.** The reveal shows three PDP folds built
+  synchronously by S1's `productAsPageDoc(product, { …sctx, direction })`, the action creates the product and the theme
+  draft (`createProduct(scope, facts)`, `setThemeDraft(scope, direction)`, frozen at the R2 contract step, core §K.4),
+  and `landing.inStoreMode` **stays `false`**; this part contributes nothing to that path. `landing` and `both` modes
+  keep the landing reveal of PLA-§22.2 (`onboarding.pageId`). **Fallback only:** should any path still create a
+  landing page for a `store`-mode shop (a later "Make a sales page" from the product, an import, a future onboarding
+  variant), the creating action sets `landing.inStoreMode = true` in the same transaction (through `setStoreSetting`,
+  audited `store.landing_settings.updated` with `reason: "onboarding"` or the creating action's reason) and its
+  confirmation says "Your first page is a sales page; your store home is being built", so a saved draft is never hidden
+  behind a 404. Revision 3's sentence that onboarding "reveals a landing page in every mode" and sets `inStoreMode` as
+  the primary rule is withdrawn. The owner may untick "also use landing pages" later through the mode-switch sheet,
+  which then lists such a page with its views like any other.
 
 Acceptance: in `store` mode with `inStoreMode` false, `/<slug>` of a live landing answers the store's 404 and the page
 row keeps `status = 'published'`; switching back serves it again with the same HTML (no re-render); the switch sheet
-lists exactly the live landing pages with their views; **a store created through onboarding in `store` mode has
-`landing.inStoreMode = true`, its reveal page in the nav, and `/<slug>` answering 200 after approval and publish (UX-01
-acceptance list, request to platform.md in LAN-§27.3)**.
+lists exactly the live landing pages with their views; **(rev 4, CRIT5; the UX-01 acceptance list of PLA-§22.2 carries
+both cases)** a store created through onboarding in `store` mode has **no** page with `kind = 'landing'` and
+`landing.inStoreMode = false` after the `done` step; a landing page created afterwards in that store by any path sets
+`landing.inStoreMode = true` in the same transaction and shows in the nav (`test:tenancy` mode fixtures,
+`scripts/qa/tenancy-cases/landing.ts`).
 
 ---
 
@@ -944,9 +1086,10 @@ accepted) bundles `src/landing/runtime/addons/*.ts` into `addonChunks` of `src/l
 | `exp` | `…/addons/exp.ts` | landing, store pages | any running experiment | 1,200 B | R3 |
 | `chain` | `…/addons/chain.ts` | thanks | `addons.upsellChain` on | 2,000 B | R3 |
 | `video-hero` | `…/addons/video-hero.ts` | landing | a `hero:video` section (LP-14) | 700 B | R3 |
-| `landing-v3` | `src/landing/runtime/entry-v3.ts` (fork of `entry.ts`, maintainer at the R2 contract step) | landing (runtime_v 3 only) | LP-16 pages ("Charge delivery by city") | 24,700 B (replaces `landing`; re-based on the post-R1.0 measured size of `landing` + 500 B, LD1) | **R2** (rev 3, OPS-13) |
+| `landing-v3` | `src/landing/runtime/entry-v3.ts` (fork of `entry.ts`, maintainer at the R2 contract step) | landing (runtime_v 3 only) | LP-16 pages ("Charge delivery by city") | the recorded `landing` budget + 500 B (24,700 B if the 24,200 B figure stands; replaces `landing` on v3 pages; core §H.13, D75, LD1) | **R2** (rev 3, OPS-13) |
 
-Page caps (`budgets.json` key `page`, render-check +5 % rule, `scripts/qa/render-check.ts:119-131`): the heaviest product
+Page caps (`budgets.json` key `page`, render-check +5 % rule for every chunk and cap **except the frozen `landing`
+chunk, which has tolerance 0 against its recorded budget and `landing.sha256`** (LD1, core header), `scripts/qa/render-check.ts:119-131`): the heaviest product
 page today measures 31,931 B of scripts (OFFERS §F.9). With `assist` it becomes ≈ 34,500 B: request Q5 (accepted, core
 §H.13) raises `page` to **34,800 B** and adds a `thanks-page` cap of **12,600 B** (thanks 6,650 + pixels 3,900 + assist-ty
 1,500 + margin; R3: 14,600 B with `chain`); the R3 keys `exp-head` 450, `exp` 1,200, `chain` 2,000, `video-hero` 700 and
@@ -957,9 +1100,18 @@ bytes count toward DB F5 (≤ 90 KB gz soft, 140 hard per page): the `lp-assist`
 Shared pure modules the chunks import (bundled by `scripts/build-landing-assets.mjs`, request Q30): `src/lib/delivery/eta.ts`,
 `src/lib/delivery/line.ts`, `src/landing/runtime/addons/select.ts` (form-control serialiser, LAN-§11.3),
 `src/landing/runtime/addons/storage.ts` (store-prefixed keys, core §C.9 rule: prefix `lp:<h>:` derived from
-`location.pathname` `/^\/s\/([a-z0-9-]{3,30})\//`, empty outside `/s/`; the same regex and prefix T3 adds to the frozen
-chunk, which this part asks T3 to derive **once** in `core.ts` and pass to `tracking.ts`, `pixels.ts`, `order-store.ts`
-and `entry-whatsapp.ts` rather than four times, rev 3 ENGP-26, LAN-§27.3), `src/lib/experiments/assign.ts` (R3).
+`location.pathname` with **`/^\/s\/([a-z0-9-]{3,30})(?:\/|$)/`** (rev 4: the core's regex, whose `(?:\/|$)` also
+matches the store home `/s/<h>`, so the home and `/s/<h>/<slug>` share one prefix and `lp-utm` / `lp-vid` continuity
+holds; revision 3's `\/`-only form is withdrawn), empty outside `/s/`; the same regex and prefix T3 derives **once** in
+`core.ts` and passes to `tracking.ts`, `pixels.ts`, `order-store.ts` and `entry-whatsapp.ts`, core §C.9 rev 3, ENGP-26;
+`test:landing-addons` asserts that `storage.ts` and the core chunk yield the same prefix on `/s/nour`, `/s/nour/`,
+`/s/nour/serum`, `/serum` and `/s/x` (too short: empty)), `src/lib/experiments/assign.ts` (R3).
+`src/lib/callcenter/window.ts` (P4's `nextCallableAt` and what it imports, pure, bundled into `assist-ty` only) with
+P3's `reviveWindow` from `src/lib/landing/hours.ts` (rev 4, CRIT3; ≈ 350 B together inside the 1,500 B `assist-ty`
+budget).
+**No add-on imports `src/lib/orders/address.ts`** (rev 4, CRIT1: zone lookups use the value-keyed `ZoneTable`, LD4a);
+`test:landing-addons` walks the static import graph of every `src/landing/runtime/addons/*.ts` entry (no build needed)
+and fails if any reaches that file.
 
 ### LAN-§5.3 Modes, preview and exports
 
@@ -1169,7 +1321,7 @@ the full table lives in the catalog files and is covered by `test:i18n-coverage`
 ```ts
 // src/lib/delivery/types.ts (isomorphic)
 import type { CityKey } from "@/lib/orders/address";                                      // rev 3 (OPS-1): operations' slug type, the one city key (OPE-§10.1)
-export type { CallingWindow } from "@/lib/callcenter/window";                             // rev 3 (OPS-11): re-exported for this part's bundles (LAN-§2.3)
+export type { EffectiveWindow } from "@/lib/callcenter/window";                           // rev 4 (CRIT3): operations' type re-exported unchanged; rev 3's own CallingWindow type is deleted (LAN-§2.3)
 export interface DeliveryZoneRow { id: string; name: string; cities: CityKey[]; feeCents: number | null; freeFromCents: number | null; etaMinDays: number | null; etaMaxDays: number | null; notServed: boolean; note: string | null; position: number }
 export interface StoreCalendar { tz: string; workdays: readonly number[]; cutoffHour: number | null; holidays: readonly string[]; leadDays: number }   // rev 3 (OPS-12): leadDays = checkout.calendar.confirmationLeadDays ?? 0 on pre-call surfaces, 0 after confirmation
 export interface EtaWindow { from: string /* YYYY-MM-DD store-local */; to: string; minDays: number; maxDays: number; leadDays: number }
@@ -1190,7 +1342,10 @@ export interface ZoneTable {
   star: number | null; cal: StoreCalendar & { holidays: string[] /* next 60 days */ }
 }
 export function zonesForCheckout(scope: StoreScope): Promise<ZoneTable>;   // P0 stub (core §K.2); embedded by storefront in `#sg-config` (STO-§12.3) and by LP-16; the same object feeds the `lp-assist` data block
+// rev 4 (CRIT1): the ONE producer of the browser table for every consumer (assist, S1's checkout / pdp, landing-v3); the shape above is frozen with the stub
+export function buildZoneTable(zones: readonly DeliveryZoneRow[], cal: StoreCalendar, cities: readonly City[]): ZoneTable;   // src/lib/delivery/table.ts, pure: zonesForCheckout = buildZoneTable(await listZones(scope), calendarFor(scope), citiesFor(market)); the parity fixture calls it directly
 export function deliverySummary(zones: readonly DeliveryZoneRow[], locale: Locale): { etaText: string | null; feeText: string | null };   // the server fallback line ("en 1 à 3 jours ouvrés", "25 à 35 DH"), each part only when set
+export function zoneFeesFor(scope: StoreScope, keys: readonly CityKey[]): Promise<Record<CityKey, number | null>>;   // rev 4: slug-keyed fees for server joins (P1's zones.feeMismatchTop5, the checklist's feesByTopCity); never the browser table
 
 // src/lib/delivery/match.ts (pure)
 export function zoneForCity(zones: readonly DeliveryZoneRow[], cityKey: CityKey | null): DeliveryZoneRow | null;   // exact slug, else the "*" zone (also for null), else null
@@ -1207,6 +1362,19 @@ builds the `ZoneTable`, reads an order (`orders.city_key` when P4's hook set it,
 The browser never slugs: the `lp-assist` / `#sg-config` table is keyed by the posted value, and an absent key means the
 `*` zone. For text-mode city fields, the server maps free text with operations' `normalizeCity` (OP-13; exact or alias
 only, never fuzzy) before `zoneForCity`; the page itself shows only the general line for text-mode cities.
+
+**One table shape (rev 4, CRIT1).** Core §K.2 P0 and core §Q.8 (LAN R1, accepted) freeze `zonesForCheckout` "keyed by
+the posted `City.value`, built on the server from the slugs"; core D68, OPE OD47 and STO-D43 / STO-§14.4 still say the
+browser tables carry slugs and the chunks bundle `cityKey()`. This part keeps the P0 shape and asks the three texts to
+follow it (LAN-§27.4 N1), for three reasons: (1) the frozen landing chunk and `assist` never carry the ar / fr / en fold
+table (≈ 400 B gz that `cityKey` would add, and a second copy of the conversion running on a shopper's phone);
+(2) the storefront's city list already posts `City.value` (`cities[].v`), so `table.city[entry.v] ?? table.star` is the
+same lookup on both surfaces and the `s` slug field of the storefront's city list is no longer needed for zones;
+(3) one object from one pure builder means one parity fixture can pin it. The shared fixture
+`scripts/qa/fixtures/city-key.json` (P4's file, core §J.1) carries `"zoneTableKey": "value"` and the table case
+"zones `[["fes"], ["*"]]` → `buildZoneTable(…).city["Fès"] = 0`, `city["Autre"]` absent, `star = 1`, and the key set of
+`city` equals the `City.value` set of `MA_CITIES` minus `OTHER_CITY`"; `test:delivery` (P3), `test:catalog` (S1) and `test:ops` (P4) read
+it, so a consumer that indexes the table by slug fails all three suites on the same commit.
 
 ### LAN-§7.2 ETA algorithm (`src/lib/delivery/eta.ts`, pure, isomorphic, bundled into `assist`)
 
@@ -1323,7 +1491,9 @@ same `afterCommit` phase with no ordering guarantee).
 
 ### LAN-§7.5 Acceptance and tests
 
-- `test:delivery` (new, `src/lib/delivery/selftest.ts`, in `npm test`): cut-off before/after; Saturday order with
+- `test:delivery` (in `npm test`; rev 4: the core's file `scripts/qa/delivery-check.ts`, P3's, over the shared fixture
+  `scripts/qa/fixtures/city-key.json`, P4's, core §J.1; it imports the pure ETA cases of `src/lib/delivery/selftest.ts`
+  and P4's `scripts/qa/fixtures/calling-window.json` for the `{when}` parity): cut-off before/after; Saturday order with
   Mon-Sat; Sunday start; holiday skip including two consecutive holidays; `min = 0`; month and year crossings; a date
   inside Ramadan in `Africa/Casablanca` (offset from tz data); `Intl` without `timeZone` support → day range; ar/fr/en
   texts with Latin digits for `ar-MA`; > 21 days → day range; every `ZoneProblem` code; **rev 3:** the city-key parity
@@ -1332,7 +1502,9 @@ same `afterCommit` phase with no ordering guarantee).
   server agree; the same for "Ksar El Kébir" / `"ksar-el-kebir"`, "Autre" → `star`, an unknown value → `star`, and a
   `City.value` written into `cities` → `unknown_city`); the lead grid (`leadDays` 0-3 × cut-off before/after × weekday)
   asserting `tracking.to ≤ thankYou.to` whenever `confirmed_at ≤ start + leadDays` working days; `dz.afterCall` present
-  only with `confirmationCall`.
+  only with `confirmationCall`; **rev 4 (CRIT1):** the fixture's table case (`zoneTableKey: "value"`, the key set of
+  `buildZoneTable(…).city` equals the `City.value` set) and the import-graph assertion that no add-on reaches
+  `src/lib/orders/address.ts` (`test:landing-addons`).
 - render-check: zones empty → no `lp-assist` data, the slots empty and hidden; zones on → fallback text and the chunk
   present; the line's fee equals the charged fee for every offer of the `duo` and `tshirt` fixtures (free offers
   included); the `lp-assist.dz.city` map has one key per city of `MA_CITIES` except `OTHER_CITY`.
@@ -1377,12 +1549,22 @@ interface AssistTyData {
   v: 1; h: string /* handle, storage prefix */; tz: string;
   confirm?: { wa: string /* digits */; tpl: string /* customer_confirm template, page locale; vars {order_id} {offer} {total} {name} */ };
   expect?: { phone: string /* display format, LTR isolate */;
-             win?: { d: Record<"1" | "2" | "3" | "4" | "5" | "6" | "7", [string, string][]>; closed: string[] /* next 14 days */; override?: string /* openOverrideUntil ISO */ };   // rev 3 (OPS-11): the ops.callingWindow through callingWindowFor(scope), ISO weekdays; absent = no window set → no {when}
+             win?: SerializedWindow;   // rev 4 (CRIT3): JSON of operations' EffectiveWindow from callingWindowFor(scope), its own field names and its own `days` container (this part never re-keys it); absent only when windowIsEmpty(w, renderTime) → no {when}
              within?: number;
              s: { within: string; laterToday: string; tomorrow: string; nextDay: string } };
   track?: { base: string /* storePath(store, "/track") or the absolute URL in connected exports */ };
 }
+// rev 4: Date fields as ISO strings; closedDates cut to the next 60 days and overrides to those not yet ended (≤ 4, OPE-§2.9);
+// openOverrideUntil is always null in static HTML ("Open calls now" lasts ≤ 2 h and is never baked into a page);
+// reviveWindow(json) (P3, src/lib/landing/hours.ts) turns it back into an EffectiveWindow for nextCallableAt
+type SerializedWindow = Omit<EffectiveWindow, "openOverrideUntil"> & { openOverrideUntil: null };
 ```
+
+The block stays ≤ 600 B for the default window (two ranges a day, no override); a store with four overrides and 60
+closed dates reaches ≈ 1.4 KB, still inside the `thanks-page` cap (LAN-§5.2). Because the thank-you HTML is static, the
+window baked into it is re-baked by the `store_info` re-render whenever the owner saves the window (LAN-§8.5; P4's
+`saveCallingWindowAction` calls `enqueueRenders(scope, "all-live", "store_info")`, request LAN-§27.4 N2), and the
+browser always evaluates it at the shopper's `now`, so a page served weeks later still computes "today" correctly.
 
 ### LAN-§8.3 `assist-ty` behaviour
 
@@ -1393,13 +1575,15 @@ interface AssistTyData {
    word). Click: open in a new tab; when the idem is known (step 4) send `POST /api/public/track { op: "intent", o, k,
    kind: "confirm_whatsapp" }` with `keepalive` (LAN-§9.3), which writes the order event `customer_confirm_intent` so the
    agent sees "Shopper confirmed on WhatsApp" in the queue (operations.md).
-3. **Expectation `{when}`** (rev 3, OPS-11) from `nextCallableAt(now, win, tz)` (`src/lib/callcenter/window.ts`, P4's
-   pure module, bundled into `assist-ty` like `eta.ts` is bundled into `assist`; ≈ 300 B; the same function the queue
-   uses, so the page and the ladder agree by construction): `nextCallableAt === now` (inside a range, or `override`
-   running) → "dans les {within} heures" (only when `within` is set, else "aujourd'hui"); later today → "aujourd'hui à
-   partir de {HH:MM}"; tomorrow → "demain à partir de {HH:MM}"; another day → "{weekday} à partir de {HH:MM}"; `win`
-   absent → the sentence without `{when}`. Closed dates and the ISO weekday come from `win`; the store-local time from
-   `localParts(now, tz)` (LAN-§7.2).
+3. **Expectation `{when}`** (rev 3, OPS-11; rev 4 signature, CRIT3) from `nextCallableAt(now, w)` with `w =
+   reviveWindow(win)` (`src/lib/callcenter/window.ts`, P4's pure module, `nextCallableAt(t: Date, w: EffectiveWindow):
+   Date`, OPE-§5.5; bundled into `assist-ty` like `eta.ts` is bundled into `assist`; ≈ 300 B; the same function the
+   queue uses, so the page and the ladder agree by construction): `nextCallableAt(now, w) === now` (inside a range) →
+   "dans les {within} heures" (only when `within` is set, else "aujourd'hui"); later today → "aujourd'hui à partir de
+   {HH:MM}"; tomorrow → "demain à partir de {HH:MM}"; another day → "{weekday} à partir de {HH:MM}"; a result more than
+   7 days away, or `win` absent → the sentence without `{when}`. Overrides, closed dates and the weekday convention are
+   handled inside P4's functions (this chunk never reads `w.days`); the store-local clock for the wording comes from
+   `localParts(now, w.tz)` (LAN-§7.2).
 4. **Track:** the idem comes from sessionStorage `lp:<h>:idem:<pageKey>`, written by `assist` on the landing page when the
    form dispatches `lp:order` (detail `{ idem }`, `form.ts:324-331`); link = `track.base + "?o=" + id + "#k=" + idem`.
    Without the idem (another device, storage blocked): `track.base + "?o=" + id` (the lookup form asks the 4 digits).
@@ -1412,9 +1596,13 @@ Three switches (`landing.thankYou.*`), the caller phone, the confirmation WhatsA
 operations' `CallingWindowEditor` component, `src/components/admin/callcenter/calling-window.tsx`, mounted here and in
 `/team/callcenter`, writing `ops.callingWindow` through operations' `saveCallingWindowAction`; one window, two doors), and
 the `customer_confirm` template editor per locale with variable chips (`{order_id}` `{offer}` `{total}` `{name}`) and a
-live phone preview of the thank-you hero whose `{when}` is computed with the same `nextCallableAt` as the page. Without a
-caller phone the expectation switch explains "Add the number you call from"; without a window, "Set your calling hours
-so the page can say when you call" (`thanks:no-window`).
+live phone preview of the thank-you hero whose `{when}` is computed with the same `nextCallableAt` as the page. **Rev 4
+(CRIT3):** the window editor sits directly under the caller phone field and, while the window still equals operations'
+`DEFAULT_WINDOW` (compared by value with P4's exported constant), shows the line "These are the starting hours your
+queue calls in. Change them to your team's real hours" so the promise the page makes is visible where the owner types
+the number that calls. Without a caller phone the expectation switch explains "Add the number you call from"; with a
+window closed for the next 14 days, "Your calling hours are closed for two weeks, so the page can't say when you call"
+(`thanks:no-window`).
 
 ### LAN-§8.5 Re-render
 
@@ -1428,7 +1616,12 @@ live pages; the job rewrites only the rendered columns in place (core D50: no pr
   name, a multi-item offer and a gift).
 - No caller phone → no phone number anywhere on the page; a caller phone → it appears in full, in an LTR isolate.
 - The intent beacon writes exactly one `customer_confirm_intent` event per order even when clicked 5 times.
-- `thanks-page` cap (LAN-§5.2) holds with pixels on; thank-you HTML with all blocks off is byte-identical to today's.
+- `thanks-page` cap (LAN-§5.2) holds with pixels on; thank-you HTML with all blocks off is byte-identical to today's
+  (except the colour-moment element, LAN-§3.6, and the report link, LAN-§3.9).
+- **Rev 4 (CRIT3):** on every case of P4's `scripts/qa/fixtures/calling-window.json` (default window, Friday split
+  ranges, a Ramadan override crossing midnight, closed dates, a window closed for 14 days), the `{when}` computed by
+  `assist-ty` from the serialised block equals the wording of `nextCallableAt` over the server's `EffectiveWindow` at the
+  same `now`, and the queue's `isCallable` is open at the promised time (`test:landing-addons`, `test:ops`).
 
 ---
 
@@ -1440,6 +1633,16 @@ live pages; the job rewrites only the rendered columns in place (core D50: no pr
 |---|---|---|
 | `GET <base>/track` | `src/app/s/[store]/track/route.ts` | document with the order page's theme; `noindex`, `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`; `?o=&s=` valid → server-rendered status (works without JS); `?o=` alone → lookup form with the id filled; nothing → lookup form |
 | `POST /api/public/track` | `src/app/api/public/track/route.ts` | JSON ops (LAN-§9.3); the store comes from the order id and must own the effective host (below) |
+
+**Referrer and Origin (rev 4, the core's ENGC-16 lesson applied here).** The document keeps `Referrer-Policy:
+no-referrer` (its URL may carry `?o=&s=`, a bearer link, and the store logo or a WhatsApp link must never receive it in
+a `Referer`). Under that policy a browser serialises the `Origin` of a same-origin `POST` as `null`, which
+`checkOrigin(storeHosts(store))` would refuse; so the `track` chunk sends every `POST /api/public/track` with
+`fetch(url, { method: "POST", referrerPolicy: "same-origin", … })`, which keeps the request's `Origin` while sending no
+`Referer` cross-site, and the page has no HTML form that posts (the noscript state shows signed links and the WhatsApp
+link only). `qa:headers` asserts the document header; `test:landing-addons` asserts every `fetch` of the `track` and
+`assist-ty` chunks passes `referrerPolicy: "same-origin"`; the local Playwright `tracking` step checks the request's
+`Origin` equals the store origin.
 
 Store resolution for the API: the body carries `o` (order id, global unique, core D28) and the request's effective host
 class (core §C.2); the handler loads the order through the public resolver `resolveOrderForTracking(orderId, sig: string
@@ -1468,7 +1671,7 @@ export interface TrackView {
   eta: { text: string; confirmedOn?: string } | null;                                          // zoneLineFor(cityKey, confirmed_at, { stage: "after_call" }) once confirmed (lead 0); before confirmation the pre-call window from created_at; `confirmedOn` shown when confirmation took longer than the lead (LAN-§7.2 step 7)
   carrier: { name: string; ref: string | null; url: string | null } | null;                    // rev 3 (OPS-9): R1 from orders.carrier_label / orders.tracking_ref (operations' 0005 columns, typed by the agent or pulled from the Sheet); R2 from shipments (url from the carrier account)
   canRequest: { changeAddress: boolean; cancel: boolean; other: boolean }; pending: ("change_address" | "change_phone" | "cancel" | "other")[];
-  help: { whatsapp?: string; phone?: string; hours?: string }; rightsLine: string | null;      // hours rendered from callingWindowFor(scope) (rev 3, OPS-11); rights from policies (returns window) + the legal note
+  help: { whatsapp?: string; phone?: string; hours?: string }; rightsLine: string | null;      // hours = hoursText(await callingWindowFor(scope), locale, dateLocale, now) (rev 3, OPS-11; rev 4 P4's helper, today's ranges), omitted when windowIsEmpty; rights from policies (returns window) + the legal note
 }
 ```
 
@@ -1554,6 +1757,16 @@ can then say the real delivery window, `{eta_text}` through `zoneLineFor`), and 
 list time, never stored: `customers` history of the phone (`ordersCount`, `refusedCount`, `fakeCount`, P4's table) and
 the blocklist, shown as chips "3 delivered · 1 refused" so an agent calls the leads that pay first.
 
+**Reads go through one repository, masked by scope (rev 4, core D70 / SEC-5).** Every lead read of this part
+(`listLeadRows(scope, q)`, `getLeadRow(scope, id)`, the ⌘K lead and `WA-` ref provider, the pulse counts) lives in
+`src/lib/leads/read.ts` (P3) and returns each row through P1's `maskIfImpersonation(scope, row)` (`src/lib/platform/mask.ts`,
+frozen at P0): under "View as store" (`scope.kind = "impersonation"`) names read "Salma B.", `note` reads "Note hidden",
+`city` stays (it is not an address), the phone is already masked (`06 •• •• 12 34`), and `sel` / the selection text carry
+no customer data; for every other scope kind the function is the identity. Writes (attempts, reveal, convert, assign,
+lost, follow-ups) are refused under impersonation by `storeAction` before they reach a repository (`WriteScope`, core
+D71). This corrects revision 3's "no landing side" for SEC-5: core §B.8 names the leads screen, and its repository is
+this part's, not operations' (LAN-§27.4 N5 asks PLA-§7.2 / PLA-§Q.3 Q3.3 to say so).
+
 Cross-track functions (P0 stubs, core §K.2): `markLeadConverted(scope, leadId, orderId, via: "agent")` (called by
 operations' `convertLeadToOrder`, OPE-§11.4; idempotent: a converted lead answers the existing order id) and, in R2,
 the `onLeadCreated(scope, lead)` hook (OPE Q.18) for webhooks `lead.created`.
@@ -1575,11 +1788,12 @@ the `onLeadCreated(scope, lead)` hook (OPE Q.18) for webhooks `lead.created`.
   cityKey(lead.city))`); logs an attempt; reveals the phone: audit `lead.phone_revealed`, the OP-07 rule), Call (`tel:`,
   same logging), **Convert to order** (operations' manual-order sheet, OP-08, prefilled with `sel`, name, phone, city;
   the server re-prices on the published version or the lead's version within 72 h, OFFERS D8; `convertLeadToOrder` then
-  `markLeadConverted`; **rev 3, OPS-15: the sheet is routed by `sel.v`**: a v2 selection opens the landing picker and
-  `createManualOrder`, a v3 selection (store intent or abandoned checkout, R2) opens the products picker and
-  `createManualOrderV3(ctx, { lines, customer, confirmed, adjust, fromLead, idem })` over `priceLine` /
-  `createOrderRow` (STO-§16.2-16.3), so a store-mode call center can take the order; in landing mode only v2 leads
-  exist), **Set phone** on a WhatsApp
+  `markLeadConverted`; **rev 3, OPS-15, aligned by rev 4 with core §K.2 P0 / §K.4:** P4's `convertLeadToOrder` (the P0
+  stub) **dispatches on `leads.sel.v`** itself: a v2 selection opens the landing picker and `createManualOrder` (P4), a
+  v3 selection (store intent or abandoned checkout, R2) opens the products picker (S4 owns the sheet's store branch) and
+  S1's frozen `createManualOrderV3(ctx, { lines, customer, confirmed, adjust, fromLead, idem })` in
+  `src/lib/catalog/order-v3.server.ts` (STO-§16.9; over `priceLine` / `createOrderRow`, D72), so a store-mode call
+  center can take the order; in landing mode only v2 leads exist), **Set phone** on a WhatsApp
   intent (the agent types the number the chat revealed: the intent gains `phone`, and a `form` lead of the same phone
   within 24 h is linked as `merged_into` the intent, so one person is one row), Mark lost (reason), Assign (managers),
   Next follow-up. Keyboard: `J/K` move, `W` WhatsApp, `C` call, `V` convert, `L` lost (core §I.3 chord rules).
@@ -1606,13 +1820,13 @@ by the platform (LD10).
 ### LAN-§10.5 Server actions (`src/app/app/[store]/leads/actions.ts`, every body `return storeAction(…)`)
 
 ```ts
-listLeads(q: LeadQuery): Promise<{ rows: LeadRow[]; next?: string; counts: LeadCounts }>                    // leads.read (agents: own + unassigned new)
+listLeads(q: LeadQuery): Promise<{ rows: LeadRow[]; next?: string; counts: LeadCounts }>                    // leads.read (agents: own + unassigned new); rows from listLeadRows (src/lib/leads/read.ts), masked under impersonation (rev 4, D70)
 logLeadAttempt(leadId: string, channel: "whatsapp" | "call"): Promise<{ href: string }>                     // leads.write + orders.reveal_phone
 assignLeads(ids: string[], userId: string | null): Promise<void>                                            // orders.assign
 takeNextLead(): Promise<LeadRow | null>                                                                       // leads.write
 markLeadLost(leadId: string, reason: LostReason): Promise<void>                                             // leads.write
 setLeadFollowUp(leadId: string, at: string | null): Promise<void>                                           // leads.write
-convertLead(leadId: string, input: ManualOrderInput | ManualOrderInputV3): Promise<{ orderId: string }>     // orders.create; dispatches on the lead's sel.v: v2 → operations' convertLeadToOrder / createManualOrder (request Q17); v3 (R2) → createManualOrderV3 (S1 pricing, P4 sheet; rev 3 OPS-15, LAN-§27.3), both re-price on the server and then markLeadConverted
+convertLead(leadId: string, input: ManualOrderInput | ManualOrderInputV3): Promise<{ orderId: string }>     // orders.create; calls P4's convertLeadToOrder (request Q17), which dispatches on the lead's sel.v (core §K.2 P0): v2 → createManualOrder (P4); v3 (R2) → S1's createManualOrderV3 (src/lib/catalog/order-v3.server.ts, core §K.4; S4 the sheet's store branch; rev 4 aligns OPS-15 with core §Q.8 LAN R6 / OPE Q.27h); both re-price on the server and insert through createOrderRow, then markLeadConverted
 // CSV: GET /api/app/<h>/leads/export (storeGuard, orders.export)
 ```
 
@@ -1624,6 +1838,10 @@ convertLead(leadId: string, input: ManualOrderInput | ManualOrderInputV3): Promi
 - An EU-market page has no `endpoints.lead`; an MA page has it.
 - An agent can't list, reveal or convert another agent's lead (`test:tenancy` role matrix, `qa:action-replay`).
 - Leads older than 30 days are purged by the housekeeping job (core §H.2) per store.
+- **Rev 4 (core D70):** under an impersonating session the HTML and RSC payload of `/app/<h>/leads`, the lead sheet and
+  a ⌘K lead search contain none of the customer canaries of PLA-§O.3 (name, note), every write action answers
+  `impersonation_read_only`, and `maskIfImpersonation` is called by `src/lib/leads/read.ts`, never by a component
+  (`test:leads` with a spy on `mask.ts`; the core's §F.1 attack suite covers the route).
 
 ---
 
@@ -1688,9 +1906,9 @@ export type WaOrderResponse = { ok: true; ref: string; number: string; text: str
 Intents appear in the Leads inbox (kind WhatsApp, the ref in the row, phone empty). ⌘K resolves a typed `WA-…` ref to the
 lead (search provider `src/lib/admin-data/search/landing.ts`, request Q18 accepted, core §I.3). **Convert** opens the
 manual-order sheet (OP-08) prefilled with the selection; the agent pastes name, phone, city and address from the chat; the
-order has `source = 'whatsapp'` (core D42) and re-prices on the server (`createManualOrder(ctx, { source: "whatsapp",
-fromLead })`, OPE-§11.1, for a landing intent; `createManualOrderV3` for a store intent whose `sel.v === 3`, LAN-§10.3,
-rev 3 OPS-15). The inbox header counts intents and their conversion rate (n ≥ 20). No browser Lead/Purchase
+order has `source = 'whatsapp'` (core D42) and re-prices on the server through P4's `convertLeadToOrder`, which
+dispatches on `sel.v` (`createManualOrder(ctx, { source: "whatsapp", fromLead })`, OPE-§11.1, for a landing intent;
+S1's `createManualOrderV3` for a store intent whose `sel.v === 3`, LAN-§10.3, rev 3 OPS-15 as aligned by rev 4). The inbox header counts intents and their conversion rate (n ≥ 20). No browser Lead/Purchase
 pixel fires for an intent (the frozen pixel chunk doesn't see it); the server Purchase follows the store's trigger on
 conversion (operations' `conversions` setting). **Dedupe (rev 2):** when a form order arrives with a phone the agent
 typed on an intent, or whose `note` carries the intent's `WA-` ref, the intent is marked `converted` by the landing hook
@@ -1807,8 +2025,8 @@ export function compileKit(input: CompileKitInput): { kit: CampaignKit; offersHa
 
 Inputs: the page doc (name, benefits and their structure tags from the copy library, DG-07, design.md DES-§9.5 `Line.s`;
 offers; upsell; guarantee), `policies`, the zones (general range text through `deliverySummary`, lead included), the
-calling window (`callingWindowFor`, rendered once as the script header's "Appels : lun.-sam. 09:30-19:00" line, rev 3
-OPS-11), the pixel library and the store's Purchase trigger (operations' `conversions` setting), operations' templates
+calling window (`callingWindowFor`, rendered once as the script header's "Appels : lun.-sam. 09:30-13:00, 14:30-21:00"
+line through `weekHoursText`, rev 3 OPS-11, rev 4 helper; omitted when `windowIsEmpty`), the pixel library and the store's Purchase trigger (operations' `conversions` setting), operations' templates
 (OPE-§7.1 variables). Rules:
 - **Facts only:** every number in the kit is a price, an offer, the page fee or an ETA range from these inputs; the
   brief passes the same `allowedNumbers` guard as AI output (ai.md AI-§D.2 rule 5).
@@ -1882,7 +2100,12 @@ order upgrade disabled (the plain link stays), headers `X-Robots-Tag: noindex`, 
 CSP computed from the rendered add-on set with no pixel hashes (core §F.6). The thank-you route does the same for its
 document. Bucket `s:<sid>:test-render` 60/h; an invalid, expired, foreign-store or over-limit token gets the normal
 cached page and a normal order. The frozen chunk is untouched: endpoint strings are opaque to it (`form.ts:376`,
-`lead.ts:15`, `thankyou.ts:87`) and the CSP's `connect-src 'self'` covers a same-origin path with a query.
+`lead.ts:15`, `thankyou.ts:87`), and **(rev 4, CRIT12)** the test document's CSP is the narrowed one every store document
+carries: its `connect-src` and `form-action` hold `<serving origin>/api/public/` (plus no pixel host, since no pixel
+runs), which covers `endpoints.order` / `lead` / `upsell` with the `?sg-test=` query; **no bare `'self'`**, exactly as
+core §C.9 and §F.6 require of every served store document (SEC-2; `test:security` and `qa:headers` assert it on the
+test-render fixture). Revision 3's sentence "the CSP's `connect-src 'self'` covers a same-origin path" described the
+pre-SEC-2 policy and is withdrawn.
 
 ### LAN-§14.3 Marking and exclusions (core D54, OPE-§26)
 
@@ -1955,7 +2178,10 @@ The export code moves to store scope in R1.0 (T4: EXP-01…07); this section is 
 - Exports of v2 pages never charge zone fees (LD4, LD25). From R2 (LP-16), a "Charge delivery by city" page exports its
   `landing-v3` chunk and the `ZoneTable` in the static, connected and WhatsApp exports (the connected export is priced by
   the platform by zone); the PHP export of such a page is refused with `export:runtime_v3_unsupported` until template v3
-  ships (LAN-§20.4).
+  ships (R3 at the latest, core D75; LAN-§20.4).
+- **No report link in exports (rev 4, LAN-§3.9):** every export mode renders with `ctx.links.report` undefined, so the
+  footer and the Shell fallback omit the "Report this store" line; an exported page runs on the seller's own server,
+  where the platform's `/report/<handle>` has no standing. render-check asserts zero report links per export fixture.
 - **Every export runs the prepublish registry in `block` mode** (core §M.1 rule 5: "an export is a publish to someone
   else's server"): a document that would be refused for publish (`budget_blocked`, `design_blocked`, `honesty_blocked`) is
   refused for export with the same items; the export dialog lists them like the publish dialog.
@@ -2014,6 +2240,18 @@ mirror (mirrored fields are read-only, so no edit conflicts). Open tabs keep the
 sync that fails validation (an offer references an item that left the product) keeps the old version live, marks the page
 "Out of sync" and notifies (`landing.sync_failed`). `sync` versions count toward `versions_kept_per_page` and are pruned
 first. `content` changes (product name, photos) re-render in place only for inherit-story pages (D50, no prices).
+
+**Stale banner "Recharger" (rev 4; storefront's STO-R41, decided "S" for landing in core §Q.8, accepted here; R2,
+S1 in `src/landing/runtime/addons/assist.ts`).** The frozen `form.ts` reloads once on `stale` and refuses a second
+reload inside `STALE_GUARD_MS` (60 s, `src/landing/runtime/form.ts:59-60, 309-322`), then shows `[data-lp-stale]` above
+the summary; it cannot offer a button (the chunk is frozen). On an attached page (`pages.product_id` set) `addonsFor`
+always loads `assist` (≈ +120 B), which watches `[data-lp-stale]` with one `MutationObserver` on the form and, when it
+becomes visible, appends a text button `lp.reload` ("Recharger la page" / "عاود حمّل الصفحة" / "Reload the page") that
+calls `location.reload()`: a human click, so the 60 s guard (which only stops automatic loops) is respected and the
+frozen form restores the selection it kept in `lp-u` / `lp-b`. No price is computed in the browser; the server still
+answers `stale` until the new `sync` version is served. Acceptance: `qa:storefront-e2e` "price changed mid-checkout on
+page 7 of 10" (S1) clicks the button once and orders at the new price; render-check: the button is absent on
+non-attached pages.
 
 ### LAN-§17.5 SEO, pixels, stock
 
@@ -2264,7 +2502,8 @@ default and the PDP parity test; P3's R1 modules (`src/lib/delivery/**`) are con
   zone: zoneForCityValue(zones, payload.city), fallbackFeeCents: offers.shippingFee, subtotalCents, allLinesFree })`
   (STO-§15.9) when the version's `runtime_v = 3` (else the page fee), with today's stale and compare rules, so the
   landing page and the store checkout charge one fee for one city by construction.
-- A PHP template v3 mirrors the zone table and the same rule in `order.php`; **it may lag one release:** until it ships,
+- A PHP template v3 mirrors the zone table and the same rule in `order.php`; **it may lag to R3 (core D75, §K.5; track
+  D3 with the maintainer, LAN-§26.3):** until it ships,
   the PHP export of a `runtime_v = 3` page is refused with `export:runtime_v3_unsupported` ("This page charges delivery by
   city; the PHP export supports it in the next release. Switch the page to a flat fee to export it now"); the static,
   connected and WhatsApp exports ship the v3 chunk and work (the connected export posts to the platform, which prices by
@@ -2436,6 +2675,7 @@ Audit actions (appended to the `AuditAction` union by the core, §F.5 "landing (
 | `landing:form_hidden` | conversion | 3 / 10 | a live page whose order form is `hidden` | Form tab |
 | `landing:leads_slow` | conversion | 1 / 3 | first-contact p50 (28 d) > `landing.leads.firstContactTargetMin`, n ≥ 20 leads | link `/leads` |
 | `landing:wa_intents_waiting` | conversion | 1 / 3 | WhatsApp intents `new` for > 2 h inside the calling window, n ≥ 3 | link `/leads?kind=whatsapp` |
+| `landing:fee_mismatch` (rev 4: the rule core §I.7 names for P3, D75) | conversion | 1 / 3 | `minN` 20 orders / 28 d: zones carry fees that differ from a live page's flat fee for any of the store's top-5 cities by orders, the page not on "Charge delivery by city"; input P1's `zones.feeMismatchTop5`, built on the server by P3's `zoneFeesFor(scope, keys: CityKey[])` (`src/lib/delivery/zones.server.ts`: `zoneForCity(await listZones(scope), key)?.feeCents` per key) over the top-5 `CityKey`s of `opsAggregates(dims: ["city"])`, so both sides are slug-keyed; the value-keyed browser table `zonesForCheckout` is never joined with slug-keyed aggregates (core §I.7's "built from `zonesForCheckout`" is asked to read so, LAN-§27.4 N1) | the page's Offers tab fee field; from R2 the "Charge delivery by city" switch (LAN-§20.4) |
 
 Each rule runs ≤ 40 ms through the scope, reads no other store, and is covered by a fixture with and without `minN`
 (`test:health`, P1's harness imports this file's fixtures). The hard publish items of LAN-§3.2 never appear here: a page
@@ -2453,7 +2693,8 @@ Commands (`CommandDef`, filtered by `can()`, mode and release): "Publish this pa
 "Open a test order" (`pages.publish`, `mintTestLink` of the current or home page), "Create a campaign"
 (`campaigns.write`), "New short link" (`campaigns.write`), "Delivery zones" / "Policies" (jump). Search provider
 (`kinds: ["lead", "wa-ref", "page", "campaign", "link"]`, ≤ 120 ms): a typed `WA-XXXXXX` ref opens the intent; a page by
-slug or title; a campaign by name or slug; a short-link code. Agents' results are limited to their own leads.
+slug or title; a campaign by name or slug; a short-link code. Agents' results are limited to their own leads. Lead
+and `WA-` results come from `src/lib/leads/read.ts`, so under impersonation they show masked names (rev 4, core D70).
 
 ### LAN-§23.10 Flags
 
@@ -2532,6 +2773,8 @@ Arabic is Moroccan-friendly (Darija vocabulary, Arabic script); no dashes in any
 | `track_link` (template) | السلام عليكم {name}، تقدر تتبّع الطلب ديالك {order_id} من هنا: {track_url} | Bonjour {name}, suivez votre commande {order_id} ici : {track_url} | Hello {name}, follow your order {order_id} here: {track_url} |
 | `test.banner` | طلب تجريبي: ما كيتحسبش | Commande test : non comptée | Test order: not counted |
 | `link.inactive` | هاد الرابط ما بقاش خدام. | Ce lien n'est plus actif. | This link is no longer active. |
+| `lp.report` (rev 4, LAN-§3.9; same wording as the storefront's `footer.report`) | بلّغ على هاد المتجر | Signaler cette boutique | Report this store |
+| `lp.reload` (rev 4, LAN-§17.4, R2) | عاود حمّل الصفحة | Recharger la page | Reload the page |
 
 ---
 
@@ -2541,8 +2784,8 @@ Arabic is Moroccan-friendly (Darija vocabulary, Arabic script); no dashes in any
 
 | Script | File | Checks |
 |---|---|---|
-| `test:delivery` | `src/lib/delivery/selftest.ts` | LAN-§7.5 ETA and zone-problem cases; rev 3: the "Fès" city-key parity fixture, the confirmation-lead grid, `dz.afterCall` |
-| `test:landing-addons` | `src/landing/addons/selftest.ts` | `addonsFor` matrix (page × mode × settings), data block shapes and sizes, the selection serialiser over the DOM fixtures, "every add-on off → no add-on bytes" |
+| `test:delivery` | `scripts/qa/delivery-check.ts` (rev 4: the core §J.1 file, P3's; imports `src/lib/delivery/selftest.ts`) over `scripts/qa/fixtures/city-key.json` (P4's) | LAN-§7.5 ETA and zone-problem cases; rev 3: the "Fès" city-key parity fixture, the confirmation-lead grid, `dz.afterCall`; rev 4: the `ZoneTable` key-shape case (`zoneTableKey: "value"`, CRIT1) |
+| `test:landing-addons` | `src/landing/addons/selftest.ts` | `addonsFor` matrix (page × mode × settings), data block shapes and sizes, the selection serialiser over the DOM fixtures, "every add-on off → no add-on bytes"; rev 4: the storage prefix on `/s/nour`, `/s/nour/`, `/s/nour/serum` equals the core chunk's, the import graph of the add-on entries never reaches `src/lib/orders/address.ts`, `assist-ty`'s `{when}` on every case of `scripts/qa/fixtures/calling-window.json`, `referrerPolicy: "same-origin"` on the `track` / `assist-ty` fetches |
 | `test:policies` | `src/lib/policies/selftest.ts` | `policyAllows` per claim and locale, `policyLines` ≤ 6 lines, unset → no sentence |
 | `test:links` | `src/lib/links/selftest.ts` | the LAN-§12.1 query rule (byte-identical incoming part, `utm_` detection, encodings); rev 3 (SEC-6): `resolveLinkTarget` over every `target_kind`, the open-redirect fixtures answer `null`, `assertStoreRelativePath` cases, S-mode `Location` origins |
 | `test:wa-price` | `src/lib/wa-order/selftest.ts` | `priceWaSelection` vs `orderTotals` on the `duo`, `tshirt`, `colors` fixtures, partial selections |
@@ -2553,22 +2796,23 @@ Arabic is Moroccan-friendly (Darija vocabulary, Arabic script); no dashes in any
 | `test:cod-invariants` | `src/lib/landing/cod-invariants.selftest.ts` | LAN-§3.7: `codInvariants()` on the 41-page baseline set (23 stage pages fail `foldOk`, the form on screen 14-17 fails `formScreen ≤ 3`) and on the keep-list pages (all true) |
 | `test:experiments` (R3) | `src/lib/experiments/selftest.ts` | LAN-§18.8: 2,000 seeded A/A simulations in `npm test` (10,000 + the τ sweep in `test:slow`, rev 3 ENGP-24), the `0.05 / (arms − 1)` stop rule, fingerprint stability, `pMin` monotone under daily peeking |
 | `test:policies` (extended) | `src/lib/policies/selftest.ts` | rev 3 (ENGP-8): `policyClaims` on a 120-line claim fixture and a 120-line clean fixture per locale (≥ 95 % / ≤ 2 %), the contradiction vs unset matrix |
-| `npm test` wall time | `scripts/qa/test-budget.ts` (core) | the P3 suites together ≤ 20 s on the owner's PC (`npm test` ≤ 3 min overall, request to core §J.1 in LAN-§27.3); the heavy sweeps live in `test:slow` |
+| `npm test` wall time | `scripts/qa/test-budget.ts` (core) | the P3 suites together ≤ 20 s on the owner's PC (`npm test` ≤ 3 min overall; accepted, core §J.1 rev 3 "landing ≤ 20 s", the harness prints each script's time and fails the chain above 180 s); the heavy sweeps live in `test:slow` |
 | checklist fixtures | `src/lib/editor/selftest-checklist.ts` (new) | every LAN-§3.2 item fires and clears; each id equals its gate id |
-| render-check (extended) | `scripts/qa/render-check.ts` (T3; fixtures added through Q3) | new chunk budgets and page caps, delivery fallback text, thank-you timelines × policies, no `aggregateRating`, test render without pixels, byte identity when add-ons are off; **rev 2:** order-form contract per variant (≤ 1,100 px estimate, one submit, 0 glass, ≤ 4 reveals, no kicker, visible boundaries ≥ 3:1, no one-value picker), COD line exactly twice, ≤ 1 `[data-countdown]`, ≤ 1 `.lp-trust`, thank-you ≤ 8 reveals / 0 glass, every id and price in `<bdi dir="ltr">` with `tabular-nums`; **rev 3:** thank-you 0 aurora / 0 grain (`.lp-ty__tint` only), form controls ≥ 52 px at 16 px, the `lp-assist.dz.city` map complete, the `assist` chunk free of `IntersectionObserver` and of writes to `<html>` attributes |
+| render-check (extended) | `scripts/qa/render-check.ts` (the maintainer's harness; this part's cases in **`scripts/qa/render-cases/landing.ts`**, P3's file, imported by the harness, core §J.1 rev 3, so P3 never edits the harness) | new chunk budgets and page caps, delivery fallback text, thank-you timelines × policies, no `aggregateRating`, test render without pixels, byte identity when add-ons are off; **rev 2:** order-form contract per variant (≤ 1,100 px estimate, one submit, 0 glass, ≤ 4 reveals, no kicker, visible boundaries ≥ 3:1, no one-value picker), COD line exactly twice, ≤ 1 `[data-countdown]`, ≤ 1 `.lp-trust`, thank-you ≤ 8 reveals / 0 glass, every id and price in `<bdi dir="ltr">` with `tabular-nums`; **rev 3:** thank-you 0 aurora / 0 grain (`.lp-ty__tint` only), form controls ≥ 52 px at 16 px, the `lp-assist.dz.city` map complete, the `assist` chunk free of `IntersectionObserver` and of writes to `<html>` attributes; **rev 4:** the frozen `landing` chunk at tolerance 0 against `budgets.json.landing` and `src/landing/runtime/landing.sha256` (every other chunk and cap at +5 %), exactly one report link per live fixture and none per export fixture (LAN-§3.9), the `lp-assist.dz.city` key set equal to the `City.value` set, the R2 `lp.reload` button only on attached pages |
 
 ### LAN-§25.2 DB-backed (`npm run test:db`, throwaway `cod_test_*` databases)
 
 | Script | Checks |
 |---|---|
 | `test:tracking` (`scripts/qa/tracking-check.ts`) | LAN-§9.5 |
-| `test:leads` (`scripts/qa/leads-check.ts`) | capture with `sel`, the LD12 attribution fixtures, WhatsApp intents (refs, NULL phone), conversion through the manual-order stub, retention purge |
+| `test:leads` (`scripts/qa/leads-check.ts`) | capture with `sel`, the LD12 attribution fixtures, WhatsApp intents (refs, NULL phone), conversion through the manual-order stub, retention purge; rev 4: an impersonation scope gets masked names and notes from `listLeadRows` / `getLeadRow` and the ⌘K provider (a spy on `mask.ts` sees calls from `src/lib/leads/read.ts` only), the page-vitals SQL fixture (LP-22) |
 | `test:tenancy` additions (`scripts/qa/tenancy-check.ts`, T4's file, cases listed for T4/P3) | zones, leads, intents, short links, campaigns and share tokens, slug history, test tokens, experiments and exposures of A unreachable from B (actions, public APIs, ⌘K) |
 | `test:public-api` additions | the new buckets; `wa`, `track`, `exp` refused for non-servable stores and for foreign hosts |
 
 ### LAN-§25.3 HTTP and e2e
 
-`qa:headers` (track, go 308/410, kit share, test render); `qa:publish-gates` (core, maintainer): the sample-review page
+`qa:headers` (track, go 308/410, kit share, test render with the narrowed `connect-src` and no bare `'self'`, rev 4;
+`/report/<h>` on a store host → the neutral 404, rev 4); `qa:publish-gates` (core, maintainer): the sample-review page
 refused with `honesty_blocked` naming the section, the design-baseline worst page refused with `budget_blocked`, the
 publish dialog lists the fixes; Playwright msedge steps `delivery`, `wa-order`, `thank-you`, `tracking`, `test-order`,
 `form` (the LAN-§3.5 measurements on the 41-page set, incl. the 16 px no-zoom and 52 px control checks), `floating`
@@ -2600,14 +2844,25 @@ settings/{checkout,delivery,policies}/**}`, `src/app/api/app/[store]/leads/**`,
 **`scripts/qa/wow-demo/steps/landing.ts`** (the committed demo steps, rev 3 ENGP-20), `src/lib/links/target.ts`,
 `src/lib/policies/claims.ts` and `claims.<locale>.ts`, `src/lib/landing/honesty/facts.server.ts`,
 `src/lib/delivery/lead.server.ts`, `src/components/admin/landing/{proof-attest,fact-attest}.tsx` (rev 3 files, all inside
-owned folders); the Playwright steps of the optional local harness under `qa/e2e` (git-ignored, not a deliverable).
+owned folders); **rev 4 (as the core P3 row of revision 3 lists them):** `scripts/qa/render-cases/landing.ts` (this
+part's render-check cases, ENGP-12), `scripts/qa/delivery-check.ts` (`test:delivery`, D68; the fixture
+`scripts/qa/fixtures/city-key.json` is P4's), and, requested for the core row (LAN-§27.4 N6),
+`src/lib/editor/selftest-checklist.ts` (the checklist fixtures of LAN-§25.1, the only file of `src/lib/editor/**`
+besides `checklist.ts` this part writes); the rev 4 files inside owned folders: `src/lib/leads/read.ts` (the masked
+read repository), `src/lib/landing/hours.ts` (`windowIsEmpty`, `weekHoursText`, `reviveWindow`),
+`src/lib/delivery/table.ts` (`buildZoneTable`); the Playwright steps of the optional local harness under `qa/e2e`
+(git-ignored, not a deliverable). `test:ownership` (`scripts/qa/ownership-check.ts`, core §J.1) parses the globs of
+this paragraph, so every file above is written as a path or a glob, never as prose.
 
-**Ownership boundaries this part depends on (rev 3, ENGC-8).** `src/app/(public)/kit/**` is P3's; the core's P2 row
-(`src/app/(public)/** except invite/staff/**`) must also except `kit/**` (request in LAN-§27.3; until the core row says
-so, this section and core §K.3's "this section wins" rule make P3 the owner, since the core P3 row lists the folder
-explicitly). `src/app/app/[store]/settings/audit/**` is not this part's (P2's settings tree). This part edits no file of
-P4 (`src/lib/orders/address.ts`, `src/lib/callcenter/window.ts`), of P6 (`src/landing/sections/cta/**`) or of the
-maintainer (`src/lib/orders/create.ts`); it imports from them.
+**Ownership boundaries this part depends on (rev 3, ENGC-8; rev 4: decided).** `src/app/(public)/kit/**` is P3's; the
+core's P2 row now reads "`src/app/(public)/**` except `invite/staff/**` (P1), `report/**` (P1) and `kit/**` (P3)"
+and lists `settings/audit/**` under P2 (core §K.2 rev 3, §Q.8 LAN R9 accepted), so the overlap is gone and
+`test:ownership` keeps it gone. `src/app/(public)/report/**` is P1's (the "Report this store" page, core D76); this part only links to it.
+`src/app/app/[store]/settings/audit/**` is not this part's (P2's settings tree). This part edits no file of P4
+(`src/lib/orders/address.ts`, `src/lib/callcenter/{window,window.server,defaults}.ts`,
+`src/components/admin/callcenter/calling-window.tsx`), of P1 (`src/lib/platform/{mask,brand-check}.ts`), of P6
+(`src/landing/sections/{cta,footer}/**`), of S1 (`src/lib/catalog/order-v3.server.ts`, R2) or of the maintainer
+(`src/lib/orders/create.ts`, `src/landing/document.tsx`, `src/lib/render/prepublish.ts`); it imports from them.
 
 Delivered for P3 by other tracks (so P3 never edits their files): T3 in R1.0 the render add-on hook, `purchaseInBrowser`,
 `renderTestDocument()` wiring in the slug and thank-you routes, `resolveTestToken()` in `create.ts` / `leads.ts`, the
@@ -2619,20 +2874,30 @@ path (ENGP-8); the maintainer at P0 the P0 stubs this part implements (`zoneLine
 `zonesForCheckout`, `etaWindow`, `signedTrackPath`, `waConfirmText`, `markLeadConverted`, `landingModeSwitchPlan`,
 `mintTestLink`, `compileKit`), the `landing` / `policies` / `checkout` key schemas (rev 3 fields `confirmationLeadDays`,
 `addressMode`, no `contact.hours`), `budgets.json` keys and the registrations of every extension file above (core §K.2
-P0, §K.3), and the 0004 placement of `page_slug_history`, `orders.is_test`, `leads.is_test` (ENGC-1); P4 the P0 stubs
-`cityKey` / `normalizeCity` (OPE-§10.1, used by `saveZones`, the `ZoneTable` builder, the hook and the tracking page),
-**`callingWindowFor(scope)` and the pure `nextCallableAt` (rev 3, OPS-11)**, the `CallingWindowEditor` component the
-"After the order" card mounts, the TEST chip, `convertLeadToOrder`, "Delete test orders" (`settings.write`) and, with
-S1 in R2, `createManualOrderV3` (OPS-15); P6 the `ProofAttestSheet` / `FactAttestSheet` mounts (Q31), the
-`features.slots` entry of the form thumbnail, the `orderForm` `features.h = { base: 1.1, fixed: true }` entry honoured
-by `estimateHeights` (ENGP-5), the `hero` prop on the final `cta` section's primary button and the CSS hooks on
-`[data-sticky-cta][data-visible]` (UX-4); P7 the `ad.brief` and `callcenter.script` tasks (Q20); P5 the IN-05 template
-kind, the `wa_order_reply` kind and the Sheets "Transporteur" / "Tracking" pull (OPS-9); P2 the address-card entries,
-the `C` quick action and the `store`-mode onboarding rule of LAN-§4 (OPS-14).
+P0, §K.3), and the 0004 placement of `page_slug_history`, `orders.is_test`, `leads.is_test` (ENGC-1); **rev 4:** the
+maintainer also delivers `src/landing/runtime/landing.sha256` and the tolerance-0 rule in render-check (LD1), the shared
+`originFrom(prev, doc)` builder (core §M.1 rule 2), `ctx.links.report` in the render context and the Shell's
+report-line fallback (LAN-§3.9, LAN-§27.4 N4); P4 the P0 stubs `cityKey` / `normalizeCity` (OPE-§10.1, used by
+`saveZones`, the `ZoneTable` builder, the hook and the tracking page; **server-side only for this part**, no add-on
+imports them, rev 4), **`callingWindowFor(scope): Promise<EffectiveWindow>` and the pure `nextCallableAt`,
+`rangesForDay`, `hoursText` and `DEFAULT_WINDOW` (rev 3, OPS-11; rev 4, CRIT3)**, the shared fixtures
+`scripts/qa/fixtures/city-key.json` and `scripts/qa/fixtures/calling-window.json`, the `CallingWindowEditor` component
+the "After the order" card mounts and its `saveCallingWindowAction` (which enqueues the `store_info` re-render, LAN-§8.2),
+the TEST chip, `convertLeadToOrder` (dispatching on `sel.v`) and "Delete test orders" (`settings.write`); P1
+`maskIfImpersonation` (D70), `checkBrandTerms` (D76) and the `/report/<handle>` page; S1 in R2 `createManualOrderV3` /
+`editOrderV3` (`src/lib/catalog/order-v3.server.ts`) and `productAsPageDoc`, S4 the manual-order sheet's store branch
+(OPS-15 as decided, core §K.4); P6 the `ProofAttestSheet` / `FactAttestSheet` mounts (Q31), the `features.slots` entry
+of the form thumbnail, the `orderForm` `features.h = { base: 1.1, fixed: true }` entry honoured by `estimateHeights`
+(ENGP-5), the `hero` prop on the final `cta` section's primary button and the CSS hooks on
+`[data-sticky-cta][data-visible]` (UX-4), the report link in the footer's `legalLinks(ctx)` (LAN-§3.9); P7 the
+`ad.brief` and `callcenter.script` tasks (Q20); P5 the IN-05 template kind, the `wa_order_reply` kind and the Sheets
+"Transporteur" / "Tracking" pull (OPS-9); P2 the address-card entries, the `C` quick action and the `store`-mode
+onboarding of PLA-§22.2 PD60 rev 3 (no landing page; LAN-§4 states the fallback only, OPS-14 / CRIT5).
 
 Read-only for P3 (changes through a CCR, core §K.3): `src/landing/document.tsx`, `src/lib/render/**` (except
 `prepublish/landing.ts` and its fixtures), `src/landing/runtime/**` (except `addons/**`), `src/lib/page/**`,
-`src/lib/orders/{contract,create,validate,text,upsell,resolve}.ts`, `src/lib/editor/**` (except `checklist.ts`),
+`src/lib/orders/{contract,create,validate,text,upsell,resolve}.ts`, `src/lib/editor/**` (except `checklist.ts` and
+`selftest-checklist.ts`),
 `src/components/builder/**`, `src/components/preview/**`, every other `src/landing/sections/**` (design's P6, incl.
 `stickyCta` and `whatsappFloat`), `scripts/build-landing-assets.mjs`, `src/landing/runtime/budgets.json`,
 `src/lib/render/prepublish.ts` (the registry).
@@ -2646,15 +2911,21 @@ LP-19 and the `qa:wow-demo` steps.
 
 `src/lib/landing/{attach.ts, attach.server.ts, copy.server.ts}`, `src/components/builder/attach/**` (new, request with the
 S-track contract step), the product page's "Landing pages" tab (inside storefront's own files), the `product` render
-handler. Shared with S2: the theme-mode switch.
+handler, `scripts/qa/copy-check.ts` (LP-23, LAN-§1.4), the `assist` stale button of LAN-§17.4 (a CCR on P3's
+`src/landing/runtime/addons/assist.ts`, which passes to S1 for R2). Shared with S2: the theme-mode switch. **LP-16's
+runtime side (rev 4, CRIT11; core D75, §K.4):** the `landing-v3` entry (`src/landing/runtime/entry-v3.ts`), runtime
+config v3 and the server shipping rule are the **R2 contract step** (maintainer), the `both`-mode default and the PDP
+parity test are S1's (LAN-§20.4).
 
 ### LAN-§26.3 R3, track D3 GROWTH (landing parts)
 
 `src/lib/experiments/**`, `src/landing/runtime/addons/{exp-head,exp,chain,video-hero}.ts`,
 `src/app/api/public/{exp,upsell-chain}/**`, `src/app/app/[store]/experiments/**`,
 `src/app/app/[store]/pages/[id]/{experiments,schedule,analytics}/**`, `src/components/admin/{experiments,schedules,analytics}/**`,
-`src/lib/landing/{addons.ts, schedules.server.ts, saved-blocks.server.ts}`, the `landing-v3` entry and the PHP template v3
-with the maintainer (core contract step, Q28); section files for LP-14 with design's D4.
+`src/lib/landing/{addons.ts, schedules.server.ts, saved-blocks.server.ts}`,
+`scripts/qa/{chain-check,schedules-check,analytics-check,saved-blocks-check}.ts` (LAN-§1.4), **the PHP template v3 of
+LP-16 only** (with the maintainer, core §K.5; rev 4, CRIT11: the `landing-v3` entry and config v3 moved to the R2
+contract step, LAN-§26.2, D75, so this track no longer lists them); section files for LP-14 with design's D4.
 
 ---
 
@@ -2763,6 +3034,29 @@ permission, a route or a file-ownership row consistent with this part.
 | R24 | SEC-18 | `honesty:password_field` is in this part's gate (LAN-§3.2); the brand-term checks at every write, the `platform:brand_term_live` health rule and the "Report this store" endpoint are platform's | platform.md PLA-§3.4, PLA-§22.10.1, PLA-§18; core §C.7, §F.8 |
 | R25 | ENGP-3, ENGP-6 (core side), QUAL-1, QUAL-9, QUAL-10, QUAL-20, QUAL-21, QUAL-25, SEC-1, SEC-5, UX-20, UX-21, UX-39 | No landing side (recorded in LAN-§29); owners per the findings | ai.md, design.md, platform.md, storefront.md, core |
 
+Core §Q.8 decided every row above (LAN R1 … R25): all accepted, **R3** with `Promise<EffectiveWindow>` instead of
+`CallingWindow | null`, **R5** with the platform's "no landing page in store mode" as the primary rule, **R18** with
+tolerance 0 on the frozen chunk; revision 4 applies the three changes (LAN-§30). SEC-5 of R25 turned out to have a
+landing side (core D70 names the leads screen, whose repository is this part's); revision 4 applies it (LAN-§10.2).
+
+### LAN-§27.4 Contradictions found by revision 4, and notes to the sibling parts (round 2)
+
+Core §Q.8 closed the third-round requests; this table records only the places where a core or sibling text still
+contradicts core §P / §Q.8 or this part's decided text, plus what the critic's findings need on the other side. This
+document's side is in the body; each row names the file and section that must change.
+
+| # | Finding | Contradiction and the change it needs | Owner (file, section) |
+|---|---|---|---|
+| N1 | CRIT1 (OPS-1) | Core §K.2 P0 and §Q.8 LAN R1 freeze `zonesForCheckout` "keyed by the posted `City.value`, built on the server from the slugs", while core D68, the §K.2 P0 operations line ("so landing's `assist` and the storefront's `checkout` / `pdp` chunks bundle it by source import"), OPE OD47 and STO-D43 / STO-§14.4 say the browser tables carry slugs and the chunks bundle `cityKey()`. Keep the P0 shape: D68 → "the browser zone tables are `zonesForCheckout`'s value-keyed `ZoneTable`; no chunk bundles `cityKey()`, which stays pure and isomorphic for server use and tests"; core §I.7 `zones.feeMismatchTop5` → "built from P3's slug-keyed `zoneFeesFor(scope, keys)` over the top-5 `CityKey`s of `opsAggregates`" (never the browser table); core §J.1 `test:delivery` row adds the key-shape case; OPE OD47 / OPE-§10.1: drop "the `assist` chunk, which bundles the pure `cityKey()`"; STO-D43, STO-§2 city-key row, §12.3, §14.4: `#sg-config` embeds the `ZoneTable` unchanged and the chunk looks up `table.city[entry.v] ?? table.star` (the city list's `s` slug is then not needed for zones); the server paths (STO-§15.7, §16.2 step 13) are unchanged; P4's `scripts/qa/fixtures/city-key.json` gains `"zoneTableKey": "value"` and the `buildZoneTable` case of LAN-§7.1 | core D68, §K.2 P0, §I.7, §J.1; operations.md OD47, OPE-§10.1; storefront.md STO-D43, STO-§2, §12.3, §14.4; `scripts/qa/fixtures/city-key.json` (P4) |
+| N2 | CRIT3 (OPS-11) | One window shape: OPE-§2.9 `WeekRanges` (7-slot array, "index 0 = Monday") and OPE-§5.5 `EffectiveWindow.days: Range[][]` vs core D73 / §D.10 "ISO weekdays 1-7": operations fixes **one** container, recommended `days: Record<1 \| 2 \| 3 \| 4 \| 5 \| 6 \| 7, Range[]>` so "ISO 1-7" is literally true and matches `checkout.calendar.workdays`; the "index 0 = Monday" wording of OPE-§R OPS-11 goes. OPE-§5.5 and OD57 still say `store.confirmation.hours` / `policies.contact.hours` "become read-only mirrors written by `saveOpsSettingsAction`", against core D73 / §P OPS-11 ("removed, not mirrored"): remove the mirror writes. `saveCallingWindowAction` enqueues `enqueueRenders(scope, "all-live", "store_info")` so the thank-you HTML re-bakes the window (LAN-§8.2). Export `DEFAULT_WINDOW` (`src/lib/callcenter/defaults.ts`) for the card's "starting hours" line, and add the shared window fixture `scripts/qa/fixtures/calling-window.json` read by `test:ops`, `test:delivery` and `test:landing-addons`. This part needs no change for either container (it never reads `days`) | operations.md OPE-§2.9, §5.5, OD57, OPE-§R; `scripts/qa/fixtures/calling-window.json` (P4) |
+| N3 | ENGP-6, ENGP-5 | Core §M.2's `budget:F1` soft cell still lists "or form height > 1,100 px in default state" while this part's `form:F1` is the one form-height item (LAN-§3.2, §3.4 F1 row); two notes with two ids for one measurement. Drop the clause; `budget:F1` keeps the position (soft > 3,000, hard `top × 0.8 > 3,000`) | core §M.2 |
+| N4 | CRIT15 (SEC-18) | Nobody rendered the "Report this store" link on landing pages. The maintainer adds `links.report` to the render context's `ctx.links` (live, test, preview; undefined in every export mode) and the Shell (`src/landing/document.tsx`) renders the fallback `<p class="lp-report">` when the document has no visible footer; design.md DES-§4.5.4: the footer's `legalLinks(ctx)` appends the link when `ctx.links.report` is set and `scripts/qa/render-cases/design.ts` asserts it; platform.md PLA-§24.2 still says store hosts **308** to `/report/*`, against core §B.1 / §Q.8 PLA Q3.4 (A\*: store hosts answer 404, the link is absolute): align, and name the landing renderers of LAN-§3.9 (P6 footer + Shell fallback, P3 thank-you / tracking / legal, S1 store chrome) | core §H.13 render context, `src/landing/document.tsx` (maintainer); design.md DES-§4.5.4; platform.md PLA-§24.2 |
+| N5 | SEC-5 | PLA-§Q.3 Q3.3 and PLA-§7.2 list `listLeads` / `getLead` among **operations'** read functions; the leads repository is **this part's** `src/lib/leads/read.ts` (LAN-§10.2), which calls `maskIfImpersonation`. Name it there so P1's spy test and the canary suite cover the right file | platform.md PLA-§7.2, PLA-§Q.3 Q3.3; operations.md (no lead reads) |
+| N6 | ENGC-8 | Core §K.2 P3 row: add `src/lib/editor/selftest-checklist.ts` (the checklist fixtures of LAN-§25.1 live in `src/lib/editor/**`, otherwise read-only for P3), so `test:ownership` finds an owner for it | core §K.2 P3 row |
+| N7 | CRIT11 | Core §K.5 D3 track line lists "LP-13…LP-16" whole; LP-16's runtime moved to the R2 contract step (D75). → "LP-16 PHP side only (runtime in R2, D75)" | core §K.5 |
+| N8 | ENGP-26 | Storefront STO-§29.4 STO-R41 still says "render-check's +5 % stays the gate" for the landing chunk; core §Q.8 STO-R41 / the core header made it **tolerance 0** against `budgets.json.landing` and `src/landing/runtime/landing.sha256`; STO-§14.1 reads that pin | storefront.md STO-§29.4 STO-R41, STO-§14.1 |
+| N9 | CRIT17 | Each part adds a "Proven by" map like LAN-§1.4 (command + fixture or harness step per feature id) and cites feature ids in its test files' headers, so `grep "proves:"` maps every id to a suite | platform.md PLA-§1, operations.md OPE-§1, design.md DES-§1, storefront.md STO-§1 |
+
 ---
 
 ## LAN-§28 Elevation changes (rev 2)
@@ -2835,6 +3129,30 @@ core decision, **DES / OPE / STO / AI / PLA** = a sibling part spec section.
 | 53 | LAN-§3.2, §3.2.1, §6.4 `sensitiveFields`, §6.5: `honesty:password_field` | SEC-18 |
 | 54 | LAN-§27.3 (requests to the core and siblings), §29 (one row per finding) | all |
 
+### LAN-§28.2 Round 2 changes (rev 4)
+
+| # | Change | Finding |
+|---|---|---|
+| 55 | Status, inputs paragraph, owner summary 18: revision 4 aligned with core revision 3 (D68 … D76, §P, §Q.8); LAN R3, R5, R18 changes applied | all |
+| 56 | LD4a, LAN-§5.2 (no add-on imports `address.ts`), §7.1 (`buildZoneTable`, "One table shape", `zoneFeesFor`), §7.5, §23.7, §25.1, §27.4 N1: the value-keyed `ZoneTable` as the one browser shape, pinned by `city-key.json`'s `zoneTableKey` | CRIT1, OPS-1 |
+| 57 | LD29, glossary, LAN-§2.3 (`EffectiveWindow` re-exported, `windowIsEmpty`, `weekHoursText`, never `null`), §3.2 (`callingWindow` flag, `thanks:no-window` condition), §3.2.1, §3.3, §8.2 (`SerializedWindow`), §8.3 (`nextCallableAt(now, w)`), §8.4 (default-hours line), §8.6, §9.2, §13.3, §27.4 N2 | CRIT3, OPS-11 |
+| 58 | LAN-§4: store-mode onboarding creates no landing page (core §A.2, PD60 rev 3); `inStoreMode = true` only as the fallback; acceptance "no `kind = 'landing'` after onboarding" | CRIT5, OPS-14 |
+| 59 | LAN-§26.2, §26.3, §20.4, §16: LP-16 runtime in the R2 contract step, PHP template v3 only in D3 (lag to R3 at the latest); §27.4 N7 | CRIT11, OPS-13 |
+| 60 | LAN-§14.2: the test render's narrowed `connect-src` / `form-action`, no bare `'self'` (SEC-2); §25.3 `qa:headers` | CRIT12 |
+| 61 | **LAN-§3.9** (new): the report link on landing, thank-you, tracking and legal documents, absent in exports; owner summary 18; LP-01 row; §3.3, §16, §24.2 `lp.report`, §25.1, §25.3, §26.1; §27.4 N4 | CRIT15, SEC-18 |
+| 62 | **LAN-§1.4** (new): "Proven by" per feature id; R2 / R3 check scripts named in §26.2 / §26.3; §27.4 N9 | CRIT17 |
+| 63 | LD1, LAN-§1.1 LP-01, §5.2, §25.1: the frozen `landing` chunk at tolerance 0 with `landing.sha256`; the core's prefix regex `(?:\/\|$)` | ENGP-26 (LAN R18 A\*), core ENGC-10 |
+| 64 | LAN-§2 intro, §10.2, §10.3, §10.5, §10.6, §23.9, §25.2, §27.4 N5: `src/lib/leads/read.ts` masks through `maskIfImpersonation`; `WriteScope` on every writer | SEC-5 (core D70), core D71 |
+| 65 | LAN-§10.3, §10.5, §11.5, §26.1: `convertLeadToOrder` dispatches; S1's `createManualOrderV3` in `src/lib/catalog/order-v3.server.ts`, S4's sheet branch | OPS-15 (core §Q.8 LAN R6, OPE Q.27h A\*) |
+| 66 | LAN-§3.2 `form:F1`, §3.4 C2 / C3 / F1 / N8 rows: the core's §M.2 bands and §M.4 origin rule; §27.4 N3 | ENGP-6, QUAL-1 |
+| 67 | LAN-§3.2.1, LD31: `originFrom(prev, doc)` and `KIND_GATES` named; `honesty:password_field` mirrored on utility kinds | ENGP-8, ENGP-1, SEC-18 |
+| 68 | LAN-§23.7 `landing:fee_mismatch` (the rule core §I.7 names) | OPS-13 (core D75) |
+| 69 | LAN-§9.1: `referrerPolicy: "same-origin"` on the `track` / `assist-ty` fetches under the document's `no-referrer` | found by the re-check (the core's ENGC-16 lesson) |
+| 70 | LAN-§3.3: `checkBrandTerms` on the policies' free-text fields | SEC-18 (core D76) |
+| 71 | LAN-§17.4: the R2 `assist` "Recharger" button on attached pages; §24.2 `lp.reload` | storefront STO-R41 (core §Q.8 "S" for landing) |
+| 72 | LAN-§26.1: `render-cases/landing.ts`, `delivery-check.ts`, `selftest-checklist.ts`, the rev 4 files; the decided P2 carve-outs; §27.4 N6 | ENGC-8 |
+| 73 | LAN-§27.3 closing paragraph, **§27.4** (contradictions and round 2 notes), **§30** (one line per round 2 finding id) | all |
+
 ---
 
 ## LAN-§29 Review decisions (round 1)
@@ -2842,6 +3160,8 @@ core decision, **DES / OPE / STO / AI / PLA** = a sibling part spec section.
 Revision 3 answers every finding of the round 1 review that names this file or crosses it. "Resolved" = applied in the
 body (section named); "cross" = this file's side applied and the other side requested in LAN-§27.3; "no landing side"
 = the finding concerns other files only; "rejected" = not applied, with the reason. Nothing is deferred to a note.
+The rows keep their revision 3 wording; where revision 4 changed a decision (OPS-14, OPS-15, ENGP-26, SEC-5) or its
+mechanism (OPS-1, OPS-11, OPS-13, SEC-18), **LAN-§30** is the current decision.
 
 | Id | Sev. | Decision | How / where |
 |---|---|---|---|
@@ -2882,3 +3202,61 @@ body (section named); "cross" = this file's side applied and the other side requ
 | QUAL-20 | major | **no landing side** | niche 4-gram and tell-pair data path (design.md DES-§5.1, §3.2, §7.4) |
 | QUAL-21 | major | **no landing side** | rubric v3 typography text (ai.md AI-§A.8.7, design.md DES-§10.3) |
 | QUAL-25 | minor | **no landing side** | `GenomeCard` / `RepairOp` / task-name drift (ai.md, design.md) |
+
+---
+
+## LAN-§30 Review decisions (round 2)
+
+Revision 4 answers the round 2 review: the critic's consistency findings (CRIT1, CRIT3, CRIT5, CRIT11, CRIT12,
+CRIT15, CRIT17) and every round 1 id again, re-checked against core revision 3 (D68 … D76, §P, §Q.8). One line per
+finding id. "Resolved" = applied in the body (sections named); "holds" = the revision 3 resolution was re-checked
+against core revision 3 and stands, with any wording re-aligned; "cross" = this file's side applied and the other
+side recorded in LAN-§27.4 (round 2) or LAN-§27.3 (round 1, decided in core §Q.8); "no landing side" = other files
+only; "rejected" = not applied, with the reason.
+
+| Id | Sev. | Decision | How / where |
+|---|---|---|---|
+| OPS-1 | blocker | **holds, re-aligned (cross)** | the slug `CityKey` is the one storage and API key (D68); rev 4 settles the browser side with CRIT1: one value-keyed `ZoneTable` from one pure `buildZoneTable` for `assist`, `#sg-config` and `landing-v3`, no add-on imports `cityKey()`, `city-key.json`'s `zoneTableKey` pins it (LD4a, LAN-§5.2, §7.1, §7.5, §25.1); server joins use the slug-keyed `zoneFeesFor` (§7.1, §23.7); N1 |
+| OPS-9 | major | **holds** | core D74 adopted option (a); LAN-§9.2 reads `orders.tracking_ref` / `carrier_label`; the Carrier CSV and the Sheets pull are operations' and P5's (LAN-§26.1 delivered list) |
+| OPS-11 | major | **holds, re-aligned (cross)** | core D73 (one window, the two hours keys removed, no mirrors); rev 4 with CRIT3: `callingWindowFor(scope): Promise<EffectiveWindow>` never null, this part never reads `days`, `windowIsEmpty` is the only "no hours" state (LD29, LAN-§2.3, §3.2, §3.2.1, §8.2-§8.4, §8.6, §9.2, §13.3); N2 asks operations to drop the mirror writes OPE-§5.5 still describes |
+| OPS-12 | major | **holds** | `checkout.calendar.confirmationLeadDays` is in the core's P0 key schemas (core §K.2 P0); LD5, LAN-§7.2 steps 2b / 7, §7.3, §7.5 unchanged |
+| OPS-13 | major | **holds (cross)** | core D75; LD4, LD25, LAN-§17.5, §20.4 (PHP template v3 may lag to R3, `export:runtime_v3_unsupported`), §16; rev 4 adds the health rule `landing:fee_mismatch` that core §I.7 names (LAN-§23.7) and moves the runtime out of D3 (CRIT11) |
+| OPS-14 | major | **resolved, re-decided (cross)** | core §Q.8 LAN R5 A\* and core §A.2: store-mode onboarding creates **no** landing page and `inStoreMode` stays false; the `inStoreMode = true` write is the fallback for any other creating path; acceptance "no `kind = 'landing'` after onboarding" (LAN-§4; CRIT5) |
+| OPS-15 | major | **holds, re-aligned** | core §Q.8 LAN R6 / OPE Q.27h A\*: `convertLeadToOrder` (P4) dispatches on `sel.v`; v3 goes to S1's `createManualOrderV3` in `src/lib/catalog/order-v3.server.ts`, S4 owns the sheet's store branch (LAN-§10.3, §10.5, §11.5, §26.1) |
+| OPS-20 | minor | **holds** | LAN-§14.3, §23.1: "Delete test orders" under `settings.write`; core §H.11 names the same |
+| ENGC-1 | blocker | **holds** | core §D.2 / §D.4 / §Q.8 LAN R8 cut `orders.is_test`, `leads.is_test`, `orders_store_test_idx` and `page_slug_history` in 0004 (LAN-§2, §2.4, §15.1) |
+| ENGC-8 | major | **holds (cross)** | the core rows now carry the carve-outs (`kit/**` P3, `report/**` P1, `settings/audit/**` P2) and `test:ownership` parses this part's §26.1; rev 4 lists `render-cases/landing.ts`, `delivery-check.ts` and the rev 4 files, and asks for `src/lib/editor/selftest-checklist.ts` in the P3 row (LAN-§26.1; N6) |
+| ENGC-13 | major | **holds** | core D72: `createOrderRow` extracted by T3 in R1.0; LAN-§14.3, §26.1 |
+| ENGP-1 | blocker | **holds** | core §M.1 rule 2 names `gateInputFor` and `KIND_GATES` (DES-§8.13); the LAN-§3.2.1 store-kind branch is unchanged, rev 4 names the table and the `honesty:password_field` mirror on utility kinds (LD31, LAN-§3.2.1) |
+| ENGP-3 | major | **no landing side** | `ai_jobs.active` / `aj_active_uq` fixed in core §D.5 (AI R29) |
+| ENGP-5 | major | **holds** | design accepted `features.h fixed` (core §Q.8 LAN R12 "S"); LD32, LAN-§3.5 OF2 unchanged |
+| ENGP-6 | major | **holds, re-aligned (cross)** | core §M.2 bands (`HEIGHT_BAND = 0.8`, `FOLD_BAND = 0.9`) now in the LAN-§3.4 C2 / C3 / F1 rows (Playwright = calibration, never the measurer); `form:F1` is the one form-height item and the duplicate clause of `budget:F1` is asked to go (LAN-§3.2; N3) |
+| ENGP-8 | major | **holds** | core §M.1 rule 2 adopted the proof-class rule; rev 4 reads `origin` from the core's `originFrom(prev, doc)` (LAN-§3.2.1, LD31) |
+| ENGP-18 | minor | **holds** | core §M.2 counts the control arm only; LAN-§18.5, §18.6 unchanged |
+| ENGP-20 | minor | **holds** | `buildChecklist(doc, ctx)`, `scripts/qa/wow-demo/steps/landing.ts` (LAN-§3.2, §3.8) |
+| ENGP-24 | minor | **holds** | core §J.1: `npm test` ≤ 3 min, landing ≤ 20 s, `test:slow` (LAN-§18.8, §25.1) |
+| ENGP-26 | minor | **resolved, re-aligned** | core §Q.8 LAN R18 A\*: tolerance **0** on the `landing` chunk against `budgets.json.landing` and `landing.sha256`, +5 % for every other chunk and cap; the core's prefix regex `(?:\/\|$)` (LD1, LAN-§5.2, §25.1); the storefront's wording is N8 |
+| UX-4 | major | **holds** | design accepted (core §Q.8 LAN R19 "S"); LD35, LAN-§5.4 unchanged |
+| UX-20 | major | **no landing side** | design accepted the three-fold reveal (DES-§28 UX-20) |
+| UX-21 | major | **no landing side** | design and storefront accepted the commerce-register wording (DES-§28, STO-§30) |
+| UX-31 | minor | **holds** | `checkout.addressMode` is in the core's key schemas; storefront accepted (core §Q.8 LAN R20) |
+| UX-37 | minor | **holds; sticky submit stays rejected** | OF13 ergonomics adopted by both surfaces (core §Q.8 STO-R37, LAN R21); the sticky submit row stays rejected for the reason in LAN-§3.5 OF13 (a second fixed layer under R7 and a `visualViewport` script the form must not depend on, while OF2 keeps the form near one screen) |
+| UX-38 | minor | **holds** | LD38, LAN-§3.6 `.lp-ty__tint`; the admin side is core D60 rev 3 |
+| UX-39 | major | **no landing side** | the cutout-later path is design's and platform's (core §Q.8 PLA Q3.10) |
+| SEC-1 | blocker | **no landing side** | core D69 (Turnstile gate, daily sandboxes, shared disk and AI budgets); kits and links of pending stores still mint only in the sandbox and serve nothing public (LAN-§12.1, §13.1) |
+| SEC-5 | major | **resolved (re-decided: a landing side exists)** | core D70 names the leads screen, whose repository is this part's: `src/lib/leads/read.ts` returns every row through `maskIfImpersonation`; ⌘K and the pulse read it; writes are refused through `WriteScope` (LAN-§2 intro, §10.2, §10.6, §23.9, §25.2); N5 corrects the platform text that lists the lead reads under operations |
+| SEC-6 | major | **holds** | core §Q.8 LAN R23 A: typed `short_links` targets, `resolveLinkTarget`, `assertStoreRelativePath` (LD14, LAN-§2.1, §12) |
+| SEC-18 | minor | **holds, extended** | `honesty:password_field` (LAN-§3.2, §6.4); rev 4: `checkBrandTerms` on the policies' free text (LAN-§3.3) and the report link (LAN-§3.9, CRIT15); the health rule and the `/report` page are P1's (core D76) |
+| QUAL-1 | blocker | **no landing side** | core §M.4: N8 hard on generated lines only, soft on owner-typed and library lines; the LAN-§3.4 N8 row now says so |
+| QUAL-9 | major | **no landing side** | ai.md / design.md acceptance rule |
+| QUAL-10 | major | **no landing side** | design pins (core §K.2 P0 `sampleGenome(…, { pins })`) |
+| QUAL-20 | major | **no landing side** | design.md data path |
+| QUAL-21 | major | **no landing side** | ai.md / design.md typography text |
+| QUAL-25 | minor | **no landing side** | design's types are the single source (core §Q.8 AI R31-R36 "S") |
+| CRIT1 | major | **resolved (cross)** | this part keeps the core §K.2 P0 / §Q.8 LAN R1 shape: the browser tables are `zonesForCheckout`'s value-keyed `ZoneTable`, built by `buildZoneTable` on the server from the slugs; no chunk bundles `cityKey()` (the frozen chunk untouched); the fixture asserts `zoneTableKey: "value"` and the key set, so `test:delivery`, `test:catalog` and `test:ops` fail together (LD4a, LAN-§5.2, §7.1, §7.5, §25.1); core D68, the §K.2 P0 operations line, §I.7, OD47 and STO-D43 / §14.4 to align (N1) |
+| CRIT3 | major | **resolved (cross)** | `CallingWindow` deleted; operations' `EffectiveWindow` re-exported and the `\| null` dropped, "no hours" = `windowIsEmpty`; the data block serialises operations' type unchanged and this part never reads `days`, so either container works; one window fixture shared by `test:ops`, `test:delivery` and `test:landing-addons` (LD29, glossary, LAN-§2.3, §3.2, §3.2.1, §8.2, §8.3, §8.6, §9.2); operations fixes `Record<1 … 7, Range[]>` and drops the mirrors (N2) |
+| CRIT5 | major | **resolved** | LAN-§4 restates core §A.2 / PD60 rev 3 (no landing page in store mode, `inStoreMode` stays false), keeps `inStoreMode = true` only as the fallback, and replaces the "`/<slug>` answers 200" case with "nothing with `kind = 'landing'` exists after onboarding" |
+| CRIT11 | minor | **resolved (cross)** | LAN-§26.3 keeps only the PHP template v3; LAN-§26.2 names the R2 contract step for `landing-v3` and config v3; the core §K.5 D3 line to read "LP-16 PHP side only" (N7) |
+| CRIT12 | minor | **resolved** | LAN-§14.2 reworded: the narrowed `<serving origin>/api/public/` source covers the `?sg-test` endpoints, no bare `'self'` (core §C.9, §F.6, SEC-2); `qa:headers` and `test:security` assert it on the test render (LAN-§25.3) |
+| CRIT15 | minor | **resolved (cross)** | new LAN-§3.9: P6's footer `legalLinks(ctx)` plus the Shell fallback on landing pages, P3 on the thank-you, tracking and legal pages, S1 in the store chrome; absolute `platformOrigin()/report/<h>?p=<path without query>`, never an order id or token; absent in exports; render-check and `qa:headers` cases; `lp.report` copy (LAN-§16, §24.2, §25.1, §25.3, §26.1); the maintainer, design and platform sides are N4 |
+| CRIT17 | minor | **resolved (cross for the other parts)** | new LAN-§1.4 "Proven by": one command and fixture or step per feature id (LP-01 … LP-24, SF rows) and `// proves:` headers in the test files; the R2 / R3 check scripts it names are owned in LAN-§26.2 / §26.3; the other parts add theirs (N9) |

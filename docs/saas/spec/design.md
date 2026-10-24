@@ -1,11 +1,14 @@
 # Store Gen SaaS part spec: design (genome, anti-repetition, quality gates, brand kit, logo designer, generation flows, admin design system)
 
-Status: **part spec, revision 3 (round-1 review applied)** (2026-10-24, design part architect, owner brief item 16).
+Status: **part spec, revision 4 (round-2 review applied)** (2026-10-24, design part architect, owner brief item 16).
 Revision 2 (elevated) was attacked by six reviewer passes (operations, engineering core, engineering parts, UX, security,
-quality); every finding that names this file is decided in **DES-§28** (resolved in the body, or rejected with a reason)
-and the cross-file consequences are listed there for the core and the sibling parts. Built on `docs/STORE-SAAS.md`
-**revision 2.1** (the core contract, cited as **core §X**; its appendix §Q.6 decided every request of revision 1 and
-DES-R18 / R19 / R20 of revision 2, and this revision's text follows those decisions), on the settled
+quality); every finding that names this file is decided in **DES-§28** (round 1, revision 3). **Round 2** re-checked
+every round-1 finding against the body of revision 3 and added the critic's findings (CRIT1 … CRIT18); **DES-§30**
+records one line per finding id (verified, residual text fixed, or rejected with a reason), and the residual
+contradictions with the core are recorded as round-2 notes in **DES-§27.4** (no new request: the core closed the
+request rounds in §Q.8). Built on `docs/STORE-SAAS.md` **revision 3** (the core contract, cited as **core §X**; its
+appendix §Q.6 decided every request of revision 1, §Q.7 DES-R18 / R19 / R20 of revision 2, §Q.8 DES-R21 … R27 of
+revision 3 (all accepted), and §P the round-1 review; this revision's text follows those decisions), on the settled
 research decisions of `docs/saas/RESEARCH.md` §2 (cited as **R-D1 … R-D53**), and on the three elevation inputs: the
 measured baseline `docs/saas/research/design-baseline.md` (score 4.3/10, distinctiveness 2/10; its §5 targets are cited
 as **N1 … F5** and every one of them is a gate here, DES-§8.10), `docs/saas/research/rethink-ai.md` (the Director loop,
@@ -46,14 +49,15 @@ server-rendered markup and planner choices: **zero runtime JavaScript bytes** (D
 
 Reading order for a build agent: DES-§0 (decisions) → DES-§1 (your feature rows) → **DES-§8.10 (the baseline target
 coverage map: which gate owns which target)** and **DES-§8.12 (root causes made impossible by construction)** → the
-track you own (DES-§26) → the sections your files touch → DES-§25 (tests you must keep green) → DES-§29 (what changed in
-this revision and why) → DES-§27 (how the core decided the requests).
+track you own (DES-§26) → the sections your files touch → DES-§25 (tests you must keep green) and **DES-§1.4 (which
+command proves each feature id)** → DES-§30 (what round 2 changed and why), DES-§28 (round 1), DES-§29 (the rev 2
+elevation) → DES-§27 (how the core decided the requests).
 
 ### Owner summary (plain English)
 
 1. Today two shops that sell the same kind of product get almost the same page: the same hero, the same chips on the
    photo, the same giant word behind the product. Only the colours and the font change (we checked this on 41 rendered
-   pages). The fix is a **design DNA ("genome")** of 31 choices: layout family, grid, fonts, colour strategy, photo
+   pages). The fix is a **design DNA ("genome")** of 35 choices: layout family, grid, fonts, colour strategy, photo
    treatment, shapes, motion, voice. A few bold choices are drawn at random within what suits the product; every other
    choice follows design rules, so the result looks decided, not random.
 2. Every new page is compared with every live shop on the platform (by numbers only: nobody ever sees another shop's
@@ -108,6 +112,12 @@ this revision and why) → DES-§27 (how the core decided the requests).
     refuse generated text. Arabic typography is measured on Arabic letters (not on the Latin letters of the same font
     file), and the design engine's own settings (fonts, motion, colours) must hit measured caps per niche so three in
     ten competitors never share a first screen.
+17. **New in revision 4 (second review).** The design score now needs real composition (a signature detail, a
+    full-bleed moment, an asymmetric grid…): a tidy but bland page scores about 80, below the 82 target, so the number
+    cannot be reached by hygiene alone. When a niche is so crowded that no variation of your page clears the "too close
+    in your niche" line, the server checks that itself and publishes with a note instead of refusing (it never lets a
+    near-copy of another shop through). Every landing page's footer carries the "Report this store" link. Each feature
+    now names the exact test that proves it (DES-§1.4).
 
 ---
 
@@ -119,16 +129,16 @@ R-D35 … R-D41 are the design decisions this spec builds on, adopted as settled
 | # | Decision | Why |
 |---|---|---|
 | DS1 | **Design Genome v1 = 35 genes** (G1 … G31 of revision 1 plus the four **rhythm genes** G32 opener and kicker budget, G33 photo-use plan, G34 CTA plan, G35 reveal plan, DES-§4.2) in three levels: brand (store-stable), page (per generation), section (per instance). The archetype becomes gene G1 `vibe`, a **prior** over the other genes, never a lock (R-D35, GEN-06). The rhythm genes are solved, never sampled; they exist so the baseline's rhythm faults (C5, I1, R1, R5) are decided by the planner and checkable before render. | Sameness comes from archetype locks (`src/lib/theme/tokens.ts:419-433`), 3 storylines (`src/lib/generator/plan.ts:90-97`) and sibling-only anti-repeat (`src/lib/generator/directions.ts:455-470`); dg §0.1; design-baseline §4.2 root causes 2, 4, 5, 9. |
-| DS2 | **Where the genome lives:** the full genome (all 31 genes, seed, explanation) is a row in `design_genomes`; the **render-relevant part compiles to an optional `ThemeSpec.look`** (≤ 700 B JSON, no default) inside the PageDoc. **Deviates R-D35** (which put `PageDoc.design.genome` in the doc): only the compiled look enters the doc. | The PageDoc is frozen and `z.object` strips unknown keys; an optional field without a default leaves every existing doc's validated JSON, and so its published checksum (`src/lib/db/boot-tasks.ts:24-47`, sha256 of `validateDoc(doc)`), unchanged. The doc stays self-contained for re-renders (core D50) and exports; the genome row is history and the novelty index. Request DES-R1. |
+| DS2 | **Where the genome lives:** the full genome (all 35 genes, seed, explanation) is a row in `design_genomes`; the **render-relevant part compiles to an optional `ThemeSpec.look`** (≤ 700 B JSON, no default) inside the PageDoc. **Deviates R-D35** (which put `PageDoc.design.genome` in the doc): only the compiled look enters the doc. | The PageDoc is frozen and `z.object` strips unknown keys; an optional field without a default leaves every existing doc's validated JSON, and so its published checksum (`src/lib/db/boot-tasks.ts:24-47`, sha256 of `validateDoc(doc)`), unchanged. The doc stays self-contained for re-renders (core D50) and exports; the genome row is history and the novelty index. Request DES-R1. |
 | DS3 | **Bold genes are sampled, the rest are solved.** **Seven** bold genes (G1 vibe, G2 composition grammar, G4 type pairing, G9 colour strategy, G18 image treatment, **G23.f motion family (rev 3, UX-6)**, G28 voice register) are drawn from priors; the other genes come from a seeded, deterministic constraint solver (forward checking + backtracking, ≤ 200 node expansions, cheapest gene first). The motion family's prior is conditioned on G2 (DES-§4.12), not on the archetype, so two maison stores can differ in how their hero moves. | dg §0.3: designers make a few strong decisions and keep the rest quiet; many independent random knobs give noise (R-D35). Rev 2 derived motion from the archetype ± one jitter step, which restated the baseline's root cause 2 under a new name (UX-6). |
 | DS4 | **Precedence at render:** an explicit non-`"archetype"` ThemeSpec value (today's builder fields `radius`, `shadow`, `texture`, `surfaces`) > `look` > the archetype default. A doc without `look` keeps today's theme tokens and `<html>` attributes; only the owner-rule fixes of DES-§4.5.4 (redrawn seal/stamp/tape/ticket variants, no rotating ring, no numbered cover lines) and DS28 (spring overshoot) change how it renders, at its next render (DES-§23.1). | Back-compat for every published page; the builder keeps working while it learns to edit `look`; owner rules apply to old pages too. |
 | DS5 | **Seeds mix the store's brand seed:** `seed = deriveSeed(stores.brand_seed, inputHash, "direction:<i>", attempt)`. | Identical photos in two stores diverge (GEN-12, R-D36). |
-| DS6 | **Distance thresholds** (starting points, calibrated by DG-09): platform-wide d ≥ **0.25**, same niche d ≥ **0.40**, pages of one store d_page ≥ **0.30** (against its last 10 pages), campaign brand radius d_brand ≤ **0.35**; `clone` = d < **0.12** (the wording level "almost identical"). **Changed in rev 2 (core §M.4, core §Q.6 DES-R3 A\*, baseline N1/N2 "hard"):** at publish every `too_close` band (below the niche, platform or own-page threshold) is a **hard** `design_blocked` item (`design:N1`, `design:N2`), not only the 0.12 clone; `close` (within +0.05 of the threshold) is a soft note with the one-click "Differentiate". First come keeps its design: the incumbent in a collision is the page whose **first publish** is older (`pages.first_published_at`, or the minimum `created_at` of the page's `published` rows), never the row written last, so a store republishing a long-standing design is never refused for it (rev 3, QUAL-19). The wizard never shows a `too_close` candidate (it resamples, DES-§14.2), so the server refusal is the backstop, not the normal path. **Rev 3 (QUAL-3, QUAL-4, UX-24):** the niche threshold is a **function of the niche pool size** τ_niche(n) (0.40 while n ≤ 20 live stores, linear to 0.30 at n ≥ 100, never below τ_platform + 0.05; DES-§7.9), the sampler adds a **repulsion step** (greedy maximin over the candidate set) before any band is called, and the own-page rule N2 is **hard only between pages of the same product** (the store's last 5 published pages of that product); across products it is the soft Store Health note `design:pages_close`. A crowded niche therefore has a defined path (DES-§14.2 step 5), never a dead end. (R-D36) | The baseline measured twins at 15 % and J 0.33 inside a niche; a warning-only threshold would let the first beta stores clone each other on day one. The core made N1/N2 hard at publish; this spec follows it and keeps the seller's path smooth by never proposing a candidate that would be refused. A fixed 0.40 cannot hold as a niche fills (P(all live rows ≥ 0.40) ≈ 2.6 % per candidate at 50 stores, QUAL-3) and a brand-locked store has only 21 of 40 distance points to vary between its own pages (QUAL-4). |
+| DS6 | **Distance thresholds** (starting points, calibrated by DG-09): platform-wide d ≥ **0.25**, same niche d ≥ **0.40**, pages of one store d_page ≥ **0.30** (against its last 10 pages), campaign brand radius d_brand ≤ **0.35**; `clone` = d < **0.12** (the wording level "almost identical"). **Changed in rev 2 (core §M.4, core §Q.6 DES-R3 A\*, baseline N1/N2 "hard"):** at publish every `too_close` band (below the niche, platform or own-page threshold) is a **hard** `design_blocked` item (`design:N1`, `design:N2`), not only the 0.12 clone; `close` (within +0.05 of the threshold) is a soft note with the one-click "Differentiate". First come keeps its design: the incumbent in a collision is the page whose **first publish** is older (`pages.first_published_at`, or the minimum `created_at` of the page's `published` rows), never the row written last, so a store republishing a long-standing design is never refused for it (rev 3, QUAL-19). The wizard never shows a `too_close` candidate (it resamples, DES-§14.2), so the server refusal is the backstop, not the normal path. **Rev 3 (QUAL-3, QUAL-4, UX-24):** the niche threshold is a **function of the niche pool size** τ_niche(n) (0.40 while n ≤ 20 live stores, linear to 0.30 at n ≥ 100, never below τ_platform + 0.05; DES-§7.9), the sampler adds a **repulsion step** (greedy maximin over the candidate set) before any band is called, and the own-page rule N2 is **hard only between pages of the same product** (the store's last 5 published pages of that product); across products it is the soft Store Health note `design:pages_close`. A crowded niche therefore has a defined path (DES-§14.2 step 5), never a dead end, **and at publish the server verifies the exhaustion itself (rev 4, UX-24; DES-§7.9 step 4): when no `differentiate` variant of the page (≤ 6 server-side resamples of its unlocked bold page genes) clears the niche band, the niche item is a note with the three differentiators, while the platform band (d ≥ 0.25) and the clone flag (d < 0.12) stay hard**, so a seller is never refused for a niche that has no room left and never let through as a near-copy. (R-D36) | The baseline measured twins at 15 % and J 0.33 inside a niche; a warning-only threshold would let the first beta stores clone each other on day one. The core made N1/N2 hard at publish; this spec follows it and keeps the seller's path smooth by never proposing a candidate that would be refused. A fixed 0.40 cannot hold as a niche fills (P(all live rows ≥ 0.40) ≈ 2.6 % per candidate at 50 stores, QUAL-3) and a brand-locked store has only 21 of 40 distance points to vary between its own pages (QUAL-4). |
 | DS7 | **The distance service answers verdicts, not numbers:** clients get `ok` / `close` / `too_close` per candidate; raw distances stay on the server (logs, calibration). Requests are rate-limited per store. **Refines R-D36** ("returning scores only"). | A numeric distance oracle can be probed to reconstruct another store's vector; a coarse verdict can't. The core adopted it in rev 2: §F.2 and D64 now say "verdict bands only, never another store's genome or text" (DES-R17 accepted). |
 | DS8 | **Cross-store checks read only live and reserved genomes** (published pages, active store themes). Generated-but-unpublished rows influence only their own store. A genome stays reserved 90 days after its store leaves `active`/`restricted`. | First-come fairness (R-D36) without letting a tenant flood the index from the wizard. |
-| DS9 | **Headline check = bottom-k MinHash** (k = 256) per (niche, store) over HMAC'd word-3-gram shingles in `headline_shingles`; in-store Jaccard > 0.5 and cross-store containment > 0.35 resample generated copy. Owner-typed copy is only flagged. (R-D37, core D35) **Rev 3 (ENGP-9, QUAL-1):** the niche shingle-share item `design:N8` is **hard only for lines the engine or a model wrote** (origin `generated`, which the engine rewrites before the owner sees them); an owner-typed line above 25 % is a soft note with the `differentiate` suggestion and a Q penalty, never a refusal; and the engine-only path composes headlines from the product's facts (DES-§9.12) instead of picking one of three library lines, so a crowded niche of library-copy stores cannot collide on N8 (corpus test: 30 engine-only stores in one niche publish with 0 `design:N8` refusals). | Bounded rows per store (≤ 256 per niche; a store's live headlines rarely exceed 300 shingles, so most sketches are exact), no plaintext, no store id (only the opaque `owner_tag`), deletable at purge. Refusing a seller's own product name because a competitor wrote it first contradicts the owner goal and leaks which phrase is "taken" (ENGP-9). |
+| DS9 | **Headline check = bottom-k MinHash** (k = 256) per (niche, store) over HMAC'd word-3-gram shingles in `headline_shingles`; in-store Jaccard > 0.5 and cross-store containment > 0.35 resample generated copy. Owner-typed copy is only flagged. (R-D37, core D35) **Rev 3 (ENGP-9, QUAL-1):** the niche shingle-share item `design:N8` is **hard only for lines the engine or a model wrote** (origin class `engine`, `local` or `cloud` of the core's shared origin map, core §M.1 rule 2; the engine rewrites them before the owner sees them); an owner-typed line above 25 % is a soft note with the `differentiate` suggestion and a Q penalty, never a refusal, and **a copy-library fallback line (origin `library`) is soft too** (rev 4, core §M.4: its shared wording is by construction and the library sweep keeps each skeleton ≤ 10 % of a niche); and the engine-only path composes headlines from the product's facts (DES-§9.12) instead of picking one of three library lines, so a crowded niche of library-copy stores cannot collide on N8 (corpus test: 30 engine-only stores in one niche publish with 0 `design:N8` refusals). | Bounded rows per store (≤ 256 per niche; a store's live headlines rarely exceed 300 shingles, so most sketches are exact), no plaintext, no store id (only the opaque `owner_tag`), deletable at purge. Refusing a seller's own product name because a competitor wrote it first contradicts the owner goal and leaks which phrase is "taken" (ENGP-9). |
 | DS10 | **Quality gates are pure TypeScript** on `PageDoc + BuiltTheme + asset metadata + genome`, ≤ 8 ms per doc in Node. They run in the wizard, the builder (client, 400 ms after the last edit) and on **save** (server, `warn` mode, summary stored), and **authoritatively at publish** through the one core registry `src/lib/render/prepublish.ts` (core D51, §M; the design check is `src/lib/render/prepublish/design.ts`, P6). Hard fails answer `design_blocked` with core `GateItem[]`; soft items lower Q and appear as notes and as Store Health design issues (core §I.7). Budget gates (`budget:*`, core §M.2) and honesty gates (`honesty:*`, landing LAN-§6, core §M.3) are the core's and landing's; this part supplies the measurement modules they call (`src/lib/design/heights.ts`, `variantFeatures`, DES-§5.3, §8.4) and never duplicates their hard refusals. (R-D39) | No headless browser on Hostinger; the server re-check means a modified client can't publish a failing page; one registry means one dialog listing budget, honesty and design items together (core §M.1 precedence budget → honesty → design). |
-| DS11 | **Deterministic repairs first**, from a closed `RepairOp` vocabulary, at most 3 rounds, keep the best of {original, repaired} by score; AI critique (AI-19, R2) proposes ops from the same vocabulary. **Rev 3 (QUAL-9): one acceptance rule for a Director op, shared with ai.md:** the op is applied when **no new hard item appears, the slop score does not rise and every novelty band stays `ok`**; Q is reported, never the acceptance key (a judgment op that changes no gate item may leave Q equal). The "Q rises by ≥ 3" wording of rev 2 and the "does not fall" wording of ai.md are both withdrawn. | R-D39; dg §5.4. One vocabulary for rules, the local model and the Director. Q is a compliance score that saturates near 100 on any compliant page (DES-§8.5); keying acceptance on it would reject every non-mechanical op and make the critique stage a second `repairDoc` (QUAL-9). |
+| DS11 | **Deterministic repairs first**, from a closed `RepairOp` vocabulary, at most 3 rounds, keep the best of {original, repaired} by score; AI critique (AI-19, R2) proposes ops from the same vocabulary. **Rev 3 (QUAL-9): one acceptance rule for a Director op, shared with ai.md:** the op is applied when **no new hard item appears, the slop score does not rise and every novelty band stays `ok`**; Q is reported, never the acceptance key (a judgment op that changes no gate item may leave Q equal). The "Q rises by ≥ 3" wording of rev 2 and the "does not fall" wording of ai.md are both withdrawn. | R-D39; dg §5.4. One vocabulary for rules, the local model and the Director. Q is mostly a compliance score with one coarse composition term (DES-§8.5; rev 4 base 70): a judgment op that improves rhythm or proportion without changing a gate or composition item leaves it equal; keying acceptance on it would reject every non-mechanical op and make the critique stage a second `repairDoc` (QUAL-9). |
 | DS12 | **Slop score** = the dg §5.2 list **plus the tells seen in the baseline renders** (giant ghost word, rotating-text ring badge, masthead/number eyebrows, glass callouts piled on the hero photo, decorative status dots, two scrolling strips, identical section headers; rev 2 adds per-word reveal spans, the chat-mock problem block, phone-mock reviews, the countdown chip, the giant cut-off footer wordmark, the hotspot trio without merchant anchors and the **tell budget** R8: at most 2 of the 11 named devices per page, never the same pair twice in a niche). ≥ 6 is hard (`design:S00`), 3-5 triggers repair. **Refines R-D39.** | `qa/saas-baseline/shots/argan-default-ar-s7-mobile-fold.png` and `…-s4242-…` show the same composition across seeds; `tshirt-kinetic-ar` shows a rotating-text ring and a clipped Arabic ghost word; `argan-editorial-ar` shows "الإصدار 01 · العناية" (the "Brand · No. 01" tell, rubric §9.F); design-baseline §3.7 lists all eleven devices on every page. |
 | DS13 | **Em and en dashes are not used as separators in generated copy**; the cliché detector rewrites them (period, comma or colon by context). Owner-typed text is flagged, never rewritten. **Refines DESIGN.md §8.** | The rubric's #1 tell (§9.G); today's library has them ("Douceur, confort, éclat — au quotidien", `src/lib/ai/copy-library/fr.ts`). |
 | DS14 | **DESIGN.md v3** turns the 2026 tells into **budgets** (glass ≤ 2 per page, a 4-tier radius ladder, 1 hero signature + ≤ 3 secondary details, bento ≤ 1, ≤ 2 centred sections in a row, no bounce outside `playground`, …) and removes every orange colour word. Written in core step C0 by the design lead. (R-D38, DG-01, GEN-14) | Every generator and build agent reads the bible first; the old one prescribes several tells (dg §0.2). |
@@ -138,12 +148,12 @@ R-D35 … R-D41 are the design decisions this spec builds on, adopted as settled
 | DS18 | **Logo engine = harfbuzzjs shaping on the shipped OFL fonts, converted once from WOFF2 to SFNT at build time** (`scripts/build-logo-fonts.mjs`), outlines to SVG paths, deterministic and isomorphic (browser preview, Node export from parameters). Never live text. (R-D40) | HarfBuzz is the only correct Arabic shaper (opentype.js has no joining, dg §7.2); HarfBuzz reads SFNT, not WOFF2; the 27 fonts already ship (`src/lib/theme/fonts.generated.ts:50`), so no font download is needed. Request DES-R6 (package) and DES-R7 (prebuild). |
 | DS19 | **Craft moves come in two tiers:** contour moves (tittle swap, weight shift, baseline shift, counter accent, ligature join) need no boolean geometry; cut moves (stem cut, terminal trim, monogram interlock) use `clipper-lib` on flattened outlines. Until the package lands, cut moves are disabled and the engine still offers five moves. | Robust boolean ops are hard to hand-write; Clipper is zero-dependency integer geometry. The designer never waits on it. Request DES-R6. |
 | DS20 | **PNG exports use `sharp`** (already a dependency, `package.json`) to rasterise path-only SVG. **Deviates dg §7.1** (`@resvg/resvg-js`). Fallback: the browser rasterises with canvas and uploads through the media pipeline. | No new native binary on Hostinger (resvg's prebuilt binary is unverified there, RESEARCH §6.2); path-only SVG needs no font loading. |
-| DS21 | **The admin design system has one source:** a 3-input OKLCH generator (base hue, accent, contrast) produces every admin token at build time in `scripts/build-admin-css.mjs` (core §I.6); surfaces tenant (jade 166), console (teal 205), impersonation (violet 295), the rev 2 status pair `--info` / `--info-ink` at hue **250** (core §I.6, OPE Q.16); **no bounce anywhere, today's shell included** (core D60): `--ui-spring` (`src/app/globals.css:120`, used at `:225`) is removed, the sidebar pill spring (`src/components/admin/shell/app-sidebar.tsx:96`, `stiffness: 480`) becomes a tween, the generate icon's `ease-[cubic-bezier(.34,1.36,.64,1)] group-hover/gen:rotate-12` (`:146`) goes; aurora + grain are a budget of one per screen and off by default (`dashboard/kpi-card.tsx:58`, `common/empty-state.tsx:28`); sparklines need ≥ 7 points (`kpi-card.tsx:92` draws from 2); delta chips use semantic tokens (`kpi-card.tsx:75` uses Tailwind `emerald`/`rose`). Arabic UI face = **IBM Plex Sans Arabic** (400/500/700, already in `public/fonts`). `test:admin-motion` fails on springs, overshoot curves and any duration above 400 ms outside the builder canvas (core §I.6). | Linear's method (dg §9); core §I.6 asks design.md to pick the Arabic face; Plex Arabic is a UI face with compact proportions at 13-14 px and ships today; rethink-features §2.1 rule 4, §2.5, §2.6 name the three admin habits that break the owner's own rules. |
+| DS21 | **The admin design system has one source:** a 3-input OKLCH generator (base hue, accent, contrast) produces every admin token at build time in `scripts/build-admin-css.mjs` (core §I.6); surfaces tenant (jade 166), console (teal 205), impersonation (violet 295), the rev 2 status pair `--info` / `--info-ink` at hue **250** (core §I.6, OPE Q.16); **no bounce anywhere, today's shell included** (core D60): `--ui-spring` (`src/app/globals.css:120`, used at `:225`) is removed, the sidebar pill spring (`src/components/admin/shell/app-sidebar.tsx:96`, `stiffness: 480`) becomes a tween, the generate icon's `ease-[cubic-bezier(.34,1.36,.64,1)] group-hover/gen:rotate-12` (`:146`) goes; **aurora + grain are removed from the admin** (rev 3, UX-38, core D60 rev 3: `dashboard/kpi-card.tsx:58`, `common/empty-state.tsx:28` lose the `adm-aurora` / `adm-grain` classes, the celebration is a typographic moment, the admin lint fails on `aurora`, `mesh`, `grain`, `feTurbulence`; DES-§16.8); sparklines need ≥ 7 points (`kpi-card.tsx:92` draws from 2); delta chips use semantic tokens (`kpi-card.tsx:75` uses Tailwind `emerald`/`rose`). Arabic UI face = **IBM Plex Sans Arabic** (400/500/700, already in `public/fonts`). `test:admin-motion` fails on springs, overshoot curves and any duration above 400 ms outside the builder canvas (core §I.6). | Linear's method (dg §9); core §I.6 asks design.md to pick the Arabic face; Plex Arabic is a UI face with compact proportions at 13-14 px and ships today; rethink-features §2.1 rule 4, §2.5, §2.6 name the three admin habits that break the owner's own rules. |
 | DS22 | **MAP-Elites archive cells hold platform designer seeds and counts, never another store's genome.** Direction 3 explores an under-filled cell by its coordinates only. **Refines R-D36 / dg §4.5.** | Using a tenant's elite genome as another tenant's template would leak and clone designs. |
 | DS23 | **Director hints (AI-19a, ai.md AI-D18) enter the sampler as `GeneHints`** (a closed vocabulary of gene values with weights ≤ 3×); the solver, the gates and the novelty check still decide. A hint that breaks a hard rule is dropped and logged. | Brief item 16 wants the strongest design thinking; the deterministic engine stays the authority (R-D30 spirit for design). |
 | DS24 | **Landing PageDoc v2, runtime config v2, payload v2, the PHP export and the 24.2 KB landing chunk are untouched.** Genes compile to CSS tokens, `<html>` attributes and planner choices only: zero runtime JS bytes. A new render budget key `css` caps the inlined CSS growth at +4 KB gzip on the heaviest page. | Frozen contracts (core §K.3, LND-16). Request DES-R5. |
-| DS25 | **Measurable quality targets** (brief item 16) on the DG-09 corpus: median Q ≥ 82, minimum Q ≥ 70, 0 hard fails after repair, median slop ≤ 2, median distance between the 3 directions of one run ≥ 0.35, ≥ 7 of 9 grammars over 20 runs of one input, 0 em dashes in generated copy, median cliché density ≤ 0.5 per 100 words; **plus every §5 target of the baseline at its threshold** (DES-§8.10: ≥ 60 distinct in-flow sequences per 100 pages in one niche, no 4-section subsequence on > 50 %, **N4 redefined (rev 3, QUAL-2)** on the axes the design varies (hero family × hero arrangement / ratio × benefits variant × benefits opener × form variant), asserted as measured distinct ≥ 0.9 × E[distinct] computed from the pool weights plus per-axis entropy floors (hero family ≥ 2.8 bits, benefits ≥ 2.0 bits), hero family ≤ **20 %** per niche (stricter than the baseline's 30 %, UX-5), top pairing ≤ 25 % per archetype, …) **and the re-scored critic consensus ≥ 7.5 / 10 with no dimension < 6 and distinctiveness ≥ 8** (design-baseline §5.10; DES-§17.6, **blind and interleaved with the baseline pages, rev 3**). **Rev 3 adds a positive term:** median **composition score ≥ 10 / 15** on the corpus (DES-§8.5), so a page cannot score "Excellent" by hygiene alone (UX-16). The design track is "done" only when all groups hold on the merged build (core §K.2 exit criterion 10), measured against a **Q floor and a slop fail line fixed before P6 merges** (DES-§17.3; ENGP-29), not fitted on the corpus they judge. | "Highest quality bar" must be checkable; numbers are starting points the calibration may raise, never lower without the owner; the scorecard that found 4.3 is the one that must find ≥ 7.5. The rev 2 N4 (≥ 150 of 210 over ≤ 240 cells) was mathematically unreachable even with uniform sampling (E[distinct] ≈ 140), so the track could never be "done" (QUAL-2). |
-| DS26 | **The generator stays client-side; novelty is one batched server verdict per wizard run.** The browser samples 3 directions plus up to 3 alternates each (≤ 12 candidates, genome + plan only, no full docs), sends their distance views to `checkNoveltyAction`, and builds full docs only for the chosen candidates. Publish recomputes the vector from the doc on the server. | The wizard already generates in the browser (`src/components/generate/wizard.tsx:777`); 12 small vectors cost one request and ≤ 25 ms of server time; a lying client only fools its own preview, never the publish check. |
+| DS25 | **Measurable quality targets** (brief item 16) on the DG-09 corpus: median Q ≥ 82, minimum Q ≥ 70, 0 hard fails after repair, median slop ≤ 2, median distance between the 3 directions of one run ≥ 0.35, ≥ 7 of 9 grammars over 20 runs of one input, 0 em dashes in generated copy, median cliché density ≤ 0.5 per 100 words; **plus every §5 target of the baseline at its threshold** (DES-§8.10: ≥ 60 distinct in-flow sequences per 100 pages in one niche, no 4-section subsequence on > 50 %, **N4 redefined (rev 3, QUAL-2)** on the axes the design varies (hero family × hero arrangement / ratio × benefits variant × benefits opener × form variant), asserted as measured distinct ≥ 0.9 × E[distinct] computed from the pool weights plus per-axis entropy floors (hero family ≥ 2.8 bits, benefits ≥ 2.0 bits), hero family ≤ **20 %** per niche (stricter than the baseline's 30 %, UX-5), top pairing ≤ 25 % per archetype, …) **and the re-scored critic consensus ≥ 7.5 / 10 with no dimension < 6 and distinctiveness ≥ 8** (design-baseline §5.10; DES-§17.6, **blind and interleaved with the baseline pages, rev 3**). **Rev 3 adds a positive term:** median **composition score ≥ 10 / 15** on the corpus (DES-§8.5), so a page cannot score "Excellent" by hygiene alone (UX-16); **rev 4 fixes the arithmetic that made the claim true**: Q's base is 70, so a clean page with no composition scores ≈ 80 and the median ≥ 82 needs composition (the rev 3 base 85 gave a bland clean page 95). The design track is "done" only when all groups hold on the merged build (core §K.2 exit criterion 10), measured against a **Q floor and a slop fail line fixed before P6 merges** (DES-§17.3; ENGP-29), not fitted on the corpus they judge. | "Highest quality bar" must be checkable; numbers are starting points the calibration may raise, never lower without the owner; the scorecard that found 4.3 is the one that must find ≥ 7.5. The rev 2 N4 (≥ 150 of 210 over ≤ 240 cells) was mathematically unreachable even with uniform sampling (E[distinct] ≈ 140), so the track could never be "done" (QUAL-2). |
+| DS26 | **The generator stays client-side; novelty is one batched server verdict per wizard run.** The browser samples 3 directions plus up to 3 alternates each (≤ 12 candidates, genome + plan only, no full docs), sends their distance views to `checkNoveltyAction`, and builds full docs only for the chosen candidates. Publish recomputes the vector from the doc on the server. | The wizard already generates in the browser (`src/components/generate/wizard.tsx:777`); 12 small vectors cost one request and ≤ 150 ms p95 of server compute (DS57; the rev 2 "≤ 25 ms" ignored the 20,000-row pool); a lying client only fools its own preview, never the publish check. |
 | DS27 | **The novelty certificate is shown in words, never numbers** ("Distinct across the platform", "Distinct in your niche", "Distinct from your other pages"), each from the DS7 verdict bands. **Refines** rethink-features §1.2, which showed raw distances. | Raw distances to "the nearest store" are an oracle (DS7); bands carry the promise without the leak. |
 | DS28 | **No bounce outside `playground`, measured as overshoot:** easing curves with y1 < 0 or y2 > 1 and springs with ζ < 0.85 (overshoot > 0.6 %) are allowed only on `playground`, never on layout properties. `SPRINGS.soft` moves from ζ 0.78 to 0.86; `bouncy` (ζ 0.56) stays playground-only. The admin uses no spring at all. **Refines R-D38.** | Seven archetypes use the 0.78 spring today (`src/lib/theme/archetypes.ts:337,409,555,700,772,844,988`, ≈ 2 % overshoot), which reads as a soft bounce; owner rule 2 and rethink-features §3.4. Old pages change only at their next render. |
 | DS29 | **A genome reservation lasts 90 days or until the store is purged, whichever comes first.** Purge deletes `design_genomes` (core §F.9) and nothing anonymous is kept. **Refines R-D36** ("release after 90 days"). | A purged tenant leaves no data behind (core §F.9); a closed store reaches purge after ≥ 31 days, which still covers the copy-a-departing-store risk the reservation targets. |
@@ -167,9 +177,9 @@ R-D35 … R-D41 are the design decisions this spec builds on, adopted as settled
 | DS47 (rev 3) | **Composition sheets are the source of the layout data.** Every hero family and every new or redrawn section has a sheet in DES-§5.13 (an ASCII grid at 390 / 768 / 1440 in grid units, slot sizes and aspects, the type step and max lines per text slot, the price cluster and COD line placement, the one signature detail, the RTL mirror, the stage or frame recipe, a named reference); `features.fold`, `features.slots` and `features.h` are **derived from the sheet** by `src/lib/design/sheets.ts` and a registry test fails when the registry and the sheet disagree. DESIGN.md v3 chapter 5 points to the sheets. No P6 variant code starts before its sheet exists. | UX-1: rev 2 specified ten hero families as one table cell each, which is how the baseline's 23 identical stage folds were born (design-baseline §3.1); owner items 8, 15, 16 ask for expert-senior-designer output. |
 | DS48 (rev 3) | **Craft recipes are numbers, not adjectives.** Depth (`G15` × base: shadow stacks, hairline alpha, the 1 px inner highlight, grain), the stage presets (`glow` / `contact` / `plinth` relative to the product bounding box and the base lightness) and the mask geometry (`arch`, `cut`, `blob`) are specified with values and token names (DES-§4.10.1, §4.11.1) and every emitted shadow or mix is registered with `blend.ts` (asserted by `theme:check`). | UX-15: v3 removed the "Required" craft vocabulary of DESIGN.md v2 §1.2 and replaced it with budgets only; a build agent cannot execute "ambient depth" or "plinth" consistently across 10 heroes and 27 sections. |
 | DS49 (rev 3) | **Anti-concentration is a production control for every bold visual gene, not a corpus assertion.** H33 is generalised: when the niche pool (k ≥ 10 stores) shows a grammar, colour strategy, hero family, (hero family × arrangement), Latin display family or Arabic display face at ≥ 0.8 × its cap, that value's prior weight is multiplied by 0.5 (× 0.25 at or above the cap, floor 0.02), **before** the hard rules and for the best-fit slot too. Caps at niche scale: hero family ≤ 20 %, (family × arrangement) ≤ 12 %, colour strategy ≤ 25 %, Arabic display face ≤ 30 % (and ≤ 40 % per structural class), pairing ≤ 25 % per archetype, Latin display family ≤ 20 % platform-wide and **Fraunces and Instrument Serif ≤ 8 % each platform-wide, ≤ 10 % per niche**. C1 / K1 / N5 are measured on simulated **chosen** pages (owner choice model 55 / 30 / 15 % for directions 1 / 2 / 3), not on plans; the console design page shows the niche-share histogram. | UX-5, QUAL-8, UX-8: the G2 priors are sharp (editorial-column + gallery-led + cinematic = .72 for editorial), G1 is ranked, owners pick direction 1 most often, and rev 2's only runtime counter-force was H33 on Arabic display faces; a niche of 100 skincare stores would sit at ~30 % specimen heroes. |
-| DS50 (rev 3) | **Hardness follows origin.** A copy or register item (`design:N8` shingle share, `design:D3` register mismatch) is **hard only for text the engine or a model generated** (it is auto-repaired before the owner sees it); the same finding on owner-typed text is a soft note with the fix offered, never a refusal. Honesty items (landing's) are the one exception and stay hard for everyone (core §M.1 rule 2). | ENGP-9, QUAL-1, UX-23: a lexicon classifier at ~10 % error per sentence over six FAQ pairs would block ≈ 4 in 10 Arabic pages for a mismatch a Moroccan reader does not perceive; a shingle share crossing 25 % in a small niche would make a seller rename her product. |
+| DS50 (rev 3; rev 4 origin classes) | **Hardness follows origin.** A copy or register item (`design:N8` shingle share, `design:D3` register mismatch) is **hard only for text the engine or a model generated** (origin class `engine`, `local` or `cloud` of the core's one origin map, `originFrom(prev, doc)`, core §M.1 rule 2; it is auto-repaired before the owner sees it); the same finding on owner-typed text (`owner`) is a soft note with the fix offered, never a refusal, and on a copy-library fallback line (`library`) it is soft as well (core §M.4; the library is register-tagged and its skeleton shares are kept ≤ 10 % by the sweep, so a library hit is a library bug that `test:copylib` catches, not the seller's). Honesty items (landing's) are the one exception and stay hard for everyone (core §M.1 rule 2, with the proof-class rules it lists). | ENGP-9, QUAL-1, UX-23: a lexicon classifier at ~10 % error per sentence over six FAQ pairs would block ≈ 4 in 10 Arabic pages for a mismatch a Moroccan reader does not perceive; a shingle share crossing 25 % in a small niche would make a seller rename her product. |
 | DS51 (rev 3) | **Headlines are composed, not picked.** The engine-only path uses a compositional generator (`src/lib/design/copy-gen.ts`, DES-§9.12): structure × angle × product fact × sensory verb × COD fact slots with `ProductRef` gender and the register table, ≥ 24 skeletons per family × locale and ≥ 40 distinct hero titles per family × locale on the sweep; the three-line library is the fallback of last resort. The wow demo's second store must have hero title + lead shingle Jaccard < 0.3 to the first. | UX-18, QUAL-1: the baseline found 7 fr and 3 ar H2 skeletons verbatim on every product (§3.7); distinct genomes do not read distinct when both shops say "Une douceur qu'on sent dès le premier geste". |
-| DS52 (rev 3) | **Store documents enter the design gates through one adapter.** `gateInputFor(doc: PageDoc \| StorePageDoc, ctx)` maps a `StorePageDoc` to `GateInput` (theme from `getStoreTheme`, sections through the store registry's `features`, no product / offers / form), `GateInput.doc`, `genomeOf` and `estimateHeights` accept the union (frozen P0 types widened at the R2 contract step), **utility kinds** (`product`, `collection`, `search`, `cart`, `checkout`, `not_found`) run the structural and owner-rule gates only and are **never pooled or novelty-checked** (only `home` and `page` enter `design_genomes`), and `src/storefront/fold.ts checkFold` is a thin call into `estimateHeights` with the kind's `FoldLayout` (one fold model, DS33). | ENGP-1: core §M.1 types `ctx.doc` as the union while every gate was typed on `PageDoc`; `defaultTemplate(kind, shape)` yields byte-identical utility docs for every store, so a pooled novelty check would refuse every second store's auto-publish with `design:N1`. |
+| DS52 (rev 3; rev 4 signature, CRIT18) | **Store documents enter the design gates through one adapter.** `gateInputFor(doc: PageDoc \| StorePageDoc, ctx: GateInputCtx): GateInput` (pure and isomorphic; DES-§8.1) maps a `StorePageDoc` to `GateInput` (the theme and look the caller resolved from `getStoreTheme`, sections through the store registry's `features`, no product / offers / form); a server caller holding a `PrePublishCtx` builds the `GateInputCtx` with `gateCtxFrom(ctx)` (`src/lib/render/prepublish/design.ts`, P6), so core §M.1 and STO-D35 cite **these two signatures verbatim**. `GateInput.doc`, `genomeOf` and `estimateHeights` accept the union (frozen P0 types widened at the R2 contract step); **utility kinds** (`product`, `collection`, `search`, `cart`, `checkout`, `not_found`, `policy`) run **the design gates of `KIND_GATES` (DES-§8.13)** only, beside the core's budget profile for the kind and landing's / storefront's own items, and are **never pooled or novelty-checked** (only landing pages and the store's `home` / `page` kinds enter `design_genomes`); the sibling parts cite "the design gates of `KIND_GATES` (DES-§8.13)" instead of paraphrasing the set; `src/storefront/fold.ts checkFold` is a thin call into `estimateHeights` with the kind's `FoldLayout` (one fold model, DS33). | ENGP-1: core §M.1 types `ctx.doc` as the union while every gate was typed on `PageDoc`; `defaultTemplate(kind, shape)` yields byte-identical utility docs for every store, so a pooled novelty check would refuse every second store's auto-publish with `design:N1`. |
 | DS53 (rev 3) | **Rhythm is sequenced, not shuffled.** Act2 is a constrained ordering (honour the G20.p density pattern, alternate media-led and type-led layout families, ≤ 2 consecutive image + text splits (hard V38), ≥ 4 layout families per 8 in-flow sections (soft −3, hard below 3), no two adjacent sections with the same `arrange`), with the 4-gram re-draw kept on top; Act1 may hold two blocks when the hero is compact and the estimate fits; N3's third clause becomes a position-entropy target. | UX-14, QUAL-27: a random permutation can emit four image + text splits in a row (rubric §4.7 fails the third), the digest counted `zigzagRun` and `sameFamilyMax` without any gate reading them, and I2 collapsed Act1 to one block on every page. |
 | DS54 (rev 3) | **Real phone photos are the modal input.** H13 is slot- and viewport-relative (an asset must be ≥ 1.5 × the slot at DPR 2 on the breakpoints the variant uses; `full-bleed-crop` may be mobile-only with a framed desktop fallback), the `framed-stage` treatment (contact shadow or plinth without alpha) keeps stage-family compositions alive without a cutout, a **one-asset grammar** defines what a strong single-photo 1,200 px page is, the `tight` crop exists only when its effective pixels cover the slot (else dropped without penalty) and "≥ 3 crops" is soft only when ≥ 2 assets exist. The sweep and the corpus gain a `low-asset` fixture class (1 photo, 1,100-1,280 px, no alpha, ar) and C1 / K1 / N4 must hold on it. The browser computes a **model-free alpha estimate** for uniform backgrounds (`hasCutout: "estimated"`) so the 0:50 reveal can show a stage, specimen or dark direction before the BiRefNet mask arrives; when the mask arrives a `render_jobs` reason `cutout` upgrades the hero in place. | UX-7, QUAL-7, UX-39: rev 2's thresholds (≥ 1,600 px and alpha) left only framed editorial / split / quiet for most sellers, exactly where the niche converges, and the 20 corpus fixtures (3-4 studio photos each) never measured that population; at the reveal `hasCutout` was false for everyone (PLA-§22.2 queues the cutout). |
 | DS55 (rev 3) | **Gate calibration before gate count.** Centred caps are grammar-aware and count body copy only; S05 is scoped to a glow without a product image or outside the accent family; V09 counts lead / body words and exempts `faq`, `specs`, `comparison`, `orderForm`, `footer`; the radius ladder is expressed in **effective radius** (a pill = min(999, height / 2)) with pills exempt from the ordering test and `mixed` media `999` replaced by a `cut` / `rect` mask option; H09 allows `framed-stage` on `stage` so the prior table and the hard rules agree. | UX-12, UX-25: as written the gates penalised the poster grammar on every page, the canonical dark-luxe perfume fold, every six-question FAQ and the spec's own `round` ladder. |
@@ -190,13 +200,13 @@ with the detail and to the tests of DES-§25.
 
 | ID | Feature | Rel. | Track | Scope | Acceptance | Spec |
 |---|---|---|---|---|---|---|
-| DG-01 | DESIGN.md v3 | R1.0 (C0) | design lead (docs only) | Budgets table, tells list, banned list update, gene and register chapters, §2.5 attribute value sets extended, every orange colour word removed | `grep -inE "amber|terracotta|saffron|tomato|coral|ochre|apricot|peach" docs/DESIGN.md` hits only the owner-rule paragraph (§1.0, the forbidden examples); the budgets of DES-§3.2 present verbatim; §2.5 value sets equal `THEME_ATTR_VALUES` (checked by `theme:check`) | DES-§3 |
+| DG-01 | DESIGN.md v3 | R1.0 (C0) | design lead (docs only) | Budgets table, tells list, banned list update, gene and register chapters, §2.5 attribute value sets extended, every orange colour word removed | `grep -inE "amber\|terracotta\|saffron\|tomato\|coral\|ochre\|apricot\|peach" docs/DESIGN.md` (pipes escaped for the table; the full list is DES-§3.5's) hits only the owner-rule paragraph (§0, the forbidden examples; rev 4: "§1.0" corrected to the chapter list's §0); the budgets of DES-§3.2 present verbatim; §2.5 value sets equal `THEME_ATTR_VALUES` (checked by `theme:check`) | DES-§3 |
 | DG-02 | Design Genome v1 | R1 | P6 | Schema (35 genes incl. the four rhythm genes; seven bold), sampler, solver, compile to `ThemeSpec` + `look`, back-derivation for old docs, explanation chips, `GenomeCard` for the Director | **Same (seed, inputs, priors snapshot `priorsV`, hints) → byte-identical genome; same stored genome → byte-identical doc** (rev 3, QUAL-26: learned priors, niche shares and hints enter the weights, so the seed alone is not the key; `design_genomes.priors_v` and `genome.hints` make a re-sample explainable); 11 archetypes × 3 moods × 200 seeds satisfy every hard rule; `buildTheme(compile(g))` never throws and `orangeMixes` is empty; `compile(genomeOf(docWithoutLook))` reproduces today's `<html>` attributes on every baseline fixture; N5: every archetype reachable for every category, top archetype ≤ 45 % per category over 100 simulated stores, souk/playground/garage > 0; N6: same (seedBase, archetype) across two products gives J ≤ 0.25 and never shares hero + pairing + order | DES-§4 |
 | DG-03 | Unlock archetype locks + radius ladder + glass budget | R1 | P6 | `look` drives btn/card/mask/glyph/emphasis/density; 4-tier radius tokens; glass counted per page; one ground + one card tier (K5) | Over 2,000 generated docs: every gene value of G12/G15/G17/G25/G26/G27 appears under ≥ 4 archetypes; radius tiers strictly increase (or the `mixed` rule, R6); glass ≤ 2 on 100 % of pages (R4); 0 nested cards (K5); the 8 distinct theme tuples of the baseline become ≥ 0.9 × E[distinct] over 210 plans on the redefined N4 axes (DES-§5.7; rev 3, QUAL-2) | DES-§4.5, DES-§8 |
 | DG-04 | Choreography grammar | R1 | P6 | Stochastic grammar replaces the 3 storylines, with hard COD invariants and a variable tail; **constrained Act2 ordering (DS53)**; opener grammar, CTA plan, photo-use plan, reveal plan, fold contract; **composition sheets (DS47)**; reused by store page kinds | ≥ 100 distinct valid in-flow sequences over 10,000 expansions (2,000 inside `npm test`, the rest in `test:design:full`); 100 % satisfy the invariants I1-I8; form reachable ≤ 3 estimated screens on 100 %; **N3** on the 140-plan sweep: ≥ 60 distinct in-flow sequences per 100 plans of one niche, no 4-section subsequence on > 50 %, **order-form position entropy ≥ 1.0 bit and final-section entropy ≥ 1.2 bits** (rev 3, QUAL-27: the honest form of "no fixed position"); **N4 (redefined, rev 3, QUAL-2)**: distinct (hero family × hero arrangement / ratio × benefits variant × benefits opener × form variant) tuples ≥ 0.9 × E[distinct] computed from the pool weights over 210 plans, hero-family entropy ≥ 2.8 bits, benefits-variant entropy ≥ 2.0 bits, and ≥ 40 distinct (hero family × grammar × strategy); **C1** hero family ≤ **20 %** per niche (on simulated chosen pages, DS49) and on the `low-asset` fixture class too (DS54); **V38** ≤ 2 consecutive image + text splits and ≥ 4 layout families per 8 in-flow sections on 100 %; 8-14 in-flow sections and ≤ 12,000 estimated px on 100 % (C3); every hero family and every new section has a sheet in DES-§5.13 and `test:registry` proves `features.fold` / `slots` / `h` equal the sheet's numbers | DES-§5 |
 | DG-05 | Brand seed + genome distance + reservation | R1 | P6 | `design_genomes` rows, `genomeVector`, `genomeDistance`, `checkNovelty` (verdict bands), publish-time hard N1/N2, reservation reconcile job | Distance is symmetric, 0 on identical, in [0,1]; two stores with identical inputs get d ≥ 0.25 (also asserted by `qa:wow-demo`, core §J.3); responses never contain another store's id, vector or genome (attack suite); a `too_close` doc is refused at publish with `design:N1` / `design:N2`; a closed store's genomes stay reserved 90 days or until purge (DS29) | DES-§7 |
 | DG-06 | Static gates + slop score + repairs + Design check panel | R1 | P6 | 37 visual/structural gates (V01-V37), 26 slop items (S01-S26), the four novelty items, the baseline target coverage map, the repair vocabulary (21 ops), Q score, panel in the builder and per direction, the registered design check in the core registry, the render digest for the Director | Gates ≤ 8 ms per doc (Node, p95 over fixtures); a baseline-like fixture scores slop ≥ 6 and ≤ 2 after repair; publish of a doc with a hard fail answers `design_blocked` with core `GateItem[]` whose ids are `design:<target>`; every design-baseline §5 hard target has a failing and a passing fixture in `test:design`; the worst baseline page fails and every §6 keep-list page passes | DES-§8 |
-| DG-07 | Copy cliché + specificity detector + headline check + **compositional headline generator (rev 3, DS51)** | R1 | P6 | ar/fr/en normalisers **with clitic stripping and a light stemmer (ar) and elision + lemma table (fr)**, lexicons written as **stems with inflection classes**, structure tags on the copy library, specificity score, em-dash repair, register lock (D3, hardness by origin DS50), French article metadata (D4), MinHash headline check in-store and cross-store, `·` rationing, `copy-gen.ts` (DES-§9.12) | Library: 0 em/en dashes, every headline tagged, ≥ 24 skeletons and ≥ 3 structures per family × locale, every `{product}` template article-safe; the generator yields ≥ 40 distinct hero titles per family × locale on the sweep with 0 em dashes and specificity ≥ 0.5; detector recall ≥ **85 % on a cliché fixture built from real seller pages and the baseline text extracts** (not from the lexicon) and ≤ 5 % on a 120-line clean fixture (rev 3, QUAL-22: the rev 2 "≥ 90 % of a lexicon-written fixture" was circular); a FAQ fixture mixing MSA questions with Darija answers fails `design:D3` **when generated** and is a soft note when owner-typed; `registerOf` ≥ 90 % on a 60-line set labelled by a native speaker with a Darija marker set of ≥ 60 forms; bottom-k containment within ±0.08 of exact on synthetic sets; N8: no 3-gram shingle on > 10 % of a niche's live pages (soft), > 25 % hard **for generated lines, soft for owner-typed lines**; **30 simulated engine-only stores in one niche publish with 0 `design:N8` refusals** | DES-§9 |
+| DG-07 | Copy cliché + specificity detector + headline check + **compositional headline generator (rev 3, DS51)** | R1 | P6 | ar/fr/en normalisers **with clitic stripping and a light stemmer (ar) and elision + lemma table (fr)**, lexicons written as **stems with inflection classes**, structure tags on the copy library, specificity score, em-dash repair, register lock (D3, hardness by origin DS50), French article metadata (D4), MinHash headline check in-store and cross-store, `·` rationing, `copy-gen.ts` (DES-§9.12) | Library: 0 em/en dashes, every headline tagged, ≥ 24 skeletons and ≥ 3 structures per family × locale, every `{product}` template article-safe; the generator yields ≥ 40 distinct hero titles per family × locale on the sweep with 0 em dashes and specificity ≥ 0.5; detector recall ≥ **85 % on a cliché fixture built from real seller pages and the baseline text extracts** (not from the lexicon) and ≤ 5 % on a 120-line clean fixture (rev 3, QUAL-22: the rev 2 "≥ 90 % of a lexicon-written fixture" was circular); a FAQ fixture mixing MSA questions with Darija answers fails `design:D3` **when generated** and is a soft note when owner-typed; `registerOf` ≥ 90 % on a 60-line set labelled by a native speaker with a Darija marker set of ≥ 60 forms; bottom-k containment within ±0.08 of exact on synthetic sets; N8: no 3-gram shingle on > 10 % of a niche's live pages (soft), > 25 % hard **for engine / local / cloud lines, soft for owner-typed and copy-library lines** (rev 4, core §M.4); **30 simulated engine-only stores in one niche publish with 0 `design:N8` refusals** | DES-§9 |
 | DG-08 | Font pairing expansion + typography engine + **roster growth (rev 3, DS60, request DES-R21)** | R1 | P6 (+ maintainer CCR for the seven manifest lines and the Arabic metrics step) | ≥ 8 pairings per archetype (≥ 88 entries, ≥ 60 unique tuples) from the 27 shipped fonts **plus the seven added faces**; pairing rules F1-F15; ≤ 2 preloads; the harmonisation engine of DES-§10.5 (size and weight from **Arabic-measured metrics**, tracking, leading per script; balanced whole-line breaks; tabular lining numerals) | Every pairing passes the validity rules of DES-§10.2 incl. F11 (the Arabic display roster holds ≥ 3 structural classes; no Reem Kufi, Noto Naskh Arabic or IBM Plex Sans Arabic as display, T4), F12 (concentration incl. the Fraunces / Instrument Serif caps), F14 (El Messiri only with contrast serifs) and F15 (ink-density ratio 0.85-1.15 per pairing); every non-playful Arabic display face is used by ≥ 3 archetypes and each playful one (Marhey, Baloo Bhaijaan 2, Lemonada) by ≥ 2; `fontPreloads` returns ≤ 2 for every pairing × locale; T5 on the sweep: top pairing ≤ 25 % within an archetype, top display face ≤ 20 % platform-wide, Fraunces and Instrument Serif ≤ 8 % each, any Arabic display face ≤ 30 % of ar pages per niche and ≤ 40 % per structural class; T6: hero display ≥ 44 px at 390 on 100 %; **every Arabic display face has `metrics.ar.measured = true` before R1 exit** (rev 3, QUAL-6) and `theme:check` warns `metrics_missing` until then; N7: `type:variant` or `arrange` differs between the ar and fr renders of one genome in ≥ 50 % of pairs on the sweep (rev 3, UX-10) | DES-§10 |
 | DG-09 | Threshold calibration corpus + verification | R1 | P6 (+ maintainer for the human review and the critic re-score) | 200 generated pages + ≥ 44 designer seed genomes + **the `low-asset` class and 20 simulated chosen pages per niche** (rev 3); human-labelled pairs; fitted **distance thresholds and height scale only** in `calibration.json` (the Q floor and the slop fail line are fixed before P6 merges, ENGP-29); the **capacity simulation** of DES-§17.7 (200 stores per niche); the baseline method re-run (140 plans, 41-page render set, extended `index.json`, three **blind** critic passes) | `calibration.json` committed with version, date, the pre-fit Q floor and `approved: "owner"` (a precondition of exit criterion 10); DS25 targets met on the corpus or the miss recorded with the owner's decision; estimate-vs-measured height error p95 ≤ 10 % per family (else R1 exit is refused, QUAL-5); the capacity report shows the share of stores needing the niche fallback < 5 % at 200 stores per niche; the re-scored consensus ≥ 7.5 with the bootstrapped 95 % CI lower bound ≥ 7.0, no dimension < 6, distinctiveness ≥ 8, scored blind on a shuffled mix of baseline and regenerated pages (DS43, DES-§17.6) | DES-§17 |
 | DG-10 | Logo designer v1 | R2 | S2 | HarfBuzz shaping and outlines (ar + Latin), optical spacing, one craft move, Latin monogram grid, Arabic initial in enclosure, basic stacked bilingual lockup, small-size test, exports, 6 candidates in 3 families, locks, "more like this" | Arabic golden names shape with correct joining (glyph-id goldens); exported SVG contains only `svg`/`g`/`path` with palette fills; small-size test passes or a simplified favicon is produced; 12 candidates in ≤ 600 ms in the browser (mid laptop) | DES-§13 |
@@ -217,7 +227,7 @@ motion, density, data-viz, states, visuals. Releases follow core §L.2 and platf
 
 | ID | Feature | Rel. | Track | Design scope here | Acceptance (design part) | Spec |
 |---|---|---|---|---|---|---|
-| UX-01 | Onboarding wow flow | R1 | P2 (+ P6 generator pieces) | The reveal composition (**three real folds, DS58**), motion, device paths and the generator call that produces it | Reveal ≤ 2.5 s after analysis ends on a 4× CPU-throttled run (library copy); 3 directions pairwise d ≥ 0.35; no hard fail on screen; the three folds are visible together at 390 (carousel with an 8 % peek) and at 1440 (side by side); at least one of the three directions is stage / specimen / dark for the argan and parfum fixtures (DS54); 360 px and ar RTL screenshots clean; in `store` mode the reveal shows the PDP draft, not a hidden landing page (OPS-14, platform.md) | DES-§14.3 |
+| UX-01 | Onboarding wow flow | R1 | P2 (+ P6 generator pieces) | The reveal composition (**three real folds, DS58**), motion, device paths and the generator call that produces it | Reveal ≤ 2.5 s after analysis ends on a 4× CPU-throttled run (library copy); 3 directions pairwise d ≥ 0.25 always and median pairwise d ≥ 0.35 on the DG-09 fixtures (rev 4: one rule with DES-§14.2 and DS25); no hard fail on screen; the three folds are visible together at 390 (carousel with an 8 % peek) and at 1440 (side by side); at least one of the three directions is stage / specimen / dark for the argan and parfum fixtures (DS54); 360 px and ar RTL screenshots clean; in `store` mode the reveal shows the PDP draft, not a hidden landing page (OPS-14, platform.md) | DES-§14.3 |
 | UX-02 | Store-scoped ⌘K (tenant + console) | R1 | P2, P1 | Palette anatomy, rows, groups, keys, motion, console variant | Opens ≤ 50 ms after the key (warm); keyboard-only path for every row; matches DES-§16.10 dimensions; RTL mirrored | DES-§16.10 |
 | UX-03 | Console identity | R1 | P1 (+ P2 tokens) | Teal surface tokens, deep-ink sidebar, "Platform" badge, violet impersonation ribbon | `test:admin-tokens` green; ribbon text ≥ 4.5:1; badge visible on every console route | DES-§16.11 |
 | UX-04 | Admin upgrade | R2 | S6 | Token generator use everywhere, density modes, motion, KPI tiles, COD funnel, empty states, split views, undo toasts | Every R2 screen passes the DES-§16.17 checklist at 1280/1440/390 in light and dark; no hard-coded colour outside tokens (lint); no bounce easing | DES-§16 |
@@ -239,6 +249,52 @@ motion, density, data-viz, states, visuals. Releases follow core §L.2 and platf
 | FL-1 Design flags (`src/lib/flags/defs/design.ts`: `design_publish_gates`) | R1 | P6 | core §D.4: ops flag `"block" \| "warn"`, the mirror of `platform_design.gatesAtPublish`. DES-§2.9 |
 | SP-1 ⌘K search provider (`src/lib/admin-data/search/design.ts`: pages by design tags) | R1 | P6 | core §I.3 (LAN Q18 extension point). DES-§15.5 |
 | RD-1 Render digest and `GenomeCard` for the Director (rethink-ai §1.2, §1.4) | R1 (digest, cards) · R2 (preview tiles, S7) | P6 · S7 | DES-§8.9 |
+
+### DES-§1.4 Proven by (rev 4, CRIT17: every acceptance cell names its command and fixture)
+
+Each row names the command that proves the id's acceptance cell, the fixture or harness step inside it, and whether it
+runs in `npm test` (fast, ≤ 3 min in total, core §J.1), in `test:slow` (before each merge), in `test:db`, or locally
+(`qa:*`, the owner's PC). The DES-§25 tables carry the same ids in their "Ids" lines, so the mapping holds both ways; a
+deliverable without a row here is not part of its id's acceptance.
+
+| Id | Proven by (command → fixture / step) | Runs in |
+|---|---|---|
+| DG-01 | `theme:check` → the DESIGN v3 §2.5 parse = `THEME_ATTR_VALUES`; the colour-word `grep` of DES-§3.5 hits §0 only; the budgets table of DES-§3.2 present verbatim (string compare) | `npm test` |
+| DG-02 | `test:design` → byte-identical genome for (seed, inputs, `priorsV`, hints); H01-H36 over 11 × 3 × 20 seeds (200 in `test:design:full`); `orangeMixes` empty; `genomeOf` consistency on the baseline fixtures; the N5 / N6 sweeps | `npm test` (+ `test:slow`) |
+| DG-03 | `test:design` → the 2,000-doc gene spread (every G12 / G15 / G17 / G25 / G26 / G27 value under ≥ 4 archetypes), V05 ladder fixtures incl. the pill chip, glass ≤ 2, 0 nested cards (V29 fixture), N4 measured ≥ 0.9 × E[distinct] | `npm test` |
+| DG-04 | `test:design` → 2,000 expansions (10,000 full), invariants I1-I8, H35 / V38 fixtures, the 140-plan sweep (N3 distinct, 4-gram cap, the two entropies; C1 on chosen pages and the `low-asset` class); `test:registry` → `sheets.ts` = registry `features.fold / slots / h` | `npm test` (+ `test:slow`) |
+| DG-05 | `test:design` → distance properties, Σw = 40 / 21 / 19, bounds-first = full on 10,000 pairs, two identical-input stores ≥ 0.25; `test:design-db` → bands, clone flag, τ_niche(n) at n = 10 / 50 / 150, reservation transitions, first-come by page age, N2 by product, the exhaustion fallback (DES-§7.9 step 4); `qa:wow-demo` run 2 | `npm test`, `test:db`, local |
+| DG-06 | `test:design` → every design-baseline §5 hard target with a failing and a passing fixture (DES-§8.10), slop ≥ 6 → ≤ 2 after repair, gates ≤ 8 ms p95, repairs idempotent, the composition score fixtures; `test:prepublish` → `design_blocked` with `design:*` ids, the store-kind fixtures; `test:i18n-coverage` → every `design.gate.*` title in ar / fr / en | `npm test` |
+| DG-07 | `test:design` → the real-text cliché fixture recall ≥ 85 %, clean ≤ 5 %, `registerOf` on the native-labelled set, `composeLines` ≥ 40 distinct hero titles per family × locale, bottom-k ±0.08; `test:copylib` → 0 dashes, tags, ≥ 24 skeletons, article faults 0; `test:design-db` → N8 by origin, 30 engine-only stores → 0 refusals (`test:slow` corpus variant) | `npm test`, `test:db`, `test:slow` |
+| DG-08 | `theme:check` → F1-F15 over the catalogue, the ink-density ratio (`scripts/qa/design-ink.ts`), `metrics_missing` list; `test:design` → T1 / T3 / T6 / V15 per pairing × locale, the T5 / F12 caps on the sweep; R1 exit reads `metrics.ar.measured` for every Arabic display face | `npm test`, R1 exit check |
+| DG-09 | `qa:design-corpus` (+ `--pairs 300`, `--fit`, `--capacity`) → `calibration.json` with `preFit` and `approved: "owner"`; `qa:design-report` → the DS25 table and the per-target table; the critic re-score report `qa/saas-baseline/rescore-<date>.md` | local, R1 exit |
+| DG-10 | `test:logo` → shaping goldens, SVG goldens, element whitelist, small-size test, browser = Node bytes, 12 candidates timed; the `name`-table assertion | `npm test` (R2) |
+| DG-11 | `test:design` (R2) → `compileRegister` clamps per register; storefront's `test:catalog` render matrix of the PDP families (STO-§8.4) → no glass, motion ≤ 250 ms, accent ≤ 8 % on commerce pages; `test:design-db` → one `render_jobs` row per live inherit page on activation | `npm test`, `test:db` (R2) |
+| DG-12 | R1: `test:design` → Bolder / Calmer move only their genes and never add a hard item; R3: the slider property test and the seed-restore byte identity | `npm test` |
+| DG-13 | `qa:design-visual` → the seeded clipping fixture fails, 0 failures on the corpus | local (R2) |
+| DG-14 | `test:design` (R2) → e-mail template snapshots ar / fr, no `var(`, contrast pairs | `npm test` (R2) |
+| DG-15 | `test:render` → every arrangement at 320 / 390 / 768 / 1440 in ar and fr; the tuple count ≥ 10 × 91 | `npm test` (R3) |
+| DG-16 | `test:design:full` → 1,000 simulated stores, no value share > 2 × target; `test:design-db` → no tenant genome reachable through the archive | `test:slow`, `test:db` (R3) |
+| DG-17 | `test:logo` → the 30 golden name pairs within the ink-weight and height ratios; designer sign-off recorded in `docs/saas/PROGRESS.md` | `npm test` (R3) |
+| DG-18 | `test:logo` → 100 % of fixture concepts parse, 0 raw SVG stored | `npm test` (R3) |
+| DG-19 | each item names its command when it is scheduled (later) | — |
+| UX-01 | `qa:wow-demo` → the 0:50 rows of DES-§14.8 (three folds together, d ≥ 0.25, one stage / specimen / dark direction on argan and parfum, ≤ 1.5 s p75 **[measure]**); the `reveal` story fixture in `qa/admin-visual/shoot.mjs` at 390 / 1440, ar RTL; e2e reveal ≤ 2.5 s with a 4× CPU throttle | local, e2e |
+| UX-02 | e2e → palette open ≤ 50 ms warm, every row by keyboard, the phone sheet with a 300 px keyboard inset | e2e |
+| UX-03 | `test:admin-tokens` → console tokens and ribbon contrast; e2e → the Platform badge on every console route | `npm test`, e2e |
+| UX-04 | the DES-§16.17 checklist in `qa/admin-visual/shoot.mjs` on every R2 screen; `test:admin-tokens`, `test:admin-motion`, `test:admin-rtl` | local, `npm test` (R2) |
+| UX-05 | `qa:wow-demo` step 1:40 (the card on screen); `test:design` → for both URL lengths `qrcode.create(url, { errorCorrectionLevel: "M" }).modules.size × 4 px` equals the rendered size and the quiet zone is 4 modules (the `qrcode` package generates, it does not read); the 3 cm print scan is a manual step on the address-card story fixture before R1 exit | local, `npm test`, manual |
+| UX-06 | e2e → the dot is "live" only within 30 s of a successful poll; `test:admin-motion` → the 400 ms arrival fade | e2e, `npm test` (R2) |
+| UX-07 | `test:admin-tokens` → `theme_color` from tokens; P2's `scripts/build-app-icons.mjs` fails the build when the mark's ink bbox leaves the inner 80 % circle of a maskable icon (the safe-zone rule of DES-§16.14) | `npm test`, build |
+| UX-08 | `test:admin-rtl` → no physical properties; the ar screenshot run with the clipped-mark check | `npm test`, local (R2 / R3) |
+| BK-1 | `test:design-db` → `brand.write` required, `assertOwned` on asset ids, `nearestAllowed` moves stored with a `ColorMove`; the `brand` story fixture in the admin screenshot run | `test:db`, local |
+| GN-1 | `test:design` → ≥ 6 distinct why lines per locale, no line names a fact absent from the digest, chips without `·` | `npm test` |
+| GH-1 | `test:design` → invalid hints dropped, locks respected, one pin honoured, a second dropped (`second_pin`) | `npm test` |
+| SF-02 | `qa:wow-demo` 0:50 rows (DNA card, three novelty words, no number on the card); the `dna-card` story fixture | local |
+| TC-1 | `test:design` → the DES-§8.10 map: one failing and one passing fixture per hard target id; `qa:design-report` → the per-target table on the corpus | `npm test`, local |
+| HR-1 | `test:health` → the five design rules with and without data, the group cap 15, `pages_close` from the store's own rows only | `npm test` |
+| FL-1 | `test:prepublish` → `design_publish_gates = "warn"` publishes and audits `page.publish.design_override`; honesty items never `warn` | `npm test` |
+| SP-1 | `test:design-db` → the search provider returns only the caller store's rows, ≤ 8 hits, ≤ 120 ms | `test:db` |
+| RD-1 | `test:design` → `renderDigest` fields equal the gate inputs on 20 docs; `GenomeCard` carries bands only (schema test); `test:ai` (P7) → the imported types equal design's exports | `npm test` |
 
 ---
 
@@ -265,7 +321,7 @@ export const designGenomes = mysqlTable("design_genomes", {
   priorsV: varchar("priors_v", { length: 24 }).notNull().default("p1"),  // + rev 3 (QUAL-26): priors snapshot id (priors.ts version + learned-prior date + shares watermark) the sample used
   firstPublishedAt: ts("first_published_at"),                            // + rev 3 (QUAL-19): copied from pages.first_published_at on the `published` row; the first-come key
   q: tinyint("q"), slop: tinyint("slop"),                                // + gate summary at the time of the row
-  report: jsonText<GateSummary>("report"),                               // + ≤ 1 KB: gate ids and counts, never page text
+  report: jsonText<GateSummary>("report"),                               // + ≤ 1 KB: gate ids and counts, never page text; on `chosen` rows also `gen` (rev 4: field path → { h: hash16, o: OriginClass }, ≤ 600 B, read by the core's originFrom, DES-§9.8)
   novelty: jsonText<NoveltyBands>("novelty"),                            // + verdict bands shown to the owner (DS27)
   live: boolean("live").notNull().default(false),
   pool: boolean("pool").notNull().default(false),                        // + live OR reserved_until > now (DES-§7.5)
@@ -288,7 +344,8 @@ export const designGenomes = mysqlTable("design_genomes", {
 | `theme` | store theme activation (R2, DES-§11.4) | each `store_themes` version | true for the active one |
 
 **Size and retention** (3 GB DB, core §H.11). A row is ≤ 1.8 KB (genome ≤ 1,200 B, vec ≤ 400 B, report ≤ 200 B in
-practice). The nightly job `design.retention` (DES-§24) deletes `generated` rows older than 14 days, `chosen` rows older
+practice); a `chosen` row adds the ≤ 600 B generation record (one per page, rev 4), so the worst case below grows by
+< 5 %. The nightly job `design.retention` (DES-§24) deletes `generated` rows older than 14 days, `chosen` rows older
 than 90 days whose page was never published, and `published` / `derived` rows that are not live and older than 180
 days (ai.md's gene join runs nightly over the last 90 days). Hard cap: 600 rows per store; above it the oldest non-live
 rows go first. 1,000 stores at the cap ≈ 1.1 GB worst case, typical ≪ 100 MB; the console health view shows the table
@@ -297,7 +354,7 @@ size and alarms at 300 MB (request DES-R12).
 ```ts
 // src/lib/design/types.ts
 export type Band = "ok" | "close" | "too_close";
-export interface NoveltyBands { v: 1; platform: Band; niche: Band; own: Band | "first"; at: string /* ISO */ }
+export interface NoveltyBands { v: 1; platform: Band; niche: Band; own: Band | "first"; at: string /* ISO */; fallback?: true /* rev 4: published on the verified exhaustion path, DES-§7.9 step 4 */ }
 export interface GateSummary { v: 1; hard: GateId[]; soft: GateId[]; slop: SlopId[]; copy: { cliche: number; spec: number } }
 ```
 
@@ -380,8 +437,10 @@ export const BrandSetting = z.object({
     pairing: z.string().regex(/^[a-z0-9-]{2,40}$/).nullable().default(null),   // a pairing id of the catalogue (DES-§10.3)
     locked: z.boolean().default(false),
   }).default({}),
-  /** brand gene locks, R1 subset; values validated against GENE_VOCAB (G28 and G31 are read from store_ai.voice, DS45) */
-  genes: z.partialRecord(z.enum(["G12", "G17", "G23", "G26", "G27"]), z.string().max(48)).default({}),
+  /** brand gene locks, R1 subset; values validated against GENE_VOCAB (G28 and G31 are read from store_ai.voice, DS45;
+   *  G4 is `fonts.locked`; the page genes G2 / G18 have page locks only, `look.locks`). Rev 4: + G1 and G9 so the DNA
+   *  card's "Lock for my brand" has a home for every brand-level bold gene (DES-§15.4); additive, the record is partial. */
+  genes: z.partialRecord(z.enum(["G1", "G9", "G12", "G17", "G23", "G26", "G27"]), z.string().max(48)).default({}),
   storeThemeVersion: z.number().int().positive().nullable().default(null),                       // R2: active store_themes.version
 });
 export type BrandSetting = z.infer<typeof BrandSetting>;
@@ -472,7 +531,7 @@ only, no code. Title: "Design Bible: Store Gen (v3, Genome)". The rules below ar
 | 0 | Owner rules, verbatim: no orange (the exact band), maximally modern, never vintage or craft, never AI-generic, natural ar/fr/en, never invented data | HANDOFF §2 |
 | 1 | Budgets (DES-§3.2), the tells list (DES-§3.3), the banned list v3 (DES-§3.4) | this spec |
 | 2 | Token contract: v2 tokens plus the `look` tokens (DES-§4.5.3); §2.5 value sets = `THEME_ATTR_VALUES` incl. the new attributes | `archetypes.ts` |
-| 3 | The genome: levels, the 31 genes, bold vs solved, what each gene changes on screen (one line each) | DES-§4 |
+| 3 | The genome: levels, the 35 genes (seven bold, four rhythm), bold vs solved, what each gene changes on screen (one line each) | DES-§4 |
 | 4 | Archetypes as priors (one paragraph each, colour words only from the allowed families, DES-§3.5) | DES-§4.3 |
 | 5 | Page choreography grammar and the eight COD invariants; **the composition sheets** (one per hero family and per new or redrawn section: grid at 390 / 768 / 1440, slots, type steps, price cluster and COD line, signature detail, RTL mirror, recipe, reference), reproduced from DES-§5.13 and the fold budget table of DES-§5.12 | DES-§5, **DES-§5.13** |
 | 6 | Imagery: the seven treatments (incl. `framed-stage`), resolution and focal rules, the one-asset grammar, the stage presets and mask geometry with their numbers | DES-§4.10.1, §4.11, §4.11.1, DES-§8 |
@@ -492,7 +551,7 @@ only, no code. Title: "Design Bible: Store Gen (v3, Genome)". The rules below ar
 | Order form | starts ≤ 3,000 px at 390 (grammar: ≤ 3 estimated screens), ≤ 1,100 px tall in its default state | V22 / `budget:F1` | screen 14-17, 2,840 px |
 | First screen (390 × 844) | product image, price, primary CTA and the COD line inside it, every hero family and locale | V25 / `budget:C2` | 23 heroes below the fold |
 | Primary CTAs | ≤ 6 (sticky bar counts as 1; hard above 8, `budget:R1`); ≤ 2 visible at once on mobile | V26 / `budget:R1` | 58-68 `.lp-btn` |
-| Floating layers | ≤ 1 fixed bar + ≤ 1 float, fixed UI ≤ 88 px of 844, the bar hidden while an in-flow primary CTA is ≥ 50 % visible | V27 | three layers colliding |
+| Floating layers | ≤ 1 fixed bar + ≤ 1 float, fixed UI ≤ 88 px of 844, the bar hidden while any `[data-hero-cta]` (hero, form submit, final `cta`) or the order form is on screen at all (the frozen `sticky.ts`, `stickyVisible`; stricter than "≥ 50 % visible", DES-§5.9) | V27 | three layers colliding |
 | Frosted glass surfaces (sticky bar and header excluded) | ≤ 2 (soft above 2, hard above 4, `budget:R4`) | V06 / `budget:R4` | 80-96 `backdrop-filter` rules |
 | Reveal nodes | ≤ 60 `[data-reveal]`, on the hero and section heads only (hard above 120, `budget:R5`); 1-2 reveal kinds; one easing family | V28 / `budget:R5` | 343-397 |
 | Photo appearances | each asset ≤ 3 times (sticky bar and form thumbnail excluded; hard above 4, `budget:I1`), ≤ 2 for the hero image at the same crop, ≥ 3 distinct crops per page | V14 / `budget:I1` | one `src` in 14-19 slots |
@@ -649,8 +708,11 @@ export interface DesignGenome {
   page: PageGenes;
   sections: SectionGene[];                                         // ≤ 40
   why: string[];                                                   // explanation chip keys (DES-§4.8), ≤ 6
-  hints?: { from: "director"; accepted: GeneKey[]; dropped: GeneKey[] };
+  hints?: { from: "director"; accepted: GeneKey[]; pinned: GeneKey[]; dropped: { gene: string; value: string; why: "vocab" | "hard_rule" | "locked" | "photo" | "pin" | "second_pin" }[] };   // rev 4: = HintIntake (DES-§4.6); `why: "pin"` = a pin that failed the H-rules / photo facts / locks (core §K.2 P0)
 }
+/** rev 4 (core §K.2 P0 stub shape): the options of sampleGenome; pins are an option of their own, not part of GeneHints. */
+export interface SampleOpts { hints?: GeneHints; pins?: Partial<Record<BoldGene, string>>; priors?: PriorsSnapshot; locks?: Partial<Record<GeneKey, string>> }
+export function sampleGenome(input: SampleInput, opts?: SampleOpts): DesignGenome;   // DES-§4.4
 /** Compact storage form for design_genomes.genome: short keys, numbers rounded to 3 decimals, ≤ 1,200 B. */
 export type GenomeCompact = { v: 1; s: number; b: Record<string, unknown>; p: Record<string, unknown>; x: [string, string, string?, string?][] };
 export function packGenome(g: DesignGenome): GenomeCompact;
@@ -835,7 +897,7 @@ sweep (`souk` / `playground` / `garage` > 0 per category, top archetype ≤ 45 %
 | H33 (rev 2, T4, T5; **generalised rev 3, DS49, UX-5, QUAL-8**) | anti-concentration for every bold visual gene, applied to the prior **before** the hard rules and to the best-fit slot too: with the niche pool's shares (`nicheShares`, k ≥ 10 stores, DES-§7.4) a value at ≥ 0.8 × its cap has its weight × 0.5, at ≥ its cap × 0.25 (floor 0.02). Caps: G2 grammar ≤ 25 %, G9 strategy ≤ 25 %, hero family ≤ 20 %, (hero family × arrangement) ≤ 12 %, Latin display family ≤ 20 % (Fraunces and Instrument Serif ≤ 8 % each platform-wide and ≤ 10 % per niche), Arabic display face ≤ 30 % of ar pages and ≤ 40 % per structural class (F11), pairing ≤ 25 % within an archetype, the ghost-word device ≤ 15 % of pages, the figure-caption / padded-numbering devices ≤ 20 %. `reem-kufi`, `noto-naskh-arabic` and `ibm-plex-sans-arabic` are never `displayAr` (F11). The R3 novelty budget (DES-§7.6) replaces the step factors by the continuous form; the caps stay |
 | H34 (rev 3, K6, UX-17) | gold band: no `accent` or `pop` role with hue 75-95° at chroma > 0.10 (rendered to sRGB); the repair is **"sand + signal"**: the accent is desaturated to C ≤ 0.06 (sand) and the pop is drawn outside 22-95° from the complement or analogue families (olive 110-130°, teal 185-215°, majorelle 240-260°); neutrals and tints at C ≤ 0.06 in the band stay allowed (DES-§4.10 argan worked example) |
 | H35 (rev 3, DS53, UX-14) | Act2 ordering: the density pattern G20.p is honoured; media-led and type-led layout families alternate; ≤ 2 consecutive image + text splits (`benefits:zigzag`, `story:image-text`, `comparison:split`, `mediaText`, `showcase:figure` count); ≥ 4 layout families per 8 in-flow sections (≥ 3 hard); no two adjacent sections with the same `arrange`; then the 4-gram re-draw of DES-§5.1 |
-| H36 (rev 3, DS54, UX-7) | one-asset grammar: with one photo the plan uses the type-led families (`statement`, `quiet`, `editorial`, `framed-stage`), one `framed` use and one `context` use of the asset at two crops, colour-field or tonal moments instead of a gallery / showcase / contact grid, and no `tight` crop unless its effective pixels cover the slot (H13); the "≥ 3 crops" rule (V14) is soft only when ≥ 2 assets exist |
+| H36 (rev 3, DS54, UX-7) | one-asset grammar: with one photo the plan uses the type-led hero families (`statement`, `quiet`, `editorial`) and the stage family with the `framed-stage` treatment, one `framed` use and one `context` use of the asset at two crops, colour-field or tonal moments instead of a gallery / showcase / contact grid, and no `tight` crop unless its effective pixels cover the slot (H13); the "≥ 3 crops" rule (V14) is soft only when ≥ 2 assets exist |
 
 **G9 → palette** (input to `productTheme`): ink+one → base light | tinted, harmonies {ink-accent, cool-precise,
 mono-luxe}, 1 colour moment · duotone → light | tinted, {pop-complement, blush-berry, clay-sage, earth-triad}, 2 moments
@@ -857,12 +919,12 @@ same family without an opsz axis (−2).
 sampleGenome(input: SampleInput, opts): DesignGenome
   rng(k)   = rngFor(seed, "genome:" + k)                         // independent streams (src/lib/generator/rng.ts)
   locks    = brand kit locks ∪ opts.locks                         // locked genes are fixed values, never sampled
-  pins     = opts.hints?.pins                                     // rev 3 (QUAL-10): ≤ 1 pinned bold gene per direction
+  pins     = opts.pins                                            // rev 3 (QUAL-10): ≤ 1 pinned bold gene per direction; rev 4: SampleOpts.pins (core P0 shape)
   for gene in [G1, G2, G9, G4, G18, G23.f, G28]:                  // seven bold (rev 3: + G23.f), in this order (each conditions the next)
     w = prior(gene | earlier bold) × concentration(gene, shares)  // DES-§4.3; H33 step factors from nicheShares (k ≥ 10), BEFORE the hard rules
         × hints(gene) × learned(gene) × novelty(gene)             // DES-§4.6 (≤ 3×), ai.md AI-13 (R3), DES-§7.6 (R3)
     w = w with values violating H-rules given earlier choices set to 0, floor 0.02 re-applied to valid values
-    value = locks[gene] ?? (pins[gene] when valid under the H-rules, the photo facts and the locks; else logged "pin_dropped")
+    value = locks[gene] ?? (pins[gene] when valid under the H-rules, the photo facts and the locks; else hints.dropped += { why: "pin" })
             ?? weighted(rng(gene), w)
   domains  = for each solved gene: preferred order = derive(gene, bold) (DES-§4.3 tables, archetype data) with
              ±1-step jitter from rng(gene); domain = all values passing unary constraints
@@ -929,15 +991,18 @@ export const ThemeLook = z.object({
                  st: z.number().int().min(30).max(80), sc: z.boolean(),
                  scope: z.enum(["heads", "hero", "none"]) }),                            // rev 2: reveal scope (G35, R5); heads = hero + section heads only
   kit: z.object({ gl: z.enum(["dot", "spark", "diamond", "none"]), nb: z.enum(["none", "plain", "padded"]), cap: z.enum(["mono", "smallcaps", "italic-serif", "plain"]) }),
-  em: z.enum(["swoosh", "highlight", "color", "italic"]), btn: z.enum(["solid", "pill", "soft", "outline", "underline", "glow"]),
+  em: z.enum(["none", "swoosh", "highlight", "color", "italic"]), btn: z.enum(["solid", "pill", "soft", "outline", "underline", "glow"]),   // rev 4: + "none" (G26 rev 3, DS56)
   gid: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/).optional(),        // design_genomes id (learning join, ai.md AI-§G.4)
-  locks: z.array(z.enum(["G1", "G2", "G4", "G9", "G18", "G28"])).max(6).optional(),   // rev 2: "Lock for this page" (DES-§15.4); absent = none
+  locks: z.array(z.enum(["G1", "G2", "G4", "G9", "G18", "G23", "G28"])).max(7).optional(),   // rev 2: "Lock for this page" (DES-§15.4); rev 4: + G23 (the seventh bold gene); absent = none
 }).strict();
 // ThemeSpec gains:  look: ThemeLook.optional(),
 ```
 
 A compiled look serialises to ≈ 570-690 B of JSON (`theme:check` asserts ≤ 700 B over 2,000 sampled genomes; the rev 2
-`mo.scope` adds ≤ 16 B). The constants (`GRAMMARS`, …) move with it into `src/lib/page/schema.ts` (they are part of the
+`mo.scope` adds ≤ 16 B). **Rev 4 (DES-§27.4 note N6):** the two enum additions above (`em: "none"`, `locks` + `G23`)
+are part of the same C0 CCR the core accepted as DES-R1 (the constants and the object have not been applied yet, so the
+change is in the text the maintainer applies, not a second frozen-contract change); `data-emphasis="none"` emits no
+emphasis device and is added to `THEME_ATTR_VALUES`. The constants (`GRAMMARS`, …) move with it into `src/lib/page/schema.ts` (they are part of the
 doc contract); the design modules import them from there. **Rule for every other new field this part adds to a section
 data schema (`src/landing/sections/<type>/schema.ts`, P6): `.optional()` with no default** (`opener`, `cta`, `ghost`,
 `arrange`, `align`, `ratio` additions), so `validateDoc(doc)` of an existing document serialises byte-identically and
@@ -992,7 +1057,7 @@ optional without a default (DES-§4.5.1 rule).
 | `hero:poster` | redrawn | the turning badge removed (S17); `priceBlock?: "static" \| "band"` | −200 | display weight ≥ 700 enforced by H04; uppercase never for `ar` | P6 |
 | `hero:spec` | redrawn | callouts ≤ 3, glass only when G16 allows (else hairline cards), figures merchant-only | −100 | callout numbers LTR isolates | P6 |
 | `hero:split` | kept | `ratio?: "5:7" \| "4:8" \| "1:1"` (G3), `mediaSide?: "start" \| "end"` | +150 | mirrored by logical properties; `mediaSide` is logical | P6 |
-| `hero:cinema` (rev 1) | new | `band?: "below" \| "beside"`, `caption?: string`, photo ≥ 1600 px wide (H13) | +1,400 | the band sits inline-start on desktop; text never over the photo except the one caption | P6 |
+| `hero:cinema` (rev 1) | new | `band?: "below" \| "beside"`, `caption?: string`, the primary asset ≥ 1.5 × the slot at DPR 2 on every declared breakpoint, else a mobile-only bleed with a framed desktop fallback (H13, slot-relative; the rev 1 "≥ 1600 px" is gone) | +1,400 | the band sits inline-start on desktop; text never over the photo except the one caption | P6 |
 | `hero:quiet` (rev 1) | new | `ratio?: "4:5" \| "1:1"`, `frame?: "framed" \| "bleed"` | +900 | small display (dmax ≤ 56), price and CTA on one line under the image | P6 |
 | `hero:index` (rev 1) | new | `facts?: 3..5` merchant facts as numbered rows (G25.nb), `numbering?: "plain" \| "padded"` | +1,100 | row numbers LTR isolates; rows are an `index` arrangement | P6 |
 | `hero:contact` (rev 2, replaces scrapbook in every pool) | new | `photos: 3..4` (`AssetRef[]`), `titleCell?: "tl" \| "tr" \| "bl" \| "br"`, grid-contact treatment | +1,300 | the grid mirrors; the title cell is logical (`tl` = inline-start top) | P6 |
@@ -1013,6 +1078,7 @@ optional without a default (DES-§4.5.1 rule).
 | `MarqueeTrack` duplicates the track **per whole item** with `direction`-aware offsets and `overflow: clip` on the track, never on a word; the outline marquee gets `padding-inline` ≥ 0.5 em | — | +80 | ar tracks run inline-start → end | I7, RTL6 | P6 (primitives) |
 | `whatsappFloat:tab` renders a horizontal pill in `ar` (no rotated Arabic) | `data.tabLabel?` | +40 | RTL3 | RTL3 | P6 |
 | `footer:big` wordmark is sized by `--sh-word` (fits, never clipped); addresses and e-mails in `dir="ltr"` inline blocks without spaced punctuation | — | +40 | RTL5 | S24, RTL5 | P6 |
+| **"Report this store" in every footer variant (rev 4, CRIT15; core D76, §C.4.1 `/report/<handle>`, PLA PD70):** the legal row of both footer variants, `footer:simple` and `footer:big` (`src/landing/sections/footer/parts.tsx`, `legalLinks()` / `LegalNav`, P6) appends one link after the four legal documents when `ctx.links.report` is set: label `ctx.t("footer.report")` (ar / fr / en = platform's `shell.report.link` strings, one source), `href` = the **absolute** platform URL `platformOrigin() + "/report/<handle>"` (never relative: store hosts answer 404 for `/report/*`, core §C.4), `rel="nofollow"`, same tab, the same 13 px muted link style as the legal links (never a button, never an icon-only control). `ctx.links.report` is built by `liveLinks()` for live store renders only and is **absent** in static exports (ZIP / PHP: the page is not served by the platform), previews and test renders, so the frozen PHP export and the doc are unchanged. The field `PageLinks.report?: string` (`src/landing/types.ts`), its value in `liveLinks()` (`src/landing/context.ts`) and the UiKey `footer.report` (`src/landing/i18n.ts`) are a maintainer CCR (three read-only files; DES-§27.4 note N1); the legal pages (`src/landing/legal/**`) and the thank-you page are P3's and render the same `ctx.links.report`; a doc whose owner removed the footer section gets the link from the document shell's minimal legal row (`document.tsx`, the same CCR), so every live page carries it | no data field; `ctx.links.report` | +20 | the link sits at the inline-end of the legal row, mirrored in `ar`; the URL is never shown as text | D76, SEC-18 | P6 (footer), maintainer (CCR), P3 (legal, thank-you) |
 | `benefits:hanging` (rev 2): numbered rows with hanging thumbnails (the keep-list's Didone 01-05 benefits, design-baseline §6.7) | `thumbs?: boolean` | +900 | thumbnails hang inline-start | keep-list 7, C5 | P6 |
 | `showcase:figure` (rev 2): one large image with a "FIG. 01" caption column (keep-list) | `caption?: string`, `figure?: string` | +600 | caption column inline-end | keep-list 7 | P6 |
 | `gallery:contact` (rev 2): 3-6 photos as a contact sheet (grid-contact treatment) | `cols?: 2 \| 3` | +700 | grid mirrors | I2, gallery-led grammar | P6 |
@@ -1028,7 +1094,7 @@ optional without a default (DES-§4.5.1 rule).
 Net CSS change: ≈ +8.0 KB gz added, ≈ −2.1 KB removed. **Rev 3 (UX-35): two budgets, so the accounting can be checked
 before the code exists.** (1) **Shared base and primitives** (`src/landing/styles/base.css`, inlined on every page):
 the primitive rows above (`SectionHeader.opener` +450, `<bdi>` +60, `Price` +120, `MarqueeTrack` +80, `footer:big`
-+40, `whatsappFloat:tab` +40, `[data-look]` selectors +500) ≈ **+1.3 KB gz, budget ≤ +1.5 KB gz**, minus the base
++40, the footer report link +20, `whatsappFloat:tab` +40, `[data-look]` selectors +500) ≈ **+1.3 KB gz, budget ≤ +1.5 KB gz**, minus the base
 removals (−2.1 KB: ring, tape, stamps, chat and phone mocks). (2) **Per-variant chunks** (`src/landing/sections/<type>/
 <variant>.css`, inlined only when the variant is on the page): every hero family row (`cinema` +1,400, `quiet` +900,
 `index` +1,100, `contact` +1,300, `statement` +900, `split` +150), `benefits:hanging` +900, `showcase:figure` +600,
@@ -1041,12 +1107,13 @@ fails its own line.
 
 ```ts
 // src/lib/design/hints.ts
-export type GeneHints = Partial<Record<BoldGene | "G10" | "G16" | "G20", { value: string; weight: 1 | 2 | 3 }[]>> & {
-  pins?: Partial<Record<BoldGene, string>>;                       // rev 3 (QUAL-10): ≤ 1 pinned bold gene per direction; the only value when it passes the H-rules, the photo facts and the locks
-};
-export interface HintIntake { accepted: GeneKey[]; pinned: GeneKey[]; dropped: { gene: string; value: string; why: "vocab" | "hard_rule" | "locked" | "photo" | "second_pin" }[] }
+export type GeneHints = Partial<Record<BoldGene | "G10" | "G16" | "G20", { value: string; weight: 1 | 2 | 3 }[]>>;
+// rev 4: the pin is SampleOpts.pins (DES-§4.1, the core's P0 stub `sampleGenome(…, { hints?, pins?, priors? })`); ai.md's
+// DirectionBrief.pin ({ gene, value }) maps to `pins = { [gene]: value }`; ≤ 1 pinned bold gene per direction, the only
+// value when it passes the H-rules, the photo facts and the locks
+export interface HintIntake { accepted: GeneKey[]; pinned: GeneKey[]; dropped: { gene: string; value: string; why: "vocab" | "hard_rule" | "locked" | "photo" | "pin" | "second_pin" }[] }
 export function applyHints(prior: GenePrior, gene: GeneKey, hints: GeneHints | undefined): GenePrior;   // multiplies weights ≤ 3×, never adds a value
-export function validateHints(raw: unknown): { hints: GeneHints; intake: HintIntake };                 // GENE_VOCAB check; a second pin is dropped ("second_pin")
+export function validateHints(raw: unknown): { hints: GeneHints; pins: SampleOpts["pins"]; intake: HintIntake };   // GENE_VOCAB check; a second pin is dropped ("second_pin")
 ```
 
 The ai task **`design.plan`** (renamed from revision 1's `design.direct` by ai.md AI-§A.8; rev 3 adopts the name
@@ -1054,7 +1121,7 @@ everywhere in this document, QUAL-25) returns a design read plus three `Directio
 headlineStructure, why }` (ai.md AI-19a). Direction *i* samples with `hints[i]`; direction 3 keeps its exploration slot
 (hints applied at weight ≤ 2 only, a pin allowed). **Pins (rev 3, QUAL-10):** a brief may pin **one** bold gene per
 direction (`pins.G2 = "poster"`); the sampler sets it as the only value when it passes the hard rules, the photo facts
-and the locks, else drops it and logs `pin_dropped`. Without a pin a 3× hint over a 0.02 floor is a 6 % chance against a
+and the locks, else drops it into `genome.hints.dropped` with `why: "pin"` (core §K.2 P0 wording). Without a pin a 3× hint over a 0.02 floor is a 6 % chance against a
 0.30 prior, so the plan stage would be a nudge, not a direction. Pin acceptance is written to `genome.hints.pinned`;
 ai.md's eval scorer "brief followed" (the share of pinned and hinted values present in the picked genome) measures the
 stage, and ai.md drops the stage if the Fair test (AI-§F.9 KPI 7) shows no lift after two quarters. A hinted value that
@@ -1141,7 +1208,9 @@ from the digest. Labels in ar/fr/en: DES-§20.2.
 | `src/lib/design/heights.ts` (rev 2, the core's measurement module) | `estimateHeights(doc, { look, locale, features }): HeightReport` at 390 px (the DES-§5.3 signature, frozen at P0 by core §Q.6 DES-R19; the shorter form of rev 2 is withdrawn, core M6), row-based (rev 3, QUAL-5); called by the core's `budget.ts` (core §M.2 rows C3, F1, C2) |
 | `src/lib/design/features.ts` (rev 3, core DES-R19 A\*) | `variantFeatures(type, variant, data): VariantFeaturesResolved` (DES-§8.4), re-exported from `index.ts`; the three report types are maintainer-frozen in `types.ts` |
 | `src/lib/design/sheets.ts` (rev 3, DS47) | the composition sheets of DES-§5.13 as data (`SHEETS[family]`: grid per breakpoint, slots, type steps, fold rows); `features.fold`, `features.slots` and `features.h` of every hero family and sheeted section are derived from it, asserted by `test:registry` |
-| `src/lib/design/gate-input.ts` (rev 3, DS52) | `gateInputFor(doc: PageDoc \| StorePageDoc, ctx): GateInput` (DES-§8.13); the kind table of which gates run per store kind |
+| `src/lib/design/gate-input.ts` (rev 3, DS52; rev 4 signature) | `gateInputFor(doc: PageDoc \| StorePageDoc, ctx: GateInputCtx): GateInput` (pure, DES-§8.1, §8.13), the `GateInputCtx` and `OriginClass` types, the `KIND_GATES` table of which design gates run per kind; the server wrapper `gateCtxFrom(ctx: PrePublishCtx)` lives in `src/lib/render/prepublish/design.ts` (P6) |
+| `src/lib/design/photo-facts.ts` (rev 3, UX-39; named in core §K.2 P6) | `photoFacts(bitmap, meta): PhotoFacts` (the 32 × 32 pass) and `estimateAlpha(bitmap): { hasCutout: "estimated"; bbox } \| null` (the model-free flood-fill of DES-§4.11), browser-only, called by the wizard (P6) and by P2's onboarding photos step |
+| `src/components/generate/reveal/**` (rev 4, UX-20; inside P6's `src/components/generate/**`) | `RevealFolds` (the three real folds, the carousel, the DNA bottom sheet, DES-§14.3), mounted by P2's `/app/<h>/welcome` step, which owns the step, its timing and its acceptance (PLA PD73) |
 | `src/lib/design/copy-gen.ts` (rev 3, DS51) | the compositional headline and lead generator of DES-§9.12 (`composeLines(ref, facts, directives, locale, rng)`) |
 | `src/lib/design/calibration/heights.json` (rev 3, ENGP-6) | the committed heights fixture (per family × locale: measured fold items and section heights from the baseline and the corpus renders) so `test:design` never depends on the git-ignored `qa/saas-baseline/index.json` (`.gitignore:48`) |
 | `src/lib/design/typography.ts` (rev 2) | the harmonisation engine of DES-§10.5: `typeTokens(pairing, look, locale): TypeTokens`; `AR_METRICS_FALLBACK` (the hand-tuned per-face table, `measured: false`) until `metrics.ar` is measured at build time (DES-R21) |
@@ -1227,7 +1296,7 @@ width/height, hero eager, DESIGN.md §5).
 | Step | Rule | Where |
 |---|---|---|
 | Photo facts | `PhotoFacts = { count, maxWidth, hasCutout: boolean \| "estimated", dominant, background: { luminance: number; uniform: boolean }, sharp: boolean }` per asset from the asset metadata and a 32 × 32 downscale in the browser (edge-band variance decides `uniform`, Laplacian variance decides `sharp`); nothing is sent anywhere | wizard (P6), `src/lib/generator/garment.ts` `PhotoInfo` extended |
-| **Estimated cutout (rev 3, UX-39, DS54)** | when the asset has no alpha mask yet and `background.uniform` holds, the browser runs a **model-free alpha estimate**: an edge flood-fill with a tolerance of ΔE ≤ 6 OKLab from the four border bands on the 32 × 32 facts pass, confirmed at 1,024 px (one `OffscreenCanvas`, < 150 ms on a mid phone, no download, no upload); the result is `hasCutout: "estimated"` plus the alpha bbox (for the focal default) and is kept in the wizard state only (never written to the asset). An estimated cutout unlocks `cutout-stage` with the `plinth` or `contact` preset (never `glow`, whose radial would show a soft matte edge) and the dark base of H27 (a); the page renders the **original photo framed on the plinth** (`framed-stage`) until the real mask exists, so nothing fake is ever on screen. When the BiRefNet mask arrives (AI-21, `ai.worker.ts`), the media pipeline enqueues `render_jobs` reason **`cutout`** (request DES-R22) for the live pages whose hero uses that asset with an estimated cutout; the re-render swaps `framed-stage` → `cutout-stage` with the same preset, genome and seed (`look.img` is the only field that changes; the published checksum changes like any re-render under core D50). `qa:wow-demo` asserts that at 0:50 at least one of the three directions is stage / specimen / dark for the argan and parfum fixtures | wizard (P6), media pipeline (T4 / P8, the `cutout` reason), `src/lib/design/photos.ts` |
+| **Estimated cutout (rev 3, UX-39, DS54)** | when the asset has no alpha mask yet and `background.uniform` holds, the browser runs a **model-free alpha estimate**: an edge flood-fill with a tolerance of ΔE ≤ 6 OKLab from the four border bands on the 32 × 32 facts pass, confirmed at 1,024 px (one `OffscreenCanvas`, < 150 ms on a mid phone, no download, no upload); the result is `hasCutout: "estimated"` plus the alpha bbox (for the focal default) and is kept in the wizard state only (never written to the asset). An estimated cutout unlocks `cutout-stage` with the `plinth` or `contact` preset (never `glow`, whose radial would show a soft matte edge) and the dark base of H27 (a); the page renders the **original photo framed on the plinth** (`framed-stage`) until the real mask exists, so nothing fake is ever on screen. When the BiRefNet mask arrives (AI-21, `ai.worker.ts`), the media pipeline enqueues `render_jobs` reason **`cutout`** (request DES-R22) for the live pages whose hero uses that asset with an estimated cutout; the re-render swaps `framed-stage` → `cutout-stage` with the same preset, genome and seed (`look.img` is the only field that changes; the published checksum changes like any re-render under core D50). `qa:wow-demo` asserts that at 0:50 at least one of the three directions is stage / specimen / dark for the argan and parfum fixtures. **Genome vs doc (rev 4):** the genome records `G18 = cutout-stage` with the preset (what the design is), the doc's `look.img` carries `framed-stage` until the mask lands (what is rendered), so the publish gate V13 never sees a cut-out without alpha and core §M.4's "an `estimated` cutout counts as alpha" applies to the sampler's H13 / H27 decisions | wizard (P6), media pipeline (T4 / P8, the `cutout` reason), `src/lib/design/photo-facts.ts` (`estimateAlpha`) |
 | Treatment choice (G18) | conditioned on G2 and filtered by H13 (rev 3: slot- and viewport-relative): `cutout-stage` needs alpha or an estimated cutout; `framed-stage` needs nothing; `full-bleed-crop` needs the asset ≥ 1.5 × the hero slot at DPR 2 on the breakpoints the variant declares and `sharp` (mobile-only bleeds with a framed desktop fallback are a declared variant option); `tight-detail` needs the inner-50 % crop to cover its slot at ≥ 1.0 ×; `grid-contact` needs ≥ 3 assets; `framed` always possible; `tonal-duotone` only on secondary roles; with one asset the one-asset grammar H36 applies | sampler |
 | Focal-aware crops (G19, I2) | the focal point comes from the focal editor (`assets.focus`) or the asset's stored default (centre of the alpha bbox for cutouts, else the centre); each slot's aspect (4:5, 3:4, 1:1, 2:3, 16:9, 21:9) crops around the focus with `object-position` from the normalised focus; the focus must stay inside the inner 80 % of the crop (V12) or the slot takes `framed`; three crop families per page (`full`, `tight` = the inner 50 % around the focus, `context` = the outer frame or `bleed`) | `planPhotos` (DES-§5.10), `Picture` |
 | Cutouts and stages (I3) | a **cut-out** image on a stage needs alpha: `hasCutout` from the media pipeline's alpha mask (local BiRefNet, AI-21) or the estimated cutout above; without either, a uniform-background photo on a stage is the **`framed-stage` treatment**: the true-colour photo as a framed object (its background luminance decides a `soft` or `surface` panel behind it, or none when the photo's background matches the ground within ΔL 0.04) standing on the `plinth` or casting the `contact` shadow, never placed as a fake cutout; stage presets per vibe: `glow` (radial product-tinted glow, maison / bloom / souk; cut-outs only), `contact` (soft contact shadow only, apothecary / field / hearth / editorial), `plinth` (a flat tinted plinth with a hairline, circuit / kinetic / garage / playground); exactly one preset per page; the numbers are DES-§4.11.1 | `hero:stage`, `showcase`, `offer` visuals |
@@ -1393,11 +1462,15 @@ Soft (V24): ≤ 1 strip in the body (V19 is hard above 1); estimated length 8-14
 
 Estimated height at 390 px in screens (844 px), before density: announcement .05 · header .08 · hero 1.0 · trustBar
 .12 · marquee .10 · benefits 1.3 · showcase 1.1 · gallery 1.0 · video .9 · beforeAfter 1.0 · problem .9 · reviews 1.2
-· socialProof .8 · stats .6 · story 1.0 · comparison 1.1 · specs .9 · steps 1.0 · offer 1.2 · orderForm 1.6 (1.3 in
-the default state with the F1 field order, DES-§5.12) · urgency .4 · guarantee .6 · faq 1.2 · cta .7 · footer .6.
+· socialProof .8 · stats .6 · story 1.0 · comparison 1.1 · specs .9 · steps 1.0 · offer 1.2 · **orderForm 1.1, fixed**
+(rev 4, LAN R12 / ENGP-5 accepted by this part: the F1 default state with ≤ 2 offers and the required address row,
+928 px, plus LAN-§3.5 OF2's additive terms: + 0.15 per offer row beyond 2, + 0.25 per visible per-piece option group,
++ 0.07 for the bump row; the rev 3 "1.6 / 1.3" is withdrawn) · urgency .4 · guarantee .6 · faq 1.2 · cta .7 · footer .6.
 Multipliers: airy × 1.2, dense × 0.85, `spacingFor` tight/airy × 0.95 / 1.08, G21 adds `(G21 − 1) × 0.12` screens per
 section. A variant may override its type value in the registry `features.h` (for sheeted variants `features.h` is
-derived from the sheet, DS47). The section constants are the coarse model for the page total (C3); **the fold and the
+derived from the sheet, DS47); **an entry `features.h = { base, fixed: true, per? }` skips the density, `spacingFor` and
+G21 multipliers** (the core's P0 stub wording, core §K.2) and adds its `per` terms (`offerRow`, `optionGroup`, `bump`)
+from the doc, which is how `orderForm` declares the 1.1-screen form whose internal layout landing fixes. The section constants are the coarse model for the page total (C3); **the fold and the
 form top are estimated from element rows (rev 3, QUAL-5)**, because a ±25 % error on a 1-screen hero moves the CTA
 ±127 px across the 844 px line:
 
@@ -1424,9 +1497,10 @@ frozen at P0:**
 
 ```ts
 // src/lib/design/heights.ts (pure, isomorphic; no DOM)
-export interface FoldReport { family: string; ok: boolean; items: { image: number; price: number; cta: number; cod: number } /* estimated top px at 390 */; limit: 844 }
-export interface HeightReport { v: 1; viewport: 390; sections: { id: string; type: string; variant: string; top: number; height: number }[]; total: number; screens: number; formTop: number | null; formHeight: number | null; fold: FoldReport; inFlow: number }
-export function estimateHeights(doc: PageDoc, opts: { look: ThemeLook | null; locale: Locale; features: (type: string, variant: string, data: unknown) => VariantFeaturesResolved }): HeightReport;   // ≤ 1 ms
+export type FoldItem = "image" | "price" | "cta" | "cod";        // R1; widened additively at the R2 contract step to | "name" | "identity" | "collections" (store kinds, core §K.2 P0, DES-§8.13)
+export interface FoldReport { family: string; ok: boolean; items: Partial<Record<FoldItem, number>> /* estimated top px at 390; an absent key = the family has no such item */; limit: 844 }   // rev 4: the core's frozen P0 shape verbatim
+export interface HeightReport { v: 1; viewport: 390; sections: { id: string; type: string; variant: string; top: number; height: number }[]; total: number; screens: number; formTop: number | null; formHeight: number | null; fold: FoldReport; inFlow: number; stub?: true /* the P0 stub only (core §K.2 stub rule) */ }
+export function estimateHeights(doc: PageDoc, opts: { look: ThemeLook | null; locale: Locale; features: (type: string, variant: string, data: unknown) => VariantFeaturesResolved }): HeightReport;   // ≤ 1 ms; `doc` widened to PageDoc | StorePageDoc at the R2 contract step (DES-R27)
 export const HEIGHT_MODEL_VERSION: number;   // bumped with the coefficients; calibration.json records the version it was fitted against
 ```
 
@@ -1607,10 +1681,14 @@ DES-§10.5). Families and their fold stacks: `stage` image (≤ 46 vh) → title
 mobile; `cinema` image (≤ 50 vh at 390, rev 3) → band (title, price, CTA, COD); `quiet` image (≤ 52 vh) → one line (title) → one line
 (price, CTA); `index` image (≤ 36 vh) → 3 facts → price row; `contact` grid (≤ 58 vh) with the title cell holding
 price + CTA; `statement` title (≤ 3 lines) → thumbnail ≥ 160 px → price row. A family whose fold cannot hold at the
-page's `dmax` is re-solved (H28). The order form's default state (F1) is `offer → name → phone → city → submit`,
-address and note collapsed or after the confirmation call (P3's `orderForm`, LAN-§3.2; the height model gives it 1.3
-screens, V22 keeps it ≤ 3 screens from the top; the touch ergonomics of its controls, inputs 52-56 px tall at 16 px
-text, 12 px gaps, label 13/500 above, are P3's contract and are the control heights this model uses, UX-37).
+page's `dmax` is re-solved (H28). The order form's default state (F1) is `offer → name → phone → city → [address] →
+submit` (P3's `orderForm`, LAN-§3.5 OF2): the address is one line after `city` when the store's
+`checkout.addressMode` resolves to `required` (the R1 default for MA, core §D.10, UX-31) and behind "Ajouter une
+adresse" when `optional`; the note stays behind the disclosure. The height model gives the form **1.1 screens, fixed**
+(`features.h = { base: 1.1, fixed: true, per }`, DES-§5.3; rev 4 replaces the rev 3 "1.3", LAN R12), V22 keeps it ≤ 3
+screens from the top; the touch ergonomics of its controls, inputs 52-56 px tall at 16 px text, 12 px gaps, label
+13/500 above, are P3's contract and are the control heights this model uses (UX-37; landing rejected the sticky submit
+with a reason, LAN-§29, and this part takes no side).
 
 **Three zones (rev 3, DS41; QUAL-5, ENGP-6).** The static estimate has a measured error band, and no browser runs at
 publish on Hostinger, so one line cannot be both the design target and the refusal:
@@ -1623,8 +1701,9 @@ publish on Hostinger, so one line cannot be both the design target and the refus
 
 The core's Playwright measurement (`qa:publish-gates`, `qa:design-corpus`) is the **calibration check**, never the
 publish decision: estimate vs measured per family × locale is compared on every corpus run with the target fold-item
-error p95 ≤ 10 % (QUAL-5) and page total ratio within 0.9-1.1 on ≥ 95 % of pages, else the row constants are refitted
-and `heights.json` updated. The core's §M.2 row C2 is asked to say so (DES-§28 ENGP-6 cross note).
+error p95 ≤ 10 % (QUAL-5, the `FOLD_BAND = 0.9` of core §M.2) and the page total ratio within 0.8-1.25 on ≥ 90 % of
+pages (the `HEIGHT_BAND = 0.8` of rows C3 / F1; rev 4: one pair of numbers with DES-§5.3, the rev 3 "0.9-1.1 on ≥ 95 %"
+of this paragraph is withdrawn), else the row constants are refitted and `heights.json` updated. Core §M.2 row C2 says so since its revision 3 (DES-R23 accepted, core §Q.8).
 
 **Fold budget per family × locale at 390 × 844 (rev 3, UX-11), in px, derived from the sheets of DES-§5.13.** Rows:
 header 68 · announcement 42 (counted: the worst case) · display line at 44 px: Latin 46 (lh 1.05), Arabic 61 (× 1.08
@@ -1772,7 +1851,7 @@ price cluster and the COD line never split; LTR isolates for numerals). **Refere
 | IMG  44vh         |       | TTL D (3 col)  | IMG 5 col, 4:5     |   | TTL D ≤ 3 (5 col) | · | IMG 6 col 4:5   |
 +----+----+----+----+       | LED L          |  (ratio 5:7)       |   | LED L (4 col)     | · |  (4:8 or 5:7)   |
 | TTL  D ≤ 2 lines  |       | PRC CTA        |                    |   | PRC  CTA          | · |  bleed inline-end|
-| PRC | CTA   COD   |       | COD            |                    |   | COD               | · |  allowed ≥ 1600 |
+| PRC | CTA   COD   |       | COD            |                    |   | COD               | · | if ≥1.5×slot@2x |
 +----+----+----+----+       +----+----+----+----+----+----+----+----+   +--+--+--+--+--+--+--+--+--+--+--+--+
 ```
 
@@ -1917,62 +1996,149 @@ price cluster and the COD line never split; LTR isolates for numerals). **Refere
 #### S2 `showcase:figure` (keep-list 7)
 
 ```
-390                         1440
-+----+----+----+----+       +--+--+--+--+--+--+--+--+--+--+--+--+
-| IMG 4:5 full      |       | IMG 8 col, 3:2 or 4:5 (framed)  | CAP column 3 col: |
-| CAP C: figure ·   |       |                                 |  "FIG. 01" C mono  |
-|  caption B        |       |                                 |  caption B ≤ 40 w  |
-+----+----+----+----+       +--+--+--+--+--+--+--+--+--+--+--+--+
+390                         768                                 1440
++----+----+----+----+       +----+----+----+----+----+----+----+----+   +--+--+--+--+--+--+--+--+--+--+--+--+
+| TTL T ≤ 2 lines   |       | TTL T ≤ 2 (5 col, start)  | ·  | ·  |   | · | TTL T ≤ 2 (6 col)    | ·  | ·  | · |
++----+----+----+----+       +----+----+----+----+----+----+----+----+   +--+--+--+--+--+--+--+--+--+--+--+--+
+| IMG 4:5 full      |       | IMG 6 col, 3:2 (framed)  | CAP 2 col |   | · | IMG 8 col, 3:2 or 4:5 | CAP column |
+|                   |       |                          | FIG. 01 C |   | · |  (framed)             | 3 col:     |
++----+----+----+----+       |                          | caption B |   | · |                       | "FIG. 01"  |
+| CAP C: figure ·   |       +----+----+----+----+----+----+----+----+   | · |                       | C mono     |
+|  caption B        |                                                   | · |                       | caption B  |
++----+----+----+----+                                                   +--+--+--+--+--+--+--+--+--+--+--+--+
 ```
 
-- One large image (`context` or `detail` role, true colour), a caption column at inline-end (≥ 1024) or under the
-  image (< 1024): figure label C mono (`figure` prop, **a counted device**, ≤ 20 % of pages per niche, DS56) and a
-  caption B ≤ 40 words that names a fact; no second image, no CTA (`ctas = 0`).
+- One large image (`context` or `detail` role, true colour), a caption column at inline-end (≥ 768: 2 col; ≥ 1024: 3
+  col) or under the image (< 768): figure label C mono (`figure` prop, **a counted device**, ≤ 20 % of pages per niche,
+  DS56) and a caption B ≤ 40 words (≤ 5 lines at 390) that names a fact; the title T ≤ 2 lines; no second image, no
+  CTA (`ctas = 0`), no price cluster (a showcase never sells; the form does).
+- Slots (rev 4, the 768 column added): `IMG` 4:5 at 390 (full column), 3:2 at 768 (6 col), 3:2 or 4:5 at 1440 (8 col,
+  offset one column: G3.m = offset); the crop is `context` or `tight` (only when the tight crop covers the slot at DPR
+  2, H13).
 - Signature detail: the caption column hanging in the margin (`hang` arrangement at ≥ 1024, G3.m = offset).
-- RTL: the caption column inline-end (left in `ar`).
+- RTL: the caption column inline-end (left in `ar`); the figure label "FIG. 01" becomes "الشكل 01" with the numeral in
+  an LTR isolate.
+- Recipe: hairline frame (`G15` hairline) on light and tinted bases, the `surface` panel on dark (H27 (c)).
 - Reference: `tshirt-default-fr-dsk-2` ("FIG. 01" captions).
 
 #### S3 `gallery:contact` (grid-contact treatment)
 
+```
+390 (cols 2)                768 (cols 3)                        1440 (cols 3, container 1280)
++----+----+----+----+       +----+----+----+----+----+----+----+----+   +--+--+--+--+--+--+--+--+--+--+--+--+
+| TTL T ≤ 2 (opener)|       | TTL T ≤ 2 (5 col)                    |   | TTL T (5 col) | ·  LED L ≤ 2 (4 col)   |
++---------+---------+       +-----------+-----------+------------+   +------------+-------------+-------------+
+| IMG a   | IMG b   |       | IMG a 1:1 | IMG b 1:1 | IMG c 1:1  |   | IMG a 1:1  | IMG b 1:1   | IMG c 1:1   |
+| 1:1     | 1:1     |       +-----------+-----------+------------+   +------------+-------------+-------------+
++---------+---------+       | IMG d     | IMG e     | IMG f      |   | IMG d      | IMG e       | IMG f       |
+| IMG c   | IMG d   |       +-----------+-----------+------------+   +------------+-------------+-------------+
++---------+---------+          (2 px gaps; 3-6 distinct assets; odd counts end with a 2-cell row)
+```
+
 - 3-6 photos as a contact sheet: `cols` 2 (390) or 3 (≥ 768), 1:1 cells, 2 px gaps, no captions, no frames, no
-  lightbox chrome; the title at T above with the `image` or `bare` opener; the cells reveal in reading order.
+  lightbox chrome; the title at T (≤ 2 lines) above with the `image` or `bare` opener, an optional lead L ≤ 2 lines
+  beside it at 1440; the cells reveal in reading order. Each cell ≥ 1.5 × its CSS width at DPR 2 (390: 186 px cells
+  need ≥ 558 px assets; 1440: 425 px cells need ≥ 1,275 px), else the asset leaves the grid and the count drops (a grid
+  of 2 becomes `showcase:figure`).
+- No price, no CTA (`ctas = 0`); the COD line never appears in a gallery.
 - Signature detail: the uniform grid itself; distinct assets only (H08, `honesty:I4`).
-- RTL: reading order mirrors. Reference: a Kinfolk or Cereal magazine contact spread.
+- RTL: reading order mirrors (cell a at inline-start top). Recipe: no shadow, no radius beyond `--lp-radius-media` of
+  the ladder (crisp / mixed ladders give square cells). Reference: a Kinfolk or Cereal magazine contact spread.
 
 #### S4 `offer:showcase` (R2; the picker lives in the form)
 
-- The packs as a row of 2-3 cards at 390 (horizontal scroll with a 12 % peek) and a 3-column row at ≥ 768: pack name
-  B/600, per-piece price P tabular, savings chip (`−25 %` as an LTR isolate, keep-list 5), **no picker and no button**
-  (`picker = false`, `ctas = 0`); the recommended pack has the hairline + `--lp-accent-soft` ground, never a "best
-  seller" badge without merchant data.
+```
+390 (scroll row, 12 % peek)      768 / 1440 (3-column row; 1440 inside 10 col, offset 1)
++------------+------------+-+    +-------------+-------------+-------------+
+| PACK ×1    | PACK ×2  ★ | |    | PACK ×1     | PACK ×2  ★  | PACK ×3     |
+| name B/600 | (accent-   | |    | name B/600  | soft ground | name B/600  |
+| P per piece| soft, line)| |    | P per piece | P per piece | P per piece |
+| −25 % chip | −33 % chip | |    | savings chip| savings chip| savings chip|
++------------+------------+-+    +-------------+-------------+-------------+
+  TTL T ≤ 2 above the row; "Choose your pack in the form" C link to #order under it
+```
+
+- The packs as a row of 2-3 cards at 390 (horizontal scroll with a 12 % peek, each card 72 vw) and a 3-column row at ≥
+  768: pack name B/600 (1 line), per-piece price P tabular (the price cluster rule: price, old price and chip as one
+  `inline-flex` unit), savings chip (`−25 %` as an LTR isolate, keep-list 5), **no picker and no button** (`picker =
+  false`, `ctas = 0`); the recommended pack (★ above) has the hairline + `--lp-accent-soft` ground, never a "best
+  seller" badge without merchant data; a C link "Choose your pack in the form" to `#order` under the row (a link, not a
+  CTA).
 - Signature detail: none (this is a quiet section by design; it may be the page's `quiet` screen, C4).
-- RTL: the row scrolls from inline-start; prices stay one `bdi` group. Reference: keep-list 7 (pedestal ×1/×2/×3
-  offers), without the pedestal when `G18` is not a stage treatment.
+- RTL: the row scrolls from inline-start; prices stay one `bdi` group. Recipe: card tier from `G15`, never raised on a
+  `panels` page (H26). Reference: keep-list 7 (pedestal ×1/×2/×3 offers), without the pedestal when `G18` is not a stage
+  treatment.
 
 #### S5 `problem` ledger (redraw of `problem:chat`)
 
-- Pains as a two-column ledger at ≥ 768 (pain B/600 inline-start, the product's answer B inline-end, hairline rows,
-  3-4 rows) and a stacked list at 390 (pain, then answer indented by one column); no bubbles, no timestamps, no
-  avatars (S20); the opener `quote` is allowed (the lead as a pulled line).
+```
+390                         768                                 1440
++----+----+----+----+       +----+----+----+----+----+----+----+----+   +--+--+--+--+--+--+--+--+--+--+--+--+
+| TTL T ≤ 2 / quote |       | TTL T ≤ 2 (5 col)   | LED quote (3)  |   | TTL T (4 col) | ·  | LED quote L (5 col) |
++----+----+----+----+       +----+----+----+----+----+----+----+----+   +--+--+--+--+--+--+--+--+--+--+--+--+
+| pain B/600        |       | pain B/600 (4 col)  | answer B (4)   |   | · | pain B/600 (4) | answer B (6 col)  |
+|  · answer B (ind.)|       |---------------------|----------------|   |---|----------------|-------------------|
+| pain B/600        |       | pain …              | answer …       |   | · | pain …         | answer …          |
+|  · answer B       |       +----+----+----+----+----+----+----+----+   +--+--+--+--+--+--+--+--+--+--+--+--+
++----+----+----+----+         (3-4 rows; hairline between rows)
+```
+
+- Pains as a two-column ledger at ≥ 768 (pain B/600 inline-start, one line; the product's answer B inline-end, ≤ 2
+  lines; hairline rows, 3-4 rows) and a stacked list at 390 (pain, then answer indented by one column); no bubbles, no
+  timestamps, no avatars (S20); the opener `quote` is allowed (the lead as a pulled line at L).
+- No price, no CTA (`ctas = 0`).
 - Signature detail: the ledger's hairlines (`line-draw`) or none.
-- RTL: columns mirror. Reference: `tshirt-default-fr-dsk-1` (the big quote problem block) for the register.
+- RTL: columns mirror (pain at inline-start, so right in `ar`). Reference: `tshirt-default-fr-dsk-1` (the big quote
+  problem block) for the register.
 
 #### S6 `socialProof` quote cards (redraw of `socialProof:whatsapp`)
 
-- Owner-attested quotes only (LP-02, `honesty:I4`): 2-3 cards, quote B/L, name and city in C (never a timestamp, a
-  rating or an avatar photo the owner did not upload, D2); card tier from `G15` (no phone frame, S21); at 390 one
-  column, at ≥ 768 a 3-column row or a single wide quote (`quote` opener) when there is one.
+```
+390                         768                                 1440 (the one-wide-quote form)
++----+----+----+----+       +----+----+----+----+----+----+----+----+   +--+--+--+--+--+--+--+--+--+--+--+--+
+| TTL T ≤ 2         |       | TTL T ≤ 2 (5 col)                    |   | · | « quote at L, ≤ 4 lines (8 col) »  | · |
++----+----+----+----+       +------------+-----------+------------+   | · | name · city C (4 col)              | · |
+| « quote B/L »     |       | « quote »  | « quote » | « quote »  |   +--+--+--+--+--+--+--+--+--+--+--+--+
+| name · city C     |       | name, city | name, city| name, city |      (or the 3-card row of 768 at 4 col each)
++----+----+----+----+       +------------+-----------+------------+
+```
+
+- Owner-attested quotes only (LP-02, `honesty:I4`): 2-3 cards, quote B/L (≤ 6 lines at 390), name and city in C
+  (never a timestamp, a rating or an avatar photo the owner did not upload, D2); card tier from `G15` (no phone frame,
+  S21); at 390 one column, at ≥ 768 a 3-column row or a single wide quote (`quote` opener) when there is one.
+- No price, no CTA (`ctas = 0`).
 - Signature detail: the single wide quote when the grammar is `editorial-column` or `quiet-luxe`.
 - RTL: quotation marks « » / „“ per locale from the voice table. Reference: the merci pages of keep-list 4 for restraint.
 
 #### S7 `stats` (merchant figures only)
 
+```
+390 (2 col)                 768 / 1440 (one row, hairline separators)
++---------+---------+       +-----------+-----------+-----------+-----------+
+| FIG s5  | FIG s5  |       | FIG step-5| FIG step-5| FIG step-5| FIG step-5|
+| label C | label C |       | label C   | label C   | label C   | label C   |
++---------+---------+       +-----------+-----------+-----------+-----------+
+| FIG     | FIG     |       | source C (only when the owner typed one)      |
++---------+---------+
+```
+
 - 2-4 figures from `allowedNumbers` (else the section is not in the pool, DS42): figure at step-5 tabular lining
-  (never a gradient, never a bar, S22), label C under it, a source line only when the owner typed one; a 2-column grid
-  at 390, a row at ≥ 768 with hairline separators.
+  (never a gradient, never a bar, S22), label C under it (≤ 2 lines), a source line only when the owner typed one; a
+  2-column grid at 390, a row at ≥ 768 with hairline separators.
+- No price, no CTA (`ctas = 0`).
 - Signature detail: the ticking number (one per page, S11). RTL: figures are LTR isolates with the unit per locale.
 
 #### S8 The redrawn `cta`, `guarantee:seal`, `trustBar:stamps`, `marquee:tape`, `offer:tickets`
+
+```
+cta at 390                  cta at 768 / 1440 (start-aligned; a centred 8-col block only on poster / quiet-luxe / statement pages)
++----+----+----+----+       +----+----+----+----+----+----+----+----+
+| TTL T ≤ 2 lines   |       | TTL T ≤ 2 lines (6 col)         | ·  |
+| PRC (optional)    |       | PRC (optional) · CTA 52 px      | ·  |
+| CTA full width 52 |       | COD C                           | ·  |
+| COD C             |       +----+----+----+----+----+----+----+----+
++----+----+----+----+
+```
 
 - `cta`: title T ≤ 2 lines, one primary button (`data-hero-cta`, DES-§5.9), the COD line, optionally the price
   cluster; a colour moment when the plan assigns one; no countdown (R3), no second button.
@@ -1981,6 +2147,8 @@ price cluster and the COD line never split; LTR isolates for numerals). **Refere
 - `trustBar:stamps` → out of every pool; the redraw for old docs is the `chips` variant's row.
 - `marquee:tape` → the `outline` marquee with whole-item duplication (I7), no tape texture, no rotation.
 - `offer:tickets` → the `showcase` cards above with a `cut` corner as the one allowed device, no perforations.
+- RTL: the `cta` block and the guarantee card mirror; the COD line and the price cluster stay one `bdi` group each.
+  Reference: `massage-default-ar` closing block (one button, one COD line) for the restraint.
 
 **Rule for every sheet:** the registry entry's `features.fold.rows`, `features.slots[*].cssWidth390 / cssWidth1440 /
 aspect` and `features.h` are generated from `SHEETS` (`sheets.ts`) and `test:registry` fails on a hand-edited value; a
@@ -2002,7 +2170,7 @@ supports. An arrangement changes the CSS grid placement only (no new component):
 | `split(r)` | media and text side by side, r ∈ {1:1, 5:7, 7:5, 4:8, 8:4} | ≥ 768 px; mirrored by logical properties in RTL |
 | `overlap(dx, dy)` | media overlaps the text panel by 8-16 % | ≥ 768 px; the boundary-cross slot (DES-§5.5) only; never over a CTA |
 | `hang` | a caption or label column hangs in the margin | ≥ 1024 px and G3.m = offset |
-| `bleed(edge)` | media bleeds off the inline-start or inline-end edge | ≥ 768 px; media ≥ 1600 px wide (V11) |
+| `bleed(edge)` | media bleeds off the inline-start or inline-end edge | ≥ 768 px; the asset ≥ 1.5 × the bleed slot at DPR 2 (V11, H13 slot-relative; the rev 2 "≥ 1600 px" is gone) |
 | `index` | items as numbered rows with hairlines | list slots only; G25.nb ≠ none; one numbering style per page |
 
 `SectionInstance.data.arrange` is an optional field added to the section data schemas of the variants that support it
@@ -2179,8 +2347,8 @@ Per niche and per bold gene value: `w'(v) = w(v) · (1 + ε) / (1 + ε + share(v
 fraction of pool rows in the niche with value `v` (computed from the pool cache, no table), `target(v)` = 1 / |valid
 values| (or a designer share from `priors.ts`). Floor 0.02 while the value is valid. Applied after the learned prior
 and before the hard rules (DES-§4.4). Acceptance (DG-16): 1,000 simulated stores in one niche → no value's share exceeds
-2 × its target. Shares are never shown per store; the console's niche chart shows them only for niches with ≥ 5 stores
-(k-anonymity, core §F.11).
+2 × its target. Shares are never shown per store; the console's niche chart shows them only for niches with ≥ 10 stores
+(k-anonymity, core §F.11; rev 4: the same k as `nicheShares`, QUAL-32).
 
 ### DES-§7.7 MAP-Elites archive (DG-16, R3, D4)
 
@@ -2193,8 +2361,8 @@ and before the hard rules (DES-§4.4). Acceptance (DG-16): 1,000 simulated store
 - `filled` = pool rows in the cell (nightly job `design.archive`, from the pool cache).
 - **Direction 3 explores:** when the wizard has ≥ 3 directions, direction 3 fixes (G2, G9, type class) to the
   under-filled cell (lowest `filled`, ties by highest designer `best_q`) that is valid under the hard rules, the mood and
-  the photo facts, and samples the remaining genes inside it. With fewer than 5 stores in the niche the cell choice
-  uses the platform-wide counts instead (no niche signal leaks).
+  the photo facts, and samples the remaining genes inside it. With fewer than 10 stores in the niche the cell choice
+  uses the platform-wide counts instead (no niche signal leaks; the `nicheShares` k, QUAL-32).
 - No request ever reads another store's genome through the archive: cells carry counts and seed ids only (DS22).
 
 ### DES-§7.8 Publish-time distance gates (R1; core §M.4, DS6)
@@ -2204,9 +2372,9 @@ the doc's look) and calls `checkNovelty(scope, …, "publish")`. **Hard items (`
 
 | Item id | Condition | Title (ar/fr/en keys in DES-§20.1) | Fix offered |
 |---|---|---|---|
-| `design:N1` | `platform = too_close` (d < τ_platform against another store's live page or brand row) or `niche = too_close` (d < **τ_niche(n)**, DES-§7.9, against a live row of the same niche); `clone = true` (d < 0.12) sets `vars.clone = 1` so the wording says "almost identical" | `design.gate.N1` | `differentiate` (DES-§15.3): resample one bold page gene, ≤ 6 seeds, preview before/after; the three concrete differentiators |
+| `design:N1` | `platform = too_close` (d < τ_platform against another store's live page or brand row) or `niche = too_close` (d < **τ_niche(n)**, DES-§7.9, against a live row of the same niche); `clone = true` (d < 0.12) sets `vars.clone = 1` so the wording says "almost identical". **Exhaustion exception (rev 4, UX-24, DES-§7.9 step 4):** when only the niche band is `too_close` (platform `ok`, `clone = false`) and the server's exhaustion test finds no `differentiate` variant of the page that clears τ_niche(n), the item is emitted **soft** with `vars.fallback = 1` (`design.novelty.niche.fallback`); the platform band and the clone flag are never softened | `design.gate.N1` | `differentiate` (DES-§15.3): resample one bold page gene, ≤ 6 seeds, preview before/after (the variant the exhaustion test found, when it found one); the three concrete differentiators |
 | `design:N2` (rev 3, QUAL-4) | `own = too_close` (d_page < 0.30) against one of the store's **last 5 published pages of the same product**; across products or beyond the fifth page the same finding is the soft Store Health note `design:pages_close`, never a refusal | `design.gate.N2` | `differentiate` with the store's own pages as the reference |
-| `design:N8` (rev 3, DS50) | a **generated** headline or lead (origin `generated`: library, generator or model text, untouched by the owner) whose 3-gram shingle share in the niche is > 25 % (`checkHeadlineNovelty`, DES-§9.8); an **owner-typed** line above 25 % is the soft item N05 (−2) with the line focused and the `differentiate` / `rewriteLine` suggestion, never a refusal | `design.gate.N8` | `rewriteLine` through the generator (DES-§9.12) with another structure or angle |
+| `design:N8` (rev 3, DS50; rev 4 origin classes) | a headline or lead **the engine or a model wrote** (origin class `engine` = the compositional generator, `local` or `cloud`, untouched by the owner; the core's one origin map, core §M.1 rule 2) whose 3-gram shingle share band in the niche is `high` (> 25 %, `checkHeadlineNovelty`, DES-§9.8); an **owner-typed** line (`owner`) or a **copy-library fallback** line (`library`) in the `high` band is the soft item N05 (−2) with the line focused and the `differentiate` / `rewriteLine` suggestion, never a refusal (core §M.4) | `design.gate.N8` | `rewriteLine` through the generator (DES-§9.12) with another structure or angle |
 
 **First come keeps its design (rev 3, QUAL-19):** the incumbent in a collision is the page whose **first publish is
 older** (`design_genomes.first_published_at`, copied from `pages.first_published_at`; for pre-R1 pages the minimum
@@ -2218,8 +2386,8 @@ Health issue `design:pages_close` (own pages only); they never refuse. Owner-typ
 it is flagged with the line focused. The wizard and the studio never present a `too_close` candidate (DES-§14.2 step 5
 resamples, repels and, in a crowded niche, falls back as DES-§7.9 defines), so a seller meets `design:N1` / `design:N2`
 at publish only after editing a page toward another design in the builder; the panel shows the same item live (core
-§M.1 rule 6). The core's §M.4 is asked to carry τ_niche(n), the same-product scope of N2 and the origin rule of N8
-(DES-§28 cross notes).
+§M.1 rule 6). Core §M.4 carries τ_niche(n), the same-product scope of N2 and the origin rule of N8 since its revision 3
+(DES-R24 accepted); the exhaustion exception of the N1 row is recorded for §M.4 as round-2 note N2 (DES-§27.4).
 
 ### DES-§7.9 Capacity, the pool-size threshold and the exhaustion path (rev 3; QUAL-3, UX-24)
 
@@ -2247,10 +2415,24 @@ what happens when it still is not:
    candidate of a direction is still `too_close` in the niche band, the wizard shows the candidate with the **largest
    minimum distance** that clears the **platform** band, with the niche band rendered as `close` wording ("Close to other
    stores in your niche") and the three concrete differentiators under it (change the pairing, change the colour
-   strategy, add a second photo), each one tap; the publish-time check then decides on the edited page, and the panel
-   shows the same item live, so there is never a dead end and never a surprise. The calibration task of DES-§17.7
-   simulates 200 stores per niche with realistic photo facts (the `low-asset` class included) and reports the share of
-   stores that reach this path; the base threshold is raised only while that share stays < 5 %.
+   strategy, add a second photo), each one tap, and the panel shows the same item live. **At publish the server verifies
+   the exhaustion itself (rev 4; the rev 3 text left the decision to "the edited page", so an unedited fallback page met
+   a hard `design:N1`, which was a dead end in all but name):** when the page's niche band is `too_close` while the
+   platform band is `ok` and `clone = false`, the design check runs `differentiate` (DES-§8.6) server-side on the
+   page's genome: ≤ 6 resamples spread over the bold page genes the brand does not lock (G2, G18, then G4, G9), each a
+   re-solved genome whose `DistanceView` keeps the page's `seq` / `tags` / `openers` / `crops` (no doc is built) and is
+   checked with the bounds-first distance against the niche rows. If any variant clears τ_niche(n), the niche is not
+   exhausted for this page: `design:N1` stays **hard** and its fix is that variant (the panel previews it). If none does,
+   the niche is exhausted **for this page's constraints** (photo facts, brand locks, product): `design:N1` is emitted
+   **soft** with `vars.fallback = 1` and the `design.novelty.niche.fallback` wording, the page publishes, and the
+   `published` genome row records `novelty.niche = "close"` with `fallback: true` (counted by the capacity report). The
+   platform band (d ≥ 0.25) and the clone flag (d < 0.12) are never softened, so a near-copy of another store never
+   publishes through this path. The test is deterministic (seeded by the page id and the pool watermark), so a client
+   cannot shop for a lucky answer, and it costs ≤ 6 × (≤ 3 ms sample + ≤ 20 ms bounds-first verdict) ≈ 140 ms on this
+   rare path only (budget ≤ 300 ms p95 for the whole check on that path, inside the core's 400 ms per check, DES-§19).
+   The calibration task of DES-§17.7 simulates 200 stores per niche with realistic photo facts (the `low-asset` class
+   included) and reports the share of stores that reach this path; the base threshold is raised only while that share
+   stays < 5 %, and a share ≥ 5 % at any n is a DG-09 miss recorded with the owner's decision.
 
 `test:design` asserts the capacity numbers from the priors in force: it samples 200 stores per niche for the three most
 crowded niche fixtures (skincare, fragrance, modest fashion), prints the pairwise d distribution (mean, σ, P(d < τ)) and
@@ -2271,7 +2453,7 @@ export interface GateInput {
   kind: "landing" | StorePageKind;                      // rev 3: which gate set runs (DES-§8.13 table)
   theme: BuiltTheme; genome: DesignGenome; assets: ReadonlyMap<string, AssetMeta>;
   locale: Locale; register: Register; context: "wizard" | "builder" | "save" | "remix" | "publish";
-  origin: ReadonlyMap<string, "generated" | "owner">;   // per text field path: who wrote it (DES-§9.8)
+  origin: ReadonlyMap<string, OriginClass>;             // per text field path: who wrote it (DES-§9.8); rev 4: the core's five classes
   ownerProof: boolean;                                  // the store has real reviews/proof data (LP-02)
   facts: CopyFacts;                                     // merchant facts, allowedNumbers, policies, delivery text (DES-§9.6)
   heights?: HeightReport;                               // rev 2: estimateHeights() when the caller already has it (else computed)
@@ -2292,7 +2474,23 @@ export interface GateReport {
   composition: { score: number /* 0-15, DES-§8.5 */; items: { key: CompositionKey; points: number }[] };   // rev 3 (UX-16)
 }
 export type CompositionKey = "fullBleedMoment" | "boundaryCross" | "quietScreen" | "heroTypeRatio" | "asymmetricGrid" | "distinctCrops" | "heroSignature";
-export function gateInputFor(doc: PageDoc | StorePageDoc, ctx: Pick<PrePublishCtx, "scope" | "store" | "theme" | "assets"> & { locale: Locale; origin: GateInput["origin"]; facts: CopyFacts; ownerProof: boolean }): GateInput;   // rev 3 (DS52): one adapter for both document types (DES-§8.13)
+/** rev 4: the origin classes of the core's one origin map (`originFrom(prev, doc)`, core §M.1 rule 2); "generated" in this
+ *  document means every class but `owner`; hardness of N8 / D3 is decided per class (DS50). */
+export type OriginClass = "owner" | "library" | "engine" | "local" | "cloud";
+/** rev 4 (CRIT18): the adapter's context, the single source the core (§M.1) and storefront (STO-D35, STO-§8) cite verbatim.
+ *  Pure data, no scope or DB handle, so the wizard and the builder build it in the browser and the server builds it with gateCtxFrom. */
+export interface GateInputCtx {
+  kind: "landing" | StorePageKind;                      // the page kind (`pages.kind`); decides the KIND_GATES row and with it `GateInput.register` (DES-§8.13: landing / home / page → marketing, product / collection / search / cart / checkout / not_found → commerce, policy → transactional)
+  theme: BuiltTheme;                                    // PageDoc: buildTheme(doc.theme); StorePageDoc: the store theme for the kind's register (getStoreTheme, resolved by the caller)
+  look: ThemeLook | null;                               // PageDoc: doc.theme.look; StorePageDoc: the store theme's brand look + the kind's page constants
+  assets: ReadonlyMap<string, AssetMeta>; locale: Locale; context: GateInput["context"];
+  origin: ReadonlyMap<string, OriginClass>; facts: CopyFacts; ownerProof: boolean;
+  storeFeatures?: (type: string, variant: string, data: unknown) => VariantFeaturesResolved;   // StorePageDoc: the store registry's features (STO-§6.1)
+  novelty?: NoveltyVerdict | null;
+}
+export function gateInputFor(doc: PageDoc | StorePageDoc, ctx: GateInputCtx): GateInput;   // rev 3 (DS52): one adapter for both document types (DES-§8.13); pure, isomorphic
+// src/lib/render/prepublish/design.ts (P6, server-only): the one way a PrePublishCtx becomes a GateInputCtx
+export function gateCtxFrom(ctx: PrePublishCtx): Promise<GateInputCtx>;   // kind from ctx.doc, theme / look from getStoreTheme for a StorePageDoc, origin = originFrom(ctx.prev, ctx.doc), facts from recordFacts' store (landing's facts.server.ts), ownerProof from the store's proof data
 export function runGates(input: GateInput): GateReport;                          // ≤ 8 ms p95 in Node per doc
 export function repairDoc(input: GateInput, opts?: { rounds?: 1 | 2 | 3; allowCopy?: boolean }): { doc: PageDoc; report: GateReport; log: RepairLog[] };
 export function summarize(r: GateReport): GateSummary;                          // design_genomes.report
@@ -2322,7 +2520,7 @@ list name the same `design:C5` for the same fault (core §M.5).
 | V10 | Accent area | estimated area of accent/pop grounds (heights × full-bleed) within the G10 band ± 0.03 | soft −2 |
 | V11 | Image resolution | for each media slot: the **effective pixels of the crop** (the asset width × the crop's share: `full` 1.0, `tight` 0.5, `context` 1.0, `bleed` 1.0) ≥ 1.5 × the slot's CSS width × DPR 2 on every breakpoint the variant declares (`features.slots[*].cssWidth390 / cssWidth1440`); a `tight` crop that fails is dropped by the plan without penalty (rev 3, UX-7) | hard below 1.0×, soft below 1.5× |
 | V12 | Focal safe area | the asset's focus point lies inside the inner 80 % of the crop for the slot aspect | hard |
-| V13 | Cutout required | stage, poster and spec heroes have an alpha asset | hard |
+| V13 | Cutout required (rev 4, aligned with `framed-stage` and the estimated cutout) | a hero whose `look.img` is `cutout-stage` renders an asset with a real alpha mask (`AssetMeta.alpha`); stage, poster and spec heroes without one carry `framed-stage` (a framed true-colour photo on the plinth or with the contact shadow, DES-§4.11), and a page generated from an estimated cutout carries `framed-stage` until the mask lands (the genome keeps `cutout-stage`, the `cutout` re-render swaps it), so V13 never fires on a planned page | hard |
 | V14 | Photo reuse (I1, I2) | the same asset ≤ 3 times per page (sticky bar and form thumbnail excluded), the hero image ≤ 2 at the same crop, ≥ 3 distinct crops per page **when ≥ 2 assets exist** (with one asset the one-asset grammar H36 plans two crops and the rule is not raised, rev 3); above 4 the core's `budget:I1` refuses | soft −1 per extra use, −2 below 3 crops (≥ 2 assets) |
 | V15 | Type contrast | hero display / body size ratio ≥ 2.5 at 390 and 1440 px (from the type steps) | soft −3 |
 | V16 | Weights per section | ≤ 3 font weights per section | soft −1 |
@@ -2349,11 +2547,11 @@ list name the same `design:C5` for the same fault (core §M.5).
 | V37 (rev 2; **hard for accent / pop in rev 3**, UX-17, H34) | Gold band (K6) | the `accent` or `pop` role with hue 75-95° and chroma > 0.10 rendered to sRGB → hard, repair "sand + signal" (DES-§4.10); any other emitted colour in the band at C > 0.10 → note (the 25-75° gate V03 stays hard for every role) | hard (accent, pop) / soft −1 (other roles) |
 | V38 (rev 3, DS53, UX-14) | Layout rhythm | ≤ 2 consecutive image + text splits (hard above); ≥ 4 layout families (`features.family`) per 8 in-flow sections (soft −3 below 4, hard below 3); media-led and type-led families alternate (soft −2 on a run of 3); no two adjacent sections with the same `arrange` (soft −1); counts from `RenderDigest.counts.zigzagRun` / `sameFamilyMax`, which no gate read in rev 2 | hard / soft |
 | V39 (rev 3, UX-16) | Hero signature declared | the hero variant's `features.signature = 1` and its sheet's signature detail is present in the compiled doc (the preset, the mask reveal, the cell cascade, the type ratio ≥ 3 for `statement`); absent → soft −4 and composition 0 for `heroSignature` | soft −4 |
-| N01 → `design:N1` | Niche / platform distance (DES-§7.8) | `too_close` on the niche (τ_niche(n)) or platform band (publish) | hard |
+| N01 → `design:N1` | Niche / platform distance (DES-§7.8) | `too_close` on the niche (τ_niche(n)) or platform band (publish); the niche band alone is soft when the server's exhaustion test finds no variant (DES-§7.9 step 4) | hard (soft on the verified exhaustion path) |
 | N02 | Novelty bands | DES-§7.4: platform / niche `close` −1; own page `close` −1; shingle share 10-25 % −1; own-page `too_close` across products or beyond the fifth page −2 (`design:pages_close`) | soft |
 | N03 → `design:N2` | Own-page distance (N2) | `own = too_close` against the last 5 published pages of the **same product** (publish) | hard |
-| N04 → `design:N8` | Headline shingle share (N8) | > 25 % in the niche on a **generated** line (publish; DS50) | hard |
-| N05 (rev 3, DS50) | Owner line in the niche's cliché | > 25 % on an owner-typed line → note with the line focused and the `differentiate` / generator suggestion | soft −2 |
+| N04 → `design:N8` | Headline shingle share (N8) | the `high` band (> 25 %) in the niche on an `engine`, `local` or `cloud` line (publish; DS50) | hard |
+| N05 (rev 3, DS50; rev 4 + library) | Owner or library line in the niche's cliché | the `high` band on an `owner` or `library` line → note with the line focused and the `differentiate` / generator suggestion | soft −2 |
 
 ### DES-§8.3 Slop score
 
@@ -2401,7 +2599,8 @@ export interface VariantFeatures {
   dots?: boolean; numberedEyebrow?: boolean; animatesLayout?: boolean;
   slots?: { name: string; cssWidth1440: number; cssWidth390: number; aspect: Aspect | "free"; role: PhotoRole }[];   // V11, V12, the photo plan
   decor?: Partial<Record<"ghost" | "ring" | "chips" | "aurora" | "dots" | "ticker", string>>;   // data path that turns it off
-  h?: number;                                                                  // height override in screens (DES-§5.3)
+  h?: number | { base: number; fixed: true; per?: Partial<Record<"offerRow" | "optionGroup" | "bump", number>> };   // height override in screens (DES-§5.3); rev 4: the fixed form skips density / spacingFor / G21 (core §K.2 P0, LAN R12)
+  family?: "split" | "grid" | "list" | "statement" | "ledger" | "table" | "media";   // rev 4: the layout family orderAct2 / H35 / V38 read (DES-§5.1); every variant declares it (test:registry)
   arrangements?: Arrangement[];                                                // DG-15 (R3)
   // rev 2
   ctas?: number;                     // primary CTAs the variant renders by default (hero 1, orderForm 1, cta 1, stickyCta 1, others 0 unless data.cta)
@@ -2414,20 +2613,22 @@ export interface VariantFeatures {
   openers?: Opener[];                // openers the variant's header supports (default: every opener; orderForm and footer: none)
   textRuns?: ("display" | "marquee" | "badge" | "ghost")[];   // text that can clip (RTL6, I7, T8 checks)
 }
-export type VariantFeaturesResolved = Required<Omit<VariantFeatures, "decor" | "slots" | "h" | "arrangements" | "fold" | "openers" | "textRuns">> & Pick<VariantFeatures, "slots" | "fold" | "openers" | "textRuns">;
+export type VariantFeaturesResolved = Required<Omit<VariantFeatures, "decor" | "slots" | "h" | "arrangements" | "fold" | "openers" | "textRuns">> & Pick<VariantFeatures, "slots" | "fold" | "openers" | "textRuns" | "h">;   // rev 4: `h` is carried (estimateHeights reads it through `features`), `family` is required; the P0-frozen shape (core §Q.7 DES-R19)
 export function variantFeatures(type: string, variant: string, data: unknown): VariantFeaturesResolved;
 ```
 
 Data toggles (`decor`) override the static features: `hero:stage` with `data.ghost = false` has `ghostWord = false`;
 `data.cta = false` sets `ctas = 0`; `data.opener` narrows `openers`. A registry test (`test:registry`) fails when a
-variant omits `features`, when a hero variant omits `fold`, or when a `fixed` variant omits `fixedPx` (so a new variant
-cannot dodge the slop score, the fold contract or the floating-layer rule). The core's `budget.ts` reads only this
+variant omits `features`, when a hero variant omits `fold`, when a `fixed` variant omits `fixedPx`, or (rev 4) when a
+variant omits `family` (so a new variant cannot dodge the slop score, the fold contract, the floating-layer rule or the
+rhythm rules of H35 / V38). The core's `budget.ts` reads only this
 function and `estimateHeights()` (DS33), so the data is the single source for the design, budget and health
 computations.
 
 ### DES-§8.5 Quality score
 
-`Q = clamp(85 − 15·H − Σ soft penalties − 4·slop + 10·spec + 5·nov + comp, 0, 100)`, rounded (rev 3, UX-16). `H` = hard
+`Q = clamp(70 − 15·H − Σ soft penalties − 4·slop + 10·spec + 5·nov + comp, 0, 100)`, rounded (rev 3, UX-16; **rev 4:
+base 70**, see below). `H` = hard
 items, `spec` = specificity (0-1, DES-§9.6), `nov` = 1 when every novelty band is `ok`, 0.5 when the worst is `close`,
 0 otherwise (and 0 in the builder before the first check), **`comp` = the composition score 0-15**, the one positive
 term, so a page with no signature detail, 1:1 grids and framed photos everywhere cannot reach "Excellent" by hygiene
@@ -2443,9 +2644,16 @@ alone:
 | `distinctCrops`: ≥ 3 distinct crops when ≥ 2 assets exist (2 crops with one asset) | 2 | `planPhotos` |
 | `heroSignature`: the sheet's signature detail present (V39) | 3 | `features.signature` |
 
-Corpus target: median `comp` ≥ 10 (DS25); the 85 base keeps the labels of DES-§15.1 (Excellent ≥ 90 needs ≥ 5 points
-of composition even on a clean page). Shown as a whole number with its three largest contributions ("Good · 86: 2
-sections share an alignment run (−2), hero contrast low (−3), no quiet screen (composition 11 / 15)"). Q is a report; it
+Corpus target: median `comp` ≥ 10 (DS25). **The arithmetic (rev 4, UX-16):** rev 3's base 85 gave a clean page with
+no composition at all `85 + 10 × 0.5 + 5 × 1 = 95`, i.e. "Excellent" by hygiene alone, the exact fault UX-16 named.
+With base 70 the same clean, bland page (no hard item, no soft penalty, spec 0.5, every band `ok`, comp 0) scores
+**80**: below the corpus median target of 82 (DS25) and below "Excellent"; reaching 82 needs ≥ 2 composition points at
+spec 0.5, "Excellent ≥ 90" needs ≥ 10 at spec 0.5 (≥ 5 at spec 1.0), and the maximum (spec 1, bands `ok`, comp 15) is
+100. The labels of DES-§15.1 stay (Excellent ≥ 90 · Good 80-89 · Fair 65-79 · Needs work < 65), the Store Health rule
+`design:q_low` stays at Q < 70 (a page with one hard item or several soft ones), and the pre-fit floor `qFloor = 82` of
+DES-§17.3 is computed with this formula. `test:design` asserts the three anchor pages: the bland clean page = 80, the
+keep-list pages ≥ 85, the baseline-like page ≤ 40. Shown as a whole number with its three largest contributions
+("Good · 86: 2 sections share an alignment run (−2), hero contrast low (−3), no quiet screen (composition 11 / 15)"). Q is a report; it
 is never the acceptance key of a Director op (DS11, QUAL-9).
 
 ### DES-§8.6 Repairs
@@ -2492,7 +2700,7 @@ Deterministic plan (first matching row per item; at most 6 ops per round; hard i
 | V08 / S05 centred run | `setAlign start` on the middle section of the run |
 | V11 low resolution in a bleed slot | `frameImage`; still failing → `changeGene G18 framed` |
 | V12 focal outside the safe area | `frameImage` (framed slots crop around the focus) |
-| V13 cutout missing | `swapVariant hero split` (or `editorial` when split is the current one) |
+| V13 cutout missing (rev 4) | `changeGene G18 framed-stage` (the stage, poster or spec family keeps its composition on the plinth or the contact shadow, DES-§4.11); only when the family's sheet has no `framed-stage` recipe: `swapVariant hero split` (or `editorial` when split is the current one) |
 | V19 / S14 strips | `dropSection` the marquee; else `swapVariant trustBar chips` |
 | V22 form too low | `moveSection orderForm` to the latest index that passes I2 |
 | V23 / S09 bounce | `changeGene G23 quint` |
@@ -2526,7 +2734,7 @@ Deterministic plan (first matching row per item; at most 6 ops per round; hard i
 | S23 countdown chips (rev 2) | `dropDecor ticker` on the announcement, `dropSection urgency` |
 | S24 footer wordmark (rev 2) | `swapVariant footer simple` |
 | S26 tell budget (rev 2) | drop the lowest-value devices first (`dropDecor` ghost / ring / chips / ticker, then `swapVariant`) until ≤ 2 remain |
-| N1 / N2 (rev 2) | `differentiate` = `changeGene G2` or `G18` with ≤ 6 seeds, keep the first that clears every band (DES-§15.3) |
+| N1 / N2 (rev 2) | `differentiate` = `changeGene G2` or `G18` with ≤ 6 seeds, keep the first that clears every band (DES-§15.3); at publish the same op is the server's exhaustion test of DES-§7.9 step 4 (rev 4) |
 
 Loop: up to 3 rounds; after each round `runGates` again; the result kept is the best of {original, round 1, 2, 3} by
 (fewer hard items, then slop below the fail line, then higher Q). Repairs never touch owner-typed text, never change
@@ -2541,7 +2749,7 @@ prices, items, offers, pixels or the form fields, and never drop a section the o
 | remix | after `remixDoc` | automatic (2 rounds) | ≤ 20 ms |
 | builder | 400 ms after the last edit, in an idle callback; the panel lists design, budget (estimated) and honesty items with the same ids as the publish dialog (core §M.1 rule 6: `buildChecklist` carries the `GateItem[]`) | offered as one-click fixes in the panel | ≤ 8 ms |
 | save (server, rev 2) | in `savePageDraft` after validation, `warn` mode: never refuses; writes `q`, `slop` and the `GateSummary` on the draft's `chosen` genome row (or creates a `derived` row for a legacy page) so the pages list, Store Health and the console see Q without a browser | none | ≤ 10 ms |
-| publish (server) | the design check in the core registry (DES-§8.8) | none (the owner approved this doc) | ≤ 150 ms p95 on Hostinger incl. the one-candidate novelty verdict and the headline query (≤ 60 ms in Node unit timing; rev 3, DS57: the rev 2 "≤ 15 ms incl. novelty" was smaller than the novelty call it included) |
+| publish (server) | the design check in the core registry (DES-§8.8) | none (the owner approved this doc) | ≤ 150 ms p95 on Hostinger incl. the one-candidate novelty verdict and the headline query (≤ 60 ms in Node unit timing; rev 3, DS57: the rev 2 "≤ 15 ms incl. novelty" was smaller than the novelty call it included); ≤ 300 ms p95 on the rare exhaustion path (≤ 6 server-side `differentiate` resamples, DES-§7.9 step 4; rev 4) |
 | re-render (server, core §H.3) | `warn` mode through the same registry; items recorded as notes in `render_jobs.error` and surfaced as Store Health design issues | none | ≤ 150 ms p95 |
 | export (ZIP, PHP, connected, WhatsApp) | `block` mode like a publish (core §M.1 rule 5) | none | ≤ 150 ms p95 |
 | store theme activation (R2) | before activating | offered | ≤ 50 ms for all inherit pages |
@@ -2559,12 +2767,13 @@ is listed (core §M.1). The core's types, used as they are:
 // PrePublishResult = { ok: true; notes?: GateItem[] } | { ok: false; code: "design_blocked" | "honesty_blocked" | "budget_blocked"; items: GateItem[] }
 // src/lib/render/prepublish/design.ts (P6)
 registerPrePublishCheck("design", async (ctx) => {
-  const input = gateInputFor(ctx.doc, { ...ctx, locale, origin: originFrom(ctx.prev, ctx.doc), facts, ownerProof });   // rev 3 (DS52): PageDoc or StorePageDoc
+  const input = gateInputFor(ctx.doc, await gateCtxFrom(ctx));                                                        // rev 3 (DS52) PageDoc or StorePageDoc; rev 4 the one signature (CRIT18)
   const pooled = input.kind === "landing" || input.kind === "home" || input.kind === "page";                           // utility kinds are never pooled or novelty-checked (DES-§8.13)
   const novelty = pooled ? await checkNovelty(ctx.scope, { candidates: [{ key: ctx.pageId, view: distanceView(input.genome, compiled, locale) }], niche, pageId: ctx.pageId }, "publish") : null;
-  const headlines = pooled ? await checkHeadlineNovelty(ctx.scope, niche, generatedTitlesAndLeads(ctx.doc)) : [];
+  const exhausted = novelty?.[0] && nicheOnlyTooClose(novelty[0]) ? await exhaustionTest(ctx.scope, input, niche) : null;   // rev 4: DES-§7.9 step 4, ≤ 6 resamples, deterministic
+  const headlines = pooled ? await checkHeadlineNovelty(ctx.scope, niche, linesWithOrigin(ctx.doc, input.origin)) : [];  // every line with its origin class; bands only back
   const report = runGates({ ...input, context: "publish", novelty: novelty?.[0] ?? null });
-  const items = [...report.hard, ...noveltyItems(novelty?.[0], headlines, input.origin)].filter(notOwnerCopy).map(toGateItem);   // N8 / D3 hard only on generated lines (DS50)
+  const items = [...report.hard, ...noveltyItems(novelty?.[0], exhausted, headlines, input.origin)].filter(hardByOrigin).map(toGateItem);   // N8 / D3 hard only on engine / local / cloud lines (DS50); N1 soft only on the verified exhaustion path
   const notes = [...report.soft, ...report.info].map(toGateItem);
   if (items.length && ctx.mode === "block") return { ok: false, code: "design_blocked", items: [...items, ...notes] };
   return { ok: true, notes: [...items, ...notes] };                       // warn mode: the core audits page.publish.design_override
@@ -2572,10 +2781,11 @@ registerPrePublishCheck("design", async (ctx) => {
 registerPublishListener("design", async (ctx) => { /* DES-§7.5 live flip, the `published` genome row with q / slop / report, syncShingles (DES-§2.2); on "unpublished": DES-§7.5 + syncShingles */ });
 ```
 
-Rules: (1) hard items exclude copy and register items on owner-typed fields (`design:N8`, `design:D3` are hard on
-generated text only, DS50) and exclude V09 / V24 / V26 / V28 (soft here; their hard levels are the core's budget gates)
+Rules: (1) hard items exclude copy and register items on owner-typed and copy-library fields (`design:N8`, `design:D3`
+are hard on `engine` / `local` / `cloud` text only, DS50), the niche band of `design:N1` on the verified exhaustion
+path (DES-§7.9 step 4), and V09 / V24 / V26 / V28 (soft here; their hard levels are the core's budget gates)
 and V20 (landing's honesty gate), DS33; (1b, rev 3) for a `StorePageDoc` the kind table of DES-§8.13 decides which gates
-run, and the listener writes a `published` genome row only for `home` and `page`; (2) `mode` comes from the core (the flag
+run, and the listener writes a `published` genome row only for landing pages and the `home` / `page` kinds; (2) `mode` comes from the core (the flag
 `design_publish_gates` or `platform_design.gatesAtPublish`); honesty items are never `warn`-able and are not this
 check's; (3) the design listener never fails the publish: a failure is an `error_events` row (area `design`) and
 `design.backfill` repairs the row later (core §M.1 rule 4); (4) re-renders run this check in `warn` mode and exports in
@@ -2636,7 +2846,8 @@ export function critiqueSummary(report: GateReport, genome: DesignGenome, doc: P
   24 is withdrawn).
 - **Candidate ordering (rev 3, QUAL-9):** "top 2 per brief" is ordered by a two-key sort: first the gate state (no
   hard item, slop below the repair line), then the **distance** from the store's recent genomes and from the sibling
-  candidates (the maximin of DES-§4.4), and only then Q; Q barely discriminates among compliant pages.
+  candidates (the maximin of DES-§4.4), and only then Q; among compliant pages Q differs only through its coarse
+  composition term (DES-§8.5), too little to rank a brief's candidates on.
 - **Critique and repair (R2, AI-19 "Director review" button; the engine side is this part's, the button is mounted in
   the builder by S1, core §K.4):** the Director's `{ ops: RepairOp[] }` is validated against `AI_REPAIR_OPS` and
   `GENE_VOCAB`; `applyOps` runs on a sandbox copy; **the result is kept when no new hard item appears, the slop score
@@ -2663,14 +2874,14 @@ it is measured, and the fixture that proves it. "static" = pure TS on the doc (w
 
 | Target | Owner · gate | Level · threshold | Where | Fixture in `test:design` / corpus |
 |---|---|---|---|---|
-| N1 niche d ≥ τ_niche(n) (0.40 at n ≤ 20 → 0.30 at n ≥ 100), platform ≥ 0.25 | design · `design:N1` (DES-§7.8, §7.9) | hard at publish; the wizard resamples, repels and falls back (DES-§7.9) | static + pool | two-store fixture with identical photos → d ≥ 0.25; a cloned doc → `design_blocked` (`test:design-db`); 200-store capacity simulation: fallback share < 5 % |
+| N1 niche d ≥ τ_niche(n) (0.40 at n ≤ 20 → 0.30 at n ≥ 100), platform ≥ 0.25 | design · `design:N1` (DES-§7.8, §7.9) | hard at publish; the wizard resamples, repels and falls back; the niche band alone is soft on the server-verified exhaustion path (DES-§7.9 step 4), platform and clone never | static + pool | two-store fixture with identical photos → d ≥ 0.25; a cloned doc → `design_blocked` (`test:design-db`); a saturated synthetic niche where no variant clears τ → a soft N1 with `fallback = 1` and the page published; the same niche with one clearing variant → hard N1 whose fix is that variant; 200-store capacity simulation: fallback share < 5 % |
 | N2 own pages d_page ≥ 0.30 (same product, last 5 published; else soft) | design · `design:N2` / `design:pages_close` | hard / soft | static + own rows | store with 5 pages of one product, a 6th near-copy → blocked; a brand-locked store publishes 15 landing pages for one product with distinct genomes → 0 refusals (QUAL-4) |
 | N3 ≥ 60 distinct orders / 100, no 4-gram > 50 %, form-position entropy ≥ 1.0 bit, final-section entropy ≥ 1.2 bits | design · grammar (DES-§5.7) | construction; corpus assertion | sweep | 140 plans per niche: distinct ≥ 60/100, max 4-gram share ≤ 50 %, the two entropies |
 | N4 (redefined) distinct (hero family × arrangement × benefits variant × benefits opener × form variant) ≥ 0.9 × E[distinct] / 210; hero-family entropy ≥ 2.8 bits, benefits ≥ 2.0 bits; ≥ 40 (hero × grammar × strategy) | design · pools (DES-§5.4) | corpus assertion | sweep | counts on 210 plans with E[distinct] printed from the pool weights |
 | N5 every archetype per category, top ≤ 45 %, souk/playground/garage > 0 | design · priors (DES-§4.3, §5.7) | corpus assertion | sweep | 100 simulated stores × 10 categories |
 | N6 product-sensitive seed, J ≤ 0.25 across products | design · DS5 seed (DES-§14.2) | unit | static | same seedBase + archetype, two fixtures → J ≤ 0.25, no shared hero + pairing + order |
 | N7 ar / fr differ in type metrics and hero arrangement | design · `typeTokens` (DES-§10.5) | render-check | render | ar vs fr fixture: identical sequence allowed, identical `--lp-step-*` / line-height not |
-| N8 shingle share ≤ 10 % soft, > 25 % hard on generated lines (soft on owner-typed, DS50) | design · `design:N8` / N05 (DES-§9.8) | soft / hard by origin | static + `headline_shingles` | synthetic niche with 20 live pages; 30 engine-only stores in one niche → 0 `design:N8` refusals |
+| N8 shingle share ≤ 10 % soft, > 25 % hard on `engine` / `local` / `cloud` lines (soft on `owner` and `library` lines, DS50, core §M.4) | design · `design:N8` / N05 (DES-§9.8) | soft / hard by origin class | static + `headline_shingles` | synthetic niche with 20 live pages; 30 engine-only stores in one niche → 0 `design:N8` refusals; a library fallback line in the `high` band → N05 only |
 | C1 ≥ 6 hero families, any ≤ **20 %** per niche (and (family × arrangement) ≤ 12 %), on chosen pages and on the `low-asset` class | design · pools + H33 (DS49) | production control + corpus assertion | sweep | hero family histogram per niche (owner-choice model) |
 | C2 fold contract (image, price, CTA, COD inside 844 px) | design V25 (static, three zones: target 760, band 760-938 soft, > 938 hard) · the core's `budget:C2` row reads the same `FoldReport`; Playwright = calibration | soft / hard | static; render for calibration | every hero family × ar/fr at 390 with the fixture's longest title; estimate-vs-measured p95 ≤ 10 % |
 | C3 8-14 sections, ≤ 12,000 px (hard 16 / 15,000) | **budget** · `budget:C3`; design V24 soft | soft / hard | static (height model) | the 27-section baseline doc → `budget_blocked`; keep-list pages pass |
@@ -2710,11 +2921,11 @@ it is measured, and the fixture that proves it. "static" = pure TS on the doc (w
 | R5 reveals ≤ 60 on heads (hard > 120), 1-2 kinds, one family | **budget** · `budget:R5`; design V28 + G35 + V23 | soft / hard | static / DOM count | 394-node baseline doc → `budget_blocked` |
 | R6 radius ladder, nested radius = outer − padding | design · V05 | hard | static tokens | |
 | R7 ≤ 1 bar + ≤ 1 float, fixed ≤ 88 px, bar hides near an in-flow CTA | design · V27 | hard | static + render (`qa:design-corpus` measures fixed heights) | |
-| R8 tell budget ≤ 2 of 11, never the same pair twice in a niche; slop ≥ 6 fails | design · S26 + `design:R8` (slop) | hard | static (+ corpus for the pair rule) | the baseline-like fixture scores ≥ 6 |
+| R8 tell budget ≤ 2 of the 13 devices (rev 3 list), never the same pair twice in a niche; slop ≥ 6 fails | design · S26 + `design:R8` (slop) | hard | static (+ `nicheShares.tells` for the pair rule) | the baseline-like fixture scores ≥ 6 |
 | R9 ≤ 3 card grids, none adjacent, ≤ 1 triplet (hard > 5) | design · V33 + S04 | soft / hard | static | |
 | D1 numbers consistency | **honesty** · `honesty:D1` (landing, `allowedNumbers`); design `copyReport.numbers` for Q and the wizard repair | hard | static | "30 s vs 40 s" blender fixture |
 | D2 no library figures, ratings, synthetic names | **honesty** · `honesty:D2`; design S22 + DS42 pools | hard | static | "94 % questionnaire" fixture |
-| D3 one Arabic register per page incl. FAQ Q/A | design · `design:D3` (DES-§9.4) | hard when a **generated** FAQ pair mixes registers (auto-repaired before the owner sees it); soft −2 on owner-typed text (DS50) | static | MSA question + Darija answer fixture, generated and owner-typed variants |
+| D3 one Arabic register per page incl. FAQ Q/A | design · `design:D3` (DES-§9.4) | hard when an `engine` / `local` / `cloud` FAQ pair mixes registers (auto-repaired before the owner sees it); soft −2 on `owner` and `library` text (DS50) | static | MSA question + Darija answer fixture, generated and owner-typed variants |
 | D4 French article agreement | design · `design:D4` (DES-§9.5 `ProductRef`) | hard (grammar lint) | static | "Ce que change Sérum" fixture |
 | D5 specificity ≥ 50 % | design · C04 | soft | static | |
 | D6 lexicon, ≤ 1 "!" | design · C02 / C05 (+ guard `BANNED`, P7) | hard on the existing list | static | |
@@ -2724,7 +2935,7 @@ it is measured, and the fixture that proves it. "static" = pure TS on the doc (w
 | RTL4 price cluster one unit | design · `Price` + render adjacency check | hard | render-check (bounding boxes) | `parfum-default-ar` fixture |
 | RTL5 addresses and e-mails LTR, no spaced punctuation | design · `footer` + render regex | hard | render-check | |
 | RTL6 no clipped Arabic glyph box | design · clip check in `qa:design-corpus` (R1, segmented shots) and `qa:design-visual` (R2) | hard | render | seeded clipping fixture must fail |
-| RTL7 logical properties, mirrored icons, no tracking / uppercase / italic, +6-10 %, LTR tel | design · V18 + `test:render` | hard | static + render-check | |
+| RTL7 logical properties, mirrored icons, no tracking / uppercase / italic, `--lp-ar-scale` = the engine's value for the pairing (clamp 1.04-1.14) applied under `[lang=ar]` (rev 4: the fixed "+6-10 %" is gone, UX-28), LTR tel | design · V18 + `test:render` | hard | static + render-check | |
 | RTL8 every visual run covers ar and fr at 390 and 1440; no `.lp-skip` on plain scroll | design · corpus harness (DES-§17.1) | harness rule | render | |
 | F1 form top ≤ 3,000 px, height ≤ 1,100 px default, field order | **budget** · `budget:F1` (top); landing `orderForm` (order, collapse); design V22 (I2) + height model | hard | static | |
 | F2 options only with declared variants, single-value pickers hidden, per-piece rows collapsed | design (generator, `src/lib/generator/offers.ts`, no invented per-piece options) + landing (`orderForm` rendering) | hard | static (generator unit) + render | the "Usage Visage/Cheveux" fixture never generates |
@@ -2745,9 +2956,12 @@ no `theme`, `product`, `items`, `offers` or `form` (STO-§6.2), so every rev 2 g
 or evaluated nothing, and `defaultTemplate(kind, shape)` yields byte-identical utility documents for every store, so a
 pooled novelty check would have refused every second store's auto-publish with `design:N1`. Rev 3 defines the branch:
 
-1. **One adapter.** `gateInputFor(doc, ctx)` (`src/lib/design/gate-input.ts`) builds the `GateInput` for both types:
+1. **One adapter.** `gateInputFor(doc, ctx: GateInputCtx)` (`src/lib/design/gate-input.ts`, pure; the signature of
+   DES-§8.1 is the one core §M.1 and STO-D35 / STO-§8 cite verbatim, CRIT18) builds the `GateInput` for both types:
    for a `PageDoc` as before; for a `StorePageDoc` the theme is `getStoreTheme(scope, register)` (storefront's S2 stub,
-   STO-§8.4), the `look` is the store theme's brand genes plus the kind's declared page constants, the sections are the
+   STO-§8.4), **resolved by the server caller** (`gateCtxFrom(ctx)` in `prepublish/design.ts`, or storefront's builder
+   preview) and passed in `ctx.theme` / `ctx.look`, so the adapter itself reads nothing; the `look` is the store theme's
+   brand genes plus the kind's declared page constants, the sections are the
    store sections resolved through **the store registry's `features`** (STO-§6.1; the same `VariantFeatures` shape),
    G2 / G18 come from `FAMILY_GRAMMARS` (STO-§9.5) for the `storeHero` / `productDetail` variant, and there is no
    `product`, `offers` or `form` (the landing-only facts are `null` and the gates that need them are skipped by the kind
@@ -2755,10 +2969,18 @@ pooled novelty check would have refused every second store's auto-publish with `
    contract step** (the maintainer's one-line change to `src/lib/design/types.ts`, STO-R25's step), never earlier.
 2. **One fold model.** `src/storefront/fold.ts checkFold(doc, kind, variant, locale)` becomes a thin call into
    `estimateHeights(doc, { look, locale, features: storeFeatures })` with the kind's `FoldLayout.mustShow` mapped onto
-   `FoldReport.items` (`identity` and `collections` join `image`, `price`, `cta`, `cod` as optional items) and the same
+   `FoldReport.items` (`name`, `identity` and `collections` join `image`, `price`, `cta`, `cod` as optional `FoldItem`
+   keys at the R2 contract step, core §K.2 P0) and the same
    three zones (DES-§5.12); `budget:C2` for store kinds reads that report (`BudgetProfile.fold = "kind-layout"`, core
    §M.2). There is no second height model (DS33).
-3. **Which gates run per kind** (the table `KIND_GATES` in `gate-input.ts`; `test:prepublish` has a fixture per kind):
+3. **Which design gates run per kind** (the table `KIND_GATES` in `gate-input.ts`; `test:prepublish` has a fixture per
+   kind). `KIND_GATES` lists **design gates only**: beside them, every kind also runs the core's budget profile for its
+   kind (D66, `registerBudgetProfile`), landing's `landingGateItems` on the eligible landing sections (LAN-§3.2.1) and,
+   in R2, storefront's `storefront:*` items, each under its owner's rules. The sibling parts and the core cite "the
+   design gates of `KIND_GATES` (DES-§8.13)" rather than paraphrasing this set (rev 4, CRIT18: core §M.1 rule 2 said
+   "structural, owner-rule, register and budget gates", STO-D35 "… register, budget and honesty gates", LAN R11
+   "structural / no-orange gates"; all three are consistent with this table read with the sentence above, and the
+   table is the definition):
 
 | Kind | Gates that run | Novelty / pool | Notes |
 |---|---|---|---|
@@ -2767,10 +2989,10 @@ pooled novelty check would have refused every second store's auto-publish with `
 | `product`, `collection` (commerce register) | V01-V07 (contrast, no orange, grid, ladder, glass = 0, background rhythm), V11-V12, V16-V18, V21, V23 (motion ≤ 250 ms, one reveal kind), V29, V36-V37, the register's frozen-gene rows as hard (DES-§11.1), S01 / S03 / S09 / S16 / S17; **no** V22 / V24-V28 / V30-V35 (no choreography, openers, CTA plan or fold stack of their own: the PDP fold is `checkFold`), no copy gates on store-owned catalogue text, no slop beyond the listed items | **never pooled, never novelty-checked** (`genome: null`, STO-§8.1) | the marketing islands (STO-§8.4) are gated as sections with the full gate set inside the document's clamps |
 | `search`, `cart`, `checkout`, `not_found`, `policy` (commerce / transactional) | V01-V05, V07, V18, V23 (no motion beyond 250 ms, reveal scope `none`), V29, V36-V37, S01 / S09 | never pooled | `defaultTemplate` output passes by construction; `test:catalog` asserts it for every kind × shape × locale |
 
-4. **Landing's honesty gate on a store document** (`landingGateItems`) is landing.md's: rev 3 asks it to define the
-   store branch as "eligible landing sections only (`ELIGIBILITY`, STO-§9.1), facts from the bound product" (DES-§28
-   ENGP-1 cross note); this part's V20 info row mirrors it.
-5. **Tests.** `test:prepublish` gains a fixture per store kind (a `defaultTemplate(kind, shape)` publish passes with 0
+4. **Landing's honesty gate on a store document** (`landingGateItems`) is landing.md's: it defines the store branch as
+   "eligible landing sections only (`ELIGIBILITY`, STO-§9.1), facts from the bound product" (LAN-§3.2.1, rev 3; core
+   §M.3); this part's V20 info row mirrors it.
+5. **Tests.** `test:prepublish` gains a fixture per store kind, `policy` included (a `defaultTemplate(kind, shape)` publish passes with 0
    items; a `home` with glass on a commerce island → hard; two stores' identical `@cart` templates → no `design:N1`;
    a `home` cloned from another store's live home → `design:N1`); `test:catalog` (storefront) keeps its 1,200-home
    sweep through `checkHomeDoc` + `checkFold` + `runGates` with this adapter.
@@ -2867,7 +3089,7 @@ lexicon-written fixture" was circular).
 | bang | > 1 exclamation mark on the page (C05; generated: repaired) | hard for generated, −2 for owner |
 | dots | `·` more than once in a line, or in a title (C07; the rubric's rationing, rethink-ai §1.3) | −1 |
 | emoji | any emoji (existing guard) | hard |
-| register (rev 2, D3; **rewritten rev 3, UX-23, QUAL-22, DS50**) | `ar` pages: `registerOf(text)` classifies each sentence `msa` / `darija` / `mixed` / `none` from a **Darija marker set of ≥ 60 forms reviewed by a native speaker** (the rev 2 seed `واش, بغيت, ديال, دابا, كيفاش, علاش, باش, هاد, غادي, بزاف, شحال, فين, ملي, خلّص` plus the `كا-` / `كـ` present prefix, the `ما…ش` negation, `ديالي / ديالك / ديالنا / ديالكم`, `هادي / هادو`, `دبا / دابا`, `واخا`, `بصح`, `زعما`, `عندي / عندك`, `كاين / كاينة / كاينين`, `غير`, `حتى`, `نيت`, `صافي`, `يالاه`, `مزيان`, `خايب`, `بلاتي`, `تقدر / تقدري`, `عافاك`, `شنو`, `فوقاش`, `منين`, `علاه`, …) and MSA markers (`سوف, الذي, التي, إنّ, ليس, ذلك, هذه, كما, حيث, لقد, قد, إذ, كذلك, فإن`), after the clitic stripping of DES-§9.1 so inflected forms count. **A sentence is classified only with ≥ 2 markers and a margin** (Darija markers − MSA markers ≥ 2 → `darija`; the inverse → `msa`; both ≥ 2 → `mixed`); otherwise `none`, which is **compatible with either register** (Moroccan commercial Arabic is routinely an MSA frame with Darija lexis, and short FAQ answers often carry no marker). The page register (G31) is the **planner's rule**, not the classifier's: `none` = MSA everywhere; `cta` = Darija only in CTA labels, the sticky bar, the form submit / reassurance and FAQ **questions**; `light` = Darija allowed in leads and FAQ answers too; the generator and the library pick lines by their `r` tag, so generated text obeys it by construction. The classifier's item: a FAQ pair whose question and answer are classified `msa` vs `darija` (never `none` or `mixed` against anything) is **hard on generated text** (`design:D3`, repaired by `rewriteLine` with the register's alternative before the owner sees it) and **soft −2 on owner-typed text** with the pair focused; any other breach is −2 per sentence. Acceptance: ≥ 90 % on a 60-line set labelled by a native speaker; ≤ 2 % false `darija` / `msa` calls on a 200-sentence MSA-frame-with-Darija-lexis set (the `none` / `mixed` calls are not errors) | hard (generated FAQ pair) / −2 (owner-typed, other breaches) |
+| register (rev 2, D3; **rewritten rev 3, UX-23, QUAL-22, DS50**) | `ar` pages: `registerOf(text)` classifies each sentence `msa` / `darija` / `mixed` / `none` from a **Darija marker set of ≥ 60 forms reviewed by a native speaker** (the rev 2 seed `واش, بغيت, ديال, دابا, كيفاش, علاش, باش, هاد, غادي, بزاف, شحال, فين, ملي, خلّص` plus the `كا-` / `كـ` present prefix, the `ما…ش` negation, `ديالي / ديالك / ديالنا / ديالكم`, `هادي / هادو`, `دبا / دابا`, `واخا`, `بصح`, `زعما`, `عندي / عندك`, `كاين / كاينة / كاينين`, `غير`, `حتى`, `نيت`, `صافي`, `يالاه`, `مزيان`, `خايب`, `بلاتي`, `تقدر / تقدري`, `عافاك`, `شنو`, `فوقاش`, `منين`, `علاه`, …) and MSA markers (`سوف, الذي, التي, إنّ, ليس, ذلك, هذه, كما, حيث, لقد, قد, إذ, كذلك, فإن`), after the clitic stripping of DES-§9.1 so inflected forms count. **A sentence is classified only with ≥ 2 markers and a margin** (Darija markers − MSA markers ≥ 2 → `darija`; the inverse → `msa`; both ≥ 2 → `mixed`); otherwise `none`, which is **compatible with either register** (Moroccan commercial Arabic is routinely an MSA frame with Darija lexis, and short FAQ answers often carry no marker). The page register (G31) is the **planner's rule**, not the classifier's: `none` = MSA everywhere; `cta` = Darija only in CTA labels, the sticky bar, the form submit / reassurance and FAQ **questions**; `light` = Darija allowed in leads and FAQ answers too; the generator and the library pick lines by their `r` tag, so generated text obeys it by construction. The classifier's item: a FAQ pair whose question and answer are classified `msa` vs `darija` (never `none` or `mixed` against anything) is **hard on `engine` / `local` / `cloud` text** (`design:D3`, repaired by `rewriteLine` with the register's alternative before the owner sees it) and **soft −2 on `owner` and `library` text** with the pair focused (rev 4 origin classes; a library pair is register-tagged, so a hit is a library bug `test:copylib` fails on); any other breach is −2 per sentence. Acceptance: ≥ 90 % on a 60-line set labelled by a native speaker; ≤ 2 % false `darija` / `msa` calls on a 200-sentence MSA-frame-with-Darija-lexis set (the `none` / `mixed` calls are not errors) | hard (generated FAQ pair) / −2 (owner-typed, other breaches) |
 | article (rev 2, D4) | `fr`: every rendered `{product}` slot is checked by `articleCheck(template, productRef)`: a template that places the name after `ce / cette / le / la / du / de la / un / une` needs `productRef.gender`; a template starting the slot with a bare name after a preposition ("Ce que change Sérum …") is rewritten to the gendered form ("Ce que change ce sérum") or to the name-free alternative the library carries for every such template | hard (grammar lint on the library at `test:copylib`; `design:D4` on owner-typed templates is soft −2) |
 
 ### DES-§9.5 Headline structures in the copy library
@@ -2925,10 +3147,14 @@ applies the same table after the owner clicks.
 
 ### DES-§9.8 Headline near-duplicate checks
 
-- **Origin:** every text field carries an origin: `generated` (library, local or cloud AI, untouched since) or `owner`
-  (typed or edited). The builder already knows edits; the wizard marks everything `generated`. Stored in the editor
-  state, not in the doc; at publish the server treats fields equal to the generation-time text (kept in the `chosen`
-  genome row's report as a hash per field) as generated, everything else as owner.
+- **Origin (rev 4: the core's five classes, core §M.1 rule 2):** every text field carries an `OriginClass`: `library`
+  (a copy-library line), `engine` (the compositional generator, DES-§9.12), `local` or `cloud` (a model), each
+  untouched since, or `owner` (typed or edited). The builder already knows edits; the wizard marks every field with the
+  class that produced it. Stored in the editor state, not in the doc; the create-from-directions path writes the
+  generation record (field path → `{ h: hash16, o: OriginClass }`, ≤ 600 B) into the draft's `chosen` genome row
+  (`report.gen`), and at publish the core's one builder `originFrom(prev, doc)` reads it: a field whose current text
+  hashes to the record keeps its class, everything else is `owner`. Landing's honesty gate reads the same map, so one
+  field has one origin on both sides.
 - **In-store:** Jaccard of the page's shingle set vs each other page of the store (titles + leads, computed from the
   store's own docs, no table) > 0.5 → generated lines are resampled (`rewriteLine` with another structure), owner lines
   flagged (C06 soft −2).
@@ -2936,19 +3162,24 @@ applies the same table after the owner clicks.
   wrapper `checkHeadlinesAction`, ≤ 60 lines, `storeBucket(scope, "design:headlines")` 60 / 10 min): HMAC shingles →
   `SELECT owner_tag, hash FROM headline_shingles WHERE niche_key = ? AND hash IN (…) AND owner_tag <> ?`; for owners with
   ≥ 3 matched shingles, `τ_B` = max stored hash when B holds 256 rows (else ∞) and containment = matches / |candidate
-  shingles with hash ≤ τ_B|. Containment > 0.35 → line verdict `close`. **Rev 2 (N8):** the same query also returns, per
-  line, the **share** of the niche's live owners whose sketch contains any of the line's shingles, rounded to 5 % and
-  computed over ≥ 5 owners (else `null`): share > 10 % → soft note; share > 25 % → the publish-time hard item
-  `design:N8` (DES-§7.8). Answers per line `{ verdict: ok | close; share: number | null }` only (no owner, no count).
-  Generated `close` lines are resampled (C08); owner lines get a soft flag "Close to wording already live on another
-  store" (−1) and, above 25 %, the hard item with the line focused (the owner rewrites it; nothing is rewritten for
-  them).
+  shingles with hash ≤ τ_B|. Containment > 0.35 → line verdict `close`. **Rev 2 (N8):** the same query also computes,
+  per line, the **share** of the niche's live owners whose sketch contains any of the line's shingles, over **≥ 10
+  owners** (else no band), and answers it as a **band** only (rev 4, DS7 discipline and QUAL-32's k; the rev 3 number
+  "rounded to 5 % over ≥ 5 owners" could be differenced like the niche shares): `low` ≤ 10 %, `mid` 10-25 % (soft
+  note), `high` > 25 % (the publish-time item `design:N8`, DES-§7.8). Answers per line `{ verdict: "ok" | "close";
+  band: "low" | "mid" | "high" | null }` only (no owner, no count, no number). Generated `close` lines are recomposed
+  (C08, DES-§9.12); owner lines get a soft flag "Close to wording already live on another store" (−1) and, in the
+  `high` band, **the soft item N05 (−2) with the line focused, never a refusal** (rev 4: the rev 3 text still said
+  "the hard item" here, contradicting DS50 and core §M.4; ENGP-9); nothing is rewritten for the owner. `library` lines
+  in the `high` band are N05 as well; `engine` / `local` / `cloud` lines in it are the hard `design:N8`, which the
+  wizard never shows because it recomposes them first.
 - **Library exhaustion (rewritten rev 3, QUAL-1, UX-18):** in a crowded niche every library alternative may be `close`,
   and with one of three library headlines per family (`src/lib/ai/copy-library/fr.ts:10-14`, `index.ts:496`) and one
   common benefits lead per locale (`index.ts:508`) the shares sit at ≈ 33 % and ≈ 100 % after eight library-copy stores,
   which would collide with a hard N8. Rev 3 removes the collision twice: (a) the engine-only path **composes** headlines
   and leads from the product's facts (DES-§9.12), so the library is the fallback of last resort and two stores in a
-  niche no longer share a skeleton; (b) `design:N8` is hard only on generated lines, and a generated line that is still
+  niche no longer share a skeleton; (b) `design:N8` is hard only on `engine` / `local` / `cloud` lines (a `library`
+  fallback line is soft, core §M.4), and a generated line that is still
   `close` after 3 compositions with different structures and angles is replaced by the **name-led neutral skeleton**
   (`{product}` + one fact, e.g. "Huile d'argan pure, pressée à froid." / "زيت أركان نقي، معصور على البارد."), which is
   product-specific by construction and cannot share a 3-gram with another store after `§p` masking unless the facts are
@@ -3060,7 +3291,10 @@ export const SKELETONS: Record<Locale, Record<CopyFamily | "common", Skeleton[]>
 
 34 pairings over the 27 shipped OFL fonts (15 Latin, 12 Arabic; `src/lib/theme/fonts.generated.ts:50`), about 3 per
 archetype, picked uniformly per seed (`src/lib/theme/vibe.ts:579`). Two stores of one archetype share type one time in
-three. No font is added in R1: the catalogue grows by **combination**, not by downloads.
+three. Rev 2 grew the catalogue by **combination** only; **rev 3 adds seven OFL faces in R1** (DES-§10.4, DS60, DES-R21
+accepted by core §Q.8), installed by the maintainer as `@fontsource` devDependencies and self-hosted like the 27
+(no runtime download, no third-party font host); the page font budget (`budget:F5`: ≤ 2 families / ≤ 4 files) is
+unchanged.
 
 ### DES-§10.2 Validity rules (`src/lib/design/pairings.ts`, checked by `theme:check`)
 
@@ -3175,8 +3409,10 @@ unchanged).
 
 The 21 new pairings are written with the F1-F15 rules and the designer `note`, and bring the catalogue to ≥ 109 entries
 (≥ 8 per archetype still holds; the F12 caps now have room to bind). Almarai (design-gen §6.5) is not added: Cairo covers
-its class and the roster stays within the `budget:F5` font budget per page. If the core refuses DES-R21 for R1, the F11
-roster rule falls back to the rev 2 eight faces with `noto-naskh-arabic` and `ibm-plex-sans-arabic` still removed
+its class and the roster stays within the `budget:F5` font budget per page. Core §Q.8 accepted DES-R21 (A, maintainer
+CCR in R1 product, each face after the licence / modernity / size check). Should one face fail its check in the S2-style
+spike, it is dropped individually and its pairings are not written; the fallback for the whole roster (only if every
+Arabic addition failed) stays the rev 2 eight faces with `noto-naskh-arabic` and `ibm-plex-sans-arabic` still removed
 (six modern faces in three classes), and the caps of F12 apply unchanged.
 
 ### DES-§10.5 The typography engine (rev 2; DS37; T1-T3, T6, T7, N7)
@@ -3223,7 +3459,7 @@ already says Arabic letter shapes vary too much for that metric (0.35-0.57 em me
 | Tracking per size (Latin only) | `tracking(size) = −tk × log2(size / 16)` em, clamped −0.05 … 0 (G6.tk); 0 for Arabic always; +0.02 … +0.06 em only for Latin uppercase labels ≤ 13 px (G7) | `--lp-display-tracking`, `--lp-label-tracking` |
 | Line-height per script | Latin display 1.02-1.10 (by `dmax`: 1.10 at 48, 1.02 at ≥ 120), Latin body 1.45-1.6; Arabic display `lh = max(1.25, (metrics.ar.markAbove + metrics.ar.markBelow + 0.08 × upem) / upem)` (F13; ≥ 1.32 for the tall-mark faces by that formula, the hamza-collision fix T3 now depends on Arabic marks, not on the Latin `ascent − descent`), Arabic body ≥ 1.6 (T3); `padding-block` ≥ 0.12 em on Arabic display runs so marks never collide with the line above | `--lp-display-lh`, `--lp-body-lh`, `--lp-display-pad` |
 | Measure and line count (rev 3) | Arabic measure and the fold's headline line count use `metrics.ar.advanceAvg` (never `xWidthAvg`); the `--sh-word` cap for Arabic uses the measured longest-word advance of the actual title (the `SectionHeader.tsx:70-80` method with `advanceAvg` instead of the middle-high constant) | `--sh-word`, the height model |
-| Headline breaking | h1 / h2 get `text-wrap: balance`; leads `text-wrap: pretty`; `max-inline-size` 10-14 ch on display (T6); Arabic particles bound to the next word with U+00A0 (DES-§4.5.4 `RichText`), so no line ends on `من في على إلى عن مع و`; the `--sh-word` cap (`SectionHeader.tsx:70-80`) keeps the longest word inside the column; 2-3 lines at 390 (the solver lowers `dmax` first, H28) | existing `--sh-word` + the two `text-wrap` rules |
+| Headline breaking | h1 / h2 get `text-wrap: balance`; leads `text-wrap: pretty`; `max-inline-size` 10-14 ch on display (T6); Arabic particles bound to the next word with U+00A0 (DES-§4.5.4 `RichText`), so no line ends on `من في على إلى عن مع و`; the `--sh-word` cap (`SectionHeader.tsx:70-80`) keeps the longest word inside the column; 2-3 lines at 390 (the H28 ladder: drop the lead, shorten the title to 2 lines, cut the image, drop the kicker, and only then lower `dmax` ≥ 48; rev 4, UX-11) | existing `--sh-word` + the two `text-wrap` rules |
 | Reveals | whole lines, never `.lp-word` spans for Arabic; Latin word split only for display ≥ 48 px inside the reveal scope (T2, S19) | `data-reveal` scoping (G35) |
 | Numerals | `font-variant-numeric: tabular-nums lining-nums` on `.lp-price*`, `.lp-count*`, `[data-num]`, phones and quantities (T1) in every face, serif included (Bodoni Moda's default figures are old-style); G8 `oldstyle` applies to running copy only | `--lp-num-copy` |
 | Measure | body line length 45-75 ch at 1440 (V17) from `xWidthAvg` and the container (G3.w) | container / column tokens |
@@ -3368,7 +3604,11 @@ export function nearestAllowed(hex: Hex): AllowedColor;
 muted version (same L and h, chroma 0.056 / 0.05 / 0.042, or 0.038 / 0.032 / 0.025 for L ≥ 0.8)} with the smallest
 OKLab ΔE to the input; ties go to muted. The picker shows the request and the result side by side for 6 s with the note
 "Orange isn't used on Store Gen pages, so we picked the closest allowed colour." and stores a `ColorMove`. The hue
-slider shows the forbidden band as a hatched, non-selectable range (25-75° at chroma > 0.06). The extracted logo
+slider shows the forbidden band as a hatched, non-selectable range (25-75° at chroma > 0.06) and, **for the accent and
+pop roles only, the gold band 75-95° at chroma > 0.10** as a second hatched range (rev 3 H34 / V37, UX-17; a gold pick
+for those roles takes the "sand + signal" path: the colour is kept as the warm neutral and the picker proposes the
+olive, teal or majorelle accent, with the same before / after note; neutrals may stay in the band at C ≤ 0.06). The
+extracted logo
 palette goes through the same function; **the logo file itself is never recoloured**. `allowSellerBrandOrange = true`
 (platform setting) is not implemented in R1 or R2: the setting is read and, if true, the brand page shows "Not
 available yet"; enabling it needs an owner decision on RESEARCH §6.3 Q4 and a CCR, because the theme engine refuses
@@ -3644,7 +3884,11 @@ fixed element names; nothing user-supplied reaches the markup).
 ### DES-§13.15 Designer screen (`/app/<h>/brand`, tab "Logo designer", R2)
 
 - **Inputs** (left): Latin name, Arabic name (both prefilled from the store name; either may be empty), "Arabic first
-  / Latin first", optional tagline, a style row with the brand vibe chip.
+  / Latin first", optional tagline, a style row with the brand vibe chip. **Brand-term guard (rev 4, SEC-18, core D76):**
+  every write of the two names and the tagline calls the core P0 stub `checkBrandTerms("wordmark", value)` (P1's
+  `src/lib/platform/brand-check.ts`; core §K.2 names "P6's brand kit" as a caller): `exact` refuses for non-staff with
+  the action error `brand_protected` (the limit-sheet variant), `near` writes the console flag and saves. The R1 brand
+  page writes no text (logo files, colours, fonts and voice only), so the call starts with the R2 designer.
 - **Grid** (centre): 6 candidate cards on the store's ground, each with its family label; skeleton cards for the first
   300 ms; "More like this" on hover / long-press.
 - **Detail** (right or a sheet on mobile): live previews: storefront header at 1440 and 390 px, a browser tab with the
@@ -3702,9 +3946,9 @@ Inputs already in the wizard (`src/components/generate/wizard.tsx`) plus three n
 | 2 | browser | the direction draw of DES-§4.3 (rev 3, QUAL-35): direction 1 = the de-concentrated best fit of `rankDirections()`, directions 2-3 drawn from the next five by `score + 0.02` (seeded), forced archetypes lead; R3: direction 3 = exploration cell (DES-§7.7). The photo facts pass (DES-§4.11) incl. the model-free alpha estimate runs here (< 150 ms per asset) | < 5 ms (+ the facts pass) |
 | 3 | browser | per direction i, attempts 0-3: `sampleGenome` (seven bold genes, H33 from the cached `nicheShares`) → `compileGenome` → `expandChoreography` + the rhythm planners (DES-§5.5 step 3: photos, CTAs, openers, reveals, fold) → `planSections` with the directives (no copy) → `estimateHeights` (I2, I8, fold at the 760 target) → `distanceView`; skip an attempt whose pairwise distance to an earlier direction's chosen candidate is < 0.25 or whose estimates breach a core budget threshold (`budget-limits.ts`); then the **repulsion step** over the candidate set (DES-§4.4, ≤ 6 iterations) | ≤ 150 ms for 12 candidates |
 | 4 | server | `checkNoveltyAction({ candidates ≤ 12, niche })` (DES-§7.4) → bands at τ_niche(n) (+ `nicheSharesAction` for H33, cached per wizard session, hourly watermark) | one round trip, ≤ 150 ms p95 server time (bounds-first distance, DS57) |
-| 5 | browser | per direction keep the first candidate with every band `ok`, else the one with the best worst band **that is not `too_close`** (a `too_close` candidate is never shown, DS6; when all four attempts are `too_close` the direction re-samples its bold genes once more with `explore` weights, then repels again); **exhaustion path (rev 3, UX-24, DES-§7.9 step 4):** when every candidate is still `too_close` in the niche band, show the candidate with the largest minimum distance that clears the platform band, with the niche band as `close` wording and the three differentiators (pairing, colour strategy, second photo) as one-tap actions; then full docs via `buildDirection` with the genome and the **composed copy** (DES-§9.12; library fallback; AI copy merge, existing) | ≤ 600 ms for 3 docs |
+| 5 | browser | per direction keep the first candidate with every band `ok`, else the one with the best worst band **that is not `too_close`** (a `too_close` candidate is never shown, DS6; when all four attempts are `too_close` the direction re-samples its bold genes once more with `explore` weights, then repels again); **exhaustion path (rev 3, UX-24, DES-§7.9 step 4):** when every candidate is still `too_close` in the niche band, show the candidate with the largest minimum distance that clears the platform band, with the niche band as `close` wording and the three differentiators (pairing, colour strategy, second photo) as one-tap actions (at publish the server re-runs the same exhaustion test and publishes with the niche note when it confirms it, DES-§7.9 step 4, rev 4); then full docs via `buildDirection` with the genome and the **composed copy** (DES-§9.12; library fallback; AI copy merge, existing) | ≤ 600 ms for 3 docs |
 | 6 | browser | `repairDoc` (3 rounds) per doc, then the budget estimates again | ≤ 30 ms per doc |
-| 7 | server | `checkHeadlineNovelty` (through `checkHeadlinesAction`) for the generated titles and leads of the 3 docs (≤ 60 lines) → resample `close` lines from the library, re-run the copy gates | one round trip |
+| 7 | server | `checkHeadlineNovelty` (through `checkHeadlinesAction`) for the generated titles and leads of the 3 docs (≤ 60 lines, each with its origin class; bands only back) → recompose `close` lines with another skeleton (≤ 3, DES-§9.12), then the name-led neutral skeleton, the library line only as the last fallback (rev 4: the rev 3 "resample from the library" contradicted DS51); re-run the copy gates | one round trip |
 | 8 | browser | present (DES-§14.3); AI copy streaming (ai.md AI-02) overlays fields as they arrive and re-runs the copy gates per field | |
 | 9 | server | `recordCandidatesAction` (in `after()`) writes the 3 directions as `generated` rows | async |
 | 10 | server | "Use this direction" → `createFromDirectionsAction` (moved to `src/app/app/[store]/generate/actions.ts`, core §I.1): validates the docs (today's checks), writes the page and the generation versions, writes the `chosen` genome row from `genomeOf(doc)` on the server plus the client's copy-gene tags (validated against `GENE_VOCAB`) | existing |
@@ -3715,11 +3959,16 @@ The whole path from "Generate" to the directions is ≤ 2.5 s with library copy 
 directions without the novelty words and a quiet line "Uniqueness check unavailable right now"; the publish check still
 runs. The three directions of one run must be pairwise d ≥ 0.25 (hard, by construction in step 3) and target a median
 ≥ 0.35 (DS25). Nothing in steps 1-9 downloads a model or waits for Cloud AI (core D59): the category comes from the
-owner's tap, the palette from the photos in the browser, the copy from the library; SigLIP and the VLM refine after the
-reveal.
+owner's tap, the palette and the alpha estimate from the photos in the browser, the copy from the compositional
+generator (the library as its fallback, DS51); SigLIP and the VLM refine after the reveal.
 
 ### DES-§14.3 The onboarding reveal (UX-01, R1; flow owned by platform.md PD4 at `/app/<h>/welcome`)
 
+- **Ownership (rev 4, UX-20, PLA PD73):** the reveal **component** is P6's (`src/components/generate/reveal/RevealFolds.tsx`,
+  inside `src/components/generate/**`: the three folds, the carousel, the DNA bottom sheet, the DNA cards, the motion
+  below); P2's `/app/<h>/welcome` step (`src/app/app/[store]/welcome/**`) mounts it, owns the step, its routing, the
+  timing (`reportRevealAction`) and the UX-01 acceptance. Where PLA-§22.2's prose and this section differ in a
+  measurement (the sheet handle, the entrance), this section is the component's specification.
 - **Composition (rewritten rev 3, UX-20, DS58): three real folds, never a page inside a frame inside a phone.**
   *Mobile (390):* direction 1 is rendered as the **real page fold, edge to edge at 100 %** (the live `<iframe>` of the
   draft's first 844 px, `pointer-events: none`, `sandbox`), inside a **horizontal snap carousel** of the three folds
@@ -3736,17 +3985,19 @@ reveal.
 - **Motion:** the three folds rise 12 px with opacity 0 → 1 over 420 ms (quint-out) with an 80 ms stagger (direction 1
   first); the cards fade in last (180 ms); the carousel's peek is the only hint of more. No confetti, no glow sweep, no
   parallax. Reduced motion: a 180 ms crossfade only. The expansion on desktop is a 240 ms `--ease-out` width change.
-- **Store mode (OPS-14, platform.md PLA-§22.2):** in `store` mode the reveal's three folds are the **PDP draft** built
-  synchronously from `productAsPageDoc` through the PDP families of STO-§12.8 (three families, one per direction), not a
-  landing page the store mode then hides; the "done" step says "Your product page is ready; your store home is being
+- **Store mode (OPS-14, platform.md PLA-§22.2, core §A.2):** in `store` mode the reveal's three folds are the **PDP
+  draft** built synchronously by `productAsPageDoc(product, { …sctx, direction })` (S1, R2; core §K.4) through the PDP
+  families of STO-§12.8 (three families, one per direction), not a landing page the store mode then hides (store-mode
+  onboarding creates no landing page, core §A.2); the "done" step says "Your product page is ready; your store home is being
   built". In `landing` and `both` modes the folds are landing pages as above.
 - **States:** analysing (skeleton of the exact final layout after 150 ms, kept ≥ 300 ms; a progress line names the real
   step: "Reading your photos", "Choosing type", "Checking it's unique"); revealed; error (one sentence + "Try again";
   the library fallback always produces directions).
 - **Honesty:** prices are the ones the owner typed (PD23); no stock, ratings or reviews appear in previews; sample
   proof sections are absent (LP-02).
-- **Acceptance:** reveal ≤ 2.5 s after the analysis ends (library copy); the 3 directions pairwise d ≥ 0.35 on the
-  DG-09 fixtures; no hard gate item on screen; 360 px and Arabic RTL screenshots clean (visual CI fixture).
+- **Acceptance:** reveal ≤ 2.5 s after the analysis ends (library copy); the 3 directions pairwise d ≥ 0.25 always and a
+  median pairwise d ≥ 0.35 on the DG-09 fixtures (rev 4: one rule with DES-§14.2 and UX-01); no hard gate item on
+  screen; 360 px and Arabic RTL screenshots clean (the `reveal` story fixture, DES-§15.6).
 
 ### DES-§14.4 Store generation from photos and the brand kit (R2, S2 with storefront.md S1)
 
@@ -3884,8 +4135,11 @@ the bands the panel does not stop at "says so": it offers the **three concrete d
 each previewed before / after: *change the pairing* (`differentiate G4`), *change the colour strategy* (`differentiate
 G9`), *add a second photo* (opens the media picker; with a second asset the pools reopen `grid-contact`, `showcase:figure`
 and the `detail` role, which moves the page in `treatment`, `crops`, `seq` and `hero`), then "Remix design" (a new page
-genome within the brand locks). The item's wording is the `close` wording of the niche band while the owner works; the
-publish check decides on the result.
+genome within the brand locks). The item's wording is the `close` wording of the niche band while the owner works. At
+publish the server runs the same `differentiate` as its exhaustion test (DES-§7.9 step 4, rev 4): if a variant exists
+the refusal names it as the fix (one tap applies it), if none exists the page publishes with the niche note, so the
+panel never promises a path the server then refuses. The platform band and the clone flag are not part of this path:
+"almost identical to another store" is always fixed before publishing.
 
 ### DES-§15.4 DNA card (Theme panel)
 
@@ -3903,7 +4157,9 @@ novelty words** as one row of three 20 px status chips (`--success-soft` for ok,
 number), the **provenance line** (12 muted with the engine / Director icon 14 px), and **one disclosure row** "Locks"
 (32 px, chevron) that expands to the seven lock toggles (one per bold gene, 36 px rows, a switch at the inline-end,
 "for this page" / "for my brand" as a segmented 2-way control under the list, `brand.write` required for the brand
-side). Height collapsed ≈ 232 px, expanded ≈ 520 px. At 390 (the builder's Theme sheet) the chip grid stays 2 × 2 at
+side; rev 4: the brand side writes `brand.genes.G1` / `.G9` / `.G23`, `brand.fonts.locked` for G4 and `store_ai.voice`
+for G28 through ai.md's action, and is disabled with the hint "Page genes lock per page" for G2 and G18, which are
+page genes; the page side writes `look.locks`, now with all seven bold genes). Height collapsed ≈ 232 px, expanded ≈ 520 px. At 390 (the builder's Theme sheet) the chip grid stays 2 × 2 at
 full width. RTL: the grid mirrors; the pairing chip's Latin names are LTR isolates. Fixture:
 `src/app/dev/fixture/design/dna-card/page.tsx` (engine / Director, locked / unlocked, legacy doc) in `fr` and `ar`.
 
@@ -4098,9 +4354,10 @@ controls are ≥ 44 px whatever the density.
 - **KPI tile:** label (13, muted) · value (28 / 32, 600, tabular) · delta chip vs the previous period (semantic tokens,
   arrow icon, never Tailwind `emerald` / `rose`: `dashboard/kpi-card.tsx:75`) with its n · sparkline only with ≥ 7
   points (28 days, 1.5 px jade line, last point marked; today `kpi-card.tsx:92` draws from `spark.length > 1`) · a
-  definition on hover ("Delivered orders, last 28 days"). The hero tile loses aurora + grain by default
-  (`kpi-card.tsx:58`, `emphasis && "adm-aurora adm-grain"`); placed, confirmed and delivered never share a tile (core
-  §I.8 rule 3).
+  definition on hover ("Delivered orders, last 28 days"). The hero tile loses aurora + grain (`kpi-card.tsx:58`,
+  `emphasis && "adm-aurora adm-grain"`: the classes are removed from the codebase, rev 3 UX-38, core D60 rev 3; the
+  emphasis is the tile's 32 px value and a 2 px inline-start `--brand` bar); placed, confirmed and delivered never
+  share a tile (core §I.8 rule 3).
 - **COD funnel (signature chart):** horizontal stepped bars orders → confirmed → shipped → delivered → cash collected;
   bar length ∝ count, absolute count + step rate between bars, delivered in jade, the others in the graphite ramp,
   refused and returned as a thin crimson annotation; one funnel per period; tabular labels.
@@ -4185,7 +4442,7 @@ with the grid monogram (DS32) on the deep-ink ground; R2 store icons come from t
 
 | Release / track | Scope |
 |---|---|
-| R1, P2 (shell) | token generator (tenant reproduces today), console input, `--info` pair at hue 250, density attribute, motion fixes (sidebar spring and rotation, `--ui-spring` removed, the 400 ms rule), `test:admin-motion` / `test:admin-rtl` / `test:i18n-coverage` (core §J.1), radius tokens, Plex Arabic for `ar` pages (auth, onboarding, agent console, D36), palette visuals, banners, limit sheet, quiet empty states (aurora off by default, celebration variant twice), KPI ≥ 7-point rule and semantic delta tokens, the Store Health ring and issue list (SF-03 UI), onboarding reveal (DES-§14.3), the **full live address card** (DES-§16.12), manifest |
+| R1, P2 (shell) | token generator (tenant reproduces today), console input, `--info` pair at hue 250, density attribute, motion fixes (sidebar spring and rotation, `--ui-spring` removed, the 400 ms rule), `test:admin-motion` / `test:admin-rtl` / `test:i18n-coverage` (core §J.1), radius tokens, Plex Arabic for `ar` pages (auth, onboarding, agent console, D36), palette visuals, banners, limit sheet, quiet empty states and the typographic celebration (no aurora / grain anywhere: classes removed and linted, DES-§16.8), KPI ≥ 7-point rule and semantic delta tokens, the Store Health ring and issue list (SF-03 UI), onboarding reveal (DES-§14.3), the **full live address card** (DES-§16.12), manifest |
 | R1, P1 (console) | console identity, impersonation ribbon, console palette variant, the console health ring |
 | R1, P6 | Design check panel with budget meters, DNA card with locks and provenance, brand page (BK-1), the search provider, the design health rules, the design flags |
 | R1, P3 / P4 / P5 | their screens on the system per core §I.8's 13-screen order; P4 owns the agent console's phone-first rules (core §I.8 rule 6) |
@@ -4370,7 +4627,7 @@ export function inlineStyle(role: EmailRole, t: EmailTokens): string;           
 
 | Item | Budget | Checked by |
 |---|---|---|
-| landing runtime JS added by this part | **0 bytes** (LND-16; the chunk budget in `budgets.json` is the value T3 re-measures and records after the R1.0 storage-key change, ENGP-26; this part adds nothing to it and `render-check`'s +5 % rule stays the gate) | `render-check` |
+| landing runtime JS added by this part | **0 bytes** (LND-16; the chunk budget in `budgets.json` is the value T3 re-measures and records with its sha256 after the R1.0 storage-key change, ENGP-26; this part adds nothing to it and `render-check` holds the `landing` chunk at **tolerance 0** against that recorded value (core header freeze rule, ENGC-10, core §Q.8 LAN R18 / STO-R41: the rev 3 "+5 %" wording is withdrawn); a re-freeze above 24,200 B is the owner's decision in core §P, never this part's) | `render-check` |
 | inlined CSS growth from `look` and the new variants | ≤ +4 KB gz on the heaviest page (new budget key `css`, request DES-R5), reported as two lines: shared base ≤ +1.5 KB gz and per-variant chunks ≤ +2.7 KB gz on one page (DES-§4.5.4, UX-35) | `render-check` |
 | `look` JSON in the doc | ≤ 700 B | `theme:check` |
 | `sampleGenome` + compile, per candidate | ≤ 3 ms (200 node expansions) | `test:design` (timed) |
@@ -4388,8 +4645,10 @@ export function inlineStyle(role: EmailRole, t: EmailTokens): string;           
 | `renderDigest` (rev 2) | ≤ 2 ms per doc | `test:design` |
 | `base.css` growth (rev 2) | ≤ +8 KB gz added, ≥ 2 KB removed (DES-§4.5.4); per-page inlined CSS within the `css` key | `render-check` |
 | the design check at publish incl. the one-candidate novelty verdict and the headline query (rev 3, DS57, QUAL-33) | ≤ 60 ms in Node unit timing; **≤ 150 ms p95 on Hostinger** (core §M.1 allows ≤ 400 ms per check); the rev 2 "≤ 15 ms" was smaller than the novelty call it included | `test:prepublish` (synthetic 20,000-row pool) |
+| the exhaustion test on the rare niche-only `too_close` path (rev 4, DES-§7.9 step 4) | ≤ 6 resamples × (≤ 3 ms sample + ≤ 20 ms bounds-first verdict) ≈ 140 ms; **≤ 300 ms p95 for the whole check on that path** on Hostinger, inside the core's 400 ms | `test:prepublish` (saturated synthetic niche, timed) |
+| the footer "Report this store" link (rev 4) | ≤ +20 B gz CSS (one legal-row link); 0 runtime bytes | `render-check` |
 | `designHealth(scope)` (rev 2) | ≤ 40 ms, one scoped query | `test:health` fixture |
-| `design_genomes` | ≤ 600 rows per store, ≤ 1.8 KB per row | retention job, console tile |
+| `design_genomes` | ≤ 600 rows per store, ≤ 1.8 KB per row (≤ 2.4 KB on the one `chosen` row per page, rev 4) | retention job, console tile |
 | `headline_shingles` | ≤ 256 rows per (niche, store) | `syncShingles` |
 | logo designer | 12 candidates ≤ 600 ms warm; WASM + fonts only on the Designer tab | `test:logo` (Node timing), manual browser check |
 | admin palette | opens ≤ 50 ms warm | e2e timing |
@@ -4459,7 +4718,8 @@ dash or a "Step 1/2/3" label. Titles say what was measured with the value ("Page
 | `design.gate.V37` (rev 3, hard) | This gold reads as amber on many phone screens. We moved it to a warm sand and chose {colour} for the buttons. |
 | `design.gate.V38` (rev 3) | {count} image-and-text sections follow each other. Vary the rhythm: a list, a statement or a quote between them. |
 | `design.gate.V39` (rev 3, soft) | This first screen has no signature detail. Pick the stage, the mask or the type-led version. |
-| `design.novelty.niche.fallback` (rev 3) | Close to other stores in your niche. Change the type pairing, the colours or add a second photo to stand apart. |
+| `design.novelty.niche.fallback` (rev 3; rev 4 also the publish note of the verified exhaustion path) | Close to other stores in your niche. Change the type pairing, the colours or add a second photo to stand apart. |
+| `footer.report` (rev 4, landing UI key through the CCR of DES-§27.4 N1; the strings are platform's `shell.report.link`) | Report this store (fr: Signaler cette boutique · ar: الإبلاغ عن هذا المتجر) |
 | `design.why.cutout` / `.onePhoto` / `.background` / `.darkFromPhoto` / `.manyPhotos` / `.accent` / `.voice` / `.market` (rev 3) | the eight why-line templates of DES-§4.8 |
 | `design.health.q_low` / `.slop` / `.pages_close` / `.no_dna` / `.brand_empty` (rev 2) | "{page}" scores {q} on the design check · "{page}" uses {count} generated-looking devices · "{a}" and "{b}" look alike · "{page}" was generated before design DNA · No brand colours or logo yet |
 
@@ -4541,7 +4801,7 @@ No orange-family word exists in the table, because no emitted colour is in the b
 | ai.md needs | Design provides | Where |
 |---|---|---|
 | the closed gene vocabulary (AI-§D.3) | `GENE_VOCAB`, `DesignGenomeSchema`, `AI_REPAIR_OPS` | `src/lib/design/vocab.ts`, `gates/repair.ts` |
-| Director brief intake (AI-19a, AI-D18; the task is `design.plan`, rev 3) | `validateHints`, `applyHints`, `sampleGenome(…, { hints })` with **pins** (DES-§4.6, DS59); `directorBriefInput(ctx)` = product summary (name, category, owner facts, analysis colours and materials), mood, market, locale, the ranked vibes, brand locks and `GENE_VOCAB` (never another store's data); the Director candidate budget is 12 per pass (4 per brief, top 2) | `src/lib/design/hints.ts` |
+| Director brief intake (AI-19a, AI-D18; the task is `design.plan`, rev 3) | `validateHints`, `applyHints`, `sampleGenome(input, { hints, pins })` (rev 4: `pins` is a `SampleOpts` field, the core's P0 stub shape; ai.md's `DirectionBrief.pin` maps to it; DES-§4.1, §4.6, DS59); `directorBriefInput(ctx)` = product summary (name, category, owner facts, analysis colours and materials), mood, market, locale, the ranked vibes, brand locks and `GENE_VOCAB` (never another store's data); the Director candidate budget is 12 per pass (4 per brief, top 2) | `src/lib/design/hints.ts` |
 | the acceptance rule for Director ops and the candidate ordering (rev 3, QUAL-9) | applied when no new hard item, slop not rising, bands `ok`; Q reported; "top 2" by gate state → distance from the store's recent genomes and the siblings → Q; the eval scorers "brief followed", "non-mechanical ops kept ≥ 20 %", "pick type-class drift ±10" are ai.md's, defined against these exports | `gates/repair.ts`, DES-§8.9 |
 | copy genes for CopyRequest v2 (AI-§A.6) | `CopyDirectives.angle`, `.structures`, `.register`, `.darija` from the genome | `compile.ts` |
 | cliché penalty in guard v2 (AI-§D.2 rule 6) | `clicheScore(text, locale)` | `src/lib/design/cliche.ts` |
@@ -4549,17 +4809,17 @@ No orange-family word exists in the table, because no emitted colour is in the b
 | `genomeOf` per version (AI-§G.4) | `genomeOf(doc)` and the `published` rows with `version_id` | `derive.ts`, DES-§8.8 |
 | learned priors (AI-13, R3) | G1 through `rankDirections` (the archetype score gains the capped bonus) and the other bold genes in `sampleGenome`: weights × `1 + sampleBonus(…)`, capped so the learned share stays ≤ 25 % of the rank score (R-D33); direction 3 uses the MAP-Elites cell (DES-§7.7) or, when no valid cell exists, `explorationPick` | `priors.ts` |
 | gene pins and bans (AI-§G.5) | the sampler reads `platform_ai.genePins` (ban → weight 0, pin → the only value unless a hard rule refuses it) | `priors.ts` |
-| critique and repair (AI-19, R3) | `critiqueSummary`, `applyOps`, the Q rule (DES-§8.9) | `gates/**` |
+| critique and repair (AI-19, **R2**, the Director review button, core §K.4) | `critiqueSummary`, `applyOps`, the one acceptance rule (no new hard item, slop not rising, bands `ok`; Q reported, never the key; DS11, DES-§8.9) | `gates/**` |
 | store blueprint (AI-11, R2) | `compileBlueprint(blueprint) → { brand: BrandGenome; home: PlanDirectives }` validated against `GENE_VOCAB`; then DES-§14.4 | `src/lib/design/blueprint.ts` (S2) |
 | logo concepts (DG-18, R3) | `LogoConceptParams` schema and the engine (DES-§13.16) | `src/lib/logo/params.ts` |
 | the render digest and the candidate cards the Director reads (rethink-ai §1.2, §1.4; rev 2) | `renderDigest(doc, theme, genome, report)`, `genomeCard(g, report, bands, slot)` (DES-§8.9); the digest is the ground truth the critic must not contradict | `src/lib/design/digest.ts` |
-| the closed repair vocabulary (rethink-ai §1.2; rev 2) | `AI_REPAIR_OPS` = swapVariant, changeGene, rewriteLine, dropKicker, setOpener, setAlign, moveSection, trimCopy, swapHeroFamily; `applyOps` on a sandbox copy; the Q rule (+3, no new hard item, bands stay `ok`) | `src/lib/design/gates/repair.ts` |
+| the closed repair vocabulary (rethink-ai §1.2; rev 2) | `AI_REPAIR_OPS` = swapVariant, changeGene, rewriteLine, dropKicker, setOpener, setAlign, moveSection, trimCopy, swapHeroFamily; `applyOps` on a sandbox copy; the acceptance rule of DS11 (rev 3: no new hard item, slop not rising, bands `ok`; the rev 2 "+3 Q" is withdrawn) | `src/lib/design/gates/repair.ts` |
 | the rubric v3 precedence and the compatible anti-slop items (rethink-ai §1.3; rev 2) | the ordered list of DES-§8.9 is the text ai.md's `system[1]` renders; the design part owns the list, ai.md owns the prompt | DES-§8.9 |
 | the voice table (DES-§9.10; rev 2) | registers × locales × rhythm as structured data for the copy prompts and the library | `src/lib/design/voice.ts` |
-| cross-store headline check (core P0 stub name) | `checkHeadlineNovelty(scope, niche, texts)` (DES-§9.8) with `{ verdict, share }` per line | `src/lib/design/headlines.server.ts` |
+| cross-store headline check (core P0 stub name) | `checkHeadlineNovelty(scope, niche, texts)` (DES-§9.8) with `{ verdict, band }` per line (rev 4: a band over ≥ 10 owners, never a number) | `src/lib/design/headlines.server.ts` |
 | the design health read (core §I.7, §K.2 P0) | `designHealth(scope)` (DES-§2.10) | `src/lib/design/health.server.ts` |
 | the kicker budget the copy schema honours (rethink-ai §9.9; rev 2) | `CopyDirectives.kickers: Set<sectionId>` from G32; P7 makes `PageCopy.*.kicker` optional and the library keeps one per section | `compile.ts` |
-| niche shares for anti-concentration (H33; rev 2) | `nicheShares(niche)` through `nicheSharesAction` (rounded to 5 %, k ≥ 5) | `src/lib/design/novelty.server.ts` |
+| niche shares for anti-concentration (H33; rev 2) and ai.md's `recent.nicheCrowding` | `nicheShares(niche)` through `nicheSharesAction` (rev 3, QUAL-32: rounded to 10 %, k ≥ 10, ± one store-equivalent noise, hourly refresh per niche; the rev 2 "5 %, k ≥ 5" is withdrawn) | `src/lib/design/novelty.server.ts` |
 
 ---
 
@@ -4568,7 +4828,8 @@ No orange-family word exists in the table, because no emitted colour is in the b
 | Risk | Mitigation | Test (DES-§25) |
 |---|---|---|
 | the distance service as an oracle for another store's design | verdict bands only, no ids, no numbers, no vectors in answers (DS7); ≤ 16 candidates per call and 60 calls / 10 min per store; raw distances never persisted | `design-db-check`: answer shape identical whatever the pool; no store id or vector in any response; bucket refusal at call 61 |
-| headline check as a text oracle | HMAC shingles with a server-only key, answers per line `ok` / `close`, no counts or owners; rate-limited | same; owner tags never serialised (schema test on every design response type) |
+| headline check as a text oracle | HMAC shingles with a server-only key, answers per line `ok` / `close` and a share **band** computed over ≥ 10 owners (rev 4; never a number, no counts or owners); rate-limited | same; owner tags never serialised (schema test on every design response type); a 9-owner niche returns `band: null` |
+| the exhaustion fallback as a way around the niche band (rev 4) | the fallback softens the niche band only after the server's own deterministic test (seeded by page id and pool watermark, so re-publishing cannot shop for a different answer) finds no `differentiate` variant; the platform band (0.25) and the clone flag (0.12) are never softened; the `published` row records `fallback: true` and the console design page counts fallbacks per niche (the capacity signal of DES-§17.7) | `test:design-db`: a saturated niche → soft N1 and a published page; the same page with a clearing variant → hard N1; a page at d < 0.12 to another store → hard whatever the niche |
 | cross-store reads outside the allowlist | only `novelty.server.ts` and the jobs track file read other stores' rows, annotated (request DES-R9); the lint pins the count | `test:tenancy-lint` |
 | a tenant's genome reused as another's template | the archive holds designer seeds and counts only (DS22); exploration fixes three categorical genes, never copies a genome | static test: `src/lib/design/seeds/**` and `design_archive` writes contain no store id or genome id |
 | brand assets from another store | `assertOwned(scope, "asset", ids)` on every brand write; export routes go through `storeGuard` | attack case: B binds A's asset id → `not_found`; B fetches A's logo export → 404 |
@@ -4655,7 +4916,7 @@ few ticks for today's volumes; re-run automatically when `genome_v` or the token
 | `design_genomes` rows per store | 600 |
 | shingles per (niche, store) | 256 |
 | `store_themes` versions per store | 30 |
-| brand gene locks (R1) | 7 genes (G12, G17, G23, G26, G27, G28, G31) |
+| brand gene locks (R1; rev 4 aligned with DES-§2.6) | 7 genes in `brand.genes` (G1, G9, G12, G17, G23, G26, G27) + G4 through `brand.fonts.locked`; G28 / G31 are `store_ai.voice` (DS45), not brand locks |
 | brand colour moves kept | 4 |
 | logo names / tagline | 32 characters each |
 | logo candidates generated / shown / "more like this" | 12 / 6 / 6 |
@@ -4684,7 +4945,9 @@ few ticks for today's volumes; re-run automatically when `genome_v` or the token
 | `nicheShares` k / rounding / refresh (rev 3) | ≥ 10 stores / 10 % / hourly |
 | Director candidates per pass / pins per direction (rev 3) | 12 / 1 |
 | composition score / corpus median (rev 3) | 0-15 / ≥ 10 |
-| headline shingle share in the niche (rev 2) | > 10 % soft, > 25 % hard |
+| headline shingle share in the niche (rev 2; rev 4 bands by origin) | `mid` > 10 % soft, `high` > 25 % hard on `engine` / `local` / `cloud` lines and soft (N05) on `owner` / `library` lines; bands over ≥ 10 owners |
+| exhaustion test at publish (rev 4) | ≤ 6 server-side resamples; ≤ 300 ms p95 on that path |
+| Q base (rev 4) | 70 (a clean page without composition = 80) |
 | `base.css` growth from this part (rev 2) | ≤ +8 KB gz |
 
 ### DES-§24.3 Starting values to calibrate (DG-09)
@@ -4695,7 +4958,8 @@ share lines 10 % / 25 %, height-model row constants and the fold zones (760 / 93
 bits, the Arabic lockup size ratio 110-125 %, the 0.02 novelty floor and ε 0.25, the anti-concentration factors 0.5 /
 0.25 and the caps of H33, the `AR_METRICS_FALLBACK` table (until measured), the ink-density band 0.85-1.15, the gold
 band 75-95° at C > 0.10, the composition points, the repulsion iterations (6). **Fixed before P6 merges and not
-calibrated (rev 3, ENGP-29):** the Q floor 82, the slop lines 6 / 3, the composition median 10. Every one lives in
+calibrated (rev 3, ENGP-29):** the Q floor 82, the slop lines 6 / 3, the composition median 10, and (rev 4) the Q base 70
+of DES-§8.5 that gives those numbers their meaning. Every one lives in
 `calibration.json` or `priors.ts`, never inline in code; the core's budget thresholds live in the core's
 `budget-limits.ts` and are not this part's to change.
 
@@ -4707,43 +4971,49 @@ calibrated (rev 3, ENGP-29):** the Q floor 82, the slop lines 6 / 3, the composi
 
 | Script | File | Checks |
 |---|---|---|
-| `test:design` (new; core §J.1; **rev 3, ENGP-24: a seeded fast subset ≤ 40 s inside `npm test`, the full sweeps in `test:design:full` under `test:slow`, run before each merge; `npm test` as a whole is asked to stay ≤ 3 minutes, DES-R26**) | `src/lib/design/selftest.ts` (+ `scripts/qa/design-check.ts` for the fixture sweep) | same (seed, inputs, `priorsV`, hints) → byte-identical genome; 11 archetypes × 3 moods × **20 seeds (fast) / 200 (full)** satisfy H01-H36; `compileGenome` never throws, `orangeMixes` empty, look ≤ 700 B; `genomeOf` consistency on the baseline fixtures (DES-§4.7); solver ≤ 200 expansions and ≤ 3 ms; hints: invalid values dropped, locks respected, one pin honoured and a second dropped; distance: symmetric, `d(a,a) = 0`, range [0, 1], Σw = 40 / 21 / 19 and page + brand = full, two stores with identical inputs ≥ 0.25 (GEN-12), the bounds-first `genomeDistance` equals the full computation on 10,000 random pairs, the locale-aware pairing component; N6: same (seedBase, archetype) across two fixtures → J ≤ 0.25, no shared hero + pairing + order; choreography: ≥ 100 distinct sequences over **2,000 (fast) / 10,000 (full)** expansions, 100 % invariants I1-I8 and H35, form ≤ 3 screens, 8-14 sections, ≤ 12,000 px, the two position entropies; **the 140-plan sweep** (7 fixtures × ar/fr × 10 seeds, chosen-page model, **plus the `low-asset` class**): N3 ≥ 60 distinct per 100 and max 4-gram ≤ 50 %, N4 measured ≥ 0.9 × E[distinct] with the entropy floors and ≥ 40 (hero × grammar × strategy), C1 hero family ≤ 20 % and (family × arrangement) ≤ 12 % per niche, T5 / F12 concentration incl. the Fraunces / Instrument caps and the class cap, K1 strategy ≤ 25 %, ≥ 6 distinct why lines per locale, ≥ 40 distinct composed hero titles per family × locale with 0 em dashes and spec ≥ 0.5; the **capacity simulation** (DES-§7.9, §17.7: 200 stores × 3 niches, full only); the rhythm planners: kickers ≤ ⌈n/3⌉ and ≥ 5 openers, photo uses ≤ 3 and the crop rule by asset count, CTAs ≤ 6, reveals ≤ 60, every fold item ≤ 760 for every hero family × ar/fr with the fixture's longest title; the choreography rows differ for two genomes with the same G1 and different G2; `estimateHeights` vs **`src/lib/design/calibration/heights.json`** (committed) within 0.8-1.25 on ≥ 90 % for totals and p95 ≤ 10 % for fold items; `sheets.ts` → registry equality (`features.fold / slots / h`); gates ≤ 8 ms p95; **every design-baseline §5 hard target has a failing and a passing fixture** (DES-§8.10: the 27-section 170 KB baseline doc, the ghost-word / ring / three-glass / two-strips / numbered-eyebrow doc scores slop ≥ 6 and ≤ 2 after repair, the "X Pulse" doc, the "02 يومين" doc, the Bodoni old-style price doc, the panel → surface → card doc, the teal-on-argan pop, the 68-button doc, the 394-reveal doc, the "Ce que change Sérum" template, the MSA / Darija FAQ pair); the §6 keep-list pages pass every hard gate; the rev 3 calibration fixtures (a poster page with 3 display-only centred sections → 0 V08 penalty, a 6-question FAQ → 0 V09 penalty, the `round` ladder with a pill chip → V05 passes, a dark-luxe perfume fold with a product-tinted glow around the bottle → 0 S05, four splits in a row → V38 hard, the `argan-gold` / `honey` / `saffron` fixtures → "sand + signal", a white-background perfume + maison → a dark-luxe direction in ≥ 1 of 3, the one-asset 1,200 px fixture → two uses, no tight crop, no V14 penalty); repairs idempotent (repairing twice = once); copy: the real-text cliché fixture per locale flagged ≥ 85 %, a 120-line clean fixture ≤ 5 %, inflected and clitic forms hit; `registerOf` on a 60-line native-labelled Darija / MSA set ≥ 90 % and ≤ 2 % false calls on the 200-sentence mixed set; normalisers (ar alef/ya/ta marbuta, clitics, stems; fr elisions and lemmas; digits); `composeLines` obeys the register table, D4 and the fold line count; bottom-k containment within ±0.08 of exact on synthetic sets; `punctuate` table; specificity; `typeTokens` satisfies T1 / T3 / T6 / V15 for every pairing × locale from `metrics.ar` or the fallback and never calls a fallback value "measured"; the ink-density ratio per pairing within 0.85-1.15 (`design-ink.ts`); `nearestAllowed` never returns a colour in the guard band, picks the minimum ΔE among its candidates and is idempotent; chips never contain `·`; `renderDigest` fields equal the gate inputs on 20 docs; `toGateItem` ids are `design:*` and titles exist in ar/fr/en; pack/unpack round trips; the token table is append-only (snapshot); `gateInputFor` on a `defaultTemplate` of every store kind → 0 hard items and no pool write for utility kinds |
-| `theme:check` (extended) | `scripts/check-theme.ts` | DESIGN v3 §2.5 = `THEME_ATTR_VALUES`; pairing rules F1-F13 over the catalogue (incl. no `reem-kufi` as `displayAr`); no overshoot easing outside playground (DS28); look emission for 2,000 sampled genomes keeps contrast and no-orange; the K6 advisory list is printed |
-| `test:render` (extended) | `scripts/qa/render-check.ts` | golden HTML for docs without look (allow-listed diffs only; the 41 baseline docs' published checksums unchanged); the hero families `cinema`, `quiet`, `index`, `contact`, `statement` at 320 / 390 / 768 / 1440 in ar and fr; the `css` budget; landing chunk 24,200 B gz unchanged; the T1 CSS lint (`font-variant-numeric` on `.lp-price*`, `.lp-count*`, `[data-num]`); RTL1 / RTL2 / RTL3 / RTL5 regexes on the ar fixtures (`[dir=rtl]` text with "48-24"-style reversals, "02 يومين", `writing-mode` / `textPath` in ar documents, spaced punctuation in addresses); `data-reveal` count ≤ 60 on a `look` doc; T7 `<bdi>` on Latin runs in ar |
-| `test:copylib` (extended) | `src/lib/ai/copy-library/selftest.ts` | 0 em / en dashes; every hero and section title tagged with structure and register; ≥ 3 structures per family × locale for hero titles; every `fr` template renders against the four `ProductRef` shapes with 0 article faults (D4); the `stats` tables are not referenced by any section renderer |
-| `test:registry` (new) | `src/landing/selftest-registry.ts` | every variant declares `features`; hero variants declare `fold`; fixed variants declare `fixedPx`; decor paths exist in the variant's data schema; no pool of DES-§5.4 names a variant outside the registry; `scrapbook`, `problem:chat`, `faq:chat`, `trustBar:stamps`, `urgency:*` appear in no pool |
-| `test:admin-tokens` (extended) | `scripts/qa/admin-tokens-check.ts` | DES-§16.2 contrast and no-orange checks for both surfaces and modes; `--info` present in light and dark; `--ui-spring` absent (core §J.1) |
-| `test:admin-motion` (new, P2) | `scripts/qa/admin-motion-check.ts` | DES-§16.6 incl. the 400 ms rule; the two named sites (`app-sidebar.tsx:96`, `:146`) are tweens |
-| `test:admin-rtl` (new, P2) | `scripts/qa/admin-rtl-lint.ts` | DES-§16.15 |
-| `test:i18n-coverage` (P2, core §J.1) | `scripts/qa/i18n-coverage.ts` | every `design.gate.*`, `design.slop.*`, `design.copy.*`, `design.novelty.*`, `design.health.*` key and the onboarding reveal strings exist in ar / fr / en; no em dash or "Step n" in any catalog value |
-| `test:prepublish` (maintainer, core §J.1) | `src/lib/render/selftest-prepublish.ts` | the design check is registered, refuses a `too_close` fixture with `design:N1`, lists budget + honesty + design items together, `warn` mode audits `page.publish.design_override`; the design listener never fails a publish; **rev 3:** a fixture per store kind (DES-§8.13: every `defaultTemplate(kind, shape)` publish passes with 0 items; a `home` cloned from another store's live home → `design:N1`; two identical `@cart` templates → no item); the fold band fixture (an item at 800 px → a soft `estimated` note, at 950 px → hard); the publish design check timed ≤ 60 ms in Node on a synthetic 20,000-row pool |
-| `test:health` (P1, core §J.1) | `src/lib/health/selftest.ts` | the five design rules with and without data; group cap 15; `design:pages_close` only from the store's own rows |
-| `test:logo` (R2, new) | `src/lib/logo/selftest.ts` | shaping goldens (`goldens/shape.json`), SVG goldens, element whitelist, spacing clamps, move eligibility, small-size test on the golden marks, browser/Node byte-identical SVG for the same params, 12 candidates timing in Node |
+| `test:design` (new; core §J.1; **rev 3, ENGP-24: a seeded fast subset ≤ 40 s inside `npm test`, the full sweeps in `test:design:full` under `test:slow`, run before each merge; `npm test` as a whole stays ≤ 3 minutes, core §J.1 (DES-R26 accepted)**). **Ids:** DG-02 … DG-08, DG-12 (R1 slice), GN-1, GH-1, TC-1, RD-1, UX-05 (QR) | `src/lib/design/selftest.ts` (+ `scripts/qa/design-check.ts` for the fixture sweep) | same (seed, inputs, `priorsV`, hints) → byte-identical genome; 11 archetypes × 3 moods × **20 seeds (fast) / 200 (full)** satisfy H01-H36; `compileGenome` never throws, `orangeMixes` empty, look ≤ 700 B; `genomeOf` consistency on the baseline fixtures (DES-§4.7); solver ≤ 200 expansions and ≤ 3 ms; hints: invalid values dropped, locks respected, one pin honoured and a second dropped; distance: symmetric, `d(a,a) = 0`, range [0, 1], Σw = 40 / 21 / 19 and page + brand = full, two stores with identical inputs ≥ 0.25 (GEN-12), the bounds-first `genomeDistance` equals the full computation on 10,000 random pairs, the locale-aware pairing component; N6: same (seedBase, archetype) across two fixtures → J ≤ 0.25, no shared hero + pairing + order; choreography: ≥ 100 distinct sequences over **2,000 (fast) / 10,000 (full)** expansions, 100 % invariants I1-I8 and H35, form ≤ 3 screens, 8-14 sections, ≤ 12,000 px, the two position entropies; **the 140-plan sweep** (7 fixtures × ar/fr × 10 seeds, chosen-page model, **plus the `low-asset` class**): N3 ≥ 60 distinct per 100 and max 4-gram ≤ 50 %, N4 measured ≥ 0.9 × E[distinct] with the entropy floors and ≥ 40 (hero × grammar × strategy), C1 hero family ≤ 20 % and (family × arrangement) ≤ 12 % per niche, T5 / F12 concentration incl. the Fraunces / Instrument caps and the class cap, K1 strategy ≤ 25 %, ≥ 6 distinct why lines per locale, ≥ 40 distinct composed hero titles per family × locale with 0 em dashes and spec ≥ 0.5; the **capacity simulation** (DES-§7.9, §17.7: 200 stores × 3 niches, full only); the rhythm planners: kickers ≤ ⌈n/3⌉ and ≥ 5 openers, photo uses ≤ 3 and the crop rule by asset count, CTAs ≤ 6, reveals ≤ 60, every fold item ≤ 760 for every hero family × ar/fr with the fixture's longest title; the choreography rows differ for two genomes with the same G1 and different G2; `estimateHeights` vs **`src/lib/design/calibration/heights.json`** (committed) within 0.8-1.25 on ≥ 90 % for totals and p95 ≤ 10 % for fold items; `sheets.ts` → registry equality (`features.fold / slots / h`); gates ≤ 8 ms p95; **every design-baseline §5 hard target has a failing and a passing fixture** (DES-§8.10: the 27-section 170 KB baseline doc, the ghost-word / ring / three-glass / two-strips / numbered-eyebrow doc scores slop ≥ 6 and ≤ 2 after repair, the "X Pulse" doc, the "02 يومين" doc, the Bodoni old-style price doc, the panel → surface → card doc, the teal-on-argan pop, the 68-button doc, the 394-reveal doc, the "Ce que change Sérum" template, the MSA / Darija FAQ pair); the §6 keep-list pages pass every hard gate; the rev 3 calibration fixtures (a poster page with 3 display-only centred sections → 0 V08 penalty, a 6-question FAQ → 0 V09 penalty, the `round` ladder with a pill chip → V05 passes, a dark-luxe perfume fold with a product-tinted glow around the bottle → 0 S05, four splits in a row → V38 hard, the `argan-gold` / `honey` / `saffron` fixtures → "sand + signal", a white-background perfume + maison → a dark-luxe direction in ≥ 1 of 3, the one-asset 1,200 px fixture → two uses, no tight crop, no V14 penalty); repairs idempotent (repairing twice = once); copy: the real-text cliché fixture per locale flagged ≥ 85 %, a 120-line clean fixture ≤ 5 %, inflected and clitic forms hit; `registerOf` on a 60-line native-labelled Darija / MSA set ≥ 90 % and ≤ 2 % false calls on the 200-sentence mixed set; normalisers (ar alef/ya/ta marbuta, clitics, stems; fr elisions and lemmas; digits); `composeLines` obeys the register table, D4 and the fold line count; bottom-k containment within ±0.08 of exact on synthetic sets; `punctuate` table; specificity; `typeTokens` satisfies T1 / T3 / T6 / V15 for every pairing × locale from `metrics.ar` or the fallback and never calls a fallback value "measured"; the ink-density ratio per pairing within 0.85-1.15 (`design-ink.ts`); `nearestAllowed` never returns a colour in the guard band, picks the minimum ΔE among its candidates and is idempotent; chips never contain `·`; `renderDigest` fields equal the gate inputs on 20 docs; `toGateItem` ids are `design:*` and titles exist in ar/fr/en; pack/unpack round trips; the token table is append-only (snapshot); `gateInputFor` on a `defaultTemplate` of every store kind → 0 hard items and no pool write for utility kinds; **rev 4:** the Q anchors of DES-§8.5 (the bland clean page = 80, the keep-list pages ≥ 85, the baseline-like page ≤ 40); `look.em = "none"` emits no emphasis device and `look.locks` accepts G23; `VariantFeaturesResolved` carries `h` and `family`, and `features.h = { base: 1.1, fixed: true }` estimates the default-state form at 928 px whatever the density, spacing and G21 (every form variant × density × locale ≤ 1,100 px, LAN R12); the origin classes (`library` lines never hard for N8 / D3); the footer legal row renders "Report this store" with an absolute platform URL when `ctx.links.report` is set and nothing when it is absent; the address card's QR size = module count × 4 px with a 4-module quiet zone at both URL lengths |
+| `theme:check` (extended). **Ids:** DG-01, DG-08 | `scripts/check-theme.ts` | DESIGN v3 §2.5 = `THEME_ATTR_VALUES`; pairing rules **F1-F15** over the catalogue (incl. no `reem-kufi`, `noto-naskh-arabic` or `ibm-plex-sans-arabic` as `displayAr`, the ink-density ratio, the `metrics_missing` list); no overshoot easing outside playground (DS28); look emission for 2,000 sampled genomes keeps contrast and no-orange; **the gold band is hard for accent / pop (rev 3, V37) and listed for the other roles** (rev 4: the "K6 advisory list" wording of rev 2 is gone) |
+| `test:render` (extended). **Ids:** DG-15 (R3), TC-1 (T1, T7, RTL1-RTL5 rows), the footer report link | `scripts/qa/render-check.ts` (+ `scripts/qa/render-cases/design.ts`, core ENGP-12) | golden HTML for docs without look (allow-listed diffs only; the 41 baseline docs' published checksums unchanged); the hero families `cinema`, `quiet`, `index`, `contact`, `statement` at 320 / 390 / 768 / 1440 in ar and fr; the `css` budget (two lines: base and per-variant); the landing chunk equal to T3's recorded post-R1.0 size and sha256 at **tolerance 0** (core header freeze rule; rev 4); a live render carries exactly one `/report/<handle>` link with an absolute platform URL and an export carries none; the T1 CSS lint (`font-variant-numeric` on `.lp-price*`, `.lp-count*`, `[data-num]`); RTL1 / RTL2 / RTL3 / RTL5 regexes on the ar fixtures (`[dir=rtl]` text with "48-24"-style reversals, "02 يومين", `writing-mode` / `textPath` in ar documents, spaced punctuation in addresses); `data-reveal` count ≤ 60 on a `look` doc; T7 `<bdi>` on Latin runs in ar |
+| `test:copylib` (extended). **Ids:** DG-07 | `src/lib/ai/copy-library/selftest.ts` | 0 em / en dashes; every hero and section title tagged with structure and register; ≥ 3 structures per family × locale for hero titles; every `fr` template renders against the four `ProductRef` shapes with 0 article faults (D4); the `stats` tables are not referenced by any section renderer |
+| `test:registry` (new). **Ids:** DG-04, DG-06 | `src/landing/selftest-registry.ts` | every variant declares `features`; hero variants declare `fold`; fixed variants declare `fixedPx`; every variant declares `family` (rev 4); `features.fold / slots / h` equal `sheets.ts`; decor paths exist in the variant's data schema; no pool of DES-§5.4 names a variant outside the registry; `scrapbook`, `problem:chat`, `faq:chat`, `trustBar:stamps`, `urgency:*` appear in no pool |
+| `test:admin-tokens` (extended). **Ids:** UX-03, UX-04, UX-07 | `scripts/qa/admin-tokens-check.ts` | DES-§16.2 contrast and no-orange checks for both surfaces and modes; `--info` present in light and dark; `--ui-spring` absent (core §J.1); `CATEGORICAL` read from `generate.ts` (no violet); no `aurora` / `mesh` / `grain` / `feTurbulence` in admin CSS and components (DES-§16.8) |
+| `test:admin-motion` (new, P2). **Ids:** UX-04, UX-06 | `scripts/qa/admin-motion-check.ts` | DES-§16.6 incl. the 400 ms rule; the two named sites (`app-sidebar.tsx:96`, `:146`) are tweens |
+| `test:admin-rtl` (new, P2). **Ids:** UX-08 | `scripts/qa/admin-rtl-lint.ts` | DES-§16.15 |
+| `test:i18n-coverage` (P2, core §J.1). **Ids:** DG-06, UX-01 | `scripts/qa/i18n-coverage.ts` | every `design.gate.*`, `design.slop.*`, `design.copy.*`, `design.novelty.*`, `design.health.*` key and the onboarding reveal strings exist in ar / fr / en; no em dash or "Step n" in any catalog value |
+| `test:prepublish` (maintainer, core §J.1). **Ids:** DG-06, FL-1 | `src/lib/render/selftest-prepublish.ts` | the design check is registered, refuses a `too_close` fixture with `design:N1`, lists budget + honesty + design items together, `warn` mode audits `page.publish.design_override`; the design listener never fails a publish; **rev 3:** a fixture per store kind (DES-§8.13: every `defaultTemplate(kind, shape)` publish passes with 0 items; a `home` cloned from another store's live home → `design:N1`; two identical `@cart` templates → no item); the fold band fixture (an item at 800 px → a soft `estimated` note, at 950 px → hard); the publish design check timed ≤ 60 ms in Node on a synthetic 20,000-row pool; **rev 4:** the exhaustion path (a saturated synthetic niche → a soft `design:N1` with `vars.fallback = 1` and a published page within 300 ms; one clearing variant → a hard `design:N1` whose fix is that variant; a clone → hard whatever the niche); `gateInputFor(doc, await gateCtxFrom(ctx))` is the only path from a `PrePublishCtx` (a grep test on `prepublish/*.ts`) |
+| `test:health` (P1, core §J.1). **Ids:** HR-1 | `src/lib/health/selftest.ts` | the five design rules with and without data; group cap 15; `design:pages_close` only from the store's own rows |
+| `test:logo` (R2, new). **Ids:** DG-10, DG-17, DG-18 | `src/lib/logo/selftest.ts` | shaping goldens (`goldens/shape.json`), SVG goldens, element whitelist, spacing clamps, move eligibility, small-size test on the golden marks, browser/Node byte-identical SVG for the same params, 12 candidates timing in Node |
 
 ### DES-§25.2 DB-backed (`npm run test:db`, `cod_test_*` databases only)
 
-`test:design-db` (`scripts/qa/design-db-check.ts`): seeded pool of 3 stores → bands and the clone flag; τ_niche(n) at
-n = 10, 50, 150 (seeded pools) gives 0.40 / 0.3625 / 0.30; reservation transitions with store status changes (suspend,
-restore, close, purge); retention and the row cap; `syncShingles` on publish / unpublish; cross-store headline
-containment and the N8 share (k ≥ 10 → value, 9 stores → `null`); rate-limit refusal; the publish check writes the live
+`test:design-db` (`scripts/qa/design-db-check.ts`; **Ids:** DG-05, DG-07, DG-11 (R2), BK-1, SP-1): seeded pool of 3
+stores → bands and the clone flag; τ_niche(n) at n = 10, 50, 150 (seeded pools) gives 0.40 / 0.3625 / 0.30;
+reservation transitions with store status changes (suspend, restore, close, purge); retention and the row cap;
+`syncShingles` on publish / unpublish; cross-store headline containment and the N8 share band (≥ 10 owners → a band,
+9 owners → `band: null`; never a number in the response); rate-limit refusal; **the exhaustion path (rev 4, UX-24)**:
+a saturated synthetic niche where no `differentiate` variant clears τ_niche(n) → the page publishes with a soft
+`design:N1` (`fallback = 1`) and the `published` row records `fallback: true`; the same niche with one clearing
+variant → a hard `design:N1` naming it; a d < 0.12 page → hard whatever the niche; the test is deterministic (two runs,
+same answer); the publish check writes the live
 row with `first_published_at` and refuses `design:N1` / `design:N2` / `design:N8` while **first-come keeps its design by
 page age**: A live → B too close refused → A republishes → A not refused, B still refused (QUAL-19); **N2 by product**:
 a brand-locked store publishes 15 landing pages for one product with distinct genomes → 0 refusals, a 6th near-copy of
 the same product → `design:N2`, a near-copy for another product → the `pages_close` note only (QUAL-4); **N8 by origin**:
-30 simulated engine-only stores in one niche → 0 `design:N8` refusals, an owner-typed line at 40 % share → N05 note only
-(QUAL-1, ENGP-9); the save path stores the recomputed `q` / `slop` whatever the client sent; `nicheShares` 10 %
+30 simulated engine-only stores in one niche → 0 `design:N8` refusals, an owner-typed line at 40 % share → N05 note only,
+a copy-library fallback line at 40 % → N05 note only, an `engine` line at 40 % → `design:N8` (QUAL-1, ENGP-9, core §M.4); the save path stores the recomputed `q` / `slop` whatever the client sent; `nicheShares` 10 %
 rounding, hourly watermark and k-anonymity (9 stores → empty) and the differencing test of DES-§22; two stores' identical
 `@cart` templates → no pool row and no `design:N1` (ENGP-1); plus the design cases of the tenancy suite (DES-§22,
 DES-R13 accepted: `scripts/qa/tenancy-cases/design.ts`).
 
 ### DES-§25.3 e2e and local QA
 
-e2e (core §J.3): the onboarding reveal timing (≤ 2.5 s after analysis, library copy, 4× CPU throttle), palette open ≤
-50 ms, the Platform badge on every console route, the impersonation ribbon contrast; **`qa:wow-demo`** (maintainer; the
+e2e (core §J.3; **Ids:** UX-01, UX-02, UX-03, UX-06): the onboarding reveal timing (≤ 2.5 s after analysis, library
+copy, 4× CPU throttle), palette open ≤ 50 ms, the Platform badge on every console route, the impersonation ribbon
+contrast; **`qa:wow-demo`** (maintainer; the
 design assertions of DES-§14.8 contributed by P6); **`qa:publish-gates`** (maintainer): the design-baseline worst page
 refused with `budget_blocked` items naming count, height and bytes, a `too_close` page refused with `design:N1`, the
-dialog lists the fixes, `warn` publishes and audits. Local: `qa:design-corpus` (the 140-plan sweep + the 41-page render
-set with the R1 visual subset, DES-§17.1, §17.5), `qa:design-report` (DS25 table + the per-target table, DES-§17.4),
+dialog lists the fixes, `warn` publishes and audits. Local (**Ids:** DG-09, DG-13, TC-1, SF-02, UX-04, UX-05):
+`qa:design-corpus` (the 140-plan sweep + the 41-page render set with the R1 visual subset, DES-§17.1, §17.5), `qa:design-report` (DS25 table + the per-target table, DES-§17.4),
 the critic re-score (DES-§17.6, at R1 exit), `qa:design-visual` (R2), `qa/admin-visual/shoot.mjs --scan-only`,
 `qa/verify/orange-check.mjs` on every rendered page.
 
@@ -4754,17 +5024,17 @@ the critic re-score (DES-§17.6, at R1 exit), `qa:design-visual` (R2), `qa/admin
 | Release · track | Owns (create / modify) | Delivers |
 |---|---|---|
 | R1.0 · C0 (design lead, docs only) | `docs/DESIGN.md` | DG-01 (DES-§3) |
-| R1 · **P6 DESIGN** | the core §K.2 P6 row (rev 2, DES-R2 accepted): `src/lib/theme/**`, `src/lib/generator/**`, `src/lib/design/**`, `src/lib/ai/copy-library/**`, `src/landing/sections/**` (except `orderForm/**`), `src/landing/styles/**`, `src/landing/registry.ts` (the `features` field), `src/landing/selftest-registry.ts`, `scripts/check-theme.ts`, `src/components/generate/**` (except `ai/**`), `src/components/builder/**` (except `ai/**`; mounts P3's `ProofAttestSheet` and P7's AI components, DES-§15.5), `src/app/app/[store]/{generate,brand}/**`, `src/components/admin/brand/**`, `src/lib/logo/{monogram-grid,favicon}.ts`, `src/lib/settings/keys/{brand,platform-design}.ts`, `src/lib/render/prepublish/design.ts`, `src/lib/health/rules/design.ts`, `src/lib/flags/defs/design.ts`, `src/lib/admin-data/search/design.ts`, `src/lib/jobs/tracks/design.ts`, `src/components/admin/shell/nav/design.ts`, `src/lib/i18n/admin/<locale>/design.ts`, `scripts/qa/design-*.ts` (rev 3 adds `design-ink.ts`), `scripts/qa/tenancy-cases/design.ts`; **accepted in core rev 2.1 (DES-R18):** `src/landing/primitives/{SectionHeader,RichText,Price,Countdown,Badge,MarqueeTrack,Kicker}.tsx` (additive props only; the other 18 primitives, incl. `Cta.tsx` whose existing `hero` prop the CTA plan uses, stay read-only); **new in rev 3 (inside `src/lib/design/**`, already P6's):** `sheets.ts`, `gate-input.ts`, `copy-gen.ts`, `features.ts` (DES-R19 A\*), `calibration/heights.json`, `scripts/sync-fonts/ar-sample.json` (the Arabic sample word list the maintainer's step reads; the list is P6's, the script is the maintainer's); **requested in rev 3 (DES-R25):** `src/app/dev/fixture/design/**` | DG-02 … DG-09, SF-02, BK-1, GN-1, GH-1, TC-1, HR-1, FL-1, SP-1, RD-1 (digest and cards), DS32 favicon, the P0 stubs `GENE_VOCAB`, `sampleGenome`, `clicheScore`, `checkHeadlineNovelty`, `genomeDistance` / `checkNovelty`, `designHealth`, `estimateHeights`, `variantFeatures` (core §K.2); the composition sheets (DS47), the compositional copy (DS51), the store-document adapter (DS52, widened at the R2 contract step) |
-| R1 · P2 SHELL | its core §K.2 files incl. `scripts/qa/{admin-tokens-check,admin-motion-check,admin-rtl-lint,i18n-coverage}.ts`, `src/app/globals.css`, `scripts/build-admin-css.mjs`, `src/lib/admin-theme/**`, `src/components/admin/{shell,common,dashboard}/**` | DES-§16.1-16.10, §16.12 (the full address card, R1), §16.14, the Store Health ring and issue list UI, the reveal composition of DES-§14.3 (P6 supplies the generator calls and chips) |
+| R1 · **P6 DESIGN** | the core §K.2 P6 row (rev 2, DES-R2 accepted): `src/lib/theme/**`, `src/lib/generator/**`, `src/lib/design/**`, `src/lib/ai/copy-library/**`, `src/landing/sections/**` (except `orderForm/**`), `src/landing/styles/**`, `src/landing/registry.ts` (the `features` field), `src/landing/selftest-registry.ts`, `scripts/check-theme.ts`, `src/components/generate/**` (except `ai/**`), `src/components/builder/**` (except `ai/**`; mounts P3's `ProofAttestSheet` and P7's AI components, DES-§15.5), `src/app/app/[store]/{generate,brand}/**`, `src/components/admin/brand/**`, `src/lib/logo/{monogram-grid,favicon}.ts`, `src/lib/settings/keys/{brand,platform-design}.ts`, `src/lib/render/prepublish/design.ts`, `src/lib/health/rules/design.ts`, `src/lib/flags/defs/design.ts`, `src/lib/admin-data/search/design.ts`, `src/lib/jobs/tracks/design.ts`, `src/components/admin/shell/nav/design.ts`, `src/lib/i18n/admin/<locale>/design.ts`, `scripts/qa/design-*.ts` (rev 3 adds `design-ink.ts`), `scripts/qa/tenancy-cases/design.ts`; **accepted in core rev 2.1 (DES-R18):** `src/landing/primitives/{SectionHeader,RichText,Price,Countdown,Badge,MarqueeTrack,Kicker}.tsx` (additive props only; the other 18 primitives, incl. `Cta.tsx` whose existing `hero` prop the CTA plan uses, stay read-only); **new in rev 3 (inside `src/lib/design/**`, already P6's):** `sheets.ts`, `gate-input.ts`, `copy-gen.ts`, `features.ts` (DES-R19 A\*), `calibration/heights.json`, `scripts/sync-fonts/ar-sample.json` (the Arabic sample word list the maintainer's step reads; the list is P6's, the script is the maintainer's); **accepted in core rev 3 (DES-R25, core §K.2 P6 row):** `src/app/dev/fixture/design/**`, `scripts/qa/render-cases/design.ts` (ENGP-12), `scripts/qa/wow-demo/steps/design.ts` (the 0:50 stage / specimen / dark assertion), `src/lib/design/photo-facts.ts` (`estimateAlpha`, which P2's photos step calls); **rev 4 (inside folders already P6's):** `src/components/generate/reveal/**` (the reveal component P2 mounts, UX-20), the "Report this store" link in `src/landing/sections/footer/**` (CRIT15) | DG-02 … DG-09, SF-02, BK-1, GN-1, GH-1, TC-1, HR-1, FL-1, SP-1, RD-1 (digest and cards), DS32 favicon, the P0 stubs `GENE_VOCAB`, `sampleGenome`, `clicheScore`, `checkHeadlineNovelty`, `genomeDistance` / `checkNovelty`, `designHealth`, `estimateHeights`, `variantFeatures` (core §K.2); the composition sheets (DS47), the compositional copy (DS51), the store-document adapter (DS52, widened at the R2 contract step) |
+| R1 · P2 SHELL | its core §K.2 files incl. `scripts/qa/{admin-tokens-check,admin-motion-check,admin-rtl-lint,i18n-coverage}.ts`, `src/app/globals.css`, `scripts/build-admin-css.mjs`, `src/lib/admin-theme/**`, `src/components/admin/{shell,common,dashboard}/**` | DES-§16.1-16.10, §16.12 (the full address card, R1), §16.14, the Store Health ring and issue list UI, the onboarding `/welcome` step that **mounts P6's reveal component** (`src/components/generate/reveal/**`, DES-§14.3) and owns the step, its timing and the UX-01 acceptance (rev 4: one owner per file; PLA PD73 and core §K.2 P2's "three-fold reveal composition" read as the step's composition, the component is P6's) |
 | R1 · P1 CONSOLE | its core §K.2 files (`src/lib/health/**` engine and registry imports; the rules files belong to their tracks) | DES-§16.11, the console health ring, the `platform_design` field group placement on `/admin/settings/general` |
-| R1 · P3 LANDING | its core §K.2 files: `src/lib/render/prepublish/landing.ts` (the honesty gate: I4, I5, D1, D2, LP-21), `src/landing/sections/orderForm/**` (F1 field order, F2 picker rules, F3 input boundaries, the urgency chip), `src/landing/thankyou/**` (F4), `ProofAttestSheet` | the honesty side of DES-§8.10 |
+| R1 · P3 LANDING | its core §K.2 files: `src/lib/render/prepublish/landing.ts` (the honesty gate: I4, I5, D1, D2, LP-21, `honesty:password_field`), `src/landing/sections/orderForm/**` (F1 field order, F2 picker rules, F3 input boundaries, the urgency chip), `src/landing/thankyou/**` (F4), `src/landing/legal/**` (the legal pages render the same `ctx.links.report` link), `ProofAttestSheet` | the honesty side of DES-§8.10 |
 | R1 · P7 AI | its core §K.2 files: `src/lib/ai/copy-schema.ts` (kickers optional, ≤ ⌈n/3⌉), `src/lib/ai/guard.ts` (`allowedNumbers`, `BANNED`), the Director interactive pass, `design.plan`, `ad.brief` | consumers of DES-§4.6, §8.9, §9.10, §21 |
-| R1 · maintainer | `src/lib/render/prepublish.ts` and `prepublish/budget.ts` + `budget-limits.ts` (core §M.2, calling `estimateHeights` and `variantFeatures`), `src/lib/page/schema.ts` (`ThemeLook`, DES-R1), `src/landing/document.tsx` (`brandIcon`, DES-R11 CCR), `budgets.json` (`css` key, DES-R5), `scripts/qa/{wow-demo,publish-gates-e2e}.ts` | DES-§8.10 budget rows, DES-§14.8 |
+| R1 · maintainer | `src/lib/render/prepublish.ts` (incl. `originFrom(prev, doc)`, which reads design's generation record, DES-§9.8) and `prepublish/budget.ts` + `budget-limits.ts` (core §M.2, calling `estimateHeights` and `variantFeatures`), `src/lib/page/schema.ts` (`ThemeLook`, DES-R1, with the rev 4 `em: "none"` and `locks` + G23), `src/landing/document.tsx` (`brandIcon`, DES-R11 CCR; the footer-less report link, DES-§27.4 N1), `src/landing/{types,context,i18n}.ts` (`PageLinks.report`, `liveLinks()`, UiKey `footer.report`: the N1 CCR), `budgets.json` (`css` key, DES-R5), `scripts/sync-fonts.mjs` + `package.json` (DES-R21), `scripts/qa/{wow-demo,publish-gates-e2e}.ts` | DES-§8.10 budget rows, DES-§14.8, the report-link plumbing |
 | R2 · **S2 BRAND & LOGO** | `src/lib/logo/**` (takes over the R1 files), `src/lib/design/{brand,registers,effective,email,blueprint,store-theme.server}.ts`, `src/app/app/[store]/brand/**`, `src/components/admin/brand/**`, `src/app/api/app/[store]/brand/**`, `scripts/build-logo-fonts.mjs`, `scripts/qa/design-visual.mjs` | DG-10 … DG-14, DES-§11, DES-§14.4, DES-§18 |
 | R2 · S1 STOREFRONT | storefront.md files; registers page-kind grammars and calls `compileRegister` / `effectiveTheme`; mounts the AI-19 "Director review" button in the builder (core §K.4) | DES-§5.6, §11 consumers, §8.9 button |
 | R2 · S7 AI DATA | preview rasterisation and tiles, verify round 2, `recordPublishFeedback` (core §K.4) | DES-§8.9 tiles (RD-1 R2), DES-§2.8 |
 | R2 · S6 PLATFORM UX | P2's admin files | UX-04, UX-06 (DES-§16.13, §16.16) |
-| R3 · D4 LEARNING | `src/lib/design/{archive,novelty-budget}.ts`, `src/lib/design/seeds/**`, `src/landing/sections/**` (arrangements), `src/lib/logo/{bilingual,symbol}.ts`, the generation studio (DG-12 sliders, seed history; DES-§14.5) | DG-12 (studio), DG-15 … DG-18 |
+| R3 · D4 LEARNING | `src/lib/design/{archive,novelty-budget}.ts`, `src/lib/design/seeds/**`, `src/landing/sections/**` **except `reviewsVerified/**` (D3, core §K.5)** (arrangements; rev 4, CRIT8: the R3 phase's intersection removed so `test:ownership` stays green), `src/lib/logo/{bilingual,symbol}.ts`, the generation studio (DG-12 sliders, seed history; DES-§14.5) | DG-12 (studio), DG-15 … DG-18 |
 | R3 · D5 PLATFORM | admin RTL files | UX-07 push, UX-08 Arabic dashboard |
 | core maintainer | `src/lib/db/schema.ts`, `drizzle/**`, `package.json`, `src/lib/page/schema.ts`, `src/landing/runtime/budgets.json`, `src/landing/document.tsx` (R1 read-only), registries | DES-§27 |
 
@@ -4820,6 +5090,10 @@ part's next revision, core §Q).
 
 ### DES-§27.3 Third-round requests (revision 3; from the round-1 review)
 
+**Decided in core §Q.8 (revision 3): all seven accepted (A)**; DES-R21 as a maintainer CCR in R1 product with each face
+after its licence / modernity / size check. This revision's text follows the decisions (DES-§10.4, §4.11, §5.12, §7.8,
+§15.6, §25.1, §8.13).
+
 | # | Change | Why |
 |---|---|---|
 | DES-R21 | **Fonts (maintainer CCR, R1):** (a) `scripts/sync-fonts.mjs` measures the Arabic subset of every face that has one and writes `metrics.ar = { bodyBand, toothHeight, loopHeight, markAbove, markBelow, alefHeight, advanceAvg, measured: true }` (DES-§10.5 step 1; the sample list `scripts/sync-fonts/ar-sample.json` is P6's); `FontMetricsData` gains `ar?`; (b) seven `@fontsource` devDependencies and manifest lines: Cairo, Kufam, Vazirmatn, Cormorant Garamond, DM Serif Display, Syne, Manrope (DES-§10.4, each after the licence / modernity / size check); `fonts.generated.ts` regenerated | UX-2, QUAL-6: every Arabic metric in the manifest is Latin-measured today; UX-8, UX-9: the display rosters' real variety; type is the cheapest distinctiveness lever. Alternative if (b) is refused: the F11 fallback roster of DES-§10.4 |
@@ -4829,6 +5103,26 @@ part's next revision, core §Q).
 | DES-R25 | Core §K.2 P6 row: `src/app/dev/fixture/design/**` (the story fixtures of DES-§15.6), excluded from production builds like platform.md's fixtures | UX-19: PLA-§22.12 requires a fixture per primitive; the design screens had none |
 | DES-R26 | Core §J.1: `npm test` wall time ≤ 3 minutes on the owner's PC; a `test:slow` group (`test:design:full`, storefront's full `test:catalog` sweep, landing's full A/A simulation) run before each merge, not on every `npm test` | ENGP-24: the offline suites summed to several minutes with no ceiling |
 | DES-R27 | Core §K.2 P0 types: at the R2 contract step `GateInput.doc`, `genomeOf(doc)` and `estimateHeights(doc, …)` are widened to `PageDoc \| StorePageDoc` (one-line changes to the frozen `src/lib/design/types.ts` by the maintainer), and `src/storefront/fold.ts checkFold` is specified as a thin call into `estimateHeights` (STO-§9.5) | ENGP-1: the registry's union type had no design branch |
+
+### DES-§27.4 Round-2 notes (revision 4; contradictions recorded for core §P, no new request)
+
+Core §Q.8 closed the request rounds ("a part's next revision records only contradictions it finds between its text and
+§P / §Q.8"). Round 2 found these; each names the core text it touches, what this part now says, and what the core (or
+the named sibling) is asked to carry at its next revision. None reopens a frozen seam: N1 is three additive lines in
+read-only files the core already lists as CCR targets, N6 / N7 amend text the maintainer has not applied yet (C0 / P0).
+
+| # | Core / sibling text | Contradiction | This part (rev 4) | Asked of the core / sibling |
+|---|---|---|---|---|
+| N1 | core D76, §C.4.1 `/report` row, §L.2 PL-20 ("P1 (+ P3 / S1 footer link)"); PLA PD70 / Q3.4 ("rendered by P3 in the landing footer") | the landing footer section is P6's (`src/landing/sections/footer/**`, core §K.2 P6 row), so P3 cannot render it there, and no part named the plumbing (CRIT15) | P6's footer renders the link from `ctx.links.report` (DES-§4.5.4); P3 renders it on the legal pages and the thank-you page | a maintainer CCR: `PageLinks.report?: string` (`src/landing/types.ts`), set by `liveLinks()` only for live store renders (`src/landing/context.ts`; absolute `platformOrigin() + "/report/<h>"`, absent in exports / previews / test renders), the UiKey `footer.report` with platform's `shell.report.link` strings (`src/landing/i18n.ts`), and the minimal legal row in `document.tsx` for a doc without a footer section; §L.2 PL-20 reads "P1 (+ P6 landing footer, P3 legal pages, S1 store chrome)"; storefront's `footer.report` ar string aligns with platform's (one wording) |
+| N2 | core §M.4 clone block | §M.4 makes the niche band hard without exception, which left the wizard's exhaustion fallback (DES-§7.9 step 4, accepted in rev 3) a dead end at publish (UX-24) | the server-verified exhaustion exception: niche band soft only when ≤ 6 deterministic server-side `differentiate` resamples find no clearing variant; platform band and clone flag never softened | §M.4 adds one sentence: "except the verified exhaustion path of DES-§7.9 step 4, where the niche band is a note; the platform band and the clone flag stay hard" |
+| N3 | core §M.1 rule 2 (origin map: owner, library, cloud, local, engine), §M.4 (N8 soft on library lines) | design's rev 3 text used two classes (`generated` / `owner`) and made library lines hard | the five `OriginClass` values in `GateInput.origin`; N8 / D3 hard on `engine` / `local` / `cloud` only (DS50, DES-§7.8, §9.8) | none: design now follows the core; `originFrom(prev, doc)` reads design's generation record (`report.gen` on the `chosen` row, DES-§9.8) |
+| N4 | core §M.1 rule 2 and STO-D35 / STO-§8 (`gateInputFor(doc, ctx: PrePublishCtx)`) vs DES-§8.1 rev 3 (`Pick<PrePublishCtx, …> & { … }`) | two signatures for one seam (CRIT18) | design's signature wins (the owner): `gateInputFor(doc, ctx: GateInputCtx)` pure, and `gateCtxFrom(ctx: PrePublishCtx): Promise<GateInputCtx>` for server callers | core §M.1 and STO-D35 / §8 / STO-R29 quote the two signatures verbatim; STO, LAN R11 and core cite "the design gates of `KIND_GATES` (DES-§8.13)" |
+| N5 | core §K.2 P2 row ("the three-fold reveal composition (UX-20)"); PLA PD73 ("P6 owns the component") | one feature, two owners in prose | P6 owns the component (`src/components/generate/reveal/**`), P2 owns the `/welcome` step that mounts it | core §K.2 P2 row reads "mounts P6's reveal component"; PLA-§22.2's measurements defer to DES-§14.3 |
+| N6 | core §Q.6 DES-R1 (the `ThemeLook` text of DES-§4.5.1, applied in C0) | the rev 3 genes G26 `none` and the seventh bold gene G23 were not in `ThemeLook.em` / `ThemeLook.locks` | `em` gains `"none"`, `locks` gains `"G23"` (max 7) in the same CCR text | the maintainer applies DES-§4.5.1 as now written (0 changed checksums still asserted) |
+| N7 | core §K.2 P0 frozen shapes (`FoldReport.items: Partial<Record<FoldItem, number>>`, `features.h = { base, fixed: true }`) | DES-§5.3 rev 3 still showed a closed `items` object; `VariantFeaturesResolved` dropped `h` and had no `family` | DES-§5.3 and §8.4 now show the core's shapes, `h` carried and `family` required | the maintainer freezes `types.ts` from DES-§5.3 / §8.4 as now written |
+| N8 | core header freeze rule (tolerance 0 for `landing`, ENGC-10) | DES-§19 rev 3 still said "+5 %" | DES-§19, §25.1 say tolerance 0 against T3's recorded value | none |
+| N9 | core §K.2 P0 design stub `sampleGenome(…, { hints?, pins?, priors? })` | DES-§4.6 rev 3 nested `pins` inside `GeneHints` | `SampleOpts.pins` (DES-§4.1), `GeneHints` has no pins; ai's `DirectionBrief.pin` maps to it | ai.md AI-§A.8.2 cites `SampleOpts.pins` |
+| N10 | LAN-§3.4 table (rev 3) N1 / N2 / C1 rows ("d ≥ 0.40", "the store's last 10 pages", "hero family ≤ 30 %") | stale against DS6 / DS49 | DES-§7.9, §7.8, DS49 | landing cites τ_niche(n), "the last 5 published pages of the same product", hero family ≤ 20 % |
 
 ---
 
@@ -4976,3 +5270,119 @@ a design-baseline §5 target or §4 root cause, **RA** = rethink-ai section, **R
 Second-round requests to the core (DES-§27.2): **DES-R18** `src/landing/primitives/**` (seven files) added to the P6
 row, or the same edits as maintainer CCRs; **DES-R19** `estimateHeights` / `variantFeatures` typed stubs in the P0
 list; **DES-R20** P7's kicker-optional confirmation.
+
+---
+
+## DES-§30 Review decisions (round 2)
+
+Round 2 re-checked every round-1 finding that names this file (or is cross-file) against the body of revision 3, and
+added the critic's findings (CRIT1 … CRIT18). One line per finding id. **Verified** = the rev 3 resolution holds in the
+body and nothing contradicts it elsewhere in this file; **residual fixed** = a sentence elsewhere in the file still
+contradicted the resolution (or the core's revision 3 decided differently) and revision 4 fixed it, section named;
+**resolved** = new body text in revision 4; **no design side** = a cross finding this file has no text for (verified by
+search), with the consequence for the owning file. Contradictions with the core are the round-2 notes of DES-§27.4.
+**Rejected: none.**
+
+| Id | Sev. | Round-2 decision | Where (rev 4) |
+|---|---|---|---|
+| OPS-1 | blocker, cross | **No design side** (verified: no city key, zone table or delivery-zone read anywhere in this file; the COD and delivery lines are copy slots filled from the facts). Core D68 decided the key | — |
+| OPS-9 | major, cross | **No design side** (carrier loop, D74) | — |
+| OPS-11 | major, cross | **No design side** (verified: this file reads no hours setting; the thank-you composition and `{when}` are landing's, D73) | — |
+| OPS-13 | major, cross | **No design side** (per-city fees, D75) | — |
+| OPS-14 | major, cross | **Verified**; residual fixed: the store-mode reveal cites `productAsPageDoc(product, { …sctx, direction })` and core §A.2 (store-mode onboarding creates no landing page) | DES-§14.3 |
+| OPS-15 | major, cross | **No design side** (v3 manual orders, S1 / S4) | — |
+| OPS-20 | minor, cross | **No design side** (landing fixed LAN-§14.3) | — |
+| ENGC-1 | blocker, cross | **No design side** (core moved `is_test` / `page_slug_history` to 0004; `design_genomes` / `headline_shingles` stay 0005 and P6 merges after P0) | — |
+| ENGC-8 | major, cross | **Verified**; residual fixed: DES-§26 now lists every file core §K.2 rev 3 gives P6, removes the R3 D4 / D3 intersection (CRIT8) and states one owner for the reveal (P6 component, P2 step) so `test:ownership` has no design intersection | DES-§26, §4.9 |
+| ENGC-13 | major, cross | **No design side** (`createOrderRow`, D72) | — |
+| ENGP-1 | blocker, cross | **Verified**; residual fixed with CRIT18: one adapter signature (`gateInputFor(doc, ctx: GateInputCtx)` + `gateCtxFrom(ctx: PrePublishCtx)`), the theme resolved by the caller (the adapter stays pure), `policy` in the utility kinds, `KIND_GATES` scoped to design gates with the core's and siblings' items beside it, `FoldItem` + `name` | DS52, DES-§8.1, §8.8, §8.13, §27.4 N4 |
+| ENGP-3 | major, cross | **No design side** (core §D.5 `active` column) | — |
+| ENGP-6 | major, cross | **Verified**; residual fixed: DES-§5.12 had a second, stricter page-total band (0.9-1.1 on ≥ 95 %); one pair now (totals 0.8-1.25 on ≥ 90 %, fold items p95 ≤ 10 %, = core `HEIGHT_BAND` / `FOLD_BAND`); core §M.2 carries it (DES-R23 accepted) | DES-§5.3, §5.12 |
+| ENGP-7 | major | **Verified** (DS57, DES-§7.4, §19); rev 4 adds the budget of the one new server path (exhaustion test ≤ 300 ms p95) | DES-§7.9, §8.7, §19 |
+| ENGP-9 | major | **Residual fixed**: DES-§9.8 still gave owner lines above 25 % "the hard item"; now the soft N05, and the share leaves the server as a band over ≥ 10 owners, never a number (the competitive-signal leak) | DES-§9.8, §7.8, §8.2, §21, §22 |
+| ENGP-13 | major | **Verified** (`name`-table rewrite, licence record, `test:logo` assertion, WASM bytes in the S2 spike) | DES-§13.3 |
+| ENGP-24 | minor, cross | **Verified**; wording follows core §J.1 (≤ 3 min accepted, DES-R26) | DES-§25.1 |
+| ENGP-25 | minor | **Verified** (`nicheKey` for store-level genomes) | DES-§7.3 |
+| ENGP-26 | minor, cross | **Residual fixed**: DES-§19 / §25.1 said render-check's "+5 %"; the core decided tolerance 0 against T3's recorded size and sha256 (ENGC-10) | DES-§19, §25.1, §27.4 N8 |
+| ENGP-29 | minor | **Verified**; rev 4 adds the Q base 70 to the constants fixed before P6 merges (it defines what `qFloor = 82` means) | DES-§17.3, §24.3 |
+| UX-1 | blocker | **Residual fixed**: S2-S8 were partly prose; every new or redrawn section now has the ASCII grid at 390 / 768 / 1440, slots and aspects, type steps and max lines, the price / COD placement (or "none"), the signature, the RTL mirror, the recipe and a reference; the H5 sheet's "≥ 1600" became the slot rule | DES-§5.13 |
+| UX-2 | blocker | **Verified** (`metrics.ar`, the fallback table marked unmeasured, DES-R21 accepted) | DS37, DES-§10.5 |
+| UX-3 | major | **Verified** (H27 (a)-(c), the white-background perfume fixture) | DES-§4.4 H27 |
+| UX-4 | major, cross | **Verified**; residual fixed: the budgets table still said "≥ 50 % visible"; it now states the real `stickyVisible` rule | DES-§3.2, §5.9 |
+| UX-5 | major | **Verified** (H33 generalised, caps, histogram) | DS49, DES-§4.4 |
+| UX-6 | major | **Verified**; residual fixed: the seventh bold gene G23 was missing from `look.locks` and from the brand locks | DES-§4.5.1, §2.6, §15.4 |
+| UX-7 | major | **Verified**; H36 wording names hero families and the `framed-stage` treatment separately | DES-§4.4 H36 |
+| UX-8 | major | **Verified**; residual fixed: DES-§10.1 still said "no font is added in R1" | DES-§10.1, §10.4 |
+| UX-9 | major | **Verified** (F11 classes, Cairo / Kufam / Vazirmatn) | DES-§10.2 |
+| UX-10 | major | **Verified** (`displayWeightAr` + ink-density, N7 structural difference) | DES-§10.5, §5.7 |
+| UX-11 | major | **Residual fixed**: the typography table still said "the solver lowers `dmax` first"; it now cites the H28 ladder (headline last) | DES-§10.5 |
+| UX-12 | major | **Verified** (V05 / V08 / V09 / S05 calibration) | DES-§8.2, §8.3 |
+| UX-13 | major | **Residual fixed**: `ThemeLook.em` had no `"none"`, so the G26 `none` value could not compile; added in the same C0 CCR text | DES-§4.5.1, §27.4 N6 |
+| UX-14 | major | **Verified**; residual fixed: `features.family`, which `orderAct2` / H35 / V38 read, was not in `VariantFeatures`; added, required by `test:registry` | DES-§8.4, §25.1 |
+| UX-15 | major | **Verified** (depth recipes, stage presets, mask geometry) | DES-§4.10.1, §4.11.1 |
+| UX-16 | major | **Residual fixed**: with base 85 a clean page with no composition scored 95 ("Excellent" by hygiene, the fault itself); base 70 makes it 80, so the median 82 and "Excellent" need composition; anchors tested | DES-§8.5, DS25, DS11 |
+| UX-17 | major | **Verified**; the brand picker now hatches the gold band for the accent and pop roles | DES-§4.10, §12.4 |
+| UX-18 | major | **Residual fixed**: the wizard's step 7 still "resampled from the library"; it recomposes (generator first, library last) | DES-§14.2 |
+| UX-19 | major | **Verified** (anatomy and fixtures) | DES-§15.1, §15.4, §15.6, §12.7 |
+| UX-20 | major, cross | **Verified**; ownership stated once (P6 component `src/components/generate/reveal/**`, P2 step) | DES-§14.3, §4.9, §26, §27.4 N5 |
+| UX-21 | major, cross | **Verified** (commerce register = brand genes + clamps, PDP family from STO-§12.8) | DES-§11.1 |
+| UX-23 | major | **Verified**; the origin classes make `library` text soft too | DES-§9.4, DS50 |
+| UX-24 | major | **Resolved (residual)**: rev 3's exhaustion path let the wizard show a candidate the server then refused (hard N1 on the niche band); the server now verifies exhaustion with ≤ 6 deterministic `differentiate` resamples and publishes with a niche note only when none clears τ_niche(n); the platform band and the clone flag are never softened | DS6, DES-§7.8, §7.9 step 4, §8.2 N01, §8.8, §15.3, §19, §22, §25, §27.4 N2 |
+| UX-25 | minor | **Verified** | DES-§4.3, H09 |
+| UX-26 | minor | **Verified** | DES-§16.2, §16.9 |
+| UX-27 | minor | **Verified** | DES-§16.13 |
+| UX-28 | minor | **Residual fixed**: the coverage map's RTL7 row still said "+6-10 %" | DES-§8.10 |
+| UX-29 | minor | **Verified** | DES-§4.8 |
+| UX-30 | minor | **Verified**; a size fixture (module count × 4 px, 4-module quiet zone, both URL lengths) and the manual 3 cm scan prove it (DES-§1.4 UX-05) | DES-§16.12, §1.4 |
+| UX-31 | minor, cross | **Verified (core decided `checkout.addressMode`)**; residual fixed: the fold paragraph still collapsed the address by default | DES-§5.12 |
+| UX-32 | minor | **Verified** | DES-§12.2, §19 |
+| UX-33 | minor | **Verified** | DES-§16.3 |
+| UX-35 | minor | **Verified**; the footer link's +20 B joins the base line | DES-§4.5.4 |
+| UX-36 | minor | **Verified** | DES-§16.10 |
+| UX-37 | minor, cross | **Verified**; landing rejected the sticky submit with a reason and this part takes no side | DES-§5.12 |
+| UX-38 | minor, cross | **Residual fixed**: DS21, the KPI tile and the P2 scope row still described aurora as "a budget" / "off by default"; now removed and linted everywhere in the admin | DS21, DES-§16.9, §16.16, §25.1 |
+| UX-39 | major, cross | **Verified**; residual fixed: V13 still demanded alpha for every stage / poster / spec hero and its repair left the family; the genome keeps `cutout-stage`, the doc renders `framed-stage` until the mask, V13 fires only on a `cutout-stage` look without alpha, the repair is `changeGene G18 framed-stage` | DES-§4.11, §8.2 V13, §8.6 |
+| SEC-1 | blocker, cross | **No design side** (sandbox ceilings, D69) | — |
+| SEC-5 | major, cross | **No design side** (every design action is a write `storeAction`, refused under impersonation; the brand kit holds no customer data) | DES-§22 |
+| SEC-18 | minor, cross | **Resolved (design side)**: the landing footer carries "Report this store" (CRIT15) and the R2 logo designer's text writes call `checkBrandTerms` | DES-§4.5.4, §13.15, §27.4 N1 |
+| QUAL-1 | blocker, cross | **Residual fixed**: core §M.4 made copy-library lines soft for N8; DS9 / DS50 / DES-§7.8 / §9.8 / §8.10 / tests now use the five origin classes (hard on `engine` / `local` / `cloud` only) | DS9, DS50, DES-§7.8, §8.1, §9.8, §25.2, §27.4 N3 |
+| QUAL-2 | blocker | **Verified** (N4 redefined, E[distinct], entropy floors) | DS25, DES-§5.7 |
+| QUAL-3 | major | **Verified**; the exhaustion path is now server-verified (UX-24) | DES-§7.9 |
+| QUAL-4 | major | **Verified** (N2 same product, page-scope components) | DES-§7.2, §7.8 |
+| QUAL-5 | major | **Verified**; numbers unified with ENGP-6 | DES-§5.3, §5.12 |
+| QUAL-6 | major | **Verified** | DES-§10.5 |
+| QUAL-7 | major | **Verified**; residual fixed: three fixed-pixel thresholds survived (`hero:cinema` "≥ 1600 px", the `bleed` arrangement, the H5 sheet) | DES-§4.5.4, §6.1, §5.13 |
+| QUAL-8 | major | **Verified** | DES-§4.4 H33, §17.1 |
+| QUAL-9 | major, cross | **Verified**; DS11 / §8.9 rationale restated for base 70; DES-§21's stale "Q rule" / "+3" rows and "AI-19, R3" fixed | DS11, DES-§8.9, §21 |
+| QUAL-10 | major, cross | **Residual fixed**: the pin moved from `GeneHints.pins` to `SampleOpts.pins` (the core's P0 stub shape); a failed pin is `hints.dropped` with `why: "pin"` | DES-§4.1, §4.4, §4.6, §21, §27.4 N9 |
+| QUAL-14 | major | **Verified** (blind, interleaved, anchored, CI) | DES-§17.6 |
+| QUAL-19 | major | **Verified** (first publish time) | DS6, DES-§7.8 |
+| QUAL-20 | major, cross | **Verified** (`seq4`, `tells`) | DES-§7.4 |
+| QUAL-21 | major, cross | **Verified** | DES-§8.9 |
+| QUAL-22 | major | **Verified** | DES-§9.1-9.4 |
+| QUAL-25 | minor, cross | **Verified**; DES-§21 aligned (AI-19 is R2) | DES-§8.9, §21 |
+| QUAL-26 | minor | **Verified**; `DesignGenome.hints` now carries `pinned` and the dropped reasons it promised | DES-§4.1 |
+| QUAL-27 | minor | **Verified** | DES-§5.1, §5.7 |
+| QUAL-28 | minor | **Verified** | DES-§7.1, §7.2 |
+| QUAL-32 | minor | **Residual fixed**: the console niche chart (DES-§7.6) and the archive fallback (§7.7) still used 5 stores, and the headline share was a number over 5 owners; all now k ≥ 10, the headline share a band | DES-§7.6, §7.7, §9.8, §22 |
+| QUAL-33 | minor | **Verified**; the exhaustion path has its own budget | DES-§8.7, §19 |
+| QUAL-35 | minor | **Verified** | DES-§4.3, §14.2 |
+| CRIT1 | major, cross | **No design side** (verified: no `ZoneTable`, `zonesForCheckout` or city key in this file) | — |
+| CRIT3 | major, cross | **No design side** (verified: no calling window or weekday convention in this file) | — |
+| CRIT8 | minor | **Resolved**: the R3 D4 row reads `src/landing/sections/**` except `reviewsVerified/**` (D3) | DES-§26 |
+| CRIT15 | minor, cross | **Resolved**: P6's footer renders the link from `ctx.links.report` (absolute platform URL, live renders only, never in exports); the plumbing is a maintainer CCR; P3 renders it on the legal and thank-you pages | DES-§4.5.4, §20.1, §25.1, §26, §27.4 N1 |
+| CRIT17 | minor, cross | **Resolved**: DES-§1.4 names the command and fixture for every feature id; the DES-§25 rows carry the ids back | DES-§1.4, §25 |
+| CRIT18 | minor | **Resolved**: design's signature is the single source and is now spelled out (`GateInputCtx`, `gateCtxFrom`); `KIND_GATES` is the definition the siblings cite | DS52, DES-§8.1, §8.13, §27.4 N4 |
+
+**Other consistency fixes found while re-reading (no finding id):** `FoldReport.items` and `HeightReport.stub` follow the
+core's frozen P0 shapes and `estimateHeights` honours `features.h = { base, fixed: true }` with the 1.1-screen form
+(LAN R12, accepted by this part in core §Q.8 as S) (DES-§5.3, §5.12, §8.4, N7); `VariantFeaturesResolved` carries `h`;
+`BrandSetting.genes` gains G1 and G9 and DES-§24.2 lists the same lock set (DES-§2.6, §24.2); DS2, DS26, the owner
+summary and DESIGN v3 chapter 3 count 35 genes and the 150 ms novelty budget; DES-§27.3 records that core §Q.8 accepted
+DES-R21 … R27.
+
+**Cross-file consequences of revision 4 (for the orchestrator):** the ten round-2 notes of DES-§27.4 (N1 the report-link
+CCR and PL-20 owner wording, N2 the §M.4 exhaustion sentence, N4 the adapter signatures in core §M.1 and STO-D35 / §8 /
+STO-R29 and the `KIND_GATES` citation in STO / LAN R11 / core, N5 the P2 row's "mounts P6's reveal component" and
+PLA-§22.2 deferring to DES-§14.3's measurements, N6 / N7 the C0 / P0 texts as now written, N9 ai.md's `SampleOpts.pins`,
+N10 landing's LAN-§3.4 rows); storefront aligns its `footer.report` Arabic string with platform's `shell.report.link`.

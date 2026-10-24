@@ -1,18 +1,26 @@
 # Store Gen SaaS part spec: the AI layer (providers, quotas, honesty, privacy, learning, latency, features)
 
-Status: **part spec, revision 3 (round-1 review applied)** (2026-10-24, AI part architect). Revision 2 was attacked by
-the engineering, quality, security and UX reviewers; every finding that names this file is decided in **AI-§T** (one
-line per finding id with the section that changed, or the written reason for a rejection), the cross-file consequences
-are listed in **AI-§S.3** for the core and the other parts, and nothing of revision 2 was removed (sections only grew).
-Built on `docs/STORE-SAAS.md` **revision 2** (the core contract, cited as **core §X**; its decisions D55, D56, D61, D64 and
-appendix §Q.5, which decided every request of revision 1, are integrated here) and on the settled research decisions
+Status: **part spec, revision 4 (round-2 review applied)** (2026-10-24, AI part architect). Revision 3 answered the
+round-1 findings (**AI-§T**); round 2 re-sent every finding that names this file or is cross-file, plus the critic's
+four new ones (CRIT1, CRIT3, CRIT15, CRIT17), against **core revision 3** and the six parts at revision 3. Every one is
+decided in **AI-§V Review decisions (round 2)** (one line per finding id: resolved how and where, or rejected why); the
+body now follows the core's rev 3 decisions (D56 `maxDuration = 360` and the flag `ai_detached_jobs`, slot 4c's leftover
+budget, D68 `CityKey`, D69 sandbox ceilings, D70 impersonation masking, D73 one calling window, D74 the Sheets carrier
+loop, §M.2 calibrated bands, §M.4 N8 hard on generated lines, `GeneHints.pins`), the residual contradictions the
+round-2 read found inside this file are fixed in place (each marked **rev 4**), the cross-file consequences are
+**AI-§S.4**, and nothing was removed (sections only grew; superseded sentences say what replaced them).
+Built on `docs/STORE-SAAS.md` **revision 3** (the core contract, cited as **core §X**; its decisions D55, D56, D61, D64,
+D68-D76, appendix §Q.5 which decided revision 1's requests and §Q.8 which decided revision 3's, are integrated here; rev 2
+was the base of revision 3) and on the settled research decisions
 `docs/saas/RESEARCH.md` §2 (cited as **R-D1 … R-D53**). It covers every AI feature id **AI-01 … AI-24** (RESEARCH §3.8),
 the signature features the core assigned to the ai track (SF-01 tasks, SF-05 learning exclusions, SF-07 learners, SF-11,
 SF-12; core §K.2) with scope, release and acceptance criteria, and the 17 changes of the rethink (`docs/saas/research/
 rethink-ai.md` §9, cited **rethink-ai §n**). Section ids carry the prefix **AI-§** so cross-references to the core
 (`core §E.2`) and to the other part specs (`design.md DES-§…`, `operations.md OPE-§…`, `landing.md LAN-§…`) stay
 unambiguous. Revision 1's sections keep their ids; the Director loop is the new **AI-§A.8**, detached jobs **AI-§B.13**,
-the learning KPIs **AI-§F.9**, and **AI-§U Elevation changes (rev 2)** lists every change with its source.
+the learning KPIs **AI-§F.9**, and **AI-§U Elevation changes (rev 2)** lists every change with its source. Revision 4
+adds **AI-§Q.5 Proven by** (every acceptance item of AI-01 … AI-24 mapped to the test command, fixture or harness step
+that proves it, CRIT17), **AI-§S.4** and **AI-§V**.
 
 This document may refine only the tables core §D.9 assigns to the ai part (`ai_runs`, `ai_cache`, `ai_memory`,
 `prompt_versions`, `ai_jobs`, `ai_batches`, `ai_batch_items`, `ai_eval_runs`, `ai_usage_daily`, `stats_version_daily`,
@@ -44,7 +52,8 @@ AI-§B.2; token counts are stated assumptions and thinking tokens the least cert
 
 Reading order for a build agent: AI-§0 → the track you own (AI-§R) → AI-§A (tasks, classes, router) → AI-§A.8 (the
 Director loop) → AI-§B (server provider, jobs) → AI-§C (money) → AI-§D/E (honesty, privacy, safety) → AI-§F (prompt
-artifacts and the eval gate) → your feature rows in AI-§I → AI-§Q (tests you must keep green) → AI-§U (what changed).
+artifacts and the eval gate) → your feature rows in AI-§I → AI-§Q (tests you must keep green; AI-§Q.5 says which test
+proves each acceptance item) → AI-§U, AI-§T and AI-§V (what changed in revisions 2, 3 and 4).
 
 ### Owner summary (plain English)
 
@@ -98,6 +107,13 @@ artifacts and the eval gate) → your feature rows in AI-§I → AI-§Q (tests y
     in review share one small, separate slice of the platform's AI budget, so a wave of sign-ups cannot starve the paying
     shops. The AI's numbers check also reads numbers written as words ("deux semaines", "جوج دقايق"), and anything the AI
     believes it saw in a photo (a material, an origin, a certification) is a suggestion to tick, never a fact.
+16. **New in revision 4.** An AI-written headline is compared with the other shops of the niche **before** you see it: if
+    it sounds like theirs, the AI rewrites it once, otherwise the built-in engine writes a different one, so a page is
+    never refused at publish for copying a headline the AI wrote. The background "deep pass" no longer depends on the
+    hosting keeping hidden work alive: the screen you are watching moves it forward stage by stage. Staff who look at a
+    shop for support see it read-only and never spend its AI credits. "Best time to call" never suggests a time outside
+    your calling hours, and a delivery only teaches the AI once a carrier confirmed it or the return window passed with
+    no return, whatever a spreadsheet says.
 
 ---
 
@@ -116,7 +132,7 @@ why.
 | AI-D6 | Server calls use **structured outputs with loose schemas**: the same declaration in `copy-schema.ts` gives a strict Zod schema (guard input, local decoding), a strict JSON Schema (local worker, unchanged) and a **loose** projection with no length, count or range keywords. Lengths and counts are enforced after the call by `mergeAiCopy` / `fitText` / per-task `finalize`. No forced `tool_choice`, no assistant prefill, no `temperature`, no `thinking` field (adaptive by default), `effort` always explicit. (R-D29) | **[api]** The API drops length constraints and forced tool choice and prefill return 400 on Opus 5.5 / Fable 5.1; one long string must not fail a whole page. |
 | AI-D7 | Call shape A = `client.beta.messages.parse` / `.stream` with `output_config.format` and **`fallbacks: "default"`** under beta `server-side-fallback-2026-07-01` **on the Director and Worker classes only**; the Fast class (Haiku 5.5) never sends `fallbacks` (a list is a 400, `"default"` is inert) and may use a forced `tool_choice` for tool-only quick actions. Shape B (if the probe shows A is not accepted) = the same beta call with a hand-built JSON-Schema format and local parsing with the loose Zod schema. `platform_ai.callShape` records which one the probe validated. **Refines revision 1 (fallbacks everywhere).** | **[api]** Haiku 5.5 has no server-side fallback and still accepts forced `tool_choice`; Sonnet 5.5's `"default"` retries only `cyber` and `frontier_llm`; `reasoning_extraction` is never retried (rethink-ai §2.1, §9.3). Whether `fallbacks` combines with `parse` stays **[probe]**. |
 | AI-D8 | **Prompt caching** of a byte-stable per-task platform prefix (≥ 512 tokens, 1 h TTL) followed by a per-store block (5 min TTL), then the request data. Effort is fixed per task so a route never invalidates its own cache. | **[api]** 512-token minimum on Opus 5.5 / Fable 5.1; caches are model- and effort-scoped; cache reads cost 0.05× on Opus 5.5. |
-| AI-D9 | **Three transport patterns, one per operation, named in the task registry** (core §H.12, D56): **A interactive** (one route or `storeAction`, per-call deadline ≤ 90 s, typed fallback) for every Worker and Fast task and the Director interactive stages; **B detached, stage-resumable job** (`ai_jobs` row, `202 { jobId }`; the work is cut into **stages sized like pattern-A calls (≤ 90 s each)**, every finished stage is persisted in `progress.stages`, and the next stage is advanced by whichever comes first: the creating request's `after()`, **the poll request itself** (`GET /ai/jobs/[id]` claims the next stage under `lease_until` and runs it inside its own 90 s), or the cron `ai.jobs`; 10 s heartbeat, polling every 2 s visibility-aware; a one-item Message Batch per stage when nobody polls; **recovery never relies on `after()`**, AI-§B.13) for the deep pass, blueprints, logo systems and the health report; **C Message Batch** (50 % price, hours) for SEO/alt/translation, distillation, exemplar scoring, insights narration and the eval judge. Browser streaming for pattern A stays **NDJSON over `fetch`** with the **poll fallback** of revision 1 (the run continues in `after()`, partial events kept 10 min in a `ScopedCache`). **Refines R-D50 and revision 1's AI-D9; rev 3 makes B stage-resumable (ENGP-2).** | Fable 5.1 at `high` can run for minutes and Hostinger ends a request after about 120 s (`src/app/api/cron/tick/route.ts:25` sets `maxDuration = 120`; `after()` runs only within the route's `maxDuration`, `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/after.md` § Duration); a request must never hold the model's wall-clock (rethink-ai §1.5, §9.6). Whether a detached promise survives beyond the response on Hostinger's Node runtime is **[probe]** (`scripts/qa/detached-job-probe.ts`, AI-§B.13), but the probe now decides only whether `after()` may *also* advance stages; the job never depends on it, so the 2-6 min promise (AI-§H.1) holds through polling alone. |
+| AI-D9 | **Three transport patterns, one per operation, named in the task registry** (core §H.12, D56): **A interactive** (one route or `storeAction`, per-call deadline ≤ 90 s, typed fallback) for every Worker and Fast task and the Director interactive stages; **B detached, stage-resumable job** (`ai_jobs` row, `202 { jobId }`; the work is cut into **stages sized like pattern-A calls (≤ 90 s each)**, every finished stage is persisted in `progress.stages`, and the next stage is advanced by whichever comes first: the creating request's `after()`, **the poll request itself** (`GET /ai/jobs/[id]` claims the next stage under `lease_until` and runs it inside its own 90 s), or the cron `ai.jobs`; 10 s heartbeat, polling every 2 s visibility-aware; a one-item Message Batch per stage when nobody polls; **recovery never relies on `after()`**, AI-§B.13) for the deep pass, blueprints, logo systems and the health report; **C Message Batch** (50 % price, hours) for SEO/alt/translation, distillation, exemplar scoring, insights narration and the eval judge. Browser streaming for pattern A stays **NDJSON over `fetch`** with the **poll fallback** of revision 1 (the run continues in `after()`, partial events kept 10 min in a `ScopedCache`). **Refines R-D50 and revision 1's AI-D9; rev 3 makes B stage-resumable (ENGP-2).** **Rev 4 (core rev 3 D56, §H.12):** every P7 route handler that may start or advance a pattern-B job exports `maxDuration = 360` (the Hostinger proxy still cuts a response near 120 s, so a poll-driven stage stays ≤ 90 s); the `after()` driver is switched by the release flag **`ai_detached_jobs`** (default `false`, set from the live probe), never by a setting; a poll advances a stage only from a same-origin browser fetch (`Sec-Fetch-Site: same-origin`, AI-§A.7); and no pooled DB connection is held while a model call runs (AI-§B.11). | Fable 5.1 at `high` can run for minutes and Hostinger ends a request after about 120 s (`src/app/api/cron/tick/route.ts:25` sets `maxDuration = 120`; `after()` runs only within the route's `maxDuration`, `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/after.md` § Duration); a request must never hold the model's wall-clock (rethink-ai §1.5, §9.6). Whether a detached promise survives beyond the response on Hostinger's Node runtime is **[probe]** (`scripts/qa/detached-job-probe.ts`, AI-§B.13), but the probe now decides only whether `after()` may *also* advance stages; the job never depends on it, so the 2-6 min promise (AI-§H.1) holds through polling alone. |
 | AI-D10 | **Batches** (50 % cost) go through their own queue (`ai_batch_items`) drained by a cron job `ai.batches`, not through the core outbox. **Deviates R-D25's "one outbox for async work"** for this one case. | A batch is submit → poll for up to 24 h → stream results by `custom_id`; the outbox models one HTTP delivery with a retry ladder. Mixing them would distort both. |
 | AI-D11 | **Credits = $0.01 of provider cost.** Every server call **reserves** a p90 estimate against three counters (store month, store day, platform month), runs, then **reconciles** to the real `usage` (including fallback iterations). Over-runs above the reservation are charged even past the limit (no refusal after the fact); the next call is refused instead. | R-D15 / core D23 (`store_usage` conditional update); an honest bill without blocking a call already made. |
 | AI-D12 | **Honesty is enforced by code, not by prompt** (R-D30): every task has a `finalize(raw, ctx)` that runs the guard (`cleanAiText`, `mergeAiCopy`, number check against the inputs, closed vocabularies); the prompt rules only reduce rejections. | Owner rule 4; a prompt can be ignored, a guard can't. |
@@ -141,7 +157,7 @@ why.
 | AI-D31 | **Customer PII never enters a cloud prompt in any feature** (hard boundary, R-D31 sharpened): scripts are generated **per product** and personalised by templates locally; risk explanations, insights and the health report receive pseudonymised or aggregated features only; the `TaskIO` input types have no field for a customer's text; the PII scanner is defense in depth. | Morocco Law 09-08 transfer rules; the brief's "fast AI that learns from server data" must not mean "customer data in a prompt" (rethink-ai §5.2, §9.14, §9.15). |
 | AI-D32 | **Untrusted text travels only inside delimited data blocks; operator instructions only in `system` or appended `role: "system"` messages; every Director and copilot system prompt carries a per-run canary token the model is told never to output; imported bulk text is screened by the Fast task `injection.screen` before it can be a prompt input.** Model output never has side effects: copilot writes are proposals executed after a click through `storeAction` with the store from the session and every id re-validated. | OWASP LLM01:2025 and the 5.5-generation prompting facts (mid-turn text after a tool result reads as an injection; reminders must be append-only) (rethink-ai §5.1; skill `shared/model-migration.md` → Sonnet 5.5 → Mid-turn user messages). |
 | AI-D33 | **Insights never compute.** Every number a Worker narrates (digest, "Why?", health report, offer advisor) comes from a deterministic decomposition the server produced first (period-over-period deltas by dimension, contribution shares, Beta or binomial intervals, cells with < 5 orders suppressed, < 20 orders for rates); the `finalize` rejects any figure outside the payload and drops any health-report sentence that cites no input aggregate id. | A narrated statistic the model computed is an invented number with a decimal point (rethink-ai §4.2, §4.8, §9.15; owner rule 4). |
-| AI-D34 | **Every cloud call is metered before it runs** (reserve-then-reconcile per class with `allowOver` on reconcile), counted against three counters (store month, store day, platform month), **two share counters** (the store's Director share `ai_credits_director`, ≤ `caps.directorSharePct` 60 % of the month's credits, so copy and rewrites always keep ≥ 40 %, QUAL-34; the platform's pending share `ai_cost_micros_pending`, ≤ `caps.pendingSharePct` 10 % of `monthlyUsd`, charged only by stores in `pending`, SEC-1 / SEC-26) and two pass counters (`directorPassesPerStorePerDay` 30, `deepPassesPerStorePerDay` 5), inside class semaphores (4 Director, 8 Worker, 12 Fast; 3 Worker and 1 deep pass per store) with loop guards (≤ 6 copilot tool iterations, ≤ 2 critique rounds, ≤ 3 repair ops per candidate). | Cost-runaway protection on one shared process with a 3 GB database (rethink-ai §2.5, §5.4; core §A.4 `allowOver`, D64). A sandbox that burns $0.50 a day × N bots, or a Director pass that empties a 300-credit month in six generations, is a runaway too. |
+| AI-D34 | **Every cloud call is metered before it runs** (reserve-then-reconcile per class with `allowOver` on reconcile), counted against three counters (store month, store day, platform month), **two share counters** (the store's Director share `ai_credits_director`, ≤ `caps.directorSharePct` 60 % of the month's credits, so copy and rewrites always keep ≥ 40 %, QUAL-34; the platform's pending share `ai_cost_micros_pending`, ≤ `caps.pendingSharePct` 10 % of `monthlyUsd`, charged only by stores in `pending`, SEC-1 / SEC-26) and two pass counters (`directorPassesPerStorePerDay` 30, `deepPassesPerStorePerDay` 5), inside class semaphores (4 Director, 8 Worker, 12 Fast; 3 Worker and 1 deep pass per store) with loop guards (≤ 6 copilot tool iterations, ≤ 2 critique rounds, ≤ 3 repair ops per **pick**, none for a non-pick: rev 4 aligns this row with the slim critique of AI-§A.8.2). | Cost-runaway protection on one shared process with a 3 GB database (rethink-ai §2.5, §5.4; core §A.4 `allowOver`, D64). A sandbox that burns $0.50 a day × N bots, or a Director pass that empties a 300-credit month in six generations, is a runaway too. |
 | AI-D35 | **Provenance is answerable for every page**: `page_versions.generation_source` (`manual` / `instant` / `director` / `deep`) and `critic_picks` (≤ 2 KB: direction slot, critique round, repair ops applied, prompt and rubric versions, never page text) are written at publish; every executed copilot proposal is an `audit_log` row `store.ai.proposal_executed` naming the `ai_runs.id` that proposed it. | "Which AI wrote this" must be answerable (EU AI Act Art. 50 provenance; rethink-ai §5.6, §9.16; core §D.2). |
 | AI-D36 | **The `/ai/warm` pre-warm of revision 1 is withdrawn for structured-output tasks**; the platform prefix uses an explicit **1-hour** breakpoint instead and the store layer a 5-minute one. A `max_tokens: 1` warm request is a **[probe]** experiment, not a dependency. | **[api]** `max_tokens: 0` is an `invalid_request_error` with `output_config.format`, with `stream: true` and inside a Batch (skill `shared/prompt-caching.md` § Pre-warming → Rejected combinations); every task here uses a format. Cache reads are 0.025× on Fable 5.1 and 0.05× on Opus 5.5, so a miss is relatively dear and the 1-hour TTL pays off (rethink-ai §1.6, §9.2). |
 
@@ -215,7 +231,7 @@ export interface TaskDef {
   deadlineMs?: number;                       // pattern A: whole run, retries included, ≤ 90,000; pattern B: per stage, also ≤ 90,000 (stage-resumable, AI-§B.13); `test:ai` fails any value above 90,000 (ENGP-19)
   retries?: 0 | 1 | 2;                       // our retries (the SDK runs with maxRetries 0)
   fallbacks: "default" | "none";             // "none" is mandatory for the fast class (Haiku 5.5) [api]
-  batch: "never" | "allowed" | "always" | "fallback";   // "fallback" = pattern B degrades to C when the detached-job probe failed (core §H.12)
+  batch: "never" | "allowed" | "always" | "fallback";   // "fallback" = a pattern-B stage runs as a one-item batch in the three cases of AI-§B.8 (nobody drives the job for 60 s, a stage too big for 90 s, the owner chose "always"); rev 4: the detached-job probe no longer forces it (core §H.12 rule 1)
   pii: PiiClass;
   untrusted: readonly string[];              // input paths placed in delimited data blocks (AI-§E.3)
   estimate: { inTok: number; cachedTok: number; outTok: number; images?: number };   // p90, for the reservation
@@ -317,7 +333,15 @@ export type AiFlag = "cache_hit" | "pii_redacted" | "injection_suspected" | "fal
   | "job_degraded_to_batch"                               // pattern B fell back to pattern C (AI-§B.13)
   | "stage_resumed"                                       // rev 3: a pattern-B stage was advanced by a poll request or the cron, not by the creating request's after() (AI-§B.13)
   | "orange_regions"                                      // rev 3: the client-side raster scan found orange regions; a soft cross-check of the token guard, never a hard fail by itself (AI-§A.8.4)
-  | "pin_dropped";                                        // rev 3: a brief's pinned gene value failed a hard rule, a lock or the photo facts and was dropped (AI-§A.8.2)
+  | "pin_dropped"                                         // rev 3: a brief's pinned gene value failed a hard rule, a lock or the photo facts and was dropped (AI-§A.8.2)
+  | "novelty_reasked"                                     // rev 4 (QUAL-1, core §M.4): a generated headline or lead whose niche shingle share was > 25 % (or `close`) was re-asked once before display (AI-§D.2 rule 13)
+  | "novelty_replaced";                                   // rev 4: the re-ask still collided, the line was replaced by the engine's generator line (origin `engine`) or the library line (origin `library`)
+
+/** rev 4 (QUAL-1, core §M.1 `originFrom`, §M.4 N8): who wrote each text field of a generated draft. `mergeAiCopy` v2 returns it
+ *  per field path; the wizard (P6) stores it in the draft's `generation` block next to design's per-field text hash, and the
+ *  core's one origin builder `originFrom(prev, doc)` reads it at publish (a field whose text changed since is `owner`). N8 / D3
+ *  are hard for `cloud`, `local` and `engine`, soft for `library` and `owner`. */
+export type CopyOrigin = "cloud" | "local" | "library" | "engine";
 
 export interface AiUsage {
   inTok: number; outTok: number; cacheReadTok: number; cacheWriteTok: number;
@@ -372,7 +396,7 @@ export interface AiPolicy {
            directorBlock: "passes_day" | "quota_director" | "class_down" | null;   // rev 3: why `director` is "unavailable", for the chip copy (AI-§L)
            directorPassCredits: number;                       // rev 3: the current p90 estimate of one interactive pass in credits (≈ 53), shown on the button and the stage line in every mode (QUAL-34)
            directorPassesLeft: number | null; deepPass: boolean; deepPassesLeft: number | null;
-           deepTransport: "job" | "batch" };               // pattern B, or C when the detached-job probe failed (AI-§B.13)
+           deepTransport: "job" | "batch" };               // pattern B; "batch" only when platform_ai.classes.director_deep.batch = "always" (AI-§B.8 case c). Rev 4: a failed detached-job probe turns off only the after() driver (flag ai_detached_jobs), never pattern B (core §H.12 rule 1)
   local: { enabled: boolean; tierMax: "lite" | "full"; bgRemoval: boolean };
   autoPrefersCloud: Partial<Record<AiTaskId, true>>;
   live: AiTaskId[];                                    // tasks released and flagged on for this store
@@ -403,6 +427,14 @@ of the month is not spent (`ai_credits_director`, AI-§C.2), else `"unavailable"
 `running` for the store (`aj_active_uq`, core §D.5). The two counters are the daily `store_usage` metrics
 `ai_director_passes` and `ai_deep_passes` (period `YYYY-MM-DD`, limits `platform_ai.caps.directorPassesPerStorePerDay`
 30 and `deepPassesPerStorePerDay` 5; AI-§C.3).
+
+**Impersonation (rev 4, SEC-5 / core D70, D71).** Under a "View as store" session (`ctx.scope.kind = "impersonation"`)
+`aiPolicyFor` returns `live: []`, `cloud.available = false` with `block = "state"` and `local.enabled = false`, so no AI
+action renders; every AI route refuses on its own (`ai.use` is a write key, so `storeGuard` answers
+`impersonation_read_only`, core §B.8; the R3 copilot route refuses the impersonation scope explicitly even though
+`ai.assist` is not a write key, because a turn writes `ai_runs` and spends the **store's** credits, which staff never
+do). Settings → AI renders read-only (AI-§K.1), and the "Recent AI activity" list is metadata only, so no customer field
+can appear there (the masking of customer rows is the repositories' job, D70).
 
 **`ladderFor` decision table** (Auto rows follow R-D28, core D59 and ai.md §3.4; "→" = next rung on failure):
 
@@ -508,15 +540,21 @@ Wraps the existing deterministic code; it never fails and costs nothing:
 
 ### AI-§A.7 Browser ↔ server transport
 
-Route handlers (P7-owned, `src/app/api/app/[store]/ai/**`, each `export const maxDuration = 120`; every handler calls
-`storeGuard(req, params.store, "ai.use")` first, core §E.2; strict same-origin CSRF, core §C.9):
+Route handlers (P7-owned, `src/app/api/app/[store]/ai/**`, each `export const maxDuration = 120`, **except the three
+that may start or advance a pattern-B job, which export `maxDuration = 360`** (rev 4, core D56 / §H.12, ENGC-18:
+`[task]` for the B tasks, `director/critique` for the < 80 tok/s critique stage of AI-§A.8.6, and `jobs/[id]`; `after()`
+lives at most the route's `maxDuration`, and the Hostinger proxy still ends the response near 120 s, so no handler ever
+makes the browser wait more than 95 s); every handler calls `storeGuard(req, params.store, "ai.use")` first, core §E.2;
+strict same-origin CSRF, core §C.9). AI jobs are created **only through these routes**, so no page needs the 360 export
+for ai's sake; a page that enqueues a job through a `storeAction` (`job_queued`) must export it too (core §H.12), and
+none does in R1.
 
 | Route | Method | Body / query | Answer |
 |---|---|---|---|
 | `/api/app/<h>/ai/[task]` | POST | `{ input, nonce?, surface, stream?: boolean }` | pattern A, stream tasks with `transport = stream`: `200 application/x-ndjson` (events below); `transport = poll`: `202 { runId }`; other tasks: `200 { ok: true, value, rejected, provider, class, model, runId, credits, flags }`; **pattern B tasks** (`store.blueprint`, `logo.system`, a deep critique): `202 { jobId }` after the `ai_jobs` row and the reservation exist (AI-§B.13); failures: `{ ok: false, error: AiFailCode, retryable, retryAfterSec? }` with 403 (policy blocks), 404 (`flag_off`, the same neutral answer as an unknown route), 422 (`input_invalid`, `pii_blocked`), 429 (quota, rate, pass caps), 503 (`busy`, provider) |
 | `/api/app/<h>/ai/director/plan`, `/ai/director/critique`, `/ai/director/verify` (R2) | POST | the stage inputs of AI-§A.8.2 (`DirectorBrief`; `CritiqueInput` = cards + digests, R2 + tiles ≤ 250 KB each; `VerifyInput`) | pattern A: `200 { ok: true, value, runId, credits, flags, stage }`; the three are the `[task]` route specialised with a stage-aware deadline (45 / 90 / 60 s), the pass counter and the `ai_feedback` `director_requested` row; `410 { error: "pass_superseded" }` when a newer pass for the same wizard session started |
 | `/api/app/<h>/ai/runs/[id]` | GET | `?after=<seq>` | `{ events: AiStreamEvent[], done: boolean }` from the run buffer, or the final row when the buffer has expired; `not_found` for another store's run (same body as missing) |
-| `/api/app/<h>/ai/jobs/[id]` | GET | `?advance=1` (default 1; `0` = read only, for a second tab or the console) | `{ id, kind, status, stage, progress?: { done, total, plan }, heartbeatAt, driver?, result?, error?, costCredits }` for the store's own job (core §H.12 rule 4; `not_found` otherwise); **rev 3 (ENGP-2): a poll with `advance=1` that finds no stage under a live lease and a non-terminal job claims the next stage and runs it inside this request (`maxDuration = 120`, stage deadline ≤ 90 s), answering with the status it reached (the browser waits ≤ 95 s; a concurrent poll gets the current view at once)**; otherwise it answers at once; polled every 2 s while visible, 6 s hidden; `s:<sid>:ai:jobs` 10 / h applies to **creation**, not polling; `storeGuard(…, "ai.use")` as every ai route, so only a member of the store can drive its job |
+| `/api/app/<h>/ai/jobs/[id]` | GET | `?advance=1` (default 1; `0` = read only, for a second tab or the console) | `{ id, kind, status, stage, progress?: { done, total, plan }, heartbeatAt, driver?, result?, error?, costCredits }` for the store's own job (core §H.12 rule 4; `not_found` otherwise); **rev 3 (ENGP-2): a poll with `advance=1` that finds no stage under a live lease and a non-terminal job claims the next stage and runs it inside this request (`maxDuration = 360` since rev 4, stage deadline ≤ 90 s), answering with the status it reached (the browser waits ≤ 95 s; a concurrent poll gets the current view at once)**; **rev 4 (core §C.9 mutations rule): `advance=1` is honoured only when the request carries `Sec-Fetch-Site: same-origin` (every modern browser's `fetch` from the wizard sends it); any other value or its absence answers read-only, so a cross-site `<img>` or link cannot make a stage run, and the cron, `after()` or a one-item batch keep the job moving**; otherwise it answers at once; polled every 2 s while visible, 6 s hidden; `s:<sid>:ai:jobs` 10 / h applies to **creation**, not polling; `storeGuard(…, "ai.use")` as every ai route, so only a member of the store can drive its job |
 | `/api/app/<h>/ai/jobs/[id]/cancel` | POST | — | `204`; `status = 'cancelled'`, the in-flight call aborted, the reservation reconciled at the usage known so far |
 | `/api/app/<h>/ai/warm` | POST | `{ task }` | **R1: `410 Gone`** (AI-D36: `max_tokens: 0` is rejected with `output_config.format` **[api]**); the route stays reserved for the `max_tokens: 1` warm **[probe]**, which, if it hits the real prefix on the probe, returns `204` at most once per 50 min per (store, task, model) |
 | `/api/app/<h>/ai/report` | POST | `{ task, model, promptVersion, ms, status, rejected }` | `204`; local-run telemetry into `ai_runs` (`provider = 'local'`, 0 credits); bucket `s:<sid>:ai:report:<userId>` 120 / h |
@@ -565,7 +603,7 @@ export function useDeviceInfo(): DeviceInfo;      // capabilities.ts + userAgent
 | Layer | Runs | Does | Never does |
 |---|---|---|---|
 | **Engine** (deterministic, pure TS; design-owned: browser in the wizard, distance service on the server) | ms | Genome sampling under weights + constraint solver (`sampleGenome`, DES-§4.4), choreography grammar, variant choice with the honesty reservations (`src/lib/generator/plan.ts:173-258`), library copy (`src/lib/ai/copy-library/index.ts:433`), gates + slop score + deterministic repairs (`runGates`, `repairDoc`, DES-§8), distance / novelty / reservation (`checkNovelty`), the **render digest** and (R2) rasterization | Judge taste; write prose |
-| **Director** (`director_interactive`: Opus 5.5 `medium`; `director_deep`: Fable 5.1 `high`) | 8-90 s per call | Design read, three direction briefs as `GeneHints`, selection among gate-passing candidates, critique with evidence tied to a card index (R2: a tile), ≤ 3 repair ops per candidate from `AI_REPAIR_OPS`, copy angle per direction, suggested facts from photos, store blueprint, logo parameters, health report | Emit a genome, CSS, HTML or SVG that ships unguarded; invent facts, numbers or prices; apply its own ops |
+| **Director** (`director_interactive`: Opus 5.5 `medium`; `director_deep`: Fable 5.1 `high`) | 8-90 s per call | Design read, three direction briefs as `GeneHints`, selection among gate-passing candidates, critique with evidence tied to a card index (R2: a tile), ≤ 3 repair ops per **pick** from `AI_REPAIR_OPS` (none for a non-pick, rev 3 slim shape), copy angle per direction, suggested facts from photos, store blueprint, logo parameters, health report | Emit a genome, CSS, HTML or SVG that ships unguarded; invent facts, numbers or prices; apply its own ops |
 | **Worker** (Sonnet 5.5) | 2-30 s | Hero packs and page copy per locale and direction, field rewrites, translations, scripts, briefs, insight narration, memory distillation | Decide design; compute statistics |
 | **Fast** (Haiku 5.5) | < 3 s | Classification, alt text, copilot intents, risk phrasing, injection screening | Write customer-facing long copy |
 
@@ -586,11 +624,17 @@ P7 merges (P6 merges after P7, core §K.2).
 export interface DirectorBrief {                                              // stage 0 input, built by the wizard
   store: { handle: string; market: Market; locales: Locale[]; brandGenome?: BrandGenome; memory: MemoryItem[]; policies: StorePolicyFacts; brandSeed: string };
   product: { name: string; category: ProductCategory; facts: string[]; price: Money; items: ItemSummary[]; offers: OfferSummary[] };
-  photos: { assetId: string; w: number; h: number; hasCutout: boolean; palette: string[]; analysis?: Analysis }[];   // ≤ 3 sent as images
-  mode: "landing" | "store" | "campaign";                                     // campaign = within the brand radius (R-D41)
+  photos: { assetId: string; w: number; h: number; hasCutout: boolean | "estimated"; palette: string[]; analysis?: Analysis }[];   // ≤ 3 sent as images; rev 4 (UX-39): "estimated" = design's model-free alpha estimate (`estimateAlpha`, DES-§4.11, P6) before the BiRefNet mask exists; core §M.4 counts it as alpha, so the plan may brief stage / specimen / dark directions at the reveal
+  mode: "landing" | "store" | "campaign";                                     // campaign = within the brand radius (R-D41); rev 4 (OPS-14): "store" is used only by the blueprint's critique stage (AI-11), never by the interactive pass
   constraints: { noOrange: true; mood: "calm" | "lively" | null; modest: boolean; locks: BrandLocks };
-  recent: { storeGenomeCards: GenomeCard[]; nicheCrowding: Record<string, number> };   // the store's last 10 pages; gene-value shares of the niche (no other store's content, R-D36)
+  recent: { storeGenomeCards: GenomeCard[]; nicheCrowding: NicheShares };     // the store's last 10 pages; the niche's shares (no other store's content, R-D36)
 }
+/** rev 4 (QUAL-20): design's `nicheShares` result, imported, never redeclared: gene-value shares (grammar, strategy, displayFamily,
+ *  arDisplay, heroFamily, …) plus `seq4` (top 20 four-section subsequences) and `tells` (tell-device pair shares), k ≥ 10 stores,
+ *  rounded to 10 % (DES-§7.4), shares only (D64). The plan prompt renders the crowded `seq4` and `tells` entries into each brief's `mustAvoid`
+ *  ("niche already uses hero → proof → offer → faq on 45 % of pages"), so the briefs steer away from what the niche repeats;
+ *  the engine's own N3 / S26 rules stay the guarantee. */
+export type NicheShares = import("@/lib/design").NicheShares;
 export interface DesignRead {                                                 // rubric §0.B "Reading this as …" made structured
   readLine: string; audience: string; priceTier: "entry" | "mid" | "premium";
   suggestedFacts: { text: string; from: "photo" | "name" }[];                 // shown with a tick box; never used until ticked (AI-04)
@@ -601,7 +645,10 @@ export interface DesignRead {                                                 //
 export interface DirectionBrief {
   slot: "best-fit" | "contrast" | "explore";
   hints: GeneHints;                                                           // design's closed vocabulary, weights ≤ 3× (DES-§4.6); validated by design's validateHints
-  pin?: { gene: BoldGene; value: string };                                    // rev 3 (QUAL-10): ONE bold gene per direction set as the only value when it passes the hard rules, the photo facts and the locks; else dropped (`pin_dropped`, listed in genome.hints.dropped); the other hinted genes keep ≤ 3×
+                                                                              // rev 4 (QUAL-10, design DES-§4.6 / DS59): the pin lives INSIDE the hints as design declares it, `hints.pins?: Partial<Record<BoldGene, string>>`
+                                                                              // with ≤ 1 key per direction: set as the only value when it passes the hard rules, the photo facts and the locks; else dropped (`pin_dropped`,
+                                                                              // listed in genome.hints.dropped with why "pin"); the other hinted genes keep ≤ 3×. Revision 3's separate `pin?: { gene; value }` field is
+                                                                              // withdrawn (the model's JSON may still name it; `finalize` folds it into `hints.pins`), so the wizard passes `sampleGenome(…, { hints })` unchanged
   headlineStructures: HeadlineStructure[];                                    // G29, ≤ 2 per direction, distinct across directions
   copyAngle: CopyAngle; mustHave: string[]; mustAvoid: string[];              // named patterns, e.g. "centered dark hero + glow", "equal 3-card row"
   rationale: string;                                                          // one sentence; becomes the owner-facing "why this design" (DG-12 line, SF-02)
@@ -613,7 +660,23 @@ export interface DirectorPlan { read: DesignRead; directions: [DirectionBrief, D
  *  numeric distances and `store` is withdrawn. `test:ai` asserts the imported type is used (no local `GenomeCard` declaration under src/lib/ai/). */
 export type GenomeCard = import("@/lib/design").GenomeCard;                  // re-exported from design's index (DES-§8.9 `genomeCard(g, report, bands, slot)`)
 export type Band = import("@/lib/design").Band;
-export interface RenderDigest {                                               // mechanical rubric checks over the PageDoc + theme + height model; built by the wizard (P6) from design's `renderDigest(doc, theme, genome, report)` (DES-§8.9) plus the fields below; where design's shape lacks a field listed here, design adds it (AI-§S.3 R31), ai never computes it
+/** rev 4 (QUAL-25 closed, ENGP-6): design's `RenderDigest` (DES-§8.9, `src/lib/design/digest.ts`) is the single source and is imported;
+ *  ai adds only what design cannot know: the R2 raster result (P7's rasterizer) and the budget verdicts computed with the core's band
+ *  constants. Where revision 3's list below names a field, it now lives in design's shape as: `sections[].kicker / words / glass / align / bg /
+ *  family` (same names), `hero.*` (same names + `family`, `fold: FoldReport`), `counts.*` (same names + `eyebrowBudget`, `glass`, `photoUses`,
+ *  `fullBleedMoments`), `tokenOrange` → the no-orange gate in `gates.hard` (design V03 on the compiled theme; `colour.orangeAdvisory` is the
+ *  advisory twin), `budgets` → `heights` + `hero.fold` read through `budgetVerdicts()` below, `overflow` → `raster.overflow` (only a DOM can
+ *  see an overflow; R2), `orangeRegions` → `raster.orangeRegions`. The interface after this comment is kept as the revision 3 record. */
+export type DirectorDigest = import("@/lib/design").RenderDigest & {
+  budgets: { C2: BudgetVerdict; C3: BudgetVerdict; F1: BudgetVerdict };     // budgetVerdicts(digest.heights, digest.hero.fold) with HEIGHT_BAND 0.8 / FOLD_BAND 0.9 from core `src/lib/render/prepublish/budget-limits.ts` (pure constants; core §M.2)
+  raster: { fidelity: "full" | "partial"; orangeRegions: { count: number; px: number }; overflow: { sectionIdx: number; kind: "x" | "clip" }[] } | null;   // R2 only; null in R1
+};
+/** "ok" = inside the limit; "estimated" = inside the calibrated band (a soft note at publish, `vars.estimated = 1`); "over" = the hard refusal of §M.2.
+ *  The critic is told an "estimated" budget is NOT a hard fail and must not spend a repair op on it unless another dimension asks for it;
+ *  only "over" (and the design hard gates) excludes a candidate from the pick. */
+export type BudgetVerdict = "ok" | "estimated" | "over";
+export function budgetVerdicts(h: import("@/lib/design").RenderDigest["heights"], fold: import("@/lib/design").FoldReport): DirectorDigest["budgets"];   // pure, P7 (src/lib/ai/director/budgets.ts); test:ai pins it against the §M.2 arithmetic (C3: est × 0.8 > 15,000; F1: top × 0.8 > 3,000; C2: fold item top × 0.9 > 844)
+interface RenderDigestRev3Record {                                            // REVISION 3 RECORD, never written as code (superseded by DirectorDigest above, rev 4; `test:ai` fails a local `RenderDigest` declaration under src/lib/ai/): mechanical rubric checks over the PageDoc + theme + height model; built by the wizard (P6) from design's `renderDigest(doc, theme, genome, report)` (DES-§8.9)
   sections: { type: string; variant: string; family: LayoutFamily; align: "start" | "center"; bg: "plain" | "tinted" | "dark" | "image"; glass: number; kicker: boolean; words: number }[];
   hero: { headlineLines390: number; subWords: number; textElements: number; ctaWraps: boolean; ctaContrast: number; fitsViewport390: boolean; topPaddingPx: number };
   counts: { eyebrows: number; centeredRun: number; sameFamilyMax: number; zigzagRun: number; marquees: number; bento: number; equalCardTriplets: number; ctas: number; reveals: number };
@@ -622,7 +685,7 @@ export interface RenderDigest {                                               //
   tokenOrange: boolean;                                                       // the deterministic token-level check (`orangeMixes`, src/lib/theme/blend.ts): the hard rule
   budgets: { heightPx390: number; sectionCount: number; formTopPx: number };  // the §M.2 numbers the gate will measure at publish
 }
-export interface Candidate { card: GenomeCard; digest: RenderDigest; heroCopy: HeroPack; tiles?: { label: string; w: number; h: number; jpegBase64: string; fidelity: "full" | "partial" }[] }   // tiles R2
+export interface Candidate { card: GenomeCard; digest: DirectorDigest /* rev 4: was RenderDigest */; heroCopy: HeroPack; tiles?: { label: string; w: number; h: number; jpegBase64: string; fidelity: "full" | "partial" }[] }   // tiles R2
 export interface CritiqueInput { brief: DirectorBrief; plan: DirectorPlan; candidates: Candidate[]; round: 1 | 2; previous?: Critique; tilesPresent: boolean }   // rev 3: tilesPresent decides which rubric parts may be scored (AI-§A.8.3)
 export type RepairOp = import("@/lib/design/gates/repair").RepairOp;         // design's AI_REPAIR_OPS (DES-§8.6, the single source): swapVariant | changeGene | rewriteLine | dropKicker | setOpener | setAlign | moveSection | trimCopy | swapHeroFamily; rev 3 withdraws revision 2's `reorderSection | setAlignment | setImageTreatment` names (QUAL-25)
 export const AI_REPAIR_OPS = import("@/lib/design/gates/repair").AI_REPAIR_OPS;   // the prompt's vocabulary block is rendered from this constant and GENE_VOCAB at module load (AI-§A.8.7); `test:ai` asserts the rendered block names exactly these ops
@@ -645,19 +708,20 @@ export interface Verify { confirmed: string[]; swap?: { out: string; in: string;
 |---|---|---|---|---|---|
 | 0 | Brief | browser (wizard state, store settings `brand`, `policies`, `store_ai`, memory items) + `storeAction` | → `DirectorBrief` | < 300 ms | R1 |
 | 1 | Read + plan (one call) | route `/ai/director/plan` (`storeGuard`, `ai.use`), pattern A | brief + ≤ 3 photos → `DirectorPlan` (`messages.parse`) | Director interactive, 45 s deadline | R1 |
-| 2 | Candidates | browser, design's engine (the wizard already generates client-side, `src/components/generate/wizard.tsx:772-794`) | per brief: `sampleGenome(…, { hints, pin })` × **4** → solver → gates → **top 2 by the two-signal order** (rev 3, QUAL-9 / QUAL-25: (1) no hard item, (2) **distance** from the store's last 10 genomes and from the sibling candidates already kept, (3) Q as the tie-breaker; Q alone saturates near 100 for any compliant page and cannot order candidates) with `d ≥ τ` between them → **12 candidates in one `checkNovelty` call** (≤ 16 per call, DES-§7.4; bands only, R-D36, core D64) → 6 candidates with library copy and their `RenderDigest` | 0.3-2 s | R1 |
+| 2 | Candidates | browser, design's engine (the wizard already generates client-side, `src/components/generate/wizard.tsx:772-794`) | per brief: `sampleGenome(…, { hints })` × **4** (rev 4: the pin travels as `hints.pins`, DES-§4.6) → solver → gates → **top 2 by the two-signal order** (rev 3, QUAL-9 / QUAL-25: (1) no hard item, (2) **distance** from the store's last 10 genomes and from the sibling candidates already kept, (3) Q as the tie-breaker; Q alone saturates near 100 for any compliant page and cannot order candidates) with `d ≥ τ` between them → **12 candidates in one `checkNovelty` call** (≤ 16 per call, DES-§7.4; bands only, R-D36, core D64) → 6 candidates with library copy and their `RenderDigest` | 0.3-2 s | R1 |
 | 2b | Hero packs | 3 parallel `copy.hero` calls (Worker), one per direction, primary locale | brief's angle + headline structure → `{ kicker?, headline, sub, cta }`, guarded by `mergeAiCopy` | 3-6 s, streamed | R1 |
 | 3 | Render + digest (+ tiles) | browser: the digest from the plan and the height model (`src/lib/design/heights.ts`, DES-§5.3) in R1; **R2** the preview iframe rasterizes two hero tiles per candidate (AI-§A.8.4) | 6 PageDocs → 6 `RenderDigest` (+ 12 tiles) | 0.3 s (R1) / 1-3 s (R2) | R1 / R2 |
 | 4 | Critique round 1 | route `/ai/director/critique`, pattern A (a pattern-B stage when probe line 11 measured < 80 tok/s, AI-§A.8.6) | `CritiqueInput` → `Critique` (the slim shape: 3 picks with scores and ≤ 3 ops each, ≤ 1 issue per non-pick, "why" lines in the primary locale) | Director interactive, 90 s deadline, `max_tokens = ⌊90 × tok/s × 0.6⌋` | R1 |
 | 4b | Why-line translation | 2 parallel `copy.field` calls (Worker `low`, intent `translate`) for the two other locales, guarded | `whyLines.lines` → `Record<Locale, [string, string, string]>` for the UI and `critic_picks` | 1-3 s, in parallel with stage 5 | R1 |
 | 5 | Repair + re-gate | browser, design's `applyOps` + `runGates` (DES-§8.7) | **the one acceptance rule (rev 3, QUAL-9; shared with design DES-§8.9 and the builder "Director review"): an op is applied when no new hard item appears, the slop score does not rise and every novelty band stays `ok`; Q may stay equal or move either way and is reported, never the key**; rejected ops logged `repair_rejected` with the reason (`hard` / `slop` / `band`) | < 1 s | R1 |
 | 6 | Verify round 2 (conditional) | route `/ai/director/verify` (pattern A) or inside a deep job | the 3 picks with full tiles (5 mobile + 2 desktop each) → confirm or swap one; runs only when a repair was applied or any pick has `q < 70` (≈ 40 % of generations, **[estimate]**) | 60 s | R2 |
-| 7 | Present + learn | browser + `storeAction` | 3 directions with the "why this design" lines and the Design check; all three stored as `generation` versions (`src/app/admin/(panel)/generate/actions.ts:102-110`, moved to `/app/<h>/generate` by T4); `ai_feedback` rows `shown` (source `director`), then `chosen` / `not_chosen`; full `copy.page` for the chosen direction, 3 locales in parallel | copy 6-12 s per locale, streamed | R1 |
+| 7 | Present + learn | browser + `storeAction` | 3 directions with the "why this design" lines and the Design check; all three stored as `generation` versions (`src/app/admin/(panel)/generate/actions.ts:102-110`, moved to `/app/<h>/generate` by T4); `ai_feedback` rows `shown` (source `director`), then `chosen` / `not_chosen`; full `copy.page` for the chosen direction, 3 locales in parallel; **rev 4 (QUAL-1): the headlines and leads of the final merge pass the generation-time novelty check of AI-§D.2 rule 13 before they are shown, and `mergeAiCopy` hands the per-field `CopyOrigin` map to the draft's `generation` block** | copy 6-12 s per locale, streamed; novelty check ≤ 400 ms | R1 |
+| — | **Store mode (rev 4, OPS-14, core §A.2)** | onboarding of a `store` / `both` store reveals three **PDP** directions built synchronously by `productAsPageDoc(direction)` (core §K.4, STO-§6.7) and creates no landing page | the interactive Director pass is **not offered** on the PDP reveal (it is a landing-page pass, AI-19); `analyze` and `copy.hero` (primary locale) fill the PDP hero, and the store's design depth comes from the `store.blueprint` deep job (AI-11) whose critique stage is the only use of `DirectorBrief.mode = "store"`; a seller who switches `landing.inStoreMode` on gets the pass on landing pages as usual | — | R2 |
 
 **Why the plan stage can now move a direction (rev 3, QUAL-10).** With weights ≤ 3× over the 0.02 floor of a value absent
 from the vibe row (DES-§4.3), a brief for `poster` on a maison product raised 0.02 → 0.06 against quiet-luxe 0.30: a 6 %
 chance, so the three briefs produced three nudges, not three decided directions. Each `DirectionBrief` may therefore
-**pin one bold gene** (`pin`, above): design's `sampleGenome(…, { hints, pin })` sets the pinned value as the only value of
+**pin one bold gene** (`hints.pins`, above; rev 4 uses design's field name): design's `sampleGenome(…, { hints })` sets the pinned value as the only value of
 that gene when it passes the hard rules (H-rules), the photo facts and the brand locks, else drops it (`pin_dropped`,
 `genome.hints.dropped[].why`), and keeps ≤ 3× for the other hinted genes (the explore slot keeps its ≤ 2× for hints and
 may pin too). The plan stage is measured: the eval scorer `briefFollowed` (AI-§F.4) is the share of pinned and hinted
@@ -682,7 +746,8 @@ Precedence when sources disagree, highest first:
    prescribes glass chips, 20-32 px radii everywhere and a signature moment per section (`docs/DESIGN.md:28-45`) is
    superseded; the §9 craft checklist (`docs/DESIGN.md:159-184`) stays as judged items.
 3. **Design gates** (DES-§8): hard items, the slop score (fail ≥ 6, repair 3-5, DS12), the copy cliché and specificity
-   detector (DG-07), the genome distance thresholds (platform ≥ 0.25, niche ≥ 0.40, in-store pages ≥ 0.30, R-D36) and
+   detector (DG-07), the genome distance thresholds (platform ≥ 0.25, niche ≥ `τ_niche(n)` = 0.40 at ≤ 20 stores falling
+   to 0.30 at ≥ 100 (core §M.4 rev 3; revision 3 said a flat 0.40), the same product's last 5 pages ≥ 0.30, R-D36) and
    the design-baseline hard rows (DB C2, C3, C5 > 70 %, K2, K4, K5, I1-I6, R1-R7, T1-T3, T7, T8, RTL1-RTL7, F1-F5).
 4. **Anti-slop rubric items that are compatible** (`qa/ref/anti-slop-frontend-rubric.md`): the one-line design read
    (`:25-31`), the three dials (`:47-51`), anti-centre bias (`:210`), the shape and colour consistency locks (`:190`,
@@ -763,7 +828,9 @@ colour and never a UI accent: the palette engine derives accents through the no-
   pixels at red/yellow edges, at photo bleed into masked boxes and on anti-aliased crimson-on-cream glyphs), with photo
   boxes masked by their known layout boxes **plus a 3 px margin**, glyph edges excluded by a 3 px dilation of the text
   boxes, converted to OKLCH (`culori` is already a dependency, `package.json:52`, used by `scripts/check-theme.ts`),
-  and counts only **connected regions ≥ 24 px²** of hue 25-75° with C > 0.06 → `digest.orangeRegions = { count, px }`.
+  and counts only **connected regions ≥ 24 px²** of hue 25-75° with C > 0.06 → `digest.orangeRegions = { count, px }`
+  (rev 4: `DirectorDigest.raster.orangeRegions`; "`digest.tokenOrange`" below = the V03 no-orange item in design's
+  `digest.gates.hard`, AI-§A.8.2).
   The result is a **soft note** that cross-checks the deterministic token rule: `digest.tokenOrange` (`orangeMixes`,
   `src/lib/theme/blend.ts`) stays the **hard** rule the engine already guarantees; a raster hit with `tokenOrange =
   false` is logged `orange_regions` (a theme-engine or rasterizer bug to look at in the console Quality tab), the critic
@@ -782,7 +849,7 @@ why the interactive critique runs at `medium`.
 | Stage | Pattern | Why |
 |---|---|---|
 | 1, 4, 6 interactive | **A**: route handler, `storeGuard`, one `messages.parse` call, per-request SDK `timeout` in milliseconds (never the 10-minute default), deadline ≤ 90 s | the user is waiting; Opus 5.5 at `medium` with ≤ 20K input and ≤ 10K `max_tokens` fits (p50 target 15-35 s, p95 < 80 s, **[probe]** before the stage split is fixed) |
-| deep pass (Fable critique, blueprint, logo system, health report) | **B, stage-resumable** (rev 3, ENGP-2): `ai_jobs` row, `202 { jobId }`; the job is a list of **stages each sized like a pattern-A call (≤ 90 s, `max_tokens` from probe line 11)**; a finished stage is persisted in `progress.stages` before the next starts; the next stage is claimed under `lease_until` and run by **whichever comes first**: the creating request's `after()` (while it lives), **the poll request `GET /ai/jobs/[id]` itself** (poll-driven progress: when no stage is `running`, the poll claims the next one and runs it inside its own 90 s, answering the stage status it reached), or the cron `ai.jobs` (one stage per tick once the core grants the budget of AI-§S.3 R27; with today's 1 s slice it only marks orphans and resets leases); 10 s heartbeat; polled every 2 s visibility-aware; a stage with no poller for 60 s and no `after()` is submitted as a one-item batch (`batch:<stage>`, the C degradation of AI-§B.8). **Recovery never relies on `after()`.** | minutes of model time without any single request holding the model's wall-clock; `after()` lives only within the route's `maxDuration` (120 s, the Next 16 `after.md` § Duration), so a recovery scheduled through `after()` would die exactly like the original; the probe (`scripts/qa/detached-job-probe.ts`) now only measures how much free progress `after()` adds |
+| deep pass (Fable critique, blueprint, logo system, health report) | **B, stage-resumable** (rev 3, ENGP-2): `ai_jobs` row, `202 { jobId }`; the job is a list of **stages each sized like a pattern-A call (≤ 90 s, `max_tokens` from probe line 11)**; a finished stage is persisted in `progress.stages` before the next starts; the next stage is claimed under `lease_until` and run by **whichever comes first**: the creating request's `after()` (while it lives), **the poll request `GET /ai/jobs/[id]` itself** (poll-driven progress: when no stage is `running`, the poll claims the next one and runs it inside its own 90 s, answering the stage status it reached; rev 4: only for a same-origin fetch, in a handler exporting `maxDuration = 360`), or the cron `ai.jobs` (core §H.2 slot 4c as decided in core §Q.8 AI R27: 1 s guaranteed + the leftover of slots 1-5 up to 20 s for orphan marking, and **one inline stage only on an otherwise idle tick whose remaining budget is ≥ 95 s**; otherwise the cron hands a driverless job's next stage to a one-item batch, which takes milliseconds); 10 s heartbeat; polled every 2 s visibility-aware; a stage with no poller for 60 s and no `after()` is submitted as a one-item batch (`batch:<stage>`, the C degradation of AI-§B.8). **Recovery never relies on `after()`.** | minutes of model time without any single request holding the model's wall-clock; `after()` lives only within the route's `maxDuration` (120 s, the Next 16 `after.md` § Duration), so a recovery scheduled through `after()` would die exactly like the original; the probe (`scripts/qa/detached-job-probe.ts`) now only measures how much free progress `after()` adds |
 | 2, 2b render, 3, 5 | browser | the engine is client-side; rasterization needs the DOM |
 | 2b, 7 copy | 3 parallel pattern-A calls, `messages.stream` + incremental field parse | perceived speed; the local worker serializes (`ai.worker.ts:10-11`), the server does not |
 | memory distillation, exemplar scoring, insights, SEO/alt/translation, the eval judge, the health report | **C** (`ai.batches`, slot 4b) | 50 % price, nobody waits; `fallbacks` is rejected on Batches, so refusals there fall to library or template |
@@ -809,6 +876,7 @@ AI-§B.2. Thinking is the uncertain term: every output figure is ±2×.
 | Full copy, 3 locales | Worker · Sonnet 5.5 `low` | 3 × 1.6K | 3 × 3.5K | 3 × 3.1K | $0.104 |
 | Guard re-ask (15 % of runs) | Worker · Sonnet 5.5 `low` | | | | ≈ $0.01 |
 | **Landing generation, interactive Director** | Opus + Sonnet | | | | **≈ $0.53** (range $0.35-0.85; ≈ 53 credits) |
+| ↳ with the rev 3 slim critique (≈ 5K out instead of 7K, why-lines translated by two Worker calls ≈ $0.004) | Opus + Sonnet | | | | ≈ $0.49 (rev 4 note: the reservation and the button keep the conservative 53 credits until `ai_runs` shows the real p90, AI-§C.2 step 1) |
 | **Landing generation, deep Director** | Fable + Sonnet | | | | **≈ $1.09** (range $0.70-1.80) |
 | Engine + Worker copy only (no Director) | Sonnet | | | | ≈ $0.11 |
 | Store blueprint (brief → brand kit, collections, home sections, policy drafts; 6K in, 17K out) | Opus / Fable | 6K | 9K | 17K | $0.37 / $0.91, plus one critique of home + collection + PDP previews ≈ $0.20 / $0.50 |
@@ -866,9 +934,12 @@ system[3]  Store layer (≈ 0.6-1.2K): brand genome, voice settings, ≤ 20 memo
            <exemplar locale field structure> "style only, another product, never copy wording or facts".
            cache_control 5m. The per-run canary token (AI-§E.3) sits here, after the cacheable blocks.
 user       <brief>…</brief>  <candidates>cards + digests</candidates>  Image 1: "A · mobile hero" … Image 12.
-           Final instruction, short: "Critique each candidate against the rubric with one piece of evidence per issue,
-           propose at most three repair ops each, pick three directions that differ pairwise by at least 0.30, and
-           write one plain sentence per pick a shop owner understands, in ar, fr and en."
+           Final instruction, short (rev 4: aligned with the slim shape of AI-§A.8.2; revision 2's wording asked for ops
+           on every candidate and why-lines in three locales): "Pick three directions that differ pairwise by at least
+           0.30. Score the three picks against the rubric with one piece of evidence per issue and at most three repair
+           ops each; give each other candidate at most one issue, the reason it lost. Score only what the cards, the
+           digest and the tiles you were given show. Write one plain sentence per pick a shop owner understands, in
+           {primaryLocale}."
 ```
 
 - **Structured outputs:** `client.beta.messages.parse({ output_config: { format: zodOutputFormat(Schema) } })`; the API
@@ -896,7 +967,7 @@ user       <brief>…</brief>  <candidates>cards + digests</candidates>  Image 1
 |---|---|
 | Instant directions | synchronous engine, < 1 s |
 | Hero packs and full copy | NDJSON from the copy route; completed fields appear one by one over the library draft (the wizard already merges AI copy over the library, `wizard.tsx:587-603`); never show 100 % early (the `ai.worker.ts:223-233` discipline kept) |
-| Director interactive pass | one route call per stage; the UI shows "Reading the product → Briefing 3 directions → Reviewing 6 candidates → Repairing → Done" from `progress` events; `messages.parse` output is not streamed (structured JSON is not useful half-parsed) |
+| Director interactive pass | one route call per stage; the UI shows "Reading the product → Briefing 3 directions → Reviewing 6 candidates → Repairing → Done" from `progress` events; `messages.parse` output is not streamed (structured JSON is not useful half-parsed). **Rev 4 (UX-20, PLA-§22.2 PD73):** in the three-fold reveal the control (button or stage line) sits in the reveal's bottom action row next to "Use this design" (sticky on mobile, under the focused fold on desktop), never over a fold; the "Refined by the Director" chip and the why line render in each direction's DNA card (desktop) or the DNA bottom sheet (mobile), the slot P6's reveal provides; the replacement animates each fold with the reveal's own motion (180 ms crossfade, reduced motion: instant) |
 | Deep pass | `ai_jobs` row polled every 2 s; stage + progress; **each poll may advance the job by one stage** (rev 3, AI-§B.13: the poll answers after the stage it ran, so a visible tab is the job's engine and the stage line moves with it); a notification `ai.job_done` (core §I.4) when done; the result replaces the directions with an undo; the pulse's `jobs.done` wakes a tab that stopped polling |
 | Builder "Director review" (R2) | `critique.doc` on the current PageDoc: digest + tiles → ≤ 3 ops, one-click apply through the builder store, **kept under the one acceptance rule of stage 5** (no new hard item, slop does not rise, bands stay `ok`; Q reported, "no gain" shown when Q did not move); rev 3 replaces "kept only if Q rises" (QUAL-9) |
 
@@ -912,6 +983,8 @@ user       <brief>…</brief>  <candidates>cards + digests</candidates>  Image 1
 | Picks closer than τ (0.30) | the engine replaces the closer pair's second member with the best `explore` candidate; `picks_adjusted` | distance unit test |
 | Rasterization fails or `fidelity: "partial"` on every tile (R2) | critique from cards + digest only; the tile-only rubric parts are not scored (`tilesPresent = false`); the "why" lines mention nothing visual | force `foreignObject` failure |
 | Raster orange scan hits while the token rule passes (R2) | soft note `orange_regions`, the candidate stays eligible, console Quality counter; the token rule stays the hard fail | JPEG-artefact fixture (crimson text on cream, red product bleed) must produce 0 exclusions |
+| A budget row is inside its calibrated band (rev 4, ENGP-6) | `budgets.X = "estimated"`: the candidate stays eligible, the critic sees "estimated, inside the error band" and may not count it as a hard fail; only `"over"` excludes | `test:ai` `budgetVerdicts` table at the band edges (18,749 / 18,751 px; 3,749 / 3,751 px; fold item 937 / 939 px) |
+| An AI headline collides with the niche (rev 4, QUAL-1) | one re-ask (`novelty_reasked`), then the engine or library line (`novelty_replaced`); the seller never meets a hard N8 on an AI line at publish | `test:ai` with a stub `checkHeadlineNovelty`; `test:slow` corpus (AI-§Q.1) |
 | A pinned gene value fails a hard rule, a lock or the photo facts | pin dropped (`pin_dropped`), the direction samples with hints only | planted pin fixture (`cutout-stage` without a cutout) |
 | Deep job stage orphaned (deploy, crash, `after()` killed at the route's `maxDuration`) | the next poll request or the cron slice re-claims the stage from `progress.stages` under a fresh `lease_until` (one retry per stage, `stage_attempts`), flag `stage_resumed`; **never through `after()`**; a second failure of the same stage marks the job `failed` with the instant result kept; a job with no poller for 60 s continues as one-item batches per stage | kill the process mid-stage, then poll (`test:ai-db`): the poll advances the job; no `after()` is scheduled by the recovery path (asserted with a spy) |
 | Cost cap or credits exhausted mid-loop | finish the current stage, skip the rest, chip "Director pass paused: credits" | quota mock |
@@ -950,7 +1023,8 @@ export function anthropic(): Anthropic | null;          // null when no key → 
 export function keySource(): "console" | "env" | "none";   // for the console status tile; never the key itself
 export function resetAnthropic(): void;                  // after the key changes in the console
 // new Anthropic({ apiKey, maxRetries: 0, timeout: 90_000 })  — per request: { timeout, signal } override; pattern A ≤ 90 s (core §H.12),
-//                                                                 pattern B stages ≤ 600 s inside the job, pattern C has no client timeout (Batches)
+//                                                                 pattern B stages ≤ 90 s each (rev 4: revision 2's "≤ 600 s inside the job" predates the
+//                                                                 stage-resumable jobs of rev 3 and is withdrawn), pattern C has no client timeout (Batches)
 ```
 
 - **Key resolution**: the encrypted platform secret `platform_ai_secret.apiKey` (envelope v2, scope `platform`, core §F.3;
@@ -967,7 +1041,7 @@ export function resetAnthropic(): void;                  // after the key change
 | Class (`platform_ai.classes[…]`) | Default model · effort | `maxTokens` (incl. thinking) | `timeoutMs` | Stream | Fallbacks | Batch | Owner options |
 |---|---|---|---|---|---|---|---|
 | `director_interactive` | `claude-opus-5-5` · `medium` | 8,000-10,000 | 45,000-90,000 | no (`parse`) | `"default"` | never | `claude-fable-5-1` at `medium` (≈ +150 % cost); effort `high` |
-| `director_deep` | `claude-fable-5-1` · `high` | 32,000, streamed into the job | per stage ≤ 600,000 (pattern B) | `stream` → job | `"default"` (the fallback model runs without Fable's thinking blocks **[api]**) | `health.report`, `eval.judge` always; others `fallback` | `claude-opus-5-5` at `high` (≈ −55 % cost) |
+| `director_deep` | `claude-fable-5-1` · `high` | 32,000 as the class ceiling; each stage uses `min(ceiling, ⌊deadline_s × tok/s × 0.6⌋)` (rev 4) | per stage ≤ 90,000 (pattern B stage; rev 4, was 600,000) | `stream` → job | `"default"` (the fallback model runs without Fable's thinking blocks **[api]**) | `health.report`, `eval.judge` always; others `fallback` | `claude-opus-5-5` at `high` (≈ −55 % cost) |
 | `worker` | `claude-sonnet-5-5` · `low` (copy) / `medium` (scripts, briefs, insights, distill) | 2,000-6,000 | 20,000-60,000 | copy yes | `"default"` (only `cyber` and `frontier_llm` are retried **[api]**) → library | translate, describe, insights, distill, seo allowed | `claude-opus-5-5` for copy (≈ 2× cost) |
 | `fast` | `claude-haiku-5-5` · `low` | 512-2,000 (room for thinking) | 10,000-30,000 | copilot yes | **`"none"`** (no server-side fallback exists; a list is a 400 **[api]**) → template | allowed | `claude-sonnet-5-5` · `low` for the copilot if tool reliability is insufficient |
 
@@ -1263,6 +1337,13 @@ ai.md §5.5), ≤ 1 Director interactive call in flight, ≤ 1 deep job (`aj_act
 round-robin across stores; waiting longer than 3 s in pattern A answers `busy` (retryable; the client moves down the
 ladder with the "Cloud AI busy" note); a pattern-B job waits inside the job and reports `stage = "queued"`.
 
+**No DB connection across a model call (rev 4; core §E.7, §H.7 10-connection budget, §H.12 rule 2).** Up to 24 model
+calls may be in flight (4 + 8 + 12), far more than the pool. Every AI path therefore runs its reads and the run-row
+insert, **releases the connection**, awaits the provider, and acquires one again for the reconcile and the run-row
+update; the 10 s heartbeat of a job stage is one short `UPDATE` per beat on a freshly acquired connection; a named lock
+(core §E.7) is never held across a call either. `test:ai-db` runs 12 stubbed calls that each sleep 2 s with a pool of 4
+and asserts no `pool_wait` beyond 100 ms.
+
 ### AI-§B.12 Probe (`scripts/qa/ai-probe.ts`, manual, needs a key; never in `npm test`)
 
 Run by the owner or the maintainer with a real key on a throwaway database (the script refuses `cod_studio` and
@@ -1294,7 +1375,9 @@ Run by the owner or the maintainer with a real key on a throwaway database (the 
     deep-job stage (AI-§A.8.6) until the next probe.
 12. **Poll-driven stage advance** (rev 3, ENGP-2): against a running local or live server, create a dummy stage-resumable
     job whose stages sleep 20 s without a model, kill `after()` (the server is started with `SG_AI_NO_AFTER=1` so the
-    creating request schedules nothing), and poll: the probe asserts that every poll advances exactly one stage, that
+    creating request schedules nothing; in production the same state is the flag `ai_detached_jobs` off, rev 4), and
+    poll from a browser-like client sending `Sec-Fetch-Site: same-origin` (a second run without the header must leave
+    the job where it was, rev 4): the probe asserts that every poll advances exactly one stage, that
     the job reaches `done` through polls alone, and that a stage left `running` with a stale heartbeat is re-claimed by
     the next poll with `stage_resumed` on the run row.
 
@@ -1308,7 +1391,7 @@ export function enqueueAiJob<K extends AiJobKind>(ctx: StoreCtx, job: AiJobInput
 export function getAiJob(scope: StoreScope, id: string): Promise<AiJobView | null>;          // `GET /api/app/<h>/ai/jobs/[id]`; null for another store's id
 export function cancelAiJob(ctx: StoreCtx, id: string): Promise<void>;
 export function runDetachedJob(scope: StoreScope, jobId: string): Promise<void>;           // called inside after() while it lives; runs stages through advanceJob() until the deadline it is given; never throws (writes ai_jobs.error)
-export function recoverOrphans(ctx: JobCtx): Promise<{ resubmitted: number; failed: number }>;   // cron ai.jobs, slot 4c: marks stale leases, fails twice-orphaned stages; advances one stage per tick only when ctx.deadline leaves ≥ 95 s (AI-§S.3 R27)
+export function recoverOrphans(ctx: JobCtx): Promise<{ resubmitted: number; failed: number }>;   // cron ai.jobs, slot 4c: marks stale leases, fails twice-orphaned stages; advances one stage per tick only when ctx.remainingMs() ≥ 95 s (core §H.2 4c as decided, §Q.8 AI R27); else hands a driverless job's next stage to a one-item batch
 // rev 3 (ENGP-2): the stage machine every driver shares
 export interface StagePlan { stages: readonly { id: string; task: AiTaskId; maxTokens: number /* ⌊deadline_s × tok/s × 0.6⌋ */; deadlineMs: number /* ≤ 90,000 */ }[] }
 export function stagePlanFor(kind: AiJobKind, input: unknown, probe: ProbeResult | null): StagePlan;   // pure; splits a stage whose output need exceeds its token budget (blueprint sections in halves, logo families one per stage)
@@ -1325,8 +1408,11 @@ export function advanceJob(scope: StoreScope, jobId: string, driver: "after" | "
    again to `done` as often as the owner likes (rev 3, ENGP-3: revision 2's `(store_id, input_hash, status)` index made
    the second identical job's `UPDATE … SET status = 'done'` collide with the first's row; the `render_jobs.dedupe`
    "NULL once finished" pattern of core §D.5 is the model). Then the route answers `202 { jobId }` (or `storeAction` →
-   `job_queued`) and, when `platform_ai.probe.detachedJob.useAfter` is true, calls `after(() => runDetachedJob(scope,
-   jobId))` as a **free first driver**; the job does not need it.
+   `job_queued`) and, when the release flag **`ai_detached_jobs`** is on (rev 4, core D56 / §H.12 rule 1; revision 3's
+   `platform_ai.probe.detachedJob.useAfter` setting is replaced by the flag, and the probe's measurement stays in
+   `platform_ai.probe.detachedJob = { survivedMs, at }`), calls `after(() => runDetachedJob(scope, jobId))` as a **free
+   first driver**; the job does not need it. The creating handler exports `maxDuration = 360`, so `after()` may run up to
+   ≈ 345 s after the `202`.
 2. **Stages**: a job is `stagePlanFor(kind, input, probe).stages`, each **sized like a pattern-A call** (`deadlineMs` ≤
    90,000, `maxTokens = ⌊deadline_s × tok/s × 0.6⌋` from probe line 11; the registry ceilings of AI-§A.2 bound it). A stage
    whose output need exceeds its budget is split by the plan (a blueprint's "collections + home sections" becomes two
@@ -1342,15 +1428,21 @@ export function advanceJob(scope: StoreScope, jobId: string, driver: "after" | "
    brand screen that applies the result).
 3. **Drivers (rev 3, ENGP-2: poll-driven progress).** Three drivers share `advanceJob`, and **whichever comes first runs
    the next stage**; a stage is claimed by one conditional `UPDATE` on `lease_until`, so two drivers never run the same
-   stage: (a) **`after()` of the creating request**, while it lives (Next 16 runs `after()` only within the route's
-   `maxDuration`, 120 s here, `after.md` § Duration), with a budget of `maxDuration − elapsed − 15 s`; (b) **the poll
-   request itself**: `GET /api/app/<h>/ai/jobs/<id>` (`maxDuration = 120`) checks the row; when no stage holds a live
-   lease and the job is not terminal, it calls `advanceJob(scope, id, "poll", 90_000)`, **runs the next stage inside its
-   own request** and answers with the status it reached (the browser's fetch waits up to 95 s for that answer; the UI
-   shows the stage line meanwhile; a second tab polling the same job gets `{ none: "running" }` at once and keeps
-   polling every 2 s); (c) **the cron `ai.jobs`** (slot 4c), which with today's 1 s slice only marks stale leases and
-   fails twice-orphaned stages, and advances one stage per tick once the core grants it a real budget (AI-§S.3 R27: 20 s
-   shared, trimmed from `renders` / `exports` leftovers). A job with **no driver for 60 s** (no poll, no `after()`) has
+   stage: (a) **`after()` of the creating request**, while it lives and only when the flag `ai_detached_jobs` is on
+   (Next 16 runs `after()` only within the route's `maxDuration`, **360 s** on the job-starting handlers since rev 4,
+   `after.md` § Duration), with a budget of `maxDuration − elapsed − 15 s`; (b) **the poll request itself**: `GET
+   /api/app/<h>/ai/jobs/<id>` (`maxDuration = 360`, rev 4) checks the row; when no stage holds a live lease, the job is
+   not terminal **and the request is a same-origin browser fetch (`Sec-Fetch-Site: same-origin`, rev 4)**, it calls
+   `advanceJob(scope, id, "poll", 90_000)`, **runs the next stage inside its own request** and answers with the status it
+   reached (the browser's fetch waits up to 95 s for that answer, under the proxy's ≈ 120 s cut; the UI shows the stage
+   line meanwhile; a second tab polling the same job gets `{ none: "running" }` at once and keeps polling every 2 s);
+   (c) **the cron `ai.jobs`** (slot 4c as decided by core §Q.8 AI R27: 1 s guaranteed + the leftover of slots 1-5 up to
+   20 s), which marks stale leases and fails twice-orphaned stages in its guaranteed second, **runs one stage inline only
+   when `ctx.remainingMs() ≥ 95 s`** (an otherwise idle tick, the core's rule), and otherwise submits the next stage of a
+   job that has had no driver for 60 s as a one-item batch (milliseconds of tick time). The 20 s cap and the inline
+   95 s stage cannot both hold on one tick; the ai code obeys the stricter reading (inline only when the remaining
+   budget allows a whole stage **and** the slots after 4c have finished their guaranteed work is a core decision, AI-§S.4
+   R41), so the cron never starves `exports` or slot 6, and the poll stays the primary driver. A job with **no driver for 60 s** (no poll, no `after()`) has
    its next stage submitted as a one-item batch (AI-§B.8 case a). Every stage advanced by (b) or (c) carries the flag
    `stage_resumed` so the console can see how much `after()` actually contributes. The browser polls every 2 s while
    visible, 6 s hidden, stops on a terminal status; the pulse's `jobs` field (core §I.4 `StorePulse.jobs`) wakes a tab
@@ -1372,18 +1464,32 @@ export function advanceJob(scope: StoreScope, jobId: string, driver: "after" | "
    survivedMs, useAfter }`. Rev 3: the result decides **only** `useAfter` (whether the creating request schedules
    `after()` at all; false when it survived < 30 s, since a driver that dies mid-stage only costs a re-claim); pattern B
    itself stays enabled, driven by polls. `platform_ai.classes.director_deep.batch = "fallback"` keeps its meaning for
-   the three batch cases of AI-§B.8; probe line 12 (AI-§B.12) proves the poll-driven path end to end.
+   the three batch cases of AI-§B.8; probe line 12 (AI-§B.12) proves the poll-driven path end to end. **Rev 4 (core
+   §H.12 rule 1):** the probe runs **through the real `/api/app/<h>/ai/jobs` route and a real `storeAction` page** under
+   `maxDuration = 360`, measures both the proxy cut-off and Next's `after()` lifetime, records `{ survivedMs,
+   proxyCutMs, at }` in HANDOFF and in `platform_ai.probe.detachedJob`, and its outcome sets the release flag
+   **`ai_detached_jobs`** (on when `after()` survived ≥ 30 s past the response; a staff toggle in Flags, audited), which
+   replaces revision 3's `useAfter`.
 6. **Caps**: one deep job per store at a time, `deepPassesPerStorePerDay` 5, `s:<sid>:ai:jobs` 10 / h on creation
    (core §E.8), the Director class semaphore shared with pattern A (a waiting job shows `stage = "queued"`).
 7. **Tenancy**: `ai_jobs` is a tenant table (`storeRef()`); every read goes through `StoreScope`; `GET` of another
-   store's id answers `not_found` (core §H.12 rule 4); a purge deletes the rows and the `DATA_DIR/ai/<storeId>/` blobs.
+   store's id answers `not_found` (core §H.12 rule 4); a purge deletes the rows and the `DATA_DIR/ai/<storeId>/` blobs
+   (rev 4: the `ai` area is a row of core's `DATA_AREAS` registry, §G.7, so the purge and the export iterate it instead of
+   naming it; P7 registers it through the extension file the maintainer creates at P0). Under an impersonation scope
+   every job route refuses (`impersonation_read_only`, AI-§A.4), including a poll with `advance=1`; a read-only poll
+   (`advance=0`) is allowed, metadata only.
 8. **Tests**: `test:jobs` (core) checks the orphan rules with a fake clock; `test:ai-db` kills the process mid-stage and
    asserts that the **next poll** re-claims and finishes that stage (`stage_resumed`), that the job reaches `done`
    through polls alone with `after()` disabled (`SG_AI_NO_AFTER=1`), that a second kill of the same stage ends in
    `failed` with the instant result kept and the ledger reconciled, that **the recovery path never calls `after()`**
    (spy), that two concurrent polls run one stage once (lease race), and that **the same input run twice to `done`**
    leaves two rows with `active = NULL` and no unique-key error (ENGP-3); `test:ai` asserts that no `director_deep` call
-   is ever built outside a job or a batch and that every `StagePlan` stage has `deadlineMs ≤ 90,000`.
+   is ever built outside a job or a batch and that every `StagePlan` stage has `deadlineMs ≤ 90,000`. **Rev 4:** a poll
+   without `Sec-Fetch-Site: same-origin` never advances a stage; with the flag `ai_detached_jobs` off the creating
+   request schedules no `after()` (spy); `ai.jobs` runs no inline stage when `ctx.remainingMs() < 95 s` and submits the
+   driverless job's stage as a one-item batch instead (fake clock); each `advanceJob` stage releases its pool
+   connection before the model call (pool spy, AI-§B.11); `test:jobs` sees every ai job call `ctx.yield()` within 2 s of
+   fake CPU (core §H.2 rev 3: the batch ingest loop yields every 50 items, `ai.rollups` every store).
 
 ---
 
@@ -1403,8 +1509,12 @@ export function advanceJob(scope: StoreScope, jobId: string, driver: "after" | "
   metric `ai_cost_micros`, period `YYYY-MM` in the platform timezone (core §D.7). Eval runs and every store call count
   toward it.
 - **Pending stores' share (rev 3, SEC-1 / SEC-26)**: a second platform metric `ai_cost_micros_pending` (same period;
-  AI-§S.3 R28 asks the core to register it) is charged **in addition** by every call of a store whose `status =
-  'pending'`, with limit `monthlyUsd × caps.pendingSharePct / 100` (default 10 %). At the limit pending stores get
+  registered by core rev 3 as a `PlatformUsageMetric`, §A.4, D69, and charged through `chargePlatformUsage` /
+  `refundPlatformUsage`) is charged **in addition** by every call of a store whose `status = 'pending'`, with limit
+  `monthlyUsd × caps.pendingSharePct / 100` (default 10 %). **Rev 4:** the slice is a spend budget, not a deposit: a
+  store's month-to-date pending spend is **not** refunded when it is approved (the money was spent; D69's refund on the
+  transition out of `pending` concerns the media budget only), the slice resets each platform month, and a store that
+  leaves `pending` stops charging it from its next call. At the limit pending stores get
   `quota_platform_pending` ("AI for stores in review is paused until approval") while approved stores are untouched; the
   sandbox can never exhaust the cap the approved stores pay for. The pending daily floor is **10 credits** (not 50):
   `ai_credits_day` limit for a `pending` store = `min(max(10, ceil(monthly × storeDailyCapPct / 100)), …)` (AI-§S.3 R30
@@ -1423,7 +1533,7 @@ export function advanceJob(scope: StoreScope, jobId: string, driver: "after" | "
 // src/lib/ai/quota/reserve.ts (server-only)
 export interface Reservation { credits: number; micros: number; runId: string; keys: { store: boolean; day: boolean; director: boolean; pass: boolean; platform: boolean; pending: boolean } }   // rev 3: `director` (ai_credits_director) and `pending` (ai_cost_micros_pending) join the chain; reconcile/release touch exactly the keys that were charged
 export function estimate(task: AiTaskId, input: unknown, cls: TaskClass, opts: { batch: boolean; fast: boolean; stages?: number }): { micros: number; credits: number };   // stages: pattern B reserves every stage up front
-export function reserve(scope: StoreScope | "platform", est: { micros: number; credits: number }, runId: string): Promise<Reservation>;   // throws QuotaError (core) → quota_store | quota_day | quota_platform
+export function reserve(scope: StoreScope | "platform", est: { micros: number; credits: number }, runId: string): Promise<Reservation>;   // throws QuotaError (core) → quota_store | quota_day | quota_director | quota_platform | quota_platform_pending (rev 4: the two rev 3 codes listed; platform counters through chargePlatformUsage, core §A.4)
 export function reconcile(r: Reservation, actual: { micros: number; credits: number }): Promise<void>;     // refund the difference or charge the excess with allowOver
 export function release(r: Reservation): Promise<void>;                                                    // full refund (failure before any provider billing)
 ```
@@ -1444,8 +1554,11 @@ export function release(r: Reservation): Promise<void>;                         
    at step k refunds steps < k and throws the matching `QuotaError`. `reconcile` and `release` touch exactly the counters
    the reservation charged (`Reservation.keys` gains `director` and `pending`).
 3. The run row records `reserved_credits`.
-4. `reconcile` after the call: `delta = actual − reserved`; `delta < 0` → `refundUsage` on all three; `delta > 0` →
-   `chargeUsage(…, { allowOver: true })` (core §A.4, §D.7) on all three, so the bill is honest and the **next** call is refused.
+4. `reconcile` after the call: `delta = actual − reserved`; `delta < 0` → `refundUsage` / `refundPlatformUsage` on
+   every counter the reservation charged (`Reservation.keys`; rev 4: revision 2's "all three" predates the Director and
+   pending shares); `delta > 0` → `chargeUsage(…, { allowOver: true })` / `chargePlatformUsage(…, { allowOver: true })`
+   (core §A.4, §D.7) on the same counters, so the bill is honest and the **next** call is refused. The pass counters
+   are never reconciled (a pass is one unit whatever it cost).
    `reconciled_at` is set in the same statement batch as the run update.
 5. A failure before the provider was reached (gate, PII, busy, connection refused) → `release`. A failure after the
    request was sent (timeout, 5xx after streaming started) → reconcile with whatever `usage` is known, else with the
@@ -1471,7 +1584,8 @@ export function release(r: Reservation): Promise<void>;                         
 | Platform monthly spend | `platform_ai.caps.monthlyUsd` | none (must be set: `no_cap`) | every store `quota_platform`; staff notifications at 70 %, 85 % (`ai.cap_80` kind, vars carry the percentage) and 100 % (`ai.cap_reached`); the console shows the forecast |
 | Kill switch | flag `ai_generation_enabled` (core §H.8) | on | `kill`: server tasks off at once, Batches not submitted, queued jobs wait, running jobs finish their current stage; local and library keep working |
 | Concurrency | AI-§B.11 | 4 Director / 8 Worker / 12 Fast; per store 3 Worker, 1 deep | `busy` (pattern A), `stage = "queued"` (pattern B) |
-| Loop guards | router | ≤ 6 copilot tool iterations, ≤ 2 critique rounds, ≤ 3 repair ops per candidate, ≤ 3 blueprint stages | the loop ends with what it has; logged |
+| Loop guards | router | ≤ 6 copilot tool iterations, ≤ 2 critique rounds, ≤ 3 repair ops per pick (0 for a non-pick; rev 4 wording), ≤ 3 blueprint stages before the split of AI-§B.13 step 2 (≤ 6 after), ≤ 1 novelty re-ask per line (AI-§D.2 rule 13) | the loop ends with what it has; logged |
+| Impersonation (rev 4, D70) | `scope.kind = "impersonation"` | — | every AI route refuses (`impersonation_read_only`); no credit, pass or share counter is ever charged by a staff session |
 
 Notifications to the store: `ai.credits_80` (once per month, owners and admins), `ai.credits_out`. Orders are never
 affected by any AI limit (R-D15).
@@ -1514,6 +1628,7 @@ export interface FinalizeCtx extends GuardContext {      // GuardContext = guard
   numbers?: ReadonlySet<string>;                          // tasks over aggregates: the only numbers the text may quote (AI-17)
   hasWhatsapp: boolean;                                   // GEN-09
   policies: StorePolicyFacts;                             // the store's `policies` setting (landing.md)
+  callingHours: { text: string | null; withinHours: number | null };   // rev 4 (D73): hoursText(callingWindowFor(scope)) and store.confirmation.withinHours; the only call-timing words a text may state (rule 3)
   vocab?: Record<string, readonly string[]>;              // closed vocabularies (genes, ops, preset ids)
 }
 export type Finalize<Out> = (raw: unknown, ctx: FinalizeCtx) => { value: Out; rejected: string[] } | null;
@@ -1527,7 +1642,13 @@ Additions to today's rules (all pure, all covered by `test:ai`):
    matching `/whats\s?app|واتس|واتساب|ouatsap/i` is rejected item by item (the library line takes its place).
 3. **Policies, not promises**: a line that states a delivery time, a return window, an exchange, an inspection-before-
    payment or a "free delivery" claim is kept only when the store's `policies` (or the page's real delivery fee and the
-   offer's `freeShipping`) say so; the patterns are a per-locale list in `src/lib/ai/guard-policies.ts`.
+   offer's `freeShipping`) say so; the patterns are a per-locale list in `src/lib/ai/guard-policies.ts`. **Rev 4 (OPS-11,
+   core D73, LAN LD29):** a line that promises *when* the shop calls ("on vous appelle dans l'heure", "نتصلو بيك اليوم",
+   "we call you today from 9:30") is kept only when it matches the store's calling window: the allowed call-timing text
+   is `hoursText(callingWindowFor(scope))` (P4's pure `window.ts`, passed in `FinalizeCtx.callingHours`), and a stated
+   hour or "within N hours" must equal it or `store.confirmation.withinHours` (LAN Q10; absent = no promise); a generic
+   "we call you to confirm" is always allowed. No model invents a calling hour, and no task reads the removed
+   `store.confirmation.hours` / `policies.contact.hours` keys.
 4. **No links, e-mails or phone numbers** in generated text: `/https?:\/\/|www\.|\b[\w.-]+\.(com|ma|fr|net|shop|store)\b/i`
    and e-mail patterns → field rejected; phone-like digit runs are already rejected by the number rule unless the owner
    typed them.
@@ -1584,25 +1705,43 @@ Additions to today's rules (all pure, all covered by `test:ai`):
     and variant ids from the registry, rubric dims from `RUBRIC_V3`, slot names from the brief; an unknown value drops
     the item (never the run) and is logged; a card id, section index or tile label that does not exist in the input
     drops the issue (`critic_contradiction`).
+13. **Generated-line novelty before display (rev 4, QUAL-1; core §M.4, DES-§9.8).** Since core rev 3 the publish gate
+    refuses a headline or lead whose 3-gram shingle share in the niche is > 25 % **when the line's origin is `cloud`,
+    `local` or `engine`** (soft for `library` and `owner`). An AI line must therefore never reach the seller in a state
+    the gate will refuse later. After the final merge of `copy.page` / `copy.hero` / `copy.field` (and R2
+    `product.describe` titles), P7's client helper `useNoveltyGuard({ check })` (`src/lib/ai/router/novelty.ts`) runs on
+    the AI-written headlines and leads only, with `check` = design's `checkHeadlinesAction` (`checkHeadlineNovelty(scope,
+    niche, texts)`, ≤ 60 lines, bucket `design:headlines`) **injected by the wizard (P6), which owns the call site**, so
+    P7 never imports a design server action; a line whose verdict is
+    `close` (containment > 0.35) or whose niche share is > 25 % is **re-asked once** through `copy.field` (intent
+    `differentiate`, the line's structure tag and the colliding structure in `mustAvoid`, inside the same run's
+    deadline, flag `novelty_reasked`), and if the new line still collides it is **replaced** by the engine's generator
+    line with another structure (design's `rewriteLine`, origin `engine`, which design guarantees ≤ 10 % share per
+    skeleton) or, when the generator has none, by the library line (origin `library`, soft at the gate), flag
+    `novelty_replaced`. `mergeAiCopy` v2 returns `{ copy, rejected, origin: Record<fieldPath, CopyOrigin> }` (AI-§A.3) so
+    the draft's `generation` block records who wrote each field and the core's `originFrom(prev, doc)` can tell a
+    `cloud` line from a `library` one at publish. The check is advisory where it cannot run (no network, the bucket
+    exhausted): the line ships with origin `cloud` and the publish dialog's N8 item, with its `rewriteLine` fix, is the
+    fallback; it never blocks the wizard's "Next".
 
 ### AI-§D.3 Per-task honesty rules
 
 | Task | `finalize` checks (beyond schema validity) |
 |---|---|
-| `copy.page`, `copy.field`, `copy.translate` | the full guard (AI-§D.2); translation keeps every number and unit of the source and nothing else; product names are kept as written unless the owner allowed translation |
+| `copy.page`, `copy.field`, `copy.translate` | the full guard (AI-§D.2); translation keeps every number and unit of the source and nothing else; product names are kept as written unless the owner allowed translation; **rev 4:** the per-field `CopyOrigin` map and the generated-line novelty check of rule 13 on headlines and leads; call-timing words only from `ctx.callingHours` (rule 3) |
 | `analyze` | category and vibe from closed enums; colours ≤ 4 colour words (from the closed colour-word list per locale); `summary` appearance-only and factual (guard hype + medical lists; **any material, origin, certification or quantity noun is moved into `suggestedFacts`**, rev 3 rule 7); `suggestedFacts` per D.2 rule 7; `photoQuality` enums |
 | `product.describe` (R2, SF-12) | guard with **ticked facts + the owner's own text as the only allowed sources** (never `Analysis` nouns; a description built before any tick uses appearance words and the product name only); number words count (rule 5); output carries `needsReview: true` like a policy draft (core D39) and is a **draft** the owner approves per product or in bulk (AI-09's table); no price anywhere; a "misread material" fixture asserts no leather / crystal / silk word reaches the guarded output for a PU, glass or polyester product |
 | `seo.meta`, `media.alt` | guard; title ≤ 60, description ≤ 155, alt ≤ 125, OG ≤ 90 chars (`fitText`); alt describes only what the analysis saw (appearance, no material or origin claims) |
 | `design.plan` | `DesignRead` enums closed; `dials` 1-10; `suggestedFacts` ≤ 5 × 80 chars, numbers only when visible on the product and still unticked (rule 7; **materials, origins and certifications read from the photos land here too**, rev 3); every `DirectionBrief.hints` value validated by design's `validateHints` (unknown values dropped and logged, DES-§4.6); **`pin` (≤ 1 per direction) validated against `GENE_VOCAB` and the bold-gene list, else dropped with `pin_dropped`** (rev 3, QUAL-10; the hard rules, locks and photo facts are applied by design's sampler, not here); three slots present and distinct; `rationale` through the guard (≤ 140 chars, no numbers, no em-dash); `mustAvoid` entries from the named-pattern list |
 | `design.critique`, `design.verify`, `critique.doc` | scores 0-5 on the 11 rubric dims only, **for the three picks only, and never on a tile-only rubric part when `tilesPresent` is false** (such a score is dropped, `critic_contradiction:no_tiles`; rev 3, QUAL-11); each issue cites a card id, section index or tile label that exists in the input (else dropped, `critic_contradiction`); an issue on a D-dimension that contradicts the digest value is dropped; **≤ 1 issue and 0 ops for a non-pick** (rev 3, QUAL-12); ≤ 3 `RepairOp`s per **pick**, each from `AI_REPAIR_OPS` with target indices inside the candidate (else dropped); `pick` = 3 distinct candidate ids none of which has a hard fail; `whyLines` in the store's primary locale through the guard (≤ 120 chars, plain, no numbers except the merchant's, no em-dash; the other locales come from `copy.field` translate and pass the same guard); `distinctness` recomputed by the engine from the cards, the model's numbers ignored |
-| `store.blueprint` | every gene value, archetype, section kind and variant from the closed vocabulary (`GENE_VOCAB`, STO-§11.5 `StoreBlueprint` shape); collections only from the owner's own products; about and policy drafts use only `policies` facts, carry `needsReview: true` (core D39) and pass the guard with the policy facts as the only allowed source of numbers; no price anywhere |
+| `store.blueprint` | every gene value, archetype, section kind and variant from the closed vocabulary (`GENE_VOCAB`, STO-§11.5 `StoreBlueprint` shape); collections only from the owner's own products; about and policy drafts use only `policies` facts, carry `needsReview: true` (core D39) and pass the guard with the policy facts as the only allowed source of numbers; no price anywhere; **rev 4 (SEC-18, core D76):** no task proposes a store name, legal name or WhatsApp display name (the schema has no field for one), and the about / policy drafts pass P1's `checkBrandTerms` with the field `policy_text` (`BrandField`, PLA-§13.3) before they are shown (`exact` → the sentence is dropped and logged, `near` → kept with the console flag of D76; the write itself goes through the owning part's action, which runs the check again); R2 `seo.meta` titles pass it with `seo_title` the same way |
 | `logo.params`, `logo.system` | parameters only, from the logo engine's vocabulary (families, craft move, lockup arrangement, symbol primitives); the model never ships SVG (R-D40); no badges, seals or hand-drawn marks (owner rule 2) |
 | `health.report` | every claim sentence cites an aggregate id present in the input (`ids` whitelist); a sentence without a valid citation is dropped; every number ∈ `ctx.numbers`; ranked issues ≤ 10, each with one "do this" action from the closed action list (open screen, copilot proposal id); no vendor benchmark, no customer datum |
 | `insights.why`, `insights.weekly` | every number ∈ the decomposition payload (AI-D33); cells below the minimum sample are never narrated; actions from the closed list |
 | `injection.screen` | `{ suspicious: boolean; reason ≤ 120 chars }`; `reason` never echoes more than 40 chars of the screened text |
 | `copy.hero` | the hero guard (headline ≤ 84, sub ≤ 190, cta ≤ 32, kicker ≤ 56 optional), the direction's headline structure respected (detector), no em-dash |
 | `offers.advise` | output = preset ids + quantities + labels; **no price field exists**; a price shown is computed by `presetOffer()` from the owner's unit price and marked "check before publishing" |
-| `callcenter.script` | guard; objection answers may cite only facts and policies; no discount the store has not configured; the input is **per product** (facts, policies, packs and prices, the Darija ratio, the platform objection library) and a test asserts it contains no phone, name or address pattern (AI-D31); per-order personalisation (name, pack, city) is done by templates in the agent console |
+| `callcenter.script` | guard; objection answers may cite only facts and policies; no discount the store has not configured; the input is **per product** (facts, policies, packs and prices, the Darija ratio, the platform objection library) and a test asserts it contains no phone, name or address pattern (AI-D31); per-order personalisation (name, pack, city) is done by templates in the agent console; **rev 4:** the confirmation checklist asks for the address (quartier, rue, repère) when `checkout.addressMode = "optional"` and the order has none, and only confirms it when it is `required` (UX-31, core §D.10), and any "we deliver / call back on" line uses `ctx.callingHours` and the delivery line (D73, rule 3) |
 | `risk.explain`, `insights.weekly`, `brief.today` | every number in the text ∈ `ctx.numbers` (the aggregates given); reasons from the closed flag list; never a customer's name or phone (there is none in the input) |
 | `ad.brief` | guard + no before/after or body-shaming patterns (per-locale list), no "guaranteed results", no personal-attribute questions ("Are you overweight?") |
 | `memory.distill` | each item ≤ 160 chars, kind from the enum, evidence counts ≥ 3 edits; never a customer datum |
@@ -1706,8 +1845,9 @@ Nothing a model writes is executed: no tool has a side effect until a person cli
   crosses stores; copy exemplars cross stores only from `ai_exemplars_platform` (the hand-written library and texts the
   platform owner approves, no store id; core §D.6, 0007) and in R1 from the curated style guide in block 2.
 - The Director brief carries `recent.storeGenomeCards` (the store's own last 10 pages) and `recent.nicheCrowding` (gene-value
-  **shares** of the niche from `gene_stats_platform`, k ≥ 5): never another store's genome, text or card. The distance
-  numbers on a `GenomeCard` come from `checkNovelty` as scores or bands (core D64).
+  **shares** of the niche from `gene_stats_platform`, k ≥ 5, and from design's `nicheShares`, k ≥ 10, rev 4): never
+  another store's genome, text or card. The distances on a `GenomeCard` come from `checkNovelty` as **bands only** (core
+  D64, DES-§8.9 DS7; rev 4: revision 2's "scores or bands" is withdrawn with the imported card).
 - `src/lib/ai/platform/**` is the only ai directory allowed to read or write the ai P tables and to read `ai_usage_daily` /
   `ai_runs` across stores (the console, the batch collector, the eval gate), each statement annotated `// tenancy: platform
   <reason>` and the count pinned at the P7 merge (core §E.3 rule 6, §F.1, D64).
@@ -1838,7 +1978,8 @@ AI-§A.8.9 joins the Director group.
 | Store without WhatsApp / without inspection policy | 4 | 8 | GEN-09 and policy rule 3 |
 | Long names, many facts, empty facts | 4 | 8 | length fit, specificity without facts |
 | Analyze (photos; `analyze`, `director.plan`) | 4 | 12 | small product photos (≤ 80 KB each, the owner's own or the repo's dev fixture images, with rights); an orange product (accent must not be orange); a blurry photo (`photoQuality.sharp = false`); a cluttered group shot |
-| **Director** (`director.plan`, `director.critique`) | — (R1 uses the 24 core fixtures with their 6 engine candidates each) | 24 | three slots distinct; hints valid; the critique never contradicts the digest; picks pairwise ≥ 0.30; "why" lines plain; a planted hard fail (orange pixels, hero over the fold) is never picked |
+| **Director** (`director.plan`, `director.critique`) | — (R1 uses the 24 core fixtures with their 6 engine candidates each) | 24 | three slots distinct; hints valid; the critique never contradicts the digest; picks pairwise ≥ 0.30; "why" lines plain; a planted hard fail (**token-level** orange via the V03 gate item, a hero whose fold verdict is `over`; rev 4: revision 2 said "orange pixels", which QUAL-29 made a soft cross-check) is never picked, while a fold verdict `estimated` never excludes |
+| **Niche novelty** (`copy.page`, `copy.hero`; rev 4, QUAL-1) | 6 | 12 | recorded cloud headlines of 30 simulated stores in one niche, a stub `checkHeadlineNovelty` fed the earlier stores' shingles: after rule 13 no line with origin `cloud` / `local` has share > 25 %, every replaced line carries origin `engine` or `library`; the full 30-store run is `test:slow`, a 6-store seeded subset is in the smoke set |
 | Insights and health (`insights`, `health`) | — | 12 | synthetic datasets with a planted driver (one city's delivered rate falls, one source's fake rate rises, a carrier holds cash > 30 days): the narrative names the driver; 0 numbers outside the payload |
 | Scripts and briefs (`script`, `brief`) | 6 | 16 | per-product scripts with 0 PII in the prompt; briefs with every hook traceable to a fact or a policy |
 
@@ -2000,7 +2141,7 @@ console shows them next to the offline scorecard, so a version that passes offli
 | 3 | Regenerate-before-choose ratio | `regenerated` / `shown` | −15 % relative |
 | 4 | Judge win-rate vs the frozen Q0 (launch) baseline, and critic-pick agreement with owner choices | harness, pairwise; `critic_picks` vs `chosen` | +5 points until saturation; agreement ≥ 60 % |
 | 5 | Slop score mean and specificity share of generated pages | harness + production `design_genomes` Q | slop −0.5, specificity +5 points |
-| 6 | Distinctness as the platform grows | median nearest-neighbour genome distance across live stores | stays ≥ 0.40 within a niche |
+| 6 | Distinctness as the platform grows | median nearest-neighbour genome distance across live stores | stays ≥ `τ_niche(n)` + 0.05 within a niche of n stores (rev 4, design's request: 0.45 at ≤ 20 stores, 0.35 at ≥ 100; core §M.4 `τ_niche`; revision 3's flat 0.40 ignored the falling threshold) |
 | 7 | Market effect of the Director | Fair test (core D58, mSPRT) on volunteer stores: Director-generated version vs the instant version of the same product; delivered per unique | reported with its interval; the only causal number |
 | 8 | Cost per accepted generation | `ai_runs.cost_micros` / accepted | −10 % via caching, effort tuning, fewer verify rounds |
 | 9 | Darija and French naturalness | the human calibration slice, 1-5 | ≥ 4.0 mean, no item < 3 (first measured at the R1 exit on the launch slice, AI-§F.5) |
@@ -2100,6 +2241,14 @@ after the test ends, core D58).
 
 ### AI-§G.3 Retrieval exemplars
 
+- **Masking is done once, at entry (rev 4, QUAL-31 data path).** Revision 3 said the `facts_hash` row "keeps the source
+  product's token set", but a 16-character hash cannot hold a token set. The source product's facts, materials, origins,
+  certifications, processes and numbers are known when an exemplar **enters** (it is a field of one of that product's
+  published pages), so `ai_exemplars.masked` (AI-§M.4, rev 4) stores the masked skeleton computed then by
+  `maskExemplar(text, sourceTokens, locale)` (`src/lib/ai/learn/mask.ts`, pure, the `guard-claims.ts` and
+  `guard-numbers.ts` lists catch what the source facts miss); injection reads `masked` only, `text` stays for the
+  owner-facing "What the AI learned" view, and `facts_hash` stays as the dedupe key of the source fact set. The curated
+  R1 exemplars are written masked by hand (below) and linted.
 - **R1** (no table): the platform-curated style guide has 6 exemplars per locale and family in block 2; the request's
   block 4 names which 2 to follow (`styleRotation = hash(storeId|pageId|seed) mod C(6,2)`), so references rotate and outputs
   do not converge; local prompts get 1 exemplar from the same rotation. **Exemplars carry structure, never specifics
@@ -2116,8 +2265,8 @@ after the test ends, core D58).
     `uses` incremented when injected; keys `(store, family, category, locale, market, field, angle)`.
   - **Rotation:** sample 2-3 by `softmax(score / 0.3)`, excluding exemplars used in the store's last 3 generations;
     **masked before injection (rev 3, QUAL-31):** every token of the exemplar that matches the *source* product's facts,
-    materials, origins, certifications, processes or numbers (the `facts_hash` row keeps the source product's token set;
-    the `guard-claims.ts` and `guard-numbers.ts` lists catch the rest) is replaced by a slot (`{fact}`, `{material}`,
+    materials, origins, certifications, processes or numbers (rev 4: matched at entry and stored in `ai_exemplars.masked`,
+    see the first bullet; the `guard-claims.ts` and `guard-numbers.ts` lists catch the rest) is replaced by a slot (`{fact}`, `{material}`,
     `{origin}`, `{n}`), so what travels is the **masked skeleton plus the structure and rhythm tags** (`Line.s`, `Line.d`),
     never a specific that could migrate to a product without it; the revision 2 rule "exclude exemplars with Jaccard >
     0.5 to the current product's facts" is **withdrawn** (it removed the safe, similar exemplars and kept the dissimilar
@@ -2155,7 +2304,14 @@ after the test ends, core D58).
   **7-day return window with no `returned` / `refused` transition** and no `is_test`, `fake` or `risk_score ≥ 70` flag.
   A hand-set `delivered` (the drawer, a Sheet status, a bulk action) counts as **confirmed** at most until (b) holds, so a
   store that places ordinary-looking orders from friends' phones and marks them delivered by hand moves nothing for
-  seven days and only its own store prior after that. `stats_version_daily.delivered` keeps its operational meaning; the
+  seven days and only its own store prior after that. **Rev 4 (OPS-9 / core D74, QUAL-16): the evidence list is closed
+  and keyed on `order_events.actor_kind`:** evidence = `carrier` (a carrier adapter's webhook or poll, the existing
+  enum value), `integration` (core §K.4's R2 append, **a carrier adapter only**) and `reconciliation` (a matched carrier
+  statement line); never evidence = `user`, `sheet`, `api`, `bot`, `system`, `customer`. D74 makes Google Sheets the R1
+  carrier loop, but a Sheet's "Livré" cell is typed by the seller or an agent, so `sheet` stays hand-set even though
+  the Sheets sync is an "integration" in the product's vocabulary; the store's own API (`api`) is self-reported too.
+  The R1 product therefore learns deliveries only through rule (b), which is the honest R1 state. `orders.tracking_ref`
+  and `carrier_label` (D74) never enter any prompt or learning row (they identify one parcel). `stats_version_daily.delivered` keeps its operational meaning; the
   learning read uses `delivered_evidence` (a column added by the same 0006 refinement, bumped by the hook when (a) or (b)
   holds). **UTM-stratified**: the rate is
   computed per `utm_source` cell of `stats_version_daily` (the beacon already carries `utm`,
@@ -2173,7 +2329,7 @@ design-owned (design.md, `rankDirections`).
 export interface GenePosterior { gene: string; value: string; owner: { a: number; b: number }; market: { a: number; b: number; visits: number } }
 export interface GenePriors { niche: string; genes: Record<string, Record<string, GenePosterior>>; version: number }
 export function priorsFor(scope: StoreScope, niche: string): Promise<GenePriors>;      // ≤ 8 KB JSON, cached 10 min per store+niche, sent with the wizard props
-export function sampleBonus(p: GenePriors, gene: string, value: string, rng: () => number): number;   // pure; 0 … 1, the caller caps it
+export function sampleBonus(p: GenePriors, gene: string, value: string, rng: () => number): number;   // pure; rev 4 comment fix: returns clamp(k·(θ − 0.5), −0.25, 0.25) (rev 3, QUAL-23), the sampler applies w × (1 + bonus) then the 0.02 floor; revision 2's "0 … 1, the caller caps it" is withdrawn
 export function explorationPick(p: GenePriors, gene: string, values: readonly string[], rng: () => number): string;  // widest posterior / least shown
 ```
 
@@ -2351,7 +2507,12 @@ Acceptance:
 11. A pattern-B task answers `202 { jobId }` within 500 ms, heartbeats every 10 s, **reaches `done` through poll requests
     alone with `after()` disabled** (every stage ≤ 90 s, `stage_resumed` on the resumed runs), and the probe result
     decides only whether `after()` is also used (`qa:detached-job-probe` recorded in HANDOFF before the deep pass is
-    enabled, core §H.12 rule 1; rev 3, ENGP-2).
+    enabled, core §H.12 rule 1; rev 3, ENGP-2); **rev 4:** that decision is the release flag `ai_detached_jobs`, the three
+    job routes export `maxDuration = 360`, and a poll without `Sec-Fetch-Site: same-origin` never advances a stage.
+14. (rev 4, SEC-5 / D70) Under an impersonation session every AI route answers `impersonation_read_only`, `aiPolicyFor`
+    lists no live task, and no `store_usage` or `platform_usage` counter moves (`tenancy-cases/ai.ts`).
+15. (rev 4, AI-§B.11) Twelve concurrent stubbed calls of 2 s each on a pool of 4 connections show no `pool_wait` above
+    100 ms: no connection is held across a model call.
 12. Pass caps: the 31st Director pass of a store in one day is skipped with the chip and the instant set; the 6th deep
     pass is refused with the reset time; a second concurrent deep job answers `{ deduped: true }` or `busy`; **the same
     input run again after the first job is `done` creates a new job and completes without a unique-key error**
@@ -2383,12 +2544,24 @@ Acceptance:
 7. Cost of one locale stays within ±2× of the AI-§A.2 estimate over the first 100 runs (console check, not a test).
 8. No guarded output contains `—` or `–`, more than one `·` per line, or a kicker on a section whose plan says
    `kicker: false` (fixtures; the kicker share of a generated page ≤ ⌈n/3⌉ / n).
+9. (rev 4, QUAL-1) An AI headline or lead whose niche share is > 25 % (stub `checkHeadlineNovelty`) is re-asked once and,
+   if it still collides, replaced by an `engine` or `library` line before the seller sees it; `mergeAiCopy` returns a
+   `CopyOrigin` for every field it wrote; over the 30-store niche corpus (`test:slow`) the publish gate raises **0 hard
+   `design:N8` items on lines of origin `cloud` or `local`**.
+10. (rev 4, OPS-11) A recorded output that promises "on vous appelle dans l'heure" for a store whose calling window
+    `hoursText` says "de 9h30 à 18h" and whose `withinHours` is absent loses that line to the library (guard rule 3).
 
 ### AI-03 Speed kit (P0, R1)
 
 Scope: AI-§H.2: classify on add, speculative cutout, VLM warm-up, server analyze on upload end, the Director plan started
 when Details is valid, consented model download card (never on mobile data, core D59), deadlines with quiet fallback
-chips; the 1-hour cached prefix replaces the withdrawn pre-warm (AI-D36).
+chips; the 1-hour cached prefix replaces the withdrawn pre-warm (AI-D36). **Cutout later (rev 4, UX-39; core §H.3, §M.4,
+DES-§4.11):** at the reveal no BiRefNet mask exists yet (no model download before the reveal, D59), so the wizard and the
+photos step use design's `estimateAlpha(bitmap)` (P6) and pass `hasCutout: "estimated"` into `DirectorBrief.photos`
+(the gate counts an estimated cutout as alpha); when the local `removeBackground` task later produces the real mask, the
+browser uploads it as a derived asset of the same photo (`sourceAssetId`, core §G.4 MED-02, `media.write`) through P8's
+upload path, and P8's media pipeline enqueues the `render_jobs` reason **`cutout`**, which swaps `framed-stage` →
+`cutout-stage` in place on the pages using that photo. ai only produces and uploads the mask; it never enqueues a render.
 Acceptance:
 1. The consent card appears only on a desktop with tier ≥ lite, no `saveData`, after the first sign-in, states the exact
    size (0.9 or 2.2 GB) and never auto-starts a download; dismiss is remembered per device (localStorage, a convenience);
@@ -2397,6 +2570,10 @@ Acceptance:
    with Cloud AI off and no model cached; SigLIP refines the category chip afterwards or not at all.
 3. Every AI wait shows a progress state within 150 ms and a fallback chip within 500 ms of a rung failing; no AI error ever
    blocks the wizard's "Next" button; the Director pass can be dismissed to the instant set at any time.
+4. (rev 4, UX-39) A mask produced by `removeBackground` after the reveal is uploaded with `sourceAssetId` = the photo and
+   no other ai call; the `cutout` render that follows is P8's (asserted in the wizard e2e with a stub upload route: one
+   upload, zero render calls from ai code); the Director brief built before the mask carries `hasCutout: "estimated"`
+   whenever `estimateAlpha` returned a mask.
 
 ### AI-04 Photo analysis + suggested facts (P0, R1)
 
@@ -2576,7 +2753,10 @@ manager to approve. **R1 slice**: the Campaign Kit's call-script template is fil
 console; the model input never contains customer data (AI-D31).
 Acceptance: (1) no discount, gift or delay the store has not configured; (2) the template fallback exists when cloud is off;
 (3) agents see only approved scripts; (4) a test asserts the assembled prompt contains no phone, name or address pattern
-across 20 fixture stores (automatic); (5) native-reviewer naturalness ≥ 4/5 on 20 scripts (calibration slice).
+across 20 fixture stores (automatic); (5) native-reviewer naturalness ≥ 4/5 on 20 scripts (calibration slice); (6) (rev 4,
+UX-31, OPS-11) a store with `checkout.addressMode = "optional"` gets a checklist line that asks for the quartier and a
+landmark, a `required` store gets a confirm-only line, and no script states a call-back time outside `ctx.callingHours`
+(`test:ai` fixtures).
 
 ### AI-16 Offer and pack advisor (P1, R3)
 
@@ -2654,7 +2834,13 @@ every store defaults to `director: "ask"` and the console's "Auto by default" sw
 the picked genome) and a pin that breaks a hard rule is dropped with `pin_dropped` and never reaches the sampler; (12)
 (rev 3, QUAL-25) `test:ai` asserts the Director types import design's `GenomeCard`, `RepairOp` and `AI_REPAIR_OPS`
 (no local redeclaration), the rendered vocabulary block equals the current constants, and stage 2 submits ≤ 12
-candidates to one `checkNovelty` call.
+candidates to one `checkNovelty` call; (13) (rev 4, QUAL-25 / QUAL-10 / QUAL-20) the same assertion covers design's
+`RenderDigest`, `NicheShares` and `GeneHints.pins` (no local `RenderDigest` field list is read; a brief whose model JSON
+names the withdrawn `pin` field is folded into `hints.pins`), and the plan prompt's `mustAvoid` lists the niche's
+`seq4` / `tells` entries at ≥ 30 % share; (14) (rev 4, ENGP-6) a candidate whose C2 / C3 / F1 verdict is `estimated` is
+never excluded and never repaired for that reason alone, one whose verdict is `over` is never picked; (15) (rev 4,
+UX-20) in the three-fold reveal the Director control never covers a fold at 390 px (wizard e2e screenshot), the why
+lines appear in the DNA card / bottom sheet slot, and the in-place replacement keeps the focused fold focused.
 
 ### AI-20 Ad creative briefs (template R1 inside SF-01, P3 + P7 · LLM depth R3, D4)
 
@@ -2680,7 +2866,9 @@ full-width hero") in the admin locale; Sonnet 5.5 `low` when called alone (Haiku
 Acceptance: (1) no pixel is generated by a model (edits only), so no AI-content marking is needed; (2) every backdrop colour
 passes the no-orange guard (`src/lib/theme/blend.ts` registration for any new mix); (3) batch of 50 images runs in a worker
 without freezing the UI; (4) QA flags agree with human labels on 50 photos ≥ 85 %; photos never leave the browser when
-`store_ai.mode = "local"`; the model never alters pixels.
+`store_ai.mode = "local"`; the model never alters pixels; (5) (rev 4, UX-39, design's request) every studio result and
+every late BiRefNet mask is uploaded as a derived asset (`sourceAssetId`), and **the media pipeline (P8), not ai,
+enqueues the `cutout` render** that upgrades a hero from an estimated to a real cutout (AI-03 scope; core §H.3).
 
 ### AI-22 Semantic retrieval (P1, R3)
 
@@ -2698,10 +2886,21 @@ The explanation is a **template first** (deterministic ar/fr sentences per flag:
 captcha_*, ip_repeat, history_bad, page_burst, duplicate, returning_customer, `src/lib/orders/risk.ts:49-64`), with
 `risk.explain` (Fast) only to phrase the combination from pseudonymised features ("phone seen with 2 returned orders",
 "city = Tanger", "note contains a URL"), plus "best time to call: 18-20h (your data)" from the per-store Beta posteriors.
+**Rev 4 (OPS-11 / core D73, OPS-1 / D68, CRIT1, CRIT3):** the best-call-time posteriors are keyed on **ISO weekday
+1-7** (Monday = 1, the convention of `checkout.calendar.workdays` and of core D73) × hour × **`CityKey` slug bucket**
+(`cityKey()` from P4's `address.ts`, null / "Autre" → the `*` bucket, the same key `delivery_zones.cities` and
+`carrier_rates` use); the suggestion is **clipped to the store's calling window**: only hours where P4's pure
+`isCallable(window, at)` is true for `window = callingWindowFor(scope)` (`EffectiveWindow`, imported, never redeclared;
+its internal day indexing is operations' to state) may be suggested, a best hour outside the window is shown as "outside
+your calling hours" with the best inside one, and nothing here writes the window (its one editor is P4's
+`CallingWindowEditor`).
 Acceptance: (1) advisory only: never cancels, blocks or delays an order (the `risk.ts:1-5` rule); (2) shows its top 3 reasons
 and every flag appears in the explanation (100 % flag coverage on fixtures); (3) a store with < 200 labelled orders uses
 the prior only; (4) AUC on a held-out week is logged in `ai_models.metrics` and a model worse than the prior is not
-activated; (5) no raw phone, name or note in any prompt (automatic); agents rate clarity ≥ 4/5.
+activated; (5) no raw phone, name or note in any prompt (automatic); agents rate clarity ≥ 4/5; (6) (rev 4) on a fixture
+whose best hour is Friday 13:00 and whose window closes Friday 12:00-14:30, the hint names a callable hour and marks the
+other "outside your calling hours"; a Fès order and a "fes" posterior share one bucket (the shared city-key fixture of
+P4, `scripts/qa/fixtures/city-key.json`).
 
 ### AI-24 Later bundle (P2)
 
@@ -2762,6 +2961,13 @@ system prompt names which tool answers which kind of question; there is never a 
 | `propose_delivery_zones` `{ zones }` | write → proposal | `checkout.write` | same (fees only as typed by the owner in the chat, echoed back for confirmation) | same |
 | `open` `{ target: "orders"\|"page"\|"settings"\|…, ref?: handle }` | navigation | the target's read key | `{ ok }` | a link card |
 
+**City arguments (rev 4, OPS-1 / core D68, CRIT1):** `city` in `find_orders`, the `city` group of `order_counts` and the
+`cities` of `propose_delivery_zones` are **`CityKey` slugs**; the model may write "Fès", "fes", "فاس" or "Fez", and the
+tool normalises with P4's pure `cityKey()` before any query (null / "Autre" → the `*` zone of the zone table, never a
+literal match), the result cards show the display name, and `propose_delivery_zones` carries per-city fees (LP-16 R2,
+D75) only as the owner typed them, echoed back for confirmation. **Impersonation:** the copilot route refuses an
+impersonation scope (AI-§A.4), so no staff session runs a turn on the store's credits.
+
 A near-miss tool name (`find_order` for `find_orders`) is corrected or answered with an `is_error` tool result naming the
 right tool, never a failed turn **[api]**; tool results containing untrusted text (product names, page titles, note
 features) are wrapped in data blocks; a tool result never carries customer PII (phones masked as in the UI, OP-07).
@@ -2787,6 +2993,9 @@ export function executeProposalAction(token: string): Promise<ActionResult<unkno
   'user'`, meta `{ via: "copilot", runId }`), plus one audit row `store.ai.proposal_executed` naming the `ai_runs.id` of
   the proposal (core §F.5, AI-D35). The proposal card id is single-use (idempotency key): a second click answers `done`.
 - Impersonation and read-only states: write proposals are never offered (the tool list for that session excludes `propose_*`).
+  Rev 4 (D70): an impersonation session gets no copilot at all (AI-§J.2); a suspended store's read-only state keeps the
+  read tools, whose UI rows come from the owning parts' repositories and are therefore masked exactly as the rest of the
+  tenant UI (`maskIfImpersonation` is the identity outside impersonation).
 
 ### AI-§J.4 Safety
 
@@ -2885,8 +3094,10 @@ Tabs:
 - **Quality**: guard rejection heat-map (field × locale × provider), latency p50/p95 per task and provider, injection flags,
   PII redactions count, `invalid_output` and `max_tokens` counts.
 - **Batches**: open and recent batches (kind, items, state, cost), cancel, retry failed items.
-- **Settings**: enable, monthly cap (step-up), daily cap %, concurrency, transport, cache TTLs, fallbacks mode, pattern
-  library switch, gene pins (R3), "Set API key" sheet (step-up; a password field; the key is sent once, sealed, never shown
+- **Settings**: enable, monthly cap (step-up), daily cap %, **Director share % (default 60), pending share % (default 10)
+  and the pending daily floor (default 10)** (rev 4: the rev 3 caps had no console control), concurrency, transport,
+  cache TTLs, fallbacks mode, pattern library switch, gene pins (R3), the read-only line "`after()` driver: on / off (flag
+  `ai_detached_jobs`, set from the detached-job probe of {date})" with a link to Flags, "Set API key" sheet (step-up; a password field; the key is sent once, sealed, never shown
   again; "Remove key"), "Test connection" (a 1-token call, shows latency and the model's display name).
 
 ### AI-§K.3 In-flow AI (wizard, onboarding, builder) — components P7 provides, mounted by P6/P2 (core §Q.5 R15)
@@ -2907,7 +3118,10 @@ Tabs:
   Undo".
 - **Consent card** (`src/components/admin/ai/model-consent.tsx`): "Download on-device AI (2.2 GB, one time) for faster,
   private writing on this computer" · Download · Not now.
-- **Director pass** (AI-19a; `src/components/generate/ai/director-pass.tsx`, mounted by P6 under the three directions):
+- **Director pass** (AI-19a; `src/components/generate/ai/director-pass.tsx`, mounted by P6 under the three directions;
+  **rev 4, UX-20 / PD73:** it exports two parts, `<DirectorPassControl>` for the reveal's bottom action row beside "Use
+  this design" (sticky on mobile, under the focused fold on desktop) and `<DirectorWhy directionId>` for the DNA card /
+  bottom-sheet slot of each fold, so nothing of the pass ever covers a fold):
   a quiet stage line "Reading the product → Briefing 3 directions → Reviewing 6 candidates → Repairing → Done" driven by
   `progress` events (a 2 px hairline, no spinner, no sparkle); when done the three directions animate in place (180 ms
   crossfade, DES-§14.6) with a "Refined by the Director" chip, one "why this design" line per direction (the critique's
@@ -2923,7 +3137,9 @@ Tabs:
   an Undo toast; on `failed` "The deep pass stopped; your instant result is kept".
 - **Director review** (builder, R2; `src/components/builder/ai/director-review.tsx`, mounted by P6): a "Director review"
   button in the Design check panel → ≤ 3 suggested fixes as rows with evidence ("hero: 3 lines at 390 px"), "Apply" each
-  (through the builder store, undoable) or "Apply all"; a fix that does not raise Q is shown greyed with "no gain".
+  (through the builder store, undoable) or "Apply all"; a fix that does not raise Q is shown with the note "no score
+  change" and **stays applicable** (rev 4, QUAL-9: revision 2's "greyed" contradicted the one acceptance rule; a fix that
+  would add a hard item, raise the slop score or move a band off `ok` is not offered at all).
 
 ### AI-§K.4 Store profile → AI tab (console; data `aiStoreSummary(ctx, storeId)`, component `src/components/admin/ai/console/store-ai-tab.tsx`, mounted by P1)
 
@@ -2950,7 +3166,7 @@ only: task, class, provider, model, status, credits, ms, time), learning and sha
 | Pending store at the pending platform share (rev 3, `quota_platform_pending`) | the chip says "AI for stores in review is paused until approval · built-in copy"; local and library keep working; approved stores are unaffected |
 | Deep stage advanced by the poll (rev 3) | the stage line moves when the poll returns (≤ 95 s per stage); a second tab shows the same stage read-only; closing every tab lets the job continue through the cron or one-item batches ("ready in a few minutes / hours") |
 | Deep pass queued / running / degraded to batch | the job row with its stage; "ready in a few minutes" when degraded; the page the result applies to stays editable |
-| Read-only (impersonation, suspended) | AI actions hidden; settings read-only |
+| Read-only (impersonation, suspended) | AI actions hidden; settings read-only; rev 4: under impersonation every AI route answers `impersonation_read_only`, the copilot is absent and no credit moves (D70) |
 | Pending store | everything works within the pending credits cap (Cloud AI incl. the Director for the onboarding wow, `ai_credits_month` capped at 100) |
 
 ---
@@ -3017,6 +3233,10 @@ marks.
 | `ai.director.share` (rev 3) | Director passes: {used} of {share} credits used this month; {kept} credits are always kept for copy | | |
 | `ai.director.stage.critique_job` ◆ (rev 3) | Reviewing the 6 candidates in the background, about two minutes | Revue des 6 candidats en arrière-plan, environ deux minutes | مراجعة المقترحات الستة في الخلفية، حوالي دقيقتين |
 | `ai.job.batch_hours` (rev 3) | Ready in a few hours | | |
+| `ai.note.novelty` ◆ (rev 4, QUAL-1) | Rewrote {n} headlines that sounded like other shops | {n} titres réécrits, trop proches d'autres boutiques | أعدنا كتابة {n} عناوين كانت قريبة من متاجر أخرى |
+| `ai.block.impersonation` (rev 4) | AI is off while support views this shop | | |
+| `ai.callhint.outside` (R3, rev 4) | Best time {time} is outside your calling hours · best inside: {inside} | | |
+| `ai.console.after_driver` (rev 4, en only) | after() driver: {state} (flag ai_detached_jobs, probe of {date}) | — | — |
 | `ai.copilot.placeholder` | Ask about orders, pages or customers | | |
 | `ai.copilot.no_cloud` | Plain-language questions need Cloud AI. Showing search results. | | |
 | `ai.copilot.proposal.do` / `.cancel` | Do it / Cancel | | |
@@ -3089,6 +3309,8 @@ export const aiJobs = mysqlTable("ai_jobs", {   // core §D.5 shape (D56) + the 
 // rev 3 (ENGP-3): `aj_active_uq` is on (store_id, input_hash, active), NOT on status. With status in the key the second identical job's terminal UPDATE
 // collided with the first's `done` row (and two `failed` rows collided too). MariaDB treats NULL as distinct in unique keys, so finished rows never collide;
 // the core's §D.5 declaration must change the same way (AI-§S.3 R29). `test:ai-db`: "same input twice to done".
+// rev 4: core rev 3 adopted it (§D.5 `aiJobs`, §Q.8 AI R29 = A), so this block and the core's are now the same declaration; `driver` gains no new
+// value (the cron's batch hand-off writes "batch"), and the `stage` varchar(24) holds "batch:<stage>" for stage ids ≤ 18 chars (asserted by test:ai).
 
 /** page_versions.critic_picks (core §D.2; ai owns the values): ≤ 2 KB, never page text */
 export interface CriticPicks {
@@ -3218,7 +3440,10 @@ export const aiUsageDaily = mysqlTable("ai_usage_daily", {   // T (rolled up hou
 - `ai_exemplars` (T; core §D.6): `id`, `store_id`, `family`, `category`, `locale`, `market`, `field`, `angle`, `text
   varchar(1000)`, `score`, `score_n int`, `uses`, `source enum('published','curated')`, `version_id`, `active bool`,
   `last_used_at`, `embedding blob NULL` (int8, R-D34), `created_at`, + `structure varchar(32)` (the headline structure
-  tag, G29) and `facts_hash char(16)` (for the Jaccard exclusion, AI-§G.3); index `(store_id, field, locale, active, score)`.
+  tag, G29) and `facts_hash char(16)` (rev 4: the dedupe key of the source product's fact set; revision 2's "for the
+  Jaccard exclusion" is withdrawn with the exclusion, QUAL-31), + **`masked varchar(1000) NOT NULL`** (rev 4: the
+  skeleton with `{fact}` / `{material}` / `{origin}` / `{n}` slots computed at entry by `maskExemplar`, the only text
+  injected into prompts, AI-§G.3); index `(store_id, field, locale, active, score)`.
 - `ai_exemplars_platform` (P, 0007; core §D.6): `id`, `family`, `category`, `locale`, `market`, `field`, `angle`, `text
   varchar(1000)`, `structure varchar(32)`, `score`, `uses`, `source enum('library','approved')`, `approved_by`, `active
   bool`, `created_at`; **no store id**; written only by `src/lib/ai/platform/**` (console approval) and the library seed;
@@ -3232,14 +3457,14 @@ export const aiUsageDaily = mysqlTable("ai_usage_daily", {   // T (rolled up hou
 // src/lib/settings/keys/platform_ai.ts (platform, not secret; core §D.10 names the paths: `enabled`, `classes`, `prices`, `caps`,
 // `promptVersions`, `evalGate`, `patternLibrary`, `retentionNotice`; the rest are ai-owned extras)
 const ClassZ = z.object({
-  model: ModelId, effort: EffortZ, maxTokens: z.number().int().min(256).max(64_000), timeoutMs: z.number().int().min(5_000).max(600_000),
+  model: ModelId, effort: EffortZ, maxTokens: z.number().int().min(256).max(64_000), timeoutMs: z.number().int().min(5_000).max(90_000),   // rev 4: max 90,000 (every call, pattern-B stages included, is ≤ 90 s; ENGP-19 / ENGP-2); revision 3's 600,000 is withdrawn
   fastMode: z.literal(false).default(false), fallbacks: z.enum(["default", "none"]), batch: z.enum(["never", "allowed", "always", "fallback"]),
 });
 export const PlatformAi = z.object({
   enabled: z.boolean().default(false),                                               // false until a key and a cap exist (core D40)
   classes: z.object({                                                                // core D55
     director_interactive: ClassZ.default({ model: "claude-opus-5-5", effort: "medium", maxTokens: 10_000, timeoutMs: 90_000, fallbacks: "default", batch: "never" }),
-    director_deep:        ClassZ.default({ model: "claude-fable-5-1", effort: "high", maxTokens: 32_000, timeoutMs: 600_000, fallbacks: "default", batch: "fallback" }),
+    director_deep:        ClassZ.default({ model: "claude-fable-5-1", effort: "high", maxTokens: 32_000, timeoutMs: 90_000, fallbacks: "default", batch: "fallback" }),   // rev 4: per-stage timeout (was 600_000)
     worker:               ClassZ.default({ model: "claude-sonnet-5-5", effort: "low", maxTokens: 8_000, timeoutMs: 60_000, fallbacks: "default", batch: "allowed" }),
     fast:                 ClassZ.default({ model: "claude-haiku-5-5", effort: "low", maxTokens: 2_000, timeoutMs: 30_000, fallbacks: "none", batch: "allowed" }),
   }).default({}),
@@ -3284,13 +3509,13 @@ export const PlatformAi = z.object({
   fallbacks: z.enum(["default", "off"]).default("default"),
   callShape: z.enum(["parse", "create"]).default("parse"),
   streamTransport: z.enum(["stream", "poll"]).default("stream"),
-  routes: z.record(TaskIdZ, z.object({ enabled: z.boolean(), effort: EffortZ, fast: z.boolean(), deadlineMs: z.number().int().min(5_000).max(600_000), maxTokens: z.number().int().min(256).max(64_000) }).partial()).default({}),
+  routes: z.record(TaskIdZ, z.object({ enabled: z.boolean(), effort: EffortZ, fast: z.boolean(), deadlineMs: z.number().int().min(5_000).max(90_000) /* rev 4: was 600_000 */, maxTokens: z.number().int().min(256).max(64_000) }).partial()).default({}),
   autoPrefersCloud: z.record(TaskIdZ, z.literal(true)).default({}),                 // set only through the gate (AI-§F.6)
   cacheTtl: z.object({ platform: z.enum(["1h", "5m"]).default("1h") }).default({}),
   vision: z.object({ maxSide: z.number().int().min(512).max(1568).default(1024), maxImages: z.number().int().min(1).max(4).default(3), tileQuality: z.number().min(0.6).max(0.95).default(0.85) }).default({}),
   genePins: z.record(z.string(), z.object({ pin: z.array(z.string()).optional(), ban: z.array(z.string()).optional() })).default({}),   // R3
   modelInfo: z.record(ModelId, ModelInfo).default({}),
-  probe: ProbeResult.nullable().default(null),                                      // incl. detachedJob: { survivedMs, at } and the live price rows
+  probe: ProbeResult.nullable().default(null),                                      // incl. detachedJob: { survivedMs, proxyCutMs, at } (rev 4: no `useAfter`; the after() driver is the release flag ai_detached_jobs, core §H.12), tokPerSec per class (line 11) and the live price rows
 });
 // src/lib/settings/keys/platform_ai_secret.ts (platform, secret: true; core §D.10)
 export const PlatformAiSecret = z.object({ apiKey: z.string().regex(/^sk-ant-[A-Za-z0-9_-]{20,200}$/).optional(), setAt: z.string().optional(), setBy: z.string().optional() });
@@ -3322,14 +3547,18 @@ export const BrandVoice = z.object({
 ## AI-§N Jobs (`src/lib/jobs/tracks/ai.ts`; core §H.2 slots 4b, 4c and 6; core §Q.5 R8)
 
 All jobs are registered from `src/lib/jobs/tracks/ai.ts` into the slots the core assigned (core §H.2: slot 4b `ai.batches`
-8 s, slot 4c `ai.jobs` 1 s, slot 6 for the hourly and daily jobs; the guaranteed budgets sum to 95 s and `test:jobs`
-fails a registry that exceeds them). Revision 2 adds **no new job name**: the health report rides on `ai.insights`, the
+8 s, slot 4c `ai.jobs` **1 s guaranteed + the leftover of slots 1-5 up to 20 s** (rev 4: core §Q.8 AI R27 = A, option 1),
+slot 6 for the hourly and daily jobs; the guaranteed budgets sum to 95 s and `test:jobs` fails a registry that exceeds
+them). **Rev 4 (core §H.2 rev 3, ENGC-11):** every ai job runs under the tick's `platformLock("tick")`, calls
+`ctx.yield()` at least every 2 s of CPU (the batch ingest loop every 50 items, `ai.rollups` every store, `ai.genes`
+every 200 cells), takes at most one named lock (core §E.7, pool of 2) and never holds a pooled connection across a model
+call (AI-§B.11). Revision 2 adds **no new job name**: the health report rides on `ai.insights`, the
 canary rollback on `ai.rollups`, the gene decay on `ai.genes`.
 
 | Job | Slot · every | Budget | Per store | Does |
 |---|---|---|---|---|
 | `ai.batches` | 4b · tick | 8 s | items across stores in one batch | poll open batches, ingest ended ones (idempotent per item, resumes next tick), submit queued items (AI-§B.8); refresh the heartbeat of jobs degraded to `batch:<stage>`; **skipped (not failed)** for submission when `ai_generation_enabled` is off, open batches still ingested (core §H.8) |
-| `ai.jobs` | 4c · tick | 1 s today (20 s shared requested, AI-§S.3 R27) | — | rev 3 (ENGP-2): orphan handling of `ai_jobs` **without `after()`**: `running` with `heartbeat_at` older than 60 s → the lease is cleared so the next driver re-claims the stage (one re-claim per stage), a second orphaning of the same stage → `failed` with the instant result kept (AI-§B.13 step 4); a job with no poller for 60 s → its next stage submitted as a one-item batch; expires `queued` rows older than 30 min whose creator never polled; **when the tick leaves ≥ 95 s of budget** (the requested slice) it also advances **one stage of one job** per tick (`advanceJob(…, "cron", 90_000)`), oldest `lease_until = NULL` first, so a job keeps moving at one stage per 5 min even with no tab and no `after()` |
+| `ai.jobs` | 4c · tick | 1 s guaranteed + leftover of slots 1-5 ≤ 20 s (rev 4, as decided); one inline stage only when `ctx.remainingMs() ≥ 95 s` | — | rev 3 (ENGP-2): orphan handling of `ai_jobs` **without `after()`**: `running` with `heartbeat_at` older than 60 s → the lease is cleared so the next driver re-claims the stage (one re-claim per stage), a second orphaning of the same stage → `failed` with the instant result kept (AI-§B.13 step 4); a job with no poller for 60 s → its next stage submitted as a one-item batch; expires `queued` rows older than 30 min whose creator never polled; **when the tick leaves ≥ 95 s of budget** (the requested slice) it also advances **one stage of one job** per tick (`advanceJob(…, "cron", 90_000)`), oldest `lease_until = NULL` first, so a job keeps moving at one stage per 5 min even with no tab and no `after()`; **rev 4:** on every other tick the driverless job's next stage goes to a one-item batch (case a of AI-§B.8) so no stage waits for an idle tick, and the inline case is reviewed by the core (AI-§S.4 R41) |
 | `ai.rollups` | 6 · hourly | 5 s | cursor over stores with new runs | `ai_runs` → `ai_usage_daily` (idempotent upsert of the last 2 days); the per-version online metrics; the **canary rollback check** (AI-§F.8) |
 | `ai.reconcile` | 6 · hourly | 2 s | — | abandoned `running` runs → `error/abandoned`, reconciled at the reservation (AI-§C.2); jobs `cancelled` with an unreconciled reservation |
 | `ai.retention` | 6 · daily 03:50 | 5 s | — | `ai_cache` expired rows; `ai_runs.output` > 90 days → NULL (core §H.11); `ai_runs` rows > 180 days deleted after rollup; `ai_batch_items` ingested > 30 days deleted; `ai_feedback` texts > 400 days → NULL; `ai_eval_runs.report` > 180 days → NULL; `ai_jobs` done/failed > 30 days with their `DATA_DIR/ai/<storeId>/` blobs |
@@ -3351,12 +3580,17 @@ not needed for its work and the kill switch is off for the parts that need it.
 - **Rollups**: `ai_usage_daily` hourly; the console reads only rollups for ranges over 2 days (fast on a 3 GB DB).
 - **Health** (core `getHealth` §H.5, `AiHealth`): `aiHealth()` returns key source, enabled, provider paused or ok per
   class, breaker state, transport and deep transport, last successful call, open batches, orphaned jobs, month-to-date
-  spend vs cap (used %), refusal rate 24 h, errors in the last hour, the canary in flight.
+  spend vs cap (used %), refusal rate 24 h, errors in the last hour, the canary in flight; **rev 4 (platform PLA-§15.1
+  AI panel row, PD57 / PD68):** per class the served model and the fallback use in 24 h, open batches with the oldest
+  age, `ai_jobs` running / orphaned / failed in 24 h with the stage-driver shares (`after()` / poll / cron / batch), the
+  **pending slice used %** (`ai_cost_micros_pending` vs `pendingSharePct × monthlyUsd`), the Director-share refusals
+  (`quota_director`) in 24 h, the flag `ai_detached_jobs` and the date of the detached-job probe.
 - **Alarms** (staff notifications; the core §H.5 list): spend ≥ 70 %, 85 % and 100 % of the cap; auth failure; a Director
   class unavailable; refusal rate > 5 % over 50 runs in an hour; 3 canary-token leaks in a day; `invalid_output` > 10 % for
   a task over 30 runs; `critic_contradiction` > 5 % of critique issues over 30 runs; cache hit rate 0 for a hot task
-  (AI-§B.5); a batch failed or expired; an `ai_jobs` orphan recovered or failed; the detached-job probe failing (pattern B
-  degraded to C); a canary rolled back; **rev 3:** a stage re-claimed by a poll > 3 times in an hour (`after()` never
+  (AI-§B.5); a batch failed or expired; an `ai_jobs` orphan recovered or failed; the detached-job probe failing (rev 4:
+  informational only, the flag `ai_detached_jobs` stays off and pattern B runs on polls and the cron; revision 2's
+  "pattern B degraded to C" no longer happens); a canary rolled back; **rev 3:** a stage re-claimed by a poll > 3 times in an hour (`after()` never
   survives on this host; informational), the pending stores' share at 80 % and 100 % (`ai.pending_share_reached`),
   measured throughput (probe line 11) below 150 tok/s on a Director class, a raster `orange_regions` hit with
   `tokenOrange = false` (a theme-engine or rasterizer bug), `pickTypeClassDrift` beyond ±10 points on a live eval.
@@ -3385,7 +3619,8 @@ not needed for its work and the kill switch is off for the parts that need it.
 | Director passes / deep passes per store per day | 30 / 5 (`platform_ai.caps`); 1 deep job at a time per store |
 | Director share of a store's month (rev 3) | ≤ 60 % of `ai_credits_month` (`caps.directorSharePct`); the rest is kept for copy, rewrites and analyze |
 | Pending stores' share of the platform cap (rev 3) | ≤ 10 % of `monthlyUsd` (`caps.pendingSharePct`); pending daily floor 10 credits |
-| Deep job | ≤ 10 min wall clock, **stages ≤ 90 s each with `max_tokens` = ⌊90 × tok/s × 0.6⌋**, heartbeat 10 s, orphan at 60 s, 1 re-claim per stage, drivers `after()` / poll / cron (never `after()` for recovery), result ≤ 64 KB (+ blob under `DATA_DIR/ai/<storeId>/`, 30 days) |
+| Deep job | ≤ 10 min wall clock, **stages ≤ 90 s each with `max_tokens` = ⌊90 × tok/s × 0.6⌋**, heartbeat 10 s, orphan at 60 s, 1 re-claim per stage, drivers `after()` / poll / cron (never `after()` for recovery), result ≤ 64 KB (+ blob under `DATA_DIR/ai/<storeId>/`, 30 days); rev 4: job-starting handlers `maxDuration = 360`, the `after()` driver only with the flag `ai_detached_jobs`, a poll advances only from a same-origin fetch, the cron inline stage only at `remainingMs ≥ 95 s` |
+| Generated-line novelty (rev 4) | headlines and leads of AI copy checked once per merge (≤ 60 lines per call, bucket `design:headlines` 60 / 10 min); ≤ 1 re-ask per line, then the engine or library line |
 | Hints per direction | ≤ 3 values per gene, weight ≤ 3× (DES-§4.6); **plus ≤ 1 pinned bold gene per direction** (rev 3) |
 | "Why this design" line | ≤ 120 chars per locale, no numbers but the merchant's, no dash; written in one locale, translated by the Worker (rev 3) |
 | Canary (rev 3) | 50 % / 20 % / 5 % of the family's runs by its 7-day volume (< 400 / < 2,000 / else); rollback at 2× guard rejections (R1) or −10 points keep rate (R2) on ≥ 20 generations; promotion at 7 d ∧ ≥ 50 runs or 14 d ∧ ≥ 20 runs |
@@ -3416,7 +3651,7 @@ not needed for its work and the kill switch is off for the parts that need it.
 
 | Script | File | Checks |
 |---|---|---|
-| `test:ai` | `src/lib/ai/selftest.ts` | `ladderFor` decision table (every row of AI-§A.4 × device shapes incl. the Director rows and the degrade ladder); policy block order; the **class router** (every task resolves to its class, model, effort and pattern; a Fast request never carries `fallbacks`; a `director_deep` call is never built outside a job or a batch; effort present on every call); loose schema projections (strict ⊂ loose; no `minLength/maxLength/minItems/maxItems/minimum/maximum` in any loose JSON); `mergeAiCopy` v2 (over-long field keeps the others; GEN-09; policy rule; link/e-mail rule; counts sliced; **dash and middle-dot rewrite; kicker budget**); `PartialJson` (escapes, nested arrays, split deltas at every byte offset of a recorded stream, garbage input); cost formula with iterations, batch and fast and the per-model cache tiers; credit rounding; reservation math incl. pass counters; PII scanner (Moroccan formats, Arabic-Indic digits, spaced digits, e-mails, URLs, Luhn) and the canary-PII request-body test for every task builder incl. scripts, insights, health and copilot tool results; injection heuristic; **canary token** minted, placed after the cached blocks, detected in output; prompt assembly: block 2 byte-identical across two stores and ≥ 512 tokens (token estimate ≥ 2,400 chars) per family, block 3 differs, no store string in block 2, the Director prefix ≈ 9K tokens; prompt version and rubric version hash checks; every family has README, fixtures and a frozen baseline; `fromSdkError` mapping with SDK error instances; proposal sign/verify/expiry; guard per task (AI-§D.3) incl. **Director `finalize`** (unknown gene value dropped, missing card id dropped, digest contradiction dropped, ≤ 3 ops, picks distinct, hard-fail candidate never picked); `Critique` validation fixtures; `GateThresholds` logic incl. the lower-bound rule and the noise floor; the canary hash picks ≈ 5 % of 10,000 synthetic runs; `ai_jobs` state transitions with a fake clock (queued → running → done; orphan → resubmitted once → failed; cancel) |
+| `test:ai` | `src/lib/ai/selftest.ts` | `ladderFor` decision table (every row of AI-§A.4 × device shapes incl. the Director rows and the degrade ladder); policy block order; the **class router** (every task resolves to its class, model, effort and pattern; a Fast request never carries `fallbacks`; a `director_deep` call is never built outside a job or a batch; effort present on every call); loose schema projections (strict ⊂ loose; no `minLength/maxLength/minItems/maxItems/minimum/maximum` in any loose JSON); `mergeAiCopy` v2 (over-long field keeps the others; GEN-09; policy rule; link/e-mail rule; counts sliced; **dash and middle-dot rewrite; kicker budget**); `PartialJson` (escapes, nested arrays, split deltas at every byte offset of a recorded stream, garbage input); cost formula with iterations, batch and fast and the per-model cache tiers; credit rounding; reservation math incl. pass counters; PII scanner (Moroccan formats, Arabic-Indic digits, spaced digits, e-mails, URLs, Luhn) and the canary-PII request-body test for every task builder incl. scripts, insights, health and copilot tool results; injection heuristic; **canary token** minted, placed after the cached blocks, detected in output; prompt assembly: block 2 byte-identical across two stores and ≥ 512 tokens (token estimate ≥ 2,400 chars) per family, block 3 differs, no store string in block 2, the Director prefix ≈ 9K tokens; prompt version and rubric version hash checks; every family has README, fixtures and a frozen baseline; `fromSdkError` mapping with SDK error instances; proposal sign/verify/expiry; guard per task (AI-§D.3) incl. **Director `finalize`** (unknown gene value dropped, missing card id dropped, digest contradiction dropped, ≤ 3 ops, picks distinct, hard-fail candidate never picked); `Critique` validation fixtures; `GateThresholds` logic incl. the lower-bound rule and the noise floor; the canary hash picks ≈ `canary_bp` / 10,000 of 10,000 synthetic runs at each of the three slice values 5,000 / 2,000 / 500 (rev 4 wording; revision 2 said "≈ 5 %"); `ai_jobs` state transitions with a fake clock (queued → running → done; orphan → lease cleared → re-claimed once by the next driver → failed on a second orphaning; cancel; rev 4 wording, revision 2 said "resubmitted") |
 | `test:ai-eval` | `scripts/qa/ai-eval.ts --offline` | the **20-case committed smoke set** over the library provider and the recorded server outputs (`src/lib/ai/eval/sets/<family>/recorded/`); fails on any hard metric (invented numbers 0 incl. **number words**, invented claims 0, banned and medical 0, dashes 0, no-orange, language purity, RTL sanity, canary leaks 0, diversity floor); prints the scorecard; runs in < 60 s |
 
 **Rev 3 additions to `test:ai`** (one line each so the reviewers' checks are mechanical): no registry `deadlineMs` or
@@ -3436,6 +3671,20 @@ JPEG-artefact fixture yields 0 hard exclusions (QUAL-29); the Darija guide lint 
 **Wall time (ENGP-24):** `test:ai` ≤ 20 s and `test:ai-eval` < 60 s on the owner's PC; the word-number and claim tables
 are tested on fixtures, never by sweeping the corpus inside `npm test` (the corpus sweep is `qa:ai-eval-live`).
 
+**Rev 4 additions to `test:ai`:** `budgetVerdicts` at the band edges of core §M.2 (C3 18,749 / 18,751 px, F1 3,749 /
+3,751 px, C2 fold item 937 / 939 px; `estimated` never excludes a candidate, `over` always does; ENGP-6); the generated-
+line novelty path with a stub `checkHeadlineNovelty` (share 0.3 → one re-ask → still 0.3 → `engine` line, origin map
+updated; QUAL-1); `mergeAiCopy` v2 returns a `CopyOrigin` for every field it wrote and `library` for every field it
+rejected; guard rule 3's call-timing table against `ctx.callingHours` (OPS-11); the copilot tools normalise "Fès",
+"fes", "فاس" to one `CityKey` with the shared `scripts/qa/fixtures/city-key.json` (OPS-1, CRIT1); a brief whose JSON names
+`pin` is folded into `hints.pins` and a second pin is dropped (QUAL-10); the imported `RenderDigest` / `NicheShares` /
+`GeneHints` types (no local declarations under `src/lib/ai/director/`; QUAL-25, QUAL-20); every `ClassZ.timeoutMs` and
+`routes.deadlineMs` ≤ 90,000 (ENGP-19); the canary slice rule and the jury table unchanged from rev 3.
+**`test:slow` (core §J.1, run before each merge, never in `npm test`):** `test:ai:slow` = the 30-store niche-novelty
+corpus over recorded cloud outputs (0 hard `design:N8` on `cloud` / `local` lines after rule 13) and, from R3, the
+1,000-run anti-convergence and gaming simulations of AI-13 acceptance (4), (8) (100-run seeded subsets of both stay in
+`test:ai`).
+
 ### AI-§Q.2 DB-backed (`npm run test:db`; core §J.2 `test:ai-db` = `scripts/qa/ai-db-check.ts`, plus the ai cases in `scripts/qa/tenancy-cases/ai.ts`)
 
 `test:ai-db`: reserve → reconcile with `allowOver`; `ai_credits_day`, pass-counter, **Director-share and pending-share**
@@ -3453,6 +3702,12 @@ every `ai_*` row and the `DATA_DIR/ai/<storeId>/` blobs of the store and none of
 (`tenancy-cases/ai.ts`, imported by `tenancy-check.ts`, core §F.1): store B can't read A's `ai_runs` by id (runs route),
 can't hit A's `ai_cache` (same input hash), can't poll A's run buffer or A's `ai_jobs` row, can't cancel A's job, can't
 redeem A's copilot proposal (R3); a local-mode store gets `store_local_only` from every AI route with 0 stub calls.
+**Rev 4 cases:** an impersonating session gets `impersonation_read_only` from every AI route (POST and `jobs/[id]?advance=1`)
+and moves no usage counter, and the HTML / RSC of Settings → AI under impersonation contains none of the customer
+canaries (core §F.1, D70); a `jobs/[id]?advance=1` GET without `Sec-Fetch-Site: same-origin` leaves the job's stage
+unchanged; the pool-hold case of AI-§B.11 (12 stubbed 2-s calls on a pool of 4, no `pool_wait` > 100 ms); a `sheet` or
+`api` `delivered` event never bumps `stats_version_daily.delivered_evidence` before the 7-day window closes, a `carrier`
+/ `integration` / `reconciliation` one does at once (QUAL-16, D74; the R2 rows of the case are skipped until 0006).
 
 ### AI-§Q.3 HTTP / e2e (core §J.3 rows `qa:ai-stream`, `qa:ai-probe`, `qa:ai-eval-live`, `qa:ai-eval-local`, `qa:detached-job-probe`)
 
@@ -3464,7 +3719,15 @@ redeem A's copilot proposal (R3); a local-mode store gets `store_local_only` fro
   with a stub Director: the stage line, the in-place replacement of the three directions, Undo back to the instant set,
   "Use this" on an instant direction cancelling the pass.
 - `qa:wow-demo` (core §J.3, maintainer) runs with Cloud AI **off**; the ai part contributes the assertion that no provider
-  call is made and that the two-store genome distance is ≥ 0.25.
+  call is made and that the two-store genome distance is ≥ 0.25 (rev 4: in its own step file
+  `scripts/qa/wow-demo/steps/ai.ts`, the extension file the maintainer creates at P0, core §K.2; plus: the Director
+  control is absent with Cloud AI off and the reveal shows "Director pass: needs Cloud AI" nowhere over a fold).
+- `scripts/qa/ai-stream-check.ts` (rev 4 additions): the three job-capable handlers export `maxDuration = 360` and every
+  other ai handler 120 (a static check over the route modules); a `jobs/[id]?advance=1` from a client without
+  `Sec-Fetch-Site: same-origin` answers the read-only view; the poll answer of a 20-s stub stage arrives in ≤ 25 s.
+- `render-check` (core §H.13, the maintainer's harness): AI-08 acceptance (6)'s `<img onerror>` fixture lives in
+  `scripts/qa/render-cases/ai.ts` (rev 4: the per-track case file the maintainer creates at P0, ENGP-12), rendered
+  through the landing sections with AI copy in every text slot.
 
 ### AI-§Q.4 Live (manual, needs the key or the live site)
 
@@ -3472,6 +3735,39 @@ redeem A's copilot proposal (R3); a local-mode store gets `store_local_only` fro
 qa:detached-job-probe` (AI-§B.13) against the live site before the deep pass is enabled, result recorded in HANDOFF;
 `npm run qa:ai-eval-live` (submits a live eval through Batches on a throwaway DB; the oracle and the null first); `npm run
 qa:ai-eval-local` (Playwright msedge with WebGPU on the owner's PC for local prompt and model changes).
+
+### AI-§Q.5 Proven by (rev 4, CRIT17): every acceptance item → the command, fixture or harness step that proves it
+
+Read as "item (n) of the feature's acceptance list → proof". **Auto** = runs without a person (`npm test`, `test:db`,
+`test:slow`, `test:e2e`); **manual** = a named live run whose result is recorded (HANDOFF, `ai_eval_runs`, the quarterly
+REVIEW); **metric** = a console number reviewed by a person, stated as such (not a test). Every `test:*` script is in core
+§J.1 / §J.2 / §J.3; fixture paths are under `src/lib/ai/eval/sets/<family>/` unless named.
+
+| Feature | Acceptance item → proven by |
+|---|---|
+| AI-01 | (1) `test:ai` stub provider counting calls with `platform_ai.enabled = false` / no key / no cap, auto; `qa:wow-demo` step `ai.ts`, auto · (2) `test:ai-db` reconcile case + `qa:ai-stream` stub run, auto · (3) `test:ai-db` quota case, auto · (4) `test:ai-db` 20-parallel race, auto · (5) `test:ai-db` flags-cache case with a fake clock, auto · (6) `tenancy-cases/ai.ts` local-mode case over every ai route, auto · (7) `test:ai` `fromSdkError` table + breaker with a fake clock, auto · (8) `test:ai` class-router table and the failure-code sweep, auto · (9) `test:ai-db` cache-hit case, auto · (10) `test:ai` request-builder assertion, auto · (11) `qa:ai-stream` 202 timing + `test:ai-db` poll-only completion (`SG_AI_NO_AFTER=1`), auto; probe line 12 and `qa:detached-job-probe`, manual (HANDOFF) · (12) `test:ai-db` pass caps and "same input twice to done", auto · (13) `test:ai-db` shares, auto · (14) `tenancy-cases/ai.ts` impersonation cases, auto · (15) `test:ai-db` pool-hold case, auto |
+| AI-02 | (1) `qa:ai-stream` slow stub (field before final ≥ 1 s) + `test:ai` structure detector over the three packs, auto · (2) `qa:ai-stream` three parallel locales, auto · (3) `test:ai-eval` hard metrics on the smoke set, auto; `qa:ai-eval-live` full set, manual (`ai_eval_runs`) · (4) `test:ai` assembled-prompt assertion (no `prompts.ts:99-103` line), auto · (5) `test:ai` `mergeAiCopy` v2 over-long field, auto · (6) `qa:ai-stream` deadline cut, auto · (7) metric (console, first 100 runs) · (8) `test:ai` guard fixtures + `test:ai-eval` `kickerShare`, auto · (9) `test:ai` stub novelty path, auto; `test:ai:slow` 30-store corpus, auto (`test:slow`) · (10) `test:ai` call-timing fixture, auto |
+| AI-03 | (1) wizard e2e (`qa/e2e`, consent card only on desktop tier ≥ lite) + `qa:wow-demo` at 390 px with an empty model cache, auto (`test:e2e`) · (2) `qa:wow-demo` timing step, auto · (3) wizard e2e fallback chips and "Next" never blocked, auto · (4) wizard e2e with a stub upload route (one upload, zero ai render calls), auto |
+| AI-04 | (1) `test:ai` request builder (≤ 3 images, ≤ 1,024 px, ≤ 400 KB), auto; probe line 5 for the token formula, manual · (2) `test:ai` `suggested-facts` state test (P7's component reducer), auto · (3) `test:ai` `finalize("analyze")` enums, auto · (4) `test:ai-eval` misread-material group (4 fixtures) + `test:ai` claim-noun move, auto |
+| AI-05 | (1) `test:ai` rewrite `finalize` with the field maximum and allowed numbers, auto · (2) builder e2e (one undo step), auto · (3) metric (p50 in the console); the `rewritten` event is `test:ai-db` from R2 (AI-12) |
+| AI-06 | (1) `test:ai` prefix-cache byte test, auto · (2) `test:ai-eval` `wordsAvoid` fixture, auto · (3) `test:ai-db` cross-tenant prompt case, auto · (4) `test:permissions` (`ai.manage`) + `tenancy-cases/ai.ts` impersonation read-only, auto |
+| AI-07 | (1) `test:ai-eval`, auto · (2) `test:ai` hash, README, fixtures and baseline checks, auto · (3) `test:ai-db` canary / promote server-action cases + `test:ai` slice rule, auto · (4) `qa:ai-eval-live` (oracle, null, Batches), manual; `test:ai` jury assertion per item, auto · (5) `test:ai` scorecard builder snapshot, auto · (6) `test:ai-eval` broken-version and verbosity-bias fixtures, auto · (7) `test:ai-db` rollback on 20 synthetic generations, auto · (8) `test:ai` word-number fixtures, auto; `qa:ai-eval-live --smoke` ≤ 1 h, manual |
+| AI-08 | (1) `test:ai` canary-PII sweep over every task builder, auto · (2) `test:ai-eval` injection group × 3 runs, auto · (3) `test:ai` screen fixtures (recorded) + `test:ai-db` exclusion of a suspicious row, auto · (4) `test:ai` settings snapshot, auto · (5) `test:tenancy-lint` + `tenancy-cases/ai.ts`, auto · (6) `render-check` with `scripts/qa/render-cases/ai.ts`, auto |
+| AI-09 … AI-11 (R2) | AI-09 (1)-(4) and AI-10 (1)-(3): `test:ai` length and number rules + S7's `test:ai-db` batch cases, auto · AI-11 (1) design's `test:design` compile of a recorded blueprint, auto · (2) `test:ai-db` with a stub distance service, auto · (3) `test:ai` guard on the drafts, auto · (4) `test:ai-db` kill-and-poll case, auto · (5) metric (cost vs reservation) · (6) `test:prepublish` `gateInputFor` fixtures per store kind (core §J.1), auto |
+| AI-12 (R2) | (1)-(2), (4)-(5) `test:ai-db` (S7), auto · (3) `render-check` byte-identical landing chunk + `landing.sha256`, auto |
+| AI-13 (R3) | (1)-(3), (6)-(7) `test:ai` on synthetic posteriors, auto · (4), (8) `test:ai:slow` 1,000-run simulations (100-run subsets in `test:ai`), auto · (5), (9) `test:ai-db`, auto |
+| AI-14 (R3) | (1)-(2), (4)-(5) `test:ai-db`, auto · (3) `test:ai` `maskExemplar` + `test:ai-eval` false-material exemplar fixture, auto |
+| AI-15 | (1), (4), (6) `test:ai` prompt and output fixtures, auto · (2) `test:ai` template rung with Cloud AI off, auto · (3) operations' `test:ops-db` approved-only read (OPE-§O), auto · (5) calibration slice (`ai_eval_runs.kind = 'calibration'`), manual |
+| AI-16 (R3) | (1) `test:ai` schema has no price field, auto · (2) wizard e2e "check before publishing", auto · (3) `test:ai` library rung, auto · (4) `test:ai` synthetic order sets (≥ 90 %), auto |
+| AI-17 (R3) | (1), (2) `test:ai` decomposition + guard `ctx.numbers`, auto · (3) `test:ai` pseudonym mapping unit, auto · (4) `test:ai` template fixtures, auto · (5), (6) `test:ai` planted-driver datasets (≥ 90 %, 100 % citations), auto; owner usefulness ≥ 4/5, manual |
+| AI-18 (R3) | AI-§J.6 (1) `test:ai` 30 intents × 3 locales over recorded tool calls, auto; `qa:ai-eval-live` copilot family, manual · (2) `test:ai` proposal sign / verify / expiry + `tenancy-cases/ai.ts` cross-store token, auto · (3) `test:ai-db` agent queue case, auto · (4) `test:ai-eval` injection-in-tool-result fixtures, auto · (5) `test:ai` session-store byte test, auto · (6) metric |
+| AI-19 | (1), (2), (7), (11)-(14) `test:ai` (Director `finalize`, stage-5 rule with the planted `swapHeroFamily`, `no_tiles`, pins, imports, budget verdicts), auto · (3), (15) wizard e2e with a stub Director (incl. the 390 px reveal screenshot), auto · (4) `test:ai` ladder table, auto · (5) `test:ai-eval` Director group (60 runs from R2; R1 24 core fixtures), auto · (6) `test:ai-eval` planted hard fails + the JPEG-artefact fixture, auto · (8) `qa:wow-demo` step `ai.ts`, auto · (9) quarterly REVIEW (KPI 4), manual · (10) `ai_eval_runs.kind = 'preference'` record + `test:ai-db` refusal of the "Auto by default" switch without it, auto |
+| AI-20 | (1), (4) `test:ai-eval` brief group (50 recorded briefs), auto · (2) `test:ai` brief carries the version id, auto · (3) by construction (no outbound call but the provider; `test:ai` asserts the task's module imports no fetch to another host), auto · (5) owner usefulness, manual |
+| AI-21 (R3) | (1) by construction (canvas edits only; `test:ai` asserts the studio module has no model-output-to-pixels path), auto · (2) `scripts/check-theme.ts` over every studio mix, auto · (3) e2e (50 images, no long task > 200 ms), auto · (4) labelled photo set, manual · (5) wizard e2e (one upload with `sourceAssetId`, zero ai render calls), auto; P8's `test:jobs` for the `cutout` reason |
+| AI-22 (R3) | (1) `qa:ai-eval-live --retrieval` benchmark, manual · (2) `test:ai-db` cross-store case, auto · (3) `test:ai` timing on 5,000 synthetic vectors, auto |
+| AI-23 (R3) | (1) `test:ai` (no write path from the advisory), auto · (2) `test:ai` flag-coverage fixtures, auto · (3), (4) `test:ai-db` training cases, auto · (5) `test:ai` canary-PII sweep, auto; agent clarity, manual · (6) `test:ai` window and city-key fixtures, auto |
+| SF-03 (ai rules) | `test:health` (core §J.1) over `src/lib/health/rules/ai.ts` fixtures (`ai:credits_low`, `ai:director_off_with_cloud`), auto |
+| SF-05 (learning exclusions) | `test:ai-db` `is_test` case (no row in `stats_version_daily`, `ai_feedback`, `gene_stats_*`), auto |
 
 ---
 
@@ -3486,11 +3782,20 @@ Owns (create/modify/delete), exactly the core's list: `src/lib/ai/**` **except**
 §Q.5 R15); `src/lib/settings/keys/{platform_ai,store_ai,platform_ai_secret}.ts`; `src/lib/notify/kinds/ai.ts`;
 `src/lib/flags/defs/ai.ts`; `src/lib/health/rules/ai.ts`; `src/lib/i18n/admin/<locale>/ai.ts`;
 `src/components/admin/shell/nav/ai.ts`; `src/lib/jobs/tracks/ai.ts`; `scripts/qa/{ai-eval,ai-probe,ai-stream-check,
-ai-db-check,detached-job-probe}.ts`; `src/lib/ai/selftest.ts`; `scripts/qa/tenancy-cases/ai.ts`. The one package
+ai-db-check,detached-job-probe}.ts`; `src/lib/ai/selftest.ts`; `scripts/qa/tenancy-cases/ai.ts`; **rev 4 (the core's
+rev 3 extension files and flags, core §K.2 P0 / P7 row):** `scripts/qa/wow-demo/steps/ai.ts` and `scripts/qa/render-cases/ai.ts`
+(created empty by the maintainer at P0, filled by P7), the release flag `ai_detached_jobs` in `src/lib/flags/defs/ai.ts`
+(default `false`, set from the live probe), the `ai` row of the `DATA_AREAS` registry through its extension point,
+`src/lib/ai/director/budgets.ts` (`budgetVerdicts`, inside `src/lib/ai/**`); the three job-capable route handlers export
+`maxDuration = 360` (core D56); `src/lib/ai/learn/mask.ts` is D4's (R3, inside `src/lib/ai/**`). The one package
 `@anthropic-ai/sdk` (exact pinned version) is added by the maintainer (core §Q.5 R21). `src/lib/ai/platform/**` is on
 the cross-store allowlist with a pinned annotation count (core D64). Reads (never edits): copy-library, generator,
 design APIs (`GENE_VOCAB`, `validateHints`, `clicheScore`, `checkHeadlineNovelty`, `checkNovelty`, `designHealth`: the P0
-stubs), settings index, entitlements, seam, jobs runner, audit, `src/lib/ai/copy-schema.ts`'s consumers in P6.
+stubs), settings index, entitlements, seam, jobs runner, audit, `src/lib/ai/copy-schema.ts`'s consumers in P6; **rev 4
+reads:** design's `RenderDigest`, `NicheShares`, `GeneHints` (with `pins`), `FoldReport`, `checkHeadlinesAction`,
+`estimateAlpha` (P6 stubs); the core's `HEIGHT_BAND` / `FOLD_BAND` (`src/lib/render/prepublish/budget-limits.ts`) and
+`originFrom` (maintainer); P4's `cityKey`, `callingWindowFor`, `isCallable`, `hoursText` (P0 stubs); P1's
+`checkBrandTerms` and `maskIfImpersonation` (P0 stubs); P8's derived-asset upload path. None is edited by P7.
 
 Build order inside P7:
 1. `tasks.ts` (classes, patterns, families), `provider/types.ts`, `policy.ts` + `ladderFor`, loose projections and the
@@ -3524,11 +3829,14 @@ green; with cloud disabled the whole product works on local + library and the wo
 DB the probe passes (incl. line 11 throughput and line 12 poll-driven stages, rev 3), one wizard run streams copy on a
 weak-device profile, and one interactive Director pass completes with three distinct picks and "why" lines in ar/fr/en;
 the eval gate blocks a deliberately broken prompt version; the detached-job probe result is recorded in HANDOFF
-(`useAfter` true or false; pattern B works either way through polls); **rev 3 (QUAL-30): the 40-case naturalness slice
+(`useAfter` true or false, which rev 4 records as the flag `ai_detached_jobs`; pattern B works either way through polls); **rev 3 (QUAL-30): the 40-case naturalness slice
 (ar incl. Darija, fr) is labelled by the native reviewer on the launch versions `copy.page@s1`, `copy.hero@s1`,
 `copy.field@s1` and the local `@l1`, with mean ≥ 4.0 and no item < 3, and the Darija orthography guide exists and lints
 the library**; `platform_ai.directorAutoDefault` stays `false` at launch (the preference test of AI-19 acceptance (10) is
-an R1-R2 activity, not an exit criterion).
+an R1-R2 activity, not an exit criterion). **Rev 4 additions:** `test:ai:slow` green inside `test:slow` (the 30-store
+niche-novelty corpus); the detached-job probe has set the flag `ai_detached_jobs` (on or off, either is a pass); the
+`tenancy-cases/ai.ts` impersonation and same-origin cases green; every acceptance item of AI-01 … AI-08 and AI-19's R1
+items has the proof AI-§Q.5 names.
 
 ### AI-§R.2 R2 — track S7 AI DATA (core §K.4 S7 row)
 
@@ -3625,6 +3933,34 @@ every one is already in the body above.
 | R39 | core §J.1 | State the `npm test` wall-time ceiling (≤ 3 min) the ai suites already respect (`test:ai` ≤ 20 s, `test:ai-eval` < 60 s). | ENGP-24 |
 | R40 | core §F.5 (`AuditAction`), §D.4 notification kinds | Append `platform.ai.director_default_changed`, `platform.ai.prompt_rolled_back` (named in rev 2's AI-§F.8, missing from R10's list), the staff kind `ai.pending_share_reached`. | QUAL-11, SEC-26, AI-§F.8 |
 
+**How core revision 3 decided them (§Q.8; rev 4 integrates every decision in the body):** R27 **A** (option 1: 1 s
+guaranteed + the leftover of slots 1-5 up to 20 s, one stage only on an idle tick; AI-§B.13 step 3, AI-§N; the residual
+contradiction is R41 below) · R28 **A** (`ai_cost_micros_pending` in `PlatformUsageMetric`, `ai_credits_director` in
+`UsageMetric`; AI-§C.1, AI-§C.2) · R29 **A** (core §D.5 `aiJobs` is now this file's declaration; AI-§M.1) · R30 **A**
+(the pending floor of 10) · R31-R36 **S** (design accepted in DES-§28: `design.plan`, the exported `GenomeCard` / `Band` /
+`RepairOp` / `AI_REPAIR_OPS`, **`GeneHints.pins`** rather than a separate `pin` option, 12 candidates per pass, the one
+acceptance rule, the learned factor, the jury rule of DES-§17.6, the typography text, the `gateInputFor` digest;
+AI-§A.8.2 follows design's shapes) · R37 **A** (R2 contract step; AI-§G.4 keys the evidence list on it) · R38 **S**
+(platform; the queue card is PLA-§3.5's) · R39 **A** (core §J.1: `npm test` ≤ 3 min, ai ≤ 20 s + `test:ai-eval` < 60 s) ·
+R40 **A** (core §F.5, §I.4) · the P7-row additions (`store_ai.director = null`, the `caps` additions, `evalGate.jury` /
+`canary`, the rev 3 `AiFailCode` codes and `AiPolicy` fields, the flag `ai_detached_jobs`) **A**.
+
+### AI-§S.4 Fourth-round requests (revision 4; the cross-file consequences of the round-2 findings)
+
+Each row names the file and the section that must change so it stays consistent with this revision; the ai side is in
+the body already. Nothing here needs a new table, permission or track.
+
+| # | File · section | Exact change requested | Why (finding) |
+|---|---|---|---|
+| R41 | core §H.2 slot 4c row, §H.12 pattern B | The 4c row says both "the leftover of slots 1-5, up to 20 s" and "advances one stage (≤ 90 s model call) only when the tick's remaining budget is ≥ 95 s"; a 90 s stage cannot fit a 20 s cap, and at slot 4c a 95 s remainder would leave the later slots (exports, slot 6) less than their guaranteed budgets. State one rule: either (a) the inline stage advance is evaluated **after slot 9** (the tick's tail) when every guaranteed job has finished and ≥ 95 s remain, or (b) the cron never runs a stage inline and only hands driverless stages to a one-item batch. ai's code implements the stricter reading until decided (AI-§B.13 step 3c). | ENGP-2 residual |
+| R42 | core D56 (decision table) | D56 says "pattern B is on only behind the release flag `ai_detached_jobs`"; §H.12 rule 1, the §D.4 flag list ("pattern B's `after()` driver") and the P7 row say the flag switches the **`after()` driver** only and pattern B runs on the poll and cron drivers either way. Align D56's sentence with §H.12 rule 1. | ENGP-2, ENGC-18 |
+| R43 | core §K.2 P0 design stubs (line "`sampleGenome(…, { hints?, pins?, priors? })`") | Write the stub as design declares it: `sampleGenome(…, { hints?: GeneHints, priors? })` with `GeneHints.pins?: Partial<Record<BoldGene, string>>` (≤ 1 key per direction; DES-§4.6 `pins = opts.hints?.pins`), so the P0 stub, design and ai use one shape. | QUAL-10, QUAL-25 |
+| R44 | core §M.1 rule 2 (`originFrom(prev, doc)`), design DES-§9.8 "Origin" paragraph, landing LAN-§6.4 `origin` map | The origin map must distinguish **`cloud` / `local` / `engine` / `library` / `owner`** (core §M.4 makes N8 / D3 hard for the first three and soft for the last two), but design's and landing's maps are `"generated" \| "owner"`. Source of the finer class: the draft's `generation` block stores ai's per-field `CopyOrigin` (returned by `mergeAiCopy` v2, AI-§A.3) next to design's per-field text hash; `originFrom` returns `owner` when the hash differs, else the stored `CopyOrigin` (`library` when absent, for pre-rev-4 drafts). Design's gate and landing's honesty gate may keep collapsing `cloud`/`local`/`engine`/`library` to `generated` where they need only that. | QUAL-1 |
+| R45 | core §K.4 R2 append of `order_events.actor_kind` | State that `'integration'` means a **carrier adapter** only (never the Sheets sync, never the store's own API), or drop it and reuse the existing `carrier` value, so a Sheet's typed "Livré" can never be read as a carrier-confirmed delivery; ai's evidence list is `carrier`, `integration`, `reconciliation` (AI-§G.4). | QUAL-16, OPS-9 (D74) |
+| R46 | design DES-§8.9 `RenderDigest` | Confirm the shape ai now imports as-is (no field added for ai); ai derives the C2 / C3 / F1 verdicts itself from `heights` + `hero.fold` with the core's band constants, and the R2 raster block is ai's. If design prefers to own the verdicts, export `budgetVerdicts` from `src/lib/design/index.ts` and ai imports it. | QUAL-25, ENGP-6 |
+| R47 | platform PLA-§22.2 reveal row (PD73), design DES-§14.3 | The reveal provides two slots for P7's components: the bottom action row (sticky on mobile, under the focused fold on desktop) for `<DirectorPassControl>` and the per-direction DNA card / bottom sheet for `<DirectorWhy>` (AI-§K.3); the Director control never overlays a fold. | UX-20 |
+| R48 | operations OPE-§10.1 / §5 (`window.ts`), core §K.2 P0 operations stubs | Export the pure `isCallable(window, at)` beside `nextCallableAt` / `hoursText` (core §K.2 names it in the P0 list; ai's AI-23 and guard rule 3 import it) and keep `EffectiveWindow` the one exported type; ai never re-declares the day indexing (CRIT3 is operations' and landing's to settle). | OPS-11, CRIT3 |
+
 ---
 
 ## AI-§T Review decisions (round 1)
@@ -3678,7 +4014,8 @@ per-finding rows of AI-§T and the cross-file rows of AI-§S.3, and the rev 3 te
 **RA** = rethink-ai section (§9.n = one of its 17 changes), **RF** = rethink-features section, **DB** = design-baseline
 target, **core** = STORE-SAAS rev 2 decision or section, **R** = a revision 1 request as decided in core §Q.5, **[api]** =
 the Claude API reference. Where a rev 2 row below says "nine KPIs", "5 % canary", "resubmitted through `after()`",
-"kept only if Q rises" or "Opus 5.5 + Sonnet 5.5 jury", revision 3 superseded it (AI-§T).
+"kept only if Q rises" or "Opus 5.5 + Sonnet 5.5 jury", revision 3 superseded it (AI-§T); revision 4's changes are the
+rows of AI-§V and the cross-file rows of AI-§S.4, marked "rev 4" in place.
 
 | # | Change | Why | Source |
 |---|---|---|---|
@@ -3735,4 +4072,71 @@ status of the shopper assistant and generative imagery (AI-24), loose schemas wi
 (AI-D6), the console-pasted key with the env fallback (AI-D14), the emergency model switch (AI-D15), NDJSON streaming with
 the poll fallback for pattern A (AI-D9), Batches through their own queue (AI-D10), and Cloud AI shipping **disabled**
 until the owner sets a key and a monthly cap (core D40).
+
+---
+
+## AI-§V Review decisions (round 2)
+
+One line per finding id of the round-2 review that names this file or is cross-file (the 49 ids of round 1 re-sent
+against core revision 3, plus the critic's CRIT1, CRIT3, CRIT15, CRIT17). **Resolved** = the body changed in rev 3
+and/or rev 4 (sections named; "rev 4" marks what this round changed). **Resolved (ai side)** = the ai part of a cross
+finding is in the body and the other file's part is a core decision already taken or a row of AI-§S.4. **n/a** = no ai
+surface exists, checked against the body (the reason is given). **Rejected: none.** Every blocker and major is resolved
+in the body; no finding is answered by a note alone.
+
+| Finding | Severity · file | Decision (round 2) |
+|---|---|---|
+| OPS-1 | blocker · cross | **Resolved (ai side, rev 4).** Every ai use of a city goes through P4's pure `cityKey()` to the D68 slug: the copilot's `find_orders.city`, the `city` group of `order_counts` and `propose_delivery_zones.cities` (null / "Autre" → the `*` zone; AI-§J.2), AI-23's call-time posteriors (`CityKey` buckets), tested on the shared `scripts/qa/fixtures/city-key.json` (AI-§Q.1, AI-23 acc 6). Core D68 is the decision; no new request. |
+| OPS-9 | major · cross | **Resolved (ai side, rev 4).** With Sheets as the R1 carrier loop (D74) the learning evidence is a closed `actor_kind` list: `carrier`, `integration` (carrier adapters only), `reconciliation`; `sheet`, `api`, `user`, `bot`, `system`, `customer` are hand-set and count only after the 7-day return window; `tracking_ref` / `carrier_label` never enter a prompt or learning row (AI-§G.4, AI-§Q.2). Core: AI-§S.4 R45. |
+| OPS-11 | major · cross | **Resolved (ai side, rev 4).** `ops.callingWindow` is the only source of call-timing words: `FinalizeCtx.callingHours` = `hoursText(callingWindowFor(scope))` + `withinHours` (AI-§D.1), guard rule 3 rejects any other "we call you at / within" (AI-§D.2), `callcenter.script` follows it (AI-§D.3, AI-15 acc 6), AI-23 clips suggestions with `isCallable` (AI-23), the removed `store.confirmation.hours` / `policies.contact.hours` are read nowhere; AI-02 acc 10. Operations: AI-§S.4 R48. |
+| OPS-13 | major · cross | **n/a beyond one line.** Per-city fees on landings are LP-16 (D75, landing / storefront); the only ai touch is the R3 copilot's `propose_delivery_zones`, which carries fees only as the owner typed them, keyed by `CityKey` (AI-§J.2 rev 4). |
+| OPS-14 | major · cross | **Resolved (ai side, rev 4).** Store-mode onboarding reveals three PDP directions from `productAsPageDoc(direction)` and creates no landing page; the interactive Director pass is not offered on the PDP reveal, `analyze` and `copy.hero` fill the PDP hero, and `DirectorBrief.mode = "store"` is used only by the blueprint's critique stage (AI-§A.8.2 brief comment and the "Store mode" stage row). |
+| OPS-15 | major · cross | **n/a.** The v3 manual-order functions are S1's (core §K.4, OPS-15 decision); no ai task creates or edits an order, and the R3 copilot's order proposals call operations' existing actions (AI-§J.3), never a manual-order path. |
+| OPS-20 | minor · cross | **n/a.** "Delete test orders" is `settings.write` (OPE-§26, fixed in LAN-§14.3); ai has no such action and only excludes `is_test` rows from every learning table (AI-§G.1, SF-05 row). |
+| ENGC-1 | blocker · cross | **n/a, checked.** `orders.is_test` / `leads.is_test` / `page_slug_history` moved to 0004 (core 3-11); ai reads `is_test` only through core D54's exclusion rule and never names a migration for it; every ai table stays in 0005 / 0006 / 0007 as core §D.3 lists them (AI-§M). |
+| ENGC-8 | major · cross | **Resolved (ai side, rev 4).** The P7 row stays disjoint; the rev 4 files are inside P7's globs (`src/lib/ai/director/budgets.ts`, `src/lib/ai/router/novelty.ts`) or extension files the maintainer creates at P0 (`scripts/qa/render-cases/ai.ts`, `scripts/qa/wow-demo/steps/ai.ts`, `src/lib/flags/defs/ai.ts` with `ai_detached_jobs`, the `DATA_AREAS` row); `test:ownership` covers them (AI-§R.1). |
+| ENGC-13 | major · cross | **n/a.** `createOrderRow` (D72) is T3's; ai's R2 order hook `src/lib/orders/hooks/ai.ts` is called by it like every hook and never inserts an order. |
+| ENGP-1 | blocker · cross | **Resolved (ai side).** The blueprint critique consumes design's `gateInputFor` digest for a `StorePageDoc` and never novelty-checks utility kinds (AI-11 acc 6, rev 3); rev 4 imports design's `RenderDigest` itself (`DirectorDigest`, AI-§A.8.2). Core 3-13 adopted the adapter. |
+| ENGP-2 | major · ai | **Resolved (rev 3) and aligned with core rev 3 (rev 4).** Stage-resumable pattern B with three drivers (rev 3); rev 4: the three job handlers export `maxDuration = 360`, the `after()` driver is the release flag `ai_detached_jobs` (replacing `useAfter`), a poll advances only from a same-origin fetch, the cron follows slot 4c as decided (1 s + leftover ≤ 20 s; inline stage only at `remainingMs ≥ 95 s`, else a one-item batch), no pooled connection across a model call (AI-D9, AI-§A.7, AI-§A.8.5, AI-§B.11, AI-§B.12 line 12, AI-§B.13 steps 1, 3, 5, 7, 8, AI-§M.5 `probe`, AI-§N, AI-01 acc 11, 15). Core: AI-§S.4 R41 (the 4c contradiction), R42 (D56's sentence). |
+| ENGP-3 | major · cross | **Resolved.** `aj_active_uq (store_id, input_hash, active)`; core §D.5 adopted it (§Q.8 AI R29 = A); AI-§M.1 note rev 4, AI-01 acc 12, `test:ai-db`. |
+| ENGP-6 | major · cross | **Resolved (ai side, rev 4).** `DirectorDigest.budgets` gives C2 / C3 / F1 verdicts `ok \| estimated \| over` from the core's `HEIGHT_BAND` / `FOLD_BAND`; only `over` excludes a candidate, the critic is told an `estimated` budget is not a hard fail and may not spend a repair op on it alone (AI-§A.8.2, AI-§A.8.9, AI-19 acc 14, AI-§Q.1 band-edge table). Design: AI-§S.4 R46. |
+| ENGP-14 | major · ai | **Resolved (rev 3).** Volume-scaled canary and the two promotion thresholds (AI-D29, AI-§F.8, AI-§M.5); rev 4 removes the residual "≈ 5 %" from the `test:ai` row (AI-§Q.1). |
+| ENGP-19 | minor · ai | **Resolved (rev 3, closed in rev 4).** `copy.page` 60 s everywhere; rev 4 removes the last 600 s values (AI-§B.1 client comment, AI-§B.2 deep row, `ClassZ.timeoutMs` and `routes.deadlineMs` max 90,000, `director_deep` default 90,000 in AI-§M.5) and `test:ai` asserts them. |
+| ENGP-24 | minor · cross | **Resolved.** Core §J.1 adopted ≤ 3 min and the ai share (§Q.8 AI R39); rev 4 moves the 1,000-run simulations and the 30-store novelty corpus into `test:ai:slow` under `test:slow`, with seeded subsets in `test:ai` (AI-§Q.1). |
+| ENGP-26 | minor · cross | **n/a.** The landing chunk and its storage-key prefix are T3's; no ai code ships in the landing runtime (AI-12 acc 3 keeps the byte-identical render-check). |
+| ENGP-30 | minor · ai | **Resolved (rev 3).** Smoke live run to canary, full Batch run to promote, per-family fixtures hash (AI-D28, AI-§F.3, AI-§F.6); unchanged. |
+| UX-4 | major · cross | **n/a.** The CTA-plan hook and V27 are design's / landing's; the Director only reads design's `counts.ctas` through the digest (rubric R9). |
+| UX-20 | major · cross | **Resolved (ai side, rev 4).** The Director pass is two parts: `<DirectorPassControl>` in the reveal's bottom action row (sticky on mobile, under the focused fold on desktop) and `<DirectorWhy>` in each fold's DNA card / bottom sheet; nothing covers a fold; the replacement uses the reveal's motion (AI-§A.8.8, AI-§K.3, AI-19 acc 15). Platform / design: AI-§S.4 R47. |
+| UX-21 | major · cross | **n/a.** The commerce register and the PDP families are design's / storefront's; the blueprint critique applies design's kind table and judges against rubric v3 only. |
+| UX-31 | minor · cross | **Resolved (ai side, rev 4).** `callcenter.script` reads `checkout.addressMode`: it asks for the quartier and a landmark when the address is optional and missing, confirms it when required (AI-§D.3, AI-15 acc 6). |
+| UX-37 | minor · cross | **n/a.** Form ergonomics are landing's / storefront's; no ai component renders a form field. |
+| UX-38 | minor · cross | **n/a, checked.** No AI surface uses aurora, grain or gradients (AI-§K preamble: "no gradients for AI magic"); the streamed-reveal tint is a flat 8 % accent fade, not an aurora; nothing to remove. |
+| UX-39 | major · cross | **Resolved (ai side, rev 4).** `DirectorBrief.photos[].hasCutout: boolean \| "estimated"` (design's `estimateAlpha` before the mask), so the plan may brief stage / specimen / dark directions at the reveal; the late BiRefNet mask is uploaded as a derived asset (`sourceAssetId`) and **P8's media pipeline** enqueues the `cutout` render; ai never enqueues renders (AI-§A.8.2, AI-03 scope and acc 4, AI-21 acc 5). |
+| SEC-1 | blocker · cross | **Resolved.** Core D69 adopted the pending AI slice and the 10-credit floor; rev 4 charges it through `chargePlatformUsage` / `refundPlatformUsage` and states it is a spend budget, never refunded on approval (AI-§C.1, AI-§C.2); `aiHealth()` reports the slice used % (AI-§O). The Turnstile gate, the daily sandbox ceiling and the media budgets are core / platform. |
+| SEC-5 | major · cross | **Resolved (ai side, rev 4).** Under `scope.kind = "impersonation"` `aiPolicyFor` lists no live task, every AI route refuses (`impersonation_read_only`, incl. the R3 copilot whose `ai.assist` is not a write key and `jobs/[id]?advance=1`), no usage counter moves, and Settings → AI stays metadata-only (AI-§A.4, AI-§B.13 step 7, AI-§C.3, AI-§J.2, AI-§J.3, AI-§K.5, AI-§L, AI-01 acc 14, AI-§Q.2). |
+| SEC-18 | minor · cross | **Resolved (ai side, rev 4).** No ai task proposes a store, legal or WhatsApp name; the blueprint's about / policy drafts and R2 SEO titles pass P1's `checkBrandTerms` (`policy_text`, `seo_title`) before display (AI-§D.3). |
+| SEC-26 | minor · ai | **Resolved (rev 3).** The pending share, its refusal code and the 10-credit floor; rev 4 adds the console controls for the shares (AI-§K.2) and the slice in `aiHealth()` (AI-§O). |
+| QUAL-1 | blocker · cross | **Resolved (ai side, rev 4).** Guard rule 13: AI headlines and leads pass the niche novelty check before display (one re-ask, then the engine or library line; flags `novelty_reasked` / `novelty_replaced`), `mergeAiCopy` v2 returns a per-field `CopyOrigin` for the draft's `generation` block so the core's `originFrom` can apply N8's hard / soft split, and the 30-store corpus proves 0 hard N8 on `cloud` / `local` lines (AI-§A.3, AI-§A.8.2 stage 7, AI-§A.8.9, AI-§D.2 rule 13, AI-§D.3, AI-§F.3, AI-§L, AI-§P, AI-02 acc 9, AI-§Q.1). Core / design / landing: AI-§S.4 R44. |
+| QUAL-9 | major · cross | **Resolved (rev 3).** One acceptance rule for a Director op; rev 4 fixes the residual "greyed" fix in the builder review (AI-§K.3). Design adopted the rule (DS11). |
+| QUAL-10 | major · cross | **Resolved.** One pinned bold gene per direction; rev 4 adopts design's shape `hints.pins` (≤ 1 key), folds a legacy `pin` field, and passes `sampleGenome(…, { hints })` (AI-§A.8.2, AI-19 acc 13). Core stub wording: AI-§S.4 R43. |
+| QUAL-11 | major · ai | **Resolved (rev 3).** `director: "ask"` default until the preference test, tile-only parts unscored in R1, KPI 10; rev 4 aligns the critique's final instruction ("score only what the cards, the digest and the tiles show", AI-§A.8.7). |
+| QUAL-12 | major · ai | **Resolved (rev 3).** Probe line 11, derived `maxTokens`, the slim critique; rev 4 aligns the final instruction to the slim shape and adds the slim-shape cost row (AI-§A.8.6, AI-§A.8.7). |
+| QUAL-13 | major · ai | **Resolved (rev 3).** Juries never contain the candidate's model, asserted per batch item (AI-D28, AI-§F.5, AI-§M.5); unchanged. |
+| QUAL-15 | major · ai | **Resolved (rev 3).** Slot-stratified owner reward and the always-best-fit test; rev 4 runs the 1,000-run simulation in `test:ai:slow` with a 100-run subset in `test:ai` (AI-§Q.1). |
+| QUAL-16 | major · ai | **Resolved (rev 3, tightened in rev 4).** Delivery evidence, winsorised platform cells, excluded stores; rev 4 closes the evidence list on `actor_kind` so a Sheet or API "delivered" is hand-set (AI-§G.4, AI-§Q.2). Core: AI-§S.4 R45. |
+| QUAL-17 | major · ai | **Resolved (rev 3).** Number words per locale incl. Darija and Arabic duals (AI-§D.2 rule 5, `guard-numbers.ts`); unchanged. |
+| QUAL-18 | major · ai | **Resolved (rev 3).** Vision nouns are suggestions (AI-§D.2 rule 7, `guard-claims.ts`, AI-04 acc 4); unchanged. |
+| QUAL-20 | major · cross | **Resolved (ai side, rev 4).** `DirectorBrief.recent.nicheCrowding` is design's `NicheShares` with `seq4` and `tells` (k ≥ 10, 10 % rounding); the plan renders crowded entries into `mustAvoid` (AI-§A.8.2, AI-19 acc 13). Design's runtime rules are DES-§5.1 / S26. |
+| QUAL-21 | major · cross | **Resolved (rev 3).** The serif line is gone from `system[1]`, the typography text is design's (DES-§8.9 confirms), scorer `pickTypeClassDrift`; unchanged. |
+| QUAL-23 | minor · ai | **Resolved (rev 3).** One multiplicative formula; rev 4 fixes the stale `sampleBonus` code comment (AI-§G.5). |
+| QUAL-24 | minor · ai | **Resolved (rev 3).** Honest R1 rollback metrics; unchanged. |
+| QUAL-25 | minor · cross | **Resolved.** Design's `GenomeCard`, `Band`, `RepairOp`, `AI_REPAIR_OPS` imported (rev 3); rev 4 also imports `RenderDigest`, `NicheShares`, `GeneHints` and keeps revision 3's local digest interface only as a record (AI-§A.8.2, AI-19 acc 13). Design: AI-§S.4 R46. |
+| QUAL-29 | minor · ai | **Resolved (rev 3).** Lossless raster scan as a soft cross-check; rev 4 moves it to `DirectorDigest.raster` and names the hard rule as design's V03 item (AI-§A.8.2, AI-§A.8.4, AI-§F.3). |
+| QUAL-30 | minor · ai | **Resolved (rev 3).** Launch naturalness slice and the Darija orthography guide; unchanged. |
+| QUAL-31 | minor · ai | **Resolved (rev 3, data path fixed in rev 4).** Masking happens once at entry into `ai_exemplars.masked` (a 16-char `facts_hash` could not hold a token set; it stays the dedupe key), injection reads `masked` only (AI-§G.3, AI-§M.4). |
+| QUAL-34 | minor · ai | **Resolved (rev 3).** `ask` default and the 60 % Director share; rev 4 adds the share controls to the console (AI-§K.2). |
+| CRIT1 | major · cross | **Resolved (ai side).** ai builds and reads no browser zone table; every ai city use is server-side through `cityKey()` to the slug, so whichever `ZoneTable` key shape the core fixes in D68 leaves ai unaffected; ai's tests use the shared city-key fixture (AI-§J.2, AI-23, AI-§Q.1). |
+| CRIT3 | major · cross | **Resolved (ai side).** ai imports `EffectiveWindow` and P4's pure `isCallable` / `hoursText`, never re-declares the day indexing, and uses ISO weekday 1-7 only for its own call-time posteriors (AI-23, AI-§D.1); the shape itself is operations' to fix (AI-§S.4 R48). |
+| CRIT15 | minor · cross | **n/a.** The "Report this store" footer link is landing's / design's; no AI task writes footer text, and guard rule 4 rejects links in model output, so AI copy can neither carry nor replace it. |
+| CRIT17 | minor · cross | **Resolved (ai side, rev 4).** AI-§Q.5 maps every acceptance item of AI-01 … AI-24, SF-03 and SF-05 to the command, fixture or harness step that proves it, marked auto / manual / metric; deliverable-only items were rewritten as checks where the table needed it (AI-01 acc 14-15, AI-02 acc 9-10, AI-03 acc 4, AI-15 acc 6, AI-19 acc 13-15, AI-21 acc 5, AI-23 acc 6). |
 

@@ -1,13 +1,18 @@
 # Store Gen SaaS part spec: orders, call center, agents, accounting, integrations
 
-Status: **part spec, revision 3 (round 1 review integrated)** (2026-10-24, operations part architect). Built on
-`docs/STORE-SAAS.md` **revision 2.1** (cited as **core §X**, its decisions as **core D1 … D64**; every revision 1
-request of this part was decided in **core §Q.4**, all 25 accepted as written, and integrated into the core's body:
-§D.2, §D.5, §A.3, §H.2, §E.8, §F.5, §F.9, §I.4, §K.1, §K.2) and on the settled research decisions **R-D1 … R-D53**
-(`docs/saas/RESEARCH.md` §2). **Reviewed once**: OPE-§R records every round-1 finding (OPS-1 … OPS-29 and the cross
-findings that name this file) with the decision and the section it changed; the new decisions are **OD47 … OD62**
-(OPE-§0) and the third-round requests to the core are **OPE-§Q.27** (columns, two enum appends, one P0 stub, one
-scope kind). This document is the contract for the R1 product tracks **P4 CALL CENTER**
+Status: **part spec, revision 4 (round 2 review integrated)** (2026-10-24, operations part architect). Built on
+`docs/STORE-SAAS.md` **revision 3** (cited as **core §X**, its decisions as **core D1 … D76**, its review decisions as
+**core §P** and its third-round request decisions as **core §Q.8**; every revision 1 request of this part was decided
+in **core §Q.4**, all 25 accepted as written; every revision 3 request (OPE-§Q.27a … o) was decided in core §Q.8, 13
+accepted as written and two accepted with a change, Q.27h and Q.27k, which this revision now follows) and on the
+settled research decisions **R-D1 … R-D53** (`docs/saas/RESEARCH.md` §2). **Reviewed twice**: OPE-§R records every
+round-1 finding (OPS-1 … OPS-29 and the cross findings that name this file) with the decision and the section it
+changed, and **OPE-§R2** records round 2 (the same findings re-checked against core rev 3, plus the critic's CRIT1,
+CRIT2, CRIT3, CRIT4, CRIT14, CRIT15, CRIT17); the round-1 decisions are **OD47 … OD62**, round 2 adds **OD63 … OD65**
+(OPE-§0) and changes OD47, OD57, OD61 and OD62 in place where the core decided differently (each change carries a
+**rev 4:** marker). Round 2 raised **no new request to the core**: every core-side alignment it needs is a contradiction
+between core rev 3's own sentences, listed for the maintainer in OPE-§R2's notes (core §Q.8 closing rule).
+This document is the contract for the R1 product tracks **P4 CALL CENTER**
 and **P5 INTEGRATIONS** (core §K.2), the R2 tracks **S3 MONEY**, **S4 LOGISTICS** and **S5 INTEGRATIONS 2** (core §K.4)
 and the R3 track **D2 CARRIERS & MESSAGING** (core §K.5). It refines only the tables core §D.9 gives to operations.md,
 adds product behaviour, and never renames a table, changes a `store_id` rule, changes a seam signature or moves a
@@ -32,8 +37,9 @@ commit, checked with `git diff --stat`; every cited line was re-read for this re
 
 Reading order for a build agent: OPE-§0 (decisions) → OPE-§1 (feature map: find your ids and your track) →
 OPE-§P (file ownership) → the sections your files touch → OPE-§M (actions, routes, permissions) → OPE-§N (copy keys)
-→ OPE-§O (tests you must keep green) → OPE-§Q (how the core decided this part's requests; the stubs it freezes in
-step P0 are in core §K.2) → OPE-§E (what changed in this revision and why).
+→ OPE-§O (tests you must keep green; §O.4 tells you which test proves your feature ids) → OPE-§Q (how the core decided
+this part's requests; the stubs it freezes in step P0 are in core §K.2) → OPE-§E, OPE-§R and OPE-§R2 (what changed in
+each revision and why).
 
 Section map: §0 decisions · §1 feature map · §2 data · §3 order state machine (rev 3: delivery-attempt states,
 holds, return reasons, collected amount, settlement, refunds) · §4 timeline and notes · §5 claim queue, presence,
@@ -46,8 +52,9 @@ agents, KPIs · §15 commissions and payouts · §16 accounting · §17 carriers
 notifications · §22 WhatsApp · §23 signed webhooks · §24 anti-spam settings and Turnstile · §25 later integrations ·
 §26 test orders · §27 data for the platform, health, pulse, exports, insights · §28 integration health, deliveries log
 and replay · §J jobs and time budgets · §L limits · §M server actions, routes, permissions · §N copy keys · §O tests ·
-§P file ownership · §Q requests to the core (decided; **§Q.27 third round, new**) · §E elevation changes (rev 2) ·
-**§R review decisions (round 1, filled)**.
+§P file ownership · §Q requests to the core (decided; §Q.27 third round, decided in core §Q.8) · §E elevation
+changes (rev 2) · §R review decisions (round 1) · **§R2 review decisions (round 2, new)**. **§O.4 "Proven by"** (new in
+rev 4) maps every feature id of §1 to the test command and fixture or harness step that proves it.
 
 ### Owner summary (plain English)
 
@@ -114,20 +121,28 @@ and replay · §J jobs and time budgets · §L limits · §M server actions, rou
     **French and English** in R1; the agent screen also in Darija Arabic. Ad spend typed in **USD or EUR** is converted
     with a rate you type and date (shown as your estimate), never a hidden one. Your calling hours live in one place
     and drive the thank-you page's "we call you today from 09:30" as well as the agents' queue.
+22. **New in revision 4 (after the second review).** The thank-you page and your message templates promise a calling
+    hour **only once you have saved your hours** (before that the queue still works with sensible starting hours, but
+    no customer is told a time you never chose). Exporting orders or the carrier file asks you to confirm it is you
+    (your 2FA code or your password) once every 5 minutes, because those files carry full phone numbers. Every
+    feature in this document now names the test that proves it (OPE-§O.4).
 
 ---
 
 ## OPE-§0. Decisions at a glance
 
-R-D1 … R-D53 and core D1 … D64 are settled; the 25 requests of revision 1 are accepted (core §Q.4), so no row below
-still depends on a pending request. Rows below are this part's own decisions; **deviates** / **refines** name the
-settled decision that changes and why. OD36 … OD46 are new in revision 2 (sources in OPE-§E); **OD47 … OD62 are new
-in revision 3** (each names the round-1 finding it answers, OPE-§R). Where a rev 3 decision changes an earlier row,
-the earlier row carries a "**rev 3:**" note rather than a rewrite, so the history stays readable.
+R-D1 … R-D53 and core D1 … D76 are settled; the 25 requests of revision 1 (core §Q.4) and the 15 of revision 3 (core
+§Q.8) are decided, so no row below still depends on a pending request. Rows below are this part's own decisions;
+**deviates** / **refines** name the settled decision that changes and why. OD36 … OD46 are new in revision 2 (sources
+in OPE-§E); OD47 … OD62 are new in revision 3 (each names the round-1 finding it answers, OPE-§R); **OD63 … OD65 are
+new in revision 4** (OPE-§R2). Where a later decision changes an earlier row, the earlier row carries a "**rev 3:**" or
+"**rev 4:**" note rather than a silent rewrite, so the history stays readable; in OD47, OD57, OD61 and OD62 the
+superseded clause itself was corrected (a builder must not read a contract the core declined) and the note says what
+changed.
 
 | # | Decision | Why |
 |---|---|---|
-| OD1 | **One spec, six tracks.** R1: P4 builds OPE-§3-§14, §16.2 (Profit lite), §26, §27 (reads), §28 (the store side of deliveries); P5 builds §19-§22 (R1 parts), §24, §28 (health rows and handlers). R2: S3 builds §15, §16.3-§16.9 (rev 3: incl. the XLSX writer of §18.6 and the refund / probable-match actions); S4 builds §17 (R2 parts), §18 (carrier mappings), the OP-06 merge (§9.4), OP-18/OP-19 and, rev 3, the catalog manual orders of §11.5 with the store-mode branch of the manual-order sheet; S5 builds §23 and the IN-09 parts of §19 (rev 3: four of its columns moved to P5 in R1, §19.4). R3: D2 builds the R3 parts of §17, §20, §22, §25 and AC-08…AC-11. Core merge order puts P5 before P4 (core §K.2: P8 → P2 → P1 → P5 → P4 → P3 …): P4 imports P5's finished `src/lib/integrations/templates.ts` and `scheduleSheetPush`; P5 builds against P4's frozen P0 stubs (`applyExternalStatus`, `projectStatus`, `appendOrderEvent`). File lists are the core's §K.2 P4 / P5 rows verbatim (OPE-§P). | Core §K.2/§K.4/§K.5 split; the dependency arrows then point one way inside each release. |
+| OD1 | **One spec, six tracks.** R1: P4 builds OPE-§3-§14, §16.2 (Profit lite), §26, §27 (reads), §28 (the store side of deliveries); P5 builds §19-§22 (R1 parts), §24, §28 (health rows and handlers). R2: S3 builds §15, §16.3-§16.9 (rev 3: incl. the XLSX writer of §18.6 and the refund / probable-match actions); S4 builds §17 (R2 parts), §18 (carrier mappings), the OP-06 merge (§9.4), OP-18/OP-19 and, rev 3, the store-mode branch of the manual-order sheet (§11.5; rev 4: it calls S1's v3 order functions, it does not write them); S5 builds §23 and the IN-09 parts of §19 (rev 3: four of its columns moved to P5 in R1, §19.4). R3: D2 builds the R3 parts of §17, §20, §22, §25 and AC-08…AC-11. Core merge order puts P5 before P4 (core §K.2: P8 → P2 → P1 → P5 → P4 → P3 …): P4 imports P5's finished `src/lib/integrations/templates.ts` and `scheduleSheetPush`; P5 builds against P4's frozen P0 stubs (`applyExternalStatus`, `projectStatus`, `appendOrderEvent`). File lists are the core's §K.2 P4 / P5 rows verbatim (OPE-§P). | Core §K.2/§K.4/§K.5 split; the dependency arrows then point one way inside each release. |
 | OD2 | **The app is the source of truth for order state; the sheet is a two-way mirror.** Status writes never wait for Google; a sheet edit enters as an external event through the state machine with a conflict rule (OPE-§19.6). **Deviates from today's behaviour** (`src/lib/sheets/sync.ts:16-17`, `src/lib/orders/admin.ts:166-171`: "the sheet is the source of truth for statuses once connected", sheet written first). | Agent actions must answer in ≤ 500 ms (RF §2.1); one platform service account is one shared Google quota (R-D24); one timeline needs one writer. |
 | OD3 | **Three axes per R-D17** with the exact transition tables of OPE-§3.2. `orders.status` is written only by `transitionOrder()` and by the creation insert, always as `projectStatus(states)`. Legacy labels are appended, never renamed; `lost` ("Perdue") is appended next to the core's four (accepted: core §D.2 lists the five labels, core §Q.4 Q.2). | Sheets, CSV and the PHP export read the 9 legacy ids (`src/lib/orders/contract.ts:304-314`); a lost parcel is not a return. |
 | OD4 | **Optimistic concurrency on `orders.rev`** (compare-and-set, `rev = rev + 1` in every state or line write). A stale write answers `conflict` with the fresh state; no last-writer-wins for people. | Two agents, a sheet pull and a carrier import can touch one order within seconds. |
@@ -173,7 +188,7 @@ the earlier row carries a "**rev 3:**" note rather than a rewrite, so the histor
 | OD44 | **Best hours to call, in R1, at $0**: a deterministic contact-rate table per hour of the store day (contact = any outcome except `no_answer`, `busy`, `switched_off`; trailing 90 days; a cell shows only with n ≥ 30 attempts) on the manager board and in the ladder editor. The Beta-posterior learner that rewrites ladder hours (AI-23, RF §1.5 step 4) stays R3 and advisory, never earlier than the step's minimum gap, never outside the window. | RF §1.5 ("Rules (ladder, learner) at $0"); the brief's "best-time learner"; owner rule 4 (a number only with its n). |
 | OD45 | **Every tenant-facing operations notification ships in ar/fr/en** (`ops.*`, `int.*`, `fin.*` kinds in `src/lib/notify/kinds/{ops,integrations}.ts`), its `vars` carry ids, counts and codes only, and batched kinds collapse on `dedupe_key` ("12 new orders since 14:02"). | Core §I.4 (`test:i18n-coverage` covers tenant kinds); agents and owners are Moroccan (core D36). |
 | OD46 | **Lease expiry is attributed, not silent**: when a claim takes an order whose previous `claim_token` is set and whose lease has expired, the claim writes `released` (`why: "lease_expired"`, `actor_id` = the previous holder) before `claimed`, so "orders opened and abandoned" is a visible agent KPI and the timeline never shows two `claimed` in a row. | Attempt logging the brief asks for; OD8 (the queue is computed on read: no job watches leases). |
-| OD47 | **One city key everywhere: the slug `CityKey`** (`cityKey("Fès") = "fes"`, `cityKey("Autre") = null`, OPE-§10.1). `delivery_zones.cities`, the `lp-assist` / `#sg-config` zone tables, `orders.city_key`, `carrier_rates.city_key`, `opsAggregates(dims: ["city"])`, `city_refusal` and `zoneLineFor(scope, key)` all carry slugs; the order form's `<select>` keeps posting `City.value` ("Fès") and the server (and the `assist` chunk, which bundles the pure `cityKey()`) converts once. `zoneForCity(zones, key | null)` maps `null`, "Autre" and unknown cities to the `*` zone. `test:ops` and landing's `test:delivery` share the fixture "Fès picked in the form → zone found, ETA shown" so P3, P4 and S1 fail together if the key drifts (OPS-1). | Revision 2 had two keys (landing stored `City.value`, operations the slug): the queue card, templates, tracking and checkout would never have matched a zone. The slug already folds ar/fr/en and feeds three operations tables. |
+| OD47 | **One city key everywhere: the slug `CityKey`** (`cityKey("Fès") = "fes"`, `cityKey("Autre") = null`, OPE-§10.1). Every **stored** key and every **server API** carries slugs: `delivery_zones.cities`, `orders.city_key`, `carrier_rates.city_key`, `opsAggregates(dims: ["city"])`, `city_refusal`, `zoneLineFor(scope, key)` and `zoneForCity(zones, key \| null)` (`null`, "Autre" and unknown cities → the `*` zone). **rev 4 (CRIT1): the browser never computes a slug.** The order form's `<select>` and the store checkout keep posting `City.value` ("Fès"); the only zone table a browser receives (landing's `ZoneTable` from `zonesForCheckout(scope)`, embedded as the `lp-assist` data block and in the storefront's `#sg-config`) is **keyed by the posted `City.value`**, built on the server as `city[c.value] = zoneIndex(zoneForCity(zones, cityKey(c.value)))`, with an absent key meaning the `*` zone (the core §K.2 P0 shape and LAN-§7.1); the server converts once. `cityKey` stays pure and isomorphic (any chunk *may* bundle it), but no R1 or R2 chunk is required to, so the frozen landing chunk and the add-on chunks carry no slug code. The parity fixture `scripts/qa/fixtures/city-key.json` (P4) asserts both shapes (the slug of every `City.value`, and the `ZoneTable.city` key shape) and is read by `test:ops`, landing's `test:delivery` and the storefront's `test:catalog`, so P3, P4 and S1 fail together if either drifts (OPS-1, CRIT1). | Revision 2 had two keys (landing stored `City.value`, operations the slug): the queue card, templates, tracking and checkout would never have matched a zone. The slug already folds ar/fr/en and feeds three operations tables. Revision 3 then said both "the chunks slug" and "the table is keyed by the posted value"; one shape per layer (slugs stored, values in the browser) removes the second implementation from every chunk. |
 | OD48 | **A failed or postponed delivery attempt is a ship state and a second queue lane.** `SHIP_STATES` gains `attempt_failed` and `postponed`; the move to `attempt_failed` increments `orders.delivery_attempts` and puts the order in the **delivery lane** (callable by agents with base priority 650, outcomes `customer_informed`, `reschedule`, `no_answer`, `busy`, `cancel_recall`, OPE-§6.1a); the built-in view **Delivery problems**, the board tile and `queueCounts.deliveryRescue` make them visible; carrier labels map to `{ state: "attempt_failed", reason? }` in `statusMap` (OPS-2). | Moroccan carriers report "Tentative échouée / Client injoignable / Reporté" several times per parcel; rescuing those customers is 20-30 % of a call center's day and revision 2 forced the signal into `in_transit` or `ignore`. |
 | OD49 | **"Confirmed, ship after a date" is a hold on the order**: `orders.ship_after` (set by the outcome `confirmed` with "Deliver from…", by the delivery-lane outcome `reschedule`, or in the drawer); To-pack views, picking lists, "Create shipments" and the Carrier CSV exclude rows whose hold has not passed; the drawer, slips and the Sheet ("Livrer à partir du") show it; `ops:hold_passed` raises a hold that passed without shipment (OPS-3). | Customers routinely confirm with "livrez après le 5" (payday, travel, Eid); leaving the order in `callback` re-calls them for nothing and counts them as undecided. |
 | OD50 | **Refusals and returns carry a coded reason** (`RETURN_REASONS`, `orders.return_reason`): set by the L-class move (manual picker, Sheets label mapping "Refusé: prix" in R2, carrier `statusMap` entries `{ state, reason }`), stored in the `state_changed` event, decomposed by `returnReasonMix()`, shown in the Refused & returned view, the `city_refusal` alert evidence, the R3 quality review and the sales register (OPS-4). | A 28 % refusal rate with no cause is a number the owner cannot act on; `CANCEL_REASONS` belongs to the confirm axis. |
@@ -183,12 +198,15 @@ the earlier row carries a "**rev 3:**" note rather than a rewrite, so the histor
 | OD54 | **Teams working in the Google Sheet get attribution in R1**: the optional sheet header **"Agent"** lands in `orders.confirmed_by_label` on the confirmation the pull applies and **"Note agent"** becomes a `note` event (actor `sheet`, `meta.agentLabel`); the board shows sheet agents by label; a manager maps a label to a member (`ops.agentLabels`, `/team/agents`) and from then on the pull writes `confirmed_by` directly (one backfill of the last 90 days), so KPIs and, in R2, commissions accrue for mapped labels (OPS-8). | Owner goal 10 (agent performance and commissions) must not depend on adopting the queue on day one; outsourced teams work in the owner's sheet today. |
 | OD55 | **The Sheet is the explicit R1 carrier loop, plus a Carrier CSV**: the optional headers **"Tracking"** and **"Transporteur"** are pulled in R1 into `orders.tracking_ref` and `orders.carrier_label` (shown in the drawer, slips and timeline; a tracking value implies ship ≥ `packed`), and **Export → Carrier CSV** (`shipments.write`, full phones, audited, per-order `manifest_exported`) builds the carrier's upload file from a fixed field list with the owner's own header names and delimiter (`ops.carrierCsv`, no presets, D38). R2 shipments supersede both without a rework: `shipments.tracking` is copied into `orders.tracking_ref` (OPS-9). | A landing seller ships every day in R1; revision 2 gave her no place for the tracking number and no file for the carrier's portal until R2. |
 | OD56 | **Ad spend in the account's currency, converted by a rate the owner types and dates**: `accounting.adAccounts[platform].currency` and `accounting.adRates[]` (`{ currency, fromDay, rateMilli }`, ≤ 120, labelled "your rate, estimate"); `ad_spend_daily.spend_cents` keeps the account currency and every Profit lite / `finance_daily` figure uses `spendStoreCents = round(spend_cents × rate / 1000)` with the latest rate dated ≤ the day; a row without a rate is listed "needs a rate", never converted silently; the rate is printed under the break-even card (OPS-10). | Most Moroccan Meta and TikTok ad accounts are billed in USD or EUR; comparing a MAD break-even with a USD spend invents a number. The setting (not a table) keeps 0005 unchanged. |
-| OD57 | **`ops.callingWindow` is the single source of hours** (ISO weekdays, ≤ 4 dated overrides): `confirm_hours`, the thank-you `{when}` (`nextCallableAt`), the tracking help hours and the FAQ promise are derived from it through the P0 stub `callingWindowFor(scope)` (pure helpers isomorphic in `src/lib/callcenter/window.ts`); `store.confirmation.hours` and `policies.contact.hours` become read-only mirrors written by `saveOpsSettingsAction` (one component, `CallingWindowEditor`, used by `/team/callcenter` and the thank-you card) (OPS-11, OPS-28). | Three independent hours settings with two weekday conventions let the thank-you page promise a 09:30 call on a day the ladder calls from 14:30. |
+| OD57 | **`ops.callingWindow` is the single source of hours** (≤ 4 dated overrides): `confirm_hours`, the thank-you `{when}` (`nextCallableAt`), the tracking help hours and the FAQ promise are derived from it through the P0 stub `callingWindowFor(scope): Promise<EffectiveWindow>` (never null; pure helpers isomorphic in `src/lib/callcenter/window.ts`); one component, `CallingWindowEditor`, edits it from `/team/callcenter` and from P3's thank-you card (OPS-11, OPS-28). **rev 4 (CRIT2, CRIT3; core D73):** `store.confirmation.hours` and `policies.contact.hours` are **removed** from their schemas by the core (no mirror is written: one key, one editor); the weekday shape is literally ISO, `days: Record<1 \| 2 \| 3 \| 4 \| 5 \| 6 \| 7, Range[]>` (1 = Monday … 7 = Sunday, the numbers of `checkout.calendar.workdays`), in `callingWindow`, in every `windowOverrides[].days` and in `EffectiveWindow`; landing's `CallingWindow` is the same type re-exported (`export type CallingWindow = EffectiveWindow` in `window.ts`). | Three independent hours settings with two weekday conventions let the thank-you page promise a 09:30 call on a day the ladder calls from 14:30; a 0-indexed array called "ISO" was a third convention waiting to happen. |
 | OD58 | **French ships with English in R1 for every operations screen** (`ops.`, `int.`, `fin.` prefixes; `test:i18n-coverage` requires `fr` for them in R1); Arabic for the manager screens stays R3 with the RTL dashboard; the agent console is trilingual in R1 as before (OPS-17). **Refines core D36** for this part's screens. | Owner rule "natural ar/fr/en"; the keys are a few hundred and the trilingual set already exists for the queue. |
 | OD59 | **A cash refund after delivery is a money state**: `MONEY_STATES` gains `refunded` (`collected → refunded`, `remitted → refunded`, class M with a reason and a method), `orders.refund_cents` / `refunded_at` (R2, 0006), `finance_daily.refund_cents` (net = delivered − refunds), the drawer action "Refund" (`finance.write`), the sales register state `refunded`; designed now so 0006 needs no rework when OP-22 (R3) adds the returns flow (OPS-18). | `policies.refund.method` advertises refunds; revision 2 had no ledger for them, so a returned-after-remittance order overstated delivered revenue. |
 | OD60 | **One tap less, one lease more**: the first `N` of a session sets presence `online` implicitly (an explicit `break` is respected), the presence heartbeat renews the lease of the order the agent holds (one `UPDATE` folded into `touchAgent`), `leaseMinutes` defaults to 15, and a reveal is allowed on an order the agent held in the last 30 minutes (follow-up WhatsApp after the call). `qa:wow-demo` seeds the demo store with `openOverrideUntil = now + 2 h` and presses `N` from the store owner's own session (OPS-16, OPS-19). | The three-minute demo must pass at 13:30 and on a Friday; a 12-minute call must not hand the customer to a second agent. |
-| OD61 | **Impersonation masks customers at the repository boundary**: when `scope.kind === "impersonation"` every order, lead and customer read function of this part returns `Masked` values (name → first name + initial, address and landmark → "Hidden (support view)", notes → "Note hidden"), the same `Masked` type as the console; the tenant UI renders them without per-component work; the attack suite asserts no customer canary in any tenant route under an impersonating session (SEC-5). | "View as store" is sold as safe; revision 2 masked only the phone. |
-| OD62 | **One order-insert pipeline and catalog orders by phone**: `createOrderRow(draft, ctx)` is extracted by T3 in R1.0 (frozen at P0) and is the only insert for public v2, manual v2, public v3 and manual v3 orders; R2 adds `createManualOrderV3` / `editOrderV3` on `priceLine` + `createOrderRow` (S4, with S1's product picker), and the manual-order sheet routes by store mode (ENGC-13, OPS-15). | Two inserts means every R1 change (is_test, rev, hooks, the ER_DUP_ENTRY retry) is made twice; a store-mode call center must take a phone order for a product in R2. |
+| OD61 | **Impersonation masks customers at the repository boundary**: when `scope.kind === "impersonation"` every order, lead and customer read function of this part returns its customer fields through **`maskIfImpersonation(scope, row)`** (the P0 frozen stub of `src/lib/platform/mask.ts`, P1; identity for every other scope kind; PLA-§7.2: name → "Salma B.", address → "<city> · address hidden", landmark and note → hidden), the same `Masked` type as the console; the tenant UI renders them without per-component work; the attack suite asserts no customer canary in any tenant route under an impersonating session (SEC-5). **rev 4 (CRIT14):** this part defines no masking helper of its own beyond the phone (`maskPhone` / `maskPhonesIn`, OD11): the revision 3 two-argument `maskCustomerFields(row, scope)` and the local `maskName` / `maskAddress` / `Masked` declarations are withdrawn; the read functions pass `{ name, phone: null, address, city, landmark, note }` (phones are already masked for every role) and rebuild their row from the result. | "View as store" is sold as safe; revision 2 masked only the phone. |
+| OD62 | **One order-insert pipeline and catalog orders by phone**: `createOrderRow(draft, ctx)` is extracted by T3 in R1.0 (frozen at P0) and is the only insert for public v2, manual v2, public v3 and manual v3 orders; R2 adds `quoteManualOrderV3` / `createManualOrderV3` / `editOrderV3` on `priceLine` + `createOrderRow`, and the manual-order sheet routes by store mode (ENGC-13, OPS-15). **rev 4 (CRIT4; core §K.4, §Q.8 Q.27h A\*):** the three v3 functions are **S1's**, in `src/lib/catalog/order-v3.server.ts` (STO-§16.9 is their signature source, frozen at the R2 contract step), so the public and manual v3 prices have one owner; **S4** owns the sheet's store-mode branch (`src/components/admin/orders/manual/**`, taken over from P4) and the Carrier CSV route's `format=xlsx`, and calls S1's functions without editing them; the revision 3 files `src/lib/orders/{manual-v3,edit-v3}.ts` do not exist. | Two inserts means every R1 change (is_test, rev, hooks, the ER_DUP_ENTRY retry) is made twice; a store-mode call center must take a phone order for a product in R2. |
+| OD63 | **A calling-hours promise to a shopper needs hours the owner chose** (rev 4, CRIT3 / OPS-11 follow-through): `EffectiveWindow.configured` is true once the owner saved the window at least once (`ops.callingWindow.savedAt`, written by `CallingWindowEditor` from `/team/callcenter` or P3's thank-you card); while it is false the **queue** still runs on `DEFAULT_WINDOW` (a reasoned starting value, OD9) but every **shopper-facing** reader renders nothing: the thank-you `{when}`, the tracking help hours, the honesty gate's "we call …" fact and the `confirm_hours` template variable (empty, so its optional block drops). `callingWindowFor` therefore never answers `null` (one type for every consumer) and still never lets a default become a promise. Confirming costs one tap: `CallingWindowEditor` shows the default hours with **"Use these hours"** (a save, `savedAt` set) both on `/team/callcenter` and in P3's "After the order" card, next to the caller phone; landing's "no hours" test becomes `windowIsEmpty(w, now) \|\| !w.configured` (OPE-§R2 notes). | Landing typed the stub `CallingWindow \| null` so an unset window promised nothing; the core froze `Promise<EffectiveWindow>` (never null). A flag on the one type keeps both truths: the agents' hours always exist, a customer promise exists only when a person made it (owner rule "never invent"). |
+| OD64 | **Full-phone files need a fresh step-up** (rev 4; core §B.7 tenant ladder, SEC-17): the orders CSV is under `orders.export`, which core §B.7 already lists, so its route answers `{ ok: false, error: "step_up" }` unless `sessions.step_up_at` is within 5 minutes (TOTP when enrolled, else the password re-entry) and the UI opens the step-up sheet; the **Carrier CSV** carries the same full phones under `shipments.write` (D74), which §B.7 does not list, so this part requires the **same check on that route** and records the gap for the maintainer (the seam owns the check; OPE-§R2 notes: core §B.7's stated guarantee "a stolen cookie can no longer pull every customer" does not hold while D74's file needs no step-up). The same ladder covers `closePeriodAction` / `reopenPeriodAction` (R2; revision 3 said "when the user has TOTP", which the ladder replaced). Order slips (masked phones) and the queue's reveal (one number, audited per order) need none. | Both files carry every customer's full phone; a stolen 30-day cookie alone must not be able to pull them (the core's reason for the ladder). Revision 3 still said "step-up when the user has TOTP", which the ladder replaced. |
+| OD65 | **Every feature id has a named proof, and R2 cases live with their R2 owner** (rev 4, CRIT17): OPE-§O.4 maps each id of OPE-§1 to the script (or e2e step) and the fixture that proves it, phrased as a checkable statement; P4's and P5's scripts carry R1 cases only once R1 is merged, and each R2 / R3 case is written into the owning track's own script (`money-check.ts` S3, `carrier-check.ts` S4, `test:storefront-db` S1, D2's adapter suite), because P4's files are read-only to R2 tracks (core §K.2). | A track must be able to tell which suite covers which id; an R2 case written into an R1 track's file would be a second owner of one file. |
 
 Glossary: **axis** = one of confirm / ship / money. **projection** = the legacy `orders.status` value derived from
 the three axes. **claim** = an agent's lease on one order. **outcome** = what an agent records after a call or a
@@ -196,8 +214,8 @@ WhatsApp exchange. **open order** = confirm ∈ {new, attempting, callback} or (
 packed}). **decided** = confirm reached confirmed, cancelled, unreachable, fake or duplicate. **final** = ship reached
 delivered, refused, returned or lost. **window minutes** = minutes inside the store's calling window. **rev 3:**
 **confirm lane** = the queue of orders to confirm (confirm ∈ {new, attempting, callback}); **delivery lane** = the
-queue of shipped orders whose last carrier attempt failed (ship ∈ {attempt_failed, postponed} with `due_at` set,
-OD48); **hold** = a confirmed order with `ship_after` in the future (OD49); **collected** = the cash the courier
+queue of shipped orders whose last carrier attempt failed (ship = `attempt_failed` with `due_at` set, OD48; rev 4:
+`postponed` orders are shown with them but never handed out); **hold** = a confirmed order with `ship_after` in the future (OD49); **collected** = the cash the courier
 actually took at the door (`collected_cents`, OD51); **settlement** = how a carrier account hands that cash to the
 store (`statement` or `at_delivery`, OD52); **inbound** = an action on an order the customer called about (OD53).
 
@@ -206,7 +224,9 @@ store (`statement` or `at_delivery`, OD52); **inbound** = an action on an order 
 ## OPE-§1. Feature map (every id of this area)
 
 Release per RESEARCH §4 unless a decision moves it (OD13, OD25, OD32). Track per core §K.2/§K.4/§K.5. "AC" = the
-acceptance criteria in one line; the detailed criteria sit in the section.
+acceptance criteria in one line; the detailed criteria sit in the section. **Proven by (rev 4, CRIT17, OD65):** every id
+below has one row in **OPE-§O.4** naming the script or e2e step, the fixture and the checkable statement that proves
+it; a cell here that reads like a deliverable list is the scope, OPE-§O.4 is the test.
 
 ### OPE-§1.1 Orders, call center and agents (OP-*)
 
@@ -312,7 +332,8 @@ of 0005/0006, **except `orders.is_test`, which is core-owned**).
 ### OPE-§2.1 `orders` (core §D.2 columns of 0005/0006 plus additions)
 
 Final operations column set on `orders` (existing columns unchanged; `status` stays `varchar(20)` and becomes the
-projection; the list below is byte-for-byte the rev 2 core §D.2 row for 0005):
+projection; the list below matches the **rev 3** core §D.2 rows for 0004 (`is_test`), 0005 and 0006 column for column,
+checked for revision 4):
 
 ```ts
 // 0005 (core §D.2): confirm_state, ship_state, money_state, assignee_id, lease_until, claim_token, due_at, attempts,
@@ -342,12 +363,15 @@ refundCents: bigint("refund_cents", { mode: "number" }), refundedAt: ts("refunde
 
 The enums `ship_state` and `money_state` are **appended** (core §D.1 append-only enums; OPE-§Q.27): `ship_state` gains
 `attempt_failed`, `postponed` in **0005** (the state machine ships complete in R1; manual "Move to…" and the R1 Sheets
-loop can express them), `money_state` gains `refunded` in **0006** with the refund columns.
+loop can express them), `money_state` gains `refunded` in **0006** with the refund columns. **rev 4:** the database
+enum order is the core's (the two values at the **end** of the 0005 list, core §D.2); the `SHIP_STATES` constant of
+OPE-§3.2 is a display order and is never used to generate the column (`test:state` asserts the two sets are equal, not
+their order).
 
 Indexes added **[Q.1]** (accepted, core §D.2): `orders_confirmer_idx (store_id, confirmed_by, confirmed_at)` (agent
 KPIs and agent visibility), `orders_money_idx (store_id, money_state, delivered_at)` (cash held), `orders_dirty_idx
-(store_id, sheet_dirty)` (Sheets push), `orders_store_test_idx (store_id, is_test, created_at)` (core, the test-order
-views and "Delete test orders"). The core indexes `orders_queue_idx (store_id, confirm_state, due_at)`,
+(store_id, sheet_dirty)` (Sheets push), `orders_store_test_idx (store_id, is_test, created_at)` (core, **cut in 0004**
+with the column, ENGC-1; the test-order views and "Delete test orders"). The core indexes `orders_queue_idx (store_id, confirm_state, due_at)`,
 `orders_assignee_idx (store_id, assignee_id, confirm_state)`, `orders_customer_idx` and `orders_ship_idx` serve the
 queue, "my orders", the customer page and the logistics lists. The one **cross-store** index `orders_created_idx
 (created_at)` (core §D.2, PLA Q.10) exists for the console order lookup only: operations code never queries it
@@ -544,7 +568,7 @@ Shapes refine core §D.6. Every table: `store_id` = `storeRef()`, money = `cents
 |---|---|---|
 | `product_costs` | `id`, `store_id`, `product_id NULL`, `page_id NULL`, `item_id varchar(40) NULL`, **`sku varchar(64) NULL`** (rev 3, OPS-24: a store-level cost by warehouse code, the Offers v2 item `code`), `variant_key varchar(120) NOT NULL DEFAULT ''` ('' = every variant), `cost_cents bigint NOT NULL`, `packaging_cents bigint NULL` (NULL = store default), `effective_from datetime(3) NOT NULL`, `note varchar(200)`, `created_by`, `created_at` | `pc_prod_idx (store_id, product_id, item_id, variant_key, effective_from)`, `pc_page_idx (store_id, page_id, item_id, variant_key, effective_from)`, **`pc_sku_idx (store_id, sku, variant_key, effective_from)`**; code check: exactly one of `product_id`, `page_id`, `sku`. Lookup order (OPE-§16.3): variant → item@page → **sku** → product default |
 | `carrier_accounts` | `id`, `store_id`, `adapter varchar(32)` (`manual`; **`self`** (rev 3, OD52: own couriers, pickup, Glovo-style runners; capabilities all false); `sendit` R3; …), `label varchar(60)`, `status enum(active,disabled)`, **`settlement enum(statement,at_delivery) NOT NULL DEFAULT 'statement'`** (rev 3, OD52; `self` accounts default to `at_delivery`), `hook_key_hash char(64) NULL`, `settings longtext` (`{ statusMap: Record<string, StatusMapEntry>, manifestMappingId?, trackingMappingId?, statusMappingId?, remittanceMappingId?, trackingUrl?: "https://…{tracking}" }` where **`StatusMapEntry = ShipState \| "ignore" \| { state: ShipState; reason?: ReturnReason }`** (rev 3, OD48, OD50)), `created_by`, `created_at`, `updated_at` | `UNIQUE ca_label_uq (store_id, adapter, label)`, `UNIQUE ca_hook_uq (hook_key_hash)` |
-| `carrier_rates` | `id`, `store_id`, `carrier_account_id varchar(26) NOT NULL DEFAULT ''` ('' = "my carrier", the R1 lite rows), `city_key varchar(40) NOT NULL` (`*` = every other city; **slug keys, OD47**), `delivery_fee_cents`, `return_fee_cents`, `cod_fee_bp int NOT NULL DEFAULT 0`, `cod_fee_min_cents bigint NULL`, **`cod_fee_flat_cents bigint NOT NULL DEFAULT 0`** (rev 3, OPS-25: flat-fee carriers), `eta_days tinyint NULL`, `active bool`, `updated_by`, `updated_at` | `UNIQUE cr_uq (store_id, carrier_account_id, city_key)`. COD fee base (OPS-25, OPE-§16.3): `codFeeCents = max(cod_fee_min_cents ?? 0, round(collected_cents × cod_fee_bp / 10000)) + cod_fee_flat_cents`, `collected_cents` = the amount the courier collected (the order total by default, OD51) |
+| `carrier_rates` | `id`, `store_id`, `carrier_account_id varchar(26) NOT NULL DEFAULT ''` ('' = "my carrier", the R1 lite rows), `city_key varchar(40) NOT NULL` (`*` = every other city; **slug keys, OD47**), `delivery_fee_cents`, `return_fee_cents`, `cod_fee_bp int NOT NULL DEFAULT 0`, `cod_fee_min_cents bigint NULL`, **`cod_fee_flat_cents bigint NOT NULL DEFAULT 0`** (rev 3, OPS-25: flat-fee carriers; **rev 4:** this section is the cut list core §D.5 cites, so `NOT NULL DEFAULT 0` and `cod_fee_bp int NOT NULL DEFAULT 0` are the definitions — the formula below adds the flat fee unconditionally — and core §D.6's "`cod_fee_flat_cents bigint NULL`" / "`cod_fee_bp int DEFAULT 0`" wording is listed for the maintainer in OPE-§R2's notes), `eta_days tinyint NULL`, `active bool`, `updated_by`, `updated_at` | `UNIQUE cr_uq (store_id, carrier_account_id, city_key)`. COD fee base (OPS-25, OPE-§16.3): `codFeeCents = max(cod_fee_min_cents ?? 0, round(collected_cents × cod_fee_bp / 10000)) + cod_fee_flat_cents`, `collected_cents` = the amount the courier collected (the order total by default, OD51) |
 | `shipments` | `id`, `store_id`, `order_id varchar(20)`, `carrier_account_id`, `tracking varchar(64) NULL`, `state` (ShipState values), **`kind enum(full,partial,reship) NOT NULL DEFAULT 'full'`** (rev 3, OD51: `partial` = the pending lines of a partial delivery, R2; `reship` = OP-22, R3), `fee_cents NULL`, `cod_cents`, `return_fee_cents NULL`, `label_ref varchar(120) NULL`, `parent_id NULL` (the shipment this one continues: `partial` in R2, `reship` in R3), `created_by`, `created_at`, `shipped_at`, `delivered_at`, `returned_at`, `remittance_id NULL`, `updated_at` | `UNIQUE sh_track_uq (store_id, carrier_account_id, tracking)`, `sh_order_idx (store_id, order_id)`, `sh_state_idx (store_id, state, created_at)`, `sh_unremitted_idx (store_id, remittance_id, delivered_at)` |
 | `shipment_events` | `id bigint`, `store_id`, `shipment_id`, `at`, `carrier_status varchar(80)`, `mapped_state varchar(24) NULL`, `source enum(csv,webhook,poll,manual)`, `raw longtext NULL` (nulled after 30 days) | `se_ship_idx (store_id, shipment_id, at)` |
 | `remittances` | `id`, `store_id`, `carrier_account_id`, `statement_ref varchar(80)`, `period_from date NULL`, `period_to date NULL`, `paid_at datetime(3) NULL`, `gross_cents`, `fees_cents`, `net_cents`, `lines int`, `matched int`, `state enum(imported,matched,disputed,closed)`, `import_run_id`, `created_by`, `created_at` | `UNIQUE rm_ref_uq (store_id, carrier_account_id, statement_ref)` |
@@ -575,12 +599,20 @@ Each schema lives in `src/lib/settings/keys/<key>.ts` (extension files, core §K
 ```ts
 // ops (P4, R1)
 const Range = z.object({ from: HHMM, to: HHMM });
-const WeekRanges = z.array(z.array(Range).max(3)).length(7);                        // index i = ISO weekday i + 1: 0 = Monday … 6 = Sunday (OD57; same convention as checkout.calendar.workdays)
+const DayRanges = z.array(Range).max(3);
+/** rev 4 (CRIT3, OD57): keyed by the ISO weekday NUMBER, 1 = Monday … 7 = Sunday — the same numbers as
+ *  checkout.calendar.workdays (an array of 1-7). JSON keys are "1".."7"; the TS type is Record<IsoWeekday, Range[]>.
+ *  isoWeekday(date, tz) = (Intl weekday index + 6) % 7 + 1. No 0-based index exists anywhere in this part. */
+import type { IsoWeekday, Range as WindowRange } from "@/lib/callcenter/window";      // one definition (OPE-§5.5); the zod Range below matches WindowRange
+const WeekRanges = z.object({ 1: DayRanges, 2: DayRanges, 3: DayRanges, 4: DayRanges, 5: DayRanges, 6: DayRanges, 7: DayRanges });
 export const OpsSetting = z.object({
   callingWindow: z.object({
     days: WeekRanges,                                                               // store tz
     closedDates: z.array(ISODate).max(60).default([]),
-  }).default(DEFAULT_WINDOW),                                                       // OD9
+    /** rev 4 (OD63): set by CallingWindowEditor on the owner's first save; null = DEFAULT_WINDOW never confirmed by a
+     *  person → the queue uses it, no shopper-facing reader promises an hour from it */
+    savedAt: z.string().datetime().nullable().default(null),
+  }).default(DEFAULT_WINDOW),                                                       // OD9 (DEFAULT_WINDOW.savedAt = null)
   /** rev 3 (OD57, OPS-28): date-ranged schedules evaluated before `callingWindow.days`; the "Ramadan hours" preset
    *  fills the ranges, never the dates (like the movable holidays of LAN-§7.2); ≤ 4, non-overlapping */
   windowOverrides: z.array(z.object({ label: z.string().max(40), from: ISODate, to: ISODate, days: WeekRanges })).max(4).default([]),
@@ -652,7 +684,7 @@ export const SheetsSetting = z.object({
 });
 
 // accounting (S3 R2; the R1 lite subset by P4: packagingCents, adsAllocation, cashHeldAlertDays = core §D.10 "R1 lite";
-// rev 3 adds to the R1 lite subset: myCarrier, adAccounts, adRates (OPE-§Q.27 asks the core to list them))
+// rev 3 adds to the R1 lite subset: myCarrier, adAccounts, adRates — accepted by the core, §Q.8 Q.27k, §D.10)
 const Platform = z.enum(["meta", "tiktok", "snap", "google", "other"]);
 export const AccountingSetting = z.object({
   packagingCents: z.number().int().min(0).nullable().default(null),        // per order; NULL = not set (never invented)
@@ -684,7 +716,9 @@ export const AccountingSetting = z.object({
 ```
 
 `DEFAULT_WINDOW`, `DEFAULT_LADDER` and every other default live in `src/lib/callcenter/defaults.ts`, each with the
-comment "reasoned starting value, not researched" (OD9, OD10). `ManifestSource` is the `source` enum of the `manifest`
+comment "reasoned starting value, not researched" (OD9, OD10). **rev 4 (CRIT3):** `ops` is a new key of 0005 / R1, so
+no stored window exists in the revision 2 shape and nothing is migrated; `DEFAULT_WINDOW.days` has keys 1-4, 6 and 7
+= `[09:30-13:00, 14:30-21:00]` and key **5** (Friday) = `[09:30-12:15, 14:30-21:00]`, `savedAt: null`. `ManifestSource` is the `source` enum of the `manifest`
 mapping kind (OPE-§18.3), exported from `src/lib/callcenter/carrier-csv.ts` (P4) in R1 and re-exported by
 `src/lib/imports/**` in R2 so the two lists never diverge. The settings schema validates `windowOverrides` as
 non-overlapping and `adRates` as unique per `(currency, fromDay)`.
@@ -722,7 +756,7 @@ None of these tables is quota-charged (orders are never blocked, R-D15); the con
 
 ```ts
 export const CONFIRM_STATES = ["new", "attempting", "callback", "confirmed", "cancelled", "fake", "duplicate", "unreachable"] as const;
-export const SHIP_STATES = ["none", "to_pack", "packed", "shipped", "in_transit", "out_for_delivery", "attempt_failed", "postponed", "delivered", "refused", "returned", "lost"] as const;   // rev 3: attempt_failed, postponed (OD48)
+export const SHIP_STATES = ["none", "to_pack", "packed", "shipped", "in_transit", "out_for_delivery", "attempt_failed", "postponed", "delivered", "refused", "returned", "lost"] as const;   // rev 3: attempt_failed, postponed (OD48); rev 4: display order only, the DB enum appends them last (core §D.2, OPE-§2.1)
 export const MONEY_STATES = ["unpaid", "collected", "remitted", "disputed", "written_off", "refunded"] as const;   // rev 3: refunded (OD59, R2)
 /** rev 3 (OD50): coded reasons of the ship moves to refused / returned / lost; the confirm axis keeps CANCEL_REASONS */
 export const RETURN_REASONS = ["customer_absent", "refused_price", "changed_mind", "wrong_item", "damaged", "unreachable", "no_cash", "address_wrong", "not_ordered", "other"] as const;
@@ -1043,8 +1077,9 @@ An order is **callable** for agent `u` at `now` when, in its store:
 calling window is open (or the override is active). Test orders are callable like any other (TEST chip, OD31).
 
 **rev 3 (OD48): the delivery lane.** An order is also callable, in the **delivery lane**, when
-`confirm_state = confirmed` ∧ `ship_state ∈ {attempt_failed, postponed}` ∧ `due_at IS NOT NULL` ∧ `due_at ≤ now` ∧ the
-same lease and mode clauses ∧ the window is open. `due_at` on a confirmed order is written only by the moves of §3.2
+`confirm_state = confirmed` ∧ `ship_state = attempt_failed` ∧ `due_at IS NOT NULL` ∧ `due_at ≤ now` ∧ the same lease and
+mode clauses ∧ the window is open (**rev 4:** `postponed` is listed in the "Delivery problems" view but is never callable:
+the move to `postponed` clears `due_at`, §3.2, because the customer already agreed the new date). `due_at` on a confirmed order is written only by the moves of §3.2
 (`attempt_failed` sets it, every other ship move clears it) and by the delivery-lane outcomes (OPE-§6.1a), so the lane
 is exactly "parcels the courier could not deliver that nobody has rescued yet". Both lanes are served by **one** claim
 statement (§5.2): a rescue (base priority 650) ranks above a callback (600) because the parcel is already paid for and
@@ -1088,7 +1123,7 @@ UPDATE orders
    SET assignee_id = :uid, claim_token = :tok, lease_until = UTC_TIMESTAMP(3) + INTERVAL :leaseMin MINUTE, rev = rev + 1
  WHERE store_id = :sid
    AND (   (confirm_state IN ('new', 'attempting', 'callback') AND (due_at IS NULL OR due_at <= UTC_TIMESTAMP(3)))
-        OR (confirm_state = 'confirmed' AND due_at IS NOT NULL AND due_at <= UTC_TIMESTAMP(3)) )   -- rev 3: the delivery lane (OD48); due_at on a confirmed order exists only for attempt_failed / postponed
+        OR (confirm_state = 'confirmed' AND due_at IS NOT NULL AND due_at <= UTC_TIMESTAMP(3)) )   -- rev 3: the delivery lane (OD48); due_at on a confirmed order exists only for attempt_failed (rev 4: postponed clears it)
    AND (lease_until IS NULL OR lease_until < UTC_TIMESTAMP(3) OR assignee_id = :uid)
    [AND assignee_id = :uid]                                   -- assignment mode "manual" only
  ORDER BY (assignee_id <=> :uid) DESC, priority DESC, COALESCE(due_at, created_at) ASC, id ASC
@@ -1194,26 +1229,50 @@ export function touchAgent(scope: StoreScope, userId: string): Promise<void>;   
 export const isLive = (a: AgentProfileRow, now: Date) => a.presence === "online" && !!a.lastSeenAt && now.getTime() - a.lastSeenAt.getTime() <= 180_000;
 
 // src/lib/callcenter/window.ts (pure, isomorphic; time zone math with Intl.DateTimeFormat, no dependency)
-export interface EffectiveWindow { days: Range[][] /* index 0 = Monday … 6 = Sunday (ISO, OD57) */; closedDates: readonly string[]; overrides: OpsSetting["windowOverrides"]; tz: string; openOverrideUntil: Date | null }
+/** rev 4 (CRIT3, OD57, OD63): the ONE window type, JSON-safe so assist-ty / the store checkout can receive it as data.
+ *  days keyed by ISO weekday number (1 = Monday … 7 = Sunday), exactly OpsSetting.callingWindow.days. */
+export type Range = { from: string /* HH:MM, store tz */; to: string /* HH:MM; to < from = crosses midnight, belongs to the start day */ };
+export type IsoWeekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;              // defined here once; src/lib/settings/keys/ops.ts imports it
+export interface EffectiveWindow {
+  tz: string;                                                  // stores.timezone
+  days: Record<IsoWeekday, Range[]>;                           // { 1: [{ from: "09:30", to: "13:00" }, …], …, 7: […] }
+  closedDates: readonly string[];                              // ISO dates, store tz
+  overrides: readonly { label: string; from: string; to: string; days: Record<IsoWeekday, Range[]> }[];   // ops.windowOverrides (≤ 4)
+  openOverrideUntil: string | null;                            // ISO instant ("Open calls now"), parsed by the helpers
+  configured: boolean;                                         // OD63: true once the owner saved the window (callingWindow.savedAt ≠ null)
+}
+export type CallingWindow = EffectiveWindow;                   // rev 4: the name landing.md re-exports (LAN-§2.3); one type, two names, never two shapes
+export function isoWeekday(d: Date, tz: string): IsoWeekday;
 export function isCallable(now: Date, w: EffectiveWindow): { open: true } | { open: false; opensAt: Date | null };
 export function nextCallableAt(t: Date, w: EffectiveWindow): Date;          // t itself when open
 export function windowMinutesBetween(a: Date, b: Date, w: EffectiveWindow): number;   // first-touch KPI (OD17)
 export function snapIntoWindow(t: Date, w: EffectiveWindow): Date;          // ladder results, callbacks warn only
 export function rangesForDay(ymd: string, w: EffectiveWindow): Range[];     // rev 3: the override whose [from, to] contains the day wins over the weekly table; a closed date answers []
-export function hoursText(w: EffectiveWindow, locale: Locale, dateLocale: string, now: Date): string;   // rev 3: "09:30-13:00, 14:30-21:00" for today's ranges (the `confirm_hours` variable and the tracking help)
+export function hoursText(w: EffectiveWindow, locale: Locale, dateLocale: string, now: Date): string;   // rev 3: "09:30-13:00, 14:30-21:00" for today's ranges (the `confirm_hours` variable and the tracking help); rev 4: always renders (staff screens show it), every shopper-facing caller checks shopperPromiseAllowed first (OD63)
+export function shopperPromiseAllowed(w: EffectiveWindow): boolean;          // rev 4 (OD63): = w.configured; every shopper-facing reader checks it before rendering an hour
 
-// src/lib/callcenter/window.server.ts — P0 frozen stub (rev 3, OD57; OPE-§Q.27): the one reader every promise uses
-export function callingWindowFor(scope: StoreScope): Promise<EffectiveWindow>;   // ops setting + stores.timezone; scopedCache("settings") 30 s
+// src/lib/callcenter/window.server.ts — P0 frozen stub (rev 3, OD57; core D73, §K.2 P0): the one reader every promise uses
+export function callingWindowFor(scope: StoreScope): Promise<EffectiveWindow>;   // ops setting + stores.timezone; scopedCache("settings") 30 s; never null (the P0 stub answers DEFAULT_WINDOW in the store tz with configured: false)
+
+// src/lib/callcenter/window.fixtures.ts — rev 4 (CRIT3): the shared window fixture (data only, P4's file inside its own
+// src/lib/callcenter/**, so no ownership row changes; P3 merges after P4 and S1 is R2, so both read the finished file):
+// stores × instants × expected { open, opensAt, hoursText(fr|ar|en), nextCallableAt } incl.
+// Friday = key 5, a Ramadan override, a midnight-crossing range, a closed date, configured: false; read by test:ops (P4),
+// landing's test:delivery (P3, the thank-you {when}) and the storefront's test:catalog (S1), so the three fail together
+// if the weekday convention drifts
 ```
 
 **rev 3 (OD57, OPS-11): one source of hours.** `callingWindowFor(scope)` is a P0 frozen stub P4 implements; the
 thank-you `{when}` (LAN-§8.3, through `nextCallableAt`), the `confirm_hours` template variable (OPE-§7.1), the
-tracking-page help hours (LAN-§9) and the FAQ / honesty-gate fact `policyAllows("we call …")` read it. The core-owned
-`store.confirmation.hours` and landing's `policies.contact.hours` become **read-only mirrors**: `saveOpsSettingsAction`
-rewrites both from the window (ISO days, the first and last range of a typical weekday) so older readers and the
-`honesty:promise` gate keep working, and their editors are replaced by the one component `CallingWindowEditor`
-(`src/components/admin/callcenter/calling-window.tsx`, P4; P3's thank-you card imports it, merge order P4 → P3).
-`DEFAULT_WINDOW` is expressed in the ISO convention (index 0 = Monday); `test:ops` asserts that Friday is index 4.
+tracking-page help hours (LAN-§9) and the FAQ / honesty-gate fact `policyAllows("we call …")` read it.
+**rev 4 (CRIT2; core D73, §D.10):** `store.confirmation.hours` and landing's `policies.contact.hours` **no longer exist**
+(the core removed both from their schemas; nothing writes or mirrors them), so the `honesty:promise` gate and every
+older reader read `callingWindowFor` too; the only hours editor is `CallingWindowEditor`
+(`src/components/admin/callcenter/calling-window.tsx`, P4; P3's thank-you card imports it, merge order P4 → P3), whose
+save writes `ops.callingWindow` (+ `savedAt`, OD63) through `saveOpsSettingsAction` and nothing else. **rev 4 (CRIT3):**
+the weekday key is the ISO number (`DEFAULT_WINDOW.days[5]` is Friday); `test:ops` asserts it on `window.fixtures.ts`.
+**rev 4 (OD63):** a shopper-facing reader renders an hour only when `shopperPromiseAllowed(w)`; the queue's
+`outside_window` / `opensAt` use the window whether or not it is configured.
 
 - `online` = presence `online` and a heartbeat within 3 minutes (`isLive`); the job `ops.presence` turns profiles
   silent for 15 minutes to `offline` (OPE-§J).
@@ -1464,7 +1523,7 @@ Every value comes from a stored fact (OD24, owner rule 4):
 | `store_name` | `stores.name` | — |
 | `agent_first_name` | the viewer's member display name, first word | no display name |
 | `confirm_number` | store setting `store.confirmation` (LAN Q10, core §D.10): `callerPhone` (E.164, rendered national) or, when absent, `whatsapp` digits; `withinHours` is **not** a template variable (a promise the store may not have made) | not set |
-| `confirm_hours` | **rev 3 (OD57):** `hoursText(await callingWindowFor(scope), …)`: today's effective calling ranges (overrides and closed dates applied), the same source as the thank-you `{when}`; `store.confirmation.hours` is no longer read | the window has no range today |
+| `confirm_hours` | **rev 3 (OD57):** `shopperPromiseAllowed(w) ? hoursText(w, …) : ""` with `w = await callingWindowFor(scope)` (rev 4, OD63): today's effective calling ranges (overrides and closed dates applied), the same source as the thank-you `{when}` (**rev 4:** `store.confirmation.hours` no longer exists, core D73) | the window has no range today, **or the owner never saved the window (rev 4, OD63: `configured: false`)** |
 | `carrier_label`, `carrier_tracking` (rev 3) | `orders.carrier_label`, `orders.tracking_ref` (OD55; R2: the active shipment's account label and tracking) | not set |
 | `ship_after_date` (rev 3) | `orders.ship_after` formatted in the template locale ("5 nov.", "٥ نونبر") | no hold |
 | `upsell_title`, `upsell_price` | the order's version doc `offers.upsell` when enabled and not already taken | no upsell, or taken |
@@ -1560,11 +1619,13 @@ R3 learner reads as "which objection preceded which outcome" without any text.
 export function maskPhone(e164: string): string;    // "+212612345678" → "06 •• •• 56 78"; other countries: "+33 6 •• •• 56 78"
 export function maskPhonesIn(text: string, country: string): string;   // notes, edit details, imported cells
 export function phoneLast4(e164: string): string;
-// rev 3 (OD61, SEC-5): the console's masks, reused by every operations read function under impersonation
-export function maskName(name: string): string;                        // "Samira Benali" → "Samira B."
-export function maskAddress(): MessageRef;                             // "Hidden (support view)" in the reader's locale; never a prefix of the real text
-export type Masked<T> = T & { readonly __masked: true };               // the console's type (platform.md PLA-§7.2), imported, not redefined
-export function maskCustomerFields<R extends { name?: string; address?: string | null; landmark?: string | null; note?: string | null }>(row: R, scope: StoreScope): R;   // identity unless scope.kind === "impersonation"
+// rev 4 (CRIT14, OD61): no other masking helper is declared here. Under impersonation every operations read function
+// calls the P0 frozen platform stub, imported, never redefined:
+//   import { maskIfImpersonation, type Masked } from "@/lib/platform/mask";   // P1; PLA-§7.2; core §K.2 P0
+//   maskIfImpersonation<T extends CustomerFieldsIn>(scope: StoreScope, row: T)   // identity for every scope kind but "impersonation"
+// with the row shape CustomerFieldsIn = { name, phone, address, city, landmark, note }: this part always passes phone: null
+// (the tenant phone is already maskPhone()d for every role, OD11) and rebuilds its own row (QueueOrder.customer,
+// OrderListRow, TimelineItem detail, …) from the masked result.
 ```
 
 Masked = national format with the first two national digits and the last four visible (libphonenumber-js, already a
@@ -1572,9 +1633,9 @@ dependency, `src/lib/markets/phone.ts`). Every list, queue card, timeline, custo
 board and Telegram message (default) uses it. Search by phone still works (digits matched server-side, results
 masked).
 
-**Impersonation (rev 3, OD61).** When `scope.kind === "impersonation"` (the core marks the scope of a "View as store"
-session, OPE-§Q.27), `maskCustomerFields` is applied **at the repository boundary** by every read function of this
-part that returns a customer field — `listOrders`, `OrderListRow`, the drawer loader, `QueueOrder` (never claimable
+**Impersonation (rev 3, OD61; rev 4 CRIT14).** When `scope.kind === "impersonation"` (set by the seam for a "View as
+store" session, core D70, §B.8), `maskIfImpersonation(scope, row)` is applied **at the repository boundary** by every
+read function of this part that returns a customer field — `listOrders`, `OrderListRow`, the drawer loader, `QueueOrder` (never claimable
 anyway: writes are refused), `orderTimeline` (`field_edited` details and notes → "Note hidden"), the customers list
 and page, `searchOrders`, `inboundLookup`, the deliveries log summary, print views (refused: `shipments.write` is a
 write) — so the tenant UI renders masked values with no per-component work. The phone stays masked as for every
@@ -1584,7 +1645,8 @@ attack-suite case: the HTML and RSC payload of `/orders`, `/orders?order=<id>`, 
 `/customers/<id>` and `/integrations` under an impersonating session contain none of the customer canaries (name,
 address, landmark, note; the PLA-§O.3 canary set), and `test:ops` asserts that every exported read function of
 `src/lib/orders/{profile,admin,events,queue,customers}.ts` and `src/lib/callcenter/inbound.ts` calls
-`maskCustomerFields` (static check, like the `status` writer lint of §3.7).
+`maskIfImpersonation` (static check, like the `status` writer lint of §3.7) and that no file of this part declares a
+function named `maskName`, `maskAddress` or `maskCustomerFields` (the platform's names stay single-sourced).
 
 ### OPE-§8.2 Reveal
 
@@ -1616,7 +1678,8 @@ template render (pure). A replayed key answers the same `tel` / `wa` without a s
 | Place | Who | Audit |
 |---|---|---|
 | Reveal response | as §8.2 | `phone_revealed` |
-| Orders CSV export | `orders.export` (owner, admin) | `audit("orders.exported", { count, filters })` |
+| Orders CSV export | `orders.export` (owner, admin and, rev 4 per core §A.3.2 / OPS-22, manager); fresh step-up (OD64) | `audit("orders.exported", { count, filters })` |
+| Carrier CSV (R1, OD55) | `shipments.write` (owner, admin, manager); fresh step-up (OD64) | `manifest_exported` per order + `audit("orders.carrier_exported", { count })` |
 | Carrier manifest export (R2) | `shipments.write` | `manifest_exported` per order |
 | Google Sheet column E | whoever the owner shares the sheet with | outside the app; agents never get the link (OD12) |
 | Telegram `pii: "full"` | the owner's chat | setting change audited |
@@ -1714,8 +1777,9 @@ export function blockPhoneAndCancel(ctx: StoreCtx, input: { phone?: string; orde
 ### OPE-§10.1 City keys and suggestions (`src/lib/orders/address.ts`, P4; P0 frozen stub for P3, core §K.2, accepted Q.8)
 
 ```ts
-// src/lib/orders/address.ts — cityKey() and CityKey are PURE and ISOMORPHIC (no server import), so the landing `assist`
-// chunk and the storefront checkout chunk bundle the same function (≤ 400 B minified); normalizeCity stays server-side.
+// src/lib/orders/address.ts — cityKey() and CityKey are PURE and ISOMORPHIC (no server import, ≤ 400 B minified), so a
+// chunk MAY bundle them; rev 4 (CRIT1): none is required to — browser zone tables are keyed by the posted City.value and
+// built on the server (zonesForCheckout, LAN-§7.1). normalizeCity stays server-side.
 export type CityKey = string & { readonly __city: true };   // "casablanca", "fes", "ksar-el-kebir": the ONE city key of the platform (OD47)
 export const CITY_KEYS: readonly CityKey[];                  // every key of MA_CITIES except "Autre", derived at build from src/lib/markets/cities-ma.ts
 export function cityKey(value: string): CityKey | null;      // slug of the stored French value of src/lib/markets/cities-ma.ts (NFKD, diacritics removed, lowercase, spaces and apostrophes → "-"); "Autre", unknown → null
@@ -1724,26 +1788,35 @@ export function normalizeCity(input: string, market: string, aliases?: Record<st
   { key: CityKey | null; value: string | null; confidence: "exact" | "alias" | "fuzzy" | "none"; suggestions: { key: CityKey; label: string }[] };
 ```
 
-**One key everywhere (rev 3, OD47, OPS-1).** Revision 2 left two definitions in the platform: landing stored
-`City.value` ("Fès") in `delivery_zones.cities` and matched `zoneForCity` exactly, while this part keyed
+**One key everywhere (rev 3, OD47, OPS-1; rev 4, CRIT1).** Revision 2 left two definitions in the platform: landing
+stored `City.value` ("Fès") in `delivery_zones.cities` and matched `zoneForCity` exactly, while this part keyed
 `orders.city_key`, `carrier_rates.city_key`, `opsAggregates(dims: ["city"])` and `city_refusal` on the slug. The slug
-is now canonical for every stored key and every API:
+is now canonical for every **stored** key and every **server** API, and the browser sees only posted values:
 - `delivery_zones.cities` holds slugs (`["casablanca", "mohammedia"]` or `["*"]`); `saveZones` validates against
-  `CITY_KEYS`; the `lp-assist` data block and the storefront `#sg-config` zone table carry slugs; the order form's
-  `<select>` **keeps posting `City.value`** ("Fès", the frozen payload v2 contract and what `orders.city` stores), and
-  the server (`create.ts` through the `ops.created` hook, the manual path, the v3 path) and the browser chunks convert
-  **once** with the same `cityKey()`.
+  `CITY_KEYS`; the order form's `<select>` and the store checkout **keep posting `City.value`** ("Fès", the frozen payload
+  v2 contract and what `orders.city` stores), and the server (`create.ts` through the `ops.created` hook, the manual
+  path, the v3 path, `zonesForCheckout`) converts **once** with `cityKey()`.
+- **rev 4 (CRIT1): browser zone tables are keyed by the posted value.** The `lp-assist` data block and the storefront's
+  `#sg-config` both embed landing's `ZoneTable` from `zonesForCheckout(scope)` (core §K.2 P0, LAN-§7.1): `city:
+  Record<City.value, zoneIndex>` built on the server from the slug-keyed zones, `star` for any absent value ("Autre", a
+  typed city). No browser chunk computes a slug, so no chunk has to bundle `cityKey` (it stays pure and isomorphic, so
+  bundling remains *possible*, never *required*); revision 3's "`assist` bundles `cityKey`" and "`#sg-config` carries
+  slugs" are withdrawn here, and the storefront's per-city `s` slug field becomes unnecessary (OPE-§R2 notes).
 - `zoneForCity(zones, key: CityKey | null)` (landing) answers the exact-key zone, else the `*` zone, else null; `null`
   (the shopper picked "Autre", a free-text city that did not normalise, or a market without a list) therefore reaches
   the `*` zone when one exists, so "Autre" is served by the "Reste du Maroc" zone the owner typed.
 - `zoneLineFor(scope, key: CityKey | null, at?)` (the P0 stub, core §K.2) takes the same argument; this part passes
   `orders.city_key` (which is `cityKey(orders.city)` or an alias match, never a re-derivation at read time).
-- Parity fixture shared by `test:ops` (P4) and `test:delivery` (P3): "Fès picked in the form → `city = "Fès"`,
-  `city_key = "fes"`, zone found, ETA shown on the card, in `{eta_text}` and on the tracking page"; `test:catalog` (S1)
-  runs the same fixture through the store checkout. If any side changes the key, the three fail together.
-- The landing-side changes (zone table contents, `zoneForCity` signature, the `assist` bundle) are landing.md's
-  (LAN-§2.1, §7.1, §5.4) and the storefront's (STO-§12.3, §15.9); the core §K.2 stub line is widened to `CityKey |
-  null` (OPE-§Q.27). Existing `delivery_zones` rows are empty today (TENANCY-MAP), so no data migration exists.
+- Parity fixture `scripts/qa/fixtures/city-key.json` (P4) shared by `test:ops` (P4), `test:delivery` (P3) and
+  `test:catalog` (S1), with three sections: **`slugs`** (every `City.value` of `cities-ma.ts` and its ar / fr / en
+  spellings → one `CityKey`; "Autre" → `null`), **`zoneTable`** (rev 4, CRIT1: a slug-keyed zone set → the expected
+  `ZoneTable.city` keyed by `City.value`, "Fès" → the `fes` zone's index, "Autre" absent → `star`; any slug appearing
+  as a `city` key fails) and **`flows`** ("Fès picked in the form → `city = "Fès"`, `city_key = "fes"`, zone found, ETA
+  shown on the card, in `{eta_text}`, on the tracking page and at the store checkout"). If any side changes either
+  key shape, the three suites fail together.
+- The landing-side changes (zone table contents, `zoneForCity` signature) are landing.md's (LAN-§2.1, §7.1) and the
+  storefront's (STO-§12.3, §15.9); the core §K.2 stub lines are already widened to `CityKey | null` (core §Q.8
+  Q.27e / f). Existing `delivery_zones` rows are empty today (TENANCY-MAP), so no data migration exists.
 
 - Folding: Latin = NFKD, diacritics removed, lowercase, punctuation and repeated spaces removed; Arabic = tashkeel
   and tatweel removed, أ إ آ → ا, ة → ه, ى → ي, a leading "ال" ignored for matching only.
@@ -1859,8 +1932,8 @@ RF §2.1 rule 8):
    built on `src/lib/page/options.ts` availability rules; unavailable choices disabled with the page's own label.
    **rev 3 (OD62, R2):** the block is routed by store mode — `landing`: pages (this block); `store`: S1's product
    picker (`src/components/admin/catalog/product-picker.tsx`, search by name or SKU, offer and option pickers from
-   `productAsPageDoc`, ≤ 20 lines) feeding `quoteManualOrderV3` (OPE-§11.5); `both`: a segmented "Page / Product"
-   switch, pages first when the store has live landing pages.
+   `productAsPageDoc`, ≤ 20 lines) feeding S1's `quoteManualOrderV3` (STO-§16.9; OPE-§11.5); `both`: a segmented
+   "Page / Product" switch, pages first when the store has live landing pages (`manualSheetMode`, OPE-§11.5 step 1).
 2. **Customer**: phone (country from the store market, as-you-type format, `dir="ltr"`), name, city combobox over the
    store's city list with folded matching (OPE-§10.1), address, landmark, customer note. **rev 3 (UX-31):** the
    address field is required or optional exactly as the store's `checkout.addressMode` says (the one setting the
@@ -1914,47 +1987,56 @@ Pre-fills from the lead (page, phone, name, city, offer, units, extras; a `whats
 `src/lib/orders/leads.ts`, frozen P0 stub) which sets `converted_via = 'agent'`. A lead already converted answers
 `already_converted` with the order id; a lead of another store answers `not_found`. The order's `created` event meta
 carries `{ leadId }` and P3's hook appends `lead_attributed` (OPE-§4.1). **rev 3:** a `whatsapp` lead whose `sel` is a
-v3 selection (a store intent, STO-§15.13) converts through `createManualOrderV3` (OPE-§11.5) and a v2 selection through
-§11.1; `convertLeadToOrder` dispatches on `sel.v`.
+v3 selection (a store intent, STO-§15.13) converts through S1's `createManualOrderV3` (STO-§16.9, with `fromLead`;
+OPE-§11.5) and a v2 selection through §11.1; `convertLeadToOrder` dispatches on `sel.v` (core §K.2 P0).
 
 ### OPE-§11.5 Catalog orders by phone and WhatsApp: payload v3 (rev 3, OD62, OPS-15; R2)
 
 A store-mode call center takes phone orders for products and adds a line to a cart order; revision 2 had no function
 for it (`createManualOrder` validates a v2 selection against a landing version and v3 orders have `page_id NULL`).
-R2 adds, in the contract step (core §K.4; OPE-§Q.27), on top of S1's `priceLine` (STO-§16.3) and the shared
-`createOrderRow` (OD62):
+
+**rev 4 (CRIT4; core §K.4, §Q.8 Q.27h A\*): the v3 functions are S1's, not this part's.** `quoteManualOrderV3`,
+`createManualOrderV3` and `editOrderV3` live in **`src/lib/catalog/order-v3.server.ts` (S1)**, built on `priceLine`
+(STO-§16.3) and the shared `createOrderRow` (OD62), with **STO-§16.9 as their signature source** (frozen at the R2
+contract step); one pricing owner makes "manual v3 total = public v3 total" true by construction. The revision 3 files
+`src/lib/orders/{manual-v3,edit-v3}.ts` and the `ManualOrderV3Input` / `ctxPageId` shape declared here are withdrawn;
+this section only states what the manual-order sheet consumes and requires.
 
 ```ts
-// src/lib/orders/manual-v3.ts (S4; signatures frozen at the R2 contract step)
-export interface ManualOrderV3Input {
-  lines: Omit<LineIn, "ls">[];                        // STO-§16.1 LineIn without the shown subtotal (nothing is typed, everything is priced)
-  customer: ManualOrderInput["customer"];
-  ctxPageId?: string;                                 // the template the order is attributed to (checkout, else the store home); null = none
-  source?: "manual" | "whatsapp"; confirmed: boolean; adjustCents?: number; adjustReason?: string;
-  fromLead?: { leadId: string }; allowDuplicate?: boolean; idem: string; shipAfter?: string;
-}
-export interface ManualQuoteV3 { lines: ({ i: number } & LinePriced)[]; subtotalCents: number; deliveryCents: number | null /* null = fee not set for the city (STO-§15.9 not_set) */; adjustCents: number; totalCents: number; currency: string; warnings: ("duplicate" | "blocked" | "city_unknown" | "fee_unset" | "stale_line")[]; duplicates: { id: string; createdAt: string }[] }
-export function quoteManualOrderV3(ctx: StoreCtx, input: ManualOrderV3Input): Promise<ActionResult<ManualQuoteV3>>;   // orders.create, no write
-export function createManualOrderV3(ctx: StoreCtx, input: ManualOrderV3Input): Promise<ActionResult<{ orderId: string; rev: number; replayed?: true }>>;
-// src/lib/orders/edit-v3.ts (S4)
-export interface OrderPatchV3 { lines?: Omit<LineIn, "ls">[]; contact?: Omit<OrderPatch, "selection" | "adjust">; adjust?: OrderPatch["adjust"] }
-export function editOrderV3(ctx: StoreCtx, orderId: string, patch: OrderPatchV3, expectRev: number): Promise<ActionResult<{ rev: number; totalCents: number; lines: { i: number; sub: number }[] }>>;
+// consumed, never redefined (names as STO-§16.9 declares them; STO-§16.9 wins on any drift):
+import { quoteManualOrderV3, createManualOrderV3, editOrderV3,
+         type ManualOrderInputV3 /* lines 1..20 without ls / rev, customer, source?, confirmed, adjust*, fromLead?, allowDuplicate?, idem */,
+         type ManualQuoteV3      /* per-line verdicts, subtotalCents, deliveryCents, deliveryRule | "not_set", warnings incl. "fee_unset" */,
+         type OrderPatchV3       /* contact?, lines?, adjust? */ } from "@/lib/catalog/order-v3.server";
 ```
 
-Rules: every line is priced by `priceLine` against the product's **current** `rev` (a `changed` verdict is shown as
-"price changed, now {x}" and accepted when the agent re-submits; `unavailable` / `removed` lines are refused);
-`deliveryCents` comes from `storeDeliveryFee` with `zoneLineFor(scope, cityKey)` (STO-§15.9; `not_set` → the quote
-says "delivery fee not set for {city}" and the create is refused with `fee_unset`, never a typed fee); the adjustment
-rule of §11.1 step 4 applies; the row is inserted by `createOrderRow` with `items = { v: 3, lines }`, `page_id =
-ctxPageId ?? NULL`, `version_id NULL`, `source` as given, `flags = ["manual"]`; stock holds (R3) follow STO-§16.2
-step 15. `editOrderV3` re-prices the whole line set, rewrites `items`, `qty`, `subtotal`, `shipping`, `total`,
-writes one `field_edited` with before / after per line, `sheet_dirty |= 4`, `rev + 1`; locked after `packed` like §11.3
-(contact fields excepted). Ownership: **S4** writes both files (it already produces v3 orders in `merge.ts`) and the
-store-mode branch of the manual-order sheet (`src/components/admin/orders/manual/**`, taken over from P4 in R2); **S1**
-exposes `priceLine`, `storeDeliveryFee`, `productAsPageDoc` and the product picker component. Acceptance (`test:ops-db`,
-R2): "manual v3 total = public v3 total" for the `duo`, `tshirt` and `colors` fixtures (the same fixtures as STO-§15.13);
-a WhatsApp intent converted through the sheet carries `source = 'whatsapp'`, `page_id NULL` and the lead's `sel` lines;
-`editOrderV3` on a 20-line cart stays under 400 ms; an agent of store B editing A's v3 order → `not_found`.
+What the sheet does with them (S4 builds it in R2; the behaviour is this part's):
+1. **Routing by store mode** (`manualSheetMode(storeMode, hasLivePages): "pages" | "products" | "switch"`, a pure
+   function in `src/components/admin/orders/manual/mode.ts`, S4's folder): `landing` → the pages picker and
+   `createManualOrder` (§11.1); `store` → S1's product picker (`src/components/admin/catalog/product-picker.tsx`) and
+   the v3 functions; `both` → a "Page / Product" switch, pages first when the store has live landing pages.
+2. **Quote first**: the summary shows `quoteManualOrderV3` (debounced 250 ms); a `changed` line reads "price changed,
+   now {x}" and is accepted on re-submit; `unavailable` / `removed` lines are disabled with their verdict.
+3. **No invented delivery fee**: on `fee_unset` (no zone covers the city) **Create order stays disabled** with
+   "Delivery fee not set for {city}" and, for owners, a link to Delivery. An adjustment cannot cover it: adjustments
+   are ≤ 0 by rule (OD15, §11.1 step 4), so STO-§16.9 step 1's "override with `adjustCents`" is impossible and is
+   listed for storefront in OPE-§R2's notes.
+4. **Hold** ("Deliver from…", OD49): `ManualOrderInputV3` has no `shipAfter`; when the agent picks a date the sheet
+   calls `createManualOrderV3({ confirmed: true, … })` and then `setShipAfterAction(orderId, date)` (§M.3) in the same
+   submit; both writes are idempotent on the sheet's `idem` (the second is a no-op when replayed), and the To-pack views
+   exclude the order from the moment `ship_after` is written (the gap is one request).
+5. **Edits**: "Add a line" / line changes on a **v3** order call `editOrderV3` (locked once `ship_state ∉ {none,
+   to_pack, packed}`); **contact-only** edits on any order, v2 or v3, call operations' `editOrder` with contact fields
+   only (§11.3), which is payload-agnostic and keeps the in-transit exception of OPS-21 (`address`, `landmark`,
+   `note` with `inTransit: true`) in one place.
+6. **Ownership**: S4 owns `src/components/admin/orders/manual/**` (the whole sheet from R2, taken over from P4) and the
+   Carrier CSV route's `format=xlsx`; S4 never writes under `src/lib/catalog/**`; S1 exposes the three functions,
+   `priceLine`, `storeDeliveryFee`, `productAsPageDoc` and the product picker.
+
+Acceptance: the parity "manual v3 total = public v3 total", the `fromLead` conversion (`converted_via = 'agent'`,
+`source = 'whatsapp'`, `page_id NULL`), the 20-line `editOrderV3` and the cross-store refusal are **S1's assertions**
+(`test:catalog`, `test:storefront-db`, STO-§16.9 step 6); S4 adds `manualSheetMode`'s table, the `fee_unset`
+disabled state and the hold two-step to its own `scripts/qa/carrier-check.ts` (`test:carriers`), per OD65.
 
 ---
 
@@ -2091,9 +2173,12 @@ conflict refresh ("Updated by Karim just now"); read-only store or impersonation
   `Confirmation`, `Shipping state`, `Money`, `Agent`, `Attempts`, `Cancel reason`, `Landmark`, `Adjustment`,
   `Confirmed at`, `Delivered at`, `Test`, **rev 3:** `Ship after`, `Return reason`, `Tracking`, `Carrier`, `Agent
   (sheet)`, `Delivery attempts`; R2: `Collected`, `Refund`. Route `/api/app/<h>/orders/export` (`orders.export`,
-  sensitive), `audit("orders.exported", { count, filters })`. Agents never get the button or the route.
+  sensitive; owner, admin and manager, core §A.3.2 rev 3), **fresh step-up** (rev 4, OD64: `step_up` → the step-up sheet,
+  TOTP or password, then the download), `audit("orders.exported", { count, filters })`. Agents never get the button or
+  the route.
 - **Carrier CSV (rev 3, R1, OD55, OPS-9)**: Export selection → **Carrier file** (`shipments.write`, sensitive: full
-  phones; refused to impersonation). First use opens the column picker: the fixed source list of the `manifest`
+  phones; refused to impersonation; **fresh step-up, rev 4 OD64**, the same check as the orders CSV). First use opens
+  the column picker: the fixed source list of the `manifest`
   mapping kind (OPE-§18.3: `order_id`, `name`, `phone`, `city`, `address`, `landmark`, `cod_amount`, `content`, `qty`,
   `note`, `constant`), each with the header name the owner's carrier portal expects, in the owner's order, plus the
   delimiter (`;` default: Excel in French locale opens it in columns) and "Mark exported orders as packed" (default on:
@@ -2289,7 +2374,8 @@ sentence, one action).
   28 days, a second table "Agents named in your sheet" lists the labels with decided / confirmed counts and the
   confirmation rate (n ≥ 20) computed live from `orders` (`orders_confirmer_idx` is unusable here, so the query is the
   28-day `orders_store_created_idx` range grouped by label, cached 60 s), each row with **Map to a member…** (writes
-  `ops.agentLabels`, audited `callcenter.settings.updated`, then the backfill of OPE-§19.6 runs in `after()` and
+  `ops.agentLabels`, audited `callcenter.label_mapped` with `{ label, count }` (core §F.5, rev 4 name), then the
+  backfill of OPE-§19.6 runs in `after()` and
   `ops.rollup` recomputes the 14 days). Mapped labels disappear from this table and appear in the agents table.
 - **Best hours to call (your data)** (OD44): a 24-cell strip of the store day (window hours only) coloured by contact
   rate (jade scale, graphite below n), each cell "18h: 62 % · n = 84"; a cell with fewer than 30 attempts in the
@@ -2458,8 +2544,13 @@ owner and admin [Q.3]):
   `accounting.myCarrier` with `confirmedAt`; until confirmed the Store Health note `fin:settlement_check` (sev 1)
   shows after 20 delivered orders. **rev 3 (OPS-13):** the per-city rows show two columns side by side, **fee charged**
   (median `orders.shipping` of the city's delivered orders, 28 d) and **fee paid** (the rate row), so a landing page
-  charging 30 for a city that costs 45 is visible before LP-16 (R3) lets the page charge by city; `fin:fee_gap` (OPE-§27.2)
-  raises it.
+  charging 30 for a city that costs 45 is visible; `fin:fee_gap` (OPE-§27.2) raises it. **rev 4 (core D75):** LP-16
+  (per-city fees on landing pages) is now in the **R2 contract step**, not R3, and the two signals are split so a
+  store never gets two alerts for one cause: landing's checklist warning `delivery:fee_mismatch` and the health rule
+  `landing:fee_mismatch` (P3, core §I.7) compare **zone fee vs page fee** (what the shopper is told on two surfaces),
+  while `fin:fee_gap` compares **fee charged vs fee paid** (the carrier rate: the margin leak) and never reads the zone
+  fee; the `zones.feeMismatchTop5` input of the landing rule reads `opsAggregates(dims: ["city"])`, whose city keys are
+  `CityKey` slugs (OPE-§27.6).
 - **Ad spend**: a 14-day grid (day × Meta / TikTok / Snap / Google / Other) of editable amounts, saved per cell
   (`ad_spend_daily`, source `manual`); totals per day. **rev 3 (OD56, OPS-10):** each platform column carries its
   **account currency** (`accounting.adAccounts[platform].currency`, default the store currency, changed from the column
@@ -2639,8 +2730,9 @@ the owner picks several files).
 | P&L summary | month | delivered revenue, COGS, packaging, delivery and return fees, COD fees, commissions, ad spend, expenses, late adjustments, net; one row per month, closed months flagged |
 
 No customer phone, address or note in any accountant export (accountant role, core §A.3.2); the sales register names
-the customer's city only. Closing a period (`accounting.closedThrough`, owner, `finance.write` + step-up when the user
-has TOTP, audit `finance.period_closed`, second-round request OPE-§Q.26) freezes every row dated inside it: a later
+the customer's city only. Closing a period (`accounting.closedThrough`, owner, `finance.write` + a fresh step-up on the
+core §B.7 tenant ladder, TOTP or password, rev 4 OD64; audit `finance.period_closed`, second-round request OPE-§Q.26)
+freezes every row dated inside it: a later
 cost edit, statement line or ad-spend cell for those days books a `late` adjustment in the current period and the
 export of the closed month is byte-identical to the one taken at closing (`test:money` re-exports a closed fixture
 month after a late import and compares the sha256).
@@ -3011,14 +3103,19 @@ These cells never move the confirm axis out of a terminal state (the OD5 rule), 
   and the store keeps its work for the next run).
 - Per store per tick: at most one read, one append, one batchUpdate (OD22, accepted in core §H.2 slot 1); the
   `after()` fast path uses at most 2 calls (append, or read + batchUpdate).
-- Round-robin over stores with work (`forEachStore(… where: "pending_sheets")`, core §E.2; the predicate is the core's:
-  bound + enabled and (`sheet_status` pending / failed past backoff, or `sheet_dirty > 0`, or a pull due)), cursor in
-  `cron_cursors`; `sheets.push` has **18 s** and `sheets.pull` **12 s** per tick (core §H.2 as re-cut by PLA Q.18).
+- Stores with work (`forEachStore(… where: "pending_sheets")`, core §E.2; the predicate is the core's: bound + enabled
+  and (`sheet_status` pending / failed past backoff, or `sheet_dirty > 0`, or a pull due)) are served **oldest pending
+  order first** (rev 4, aligned with core §H.2 slot 1 rev 3, ENGC-33: not plain round-robin, so the store waiting longest
+  is never behind a store that just got an order); `sheets.push` has **18 s** and `sheets.pull` **12 s** per tick (core
+  §H.2), and the run awaits `ctx.yield()` between stores (core §H.2 rev 3).
 - A 429 from Google opens a platform breaker for 90 s (`cron_cursors.state` of `sheets.push` + an in-memory copy);
   every run checks it.
-- Capacity **[estimate]**: about 25-45 calls per 5-minute tick plus the request-time pushes, enough for ~100
-  actively selling stores at one call per tick each; beyond that, IN-09's store-owned service account takes those
-  stores off the shared quota.
+- Capacity (rev 4, the core's figure, core §H.2 slot 1): the platform bucket allows `floor(50 / 3)` ≈ **16 stores per
+  tick** when every store needs its three calls, i.e. a store is served every `ceil(active / 16)` ticks (5 minutes each)
+  plus the request-time `after()` pushes (≤ 2 calls) that most new orders get anyway; the `int:sheets_backlog` rule and
+  the core's backlog alarm scale with that figure (core §H.5), and past ~40 active Sheets stores the remedy is IN-09's
+  store-owned service account (`sheets_sa`, R2), which takes a store off the shared quota. Revision 3's "~100 stores"
+  estimate assumed one call per store per tick and is withdrawn.
 
 ### OPE-§19.8 Screen `/app/<h>/integrations/sheets` (P5)
 
@@ -3223,8 +3320,9 @@ which writes `whatsapp_sent` + `phone_revealed` and renews the claim. The agent 
 
 Editing at `/app/<h>/integrations/whatsapp` → **Templates** (`callcenter.configure`, OD24): per kind and locale, the
 same editor as scripts (variable chips, live preview on a recent order, reset to built-in), ≤ 1,000 characters.
-The same page shows the store's confirmation number and hours (from the `store` setting, LP-04) and, in R3, the
-Cloud API connection (`integrations.manage`).
+The same page shows the store's confirmation number (from the `store` setting's `confirmation` block, LP-04) and the
+calling hours (**rev 4:** from `callingWindowFor(scope)` with a link to `/team/callcenter`, the one editor, core D73;
+"Hours not set yet" while `configured` is false, OD63) and, in R3, the Cloud API connection (`integrations.manage`).
 
 ### OPE-§22.3 Rendering rules
 
@@ -3457,12 +3555,12 @@ or an `actionId`) and a `text` message key in ar/fr/en, or `null` when silent.
 | `ops:delivery_rescue` (rev 3, OD48) | operations | 2 | ≥ 3 orders in the delivery lane for > 4 window hours without a rescue call | link `/queue/board` |
 | `ops:sheet_agents_unmapped` (rev 3, OD54) | operations | 1 | ≥ 1 sheet label with ≥ 20 confirmations in 28 d and no mapped member (a suggestion) | link `/integrations/sheets#agents` |
 | `fin:settlement_check` (rev 3, OD52, flag `finance_lite`) | operations | 1 | ≥ 20 delivered orders and `accounting.myCarrier.confirmedAt` is null | link `/finance?tab=costs#carrier` |
-| `fin:fee_gap` (rev 3, OPS-13, flag `finance_lite`) | operations | 1 | among the top-5 cities by delivered orders (28 d, n ≥ 10 each), the median `orders.shipping` differs from the city's zone fee (`listZones`, P3 stub) or its carrier rate by ≥ 10 currency units | link `/settings/delivery` |
+| `fin:fee_gap` (rev 3, OPS-13, flag `finance_lite`; rev 4 narrowed) | operations | 1 | among the top-5 cities by delivered orders (28 d, n ≥ 10 each), the median `orders.shipping` charged is below the city's **carrier rate** (`carrier_rates`, "my carrier" or the most used account) by ≥ 10 currency units: the margin leak. **rev 4:** the zone-fee vs page-fee comparison belongs to landing's `landing:fee_mismatch` (core §I.7, D75) and is not repeated here, so one cause never raises two issues | link `/finance?tab=costs#carrier` |
 | `fin:ad_rate_missing` (rev 3, OD56, flag `finance_lite`) | operations | 1 | ≥ 1 ad-spend day in a foreign currency without a rate in the last 14 days | link `/finance?tab=ads` |
 
 | Rule id (`src/lib/health/rules/integrations.ts`, P5) | Group | Sev. | Rule | Fix |
 |---|---|---|---|---|
-| `int:sheets_backlog` | integrations | 3 | oldest pending order > 15 min while connected | link `/integrations/sheets` |
+| `int:sheets_backlog` | integrations | 3 | oldest pending order older than `max(15, 5 × ceil(activeSheetsStores / 16))` minutes while connected (rev 4: the core §H.5 scaled threshold, ENGC-33, instead of a flat 15 min that would fire permanently past 16 active stores) | link `/integrations/sheets` |
 | `int:capi_failing` | integrations | 2 | a pixel with failures in 24 h and no success | link `/integrations/pixels` |
 | `int:telegram_failing` | integrations | 2 | Telegram `failing` | link `/integrations/telegram` |
 | `int:delivery_dead` (rev 2) | integrations | 2 | ≥ 1 `dead` outbox item of the store | link `/integrations#deliveries` (Replay) |
@@ -3522,8 +3620,10 @@ export function returnReasonMix(scope: StoreScope, days: 28, by?: { dim: "city" 
 export function riskBandOutcomes(scope: StoreScope): Promise<Record<"check" | "high", RiskBandOutcome | null>>;   // OD39, OPE-§10.2
 ```
 
-Rules: agent keys are the member's display name as a label and the user id as the key (pseudonymous enough for the
-store's own owner, never shown cross-store); no phone, name, address or note appears in any cell; `campaign` and
+Rules: **city keys are `CityKey` slugs** (`orders.city_key`; an order whose `city_key` is NULL, "Autre" or an
+unmatched free text, aggregates under `"*"`, the same key as the catch-all zone, rev 4 for D68 / D75 consumers such as
+landing's `zones.feeMismatchTop5`); agent keys are the member's display name as a label and the user id as the key
+(pseudonymous enough for the store's own owner, never shown cross-store); no phone, name, address or note appears in any cell; `campaign` and
 `angle` keys are the UTM values the order carries (`orders.utm`, `src/lib/db/schema.ts:286`), so the Campaign Kit's
 per-angle results (RF §1.1 step 5) and the Profit lite cohort read the same cells; windows are store-local days; the
 functions are cached 5 min per (store, query hash) and run ≤ 400 ms on a store with 50,000 orders (one grouped query
@@ -3551,13 +3651,14 @@ per dim over `orders_store_created_idx` / `oe_type_idx`; `test:ops-db` measures 
 | Health strip | one tile per connected target (Sheets, each pixel's server events, Telegram; R2 each webhook endpoint and carrier account; R3 WhatsApp Cloud): state `ok` / `warn` / `failing` / `off` as text + token colour (success / warn / destructive, never a lone dot), backlog, oldest pending age, last ok, last error in plain words | `integration_status` through `integrationHealth(scope)` (P5 P0 stub, core §K.2): `Promise<IntegrationHealthRow[]>` = the rows with `lastErrorCode` mapped to a message key |
 | Sheets backlog | pending appends, dirty updates, failed rows, last 20 runs (OPE-§19.8) | `sheetsBacklog(scope)` (P5 P0 stub): `Promise<{ pending: number; dirty: number; failed: number; oldestPendingAt: string \| null; lastRunAt: string \| null }>` |
 | **Deliveries** (`#deliveries`) | the last 100 outbox rows of the store (kinds `capi`, `telegram`; R2 `webhook`, `carrier`; R3 `whatsapp`; `mail` never shown to tenants), filters by kind and state, columns: when, kind, topic, target (pixel last 4, chat label, endpoint host, carrier label), state, attempts, next try, last status / error in plain words, a **payload summary** (order id, event name, amount; never the sealed payload, never a phone) | `outboxSummary(scope)` (core §H.5, P8) + a scoped list `listDeliveries(scope, q)` (P5, `src/lib/integrations/deliveries.ts`: `SELECT … FROM outbox WHERE store_id = ? …`, `ob_store_idx`) |
-| Row actions | **Replay** on `dead` (and on `cancelled` CAPI items younger than 7 d − 1 h) → the core's `replay(ctx, id)` (dead → pending, audited `integrations.outbox.replayed` with `{ kind, topic, outboxId }`, second-round request OPE-§Q.26); bucket `s:<sid>:replay:<uid>` 30 / h; "Replay all dead of this kind" ≤ 50 rows per call | core `replay` |
+| Row actions | **Replay** on `dead` rows of every kind → the core's `replay(ctx, id)` (dead → pending, audited `integrations.outbox.replayed` with `{ kind, topic, outboxId }`, second-round request OPE-§Q.26); **rev 4 (core §H.1 re-send rule, ENGC-29):** **Send again** on `done` rows of `telegram` and (R2) `webhook` only, through the same `replay` (the core accepts `done` for those two kinds, never for `capi` or `mail`); revision 3's "Replay on `cancelled` CAPI items" is withdrawn (a CAPI item is cancelled by the 7-day guard, so a replay would be cancelled again); bucket `s:<sid>:replay:<uid>` 30 / h; "Replay all dead of this kind" ≤ 50 rows per call | core `replay` |
 | What to check | per failing kind the three most likely causes in the owner's words (token revoked, sheet not shared, chat not found, endpoint 410) with the fix link | `lastErrorCode` → `int.cause.<code>` keys |
 
-Rules: a replay never re-sends an item whose dedupe key is already `done` (the core's `INSERT IGNORE` and state machine
-make it a no-op), a replayed CAPI item still passes the 7-day guard at send time (OPE-§20.4), a replayed Telegram
-`new_order` batch re-sends as one message marked "(renvoi)", and a replay of a test order's item is impossible because
-none was enqueued. The page polls the pulse's `syncFailed` and refreshes the deliveries list on change (one poller per
+Rules: a `dead` replay of a `capi` item still passes the 7-day guard at send time (OPE-§20.4); a `done` CAPI or mail
+row is never re-sent (the core refuses it: an ad platform would count it twice); "Send again" on a `done` Telegram or
+webhook row is the core's deliberate re-send (rev 4, core §H.1), audited like a replay, and a re-sent Telegram
+`new_order` batch is one message marked "(renvoi)"; a replay of a test order's item is impossible because none was
+enqueued; a second click on the same row while it is `pending` is a no-op. The page polls the pulse's `syncFailed` and refreshes the deliveries list on change (one poller per
 browser, core D57). Agents never see this page (OD12); `callcenter.configure` holders see the health strip and the log
 without Replay.
 
@@ -3589,13 +3690,15 @@ once per minute per row under a flood of 1,000 outbox results (`test:integration
 ## OPE-§J. Jobs and time budgets (core §H.2 runner)
 
 Jobs live in the track files `src/lib/jobs/tracks/{ops,integrations,money,logistics,messaging}.ts`; outbox handlers in
-`src/lib/jobs/handlers/<kind>.ts`. Budgets are the core's **rev 2 slot table** (core §H.2, re-cut by PLA Q.18 and AI R8:
-slots 18 / 12 / 13 / 12 / 11 / 8 / 5 / 4 s + 3 s platform = 95 s guaranteed inside the 100 s tick); this table repeats
-them so no job here claims more than its slot. `test:jobs` (core §J.1) fails when the registered budgets exceed 95 s.
+`src/lib/jobs/handlers/<kind>.ts`. Budgets are the core's **rev 3 slot table** (core §H.2: the operations slots are
+unchanged from rev 2 — `sheets.push` 18 s, `sheets.pull` 12 s, outbox 13 s, slot 5 11 s, slot 6 8 s, slot 7 5 s,
+housekeeping 4 s — inside the 95 s guaranteed of the 100 s tick, with the rev 3 tick lock, `ctx.yield()` and lag
+sampling); this table repeats them so no job here claims more than its slot. `test:jobs` (core §J.1) fails when the
+registered budgets exceed 95 s or a job runs 2 s of CPU without a `yield()`.
 
 | Job | Track | Every | Budget (core slot) | Per-store fairness | Does |
 |---|---|---|---|---|---|
-| `sheets.push` | P5 | tick | **18 s** (slot 1) | round-robin over the `pending_sheets` predicate, ≤ 3 calls per store, platform bucket `p:sheets:sa` 50 / 60 s | OPE-§19.5 |
+| `sheets.push` | P5 | tick | **18 s** (slot 1) | **oldest pending order first** over the `pending_sheets` predicate (rev 4, core §H.2 rev 3), ≤ 3 calls per store, platform bucket `p:sheets:sa` 50 / 60 s (≈ 16 stores per tick) | OPE-§19.5 |
 | `sheets.pull` | P5 | tick | **12 s** (slot 2) | `s:<sid>:sheets:pull` 1 / 290 s, round-robin; stores served by slot 1's read are skipped | reads for stores with a due pull and no push work |
 | `sheets.bind_legacy` | P5 | tick | ≤ 50 ms (slot 7, 5 s shared) | — | OPE-§19.2, a no-op once done |
 | outbox `capi`, `telegram` | P5 | tick (+ `after()`) | slot 3 (**13 s** shared with every handler) | `perStorePerTick` 20 / 10, `timeoutMs` 8,000 / 6,000 | OPE-§20.4, §21.3; health rows OPE-§28.2 |
@@ -3612,8 +3715,8 @@ them so no job here claims more than its slot. `test:jobs` (core §J.1) fails wh
 | outbox `webhook` | S5 (R2) | tick | slot 3 | `perStorePerTick` 20, `timeoutMs` 10,000 | OPE-§23.4 |
 | `carrier.poll`, outbox `carrier`, `whatsapp` | D2 (R3) | tick | slot 3 | ≤ 50 shipments per store per tick | OPE-§17.7, §22.4 |
 
-Every job checks `ctx.deadline` between stores; a store whose step throws is skipped for the rest of the tick and
-logged (`recordError`, core §H.5); each run writes its `job_runs` rows. No operations job moves an order state on a
+Every job checks `ctx.deadline` and awaits `ctx.yield()` between stores (core §H.2 rev 3); a store whose step throws is
+skipped for the rest of the tick and logged (`recordError`, core §H.5); each run writes its `job_runs` rows. No operations job moves an order state on a
 timer (OD8): leases expire by comparison, ladders are computed at the outcome, the queue is computed on read.
 
 ---
@@ -3703,9 +3806,9 @@ starts with `storeGuard` (or a public resolver for hooks); `not_found` is identi
 | `/api/app/<h>/ops/reveal` (OD36) | POST | `orders.reveal_phone` (s); `Idempotency-Key`; `s:<sid>:reveal:<uid>` 300 / h; body `{ orderId, why, templateId? }` | P4 | R1 |
 | `/api/app/<h>/ops/presence` (OD33) | POST | `agents.self`; body `{ presence }` or `{ heartbeat: true }`; ≤ 1 write / 60 s | P4 | R1 |
 | `/api/app/<h>/ops/state?view=queue\|board` | GET | `agents.self` or `orders.read_all`; ETag / 304 | P4 | R1 |
-| `/api/app/<h>/orders/export` | GET | `orders.export` (s); audit | P4 | R1 |
+| `/api/app/<h>/orders/export` | GET | `orders.export` (s; owner, admin, manager); fresh step-up (core §B.7, OD64); audit | P4 | R1 |
 | `/api/app/<h>/orders/print?ids=` (HTML, print CSS) | GET | `orders.read` + `shipments.write` | P4 | R1 |
-| `/api/app/<h>/orders/carrier-csv?ids=&format=csv\|xlsx` (rev 3, OD55) | GET | `shipments.write` (s: full phones); `ops.carrierCsv` must exist; ≤ 200 ids; held orders refused; audit `orders.carrier_exported`; `manifest_exported` per order | P4 (`xlsx` R2, S4) | R1 |
+| `/api/app/<h>/orders/carrier-csv?ids=&format=csv\|xlsx` (rev 3, OD55) | GET | `shipments.write` (s: full phones); **fresh step-up (rev 4, OD64; the core's §B.7 list gains the route, OPE-§R2 notes)**; `ops.carrierCsv` must exist; ≤ 200 ids; held orders refused; audit `orders.carrier_exported`; `manifest_exported` per order | P4 (`xlsx` R2, S4) | R1 |
 | `/api/app/<h>/sheets/**` (moved in R1.0) | GET/POST | `integrations.manage` | P5 | R1 |
 | `/api/app/<h>/imports` | POST (multipart) | the kind's permission | S3 | R2 |
 | `/api/app/<h>/finance/receipts/<id>` | GET | `finance.read` | S3 | R2 |
@@ -3737,7 +3840,7 @@ starts with `storeGuard` (or a public resolver for hooks); `not_found` is identi
 | `blockPhoneAndCancelAction`, `unblockAction` (`customers/actions.ts`) | `blocklist.write` (+ `orders.write` for the moves) | — | §9.5 |
 | `saveCustomerNoteAction` | `customers.read` + `orders.write` | — | §9.2 |
 | `updateAgentProfileAction` (`team/agents/actions.ts`) | `callcenter.configure` | — | §14.2 |
-| `saveOpsSettingsAction`, `openCallsNowAction` (`team/callcenter/actions.ts`) | `callcenter.configure` | — | `ops` setting; audit |
+| `saveOpsSettingsAction`, `openCallsNowAction` (`team/callcenter/actions.ts`) | `callcenter.configure` | — | `ops` setting only (rev 4, CRIT2: the calling window and its `savedAt`, OD63; **no** `store` / `policies` write: the hours keys there no longer exist, core D73); `markHealthDirty`; audit `callcenter.settings.updated` |
 | `saveScriptAction`, `resetScriptAction`, `approveScriptDraftAction` | `callcenter.configure` | — | §7.4 |
 | `saveItemCostAction`, `saveCarrierRateAction`, `saveAdSpendCellAction`, `savePackagingAction` (`finance/actions.ts`) | `finance.write` [Q.3] | flag `finance_lite` | §16.2 |
 | `startSheetConnectAction`, `verifySheetConnectAction`, `disconnectSheetAction` (`integrations/sheets/actions.ts`) | `integrations.manage` (s) | `sheets`; `sheets:connect` 10/h | §19.3 |
@@ -3755,18 +3858,21 @@ starts with `storeGuard` (or a public resolver for hooks); `not_found` is identi
 | `setTrackingAction` (`orders/actions.ts`, rev 3) | `shipments.write` | — | `tracking_ref` / `carrier_label` + `tracking_set`; implies `packed` when pre-ship (OD55) |
 | `requestRecallAction` (`orders/actions.ts`, rev 3) | `orders.write` | — | event `recall_requested` (§6.1a, OPS-21); `markCarrierNotifiedAction` (`shipments.write`) ticks it |
 | `markCashReceivedAction` (`finance/actions.ts`, rev 3) | `finance.write` | `bulk` | money `collected → remitted` (class M, meta `settlement: "manual"`), ≤ 200 ids (OD52) |
-| `saveSettlementAction`, `saveAdAccountAction`, `saveAdRateAction` (`finance/actions.ts`, rev 3) | `finance.write` | flag `finance_lite` | `accounting.myCarrier`, `.adAccounts`, `.adRates` (OD52, OD56); audited `callcenter.settings.updated`-style as `finance.settings.updated` (core §F.5 fallback union) |
+| `saveSettlementAction`, `saveAdAccountAction`, `saveAdRateAction` (`finance/actions.ts`, rev 3) | `finance.write` | flag `finance_lite` | `accounting.myCarrier`, `.adAccounts`, `.adRates` (OD52, OD56); audit `finance.settings.updated` (core §F.5, accepted Q.27m) |
 | `saveSkuCostAction` (`finance/actions.ts`, rev 3) | `finance.write` | flag `finance_lite` | `product_costs` row with `sku` (OPS-24) |
-| `mapAgentLabelAction`, `unmapAgentLabelAction` (`team/agents/actions.ts`, rev 3) | `callcenter.configure` | — | `ops.agentLabels` + the backfill of §19.6 in `after()` (OD54); audited |
+| `mapAgentLabelAction`, `unmapAgentLabelAction` (`team/agents/actions.ts`, rev 3) | `callcenter.configure` | — | `ops.agentLabels` + the backfill of §19.6 in `after()` (OD54); audit `callcenter.label_mapped` `{ label, count }` (core §F.5) |
 | `saveCarrierCsvColumnsAction` (`orders/actions.ts`, rev 3) | `shipments.write` | — | `ops.carrierCsv` (OD55) |
-| `saveWindowOverridesAction` (`team/callcenter/actions.ts`, rev 3) | `callcenter.configure` | — | `ops.windowOverrides` (OPS-28); rewrites the `store.confirmation.hours` / `policies.contact.hours` mirrors (OD57) like `saveOpsSettingsAction` |
+| `saveWindowOverridesAction` (`team/callcenter/actions.ts`, rev 3) | `callcenter.configure` | — | `ops.windowOverrides` (OPS-28; days keyed by ISO weekday 1-7, OD57) and nothing else (rev 4, CRIT2: no mirror is written); audit `callcenter.settings.updated` |
 
-R2 adds `closePeriodAction` / `reopenPeriodAction` (`finance/actions.ts`, `finance.write`, owner only, step-up when the
-user has TOTP, audit `finance.period_closed` / `finance.period_reopened`, OD41) and `exportAccountingAction`
-(`finance.read`; the sha256 header of OPE-§16.8), and **(rev 3)** `refundOrderAction` (`finance.write`, reason + method
-+ amount → money `refunded`, OD59), `partialDeliveryAction` (`shipments.write`, lines + collected amount → `delivered`
-with `line_outcome`, OD51), `confirmProbableMatchesAction` (`finance.write`, OPS-26), `quoteManualOrderV3Action` /
-`createManualOrderV3Action` / `editOrderV3Action` (`orders.create` / `orders.edit`, OPE-§11.5, S4), and
+R2 adds `closePeriodAction` / `reopenPeriodAction` (`finance/actions.ts`, `finance.write`, owner only, a fresh step-up
+on the core §B.7 tenant ladder, TOTP or password, rev 4 OD64; audit `finance.period_closed` / `finance.period_reopened`,
+OD41) and `exportAccountingAction` (`finance.read`; the sha256 header of OPE-§16.8), and **(rev 3)** `refundOrderAction`
+(`finance.write`, reason + method + amount → money `refunded`, audit `orders.refunded` `{ cents, method }`, OD59),
+`partialDeliveryAction` (`shipments.write`, lines + collected amount → `delivered` with `line_outcome`, OD51),
+`confirmProbableMatchesAction` (`finance.write`, OPS-26), the sheet's `quoteManualOrderV3Action` /
+`createManualOrderV3Action` / `editOrderV3Action` (`orders.create` / `orders.edit`; **rev 4:** thin `storeAction`
+wrappers in S4's `src/lib/shipping/manual-actions.ts` (inside S4's `src/lib/shipping/**`; server actions live under
+`src/lib/**` or `src/app/app/**`, core §E.2) around **S1's** functions of STO-§16.9, OPE-§11.5), and
 `saveExportFormatAction` (`finance.write`, OPS-27). R2 and R3 actions otherwise follow the same pattern: commission rules (`commissions.manage`), payouts (`payouts.approve`, s),
 expenses / costs / imports / disputes / snapshot recompute (`finance.write`), carrier accounts (`integrations.manage`),
 shipments, imports of tracking and status, prints (`shipments.write`), merge (`orders.edit` + `orders.assign`),
@@ -3905,10 +4011,10 @@ sections of the existing `conversions-check.ts` rather than new scripts.
 
 | Script | File | Checks |
 |---|---|---|
-| `test:state` | `src/lib/orders/state.selftest.ts` (P4) | every cell of the three transition tables (legal and illegal per class), implied paths, terminal protection, `projectStatus` over all **96** confirm × ship pairs (golden table; rev 3: 12 ship states), `legacyToWanted` for every label incl. the rev 3 `"noop"` rule (a coarse label never coarsens `attempt_failed` / `postponed` / `out_for_delivery`); **rev 3:** `attempt_failed` bookkeeping (`delivery_attempts + 1`, `due_at` set while rescue calls < `maxCalls`, cleared by every other ship move), `postponed` + `ship_after`, `shipAfter` on `confirmed` (`bad_hold` outside (now, +60 d]), `returnReason` written only on refused / returned / lost, the `at_delivery` settlement writing `collected` + `remitted` in one plan, `refunded` legality (R2 cells) and `bad_amount` |
-| `test:ops` | `scripts/qa/ops-check.ts` (P4; imports `src/lib/callcenter/selftest.ts`) | **static:** only `transition.ts` and the creation insert write `status` / `confirm_state` / `ship_state` / `money_state`; no `phone`, `email`, `address` or `note` field in the `QueueOrder`, `OrderListRow`, `TimelineItem`, `ConsoleOrderRow`, `AggCell` types (TypeScript API); every exported function of `kpis.ts` returns `Kpi` (OD38); the honest-triad catalog lint (OD38); the queue key map and the shell chords are disjoint (§13.3); every new status colour passes the orange check; **rev 3:** a single `insert(orders)` call site in `src/**` (`createOrderRow`, OD62); every exported read function of `src/lib/orders/{profile,admin,events,queue,customers}.ts` and `src/lib/callcenter/inbound.ts` calls `maskCustomerFields` (OD61); `cityKey` imports nothing server-side (isomorphic, OD47); `ManifestSource` of `carrier-csv.ts` equals the `manifest` mapping's source enum. **Pure:** ladder with the window, closed dates and the `Africa/Casablanca` offset changes; `windowMinutesBetween`; `priorityOf` (rev 3: delivery lane 650 > callback 600); `maskPhone` / `maskPhonesIn` / `maskName`; `explainRisk` covers every flag read from `risk.ts`'s source; `cityKey` / `normalizeCity` (fr, ar, alias, fuzzy) fixtures **and the shared parity fixture "Fès picked → `fes` → zone found" (OD47; the same file `scripts/qa/fixtures/city-key.json` is read by P3's `test:delivery` and S1's `test:catalog`)**; the ISO window (`DEFAULT_WINDOW` Friday = index 4, `rangesForDay` with an override and a midnight-crossing range, `hoursText`); KPI formulas with the minimum-n rule (incl. rescue rate and inbound share); the 40-fixture `QueueOrder` cards each ≤ 6 KB gz (incl. 8 delivery-lane cards); the idempotency cache replays `nextOrder` / `recordOutcome` results and expires at 10 min (fake clock); the Carrier CSV writer (columns in the saved order, `;` delimiter, BOM, national digits, held orders refused) |
+| `test:state` | `src/lib/orders/state.selftest.ts` (P4) | every cell of the three transition tables (legal and illegal per class), implied paths, terminal protection, `projectStatus` over all **96** confirm × ship pairs (golden table; rev 3: 12 ship states), `legacyToWanted` for every label incl. the rev 3 `"noop"` rule (a coarse label never coarsens `attempt_failed` / `postponed` / `out_for_delivery`); **rev 3:** `attempt_failed` bookkeeping (`delivery_attempts + 1`, `due_at` set while rescue calls < `maxCalls`, cleared by every other ship move), `postponed` + `ship_after`, `shipAfter` on `confirmed` (`bad_hold` outside (now, +60 d]), `returnReason` written only on refused / returned / lost, the `at_delivery` settlement writing `collected` + `remitted` in one plan, `refunded` legality (R2 cells) and `bad_amount`; **rev 4:** the set of `SHIP_STATES` / `MONEY_STATES` equals the core §D.2 enum set (order not compared, OPE-§2.1), and only `attempt_failed` ever sets `due_at` on a confirmed order (`postponed` clears it) |
+| `test:ops` | `scripts/qa/ops-check.ts` (P4; imports `src/lib/callcenter/selftest.ts`) | **static:** only `transition.ts` and the creation insert write `status` / `confirm_state` / `ship_state` / `money_state`; no `phone`, `email`, `address` or `note` field in the `QueueOrder`, `OrderListRow`, `TimelineItem`, `ConsoleOrderRow`, `AggCell` types (TypeScript API); every exported function of `kpis.ts` returns `Kpi` (OD38); the honest-triad catalog lint (OD38); the queue key map and the shell chords are disjoint (§13.3); every new status colour passes the orange check; **rev 3:** a single `insert(orders)` call site in `src/**` (`createOrderRow`, OD62); every exported read function of `src/lib/orders/{profile,admin,events,queue,customers}.ts` and `src/lib/callcenter/inbound.ts` calls **`maskIfImpersonation`** (OD61, rev 4 CRIT14) and no file of this part declares `maskName`, `maskAddress` or `maskCustomerFields`; `cityKey` imports nothing server-side (isomorphic, OD47); `ManifestSource` of `carrier-csv.ts` equals the `manifest` mapping's source enum; **rev 4:** no file of this part reads or writes a `store.confirmation.hours` or `policies.contact.hours` key (CRIT2); `EffectiveWindow`, `OpsSetting.callingWindow.days` and `windowOverrides[].days` have exactly the keys `1`-`7` (CRIT3, a type-level check). **Pure:** ladder with the window, closed dates and the `Africa/Casablanca` offset changes; `windowMinutesBetween`; `priorityOf` (rev 3: delivery lane 650 > callback 600); `maskPhone` / `maskPhonesIn`; `explainRisk` covers every flag read from `risk.ts`'s source; `cityKey` / `normalizeCity` (fr, ar, alias, fuzzy) fixtures **and the shared parity fixture `scripts/qa/fixtures/city-key.json` (OD47; read by P3's `test:delivery` and S1's `test:catalog` too): its `slugs`, `zoneTable` (rev 4, CRIT1: `ZoneTable.city` keyed by `City.value`, no slug as a key, "Autre" → `star`) and `flows` sections**; the ISO window over **`src/lib/callcenter/window.fixtures.ts`** (rev 4, CRIT3: `DEFAULT_WINDOW.days[5]` is Friday, `isoWeekday` across the Casablanca offset changes, `rangesForDay` with an override and a midnight-crossing range, `hoursText`, `nextCallableAt`; `shopperPromiseAllowed` false and the `confirm_hours` value empty while `configured: false`, OD63; the same file feeds P3's `test:delivery` and S1's `test:catalog`); KPI formulas with the minimum-n rule (incl. rescue rate and inbound share); the 40-fixture `QueueOrder` cards each ≤ 6 KB gz (incl. 8 delivery-lane cards); the idempotency cache replays `nextOrder` / `recordOutcome` results and expires at 10 min (fake clock); the Carrier CSV writer (columns in the saved order, `;` delimiter, BOM, national digits, held orders refused) |
 | `test:profit` | `scripts/qa/profit-check.ts` (P4) | SF-04 golden fixtures for `E_placed`, break-even CPA and the Wilson intervals; no rate below n = 30; alerts fire once and clear (hysteresis, fake clock); cents parity with `src/lib/page/pricing.ts`; zero costs typed → prompts, no numbers; the by-angle table suppresses cells under 5 orders; **rev 3:** `spendStoreCents` with dated rates (the latest rate ≤ the day; a day without a rate is excluded and counted in `missing_rates`, never converted at 1:1); the cost lookup order variant → item → sku → product; the COD fee base `max(min, round(collected × bp / 10000)) + flat` on the golden carriers; `fee charged` vs `fee paid` per city; `city_refusal` evidence carries the reason mix only when reasons exist |
-| `test:conversions` | `scripts/qa/conversions-check.ts` (P5, extended) | **conversions:** the trigger matrix of §20.2, event ids, custom events Meta-only, risk gate only for `order`, the 7-day guard boundary (7 d − 1 h), test and manual orders never sent, `capi_ctx` round trip. **templates** (`src/lib/integrations/templates.selftest.ts`): parse / render, optional blocks, unknown variable and unbalanced errors, braces; every built-in (script steps, objection answers, WhatsApp kinds) renders against the 40 order fixtures with **zero numbers not present in the order or settings** (`allowedNumbers` of `src/lib/ai/guard.ts:52`); an empty `eta_text` removes every timing sentence; `confirm_number` falls back to the WhatsApp digits and is empty when `store.confirmation` is unset. **sheets** (`src/lib/sheets/selftest.ts`): the pure run planner (`planSheetRun`): ≤ 1 read + 1 append + 1 batchUpdate, bits → cells, new labels and the "Repère" header, the conflict rule table of §19.6, the row-deleted case, `is_test = 0` in every work predicate; **rev 3:** the six optional headers (detection, bit → cell, the widened read range stays one call), "Note agent" `cellHash` dedupe, "Tracking" implies `packed` only pre-ship and never clears, "Agent" writes `confirmed_by` for a mapped label and `confirmed_by_label` otherwise, "Statut livraison" renders `ops.ship.*` in the sheet's locale. **telegram:** batch merge ≤ 10 orders, "[TEST]" prefix only with `testOrders`, the honest-triad rule on `int.tg.*`, the cash-held line skipped for `at_delivery` accounts |
+| `test:conversions` | `scripts/qa/conversions-check.ts` (P5, extended) | **conversions:** the trigger matrix of §20.2, event ids, custom events Meta-only, risk gate only for `order`, the 7-day guard boundary (7 d − 1 h), test and manual orders never sent, `capi_ctx` round trip. **templates** (`src/lib/integrations/templates.selftest.ts`): parse / render, optional blocks, unknown variable and unbalanced errors, braces; every built-in (script steps, objection answers, WhatsApp kinds) renders against the 40 order fixtures with **zero numbers not present in the order or settings** (`allowedNumbers` of `src/lib/ai/guard.ts:52`); an empty `eta_text` removes every timing sentence; `confirm_number` falls back to the WhatsApp digits and is empty when `store.confirmation` is unset; **rev 4 (OD63):** `confirm_hours` is empty (its optional block dropped) while the window is not `configured`, and filled from `window.fixtures.ts` once it is. **sheets** (`src/lib/sheets/selftest.ts`): the pure run planner (`planSheetRun`): ≤ 1 read + 1 append + 1 batchUpdate, bits → cells, new labels and the "Repère" header, the conflict rule table of §19.6, the row-deleted case, `is_test = 0` in every work predicate; **rev 3:** the six optional headers (detection, bit → cell, the widened read range stays one call), "Note agent" `cellHash` dedupe, "Tracking" implies `packed` only pre-ship and never clears, "Agent" writes `confirmed_by` for a mapped label and `confirmed_by_label` otherwise, "Statut livraison" renders `ops.ship.*` in the sheet's locale. **telegram:** batch merge ≤ 10 orders, "[TEST]" prefix only with `testOrders`, the honest-triad rule on `int.tg.*`, the cash-held line skipped for `at_delivery` accounts |
 | `test:render` | `scripts/qa/render-check.ts` (core / T3 fixture, accepted OPE Q.6) | trigger ≠ `order` → thank-you without the pixel chunk, landing with it; every runtime budget unchanged |
 | `test:i18n-coverage` (core, P2) | `scripts/qa/i18n-coverage.ts` | the ar/fr/en completeness of OPE-§N's trilingual set, the notification kinds of §21.4 and the gate titles; **rev 3 (OD58):** `fr` present for every `ops.` / `int.` / `fin.` key in R1; no em dash or "Step n" in any `ops.` / `int.` / `fin.` key |
 | `test:imports` (R2) | `src/lib/imports/selftest.ts` (S3) | RFC 4180 cases, encodings, delimiters, decimals, dates, header detection and signature matching, mapping validation, the ≤ 20 mappings cap |
@@ -3923,14 +4029,18 @@ here.
 
 ### OPE-§O.2 DB-backed (`npm run test:db`, throwaway `cod_test_*` databases)
 
+**rev 4 (OD65):** P4's and P5's scripts carry R1 cases; every R2 / R3 case sits in the script of the track that builds
+the behaviour (S3 `money-check.ts`, S4 `carrier-check.ts`, S1 `test:storefront-db`, D2's adapter suite), because P4's and
+P5's files are read-only to the R2 tracks (core §K.2). The R2 rows of revision 3's `test:ops-db` moved accordingly.
+
 | Script | File | Checks |
 |---|---|---|
 | `test:queue` | `scripts/qa/queue-check.ts` (P4) | **200 parallel claims on 50 orders → 50 distinct winners, 150 `empty`**; lease expiry makes an order claimable **and** the next claim writes `released` (`lease_expired`) attributed to the previous holder (OD46); one active claim per agent; a callback reaches its owner first and the pool after the grace; manual mode; round-robin shares over 1,000 orders with weights 1 / 2 / 3 within ±5%; outside window; daily cap; lock-wait or deadlock retried once; the same `Idempotency-Key` sent twice claims once; `releaseAllLeases` releases every claim of the store and none of another; **rev 3:** the first `N` of an `offline` agent sets `online` and claims, a `break` agent gets `on_break` (OD60); the heartbeat renews a held lease and never an expired one; a 15-minute lease expires 15 min after the last heartbeat (fake clock); an `attempt_failed` order is claimed before a callback and after a pinned order (OD48), only by the lane statement, and `recordOutcome` refuses a confirm outcome on it; `EXPLAIN` of the claim statement uses `orders_queue_idx` for both lane ranges (no full scan); the inbound take of a callback owned by an idle agent (OD53) |
-| `test:ops-db` | `scripts/qa/ops-db-check.ts` (P4) | CAS conflict; external pull refused from a terminal state and the label rewritten; customer counters equal the nightly reconcile; store-wide duplicates (and test orders only match test orders); block-and-cancel; manual order total = the public path's total for the same selection (parity fixtures of `test:offers`) and a replayed `idem` returns the first order; edit re-price; `agent_stats_daily` rollup (incl. `abandoned`) = full recompute; **test-order exclusions everywhere** (the table of OPE-§3.6); `riskBandOutcomes` null below 30 decided and exact above; `attemptStats` and `opsAggregates` on a 50,000-order seeded store ≤ 400 ms, cells under 5 suppressed, no customer field in any cell (canary strings); **rev 3:** inbound (OPE-§5.7 acceptance b: a `confirmed` on an `unreachable` order with `inbound: true`, attribution, `not_found` without a lookup, the 61st lookup refused); a held order is absent from To pack and the Carrier CSV and present in On hold, `ops:hold_passed` fires 48 h after the hold (fake clock); an `at_delivery` store's `delivered` writes `collected` **and** `remitted` in one `rev` bump and the order never appears in cash held, a `statement` store's stays `collected`; "Mark cash received" bulk on 200 ids; a mapped sheet label backfills `confirmed_by` for 90 days and the rollup equals a recompute; the Carrier CSV moves exported orders to `packed` once (a second export is a no-op on the axis); `returnReasonMix` equals a recompute; `maskCustomerFields` under an impersonation scope masks every read function's output (canaries); **R2:** manual v3 total = public v3 total (OPE-§11.5); a partial delivery restocks refused lines and spawns one `partial` child; `refunded` after `remitted` keeps the statement link and claws back once; a `probable` match is never committed without confirmation; `collected_cents` adjusted within the tolerance, `disputed` above |
+| `test:ops-db` | `scripts/qa/ops-db-check.ts` (P4) | CAS conflict; external pull refused from a terminal state and the label rewritten; customer counters equal the nightly reconcile; store-wide duplicates (and test orders only match test orders); block-and-cancel; manual order total = the public path's total for the same selection (parity fixtures of `test:offers`) and a replayed `idem` returns the first order; edit re-price; `agent_stats_daily` rollup (incl. `abandoned`) = full recompute; **test-order exclusions everywhere** (the table of OPE-§3.6); `riskBandOutcomes` null below 30 decided and exact above; `attemptStats` and `opsAggregates` on a 50,000-order seeded store ≤ 400 ms, cells under 5 suppressed, no customer field in any cell (canary strings); **rev 3:** inbound (OPE-§5.7 acceptance b: a `confirmed` on an `unreachable` order with `inbound: true`, attribution, `not_found` without a lookup, the 61st lookup refused); a held order is absent from To pack and the Carrier CSV and present in On hold, `ops:hold_passed` fires 48 h after the hold (fake clock); an `at_delivery` store's `delivered` writes `collected` **and** `remitted` in one `rev` bump and the order never appears in cash held, a `statement` store's stays `collected`; "Mark cash received" bulk on 200 ids; a mapped sheet label backfills `confirmed_by` for 90 days and the rollup equals a recompute; the Carrier CSV moves exported orders to `packed` once (a second export is a no-op on the axis); `returnReasonMix` equals a recompute; `maskIfImpersonation` under an impersonation scope masks every read function's output and is the identity under a member scope (canaries; rev 4 CRIT14); **rev 4:** saving the calling window writes `ops` only (no `store` / `policies` row changes, CRIT2) and sets `savedAt` (OD63); **the OPE-§O.4 rows this script proves** (rev 4, CRIT17): one event per move / attempt / edit / reveal / assignment / note and the newest-first masked timeline, a note edit after 5 min refused (OP-02); bulk on 200 ids with per-order results, 201 refused, undo only while `rev` is unchanged within 10 s (OP-09); `queueCounts` equal to a recompute on the seeded store (OP-11); the export-ZIP writers (`orders.csv` with full phones, no Telegram token, carrier credential, webhook secret or `capi_ctx`; PL-09); the ⌘K provider ≤ 120 ms with masked results and the agent restriction (UX-02); a shipped order accepting only `address` / `landmark` / `note` with `inTransit: true` (OP-08). **R2 cases (moved, OD65):** manual v3 total = public v3 total → S1 `test:storefront-db` (STO-§16.9); partial delivery, `partial` child and refused-line restock → S4 `test:carriers` (+ S1's stock hook test); `refunded`, `probable`, the `collected_cents` tolerance → S3 `test:money` |
 | `test:integrations-db` | `scripts/qa/integrations-db-check.ts` (P5) | Sheets push / pull against a fake `gapi` counting calls (≤ 3 per store per tick), the platform bucket, the 429 breaker, ownership proof (code found / not found / bound elsewhere → generic answer), the last-20-runs history ≤ 4 KB; CAPI enqueue at each trigger and the handler with a mocked `fetch`; Telegram batch merge and 429 `retry_after`; `integration_status` written ≤ 1 / min per row under 1,000 results; a dead item replayed is sent once and a second replay is a no-op (OPE-§28.3) |
 | `test:tenancy` (core; cases in `scripts/qa/tenancy-cases/{ops,integrations}.ts`, core §F.1) | `scripts/qa/tenancy-check.ts` | store B's agent: Next never returns A's orders; reveal, outcome, edit, note, assign with A's order ids → `not_found`; A's `Idempotency-Key` replayed by B → a fresh (empty) result, never A's card; B's sheet listing A's order ids is ignored by the pull; binding A's spreadsheet from B → generic refusal; saved view with A's page id → no rows; template values never read A's data; `convertLead` with A's lead → `not_found`; Profit lite costs for A's page → `not_found`; `ops/state`, the pulse contributors, `queueCounts`, `opsAggregates` and the deliveries log never count or list A's rows; `replay` of A's outbox id from B → `not_found`; **rev 3:** B's agent looking up A's customer phone gets the empty inbound shape in the same time (OD53); A's order ids with `inbound: true` from B → `not_found`; the Carrier CSV with A's ids from B lists them as refused, never exported; mapping a label in B never touches A's `confirmed_by`; an impersonating staff session on A sees no customer canary in A's tenant routes and nothing of B (OD61) |
-| `test:money` (R2) | `scripts/qa/money-check.ts` (S3) | ledger replay from events; payouts exclude pending and void; remittance golden statements (duplicates, partial payments, fee differences, unknown lines), idempotent re-import, ageing across month ends; `finance_daily` golden store; **rev 3:** delivered revenue = Σ `collected_cents` on a store with partials; `refund_cents` on the refund day and `net` = delivered − refunds − costs; the footer identity with `refunded` as its own term; the XLSX writer round-trips through the §18.6 reader cell for cell and carries the same sha256 as the CSV; `probable` lines by phone with two candidates → `unknown`; the sales register of a closed month is byte-identical after a late refund (booked `late`) |
-| `test:carriers` (R2) | `scripts/qa/carrier-check.ts` (S4) | manual adapter manifest / tracking / status round trip; status map coverage incl. `{ state, reason }` entries and `attempt_failed` → the delivery lane; `self` adapter settlement; a `postponed_to` column sets `ship_after`; the `partial` child shipment in the manifest; R3 adapters against recorded fixtures (incl. `rescheduleParcel` / `updateParcel` when documented) |
+| `test:money` (R2) | `scripts/qa/money-check.ts` (S3) | ledger replay from events; payouts exclude pending and void; remittance golden statements (duplicates, partial payments, fee differences, unknown lines), idempotent re-import, ageing across month ends; `finance_daily` golden store; **rev 3:** delivered revenue = Σ `collected_cents` on a store with partials; `refund_cents` on the refund day and `net` = delivered − refunds − costs; the footer identity with `refunded` as its own term; the XLSX writer round-trips through the §18.6 reader cell for cell and carries the same sha256 as the CSV; `probable` lines by phone with two candidates → `unknown`; the sales register of a closed month is byte-identical after a late refund (booked `late`); **rev 4 (moved from `test:ops-db`, OD65):** `refunded` after `remitted` keeps the statement link and claws back the commission once; a `probable` match is never committed without the owner's tick; an `amount_diff` within `remittanceToleranceCents` adjusts `collected_cents`, above it the line is `disputed` |
+| `test:carriers` (R2) | `scripts/qa/carrier-check.ts` (S4) | manual adapter manifest / tracking / status round trip; status map coverage incl. `{ state, reason }` entries and `attempt_failed` → the delivery lane; `self` adapter settlement; a `postponed_to` column sets `ship_after`; the `partial` child shipment in the manifest; R3 adapters against recorded fixtures (incl. `rescheduleParcel` / `updateParcel` when documented); **rev 4 (moved from `test:ops-db`, OD65):** a partial delivery writes `line_outcome`, restocks the refused lines through S1's hook and spawns exactly one `partial` child in `to_pack`; **(OPE-§11.5)** `manualSheetMode`'s table (`landing` → pages, `store` → products, `both` → switch), Create disabled on `fee_unset`, the hold two-step leaving `ship_after` set and replay-safe on `idem` |
 
 ### OPE-§O.3 HTTP / e2e (`npm run test:e2e`, production build on port 3451+)
 
@@ -3957,6 +4067,10 @@ here.
   `test:admin-motion` and `test:admin-rtl` (core §J.1) on the operations components; **rev 3:** every operations
   screen shot in `fr` as well as `en` (OD58: no untranslated key visible, the shell's missing-key marker is asserted
   absent), and the queue, delivery lane and inbound field at 390 px in `ar`.
+- **Step-up on full-phone files (rev 4, OD64):** a manager session older than 5 minutes since its last step-up asks
+  for `/orders/export` and `/orders/carrier-csv` → `step_up` (no file, no `orders.exported` / `orders.carrier_exported`
+  audit row); after the password re-entry (no TOTP enrolled) or a TOTP code, the same request downloads and the audit row
+  names the method (`meta.stepUp`); order slips stay one click.
 - **Impersonation canaries (rev 3, OD61):** a staff session impersonating the fixture store loads `/orders`,
   `/orders?order=<id>`, `/queue`, `/customers`, `/customers/<id>`, `/integrations`; the HTML and every RSC payload
   contain no customer name, address, landmark or note canary (PLA-§O.3 set); "Show number", Export, Carrier file and
@@ -3965,6 +4079,75 @@ here.
   §13.2): Next ≤ 300 ms server / ≤ 1.2 s on 4G, outcome + next ≤ 500 ms / ≤ 1.5 s, reveal ≤ 200 ms / ≤ 0.8 s, drawer
   open ≤ 400 ms, orders list first page ≤ 400 ms, board payload ≤ 300 ms, `/integrations` ≤ 400 ms; a run above a
   budget fails.
+
+### OPE-§O.4 Proven by: feature id → test (rev 4, CRIT17, OD65)
+
+One row per id of OPE-§1. **Proven by** names the script (or e2e step) and the fixture; **Asserts** is the checkable
+statement that fails when the feature breaks. A test script cites the ids it proves in its header comment (`// proves:
+OP-03, SF-07`), and `scripts/qa/ops-check.ts` fails when an id of this table is cited by no script of its track
+(R2 / R3 ids are checked once their track's script exists, OD65). Ids marked *later* are not built; their proof is the
+gate of OPE-§25.6.
+
+| ID | Proven by | Asserts |
+|---|---|---|
+| OP-01 | `test:state` (96-cell golden table, every transition cell) · `test:ops` (writer lint) | every legal / illegal cell answers per §3.2 and its class; `projectStatus` = golden table; only `transition.ts` and `createOrderRow` write the four state columns |
+| OP-02 | `test:ops-db` (timeline fixture order) | each move, attempt, edit, reveal, assignment and note writes exactly one event; the timeline is newest first with masked phones; a note edit after 5 min or by another member is refused |
+| OP-03 | `test:queue` (200 claims / 50 orders, fake clock) · `qa:wow-demo` `ops` step | 50 distinct winners, 150 `empty`; claim ≤ 300 ms p75; first `N` sets `online`; the heartbeat keeps a 15-min lease; `attempt_failed` before callbacks; outside the window → `outside_window` |
+| OP-04 | `test:ops` (ladder, fake clock) · `test:state` (`bad_hold`) · `test:queue` (callback owner first) | every outcome writes `call_attempt` + its move; `due_at` = `ladderNext` snapped into the window; a callback reaches its agent before the grace; `shipAfter` outside (now, +60 d] → `bad_hold`; the delivery-lane grid refuses confirm outcomes |
+| OP-05 | `test:conversions` templates section (40 order fixtures) · `test:ops` (schema caps) | 0 numbers not present in the order or settings; an empty `eta_text` removes every timing sentence; a 13-step script or a 7th objection fails the schema |
+| OP-06 | `test:ops-db` (duplicate predicate) · R2 merge: `test:carriers` (S4) | same phone with an open order inside the window flags both; Keep both hides the pair; test orders match test orders only; R2: merged total = Σ line totals + one fee, refused across phones or after shipping |
+| OP-07 | `test:ops` (no phone field in list / card / timeline types) · `test:tenancy` · e2e queue | no full phone in any list payload; every reveal writes `phone_revealed`; agents get neither the export button nor the route |
+| OP-08 | `test:ops-db` (manual v2 parity with `test:offers` fixtures, `idem` replay, edit re-price, in-transit contact edit) · `test:ops` (single `insert(orders)`) · R2: `test:storefront-db` (S1) | manual v2 total = public total; a replayed `idem` returns the first order; a shipped order accepts only `address` / `landmark` / `note` with `inTransit: true`; R2: manual v3 total = public v3 total |
+| OP-09 | `test:ops-db` (bulk on 200 ids) · e2e orders list | per-order results with reasons; 201 ids refused; undo restores the exact states only while `rev` is unchanged and within 10 s |
+| OP-10 | `test:ops` (KPI formulas, minimum n) · `test:ops-db` (rollup) | every KPI returns `Kpi` with its `n`; below the minimum no rate; the nightly rows equal a full recompute byte for byte |
+| OP-11 | `test:ops-db` (`queueCounts` on the seeded store) · e2e board | tiles equal the recomputed counts; the board polls every 15 s and gets `304` when unchanged |
+| OP-12 | `test:ops-db` (block-and-cancel) · `test:tenancy` | open pre-ship orders move to `fake` / `cancelled` (`blocked`) with events, shipped ones listed untouched, no other store's order changes |
+| OP-13 | `test:ops` (`cityKey` / `normalizeCity` fixtures, `city-key.json`) | exact and alias set `city_key`; fuzzy only suggests (no write); "Autre" → `null` |
+| OP-14 | `test:ops` (flags read from `risk.ts` source) · `test:i18n-coverage` | every flag has a sentence in ar / fr / en; top 3 by points; calibration hidden below 30 decided |
+| OP-15 | `test:money` (S3, ledger replay) | confirmed then delivered → one earned entry; refused → void; return after payment → one clawback; payouts exclude pending and void; integer cents |
+| OP-16 | R1: `test:conversions` sheets section · `test:ops` (Carrier CSV writer) · `test:ops-db` (Carrier CSV) · R2: `test:carriers` (S4) | R1: "Tracking" pulled → `tracking_ref` and pre-ship → `packed`; the Carrier CSV has the saved columns, `;`, BOM, national digits, refuses held orders, moves to `packed` once; R2: manifest / tracking / status round trip with `{ state, reason }` |
+| OP-17 | e2e queue run · `test:ops` (key map ∩ chords = ∅) | each key works on desktop; none fires inside the note field or with a sheet open; `event.code` matches on an Arabic layout |
+| OP-18 | `test:carriers` (S4, assignment rules table) | first match wins in list order; disabled rules ignored; a rule routes only while one of its agents is live |
+| OP-19 | `test:carriers` (S4, fake clock) | 61 reveals in an hour notify once; 121 pause for 15 min; a manager lifts the pause (audited) |
+| OP-20, OP-27 | D2's adapter suite (recorded carrier fixtures; core §K.5 names the script) | idempotent create, status-map coverage, webhook signature, timeout and retry before registration |
+| OP-21 | D2's adapter suite | unknown hook key → 404 in constant time; ≤ 50 shipments polled per store per tick |
+| OP-22 | D2's R3 finance cases | a reship is a linked shipment; restock / damaged recorded; finance books the return fee once |
+| OP-23, OP-24 | D2's messaging suite | `X-Hub-Signature-256` vectors; idempotent on `wamid`; Confirm → `confirmed` with actor `bot`; the OTP path only at `risk ≥ otpRiskMin` and never delays the call path |
+| OP-25, OP-26 | D2's R3 cases | leaderboard `off` by default, earnings never shown to other agents; routing pre-selects the city's account with its fallback |
+| OP-28, OP-29, TN-14 | *later* (§25.6) | not built; no proof until its gate opens (the cross-store refusal network stays excluded by `test:tenancy` like any cross-store read) |
+| SF-04 | `test:profit` (golden fixtures) | `E_placed`, BE_CPA and the Wilson interval match the goldens; no rate below n = 30; zero costs → prompts, no numbers; alerts fire once and clear |
+| AC-01 | `test:money` (S3) | the snapshot is frozen at `shipped`; a later cost edit leaves past profit unchanged; lookup variant → item → sku → product |
+| AC-02 | `test:money` (S3) | estimate vs statement actual per carrier × city; finance uses the actual when present; the COD fee base formula |
+| AC-03 | R1: `test:profit` (`spendStoreCents`) · R2: `test:imports`, `test:money` (S3) | a day without a rate is excluded and counted, never converted 1:1; foreign CSV rows need a rate; recurring expenses idempotent per occurrence |
+| AC-04 | `test:money` (S3, `finance_daily` golden store) | delivered revenue = Σ `collected_cents`; net = delivered − refunds − costs; placed and delivered never share a tile (OD38 lint) |
+| AC-05 | R1: `test:profit` · R2: `test:money` | break-even at the store's own c × d with n ≥ 30 and the interval |
+| AC-06 | `test:money` (S3, golden statements) | duplicates, partial payments, fee differences, unknown and probable lines; idempotent re-import; ageing per `statement` account only |
+| AC-07 | `test:money` (S3) | a closed month re-exports byte-identical (sha256) after a late line; XLSX = CSV cell for cell; no phone, address or note canary in any file |
+| AC-08 … AC-11 | D2's R3 finance cases | campaign matching leaves unmatched spend day-level; every tax figure labelled "estimate"; XLSX reader = CSV twin; inventory value = Σ qty × unit cost − delivered at average cost |
+| AC-12 | *later* (§25.6) | not built |
+| IN-01 | `test:integrations-db` (fake `gapi`) · `test:conversions` sheets section · `test:tenancy` | ≤ 1 read + 1 append + 1 batchUpdate per store per tick; ownership proof; 429 breaker; oldest-pending order of service; B's sheet never moves A's orders |
+| IN-02 | `test:conversions` (trigger matrix) · `test:render` | trigger ≠ `order` → thank-you without the pixel chunk; one Purchase per pixel at the trigger with `event_id = orderId`; 7 d − 1 h guard |
+| IN-03 | `test:tenancy` (T4, tokens keyed by store and pixel) · `test:integrations-db` | a token of store A never signs store B's event; health row per pixel ≤ 1 write / min |
+| IN-04 | `test:conversions` telegram section · `test:integrations-db` | batch ≤ 10 orders; "[TEST]" only with the switch; `429` waits `retry_after`; no cash-held line for `at_delivery` |
+| IN-05 | `test:conversions` templates section | URL ≤ 2,000 chars with optional blocks dropped first; the order id always stays |
+| IN-06 | `test:health` (`int:turnstile` fixture) · e2e anti-spam page | the issue fires above 20 % failures with n ≥ 20 and is silent below |
+| IN-07 | `test:webhooks` (S5) | Standard Webhooks vectors; two signatures during rotation; the SSRF address table (IPv4, IPv6, mapped) |
+| IN-08 | the Mailer's own tests (platform.md, S5) | only the digest and `payout_ready` templates are sent by operations |
+| IN-09 | R1: `test:conversions` sheets section (four headers) · R2: S5's extension of `src/lib/sheets/selftest.ts` | R1: "Agent", "Note agent", "Tracking", "Transporteur" pulled inside the one read; R2: "Refusé : prix" → `refused_price`, a `sheets_sa` store skips the platform bucket |
+| IN-10 … IN-13 | D2's R3 suites | hashed scoped keys; feeds tokenised and 404 after rotation; Shopify CSV grouped by handle with SSRF-safe images; TikTok offline events only after the documented values |
+| IN-14 | *later* (§25.6) | not built |
+| SF-07 | `qa:wow-demo` `ops` step (RF §4 rows 2:15-2:50) | owner session presses `N` (override seeded) → masked card ≤ 300 ms, a second agent never gets the same order, `C` writes `phone_revealed`, `1` confirms with attempt → confirmed on the timeline; without the override at a closed hour → `outside_window` |
+| SF-05 | `test:ops-db` (exclusions table of §3.6) · `test:test-orders` (P3) · `qa:wow-demo` | the board, KPIs, Profit lite and `finance_daily` read the same before and after a test order; Sheets and CAPI mocks receive nothing |
+| SF-06 | `test:pulse` (P2) with the ops / integrations contributors | each contributor ≤ 50 ms; a failure omits its keys; per-user parts never cached across users |
+| SF-03 | `test:health` (P1, two-store fixture) | each ops / integrations rule fires on its fixture, is silent below `minN`, and never reads another store |
+| SF-09 | `test:money` (S3) · `test:carriers` (S4) | match states on order and shipment; the cash-held footer identity; `at_delivery` orders never age |
+| SF-11 | `test:ops-db` (`opsAggregates` on 50,000 orders) | ≤ 400 ms; cells under 5 suppressed; no customer canary in any cell; city keys are slugs, NULL → `"*"` |
+| SF-01 | `test:kit` (P3) · `test:ops-db` (`angle` dim) | the by-angle table shows counts and rates with n and no CPA per angle |
+| LP-04, LP-06, LP-11 | `test:conversions` (`thank_you_confirm`) · `test:leads` (P3) | the thank-you WhatsApp text renders from stored facts only; `convertLeadToOrder` dispatches on `sel.v`, answers `already_converted` the second time and `not_found` across stores |
+| PL-07, PL-18 | `test:platform` (P1) · PLA-§O.3 canaries · `test:ops` (console row types) | console rows carry first name + initial and a masked phone only; `recordPlatformReveal` is the only unmasking read |
+| AI-15, AI-23 | `test:ai-eval` (P7) · `test:conversions` | drafts are one per (page, locale) and carry no phone / name / address pattern; agents never see a `draft` row |
+| PL-09 | `test:ops-db` (export-zip writers) | `orders.csv` carries full phones; no Telegram token, carrier credential, webhook secret or `capi_ctx` in any file |
+| UX-02 | `test:ops-db` (search provider) · `test:tenancy` | ≤ 120 ms; agents get their own queue plus the exact-phone inbound lookup only; results masked; B never finds A's orders |
 
 ---
 
@@ -3976,10 +4159,10 @@ a folder the core already assigns.
 
 | Track | Owns (create / modify / delete) |
 |---|---|
-| **P4 CALL CENTER** (R1) | `src/lib/orders/{state.ts, events.ts, queue.ts, customers.ts, duplicates.ts, manual.ts, address.ts, risk-explain.ts, admin.ts, transition.ts, edit.ts, masking.ts, profile.ts, export-zip.ts, state.selftest.ts}`, `src/lib/orders/hooks/ops.ts`, `src/lib/callcenter/**` (rev 2 adds `aggregates.ts` for OPE-§27.6 and `idem.ts` for OD36; **rev 3 adds `inbound.ts` (OD53), `carrier-csv.ts` (OD55), `window.server.ts` (the `callingWindowFor` stub, OD57)**), `src/lib/finance/lite/**` (rev 2 adds `cents.ts`, OD35; rev 3 adds `ad-rates.ts`, OD56), `src/lib/admin-data/orders.ts`, `src/app/app/[store]/{orders,queue,customers,finance}/**`, `src/app/app/[store]/team/{agents,callcenter}/**`, `src/app/api/app/[store]/{orders,ops}/**` (rev 2: `ops/{next,outcome,reveal,presence,state}/route.ts`, `orders/{export,print}/route.ts`; **rev 3: `orders/carrier-csv/route.ts`**), `src/components/admin/{orders,queue,customers,agents,callcenter,finance}/**` (**rev 3: `callcenter/calling-window.tsx` is the one hours editor, imported by P3's thank-you card after the P4 merge, OD57**), `src/lib/settings/keys/{ops,accounting}.ts`, `src/lib/health/rules/ops.ts`, `src/lib/pulse/contributors/ops.ts`, `src/lib/notify/kinds/ops.ts`, `src/lib/flags/defs/ops.ts` (`finance_lite`), `src/lib/admin-data/search/ops.ts`, `src/components/admin/shell/commands/ops.ts`, `src/components/admin/shell/nav/ops.ts`, `src/lib/i18n/admin/<locale>/ops.ts` (+ the R1 lite `finance.ts` keys; **rev 3: `fr` files complete in R1, OD58**), `src/lib/jobs/tracks/ops.ts`, `scripts/qa/{ops-check,queue-check,ops-db-check,profit-check}.ts`, `scripts/qa/tenancy-cases/ops.ts` (rev 2, core §F.1), `scripts/qa/wow-demo/steps/ops.ts` (core §K.2 rev 2.1; rev 3 adds the `seed` step of OPE-§O.3), **`scripts/qa/fixtures/city-key.json`** (rev 3, OD47: the parity fixture P3 and S1 read, owned here because `cityKey` is this part's); appends to `src/lib/orders/contract.ts` status labels go through the maintainer (core §Q.4 Q.9a) |
+| **P4 CALL CENTER** (R1) | `src/lib/orders/{state.ts, events.ts, queue.ts, customers.ts, duplicates.ts, manual.ts, address.ts, risk-explain.ts, admin.ts, transition.ts, edit.ts, masking.ts, profile.ts, export-zip.ts, state.selftest.ts}`, `src/lib/orders/hooks/ops.ts`, `src/lib/callcenter/**` (rev 2 adds `aggregates.ts` for OPE-§27.6 and `idem.ts` for OD36; **rev 3 adds `inbound.ts` (OD53), `carrier-csv.ts` (OD55), `window.server.ts` (the `callingWindowFor` stub, OD57)**; **rev 4: `window.ts` exports `EffectiveWindow` / `CallingWindow` keyed by ISO weekday and `window.fixtures.ts` is the shared window fixture P3 and S1 read, CRIT3**), `src/lib/finance/lite/**` (rev 2 adds `cents.ts`, OD35; rev 3 adds `ad-rates.ts`, OD56), `src/lib/admin-data/orders.ts`, `src/app/app/[store]/{orders,queue,customers,finance}/**`, `src/app/app/[store]/team/{agents,callcenter}/**`, `src/app/api/app/[store]/{orders,ops}/**` (rev 2: `ops/{next,outcome,reveal,presence,state}/route.ts`, `orders/{export,print}/route.ts`; **rev 3: `orders/carrier-csv/route.ts`**), `src/components/admin/{orders,queue,customers,agents,callcenter,finance}/**` (**rev 3: `callcenter/calling-window.tsx` is the one hours editor, imported by P3's thank-you card after the P4 merge, OD57**), `src/lib/settings/keys/{ops,accounting}.ts`, `src/lib/health/rules/ops.ts`, `src/lib/pulse/contributors/ops.ts`, `src/lib/notify/kinds/ops.ts`, `src/lib/flags/defs/ops.ts` (`finance_lite`), `src/lib/admin-data/search/ops.ts`, `src/components/admin/shell/commands/ops.ts`, `src/components/admin/shell/nav/ops.ts`, `src/lib/i18n/admin/<locale>/ops.ts` (+ the R1 lite `finance.ts` keys; **rev 3: `fr` files complete in R1, OD58**), `src/lib/jobs/tracks/ops.ts`, `scripts/qa/{ops-check,queue-check,ops-db-check,profit-check}.ts`, `scripts/qa/tenancy-cases/ops.ts` (rev 2, core §F.1), `scripts/qa/wow-demo/steps/ops.ts` (core §K.2 rev 2.1; rev 3 adds the `seed` step of OPE-§O.3), **`scripts/qa/fixtures/city-key.json`** (rev 3, OD47: the parity fixture P3 and S1 read, owned here because `cityKey` is this part's); appends to `src/lib/orders/contract.ts` status labels go through the maintainer (core §Q.4 Q.9a) |
 | **P5 INTEGRATIONS** (R1) | `src/lib/sheets/**`, `src/lib/pixels/**`, `src/lib/orders/{conversions.ts, conversions-core.ts}`, `src/lib/orders/hooks/integrations.ts`, `src/lib/integrations/**` (templates, telegram, whatsapp builtins; rev 2 adds `deliveries.ts` for OPE-§28), `src/lib/jobs/handlers/{capi,telegram}.ts`, `src/app/app/[store]/integrations/**` (incl. the rev 2 health strip and deliveries page), `src/app/app/[store]/settings/anti-spam/**`, `src/app/api/app/[store]/sheets/**`, `src/components/admin/{pixels,integrations}/**`, `src/components/admin/settings/sheets-wizard.tsx`, `src/lib/settings/keys/{sheets,conversions,notifications,telegram,export_key,pixel_library,pixel_health,tracking_secrets}.ts`, `src/lib/health/rules/integrations.ts`, `src/lib/pulse/contributors/integrations.ts`, `src/lib/notify/kinds/integrations.ts`, `src/components/admin/shell/commands/integrations.ts`, `src/components/admin/shell/nav/integrations.ts`, `src/lib/i18n/admin/<locale>/integrations.ts`, `src/lib/jobs/tracks/integrations.ts`, `scripts/qa/{conversions-check,integrations-db-check}.ts`, `scripts/qa/tenancy-cases/integrations.ts` (rev 2) |
 | **S3 MONEY** (R2) | `src/lib/finance/**` (takes over the lite files), `src/lib/imports/**` (**rev 3: incl. `xlsx-write.ts`, the writer S4 and the Carrier CSV route import, OPS-27**), `src/lib/orders/hooks/money.ts`, `src/lib/jobs/tracks/money.ts`, `src/app/app/[store]/finance/**`, `src/components/admin/finance/**`, `src/app/api/app/[store]/{imports,finance}/**`, `src/lib/settings/keys/accounting.ts`, `scripts/qa/money-check.ts`; **rev 3:** the drawer's Money block actions `refundOrderAction`, `confirmProbableMatchesAction` (`src/app/app/[store]/finance/actions.ts`) |
-| **S4 LOGISTICS** (R2) | `src/lib/carriers/**` (**rev 3: incl. `adapters/self.ts`, OD52**), `src/lib/shipping/**`, `src/lib/orders/merge.ts`, **`src/lib/orders/{manual-v3.ts, edit-v3.ts}`** (rev 3, OPE-§11.5, OD62), `src/lib/callcenter/{rules.ts, reveal-alarm.ts}`, `src/lib/jobs/tracks/logistics.ts`, `src/app/app/[store]/shipping/**`, `src/components/admin/shipping/**`, **`src/components/admin/orders/manual/**` and `src/app/api/app/[store]/orders/carrier-csv/route.ts` (taken over from P4 in R2: the store-mode branch of the manual-order sheet and `format=xlsx`)**, `src/app/api/app/[store]/shipping/**`, `src/lib/settings/keys/carrier_credentials.ts`, `scripts/qa/carrier-check.ts`. **S1 STOREFRONT** (storefront.md) exposes `priceLine`, `storeDeliveryFee`, `productAsPageDoc` and `src/components/admin/catalog/product-picker.tsx` for the sheet; S4 never writes under `src/lib/catalog/**` |
+| **S4 LOGISTICS** (R2) | `src/lib/carriers/**` (**rev 3: incl. `adapters/self.ts`, OD52**), `src/lib/shipping/**` (**rev 4: incl. `manual-actions.ts`, the sheet's thin v3 `storeAction` wrappers, OPE-§11.5**), `src/lib/orders/merge.ts`, `src/lib/callcenter/{rules.ts, reveal-alarm.ts}`, `src/lib/jobs/tracks/logistics.ts`, `src/app/app/[store]/shipping/**`, `src/components/admin/shipping/**`, **`src/components/admin/orders/manual/**` (incl. rev 4 `mode.ts`, `manualSheetMode`) and `src/app/api/app/[store]/orders/carrier-csv/route.ts` (taken over from P4 in R2: the store-mode branch of the manual-order sheet and `format=xlsx`)**, `src/app/api/app/[store]/shipping/**`, `src/lib/settings/keys/carrier_credentials.ts`, `scripts/qa/carrier-check.ts`. **rev 4 (CRIT4; core §K.4):** the v3 order functions `quoteManualOrderV3` / `createManualOrderV3` / `editOrderV3` are **S1's** (`src/lib/catalog/order-v3.server.ts`, STO-§16.9); revision 3's `src/lib/orders/{manual-v3,edit-v3}.ts` do not exist. **S1 STOREFRONT** (storefront.md) exposes those three functions, `priceLine`, `storeDeliveryFee`, `productAsPageDoc` and `src/components/admin/catalog/product-picker.tsx` for the sheet; S4 never writes under `src/lib/catalog/**` |
 | **S5 INTEGRATIONS 2** (R2) | `src/lib/webhooks/**`, `src/lib/security/ssrf.ts`, `src/lib/jobs/handlers/webhook.ts`, `src/lib/orders/hooks/webhooks.ts`, `src/app/app/[store]/integrations/webhooks/**`, `src/lib/sheets/**` (IN-09 changes), `src/lib/settings/keys/sheets_sa.ts` |
 | **D2 CARRIERS & MESSAGING** (R3) | `src/lib/carriers/adapters/**`, `src/lib/whatsapp-cloud/**`, `src/lib/jobs/handlers/{whatsapp,carrier}.ts`, `src/lib/jobs/tracks/messaging.ts`, `src/app/api/hooks/{carrier,whatsapp}/**`, `src/app/api/v1/**`, `src/lib/api/**`, `src/app/s/[store]/feeds/**`, `src/lib/imports/xlsx.ts`, the R3 slices of `src/lib/finance/**` (AC-08 … AC-11), `src/app/app/[store]/integrations/api/**` |
 
@@ -3989,12 +4172,14 @@ create.ts, text.ts, risk.ts, upsell.ts, versions.ts, hooks.ts}`, `src/lib/page/*
 `notify`, `flags`, `health`, `commands`, `nav`, `i18n/admin/index.ts`, `jobs/registry.ts`). **rev 3:** `createOrderRow`
 lives in `src/lib/orders/create.ts` (T3, R1.0) and is called, never edited, by P4 and S4 (OD62).
 
-**Overlap check (rev 3, ENGC-8).** This table is consistent with core §K.2 only when the core's **P2** row reads
-"`src/app/app/[store]/team/**` **except `team/{agents,callcenter}/**`**" (P4's) — the current core text lists the whole
-`team/**` for P2; OPE-§Q.27 asks for the exclusion, and the P0 glob-intersection script the core adds (ENGC-8's
-recommendation) is the mechanical check. No file in this table is listed by another part spec; the two rev 3 cross-track
-imports (P3's thank-you card → `CallingWindowEditor`; S4 → S1's product picker and `priceLine`) are imports of finished
-modules in merge order, not shared ownership.
+**Overlap check (rev 3, ENGC-8; rev 4 re-checked against core rev 3).** Core §K.2's P2 row now reads
+"`src/app/app/[store]/team/**` except `team/{agents,callcenter}/**`" (P4's), core §K.4's S4 row carries the sheet and
+the Carrier CSV route and names the v3 functions S1's, and `scripts/qa/ownership-check.ts` (`test:ownership`, core
+§J.1) is the mechanical check; this table matches those rows. No file in this table is listed by another part spec;
+the cross-track imports (P3's thank-you card → `CallingWindowEditor`; P3 and S1 → `window.fixtures.ts` and
+`city-key.json` as read-only test data; S4 → S1's product picker, `priceLine` and the v3 functions) are imports of
+finished modules in merge order, not shared ownership. R2 / R3 test cases are written into the R2 / R3 owner's script,
+never into P4's or P5's files (OD65).
 
 ---
 
@@ -4050,7 +4235,13 @@ contributors, flags, commands, i18n, tests) or in tables this part may refine, s
 
 Every row changes a core-owned list this part may not edit (the `orders` columns and enums of §D.2, the P0 stub list,
 a gauge predicate, a scope kind, the i18n release rule, an ownership glob). Everything else revision 3 adds lives in
-tables this part refines or in track-owned files.
+tables this part refines or in track-owned files. **Decided in core §Q.8 (revision 3):** Q.27a, b, c, d, e, f, g, i, j,
+l, m, n, o **accepted as written**; **Q.27h accepted with a change** (the three v3 functions are S1's, in
+`src/lib/catalog/order-v3.server.ts`; S4 keeps the sheet and the `xlsx` route) and **Q.27k accepted with a change**
+(`store.confirmation.hours` and `policies.contact.hours` are **removed**, not mirrored; the `accounting` and `ops`
+additions accepted). Q.27e's parenthesis "bundled by landing's `assist` and the storefront checkout chunk" was
+overtaken by LAN R1 (core §Q.8: `ZoneTable.city` keyed by the posted value): no chunk needs to bundle `cityKey`
+(OD47 rev 4). The rows below keep the text as asked; the body of this revision follows the decisions.
 
 | # | Core section | Exact change | Why / finding |
 |---|---|---|---|
@@ -4070,15 +4261,20 @@ tables this part refines or in track-owned files.
 | Q.27n | §J.3 / §K.2 exit criterion 12, RF §4 row 2:15 | The demo presses `N` from the **demo store owner's** session (not the platform owner's) and the seed sets `ops.openOverrideUntil = now + 2 h`; assert both. | OD60 (OPS-16). |
 | Q.27o | §D.5 `product_costs`, §D.6 `carrier_accounts`, `carrier_rates`, `shipments`, `remittance_lines`, `finance_daily` | Record this part's refinements: `product_costs.sku`; `carrier_accounts.settlement` + adapter `self`; `carrier_rates.cod_fee_flat_cents`; `shipments.kind`; `remittance_lines.phone_digits` + `probable`; `finance_daily.refund_cents`, `missing_rates`. | OPS-24, OD52, OPS-25, OD51, OPS-26, OD59, OD56 (refinements §D.9 allows; listed for the registry). |
 
-Notes to the other parts (not core requests; carried in `crossFileNotes` of the review record):
-- **landing.md**: LAN-§2.1 / §7.1 slug keys and the `null` → `*` rule, `assist` bundles `cityKey` (OPS-1); LAN-§8.3 `{when}`
-  and LAN-§8.4 hours from `callingWindowFor`, `Hours` becomes a mirror, the card imports `CallingWindowEditor`
-  (OPS-11); LAN-§14.3 "Delete test orders" → `settings.write` (OPS-20); LP-16 pulled to R2 and the `delivery:fee_mismatch`
-  checklist warning (OPS-13); `checkout.addressMode` as the one address setting (UX-31).
-- **storefront.md**: STO-§12.3 / §15.9 slug keys in `#sg-config` (OPS-1); STO-§15.13 step 5 cites `createManualOrderV3`
-  (OPS-15); STO-§15.5 reads `checkout.addressMode` (UX-31); STO-R23 stock hook reads `line_outcome` (OD51).
-- **platform.md**: PLA-§7.2 `Masked` type exported for `maskCustomerFields`; PLA-§10.1 preview text "support sees
-  masked customers" (SEC-5); PLA-§22.2 store-mode onboarding reveal (OPS-14, no operations side).
+Notes to the other parts as written in revision 3 (not core requests; carried in `crossFileNotes` of the review
+record; **rev 4:** three of them are superseded, marked †, and OPE-§R2's notes give the current text):
+- **landing.md**: LAN-§2.1 / §7.1 slug keys and the `null` → `*` rule, † `assist` bundles `cityKey` (OPS-1; rev 4: no chunk
+  slugs, the `ZoneTable` is keyed by the posted value, which LAN-§7.1 already says); LAN-§8.3 `{when}` and LAN-§8.4
+  hours from `callingWindowFor`, † `Hours` becomes a mirror (rev 4: removed, core D73), the card imports
+  `CallingWindowEditor` (OPS-11); LAN-§14.3 "Delete test orders" → `settings.write` (OPS-20, done by landing); LP-16
+  pulled to R2 and the `delivery:fee_mismatch` checklist warning (OPS-13, done: core D75); `checkout.addressMode` as the
+  one address setting (UX-31, done).
+- **storefront.md**: † STO-§12.3 / §15.9 slug keys in `#sg-config` (OPS-1; rev 4: `#sg-config` embeds the `ZoneTable`
+  keyed by the posted value); STO-§15.13 step 5 cites `createManualOrderV3` (OPS-15, now S1's own function);
+  STO-§15.5 reads `checkout.addressMode` (UX-31); STO-R23 stock hook reads `line_outcome` (OD51).
+- **platform.md**: PLA-§7.2 `Masked` type and `maskIfImpersonation` (rev 4 name; the two-argument `maskCustomerFields`
+  of revision 3 is withdrawn, CRIT14); PLA-§10.1 preview text "support sees masked customers" (SEC-5); PLA-§22.2
+  store-mode onboarding reveal (OPS-14, no operations side; core §A.2 decided it).
 
 ---
 
@@ -4137,7 +4333,9 @@ target, **Q** = a revision 1 request as decided in core §Q.4.
 | 45 | §Q marked decided with the core sections per request; §Q.26 the one second-round request (two audit names, one bucket) | the core asked parts to record only contradictions or unavoidable needs | core §Q (closing paragraph) |
 
 Revision 3 (the round-1 review) is recorded **per finding** in OPE-§R below, with the decision OD47 … OD62 each change
-rests on; the requests it could not avoid are OPE-§Q.27.
+rests on; the requests it could not avoid are OPE-§Q.27. Revision 4 (the round-2 review, against core rev 3) is
+recorded per finding in **OPE-§R2**, with OD63 … OD65 and the in-place corrections of OD47, OD57, OD61 and OD62; it
+adds no request to the core.
 
 ---
 
@@ -4150,7 +4348,7 @@ note: every resolved row points at a section whose text changed.
 
 | Id | Sev. | Decision | Where in this document |
 |---|---|---|---|
-| OPS-1 | blocker, cross | **Resolved (OD47)**: the slug `CityKey` is the one key; `cityKey` pure and isomorphic; `zoneLineFor` / `zoneForCity` take `CityKey \| null` (null → `*`); the shared parity fixture `scripts/qa/fixtures/city-key.json`; landing / storefront / core changes requested | §0 OD47, §10.1, §5.3 (`eta`), §2.7 `carrier_rates`, §O.1 `test:ops`, §P, §Q.27e / Q.27f |
+| OPS-1 | blocker, cross | **Resolved (OD47)**: the slug `CityKey` is the one key; `cityKey` pure and isomorphic; `zoneLineFor` / `zoneForCity` take `CityKey \| null` (null → `*`); the shared parity fixture `scripts/qa/fixtures/city-key.json`; landing / storefront / core changes requested. *(rev 4: the "chunks bundle `cityKey`" detail is superseded — browser tables are keyed by the posted value; CRIT1, OPE-§R2)* | §0 OD47, §10.1, §5.3 (`eta`), §2.7 `carrier_rates`, §O.1 `test:ops`, §P, §Q.27e / Q.27f |
 | OPS-2 | major | **Resolved (OD48)**: `attempt_failed` + `postponed` ship states, `orders.delivery_attempts`, the delivery lane (claim statement, base 650, `ops.rescue`), outcomes `customer_informed` / `reschedule` / `no_answer` / `busy` / `cancel_recall`, view "Delivery problems", board tile, `queueCounts.deliveryRescue`, `statusMap` `{ state, reason }`, `defaultStatusMap` stays empty until real files (D38) | §2.1, §2.2, §2.7, §2.9, §3.2, §3.3, §5.1, §5.2, §5.3, §5.4, §6.1a, §12.1, §13.1, §13.3, §14.1, §14.3, §17.1, §17.2, §21.2, §27.1, §27.2, §N |
 | OPS-3 | major | **Resolved (OD49)**: `orders.ship_after`, "Deliver from…" on `confirmed`, holds excluded from To pack / picking / Create shipments / Carrier CSV, "On hold" view, drawer + slips + Sheet header "Livrer à partir du", `ops:hold_passed` | §2.1, §2.2 (`hold_set`), §3.2, §6.1, §12.1, §12.7, §12.8, §17.4, §19.4, §27.2, §M.3 |
 | OPS-4 | major | **Resolved (OD50)**: `RETURN_REASONS`, `orders.return_reason`, set by L moves / `statusMap` / R2 label mapping, stored in `state_changed`, `returnReasonMix`, reason column in Refused & returned and the sales register, `city_refusal` evidence, KPI "Return reason mix" | §3.2, §3.4, §2.1, §2.2, §12.1, §14.3, §16.2, §16.6, §16.8, §17.2, §19.9, §27.6, §N |
@@ -4160,10 +4358,10 @@ note: every resolved row points at a section whose text changed.
 | OPS-8 | major | **Resolved (OD54)**: Sheet header "Agent" → `orders.confirmed_by_label` (mapped label → `confirmed_by`), "Note agent" in R1, `ops.agentLabels` mapping from `/team/agents` with a 90-day backfill, board table "Agents named in your sheet", commissions for mapped labels, the Sheets screen states what needs the queue | §2.1, §2.2, §2.9, §4.1, §12.3, §14.1, §14.2, §14.3, §15.3, §19.4, §19.6, §19.8, §19.9, §27.2, §M.3 |
 | OPS-9 | major, cross | **Resolved (OD55), option (a)**: "Tracking" / "Transporteur" pulled in R1 into `orders.tracking_ref` / `carrier_label` (drawer, slips, timeline, `{carrier_tracking}`), tracking implies `packed`, **Carrier CSV** export with the owner's columns (`ops.carrierCsv`, `shipments.write`, audited, `manifest_exported`), R2 shipments mirror the columns; IN-09's two rows moved to R1 | §1.1 OP-16, §1.3 IN-09, §2.1, §2.2 (`tracking_set`), §2.9, §7.1, §12.7, §12.8, §17.4, §19.4, §19.6, §19.9, §M.2, §M.3, §P |
 | OPS-10 | major | **Resolved (OD56)**: `accounting.adAccounts[platform].currency` + `accounting.adRates` (owner-typed, dated, "your rate, estimate"), `spendStoreCents`, "needs a rate" rows never converted, the rate printed under the card, `finance_daily.missing_rates`, `fin:ad_rate_missing`. The finding's `ad_rates` **table** is replaced by a setting (same behaviour, no 0005 change) | §0 OD56, §1.2 AC-03, §2.7 `finance_daily`, §2.9, §16.2, §16.5, §27.2, §M.3, §O.1 |
-| OPS-11 | major, cross | **Resolved (OD57)**: `ops.callingWindow` is the one source; ISO weekdays (index 0 = Monday); `callingWindowFor(scope)` P0 stub; `hoursText`; `confirm_hours` reads it; `store.confirmation.hours` and `policies.contact.hours` become mirrors written by `saveOpsSettingsAction`; one `CallingWindowEditor` component | §0 OD9 / OD57, §2.9, §5.5, §7.1, §M.3, §P, §Q.27e / Q.27k |
+| OPS-11 | major, cross | **Resolved (OD57)**: `ops.callingWindow` is the one source; ISO weekdays (index 0 = Monday); `callingWindowFor(scope)` P0 stub; `hoursText`; `confirm_hours` reads it; `store.confirmation.hours` and `policies.contact.hours` become mirrors written by `saveOpsSettingsAction`; one `CallingWindowEditor` component. *(rev 4: superseded twice — the core removed the two keys instead of mirroring them, and the weekday key is the ISO number 1-7, not an index; CRIT2, CRIT3, OPE-§R2)* | §0 OD9 / OD57, §2.9, §5.5, §7.1, §M.3, §P, §Q.27e / Q.27k |
 | OPS-13 | major, cross | **Operations side resolved**: Profit lite shows fee charged vs fee paid per city and `fin:fee_gap` raises the gap; the landing-side pull of LP-16 into R2 and the `delivery:fee_mismatch` checklist warning are landing.md / core items (notes in §Q.27) | §16.2, §27.2, §Q.27 notes |
 | OPS-14 | major, cross | **n/a for operations**: store-mode onboarding reveal is platform.md / landing.md (PLA-§22.2, LAN-§4); no operations surface. Recorded in §Q.27's notes to platform | §Q.27 notes |
-| OPS-15 | major, cross | **Resolved (OD62)**: new §11.5 `createManualOrderV3` / `quoteManualOrderV3` / `editOrderV3` on `priceLine` + `createOrderRow`, the sheet routed by store mode (S1 product picker), S4 owns the files, R2 contract step freezes the signatures, `test:ops-db` parity "manual v3 total = public v3 total"; `convertLeadToOrder` dispatches on `sel.v` | §0 OD62, §1.1 OP-08, §11.2, §11.4, §11.5, §M.3, §P, §Q.27h |
+| OPS-15 | major, cross | **Resolved (OD62)**: new §11.5 `createManualOrderV3` / `quoteManualOrderV3` / `editOrderV3` on `priceLine` + `createOrderRow`, the sheet routed by store mode (S1 product picker), S4 owns the files, R2 contract step freezes the signatures, `test:ops-db` parity "manual v3 total = public v3 total"; `convertLeadToOrder` dispatches on `sel.v`. *(rev 4: superseded — the functions and the parity test are S1's, S4 owns only the sheet; CRIT4, OPE-§R2)* | §0 OD62, §1.1 OP-08, §11.2, §11.4, §11.5, §M.3, §P, §Q.27h |
 | OPS-16 | major | **Resolved (OD60)**: the first `N` sets `online` implicitly, `outside_window` stays honest, `qa:wow-demo` seeds `openOverrideUntil = now + 2 h` and presses `N` from the demo store owner's session; the core / RF §4 row asked to say so | §5.2 step 1, §13.2a, §O.2 `test:queue`, §O.3, §Q.27n |
 | OPS-17 | major | **Resolved (OD58)**: fr with en in R1 for every `ops.` / `int.` / `fin.` key, ar R3; `test:i18n-coverage` requires fr; the English-only rows of §N translated; the core's D36 exception requested | §0 OD34 / OD58, §N, §O.1, §O.3, §P, §Q.27l |
 | OPS-18 | major | **Resolved (OD59)**: `refunded` money state (`collected → refunded`, `remitted → refunded`, M †), `orders.refund_cents` / `refunded_at`, `finance_daily.refund_cents`, drawer "Refund…" (`finance.write`, R2), sales register / cash journal state `refunded`, commission clawback once; designed in 0006 so OP-22 needs no rework | §2.1, §2.2, §2.7, §3.2, §12.7, §15.3, §16.6, §16.8, §L, §M.3, §O.2, §Q.27b |
@@ -4181,7 +4379,7 @@ note: every resolved row points at a section whose text changed.
 | ENGC-8 | major, cross | **Operations side resolved**: §P keeps P4's `team/{agents,callcenter}/**` and asks the core's P2 row for the exclusion plus the P0 glob-intersection script | §P (overlap check), §Q.27g |
 | ENGC-13 | major, cross | **Resolved (OD62)**: `createOrderRow` extracted by T3 in R1.0 and frozen at P0, the only insert (static lint), P4's manual path calls it, `newOrderId` export withdrawn | §0 OD62, §11.1 step 5, §11.5, §O.1, §P, §Q.27d |
 | ENGP-24 | minor, cross | **Operations side resolved**: a 25 s wall-time ceiling for the operations scripts of `npm test`, fixtures not corpora, `ops-check.ts` fails above it | §O.1 (wall time) |
-| SEC-5 | major, cross | **Resolved (OD61)**: `maskName` / `maskAddress` / `maskCustomerFields` at the repository boundary when `scope.kind === "impersonation"`, static check that every read function calls it, attack-suite canaries on the tenant routes; `StoreScope.kind` requested from the core | §0 OD61, §8.1, §O.1, §O.2 `test:tenancy`, §O.3, §Q.27j |
+| SEC-5 | major, cross | **Resolved (OD61)**: `maskName` / `maskAddress` / `maskCustomerFields` at the repository boundary when `scope.kind === "impersonation"`, static check that every read function calls it, attack-suite canaries on the tenant routes; `StoreScope.kind` requested from the core. *(rev 4: the local helpers are withdrawn; the read functions call the platform's frozen `maskIfImpersonation(scope, row)`; CRIT14, OPE-§R2)* | §0 OD61, §8.1, §O.1, §O.2 `test:tenancy`, §O.3, §Q.27j |
 | UX-31 | minor, cross | **Operations side resolved**: the manual-order sheet's address field follows `checkout.addressMode`; the setting itself is landing.md's / storefront.md's | §11.2 |
 | ENGP-1, ENGP-3, ENGP-6, ENGP-26 | cross | **n/a for operations** (publish-gate registry, `ai_jobs` unique index, height-estimate thresholds, the landing chunk hash): design.md / ai.md / core / storefront items; no operations surface | — |
 | UX-4, UX-20, UX-21, UX-37, UX-38, UX-39 | cross | **n/a for operations** (CTA plan markup, phone reveal layout, commerce register, checkout ergonomics, aurora, cutout path): design.md / landing.md / storefront.md / platform.md items | — |
@@ -4191,3 +4389,120 @@ note: every resolved row points at a section whose text changed.
 **Rejected: none.** Two recommendations were implemented in a different shape, both stated in the body: OPS-10's
 `ad_rates` table became the `accounting.adRates` setting (same behaviour, no new 0005 table), and OPS-5's
 `OrderItemsV3.lines[].state` became the `line_outcome` event (the storefront's frozen items JSON is not touched).
+
+---
+
+## OPE-§R2. Review decisions (round 2)
+
+Revision 4. One row per finding id of the round-2 review that names this file or is marked `cross` (the round-1 ids
+re-checked against core **revision 3**, plus the critic's CRIT ids). **Resolved** = the body changed in this revision
+(sections named); **verified** = the round-1 resolution was re-read against core rev 3 and still holds (the sections
+that carry it are named, with any rev 4 adjustment); **cross** = this file's side is done and the other side is listed
+in the notes below; **n/a** = no operations surface (the owning part or the core answers it). Every "resolved" row
+points at a section whose text changed; nothing here is only a note.
+
+| Id | Sev. | Decision (round 2) | Where in this document |
+|---|---|---|---|
+| OPS-1 | blocker, cross | **Verified + re-aligned (CRIT1)**: slugs for every stored key and server API; the browser's only zone table is landing's `ZoneTable` keyed by the posted `City.value` (core §K.2 P0 `zonesForCheckout`, LAN-§7.1); `cityKey` may be bundled, never required; `city-key.json` gains the `zoneTable` section so P3, P4 and S1 fail together on either shape | §0 OD47, §10.1, §O.1, §O.4 |
+| OPS-2 | major | **Verified (OD48)**, tightened: the lane is `ship_state = attempt_failed` only; `postponed` is listed in "Delivery problems" but never handed out (its move clears `due_at`); `test:state` asserts the `due_at` invariant | §0 glossary, §5.1, §5.2, §O.1 |
+| OPS-3 | major | **Verified (OD49)**; the store-mode sheet's hold is the two-step of §11.5 step 4 (S1's v3 input has no `shipAfter`) | §2.1, §3.2, §6.1, §11.5, §12.1, §12.8, §17.4, §19.4, §27.2 |
+| OPS-4 | major | **Verified (OD50)**; no change | §3.2, §2.1, §12.1, §16.8, §27.6 |
+| OPS-5 | major | **Verified (OD51)**; its R2 test cases moved to S4's `test:carriers` and S3's `test:money` (OD65) | §2.1, §3.2, §17.4 step 7, §O.2 |
+| OPS-6 | major | **Verified (OD52)**; no change | §2.7, §2.9, §3.2, §16.2, §16.7, §17.2, §21.2 |
+| OPS-7 | major | **Verified (OD53)**; the bucket is in core §E.8 (Q.27m) | §5.7, §3.5, §6.3, §9.2, §M.3 |
+| OPS-8 | major | **Verified (OD54)**; the mapping audit is now the core's `callcenter.label_mapped` | §14.1, §19.6, §M.3 |
+| OPS-9 | major, cross | **Verified (OD55, core D74)**; rev 4 adds the fresh step-up on the Carrier CSV (OD64) and lists the core §B.7 gap | §0 OD64, §8.3, §12.8, §M.2, §O.3 |
+| OPS-10 | major | **Verified (OD56)**; the `accounting` additions are in core §D.10 | §2.9, §16.2, §16.5 |
+| OPS-11 | major, cross | **Resolved per core D73 (A\*)**: no mirror anywhere (CRIT2), ISO weekday-number keys (CRIT3), never-null `EffectiveWindow` with `configured` so a default never becomes a shopper promise (OD63) | §0 OD57, OD63, §2.9, §5.5, §7.1, §22.2, §M.3, §O.1, §O.2 |
+| OPS-13 | major, cross | **Operations side re-aligned to core D75** (LP-16 in R2): `fin:fee_gap` narrowed to fee charged vs carrier rate; zone fee vs page fee is landing's `landing:fee_mismatch` only; aggregate city keys are slugs, NULL → `"*"` | §16.2, §27.2, §27.6 |
+| OPS-14 | major, cross | **n/a for operations**: core §A.2 decided (store-mode onboarding creates no landing page; PLA PD60 rev 3) | §Q.27 notes |
+| OPS-15 | major, cross | **Resolved per core §K.4 / Q.27h A\* (CRIT4)**: §11.5 rewritten around S1's `src/lib/catalog/order-v3.server.ts` (STO-§16.9 the signature source); the sheet's routing (`manualSheetMode`), `fee_unset` keeps Create disabled, the hold two-step, contact-only edits through `editOrder` | §0 OD1, OD62, §11.2, §11.4, §11.5, §M.3, §P, §O.2 |
+| OPS-16 | major | **Verified (OD60; core Q.27n, §J.3)**; no change | §5.2, §13.2a, §O.3 |
+| OPS-17 | major | **Verified (OD58; core §I.5)**; no change | §0 OD34, §N, §O.1 |
+| OPS-18 | major | **Verified (OD59)**; audit `orders.refunded` named; R2 tests in S3's `test:money` | §3.2, §M.3, §O.2 |
+| OPS-19 | minor | **Verified (OD60)**; no change | §2.9, §5.2, §8.2 |
+| OPS-20 | minor, cross | **Verified**: landing fixed LAN-§14.3 to `settings.write` (core §H.11); §26 stays the source | §26, §M.3 |
+| OPS-21 | minor | **Verified**; rev 4 routes contact-only edits of v3 orders through `editOrder` so the in-transit exception exists once | §11.3, §11.5 step 5, §6.1a, §17.4 step 8 |
+| OPS-23 | minor | **Verified (core §A.4, Q.27i)**; no change | §2.4, §14.2 |
+| OPS-24 | minor | **Verified (core Q.27o)**; no change | §2.7, §16.2, §16.3 |
+| OPS-25 | minor | **Verified**; rev 4 records that this section is the cut list (`cod_fee_flat_cents` / `cod_fee_bp` `NOT NULL DEFAULT 0`) and lists core §D.6's nullable wording for the maintainer | §2.7 |
+| OPS-26 | minor | **Verified**; R2 tests in S3's `test:money` | §2.7, §16.7, §18.3, §O.2 |
+| OPS-27 | minor | **Verified (core §K.4 S4 `format=xlsx`)**; no change | §2.9, §16.8, §18.6 |
+| OPS-28 | minor | **Verified**; `windowOverrides[].days` uses the ISO weekday-number shape (CRIT3) | §2.9, §5.5 |
+| OPS-29 | minor | **Verified**; no change | §14.1, §27.1, §27.2 |
+| ENGC-1 | blocker, cross | **Verified**: core rev 3 cut `is_test`, `orders_store_test_idx` and `page_slug_history` in 0004; §2.1 says so | §2.1 |
+| ENGC-8 | major, cross | **Resolved**: core rev 3 carries the P2 carve-outs and `test:ownership`; §P's stale sentence ("the current core text lists the whole `team/**`") deleted, S4 row aligned with core §K.4 | §P |
+| ENGC-13 | major, cross | **Verified (core D72)**: `createOrderRow` by T3 in R1.0 is the only insert; S1's v3 functions call it too | §11.1 step 5, §11.5, §O.1 |
+| ENGP-1 | blocker, cross | **n/a for operations** (core §M.1 `gateInputFor`, DES-§8.13) | — |
+| ENGP-3 | major, cross | **n/a for operations** (core §D.5 `aj_active_uq` on `active`) | — |
+| ENGP-6 | major, cross | **n/a for operations** (core §M.2 calibrated bands) | — |
+| ENGP-24 | minor, cross | **Verified**: this part's ≤ 25 s equals core §J.1's operations share; R2 cases live in R2 scripts (OD65) | §O.1, §O.2 |
+| ENGP-26 | minor, cross | **n/a for operations**: no operations runtime bytes (OD18); rev 4 removes the last reason a chunk would bundle operations code (CRIT1) | §10.1 |
+| UX-4 | major, cross | **n/a for operations** (CTA plan markup and sticky hooks: design / landing) | — |
+| UX-20 | major, cross | **n/a for operations** (phone reveal composition: platform / design) | — |
+| UX-21 | major, cross | **n/a for operations** (commerce register: design / storefront) | — |
+| UX-31 | minor, cross | **Verified**: the sheet's address follows `checkout.addressMode` (core §D.10) | §11.2 |
+| UX-37 | minor, cross | **n/a for operations** (shopper forms); the admin sheet and the console keep the core §I.8 ≥ 44 px targets | §13.1 |
+| UX-38 | minor, cross | **n/a for operations**: no aurora or grain in any operations screen (core D60 rev 3; §13.6 design rules) | §13.6 |
+| UX-39 | major, cross | **n/a for operations** (cutout-later path: design / platform / ai) | — |
+| SEC-1 | blocker, cross | **n/a for operations** (core D69 sandbox ceilings) | — |
+| SEC-5 | major, cross | **Resolved per core D70 + CRIT14**: every read function calls the frozen `maskIfImpersonation(scope, row)`; the local helpers are withdrawn and a static check forbids redefining them | §0 OD61, §8.1, §O.1, §O.2, §O.3 |
+| SEC-18 | minor, cross | **n/a for operations** (core D76; this part writes no store, legal or WhatsApp display name, and renders no public page; the report link is CRIT15's) | — |
+| QUAL-1 | blocker, cross | **n/a for operations** (copy library, N8) | — |
+| QUAL-9 | major, cross | **n/a for operations** (Director acceptance rule) | — |
+| QUAL-10 | major, cross | **n/a for operations** (gene pins) | — |
+| QUAL-20 | major, cross | **n/a for operations** (`nicheShares` data path) | — |
+| QUAL-21 | major, cross | **n/a for operations** (rubric typography text) | — |
+| QUAL-25 | minor, cross | **n/a for operations** (design / ai seams) | — |
+| CRIT1 | major, cross | **Resolved (operations side)**: one shape per layer — slugs in storage and server APIs, the posted `City.value` in every browser table (built by `zonesForCheckout`); the parity fixture asserts both; the core's D68, §K.2 P0 and §K.4 S1 sentences and the storefront's STO-D43 / §14.4 / §15.7 / §16.2 step 13 are listed below to align with the §K.2 P0 / LAN-§7.1 shape the core already accepted (§Q.8 LAN R1) | §0 OD47, §10.1, §O.1, §O.4, notes |
+| CRIT2 | major | **Resolved**: every mirror sentence deleted (OD57, §5.5, §7.1, §22.2, §M.3 `saveOpsSettingsAction` and `saveWindowOverridesAction`); `test:ops` forbids reading or writing the removed keys; Q.27k carries the core's decision and the round-1 OPS-11 row is annotated as superseded (kept as history, not contract) | §0 OD57, §5.5, §7.1, §22.2, §M.3, §O.1, §O.2, §Q.27, §R |
+| CRIT3 | major, cross | **Resolved**: `days: Record<1 \| … \| 7, Range[]>` (1 = Monday) in `ops.callingWindow`, `windowOverrides[].days` and `EffectiveWindow`; `export type CallingWindow = EffectiveWindow`; never `null` (the stub answers `DEFAULT_WINDOW` with `configured: false`, OD63); `DEFAULT_WINDOW.days[5]` is Friday; the shared fixture `src/lib/callcenter/window.fixtures.ts` read by `test:ops`, `test:delivery` and `test:catalog`; landing's `CallingWindow` interface and `\| null` listed below | §0 OD57, OD63, §2.9, §5.5, §O.1, §P |
+| CRIT4 | major | **Resolved**: the v3 functions are S1's in `src/lib/catalog/order-v3.server.ts` (OD62, §11.5, §M.3, §P S4 row); S4 keeps the sheet (`src/components/admin/orders/manual/**`, `mode.ts`) and the `xlsx` route, its action wrappers in `src/lib/shipping/manual-actions.ts`; the stale `team/**` sentence of §P deleted; Q.27h carries the decision; round-1 OPS-15 annotated | §0 OD1, OD62, §11.4, §11.5, §M.3, §P, §Q.27, §R |
+| CRIT14 | minor | **Resolved**: §8.1 imports `maskIfImpersonation(scope, row)` from `src/lib/platform/mask.ts` (P1, frozen P0); the two-argument `maskCustomerFields(row, scope)` and the local `maskName` / `maskAddress` / `Masked` are withdrawn; phones pass as `null` (already masked) | §0 OD61, §8.1, §O.1, §O.2 |
+| CRIT15 | minor, cross | **n/a for operations**: the landing pages' "Report this store" link belongs to the landing footer (design's footer section via the document context; landing / design name the renderer); operations renders no public page | notes |
+| CRIT17 | minor, cross | **Resolved for operations**: new **OPE-§O.4** maps every id of OPE-§1 to its script / e2e step, fixture and checkable statement; scripts cite `// proves:` ids and `ops-check.ts` fails on an uncited id (OD65); the §1 intro points at it | §0 OD65, §1, §O.2, §O.4 |
+
+**Consistency fixes found while re-checking against core rev 3** (no finding id; each aligns this text with a decided
+core sentence): `orders.export` now held by managers too (core §A.3.2, OPS-22) in §8.3, §12.8, §M.2; the tenant step-up
+ladder (core §B.7, SEC-17) on the orders CSV, the Carrier CSV and the period close (OD64, §12.8, §16.8, §M.2, §M.3,
+§O.3); Sheets served oldest-pending-first with the ≈ 16 stores per tick capacity and the scaled backlog threshold (core
+§H.2 slot 1, §H.5, ENGC-33) in §19.7, §J, §27.2; the outbox re-send rule (core §H.1, ENGC-29) in §28.1; `ctx.yield()`
+between stores (core §H.2, ENGC-11) in §19.7 and §J; the accepted audit names `callcenter.label_mapped`,
+`finance.settings.updated`, `orders.refunded` (core §F.5) in §14.1 and §M.3; the DB enum order of `ship_state` (core
+§D.2) in §2.1 and §3.2.
+
+**Notes for the maintainer (contradictions inside core rev 3, recorded per the §Q.8 closing rule; no new request):**
+- D68's sentence "the server, `assist`, `checkout` and `pdp` chunks convert with the same function", §K.2 P0's
+  "so landing's `assist` and the storefront's `checkout` / `pdp` chunks bundle it by source import" and §K.4's S1 row
+  "(bundling P4's pure `cityKey`, D68)" contradict §K.2 P0's own `zonesForCheckout` ("keyed by the posted `City.value`,
+  built on the server from the slugs") and §Q.8 LAN R1; this part follows the latter (CRIT1): `cityKey` *may* be
+  bundled, no chunk *has to*.
+- §B.7's step-up list names `orders.export` but not the D74 Carrier CSV, which carries the same full phones under
+  `shipments.write`; this part requires the check on `/orders/carrier-csv` (OD64) and asks that the sentence list it.
+- §D.6 `carrier_rates`: "`cod_fee_flat_cents bigint NULL`" and "`cod_fee_bp int DEFAULT 0`" vs OPE-§2.7 (the cited cut
+  list) `NOT NULL DEFAULT 0` for both.
+- §K.4's contract-step sentence "so S3/S4 build the manual-order sheet's store-mode branch" vs its own S4 row (S4 only).
+- §D.10 `ops` row and §K.2 P0: `callingWindow.savedAt` and `EffectiveWindow.configured` (OD63) are this part's
+  refinements of its own key and stub type; the P0 stub answers `DEFAULT_WINDOW` with `configured: false`.
+
+**Notes to the other parts (current text; supersede the † items of OPE-§Q.27's notes):**
+- **landing.md**: the "no hours" rule of LAN-§2.3 becomes `windowIsEmpty(w, now) || !w.configured` (OD63: the default
+  window runs the queue but is not a promise a person made; LAN-§2.3's "the thank-you may promise from it" sentence
+  changes accordingly), and the "After the order" card mounts `CallingWindowEditor`, whose "Use these hours" sets
+  `configured`; `Range` and `EffectiveWindow` are exported by `window.ts` as LAN-§2.3 already imports them; the
+  `honesty:promise` `confirmation_call` claim checks `configured` too; `test:delivery` reads
+  `src/lib/callcenter/window.fixtures.ts` next to `city-key.json`; CRIT15's footer link is landing's / design's to place.
+- **storefront.md**: STO-§16.9 step 1's "a 0 delivery the agent must override with `adjustCents`" cannot happen
+  (adjustments are ≤ 0, OD15): the quote keeps `fee_unset` and the operations sheet keeps Create disabled (OPE-§11.5
+  step 3), so the function should refuse a create with `fee_unset` as well; STO-§16.9 step 5 and STO-R30 say "S3" for
+  the sheet's R2 owner where core §K.4 says **S4**; `ManualOrderInputV3` needs no `shipAfter` (the sheet does the hold
+  in a second idempotent write, OPE-§11.5 step 4); `test:catalog` may read `window.fixtures.ts` for STO-D45.
+- **platform.md**: PLA-§7.2's `maskIfImpersonation` receives `phone: null` from every operations read function (the
+  tenant phone is already `maskPhone`d for every role, with the tenant format "06 •• •• 56 78"; the console format
+  stays the platform's).
+
+**Rejected: none.** Two recommendations were implemented in a different shape, both stated in the body: CRIT17's
+"Proven by column in the feature map" became the OPE-§O.4 table (one row per id; the §1 tables stay readable on a
+phone and the proof sits next to the tests it names), and CRIT3's shared window fixture lives in
+`src/lib/callcenter/window.fixtures.ts` (inside P4's own folder, so no ownership row changes) rather than under
+`scripts/qa/fixtures/`.

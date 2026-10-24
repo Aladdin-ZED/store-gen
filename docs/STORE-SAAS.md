@@ -1,13 +1,15 @@
 # Store Gen SaaS: core contract (tenancy, identity, routing, data, security, storage, jobs, shell, releases)
 
-Status: **core contract, revision 3 (round-1 review integrated)** (2026-10-24, lead architect). Reviewed once: the
-six reviewer passes (OPS, ENGC, ENGP, UX, SEC, QUAL) found 4 blockers, ~45 majors and ~40 minors against revision 2.1
-and the six revision-2 parts; **§P decides every finding that names the core or is cross-file**, §N.2 lists what
-changed, §Q.8 decides the parts' third-round requests, and the six parts are at revision 3 (their own review
-decisions in PLA-§R, STO-§30, LAN-§29, OPE-§R, AI-§T, DES-§28). This document is the contract every build agent follows for everything cross-cutting: the
+Status: **core contract, revision 4 (round-2 review integrated)** (2026-10-24, lead architect). Reviewed twice. Round
+1: the six reviewer passes (OPS, ENGC, ENGP, UX, SEC, QUAL) found 4 blockers, ~45 majors and ~40 minors against
+revision 2.1; revision 3 resolved them (§P round 1, §N.2, §Q.8). **Round 2** re-sent every finding that names the core
+or is cross-file against revision 3 plus the critic's consistency findings (CRIT1 … CRIT20); **revision 4 re-verifies
+every round-1 resolution, resolves the critic's findings in the body and decides the parts' fourth-round notes**
+(§P round 2, §N.3, §Q.9). The six parts are at revision 4 (their round-2 decisions in PLA-§R, STO-§30.2, LAN-§30,
+OPE-§R2, AI-§V, DES-§30). This document is the contract every build agent follows for everything cross-cutting: the
 tenant model, identity, routing and domains, the full table list, the store-scope seam, security, storage, jobs, the
 admin shell, tests, releases and file ownership. Product depth lives in six part specs written on top of it:
-`docs/saas/spec/platform.md`, `storefront.md`, `landing.md`, `operations.md`, `ai.md`, `design.md` (all at revision 3).
+`docs/saas/spec/platform.md`, `storefront.md`, `landing.md`, `operations.md`, `ai.md`, `design.md` (all at revision 4).
 A part spec may refine the columns of the tables this document assigns to it (§D.9) and add product behaviour; it may
 not rename tables, change `store_id` rules, change a seam signature (§E) or move a file between tracks (§K). Each part
 spec ends with a section "Requests to the core"; **revision 2 decided every first-round request in appendix §Q.1-Q.6
@@ -34,13 +36,14 @@ the request hook is `src/proxy.ts` (not middleware), Node runtime only
 (`node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md:253-255`).
 
 Reading order for a build agent: §0 (decisions) → the track you own (§K) → the sections your track's files touch →
-§J (tests you must keep green) → §L (find your feature ids) → §Q (how your part's requests were decided) → §P (what
-the review changed and why).
+§J (tests you must keep green) → §L (find your feature ids) → §Q (how your part's requests were decided, §Q.9 for the
+fourth round) → §P (what the two reviews changed and why).
 
 Frozen for the whole of R1, unchanged by this revision: landing **PageDoc v2**, **runtime config v2**, **order payload
 v2**, the **PHP export**, and the landing runtime chunk at **24,200 B gz** (`src/landing/runtime/budgets.json:3`). Every
 new runtime behaviour is a **new chunk** with its own budget (§H.13, LAN-§5); the frozen chunk gains only the storage
-prefix bytes of §C.9, **derived once in `core.ts`** (ENGC-10, ENGP-26). **Rev 3 freeze rule:** after T3's prefix edit,
+prefix bytes of §C.9, **derived once in `core.ts`** (ENGC-10, ENGP-26), and nothing else (rev 4: no zone, city-key or
+calling-window code enters it; the browser zone tables are keyed by the posted `City.value`, D68). **Rev 3 freeze rule:** after T3's prefix edit,
 T3 re-measures the chunk; if it still fits 24,200 B the figure stands, otherwise the maintainer records the measured
 value in `budgets.json.landing` and in §P as an explicit re-freeze for the owner (expected ≤ +60 B); from the R1.0
 integration `render-check` enforces the `landing` chunk with **tolerance 0** against the recorded budget **and** the
@@ -101,6 +104,10 @@ chunk keeps the +5 % rule (§J.1). The storefront's hash assertion (STO-§14.1) 
     checked against protected brands at every change, and no page may contain a password or card field. Sellers
     get a carrier loop in R1 through their Google Sheet (tracking number and carrier columns, a carrier CSV), one
     calling-hours setting that every promise reads, and one city key everywhere so delivery zones match.
+21. **New in revision 4 (second review).** A shopper is told "we call you from 09:30" only after the seller saved
+    their calling hours once (until then the team works on starting hours, but no promise is made). The "Report this
+    store" link is drawn by the page footer itself, so no landing page can miss it. Pulling the carrier file or every
+    customer now asks for a fresh password or 2FA code, and a seller can delete their own account when they own no shop.
 
 ---
 
@@ -166,7 +173,7 @@ marked **deviates R-Dx** or **refines R-Dx** changes or sharpens a settled decis
 | D53 | **One `store_health` table, two audiences** (P*, one row per store, computed by the `platform.health` job): the console ring (PL-18) and the tenant Store Health ring with reasoned fixes (SF-03) read the same row; rules are contributed per track (`src/lib/health/rules/<track>.ts`); snoozes are stored and audited; the score never gates anything. | rethink-features §1.3, §3.2 (PL-18 raised to a tenant feature); PLA-Q.1 asked for the snapshot; one computation, one number. |
 | D54 | **Test-order mode is a core flag:** `orders.is_test` and `leads.is_test` (**0004**, rev 3 ENGC-1: T3's R1.0 code writes them, so they are cut with the tenancy migration together with `orders_store_test_idx` and `page_slug_history`), set only by the public path from a store-signed token (`hmac(exp, "test-order:<storeId>")`, 2 h); every aggregate reader skips `is_test` (Sheets, CAPI, Telegram "[TEST]", stats, KPIs, finance, learning, rollups). | SF-05 (rethink-features §3.1); the owner's test orders hit risk ≥ 70 today (HANDOFF §5) and poison stats; the wow demo (§K.2) needs it. |
 | D55 | **Per-class model matrix, not one model id:** `platform_ai.classes` = `director_interactive` (`claude-opus-5-5`, `medium`), `director_deep` (`claude-fable-5-1`, `high`), `worker` (`claude-sonnet-5-5`, `low`), `fast` (`claude-haiku-5-5`, `low`), each with `maxTokens`, `timeoutMs`, fallback and batch policy, owner-overridable. **Refines R-D29** (one default id). The degrade ladder removes stages, never swaps a model inside a class. | rethink-ai §0.5, §2.3, §9.13; brief item 16 asks for the strongest model on judgment and a fast one everywhere else. |
-| D56 | **Long work is a job, never a long request:** no interactive route holds a request past 90 s; anything slower inserts an `ai_jobs` row, answers `202 { jobId }`, continues in `after()` with a 10 s heartbeat, is polled visibility-aware every 2 s, and is recovered by the cron (`ai.jobs`) when the heartbeat is older than 60 s; Message Batches are the guaranteed fallback (§H.12). **Rev 3 (ENGC-18, AI-§B.13):** jobs are **stage-resumable** (every stage ≤ 90 s) and three drivers advance them (`after()` while it lives, the poll request itself, the cron), so the 2-6 minute promise holds whatever `after()` survives; every page and route that may start a job exports `maxDuration = 360`, and pattern B is on only behind the release flag `ai_detached_jobs` that the live probe sets. | rethink-ai §1.5, §9.6; Hostinger's 120 s cap (`src/app/api/cron/tick/route.ts:25` sets `maxDuration = 120`); `after()` lives at most the route's `maxDuration` (`after.md`); whether a detached promise survives minutes is **[unverified]** until the R1 probe. |
+| D56 | **Long work is a job, never a long request:** no interactive route holds a request past 90 s; anything slower inserts an `ai_jobs` row, answers `202 { jobId }`, continues in `after()` with a 10 s heartbeat, is polled visibility-aware every 2 s, and is recovered by the cron (`ai.jobs`) when the heartbeat is older than 60 s; Message Batches are the guaranteed fallback (§H.12). **Rev 3 (ENGC-18, AI-§B.13):** jobs are **stage-resumable** (every stage ≤ 90 s) and three drivers advance them (`after()` while it lives, the poll request itself, the cron), so the 2-6 minute promise holds whatever `after()` survives; every page and route that may start a job exports `maxDuration = 360`. **Rev 4 (AI R41, R42):** the release flag `ai_detached_jobs` (set by the live probe) switches **only the `after()` driver**; pattern B runs on the poll and cron drivers either way (§H.12 rule 1); the cron driver never runs a model call inside the tick: it marks orphans and hands a driverless job's next stage to a one-item Message Batch (§H.2 slot 4c). | rethink-ai §1.5, §9.6; Hostinger's 120 s cap (`src/app/api/cron/tick/route.ts:25` sets `maxDuration = 120`); `after()` lives at most the route's `maxDuration` (`after.md`); whether a detached promise survives minutes is **[unverified]** until the R1 probe. |
 | D57 | **Pulse gains an ETag and a shared poller** (SF-06): `GET /api/app/<h>/pulse` answers `304` when nothing changed, one tab per browser polls and shares through `BroadcastChannel("sg-pulse:<storeId>")` (fallback: independent pollers), contributors add counters through `src/lib/pulse/contributors/<track>.ts`. **Refines R-D50 / D46.** | rethink-features §2.2, §3.4; PLA-Q.14; 15 s polling must stay cheap on one Node process. |
 | D58 | **Fair tests use always-valid sequential inference (mSPRT)** instead of a fixed horizon: peeking allowed, the stop rule shown, ≥ 100 uniques per arm, auto-end at 28 days. **Refines R-D47.** | rethink-features §1.8, §3.4 (Johari et al. 2015); sellers look every day. |
 | D59 | **Nothing on the critical path waits for a model download:** onboarding ranks directions from category tap + photo palette + keywords; SigLIP and the VLM refine after the reveal or run on the server when Cloud AI is on; the consent card never shows on mobile data. **Refines UX-01 / AI-03 as written in RESEARCH.** | rethink-features §3.4, §4 (99.5 + 111 MB at q8 on 4G = 1-3 minutes); demo check 2. |
@@ -178,15 +185,15 @@ marked **deviates R-Dx** or **refines R-Dx** changes or sharpens a settled decis
 | D65 | **(rev 2.1) `ActionErrorCode` is the core union plus an open `(string & {})` tail**, like `AuditAction` (`src/lib/audit.ts:14-38`). A part may answer its own codes from a `storeAction` / `platformAction`; every such code is listed in that part's spec, has a message key `error.<code>` in ar/fr/en (`test:i18n-coverage`) and a UI that renders it; an unknown code falls back to the generic "something went wrong" sheet, never to raw text. The nine platform codes known at rev 2.1 are listed in §E.2. | PLA-§Q.1 note 1; closing the union at P0 would make every part-level code a CCR. |
 | D66 | **(rev 2.1) Budget gates take a per-kind profile, never a second registry:** `registerBudgetProfile(kind, profile)` in `src/lib/render/prepublish/budget.ts` lets the storefront contract step (R2) pass the STO-§6.1 thresholds for store page kinds; a profile may **lower** a threshold and may never raise a hard ceiling above D52 (140 KB gz, 16 sections, 15,000 px). The landing profile is the default. | STO-R25; D51 (one registry), D52 (owner-rule ceilings). |
 | D67 | **(rev 2.1) One i18n file per track, texts live with their owner:** a track owns only `src/lib/i18n/admin/<locale>/<track>.ts` (plus the extra files §K.2 names for P1 and P2); notification texts `notify.<kind>.*` live in the file of the track that declares the kind, Store Health rule sentences `health.<track>.<rule>.*` in the file of the track whose `rules/<track>.ts` emits the issue; P2's `health.ts` holds the ring and issue-list chrome only. | platform.md and the P2 row both claimed `health.ts`; §K.3's rule that two tracks never own one file. |
-| D68 | **(rev 3, OPS-1) One canonical city key everywhere: operations' slug `CityKey`** (`cityKey(value): CityKey \| null`, `src/lib/orders/address.ts`, pure and isomorphic, folds ar/fr/en spellings; `"Autre"` and unknown → `null`). `delivery_zones.cities`, `carrier_rates.city_key`, `orders.city_key`, the `lp-assist` / `#sg-config` zone tables and every aggregate dimension store slugs; the order form keeps posting `City.value` and the server, `assist`, `checkout` and `pdp` chunks convert with the same function; `zoneForCity(zones, key \| null)` and `zoneLineFor(scope, key \| null, …)` map `null` to the `*` zone. One shared parity fixture (`scripts/qa/fixtures/city-key.json`, P4) is read by `test:delivery`, `test:catalog` and `test:ops` so P3, P4 and S1 fail together if the key drifts. | Rev 2 had two incompatible keys (landing stored `City.value`, operations the slug): no city would ever have matched a zone, and three tracks would have built to different keys. |
+| D68 | **(rev 3, OPS-1; rev 4, CRIT1) One canonical city key in storage and on the server, one table shape in the browser.** Every **stored and server-side** key is operations' slug `CityKey` (`cityKey(value): CityKey \| null`, `src/lib/orders/address.ts`, pure and isomorphic, folds ar/fr/en spellings; `"Autre"` and unknown → `null`): `delivery_zones.cities`, `carrier_rates.city_key`, `orders.city_key`, `zoneFeesFor(scope, keys)`, `opsAggregates(dims: city)` and every aggregate dimension; `zoneForCity(zones, key \| null)` and `zoneLineFor(scope, key \| null, …)` map `null` to the `*` zone. **Every browser zone table** (the `lp-assist` data block, `#sg-config.checkout.zones`, the R2 `landing-v3` config) is the one `ZoneTable` that `zonesForCheckout(scope)` builds on the server with the pure `buildZoneTable(zones, cal, cities)` (`src/lib/delivery/table.ts`, P3): `city` is **keyed by the posted `City.value`** (`city["Fès"] = zoneIndex`), a value absent from the map (`"Autre"`, a typed city) resolves to `star`, and the chunk looks up `table.city[value] ?? table.star`. **Only server code calls `cityKey()`**; it stays pure and isomorphic so tests and a future chunk may import it, but no R1/R2 chunk is required to (the frozen landing chunk and the `assist`, `checkout`, `pdp` chunks carry no slug logic). One shared parity fixture (`scripts/qa/fixtures/city-key.json`, P4) asserts both layers (every spelling → one slug; `zoneTableKey: "value"` and the `buildZoneTable` key set = the `City.value` set) and is read by `test:delivery`, `test:catalog` and `test:ops`, so P3, P4 and S1 fail together on either drift. | Rev 2 had two incompatible keys (landing stored `City.value`, operations the slug): no city would ever have matched a zone. Rev 3 then specified the P0 `zonesForCheckout` as value-keyed while this row said the tables carry slugs (CRIT1): one P0 function with two shapes for its two consumers. The value-keyed table is what the `<select>` gives the browser, costs no runtime bytes and keeps the frozen chunk untouched. |
 | D69 | **(rev 3, SEC-1) The pending sandbox has platform-wide ceilings:** in `approval` and `open` modes a configured Turnstile with a missing or invalid token **refuses** the signup (`+20` scoring stays for `invite` only); at most `platform.signup.pendingStoresPerDay` (default 50) sandboxes are created per platform day through `chargePlatformUsage("pending_stores", <day>, 1)` and the next applicant lands in `waitlist` with `source = "cap:<day>"`; every pending store's uploads charge one shared disk budget `pending_media_bytes` (limit `platform.signup.pendingMediaTotalMiB`, default 5,000 MiB) before the store gauge, with a two-tier per-store cap (`pendingMediaMiBBeforeSubmit` 20 MiB until "Submit for review", `pendingMediaMiB` 100 after); pending stores' AI spend is a slice `ai_cost_micros_pending` ≤ `platform_ai.caps.pendingSharePct` (10 %) of the monthly cap with a daily floor of 10 credits. Refunded on the transition out of `pending`, recomputed by `usage.reconcile`. | Without a sum cap, 1,000 bot sign-ups (200 IPs/hour) meant 100 GB of disk, ~900k inodes and the whole AI cap before anything auto-rejects (R-D12). |
 | D70 | **(rev 3, SEC-5) Masking is a property of the scope, not of components:** `requireStoreMember` returns `ctx.scope.kind = "impersonation"` with the synthetic membership (§B.8), and every order, lead and customer read repository (operations) returns rows through `maskIfImpersonation(scope, row)` (`src/lib/platform/mask.ts`, P1, frozen at P0: `maskName`, `maskAddress`, note → "Note hidden", the console's `Masked` type), so the tenant UI renders masked names, addresses, landmarks and notes under impersonation with no per-component work; phones were already masked. The console's per-order `pii.reveal` ↑ stays the only unmasking path. | "View as shop" was sold as safe while a support agent with a ticket ref could read every customer's identity and address of any store, unaudited per record (PD35). |
-| D71 | **(rev 3, ENGC-6, SEC-8) Write capability is a type:** `WriteScope = StoreScope & { kind: "member" \| "public" \| "system" }`; every repository that inserts, updates or deletes a tenant table types its first parameter `WriteScope`; `platformScope()` and the impersonation seam return scopes whose `kind` is not assignable to it. Lint L6 becomes "a function whose body writes a tenant table must take `WriteScope`; no cast from `StoreScope` to `WriteScope` outside `src/lib/tenancy/seam.ts`". `storeAction`'s runtime refusal stays as the second layer. | Read-only impersonation and platform scopes rested on a JSDoc tag and on permission checks; ~225 call sites make a compile-time guarantee the only reliable one. |
-| D72 | **(rev 3, ENGC-13, OPS-15) One order insert:** `createOrderRow(draft, ctx)` is extracted from `src/lib/orders/create.ts:255-300` by **T3 in R1.0** (id retry on `ER_DUP_ENTRY`, `is_test`, `sheet_status`, `rev`, `confirm_state` defaults, `upsell_token_hash`, `order_events` "created", `INSERT IGNORE` outbox, the hooks call) and frozen at P0; the public v2 path, P4's manual v2 path and the R2 v3 paths (`createManualOrderV3` / `editOrderV3`, S1) call it. `newOrderId` is not exported (OPE Q.9c withdrawn). | A second hand-written insert would have had to repeat every R1 change twice; the id-retry loop is easy to get wrong the second time. |
-| D73 | **(rev 3, OPS-11) One calling window:** `ops.callingWindow` (ISO weekdays 1-7, aligned with `checkout.calendar.workdays`, overrides and closed dates) is the single source of every calling-hours promise; `callingWindowFor(scope): Promise<EffectiveWindow>` (`src/lib/callcenter/window.server.ts`, P4) and the pure `nextCallableAt` / `hoursText` (`window.ts`, isomorphic, bundled by `assist-ty`) feed the thank-you `{when}`, the template variable `confirm_hours`, the tracking help and the store checkout; `store.confirmation.hours` and `policies.contact.hours` are **removed** from their schemas (no mirrors: one key, one editor, `CallingWindowEditor`, mounted by P3's "After the order" card). | Three independent hours settings with two weekday conventions let the thank-you page promise a call the ladder never makes. |
+| D71 | **(rev 3, ENGC-6, SEC-8) Write capability is a type:** `WriteScope = StoreScope & { kind: "member" \| "public" \| "system" }`; every repository that inserts, updates or deletes a tenant table types its first parameter `WriteScope`; `platformScope()` and the impersonation seam return scopes whose `kind` is not assignable to it. Lint L6 becomes "a function whose body writes a tenant table must take `WriteScope`; no cast from `StoreScope` to `WriteScope` outside `src/lib/tenancy/seam.ts`". `storeAction`'s runtime refusal stays as the second layer. **Rev 4 (STO C5):** `storeAction` / `storeGuard` called with permissions that are all `WritePermission`s (a key whose def is `write` or `sensitive`, both refused to impersonation) hand `fn` a **`WriteCtx`** (`StoreCtx<WriteScope>`, §E.1), so ctx-taking write functions (`createProduct(ctx, …)`, `createManualOrderV3(ctx, …)`, `saveZones(ctx, …)`) need no cast; the one narrowing lives in `seam.ts`. | Read-only impersonation and platform scopes rested on a JSDoc tag and on permission checks; ~225 call sites make a compile-time guarantee the only reliable one. |
+| D72 | **(rev 3, ENGC-13, OPS-15) One order insert:** `createOrderRow(draft, ctx)` is extracted from `src/lib/orders/create.ts:255-300` by **T3 in R1.0** (id retry on `ER_DUP_ENTRY`, `is_test`, `sheet_status`, `rev`, `confirm_state` defaults, `upsell_token_hash`, `order_events` "created", `INSERT IGNORE` outbox, the hooks call) and frozen at P0; the public v2 path, P4's manual v2 path and the R2 v3 paths (`createManualOrderV3` / `editOrderV3`, S1) call it. **Rev 4 (CRIT20, wording):** `newOrderId` lives in `src/lib/db/ids` (T1; `create.ts` imports it at `:25` and calls it at `:256`, `:344`); `create.ts` does not re-export it, and no caller generates an order id outside `createOrderRow` (OPE Q.9c withdrawn). | A second hand-written insert would have had to repeat every R1 change twice; the id-retry loop is easy to get wrong the second time. |
+| D73 | **(rev 3, OPS-11; rev 4, CRIT3) One calling window, one shape:** `ops.callingWindow` (overrides and closed dates) is the single source of every calling-hours promise; its weekday container is literally ISO, **`days: Record<IsoWeekday, Range[]>`** (`IsoWeekday = 1 … 7`, 1 = Monday, the numbers of `checkout.calendar.workdays`; never a 0-indexed array), in the setting, in every `windowOverrides[].days` and in **`EffectiveWindow`**, the one exported type (`src/lib/callcenter/window.ts`, P4; JSON-safe, no server import; `export type CallingWindow = EffectiveWindow` is an alias, never a second shape). `callingWindowFor(scope): Promise<EffectiveWindow>` (`window.server.ts`) **never answers `null`**: before the owner saves the window it answers `DEFAULT_WINDOW` (`src/lib/callcenter/defaults.ts`) in the store time zone with **`configured: false`** (`configured` = `ops.callingWindow.savedAt ≠ null`, OPE OD63); the queue runs on it either way, but **every shopper-facing reader** (the thank-you `{when}`, `confirm_hours`, the tracking help, the store checkout, the honesty gate's call claim) renders an hour only when `shopperPromiseAllowed(w)` (= `w.configured`). The pure `isCallable` / `nextCallableAt` / `hoursText` / `shopperPromiseAllowed` feed them (`assist-ty` and the R2 store checkout bundle `nextCallableAt` by source import); one shared fixture `src/lib/callcenter/window.fixtures.ts` (P4) is read by `test:ops`, `test:delivery` and `test:catalog`. `store.confirmation.hours` and `policies.contact.hours` are **removed** from their schemas (no mirrors: one key, one editor, `CallingWindowEditor`, mounted by P3's "After the order" card, whose "Use these hours" sets `savedAt`). | Three independent hours settings with two weekday conventions let the thank-you page promise a call the ladder never makes; rev 3 still had a 7-slot array called "ISO" in operations, a `Record<1..7>` in landing and a nullable stub (CRIT3), and a default window must never become a promise nobody made (owner rule: never invent). |
 | D74 | **(rev 3, OPS-9) Sheets is the explicit R1 carrier loop:** `orders.tracking_ref` and `orders.carrier_label` (0005, operations), pulled from the optional "Tracking" / "Transporteur" sheet columns in R1 (the two IN-09 rows move to P5 R1), shown on the drawer, the slips, the timeline and the tracking page; a **Carrier CSV** export under `shipments.write` with a fixed column picker (`ops.carrierCsv`, D38-compliant, `;` + BOM, audited `orders.carrier_exported`). Manifests, status import and `shipments` stay R2. | A landing-only seller ships every day in R1 and had nowhere to store a tracking number or to build the carrier's upload file. |
 | D75 | **(rev 3, OPS-13) Per-city delivery fees on landing pages ship in R2, not R3:** LP-16 moves to the R2 contract step (`landing-v3` entry = a fork of `entry.ts` plus one zone lookup, runtime config v3 with `zones: ZoneTable`, server shipping by zone for `runtime_v = 3` versions; the PHP template v3 may lag to R3 with the export refusing "charge by city" pages, `export:runtime_v3_unsupported`); attached landings created from a product in `both` mode start on v3; until a page is on v3 the checklist warns `delivery:fee_mismatch` when zones carry fees that differ from the page fee for the top-5 cities. | A `both` store would otherwise quote two fees for one city; "Casa 20 / autres villes 35-45" is the Moroccan norm a flat fee cannot express. |
-| D76 | **(rev 3, SEC-18) Brand protection is live, not only at signup:** `brandTokens()` + active `protected_brands` run on the store name, legal name and WhatsApp display name at every write (`brand_exact` refuses for non-staff with `brand_protected`, `brand_near` writes a console flag); a nightly health rule `platform:brand_term_live` (P1) scans live page titles, headlines and policy text; the publish gate `honesty:password_field` (P3; the storefront's `storefront:form_field_foreign` mirrors it) refuses any `<input type="password">`, card-number pattern or OTP field; every public page carries "Report this store" → `/report/<handle>` (platform host, insert-only `abuse_reports` in **0005**, triage UI R3). | A store approved as "Boutique Nour" could become "CIH Bank · Vérification" with a password form in minutes; R1 had no abuse report and no live check. |
+| D76 | **(rev 3, SEC-18) Brand protection is live, not only at signup:** `brandTokens()` + active `protected_brands` run on the store name, legal name and WhatsApp display name at every write (`brand_exact` refuses for non-staff with `brand_protected`, `brand_near` writes a console flag); a health rule `platform:brand_term_live` (P1) runs **at least nightly, on every health computation of the store** (rev 4, PLA Q4.4) over live page titles, headlines and policy text; the publish gate `honesty:password_field` (P3; it exports its field-pattern list and the storefront's `storefront:form_field_foreign` imports the same list) refuses any `<input type="password">`, card-number pattern or OTP field; every public page carries "Report this store" → `/report/<handle>` (platform host, insert-only `abuse_reports` in **0005**, triage UI R3). **Rev 4 (CRIT15):** the link is one absolute URL from `reportUrl(store, path)` (§C.6) carried in the render context as `links.report`; it is drawn by **P6's landing footer section** (`legalLinks(ctx)`), by the **Shell fallback** in `document.tsx` when a document has no footer, by **P3** on the thank-you, tracking and legal pages and by **S1** in the store chrome (R2), exactly once per document; it is absent in every export. | A store approved as "Boutique Nour" could become "CIH Bank · Vérification" with a password form in minutes; R1 had no abuse report and no live check. |
 
 ---
 
@@ -256,8 +263,9 @@ Mode-switch safeguards (rev 2; LAN Q34, STO-R17):
   `stores.category` (rev 3, ENGP-25: design's store-level niche key falls back to `general` otherwise).
 - **Onboarding in `store` mode creates no landing page (rev 3, OPS-14; PLA-§22.2 PD60 rev 3, STO-§6.7):** the reveal
   shows three PDP folds built synchronously by `productAsPageDoc(product, { …sctx, direction })` (S1, R2), the action
-  creates the product and the theme draft (`createProduct(scope, facts)`, `setThemeDraft(scope, direction)`, frozen at
-  the R2 contract step), and `landing.inStoreMode` stays `false`. Should any path create a landing page for a
+  creates the product and the theme draft (`createProduct(ctx, { facts })`, `setThemeDraft(ctx, direction)`: they take
+  the `WriteCtx` because they write and audit, rev 4 STO C5; frozen at the R2 contract step), and `landing.inStoreMode`
+  stays `false`. Should any path create a landing page for a
   `store`-mode shop, it sets `landing.inStoreMode = true` in the same transaction (audit `store.landing_settings.updated`,
   reason `onboarding`) and the `done` step says so ("Your first page is a sales page; your store home is being built"),
   so a saved draft is never hidden behind a 404. The UX-01 acceptance list carries both cases.
@@ -349,7 +357,7 @@ are removed in R1.0; `homePathFor` is replaced by `landingPathFor(memberships)` 
 | `catalog.read` | | | R2 | catalog | products, collections, inventory |
 | `catalog.write` | w | | R2 | catalog | edit the catalog |
 | `storefront.write` | w | | R2 | storefront | store theme, menus, store pages |
-| `shipments.write` | w | | **R1** | | ship-axis moves and order slips in R1 (Sheets statuses, manual moves; OPE Q.3a), **the Carrier CSV export and the tracking / carrier columns (rev 3, D74)**; shipments, manifests, carrier imports in R2 |
+| `shipments.write` | w | | **R1** | | ship-axis moves and order slips in R1 (Sheets statuses, manual moves; OPE Q.3a), **the Carrier CSV export and the tracking / carrier columns (rev 3, D74; the export needs a fresh step-up, §B.7, rev 4)**; shipments, manifests, carrier imports in R2 |
 | `finance.read` | | | **R1** | | Profit lite screen in R1 (SF-04, flag `finance_lite`); full accounting screens R2 (OPE Q.3b) |
 | `finance.write` | w | | **R1** | | R1: item costs, packaging, manual carrier fee per zone, manual ad spend; R2: expenses, remittance imports |
 | `commissions.manage` | w | | R2 | | commission rules |
@@ -608,7 +616,7 @@ platform-admin.md §21). Published HTML is never re-rendered for a state change.
 | `/reset/<token>` | set a new password from a reset link (§B.9) | public; token |
 | `/kit/<token>` | read-only Campaign Kit share page for a media buyer or designer without an account (SF-01, LAN Q12); **platform host only**, store hosts 404 | public; token (`resolveKitShare`, §E.2); `p:kit:ip:<h>` 60/10 min |
 | `/report/<handle>` (rev 3, D76, P1) | "Report this store": reason, optional details and contact, one `abuse_reports` insert (`recordAbuseReport`, PLA-§24.2); answers the same thank-you whether the handle exists or not (no oracle); **platform host only** (the footer link is absolute, `platformOrigin() + "/report/<h>"`); store hosts 404 like `/kit` | public; `publicAction` with Turnstile `when-configured`; `p:report:ip:<h>` 5/h, `p:report:store:<h>` 20/day |
-| `/app/account/**` | profile, password, 2FA, sessions/devices, admin locale, on-device AI tier | `requireUser()` (no store) |
+| `/app/account/**` | profile, password, 2FA, sessions/devices, admin locale, on-device AI tier, **`/app/account/danger`** (rev 4, PLA Q4.7: delete my account through `deleteUserAccount`, refused with `owns_store` while the user owns a non-purged store) | `requireUser()` (no store) |
 | `/app/new` | create another store (onboarding, UX-01) | `requireUser()`; `p:store:create:<userId>` 3/day |
 | `/app/manifest.webmanifest` | the installable dashboard's manifest (UX-07, PLA Q.26): a non-HTML path of area `app`, no nonce headers, `Content-Type: application/manifest+json`; **public, no session, `Cache-Control: public, max-age=3600`** (rev 3, ENGC-24, SEC-25: browsers fetch a manifest without credentials, and it carries only `platform.brand.name`) | none |
 | `/admin/setup` | first super_admin + first store (§B.11) | gate + `SETUP_TOKEN`, only while no `super_admin` exists |
@@ -777,10 +785,15 @@ rows are promoted to single-use invites by staff (copy-link in R1). Both live in
   Q.32). **Tenant step-up ladder (rev 3, SEC-17):** the store-side sensitive actions need a fresh step-up
   (`sessions.step_up_at` within 5 minutes) **whether or not the user has TOTP**: a TOTP code when enrolled, else a
   password re-entry ("sudo mode", `stepUpWithPasswordAction(password)`, bucket `p:password:<userId>`, through the scrypt
-  semaphore). Required for `store.export`, `orders.export`, `store.close`, secret writes under `integrations.manage`
-  (Sheets, CAPI tokens, Telegram, export key) and `members.manage` role changes to `admin` or `owner`; the audit row
-  names the method (`meta.stepUp: "totp" | "password"`). Exports stay allowed in read-only states. A stolen 30-day
-  `__Host-cs` cookie alone can therefore no longer pull every customer of a store.
+  semaphore). Required for `store.export`, `orders.export`, **the Carrier CSV route `/api/app/<h>/orders/carrier-csv`**
+  (rev 4, OPE OD64: D74's file carries the same full phones under `shipments.write`), `store.close`, secret writes under
+  `integrations.manage` (Sheets, CAPI tokens, Telegram, export key), `members.manage` role changes to `admin` or `owner`
+  and (R2) the accounting period close / reopen (`finance.period_closed|period_reopened`); the audit row names the
+  method (`meta.stepUp: "totp" | "password"`). Exports stay allowed in read-only states. A stolen 30-day `__Host-cs`
+  cookie alone can therefore no longer pull every customer of a store. **Signature (rev 4, PLA Q4.8):**
+  `stepUpWithPasswordAction(password: string): Promise<ActionResult<{ until: string }>>` (T2, `src/lib/auth/**`; the same
+  result shape as `stepUpAction`), refused under impersonation with `impersonation_read_only`; `StoreCtx.stepUpUntil:
+  Date | null` (§E.1) feeds the tenant sheet's "Verified · 4:12" chip as `PlatformCtx.stepUpUntil` does for staff.
 - **Tenants:** TOTP optional (existing enrolment UI moves to `/app/account/two-factor`), with recovery codes as today
   (`src/lib/auth/mfa.ts`). Per store, `stores.require_member_2fa` (D12): when true, `requireStoreMember` sends any
   member without TOTP to the enrolment page (allowed paths: `/app/account/**`, sign-out). Only an owner who has TOTP can
@@ -1085,15 +1098,24 @@ export function storeUrl(store: StoreAddress, path: `/${string}` = "/"): string;
 export function storeHosts(store: StoreAddress): ReadonlySet<string>;       // every host the store owns, §C.9
 export function mediaUrl(store: StoreAddress, key: string): string;         // P: "/media/<key>"; S/C: platformOrigin() + "/media/<key>" (R-D11)
 export function appHref(handle: string, path: `/${string}` | "" = ""): string;   // "/app/<h><path>"
-export function consoleHref(path: `/${string}` = "/"): string;              // "/admin<path>"
+export function consoleHref(path: `/${string}` = "/"): string;              // rev 4 (PLA Q4.2): "https://<ADMIN_HOST>/admin<path>" when ADMIN_HOST is set (from the domain move, D44), else the relative "/admin<path>"
 export function apiHref(handle: string, path: `/${string}`): string;        // "/api/app/<h><path>"
 export function previewUrl(token: string): string;                          // platformOrigin() + "/preview/<token>"
+/** rev 4 (CRIT15, PLA Q4.1): the one "Report this store" URL every renderer uses (landing footer, Shell fallback, thank-you,
+ *  tracking, legal pages, store chrome): platformOrigin() + "/report/<handle>" + (pagePath ? "?p=" + encodeURIComponent(path
+ *  without its query, ≤ 300 chars) : ""). Never an order id, a token or a query string; always absolute (store hosts 404 /report/*). */
+export function reportUrl(store: StoreAddress, pagePath?: string): string;
 ```
 
 Rules: every link in published HTML, canonical/og/JSON-LD (PUB-11), CAPI `event_source_url` (PIX-02), sitemaps,
 "view live" admin links (ADM-39, LND-27) and e-mails go through these builders; no `/admin` or `/${slug}` literal stays
 in `src/**` (lint rule L8, §F.1). The landing renderer receives `{ base, origin, mediaOrigin }` in its store context
-(PUB-10, PUB-16, PUB-17); the runtime config keeps relative `/api/public/*` endpoints (works on every host). When
+(PUB-10, PUB-16, PUB-17) and, **rev 4 (CRIT15)**, `links.report` (`PageLinks.report?: string` in `src/landing/types.ts`,
+set by `src/landing/context.ts` from `reportUrl(store, path)` for every platform-served render: live, test render and
+`/preview/<token>`, so the three stay byte-comparable; **undefined in every export mode**, ZIP, PHP, connected and
+WhatsApp, where the page runs on the seller's own server); the storefront's `StoreLinks.report(path)` (R2) calls the
+same builder, and no section ever concatenates the platform origin itself. The runtime config keeps relative
+`/api/public/*` endpoints (works on every host). When
 `addressMode()` or `storeOrigin()` of a store changes (handle rename, S mode on, primary custom domain), the store's
 `address_version` is bumped and one `render_jobs` row per live page is enqueued (reason `address`, §H.3).
 
@@ -1117,8 +1139,8 @@ export function renameHandle(ctx: StoreCtx, next: string): Promise<void>;       
   the active `protected_brands` on the store name, legal name and WhatsApp display name at **every write**
   (`saveGeneralAction`, the onboarding, `store.policies` contact block, the brand kit): `brand_exact` refuses for
   non-staff with `brand_protected` (D65 code, limit-sheet variant), `brand_near` writes a console flag and lets the
-  write through; the health rule `platform:brand_term_live` (P1, nightly over live page titles, headlines and policy
-  text, platform-visible only; raises `attention = 2` and a `staff.alarm` on an exact term) covers what the builder
+  write through; the health rule `platform:brand_term_live` (P1, at least nightly: on every health computation of the
+  store, rev 4; over live page titles, headlines and policy text, platform-visible only; raises `attention = 2` and a `staff.alarm` on an exact term) covers what the builder
   types after approval.
 - **Legacy conversion handle (rev 3, ENGC-30):** statement S1 of §D.8 derives store #1's handle from
   `settings.store.storeName` (slugified, checked with `isHandle()`, the reserved and protected lists, and uniqueness in
@@ -1180,8 +1202,11 @@ Cache Rule, Worker + secret + route, Hostinger CDN off, TLS mode Full strict). T
 2. `render_jobs` for every live page of every store (reason `address`), drained by the cron; the console Domains view
    (OS-06) shows progress. P-mode HTML keeps working on subdomains meanwhile (D17).
 3. Verification V1 … V11 (RESEARCH §5.3) must pass (V4 now expects the neutral 404 for a wrong `x-sg-edge`, §C.2;
-   RESEARCH records the change at its next revision); then the signup mode default flips to `approval` (D9), with the
-   D69 ceilings in force.
+   RESEARCH records the change at its next revision), plus the app check **V12 "console on its own host"** (rev 4, PLA
+   Q4.2 / PLA-§16.3: the Domains page running the check was served on `ADMIN_HOST` (`effectiveHost().cls ===
+   "console"`), a cookie-less `HEAD https://<root>/admin` answers the neutral 404, and `consoleHref()` links point at
+   `ADMIN_HOST`); then the signup mode default flips to `approval` (D9),
+   with the D69 ceilings in force.
 4. The cron URL, Meta/TikTok domains, Turnstile hostnames and Sheets links are updated by the owner (checklist in the
    console).
 
@@ -1667,7 +1692,8 @@ export const profitAlerts = mysqlTable("profit_alerts", {
 }, (t) => [primaryKey({ columns: [t.storeId, t.kind, t.key, t.firedAt] }), index("pa_open_idx").on(t.storeId, t.clearedAt)]);
 // product_costs, carrier_rates, ad_spend_daily: the OPE-§2.7 shapes, cut into 0005 (R1 rows: product_costs.page_id + item_id;
 // carrier_rates.carrier_account_id = '' = "my carrier", city_key = a CityKey slug or '*' (D68); ad_spend_daily.source = 'manual', campaign_id = '').
-// rev 3 refinements recorded (OPE Q.27o): product_costs.sku varchar(64) NULL + pc_sku_idx (store_id, sku, effective_from); carrier_rates.cod_fee_flat_cents bigint NULL.
+// rev 3 refinements recorded (OPE Q.27o): product_costs.sku varchar(64) NULL + pc_sku_idx (store_id, sku, effective_from); carrier_rates.cod_fee_flat_cents
+// bigint NOT NULL DEFAULT 0 and cod_fee_bp int NOT NULL DEFAULT 0 (rev 4, OPS-25: OPE-§2.7 is the cut list; the COD fee formula adds the flat fee unconditionally).
 // abuse_reports (P*, 0005, D76): the PLA-§2.2 block verbatim (reason enum, details, reporter_contact_enc sealed with the platform envelope
 // purpose "abuse:contact", status, ip_hash; indexes ar_status_idx, ar_store_idx, ar_ip_idx); written only by recordAbuseReport() (P1).
 
@@ -1859,6 +1885,8 @@ export const designGenomes = mysqlTable("design_genomes", {
   vec: jsonText<number[]>("vec").notNull(), genome: jsonText<unknown>("genome").notNull(),
   live: boolean("live").notNull().default(false), reservedUntil: ts("reserved_until"), createdAt: createdAt(),
 }, (t) => [index("dg_bucket_idx").on(t.bucket, t.live), index("dg_store_idx").on(t.storeId, t.pageId), index("dg_niche_idx").on(t.niche, t.live)]);
+// design_genomes: DES-§2.1 is the cut list (design refines its columns, §D.9), incl. `report` (GateSummary ≤ 1 KB, never page text) whose
+// `chosen` rows also carry `gen` = field path → { h: hash16, o: OriginClass } (≤ 600 B, rev 4): the generation record originFrom reads (§M.1 rule 2).
 export const headlineShingles = mysqlTable("headline_shingles", {
   nicheKey: varchar("niche_key", { length: 64 }).notNull(), hash: char("hash", { length: 16 }).notNull(),
   ownerTag: char("owner_tag", { length: 16 }).notNull(),               // hmac(storeId, "shingle-owner")[:16], never returned (D35)
@@ -1885,7 +1913,7 @@ per row below.
 | `store_themes` (0006) | `store_id`, `version int`, `status enum(draft,active,archived) DEFAULT 'draft'`, `active_key varchar(26) NULL` (= `store_id` while active), `genome longtext`, `theme_spec longtext`, `locks longtext`, `logo longtext` (logo designer parameters + exported asset ids), `note varchar(200)`, `active bool` (kept equal to `status = 'active'`), `created_by`, `created_at` (DES-R10, DES-§2.3) | PK `(store_id, version)`; `UNIQUE st_active_uq (active_key)` (two concurrent activations fail cleanly); `(store_id, status, version)`; ≤ 30 versions per store |
 | `product_costs` (**0005**, OPE-§2.7) | `id`, `store_id`, `product_id NULL`, `page_id NULL`, `item_id varchar(40) NULL`, `variant_key varchar(120) NOT NULL DEFAULT ''`, `cost_cents`, `packaging_cents NULL`, `effective_from`, `note`, `created_by`, `created_at`; code check: exactly one of `product_id`, `page_id` | `pc_prod_idx (store_id, product_id, item_id, variant_key, effective_from)`, `pc_page_idx (store_id, page_id, item_id, variant_key, effective_from)` |
 | `carrier_accounts` (0006) | `id`, `store_id`, `adapter varchar(32)` (incl. the rev 3 adapter `self` = the seller's own driver, OPE OD52), `label`, `status enum(active,disabled)`, `settlement enum(at_delivery,remittance) DEFAULT 'remittance'` (rev 3, OPE Q.27o), `hook_key_hash char(64) NULL`, `settings longtext` (non-secret: status map, mapping ids, tracking URL template; credentials in store setting `carrier_credentials`), `created_by`, `created_at`, `updated_at` | `UNIQUE(store_id, adapter, label)`, `UNIQUE(hook_key_hash)` |
-| `carrier_rates` (**0005**, OPE-§2.7) | `id`, `store_id`, `carrier_account_id varchar(26) NOT NULL DEFAULT ''` ('' = "my carrier", the R1 lite rows), `city_key varchar(40)` (a `CityKey` slug, D68; `*` = every other city), `delivery_fee_cents`, `return_fee_cents`, `cod_fee_bp int DEFAULT 0`, `cod_fee_min_cents NULL`, `cod_fee_flat_cents bigint NULL` (rev 3), `eta_days tinyint NULL`, `active`, `updated_by`, `updated_at` | `UNIQUE cr_uq (store_id, carrier_account_id, city_key)` |
+| `carrier_rates` (**0005**, OPE-§2.7) | `id`, `store_id`, `carrier_account_id varchar(26) NOT NULL DEFAULT ''` ('' = "my carrier", the R1 lite rows), `city_key varchar(40)` (a `CityKey` slug, D68; `*` = every other city), `delivery_fee_cents`, `return_fee_cents`, `cod_fee_bp int NOT NULL DEFAULT 0`, `cod_fee_min_cents NULL`, `cod_fee_flat_cents bigint NOT NULL DEFAULT 0` (rev 3; both `NOT NULL DEFAULT 0` in rev 4 as OPE-§2.7 cuts them, OPS-25), `eta_days tinyint NULL`, `active`, `updated_by`, `updated_at` | `UNIQUE cr_uq (store_id, carrier_account_id, city_key)` |
 | `shipments` (0006) | `id`, `store_id`, `order_id varchar(20)`, `carrier_account_id`, `tracking varchar(64)`, `kind enum(full,partial,reship) DEFAULT 'full'`, `parent_id varchar(26) NULL` (rev 3, OPE Q.27o: partial deliveries), `state` (= `ship_state` values), `fee_cents`, `cod_cents`, `return_fee_cents`, `label_ref`, `created_at`, `shipped_at`, `delivered_at`, `returned_at`, `remittance_id` | `UNIQUE(store_id, carrier_account_id, tracking)`, `(store_id, order_id)`, `(store_id, state, created_at)` |
 | `shipment_events` (0006) | `id bigint`, `store_id`, `shipment_id`, `at`, `carrier_status varchar(80)`, `mapped_state varchar(24)`, `raw longtext` (nulled after 30 d) | `(store_id, shipment_id, at)` |
 | `remittances` (0006) | `id`, `store_id`, `carrier_account_id`, `statement_ref`, `period_from date`, `period_to date`, `paid_at`, `gross_cents`, `fees_cents`, `net_cents`, `state enum(imported,matched,disputed,closed)`, `import_run_id`, `created_by` | `UNIQUE(store_id, carrier_account_id, statement_ref)` |
@@ -2143,13 +2171,13 @@ boot task of §D.8 re-seals them in the background (`test:migrate` asserts it). 
 | `platform_cloudflare` | P | **yes** | — | API token (custom hostnames), zone id, fallback origin | core / R3 |
 | `platform_backup` | P | no | — | retention (7 daily, 4 weekly), tables, last download | core / R1 |
 | `store_ai` | S | no | — | `mode` = `auto` / `local` / `server`, `director: "auto" \| "ask" \| "off" \| null` (rev 3: `null` = the platform default, `ask` until `platform_ai.directorAutoDefault` flips), `deepPass: boolean`, local tier ceiling, background removal, learning on/off, share patterns (default off), `contributeTraining: false`, `darijaRatio: "none" \| "cta" \| "light"`, `voice` (register, darija, words to use/avoid) (rethink-ai §2.3, AI-06) | ai / R1 |
-| `brand` | S | no | — | the DES-§2.6 schema **from R1.0** (DES-R16): `logo: { primary, mark?, wordmark? }` asset ids, accent/pop/neutral locks, font locks; `voiceSummary` is **derived read-only** from `store_ai.voice` (AI R24: one source of truth; design genes G28/G31 read `store_ai.voice.register` / `.darija`); R2: logo designer parameters live in `store_themes.logo` | design / R1 basic, R2 full |
+| `brand` | S | no | — | the DES-§2.6 schema **from R1.0** (DES-R16): `logo: { primary, mark?, wordmark? }` asset ids, accent/pop/neutral locks, font locks, `genes` (a partial record of the locked brand-level bold genes; rev 4 adds G1 and G9, additive, so "Lock for my brand" covers every brand-level bold gene; G4 stays `fonts.locked`, G28 / G31 stay `store_ai.voice`); `voiceSummary` is **derived read-only** from `store_ai.voice` (AI R24: one source of truth; design genes G28/G31 read `store_ai.voice.register` / `.darija`); R2: logo designer parameters live in `store_themes.logo` | design / R1 basic, R2 full |
 | `onboarding` | S | no | — | wizard step, timings (`revealMs`), the chosen draft page id, the resumable draft (category, product name, price typed by the owner, fact, asset ids), `dismissedChecklist` (PLA Q.7, PLA-§2.4 schema) | platform (P2) / R1 |
 | `landing` | S | no | — | `inStoreMode` (§A.2), thank-you blocks (`confirmWhatsapp`, `expectation`, `trackLink`), leads capture + `followUpHours`, `waOrder.enabled` (LP-11), `tracking.requests`, R2 `attach` defaults (LAN Q9, LAN-§2.3) | landing / R1 |
 | `policies` | S | no | — | store policy facts (delivery, inspection, exchange, returns, refund, warranty, contact channels **without `contact.hours` (rev 3, D73)**, extras, `reviewedAt`) feeding legal pages, the delivery line and the AI prompt as `StorePolicyFacts` (GEN-08, LND-32, LAN-§2.3) | landing / R1 |
 | `checkout` | S | no | — | R1 (landing, `src/lib/settings/keys/checkout.ts`): `zonesEnabled`, `lineOnLanding`, `calendar` (workdays as ISO 1-7, cut-off hour, holidays, `holidaysReviewedYear`, **`confirmationLeadDays` 0-3 \| null**, rev 3 OPS-12), `notServed.whatsapp`, `confirmationCall`, **`addressMode: "required" \| "optional" \| null`** (rev 3, UX-31: one decision for the landing form and the store checkout; `null` = the market default, `required` for MA), `newPageForm` (R-D45 defaults; `address` left it); R2 (storefront, `src/lib/settings/keys/checkout-store.ts`, S1): the `checkout.store` block (cart rules, buy model R-D44) **merged** into the same key by the registry (STO-R16; it never redefines `addressMode`) | landing R1 / storefront R2 |
 | `accounting` | S | no | — | **R1 lite** (SF-04, OPE Q.3c): `packagingCents` (NULL = not set, never invented), `adsAllocation`, `cashHeldAlertDays`, and **rev 3 (OPE Q.27k)** `myCarrier` (settlement `at_delivery` default), `adAccounts[platform].currency`, `adRates` (owner-typed, dated); R2/R3: tax profile, currency display, `exportFormat`, `remittanceToleranceCents` | operations (P4 lite, S3 full) / R1 |
-| `ops` | S | no | — | **`callingWindow`** (ISO weekdays 1-7, up to 3 ranges per day, closed dates; **the one source of hours, D73**), `openOverrideUntil`, **rev 3** `windowOverrides` (≤ 4 dated schedules, e.g. Ramadan hours), `rescue` (delivery-rescue lane), `agentLabels` (sheet label → member), `carrierCsv` (the Carrier CSV column picker, D74), retry ladder, unreachable policy, duplicate window (days), assignment mode, lease minutes, callback grace, first-touch target, city aliases, reveal-alarm threshold (R2), leaderboard (R3) (OPE-§2.9) | operations / R1 |
+| `ops` | S | no | — | **`callingWindow`** (`days: Record<IsoWeekday, Range[]>`, ISO 1-7 as keys, up to 3 ranges per day, closed dates, and **rev 4 `savedAt`**: NULL until the owner saves once, which is what `EffectiveWindow.configured` reads, OPE OD63; **the one source of hours, D73**; the default is `DEFAULT_WINDOW`), `openOverrideUntil`, **rev 3** `windowOverrides` (≤ 4 dated schedules, e.g. Ramadan hours, with the same `days` container), `rescue` (delivery-rescue lane), `agentLabels` (sheet label → member), `carrierCsv` (the Carrier CSV column picker, D74), retry ladder, unreachable policy, duplicate window (days), assignment mode, lease minutes, callback grace, first-touch target, city aliases, reveal-alarm threshold (R2), leaderboard (R3) (OPE-§2.9) | operations / R1 |
 | `conversions` | S | no | — | Purchase trigger `order` / `confirmed` / `delivered`, custom events on/off, 7-day guard behaviour (IN-02, R-D23) | operations / R1 |
 | `notifications` | S | no | — | which events go to Telegram / in-app, daily summary hour | operations / R1 |
 | `telegram` | S | **yes** | `export/templates/order.php:2632-2660` (PHP only) | bot token + chat id (IN-04) | operations / R1 |
@@ -2198,11 +2226,17 @@ export interface StoreRow {                     // cached view of `stores` (15 s
 }
 export interface Membership { role: StoreRole; status: "active" | "suspended"; synthetic?: "impersonation" }
 export interface Actor { kind: "user" | "platform" | "impersonation" | "system" | "api"; userId: string | null; impersonatorId: string | null; ip: string | null }
-export interface StoreCtx {
-  user: SessionUser; store: StoreRow; membership: Membership; scope: StoreScope; actor: Actor;
+export interface StoreCtx<S extends ReadScope = ReadScope> {
+  user: SessionUser; store: StoreRow; membership: Membership; scope: S; actor: Actor;
   impersonation: ImpersonationInfo | null;
+  stepUpUntil: Date | null;                    // rev 4 (PLA Q4.8): step_up_at + 5 min, the tenant step-up chip (§B.7)
   can(p: StorePermission): boolean;            // matrix ∧ mode ∧ release ∧ state ∧ impersonation
 }
+/** rev 4 (D71, STO C5): the keys refused to impersonation (write or sensitive), computed from STORE_PERMISSIONS */
+export type WritePermission = { [K in StorePermission]: (typeof STORE_PERMISSIONS)[K] extends { write: true } | { sensitive: true } ? K : never }[StorePermission];
+/** the ctx storeAction / storeGuard hand fn when every required key is a WritePermission; the only narrowing site is seam.ts */
+export type WriteCtx = StoreCtx<WriteScope>;
+export interface UserCtx { user: SessionUser; actor: Actor }   // rev 4 (PLA Q4.7): the ctx of userAction (account pages, no store)
 export interface PlatformCtx { user: SessionUser; role: PlatformRole; actor: Actor; can(p: PlatformPermission): boolean; stepUpFresh: boolean; stepUpUntil: Date | null /* step_up_at + 5 min, PLA Q.32 */ }
 export interface SystemCtx { job: string; actor: Actor /* kind "system" */ }
 export interface PublicTarget { store: StoreRow; scope: StoreScope /* kind "public" */ }
@@ -2224,14 +2258,13 @@ export interface RequireStoreOpts {
 export function requireStoreMember(opts?: RequireStoreOpts): Promise<StoreCtx>;
 
 /** server actions in src/app/app/** and src/lib/**: the body of every exported action is `return storeAction(...)` */
-export function storeAction<T>(
-  permission: StorePermission | readonly StorePermission[] | null,
-  fn: (ctx: StoreCtx) => Promise<T>,
-  opts?: { feature?: FeatureKey; rate?: { name: string; limit: number; windowSec: number; per?: "store" | "user" } },
-): Promise<ActionResult<T>>;
+type ActionOpts = { feature?: FeatureKey; rate?: { name: string; limit: number; windowSec: number; per?: "store" | "user" } };
+export function storeAction<T>(permission: WritePermission | readonly WritePermission[], fn: (ctx: WriteCtx) => Promise<T>, opts?: ActionOpts): Promise<ActionResult<T>>;   // rev 4 (D71): write keys → WriteCtx
+export function storeAction<T>(permission: StorePermission | readonly StorePermission[] | null, fn: (ctx: StoreCtx) => Promise<T>, opts?: ActionOpts): Promise<ActionResult<T>>;
 
-/** route handlers under src/app/api/app/[store]/** */
-export type StoreGuard = { ok: true; ctx: StoreCtx } | { ok: false; response: Response };
+/** route handlers under src/app/api/app/[store]/** (same overload rule: all-write keys → WriteCtx) */
+export type StoreGuard<C extends StoreCtx<ReadScope> = StoreCtx> = { ok: true; ctx: C } | { ok: false; response: Response };
+export function storeGuard(req: Request, handle: string, permission: WritePermission | readonly WritePermission[], opts?: { feature?: FeatureKey }): Promise<StoreGuard<WriteCtx>>;
 export function storeGuard(req: Request, handle: string, permission: StorePermission | readonly StorePermission[], opts?: { feature?: FeatureKey }): Promise<StoreGuard>;
 
 // src/lib/platform/seam.ts
@@ -2243,7 +2276,9 @@ export function platformScope(ctx: PlatformCtx, storeId: string): StoreScope & {
 
 // src/lib/auth/index.ts
 export function requireUser(opts?: { throwOnFail?: boolean }): Promise<SessionUser>;   // account pages; no store, no permission
-export function userAction<T>(fn: (ctx: { user: SessionUser; actor: Actor }) => Promise<T>): Promise<ActionResult<T>>;
+export function userAction<T>(fn: (ctx: UserCtx) => Promise<T>): Promise<ActionResult<T>>;
+export function stepUpWithPasswordAction(password: string): Promise<ActionResult<{ until: string }>>;   // rev 4 (PLA Q4.8, §B.7): tenant step-up without TOTP; refused under impersonation
+export function deleteUserAccount(ctx: UserCtx | PlatformCtx, target?: { userId: string; reason: string }): Promise<void>;   // rev 4 (PLA Q4.7, §F.9): self-service (UserCtx, no target) or staff (PlatformCtx + users.manage ↑ + target); refuses owns_store / is_staff
 export function publicAction<T>(name: string, fn: (ctx: { ip: string; ua: string }) => Promise<T>, opts: { turnstile: "required" | "when-configured" | "challenge"; burst: BurstName }): Promise<ActionResult<T>>;
 
 // src/lib/tenancy/public.ts (public route handlers: order, lead, event, upsell, track, store pages)
@@ -2299,7 +2334,10 @@ message) + the new codes `not_found`, `forbidden`, `read_only`, `impersonation_r
 sectionId?, actionId? } }`), plus `busy` (the AI semaphore wait exceeded 3 s) and `job_queued` (a long task became an
 `ai_jobs` row, result `{ jobId }`, §H.12). `ActionResult<T>` is therefore `{ ok: true; data: T } | { ok: false; error:
 ActionErrorCode; items?: GateItem[]; message?: MessageKey }`. `adminAction` and `adminGuard` (`src/lib/orders/http.ts:164-174`)
-are deleted in R1.0 (AUTH-23).
+are deleted in R1.0 (AUTH-23). The **`WriteCtx` overloads** (rev 4, D71) narrow types only: the runtime checks are
+identical, and an impersonation or platform scope never reaches a `WriteCtx` because every `WritePermission` is refused
+to it before `fn` runs; `test:permissions` asserts that `WritePermission` equals the set of keys marked `w` or `s` in
+§A.3.1.
 
 **`ActionErrorCode` (rev 2.1, D65)** = `"invalid" | "not_found" | "forbidden" | "read_only" | "impersonation_read_only" |
 "quota" | "feature_off" | "step_up" | "busy" | "job_queued" | "design_blocked" | "honesty_blocked" | "budget_blocked" |
@@ -2310,7 +2348,10 @@ code must exist in ar/fr/en. Known at rev 2.1 (platform, PLA-§M.1, autocomplete
 `already_requested`, `take_orders_locked`, `last_super_admin`, `impersonation_member`, `impersonation_state`,
 `status_changed`, `cooldown_handle_required`, `health_recompute_limited`; **rev 3:** `brand_protected` (platform, D76;
 rendered as the limit-sheet variant), `quota_platform_pending` and `quota_director` (ai, D69 / AI R28),
-`unavailable` (storefront, a v3 line no longer available). A part adds its codes to its own spec; no CCR.
+`unavailable` (storefront, a v3 line no longer available); **rev 4:** `owns_store` and `is_staff` (`deleteUserAccount`,
+PLA Q4.7), `category_required` (platform: onboarding and the mode switch need `stores.category`, ENGP-25), `fee_unset`
+(storefront: `createManualOrderV3` refuses a create whose quote has no delivery rule, OPE R2 notes). A part adds its
+codes to its own spec; no CCR.
 
 ### E.3 The rule: every query is scoped
 
@@ -2623,8 +2664,15 @@ export function listPlatformAudit(ctx: PlatformCtx, opts: { storeId?: string; ac
     `{ label, count }`), `finance.settings.updated` (R1), `orders.refunded` (R2, `{ cents, method }`); ai (AI R40)
     `platform.ai.director_default_changed`, `platform.ai.prompt_rolled_back`; landing (ENGP-8) `page.fact_attested`
     (`{ field, value }`); core `store.preview_link.revoked` (SEC-7), `auth.step_up` (`{ method: "totp" \| "password" }`,
-    SEC-17), `store.brand_term.refused` (D76, meta `{ field, term }`), `platform.abuse.reported` (`{ storeId, reason }`,
-    no reporter data).
+    SEC-17), `store.brand_term.refused` (D76, meta `{ field }`; rev 4: no term in the meta, PLA PD70, so a tenant-visible
+    row never reveals which protected term matched), `platform.abuse.reported` (`{ storeId, reason }`, no reporter data).
+  - **rev 4:** `platform.user.deleted` (`{ reason }`, the staff path of `deleteUserAccount`) and `auth.account.deleted`
+    (self-service, no meta) (PLA Q4.7, SEC-20); **`meta.stepUp: "totp" | "password"`** is written on `store.export_requested`,
+    `store.closed`, `store.member.role_changed` (to `admin` / `owner`), `orders.exported`, `orders.carrier_exported`,
+    every secret-write row under `integrations.manage` (`integrations.sheets.connected`, `integrations.telegram.changed`,
+    `integrations.conversions.changed`, the export key) and, in R2, `finance.period_closed|period_reopened` (§B.7, PLA
+    Q4.8, OPE OD64). Platform's `store.brand_refused` is the same event as `store.brand_term.refused` and takes the
+    core's name.
 - `auth.login.*` rows stay platform-only (`store_id` NULL). Tenants see only rows with their `store_id`, including
   platform actions on their store (with the staff member's display name, never the staff IP hash).
 - Redaction (`src/lib/audit.ts:57-84`) unchanged; meta ≤ 4 KB. Retention: 400 days, then rolled up (OS-11).
@@ -2667,7 +2715,7 @@ Turnstile (platform widget; **a gate in `approval` and `open`**, D69) · scrypt 
 MX lookup 2 s fail-open, `protected_brands` match on name/handle/e-mail local part, identity links, velocity, bot UA,
 too-fast form) · the pending sandbox (nothing public, no integrations) **inside the D69 ceilings** (sandboxes per day,
 one shared disk budget, the pending AI slice, the two-tier media cap) · invite mode on the temporary domain (D9) ·
-brand-protected handles **and the live brand check on every name write plus the nightly `platform:brand_term_live`
+brand-protected handles **and the live brand check on every name write plus the at-least-nightly `platform:brand_term_live`
 rule** (D76) · the `honesty:password_field` publish gate · "Report this store" on every public page · nothing
 auto-rejected at launch (R-D12).
 
@@ -2714,9 +2762,11 @@ nulled, `platform_notes` **soft-deleted** (`deleted_at` set, `body` replaced by 
 details into notes), `store_handle_history`. **Backups (rev 3, SEC-20):** the purge appends the store id to the
 platform setting `backup.purgeRequests`; the next `backup` run filters every slice `WHERE store_id NOT IN (…)` and
 drops the id once the oldest retained snapshot (4 weeks) no longer contains it, so deletion is complete within one
-weekly cycle and the privacy template states that window. **Account deletion (rev 3, SEC-20):** `deleteUserAccount(ctx)`
-(T2 signature frozen at C0; the staff path `users.manage` ↑ in R1 through P1's user profile, owner self-service from
-`/app/account/danger` when the user owns no store, P2 R1) anonymises `users` (e-mail → `deleted+<ulid>@invalid`, name,
+weekly cycle and the privacy template states that window. **Account deletion (rev 3, SEC-20):** `deleteUserAccount(ctx:
+UserCtx | PlatformCtx, target?: { userId; reason })` (T2 signature frozen at C0, §E.2; rev 4 PLA Q4.7: the staff path
+`users.manage` ↑ with `target` in R1 through P1's user profile, owner self-service from `/app/account/danger` with no
+target, P2 R1; it refuses `owns_store` while the user owns a store that is not purged and `is_staff` while a platform
+role is set, so a staff account is demoted first) anonymises `users` (e-mail → `deleted+<ulid>@invalid`, name,
 phone, locale nulled, `disabled = 1`), deletes `identity_links`, `sessions`, `password_resets` and
 `notification_reads`, keeps `legal_acceptances` with `ua` nulled and `audit_log` rows with the user id, and audits
 `platform.user.deleted` / `auth.account.deleted`. All of this is `needs_legal_review` for the lawyer pass. Retention for
@@ -2950,7 +3000,7 @@ slot 9 may use, PLA Q.18):
 | 3 | `outbox` (core drainer; handlers `capi`, `telegram` P5; `webhook` S5 R2; `carrier`, `whatsapp` D2 R3; `mail` S5 R2; `push` D5 R3) | drain | tick | 13 s shared | `perStorePerTick` per handler (`capi` 20, `telegram` 10, `webhook` 20, `carrier` ≤ 50 shipments), then the next store |
 | 4 | `renders` (§H.3, P8) | render | tick | 12 s | ≤ 10 pages per store per tick **and ≤ 4 s of CPU per tick** (rev 3, ENGC-11); reason `product` handled by `republishAttached` (P3/S1, R2) |
 | 4b | `ai.batches` (`ai.ts`, P7; AI R8) | poll / ingest / submit Message Batches | tick | 8 s | items across stores in one batch; ingestion idempotent per item, resumes next tick; **skipped** (not failed) when `ai_generation_enabled` is off for submission (open batches still ingested, §H.8) |
-| 4c | `ai.jobs` (`ai.ts`, P7; D56, §H.12) | orphan recovery **and one stage advance** of `ai_jobs` | tick | **1 s guaranteed + the leftover of slots 1-5, up to 20 s** (rev 3, AI R27) | marks orphans (a `running` job with `heartbeat_at` older than 60 s has its stage re-claimed once, `stage_attempts`, then `failed` with the instant result kept) in its guaranteed second; **advances one stage (≤ 90 s model call) of one job only when the tick's remaining budget is ≥ 95 s** (an otherwise idle tick), so the cron is the third driver of a stage-resumable job and never starves the slots after it; the poll request is the primary driver (AI-§B.13) |
+| 4c | `ai.jobs` (`ai.ts`, P7; D56, §H.12) | orphan recovery **and the batch hand-off** of driverless `ai_jobs` stages | tick | **1 s guaranteed + the leftover of slots 1-5, up to 5 s** (rev 4, AI R41: DB writes only) | marks orphans (a `running` job with `heartbeat_at` older than 60 s has its stage re-claimed once, `stage_attempts`, then `failed` with the instant result kept) and expires `queued` rows nobody polled for 30 min; **the cron never runs a model call inside the tick** (rev 4, AI R41 option b: a ≤ 90 s stage cannot fit a slot without starving slots 5-9, and at the tick's tail the 95 s it needs is never left once slot 9 has run): a job with no live lease, no poll and no `after()` for 60 s has its next stage submitted as a **one-item Message Batch** (`batch:<stage>`, collected by slot 4b, milliseconds of tick time), so the cron is still the third driver of a stage-resumable job; the poll request is the primary driver (AI-§B.13) |
 | 5 | `exports`, `backup`, `purge` (§F.9, §H.6, §H.9; P8), `imports.commit` (S3, R2) | tick | 11 s shared | one job row at a time, resumable cursor; `imports.commit` in slices of 2,000 rows |
 | 6 | nightly / hourly: `media.migrate`, `usage.reconcile` (nightly), `rollups` (`agent_stats_daily` via `ops.rollup` 02:40 P4, `finance_daily` via `fin.rollup` 03:40 S3 R2, `store_daily_rollup` R3), `ops.customers_reconcile` 03:10 (P4), `fin.alerts` 04:00 (P4, SF-04, stores with `finance_lite`), `fin.recurring`, `money.close_period` (S3 R2), `ai.rollups` (hourly, 5 s, P7), `ai.reconcile` (hourly, 2 s, P7), `ai.retention` 03:50 (P7), `design.retention` 03:50, `design.shingles` 04:10, `design.archive` 04:20 R3 (P6/D4), `leads.followups` (hourly, P3), `delivery.holidays_review` 08:00 store tz (P3), `experiments.weights` 04:00 R3 (D3), R3 ai: `ai.distill` 02:40, `ai.genes` 02:55, `ai.genes_platform` Mon 03:10, `ai.risk_train` 03:20, `ai.insights` Mon 06:00; **R2 storefront (S1, `storefront.ts`, rev 2.1 placement):** `catalog.stock_reconcile` 02:20, `catalog.collections` 02:30, `catalog.bestsellers` 03:40 (shares the tick with `fin.rollup`: two daily jobs, the cap) | tick / hourly / daily | 8 s shared | cursor over stores; each job ≤ its own budget (AI-§N, OPE-§J, DES-§24.1, LAN-§23.4, STO-§27.2); daily jobs are spread over the 02:00-04:30 ticks so no single tick carries more than two |
 | 7 | `lifecycle` (closed → scheduled_deletion, rejected purge, impersonation expiry, invite expiry, `staff_invites` expiry; core), `ops.presence` (1 s, P4: silent > 15 min → offline, one statement `// tenancy: platform presence sweep`), `sheets.bind_legacy` (≤ 50 ms, P5), `int.telegram_daily` (hourly, ≤ 2 s, P5), `links.flush` (1 s, P3), `design.reserve` (2 s, P6), `design.backfill` (2 s until done, P6), `experiments.autoend` (1 s, R3), `landing.schedules` (5 s, R3), `pages.copy` (R2), `stock.holds_expire` (1 s, R3, S1/D3) | tick | 5 s shared | — (most are no-ops on a quiet tick; `landing.schedules` and `pages.copy` yield to the next tick when the slot is spent) |
@@ -2975,8 +3025,9 @@ budgets of the registered jobs exceed 95 s or a job declares no budget.
   after completion; two enqueues while pending yield one.
 - Triggers and reasons (`render_jobs.reason`, appended in rev 2 and rev 3; the §D.5 enum lists them all): handle rename,
   S mode on, primary custom domain (`address`); a logo, mark or store-name change (`brand`, **R1** per DES-R4 B: one
-  brand across live pages without touching docs); store theme activation (`theme`, R2); store contacts, policies or
-  zone fallback text that live pages bake in (`store_info`, 0005, LAN Q8: thank-you, legal and tracking documents); the
+  brand across live pages without touching docs); store theme activation (`theme`, R2); store contacts, policies, the
+  calling window (rev 4, LAN N2: P4's `saveCallingWindowAction` enqueues it, the thank-you bakes the hours) or zone
+  fallback text that live pages bake in (`store_info`, 0005, LAN Q8: thank-you, legal and tracking documents); the
   Purchase trigger or a per-page override change (`conversions`, 0005, OPE Q.6: priority 4; the thank-you document omits
   the `pixels` chunk when the store render context's `purchaseInBrowser` is false, i.e. `triggerFor(page) !== "order"`,
   zero runtime bytes, runtime config v2 unchanged); **a BiRefNet mask landing for an asset whose live pages render it
@@ -3045,11 +3096,16 @@ tasks during the deploy that renames it).
 - `GET /api/health` (public, burst-limited): `{ ok: boolean, app: "store-gen", db: "ok" | "down", build: "<8 chars>" }`,
   `Cache-Control: no-store` (D45). The e2e harness asserts `app === "store-gen"` before running (QA-01).
 - Alarms (staff notifications, in-app): last tick > 10 min, outbox `dead` > 0 for a kind, DB > 70 % / 85 %, `DATA_DIR`
-  at 70 % / 85 % of `DATA_DIR_BUDGET_BYTES` (rev 3; replaces "disk free < 2 GiB"), inode count > 300,000, error spike
+  at 70 % / 85 % of `DATA_DIR_BUDGET_BYTES` (codes **`data_dir_70` / `data_dir_85`**, rev 4 PLA Q4.9; they replace the
+  old `disk_low` "disk free < 2 GiB"), inode count > 300,000, error spike
   (> 50 of one code in an hour), a store's Sheets backlog > `max(15, 5 × ceil(activeSheetsStores / 16))` minutes (rev
   3, ENGC-33: the threshold scales with the §H.2 slot-1 capacity); rev 2: AI monthly cap at 70 % / 85 % and reached,
   provider auth failure, Director unavailable, refusal spike, an `ai_jobs` orphan recovered or failed (AI-§O), design
-  tables > 300 MB, `store_health` snapshots stale > 60 min, the detached-job probe failing (§H.12); **rev 3:**
+  tables > 300 MB, `store_health` snapshots stale beyond **`max(platform.health.staleAlarmMinutes, 1.5 × cycleMin)`**
+  (rev 4, PLA Q4.9 / PD78: `cycleMin` = the measured time `platform.health` needs to visit every store, §I.7, so the
+  alarm `health_stale` does not fire permanently past ≈ 120 active stores) and **`health_job_slow`** (the job's
+  `perStoreP50Ms` above 800 ms for three ticks in a row: a rule or a read API regressed), the detached-job probe failing
+  (§H.12); **rev 3:**
   `edge_bad_key` (10 unverifiable `x-sg-edge` requests in a minute, SEC-4), `gate_mismatch` (SEC-10), `pool_wait`
   (query or lock pool wait p95 > 500 ms over 5 min, ENGC-12), `tick_lag` (event-loop lag p95 > 250 ms during a tick,
   ENGC-11), `pending_media_budget` 80 % / 95 % and `signup_capped` (D69), `abuse_reports_spike` (D76),
@@ -3185,7 +3241,7 @@ core therefore fixes three patterns; every track picks one per operation and nam
 | Pattern | When | Contract |
 |---|---|---|
 | **A. Interactive** | the user waits; p95 < 80 s | one route handler or `storeAction`, a per-call deadline ≤ **90 s** (SDK `timeout` in ms, the default is 10 min and must never be used), a typed fallback when the deadline hits (`busy`, a quiet "library" chip, the instant engine result). Director interactive passes (Opus 5.5 `medium`, ≤ 20K input, ≤ 10K `max_tokens`) are pattern A. |
-| **B. Detached job** | 90 s to ~6 min; one user's result | the route inserts an `ai_jobs` row (`status queued`, `active = '1'`, `input_hash`, `progress.plan` = the stage ids, `lease_until`), answers **`202 { jobId }`** (or `storeAction` → `job_queued`), and the job is **stage-resumable** (rev 3, AI-§B.13): every stage is a model call ≤ 90 s; three drivers advance it, **`after()`** while it lives (the pattern `src/lib/orders/http.ts:51-63` already uses for Sheets), **the poll request itself** (`GET /api/app/<h>/ai/jobs/<id>` claims the next stage when no live lease exists), and **the cron** `ai.jobs` (slot 4c, one stage on an idle tick); a stage is claimed by one conditional `UPDATE` (`claimStage`, `stage_attempts`), heartbeat `heartbeat_at` every **10 s**, result ≤ 64 KB in `result` (larger blobs under `DATA_DIR/ai/<storeId>/`, `outputRef`). The browser polls every **2 s, visibility-aware** (the pulse pattern, D46), `s:<sid>:ai:jobs` and the daily pass caps apply. Orphans: a stage whose heartbeat is older than 60 s is re-claimed once by the next driver (same `active` row), a second orphaning marks the job `failed` with the instant result kept; `aj_active_uq (store_id, input_hash, active)` keeps one active job per input and lets a finished input run again (ENGP-3). **`maxDuration = 360`** is exported by every page and route handler that may start a job (rev 3, ENGC-18: `after()` lives at most the route's `maxDuration`, `after.md`; the Hostinger proxy still cuts the response at 120 s, which is why the poll driver exists). Deep Director passes, store blueprints, logo systems and the monthly health report are pattern B. |
+| **B. Detached job** | 90 s to ~6 min; one user's result | the route inserts an `ai_jobs` row (`status queued`, `active = '1'`, `input_hash`, `progress.plan` = the stage ids, `lease_until`), answers **`202 { jobId }`** (or `storeAction` → `job_queued`), and the job is **stage-resumable** (rev 3, AI-§B.13): every stage is a model call ≤ 90 s; three drivers advance it, **`after()`** while it lives (the pattern `src/lib/orders/http.ts:51-63` already uses for Sheets), **the poll request itself** (`GET /api/app/<h>/ai/jobs/<id>` claims the next stage when no live lease exists), and **the cron** `ai.jobs` (slot 4c; rev 4: it never calls a model inside the tick, it submits a driverless job's next stage as a one-item Message Batch); a stage is claimed by one conditional `UPDATE` (`claimStage`, `stage_attempts`), heartbeat `heartbeat_at` every **10 s**, result ≤ 64 KB in `result` (larger blobs under `DATA_DIR/ai/<storeId>/`, `outputRef`). The browser polls every **2 s, visibility-aware** (the pulse pattern, D46), `s:<sid>:ai:jobs` and the daily pass caps apply. Orphans: a stage whose heartbeat is older than 60 s is re-claimed once by the next driver (same `active` row), a second orphaning marks the job `failed` with the instant result kept; `aj_active_uq (store_id, input_hash, active)` keeps one active job per input and lets a finished input run again (ENGP-3). **`maxDuration = 360`** is exported by every page and route handler that may start a job (rev 3, ENGC-18: `after()` lives at most the route's `maxDuration`, `after.md`; the Hostinger proxy still cuts the response at 120 s, which is why the poll driver exists). Deep Director passes, store blueprints, logo systems and the monthly health report are pattern B. |
 | **C. Message Batch** | nobody waits; hours are fine; 50 % price | `queueAi(scope, task, input, ref)` inserts an `ai_batch_items` row; `ai.batches` (slot 4b) submits, polls and ingests; results arrive through `registerBatchResultHandler`. SEO/alt/translation, memory distillation, exemplar scoring, insights, the eval judge and the health report's narrative are pattern C. Refusals inside a batch fall to library/template on ingestion (`fallbacks` is rejected on Batches). |
 
 Rules: (1) **whether a detached promise survives 3-6 minutes after the response on Hostinger's Node runtime is
@@ -3193,8 +3249,10 @@ unverified**: before the deep pass is enabled, P7 runs `scripts/qa/detached-job-
 (manual, never in `npm test`) **through the real `/api/app/<h>/ai/jobs` route and a real `storeAction` page** (rev 3,
 ENGC-18: a 5-minute dummy job that heartbeats, measuring both the proxy cut-off and Next's `after()` lifetime under
 `maxDuration = 360`) and records the result in HANDOFF; its result sets the release flag **`ai_detached_jobs`**
-(default `false`): with `after()` confirmed the three drivers all run, without it the poll and cron drivers alone carry
-the job (slower, still inside the 2-6 min promise), and pattern C stays the fallback for nobody-waits work
+(default `false`), **which switches the `after()` driver only** (rev 4, AI R42; D56): with `after()` confirmed the three
+drivers all run, without it the poll and cron drivers alone carry the job (slower, still inside the 2-6 min promise for a
+seller who keeps the tab open; a closed tab continues through one-item batches, "ready in a few minutes"), and pattern C
+stays the fallback for nobody-waits work
 (`platform_ai.classes.director_deep.batch = "fallback"`, the UI says "ready in a few minutes"); (2) a job never holds a
 DB transaction across a model call; (3) every job writes `ai_runs` rows with `job_id` and reserves credits before the
 first call (§D.7 reserve-then-reconcile, `allowOver` on reconcile); (4) `ai_jobs` is a tenant table: `GET
@@ -3216,7 +3274,12 @@ never call into the core chunk, never price, never change the payload, and wrap 
   data blocks with `inlineJson`, the extra CSS chunks, and a `banner: "test"` when the document is a test render (D54);
   every add-on script joins the hash CSP (`inlineHashes` / `buildLandingCsp`); data blocks are `type="application/json"`
   (not executed, no hash). `RuntimeChunkName` gains the add-on names; the publish/render path calls `addonsFor(input)`
-  (P3, pure) to decide what a document embeds.
+  (P3, pure) to decide what a document embeds. **Rev 4 (CRIT15):** the context also carries `links.report` (§C.6), P6's
+  footer section appends it in `legalLinks(ctx)`, and when a document renders no footer section the Shell
+  (`src/landing/document.tsx`) prints one minimal legal row `<p class="lp-report">` with the same link (server HTML, ≈ 20 B
+  gz, no runtime bytes); the UiKey `footer.report` in `src/landing/i18n.ts` carries platform's `shell.report.link`
+  wording (one wording for landing, store and shell). These three additive lines (`types.ts`, `context.ts`, `i18n.ts`)
+  and the Shell row are a maintainer CCR applied at P0, before P3 and P6 start.
 - **Build**: `scripts/build-landing-assets.mjs` bundles `src/landing/runtime/addons/*.ts` entries (each may import pure
   modules such as `src/lib/delivery/eta.ts`) into `addonChunks` in `src/landing/generated/assets.ts`.
 - **Budgets** (`src/landing/runtime/budgets.json`, maintainer; render-check measures each add-on and both page caps,
@@ -3235,7 +3298,8 @@ never call into the core chunk, never price, never change the payload, and wrap 
   change. A chunk over budget + 5 % fails `npm test`, as today, **except the frozen `landing` chunk: tolerance 0 against
   the recorded budget and `src/landing/runtime/landing.sha256`** (header freeze rule, ENGC-10). `render-check.ts` is the
   maintainer's harness from R1 product and imports `scripts/qa/render-cases/<track>.ts` (P3 `landing.ts`, P6
-  `design.ts`, S1 `storefront.ts`, pre-registered at P0) for the tracks' fixtures.
+  `design.ts`, P7 `ai.ts` (rev 4: the digest fixtures, AI-§R.1), S1 `storefront.ts`, pre-registered at P0) for the
+  tracks' fixtures.
 - **Loading rules** are the part's (LAN-§5.2): an add-on is embedded only when its feature is on and its data exists,
   so a page without zones, WhatsApp order or tracking link ships exactly today's bytes.
 
@@ -3253,7 +3317,7 @@ AUTH-31), `src/app/app/[store]/(editor)/layout.tsx` (full-screen builder).
 |---|---|---|---|
 | `/app` | — | session | R1 (picker or redirect, §B.4) |
 | `/app/new` | — | session | R1 (onboarding, UX-01) |
-| `/app/account`, `/security`, `/two-factor`, `/sessions` | `admin/(auth)/two-factor`, `settings/security` (user part) | session | R1 |
+| `/app/account`, `/security`, `/two-factor`, `/sessions`, **`/danger`** (rev 4, PLA Q4.7: account deletion, P2) | `admin/(auth)/two-factor`, `settings/security` (user part) | session | R1 |
 | `/app/<h>` | `/admin` (dashboard) | `store.read` | R1 (Today brief, COD KPIs, funnel, Store Health ring, §I.8 screen 2) |
 | `/app/<h>/welcome` | — | `store.read` + `pages.write` | R1 (onboarding reveal flow, UX-01, PLA-§22.2; P2 shell, P6 generator calls) |
 | `/app/<h>/orders` (+ drawer `?o=`) | `/admin/orders` | `orders.read` | R1 |
@@ -3270,14 +3334,15 @@ AUTH-31), `src/app/app/[store]/(editor)/layout.tsx` (full-screen builder).
 | `/app/<h>/generate` | `/admin/generate` | `pages.write` + `ai.use` | R1 |
 | `/app/<h>/media`, `/history`, `/exports` | same under `/admin` | `media.read` / `pages.read` / `export.create` | R1 |
 | `/app/<h>/team` (members, invites, agents) | `/admin/settings/team` | `members.read` | R1 |
-| `/app/<h>/integrations/{sheets,pixels,telegram,whatsapp}` | `settings/sheets`, `settings/pixels` | `integrations.manage` / `pixels.manage` | R1 |
+| `/app/<h>/integrations` (health rows, deliveries log and replay, OPE-§28.1; P5), `/integrations/{sheets,pixels,telegram,whatsapp}` | `settings/sheets`, `settings/pixels` | `integrations.manage` / `pixels.manage` (`callcenter.configure` reads the health page) | R1 |
 | `/app/<h>/brand` | `settings/store` (logo) | `brand.write` | R1 basic, R2 logo designer |
 | `/app/<h>/settings/{general,market,checkout,delivery,policies,anti-spam,ai,security,address,plan,audit,danger}` | `settings/{store,market,anti-spam,ai,audit}` | `settings.read` (+ write keys) | R1 (`anti-spam` owned by P5, OPE Q.17; `delivery` = zones, ETA calendar, holidays, P3; `audit` = P2, PLA-§22.10.6, rev 3 ENGC-8; `general` has no hours field: Call center is the one hours source, D73) |
 | `/app/<h>/notifications` | — | `store.read` | R1 |
-| `/app/<h>/catalog/{products,collections}`, `/storefront`, `/shipping`, `/integrations/{webhooks,carriers}` | — | §A.3.1 | R2 |
-| `/app/<h>/reviews`, `/experiments`, `/settings/domains` (custom) | — | §A.3.1 | R3 |
+| `/app/<h>/catalog/{products,collections,inventory}`, `/storefront/**` (menus, store page editor), `/shipping/**` (S4), `/integrations/{webhooks,carriers}`, `/finance/**` full accounting and `/imports` (S3), `/preview/theme/<id>` (S2) | — | §A.3.1 | R2 |
+| `/app/<h>/reviews`, `/experiments`, `/pages/<id>/{experiments,schedule,analytics}` (D3), `/catalog/coupons`, `/integrations/api` (D2), `/settings/domains` (custom) | — | §A.3.1 | R3 |
 | API `/api/app/<h>/media`, `/media/<id>`, `/export/**`, `/sheets/**`, `/orders/export`, `/orders/carrier-csv` (rev 3, D74, `shipments.write`, P4), `/orders/print`, `/exports/<jobId>/<part>` | `/api/admin/{media,export,sheets}`, `(panel)/orders/export` | `storeGuard` per route | R1 |
-| API `/api/app/<h>/pulse` (GET only, `ETag` / `304`, D57; P2), `/search` (⌘K server search, P2), `/orders/**`, `/ops/**` (queue claim, outcomes, presence; P4), `/leads/**` (P3), `/ai/[task]`, `/ai/runs/<id>`, `/ai/jobs/<id>`, `/ai/warm`, `/ai/report` (P7), `/finance/receipts/<id>` (R2) | — | `storeGuard` per route | R1 |
+| API `/api/app/<h>/pulse` (GET only, `ETag` / `304`, D57; P2), `/search` (⌘K server search, P2), `/orders/**`, `/ops/**` (queue claim, outcomes, presence, state; P4), `/leads/**` (incl. `/leads/export`; P3), `/ai/**` (P7: `[task]`, `director/{plan,critique,verify}`, `runs/<id>`, `jobs/<id>` (the poll driver, `advance=1` honoured only on a same-origin fetch), `jobs/<id>/cancel`, `warm` (reserved, `410`), `report`; R3 `copilot`) | — | `storeGuard` per route | R1 |
+| API (R2) `/api/app/<h>/finance/**` incl. `receipts/<id>`, `/imports/**` (S3), `/shipping/**` incl. `manifest/<batchId>.csv` (S4), `/brand/**` incl. `logo/<name>.svg` (S2) | — | `storeGuard` per route | R2 |
 
 `src/app/admin/(panel)/**`, `src/app/admin/(editor)/**`, `src/app/admin/preview/**` and the tenant parts of
 `src/app/api/admin/**` are **moved** (not copied) in R1.0; `src/app/admin/(auth)/login/**` becomes `src/app/(public)/login/**`.
@@ -3382,8 +3447,10 @@ an action) never fire inside editable fields or open overlays (the builder's `is
   audienceHint, vars: z.ZodType, link?, tenant: boolean, batch?: { windowMin } }`) and imported by
   `src/lib/notify/registry.ts` (maintainer); titles and bodies are message keys `notify.<kind>.title` / `.body`
   rendered in the reader's locale; tenant-facing kinds must exist in ar/fr/en (`test:i18n-coverage`); `vars` carry ids,
-  counts, codes and short labels, never customer data; **`link` is validated against `^/app/[a-z0-9-]{3,30}/` (or
-  `^/admin/`) at `notify()` time and rendered as plain text otherwise** (rev 3, SEC-6 / LAN R23: a notification can
+  counts, codes and short labels, never customer data; **`link` is validated at `notify()` time against
+  `^/app/[a-z0-9-]{3,30}(?:[/?#]|$)` (the store dashboard root `/app/<h>` included, rev 4 PLA Q4.3: seven platform
+  kinds and P4's order kinds link to it), `^/app/account(?:[/?#]|$)` (user-level kinds) or `^/admin(?:[/?#]|$)`
+  (staff kinds); a refused link is stored as `NULL`, never rewritten** (rev 3, SEC-6 / LAN R23: a notification can
   never carry an open redirect); batched kinds use `INSERT … ON DUPLICATE KEY UPDATE` on `dedupe_key` so one row reads
   "12 new orders since 14:02". R1 kinds by track: platform PLA-§18.2 (incl. rev 3 `staff.signup_capped`,
   `staff.abuse_report`); operations
@@ -3508,11 +3575,13 @@ export interface HealthRule { id: string; group: HealthGroup; minN?: number; rel
   collect(scope: StoreScope, inputs: HealthInputs): Promise<HealthIssue | null> }   // ≤ 40 ms, read-only, scoped
 // src/lib/health/rules/<track>.ts exports `rules: HealthRule[]`; src/lib/health/registry.ts (maintainer) imports them
 export function computeHealth(issues: HealthIssue[], flags: HealthFlag[], snoozed: Record<string, string>, now: Date): { score: number; components: Record<HealthGroup, number>; attention: 0 | 1 | 2 | 3 };
-// score = 100 − Σ_group min(cap, Σ points of unsnoozed issues in the group); console flags (PLA-§6.3 codes) map onto the
-// groups: sheets_* / outbox_dead / capi_failing / telegram_failing → integrations; quota_* → quota; risky_orders → operations;
-// setup_incomplete / render_failed → setup; inactive_14d, dormant_60d, review_waiting, restricted, suspended → 0 points, flag only
+// score = 100 − Σ_group min(cap, Σ points of unsnoozed issues in the group); rev 4 (PLA Q4.5, PD79): console flags that mirror a
+// track's issue (sheets_* / outbox_dead / capi_failing / telegram_failing ← P5's int:* rules, render_failed, …) are DERIVED from that
+// issue and add no points of their own (one condition, one issue, one number); quota_* → quota (core rule); inactive_14d, dormant_60d,
+// review_waiting, restricted, suspended, abuse_reports_new → 0 points, flag only
 // src/lib/platform/health-snapshot.ts (P1)
-export function getStoreHealth(scope: StoreScope): Promise<StoreHealthView>;          // the store's own row, cached 5 min; tenant dashboard + pulse
+export function getStoreHealth(scope: StoreScope): Promise<StoreHealthView | null>;   // rev 4 (PLA Q4.4): null = not computed yet (the ring's "computing" state); cached 5 min; tenant dashboard + pulse
+// StoreHealthView (PLA-§2.2) gains the additive `staleAfterMin` (= max(platform.health.staleAlarmMinutes, 1.5 × the measured cycleMin), rev 4)
 export function markHealthDirty(storeId: string): Promise<void>;                     // every console action on a store, every publish, zone save, integration change
 export function snoozeHealthIssue(ctx: StoreCtx, issueId: string, days: 7): Promise<void>;   // health.snooze; audit store.health.snoozed
 export function requestHealthRecompute(ctx: StoreCtx): Promise<{ queuedAt: string }>; // rev 2.1 (PLA-§6.3): "Recompute now"; `s:<sid>:health:recompute` 6/h → markHealthDirty; the job computes within ≤ 5 min; P0 stub
@@ -3527,18 +3596,25 @@ PLA-§6.3 console flags as rules), `src/lib/health/selftest.ts`; the pure `compu
 `health.<track>.<rule>.*` in the owning track's i18n file (D67).
 
 - **Rules by track (R1):** setup (P2/P3): contact phone or WhatsApp missing, legal identity missing, no published
-  page, delivery zones empty while a page shows a flat fee, 2FA off for a member with `orders.read_all`; trust (P3,
+  page (**P3's `landing:no_live_page` only**, rev 4 PLA Q4.5: P2 emits no copy of it), delivery zones empty while a page
+  shows a flat fee, 2FA off for a member with `orders.read_all`; trust (P3,
   from `checklist.ts` honesty rules): countdown ended, compare-at not higher, stock 0, sample proof present; design
   (P6): a live page with `q < 70` or `slop ≥ 3`, two live landings closer than `d_page 0.30`; conversion (P3/P5):
   missing SEO title/description, missing alt, no pixel on a live page, Purchase trigger `order` while the store runs
   confirmation calls (a suggestion, severity 1), form hidden; operations (P4, `minN` 30 orders / 28 days): first-touch
   p50 above the store's own target, orders without an attempt > 2 h inside the window, unreachable rate 7 d > 28 d +
   10 points; integrations (P5): Sheets backlog beyond the scaled threshold of §H.5, CAPI failures 24 h, Telegram
-  failing; quota (core): any gauge ≥ 80 % / 100 %; **rev 3:** conversion (P3) `landing:fee_mismatch` (severity 1, `minN`
-  20 orders / 28 d: zones carry fees that differ from a live page's flat fee for the top-5 cities, over P1's input
-  `zones.feeMismatchTop5` built from `zonesForCheckout` and `opsAggregates(dims: city)` keyed by `CityKey`; D75),
-  platform-visible `platform:brand_term_live` (P1, nightly: an exact protected term in a live title, headline or policy
-  text; D76) and the console flag `abuse_reports_new` (0 points, `attention`). R2 adds refusal rate per city and cash
+  failing (P5's `int:*` rules are the only tenant issues for these conditions; `int:sheets_backlog` uses §H.5's scaled
+  threshold, rev 4 PLA Q4.5); quota (core): any gauge ≥ 80 % / 100 %; **rev 3:** conversion (P3) `landing:fee_mismatch`
+  (severity 1, `minN` 20 orders / 28 d: zones carry fees that differ from a live page's flat fee for the top-5 cities,
+  over P1's input `zones.feeMismatchTop5`; **rev 4 (CRIT1, LAN N1):** the input is built on the server from P3's
+  slug-keyed `zoneFeesFor(scope, keys)` over the top-5 `CityKey`s of `opsAggregates(dims: city)`, never from the
+  browser `ZoneTable`; it covers **every live page not on "Charge delivery by city", attached landings included**, and
+  `landing:fee_mismatch` is the one rule for them (the storefront withdrew `sf:landing_fee_mismatch`; its "Pages de
+  vente" chip reads the same input; evidence metric `fee_mismatch_cities`, distinct from operations' `fin:fee_gap`;
+  D75), platform-visible `platform:brand_term_live` (P1, **at least nightly: it runs on every health computation of the
+  store**, rev 4: an exact protected term in a live title, headline or policy text; D76) and the console flag
+  `abuse_reports_new` (0 points, `attention`). R2 adds refusal rate per city and cash
   held (needs ship states). A rule stays silent below `minN` and never reads another store; platform medians appear only
   in R3 and only labelled "platform median".
 - **Job** `platform.health` (slot 9): **budget-driven** (rev 3, ENGC-25: no fixed store count): `dirty_at` rows first,
@@ -3595,10 +3671,11 @@ nav are reworked or redesigned; topbar, KPI card, media, builder, export dialog,
 
 **Wall time ≤ 3 minutes on the owner's PC (rev 3, ENGP-24).** Every suite below runs a seeded, bounded subset; the
 full sweeps (`test:design:full` 11 × 3 × 200 genomes + 10,000 choreography expansions, the storefront 1,200-home
-`test:catalog` sweep, landing's 10,000 A/A simulations, the capacity simulation) live in **`npm run test:slow`**, run
-before each merge and by `npm run gate`, never on every `npm test`. Per-track shares: platform ≤ 20 s, landing ≤ 20 s,
-operations ≤ 25 s, ai ≤ 20 s (+ `test:ai-eval` < 60 s), design ≤ 40 s, storefront ≤ 40 s (192 homes); the harness
-prints each script's time and fails the chain above 180 s.
+`test:catalog` sweep, landing's 10,000 A/A simulations, the capacity simulation, **`test:ai:slow`** (the 30-store
+niche-novelty corpus and the 1,000-run reward simulations, rev 4)) live in **`npm run test:slow`**, run before each
+merge and by `npm run gate`, never on every `npm test`. Per-track shares: platform ≤ 20 s, landing ≤ 20 s, operations
+≤ 25 s, ai ≤ 20 s (+ `test:ai-eval` < 60 s), design ≤ 40 s, storefront ≤ 40 s (192 homes); the harness
+(`scripts/qa/test-budget.ts`, maintainer, rev 4 named) prints each script's time and fails the chain above 180 s.
 
 Existing chain (`package.json:22`: theme, runtime, generator, render, money, conversions, offers, orders) plus:
 
@@ -3611,18 +3688,22 @@ Existing chain (`package.json:22`: theme, runtime, generator, render, money, con
 | `test:tenancy-unit` | `src/lib/tenancy/selftest.ts` | entitlement resolution order and every state cap incl. the two-tier pending media cap and the pending AI floor (D69); handle rules, reserved/protected/history availability, the conversion's handle derivation (ENGC-30); `ScopedCache` bounds and `invalidateStore`; `Bucket` construction; `storeUrl` / `storeBase` / `mediaUrl` per mode; `landingPathFor` |
 | `test:envelope` | `src/lib/security/selftest-envelope.ts` | golden v1 + v2 vectors; AAD binding incl. a mismatched kid (rev 3, SEC-25); a store-A ciphertext fails under store B; HKDF salt frozen |
 | `test:security` | `src/lib/security/selftest.ts` (promoted; offline parts; T3's file in R1.0) | CSRF strict same-origin with platform/admin hosts only and **a missing Origin refused** (SEC-11); `documentOrigins` never reflects Host; IP trust with `x-sg-ip` only when the edge verifies; `allowlistAddress()` behind Cloudflare (SEC-14); `p:login:acct` never refuses (SEC-22); no served document CSP carries a bare `'self'` in `connect-src` / `form-action` (SEC-2); `originAllowed` refuses apex / sibling / admin hosts (SEC-23) |
-| `test:jobs` | `src/lib/jobs/selftest.ts` | outbox backoff ladder and dead rules; tick budget allocation (registered guaranteed budgets ≤ 95 s, every job has a budget, §H.2); round-robin cursor fairness with a fake clock (one slow store does not starve others); `ai.jobs` orphan and stage-advance rules with a fake clock (§H.12); **rev 3:** the tick lock answers `skipped` on overlap, `render_jobs` dedupe cleared on claim (a second render after an enqueue mid-run, ENGC-4), the render CPU cap, the `yield()` contract (a job without a yield in 2 s of fake CPU fails), the Sheets capacity arithmetic (ENGC-33) |
-| `test:delivery` (rev 3, D68; P3 owns the script, P4 the fixture) | `scripts/qa/delivery-check.ts` over `scripts/qa/fixtures/city-key.json` | the shared city-key parity fixture: every `City.value` of `cities-ma.ts` and the ar / fr / en spellings resolve to one `CityKey` slug, "Fès picked in the form → zone found → ETA shown", `null` / "Autre" → the `*` zone; `test:catalog` (S1) and `test:ops` (P4) read the same file so three tracks fail together if the key drifts |
+| `test:jobs` | `src/lib/jobs/selftest.ts` | outbox backoff ladder and dead rules; tick budget allocation (registered guaranteed budgets ≤ 95 s, every job has a budget, §H.2); round-robin cursor fairness with a fake clock (one slow store does not starve others); `ai.jobs` orphan and batch hand-off rules with a fake clock (§H.12; rev 4: the tick never calls a provider, a spy asserts it); **rev 3:** the tick lock answers `skipped` on overlap, `render_jobs` dedupe cleared on claim (a second render after an enqueue mid-run, ENGC-4), the render CPU cap, the `yield()` contract (a job without a yield in 2 s of fake CPU fails), the Sheets capacity arithmetic (ENGC-33) |
+| `test:delivery` (rev 3, D68; P3 owns the script, P4 the fixtures) | `scripts/qa/delivery-check.ts` over `scripts/qa/fixtures/city-key.json` and `src/lib/callcenter/window.fixtures.ts` | the shared city-key parity fixture: every `City.value` of `cities-ma.ts` and the ar / fr / en spellings resolve to one `CityKey` slug, "Fès picked in the form → zone found → ETA shown", `null` / "Autre" → the `*` zone; **rev 4 (CRIT1):** the key-shape case (`zoneTableKey: "value"`: the key set of `buildZoneTable(…).city` equals the `City.value` set minus "Autre", `city["Fès"]` is the Fès zone index, "Autre" absent and resolved to `star`) and the import-graph case (no add-on chunk reaches `src/lib/orders/address.ts`); **rev 4 (CRIT3):** the thank-you `{when}` over the window fixture (Friday = key 5, a Ramadan override, a midnight-crossing range, `configured: false` → no hour rendered); `test:catalog` (S1) and `test:ops` (P4) read the same two files so three tracks fail together if a key or the weekday convention drifts |
+| `test:landing-addons` (rev 4 listed, CRIT16) | `src/landing/addons/selftest.ts` (P3) | `addonsFor` matrix (page × mode × settings), data-block shapes and sizes, the selection serialiser over the DOM fixtures, "every add-on off → no add-on bytes"; the `lp-assist` zone table deep-equals `zonesForCheckout`'s; the window data block is the serialised `EffectiveWindow` unchanged |
+| `test:policies` (rev 4 listed) | `src/lib/policies/selftest.ts` (P3) | `policyAllows` per claim and locale, `policyLines` ≤ 6 lines, unset → no sentence; `policyClaims` on the 120-line claim and clean fixtures per locale (≥ 95 % / ≤ 2 %), the contradiction-vs-unset matrix (ENGP-8) |
+| `test:wa-price` (rev 4 listed) | `src/lib/wa-order/selftest.ts` (P3) | `priceWaSelection` equals `orderTotals` on the `duo`, `tshirt`, `colors` fixtures and partial selections (no second pricing engine, Offers D9) |
+| `test:copylib` (existing, extended; rev 4 listed) | `src/lib/ai/copy-library/selftest.ts` (P6) | 0 em / en dashes; every hero and section title tagged with structure and register; ≥ 3 structures per family × locale; the generative skeleton layer's seeded share subset (≤ 10 % per skeleton, the full sweep in `test:slow`, QUAL-1) |
 | `test:admin-tokens` | `scripts/qa/admin-tokens-check.ts` | no admin token in the orange band (§I.6); `--info` present in light and dark; `--ui-spring` absent |
 | `test:admin-motion`, `test:admin-rtl` | `scripts/qa/admin-motion-check.ts`, `scripts/qa/admin-rtl-lint.ts` (P2, DES-R2) | §I.6 motion rules (no spring, no overshoot, ≤ 400 ms); §I.5 logical-property lint and the mirrored-icon allow-list |
 | `test:i18n-coverage` | `scripts/qa/i18n-coverage.ts` (P2) | §I.5: ar/fr/en completeness of the R1 surfaces, tenant notification kinds and gate titles; no em-dash or "Step n" in catalogs |
-| `test:prepublish` | `src/lib/render/selftest-prepublish.ts` (maintainer) | §M: the registry runs every check, a hard item refuses with the right code and items, `warn` mode audits and passes, listeners never fail a publish, the budget gates on the design-baseline fixtures (a 27-section 170 KB page is refused, the keep-list pages pass); **rev 3:** the calibrated band of C2 / C3 / F1 (a page at the nominal limit is a soft `estimated` note, one past the band is refused; ENGP-6), fixtures read from the committed `src/lib/design/calibration/heights.json` (never the git-ignored `qa/saas-baseline/index.json`), one fixture per store page kind through `gateInputFor` (a `defaultTemplate` publish passes with 0 items, two stores' identical `@cart` templates never raise `design:N1`; ENGP-1), `budget:R1/R5/I1/F5` exclude non-control arm wrappers (ENGP-18), and the module throws at load in a production build while `estimateHeights` is a stub (ENGC-21) |
+| `test:prepublish` | `src/lib/render/selftest-prepublish.ts` (maintainer) | §M: the registry runs every check, a hard item refuses with the right code and items, `warn` mode audits and passes, listeners never fail a publish, the budget gates on the design-baseline fixtures (a 27-section 170 KB page is refused, the keep-list pages pass); **rev 3:** the calibrated band of C2 / C3 / F1 (a page at the nominal limit is a soft `estimated` note, one past the band is refused; ENGP-6), fixtures read from the committed `src/lib/design/calibration/heights.json` (never the git-ignored `qa/saas-baseline/index.json`), one fixture per store page kind through `gateInputFor` (a `defaultTemplate` publish passes with 0 items, two stores' identical `@cart` templates never raise `design:N1`; ENGP-1), `budget:R1/R5/I1/F5` exclude non-control arm wrappers (ENGP-18), and the module throws at load in a production build while `estimateHeights` is a stub (ENGC-21); **rev 4:** the verified exhaustion path (a saturated synthetic niche → a soft `design:N1` with `vars.fallback = 1`; one clearing variant → hard, its fix that variant; a clone → hard whatever the niche; DES N2), `originFrom` over a generation record (an edited field → `owner`, a field without a record → `library`, AI R44), `budget:F1` emits no form-height item (LAN N3), and `gateInputFor(doc, await gateCtxFrom(ctx))` is the only path from a `PrePublishCtx` (a grep case) |
 | `test:health` | `src/lib/health/selftest.ts` (P1) | §I.7: fixtures per rule with and without `minN`; score monotonic; group caps; snooze expiry; i18n templates render with every variable; a two-store fixture proves no cross-store evidence |
 | `test:pulse` | `src/lib/pulse/selftest.ts` (P2) | §I.4: `StorePulse` shape, ETag stability for identical payloads, contributor budget and failure isolation, per-user parts never cached across users |
 | `test:test-orders` | `src/lib/testing/selftest.ts` (P3) | D54: token mint/verify (2 h, store-bound, store A's token rejected on store B), `renderTestDocument` has no pixel script and a banner, `is_test` propagation on orders and leads |
 | `test:kit`, `test:links` | `scripts/qa/kit-check.ts`, `src/lib/links/selftest.ts` (P3) | SF-01: 60 eval fixtures → 0 invented numbers in every brief, banned words 0, distinct structure tags per angle, the kit compiles with Cloud AI off; `/go/<code>` preserves the query byte for byte, 410 when paused, share link 404 after revocation |
 | `test:profit` | `scripts/qa/profit-check.ts` (P4) | SF-04: golden fixtures for `E_placed`, break-even CPA and intervals; no rates below n = 30; alerts fire once and clear; cents parity with `src/lib/page/pricing.ts`; zero costs typed → prompts, no numbers |
-| `test:ops`, `test:queue`, `test:state` | `scripts/qa/{ops-check,queue-check}.ts`, `src/lib/orders/state.selftest.ts` (P4) | state machine legality and projection; claim queue under concurrency with a fake clock (two agents never get the same order); outcome ladder |
+| `test:ops`, `test:queue`, `test:state` | `scripts/qa/{ops-check,queue-check}.ts`, `src/lib/orders/state.selftest.ts` (P4) | state machine legality and projection; claim queue under concurrency with a fake clock (two agents never get the same order); outcome ladder; **rev 4:** `isCallable` / `nextCallableAt` / `hoursText` over `window.fixtures.ts` (ISO keys, never a 0-indexed array), the removed `store.confirmation.hours` / `policies.contact.hours` read or written nowhere, operations' read functions return rows through `maskIfImpersonation` (a static check forbids a local mask helper) |
 | `test:tracking`, `test:leads` | `scripts/qa/{tracking-check,leads-check}.ts` (P3) | LP-05 signed links and lookups; LP-06 / LP-11 lead capture, attribution and conversion |
 | `test:honesty`, `test:cod-invariants` (rev 2.1) | `src/lib/landing/honesty/selftest.ts`, `src/lib/landing/cod-invariants.selftest.ts` (P3) | LAN-§6: every `honesty:*` gate has a failing and a passing fixture, `auditNumbers` on the baseline numbers set, messages exist in ar/fr/en; LAN-§3.7: `codInvariants()` fails `foldOk` on the 23 stage-hero baseline pages and `formScreen ≤ 3` on the screen-14-17 forms, passes every keep-list page |
 | `test:platform` (rev 2.1) | `scripts/qa/platform-check.ts` (P1) | PLA-§O: `scoreSignup` fixtures per band with `explainBand()` counterfactuals, `autoApprove` table, `lifecyclePreview` = effect (fixtures per edge), plan-impact diff, the console UX ceiling rules on the console components (PLA-§4.7) |
@@ -3642,7 +3723,12 @@ ENGC-10 / ENGP-26). It imports the tracks' fixture modules `scripts/qa/render-ca
 delivery fallback, thank-you timelines, the `.lp-ty__tint` rule, the order-form contract rows; P6 `design.ts`: goldens,
 the five hero families, the T1 CSS lint, RTL regexes, no `adm-aurora` / `adm-grain`; S1 `storefront.ts`; rev 3,
 ENGP-12) so no track edits the harness. It also asserts **0 changed checksums** on the existing fixture docs after the
-`ThemeSpec.look` addition (DES-R1: `look` is optional with no default, so old docs serialise byte-identically).
+`ThemeSpec.look` addition (DES-R1: `look` is optional with no default, so old docs serialise byte-identically; the rev 4
+`ThemeLook.em: "none"` and `locks` + `G23` widenings keep it). **Rev 4 (CRIT15):** every page-kind fixture (landing with
+and without a footer section, thank-you, tracking, legal; R2 store kinds) asserts **exactly one** "Report this store"
+link, absolute to `platformOrigin()`, its `?p=` without a query; every export fixture (ZIP, PHP, connected) asserts
+none (cases in `render-cases/design.ts` for the footer, `render-cases/landing.ts` for P3's pages, the harness itself for
+the Shell fallback).
 
 ### J.2 DB-backed (`npm run test:db`; local XAMPP MariaDB, throwaway databases only)
 
@@ -3672,10 +3758,10 @@ The harness first asserts `GET /api/health` → `app: "store-gen"` (never COD St
 | `qa:headers` | `scripts/qa/headers-check.ts` | §F.6 header sets per response class and host class; byte-identical 404 headers across producers (the proxy's included, ENGC-22); (rev 2.1) the `/go/<code>` 308 carries `Cache-Control: private, no-store` while a canonical 308 carries `public, max-age=300`; `/track`, `/kit/<token>` and test renders carry `noindex` + `private, no-store`; **rev 3:** `Referrer-Policy: same-origin` on `/invite/*`, `/reset/*`, `/report/*` and `no-referrer` only on `/kit/*` (ENGC-16), the manifest public with `max-age=3600` and no `Set-Cookie` (ENGC-24), HSTS with `includeSubDomains` only on the platform host in S mode (SEC-15), `CDN-Cache-Control: no-store` on edge-served documents (ENGC-2), no bare `'self'` in any served document's `connect-src` / `form-action` (SEC-2) |
 | `qa:edge-sim` | `scripts/qa/edge-sim.ts` | sends Worker-shaped requests (`x-sg-host`, `x-sg-edge`, `x-sg-ip`, `x-sg-ts`) to the local server: S-mode rewrites, Cookie never reaching store routes (nor `store` / `preview` / `public-api` areas on the platform host, SEC-2), `Set-Cookie` never sent on store hosts and never without the `__Host-` prefix on the platform host (SEC-13), own-handle 308, `/admin`/`/app`/`Next-Action` 404 on store hosts, CSP with the store host only, order posts from the right and the wrong store host (V1, V4, V5, V6 locally); **rev 3:** a present-but-wrong `x-sg-edge` → the neutral 404 (SEC-4), `GET https://<h>.<root>/` → 200 store home and `/x/` ≡ `/x` (ENGC-15), two store hosts requesting one path never share a cached body and the apex request of it answers the platform page (ENGC-2), a client-sent `x-sg-path` on the upload route and on a matcher-excluded path is ignored (SEC-3) |
 | `qa:action-replay` | `scripts/qa/action-replay.ts` | §F.1 server-action replay with Playwright (`channel: "msedge"`, HANDOFF §3) |
-| `qa:wow-demo` | `scripts/qa/wow-demo.ts` (maintainer) + the step modules `scripts/qa/wow-demo/steps/<track>.ts` (extension point, rev 2.1: `shell.ts` P2, `landing.ts` P3, `ops.ts` P4, `platform.ts` P1, rev 3 `design.ts` P6; committed, unlike the optional `qa/e2e` harness; each exports `steps: DemoStep[]` with the clock-table condition it asserts) | **the R1 acceptance scenario** (rethink-features §4, §K.2): the seller path on a 390 px viewport with 4G throttling, human typing modelled at 150 ms per character, every pass condition of the clock table asserted, total wall time ≤ 3:30; runs with Cloud AI **off** and the local model cache empty; runs twice with the same photos in two stores and asserts genome distance `d ≥ 0.25`; every page in the path passes the no-orange scan and the admin token check; the test order never reaches Sheets, CAPI or the learning tables and revenue stays at 0; a second agent pressing `N` does not get the same order (two sessions); the tenancy gate is green on the same build; **rev 3 (OPE Q.27n, UX-39):** the `N` press comes from the **demo store owner's** (or an invited agent's) session, never the platform owner's, and the seed step sets `ops.openOverrideUntil = now + 2 h` (both asserted); at 0:50 at least one of the three directions is a `stage` / `specimen` / dark family for the argan and parfum fixtures (the model-free alpha estimate, no model file downloaded) |
+| `qa:wow-demo` | `scripts/qa/wow-demo.ts` (maintainer) + the step modules `scripts/qa/wow-demo/steps/<track>.ts` (extension point, rev 2.1: `shell.ts` P2, `landing.ts` P3, `ops.ts` P4, `platform.ts` P1, rev 3 `design.ts` P6, rev 4 `ai.ts` P7 (the Director control never overlays a fold, AI R47); committed, unlike the optional `qa/e2e` harness; each exports `steps: DemoStep[]` with the clock-table condition it asserts) | **the R1 acceptance scenario** (rethink-features §4, §K.2): the seller path on a 390 px viewport with 4G throttling, human typing modelled at 150 ms per character, every pass condition of the clock table asserted, total wall time ≤ 3:30; runs with Cloud AI **off** and the local model cache empty; runs twice with the same photos in two stores and asserts genome distance `d ≥ 0.25`; every page in the path passes the no-orange scan and the admin token check; the test order never reaches Sheets, CAPI or the learning tables and revenue stays at 0; a second agent pressing `N` does not get the same order (two sessions); the tenancy gate is green on the same build; **rev 3 (OPE Q.27n, UX-39):** the `N` press comes from the **demo store owner's** (or an invited agent's) session, never the platform owner's, and the seed step sets `ops.openOverrideUntil = now + 2 h` (both asserted); at 0:50 at least one of the three directions is a `stage` / `specimen` / dark family for the argan and parfum fixtures (the model-free alpha estimate, no model file downloaded) |
 | `qa:publish-gates` | `scripts/qa/publish-gates-e2e.ts` (maintainer) | §M end to end: publishing the design-baseline worst page is refused with `budget_blocked` items naming the section count, height and bytes; a sample-review page is refused with `honesty_blocked` naming the field; the publish dialog lists the fixes; `warn` mode publishes and writes `page.publish.design_override` |
-| `qa:pulse-e2e` | part of `qa/e2e` (P2) | two tabs of one browser produce one poller (`BroadcastChannel`), unchanged polls answer 304, a status change unlocks publish without a reload within one pulse; (rev 2.1) a finished `ai_jobs` row of the viewer appears in `jobs.done` on the next poll and never in another viewer's |
-| `qa:admin-perf` (rev 2.1) | part of `qa/e2e` (P2, PLA-§22.18) | §I.8 rule 1 on the 13 R1 screens at 4× CPU: shell navigation < 150 ms perceived (prefetched chunk present), optimistic writes complete < 500 ms, skeletons appear after 150-300 ms and stay ≥ 300 ms, no layout shift > 0.02 after hydration |
+| `qa:pulse-e2e` | `scripts/qa/e2e/pulse.ts` (P2; rev 4, CRIT19: committed, not under the git-ignored `qa/`) | two tabs of one browser produce one poller (`BroadcastChannel`), unchanged polls answer 304, a status change unlocks publish without a reload within one pulse; (rev 2.1) a finished `ai_jobs` row of the viewer appears in `jobs.done` on the next poll and never in another viewer's |
+| `qa:admin-perf` (rev 2.1) | `scripts/qa/e2e/admin-perf.ts` (P2, PLA-§22.18; rev 4, CRIT19: committed, so it can back §I.8 rule 1 from a clean clone) | §I.8 rule 1 on the 13 R1 screens at 4× CPU: shell navigation < 150 ms perceived (prefetched chunk present), optimistic writes complete < 500 ms, skeletons appear after 150-300 ms and stay ≥ 300 ms, no layout shift > 0.02 after hydration |
 | `qa:storefront-e2e`, `qa:storefront-perf`, `qa:storefront-a11y` (R2, STO-R13) | storefront.md | store pages on cheap Android profiles, LCP and byte budgets, WCAG checks |
 | `qa:design-corpus`, `qa:design-report` (local only, P6) | `scripts/qa/design-corpus.ts`, `design-report.ts` | the DG-09 calibration corpus and the §5.10 harness of the design baseline (7 fixtures × ar/fr × 10 seeds; 41-page render set; `gates[]`, `slop`, `Q` in `qa/saas-baseline/index.json`); regression = any hard gate pass→fail or median Q drop > 3 |
 | `qa:ai-probe`, `qa:ai-eval-live`, `qa:ai-eval-local`, `qa:ai-stream`, `qa:detached-job-probe` (manual, need a key or the live site; never in `npm test`) | P7 | provider probe (served model asserted, fallback behaviour per class), the live eval gate through Batches, streaming, and the §H.12 detached-promise probe recorded in HANDOFF |
@@ -3704,6 +3790,24 @@ present, `qa:ai-eval-live`.
 - A new tenant table, a new server action file, a new route handler or a new cache is covered automatically (L1, L9,
   L13, L4 read `schema.ts` and the file tree; `tenancy-check.ts` and `action-replay.ts` derive the route list from the
   tree, §F.1); a new public route still adds its **header** cases to `headers-check.ts` in the same merge.
+
+### J.6 Scripts of later releases (rev 4, CRIT16; named now so the C0b `package.json` plan and `test:slow` are complete)
+
+Each joins `npm test` (offline), `test:db` or `test:e2e` at its release's contract step, inside its track's share of
+§J.1's 3-minute ceiling; its file is owned by the track named.
+
+| Release | Script | File (track) | Group |
+|---|---|---|---|
+| R2 | `test:catalog`, `test:store-runtime`, `qa:storefront-render` | `src/lib/catalog/selftest.ts`, `src/storefront/runtime/selftest.ts`, `scripts/qa/storefront-render-check.ts` (S1) | `npm test` (the 1,200-home sweep in `test:slow`) |
+| R2 | `test:storefront-db`, `qa:storefront-e2e`, `qa:storefront-perf`, `qa:storefront-a11y`, `qa:storefront-demo` | `scripts/qa/storefront-{db-check,e2e,perf,a11y,demo}.ts` (S1) | `test:db` / `test:e2e` (the demo is an R2 exit check, STO-§26.4) |
+| R2 | the LP-23 copy check (copy a page to another store, B's asset ids only) | `scripts/qa/copy-check.ts` (S1) | part of `test:db` |
+| R2 | `test:logo`, `qa:design-visual` | `src/lib/logo/selftest.ts`, `scripts/qa/design-visual.mjs` (S2) | `npm test` / local |
+| R2 | `test:money`, `test:imports` | `scripts/qa/money-check.ts`, `src/lib/imports/selftest.ts` (S3; the importer fixtures under `scripts/qa/fixtures/imports/**`, S3) | `test:db` / `npm test` |
+| R2 | `test:carriers` | `scripts/qa/carrier-check.ts` (S4) | `test:db` |
+| R2 | `test:webhooks` | `src/lib/webhooks/selftest.ts` (S5) | `npm test` |
+| R3 | `test:experiments` | `src/lib/experiments/selftest.ts` (D3; 2,000 seeded A/A runs in `npm test`, 10,000 + the τ sweep in `test:slow`) | `npm test` |
+| R3 | the LP-10 / LP-13 / LP-15 / LP-24 checks | `scripts/qa/{chain-check,schedules-check,analytics-check,saved-blocks-check}.ts` (D3) | part of `test:db` |
+| R3 | the learning simulations (`ai.genes`, risk v2, call time) | inside `test:ai` / `test:ai:slow` (D4) | `npm test` / `test:slow` |
 
 ---
 
@@ -3755,7 +3859,7 @@ context) **live in that track's row below**, not in C0: C0a only fixes their sig
 | `package.json` (b) | the new scripts (§J incl. `test:slow`, `gate:offline`), `typescript` in devDependencies; `prebuild` gains `gate:offline` **at the R1.0 integration**, not at C0 (SEC-10) |
 | `src/landing/runtime/budgets.json` (b) | the `compositions` object (ENGP-12) and the add-on keys of §H.13; the `landing` value is re-recorded by T3 after the prefix edit (header freeze rule) |
 | `docs/DESIGN.md` (b) | **DG-01 (DESIGN v3)**, written by the design lead during C0 (docs only), so no build agent reads the old bible (GEN-14); its budgets table is the §M.2 source |
-| `src/lib/page/schema.ts` (a; frozen contract, one additive change) | the DES-§4.1 constants (`GRAMMARS`, `COLOR_STRATEGIES`, `TREATMENTS`, `LADDERS`, `DEPTHS`, `MASKS`, `EASE_FAMILIES`, `REVEALS`), the `ThemeLook` object and `look: ThemeLook.optional()` in `ThemeSpec` with **no default** (DES-R1); render-check and the published-checksum boot task must show 0 changed checksums on existing docs — the one PageDoc v2 change of R1, additive and optional |
+| `src/lib/page/schema.ts` (a; frozen contract, one additive change) | the DES-§4.1 constants (`GRAMMARS`, `COLOR_STRATEGIES`, `TREATMENTS`, `LADDERS`, `DEPTHS`, `MASKS`, `EASE_FAMILIES`, `REVEALS`), the `ThemeLook` object and `look: ThemeLook.optional()` in `ThemeSpec` with **no default** (DES-R1), **as DES-§4.5.1 now writes it** (rev 4, DES N6: `ThemeLook.em` includes `"none"` for G26 `none`, `ThemeLook.locks` adds `"G23"`, max 7 entries; DESIGN v3 §2.5 lists `data-emphasis="none"` and P6's `THEME_ATTR_VALUES` follows it, `theme:check` keeps the two equal); render-check and the published-checksum boot task must show 0 changed checksums on existing docs — the one PageDoc v2 change of R1, additive and optional |
 
 C0a exit: `tsc` green (the deprecated `rateLimit` overload keeps today's callers compiling); today's `npm test` green;
 `drizzle/0004` applies on an empty `cod_test_*` DB; one page under `/app/<h>` renders through the minimal seam on
@@ -3766,8 +3870,8 @@ XAMPP. C0b exit: `test:tenancy-lint` runs standalone and reports today's violati
 | Track | Owns (create/modify/delete) | Delivers | Depends on |
 |---|---|---|---|
 | **T1 DATA** | `src/lib/db/**` (except `schema.ts`, `locks.ts`), `src/lib/tenancy/{convert.server.ts, entitlements.ts, usage.ts, lifecycle.ts, handles.ts, cache.ts, sql.ts}`, `src/lib/jobs/scope.ts` (`systemScope`, `forEachStore`), `src/lib/settings/index.ts`, `src/lib/security/crypto.ts`, `src/lib/security/selftest-envelope.ts`, `src/lib/audit.ts`, `src/instrumentation.ts`, `src/lib/tenancy/selftest.ts`, `scripts/qa/{upgrade-dry-run.ts, migrate-check.ts}`, `src/lib/platform/data/protected-brands.ts` | envelope v2 (§F.3), settings split + caches (§D.10), entitlements/usage/lifecycle (§A.4-A.5), handles (§C.7), audit v2 (§F.5), conversion task + boot order (§D.8, §H.4), tenancy dry run, `test:migrate`, `test:envelope`, `test:tenancy-unit` | C0 |
-| **T2 AUTH** | `src/lib/auth/**` except `permissions.ts`, `unknown-page.ts`, `host-selftest.ts` (and nothing under `src/lib/security/**`: `selftest.ts` there is T3's, rev 3 ENGC-8); `src/lib/tenancy/{seam.ts, context.ts, invites.ts, owned.ts}`; `src/lib/platform/{seam.ts, impersonation.ts, notify.ts}` (`notify` = a minimal insert in R1.0 behind the frozen signature); `src/lib/mail/**`; `src/app/(public)/**`; `src/app/app/{layout.tsx, page.tsx}`, `src/app/app/account/**`, `src/app/app/new/**` (functional skeleton), `src/app/app/[store]/team/**`; `src/app/admin/{layout.tsx, page.tsx}`, `src/app/admin/(auth)/**`; `src/components/admin/settings/{team-panel.tsx, security-panel.tsx}`; `src/lib/auth/selftest-permissions.ts` | §B (login incl. the challenge-only account bucket, signup modes incl. invite/approval with the Turnstile gate and the daily ceiling (D69), `identity_links` device/net rows (PLA Q.3; the `__Host-sgd` cookie itself is set by T3's proxy, SEC-12), invites with compare-and-set consumption (SEC-24), sessions, switcher data incl. the agent landing path, 2FA policy, step-up with `stepUpUntil` and the tenant password step-up (SEC-17), reset links, impersonation seam with the PLA Q.31 rules and `scope.kind = "impersonation"` (D70), Mailer interface, bootstrap, the PLA Q.19 user functions incl. `deleteUserAccount` (SEC-20)), §E.2 seam hardening over C0a's minimal bodies (`assertSameOrigin` first, `x-sg-path-sig`, 2FA, buckets), §E.4 context | C0a; T1's settings and audit APIs (signatures frozen, stubs until merged) |
-| **T3 EDGE** | `src/proxy.ts`, `src/lib/edge/**`, `src/lib/urls/**`, `src/lib/auth/{unknown-page.ts, host-selftest.ts}`, `src/lib/security/{csrf.ts, headers.ts, ip.ts, selftest.ts}` (`selftest.ts` added rev 3, ENGC-8: T3 changes `csrf.ts` / `ip.ts`, so it owns their test), `src/lib/render/**` (incl. the new `preview-token.ts`; the `prepublish.ts` registry file itself is the maintainer's), `src/lib/stats/**`, `src/lib/orders/{origin.ts, resolve.ts, create.ts, leads.ts, upsell.ts, turnstile.ts, http.ts, export-origins.ts}` (**`create.ts` exports `createOrderRow(draft, ctx)`**, D72: the extracted insert of `create.ts:255-300` with the id retry, `is_test`, `rev`, `confirm_state` defaults, `upsell_token_hash`, `order_events` "created", `INSERT IGNORE` outbox and the `runOrderHooks("created", …)` call inside `after()` with the built `PurchaseConversion` or null, OPE Q.7; `newOrderId` stays internal), `src/lib/tenancy/public.ts` (bodies; signatures from C0a, ENGC-27), `src/landing/{context.ts, document.tsx}`, `src/landing/legal/**` (R1.0 only; moves to P3 in R1 product, LAN Q16), `src/landing/runtime/{core.ts, tracking.ts, pixels.ts, order-store.ts, entry-whatsapp.ts}` (the storage-key prefix derived once in `core.ts`, §C.9) and the new `src/landing/runtime/landing.sha256` (the post-R1.0 pin), `src/app/api/public/**`, `src/app/s/**`, `src/app/[slug]/**`, `src/app/legal/**` (deleted), `src/app/route.ts` → `src/app/(marketing)/**`, `src/app/{robots.txt, sitemap.xml, preview, api/health}/**`, `src/app/media/[key]/route.ts` (status check only), `src/app/{layout.tsx, not-found.tsx}`, `edge/worker.js`, `scripts/qa/{render-check.ts, headers-check.ts, edge-sim.ts, public-api-security.ts}` (render-check is the maintainer's from P0), `src/lib/edge/selftest.ts` | §C (host classes incl. the fail-closed edge step and `x-sg-ts` (SEC-4), proxy incl. the `kit` / `report` / manifest rules, the Cookie deletion for store areas on the platform host (SEC-2), `x-sg-path-sig` (SEC-3), the `__Host-sgd` marker (SEC-12), the store rewrite without a trailing slash (ENGC-15), the two proxy header sets (ENGC-22); store routes in P mode with S/C redirects, slug-history 308 (reads `page_slug_history`, 0004), URL builders, canonical, robots/sitemap, cookies/CSRF/CSP/order origin incl. the per-request `connect-src` narrowing on every host class (SEC-2) and the `originAllowed` entry validation (SEC-23), Worker with the `cf` cache option (ENGC-2)), §F.6 headers incl. HSTS per host class, public writes carrying the store (ORD-01…ORD-07, ORD-17, ORD-18, ORD-21), stats per store with the store timezone (STAT-01…04), render context per store (PUB-*), the **render add-on hook** and `purchaseInBrowser` (§H.13; the signatures from C0a), the **test-order plumbing** on the public path (`is_test` from `resolveTestToken()` in `create.ts` / `leads.ts`, skips CAPI enqueue and `bumpOrderStats`, `sheet_status = 'disabled'`) and the test render (`renderTestDocument()` in the slug and thank-you routes, D54), **preview-token minting and the `preview_tokens` rows** (§E.2, SEC-7), `aggregateRating` removal (§C.8), **the landing chunk re-measured and recorded** (header freeze rule; `budgets.json.landing` through the maintainer, `landing.sha256` written) | C0a; T1's settings API (stubs until merged). No dependency on T2 (rev 3, ENGC-27) |
+| **T2 AUTH** | `src/lib/auth/**` except `permissions.ts`, `unknown-page.ts`, `host-selftest.ts` (and nothing under `src/lib/security/**`: `selftest.ts` there is T3's, rev 3 ENGC-8); `src/lib/tenancy/{seam.ts, context.ts, invites.ts, owned.ts}`; `src/lib/platform/{seam.ts, impersonation.ts, notify.ts}` (`notify` = a minimal insert in R1.0 behind the frozen signature); `src/lib/mail/**`; `src/app/(public)/**`; `src/app/app/{layout.tsx, page.tsx}`, `src/app/app/account/**`, `src/app/app/new/**` (functional skeleton), `src/app/app/[store]/team/**`; `src/app/admin/{layout.tsx, page.tsx}`, `src/app/admin/(auth)/**`; `src/components/admin/settings/{team-panel.tsx, security-panel.tsx}`; `src/lib/auth/selftest-permissions.ts` | §B (login incl. the challenge-only account bucket, signup modes incl. invite/approval with the Turnstile gate and the daily ceiling (D69), `identity_links` device/net rows (PLA Q.3; the `__Host-sgd` cookie itself is set by T3's proxy, SEC-12), invites with compare-and-set consumption (SEC-24), sessions, switcher data incl. the agent landing path, 2FA policy, step-up with `stepUpUntil` and the tenant password step-up (SEC-17), reset links, impersonation seam with the PLA Q.31 rules and `scope.kind = "impersonation"` (D70), Mailer interface, bootstrap, the PLA Q.19 user functions incl. `deleteUserAccount(ctx: UserCtx | PlatformCtx, target?: { userId; reason })` with the `owns_store` / `is_staff` refusals (SEC-20; rev 4 PLA Q4.7) and `stepUpWithPasswordAction` (§B.7)), §E.2 seam hardening incl. the `WriteCtx` overloads (rev 4, D71) over C0a's minimal bodies (`assertSameOrigin` first, `x-sg-path-sig`, 2FA, buckets), §E.4 context | C0a; T1's settings and audit APIs (signatures frozen, stubs until merged) |
+| **T3 EDGE** | `src/proxy.ts`, `src/lib/edge/**`, `src/lib/urls/**`, `src/lib/auth/{unknown-page.ts, host-selftest.ts}`, `src/lib/security/{csrf.ts, headers.ts, ip.ts, selftest.ts}` (`selftest.ts` added rev 3, ENGC-8: T3 changes `csrf.ts` / `ip.ts`, so it owns their test), `src/lib/render/**` (incl. the new `preview-token.ts`; the `prepublish.ts` registry file itself is the maintainer's), `src/lib/stats/**`, `src/lib/orders/{origin.ts, resolve.ts, create.ts, leads.ts, upsell.ts, turnstile.ts, http.ts, export-origins.ts}` (**`create.ts` exports `createOrderRow(draft, ctx)`**, D72: the extracted insert of `create.ts:255-300` with the id retry, `is_test`, `rev`, `confirm_state` defaults, `upsell_token_hash`, `order_events` "created", `INSERT IGNORE` outbox and the `runOrderHooks("created", …)` call inside `after()` with the built `PurchaseConversion` or null, OPE Q.7; `newOrderId` stays in `src/lib/db/ids` (T1) and `create.ts` does not re-export it, rev 4 CRIT20), `src/lib/tenancy/public.ts` (bodies; signatures from C0a, ENGC-27), `src/landing/{context.ts, document.tsx}`, `src/landing/legal/**` (R1.0 only; moves to P3 in R1 product, LAN Q16), `src/landing/runtime/{core.ts, tracking.ts, pixels.ts, order-store.ts, entry-whatsapp.ts}` (the storage-key prefix derived once in `core.ts`, §C.9) and the new `src/landing/runtime/landing.sha256` (the post-R1.0 pin), `src/app/api/public/**`, `src/app/s/**`, `src/app/[slug]/**`, `src/app/legal/**` (deleted), `src/app/route.ts` → `src/app/(marketing)/**`, `src/app/{robots.txt, sitemap.xml, preview, api/health}/**`, `src/app/media/[key]/route.ts` (status check only), `src/app/{layout.tsx, not-found.tsx}`, `edge/worker.js`, `scripts/qa/{render-check.ts, headers-check.ts, edge-sim.ts, public-api-security.ts}` (render-check is the maintainer's from P0), `src/lib/edge/selftest.ts` | §C (host classes incl. the fail-closed edge step and `x-sg-ts` (SEC-4), proxy incl. the `kit` / `report` / manifest rules, the Cookie deletion for store areas on the platform host (SEC-2), `x-sg-path-sig` (SEC-3), the `__Host-sgd` marker (SEC-12), the store rewrite without a trailing slash (ENGC-15), the two proxy header sets (ENGC-22); store routes in P mode with S/C redirects, slug-history 308 (reads `page_slug_history`, 0004), URL builders, canonical, robots/sitemap, cookies/CSRF/CSP/order origin incl. the per-request `connect-src` narrowing on every host class (SEC-2) and the `originAllowed` entry validation (SEC-23), Worker with the `cf` cache option (ENGC-2)), §F.6 headers incl. HSTS per host class, public writes carrying the store (ORD-01…ORD-07, ORD-17, ORD-18, ORD-21), stats per store with the store timezone (STAT-01…04), render context per store (PUB-*), the **render add-on hook** and `purchaseInBrowser` (§H.13; the signatures from C0a), the **test-order plumbing** on the public path (`is_test` from `resolveTestToken()` in `create.ts` / `leads.ts`, skips CAPI enqueue and `bumpOrderStats`, `sheet_status = 'disabled'`) and the test render (`renderTestDocument()` in the slug and thank-you routes, D54), **preview-token minting and the `preview_tokens` rows** (§E.2, SEC-7), `aggregateRating` removal (§C.8), **the landing chunk re-measured and recorded** (header freeze rule; `budgets.json.landing` through the maintainer, `landing.sha256` written) | C0a; T1's settings API (stubs until merged). No dependency on T2 (rev 3, ENGC-27) |
 | **T4 SCOPE** | `src/lib/admin-data/**` (except `action.ts`), `src/lib/orders/{admin.ts, conversions.ts, conversions-core.ts, index.ts, selftest.ts}`, `src/lib/editor/**` (incl. `buildChecklist(doc, ctx: LandingCheckContext)`, LAN Q15, with the store facts the LP-02 / LP-21 rules need and the publish dialog rendering `GateItem[]`; `recordSlugMove(scope, pageId, oldSlug)` called by the slug action at `pages.server.ts:418-441`, LAN Q22; the `recordFacts(scope, pageId, facts)` call from the create-from-directions path, ENGP-8), `src/lib/export/**`, `src/lib/media/**` (except `store.ts`; `process.ts`, `assets.ts`, `upload-slots.ts` pass to P8 at the R1.0 integration, ENGC-32), `src/lib/pixels/**`, `src/lib/sheets/**`, `src/app/app/[store]/**` (except `team/**`), `src/app/api/app/**`, `src/app/api/cron/tick/route.ts` (per-store loop, minimal), `src/app/admin/(panel)/**`, `src/app/admin/(editor)/**`, `src/app/admin/preview/**`, `src/app/api/admin/{media,export,sheets}/**` (moved away), `src/components/**` (except `admin/settings/{team-panel,security-panel}.tsx`), `scripts/qa/{tenancy-check.ts, action-replay.ts, pixels-publish-check.ts, conversions-check.ts}` (`tenancy-check.ts` imports `scripts/qa/tenancy-cases/*.ts`, DES-R13, and derives the route list from the file tree, SEC-9), `src/lib/media/selftest*.ts` | §E.3 over the ~225 query sites with `WriteScope` on every write repository (D71); the dashboard move to `/app/<handle>` (§I.1) with `appHref`/`apiHref` everywhere; per-store Sheets (SHT-*), pixels and CAPI secrets (PIX-*), exports (EXP-*), media ids and quotas on the DB backend (MED-*), generate (GEN-01…04), builder (LND-17…30), store-keyed client storage, `listPagesForConsole(scope)` with `name` / `seoTitle` (PLA Q.11, SEC-18); `test:tenancy` (running from week one against C0a's seam), `qa:action-replay` | C0a; T2's hardened seam (C0a's minimal one until merged); T1's settings API |
 
 Rules inside R1.0: a track that needs a change in another track's file writes a note in
@@ -3800,7 +3904,8 @@ the requests are decided (§Q); write `drizzle/0005_r1.sql` and the §D.5 tables
 column refinements) into `schema.ts`, the R1 settings key schemas (§D.10 incl. `onboarding`, `landing`, `accounting`
 lite, `platform_ai_secret`, `platform_design`, the rev 3 fields `checkout.calendar.confirmationLeadDays`,
 `checkout.addressMode`, `ops.windowOverrides` / `rescue` / `agentLabels` / `carrierCsv`, `accounting.myCarrier` /
-`adAccounts` / `adRates`, and the removal of `store.confirmation.hours` and `policies.contact.hours`), register the
+`adAccounts` / `adRates`, and the removal of `store.confirmation.hours` and `policies.contact.hours`; rev 4: the ISO
+`days` container and `ops.callingWindow.savedAt`, `brand.genes` with G1 / G9), register the
 extension files below (every `src/lib/{health/rules,pulse/contributors,notify/kinds,flags/defs,jobs/tracks,orders/hooks,
 render/prepublish,admin-data/search}/<track>.ts`, `src/components/admin/shell/{nav,commands}/<track>.ts`,
 `src/lib/i18n/admin/<locale>/<track>.ts`, `scripts/qa/tenancy-cases/<track>.ts`, rev 2.1 `scripts/qa/wow-demo/steps/<track>.ts`
@@ -3808,15 +3913,22 @@ and rev 3 `scripts/qa/render-cases/<track>.ts`, each created empty and imported 
 registry), run `test:ownership` over the rows below (ENGC-8), and freeze the cross-track APIs as typed stubs:
 - operations (P4): `transitionOrder` / `applyExternalStatus` (`src/lib/orders/transition.ts`), `projectStatus` /
   `legacyToWanted` (`state.ts`), **`cityKey(value): CityKey | null` / `normalizeCity` (`address.ts`; pure and
-  isomorphic, no server import, so landing's `assist` and the storefront's `checkout` / `pdp` chunks bundle it by source
-  import, D68)**, `maskPhone` / `maskPhonesIn` (`masking.ts`), `opsPulse` / `releaseAllLeases` (`queue.ts`),
+  isomorphic, no server import; rev 4, CRIT1: the server converts once, every browser zone table is P3's value-keyed
+  `ZoneTable`, so a chunk *may* bundle `cityKey` and none is required to, D68)**, `maskPhone` / `maskPhonesIn`
+  (`masking.ts`), `opsPulse` / `releaseAllLeases` (`queue.ts`),
   `convertLeadToOrder` (`manual.ts`; dispatches on `leads.sel.v` from R2), `appendOrderEvent(scope, orderId, {
   actorKind, type, meta })` (`events.ts`), `createManualOrder(ctx, input & { source?: "manual" | "whatsapp"; fromLead?:
   { leadId } })` (the v2 path; it inserts through `createOrderRow`, D72), **`callingWindowFor(scope): Promise<EffectiveWindow>`
-  (`src/lib/callcenter/window.server.ts`) with the pure, isomorphic `isCallable` / `nextCallableAt` / `hoursText` of
-  `window.ts` (D73; `assist-ty` bundles `nextCallableAt`)**, the console reads `orderKpis`, `listOrdersForConsole`,
-  `getOrderForConsole`, `recordPlatformReveal`, `orderRiskMix`, `searchOrders`, `queueCounts` (OPE Q.8, LAN Q17, PLA
-  Q.11); **rev 2.1 (OPE-§27.6, OD43):** the
+  (`src/lib/callcenter/window.server.ts`; never `null`: the stub answers `DEFAULT_WINDOW` in the store time zone with
+  `configured: false`) with the pure, isomorphic, JSON-safe exports of `window.ts`: the types `EffectiveWindow`
+  (`days: Record<IsoWeekday, Range[]>`, `configured`), `CallingWindow` (alias), `Range`, `IsoWeekday`, and `isCallable`
+  / `nextCallableAt` / `hoursText` / `rangesForDay` / `shopperPromiseAllowed` (D73; `assist-ty` and the R2 store
+  checkout bundle `nextCallableAt` by source import); `DEFAULT_WINDOW` in `defaults.ts`; the shared fixture
+  `window.fixtures.ts` (rev 4, CRIT3: data, written by P4 and read by P3 and S1 after P4 merges; the P0 stub of the
+  file carries the `DEFAULT_WINDOW` cases only)**, the console reads `orderKpis`, `listOrdersForConsole`, `getOrderForConsole`
+  (rev 4, PLA Q4.10: `ConsoleOrderRow` carries `pageId: string | null`, `carrierLabel`, `trackingRef`,
+  `carrierExportedAt`, and from the R2 contract step `lines?` for payload v3), `recordPlatformReveal`, `orderRiskMix`,
+  `searchOrders`, `queueCounts` (OPE Q.8, LAN Q17, PLA Q.11); **rev 2.1 (OPE-§27.6, OD43):** the
   deterministic aggregates the Today brief (P2) and the Campaign Kit by-angle table (P3) read,
   `opsAggregates(scope, q: { from: ISODate; to: ISODate; dims: AggDim[]; compareWith?: "previous" }): Promise<{ cells:
   Record<AggDim, AggCell[]>; suppressed: number; computedAt: string }>` (cells under 5 orders suppressed) and
@@ -3826,8 +3938,12 @@ registry), run `test:ownership` over the rows below (ENGC-8), and freeze the cro
   (`src/lib/sheets/push.ts`), `integrationHealth(scope)`, `sheetsBacklog(scope)`;
 - landing (P3): **`zoneLineFor(scope, cityKey: CityKey | null, at?, opts?: { stage })`** and the pure
   `zoneForCity(zones, key: CityKey | null)` (both map `null` / unknown to the `*` zone, D68; rev 3 OPS-1, OPS-12),
-  `zonesForCheckout(scope): Promise<ZoneTable>` (the `#sg-config` / `lp-assist.dz` table keyed by the posted
-  `City.value`, built on the server from the slugs), the ETA trio of `src/lib/delivery/eta.ts`
+  `zonesForCheckout(scope): Promise<ZoneTable>` (**the one producer of every browser zone table**: `lp-assist.dz`,
+  `#sg-config.checkout.zones`, the R2 `landing-v3` config; `city` keyed by the posted `City.value`, built on the server
+  from the slugs by the pure `buildZoneTable(zones, cal, cities)` of `src/lib/delivery/table.ts`, which the parity
+  fixture calls directly; rev 4, CRIT1), **`zoneFeesFor(scope, keys: readonly CityKey[]): Promise<Record<CityKey, number
+  | null>>`** (rev 4: the slug-keyed fees for server joins, P1's `zones.feeMismatchTop5` and the checklist; never the
+  browser table), the ETA trio of `src/lib/delivery/eta.ts`
   (pure, bundled into `assist`): `etaWindow(cal, zone, now): EtaWindow | null` (`cal.leadDays` from
   `checkout.calendar.confirmationLeadDays`), `etaText(w, zone, locale, dateLocale,
   now): string` and **(rev 2.1, LAN N2)** `etaWindowText(zone, now, cal, locale, dateLocale?): { from: Date; to: Date;
@@ -3841,7 +3957,8 @@ registry), run `test:ownership` over the rows below (ENGC-8), and freeze the cro
   pure, isomorphic: the one implementation the design digest `RenderDigest.cod` (P6), the checklist and the honesty gate
   import);
 - platform ops (P8): `enqueue` / `registerOutboxHandler` / `enqueueRenders`, the PLA Q.25 health and export APIs;
-- platform (P1): `notify` (the PLA-§18.1 signature; T2's R1.0 body becomes P1's), `markHealthDirty`, `getStoreHealth`,
+- platform (P1): `notify` (the PLA-§18.1 signature; T2's R1.0 body becomes P1's), `markHealthDirty`,
+  `getStoreHealth(scope): Promise<StoreHealthView | null>` (rev 4, PLA Q4.4; `staleAfterMin` additive),
   `snoozeHealthIssue`, **(rev 2.1)** `requestHealthRecompute(ctx: StoreCtx): Promise<{ queuedAt: string }>` (§I.7; P2's
   "Recompute now" button calls it), **(rev 3)** `maskCustomerFields(row)` / `maskIfImpersonation(scope, row)` and the
   `Masked` type (`src/lib/platform/mask.ts`, D70: identity for every scope kind but `impersonation`; P4's read
@@ -3849,14 +3966,25 @@ registry), run `test:ownership` over the rows below (ENGC-8), and freeze the cro
   `saveGeneralAction`, P3's policies contact block and P6's brand kit call it), `recordAbuseReport(input)`
   (`abuse-report.ts`, used only by P1's own `/report` page);
 - shell (P2): `renameHandle` (honouring the `freeRename` grant, ENGC-30), the pulse contributors registry;
+- maintainer (rev 4, CRIT15, PLA Q4.1 / Q4.2, DES N1, LAN N4): `reportUrl(store, pagePath?)` and the ADMIN_HOST-aware
+  `consoleHref(path)` in `src/lib/urls/index.ts`; `PageLinks.report?: string` (`src/landing/types.ts`), its value from
+  `reportUrl` for live, test and preview renders and `undefined` in every export (`src/landing/context.ts`), the UiKey
+  `footer.report` with platform's `shell.report.link` strings (`src/landing/i18n.ts`) and the Shell's `<p
+  class="lp-report">` fallback row (`src/landing/document.tsx`): additive lines in read-only files, applied once at P0 so
+  P3 and P6 build against them;
 - ai (P7): `runAi`, `queueAi`, `registerBatchResultHandler`, `aiPolicyFor`, the `AiPolicy` / `AiOutcome` types,
-  `aiStoreSummary(ctx: PlatformCtx, storeId)`, `aiHealth()`, `aiUsageForStore(scope, month)`, `linkAiRuns`,
+  `aiStoreSummary(ctx: PlatformCtx, storeId)`, `aiHealth()`, `aiUsageForStore(scope, month)` (rev 4, PLA Q4.11 / AI
+  R38: returns `{ creditsUsed, creditsLimit, costMicros }`, `creditsLimit` = the pending cap while the store is
+  `pending`, read by the console queue chip), `linkAiRuns`,
   `recordPublishFeedback`, `enqueueAiJob` (AI R13, PLA Q.11), **(rev 2.1, AI R26)** `aiJobsForPulse(scope, viewer: {
   userId }, since: Date): Promise<{ running: number; done: string[] }>` (`src/lib/ai/jobs/pulse.ts`; the producer of
   `StorePulse.jobs`, §I.4; stub `{ running: 0, done: [] }`);
-- design (P6): `GENE_VOCAB`, `sampleGenome(…, { hints?, pins?, priors? })` (rev 3, QUAL-10: one pinned bold gene per
-  direction, set as the only value when it passes the hard rules, the photo facts and the locks, else dropped into
-  `genome.hints.dropped` with `why: "pin"`), `clicheScore(text, locale)`, `checkHeadlineNovelty(scope, niche, texts)`,
+- design (P6): `GENE_VOCAB`, `sampleGenome(input, opts: SampleOpts = { hints?, pins?, priors? })` (rev 3, QUAL-10: one
+  pinned bold gene per direction, set as the only value when it passes the hard rules, the photo facts and the locks,
+  else dropped into `genome.hints.dropped` with `why: "pin"`; **rev 4 (DES N9 over AI R43):** the pin is
+  `SampleOpts.pins?: Partial<Record<BoldGene, string>>` (≤ 1 key), a sibling of `hints`, and `GeneHints` carries no pins;
+  ai's `DirectionBrief.pin` maps to it), `clicheScore(text, locale)`, `checkHeadlineNovelty(scope, niche, texts)` (rev 4:
+  per line `{ verdict, band: "low" | "mid" | "high" | null }` over ≥ 10 owners, never a share number),
   `genomeOf(doc)` (R2), `genomeDistance` / `checkNovelty` (≤ 16 candidates per call; the Director budget is 12 per pass,
   QUAL-25), `designHealth(scope)` (AI R14, §I.7), **the exported Director vocabulary** `GenomeCard` (distance as bands
   only, DS7), `Band`, `RepairOp`, `AI_REPAIR_OPS` and the task names (`design.plan`, `design.critique`) from
@@ -3872,9 +4000,15 @@ registry), run `test:ownership` over the rows below (ENGC-8), and freeze the cro
   formHeight: number | null; fold: FoldReport; inFlow: number }`), `FoldReport` (`{ family; ok; items: Partial<Record<FoldItem,
   number>> /* top px */; limit: 844 }` with `FoldItem = "image" | "price" | "cta" | "cod"` in R1, **widened additively** to
   `| "name" | "identity" | "collections"` at the R2 contract step for store kinds, rev 3 ENGP-1) and `VariantFeaturesResolved`
-  (DES-§8.4) frozen at P0 in `src/lib/design/types.ts`; at the R2 contract step the maintainer widens `GateInput.doc`,
-  `genomeOf(doc)` and `estimateHeights(doc, …)` to `PageDoc | StorePageDoc` (one-line changes, DES-R27) and design's
-  `gateInputFor(doc, ctx)` adapter (DES-§8.13) becomes the one entry for both document types.
+  (DES-§8.4; rev 4, DES N7: it picks `h` and **requires `family`**, the layout family `orderAct2` / H35 / V38 read;
+  `VariantFeatures.h` is `number | { base; fixed: true; per? }`; `HeightReport.stub?: true`) frozen at P0 in
+  **`src/lib/design/types.frozen.ts`** (rev 4, CRIT9: a maintainer-owned file of its own, so one file never has two
+  owners; P6's `src/lib/design/types.ts` re-exports the three shapes and owns everything else); at the R2 contract step
+  the maintainer widens the frozen shapes in `types.frozen.ts` and, through the contract step's CCR on P6's finished
+  files, `GateInput.doc`, `genomeOf(doc)` and `estimateHeights(doc, …)` to `PageDoc | StorePageDoc` (one-line changes,
+  DES-R27), and design's `gateInputFor(doc, ctx)` adapter (DES-§8.13) becomes the one entry for both document types;
+  **rev 4 (CRIT10, UX-39):** `estimateAlpha(bitmap): { hasCutout: "estimated"; bbox } | null` (`src/lib/design/photo-facts.ts`,
+  browser-only; the stub answers `null`), which P2's onboarding photos step calls before P6 merges.
   **Stub rule:** until P6 merges, the stubs return a report flagged `stub: true` (`fold.ok = true`, every section 600 px,
   `formTop = null`); `prepublish/budget.ts` turns C2 / C3 / F1 into **notes** while `stub` is true and `test:prepublish`
   enables their hard fixtures at the P6 merge. Two locks keep the D52 hard gates from shipping disabled (rev 3,
@@ -3885,12 +4019,12 @@ Then:
 | Track | Part spec | Feature ids (rev 2) | Owns |
 |---|---|---|---|
 | **P1 CONSOLE** | platform.md | PL-01…PL-06, PL-07 (R1 tabs), PL-08…PL-14 (DPA R2), **PL-18 / SF-03 engine and job**, UX-02 (console), UX-03, OS-06, SE-01 (UI), SE-04 (break-glass UI, `platform_requests`), staff invites, **rev 3:** the D69 sandbox ceilings' console side, the D70 masking helpers, the D76 brand guard, `platform:brand_term_live`, the R1 abuse-report slice (PL-20 R1 slice), the account-deletion staff path (SEC-20) | `src/app/admin/**` (except `(auth)/setup/**`, `(console)/ai/**`; deletes `src/app/admin/page.tsx`), `src/app/api/admin/**`, `src/app/(public)/invite/staff/**`, **`src/app/(public)/report/**`** (rev 3, D76), `src/lib/platform/**` (except `seam.ts`, `impersonation.ts`, `health.ts`; includes `notify.ts`, `notify-kinds.ts`, `signup-risk.ts`, `health-score.ts`, `health-snapshot.ts`, `flags.ts`, `data/legal/**`, and rev 3 `mask.ts`, `brand-check.ts`, `abuse-report.ts`), **`src/lib/settings/keys/platform.ts`** (rev 3, ENGC-8: core §D.10 names platform.md as the key's owner), `src/lib/health/{engine,inputs,platform-flags}.ts`, `src/lib/health/rules/platform.ts`, `src/lib/health/selftest.ts` (rev 2.1 precise list; `types.ts` / `registry.ts` stay the maintainer's with the import lines pre-written at P0, §I.7), `src/lib/notify/kinds/platform.ts`, `src/lib/flags/defs/platform.ts`, `src/components/console/**`, nav `console.ts`, i18n `console.ts` + `notify.ts` (platform kinds only, D67), jobs `platform.ts`, `scripts/qa/{platform-check,health-db-check}.ts`, `scripts/qa/tenancy-cases/platform.ts`, `scripts/qa/wow-demo/steps/platform.ts`, `scripts/platform/refresh-disposable.mjs` (manual, never at runtime) |
-| **P2 SHELL** | platform.md + design.md (UX parts) | UX-01 (no download on the critical path, D59; the store-mode rule of §A.2), UX-02 (tenant), **UX-05 live address card (R1)**, **SF-06 pulse**, §I.3-I.8 foundation, notification centre UI (PL-13 tenant side), **SF-03 ring and issue list UI**, handle rename, `onboarding` key, the `settings/audit` screen (PLA-§22.10.6), the three-fold reveal composition (UX-20) | `src/components/admin/{shell,common,dashboard}/**` (except other tracks' nav/commands files), **`src/app/(public)/**` except `invite/staff/**` (P1), `report/**` (P1) and `kit/**` (P3)** (rev 3, ENGC-8 / ENGP-11), `src/app/app/{page.tsx, actions.ts, account/**, new/**, manifest.webmanifest/**}`, the `metadata` export of `src/app/app/layout.tsx`, `src/app/app/[store]/{layout.tsx, page.tsx, welcome/**, review-actions.ts, health-actions.ts, notifications/**, settings/{general,market,plan,address,security,danger,audit}/**}` (`audit/**` added rev 3, PLA PD75), **`src/app/app/[store]/team/**` except `team/{agents,callcenter}/**` (P4)** (rev 3), `src/app/api/app/[store]/{pulse,search}/**`, `src/lib/pulse/contributors/shell.ts`, `src/components/admin/settings/{team-panel,security-panel,audit-view}.tsx`, `src/app/globals.css`, `scripts/build-admin-css.mjs`, `scripts/build-app-icons.mjs`, `public/icons/**`, `src/lib/admin-theme/**`, `src/lib/i18n/admin/<locale>/{shell,auth,onboarding,team,health,brief}.ts` (rev 2.1, D67: **not** `src/lib/i18n/**`; the base catalogs and `index.ts` are the maintainer's, the other tracks' files are theirs), `scripts/qa/{admin-tokens-check,admin-motion-check,admin-rtl-lint,i18n-coverage}.ts`, `src/lib/tenancy/handles.ts` (rename), `src/lib/admin-data/{dashboard.ts, search.ts}`, `src/lib/settings/keys/onboarding.ts`, `src/lib/health/rules/shell.ts`, `src/lib/pulse/selftest.ts`, `scripts/qa/wow-demo/steps/shell.ts`, the `qa:admin-perf` and `qa:pulse-e2e` steps under `qa/e2e` (PLA Q.12, PLA-§P.2) |
-| **P3 LANDING** | landing.md | wave 1: LP-01…LP-06 (LP-03 incl. **ST-17 ETA as dates on landings**), LP-20, LP-21, LP-22; **wave 2: LP-11, LP-12, LP-18 / SF-01 Campaign Kit, LP-19 / SF-05 test links** (LAN Q33) | `src/lib/editor/checklist.ts`, `src/lib/delivery/**`, `src/lib/tracking/**`, `src/lib/orders/leads.ts`, `src/landing/thankyou/**`, `src/landing/sections/orderForm/**`, `src/landing/addons/**`, `src/landing/runtime/addons/**` (the add-on chunks `assist`, `assist-ty`, `track`; replaces the single `entry-delivery.ts` of rev 1), `src/landing/legal/**` (from R1 product, LAN Q16), `src/lib/{policies,leads,wa-order,links,campaigns,testing,landing}/**`, `src/lib/render/prepublish/landing.ts` (the honesty gate), `src/lib/orders/hooks/landing.ts`, `src/lib/settings/keys/{policies,checkout,landing}.ts`, `src/lib/health/rules/landing.ts`, `src/lib/pulse/contributors/landing.ts`, `src/lib/notify/kinds/landing.ts`, `src/lib/admin-data/search/landing.ts`, `src/components/admin/shell/commands/landing.ts`, `src/app/s/[store]/{track,go}/**`, `src/app/api/public/{track,wa}/**`, `src/app/(public)/kit/**`, `src/app/app/[store]/{leads/**, links/**, campaigns/**, settings/{checkout,delivery,policies}/**}`, `src/app/api/app/[store]/leads/**`, `src/components/admin/{leads,pages,delivery,policies,links,campaigns,landing}/**` (`pages/**` moves to P3, LAN Q19), nav/i18n/jobs `landing.ts`, `scripts/qa/{tracking-check,leads-check,kit-check}.ts`, `src/lib/testing/selftest.ts`, `src/lib/links/selftest.ts`, `scripts/qa/tenancy-cases/landing.ts`; **rev 2.1 (LAN-§26.1):** `src/lib/render/prepublish/landing.fixtures.ts`, `src/lib/landing/honesty/selftest.ts`, `src/lib/landing/cod-invariants.selftest.ts`, `scripts/qa/wow-demo/steps/landing.ts` (replaces the `qa/e2e/steps/landing-*.mjs` names of LAN-§3.8: demo steps are committed); **rev 3:** `scripts/qa/render-cases/landing.ts` (ENGP-12), `scripts/qa/delivery-check.ts` (`test:delivery`, D68; the fixture file is P4's), and the LAN-§26.1 rev 3 files inside owned folders (`src/lib/links/target.ts`, `src/lib/policies/claims*.ts`, `src/lib/landing/honesty/facts.server.ts`, `src/lib/delivery/lead.server.ts`, `src/components/admin/landing/{proof-attest,fact-attest}.tsx`). P3 imports P4's `CallingWindowEditor` and `cityKey` and never edits them |
-| **P4 CALL CENTER** | operations.md | OP-01…OP-05, OP-06 (flag + link + separate; **merge R2**), OP-07…OP-14, **OP-17 keyboard-first (R1)**, **SF-04 Profit Guardian lite** (flag `finance_lite`), `shipments.write` R1 moves | `src/lib/orders/{state.ts, events.ts, queue.ts, customers.ts, duplicates.ts, manual.ts, address.ts, risk-explain.ts, admin.ts, transition.ts, edit.ts, masking.ts, profile.ts, export-zip.ts, state.selftest.ts}`, `src/lib/orders/hooks/ops.ts`, `src/lib/callcenter/**`, `src/lib/finance/lite/**`, `src/lib/admin-data/orders.ts`, `src/app/app/[store]/{orders,queue,customers,finance}/**`, `src/app/app/[store]/team/{agents,callcenter}/**`, `src/app/api/app/[store]/{orders,ops}/**`, `src/components/admin/{orders,queue,customers,agents,callcenter,finance}/**`, `src/lib/settings/keys/{ops,accounting}.ts`, `src/lib/health/rules/ops.ts`, `src/lib/pulse/contributors/ops.ts`, `src/lib/notify/kinds/ops.ts`, `src/lib/flags/defs/ops.ts`, `src/lib/admin-data/search/ops.ts`, `src/components/admin/shell/commands/ops.ts`, nav/jobs `ops.ts`, i18n `ops.ts` + `finance.ts` (lite keys, **`fr` complete in R1**, OPE Q.27l; S3 takes `finance.ts` over in R2, D67), `scripts/qa/{ops-check,queue-check,ops-db-check,profit-check}.ts`, **rev 2.1 (OPE-§P):** `scripts/qa/tenancy-cases/ops.ts`, `scripts/qa/wow-demo/steps/ops.ts`, `src/lib/callcenter/{aggregates,idem}.ts` and `src/lib/finance/lite/cents.ts` (inside owned folders); **rev 3 (OPE-§P):** `src/lib/callcenter/{inbound,carrier-csv,window.server}.ts`, `src/lib/finance/lite/ad-rates.ts`, `src/app/api/app/[store]/orders/carrier-csv/route.ts`, `src/components/admin/callcenter/calling-window.tsx` (the one hours editor, D73), **`scripts/qa/fixtures/city-key.json`** (the parity fixture P3 and S1 read, D68; owned here because `cityKey` is P4's); appends to `src/lib/orders/contract.ts` status labels through the maintainer (OPE Q.9a); the manual v2 path inserts through `createOrderRow` and never edits `create.ts` (D72) |
+| **P2 SHELL** | platform.md + design.md (UX parts) | UX-01 (no download on the critical path, D59; the store-mode rule of §A.2), UX-02 (tenant), **UX-05 live address card (R1)**, **SF-06 pulse**, §I.3-I.8 foundation, notification centre UI (PL-13 tenant side), **SF-03 ring and issue list UI**, handle rename, `onboarding` key, the `settings/audit` screen (PLA-§22.10.6), the `/welcome` step that **mounts P6's reveal component** (`src/components/generate/reveal/**` is P6's; P2 owns the step, its timing and the UX-01 acceptance; rev 4, DES N5, UX-20), the account deletion page (`/app/account/danger`, SEC-20) | `src/components/admin/{shell,common,dashboard}/**` (except other tracks' nav/commands files), **`src/app/(public)/**` except `invite/staff/**` (P1), `report/**` (P1) and `kit/**` (P3)** (rev 3, ENGC-8 / ENGP-11), `src/app/app/{page.tsx, actions.ts, account/**, new/**, manifest.webmanifest/**}`, the `metadata` export of `src/app/app/layout.tsx`, `src/app/app/[store]/{layout.tsx, page.tsx, welcome/**, review-actions.ts, health-actions.ts, notifications/**, settings/{general,market,plan,address,security,danger,audit}/**}` (`audit/**` added rev 3, PLA PD75), **`src/app/app/[store]/team/**` except `team/{agents,callcenter}/**` (P4)** (rev 3), `src/app/api/app/[store]/{pulse,search}/**`, `src/lib/pulse/contributors/shell.ts`, `src/components/admin/settings/{team-panel,security-panel,audit-view}.tsx`, `src/app/globals.css`, `scripts/build-admin-css.mjs`, `scripts/build-app-icons.mjs`, `public/icons/**`, `src/lib/admin-theme/**`, `src/lib/i18n/admin/<locale>/{shell,auth,onboarding,team,health,brief}.ts` (rev 2.1, D67: **not** `src/lib/i18n/**`; the base catalogs and `index.ts` are the maintainer's, the other tracks' files are theirs), `scripts/qa/{admin-tokens-check,admin-motion-check,admin-rtl-lint,i18n-coverage}.ts`, `src/lib/tenancy/handles.ts` (rename), `src/lib/admin-data/{dashboard.ts, search.ts}`, `src/lib/settings/keys/onboarding.ts`, `src/lib/health/rules/shell.ts`, `src/lib/pulse/selftest.ts`, `scripts/qa/wow-demo/steps/shell.ts`, **`scripts/qa/e2e/{pulse,admin-perf}.ts`** (`qa:pulse-e2e`, `qa:admin-perf`; rev 4, CRIT19: committed, not under the git-ignored `qa/e2e`; PLA Q.12, PLA-§P.2) |
+| **P3 LANDING** | landing.md | wave 1: LP-01…LP-06 (LP-03 incl. **ST-17 ETA as dates on landings**), LP-20, LP-21, LP-22; **wave 2: LP-11, LP-12, LP-18 / SF-01 Campaign Kit, LP-19 / SF-05 test links** (LAN Q33) | `src/lib/editor/{checklist.ts, selftest-checklist.ts}` (`selftest-checklist.ts` rev 4, LAN N6), **`src/app/app/[store]/pages/**` outside `(editor)`** (rev 4, ownership re-check: the pages list and new-page routes follow `src/components/admin/pages/**`, which LAN Q19 moved to P3, so LP-22's vitals and the kit entry need no CCR), `src/lib/delivery/**`, `src/lib/tracking/**`, `src/lib/orders/leads.ts`, `src/landing/thankyou/**`, `src/landing/sections/orderForm/**`, `src/landing/addons/**`, `src/landing/runtime/addons/**` (the add-on chunks `assist`, `assist-ty`, `track`; replaces the single `entry-delivery.ts` of rev 1), `src/landing/legal/**` (from R1 product, LAN Q16), `src/lib/{policies,leads,wa-order,links,campaigns,testing,landing}/**`, `src/lib/render/prepublish/landing.ts` (the honesty gate), `src/lib/orders/hooks/landing.ts`, `src/lib/settings/keys/{policies,checkout,landing}.ts`, `src/lib/health/rules/landing.ts`, `src/lib/pulse/contributors/landing.ts`, `src/lib/notify/kinds/landing.ts`, `src/lib/admin-data/search/landing.ts`, `src/components/admin/shell/commands/landing.ts`, `src/app/s/[store]/{track,go}/**`, `src/app/api/public/{track,wa}/**`, `src/app/(public)/kit/**`, `src/app/app/[store]/{leads/**, links/**, campaigns/**, settings/{checkout,delivery,policies}/**}`, `src/app/api/app/[store]/leads/**`, `src/components/admin/{leads,pages,delivery,policies,links,campaigns,landing}/**` (`pages/**` moves to P3, LAN Q19), nav/i18n/jobs `landing.ts`, `scripts/qa/{tracking-check,leads-check,kit-check}.ts`, `src/lib/testing/selftest.ts`, `src/lib/links/selftest.ts`, `scripts/qa/tenancy-cases/landing.ts`; **rev 2.1 (LAN-§26.1):** `src/lib/render/prepublish/landing.fixtures.ts`, `src/lib/landing/honesty/selftest.ts`, `src/lib/landing/cod-invariants.selftest.ts`, `scripts/qa/wow-demo/steps/landing.ts` (replaces the `qa/e2e/steps/landing-*.mjs` names of LAN-§3.8: demo steps are committed); **rev 3:** `scripts/qa/render-cases/landing.ts` (ENGP-12), `scripts/qa/delivery-check.ts` (`test:delivery`, D68; the fixture file is P4's), and the LAN-§26.1 rev 3 files inside owned folders (`src/lib/links/target.ts`, `src/lib/policies/claims*.ts`, `src/lib/landing/honesty/facts.server.ts`, `src/lib/delivery/lead.server.ts`, `src/components/admin/landing/{proof-attest,fact-attest}.tsx`); **rev 4** files inside owned folders: `src/lib/leads/read.ts` (the lead read repository through `maskIfImpersonation`, D70, LAN N5), `src/lib/landing/hours.ts` (`windowIsEmpty`, `weekHoursText`), `src/lib/delivery/table.ts` (`buildZoneTable`, D68). P3 imports P4's `CallingWindowEditor`, `window.ts` and `cityKey` (server-side only: no add-on imports `address.ts`, D68) and never edits them |
+| **P4 CALL CENTER** | operations.md | OP-01…OP-05, OP-06 (flag + link + separate; **merge R2**), OP-07…OP-14, **OP-17 keyboard-first (R1)**, **SF-04 Profit Guardian lite** (flag `finance_lite`), `shipments.write` R1 moves | `src/lib/orders/{state.ts, events.ts, queue.ts, customers.ts, duplicates.ts, manual.ts, address.ts, risk-explain.ts, admin.ts, transition.ts, edit.ts, masking.ts, profile.ts, export-zip.ts, state.selftest.ts}`, `src/lib/orders/hooks/ops.ts`, `src/lib/callcenter/**`, `src/lib/finance/lite/**`, `src/lib/admin-data/orders.ts`, `src/app/app/[store]/{orders,queue,customers,finance}/**`, `src/app/app/[store]/team/{agents,callcenter}/**`, `src/app/api/app/[store]/{orders,ops}/**`, `src/components/admin/{orders,queue,customers,agents,callcenter,finance}/**`, `src/lib/settings/keys/{ops,accounting}.ts`, `src/lib/health/rules/ops.ts`, `src/lib/pulse/contributors/ops.ts`, `src/lib/notify/kinds/ops.ts`, `src/lib/flags/defs/ops.ts`, `src/lib/admin-data/search/ops.ts`, `src/components/admin/shell/commands/ops.ts`, nav/jobs `ops.ts`, i18n `ops.ts` + `finance.ts` (lite keys, **`fr` complete in R1**, OPE Q.27l; S3 takes `finance.ts` over in R2, D67), `scripts/qa/{ops-check,queue-check,ops-db-check,profit-check}.ts`, **rev 2.1 (OPE-§P):** `scripts/qa/tenancy-cases/ops.ts`, `scripts/qa/wow-demo/steps/ops.ts`, `src/lib/callcenter/{aggregates,idem}.ts` and `src/lib/finance/lite/cents.ts` (inside owned folders); **rev 3 (OPE-§P):** `src/lib/callcenter/{inbound,carrier-csv,window.server}.ts`, `src/lib/finance/lite/ad-rates.ts`, `src/app/api/app/[store]/orders/carrier-csv/route.ts`, `src/components/admin/callcenter/calling-window.tsx` (the one hours editor, D73), **`scripts/qa/fixtures/city-key.json`** (the parity fixture P3 and S1 read, D68; owned here because `cityKey` is P4's); **rev 4 (CRIT3):** `src/lib/callcenter/{window.ts, defaults.ts, window.fixtures.ts}` (inside the owned folder: the one window type, `DEFAULT_WINDOW`, the shared window fixture P3 and S1 read); appends to `src/lib/orders/contract.ts` status labels through the maintainer (OPE Q.9a); the manual v2 path inserts through `createOrderRow` and never edits `create.ts` (D72) |
 | **P5 INTEGRATIONS** | operations.md | IN-01…IN-06 (IN-03 per-store secrets landed in T4; P5 adds the trigger, `integration_status` and health), the test-order exclusions on Sheets / CAPI / Telegram (D54) | `src/lib/sheets/**`, `src/lib/pixels/**`, `src/lib/orders/{conversions.ts, conversions-core.ts}`, `src/lib/orders/hooks/integrations.ts`, `src/lib/integrations/**` (telegram, whatsapp templates), `src/lib/jobs/handlers/{capi,telegram}.ts`, `src/app/app/[store]/integrations/**`, `src/app/app/[store]/settings/anti-spam/**` (OPE Q.17), `src/app/api/app/[store]/sheets/**`, `src/components/admin/{pixels,integrations}/**`, `src/components/admin/settings/sheets-wizard.tsx`, `src/lib/settings/keys/{sheets,conversions,notifications,telegram,export_key,pixel_library,pixel_health,tracking_secrets}.ts`, `src/lib/health/rules/integrations.ts`, `src/lib/pulse/contributors/integrations.ts`, `src/lib/notify/kinds/integrations.ts`, `src/components/admin/shell/commands/integrations.ts`, nav/i18n/jobs `integrations.ts`, `scripts/qa/{conversions-check,integrations-db-check}.ts` (OPE Q.9b), **rev 2.1:** `scripts/qa/tenancy-cases/integrations.ts`, `src/lib/integrations/deliveries.ts` (`listDeliveries(scope, q)`, OPE-§28, inside the owned folder) |
-| **P6 DESIGN** | design.md | DG-02…DG-09 (DG-12 reduced to the `explanation[]` "why this design" line and the DNA card; sliders and seed history R3), BK-1, GN-1, GH-1 (behind `ai_director_brief`), the §M design gate, the design-baseline §5 targets | `src/lib/theme/**`, `src/lib/generator/**`, `src/lib/design/**`, `src/lib/ai/copy-library/**`, `src/landing/sections/**` (except `orderForm/**`), `src/landing/styles/**`, `src/landing/registry.ts` (the `features` field), `src/landing/selftest-registry.ts`, `scripts/check-theme.ts`, `src/components/generate/**` (except `ai/**`), `src/components/builder/**` (except `ai/**`; mounts P3's `ProofAttestSheet` at the `sample` toggle and the rating field, LAN Q31, and P7's AI components, AI R15), `src/app/app/[store]/{generate,brand}/**`, `src/components/admin/brand/**`, `src/lib/logo/{monogram-grid,favicon}.ts`, `src/lib/settings/keys/{brand,platform-design}.ts`, `src/lib/render/prepublish/design.ts`, `src/lib/health/rules/design.ts`, `src/lib/flags/defs/design.ts`, `src/lib/admin-data/search/design.ts`, `src/lib/jobs/tracks/design.ts`, nav `design.ts`, i18n `design.ts`, `scripts/qa/design-*.ts`, `scripts/qa/tenancy-cases/design.ts` (DES-R2); **rev 2.1 (DES-R18 accepted):** `src/landing/primitives/{SectionHeader,RichText,Price,Countdown,Badge,MarqueeTrack,Kicker}.tsx` (seven of the folder's 25 files; the rest of `src/landing/primitives/**` stays read-only, CCR). Rules for the seven: every change is **additive** (new optional props such as `SectionHeader.opener`; a doc without `look` renders byte-identical markup to today, proven by `render-check` goldens), no new runtime bytes (they are server components), and P3's `orderForm/**` and `thankyou/**` keep consuming them through their existing props, so P3 wave 1 builds before P6 merges; **rev 3:** `src/app/dev/fixture/design/**` (the story fixtures of DES-§15.6, excluded from production builds, DES-R25), `scripts/qa/render-cases/design.ts` (ENGP-12), `scripts/qa/wow-demo/steps/design.ts` (the stage / specimen / dark assertion, UX-39), `src/lib/design/{sheets,gate-input,copy-gen,features}.ts` and `src/lib/design/calibration/heights.json` (inside `src/lib/design/**`); the `estimateAlpha(bitmap)` browser estimate (`src/lib/design/photo-facts.ts`) that P2's photos step calls (UX-39); the `cta` section's primary button carries `Cta`'s existing `hero` prop so the frozen `sticky.ts` hides the bar near every in-flow CTA (UX-4) |
-| **P7 AI** | ai.md | AI-01…AI-08 with the **class router (D55)**, `ai_jobs` + the detached-job pattern and probe (D56), the Director **interactive** pass for landing pages (plan + critique round 1, digest without screenshots), rubric v3 and the kicker budget (`src/lib/ai/copy-schema.ts:113-151` kickers become optional, ≤ ⌈sections/3⌉), eval harness v1 with the pairwise judge and the gate, injection screen, canary; AI-19a Director brief (flag); the `ad.brief` task (R1, behind the Cloud AI flag, template fallback) and `callcenter.script` for SF-01 (LAN Q20) | `src/lib/ai/**` (except `copy-library/**`), `src/app/api/app/[store]/ai/**` (incl. `jobs/[id]`), `src/app/app/[store]/settings/ai/**`, `src/app/admin/(console)/ai/**`, `src/components/admin/ai/**`, `src/components/generate/ai/**`, `src/components/builder/ai/**`, `src/lib/settings/keys/{platform_ai,store_ai,platform_ai_secret}.ts`, `src/lib/notify/kinds/ai.ts`, `src/lib/flags/defs/ai.ts` (`ai_director_brief`, `ai_copilot`, `ai_learned_priors`, `ai_risk_v2`, and rev 3 **`ai_detached_jobs`**, release, `false`, set by the live probe, ENGC-18), `src/lib/health/rules/ai.ts`, `src/lib/i18n/admin/<locale>/ai.ts`, nav `ai.ts`, `src/lib/jobs/tracks/ai.ts`, `scripts/qa/{ai-eval,ai-probe,ai-stream-check,ai-db-check,detached-job-probe}.ts`, `src/lib/ai/selftest.ts`, **rev 2.1:** `scripts/qa/tenancy-cases/ai.ts`, `src/lib/ai/jobs/pulse.ts` (`aiJobsForPulse`, AI R26; inside `src/lib/ai/**`); **rev 3:** `src/lib/ai/jobs/stages.ts` (the stage machine, AI-§B.13), `src/lib/ai/guard-numbers.ts`, `guard-claims.ts`, `prompts/darija-orthography.ts` (inside `src/lib/ai/**`); every page and route that may start a pattern-B job exports `maxDuration = 360` (ENGC-18); adds `@anthropic-ai/sdk` (exact pinned version) through the maintainer (one package) (AI R1). **DES-R20 confirmed (rev 2.1):** P7 makes every `kicker` field of the loose and strict `PageCopy` schemas `.optional()` (`src/lib/ai/copy-schema.ts:113-151`, 15 sections today) and `mergeAiCopy(library, ai, ctx)` (`src/lib/ai/guard.ts:114`) gains `ctx.kickers?: ReadonlySet<string>` (section ids allowed a kicker, from design's `CopyDirectives.kickers`, G32): a kicker is dropped, library or model, for a section not in the set; absent set = today's behaviour. P6's wizard (`src/components/generate/wizard.tsx:602`) passes the set |
+| **P6 DESIGN** | design.md | DG-02…DG-09 (DG-12 reduced to the `explanation[]` "why this design" line and the DNA card; sliders and seed history R3), BK-1, GN-1, GH-1 (behind `ai_director_brief`), the §M design gate, the design-baseline §5 targets | `src/lib/theme/**`, `src/lib/generator/**`, `src/lib/design/**`, `src/lib/ai/copy-library/**`, `src/landing/sections/**` (except `orderForm/**`), `src/landing/styles/**`, `src/landing/registry.ts` (the `features` field), `src/landing/selftest-registry.ts`, `scripts/check-theme.ts`, `src/components/generate/**` (except `ai/**`), `src/components/builder/**` (except `ai/**`; mounts P3's `ProofAttestSheet` at the `sample` toggle and the rating field, LAN Q31, and P7's AI components, AI R15), `src/app/app/[store]/{generate,brand}/**`, `src/components/admin/brand/**`, `src/lib/logo/{monogram-grid,favicon}.ts`, `src/lib/settings/keys/{brand,platform-design}.ts`, `src/lib/render/prepublish/design.ts`, `src/lib/health/rules/design.ts`, `src/lib/flags/defs/design.ts`, `src/lib/admin-data/search/design.ts`, `src/lib/jobs/tracks/design.ts`, nav `design.ts`, i18n `design.ts`, `scripts/qa/design-*.ts`, `scripts/qa/tenancy-cases/design.ts` (DES-R2); **rev 2.1 (DES-R18 accepted):** `src/landing/primitives/{SectionHeader,RichText,Price,Countdown,Badge,MarqueeTrack,Kicker}.tsx` (seven of the folder's 25 files; the rest of `src/landing/primitives/**` stays read-only, CCR). Rules for the seven: every change is **additive** (new optional props such as `SectionHeader.opener`; a doc without `look` renders byte-identical markup to today, proven by `render-check` goldens), no new runtime bytes (they are server components), and P3's `orderForm/**` and `thankyou/**` keep consuming them through their existing props, so P3 wave 1 builds before P6 merges; **rev 3:** `src/app/dev/fixture/design/**` (the story fixtures of DES-§15.6, excluded from production builds, DES-R25), `scripts/qa/render-cases/design.ts` (ENGP-12), `scripts/qa/wow-demo/steps/design.ts` (the stage / specimen / dark assertion, UX-39), `src/lib/design/{sheets,gate-input,copy-gen,features}.ts` and `src/lib/design/calibration/heights.json` (inside `src/lib/design/**`); the `estimateAlpha(bitmap)` browser estimate (`src/lib/design/photo-facts.ts`) that P2's photos step calls (UX-39); the `cta` section's primary button carries `Cta`'s existing `hero` prop so the frozen `sticky.ts` hides the bar near every in-flow CTA (UX-4); **rev 4:** `src/components/generate/reveal/**` (the three-fold reveal component P2's `/welcome` step mounts, with the slots for P7's `<DirectorPassControl>` and `<DirectorWhy>`, DES N5, AI R47), the "Report this store" link in `src/landing/sections/footer/**` (`legalLinks(ctx)`, CRIT15), the wizard's call site of P7's `useNoveltyGuard` and the generation record it stores (§M.1 rule 2); `src/lib/design/types.frozen.ts` is **not** P6's (maintainer, CRIT9) |
+| **P7 AI** | ai.md | AI-01…AI-08 with the **class router (D55)**, `ai_jobs` + the detached-job pattern and probe (D56), the Director **interactive** pass for landing pages (plan + critique round 1, digest without screenshots), rubric v3 and the kicker budget (`src/lib/ai/copy-schema.ts:113-151` kickers become optional, ≤ ⌈sections/3⌉), eval harness v1 with the pairwise judge and the gate, injection screen, canary; AI-19a Director brief (flag); the `ad.brief` task (R1, behind the Cloud AI flag, template fallback) and `callcenter.script` for SF-01 (LAN Q20) | `src/lib/ai/**` (except `copy-library/**`), `src/app/api/app/[store]/ai/**` (incl. `jobs/[id]`), `src/app/app/[store]/settings/ai/**`, `src/app/admin/(console)/ai/**`, `src/components/admin/ai/**`, `src/components/generate/ai/**`, `src/components/builder/ai/**`, `src/lib/settings/keys/{platform_ai,store_ai,platform_ai_secret}.ts`, `src/lib/notify/kinds/ai.ts`, `src/lib/flags/defs/ai.ts` (`ai_director_brief`, `ai_copilot`, `ai_learned_priors`, `ai_risk_v2`, and rev 3 **`ai_detached_jobs`**, release, `false`, set by the live probe, ENGC-18), `src/lib/health/rules/ai.ts`, `src/lib/i18n/admin/<locale>/ai.ts`, nav `ai.ts`, `src/lib/jobs/tracks/ai.ts`, `scripts/qa/{ai-eval,ai-probe,ai-stream-check,ai-db-check,detached-job-probe}.ts`, `src/lib/ai/selftest.ts`, **rev 2.1:** `scripts/qa/tenancy-cases/ai.ts`, `src/lib/ai/jobs/pulse.ts` (`aiJobsForPulse`, AI R26; inside `src/lib/ai/**`); **rev 3:** `src/lib/ai/jobs/stages.ts` (the stage machine, AI-§B.13), `src/lib/ai/guard-numbers.ts`, `guard-claims.ts`, `prompts/darija-orthography.ts` (inside `src/lib/ai/**`); **rev 4 (AI-§R.1):** `scripts/qa/render-cases/ai.ts` and `scripts/qa/wow-demo/steps/ai.ts` (extension files pre-registered at P0), `src/lib/ai/director/budgets.ts` (`budgetVerdicts` over the core's `HEIGHT_BAND` / `FOLD_BAND`, inside `src/lib/ai/**`); every page and route that may start a pattern-B job exports `maxDuration = 360` (ENGC-18); adds `@anthropic-ai/sdk` (exact pinned version) through the maintainer (one package) (AI R1). **DES-R20 confirmed (rev 2.1):** P7 makes every `kicker` field of the loose and strict `PageCopy` schemas `.optional()` (`src/lib/ai/copy-schema.ts:113-151`, 15 sections today) and `mergeAiCopy(library, ai, ctx)` (`src/lib/ai/guard.ts:114`) gains `ctx.kickers?: ReadonlySet<string>` (section ids allowed a kicker, from design's `CopyDirectives.kickers`, G32): a kicker is dropped, library or model, for a section not in the set; absent set = today's behaviour. P6's wizard (`src/components/generate/wizard.tsx:602`) passes the set |
 | **P8 PLATFORM OPS** | this doc §G, §H | OS-07…OS-11, PL-09 (job + ZIP), the runner with the rev 2 slot table **and the rev 3 tick lock, `yield()`, lag sampling and render CPU cap (ENGC-11)**, outbox core incl. the re-send rule (ENGC-29), render queue with the new reasons (incl. `cutout`) and the claim-clears-dedupe rule (ENGC-4), `renders` in-place `store_info` / `conversions` / `brand` (R1), health data incl. the PLA Q.25, AI/design, edge, build-gate, pool and tick sections, backups incl. `purgeRequests`, retention incl. the rev 2 rows, the `DATA_AREAS` registry (SEC-21), the `DATA_DIR` owner marker and budget walk (ENGC-14), the idempotent `put` (ENGC-20), the lock pool (ENGC-12) | `src/lib/jobs/**` (except other tracks' `tracks/*.ts`, `handlers/{capi,telegram}.ts` and `registry.ts`), `src/lib/media/{store.ts, storage/**}` **and, from the R1.0 integration, `src/lib/media/{process.ts, assets.ts, upload-slots.ts}`** (rev 3, ENGC-32: the upload pipeline steps 4-6 of §G.4), `src/lib/storage/**`, `src/lib/backup/**`, `src/lib/exports-store/**`, `src/lib/platform/health.ts`, `src/lib/db/locks.ts` (the lock pool; C0a's pure part frozen), `src/app/api/cron/tick/route.ts`, `src/app/media/[key]/route.ts`, `src/app/api/app/[store]/{media/**, exports/**}`, `scripts/qa/storage-check.ts`, `src/lib/jobs/selftest.ts` |
 
 Files no R1 product track lists (for example `src/components/admin/{media,history,items,offers,variants}/**`,
@@ -3900,7 +4034,14 @@ contributors, notification kinds, flags, commands, search providers and render-c
 file (§K.3), so SF-01, SF-03, SF-04, SF-05 and SF-06 add no shared-file edits beyond P0. **`test:ownership` (§J.1)
 parses the rows above and the parts' ownership tables at P0 and on every merge** (rev 3, ENGC-8): the P2/P3 `kit/**`,
 P2/P4 `team/**` overlaps and the three unowned files (`settings/audit/**`, `keys/platform.ts`, `security/selftest.ts`)
-rev 3 fixed were the last ones found by hand.
+rev 3 fixed were the last ones found by hand. **Rev 4 re-check** (every row above against PLA-§P, LAN-§26, OPE-§P,
+AI-§R, DES-§26 and STO-§27): no file has two owners in one phase; the prose overlap "reveal composition" (P2) vs the
+reveal component (P6) is now one owner per file (P6 the component, P2 the step); the one file with two owners inside it
+(`src/lib/design/types.ts`: frozen shapes + P6 exports) is split into `types.frozen.ts` (maintainer) and `types.ts`
+(P6, re-exporting); files the parts named in rev 4 got their row (P3 `selftest-checklist.ts` and `pages/**`, P2
+`scripts/qa/e2e/*.ts`, P7 `render-cases/ai.ts` / `wow-demo/steps/ai.ts`, the R2 / R3 rows of §K.4 / §K.5). Imports of
+another track's finished module in merge order (P3 → P4's `window.ts` and `CallingWindowEditor`; S4 → S1's
+`product-picker.tsx` and v3 functions; P2 → P6's `estimateAlpha` stub and reveal) are reads, never shared ownership.
 
 **Signature-feature ownership (rethink-features §1, §3.1):** SF-01 Campaign Kit → **P3** (wave 2; P7 supplies the
 `ad.brief` and `callcenter.script` tasks, P5 the WhatsApp confirmation template kind, P2 the address-card entry) ·
@@ -3947,15 +4088,19 @@ Owned by the maintainer for the whole of R1 product (and again in R2/R3): `src/l
 `src/lib/render/prepublish.ts`, `src/lib/render/prepublish/{budget,budget-limits}.ts` (the core's budget gate and its
 `registerBudgetProfile` hook, §M.2; rev 2.1 names them explicitly), `src/lib/render/selftest-prepublish.ts`,
 `src/lib/pulse/{types,registry}.ts`, `src/lib/notify/registry.ts`, `src/lib/flags/registry.ts`,
-`src/lib/health/{types,registry}.ts`, `src/lib/design/types.ts` (the frozen `HeightReport` / `FoldReport` /
-`VariantFeaturesResolved` shapes only; the file's other exports are P6's), `next.config.ts`, `src/landing/runtime/budgets.json`,
+`src/lib/health/{types,registry}.ts`, **`src/lib/design/types.frozen.ts`** (rev 4, CRIT9: the frozen `HeightReport` /
+`FoldReport` / `VariantFeaturesResolved` shapes in a file of their own; P6's `src/lib/design/types.ts` re-exports them and
+owns everything else, so no file has two owners and `test:ownership` can express it as a glob), `next.config.ts`,
+`src/landing/runtime/budgets.json`,
 **`src/landing/runtime/landing.sha256`** (written by T3 at the R1.0 integration, frozen afterwards),
 `scripts/build-landing-assets.mjs`, `src/lib/orders/contract.ts`, **`src/lib/orders/create.ts`** (`createOrderRow`, D72;
 T3's in R1.0, read-only afterwards), `src/lib/page/schema.ts` (frozen; the one DES-R1
 additive change is the maintainer's), `src/landing/document.tsx` (read-only in R1 product after T3; DES-R11's
 `brandIcon` swap is a CCR applied by the maintainer), `scripts/qa/wow-demo.ts`, `scripts/qa/publish-gates-e2e.ts`,
 **`scripts/qa/render-check.ts`** (the harness; tracks add fixtures through `render-cases/<track>.ts`, ENGP-12),
-**`scripts/qa/ownership-check.ts`**, **`scripts/deploy/archive.mjs`** (SEC-10), `scripts/sync-fonts.mjs` (the Arabic
+**`scripts/qa/ownership-check.ts`**, **`scripts/qa/test-budget.ts`** (the 3-minute harness, §J.1; rev 4 named),
+**`scripts/deploy/archive.mjs`** (SEC-10), `src/landing/{types,context,i18n}.ts` (read-only in R1 product; the rev 4
+report-link lines are the maintainer's P0 CCR, §K.2 P0), `scripts/sync-fonts.mjs` (the Arabic
 metrics step and the seven `@fontsource` faces of DES-R21 are a maintainer CCR applied in R1 product; the sample list
 `scripts/sync-fonts/ar-sample.json` is P6's), `docs/STORE-SAAS.md`. A track needing a change files
 `docs/saas/ccr/<release>-<track>-<n>.md` (what, why, exact diff); the maintainer applies CCRs serially, the same day, and
@@ -3983,7 +4128,8 @@ missing key is a CCR. In R1 product, `src/landing/runtime/**` stays read-only ex
 spec and this section disagree, this section wins (rev 2.1 fixed the four overlaps it found: `src/lib/i18n/**`,
 `health.ts`, the health registry import lines, the demo step folder; rev 3 fixed `(public)/kit/**` (P2/P3),
 `team/{agents,callcenter}/**` (P2/P4) and gave `settings/audit/**`, `keys/platform.ts` and `security/selftest.ts` an
-owner), and from P0 `test:ownership` checks it mechanically.
+owner; rev 4 split `src/lib/design/types.ts` and named the reveal component's owner, §K.2), and from P0
+`test:ownership` checks it mechanically.
 
 ### K.4 R2 (full stores and the money side), coarser grain
 
@@ -4000,9 +4146,13 @@ ENGC-13), `attachedDocFor(target)` applied by `orderVersion` for pages with `pro
 in `src/lib/render/config.ts` (STO-R12, LAN Q25), `ensureTemplateSet` (STO-R17), the STO-R19 stubs (`getStoreTheme(scope,
 register)` S2; from P3's R1 modules, named for S1: `zonesForCheckout`, `zoneLineFor`, `zoneForCity`, `etaWindow`,
 `etaText`, `etaWindowText` (rev 2.1, LAN N2: the STO-§15.8 shape, so S1 writes nothing in `src/lib/delivery/**`),
-`signedTrackPath`, `waConfirmText`; from P4: `cityKey`, `callingWindowFor`, `nextCallableAt`, `hoursText` (D68, D73))
-and the `stores.catalog_version` bump on delivery-zone writes, theme/brand changes and `store` / `policies` setting
-writes, `republishAttached` as the `product` render handler for `prices` / `options` changes only (LAN Q24, STO-R41),
+`signedTrackPath`, `waConfirmText`; from P4: `cityKey` (server-side), `callingWindowFor`, `nextCallableAt`, `hoursText`,
+`shopperPromiseAllowed` (D68, D73; the store chunks import none of the city-key code and embed the `ZoneTable` and the
+serialised `EffectiveWindow` as they are)) and the `stores.catalog_version` bump on delivery-zone writes, theme/brand
+changes, `store` / `policies` setting writes **and (rev 4, STO C6) every `ops` write that changes `callingWindow`,
+`windowOverrides` or closed dates (P4's `saveOpsSettingsAction` / `saveCallingWindowAction`: the store footer, the
+contact hours and `#sg-config.checkout.callWindow` are rendered from it) and P8's `cutout` render handler, once per store
+whose active products' `asset_refs` contain the asset (STO-D47)**, `republishAttached` as the `product` render handler for `prices` / `options` changes only (LAN Q24, STO-R41),
 **(rev 2.1, STO-R25)** the import line of `src/lib/render/prepublish/storefront.ts` in `prepublish.ts` and the
 `registerBudgetProfile(kind, profile)` calls for the STO-§6.1 kinds (D66, §M.2; the storefront file also registers
 `storefront:*` items under the three codes, STO-§23.6), `src/storefront/{types,schema,kinds,fold}.ts` as frozen
@@ -4012,8 +4162,10 @@ StorePageDoc` in `src/lib/design/types.ts` and of `FoldItem` to `| "name" | "ide
 `gateInputFor(doc, ctx)` (DES-§8.13, `KIND_GATES`) as the one adapter and `src/storefront/fold.ts checkFold` a thin call
 into `estimateHeights` (DS33), **(rev 3, OPS-15 / D72)** the frozen signatures of `quoteManualOrderV3` /
 `createManualOrderV3` / `editOrderV3` (`src/lib/catalog/order-v3.server.ts`, S1, STO-§16.9: pricing by `priceLine`,
-insert by `createOrderRow`) so S3/S4 build the manual-order sheet's store-mode branch against them, `createProduct(scope,
-facts)` and `setThemeDraft(scope, direction)` (S1, for the store-mode onboarding reveal, §A.2 / OPS-14),
+insert by `createOrderRow`; a create whose quote has no delivery rule is refused `fee_unset`, never a 0 fee, and the
+input has no `shipAfter`, the sheet sets the hold in a second idempotent write) so **S4** builds the manual-order
+sheet's store-mode branch against them (rev 4, CRIT4: S4 only, as its row says), `createProduct(ctx, { facts })` and
+`setThemeDraft(ctx, direction)` (S1, `WriteCtx`, for the store-mode onboarding reveal, §A.2 / OPS-14),
 `productAsPageDoc(product, { …sctx, direction })` taking the onboarding direction, **(rev 3, D75)** **LP-16**: the
 `landing-v3` runtime entry (a fork of `entry.ts` plus one zone lookup), runtime config **v3** with `zones: ZoneTable`,
 server shipping by zone (`storeDeliveryFee`) for `runtime_v = 3` versions, the `budgets.json` key `landing-v3` (the
@@ -4021,7 +4173,9 @@ re-measured `landing` + 500 B), the export refusal `export:runtime_v3_unsupporte
 checklist warning `delivery:fee_mismatch` and the "Charge delivery by city" toggle the attach flow uses (attached
 landings created from a product in `both` mode start on v3), **(rev 3, AI R37)** `order_events.actor_kind` appended
 `'integration'`, `'reconciliation'` so `stats_version_daily.delivered_evidence` can tell a carrier-confirmed delivery
-from a hand-set one, `stores.category` required at a mode switch to `store` / `both` (ENGP-25), the `onLeadCreated`
+from a hand-set one (**rev 4, AI R45:** `'integration'` means a carrier adapter only; the Sheets sync of D74 writes
+`'sheet'` and the store's own API `'api'`, both counted as hand-set, so a typed "Livré" in a Sheet is never read as a
+carrier-confirmed delivery), `stores.category` required at a mode switch to `store` / `both` (ENGP-25), the `onLeadCreated`
 hook (OPE Q.18), `bumpVersionStats` (LAN Q26) and the `recordEvent` call line (AI R22), the packages `harfbuzzjs` and
 `clipper-lib` pinned after the S2 spike (DES-R6), `scripts/build-logo-fonts.mjs` in `prebuild`/`predev` and `test:logo`
 (DES-R7), `logistics`/`accountant` roles switched on, the `keepPng` media option (DES-R14), the deep Director pass enabled
@@ -4033,11 +4187,11 @@ at this step, never "the store branches of" a shared file.
 
 | Track | Feature ids | Main areas |
 |---|---|---|
-| S1 STOREFRONT | ST-01…ST-10, ST-17 (store side), LP-07, LP-08, LP-16 store side (D75), LP-23, AI-19 consumer (Director review button), SF-12 store side, SF-05 store side, the v3 manual-order pricing (OPS-15) | `src/lib/catalog/**` (incl. `order-v3.server.ts`, STO-§16.9), `src/lib/storefront/**` (incl. `chrome.server.ts`), `src/storefront/**` (except the four frozen contract files above), store page kinds and sections, `/p` `/c` `/cart` `/checkout` `/search` routes and **the whole files** `src/app/s/[store]/route.ts`, `[slug]/route.ts`, `policies/**` (rev 3; `track/**` stays landing's and imports `wrapInStoreChrome`), `src/app/s/[store]/[slug]/[...rest]/route.ts`, `src/app/api/public/store/**`, cart/checkout runtime chunks (bundling P4's pure `cityKey`, D68), on-request render cache with `w${windowId}` (R-D42, STO-R7), store SEO, `src/app/app/[store]/{catalog,storefront}/**`, `src/components/admin/{catalog,storefront}/**` (incl. `catalog/product-picker.tsx` that S4's sheet imports), `src/lib/editor/store-page.ts`, `src/lib/settings/keys/{checkout-store,storefront}.ts` (`checkout-store.ts` never redefines `addressMode`, UX-31), `src/lib/orders/hooks/storefront.ts` (stock decrement, hold release, STO-R23; reads the `line_outcome` event of a partial delivery), **the landing parts S1 takes over in R2 (LAN-§26.2 = STO-§27.2):** `src/lib/landing/{attach.ts, attach.server.ts, copy.server.ts}` (`materializeAttached`, `offerOverrides`, `republishAttached`, `copyPageToStore`), `src/components/builder/attach/**`, the `product` render handler registration, read-only mirrored item fields in the landing editor, the `landing-v3` runtime entry with the maintainer (D75); **extension files (rev 2.1):** `src/lib/render/prepublish/storefront.ts` (+ `storefront.fixtures.ts`, the per-kind `test:prepublish` fixtures), `src/lib/health/rules/storefront.ts`, `src/lib/pulse/contributors/storefront.ts` (`lowStock`, `outOfStock`, `templateDrafts`), `src/lib/notify/kinds/storefront.ts`, `src/lib/flags/defs/storefront.ts`, `src/lib/jobs/tracks/storefront.ts`, `src/components/admin/shell/{nav,commands}/storefront.ts`, `src/lib/admin-data/search/storefront.ts`, `src/lib/i18n/admin/<locale>/storefront.ts`, `scripts/qa/tenancy-cases/storefront.ts`, `scripts/qa/render-cases/storefront.ts`, `scripts/build-store-assets.mjs`, `scripts/qa/storefront-{render-check,db-check,e2e,perf,a11y,demo}.ts` |
+| S1 STOREFRONT | ST-01…ST-10, ST-17 (store side), LP-07, LP-08, LP-16 store side (D75), LP-23, AI-19 consumer (Director review button), SF-12 store side, SF-05 store side, the v3 manual-order pricing (OPS-15) | `src/lib/catalog/**` (incl. `order-v3.server.ts`, STO-§16.9), `src/lib/storefront/**` (incl. `chrome.server.ts`), `src/storefront/**` (except the four frozen contract files above), store page kinds and sections, `/p` `/c` `/cart` `/checkout` `/search` routes and **the whole files** `src/app/s/[store]/route.ts`, `[slug]/route.ts`, `policies/**` (rev 3; `track/**` stays landing's and imports `wrapInStoreChrome`), `src/app/s/[store]/[slug]/[...rest]/route.ts`, `src/app/api/public/store/**`, cart/checkout runtime chunks (rev 4, CRIT1: they look up the embedded value-keyed `ZoneTable`, `table.city[value] ?? table.star`, and bundle no city-key code, D68), on-request render cache with `w${windowId}` (R-D42, STO-R7), store SEO, `src/app/app/[store]/{catalog,storefront}/**`, `src/components/admin/{catalog,storefront}/**` (incl. `catalog/product-picker.tsx` that S4's sheet imports), `src/lib/editor/store-page.ts`, `src/lib/settings/keys/{checkout-store,storefront}.ts` (`checkout-store.ts` never redefines `addressMode`, UX-31), `src/lib/orders/hooks/storefront.ts` (stock decrement, hold release, STO-R23; reads the `line_outcome` event of a partial delivery), **the landing parts S1 takes over in R2 (LAN-§26.2 = STO-§27.2):** `src/lib/landing/{attach.ts, attach.server.ts, copy.server.ts}` (`materializeAttached`, `offerOverrides`, `republishAttached`, `copyPageToStore`), `src/components/builder/attach/**`, the `product` render handler registration, read-only mirrored item fields in the landing editor, the `landing-v3` runtime entry with the maintainer (D75); **extension files (rev 2.1):** `src/lib/render/prepublish/storefront.ts` (+ `storefront.fixtures.ts`, the per-kind `test:prepublish` fixtures), `src/lib/health/rules/storefront.ts`, `src/lib/pulse/contributors/storefront.ts` (`lowStock`, `outOfStock`, `templateDrafts`), `src/lib/notify/kinds/storefront.ts`, `src/lib/flags/defs/storefront.ts`, `src/lib/jobs/tracks/storefront.ts`, `src/components/admin/shell/{nav,commands}/storefront.ts`, `src/lib/admin-data/search/storefront.ts`, `src/lib/i18n/admin/<locale>/storefront.ts`, `scripts/qa/tenancy-cases/storefront.ts`, `scripts/qa/render-cases/storefront.ts`, `scripts/build-store-assets.mjs`, `scripts/qa/storefront-{render-check,db-check,e2e,perf,a11y,demo}.ts`; **rev 4 (STO-§27.2, LAN-§26.2):** `src/lib/storefront/onboarding.server.ts` (`setThemeDraft`) and the `facts` form of `createProduct` in `src/lib/catalog/products.server.ts`, `scripts/qa/copy-check.ts` (LP-23), `scripts/qa/lib/orange.ts` (S1's extraction of the orange scan, STO-§8.4; `scripts/check-theme.ts` stays read-only for S1) |
 | S2 BRAND & LOGO | DG-10…DG-14 | `src/lib/logo/**` (HarfBuzz shaping, outlines, exports; takes over the R1 files), `src/lib/design/{brand,registers,effective,email,blueprint,store-theme.server}.ts`, `store_themes` lifecycle, brand kit UI (`src/app/app/[store]/brand/**`, `src/components/admin/brand/**`, `src/app/api/app/[store]/brand/**`), email token compiler, `scripts/build-logo-fonts.mjs`, `scripts/qa/design-visual.mjs` (DES-§26) |
-| S3 MONEY | AC-01…AC-07, OP-15, TN-12, SF-09 (with S4) | `src/lib/finance/**` (takes over `lite/**`), `src/lib/imports/**` framework + `import_mappings` (D38), commissions ledger (`hooks/money.ts`), finance screens, `DATA_DIR/receipts` |
-| S4 LOGISTICS | OP-06 merge (R2), OP-16…OP-19, the store-mode manual-order sheet (OPS-15) | `src/lib/carriers/**` (`CarrierAdapter`, manual CSV adapter, the `self` adapter), shipments, picking list / manifest PDF, assignment rules, reveal alarm; **takes over from P4 in R2:** `src/components/admin/orders/manual/**` (the sheet routed by store mode: the products picker in `store` / `both` calling S1's v3 functions, the pages picker in `landing` calling `createManualOrder`), `src/app/api/app/[store]/orders/carrier-csv/route.ts` (`format=xlsx` through S3's writer). Operations' proposed `src/lib/orders/{manual-v3,edit-v3}.ts` do **not** exist: the v3 functions are S1's (`src/lib/catalog/order-v3.server.ts`), so the public and manual v3 prices share one owner (rev 3, OPS-15; §Q.8) |
-| S5 INTEGRATIONS 2 | IN-07…IN-09, SE-07 | webhooks (Standard Webhooks, outbox, `hooks/webhooks.ts`, `lead.created` via `onLeadCreated`), SSRF guard library, SMTP mail transport (`payout_ready` template), Sheets upgrades (`sheets_sa`) |
+| S3 MONEY | AC-01…AC-07, OP-15, TN-12, SF-09 (with S4) | `src/lib/finance/**` (takes over `lite/**`), `src/lib/imports/**` framework + `import_mappings` (D38; incl. `xlsx-write.ts`, the writer S4's Carrier CSV route imports), commissions ledger (`hooks/money.ts`), `src/lib/jobs/tracks/money.ts`, finance screens (`src/app/app/[store]/finance/**`, `src/components/admin/finance/**`), `src/app/api/app/[store]/{imports,finance}/**`, `src/lib/settings/keys/accounting.ts` (from P4), `DATA_DIR/receipts`, `scripts/qa/money-check.ts`, `scripts/qa/fixtures/imports/**` (OPE-§P) |
+| S4 LOGISTICS | OP-06 merge (R2), OP-16…OP-19, the store-mode manual-order sheet (OPS-15) | `src/lib/carriers/**` (`CarrierAdapter`, manual CSV adapter, the `self` adapter), `src/lib/shipping/**` (shipments, picking list / manifest PDF; rev 4: incl. `manual-actions.ts`, the sheet's thin v3 `storeAction` wrappers, OPE-§11.5), `src/lib/orders/merge.ts`, `src/lib/callcenter/{rules.ts, reveal-alarm.ts}` (assignment rules, reveal alarm), `src/lib/jobs/tracks/logistics.ts`, `src/app/app/[store]/shipping/**`, `src/components/admin/shipping/**`, `src/app/api/app/[store]/shipping/**`, `src/lib/settings/keys/carrier_credentials.ts`, `scripts/qa/carrier-check.ts`; **takes over from P4 in R2:** `src/components/admin/orders/manual/**` (incl. rev 4 `mode.ts`, `manualSheetMode`; the sheet routed by store mode: the products picker in `store` / `both` calling S1's v3 functions, the pages picker in `landing` calling `createManualOrder`), `src/app/api/app/[store]/orders/carrier-csv/route.ts` (`format=xlsx` through S3's writer). Operations' proposed `src/lib/orders/{manual-v3,edit-v3}.ts` do **not** exist: the v3 functions are S1's (`src/lib/catalog/order-v3.server.ts`), so the public and manual v3 prices share one owner (rev 3, OPS-15; §Q.8) |
+| S5 INTEGRATIONS 2 | IN-07…IN-09, SE-07 | webhooks (`src/lib/webhooks/**`: Standard Webhooks, outbox handler `src/lib/jobs/handlers/webhook.ts`, `hooks/webhooks.ts`, `lead.created` via `onLeadCreated`, `src/app/app/[store]/integrations/webhooks/**`), SSRF guard library (`src/lib/security/ssrf.ts`), SMTP mail transport (`payout_ready` template), Sheets upgrades (`src/lib/sheets/**` for IN-09, `src/lib/settings/keys/sheets_sa.ts`) |
 | S6 PLATFORM UX | UX-04, UX-06, OS-12, OS-13, PL-07 remaining tabs, French dashboard | admin upgrade on the §I.6/§I.8 foundation, realtime arrivals on the pulse (PLA-§22.6.4), Worker edge cache + purge, Worker alerts; UX-05 already shipped in R1 (P2) |
 | S7 AI DATA | AI-09…AI-12, the **deep Director pass** (Fable 5.1) for store blueprints and logo systems, preview rasterization + tiles, verify round 2 (rethink-ai §6) | SEO/alt/translation tasks with Batches, store blueprint, `stats_version_daily` + `ai_feedback` plumbing (`src/lib/stats/version.ts`, `src/lib/orders/hooks/ai.ts`, AI R22), `recordPublishFeedback`, `generation_source` / `critic_picks` readers |
 
@@ -4072,7 +4226,8 @@ and the new landing section `src/landing/sections/reviewsVerified/**` plus `src/
 owned by D3 (STO-§27.3).
 Tracks: **D1 DOMAINS** (OS-14…OS-18, PL-22
 skeletons), **D2 CARRIERS & MESSAGING** (OP-20…OP-27, IN-10…IN-13, AC-08…AC-11), **D3 GROWTH** (ST-11…ST-20, LP-09,
-LP-10, LP-13…LP-16, LP-24; SF-10), **D4 LEARNING** (AI-13…AI-23 incl. the LLM version of AI-20, DG-12 sliders and seed
+LP-10, LP-13…LP-15, **LP-16 PHP side only (runtime in R2, D75; rev 4, LAN N7 / CRIT11)**, LP-24; SF-10; the R3 check
+scripts `scripts/qa/{chain-check,schedules-check,analytics-check,saved-blocks-check}.ts`, LAN-§26.3), **D4 LEARNING** (AI-13…AI-23 incl. the LLM version of AI-20, DG-12 sliders and seed
 history, DG-15…DG-18; SF-11), **D5 PLATFORM** (PL-15…PL-21, UX-07 push, UX-08 Arabic RTL dashboard, SE-08). ST-21 (EU
 pack) becomes P0 when the first EU store is planned. P2 items stay gated on volume, consent, legal review or owner
 demand (RESEARCH §4).
@@ -4083,6 +4238,12 @@ demand (RESEARCH §4).
 
 Track codes: R1.0 `C0`, `T1` DATA, `T2` AUTH, `T3` EDGE, `T4` SCOPE; R1 `P1` CONSOLE … `P8` PLATFORM OPS (§K.2);
 R2 `S1` … `S7` (§K.4); R3 `D1` … `D5` (§K.5). "core" = this document.
+
+**Proven by (rev 4, CRIT17).** Every feature id is mapped to the command and the fixture or harness step that proves it
+in its part: PLA-§1 (a "Proven by" column, `FEATURE_PROOFS` asserted by `test:platform`), STO-§1.5, LAN-§1.4,
+OPE-§O.4 (`ops-check.ts` fails on an uncited id), AI-§Q.5, DES-§1.4; every test file names the ids it proves in a
+`// proves: <ids>` header, so `grep "proves:"` maps every id to a suite. An acceptance cell that only lists deliverables
+is rewritten as a checkable statement by its part; the core's own rows below point at the §J scripts.
 
 ### L.1 TENANCY-MAP item → where it is resolved
 
@@ -4215,7 +4376,7 @@ R2 `S1` … `S7` (§K.4); R3 `D1` … `D5` (§K.5). "core" = this document.
 | PL-13 | core §D.4 + platform.md | R1.0 / R1 | T2, P1, P2 |
 | PL-14 | core §D.10, §H.4 (legal seed from code) + platform.md; R1 = ToS, Privacy, AUP, store templates; the platform **DPA moves to R2** (rethink-features §3.3) | R1 (DPA R2) | P1 |
 | PL-15 … PL-17, PL-19, PL-21 | platform.md (PL-17 stays R3: no R1 "What's new" drawer) | R3 | D5 |
-| PL-20 | **R1 slice (rev 3, D76):** "Report this store" on every public page, `/report/<handle>`, insert-only `abuse_reports` in 0005, console counts and the `abuse_reports_new` flag; the triage queue and takedowns stay R3 | R1 (slice) / R3 | P1 (+ P3 / S1 footer link) / D5 |
+| PL-20 | **R1 slice (rev 3, D76):** "Report this store" on every public page, `/report/<handle>`, insert-only `abuse_reports` in 0005, console counts and the `abuse_reports_new` flag; the triage queue and takedowns stay R3; rev 4 (CRIT15): one `reportUrl()` builder and `links.report` in the render context (§C.6) | R1 (slice) / R3 | P1 (+ P6 landing footer, the maintainer's Shell fallback, P3 thank-you / tracking / legal pages, S1 store chrome) / D5 |
 | PL-18 | **raised to R1 and tenant-facing** (SF-03): core §I.7, D53, §D.5 `store_health` + platform.md PLA-§6.3 | R1 | P1 (engine, job, console ring), P2 (tenant ring), rules per track |
 | PL-22 | platform.md | R3 | D1 |
 | PL-23 … PL-25 | platform.md | later | — |
@@ -4356,6 +4517,7 @@ R2 `S1` … `S7` (§K.4); R3 `D1` … `D5` (§K.5). "core" = this document.
 | **rev 2.1** PLA-§Q.1 (notes 1, 2) | `ActionErrorCode` open tail with the i18n rule (D65); `addImpersonationNoteAction` seam behaviour pinned | D65, §E.2, §B.8, §F.1 | P1, P2 |
 | **rev 2.1** core reconciliation | one i18n file per track (D67), the health engine file placement and `computeHealth` location, the committed demo-step folder, the storefront R2 job times, the `platform.ts` / `storefront.ts` / `ai.ts` / `ops.ts` / `integrations.ts` attack-case files | §I.5, §I.7, §H.2, §J.1, §J.3, §K.2, §K.3 | P1, P2, P4, P5, P7, S1 |
 | **rev 3** round-1 review (OPS, ENGC, ENGP, UX, SEC, QUAL) | the blockers OPS-1, ENGC-1, ENGC-2, ENGP-1, SEC-1, QUAL-1 and every major and minor that names the core; the parts' third-round requests | D68-D76; §P (one line per finding), §N.2 (one line per change), §Q.8 (the parts' requests) | every track |
+| **rev 4** round-2 review (the round-1 ids re-sent, CRIT1 … CRIT20) | the browser zone-table shape, the calling-window shape and the shopper-promise flag, the report-link renderers, the frozen-types file, `estimateAlpha` at P0, the R1 scripts and the later-release script list, the proof maps, the committed e2e steps, the `WriteCtx` overloads, the slot 4c rule, the parts' fourth-round notes | D56, D68, D71-D73, D76; §P round 2, §N.3, §Q.9 | every track |
 
 ---
 
@@ -4391,13 +4553,24 @@ export function runPrePublishChecks(ctx: PrePublishCtx): Promise<{ ok: true; not
    savings or countdown an owner typed with no merchant source, a numeric conflict between two occurrences, and a claim
    that contradicts a set policy are refusals; an owner-typed numeral of class `fact` / `other` and a claim about an
    **unset** policy are notes with a one-tap attestation that writes `page.fact_attested`, LAN-§6.4). The `origin` map
-   both design's `GateInput.origin` and landing's `LandingGateInputs.origin` read (which field is owner-typed, library,
-   cloud, local or engine-generated) is built by **one** shared builder (`originFrom(prev, doc)` in `prepublish.ts`),
-   and the create-from-directions path records the wizard's merchant facts through `recordFacts(scope, pageId, facts)`
-   so the gate judges the facts the seller actually gave. Document types: `gateInputFor(doc, ctx)` (design,
-   DES-§8.13) maps a `PageDoc` or a `StorePageDoc` to the gate input and its `KIND_GATES` table says which gates run per
-   kind (utility kinds run the structural, owner-rule, register and budget gates only and are never pooled or
-   novelty-checked; only `landing`, `home` and `page` enter `design_genomes`; rev 3 ENGP-1).
+   both design's `GateInput.origin` and landing's `LandingGateInputs.origin` read is built by **one** shared builder
+   (`originFrom(prev, doc)` in `prepublish.ts`) over design's five classes **`OriginClass = "owner" | "library" |
+   "engine" | "local" | "cloud"`** (rev 4, QUAL-1 / AI R44 / DES N3): it reads the **generation record** design stores
+   on the draft's `chosen` genome row (`design_genomes.report.gen`: field path → `{ h: hash16, o: OriginClass }`, ≤ 600 B,
+   DES-§9.8), whose `o` comes from ai's per-field `CopyOrigin` returned by `mergeAiCopy` v2 (AI-§A.3) and from the
+   engine / library path for the rest; a field whose current text hash differs from `h` is `owner`, a field without a
+   record is `library` (pre-rev-4 drafts); the wizard (P6) owns the call site of P7's `useNoveltyGuard({ check:
+   checkHeadlinesAction })` and writes the record; a gate that needs only two classes may collapse `library` / `engine`
+   / `local` / `cloud` to "generated" except where §M.4 distinguishes them. The create-from-directions path records the
+   wizard's merchant facts through `recordFacts(scope, pageId, facts)` so the gate judges the facts the seller actually
+   gave. Document types (rev 4, DES N4 / CRIT18, quoted verbatim from design): **`gateInputFor(doc: PageDoc |
+   StorePageDoc, ctx: GateInputCtx): GateInput`** (pure, isomorphic, `src/lib/design/gate-input.ts`) and
+   **`gateCtxFrom(ctx: PrePublishCtx): Promise<GateInputCtx>`** (server-only, `src/lib/render/prepublish/design.ts`,
+   P6; it resolves the kind, the store theme and look, the origin through `originFrom`, the facts and the proof data);
+   which gates run per kind is **"the design gates of `KIND_GATES` (DES-§8.13)"**, beside the core's budget profile for
+   the kind and landing's / storefront's own items; utility kinds (`product`, `collection`, `search`, `cart`,
+   `checkout`, `not_found`, `policy`) are never pooled or novelty-checked, and only `landing`, `home` and `page` enter
+   `design_genomes` (rev 3 ENGP-1).
 3. **`mode`**: `platform_design.gatesAtPublish` (design items) and the ops flag `design_publish_gates` default to
    `block`; `warn` turns hard items into notes, publishes, and audits `page.publish.design_override` /
    `page.publish.budget_override` with the items. Honesty items have **no warn mode**.
@@ -4417,7 +4590,7 @@ export function runPrePublishChecks(ctx: PrePublishCtx): Promise<{ ok: true; not
 |---|---|---|---|
 | `budget:F5` page weight | HTML > 90 KB gz; > 16 `<picture>` (control arm only, ENGP-18) ; > 2 font families or > 4 font files | **HTML > 140 KB gz** | gzip of the rendered document (`renderAndCommit` output) |
 | `budget:C3` length | > 14 in-flow sections or estimated mobile height > 12,000 px at 390; **estimated height > 15,000 px but ≤ 18,750 px** = a soft `estimated` note (rev 3) | **> 16 sections (exact) or estimated height × 0.8 > 15,000 px** (i.e. > 18,750 px estimated; rev 3, ENGP-6) | the design height model (`src/lib/design/heights.ts`, DES-§5.3; accepted error 0.8-1.25), no browser needed |
-| `budget:F1` form position | order form starts below 3,000 px at 390 (screen > 4) or form height > 1,100 px in default state; **estimated top > 3,000 px but ≤ 3,750 px** = a soft `estimated` note | **form not present on a landing page with an offer; estimated top × 0.8 > 3,000 px** (rev 3) | height model |
+| `budget:F1` form position | order form starts below 3,000 px at 390 (screen > 4); **estimated top > 3,000 px but ≤ 3,750 px** = a soft `estimated` note (rev 4, LAN N3: the form's **height** is one item only, P3's `form:F1`, so this row measures the position alone) | **form not present on a landing page with an offer; estimated top × 0.8 > 3,000 px** (rev 3) | height model |
 | `budget:C2` fold contract | **the lowest fold item's estimated top in 760-938 px** (the band of the ±10 % fold error) = a soft `estimated` note (rev 3) | **product image, price, primary CTA or the COD line with an estimated top × 0.9 > 844 px at 390 × 844 for the chosen hero family** (i.e. > 938 px; the only server viewport; 360 × 740 is a Playwright-only soft check) | the hero family's declared fold layout through the height model's `FoldReport` (DES-§5.2, §5.12); **the server decides from the model alone, Playwright in `qa:publish-gates` is the calibration check, never the measurer** (rev 3) |
 | `budget:R1` CTA count | > 6 primary CTAs (sticky bar counts as 1) | **> 8** | DOM count on the rendered HTML, control arm only (ENGP-18) |
 | `budget:R4`, `budget:R5` | > 2 glass surfaces outside nav/sticky; > 60 reveal nodes | **> 4 glass; > 120 reveals** | CSS / DOM count, control arm only for R5 |
@@ -4476,8 +4649,12 @@ hotspots without merchant-placed anchors (I5); a countdown without a merchant-se
 figure the owner did not type (LP-21); sample proof content still marked `sample` without an attestation
 (`page.proof_attested`, LAN-§6.1); a delivery fee, ETA or promise not present in `delivery_zones`, `policies`, the
 `store.confirmation` block or `ops.callingWindow` (the fee line is **absent**, never invented, when zones are empty; the
-calling-hours promise reads the one window, D73); **`honesty:password_field`** (rev 3, D76 / SEC-18): any `<input
-type="password">`, card-number pattern or OTP field on a landing or store page (never legitimate on a COD page). Exports
+calling-hours promise reads the one window, D73, and is a fact only when `shopperPromiseAllowed(w)`; rev 4, OD63: a
+call-time claim while the window is not configured is treated like a claim about an unset policy, a note whose one-tap
+fix is "Use these hours", and a claim that contradicts a configured window is refused); **`honesty:password_field`** (rev 3, D76 /
+SEC-18): any `<input type="password">`, card-number pattern or OTP field on a landing or store page (never legitimate on
+a COD page; P3 exports the field-pattern list and the storefront's `storefront:form_field_foreign` imports it, so both
+refuse exactly the same fields). Exports
 and the PHP template pass the same checks because they publish the same document; store documents pass the landing
 honesty items through `landingGateItems` on the eligible landing sections only, with the facts of the bound product
 (LAN-§3.2.1).
@@ -4488,16 +4665,20 @@ honesty items through `landingGateItems` on the eligible landing sections only, 
 chroma > 0.06 anywhere in the compiled theme or a section's declared colour mix; AA contrast; RTL hard gates RTL1-RTL7;
 Arabic type hard rules T1-T3, T7, T8), then the **clone block (rev 3 wording, DES-R24 / QUAL-1, QUAL-3, QUAL-4)**:
 genome distance `d < τ_niche(n)` against any live store in the niche (`τ_niche` = 0.40 at ≤ 20 stores falling to 0.30
-at ≥ 100, never below the platform threshold + 0.05, DES-§7.9) or `d < 0.25` platform-wide (N1); `d_page < 0.30` against
+at ≥ 100, never below the platform threshold + 0.05, DES-§7.9) or `d < 0.25` platform-wide (N1), **except the verified
+exhaustion path of DES-§7.9 step 4** (rev 4, DES N2 / UX-24): when only the niche band is `too_close` and ≤ 6
+deterministic server-side `differentiate` resamples find no variant clearing `τ_niche(n)`, the niche item is a soft
+note (`vars.fallback = 1`); the platform band (`d < 0.25`) and the clone flag (`d < 0.12`) stay hard whatever the niche; `d_page < 0.30` against
 the store's last **5 published pages of the same product** (N2; other pages of the store give the soft `pages_close`
 note); a headline 3-gram shingle share > 25 % in the niche **on a generated line** (N8: hard when the line's origin is
 `cloud`, `local` or `engine` — the compositional generator — and **soft** when it is `owner`-typed, per rule 2 of §M.1,
 or a copy-library fallback line, whose shared wording is by construction and whose share the library sweep keeps ≤ 10 %
 per skeleton; STO-R39's "owner-typed hard" is not adopted, §P); D3 (FAQ register) likewise hard on generated text only;
 then the structural hard rows (C5 one opener > 70 %, K4 pop derivation, K5 nested cards, I2 focal outside the inner
-80 %, I3 cutout without alpha (an `estimated` cutout counts as alpha, UX-39), I6 resolution, R2 offer duplication, R3
+80 %, I3 cutout without alpha (an `estimated` cutout counts as alpha for the sampler's H13 / H27 decisions, UX-39; the
+doc renders `framed-stage` until the mask lands, so the publish gate never sees a cut-out without alpha), I6 resolution, R2 offer duplication, R3
 trust/urgency duplication, R6 radius ladder, R7 floating layers, slop score ≥ 6). Utility store kinds run none of the
-novelty rows (DES-§8.13). The corpus test "30 engine-only stores in one niche publish with 0 `design:N8` refusals"
+novelty rows (the design gates of `KIND_GATES`, DES-§8.13). The corpus test "30 engine-only stores in one niche publish with 0 `design:N8` refusals"
 (`test:slow`) pins the library rule. Soft rows lower Q and appear as notes and as Store Health design issues (§I.7). The
 novelty check answers bands only (D64).
 
@@ -4645,11 +4826,45 @@ revision 3. Codes as above; the finding ids are the reviewers'; **part** = a thi
 | 3-52 | `npm run gate:offline` in `prebuild` from the R1.0 integration; `qa/.gate-ok` + `scripts/deploy/archive.mjs`; `getHealth().build.gateSha` and `gate_mismatch`; §J.5, §H.10, §H.5 | the tenancy gate was a script humans remembered to run | SEC-10 |
 | 3-53 | §P filled (one line per finding), §Q.8 (the parts' third-round requests), §L.3 rev 3 row, this table | traceability | all |
 
+### N.3 Revision 4 changes (round-2 review integrated)
+
+Every change of revision 4. Round 2 re-sent the round-1 findings (each re-verified against the body: the rev 3
+resolutions hold) and added the critic's CRIT findings; **part** = a fourth-round note of a part, decided in §Q.9.
+
+| # | Change | Why | Source |
+|---|---|---|---|
+| 4-1 | Status → revision 4; owner summary item 21; reading order names §Q.9; the frozen-chunk sentence says no zone or window code enters it | the parts are at revision 4 | all |
+| 4-2 | D68 rewritten: slugs in storage and server APIs, one value-keyed `ZoneTable` from `buildZoneTable` for every browser table, `cityKey` server-side only (may be bundled, never required); `zoneFeesFor(scope, keys)` for server joins; §K.2 P0 operations and landing lines, §K.4 S1 row and STO-R19 list, §I.7 fee-mismatch input, §J.1 `test:delivery` key-shape and import-graph cases | one P0 function had two table shapes for its two consumers | CRIT1; part STO C1, LAN N1, OPE notes |
+| 4-3 | D73 rewritten: `days: Record<IsoWeekday, Range[]>`, `EffectiveWindow` the one JSON-safe type (+ `CallingWindow` alias, `Range`, `IsoWeekday`), never `null`, `configured` from `ops.callingWindow.savedAt`, `shopperPromiseAllowed`, `DEFAULT_WINDOW`, the shared `window.fixtures.ts`; §D.10 `ops`, §K.2 P0, §M.3 call-claim rule, §H.3 `store_info` on a window save, §J.1 `test:delivery` / `test:ops` | two documented shapes and a nullable stub for the one window; a default must not become a promise | CRIT3; part LAN N2, OPE notes, STO C2 / C11 |
+| 4-4 | D76 + §C.6 `reportUrl()`, `links.report` in the render context (live, test, preview; never exports), P6 footer, Shell fallback, P3 pages, S1 chrome, one UiKey `footer.report` with platform's wording; `consoleHref` ADMIN_HOST-aware; §C.10 V12; §H.13, §K.2 P0 maintainer CCR, §L.2 PL-20, §J.1 render-check cases | nobody rendered the report link on landing pages; the console link would break at the domain move | CRIT15; part PLA Q4.1 / Q4.2, DES N1, LAN N4 |
+| 4-5 | `src/lib/design/types.frozen.ts` (maintainer) for the three frozen shapes, P6's `types.ts` re-exports; `VariantFeaturesResolved` picks `h` and requires `family`, `HeightReport.stub?`; §K.2 P0, §K.3 | one file had two owners | CRIT9; part DES N7 |
+| 4-6 | `estimateAlpha(bitmap)` in the §K.2 P0 design stubs with design's signature (stub `null`) | P2 merges second and calls a function P6 ships last | CRIT10 |
+| 4-7 | §J.1 rows `test:landing-addons`, `test:policies`, `test:wa-price`, `test:copylib`, the harness `scripts/qa/test-budget.ts`, `test:ai:slow` in `test:slow`; new §J.6 later-release scripts | four R1 scripts were outside the 3-minute accounting; R2 / R3 scripts had no list | CRIT16 |
+| 4-8 | §L "Proven by" rule (the parts' maps, `// proves:` headers) | acceptance cells named no test | CRIT17; part LAN N9 |
+| 4-9 | `scripts/qa/e2e/{pulse,admin-perf}.ts` committed (P2); §J.3 rows, §K.2 P2 row | two deliverables backing §I.8 sat in the git-ignored `qa/` | CRIT19 |
+| 4-10 | D72 / §K.1 T3 wording: `newOrderId` lives in `src/lib/db/ids`, not re-exported by `create.ts` | the text implied an internal id generator | CRIT20 |
+| 4-11 | D71 + §E.1 / §E.2: `StoreCtx<S>`, `WritePermission`, `WriteCtx`, the `storeAction` / `storeGuard` overloads, `UserCtx`, `StoreCtx.stepUpUntil`; §A.2 / §K.4 `createProduct(ctx, { facts })`, `setThemeDraft(ctx, direction)` | ctx-taking write functions needed a cast outside `seam.ts` | part STO C5, PLA Q4.7 / Q4.8 |
+| 4-12 | D56 + §H.2 slot 4c + §H.12: the flag switches the `after()` driver only; the cron never calls a model inside the tick (one-item batch hand-off; leftover cap 5 s) | "on only behind the flag" and a 90 s stage inside a 20 s slot contradicted §H.12 | part AI R41, R42 (ENGP-2, ENGC-18) |
+| 4-13 | §B.7 step-up list + the Carrier CSV route and the R2 period close; `stepUpWithPasswordAction` signature; §F.5 `meta.stepUp` rows, `platform.user.deleted`, `auth.account.deleted`, `store.brand_term.refused` without the term | the guarantee "a stolen cookie can no longer pull every customer" did not cover the Carrier CSV | part OPE notes (OD64), PLA Q4.8, PLA-§Q.1 |
+| 4-14 | §B.1 / §I.1 `/app/account/danger`; §E.2 `deleteUserAccount(ctx: UserCtx \| PlatformCtx, target?)` with `owns_store` / `is_staff`; §F.9; §K.1 T2 | the staff and self-service paths needed one signature and a route | part PLA Q4.7 (SEC-20) |
+| 4-15 | §I.4 notification link rule widened (`/app/<h>` root, `/app/account`, `/admin`; refused → `NULL`) | the rev 3 regex refused the dashboard root seven kinds link to | part PLA Q4.3 |
+| 4-16 | §I.7: `getStoreHealth` → `StoreHealthView \| null` + `staleAfterMin`; flags mirroring a track's issue are derived, no points; "no published page" = P3's rule only; `int:*` the only integration issues; `landing:fee_mismatch` the one rule for attached landings too; `brand_term_live` at least nightly; §H.5 `data_dir_70` / `data_dir_85`, `health_stale` scaled, `health_job_slow` | duplicate issues for one condition; an alarm that fired permanently past 120 stores | part PLA Q4.4 / Q4.5 / Q4.9, STO C4 |
+| 4-17 | §D.5 / §D.6 `carrier_rates.cod_fee_bp` and `cod_fee_flat_cents` `NOT NULL DEFAULT 0`; `design_genomes.report.gen` noted | the core's cut text disagreed with OPE-§2.7 | part OPE notes (OPS-25), DES N3 |
+| 4-18 | §M.1 rule 2: the five `OriginClass` values, the generation record, the wizard's `useNoveltyGuard` call site; `gateInputFor` / `gateCtxFrom` quoted verbatim, `KIND_GATES` cited, `policy` a utility kind; §M.2 F1 position only; §M.4 the verified exhaustion path, I3 wording; §M.3 export of the password-field patterns | the origin map had two classes where §M.4 needs five; two adapter signatures; two form-height items; a dead-end exhaustion path | part AI R44, DES N2 / N3 / N4, LAN N3, STO notes (QUAL-1, CRIT18, UX-24) |
+| 4-19 | §K.2 P0 design stub `sampleGenome(input, { hints?, pins?, priors? })` with `SampleOpts.pins` (not `GeneHints.pins`); `checkHeadlineNovelty` answers bands; ai's `aiUsageForStore` return; operations' console read fields | two parts described the pin in two places | part DES N9 (over AI R43), PLA Q4.10 / Q4.11 |
+| 4-20 | §K.4: `catalog_version` bumps on calling-window writes and on the `cutout` handler; the S4-only sentence; `fee_unset`, no `shipAfter`; `actor_kind 'integration'` = carrier adapters only; S1 / S3 / S4 / S5 rows at file level; §K.5 D3 "LP-16 PHP side only" + its check scripts | stale store HTML after a window save or a mask; two R2 owners in prose; a Sheet's "Livré" read as carrier evidence | part STO C6, OPE notes, AI R45, LAN N7 / scripts |
+| 4-21 | §K.2 rows: P2 mounts P6's reveal (P6 owns `src/components/generate/reveal/**`); P3 `selftest-checklist.ts`, `pages/**`, the rev 4 files; P4 `window.ts` / `defaults.ts` / `window.fixtures.ts`; P6 reveal, footer link, wizard record; P7 `render-cases/ai.ts`, `wow-demo/steps/ai.ts`, `director/budgets.ts`; §K.3 `types.frozen.ts`, `test-budget.ts`; the rev 4 ownership re-check paragraph | `test:ownership` must find one owner per file | part DES N5, LAN N6, AI-§R.1; ENGC-8 re-check |
+| 4-22 | C0a `ThemeLook.em` + `"none"`, `locks` + `G23` (max 7); §D.10 `brand.genes` + G1, G9 | the rev 3 genes G26 `none` and G23 could not compile into the frozen `look` | part DES N6, DES-R16 note |
+| 4-23 | §I.1 API rows (`/ai/**` detail, `/leads/export`, R2 `/finance/**`, `/imports`, `/shipping/**`, `/brand/**`), dashboard R2 / R3 rows (`/integrations`, `/catalog/inventory`, `/preview/theme/<id>`, `/pages/<id>/{experiments,schedule,analytics}`, `/integrations/api`); §E.2 codes `owns_store`, `is_staff`, `category_required`, `fee_unset` | every route and code a part names exists in the core | rev 4 route / table / permission re-check |
+| 4-24 | §P round 2, §Q.9, §L.3 rev 4 row, this table | traceability | all |
+
 ---
 
 ## P. Review decisions
 
-Round 1 (revision 3). One line per finding id that names the core or is cross-file, as the reviewers wrote them (OPS,
+### P.1 Round 1 (revision 3)
+
+One line per finding id that names the core or is cross-file, as the reviewers wrote them (OPS,
 ENGC, ENGP, UX, SEC, QUAL). **Resolved** = the body changed (sections named). **Resolved\*** = accepted with a change,
 the change and its reason in the row. **Rejected** = not applied, with the reason. **Parts** = the finding has no core
 text; the part that resolved it is named (its review-decision section: PLA-§R, STO-§30, LAN-§29, OPE-§R, AI-§T,
@@ -4750,6 +4965,118 @@ DES-§28). Findings the reviewers addressed to a part only and that changed a co
 part request was partly declined (STO-R39's owner-typed clause under QUAL-1); every reason is in its row. Re-freeze
 of the landing chunk: **not needed as of this revision** (T3 measures at its merge; the row is reserved here for the
 owner if the prefix bytes exceed 24,200 B).
+
+### P.2 Round 2 (revision 4)
+
+Round 2 re-sent every round-1 finding that names the core or is cross-file against revision 3, plus the critic's
+consistency findings. **Holds** = the rev 3 resolution was re-read against the revision-4 parts and stands (the
+sections named in §P round 1 carry it); **Holds +** = it stands and revision 4 adds the named alignment; **Resolved** /
+**Resolved\*** = new body text in revision 4 (with a change, reason given); **Parts** = no core text; the part that
+carries it is named (round-2 sections PLA-§R, STO-§30.2, LAN-§30, OPE-§R2, AI-§V, DES-§30). Fourth-round notes of the
+parts are decided in §Q.9.
+
+| Finding | Sev. | Round 2 | How / where (rev 4) |
+|---|---|---|---|
+| OPS-1 | blocker | **Holds +** | slugs stay the stored key (D68); the browser shape fixed by CRIT1 (D68, §K.2 P0, §K.4 S1, §I.7, §J.1 `test:delivery`) |
+| OPS-9 | major | **Holds +** | D74; the Carrier CSV joins the step-up list (§B.7), `meta.stepUp` on `orders.carrier_exported` (§F.5), the console read stub carries `carrierLabel` / `trackingRef` / `carrierExportedAt` (§K.2 P0) |
+| OPS-11 | major | **Holds +** | D73 (two keys removed, no mirrors); the one shape, never-null stub and `configured` flag of CRIT3 (D73, §D.10 `ops`, §K.2 P0, §M.3) |
+| OPS-13 | major | **Holds +** | D75; the fee-mismatch input from `zoneFeesFor`, attached landings covered, one rule (§I.7) |
+| OPS-14 | major | **Holds +** | §A.2; `createProduct(ctx, { facts })` / `setThemeDraft(ctx, direction)` take the `WriteCtx` (§A.2, §K.4) |
+| OPS-15 | major | **Holds +** | §K.4 (S1's functions, S4's sheet); the contract-step sentence says S4 only (CRIT4), `fee_unset` refusal, no `shipAfter` |
+| OPS-20 | minor | **Holds** | §H.11 `settings.write`; LAN-§14.3 fixed (LAN-§30) |
+| OPS-22 | minor | **Holds** | §A.3.1 / §A.3.2 |
+| ENGC-1 | blocker | **Holds** | 0004 placement (§D.2, §D.4, §D.8); every part reads it from R1.0 |
+| ENGC-2 | blocker | **Holds** | §C.5 `cf` option, §F.6, §J.3 |
+| ENGC-3 | major | **Holds** | §D.5 `aj_active_uq` on `active` |
+| ENGC-4 | major | **Holds** | §H.3 claim clears `dedupe` |
+| ENGC-5 | major | **Holds** | §F.1 tenant set from `schema.ts` |
+| ENGC-6 | major | **Holds +** | D71; the `WriteCtx` overloads (§E.1, §E.2) remove the last cast outside `seam.ts` |
+| ENGC-7 | major | **Holds** | §F.1 L9, L13; §E.2 `assertSameOrigin` |
+| ENGC-8 | major | **Holds +** | the rev 4 re-check (§K.2 closing paragraph): `types.frozen.ts`, one reveal owner, P3 / P2 / P7 / S1 / S3 / S4 / S5 / D3 files placed; no intersection found |
+| ENGC-9 | major | **Holds** | §K.1 C0a / C0b |
+| ENGC-10 | major | **Holds** | header freeze rule; no zone, city-key or window code enters the frozen chunk (D68 rev 4); re-freeze still not needed (measured at T3's merge) |
+| ENGC-11 | major | **Holds +** | §H.2; the only > 20 s unit (an inline 90 s stage) is gone from the tick (slot 4c, AI R41) |
+| ENGC-12 | major | **Holds** | §E.7, §H.7 |
+| ENGC-13 | major | **Holds +** | D72; CRIT20's wording on `newOrderId` |
+| ENGC-14 | major | **Holds +** | §G.2; alarm codes `data_dir_70` / `data_dir_85` (§H.5) |
+| ENGC-15 | major | **Holds** | §C.3 store rewrite |
+| ENGC-16 | major | **Holds** | §B.1 Referrer-Policy |
+| ENGC-17 | major | **Holds** | §D.2, §D.8 |
+| ENGC-18 | major | **Holds +** | D56 now says the flag switches the `after()` driver only (AI R42); §H.12 rule 1 |
+| ENGC-19 | major | **Holds** | §D.10 `openLegacy` |
+| ENGC-20 | major | **Holds** | §G.1 idempotent `put` |
+| ENGC-21 | major | **Holds** | §K.2 P0 stub rule, §H.10 |
+| ENGC-22 | major | **Holds** | §C.3 step 4 |
+| ENGC-23 | major | **Holds** | §F.1 L2 |
+| ENGC-24 | minor | **Holds** | §B.1 manifest public |
+| ENGC-25 | minor | **Holds +** | §I.7 budget-driven; `getStoreHealth` may answer `null`, `staleAfterMin`, the scaled `health_stale` and `health_job_slow` (§H.5) |
+| ENGC-26 | minor | **Holds** | §H.7 runtime read |
+| ENGC-27 | minor | **Holds** | §K.1 `public.ts` |
+| ENGC-28 | minor | **Holds** | §E.8 overload |
+| ENGC-29 | minor | **Holds** | §H.1 re-send rule |
+| ENGC-30 | minor | **Holds** | §D.8 S1, §C.7 `freeRename` |
+| ENGC-31 | minor | **Holds** | §F.9 enumeration |
+| ENGC-32 | minor | **Holds** | §G.4, §K.2 P8 |
+| ENGC-33 | minor | **Holds +** | §H.2 slot 1; P5's `int:sheets_backlog` uses the scaled threshold (§I.7) |
+| ENGC-34 | minor | **Holds** | §D.8 batched `ALTER` |
+| ENGP-1 | blocker | **Holds +** | §M.1 quotes `gateInputFor(doc, ctx: GateInputCtx)` and `gateCtxFrom(ctx: PrePublishCtx)` verbatim, cites `KIND_GATES`, lists `policy` among the utility kinds (CRIT18, DES N4) |
+| ENGP-3 | major | **Holds** | §D.5 |
+| ENGP-6 | major | **Holds +** | §M.2 bands; `budget:F1` measures the position only, the height is P3's `form:F1` (LAN N3) |
+| ENGP-11 | major | **Holds** | §K.2 P2 `team/**` carve-out |
+| ENGP-12 | major | **Holds +** | §H.13 / §J.1: P7's `render-cases/ai.ts` pre-registered |
+| ENGP-24 | minor | **Holds +** | §J.1: `scripts/qa/test-budget.ts` named, `test:ai:slow` in `test:slow`, the four R1 scripts accounted (CRIT16) |
+| ENGP-26 | minor | **Holds** | header rule; the storefront's "+5 %" wording is the part's (LAN N8 → STO) |
+| ENGP-28 | minor | **Holds** | §D.5 enum |
+| UX-4 | major | **Parts** | DES-§30, LAN-§30 (CSS hooks, `hero` prop; §K.2 P6 row records the `Cta` prop) |
+| UX-20 | major | **Holds +** | one owner per file: P6 owns `src/components/generate/reveal/**`, P2's `/welcome` mounts it (§K.2 P2 / P6 rows, DES N5); the Director slots (AI R47) |
+| UX-21 | major | **Parts** | DES-§30, STO-§30.2 |
+| UX-31 | minor | **Holds** | §D.10 `checkout.addressMode` |
+| UX-37 | minor | **Parts** | LAN-§30 (sticky submit rejected with a reason), STO-§30.2 (reversed in part, same reason); no core text |
+| UX-38 | minor | **Holds** | D60 rev 3, §I.6 |
+| UX-39 | major | **Holds +** | `estimateAlpha` frozen at P0 (CRIT10); §M.4 I3 wording (genome vs doc) |
+| SEC-1 | blocker | **Holds** | D69 |
+| SEC-2 | major | **Holds** | §C.9 (A\* of round 1 stands) |
+| SEC-3 | major | **Holds** | §C.3 `x-sg-path-sig` |
+| SEC-4 | major | **Holds** | §C.2 fail closed |
+| SEC-5 | major | **Holds +** | D70; the lead read repository is P3's `src/lib/leads/read.ts` (LAN N5 → PLA), operations calls the frozen `maskIfImpersonation` and declares no local mask (CRIT14, OPE-§R2) |
+| SEC-7 | major | **Holds** | §E.2 preview tokens |
+| SEC-8 | major | **Holds +** | = ENGC-6 (`WriteCtx`) |
+| SEC-9 | major | **Holds** | §F.1 L13, derived routes |
+| SEC-10 | major | **Holds** | §J.5, §H.10 |
+| SEC-11 | minor | **Holds** | §E.2 |
+| SEC-12 | minor | **Holds** | §B.1 device marker (platform PD12 aligned) |
+| SEC-14 | minor | **Holds** | §B.7 allowlist |
+| SEC-15 | minor | **Holds** | §F.6 HSTS |
+| SEC-16 | minor | **Holds** | §C.3 kept headers |
+| SEC-17 | minor | **Holds +** | §B.7: the Carrier CSV route and the R2 period close join the list, `stepUpWithPasswordAction` signature, `StoreCtx.stepUpUntil`; §F.5 `meta.stepUp` rows |
+| SEC-18 | minor | **Holds +** | D76: the renderers of the report link (CRIT15), "at least nightly", the shared password-field pattern list; §F.5 one audit name `store.brand_term.refused` without the term |
+| SEC-19 | minor | **Holds** | §D.6, §K.5 |
+| SEC-20 | minor | **Holds +** | `deleteUserAccount(ctx: UserCtx \| PlatformCtx, target?)` with `owns_store` / `is_staff` (§E.2, §F.9, §K.1 T2), `/app/account/danger` (§B.1, §I.1), `platform.user.deleted` / `auth.account.deleted` (§F.5) |
+| SEC-21 | minor | **Holds** | §G.7 `DATA_AREAS` |
+| SEC-22 | minor | **Holds** | §B.2, §B.3 |
+| SEC-23 | minor | **Holds** | §C.9 |
+| SEC-24 | minor | **Holds** | §B.5 compare-and-set |
+| SEC-25 | minor | **Holds** | D30 / §F.3, §B.1 |
+| QUAL-1 | blocker | **Holds +** | §M.4 hard on `cloud` / `local` / `engine` only; §M.1 rule 2 now names the five classes and the generation record `originFrom` reads (AI R44, DES N3); the verified exhaustion path (DES N2) |
+| QUAL-9 | major | **Parts** | AI-§V, DES-§30 (one acceptance rule) |
+| QUAL-10 | major | **Holds +** | §K.2 P0: the pin is `SampleOpts.pins` (DES N9; AI R43's `GeneHints.pins` declined, §Q.9) |
+| QUAL-20 | major | **Parts** | DES-§30 (`seq4`, `tells`); the per-family `seq4` is a storefront → design note (§Q.9 STO C9) |
+| QUAL-21 | major | **Parts** | AI-§V, DES-§30 |
+| QUAL-25 | minor | **Holds +** | §K.2 P0: `checkHeadlineNovelty` answers bands; ai imports design's `RenderDigest`, `NicheShares`, `GeneHints` (AI-§V) |
+| CRIT1 | major | **Resolved** | D68 rewritten; §K.2 P0 operations and landing lines (`buildZoneTable`, `zoneFeesFor`); §K.4 S1 row and STO-R19 list; §I.7 input; §J.1 `test:delivery` key-shape and import-graph cases; the fixture asserts `zoneTableKey: "value"` |
+| CRIT3 | major | **Resolved** | D73 rewritten (`Record<IsoWeekday, Range[]>`, `EffectiveWindow` one type with the alias, never `null`, `configured` / `shopperPromiseAllowed`, `window.fixtures.ts`); §D.10 `ops` (`savedAt`), §K.2 P0, §M.3, §J.1. The finding's "landing re-exports" and "drop the 0 = Monday wording" are in LAN-§30 / OPE-§R2 |
+| CRIT9 | minor | **Resolved** | `src/lib/design/types.frozen.ts` (maintainer), P6's `types.ts` re-exports (§K.2 P0, §K.3) |
+| CRIT10 | minor | **Resolved\*** | `estimateAlpha` in the §K.2 P0 design stubs with **design's** signature `(bitmap) → { hasCutout: "estimated"; bbox } \| null` (stub `null`), not the finding's `Promise<boolean \| "estimated">`: the function's owner defines it (DES-§4.9, §4.11) and P2 needs the bbox for the focal default |
+| CRIT15 | minor | **Resolved** | D76; §C.6 `reportUrl`, `links.report`; §H.13 Shell fallback; §K.2 P0 maintainer CCR; §L.2 PL-20; §J.1 render-check cases; renderers P6 footer, P3 pages, S1 chrome |
+| CRIT16 | minor | **Resolved** | §J.1 four R1 rows and the harness file; §J.6 later releases |
+| CRIT17 | minor | **Resolved** | §L "Proven by" rule; the maps are in each part (PLA-§1, STO-§1.5, LAN-§1.4, OPE-§O.4, AI-§Q.5, DES-§1.4) |
+| CRIT19 | minor | **Resolved** | `scripts/qa/e2e/{pulse,admin-perf}.ts` committed, P2 (§J.3, §K.2) |
+| CRIT20 | minor | **Resolved** | D72 and §K.1 T3 reworded |
+| *Critic findings with no core text (pointers)* | | **Parts** | CRIT2 (mirrors removed) → OPE-§R2 · CRIT4 (S4 owns the sheet) → OPE-§R2 (and the §K.4 sentence, 4-20) · CRIT5 (store-mode onboarding) → LAN-§30 · CRIT6 / CRIT7 (P1 glob, P2 i18n files) → PLA-§R · CRIT8 (D4 / D3 sections) → DES-§30 · CRIT11 (LP-16 in D3) → LAN-§30 (and §K.5, 4-20) · CRIT12 (test-render CSP wording) → LAN-§30 · CRIT13 (N8 owner-typed wording) → STO-§30.2 · CRIT14 (one mask helper) → OPE-§R2 · CRIT18 (adapter signature) → DES-§30 (and §M.1, 4-18) |
+
+**Rejected in round 2: none.** One finding was resolved with a change (CRIT10, the owner's signature). One part request
+was declined in favour of a sibling's (AI R43 → design's `SampleOpts.pins`, §Q.9). Re-freeze of the landing chunk:
+**still not needed** (nothing in revision 4 adds bytes to it).
 
 ---
 
@@ -5072,7 +5399,7 @@ for them). Codes: **A** accepted as written, **A\*** accepted with the change na
 | OPE Q.27m | audit names, `s:<sid>:inbound:<uid>` | **A** | §F.5, §E.8 |
 | OPE Q.27n | demo presses `N` from the demo store owner's session; seed sets `openOverrideUntil` | **A** | §J.3, §K.2 exit 12 |
 | OPE Q.27o | `product_costs.sku`, `carrier_accounts.settlement` + `self`, `cod_fee_flat_cents`, `shipments.kind`, `phone_digits` + `probable`, `finance_daily.refund_cents` / `missing_rates` | **A** (recorded) | §D.5, §D.6 |
-| AI R27 | `ai.jobs` slot budget | **A** (option 1: 1 s guaranteed + the leftover of slots 1-5 up to 20 s; a stage advances only on an idle tick) | §H.2 slot 4c |
+| AI R27 | `ai.jobs` slot budget | **A** (option 1: 1 s guaranteed + the leftover of slots 1-5 up to 20 s; a stage advances only on an idle tick); **superseded in rev 4 by §Q.9 AI R41** (no model call inside the tick, leftover ≤ 5 s) | §H.2 slot 4c |
 | AI R28 | `ai_cost_micros_pending`, `ai_credits_director` | **A** | §A.4, §D.7 |
 | AI R29 | `aj_active_uq` on `active`; `stage_attempts`, `driver`, `progress.plan` | **A** | §D.5, §H.12 |
 | AI R30 | pending daily floor 10 | **A** | §A.4, §A.5.2 |
@@ -5092,3 +5419,78 @@ for them). Codes: **A** accepted as written, **A\*** accepted with the change na
 
 Third-round requests are now closed with the round-1 review. The parts' next revision records only contradictions they
 find between their text and §P / §Q.8.
+
+### Q.9 Fourth-round notes (revision 4; the contradictions the parts recorded in round 2)
+
+One row per note of PLA-§Q.4, STO-§29.5, LAN-§27.4, the OPE-§R2 maintainer notes, AI-§S.4 and DES-§27.4 that names
+the core, plus the sibling notes the core had to arbitrate. Codes as in §Q.8 (**A**, **A\***, **R**, **S** = a
+sibling's text only, receiving part named; **—** = nothing left to do). Where a part's revision-4 text differs from a
+row below, this row wins until the part's next revision.
+
+| # | Note | Decision | Where |
+|---|---|---|---|
+| PLA Q4.1 | `reportUrl(store, pagePath?)`; `reportHref` in the store context; renderers P6 / P3 / S1 | **A\***: the builder as written; the context field is named **`links.report`** (`PageLinks.report`, the name design and landing use), not `reportHref`; one UiKey `footer.report` carries platform's `shell.report.link` wording | §C.6, §H.13, §K.2 P0, D76 |
+| PLA Q4.2 | `consoleHref` ADMIN_HOST-aware; V12 | **A** | §C.6, §C.10 step 3 |
+| PLA Q4.3 | notification link rule widened; refused → `NULL` | **A** | §I.4 |
+| PLA Q4.4 | `getStoreHealth` → `\| null`, `staleAfterMin`; `brand_term_live` "at least nightly" | **A** | §I.7, §K.2 P0, D76, §C.7, §F.8 |
+| PLA Q4.5 | derived flags add no points; "no published page" = P3's rule; `int:sheets_backlog` scaled | **A** (core side); the OPE-§27.2 threshold is **S** (operations) | §I.7 |
+| PLA Q4.6 | LAN-§23.7 lists `landing:fee_mismatch` | **S** (landing added it in rev 4, LAN-§23.7) | §I.7 names it |
+| PLA Q4.7 | `/app/account/danger`; `deleteUserAccount(ctx: UserCtx \| PlatformCtx, target?)`, `owns_store` / `is_staff` | **A** | §B.1, §I.1, §E.1 `UserCtx`, §E.2, §F.9, §K.1 T2 |
+| PLA Q4.8 | `stepUpWithPasswordAction` signature; `StoreCtx.stepUpUntil` | **A** | §B.7, §E.1, §E.2 |
+| PLA Q4.9 | alarm codes `data_dir_70` / `data_dir_85`, `health_job_slow`, the scaled stale rule | **A** | §H.5 |
+| PLA Q4.10 | console read stubs carry `pageId \| null`, `lines` (R2), `carrierLabel`, `trackingRef`, `carrierExportedAt` | **A** (named in the P0 stub list); the signatures are **S** (operations OPE-§M) | §K.2 P0 |
+| PLA Q4.11 | `aiUsageForStore` returns `creditsUsed`, `creditsLimit`, `costMicros` | **A** | §K.2 P0 ai stubs |
+| PLA-§Q.1 (rev 4 list) | `platform.user.deleted`, `meta.stepUp`, codes `owns_store` / `is_staff` / `category_required` | **A**; platform's `store.brand_refused` takes the core's name `store.brand_term.refused` with meta `{ field }` (S, platform renames) | §F.5, §E.2 |
+| STO C1 | D68 / §K.4 S1 say slugs in the browser | **A** (CRIT1) | D68, §K.4 S1, §K.2 P0 |
+| STO C2 | name `configured`, `shopperPromiseAllowed`, `window.fixtures.ts` in D73 / P0 | **A** (CRIT3) | D73, §K.2 P0, §J.1 |
+| STO C3 | N8 library lines soft | **—** (design rev 4 aligned) | §M.4 |
+| STO C4 | one fee-mismatch rule; the input covers attached pages | **A** | §I.7 |
+| STO C5 | `createProduct(ctx, …)`, `setThemeDraft(ctx, …)`; `storeAction` hands a `WriteScope` ctx | **A** (`WriteCtx` overloads) | D71, §A.2, §E.1, §E.2, §K.4 |
+| STO C6 | `catalog_version` bump on window writes and on the `cutout` handler | **A** | §K.4 contract step |
+| STO C7, C8, C10, C11, C12 | resolved inside storefront or by the siblings' rev 4 | **—** | — |
+| STO C9 | `nicheShares.seq4` per page-kind family | **S** (design: compute `seq4` per family, `landing` vs `home` / `page`, or a top 20 per family; the store home re-draw reads its own family) | — |
+| STO (note) | one helper builds landing's `links.report` and the storefront's `StoreLinks.report(path)` | **A** (`reportUrl`) | §C.6 |
+| STO (note) | `critique.doc` accepts a `StorePageDoc` through `gateInputFor`; utility kinds get no Director button | **S** (ai) | §K.4 S1 (AI-19 consumer) |
+| STO (note) | `honesty:password_field` exports its pattern list | **A** (the core states it; the export is P3's) | §M.3, D76 |
+| STO (note) | exactly one report link per document (tracking wrapped by the store chrome, policies inside `StoreDocument`) | **A** (D76 "exactly once"); the rendering rule is **S** (landing LAN-§3.9, storefront STO-§10.3) | D76 |
+| LAN N1 | D68, §K.2 P0, §I.7 `zoneFeesFor`, §J.1 key-shape case, the fixture's `zoneTableKey` | **A** | D68, §K.2 P0, §I.7, §J.1 |
+| LAN N2 | one window container; drop the mirror writes; `store_info` re-render on a window save; export `DEFAULT_WINDOW`; `scripts/qa/fixtures/calling-window.json` | **A\***: all accepted except the fixture's place: the one window fixture is **operations' `src/lib/callcenter/window.fixtures.ts`** (OPE-§R2: inside P4's folder, typed data, no new ownership row), read by `test:ops`, `test:delivery`, `test:landing-addons` and `test:catalog`; landing points its scripts at it (S) | D73, §H.3, §K.2 P0, §J.1 |
+| LAN N3 | drop the form-height clause of `budget:F1` | **A** | §M.2 |
+| LAN N4 | `links.report` for live, test and preview, undefined in exports; Shell fallback; P6 footer; PLA-§24.2 404 not 308 | **A** (the core keeps landing's "live, test and preview" over design's "live only": a test render and a preview must stay byte-comparable with the live document, and a report link on a private preview harms nothing because `/report/<h>` answers the same thank-you for any handle); the platform wording is **S** (platform) | §C.6, §H.13, §K.2 P0, D76 |
+| LAN N5 | the lead read functions are P3's `src/lib/leads/read.ts` | **S** (platform PLA-§7.2, Q3.3); the core names the file in the P3 row | §K.2 P3 |
+| LAN N6 | `src/lib/editor/selftest-checklist.ts` to P3 | **A** | §K.2 P3 |
+| LAN N7 | §K.5 D3: "LP-16 PHP side only" | **A** | §K.5 |
+| LAN N8 | storefront's "+5 %" wording for the landing chunk | **S** (storefront STO-§29.4 R41 / §14.1: tolerance 0 against `budgets.json.landing` and `landing.sha256`) | header freeze rule |
+| LAN N9 | "Proven by" maps in every part | **A** (the core rule); the maps are **S** (each part; done in rev 4) | §L |
+| LAN (scripts) | S1 `scripts/qa/copy-check.ts`; D3 `scripts/qa/{chain-check,schedules-check,analytics-check,saved-blocks-check}.ts` | **A** | §K.4 S1, §K.5 D3, §J.6 |
+| LAN (ownership) | the pages list routes | **A** (maintainer re-check): `src/app/app/[store]/pages/**` outside `(editor)` joins P3 so LP-22 and the kit entry need no CCR; landing lists it at its next revision (S) | §K.2 P3 |
+| OPE (note 1) | D68 / §K.2 P0 / §K.4 S1 slug sentences | **A** (CRIT1) | D68, §K.2 P0, §K.4 |
+| OPE (note 2) | the Carrier CSV route in the §B.7 step-up list (+ the R2 period close) | **A** | §B.7, §F.5 |
+| OPE (note 3) | `carrier_rates.cod_fee_flat_cents` / `cod_fee_bp` `NOT NULL DEFAULT 0` | **A** | §D.5, §D.6 |
+| OPE (note 4) | §K.4 "S3/S4" → S4; S4's `manual-actions.ts`, `mode.ts` | **A** | §K.4 contract step, S4 row |
+| OPE (note 5) | `callingWindow.savedAt`, `EffectiveWindow.configured`, the alias, `Range` / `IsoWeekday`, the stub's `DEFAULT_WINDOW` with `configured: false`, `test:delivery` reads `window.fixtures.ts` | **A** | D73, §D.10, §K.2 P0, §J.1 |
+| OPE (sibling notes) | landing "no hours" = `windowIsEmpty(w, now) \|\| !w.configured`, "Use these hours"; storefront `fee_unset` refusal, S4 owner, no `shipAfter`; platform `phone: null` to `maskIfImpersonation` | **S** (landing, storefront, platform); the core records `fee_unset` and the input without `shipAfter` | §K.4, §E.2 |
+| AI R41 | slot 4c: one rule | **A**, option (b): the cron never runs a model call inside the tick; it marks orphans and hands a driverless stage to a one-item batch; the leftover cap drops to 5 s (DB writes only). Option (a) declined: after slot 9 (budget-driven, up to 9 s) the 95 s an inline stage needs is almost never left, so (a) would be dead text, and a stage of nobody-waits work is exactly pattern C's case | §H.2 slot 4c, §H.12, D56 |
+| AI R42 | D56's flag sentence | **A** | D56, §H.12 rule 1 |
+| AI R43 | `sampleGenome(…, { hints })` with `GeneHints.pins` | **R**: design, the function's owner, moved the pin to **`SampleOpts.pins`** (a sibling of `hints`, DES N9, DES-§4.1 / §4.6), the shape the core's rev 3 stub already had; ai maps `DirectionBrief.pin` to it at its next revision (S) | §K.2 P0 |
+| AI R44 | the five origin classes; the generation record; the wizard's call site | **A\***: the record lives in design's `design_genomes.report.gen` on the `chosen` row (field path → `{ h, o: OriginClass }`, DES-§9.8, DES N3), whose `o` takes ai's per-field `CopyOrigin`; `originFrom` returns `owner` on a hash mismatch and `library` without a record | §M.1 rule 2, §D.5 note |
+| AI R45 | `actor_kind 'integration'` = carrier adapters only | **A** | §K.4 |
+| AI R46 | `RenderDigest` imported as-is; `budgetVerdicts` | **S** (design confirms the shape; ai keeps `budgetVerdicts` in its own `src/lib/ai/director/budgets.ts`, over the core's band constants) | §K.2 P7 |
+| AI R47 | two reveal slots for P7's components | **S** (platform PD73, design DES-§14.3); the core records the slots in the P6 row | §K.2 P6 |
+| AI R48 | `isCallable` exported beside `nextCallableAt` / `hoursText`; `EffectiveWindow` the one type | **A** | §K.2 P0, D73 |
+| AI (note) | `aiHealth()` additions | **S** (platform PLA-§15.1) | — |
+| DES N1 | `PageLinks.report`, `liveLinks()`, UiKey `footer.report`, the Shell row; PL-20 wording | **A\***: the link is set for live, test **and preview** renders, not live only (LAN N4's reason); PL-20 reads "P1 (+ P6 landing footer, the Shell fallback, P3 thank-you / tracking / legal pages, S1 store chrome)"; the storefront's Arabic `footer.report` takes platform's wording (S) | §C.6, §H.13, §K.2 P0, §L.2 |
+| DES N2 | §M.4 the verified exhaustion path | **A** | §M.4, §J.1 `test:prepublish` |
+| DES N3 | `originFrom` reads `report.gen` | **A** | §M.1 rule 2 |
+| DES N4 | quote `gateInputFor` / `gateCtxFrom` verbatim; cite `KIND_GATES`; `policy` a utility kind | **A** (core side); STO-D35 / STO-§8 / STO-R29 / LAN R11 wording is **S** | §M.1 rule 2, §M.4 |
+| DES N5 | P2 mounts P6's reveal component | **A** | §K.2 P2, P6 |
+| DES N6 | `ThemeLook.em` + `"none"`, `locks` + `G23`; `data-emphasis="none"` | **A** | §K.1 C0a `src/lib/page/schema.ts` |
+| DES N7 | the frozen shapes as DES-§5.3 / §8.4 now write them | **A** (in `types.frozen.ts`, CRIT9) | §K.2 P0 |
+| DES N8 | tolerance 0 | **—** | header |
+| DES N9 | `SampleOpts.pins` | **A** (over AI R43) | §K.2 P0 |
+| DES N10 | LAN-§3.4 rows (`τ_niche(n)`, the same product's last 5 pages, hero family ≤ 20 %) | **S** (landing) | — |
+| DES (note) | `BrandSetting.genes` + G1, G9 | **A** | §D.10 `brand` |
+| DES (note) | one wording for "Report this store" (platform's key) | **A** | §H.13, §C.6 |
+
+Fourth-round notes are closed with the round-2 review. A part's next revision records only contradictions it finds
+between its text and §P / §Q.8 / §Q.9; the maintainer decides them in §P with the next review.

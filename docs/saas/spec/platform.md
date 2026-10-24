@@ -1,10 +1,14 @@
 # Store Gen SaaS part spec: platform console and the tenant SaaS layer
 
-Status: **part spec, revision 3 (round-1 review integrated)** (2026-10-24, platform part architect; revision 2 was
-the elevated spec of the same day). Built on `docs/STORE-SAAS.md` **revision 2.1** (cited as **core §X**, its
-decisions as **core D1 … D65**; appendix core §Q.1 decides every request of revision 1: all 32 accepted, three with
+Status: **part spec, revision 4 (round-2 review integrated)** (2026-10-24, platform part architect; revision 3
+integrated the round-1 review, revision 2 was the elevated spec of the same day). Built on `docs/STORE-SAAS.md`
+**revision 3** (cited as **core §X**, its decisions as **core D1 … D76**; core §P decides the round-1 findings and
+core §Q.8 the third-round requests of PLA-§Q.3, all accepted, PLA Q3.4 with a change; **revision 4 aligns every
+platform text with core revision 3** (the alignments are listed one by one in PLA-§R "Alignment with core revision 3")
+and decides the round-2 findings one by one in **PLA-§R "Review decisions (round 2)"**, with the cross-file needs they
+still raise in **PLA-§Q.4**; appendix core §Q.1 decides every request of revision 1: all 32 accepted, three with
 changes, Q.1, Q.14 and Q.18, integrated below; the round-1 review findings that touch this part are decided one by
-one in **PLA-§R** and the cross-file needs they raise are listed in **PLA-§Q.3**), on the settled research
+one in **PLA-§R** and the cross-file needs they raised are listed in **PLA-§Q.3**), on the settled research
 decisions **R-D1 … R-D53** (`docs/saas/RESEARCH.md` §2) and on the elevation inputs of owner brief item 16:
 `docs/saas/research/rethink-features.md` (cited as **RF §n**: the eight admin UX rules §2.1, the IA and interaction
 model §2.2, empty states §2.4, data-viz §2.5, motion §2.6, the keep/rework/redesign table §2.9, the 13-screen build
@@ -13,9 +17,10 @@ order §2.10, Store Health §1.3, the catalog delta §3, the three-minute demo �
 `docs/saas/research/design-baseline.md` (**DB** target ids, used here for the admin's RTL and honesty rules:
 RTL1-RTL8, D1, D2) and `qa/ref/anti-slop-frontend-rubric.md` (adopted for product UI where the owner rules do not
 override it: §4.5-4.7 states, forms and layout discipline, §9 AI tells, §9.G the em-dash ban; its orange-family
-palette suggestions are void and Arabic keeps its own type rules). Reviewed once: the round-1 findings (OPS-*, ENGC-*,
-ENGP-*, UX-*, SEC-*, QUAL-*) that name this file or are marked "cross" are each decided in PLA-§R with the section
-that changed; every blocker and major with a platform side is resolved in the body, not only in a note. This document
+palette suggestions are void and Arabic keeps its own type rules). Reviewed twice: the round-1 findings (OPS-*, ENGC-*,
+ENGP-*, UX-*, SEC-*, QUAL-*) and the round-2 findings (the same ids re-checked against core revision 3, plus the
+critic's CRIT-*) that name this file or are marked "cross" are each decided in PLA-§R with the section that changed;
+every blocker and major with a platform side is resolved in the body, not only in a note. This document
 is the contract for two R1 product tracks of core §K.2, **P1 CONSOLE** (the platform console on the main domain,
 plus the Store Health engine and job of core §I.7) and **P2 SHELL** (the tenant-side SaaS UX, the pulse, the
 dashboard and the tenant Store Health ring), plus the R3 track **D5 PLATFORM** for the later platform features. It
@@ -47,8 +52,9 @@ orders lookup · §12 flags + kill switches · §13 platform settings + legal ·
 the shared pulse, banners, limit sheet, plan page, danger zone, account, the Store Health ring, the dashboard, the
 admin UX ceiling per screen) · §23 mobile admin + PWA · §24 later platform features (R3 and P2) · §L limits · §M
 server actions and routes · §N copy keys · §O tests · §P file ownership · §Q requests to the core (status after core
-rev 2; §Q.3 the requests raised by the round-1 review) · §R review decisions (round 1, one line per finding) · §S
-elevation changes (rev 2).
+rev 2; §Q.3 the requests raised by the round-1 review, all decided in core §Q.8; §Q.4 the requests raised by the
+round-2 review) · §R review decisions (round 1 and round 2, one line per finding, plus the alignment with core
+revision 3) · §S elevation changes (rev 2; §S.1 revision 3; §S.2 revision 4).
 
 ### Owner summary (plain English)
 
@@ -112,19 +118,30 @@ elevation changes (rev 2).
 22. **The first design reveal shows three real pages side by side** (not one page inside a phone inside a phone), and
     a seller who chose "Full store" sees a product page and a store home, never a hidden landing page. The mode choice
     explains itself in one line and three bullets, and can be changed later without losing anything.
+23. **New in revision 4 (after the second review).** The health score tells the truth about how fresh it is: the
+    5-minute job checks about ten shops per run, a shop you or the seller just changed is checked first (within five
+    minutes), and the others as often as the machine allows; the screens say "checked at 14:20", never "within an
+    hour" when that would not hold. One problem gives one reason in the score, never two copies of the same thing.
+24. **Sellers confirm dangerous steps too.** Exporting customer data, closing the shop, changing someone to admin or
+    owner and pasting integration secrets ask the seller for their two-step code, or their password when they have no
+    code. A seller who owns no shop can delete their account from Account settings; you can delete a person's account
+    from their profile in the console (with your code and a reason).
+25. **Every feature of this part names the test that proves it** in the feature list, so a builder can see which check
+    must stay green; the "Report this store" link is the same absolute link on every landing page, legal page and
+    shop page, and a shop's own address never serves the report form.
 
 ---
 
 ## PLA-§0. Decisions at a glance
 
-R-D1 … R-D53 and core D1 … D64 are settled. Rows below are this part's own decisions; **deviates** / **refines** say
-which settled decision changes and why. Rows changed or added in revision 2 carry **(rev 2)**; PLA-§S lists them with
-their sources.
+R-D1 … R-D53 and core D1 … D76 are settled. Rows below are this part's own decisions; **deviates** / **refines** say
+which settled decision changes and why. Rows changed or added in revision 2 carry **(rev 2)**, in revision 3 **(rev 3)**
+and in revision 4 **(rev 4)**; PLA-§S, §S.1 and §S.2 list them with their sources.
 
 | # | Decision | Why |
 |---|---|---|
 | PD1 | **One spec, two R1 tracks.** P1 builds PLA-§2-§21 (console, `src/lib/platform/**`); P2 builds PLA-§22-§23 (tenant UX). Shared UI primitives used by both (step-up sheet, typed-confirm dialog, usage meter, masked value, reason picker) live in P2's `src/components/admin/common/**` with the props frozen here (PLA-§22.12). | Core §K.2 splits the work that way; P2 merges before P1 (core merge order P8 → P2 → P1), so P1 imports finished primitives. |
-| PD2 | **The console reads one store only through `src/lib/platform/profile/**` read functions** that take the `platformScope(ctx, storeId)` scope and return **masked projections**. Raw customer phone, name, address and note never leave those functions; the only unmasked path is `revealOrderPii` (`pii.reveal` ↑, reason). | One choke point for R-D16 / core §F.11; the type (`StoreScope`) satisfies lint L1, and L6 keeps platform scopes away from write repositories. |
+| PD2 | **The console reads one store only through `src/lib/platform/profile/**` read functions** that take the `platformScope(ctx, storeId)` scope and return **masked projections**. Raw customer phone, name, address and note never leave those functions; the only unmasked path is `revealOrderPii` (`pii.reveal` ↑, reason). **(rev 4, core D71)** `platformScope()` returns `StoreScope & { kind: "platform" }`, which is a `ReadScope` and **not assignable to `WriteScope`**: no write repository compiles with it, so "staff never edit tenant data" (PD34) is a type fact, and the platform rows this part writes (reviews, notes, entitlements, flags, settings, `abuse_reports`) are platform tables outside the tenant set. | One choke point for R-D16 / core §F.11; the type (`StoreScope`) satisfies lint L1, and L6 (by type since core rev 3) keeps platform scopes away from write repositories. |
 | PD3 | **`scoreSignup()`** = 0-100 with explainable flags (PLA-§3.4). Bands: `fast` ≤ 24, `review` 25-59, `hold` ≥ 60, `reject_candidate` ≥ 85 **or** linked to a banned user. Nothing is auto-rejected (R-D12). Mode `open` auto-approves only `fast` + Turnstile `ok` + no hold-class flag. Weights and thresholds are platform settings, starting values **[to tune]**. | PA §5.3 signals and points; the bands give the queue its triage order. |
 | PD4 | **Signup stays one two-step form and one transaction (core §B.2 unchanged); the wow flow happens right after, at `/app/<h>/welcome`** (photos → details while the directions are ranked → reveal with 3 directions → contact → address card). **Refines UX-01**, which put photos before name and handle. **(rev 2)** The reveal budget is the demo clock (RF §4: reveal at 0:50 from the invite link, generation ≤ 1.5 s client-side, preview render ≤ 1 s), and nothing on that path waits for a model download (PD59, core D59). | The core transaction needs name, handle and mode; uploads need a store scope (media ids are per store, core D21); the pending sandbox allows building at once (R-D12). |
 | PD5 | **The approval queue carries every staff decision about a store:** signups, appeals (`reopen`), restore requests (`go_live`), plan changes (`plan_change`), limit raises (`limit_raise`), store-mode interest (`mode_change`), custom domains (`domain`, R3). `signup_reviews.kind` is appended (core §D.9 lets this part refine the enum; applied in core §D.4). | One inbox and one SLA for the owner (PA §5.4: "the same queue later carries…"). |
@@ -134,7 +151,7 @@ their sources.
 | PD9 | **Console copy is English in R1** (fr R2, ar R3, core D36). **Every tenant-facing string this part adds in R1 ships in ar, fr and en:** auth pages, onboarding, store picker and switcher, review card, lifecycle banners, limit sheet, plan page, team and invites, notification texts, impersonation notices, help sheet. | Staff read English; sellers and agents read Darija, Arabic and French (core D36). |
 | PD10 | **Mobile in R1** = every PLA tenant screen and the console queue work at 360 px, plus an **installable dashboard manifest** scoped to `/app/` with **no service worker**. **R3** = a push-only service worker (no offline caching) and Web Push with hand-written VAPID + aes128gcm on `node:crypto`. **Deviates UX-07** (R3) for the manifest only. | Installability needs only a valid manifest and HTTPS (`node_modules/next/dist/docs/01-app/02-guides/progressive-web-apps.md:592-595`). Offline caches of dashboards risk stale customer data; `npm` installs are slow here (HANDOFF §3). |
 | PD11 | **Notifications = one `notify(target, kind, vars, opts)` API with a typed kind catalog**; titles are rendered at read time in the reader's locale; staff free text only in `notifications.text`; `dedupeKey` batches noisy kinds. Broadcasts fan out lazily at read time (R3). | One catalog → one translation set; no per-user row explosion (PA §10.4). |
-| PD12 | **A random device marker cookie `__Host-sgd`** (128-bit, HttpOnly, Secure, SameSite=Lax, 400 days, platform host only) feeds the `identity_links.kind = 'device'` signal (core §B.1 "Device marker", Q.3 accepted; written by T2). | Core §D.4 has the `device` kind and the core now names its producer; a random marker is not fingerprinting (PA §2 "device labels without fingerprinting"). |
+| PD12 | **A random device marker cookie `__Host-sgd`** (128-bit, HttpOnly, Secure, SameSite=Lax, 400 days, platform host only) feeds the `identity_links.kind = 'device'` signal (core §B.1 "Device marker", Q.3 accepted). **(rev 4, core §B.1 rev 3 / SEC-12)** The cookie is **set by T3's proxy** on every area-`auth` GET without it (a page response cannot set a cookie), `publicAction` sets it as a fallback, T2 only reads it and writes the `identity_links` rows; `scoreSignup` receives it as `deviceId`. | Core §D.4 has the `device` kind and the core now names its producer; a random marker is not fingerprinting (PA §2 "device labels without fingerprinting"). |
 | PD13 | **Staff are added by a staff invite link** that creates (or binds) a user with **no store**; the platform role activates only once TOTP is enrolled (core §B.1 `/invite/staff/<token>`, §D.5 `staff_invites`; Q.4 accepted). | Signup always creates a store (core §B.2); staff should not own a sandbox store; core §B.7 makes 2FA mandatory for staff. |
 | PD14 | **Cross-store phone lookup in the console is admin+ only** (key `orders.lookup`, core §A.3.3; Q.5 accepted), results masked, audited with the phone's HMAC. Order-id lookup is open to every console role. | "Which stores did this phone order from" is legitimate for abuse and support, and is still sensitive. |
 | PD15 | **k-anonymity applies to the analyst role everywhere**, overview totals included: any aggregate over fewer than `k` stores (setting, default 5, minimum 5) is suppressed for analysts. | R-D16, PA §13; with 3 stores a "platform total" is one seller's numbers. |
@@ -164,7 +181,7 @@ their sources.
 | PD39 | **Console and shell mutations finish with `refresh()`** (`next/cache`) after the write; no `revalidateTag` is used. | Console data lives in MariaDB and `scopedCache`, not in Next's data cache; `refresh()` re-renders the current route in the same round trip (`server-actions.md:141-150`, `04-functions/refresh.md`). |
 | PD40 | **Store milestones are recorded from R1** (first draft, first publish, first order, 10th order, first teammate; first delivered order from R2) in `store_health.milestones` and as `store.milestone.reached` audit rows. | The store timeline needs them now and the R3 activation funnel (PL-19) needs history from day one. |
 | PD41 | **R2 mail transport = `nodemailer`** (the one dependency core §B.10 lets this part choose), pinned to an exact version at install; it has no runtime dependencies **[verify at install]**. | The reference SMTP client for Node; avoids a hand-written SMTP/STARTTLS stack; Hostinger SMTP limits stay unverified (R-D51). |
-| PD42 | **(rev 2) One score, seven groups (core §I.7):** `setup 20 · trust 15 · design 15 · conversion 15 · operations 15 · integrations 15 · quota 5` (Σ = 100); issues carry `severity 1 \| 2 \| 3 → points 3 \| 6 \| 10` and an evidence object with `n`; the console flags of PLA-§6.3 (`sheets_*`, `outbox_dead`, `capi_failing`, `telegram_failing`, `quota_*`, `risky_orders`, `setup_incomplete`, `render_failed`) are **produced by `src/lib/health/rules/platform.ts` (P1) as issues mapped onto the groups**, and the status flags (`inactive_14d`, `dormant_60d`, `review_waiting`, `restricted`, `suspended`) stay 0-point console flags that only drive `attention`. Design and honesty rules come from P6 and P3's rules files. **Replaces** revision 1's six platform-only components (30/20/15/20/10/10). | Core D53 adopted the one-table, one-computation model; a score the seller reads must include what the seller can fix (RF §1.3). |
+| PD42 | **(rev 2) One score, seven groups (core §I.7):** `setup 20 · trust 15 · design 15 · conversion 15 · operations 15 · integrations 15 · quota 5` (Σ = 100); issues carry `severity 1 \| 2 \| 3 → points 3 \| 6 \| 10` and an evidence object with `n`; the console flags of PLA-§6.3 (`sheets_*`, `outbox_dead`, `capi_failing`, `telegram_failing`, `quota_*`, `risky_orders`, `setup_incomplete`, `render_failed`) are **produced by `src/lib/health/rules/platform.ts` (P1) as issues mapped onto the groups**, and the status flags (`inactive_14d`, `dormant_60d`, `review_waiting`, `restricted`, `suspended`) stay 0-point console flags that only drive `attention`. Design and honesty rules come from P6 and P3's rules files. **Replaces** revision 1's six platform-only components (30/20/15/20/10/10). **(rev 4, core §I.7 rev 3: one condition, one issue, PD79)** where another track's rules file already emits the issue for a condition (P5's `int:sheets_backlog`, `int:capi_failing`, `int:telegram_failing`, `int:delivery_dead`; P3's `landing:no_live_page`), `rules/platform.ts` emits **no second issue**: the console flag (`sheets_backlog`, `capi_failing`, `telegram_failing`, `outbox_dead`, `setup_incomplete`) is **derived from that issue** by `platformFlags()` with the same evidence, so the score never counts one problem twice; P1's own issues are only `platform:render_failed` (setup), `platform:quota_high` / `platform:quota_full` (quota) and `platform:risky_orders` (operations). | Core D53 adopted the one-table, one-computation model; a score the seller reads must include what the seller can fix (RF §1.3); two rules on one condition would double the penalty and show the seller the same reason twice. |
 | PD43 | **Kill switches are never toggled from ⌘K, a bulk bar or a keyboard shortcut**: ⌘K only opens the switch's sheet. | An incident tool needs one deliberate path (PD29). |
 | PD44 | **No bulk lifecycle actions in R1.** Bulk on the stores list = message (≤ 50 stores) and a CSV of the list without PII. | One mistaken selection must never suspend 50 sellers. |
 | PD45 | **Impersonation is refused** for a store the staff member is a member of ("open it directly"), and for `scheduled_deletion` / `purged` stores; one active impersonation per staff session (starting another ends the first). | Avoids mixed identities in the audit; nothing to support on a store about to be deleted. |
@@ -175,14 +192,14 @@ their sources.
 | PD50 | **Notification kinds are a typed registry with per-track extension files** (PLA-§Q.15); this part owns the platform, lifecycle, team, plan, security, staff and health kinds. | Every kind needs ar/fr/en texts and a link builder; tracks must not edit one shared file. |
 | PD51 | **(rev 2) The console passes the admin UX ceiling with its own budgets** (core §I.8 applied to staff screens, PLA-§4.7): shell navigation < 150 ms (route chunks prefetched on hover and focus, the first page of every list served from a 60 s `scopedCache`), keyboard decisions ≤ 500 ms with optimistic UI and an `opId`, skeletons that mirror the final rows after 150-300 ms and for ≥ 300 ms, status always as text + icon (never a bare coloured dot), compact density by default, the §I.6 motion tokens and no bounce. Measured by `platform-check.ts --perf` and the Playwright budgets of PLA-§O.4. | The owner lives in the console every day; "futuristic" is latency discipline, keyboard and honest data (RF §0.4, §2.1). |
 | PD52 | **(rev 2) Explainable risk has three layers on every review:** (a) the flag list with points and evidence (PD3); (b) a **counterfactual line** from `explainBand(score)`: which single flag, removed, would change the band ("Without `disposable_email` this would be `fast`") and which single flag puts it in the hold class; (c) the **draft evidence**: readiness, the Design check summary of the newest draft (P6 `designHealth(scope)`), the count of honesty items (`buildChecklist`) and whether any sample proof is still marked `sample`. Staff decide about the store, not only about the signup; nothing is auto-rejected (R-D12). | Brief item 16: "approvals queue with explainable risk"; a score with no counterfactual is a number, not an explanation (PD18). |
-| PD53 | **(rev 2) P1 owns the Store Health engine, P2 the tenant surface, every track its rules** (core §I.7, §K.2): `src/lib/health/{types,registry}.ts` are the maintainer's skeletons; P1 writes `src/lib/health/{engine,inputs,platform-flags}.ts`, `src/lib/health/rules/platform.ts`, `src/lib/health/selftest.ts`, `src/lib/platform/health-snapshot.ts` (`getStoreHealth`, `markHealthDirty`, `snoozeHealthIssue`), the job in `src/lib/jobs/tracks/platform.ts` and the console ring; P2 writes the ring, the issue list, "Recompute now" and the snooze UI (PLA-§22.16) plus `src/lib/health/rules/shell.ts` (setup rules about contacts, legal identity and 2FA). The score never gates anything (publish gates are core §M). | One owner per layer; the setup checklist (`src/lib/admin-data/dashboard.ts:173-180`, six static items) is deleted, not duplicated (RF §1.3, core §I.4). |
+| PD53 | **(rev 2) P1 owns the Store Health engine, P2 the tenant surface, every track its rules** (core §I.7, §K.2): `src/lib/health/{types,registry}.ts` are the maintainer's skeletons; P1 writes `src/lib/health/{engine,inputs,platform-flags}.ts`, `src/lib/health/rules/platform.ts`, `src/lib/health/selftest.ts`, `src/lib/platform/health-snapshot.ts` (`getStoreHealth`, `markHealthDirty`, `snoozeHealthIssue`), the job in `src/lib/jobs/tracks/platform.ts` and the console ring; P2 writes the ring, the issue list, "Recompute now" and the snooze UI (PLA-§22.16) plus `src/lib/health/rules/shell.ts` (setup rules about contacts, legal identity and 2FA). The score never gates anything (publish gates are core §M). **(rev 4, core D67 / §I.5)** Rule sentences live in the emitting track's own i18n file: P1's tenant sentences `health.platform.<rule>.*` in P1's `notify.ts` (ar / fr / en), P2's `health.shell.<rule>.*` in P2's `shell.ts`; P2's `health.ts` carries the ring, groups, issue-list and snooze chrome only. | One owner per layer; the setup checklist (`src/lib/admin-data/dashboard.ts:173-180`, six static items) is deleted, not duplicated (RF §1.3, core §I.4). |
 | PD54 | **(rev 2) Lifecycle safety = preview, arm, cooldown.** Every lifecycle action (PLA-§8) opens a sheet that shows the **exact store-facing sentence** in the store's default locale, the **consequences count** from `lifecyclePreview(ctx, storeId, to)` (live pages, open orders, agents holding a lease, integrations that pause, the reopen deadline) and the audit row it will write; the primary button arms a **5-second cancel window** on the client before the single `transitionStore` write; a second lifecycle change on the same store within 10 minutes needs the typed handle even where the edge normally does not; no bulk lifecycle action exists (PD44). | Brief item 16: "lifecycle safety"; `transitionStore` sends exactly one notification per edge (core §A.5.1), so an undo after the write would notify twice; preventing the write is cheaper than undoing it. |
 | PD55 | **(rev 2) The store profile Overview is the "every detail" screen** (PD32): identity & address (mode, canonical URL, address mode, handle history count, next re-render), health (ring, groups, top 5 issues incl. snoozes), pages (count, last publish, live URL, preview), orders (7/30 d counts, confirmation rate with `n`, risk mix, masked latest 5), team (members, invites, 2FA coverage), integrations (`integrationHealth`: Sheets, pixels, Telegram, outbox dead), AI (`aiStoreSummary`: credits, cost, last run), usage (`store_usage` meters), risk (latest review band and flags, linked accounts count), timeline (last 8 events). Each strip reads one P0 read API and fails alone. | The owner asked for every detail on one page (brief items 13-14) and the rethink cut the deep tabs (RF §3.3): the strips deliver the first without the cost of the second. |
 | PD56 | **(rev 2) Impersonation is visible on both sides and survives navigation:** the start sheet previews the exact store-facing notice (PD19); the console topbar shows a "Viewing @handle · mm:ss" chip (from `ConsolePulse.impersonation`) while this session impersonates, linking back to `/app/<h>`; the tenant ribbon's countdown reads `StorePulse.impersonation.endsAt` (core D57) so it never drifts after a client navigation; every refused write is one toast and one `platform.impersonation.write_refused` audit row (core §B.8); "Note while viewing" writes a `platform_notes` row of kind `note` from the ribbon's menu (staff only). | Brief item 16: "impersonation UX"; R-D14 read-only support must feel safe to the seller and efficient to staff. |
 | PD57 | **(rev 2) System health shows the machinery:** Edge / Worker (S mode, Worker version last seen, last edge-verified request, prev-key use, foreign hosts), **Render queue** (depth by reason, oldest pending, failed by store, last-hour throughput and ETA), **Health engine** (stale snapshots, dirty rows, last job run), **AI** (`aiHealth()`: provider ok/paused, open batches, orphaned jobs, cap used %, refusal rate 24 h), **Design tables** (bytes, 300 MB alarm) and the cron, queues, Sheets, storage, errors and runtime panels of revision 1; every panel names the alarm it drives (PLA-§15.2). Data: core §H.5 rev 2 (`edge`, `commerce`, `sheetsTop`, `ai`, `design`, `health`, `renderSummary`, `outboxSummary`). | Brief item 16: "system health incl. the Worker and render queue"; a queue nobody can see fails silently. |
 | PD58 | **(rev 2) The plans editor explains every row three ways and previews impact per store:** registry default, plan value, effective sentence ("Stores on this plan get 1 GiB"); the impact preview lists, per lowered key, the count and the handles (≤ 20, sorted by usage) of stores already above the new limit and what they keep; a diff is shown before save; `take_orders` is locked (PD8); the rev 2 keys `campaigns_max`, `short_links_max`, `coupons`, `reviews` appear with their release chip (core §A.4). | Brief item 16: "plans editor"; a limit change is a change to someone's business (PD18). |
 | PD59 | **(rev 2) Onboarding ranks directions with no model on the critical path** (core D59): category tap + photo palette (browser) + keywords through `rankDirections()` (`src/lib/generator/directions.ts:375`); SigLIP and the VLM refine **after** the reveal (a quiet "refining" chip, never a blocker) or run on the server when Cloud AI is on; the "Download local AI" consent card (AI-03) never shows on mobile data; the copy is the hand-written library when Cloud AI is off. **Refines UX-01 / AI-03** as written in RESEARCH. | 99.5 + 111 MB at q8 on 4G is 1-3 minutes (RF §4); the demo reveal is at 0:50. |
-| PD60 | **(rev 2) Mode-aware onboarding, fixed now for R2:** choosing `both` (R2) lands on the **same immediate landing reveal** for the first product, while the store blueprint runs as a detached job (core §H.12 pattern B, `ai_jobs.kind = "store_blueprint"`, S1/S7); the `pulse.jobs.done` list surfaces "Your store home is ready" when it finishes, and the `done` step shows the address card with the store home URL. **(rev 3, OPS-14)** In `store` mode the reveal is the **product page**, not a landing page: `useDirectionAction` creates the first product (S1's `createProduct`) and renders the three directions through `productAsPageDoc(product, …)` (storefront.md STO-§12.2, synchronous, no job), the chosen direction becomes the store's theme draft and the PDP family seed, `onboarding.firstKind = "product"` and `onboarding.productId` are written, no landing page is created and `landing.inStoreMode` stays `false`; the store home arrives from the blueprint job as before. The owner never waits on a model for the first result in any mode. P2 owns the flow; the blueprint is S1/S7's. | Brief item 16: "the tenant onboarding that chooses store / landing / both and lands on a generated first result within the demo budget"; the first result must exist in every mode without a long request; a `store`-mode seller must never be shown a page the mode then hides (core §A.2: landing pages hidden by default in `store` mode). |
+| PD60 | **(rev 2) Mode-aware onboarding, fixed now for R2:** choosing `both` (R2) lands on the **same immediate landing reveal** for the first product, while the store blueprint runs as a detached job (core §H.12 pattern B, `ai_jobs.kind = "store_blueprint"`, S1/S7); the `pulse.jobs.done` list surfaces "Your store home is ready" when it finishes, and the `done` step shows the address card with the store home URL. **(rev 3, OPS-14)** In `store` mode the reveal is the **product page**, not a landing page: `useDirectionAction` creates the first product (S1's `createProduct`) and renders the three directions through `productAsPageDoc(product, …)` (storefront.md STO-§12.2, synchronous, no job), the chosen direction becomes the store's theme draft and the PDP family seed, `onboarding.firstKind = "product"` and `onboarding.productId` are written, no landing page is created and `landing.inStoreMode` stays `false`; the store home arrives from the blueprint job as before. **(rev 4, core §A.2 rev 3 / LAN R5 A\*)** Should any onboarding path create a landing page for a `store`-mode shop (a resumed revision-3 draft, a future entry), the same transaction sets `landing.inStoreMode = true` (audit `store.landing_settings.updated`, reason `onboarding`) and the `done` step reads `onboarding.reveal.saved_sales_page` ("Your first page is a sales page; your store home is being built"), so a saved draft is never hidden behind the store's 404. The owner never waits on a model for the first result in any mode. P2 owns the flow; the blueprint is S1/S7's. | Brief item 16: "the tenant onboarding that chooses store / landing / both and lands on a generated first result within the demo budget"; the first result must exist in every mode without a long request; a `store`-mode seller must never be shown a page the mode then hides (core §A.2: landing pages hidden by default in `store` mode). |
 | PD61 | **(rev 2) The live address card ships in R1** (UX-05 raised, RF §3.2, core §I.4): canonical link + Copy, QR (PD47), "Share on WhatsApp", **"Open a test order"** (P3's `mintTestLink(scope, pageId)`, SF-05), **"Create a campaign"** (P3 entry, SF-01), the live state line; placed on the pages list, on the dashboard after the first publish and at the onboarding end. P2 owns `src/components/admin/common/address-card.tsx` with two named slots (`testOrder`, `campaign`) that P3 fills. | The wow moment ends with sharing (RF §2.3, §4 1:40). |
 | PD62 | **(rev 2) The dashboard is screen 2 of RF §2.10 (P2):** a **Today brief** template line from real counts (SF-11 R1 slice: orders to call now from `opsPulse`, the worst open health issue, one opportunity or "no orders yet"), COD KPI tiles where **placed, confirmed and delivered never share a tile** (sparklines only with ≥ 7 points, every rate with its `n`), the **COD funnel** (orders → confirmed → shipped → delivered → cash collected as horizontal stepped bars, delivered in jade, R1 shows the steps whose data exists and labels the rest "with delivery tracking (R2)"), work lists and the Store Health ring. "Revenue · 7 days" (`src/components/admin/dashboard/dashboard-view.tsx:99`) becomes "Placed · 7 days" with the hint "placed, not delivered"; the setup checklist (`setup-checklist.tsx`) is replaced by the ring. | RF §0.5 names the dashboard's placed-as-revenue habit as an owner-rule break; §2.5 fixes the chart language. |
 | PD63 | **(rev 2) The pulse is the core's `StorePulse` (D57, SF-06):** GET-only route with `ETag` → `304`, **one poller per browser and store** through `BroadcastChannel("sg-pulse:<storeId>")` with independent pollers as the fallback, store-level parts cached 5 s per store and per-user parts fresh, contributors from `src/lib/pulse/contributors/<track>.ts` (50 ms budget each, a failure omits its keys). P2 owns the route, the `usePulse()` hook, the poller election and `contributors/shell.ts`; the `health` and `jobs` fields drive the ring freshness dot and the background-job chip. | 15 s polling must stay cheap on one Node process (RF §2.2, §3.4). |
@@ -190,15 +207,22 @@ their sources.
 | PD65 | **(rev 2) Approval latency is a demo pass condition** (RF §4 at 1:25, core §K.2 exit criterion 12): a submitted store appears in the Review tab within one console pulse (≤ 15 s); `A` commits in ≤ 1 s server time (one compare-and-set review update, one `transitionStore`, one notification, one audit row, `markHealthDirty`); the seller's dashboard unlocks on its next pulse (≤ 15 s) without a reload. Measured by `qa:wow-demo` persona 2. | The owner's one-key approval is part of the acceptance scenario. |
 | PD66 | **(rev 2) Health fixes run through the ⌘K command registry:** `HealthFix.kind = "action"` carries a `CommandDef.id` (core §I.3), so a one-tap fix runs the same registered, permission-filtered command the palette runs (Sync Sheets, Recompute health, Open a test order, Publish); `kind = "link"` fixes build their `href` with `appHref`. The console renders the same issue read-only with "Open in store (view as)". | One action registry; a fix that bypassed permissions would be a second write path. |
 | PD67 | **(rev 2) Health notifications and snoozes are owner/admin actions:** a **new** severity-3 issue notifies owners and admins once per issue id per ISO week (`health.issue_new`, dedupe `health:<storeId>:<issueId>:<YYYY-Www>`); a snooze (`health.snooze`, 7 days) is stored in `store_health.snoozed`, audited `store.health.snoozed` and shown to staff as "snoozed by <role> until <date>"; "Recompute now" (`s:<sid>:health:recompute` 6/h) only marks the row dirty (the job computes within ≤ 5 min). | Nagging kills a health score (RF §1.3 risks); staff must see what the seller chose to ignore. |
-| PD68 | **(rev 3, SEC-1) The pending sandbox has platform-wide ceilings and the human check is a gate, not a score, wherever anyone may sign up.** In `approval` and `open` modes a configured Turnstile widget **refuses** the signup when the token is missing or invalid (the +20 / +10 points stay only for `invite` mode, where the code already gates); `signup.pendingStoresPerDay` (default 50) caps the sandboxes created per platform day through `chargePlatformUsage("pending_stores", <YYYY-MM-DD>, 1)` and the 51st applicant lands on the **waitlist** for that day (never a 500, never a silent sandbox); `signup.pendingMediaTotalMiB` (default 5,000) is one disk budget shared by every `pending` store, charged through `chargePlatformUsage("pending_media_bytes", "total", bytes)` beside the store's own `media_bytes` charge, so an exhausted budget answers `quota` at upload; the per-store pending media cap is **two-tier**: `signup.pendingMediaMiBBeforeSubmit` (default 20) until "Submit for review" is pressed, `signup.pendingMediaMiB` (default 100) after; pending stores draw Cloud AI from a separate slice `platform_ai.caps.pendingSharePct` (default 10 % of `monthlyUsd`, ai.md) so sandboxes can never exhaust the cap approved stores pay for. PLA-§3.1, §3.2, §3.4.1, §3.6, §O.2 case 13, §O.3 cases 13-14. | 1,000 bot signups at 200 IPs/hour were 100 GB of disk, ~900k inodes (core §G.2: 600,000 plan-wide) and $500/day of AI before the monthly cap tripped; a full disk breaks backups (core §H.6), exports (core §F.9) and every store's uploads; nothing is auto-rejected (R-D12), so the queue alone cannot stop a flood. |
+| PD68 | **(rev 3, SEC-1) The pending sandbox has platform-wide ceilings and the human check is a gate, not a score, wherever anyone may sign up.** In `approval` and `open` modes a configured Turnstile widget **refuses** the signup when the token is missing or invalid (the +20 / +10 points stay only for `invite` mode, where the code already gates); `signup.pendingStoresPerDay` (default 50) caps the sandboxes created per platform day through `chargePlatformUsage("pending_stores", <YYYY-MM-DD>, 1)` and the 51st applicant lands on the **waitlist** for that day (never a 500, never a silent sandbox); `signup.pendingMediaTotalMiB` (default 5,000) is one disk budget shared by every `pending` store, charged through `chargePlatformUsage("pending_media_bytes", "total", bytes)` beside the store's own `media_bytes` charge, so an exhausted budget answers `quota` at upload; the per-store pending media cap is **two-tier**: `signup.pendingMediaMiBBeforeSubmit` (default 20) until "Submit for review" is pressed, `signup.pendingMediaMiB` (default 100) after; pending stores draw Cloud AI from a separate slice `platform_ai.caps.pendingSharePct` (default 10 % of `monthlyUsd`, ai.md) so sandboxes can never exhaust the cap approved stores pay for. **(rev 4, aligned with core D69 / §B.2 / §A.5.2 rev 3)** The daily charge is core §B.2 **step 6, before** the step-7 transaction, and applies **whenever the store would start `pending`** (an invite code without `auto_approve` included; auto-approved paths skip it); a step-7 rollback (duplicate e-mail or handle) gives the slot back with `refundPlatformUsage("pending_stores", <day>, 1)`; the shared media budget is refunded through `refundPlatformUsage("pending_media_bytes", …)` on any transition out of `pending`; the pending AI slice's daily floor is **10 credits** and its exhaustion answers **`quota_platform_pending`** (pending stores only); the alarms are `pending_media_budget` (80 % yellow, 95 % red) and `signup_capped` (core §H.5 names). PLA-§3.1, §3.2, §3.4.1, §3.6, §O.2 case 13, §O.3 cases 13-14. | 1,000 bot signups at 200 IPs/hour were 100 GB of disk, ~900k inodes (core §G.2: 600,000 plan-wide) and $500/day of AI before the monthly cap tripped; a full disk breaks backups (core §H.6), exports (core §F.9) and every store's uploads; nothing is auto-rejected (R-D12), so the queue alone cannot stop a flood. |
 | PD69 | **(rev 3, SEC-5) Impersonation masks customers at the repository boundary.** When `ctx.impersonation` is set the seam gives `StoreCtx.scope.kind = "impersonation"` and every order, lead and customer read function (operations.md) applies `maskName` / `maskPhone` / `maskAddress` and replaces notes by "Note hidden" from `src/lib/platform/mask.ts` before returning rows, so the tenant UI renders masked values with no per-component work; the only unmasking path stays the console's per-order reveal (`pii.reveal` ↑, PLA-§7.4), reachable from the ribbon's "Open profile". The start sheet says so to staff and the store's notification says so to the seller. PLA-§7.2, §10.1-10.3, §O.3 case 15. | PD35 promised "customer PII masked for every role and revealed per order only"; the revision-2 synthetic membership (`orders.read_all`, `customers.read`, `leads.read` with `write = false`) rendered names, addresses and notes in clear while only the phone was masked (OP-07), contradicting the owner summary's "read-only is safe". |
-| PD70 | **(rev 3, SEC-18) Brand protection runs at every write, on every live page and from day one for reporters:** (1) `checkBrandTerms(fields)` (`src/lib/platform/brand-check.ts`, P1, the second tenant-callable function of `src/lib/platform/**` after `createStoreRequest`) runs `brandTokens()` + the active `protected_brands` rows on the store name, legal name and WhatsApp display name at every write (`saveGeneralAction`, `/admin/stores/new`, onboarding); `brand_exact` **refuses** for non-staff with the action error `brand_protected` (limit-sheet variant `shell.limit.brand_protected`), `brand_near` writes the console flag `brand_near_live`; (2) the health engine's platform rule `platform:brand_term_live` scans the store name, legal name, every live page's name and SEO title and the `policies` texts on each run and raises the console flag `brand_term_live` (`attention = 2`, `staff.alarm brand_term_live`, platform-visible only, never a tenant issue); (3) the public **"Report this store"** link (`/report/<handle>`, platform host, P1) and the insert-only `abuse_reports` table ship in **R1** (the table moves from 0007 to 0005, PLA-§Q.3); the triage UI stays R3 (PL-20); new reports count in Needs attention and in the profile's Risk strip; (4) the publish gate `honesty:password_field` (a landing or store page with `<input type="password">`, a card-number pattern or an `otp` field is refused) is P3's in `src/lib/render/prepublish/landing.ts` (PLA-§Q.3). PLA-§6.3.3, §13.3, §22.10.1, §24.2. | `brand_exact` / `brand_near` were signup-time signals only; after approval a store approved as "Boutique Nour" could become "CIH Bank · Vérification" with a password-shaped form in minutes on `<handle>.<root>`, with no abuse report before R3 and no Web Risk before PL-24. |
+| PD70 | **(rev 3, SEC-18) Brand protection runs at every write, on every live page and from day one for reporters:** (1) `checkBrandTerms(fields)` (`src/lib/platform/brand-check.ts`, P1, the second tenant-callable function of `src/lib/platform/**` after `createStoreRequest`) runs `brandTokens()` + the active `protected_brands` rows on the store name, legal name and WhatsApp display name at every write (`saveGeneralAction`, `/admin/stores/new`, onboarding); `brand_exact` **refuses** for non-staff with the action error `brand_protected` (limit-sheet variant `shell.limit.brand_protected`), `brand_near` writes the console flag `brand_near_live`; (2) the health engine's platform rule `platform:brand_term_live` scans the store name, legal name, every live page's name and SEO title and the `policies` texts on each run and raises the console flag `brand_term_live` (`attention = 2`, `staff.alarm brand_term_live`, platform-visible only, never a tenant issue); (3) the public **"Report this store"** link (`/report/<handle>`, platform host, P1) and the insert-only `abuse_reports` table ship in **R1** (the table moves from 0007 to 0005, PLA-§Q.3); the triage UI stays R3 (PL-20); new reports count in Needs attention and in the profile's Risk strip; (4) the publish gate `honesty:password_field` (a landing or store page with `<input type="password">`, a card-number pattern or an `otp` field is refused) is P3's in `src/lib/render/prepublish/landing.ts` (PLA-§Q.3). **(rev 4, aligned with core D76 / §C.7 / §B.1 / §K.2 P0 rev 3)** The tenant-callable function has the core's frozen P0 signature `checkBrandTerms(kind: BrandField, value: string): Promise<"ok" \| "near" \| "exact">` (P2's `saveGeneralAction` and onboarding, P3's policies contact block and P6's brand kit call it once per field); the console's "Check a name" box and the health rule use P1's internal `brandMatches(kind, value)` that also returns the matched term, never exposed to tenants; the rule runs on **every health computation** of the store, which is at least as often as the core's "nightly" (PLA-§Q.4 asks the core to say "at least nightly"); the footer link is the absolute `reportUrl(handle, path)` = `platformOrigin() + "/report/<handle>?p=<path>"` and **store hosts answer the neutral 404 for `/report/*`** (like `/kit/*`, core §C.4; not a 308); the form posts with `Referrer-Policy: same-origin` and the buckets are `p:report:ip:<h>` 5/h and `p:report:store:<h>` 20/day (core §B.1, §E.8). PLA-§6.3.3, §13.3, §22.10.1, §24.2. | `brand_exact` / `brand_near` were signup-time signals only; after approval a store approved as "Boutique Nour" could become "CIH Bank · Vérification" with a password-shaped form in minutes on `<handle>.<root>`, with no abuse report before R3 and no Web Risk before PL-24. |
 | PD71 | **(rev 3, SEC-13) Every platform cookie carries the `__Host-` prefix.** The locale cookie becomes `__Host-sgl` (Secure, Path=/, no Domain, SameSite=Lax, not HttpOnly, 1 year); its value is validated with `z.enum(["ar", "fr", "en"])` on every read and before any write to `users.locale`; when several cookies of the same name arrive only the host-only one is taken; `qa:edge-sim` asserts that the platform host never emits a `Set-Cookie` without `__Host-` (T3, PLA-§Q.3). PLA-§22.1. | In S mode every store subdomain is same-site with the apex (R-D7); a vendor script on `<store>.<root>` could set `sg-locale=…; Domain=.<root>` and toss an attacker-controlled value into `users.locale` (`varchar(5)`), later used to pick catalogs and `dir="rtl"`. |
 | PD72 | **(rev 3, OPS-31) The store / landing / both choice explains itself** with `modeSummary(mode): { line: MessageKey; get: MessageKey[]; later: MessageKey }` (`src/components/admin/common/mode-explainer.tsx`, P2, derived from `modeAllows()` so it never drifts from core §A.2): one line and three "you get" bullets per card and the sentence "You can change this later; nothing is deleted", reused by `/signup` step 2, `/app/new`, onboarding and the mode-switch sheet of Settings → General. PLA-§22.1.5, §22.10.1. | Owner item 7 makes the choice first-class; three card titles with two "Coming soon" badges did not tell a seller that landing = one product per page with the COD form and both = a catalog plus campaign pages borrowing product prices. |
 | PD73 | **(rev 3, UX-20) The reveal shows three real folds, never a page inside a phone inside a phone.** Mobile (390 px): direction 1 renders as the real page edge-to-edge (the live fold at 100 %), the three folds sit in a horizontal snap carousel with an 8 % peek of the next, the DNA chips live in a bottom sheet, "Use this design" is sticky at the bottom; desktop: three real folds side by side at equal width (≤ 440 px each), hover or focus expands one to a full scrollable preview, the DNA card under each. The 420 ms quint entrance and the reduced-motion crossfade stay. P6 owns the component (design.md DES-§14.3 must follow, PLA-§Q.3); P2 owns the step and its acceptance. PLA-§22.2. | A scaled screenshot in a device bezel at 390 px is unreadable type with no sense of the real fold; the wow moment is three clearly different folds seen together, and one large frame plus two small cards biases the choice (UX-20). |
 | PD74 | **(rev 3, UX-39) Cutout-later path for the reveal:** the photos step runs P6's model-free alpha estimate in the browser for uniform backgrounds (edge flood-fill with tolerance on the 32 × 32 facts pass, then at 1024 px, < 150 ms) and passes `hasCutout: "estimated"` to the generator so stage / specimen / dark-base directions are eligible at 0:50 with a `plinth` / `contact` preset; when the BiRefNet mask (AI-21) lands later, a `render_jobs` row with reason `cutout` upgrades the hero in place for the chosen page; `qa:wow-demo` asserts that at least one of the three directions at 0:50 is stage, specimen or dark for the argan and parfum fixtures. PLA-§22.2, §O.5. | Core D59 forbids any model download before the reveal, so `PhotoFacts.hasCutout` was always false at 0:50 and H13 / H27 excluded the most distinctive subset of the genome at the moment the owner judges "special"; the chosen page was never re-sampled when the cutout arrived. |
 | PD75 | **(rev 3, ENGC-8) The tenant audit page `settings/audit` is P2's** (core §I.1 lists the route; no R1 track owned it): the store's own activity log over `listStoreAudit(scope, filter)` (T1's audit v2 read API, store rows only), the deep-link target of `store.impersonation_*` notifications (PLA-§18.2 already points there), filters by actor kind and area, keyset by id, every impersonation session and platform reveal listed with the staff display name (core §F.5). PLA-§22.10.6. | A route in the core's tree with no owner is a file two tracks would both create; the notification kinds of this part already link to it. |
-| PD76 | **(rev 3, OPS-13) The health inputs carry the per-city fee mismatch** so P3's rule `landing:fee_mismatch` (severity 1, conversion group) can tell a seller that a live page charges a flat fee while the zone table carries a different fee for one of the five most-ordered cities; the rule's condition and text are P3's (landing.md), the input `zones.feeMismatchTop5` is P1's (`inputs.ts`, from `zonesForCheckout` and `opsAggregates(dims: city)`). PLA-§6.3.1, §6.3.2. | Until landing pages charge per-city fees (LP-16), a `both` store quotes two fees for one city; the seller must at least see it as a reasoned issue with a fix link. |
+| PD76 | **(rev 3, OPS-13) The health inputs carry the per-city fee mismatch** so P3's rule `landing:fee_mismatch` (severity 1, conversion group) can tell a seller that a live page charges a flat fee while the zone table carries a different fee for one of the five most-ordered cities; the rule's condition and text are P3's (landing.md), the input `zones.feeMismatchTop5` is P1's (`inputs.ts`, from `zonesForCheckout` and `opsAggregates(dims: city)`). PLA-§6.3.1, §6.3.2. **(rev 4)** Core D75 moved LP-16 ("Charge delivery by city") into the R2 contract step and core §I.7 names `landing:fee_mismatch` as a P3 health rule; the input stays and is computed only for pages **not** on "Charge delivery by city" (a page that charges the zone fee cannot mismatch); the input's keys are the canonical `CityKey` slug of core D68 (`null` = the `*` zone, never an input row). LAN-§23.7 does not list the rule yet (PLA-§Q.4). | Until landing pages charge per-city fees (LP-16), a `both` store quotes two fees for one city; the seller must at least see it as a reasoned issue with a fix link. |
+| PD77 | **(rev 4, CRIT17) Every feature row names its proof.** Each row of the PLA-§1 feature maps carries a **Proven by** cell naming the script (and the case or step) that fails when the row's acceptance breaks; `src/lib/platform/selftest.ts` exports `FEATURE_PROOFS: Record<FeatureId, string[]>` (the same list, machine-readable) and `test:platform` asserts that every R1 id of PLA-§1 has at least one entry and every entry names a script of PLA-§O; deliverable-list cells (PL-04, the critic's example, and PL-10, PL-11, PL-13) are rewritten as checkable statements. | The criterion "every acceptance criterion names a test command or harness" must be checked mechanically, not by a reviewer reading two sections side by side. |
+| PD78 | **(rev 4, core §I.7 rev 3 / ENGC-25) Health freshness is measured, not promised.** The `platform.health` job is budget-driven (≈ 10 stores per tick at 100-800 ms each), dirty rows first: ≤ 5 min after any `markHealthDirty`, otherwise one full cycle = `ceil(activeStores / storesPerTickP50) × 5 min` (≤ 60 min up to ≈ 120 active stores, longer beyond, recorded in `job_runs.summary`). The stale alarm and the console panel compare each snapshot with **the measured cycle**, not a fixed hour (`stale` = older than `max(staleAlarmMinutes, 1.5 × cycleMin)`), and every tenant sentence shows the check time ("Checked at 14:20") instead of promising "within an hour". | "≤ 200 stores per tick" was unreachable in 3 s; a fixed 60-minute stale alarm would fire permanently past ≈ 120 stores and the copy would lie. |
+| PD79 | **(rev 4, core §I.7 / D67) One condition, one issue; rule ids as their owners write them.** The PLA-§6.3.2 table is a summary of the R1 rule set whose source is each owner's table (P3 LAN-§23.7, P4 / P5 OPE-§27.2, P6 DES-§2.10 / DS46, P2 here, P1 here); a condition appears in exactly one rules file, console flags that mirror another track's issue are derived from it (PD42 rev 4), and `test:health` fails when two registered rules share an evidence `metric` in the same group. | Revision 3 listed `platform:sheets_backlog` beside P5's `int:sheets_backlog`, `shell:no_published_page` beside P3's `landing:no_live_page` and stale ids for P4 / P6 rules: the score would have counted one backlog twice. |
+| PD80 | **(rev 4, core §B.7 rev 3 / SEC-17) The tenant step-up ladder is P2's UI.** `StepUpSheet` gains `method: "totp" \| "password"` (TOTP when the user has it, else a password re-entry through T2's `stepUpWithPasswordAction`, bucket `p:password:<userId>`); P2 opens it for every store-side action the core lists: `store.export` and `orders.export` (Danger zone, P4's export menu uses the same sheet), `store.close`, secret writes under `integrations.manage` (P5's screens mount the same sheet), and role changes **to `admin` or `owner`** (Team); the audit row names the method (`meta.stepUp`). Revision 3's "↑ when the user has TOTP" is withdrawn. | A stolen 30-day session cookie alone could pull every customer of a store; the ladder needs one sheet the seller recognises everywhere. |
+| PD81 | **(rev 4, core §F.9 rev 3 / SEC-20) Account deletion has two doors.** Staff: **Delete account** on the console user profile (`users.manage` ↑, reason, refused while the user owns a store that is not `purged`, PLA-§11.2) calls T2's `deleteUserAccount(ctx)`; seller: `/app/account/danger` **Delete my account** (P2, R1; offered only when the user owns no store, else the page lists the stores to close or transfer first) behind the password / TOTP step-up and a typed `delete`. Both anonymise `users`, revoke sessions and audit (`platform.user.deleted` / `auth.account.deleted`). | The core gave the staff path to P1 and the self-service page to P2 (core §K.2 P1 row "the account-deletion staff path"); a right to deletion needs a door. |
+| PD82 | **(rev 4, core D44 rev 3 / SEC-2) The console leaves the shared origin at the domain move.** The PLA-§16.3 checklist carries `ADMIN_HOST=console.<domain>` in the env step (restart, not rebuild, core §C.10), "verify the console allowlist still admits you (`CF-Connecting-IP`)" before the nameserver switch, and a V-check that `/admin` on the apex answers the neutral 404 once `ADMIN_HOST` is set; every console link this part builds goes through `consoleHref()`, which the core makes absolute (`https://<ADMIN_HOST>/admin…`) when `ADMIN_HOST` is set (PLA-§Q.4), so the tenant shell's "Platform console" item and staff notification links keep working. | A vendor pixel script on a tenant page runs with the viewer's cookies on a shared origin; the console must leave it before public sign-ups. |
+| PD83 | **(rev 4, CRIT15) One report link contract for every public page.** `reportUrl(store, pagePath?)` (core §C.6 builder, PLA-§Q.4) = `platformOrigin() + "/report/" + handle + "?p=" + encodeURIComponent(pagePath)` (path only: no host, no query, ≤ 300 chars); the wording is `shell.report.link` (ar / fr / en, PLA-§N.3; the shell and the `/report` page use that key), and each shopper-facing renderer keeps the same three texts under its own key (D67: P3 / P6 `landing.footer.report`, S1 `footer.report` which STO-§24 already has), so the surfaces read identically without sharing a catalog file; the renderers are named: **P6's landing footer section** and **P3's legal / policy pages** receive it as `ctx.reportHref` from the landing renderer's store context (`{ base, origin, mediaOrigin, reportHref }`, core §C.6 / T3), **S1's store chrome** in R2 (`footer.report`, STO-§24), the thank-you and tracking pages through the same context; `qa:headers` / render-check assert the link on one fixture per page kind. Re-render reason `address` refreshes it at the domain move. | The core promised the link on every public page; landing.md and design.md (owner of the footer section) never rendered it, so the R1 product (landing pages) had no owner for the slice (CRIT15). |
 
 Glossary: **staff** = a user with `platform_role ≠ none`. **store profile** = `/admin/stores/<id>`. **band** = the
 signup triage class of PD3. **request** = a `signup_reviews` row whose kind is not `signup`. **snapshot** = the
@@ -212,95 +236,99 @@ window before a lifecycle write (PD54).
 ## PLA-§1. Feature map (every id of this area)
 
 Release per RESEARCH §4 unless a decision moves it (PD6, PD10). "Track" per core §K.2/§K.5. AC = acceptance
-criteria in one line; the detailed criteria sit in the section.
+criteria in one line; the detailed criteria sit in the section. **Proven by (rev 4, PD77, CRIT17)** names the
+script and the case or step of PLA-§O that fails when the row's acceptance breaks (`test:db` = `scripts/qa/platform-check.ts`,
+attack case = `scripts/qa/tenancy-cases/platform.ts`, e2e step = PLA-§O.4); the same mapping is the `FEATURE_PROOFS`
+constant of `src/lib/platform/selftest.ts`, and `test:platform` fails when an R1 id has no entry or an entry names a
+script PLA-§O does not define.
 
 ### PLA-§1.1 Platform (PL-*)
 
-| ID | Feature | R | Track | Section | AC (summary) |
-|---|---|---|---|---|---|
-| PL-01 | Signup modes | R1 (core R1.0 for the form) | T2, P1 | §3.1, §3.2, §13.2 | Mode setting editable; `null` = derived (core D9); invite codes and waitlist manageable; each mode behaves per §3.1 in an e2e run. |
-| PL-02 | Pending-store sandbox | R1 | T1, T2, P1, P2 | §3.6, §22.7 | A pending store builds, uploads ≤ pending cap and previews; publish/orders/integrations show the locked state with copy; approval unlocks without reload (next pulse). **(rev 3, PD68)** The sandbox is bounded platform-wide: 50 sandboxes per day (then waitlist), 20 MiB before submit / 100 MiB after per store, one shared 5,000 MiB disk budget, a 10 % AI slice; the human check is required in `approval` / `open`. |
-| PL-03 | Signup risk score | R1 | P1 | §3.4 | Golden fixtures produce the exact score/flags; MX timeout ≤ 2 s fails open; no raw e-mail/phone/IP in `signals`. |
-| PL-04 | Approval queue | R1 | P1 | §3.5 | Keyboard triage A/I/R/S/J/K; split view with explanation, draft preview, cluster; bulk fast lane (≤ 50); SLA tile; one appeal. |
-| PL-05 | Platform pulse overview | R1 | P1 | §5 | KPI row, needs-attention, activity feed render from real data only; each panel fails independently. |
-| PL-06 | Stores list | R1 | P1 | §6 | Filters status/mode/plan/market/band/flag/dormant; health chips; sort by health; ≤ 300 ms p95 on 2,000 stores. |
-| PL-07 | Store profile | R1 (6 tabs); Catalog & pages, Integrations health, Domains, Risk, Media, Ops R2; Support R3 | P1 (S6, D5) | §7 | R1: Overview with ten detail strips (PD55), Orders (masked), Team, Activity (+ Timeline view), Usage & plan, Notes; PII masked; reveal ↑ with reason; every strip and tab has loading / empty / error states; deferred tabs are honest lines, never placeholder numbers. |
-| PL-08 | Lifecycle actions | R1 | T1, P1 | §8 | Every core §A.5.1 edge available with reason codes, step-up where marked, notification and audit. |
-| PL-09 | Store export ZIP (UI) | R1 | P8 (engine), P1, P2 | §7.14, §22.11 | Owner requests and downloads from Danger zone; super_admin from the profile with reason; both audited. |
-| PL-10 | Read-only "View as store" | R1 | T2, P1, P2 | §10 | Start sheet, ribbon with countdown, write refusals toast, store notification, end returns to the profile. |
-| PL-11 | Plans, entitlements, usage meters | R1 | T1, P1, P2 | §9, §22.10 | Plan editor with impact preview; overrides/boosts with expiry and reason; tenant meters; limit sheet. |
-| PL-12 | Kill switches | R1 | T1, P1 | §12 | 7 switches with step-up, banner preview, affected count; tenant banners within 45 s (30 s flag cache + one 15 s pulse). |
-| PL-13 | Notification centre | R1 | P1 (`notify`), P2 (UI) | §18, §22.6 | Bell + page; kind catalog in ar/fr/en; unread count via pulse; staff feed in the console. |
-| PL-14 | Platform settings + legal templates | R1 (platform DPA R2, RF §3.3) | P1 (S6 for the DPA) | §13 | Brand, signup, defaults, reserved handles, protected brands, legal versions with acceptance counts; R1 legal kinds = ToS, Privacy, AUP and the store templates; the design gate field group (`platform_design`, P6's component) mounted on General. |
-| PL-15 | Support grants + break-glass write | R3 | D5 | §24.1 | Owner grant 24/72 h scoped; break-glass write ↑ with crimson ribbon and instant notice. |
-| PL-16 | Tickets inbox | R3 | D5 | §20.2 | Auto-context, macros ar/fr/en, assignment, SLA, appeals, view-as from a ticket. |
-| PL-17 | Broadcasts and changelog | R3 | D5 | §19.2 | Targeted announcements, maintenance banners, "What's new" drawer, seen/click counts without per-user tracking beyond read state. |
-| PL-18 | Store health score + dormancy (= **SF-03** Store Health, raised and tenant-facing; core D53) | **R1** (PD6; re-engagement R3) | P1 (engine, job, console ring, platform rules), P2 (tenant ring and issue list), rules per track | §6.3, §22.16 | One `store_health` row per store; score = 100 − Σ group penalties (caps 20/15/15/15/15/15/5); refreshed ≤ 5 min after a platform action, a publish or a zone / integration change (dirty mark) and ≤ 60 min otherwise; ≤ 20 issues stored, 5 shown with evidence `n` and one fix each; snooze 7 days audited; dormant tag at 60 days; the two-store fixture proves no cross-store evidence. |
-| PL-19 | Global analytics | R3 | D5 | §21 | Activation funnel, placed/confirmed/delivered GMV labelled, mode mix; k ≥ 5 suppression. |
-| PL-20 | Abuse reports + takedowns | R3 (**report link and insert-only store R1**, rev 3, PD70) | P1 (R1 slice), D5 | §24.2 | R1: "Report this store" on every public page, `/report/<handle>` writes `abuse_reports`, new reports count in Needs attention and the Risk strip; R3: queue, page/media takedown through a platform write scope. |
-| PL-21 | Ownership transfer | R3 | D5 | §24.3 | Two-sided confirmation, audited, old owner becomes admin or leaves. |
-| PL-22 | UTS #39 skeletons + mixed-script check | R3 | D5 (D1) | §3.4.4 | Vendored `confusables.txt`; skeleton match flags homographs; mixed Latin+Cyrillic handle names flagged. |
-| PL-23 | Manual billing, then a payment provider | later | — | §24.4 | `payments_manual` sketch; no prices until the owner decides. |
-| PL-24 | Web Risk URL checks, VPN/ASN signal | later | — | §24.5 | Optional Google key; ASN dataset only if a reliable free one exists. |
-| PL-25 | Help centre + CSAT | later | — | §24.6 | In-app articles, one-tap rating after a ticket. |
+| ID | Feature | R | Track | Section | AC (summary) | Proven by |
+|---|---|---|---|---|---|---|
+| PL-01 | Signup modes | R1 (core R1.0 for the form) | T2, P1 | §3.1, §3.2, §13.2 | Mode setting editable; `null` = derived (core D9); invite codes and waitlist manageable; each mode behaves per §3.1 in an e2e run. | `test:platform` (`autoApprove` truth table per mode, `turnstile: "off"` refused in `open`) · `test:db` case 13 (Turnstile gate, daily cap) · e2e step 1 (invite-mode signup) |
+| PL-02 | Pending-store sandbox | R1 | T1, T2, P1, P2 | §3.6, §22.7 | A pending store builds, uploads ≤ pending cap and previews; publish/orders/integrations show the locked state with copy; approval unlocks without reload (next pulse). **(rev 3, PD68)** The sandbox is bounded platform-wide: 50 sandboxes per day (then waitlist), 20 MiB before submit / 100 MiB after per store, one shared 5,000 MiB disk budget, a 10 % AI slice; the human check is required in `approval` / `open`. | `test:db` case 13 · attack cases 13-14 · e2e steps 1 and 17 |
+| PL-03 | Signup risk score | R1 | P1 | §3.4 | Golden fixtures produce the exact score/flags; MX timeout ≤ 2 s fails open; no raw e-mail/phone/IP in `signals`. | `test:platform` (≥ 30 golden fixtures with injected deps, the MX-timeout fixture) · attack case 8 (no raw e-mail / phone / IP in `signals`) |
+| PL-04 | Approval queue | R1 | P1 | §3.5 | Each of `A` / `I` / `R` / `S` decides the focused row with one key and writes exactly one audit row and one store notification; two concurrent decisions on one row → one wins, the other answers `already_decided`; `Shift+A` approves only fast-lane rows without a hold-class flag (≤ 50 per call); the counterfactual line equals `bandFor()` re-scored without the pivot flag; tenant HTML renders only in the sandboxed iframe; a second appeal on one rejection is refused. | `test:platform` (`explainBand` vs `bandFor` on every fixture) · `test:db` case 1 · attack case 1 · e2e step 1 · `qa:wow-demo` persona 2 (1:25) |
+| PL-05 | Platform pulse overview | R1 | P1 | §5 | KPI row, needs-attention, activity feed render from real data only; each panel fails independently. | `test:db` case 10 (`EXPLAIN` + `--perf` overview ≤ 800 ms p95, one throwing panel) · attack case 2 (k-suppression) |
+| PL-06 | Stores list | R1 | P1 | §6 | Filters status/mode/plan/market/band/flag/dormant; health chips; sort by health; ≤ 300 ms p95 on 2,000 stores. | `test:db` case 10 (stores list ≤ 300 ms p95 on 2,000 stores; the CSV has no `@` outside its header) |
+| PL-07 | Store profile | R1 (6 tabs); Catalog & pages, Integrations health, Domains, Risk, Media, Ops R2; Support R3 | P1 (S6, D5) | §7 | R1: Overview with ten detail strips (PD55), Orders (masked), Team, Activity (+ Timeline view), Usage & plan, Notes; PII masked; reveal ↑ with reason; every strip and tab has loading / empty / error states; deferred tabs are honest lines, never placeholder numbers. | attack case 1 (canaries absent per tab and strip) · `test:db` case 10 (Overview ≤ 900 ms with one strip throwing) · e2e step 6 (states at 1280 / 360) |
+| PL-08 | Lifecycle actions | R1 | T1, P1 | §8 | Every core §A.5.1 edge available with reason codes, step-up where marked, notification and audit. | `test:platform` (`lifecyclePreview` pure parts) · `test:db` cases 3 and 11 · e2e step 12 |
+| PL-09 | Store export ZIP (UI) | R1 | P8 (engine), P1, P2 | §7.14, §22.11 | Owner requests and downloads from Danger zone; super_admin from the profile with reason; both audited. | attack case 7 (tampered / foreign signature, no step-up) · e2e step 19 (step-up ladder on the export) |
+| PL-10 | Read-only "View as store" | R1 | T2, P1, P2 | §10 | Start writes one `store.impersonation_started` notification with reason and window; every store action during the session answers `impersonation_read_only` and audits `platform.impersonation.write_refused`; the ribbon's countdown differs by < 1 s across two tabs; the session ends itself at expiry (fake clock); End lands on the profile's Activity tab with the session listed; no customer canary appears in any tenant route's HTML or RSC payload. | `test:db` cases 9, 12 and 14 · attack case 15 · e2e step 3 |
+| PL-11 | Plans, entitlements, usage meters | R1 | T1, P1, P2 | §9, §22.10 | Lowering a limit previews the exact count and up to 20 handles of stores already above it before save; `take_orders` cannot be set false by a plan or an override (server refusal); a boost past its expiry is ignored by `entitlement()` and deleted after 30 days; a quota refusal opens the limit sheet with the meter, never a toast. | `test:platform` (`PlanImpact.examples` order and cap) · `test:db` cases 2 and 4 |
+| PL-12 | Kill switches | R1 | T1, P1 | §12 | 7 switches with step-up, banner preview, affected count; tenant banners within 45 s (30 s flag cache + one 15 s pulse). | `test:platform` (`flagValue` order, rollout stability) · e2e step 4 |
+| PL-13 | Notification centre | R1 | P1 (`notify`), P2 (UI) | §18, §22.6 | A kind without ar, fr or en texts fails `npm test`; an agent never reads a `store_role` row addressed to owners; 50 parallel batched inserts give one row with count 50; reading 50 notifications costs two queries; the unread count arrives through the pulse. | `test:platform` (kind `vars` schemas free of PII keys) · `test:i18n-coverage` · `test:db` case 6 |
+| PL-14 | Platform settings + legal templates | R1 (platform DPA R2, RF §3.3) | P1 (S6 for the DPA) | §13 | Brand, signup, defaults, reserved handles, protected brands, legal versions with acceptance counts; R1 legal kinds = ToS, Privacy, AUP and the store templates; the design gate field group (`platform_design`, P6's component) mounted on General. | `test:platform` (`renderMarkdownLite` escaping, schema defaults) · `test:db` case 8 |
+| PL-15 | Support grants + break-glass write | R3 | D5 | §24.1 | Owner grant 24/72 h scoped; break-glass write ↑ with crimson ribbon and instant notice. | R3 contract step (D5): its own attack cases |
+| PL-16 | Tickets inbox | R3 | D5 | §20.2 | Auto-context, macros ar/fr/en, assignment, SLA, appeals, view-as from a ticket. | R3 contract step (D5) |
+| PL-17 | Broadcasts and changelog | R3 | D5 | §19.2 | Targeted announcements, maintenance banners, "What's new" drawer, seen/click counts without per-user tracking beyond read state. | R3 contract step (D5) |
+| PL-18 | Store health score + dormancy (= **SF-03** Store Health, raised and tenant-facing; core D53) | **R1** (PD6; re-engagement R3) | P1 (engine, job, console ring, platform rules), P2 (tenant ring and issue list), rules per track | §6.3, §22.16 | One `store_health` row per store; score = 100 − Σ group penalties (caps 20/15/15/15/15/15/5); refreshed ≤ 5 min after a platform action, a publish or a zone / integration change (dirty mark) and otherwise once per measured cycle (≤ 60 min up to ≈ 120 active stores, rev 4 PD78; the cycle is shown, never promised); ≤ 20 issues stored, 5 shown with evidence `n` and one fix each; snooze 7 days audited; dormant tag at 60 days; the two-store fixture proves no cross-store evidence. | `test:health` · `test:health-db` · e2e step 13 · `qa:wow-demo` 2:50 |
+| PL-19 | Global analytics | R3 | D5 | §21 | Activation funnel, placed/confirmed/delivered GMV labelled, mode mix; k ≥ 5 suppression. | R3 contract step (D5): k-suppression fixture |
+| PL-20 | Abuse reports + takedowns | R3 (**report link and insert-only store R1**, rev 3, PD70) | P1 (R1 slice), D5 | §24.2 | R1: "Report this store" on every public page, `/report/<handle>` writes `abuse_reports`, new reports count in Needs attention and the Risk strip; R3: queue, page/media takedown through a platform write scope. | R1 slice: `test:db` case 15 · attack case 17 · e2e step 16; R3: D5 |
+| PL-21 | Ownership transfer | R3 | D5 | §24.3 | Two-sided confirmation, audited, old owner becomes admin or leaves. | R3 contract step (D5) |
+| PL-22 | UTS #39 skeletons + mixed-script check | R3 | D5 (D1) | §3.4.4 | Vendored `confusables.txt`; skeleton match flags homographs; mixed Latin+Cyrillic handle names flagged. | R3 (`test:platform` skeleton fixtures added with the vendored table) |
+| PL-23 | Manual billing, then a payment provider | later | — | §24.4 | `payments_manual` sketch; no prices until the owner decides. | — (later) |
+| PL-24 | Web Risk URL checks, VPN/ASN signal | later | — | §24.5 | Optional Google key; ASN dataset only if a reliable free one exists. | — (later) |
+| PL-25 | Help centre + CSAT | later | — | §24.6 | In-app articles, one-tap rating after a ticket. | — (later) |
 
 ### PLA-§1.2 Tenancy, product side (TN-*)
 
 The tenancy mechanics are the core's (core §A-§F). This part owns how they look and feel.
 
-| ID | Product-side scope here | R | Track | Section | AC (summary) |
-|---|---|---|---|---|---|
-| TN-01 | Console views of the store row (status, mode, plan, market, currency, timezone, category, brand seed hidden) | R1 | P1 | §6, §7 | Every `stores` field a staff member needs is visible; none is editable outside a defined action. |
-| TN-02 | The seam's error codes become premium states (`not_found`, `forbidden`, `read_only`, `impersonation_read_only`, `quota`, `feature_off`, `step_up`) | R1 | P2, P1 | §22.8, §22.9 | Each code maps to one component (toast, sheet or page) with ar/fr/en copy; no raw error text. |
-| TN-03 | Store #1 shows as `internal`, owner = the converted super_admin; the console never offers "delete" without a purge request | R1 | P1 | §7.1 | Store #1 renders like any store with an "Internal" chip. |
-| TN-04 | Platform settings screens (PLA-§13) and store settings pages owned by P2 (general, market, plan, address, security, danger) | R1 | P1, P2 | §13, §22.10-§22.11 | Settings saved through the core registries; secrets only "set / not set". |
-| TN-05 | Public auth UI: `/login`, `/login/verify`, `/signup` (two steps), `/reset/<token>` | R1.0 functional (T2), R1 polish (P2) | T2, P2 | §22.1 | ar/fr/en, RTL, 360 px, Turnstile challenge state, generic answers (no enumeration). |
-| TN-06 | Invite creation, share (copy, WhatsApp, QR) and acceptance screens | R1 | T2, P2 | §22.4, §22.1.4 | Link shown once; e-mail-bound states; masked e-mails; seats meter. |
-| TN-07 | Store picker `/app` and the sidebar store switcher | R1 | P2 | §22.3 | Logo/monogram, mode badge, status pill, role; keyboard; client state cleared on switch (core §B.4). |
-| TN-08 | Role picker and plain-language role explainer | R1 | P2 | §22.4.4 | Only `invitableRoles()` offered; rank rule enforced in UI and server. |
-| TN-09 | Store mode cards in onboarding and Settings → General; hide-never-delete explanation | R1 (landing only), R2 (store/both) | P2 | §22.2, §22.10.1 | Disabled modes show "Coming soon" + interest request (PD30). |
-| TN-10 | Console cases added to the attack suite and the action replay | R1 | P1, P2 | §O.3 | PLA attack cases green (analyst notes, support reveal, tenant → console actions, masked JSON canaries). |
-| TN-11 | Every PLA cache is a `scopedCache`; every PLA bucket is a `Bucket` | R1 | P1, P2 | §M.5 | Lint L4/L5 green with no new allow-list entry. |
-| TN-12 | Accountant role (R2) and viewer role (R1) in the role picker and explainer | R1 viewer / R2 accountant | P2 (S3) | §22.4.4 | Roles appear only when `ACTIVE_STORE_ROLES` includes them. |
-| TN-13 | "Require 2FA for members" toggle (Settings → Security) | R1 (core D12) | P2 | §22.10.3 | Only an owner with TOTP can switch it on; lists members without 2FA; they are sent to enrolment next request. |
-| TN-14 | External confirmation team | later | — | §24.7 | Scope note only. |
+| ID | Product-side scope here | R | Track | Section | AC (summary) | Proven by |
+|---|---|---|---|---|---|---|
+| TN-01 | Console views of the store row (status, mode, plan, market, currency, timezone, category, brand seed hidden) | R1 | P1 | §6, §7 | Every `stores` field a staff member needs is visible; none is editable outside a defined action. | attack case 1 · e2e step 6 |
+| TN-02 | The seam's error codes become premium states (`not_found`, `forbidden`, `read_only`, `impersonation_read_only`, `quota`, `feature_off`, `step_up`) | R1 | P2, P1 | §22.8, §22.9 | Each code maps to one component (toast, sheet or page) with ar/fr/en copy; no raw error text. | `test:i18n-coverage` (every code's copy) · e2e steps 4 and 17 (limit sheet, banners) |
+| TN-03 | Store #1 shows as `internal`, owner = the converted super_admin; the console never offers "delete" without a purge request | R1 | P1 | §7.1 | Store #1 renders like any store with an "Internal" chip. | e2e step 6 (store #1 renders with the Internal chip) · `test:db` case 3 (no purge without a request) |
+| TN-04 | Platform settings screens (PLA-§13) and store settings pages owned by P2 (general, market, plan, address, security, danger) | R1 | P1, P2 | §13, §22.10-§22.11 | Settings saved through the core registries; secrets only "set / not set". | `test:platform` (`PlatformSettingSchema` / `OnboardingSchema` parse `{}`) · `test:db` case 8 |
+| TN-05 | Public auth UI: `/login`, `/login/verify`, `/signup` (two steps), `/reset/<token>` | R1.0 functional (T2), R1 polish (P2) | T2, P2 | §22.1 | ar/fr/en, RTL, 360 px, Turnstile challenge state, generic answers (no enumeration). | e2e steps 1, 5, 6 and 18 · `test:i18n-coverage` |
+| TN-06 | Invite creation, share (copy, WhatsApp, QR) and acceptance screens | R1 | T2, P2 | §22.4, §22.1.4 | Link shown once; e-mail-bound states; masked e-mails; seats meter. | e2e step 5 · `test:db` case 20 (compare-and-set acceptance) |
+| TN-07 | Store picker `/app` and the sidebar store switcher | R1 | P2 | §22.3 | Logo/monogram, mode badge, status pill, role; keyboard; client state cleared on switch (core §B.4). | e2e step 6 · attack case 6 (no cross-store result after a switch) |
+| TN-08 | Role picker and plain-language role explainer | R1 | P2 | §22.4.4 | Only `invitableRoles()` offered; rank rule enforced in UI and server. | `test:platform` (`roleSummary` agrees with `can()`) · `test:permissions` |
+| TN-09 | Store mode cards in onboarding and Settings → General; hide-never-delete explanation | R1 (landing only), R2 (store/both) | P2 | §22.2, §22.10.1 | Disabled modes show "Coming soon" + interest request (PD30). | `test:platform` (`modeSummary` bullets vs `modeAllows`) · e2e step 6 |
+| TN-10 | Console cases added to the attack suite and the action replay | R1 | P1, P2 | §O.3 | PLA attack cases green (analyst notes, support reveal, tenant → console actions, masked JSON canaries). | `scripts/qa/tenancy-cases/platform.ts` cases 1-20 |
+| TN-11 | Every PLA cache is a `scopedCache`; every PLA bucket is a `Bucket` | R1 | P1, P2 | §M.5 | Lint L4/L5 green with no new allow-list entry. | `test:tenancy-lint` (core L4 / L5, no new allow-list entry) |
+| TN-12 | Accountant role (R2) and viewer role (R1) in the role picker and explainer | R1 viewer / R2 accountant | P2 (S3) | §22.4.4 | Roles appear only when `ACTIVE_STORE_ROLES` includes them. | `test:platform` (`roleSummary` per `ACTIVE_STORE_ROLES`) |
+| TN-13 | "Require 2FA for members" toggle (Settings → Security) | R1 (core D12) | P2 | §22.10.3 | Only an owner with TOTP can switch it on; lists members without 2FA; they are sent to enrolment next request. | `test:db` case 17 (only an owner with TOTP can switch it on) |
+| TN-14 | External confirmation team | later | — | §24.7 | Scope note only. | — (later) |
 
 ### PLA-§1.3 Admin UX (UX-*)
 
-| ID | Feature | R | Track | Section | AC (summary) |
-|---|---|---|---|---|---|
-| UX-01 | Onboarding wow flow (no model download on the critical path, core D59) | R1 | P2 (+ P6/P7 pieces) | §22.2 | On a 390 px viewport with 4G throttling and Cloud AI off: reveal at ≤ 0:50 from the invite link in `qa:wow-demo` (generation ≤ 1.5 s, preview ≤ 1 s), ≤ 90 s with 3 photos on a 4×-throttled laptop, ≤ 15 s after "Start without photos"; never a price the owner didn't type; 360 px; ar RTL perfect; the local model cache stays empty for the whole run. |
-| UX-02 | Store-scoped ⌘K (tenant) + console ⌘K | R1 | P2 (tenant), P1 (console) | §22.13, §4.4 | Tenant search scoped (ADM-02 fixed) through the core `SearchProvider` and `CommandDef` registries (core §I.3); console jumps to store/user/order, approve next, start view-as; palette open ≤ 50 ms when warm. |
-| UX-03 | Console identity | R1 | P1 (+ P2 tokens) | §4.2, §4.7 | Teal-cyan hue 205 accent, "Platform" badge, violet ribbon; admin-tokens, admin-motion and admin-rtl checks green on every console screen. |
-| UX-04 | Admin upgrade | R2 | S6 (design.md owns depth) | §24.8 | Platform screens adopt the full DES-§16.17 checklist; the R1 foundation is core §I.6 / §I.8 applied by P2 (§22.18). |
-| UX-05 | Live address card (copy, QR, WhatsApp share, test-order link, campaign entry) | **R1** (raised, RF §3.2, core §I.4; PD61) | P2 (card), P3 (test-link and kit entries) | §22.10.2 | The card appears on the pages list, the dashboard after the first publish and the onboarding end; QR encodes the canonical URL; "Open a test order" mints a D54 token; the state line is honest (Live / Not live yet / Hidden while in review). |
-| UX-06 | Realtime dashboards | R2 | S6 | §22.6.4 | Animated arrivals on the 15 s pulse, honest "live · 12 s ago" dot. |
-| UX-07 | PWA + Web Push | **R1 manifest** (PD10), R3 push | P2, D5 | §23 | R1: installable `/app/` manifest served by the route handler with the core §B.1 / §C.3 header rule (no nonce headers); R3: push for new orders/callbacks with no PII in payloads. |
-| UX-08 | French + Arabic RTL dashboard | R2 fr / R3 ar | S6, D5 | §N.1, §22.18 | Catalog coverage report 100 % for the release's surfaces; the R1 RTL lint (`test:admin-rtl`) keeps the R3 cost at translation only. |
+| ID | Feature | R | Track | Section | AC (summary) | Proven by |
+|---|---|---|---|---|---|---|
+| UX-01 | Onboarding wow flow (no model download on the critical path, core D59) | R1 | P2 (+ P6/P7 pieces) | §22.2 | On a 390 px viewport with 4G throttling and Cloud AI off: reveal at ≤ 0:50 from the invite link in `qa:wow-demo` (generation ≤ 1.5 s, preview ≤ 1 s), ≤ 90 s with 3 photos on a 4×-throttled laptop, ≤ 15 s after "Start without photos"; never a price the owner didn't type; 360 px; ar RTL perfect; the local model cache stays empty for the whole run. | e2e steps 2 and 15 · `qa:wow-demo` persona 1 (0:00-0:50) |
+| UX-02 | Store-scoped ⌘K (tenant) + console ⌘K | R1 | P2 (tenant), P1 (console) | §22.13, §4.4 | Tenant search scoped (ADM-02 fixed) through the core `SearchProvider` and `CommandDef` registries (core §I.3); console jumps to store/user/order, approve next, start view-as; palette open ≤ 50 ms when warm. | attack case 6 · e2e step 10 (`qa:admin-perf`: palette ≤ 50 ms) |
+| UX-03 | Console identity | R1 | P1 (+ P2 tokens) | §4.2, §4.7 | Teal-cyan hue 205 accent, "Platform" badge, violet ribbon; admin-tokens, admin-motion and admin-rtl checks green on every console screen. | `test:admin-tokens` · `test:admin-motion` · `test:admin-rtl` |
+| UX-04 | Admin upgrade | R2 | S6 (design.md owns depth) | §24.8 | Platform screens adopt the full DES-§16.17 checklist; the R1 foundation is core §I.6 / §I.8 applied by P2 (§22.18). | R2 (S6): design.md DES-§16.17 checklist |
+| UX-05 | Live address card (copy, QR, WhatsApp share, test-order link, campaign entry) | **R1** (raised, RF §3.2, core §I.4; PD61) | P2 (card), P3 (test-link and kit entries) | §22.10.2 | The card appears on the pages list, the dashboard after the first publish and the onboarding end; QR encodes the canonical URL; "Open a test order" mints a D54 token; the state line is honest (Live / Not live yet / Hidden while in review). | attack case 12 · e2e step 6 (one snapshot in three places) · `qa:wow-demo` 1:40 |
+| UX-06 | Realtime dashboards | R2 | S6 | §22.6.4 | Animated arrivals on the 15 s pulse, honest "live · 12 s ago" dot. | R2 (S6) |
+| UX-07 | PWA + Web Push | **R1 manifest** (PD10), R3 push | P2, D5 | §23 | R1: installable `/app/` manifest served by the route handler with the core §B.1 / §C.3 header rule (no nonce headers); R3: push for new orders/callbacks with no PII in payloads. | e2e step 7 (manifest valid, no service worker) |
+| UX-08 | French + Arabic RTL dashboard | R2 fr / R3 ar | S6, D5 | §N.1, §22.18 | Catalog coverage report 100 % for the release's surfaces; the R1 RTL lint (`test:admin-rtl`) keeps the R3 cost at translation only. | `test:i18n-coverage` (coverage per prefix) · `test:admin-rtl` |
 
 ### PLA-§1.4 Other ids this part delivers screens for
 
-| ID | Scope here | R | Track | Section |
-|---|---|---|---|---|
-| SE-01 | Staff roles UI, staff invites, mandatory 2FA, step-up sheet | R1 | P1, P2 | §14, §22.12 |
-| SE-04 | Platform audit view, break-glass log (reveals, impersonations, purges, kill changes) | R1 | P1 | §14.3 |
-| SE-09 | Passkeys | later | — | §24.9 |
-| OS-06 | Console Domains view and domain-move checklist | R1 | P1 | §16 |
-| OS-09 | Health UI over `getHealth()` (data by P8) incl. the Edge / Worker, render queue, health engine, AI and design-tables panels (PD57, core §H.5 rev 2) | R1 | P1 | §15 |
-| OS-10 | Backups list, retention, download ↑ | R1 | P1 | §17 |
-| IN-08 | Mail transport dependency choice (`nodemailer`, PD41) and the mail settings screen `platform_mail` | R2 | S5 | §13.5 |
-| OS-12, OS-13 | Console tiles for the Worker edge cache (purge status) and Worker alerts | R2 | S6 | §16.4 |
-| OS-14 … OS-18 | Console custom-domain approvals (queue kind `domain`) and the Domains view rows for `store_domains` | R3 | D1 | §16.5 |
+| ID | Scope here | R | Track | Section | Proven by |
+|---|---|---|---|---|---|
+| SE-01 | Staff roles UI, staff invites, mandatory 2FA, step-up sheet | R1 | P1, P2 | §14, §22.12 | `test:db` case 7 · e2e step 6 (staff screens) |
+| SE-04 | Platform audit view, break-glass log (reveals, impersonations, purges, kill changes) | R1 | P1 | §14.3 | `test:db` case 19 (break-glass rows link to actor and target) |
+| SE-09 | Passkeys | later | — | §24.9 | — (later) |
+| OS-06 | Console Domains view and domain-move checklist | R1 | P1 | §16 | `test:db` case 19 (checklist survives a restart; V3 on the temporary domain answers "S mode is off" without a network call) |
+| OS-09 | Health UI over `getHealth()` (data by P8) incl. the Edge / Worker, render queue, health engine, AI and design-tables panels (PD57, core §H.5 rev 2) | R1 | P1 | §15 | `test:db` case 19 (cron stopped 11 min on a fake clock → one alarm per hour; render job pending 61 min → `render_stuck` once) |
+| OS-10 | Backups list, retention, download ↑ | R1 | P1 | §17 | `test:db` case 19 (manifest checksums; download without fresh step-up → `step_up`) |
+| IN-08 | Mail transport dependency choice (`nodemailer`, PD41) and the mail settings screen `platform_mail` | R2 | S5 | §13.5 | R2 (S5) |
+| OS-12, OS-13 | Console tiles for the Worker edge cache (purge status) and Worker alerts | R2 | S6 | §16.4 | R2 (S6) |
+| OS-14 … OS-18 | Console custom-domain approvals (queue kind `domain`) and the Domains view rows for `store_domains` | R3 | D1 | §16.5 | R3 (D1) |
 
 ### PLA-§1.5 Signature features assigned to this part (RF §1, §3.1; core §K.2 ownership paragraph) (rev 2)
 
-| ID | Feature | What this part owns | R | Track | Section | AC (summary) |
-|---|---|---|---|---|---|---|
-| SF-03 | Store Health with reasoned fixes (= PL-18 raised) | the engine, registry imports, `platform.health` job, console ring and flags, the platform rules file (P1); the tenant ring, issue list, snooze and "Recompute now" (P2); `health.issue_new` kind | R1 | P1, P2 | §6.3, §22.16 | `test:health` and `test:health-db` green; the ring and the console flags come from one row; fixing an issue never lowers the score; a two-store fixture shows no cross-store evidence; the setup checklist is gone. |
-| SF-06 | Pulse ETag + shared poller | the GET route, `ETag` / `304`, the `BroadcastChannel` election, the `usePulse()` hook, `contributors/shell.ts`, `test:pulse`, `qa:pulse-e2e` | R1 | P2 | §22.6 | Two tabs of one browser produce one poller; unchanged polls answer 304; a status or review change unlocks controls within one pulse without a reload. |
-| SF-11 | Growth Autopilot, R1 slice = the Today brief line | the template sentence on the dashboard from `opsPulse` + `store_health`, never a model text in R1 | R1 (line) / R3 | P2 (D4) | §22.17 | The line renders from zero data ("No orders yet. Publish a page to start."); every number in it comes from the store's own counts. |
-| SF-05 | Test-order mode, address-card slot | the "Open a test order" slot on the address card (P3 fills it with `mintTestLink`), the TEST chip in the tenant shell's banner priority (none: the chip belongs to P4's queue) | R1 | P2 (slot), P3 (button) | §22.10.2 | The slot renders P3's button on the pages list, the dashboard and the onboarding end; nothing of this part mints or reads test tokens. |
-| SF-01 | Campaign Kit, address-card slot and ⌘K entry | the "Create a campaign" slot (P3 fills it) and the Create menu entry `campaign` (landing/both) in the shell | R1 | P2 (slots), P3 | §22.10.2, §22.13 | The entry is hidden without `campaigns.write` and in `store` mode without "also use landing pages". |
+| ID | Feature | What this part owns | R | Track | Section | AC (summary) | Proven by |
+|---|---|---|---|---|---|---|---|
+| SF-03 | Store Health with reasoned fixes (= PL-18 raised) | the engine, registry imports, `platform.health` job, console ring and flags, the platform rules file (P1); the tenant ring, issue list, snooze and "Recompute now" (P2); `health.issue_new` kind | R1 | P1, P2 | §6.3, §22.16 | `test:health` and `test:health-db` green; the ring and the console flags come from one row; fixing an issue never lowers the score; a two-store fixture shows no cross-store evidence; the setup checklist is gone. | `test:health` · `test:health-db` · e2e step 13 · `qa:wow-demo` 2:50 |
+| SF-06 | Pulse ETag + shared poller | the GET route, `ETag` / `304`, the `BroadcastChannel` election, the `usePulse()` hook, `contributors/shell.ts`, `test:pulse`, `qa:pulse-e2e` | R1 | P2 | §22.6 | Two tabs of one browser produce one poller; unchanged polls answer 304; a status or review change unlocks controls within one pulse without a reload. | `test:pulse` · e2e step 11 (`qa:pulse-e2e`) |
+| SF-11 | Growth Autopilot, R1 slice = the Today brief line | the template sentence on the dashboard from `opsPulse` + `store_health`, never a model text in R1 | R1 (line) / R3 | P2 (D4) | §22.17 | The line renders from zero data ("No orders yet. Publish a page to start."); every number in it comes from the store's own counts. | `test:platform` (`TodayBrief` from zero data renders `brief.empty`) · `qa:wow-demo` 2:50 |
+| SF-05 | Test-order mode, address-card slot | the "Open a test order" slot on the address card (P3 fills it with `mintTestLink`), the TEST chip in the tenant shell's banner priority (none: the chip belongs to P4's queue) | R1 | P2 (slot), P3 (button) | §22.10.2 | The slot renders P3's button on the pages list, the dashboard and the onboarding end; nothing of this part mints or reads test tokens. | attack case 12 · `qa:wow-demo` 1:40 |
+| SF-01 | Campaign Kit, address-card slot and ⌘K entry | the "Create a campaign" slot (P3 fills it) and the Create menu entry `campaign` (landing/both) in the shell | R1 | P2 (slots), P3 | §22.10.2, §22.13 | The entry is hidden without `campaigns.write` and in `store` mode without "also use landing pages". | `test:platform` (command and slot filtered by `campaigns.write` and mode) |
 
 ---
 
@@ -309,7 +337,11 @@ The tenancy mechanics are the core's (core §A-§F). This part owns how they loo
 Rules (core §D.1): tenant rows use `storeRef()`, platform rows `storeRefOpt()`; JSON is `jsonText`; enums only append;
 portable SQL only. Refinements of **0004** tables below are additive (NULL-able or defaulted columns, appended enum
 values, new indexes): the maintainer writes them into `0004_tenancy.sql` if step C0 has not been cut yet, otherwise
-into `0005_r1.sql`. R3 tables are refined for `0007_r3.sql`. **(rev 2)** Every refinement of PLA-§2.1 was accepted
+into `0005_r1.sql`. R3 tables are refined for `0007_r3.sql`. **(rev 4)** Core revision 3 decided the round-1 placement
+questions: `orders.is_test`, `leads.is_test`, `orders_store_test_idx` and `page_slug_history` are cut in **0004**
+(core §D.2 / §D.3 / §D.4, PLA Q3.7 accepted), so this part's Orders tile, heartbeat and Identity strip read them from
+R1.0 on and the "no-op when absent" hedge below only covers stale test fixtures; `abuse_reports` is in **0005** (core
+§D.3 row, D76). **(rev 2)** Every refinement of PLA-§2.1 was accepted
 (core §Q.1 Q.24) and is now listed in core §D.4 "Part refinements applied to the 0004 tables in rev 2"; the tables
 marked **(new)** in revision 1 (`store_health`, `platform_requests`, `staff_invites`) are core tables of 0005 (core
 §D.3, §D.5) with this part as the column owner (core §D.9). Nothing below asks the core for anything, with two
@@ -484,7 +516,8 @@ export interface HealthFlag { code: HealthFlagCode; severity: 1 | 2 | 3; since: 
 export interface HealthMetrics { orders7d: number; risky7d: number; lastActiveAt: string | null; lastOrderAt: string | null; publishedPages: number; mediaPct: number | null }
 export type Milestone = "first_draft" | "first_publish" | "first_order" | "tenth_order" | "first_member" | "first_delivered";
 /** the row as both audiences read it (tenant: flags omitted; console: everything) */
-export interface StoreHealthView { score: number; attention: 0 | 1 | 2 | 3; components: Record<HealthGroup, number>; issues: HealthIssue[]; snoozed: Record<string, string>; metrics: HealthMetrics; milestones: Partial<Record<Milestone, string>>; dormant: boolean; computedAt: string; dirty: boolean; flags?: HealthFlag[] }
+export interface StoreHealthView { score: number; attention: 0 | 1 | 2 | 3; components: Record<HealthGroup, number>; issues: HealthIssue[]; snoozed: Record<string, string>; metrics: HealthMetrics; milestones: Partial<Record<Milestone, string>>; dormant: boolean; computedAt: string; dirty: boolean; flags?: HealthFlag[];
+  staleAfterMin: number /* rev 4, PD78: max(platform.health.staleAlarmMinutes, 1.5 × the job's measured cycleMin), from the last platform.health job_runs.summary, cached with the view */ }
 ```
 
 Rules: a `platform_requests` row of kind `store_purge` is valid only while the store is `closed` or
@@ -610,15 +643,22 @@ export const OnboardingSchema = z.object({
 `signups_enabled = false` overrides every mode: the form, `/app/new` and invite acceptance answer "closed for now"
 (core §H.8). A mode change is audited (`platform.settings.updated`, meta `{ key: "signup.mode", from, to }`).
 
-**Daily ceiling (rev 3, PD68, SEC-1).** In `approval` and `open` modes `signupAction` charges
-`chargePlatformUsage("pending_stores", <platform day YYYY-MM-DD>, 1, { limit: signup.pendingStoresPerDay })` as the
-first statement of the core §B.2 transaction (step 6); a `QuotaError` rolls the transaction back and the form falls to
-the **waitlist behaviour for the rest of that day**: the applicant's e-mail, phone and mode interest are written to
-`waitlist` with `source = "cap:<day>"`, the page shows `auth.signup.capped` ("A lot of sellers are joining today.
-You're on the list and we'll send you an invite.") and no store, user or review row exists. `invite` mode and
-`/app/new` by a trusted creator (PD31) are not counted (the code or the existing store already vouches). The console
+**Daily ceiling (rev 3, PD68, SEC-1; rev 4 aligned with core §B.2 step 6).** Whenever the new store would start
+`pending` (`approval` and `open` modes, and `invite` mode with a code that has no `auto_approve`), `signupAction` and
+the `/app/new` action call `chargePlatformUsage("pending_stores", <platform day YYYY-MM-DD>, 1, { limit:
+signup.pendingStoresPerDay })` as core §B.2 **step 6, before** the step-7 transaction; a `QuotaError` makes the form
+fall to the **waitlist behaviour for the rest of that day**: the applicant's e-mail, phone and mode interest are
+written to `waitlist` with `source = "cap:<day>"`, the page shows `auth.signup.capped` ("A lot of sellers are joining
+today. You're on the list and we'll send you an invite.") and no store, user or review row exists. When step 7 then
+rolls back (duplicate e-mail or handle), the action calls `refundPlatformUsage("pending_stores", <day>, 1)` in its
+`finally`, so a refused applicant never burns a slot. Paths that start the store `active` (an invite code with
+`auto_approve`, `open`-mode auto-approval, a trusted creator's `/app/new` under PD31) skip the ceiling, as core §B.2
+says. Revision 3's "invite mode is not counted" is withdrawn: a staff-made code without auto-approval still creates a
+sandbox, and when the owner's own invites hit the cap the fix is to raise `pendingStoresPerDay` or to tick
+`auto_approve` on the code (the Sign-up tab says so next to the counter). The console
 shows "Today: 12 / 50 sandboxes" on the Sign-up settings tab and the overview's Queue snapshot; reaching the cap raises
-the Needs-attention row `signup_cap_reached` (info) so the owner can raise the number or invite the waitlist. The
+the Needs-attention row and alarm `signup_capped` (info; core §H.5 name, rev 4: revision 3 called it
+`signup_cap_reached`) so the owner can raise the number or invite the waitlist. The
 counter is a `platform_usage` row (core §D.7), so a restart or a second process never loses it; `housekeeping` deletes
 rows older than 7 days.
 
@@ -807,7 +847,12 @@ Detail pane, top to bottom:
    as chips: "Q 78 · slop 1 · gates green"), the honesty item count from `buildChecklist(doc, ctx)` with the first
    item's title ("2 honesty items: a review section marked sample"), and the genome distance band to the nearest live
    store in the niche (`ok` / `close` / `too_close`, verdict bands only, core D64). Every chip links to the Pages
-   strip of the profile. Nothing here is a model text.
+   strip of the profile. Nothing here is a model text. **(rev 4, ai.md R38, SEC-26)** One more chip reads the sandbox's
+   AI use this month from `aiUsageForStore(scope, month)`: "AI 34 / 100 credits · $0.42", tinted yellow when the store
+   has used ≥ 50 % of its pending credits **before** pressing "Submit for review" (a sandbox that burns credits without
+   asking for review is a review signal, not a score flag: the score was computed at signup and stays explainable).
+   For a `store`-mode store (R2) the readiness and Design-check chips read the first product page draft, and "No page
+   yet" means no product draft either.
    **Draft preview:** a 9:16 sandboxed iframe (`sandbox="allow-scripts"`, never `allow-same-origin`) of the newest
    draft page through a 10-minute preview token (PD16), with a phone/desktop toggle; "No page yet" empty state
    otherwise.
@@ -876,14 +921,17 @@ error page:
    `{ error: "quota" }` with the limit-sheet reason `platform_budget` ("Store Gen is onboarding many sellers right now;
    uploads for stores in review are paused until some are approved", `shell.limit.reason.platform_budget`), never a
    500. `transitionStore(pending → active | rejected | closed)` refunds the store's `media_bytes` gauge from the shared
-   counter, and `usage.reconcile` recomputes it nightly as `SUM(store_usage.media_bytes) WHERE stores.status =
-   'pending'`.
+   counter through `refundPlatformUsage("pending_media_bytes", "total", bytes)` (T1, core §A.4 rev 3), and
+   `usage.reconcile` recomputes it nightly as `SUM(store_usage.media_bytes) WHERE stores.status = 'pending'`; a failed
+   upload after the charge refunds both counters in the upload route's `finally` (core §G.4 step 6).
 3. **Sandboxes per day** (PLA-§3.1 daily ceiling): `signup.pendingStoresPerDay`.
 4. **An AI slice.** Pending stores draw Cloud AI credits from `platform_ai.caps.pendingSharePct` (default 10 % of
    `monthlyUsd`, ai.md; PLA-§Q.3): the per-store `ai_credits_month = min(plan, 100)` of core §A.5.2 still applies, and
    on top the platform counter `platform_usage.ai_cost_micros_pending` is charged for every pending store's call;
-   exhaustion answers `quota_platform` to **pending** stores only, so approved stores keep their cap. The console AI
-   panel (PLA-§15.1) shows the slice's use.
+   exhaustion answers **`quota_platform_pending`** (rev 4: the core §A.5.2 / ai.md code; revision 3 wrote
+   `quota_platform`) to **pending** stores only, so approved stores keep their cap; the pending daily floor is **10
+   credits** (core §A.5.2 rev 3, AI R30). The tenant shell maps the code to the limit sheet with the sandbox sentence
+   (PLA-§22.8); the console AI panel (PLA-§15.1) shows the slice's use.
 
 Acceptance (PL-02): in a pending store, generate → edit → preview → upload within the cap all work; publish, Sheets,
 pixel CAPI tokens, Telegram, PHP export and handle rename show the locked state; approving the store unlocks them on
@@ -935,7 +983,7 @@ groups add no URL segment, `node_modules/next/dist/docs/01-app/03-api-reference/
 | `/admin/notifications` | `notifications/page.tsx` | `console.read` | — | R1 |
 | `/admin/settings/{general,signup,legal,brands,backups}` | `settings/<tab>/page.tsx` | `platform.settings` (signup codes and waitlist tabs: `signups.decide`; legal: `legal.manage`; backups: `backups.manage`) | same | R1 |
 | `/admin/security/{staff,audit,break-glass}` | `security/<tab>/page.tsx` | `staff.manage` / `audit.platform` | `staff.manage` ↑ | R1 |
-| `/admin/ai/**` | owned by P7 (ai.md) | `ai.platform` | | R1 |
+| `/admin/ai/**` | `ai/**` (i.e. `src/app/admin/(console)/ai/**`), owned by P7 (ai.md; excluded from P1's glob, PLA-§P.1, CRIT6) | `ai.platform` | | R1 |
 | `/admin/inbox`, `/admin/broadcasts`, `/admin/analytics`, `/admin/abuse` | D5 (R3) | `tickets.handle`, `notify.stores`, `analytics.read`, `abuse.handle` | | R3 |
 
 Each page exports `metadata = { title: "<Screen> · Platform" }` (no store names or PII in titles) and is dynamic (it
@@ -1094,18 +1142,21 @@ points (core §I.6). Tile cache 60 s (key `"p"`).
 ### PLA-§5.3 Needs attention
 
 At most 20 rows, most severe first (+ "See all in Stores" → `/admin/stores?attention=1`):
-1. Platform alarms from `getHealth()` (core §H.5, PLA-§15.2): last tick > 10 min, outbox `dead` > 0, DB ≥ 70 %, disk free
-   < 2 GiB, inodes > 300,000, an error spike, and the "heartbeat of commerce": no order platform-wide for 3 h between
+1. Platform alarms from `getHealth()` (core §H.5, PLA-§15.2): last tick > 10 min, outbox `dead` > 0, DB ≥ 70 %,
+   `DATA_DIR` ≥ 70 % of `DATA_DIR_BUDGET_BYTES` (rev 4: core §H.5 rev 3 replaced "disk free < 2 GiB", which `statfs`
+   cannot measure on Hostinger), inodes > 300,000, an error spike, the rev 3 machinery alarms (`edge_bad_key`,
+   `gate_mismatch`, `pool_wait`, `tick_lag`), and the "heartbeat of commerce": no order platform-wide for 3 h between
    09:00 and 23:00 platform time, once ≥ 10 stores are active.
 2. Queue rows in `hold` / `reject_candidate` waiting > 2 h; requests waiting > 24 h.
 3. `store_health` rows with `attention ≥ 2`, ordered `attention DESC, score ASC` (`sh_attention_idx`); **(rev 3,
    PD70)** a store flagged `brand_term_live` is listed here as Danger with the matched term and field ("@souk-nour's
    page title contains the protected name "CIH"") and one action "Open profile · Risk".
 4. Platform requests (purges, super_admin promotions) waiting for a second person.
-5. **(rev 3)** Sandbox ceilings (PD68): `signup_cap_reached` (info, "50 sandboxes created today; new sellers join the
-   waitlist", action "Open waitlist"), `pending_media_budget` (warning at ≥ 80 % of `pendingMediaTotalMiB`, danger at
-   100 %, action "Open sign-up settings"); abuse (PD70): `abuse_reports_new` (warning, "n new reports on m stores in
-   24 h", action "Open profile" of the most reported store; the triage inbox is R3).
+5. **(rev 3)** Sandbox ceilings (PD68): `signup_capped` (info, "50 sandboxes created today; new sellers join the
+   waitlist", action "Open waitlist"; rev 4 renamed from `signup_cap_reached` to the core §H.5 code),
+   `pending_media_budget` (warning at ≥ 80 % of `pendingMediaTotalMiB`, danger at ≥ 95 %, rev 4: the core §H.5
+   thresholds; action "Open sign-up settings"); abuse (PD70): `abuse_reports_new` (warning, "n new reports on m stores
+   in 24 h", action "Open profile" of the most reported store; the triage inbox is R3).
 
 Row anatomy: a severity icon with its text label (Danger / Warning / Info; never a bare coloured dot), the sentence
 (`console.attention.<code>` with vars), the store chip when relevant, "since 2 h", one action (Open profile / Open queue
@@ -1228,6 +1279,41 @@ score to allow or refuse anything; publish gates are core §M.
 
 #### PLA-§6.3.2 Rules by track (R1 set; each rule stays silent below its `minN` and reads one store)
 
+**(rev 4, PD79, core §I.7 rev 3)** This table is a **summary**; the source of each rule is its owner's table (P3
+LAN-§23.7, P4 / P5 OPE-§27.2, P6 DES-§2.10 / DS46, P2 and P1 here) and the ids below are written exactly as the
+owners write them. **One condition, one issue:** a condition lives in one rules file only; the console flags that
+mirror another track's issue are derived from it (PLA-§6.3.3), so the score never counts one problem twice, and
+`test:health` fails when two registered rules emit the same evidence `metric` in the same group. P1's
+`rules/platform.ts` emits only `platform:render_failed`, `platform:quota_high`, `platform:quota_full` and
+`platform:risky_orders` as tenant issues, plus the staff-only `platform:brand_term_live` flag rule (0 points).
+
+| Group (cap) | Rule id | Owner file | Condition (store's own data, trailing windows) | Sev | `minN` | Fix (`HealthFix`) |
+|---|---|---|---|---|---|---|
+| setup (20) | `shell:contact` | `rules/shell.ts` (P2) | no `store.phone` and no `store.whatsapp` | 3 | — | link `settings/general` |
+| | `shell:legal_identity` | P2 | `store.legalName` empty | 1 | — | link `settings/general` |
+| | `shell:2fa_orders` | P2 | a member with `orders.read_all` has no TOTP | 2 | — | link `settings/security` |
+| | `landing:no_live_page` (rev 4: the one "no live page" rule; revision 3's P2 duplicate `shell:no_published_page` is withdrawn) | `rules/landing.ts` (P3, LAN-§23.7) | no published landing page while the store is `active` and the mode allows landing (store mode's equivalent is storefront's, R2) | 3 | — | link `pages` |
+| | `landing:zones_empty` (rev 4 id; revision 3 wrote `landing:zones_empty_flat_fee`) | P3 | zones off or empty in a market with a city list while a live page shows a fee | 2 | — | link `settings/delivery` |
+| | `landing:holidays_unreviewed` · `landing:policies_unreviewed` · `landing:no_caller` | P3 | per LAN-§23.7 | 1 | — | links `settings/delivery` · `settings/policies` · `settings/checkout` |
+| | `platform:render_failed` (rev 4: group setup, core §I.7's mapping; revision 3 put it under integrations) | `rules/platform.ts` (P1) | ≥ 1 `failed` render job for the store (surfaces the §M notes recorded by re-renders) | 2 | — | action `pages.republish_failed` |
+| trust (15) | `landing:countdown_ended` · `landing:compare_not_higher` · `landing:stock_zero` · `landing:stock_stale` · `landing:proof_unattested` (rev 4 ids; revision 3 wrote `landing:sample_proof`) | P3 (from `checklist.ts` honesty rules) | per LAN-§23.7 | 3 / 2 / 2 / 1 / 2 | — | the builder section or tab |
+| design (15) | `design:q_low` · `design:slop` · `design:pages_close` · `design:no_dna` (rev 4 ids; revision 3 wrote `design:low_q` and `design:own_pages_close`) | `rules/design.ts` (P6, DS46) | a live page with `q < 70`; `slop ≥ 3`; two live landings closer than `d_page 0.30`; a live page generated before design DNA | 2 / 2 / 1 / 1 | — | action `design.open_check` |
+| conversion (15) | `landing:no_seo` · `landing:no_alt` · `landing:no_pixel` · `landing:form_hidden` · `landing:leads_slow` · `landing:wa_intents_waiting` | P3 | per LAN-§23.7 | 1 / 1 / 2 / 3 / 1 / 1 | 20 leads (`leads_slow`), 3 intents (`wa_intents_waiting`) | SEO / media / pixels / form tabs, `leads` |
+| | `conv:trigger_hint` (rev 4 id; revision 3 wrote `integrations:purchase_trigger_order`) | `rules/integrations.ts` (P5, OPE-§27.2) | Purchase trigger `order` while ≥ 50 % of orders are confirmed by calls: a suggestion, never an error | 1 | 30 orders | link `integrations/pixels#server-events` |
+| | `landing:fee_mismatch` (rev 3, PD76, OPS-13; core §I.7) | `rules/landing.ts` (P3; the condition and text are landing.md's, LAN-§23.7 must list it, PLA-§Q.4) | `inputs.zones.feeMismatchTop5` non-empty: a live page **not** on "Charge delivery by city" charges a flat fee that differs from the zone fee of one of the five most-ordered cities (evidence `{ metric: "fee_mismatch_cities", value: n, n: orders in the window }`) | 1 | 20 orders / 28 d | link `settings/delivery` |
+| operations (15) | `ops:first_touch` · `ops:untouched` · `ops:no_agent` · `ops:unreachable_rise` · `ops:abandoned` · `ops:callbacks_overdue` · `ops:to_pack_aging` · `ops:hold_passed` · `ops:delivery_rescue` · `ops:sheet_agents_unmapped` · `fin:costs_missing` · `fin:settlement_check` · `fin:fee_gap` · `fin:ad_rate_missing` (the last four behind `finance_lite`) (rev 4 ids; revision 3 wrote `ops:first_touch_slow`, `ops:unattempted_2h`, `ops:unreachable_up`) | `rules/ops.ts` (P4, OPE-§27.2) | per OPE-§27.2 | per row (1-3) | 30 orders / 28 d where OPE-§27.2 states it | links into `/queue/board`, `/team/callcenter`, `/team/agents`, `/orders`, `/finance` |
+| | `platform:risky_orders` | `rules/platform.ts` (P1) | `orders7d.n ≥ 20` and `risky / n ≥ 0.30` (the order risk check's `risk_score ≥ 70`) | 2 | 20 orders / 7 d | action `ops.open_queue` (risk ≥ 70 view) |
+| integrations (15) | `int:sheets_backlog` · `int:capi_failing` · `int:telegram_failing` · `int:delivery_dead` · `int:turnstile` (rev 4: these are **P5's**, core §I.7; revision 3's P1 copies `platform:sheets_backlog`, `platform:sheets_error`, `platform:outbox_dead`, `platform:capi_failing`, `platform:telegram_failing` are withdrawn and their console flags derived, PD42 rev 4) | `rules/integrations.ts` (P5, OPE-§27.2) | Sheets oldest pending beyond the scaled threshold of core §H.5 (`max(15, 5 × ceil(activeSheetsStores / 16))` min) while connected; a pixel failing 24 h with no success; Telegram failing; ≥ 1 `dead` outbox item; Turnstile failures > 20 % of a day's orders | 3 / 2 / 2 / 2 / 1 | 20 orders (`int:turnstile`) | links `integrations/sheets` (or action `integrations.sync_sheets`), `/pixels`, `/telegram`, `#deliveries` (Replay), `settings/anti-spam` |
+| quota (5) | `platform:quota_high` / `platform:quota_full` | `rules/platform.ts` (P1) | any gauge or monthly counter ≥ 80 % / ≥ 100 % of its limit | 1 / 2 | — | link `settings/plan` |
+
+R2 adds the ship and money rules of OPE-§27.2 (`ops:reveals`, `ops:cash_held`) and refusal by city; platform medians
+appear only in R3 and only labelled "platform median" (RF §1.3). Every `text` is a message key with the evidence as
+variables (`health.<track>.<rule>.text` in the emitting track's own i18n file, D67: P1's in `notify.ts`, P2's in
+`shell.ts`; ar/fr/en for tenant-visible rules, `test:i18n-coverage`); every rule has a fixture with and without
+`minN` in its track's part of `test:health`.
+
+Revision 3 table (kept as the record of what changed; superseded by the table above):
+
 | Group (cap) | Rule id | Owner file | Condition (store's own data, trailing windows) | Sev | `minN` | Fix (`HealthFix`) |
 |---|---|---|---|---|---|---|
 | setup (20) | `shell:contact` | `rules/shell.ts` (P2) | no `store.phone` and no `store.whatsapp` | 3 | — | link `settings/general` |
@@ -1253,14 +1339,15 @@ labelled "platform median" (RF §1.3). Every `text` is a message key with the ev
 (`health.<track>.<rule>.text`, ar/fr/en for tenant-visible rules, `test:i18n-coverage`); every rule has a fixture
 with and without `minN` in its track's part of `test:health`.
 
+
 #### PLA-§6.3.3 Console flags (`platform-flags.ts`, P1; the owner's view, never shown to tenants)
 
 | Flag | Rule (starting values **[to tune]**) | Severity | Maps onto |
 |---|---|---|---|
-| `sheets_backlog`, `sheets_error`, `outbox_dead`, `capi_failing`, `telegram_failing` | the same conditions as the `platform:*` integrations issues above | 2 / 2 / 2 / 1 / 1 | the integrations issues (same evidence object) |
+| `sheets_backlog`, `sheets_error`, `outbox_dead`, `capi_failing`, `telegram_failing` | **(rev 4, PD79)** derived by `platformFlags()` from P5's issues: `int:sheets_backlog` → `sheets_backlog`, `int:delivery_dead` → `outbox_dead`, `int:capi_failing` → `capi_failing`, `int:telegram_failing` → `telegram_failing` (same evidence object, the flag's severity = the issue's); `sheets_error` from `sheetsBacklog(scope).lastRunFailedAt` within the last hour (no tenant issue of its own: a failing run shows to the seller as the backlog it causes) | 2 / 2 / 2 / 1 / 1 | the P5 integrations issues (0 extra points; revision 3 gave them their own `platform:*` issues) |
 | `quota_high` / `quota_full` | ≥ 80 % / ≥ 100 % | 1 / 2 | the quota issues |
 | `risky_orders` | `orders7d.n ≥ 20` and `risky / n ≥ 0.30` | 2 | operations (6 points, rule `platform:risky_orders`, tenant text "3 of 10 orders this week looked risky to the risk check") |
-| `setup_incomplete` | active ≥ 7 days with no published page | 1 | `shell:no_published_page` |
+| `setup_incomplete` | active ≥ 7 days with no published page (rev 4: derived from P3's `landing:no_live_page` issue and its age) | 1 | `landing:no_live_page` (0 extra points; revision 3 mapped it onto the withdrawn `shell:no_published_page`) |
 | `render_failed` | ≥ 1 failed render job | 2 | `platform:render_failed` |
 | `inactive_14d` | active store, no member activity for 14 days | 1 | 0 points, flag only |
 | `dormant_60d` | no member login and no order for 60 days → `dormant = true` | 1 | 0 points, flag only (re-engagement R3) |
@@ -1273,9 +1360,14 @@ with and without `minN` in its track's part of `test:health`.
 #### PLA-§6.3.4 Job, snapshot API, bounds
 
 **Job** `platform.health` (`src/lib/jobs/tracks/platform.ts`, every tick, slot 9: 3 s guaranteed + up to 6 s of
-leftover, core §H.2 / §Q.1 Q.18) takes up to 200 stores per tick: rows with `dirty_at IS NOT NULL` first (by
-`dirty_at`), then the oldest `computed_at` (`sh_due_idx`), then stores without a snapshot (`stores LEFT JOIN
-store_health … WHERE h.store_id IS NULL`, states `pending`, `active`, `restricted`). For each store it calls
+leftover, core §H.2 / §Q.1 Q.18) is **budget-driven (rev 4, PD78, core §I.7 rev 3 / ENGC-25)**: it takes stores until
+`ctx.deadline` (no fixed count; revision 3's "up to 200 stores per tick" was unreachable at 100-800 ms per store and
+is withdrawn), in this order: rows with `dirty_at IS NOT NULL` first (by `dirty_at`), then stores without a snapshot
+(`stores LEFT JOIN store_health … WHERE h.store_id IS NULL`, states `pending`, `active`, `restricted`; a new store also
+gets a dirty stub from its first settings write, so it is never last), then the oldest `computed_at` (`sh_due_idx`).
+It calls `ctx.yield()` between stores and records `{ stores, perStoreP50Ms, perStoreP95Ms, rulesSlowest[3],
+cycleMin }` in `job_runs.summary`, where `cycleMin = ceil(activeStores / max(1, storesPerTickP50 over the last 12
+ticks)) × 5`. For each store it calls
 `collectHealthInputs` through `systemScope`, `runRules` over the registry, `platformFlags`, `milestonesOf`,
 `computeHealth`, and upserts `store_health` (`dirty_at = NULL`, `issues` truncated to 20, expired snoozes dropped).
 It also:
@@ -1298,21 +1390,31 @@ export function requestHealthRecompute(ctx: StoreCtx): Promise<{ queuedAt: strin
 
 `markHealthDirty(storeId)` is called by every console action on a store, by `transitionStore` (core §A.5.1), by the
 publish listener (core §M.1 step 4), by zone, policy, `store` and integration setting writes (through the settings
-layer's `onWrite` hooks, T1) and by `requestHealthRecompute`. Bound: recomputed ≤ 5 min after any of these, ≤ 60 min
-otherwise (2,000 stores / 200 per tick × 5 min = 50 min); the `platform.alarms` job raises `staff.alarm`
-`health_stale` when the oldest `computed_at` of an `active` store is older than `platform.health.staleAlarmMinutes`.
+layer's `onWrite` hooks, T1) and by `requestHealthRecompute`. **Bounds (rev 4, PD78):** recomputed ≤ 5 min after any
+of these while the dirty queue fits one tick (≈ 10 stores; a longer dirty queue drains at ≈ 10 per tick, oldest
+first, and the "Recomputing" line shows its position); otherwise once per measured cycle: ≤ 60 min up to ≈ 120
+active stores, ≈ 2 h at 240, degrading linearly (revision 3's "2,000 / 200 × 5 = 50 min" is withdrawn; the remedy
+past ≈ 120 is the second guaranteed slice the core decides in R2). The `platform.alarms` job raises `staff.alarm`
+`health_stale` when an `active` store's `computed_at` is older than **`max(staleAlarmMinutes, 1.5 × cycleMin)`** (the
+fixed hour would fire permanently past ≈ 120 stores and train the owner to ignore it) and `health_job_slow` when the
+job's `perStoreP50Ms` exceeds 800 ms for three ticks in a row (a rule or a read API regressed). The `brand_term_live`
+rule therefore runs once per cycle at least, which is more often than the core's "nightly" up to ≈ 2,800 active stores.
 
 #### PLA-§6.3.5 Acceptance (PL-18 / SF-03)
 
-A fixture store with a 20-minute Sheets backlog shows `platform:sheets_backlog` (6 points) and the console flag
-`sheets_backlog`, score 94 after one run; a suspended store enters Needs attention with `attention = 3` and no point
+A fixture store with a 20-minute Sheets backlog (one Sheets store, so the scaled threshold is 15 min) shows P5's
+`int:sheets_backlog` (severity 3, 10 points) **once** and the derived console flag `sheets_backlog`, score 90 after one
+run (rev 4: revision 3's `platform:sheets_backlog` at 6 points and score 94 is withdrawn with the duplicate rule); no
+two registered rules emit the same evidence `metric` in one group (registry scan in `test:health`); a suspended store enters Needs attention with `attention = 3` and no point
 change; dormant flips after 60 days on a fake clock; an `ops:*` rule stays silent at 29 orders and fires at 30;
 snoozing an issue removes its points and keeps it in `issues` with `snoozedUntil`; the snooze expires on a fake clock;
 fixing one issue never lowers the score (1,000 random cases); every tenant-visible rule renders in ar/fr/en with every
 variable; a two-store fixture (`test:health-db`) shows no cross-store evidence and no customer data in any snapshot
 column (canary, §O.3 case 8); `health.issue_new` fires once per issue id per week under three consecutive runs; the
 console ring and the tenant ring render the same `score` for the same row (one query each, asserted in `qa:wow-demo`
-at 2:50).
+at 2:50); **(rev 4, PD78)** with stubbed read APIs at 300 ms per store the job processes as many stores as fit its
+budget (≈ 10), records `perStoreP50Ms` and `cycleMin` in `job_runs.summary`, and on a 300-store fixture
+`health_stale` stays silent at `1.4 × cycleMin` and fires once at `1.6 × cycleMin` (fake clock).
 
 ---
 
@@ -1422,7 +1524,12 @@ distribution bar (0-29 / 30-69 / ≥ 70 with `n`). Row → a read-only drawer (l
 attempts) with every PII field masked; **(rev 3, OPS-9)** the drawer also shows the carrier label and tracking
 reference when present (`orders.carrier_label`, `orders.tracking_ref`, operations.md R1 carrier loop through Sheets;
 neither is customer data, both render in `<bdi dir="ltr">`), so support can answer "where is my parcel" tickets from
-the console without a reveal.
+the console without a reveal. **(rev 4)** The drawer also shows "Sent to the carrier file on <date>" from
+`orders.carrier_exported` (core D74). **Cart orders (R2, OPS-15):** payload v3 orders have `page_id NULL` and
+`version_id NULL` (STO-§16.4) and a `lines` list; the Orders tab's page column reads "Store checkout" for them, the
+drawer lists the lines (product title, option labels, quantity, line total) from `getOrderForConsole`, and manual
+phone / WhatsApp orders created through S1's `createManualOrderV3` (core §K.4) show their `source` chip like any
+other; no console code assumes a page.
 
 **Reveal one order**: "Reveal customer details" in the drawer → dialog with a reason (`ticket`, `fraud_review`,
 `legal_request`, `delivery_dispute`, `other` + note) → `revealOrderPiiAction({ storeId, orderId, reason, note })`
@@ -1826,6 +1933,7 @@ platform role can be changed only by a super_admin, and only through §14):
 | Reset 2FA | `resetUserTwoFactor(ctx, userId, reason)` (core §B.7) | `platform.user.2fa_reset` | notification `user.2fa_reset` |
 | Create reset link | `createPasswordResetLink(ctx, userId, reason)` → `{ url, expiresAt }` shown **once** with Copy and "Send on WhatsApp" (`https://wa.me/<user phone digits>?text=<console.reset.wa_text>` when the phone is known) | `platform.user.reset_link` | notification `user.password_reset` after use |
 | Sign out everywhere | `revokeUserSessions(userId)` | `platform.user.signed_out` | signed out |
+| **Delete account** (rev 4, PD81, core §F.9 SEC-20) | `deleteUserAccount(ctx)` (T2, frozen at C0) through `deleteUserAction({ userId, reason, note })` (`users.manage` ↑, typed confirmation of the user's e-mail): refused with `owns_store` while the user is an owner of any store that is not `purged` (the dialog lists those stores with links to their profiles: close and schedule deletion first, or transfer ownership in R3) and for a staff member (remove the platform role first, §14.1); anonymises `users` (e-mail → `deleted+<ulid>@invalid`, name, phone, locale nulled, `disabled = 1`), deletes `identity_links`, `sessions`, `password_resets`, `notification_reads`, keeps `legal_acceptances` with `ua` nulled and the audit rows | `platform.user.deleted` `{ reason }` (no e-mail, no name in the meta) | signed out everywhere; the sign-in page answers generically |
 
 ### PLA-§11.3 Order lookup (`/admin/orders`, PD14)
 
@@ -1957,15 +2065,25 @@ on it. Cache invalidation: the 5-minute `protectedTerms()` cache is cleared on s
 
 ```ts
 // src/lib/platform/brand-check.ts (P1; server-only; the second tenant-callable function of src/lib/platform/**, PLA-§3.7)
-export type BrandField = "store_name" | "legal_name" | "whatsapp_name" | "handle" | "page_name" | "seo_title" | "policy_text";
-export interface BrandCheck { exact: { term: string; field: BrandField }[]; near: { term: string; field: BrandField }[] }
-export function checkBrandTerms(fields: readonly { field: BrandField; value: string }[], opts?: { actor: "staff" | "member" }): Promise<BrandCheck>;   // active rows, cached 5 min (`protected-terms`); never throws (an empty check on cache miss + DB error, logged)
+export type BrandField = "store_name" | "legal_name" | "whatsapp_name" | "brand_name" | "handle" | "page_name" | "seo_title" | "policy_text";
+/** rev 4: the core's frozen P0 signature (core §K.2 P0 platform stubs, §C.7, D76); the R1.0 stub answers "ok".
+ *  Callers: P2 saveGeneralAction + onboarding (store name, legal name, WhatsApp display name), P3 the policies contact
+ *  block, P6 the brand kit (brand name). One call per field; a caller refuses on "exact" for non-staff. */
+export function checkBrandTerms(kind: BrandField, value: string): Promise<"ok" | "near" | "exact">;   // active rows, cached 5 min (`protected-terms`); never throws ("ok" on cache miss + DB error, logged to error_events area "platform")
+/** P1-internal (console "Check a name", rules/platform.ts): the same match with the term, never returned to a tenant */
+export interface BrandMatch { verdict: "ok" | "near" | "exact"; term?: string; termKind?: string }
+export function brandMatches(kind: BrandField, value: string): Promise<BrandMatch>;
 ```
+
+**Revision 3's multi-field form** `checkBrandTerms(fields[], opts) → BrandCheck` is withdrawn in favour of the core's
+frozen one-field signature (a contract drift the round-2 alignment found); the callers loop over their fields, which
+keeps the frozen stub one line and the tenant result free of the matched term.
 
 1. **At every write of a brand field.** `saveGeneralAction` (P2, PLA-§22.10.1), `saveOnboardingContactAction` and
    `saveOnboardingDetailsAction` (P2, PLA-§22.2: store name on `/app/new`), `renameHandleAction` (P2; `handleProblem`
    already refuses protected handles, core §C.7) and `createStoreAction` (`/admin/stores/new`) call `checkBrandTerms`
-   with the store name, legal name and WhatsApp display name. An `exact` match **refuses** the write for a member with
+   once per field for the store name, legal name and WhatsApp display name (P3's policies contact block and P6's brand
+   kit do the same for their fields, core §C.7). An `exact` match **refuses** the write for a member with
    the action error `brand_protected` (rendered by the limit sheet, variant `brand_protected`: "This name contains a
    protected brand name. Use your own brand, or contact Store Gen support if you are the owner of that brand.",
    `shell.limit.brand_protected`), writes `store.brand_refused` `{ field }` to the store's audit (no term in the meta)
@@ -1981,7 +2099,7 @@ export function checkBrandTerms(fields: readonly { field: BrandField; value: str
    COD page; the gate is listed here because the console shows its refusals in the Risk strip (`page.publish.*`
    audit rows with item `honesty:password_field` in 7 days).
 
-The "Check a name" box reuses `checkBrandTerms` so the console and the write path cannot disagree. Acceptance: renaming
+The "Check a name" box reuses `brandMatches` (the same matcher `checkBrandTerms` wraps) so the console and the write path cannot disagree. Acceptance: renaming
 a seeded active store to "CIH Bank · Vérification" from the tenant General page answers `brand_protected` and writes
 `store.brand_refused`; publishing a page whose SEO title contains the term and recomputing health raises
 `brand_term_live` and exactly one `staff.alarm` in the week; the term never appears in a tenant-visible issue.
@@ -2056,7 +2174,12 @@ Acceptance flow for a staff invite (`/invite/staff/<token>`, console styling, P1
 "Join the Store Gen team as Support" → sets `platform_role`; no account → name + password form with the e-mail locked
 (policy + scrypt semaphore), no store is created (PD13); wrong account → "This invitation is for s•••@gmail.com". Then
 `/app/account/two-factor?for=console`: the console stays closed until TOTP is enrolled (core §B.7), so the role is
-effectively inactive until then (state "Waiting for 2FA").
+effectively inactive until then (state "Waiting for 2FA"). **(rev 4, core §B.5 rev 3 / SEC-24, ENGC-16)** Acceptance
+consumes the invite with one conditional statement before the role is set, in the same transaction: `UPDATE
+staff_invites SET accepted_at = ?, accepted_by = ? WHERE id = ? AND accepted_at IS NULL AND revoked_at IS NULL AND
+expires_at > ?`, and `affectedRows === 1` is the only success path, so two concurrent accepts give one staff member
+(`test:db` case 20); the page answers with `Referrer-Policy: same-origin` (it posts a Server Action before hydration;
+`no-referrer` would serialise the form's `Origin` as `null` and Next would answer 500), `noindex`, `private, no-store`.
 
 ### PLA-§14.2 Step-up
 
@@ -2064,6 +2187,11 @@ effectively inactive until then (state "Waiting for 2FA").
 `autocomplete="one-time-code"`, paste-friendly), "Use a recovery code" link (switches to a 10-char input), errors
 "That code didn't work" / "Too many tries, wait 15 minutes" (`p:mfa:stepup:<userId>` 5 / 15 min, core §B.7). On
 success the topbar chip shows "Verified · 4:59" counting down (PLA-§Q.32) and the original action re-runs (§4.5).
+**Tenant variant (rev 4, PD80):** in the tenant shell the same sheet asks for the TOTP code when the user has it and
+otherwise for the password (`method: "password"`: one password field with Show, `autocomplete="current-password"`,
+T2's `stepUpWithPasswordAction(password)` through the scrypt semaphore, bucket `p:password:<userId>`, errors
+`shell.stepup.password_failed` / `shell.err.rate_limited`, busy `auth.busy`); the title reads `shell.stepup.title`
+("Confirm it's you") and the line under it names the action ("to export your customers' data"). Staff always use TOTP.
 
 ### PLA-§14.3 Audit and break-glass (`/admin/security/audit`, `/admin/security/break-glass`, `audit.platform`)
 
@@ -2079,7 +2207,11 @@ success the topbar chip shows "Verified · 4:59" counting down (PLA-§Q.32) and 
   are listed on top with **Confirm** (a different staff member, ↑) and **Cancel** (requester or any super_admin).
 - **Security settings** (read-only facts): console gate on, IP allowlist configured (yes / no, count), `ADMIN_HOST` set,
   staff with TOTP (all), sessions of staff in the last 24 h; action **Sign out all staff except me** (`staff.manage` ↑,
-  audit `platform.staff.signed_out_all`).
+  audit `platform.staff.signed_out_all`). **(rev 4, D44 rev 3, SEC-14)** The allowlist line names the address source in
+  force ("right-most public hop" or "`CF-Connecting-IP` behind Cloudflare") and the address the current request was
+  matched with, so the owner can confirm before the nameserver switch that the allowlist will still admit them; while
+  S mode is on and `ADMIN_HOST` is unset the line `console.security.admin_host_missing` is red ("The console still
+  shares the shops' address. Set ADMIN_HOST before opening sign-ups").
 
 Acceptance (SE-01, SE-04): a new staff member cannot open any `/admin` route before enrolling TOTP; the last
 super_admin cannot be demoted; a super_admin promotion with two super_admins needs the other's confirmation; every row
@@ -2096,15 +2228,15 @@ refreshes every 30 s while visible and fails on its own.
 
 | Panel | Content | Red when |
 |---|---|---|
-| Cron | last tick (time, duration, ok), a 50-tick strip (ok / failed / missing gaps), per job: last run, ms vs budget, processed, error code | no `job_runs` row for 10 min |
+| Cron | last tick (time, duration, ok), a 50-tick strip (ok / failed / missing gaps), per job: last run, ms vs budget, processed, error code; **(rev 4, core §H.5 rev 3)** `tick.lagP95Ms` (event-loop lag during ticks), `tick.skipped24h` (ticks skipped by `platformLock("tick")`), `db.poolWaitP95Ms` / `db.lockPoolWaitP95Ms` | no `job_runs` row for 10 min · `tick_lag` (lag p95 > 250 ms during a tick, red) · `pool_wait` (query or lock pool wait p95 > 500 ms over 5 min, red) |
 | Queues | outbox by kind × state with the oldest pending per kind; dead items (store, kind, topic, attempts, last error) with **Replay** (`stores.lifecycle`, P8 `replay(ctx, id)`); render queue depth, failed renders; export jobs; purge jobs; backups running | any `dead` > 0 (yellow), dead older than 24 h (red) |
-| Sheets | backlog per store (top 10 by oldest pending), last push / pull per store, the service-account token health | a store backlog > 15 min |
-| Storage | DB used vs quota with 70 / 85 % marks, the top 15 tables by size, the top 15 stores by `store_usage` media + page bytes, `DATA_DIR` bytes / free / files vs the 300,000-inode warning, media backend (`fs` / `db`), reclaimable `media_chunks` bytes with the hPanel `OPTIMIZE TABLE` guidance (core §G.3), a trend "85 % reached in ~41 days" when ≥ 7 daily points exist; **(rev 3, PD68)** the **pending media budget** meter (`platform_usage.pending_media_bytes` vs `signup.pendingMediaTotalMiB`, with the count of pending stores and the five largest) and **sandboxes today** (`pending_stores` vs `pendingStoresPerDay`) | DB ≥ 85 %, free disk < 2 GiB, backend `db` while `DATA_DIR` is set; pending budget ≥ 100 % (yellow; it is working as designed, but the owner should approve or reject) |
+| Sheets | backlog per store (top 10 by oldest pending), last push / pull per store, the service-account token health; **(rev 4)** the slot-1 capacity line "≈ 16 stores per tick; threshold now {n} min" | a store backlog > `max(15, 5 × ceil(activeSheetsStores / 16))` min (rev 4, core §H.5 rev 3 / ENGC-33: the fixed 15 min would fire permanently past 16 active Sheets stores) |
+| Storage | DB used vs quota with 70 / 85 % marks, the top 15 tables by size, the top 15 stores by `store_usage` media + page bytes, `DATA_DIR` bytes vs `DATA_DIR_BUDGET_BYTES` and files vs the 300,000-inode warning (rev 4: `getHealth().dataDir` from the bounded walk, core §G.2 / §H.5 rev 3; "free disk" is not measurable on Hostinger and is no longer shown), media backend (`fs` / `db`), reclaimable `media_chunks` bytes with the hPanel `OPTIMIZE TABLE` guidance (core §G.3), a trend "85 % reached in ~41 days" when ≥ 7 daily points exist; **(rev 3, PD68)** the **pending media budget** meter (`platform_usage.pending_media_bytes` vs `signup.pendingMediaTotalMiB`, with the count of pending stores and the five largest) and **sandboxes today** (`pending_stores` vs `pendingStoresPerDay`) | DB ≥ 85 %, `DATA_DIR` ≥ 85 % of its budget (yellow at 70 %), backend `db` while `DATA_DIR` is set; pending budget ≥ 80 % yellow, ≥ 95 % red (rev 4: core §H.5 thresholds; at 100 % uploads of pending stores answer `quota` as designed, and the owner should approve or reject) |
 | Errors | last 24 h by `area / code / route` with count, stores affected, first / last seen; a code row expands to its redacted samples | > 50 of one code in an hour |
-| Runtime | build id, build time, Node version, memory (rss, heap used / total), uptime, boot warnings (config, data dir, env aliases) | a boot warning of level error |
-| Edge / Worker (rev 2, PD57; `getHealth().edge`) | S mode on / off, Worker version last seen (`x-sg-worker`, `WORKER_VERSION` of `edge/worker.js`), last edge-verified request (relative), requests still using `EDGE_KEY_PREV` in 24 h, foreign-host count 24 h, the rotation state (`EDGE_KEY_PREV` set / not set) with the three rotation steps of core §C.5 as a checklist | prev-key use 24 h after a rotation; no edge-verified request for 15 min while S mode is on and ≥ 1 store is live |
+| Runtime | build id, build time, Node version, memory (rss, heap used / total), uptime, boot warnings (config, data dir, env aliases); **(rev 4, core §H.5 rev 3 / SEC-10)** `build.gateSha` and `gateAt` (the offline gate's commit the build was made from) beside the build's own commit | a boot warning of level error · `gate_mismatch` (the gate SHA differs from the build's commit, red) |
+| Edge / Worker (rev 2, PD57; `getHealth().edge`) | S mode on / off, Worker version last seen (`x-sg-worker`, `WORKER_VERSION` of `edge/worker.js`), last edge-verified request (relative), requests still using `EDGE_KEY_PREV` in 24 h, foreign-host count 24 h, **(rev 4)** unverifiable `x-sg-edge` requests 24 h (`edge.badKey24h`, core §C.2 step 2: such requests get the neutral 404, never the platform), the rotation state (`EDGE_KEY_PREV` set / not set) with the three rotation steps of core §C.5 as a checklist | prev-key use 24 h after a rotation; no edge-verified request for 15 min while S mode is on and ≥ 1 store is live; `edge_bad_key` (≥ 10 unverifiable keys in a minute, red: the Worker secret and `EDGE_KEY` disagree) |
 | Render queue (rev 2, PD57; P8 `renderSummary()` platform-wide + per store) | depth by `reason` (`address`, `brand`, `store_info`, `conversions`, `theme` R2, `product` R2, `reviews` R3, `runtime`) × state, the oldest pending (store, page, age), failed jobs in 24 h grouped by store with the error summary and **Retry** (`domains.manage`, P8 `enqueueRenders`), last-hour throughput (pages / min) and the ETA for the pending set, the §M notes recorded by re-renders (`render_jobs.error` notes) as a count with the top 3 item ids | pending > 500 (yellow) · oldest pending > 60 min (yellow) · any failed job older than 24 h still failed (red) · throughput 0 with pending > 0 over two ticks (red) |
-| Health engine (rev 2, PD57; `getHealth().health`) | stale snapshots (`active` stores with `computed_at` older than `staleAlarmMinutes`), dirty rows waiting, last `platform.health` run (ms vs its 3 s budget, stores processed), the slowest rule ids of the last run (from `job_runs.summary.rules`), the issue mix platform-wide (count per group, k-suppressed for analysts) | stale > 0 (yellow) · stale > 10 % of active stores or last run > 60 min ago (red) |
+| Health engine (rev 2, PD57; `getHealth().health`) | stale snapshots (rev 4: `active` stores with `computed_at` older than `max(staleAlarmMinutes, 1.5 × cycleMin)`, PD78), dirty rows waiting, last `platform.health` run (ms vs its 3 s budget, stores processed, `perStoreP50Ms` / `p95`), **the measured cycle** ("every store is rechecked about every {cycleMin} min at today's {stores} active stores"), the slowest rule ids of the last run (from `job_runs.summary.rulesSlowest`), the issue mix platform-wide (count per group, k-suppressed for analysts) | stale > 0 (yellow) · stale > 10 % of active stores or last run > 15 min ago (red) · `cycleMin > 120` (yellow: time for the second slice the core decides in R2) |
 | AI (rev 2, PD57; P7 `aiHealth()`, core §H.5) | provider ok / paused (and why), per-class served model and fallback use in 24 h, open Message Batches (count, oldest), `ai_jobs` running / orphaned / failed 24 h, monthly cap used % (platform), **the pending slice used % (rev 3, PD68: `ai_cost_micros_pending` vs `caps.pendingSharePct × monthlyUsd`)**, refusal rate 24 h, the detached-job probe result (`qa:detached-job-probe`, recorded in HANDOFF: pass / fail / not run) | cap ≥ 70 % (yellow) / ≥ 85 % (red) · pending slice ≥ 100 % (yellow, `ai_pending_cap`) · provider auth failure · Director unavailable · an orphan recovered or failed · refusal spike (AI-§O) |
 | Design tables (rev 2; DES-R12, `getHealth().design`) | `design_genomes` and `headline_shingles` bytes, rows, growth per week | > 300 MB (yellow) |
 | Commerce heartbeat | the last order platform-wide and orders per hour for 24 h (`orders_created_idx`, `is_test = 0`) | §5.3 rule |
@@ -2120,17 +2252,26 @@ alarm sends `staff.alarm` (`vars: { alarm, value }`, dedupe `alarm:<code>:<YYYY-
 `minRole: "admin"` and appears in Needs attention; a recovered alarm sends nothing (the panel shows "Recovered 14:20").
 
 Alarm codes (rev 2 complete list; the first eight are revision 1's, the rest core §H.5 rev 2 and PD57):
-`no_tick` (10 min) · `outbox_dead` (any kind) · `db_70` / `db_85` · `disk_low` (< 2 GiB) · `inodes_high` (> 300,000) ·
-`error_spike` (> 50 of one code in an hour) · `sheets_backlog` (a store > 15 min) · `commerce_quiet` (§5.3 rule) ·
+`no_tick` (10 min) · `outbox_dead` (any kind) · `db_70` / `db_85` · ~~`disk_low` (< 2 GiB)~~ (rev 4: replaced by
+`data_dir_70` / `data_dir_85`, below) · `inodes_high` (> 300,000) · `error_spike` (> 50 of one code in an hour) ·
+`sheets_backlog` (a store beyond the scaled threshold, below) · `commerce_quiet` (§5.3 rule) ·
 `render_stuck` (oldest pending > 60 min or throughput 0 with pending) · `render_failed_old` (a failed job > 24 h) ·
 `edge_silent` (S mode on, no edge-verified request for 15 min) · `edge_prev_key` (prev-key use 24 h after rotation) ·
 `health_stale` (`staleAlarmMinutes`) · `health_job_slow` (the job exceeded its slot three ticks in a row) · `ai_cap_70`
 / `ai_cap_85` / `ai_cap_reached` · `ai_auth_failed` · `ai_director_unavailable` · `ai_refusal_spike` · `ai_job_orphan`
 · `design_tables_large` (300 MB) · `backup_failed` · `backup_not_downloaded` (`remindAfterDays`) · `breakglass_unreviewed`
-(a week older than 14 days) · **(rev 3)** `signup_cap_reached` (PD68, info) · `pending_media_budget` (PD68, ≥ 80 %
-yellow, 100 % red) · `ai_pending_cap` (PD68, relayed from `aiHealth()`) · `brand_term_live` (PD70, per store and term,
-weekly dedupe) · `abuse_reports_spike` (PD70: ≥ 5 new reports platform-wide in an hour, or ≥ 3 on one store in 24 h).
-The AI alarms are raised by P7's `aiHealth()` flags and only relayed here, so one notification path exists.
+(a week older than 14 days) · **(rev 3)** `signup_capped` (PD68, info; revision 3 called it `signup_cap_reached`) ·
+`pending_media_budget` (PD68, ≥ 80 % yellow, ≥ 95 % red) · `ai_pending_cap` (PD68, relayed from `aiHealth()`) ·
+`brand_term_live` (PD70, per store and term, weekly dedupe) · `abuse_reports_spike` (PD70: ≥ 5 new reports
+platform-wide in an hour, or ≥ 3 on one store in 24 h) · **(rev 4, core §H.5 rev 3)** `data_dir_70` / `data_dir_85`
+(`DATA_DIR` vs `DATA_DIR_BUDGET_BYTES`; they **replace** `disk_low`, which `statfs` cannot measure on Hostinger) ·
+`edge_bad_key` (≥ 10 unverifiable `x-sg-edge` in a minute) · `gate_mismatch` (the build was not made from the commit
+the offline gate passed) · `pool_wait` (pool wait p95 > 500 ms over 5 min) · `tick_lag` (event-loop lag p95 > 250 ms
+during a tick) · `health_stale` and `health_job_slow` with the measured-cycle rules of PLA-§6.3.4 (PD78) ·
+`sheets_backlog` with the scaled threshold `max(15, 5 × ceil(activeSheetsStores / 16))` min. The AI alarms are raised
+by P7's `aiHealth()` flags and only relayed here, so one notification path exists; the machinery alarms (`no_tick`,
+`pool_wait`, `tick_lag`, `edge_*`, `gate_mismatch`, `data_dir_*`) are computed from `getHealth()` (P8's data), the
+store-level ones from `store_health` and `platform_usage` (P1).
 
 Acceptance (OS-09): stopping the cron for 11 minutes (fake clock in `platform-check.ts`) turns the Cron panel red and
 produces exactly one staff notification per hour; replaying a dead outbox row moves it to `pending` and writes an
@@ -2146,8 +2287,9 @@ the Edge panel on the temporary domain reads "S mode off" with no alarm and no n
 ### PLA-§16.1 Status card
 
 Address mode (P only / S on), `PLATFORM_URL` host, `STORE_ROOT_DOMAIN`, `LEGACY_PLATFORM_HOSTS`, `BEHIND_CLOUDFLARE`,
-`TRUSTED_PROXY_HOPS` (non-secret values shown), `EDGE_KEY` and `EDGE_KEY_PREV` (set / not set only), the current
-signup-mode default this implies (D9), the Worker version last seen.
+`TRUSTED_PROXY_HOPS`, **`ADMIN_HOST`** (rev 4, D44 rev 3: shown with the line "Console on its own host" or, while S mode
+is on without it, the red "Console still on the shops' origin") (non-secret values shown), `EDGE_KEY` and
+`EDGE_KEY_PREV` (set / not set only), the current signup-mode default this implies (D9), the Worker version last seen.
 
 ### PLA-§16.2 Re-render progress
 
@@ -2161,15 +2303,26 @@ failures), an ETA from the last hour's throughput, **Retry failed** and **Re-ren
 Owner steps from RESEARCH §5.2 and app steps from core §C.10, each with "Mark done" (records date and staff):
 buy the domain · Cloudflare zone · apex A record checked in hPanel · proxied `*` record · nameservers switched ·
 Hostinger CDN off · TLS route (Full strict) · www Redirect Rule · `/media/*` Cache Rule · Worker deployed with its
-secret and the `*.<domain>/*` route · env full replace + rebuild (core §H.7, 19 keys) · re-render all live pages ·
-legacy 308s on · cron URL updated · Meta / TikTok domains · Turnstile hostnames · Sheets links.
+secret and the `*.<domain>/*` route · **(rev 4, core §C.10 rev 3)** "verify the console allowlist still admits you"
+(the Security settings line of PLA-§14.3 shows the address the allowlist matched, `CF-Connecting-IP` behind
+Cloudflare) **before** nameservers switch · env full replace with `PLATFORM_URL`, `PUBLIC_URL`, `STORE_ROOT_DOMAIN`,
+`EDGE_KEY`, `BEHIND_CLOUDFLARE=1`, `LEGACY_PLATFORM_HOSTS`, `TRUSTED_PROXY_HOPS` and **`ADMIN_HOST=console.<domain>`**
+(core §H.7, 20 keys) + **restart, no rebuild** (every key is a server-side `process.env` read; revision 3 said
+"rebuild", ENGC-26) · re-render all live pages · legacy 308s on · cron URL updated · Meta / TikTok domains · Turnstile
+hostnames · Sheets links.
 Verification V1 … V11 (RESEARCH §5.3), each with a note and "Passed": the server-runnable ones have a **Run** button
 that calls `runDomainCheck(id)` (`src/lib/platform/domain-move.ts`): V3 (`HEAD https://probe.<root>/` expects the
 neutral 404 with `x-sg-mode: subdomain`), V7 (a 308 with the byte-identical query from the legacy host), V8 (the
 certificate subject covers `*.<root>`, via `tls.connect` with SNI), V10 (Turnstile verify on a subdomain, needs a token
 from the test widget); the others are manual (V1 `npm run test:hosts`, V2, V4, V5, V6, V9, V11 scripts) and take a
-note. When every V check has passed, a banner offers "Switch sign-up to approval" (the D9 default flips by itself once
-both env vars are set; this button only clears an explicit override).
+note. **(rev 4, PD82)** One app check is added after V11: **V12** "console on its own host" (`runDomainCheck("V12")`:
+passes when the Domains page making the check was itself served on `ADMIN_HOST` (`effectiveHost().cls === "console"`
+for that request) **and** a server-side `HEAD https://<root>/admin` without cookies answers the neutral 404, never a
+console or store page; both answers are recorded with the check), and V4 now expects the neutral
+404 for a wrong `x-sg-edge` (core §C.10
+step 3). When every V check has passed, a banner offers "Switch sign-up to approval" (the D9 default flips by itself
+once both env vars are set; this button only clears an explicit override), and the D69 ceilings card of PLA-§3.2 is
+linked from the banner because they become the sandbox's only bound once anyone may sign up.
 
 ### PLA-§16.4 R2 (OS-12, OS-13, S6)
 
@@ -2183,7 +2336,9 @@ Custom domains table (`store_domains`: host, store, status, primary, verified, l
 approvals arriving as queue requests of kind `domain`, plus the Cloudflare custom-hostname state per row.
 
 Acceptance (OS-06): the checklist state survives a restart and a deploy; "Run" for V3 on the temporary domain answers
-"S mode is off" without a network call; no secret value ever appears in the page.
+"S mode is off" without a network call; no secret value ever appears in the page; **(rev 4)** "Run" for V12 on the
+temporary domain answers "ADMIN_HOST not set (expected before the move)" without a network call, and the env step's
+text says "restart", never "rebuild" (`test:db` case 19).
 
 ---
 
@@ -2232,6 +2387,14 @@ export interface NotificationItem { id: number; kind: NotificationKind; group: N
   schema has a key named `phone`, `name`, `address`, `email` or `note`.
 - **Rendering at read time** in the reader's locale (`users.locale`, PD11); `vars` hold ids, counts, codes and short
   labels only, never customer data; `text` is staff free text and is shown as plain text.
+- **Links (rev 4, core §I.4 rev 3 / SEC-6):** `notify()` validates `opts.link` (and every kind's `link(vars, ctx)`
+  result) before the insert: a tenant link must be an in-app path built with `appHref(handle, path)` and match
+  `^/app/[a-z0-9-]{3,30}(?:[/?#]|$)`, a staff link a `consoleHref(path)` result (`^/admin(?:[/?#]|$)`, made absolute on
+  `ADMIN_HOST` by the core builder, PD82), a user-level link `^/app/account(?:[/?#]|$)`; anything else (an https URL a
+  staff member typed in §19.1, a link built by mistake) is stored as `null` and shown as plain text in the body, so a
+  notification can never carry an open redirect. The core's pattern as written (`^/app/[a-z0-9-]{3,30}/`) refuses the
+  dashboard root `/app/<h>` that seven platform kinds link to; PLA-§Q.4 asks the core to adopt the form above, and
+  until it does the kinds link to `/app/<h>/` (trailing slash, redirected by Next to `/app/<h>`).
 - **Batching**: kinds with `batch` (e.g. P4's `order.new_batch`) use `dedupeKey = <kind>:<storeId>:<window start>` and
   `INSERT … ON DUPLICATE KEY UPDATE vars = JSON_SET(vars, '$.count', JSON_EXTRACT(vars, '$.count') + 1)` so one row
   reads "12 new orders since 14:02".
@@ -2261,7 +2424,7 @@ export interface NotificationItem { id: number; kind: NotificationKind; group: N
 | `member.role_changed` · `member.suspended` | team | user (the member) | `{ role }` | `/app/<h>` |
 | `security.2fa_required` | security | store | — | `/app/account/two-factor` |
 | `user.2fa_reset` · `user.password_reset` | security | user (platform-wide) | — | `/app/account/security` |
-| `legal.updated` | platform | user (platform-wide, lazily per acceptance check) | `{ kind, version }` | the document |
+| `legal.updated` | platform | user (platform-wide, lazily per acceptance check) | `{ kind, version }` | `/app/account?doc=<kind>` (rev 4: an in-app path that opens the document sheet; revision 3 linked "the document", a public URL the link rule renders as plain text) |
 | `staff.message` | support | store_role owner, admin (or one user) | text | optional link |
 | `staff.signup_new` (batched hourly) · `staff.signup_hold` · `staff.info_answered` · `staff.appeal` · `staff.request` | staff | platform_staff admin | `{ count? , store }` | `/admin/queue?r=…` |
 | `staff.purge_requested` · `staff.purge_confirmed` · `staff.super_admin_requested` | staff | platform_staff super_admin | `{ store? , by }` | `/admin/security/break-glass` |
@@ -2419,7 +2582,13 @@ role's one-line explainer (§22.4.4), the masked e-mail the invitation is bound 
 | expired, used, revoked, unknown | `team.invite.invalid` ("This invitation link is no longer valid. Ask for a new one.") | — |
 | members limit reached at acceptance | `team.invite.full` | — |
 
-`Referrer-Policy: no-referrer`, `noindex` (core §B.1). Buckets `p:invite:accept:ip` (core §E.8).
+`Referrer-Policy: same-origin` (rev 4, core §B.1 / §B.5 rev 3, ENGC-16: the page posts a Server Action before
+hydration and `no-referrer` would make the browser send `Origin: null`, which Next answers with a 500; the token is a
+path segment and `same-origin` sends nothing cross-site; revision 3 wrote `no-referrer`), `noindex` (core §B.1).
+Buckets `p:invite:accept:ip` (core §E.8). Acceptance is T2's compare-and-set `UPDATE store_invites … WHERE accepted_at
+IS NULL AND revoked_at IS NULL AND expires_at > ?` before the membership insert (core §B.5 rev 3, SEC-24): the
+"members limit reached" and "already used" states above come from that statement's outcome, and a double tap on
+**Join** shows the joined state once.
 
 #### PLA-§22.1.5 Mode explainer (`modeSummary`, rev 3, PD72, OPS-31)
 
@@ -2489,7 +2658,15 @@ home URL and the dashboard shows "Your store home is ready" with Preview. The `d
 approval."). The owner never waits on a model for the first result in any mode, and the budget above holds for every
 mode (the PDP render is the same server render as a landing preview, ≤ 1 s for three in parallel). UX-01 acceptance
 gains the case: in `store` mode nothing with `kind = 'landing'` exists after onboarding, the Catalog lists the product
-and `/s/<h>/<slug>` of no landing is ever served as the store's 404.
+and `/s/<h>/<slug>` of no landing is ever served as the store's 404. **(rev 4, core §A.2 rev 3 / LAN R5 A\*)** The
+fallback is fixed too: if any path does create a landing page for a `store`-mode shop (a revision-3 draft resumed
+after the mode switch opened, a later entry point), `useDirectionAction` sets `landing.inStoreMode = true` in the same
+transaction (audit `store.landing_settings.updated`, reason `onboarding`) and the `done` step reads
+`onboarding.reveal.saved_sales_page`; UX-01 acceptance carries this second case (seeded through the resume path).
+In `store` and `both` the category tap of the `details` step is required before the reveal (it writes
+`stores.category` through `saveOnboardingDetailsAction`, and `useDirectionAction` answers `category_required` when it
+is still null), because those modes need `stores.category` for the store-level niche key (core §A.2 rev 3,
+ENGP-25); in `landing` the tap stays required by PD23 anyway.
 
 Server actions (`src/app/app/[store]/welcome/actions.ts`, all `storeAction`):
 
@@ -2499,7 +2676,7 @@ Server actions (`src/app/app/[store]/welcome/actions.ts`, all `storeAction`):
 | `useDirectionAction({ directionKey })` | `pages.write` + `ai.use` (store / both: also `catalog.write`) | landing / both: calls the existing create-from-directions path (GEN-02, `CreateFromDirectionsInput`, store-free input) with the typed price → `onboarding.pageId`; both: also S1 `createProduct` + attach → `onboarding.productId`; store (R2): S1 `createProduct` + `setThemeDraft(direction)` → `onboarding.productId`, `firstKind = "product"`, no page (PD60 rev 3); every path runs `checkBrandTerms` on the store name when the owner typed one on `/app/new` (PD70); step `contact` |
 | `reportRevealAction({ paintedAt })` | `store.read` | sets `revealedAt` (clamped to server now) and `revealMs = revealedAt − stores.created_at` once |
 | `saveOnboardingContactAction({ whatsapp \| useSignupPhone })` | `settings.write` | store contacts; step `done`, `completedAt` |
-| `skipOnboardingAction()` | `store.read` | step `skipped` (the Store Health ring keeps the `shell:no_published_page` issue with its fix "Create your first page", PLA-§22.16) |
+| `skipOnboardingAction()` | `store.read` | step `skipped` (the Store Health ring keeps P3's `landing:no_live_page` issue with its fix "Create your first page", PLA-§22.16; rev 4: revision 3 named the withdrawn `shell:no_published_page`) |
 
 The `onboarding` store setting (PLA-§2.4, PLA-§Q.7) keeps `step` and `draft`, so a closed tab resumes on the same step
 with the same photos and the typed price.
@@ -2562,7 +2739,7 @@ Actions (`src/app/app/[store]/team/actions.ts`; functions of core §B.5 and PLA-
 |---|---|---|
 | `createInviteAction({ email, role, note? })` | `members.invite` (+ `invites` feature) | `s:<sid>:invite` 20/day |
 | `revokeInviteAction({ inviteId })` | `members.invite` | — |
-| `changeMemberRoleAction({ userId, role })` | `members.manage` (rank rule) | — |
+| `changeMemberRoleAction({ userId, role })` | `members.manage` (rank rule); **↑ when the new role is `admin` or `owner`** (rev 4, PD80, core §B.7 tenant step-up ladder: TOTP, or the password when the actor has no TOTP; `meta.stepUp` names the method) | — |
 | `setMemberStatusAction({ userId, status })` | `members.manage` | — |
 | `removeMemberAction({ userId })` | `members.manage` | — |
 | `leaveStoreAction()` | `store.read` (refused for the last owner) | — |
@@ -2586,6 +2763,16 @@ in their own queue"; viewer "Sees pages and media, no customer data"; logistics 
 - **Two-factor**: the existing enrolment, QR, recovery codes and disable flows moved from `src/app/admin/(auth)/two-factor`;
   with `?for=console` a teal banner "Store Gen staff must use two-step codes before opening the console".
 - **My stores**: memberships with role and status, "Leave" (not for the last owner).
+- **Delete my account** (`/app/account/danger`, rev 4, PD81, core §F.9 rev 3 / SEC-20; P2, R1): shown in full only when
+  the user owns no store (`store_members.role = 'owner'` on a store that is not `purged`); otherwise the page lists those
+  stores with "Close the store first" links to each Danger zone and nothing else. The flow: what is deleted and what is
+  kept (in plain words: your name, e-mail, phone and devices are removed; the record that you accepted the terms and the
+  shops' activity logs keep an anonymous id), the step-up sheet (TOTP, or the password when the user has none, PD80),
+  the typed word `delete` (localised: `supprimer`, `حذف`), then `deleteMyAccountAction()` (`userAction`) → T2's
+  `deleteUserAccount(ctx)` → every session revoked and a redirect to `/login?deleted=1` with the generic line
+  `auth.account.deleted` ("Your account was deleted."). A staff member (`platform_role ≠ none`) sees "Ask another
+  super admin to remove your staff role first". Audit `auth.account.deleted` (core). Retention for legal reasons is
+  `[unverified]` (core §F.9) and the page states only what the code does.
 
 ### PLA-§22.6 Notification centre (PL-13 tenant side)
 
@@ -2635,12 +2822,17 @@ less than 30 s ago (design.md UX-06 row).
 
 On the dashboard of a `pending` store (and in a compact form on Pages and Generate):
 - **Before submitting**: title `shell.review.title` ("Your store is in review"), "Works now": build pages, preview,
-  upload up to 100 MB, invite one teammate; "Unlocks after approval": publishing, orders, Sheets, pixels, Telegram, PHP
+  upload up to **20 MB until you submit, 100 MB after** (rev 4: `shell.review.works_now` with `{mediaMb}` from
+  `applyStateCap("pending", { submitted })`, PD68; revision 3's "up to 100 MB" here contradicted PLA-§3.6 and is
+  withdrawn), invite one teammate; "Unlocks after approval": publishing, orders, Sheets, pixels, Telegram, PHP
   export, address change. Primary **Submit for review** → a sheet with optional business context (what you sell ≤ 200;
   a social or shop link ≤ 200, kept as plain text; a WhatsApp number prefilled from the signup phone) →
   `submitForReviewAction` (owner; `store.read`; writes only `signup_reviews.business_context` and `submitted_at`) →
   staff notification `staff.signup_new`. Secondary **Share a private preview** → a 72 h `/preview/<token>` link
-  (PLA-§Q.6) with Copy and WhatsApp share.
+  (PLA-§Q.6) with Copy and WhatsApp share. **(rev 4, core §E.2 rev 3 / SEC-7)** The link is store-bound and revocable:
+  `mintPreviewLinkAction` keeps the returned `tokenId`, the card lists the active links (created, expires) with
+  **Revoke** → `revokePreviewLinkAction({ tokenId })` (`storeAction("pages.read")`, T3's `revokePreviewToken(scope,
+  tokenId)`, audit `store.preview_link.revoked`); a revoked link answers the neutral 404 at once.
 - **Submitted**: "Submitted. We'll tell you here when it's done." plus "Usually within {hours} hours" only when
   `signup.slaHours` is set (no invented promise).
 - **Needs info**: the staff question as a quote, an answer box (≤ 500) → `answerReviewQuestionAction` (owner) →
@@ -2680,7 +2872,8 @@ switch > require-2FA > quota ≥ 80 % (legal re-acceptance is a blocking sheet, 
 | `impersonation_read_only` | toast `shell.impersonation.write_refused` |
 | `quota` | the limit sheet (§22.9), quota variant |
 | `feature_off` | the limit sheet, feature variant with the reason (plan · state · release · kill) |
-| `step_up` | the step-up sheet (tenants with TOTP, for `store.close` and `store.export`) |
+| `step_up` | the step-up sheet (rev 4, PD80, core §B.7 ladder: **every** tenant, TOTP when enrolled, else the password; for `store.export`, `orders.export`, `store.close`, secret writes under `integrations.manage` and role changes to `admin` / `owner`); the original action re-runs with the same `opId` after success |
+| `quota_platform_pending` (rev 4, D69 / ai.md) | the limit sheet, quota variant, with `shell.limit.reason.pending_ai` ("Store Gen's AI budget for stores in review is used up for now. Your store gets its own budget once it is approved; the hand-written suggestions keep working.") and no "Ask for more" button |
 | `rate_limited` | toast `shell.err.rate_limited` ("Too many tries. Wait a minute.") |
 | `busy` | toast `shell.err.busy` ("The AI is busy right now. Try again in a few seconds." for AI calls; `auth.busy` for the scrypt semaphore) |
 | `design_blocked` · `honesty_blocked` · `budget_blocked` (rev 2; core D51, §M) | **never a toast**: the publish dialog (P3's `src/components/admin/pages/publish-dialog.tsx`) renders `items: GateItem[]` one row per item with its title, the measured value and one fix (a deep link into the builder tab or section, or an action); P2's error mapping only routes the code to the dialog and keeps the dialog open |
@@ -2715,10 +2908,15 @@ Store name (≤ 120), category (the platform niche list), default language and l
 everywhere; confirm sheet), store id (Copy), created. **Mode** (owner, `store.mode`): the three `ModeCards` of
 §22.1.5 with their `modeSummary` lines and bullets (PD72) and the same R1 rule (PD30); from R2 a switch shows the
 "hide, never delete" sheet listing what is hidden and what appears (`modeAllows`, core §A.2; the sheet reuses the same
-`modeSummary` bullets as "what appears" and "what is hidden") → `setStoreModeAction`. Actions `saveGeneralAction`
-(`settings.write`): **(rev 3, PD70)** it calls `checkBrandTerms([{ field: "store_name", value }, { field:
-"legal_name", value }, { field: "whatsapp_name", value }])` before writing and answers `brand_protected` on an exact
-match (the limit sheet explains; nothing is written); a near match saves and flags the store for staff. **No opening
+`modeSummary` bullets as "what appears" and "what is hidden") → `setStoreModeAction`. **(rev 4, core §A.2 rev 3)** The
+sheet first calls P3's `landingModeSwitchPlan(scope)` and shows its plan ("3 live sales pages, 1,240 views in 7 days
+keep working: 'Also use sales pages' stays on" with the tick the owner may clear, so ad traffic never hits a 404);
+switching to `store` or `both` needs `stores.category` (the sheet shows the category chips inline when it is empty and
+`setStoreModeAction` answers `category_required` otherwise, ENGP-25); the switch then runs `ensureTemplateSet` through
+the core. Actions `saveGeneralAction` (`settings.write`): **(rev 3, PD70; rev 4 signature)** it calls
+`checkBrandTerms("store_name", value)`, `checkBrandTerms("legal_name", value)` and `checkBrandTerms("whatsapp_name",
+value)` (the core's frozen one-field form, PLA-§13.3) before writing and answers `brand_protected` on an `"exact"`
+(the limit sheet explains; nothing is written); a `"near"` saves and flags the store for staff. **No opening
 hours live on this page (rev 3, OPS-11):** the one source of every hours promise (the thank-you "we call you today
 from {from}", `confirm_hours`, the tracking help, the contact page) is the call-centre window `ops.callingWindow`
 edited at `/team/callcenter` (operations.md) and exposed through the P0 stub `callingWindowFor(scope)`; General links
@@ -2745,7 +2943,9 @@ export function AddressCard(p: { store: Pick<StoreRow, "id" | "handle" | "name" 
 
 **The settings page** shows the same card plus **Rename handle** (`domains.manage`, active stores): input with live
 availability, the warning "Old links keep working for 12 months", once per 30 days → `renameHandleAction` (core
-`renameHandle`, P2 owns the rename in R1); after a rename the card shows "Re-rendering n pages" from
+`renameHandle`, P2 owns the rename in R1; **rev 4, core §C.7 rev 3 / ENGC-30:** the store #1 conversion's one-time
+`freeRename` grant is honoured outside the 30-day rule and the page says so to store #1 while the grant is unused: "Your first rename is free: your
+address was set automatically when Store Gen moved to shops"); after a rename the card shows "Re-rendering n pages" from
 `renderSummary(scope)` until the address jobs finish. Acceptance (UX-05): the QR decodes to the canonical URL; the
 WhatsApp link opens `wa.me` with the store name and URL only; "Open a test order" is absent (not disabled) for a
 viewer without `pages.read`; the card renders identically in its three places (one snapshot).
@@ -2793,18 +2993,22 @@ with the session row in view (`#imp-<id>` anchor); a member of store B opening s
 
 ### PLA-§22.11 Danger zone (`settings/danger`, PL-09, PL-08 owner side)
 
-- **Export your data** (`store.export`, ↑ when the user has TOTP): what is inside (core §F.9 list in plain words),
-  "Request export" → P8's job → progress (parts done / total) → the parts list with download links (24 h signed, parts
-  deleted after 72 h) and past exports. Allowed in read-only states.
-- **Close the store** (owner, `store.close`, ↑ when TOTP): what happens (pages go offline, orders stop, 30 days to
-  reopen, then deletion is scheduled), typed handle → `closeOwnStoreAction`. **Reopen** while closed ≤ 30 days.
+- **Export your data** (`store.export`, **↑ always**: rev 4, PD80, core §B.7 tenant step-up ladder, TOTP when the user
+  has it, else the password; revision 3's "↑ when the user has TOTP" is withdrawn): what is inside (core §F.9 list in
+  plain words), "Request export" → P8's job → progress (parts done / total) → the parts list with download links (24 h
+  signed, parts deleted after 72 h) and past exports. Allowed in read-only states (the step-up still applies). The
+  download route re-checks the session's `store.export` and a fresh step-up (core §F.9), so a link copied out of the
+  page is useless without the second factor.
+- **Close the store** (owner, `store.close`, **↑ always**, same ladder): what happens (pages go offline, orders stop,
+  30 days to reopen, then deletion is scheduled), typed handle → `closeOwnStoreAction`. **Reopen** while closed ≤ 30
+  days (no step-up: reopening restores, it never exposes data).
 - **Leave this store** (any member but the last owner) → `leaveStoreAction`.
 - **Transfer ownership**: disabled "Coming later" (PL-21, R3).
 
 ### PLA-§22.12 Shared primitives (`src/components/admin/common/**`, P2, props frozen here, PD1)
 
 ```ts
-export function StepUpSheet(p: { open: boolean; onVerified(): void; onClose(): void; surface: "console" | "tenant" }): JSX.Element;
+export function StepUpSheet(p: { open: boolean; onVerified(): void; onClose(): void; surface: "console" | "tenant"; method?: "totp" | "password" /* rev 4, PD80: tenant only; default from the viewer (TOTP when enrolled, else password via T2's stepUpWithPasswordAction); the console is always "totp" */ }): JSX.Element;
 export function TypedConfirmDialog(p: { open: boolean; title: string; body: ReactNode; expected: string; confirmLabel: string; tone: "danger" | "warn"; onConfirm(): Promise<void>; onClose(): void }): JSX.Element;
 export function ReasonPicker<R extends string>(p: { reasons: readonly R[]; labelKey: (r: R) => MessageKey; value: R | null; note: string; noteRequiredFor?: readonly R[]; onChange(v: { reason: R | null; note: string }): void }): JSX.Element;
 export function UsageMeter(p: { label: string; used: number; limit: number | null; unit?: "bytes" | "count" | "credits"; warnAt?: number /* 0.8 */ }): JSX.Element;
@@ -2897,7 +3101,9 @@ a state, not a score.
 
 **What.** `getStoreHealth(scope)` (P1, cached 5 min) renders:
 1. **The ring** (`HealthRing`, 96 px on the dashboard): the score in tabular numerals, the stroke tinted by band, the
-   freshness dot from `computedAt` (neutral when older than 60 min, with "Updated hh:mm"), and **Recompute now**
+   freshness dot from `computedAt` (rev 4, PD78: neutral when older than `view.staleAfterMin` = `max(staleAlarmMinutes, 1.5 ×
+   cycleMin)` from the last job summary, an additive field of `StoreHealthView` (PLA-§2.2, PLA-§Q.4), never a fixed
+   hour; the line always reads "Checked at hh:mm"), and **Recompute now**
    (`recomputeHealthAction`, `s:<sid>:health:recompute` 6/h) which marks the row dirty and shows "Recomputing, ready
    within 5 minutes" (`health.recomputing`), never a spinner that waits. When `score` is null (a new store before the
    first run): the ring is neutral with `health.computing` ("Your first health check runs within 5 minutes") and the
@@ -2914,8 +3120,10 @@ a state, not a score.
    it renders disabled), and **Snooze 7 days** (`snoozeHealthIssueAction`, `health.snooze`: owner and admin only;
    others see no snooze). A snoozed issue leaves the list and reappears after 7 days or when the job sees it again
    with higher severity; "n snoozed" opens the snoozed list with "Unsnooze".
-4. **Empty state**: `health.all_good` ("Nothing to fix right now. The next check runs within an hour.") as the quiet
-   `EmptyState` variant; the *celebration* variant is used once, when a store first reaches 90 or more with no
+4. **Empty state**: `health.all_good` (rev 4 text: "Nothing to fix right now. Checked at {time}; it checks again
+   after every change you make." The revision-3 promise "within an hour" is withdrawn because it does not hold past
+   ≈ 120 active stores, PD78; "after every change" holds because each settings, publish and integration write marks
+   the store dirty and dirty stores are checked first) as the quiet `EmptyState` variant; the *celebration* variant is used once, when a store first reaches 90 or more with no
    severity-3 issue (localStorage marker, per viewer). **(rev 3, UX-38, PD64)** The celebration is a **typographic
    moment**, not a colour wash: the score as one large tabular number (56 px on the dashboard), one accent hairline
    (2 px, the tenant accent) drawn under it over 240 ms ease-out, the sentence `health.celebrate` ("Your store is in
@@ -2982,7 +3190,8 @@ queue line and excluded from every money tile.
 
 ### PLA-§22.18 The admin UX ceiling as acceptance for every P2 screen (core §I.8; RF §2.1; PD64) (rev 2)
 
-Each P2 screen (auth pages, onboarding, picker and switcher, dashboard, team and invites, account, notifications,
+Each P2 screen (auth pages, onboarding, picker and switcher, dashboard, team and invites, account (incl. the rev 4
+danger page and the step-up sheet's password variant), notifications,
 settings general / market / plan / address / security / danger, the limit sheet, the help sheet, the legal sheet)
 ships with this checklist filled in its PR description; the four scripts and the e2e run enforce the measurable rows.
 
@@ -3062,7 +3271,7 @@ digit sequence longer than 4 (PII canary).
 
 ### PLA-§24.1 Support grants and break-glass write (PL-15, R3)
 
-Store side (`settings/security`, owner, `support.grant` ↑ when TOTP): "Allow Store Gen support to edit for 24 h /
+Store side (`settings/security`, owner, `support.grant` ↑ through the tenant step-up ladder, PD80 rev 4; revision 3 wrote "↑ when TOTP"): "Allow Store Gen support to edit for 24 h /
 72 h", scope chips from `SUPPORT_GRANT_AREAS` (pages, media, basic settings, catalog; never team, security,
 integrations, billing, payouts, export), optional note; active grants with Revoke; every use listed in Activity.
 Console side: an impersonation started while a valid grant covers the store offers "Start with edit access (granted
@@ -3073,16 +3282,21 @@ maximum, listed in the break-glass log. Acceptance: a write outside the granted 
 
 ### PLA-§24.2 Abuse reports and takedowns (PL-20; **R1 report slice (rev 3, PD70, SEC-18)**, triage R3)
 
-**R1 (P1):** a "Report this store" link (`shell.report.link` in ar / fr / en, rendered by P3 in the landing footer and
-the legal pages and by S1 in the store chrome in R2, PLA-§Q.3) → `/report/<handle>` on the **platform host** (store
-hosts 308 to it, like `/kit/<token>`; `src/app/(public)/report/[handle]/**`, area `auth`: nonce CSP, `noindex`,
-`Referrer-Policy: no-referrer`, `private, no-store`). The page: the store name and handle (resolved through
+**R1 (P1):** a "Report this store" link (the wording of `shell.report.link` in ar / fr / en; rendered by P6's landing
+footer section and P3's legal / policy pages from the renderer context's `reportHref`, and by S1's store chrome in R2,
+PD83, PLA-§Q.4) → `/report/<handle>` on the **platform host only**: the link is the absolute `reportUrl(store, path)` =
+`platformOrigin() + "/report/<handle>?p=<path>"` (core §B.1 / §C.6) and **store hosts answer the neutral 404 for
+`/report/*`** like `/kit/*` (rev 4, core §Q.8 PLA Q3.4 A\*: not a 308; revision 3's "store hosts 308 to it" is
+withdrawn), legacy hosts 308 to the platform host (core §C.4 route table); `src/app/(public)/report/[handle]/**`, area
+`auth`: nonce CSP, `noindex`, **`Referrer-Policy: same-origin`** (rev 4, core §B.1 rev 3: the form posts a Server
+Action before hydration), `private, no-store`. The page: the store name and handle (resolved through
 `resolveStoreByHandle`; an unknown or `purged` handle renders the same form and discards the post, so the page is no
 handle oracle), reason (`phishing`, `scam`, `counterfeit`, `prohibited`, `impersonation`, `other`), details (≤ 2,000,
 plain text), the page path the reporter came from (prefilled from `?p=`, same host only, query stripped), an optional
 contact (e-mail or phone, sealed with the platform envelope purpose `abuse:contact`), Turnstile when configured.
-`reportStoreAction` (`publicAction`; bucket `p:report:ip:<ipHash>` 5/day and `p:report:store:<storeId>` 50/day; the
-burst limit of core §E.8) calls `recordAbuseReport(input)` (`src/lib/platform/abuse-report.ts`, P1): `INSERT` into
+`reportStoreAction` (`publicAction` with Turnstile `when-configured`; buckets **`p:report:ip:<h>` 5/h and
+`p:report:store:<h>` 20/day** (rev 4: core §B.1 / §E.8 rev 3; revision 3 wrote 5/day and 50/day), the burst limit of
+core §E.8) calls `recordAbuseReport(input)` (`src/lib/platform/abuse-report.ts`, P1): `INSERT` into
 `abuse_reports` (`status = 'new'`, `ip_hash`), `markHealthDirty(storeId)` (the `abuse_reports_new` flag, PLA-§6.3.3),
 `notify(platform_staff admin, "staff.abuse_report", …)` (deduped per store and day) and the alarm `abuse_reports_spike`
 when the thresholds of PLA-§15.2 trip. The reporter sees `report.thanks` ("Thank you. Store Gen will review this
@@ -3095,9 +3309,12 @@ reads them under `abuse.handle`; a super_admin may read them from the DB in an i
 (sandboxed preview), actions Dismiss, Unpublish page, Hide media, Restrict / Suspend store; page and media takedowns go
 through a dedicated platform write scope (`platformWriteScope(ctx, storeId, "takedown")`, a core addition at the R3
 contract step) and notify the store with the reason. Acceptance (R1): a report on a seeded store creates one row, one
-staff notification and the flag within one health run; the 6th report from one IP in a day answers `rate_limited`
-without a row; the form on an unknown handle renders and the post writes nothing; the store's dashboard shows no
-trace of the report.
+staff notification and the flag within one health run; the 6th report from one IP in an hour answers `rate_limited`
+without a row (rev 4: core bucket); the 21st report on one store in a day answers `rate_limited`; the form on an
+unknown handle renders and the post writes nothing; the store's dashboard shows no trace of the report;
+**(rev 4)** `GET https://<h>.<root>/report/<h>` (S mode, edge-simulated) answers the neutral 404 and the link in a
+rendered landing footer, legal page and thank-you page fixture is absolute to the platform origin with `?p=` holding
+the page path only (render-check fixture per page kind, PD83).
 
 ### PLA-§24.3 Ownership transfer (PL-21, R3)
 
@@ -3163,7 +3380,7 @@ stays the required factor until then.
 | Boosts | expiry required, ≤ 90 days | `setEntitlementAction` |
 | Platform requests | expire after 7 days unconfirmed; one pending per (store, kind) | `platform.requests` job |
 | Lists | page size 50 (25 below 768 px); CSV ≤ 10,000 rows (stores), ≤ 50,000 (audit) | list functions |
-| Health job | ≤ 200 stores per tick | `platform.health` |
+| Health job | budget-driven within slot 9 (3 s + up to 6 s leftover), ≈ 10 stores per tick, dirty first; per-store cost and `cycleMin` recorded (rev 4, PD78; revision 3's "≤ 200 stores per tick" withdrawn) | `platform.health` |
 | Preview tokens | 10 min (console), 72 h (seller "private preview") | core §E.2 `mintPreviewToken` (Q.6 accepted) |
 | Step-up freshness | 5 min (core §B.7); `p:mfa:stepup:<userId>` 5 / 15 min | T2 |
 | Operation de-duplication | `p:op:<userId>:<opId>` 10 min | console actions |
@@ -3179,8 +3396,11 @@ stays the required factor until then.
 | Today brief (rev 2) | ≤ 3 lines; opportunity line only with `n ≥ 30` | `TodayBrief` |
 | Impersonation note (rev 2) | ≤ 300 chars, kind `note`, `stores.notes` | ribbon composer |
 | Sandbox ceilings (rev 3, PD68) | per store 20 MiB before submit / 100 MiB after (`signup.pendingMediaMiBBeforeSubmit` 5-200, `signup.pendingMediaMiB` 10-1,024); shared `signup.pendingMediaTotalMiB` 500-50,000 (default 5,000); `signup.pendingStoresPerDay` 1-1,000 (default 50); AI slice `platform_ai.caps.pendingSharePct` (ai.md, default 10) | `applyStateCap`, the media upload route (`chargePlatformUsage`), `signupAction` |
-| Abuse reports (rev 3, PD70) | details ≤ 2,000 chars; contact ≤ 120; `p:report:ip:<ipHash>` 5/day; `p:report:store:<storeId>` 50/day | `reportStoreAction` |
-| Brand check (rev 3, PD70) | ≤ 8 fields per call, each ≤ 200 chars; terms cached 5 min | `checkBrandTerms` |
+| Abuse reports (rev 3, PD70; rev 4 core buckets) | details ≤ 2,000 chars; contact ≤ 120; `?p=` path ≤ 300 chars; `p:report:ip:<h>` 5/h; `p:report:store:<h>` 20/day | `reportStoreAction` |
+| Brand check (rev 3, PD70; rev 4 one-field signature) | one field per call, value ≤ 200 chars (longer policy texts are scanned in 200-char windows by the health rule only); terms cached 5 min | `checkBrandTerms`, `brandMatches` |
+| Tenant step-up (rev 4, PD80) | fresh for 5 min (`sessions.step_up_at`); TOTP `p:mfa:stepup:<userId>` 5 / 15 min; password `p:password:<userId>` (core §E.8) | `StepUpSheet`, T2's `stepUpAction` / `stepUpWithPasswordAction` |
+| Account deletion (rev 4, PD81) | staff: `users.manage` ↑, reason ≤ 200, typed e-mail, `p:users:manage:<staffId>` 30/h; self: owns no store, step-up, typed word | `deleteUserAction`, `deleteMyAccountAction` |
+| Private preview links (rev 4) | 72 h; revocable; at most 10 active per store (older ones listed first for Revoke) | `mintPreviewLinkAction`, `revokePreviewLinkAction` |
 | Locale cookie (rev 3, PD71) | `__Host-sgl` ∈ {`ar`, `fr`, `en`}; anything else ignored | `(public)` layout, `updateProfileAction` |
 | Store audit page (rev 3, PD75) | 50 rows per page; filters by actor kind, area, date | `listStoreAudit` |
 
@@ -3216,6 +3436,7 @@ across stores) and load the store through `getStoreById`.
 | | `replayOutboxAction` | `stores.lifecycle` | | `platform.outbox.replayed` |
 | | `retryRendersAction` | `domains.manage` | | `platform.domains.rerender` |
 | `users/actions.ts` | `banUserAction`, `unbanUserAction`, `resetUser2faAction`, `createResetLinkAction`, `signOutUserAction` | `users.manage` | ↑ | `platform.user.*` |
+| | `deleteUserAction` (rev 4, PD81: T2's `deleteUserAccount`; refused `owns_store` / `is_staff`) | `users.manage` | ↑ | `platform.user.deleted` |
 | `orders/actions.ts` | `lookupPhoneAction` | `orders.lookup` | | `platform.order.lookup` |
 | `plans/actions.ts` | `previewPlanChangeAction` (read), `savePlanAction`, `createPlanAction`, `setPlanStatusAction` | `plans.manage` | | `platform.plan.updated` · `.created` |
 | `flags/actions.ts` | `setKillSwitchAction` | `kill.manage` | ↑ | `platform.kill.changed` |
@@ -3241,7 +3462,7 @@ Decision recorded (§3.3): invite codes are `signups.decide` (daily ops) althoug
 |---|---|---|---|
 | `src/app/app/actions.ts` | `setLastStoreAction`, `acceptLegalAction` | `userAction` | — / `auth.legal.accepted` |
 | `src/app/app/[store]/review-actions.ts` | `submitForReviewAction`, `answerReviewQuestionAction`, `submitAppealAction` | `storeAction("store.read")` + owner check | `store.review.submitted` · `.answered` · `store.appeal.submitted` |
-| | `mintPreviewLinkAction({ pageId })` | `storeAction("pages.read")` | `store.preview_link.created` |
+| | `mintPreviewLinkAction({ pageId })` · `revokePreviewLinkAction({ tokenId })` (rev 4, core §E.2 SEC-7) | `storeAction("pages.read")` | `store.preview_link.created` · `store.preview_link.revoked` |
 | `src/app/app/[store]/welcome/actions.ts` | PLA-§22.2 table | per row | `store.onboarding.completed` · `.skipped` |
 | `src/app/app/[store]/team/actions.ts` | PLA-§22.4 table | per row | core `store.member.*` |
 | `src/app/app/[store]/notifications/actions.ts` | `markNotificationsReadAction` | `storeAction("store.read")` | — |
@@ -3252,8 +3473,9 @@ Decision recorded (§3.3): invite codes are `signups.decide` (daily ops) althoug
 | `settings/address/actions.ts` | `renameHandleAction` | `domains.manage` | `store.handle_renamed` |
 | `settings/security/actions.ts` | `setRequireMember2faAction` | `security.write` | `store.2fa_required_changed` |
 | `settings/plan/actions.ts` | `createStoreRequestAction`, `withdrawStoreRequestAction` | `billing.manage` (rate `s:<sid>:request` 5/day) | `store.request.created` · `.withdrawn` |
-| `settings/danger/actions.ts` | `requestStoreExportAction` · `closeOwnStoreAction` · `reopenOwnStoreAction` · `leaveStoreAction` | `store.export` ↑ · `store.close` ↑ · `store.close` · `store.read` | core `store.export_requested` · `store.closed` · `store.reopened` · `store.member.removed` |
+| `settings/danger/actions.ts` | `requestStoreExportAction` · `closeOwnStoreAction` · `reopenOwnStoreAction` · `leaveStoreAction` | `store.export` ↑ · `store.close` ↑ · `store.close` · `store.read` (rev 4, PD80: ↑ = the tenant ladder, TOTP or password, for every user) | core `store.export_requested` · `store.closed` · `store.reopened` · `store.member.removed` (each with `meta.stepUp`) |
 | `src/app/app/account/**/actions.ts` | `updateProfileAction`, `changePasswordAction`, `revokeSessionAction`, `signOutOthersAction` (+ the moved 2FA actions) | `userAction` | `auth.*` |
+| `src/app/app/account/danger/actions.ts` (rev 4, PD81) | `deleteMyAccountAction()` (T2's `deleteUserAccount`; refused `owns_store` / `is_staff`) | `userAction` + the step-up ladder | core `auth.account.deleted` |
 
 ### PLA-§M.2 Route handlers
 
@@ -3269,8 +3491,8 @@ Decision recorded (§3.3): invite codes are `signups.decide` (daily ops) althoug
 | `GET /api/app/<h>/pulse` | `src/app/api/app/[store]/pulse/route.ts` (P2) | `storeGuard(req, h, "store.read")` | ETag, `private, no-store` |
 | `GET /api/app/<h>/search?q=` | `src/app/api/app/[store]/search/route.ts` (P2) | `storeGuard(req, h, "store.read")` | `private, no-store` |
 | `GET /app/manifest.webmanifest` | `src/app/app/manifest.webmanifest/route.ts` (P2) | none (public) | `public, max-age=3600` |
-| `GET /invite/staff/<token>` (page) | `src/app/(public)/invite/staff/[token]/page.tsx` (P1) | token | `private, no-store`, `no-referrer`, `noindex` |
-| `GET /report/<handle>` (page, rev 3, PD70) | `src/app/(public)/report/[handle]/page.tsx` (P1) | none (public; Turnstile on the post) | `private, no-store`, `no-referrer`, `noindex`; store hosts 308 to the platform host (T3 proxy rule, PLA-§Q.3) |
+| `GET /invite/staff/<token>` (page) | `src/app/(public)/invite/staff/[token]/page.tsx` (P1) | token | `private, no-store`, **`same-origin`** (rev 4, core §B.1 rev 3 / ENGC-16; revision 3 wrote `no-referrer`), `noindex` |
+| `GET /report/<handle>` (page, rev 3, PD70) | `src/app/(public)/report/[handle]/page.tsx` (P1) | none (public; Turnstile on the post) | `private, no-store`, **`same-origin`**, `noindex`; **store hosts answer the neutral 404** and legacy hosts 308 to the platform host (rev 4, core §C.4 route table / §Q.8 PLA Q3.4 A\*; revision 3 wrote "store hosts 308") |
 
 Every handler sets its own security headers (core D31) through `apiHeaders` or the media headers.
 
@@ -3285,8 +3507,11 @@ Every handler sets its own security headers (core D31) through `apiHeaders` or t
 `store.milestone.reached`, `store.review.submitted|answered`, `store.appeal.submitted`, `store.request.created|withdrawn`,
 `store.preview_link.created`, `store.onboarding.completed|skipped`, `auth.legal.accepted`, and (rev 2)
 `store.health.snoozed` (core §F.5 lists it), `store.milestone.reached` (job), and (rev 3) `store.brand_refused`
-`{ field }` (PD70; the matched term never enters the meta). Core actions reused as listed in core
-§F.5. `AuditAction` keeps its `(string & {})` escape hatch (`src/lib/audit.ts:14-38`); the names were appended to the
+`{ field }` (PD70; the matched term never enters the meta), and (rev 4) `platform.user.deleted` `{ reason }` (PD81;
+the core's §F.9 name, appended by core §F.5). Core actions reused as listed in core §F.5, incl. (rev 4)
+`auth.account.deleted`, `store.preview_link.revoked`, `store.landing_settings.updated` (reason `onboarding`) and the
+`meta.stepUp: "totp" | "password"` field the tenant ladder adds to `store.export_requested`, `store.closed`,
+`store.member.role_changed` and the secret-write audit rows (core §B.7). `AuditAction` keeps its `(string & {})` escape hatch (`src/lib/audit.ts:14-38`); the names were appended to the
 union by core §F.5 (Q.23 accepted). No lifecycle "undo" action exists: an arm-window cancel writes nothing (PD54).
 
 ### PLA-§M.4 Query plans (every console list, MariaDB 10.4)
@@ -3311,7 +3536,7 @@ union by core §F.5 (Q.23 accepted). No lifecycle "undo" action exists: an arm-w
 | Platform requests due | `preq_due_idx (status, execute_after)` | |
 | Waitlist | `wl_status_idx (status, created_at)` | |
 | Legal list | `ld_kind_status_idx (kind, locale, status)` | |
-| Health job: stores without a snapshot (rev 2) | `stores_status_idx (status, created_at)` + PK anti-join on `store_health` | `LEFT JOIN … WHERE h.store_id IS NULL LIMIT 200` after the dirty and stale batches |
+| Health job: stores without a snapshot (rev 2) | `stores_status_idx (status, created_at)` + PK anti-join on `store_health` | `LEFT JOIN … WHERE h.store_id IS NULL LIMIT 20` after the dirty batch and before the stale one (rev 4: the job is budget-driven, so each batch reads at most 20 ids and the loop stops at the deadline) |
 | Plan impact examples (rev 2) | `store_usage` PK `(store_id, metric, period)` over the plan's store ids (`stores_plan_idx`) | `IN (…≤ 2,000 ids)` chunked by 500 |
 | Lifecycle preview (rev 2) | `orders_queue_idx (store_id, confirm_state, due_at)`, `orders_assignee_idx`, `rj_store_idx (store_id, state)`, `pages_store_status_idx` | four indexed counts, one store |
 | Console orders 24 h confirmed / risky (rev 2) | `orders_created_idx (created_at)` range, filter in memory | ≤ one day of rows |
@@ -3343,8 +3568,9 @@ Every process cache of this part is created with `scopedCache()` (core §E.6; li
 
 Buckets: `p:console:search:<userId>`, `p:pii:reveal:<userId>`, `p:orders:lookup:<userId>`, `p:users:manage:<staffId>`,
 `p:impersonate:<userId>`, `p:op:<userId>:<opId>`, `s:<sid>:request`, `s:<sid>:search:<userId>`, `s:<sid>:health:recompute`
-(rev 2, core §E.8), `p:report:ip:<ipHash>`, `p:report:store:<storeId>` (rev 3, PD70) (and the core's
-`s:<sid>:pulse:<userId>`, `s:<sid>:invite`, `p:invite:accept:ip:<h>`, `p:mfa:stepup:<userId>`). Keys are ids or hashes,
+(rev 2, core §E.8), `p:report:ip:<h>` 5/h, `p:report:store:<h>` 20/day (rev 3, PD70; rev 4 the core's names and
+rates) (and the core's `s:<sid>:pulse:<userId>`, `s:<sid>:invite`, `p:invite:accept:ip:<h>`, `p:mfa:stepup:<userId>`,
+and rev 4 `p:password:<userId>` for the tenant password step-up). Keys are ids or hashes,
 never raw e-mails, phones or IPs. **Platform counters (rev 3, PD68; `platform_usage`, core §D.7, not buckets):**
 `pending_stores` per platform day, `pending_media_bytes` (`period = "total"`), and ai.md's `ai_cost_micros_pending`
 per month; the console reads them for the ceilings card, the Storage and AI panels and the alarms.
@@ -3358,12 +3584,12 @@ per month; the console reads them for the ceilings card, the Storage and AI pane
 | File (`src/lib/i18n/admin/<locale>/…`) | Owner | Locales in R1 | Prefixes |
 |---|---|---|---|
 | `console.ts` | P1 | en (fr R2, ar R3) | `console.*` |
-| `notify.ts` | P1 | en, fr, ar for tenant kinds; en for `staff.*` | `notify.<kind>.title`, `notify.<kind>.body` |
+| `notify.ts` | P1 | en, fr, ar for tenant kinds and for `health.platform.*`; en for `staff.*` | `notify.<kind>.title`, `notify.<kind>.body`; **(rev 4, D67 / core §I.5)** P1's tenant health sentences `health.platform.<rule>.*` |
 | `auth.ts` | P2 | en, fr, ar | `auth.*` |
 | `onboarding.ts` | P2 | en, fr, ar | `onboarding.*` |
 | `team.ts` | P2 | en, fr, ar | `team.*` |
-| `shell.ts` | P2 | en, fr, ar | `shell.*` (incl. `shell.address.*`, `shell.jobs.*`, `shell.err.busy`) |
-| `health.ts` (rev 2) | P2 (ring UI keys `health.*`; the shell rules' texts `health.shell.<rule>.text`); each track's own `health.<track>.<rule>.text` lives in that track's file (P1: `health.platform.*` in `console.ts` for staff labels and in `health.ts` for the tenant sentence) | en, fr, ar | `health.*` |
+| `shell.ts` | P2 | en, fr, ar | `shell.*` (incl. `shell.address.*`, `shell.jobs.*`, `shell.err.busy`, rev 4 `shell.stepup.*`, `shell.account.danger.*`); **(rev 4, D67)** the shell rules' sentences `health.shell.<rule>.*` |
+| `health.ts` (rev 2; rev 4 per D67) | P2: the ring, groups, issue-list and snooze **chrome only** (`health.title`, `computing`, `recomputing`, `all_good`, `celebrate`, `severity.*`, `group.*`, `snooze*`, `evidence.*`); every rule sentence lives in the emitting track's file (P1's `health.platform.*` in `notify.ts`, P2's `health.shell.*` in `shell.ts`, P3's in `landing.ts`, P4's in `ops.ts`, P5's in `integrations.ts`, P6's in `design.ts`); revision 3's "P1's tenant sentence in `health.ts`" is withdrawn (two tracks would have owned one file) | en, fr, ar | `health.*` chrome |
 | `brief.ts` (rev 2) | P2 | en, fr, ar | `brief.*` (the Today brief templates) |
 
 Rules: ICU-lite `{var}` placeholders identical in every locale (checked); counts use `Intl.PluralRules` keys
@@ -3403,7 +3629,11 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 - `health.*` (rev 2): `title`, `computing`, `recomputing`, `recompute`, `updated_at`, `score_later`, `all_good`,
   `celebrate`, `severity.<1|2|3>` (Suggestion / Should fix / Fix now), `group.<group>`, `snooze`, `snoozed_count`,
   `unsnooze`, `snoozed_until`, `after_approval`, `fix.<actionId>` labels, `shell.<rule>.text` and `.fix` for the five
-  P2 rules, `platform.<rule>.text` for the nine P1 rules (tenant sentence), `evidence.<metric>` labels.
+  P2 rules, `platform.<rule>.text` for the nine P1 rules of revision 3 (tenant sentence; four in rev 4, below), `evidence.<metric>` labels. **(rev 4)**
+  `health.shell.<rule>.*` now covers **three** P2 rules (`contact`, `legal_identity`, `2fa_orders`; `no_published_page`
+  is withdrawn, P3's `landing:no_live_page` replaces it) and lives in `shell.ts`; `health.platform.<rule>.*` covers the
+  **four** P1 tenant rules (`render_failed`, `quota_high`, `quota_full`, `risky_orders`; the five integrations copies
+  are withdrawn) and lives in `notify.ts`.
 - `brief.*` (rev 2): `orders`, `callbacks`, `health`, `opportunity`, `queue`, `empty`.
 - `shell.address.*` (rev 2): `title`, `live`, `not_live`, `hidden`, `copy`, `open`, `qr`, `qr_download`, `share`,
   `wa_text`, `test_order`, `after_publish`, `campaign`, `future_domain`, `rerendering`.
@@ -3418,6 +3648,15 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
   `notify.staff.signup_capped.*` (en); `console.impersonation.masked`, `console.attention.signup_cap_reached`,
   `console.attention.pending_media_budget`, `console.attention.abuse_reports_new`, `console.attention.brand_term_live`,
   `console.signup.ceilings.*`, `console.turnstile.gate_rule`, `console.brands.live_guard.*`.
+- **Rev 4 keys:** `shell.stepup.title`, `shell.stepup.reason.<action>`, `shell.stepup.password`,
+  `shell.stepup.password_failed` (PD80); `shell.account.danger.title`, `.what_goes`, `.what_stays`, `.owns_stores`,
+  `.is_staff`, `.confirm_word`, `.submit`, `auth.account.deleted` (PD81); `shell.limit.reason.pending_ai` (D69);
+  `shell.review.preview_revoke`, `shell.review.preview_revoked`; `onboarding.reveal.saved_sales_page` (PD60 rev 4);
+  `health.all_good` text changed, `health.checked_at` (PD78); `error.owns_store`, `error.is_staff`,
+  `error.category_required` (D65 rule); `console.users.delete.*`, `console.security.admin_host_missing`,
+  `console.domains.v12.*`, `console.attention.signup_capped` (renamed from `signup_cap_reached`),
+  `console.attention.data_dir_70` / `data_dir_85` / `edge_bad_key` / `gate_mismatch` / `pool_wait` / `tick_lag`,
+  `console.health.cycle`, `console.queue.ai_used`.
 - `console.*`: `badge`, `nav.<item>`, `queue.*` (+ rev 2 `queue.pivot`, `queue.margin`, `queue.hold`,
   `queue.evidence.*`), `risk.<SignupFlagCode>`, `reject.<RejectReason>`, `ask.<template>`, `reason.<code>`,
   `attention.<code>` (+ rev 2 `render_stuck`, `render_failed_old`, `edge_silent`, `edge_prev_key`, `health_stale`,
@@ -3525,14 +3764,14 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 | `health.title` (rev 2) | Store health | Santé de la boutique | صحة المتجر |
 | `health.computing` | Your first health check runs within 5 minutes. | Votre premier bilan arrive dans les 5 minutes. | أول فحص لصحة متجرك سيجري خلال 5 دقائق. |
 | `health.recomputing` | Recomputing. Ready within 5 minutes. | Recalcul en cours. Prêt dans les 5 minutes. | يُعاد الحساب الآن. سيكون جاهزًا خلال 5 دقائق. |
-| `health.all_good` | Nothing to fix right now. The next check runs within an hour. | Rien à corriger pour l'instant. Le prochain bilan a lieu dans l'heure. | لا شيء يحتاج إصلاحًا الآن. الفحص التالي خلال ساعة. |
+| `health.all_good` (rev 2 text, superseded by the rev 4 row below, PD78) | Nothing to fix right now. The next check runs within an hour. | Rien à corriger pour l'instant. Le prochain bilan a lieu dans l'heure. | لا شيء يحتاج إصلاحًا الآن. الفحص التالي خلال ساعة. |
 | `health.severity.3` | Fix now | À corriger maintenant | أصلحه الآن |
 | `health.severity.2` | Should fix | À corriger | يُستحسن إصلاحه |
 | `health.severity.1` | Suggestion | Suggestion | اقتراح |
 | `health.snooze` | Snooze 7 days | Mettre en pause 7 jours | تجاهل لمدة 7 أيام |
 | `health.shell.contact.text` | Customers have no way to reach you: add a phone or WhatsApp number. | Vos clients ne peuvent pas vous joindre : ajoutez un téléphone ou un numéro WhatsApp. | لا يستطيع الزبناء التواصل معك: أضف رقم هاتف أو واتساب. |
-| `health.shell.no_published_page.text` | No page is live yet. | Aucune page n'est encore en ligne. | لا توجد صفحة منشورة بعد. |
-| `health.platform.sheets_backlog.text` | Google Sheets is {minutes} min behind ({n} orders waiting). | Google Sheets a {minutes} min de retard ({n} commandes en attente). | Google Sheets متأخر بـ {minutes} دقيقة ({n} طلبات في الانتظار). |
+| `health.shell.no_published_page.text` (withdrawn in rev 4, PD79: P3's `landing:no_live_page` carries the sentence in `landing.ts`) | No page is live yet. | Aucune page n'est encore en ligne. | لا توجد صفحة منشورة بعد. |
+| `health.platform.sheets_backlog.text` (withdrawn in rev 4, PD79: P5's `int:sheets_backlog` carries the sentence in `integrations.ts`; the wording is offered to P5) | Google Sheets is {minutes} min behind ({n} orders waiting). | Google Sheets a {minutes} min de retard ({n} commandes en attente). | Google Sheets متأخر بـ {minutes} دقيقة ({n} طلبات في الانتظار). |
 | `health.platform.quota_high.text` | {metric} is {percent} % full. | {metric} est rempli à {percent} %. | {metric} ممتلئ بنسبة {percent}%. |
 | `brief.orders.other` (rev 2) | {confirmed} orders confirmed today · {callbacks} callbacks due | {confirmed} commandes confirmées aujourd'hui · {callbacks} rappels à faire | {confirmed} طلبات مؤكدة اليوم · {callbacks} مكالمات متابعة مستحقة |
 | `brief.empty` | No orders yet. Publish a page to start. | Pas encore de commandes. Publiez une page pour commencer. | لا طلبات بعد. انشر صفحة للبدء. |
@@ -3571,6 +3810,21 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 | `onboarding.reveal.saved_product` (rev 3) | Your first product and its page are saved as drafts; your store home is being built. Publishing unlocks after approval. | Votre premier produit et sa page sont enregistrés en brouillon ; l'accueil de votre boutique est en cours de création. La publication s'ouvre après validation. | تم حفظ منتجك الأول وصفحته كمسودة؛ الصفحة الرئيسية لمتجرك قيد الإنشاء. يصبح النشر متاحًا بعد الموافقة. |
 | `onboarding.reveal.dna` (rev 3) | Why this design | Pourquoi ce design | لماذا هذا التصميم |
 | `health.celebrate` (rev 3 text) | Your store is in great shape. | Votre boutique est en pleine forme. | متجرك في حالة ممتازة. |
+| `health.all_good` (rev 4 text, PD78) | Nothing to fix right now. Checked at {time}; it checks again after every change you make. | Rien à corriger pour l'instant. Vérifié à {time} ; un nouveau bilan suit chaque modification. | لا شيء يحتاج إصلاحًا الآن. آخر فحص على {time}، ويُعاد الفحص بعد كل تغيير تقوم به. |
+| `health.checked_at` (rev 4) | Checked at {time} | Vérifié à {time} | آخر فحص: {time} |
+| `shell.stepup.title` (rev 4, PD80) | Confirm it's you | Confirmez que c'est bien vous | أكّد أنك أنت |
+| `shell.stepup.reason.export` | to export your customers' data | pour exporter les données de vos clients | لتصدير بيانات زبنائك |
+| `shell.stepup.password` | Your password | Votre mot de passe | كلمة المرور |
+| `shell.stepup.password_failed` | That password didn't work. | Ce mot de passe ne fonctionne pas. | كلمة المرور غير صحيحة. |
+| `shell.account.danger.title` (rev 4, PD81) | Delete my account | Supprimer mon compte | حذف حسابي |
+| `shell.account.danger.what_goes` | Your name, e-mail, phone and devices are removed. | Vos nom, e-mail, téléphone et appareils sont supprimés. | يُحذف اسمك وبريدك الإلكتروني وهاتفك وأجهزتك. |
+| `shell.account.danger.what_stays` | The proof that you accepted the terms and the stores' activity logs keep an anonymous id. | La preuve d'acceptation des conditions et l'historique des boutiques gardent un identifiant anonyme. | يبقى إثبات موافقتك على الشروط وسجلّ نشاط المتاجر بمعرّف مجهول. |
+| `shell.account.danger.owns_stores.other` | You own {count} stores. Close them first, then come back here. | Vous êtes propriétaire de {count} boutiques. Fermez-les d'abord, puis revenez ici. | أنت مالك لـ {count} متاجر. أغلقها أولًا ثم ارجع إلى هنا. |
+| `auth.account.deleted` | Your account was deleted. | Votre compte a été supprimé. | تم حذف حسابك. |
+| `shell.limit.reason.pending_ai` (rev 4, D69) | Store Gen's AI budget for stores in review is used up for now. Your store gets its own budget once it is approved; the hand-written suggestions keep working. | Le budget IA de Store Gen pour les boutiques en vérification est épuisé pour le moment. Votre boutique aura le sien une fois validée ; les suggestions rédigées à la main restent disponibles. | ميزانية الذكاء الاصطناعي للمتاجر قيد المراجعة نفدت حاليًا. سيحصل متجرك على ميزانيته بعد الموافقة، والاقتراحات المكتوبة مسبقًا تبقى متاحة. |
+| `shell.review.preview_revoke` (rev 4) | Revoke | Révoquer | ألغِ الرابط |
+| `onboarding.reveal.saved_sales_page` (rev 4) | Your first page is a sales page; your store home is being built. Publishing unlocks after approval. | Votre première page est une page de vente ; l'accueil de votre boutique est en cours de création. La publication s'ouvre après validation. | صفحتك الأولى صفحة بيع؛ الصفحة الرئيسية لمتجرك قيد الإنشاء. يصبح النشر متاحًا بعد الموافقة. |
+| `error.category_required` (rev 4) | Choose a category first. | Choisissez d'abord une catégorie. | اختر الفئة أولًا. |
 
 ### PLA-§N.4 Console reference texts (en, R1)
 
@@ -3616,12 +3870,20 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 | `console.impersonation.chip` (rev 2) | Viewing @{handle} · {left} |
 | `console.plans.impact.lowered` (rev 2) | Lowers {key} for {stores} stores; {above} are already above {to}: {examples} |
 | `console.impersonation.masked` (rev 3) | You will see customer names, phones, addresses and notes masked. To read one customer, use the per-order reveal from the store profile. |
-| `console.attention.signup_cap_reached` (rev 3) | {cap} sandboxes were created today; new sellers join the waitlist |
+| `console.attention.signup_cap_reached` (rev 3; renamed `console.attention.signup_capped` in rev 4, row below) | {cap} sandboxes were created today; new sellers join the waitlist |
 | `console.attention.pending_media_budget` (rev 3) | Stores in review use {percent} % of their shared {total} MiB |
 | `console.attention.abuse_reports_new` (rev 3) | {count} new reports on {stores} stores in 24 h |
 | `console.attention.brand_term_live` (rev 3) | @{handle}'s {field} contains the protected name "{term}" |
 | `console.turnstile.gate_rule` (rev 3) | Required for sign-up in Approval and Open; scored in Invite. |
 | `console.signup.ceilings.today` (rev 3) | Today: {count} / {cap} sandboxes |
+| `console.attention.signup_capped` (rev 4 name) | {cap} sandboxes were created today; new sellers join the waitlist |
+| `console.attention.data_dir_85` (rev 4) | Store files use {percent} % of the {budget} disk budget |
+| `console.attention.edge_bad_key` (rev 4) | {count} requests carried an edge key the app could not verify in the last minute |
+| `console.attention.gate_mismatch` (rev 4) | This build was not made from the commit the offline gate passed |
+| `console.health.cycle` (rev 4) | Every store is rechecked about every {minutes} min at today's {stores} active stores |
+| `console.queue.ai_used` (rev 4) | AI {used} / {limit} credits · {cost} |
+| `console.users.delete.confirm` (rev 4) | Type {email} to delete this account. The stores they belonged to and the audit history stay; their name, e-mail, phone and devices are removed. |
+| `console.security.admin_host_missing` (rev 4) | The console still shares the shops' address. Set ADMIN_HOST before opening sign-ups. |
 
 ---
 
@@ -3633,8 +3895,9 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 |---|---|---|---|
 | `test:platform` | `src/lib/platform/selftest.ts` | P1 | **scoreSignup golden fixtures** (≥ 30, injected `SignupRiskDeps`, no network): clean Gmail sign-up → 0 / `fast`; disposable domain → 35; null MX → 25; MX timeout → `partial`, 0 points; `face-b00k-shop` handle → `brand_exact` (`brandTokens`); "Banque Populaire Store" → `brand_exact` kind bank; Arabic name with tatweel matching an Arabic term; Gmail dot / plus variant → `dup_email_norm`; phone shared by 3 users → +40 cap; banned link → `reject_candidate` whatever the score; 3 s form → `too_fast`; bot UA; market not allowed; invite code −20; trusted creator −30 and clamp at 0; weights override from settings; thresholds order refusal. `bandFor` table; `autoApprove` truth table per mode (incl. `turnstile: "off"` refused in `open`); `HOLD_CLASS` members. `normalizeEmailForIdentity`, every `mask*` function (incl. short names, IPv6), the console `platformFlags` fixtures per flag code (the issue-level fixtures and the monotonic property moved to `test:health`, rev 2), milestones, `flagValue` order and rollout stability, `renderMarkdownLite` escaping (`<script>`, `javascript:` links, nested emphasis), cursor tamper → `null`, every reason code has `console.reason.*` and `shell.status_reason.*` keys, every tenant notification kind has ar/fr/en keys with the same placeholders, `roleSummary` agrees with `can()` for every role, `PlatformSettingSchema` / `OnboardingSchema` defaults parse `{}` |
 | `test:platform` (rev 2 additions) | `src/lib/platform/selftest.ts` | P1 | `explainBand` agrees with `bandFor` on every golden fixture (removing the pivot flag re-scores to `bandWithout`; no pivot when no single flag changes the band); `lifecyclePreview` pure parts (`storeSees` text per edge and locale, `cooldown.typedHandleRequired` on a fake clock); `PlanImpact.examples` ordering and the ≤ 20 cap; `ConsolePulse` ETag stability; every `NotificationKindDef.vars` schema free of `phone` / `name` / `address` / `email` / `note`; the alarm code list of PLA-§15.2 has a `console.attention.*` key each; `KpiTile`, `FunnelChart`, `HealthRing` refuse dishonest props (type-level and runtime); a grep over `src/components/console/**` for `adm-aurora` / `adm-grain` and over `src/components/admin/dashboard/**` for "Revenue" returns nothing |
+| `test:platform` (rev 4 additions) | `src/lib/platform/selftest.ts` | P1 | **`FEATURE_PROOFS`** (PD77): every R1 id of PLA-§1 has ≥ 1 entry, every entry names a script of PLA-§O and, for `test:db` / attack / e2e entries, a case or step number that exists in this document's lists (the lists are mirrored as constants in the same file); `checkBrandTerms(kind, value)` answers `"ok" \| "near" \| "exact"` and never the term, `brandMatches` returns the term (one-field signature, PD70 rev 4); `reportUrl` fixtures (absolute platform origin, `?p=` path only, query and host stripped, 300-char cap); the notification link rule (`/app/<h>`, `/app/<h>/x`, `/app/<h>?a`, `/admin/x`, `/app/account?doc=tos` pass; `https://evil.example`, `//evil`, `/app/../admin`, `javascript:` stored as `null`); `staleAfterMin` = `max(staleAlarmMinutes, 1.5 × cycleMin)` on fixtures; `platformFlags()` derives `sheets_backlog` / `outbox_dead` / `capi_failing` / `telegram_failing` / `setup_incomplete` from the P5 / P3 issue fixtures and emits no issue of its own for them |
 | `test:platform` (rev 3 additions) | `src/lib/platform/selftest.ts` | P1 | `checkBrandTerms` fixtures (exact / near / none; Arabic term; a staff actor gets the same result, the refusal is the caller's); `maskCustomerFields` and `maskIfImpersonation` (identity for `member` / `system`, every field masked for `impersonation`, `city` kept); the `__Host-sgl` parser (`"fr"` ok; `"FR"`, `"ar; Domain=x"`, `""`, a 300-char value → fallback; two cookies → the host-only one); `platform:brand_term_live` fixtures (term in the store name / a page `seoTitle` / a policy text / nowhere; a `substring` term of 5 chars never matches; weekly alarm dedupe key); the two Turnstile flags never appear on a fixture scored with `mode ∈ {approval, open}`; `modeSummary` bullets agree with `modeAllows` and differ across modes; the `PlatformSettingSchema` ceilings parse their defaults (20 / 100 / 5,000 / 50) and refuse `pendingMediaMiBBeforeSubmit > pendingMediaMiB`; `recordAbuseReport` input parsing (reason enum, 2,000-char cap, same-host path rule) |
-| `test:health` (rev 2; core §J.1) | `src/lib/health/selftest.ts` | P1 (fixtures per rule from every track's `rules/<track>.ts`) | §6.3: fixtures per rule with and without `minN`; score monotonic (1,000 random removals and snoozes never lower it, seeded RNG); group caps; severity → points; snooze expiry on a fake clock; `platformFlags` ↔ issues consistency (every flag that maps onto a group has its issue); milestones once; `health.issue_new` dedupe per week; i18n templates of every tenant-visible rule render with every variable in ar/fr/en; a two-store fixture proves no cross-store evidence; a throwing rule is skipped and recorded, the others still score |
+| `test:health` (rev 2; core §J.1) | `src/lib/health/selftest.ts` | P1 (fixtures per rule from every track's `rules/<track>.ts`) | **(rev 4, PD79)** registry scan: no two registered rules emit the same evidence `metric` in the same group (one condition, one issue), every registered rule id is `<track>:<rule>` with the track matching its file; §6.3: fixtures per rule with and without `minN`; score monotonic (1,000 random removals and snoozes never lower it, seeded RNG); group caps; severity → points; snooze expiry on a fake clock; `platformFlags` ↔ issues consistency (every flag that maps onto a group has its issue); milestones once; `health.issue_new` dedupe per week; i18n templates of every tenant-visible rule render with every variable in ar/fr/en; a two-store fixture proves no cross-store evidence; a throwing rule is skipped and recorded, the others still score |
 | `test:pulse` (rev 2; core §J.1) | `src/lib/pulse/selftest.ts` | P2 | `StorePulse` shape; ETag stability for identical payloads and change on any field; contributor budget (a 60 ms contributor is dropped, its keys omitted) and failure isolation; per-user parts never cached across users (two viewers, two bodies); the poller election with a fake `BroadcastChannel` (one leader, re-election after 40 s of silence) |
 | `test:admin-motion` (rev 2; core D60, §J.1) | `scripts/qa/admin-motion-check.ts` | P2 | no `type: "spring"`, no overshoot cubic-bezier (y1 or y2 outside 0-1), no duration > 400 ms outside `src/components/builder/**`; `--ui-spring` absent from the tokens; the two revision-1 sites (`app-sidebar.tsx:96`, `:146`) are the regression fixtures |
 | `test:admin-rtl` (rev 2; DES-R2, core §I.5) | `scripts/qa/admin-rtl-lint.ts` | P2 | fails on physical-side classes `(^| )(ml|mr|pl|pr|left|right|text-left|text-right)-` in `src/components/admin/**`, `src/components/console/**` and `src/app/app/**`, and on directional icons outside the mirrored allow-list |
@@ -3698,20 +3961,47 @@ and `health-db-check.ts` are `test:db`, not `npm test`.
     `saveGeneralAction` answers `brand_protected`, writes `store.brand_refused` and changes no column; a near term
     saves and sets the `brand_near_live` flag on the next health run; a live page whose `seoTitle` carries an exact
     term raises `brand_term_live` and one `staff.alarm` across three runs in the same week; `recordAbuseReport` ×
-    6 from one IP hash in a day → 5 rows and one `rate_limited`; two reports on one store in a day → one
-    `staff.abuse_report` notification with `count24h = 2`.
+    6 from one IP hash in an hour → 5 rows and one `rate_limited` (rev 4: the core's 5/h); two reports on one store in
+    a day → one `staff.abuse_report` notification with `count24h = 2`.
+16. **(rev 4, PD81) Account deletion:** `deleteUserAction` on a user who owns an `active` store → `owns_store`, nothing
+    changed; on a staff member → `is_staff`; on a plain member → `users.email` = `deleted+<ulid>@invalid`, name /
+    phone / locale null, `disabled = 1`, no `identity_links` / `sessions` / `password_resets` / `notification_reads`
+    row left, `legal_acceptances.ua` null, audit rows kept, one `platform.user.deleted` row without the e-mail;
+    `deleteMyAccountAction` without a fresh step-up → `step_up`; with it → the same end state and `auth.account.deleted`.
+17. **(rev 4, PD80) Tenant step-up ladder:** for a user **without** TOTP, `requestStoreExportAction`,
+    `closeOwnStoreAction` and `changeMemberRoleAction(→ admin)` answer `step_up`; after `stepUpWithPasswordAction`
+    with the right password they succeed within 5 minutes and their audit rows carry `meta.stepUp = "password"`; a
+    wrong password 5 times hits `p:password:<userId>`; `changeMemberRoleAction(→ editor)` needs no step-up;
+    `setRequireMember2faAction` is refused for an owner without TOTP (TN-13).
+18. **(rev 4) Sandbox ceilings, refund paths:** a signup that passes step 6 and then fails step 7 on a duplicate
+    e-mail leaves `pending_stores` unchanged (`refundPlatformUsage`); an `invite`-mode signup with a code without
+    `auto_approve` is counted, one with `auto_approve` is not; a pending store's AI call past the slice answers
+    `quota_platform_pending` while an active store's call succeeds.
+19. **(rev 4) Machinery screens:** the Domains checklist state survives a process restart; V3 and V12 on the
+    temporary domain answer "S mode is off" / "ADMIN_HOST not set" without a network call (OS-06); the cron stopped
+    11 minutes on a fake clock turns the Cron panel red and sends exactly one `staff.alarm` per hour, a render job
+    pending 61 minutes raises `render_stuck` once, `data_dir_85` fires from a seeded `dataDir` snapshot (OS-09); a
+    backup download without a fresh step-up answers `step_up` and the ZIP's manifest checksums match (OS-10); every
+    break-glass row links to its actor and target (SE-04).
+20. **(rev 4, core §B.5 rev 3 / SEC-24) Invite consumption:** 10 parallel accepts of one store invite from 10 sessions
+    → one membership, nine "already used"; 5 parallel accepts of one staff invite → one `platform_role` set; a
+    revoked or expired invite accepted in the same instant as its revocation → refused.
 
 `scripts/qa/health-db-check.ts` (P1, rev 2; core §J.2 `test:health-db`): the `platform.health` job over 3 seeded
 stores (one clean, one with a 20-minute Sheets backlog and a quota at 85 %, one `suspended`): dirty-first order, snapshot
 upsert with `dirty_at = NULL`, milestones written once over two runs, `quota.80` once per metric and period,
 `health.issue_new` once per issue id per week, snooze honoured by the next run, no customer data in any snapshot column
-(canary scan of `issues`, `flags`, `metrics`), the slot budget respected (200 stores processed in ≤ 3 s on the `--perf`
-fixture with stubbed read APIs), and the two rings (`getStoreHealth(systemScope)` vs `getStoreHealth(platformScope)`)
-reading the same `score`.
+(canary scan of `issues`, `flags`, `metrics`), the slot budget respected (rev 4, PD78: with stubbed read APIs at 300 ms
+per store the job stops at its deadline, processes ≈ 10 stores, and records `perStoreP50Ms`, `perStoreP95Ms` and
+`cycleMin` in `job_runs.summary`; revision 3's "200 stores in ≤ 3 s" is withdrawn as unreachable), the dirty-first
+order holding under a 30-row dirty queue (oldest dirty first, three ticks to drain), and the two rings
+(`getStoreHealth(systemScope)` vs `getStoreHealth(platformScope)`) reading the same `score`.
 
 ### PLA-§O.3 Attack cases added to `scripts/qa/tenancy-check.ts` (TN-10)
 
-Canaries seeded in store A: customer phone `+212600000777`, name `Canaryname Zzz`, address `Rue Canary 77`, order
+**(rev 4, core §K.1 T4 / §K.2 P1 rev 3)** The cases live in **`scripts/qa/tenancy-cases/platform.ts`** (P1), which T4's
+`scripts/qa/tenancy-check.ts` imports with every other track's `tenancy-cases/<track>.ts`; P1 writes the shell's cases
+too (they are specified here and P1 merges after P2), so no other track edits the file. Canaries seeded in store A: customer phone `+212600000777`, name `Canaryname Zzz`, address `Rue Canary 77`, order
 note `canary-note-77`, seller e-mail `canary.seller@example.test`. Cases:
 1. For a support and an analyst session, the HTML **and** the RSC payload of every console route that shows store A
    (overview, queue, stores list, every profile tab, people, order lookup, search JSON) contain none of the customer
@@ -3754,6 +4044,14 @@ note `canary-note-77`, seller e-mail `canary.seller@example.test`. Cases:
     row or audit meta carries it); a member of store A cannot read `abuse_reports` through any tenant route.
 18. **(rev 3, PD71)** A request with `Cookie: __Host-sgl=ar; __Host-sgl=zz` renders `dir="rtl"`; a request with
     `sg-locale=fr` (the old name) is ignored; `updateProfileAction` with locale `"zz"` → `invalid`.
+19. **(rev 4, core §E.2 SEC-7)** `revokePreviewLinkAction` with a `tokenId` minted by store A, posted to store B's path
+    by B's owner → `not_found` and A's link still opens; `mintPreviewLinkAction` with A's `pageId` on B's path →
+    `not_found` (T3's `assertOwned`); a revoked link answers the neutral 404 on the next request.
+20. **(rev 4, PD81, PD80)** `deleteUserAction` from a tenant owner session → `not_found`; `deleteMyAccountAction` from
+    an impersonating staff session → `impersonation_read_only` (account pages are a sensitive surface, PLA-§10.2);
+    `stepUpWithPasswordAction` for user X from user Y's session cannot raise X's `step_up_at` (it binds to the
+    session); a notification inserted with `link = "https://evil.example/x"` or `"//evil.example"` is stored with
+    `link = NULL` (PLA-§18.1 rule).
 
 ### PLA-§O.4 HTTP / e2e (`npm run test:e2e`, production build on 3451+, Playwright `channel: "msedge"`)
 
@@ -3771,7 +4069,8 @@ note `canary-note-77`, seller e-mail `canary.seller@example.test`. Cases:
 7. **PWA**: `/app/manifest.webmanifest` valid JSON with `scope "/app/"`, icons reachable, `navigator.serviceWorker`
    has no registration (R1).
 8. **Headers**: `scripts/qa/headers-check.ts` cases for `/api/admin/*`, `/api/app/<h>/pulse`, `/api/app/<h>/search`, the
-   manifest and `/invite/staff/<token>` (`no-referrer`, `noindex`).
+   manifest and `/invite/staff/<token>` (**`same-origin`** since rev 4, core §B.1 / ENGC-16; revision 3 asserted
+   `no-referrer`, `noindex`), `/invite/<token>` and `/report/<handle>` (`same-origin`, `noindex`, `private, no-store`).
 9. **Release check (manual, R1 exit)**: a native Darija/Arabic speaker and a French speaker review every R1 tenant
    string in the screenshots of step 6; findings fixed before the R1 deploy.
 10. **(rev 2) `qa:admin-perf`** (P2, part of `qa/e2e`): with a warm shell on the `--perf` DB, 20 route changes across
@@ -3798,14 +4097,26 @@ note `canary-note-77`, seller e-mail `canary.seller@example.test`. Cases:
     handle; "Use this design" stays visible while scrolling; at 1280 px three folds render side by side at equal width
     and focusing one expands it; the reduced-motion run shows no scale animation.
 16. **(rev 3, PD70) Brand guard end to end:** the General page refuses "CIH Bank · Vérification" with the limit sheet
-    (no toast, nothing saved); the console's "Check a name" box agrees; `/report/<handle>` from a store page's footer
-    link (308 from the store host in S mode, direct in P mode) submits and the console's Needs attention shows the
+    (no toast, nothing saved); the console's "Check a name" box agrees; `/report/<handle>` from a landing page's footer
+    link (rev 4: the link is absolute to the platform origin in every mode, and the same path on the store host
+    answers the neutral 404 in S mode; revision 3 expected a 308) submits and the console's Needs attention shows the
     row within one pulse.
 17. **(rev 3, PD68) Ceilings in the UI:** the Sign-up settings tab shows "Today: 3 / 3 sandboxes" after case 13's
     seed and the waitlist rows carry the "Daily cap" chip; the review card of a pending store reads "up to 20 MB" and,
     after Submit, "up to 100 MB".
 18. **(rev 3, PD71) Cookies:** `scripts/qa/headers-check.ts` asserts every `Set-Cookie` of `/login`, `/signup`,
     `/invite/*`, `/app/**` and `/admin/**` starts with `__Host-`.
+19. **(rev 4, PD80) Step-up ladder:** a seller without TOTP presses "Request export" → the password sheet opens with
+    the line "to export your customers' data", the right password runs the original request once (same `opId`), the
+    export job appears; "Close the store" in the next 5 minutes needs no second prompt; a role change to `admin` opens
+    the sheet, a change to `editor` does not; with TOTP enrolled the sheet asks for the code instead (PL-09).
+20. **(rev 4, PD81) Account deletion:** a member who owns no store deletes their account from `/app/account/danger`
+    (step-up, typed word) and lands on `/login?deleted=1`; signing in with the old e-mail answers the generic failure;
+    an owner sees only the "close your stores first" list; the console's Delete account on that member's profile is
+    disabled with the same reason.
+21. **(rev 4, PD83) Report link on every public page:** in the rendered landing page, legal page and thank-you page of a
+    seeded live store (and in R2 the store home), the "Report this store" link points to
+    `platformOrigin()/report/<h>?p=<path>`; following it lands on the form with the page path prefilled.
 
 ### PLA-§O.5 The wow demo (RF §4; `scripts/qa/wow-demo.ts`, maintainer; steps contributed by P2, P3, P4, P1) parts owned here
 
@@ -3835,8 +4146,10 @@ hidden" line before `V` (PD69), and the Risk strip reads "No protected term on l
 
 ### PLA-§P.1 P1 CONSOLE (R1)
 
-- `src/app/admin/(console)/**` (every page, layout and `actions.ts` of PLA-§4.1 and PLA-§M.1); `src/app/admin/page.tsx`
-  (deleted); not `src/app/admin/(auth)/setup/**` (T2 / maintainer) and not `src/app/admin/ai/**` (P7).
+- **`src/app/admin/**`** (rev 4: the core §K.2 P1 row's glob; every page, layout and `actions.ts` of PLA-§4.1 and
+  PLA-§M.1 lives under `src/app/admin/(console)/**`), **except `src/app/admin/(auth)/setup/**`** (T2 / maintainer) **and
+  `src/app/admin/(console)/ai/**`** (P7; rev 4, CRIT6: revision 3 excluded the non-existent `src/app/admin/ai/**`, which
+  left P7's folder inside P1's glob, core §Q.7 M5); `src/app/admin/page.tsx` is deleted by P1.
 - `src/app/api/admin/**` (PLA-§M.2).
 - `src/app/(public)/invite/staff/**` (PLA-§Q.12) and **`src/app/(public)/report/**`** (rev 3, PD70: the public abuse
   report page and its action; P2's `src/app/(public)/**` glob excludes it, PLA-§P.2).
@@ -3857,19 +4170,29 @@ hidden" line before `V` (PD69), and the Risk strip reads "No protected term on l
   omits it and PLA-§Q.3 asks the core to list it, since core §D.10 names platform.md as the `platform` key's owner),
   `src/lib/jobs/tracks/platform.ts` (`platform.health`,
   `platform.alarms`, `platform.requests`, `platform.entitlements`), `src/lib/i18n/admin/<locale>/{console,notify}.ts`
-  (+ the `health.platform.*` tenant sentences in `health.ts`, ar/fr/en), `src/lib/notify/kinds/platform.ts`,
+  (rev 4, D67 / core §I.5: the `health.platform.*` tenant sentences live in P1's **`notify.ts`**, ar/fr/en; revision
+  3 put them in P2's `health.ts`, which would have given one file two owners), `src/lib/notify/kinds/platform.ts`,
   `src/lib/flags/defs/platform.ts`, `src/components/admin/shell/nav/console.ts` (the one "Platform console" switcher
   item, PD36).
-- `scripts/qa/platform-check.ts`, `scripts/qa/health-db-check.ts` (rev 2), `scripts/qa/wow-demo/steps/platform.ts`
+- `scripts/qa/platform-check.ts`, `scripts/qa/health-db-check.ts` (rev 2), **`scripts/qa/tenancy-cases/platform.ts`**
+  (rev 4: the attack cases of PLA-§O.3, incl. the shell's; core §K.2 P1 row), `scripts/qa/wow-demo/steps/platform.ts`
   (rev 2, contributed steps), `scripts/platform/refresh-disposable.mjs` (manual refresh of the CC0 list, prints the
   diff; never run at runtime).
+- Not P1's although this part specifies them (read-only for P1): `src/lib/urls/index.ts` (`reportUrl`, `consoleHref`
+  are core builders, PLA-§Q.4), the landing footer section (`src/landing/sections/footer/**`, P6) and the legal pages
+  (P3) that render the report link, `src/lib/auth/**` (T2's `deleteUserAccount`, `stepUpWithPasswordAction`).
+  `test:ownership` (core §J.1) parses this list and §P.2 at P0 and on every merge, so the globs above are written
+  exactly as the core §K.2 rows write them.
 
 ### PLA-§P.2 P2 SHELL (R1)
 
 - Core §K.2 list: `src/components/admin/{shell,common,dashboard}/**` (except other tracks' nav and command files),
   `src/app/app/new/**`, `src/app/app/[store]/{layout.tsx, page.tsx, notifications/**,
   settings/{general,market,plan,address,security,danger}/**}`, `src/app/globals.css`, `scripts/build-admin-css.mjs`,
-  `src/lib/admin-theme/**`, `src/lib/i18n/**` (base files + `shell.ts`), `scripts/qa/admin-tokens-check.ts`,
+  `src/lib/admin-theme/**`, **`src/lib/i18n/admin/<locale>/{shell,auth,onboarding,team,health,brief}.ts` only** (rev 4,
+  CRIT7, core D67 / §I.5: **not** `src/lib/i18n/**`; the base catalogs `src/lib/i18n/admin/{en,fr,ar}.ts`, `index.ts`
+  and the `t` / `useT` runtime are the maintainer's, every other track's `<locale>/<track>.ts` is that track's;
+  revision 3's "`src/lib/i18n/**` (base files + `shell.ts`)" is withdrawn), `scripts/qa/admin-tokens-check.ts`,
   `src/lib/tenancy/handles.ts` (rename), `src/lib/admin-data/{dashboard.ts, search.ts}`.
 - Accepted by core §Q.1 Q.12 (now core §K.2 P2), **globs made disjoint in rev 3 (ENGC-8):** `src/app/(public)/**`
   **except `invite/staff/**` (P1), `report/**` (P1, PD70) and `kit/**` (P3, core §K.2 P3 row, LAN-§26.1)**;
@@ -3877,13 +4200,16 @@ hidden" line before `V` (PD69), and the Risk strip reads "No protected term on l
   `src/app/app/[store]/{welcome/**, review-actions.ts}`, **`src/app/app/[store]/team/**` except
   `team/{agents,callcenter}/**` (P4, core §K.2 P4 row, OPE-§P)**, **`src/app/app/[store]/settings/audit/**` (rev 3,
   PD75: the route core §I.1 lists had no R1 owner)**, `src/app/api/app/[store]/{pulse,search}/**`,
-  `src/components/admin/settings/{team-panel,security-panel}.tsx`. PLA-§Q.3 asks the core to write the same three
-  exclusions and the audit folder into the §K.2 P2 row and to run a glob-intersection script at P0 (every row's globs
-  parsed, the build fails on any intersection), so the "two tracks never own one file" rule of core §K.3 is checked
-  mechanically rather than by reviewers.
-- New in this part: `src/lib/i18n/admin/<locale>/{auth,onboarding,team,health,brief}.ts`,
-  `src/lib/settings/keys/onboarding.ts`, `scripts/qa/i18n-coverage.ts`, `scripts/build-app-icons.mjs`,
-  `public/icons/**`, `src/components/admin/shell/commands/shell.ts`.
+  `src/components/admin/settings/{team-panel,security-panel,audit-view}.tsx`. PLA-§Q.3 asked the core to write the same
+  three exclusions and the audit folder into the §K.2 P2 row and to run a glob-intersection script at P0; **core
+  revision 3 did both** (§K.2 P2 row, `scripts/qa/ownership-check.ts` / `test:ownership`, core §Q.8 PLA Q3.6), so the
+  "two tracks never own one file" rule of core §K.3 is checked mechanically rather than by reviewers.
+- New in this part: `src/lib/i18n/admin/<locale>/{auth,onboarding,team,health,brief}.ts` (the same six files as the
+  first bullet with `shell.ts`; listed once more only because they are new files), `src/lib/settings/keys/onboarding.ts`,
+  `scripts/qa/i18n-coverage.ts`, `scripts/build-app-icons.mjs`, `public/icons/**`,
+  `src/components/admin/shell/commands/shell.ts`; **rev 4:** `src/app/app/account/danger/**` (PD81, inside the
+  `src/app/app/account/**` glob above), the password variant of `src/components/admin/common/step-up-sheet.tsx` (PD80,
+  inside `common/**`).
 - **Rev 2 (core §K.2 P2):** `src/lib/pulse/contributors/shell.ts`, `src/lib/pulse/selftest.ts`,
   `src/lib/health/rules/shell.ts`, `src/app/app/[store]/health-actions.ts`,
   `src/components/admin/shell/{use-pulse.ts, chords.ts, job-chip.tsx, store-banner.tsx, help-sheet.tsx, client-state.ts}`,
@@ -3901,8 +4227,9 @@ hidden" line before `V` (PD69), and the Risk strip reads "No protected term on l
 `src/lib/platform/{grants,abuse,transfer,support,broadcasts,analytics,push}/**` (rev 3: `abuse/**` is the R3 triage;
 the R1 insert path `src/lib/platform/abuse-report.ts` and the public page stay P1's, PLA-§P.1),
 `src/app/admin/(console)/{inbox,broadcasts,analytics,abuse}/**`, the R3 additions to P2's
-`settings/{security,danger}` pages (taken over at the R3 contract step), `/report/<handle>` and `/app/sw.js` routes
-(through the core's R3 contract step), `support_macros` / `push_subscriptions` code.
+`settings/{security,danger}` pages (taken over at the R3 contract step), the `/app/sw.js` route (through the core's R3
+contract step), `support_macros` / `push_subscriptions` code. (rev 4: `/report/<handle>` is **P1's from R1**,
+PLA-§P.1; D5 adds only the triage under `/admin/(console)/abuse/**` and may take the page over at the R3 contract step.)
 
 ### PLA-§P.4 Read-only dependencies (called, never edited)
 
@@ -3930,10 +4257,11 @@ this document cite the core instead of the request. Migration placement as decid
 None are unavoidable. Two notes for the maintainer, recorded here so a reviewer can decide them in core §P without a
 request cycle: (1) this part's action-level error codes (`already_decided`, `already_requested`, `take_orders_locked`,
 `last_super_admin`, `impersonation_member`, `impersonation_state`, `status_changed`, `cooldown_handle_required`,
-`health_recompute_limited`, and **rev 3** `brand_protected` (PD70), each with its `error.<code>` key in ar / fr / en per
-core D65) assume `ActionErrorCode` (core §E.2) keeps an open `(string & {})` tail like `AuditAction`
-(`src/lib/audit.ts:14-38`); core D65 (rev 2.1) confirmed the tail, so these ten names are autocomplete entries, not a
-CCR. (2) The console's `addImpersonationNoteAction` is a `platformAction` posted from a tenant route (`/app/<h>`) by the
+`health_recompute_limited`, and **rev 3** `brand_protected` (PD70), **rev 4** `owns_store`, `is_staff` (PD81) and
+`category_required` (core §A.2 rev 3), each with its `error.<code>` key in ar / fr / en per core D65) assume
+`ActionErrorCode` (core §E.2) keeps an open `(string & {})` tail like `AuditAction` (`src/lib/audit.ts:14-38`); core D65
+(rev 2.1) confirmed the tail and core §Q.8 accepted `brand_protected`, so these thirteen names are autocomplete
+entries, not a CCR (`quota_platform_pending` is the core's / ai.md's code, mapped by PLA-§22.8). (2) The console's `addImpersonationNoteAction` is a `platformAction` posted from a tenant route (`/app/<h>`) by the
 impersonating staff member; `platformAction` needs no store from `x-sg-path`, so no seam change is needed, and the
 attack case PLA-§O.3 item 12 pins the behaviour (core §B.8 rev 2.1 records it).
 
@@ -3976,6 +4304,12 @@ attack case PLA-§O.3 item 12 pins the behaviour (core §B.8 rev 2.1 records it)
 
 ### PLA-§Q.3 Requests raised by the round-1 review (rev 3)
 
+**Status (rev 4):** every row below was decided in core §Q.8: Q3.1-Q3.7 and Q3.12-Q3.16 **accepted** (D69, D70, D76,
+§C.9, the §K.2 rows and `test:ownership`, 0004, D73, D68, D74, §J.1), Q3.4 **accepted with a change** (the footer
+link is absolute to the platform origin and store hosts answer 404 for `/report/*`, not 308; integrated in PD70,
+PD83 and PLA-§24.2), Q3.8-Q3.11 and Q3.17 **sibling** (storefront, design, landing accepted them). The table is kept
+as the record.
+
 The findings of PLA-§R that this part could not close alone. Each row names the file and section that must change and
 what this part already assumes; the maintainer decides them in core §P / §Q.7 and the other part architects in their
 own review-decision sections. Nothing here blocks P1 / P2 from building: every item has a stub or a default that keeps
@@ -4001,11 +4335,33 @@ this part's code typechecking until the other side lands.
 | Q3.16 | ENGP-24 (minor) | core §J.1 | State `npm test` ≤ 3 minutes; move the full design corpus, the 1,200-home catalog sweep and the 10,000 A/A simulations to `test:slow` / `qa:design-corpus` | PLA-§O.1 wall-time paragraph (this part's suites ≤ 20 s) |
 | Q3.17 | OPS-20 (minor) | landing.md LAN-§14.3 | "Delete test orders" is `settings.write` (owner, admin), as OPE-§26 says; the landing wording `orders.edit` is the error | none (no platform text names the permission) |
 
+### PLA-§Q.4 Requests raised by the round-2 review (rev 4)
+
+What revision 4 could not close inside this file: the contradictions it found between core revision 3 and the other
+parts while aligning, and the cross-file sides of the round-2 findings. Each row names the file and section, the exact
+change and what this part already does meanwhile (nothing here blocks P1 / P2: every item has a default that keeps
+this part's code building).
+
+| # | Finding / alignment | File and section | Exact change asked | This part's side (done) |
+|---|---|---|---|---|
+| Q4.1 | CRIT15 (PD83) | core §C.6 `src/lib/urls/index.ts`; core §C.6 landing renderer context; design.md DES-§4.5.4 (footer section, P6); landing.md LAN-§3 legal / policy pages and the thank-you page (P3); storefront STO-§24 | Add `reportUrl(store: StoreAddress, pagePath?: string): string` = `platformOrigin() + "/report/" + handle + (pagePath ? "?p=" + encodeURIComponent(pathOnly(pagePath).slice(0, 300)) : "")`; add `reportHref` to the renderer's store context `{ base, origin, mediaOrigin, reportHref }`; P6's footer section renders "Report this store" from it on every landing page (no runtime bytes: plain server HTML), P3 on legal / policy pages and the thank-you page, S1 on the store chrome (R2, `footer.report` exists); each keeps the three texts under its own key (`landing.footer.report`); render-check fixtures per page kind assert the absolute link | PD83, PLA-§24.2 R1 slice, §O.4 step 21, §N.3 wording |
+| Q4.2 | alignment D44 (PD82) | core §C.6 `consoleHref`; core §C.10 step 3 | `consoleHref(path)` returns `https://<ADMIN_HOST>/admin<path>` when `ADMIN_HOST` is set and the relative `/admin<path>` otherwise, so the tenant shell's "Platform console" item and staff links survive the move; §C.10 step 3 lists the app check V12 "console on its own host" | PLA-§16.3 V12, §14.3 allowlist line, PD36 item uses `consoleHref` |
+| Q4.3 | alignment core §I.4 rev 3 (SEC-6) | core §I.4 notifications bullet | Widen the link rule to `^/app/[a-z0-9-]{3,30}(?:[/?#]\|$)` (the written `^/app/[a-z0-9-]{3,30}/` refuses the dashboard root `/app/<h>` that seven platform kinds and P4's order kinds link to), `^/app/account(?:[/?#]\|$)` for user-level kinds and `^/admin(?:[/?#]\|$)` for staff; a refused link is stored `NULL`, never rewritten | PLA-§18.1 link rule; until the core widens it the kinds use `/app/<h>/` |
+| Q4.4 | alignment core §I.7 / D76 (PD78) | core §I.7 code block, D76, §C.7 | `getStoreHealth(scope): Promise<StoreHealthView \| null>` (null = not computed yet, as PLA-§6.3.4 has had since revision 1; the ring's "computing" state needs it) and the additive `StoreHealthView.staleAfterMin`; "a **nightly** health rule `platform:brand_term_live`" → "**at least nightly** (it runs on every health computation of the store)" | PLA-§2.2 type, §6.3.4, §13.3, §22.16 |
+| Q4.5 | alignment core §I.7 (PD79) | core §I.7 flag-mapping comment and R1 rule list; operations.md OPE-§27.2 `int:sheets_backlog` | The comment "console flags … map onto the groups" becomes "console flags that mirror a track's issue are derived from it and add no points"; the R1 list names "no published page" as P3's `landing:no_live_page` only; P5's `int:sheets_backlog` uses the scaled threshold `max(15, 5 × ceil(activeSheetsStores / 16))` min of core §H.5 instead of a fixed 15 min, so the tenant issue and the staff alarm agree | PLA-§6.3.2 (P1's four issues only), §6.3.3 derived flags, §15.1 / §15.2 scaled threshold |
+| Q4.6 | OPS-13 / CRIT1 follow-up (PD76) | landing.md LAN-§23.7 | Add the row `landing:fee_mismatch` (conversion, severity 1 / 3 points, `minN` 20 orders / 28 d, over `inputs.zones.feeMismatchTop5` keyed by `CityKey`, only for pages not on "Charge delivery by city", fix `settings/delivery`) that core §I.7 lists; keep its evidence metric (`fee_mismatch_cities`) distinct from operations' `fin:fee_gap` (`fee_gap_cities`, operations group), which compares the median charged fee with the zone fee or carrier rate | PLA-§6.1 input, §6.3.2 row |
+| Q4.7 | alignment SEC-20 (PD81) | core §I.1 route table; core §K.1 T2 `deleteUserAccount` | List `/app/account/danger` (P2, R1) in §I.1; state the staff form of the frozen signature: `deleteUserAccount(ctx: UserCtx \| PlatformCtx, target?: { userId: string; reason: string }): Promise<void>` with the refusals `owns_store` (an owner of a non-purged store) and `is_staff` (a platform role is set), so P1's `deleteUserAction` and P2's `deleteMyAccountAction` call one function | PLA-§11.2 action, §22.5 page, §M.1, §O.2 case 16 |
+| Q4.8 | alignment core §B.7 (PD80) | core §B.7, §E.2 | `stepUpWithPasswordAction(password): Promise<ActionResult<{ until: string }>>` (the same result shape as `stepUpAction`), refused under impersonation (`impersonation_read_only`); `StoreCtx` exposes `stepUpUntil` like `PlatformCtx` so the tenant sheet can show "Verified · 4:12" | PLA-§14.2 tenant variant, §22.12 `StepUpSheet.method` |
+| Q4.9 | alignment core §H.5 (PD78) | core §H.5 alarm list | Name the codes this part relays: `data_dir_70` / `data_dir_85` (they replace `disk_low`), `health_job_slow`, and restate "`store_health` snapshots stale > 60 min" as "stale beyond `max(staleAlarmMinutes, 1.5 × cycleMin)`" so the alarm does not fire permanently past ≈ 120 active stores | PLA-§15.1, §15.2 |
+| Q4.10 | OPS-15 / OPS-9 follow-up | operations.md OPE-§M (P0 read stubs); storefront STO-§16.4 | `ConsoleOrderRow` / `getOrderForConsole` carry `pageId: string \| null`, `lines?: { title; options; qty; totalMinor }[]` for payload v3 (R2 contract step), `carrierLabel`, `trackingRef` and `carrierExportedAt` (D74, R1) | PLA-§7.4 renders them |
+| Q4.11 | ai.md R38 (SEC-26) | ai.md AI-§S.3 R38 | Accepted on the platform side; `aiUsageForStore(scope, month)` returns `creditsUsed`, `creditsLimit` (the pending cap while `pending`) and `costMicros`, which the queue chip reads | PLA-§3.5 draft-evidence chip |
+
 ---
 
 ## PLA-§R. Review decisions
 
-(Empty in revisions 1 and 2.) **Round 1 (rev 3):** one line per finding id that named this file or was marked "cross".
+(Empty in revisions 1 and 2.) **Round 2 (rev 4)** is below the round-1 table: one line per round-2 finding id, then
+the alignment with core revision 3. **Round 1 (rev 3):** one line per finding id that named this file or was marked "cross".
 Decision codes: **resolved** (the body changed; the section is named), **resolved (platform side)** (this part's side
 is in the body, the rest is a PLA-§Q.3 request to the named file), **not applicable** (no platform.md text is involved;
 the owner of the finding is named; nothing to change here). Severity is the reviewer's.
@@ -4053,6 +4409,91 @@ OPS-14, OPS-31, UX-20, UX-38, SEC-13; the rest with a platform side here and the
 **16 not applicable** (no platform.md text involved; the owning part is named). Every blocker and major with a
 platform side (OPS-1, OPS-9, OPS-11, OPS-13, OPS-14, ENGC-1, ENGC-8, UX-20, UX-39, SEC-1, SEC-5) is resolved in a
 section, not only in this table; no finding was rejected on the merits.
+
+### Review decisions (round 2)
+
+Round 2 re-sent the round-1 findings against the revision-3 parts and core revision 3, plus the critic's findings
+(CRIT-*). For each id the question was: is the platform side still resolved **and consistent with how core revision
+3 decided it** (core §P, §Q.8)? Codes as in round 1; **re-verified** = the revision-3 resolution stands and was checked
+against the core's decision; **aligned** = the body changed in revision 4 to match the core. Every blocker and major
+with a platform side is resolved in a section named in the row.
+
+| Finding | Severity | Decision (round 2) | How / where (rev 4) |
+|---|---|---|---|
+| OPS-1 | blocker (cross) | resolved (platform side), re-verified against core D68 | The console's city dimension (PLA-§7.15) and P1's health input `zones.feeMismatchTop5` (PLA-§6.3.1, PD76 rev 4) are keyed by the canonical `CityKey` slug of D68; `null` (Autre / unknown) maps to the `*` zone and never becomes an input row; display goes through `cityLabel`. The browser zone-table shape (CRIT1) and the parity fixture are core / landing / storefront's; no platform code reads a `ZoneTable`. |
+| OPS-9 | major (cross) | resolved (platform side), aligned with D74 | PLA-§7.4: the console drawer shows `carrier_label`, `tracking_ref` and (rev 4) "Sent to the carrier file on <date>" from `orders.carrier_exported`; PLA-§Q.4 Q4.10 asks the P0 read stub to carry the three fields. The Sheets columns and the Carrier CSV are operations'. |
+| OPS-11 | major (cross) | resolved (platform side), re-verified against D73 | PLA-§22.10.1 builds no hours field and links to Call center; core D73 **removed** `store.confirmation.hours` and `policies.contact.hours`, and no platform text reads either (checked by search over this file); `platform.brand.supportHours` is Store Gen's own support hours on the Help sheet, not a store promise. The window's shape (CRIT3) is operations'. |
+| OPS-13 | major (cross) | resolved (platform side), aligned with D75 | PD76 rev 4: the fee-mismatch input is computed only for pages not on "Charge delivery by city" (LP-16 is R2, D75) and keyed by `CityKey`; PLA-§6.3.2 row; PLA-§Q.4 Q4.6 asks LAN-§23.7 to list `landing:fee_mismatch`, which core §I.7 names but landing's table lacks, with an evidence metric distinct from operations' `fin:fee_gap`. |
+| OPS-14 | major (cross) | resolved, aligned with core §A.2 rev 3 (LAN R5 A\*) | PD60 rev 4 and PLA-§22.2: store mode creates no landing page (rev 3) **and** the fallback is fixed: any path that creates one sets `landing.inStoreMode = true` in the same transaction with `onboarding.reveal.saved_sales_page`; store / both need `stores.category` before the reveal (`category_required`); the mode-switch sheet calls `landingModeSwitchPlan` first (PLA-§22.10.1); UX-01 acceptance carries both cases. |
+| OPS-15 | major (cross) | resolved (platform side) | PLA-§7.4 rev 4: payload v3 orders render with "Store checkout" for the null page, their lines in the drawer and the `source` chip of S1's `createManualOrderV3` orders; PLA-§Q.4 Q4.10. The v3 functions are S1's (core §K.4, §P). |
+| OPS-20 | minor (cross) | not applicable | Landing fixed LAN-§14.3 to `settings.write` (core §P); no platform text names the permission. |
+| OPS-31 | minor (platform) | resolved (rev 3), re-verified | PD72 and PLA-§22.1.5 stand; rev 4 adds the `landingModeSwitchPlan` preview and the category chips to the same mode-switch sheet that reuses `ModeCards` (PLA-§22.10.1). |
+| ENGC-1 | blocker (cross) | resolved, aligned (core rev 3 cut the columns in 0004) | PLA-§2 intro rev 4: `orders.is_test`, `leads.is_test`, `orders_store_test_idx` and `page_slug_history` are in 0004, so the Orders tile, the heartbeat and the Identity strip read them from R1.0; the "no-op when absent" hedge covers stale fixtures only. |
+| ENGC-8 | major (cross) | resolved, aligned with the core §K.2 rows | PLA-§P.1 now uses the core P1 glob (`src/app/admin/**` except `(auth)/setup/**` and `(console)/ai/**`) and adds `scripts/qa/tenancy-cases/platform.ts`; PLA-§P.2 claims the six i18n files only; the core's `test:ownership` parses both lists. |
+| ENGC-13 | major (cross) | not applicable | Core D72: `createOrderRow` extracted by T3 in R1.0; the console never inserts orders. |
+| ENGP-1 | blocker (cross) | not applicable (core / design resolved it); platform note added | PLA-§3.5 rev 4: for a `store`-mode pending store the draft-evidence chips read the first product page draft through `designHealth(scope)`, which accepts store kinds from the R2 contract step (`gateInputFor`, core §M.1). |
+| ENGP-3 | major (cross) | not applicable | `aj_active_uq` on `active` is core §D.5 / ai.md; the console only displays `ai_jobs` state. |
+| ENGP-6 | major (cross) | not applicable | The calibrated bands are core §M.2 / design; the console shows gate refusals as counts and reuses each `GateItem.title` (which carries the "estimated" wording) verbatim. |
+| ENGP-24 | minor (cross) | resolved (platform side), re-verified | PLA-§O.1: this part's suites ≤ 20 s, equal to the platform share core §J.1 rev 3 sets; the new rev 4 selftests (`FEATURE_PROOFS`, link rule, `reportUrl`) are pure and add < 100 ms. |
+| ENGP-26 | minor (cross) | not applicable | Nothing of this part touches `src/landing/runtime/**`; the report link (PD83) is server-rendered footer HTML with no runtime bytes. |
+| UX-4 | major (cross) | not applicable | The CTA hooks and V27 are design / landing. |
+| UX-20 | major (cross) | resolved (rev 3), re-verified (core §P "Parts") | PD73 and the PLA-§22.2 reveal row stand; design.md DES-§14.3 accepted the layout. |
+| UX-21 | major (cross) | not applicable | Design / storefront. |
+| UX-31 | minor (cross) | not applicable | `checkout.addressMode` is landing's key (core §D.10); the console masks the address whatever the mode. |
+| UX-37 | minor (cross) | resolved (platform side), re-verified | PLA-§22.1 touch ergonomics and PLA-§22.18 rule 6 apply to P2's forms; landing rejected the sticky submit for the order form with a reason (core §P) and this part does not impose it on landing. |
+| UX-38 | minor (cross) | resolved (rev 3), re-verified (core D60 rev 3 agrees) | PD64 rev 3, PLA-§22.16 item 4, §22.18 rule 4. |
+| UX-39 | major (cross) | resolved (platform side), re-verified | PD74 stands; core §K.2 P6 now freezes `estimateAlpha` as P6's stub and core §D.5 / §H.3 append the `render_jobs.reason` `cutout`, exactly as PLA-§22.2's photos row calls them. |
+| SEC-1 | blocker (cross) | resolved, aligned with core D69 / §B.2 / §A.5.2 | PD68 rev 4, PLA-§3.1 (charge at step 6 **before** the transaction, counted whenever the store would start `pending` incl. invite codes without `auto_approve`, refunded with `refundPlatformUsage` when step 7 rolls back), §3.6 (`refundPlatformUsage` on the media budget, `quota_platform_pending`, the 10-credit floor), §5.3 / §15.1 / §15.2 (`signup_capped`, 80 / 95 %), §22.8 (the error code's UI), §O.2 case 18. |
+| SEC-5 | major (cross) | resolved, aligned with D70 / D71 | PD69 and PLA-§7.2 match core D70 and the `maskIfImpersonation` / `maskCustomerFields` P0 stubs; PD2 rev 4 states `platformScope()` is not a `WriteScope` (D71). |
+| SEC-13 | minor (platform) | resolved (rev 3), aligned | PD71 stands (core §C.9 adopted `__Host-sgl` and the prefix rule); PD12 rev 4: `__Host-sgd` is set by T3's proxy, not T2. |
+| SEC-18 | minor (cross) | resolved, aligned with D76 / §Q.8 PLA Q3.4 A\* | PD70 rev 4 and PLA-§13.3: the core's one-field `checkBrandTerms(kind, value)` with `brandMatches` internal; PLA-§24.2 / §M.2 / §L / §M.5: the report link is absolute, store hosts answer 404 (not 308), `Referrer-Policy: same-origin`, buckets 5/h and 20/day; PD83 names the renderers (CRIT15). |
+| QUAL-1 | blocker (cross) | not applicable | Core §M.4 / design / ai. |
+| QUAL-9 | major (cross) | not applicable | Ai / design. |
+| QUAL-10 | major (cross) | not applicable | Design / ai. |
+| QUAL-20 | major (cross) | not applicable | Design. |
+| QUAL-21 | major (cross) | not applicable | Ai / design. |
+| QUAL-25 | minor (cross) | not applicable | Design / ai (core §K.2 P0 design stubs). |
+| CRIT1 | major (cross) | not applicable | No platform code reads the `lp-assist` / `#sg-config` zone tables or calls `zonesForCheckout` for display; P1's health input only consumes the fee per `CityKey` from it, whatever shape the browser table takes. The shape decision is core D68 / landing / storefront's. |
+| CRIT3 | major (cross) | not applicable | No platform code reads `ops.callingWindow` or `callingWindowFor`; the Today brief's call counts come from `opsPulse`; the shape (`Record<1..7, Range[]>` vs a 7-slot array) and `EffectiveWindow` are operations' and landing's. |
+| CRIT6 | minor (platform) | resolved | PLA-§P.1: the exclusion reads `src/app/admin/(console)/ai/**` (P7), with P1's glob written as the core §K.2 P1 row writes it. |
+| CRIT7 | minor (platform) | resolved | PLA-§P.2: `src/lib/i18n/admin/<locale>/{shell,auth,onboarding,team,health,brief}.ts` only; the base catalogs and `index.ts` stay the maintainer's (D67); PLA-§N.1 moves P1's health sentences to `notify.ts` and P2's to `shell.ts`. |
+| CRIT15 | minor (cross) | resolved (platform side) | PD83 (one `reportUrl` contract, renderers named: P6's landing footer, P3's legal / policy and thank-you pages, S1's store chrome), PLA-§24.2, §O.4 step 21; PLA-§Q.4 Q4.1 asks core §C.6, design.md and landing.md for the builder, the context field and the rendering. |
+| CRIT17 | minor (cross) | resolved (platform side) | PD77: a **Proven by** column in every PLA-§1 table (61 rows), PL-04, PL-10, PL-11 and PL-13 rewritten as checkable statements, `FEATURE_PROOFS` asserted by `test:platform`; the rows that had no proof gained one (`test:db` cases 16-20 for TN-06, TN-13, OS-06, OS-09, OS-10, SE-04; e2e steps 19-21 for PL-09 and the report link). The other parts' maps are theirs. |
+
+Totals (round 2): 39 findings; **22 resolved** (4 wholly inside this file: OPS-31, SEC-13, CRIT6, CRIT7; 18 with this
+part's side in the body and the rest requested in PLA-§Q.4; the body changed in revision 4 for 14 of the 22: OPS-9,
+OPS-13, OPS-14, OPS-15, ENGC-1, ENGC-8, SEC-1, SEC-5, SEC-13, SEC-18, CRIT6, CRIT7, CRIT15, CRIT17), **17 not
+applicable** (no platform text involved; the owning part is named). No finding rejected. Every blocker and major with
+a platform side (OPS-1, OPS-9, OPS-11, OPS-13, OPS-14, OPS-15, ENGC-1, ENGC-8, UX-20, UX-39, SEC-1, SEC-5) is
+resolved in a named section.
+
+### Alignment with core revision 3 (rev 4; contradictions found while re-reading the core, not reviewer findings)
+
+| # | Core source | What revision 3 of this part said | Revision 4 (section) |
+|---|---|---|---|
+| A1 | §I.7 rev 3 (ENGC-25) | `platform.health` "up to 200 stores per tick", "≤ 60 min otherwise", a fixed 60-min stale alarm, "within an hour" in tenant copy | budget-driven, measured `cycleMin`, scaled stale rule, "Checked at" copy (PD78, §6.3.4, §6.3.5, §15.1, §15.2, §22.16, §L, §M.4, §O.2) |
+| A2 | §I.7 rule list, OPE-§27.2, LAN-§23.7, DES-§2.10 | P1 duplicates of P5's integrations rules, P2's duplicate of P3's "no live page", stale rule ids | one condition one issue, derived flags, owners' ids (PD42 rev 4, PD79, §6.3.2, §6.3.3, §22.2, §N.2) |
+| A3 | D67, §I.5 | P1's tenant health sentences in P2's `health.ts`; P2 claiming `src/lib/i18n/**` | `notify.ts` (P1), `shell.ts` (P2), six P2 files only (PD53 rev 4, §N.1, §P.1, §P.2) |
+| A4 | §K.2 P0, §C.7, D76 | `checkBrandTerms(fields[], opts) → BrandCheck` | the frozen `checkBrandTerms(kind, value) → "ok" \| "near" \| "exact"` + internal `brandMatches` (PD70 rev 4, §13.3, §22.10.1, §L) |
+| A5 | §B.1, §C.4, §E.8, §Q.8 PLA Q3.4 | `/report` 308 from store hosts, `no-referrer`, 5/day and 50/day | 404 on store hosts, absolute link, `same-origin`, 5/h and 20/day (PD70, PD83, §24.2, §M.2, §M.5, §L, §O.4) |
+| A6 | §B.1, §B.5 rev 3 (ENGC-16, SEC-24) | `no-referrer` on `/invite/*` and `/invite/staff/*`; acceptance not stated as compare-and-set | `same-origin`; one conditional `UPDATE` (§14.1, §22.1.4, §M.2, §O.2 case 20, §O.4 step 8) |
+| A7 | §B.7 rev 3 (SEC-17) | tenant step-up "when the user has TOTP" | the ladder for every user, password variant, role changes to admin / owner (PD80, §14.2, §22.4, §22.8, §22.11, §22.12, §M.1, §O.2 case 17, §O.4 step 19) |
+| A8 | §F.9 rev 3 (SEC-20), §K.2 P1 row | no account deletion | staff and self-service paths (PD81, §11.2, §22.5, §M.1, §M.3, §O.2 case 16, §O.3 case 20, §O.4 step 20) |
+| A9 | D44 rev 3, §C.10 (SEC-2, ENGC-26, SEC-14) | "env full replace + rebuild (19 keys)", no `ADMIN_HOST` | `ADMIN_HOST`, restart not rebuild, the allowlist check, V12 (PD82, §14.3, §16.1, §16.3) |
+| A10 | §H.5 rev 3 | `disk_low` (< 2 GiB), fixed 15-min Sheets alarm, no pool / tick / gate / bad-key alarms | `data_dir_70/85`, the scaled Sheets threshold, `pool_wait`, `tick_lag`, `gate_mismatch`, `edge_bad_key` (§5.3, §15.1, §15.2) |
+| A11 | §I.4 rev 3 (SEC-6) | free `link` strings on notifications | the link rule, `legal.updated` link (§18.1, §18.2, §O.1, §O.3 case 20; Q4.3) |
+| A12 | §I.7 code block | `getStoreHealth` returning `StoreHealthView \| null` here, non-null in the core | kept `\| null` with `staleAfterMin` and asked the core (§2.2, Q4.4) |
+| A13 | D69, §B.2 step 6, §A.5.2, §A.4 | the charge "inside the transaction", invite mode uncounted, `quota_platform`, floor unstated, 100 % red, `signup_cap_reached` | step 6 before step 7, counted whenever pending, `refundPlatformUsage`, `quota_platform_pending`, 10-credit floor, 95 % red, `signup_capped` (PD68 rev 4, §3.1, §3.6, §5.3, §15.1, §15.2, §22.8) |
+| A14 | §B.1 rev 3 (SEC-12) | `__Host-sgd` "written by T2" | set by T3's proxy (PD12) |
+| A15 | §A.2 rev 3 (LAN R5 A\*, ENGP-25) | no `inStoreMode` fallback, no category requirement, no `landingModeSwitchPlan` in the switch sheet | all three (PD60, §22.2, §22.10.1) |
+| A16 | §Q.8 AI R38 | queue detail without the sandbox's AI use | the AI chip (§3.5) |
+| A17 | this file (§3.6 vs §22.7) | review card "upload up to 100 MB" while the cap is 20 MB before submit | `{mediaMb}` text (§22.7) |
+| A18 | §K.1 T4, §K.2 P1 row | attack cases "added to `tenancy-check.ts`" (T4's file) | `scripts/qa/tenancy-cases/platform.ts` (P1) (§O.3, §P.1) |
+| A19 | §K.2 P1 row | P1 glob `src/app/admin/(console)/**` | `src/app/admin/**` except setup and `(console)/ai/**` (§P.1) |
+| A20 | §E.2 rev 3 (SEC-7) | private preview links not revocable | Revoke + `revokePreviewLinkAction` (§22.7, §M.1, §L, §O.3 case 19) |
+| A21 | §C.7 rev 3 (ENGC-30) | rename "once per 30 days" only | the one-time `freeRename` grant for store #1 (§22.10.2) |
+| A22 | §K.4 (OPS-15), STO-§16.4 | the console assumed every order has a page | v3 rendering (§7.4) |
+| A23 | D71 | `platformScope` typed only as `StoreScope` in PD2's wording | not a `WriteScope` (PD2) |
 
 ---
 
@@ -4127,3 +4568,34 @@ the count at the end of this file is the measure.
 | 51 | §2 intro: `is_test` / `page_slug_history` placement follows the core; the tile filter is a no-op without the column | ENGC-1 |
 | 52 | §O.1 wall-time budget for this part's suites | ENGP-24 |
 | 53 | §Q.1 error code `brand_protected`; new §Q.3 (17 requests); §R filled (31 findings) | round 1 |
+
+### PLA-§S.2 Revision 4 in one table (round-2 review and the alignment with core revision 3)
+
+| # | Change | Source |
+|---|---|---|
+| 54 | Status → revision 4 on core revision 3 (D1 … D76); owner summary items 23-25; section map names §Q.4, §R round 2, §S.2 | round 2 |
+| 55 | PD77 and the **Proven by** column in every PLA-§1 table; PL-04, PL-10, PL-11, PL-13 as checkable statements; `FEATURE_PROOFS` in `test:platform` | CRIT17 |
+| 56 | PD78: budget-driven health job, measured `cycleMin`, scaled `health_stale`, `health_job_slow`, `staleAfterMin`, "Checked at" copy; §6.3.4, §6.3.5, §15.1, §15.2, §22.16, §L, §M.4, §O.2 | core §I.7 rev 3 (ENGC-25), A1 |
+| 57 | PD42 rev 4 and PD79: one condition, one issue; P1's four tenant issues; flags derived from P5 / P3 issues; the owners' rule ids; the revision-3 table kept as the record; §6.3.2, §6.3.3, §N.2 | core §I.7, OPE-§27.2, LAN-§23.7, DES-§2.10, A2 |
+| 58 | PD53 rev 4, §N.1, §P.1, §P.2: health sentences in the emitting track's file; P2's six i18n files only; P1's glob as the core writes it; `tenancy-cases/platform.ts` | D67, CRIT6, CRIT7, ENGC-8, A3, A18, A19 |
+| 59 | PD70 rev 4, §13.3, §22.10.1: the frozen one-field `checkBrandTerms(kind, value)`, internal `brandMatches` | core §K.2 P0, D76, SEC-18, A4 |
+| 60 | PD83, §24.2, §M.2, §M.5, §L, §O.4 steps 16 and 21: the absolute `reportUrl`, 404 on store hosts, `same-origin`, 5/h and 20/day, renderers named | CRIT15, core §Q.8 PLA Q3.4 A\*, A5 |
+| 61 | §14.1, §22.1.4, §M.2, §O.2 case 20, §O.4 step 8: `same-origin` on invite pages; compare-and-set acceptance | core §B.1 / §B.5 rev 3, A6 |
+| 62 | PD80, §14.2, §22.4, §22.8, §22.11, §22.12, §M.1, §O.2 case 17, §O.4 step 19: the tenant step-up ladder with the password variant | core §B.7 rev 3 (SEC-17), A7 |
+| 63 | PD81, §11.2, §22.5, §M.1, §M.3, §O.2 case 16, §O.3 case 20, §O.4 step 20: account deletion (staff and self-service) | core §F.9 rev 3 (SEC-20), A8 |
+| 64 | PD82, §14.3, §16.1, §16.3: `ADMIN_HOST` at the domain move, restart not rebuild, the allowlist check, V12 | D44 rev 3, §C.10, A9 |
+| 65 | §5.3, §15.1, §15.2: `data_dir_70/85`, scaled Sheets threshold, `pool_wait`, `tick_lag`, `gate_mismatch`, `edge_bad_key` | core §H.5 rev 3, A10 |
+| 66 | §18.1, §18.2: the notification link rule, `legal.updated` link | core §I.4 rev 3 (SEC-6), A11 |
+| 67 | PD68 rev 4, §3.1, §3.6, §5.3, §15.1, §15.2, §22.8, §O.2 case 18: the D69 details (step 6, counted whenever pending, refunds, `quota_platform_pending`, 10-credit floor, 80 / 95 %, `signup_capped`) | D69, SEC-1, A13 |
+| 68 | PD12: `__Host-sgd` set by T3's proxy | core §B.1 rev 3, A14 |
+| 69 | PD60 rev 4, §22.2, §22.10.1: the `inStoreMode` fallback, `category_required`, `landingModeSwitchPlan` in the switch sheet | core §A.2 rev 3, OPS-14, A15 |
+| 70 | §3.5: the sandbox AI chip; the store-mode draft evidence | ai.md R38, ENGP-1, A16 |
+| 71 | §22.7: the review card's `{mediaMb}` text; Revoke for private preview links | A17, A20 |
+| 72 | §7.4: carrier export marker and payload v3 rendering | OPS-9, OPS-15, A22 |
+| 73 | §22.10.2: the `freeRename` grant | core §C.7 rev 3, A21 |
+| 74 | PD2: `platformScope()` is not a `WriteScope`; PD76 rev 4 | D71, D75, A23 |
+| 75 | §N.2 / §N.3 / §N.4: rev 4 keys and reference texts in ar / fr / en (step-up, account deletion, pending AI, health copy, console alarms) | PD78, PD80, PD81, D69 |
+| 76 | §Q.1 error codes `owns_store`, `is_staff`, `category_required`; §Q.3 status after core §Q.8; new §Q.4 (11 requests); §R round 2 (39 findings) and the alignment table (A1-A23) | round 2 |
+
+Line count: revision 3 ended at 4,129 lines; revision 4 adds without removing a section (superseded texts are kept
+as marked records), and the count at the end of this file is the measure.
