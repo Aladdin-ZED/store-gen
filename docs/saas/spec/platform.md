@@ -1,6 +1,8 @@
 # Store Gen SaaS part spec: platform console and the tenant SaaS layer
 
-Status: **part spec, revision 4 (round-2 review integrated)** (2026-10-24, platform part architect; revision 3
+Status: **part spec, revision 5 (critic r2 integrated)** (2026-10-24, platform part architect; revision 5 applies the
+final critic's issues that name this file, CRIT2-6, CRIT2-13, CRIT2-14, CRIT2-18, CRIT2-19, listed in **PLA-§R "Critic
+round 2 (revision 5)"**, against core revision 5; revision 4 integrated the round-2 review; revision 3
 integrated the round-1 review, revision 2 was the elevated spec of the same day). Built on `docs/STORE-SAAS.md`
 **revision 3** (cited as **core §X**, its decisions as **core D1 … D76**; core §P decides the round-1 findings and
 core §Q.8 the third-round requests of PLA-§Q.3, all accepted, PLA Q3.4 with a change; **revision 4 aligns every
@@ -635,10 +637,10 @@ export const OnboardingSchema = z.object({
 | Mode | `/signup` shows | Store starts | Notes |
 |---|---|---|---|
 | `closed` | "Sign-ups are closed for now" + the support WhatsApp button when set | — | staff invites still work (`/invite/staff/<token>`, PD13) |
-| `invite` (default while S mode is off, core D9) | the two-step form with an "Invite code" field first | `pending`, or `active` when the code has `auto_approve` | codes `SG-` + 12 Crockford chars (core §B.6) |
-| `approval` (default once S mode is on) | the two-step form | `pending` | Turnstile **required when configured** (rev 3, PD68: a missing or invalid token is refused with `auth.signup.challenge`, never scored) |
+| `invite` (default while S mode is off, **and while `platform_turnstile` is unset even in S mode**, core D9 rev 5, CRIT2-13) | the two-step form with an "Invite code" field first | `pending`, or `active` when the code has `auto_approve` | codes `SG-` + 12 Crockford chars (core §B.6) |
+| `approval` (default once S mode is on **and `platform_turnstile` is configured**, core D9 rev 5) | the two-step form | `pending` | Turnstile **required** (rev 3, PD68: a missing or invalid token is refused with `auth.signup.challenge`, never scored; **rev 5, CRIT2-13: the mode itself needs a configured widget**, `savePlatformSettingsAction` refuses `approval` / `open` without one with `turnstile_required`, and a stored mode whose widget was removed falls back to `invite` with the alarm `signup_unguarded`, core §B.2, §H.5) |
 | `waitlist` | e-mail + phone (+ optional "What do you sell?") | — | a `waitlist` row; staff promote rows to single-use codes (§3.3) |
-| `open` | the two-step form, Turnstile **required** | `active` when PD3 auto-approval passes, else `pending` | — |
+| `open` | the two-step form, Turnstile **required** (a configured widget is a precondition of the mode, rev 5 CRIT2-13) | `active` when PD3 auto-approval passes, else `pending` | — |
 
 `signups_enabled = false` overrides every mode: the form, `/app/new` and invite acceptance answer "closed for now"
 (core §H.8). A mode change is audited (`platform.settings.updated`, meta `{ key: "signup.mode", from, to }`).
@@ -2086,7 +2088,7 @@ keeps the frozen stub one line and the tenant result free of the matched term.
    kit do the same for their fields, core §C.7). An `exact` match **refuses** the write for a member with
    the action error `brand_protected` (rendered by the limit sheet, variant `brand_protected`: "This name contains a
    protected brand name. Use your own brand, or contact Store Gen support if you are the owner of that brand.",
-   `shell.limit.brand_protected`), writes `store.brand_refused` `{ field }` to the store's audit (no term in the meta)
+   `shell.limit.brand_protected`), writes `store.brand_term.refused` `{ field }` (rev 5, CRIT2-14: core §F.5's name; rev 4 wrote the shorter `brand_refused` form) to the store's audit (no term in the meta)
    and `markHealthDirty`; staff may override with a note (`/admin/stores/new`, the same rule as the handle). A `near`
    match lets the write through and raises the console flag `brand_near_live` (PLA-§6.3.3).
 2. **On every health run.** Rule `platform:brand_term_live` (`rules/platform.ts`) scans `inputs.brand` and the live
@@ -2101,7 +2103,7 @@ keeps the frozen stub one line and the tenant result free of the matched term.
 
 The "Check a name" box reuses `brandMatches` (the same matcher `checkBrandTerms` wraps) so the console and the write path cannot disagree. Acceptance: renaming
 a seeded active store to "CIH Bank · Vérification" from the tenant General page answers `brand_protected` and writes
-`store.brand_refused`; publishing a page whose SEO title contains the term and recomputing health raises
+`store.brand_term.refused`; publishing a page whose SEO title contains the term and recomputing health raises
 `brand_term_live` and exactly one `staff.alarm` in the week; the term never appears in a tenant-visible issue.
 
 ### PLA-§13.4 Legal documents (`/admin/settings/legal`, `legal.manage`)
@@ -2228,7 +2230,7 @@ refreshes every 30 s while visible and fails on its own.
 
 | Panel | Content | Red when |
 |---|---|---|
-| Cron | last tick (time, duration, ok), a 50-tick strip (ok / failed / missing gaps), per job: last run, ms vs budget, processed, error code; **(rev 4, core §H.5 rev 3)** `tick.lagP95Ms` (event-loop lag during ticks), `tick.skipped24h` (ticks skipped by `platformLock("tick")`), `db.poolWaitP95Ms` / `db.lockPoolWaitP95Ms` | no `job_runs` row for 10 min · `tick_lag` (lag p95 > 250 ms during a tick, red) · `pool_wait` (query or lock pool wait p95 > 500 ms over 5 min, red) |
+| Cron | last tick (time, duration, ok), a 50-tick strip (ok / failed / missing gaps), per job: last run, ms vs budget, processed, error code; **(rev 4, core §H.5 rev 3)** `tick.lagP95Ms` (event-loop lag during ticks), `tick.skipped24h` (ticks skipped by the tick lease; core rev 5, CRIT2-18: a `cron_cursors` lease row replaced `platformLock("tick")`), `db.poolWaitP95Ms` / `db.lockPoolWaitP95Ms` | no `job_runs` row for 10 min · `tick_lag` (lag p95 > 250 ms during a tick, red) · `pool_wait` (query or lock pool wait p95 > 500 ms over 5 min, red) |
 | Queues | outbox by kind × state with the oldest pending per kind; dead items (store, kind, topic, attempts, last error) with **Replay** (`stores.lifecycle`, P8 `replay(ctx, id)`); render queue depth, failed renders; export jobs; purge jobs; backups running | any `dead` > 0 (yellow), dead older than 24 h (red) |
 | Sheets | backlog per store (top 10 by oldest pending), last push / pull per store, the service-account token health; **(rev 4)** the slot-1 capacity line "≈ 16 stores per tick; threshold now {n} min" | a store backlog > `max(15, 5 × ceil(activeSheetsStores / 16))` min (rev 4, core §H.5 rev 3 / ENGC-33: the fixed 15 min would fire permanently past 16 active Sheets stores) |
 | Storage | DB used vs quota with 70 / 85 % marks, the top 15 tables by size, the top 15 stores by `store_usage` media + page bytes, `DATA_DIR` bytes vs `DATA_DIR_BUDGET_BYTES` and files vs the 300,000-inode warning (rev 4: `getHealth().dataDir` from the bounded walk, core §G.2 / §H.5 rev 3; "free disk" is not measurable on Hostinger and is no longer shown), media backend (`fs` / `db`), reclaimable `media_chunks` bytes with the hPanel `OPTIMIZE TABLE` guidance (core §G.3), a trend "85 % reached in ~41 days" when ≥ 7 daily points exist; **(rev 3, PD68)** the **pending media budget** meter (`platform_usage.pending_media_bytes` vs `signup.pendingMediaTotalMiB`, with the count of pending stores and the five largest) and **sandboxes today** (`pending_stores` vs `pendingStoresPerDay`) | DB ≥ 85 %, `DATA_DIR` ≥ 85 % of its budget (yellow at 70 %), backend `db` while `DATA_DIR` is set; pending budget ≥ 80 % yellow, ≥ 95 % red (rev 4: core §H.5 thresholds; at 100 % uploads of pending stores answer `quota` as designed, and the owner should approve or reject) |
@@ -2318,7 +2320,9 @@ from the test widget); the others are manual (V1 `npm run test:hosts`, V2, V4, V
 note. **(rev 4, PD82)** One app check is added after V11: **V12** "console on its own host" (`runDomainCheck("V12")`:
 passes when the Domains page making the check was itself served on `ADMIN_HOST` (`effectiveHost().cls === "console"`
 for that request) **and** a server-side `HEAD https://<root>/admin` without cookies answers the neutral 404, never a
-console or store page; both answers are recorded with the check), and V4 now expects the neutral
+console or store page; both answers are recorded with the check); **(rev 5, CRIT2-13) V13** "human check ready"
+(`runDomainCheck("V13")`: `platform_turnstile` is configured, its hostnames include the new root, and a token from the
+test widget verifies against `/signup`; until V13 passes the signup default stays `invite`, core §C.10 step 3), and V4 now expects the neutral
 404 for a wrong `x-sg-edge` (core §C.10
 step 3). When every V check has passed, a banner offers "Switch sign-up to approval" (the D9 default flips by itself
 once both env vars are set; this button only clears an explicit override), and the D69 ceilings card of PLA-§3.2 is
@@ -2635,7 +2639,7 @@ place. The "Download local AI" consent card (AI-03) never shows on a connection 
 |---|---|---|---|
 | `photos` | A large drop zone "Drop 1 to 5 product photos" (click to pick, camera capture on phones), thumbnails appear as each upload finishes, "Start without photos" link | uploads through `POST /api/app/<h>/media` (pending cap `signup.pendingMediaMiBBeforeSubmit`, PD68, so 5 × 2 MB phone photos fit); palette extracted in the browser; **(rev 3, PD74, UX-39)** P6's model-free alpha estimate `estimateAlpha(bitmap)` (design.md DES-§4.11, pure, browser: edge flood-fill with tolerance on the 32 × 32 facts pass, confirmed at 1024 px, < 150 ms per photo) runs on each photo and sets `PhotoFacts.hasCutout = "estimated"` when the background is uniform, so stage / specimen / dark-base directions are eligible at the reveal with a `plinth` / `contact` preset; the real background cutout (BiRefNet, AI-21) is queued by the existing pipeline and, when its mask lands, P8's `render_jobs` reason `cutout` (PLA-§Q.3) upgrades the chosen page's hero in place | 3 × ≈ 600 KB ≤ 8 s; palette + alpha estimate ≤ 0.5 s (0:25 → 0:35) |
 | `details` (shown while the uploads finish) | category chips with the suggested one highlighted (a tap is required, PD23), product name with "Use suggestion" (never auto-filled), **price** (required, numeric keypad, currency suffix), compare-at price (optional, hint `onboarding.compare_hint` "Only a price you really sold at before"), one optional fact; the store name and handle with the live address preview when the owner came from `/app/new` | `rankDirections()` input assembled client-side; P7 `useAiTask("analyze", …)` runs in the background and updates the suggestions; suggested facts are unticked chips | typing is never blocked; availability check ≤ 300 ms per keystroke (debounced) |
-| `reveal` | **Three real folds (rev 3, PD73, UX-20).** Mobile (390 px): direction 1 renders as the real page **edge-to-edge** (the live fold at 100 %, no device bezel, no scaled screenshot); the three folds sit in a horizontal **snap carousel** with an 8 % peek of the next fold so all three are seen to exist; a swipe or the dots (with labels) move between them; the DNA chips, the why line and the novelty words live in a **bottom sheet** pulled up from a 56 px handle; "Use this design" is **sticky** at the bottom with "Show 3 more" beside it. Desktop (≥ 1024 px): the three folds **side by side at equal width** (≤ 440 px each, real page rendering, scrollable inside each frame), hover or focus expands one to a full-height scrollable preview (the other two shrink to 25 %), the DNA card under each; "Use this design" under the focused one. Each direction carries its novelty certificate (verdict bands, SF-02). Motion: the folds enter with the 420 ms quint-out scale 0.96 → 1 and an 80 ms stagger; reduced motion: a 180 ms crossfade. Every swipe has a tap alternative (dots, arrow keys) | P6's reveal component and generator (design.md DES-§14.3 follows this layout, PLA-§Q.3); each fold is a sandboxed iframe of the draft render at the real viewport width; `reportRevealAction` records `revealMs` | generation ≤ 1.5 s client-side **[measure]**, three preview renders ≤ 1 s server in parallel (reveal at 0:50); pairwise `d ≥ 0.25`, no orange, Design check green; the three folds are visible together at 390 px (screenshot) |
+| `reveal` | **Three real folds (rev 3, PD73, UX-20).** Mobile (390 px): direction 1 renders as the real page **edge-to-edge** (the live fold at 100 %, no device bezel, no scaled screenshot); the three folds sit in a horizontal **snap carousel** with an 8 % peek of the next fold so all three are seen to exist; a swipe or the dots (with labels) move between them; the DNA chips, the why line and the novelty words live in a **bottom sheet** pulled up from a 56 px handle; "Use this design" is **sticky** at the bottom with "Show 3 more" beside it. Desktop (≥ 1024 px): the three folds **side by side at equal width** (≤ 440 px each, real page rendering, scrollable inside each frame), hover or focus expands one to a full-height scrollable preview (the other two shrink to 25 %), the DNA card under each; "Use this design" under the focused one. Each direction carries its novelty certificate (verdict bands, SF-02). Motion: the folds enter with the 420 ms quint-out scale 0.96 → 1 and an 80 ms stagger; reduced motion: a 180 ms crossfade. Every swipe has a tap alternative (dots, arrow keys) | P6's reveal component `RevealFolds` (`src/components/generate/reveal/**`, P6) and generator (design.md DES-§14.3 follows this layout, PLA-§Q.3); **rev 5 (CRIT2-6): P2 merges second and mounts the core §K.2 P0 stub of `RevealFolds` (props `directions`, `state`, `dnaSlot`, `actionSlot`, `onUse`, `onRetry`), so this row's measurements are proven at the R1 integration once P6's body exists**; each fold is a sandboxed iframe of the draft render at the real viewport width; `reportRevealAction` records `revealMs` | generation ≤ 1.5 s client-side **[measure]**, three preview renders ≤ 1 s server in parallel (reveal at 0:50); pairwise `d ≥ 0.25`, no orange, Design check green; the three folds are visible together at 390 px (screenshot) |
 | `contact` | "Where should customers reach you?": WhatsApp number (toggle "Use my phone +212 6•• ••• •34"), delivery fee left empty with `onboarding.fee_note` ("Add delivery fees in Checkout & delivery when you know them") | `updateStoreSetting(scope, "store", { whatsapp })` | — |
 | `done` | the dashboard (PLA-§22.17) with the In-review card (§22.7), the **Store Health ring** (PLA-§22.16; the setup group shows what is missing, e.g. "delivery zones empty" as an issue, not a blocker) and the **address card** (PD61) with Copy, QR, WhatsApp share, "Open a test order" and "Create a campaign" (the last two from P3; "Open a test order" is disabled with "after publishing" while no page is live) | `getStoreHealth(scope)`, the address card | first dashboard paint ≤ 1 s after `contact` |
 
@@ -2673,7 +2677,7 @@ Server actions (`src/app/app/[store]/welcome/actions.ts`, all `storeAction`):
 | Action | Permission | Effect |
 |---|---|---|
 | `saveOnboardingDetailsAction({ category, productName, priceMinor, compareAtMinor?, fact?, assetIds })` | `pages.write` | writes `onboarding.draft` (schema below), `stores.category` |
-| `useDirectionAction({ directionKey })` | `pages.write` + `ai.use` (store / both: also `catalog.write`) | landing / both: calls the existing create-from-directions path (GEN-02, `CreateFromDirectionsInput`, store-free input) with the typed price → `onboarding.pageId`; both: also S1 `createProduct` + attach → `onboarding.productId`; store (R2): S1 `createProduct` + `setThemeDraft(direction)` → `onboarding.productId`, `firstKind = "product"`, no page (PD60 rev 3); every path runs `checkBrandTerms` on the store name when the owner typed one on `/app/new` (PD70); step `contact` |
+| `useDirectionAction({ directionKey })` | `pages.write` + `ai.use` (store / both: also `catalog.write`) | landing / both: calls the existing create-from-directions path (GEN-02, `CreateFromDirectionsInput`, store-free input) with the typed price → `onboarding.pageId`; both: also S1 `createProduct` + attach → `onboarding.productId`; store (R2): S1 `createProduct(ctx, { facts })` + `setThemeDraft(ctx, direction)` (rev 5, CRIT2-14: the `WriteCtx` signatures of core §A.2 / §K.4) → `onboarding.productId`, `firstKind = "product"`, no page (PD60 rev 3); every path runs `checkBrandTerms` on the store name when the owner typed one on `/app/new` (PD70); step `contact` |
 | `reportRevealAction({ paintedAt })` | `store.read` | sets `revealedAt` (clamped to server now) and `revealMs = revealedAt − stores.created_at` once |
 | `saveOnboardingContactAction({ whatsapp \| useSignupPhone })` | `settings.write` | store contacts; step `done`, `completedAt` |
 | `skipOnboardingAction()` | `store.read` | step `skipped` (the Store Health ring keeps P3's `landing:no_live_page` issue with its fix "Create your first page", PLA-§22.16; rev 4: revision 3 named the withdrawn `shell:no_published_page`) |
@@ -2697,7 +2701,7 @@ the setup issues and the address card with "Open a test order" disabled until a 
 the three folds are visible together in the reveal screenshot and direction 1 is rendered at the real viewport width
 (no bezel, PD73); with the argan and parfum fixtures at least one of the three directions at 0:50 is stage, specimen
 or dark (PD74, asserted in `qa:wow-demo`); no model file is requested before the reveal even with the alpha estimate
-on (it is pure browser code); in `store` mode (R2, `qa:e2e` only) onboarding ends with one draft product, a theme
+on (it is pure browser code); in `store` mode (R2, `test:e2e` only; rev 5, CRIT2-19: rev 4 wrote the non-existent `qa:e2e`) onboarding ends with one draft product, a theme
 draft, no landing page and `onboarding.firstKind = "product"` (OPS-14).
 
 ### PLA-§22.3 Store picker and switcher (TN-07)
@@ -3283,7 +3287,7 @@ maximum, listed in the break-glass log. Acceptance: a write outside the granted 
 ### PLA-§24.2 Abuse reports and takedowns (PL-20; **R1 report slice (rev 3, PD70, SEC-18)**, triage R3)
 
 **R1 (P1):** a "Report this store" link (the wording of `shell.report.link` in ar / fr / en; rendered by P6's landing
-footer section and P3's legal / policy pages from the renderer context's `reportHref`, and by S1's store chrome in R2,
+footer section and P3's legal / policy pages from the renderer context's `links.report` (`PageLinks.report`, core §C.6 / D76; rev 5, CRIT2-14: rev 4's `reportHref` is withdrawn), and by S1's store chrome in R2,
 PD83, PLA-§Q.4) → `/report/<handle>` on the **platform host only**: the link is the absolute `reportUrl(store, path)` =
 `platformOrigin() + "/report/<handle>?p=<path>"` (core §B.1 / §C.6) and **store hosts answer the neutral 404 for
 `/report/*`** like `/kit/*` (rev 4, core §Q.8 PLA Q3.4 A\*: not a 308; revision 3's "store hosts 308 to it" is
@@ -3468,7 +3472,7 @@ Decision recorded (§3.3): invite codes are `signups.decide` (daily ops) althoug
 | `src/app/app/[store]/notifications/actions.ts` | `markNotificationsReadAction` | `storeAction("store.read")` | — |
 | `src/app/app/[store]/health-actions.ts` (rev 2, PD67) | `snoozeHealthIssueAction({ issueId })` · `recomputeHealthAction()` | `storeAction("health.snooze")` · `storeAction("store.read", …, { rate: { name: "health:recompute", limit: 6, windowSec: 3600, per: "store" } })` | `store.health.snoozed` · — |
 | `src/app/app/[store]/actions.ts` (rev 2, PD61) | `dismissAddressCardAction()` (writes nothing server-side: a client-only localStorage convenience; listed so the lint sees no action) | — | — |
-| `settings/general/actions.ts` | `saveGeneralAction` (rev 3: `checkBrandTerms` first; `brand_protected` on an exact match, PD70) · `setStoreModeAction` (shows `landingModeSwitchPlan(scope)` first, core §A.2) | `settings.write` · `store.mode` | `store.settings.updated` (+ `store.brand_refused` on refusal) · `store.mode_changed` |
+| `settings/general/actions.ts` | `saveGeneralAction` (rev 3: `checkBrandTerms` first; `brand_protected` on an exact match, PD70) · `setStoreModeAction` (shows `landingModeSwitchPlan(scope)` first, core §A.2) | `settings.write` · `store.mode` | `store.settings.updated` (+ `store.brand_term.refused` on refusal) · `store.mode_changed` |
 | `settings/audit/page.tsx` (rev 3, PD75; read-only, no actions) | — (`listStoreAudit(scope, filter)` in the server component) | `requireStoreMember({ permission: "settings.read" })` | — |
 | `settings/address/actions.ts` | `renameHandleAction` | `domains.manage` | `store.handle_renamed` |
 | `settings/security/actions.ts` | `setRequireMember2faAction` | `security.write` | `store.2fa_required_changed` |
@@ -3506,7 +3510,7 @@ Every handler sets its own security headers (core D31) through `apiHeaders` or t
 `platform.staff.invited|signed_out_all`, `platform.audit.exported`, `platform.breakglass.reviewed`,
 `store.milestone.reached`, `store.review.submitted|answered`, `store.appeal.submitted`, `store.request.created|withdrawn`,
 `store.preview_link.created`, `store.onboarding.completed|skipped`, `auth.legal.accepted`, and (rev 2)
-`store.health.snoozed` (core §F.5 lists it), `store.milestone.reached` (job), and (rev 3) `store.brand_refused`
+`store.health.snoozed` (core §F.5 lists it), `store.milestone.reached` (job), and (rev 3) `store.brand_term.refused`
 `{ field }` (PD70; the matched term never enters the meta), and (rev 4) `platform.user.deleted` `{ reason }` (PD81;
 the core's §F.9 name, appended by core §F.5). Core actions reused as listed in core §F.5, incl. (rev 4)
 `auth.account.deleted`, `store.preview_link.revoked`, `store.landing_settings.updated` (reason `onboarding`) and the
@@ -3958,7 +3962,7 @@ and `health-db-check.ts` are `test:db`, not `npm test`.
     `Masked` values for name, phone, address, landmark and note and the real `city`; the same calls under the owner's
     session return the raw values; `revealOrderPii` is unreachable from the tenant route (`forbidden`).
 15. **(rev 3, PD70) Brand guard and reports:** renaming an active store to a protected exact term through
-    `saveGeneralAction` answers `brand_protected`, writes `store.brand_refused` and changes no column; a near term
+    `saveGeneralAction` answers `brand_protected`, writes `store.brand_term.refused` and changes no column; a near term
     saves and sets the `brand_near_live` flag on the next health run; a live page whose `seoTitle` carries an exact
     term raises `brand_term_live` and one `staff.alarm` across three runs in the same week; `recordAbuseReport` ×
     6 from one IP hash in an hour → 5 rows and one `rate_limited` (rev 4: the core's 5/h); two reports on one store in
@@ -4058,7 +4062,9 @@ note `canary-note-77`, seller e-mail `canary.seller@example.test`. Cases:
 1. **Approval flow**: invite-mode signup on a 390 px viewport → pending store → console keyboard triage (`J`, `A`) →
    the seller's dashboard unlocks within one pulse (≤ 15 s) without a reload.
 2. **Onboarding timing** (UX-01 AC): 3 photos, 4× CPU throttle, Cloud AI off, empty model cache → `revealMs ≤ 90,000`;
-   "Start without photos" → ≤ 15 s; the typed price is the only price on the generated draft.
+   "Start without photos" → ≤ 15 s; the typed price is the only price on the generated draft. **Rev 5 (CRIT2-6):** runs
+   at the R1 integration (after P6's merge); at P2's own merge the step runs against P6's P0 stubs (`RevealFolds`,
+   `estimateAlpha`) and asserts only the step's flow, routing and `reportRevealAction`.
 3. **Impersonation**: start (30 min) → the ribbon and countdown render → a save attempt toasts and the server refuses →
    End → the profile Activity lists the session; the store's notification exists.
 4. **Kill switches**: `publishing_enabled` off → the tenant banner within 45 s and publish → limit sheet (kill);
@@ -4073,11 +4079,11 @@ note `canary-note-77`, seller e-mail `canary.seller@example.test`. Cases:
    `no-referrer`, `noindex`), `/invite/<token>` and `/report/<handle>` (`same-origin`, `noindex`, `private, no-store`).
 9. **Release check (manual, R1 exit)**: a native Darija/Arabic speaker and a French speaker review every R1 tenant
    string in the screenshots of step 6; findings fixed before the R1 deploy.
-10. **(rev 2) `qa:admin-perf`** (P2, part of `qa/e2e`): with a warm shell on the `--perf` DB, 20 route changes across
+10. **(rev 2) `qa:admin-perf`** (P2, the committed `scripts/qa/e2e/admin-perf.ts`, core §J.3 / CRIT19; rev 5, CRIT2-14: never under the git-ignored `qa/e2e`): with a warm shell on the `--perf` DB, 20 route changes across
     the tenant shell and 20 across the console: p75 perceived navigation (first paint of skeleton or content) < 150 ms;
     a queue approval and a team role change round-trip < 500 ms p75; skeletons never visible for < 300 ms once shown;
     the ⌘K palette opens ≤ 50 ms after the key when warm.
-11. **(rev 2) `qa:pulse-e2e`** (P2, core §J.3): two tabs of one browser on the same store produce one `/pulse` request
+11. **(rev 2) `qa:pulse-e2e`** (P2, the committed `scripts/qa/e2e/pulse.ts`, core §J.3 / CRIT19): two tabs of one browser on the same store produce one `/pulse` request
     stream (network log), the second tab updates its unread count from the first's broadcast; unchanged polls answer
     304; a console approval unlocks the seller's publish button within one pulse without a reload; closing the
     polling tab makes the other tab poll within 40 s.
@@ -4092,7 +4098,8 @@ note `canary-note-77`, seller e-mail `canary.seller@example.test`. Cases:
 14. **(rev 2) Dashboard timings:** at 390 px on 4G with a warm shell, the brief, the ring and the first KPI tile paint
     within 1.5 s; "Revenue" appears nowhere on the page; the funnel renders the R2 steps as the neutral line, never a
     zero bar.
-15. **(rev 3, PD73) Reveal layout:** at 390 px the reveal screenshot shows direction 1 at the viewport width with no
+15. **(rev 3, PD73; rev 5, CRIT2-6: run at the R1 integration, not at P2's merge, because the component is P6's and P6
+    merges after P2) Reveal layout:** at 390 px the reveal screenshot shows direction 1 at the viewport width with no
     bezel and the peek of direction 2; a swipe and the dots both move to direction 2; the DNA sheet opens from its
     handle; "Use this design" stays visible while scrolling; at 1280 px three folds render side by side at equal width
     and focusing one expands it; the reduced-motion run shows no scale animation.
@@ -4163,8 +4170,9 @@ hidden" line before `V` (PD69), and the Risk strip reads "No protected term on l
   `alarms.ts`, `notes.ts`, `legal.ts`, `staff.ts`, `reasons.ts`, `cursor.ts`, `markdown-lite.ts`, `domain-move.ts`,
   `selftest.ts`, `data/**` (`disposable-domains.json`, `protected-brands.ts` after R1.0, `legal/**`).
 - **`src/lib/health/**` (rev 2, core §K.2 P1):** `engine.ts`, `inputs.ts`, `platform-flags.ts`, `rules/platform.ts`,
-  `selftest.ts`, and the registry's import lines for every track's rules file (the skeletons `types.ts` and
-  `registry.ts` stay the maintainer's; the other `rules/<track>.ts` files belong to their tracks).
+  `selftest.ts` (rev 5, CRIT2-14: **not** the registry's import lines: `types.ts` and `registry.ts`, import lines
+  included, are the maintainer's and pre-written at P0, core §K.2 P1 row / §I.7; the other `rules/<track>.ts` files
+  belong to their tracks).
 - `src/components/console/**` (incl. `lifecycle/sheet.tsx`, `health/ring.tsx` wrappers, `profile/strips/*.tsx`, rev 2).
 - Extension files: `src/lib/settings/keys/platform.ts` (**rev 3, ENGC-8:** this file is P1's; the core §K.2 P1 row
   omits it and PLA-§Q.3 asks the core to list it, since core §D.10 names platform.md as the `platform` key's owner),
@@ -4220,7 +4228,8 @@ hidden" line before `V` (PD69), and the Risk strip reads "No protected term on l
   `src/components/admin/dashboard/**` (deletes `setup-checklist.tsx`; `kpi-card.tsx` is replaced by `kpi-tile.tsx`),
   `src/lib/admin-data/{dashboard.ts, search.ts}` (rewritten around the P0 read APIs and the search providers),
   `scripts/qa/{admin-motion-check,admin-rtl-lint}.ts`, `scripts/qa/wow-demo/steps/shell.ts` (contributed steps),
-  the `qa:admin-perf` and `qa:pulse-e2e` steps under `qa/e2e`.
+  **`scripts/qa/e2e/{pulse,admin-perf}.ts`** (`qa:pulse-e2e`, `qa:admin-perf`; committed, core §K.2 P2 row / §J.3, CRIT19;
+  rev 5, CRIT2-14: rev 4's "steps under `qa/e2e`" is withdrawn, `qa/` is git-ignored, `.gitignore:48`).
 
 ### PLA-§P.3 D5 PLATFORM (R3)
 
@@ -4324,7 +4333,7 @@ this part's code typechecking until the other side lands.
 | Q3.5 | SEC-13 (minor) | core §C.9 cookie row; T3 `qa:edge-sim` and `headers-check.ts` | The cookie row lists `__Host-sgl` beside `__Host-cs`, `__Host-csg`, `__Host-sgd` and states "every platform cookie uses the `__Host-` prefix"; `qa:edge-sim` asserts no `Set-Cookie` without the prefix is ever emitted by the platform host | PD71; PLA-§22.1, §O.3 case 18, §O.4 step 18 |
 | Q3.6 | ENGC-8 (major) | core §K.2 rows P1, P2, T3 (§K.1), P0 | P2 row: `src/app/(public)/**` except `invite/staff/**`, `report/**` and `kit/**`; `src/app/app/[store]/team/**` except `team/{agents,callcenter}/**`; add `src/app/app/[store]/settings/audit/**` to P2. P1 row: add `src/lib/settings/keys/platform.ts` and `src/app/(public)/report/**`. §K.1 T3: add `src/lib/security/selftest.ts`. P0: a script that parses every row's globs and fails the build on an intersection | PD75; PLA-§P.1, §P.2, §22.10.6 |
 | Q3.7 | ENGC-1 (blocker, core-owned) | core §D.2 / §D.3 / §D.5, §K.1 T3 / T4, landing Q21 / Q22 | Move `orders.is_test`, `leads.is_test`, `orders_store_test_idx` and `page_slug_history` (+ `psh_page_idx`) into 0004 so R1.0 code typechecks and runs; or move the test-render and slug-history logic to P3 wave 1 and adjust R1.0 exit (5) and D54's wording. This part reads `is_test` and `page_slug_history` wherever the core places them | PLA-§2 intro note; §5.2, §7.3 strip 1, §15.1 heartbeat unchanged |
-| Q3.8 | OPS-14 (major) | storefront.md STO-§12.2 / S1 | `productAsPageDoc(product, { …sctx, direction })` accepts the onboarding direction (genome) so the three PDP renders differ; S1 exports `createProduct(scope, facts)` and `setThemeDraft(scope, direction)` (R2 contract step) that `useDirectionAction` calls in `store` / `both` modes; the UX-01 acceptance case "store mode creates no landing page" is shared | PD60 rev 3; PLA-§22.2 mode table, §2.4 `onboarding.firstKind` / `productId` |
+| Q3.8 | OPS-14 (major) | storefront.md STO-§12.2 / S1 | `productAsPageDoc(product, { …sctx, direction })` accepts the onboarding direction (genome) so the three PDP renders differ; S1 exports `createProduct(ctx, { facts })` and `setThemeDraft(ctx, direction)` (R2 contract step; both take the `WriteCtx`, core D71 / §A.2 / §K.4; rev 5, CRIT2-14: rev 3's `scope` parameter is withdrawn) that `useDirectionAction` calls in `store` / `both` modes; the UX-01 acceptance case "store mode creates no landing page" is shared | PD60 rev 3; PLA-§22.2 mode table, §2.4 `onboarding.firstKind` / `productId` |
 | Q3.9 | UX-20 (major) | design.md DES-§14.3 | The composition follows PD73 (mobile: direction 1 edge-to-edge at 100 %, snap carousel with an 8 % peek, DNA bottom sheet, sticky primary; desktop: three equal folds ≤ 440 px, hover / focus expands; 420 ms quint entrance kept, reduced-motion crossfade) and drops the device-frame-in-a-phone composition; the acceptance "3 directions pairwise d ≥ 0.35" stays design's | PD73; PLA-§22.2 reveal row, §O.4 step 15, §O.5 |
 | Q3.10 | UX-39 (major) | design.md DES-§4.11 / §4.4 (H13, H27); core §H.3 `render_jobs.reason`; ai.md AI-21 | `PhotoFacts.hasCutout: boolean \| "estimated"` with the browser `estimateAlpha(bitmap)` (edge flood-fill, < 150 ms) exported for P2's photos step; H13 / H27 accept `"estimated"` with the `plinth` / `contact` presets; `render_jobs.reason` enum appends `'cutout'` (an in-place hero upgrade when the BiRefNet mask lands; P8 handler); `qa:wow-demo` design step asserts one stage / specimen / dark direction for argan and parfum | PD74; PLA-§22.2 photos row, §O.5 |
 | Q3.11 | UX-38 (minor) | design.md DES-§16.2 / §16.8; landing.md LAN-§3.6 | Remove the celebration aurora + grain and the thank-you `.lp-ty__aurora` colour moment (replace with a flat accent slab or a product-tinted single radial at ≤ 10 % alpha); delete the `adm-aurora` / `adm-grain` classes from the token generator; design's table row "celebration: the aurora + grain budget of one per screen" becomes "celebration: typographic (PLA-§22.16 item 4)" | PD64 rev 3; PLA-§22.16, §22.18 rule 4 |
@@ -4494,6 +4503,26 @@ resolved in a named section.
 | A21 | §C.7 rev 3 (ENGC-30) | rename "once per 30 days" only | the one-time `freeRename` grant for store #1 (§22.10.2) |
 | A22 | §K.4 (OPS-15), STO-§16.4 | the console assumed every order has a page | v3 rendering (§7.4) |
 | A23 | D71 | `platformScope` typed only as `StoreScope` in PD2's wording | not a `WriteScope` (PD2) |
+
+### Critic round 2 (revision 5)
+
+The final critic's issues that name this file, applied against core revision 5 (core §P.3 holds the same lines). One
+line per id: what changed, where.
+
+- **CRIT2-6** (major): P2 mounts the core §K.2 P0 stub of `RevealFolds` (P2 merges before P6); the reveal measurements
+  and the onboarding timing are proven at the R1 integration, P2's own merge asserts only the step's flow and
+  `reportRevealAction`. Where: PLA-§22.2 reveal row, §O.4 items 2 and 15.
+- **CRIT2-13** (minor): `approval` / `open` need a configured `platform_turnstile` (the default stays `invite` until then;
+  `savePlatformSettingsAction` refuses with `turnstile_required`; a widget removed later falls back to `invite` with
+  `signup_unguarded`); the Domains page gains **V13** "human check ready". Where: PLA-§3.1 mode table, §16.3.
+- **CRIT2-14** (minor): core §Q.9's platform notes applied: `store.brand_term.refused` (not `store.brand_refused`),
+  `links.report` / `PageLinks.report` (not `reportHref`), the committed `scripts/qa/e2e/{pulse,admin-perf}.ts` in P2's
+  list (no "steps under `qa/e2e`"), no claim on the health registry's import lines (maintainer, P0), `createProduct(ctx,
+  { facts })` / `setThemeDraft(ctx, direction)`. Where: PLA-§13.3, §22.2 `useDirectionAction`, §24.2, §M.1, §M.3, §O.2,
+  §O.4 items 10-11, §P.1, §P.2, §Q.3 Q3.8.
+- **CRIT2-18** (minor): the console's `tick.skipped24h` counts ticks skipped by the tick lease (core §H.2: a
+  `cron_cursors` lease row replaced `platformLock("tick")`). Where: PLA-§15.1 Cron panel.
+- **CRIT2-19** (minor): the non-existent `qa:e2e` is `test:e2e`. Where: PLA-§22.2 (store-mode onboarding note).
 
 ---
 

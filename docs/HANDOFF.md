@@ -116,7 +116,10 @@ so it's safe. It would rebuild the old snapshot only if the last build came from
   `scripts/build-admin-css.mjs`.
 - **PUBLIC_URL must equal the live domain.** The order API origin check, admin CSRF, the landing CSP
   (connect-src/form-action) and absolute media/canonical URLs all use it. After a domain change: update the env
-  var, rebuild, then **republish every live page** (published HTML is static and embeds the old domain).
+  var, **restart** (no rebuild: `PUBLIC_URL` / `PLATFORM_URL` and the other domain keys are server-side runtime
+  reads), then **republish every live page** (published HTML is static and embeds the old domain). The one env key
+  that needs a **rebuild** is `NEXT_PUBLIC_OFFERS_FEATURES` (`src/lib/page/features.ts:36`: Next inlines it into the
+  client bundles at build time); any future `NEXT_PUBLIC_*` key behaves the same (STORE-SAAS §C.10 step 1, §H.7).
 - MariaDB `max_allowed_packet`: publish splits the version row into three statements and refuses with
   `page_too_large` when it's still too big (Hostinger allows 16 MB, XAMPP 1 MB).
 - `onnxruntime-node` CUDA download is skipped through `.npmrc` (`onnxruntime-node-install=skip`).
