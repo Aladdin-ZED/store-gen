@@ -1,7 +1,7 @@
 import "server-only";
 /**
  * Dashboard data of one store in one call: KPIs (today / 7 days vs the previous 7), a 30-day series, top pages,
- * recent orders, Google Sheets sync health, the setup checklist and the database size.
+ * recent orders, Google Sheets sync health, the setup checklist and the store's storage.
  *
  * Funnel numbers (orders, revenue, unique visitors) come from the store's stats (T3's `getPageStats(scope, …)`),
  * bucketed by the store's calendar day and excluding bot (honeypot) and test orders. Revenue is the value of orders
@@ -9,15 +9,15 @@ import "server-only";
  * names come back masked under an impersonation scope (D70).
  */
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, ne } from "drizzle-orm";
-import { cronKeySecret } from "@/lib/auth/config";
 import { db } from "@/lib/db/client";
 import { orders, pages } from "@/lib/db/schema";
-import { getDbUsage, type DbUsage } from "@/lib/db/usage";
 import { getStoreSetting } from "@/lib/settings";
 import { getSheetsConfig, isSheetsConfigured } from "@/lib/sheets";
 import { getPageStats, type StatsRow } from "@/lib/stats";
 import { inStore, whereStore } from "@/lib/tenancy/sql";
 import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
+import { appHref } from "@/lib/urls";
+import { storeStorage, type StoreStorage } from "./assets";
 import { maskCustomer } from "./mask";
 import { addDays, dayKey, dayStart } from "./time";
 
@@ -57,8 +57,8 @@ export interface DashboardData {
   sheet: SheetHealth;
   checklist: ChecklistItem[];
   hasPages: boolean;
-  /** database size against the plan's limit (null when it can't be read) */
-  storage: DbUsage | null;
+  /** the store's media storage against its plan (ADM-06) */
+  storage: StoreStorage | null;
 }
 
 export interface SheetHealth {
@@ -77,10 +77,13 @@ export interface SheetHealth {
 }
 
 export interface ChecklistItem {
-  id: "store" | "sheets" | "twofactor" | "publish" | "home" | "cron";
+  id: "store" | "sheets" | "twofactor" | "publish" | "home";
   done: boolean;
   href: string;
 }
+
+/** The account's own security pages (T2, §I.1). */
+const ACCOUNT_PATH = "/app/account";
 
 const sumRows = (rows: StatsRow[]) =>
   rows.reduce((a, r) => ({ orders: a.orders + r.orders, revenue: a.revenue + r.revenue, uniques: a.uniques + r.uniques }), {
@@ -124,8 +127,16 @@ export async function getSheetHealth(scope: StoreScope): Promise<SheetHealth> {
   };
 }
 
-/** `store` is the scope's own row (the seam's ctx.store): its name, currency, calendar and home page (ADM-04, ADM-05). */
-export async function getDashboard(scope: StoreScope, store: StoreRow, user: { totpEnabled: boolean }): Promise<DashboardData> {
+/**
+ * `store` is the scope's own row (the seam's ctx.store): its name, currency, calendar and home page (ADM-04, ADM-05).
+ * `opts.orders` false (a member without orders.read) leaves the customer rows out of the answer, not only the screen.
+ */
+export async function getDashboard(
+  scope: StoreScope,
+  store: StoreRow,
+  user: { totpEnabled: boolean },
+  opts: { orders: boolean } = { orders: true },
+): Promise<DashboardData> {
   const tz = store.timezone;
   const today = dayKey(new Date(), tz);
   const from30 = addDays(today, -29);
@@ -136,26 +147,8 @@ export async function getDashboard(scope: StoreScope, store: StoreRow, user: { t
     getPageStats(scope, { from: from30, to: today }),
     getStoreSetting(scope, "store"),
     getSheetHealth(scope),
-    getDbUsage(),
-    db
-      .select({
-        id: orders.id,
-        name: orders.name,
-        city: orders.city,
-        total: orders.total,
-        currency: orders.currency,
-        status: orders.status,
-        createdAt: orders.createdAt,
-        pageName: pages.name,
-        sheetStatus: orders.sheetStatus,
-        riskScore: orders.riskScore,
-      })
-      .from(orders)
-      .leftJoin(pages, and(eq(pages.id, orders.pageId), inStore(pages, scope)))
-      // "disabled" = honeypot and test orders (D54): never in the store's numbers
-      .where(whereStore(orders, scope, ne(orders.sheetStatus, "disabled")))
-      .orderBy(desc(orders.createdAt))
-      .limit(8),
+    storeStorage(scope).catch(() => null),
+    opts.orders ? recentOrders(scope) : Promise.resolve([] as Awaited<ReturnType<typeof recentOrders>>),
     db
       .select({ status: orders.status, n: count() })
       .from(orders)
@@ -185,13 +178,14 @@ export async function getDashboard(scope: StoreScope, store: StoreRow, user: { t
   const homeSet = !!store.homePageId;
   const named = store.name.trim() !== "" && store.name !== "My store";
 
+  // the platform's cron is not the store's to set up (ADM-07): no "cron" step for tenants
+  const h = store.handle;
   const checklist: ChecklistItem[] = [
-    { id: "store", done: named && !!(contacts.phone || contacts.whatsapp), href: "/admin/settings/store" },
-    { id: "sheets", done: sheet.connected && sheet.enabled, href: "/admin/settings/sheets" },
-    { id: "twofactor", done: user.totpEnabled, href: "/admin/settings/security" },
-    { id: "publish", done: Number(publishedCount[0]?.n ?? 0) > 0, href: "/admin/pages" },
-    { id: "home", done: homeSet, href: "/admin/pages" },
-    { id: "cron", done: cronKeySecret() !== null, href: "/admin/settings/sheets#cron" },
+    { id: "store", done: named && !!(contacts.phone || contacts.whatsapp), href: appHref(h, "/settings/general") },
+    { id: "sheets", done: sheet.connected && sheet.enabled, href: appHref(h, "/integrations/sheets") },
+    { id: "twofactor", done: user.totpEnabled, href: ACCOUNT_PATH },
+    { id: "publish", done: Number(publishedCount[0]?.n ?? 0) > 0, href: appHref(h, "/pages") },
+    { id: "home", done: homeSet, href: appHref(h, "/pages") },
   ];
 
   return {
@@ -234,6 +228,31 @@ export async function getDashboard(scope: StoreScope, store: StoreRow, user: { t
     hasPages: Number(pageTotal[0]?.n ?? 0) > 0,
     storage,
   };
+}
+
+/** The store's 8 latest real orders (customer fields, raw: the caller masks them). */
+function recentOrders(scope: StoreScope) {
+  return (
+    db
+      .select({
+        id: orders.id,
+        name: orders.name,
+        city: orders.city,
+        total: orders.total,
+        currency: orders.currency,
+        status: orders.status,
+        createdAt: orders.createdAt,
+        pageName: pages.name,
+        sheetStatus: orders.sheetStatus,
+        riskScore: orders.riskScore,
+      })
+      .from(orders)
+      .leftJoin(pages, and(eq(pages.id, orders.pageId), inStore(pages, scope)))
+      // "disabled" = honeypot and test orders (D54): never in the store's numbers
+      .where(whereStore(orders, scope, ne(orders.sheetStatus, "disabled")))
+      .orderBy(desc(orders.createdAt))
+      .limit(8)
+  );
 }
 
 /** Sidebar badges of the store: orders waiting for a first call, sync failures (ADM-08). */

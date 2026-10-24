@@ -17,6 +17,7 @@ import { ASSET_ID_RE } from "@/lib/media";
 import { assetRowOf } from "@/lib/media/asset-row";
 import type { AssetRef, PageDoc } from "@/lib/page/schema";
 import { getStoreSetting } from "@/lib/settings";
+import { entitlement } from "@/lib/tenancy/entitlements";
 import { byId, inStore, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { affected, auditIn, type Actor } from "./store-audit";
@@ -144,4 +145,29 @@ export async function mediaCounts(scope: StoreScope): Promise<{ all: number; pho
     else out.photo += n;
   }
   return out;
+}
+
+/** The store's media storage against its plan (ADM-06: tenants see their own quota, never the platform database). */
+export interface StoreStorage {
+  /** what the store's files take (masters, variants, AVIF) */
+  bytes: number;
+  /** the plan's `media_bytes` limit; null while the entitlement can't be read or when it is unlimited */
+  quotaBytes: number | null;
+  /** bytes / quotaBytes (0 without a quota) */
+  ratio: number;
+  /** "warn" from 80 % of the quota (the §I.4 quota banner), "full" at the limit (uploads are refused) */
+  level: "ok" | "warn" | "full";
+}
+
+export const STORAGE_WARN_RATIO = 0.8;
+
+export async function storeStorage(scope: StoreScope): Promise<StoreStorage> {
+  const [[row], quota] = await Promise.all([
+    db.select({ bytes: sql<string | number | null>`COALESCE(SUM(${assets.storedBytes}), 0)` }).from(assets).where(inStore(assets, scope)),
+    entitlement(scope, "media_bytes").catch(() => null),
+  ]);
+  const bytes = Number(row?.bytes ?? 0) || 0;
+  const quotaBytes = typeof quota === "number" && quota > 0 ? quota : null;
+  const ratio = quotaBytes ? bytes / quotaBytes : 0;
+  return { bytes, quotaBytes, ratio, level: !quotaBytes ? "ok" : ratio >= 1 ? "full" : ratio >= STORAGE_WARN_RATIO ? "warn" : "ok" };
 }

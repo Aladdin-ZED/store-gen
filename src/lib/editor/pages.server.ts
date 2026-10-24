@@ -1,7 +1,10 @@
 import "server-only";
 /**
- * Builder persistence (server only). Call these after requireUser() — the server actions in
- * ./actions.ts do the auth, input validation and audit; this module owns the SQL and the rules:
+ * Builder persistence of one store (server only). The server actions in ./actions.ts resolve the store through the
+ * seam (storeAction) and do the input validation and audit; this module owns the SQL and the rules. Every read
+ * and write carries the scope's store (docs/STORE-SAAS.md §E.3; LND-17 … LND-22): another store's page or
+ * version id answers like a missing one, writes take a `WriteScope`, and versions are inserted with the scope's
+ * store id.
  *
  *  - Drafts are written with optimistic concurrency: `UPDATE … WHERE updated_at = <base>`; a page
  *    changed elsewhere (another tab, a teammate, a restore from the History screen) is a conflict.
@@ -13,7 +16,7 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, lt, ne, notInArray } from "drizzle-orm";
 import { createPageFromDoc } from "@/lib/admin-data/pages";
 import type { Actor } from "@/lib/admin-data/store-audit";
-import { can, type SessionUser } from "@/lib/auth";
+import type { SessionUser } from "@/lib/auth";
 import { isGatePath } from "@/lib/auth/gate";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
@@ -22,9 +25,12 @@ import { ensureFocusMany, getAssetsByIds, type AssetRecord } from "@/lib/media";
 import { assetRowOf } from "@/lib/media/asset-row";
 import { PageDoc, type PageDoc as PageDocT } from "@/lib/page/schema";
 import { sanitizeDeep, validateDoc } from "@/lib/page/validate";
-import { invalidatePublished, isServableSlug, storeInfo } from "@/lib/render/publish.server";
-import { getSetting } from "@/lib/settings";
-import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
+import { storeInfoFor, storeInfoOf } from "@/lib/admin-data/store-info";
+import { invalidatePublished, isServableSlug } from "@/lib/render/publish.server";
+import { getStoreSettings } from "@/lib/settings";
+import { STORE_RESERVED_SLUGS } from "@/lib/tenancy/handles";
+import { byId, storeValues, whereStore } from "@/lib/tenancy/sql";
+import type { StoreCtx, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { collectAssetIds } from "@/landing/context";
 import type { ActionErrorCode, EditorAsset, EditorBootstrap, EditorPageMeta, PageStatus, VersionKind, VersionSummary } from "./types";
 import { jsonBytes, MAX_DOC_BYTES } from "./types";
@@ -55,8 +61,9 @@ function affectedRows(res: unknown): number {
 /* reads                                                               */
 /* ------------------------------------------------------------------ */
 
-async function pageRow(id: string) {
-  const [row] = await db.select().from(pages).where(eq(pages.id, id)).limit(1);
+/** The scope's page `id` (another store's id = null). */
+async function pageRow(scope: StoreScope, id: string) {
+  const [row] = await db.select().from(pages).where(byId(pages, scope, id)).limit(1);
   return row ?? null;
 }
 
@@ -87,9 +94,13 @@ export async function assetsFor(scope: StoreScope, doc: PageDocT, extra: Paramet
   return Object.fromEntries(rows.map((r) => [r.id, toEditorAsset(r)]));
 }
 
-export async function listVersionSummaries(pageId: string, opts: { before?: number; limit?: number } = {}): Promise<{ items: VersionSummary[]; hasMore: boolean }> {
+export async function listVersionSummaries(
+  scope: StoreScope,
+  pageId: string,
+  opts: { before?: number; limit?: number } = {},
+): Promise<{ items: VersionSummary[]; hasMore: boolean }> {
   const limit = Math.min(100, Math.max(1, opts.limit ?? 40));
-  const where = opts.before !== undefined ? and(eq(pageVersions.pageId, pageId), lt(pageVersions.createdAt, new Date(opts.before))) : eq(pageVersions.pageId, pageId);
+  const where = whereStore(pageVersions, scope, eq(pageVersions.pageId, pageId), opts.before !== undefined ? lt(pageVersions.createdAt, new Date(opts.before)) : undefined);
   const rows = await db
     .select({
       id: pageVersions.id,
@@ -117,21 +128,23 @@ export async function listVersionSummaries(pageId: string, opts: { before?: numb
   };
 }
 
-async function versionRow(pageId: string, versionId: string) {
+async function versionRow(scope: StoreScope, pageId: string, versionId: string) {
   const [row] = await db
     .select({ id: pageVersions.id, kind: pageVersions.kind, label: pageVersions.label, doc: pageVersions.doc, createdAt: pageVersions.createdAt, checksum: pageVersions.checksum })
     .from(pageVersions)
-    .where(and(eq(pageVersions.id, versionId), eq(pageVersions.pageId, pageId)))
+    .where(and(byId(pageVersions, scope, versionId), eq(pageVersions.pageId, pageId)))
     .limit(1);
   return row ?? null;
 }
 
 /**
  * Everything the builder needs to open a page. A draft that no longer validates at page level is
- * replaced by the newest version that does (reported in `notices`); null when the page is unknown.
+ * replaced by the newest version that does (reported in `notices`); null when the page is unknown or another store's.
+ * `ctx` is the seam's: the member's grants, the store's identity and AI choices fill the builder.
  */
-export async function loadBootstrap(scope: StoreScope, pageId: string, user: SessionUser): Promise<EditorBootstrap | null> {
-  const row = await pageRow(pageId);
+export async function loadBootstrap(ctx: Pick<StoreCtx, "scope" | "store" | "user" | "can">, pageId: string): Promise<EditorBootstrap | null> {
+  const { scope, user } = ctx;
+  const row = await pageRow(scope, pageId);
   if (!row) return null;
   const notices: string[] = [];
 
@@ -140,7 +153,7 @@ export async function loadBootstrap(scope: StoreScope, pageId: string, user: Ses
     const recent = await db
       .select({ doc: pageVersions.doc, createdAt: pageVersions.createdAt })
       .from(pageVersions)
-      .where(eq(pageVersions.pageId, pageId))
+      .where(whereStore(pageVersions, scope, eq(pageVersions.pageId, pageId)))
       .orderBy(desc(pageVersions.createdAt))
       .limit(25);
     for (const v of recent) {
@@ -157,15 +170,15 @@ export async function loadBootstrap(scope: StoreScope, pageId: string, user: Ses
   const repairs = issues.filter((i) => i.level === "warning").length;
   if (repairs) notices.push(`${repairs} small ${repairs === 1 ? "problem was" : "problems were"} repaired automatically when opening this draft.`);
 
-  const [store, storeSettings, ai, versions, published] = await Promise.all([
-    storeInfo(),
-    getSetting("store"),
-    getSetting("ai"),
-    listVersionSummaries(pageId),
+  const [store, settings, versions, published] = await Promise.all([
+    storeInfoOf(scope, ctx.store),
+    getStoreSettings(scope, ["store", "store_ai"]),
+    listVersionSummaries(scope, pageId),
     row.publishedVersionId
-      ? db.select({ checksum: pageVersions.checksum }).from(pageVersions).where(eq(pageVersions.id, row.publishedVersionId)).limit(1)
+      ? db.select({ checksum: pageVersions.checksum }).from(pageVersions).where(byId(pageVersions, scope, row.publishedVersionId)).limit(1)
       : Promise.resolve([] as { checksum: string }[]),
   ]);
+  const { store: storeSettings, store_ai: ai } = settings;
   const assets = await assetsFor(scope, doc, [store.logo]);
 
   return {
@@ -185,24 +198,24 @@ export async function loadBootstrap(scope: StoreScope, pageId: string, user: Ses
     user: {
       id: user.id,
       name: user.name,
-      canWrite: can(user.role, "pages.write"),
-      canPublish: can(user.role, "pages.publish"),
-      canExport: can(user.role, "export.create"),
-      canUpload: can(user.role, "media.write"),
+      canWrite: ctx.can("pages.write"),
+      canPublish: ctx.can("pages.publish"),
+      canExport: ctx.can("export.create"),
+      canUpload: ctx.can("media.write"),
     },
-    ai: { enabled: ai.enabled, bgRemoval: ai.bgRemoval, tier: ai.tier },
+    ai: { enabled: ai.localEnabled, bgRemoval: ai.bgRemoval, tier: ai.localTierCeiling },
     notices,
   };
 }
 
 /** A version's document (repaired) and the asset rows to preview it. */
 export async function versionPreview(scope: StoreScope, pageId: string, versionId: string): Promise<{ doc: PageDocT; assets: Record<string, EditorAsset> } | null> {
-  const v = await versionRow(pageId, versionId);
+  const v = await versionRow(scope, pageId, versionId);
   if (!v) return null;
   const { doc } = validateDoc(v.doc);
   if (!doc) return null;
-  const store = await storeInfo();
-  return { doc, assets: await assetsFor(scope, doc, [store.logo]) };
+  const store = await storeInfoFor(scope);
+  return { doc, assets: await assetsFor(scope, doc, [store?.logo]) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -222,24 +235,34 @@ export function parseDraft(input: unknown): PageDocT {
   return parsed.data;
 }
 
-async function insertVersion(pageId: string, kind: VersionKind, label: string | null, doc: PageDocT, userId: string, at: Date): Promise<VersionSummary & { checksum: string }> {
+async function insertVersion(
+  scope: WriteScope,
+  pageId: string,
+  kind: VersionKind,
+  label: string | null,
+  doc: PageDocT,
+  userId: string,
+  at: Date,
+): Promise<VersionSummary & { checksum: string }> {
   const id = newId();
   const checksum = checksumOf(doc);
-  await db.insert(pageVersions).values({ id, pageId, kind, label, doc, checksum, createdBy: userId, createdAt: at });
+  await db.insert(pageVersions).values(storeValues(scope, { id, pageId, kind, label, doc, checksum, createdBy: userId, createdAt: at }));
   return { id, kind, label, createdAt: at.getTime(), author: null, starred: false, checksum };
 }
 
 /** Keep only the newest AUTOSAVE_KEEP unstarred autosaves of a page. */
-async function pruneAutosaves(pageId: string): Promise<void> {
+async function pruneAutosaves(scope: WriteScope, pageId: string): Promise<void> {
   const keep = await db
     .select({ id: pageVersions.id })
     .from(pageVersions)
-    .where(and(eq(pageVersions.pageId, pageId), eq(pageVersions.kind, "autosave")))
+    .where(whereStore(pageVersions, scope, eq(pageVersions.pageId, pageId), eq(pageVersions.kind, "autosave")))
     .orderBy(desc(pageVersions.createdAt))
     .limit(AUTOSAVE_KEEP);
   if (keep.length < AUTOSAVE_KEEP) return;
   await db.delete(pageVersions).where(
-    and(
+    whereStore(
+      pageVersions,
+      scope,
       eq(pageVersions.pageId, pageId),
       eq(pageVersions.kind, "autosave"),
       eq(pageVersions.starred, false),
@@ -252,11 +275,11 @@ async function pruneAutosaves(pageId: string): Promise<void> {
 }
 
 /** Autosave snapshot when the last one is older than AUTOSAVE_EVERY_MS and the content changed. */
-async function maybeAutosaveVersion(pageId: string, doc: PageDocT, userId: string, now: Date): Promise<VersionSummary | null> {
+async function maybeAutosaveVersion(scope: WriteScope, pageId: string, doc: PageDocT, userId: string, now: Date): Promise<VersionSummary | null> {
   const [last] = await db
     .select({ createdAt: pageVersions.createdAt, checksum: pageVersions.checksum })
     .from(pageVersions)
-    .where(and(eq(pageVersions.pageId, pageId), eq(pageVersions.kind, "autosave")))
+    .where(whereStore(pageVersions, scope, eq(pageVersions.pageId, pageId), eq(pageVersions.kind, "autosave")))
     .orderBy(desc(pageVersions.createdAt))
     .limit(1);
   if (last && now.getTime() - last.createdAt.getTime() < AUTOSAVE_EVERY_MS) return null;
@@ -265,12 +288,12 @@ async function maybeAutosaveVersion(pageId: string, doc: PageDocT, userId: strin
   const [latestAny] = await db
     .select({ checksum: pageVersions.checksum })
     .from(pageVersions)
-    .where(eq(pageVersions.pageId, pageId))
+    .where(whereStore(pageVersions, scope, eq(pageVersions.pageId, pageId)))
     .orderBy(desc(pageVersions.createdAt))
     .limit(1);
   if (latestAny?.checksum === checksum) return null;
-  const v = await insertVersion(pageId, "autosave", null, doc, userId, now);
-  await pruneAutosaves(pageId);
+  const v = await insertVersion(scope, pageId, "autosave", null, doc, userId, now);
+  await pruneAutosaves(scope, pageId);
   return v;
 }
 
@@ -279,19 +302,20 @@ async function maybeAutosaveVersion(pageId: string, doc: PageDocT, userId: strin
  * Returns the new updatedAt and the autosave version created on the way, if any.
  */
 export async function saveDraft(
+  scope: WriteScope,
   user: SessionUser,
   input: { pageId: string; doc: unknown; baseUpdatedAt: number; force: boolean },
 ): Promise<{ updatedAt: number; version: VersionSummary | null; forced: boolean }> {
   const doc = parseDraft(input.doc);
   const now = new Date(Math.max(Date.now(), input.baseUpdatedAt + 1));
-  const where = input.force ? eq(pages.id, input.pageId) : and(eq(pages.id, input.pageId), eq(pages.updatedAt, new Date(input.baseUpdatedAt)));
+  const where = input.force ? byId(pages, scope, input.pageId) : and(byId(pages, scope, input.pageId), eq(pages.updatedAt, new Date(input.baseUpdatedAt)));
   const res = await db.update(pages).set({ draft: doc, locale: doc.locale, updatedAt: now }).where(where);
   if (affectedRows(res) !== 1) {
-    const row = await db.select({ updatedAt: pages.updatedAt }).from(pages).where(eq(pages.id, input.pageId)).limit(1);
+    const row = await db.select({ updatedAt: pages.updatedAt }).from(pages).where(byId(pages, scope, input.pageId)).limit(1);
     if (!row[0]) throw new EditorError("not_found", "This page no longer exists.");
     throw new EditorError("conflict", "This page was changed somewhere else.", { serverUpdatedAt: row[0].updatedAt.getTime() });
   }
-  const version = await maybeAutosaveVersion(input.pageId, doc, user.id, now);
+  const version = await maybeAutosaveVersion(scope, input.pageId, doc, user.id, now);
   return { updatedAt: now.getTime(), version: version ? { ...version, author: user.name } : null, forced: input.force };
 }
 
@@ -304,13 +328,14 @@ export async function saveDraft(
  * instead when it already holds exactly this draft (e.g. exporting twice without edits).
  */
 export async function createVersion(
+  scope: WriteScope,
   user: SessionUser,
   pageId: string,
   kind: "save" | "generation" | "import",
   label: string | null,
   opts: { reuse?: boolean } = {},
 ): Promise<{ version: VersionSummary; created: boolean }> {
-  const row = await pageRow(pageId);
+  const row = await pageRow(scope, pageId);
   if (!row) throw new EditorError("not_found", "This page no longer exists.");
   const { doc } = validateDoc(row.draft);
   if (!doc) throw new EditorError("invalid", "The current draft has errors and cannot be saved as a version.");
@@ -318,15 +343,15 @@ export async function createVersion(
     const [latest] = await db
       .select({ id: pageVersions.id, checksum: pageVersions.checksum })
       .from(pageVersions)
-      .where(eq(pageVersions.pageId, pageId))
+      .where(whereStore(pageVersions, scope, eq(pageVersions.pageId, pageId)))
       .orderBy(desc(pageVersions.createdAt))
       .limit(1);
     if (latest?.checksum === checksumOf(doc)) {
-      const [existing] = await versionsByIds([latest.id]);
+      const [existing] = await versionsByIds(scope, [latest.id]);
       if (existing) return { version: existing, created: false };
     }
   }
-  const v = await insertVersion(pageId, kind, label || null, doc, user.id, new Date());
+  const v = await insertVersion(scope, pageId, kind, label || null, doc, user.id, new Date());
   return { version: { ...v, author: user.name }, created: true };
 }
 
@@ -337,11 +362,11 @@ export async function createVersion(
  * docs/OFFERS.md §A.4): an old version must never silently swap the ads' pixels.
  */
 export async function restoreVersion(
-  scope: StoreScope,
+  scope: WriteScope,
   user: SessionUser,
   input: { pageId: string; versionId: string; baseUpdatedAt: number; pixels?: boolean },
 ): Promise<{ doc: PageDocT; updatedAt: number; versions: VersionSummary[]; assets: Record<string, EditorAsset> }> {
-  const [row, v] = await Promise.all([pageRow(input.pageId), versionRow(input.pageId, input.versionId)]);
+  const [row, v] = await Promise.all([pageRow(scope, input.pageId), versionRow(scope, input.pageId, input.versionId)]);
   if (!row || !v) throw new EditorError("not_found", "This version no longer exists.");
   if (row.updatedAt.getTime() !== input.baseUpdatedAt) {
     throw new EditorError("conflict", "This page was changed somewhere else.", { serverUpdatedAt: row.updatedAt.getTime() });
@@ -354,9 +379,14 @@ export async function restoreVersion(
   const current = validateDoc(row.draft).doc;
   const doc: PageDocT = input.pixels || !current ? restored : { ...restored, tracking: current.tracking };
   if (current) {
-    const [latest] = await db.select({ checksum: pageVersions.checksum }).from(pageVersions).where(eq(pageVersions.pageId, input.pageId)).orderBy(desc(pageVersions.createdAt)).limit(1);
+    const [latest] = await db
+      .select({ checksum: pageVersions.checksum })
+      .from(pageVersions)
+      .where(whereStore(pageVersions, scope, eq(pageVersions.pageId, input.pageId)))
+      .orderBy(desc(pageVersions.createdAt))
+      .limit(1);
     if (latest?.checksum !== checksumOf(current)) {
-      created.push({ ...(await insertVersion(input.pageId, "autosave", "Before restore", current, user.id, new Date(now.getTime() - 1))), author: user.name });
+      created.push({ ...(await insertVersion(scope, input.pageId, "autosave", "Before restore", current, user.id, new Date(now.getTime() - 1))), author: user.name });
     }
   }
   const when = v.createdAt.toISOString().slice(0, 16).replace("T", " ");
@@ -364,32 +394,32 @@ export async function restoreVersion(
   const res = await db
     .update(pages)
     .set({ draft: doc, locale: doc.locale, updatedAt: now })
-    .where(and(eq(pages.id, input.pageId), eq(pages.updatedAt, row.updatedAt)));
+    .where(and(byId(pages, scope, input.pageId), eq(pages.updatedAt, row.updatedAt)));
   if (affectedRows(res) !== 1) throw new EditorError("conflict", "This page was changed somewhere else.");
-  created.unshift({ ...(await insertVersion(input.pageId, "restore", label, doc, user.id, now)), author: user.name });
-  await pruneAutosaves(input.pageId);
-  const store = await storeInfo();
-  return { doc, updatedAt: now.getTime(), versions: created, assets: await assetsFor(scope, doc, [store.logo]) };
+  created.unshift({ ...(await insertVersion(scope, input.pageId, "restore", label, doc, user.id, now)), author: user.name });
+  await pruneAutosaves(scope, input.pageId);
+  const store = await storeInfoFor(scope);
+  return { doc, updatedAt: now.getTime(), versions: created, assets: await assetsFor(scope, doc, [store?.logo]) };
 }
 
-export async function setVersionStar(pageId: string, versionId: string, starred: boolean): Promise<void> {
-  const res = await db.update(pageVersions).set({ starred }).where(and(eq(pageVersions.id, versionId), eq(pageVersions.pageId, pageId)));
-  if (affectedRows(res) === 0 && !(await versionRow(pageId, versionId))) throw new EditorError("not_found", "This version no longer exists.");
+export async function setVersionStar(scope: WriteScope, pageId: string, versionId: string, starred: boolean): Promise<void> {
+  const res = await db.update(pageVersions).set({ starred }).where(and(byId(pageVersions, scope, versionId), eq(pageVersions.pageId, pageId)));
+  if (affectedRows(res) === 0 && !(await versionRow(scope, pageId, versionId))) throw new EditorError("not_found", "This version no longer exists.");
 }
 
-export async function renameVersion(pageId: string, versionId: string, label: string): Promise<void> {
-  const res = await db.update(pageVersions).set({ label: label || null }).where(and(eq(pageVersions.id, versionId), eq(pageVersions.pageId, pageId)));
-  if (affectedRows(res) === 0 && !(await versionRow(pageId, versionId))) throw new EditorError("not_found", "This version no longer exists.");
+export async function renameVersion(scope: WriteScope, pageId: string, versionId: string, label: string): Promise<void> {
+  const res = await db.update(pageVersions).set({ label: label || null }).where(and(byId(pageVersions, scope, versionId), eq(pageVersions.pageId, pageId)));
+  if (affectedRows(res) === 0 && !(await versionRow(scope, pageId, versionId))) throw new EditorError("not_found", "This version no longer exists.");
 }
 
 /** New draft page of the scope's store from the current draft or one of its versions. */
 export async function duplicateAsPage(scope: WriteScope, actor: Actor, input: { pageId: string; versionId?: string; name?: string }): Promise<{ id: string; slug: string }> {
-  const row = await pageRow(input.pageId);
+  const row = await pageRow(scope, input.pageId);
   if (!row) throw new EditorError("not_found", "This page no longer exists.");
   let source: unknown = row.draft;
   let versionLabel = `Duplicated from “${row.name}”`;
   if (input.versionId) {
-    const v = await versionRow(input.pageId, input.versionId);
+    const v = await versionRow(scope, input.pageId, input.versionId);
     if (!v) throw new EditorError("not_found", "This version no longer exists.");
     source = v.doc;
     versionLabel = `Copied from “${row.name}” · version of ${v.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC`;
@@ -403,13 +433,16 @@ export async function duplicateAsPage(scope: WriteScope, actor: Actor, input: { 
 /* page meta                                                           */
 /* ------------------------------------------------------------------ */
 
-/** Why a slug cannot be used (null when it can). Reserved app routes and the admin gate are refused. */
-export async function slugProblem(slug: string, pageId: string): Promise<{ code: "slug_reserved" | "slug_taken"; message: string } | null> {
-  if (!isServableSlug(slug) || isGatePath(`/${slug}`)) return { code: "slug_reserved", message: `“/${slug}” is reserved. Choose another address.` };
+/**
+ * Why a slug cannot be used in the scope's store (null when it can): reserved app routes, the store's reserved
+ * paths (§C.4.1) and the admin gate are refused; slugs are unique per store (`pages_store_slug_uq`).
+ */
+export async function slugProblem(scope: StoreScope, slug: string, pageId: string): Promise<{ code: "slug_reserved" | "slug_taken"; message: string } | null> {
+  if (!isServableSlug(slug) || STORE_RESERVED_SLUGS.has(slug) || isGatePath(`/${slug}`)) return { code: "slug_reserved", message: `“/${slug}” is reserved. Choose another address.` };
   const [taken] = await db
     .select({ id: pages.id })
     .from(pages)
-    .where(and(eq(pages.slug, slug), ne(pages.id, pageId)))
+    .where(whereStore(pages, scope, eq(pages.slug, slug), ne(pages.id, pageId)))
     .limit(1);
   return taken ? { code: "slug_taken", message: `Another page already uses “/${slug}”.` } : null;
 }
@@ -419,12 +452,16 @@ export async function slugProblem(slug: string, pageId: string): Promise<{ code:
  * written here; the caller re-publishes (the thank-you link inside the published HTML follows the slug).
  * `updated_at` is left alone: it is the draft's concurrency token, and neither changes the draft.
  */
-export async function updateMeta(pageId: string, patch: { name?: string; slug?: string }): Promise<{ page: EditorPageMeta; slugChanged: boolean; previousSlug: string }> {
-  const row = await pageRow(pageId);
+export async function updateMeta(
+  scope: WriteScope,
+  pageId: string,
+  patch: { name?: string; slug?: string },
+): Promise<{ page: EditorPageMeta; slugChanged: boolean; previousSlug: string }> {
+  const row = await pageRow(scope, pageId);
   if (!row) throw new EditorError("not_found", "This page no longer exists.");
   const slugChanged = patch.slug !== undefined && patch.slug !== row.slug;
   if (slugChanged) {
-    const problem = await slugProblem(patch.slug!, pageId);
+    const problem = await slugProblem(scope, patch.slug!, pageId);
     if (problem) throw new EditorError(problem.code, problem.message);
   }
   const set: Partial<typeof pages.$inferInsert> = {};
@@ -432,7 +469,7 @@ export async function updateMeta(pageId: string, patch: { name?: string; slug?: 
   if (slugChanged) set.slug = patch.slug!;
   if (!Object.keys(set).length) return { page: metaOf(row), slugChanged: false, previousSlug: row.slug };
   try {
-    await db.update(pages).set(set).where(eq(pages.id, pageId));
+    await db.update(pages).set(set).where(byId(pages, scope, pageId));
   } catch (err) {
     // unique index race: someone took the slug between the check and the write
     if (slugChanged && /duplicate|ER_DUP_ENTRY/i.test(err instanceof Error ? err.message : "")) {
@@ -440,29 +477,29 @@ export async function updateMeta(pageId: string, patch: { name?: string; slug?: 
     }
     throw err;
   }
-  const next = await pageRow(pageId);
+  const next = await pageRow(scope, pageId);
   if (slugChanged) invalidatePublished();
   return { page: metaOf(next!), slugChanged, previousSlug: row.slug };
 }
 
 /** Restore a previous slug (used when re-publishing after a move fails). */
-export async function revertSlug(pageId: string, slug: string): Promise<void> {
-  await db.update(pages).set({ slug }).where(eq(pages.id, pageId));
+export async function revertSlug(scope: WriteScope, pageId: string, slug: string): Promise<void> {
+  await db.update(pages).set({ slug }).where(byId(pages, scope, pageId));
   invalidatePublished();
 }
 
-export async function currentMeta(pageId: string): Promise<EditorPageMeta | null> {
-  const row = await pageRow(pageId);
+export async function currentMeta(scope: StoreScope, pageId: string): Promise<EditorPageMeta | null> {
+  const row = await pageRow(scope, pageId);
   return row ? metaOf(row) : null;
 }
 
 /** Version summaries by id (after publish, to show the new publish version with its author). */
-export async function versionsByIds(ids: string[]): Promise<VersionSummary[]> {
+export async function versionsByIds(scope: StoreScope, ids: string[]): Promise<VersionSummary[]> {
   if (!ids.length) return [];
   const rows = await db
     .select({ id: pageVersions.id, kind: pageVersions.kind, label: pageVersions.label, createdAt: pageVersions.createdAt, starred: pageVersions.starred, author: users.name })
     .from(pageVersions)
     .leftJoin(users, eq(users.id, pageVersions.createdBy))
-    .where(inArray(pageVersions.id, ids));
+    .where(whereStore(pageVersions, scope, inArray(pageVersions.id, ids)));
   return rows.map((r) => ({ id: r.id, kind: r.kind, label: r.label, createdAt: r.createdAt.getTime(), author: r.author ?? null, starred: r.starred }));
 }

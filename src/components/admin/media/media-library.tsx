@@ -30,6 +30,7 @@ import { EmptyState } from "../common/empty-state";
 import { SearchField } from "../common/search-field";
 import { Segmented } from "../common/segmented";
 import { runAction, type ActionResult } from "../lib/action-result";
+import { useStore } from "../shell/store-context";
 import { bytes, dateTime, int } from "../lib/format";
 import { AssetTile } from "./asset-tile";
 import { altOf, deleteMedia, fetchMedia, IMAGE_ACCEPT, MediaInUseError, VIDEO_ACCEPT, useMediaList, type MediaAsset, type MediaFilter } from "./media-client";
@@ -612,6 +613,7 @@ function deleteWarning(usage: AssetUsage | null, live: number): string {
 /** "Used in" list of the details sheet: the store logo and pages (live ones first). */
 function UsageList({ state }: { state: { usage: AssetUsage | null } | null }) {
   const usage = state?.usage;
+  const storeView = useStore();
   return (
     <section className="grid gap-2" aria-live="polite">
       <h3 className="text-[0.72rem] font-semibold tracking-[0.12em] text-muted-foreground uppercase">Used in</h3>
@@ -625,7 +627,7 @@ function UsageList({ state }: { state: { usage: AssetUsage | null } | null }) {
         <ul className="flex flex-wrap gap-1.5">
           {usage.storeLogo && (
             <li>
-              <Link href="/admin/settings/store" className="inline-flex h-7 items-center rounded-full bg-foreground/[0.05] px-2.5 text-xs font-medium transition-colors hover:bg-foreground/[0.09]">
+              <Link href={storeView.href("/settings/general")} className="inline-flex h-7 items-center rounded-full bg-foreground/[0.05] px-2.5 text-xs font-medium transition-colors hover:bg-foreground/[0.09]">
                 Store logo
               </Link>
             </li>
@@ -633,8 +635,8 @@ function UsageList({ state }: { state: { usage: AssetUsage | null } | null }) {
           {usage.pages.map((p) => (
             <li key={p.id} className="min-w-0">
               <Link
-                href={`/admin/pages?focus=${p.id}`}
-                title={`/${p.slug}${p.live ? " · live" : ""}`}
+                href={storeView.href(`/pages?focus=${p.id}`)}
+                title={`${storeView.livePath(p.slug)}${p.live ? " · live" : ""}`}
                 className="inline-flex h-7 max-w-[16rem] items-center gap-1.5 rounded-full bg-foreground/[0.05] px-2.5 text-xs font-medium transition-colors hover:bg-foreground/[0.09]"
               >
                 {p.live && <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />}

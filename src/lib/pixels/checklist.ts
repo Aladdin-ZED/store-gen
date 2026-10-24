@@ -47,8 +47,9 @@ export function pixelChecks(doc: PageDoc, ctx: PixelCheckContext): CheckItem[] {
       id: `pixels:refused:${r.platform}:${r.id}`,
       level: "warning",
       title: `${label}: server refused events (${CODE_TEXT[h.code ?? "other"]}) since ${clock(h.at)}`,
-      detail: "Check the token in Settings → Pixels, then send a test event.",
-      fix: { href: "/admin/settings/pixels" },
+      detail: "Check the token in Connect → Pixels, then send a test event.",
+      // store-relative: the builder resolves it under /app/<handle>
+      fix: { href: "/integrations/pixels" },
     });
   }
   return out;

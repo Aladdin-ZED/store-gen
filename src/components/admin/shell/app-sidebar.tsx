@@ -5,7 +5,7 @@ import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -36,17 +36,18 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
+import type { MembershipSummary } from "@/lib/auth/landing";
 import { logout } from "@/lib/auth/actions";
-import { ROLE_LABELS, type Role } from "@/lib/auth/permissions";
 import { cn } from "@/lib/utils";
 import { initials } from "../lib/format";
-import { BrandMark, Wordmark } from "./brand-mark";
-import { activeNav, navFor, type NavItem } from "./nav";
+import { STORE_ROLE_LABELS } from "../lib/store-labels";
+import { useStore } from "./store-context";
+import { activeNav, storeNav, type ShellNavGroup, type ShellNavItem } from "./store-nav";
+import { StoreSwitcher } from "./store-switcher";
 
 export interface ShellUser {
   name: string;
   email: string;
-  role: Role;
   totpEnabled: boolean;
 }
 
@@ -55,26 +56,36 @@ export interface NavCounts {
   syncFailed: number;
 }
 
-const WORKSPACE: NavItem["id"][] = ["dashboard", "pages", "orders"];
-const LIBRARY: NavItem["id"][] = ["media", "history", "exports"];
+/** The account's own pages (T2, docs/STORE-SAAS.md §I.1): password, two-step verification, devices. */
+export const ACCOUNT_PATH = "/app/account";
 
-export function AppSidebar({ user, storeName, counts }: { user: ShellUser; storeName: string; counts: NavCounts | null }) {
+export function AppSidebar({
+  user,
+  counts,
+  memberships,
+  consoleHref,
+}: {
+  user: ShellUser;
+  counts: NavCounts | null;
+  memberships: readonly MembershipSummary[] | null;
+  consoleHref: string | null;
+}) {
   const pathname = usePathname();
+  const store = useStore();
   const { setOpenMobile, isMobile } = useSidebar();
-  const items = navFor(user.role);
-  const active = activeNav(pathname);
-  const canGenerate = items.some((i) => i.id === "generate");
+  const groups = useMemo(() => storeNav({ handle: store.handle, mode: store.mode, can: store.can }), [store]);
+  const active = activeNav(pathname, groups, store.handle);
+  const generate = groups.flatMap((g) => g.items).find((i) => i.id === "generate");
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false);
   };
 
-  const group = (ids: NavItem["id"][]) => items.filter((i) => ids.includes(i.id));
-  const badgeFor = (id: NavItem["id"]) => (id === "orders" && counts ? counts.newOrders : 0);
+  const badgeFor = (item: ShellNavItem) => (item.badgeKey && counts ? (counts[item.badgeKey as keyof NavCounts] ?? 0) : 0);
 
-  const renderItems = (list: NavItem[]) =>
+  const renderItems = (list: ShellNavItem[]) =>
     list.map((item) => {
       const isActive = active?.id === item.id;
-      const badge = badgeFor(item.id);
+      const badge = badgeFor(item);
       const Icon = item.icon;
       return (
         <SidebarMenuItem key={item.id}>
@@ -109,25 +120,19 @@ export function AppSidebar({ user, storeName, counts }: { user: ShellUser; store
       );
     });
 
-  const workspace = group(WORKSPACE);
-  const library = group(LIBRARY);
-  const settings = items.filter((i) => i.id === "settings");
+  // the generator has its own button in the header; settings sit at the bottom
+  const body: ShellNavGroup[] = groups
+    .filter((g) => g.id !== "settings")
+    .map((g) => ({ ...g, items: g.items.filter((i) => i.id !== "generate") }))
+    .filter((g) => g.items.length > 0);
+  const settings = groups.find((g) => g.id === "settings")?.items ?? [];
 
   return (
     <Sidebar variant="inset" collapsible="icon" className="border-none">
       <SidebarHeader className="gap-3 px-2 pt-3">
-        <Link
-          href={items[0]?.href ?? "/admin"}
-          onClick={closeMobile}
-          className="flex items-center gap-2.5 rounded-xl px-1.5 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-        >
-          <BrandMark />
-          <span className="grid min-w-0 gap-0.5 group-data-[collapsible=icon]:hidden">
-            <Wordmark />
-            <span className="truncate text-[0.72rem] text-sidebar-foreground/65">{storeName}</span>
-          </span>
-        </Link>
-        {canGenerate && (
+        {/* the store switcher slot (§I.4): the store on screen and the member's other stores */}
+        <StoreSwitcher memberships={memberships} consoleHref={consoleHref} />
+        {generate && (
           <SidebarMenu>
             <SidebarMenuItem>
               {/* quiet on purpose: the jade accent belongs to each screen's own primary action */}
@@ -142,7 +147,7 @@ export function AppSidebar({ user, storeName, counts }: { user: ShellUser; store
                   "group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center",
                 )}
               >
-                <Link href="/admin/generate" onClick={closeMobile}>
+                <Link href={generate.href} onClick={closeMobile}>
                   <span className="grid size-6 shrink-0 place-items-center rounded-md bg-brand text-brand-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.25)] transition-transform duration-500 ease-[cubic-bezier(.34,1.36,.64,1)] group-hover/gen:rotate-12 group-data-[collapsible=icon]:size-5 [&_svg]:size-3.5!">
                     <SparklesIcon />
                   </span>
@@ -155,27 +160,19 @@ export function AppSidebar({ user, storeName, counts }: { user: ShellUser; store
       </SidebarHeader>
 
       <SidebarContent className="adm-scroll gap-0 px-1">
-        {workspace.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className="h-7 text-[0.75rem] font-medium tracking-[-0.005em] text-sidebar-foreground/65">Workspace</SidebarGroupLabel>
+        {body.map((g) => (
+          <SidebarGroup key={g.id}>
+            <SidebarGroupLabel className="h-7 text-[0.75rem] font-medium tracking-[-0.005em] text-sidebar-foreground/65">{g.label}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">{renderItems(workspace)}</SidebarMenu>
+              <SidebarMenu className="gap-0.5">{renderItems(g.items)}</SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-        )}
-        {library.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className="h-7 text-[0.75rem] font-medium tracking-[-0.005em] text-sidebar-foreground/65">Library</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">{renderItems(library)}</SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
+        ))}
         <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
             {counts && counts.syncFailed > 0 && (
               <Link
-                href="/admin/orders?sheet=failed"
+                href={store.href("/orders?sheet=failed")}
                 onClick={closeMobile}
                 className="mx-1 mb-2 flex items-center gap-2 rounded-xl bg-destructive/8 px-3 py-2.5 text-[0.78rem] leading-snug text-destructive ring-1 ring-destructive/15 transition-colors ring-inset hover:bg-destructive/12 group-data-[collapsible=icon]:hidden"
               >
@@ -191,14 +188,14 @@ export function AppSidebar({ user, storeName, counts }: { user: ShellUser; store
       </SidebarContent>
 
       <SidebarFooter className="px-2 pb-3">
-        <UserMenu user={user} />
+        <UserMenu user={user} roleLabel={STORE_ROLE_LABELS[store.role]} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   );
 }
 
-function UserMenu({ user }: { user: ShellUser }) {
+function UserMenu({ user, roleLabel }: { user: ShellUser; roleLabel: string }) {
   const { theme, setTheme } = useTheme();
   const { isMobile } = useSidebar();
   // the sign-out form lives outside the menu: the menu unmounts as soon as an item is chosen
@@ -223,7 +220,7 @@ function UserMenu({ user }: { user: ShellUser }) {
                   ) : (
                     <ShieldAlertIcon className="size-3 text-warn-ink" />
                   )}
-                  {ROLE_LABELS[user.role]}
+                  {roleLabel}
                 </span>
               </span>
               <ChevronsUpDownIcon className="ms-auto size-4 text-sidebar-foreground/45" />
@@ -240,7 +237,7 @@ function UserMenu({ user }: { user: ShellUser }) {
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                <Link href="/admin/settings/security">
+                <Link href={ACCOUNT_PATH}>
                   {user.totpEnabled ? <ShieldCheckIcon className="text-emerald-600 dark:text-emerald-400" /> : <ShieldAlertIcon className="text-warn-ink" />}
                   <span className="flex-1">Two-step verification</span>
                   <span className={cn("text-xs", user.totpEnabled ? "text-emerald-600 dark:text-emerald-400" : "text-warn-ink")}>
@@ -249,7 +246,7 @@ function UserMenu({ user }: { user: ShellUser }) {
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link href="/admin/settings/security">
+                <Link href={ACCOUNT_PATH}>
                   <UserRoundCogIcon />
                   Account & devices
                 </Link>

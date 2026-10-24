@@ -11,7 +11,8 @@ import { db } from "@/lib/db/client";
 import { orders, pages } from "@/lib/db/schema";
 import { toAsciiDigits } from "@/lib/markets/phone";
 import { whereStore } from "@/lib/tenancy/sql";
-import type { StoreScope } from "@/lib/tenancy/types";
+import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
+import { appHref } from "@/lib/urls";
 import { maskCustomer } from "./mask";
 import { likeEscape } from "./store-audit";
 
@@ -23,7 +24,8 @@ export interface SearchHit {
   href: string;
 }
 
-export async function searchAdmin(scope: StoreScope, q: string, opts: { pages: boolean; orders: boolean }): Promise<SearchHit[]> {
+/** `store` is the scope's own row: the hits link into its dashboard (`/app/<handle>/…`). */
+export async function searchAdmin(scope: StoreScope, store: Pick<StoreRow, "handle">, q: string, opts: { pages: boolean; orders: boolean }): Promise<SearchHit[]> {
   const term = q.trim().slice(0, 60);
   if (term.length < 2) return [];
   const pattern = `%${likeEscape(term)}%`;
@@ -69,7 +71,7 @@ export async function searchAdmin(scope: StoreScope, q: string, opts: { pages: b
         title: p.name,
         subtitle: `/${p.slug} · ${p.status}`,
         // archived pages only show under the Archived filter
-        href: `/admin/pages?focus=${p.id}${p.status === "archived" ? "&status=archived" : ""}`,
+        href: appHref(store.handle, `/pages?focus=${p.id}${p.status === "archived" ? "&status=archived" : ""}`),
       }),
     ),
     ...orderRows
@@ -80,7 +82,7 @@ export async function searchAdmin(scope: StoreScope, q: string, opts: { pages: b
           id: o.id,
           title: `${o.id} · ${o.name}`,
           subtitle: [o.productName, o.city].filter(Boolean).join(" · "),
-          href: `/admin/orders?order=${encodeURIComponent(o.id)}`,
+          href: appHref(store.handle, `/orders?order=${encodeURIComponent(o.id)}`),
         }),
       ),
   ];

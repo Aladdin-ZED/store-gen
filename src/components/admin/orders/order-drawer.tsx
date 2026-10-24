@@ -29,7 +29,8 @@ import { ConfirmDialog } from "../common/confirm-dialog";
 import { writeClipboard } from "../common/copy-button";
 import { StatusChip } from "../common/status-chip";
 import { RelativeTime } from "../common/time";
-import { runAction, type ActionResult } from "../lib/action-result";
+import { actionMessage, runAction, type ActionResult } from "../lib/action-result";
+import { useStore } from "../shell/store-context";
 import { dateTime, money, phone as fmtPhone } from "../lib/format";
 import { orderStatusMeta, riskFlagLabel, riskLevel, SHEET_STATUS_META } from "../lib/status";
 import { OrderContents } from "./order-contents";
@@ -67,6 +68,7 @@ export function OrderDrawer({
   /** a mutation succeeded (refresh the list) */
   onChanged: () => void;
 }) {
+  const storeView = useStore();
   const [loaded, setLoaded] = useState<{ id: string; order: OrderDetailJson | null; error?: string } | null>(null);
   const [reload, setReload] = useState(0);
   const [statusPending, setStatusPending] = useState(false);
@@ -78,7 +80,7 @@ export function OrderDrawer({
     let cancelled = false;
     actions.get(orderId).then(
       (res) => {
-        if (!cancelled) setLoaded(res.ok ? { id: orderId, order: res.data } : { id: orderId, order: null, error: res.error });
+        if (!cancelled) setLoaded(res.ok ? { id: orderId, order: res.data } : { id: orderId, order: null, error: actionMessage(res) });
       },
       () => {
         if (!cancelled) setLoaded({ id: orderId, order: null, error: "Couldn't load this order. Check your connection." });
@@ -302,13 +304,13 @@ export function OrderDrawer({
                       <dt className="shrink-0 text-muted-foreground">Page</dt>
                       <dd className="min-w-0">
                         <a
-                          href={`/${order.page.slug}`}
+                          href={storeView.live(order.page.slug)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          title={`/${order.page.slug}`}
+                          title={storeView.livePath(order.page.slug)}
                           className="flex max-w-full items-center gap-1 font-medium hover:underline"
                         >
-                          <span className="min-w-0 truncate">/{order.page.slug}</span>
+                          <span className="min-w-0 truncate">{storeView.livePath(order.page.slug)}</span>
                           <ArrowUpRightIcon className="size-3 shrink-0" />
                         </a>
                       </dd>

@@ -11,7 +11,7 @@ import { CheckIcon, CopyIcon, PlusIcon, RadarIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { wizardPixelsAction, type RecentPagePixels } from "@/app/admin/(panel)/settings/pixels/actions";
+import { wizardPixelsAction, type RecentPagePixels } from "@/lib/pixels/actions";
 import type { Tracking } from "@/lib/page/schema";
 import { PIXEL_LIMIT, PIXEL_PLATFORMS, type PixelPlatform } from "@/lib/pixels/ids";
 import { editTracking, findEntryView, idsOnly, maskPixelId, pixelLabel, trackingRefs, type LibraryPixel, type PixelLibraryView } from "@/lib/pixels/library";

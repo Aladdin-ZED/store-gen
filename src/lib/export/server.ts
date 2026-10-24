@@ -31,10 +31,9 @@ import { whatsappDigits, whatsappNumber } from "@/lib/render/config";
 import { publicOrigin } from "@/lib/render/publish.server";
 import { invalidateExportOrigins } from "@/lib/orders/export-origins";
 import { errorSummary } from "@/lib/orders/log";
-import { getStoreSettings } from "@/lib/settings";
+import { storeInfoFor } from "@/lib/admin-data/store-info";
 import { getSheetsConfig } from "@/lib/sheets/config";
 import { scopedCache } from "@/lib/tenancy/cache";
-import { getStoreById } from "@/lib/tenancy/public";
 import { byId, inStore, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { Actor, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { collectAssetIds, type StoreInfo } from "@/landing/context";
@@ -124,27 +123,15 @@ function apiOriginState(): { origin: string | null; blocker: string | null } {
 
 /**
  * The store's identity for its exported documents: `stores.name`, Settings → Store and the brand logo (D76,
- * DES-R16), sanitized again by storeContext() when rendering.
+ * DES-R16; the dashboard's one reader, src/lib/admin-data/store-info.ts), sanitized again by storeContext().
  */
 async function storeInfoOf(scope: StoreScope): Promise<StoreInfo> {
-  const [row, { store: s, brand }] = await Promise.all([getStoreById(scope.storeId), getStoreSettings(scope, ["store", "brand"])]);
-  if (!row) throw new ExportError("not_found", "This store no longer exists.");
-  const socials = Object.fromEntries(Object.entries(s.socials ?? {}).filter((e): e is [string, string] => typeof e[1] === "string" && !!e[1]));
-  return {
-    name: row.name,
-    country: s.country,
-    ...(s.legalName ? { legalName: s.legalName } : {}),
-    ...(s.phone ? { phone: s.phone } : {}),
-    ...(s.whatsapp ? { whatsapp: s.whatsapp } : {}),
-    ...(s.email ? { email: s.email } : {}),
-    ...(s.address ? { address: s.address } : {}),
-    ...(s.city ? { city: s.city } : {}),
-    ...(s.ice ? { ice: s.ice } : {}),
-    ...(s.rc ? { rc: s.rc } : {}),
-    ...(brand.logo.primary ? { logo: { id: brand.logo.primary, alt: row.name } } : {}),
-    ...(Object.keys(socials).length ? { socials } : {}),
-  };
+  return (await storeInfoFor(scope)) ?? fail404();
 }
+
+const fail404 = (): never => {
+  throw new ExportError("not_found", "This store no longer exists.");
+};
 
 /** The asset rows of `ids` that belong to the store (§E.3 rule 5: a document naming another store's image exports without it). */
 function storeAssets(scope: StoreScope, ids: readonly string[]) {

@@ -1,32 +1,32 @@
-import { DatabaseIcon } from "lucide-react";
+import { HardDriveIcon } from "lucide-react";
 import Link from "next/link";
-import type { DbUsage } from "@/lib/db/usage";
+import type { StoreStorage } from "@/lib/admin-data/assets";
 import { cn } from "@/lib/utils";
 import { bytes } from "../lib/format";
 import { StatusChip } from "./status-chip";
 
 /**
- * Database size against the hosting plan's limit (lib/db/usage). Media, pages and orders share one
- * database, and the host suspends every write once it is full, orders included.
+ * The store's media storage against its plan (`storeStorage`, ADM-06): what its photos, cutouts and clips take,
+ * never the platform's database. Without a known quota only the size shows.
  */
-const percent = (u: DbUsage) => `${Math.min(100, Math.round(u.ratio * 100))}%`;
+const percent = (u: StoreStorage) => `${Math.min(100, Math.round(u.ratio * 100))}%`;
 
 /** Compact figure for a screen header (Media). */
-export function StorageChip({ usage }: { usage: DbUsage }) {
+export function StorageChip({ usage }: { usage: StoreStorage }) {
   return (
     <StatusChip
       tone={usage.level === "full" ? "red" : usage.level === "warn" ? "warn" : "neutral"}
       dot={usage.level !== "ok"}
-      title="Media, pages and orders share one database. The host stops all writes, orders included, once it reaches its limit."
+      title="Every size and format of your files counts, the originals included."
     >
-      Database {bytes(usage.bytes)} of {bytes(usage.quotaBytes)}
+      {usage.quotaBytes ? `Storage ${bytes(usage.bytes)} of ${bytes(usage.quotaBytes)}` : `Storage ${bytes(usage.bytes)}`}
     </StatusChip>
   );
 }
 
-/** Warning line from 70 % of the limit on (nothing below). */
-export function StorageNotice({ usage, showLink = false, className }: { usage: DbUsage | null; showLink?: boolean; className?: string }) {
-  if (!usage || usage.level === "ok") return null;
+/** Warning line from 80 % of the plan's storage on (nothing below). `mediaHref` adds a link to the library. */
+export function StorageNotice({ usage, mediaHref, className }: { usage: StoreStorage | null; mediaHref?: string; className?: string }) {
+  if (!usage || usage.level === "ok" || !usage.quotaBytes) return null;
   const full = usage.level === "full";
   return (
     <div
@@ -37,18 +37,18 @@ export function StorageNotice({ usage, showLink = false, className }: { usage: D
         className,
       )}
     >
-      <DatabaseIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <HardDriveIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
       <p className="text-pretty">
         <span className="font-medium">
-          The database is {percent(usage)} full ({bytes(usage.bytes)} of {bytes(usage.quotaBytes)}).
+          Your storage is {percent(usage)} full ({bytes(usage.bytes)} of {bytes(usage.quotaBytes)}).
         </span>{" "}
         {full
-          ? "New uploads are paused so orders keep the remaining space. Delete videos and photos you no longer use."
-          : "Once it is full, the host stops every write, orders included. Delete videos and photos you no longer use, and prefer short clips."}
-        {showLink && (
+          ? "New uploads are paused. Delete videos and photos you no longer use to make room."
+          : "Uploads stop once it is full. Delete videos and photos you no longer use, and prefer short clips."}
+        {mediaHref && (
           <>
             {" "}
-            <Link href="/admin/media" className="font-medium underline underline-offset-4">
+            <Link href={mediaHref} className="font-medium underline underline-offset-4">
               Open Media
             </Link>
           </>

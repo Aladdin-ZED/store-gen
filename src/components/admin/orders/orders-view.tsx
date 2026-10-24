@@ -14,6 +14,7 @@ import { Segmented } from "../common/segmented";
 import { StatusChip, TONE_CLASSES } from "../common/status-chip";
 import { RelativeTime } from "../common/time";
 import { runAction, type ActionResult } from "../lib/action-result";
+import { useStore } from "../shell/store-context";
 import { int, money, phone as fmtPhone } from "../lib/format";
 import { runSheetSync } from "../lib/sheets-client";
 import { ORDER_STATUS_META, ORDER_STATUS_ORDER, riskLevel, SHEET_STATUS_META } from "../lib/status";
@@ -110,13 +111,14 @@ export function OrdersView(props: OrdersViewProps) {
 /** CSV of what the screen shows (filters kept); on the Abandoned tab, the leads with their selection. */
 function ExportButton({ leads }: { leads?: boolean }) {
   const query = useQueryState();
+  const storeView = useStore();
   const params = new URLSearchParams(query.params.toString());
   for (const k of ["tab", "order", "page"]) params.delete(k);
   if (leads) params.set("tab", "leads");
   const qs = params.toString();
   return (
     <Button asChild variant="outline" className="h-9 rounded-full px-4">
-      <a href={`/admin/orders/export${qs ? `?${qs}` : ""}`} download>
+      <a href={`${storeView.api("/orders/export")}${qs ? `?${qs}` : ""}`} download>
         <DownloadIcon />
         Export CSV
       </a>

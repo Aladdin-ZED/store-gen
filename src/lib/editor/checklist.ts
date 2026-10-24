@@ -27,7 +27,8 @@ export interface CheckFix {
   href?: string;
 }
 
-const STORE_SETTINGS = "/admin/settings/store";
+/** Store-relative fix link (the builder resolves it under /app/<handle>; the context form builds it with ctx.appHref). */
+const STORE_SETTINGS = "/settings/general" as const;
 
 /** A checklist entry (spec name: ChecklistItem). */
 export type ChecklistItem = CheckItem;
@@ -63,6 +64,8 @@ export function buildChecklist(doc: PageDoc, storeOrCtx: StoreHealth | LandingCh
   const store: StoreHealth = ctx ? ctx.store : (storeOrCtx as StoreHealth);
   const now = (ctx ? ctx.now : nowArg) ?? Date.now();
   const pixels = (ctx ? ctx.pixels : pixelsArg) ?? NO_PIXEL_CONTEXT;
+  // the context builds the store's absolute link; the positional form keeps it store-relative (the builder resolves it)
+  const storeSettings = ctx ? ctx.appHref(STORE_SETTINGS) : STORE_SETTINGS;
   const errors: CheckItem[] = [];
   const warnings: CheckItem[] = [];
   const add = (item: CheckItem) => (item.level === "error" ? errors : warnings).push(item);
@@ -212,10 +215,10 @@ export function buildChecklist(doc: PageDoc, storeOrCtx: StoreHealth | LandingCh
 
   /* ---- store identity (legal & contact pages) ---- */
   if (!store.hasPhone && !store.hasEmail) {
-    add({ id: "store:contact", level: "warning", title: "No contact phone or email", detail: "Add them in Settings → Store: shoppers and the legal pages need a way to reach you.", fix: { href: STORE_SETTINGS } });
+    add({ id: "store:contact", level: "warning", title: "No contact phone or email", detail: "Add them in Settings → Store: shoppers and the legal pages need a way to reach you.", fix: { href: storeSettings } });
   }
   if (!store.hasLegalName || !store.hasAddress) {
-    add({ id: "store:legal", level: "warning", title: "Legal pages are incomplete", detail: "Add your legal name and address in Settings → Store.", fix: { href: STORE_SETTINGS } });
+    add({ id: "store:legal", level: "warning", title: "Legal pages are incomplete", detail: "Add your legal name and address in Settings → Store.", fix: { href: storeSettings } });
   }
 
   /* ---- media & SEO ---- */

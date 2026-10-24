@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import type { SheetHealth } from "@/lib/admin-data/dashboard";
+import { apiHref } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "../common/confirm-dialog";
 import { CopyButton } from "../common/copy-button";
@@ -30,6 +31,8 @@ import { StatusChip } from "../common/status-chip";
 import { RelativeTime } from "../common/time";
 import { int } from "../lib/format";
 import { runSheetSync } from "../lib/sheets-client";
+import { requireStoreHandle } from "../shell/store-handle";
+import { useStore } from "../shell/store-context";
 import { SettingsSection, TextInput } from "./form-kit";
 
 export interface SheetsState {
@@ -42,12 +45,16 @@ export interface SheetsState {
   /** an ownership proof is waiting (SHT-09): when it expires (the code itself is only shown when issued) */
   pendingProof: { expiresAt: string } | null;
   health: SheetHealth;
-  /** url: browser test with ?key=; endpoint: what the cron job calls with the X-Cron-Key header */
-  cron: { configured: boolean; url: string; endpoint: string };
+  /**
+   * url: browser test with ?key=; endpoint: what the cron job calls with the X-Cron-Key header. Null for a store's
+   * members: the platform's cron is not theirs to set up (ADM-35), its health lives in the console.
+   */
+  cron: { configured: boolean; url: string; endpoint: string } | null;
 }
 
 async function call(path: string, method: string, body?: unknown): Promise<{ status: number; data: Record<string, unknown> }> {
-  const res = await fetch(`/api/admin/sheets/${path}`, {
+  // the store's Sheets API (/api/app/<handle>/sheets/…, the handle of the dashboard on screen)
+  const res = await fetch(apiHref(requireStoreHandle(), `/sheets/${path}`), {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -60,6 +67,7 @@ const msg = (d: Record<string, unknown>, fallback: string) => (typeof d.message 
 
 export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState; canWrite: boolean; canSync: boolean }) {
   const router = useRouter();
+  const store = useStore();
   const [link, setLink] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -214,7 +222,7 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
           <div className="grid grid-cols-3 gap-2">
             <QueueStat label="In the sheet" value={health.synced} />
             <QueueStat label="Waiting" value={health.pending} tone={health.pending && sheet.enabled && (health.oldestPendingMinutes ?? 0) > 15 ? "warn" : undefined} />
-            <QueueStat label="Failed" value={health.failed} tone={health.failed ? "danger" : undefined} href={health.failed ? "/admin/orders?sheet=failed" : undefined} />
+            <QueueStat label="Failed" value={health.failed} tone={health.failed ? "danger" : undefined} href={health.failed ? store.href("/orders?sheet=failed") : undefined} />
           </div>
           {health.lastError && (
             <p className="flex gap-2 rounded-xl bg-destructive/8 px-3.5 py-2.5 text-sm leading-relaxed text-destructive ring-1 ring-destructive/15 ring-inset">
@@ -280,7 +288,13 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-3 text-sm">
-                  {state.envPresent && state.problem ? (
+                  {!state.cron ? (
+                    // a store's members: the service account is the platform's to set up (ADM-35)
+                    <p className="text-muted-foreground">
+                      Google Sheets isn&apos;t switched on for this platform yet. This step completes itself as soon as it is: you will only share your
+                      sheet with one address, never your Google password.
+                    </p>
+                  ) : state.envPresent && state.problem ? (
                     <p className="flex gap-2 rounded-xl bg-destructive/8 px-3.5 py-2.5 leading-relaxed text-destructive ring-1 ring-destructive/15 ring-inset">
                       <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
                       {state.problem}
@@ -291,17 +305,21 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
                       password.
                     </p>
                   )}
-                  <ol className="grid list-decimal gap-1.5 ps-5 text-muted-foreground marker:text-foreground/40">
-                    <li>
-                      In <span className="font-medium text-foreground">console.cloud.google.com</span>, create a project and enable the <span className="font-medium text-foreground">Google Sheets API</span>.
-                    </li>
-                    <li>Create a service account, then add a JSON key and download it.</li>
-                    <li>
-                      Convert the file to base64 and set it as the <code className="rounded-md bg-foreground/[0.06] px-1.5 py-0.5 text-xs text-foreground">GOOGLE_SA_JSON_B64</code>{" "}
-                      environment variable in Hostinger, then restart the app.
-                    </li>
-                  </ol>
-                  <p className="text-xs text-muted-foreground">Step-by-step guide: docs/GOOGLE-SHEETS-SETUP.md in the project.</p>
+                  {state.cron && (
+                    <>
+                      <ol className="grid list-decimal gap-1.5 ps-5 text-muted-foreground marker:text-foreground/40">
+                        <li>
+                          In <span className="font-medium text-foreground">console.cloud.google.com</span>, create a project and enable the <span className="font-medium text-foreground">Google Sheets API</span>.
+                        </li>
+                        <li>Create a service account, then add a JSON key and download it.</li>
+                        <li>
+                          Convert the file to base64 and set it as the <code className="rounded-md bg-foreground/[0.06] px-1.5 py-0.5 text-xs text-foreground">GOOGLE_SA_JSON_B64</code>{" "}
+                          environment variable in Hostinger, then restart the app.
+                        </li>
+                      </ol>
+                      <p className="text-xs text-muted-foreground">Step-by-step guide: docs/GOOGLE-SHEETS-SETUP.md in the project.</p>
+                    </>
+                  )}
                 </div>
               )}
             </Step>
@@ -415,36 +433,38 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
         </SettingsSection>
       )}
 
-      <SettingsSection
-        id="cron"
-        title={
-          <span className="flex items-center gap-2">
-            <ClockIcon className="size-4 text-muted-foreground" /> Background sync job
-          </span>
-        }
-        description="Orders are sent the moment they're placed. A cron job every 5 minutes retries anything Google refused and pulls the statuses your agents set in the sheet."
-        aside={<StatusChip tone={state.cron.configured ? "emerald" : "warn"}>{state.cron.configured ? "Key configured" : "CRON_KEY missing"}</StatusChip>}
-        style={{ ["--i" as string]: 2 }}
-      >
-        <div className="grid grid-cols-1 gap-3 text-sm">
-          <p className="text-muted-foreground">
-            First open this address in your browser, with your <code className="rounded-md bg-foreground/[0.06] px-1.5 py-0.5 text-xs text-foreground">CRON_KEY</code>{" "}
-            value at the end. It should answer <code className="font-mono text-xs">{'{"ok":true,…}'}</code>:
-          </p>
-          <div className="flex items-center gap-2 rounded-xl bg-foreground/[0.04] py-1.5 ps-3.5 pe-1.5 ring-1 ring-foreground/[0.06] ring-inset">
-            <KeyRoundIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            <code className="min-w-0 flex-1 truncate font-mono text-[0.78rem]">{state.cron.url}</code>
-            <CopyButton value={state.cron.url} label="Copy cron URL" toastMessage="Cron URL copied — paste your key at the end" />
+      {state.cron && (
+        <SettingsSection
+          id="cron"
+          title={
+            <span className="flex items-center gap-2">
+              <ClockIcon className="size-4 text-muted-foreground" /> Background sync job
+            </span>
+          }
+          description="Orders are sent the moment they're placed. A cron job every 5 minutes retries anything Google refused and pulls the statuses your agents set in the sheet."
+          aside={<StatusChip tone={state.cron.configured ? "emerald" : "warn"}>{state.cron.configured ? "Key configured" : "CRON_KEY missing"}</StatusChip>}
+          style={{ ["--i" as string]: 2 }}
+        >
+          <div className="grid grid-cols-1 gap-3 text-sm">
+            <p className="text-muted-foreground">
+              First open this address in your browser, with your <code className="rounded-md bg-foreground/[0.06] px-1.5 py-0.5 text-xs text-foreground">CRON_KEY</code>{" "}
+              value at the end. It should answer <code className="font-mono text-xs">{'{"ok":true,…}'}</code>:
+            </p>
+            <div className="flex items-center gap-2 rounded-xl bg-foreground/[0.04] py-1.5 ps-3.5 pe-1.5 ring-1 ring-foreground/[0.06] ring-inset">
+              <KeyRoundIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <code className="min-w-0 flex-1 truncate font-mono text-[0.78rem]">{state.cron.url}</code>
+              <CopyButton value={state.cron.url} label="Copy cron URL" toastMessage="Cron URL copied — paste your key at the end" />
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Then in Hostinger hPanel → your site → <span className="font-medium text-foreground">Advanced → Cron Jobs → Create Cron Job</span>, type Custom, every
+              5 minutes, with this one-line command (your key goes in the header, and never put a % in it):{" "}
+              <code className="font-mono break-all">
+                curl -fsS --max-time 110 -o /dev/null -H &quot;X-Cron-Key: YOUR_CRON_KEY&quot; &quot;{state.cron.endpoint}&quot; || date &gt;&gt; &quot;$HOME/cron-tick-failures.log&quot;
+              </code>
+            </p>
           </div>
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            Then in Hostinger hPanel → your site → <span className="font-medium text-foreground">Advanced → Cron Jobs → Create Cron Job</span>, type Custom, every
-            5 minutes, with this one-line command (your key goes in the header, and never put a % in it):{" "}
-            <code className="font-mono break-all">
-              curl -fsS --max-time 110 -o /dev/null -H &quot;X-Cron-Key: YOUR_CRON_KEY&quot; &quot;{state.cron.endpoint}&quot; || date &gt;&gt; &quot;$HOME/cron-tick-failures.log&quot;
-            </code>
-          </p>
-        </div>
-      </SettingsSection>
+        </SettingsSection>
+      )}
 
       {confirmDisconnect && (
         <ConfirmDialog

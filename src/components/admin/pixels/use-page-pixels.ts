@@ -5,7 +5,7 @@
  * builder section and the publish dialog don't fetch twice; `reload()` after any pixel write.
  */
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { pagePixelsAction, pixelLibraryAction, type PagePixelsState } from "@/app/admin/(panel)/settings/pixels/actions";
+import { pagePixelsAction, pixelLibraryAction, type PagePixelsState } from "@/lib/pixels/actions";
 import type { PixelLibraryView } from "@/lib/pixels/library";
 
 type Listener = () => void;

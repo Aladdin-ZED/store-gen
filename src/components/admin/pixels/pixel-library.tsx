@@ -30,7 +30,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { pixelLibraryAction, pixelUsageAction, removePixelEntryAction, savePixelEntryAction, type PixelPageUse } from "@/app/admin/(panel)/settings/pixels/actions";
+import { pixelLibraryAction, pixelUsageAction, removePixelEntryAction, savePixelEntryAction, type PixelPageUse } from "@/lib/pixels/actions";
 import { PIXEL_LIMIT, PIXEL_PLATFORMS, isServerPlatform, type PixelPlatform } from "@/lib/pixels/ids";
 import { LABEL_MAX, inUse, isDetached, pixelLabel, usageText, type LibraryPixel, type PixelLibraryView } from "@/lib/pixels/library";
 import { cn } from "@/lib/utils";
@@ -41,6 +41,7 @@ import { runAction } from "../lib/action-result";
 import { ReadOnlyNote, SettingsSection } from "../settings/form-kit";
 import { PixelEntryDialog, type EntryMode } from "./entry-dialog";
 import { MaskedId, PLATFORM_META, PixelHealthLine, PixelStatusChip, PlatformMark } from "./parts";
+import { useStore } from "../shell/store-context";
 import { ReplaceDialog } from "./replace-dialog";
 import { useNow } from "./use-page-pixels";
 
@@ -384,6 +385,7 @@ function InlineLabel({ pixel, editable, onSave }: { pixel: LibraryPixel; editabl
 }
 
 function UsagePopover({ pixel }: { pixel: LibraryPixel }) {
+  const storeView = useStore();
   const [list, setList] = useState<PixelPageUse[] | null>(null);
   const [open, setOpen] = useState(false);
   const used = inUse(pixel.usage);
@@ -416,7 +418,7 @@ function UsagePopover({ pixel }: { pixel: LibraryPixel }) {
           <ul className="grid max-h-72 gap-0.5 overflow-y-auto adm-scroll">
             {list.map((u) => (
               <li key={u.pageId}>
-                <Link href={`/admin/pages/${u.pageId}/edit`} className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-foreground/[0.04]">
+                <Link href={storeView.href(`/pages/${u.pageId}/edit`)} className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-foreground/[0.04]">
                   <span className="min-w-0 flex-1 truncate" dir="auto">
                     {u.name}
                   </span>

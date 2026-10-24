@@ -4,12 +4,13 @@ import { ArrowUpRightIcon, ChevronRightIcon, MoonIcon, SearchIcon, SunIcon } fro
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCommandPalette, Kbd } from "./command-palette";
-import { activeNav, SETTINGS_NAV } from "./nav";
+import { useStore } from "./store-context";
+import { activeNav, SETTINGS_NAV, storeNav } from "./store-nav";
 
 const noop = () => () => {};
 /** "⌘" on Apple platforms, "Ctrl" elsewhere (server snapshot: "Ctrl"). */
@@ -21,21 +22,29 @@ function useModKey(): string {
   );
 }
 
-/** Sticky frosted top bar: sidebar toggle, breadcrumb, ⌘K search, theme, and a link to the live store. */
-export function Topbar({ storeUrl }: { storeUrl: string | null }) {
+/**
+ * Sticky frosted top bar: sidebar toggle, breadcrumb (rooted at the store's name, ADM-30), ⌘K search, theme, and
+ * "View store" (the store's public home, `storeUrl()`, for members who can read pages).
+ */
+export function Topbar() {
   const pathname = usePathname();
+  const store = useStore();
   const palette = useCommandPalette();
   const { resolvedTheme, setTheme } = useTheme();
   const mod = useModKey();
-  const section = activeNav(pathname);
-  const sub = section?.id === "settings" ? SETTINGS_NAV.find((s) => pathname.startsWith(s.href)) : undefined;
+  const groups = useMemo(() => storeNav({ handle: store.handle, mode: store.mode, can: store.can }), [store]);
+  const section = activeNav(pathname, groups, store.handle);
+  const sub = section?.id === "settings" ? SETTINGS_NAV.find((s) => pathname.startsWith(store.href(s.path))) : undefined;
+  const storeUrl = store.can("pages.read") ? store.live("") : null;
 
   return (
     <div className="adm-glass sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 rounded-t-[inherit] px-3 shadow-none! ring-0 sm:px-4 md:rounded-t-xl">
       <SidebarTrigger className="-ms-1 text-muted-foreground hover:text-foreground" />
       <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
       <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-1.5 text-sm sm:flex">
-        <span className="text-muted-foreground">Studio</span>
+        <Link href={store.href()} className="max-w-[12rem] truncate text-muted-foreground transition-colors hover:text-foreground">
+          {store.name}
+        </Link>
         {section && (
           <>
             <ChevronRightIcon className="size-3.5 text-muted-foreground/60" />

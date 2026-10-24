@@ -23,6 +23,7 @@ import { useEditor, useEditorStore } from "./context";
 import { useEnv } from "./env";
 import { usePersistence } from "./persistence";
 import { EASE } from "./ui";
+import { resolveStoreHref, useStore } from "@/components/admin/shell/store-context";
 
 type Phase = "check" | "publishing" | "done";
 
@@ -52,7 +53,9 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const list = live ?? kept;
   const needsConfirm = list.sampleSectionIds.length > 0;
   const blocked = list.errors.length > 0 || (needsConfirm && !confirmReal) || !user.canPublish;
-  const url = typeof window === "undefined" ? `/${page.slug}` : `${window.location.origin}/${page.slug}`;
+  const storeView = useStore();
+  // the page's public address in its store (storeUrl: "/s/<h>/<slug>" on the platform host, P mode)
+  const url = storeView.live(page.slug);
 
   const reset = () => {
     setPhase("check");
@@ -159,7 +162,7 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                   Keep editing
                 </Button>
                 <Button asChild variant="brand">
-                  <a href={`/${page.slug}`} target="_blank" rel="noopener noreferrer">
+                  <a href={url} target="_blank" rel="noopener noreferrer">
                     Open live page
                     <ArrowUpRight />
                   </a>
@@ -171,7 +174,7 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               <div className="border-b border-[var(--bld-hairline)] px-6 pb-4 pt-5">
                 <DialogTitle className="text-[17px] font-semibold tracking-[-0.01em]">{page.status === "published" ? "Publish changes" : "Publish page"}</DialogTitle>
                 <DialogDescription className="mt-1 text-[12.5px]">
-                  Goes live at <span className="font-mono text-foreground/80">/{page.slug}</span>
+                  Goes live at <span className="font-mono text-foreground/80">{storeView.livePath(page.slug)}</span>
                 </DialogDescription>
               </div>
 
@@ -232,6 +235,7 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 }
 
 function CheckGroup({ title, items, tone, onFix }: { title: string; items: CheckItem[]; tone: "error" | "warning"; onFix: (fix: CheckFix | undefined) => void }) {
+  const storeView = useStore();
   if (!items.length) return null;
   return (
     <div className="mb-4 last:mb-0">
@@ -259,7 +263,7 @@ function CheckGroup({ title, items, tone, onFix }: { title: string; items: Check
             </div>
             {item.fix?.href ? (
               <Button variant="ghost" size="xs" className="shrink-0 opacity-70 group-hover:opacity-100" asChild>
-                <a href={item.fix.href} target="_blank" rel="noopener noreferrer" title="Opens in a new tab">
+                <a href={resolveStoreHref(storeView, item.fix.href)} target="_blank" rel="noopener noreferrer" title="Opens in a new tab">
                   Open
                   <ArrowUpRight />
                 </a>

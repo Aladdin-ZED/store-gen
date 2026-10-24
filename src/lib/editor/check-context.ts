@@ -54,7 +54,7 @@ export interface LandingCheckContext {
   facts: { allowed: string[]; byClass: Partial<Record<NumberClass, string[]>> }; // from allowedNumbersFor(), as the gate
   origin: Record<string, "generated" | "owner">; // per text-field path, who wrote it (LAN-§6.4)
   attestedFacts: string[]; // numerals attested through FactAttestSheet (audit page.fact_attested)
-  appHref: (path: `/${string}`) => string; // fix links (replaces the "/admin/settings/store" literal)
+  appHref: (path: `/${string}`) => string; // fix links under the store's dashboard ("/settings/general" → "/app/<h>/settings/general")
 }
 
 export function isLandingCheckContext(value: unknown): value is LandingCheckContext {

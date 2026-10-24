@@ -5,7 +5,7 @@
  */
 import { KeyRoundIcon, Loader2Icon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
-import { saveExportKeyAction, deleteExportKeyAction } from "@/app/admin/(panel)/settings/sheets/actions";
+import { saveExportKeyAction, deleteExportKeyAction } from "@/app/app/[store]/integrations/sheets/actions";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { ExportKeyInfo } from "@/lib/export/service-account";

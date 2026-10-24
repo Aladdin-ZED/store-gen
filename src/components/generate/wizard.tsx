@@ -13,8 +13,8 @@ import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
-import { createFromDirectionsAction } from "@/app/admin/(panel)/generate/actions";
-import { storePixelSummaryAction } from "@/app/admin/(panel)/settings/pixels/actions";
+import { createFromDirectionsAction } from "@/app/app/[store]/generate/actions";
+import { storePixelSummaryAction } from "@/lib/pixels/actions";
 import { ConfirmDialog } from "@/components/admin/common/confirm-dialog";
 import { PageHeader } from "@/components/admin/common/page-header";
 import { runAction } from "@/components/admin/lib/action-result";
@@ -51,6 +51,7 @@ import { StepOffers } from "./step-offers";
 import { StepPhotos } from "./step-photos";
 import { pixelTracking, type PixelStore } from "./tracking";
 import { WIZARD_LEAD, WIZARD_TITLE, WizardSkeleton } from "./skeleton";
+import { useStore } from "@/components/admin/shell/store-context";
 
 export interface GenerateWizardProps {
   /** Settings → AI */
@@ -67,7 +68,9 @@ export interface GenerateWizardProps {
 }
 
 const MAX_PHOTOS = 12;
-const COPY_STORAGE_KEY = "cod-studio:generate:copy:v1";
+/** The written copy of this tab, per store (GEN-03); the single-tenant key is only cleared. */
+const copyStorageKey = (storeId: string) => `sg:${storeId}:generate:copy:v1`;
+const LEGACY_COPY_KEY = "cod-studio:generate:copy:v1";
 
 /** Code-split parts fetched once the first step is idle: the generator, the page renderer of the
  *  direction previews and the library picker are all ready long before the user needs them. */
@@ -150,19 +153,20 @@ interface CopyJob {
   copy?: AiCopy;
   error?: string;
 }
-function loadCopy(): CopyJob | null {
+function loadCopy(storeId: string): CopyJob | null {
   try {
-    const raw = JSON.parse(sessionStorage.getItem(COPY_STORAGE_KEY) ?? "null") as { key?: unknown; copy?: unknown } | null;
+    sessionStorage.removeItem(LEGACY_COPY_KEY);
+    const raw = JSON.parse(sessionStorage.getItem(copyStorageKey(storeId)) ?? "null") as { key?: unknown; copy?: unknown } | null;
     const copy = AiCopy.safeParse(raw?.copy);
     return typeof raw?.key === "string" && raw.key.length < 4000 && copy.success ? { key: raw.key, status: "done", copy: copy.data } : null;
   } catch {
     return null;
   }
 }
-function saveCopy(job: CopyJob | null) {
+function saveCopy(storeId: string, job: CopyJob | null) {
   try {
-    if (job?.copy) sessionStorage.setItem(COPY_STORAGE_KEY, JSON.stringify({ key: job.key, copy: job.copy }));
-    else if (!job) sessionStorage.removeItem(COPY_STORAGE_KEY);
+    if (job?.copy) sessionStorage.setItem(copyStorageKey(storeId), JSON.stringify({ key: job.key, copy: job.copy }));
+    else if (!job) sessionStorage.removeItem(copyStorageKey(storeId));
   } catch {
     // storage unavailable: the copy is simply rewritten next time
   }
@@ -182,10 +186,11 @@ function classifyVibe(c: ClassifyResult | null): string | null {
 
 function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCreatePixels = false, afterSkeleton }: GenerateWizardProps & { afterSkeleton: boolean }) {
   const router = useRouter();
+  const storeView = useStore();
   const ai = useAi({ enabled: aiSettings.enabled, maxTier: aiSettings.tier });
   /** the process-wide AI manager: stable functions for the jobs below (the hook is for display) */
   const manager = getAi();
-  const [state, dispatch] = useReducer(reducer, undefined, () => loadState() ?? initialState({ locale: defaults.locale, market: defaults.market, aiCopy: aiSettings.enabled }));
+  const [state, dispatch] = useReducer(reducer, undefined, () => loadState(storeView.id) ?? initialState({ locale: defaults.locale, market: defaults.market, aiCopy: aiSettings.enabled }));
   const { details } = state;
 
   const blobs = useRef(new Map<string, Blob>());
@@ -216,7 +221,7 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
   const [errors, setErrors] = useState<{ name?: string; price?: string }>({});
   const [creating, setCreating] = useState<number | null>(null);
   const [styleOffset, setStyleOffset] = useState(0);
-  const [copyJob, setCopyJob] = useState<CopyJob | null>(loadCopy);
+  const [copyJob, setCopyJob] = useState<CopyJob | null>(() => loadCopy(storeView.id));
   /** the store's ad pixels (ids and flags, never a token), read once for the Details step */
   const [pixelStore, setPixelStore] = useState<PixelStore>({ summary: null, failed: false });
   useEffect(() => {
@@ -237,11 +242,11 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
 
   useEffect(() => {
     const t = window.setTimeout(() => {
-      if (!finished.current) saveState(state);
+      if (!finished.current) saveState(storeView.id, state);
     }, 300);
     return () => window.clearTimeout(t);
-  }, [state]);
-  useEffect(() => saveCopy(copyJob), [copyJob]);
+  }, [storeView.id, state]);
+  useEffect(() => saveCopy(storeView.id, copyJob), [storeView.id, copyJob]);
   useEffect(() => {
     photoCount.current = state.photos.length;
   }, [state.photos.length]);
@@ -824,11 +829,11 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
         setCreating(null);
         return;
       }
-      clearState();
+      clearState(storeView.id);
       setCopyJob(null);
-      router.push(`/admin/pages/${res.id}/edit`);
+      router.push(storeView.href(`/pages/${res.id}/edit`));
     },
-    [built.directions, copyState.state, stopCopy, name, router, pixelStore.summary, pagePixels, details.tracking],
+    [built.directions, copyState.state, stopCopy, name, router, storeView, pixelStore.summary, pagePixels, details.tracking],
   );
 
   /* ---- navigation ---- */
@@ -896,7 +901,7 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
     analysisRun.current = null;
     auto.current = { classify: null, analysis: null, copy: null };
     photoCount.current = 0;
-    clearState();
+    clearState(storeView.id);
     setCopyJob(null);
     setJobs({ classify: IDLE, analysis: IDLE, cutout: IDLE });
     setErrors({});

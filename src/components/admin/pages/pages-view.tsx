@@ -18,6 +18,7 @@ import { SearchField } from "../common/search-field";
 import { Segmented } from "../common/segmented";
 import { runAction, type ActionResult } from "../lib/action-result";
 import { useQueryState } from "../lib/use-query-state";
+import { useStore } from "../shell/store-context";
 import { ExportDialog, PagePreviewDialog } from "../on-demand";
 import { editHref, PageCard, type PageAction, type PagePermissions } from "./page-card";
 import { livePageMissingPixels, useLivePixels } from "./page-pixels";
@@ -39,7 +40,6 @@ export function PagesView({
   counts,
   assets,
   store,
-  origin,
   can,
   actions,
   focusId,
@@ -48,13 +48,12 @@ export function PagesView({
   counts: Record<PageStatus | "active", number>;
   assets: PreviewAssets;
   store?: StoreInfo;
-  /** public origin (PUBLIC_URL); the current origin is used when unset */
-  origin: string | null;
   can: PagePermissions;
   actions: PageActions;
   focusId?: string;
 }) {
   const router = useRouter();
+  const storeView = useStore();
   const query = useQueryState();
   const status = (query.get("status") || "active") as PageStatus | "active";
   const sort = query.get("sort") || "updated";
@@ -71,7 +70,8 @@ export function PagesView({
     [pages, livePixels, noPixelOnly],
   );
 
-  const urlFor = (slug: string) => `${origin ?? (typeof window !== "undefined" ? window.location.origin : "")}/${slug}`;
+  // the store's public address of a page (storeUrl: P mode "<origin>/s/<h>/<slug>", S mode "https://<h>.<root>/<slug>")
+  const urlFor = (slug: string) => storeView.live(slug);
 
   useEffect(() => {
     if (!focusId) return;
@@ -92,7 +92,7 @@ export function PagesView({
   const onAction = async (action: PageAction, page: PageListItem) => {
     switch (action) {
       case "edit":
-        router.push(editHref(page.id));
+        router.push(editHref(storeView, page.id));
         return;
       case "preview":
         setPreview(page);
@@ -187,7 +187,7 @@ export function PagesView({
             actions={
               can.write ? (
                 <Button asChild variant="brand" className="h-10 rounded-full px-5">
-                  <Link href="/admin/generate">
+                  <Link href={storeView.href("/generate")}>
                     <SparklesIcon />
                     Generate a page
                   </Link>
@@ -215,7 +215,7 @@ export function PagesView({
           ))}
           {can.write && status === "active" && pages.length < 3 && (
             <Link
-              href="/admin/generate"
+              href={storeView.href("/generate")}
               className="adm-surface-flat adm-aurora adm-rise group flex min-h-72 flex-col items-center justify-center gap-3 p-6 text-center transition-colors hover:bg-muted/70"
               style={{ ["--i" as string]: pages.length + 3 }}
             >
@@ -240,7 +240,7 @@ export function PagesView({
             switch (confirm.kind) {
               case "publish":
                 return act(p, actions.publish(p.id), (d) =>
-                  d.skippedSections ? `Live at /${d.slug} — ${d.skippedSections} section(s) were left out` : `Live at /${d.slug}`,
+                  d.skippedSections ? `Live at ${storeView.livePath(d.slug)} — ${d.skippedSections} section(s) were left out` : `Live at ${storeView.livePath(d.slug)}`,
                 );
               case "unpublish":
                 return act(p, actions.unpublish(p.id), "Page taken offline");
@@ -265,7 +265,7 @@ export function PagesView({
           doc={preview.doc}
           assets={assets}
           store={store}
-          editHref={can.write && preview.status !== "archived" ? editHref(preview.id) : undefined}
+          editHref={can.write && preview.status !== "archived" ? editHref(storeView, preview.id) : undefined}
           liveUrl={preview.status === "published" ? urlFor(preview.slug) : null}
         />
       )}
@@ -277,13 +277,14 @@ export function PagesView({
 
 function PageConfirm({ confirm, onClose, run }: { confirm: NonNullable<Confirm>; onClose: () => void; run: () => Promise<boolean> }) {
   const { page, kind } = confirm;
+  const address = useStore().livePath(page.slug);
   const copy = {
     publish: {
       title: page.status === "published" ? `Publish changes to “${page.name}”?` : `Publish “${page.name}”?`,
       description:
         page.status === "published"
-          ? `Visitors of /${page.slug} will get the current draft right away. The previous version stays in History.`
-          : `The page goes live at /${page.slug} and starts accepting orders.`,
+          ? `Visitors of ${address} will get the current draft right away. The previous version stays in History.`
+          : `The page goes live at ${address} and starts accepting orders.`,
       label: page.status === "published" ? "Publish changes" : "Publish",
       pending: "Publishing…",
       icon: <GlobeIcon />,
@@ -291,7 +292,7 @@ function PageConfirm({ confirm, onClose, run }: { confirm: NonNullable<Confirm>;
     },
     unpublish: {
       title: `Take “${page.name}” offline?`,
-      description: `/${page.slug} stops answering immediately and ads pointing to it will land on a 404. Your draft and versions are kept.`,
+      description: `${address} stops answering immediately and ads pointing to it will land on a 404. Your draft and versions are kept.`,
       label: "Unpublish",
       pending: "Unpublishing…",
       icon: <ArchiveIcon />,

@@ -9,7 +9,6 @@ const COPY: Record<ChecklistItem["id"], { title: string; text: string }> = {
   twofactor: { title: "Turn on two-step verification", text: "A code from your phone at every sign-in." },
   publish: { title: "Publish your first page", text: "Generate a page from product photos, then go live." },
   home: { title: "Choose the home page", text: "The page visitors see at your domain's root." },
-  cron: { title: "Schedule the sync job", text: "An hPanel cron every 5 min keeps Sheets in sync." },
 };
 
 /** Setup progress: ring + ordered steps; done steps settle into a quiet checked state. */

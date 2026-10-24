@@ -1,7 +1,8 @@
 "use client";
 /**
- * The command palette itself (search, jump-to, actions, appearance) — code-split out of the panel
- * shell: CommandPaletteProvider loads it on first open (and prefetches it once the screen is idle).
+ * The command palette itself (search, jump-to, actions, appearance) — code-split out of the dashboard
+ * shell: CommandPaletteProvider loads it on first open (and prefetches it once the screen is idle). Every
+ * target is the store on screen's (`useStore().href`), filtered by the member's grants (ADM-31).
  */
 import {
   ArrowRightIcon,
@@ -19,7 +20,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Command,
   CommandEmpty,
@@ -30,13 +31,16 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { logout } from "@/lib/auth/actions";
-import { legacyCan as can, type Role } from "@/lib/auth/permissions";
 import type { SearchHit } from "@/lib/admin-data/search";
+import type { ActionResult } from "../lib/action-result";
 import { Kbd } from "./kbd";
-import { navFor } from "./nav";
+import { useStore } from "./store-context";
+import { storeNav } from "./store-nav";
 
-export function Palette({ role, search, close }: { role: Role; search: (q: string) => Promise<SearchHit[]>; close: () => void }) {
+export function Palette({ search, close }: { search: (q: string) => Promise<ActionResult<SearchHit[]>>; close: () => void }) {
   const router = useRouter();
+  const store = useStore();
+  const can = store.can;
   const { setTheme } = useTheme();
   const [query, setQuery] = useState("");
   // results are keyed by the query they answer, so "loading" is derived (no state juggling)
@@ -51,7 +55,8 @@ export function Palette({ role, search, close }: { role: Role; search: (q: strin
     const t = setTimeout(async () => {
       let hits: SearchHit[] = [];
       try {
-        hits = await search(q);
+        const res = await search(q);
+        hits = res.ok ? res.data : [];
       } catch {
         hits = [];
       }
@@ -74,14 +79,14 @@ export function Palette({ role, search, close }: { role: Role; search: (q: strin
     [close, router],
   );
 
-  const nav = navFor(role);
+  const nav = useMemo(() => storeNav({ handle: store.handle, mode: store.mode, can: store.can }).flatMap((g) => g.items), [store]);
   const pageHits = hits.filter((h) => h.kind === "page");
   const orderHits = hits.filter((h) => h.kind === "order");
 
   return (
     <Command loop className="rounded-2xl! bg-popover p-0">
       <div className="relative border-b border-border/70 px-1 pt-1">
-        <CommandInput value={query} onValueChange={setQuery} placeholder="Search pages and orders, or jump to…" className="h-12 text-[0.95rem]" />
+        <CommandInput value={query} onValueChange={setQuery} placeholder={`Search ${store.name}, or jump to…`} className="h-12 text-[0.95rem]" />
         {loading && <Loader2Icon aria-hidden="true" className="absolute end-4 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
       </div>
       <CommandList className="adm-scroll max-h-[min(60vh,26rem)] p-1.5">
@@ -132,19 +137,19 @@ export function Palette({ role, search, close }: { role: Role; search: (q: strin
 
         <CommandSeparator />
         <CommandGroup heading="Actions">
-          {can(role, "pages.write") && (
-            <CommandItem value="action generate new page" keywords={["create", "ai"]} onSelect={() => go("/admin/generate")} className="gap-3 rounded-lg">
+          {can("pages.write") && (
+            <CommandItem value="action generate new page" keywords={["create", "ai"]} onSelect={() => go(store.href("/generate"))} className="gap-3 rounded-lg">
               <SparklesIcon className="text-brand" />
               Generate a new page
             </CommandItem>
           )}
-          {can(role, "media.write") && (
-            <CommandItem value="action upload media" keywords={["image", "photo"]} onSelect={() => go("/admin/media?upload=1")} className="gap-3 rounded-lg">
+          {can("media.write") && (
+            <CommandItem value="action upload media" keywords={["image", "photo"]} onSelect={() => go(store.href("/media?upload=1"))} className="gap-3 rounded-lg">
               <UploadIcon className="text-muted-foreground" />
               Upload photos
             </CommandItem>
           )}
-          {can(role, "orders.read") && (
+          {can("orders.export") && (
             <CommandItem
               value="action export orders csv"
               keywords={["download", "excel"]}
@@ -152,7 +157,7 @@ export function Palette({ role, search, close }: { role: Role; search: (q: strin
                 close();
                 // a file download (route handler), not a page: let the browser fetch it
                 const a = document.createElement("a");
-                a.href = "/admin/orders/export";
+                a.href = store.api("/orders/export");
                 a.download = "";
                 a.click();
               }}
@@ -162,8 +167,8 @@ export function Palette({ role, search, close }: { role: Role; search: (q: strin
               Export all orders (CSV)
             </CommandItem>
           )}
-          {can(role, "settings.read") && (
-            <CommandItem value="action google sheets" keywords={["connect", "sync"]} onSelect={() => go("/admin/settings/sheets")} className="gap-3 rounded-lg">
+          {can("settings.read") && (
+            <CommandItem value="action google sheets" keywords={["connect", "sync"]} onSelect={() => go(store.href("/integrations/sheets"))} className="gap-3 rounded-lg">
               <SheetIcon className="text-muted-foreground" />
               Google Sheets connection
             </CommandItem>

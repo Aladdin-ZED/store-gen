@@ -2,6 +2,7 @@ import { CalendarDaysIcon, MousePointerClickIcon, ReceiptTextIcon, ShoppingBagIc
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import type { DashboardData } from "@/lib/admin-data/dashboard";
+import { appHref } from "@/lib/urls";
 import { EmptyState } from "../common/empty-state";
 import { PageHeader } from "../common/page-header";
 import { Screen } from "../common/screen";
@@ -13,16 +14,19 @@ import { SetupChecklist } from "./setup-checklist";
 import { SheetHealthCard } from "./sheet-health";
 
 /**
- * The dashboard screen (server-renderable; data comes from getDashboard()). A first-run variant
- * replaces the KPI grid with a welcome card and the setup checklist until there are pages or orders.
+ * The dashboard screen of one store (server-renderable; data comes from getDashboard()). A first-run variant
+ * replaces the KPI grid with a welcome card and the setup checklist until there are pages or orders. Every link is
+ * the store's (`appHref(handle, …)`).
  */
 export function DashboardView({
+  handle,
   data,
   greeting,
   firstName,
   todayLabel,
   can,
 }: {
+  handle: string;
   data: DashboardData;
   /** "Good morning" etc., computed in the store time zone */
   greeting: string;
@@ -49,7 +53,7 @@ export function DashboardView({
           <>
             {can.orders && (
               <Button asChild variant="outline" className="h-9 rounded-full px-4">
-                <Link href="/admin/orders">
+                <Link href={appHref(handle, "/orders")}>
                   <ReceiptTextIcon />
                   Orders
                 </Link>
@@ -57,7 +61,7 @@ export function DashboardView({
             )}
             {can.write && (
               <Button asChild variant="brand" className="h-9 rounded-full px-4">
-                <Link href="/admin/generate">
+                <Link href={appHref(handle, "/generate")}>
                   <SparklesIcon />
                   Generate a page
                 </Link>
@@ -66,8 +70,8 @@ export function DashboardView({
           </>
         }
       >
-        {/* from 70 % of the plan's database limit on: past it the host stops every write, orders included */}
-        {data.storage && data.storage.level !== "ok" ? <StorageNotice usage={data.storage} showLink /> : undefined}
+        {/* from 80 % of the plan's storage on (the §I.4 quota banner): past it uploads stop */}
+        {data.storage && data.storage.level !== "ok" ? <StorageNotice usage={data.storage} mediaHref={appHref(handle, "/media")} /> : undefined}
       </PageHeader>
 
       {firstRun ? (
@@ -75,12 +79,12 @@ export function DashboardView({
           <EmptyState
             className="lg:col-span-7"
             illustration="sparkles"
-            title="Your studio is ready"
-            description="Drop a few product photos, pick a direction, and COD Studio art-directs a complete cash-on-delivery page: copy, offers and order form included."
+            title="Your store is ready"
+            description="Drop a few product photos, pick a direction, and the generator art-directs a complete cash-on-delivery page: copy, offers and order form included."
             actions={
               can.write ? (
                 <Button asChild variant="brand" className="h-10 rounded-full px-5">
-                  <Link href="/admin/generate">
+                  <Link href={appHref(handle, "/generate")}>
                     <SparklesIcon />
                     Generate your first page
                   </Link>
@@ -153,8 +157,8 @@ export function DashboardView({
           </div>
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-            <TopPages pages={data.topPages} currency={currency} className="lg:col-span-7" />
-            <RecentOrders orders={data.recentOrders} className="lg:col-span-5" />
+            <TopPages handle={handle} pages={data.topPages} currency={currency} className="lg:col-span-7" />
+            {can.orders && <RecentOrders handle={handle} orders={data.recentOrders} className="lg:col-span-5" />}
           </div>
         </div>
       )}

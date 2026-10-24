@@ -10,7 +10,9 @@
  *  - Leaving the page with unsaved work asks for confirmation.
  *  - Edits the server has not confirmed are kept in this browser (localStorage) whenever a save
  *    fails or the tab is hidden / closed, so a reload, a crash, an expired session or a redeploy
- *    never loses them: the next time the page opens, the builder offers to bring them back.
+ *    never loses them: the next time the page opens, the builder offers to bring them back. The copies are
+ *    keyed by store and member (LND-29, TENANCY-MAP §7.8): on a shared device, another member or another store's
+ *    dashboard never sees them.
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -18,8 +20,9 @@ import { saveDraft } from "@/lib/editor/actions";
 import type { EditorStore } from "@/lib/editor/store";
 import { jsonBytes, MAX_DOC_BYTES } from "@/lib/editor/types";
 import { PageDoc } from "@/lib/page/schema";
+import { useStore } from "@/components/admin/shell/store-context";
 import { useEditorStore } from "./context";
-import { fullTime } from "./env";
+import { fullTime, useEnv } from "./env";
 
 const AUTOSAVE_DELAY = 1500;
 const RETRY_STEPS = [3_000, 8_000, 20_000, 45_000, 60_000];
@@ -50,8 +53,12 @@ interface Backup {
   doc: unknown;
 }
 
-/** One copy per page and per editor tab, so a clean tab never wipes another tab's unsaved work. */
-const backupKey = (pageId: string, tab: string) => `${BACKUP_PREFIX}${pageId}:${tab}`;
+/** Whose copies: the store on screen and the signed-in member ("<storeId>:<userId>:"). */
+type Owner = string;
+const ownerOf = (storeId: string, userId: string): Owner => `${storeId}:${userId}:`;
+
+/** One copy per store, member, page and editor tab, so a clean tab never wipes another tab's unsaved work. */
+const backupKey = (owner: Owner, pageId: string, tab: string) => `${BACKUP_PREFIX}${owner}${pageId}:${tab}`;
 
 function removeBackup(key: string): void {
   try {
@@ -62,25 +69,25 @@ function removeBackup(key: string): void {
 }
 
 /** Keep the current doc in this browser while the server does not hold it. */
-function writeBackup(store: EditorStore, tab: string): void {
+function writeBackup(store: EditorStore, owner: Owner, tab: string): void {
   const s = store.getState();
   if (s.doc === s.savedDoc) return;
   try {
     const backup: Backup = { v: 1, at: Date.now(), baseUpdatedAt: s.page.updatedAt, doc: s.doc };
-    localStorage.setItem(backupKey(s.page.id, tab), JSON.stringify(backup));
+    localStorage.setItem(backupKey(owner, s.page.id, tab), JSON.stringify(backup));
   } catch {
     // quota or storage blocked: the beforeunload prompt is the remaining safety net
   }
 }
 
 /** Every valid copy left for a page, newest first (expired or damaged ones are deleted). */
-function readBackups(pageId: string): { key: string; at: number; baseUpdatedAt: number; doc: PageDoc }[] {
+function readBackups(owner: Owner, pageId: string): { key: string; at: number; baseUpdatedAt: number; doc: PageDoc }[] {
   const out: { key: string; at: number; baseUpdatedAt: number; doc: PageDoc }[] = [];
   try {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key?.startsWith(`${BACKUP_PREFIX}${pageId}:`)) keys.push(key);
+      if (key?.startsWith(`${BACKUP_PREFIX}${owner}${pageId}:`)) keys.push(key);
     }
     for (const key of keys) {
       try {
@@ -103,10 +110,10 @@ function readBackups(pageId: string): { key: string; at: number; baseUpdatedAt: 
 /* queue + autosave                                                    */
 /* ------------------------------------------------------------------ */
 
-function createPersistence(store: EditorStore): Persistence & { start(): () => void } {
+function createPersistence(store: EditorStore, owner: Owner): Persistence & { start(): () => void } {
   const tab = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
-  const backup = () => writeBackup(store, tab);
-  const dropBackup = () => removeBackup(backupKey(store.getState().page.id, tab));
+  const backup = () => writeBackup(store, owner, tab);
+  const dropBackup = () => removeBackup(backupKey(owner, store.getState().page.id, tab));
   let tail: Promise<unknown> = Promise.resolve();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let failures = 0;
@@ -208,10 +215,10 @@ function createPersistence(store: EditorStore): Persistence & { start(): () => v
 }
 
 /** Offer the unsaved edits an earlier session of this page left in the browser (the newest copy). */
-function offerRecovery(store: EditorStore): () => void {
+function offerRecovery(store: EditorStore, owner: Owner): () => void {
   const s = store.getState();
   const current = JSON.stringify(s.doc);
-  const copies = readBackups(s.page.id).filter((b) => {
+  const copies = readBackups(owner, s.page.id).filter((b) => {
     if (JSON.stringify(b.doc) !== current) return true;
     removeBackup(b.key); // already what the server holds
     return false;
@@ -241,9 +248,10 @@ const PersistenceContext = createContext<Persistence | null>(null);
 
 export function PersistenceProvider({ children }: { children: ReactNode }) {
   const store = useEditorStore();
-  const [p] = useState(() => createPersistence(store));
+  const owner = ownerOf(useStore().id, useEnv().user.id);
+  const [p] = useState(() => createPersistence(store, owner));
   useEffect(() => p.start(), [p]);
-  useEffect(() => offerRecovery(store), [store]);
+  useEffect(() => offerRecovery(store, owner), [store, owner]);
   return <PersistenceContext.Provider value={p}>{children}</PersistenceContext.Provider>;
 }
 
