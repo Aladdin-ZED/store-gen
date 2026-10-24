@@ -3,15 +3,15 @@
  * Pattern: every attempt consumes budget (atomic upsert in rateLimit()), a fully successful sign-in clears the
  * account budgets. This makes lockouts race-free under concurrent guesses.
  *
- * Every bucket is platform-level (`p:`); C0b's `platformBucket(name, key)` builds the same strings (CCR r1.0-t2-2),
- * so the switch to the branded type changes no live bucket.
+ * Every bucket is platform-level (`p:`), built by `platformBucket(name, key)` (§E.8): the strings are byte-identical
+ * to the hand-built ones before the C0b merge (CCR r1.0-t2-2), so the switch changed no live bucket.
  */
 import "server-only";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { rateLimits } from "@/lib/db/schema";
 import { hashIp, hmac } from "@/lib/security/crypto";
-import { rateLimit, type RateResult } from "@/lib/security/rate-limit";
+import { platformBucket, rateLimit, type Bucket, type RateResult } from "@/lib/security/rate-limit";
 import {
   LOGIN_ACCT_LIMIT,
   LOGIN_ACCTNET_LIMIT,
@@ -31,25 +31,25 @@ const DAY = 24 * HOUR;
 
 /** Bucket names never contain raw identifiers (e-mails and IPs are keyed hashes, user ids are ULIDs). */
 export const buckets = {
-  loginIp: (ip: string) => `p:login:ip:${hashIp(ip)}`,
+  loginIp: (ip: string) => platformBucket("login:ip", hashIp(ip)),
   /** one account from one network: hmac(email | network hash) */
-  loginAcctNet: (email: string, ip: string) => `p:login:acctnet:${hmac(`${email}|${hashIp(ip)}`, "login-acctnet")}`,
+  loginAcctNet: (email: string, ip: string) => platformBucket("login:acctnet", hmac(`${email}|${hashIp(ip)}`, "login-acctnet")),
   /** one account from every network (challenge only) */
-  loginAcct: (email: string) => `p:login:acct:${hmac(email, "login-account")}`,
-  mfaIp: (ip: string) => `p:mfa:ip:${hashIp(ip)}`,
-  mfaUser: (userId: string) => `p:mfa:user:${userId}`,
-  mfaManage: (userId: string) => `p:mfa:manage:${userId}`,
-  mfaStepUp: (userId: string) => `p:mfa:stepup:${userId}`,
+  loginAcct: (email: string) => platformBucket("login:acct", hmac(email, "login-account")),
+  mfaIp: (ip: string) => platformBucket("mfa:ip", hashIp(ip)),
+  mfaUser: (userId: string) => platformBucket("mfa:user", userId),
+  mfaManage: (userId: string) => platformBucket("mfa:manage", userId),
+  mfaStepUp: (userId: string) => platformBucket("mfa:stepup", userId),
   /** password change and the tenant password step-up (§B.7, §E.8 rev 3) */
-  passwordChange: (userId: string) => `p:password:${userId}`,
-  setupIp: (ip: string) => `p:setup:ip:${hashIp(ip)}`,
-  signupIp: (ip: string) => `p:signup:ip:${hashIp(ip)}`,
+  passwordChange: (userId: string) => platformBucket("password", userId),
+  setupIp: (ip: string) => platformBucket("setup:ip", hashIp(ip)),
+  signupIp: (ip: string) => platformBucket("signup:ip", hashIp(ip)),
   /** the velocity signal of scoreSignup (PLA-§3.4.1): completed signups per network and day */
-  signupNet: (ip: string) => `p:signup:net:${hashIp(ip)}`,
-  inviteAcceptIp: (ip: string) => `p:invite:accept:ip:${hashIp(ip)}`,
-  resetIp: (ip: string) => `p:reset:ip:${hashIp(ip)}`,
-  handleIp: (ip: string) => `p:handle:ip:${hashIp(ip)}`,
-  storeCreate: (userId: string) => `p:store:create:${userId}`,
+  signupNet: (ip: string) => platformBucket("signup:net", hashIp(ip)),
+  inviteAcceptIp: (ip: string) => platformBucket("invite:accept:ip", hashIp(ip)),
+  resetIp: (ip: string) => platformBucket("reset:ip", hashIp(ip)),
+  handleIp: (ip: string) => platformBucket("handle:ip", hashIp(ip)),
+  storeCreate: (userId: string) => platformBucket("store:create", userId),
 };
 
 export const limits = {
@@ -86,13 +86,13 @@ export const PUBLIC_FORM_LIMITS: Readonly<Record<string, { limit: number; window
   report: { limit: 5, windowSec: HOUR },
 };
 
-export function publicFormBucket(name: string, ip: string): string {
-  return `p:${name}:ip:${hashIp(ip)}`;
+export function publicFormBucket(name: string, ip: string): Bucket {
+  return platformBucket(`${name}:ip`, hashIp(ip));
 }
 
 /** The current count of a bucket's live window, without counting anything (0 when absent or expired). */
-export async function peekBucket(bucket: string): Promise<number> {
-  const key = bucket.slice(0, 191);
+export async function peekBucket(bucket: Bucket): Promise<number> {
+  const key: string = bucket;
   const [rows] = (await db.execute(sql`SELECT count FROM rate_limits WHERE bucket = ${key} AND reset_at > UTC_TIMESTAMP(3)`)) as unknown as [
     { count: number | string }[],
   ];
@@ -100,14 +100,14 @@ export async function peekBucket(bucket: string): Promise<number> {
 }
 
 /** Gives one attempt back to each live bucket (never below 0): a sign-in answered `challenge` costs no account budget. */
-export async function refundBuckets(bucketNames: readonly string[]): Promise<void> {
-  const keys = bucketNames.map((b) => b.slice(0, 191));
+export async function refundBuckets(bucketNames: readonly Bucket[]): Promise<void> {
+  const keys: string[] = [...bucketNames];
   if (keys.length === 0) return;
   await db.execute(
     sql`UPDATE rate_limits SET count = GREATEST(0, count - 1) WHERE bucket IN (${sql.join(keys.map((k) => sql`${k}`), sql`, `)}) AND reset_at > UTC_TIMESTAMP(3)`,
   );
 }
 
-export async function clearBucket(bucket: string): Promise<void> {
-  await db.delete(rateLimits).where(eq(rateLimits.bucket, bucket.slice(0, 191)));
+export async function clearBucket(bucket: Bucket): Promise<void> {
+  await db.delete(rateLimits).where(eq(rateLimits.bucket, bucket));
 }

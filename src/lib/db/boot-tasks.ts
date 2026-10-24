@@ -38,6 +38,7 @@ import { LEGAL_SEED, LEGAL_SEED_VERSION } from "@/lib/platform/data/legal";
 import { PROTECTED_BRANDS } from "@/lib/platform/data/protected-brands";
 import { getPlatformSetting, setPlatformSetting, type PlatformActor } from "@/lib/settings";
 import { byId, whereStore } from "@/lib/tenancy/sql";
+import type { WriteScope } from "@/lib/tenancy/types";
 import { withBootLock } from "./boot-lock";
 import { newId } from "./ids";
 import { pendingMigrationCount } from "./migrate";
@@ -50,6 +51,26 @@ const SYSTEM: PlatformActor = { id: "system", kind: "system" };
 
 const checksumOf = (doc: unknown) => createHash("sha256").update(JSON.stringify(doc), "utf8").digest("hex");
 
+/** One store's published landing versions: the checksum of the validated document, rewritten where it differs. */
+async function syncStoreChecksums(scope: WriteScope): Promise<{ pages: number; updated: number }> {
+  const live = await db
+    .select({ versionId: pages.publishedVersionId })
+    .from(pages)
+    .where(whereStore(pages, scope, isNotNull(pages.publishedVersionId), eq(pages.kind, "landing")));
+  let updated = 0;
+  for (const p of live) {
+    const [v] = await db.select({ doc: pageVersions.doc, checksum: pageVersions.checksum }).from(pageVersions).where(byId(pageVersions, scope, p.versionId!)).limit(1);
+    if (!v) continue;
+    const { doc } = validateDoc(v.doc);
+    if (!doc) continue;
+    const checksum = checksumOf(doc);
+    if (checksum === v.checksum) continue;
+    await db.update(pageVersions).set({ checksum }).where(byId(pageVersions, scope, p.versionId!));
+    updated++;
+  }
+  return { pages: live.length, updated };
+}
+
 export async function syncPublishedChecksums(): Promise<{ skipped: boolean; stores: number; pages: number; updated: number }> {
   if ((await getPlatformSetting("doc_schema", { fresh: true })) >= DOC_SCHEMA) return { skipped: true, stores: 0, pages: 0, updated: 0 };
 
@@ -59,22 +80,9 @@ export async function syncPublishedChecksums(): Promise<{ skipped: boolean; stor
   let total = 0;
   let updated = 0;
   for (const store of all) {
-    const scope = systemScope(ctx, store.id);
-    const live = await db
-      .select({ versionId: pages.publishedVersionId })
-      .from(pages)
-      .where(whereStore(pages, scope, isNotNull(pages.publishedVersionId), eq(pages.kind, "landing")));
-    total += live.length;
-    for (const p of live) {
-      const [v] = await db.select({ doc: pageVersions.doc, checksum: pageVersions.checksum }).from(pageVersions).where(byId(pageVersions, scope, p.versionId!)).limit(1);
-      if (!v) continue;
-      const { doc } = validateDoc(v.doc);
-      if (!doc) continue;
-      const checksum = checksumOf(doc);
-      if (checksum === v.checksum) continue;
-      await db.update(pageVersions).set({ checksum }).where(byId(pageVersions, scope, p.versionId!));
-      updated++;
-    }
+    const r = await syncStoreChecksums(systemScope(ctx, store.id));
+    total += r.pages;
+    updated += r.updated;
   }
   // the marker is written last: an interrupted run starts over on the next boot
   await setPlatformSetting("doc_schema", DOC_SCHEMA, SYSTEM);

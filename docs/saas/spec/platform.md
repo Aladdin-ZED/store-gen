@@ -4227,7 +4227,7 @@ hidden" line before `V` (PD69), and the Risk strip reads "No protected term on l
   `src/components/admin/common/{address-card.tsx, health-ring.tsx, health-groups.tsx, issue-row.tsx, issue-list.tsx,
   today-brief.tsx, kpi-tile.tsx, funnel-chart.tsx, freshness-dot.tsx, skeleton.tsx}`, **rev 3:**
   `src/components/admin/common/mode-explainer.tsx` (PD72), `src/components/admin/settings/audit-view.tsx` (PD75), the
-  `estimateAlpha` call site in `welcome/**` (the function itself is P6's, PD74), the redesigned
+  `estimateAlpha` call site in `src/app/app/[store]/welcome/**` (the function itself is P6's, PD74), the redesigned
   `src/components/admin/dashboard/**` (deletes `setup-checklist.tsx`; `kpi-card.tsx` is replaced by `kpi-tile.tsx`),
   `src/lib/admin-data/{dashboard.ts, search.ts}` (rewritten around the P0 read APIs and the search providers),
   `scripts/qa/{admin-motion-check,admin-rtl-lint}.ts`, `scripts/qa/wow-demo/steps/shell.ts` (contributed steps),

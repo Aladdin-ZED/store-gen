@@ -17,7 +17,7 @@ import { assertActionOrigin } from "@/lib/tenancy/seam";
 import type { ActionResult } from "@/lib/tenancy/types";
 import { consoleHref } from "@/lib/urls";
 import { FieldsError } from "./errors";
-import { signOut, stepUpAction, stepUpWithPasswordAction, userAction } from "./index";
+import { signOut, userAction } from "./index";
 import { rememberLastStore } from "./landing";
 import { LOGIN_PATH } from "./paths";
 
@@ -30,12 +30,12 @@ export async function logout(): Promise<void> {
 
 /** The step-up sheet (§B.7): a TOTP code (staff always; tenants with 2FA), bucket p:mfa:stepup:<userId>. */
 export async function stepUpTotpAction(code: string): Promise<ActionResult<{ until: string }>> {
-  return stepUpAction(code);
+  return userAction(async (ctx) => (await import("./step-up")).stepUpWithTotp(ctx, code));
 }
 
 /** The tenant ladder's password re-entry for an account without TOTP (SEC-17); refused under impersonation. */
 export async function stepUpPasswordAction(password: string): Promise<ActionResult<{ until: string }>> {
-  return stepUpWithPasswordAction(password);
+  return userAction(async (ctx) => (await import("./step-up")).stepUpWithPassword(ctx, password));
 }
 
 /** The switcher's choice as the session's picker hint; never an authorisation (the seam re-checks every request). */

@@ -309,14 +309,12 @@ export async function userAction<T>(fn: (ctx: UserCtx) => Promise<T>): Promise<A
 
 /** §B.7: a TOTP code refreshes `sessions.step_up_at` (bucket p:mfa:stepup:<userId> 5 / 15 min); the console's and the tenant's step-up sheet. */
 export async function stepUpAction(code: string): Promise<ActionResult<{ until: string }>> {
-  const { stepUpWithTotp } = await import("./step-up");
-  return stepUpWithTotp(code);
+  return userAction(async (ctx) => (await import("./step-up")).stepUpWithTotp(ctx, code));
 }
 
 /** rev 4 (PLA Q4.8, §B.7): the tenant step-up without TOTP (bucket p:password:<userId>, the scrypt semaphore); refused under impersonation. */
 export async function stepUpWithPasswordAction(password: string): Promise<ActionResult<{ until: string }>> {
-  const { stepUpWithPassword } = await import("./step-up");
-  return stepUpWithPassword(password);
+  return userAction(async (ctx) => (await import("./step-up")).stepUpWithPassword(ctx, password));
 }
 
 /**

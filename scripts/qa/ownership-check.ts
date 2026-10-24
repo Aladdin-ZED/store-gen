@@ -567,8 +567,8 @@ function contractRows(rows: Row[]): void {
   for (const phase of PHASES) {
     for (const t of TRACKS[phase]) add(t, [phase], "core §K.1 / §K.3 (CCR notes)", [`docs/saas/ccr/{r1.0,r1,r2,r3}-${t.toLowerCase()}-*.md`]);
   }
-  // §F.1 L4 / §E.6: the lint's allow file; LAN Q23 names the maintainer as its owner (C0b writes it in R1.0)
-  add("maintainer", PHASES, "core §F.1 L4, LAN Q23", ["scripts/qa/tenancy-allow.json"]);
+  // §K.3: the maintainer's own notes (the CCRs it files while applying the tracks' ones, e.g. r1.0-m-3)
+  add("maintainer", PHASES, "core §K.3 (maintainer CCR notes)", ["docs/saas/ccr/{r1.0,r1,r2,r3}-m-*.md"]);
 }
 
 export function loadRows(): Row[] {
@@ -641,8 +641,12 @@ interface IgnoreRule {
 function ignoreRules(dir: string): IgnoreRule[] {
   const file = `${ROOT}/${dir ? `${dir}/` : ""}.gitignore`;
   if (!existsSync(file)) return [];
+  return ignoreRulesFrom(readFileSync(file, "utf8"), dir);
+}
+
+function ignoreRulesFrom(text: string, dir: string): IgnoreRule[] {
   const out: IgnoreRule[] = [];
-  for (let line of readFileSync(file, "utf8").split(/\r?\n/)) {
+  for (let line of text.split(/\r?\n/)) {
     line = line.replace(/(?<!\\)\s+$/, "");
     if (!line || line.startsWith("#")) continue;
     let negate = false;
@@ -686,7 +690,13 @@ function ignored(rules: IgnoreRule[], rel: string, isDir: boolean): boolean {
   return verdict;
 }
 
-/** Every file git would track: the tree minus `.git` and the .gitignore rules (nested files included). */
+/** `.git/info/exclude` (when a `.git` directory exists): the clone's own ignore rules, read like a root .gitignore. */
+function excludeRules(): IgnoreRule[] {
+  const file = `${ROOT}/.git/info/exclude`;
+  return existsSync(file) ? ignoreRulesFrom(readFileSync(file, "utf8"), "") : [];
+}
+
+/** Every file git would track: the tree minus `.git`, `.git/info/exclude` and the .gitignore rules (nested files included). */
 export function workingTree(): string[] {
   const files: string[] = [];
   const walk = (dir: string, rules: IgnoreRule[]) => {
@@ -705,7 +715,7 @@ export function workingTree(): string[] {
       else files.push(rel);
     }
   };
-  walk("", []);
+  walk("", excludeRules());
   return files;
 }
 

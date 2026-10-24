@@ -92,6 +92,11 @@ async function load<K extends SettingKey>(key: K): Promise<SettingValue<K>> {
 }
 
 export async function getSetting<K extends SettingKey>(key: K, opts: { fresh?: boolean } = {}): Promise<SettingValue<K>> {
+  return readLegacy(key, opts);
+}
+
+/* the legacy API's bodies, shared by its four exports (removed together with them, §D.10) */
+async function readLegacy<K extends SettingKey>(key: K, opts: { fresh?: boolean } = {}): Promise<SettingValue<K>> {
   if (!opts.fresh) {
     const hit = cached(key);
     if (hit !== undefined) return hit;
@@ -137,6 +142,10 @@ export async function setSetting<K extends SettingKey>(
   input: SettingInput<K>,
   actor?: SettingsActor,
 ): Promise<SettingValue<K>> {
+  return writeLegacy(key, input, actor);
+}
+
+async function writeLegacy<K extends SettingKey>(key: K, input: SettingInput<K>, actor?: SettingsActor): Promise<SettingValue<K>> {
   const def = SETTINGS[key];
   const value = settingSchema(key).parse(input);
   const stored: unknown = def.secret ? encrypt(JSON.stringify(value), purpose(key)) : value;
@@ -164,13 +173,13 @@ export async function updateSetting<K extends SettingKey>(
   patch: Partial<SettingInput<K>>,
   actor?: SettingsActor,
 ): Promise<SettingValue<K>> {
-  const current = (await getSetting(key, { fresh: true })) as Record<string, unknown>;
+  const current = (await readLegacy(key, { fresh: true })) as Record<string, unknown>;
   const merged: Record<string, unknown> = { ...current };
   for (const [field, value] of Object.entries(patch as Record<string, unknown>)) {
     if (value === undefined || isMaskedSecret(value)) continue;
     merged[field] = value;
   }
-  return setSetting(key, merged as SettingInput<K>, actor);
+  return writeLegacy(key, merged as SettingInput<K>, actor);
 }
 
 export function invalidateSettings(key?: SettingKey): void {

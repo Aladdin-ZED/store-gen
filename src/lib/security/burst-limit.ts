@@ -46,6 +46,8 @@ export const BURST_LIMITS = {
   reset: { limit: 30, windowSec: 600 },
   report: { limit: 20, windowSec: 600 },
   login: { limit: 60, windowSec: 600 },
+  /** the signup form's live handle check (publicAction("handle"), one call per pause in typing): the database keeps 60 / 10 min */
+  handle: { limit: 120, windowSec: 600 },
 } as const;
 
 export type BurstScope = keyof typeof BURST_LIMITS;

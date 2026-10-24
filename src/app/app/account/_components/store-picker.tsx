@@ -22,7 +22,7 @@ const card =
  * staff, the console. Arrow keys move between cards, Enter opens one, `/` focuses the filter (above 6 stores).
  * Choosing a store remembers it on the session (a picker hint, never an authorisation) and opens its dashboard.
  */
-export function StorePicker({ stores, canCreate, console: showConsole }: { stores: PickerStore[]; canCreate: boolean; console: boolean }) {
+export function StorePicker({ stores, canCreate, consoleHref }: { stores: PickerStore[]; canCreate: boolean; consoleHref: string | null }) {
   const t = useAuthT();
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -111,8 +111,8 @@ export function StorePicker({ stores, canCreate, console: showConsole }: { store
         ) : (
           <div className={cn(card, "content-center justify-items-center border-dashed text-center text-xs text-muted-foreground")}>{t("app.picker.create_limit")}</div>
         )}
-        {showConsole && (
-          <Link data-card href="/admin" className={cn(card, "content-center justify-items-center text-center hover:border-[oklch(0.6_0.1_205/0.45)]")}>
+        {consoleHref && (
+          <Link data-card href={consoleHref} className={cn(card, "content-center justify-items-center text-center hover:border-[oklch(0.6_0.1_205/0.45)]")}>
             <ShieldIcon aria-hidden="true" className="size-5 text-[oklch(0.5_0.09_205)] dark:text-[oklch(0.78_0.08_205)]" />
             <span className="text-sm font-medium">{t("app.bar.console")}</span>
           </Link>

@@ -92,7 +92,6 @@ async function cases(c: mysql.Connection): Promise<void> {
   const teamActions = await import("@/app/app/[store]/team/actions");
   type PlatformRole = import("@/lib/auth/permissions").PlatformRole;
   type PlatformCtx = import("@/lib/tenancy/types").PlatformCtx;
-  type WriteCtx = import("@/lib/tenancy/types").WriteCtx;
   type SessionUser = import("@/lib/auth").SessionUser;
   type PublicActionCtx = import("@/lib/auth/public-action").PublicActionCtx;
   type HumanCheck = import("@/lib/auth/turnstile").HumanCheck;
@@ -122,7 +121,7 @@ async function cases(c: mysql.Connection): Promise<void> {
     return { userId: r.userId, storeId: r.storeId, handle: r.handle };
   };
   const ctxOf = async (userId: string, handle: string, extra: { stepUpAt?: Date } = {}) =>
-    (await runAsIdentity({ userId, path: null, ...extra }, () => seam.requireStoreMember({ handle, throwOnFail: true }))) as WriteCtx;
+    seam.memberWriteCtx(await runAsIdentity({ userId, path: null, ...extra }, () => seam.requireStoreMember({ handle, throwOnFail: true })));
   const addMember = async (storeId: string, role: string, email: string) => {
     const acc = await users.createAccount({ email, name: `${role} ${email.split("@")[0]}`, password: PASSWORD, locale: "en" });
     await c.query("INSERT INTO store_members (store_id, user_id, role, status) VALUES (?, ?, ?, 'active')", [storeId, acc.userId, role]);
@@ -247,7 +246,7 @@ async function cases(c: mysql.Connection): Promise<void> {
   ok("revoke: the link stops working", (await invites.previewInvite(tokenOf(i6.url))) === null && (await caught(invites.acceptInvite(tokenOf(i6.url), { email: "", name: "R", password: PASSWORD, locale: "en" }))) === "invalid:team.invite.invalid");
   ok("revoke: twice → conflict", (await caught(invites.revokeInvite(ownerA, i6.inviteId))) === "conflict:team.invite.not_pending");
   const i7 = await invites.createInvite(ownerA, { email: "late@example.ma", role: "viewer" });
-  await c.query("UPDATE store_invites SET expires_at = UTC_TIMESTAMP(3) - INTERVAL 1 SECOND WHERE id = ?", [i7.inviteId]);
+  await c.query("UPDATE store_invites SET expires_at = UTC_TIMESTAMP(3) - INTERVAL 1 SECOND WHERE store_id = ? AND id = ?", [A.storeId, i7.inviteId]);
   ok("expiry: an expired link → invalid", (await invites.previewInvite(tokenOf(i7.url))) === null && (await caught(invites.acceptInvite(tokenOf(i7.url), { email: "", name: "L", password: PASSWORD, locale: "en" }))) === "invalid:team.invite.invalid");
   const states = Object.fromEntries((await invites.listInvites(ownerA)).map((i) => [i.id, i.state]));
   ok("list: the states", states[i1.inviteId] === "accepted" && states[i6.inviteId] === "revoked" && states[i7.inviteId] === "expired" && states[i2.inviteId] === "accepted", states);
@@ -357,7 +356,7 @@ async function cases(c: mysql.Connection): Promise<void> {
   const asOwner = <T>(fn: () => Promise<T>, path: string | null = null) => runAsIdentity({ sessionToken: ownerSession.token, path }, fn);
   const stepTarget = await addMember(A.storeId, "editor", "step.target@example.ma");
   await c.query("UPDATE sessions SET step_up_at = UTC_TIMESTAMP(3) - INTERVAL 301 SECOND WHERE id = ?", [ownerSession.id]);
-  const staleCtx = (await asOwner(() => seam.requireStoreMember({ handle: A.handle, throwOnFail: true }))) as WriteCtx;
+  const staleCtx = seam.memberWriteCtx(await asOwner(() => seam.requireStoreMember({ handle: A.handle, throwOnFail: true })));
   ok("step-up: 5 min 1 s old → stepUpUntil in the past", !!staleCtx.stepUpUntil && staleCtx.stepUpUntil.getTime() < Date.now(), staleCtx.stepUpUntil);
   ok("step-up: an expired one refuses a promotion to admin", (await caught(invites.changeMemberRole(staleCtx, { userId: stepTarget, role: "admin" }))) === "seam:step_up");
   const staleAction = await asOwner(() => teamActions.changeMemberRoleAction({ userId: stepTarget, role: "admin" }), `/app/${A.handle}/team`);
@@ -381,14 +380,14 @@ async function cases(c: mysql.Connection): Promise<void> {
   const noCloseStep = await asCloser(closeAction, `/app/${C.handle}/settings`);
   ok("owner close: no step-up → step_up, the store unchanged", !noCloseStep.ok && noCloseStep.error === "step_up" && (await statusOf(C.storeId)) === closeFrom, { noCloseStep, closeFrom });
   await c.query("UPDATE sessions SET step_up_at = UTC_TIMESTAMP(3) - INTERVAL 301 SECOND WHERE id = ?", [closerSession.id]);
-  const staleCloser = (await asCloser(() => seam.requireStoreMember({ handle: C.handle, throwOnFail: true }))) as WriteCtx;
+  const staleCloser = seam.memberWriteCtx(await asCloser(() => seam.requireStoreMember({ handle: C.handle, throwOnFail: true })));
   const staleClose = await transitionStore(staleCloser, C.storeId, "closed", { reason: "owner_request" }).then(
     () => "ok",
     (e: unknown) => (e instanceof LifecycleError ? e.code : `other:${String(e)}`),
   );
   ok("owner close: a stale stepUpUntil → LifecycleError step_up (the lifecycle's own check)", staleClose === "step_up" && (await statusOf(C.storeId)) === closeFrom, staleClose);
   await c.query("UPDATE sessions SET step_up_at = UTC_TIMESTAMP(3) - INTERVAL 60 SECOND WHERE id = ?", [closerSession.id]);
-  const freshCloser = (await asCloser(() => seam.requireStoreMember({ handle: C.handle, throwOnFail: true }))) as WriteCtx;
+  const freshCloser = seam.memberWriteCtx(await asCloser(() => seam.requireStoreMember({ handle: C.handle, throwOnFail: true })));
   ok("owner close: the seam fills stepUpUntil from step_up_at + 5 min", !!freshCloser.stepUpUntil && Math.abs(freshCloser.stepUpUntil.getTime() - (Date.now() + 240_000)) < 5_000, freshCloser.stepUpUntil);
   const freshClose = await asCloser(closeAction, `/app/${C.handle}/settings`);
   ok("owner close: a fresh step-up → closed through storeAction", freshClose.ok && (await statusOf(C.storeId)) === "closed", freshClose);
@@ -483,7 +482,7 @@ async function cases(c: mysql.Connection): Promise<void> {
 
   await imp.startImpersonation(sup, { storeId: A.storeId, reason: "bug", minutes: 15 });
   const third = (await one<{ impersonation_id: string }>("SELECT impersonation_id FROM sessions WHERE id = ?", [staffSession.id]))!.impersonation_id;
-  await c.query("UPDATE impersonation_sessions SET expires_at = UTC_TIMESTAMP(3) - INTERVAL 1 SECOND WHERE id = ?", [third]);
+  await c.query("UPDATE impersonation_sessions SET expires_at = UTC_TIMESTAMP(3) - INTERVAL 1 SECOND WHERE store_id = ? AND id = ?", [A.storeId, third]);
   ok("expiry: an expired view is refused", (await caught(asStaff(() => seam.requireStoreMember({ handle: A.handle, throwOnFail: true })))) === "seam:not_found");
   const expired = await one<{ ended_reason: string | null }>("SELECT ended_reason FROM impersonation_sessions WHERE id = ?", [third]);
   ok("expiry: the row ends itself (expired)", expired?.ended_reason === "expired", expired);

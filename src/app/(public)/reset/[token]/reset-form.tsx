@@ -5,12 +5,12 @@ import { useAuthT } from "@/lib/auth/i18n/client";
 import type { AdminLocale } from "@/lib/i18n/admin";
 import { FormAlert, PasswordField, SubmitButton } from "../../_components/form-ui";
 import { TurnstileField } from "../../_components/turnstile-field";
-import { IDLE } from "../../_lib/form-state";
+import { IDLE, formStateOf, type FormState } from "../../_lib/form-state";
 import { resetAction } from "./actions";
 
 export function ResetForm({ token, locale, siteKey, nonce }: { token: string; locale: AdminLocale; siteKey: string | null; nonce?: string }) {
   const t = useAuthT();
-  const [state, action, pending] = useActionState(resetAction, IDLE);
+  const [state, action, pending] = useActionState(async (prev: FormState, data: FormData) => formStateOf(await resetAction(data), prev, data), IDLE);
   const formRef = useRef<HTMLFormElement>(null);
   const error = state.status === "error" ? state : null;
   const fe = (name: string) => (error?.fieldErrors?.[name] ? t(error.fieldErrors[name]) : undefined);

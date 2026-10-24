@@ -3,6 +3,7 @@
     "The allow file of scripts/qa/tenancy-lint.ts (docs/STORE-SAAS.md §E.6, §F.1). Owned by the core maintainer from the C0b merge.",
     "entries: process-wide state in src/lib/** that lint L4 accepts. Each one names the file, the symbol (the globalThis name, or the module variable) and why it holds no data of one store that another could see. A cache keyed by store goes through scopedCache() instead and needs no entry.",
     "A module-scope Map / Set that is never changed after module load (typed ReadonlySet / ReadonlyMap, or only read) needs no entry either.",
+    "actions: exported server actions that cannot start with return storeAction / platformAction / userAction / publicAction (lint L9), each with why; added only by the maintainer (CCR r1.0-m-3).",
     "pins: the most `// tenancy: platform` annotations each group may hold. A count may only grow with a reviewer's approval: the maintainer raises the pin in the same change. Counted at C0b; re-pinned at the R1.0 integration, the P1 merge (src/lib/platform/**) and the P7 merge (src/lib/ai/platform/**)."
   ],
   "entries": [
@@ -24,7 +25,6 @@
     { "file": "src/lib/tenancy/cache.ts", "symbol": "__sgStoreInvalidators", "reason": "the invalidateStore() hooks registered by name (§E.6); functions, no data" },
     { "file": "src/lib/tenancy/context.ts", "symbol": "__sgIdentity", "reason": "the AsyncLocalStorage of the test identity seam (§E.4): one value per async context, honoured only with SG_TEST_CONTEXT=1 outside production" },
     { "file": "src/lib/render/prepublish.ts", "symbol": "__sgPrePublish", "reason": "the pre-publish check and listener registry (§M.1); functions registered at import, no data" },
-    { "file": "src/lib/platform/notify.ts", "symbol": "__sgNotifyStubWarned", "reason": "a boolean: the notify() stub warns once per process until T2 writes the insert" },
     { "file": "src/lib/markets/info.ts", "symbol": "symbolGap", "reason": "Intl currency-symbol spacing per currency and locale; platform data, no store data" },
     { "file": "src/lib/markets/info.ts", "symbol": "optionsCache", "reason": "the city <select> options per market code and locale, built from the static market table; no store data" },
     { "file": "src/lib/markets/info.ts", "symbol": "indexCache", "reason": "the city lookup index per market code, built from the static market table; no store data" },
@@ -37,16 +37,30 @@
     { "file": "src/lib/theme/color.ts", "symbol": "lumCache", "reason": "relative luminance memo keyed by the colour string; pure maths, no store data" },
     { "file": "src/lib/theme/palette.ts", "symbol": "accentScales", "reason": "accent scale memo keyed by the hex colour, cleared above 512; pure maths, no store data" },
     { "file": "src/lib/theme/palette.ts", "symbol": "neutralScales", "reason": "neutral scale memo keyed by hue and chroma; pure maths, no store data" },
-    { "file": "src/lib/ai/worker/ai.worker.ts", "symbol": "jobs", "reason": "the job table of the in-browser AI Web Worker: one tab, one user; never runs on the server" }
+    { "file": "src/lib/ai/worker/ai.worker.ts", "symbol": "jobs", "reason": "the job table of the in-browser AI Web Worker: one tab, one user; never runs on the server" },
+    { "file": "src/lib/auth/password.ts", "symbol": "__sgScrypt", "reason": "the scrypt semaphore (§B.3): one process-wide gate, no tenant data (CCR r1.0-t2-4 item 2)" },
+    { "file": "src/lib/security/crypto.ts", "symbol": "keyCache", "reason": "derived keys, a bounded LRU of 512 (SET-12): pure functions of APP_SECRET and the info string, never store data" },
+    { "file": "src/lib/settings/index.ts", "symbol": "__codSettingsCache", "reason": "the legacy single-tenant API's cache of platform `settings` rows (30 s); store keys use scopedCache(\"settings\"); goes with the legacy API (§D.10)" },
+    { "file": "src/lib/tenancy/handles.ts", "symbol": "__sgHandleLists", "reason": "the snapshot of platform.reservedHandles and the protected brand terms (§C.7): platform lists, no store data" },
+    { "file": "src/lib/db/store-handles.ts", "symbol": "__sgHandleListsLoading", "reason": "the one in-flight reload of the platform handle lists (§C.7): a promise of platform data" },
+    { "file": "src/lib/jobs/scope.ts", "symbol": "__sgCronCursors", "reason": "forEachStore's in-memory cursor fallback while cron_cursors is missing (§H.4): one cursor per job name, store ids only" }
+  ],
+  "actions": [
+    { "file": "src/lib/auth/actions.ts", "symbol": "logout", "reason": "sign-out must work with an ended or half-open session, so no userAction; it checks the origin first and only ends this browser's own session (CCR r1.0-m-3)" },
+    { "file": "src/lib/auth/actions.ts", "symbol": "endImpersonationAction", "reason": "a plain <form action> of the console home (React types it as returning void); origin, then requirePlatform('stores.impersonate'), ends only this session's own view-as (CCR r1.0-m-3)" },
+    { "file": "src/app/(public)/invite/[token]/actions.ts", "symbol": "switchAccountAction", "reason": "the invite page's \"Not you?\": a sign-out like logout (any session state) as a plain <form action>; origin first, then this browser's own session ends (CCR r1.0-m-3)" },
+    { "file": "src/app/(public)/actions.ts", "symbol": "setLocaleAction", "reason": "the language menu works signed out and signed in: a preference cookie plus the caller's own account language; origin checked first (CCR r1.0-m-3)" },
+    { "file": "src/app/admin/(auth)/setup/actions.ts", "symbol": "setupAction", "reason": "the first-run gate (§B.11): no account exists yet; the admin gate, the origin, the setup token and p:setup:ip run first (CCR r1.0-m-3)" },
+    { "file": "src/app/admin/(auth)/setup/store/actions.ts", "symbol": "setupStoreAction", "reason": "the first-run gate (§B.11): the super_admin's first store before any membership; the admin gate and the origin run first (CCR r1.0-m-3)" }
   ],
   "pins": [
     { "files": ["src/lib/design/**", "src/lib/jobs/tracks/design.ts"], "max": 3, "reason": "DES-R9: novelty.server.ts and the design-reserve job together" },
     { "files": ["src/lib/health/**"], "max": 1, "reason": "§E.3 rule 6: the one store_health upsert" },
     { "files": ["src/lib/ai/platform/**"], "max": 0, "reason": "counted at the P7 merge (§F.1); 0 before it" },
-    { "files": ["src/lib/platform/**"], "max": 0, "reason": "counted at the P1 merge (§F.1, rev 3); 0 at C0b" },
-    { "files": ["src/lib/jobs/**"], "max": 0, "reason": "counted at C0b; re-pinned with a reviewer at the R1.0 integration" },
-    { "files": ["src/lib/tenancy/**"], "max": 0, "reason": "counted at C0b; re-pinned with a reviewer at the R1.0 integration" },
-    { "files": ["src/lib/auth/**"], "max": 0, "reason": "counted at C0b; re-pinned with a reviewer at the R1.0 integration" },
-    { "files": ["src/lib/db/**"], "max": 0, "reason": "counted at C0b; re-pinned with a reviewer at the R1.0 integration" }
+    { "files": ["src/lib/platform/**"], "max": 2, "reason": "R1.0 (maintainer, C0b merge): the view-as row lookup by session and the store-less notify rows; counted again at the P1 merge (§F.1, rev 3)" },
+    { "files": ["src/lib/jobs/**"], "max": 4, "reason": "R1.0 (maintainer, C0b merge, after T1): the cron_cursors reads/writes and the forEachStore iterator" },
+    { "files": ["src/lib/tenancy/**"], "max": 9, "reason": "R1.0 (maintainer, C0b merge, after T1/T2): the 0004 conversion (4), the store row and kill switches of entitlements (2), the lifecycle's store row, CAS and step-up row (3)" },
+    { "files": ["src/lib/auth/**"], "max": 9, "reason": "R1.0 (maintainer, C0b merge, after T2): a user's own memberships (switcher, setup, account deletion, signup), the legacy /admin entry check and team (removed with /admin by T4)" },
+    { "files": ["src/lib/db/**"], "max": 12, "reason": "R1.0 (maintainer, C0b merge, after T1): boot tasks and seeds (4), handle uniqueness and lists (3), the upgrade dry run (3), the audit writer and staff listing (2)" }
   ]
 }

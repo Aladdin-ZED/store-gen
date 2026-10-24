@@ -26,14 +26,19 @@ export type Bucket = string & { readonly [BUCKET]: true };
 
 /** `rate_limits.bucket` is varchar(191); a longer name would be cut and could collide with another bucket. */
 export const BUCKET_MAX = 191;
-/** Lower-case segments joined by ":": "login:ip", "sheets:connect", "test-render", "ai:u". */
-const NAME_RE = /^[a-z][a-z0-9_-]*(?::[a-z0-9][a-z0-9_.-]*)*$/;
+/**
+ * Lower-case segments joined by ":": "login:ip", "sheets:connect", "invite:accept:ip", "test-render", "ai:u"
+ * (CCR r1.0-t2-2: the multi-segment names of the §E.8 table), at most NAME_MAX characters.
+ */
+const NAME_RE = /^[a-z][a-z0-9_-]*(?::[a-z0-9_-][a-z0-9_.-]*)*$/;
+const NAME_MAX = 48;
 /** One segment: a hash, an id or a fixed word. No "@" (e-mail), no ":" (IPv6 or a nested name). */
 const KEY_RE = /^[A-Za-z0-9_.-]{1,128}$/;
 const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 
 function bucketName(prefix: string, name: string, key: string | undefined): Bucket {
-  if (!NAME_RE.test(name)) throw new RangeError(`rate bucket name "${name}" must be lower-case segments joined by ":"`);
+  if (!NAME_RE.test(name) || name.length > NAME_MAX)
+    throw new RangeError(`rate bucket name "${name.slice(0, 60)}" must be lower-case segments joined by ":", at most ${NAME_MAX} chars`);
   if (key !== undefined && (!KEY_RE.test(key) || IPV4_RE.test(key))) {
     // keys are hashes or ids, never a raw e-mail or IP (§E.8): hash them with hashIp() / hmac() first
     throw new RangeError(`rate bucket key for "${name}" must be a hash or an id (1-128 of [A-Za-z0-9_.-], not an IP)`);

@@ -34,7 +34,7 @@ COD Studio has two parts:
    Checks: `qa/verify/orange-check.mjs` and `qa/admin-visual/shoot.mjs --scan-only`.
 2. **Design must be maximally modern, smooth and precise,** with no vintage/craft motifs and no generic AI look:
    precise spacing and alignment, intentional compositions, premium states, perfect RTL. See `docs/DESIGN.md`
-   (banned list, §9 precision checklist, §10 budgets).
+   (§1.3 banned list, §11 precision checklist, §1.1 budgets).
 3. **Autonomy:** once a direction is approved, keep going and make the decisions yourself. Report them at the end.
    For big architecture changes, write a spec first (see `docs/OFFERS.md`, which went through a 3-lens review).
 4. Natural Arabic copy (Darija-friendly for Morocco), French and English. Never invent prices, ratings, stock

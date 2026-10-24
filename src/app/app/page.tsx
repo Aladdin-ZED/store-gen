@@ -6,6 +6,7 @@ import { authTranslator } from "@/lib/auth/i18n";
 import { landingPathFor, switcherData } from "@/lib/auth/landing";
 import { viewerLocale } from "@/lib/auth/locale";
 import { brandName } from "@/lib/auth/platform-config";
+import { consoleHref } from "@/lib/urls";
 import { PageTitle } from "@/app/(public)/_components/kit";
 import { AppBar } from "./account/_components/app-bar";
 import { StorePicker } from "./account/_components/store-picker";
@@ -36,7 +37,7 @@ export default async function AppHomePage() {
       <AppBar user={user} brand={brand} locale={locale} />
       <main className="mx-auto grid w-full max-w-6xl flex-1 content-start gap-8 px-4 py-10 sm:px-6 md:py-14">
         <PageTitle title={t("app.picker.title")} lead={t("app.picker.lead", { count: usable.length })} />
-        <StorePicker stores={stores} canCreate={created < STORES_PER_DAY} console={data.console} />
+        <StorePicker stores={stores} canCreate={created < STORES_PER_DAY} consoleHref={data.console ? consoleHref() : null} />
       </main>
     </>
   );

@@ -4,12 +4,12 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { useAuthT } from "@/lib/auth/i18n/client";
 import { FormAlert, SubmitButton, TextField } from "../../_components/form-ui";
 import { OtpField } from "../../_components/otp-field";
-import { IDLE } from "../../_lib/form-state";
+import { IDLE, formStateOf, type FormState } from "../../_lib/form-state";
 import { verifyAction } from "./actions";
 
 export function VerifyForm({ next }: { next: string | null }) {
   const t = useAuthT();
-  const [state, action, pending] = useActionState(verifyAction, IDLE);
+  const [state, action, pending] = useActionState(async (prev: FormState, data: FormData) => formStateOf(await verifyAction(data), prev, data), IDLE);
   const [method, setMethod] = useState<"totp" | "recovery">("totp");
   const [code, setCode] = useState("");
   const [seenState, setSeenState] = useState(state);

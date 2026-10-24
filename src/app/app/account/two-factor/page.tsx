@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getTwoFactorStatus, SECURITY_SETTINGS_PATH } from "@/lib/auth";
 import { authTranslator } from "@/lib/auth/i18n";
 import { viewerLocale } from "@/lib/auth/locale";
+import { consoleHref } from "@/lib/urls";
 import { requireUserCtx } from "@/lib/auth/user-action";
 import { Notice, PageTitle } from "@/app/(public)/_components/kit";
 import { TwoFactorManager } from "./two-factor-manager";
@@ -25,7 +26,7 @@ export default async function TwoFactorPage({ searchParams }: { searchParams: Se
   const fromSettings = params.from === "settings";
   const fromSetup = params.from === "setup";
   const reason = params.for === "console" ? "console" : params.for === "store" ? "store" : null;
-  const continueHref = fromSettings ? SECURITY_SETTINGS_PATH : fromSetup ? "/admin/setup/store" : reason === "console" ? "/admin" : "/app";
+  const continueHref = fromSettings ? SECURITY_SETTINGS_PATH : fromSetup ? consoleHref("/setup/store") : reason === "console" ? consoleHref() : "/app";
 
   // whitelisted notices only (never echo query text)
   let notice: string | null = null;

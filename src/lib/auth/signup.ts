@@ -316,6 +316,11 @@ async function insertReviewTx(tx: Tx, scope: WriteScope, row: ReviewRow): Promis
   );
 }
 
+/** The legal documents the signup accepted, on the new store (§F.9: the proof of acceptance). */
+async function insertAcceptancesTx(tx: Tx, scope: WriteScope, rows: Omit<typeof legalAcceptances.$inferInsert, "storeId">[]): Promise<void> {
+  await tx.insert(legalAcceptances).values(rows.map((r) => storeValues(scope, r)));
+}
+
 /* ------------------------------------------------------------------ */
 /* The platform state a signup reads                                   */
 /* ------------------------------------------------------------------ */
@@ -449,9 +454,11 @@ export async function signupAccount(rawForm: SignupForm, ctx: PublicActionCtx, e
         } catch {
           ipHash = null;
         }
-        await tx
-          .insert(legalAcceptances)
-          .values(legal.map((d) => ({ userId, storeId: created.scope.storeId, documentId: d.id, ipHash, ua: ctx.ua || null, context: "signup" as const })));
+        await insertAcceptancesTx(
+          tx,
+          created.scope,
+          legal.map((d) => ({ userId, documentId: d.id, ipHash, ua: ctx.ua || null, context: "signup" as const })),
+        );
       }
       if (invite && !(await consumeInviteTx(tx, invite.id))) throw new FieldsError({ inviteCode: "auth.signup.invite_invalid" });
       return created.storeId;

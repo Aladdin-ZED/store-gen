@@ -7,7 +7,7 @@ import { useAuthT } from "@/lib/auth/i18n/client";
 import type { AdminLocale } from "@/lib/i18n/admin";
 import { FormAlert, PasswordField, SubmitButton, TextField } from "../../_components/form-ui";
 import { TurnstileField } from "../../_components/turnstile-field";
-import { IDLE } from "../../_lib/form-state";
+import { IDLE, formStateOf, type FormState } from "../../_lib/form-state";
 import { acceptInviteAction } from "./actions";
 
 /** "accept": the signed-in invitee confirms; "sign_up": a new account with the invited e-mail locked (D10). */
@@ -27,7 +27,10 @@ export function AcceptForm({
   nonce?: string;
 }) {
   const t = useAuthT();
-  const [state, action, pending] = useActionState(acceptInviteAction, IDLE);
+  const [state, action, pending] = useActionState(
+    async (prev: FormState, data: FormData) => formStateOf(await acceptInviteAction(data), prev, data, { keep: ["name", "phone"] }),
+    IDLE,
+  );
   const formRef = useRef<HTMLFormElement>(null);
   const error = state.status === "error" ? state : null;
   const fe = (name: string) => (error?.fieldErrors?.[name] ? t(error.fieldErrors[name]) : undefined);

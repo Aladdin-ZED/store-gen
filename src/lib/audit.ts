@@ -10,13 +10,11 @@
  * under 4 KB. Retention (400 days, then rolled up) is a job (OS-11).
  */
 import "server-only";
-import { and, desc, eq, like, lt, or, type SQL } from "drizzle-orm";
-import { alias } from "drizzle-orm/mysql-core";
-import { db } from "@/lib/db/client";
-import { auditLog, users } from "@/lib/db/schema";
+import { eq, like, lt, or, type SQL } from "drizzle-orm";
+import { insertAuditRow, selectPlatformAuditRows, selectStoreAuditRows, type AuditRowJoined } from "@/lib/db/audit-rows";
+import { auditLog } from "@/lib/db/schema";
 import { errorSummary } from "@/lib/orders/log";
 import { hashIp } from "@/lib/security/crypto";
-import { whereStore } from "@/lib/tenancy/sql";
 import type { Actor, PlatformCtx, StoreCtx, SystemCtx } from "@/lib/tenancy/types";
 
 /** Today's auth and settings events (platform rows: `store_id` NULL, §F.5). */
@@ -204,7 +202,7 @@ export async function audit(action: AuditAction, details: AuditDetails & { scope
         ipHash = null;
       }
     }
-    await db.insert(auditLog).values({
+    await insertAuditRow({
       action: action.slice(0, 64),
       userId: details.userId ?? null,
       target: details.target ? details.target.slice(0, 191) : null,
@@ -246,8 +244,6 @@ export async function auditFrom(ctx: StoreCtx | PlatformCtx | SystemCtx, action:
 /* reading                                                             */
 /* ------------------------------------------------------------------ */
 
-const actorUser = alias(users, "audit_actor");
-const impersonatorUser = alias(users, "audit_impersonator");
 const ACTOR_KINDS: readonly Actor["kind"][] = ["user", "platform", "impersonation", "system", "api"];
 /** an action prefix: dot-separated lowercase words, e.g. "orders" or "store.member" */
 const AREA_RE = /^[a-z0-9_]{1,40}(?:\.[a-z0-9_]{1,40}){0,3}$/;
@@ -259,15 +255,7 @@ function inArea(area: string): SQL {
   return or(eq(auditLog.action, area), like(auditLog.action, `${area.replace(/[\\%_]/g, "\\$&")}.%`))!;
 }
 
-async function selectEntries(where: SQL | undefined, limit: number, tenantView: boolean): Promise<AuditEntry[]> {
-  const rows = await db
-    .select({ row: auditLog, actorName: actorUser.name, impersonatorName: impersonatorUser.name })
-    .from(auditLog)
-    .leftJoin(actorUser, eq(actorUser.id, auditLog.userId))
-    .leftJoin(impersonatorUser, eq(impersonatorUser.id, auditLog.impersonatorId))
-    .where(where)
-    .orderBy(desc(auditLog.id))
-    .limit(limit);
+function toEntries(rows: AuditRowJoined[], tenantView: boolean): AuditEntry[] {
   return rows.map(({ row: r, actorName, impersonatorName }) => {
     const entry: AuditEntry = {
       id: r.id,
@@ -315,7 +303,7 @@ export async function listAuditEntries(opts: { limit?: number; beforeId?: number
   if (opts.beforeId !== undefined) filters.push(lt(auditLog.id, opts.beforeId));
   if (opts.userId) filters.push(eq(auditLog.userId, opts.userId));
   if (opts.action) filters.push(eq(auditLog.action, opts.action));
-  return selectEntries(filters.length ? and(...filters) : undefined, pageSize(opts.limit), false);
+  return toEntries(await selectPlatformAuditRows({ conds: filters, limit: pageSize(opts.limit) }), false);
 }
 
 /**
@@ -328,13 +316,8 @@ export async function listStoreAudit(ctx: StoreCtx, opts: { beforeId?: number; l
   if (!ctx.can("audit.read")) throw new Error("forbidden: audit.read");
   if (ctx.scope.storeId !== ctx.store.id) throw new Error("tenancy: the ctx scope and store disagree");
   if (opts.area !== undefined && !AREA_RE.test(opts.area)) return [];
-  const where = whereStore(
-    auditLog,
-    ctx.scope,
-    opts.beforeId !== undefined ? lt(auditLog.id, opts.beforeId) : undefined,
-    opts.area !== undefined ? inArea(opts.area) : undefined,
-  );
-  return selectEntries(where, pageSize(opts.limit), true);
+  const conds = [opts.beforeId !== undefined ? lt(auditLog.id, opts.beforeId) : undefined, opts.area !== undefined ? inArea(opts.area) : undefined];
+  return toEntries(await selectStoreAuditRows(ctx.scope, conds, pageSize(opts.limit)), true);
 }
 
 /**
@@ -348,7 +331,6 @@ export async function listPlatformAudit(
   if (!ctx.can("audit.platform")) throw new Error("forbidden: audit.platform");
   if (opts.area !== undefined && !AREA_RE.test(opts.area)) return [];
   const filters: SQL[] = [];
-  if (opts.storeId !== undefined) filters.push(eq(auditLog.storeId, opts.storeId));
   if (opts.actorKind !== undefined) {
     const kind = ACTOR_KINDS.find((k) => k === opts.actorKind);
     if (!kind) return [];
@@ -356,5 +338,5 @@ export async function listPlatformAudit(
   }
   if (opts.beforeId !== undefined) filters.push(lt(auditLog.id, opts.beforeId));
   if (opts.area !== undefined) filters.push(inArea(opts.area));
-  return selectEntries(filters.length ? and(...filters) : undefined, pageSize(opts.limit), false);
+  return toEntries(await selectPlatformAuditRows({ storeId: opts.storeId, conds: filters, limit: pageSize(opts.limit) }), false);
 }

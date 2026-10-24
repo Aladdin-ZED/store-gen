@@ -15,49 +15,39 @@ import { isAdminLocale } from "@/lib/i18n/admin";
 import { acceptInvite } from "@/lib/tenancy/invites";
 import { resolveStoreByHandle } from "@/lib/tenancy/public";
 import { assertActionOrigin } from "@/lib/tenancy/seam";
-import { field, fieldErrorsOf, formError, type FormState } from "../../_lib/form-state";
+import type { ActionResult } from "@/lib/tenancy/types";
+import { field, formError, type FormState } from "../../_lib/form-state";
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
-export async function acceptInviteAction(_prev: FormState, data: FormData): Promise<FormState> {
-  const token = field(data, "token", 64);
-  if (!TOKEN_RE.test(token)) return formError("team.invite.invalid");
-  const values = { name: field(data, "name", 200), phone: field(data, "phone", 64) };
-  const locale = field(data, "locale", 4);
-  const viewer = await getSignedInUser();
-
-  const r = await publicAction(
+export async function acceptInviteAction(data: FormData): Promise<ActionResult<FormState>> {
+  return publicAction(
     "invite:accept",
     async (ctx) => {
+      const token = field(data, "token", 64);
+      if (!TOKEN_RE.test(token)) return formError("team.invite.invalid");
+      const locale = field(data, "locale", 4);
+      const viewer = await getSignedInUser();
       const accepted = viewer
         ? await acceptInvite(token, { userId: viewer.id })
         : await acceptInvite(token, {
             email: "",
-            name: values.name,
+            name: field(data, "name", 200),
             password: field(data, "password", 1024),
-            phone: values.phone || undefined,
+            phone: field(data, "phone", 64) || undefined,
             locale: isAdminLocale(locale) ? locale : "fr",
           });
-      return { accepted, ctx: { ip: ctx.ip, ua: ctx.ua } };
+      const store = await resolveStoreByHandle(accepted.storeHandle);
+      if (viewer) {
+        if (store && !viewer.sessionId.startsWith("ctx:")) await setSessionLastStore(viewer.sessionId, store.id);
+      } else {
+        const session = await createSession(accepted.userId, { mfaPassed: true, ip: ctx.ip, ua: ctx.ua, lastStoreId: store?.id ?? null });
+        await setSessionCookie(session.token, session.cookieExpiresAt);
+      }
+      redirect(storeHomePath({ handle: accepted.storeHandle, role: accepted.role }));
     },
     { turnstile: "when-configured", burst: "invite", token: field(data, "cf-turnstile-response", 2048) || null },
   );
-  if (!r.ok) {
-    if (r.error === "invalid" && r.items?.length) return formError(undefined, fieldErrorsOf(r.items), values);
-    return formError(r.message ?? (r.error === "rate_limited" ? "error.rate_limited" : r.error === "busy" ? "error.busy" : r.error === "challenge" ? "auth.challenge" : "error.server"), undefined, values, {
-      challenge: r.error === "challenge",
-    });
-  }
-
-  const { accepted, ctx } = r.data;
-  const store = await resolveStoreByHandle(accepted.storeHandle);
-  if (viewer) {
-    if (store && !viewer.sessionId.startsWith("ctx:")) await setSessionLastStore(viewer.sessionId, store.id);
-  } else {
-    const session = await createSession(accepted.userId, { mfaPassed: true, ip: ctx.ip, ua: ctx.ua, lastStoreId: store?.id ?? null });
-    await setSessionCookie(session.token, session.cookieExpiresAt);
-  }
-  redirect(storeHomePath({ handle: accepted.storeHandle, role: accepted.role }));
 }
 
 /** "Not you?": signs this browser out and reopens the same invitation (the e-mail binding is D10's). */

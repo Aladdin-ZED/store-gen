@@ -60,8 +60,13 @@ export async function insertStoreTx(tx: Tx, input: NewStoreRow, defaults: Platfo
     ...(input.status === "active" ? { approvedAt: now, approvedBy: input.approvedBy ?? null } : {}),
   });
   const scope = newStoreScope(storeId);
-  await tx.insert(storeMembers).values(storeValues(scope, { userId: input.createdBy, role: "owner" as const, status: "active" as const, joinedAt: now }));
+  await insertOwnerTx(tx, scope, input.createdBy, now);
   return { storeId, scope };
+}
+
+/** The creator's owner membership of the new store (lint L1: the scope is the parameter). */
+async function insertOwnerTx(tx: Tx, scope: WriteScope, userId: string, joinedAt: Date): Promise<void> {
+  await tx.insert(storeMembers).values(storeValues(scope, { userId, role: "owner" as const, status: "active" as const, joinedAt }));
 }
 
 /** `store.created` (§F.5) in the new store's audit, by its creator. */

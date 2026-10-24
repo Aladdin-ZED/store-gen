@@ -8,8 +8,11 @@ import { useAdminLocale } from "@/lib/i18n/admin/client";
 import { FormAlert, SubmitButton } from "@/app/(public)/_components/form-ui";
 import { StoreNameAndHandle } from "@/app/(public)/_components/handle-field";
 import { Section } from "@/app/(public)/_components/kit";
-import { IDLE } from "@/app/(public)/_lib/form-state";
+import { IDLE, formStateOf, type Refusals } from "@/app/(public)/_lib/form-state";
 import { createStoreAction, type NewStoreState } from "./actions";
+
+/** the refusals of a new store (its own outcomes come back as the form state); the fields stay */
+const NEW_STORE_REFUSALS: Refusals = { keys: { rate_limited: "app.new.limit" }, keep: ["storeName", "handle", "market"], fallback: (code) => `error.${code}` };
 
 /** "MA" → "Maroc" / "المغرب" / "Morocco" in the page language. */
 function regionLabel(locale: string, code: string): string {
@@ -23,7 +26,10 @@ function regionLabel(locale: string, code: string): string {
 export function NewStoreForm({ markets }: { markets: string[] }) {
   const t = useAuthT();
   const locale = useAdminLocale();
-  const [state, action, pending] = useActionState<NewStoreState, FormData>(createStoreAction, IDLE);
+  const [state, action, pending] = useActionState<NewStoreState, FormData>(
+    async (prev, data) => formStateOf(await createStoreAction(data), prev, data, NEW_STORE_REFUSALS),
+    IDLE,
+  );
   const formRef = useRef<HTMLFormElement>(null);
   const [startedAt] = useState(() => Date.now());
   const error = state.status === "error" ? state : null;

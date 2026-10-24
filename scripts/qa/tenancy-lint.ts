@@ -18,6 +18,8 @@
  *   time (rev 3, ENGC-5), so a new table is covered the day it is added.
  * - The annotation exemption (§E.3 rule 6) needs both an allowlisted file and the annotation on the statement: in its
  *   leading comments or on one of its lines. It covers the statement-level rules (L1, L2, L2b, L3, L3b, L6, L10).
+ * - An annotation is a `// tenancy:` comment on its own line before the statement or at the end of one of its lines.
+ * - L9's only exemptions are the allow file's `actions` (file + exported name + reason, maintainer only, CCR r1.0-m-3).
  * - L2 takes only the four helpers (`eq(T.storeId, scope.storeId)` alone is not a store predicate, though not L2b).
  * - L4 judges process state, so it skips the standalone `selftest*.ts` scripts, and a module-scope Map / Set that the
  *   type checker proves is never changed after module load (a ReadonlySet / ReadonlyMap slot, or only ever read) is a
@@ -141,6 +143,8 @@ interface Pin {
 }
 interface Config {
   allow: AllowEntry[];
+  /** L9: exported server actions that cannot take a seam wrapper, by file and name, each with its reason (m-3) */
+  actions: AllowEntry[];
   pins: Pin[];
   /** functions that commit a rendered version (L12) */
   publishSinks: FnRef[];
@@ -156,12 +160,14 @@ const AllowFile = z
   .object({
     $comment: z.union([z.string(), z.array(z.string())]).optional(),
     entries: z.array(z.object({ file: z.string().min(1), symbol: z.string().min(1), reason: z.string().min(8) }).strict()),
+    actions: z.array(z.object({ file: z.string().min(1), symbol: z.string().min(1), reason: z.string().min(8) }).strict()).default([]),
     pins: z.array(z.object({ files: z.array(z.string().min(1)).min(1), max: z.number().int().min(0), reason: z.string().min(4) }).strict()),
   })
   .strict();
 
 const REAL_CONFIG = (allow: z.infer<typeof AllowFile>): Config => ({
   allow: allow.entries,
+  actions: allow.actions,
   pins: allow.pins,
   publishSinks: [
     { file: F.publish, name: "publishPage" },
@@ -490,8 +496,10 @@ class Lint {
     const lines = new Map<number, Annotation["kind"]>();
     const seen = new Set<number>();
     const text = sf.text;
+    // leading comments (own line) and trailing ones (`.from(T) // tenancy: platform …` on the statement's line): TS
+    // reports a same-line comment only as trailing, so both are read (maintainer, C0b merge)
     const take = (pos: number) => {
-      for (const c of ts.getLeadingCommentRanges(text, pos) ?? []) {
+      for (const c of [...(ts.getLeadingCommentRanges(text, pos) ?? []), ...(ts.getTrailingCommentRanges(text, pos) ?? [])]) {
         if (c.kind !== ts.SyntaxKind.SingleLineCommentTrivia || seen.has(c.pos)) continue;
         seen.add(c.pos);
         const m = /^\/\/\s*tenancy:\s*(platform|public-key)\s+\S/.exec(text.slice(c.pos, c.end));
@@ -550,7 +558,7 @@ class Lint {
   }
 
   unusedAllowEntries(): AllowEntry[] {
-    return this.cfg.allow.filter((e) => !this.usedAllow.has(e));
+    return [...this.cfg.allow, ...this.cfg.actions].filter((e) => !this.usedAllow.has(e));
   }
 
   private visit(n: ts.Node): void {
@@ -1068,6 +1076,12 @@ class Lint {
   private checkActionBody(fn: FnLike, at: ts.Node, inline: boolean): void {
     if (this.l9Checked.has(fn) || !fn.body) return;
     this.l9Checked.add(fn);
+    const name = fnName(fn);
+    const allowedAction = name ? this.cfg.actions.find((a) => a.file === this.relFile && a.symbol === name) : undefined;
+    if (allowedAction) {
+      this.usedAllow.add(allowedAction);
+      return;
+    }
     const isSeam = (e: ts.Expression | undefined) => {
       if (!e) return false;
       const x = unwrap(e);
@@ -1368,9 +1382,13 @@ import type { PlatformCtx } from "@/lib/tenancy/types";
 export async function crossStore(ctx: PlatformCtx) {
   // tenancy: platform console member list across stores
   const rows = await db.select().from(storeMembers).where(eq(storeMembers.userId, "u"));
+  const trailing = await db
+    .select()
+    .from(storeMembers) // tenancy: platform a trailing annotation on one of the statement's lines
+    .where(eq(storeMembers.userId, "t"));
   const one = platformScope(ctx, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
   const minted = mintScope("member", "01ARZ3NDEKTSV4RRFFQ69G5FAV"); //! L6
-  return [rows, one, minted];
+  return [rows, trailing, one, minted];
 }
 export async function second() {
   // tenancy: platform second annotation over the fixture pin //! PIN
@@ -1450,6 +1468,10 @@ export async function bad(id: string) { //! L9
 export const arrow = async (id: string) => storeAction("pages.edit", async () => { await fixturePublish(); return id; }); //! L12
 export async function gated(id: string) {
   return storeAction("pages.edit", async () => { await fixtureGate(); await fixturePublish(); return id; });
+}
+export async function allowedAction(id: string) {
+  const x = id.trim(); // listed in the fixture allow file's actions: no L9
+  return x;
 }
 `,
   [`src/lib/${FX}/publish.ts`]: `
@@ -1534,7 +1556,8 @@ const FIXTURE_CONFIG = (real: Config): Config => ({
     { file: `src/lib/${FX}/cache.ts`, symbol: "ALLOWED", reason: "fixture: an allow-listed module Set" },
     { file: `src/lib/${FX}/cache.ts`, symbol: "__sgFixtureAllowed", reason: "fixture: an allow-listed global" },
   ],
-  pins: [{ files: [`src/lib/platform/${FX}/**`], max: 1, reason: "fixture pin" }],
+  actions: [{ file: `src/app/${FX}/actions.ts`, symbol: "allowedAction", reason: "fixture: an allow-listed action body" }],
+  pins: [{ files: [`src/lib/platform/${FX}/**`], max: 2, reason: "fixture pin" }],
   publishSinks: [{ file: `src/lib/${FX}/publish.ts`, name: "fixturePublish" }],
   prePublishGates: [{ file: `src/lib/${FX}/publish.ts`, name: "fixtureGate" }],
 });

@@ -8,6 +8,7 @@ import { useAuthT } from "@/lib/auth/i18n/client";
 import { FormAlert, PasswordField, SubmitButton, TextField } from "@/app/(public)/_components/form-ui";
 import { Section } from "@/app/(public)/_components/kit";
 import { OtpField } from "@/app/(public)/_components/otp-field";
+import type { ActionResult } from "@/lib/tenancy/types";
 import { beginEnrollmentAction, confirmEnrollmentAction, disableAction, regenerateCodesAction, type ChallengeState, type CodesState, type DisableState } from "./actions";
 import { RecoveryCodes } from "./recovery-codes";
 
@@ -17,6 +18,12 @@ const IDLE_DISABLE: DisableState = { status: "idle" };
 
 const linkClass =
   "inline-flex items-center justify-self-center gap-1.5 rounded-sm text-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring/50";
+
+/** A userAction result as the form's state: the seam's refusal (an ended session) is a form-level message. */
+function stateOf<S>(r: ActionResult<S> | undefined, prev: S): S | { status: "error"; message: string } {
+  if (!r) return prev;
+  return r.ok ? r.data : { status: "error", message: r.message ?? (r.error === "rate_limited" ? "error.rate_limited" : "error.server") };
+}
 
 export function TwoFactorManager({
   enabled,
@@ -36,9 +43,9 @@ export function TwoFactorManager({
   staff: boolean;
 }) {
   const t = useAuthT();
-  const [challenge, begin, beginning] = useActionState(beginEnrollmentAction, IDLE_CHALLENGE);
-  const [confirmed, confirm, confirming] = useActionState(confirmEnrollmentAction, IDLE_CODES);
-  const [regenerated, regenerate, regenerating] = useActionState(regenerateCodesAction, IDLE_CODES);
+  const [challenge, begin, beginning] = useActionState<ChallengeState>(async (prev: ChallengeState) => stateOf(await beginEnrollmentAction(), prev), IDLE_CHALLENGE);
+  const [confirmed, confirm, confirming] = useActionState<CodesState, FormData>(async (prev: CodesState, data: FormData) => stateOf(await confirmEnrollmentAction(prev, data), prev), IDLE_CODES);
+  const [regenerated, regenerate, regenerating] = useActionState<CodesState, FormData>(async (prev: CodesState, data: FormData) => stateOf(await regenerateCodesAction(prev, data), prev), IDLE_CODES);
 
   // fresh codes win over everything else: they are shown exactly once
   if (confirmed.status === "codes") return <RecoveryCodes codes={confirmed.recoveryCodes} continueHref={continueHref} />;
@@ -199,7 +206,7 @@ function EnabledView({
     if (regenerateError) setCode("");
   }
   const [showDisable, setShowDisable] = useState(false);
-  const [disabled, disable, disabling] = useActionState(disableAction, IDLE_DISABLE);
+  const [disabled, disable, disabling] = useActionState<DisableState, FormData>(async (prev: DisableState, data: FormData) => stateOf(await disableAction(prev, data), prev), IDLE_DISABLE);
   const disableError = disabled.status === "error" ? disabled : null;
   const low = remaining <= 3;
 

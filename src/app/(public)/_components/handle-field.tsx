@@ -39,7 +39,8 @@ function useHandleCheck(handle: string): HandleState {
     const timer = setTimeout(() => {
       void checkHandleAction(handle)
         .then((r) => {
-          if (live) setState(r.limited ? { kind: "idle" } : r.problem ? { kind: "taken", key: r.problem } : { kind: "free" });
+          // a refusal of the seam (the burst floor, the origin) says nothing about the handle: back to idle
+          if (live) setState(!r.ok || r.data.limited ? { kind: "idle" } : r.data.problem ? { kind: "taken", key: r.data.problem } : { kind: "free" });
         })
         .catch(() => {
           if (live) setState({ kind: "idle" });

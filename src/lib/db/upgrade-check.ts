@@ -236,6 +236,7 @@ export async function runUpgradeCheck(conn: Connection, opts: { batch?: number }
   const exportVersions = new Set(exportRows.map((r) => r.v));
 
   for (let offset = 0; ; offset += batch) {
+    // tenancy: platform upgrade dry run over every store's drafts (read-only)
     const [rows] = (await conn.query("SELECT id, draft FROM pages ORDER BY id LIMIT ? OFFSET ?", [batch, offset])) as unknown as [{ id: string; draft: unknown }[]];
     for (const r of rows) {
       report.scanned.drafts++;
@@ -244,6 +245,7 @@ export async function runUpgradeCheck(conn: Connection, opts: { batch?: number }
     if (rows.length < batch) break;
   }
   for (let offset = 0; ; offset += batch) {
+    // tenancy: platform upgrade dry run over every store's versions (read-only)
     const [rows] = (await conn.query("SELECT id, kind, doc FROM page_versions ORDER BY id LIMIT ? OFFSET ?", [batch, offset])) as unknown as [{ id: string; kind: string; doc: unknown }[]];
     for (const r of rows) {
       report.scanned.versions++;

@@ -5,13 +5,19 @@ import { useAuthT } from "@/lib/auth/i18n/client";
 import { useAdminLocale } from "@/lib/i18n/admin/client";
 import { FormAlert, PasswordField, SubmitButton, TextField } from "../_components/form-ui";
 import { TurnstileField } from "../_components/turnstile-field";
-import { IDLE } from "../_lib/form-state";
+import { IDLE, formStateOf, type FormState, type Refusals } from "../_lib/form-state";
 import { loginAction } from "./actions";
+
+/** the seam's refusals of a sign-in (its own outcomes come back as the form state) */
+const LOGIN_REFUSALS: Refusals = { keys: { rate_limited: "auth.login.limited", busy: "auth.login.busy" }, message: false, keep: ["email"] };
 
 export function LoginForm({ next, siteKey, nonce }: { next: string | null; siteKey: string | null; nonce?: string }) {
   const t = useAuthT();
   const locale = useAdminLocale();
-  const [state, action, pending] = useActionState(loginAction, IDLE);
+  const [state, action, pending] = useActionState(
+    async (prev: FormState, data: FormData) => formStateOf(await loginAction(data), prev, data, LOGIN_REFUSALS),
+    IDLE,
+  );
   const formRef = useRef<HTMLFormElement>(null);
   const error = state.status === "error" ? state : null;
   // the human check appears once the server asks for it, and stays for the rest of the visit

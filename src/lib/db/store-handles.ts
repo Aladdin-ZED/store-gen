@@ -95,6 +95,7 @@ export async function renameStoreHandle(ctx: StoreCtx, next: string): Promise<vo
       usedGrant = true;
     }
 
+    // tenancy: platform handles are unique across stores: who holds or held `next` (§C.7)
     const [[hist]] = await conn.query<RowDataPacket[]>("SELECT store_id, reserved_until FROM store_handle_history WHERE handle = ? FOR UPDATE", [next]);
     const [[cur]] = await conn.query<RowDataPacket[]>("SELECT 1 AS x FROM stores WHERE handle = ? LIMIT 1", [next]);
     const history = hist ? { storeId: String(hist.store_id), reservedUntil: hist.reserved_until as Date } : null;

@@ -157,6 +157,23 @@ async function lockTeam(tx: Tx, scope: StoreScope): Promise<TeamRow[]> {
     .for("update");
 }
 
+/* the team's row writes, each on the store the scope names (lint L1/L2: the scope is the function's parameter) */
+
+/** a member's role in this store */
+async function setMemberRoleRow(tx: Tx, scope: WriteScope, userId: string, role: StoreRole): Promise<void> {
+  await tx.update(storeMembers).set({ role }).where(whereStore(storeMembers, scope, eq(storeMembers.userId, userId)));
+}
+
+/** a member's status in this store */
+async function setMemberStatusRow(tx: Tx, scope: WriteScope, userId: string, status: "active" | "suspended"): Promise<void> {
+  await tx.update(storeMembers).set({ status }).where(whereStore(storeMembers, scope, eq(storeMembers.userId, userId)));
+}
+
+/** a membership of this store ends (the account stays) */
+async function deleteMemberRow(tx: Tx, scope: WriteScope, userId: string): Promise<void> {
+  await tx.delete(storeMembers).where(whereStore(storeMembers, scope, eq(storeMembers.userId, userId)));
+}
+
 const otherActiveOwner = (team: readonly { userId: string; role: StoreRole; status: string }[], userId: string) =>
   team.some((m) => m.userId !== userId && m.role === "owner" && m.status === "active");
 
@@ -169,6 +186,22 @@ const cleanNote = (note: unknown): string | null => {
 /* ------------------------------------------------------------------ */
 /* Invites                                                             */
 /* ------------------------------------------------------------------ */
+
+/** The pending cap and the seats, checked on the locked team, then the invite row. */
+async function insertInviteTx(
+  tx: Tx,
+  scope: WriteScope,
+  row: { id: string; emailNorm: string; role: StoreRole; tokenHash: string; note: string | null; invitedBy: string; expiresAt: Date; createdAt: Date },
+): Promise<void> {
+  const team = await lockTeam(tx, scope);
+  const [pending] = await tx
+    .select({ n: count() })
+    .from(storeInvites)
+    .where(whereStore(storeInvites, scope, isNull(storeInvites.acceptedAt), isNull(storeInvites.revokedAt), gt(storeInvites.expiresAt, row.createdAt)));
+  if ((pending?.n ?? 0) >= PENDING_INVITES_MAX) throw new AuthRefusal("quota", "team.invite.pending_cap");
+  await assertSeats(scope, row.role, team);
+  await tx.insert(storeInvites).values(storeValues(scope, row));
+}
 
 /**
  * `members.invite` (the caller runs it through storeAction with the `s:<sid>:invite` 20/day bucket);
@@ -195,18 +228,9 @@ export async function createInvite(ctx: StoreCtx, input: { email: string; role: 
   const inviteId = newId();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + INVITE_TTL_MS);
-  await db.transaction(async (tx) => {
-    const team = await lockTeam(tx, scope);
-    const [pending] = await tx
-      .select({ n: count() })
-      .from(storeInvites)
-      .where(whereStore(storeInvites, scope, isNull(storeInvites.acceptedAt), isNull(storeInvites.revokedAt), gt(storeInvites.expiresAt, now)));
-    if ((pending?.n ?? 0) >= PENDING_INVITES_MAX) throw new AuthRefusal("quota", "team.invite.pending_cap");
-    await assertSeats(scope, role, team);
-    await tx.insert(storeInvites).values(
-      storeValues(scope, { id: inviteId, emailNorm: email.data, role, tokenHash: hashInviteToken(token), note, invitedBy: ctx.user.id, expiresAt, createdAt: now }),
-    );
-  });
+  await db.transaction((tx) =>
+    insertInviteTx(tx, scope, { id: inviteId, emailNorm: email.data, role, tokenHash: hashInviteToken(token), note, invitedBy: ctx.user.id, expiresAt, createdAt: now }),
+  );
   await auditFrom(ctx, "store.member.invited", {
     target: inviteId,
     meta: { role, email: maskEmail(email.data), ...(stepUp ? { stepUp: ctx.user.totpEnabled ? "totp" : "password" } : {}) },
@@ -235,15 +259,21 @@ export async function revokeInvite(ctx: StoreCtx, inviteId: string): Promise<voi
   const scope = memberWriteScope(ctx);
   if (!ctx.can("members.invite")) throw new SeamError("forbidden");
   if (typeof inviteId !== "string" || !/^[0-9A-Z]{26}$/.test(inviteId)) throw new SeamError("not_found");
+  const role = await revokeInviteRow(scope, inviteId, invitableRoles(ctx.membership.role));
+  await auditFrom(ctx, "store.invite.revoked", { target: inviteId, meta: { role } });
+}
+
+/** The pending invite `inviteId` of this store is revoked (one conditional UPDATE); its role must be in `mayRevoke`. */
+async function revokeInviteRow(scope: WriteScope, inviteId: string, mayRevoke: readonly StoreRole[]): Promise<StoreRole> {
   const [row] = await db.select({ role: storeInvites.role }).from(storeInvites).where(byId(storeInvites, scope, inviteId)).limit(1);
   if (!row) throw new SeamError("not_found");
-  if (!invitableRoles(ctx.membership.role).includes(row.role)) throw new SeamError("forbidden");
+  if (!mayRevoke.includes(row.role)) throw new SeamError("forbidden");
   const [cas] = await db
     .update(storeInvites)
     .set({ revokedAt: new Date() })
     .where(and(byId(storeInvites, scope, inviteId), isNull(storeInvites.acceptedAt), isNull(storeInvites.revokedAt)));
   if (cas.affectedRows !== 1) throw new AuthRefusal("conflict", "team.invite.not_pending");
-  await auditFrom(ctx, "store.invite.revoked", { target: inviteId, meta: { role: row.role } });
+  return row.role;
 }
 
 /** masked e-mail, role, inviter, expiry, state */
@@ -322,6 +352,39 @@ export async function inviteLanding(token: string, viewer: { id: string; email: 
   return account ? { state: "sign_in", preview } : { state: "sign_up", preview };
 }
 
+/** The accept inside one transaction: the new account first, the locked team, the inviter rule, the CAS, the seat. */
+async function acceptInviteTx(
+  tx: Tx,
+  scope: WriteScope,
+  invite: LiveInvite,
+  userId: string,
+  account: Awaited<ReturnType<typeof prepareAccount>> | null,
+): Promise<{ joined: boolean; role: StoreRole }> {
+  if (account) {
+    try {
+      await insertAccount(account, tx);
+    } catch (err) {
+      if (err instanceof AuthRefusal && err.messageKey === ACCOUNT_REFUSED) throw new AuthRefusal("invalid", "team.invite.sign_in_first");
+      throw err;
+    }
+  }
+  const team = await lockTeam(tx, scope);
+  // no escalation through a stale link: the inviter must still be an active member who could invite this role
+  const inviter = team.find((m) => m.userId === invite.invitedBy);
+  if (!inviter || inviter.status !== "active" || !invitableRoles(inviter.role).includes(invite.role)) throw new AuthRefusal("invalid", INVITE_INVALID);
+  const now = new Date();
+  const [cas] = await tx
+    .update(storeInvites)
+    .set({ acceptedAt: now, acceptedBy: userId })
+    .where(and(byId(storeInvites, scope, invite.id), isNull(storeInvites.acceptedAt), isNull(storeInvites.revokedAt), gt(storeInvites.expiresAt, now)));
+  if (cas.affectedRows !== 1) throw new AuthRefusal("invalid", INVITE_INVALID);
+  const existing = team.find((m) => m.userId === userId);
+  if (existing) return { joined: false, role: existing.role };
+  await assertSeats(scope, invite.role, team);
+  await tx.insert(storeMembers).values(storeValues(scope, { userId, role: invite.role, status: "active" as const, invitedBy: invite.invitedBy, joinedAt: now }));
+  return { joined: true, role: invite.role };
+}
+
 /**
  * Idempotent for an existing member (no second membership, the role unchanged); the limits are checked again inside
  * the transaction, after the member rows are locked, and so is the inviter (still active, the role still in their
@@ -352,31 +415,7 @@ export async function acceptInvite(
     userId = account.id!;
   }
 
-  const outcome = await db.transaction(async (tx) => {
-    if (account) {
-      try {
-        await insertAccount(account, tx);
-      } catch (err) {
-        if (err instanceof AuthRefusal && err.messageKey === ACCOUNT_REFUSED) throw new AuthRefusal("invalid", "team.invite.sign_in_first");
-        throw err;
-      }
-    }
-    const team = await lockTeam(tx, scope);
-    // no escalation through a stale link: the inviter must still be an active member who could invite this role
-    const inviter = team.find((m) => m.userId === invite.invitedBy);
-    if (!inviter || inviter.status !== "active" || !invitableRoles(inviter.role).includes(invite.role)) throw new AuthRefusal("invalid", INVITE_INVALID);
-    const now = new Date();
-    const [cas] = await tx
-      .update(storeInvites)
-      .set({ acceptedAt: now, acceptedBy: userId })
-      .where(and(byId(storeInvites, scope, invite.id), isNull(storeInvites.acceptedAt), isNull(storeInvites.revokedAt), gt(storeInvites.expiresAt, now)));
-    if (cas.affectedRows !== 1) throw new AuthRefusal("invalid", INVITE_INVALID);
-    const existing = team.find((m) => m.userId === userId);
-    if (existing) return { joined: false, role: existing.role };
-    await assertSeats(scope, invite.role, team);
-    await tx.insert(storeMembers).values(storeValues(scope, { userId, role: invite.role, status: "active" as const, invitedBy: invite.invitedBy, joinedAt: now }));
-    return { joined: true, role: invite.role };
-  });
+  const outcome = await db.transaction((tx) => acceptInviteTx(tx, scope, invite, userId, account));
 
   if (account) await audit("auth.user.created", { userId, target: userId, meta: { via: "store_invite" } });
   await audit("store.member.accepted", { userId, target: invite.id, meta: { role: outcome.role, joined: outcome.joined }, scope: { storeId: store.id, actorKind: "user" } });
@@ -429,7 +468,7 @@ export async function changeMemberRole(ctx: WriteCtx, input: { userId: string; r
     if (target.role === "owner" && target.status === "active" && !otherActiveOwner(team, userId)) throw new AuthRefusal("last_owner", "team.leave.last_owner");
     // the member already holds a seat: only the agents gauge can refuse a role change
     if (role === "agent") await assertSeats(ctx.scope, "agent", team, { seatHeld: true });
-    await tx.update(storeMembers).set({ role }).where(whereStore(storeMembers, ctx.scope, eq(storeMembers.userId, userId)));
+    await setMemberRoleRow(tx, ctx.scope, userId, role);
     return target.role;
   });
   if (from === null) return { role };
@@ -448,7 +487,7 @@ export async function setMemberStatus(ctx: WriteCtx, input: { userId: string; st
     const { team, target } = await lockedTarget(tx, ctx, userId);
     if (target.status === status) return false;
     if (status === "suspended" && target.role === "owner" && !otherActiveOwner(team, userId)) throw new AuthRefusal("last_owner", "team.leave.last_owner");
-    await tx.update(storeMembers).set({ status }).where(whereStore(storeMembers, ctx.scope, eq(storeMembers.userId, userId)));
+    await setMemberStatusRow(tx, ctx.scope, userId, status);
     return true;
   });
   if (!changed) return { status };
@@ -464,7 +503,7 @@ export async function removeMember(ctx: WriteCtx, input: { userId: string }): Pr
   const role = await db.transaction(async (tx) => {
     const { team, target } = await lockedTarget(tx, ctx, userId);
     if (target.role === "owner" && !otherActiveOwner(team, userId)) throw new AuthRefusal("last_owner", "team.leave.last_owner");
-    await tx.delete(storeMembers).where(whereStore(storeMembers, ctx.scope, eq(storeMembers.userId, userId)));
+    await deleteMemberRow(tx, ctx.scope, userId);
     return target.role;
   });
   await auditFrom(ctx, "store.member.removed", { target: userId, meta: { self: false, role } });
@@ -485,7 +524,7 @@ export async function leaveStore(ctx: StoreCtx): Promise<void> {
     const mine = team.find((m) => m.userId === ctx.user.id);
     if (!mine) throw new AuthRefusal("not_found");
     if (mine.role === "owner" && !otherActiveOwner(team, ctx.user.id)) throw new AuthRefusal("last_owner", "team.leave.last_owner");
-    await tx.delete(storeMembers).where(whereStore(storeMembers, scope, eq(storeMembers.userId, ctx.user.id)));
+    await deleteMemberRow(tx, scope, ctx.user.id);
     return mine.role;
   });
   await auditFrom(ctx, "store.member.removed", { target: ctx.user.id, meta: { self: true, role } });

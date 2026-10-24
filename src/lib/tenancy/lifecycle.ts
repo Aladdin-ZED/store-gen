@@ -245,6 +245,7 @@ export function lifecycleAuditMeta(from: StoreStatus, to: StoreStatus, opts: Pic
 /** The method of the user's last step-up inside the window ending at `until` (the `auth.step_up` row, §F.5). */
 async function stepUpMethodOf(userId: string, until: Date | null): Promise<StepUpMethod | null> {
   if (!until) return null;
+  // tenancy: platform the staff member's own auth.step_up row (a platform event, store_id NULL, §F.5)
   const [rows] = await pool().query<RowDataPacket[]>(
     "SELECT meta FROM audit_log WHERE user_id = ? AND action = 'auth.step_up' AND created_at >= ? ORDER BY id DESC LIMIT 1",
     [userId, new Date(until.getTime() - STEP_UP_TTL_MS - 1000)],

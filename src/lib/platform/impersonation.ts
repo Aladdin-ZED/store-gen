@@ -31,11 +31,11 @@ import { newId } from "@/lib/db/ids";
 import { impersonationSessions, sessions, storeMembers } from "@/lib/db/schema";
 import { systemCtx, systemScope } from "@/lib/jobs/scope";
 import { errorSummary } from "@/lib/orders/log";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { platformBucket, rateLimit } from "@/lib/security/rate-limit";
 import { getStoreById } from "@/lib/tenancy/public";
 import { SeamError } from "@/lib/tenancy/seam";
 import { storeValues, whereStore } from "@/lib/tenancy/sql";
-import type { ImpersonationReason, PlatformCtx, StoreStatus } from "@/lib/tenancy/types";
+import type { ImpersonationReason, PlatformCtx, StoreScope, StoreStatus, WriteScope } from "@/lib/tenancy/types";
 import { appHref } from "@/lib/urls";
 import { platformScope } from "./seam";
 import { notify } from "./notify";
@@ -130,7 +130,7 @@ export async function startImpersonation(
   if (ctx.role === "support" && !ticketRef) throw new FieldsError({ ticketRef: "console.impersonation.ticket_required" });
   if (reason === "other" && !note) throw new FieldsError({ note: "console.impersonation.note_required" });
   const minutes = parsed.data.minutes ?? DEFAULT_MINUTES;
-  if (!(await rateLimit(`p:impersonate:${ctx.user.id}`, STARTS_PER_DAY, 86_400)).ok) throw new SeamError("rate_limited");
+  if (!(await rateLimit(platformBucket("impersonate", ctx.user.id), STARTS_PER_DAY, 86_400)).ok) throw new SeamError("rate_limited");
 
   // 2. the store
   const store = await getStoreById(storeId);
@@ -138,11 +138,7 @@ export async function startImpersonation(
   if (CLOSED_TO_VIEW.has(store.status)) throw new AuthRefusal("impersonation_state", "console.impersonation.state");
 
   // 3. a member opens the store as a member (a view-as would hide their own role behind the read-only viewer)
-  const [member] = await db
-    .select({ status: storeMembers.status })
-    .from(storeMembers)
-    .where(whereStore(storeMembers, platformScope(ctx, storeId), eq(storeMembers.userId, ctx.user.id)))
-    .limit(1);
+  const member = await memberStatusIn(platformScope(ctx, storeId), ctx.user.id);
   if (member?.status === "active") throw new AuthRefusal("impersonation_member", "console.impersonation.member");
 
   // 4. one view-as per session: the open one ends first
@@ -153,19 +149,17 @@ export async function startImpersonation(
   const startedAt = new Date();
   const expiresAt = new Date(startedAt.getTime() + minutes * 60_000);
   await db.transaction(async (tx) => {
-    await tx.insert(impersonationSessions).values(
-      storeValues(recordScope(storeId), {
-        id,
-        staffUserId: ctx.user.id,
-        sessionId: ctx.user.sessionId.slice(0, 64),
-        mode: "read" as const,
-        reason,
-        note,
-        ticketRef,
-        startedAt,
-        expiresAt,
-      }),
-    );
+    await insertSessionRow(tx, recordScope(storeId), {
+      id,
+      staffUserId: ctx.user.id,
+      sessionId: ctx.user.sessionId.slice(0, 64),
+      mode: "read" as const,
+      reason,
+      note,
+      ticketRef,
+      startedAt,
+      expiresAt,
+    });
     await tx.update(sessions).set({ impersonationId: id }).where(and(eq(sessions.id, ctx.user.sessionId), eq(sessions.userId, ctx.user.id)));
   });
 
@@ -183,15 +177,35 @@ export async function startImpersonation(
   return { url: appHref(store.handle) };
 }
 
+/* the rows, each on the store its scope names (lint L1/L2: the scope is the function's parameter) */
+
+/** The viewer's own membership of the store, if any (a member opens the store as a member). */
+async function memberStatusIn(scope: StoreScope, userId: string): Promise<{ status: "active" | "suspended" } | undefined> {
+  const [member] = await db.select({ status: storeMembers.status }).from(storeMembers).where(whereStore(storeMembers, scope, eq(storeMembers.userId, userId))).limit(1);
+  return member;
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function insertSessionRow(tx: Tx, scope: WriteScope, row: Omit<typeof impersonationSessions.$inferInsert, "storeId">): Promise<void> {
+  await tx.insert(impersonationSessions).values(storeValues(scope, row));
+}
+
+/** Ends the open row `id` (one conditional UPDATE: the first of two racing ends wins). */
+async function endSessionRow(scope: WriteScope, id: string, endedAt: Date, why: "ended" | "expired" | "revoked"): Promise<{ affectedRows: number }> {
+  const [cas] = await db
+    .update(impersonationSessions)
+    .set({ endedAt, endedReason: why })
+    .where(whereStore(impersonationSessions, scope, eq(impersonationSessions.id, id), isNull(impersonationSessions.endedAt)));
+  return cas;
+}
+
 export async function endImpersonation(ctx: PlatformCtx | { sessionId: string }, why: "ended" | "expired" | "revoked"): Promise<void> {
   const sessionId = "user" in ctx ? ctx.user.sessionId : ctx.sessionId;
   const row = await openRowOf(sessionId, "user" in ctx ? ctx.user.id : undefined);
   if (!row) return;
   const endedAt = why === "expired" ? row.expiresAt : new Date(Math.min(Date.now(), row.expiresAt.getTime()));
-  const [cas] = await db
-    .update(impersonationSessions)
-    .set({ endedAt, endedReason: why })
-    .where(whereStore(impersonationSessions, recordScope(row.storeId), eq(impersonationSessions.id, row.id), isNull(impersonationSessions.endedAt)));
+  const cas = await endSessionRow(recordScope(row.storeId), row.id, endedAt, why);
   // the pointer goes whoever won the race, but only if it still names this row
   await db.update(sessions).set({ impersonationId: null }).where(and(eq(sessions.id, sessionId), eq(sessions.impersonationId, row.id)));
   if (cas.affectedRows !== 1) return;

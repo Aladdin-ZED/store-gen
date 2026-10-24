@@ -58,7 +58,7 @@ import { errorSummary } from "@/lib/orders/log";
 import { CsrfError, checkSameOrigin } from "@/lib/security/csrf";
 import { baseSecurityHeaders } from "@/lib/security/headers";
 import { clientIp } from "@/lib/security/ip";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { getRequestIdentity, identityHeaders, type RequestIdentity } from "./context";
 import type { FeatureKey } from "./entitlement-keys";
 import { EntitlementError, QuotaError, activeKillSwitches, assertFeature } from "./entitlements";
@@ -116,6 +116,14 @@ export function memberWriteScope(ctx: StoreCtx): WriteScope {
   if (ctx.impersonation || ctx.scope.kind === "impersonation") throw new SeamError("impersonation_read_only");
   if (ctx.scope.kind !== "member" || ctx.membership.synthetic) throw new SeamError("forbidden");
   return ctx.scope as WriteScope;
+}
+
+/**
+ * A member's own ctx with its write scope (`memberWriteScope`'s checks), for the selftests that drive repository
+ * writes directly; no cast to WriteCtx outside this file (lint L6, D71).
+ */
+export function memberWriteCtx(ctx: StoreCtx): WriteCtx {
+  return { ...ctx, scope: memberWriteScope(ctx) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -343,25 +351,12 @@ export async function platformReadOnly(): Promise<boolean> {
 /* Rate buckets                                                        */
 /* ------------------------------------------------------------------ */
 
-const BUCKET_NAME_RE = /^[a-z][a-z0-9_-]*(?::[a-z0-9_-]+)*$/;
-
-/**
- * `s:<storeId>:<name>[:<key>]` (§E.8), byte for byte what C0b's `storeBucket(scope, name, key?)` builds; the seam
- * switches to the branded builder when it merges (CCR r1.0-t2-2). Keys are ids or hashes, never e-mails or IPs.
- * Over-long buckets throw rather than truncate (a truncation could merge two buckets).
- */
-export function storeBucketKey(scope: StoreScope, name: string, key?: string): string {
-  if (!BUCKET_NAME_RE.test(name) || name.length > 48) throw new Error(`tenancy: bad bucket name "${name}"`);
-  const bucket = key ? `s:${scope.storeId}:${name}:${key}` : `s:${scope.storeId}:${name}`;
-  if (bucket.length > 191) throw new Error("tenancy: bucket over 191 chars");
-  return bucket;
-}
-
 type RateOpt = NonNullable<ActionOpts["rate"]>;
 
 /** One hit on the action's bucket: per user (default) or for the whole store; over the limit → `rate_limited`. */
 async function chargeRate(ctx: StoreCtx, rate: RateOpt): Promise<void> {
-  const bucket = storeBucketKey(ctx.scope, rate.name, (rate.per ?? "user") === "user" ? ctx.user.id : undefined);
+  // `s:<storeId>:<name>[:<userId>]` (§E.8), built by C0b's branded builder (CCR r1.0-t2-2; same bytes as before)
+  const bucket = storeBucket(ctx.scope, rate.name, (rate.per ?? "user") === "user" ? ctx.user.id : undefined);
   const r = await rateLimit(bucket, rate.limit, rate.windowSec);
   if (!r.ok) throw new SeamError("rate_limited");
 }
@@ -429,16 +424,8 @@ async function expireImpersonation(session: SeamSession): Promise<void> {
   }
 }
 
-/**
- * Step 3, the staff branch (§B.8, D70): the session's view-as row for THIS store, still open and unexpired, bound
- * to this session and staff member, whose holder still has a platform role with `stores.impersonate`, TOTP, and
- * (on a real request) an address inside the console's IP allowlist. Anything else: no impersonation (the caller
- * falls back to the plain membership, i.e. the neutral 404 for staff).
- */
-async function impersonationFor(store: StoreRow, session: SeamSession, inputs: RequestInputs): Promise<ImpersonationInfo | null> {
-  const { user, impersonationId } = session;
-  if (!impersonationId || user.platformRole === "none" || !canPlatform(user.platformRole, "stores.impersonate") || !user.totpEnabled) return null;
-  const scope = mintScope("impersonation", store.id);
+/** The view-as row `id` of this store (lint L1/L2: the scope is the parameter). */
+async function impersonationRow(scope: StoreScope, id: string) {
   const [row] = await db
     .select({
       id: impersonationSessions.id,
@@ -449,8 +436,21 @@ async function impersonationFor(store: StoreRow, session: SeamSession, inputs: R
       endedAt: impersonationSessions.endedAt,
     })
     .from(impersonationSessions)
-    .where(whereStore(impersonationSessions, scope, eq(impersonationSessions.id, impersonationId)))
+    .where(whereStore(impersonationSessions, scope, eq(impersonationSessions.id, id)))
     .limit(1);
+  return row;
+}
+
+/**
+ * Step 3, the staff branch (§B.8, D70): the session's view-as row for THIS store, still open and unexpired, bound
+ * to this session and staff member, whose holder still has a platform role with `stores.impersonate`, TOTP, and
+ * (on a real request) an address inside the console's IP allowlist. Anything else: no impersonation (the caller
+ * falls back to the plain membership, i.e. the neutral 404 for staff).
+ */
+async function impersonationFor(store: StoreRow, session: SeamSession, inputs: RequestInputs): Promise<ImpersonationInfo | null> {
+  const { user, impersonationId } = session;
+  if (!impersonationId || user.platformRole === "none" || !canPlatform(user.platformRole, "stores.impersonate") || !user.totpEnabled) return null;
+  const row = await impersonationRow(mintScope("impersonation", store.id), impersonationId);
   if (!row || row.endedAt || row.staffUserId !== user.id) return null;
   if (session.hasRow && row.sessionId !== user.sessionId) return null;
   if (row.expiresAt.getTime() <= Date.now()) {

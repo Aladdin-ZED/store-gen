@@ -5,7 +5,7 @@
  */
 import { redirect } from "next/navigation";
 import { changePassword, deleteUserAccount, rotateCurrentSession, userAction } from "@/lib/auth";
-import { AuthInputError } from "@/lib/auth/errors";
+import { AuthInputError, FieldsError } from "@/lib/auth/errors";
 import { inputErrorKey } from "@/lib/auth/i18n/input-errors";
 import { updateOwnProfile, type Profile } from "@/lib/auth/profile";
 import { revokeUserSession, revokeUserSessions } from "@/lib/auth/session";
@@ -20,18 +20,16 @@ export async function updateProfileAction(input: unknown): Promise<ActionResult<
 
 /** Current + new password (policy, scrypt semaphore, `p:password:<userId>`); every other session ends, this one rotates. */
 export async function changePasswordAction(input: { current: string; next: string }): Promise<ActionResult<null>> {
-  const r = await userAction(async () => {
+  return userAction(async () => {
     try {
       await changePassword(String(input?.current ?? "").slice(0, 1024), String(input?.next ?? "").slice(0, 1024));
     } catch (err) {
-      if (err instanceof AuthInputError) return { field: err.field, key: inputErrorKey(err.message) };
+      // an input problem → `invalid` with one item on its field ("form" when it names none)
+      if (err instanceof AuthInputError) throw new FieldsError({ [err.field ?? "form"]: inputErrorKey(err.message) });
       throw err;
     }
     return null;
   });
-  if (!r.ok) return r;
-  if (r.data) return { ok: false, error: "invalid", message: r.data.key, items: [{ id: `field:${r.data.field ?? "form"}`, level: "hard", title: r.data.key, field: r.data.field ?? undefined }] };
-  return { ok: true, data: null };
 }
 
 /** One other device signed out (another user's session id matches nothing). */
@@ -59,17 +57,14 @@ export async function signOutOthersAction(): Promise<ActionResult<{ count: numbe
  * session ends with the account, so the answer is the sign-in page.
  */
 export async function deleteMyAccountAction(input: { confirm: string; expected: string }): Promise<ActionResult<null>> {
-  const r = await userAction(async (ctx) => {
+  return userAction(async (ctx) => {
     const words = new Set(["delete", "supprimer", "حذف"]);
     const typed = String(input?.confirm ?? "").trim().toLowerCase();
-    if (!words.has(typed) || typed !== String(input?.expected ?? "").trim().toLowerCase()) return false;
+    if (!words.has(typed) || typed !== String(input?.expected ?? "").trim().toLowerCase()) throw new FieldsError({ confirm: "account.danger.word_wrong" });
     // the step-up sheet first (PD80): a fresh TOTP code, or the password for an account without one
     const { session } = await requireUserCtx();
     if (!session.stepUpAt || session.stepUpAt.getTime() + STEP_UP_TTL_MS <= Date.now()) throw new SeamError("step_up");
     await deleteUserAccount(ctx);
-    return true;
+    redirect("/login?deleted=1");
   });
-  if (!r.ok) return r;
-  if (!r.data) return { ok: false, error: "invalid", message: "account.danger.word_wrong", items: [{ id: "field:confirm", level: "hard", title: "account.danger.word_wrong", field: "confirm" }] };
-  redirect("/login?deleted=1");
 }

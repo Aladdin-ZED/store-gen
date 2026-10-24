@@ -12,10 +12,9 @@ import "server-only";
  * holds. Both answer `{ until }` (ISO) and audit `auth.step_up` with the method; the step-up-gated audit rows name it
  * again in `meta.stepUp`.
  */
-import { unstable_rethrow } from "next/navigation";
 import { audit } from "@/lib/audit";
-import { STEP_UP_TTL_MS, actionFailure, assertActionOrigin } from "@/lib/tenancy/seam";
-import type { ActionResult } from "@/lib/tenancy/types";
+import { STEP_UP_TTL_MS, SeamError } from "@/lib/tenancy/seam";
+import type { UserCtx } from "@/lib/tenancy/types";
 import { limits } from "./attempts";
 import { AuthError, AuthRefusal, FieldsError } from "./errors";
 import { verifySecondFactor } from "./mfa";
@@ -25,47 +24,39 @@ import { normalizeTotpInput } from "./totp";
 import { requireUserCtx } from "./user-action";
 import { getUserById } from "./users";
 
-type StepUpResult = ActionResult<{ until: string }>;
+type StepUp = { until: string };
 
-async function recordStepUp(sessionId: string, userId: string, ip: string | null, method: "totp" | "password"): Promise<StepUpResult> {
+async function recordStepUp(sessionId: string, userId: string, ip: string | null, method: "totp" | "password"): Promise<StepUp> {
   const at = new Date();
   if (!(await markSessionStepUp(sessionId, at))) throw new AuthError("unauthenticated");
   await audit("auth.step_up", { userId, target: userId, meta: { method }, ip });
-  return { ok: true, data: { until: new Date(at.getTime() + STEP_UP_TTL_MS).toISOString() } };
+  return { until: new Date(at.getTime() + STEP_UP_TTL_MS).toISOString() };
 }
 
-export async function stepUpWithTotp(code: string): Promise<StepUpResult> {
-  try {
-    await assertActionOrigin();
-    const { user, actor, session } = await requireUserCtx();
-    if (!session.hasRow) throw new AuthError("unauthenticated");
-    if (!(await limits.mfaStepUp(user.id)).ok) return { ok: false, error: "rate_limited" };
-    if (!user.totpEnabled) throw new AuthRefusal("invalid", "auth.step_up.totp_off");
-    if (typeof code !== "string" || !normalizeTotpInput(code)) throw new FieldsError({ code: "auth.step_up.code_wrong" });
-    const result = await verifySecondFactor(user.id, { method: "totp", code });
-    if (!result.ok) throw new FieldsError({ code: "auth.step_up.code_wrong" });
-    return await recordStepUp(user.sessionId, user.id, actor.ip, "totp");
-  } catch (err) {
-    unstable_rethrow(err);
-    return actionFailure(err, "step-up");
-  }
+/** Runs inside `userAction` (same-origin and the session first); refusals throw and map through the seam's mapping. */
+export async function stepUpWithTotp(ctx: UserCtx, code: string): Promise<StepUp> {
+  const { user, actor } = ctx;
+  const { session } = await requireUserCtx();
+  if (!session.hasRow || session.user.id !== user.id) throw new AuthError("unauthenticated");
+  if (!(await limits.mfaStepUp(user.id)).ok) throw new SeamError("rate_limited");
+  if (!user.totpEnabled) throw new AuthRefusal("invalid", "auth.step_up.totp_off");
+  if (typeof code !== "string" || !normalizeTotpInput(code)) throw new FieldsError({ code: "auth.step_up.code_wrong" });
+  const result = await verifySecondFactor(user.id, { method: "totp", code });
+  if (!result.ok) throw new FieldsError({ code: "auth.step_up.code_wrong" });
+  return recordStepUp(user.sessionId, user.id, actor.ip, "totp");
 }
 
-export async function stepUpWithPassword(password: string): Promise<StepUpResult> {
-  try {
-    await assertActionOrigin();
-    const { user, actor, session } = await requireUserCtx();
-    if (!session.hasRow) throw new AuthError("unauthenticated");
-    if (session.impersonationId) return { ok: false, error: "impersonation_read_only" };
-    if (!(await limits.passwordChange(user.id)).ok) return { ok: false, error: "rate_limited" };
-    if (user.totpEnabled) throw new AuthRefusal("totp_required", "auth.step_up.use_totp");
-    const row = await getUserById(user.id);
-    if (!row || row.disabled) throw new AuthError("unauthenticated");
-    const ok = typeof password === "string" && password.length > 0 && password.length <= 1024 && (await verifyPassword(password, row.passwordHash));
-    if (!ok) throw new FieldsError({ password: "auth.step_up.password_wrong" });
-    return await recordStepUp(user.sessionId, user.id, actor.ip, "password");
-  } catch (err) {
-    unstable_rethrow(err);
-    return actionFailure(err, "step-up");
-  }
+/** Runs inside `userAction`; refused under impersonation. */
+export async function stepUpWithPassword(ctx: UserCtx, password: string): Promise<StepUp> {
+  const { user, actor } = ctx;
+  const { session } = await requireUserCtx();
+  if (!session.hasRow || session.user.id !== user.id) throw new AuthError("unauthenticated");
+  if (session.impersonationId) throw new SeamError("impersonation_read_only");
+  if (!(await limits.passwordChange(user.id)).ok) throw new SeamError("rate_limited");
+  if (user.totpEnabled) throw new AuthRefusal("totp_required", "auth.step_up.use_totp");
+  const row = await getUserById(user.id);
+  if (!row || row.disabled) throw new AuthError("unauthenticated");
+  const ok = typeof password === "string" && password.length > 0 && password.length <= 1024 && (await verifyPassword(password, row.passwordHash));
+  if (!ok) throw new FieldsError({ password: "auth.step_up.password_wrong" });
+  return recordStepUp(user.sessionId, user.id, actor.ip, "password");
 }

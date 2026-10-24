@@ -8,24 +8,20 @@
 import { redirect } from "next/navigation";
 import { publicAction } from "@/lib/auth";
 import { consumePasswordReset } from "@/lib/auth/reset";
-import { field, fieldErrorsOf, formError, type FormState } from "../../_lib/form-state";
+import type { ActionResult } from "@/lib/tenancy/types";
+import { field, formError, type FormState } from "../../_lib/form-state";
 
-export async function resetAction(_prev: FormState, data: FormData): Promise<FormState> {
-  const token = field(data, "token", 64);
-  const password = field(data, "password", 1024);
-  if (!password) return formError(undefined, { password: "auth.password.too_short" });
-  if (password !== field(data, "confirm", 1024)) return formError(undefined, { confirm: "auth.reset.mismatch" });
-
-  const r = await publicAction("reset", (ctx) => consumePasswordReset(token, password, { ip: ctx.ip }), {
-    turnstile: "when-configured",
-    burst: "reset",
-    token: field(data, "cf-turnstile-response", 2048) || null,
-  });
-  if (!r.ok) {
-    if (r.error === "invalid" && r.items?.length) return formError(undefined, fieldErrorsOf(r.items));
-    return formError(r.message ?? (r.error === "rate_limited" ? "error.rate_limited" : r.error === "busy" ? "error.busy" : r.error === "challenge" ? "auth.challenge" : "error.server"), undefined, undefined, {
-      challenge: r.error === "challenge",
-    });
-  }
-  redirect("/login?notice=password-reset");
+export async function resetAction(data: FormData): Promise<ActionResult<FormState>> {
+  return publicAction(
+    "reset",
+    async (ctx) => {
+      const token = field(data, "token", 64);
+      const password = field(data, "password", 1024);
+      if (!password) return formError(undefined, { password: "auth.password.too_short" });
+      if (password !== field(data, "confirm", 1024)) return formError(undefined, { confirm: "auth.reset.mismatch" });
+      await consumePasswordReset(token, password, { ip: ctx.ip });
+      redirect("/login?notice=password-reset");
+    },
+    { turnstile: "when-configured", burst: "reset", token: field(data, "cf-turnstile-response", 2048) || null },
+  );
 }

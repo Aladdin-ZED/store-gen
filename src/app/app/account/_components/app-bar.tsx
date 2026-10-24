@@ -1,6 +1,7 @@
 import { LogOutIcon, ShieldIcon } from "lucide-react";
 import Link from "next/link";
 import { BrandMark } from "@/components/admin/shell/brand-mark";
+import { consoleHref } from "@/lib/urls";
 import { Button } from "@/components/ui/button";
 import type { SessionUser } from "@/lib/auth";
 import { logout } from "@/lib/auth/actions";
@@ -24,7 +25,7 @@ export function AppBar({ user, brand, locale }: { user: SessionUser; brand: stri
         <nav className="flex items-center gap-1">
           {user.platformRole !== "none" && (
             <Button asChild variant="ghost" size="sm" className="text-[oklch(0.45_0.09_205)] dark:text-[oklch(0.78_0.08_205)]">
-              <Link href="/admin">
+              <Link href={consoleHref()}>
                 <ShieldIcon aria-hidden="true" />
                 {t("app.bar.console")}
               </Link>

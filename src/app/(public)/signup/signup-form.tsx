@@ -11,8 +11,11 @@ import type { AdminLocale } from "@/lib/i18n/admin";
 import { FormAlert, PasswordField, SubmitButton, TextField } from "../_components/form-ui";
 import { StoreNameAndHandle } from "../_components/handle-field";
 import { TurnstileField } from "../_components/turnstile-field";
-import { IDLE } from "../_lib/form-state";
+import { IDLE, formStateOf, type Refusals } from "../_lib/form-state";
 import { signupAction, type SignupState } from "./actions";
+
+/** the seam's refusals of a signup (its own outcomes come back as the form state); the non-secret fields stay */
+const SIGNUP_REFUSALS: Refusals = { keys: { challenge: "auth.signup.challenge" }, keep: ["name", "email", "phone", "storeName", "handle", "market", "inviteCode", "note"] };
 
 /** "MA" → "Maroc" / "المغرب" / "Morocco" in the page language. */
 function regionLabel(locale: string, code: string): string {
@@ -41,7 +44,10 @@ export function SignupForm({
   legalRequired: boolean;
 }) {
   const t = useAuthT();
-  const [state, action, pending] = useActionState<SignupState, FormData>(signupAction, IDLE);
+  const [state, action, pending] = useActionState<SignupState, FormData>(
+    async (prev, data) => formStateOf(await signupAction(data), prev, data, SIGNUP_REFUSALS),
+    IDLE,
+  );
   const formRef = useRef<HTMLFormElement>(null);
   const error = state.status === "error" ? state : null;
   const fe = (name: string) => (error?.fieldErrors?.[name] ? t(error.fieldErrors[name]) : undefined);

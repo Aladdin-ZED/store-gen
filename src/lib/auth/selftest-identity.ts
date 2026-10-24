@@ -107,7 +107,6 @@ async function cases(c: mysql.Connection): Promise<void> {
   type PlatformCtx = import("@/lib/tenancy/types").PlatformCtx;
   type UserCtx = import("@/lib/tenancy/types").UserCtx;
   type StoreCtx = import("@/lib/tenancy/types").StoreCtx;
-  type WriteCtx = import("@/lib/tenancy/types").WriteCtx;
   type SessionUser = import("@/lib/auth").SessionUser;
   type PublicActionCtx = import("@/lib/auth/public-action").PublicActionCtx;
   type HumanCheck = import("@/lib/auth/turnstile").HumanCheck;
@@ -607,9 +606,9 @@ async function cases(c: mysql.Connection): Promise<void> {
   const fakeImp = { ...ctxA, impersonation: { id: "x", storeId: a.storeId, staffUserId: superId, mode: "read" as const, reason: "ticket" as const, expiresAt: new Date() } } as StoreCtx;
   ok("leave under impersonation → impersonation_read_only", (await caught(invites.leaveStore(fakeImp))) === "seam:impersonation_read_only");
 
-  const ctxCo = (await runAsIdentity({ userId: co.userId, path: null }, () => seam.requireStoreMember({ handle: "atlas-aa", throwOnFail: true }))) as WriteCtx;
+  const ctxCo = seam.memberWriteCtx(await runAsIdentity({ userId: co.userId, path: null }, () => seam.requireStoreMember({ handle: "atlas-aa", throwOnFail: true })));
   ok("require 2FA: an owner without TOTP can't turn it on", (await caught(setRequireMember2fa(ctxCo, true))) === "forbidden:store.security.2fa_owner_only");
-  const ctxSuper = (await runAsIdentity({ userId: superId, path: null }, () => seam.requireStoreMember({ handle: "maison-mere", throwOnFail: true }))) as WriteCtx;
+  const ctxSuper = seam.memberWriteCtx(await runAsIdentity({ userId: superId, path: null }, () => seam.requireStoreMember({ handle: "maison-mere", throwOnFail: true })));
   await setRequireMember2fa(ctxSuper, true);
   ok("require 2FA: on, audited", (await one<{ require_member_2fa: number }>("SELECT require_member_2fa FROM stores WHERE id = ?", [setupStore.storeId]))?.require_member_2fa === 1 && !!(await one("SELECT id FROM audit_log WHERE action = 'store.2fa_required_changed' AND store_id = ?", [setupStore.storeId])));
 

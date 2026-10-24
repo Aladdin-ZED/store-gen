@@ -25,6 +25,7 @@ import { systemCtx, systemScope } from "@/lib/jobs/scope";
 import { notificationKind, safeNotifyLink, type NotificationKind, type NotificationSeverity, type NotificationVars } from "@/lib/notify/registry";
 import { errorSummary } from "@/lib/orders/log";
 import { storeValues } from "@/lib/tenancy/sql";
+import type { WriteScope } from "@/lib/tenancy/types";
 
 export type NotifyTarget =
   | { audience: "user"; userId: string; storeId?: string | null } // one person (in one store, or platform-wide)
@@ -81,6 +82,35 @@ function audienceOf(target: NotifyTarget): { audience: NotifyTarget["audience"];
   }
 }
 
+type NotifyRow = Omit<typeof notifications.$inferInsert, "storeId">;
+type Inserted = { id: number } | { deduped: true };
+
+/** MySQL answers 1 for an insert, 2 for an update of the existing row (a batch repeat), 0 for an ignored duplicate. */
+const inserted = (res: { affectedRows: number; insertId: number | string }): Inserted => (res.affectedRows === 1 ? { id: Number(res.insertId) } : { deduped: true });
+
+/** A store's row (`store`, `store_role`, a `user` target in one store): the store id from the scope only. */
+async function insertStoreRow(scope: WriteScope, row: NotifyRow, batched: boolean): Promise<Inserted> {
+  const [res] = batched
+    ? await db
+        .insert(notifications)
+        .values(storeValues(scope, row))
+        .onDuplicateKeyUpdate({ set: { vars: sql`JSON_SET(COALESCE(${notifications.vars}, '{}'), '$.count', COALESCE(JSON_EXTRACT(${notifications.vars}, '$.count'), 1) + 1)` } })
+    : await db.insert(notifications).ignore().values(storeValues(scope, row));
+  return inserted(res);
+}
+
+/** A platform row (`platform_staff`, a platform-wide `user` target): `store_id` NULL (§I.4). */
+async function insertPlatformRow(row: NotifyRow, batched: boolean): Promise<Inserted> {
+  // tenancy: platform a staff or platform-wide user notification, store_id NULL (§I.4, CCR r1.0-t2-9 item 8)
+  const [res] = batched
+    ? await db
+        .insert(notifications)
+        .values({ ...row, storeId: null })
+        .onDuplicateKeyUpdate({ set: { vars: sql`JSON_SET(COALESCE(${notifications.vars}, '{}'), '$.count', COALESCE(JSON_EXTRACT(${notifications.vars}, '$.count'), 1) + 1)` } })
+    : await db.insert(notifications).ignore().values({ ...row, storeId: null });
+  return inserted(res);
+}
+
 export async function notify<K extends NotificationKind>(target: NotifyTarget, kind: K, vars: NotificationVars<K>, opts: NotifyOpts = {}): Promise<{ id: number } | { deduped: true }> {
   try {
     const aud = audienceOf(target);
@@ -118,18 +148,8 @@ export async function notify<K extends NotificationKind>(target: NotifyTarget, k
       platformMinRole: aud.platformMinRole,
     };
     // a store's rows carry its id through a scope (§E.3 rule 4); notify is platform plumbing, so the system seam
-    const values = aud.storeId ? storeValues(systemScope(systemCtx("notify"), aud.storeId), row) : { ...row, storeId: null };
-
-    if (batch && dedupeKey) {
-      const [res] = await db
-        .insert(notifications)
-        .values(values)
-        .onDuplicateKeyUpdate({ set: { vars: sql`JSON_SET(COALESCE(${notifications.vars}, '{}'), '$.count', COALESCE(JSON_EXTRACT(${notifications.vars}, '$.count'), 1) + 1)` } });
-      // MySQL answers 1 for an insert, 2 for an update of the existing row
-      return res.affectedRows === 1 ? { id: Number(res.insertId) } : { deduped: true };
-    }
-    const [res] = await db.insert(notifications).ignore().values(values);
-    return res.affectedRows === 1 ? { id: Number(res.insertId) } : { deduped: true };
+    const batched = !!(batch && dedupeKey);
+    return aud.storeId ? await insertStoreRow(systemScope(systemCtx("notify"), aud.storeId), row, batched) : await insertPlatformRow(row, batched);
   } catch (err) {
     console.error(`[notify] "${String(kind).slice(0, 40)}" not stored:`, errorSummary(err));
     return { deduped: true };

@@ -19,7 +19,7 @@
     "pretypecheck": "node scripts/build-landing-assets.mjs",
     "theme:check": "tsx scripts/check-theme.ts",
     "pretest": "node scripts/build-landing-assets.mjs",
-    "test": "npm run theme:check && npm run test:runtime && npm run test:generator && npm run test:render && npm run test:money && npm run test:conversions && npm run test:offers && npm run test:orders",
+    "test": "npm run theme:check && npm run test:runtime && npm run test:generator && npm run test:render && npm run test:money && npm run test:conversions && npm run test:offers && npm run test:orders && npm run test:ownership",
     "test:runtime": "tsx src/landing/runtime/selftest.ts",
     "test:generator": "tsx src/lib/generator/selftest.ts",
     "test:render": "tsx scripts/qa/render-check.ts",
