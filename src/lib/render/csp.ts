@@ -48,6 +48,11 @@ export interface LandingCspInput {
    * their public API path (PUBLIC_API_PATH) is allowed, never the whole origin
    */
   apiOrigins?: readonly string[];
+  /**
+   * origins media is served from when it is not the document's own (S / C modes: the platform host, R-D11,
+   * docs/STORE-SAAS.md §C.9); added to img-src and media-src. P-mode documents load /media/* from 'self'.
+   */
+  mediaOrigins?: readonly string[];
   /** Cloudflare Turnstile widget embedded */
   turnstile?: boolean;
   /** live pages: add upgrade-insecure-requests (off for http://localhost development) */
@@ -139,6 +144,8 @@ export function buildLandingCsp(input: LandingCspInput): string {
     for (const h of PIXEL_HOSTS[key].img) img.add(h);
     for (const h of PIXEL_HOSTS[key].connect) connect.add(h);
   }
+  const media = [...new Set((input.mediaOrigins ?? []).filter((o) => ORIGIN.test(o)))];
+  for (const o of media) img.add(o);
   const api = [...new Set((input.apiOrigins ?? []).filter((o) => ORIGIN.test(o)))].map(publicApiSource);
   for (const s of api) connect.add(s);
   if (input.turnstile) {
@@ -157,7 +164,7 @@ export function buildLandingCsp(input: LandingCspInput): string {
     ["img-src", [...img]],
     ["font-src", ["'self'"]],
     ["connect-src", [...connect]],
-    ["media-src", ["'self'"]],
+    ["media-src", ["'self'", ...media]],
     ["frame-src", input.turnstile ? [TURNSTILE_ORIGIN] : ["'none'"]],
     ["worker-src", ["'none'"]],
     ["manifest-src", ["'self'"]],

@@ -7,12 +7,15 @@
  *  - every BuiltTheme attribute the CSS switches on is on <html>;
  *  - dividers are v2 kinds only, never the same shape twice in a row, none on "panels" pages;
  *  - a v1 document (paper texture, hard shadow, torn/scallop dividers…) is migrated, not rejected;
+ *  - store documents (docs/STORE-SAAS.md §C.6, §C.8): links and URLs under the store base (`/s/<h>/<slug>`,
+ *    `/s/<h>/policies/<kind>?p=`), the canonical at the store's origin, and no aggregateRating in the JSON-LD even
+ *    when the doc carries a rating;
  *  - runtime size budgets (docs/OFFERS.md §F.9, src/landing/runtime/budgets.json): every chunk and the
  *    heaviest page (every optional chunk + landing, in one document) at most the recorded gzip + 5%.
  *
  *   npx tsx scripts/qa/render-check.ts        (exit code 1 on any failure)
  */
-import { LEGAL_KINDS, liveLinks } from "@/landing/context";
+import { LEGAL_KINDS, storePageLinks } from "@/landing/context";
 import { FIXTURE_NAMES, fixtureAssets, getFixture } from "@/lib/page/fixtures";
 import { DIVIDERS } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
@@ -24,10 +27,11 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-/** Same values as PUBLIC_ENDPOINTS in src/lib/render/publish.server.ts (server-only, not importable here). */
+/** Same values as PUBLIC_ENDPOINTS in src/lib/render/store-context.server.ts (server-only, not importable here). */
 const PUBLIC_ENDPOINTS = { order: "/api/public/order", lead: "/api/public/lead", event: "/api/public/event", upsell: "/api/public/upsell" };
 
 const now = "2026-10-07T12:00:00.000Z";
+const STORE_BASE = "/s/qa-store" as const;
 let failures = 0;
 const fail = (m: string) => {
   failures++;
@@ -43,13 +47,14 @@ async function main() {
         fail(`${name}/${locale}: invalid doc ${JSON.stringify(issues.slice(0, 3))}`);
         continue;
       }
+      // a store document in P mode (docs/STORE-SAAS.md §C.6): store base "/s/qa-store", platform origin
       const opts = {
         mode: "live" as const,
         assets: fixtureAssets("/"),
         pageKey: fx.pageKey,
         store: fx.store,
-        urls: { landing: `/${name}`, thankYou: `/${name}/merci`, endpoints: PUBLIC_ENDPOINTS },
-        links: liveLinks(name),
+        urls: { landing: `${STORE_BASE}/${name}`, thankYou: `${STORE_BASE}/${name}/merci`, endpoints: PUBLIC_ENDPOINTS },
+        links: storePageLinks(STORE_BASE, name),
         origin: "https://shop.example",
         now,
         upgradeInsecureRequests: true,
@@ -85,6 +90,9 @@ async function main() {
         if (/data-kind="(marquee-tape|scallop|zigzag|torn|stitch|zellige-band)"/.test(r.html.replace(/<style[\s\S]*?<\/style>/g, ""))) fail(`${tag}: retired divider/edge name in markup`);
         if (!/frame-ancestors 'none'/.test(r.csp) || !/upgrade-insecure-requests/.test(r.csp)) fail(`${tag}: live CSP lacks frame-ancestors/upgrade`);
         if (kind === "landing") {
+          if (!r.html.includes(`<link rel="canonical" href="https://shop.example${STORE_BASE}/${name}"/>`)) fail(`${tag}: canonical is not the store URL`);
+          if (/aggregateRating/i.test(r.html)) fail(`${tag}: aggregateRating in the document (§C.8)`);
+          if (/href="\/legal\//.test(r.html)) fail(`${tag}: a root /legal link`);
           const kinds = [...r.html.matchAll(/class="lp-divider[^"]*" data-kind="([a-z]+)"/g)].map((m) => m[1]!);
           const surfaces = /data-surfaces="(\w+)"/.exec(html)?.[1];
           if (kinds.some((k) => !(DIVIDERS as readonly string[]).includes(k))) fail(`${tag}: unknown divider ${kinds.join(",")}`);

@@ -119,9 +119,9 @@ export function unknownPageHeaders(cls?: HostClass | null): Record<string, strin
 
 const RETRY_AFTER_SEC = 30;
 
-/** The 503 set: UNKNOWN_PAGE_HEADERS + Retry-After (never cached, never indexed, never re-encoded). */
+/** The 503 set: UNKNOWN_PAGE_HEADERS + Retry-After (≤ 1 day: a suspended store with its notice says 86400, D32; never cached, never indexed, never re-encoded). */
 export function unavailablePageHeaders(opts: { retryAfterSec?: number; cls?: HostClass | null } = {}): Record<string, string> {
-  const seconds = Math.max(1, Math.min(3600, Math.round(opts.retryAfterSec ?? RETRY_AFTER_SEC)));
+  const seconds = Math.max(1, Math.min(86_400, Math.round(opts.retryAfterSec ?? RETRY_AFTER_SEC)));
   return { ...unknownPageHeaders(opts.cls), "Retry-After": String(seconds) };
 }
 

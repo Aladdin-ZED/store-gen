@@ -413,7 +413,9 @@ async function main(): Promise<void> {
     eq("503: Retry-After", d["retry-after"], "12");
     delete d["retry-after"];
     eq("404, 410 and 503 share one header set (the 404-uniformity rule)", [JSON.stringify(g), JSON.stringify(d)], [JSON.stringify(setOf(get)), JSON.stringify(setOf(get))]);
-    eq("503 Retry-After is clamped", unavailablePageResponse("GET", undefined, 99_999).headers.get("retry-after"), "3600");
+    // a suspended store with its notice says one day (D32); nothing longer
+    eq("503 Retry-After: one day for a suspended store's notice", unavailablePageResponse("GET", undefined, 86_400).headers.get("retry-after"), "86400");
+    eq("503 Retry-After is clamped to a day", unavailablePageResponse("GET", undefined, 999_999).headers.get("retry-after"), "86400");
     eq("HEAD 410: empty", await gonePageResponse("HEAD").text(), "");
     withEnv({ STORE_ROOT_DOMAIN: PLATFORM, EDGE_KEY }, () => {
       eq("404 on the platform host in S mode: includeSubDomains", unknownPageHeaders("platform")["Strict-Transport-Security"], "max-age=63072000; includeSubDomains");

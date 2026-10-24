@@ -12,8 +12,15 @@
  * LegalDocument = privacy / terms / shipping / contact in the page's theme (noindex, no JavaScript).
  * Store identity and page links come from ctx (ctx.store, ctx.links).
  * Pure components: no hooks, no randomness — everything comes from the doc, ctx and options.
+ *
+ * The render hook (docs/STORE-SAAS.md §H.13, D62): `addons` embeds standalone add-on chunks (`head` scripts first
+ * in <head>, `body` scripts after the core chunk), their JSON data blocks, extra CSS chunks and the test band
+ * (`banner: "test"`, D54); `purchaseInBrowser: false` leaves the pixels out of the thank-you page (the server sends
+ * Purchase at the store's trigger, OPE Q.6) and `pixels: false` out of both pages (test renders). A document
+ * rendered without them is byte-identical to one rendered before the hook existed.
  */
 import type { ReactElement, ReactNode } from "react";
+import type { AddonChunk, RenderAddons } from "./addons/types";
 import type { LandingRenderContext } from "./context";
 import * as generatedAssets from "./generated/assets";
 import { baseCss, legalCss, runtimeJs, sectionCss, thankYouCss } from "./generated/assets";
@@ -62,6 +69,12 @@ export interface DocumentProps {
    * Omitted: the complete stylesheet of every visible section's type (correct, heavier).
    */
   rendered?: RenderedCss;
+  /** the add-ons this document embeds (§H.13); omitted or empty: today's bytes */
+  addons?: RenderAddons;
+  /** false: the thank-you page carries no pixel (the store's Purchase trigger is not "order") */
+  purchaseInBrowser?: boolean;
+  /** false: no pixel on either page (test renders, D54) */
+  pixels?: boolean;
 }
 
 /** The stylesheet needs of a rendered page body. */
@@ -242,7 +255,9 @@ function seoMeta(doc: PageDoc, ctx: LandingRenderContext, urls: DocumentUrls, or
 /**
  * schema.org Product with real data only (no invented prices or ratings): one item → `Offer` at the
  * lead item's price (as before); 2+ items → `AggregateOffer` over the offers' card prices (`from`:
- * the lowest payable total of each available offer).
+ * the lowest payable total of each available offer). Never an `aggregateRating`: no Store Gen page
+ * carries one until verified reviews exist (docs/STORE-SAAS.md §C.8, ST-13, R3); rating fields of a
+ * doc are a publish-gate item (§M.3), never structured data.
  */
 function productJsonLd(doc: PageDoc, ctx: LandingRenderContext, meta: HeadMeta, origin?: string): Record<string, unknown> {
   const { product, offers } = doc;
@@ -286,9 +301,6 @@ function productJsonLd(doc: PageDoc, ctx: LandingRenderContext, meta: HeadMeta, 
     // a placeholder store name ("My store") is not a brand: leave it out rather than publish it
     ...(isPlaceholderStoreName(ctx.store.name) ? {} : { brand: { "@type": "Brand", name: ctx.store.name.trim() } }),
     offers: offer,
-    ...(product.rating
-      ? { aggregateRating: { "@type": "AggregateRating", ratingValue: product.rating.value, reviewCount: product.rating.count, bestRating: 5 } }
-      : {}),
   };
 }
 
@@ -335,6 +347,52 @@ export function runtimeScripts(page: "landing" | "thanks", cfg: Pick<LandingRunt
   return out;
 }
 
+/* ------------------------------------------------------------------ */
+/* Add-ons and the test band (§H.13, D54)                              */
+/* ------------------------------------------------------------------ */
+
+/** A generated asset map (`addonChunks`, `addonCss`) when the asset build emits it, read by a computed key like runtimeChunks(). */
+function generatedMap(name: "addon" | "addonCss"): Partial<Record<string, string>> {
+  const key = name === "addon" ? ["addon", "Chunks"].join("") : name;
+  const v = (generatedAssets as unknown as Record<string, unknown>)[key];
+  return v && typeof v === "object" ? (v as Partial<Record<string, string>>) : {};
+}
+
+/** The inline code of each add-on chunk the asset build knows, in order (an unknown name is left out). */
+function addonScripts(names: readonly AddonChunk[] | undefined): string[] {
+  if (!names?.length) return [];
+  const chunks = generatedMap("addon");
+  const out: string[] = [];
+  for (const name of names) {
+    const js = chunks[name];
+    if (js && !out.includes(js)) out.push(js);
+  }
+  return out;
+}
+
+const ADDON_DATA_ID = /^lp-[a-z][a-z0-9-]{0,30}$/;
+
+/** The test band (D54): shown above everything on a test render, in the page's ink and background tokens. */
+const TEST_BAND_CSS =
+  ".lp-test-band{position:sticky;top:0;z-index:70;margin:0;padding:.55rem 1rem;text-align:center;" +
+  "font:600 .8125rem/1.4 system-ui,-apple-system,'Segoe UI',Roboto,'Noto Sans Arabic',sans-serif;" +
+  "background:var(--lp-ink,#1d2026);color:var(--lp-bg,#f6f7f8);text-wrap:balance}";
+
+const TEST_BAND_TEXT: Partial<Record<string, string>> = {
+  ar: "وضع الاختبار · الطلبات المرسلة من هذه الصفحة تُعلَّم كتجريبية ولا تُحتسب.",
+  fr: "Mode test · Les commandes passées depuis cette page sont marquées « test » et ne sont pas comptées.",
+  en: "Test mode · Orders placed from this page are marked as tests and are not counted.",
+};
+
+/** The add-ons' extra stylesheet chunks and the test band's rules, appended to the document's one stylesheet. */
+function addonCss(addons: RenderAddons | undefined, page: "landing" | "thanks"): string[] {
+  if (!addons) return [];
+  const known = generatedMap("addonCss");
+  const out = addons.css.map((name) => known[name]).filter((css): css is string => !!css);
+  if (addons.banner === "test" && (page === "landing" || page === "thanks")) out.push(TEST_BAND_CSS);
+  return out;
+}
+
 interface ShellProps {
   ctx: LandingRenderContext;
   theme: BuiltTheme;
@@ -347,14 +405,22 @@ interface ShellProps {
   /** runtime config; documents without one carry no script at all */
   config?: unknown;
   jsonLd?: Record<string, unknown>;
+  /** the render hook's add-ons (landing and thank-you pages only) */
+  addons?: RenderAddons;
   children: ReactNode;
 }
 
-function Shell({ ctx, theme, page, lang, qa, head, css, config, jsonLd, children }: ShellProps): ReactElement {
+function Shell({ ctx, theme, page, lang, qa, head, css, config, jsonLd, addons, children }: ShellProps): ReactElement {
   const preloads = fontPreloads(theme.fontIds, ctx.locale, ctx.base, theme.fontWeights);
   const themeColor = theme.tokens["lp-bg"];
   const scripts = config !== undefined && page !== "legal" ? runtimeScripts(page, config as LandingRuntimeConfig) : [];
   const runtime = scripts.length > 0;
+  const hook = page === "legal" ? undefined : addons;
+  // add-ons read #lp-config: without the runtime there is nothing for them to read
+  const headAddons = runtime ? addonScripts(hook?.head) : [];
+  const bodyAddons = runtime ? addonScripts(hook?.body) : [];
+  const data = runtime ? Object.entries(hook?.data ?? {}).filter(([id, value]) => ADDON_DATA_ID.test(id) && value !== undefined) : [];
+  const band = hook?.banner === "test" ? (TEST_BAND_TEXT[ctx.locale] ?? TEST_BAND_TEXT.en!) : null;
   return (
     <html lang={lang ?? ctx.locale} dir={ctx.dir} className={qa ? "lp lp-qa" : "lp"} data-page={page} {...htmlAttrs(theme)}>
       {/* a standalone document rendered to static HTML — not a Next.js page, so next/head does not apply */}
@@ -371,12 +437,26 @@ function Shell({ ctx, theme, page, lang, qa, head, css, config, jsonLd, children
         ))}
         <style dangerouslySetInnerHTML={{ __html: css }} />
         {runtime ? <script type="application/json" id="lp-config" dangerouslySetInnerHTML={{ __html: inlineJson(config) }} /> : null}
+        {data.map(([id, value]) => (
+          <script key={id} type="application/json" id={id} dangerouslySetInnerHTML={{ __html: inlineJson(value) }} />
+        ))}
+        {headAddons.map((js, i) => (
+          <script key={`h${i}`} dangerouslySetInnerHTML={{ __html: js }} />
+        ))}
         {jsonLd ? <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: inlineJson(jsonLd) }} /> : null}
       </head>
       <body className="lp-body">
+        {band ? (
+          <p className="lp-test-band" role="status">
+            {band}
+          </p>
+        ) : null}
         {children}
         {scripts.map((js, i) => (
           <script key={i} dangerouslySetInnerHTML={{ __html: js }} />
+        ))}
+        {bodyAddons.map((js, i) => (
+          <script key={`b${i}`} dangerouslySetInnerHTML={{ __html: js }} />
         ))}
       </body>
     </html>
@@ -385,7 +465,7 @@ function Shell({ ctx, theme, page, lang, qa, head, css, config, jsonLd, children
 
 function configFor(props: DocumentProps, page: "landing" | "thanks") {
   const { doc, ctx, urls } = props;
-  return buildRuntimeConfig(doc, ctx, {
+  const cfg = buildRuntimeConfig(doc, ctx, {
     page,
     mode: props.runtimeMode ?? ctx.mode,
     pageKey: ctx.pageKey,
@@ -396,6 +476,10 @@ function configFor(props: DocumentProps, page: "landing" | "thanks") {
     ver: props.ver,
     formVariant: doc.sections.find((x) => x.type === "orderForm" && !x.hidden)?.variant,
   });
+  // no pixel at all on a test render; no browser Purchase when the store sends it at another trigger (the pixels
+  // chunk is added only for a config with pixel ids, so an empty map ships zero pixel bytes; the v2 shape stays)
+  const noPixels = props.pixels === false || (page === "thanks" && props.purchaseInBrowser === false);
+  return noPixels ? { ...cfg, pixels: {} } : cfg;
 }
 
 export function LandingDocument(props: DocumentProps): ReactElement {
@@ -403,7 +487,7 @@ export function LandingDocument(props: DocumentProps): ReactElement {
   const theme = buildTheme(doc.theme, doc.locale);
   const meta = seoMeta(doc, ctx, urls, origin);
   const icon = faviconHref(ctx, theme);
-  const css = documentCss(ctx, theme, sectionChunks(doc, props.rendered), qa);
+  const css = documentCss(ctx, theme, [...sectionChunks(doc, props.rendered), ...addonCss(props.addons, "landing")], qa);
   const head = (
     <>
       <title>{meta.title}</title>
@@ -439,7 +523,17 @@ export function LandingDocument(props: DocumentProps): ReactElement {
     </>
   );
   return (
-    <Shell ctx={ctx} theme={theme} page="landing" qa={qa} head={head} css={css} config={configFor(props, "landing")} jsonLd={productJsonLd(doc, ctx, meta, origin)}>
+    <Shell
+      ctx={ctx}
+      theme={theme}
+      page="landing"
+      qa={qa}
+      head={head}
+      css={css}
+      config={configFor(props, "landing")}
+      jsonLd={productJsonLd(doc, ctx, meta, origin)}
+      addons={props.addons}
+    >
       {renderPageBody(doc, ctx, props.body)}
     </Shell>
   );
@@ -449,7 +543,7 @@ export function ThankYouDocument(props: DocumentProps): ReactElement {
   const { doc, ctx, urls, qa = false } = props;
   const theme = buildTheme(doc.theme, doc.locale);
   const icon = faviconHref(ctx, theme);
-  const css = documentCss(ctx, theme, thankYouCss ? [thankYouCss] : [], qa);
+  const css = documentCss(ctx, theme, [...(thankYouCss ? [thankYouCss] : []), ...addonCss(props.addons, "thanks")], qa);
   const head = (
     <>
       <title>{`${ctx.t("thanks.step1")} — ${brandName(ctx)}`}</title>
@@ -458,7 +552,7 @@ export function ThankYouDocument(props: DocumentProps): ReactElement {
     </>
   );
   return (
-    <Shell ctx={ctx} theme={theme} page="thanks" qa={qa} head={head} css={css} config={configFor(props, "thanks")}>
+    <Shell ctx={ctx} theme={theme} page="thanks" qa={qa} head={head} css={css} config={configFor(props, "thanks")} addons={props.addons}>
       <ThankYouBody doc={doc} ctx={ctx} landingUrl={urls.landing} />
     </Shell>
   );

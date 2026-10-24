@@ -15,7 +15,8 @@
  *   fixtureAssetResolver(rows, b)  → <b>dev-fixtures/<key>            (dev fixtures, QA renders)
  *
  * Page links (footer legal links, "back to the page"):
- *   liveLinks(slug)    → "/<slug>", "/legal/privacy?p=<slug>", …
+ *   storePageLinks(base, slug) → "<base>/<slug>", "<base>/policies/privacy?p=<slug>", … (live store pages)
+ *   liveLinks(slug)    → "/<slug>", "/legal/privacy?p=<slug>", … (deprecated root paths: QA renders)
  *   exportLinks(depth) → "index.html", "legal/privacy.html", … (depth 1: from inside legal/)
  *   PREVIEW_LINKS      → "#" everywhere (the admin preview never navigates)
  */
@@ -382,7 +383,26 @@ export type LegalKind = (typeof LEGAL_KINDS)[number];
 
 export const isLegalKind = (v: string): v is LegalKind => (LEGAL_KINDS as readonly string[]).includes(v);
 
-/** Live site: the page at "/<slug>", legal documents at "/legal/<kind>?p=<slug>" (themed like the page). */
+/**
+ * A store's live page (PUB-16, docs/STORE-SAAS.md §C.4.1): the page at "<base>/<slug>", the store's legal pages at
+ * "<base>/policies/<kind>?p=<slug>" (themed like the page). `base` is `storeBase(store)`: "/s/<handle>" in P mode,
+ * "" on the store's own host (S, C).
+ */
+export function storePageLinks(base: "" | `/s/${string}`, slug: string): PageLinks {
+  const p = encodeURIComponent(slug);
+  return {
+    home: `${base}/${p}`,
+    privacy: `${base}/policies/privacy?p=${p}`,
+    terms: `${base}/policies/terms?p=${p}`,
+    shipping: `${base}/policies/shipping?p=${p}`,
+    contact: `${base}/policies/contact?p=${p}`,
+  };
+}
+
+/**
+ * The single-tenant root paths (the page at "/<slug>", legal documents at "/legal/<kind>?p=<slug>"): QA renders and
+ * the builder preview until their callers move. @deprecated live documents use storePageLinks(storeBase(store), slug).
+ */
 export function liveLinks(slug: string): PageLinks {
   const p = encodeURIComponent(slug);
   return {

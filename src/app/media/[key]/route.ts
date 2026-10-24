@@ -10,6 +10,8 @@
  *  - the media store reads on its own bounded pool: when saturated it answers 503 + Retry-After
  *    (never cached) instead of queueing behind order traffic;
  *  - large files (videos) are served from a verified local disk copy, not re-read per request.
+ * Served on every host class (§G.6); a key of a store that is not servable for media (suspended, closed,
+ * scheduled for deletion, purged, rejected: docs/STORE-SAAS.md §A.5.3) answers the same 404 as an unknown key.
  */
 import type { NextRequest } from "next/server";
 import {
@@ -26,6 +28,7 @@ import {
 import { KEY_RE } from "@/lib/media/keys";
 import { spendMediaTokens } from "@/lib/media/throttle";
 import { clientIp } from "@/lib/security/ip";
+import { mediaServable, resolveMediaKey } from "@/lib/tenancy/public";
 
 type Params = { params: Promise<{ key: string }> };
 
@@ -109,6 +112,9 @@ async function serve(req: NextRequest, ctx: Params, head: boolean): Promise<Resp
     meta = await getMediaMeta(key);
   }
   if (!meta) return notFound();
+  // the key's store decides (cached: keys never change store, the store row is the 15 s cache)
+  const owner = await resolveMediaKey(key);
+  if (!owner || !mediaServable(owner.store.status)) return notFound();
   const headers = baseHeaders(meta);
 
   if (etagMatches(req.headers.get("if-none-match"), meta.sha256)) {
