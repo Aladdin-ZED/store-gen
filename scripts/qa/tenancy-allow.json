@@ -1,0 +1,52 @@
+{
+  "$comment": [
+    "The allow file of scripts/qa/tenancy-lint.ts (docs/STORE-SAAS.md §E.6, §F.1). Owned by the core maintainer from the C0b merge.",
+    "entries: process-wide state in src/lib/** that lint L4 accepts. Each one names the file, the symbol (the globalThis name, or the module variable) and why it holds no data of one store that another could see. A cache keyed by store goes through scopedCache() instead and needs no entry.",
+    "A module-scope Map / Set that is never changed after module load (typed ReadonlySet / ReadonlyMap, or only read) needs no entry either.",
+    "pins: the most `// tenancy: platform` annotations each group may hold. A count may only grow with a reviewer's approval: the maintainer raises the pin in the same change. Counted at C0b; re-pinned at the R1.0 integration, the P1 merge (src/lib/platform/**) and the P7 merge (src/lib/ai/platform/**)."
+  ],
+  "entries": [
+    { "file": "src/lib/db/client.ts", "symbol": "__codDb", "reason": "the 6-connection query pool (DB-16), one per process; it holds connections, no rows" },
+    { "file": "src/lib/db/locks.ts", "symbol": "__sgLockPool", "reason": "the 2-connection named-lock pool (§E.7, CRIT2-18); it holds connections, no rows" },
+    { "file": "src/lib/db/usage.ts", "symbol": "__codDbUsage", "reason": "the size of the whole database, read by the console only (ADM-06, §E.6); tenants see store_usage" },
+    { "file": "src/lib/media/ensure-focus.ts", "symbol": "__codFocusFlights", "reason": "in-flight focal-point jobs keyed by asset id; asset ids are per store and globally unique (D21, §E.6 unchanged)" },
+    { "file": "src/lib/media/ensure-focus.ts", "symbol": "__codFocusMisses", "reason": "recent focal-point misses keyed by asset id; asset ids are per store and globally unique (D21, §E.6 unchanged)" },
+    { "file": "src/lib/media/store.ts", "symbol": "__codMediaState", "reason": "the media store's pools and disk index keyed by media key; keys are per store (D21, §E.6 unchanged; T4 adds evictStore(storeId))" },
+    { "file": "src/lib/media/throttle.ts", "symbol": "__codMediaThrottle", "reason": "a platform guard keyed by client IP (§E.6 unchanged)" },
+    { "file": "src/lib/sheets/sync.ts", "symbol": "__codSheetsHeaders", "reason": "sheet header rows keyed by spreadsheet id and tab title, one sheet belongs to one store (§E.6 unchanged)" },
+    { "file": "src/lib/sheets/client.ts", "symbol": "__codSheetsToken", "reason": "the shared service account's access token, per credential, never store data (§E.6 unchanged)" },
+    { "file": "src/lib/orders/resolve.ts", "symbol": "__codOrderCache", "reason": "pageKey / version id to public target; random global keys, and the cached targets carry storeId and status (ORD-01, §E.5)" },
+    { "file": "src/lib/orders/export-origins.ts", "symbol": "__codExportOrigins", "reason": "the union of export origins for the CORS preflight (PUB-21, §E.6); invalidateStore() clears it" },
+    { "file": "src/lib/render/compress.ts", "symbol": "__codEncodedCache", "reason": "compressed bodies keyed by content hash: equal bytes, equal entry, whoever asks (§E.6 unchanged)" },
+    { "file": "src/lib/render/serve.server.ts", "symbol": "__codForeignHosts", "reason": "a platform guard: the set of unknown hosts already logged (§E.6 unchanged)" },
+    { "file": "src/lib/security/burst-limit.ts", "symbol": "__codBurst", "reason": "the in-memory burst limits keyed by IP, the platform floor before the database (§E.8)" },
+    { "file": "src/lib/tenancy/cache.ts", "symbol": "__sgCaches", "reason": "the scopedCache() registry itself; every entry inside is keyed by store (§E.6)" },
+    { "file": "src/lib/tenancy/cache.ts", "symbol": "__sgStoreInvalidators", "reason": "the invalidateStore() hooks registered by name (§E.6); functions, no data" },
+    { "file": "src/lib/tenancy/context.ts", "symbol": "__sgIdentity", "reason": "the AsyncLocalStorage of the test identity seam (§E.4): one value per async context, honoured only with SG_TEST_CONTEXT=1 outside production" },
+    { "file": "src/lib/render/prepublish.ts", "symbol": "__sgPrePublish", "reason": "the pre-publish check and listener registry (§M.1); functions registered at import, no data" },
+    { "file": "src/lib/platform/notify.ts", "symbol": "__sgNotifyStubWarned", "reason": "a boolean: the notify() stub warns once per process until T2 writes the insert" },
+    { "file": "src/lib/markets/info.ts", "symbol": "symbolGap", "reason": "Intl currency-symbol spacing per currency and locale; platform data, no store data" },
+    { "file": "src/lib/markets/info.ts", "symbol": "optionsCache", "reason": "the city <select> options per market code and locale, built from the static market table; no store data" },
+    { "file": "src/lib/markets/info.ts", "symbol": "indexCache", "reason": "the city lookup index per market code, built from the static market table; no store data" },
+    { "file": "src/lib/markets/money.ts", "symbol": "fmtCache", "reason": "Intl.NumberFormat instances per locale and currency; no store data" },
+    { "file": "src/lib/media/focus.ts", "symbol": "MEMO", "reason": "crop memo keyed by subject and frame, bounded to 600; pure geometry of one asset, asset ids are per store (D21)" },
+    { "file": "src/lib/page/variant-presets.ts", "symbol": "OKLAB_CACHE", "reason": "colour conversion memo keyed by the colour string; pure maths, no store data" },
+    { "file": "src/lib/theme/blend.ts", "symbol": "stepCache", "reason": "sample ratios keyed by a ratio range; pure maths, no store data" },
+    { "file": "src/lib/theme/blend.ts", "symbol": "endpoints", "reason": "colour endpoint memo keyed by the hex colour; pure maths, no store data" },
+    { "file": "src/lib/theme/blend.ts", "symbol": "neutralCache", "reason": "neutral ramp memo keyed by the input colour; pure maths, no store data" },
+    { "file": "src/lib/theme/color.ts", "symbol": "lumCache", "reason": "relative luminance memo keyed by the colour string; pure maths, no store data" },
+    { "file": "src/lib/theme/palette.ts", "symbol": "accentScales", "reason": "accent scale memo keyed by the hex colour, cleared above 512; pure maths, no store data" },
+    { "file": "src/lib/theme/palette.ts", "symbol": "neutralScales", "reason": "neutral scale memo keyed by hue and chroma; pure maths, no store data" },
+    { "file": "src/lib/ai/worker/ai.worker.ts", "symbol": "jobs", "reason": "the job table of the in-browser AI Web Worker: one tab, one user; never runs on the server" }
+  ],
+  "pins": [
+    { "files": ["src/lib/design/**", "src/lib/jobs/tracks/design.ts"], "max": 3, "reason": "DES-R9: novelty.server.ts and the design-reserve job together" },
+    { "files": ["src/lib/health/**"], "max": 1, "reason": "§E.3 rule 6: the one store_health upsert" },
+    { "files": ["src/lib/ai/platform/**"], "max": 0, "reason": "counted at the P7 merge (§F.1); 0 before it" },
+    { "files": ["src/lib/platform/**"], "max": 0, "reason": "counted at the P1 merge (§F.1, rev 3); 0 at C0b" },
+    { "files": ["src/lib/jobs/**"], "max": 0, "reason": "counted at C0b; re-pinned with a reviewer at the R1.0 integration" },
+    { "files": ["src/lib/tenancy/**"], "max": 0, "reason": "counted at C0b; re-pinned with a reviewer at the R1.0 integration" },
+    { "files": ["src/lib/auth/**"], "max": 0, "reason": "counted at C0b; re-pinned with a reviewer at the R1.0 integration" },
+    { "files": ["src/lib/db/**"], "max": 0, "reason": "counted at C0b; re-pinned with a reviewer at the R1.0 integration" }
+  ]
+}
