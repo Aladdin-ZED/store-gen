@@ -1,32 +1,49 @@
 # Store Gen SaaS part spec: platform console and the tenant SaaS layer
 
-Status: **part spec, revision 1** (2026-10-24, platform part architect). Built on `docs/STORE-SAAS.md` revision 1
-(cited as **core §X**, its decisions as **core D1 … D50**) and on the settled research decisions **R-D1 … R-D53**
-(`docs/saas/RESEARCH.md` §2). Not yet reviewed (PLA-§R is empty). This document is the contract for two R1 product
-tracks of core §K.2, **P1 CONSOLE** (the platform console on the main domain) and **P2 SHELL** (the tenant-side SaaS
-UX), plus the R3 track **D5 PLATFORM** for the later platform features. It refines only the tables core §D.9 gives
-to platform.md, adds product behaviour, and never renames a table, changes a `store_id` rule, changes a seam signature
-or moves a file between tracks: every such need is listed in **PLA-§Q "Requests to the core"** with the exact change.
-Where this document and an older doc disagree, the core wins, then this document.
+Status: **part spec, revision 2 (elevated)** (2026-10-24, platform part architect). Built on `docs/STORE-SAAS.md`
+**revision 2** (cited as **core §X**, its decisions as **core D1 … D64**; appendix core §Q.1 decides every request of
+revision 1: all 32 accepted, three with changes, Q.1, Q.14 and Q.18, integrated below), on the settled research
+decisions **R-D1 … R-D53** (`docs/saas/RESEARCH.md` §2) and on the elevation inputs of owner brief item 16:
+`docs/saas/research/rethink-features.md` (cited as **RF §n**: the eight admin UX rules §2.1, the IA and interaction
+model §2.2, empty states §2.4, data-viz §2.5, motion §2.6, the keep/rework/redesign table §2.9, the 13-screen build
+order §2.10, Store Health §1.3, the catalog delta §3, the three-minute demo §4), `docs/saas/research/rethink-ai.md`
+(**RA §n**: the job model under the 120 s cap §1.5, the store health report §4.8, the 17 changes §9),
+`docs/saas/research/design-baseline.md` (**DB** target ids, used here for the admin's RTL and honesty rules:
+RTL1-RTL8, D1, D2) and `qa/ref/anti-slop-frontend-rubric.md` (adopted for product UI where the owner rules do not
+override it: §4.5-4.7 states, forms and layout discipline, §9 AI tells, §9.G the em-dash ban; its orange-family
+palette suggestions are void and Arabic keeps its own type rules). Not yet reviewed (PLA-§R is empty). This document
+is the contract for two R1 product tracks of core §K.2, **P1 CONSOLE** (the platform console on the main domain,
+plus the Store Health engine and job of core §I.7) and **P2 SHELL** (the tenant-side SaaS UX, the pulse, the
+dashboard and the tenant Store Health ring), plus the R3 track **D5 PLATFORM** for the later platform features. It
+refines only the tables core §D.9 gives to platform.md, adds product behaviour, and never renames a table, changes a
+`store_id` rule, changes a seam signature or moves a file between tracks. Where this document and an older doc
+disagree, the core wins, then this document; where revision 1 of this document and core §Q.1 disagreed, core §Q.1
+wins and **PLA-§S "Elevation changes (rev 2)"** records every alignment with its source.
 
-Inputs: `docs/STORE-GEN-BRIEF.md` (owner items 1-16), `docs/HANDOFF.md` (owner rules §2, Hostinger §4),
-`docs/saas/TENANCY-MAP.md` (item ids AUTH-xx, ADM-xx), `docs/saas/RESEARCH.md` (feature ids PL-, TN-, UX-, SE-, OS-),
-`docs/saas/research/platform-admin.md` (cited as **PA §n**), `docs/saas/research/ai.md` §10, `domains.md` §4.8.
-Format model: `docs/OFFERS.md`. Code facts are `path:line` at commit `15c9cef`. Next.js 16.4 facts cite
-`node_modules/next/dist/docs/…`.
+Inputs: `docs/STORE-GEN-BRIEF.md` (owner items 1-16; item 16 = this elevation pass), `docs/HANDOFF.md` (owner rules
+§2, Hostinger §4), `docs/saas/TENANCY-MAP.md` (item ids AUTH-xx, ADM-xx), `docs/saas/RESEARCH.md` (feature ids PL-,
+TN-, UX-, SE-, OS-; signature features SF-01 … SF-12 from RF §1 and §3.1), `docs/saas/research/platform-admin.md`
+(cited as **PA §n**), `docs/saas/research/ai.md` §10, `domains.md` §4.8. Format model: `docs/OFFERS.md`. Code facts
+are `path:line` at commit `a0ffec1` (the revision 1 facts at `15c9cef` were re-verified on 2026-10-24 and still hold;
+`HEAD` `ae4e6c0` changes only docs). Next.js 16.4 facts cite `node_modules/next/dist/docs/…`.
 
-Reading order for a build agent: PLA-§0 (decisions) → PLA-§1 (feature map, find your ids) → PLA-§P (file
-ownership: which files are yours) → the sections your files touch → PLA-§N (copy keys) → PLA-§O (tests you must
-keep green) → PLA-§Q (what the core still owes you; build against the stubs it freezes in step P0).
+Reading order for a build agent: PLA-§0 (decisions) → PLA-§1 (feature map, find your ids incl. the SF-* rows) →
+PLA-§P (file ownership: which files are yours) → the sections your files touch → PLA-§N (copy keys) → PLA-§O (tests
+you must keep green) → PLA-§S (what revision 2 changed and why) → PLA-§Q (the status of every request; build against
+the stubs core §K.2 P0 freezes).
 
-Section map: §0 decisions · §1 feature map · §2 data · §3 signup + approval + `scoreSignup` · §4 console shell ·
-§5 overview · §6 stores list + health snapshot · §7 store profile · §8 lifecycle actions · §9 plans + entitlements ·
-§10 impersonation UX · §11 people + orders lookup · §12 flags + kill switches · §13 platform settings + legal ·
-§14 staff + 2FA + security centre · §15 system health · §16 Domains view · §17 backups UI · §18 notifications ·
-§19 announcements + in-app messages · §20 support · §21 platform analytics · §22 tenant SaaS UX (auth pages,
-onboarding, picker + switcher, team + invites, notification centre, ⌘K, banners, limit sheet, plan page, danger zone,
-account) · §23 mobile admin + PWA · §24 later platform features (R3 and P2) · §L limits · §M server actions and
-routes · §N copy keys · §O tests · §P file ownership · §Q requests to the core · §R review decisions.
+Section map: §0 decisions · §1 feature map · §2 data · §3 signup + approval + `scoreSignup` + explainable risk ·
+§4 console shell + the console UX ceiling · §5 overview · §6 stores list + the Store Health engine (shared with the
+tenant ring) · §7 store profile (R1: Overview as the "every detail" view, Orders, Team, Activity, Usage & plan,
+Notes) · §8 lifecycle actions + lifecycle safety · §9 plans + entitlements · §10 impersonation UX · §11 people +
+orders lookup · §12 flags + kill switches · §13 platform settings + legal · §14 staff + 2FA + security centre ·
+§15 system health incl. the Worker, the render queue and the health engine · §16 Domains view · §17 backups UI ·
+§18 notifications · §19 announcements + in-app messages · §20 support · §21 platform analytics · §22 tenant SaaS UX
+(auth pages, onboarding with the no-download critical path, picker + switcher, team + invites, notification centre +
+the shared pulse, banners, limit sheet, plan page, danger zone, account, the Store Health ring, the dashboard, the
+admin UX ceiling per screen) · §23 mobile admin + PWA · §24 later platform features (R3 and P2) · §L limits · §M
+server actions and routes · §N copy keys · §O tests · §P file ownership · §Q requests to the core (status after core
+rev 2) · §R review decisions · §S elevation changes (rev 2).
 
 ### Owner summary (plain English)
 
@@ -49,40 +66,61 @@ routes · §N copy keys · §O tests · §P file ownership · §Q requests to th
 8. Kill switches stop sign-ups, publishing, AI, Sheets, ad events or uploads in one click, or put the whole platform in
    read-only mode while orders keep flowing.
 9. Health: the 5-minute job, queues, database and disk size, errors, the Cloudflare edge, and backups you can download.
-10. For sellers: a two-step sign-up, then a "wow" first minute: drop product photos, type the price while the AI looks,
-    and see a designed landing page with two alternatives. Then a dashboard with an "In review" card that says what is
-    locked until you approve them.
+10. For sellers: a two-step sign-up, then a "wow" first minute: drop product photos, type the price while the designs
+    are ranked from the photos and the category, and see three designed pages, each unlike the others. Then a
+    dashboard with an "In review" card that says what is locked until you approve them.
 11. Sellers switch between their shops, invite teammates with a one-time link (copy or WhatsApp), see a notification
     centre, use ⌘K, and get the dashboard as an app icon on their phone. Push notifications come in R3.
 12. Everything a seller or agent reads in R1 exists in Arabic (Darija-friendly), French and English. Your console is in
     English first.
+13. **New in revision 2.** Every shop and every seller sees the same **Store Health** number: one ring, five reasons
+    in plain words with the number behind each ("Sheets is 22 minutes behind, n = 14 orders"), and one tap to fix
+    each. It replaces the old setup checklist. You see the same ring in your stores list, with the flags that matter
+    to you (quota, sync errors, risky orders, dormant). Fixing something never lowers the score and the score never
+    blocks anything.
+14. **Approvals explain themselves twice:** the risk reasons and what would change the verdict ("without the
+    throwaway e-mail this would be low risk"), plus what the seller actually built (a page or not, its design check,
+    anything invented). One key approves; the seller's dashboard unlocks within fifteen seconds without a reload.
+15. **Dangerous buttons show their consequences first:** before you restrict, suspend or close a shop you read the
+    exact sentence the seller will see, in their language, and how many live pages, open orders and agents are
+    affected; the write happens only after a five-second cancel window.
+16. **The shop profile's first tab shows every detail at once** (address, health, pages, orders, team, connections,
+    AI use, usage, risk, timeline) with customer data masked; the deeper tabs for catalog, connections, domains, risk
+    and media fill in with R2 so R1 ships on time.
+17. **Health shows the machinery too:** the Cloudflare Worker, the page re-render queue, the AI provider and the
+    health engine itself each have a panel and an alarm.
+18. The seller's first result arrives without any AI download: the three designs are ranked from the category they
+    tapped and the colours of their photos; the heavier models refine afterwards. The whole path from invite link to
+    a confirmed test order is the three-minute demo you watch before R1 ships; this part owns the first fifty seconds
+    and your one-key approval.
 
 ---
 
 ## PLA-§0. Decisions at a glance
 
-R-D1 … R-D53 and core D1 … D50 are settled. Rows below are this part's own decisions; **deviates** / **refines** say
-which settled decision changes and why.
+R-D1 … R-D53 and core D1 … D64 are settled. Rows below are this part's own decisions; **deviates** / **refines** say
+which settled decision changes and why. Rows changed or added in revision 2 carry **(rev 2)**; PLA-§S lists them with
+their sources.
 
 | # | Decision | Why |
 |---|---|---|
 | PD1 | **One spec, two R1 tracks.** P1 builds PLA-§2-§21 (console, `src/lib/platform/**`); P2 builds PLA-§22-§23 (tenant UX). Shared UI primitives used by both (step-up sheet, typed-confirm dialog, usage meter, masked value, reason picker) live in P2's `src/components/admin/common/**` with the props frozen here (PLA-§22.12). | Core §K.2 splits the work that way; P2 merges before P1 (core merge order P8 → P2 → P1), so P1 imports finished primitives. |
 | PD2 | **The console reads one store only through `src/lib/platform/profile/**` read functions** that take the `platformScope(ctx, storeId)` scope and return **masked projections**. Raw customer phone, name, address and note never leave those functions; the only unmasked path is `revealOrderPii` (`pii.reveal` ↑, reason). | One choke point for R-D16 / core §F.11; the type (`StoreScope`) satisfies lint L1, and L6 keeps platform scopes away from write repositories. |
 | PD3 | **`scoreSignup()`** = 0-100 with explainable flags (PLA-§3.4). Bands: `fast` ≤ 24, `review` 25-59, `hold` ≥ 60, `reject_candidate` ≥ 85 **or** linked to a banned user. Nothing is auto-rejected (R-D12). Mode `open` auto-approves only `fast` + Turnstile `ok` + no hold-class flag. Weights and thresholds are platform settings, starting values **[to tune]**. | PA §5.3 signals and points; the bands give the queue its triage order. |
-| PD4 | **Signup stays one two-step form and one transaction (core §B.2 unchanged); the wow flow happens right after, at `/app/<h>/welcome`** (photos → analysis while the price is typed → reveal with 2 alternates → contact defaults). **Refines UX-01**, which put photos before name and handle. | The core transaction needs name, handle and mode; uploads need a store scope (media ids are per store, core D21); the pending sandbox allows building at once (R-D12). The reveal still lands within ~90 s of the first click. |
-| PD5 | **The approval queue carries every staff decision about a store:** signups, appeals (`reopen`), restore requests (`go_live`), plan changes (`plan_change`), limit raises (`limit_raise`), store-mode interest (`mode_change`), custom domains (`domain`, R3). `signup_reviews.kind` is appended (core §D.9 lets this part refine the enum). | One inbox and one SLA for the owner (PA §5.4: "the same queue later carries…"). |
-| PD6 | **Store health score + dormant tag ship in R1** as a 5-minute snapshot table `store_health` (request PLA-§Q.1). **Deviates PL-18** (R3). Re-engagement messages for dormant stores stay R3. | PL-06 "needs attention" (R1) needs exactly these flags; a stored snapshot keeps the stores list a single indexed query; the score is the same flags summed. |
-| PD7 | **Four-eyes purge and the 24 h single-super-admin delay are `platform_requests` rows** (new table, PLA-§Q.2). The `platform.requests` job executes due requests. | Core §A.5.1 demands "two different staff, or one super_admin + 24 h", which needs a durable pending state that survives deploys and restarts. |
+| PD4 | **Signup stays one two-step form and one transaction (core §B.2 unchanged); the wow flow happens right after, at `/app/<h>/welcome`** (photos → details while the directions are ranked → reveal with 3 directions → contact → address card). **Refines UX-01**, which put photos before name and handle. **(rev 2)** The reveal budget is the demo clock (RF §4: reveal at 0:50 from the invite link, generation ≤ 1.5 s client-side, preview render ≤ 1 s), and nothing on that path waits for a model download (PD59, core D59). | The core transaction needs name, handle and mode; uploads need a store scope (media ids are per store, core D21); the pending sandbox allows building at once (R-D12). |
+| PD5 | **The approval queue carries every staff decision about a store:** signups, appeals (`reopen`), restore requests (`go_live`), plan changes (`plan_change`), limit raises (`limit_raise`), store-mode interest (`mode_change`), custom domains (`domain`, R3). `signup_reviews.kind` is appended (core §D.9 lets this part refine the enum; applied in core §D.4). | One inbox and one SLA for the owner (PA §5.4: "the same queue later carries…"). |
+| PD6 | **(rev 2) Store Health is one engine for two audiences (core D53, §I.7, SF-03):** one `store_health` row per store written only by the `platform.health` job (slot 9), read by the console ring and flags (PL-18) and by the tenant ring with reasoned fixes (P2, PLA-§22.16). P1 owns `src/lib/health/**` (engine, registry imports, job, console ring, the platform rules file); every track contributes rules in `src/lib/health/rules/<track>.ts`. **Deviates PL-18** (R3 console-only). Re-engagement messages for dormant stores stay R3. | PL-06 "needs attention" (R1) needs the flags; the seller needs the same number with fixes (RF §1.3); one computation means the two audiences never disagree (core D53). |
+| PD7 | **Four-eyes purge and the 24 h single-super-admin delay are `platform_requests` rows** (core table of 0005, core §D.5; Q.2 accepted). The `platform.requests` job executes due requests. | Core §A.5.1 demands "two different staff, or one super_admin + 24 h", which needs a durable pending state that survives deploys and restarts. |
 | PD8 | **Assigning a plan to a store needs `entitlements.override` (admin+); editing plan definitions needs `plans.manage` (super_admin).** `take_orders` is locked to `true` in every plan editor row. | Plan moves are daily ops; plan definitions change every store on them; orders are never blocked (R-D15, core D8). |
 | PD9 | **Console copy is English in R1** (fr R2, ar R3, core D36). **Every tenant-facing string this part adds in R1 ships in ar, fr and en:** auth pages, onboarding, store picker and switcher, review card, lifecycle banners, limit sheet, plan page, team and invites, notification texts, impersonation notices, help sheet. | Staff read English; sellers and agents read Darija, Arabic and French (core D36). |
 | PD10 | **Mobile in R1** = every PLA tenant screen and the console queue work at 360 px, plus an **installable dashboard manifest** scoped to `/app/` with **no service worker**. **R3** = a push-only service worker (no offline caching) and Web Push with hand-written VAPID + aes128gcm on `node:crypto`. **Deviates UX-07** (R3) for the manifest only. | Installability needs only a valid manifest and HTTPS (`node_modules/next/dist/docs/01-app/02-guides/progressive-web-apps.md:592-595`). Offline caches of dashboards risk stale customer data; `npm` installs are slow here (HANDOFF §3). |
 | PD11 | **Notifications = one `notify(target, kind, vars, opts)` API with a typed kind catalog**; titles are rendered at read time in the reader's locale; staff free text only in `notifications.text`; `dedupeKey` batches noisy kinds. Broadcasts fan out lazily at read time (R3). | One catalog → one translation set; no per-user row explosion (PA §10.4). |
-| PD12 | **A random device marker cookie `__Host-sgd`** (128-bit, HttpOnly, Secure, SameSite=Lax, 400 days, platform host only) feeds the `identity_links.kind = 'device'` signal (request PLA-§Q.3). | Core §D.4 has the `device` kind but nothing produces it; a random marker is not fingerprinting (PA §2 "device labels without fingerprinting"). |
-| PD13 | **Staff are added by a staff invite link** that creates (or binds) a user with **no store**; the platform role activates only once TOTP is enrolled (request PLA-§Q.4). | Signup always creates a store (core §B.2); staff should not own a sandbox store; core §B.7 makes 2FA mandatory for staff. |
-| PD14 | **Cross-store phone lookup in the console is admin+ only** (new key `orders.lookup`, PLA-§Q.5), results masked, audited with the phone's HMAC. Order-id lookup is open to every console role. | "Which stores did this phone order from" is legitimate for abuse and support, and is still sensitive. |
+| PD12 | **A random device marker cookie `__Host-sgd`** (128-bit, HttpOnly, Secure, SameSite=Lax, 400 days, platform host only) feeds the `identity_links.kind = 'device'` signal (core §B.1 "Device marker", Q.3 accepted; written by T2). | Core §D.4 has the `device` kind and the core now names its producer; a random marker is not fingerprinting (PA §2 "device labels without fingerprinting"). |
+| PD13 | **Staff are added by a staff invite link** that creates (or binds) a user with **no store**; the platform role activates only once TOTP is enrolled (core §B.1 `/invite/staff/<token>`, §D.5 `staff_invites`; Q.4 accepted). | Signup always creates a store (core §B.2); staff should not own a sandbox store; core §B.7 makes 2FA mandatory for staff. |
+| PD14 | **Cross-store phone lookup in the console is admin+ only** (key `orders.lookup`, core §A.3.3; Q.5 accepted), results masked, audited with the phone's HMAC. Order-id lookup is open to every console role. | "Which stores did this phone order from" is legitimate for abuse and support, and is still sensitive. |
 | PD15 | **k-anonymity applies to the analyst role everywhere**, overview totals included: any aggregate over fewer than `k` stores (setting, default 5, minimum 5) is suppressed for analysts. | R-D16, PA §13; with 3 stores a "platform total" is one seller's numbers. |
-| PD16 | **Console previews of tenant pages are sandboxed iframes on a signed `/preview/<token>` URL** minted for the staff member (10 minutes), never inline HTML (request PLA-§Q.6 for the minting API). | Core SE-05 / §I.2; a console XSS would expose every store. |
-| PD17 | **Legal:** platform ToS, Privacy, AUP and DPA templates live in code (`src/lib/platform/data/legal/**`), are seeded as drafts flagged `needs_legal_review`; publishing an unreviewed version needs an explicit owner acknowledgement; signup asks only for published kinds; a new version can require re-acceptance (a blocking sheet in the dashboard, never on public pages). | Core D39, owner rule 4 (no invented claims); signup must not break while no document is published. |
+| PD16 | **Console previews of tenant pages are sandboxed iframes on a signed `/preview/<token>` URL** minted for the staff member (10 minutes) through `mintPreviewToken(scope, { audience: "staff" })` (core §E.2, T3; Q.6 accepted), never inline HTML. | Core SE-05 / §I.2; a console XSS would expose every store. |
+| PD17 | **Legal:** platform ToS, Privacy and AUP templates and the store templates live in code (`src/lib/platform/data/legal/**`), are seeded as drafts flagged `needs_legal_review`; publishing an unreviewed version needs an explicit owner acknowledgement; signup asks only for published kinds; a new version can require re-acceptance (a blocking sheet in the dashboard, never on public pages). **(rev 2)** The platform **DPA moves to R2** (RF §3.3, core §I.2, core §L.2 PL-14): the `dpa` kind stays in the enum, no R1 seed text. | Core D39, owner rule 4 (no invented claims); signup must not break while no document is published; a DPA needs a lawyer either way. |
 | PD18 | **Every score explains itself.** Health score weights, attention rules and signup points are starting values **[to tune]**; the UI always lists the components next to the number. | Owner rule 4 spirit: no unexplained numbers; easy tuning after the first 200 signups. |
 | PD19 | **"View as store" can start from the store profile, the queue split view, ⌘K and (R3) a ticket**; the start sheet always shows the exact text the store will see. Default 30 minutes. | R-D14; the staff member knows what the seller will read. |
 | PD20 | **Platform brand = a wordmark** set in Instrument Sans from `platform.brand.name`; no uploaded platform logo in R1. | Assets are per store (core D21); the R2 logo designer can make a platform mark inside internal store #1. |
@@ -93,33 +131,53 @@ which settled decision changes and why.
 | PD25 | **Console identity:** deep-ink surfaces, teal-cyan accent OKLCH hue 205, compact density by default; impersonation ribbon violet hue 295; R3 break-glass write ribbon crimson hue 17. All checked by `test:admin-tokens`. | UX-03, core §I.6; every hue sits outside the banned 25-75° band. |
 | PD26 | **Console lists use keyset paging** (no `OFFSET`) and every list query has a written index plan (PLA-§M.4). Panels cache 5-60 s in a `scopedCache` under the platform key `"p"`. | One shared Node process and MariaDB 10.4 (core §H); lint L4 requires `scopedCache`. |
 | PD27 | **Store export downloads from the console go through a console route** `/api/admin/stores/<id>/exports/<jobId>/<part>` whose signature is bound to the staff user. | Staff are not store members, so the tenant route (session with `store.export`, core §F.9) refuses them. |
-| PD28 | **Onboarding progress lives in a new store setting `onboarding`** (PLA-§Q.7); reveal timing is recorded there, never sent to third-party analytics. | Resume after a closed tab; measure the "≤ 90 s to reveal" target honestly. |
+| PD28 | **Onboarding progress lives in the store setting `onboarding`** (core §D.10; Q.7 accepted); reveal timing is recorded there, never sent to third-party analytics. | Resume after a closed tab; measure the "≤ 90 s to reveal" target honestly. |
 | PD29 | **Kill-switch toggles preview the exact tenant banner and the number of affected stores before confirming**; `platform_read_only` can always be turned off (core §H.8 exempts `kill.manage`). | An incident tool must be impossible to misread. |
-| PD30 | **R1 mode cards show "Full store" and "Both" as "Coming soon"** with an optional "Tell me when it's ready" that files a `mode_change` interest request. | Core §A.2 (only `landing` selectable in R1); honest UI that also measures demand for R2. |
+| PD30 | **R1 mode cards show "Full store" and "Both" as "Coming soon"** with an optional "Tell me when it's ready" that files a `mode_change` interest request. **(rev 2)** The cards are first-class in onboarding and in Settings → General; the R2 path for `store` / `both` is fixed now (PD60) so the screens need no redesign when the modes open. | Core §A.2 (only `landing` selectable in R1); honest UI that also measures demand for R2. |
 | PD31 | **Trusted creators:** in `approval` mode, a new store (`/app/new`) of a user who owns an `active` store older than 30 days with no restriction in the last 90 days is auto-approved when its band is `fast` (setting `signup.trustedCreatorAutoApprove`, default on). | Keeps the queue for unknown sellers; flags still apply. |
-| PD32 | **The store profile ships 13 tabs in R1** (Overview, Orders, Pages, Team, Activity, Timeline, Usage & plan, Integrations, AI, Domains, Risk, Media, Notes); Ops is R2 (S6), Support is R3 (PL-16). A tab whose data arrives later shows an honest "Fills in with R2" state, never placeholder numbers. **Deviates** from the rethink cut (rethink-features §3.3) and follows RESEARCH PL-07. | The owner asked for every stat, log, order, teammate, usage, integration, AI use, domain, risk flag, note and timeline (brief items 13-14); every R1 tab reads data that already exists in R1. |
+| PD32 | **(rev 2) The store profile ships 6 tabs in R1** (Overview, Orders (masked), Team, Activity (with a Timeline view), Usage & plan, Notes) and the **Overview tab is the owner's "every detail" view**: ten detail strips (identity & address, health, pages, orders, team, integrations, AI, usage, risk, timeline), each a `<PanelBoundary>` over one P0 read API, each linking to its full tab when that tab exists. The full tabs **Catalog & pages, Integrations health, Domains, Risk, Media** arrive in R2 (S6), Ops in R2 (S6), Support in R3 (PL-16); until then the strip shows the R1 data and the line "Full view arrives with R2", never placeholder numbers. **Follows** the rethink cut (RF §3.3, core §I.2, core §L.2 PL-07) and replaces revision 1's 13-tab plan (PLA-§S). | The owner asked for every stat, log, order, teammate, usage, integration, AI use, domain, risk flag, note and timeline (brief items 13-14): the strips give all of it on one screen with masked PII; the deep tabs need R2 data anyway and their cut pays for SF-03 (RF §3.3). |
 | PD33 | **No page or media takedown from the console in R1.** Abuse is handled at store level (restrict / suspend, PLA-§8); page and media takedowns arrive with PL-20 (R3) through a platform write scope. | Lint L6 forbids platform scopes on write repositories; restrict already stops orders and suspend hides every page. |
 | PD34 | **Staff never edit tenant data in R1** (pages, settings, memberships, orders). Console writes are platform rows (reviews, notes, entitlements, flags, settings) and user-level actions (ban, 2FA reset, reset link, sign-out) of core §B.7, §B.9. | R-D14 read-only support; one less class of cross-tenant write to secure. |
 | PD35 | **Seller contact data** (`users.email`, `users.phone`) is shown in full to admin+ and masked to support and analyst; **customer PII** (orders, leads, customers) is masked for every role and revealed per order only (`pii.reveal` ↑, reason). | Admins need to reach sellers on WhatsApp; customers never agreed to staff reading them (R-D16, core §F.11). |
-| PD36 | **Console navigation lives in `src/components/console/nav.ts`** (P1), not in the tenant nav registry: its items carry a `PlatformPermission`, not a store handle. The core's "nav `console.ts`" extension file stays unused. | `NavItem.href(handle)` and `navFor(StoreCtx)` (core §I.3) are store-shaped. |
+| PD36 | **Console navigation lives in `src/components/console/nav.ts`** (P1), not in the tenant nav registry: its items carry a `PlatformPermission`, not a store handle. **(rev 2)** The core's extension file `src/components/admin/shell/nav/console.ts` (P1, core §K.2) exports exactly one tenant-shell item, "Platform console" (`permission` none, shown only when `user.platformRole ≠ "none"`, `href: () => consoleHref("/")`), which the store switcher renders (core §B.4); nothing else of the console lives in the tenant nav. | `NavItem.href(handle)` and `navFor(StoreCtx)` (core §I.3) are store-shaped; the one staff entry in the tenant shell still belongs to this part. |
 | PD37 | **Cross-store "last 24 h" figures use a new single-column index `orders_created_idx (created_at)`** (PLA-§Q.10) instead of per-store loops. | Core 0004 replaced every global orders index with store-prefixed ones; a platform count by time would scan the table. |
 | PD38 | **Every poll (tenant pulse, console pulse, ⌘K search) is a GET route handler with an ETag**, never a server action. | Server actions are dispatched one at a time per client (`node_modules/next/dist/docs/01-app/02-guides/server-actions.md:26-32`): a poll would delay the seller's next save. |
 | PD39 | **Console and shell mutations finish with `refresh()`** (`next/cache`) after the write; no `revalidateTag` is used. | Console data lives in MariaDB and `scopedCache`, not in Next's data cache; `refresh()` re-renders the current route in the same round trip (`server-actions.md:141-150`, `04-functions/refresh.md`). |
 | PD40 | **Store milestones are recorded from R1** (first draft, first publish, first order, 10th order, first teammate; first delivered order from R2) in `store_health.milestones` and as `store.milestone.reached` audit rows. | The store timeline needs them now and the R3 activation funnel (PL-19) needs history from day one. |
 | PD41 | **R2 mail transport = `nodemailer`** (the one dependency core §B.10 lets this part choose), pinned to an exact version at install; it has no runtime dependencies **[verify at install]**. | The reference SMTP client for Node; avoids a hand-written SMTP/STARTTLS stack; Hostinger SMTP limits stay unverified (R-D51). |
-| PD42 | **The console health score uses platform signals only** (integrations, quota, order risk mix, activity, setup, renders). Design-quality and honesty rules of the tenant-facing health ring (rethink SF-03) are not part of this score; SF-03, if adopted, may read the same snapshot. | Keeps PL-18 within this part's data and avoids two scores that disagree. |
+| PD42 | **(rev 2) One score, seven groups (core §I.7):** `setup 20 · trust 15 · design 15 · conversion 15 · operations 15 · integrations 15 · quota 5` (Σ = 100); issues carry `severity 1 \| 2 \| 3 → points 3 \| 6 \| 10` and an evidence object with `n`; the console flags of PLA-§6.3 (`sheets_*`, `outbox_dead`, `capi_failing`, `telegram_failing`, `quota_*`, `risky_orders`, `setup_incomplete`, `render_failed`) are **produced by `src/lib/health/rules/platform.ts` (P1) as issues mapped onto the groups**, and the status flags (`inactive_14d`, `dormant_60d`, `review_waiting`, `restricted`, `suspended`) stay 0-point console flags that only drive `attention`. Design and honesty rules come from P6 and P3's rules files. **Replaces** revision 1's six platform-only components (30/20/15/20/10/10). | Core D53 adopted the one-table, one-computation model; a score the seller reads must include what the seller can fix (RF §1.3). |
 | PD43 | **Kill switches are never toggled from ⌘K, a bulk bar or a keyboard shortcut**: ⌘K only opens the switch's sheet. | An incident tool needs one deliberate path (PD29). |
 | PD44 | **No bulk lifecycle actions in R1.** Bulk on the stores list = message (≤ 50 stores) and a CSV of the list without PII. | One mistaken selection must never suspend 50 sellers. |
 | PD45 | **Impersonation is refused** for a store the staff member is a member of ("open it directly"), and for `scheduled_deletion` / `purged` stores; one active impersonation per staff session (starting another ends the first). | Avoids mixed identities in the audit; nothing to support on a store about to be deleted. |
 | PD46 | **The dashboard manifest is a route handler at `/app/manifest.webmanifest`**, linked from the `/app` layout metadata. | The metadata manifest file convention lives only in the app root (`03-file-conventions/01-metadata/manifest.md:6`), and `/manifest.webmanifest` is a store-reserved slug on store hosts (core §C.4.1). |
-| PD47 | **QR codes use the installed `qrcode` package** (`package.json:65`), rendered to SVG in the browser: invite links in R1 (TN-06), the address card in R2 (UX-05). | No new dependency; nothing secret leaves the page. |
+| PD47 | **QR codes use the installed `qrcode` package** (`package.json:65`), rendered to SVG in the browser: invite links (TN-06) **and the live address card, both R1** (UX-05 raised, RF §3.2, core §I.4, PD61). | No new dependency; nothing secret leaves the page. |
 | PD48 | **Onboarding composes other tracks' engines**: P2 owns the flow, state, routes and copy; the photo analysis is P7's `useAiTask("analyze", …)` (ai.md AI-§A.7) and the reveal composition is P6's (design.md DES-§14.3). | One engine per concern; the wizard stays the same code path as Generate. |
 | PD49 | **Legal template content is code in `src/lib/platform/data/legal/**`** and is seeded by the core boot task through a versioned marker (PLA-§Q.13). | Templates are reviewed in git; the R1.0 seed must not need P1's files to exist. |
-| PD50 | **Notification kinds are a typed registry with per-track extension files** (PLA-§Q.15); this part owns the platform, lifecycle, team, plan, security and staff kinds. | Every kind needs ar/fr/en texts and a link builder; tracks must not edit one shared file. |
+| PD50 | **Notification kinds are a typed registry with per-track extension files** (PLA-§Q.15); this part owns the platform, lifecycle, team, plan, security, staff and health kinds. | Every kind needs ar/fr/en texts and a link builder; tracks must not edit one shared file. |
+| PD51 | **(rev 2) The console passes the admin UX ceiling with its own budgets** (core §I.8 applied to staff screens, PLA-§4.7): shell navigation < 150 ms (route chunks prefetched on hover and focus, the first page of every list served from a 60 s `scopedCache`), keyboard decisions ≤ 500 ms with optimistic UI and an `opId`, skeletons that mirror the final rows after 150-300 ms and for ≥ 300 ms, status always as text + icon (never a bare coloured dot), compact density by default, the §I.6 motion tokens and no bounce. Measured by `platform-check.ts --perf` and the Playwright budgets of PLA-§O.4. | The owner lives in the console every day; "futuristic" is latency discipline, keyboard and honest data (RF §0.4, §2.1). |
+| PD52 | **(rev 2) Explainable risk has three layers on every review:** (a) the flag list with points and evidence (PD3); (b) a **counterfactual line** from `explainBand(score)`: which single flag, removed, would change the band ("Without `disposable_email` this would be `fast`") and which single flag puts it in the hold class; (c) the **draft evidence**: readiness, the Design check summary of the newest draft (P6 `designHealth(scope)`), the count of honesty items (`buildChecklist`) and whether any sample proof is still marked `sample`. Staff decide about the store, not only about the signup; nothing is auto-rejected (R-D12). | Brief item 16: "approvals queue with explainable risk"; a score with no counterfactual is a number, not an explanation (PD18). |
+| PD53 | **(rev 2) P1 owns the Store Health engine, P2 the tenant surface, every track its rules** (core §I.7, §K.2): `src/lib/health/{types,registry}.ts` are the maintainer's skeletons; P1 writes `src/lib/health/{engine,inputs,platform-flags}.ts`, `src/lib/health/rules/platform.ts`, `src/lib/health/selftest.ts`, `src/lib/platform/health-snapshot.ts` (`getStoreHealth`, `markHealthDirty`, `snoozeHealthIssue`), the job in `src/lib/jobs/tracks/platform.ts` and the console ring; P2 writes the ring, the issue list, "Recompute now" and the snooze UI (PLA-§22.16) plus `src/lib/health/rules/shell.ts` (setup rules about contacts, legal identity and 2FA). The score never gates anything (publish gates are core §M). | One owner per layer; the setup checklist (`src/lib/admin-data/dashboard.ts:173-180`, six static items) is deleted, not duplicated (RF §1.3, core §I.4). |
+| PD54 | **(rev 2) Lifecycle safety = preview, arm, cooldown.** Every lifecycle action (PLA-§8) opens a sheet that shows the **exact store-facing sentence** in the store's default locale, the **consequences count** from `lifecyclePreview(ctx, storeId, to)` (live pages, open orders, agents holding a lease, integrations that pause, the reopen deadline) and the audit row it will write; the primary button arms a **5-second cancel window** on the client before the single `transitionStore` write; a second lifecycle change on the same store within 10 minutes needs the typed handle even where the edge normally does not; no bulk lifecycle action exists (PD44). | Brief item 16: "lifecycle safety"; `transitionStore` sends exactly one notification per edge (core §A.5.1), so an undo after the write would notify twice; preventing the write is cheaper than undoing it. |
+| PD55 | **(rev 2) The store profile Overview is the "every detail" screen** (PD32): identity & address (mode, canonical URL, address mode, handle history count, next re-render), health (ring, groups, top 5 issues incl. snoozes), pages (count, last publish, live URL, preview), orders (7/30 d counts, confirmation rate with `n`, risk mix, masked latest 5), team (members, invites, 2FA coverage), integrations (`integrationHealth`: Sheets, pixels, Telegram, outbox dead), AI (`aiStoreSummary`: credits, cost, last run), usage (`store_usage` meters), risk (latest review band and flags, linked accounts count), timeline (last 8 events). Each strip reads one P0 read API and fails alone. | The owner asked for every detail on one page (brief items 13-14) and the rethink cut the deep tabs (RF §3.3): the strips deliver the first without the cost of the second. |
+| PD56 | **(rev 2) Impersonation is visible on both sides and survives navigation:** the start sheet previews the exact store-facing notice (PD19); the console topbar shows a "Viewing @handle · mm:ss" chip (from `ConsolePulse.impersonation`) while this session impersonates, linking back to `/app/<h>`; the tenant ribbon's countdown reads `StorePulse.impersonation.endsAt` (core D57) so it never drifts after a client navigation; every refused write is one toast and one `platform.impersonation.write_refused` audit row (core §B.8); "Note while viewing" writes a `platform_notes` row of kind `note` from the ribbon's menu (staff only). | Brief item 16: "impersonation UX"; R-D14 read-only support must feel safe to the seller and efficient to staff. |
+| PD57 | **(rev 2) System health shows the machinery:** Edge / Worker (S mode, Worker version last seen, last edge-verified request, prev-key use, foreign hosts), **Render queue** (depth by reason, oldest pending, failed by store, last-hour throughput and ETA), **Health engine** (stale snapshots, dirty rows, last job run), **AI** (`aiHealth()`: provider ok/paused, open batches, orphaned jobs, cap used %, refusal rate 24 h), **Design tables** (bytes, 300 MB alarm) and the cron, queues, Sheets, storage, errors and runtime panels of revision 1; every panel names the alarm it drives (PLA-§15.2). Data: core §H.5 rev 2 (`edge`, `commerce`, `sheetsTop`, `ai`, `design`, `health`, `renderSummary`, `outboxSummary`). | Brief item 16: "system health incl. the Worker and render queue"; a queue nobody can see fails silently. |
+| PD58 | **(rev 2) The plans editor explains every row three ways and previews impact per store:** registry default, plan value, effective sentence ("Stores on this plan get 1 GiB"); the impact preview lists, per lowered key, the count and the handles (≤ 20, sorted by usage) of stores already above the new limit and what they keep; a diff is shown before save; `take_orders` is locked (PD8); the rev 2 keys `campaigns_max`, `short_links_max`, `coupons`, `reviews` appear with their release chip (core §A.4). | Brief item 16: "plans editor"; a limit change is a change to someone's business (PD18). |
+| PD59 | **(rev 2) Onboarding ranks directions with no model on the critical path** (core D59): category tap + photo palette (browser) + keywords through `rankDirections()` (`src/lib/generator/directions.ts:375`); SigLIP and the VLM refine **after** the reveal (a quiet "refining" chip, never a blocker) or run on the server when Cloud AI is on; the "Download local AI" consent card (AI-03) never shows on mobile data; the copy is the hand-written library when Cloud AI is off. **Refines UX-01 / AI-03** as written in RESEARCH. | 99.5 + 111 MB at q8 on 4G is 1-3 minutes (RF §4); the demo reveal is at 0:50. |
+| PD60 | **(rev 2) Mode-aware onboarding, fixed now for R2:** choosing `store` or `both` (R2) lands on the **same immediate landing reveal** for the first product, while the store blueprint runs as a detached job (core §H.12 pattern B, `ai_jobs.kind = "store_blueprint"`, S1/S7); the `pulse.jobs.done` list surfaces "Your store home is ready" when it finishes, and the `done` step shows the address card with the store home URL. The owner never waits on a model for the first result in any mode. P2 owns the flow; the blueprint is S1/S7's. | Brief item 16: "the tenant onboarding that chooses store / landing / both and lands on a generated first result within the demo budget"; the first result must exist in every mode without a long request. |
+| PD61 | **(rev 2) The live address card ships in R1** (UX-05 raised, RF §3.2, core §I.4): canonical link + Copy, QR (PD47), "Share on WhatsApp", **"Open a test order"** (P3's `mintTestLink(scope, pageId)`, SF-05), **"Create a campaign"** (P3 entry, SF-01), the live state line; placed on the pages list, on the dashboard after the first publish and at the onboarding end. P2 owns `src/components/admin/common/address-card.tsx` with two named slots (`testOrder`, `campaign`) that P3 fills. | The wow moment ends with sharing (RF §2.3, §4 1:40). |
+| PD62 | **(rev 2) The dashboard is screen 2 of RF §2.10 (P2):** a **Today brief** template line from real counts (SF-11 R1 slice: orders to call now from `opsPulse`, the worst open health issue, one opportunity or "no orders yet"), COD KPI tiles where **placed, confirmed and delivered never share a tile** (sparklines only with ≥ 7 points, every rate with its `n`), the **COD funnel** (orders → confirmed → shipped → delivered → cash collected as horizontal stepped bars, delivered in jade, R1 shows the steps whose data exists and labels the rest "with delivery tracking (R2)"), work lists and the Store Health ring. "Revenue · 7 days" (`src/components/admin/dashboard/dashboard-view.tsx:99`) becomes "Placed · 7 days" with the hint "placed, not delivered"; the setup checklist (`setup-checklist.tsx`) is replaced by the ring. | RF §0.5 names the dashboard's placed-as-revenue habit as an owner-rule break; §2.5 fixes the chart language. |
+| PD63 | **(rev 2) The pulse is the core's `StorePulse` (D57, SF-06):** GET-only route with `ETag` → `304`, **one poller per browser and store** through `BroadcastChannel("sg-pulse:<storeId>")` with independent pollers as the fallback, store-level parts cached 5 s per store and per-user parts fresh, contributors from `src/lib/pulse/contributors/<track>.ts` (50 ms budget each, a failure omits its keys). P2 owns the route, the `usePulse()` hook, the poller election and `contributors/shell.ts`; the `health` and `jobs` fields drive the ring freshness dot and the background-job chip. | 15 s polling must stay cheap on one Node process (RF §2.2, §3.4). |
+| PD64 | **(rev 2) Every tenant surface this part ships passes the eight rules of core §I.8 as acceptance** (PLA-§22.18): measured by `test:admin-tokens`, `test:admin-motion`, `test:admin-rtl` and `test:i18n-coverage` (P2 owns the four scripts) and by the Playwright budgets of PLA-§O.4. P2's rework removes the two bounce sites (`src/components/admin/shell/app-sidebar.tsx:96` spring, `:146` overshoot rotate; core D60), makes aurora + grain a budget of one per screen off by default (`src/components/admin/dashboard/kpi-card.tsx:58`, `src/components/admin/common/empty-state.tsx:28` lose them; one *celebration* `EmptyState` variant keeps them for the first store and the first order), raises the sparkline floor to 7 points (`kpi-card.tsx:92` draws from 2) and replaces the Tailwind `emerald`/`rose` delta classes (`kpi-card.tsx:75`) with the semantic tokens. | Owner rule "maximally modern, never generic"; the admin had the tells (RF §0.5, §2.6, §2.9). |
+| PD65 | **(rev 2) Approval latency is a demo pass condition** (RF §4 at 1:25, core §K.2 exit criterion 12): a submitted store appears in the Review tab within one console pulse (≤ 15 s); `A` commits in ≤ 1 s server time (one compare-and-set review update, one `transitionStore`, one notification, one audit row, `markHealthDirty`); the seller's dashboard unlocks on its next pulse (≤ 15 s) without a reload. Measured by `qa:wow-demo` persona 2. | The owner's one-key approval is part of the acceptance scenario. |
+| PD66 | **(rev 2) Health fixes run through the ⌘K command registry:** `HealthFix.kind = "action"` carries a `CommandDef.id` (core §I.3), so a one-tap fix runs the same registered, permission-filtered command the palette runs (Sync Sheets, Recompute health, Open a test order, Publish); `kind = "link"` fixes build their `href` with `appHref`. The console renders the same issue read-only with "Open in store (view as)". | One action registry; a fix that bypassed permissions would be a second write path. |
+| PD67 | **(rev 2) Health notifications and snoozes are owner/admin actions:** a **new** severity-3 issue notifies owners and admins once per issue id per ISO week (`health.issue_new`, dedupe `health:<storeId>:<issueId>:<YYYY-Www>`); a snooze (`health.snooze`, 7 days) is stored in `store_health.snoozed`, audited `store.health.snoozed` and shown to staff as "snoozed by <role> until <date>"; "Recompute now" (`s:<sid>:health:recompute` 6/h) only marks the row dirty (the job computes within ≤ 5 min). | Nagging kills a health score (RF §1.3 risks); staff must see what the seller chose to ignore. |
 
 Glossary: **staff** = a user with `platform_role ≠ none`. **store profile** = `/admin/stores/<id>`. **band** = the
 signup triage class of PD3. **request** = a `signup_reviews` row whose kind is not `signup`. **snapshot** = the
-`store_health` row of a store. **step-up** = TOTP again within 5 minutes (core §B.7), marked **↑**.
+`store_health` row of a store. **issue** = a `HealthIssue` (core §I.7) with a group, severity, evidence and a fix;
+**flag** = a console `HealthFlag` (PLA-§6.3). **strip** = one detail panel of the store profile Overview (PD55).
+**step-up** = TOTP again within 5 minutes (core §B.7), marked **↑**. **arm window** = the 5-second client-side cancel
+window before a lifecycle write (PD54).
 
 ---
 
@@ -138,18 +196,18 @@ criteria in one line; the detailed criteria sit in the section.
 | PL-04 | Approval queue | R1 | P1 | §3.5 | Keyboard triage A/I/R/S/J/K; split view with explanation, draft preview, cluster; bulk fast lane (≤ 50); SLA tile; one appeal. |
 | PL-05 | Platform pulse overview | R1 | P1 | §5 | KPI row, needs-attention, activity feed render from real data only; each panel fails independently. |
 | PL-06 | Stores list | R1 | P1 | §6 | Filters status/mode/plan/market/band/flag/dormant; health chips; sort by health; ≤ 300 ms p95 on 2,000 stores. |
-| PL-07 | Store profile | R1 (Ops tab R2) | P1 (S6) | §7 | 13 tabs per §7; PII masked; reveal ↑ with reason; every tab has empty/loading/error states. |
+| PL-07 | Store profile | R1 (6 tabs); Catalog & pages, Integrations health, Domains, Risk, Media, Ops R2; Support R3 | P1 (S6, D5) | §7 | R1: Overview with ten detail strips (PD55), Orders (masked), Team, Activity (+ Timeline view), Usage & plan, Notes; PII masked; reveal ↑ with reason; every strip and tab has loading / empty / error states; deferred tabs are honest lines, never placeholder numbers. |
 | PL-08 | Lifecycle actions | R1 | T1, P1 | §8 | Every core §A.5.1 edge available with reason codes, step-up where marked, notification and audit. |
 | PL-09 | Store export ZIP (UI) | R1 | P8 (engine), P1, P2 | §7.14, §22.11 | Owner requests and downloads from Danger zone; super_admin from the profile with reason; both audited. |
 | PL-10 | Read-only "View as store" | R1 | T2, P1, P2 | §10 | Start sheet, ribbon with countdown, write refusals toast, store notification, end returns to the profile. |
 | PL-11 | Plans, entitlements, usage meters | R1 | T1, P1, P2 | §9, §22.10 | Plan editor with impact preview; overrides/boosts with expiry and reason; tenant meters; limit sheet. |
 | PL-12 | Kill switches | R1 | T1, P1 | §12 | 7 switches with step-up, banner preview, affected count; tenant banners within 45 s (30 s flag cache + one 15 s pulse). |
 | PL-13 | Notification centre | R1 | P1 (`notify`), P2 (UI) | §18, §22.6 | Bell + page; kind catalog in ar/fr/en; unread count via pulse; staff feed in the console. |
-| PL-14 | Platform settings + legal templates | R1 | P1 | §13 | Brand, signup, defaults, reserved handles, protected brands, legal versions with acceptance counts. |
+| PL-14 | Platform settings + legal templates | R1 (platform DPA R2, RF §3.3) | P1 (S6 for the DPA) | §13 | Brand, signup, defaults, reserved handles, protected brands, legal versions with acceptance counts; R1 legal kinds = ToS, Privacy, AUP and the store templates; the design gate field group (`platform_design`, P6's component) mounted on General. |
 | PL-15 | Support grants + break-glass write | R3 | D5 | §24.1 | Owner grant 24/72 h scoped; break-glass write ↑ with crimson ribbon and instant notice. |
 | PL-16 | Tickets inbox | R3 | D5 | §20.2 | Auto-context, macros ar/fr/en, assignment, SLA, appeals, view-as from a ticket. |
 | PL-17 | Broadcasts and changelog | R3 | D5 | §19.2 | Targeted announcements, maintenance banners, "What's new" drawer, seen/click counts without per-user tracking beyond read state. |
-| PL-18 | Store health score + dormancy | **R1** (PD6; re-engagement R3) | P1 | §6.3 | Score + components per store, refreshed ≤ 5 min after a platform action (dirty mark) and ≤ 60 min otherwise; dormant tag at 60 days. |
+| PL-18 | Store health score + dormancy (= **SF-03** Store Health, raised and tenant-facing; core D53) | **R1** (PD6; re-engagement R3) | P1 (engine, job, console ring, platform rules), P2 (tenant ring and issue list), rules per track | §6.3, §22.16 | One `store_health` row per store; score = 100 − Σ group penalties (caps 20/15/15/15/15/15/5); refreshed ≤ 5 min after a platform action, a publish or a zone / integration change (dirty mark) and ≤ 60 min otherwise; ≤ 20 issues stored, 5 shown with evidence `n` and one fix each; snooze 7 days audited; dormant tag at 60 days; the two-store fixture proves no cross-store evidence. |
 | PL-19 | Global analytics | R3 | D5 | §21 | Activation funnel, placed/confirmed/delivered GMV labelled, mode mix; k ≥ 5 suppression. |
 | PL-20 | Abuse reports + takedowns | R3 | D5 | §24.2 | Public report link, queue, page/media takedown through a platform write scope. |
 | PL-21 | Ownership transfer | R3 | D5 | §24.3 | Two-sided confirmation, audited, old owner becomes admin or leaves. |
@@ -183,14 +241,14 @@ The tenancy mechanics are the core's (core §A-§F). This part owns how they loo
 
 | ID | Feature | R | Track | Section | AC (summary) |
 |---|---|---|---|---|---|
-| UX-01 | Onboarding wow flow | R1 | P2 (+ P6/P7 pieces) | §22.2 | Reveal ≤ 90 s from the signup click on a mid laptop with 3 photos (≤ 15 s with the library fallback); never a price the owner didn't type; 360 px; ar RTL perfect. |
-| UX-02 | Store-scoped ⌘K (tenant) + console ⌘K | R1 | P2 (tenant), P1 (console) | §22.13, §4.4 | Tenant search scoped (ADM-02 fixed); console jumps to store/user/order, approve next, start view-as. |
-| UX-03 | Console identity | R1 | P1 (+ P2 tokens) | §4.2 | Teal-cyan hue 205 accent, "Platform" badge, violet ribbon; admin-tokens check green. |
-| UX-04 | Admin upgrade | R2 | S6 (design.md owns depth) | §24.8 | Platform screens adopt density modes, real-data KPI tiles, split views, undo toasts. |
-| UX-05 | Live address card (QR, WhatsApp share, test-order link) | R2 | S6 | §22.10.2 | R1 ships the address card text + copy; R2 adds QR, share and the test-order link. |
+| UX-01 | Onboarding wow flow (no model download on the critical path, core D59) | R1 | P2 (+ P6/P7 pieces) | §22.2 | On a 390 px viewport with 4G throttling and Cloud AI off: reveal at ≤ 0:50 from the invite link in `qa:wow-demo` (generation ≤ 1.5 s, preview ≤ 1 s), ≤ 90 s with 3 photos on a 4×-throttled laptop, ≤ 15 s after "Start without photos"; never a price the owner didn't type; 360 px; ar RTL perfect; the local model cache stays empty for the whole run. |
+| UX-02 | Store-scoped ⌘K (tenant) + console ⌘K | R1 | P2 (tenant), P1 (console) | §22.13, §4.4 | Tenant search scoped (ADM-02 fixed) through the core `SearchProvider` and `CommandDef` registries (core §I.3); console jumps to store/user/order, approve next, start view-as; palette open ≤ 50 ms when warm. |
+| UX-03 | Console identity | R1 | P1 (+ P2 tokens) | §4.2, §4.7 | Teal-cyan hue 205 accent, "Platform" badge, violet ribbon; admin-tokens, admin-motion and admin-rtl checks green on every console screen. |
+| UX-04 | Admin upgrade | R2 | S6 (design.md owns depth) | §24.8 | Platform screens adopt the full DES-§16.17 checklist; the R1 foundation is core §I.6 / §I.8 applied by P2 (§22.18). |
+| UX-05 | Live address card (copy, QR, WhatsApp share, test-order link, campaign entry) | **R1** (raised, RF §3.2, core §I.4; PD61) | P2 (card), P3 (test-link and kit entries) | §22.10.2 | The card appears on the pages list, the dashboard after the first publish and the onboarding end; QR encodes the canonical URL; "Open a test order" mints a D54 token; the state line is honest (Live / Not live yet / Hidden while in review). |
 | UX-06 | Realtime dashboards | R2 | S6 | §22.6.4 | Animated arrivals on the 15 s pulse, honest "live · 12 s ago" dot. |
-| UX-07 | PWA + Web Push | **R1 manifest** (PD10), R3 push | P2, D5 | §23 | R1: installable `/app/` manifest; R3: push for new orders/callbacks with no PII in payloads. |
-| UX-08 | French + Arabic RTL dashboard | R2 fr / R3 ar | S6, D5 | §N.1 | Catalog coverage report 100 % for the release's surfaces. |
+| UX-07 | PWA + Web Push | **R1 manifest** (PD10), R3 push | P2, D5 | §23 | R1: installable `/app/` manifest served by the route handler with the core §B.1 / §C.3 header rule (no nonce headers); R3: push for new orders/callbacks with no PII in payloads. |
+| UX-08 | French + Arabic RTL dashboard | R2 fr / R3 ar | S6, D5 | §N.1, §22.18 | Catalog coverage report 100 % for the release's surfaces; the R1 RTL lint (`test:admin-rtl`) keeps the R3 cost at translation only. |
 
 ### PLA-§1.4 Other ids this part delivers screens for
 
@@ -200,11 +258,21 @@ The tenancy mechanics are the core's (core §A-§F). This part owns how they loo
 | SE-04 | Platform audit view, break-glass log (reveals, impersonations, purges, kill changes) | R1 | P1 | §14.3 |
 | SE-09 | Passkeys | later | — | §24.9 |
 | OS-06 | Console Domains view and domain-move checklist | R1 | P1 | §16 |
-| OS-09 | Health UI over `getHealth()` (data by P8) | R1 | P1 | §15 |
+| OS-09 | Health UI over `getHealth()` (data by P8) incl. the Edge / Worker, render queue, health engine, AI and design-tables panels (PD57, core §H.5 rev 2) | R1 | P1 | §15 |
 | OS-10 | Backups list, retention, download ↑ | R1 | P1 | §17 |
 | IN-08 | Mail transport dependency choice (`nodemailer`, PD41) and the mail settings screen `platform_mail` | R2 | S5 | §13.5 |
 | OS-12, OS-13 | Console tiles for the Worker edge cache (purge status) and Worker alerts | R2 | S6 | §16.4 |
 | OS-14 … OS-18 | Console custom-domain approvals (queue kind `domain`) and the Domains view rows for `store_domains` | R3 | D1 | §16.5 |
+
+### PLA-§1.5 Signature features assigned to this part (RF §1, §3.1; core §K.2 ownership paragraph) (rev 2)
+
+| ID | Feature | What this part owns | R | Track | Section | AC (summary) |
+|---|---|---|---|---|---|---|
+| SF-03 | Store Health with reasoned fixes (= PL-18 raised) | the engine, registry imports, `platform.health` job, console ring and flags, the platform rules file (P1); the tenant ring, issue list, snooze and "Recompute now" (P2); `health.issue_new` kind | R1 | P1, P2 | §6.3, §22.16 | `test:health` and `test:health-db` green; the ring and the console flags come from one row; fixing an issue never lowers the score; a two-store fixture shows no cross-store evidence; the setup checklist is gone. |
+| SF-06 | Pulse ETag + shared poller | the GET route, `ETag` / `304`, the `BroadcastChannel` election, the `usePulse()` hook, `contributors/shell.ts`, `test:pulse`, `qa:pulse-e2e` | R1 | P2 | §22.6 | Two tabs of one browser produce one poller; unchanged polls answer 304; a status or review change unlocks controls within one pulse without a reload. |
+| SF-11 | Growth Autopilot, R1 slice = the Today brief line | the template sentence on the dashboard from `opsPulse` + `store_health`, never a model text in R1 | R1 (line) / R3 | P2 (D4) | §22.17 | The line renders from zero data ("No orders yet. Publish a page to start."); every number in it comes from the store's own counts. |
+| SF-05 | Test-order mode, address-card slot | the "Open a test order" slot on the address card (P3 fills it with `mintTestLink`), the TEST chip in the tenant shell's banner priority (none: the chip belongs to P4's queue) | R1 | P2 (slot), P3 (button) | §22.10.2 | The slot renders P3's button on the pages list, the dashboard and the onboarding end; nothing of this part mints or reads test tokens. |
+| SF-01 | Campaign Kit, address-card slot and ⌘K entry | the "Create a campaign" slot (P3 fills it) and the Create menu entry `campaign` (landing/both) in the shell | R1 | P2 (slots), P3 | §22.10.2, §22.13 | The entry is hidden without `campaigns.write` and in `store` mode without "also use landing pages". |
 
 ---
 
@@ -213,7 +281,10 @@ The tenancy mechanics are the core's (core §A-§F). This part owns how they loo
 Rules (core §D.1): tenant rows use `storeRef()`, platform rows `storeRefOpt()`; JSON is `jsonText`; enums only append;
 portable SQL only. Refinements of **0004** tables below are additive (NULL-able or defaulted columns, appended enum
 values, new indexes): the maintainer writes them into `0004_tenancy.sql` if step C0 has not been cut yet, otherwise
-into `0005_r1.sql`. R3 tables are refined for `0007_r3.sql`. Tables marked **(new)** need the core (PLA-§Q).
+into `0005_r1.sql`. R3 tables are refined for `0007_r3.sql`. **(rev 2)** Every refinement of PLA-§2.1 was accepted
+(core §Q.1 Q.24) and is now listed in core §D.4 "Part refinements applied to the 0004 tables in rev 2"; the tables
+marked **(new)** in revision 1 (`store_health`, `platform_requests`, `staff_invites`) are core tables of 0005 (core
+§D.3, §D.5) with this part as the column owner (core §D.9). Nothing below asks the core for anything.
 
 ### PLA-§2.1 R1 tables this part refines (core §D.9)
 
@@ -300,21 +371,26 @@ export type ReviewRequest =
   | { kind: "domain"; host: string };        // R3
 ```
 
-### PLA-§2.2 New R1 tables (requests PLA-§Q.1, §Q.2)
+### PLA-§2.2 R1 tables of this part in 0005 (accepted: core §Q.1 Q.1, Q.2, Q.4; final lists)
 
 ```ts
-// 0005 — P* (one row per store, written only by the platform.health job; read by the console)
+// 0005 — P* (one row per store, written only by the platform.health job; read by the console AND the tenant
+// through getStoreHealth(scope); core D53, §D.5). Rev 2 adds `issues`, `snoozed` and types `components` by HealthGroup.
 export const storeHealth = mysqlTable("store_health", {
   storeId: varchar("store_id", { length: 26 }).primaryKey().references(() => stores.id, { onDelete: "restrict" }),
-  score: tinyint("score").notNull(),                                   // 0-100 (PLA-§6.3)
-  attention: tinyint("attention").notNull().default(0),               // max flag severity: 0 none, 1 info, 2 warn, 3 danger
-  flags: jsonText<HealthFlag[]>("flags").notNull(),
-  components: jsonText<Record<HealthComponent, number>>("components").notNull(),   // penalty per component
+  score: tinyint("score").notNull(),                                   // 0-100, one number for both audiences (PLA-§6.3)
+  attention: tinyint("attention").notNull().default(0),               // max console flag severity: 0 none, 1 info, 2 warn, 3 danger
+  flags: jsonText<HealthFlag[]>("flags").notNull(),                   // console flags (PLA-§6.3 codes), never shown to tenants
+  issues: jsonText<HealthIssue[]>("issues").notNull(),                // tenant issues with evidence + fix (core §I.7; ≤ 20 stored, 5 shown)
+  components: jsonText<Record<HealthGroup, number>>("components").notNull(),   // penalty per group (setup, trust, design, conversion, operations, integrations, quota)
   metrics: jsonText<HealthMetrics>("metrics").notNull(),               // PLA-§6.3: orders7d, risky7d, lastActiveAt, lastOrderAt, publishedPages, mediaPct
   milestones: jsonText<Partial<Record<Milestone, string>>>("milestones"),   // ISO date each milestone was first reached (PD40)
+  snoozed: jsonText<Record<string, string>>("snoozed"),                 // issue id → ISO until (health.snooze, audited; PD67)
   dormant: boolean("dormant").notNull().default(false),
   computedAt: ts("computed_at").notNull(), dirtyAt: ts("dirty_at"),   // dirtyAt: set by markHealthDirty() for priority recompute
 }, (t) => [index("sh_attention_idx").on(t.attention, t.score), index("sh_due_idx").on(t.dirtyAt, t.computedAt)]);
+// Size bound: issues ≤ 20 × ≤ 600 B, flags ≤ 15 × ≤ 120 B, so a row stays under 16 KB; `issues[].evidence` holds numbers,
+// metric names and windows only, never a customer field (canary test PLA-§O.3 case 8).
 
 // 0005 — P (opt. store): dangerous actions that need a second person or a delay (PD7)
 export const platformRequests = mysqlTable("platform_requests", {
@@ -330,22 +406,43 @@ export const platformRequests = mysqlTable("platform_requests", {
   cancelledBy: id26("cancelled_by"), cancelledAt: ts("cancelled_at"),
   executedAt: ts("executed_at"), error: varchar("error", { length: 200 }),
 }, (t) => [index("preq_due_idx").on(t.status, t.executeAfter), index("preq_store_idx").on(t.storeId, t.status)]);
+
+// 0005 — P: staff invite tokens (PD13; core §B.1 `/invite/staff/<token>`, §D.5 verbatim)
+export const staffInvites = mysqlTable("staff_invites", {
+  id: id26().primaryKey(), emailNorm: varchar("email_norm", { length: 191 }).notNull(),
+  role: mysqlEnum("role", ["admin", "support", "analyst"]).notNull(), tokenHash: char("token_hash", { length: 64 }).notNull(),
+  invitedBy: id26("invited_by").notNull(), note: varchar("note", { length: 200 }), expiresAt: ts("expires_at").notNull(),
+  acceptedAt: ts("accepted_at"), acceptedBy: id26("accepted_by"), revokedAt: ts("revoked_at"), createdAt: createdAt(),
+}, (t) => [uniqueIndex("sti_token_uq").on(t.tokenHash), index("sti_email_idx").on(t.emailNorm)]);
 ```
 
 ```ts
-// src/lib/platform/types.ts
-export type HealthComponent = "integrations" | "quota" | "orders_risk" | "activity" | "setup" | "renders";
+// src/lib/health/types.ts (maintainer skeleton, core §I.7; copied here so this part's code compiles against it)
+export type HealthGroup = "setup" | "trust" | "design" | "conversion" | "operations" | "integrations" | "quota";
+export const HEALTH_CAPS: Record<HealthGroup, number> = { setup: 20, trust: 15, design: 15, conversion: 15, operations: 15, integrations: 15, quota: 5 };   // Σ = 100
+export interface HealthEvidence { metric: string; value: number; baseline?: number; window: string; n: number }
+export type HealthFix = { kind: "link"; href: (handle: string) => string; label: MessageKey } | { kind: "action"; actionId: string /* a CommandDef.id, PD66 */; label: MessageKey };
+export interface HealthIssue { id: string /* "<track>:<rule>" */; group: HealthGroup; severity: 1 | 2 | 3; points: 3 | 6 | 10; evidence: HealthEvidence; fix: HealthFix; text: MessageKey; snoozedUntil?: string }
+export interface HealthRule { id: string; group: HealthGroup; minN?: number; release: "R1" | "R2" | "R3"; mode?: ModeFeature; collect(scope: StoreScope, inputs: HealthInputs): Promise<HealthIssue | null> }
+
+// src/lib/platform/types.ts (P1): the console-only flags and metrics kept from revision 1
 export type HealthFlagCode =
   | "sheets_backlog" | "sheets_error" | "outbox_dead" | "capi_failing" | "telegram_failing"
   | "quota_high" | "quota_full" | "risky_orders" | "inactive_14d" | "dormant_60d"
   | "setup_incomplete" | "render_failed" | "review_waiting" | "restricted" | "suspended";
 export interface HealthFlag { code: HealthFlagCode; severity: 1 | 2 | 3; since: string /* ISO */; value?: number; detail?: string /* key, metric or kind */ }
+export interface HealthMetrics { orders7d: number; risky7d: number; lastActiveAt: string | null; lastOrderAt: string | null; publishedPages: number; mediaPct: number | null }
+export type Milestone = "first_draft" | "first_publish" | "first_order" | "tenth_order" | "first_member" | "first_delivered";
+/** the row as both audiences read it (tenant: flags omitted; console: everything) */
+export interface StoreHealthView { score: number; attention: 0 | 1 | 2 | 3; components: Record<HealthGroup, number>; issues: HealthIssue[]; snoozed: Record<string, string>; metrics: HealthMetrics; milestones: Partial<Record<Milestone, string>>; dormant: boolean; computedAt: string; dirty: boolean; flags?: HealthFlag[] }
 ```
 
 Rules: a `platform_requests` row of kind `store_purge` is valid only while the store is `closed` or
 `scheduled_deletion`; a second pending request for the same store and kind is refused (`already_requested`). A
 request expires after 7 days without confirmation (`expired`, by the `platform.requests` job). The requester can never
-confirm their own four-eyes request (checked in SQL: `confirmed_by <> requested_by`).
+confirm their own four-eyes request (checked in SQL: `confirmed_by <> requested_by`). Rows are kept 400 days after a
+purge, like audit (core §F.9). `staff_invites`: 72 h, single use, bound to the e-mail, ≤ 10 pending, expired rows
+deleted 30 days after expiry by `lifecycle` (core §H.2 slot 7, §H.11).
 
 ### PLA-§2.3 R3 tables this part refines (0007) and later tables
 
@@ -358,9 +455,9 @@ confirm their own four-eyes request (checked in SQL: `confirmed_by <> requested_
 | `broadcast_reads` (0007) | core (`broadcast_id`, `user_id`, `seen_at`, `clicked_at`, `dismissed_at`) | PK `(broadcast_id, user_id)` |
 | `abuse_reports` (0007) | `id`, `store_id`, `page_url varchar(500)`, `reason enum('phishing','scam','counterfeit','prohibited','impersonation','other')`, `details text` (≤ 2,000), `reporter_contact_enc text NULL` (envelope v2, scope platform, purpose `abuse:contact`), `status enum('new','triaged','actioned','dismissed')`, `action_taken varchar(40)`, `ip_hash`, `handled_by`, `handled_at`, `created_at` | `(status, created_at)`, `(store_id, created_at)` |
 | `store_daily_rollup` (0007) | core + `views`, `uniques`, `form_starts`, `confirmed`, `delivered`, `returned`, `fake`, `leads`, `leads_recovered`, `ai_credits`, `members_active`, `currency char(3)` | PK `(store_id, day)` |
-| `support_macros` (0007, new, PLA-§Q.20) | `id`, `title varchar(80)`, `body_ar text`, `body_fr text`, `body_en text`, `tags longtext`, `created_by`, `updated_at` | — |
-| `push_subscriptions` (0007, new, PLA-§Q.21) | `id`, `user_id`, `store_id NULL`, `endpoint_hash char(64)`, `endpoint_enc text`, `keys_enc text` (p256dh + auth, envelope v2 scope platform, purpose `push:sub`), `ua_label`, `created_at`, `last_ok_at`, `failures tinyint`, `disabled_at` | `UNIQUE(endpoint_hash)`, `(user_id)` |
-| `notification_prefs` (0006, new, PLA-§Q.22) | `user_id`, `store_id varchar(26) NOT NULL DEFAULT ''` ('' = every store), `group varchar(16)`, `channels longtext` (`{ inapp: true, push: bool, email: bool }`), `updated_at` | PK `(user_id, store_id, group)` |
+| `support_macros` (0007, core §D.3; Q.20 accepted) | `id`, `title varchar(80)`, `body_ar text`, `body_fr text`, `body_en text`, `tags longtext`, `created_by`, `updated_at` | — |
+| `push_subscriptions` (0007, core §D.3; Q.21 accepted) | `id`, `user_id`, `store_id NULL`, `endpoint_hash char(64)`, `endpoint_enc text`, `keys_enc text` (p256dh + auth, envelope v2 scope platform, purpose `push:sub`), `ua_label`, `created_at`, `last_ok_at`, `failures tinyint`, `disabled_at` | `UNIQUE(endpoint_hash)`, `(user_id)` |
+| `notification_prefs` (0006, core §D.3; Q.22 accepted) | `user_id`, `store_id varchar(26) NOT NULL DEFAULT ''` ('' = every store), `group varchar(16)`, `channels longtext` (`{ inapp: true, push: bool, email: bool }`), `updated_at` | PK `(user_id, store_id, group)` |
 
 ### PLA-§2.4 Settings keys owned by this part
 
@@ -399,6 +496,16 @@ export const PlatformSettingSchema = z.object({
   reservedHandles: z.array(z.string().regex(/^[a-z0-9-]{1,30}$/)).max(500).default([]),   // extra to RESERVED_HANDLES
   analytics: z.object({ k: z.number().int().min(5).max(50).default(5) }).default({}),
   legal: z.object({ requireAcceptance: z.boolean().default(true) }).default({}),
+  health: z.object({                                                    // rev 2 (PD67): tunables of the shared engine the owner may change without a deploy
+    issueNotifyMinSeverity: z.union([z.literal(2), z.literal(3)]).default(3),   // `health.issue_new` fires at this severity or above
+    snoozeDays: z.literal(7).default(7),                                // fixed in R1 (core §I.7 "snooze 7 days"); a literal so the UI copy never drifts
+    staleAlarmMinutes: z.number().int().min(15).max(240).default(60),   // `staff.alarm` when the oldest snapshot is older than this
+    showScoreToTenantsBelowN: z.number().int().min(0).max(100).default(0),   // 0 = always; > 0 hides the number (not the issues) until the store has that many orders
+  }).default({}),
+  lifecycle: z.object({                                                 // rev 2 (PD54)
+    armSeconds: z.number().int().min(3).max(15).default(5),             // client-side cancel window before a lifecycle write
+    cooldownMinutes: z.number().int().min(0).max(120).default(10),      // a second change on the same store inside this window needs the typed handle
+  }).default({}),
   domainMove: z.object({                                                // PLA-§16.3 checklist state (booleans and dates, never values)
     steps: z.record(z.string(), z.object({ doneAt: z.iso.datetime(), by: z.string().length(26) })).default({}),
     checks: z.record(z.string(), z.object({ passedAt: z.iso.datetime(), by: z.string().length(26), note: z.string().max(200).default("") })).default({}),
@@ -499,6 +606,17 @@ export function scoreSignup(input: SignupRiskInput, deps?: Partial<SignupRiskDep
 export function bandFor(score: number, flags: readonly SignupFlag[], t: SignupThresholds): SignupBand;
 export function autoApprove(mode: SignupMode, s: SignupScore, ctx: { trustedCreator: boolean; setting: PlatformSetting["signup"] }): boolean;
 export function explainFlag(flag: SignupFlag): MessageKey;     // console.risk.<code>, rendered with flag.evidence
+/** rev 2 (PD52): the counterfactual. Pure over the stored flags and the current thresholds; recomputed at read time. */
+export interface BandExplanation {
+  band: SignupBand;
+  /** the single flag whose removal would lower the band the most, with the band it would give (null when none changes it) */
+  pivot: { code: SignupFlagCode; bandWithout: SignupBand } | null;
+  /** hold-class flags present (each alone keeps the row out of auto-approval and the fast lane) */
+  holds: SignupFlagCode[];
+  /** points to the next lower band boundary (0 for fast) */
+  marginToLower: number;
+}
+export function explainBand(s: Pick<SignupScore, "score" | "flags">, t: SignupThresholds): BandExplanation;
 export const HOLD_CLASS: ReadonlySet<SignupFlagCode>;
 export interface SignupRiskDeps {                              // injectable for the selftest (no network, no DB)
   now(): number;
@@ -604,11 +722,21 @@ Detail pane, top to bottom:
 1. **Header:** store name, handle, mode, market; applicant name, e-mail (full for admin+, masked for support and
    analyst), phone masked (`+212 6•• ••• •34`), signup age; buttons Open profile (E) and View as store (V).
 2. **Score card:** a 56 px ring + band label + "Why" list: one row per flag with the `explainFlag()` sentence, the
-   points (`+35`, tabular, crimson for positive, emerald for negative) and evidence chips. `partial` adds "Some checks
-   timed out, so the score may be low."
+   points (`+35`, tabular, crimson for positive, emerald for negative) and evidence chips, sorted by points. `partial`
+   adds "Some checks timed out, so the score may be low." **(rev 2, PD52)** Under the list, the **counterfactual line**
+   from `explainBand()`: "Without *disposable e-mail* this would be **Low risk**" (`console.queue.pivot`), or "Low risk
+   needs 11 points fewer" (`console.queue.margin`), and, when hold-class flags exist, "Kept out of the fast lane by
+   *linked to a banned account*" (`console.queue.hold`). The thresholds in force are shown as a small 0-100 bar with
+   the score marked, so a staff member sees how close the call is.
 3. **Business context** (when submitted): what they sell, social link (plain text with a Copy button, never an
    auto-link), WhatsApp number (masked), the staff question and the seller's answer.
-4. **Draft preview:** a 9:16 sandboxed iframe (`sandbox="allow-scripts"`, never `allow-same-origin`) of the newest
+4. **Draft evidence (rev 2, PD52)** above the preview: readiness (No page yet / Draft ready / Submitted), the newest
+   draft's **Design check** summary from P6's `designHealth(scope)` (quality score, slop score, hard gates failing,
+   as chips: "Q 78 · slop 1 · gates green"), the honesty item count from `buildChecklist(doc, ctx)` with the first
+   item's title ("2 honesty items: a review section marked sample"), and the genome distance band to the nearest live
+   store in the niche (`ok` / `close` / `too_close`, verdict bands only, core D64). Every chip links to the Pages
+   strip of the profile. Nothing here is a model text.
+   **Draft preview:** a 9:16 sandboxed iframe (`sandbox="allow-scripts"`, never `allow-same-origin`) of the newest
    draft page through a 10-minute preview token (PD16), with a phone/desktop toggle; "No page yet" empty state
    otherwise.
 5. **Linked accounts:** other users sharing identity links (kind chips, masked e-mail, their stores with status
@@ -648,7 +776,12 @@ hour), `staff.signup_hold` (each `hold` / `reject_candidate`), `staff.info_answe
 Acceptance (PL-04): a staff member triages 20 fast-lane and 5 review rows with the keyboard only; each decision writes
 exactly one audit row and one store notification; two staff deciding the same row at once → one wins and the other
 sees "Already decided by <name>"; the split view never renders tenant HTML outside the sandboxed iframe; masked
-fields carry no full phone or e-mail in the HTML or RSC payload for support/analyst (canary test, §O.3).
+fields carry no full phone or e-mail in the HTML or RSC payload for support/analyst (canary test, §O.3). **(rev 2,
+PD52, PD65)** The counterfactual line agrees with `bandFor()` on every golden fixture (removing the pivot flag and
+re-scoring gives exactly `bandWithout`); a submitted store appears in the Review tab within one console pulse
+(≤ 15 s); `A` on the demo store commits in ≤ 1 s server time measured in `qa:wow-demo` (persona 2, RF §4 at 1:25)
+and the seller's locked controls unlock on the next tenant pulse (≤ 15 s) without a reload; the draft-evidence chips
+render "No page yet" for a store without a draft and never a number for an absent Design check.
 
 ### PLA-§3.6 The pending sandbox from the seller's side (PL-02)
 
@@ -790,8 +923,9 @@ palette opens ≤ 50 ms after the key when warm (design.md UX-02 row).
 ### PLA-§4.6 Console pulse
 
 `GET /api/admin/pulse` (`src/app/api/admin/pulse/route.ts`, `platformGuard(req, "console.read")`): polled every 15 s
-while the tab is visible, one poller per browser (`BroadcastChannel("sg-console-pulse")`), `ETag` = sha256 of the
-body → `304` when unchanged (PD38). Platform part cached 5 s (key `"p"`), unread count per user.
+while the tab is visible, one poller per browser (`BroadcastChannel("sg-console-pulse")`, independent pollers where
+the channel is missing), `ETag` = sha256 of the body → `304` when unchanged (PD38). Platform part cached 5 s (key
+`"p"`), unread count and impersonation per user computed fresh.
 
 ```ts
 export interface ConsolePulse {
@@ -802,9 +936,33 @@ export interface ConsolePulse {
   kill: string[];                       // kill-switch keys currently stopping something
   pendingPlatformRequests: number;      // PLA-§2.2 rows waiting for a second person or for their delay
   auditHead: number;                    // newest audit id, drives the Activity feed
+  impersonation: { storeId: string; handle: string; endsAt: string } | null;   // rev 2 (PD56): this session's active view-as, drives the topbar chip
+  health: { staleSnapshots: number; dirtyRows: number; lastRunAt: string | null };   // rev 2 (PD57): the engine's own pulse
+  renders: { pending: number; failed: number; oldestMin: number | null };          // rev 2 (PD57): from P8 renderSummary() platform-wide
   build: string;                        // a change shows "New version available · Reload"
 }
 ```
+
+### PLA-§4.7 The console UX ceiling (core §I.8 applied to staff screens; rev 2, PD51)
+
+Every console screen passes these rules; they are acceptance criteria in PLA-§O.2 (`--perf`) and PLA-§O.4, not
+advice. Where a rule names a number, the number is the test.
+
+| # | Rule (core §I.8) | Console budget | How it is met | Measured by |
+|---|---|---|---|---|
+| 1 | Instant | shell navigation < 150 ms perceived; the first page of every list ≤ 60 s old from `scopedCache` (key `"p"`); a queue decision ≤ 500 ms with optimistic UI, rollback and the `opId` (PLA-§4.5); skeletons mirror the final rows, appear after 150-300 ms and stay ≥ 300 ms | `next/link` prefetch on hover and focus for every nav item and list row; server components streamed per panel (`<Suspense>` + `<PanelBoundary>`); `refresh()` after writes, never a full reload | Playwright timings in PLA-§O.4 step 10 (p75 over 20 navigations); `platform-check.ts --perf` |
+| 2 | Keyboard everywhere | every list row, tab and action reachable with the keyboard; chords of PLA-§4.3; `?` lists every shortcut of the screen; `/` focuses the page search | one `useChords()` hook (P2's `src/components/admin/shell/chords.ts`, shared) with the builder's `isEditable` / `overlayOpen` rules (`src/components/builder/shortcuts.ts:16-25`) | an axe + keyboard crawl in PLA-§O.4 step 6 (no unreachable control) |
+| 3 | Honest data | placed, confirmed and delivered never share a tile (PLA-§5.2, §7.3); every rate shows `n`; sparklines ≥ 7 points; below a minimum sample the tile says "needs n" | `KpiTile` refuses `spark` arrays shorter than 7 and `rate` without `n` at the type level | `test:platform` (component props selftest) |
+| 4 | One accent, one glass, no bounce | teal-cyan accent only (hue 205); the topbar is the one frosted surface; no aurora or grain anywhere in the console; motion tokens `--dur-1..3`, `--ease-out`, no spring | console components import only the semantic tokens; no `adm-aurora` / `adm-grain` class under `src/components/console/**` | `test:admin-tokens`, `test:admin-motion`, a grep in `test:platform` for the two class names |
+| 5 | Dense but breathing | compact by default (32 px rows, 13 px base), comfortable on demand; tabular numerals in every number column; ≤ 2 lines per cell with a `title` | `[data-density]` on `<ConsoleShell>`; `font-variant-numeric: tabular-nums` on `.num` | screenshot test at 1280 / 360 |
+| 6 | Phone-first | the approval queue detail at 360 px is a full screen with a bottom action bar (Approve, Ask, Reject, ⋯) and 44 px targets; every other console screen is readable at 360 px (one column, two-line rows) | PLA-§3.5 layout rules; `KeysetPager` at the bottom | screenshots at 360 px in PLA-§O.4 step 6 |
+| 7 | RTL-perfect by construction | logical properties only, mirrored icon allow-list, `<bdi dir="ltr">` on handles, ids, phones and e-mails even in the English console, store time zone on per-store figures | the same `test:admin-rtl` lint covers `src/components/console/**` | `test:admin-rtl` |
+| 8 | No AI tells | status as text + icon (never a bare coloured dot: `StatusPill`, severity labels in Needs attention), label above input, no placeholder-as-label, no em-dash or en-dash separator in any `console.*` string, no "Step 1/2/3", one CTA label per intent, skeletons over spinners, empty states as a quiet surface with a real-UI skeleton and one sentence | `console.ts` catalog lint; `EmptyState` quiet variant only | `test:i18n-coverage` (console catalog rules), screenshot review |
+
+Two console-specific additions: **stale is visible** (every panel shows "Updated 2 min ago" in neutral when its data
+is older than two pulses; a failed poll turns the pulse dot neutral with the time of the last success, never red
+without a reason), and **destructive is slow on purpose** (PD54: lifecycle writes arm for 5 s; kill switches need a
+typed phrase and step-up; purges need two people or 24 h). Speed is for reading and deciding, not for destroying.
 
 ---
 
@@ -823,8 +981,8 @@ server component in its own `<Suspense>` + `<PanelBoundary>`, so each fails alon
 |---|---|---|---|---|
 | Active stores | `COUNT(*) stores WHERE status = 'active'` | "+ 3 restricted · 12 in review" | `stores_status_idx` | ✓ |
 | Waiting for review | rows of the Review tab (§3.5) | "oldest 3 h 12 min"; yellow when past `slaHours` | `sr_kind_queue_idx` | ✓ |
-| Orders, last 24 h | `COUNT(*) orders WHERE created_at >= now − 24 h` | delta vs the previous 24 h; "from n stores" | `orders_created_idx` (PD37) | k-suppressed (PD15) |
-| Placed sales, last 24 h | `SUM(total)` of the same rows **per currency** | chips "MAD 48,210 · EUR 120"; hint "placed, not delivered" | same rows joined to `stores.currency` | k-suppressed |
+| Orders, last 24 h | `COUNT(*) orders WHERE created_at >= now − 24 h AND is_test = 0` | delta vs the previous 24 h; "from n stores"; **(rev 2)** "n confirmed" from `confirm_state = 'confirmed'` over the same rows (P4's 0005 column) and "n risky" (`risk_score ≥ 70`) | `orders_created_idx` (PD37); test orders excluded (core D54) | k-suppressed (PD15) |
+| Placed sales, last 24 h | `SUM(total)` of the same rows **per currency** | chips "MAD 48,210 · EUR 120"; hint "placed, not delivered" (confirmed and delivered sales are separate tiles from R2, never blended) | same rows joined to `stores.currency` | k-suppressed |
 | Errors, last 24 h | `SUM(count) error_events WHERE bucket >= <24 h ago>` | the top code and its area | `ee_bucket_idx` | ✓ |
 | Database | `getDbUsage()` used / quota (`src/lib/db/usage.ts:44`) | yellow ≥ 70 %, crimson ≥ 85 % (`DB_WARN_RATIO`, `DB_BLOCK_RATIO`, `usage.ts:19-20`) | `information_schema` (its own cache) | ✓ |
 
@@ -859,8 +1017,10 @@ time. New rows slide in (6 px rise + fade, 180 ms, at most 12 animated; reduced 
 ### PLA-§5.5 Queue snapshot and System
 
 Queue snapshot: the tab counts, the SLA tile of §3.5 and the five oldest Review rows (score ring, store, waiting) with
-"Open approvals". System: last tick (green < 6 min, yellow < 10 min, red), outbox pending / dead, render queue depth,
-media backend (`fs`, or `db` fallback in red), build id; "Open health".
+"Open approvals". System: last tick (green < 6 min, yellow < 10 min, red), outbox pending / dead, **render queue**
+(pending / failed / oldest, PD57), **Worker** (S mode on/off, version last seen), **AI** (provider ok / paused, cap
+used %), **health engine** (stale snapshots), media backend (`fs`, or `db` fallback in red), build id; "Open health".
+Each item is text + icon with its last-updated time, never a bare dot (PLA-§4.7 rule 8).
 
 Acceptance (PL-05): ≤ 800 ms p95 server time on a seeded DB of 2,000 stores and 1,000,000 orders, every query on the
 index named above (`EXPLAIN` asserted in `platform-check.ts`); a failing panel query shows that panel's error state
@@ -869,7 +1029,7 @@ tiles.
 
 ---
 
-## PLA-§6. Stores list (`/admin/stores`, PL-06) and the health snapshot (PL-18)
+## PLA-§6. Stores list (`/admin/stores`, PL-06) and the Store Health engine (PL-18 = SF-03)
 
 ### PLA-§6.1 Filters, columns, sorting
 
@@ -917,72 +1077,129 @@ existing user by exact e-mail, default the staff member). It creates the `stores
 `approved_by` = staff), the owner membership and an approved `signup_reviews` row (`reason_code = "console_created"`),
 then audits `store.created` `{ via: "console" }`. Permission `stores.create` (PLA-§Q.5).
 
-### PLA-§6.3 The health snapshot (PL-18, PD6, PD18, PD42)
+### PLA-§6.3 The Store Health engine (PL-18 = SF-03; PD6, PD18, PD42, PD53, PD66, PD67; core D53, §I.7) (rev 2)
 
-**Pure scorer** `src/lib/platform/health-score.ts` (isomorphic, no I/O, selftested):
+One computation, two audiences. The maintainer's skeletons `src/lib/health/{types,registry}.ts` hold the types of
+PLA-§2.2 and import every track's `src/lib/health/rules/<track>.ts`; P1 writes the engine, the job, the console ring
+and the platform rules; P2 the tenant surface (PLA-§22.16). Nothing in the engine reads another store.
+
+#### PLA-§6.3.1 Engine (`src/lib/health/engine.ts`, P1; pure over its inputs, selftested)
 
 ```ts
-export interface HealthInput {
-  status: StoreStatus; createdAt: Date; now: Date; slaHours: number | null;
-  sheets: { connected: boolean; oldestPendingMin: number | null; lastRunFailedAt: Date | null };
-  outbox: { deadByKind: Partial<Record<OutboxKind, number>> };            // last 24 h
-  capiErrorAt: Date | null;                                                // the store's pixel_health setting
-  usage: readonly { metric: string; period: string; used: number; limit: number | null }[];
-  orders7d: { n: number; risky: number };                                  // risk_score ≥ 70
-  lastActiveAt: Date | null; lastOrderAt: Date | null; lastLoginAt: Date | null;
-  publishedPages: number; draftPages: number; members: number; renderFailed: number; ordersTotal: number;
+// src/lib/health/inputs.ts (P1): one read pass per store through systemScope(ctx, storeId) and the P0 read APIs (core §K.2)
+export interface HealthInputs {
+  store: StoreRow; now: Date; slaHours: number | null;
+  pages: { published: number; drafts: number; lastPublishAt: Date | null; renderFailed: number; live: Pick<ConsolePageRow, "id" | "slug" | "updatedAt">[] };   // listPagesForConsole (T4), renderSummary (P8)
+  orders: OrderKpis & { risky7d: number; firstTouchP50Ms: number | null; unattempted2h: number; unreachable7d: number; unreachable28d: number };   // orderKpis, queueCounts, orderRiskMix (P4)
+  integrations: IntegrationHealth; sheets: { pending: number; oldestMin: number | null; lastRunFailedAt: Date | null };   // integrationHealth, sheetsBacklog (P5)
+  ai: AiUsageSummary | null;                                                                                           // aiUsageForStore (P7)
+  design: DesignHealth;                                                                                                 // designHealth(scope) (P6): q, slop, distances per live page, verdict bands only
+  usage: readonly { metric: UsageMetric["metric"]; period: string; used: number; limit: number | null }[];           // entitlements + store_usage (T1)
+  settings: { store: StoreSettingValue<"store">; policies: StoreSettingValue<"policies">; checkout: StoreSettingValue<"checkout">; conversions: StoreSettingValue<"conversions"> };
+  members: { total: number; withoutTotpWithOrdersReadAll: number; lastActiveAt: Date | null; lastLoginAt: Date | null };   // listMembersByScope (T2)
   review: { submittedAt: Date | null; status: string } | null;
+  zones: { count: number; pageShowsFlatFee: boolean };                                                                  // zonesForCheckout (P3)
 }
-export type Milestone = "first_draft" | "first_publish" | "first_order" | "tenth_order" | "first_member" | "first_delivered";
-export interface HealthResult {
-  score: number; attention: 0 | 1 | 2 | 3; flags: HealthFlag[]; components: Record<HealthComponent, number>;
-  dormant: boolean; reached: Milestone[];                                  // milestones true for this input
-}
-export function computeHealth(input: HealthInput, weights?: Partial<Record<HealthFlagCode, number>>): HealthResult;
-export const HEALTH_CAPS: Record<HealthComponent, number>;   // integrations 30 · quota 20 · orders_risk 15 · activity 20 · setup 10 · renders 10
+export function collectHealthInputs(scope: StoreScope, store: StoreRow, now: Date): Promise<HealthInputs>;   // ≤ 250 ms per store; a failing source leaves its field null and the rules that need it stay silent
+
+// src/lib/health/engine.ts (P1)
+export interface HealthComputation { score: number; attention: 0 | 1 | 2 | 3; components: Record<HealthGroup, number>; issues: HealthIssue[]; flags: HealthFlag[]; dormant: boolean; reached: Milestone[] }
+export function runRules(rules: readonly HealthRule[], scope: StoreScope, inputs: HealthInputs, opts: { release: "R1" | "R2" | "R3"; mode: StoreMode }): Promise<HealthIssue[]>;   // filters by release and mode; each rule ≤ 40 ms, a throwing rule is skipped and recorded (error_events area "health")
+export function computeHealth(issues: HealthIssue[], flags: HealthFlag[], snoozed: Record<string, string>, now: Date): Pick<HealthComputation, "score" | "components" | "attention">;   // core §I.7 signature
+export function platformFlags(inputs: HealthInputs): HealthFlag[];        // src/lib/health/platform-flags.ts: the console codes of the table below
+export function milestonesOf(inputs: HealthInputs): Milestone[];
 ```
 
-| Flag | Rule (starting values **[to tune]**) | Severity | Penalty | Component |
-|---|---|---|---|---|
-| `sheets_backlog` | connected, oldest pending order > 15 min | 2 | 15 | integrations |
-| `sheets_error` | a failed `sheets.push` / `sheets.pull` run for the store in the last hour | 2 | 10 | integrations |
-| `outbox_dead` | any `dead` outbox row of kind `webhook`, `whatsapp` or `carrier` in 24 h | 2 | 10 | integrations |
-| `capi_failing` | `pixel_health` shows an error in 24 h, or `dead` `capi` rows | 1 | 5 | integrations |
-| `telegram_failing` | `dead` `telegram` rows in 24 h | 1 | 5 | integrations |
-| `quota_high` | any gauge or monthly counter ≥ 80 % of its limit | 1 | 5 | quota |
-| `quota_full` | any ≥ 100 % | 2 | 15 | quota |
-| `risky_orders` | `orders7d.n ≥ 20` and `risky / n ≥ 0.30` | 2 | 15 | orders_risk |
-| `inactive_14d` | active store, no member activity for 14 days | 1 | 10 | activity |
-| `dormant_60d` | no member login and no order for 60 days → `dormant = true` | 1 | 20 | activity |
-| `setup_incomplete` | active for ≥ 7 days with no published page | 1 | 10 | setup |
-| `render_failed` | ≥ 1 `failed` render job | 2 | 10 | renders |
-| `review_waiting` | pending, submitted, waiting longer than `slaHours` (24 h when unset) | 1 | 0 | — |
-| `restricted` / `suspended` | the status itself | 2 / 3 | 0 | — |
+`score = 100 − Σ_group min(HEALTH_CAPS[group], Σ points of unsnoozed issues in the group)`, clamped 0-100; the
+points of an issue are `3 | 6 | 10` for severity `1 | 2 | 3`; `attention` = the highest **console flag** severity
+(so a suspended store is 3 and a store with a design issue is not). Issues are sorted by `points DESC, group,
+id`; at most 20 are stored and the tenant sees the first 5 unsnoozed (PLA-§22.16). **Monotonic:** removing or
+snoozing an issue never lowers the score (selftest over 1,000 random removals). **Advisory:** nothing reads the
+score to allow or refuse anything; publish gates are core §M.
 
-Score = `100 − Σ_component min(cap, Σ penalties)`, clamped 0-100; `attention` = the highest flag severity. Monotonic:
-removing a flag never lowers the score (selftest). The UI always lists the components next to the number (PD18).
+#### PLA-§6.3.2 Rules by track (R1 set; each rule stays silent below its `minN` and reads one store)
 
-**Job** `platform.health` (`src/lib/jobs/tracks/platform.ts`, every tick, budget per PLA-§Q.18) takes up to 200 stores
-per tick: rows with `dirty_at IS NOT NULL` first (by `dirty_at`), then the oldest `computed_at` (`sh_due_idx`), then
-stores without a snapshot. For each it reads the inputs through `systemScope(ctx, storeId)` and the scoped read
-functions of PLA-§Q.11, computes, and upserts `store_health` (`dirty_at = NULL`). It also:
+| Group (cap) | Rule id | Owner file | Condition (store's own data, trailing windows) | Sev | `minN` | Fix (`HealthFix`) |
+|---|---|---|---|---|---|---|
+| setup (20) | `shell:contact` | `rules/shell.ts` (P2) | no `store.phone` and no `store.whatsapp` | 3 | — | link `settings/general` |
+| | `shell:legal_identity` | P2 | `store.legalName` empty | 1 | — | link `settings/general` |
+| | `shell:no_published_page` | P2 | `pages.published = 0` and the store is `active` for ≥ 7 days | 2 | — | link `pages` |
+| | `shell:2fa_orders` | P2 | a member with `orders.read_all` has no TOTP | 2 | — | link `settings/security` |
+| | `landing:zones_empty_flat_fee` | `rules/landing.ts` (P3) | zones empty while a live page shows a flat fee | 2 | — | link `settings/delivery` |
+| trust (15) | `landing:countdown_ended`, `landing:compare_not_higher`, `landing:stock_zero`, `landing:sample_proof` | P3 (from `checklist.ts` honesty rules) | per LAN spec | 3 / 2 / 2 / 3 | — | link to the builder section |
+| design (15) | `design:low_q`, `design:slop`, `design:own_pages_close` | `rules/design.ts` (P6) | a live page with `q < 70`; `slop ≥ 3`; two live landings closer than `d_page 0.30` | 2 / 2 / 1 | — | action `design.open_check` |
+| conversion (15) | `landing:seo_missing`, `landing:alt_missing`, `integrations:no_pixel_live`, `integrations:purchase_trigger_order`, `landing:form_hidden` | P3 / P5 | per LAN / OPE specs; the Purchase-trigger rule is a suggestion (severity 1) | 1-2 | — | links to SEO / media / pixels / conversions |
+| operations (15) | `ops:first_touch_slow`, `ops:unattempted_2h`, `ops:unreachable_up` | `rules/ops.ts` (P4) | first-touch p50 above the store's target; orders without an attempt > 2 h inside the window; unreachable 7 d > 28 d + 10 points | 2 / 3 / 2 | 30 orders / 28 d | action `ops.open_queue` |
+| integrations (15) | `platform:sheets_backlog` | `rules/platform.ts` (P1) | Sheets connected and `oldestMin > 15` | 2 | — | action `integrations.sync_sheets` |
+| | `platform:sheets_error` | P1 | a failed `sheets.push` / `sheets.pull` run for the store in the last hour | 2 | — | link `integrations/sheets` |
+| | `platform:outbox_dead` | P1 | any `dead` outbox row of kind `webhook`, `whatsapp` or `carrier` in 24 h | 2 | — | link `integrations` |
+| | `platform:capi_failing` | P1 | `integration_status.kind = 'capi'` state `failing` in 24 h | 1 | — | link `integrations/pixels` |
+| | `platform:telegram_failing` | P1 | `integration_status.kind = 'telegram'` state `failing` | 1 | — | link `integrations/telegram` |
+| | `platform:render_failed` | P1 | ≥ 1 `failed` render job for the store (surfaces §M notes recorded by re-renders) | 2 | — | action `pages.republish_failed` |
+| quota (5) | `platform:quota_high` / `platform:quota_full` | P1 | any gauge or monthly counter ≥ 80 % / ≥ 100 % of its limit | 1 / 2 | — | link `settings/plan` |
+
+R2 adds `ops:refusal_city`, `ops:cash_held_30d` (ship and money states); platform medians appear only in R3 and only
+labelled "platform median" (RF §1.3). Every `text` is a message key with the evidence as variables
+(`health.<track>.<rule>.text`, ar/fr/en for tenant-visible rules, `test:i18n-coverage`); every rule has a fixture
+with and without `minN` in its track's part of `test:health`.
+
+#### PLA-§6.3.3 Console flags (`platform-flags.ts`, P1; the owner's view, never shown to tenants)
+
+| Flag | Rule (starting values **[to tune]**) | Severity | Maps onto |
+|---|---|---|---|
+| `sheets_backlog`, `sheets_error`, `outbox_dead`, `capi_failing`, `telegram_failing` | the same conditions as the `platform:*` integrations issues above | 2 / 2 / 2 / 1 / 1 | the integrations issues (same evidence object) |
+| `quota_high` / `quota_full` | ≥ 80 % / ≥ 100 % | 1 / 2 | the quota issues |
+| `risky_orders` | `orders7d.n ≥ 20` and `risky / n ≥ 0.30` | 2 | operations (6 points, rule `platform:risky_orders`, tenant text "3 of 10 orders this week looked risky to the risk check") |
+| `setup_incomplete` | active ≥ 7 days with no published page | 1 | `shell:no_published_page` |
+| `render_failed` | ≥ 1 failed render job | 2 | `platform:render_failed` |
+| `inactive_14d` | active store, no member activity for 14 days | 1 | 0 points, flag only |
+| `dormant_60d` | no member login and no order for 60 days → `dormant = true` | 1 | 0 points, flag only (re-engagement R3) |
+| `review_waiting` | pending, submitted, waiting longer than `slaHours` (24 h when unset) | 1 | 0 points, flag only |
+| `restricted` / `suspended` | the status itself | 2 / 3 | 0 points, flag only (drives `attention`) |
+
+#### PLA-§6.3.4 Job, snapshot API, bounds
+
+**Job** `platform.health` (`src/lib/jobs/tracks/platform.ts`, every tick, slot 9: 3 s guaranteed + up to 6 s of
+leftover, core §H.2 / §Q.1 Q.18) takes up to 200 stores per tick: rows with `dirty_at IS NOT NULL` first (by
+`dirty_at`), then the oldest `computed_at` (`sh_due_idx`), then stores without a snapshot (`stores LEFT JOIN
+store_health … WHERE h.store_id IS NULL`, states `pending`, `active`, `restricted`). For each store it calls
+`collectHealthInputs` through `systemScope`, `runRules` over the registry, `platformFlags`, `milestonesOf`,
+`computeHealth`, and upserts `store_health` (`dirty_at = NULL`, `issues` truncated to 20, expired snoozes dropped).
+It also:
 - fills `store_health.milestones` and writes one `store.milestone.reached` audit row (`actor_kind = 'system'`, meta
   `{ milestone }`) the first time a milestone appears (PD40);
 - emits `quota.80` / `quota.100` store notifications once per metric and period (`dedupeKey =
   quota<80|100>:<storeId>:<metric>:<period>`) to owners and admins;
-- never writes a tenant table.
+- emits `health.issue_new` once per new issue id of severity ≥ `platform.health.issueNotifyMinSeverity` per ISO week
+  (PD67; "new" = absent from the previous snapshot's `issues`);
+- never writes a tenant table; its one cross-store statement is the `store_health` upsert (core §E.3 rule 6, pinned
+  count 1 for `src/lib/health/**`).
 
-`markHealthDirty(storeId)` (`src/lib/platform/health-snapshot.ts`, `UPDATE store_health SET dirty_at = now`) is called
-by every console action on a store. Bound: recomputed ≤ 5 min after a platform action, ≤ 60 min otherwise (2,000
-stores / 200 per tick × 5 min = 50 min).
+```ts
+// src/lib/platform/health-snapshot.ts (P1; frozen at P0, core §K.2)
+export function getStoreHealth(scope: StoreScope): Promise<StoreHealthView | null>;   // the store's own row, cached 5 min ("health" scopedCache, core §E.6); null = not computed yet; flags only for platform scopes
+export function markHealthDirty(storeId: string): Promise<void>;                     // UPDATE store_health SET dirty_at = now; INSERT a dirty stub when no row exists
+export function snoozeHealthIssue(ctx: StoreCtx, issueId: string, days: 7): Promise<void>;   // health.snooze; writes `snoozed[issueId]`, audit store.health.snoozed, invalidates the cache
+export function requestHealthRecompute(ctx: StoreCtx): Promise<{ queuedAt: string }>;    // s:<sid>:health:recompute 6/h → markHealthDirty (the job computes within ≤ 5 min)
+```
 
-`store_health` columns are those of PLA-§2.2 (PLA-§Q.1), with `HealthMetrics = { orders7d: number; risky7d: number;
-lastActiveAt: string | null; lastOrderAt: string | null; publishedPages: number; mediaPct: number | null }` and
-`milestones` holding the ISO date each milestone was first reached.
+`markHealthDirty(storeId)` is called by every console action on a store, by `transitionStore` (core §A.5.1), by the
+publish listener (core §M.1 step 4), by zone, policy, `store` and integration setting writes (through the settings
+layer's `onWrite` hooks, T1) and by `requestHealthRecompute`. Bound: recomputed ≤ 5 min after any of these, ≤ 60 min
+otherwise (2,000 stores / 200 per tick × 5 min = 50 min); the `platform.alarms` job raises `staff.alarm`
+`health_stale` when the oldest `computed_at` of an `active` store is older than `platform.health.staleAlarmMinutes`.
 
-Acceptance (PL-18): a fixture store with a 20-minute Sheets backlog shows `sheets_backlog` and a score of 85 after one
-run; a suspended store enters Needs attention with severity 3; dormant flips after 60 days on a fake clock; no
-snapshot column contains customer data (canary test, §O.3).
+#### PLA-§6.3.5 Acceptance (PL-18 / SF-03)
+
+A fixture store with a 20-minute Sheets backlog shows `platform:sheets_backlog` (6 points) and the console flag
+`sheets_backlog`, score 94 after one run; a suspended store enters Needs attention with `attention = 3` and no point
+change; dormant flips after 60 days on a fake clock; an `ops:*` rule stays silent at 29 orders and fires at 30;
+snoozing an issue removes its points and keeps it in `issues` with `snoozedUntil`; the snooze expires on a fake clock;
+fixing one issue never lowers the score (1,000 random cases); every tenant-visible rule renders in ar/fr/en with every
+variable; a two-store fixture (`test:health-db`) shows no cross-store evidence and no customer data in any snapshot
+column (canary, §O.3 case 8); `health.issue_new` fires once per issue id per week under three consecutive runs; the
+console ring and the tenant ring render the same `score` for the same row (one query each, asserted in `qa:wow-demo`
+at 2:50).
 
 ---
 
@@ -1004,8 +1221,11 @@ member ("Karim is viewing this store until 14:32"), a pending purge request, a c
 cache), owners, plan name, `store_health`, open requests and active `impersonation_sessions`. An unknown id → the
 console's own not-found state "No store with this id" (staff may know ids; no oracle concern inside the console).
 
-Tabs (`[[...tab]]`, default `overview`); keyboard `1`…`9` jump to the first nine tabs; the tab bar scrolls
-horizontally at 360 px with the active tab kept in view.
+Tabs (`[[...tab]]`, default `overview`). **R1 (rev 2, PD32):** `overview` · `orders` · `team` · `activity` (with the
+`?view=timeline` preset) · `usage` · `notes`; keyboard `1`…`6` jump to them; the tab bar scrolls horizontally at
+360 px with the active tab kept in view. **R2 (S6):** `pages` (Catalog & pages), `integrations`, `domains`, `risk`,
+`media`, `ops`; **R3 (D5):** `support`. A deferred tab's path answers the console's own "Arrives with R2" page (a
+sentence and a link to the Overview strip that already shows its R1 data), never a 404 and never placeholder numbers.
 
 ### PLA-§7.2 Masking (`src/lib/platform/mask.ts`, pure, shared by every console projection)
 
@@ -1025,16 +1245,41 @@ values (PD2); order notes and customer notes are replaced by "Note hidden"; the 
 `revealOrderPii` (§7.4). Seller contact follows PD35. Masking runs on the server before the RSC payload is built, so
 neither the HTML nor the flight data contains the raw value (canary test §O.3).
 
-### PLA-§7.3 Overview tab
+### PLA-§7.3 Overview tab: the "every detail" view (rev 2, PD32, PD55)
 
-Range switch 7 / 30 / 90 days (store timezone). Tiles (each shows `n` where it is a rate):
-visitors (unique, `stats_daily`) · orders placed · confirmation rate (confirmed / (placed − still open), from P4's
-`confirm_state`) · delivery rate (from R2 ship states; R1 shows "Fills in with delivery tracking (R2)") · placed sales ·
-confirmed sales · delivered sales (R2) · average order (placed) · refusal / return rate (R2). Chart: daily orders placed
-vs confirmed (two series, neutral and jade; ≥ 7 points or a table). Milestones strip: first draft, first publish,
-first order, 10th order, first teammate, first delivered (R2) with dates from `store_health.milestones`. Health
-components table (component, penalty, flags). Data: `getStoreOverview(ctx, storeId, range)` combining
-`orderKpis(scope, range)` (P4) and `pageStats(scope, range)` (T3 stats), PLA-§Q.11.
+Range switch 7 / 30 / 90 days (store timezone) for the KPI row; everything else is "now". Layout ≥ 1280 px: the KPI
+row, then a 12-column grid of **ten strips** (each a `<PanelBoundary>` over one async server component and one P0
+read API, so each fails alone and the page streams); 768-1279 px two columns; 360 px one column with the strips
+collapsed to their header line and count, expanding on tap. Every strip has a header (name, last-updated time), ≤ 6
+lines of content, and one end link: the full tab when it exists in this release, otherwise the honest line
+`console.profile.arrives_r2` ("Full view arrives with R2") in neutral text, never a disabled button.
+
+**KPI row** (each rate shows `n`; placed, confirmed and delivered never share a tile): visitors (unique,
+`stats_daily`) · orders placed · confirmation rate (confirmed / (placed − still open), from P4's `confirm_state`) ·
+delivery rate (from R2 ship states; R1 shows "Fills in with delivery tracking (R2)") · placed sales · confirmed sales ·
+delivered sales (R2) · average order (placed) · refusal / return rate (R2). Chart: daily orders placed vs confirmed
+(two series, neutral and jade; ≥ 7 points or a table). Test orders (`is_test`) are excluded everywhere (core D54).
+
+| # | Strip | Content (R1) | Source (P0 read API, core §K.2) | End link |
+|---|---|---|---|---|
+| 1 | Identity & address | mode badge, address mode chip (P / S / C), canonical URL with Copy and Open, handle history count ("renamed once, redirect until …"), re-render state for reason `address` (pending / failed), `brand_seed` hidden, store id with Copy | store row (fresh), `store_handle_history`, P8 `renderSummary(scope)` | Domains tab (R2) |
+| 2 | Health | the 40 px ring with the score, the seven group penalties as a compact bar, the top 5 unsnoozed issues (text with evidence, severity label, "snoozed by owner until …" where applicable), console flags as chips, "Mark dirty" (recompute within 5 min) | `getStoreHealth(platformScope)` (same row as the tenant ring) | the stores list filtered by this store's flags |
+| 3 | Pages | published / draft counts, last publish (relative), the live URL, the newest draft's Design check chips (Q, slop, gates) and honesty item count, **Preview** (10-minute `/preview/<token>` in a sandboxed iframe sheet, PD16) | T4 `listPagesForConsole(scope)`, P6 `designHealth(scope)` | Catalog & pages tab (R2) |
+| 4 | Orders | placed 7 d / 30 d, confirmation rate with `n`, risk mix bar (0-29 / 30-69 / ≥ 70 with `n`), the latest 5 orders masked (id, created, state, total, `maskName`, `maskPhone`) | P4 `orderKpis`, `orderRiskMix`, `listOrdersForConsole(…, { limit: 5 })` | Orders tab (R1) |
+| 5 | Team | members by role, pending invites, 2FA coverage ("3 of 4 with 2FA"), `require_member_2fa` state, agents online now | T2 `listMembersByScope`, `listInvitesByScope`; P4 `opsPulse(scope).agentsOnline` | Team tab (R1) |
+| 6 | Integrations | one line per kind from `integration_status` (Sheets: connected, backlog and oldest, last push / pull result; Pixels: library count, CAPI tokens "set / not set" per pixel; Telegram: configured, last delivery; Turnstile override "set / not set"), outbox pending / dead for this store with **Replay** on dead rows (`stores.lifecycle`, P8 `replay`) | P5 `integrationHealth(scope)`, P8 `outboxSummary(scope)` | Integrations health tab (R2) |
+| 7 | AI | credits used / limit this month, cloud cost this month (USD micros → "$1.84"), store AI mode and Director mode, runs 7 d by provider mix, last run (task, provider, ms, outcome), open `ai_jobs` for the store (kind, stage, heartbeat age); never prompt or output text | P7 `aiStoreSummary(ctx, storeId)` (console-shaped, masked) | the console AI pages (P7, `/admin/ai/stores/<id>` when P7 ships it; otherwise none) |
+| 8 | Usage & plan | plan chip and since, the gauges media / pages / members / agents / campaigns / short links and the monthly counters exports / AI credits / orders as `UsageMeter`s, active boosts with expiry, state caps in force ("Pending: 100 MiB") | T1 `entitlements(platformScope)`, `store_entitlements`, `store_usage` | Usage & plan tab (R1) |
+| 9 | Risk | the latest `signup` review: score ring, band, the top 3 flags with `explainFlag()`, the counterfactual line (PD52), `partial`; linked accounts count with a banned badge when any; blocklist size; restriction history count | `signup_reviews` (`sr_store_kind_idx`), `identity_links` through `src/lib/platform/profile/risk.ts` (`// tenancy: platform risk strip`), `blocklist` count | Risk tab (R2) |
+| 10 | Timeline | the last 8 events of the merged stream (PLA-§7.8): lifecycle, decisions, plan changes, milestones, impersonations, notes of kind `decision` / `warning`, exports, renames | `listStoreTimeline(ctx, storeId, { limit: 8 })` | Activity tab, `?view=timeline` (R1) |
+
+Milestones appear inside the Timeline strip as pinned markers (first draft, first publish, first order, 10th order,
+first teammate, first delivered (R2)) with dates from `store_health.milestones`. Data for the KPI row:
+`getStoreOverview(ctx, storeId, range)` combining `orderKpis(scope, range)` (P4) and `pageStats(scope, range)` (T3
+stats). Masking: every customer field passes `src/lib/platform/mask.ts` before the RSC payload is built (PD2);
+seller contact follows PD35. Budget: the whole Overview ≤ 900 ms p95 server time on the `--perf` fixture (ten
+parallel reads), each strip ≤ 300 ms; a strip that misses its budget still renders when it finishes (streaming), and
+a strip whose source throws shows its own error state with the reference.
 
 ### PLA-§7.4 Orders tab (masked)
 
@@ -1051,12 +1296,14 @@ for 60 s then masked again; writes `platform.pii.revealed` (store_id = the store
 `order_events` row through P4's `recordPlatformReveal(scope, orderId, staff)`; the store's Activity shows it with the
 staff name. Bucket `p:pii:reveal:<userId>` 20/day. **No CSV export** of orders exists in the console (core §F.11).
 
-### PLA-§7.5 Pages tab
+### PLA-§7.5 Catalog & pages tab (R2, S6; the R1 data lives in Overview strip 3)
 
-`listPagesForConsole(scope)` (T4's `src/lib/admin-data/pages.ts`, PLA-§Q.11): name, slug, status, last publish, views
-30 d, orders 30 d, versions kept / bytes, the live URL (`storeUrl`), a **Preview** button that opens a 10-minute
-`/preview/<token>` URL in a sandboxed iframe sheet (PD16, `sandbox="allow-scripts"`, never `allow-same-origin`).
-Products and collections appear here from R2 (catalog read API of storefront.md). No unpublish in R1 (PD33).
+`listPagesForConsole(scope)` (T4's `src/lib/admin-data/pages.ts`, core §K.1): name, slug, status, last publish, views
+30 d, orders 30 d, versions kept / bytes, the live URL (`storeUrl`), the Design check chips per live page (P6), a
+**Preview** button that opens a 10-minute `/preview/<token>` URL in a sandboxed iframe sheet (PD16,
+`sandbox="allow-scripts"`, never `allow-same-origin`). Products and collections appear here from R2 (catalog read API
+of storefront.md). No unpublish or takedown before PL-20 (PD33). In R1 the tab path answers the "Arrives with R2"
+page and strip 3 carries the counts, the live URL and the preview.
 
 ### PLA-§7.6 Team tab
 
@@ -1074,15 +1321,17 @@ platform), staff member, date. Row: time, actor (member name, staff name + role,
 (`console.audit.<action>`, falling back to the raw action name in mono), target, meta summary (redacted by
 `src/lib/audit.ts`), IP hash short for super_admin only. Keyset by id, 50 per page.
 
-### PLA-§7.8 Timeline tab
+### PLA-§7.8 Timeline view of the Activity tab (`activity?view=timeline`; rev 2: a view, not a tab)
 
 One merged stream, newest first, 50 per page: lifecycle transitions (`platform.store.*`, `store.closed`,
 `store.reopened`, `store.deletion_scheduled`), review decisions and requests (`signup_reviews`), plan changes and
 boosts (`platform.plan.changed`, `platform.entitlement.set`), milestones (`store.milestone.reached`), impersonations
-(start/end), staff notes of kind `decision` / `warning`, exports (`store.export_*`), handle renames. Source:
-`listStoreTimeline(ctx, storeId, cursor)` = four bounded queries (audit by `audit_store_idx` with an action allow-list,
-`sr_store_idx`, `imp_store_idx`, `pn_store_idx`) merged in memory by time; cursor = `{ at, source, id }`. Each event:
-icon, sentence, actor, time; decisions show their note.
+(start/end), staff notes of kind `decision` / `warning`, exports (`store.export_*`), handle renames, health snoozes
+(`store.health.snoozed`). Source: `listStoreTimeline(ctx, storeId, { cursor?, limit })` = four bounded queries (audit
+by `audit_store_idx` with an action allow-list, `sr_store_idx`, `imp_store_idx`, `pn_store_idx`) merged in memory by
+time; cursor = `{ at, source, id }`. Each event: icon, sentence, actor, time; decisions show their note. The Activity
+tab's segmented control switches **Audit** (PLA-§7.7, every row) and **Timeline** (this stream); the URL keeps the
+view so ⌘K and notes can link to either.
 
 ### PLA-§7.9 Usage & plan tab
 
@@ -1097,9 +1346,9 @@ icon, sentence, actor, time; decisions show their note.
   blocked)".
 Data: `getStoreUsage(ctx, storeId)` = `entitlements(platformScope)` (core §A.4) + `store_entitlements` + `store_usage`.
 
-### PLA-§7.10 Integrations tab
+### PLA-§7.10 Integrations health tab (R2, S6; the R1 data lives in Overview strip 6)
 
-`integrationHealth(scope)` (P5, PLA-§Q.11) rendered as tiles in the `sheet-health.tsx` pattern: **Sheets** (connected,
+`integrationHealth(scope)` (P5, core §K.2 P0) rendered as tiles in the `sheet-health.tsx` pattern: **Sheets** (connected,
 spreadsheet title only, binding verified at, backlog count and oldest, last push / pull and result, last error code),
 **Pixels** (library count, per pixel: platform, label, CAPI token "set / not set", last OK, last error code; never the
 token), **Telegram** (configured y/n, last delivery result), **WhatsApp templates** (count), **Turnstile** (store
@@ -1107,12 +1356,15 @@ override "set / not set"), **Outbox** (pending / dead per kind for this store wi
 `stores.lifecycle`, P8's `replay(ctx, id)`), **Webhooks / carriers** (R2). Every tile: OK / Warning / Error with the
 last error summary; secrets only ever "set / not set" (core §F.10).
 
-### PLA-§7.11 AI tab
+### PLA-§7.11 AI tab (R2, S6 with P7; the R1 data lives in Overview strip 7)
 
-`aiUsageForStore(scope, month)` (P7, PLA-§Q.11): credits used / limit this month, cloud cost this month (USD micros →
-"$1.84"), runs by task (count, provider mix server / local / library, p50 / p95 ms, guard rejections), cache hit rate,
-store AI mode (`store_ai.mode`), learning on/off, the last 20 runs as metadata (task, provider, model, ms, credits,
-outcome); never prompt or output text (ai.md AI-§E.5). Boost AI credits → §9.4.
+`aiUsageForStore(scope, month)` and `aiStoreSummary(ctx, storeId)` (P7, core §K.2 P0): credits used / limit this
+month, cloud cost this month (USD micros → "$1.84"), runs by task and **class** (`director_interactive`,
+`director_deep`, `worker`, `fast`; count, provider mix server / local / library, p50 / p95 ms, guard rejections),
+cache hit rate, store AI mode and Director mode (`store_ai.mode`, `store_ai.director`), learning on/off, open and
+recent `ai_jobs` (kind, stage, heartbeat age, outcome; core §H.12), the last 20 runs as metadata (task, class, model,
+ms, credits, outcome); never prompt or output text (ai.md AI-§E.5). Boost AI credits → §9.4. In R1 strip 7 shows the
+summary; the per-store AI console pages are P7's under `/admin/ai/**`.
 
 ### PLA-§7.12 Notes tab (and the note composer used in the queue)
 
@@ -1123,7 +1375,7 @@ delete (soft, `deleted_at`; the audit keeps the event). Analysts never see notes
 notes. `src/lib/platform/notes.ts`: `listNotes(ctx, { storeId? , userId? })`, `addNote(ctx, input)`,
 `editNote(ctx, id, body)`, `deleteNote(ctx, id)`, `pinNote(ctx, id, pinned)`.
 
-### PLA-§7.13 Domains, Risk and Media tabs
+### PLA-§7.13 Domains, Risk and Media tabs (R2, S6; R1 data in Overview strips 1 and 9, media in strip 8's meter)
 
 - **Domains**: address mode and canonical URL (`addressMode`, `storeUrl`), the P-mode URL, the subdomain once S mode is
   on, handle history (`store_handle_history`: old handle, reason, redirect until), this store's `render_jobs` with
@@ -1155,20 +1407,66 @@ Ops (S6, R2): confirmation and delivery rates by agent and city, agent KPIs, car
 remittance ageing, aggregates only, no customer rows. Support (D5, R3): the store's tickets, support grants, messages
 sent, impersonation sessions.
 
-Acceptance (PL-07): each of the 13 R1 tabs renders loading, empty and error states (screenshot test at 1280 and 360);
-for support and analyst sessions the HTML and RSC payload of every tab contain none of the seeded customer canaries
-(phone, name, address, note) nor the seller's full e-mail; a reveal writes exactly one audit row and one order event and
-is visible in the store's own Activity; the Media tab shows thumbnails for a suspended store.
+Acceptance (PL-07, rev 2): each of the 6 R1 tabs and each of the ten Overview strips renders loading, empty and error
+states (screenshot test at 1280 and 360); a deferred tab path renders the "Arrives with R2" page with a working link
+to its strip; for support and analyst sessions the HTML and RSC payload of every tab and strip contain none of the
+seeded customer canaries (phone, name, address, note) nor the seller's full e-mail; a reveal writes exactly one audit
+row and one order event and is visible in the store's own Activity; the Overview answers ≤ 900 ms p95 on the `--perf`
+fixture with one strip's source made to throw (the other nine render); the console media proxy
+(`/api/admin/stores/<id>/media/<key>`, kept from revision 1 for strip 3's draft preview thumbnails) still streams for a
+suspended store.
 
 ---
 
-## PLA-§8. Lifecycle actions (PL-08)
+## PLA-§8. Lifecycle actions (PL-08) and lifecycle safety (PD54, rev 2)
+
+### PLA-§8.0 The safety model: preview, arm, cooldown
+
+Every lifecycle action of PLA-§8.1 goes through one `LifecycleSheet` (P1, `src/components/console/lifecycle/sheet.tsx`)
+in three steps, none of which writes anything until the last:
+
+1. **Preview.** The sheet opens with `lifecyclePreview(ctx, storeId, to)` (read-only, `src/lib/platform/lifecycle-preview.ts`):
+
+   ```ts
+   export interface LifecyclePreview {
+     from: StoreStatus; to: StoreStatus; allowed: boolean; blockedBy: "edge" | "cooldown" | "pending_request" | null;
+     storeSees: { locale: "ar" | "fr" | "en"; title: string; body: string; banner: string | null; publicPages: "live" | "neutral_404" | "neutral_503" | "unchanged"; publicOrders: "open" | "unavailable" | "refused" };   // rendered from shell.* keys in the store's default locale, with the reason sentence
+     affects: { livePages: number; openOrders: number; dueCallbacks: number; agentsWithLease: number; agentsOnline: number; integrationsPaused: ("sheets" | "capi" | "telegram" | "webhooks")[]; renderJobsPending: number; openReview: boolean; reopenUntil: string | null; purgeAfter: string | null };
+     willWrite: { audit: AuditAction; notification: NotificationKind | null; leasesReleased: boolean; templatesEnsured: boolean };   // what transitionStore does (core §A.5.1)
+     cooldown: { lastChangeAt: string | null; typedHandleRequired: boolean };   // PD54: a change inside platform.lifecycle.cooldownMinutes needs the handle
+   }
+   export function lifecyclePreview(ctx: PlatformCtx, storeId: string, to: StoreStatus): Promise<LifecyclePreview>;
+   ```
+
+   Sources: `listPagesForConsole` (live pages), P4 `queueCounts` / `opsPulse` (open orders, due callbacks, leases,
+   agents online), P5 `integrationHealth` (what pauses, from core §A.5.3), P8 `renderSummary` (pending renders),
+   `signup_reviews` (open review), the store row (`closed_at`, `purge_after`). The sheet shows the store-facing text
+   as the seller will read it (title, body, banner), the consequences as a short list with numbers ("3 agents hold a
+   lease: it is released", "Sheets pauses for new orders; existing orders keep syncing"), and the edge's requirements
+   (reason, note, typed confirmation, step-up) exactly as in the table below. Nothing is written.
+2. **Arm.** After reason, note and the typed confirmation (where marked), the primary button shows a countdown of
+   `platform.lifecycle.armSeconds` (default 5 s) with **Cancel** in the same spot a mis-click would land; `Esc`
+   cancels; the write is sent only when the countdown reaches 0 and the sheet is still open and focused. The countdown
+   is client-side and cheap; the step-up challenge (↑) comes **before** arming, so an expired step-up never interrupts
+   the countdown.
+3. **Cooldown.** When `cooldown.typedHandleRequired` is true (a lifecycle change on this store inside the last
+   `cooldownMinutes`, read from `stores.status_changed_at`), the typed handle is required even for edges that do not
+   normally need it (`restore`, `reopen`), and the sheet says why ("Changed 4 minutes ago by Karim: restricted").
+
+Rules: the write is one `transitionStore` call with the compare-and-set of core §A.5.1; a stale `from` (someone else
+changed the store meanwhile) answers `status_changed` and the sheet reloads the preview; no lifecycle action exists
+in ⌘K, in the bulk bar or on a keyboard chord (they only open the sheet, like PD43 for kill switches); no bulk
+lifecycle action (PD44); the preview itself is audited only when the action follows (no noise). The `restrict`
+edge keeps its light requirements (no step-up, no typed confirmation) because it is the owner's instrument against
+fake orders and must stay fast: the arm window is its safety.
 
 ### PLA-§8.1 Actions
 
-All call `transitionStore(ctx, storeId, to, { reason, note })` (core §A.5.1, T1), which validates the edge, writes the
-audit row and the store notification (kinds of §18.2, PLA-§Q.27), invalidates caches and releases agent leases. The
-console action adds `markHealthDirty`, the optional "show this note to the store" text and `refresh()`.
+All call `transitionStore(ctx, storeId, to, { reason, note, notify: { showNote } })` (core §A.5.1, T1), which
+validates the edge, writes the audit row and **exactly one** store notification (kinds of §18.2, core §Q.1 Q.27),
+invalidates caches, marks health dirty, releases agent leases and ensures the template set for `store` / `both`
+stores. The console action adds the optional "show this note to the store" toggle (`notify.showNote`) and
+`refresh()`.
 
 | Console action | Edge | Permission | ↑ | Reason codes | Typed confirm | Store sees |
 |---|---|---|---|---|---|---|
@@ -1208,10 +1506,15 @@ export type StoreStatusReason =
 Copy: `console.reason.<code>` (staff label, en) and `shell.status_reason.<code>` (store sentence, ar/fr/en). The
 `stores.status_reason` column (varchar 40) stores the code.
 
-Acceptance (PL-08): every edge of core §A.5.1 that a staff member can take is reachable from the profile menu with the
-listed permission, step-up and confirmation; an illegal edge is disabled with its reason; two staff restricting the
-same store at once → one succeeds, the other sees "The store's status changed; reload" (compare-and-set); a
-four-eyes purge requested by A cannot be confirmed by A (DB test).
+Acceptance (PL-08, rev 2): every edge of core §A.5.1 that a staff member can take is reachable from the profile menu
+with the listed permission, step-up and confirmation; an illegal edge is disabled with its reason; two staff
+restricting the same store at once → one succeeds, the other sees "The store's status changed; reload"
+(compare-and-set); a four-eyes purge requested by A cannot be confirmed by A (DB test); **the preview matches the
+effect** (for every edge on the three seeded stores, `lifecyclePreview().storeSees` equals the banner / page the
+store renders after the write, and `affects.agentsWithLease` equals the number of `releaseAllLeases` rows); cancelling
+during the arm window writes nothing (no audit row, no notification, status unchanged); a second change inside the
+cooldown without the typed handle is refused server-side (`cooldown_handle_required`), not only in the UI; the store
+receives exactly one notification per transition.
 
 ---
 
@@ -1228,25 +1531,35 @@ R1).
 ### PLA-§9.2 Plan editor (`/admin/plans/<id>`)
 
 Rows grouped **Limits**, **Features**, **Later releases** (keys whose `release` is not live yet: shown disabled with
-the release chip). Each row: label + one-line description (`console.entitlement.<key>`), registry default, the plan's
-value (number input with unit and an "Unlimited" toggle; switch for features; "Use default" option), and the effective
-example ("Stores on this plan get 1 GiB"). `take_orders` is locked to **On** with the note
-`console.plans.take_orders_locked` ("Orders are never blocked by a plan", PD8). Saving opens the **impact preview**:
+the release chip; in R1 that is `products_max`, `webhooks_max`, `custom_domains_max`, `webhooks`, `accounting`,
+`commissions`, `api_keys`, `custom_domain`, `experiments`, `coupons`, `reviews`; the rev 2 R1 keys `campaigns_max`
+and `short_links_max` sit under Limits, core §A.4). Each row explains itself three ways (PD58): label + one-line
+description (`console.entitlement.<key>`), the **registry default**, the **plan's value** (number input with unit and
+an "Unlimited" toggle; switch for features; "Use default" option), and the **effective sentence** ("Stores on this
+plan get 1 GiB"; for a limit under a state cap: "Pending stores get 100 MiB until approval"). `take_orders` is locked
+to **On** with the note `console.plans.take_orders_locked` ("Orders are never blocked by a plan", PD8). Saving opens
+the **diff** (old → new per changed key) and the **impact preview**:
 
 ```ts
 // src/lib/platform/plans.ts
 export interface PlanImpact {
   stores: number;                                    // stores on the plan without an override for the key
-  lowered: { key: EntitlementKey; from: number | null; to: number | null; storesAbove: number }[];   // already above the new limit
-  featuresOff: { key: EntitlementKey; stores: number }[];
+  lowered: { key: EntitlementKey; from: number | null; to: number | null; storesAbove: number;
+             examples: { handle: string; used: number }[] }[];   // rev 2 (PD58): ≤ 20 stores already above the new limit, highest usage first (handles are public)
+  featuresOff: { key: EntitlementKey; stores: number; examples: { handle: string }[] }[];   // stores that use the feature today (e.g. a Sheets binding) and lose it
+  unaffected: number;                                // stores on the plan whose effective values do not change (overrides, boosts or usage below)
 }
 export function previewPlanChange(ctx: PlatformCtx, planId: string, patch: PlanPatch): Promise<PlanImpact>;
 export function savePlan(ctx: PlatformCtx, planId: string, patch: PlanPatch, opId: string): Promise<void>;   // audit platform.plan.updated { diff }
 ```
 
-Sentence form: "Lowers media storage for 12 stores; 3 are already above 500 MiB: they keep their files, new uploads
-are refused." Confirm → save → `invalidateEntitlements(id)` for every store on the plan (≤ 2,000 in-process deletes) →
-`refresh()`. Validation: limits are integers ≥ 0 or `null`; feature values boolean; unknown keys refused.
+Sentence form: "Lowers media storage for 12 stores; 3 are already above 500 MiB (@argan-souk 1.9 GiB, @maison-nour
+812 MiB, @…): they keep their files, new uploads are refused until they are below the limit." Features that turn off
+list what stops ("Sheets sync pauses for 4 stores that are connected"). Confirm → save → `invalidateEntitlements(id)`
+for every store on the plan (≤ 2,000 in-process deletes) → `refresh()`. Validation: limits are integers ≥ 0 or
+`null`; feature values boolean; unknown keys refused; a limit below a state cap's default is allowed but the sentence
+says the cap wins while pending. The preview reads `store_usage` gauges and the feature's own marker (`sheet_bindings`,
+pixel library count, `campaigns` count) through one platform query per key (`// tenancy: platform plan-impact`).
 
 ### PLA-§9.3 Assign a plan to a store
 
@@ -1292,13 +1605,23 @@ member of the store → "You're a member of this store. Open it from your stores
 ### PLA-§10.2 While viewing (tenant shell, P2 component `ImpersonationRibbon`)
 
 A full-width violet ribbon (hue 295, 36 px, above the topbar, never dismissible): "Viewing **<store>** as Store Gen
-support · read-only · 24:13 left" + "Why" popover (reason, note, ticket ref) + **End**. The countdown is computed from
-`ctx.impersonation.expiresAt` (server time offset corrected once); at 0 the client calls `endImpersonationAction` and
+support · read-only · 24:13 left" + "Why" popover (reason, note, ticket ref) + **Note** (rev 2, PD56: a one-line
+`platform_notes` composer of kind `note` for this store, staff-only, `stores.notes`; it never writes a tenant row) +
+**Open profile** (the console store profile in a new tab) + **End**. The countdown reads `StorePulse.impersonation.endsAt`
+(core D57) first and `ctx.impersonation.expiresAt` on the first paint (server time offset corrected once), so a client
+navigation or a second tab never shows a stale remaining time; at 0 the client calls `endImpersonationAction` and
 navigates to the profile. Every write control stays visible; pressing it gives the toast
 `shell.impersonation.write_refused` ("Read-only while support is viewing"), never a modal; the server refuses anyway
-(`impersonation_read_only`, audited by the seam). Sensitive surfaces (secrets, phone reveal, exports, account pages of
-the seller) show the lock state `shell.impersonation.hidden`. The ribbon text has ≥ 4.5:1 contrast (design.md UX-03
-row).
+(`impersonation_read_only`, audited by the seam, one row per refused call). Sensitive surfaces (secrets, phone reveal,
+exports, account pages of the seller) show the lock state `shell.impersonation.hidden`. The ribbon text has ≥ 4.5:1
+contrast (design.md UX-03 row). The pulse keeps polling during impersonation (the staff member sees the same unread
+and counts the seller sees, read-only), and the Store Health ring renders with its fixes shown but disabled
+(`LockedControl` reason `{ kind: "impersonation" }`), so support can point at the fix without running it.
+
+**On the console side (PD56):** while `ConsolePulse.impersonation` is set, the console topbar shows the chip
+"Viewing @handle · 24:13" linking to `/app/<h>`, and the store profile header shows "You are viewing this store"
+with End; starting a second view-as from the console ends the first (core §B.8, Q.31). The profile's Activity tab
+lists the session the moment it starts (audit `platform.impersonation.started`), so a colleague sees it live.
 
 ### PLA-§10.3 End and afterwards
 
@@ -1309,7 +1632,12 @@ window at the end or expiry; both appear in the store's Activity with the staff 
 Acceptance (PL-10): start → the store's notification exists with the reason and window; every exported store action
 called during the session answers `impersonation_read_only` and writes `platform.impersonation.write_refused` (attack
 suite); the ribbon counts down and the session ends itself at expiry (fake clock); a support user without a ticket
-reference cannot start; End returns to the profile's Activity tab where the session is listed.
+reference cannot start; End returns to the profile's Activity tab where the session is listed; **(rev 2)** the
+countdown in two tabs of the same browser differs by < 1 s after one of them navigates (pulse-driven); the console
+chip appears within one console pulse of the start and disappears within one of the end; a note written from the
+ribbon lands in `platform_notes` with `store_id` = the target and `author_id` = the staff member and never in a
+tenant table (attack suite case); the health ring's fixes are rendered disabled and a forced call answers
+`impersonation_read_only`.
 
 ---
 
@@ -1407,6 +1735,17 @@ overrides (scope store / user / plan / market, id picker, value, note ≤ 200, o
 `saveFlagAction`, `setFlagOverrideAction`, `clearFlagOverrideAction`; audit `platform.flag.changed` with the diff.
 Kill-switch rows never appear in these tabs.
 
+**R1 declarations the console shows (rev 2; core §D.4, declared in `src/lib/flags/defs/<track>.ts`):** `finance_lite`
+(release, `true`, operations: SF-04 Profit lite behind `/finance`), `ai_director_brief` (release, `false`, ai:
+AI-19a), `ai_copilot`, `ai_learned_priors`, `ai_risk_v2` (release, `false`, ai, R3), `design_publish_gates` (ops,
+`"block"`, design: `"block" | "warn"`, the mirror of `platform_design.gatesAtPublish`; the row shows the count of
+`page.publish.design_override` / `page.publish.budget_override` audit rows in 7 days as the cost of `warn`, so the
+owner sees what the softer mode let through). `src/lib/flags/defs/platform.ts` (P1) declares `console_perf_panel`
+(ops, `false`: shows request timings in the console footer for staff) and `health_tenant_ring` (release, `true`: the
+tenant ring and issue list; `false` keeps the console flags and hides the ring from sellers, the one switch that lets
+the maintainer defer SF-03's tenant surface without a schema change). Every flag of every track is listed with its
+owner track; a flag missing from code shows "archived" and cannot be edited.
+
 Acceptance (PL-12): toggling `publishing_enabled` off shows the banner in a seeded store within 45 s and publish answers
 `feature_off` with reason `kill`; orders keep being accepted with `platform_read_only` on (e2e); a 20 % rollout puts the
 same store in the same bucket on every evaluation; an expired override is ignored.
@@ -1432,6 +1771,18 @@ each save is `savePlatformSettingsAction({ section, patch, opId })` (`platform.s
 - **Seller brand colours**: `allowSellerBrandOrange` (default off, D37). Switching it on needs the typed confirmation
   `allow orange` and shows the owner rule text; the console accent and every admin token stay outside the band
   regardless (the setting affects generated store palettes and the seller colour picker only).
+- **Design gates (rev 2; core §D.10 `platform_design`, DES-R8):** a field group rendered by P6's component
+  (`src/components/admin/brand/platform-design-fields.tsx`, mounted here by P1, props `{ value, onSave }`): gate
+  thresholds (Q, slop, novelty bands), `gatesAtPublish: "block" | "warn"` (mirrored into the ops flag
+  `design_publish_gates`, PLA-§12.2), the novelty pool switch, calibration values. Saving goes through
+  `setPlatformSetting("platform_design", …)` with audit `platform.design.changed` (DES-R15); the group shows the
+  7-day count of design overrides next to the mode switch. P1 owns the page and the mount, P6 the fields and their
+  validation.
+- **Health engine (rev 2; `platform.health`, PD67):** `issueNotifyMinSeverity` (2 or 3), `staleAlarmMinutes`
+  (15-240), `showScoreToTenantsBelowN` (0-100, default 0), each with its sentence of effect; `snoozeDays` is shown as
+  a fixed value (7).
+- **Lifecycle safety (rev 2; `platform.lifecycle`, PD54):** `armSeconds` (3-15) and `cooldownMinutes` (0-120), with
+  a live preview of the arm button.
 
 ### PLA-§13.2 Sign-up (`/admin/settings/signup`)
 
@@ -1449,8 +1800,9 @@ on it. Cache invalidation: the 5-minute `protectedTerms()` cache is cleared on s
 
 ### PLA-§13.4 Legal documents (`/admin/settings/legal`, `legal.manage`)
 
-List grouped by kind (`tos`, `privacy`, `aup`, `dpa` (R2, rethink cut), `store_privacy`, `store_terms`,
-`store_shipping`, `store_returns`, `store_contact`) × locale (ar, fr, en): version, status (draft / published /
+List grouped by kind (`tos`, `privacy`, `aup`, `dpa` (**R2**: the kind stays in the enum, no R1 seed text and no R1
+editor row; RF §3.3, core §L.2 PL-14), `store_privacy`, `store_terms`, `store_shipping`, `store_returns`,
+`store_contact`) × locale (ar, fr, en): version, status (draft / published /
 retired), the yellow chip **Needs legal review** while `needs_legal_review`, effective date, published at, acceptances
 count (platform kinds). Editor: title, body (markdown-lite, §13.6), "What changed" summary (≤ 500), effective date,
 "Ask people to accept again" (`requiresReacceptance`), a line diff against the previous version. Actions
@@ -1562,8 +1914,16 @@ refreshes every 30 s while visible and fails on its own.
 | Storage | DB used vs quota with 70 / 85 % marks, the top 15 tables by size, the top 15 stores by `store_usage` media + page bytes, `DATA_DIR` bytes / free / files vs the 300,000-inode warning, media backend (`fs` / `db`), reclaimable `media_chunks` bytes with the hPanel `OPTIMIZE TABLE` guidance (core §G.3), a trend "85 % reached in ~41 days" when ≥ 7 daily points exist | DB ≥ 85 %, free disk < 2 GiB, backend `db` while `DATA_DIR` is set |
 | Errors | last 24 h by `area / code / route` with count, stores affected, first / last seen; a code row expands to its redacted samples | > 50 of one code in an hour |
 | Runtime | build id, build time, Node version, memory (rss, heap used / total), uptime, boot warnings (config, data dir, env aliases) | a boot warning of level error |
-| Edge | S mode on / off, Worker version last seen (`x-sg-worker`), last edge-verified request, requests still using `EDGE_KEY_PREV` in 24 h, foreign-host count | prev-key use 24 h after a rotation |
-| Commerce heartbeat | the last order platform-wide and orders per hour for 24 h (`orders_created_idx`) | §5.3 rule |
+| Edge / Worker (rev 2, PD57; `getHealth().edge`) | S mode on / off, Worker version last seen (`x-sg-worker`, `WORKER_VERSION` of `edge/worker.js`), last edge-verified request (relative), requests still using `EDGE_KEY_PREV` in 24 h, foreign-host count 24 h, the rotation state (`EDGE_KEY_PREV` set / not set) with the three rotation steps of core §C.5 as a checklist | prev-key use 24 h after a rotation; no edge-verified request for 15 min while S mode is on and ≥ 1 store is live |
+| Render queue (rev 2, PD57; P8 `renderSummary()` platform-wide + per store) | depth by `reason` (`address`, `brand`, `store_info`, `conversions`, `theme` R2, `product` R2, `reviews` R3, `runtime`) × state, the oldest pending (store, page, age), failed jobs in 24 h grouped by store with the error summary and **Retry** (`domains.manage`, P8 `enqueueRenders`), last-hour throughput (pages / min) and the ETA for the pending set, the §M notes recorded by re-renders (`render_jobs.error` notes) as a count with the top 3 item ids | pending > 500 (yellow) · oldest pending > 60 min (yellow) · any failed job older than 24 h still failed (red) · throughput 0 with pending > 0 over two ticks (red) |
+| Health engine (rev 2, PD57; `getHealth().health`) | stale snapshots (`active` stores with `computed_at` older than `staleAlarmMinutes`), dirty rows waiting, last `platform.health` run (ms vs its 3 s budget, stores processed), the slowest rule ids of the last run (from `job_runs.summary.rules`), the issue mix platform-wide (count per group, k-suppressed for analysts) | stale > 0 (yellow) · stale > 10 % of active stores or last run > 60 min ago (red) |
+| AI (rev 2, PD57; P7 `aiHealth()`, core §H.5) | provider ok / paused (and why), per-class served model and fallback use in 24 h, open Message Batches (count, oldest), `ai_jobs` running / orphaned / failed 24 h, monthly cap used % (platform), refusal rate 24 h, the detached-job probe result (`qa:detached-job-probe`, recorded in HANDOFF: pass / fail / not run) | cap ≥ 70 % (yellow) / ≥ 85 % (red) · provider auth failure · Director unavailable · an orphan recovered or failed · refusal spike (AI-§O) |
+| Design tables (rev 2; DES-R12, `getHealth().design`) | `design_genomes` and `headline_shingles` bytes, rows, growth per week | > 300 MB (yellow) |
+| Commerce heartbeat | the last order platform-wide and orders per hour for 24 h (`orders_created_idx`, `is_test = 0`) | §5.3 rule |
+
+Every panel header carries its "Updated hh:mm" line; every red or yellow state is a text label with an icon
+(PLA-§4.7 rule 8); every panel names the alarm it drives in a tooltip, so a staff member can read why a notification
+arrived.
 
 ### PLA-§15.2 Alarms
 
@@ -1571,9 +1931,23 @@ Job `platform.alarms` (every tick, ≤ 1 s): evaluates `getHealth()`'s cheap sub
 alarm sends `staff.alarm` (`vars: { alarm, value }`, dedupe `alarm:<code>:<YYYY-MM-DDTHH>`) to `platform_staff` with
 `minRole: "admin"` and appears in Needs attention; a recovered alarm sends nothing (the panel shows "Recovered 14:20").
 
+Alarm codes (rev 2 complete list; the first eight are revision 1's, the rest core §H.5 rev 2 and PD57):
+`no_tick` (10 min) · `outbox_dead` (any kind) · `db_70` / `db_85` · `disk_low` (< 2 GiB) · `inodes_high` (> 300,000) ·
+`error_spike` (> 50 of one code in an hour) · `sheets_backlog` (a store > 15 min) · `commerce_quiet` (§5.3 rule) ·
+`render_stuck` (oldest pending > 60 min or throughput 0 with pending) · `render_failed_old` (a failed job > 24 h) ·
+`edge_silent` (S mode on, no edge-verified request for 15 min) · `edge_prev_key` (prev-key use 24 h after rotation) ·
+`health_stale` (`staleAlarmMinutes`) · `health_job_slow` (the job exceeded its slot three ticks in a row) · `ai_cap_70`
+/ `ai_cap_85` / `ai_cap_reached` · `ai_auth_failed` · `ai_director_unavailable` · `ai_refusal_spike` · `ai_job_orphan`
+· `design_tables_large` (300 MB) · `backup_failed` · `backup_not_downloaded` (`remindAfterDays`) · `breakglass_unreviewed`
+(a week older than 14 days). The AI alarms are raised by P7's `aiHealth()` flags and only relayed here, so one
+notification path exists.
+
 Acceptance (OS-09): stopping the cron for 11 minutes (fake clock in `platform-check.ts`) turns the Cron panel red and
 produces exactly one staff notification per hour; replaying a dead outbox row moves it to `pending` and writes an
-audit row; the page renders without `getHealth()`'s storage snapshot (shows "Snapshot not taken yet").
+audit row; the page renders without `getHealth()`'s storage snapshot (shows "Snapshot not taken yet"); **(rev 2)** a
+seeded render job left `pending` for 61 minutes on a fake clock turns the Render queue panel yellow and raises
+`render_stuck` once; a seeded `active` store without a snapshot for `staleAlarmMinutes + 1` raises `health_stale`;
+the Edge panel on the temporary domain reads "S mode off" with no alarm and no network call.
 
 ---
 
@@ -1660,9 +2034,12 @@ export interface NotificationItem { id: number; kind: NotificationKind; group: N
 ```
 
 - **Kind registry** (`src/lib/platform/notify-kinds.ts` + extension files `src/lib/notify/kinds/<track>.ts`,
-  PLA-§Q.15): `{ kind, group, defaultSeverity, audienceHint, vars: z.ZodType, link?: (vars, ctx) => string,
-  tenant: boolean }`. Titles and bodies are message keys `notify.<kind>.title` / `.body` with `{var}` placeholders;
-  tenant-facing kinds must exist in ar, fr and en (`test:i18n-coverage`), staff kinds in en.
+  imported by the maintainer's `src/lib/notify/registry.ts`; core §I.4): `NotificationKindDef = { kind, group,
+  defaultSeverity, audienceHint, vars: z.ZodType, link?: (vars, ctx) => string, tenant: boolean, batch?: { windowMin:
+  number } }`. Titles and bodies are message keys `notify.<kind>.title` / `.body` with `{var}` placeholders;
+  tenant-facing kinds must exist in ar, fr and en (`test:i18n-coverage`), staff kinds in en. `vars` carry ids, counts,
+  codes and short labels, never customer data (core §I.4); `test:platform` asserts that no registered kind's `vars`
+  schema has a key named `phone`, `name`, `address`, `email` or `note`.
 - **Rendering at read time** in the reader's locale (`users.locale`, PD11); `vars` hold ids, counts, codes and short
   labels only, never customer data; `text` is staff free text and is shown as plain text.
 - **Batching**: kinds with `batch` (e.g. P4's `order.new_batch`) use `dedupeKey = <kind>:<storeId>:<window start>` and
@@ -1688,6 +2065,7 @@ export interface NotificationItem { id: number; kind: NotificationKind; group: N
 | `request.answered` | plan | store_role owner | `{ requestKind, outcome }` | `/app/<h>/settings/plan` |
 | `plan.changed` · `plan.boost_granted` · `plan.boost_ending` | plan | store_role owner, admin | `{ plan? , key?, until? }` | `/app/<h>/settings/plan` |
 | `quota.80` · `quota.100` | plan | store_role owner, admin | `{ metric, used, limit }` | `/app/<h>/settings/plan` |
+| `health.issue_new` (rev 2, PD67; core §I.4) | store | store_role owner, admin | `{ issueId, group, severity, metric, value, n }` (dedupe `health:<storeId>:<issueId>:<YYYY-Www>`) | `/app/<h>#health` |
 | `member.joined` | team | store_role owner, admin | `{ name, role }` | `/app/<h>/team` |
 | `invite.accepted` | team | user (the inviter) | `{ name, role }` | `/app/<h>/team` |
 | `member.role_changed` · `member.suspended` | team | user (the member) | `{ role }` | `/app/<h>` |
@@ -1697,8 +2075,9 @@ export interface NotificationItem { id: number; kind: NotificationKind; group: N
 | `staff.message` | support | store_role owner, admin (or one user) | text | optional link |
 | `staff.signup_new` (batched hourly) · `staff.signup_hold` · `staff.info_answered` · `staff.appeal` · `staff.request` | staff | platform_staff admin | `{ count? , store }` | `/admin/queue?r=…` |
 | `staff.purge_requested` · `staff.purge_confirmed` · `staff.super_admin_requested` | staff | platform_staff super_admin | `{ store? , by }` | `/admin/security/break-glass` |
-| `staff.alarm` · `staff.kill_changed` | staff | platform_staff admin | `{ alarm }` / `{ key, to }` | `/admin/health`, `/admin/flags` |
+| `staff.alarm` · `staff.kill_changed` | staff | platform_staff admin | `{ alarm, value? }` / `{ key, to }` | `/admin/health`, `/admin/flags` |
 | `staff.mention` | staff | user (the mentioned staff) | `{ store, by }` | the note |
+| `staff.impersonation_started` (rev 2) | staff | platform_staff admin (all staff except the actor) | `{ store, by, minutes }` | `/admin/stores/<id>/activity` |
 
 Kinds of other tracks (P4 orders and callbacks, P5 Sheets / CAPI / Telegram failures, P7 AI cap and auth, P8 export
 ready and backups) live in their own extension files.
@@ -1837,19 +2216,35 @@ role's one-line explainer (§22.4.4), the masked e-mail the invitation is bound 
 
 `Referrer-Policy: no-referrer`, `noindex` (core §B.1). Buckets `p:invite:accept:ip` (core §E.8).
 
-### PLA-§22.2 Onboarding wow flow (UX-01, PD4, PD23, PD48)
+### PLA-§22.2 Onboarding wow flow (UX-01, PD4, PD23, PD48, PD59, PD60, PD61; core D59)
 
-Route `/app/<h>/welcome` (`src/app/app/[store]/welcome/**`, PLA-§Q.12), full screen (no sidebar), owner only (others
+Route `/app/<h>/welcome` (`src/app/app/[store]/welcome/**`, core §K.2 P2), full screen (no sidebar), owner only (others
 are redirected to the dashboard). `/app/<h>` redirects here while `onboarding.step ∉ {done, skipped}` and the viewer is
 an owner. `/app/new` (another store) is the store step of `/signup` on its own, then the same route.
 
-| Step | Screen | Data and calls | Budget |
+**The critical path has no model on it (PD59, core D59, RF §4).** The three directions are ranked by
+`rankDirections()` (`src/lib/generator/directions.ts:375`) from the owner's category tap, the photo palette
+extracted in the browser and the keywords of the typed name and fact; the copy is the hand-written library when
+Cloud AI is off. SigLIP classification and the local VLM run **after** the reveal and only refine (a quiet "refining
+the suggestions" chip on the details step, never a spinner that blocks); when Cloud AI is on, `analyze` runs on the
+server with ≤ 2 downsized images (AI-04) under the pattern A deadline and its result replaces the suggestions in
+place. The "Download local AI" consent card (AI-03) never shows on a connection that reports `saveData` or a cellular
+`effectiveType`, and never inside onboarding.
+
+| Step | Screen | Data and calls | Budget (RF §4 clock, p75, 390 px, 4G, Cloud AI off) |
 |---|---|---|---|
-| `photos` | A large drop zone "Drop 1 to 5 product photos" (click to pick, camera capture on phones), thumbnails appear as each upload finishes, "Start without photos" link | uploads through `POST /api/app/<h>/media` (pending cap 100 MiB); palette extracted in the browser; background cutout queued by the existing pipeline | 3 × 600 KB ≤ 8 s on 4G |
-| `details` (shown while analysis runs) | category chips with the suggested one highlighted (a tap is required, PD23), product name with "Use suggestion" (never auto-filled), **price** (required, numeric keypad, currency suffix), compare-at price (optional, hint `onboarding.compare_hint` "Only a price you really sold at before"), one optional fact | P7 `useAiTask("analyze", …)` (AI-04: ≤ 2 downsized images to the server when cloud AI is on, else local or library); suggested facts are unticked chips | analysis never blocks typing |
-| `reveal` | Full-bleed preview of the generated page with 3 directions (arrow keys, swipe, dots with labels), each with its DNA card; "Use this design", "Show 3 more" | P6's reveal component and generator (design.md DES-§14.3); the preview is a sandboxed iframe of the draft render | ≤ 2.5 s after analysis ends (design.md UX-01) |
+| `photos` | A large drop zone "Drop 1 to 5 product photos" (click to pick, camera capture on phones), thumbnails appear as each upload finishes, "Start without photos" link | uploads through `POST /api/app/<h>/media` (pending cap `signup.pendingMediaMiB`); palette extracted in the browser; background cutout queued by the existing pipeline | 3 × ≈ 600 KB ≤ 8 s; palette ≤ 0.3 s (0:25 → 0:35) |
+| `details` (shown while the uploads finish) | category chips with the suggested one highlighted (a tap is required, PD23), product name with "Use suggestion" (never auto-filled), **price** (required, numeric keypad, currency suffix), compare-at price (optional, hint `onboarding.compare_hint` "Only a price you really sold at before"), one optional fact; the store name and handle with the live address preview when the owner came from `/app/new` | `rankDirections()` input assembled client-side; P7 `useAiTask("analyze", …)` runs in the background and updates the suggestions; suggested facts are unticked chips | typing is never blocked; availability check ≤ 300 ms per keystroke (debounced) |
+| `reveal` | Full-bleed preview of the generated page with 3 directions (arrow keys, swipe, dots with labels), each with its DNA card and novelty certificate (verdict bands, SF-02); "Use this design", "Show 3 more" | P6's reveal component and generator (design.md DES-§14.3); the preview is a sandboxed iframe of the draft render; `reportRevealAction` records `revealMs` | generation ≤ 1.5 s client-side **[measure]**, preview render ≤ 1 s server (reveal at 0:50); pairwise `d ≥ 0.25`, no orange, Design check green |
 | `contact` | "Where should customers reach you?": WhatsApp number (toggle "Use my phone +212 6•• ••• •34"), delivery fee left empty with `onboarding.fee_note` ("Add delivery fees in Checkout & delivery when you know them") | `updateStoreSetting(scope, "store", { whatsapp })` | — |
-| `done` | the dashboard with the In-review card (§22.7) and the checklist | — | — |
+| `done` | the dashboard (PLA-§22.17) with the In-review card (§22.7), the **Store Health ring** (PLA-§22.16; the setup group shows what is missing, e.g. "delivery zones empty" as an issue, not a blocker) and the **address card** (PD61) with Copy, QR, WhatsApp share, "Open a test order" and "Create a campaign" (the last two from P3; "Open a test order" is disabled with "after publishing" while no page is live) | `getStoreHealth(scope)`, the address card | first dashboard paint ≤ 1 s after `contact` |
+
+**Mode-aware path (PD60).** In R1 the mode cards select `landing` (PD30). From R2, `store` or `both` runs the **same**
+steps and the same immediate landing reveal for the first product; in parallel the store blueprint is queued as a
+detached job (`enqueueAiJob(scope, "store_blueprint", …)`, core §H.12 pattern B, S1/S7) and the `done` screen shows
+the job chip "Building your store home · ready in a few minutes" fed by `pulse.jobs`; when `pulse.jobs.done` names
+it, the address card gains the store home URL and the dashboard shows "Your store home is ready" with Preview. The
+owner never waits on a model for the first result in any mode, and the budget above holds for every mode.
 
 Server actions (`src/app/app/[store]/welcome/actions.ts`, all `storeAction`):
 
@@ -1859,7 +2254,7 @@ Server actions (`src/app/app/[store]/welcome/actions.ts`, all `storeAction`):
 | `useDirectionAction({ directionKey })` | `pages.write` + `ai.use` | calls the existing create-from-directions path (GEN-02, `CreateFromDirectionsInput`, store-free input) with the typed price; `onboarding.pageId`, step `contact` |
 | `reportRevealAction({ paintedAt })` | `store.read` | sets `revealedAt` (clamped to server now) and `revealMs = revealedAt − stores.created_at` once |
 | `saveOnboardingContactAction({ whatsapp \| useSignupPhone })` | `settings.write` | store contacts; step `done`, `completedAt` |
-| `skipOnboardingAction()` | `store.read` | step `skipped` (the checklist keeps "Finish your first page") |
+| `skipOnboardingAction()` | `store.read` | step `skipped` (the Store Health ring keeps the `shell:no_published_page` issue with its fix "Create your first page", PLA-§22.16) |
 
 The `onboarding` store setting (PLA-§2.4, PLA-§Q.7) keeps `step` and `draft`, so a closed tab resumes on the same step
 with the same photos and the typed price.
@@ -1869,10 +2264,14 @@ higher than the price; no stock, rating, review, "sold" counter or countdown is 
 need a tap. The reveal ends with "Your page is saved as a draft. Publishing unlocks after approval." and the actions
 "Submit for review" (§22.7) and "Open in the builder".
 
-Acceptance (UX-01): with 3 photos on a mid laptop (4× CPU throttle, Cloud AI off, empty model cache) the reveal paints
-≤ 90 s after the signup click (Playwright, `revealMs` asserted) and ≤ 15 s after "Start without photos"; no price
-appears that the owner did not type (state test); 360 px and ar RTL screenshots pass the design checklist; reloading
-on any step resumes there; the flow works for a pending store and never calls publish.
+Acceptance (UX-01, rev 2): on the `qa:wow-demo` run (390 px, 4G throttling, Cloud AI off, **empty local model cache**,
+human typing at 150 ms per character) the reveal paints at ≤ 0:50 from the invite link and the three directions have
+pairwise `d ≥ 0.25`; with 3 photos on a mid laptop (4× CPU throttle, Cloud AI off, empty model cache) the reveal
+paints ≤ 90 s after the signup click (Playwright, `revealMs` asserted) and ≤ 15 s after "Start without photos"; no
+network request for a model file happens before the reveal (asserted on the request log); no price appears that the
+owner did not type (state test); 360 px and ar RTL screenshots pass the design checklist; reloading on any step
+resumes there; the flow works for a pending store and never calls publish; the `done` screen renders the ring with
+the setup issues and the address card with "Open a test order" disabled until a page is live.
 
 ### PLA-§22.3 Store picker and switcher (TN-07)
 
@@ -1946,25 +2345,36 @@ in their own queue"; viewer "Sees pages and media, no customer data"; logistics 
   read"; "All notifications" → `/app/<h>/notifications` (filters by group: Orders · Team · Store · Plan · Integrations
   · Security · Platform; keyset paging). Empty: `shell.notifications.empty` ("Nothing new. Orders, team changes and
   review updates appear here.").
-- **Pulse** `GET /api/app/<h>/pulse` (`src/app/api/app/[store]/pulse/route.ts`, `storeGuard(req, h, "store.read")`,
-  PLA-§Q.14), every 15 s while visible, one poller per browser and store (`BroadcastChannel("sg-pulse:<storeId>")`),
-  `ETag` → `304` (PD38), cached 5 s per store with the per-user parts computed fresh, bucket `s:<sid>:pulse:<userId>`
-  12/min (core §E.8):
+- **Pulse** `GET /api/app/<h>/pulse` (`src/app/api/app/[store]/pulse/route.ts`, `storeGuard(req, h, "store.read")`;
+  core D57 / SF-06, PD63), every 15 s while visible, **one poller per browser and store**
+  (`BroadcastChannel("sg-pulse:<storeId>")`: the tab that holds the channel lock polls and posts the body, the others
+  listen; a tab that hears nothing for 40 s elects itself; browsers without the channel poll independently), `ETag` =
+  sha256 of the body → `304` when unchanged (PD38), store-level parts cached 5 s per store (`pulse` scopedCache, core
+  §E.6) with the per-user parts (`unread`, `impersonation`, `reaccept`, `jobs`) computed fresh and never cached across
+  users, bucket `s:<sid>:pulse:<userId>` 12/min (core §E.8):
 
 ```ts
+// src/lib/pulse/types.ts (maintainer, frozen at P0; core §I.4)
 export interface StorePulse {
   v: 1; at: string; build: string;
   unread: number;
   store: { status: StoreStatus; statusReason: string | null; review: "none" | "pending" | "submitted" | "needs_info" | "approved" | "rejected" };
   kill: KillKey[];                          // active kill switches that affect tenants
-  impersonation: { endsAt: string } | null; // the viewer's own impersonation of this store
+  impersonation: { endsAt: string } | null; // the viewer's own impersonation of this store (drives the ribbon countdown, PD56)
   reaccept: boolean;                        // legal re-acceptance pending for the viewer
-  counts: Record<string, number>;           // contributed by tracks (P4: newOrders, dueCallbacks; P5: syncFailed)
+  health: { score: number; attention: 0 | 1 | 2 | 3; computedAt: string } | null;   // the ring's freshness dot and number (PLA-§22.16); null = not computed yet
+  jobs: { running: number; done: string[] };          // the viewer's ai_jobs finished since the last poll (core §H.12): the job chip (PLA-§22.8)
+  counts: Record<string, number>;           // contributed by tracks (P4: newOrders, dueCallbacks, queueNow, syncFailed; P3: leadsDue)
 }
+// src/lib/pulse/contributors/<track>.ts: contribute(scope, viewer: { userId; role }): Promise<Record<string, number>>, 50 ms budget each; a failure omits its keys
+// src/lib/pulse/contributors/shell.ts (P2): { membersPendingInvites, notificationsUnreadStore } — the shell's own counters
 ```
 
-A change of `store.status` or `review` triggers `router.refresh()` so locked controls unlock without a reload
-(PL-02 acceptance); a change of `build` shows "New version available · Reload".
+`usePulse()` (P2, `src/components/admin/shell/use-pulse.ts`) exposes the last body and `ageMs`; a change of
+`store.status` or `review` triggers `router.refresh()` so locked controls unlock without a reload (PL-02 acceptance,
+PD65); a change of `build` shows "New version available · Reload"; a change of `health.computedAt` turns the ring's
+freshness dot back to neutral and refreshes the issue list; `jobs.done` fires the job chip (PLA-§22.8). Polling
+pauses while `document.visibilityState !== "visible"` and resumes with an immediate poll on return.
 
 #### PLA-§22.6.4 Realtime (UX-06, R2, S6)
 
@@ -2022,7 +2432,10 @@ switch > require-2FA > quota ≥ 80 % (legal re-acceptance is a blocking sheet, 
 | `feature_off` | the limit sheet, feature variant with the reason (plan · state · release · kill) |
 | `step_up` | the step-up sheet (tenants with TOTP, for `store.close` and `store.export`) |
 | `rate_limited` | toast `shell.err.rate_limited` ("Too many tries. Wait a minute.") |
-| `busy` | toast `auth.busy` |
+| `busy` | toast `shell.err.busy` ("The AI is busy right now. Try again in a few seconds." for AI calls; `auth.busy` for the scrypt semaphore) |
+| `design_blocked` · `honesty_blocked` · `budget_blocked` (rev 2; core D51, §M) | **never a toast**: the publish dialog (P3's `src/components/admin/pages/publish-dialog.tsx`) renders `items: GateItem[]` one row per item with its title, the measured value and one fix (a deep link into the builder tab or section, or an action); P2's error mapping only routes the code to the dialog and keeps the dialog open |
+| `job_queued` (rev 2; core D56, §H.12) | the **job chip** (`JobChip`, PLA-§22.12) in the topbar: "Working in the background · <kind>" with a quiet progress ring fed by `pulse.jobs`; when `pulse.jobs.done` names the job the chip becomes "Ready · Open" for 60 s and a notification `ai.job_done` (P7's kind) lands in the bell; the originating screen receives the result through the job's `GET /api/app/<h>/ai/jobs/<id>` (P7) |
+| `status_changed` (console) · `cooldown_handle_required` (console, PD54) | the lifecycle sheet reloads its preview / asks for the typed handle |
 | anything else | toast `shell.err.generic` with the error reference |
 
 `<LockedControl reason>` wraps a button or link: same look plus a lock glyph; pressing it opens the review card
@@ -2053,14 +2466,31 @@ everywhere; confirm sheet), store id (Copy), created. **Mode** (owner, `store.mo
 the same R1 rule (PD30); from R2 a switch shows the "hide, never delete" sheet listing what is hidden and what appears
 (`modeAllows`, core §A.2) → `setStoreModeAction`. Actions `saveGeneralAction` (`settings.write`).
 
-#### PLA-§22.10.2 Address (`settings/address`, UX-05 R1 part)
+#### PLA-§22.10.2 Address (`settings/address`) and the live address card (UX-05, **R1**, PD61; core §I.4)
 
-The address card: the canonical URL (`storeUrl`), Copy, Open, live state ("Live" / "Not live yet: publish a page" /
-"Hidden while in review"); in P mode the line "Your address becomes <handle>.<your Store Gen domain> when Store Gen
-moves to its own domain" (only when `STORE_ROOT_DOMAIN` is unset; no domain name invented). **Rename handle**
-(`domains.manage`, active stores): input with live availability, the warning "Old links keep working for 12 months",
-once per 30 days → `renameHandleAction` (core `renameHandle`, P2 owns the rename in R1). R2 (S6) adds the QR code,
-WhatsApp share and the test-order link (UX-05, design.md DES-§16.12).
+**The address card** (`src/components/admin/common/address-card.tsx`, P2; props below) is one component used in
+three places: the pages list header (P3 mounts it), the dashboard after the first publish (PLA-§22.17) and the
+onboarding `done` step (PLA-§22.2). Content, top to bottom: the canonical URL (`storeUrl`) in a `<bdi dir="ltr">`
+with **Copy** and **Open**; the live state line (`shell.address.live` "Live" · `shell.address.not_live` "Not live
+yet: publish a page" · `shell.address.hidden` "Hidden while in review"); a **QR** (`QrCode`, PD47, encodes the
+canonical URL, 160 px, downloadable as SVG); **Share on WhatsApp** (`WhatsAppShareButton` with
+`shell.address.wa_text` = "{store}: {url}"); and two slots filled by P3: `testOrder` ("Open a test order", mints a D54
+token through `mintTestLink(scope, pageId)` for the home page or the chosen page; disabled with `shell.address.after_publish`
+while nothing is live) and `campaign` ("Create a campaign", hidden without `campaigns.write` or in `store` mode
+without "also use landing pages"). In P mode the line "Your address becomes <handle>.<your Store Gen domain> when
+Store Gen moves to its own domain" (only when `STORE_ROOT_DOMAIN` is unset; no domain name invented).
+
+```ts
+export function AddressCard(p: { store: Pick<StoreRow, "id" | "handle" | "name" | "status">; live: boolean; pageId?: string | null;
+  slots?: { testOrder?: ReactNode; campaign?: ReactNode }; compact?: boolean }): JSX.Element;
+```
+
+**The settings page** shows the same card plus **Rename handle** (`domains.manage`, active stores): input with live
+availability, the warning "Old links keep working for 12 months", once per 30 days → `renameHandleAction` (core
+`renameHandle`, P2 owns the rename in R1); after a rename the card shows "Re-rendering n pages" from
+`renderSummary(scope)` until the address jobs finish. Acceptance (UX-05): the QR decodes to the canonical URL; the
+WhatsApp link opens `wa.me` with the store name and URL only; "Open a test order" is absent (not disabled) for a
+viewer without `pages.read`; the card renders identically in its three places (one snapshot).
 
 #### PLA-§22.10.3 Security (`settings/security`, TN-13)
 
@@ -2109,30 +2539,59 @@ export function PanelBoundary(p: { title: string; children: ReactNode }): JSX.El
 export function KeysetPager(p: { next: string | null; prev: string | null; param?: string }): JSX.Element;
 export function WhatsAppShareButton(p: { text: string; phone?: string | null; label?: string }): JSX.Element;   // wa.me link, noopener
 export function QrCode(p: { value: string; size: number; label: string }): JSX.Element;   // qrcode → SVG, PD47
-export type LockReason = { kind: "pending" } | { kind: "state"; status: StoreStatus } | { kind: "plan"; key: FeatureKey } | { kind: "kill"; key: KillKey } | { kind: "role" } | { kind: "release"; release: "R2" | "R3" };
+export type LockReason = { kind: "pending" } | { kind: "state"; status: StoreStatus } | { kind: "plan"; key: FeatureKey } | { kind: "kill"; key: KillKey } | { kind: "role" } | { kind: "release"; release: "R2" | "R3" } | { kind: "impersonation" } /* rev 2, PD56 */;
+
+// rev 2 primitives (PD61, PD62, PD63, PD66, PD67; used by P2's dashboard and by P1's console with `surface: "console"`)
+export function HealthRing(p: { score: number | null; attention: 0 | 1 | 2 | 3; size: 40 | 56 | 96; computedAt: string | null; dirty?: boolean; surface: "tenant" | "console"; onRecompute?(): Promise<void> }): JSX.Element;   // the number in tabular numerals, a stroke tinted by score band (≥ 80 jade, 50-79 neutral, 30-49 yellow, < 30 crimson), a neutral "computing" state when score is null; never animates beyond one 240 ms draw on load
+export function HealthGroups(p: { components: Record<HealthGroup, number>; caps: Record<HealthGroup, number> }): JSX.Element;   // seven hairline bars, label + penalty / cap, no colour beyond the semantic tokens
+export function IssueRow(p: { issue: HealthIssue; locale: "ar" | "fr" | "en"; onFix?(fix: HealthFix): void; onSnooze?(): Promise<void>; disabled?: LockReason | null; staffView?: { snoozedBy: StoreRole | null } }): JSX.Element;   // severity as a text label with an icon, the text with its evidence numbers in <bdi>, the fix as one button, "Snooze 7 days" as a quiet secondary action
+export function IssueList(p: { issues: HealthIssue[]; max: 5; snoozed: Record<string, string>; emptyKey: MessageKey; children?: (issue: HealthIssue) => ReactNode }): JSX.Element;
+export function TodayBrief(p: { lines: { key: MessageKey; vars: Record<string, string | number>; href?: string }[] }): JSX.Element;   // 1-3 template lines, tabular numbers, no model text (PD62)
+export function KpiTile(p: { label: string; value: string; delta?: { value: number; period: string }; hint: string; n?: number; spark?: number[] /* rendered only when length ≥ 7 */; kind: "count" | "money" | "rate" | "duration"; emphasis?: boolean }): JSX.Element;   // the typed successor of dashboard/kpi-card.tsx: no aurora/grain, semantic delta tokens, `rate` requires `n`
+export function FunnelChart(p: { steps: { id: "orders" | "confirmed" | "shipped" | "delivered" | "collected"; label: string; value: number | null /* null = not available in this release */; rate?: number }[]; period: string }): JSX.Element;   // horizontal stepped bars, delivered in jade, absent steps rendered as a neutral "with delivery tracking (R2)" line, never 0
+export function JobChip(p: { running: number; done: { id: string; label: string; href: string }[]; onDismiss(id: string): void }): JSX.Element;   // the background-job indicator fed by pulse.jobs (PLA-§22.8)
+export function FreshnessDot(p: { at: string | null; staleAfterMs: number; label: string }): JSX.Element;   // "Updated 2 min ago"; text + dot, the dot carries real state only (PLA-§4.7 rule 8)
 ```
 
 Every primitive: keyboard reachable, visible focus ring (2 px accent), RTL mirrored, ≥ 44 px targets below 768 px,
-reduced-motion safe, and a story fixture in `src/app/dev/fixture/**` (dev only) for the screenshot tests.
+reduced-motion safe, a story fixture in `src/app/dev/fixture/**` (dev only) for the screenshot tests, and **no
+em-dash, en-dash separator or "Step n" label in any string it renders** (rubric §9.G, core §I.8 rule 8; asserted by
+`test:i18n-coverage` over the catalogs and by a DOM scan in the screenshot run). `KpiTile`, `HealthRing` and
+`FunnelChart` are the only places the dashboard draws numbers; each refuses the dishonest input at the type level
+(`rate` without `n`, a sparkline under 7 points, a funnel step with `0` where the data does not exist).
 
 ### PLA-§22.13 Tenant ⌘K (UX-02 tenant; fixes ADM-02)
 
-Rework of `src/components/admin/shell/command-palette*.tsx`:
+Rework of `src/components/admin/shell/command-palette*.tsx` (RF §2.9 "Rework": scope, local index, chords, action
+registry; today's palette searches the whole database, `command-palette-body.tsx:84`, and hard-codes "Export all
+orders (CSV)", `:149-158`):
 - **Scope**: the store in the URL; every server query goes through `GET /api/app/<h>/search?q=`
-  (`src/app/api/app/[store]/search/route.ts`, `storeGuard(req, h, "store.read")`, PLA-§Q.12) with
-  `src/lib/admin-data/search.ts` scoped: orders by exact id (`orders.read`; agents only their own queue, through P4's
-  scoped search), by phone (`orders.read_all`, results masked), pages by name (`pages.read`), customers by name prefix
-  (`customers.read`, masked phone). Bucket `s:<sid>:search:<userId>` 60/min. The old cross-database search and the
-  hard-coded "Export all orders (CSV)" action are removed.
-- **Local index** (≤ 300 entries, shipped with the layout): nav items from `navFor(ctx)`, settings sections, team member
-  names (members.read), recent pages.
-- **Actions** from the command registry: shell actions (Create page, Invite, Switch store, Notifications, Help, Toggle
-  theme / density, Language) plus track contributions in `src/components/admin/shell/commands/<track>.ts`
-  (PLA-§Q.17), each `{ id, label: MessageKey, permission?: StorePermission, mode?: ModeFeature, shortcut?: string, href?: (h) => string, action?: () => Promise<void> }`,
-  filtered by `ctx.can`, mode and release.
-- **Patterns and chords**: an order id opens the order drawer, `>` filters actions, `?` the shortcut sheet; chords
-  `G H` overview, `G O` orders, `G Q` queue, `G L` leads, `G C` customers, `G P` pages, `G M` media, `G T` team, `G S`
-  settings, `G N` notifications, `G W` switch store; `C` opens Create.
+  (`src/app/api/app/[store]/search/route.ts`, `storeGuard(req, h, "store.read")`, core §K.2 P2), which runs the
+  **search providers** of core §I.3 (`src/lib/admin-data/search/<track>.ts` exporting `provider: SearchProvider =
+  { id; kinds: string[]; search(scope, q, viewer: { userId; role }): Promise<SearchHit[]> }`, ≤ 120 ms budget each,
+  imported by P2's `src/lib/admin-data/search.ts`): P4 orders by exact id (agents only their own queue) and by phone
+  (`orders.read_all`, results masked) and customers by name prefix (masked phone); P3 pages by name, `WA-` refs and
+  leads; P6 pages by design tags; the shell provider settings sections and team members (`members.read`). A provider
+  over budget is dropped from that answer (its group shows "slow, try again"), never awaited. Bucket
+  `s:<sid>:search:<userId>` 60/min. The old cross-database search and the hard-coded export action are removed.
+- **Local index** (≤ 300 entries, shipped with the layout, refreshed on store switch): nav items from `navFor(ctx)`,
+  settings sections, team member names (`members.read`), the 20 most recent pages, saved views (P4).
+- **Actions** from the command registry (core §I.3; `CommandDef = { id; label: MessageKey; group: "jump" | "create" |
+  "run"; permission?; mode?; release?; shortcut?: string; run: (ctx) => void | Promise<void> }`, types in
+  `src/components/admin/shell/commands/types.ts`, registry `commands/index.ts`, both maintainer): the shell's
+  `commands/shell.ts` (Create page, Invite, Switch store, Notifications, Help, Toggle theme / density, Language,
+  **Recompute health**, **Install the app**) plus the tracks' files (P3 Publish, Open a test order, New campaign; P4
+  Export orders, Next order; P5 Sync Sheets), filtered by `ctx.can`, mode and release; a `HealthFix` of kind `action`
+  runs the command with the same id (PD66).
+- **Patterns and chords**: a typed order id (`^[A-Z0-9]{2,8}-[A-Z0-9]{4,12}$`, `orders-view.tsx:42`) opens the order
+  drawer directly, `>` filters actions, `/` searches, `?` the shortcut sheet; chords `G H` overview, `G O` orders,
+  `G Q` queue, `G L` leads, `G C` customers, `G P` pages, `G M` media, `G T` team, `G S` settings, `G N`
+  notifications, `G W` switch store; `C` opens Create (page, campaign, product R2, manual order, invite); `N` and
+  `1-6` belong to the queue (P4); `E` edit, `Enter` open, `Esc` close, `J/K` move. Chords never fire inside editable
+  fields or open overlays (`src/components/builder/shortcuts.ts:16-25` rules, shared through
+  `src/components/admin/shell/chords.ts`).
+- **Latency**: the palette opens ≤ 50 ms when warm (code-split, prefetched on the first `⌘`/`Ctrl` keydown);
+  server results arrive with a 120 ms debounce and skeleton rows that appear after 150 ms and stay ≥ 300 ms.
 
 Acceptance (UX-02 tenant): a member of store B searching store A's order id or a customer phone gets no result (attack
 suite); an agent's phone search is refused; results render masked phones only.
@@ -2149,6 +2608,114 @@ trapped, no close button) shows the document title, the "What changed" summary, 
 → `acceptLegalAction({ documentIds })` (`userAction`, `legal_acceptances.context = 'reaccept'`, IP hash and UA label)
 and **Sign out**. Never on public pages, never during an impersonation (the staff member's own acceptance is handled in
 the console shell the same way).
+
+### PLA-§22.16 Store Health ring and issue list, tenant side (SF-03 / PL-18; P2; PD6, PD53, PD66, PD67; core §I.7) (rev 2)
+
+**Where.** The dashboard (PLA-§22.17, the first block after the Today brief), a compact ring in the pages list header
+next to the address card, and `/app/<h>#health` as the deep-link target of `health.issue_new`. It **replaces** the
+setup checklist (`src/components/admin/dashboard/setup-checklist.tsx` and the six static items of
+`src/lib/admin-data/dashboard.ts:173-180` are deleted by P2); the review card (PLA-§22.7) stays separate because it is
+a state, not a score.
+
+**What.** `getStoreHealth(scope)` (P1, cached 5 min) renders:
+1. **The ring** (`HealthRing`, 96 px on the dashboard): the score in tabular numerals, the stroke tinted by band, the
+   freshness dot from `computedAt` (neutral when older than 60 min, with "Updated hh:mm"), and **Recompute now**
+   (`recomputeHealthAction`, `s:<sid>:health:recompute` 6/h) which marks the row dirty and shows "Recomputing, ready
+   within 5 minutes" (`health.recomputing`), never a spinner that waits. When `score` is null (a new store before the
+   first run): the ring is neutral with `health.computing` ("Your first health check runs within 5 minutes") and the
+   setup group's issues already render from a synchronous local pass over the setup rules only (P2's `rules/shell.ts`
+   run client-side on the store facts the layout already has), so the `done` step of onboarding is never empty.
+   `platform.health.showScoreToTenantsBelowN > 0` hides the number (not the issues) until the store has that many
+   orders, with the line `health.score_later`.
+2. **The groups** (`HealthGroups`): seven hairline bars with the penalty per group over its cap, so a seller sees
+   where the points went (PD18).
+3. **The five issues** (`IssueList`, the first 5 unsnoozed, by points): each `IssueRow` has a severity label with an
+   icon (Fix now / Should fix / Suggestion, never a bare dot), the sentence with its evidence numbers ("Sheets is
+   22 min behind · n = 14 orders waiting"), **one fix** (a link built with `appHref`, or a registered command, PD66;
+   the fix is hidden, not disabled, when the viewer lacks the command's permission, except during impersonation where
+   it renders disabled), and **Snooze 7 days** (`snoozeHealthIssueAction`, `health.snooze`: owner and admin only;
+   others see no snooze). A snoozed issue leaves the list and reappears after 7 days or when the job sees it again
+   with higher severity; "n snoozed" opens the snoozed list with "Unsnooze".
+4. **Empty state**: `health.all_good` ("Nothing to fix right now. The next check runs within an hour.") as the quiet
+   `EmptyState` variant; the *celebration* variant is used once, when a store first reaches 90 or more with no
+   severity-3 issue (localStorage marker, per viewer).
+
+**Honesty.** Every number shown is the store's own and carries its window and `n`; an operations rule below `minN`
+is not shown as a green tick either (nothing claims health it cannot measure); no platform median appears before R3.
+The ring never shows a trend arrow without ≥ 7 daily points (R3 `store_daily_rollup.score`); in R1 it shows the
+score and its freshness only.
+
+**Pending stores** see the ring with the setup and trust groups only (the others say "after approval", `LockedControl`
+reason `pending`); `restricted` stores see the restriction banner above the ring and the operations issues stay
+visible (they explain the restriction more often than not); `suspended` / `closed` stores see the last snapshot
+read-only with no fixes.
+
+Acceptance (SF-03 tenant side): the ring and the console ring render the same score from one row (`qa:wow-demo`
+2:50: "health ring shows the zones issue with a one-tap fix" and the console strip shows the same issue); a fix of
+kind `action` runs exactly the registered command (spy test); a fix of kind `link` lands on the named screen with the
+section in view; snoozing writes `store_health.snoozed[issueId]` and `store.health.snoozed`, removes the issue from
+the list and its points from the score within one pulse, and the console strip shows "snoozed by owner until
+<date>"; an agent sees the ring and the issues but no snooze and no fixes beyond their permissions; the setup issues
+render on the onboarding `done` step before the first job run; the dashboard renders with `getStoreHealth` throwing
+(the ring shows its own error state, the rest of the dashboard is unaffected).
+
+### PLA-§22.17 The dashboard (`/app/<h>`, RF §2.10 screen 2; P2; PD62) (rev 2)
+
+`src/components/admin/dashboard/dashboard-view.tsx` is **redesigned** (RF §2.9), `dashboard.ts` is rewritten around the
+P0 read APIs. Order on the page (one column at 360 px; a 12-column grid ≥ 1024 px with the ring in a 4-column rail):
+
+1. **Today brief** (`TodayBrief`, SF-11 R1 slice): one to three template lines from real counts, in the viewer's
+   locale, never a model text in R1. Line 1 from P4's `opsPulse(scope)` and `orderKpis`: "1 order confirmed today ·
+   2 callbacks due" (`brief.orders`); line 2 the worst open health issue's sentence with its fix link (`brief.health`);
+   line 3 one opportunity when the data supports it with `n ≥ 30` ("Pack 2 delivered 71 % vs 58 % for pack 1 (n = 43)",
+   `brief.opportunity`, R2 when delivered states exist; in R1 the line is "n orders waiting in the queue" or absent).
+   Zero data: `brief.empty` ("No orders yet. Publish a page to start."). Each line links to its screen.
+2. **In-review card** (PLA-§22.7) while the store is `pending`; the state banners (PLA-§22.8) sit above everything.
+3. **Store Health ring + issues** (PLA-§22.16) in the rail; on 360 px it comes right after the brief.
+4. **COD KPI tiles** (`KpiTile`; range 7 d / 28 d in the store timezone, test orders excluded): *Orders placed*
+   (count, delta), *Confirmed* (count + confirmation rate with `n`; "needs 30 orders" below the sample), *Delivered,
+   28 d* (R2; R1 shows the honest "with delivery tracking (R2)" hint and no number), *First touch p50* (P4, minutes,
+   "needs 30 orders" below `minN`), *Placed · 7 days* (money, hint "placed, not delivered"; the successor of "Revenue ·
+   7 days", `dashboard-view.tsx:99-105`), *Cash to collect* (R2). Placed, confirmed and delivered never share a tile
+   (core §I.8 rule 3); sparklines only with ≥ 7 daily points; delta chips use the semantic tokens; no aurora or grain
+   on the emphasis tile (D60).
+5. **The COD funnel** (`FunnelChart`): orders → confirmed → shipped → delivered → cash collected for the selected
+   range as horizontal stepped bars with absolute counts and step rates; in R1 the first two steps have data, the
+   rest render as the neutral "with delivery tracking (R2)" line (never a zero bar); delivered in jade when it
+   arrives. Below 5 data points the chart is a table (core §I.6).
+6. **Work lists** (P4 components mounted here): orders to call now, due callbacks, failed sync, the newest leads
+   (P3), each ≤ 5 rows with "See all" into the saved view.
+7. **Address card** (PD61) after the first publish, until the viewer dismisses it (localStorage, per viewer; it stays
+   on the pages list).
+8. **Integration tiles** in the `sheet-health.tsx` pattern (kept, RF §2.9) for Sheets, pixels and Telegram from P5's
+   `integrationHealth(scope)`.
+
+Rules: every block is its own `<Suspense>` + `<PanelBoundary>`; the first paint needs only the layout's data (store
+row, memberships, pulse) and streams the rest; nothing on the dashboard is a model text in R1; the page passes the
+eight rules of PLA-§22.18. Acceptance: the Playwright run at 390 px shows the brief, the ring and the first tile
+within 1.5 s on 4G with a warm shell; "Revenue" appears nowhere in `src/components/admin/dashboard/**` (grep in
+`test:platform`); the `qa:wow-demo` step at 2:50 reads "1 order confirmed today" with the test order counted in the
+queue line and excluded from every money tile.
+
+### PLA-§22.18 The admin UX ceiling as acceptance for every P2 screen (core §I.8; RF §2.1; PD64) (rev 2)
+
+Each P2 screen (auth pages, onboarding, picker and switcher, dashboard, team and invites, account, notifications,
+settings general / market / plan / address / security / danger, the limit sheet, the help sheet, the legal sheet)
+ships with this checklist filled in its PR description; the four scripts and the e2e run enforce the measurable rows.
+
+| # | Rule | Measured by | Pass condition |
+|---|---|---|---|
+| 1 | Instant | `qa:admin-perf` step of PLA-§O.4 (Playwright, warm shell, 20 navigations) | p75 route change < 150 ms perceived (skeleton or content painted); writes optimistic with rollback or Undo, server round trip < 500 ms p75 on the `--perf` DB; skeleton delay 150-300 ms, minimum 300 ms (checked in `src/components/admin/common/skeleton.tsx`) |
+| 2 | Keyboard everywhere | keyboard crawl in PLA-§O.4 step 6 | every control reachable; chords of PLA-§22.13; `?` lists them |
+| 3 | Honest data | `test:platform` prop selftests on `KpiTile`, `FunnelChart`, `HealthRing` | no rate without `n`; no sparkline < 7 points; no 0 where data does not exist |
+| 4 | One accent, one glass, no bounce | `test:admin-tokens`, `test:admin-motion` | tenant jade only; the topbar is the one frosted surface; no `type: "spring"`, no overshoot bezier, no duration > 400 ms outside the builder; aurora/grain only in `EmptyState variant="celebration"` |
+| 5 | Dense but breathing | screenshot review at 1280 / 360 | `[data-density]` honoured; tabular numerals in every number column; ≤ 2 lines per cell |
+| 6 | Phone-first | screenshots at 360 px, touch-target scan | ≥ 44 px targets; drawers become sheets; tables become two-line rows |
+| 7 | RTL-perfect by construction | `test:admin-rtl`, ar screenshots | logical properties only; mirrored icon allow-list; `<bdi dir="ltr">` on phones, ids, URLs, e-mails; DB RTL1 (no reversed ranges) and RTL5 (addresses and e-mails `dir="ltr"`) on every admin string with a number or an address |
+| 8 | No AI tells | `test:i18n-coverage` catalog rules, DOM scan in the screenshot run | no em-dash or en-dash separator, no "Step 1/2/3", label above input, no placeholder-as-label, status as text + icon, one CTA label per intent, skeletons not spinners, empty states quiet with a real-UI skeleton |
+
+Owner rules win over the rubric where they meet (no orange anywhere; Arabic type rules from design.md); the rubric's
+hero and marketing rules do not apply to the admin.
 
 ---
 
@@ -2295,12 +2862,20 @@ stays the required factor until then.
 | Platform requests | expire after 7 days unconfirmed; one pending per (store, kind) | `platform.requests` job |
 | Lists | page size 50 (25 below 768 px); CSV ≤ 10,000 rows (stores), ≤ 50,000 (audit) | list functions |
 | Health job | ≤ 200 stores per tick | `platform.health` |
-| Preview tokens | 10 min (console), 72 h (seller "private preview") | PLA-§Q.6 |
+| Preview tokens | 10 min (console), 72 h (seller "private preview") | core §E.2 `mintPreviewToken` (Q.6 accepted) |
 | Step-up freshness | 5 min (core §B.7); `p:mfa:stepup:<userId>` 5 / 15 min | T2 |
 | Operation de-duplication | `p:op:<userId>:<opId>` 10 min | console actions |
 | Legal document body | ≤ 200,000 chars; summary ≤ 500 | legal actions |
 | Protected brands | term 2-60 chars | brands actions |
 | Reserved handles (extra) | ≤ 500 | `platform` setting schema |
+| Store Health (rev 2) | ≤ 20 issues stored, 5 shown; snooze exactly 7 days; `s:<sid>:health:recompute` 6/h; rule budget 40 ms, inputs 250 ms per store; row ≤ 16 KB | engine, `requestHealthRecompute` |
+| Lifecycle safety (rev 2) | arm window 3-15 s (default 5); cooldown 0-120 min (default 10); preview reads ≤ 400 ms | `lifecyclePreview`, `LifecycleSheet` |
+| Plan impact preview (rev 2) | ≤ 20 example handles per key; one query per changed key | `previewPlanChange` |
+| Console pulse (rev 2) | 15 s visible polling, 5 s cache, one poller per browser | `/api/admin/pulse` |
+| Pulse contributors (rev 2) | 50 ms budget each; search providers 120 ms each | registries (core §I.3, §I.4) |
+| Address card (rev 2) | QR 160 px SVG; WhatsApp text ≤ 300 chars | `AddressCard` |
+| Today brief (rev 2) | ≤ 3 lines; opportunity line only with `n ≥ 30` | `TodayBrief` |
+| Impersonation note (rev 2) | ≤ 300 chars, kind `note`, `stores.notes` | ribbon composer |
 
 ---
 
@@ -2322,8 +2897,9 @@ across stores) and load the store through `getStoreById`.
 | | `resolveRequestAction` | `entitlements.override` (plan, limit) · `signups.decide` (go_live, mode_change, domain) | | `platform.request.resolved` |
 | `stores/actions.ts` | `messageStoresAction` | `notify.stores` (support: one store) | | `platform.store.messaged` |
 | `stores/new/actions.ts` | `createStoreAction` | `stores.create` | | `store.created` |
-| `stores/[id]/actions.ts` | lifecycle actions of PLA-§8.1, `setSuspendNoticeAction` | `stores.lifecycle` / `stores.close` / `stores.purge` | per §8.1 | `platform.store.*` |
+| `stores/[id]/actions.ts` | lifecycle actions of PLA-§8.1, `setSuspendNoticeAction`; `lifecyclePreviewAction` (read, rev 2, PD54); `markHealthDirtyAction` (rev 2: the Overview strip's "Mark dirty") | `stores.lifecycle` / `stores.close` / `stores.purge`; preview and mark-dirty `console.read` | per §8.1 | `platform.store.*`; preview none |
 | | `revealOrderPiiAction` | `pii.reveal` | ↑ | `platform.pii.revealed` |
+| | `addImpersonationNoteAction` (rev 2, PD56; callable from the tenant shell ribbon by the impersonating staff member: it is a `platformAction`, so a tenant session is refused) | `stores.notes` | | `platform.note.added` |
 | | `assignPlanAction` | `entitlements.override` | | `platform.plan.changed` |
 | | `setEntitlementAction`, `clearEntitlementAction` | `entitlements.override` | | `platform.entitlement.set` |
 | | `requestPlatformExportAction` | `stores.close` (super_admin) | ↑ | `store.export_requested` |
@@ -2361,7 +2937,9 @@ Decision recorded (§3.3): invite codes are `signups.decide` (daily ops) althoug
 | `src/app/app/[store]/welcome/actions.ts` | PLA-§22.2 table | per row | `store.onboarding.completed` · `.skipped` |
 | `src/app/app/[store]/team/actions.ts` | PLA-§22.4 table | per row | core `store.member.*` |
 | `src/app/app/[store]/notifications/actions.ts` | `markNotificationsReadAction` | `storeAction("store.read")` | — |
-| `settings/general/actions.ts` | `saveGeneralAction` · `setStoreModeAction` | `settings.write` · `store.mode` | `store.settings.updated` · `store.mode_changed` |
+| `src/app/app/[store]/health-actions.ts` (rev 2, PD67) | `snoozeHealthIssueAction({ issueId })` · `recomputeHealthAction()` | `storeAction("health.snooze")` · `storeAction("store.read", …, { rate: { name: "health:recompute", limit: 6, windowSec: 3600, per: "store" } })` | `store.health.snoozed` · — |
+| `src/app/app/[store]/actions.ts` (rev 2, PD61) | `dismissAddressCardAction()` (writes nothing server-side: a client-only localStorage convenience; listed so the lint sees no action) | — | — |
+| `settings/general/actions.ts` | `saveGeneralAction` · `setStoreModeAction` (shows `landingModeSwitchPlan(scope)` first, core §A.2) | `settings.write` · `store.mode` | `store.settings.updated` · `store.mode_changed` |
 | `settings/address/actions.ts` | `renameHandleAction` | `domains.manage` | `store.handle_renamed` |
 | `settings/security/actions.ts` | `setRequireMember2faAction` | `security.write` | `store.2fa_required_changed` |
 | `settings/plan/actions.ts` | `createStoreRequestAction`, `withdrawStoreRequestAction` | `billing.manage` (rate `s:<sid>:request` 5/day) | `store.request.created` · `.withdrawn` |
@@ -2395,9 +2973,10 @@ Every handler sets its own security headers (core D31) through `apiHeaders` or t
 `platform.brand_term.saved|deleted`, `platform.legal.saved|reviewed|published|retired`, `platform.settings.updated`,
 `platform.staff.invited|signed_out_all`, `platform.audit.exported`, `platform.breakglass.reviewed`,
 `store.milestone.reached`, `store.review.submitted|answered`, `store.appeal.submitted`, `store.request.created|withdrawn`,
-`store.preview_link.created`, `store.onboarding.completed|skipped`, `auth.legal.accepted`. Core actions reused as
-listed in core §F.5. `AuditAction` keeps its `(string & {})` escape hatch (`src/lib/audit.ts:14-38`); the names are
-appended to the union for autocomplete (PLA-§Q.23).
+`store.preview_link.created`, `store.onboarding.completed|skipped`, `auth.legal.accepted`, and (rev 2)
+`store.health.snoozed` (core §F.5 lists it), `store.milestone.reached` (job). Core actions reused as listed in core
+§F.5. `AuditAction` keeps its `(string & {})` escape hatch (`src/lib/audit.ts:14-38`); the names were appended to the
+union by core §F.5 (Q.23 accepted). No lifecycle "undo" action exists: an arm-window cancel writes nothing (PD54).
 
 ### PLA-§M.4 Query plans (every console list, MariaDB 10.4)
 
@@ -2421,6 +3000,10 @@ appended to the union for autocomplete (PLA-§Q.23).
 | Platform requests due | `preq_due_idx (status, execute_after)` | |
 | Waitlist | `wl_status_idx (status, created_at)` | |
 | Legal list | `ld_kind_status_idx (kind, locale, status)` | |
+| Health job: stores without a snapshot (rev 2) | `stores_status_idx (status, created_at)` + PK anti-join on `store_health` | `LEFT JOIN … WHERE h.store_id IS NULL LIMIT 200` after the dirty and stale batches |
+| Plan impact examples (rev 2) | `store_usage` PK `(store_id, metric, period)` over the plan's store ids (`stores_plan_idx`) | `IN (…≤ 2,000 ids)` chunked by 500 |
+| Lifecycle preview (rev 2) | `orders_queue_idx (store_id, confirm_state, due_at)`, `orders_assignee_idx`, `rj_store_idx (store_id, state)`, `pages_store_status_idx` | four indexed counts, one store |
+| Console orders 24 h confirmed / risky (rev 2) | `orders_created_idx (created_at)` range, filter in memory | ≤ one day of rows |
 
 `platform-check.ts` runs `EXPLAIN` on each and fails when the plan shows `type = ALL` on a table over 10,000 seeded
 rows.
@@ -2441,12 +3024,16 @@ Every process cache of this part is created with `scopedCache()` (core §E.6; li
 | `notify-unread` | store id : user id | 5 s / 4,000 | `markRead` |
 | `store-pulse` | store id : `"base"` | 5 s / 2,000 | `transitionStore`, review actions |
 | `legal-reaccept` | `"p"` : user id | 5 min / 4,000 | `acceptLegalAction`, legal publish |
+| `health` (core §E.6; rev 2) | store id : `"view"` | 5 min / 2,000 | the `platform.health` upsert, `snoozeHealthIssue`, `markHealthDirty` |
+| `console-strips` (rev 2) | `"p"` : `<storeId>:<strip>` | 30 s / 2,000 | console actions on the store (`markHealthDirty` path), `transitionStore` |
+| `lifecycle-preview` (rev 2) | `"p"` : `<storeId>:<to>` | 10 s / 500 | `transitionStore` |
+| `plan-impact` (rev 2) | `"p"` : `<planId>:<patchHash>` | 60 s / 50 | plan saves |
 | `broadcasts` (R3) | `"p"` : `"live"` | 60 s / 1 | broadcast saves |
 
 Buckets: `p:console:search:<userId>`, `p:pii:reveal:<userId>`, `p:orders:lookup:<userId>`, `p:users:manage:<staffId>`,
-`p:impersonate:<userId>`, `p:op:<userId>:<opId>`, `s:<sid>:request`, `s:<sid>:search:<userId>` (and the core's
-`s:<sid>:pulse:<userId>`, `s:<sid>:invite`, `p:invite:accept:ip:<h>`, `p:mfa:stepup:<userId>`). Keys are ids or
-hashes, never raw e-mails, phones or IPs.
+`p:impersonate:<userId>`, `p:op:<userId>:<opId>`, `s:<sid>:request`, `s:<sid>:search:<userId>`, `s:<sid>:health:recompute`
+(rev 2, core §E.8) (and the core's `s:<sid>:pulse:<userId>`, `s:<sid>:invite`, `p:invite:accept:ip:<h>`,
+`p:mfa:stepup:<userId>`). Keys are ids or hashes, never raw e-mails, phones or IPs.
 
 ---
 
@@ -2461,7 +3048,9 @@ hashes, never raw e-mails, phones or IPs.
 | `auth.ts` | P2 | en, fr, ar | `auth.*` |
 | `onboarding.ts` | P2 | en, fr, ar | `onboarding.*` |
 | `team.ts` | P2 | en, fr, ar | `team.*` |
-| `shell.ts` | P2 | en, fr, ar | `shell.*` |
+| `shell.ts` | P2 | en, fr, ar | `shell.*` (incl. `shell.address.*`, `shell.jobs.*`, `shell.err.busy`) |
+| `health.ts` (rev 2) | P2 (ring UI keys `health.*`; the shell rules' texts `health.shell.<rule>.text`); each track's own `health.<track>.<rule>.text` lives in that track's file (P1: `health.platform.*` in `console.ts` for staff labels and in `health.ts` for the tenant sentence) | en, fr, ar | `health.*` |
+| `brief.ts` (rev 2) | P2 | en, fr, ar | `brief.*` (the Today brief templates) |
 
 Rules: ICU-lite `{var}` placeholders identical in every locale (checked); counts use `Intl.PluralRules` keys
 (`.one`, `.other` for en/fr; `.zero`, `.one`, `.two`, `.few`, `.many`, `.other` for ar); Latin digits; no em-dash and no
@@ -2496,11 +3085,23 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
   `impersonation.*`, `limit.<metric|key>.title`, `limit.reason.*`, `limit.ask_more`, `limit.ask_owner`,
   `limit.request_sent`, `err.*`, `notifications.*`, `help.*`, `legal.*`, `plan.*`, `address.*`, `security.*`,
   `danger.*`, `general.*`, `market.*`, `account.*`, `install.*`, `cmdk.*`.
-- `notify.*`: the kinds of §18.2 (`.title`, `.body`).
-- `console.*`: `badge`, `nav.<item>`, `queue.*`, `risk.<SignupFlagCode>`, `reject.<RejectReason>`, `ask.<template>`,
-  `reason.<code>`, `attention.<code>`, `feed.<action>`, `audit.<action>`, `entitlement.<key>`,
-  `plans.take_orders_locked`, `signup.open_warning`, `invite.share_text`, `reset.wa_text`, `kill.<key>.effect`,
-  `health.*`, `domains.*`, `legal.*`, `staff.*`, `people.*`, `profile.tab.<tab>`, `empty.*`, `err.*`.
+- `notify.*`: the kinds of §18.2 (`.title`, `.body`), incl. `health.issue_new`.
+- `health.*` (rev 2): `title`, `computing`, `recomputing`, `recompute`, `updated_at`, `score_later`, `all_good`,
+  `celebrate`, `severity.<1|2|3>` (Suggestion / Should fix / Fix now), `group.<group>`, `snooze`, `snoozed_count`,
+  `unsnooze`, `snoozed_until`, `after_approval`, `fix.<actionId>` labels, `shell.<rule>.text` and `.fix` for the five
+  P2 rules, `platform.<rule>.text` for the nine P1 rules (tenant sentence), `evidence.<metric>` labels.
+- `brief.*` (rev 2): `orders`, `callbacks`, `health`, `opportunity`, `queue`, `empty`.
+- `shell.address.*` (rev 2): `title`, `live`, `not_live`, `hidden`, `copy`, `open`, `qr`, `qr_download`, `share`,
+  `wa_text`, `test_order`, `after_publish`, `campaign`, `future_domain`, `rerendering`.
+- `shell.jobs.*` (rev 2): `working`, `ready`, `open`, `blueprint_building`, `blueprint_ready`.
+- `console.*`: `badge`, `nav.<item>`, `queue.*` (+ rev 2 `queue.pivot`, `queue.margin`, `queue.hold`,
+  `queue.evidence.*`), `risk.<SignupFlagCode>`, `reject.<RejectReason>`, `ask.<template>`, `reason.<code>`,
+  `attention.<code>` (+ rev 2 `render_stuck`, `render_failed_old`, `edge_silent`, `edge_prev_key`, `health_stale`,
+  `health_job_slow`, `design_tables_large`), `feed.<action>`, `audit.<action>`, `entitlement.<key>`,
+  `plans.take_orders_locked`, `plans.impact.*`, `signup.open_warning`, `invite.share_text`, `reset.wa_text`,
+  `kill.<key>.effect`, `health.*`, `lifecycle.*` (rev 2: `preview.title`, `store_sees`, `affects.<key>`,
+  `will_write`, `arm`, `cancel`, `cooldown`), `strip.<id>.title`, `profile.arrives_r2`, `impersonation.chip`,
+  `domains.*`, `legal.*`, `staff.*`, `people.*`, `profile.tab.<tab>`, `empty.*`, `err.*`.
 
 ### PLA-§N.3 Reference texts (tenant-facing, R1)
 
@@ -2597,6 +3198,27 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 | `notify.quota.80.title` | {metric} is {percent} % full | {metric} est rempli à {percent} % | {metric} ممتلئ بنسبة {percent}% |
 | `notify.invite.accepted.title` | {name} joined your team as {role} | {name} a rejoint votre équipe ({role}) | انضمّ {name} إلى فريقك ({role}) |
 | `notify.request.answered.title` | Your request was answered | Votre demande a reçu une réponse | تم الرد على طلبك |
+| `health.title` (rev 2) | Store health | Santé de la boutique | صحة المتجر |
+| `health.computing` | Your first health check runs within 5 minutes. | Votre premier bilan arrive dans les 5 minutes. | أول فحص لصحة متجرك سيجري خلال 5 دقائق. |
+| `health.recomputing` | Recomputing. Ready within 5 minutes. | Recalcul en cours. Prêt dans les 5 minutes. | يُعاد الحساب الآن. سيكون جاهزًا خلال 5 دقائق. |
+| `health.all_good` | Nothing to fix right now. The next check runs within an hour. | Rien à corriger pour l'instant. Le prochain bilan a lieu dans l'heure. | لا شيء يحتاج إصلاحًا الآن. الفحص التالي خلال ساعة. |
+| `health.severity.3` | Fix now | À corriger maintenant | أصلحه الآن |
+| `health.severity.2` | Should fix | À corriger | يُستحسن إصلاحه |
+| `health.severity.1` | Suggestion | Suggestion | اقتراح |
+| `health.snooze` | Snooze 7 days | Mettre en pause 7 jours | تجاهل لمدة 7 أيام |
+| `health.shell.contact.text` | Customers have no way to reach you: add a phone or WhatsApp number. | Vos clients ne peuvent pas vous joindre : ajoutez un téléphone ou un numéro WhatsApp. | لا يستطيع الزبناء التواصل معك: أضف رقم هاتف أو واتساب. |
+| `health.shell.no_published_page.text` | No page is live yet. | Aucune page n'est encore en ligne. | لا توجد صفحة منشورة بعد. |
+| `health.platform.sheets_backlog.text` | Google Sheets is {minutes} min behind ({n} orders waiting). | Google Sheets a {minutes} min de retard ({n} commandes en attente). | Google Sheets متأخر بـ {minutes} دقيقة ({n} طلبات في الانتظار). |
+| `health.platform.quota_high.text` | {metric} is {percent} % full. | {metric} est rempli à {percent} %. | {metric} ممتلئ بنسبة {percent}%. |
+| `brief.orders.other` (rev 2) | {confirmed} orders confirmed today · {callbacks} callbacks due | {confirmed} commandes confirmées aujourd'hui · {callbacks} rappels à faire | {confirmed} طلبات مؤكدة اليوم · {callbacks} مكالمات متابعة مستحقة |
+| `brief.empty` | No orders yet. Publish a page to start. | Pas encore de commandes. Publiez une page pour commencer. | لا طلبات بعد. انشر صفحة للبدء. |
+| `shell.address.live` (rev 2) | Live | En ligne | منشور |
+| `shell.address.not_live` | Not live yet: publish a page. | Pas encore en ligne : publiez une page. | غير منشور بعد: انشر صفحة. |
+| `shell.address.test_order` | Open a test order | Ouvrir une commande test | افتح طلبًا تجريبيًا |
+| `shell.address.share` | Share on WhatsApp | Partager sur WhatsApp | شارك على واتساب |
+| `shell.jobs.working` (rev 2) | Working in the background | Travail en arrière-plan | قيد التنفيذ في الخلفية |
+| `shell.jobs.blueprint_ready` | Your store home is ready. | L'accueil de votre boutique est prêt. | الصفحة الرئيسية لمتجرك جاهزة. |
+| `shell.err.busy` (rev 2) | The AI is busy right now. Try again in a few seconds. | L'IA est occupée. Réessayez dans quelques secondes. | الذكاء الاصطناعي مشغول حاليًا. أعد المحاولة بعد ثوانٍ. |
 
 ### PLA-§N.4 Console reference texts (en, R1)
 
@@ -2627,7 +3249,20 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 | `console.reset.wa_text` | Your Store Gen password reset link (valid 60 minutes): {url} |
 | `console.attention.sheets_backlog` | Sheets is {minutes} min behind |
 | `console.attention.no_tick` | The 5-minute job hasn't run for {minutes} min |
+| `console.attention.render_stuck` (rev 2) | {pending} pages are waiting to re-render; the oldest for {minutes} min |
+| `console.attention.health_stale` (rev 2) | {count} active stores have no health check for over {minutes} min |
+| `console.attention.edge_silent` (rev 2) | No request came through the Worker for {minutes} min while subdomains are on |
 | `console.kill.platform_read_only.effect` | Every dashboard becomes read-only. Orders, leads and Sheets keep flowing. |
+| `console.kill.ai_generation_enabled.effect` (rev 2) | Cloud and server AI stop, new Message Batches are not submitted; open batches still finish. Local and library AI keep working. |
+| `console.queue.pivot` (rev 2) | Without {flag} this would be {band}. |
+| `console.queue.margin` (rev 2) | {band} needs {points} points fewer. |
+| `console.queue.hold` (rev 2) | Kept out of the fast lane by {flag}. |
+| `console.lifecycle.store_sees` (rev 2) | The store will read this ({locale}): |
+| `console.lifecycle.arm` (rev 2) | {action} in {seconds}… Cancel |
+| `console.lifecycle.cooldown` (rev 2) | Changed {ago} by {name} ({to}). Type the handle to change it again. |
+| `console.profile.arrives_r2` (rev 2) | Full view arrives with R2 |
+| `console.impersonation.chip` (rev 2) | Viewing @{handle} · {left} |
+| `console.plans.impact.lowered` (rev 2) | Lowers {key} for {stores} stores; {above} are already above {to}: {examples} |
 
 ---
 
@@ -2637,10 +3272,15 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 
 | Script | File | Owner | Checks |
 |---|---|---|---|
-| `test:platform` | `src/lib/platform/selftest.ts` | P1 | **scoreSignup golden fixtures** (≥ 30, injected `SignupRiskDeps`, no network): clean Gmail sign-up → 0 / `fast`; disposable domain → 35; null MX → 25; MX timeout → `partial`, 0 points; `face-b00k-shop` handle → `brand_exact` (`brandTokens`); "Banque Populaire Store" → `brand_exact` kind bank; Arabic name with tatweel matching an Arabic term; Gmail dot / plus variant → `dup_email_norm`; phone shared by 3 users → +40 cap; banned link → `reject_candidate` whatever the score; 3 s form → `too_fast`; bot UA; market not allowed; invite code −20; trusted creator −30 and clamp at 0; weights override from settings; thresholds order refusal. `bandFor` table; `autoApprove` truth table per mode (incl. `turnstile: "off"` refused in `open`); `HOLD_CLASS` members. `normalizeEmailForIdentity`, every `mask*` function (incl. short names, IPv6), `computeHealth` fixtures per flag + the monotonic property (random removal of flags never lowers the score, 1,000 cases with a seeded RNG), milestones, `flagValue` order and rollout stability, `renderMarkdownLite` escaping (`<script>`, `javascript:` links, nested emphasis), cursor tamper → `null`, every reason code has `console.reason.*` and `shell.status_reason.*` keys, every tenant notification kind has ar/fr/en keys with the same placeholders, `roleSummary` agrees with `can()` for every role, `PlatformSettingSchema` / `OnboardingSchema` defaults parse `{}` |
-| `test:i18n-coverage` | `scripts/qa/i18n-coverage.ts` | P2 | ar, fr and en complete for `auth.`, `onboarding.`, `team.`, `shell.` and the tenant `notify.` kinds; placeholder sets identical; Arabic plural categories present for count keys; no em-dash, no "Step n" in UI strings; prints the coverage per prefix (UX-08 report) |
-| `test:admin-tokens` | `scripts/qa/admin-tokens-check.ts` | P2 | the console block, the violet ribbon, the crimson break-glass ribbon (R3) and the monogram tint outside 25-75° (chroma > 0.06) |
-| `test:permissions` (core) | `src/lib/auth/selftest-permissions.ts` | maintainer | gains `orders.lookup`, `stores.create`, `abuse.handle` (PLA-§Q.5) in the platform matrix |
+| `test:platform` | `src/lib/platform/selftest.ts` | P1 | **scoreSignup golden fixtures** (≥ 30, injected `SignupRiskDeps`, no network): clean Gmail sign-up → 0 / `fast`; disposable domain → 35; null MX → 25; MX timeout → `partial`, 0 points; `face-b00k-shop` handle → `brand_exact` (`brandTokens`); "Banque Populaire Store" → `brand_exact` kind bank; Arabic name with tatweel matching an Arabic term; Gmail dot / plus variant → `dup_email_norm`; phone shared by 3 users → +40 cap; banned link → `reject_candidate` whatever the score; 3 s form → `too_fast`; bot UA; market not allowed; invite code −20; trusted creator −30 and clamp at 0; weights override from settings; thresholds order refusal. `bandFor` table; `autoApprove` truth table per mode (incl. `turnstile: "off"` refused in `open`); `HOLD_CLASS` members. `normalizeEmailForIdentity`, every `mask*` function (incl. short names, IPv6), the console `platformFlags` fixtures per flag code (the issue-level fixtures and the monotonic property moved to `test:health`, rev 2), milestones, `flagValue` order and rollout stability, `renderMarkdownLite` escaping (`<script>`, `javascript:` links, nested emphasis), cursor tamper → `null`, every reason code has `console.reason.*` and `shell.status_reason.*` keys, every tenant notification kind has ar/fr/en keys with the same placeholders, `roleSummary` agrees with `can()` for every role, `PlatformSettingSchema` / `OnboardingSchema` defaults parse `{}` |
+| `test:platform` (rev 2 additions) | `src/lib/platform/selftest.ts` | P1 | `explainBand` agrees with `bandFor` on every golden fixture (removing the pivot flag re-scores to `bandWithout`; no pivot when no single flag changes the band); `lifecyclePreview` pure parts (`storeSees` text per edge and locale, `cooldown.typedHandleRequired` on a fake clock); `PlanImpact.examples` ordering and the ≤ 20 cap; `ConsolePulse` ETag stability; every `NotificationKindDef.vars` schema free of `phone` / `name` / `address` / `email` / `note`; the alarm code list of PLA-§15.2 has a `console.attention.*` key each; `KpiTile`, `FunnelChart`, `HealthRing` refuse dishonest props (type-level and runtime); a grep over `src/components/console/**` for `adm-aurora` / `adm-grain` and over `src/components/admin/dashboard/**` for "Revenue" returns nothing |
+| `test:health` (rev 2; core §J.1) | `src/lib/health/selftest.ts` | P1 (fixtures per rule from every track's `rules/<track>.ts`) | §6.3: fixtures per rule with and without `minN`; score monotonic (1,000 random removals and snoozes never lower it, seeded RNG); group caps; severity → points; snooze expiry on a fake clock; `platformFlags` ↔ issues consistency (every flag that maps onto a group has its issue); milestones once; `health.issue_new` dedupe per week; i18n templates of every tenant-visible rule render with every variable in ar/fr/en; a two-store fixture proves no cross-store evidence; a throwing rule is skipped and recorded, the others still score |
+| `test:pulse` (rev 2; core §J.1) | `src/lib/pulse/selftest.ts` | P2 | `StorePulse` shape; ETag stability for identical payloads and change on any field; contributor budget (a 60 ms contributor is dropped, its keys omitted) and failure isolation; per-user parts never cached across users (two viewers, two bodies); the poller election with a fake `BroadcastChannel` (one leader, re-election after 40 s of silence) |
+| `test:admin-motion` (rev 2; core D60, §J.1) | `scripts/qa/admin-motion-check.ts` | P2 | no `type: "spring"`, no overshoot cubic-bezier (y1 or y2 outside 0-1), no duration > 400 ms outside `src/components/builder/**`; `--ui-spring` absent from the tokens; the two revision-1 sites (`app-sidebar.tsx:96`, `:146`) are the regression fixtures |
+| `test:admin-rtl` (rev 2; DES-R2, core §I.5) | `scripts/qa/admin-rtl-lint.ts` | P2 | fails on physical-side classes `(^| )(ml|mr|pl|pr|left|right|text-left|text-right)-` in `src/components/admin/**`, `src/components/console/**` and `src/app/app/**`, and on directional icons outside the mirrored allow-list |
+| `test:i18n-coverage` | `scripts/qa/i18n-coverage.ts` | P2 | ar, fr and en complete for `auth.`, `onboarding.`, `team.`, `shell.`, `health.`, `brief.` and the tenant `notify.` kinds (incl. `health.issue_new`) and every publish-gate `GateItem.title` (core §I.5); placeholder sets identical; Arabic plural categories present for count keys; no em-dash, no en-dash separator, no "Step n" in any UI string of any catalog incl. `console.ts`; prints the coverage per prefix (UX-08 report) |
+| `test:admin-tokens` | `scripts/qa/admin-tokens-check.ts` | P2 | the console block, the violet ribbon, the crimson break-glass ribbon (R3), the `--info` pair (core §I.6) and the monogram tint outside 25-75° (chroma > 0.06); `--ui-spring` absent |
+| `test:permissions` (core) | `src/lib/auth/selftest-permissions.ts` | maintainer | gains `orders.lookup`, `stores.create`, `abuse.handle` (accepted, core §A.3.3) in the platform matrix; `health.snooze` granted to owner and admin only |
 
 ### PLA-§O.2 DB-backed (`npm run test:db`, `cod_test_*` only)
 
@@ -2664,7 +3304,24 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 9. Impersonation from the console: start refused for a member staff and for `scheduled_deletion`; second start ends
    the first.
 10. Query plans: `EXPLAIN` of every §M.4 query (no `type = ALL` on tables > 10,000 rows); `--perf`: stores list
-    ≤ 300 ms p95, overview ≤ 800 ms p95.
+    ≤ 300 ms p95, overview ≤ 800 ms p95, **(rev 2)** store profile Overview ≤ 900 ms p95 with one strip throwing,
+    `lifecyclePreview` ≤ 400 ms, `previewPlanChange` ≤ 1 s on a 2,000-store plan, `/api/admin/pulse` ≤ 50 ms when
+    cached.
+11. **(rev 2) Lifecycle safety:** for every allowed edge on the three seeded stores, `lifecyclePreview().storeSees`
+    equals the banner / page the store renders after `transitionStore`, and `affects.agentsWithLease` equals the
+    number of leases `releaseAllLeases` released; a second change inside the cooldown without the typed handle is
+    refused server-side (`cooldown_handle_required`); the store receives exactly one notification per transition.
+12. **(rev 2) Console pulse and impersonation:** `ConsolePulse.impersonation` is set within 5 s of a start and null
+    within 5 s of an end; `addImpersonationNoteAction` from a tenant session → `forbidden`, from the impersonating
+    staff member → one `platform_notes` row and no tenant table change (row counts before / after).
+
+`scripts/qa/health-db-check.ts` (P1, rev 2; core §J.2 `test:health-db`): the `platform.health` job over 3 seeded
+stores (one clean, one with a 20-minute Sheets backlog and a quota at 85 %, one `suspended`): dirty-first order, snapshot
+upsert with `dirty_at = NULL`, milestones written once over two runs, `quota.80` once per metric and period,
+`health.issue_new` once per issue id per week, snooze honoured by the next run, no customer data in any snapshot column
+(canary scan of `issues`, `flags`, `metrics`), the slot budget respected (200 stores processed in ≤ 3 s on the `--perf`
+fixture with stubbed read APIs), and the two rings (`getStoreHealth(systemScope)` vs `getStoreHealth(platformScope)`)
+reading the same `score`.
 
 ### PLA-§O.3 Attack cases added to `scripts/qa/tenancy-check.ts` (TN-10)
 
@@ -2682,8 +3339,17 @@ note `canary-note-77`, seller e-mail `canary.seller@example.test`. Cases:
 6. `GET /api/app/<A>/pulse` and `/search` with B's session → the neutral 404; A's order id searched from B → no result.
 7. Console media proxy and export download with a tampered signature, another staff member's signature or no step-up
    → 404 / `step_up`.
-8. `store_health`, `notifications.vars`, `signup_reviews.signals` and `job_runs.summary` written by this part contain
-   no canary (scan after a full job run).
+8. `store_health` (incl. `issues[].evidence` and `issues[].text` vars), `notifications.vars`, `signup_reviews.signals`
+   and `job_runs.summary` written by this part contain no canary (scan after a full job run).
+9. **(rev 2)** `snoozeHealthIssueAction` and `recomputeHealthAction` as a member of store B posted to store A's path →
+   `not_found`, A's `store_health.snoozed` unchanged; an agent of A calling `snoozeHealthIssueAction` → `forbidden`;
+   `recomputeHealthAction` called 7 times in an hour → the 7th answers `rate_limited` and the row is dirty once.
+10. **(rev 2)** `GET /api/app/<A>/pulse` with B's session → the neutral 404; a staff member impersonating A reads A's
+    pulse with `impersonation` set and `unread` of their own; A's `health` part equals the console strip's score.
+11. **(rev 2)** `lifecyclePreviewAction` and every lifecycle action from a tenant owner session → `not_found` /
+    `forbidden`; from an analyst → `forbidden`; nothing written.
+12. **(rev 2)** The address card for a viewer without `pages.read` renders no "Open a test order" slot; a `pageId` of
+    store A passed to store B's card is refused by P3's `mintTestLink` (`not_found`), asserted through the card.
 
 ### PLA-§O.4 HTTP / e2e (`npm run test:e2e`, production build on 3451+, Playwright `channel: "msedge"`)
 
@@ -2704,12 +3370,42 @@ note `canary-note-77`, seller e-mail `canary.seller@example.test`. Cases:
    manifest and `/invite/staff/<token>` (`no-referrer`, `noindex`).
 9. **Release check (manual, R1 exit)**: a native Darija/Arabic speaker and a French speaker review every R1 tenant
    string in the screenshots of step 6; findings fixed before the R1 deploy.
+10. **(rev 2) `qa:admin-perf`** (P2, part of `qa/e2e`): with a warm shell on the `--perf` DB, 20 route changes across
+    the tenant shell and 20 across the console: p75 perceived navigation (first paint of skeleton or content) < 150 ms;
+    a queue approval and a team role change round-trip < 500 ms p75; skeletons never visible for < 300 ms once shown;
+    the ⌘K palette opens ≤ 50 ms after the key when warm.
+11. **(rev 2) `qa:pulse-e2e`** (P2, core §J.3): two tabs of one browser on the same store produce one `/pulse` request
+    stream (network log), the second tab updates its unread count from the first's broadcast; unchanged polls answer
+    304; a console approval unlocks the seller's publish button within one pulse without a reload; closing the
+    polling tab makes the other tab poll within 40 s.
+12. **(rev 2) Lifecycle sheet:** restrict a seeded store, cancel during the arm window → no audit row, status
+    unchanged, no notification; restrict again and let the window run out → one audit row, one notification, the
+    seller's banner shows the exact `storeSees.banner` text of the preview; a second change within 10 minutes asks for
+    the typed handle.
+13. **(rev 2) Health ring:** on the seeded backlog store the ring shows the Sheets issue with "Sync Sheets" as the fix;
+    pressing it runs the registered command (P5's action is stubbed to record the call); snoozing removes the issue
+    within one pulse; the console profile strip shows "snoozed by owner until <date>"; the dashboard still renders
+    when `getStoreHealth` is forced to throw.
+14. **(rev 2) Dashboard timings:** at 390 px on 4G with a warm shell, the brief, the ring and the first KPI tile paint
+    within 1.5 s; "Revenue" appears nowhere on the page; the funnel renders the R2 steps as the neutral line, never a
+    zero bar.
 
-### PLA-§O.5 The wow demo (rethink-features §4) parts owned here
+### PLA-§O.5 The wow demo (RF §4; `scripts/qa/wow-demo.ts`, maintainer; steps contributed by P2, P3, P4, P1) parts owned here
 
-Clock 0:00-0:50 (signup, mode cards, photos, handle and address preview, reveal) and 1:25 (the console row with score,
-flags and draft thumbnail, approval with `A`, the in-app notice within one pulse) must pass with this part's code; the
-rest belongs to P3-P6.
+Persona 1 (seller, 390 px, 4G, Cloud AI off, empty model cache): **0:00-0:50** signup from the invite link, the mode
+cards (`landing`), 3 photos with progressive thumbnails, store name and handle with the live address preview (≤ 300 ms
+per debounced keystroke), the suggested category tapped, the reveal with three directions at ≤ 0:50 (pairwise `d ≥
+0.25`, no orange, Design check green) — P2 with P6's reveal and generator. **1:40** the address card with link, QR,
+WhatsApp share and "Open a test order" after publish (P2 card, P3 button). **2:50** the dashboard: the Today brief reads
+"1 order confirmed today", the health ring shows the zones issue with a one-tap fix, no money tile counts the test
+order (P2). Persona 2 (owner, console): **1:25** the Review row shows the score ring, the flag chips, the counterfactual
+line and the draft thumbnail within one console pulse of the submission; **`A`** commits in ≤ 1 s server time; the
+seller's in-app notice and the unlocked publish button arrive within one tenant pulse (≤ 15 s) (P1 queue, P2 pulse);
+**2:50** the store profile Overview shows the first-order milestone in the Timeline strip and the same health score as
+the seller's ring (P1). The rest of the clock belongs to P3 (publish, test order, thank-you), P4 (queue, `N`, `1`),
+P5 (Sheets / CAPI exclusions) and P6 (design). Every step above is a named assertion in `scripts/qa/wow-demo.ts`
+(`steps/platform.ts`, `steps/shell.ts`, contributed by P1 / P2); the whole run must finish ≤ 3:30 wall time
+(core §K.2 exit criterion 12).
 
 ---
 
@@ -2722,16 +3418,23 @@ rest belongs to P3-P6.
 - `src/app/api/admin/**` (PLA-§M.2).
 - `src/app/(public)/invite/staff/**` (PLA-§Q.12).
 - `src/lib/platform/**` except `seam.ts`, `impersonation.ts` (maintainer) and `health.ts` (P8): `types.ts`,
-  `signup-risk.ts`, `normalize.ts`, `mask.ts`, `queue.ts`, `requests.ts`, `platform-requests.ts`, `stores-list.ts`,
-  `profile/**`, `people.ts`, `order-lookup.ts`, `plans.ts`, `flags.ts`, `notify.ts`, `notify-kinds.ts`,
-  `health-score.ts`, `health-snapshot.ts`, `alarms.ts`, `notes.ts`, `legal.ts`, `staff.ts`, `reasons.ts`, `cursor.ts`,
-  `markdown-lite.ts`, `domain-move.ts`, `selftest.ts`, `data/**` (`disposable-domains.json`, `protected-brands.ts`
-  after R1.0, `legal/**`).
-- `src/components/console/**`.
-- Extension files: `src/lib/settings/keys/platform.ts`, `src/lib/jobs/tracks/platform.ts`,
-  `src/lib/i18n/admin/<locale>/{console,notify}.ts`, `src/lib/notify/kinds/platform.ts` (PLA-§Q.15),
-  `src/lib/flags/defs/platform.ts` (PLA-§Q.16).
-- `scripts/qa/platform-check.ts`, `scripts/platform/refresh-disposable.mjs` (manual refresh of the CC0 list, prints the
+  `signup-risk.ts` (incl. `explainBand`, rev 2), `normalize.ts`, `mask.ts`, `queue.ts`, `requests.ts`,
+  `platform-requests.ts`, `stores-list.ts`, `profile/**` (incl. `overview-strips.ts`, `risk.ts`, rev 2), `people.ts`,
+  `order-lookup.ts`, `plans.ts`, `flags.ts`, `notify.ts`, `notify-kinds.ts`, `health-score.ts` (the pure
+  `computeHealth` of core §I.7, re-exported by the engine), `health-snapshot.ts`, `lifecycle-preview.ts` (rev 2),
+  `alarms.ts`, `notes.ts`, `legal.ts`, `staff.ts`, `reasons.ts`, `cursor.ts`, `markdown-lite.ts`, `domain-move.ts`,
+  `selftest.ts`, `data/**` (`disposable-domains.json`, `protected-brands.ts` after R1.0, `legal/**`).
+- **`src/lib/health/**` (rev 2, core §K.2 P1):** `engine.ts`, `inputs.ts`, `platform-flags.ts`, `rules/platform.ts`,
+  `selftest.ts`, and the registry's import lines for every track's rules file (the skeletons `types.ts` and
+  `registry.ts` stay the maintainer's; the other `rules/<track>.ts` files belong to their tracks).
+- `src/components/console/**` (incl. `lifecycle/sheet.tsx`, `health/ring.tsx` wrappers, `profile/strips/*.tsx`, rev 2).
+- Extension files: `src/lib/settings/keys/platform.ts`, `src/lib/jobs/tracks/platform.ts` (`platform.health`,
+  `platform.alarms`, `platform.requests`, `platform.entitlements`), `src/lib/i18n/admin/<locale>/{console,notify}.ts`
+  (+ the `health.platform.*` tenant sentences in `health.ts`, ar/fr/en), `src/lib/notify/kinds/platform.ts`,
+  `src/lib/flags/defs/platform.ts`, `src/components/admin/shell/nav/console.ts` (the one "Platform console" switcher
+  item, PD36).
+- `scripts/qa/platform-check.ts`, `scripts/qa/health-db-check.ts` (rev 2), `scripts/qa/wow-demo/steps/platform.ts`
+  (rev 2, contributed steps), `scripts/platform/refresh-disposable.mjs` (manual refresh of the CC0 list, prints the
   diff; never run at runtime).
 
 ### PLA-§P.2 P2 SHELL (R1)
@@ -2741,13 +3444,22 @@ rest belongs to P3-P6.
   settings/{general,market,plan,address,security,danger}/**}`, `src/app/globals.css`, `scripts/build-admin-css.mjs`,
   `src/lib/admin-theme/**`, `src/lib/i18n/**` (base files + `shell.ts`), `scripts/qa/admin-tokens-check.ts`,
   `src/lib/tenancy/handles.ts` (rename), `src/lib/admin-data/{dashboard.ts, search.ts}`.
-- Added by PLA-§Q.12: `src/app/(public)/**` (except `invite/staff/**`), `src/app/app/{page.tsx, actions.ts,
-  account/**, manifest.webmanifest/**}`, the metadata of `src/app/app/layout.tsx`, `src/app/app/[store]/{welcome/**,
-  team/**, review-actions.ts}`, `src/app/api/app/[store]/{pulse,search}/**`,
+- Accepted by core §Q.1 Q.12 (now core §K.2 P2): `src/app/(public)/**` (except `invite/staff/**`),
+  `src/app/app/{page.tsx, actions.ts, account/**, manifest.webmanifest/**}`, the metadata of `src/app/app/layout.tsx`,
+  `src/app/app/[store]/{welcome/**, team/**, review-actions.ts}`, `src/app/api/app/[store]/{pulse,search}/**`,
   `src/components/admin/settings/{team-panel,security-panel}.tsx`.
-- New in this part: `src/lib/i18n/admin/<locale>/{auth,onboarding,team}.ts`, `src/lib/settings/keys/onboarding.ts`,
-  `scripts/qa/i18n-coverage.ts`, `scripts/build-app-icons.mjs`, `public/icons/**`,
-  `src/components/admin/shell/commands/shell.ts` (PLA-§Q.17).
+- New in this part: `src/lib/i18n/admin/<locale>/{auth,onboarding,team,health,brief}.ts`,
+  `src/lib/settings/keys/onboarding.ts`, `scripts/qa/i18n-coverage.ts`, `scripts/build-app-icons.mjs`,
+  `public/icons/**`, `src/components/admin/shell/commands/shell.ts`.
+- **Rev 2 (core §K.2 P2):** `src/lib/pulse/contributors/shell.ts`, `src/lib/pulse/selftest.ts`,
+  `src/lib/health/rules/shell.ts`, `src/app/app/[store]/health-actions.ts`,
+  `src/components/admin/shell/{use-pulse.ts, chords.ts, job-chip.tsx, store-banner.tsx, help-sheet.tsx, client-state.ts}`,
+  `src/components/admin/common/{address-card.tsx, health-ring.tsx, health-groups.tsx, issue-row.tsx, issue-list.tsx,
+  today-brief.tsx, kpi-tile.tsx, funnel-chart.tsx, freshness-dot.tsx, skeleton.tsx}`, the redesigned
+  `src/components/admin/dashboard/**` (deletes `setup-checklist.tsx`; `kpi-card.tsx` is replaced by `kpi-tile.tsx`),
+  `src/lib/admin-data/{dashboard.ts, search.ts}` (rewritten around the P0 read APIs and the search providers),
+  `scripts/qa/{admin-motion-check,admin-rtl-lint}.ts`, `scripts/qa/wow-demo/steps/shell.ts` (contributed steps),
+  the `qa:admin-perf` and `qa:pulse-e2e` steps under `qa/e2e`.
 
 ### PLA-§P.3 D5 PLATFORM (R3)
 
@@ -2766,10 +3478,29 @@ T2 auth functions (PLA-§Q.19), P4 order read APIs, P5 `integrationHealth`, P6 r
 
 ---
 
-## PLA-§Q. Requests to the core
+## PLA-§Q. Requests to the core: status after core revision 2
 
-Each request names the exact change; nothing here is edited by this part. Migration placement: R1 items go into
-`0005_r1.sql` unless step C0 has not been cut yet (then `0004_tenancy.sql`); R2 into `0006`, R3 into `0007`.
+**(rev 2)** Every request below was decided in core §Q.1: **32 accepted**, three with changes that this revision has
+integrated: **Q.1** (one `store_health` table for both audiences with `issues`, `components` by `HealthGroup` and
+`snoozed`: PLA-§2.2, §6.3), **Q.14** (the pulse gained SF-06's ETag / 304 and shared poller and the `health` and `jobs`
+fields: PLA-§22.6) and **Q.18** (slot 9 holds `platform.*` at 3 s guaranteed + up to 6 s of leftover; slots 1-7 were
+re-cut and `housekeeping` trimmed to 4 s: PLA-§6.3.4). The table is kept as the record of what was asked; the
+"Where integrated" column of core §Q.1 names the core section that now carries each contract, and the sections of
+this document cite the core instead of the request. Migration placement as decided: the R1 items are in `0005_r1.sql`
+(core §D.5), the 0004 refinements in core §D.4, R2 in `0006`, R3 in `0007`.
+
+### PLA-§Q.1 Second-round requests (rev 2)
+
+None are unavoidable. Two notes for the maintainer, recorded here so a reviewer can decide them in core §P without a
+request cycle: (1) this part's action-level error codes (`already_decided`, `already_requested`, `take_orders_locked`,
+`last_super_admin`, `impersonation_member`, `impersonation_state`, `status_changed`, `cooldown_handle_required`,
+`health_recompute_limited`) assume `ActionErrorCode` (core §E.2) keeps an open `(string & {})` tail like `AuditAction`
+(`src/lib/audit.ts:14-38`); if the core closes the union at P0, these nine names are the list to append. (2) The
+console's `addImpersonationNoteAction` is a `platformAction` posted from a tenant route (`/app/<h>`) by the
+impersonating staff member; `platformAction` needs no store from `x-sg-path`, so no seam change is needed, and the
+attack case PLA-§O.3 item 12 pins the behaviour.
+
+### PLA-§Q.2 The revision-1 requests (all decided; kept as the record)
 
 | # | Request | Exact change | Why | R |
 |---|---|---|---|---|
@@ -2810,4 +3541,53 @@ Each request names the exact change; nothing here is edited by this part. Migrat
 
 ## PLA-§R. Review decisions
 
-(Empty in revision 1. Filled after the reviews: each row = reviewer, point, decision, section changed.)
+(Empty in revisions 1 and 2. Filled after the reviews: each row = reviewer, point, decision, section changed.)
+
+---
+
+## PLA-§S. Elevation changes (rev 2)
+
+Every change of this revision, what it does and where it came from. Codes: **D** = core §0 decision, **Q** = core
+§Q.1 decision on a revision-1 request of this part, **RF** = rethink-features section, **RA** = rethink-ai section,
+**DB** = design-baseline target, **B16** = owner brief item 16 (this pass). Nothing was removed: every revision-1
+section is still present, re-cut where the core decided otherwise.
+
+| # | Change | Why | Source |
+|---|---|---|---|
+| 1 | Status → revision 2 on core revision 2 (D1 … D64); inputs widened to RF, RA, DB and the anti-slop rubric with the owner rules winning; reading order and section map extended (§4.7, §6.3, §22.16-22.18, §S) | B16 asked to rethink every part; the core's appendix decided the requests, so the spec must cite the core, not the request | header; core §Q.1 |
+| 2 | Owner summary items 13-18 (health ring, explainable approvals, lifecycle preview, the "every detail" Overview, machinery in health, no-download first result and the demo) | the owner reads this first | B16; RF §4 |
+| 3 | PD4 reveal budget = the demo clock; PD59 no model download on the critical path; §22.2 rewritten with the clock budgets, the background refinement and the mobile-data rule for the consent card | 99.5 + 111 MB on 4G is 1-3 minutes; the reveal is at 0:50 | D59; RF §3.4, §4 |
+| 4 | PD6, PD42, PD53, PD66, PD67 and §6.3 rewritten: one Store Health engine for two audiences, seven groups with caps summing to 100, severity → points, issues with evidence `n` and one fix, rules per track with `minN`, console flags produced by `rules/platform.ts`, snoozes audited, `health.issue_new`, the `platform.health` job in slot 9, `getStoreHealth` / `markHealthDirty` / `snoozeHealthIssue` / `requestHealthRecompute` | PL-18 raised to a tenant feature; one computation, one number; the setup checklist removed | D53; Q.1 (A*), Q.18 (A*); RF §1.3, §3.2; core §I.7 |
+| 5 | §2.2 `store_health` columns = core §D.5 (`issues`, `components` by `HealthGroup`, `snoozed`); `staff_invites` added as a core table; `HealthComponent` replaced by `HealthGroup`; `StoreHealthView` | the maintainer cuts 0005 from this list | Q.1, Q.4, Q.24; core §D.5 |
+| 6 | §2.4 `platform.health.*` and `platform.lifecycle.*` tunables (additive, Q.28 paths kept) | the owner tunes the engine and the arm window without a deploy | PD54, PD67; Q.28 |
+| 7 | PD52 explainable risk: `explainBand()` counterfactual, hold-class line, draft evidence (Design check, honesty items, novelty band) in the queue detail; acceptance adds the fixture agreement and the demo budgets | B16: "approvals queue with explainable risk" | B16; RF §4 1:25; D64 (bands only) |
+| 8 | PD65 approval latency as a demo pass condition (row ≤ 15 s, `A` ≤ 1 s, unlock ≤ 15 s) | the owner's one-key approval is in the acceptance scenario | RF §4; core §K.2 criterion 12 |
+| 9 | PD51 and new §4.7: the admin UX ceiling applied to the console with budgets and tests; §4.5 honest statuses and stale indicators; `ConsolePulse` gains `impersonation`, `health`, `renders` | the console must reach the Linear / Vercel / Stripe bar in testable rules | RF §2.1, §0.4; core §I.8; D60 |
+| 10 | §5.2 Orders 24 h tile excludes test orders and shows confirmed / risky; §5.5 System block shows the render queue, the Worker, AI and the health engine | honest tiles; the machinery visible from the overview | D54; PD57 |
+| 11 | PD32, PD55 and §7 re-cut: 6 R1 tabs (Overview, Orders, Team, Activity + Timeline view, Usage & plan, Notes); the Overview as the "every detail" view with ten strips over the P0 read APIs; Catalog & pages, Integrations health, Domains, Risk, Media deferred to R2 (S6) with honest "Arrives with R2" pages; Timeline folded into Activity; acceptance updated | the rethink cut the deep tabs to pay for SF-03 and the owner still wanted every detail on one screen | RF §3.3; core §I.2, §L.2 PL-07; B16 "every detail view with masked PII" |
+| 12 | PD54 and new §8.0: lifecycle safety = preview (`lifecyclePreview`, the store-facing text in the store's locale, the consequences count, what will be written), a 5 s arm window, a 10 min cooldown with the typed handle; §8.1 names `transitionStore`'s single notification; acceptance adds preview = effect, cancel writes nothing, cooldown server-side | B16: "lifecycle safety"; one notification per edge | core §A.5.1, Q.27; B16 |
+| 13 | PD58 and §9.2: plans editor explains every row three ways, impact preview with per-store examples and a diff, the rev 2 keys with release chips | B16: "plans editor"; a limit change is someone's business | core §A.4; B16 |
+| 14 | PD56 and §10: impersonation visible on both sides (console chip from the pulse, tenant countdown from `StorePulse.impersonation`), a note from the ribbon, disabled health fixes, acceptance | B16: "impersonation UX" | D57; Q.31; B16 |
+| 15 | §12.2: the R1 flag declarations shown (incl. `design_publish_gates` with the override count) and this part's `console_perf_panel`, `health_tenant_ring` | flags are code, the console only edits defaults and rules | D51; core §D.4; Q.16 |
+| 16 | PD17 and §13.4: the platform DPA moves to R2; §13.1 mounts P6's `platform_design` field group and the health / lifecycle tunables | the rethink cut; one console home for every platform setting | RF §3.3; DES-R8; core §D.10 |
+| 17 | PD57 and §15: Edge / Worker, Render queue, Health engine, AI and Design tables panels; the complete alarm code list; acceptance with the render-stuck and health-stale fixtures | B16: "system health incl. the Worker and render queue" | core §H.5 rev 2, Q.25; DES-R12; AI-§O |
+| 18 | §18: `NotificationKindDef` with `batch`, the PII key ban on `vars`, kinds `health.issue_new` and `staff.impersonation_started` | one registry, no customer data in a notification | core §I.4; Q.15; PD67 |
+| 19 | PD60 and §22.2: mode-aware onboarding fixed for R2 (`store` / `both` reveal the first landing at once, the blueprint as a detached job surfaced by `pulse.jobs`) | B16: "onboarding that chooses store / landing / both and lands on a generated first result within the demo budget" | D56, §H.12 pattern B; core §A.2 |
+| 20 | PD63 and §22.6: the pulse is the core's frozen `StorePulse` (health, jobs) with the shared poller, ETag / 304, contributors and `usePulse()` | SF-06 | D57; Q.14 (A*); RF §2.2, §3.4 |
+| 21 | §22.8: the typed publish refusals open the publish dialog (never a toast), `job_queued` becomes the job chip, `busy`, and the console codes `status_changed` / `cooldown_handle_required` | every seam code has one UI | D51, D56; core §E.2, §M |
+| 22 | PD61 and §22.10.2: the live address card in R1 with QR, WhatsApp share and P3's `testOrder` / `campaign` slots, one component in three places | UX-05 raised; the wow moment ends with sharing | RF §3.2, §2.3; core §I.4 |
+| 23 | §22.12: new primitives `HealthRing`, `HealthGroups`, `IssueRow`, `IssueList`, `TodayBrief`, `KpiTile`, `FunnelChart`, `JobChip`, `FreshnessDot`, `LockReason` `impersonation`; the honesty-by-type rule | the dashboard draws numbers in three places only, each refusing dishonest input | core §I.6, §I.8 rule 3; RF §2.5 |
+| 24 | §22.13: ⌘K rebuilt on the core `CommandDef` and `SearchProvider` registries, provider budgets, the full chord set, latency rule; health fixes run registered commands (PD66) | one action registry, one scoped search | core §I.3; Q.17; LAN Q18 |
+| 25 | New §22.16: the tenant Store Health ring and issue list (states, pending / restricted / suspended behaviour, celebration once, acceptance) | SF-03's seller side | D53; RF §1.3 |
+| 26 | New §22.17: the dashboard redesigned around the Today brief, honest COD KPI tiles, the COD funnel, work lists, the address card and the ring; "Revenue · 7 days" becomes "Placed · 7 days" | RF §0.5 named the placed-as-revenue habit; screen 2 of the build order | RF §2.5, §2.9, §2.10; SF-11 |
+| 27 | PD64 and new §22.18: the eight rules as acceptance for every P2 screen, with the two bounce sites, the aurora / grain budget, the sparkline floor and the delta tokens named; `test:admin-motion`, `test:admin-rtl`, `qa:admin-perf` | the admin had the tells | D60; RF §2.1, §2.6, §2.9; DB RTL1, RTL5 |
+| 28 | PD36 revised: `nav/console.ts` carries the single "Platform console" switcher item | reconcile with core §K.2's file list without moving the console nav into the tenant registry | core §K.2, §B.4 |
+| 29 | PD47 updated (QR for the address card in R1); PD30 extended (cards first-class, R2 path fixed) | UX-05 raised | RF §3.2 |
+| 30 | §L limits (health, lifecycle, plan impact, pulses, address card, brief, note); §M.1 new actions (`lifecyclePreviewAction`, `markHealthDirtyAction`, `addImpersonationNoteAction`, `snoozeHealthIssueAction`, `recomputeHealthAction`); §M.3 `store.health.snoozed`; §M.4 four query plans; §M.5 caches `health`, `console-strips`, `lifecycle-preview`, `plan-impact` and the bucket `s:<sid>:health:recompute` | every new behaviour has a limit, an action, a plan and a cache row | core §E.6, §E.8, §F.5 |
+| 31 | §N: catalogs `health.ts`, `brief.ts`; key inventories for `health.*`, `brief.*`, `shell.address.*`, `shell.jobs.*`, the console `queue.*`, `lifecycle.*`, `attention.*` additions; 22 tenant reference texts and 13 console texts added | every new string exists in ar/fr/en before the screen does | core §I.5, D36 |
+| 32 | §O: `test:health`, `test:health-db`, `test:pulse`, `test:admin-motion`, `test:admin-rtl`, the `test:platform` additions, the DB cases 11-12, the attack cases 9-12, e2e steps 10-14, and §O.5 rewritten as the two-persona demo steps this part owns | every new contract has a test that fails when it breaks | core §J; RF §4 |
+| 33 | §P: P1 adds `src/lib/health/**` (engine side), `lifecycle-preview.ts`, `profile/overview-strips.ts`, `health-db-check.ts`, the demo steps, `nav/console.ts`; P2 adds the pulse, health rules, primitives, redesigned dashboard, the motion / RTL lints and the perf steps | ownership consistent with core §K.2 rows P1 and P2 | Q.12; core §K.2, §K.3 |
+| 34 | §Q restated as the status of the 32 decided requests; §Q.1 second-round: none unavoidable, two notes | the core answered once; the spec cites the core | core §Q.1 |
+
+Line count: revision 1 was 2,813 lines; revision 2 adds without removing (the count at the end of this file is the
+measure).

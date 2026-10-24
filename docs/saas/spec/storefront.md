@@ -1,13 +1,23 @@
 # Store Gen SaaS part spec: storefront (store mode, catalog, page kinds, cart and COD checkout, payload v3, SEO, speed, accessibility, "both" mode)
 
-Status: **part spec, revision 1** (2026-10-24, storefront part architect). Not yet reviewed (STO-§30 is empty). Built on
-`docs/STORE-SAAS.md` revision 1 (the core contract, cited **core §X**) and on the settled research decisions of
-`docs/saas/RESEARCH.md` §2 (cited **R-D1 … R-D53**). It covers every storefront feature id **ST-01 … ST-22**, the "both"
-mode ids **LP-07** (attach a landing to a product) and **LP-08** (campaign vs inherit, storefront side), the store
-registers of **DG-11** where they are storefront-specific, and the TENANCY-MAP items the core hands to this part
-(LND-01, LND-03, LND-04, LND-06, LND-09, LND-10, LND-11, LND-15, LND-30, LND-31, LND-33, LND-34, ORD-19, ORD-20,
-PUB-23). Section ids carry the prefix **STO-§** so references to the core (`core §E.2`) and to sibling parts
-(`design.md DES-§11`, `ai.md AI-11`, `landing.md`, `operations.md`, `platform.md`) stay unambiguous.
+Status: **part spec, revision 2 (elevated)** (2026-10-24, storefront part architect). Not yet reviewed (STO-§30 is
+empty). Built on `docs/STORE-SAAS.md` **revision 2** (the core contract, cited **core §X**; its appendix **§Q.2** decides
+every request of revision 1, all 24 accepted, and this revision's text now matches those decisions), on the settled
+research decisions of `docs/saas/RESEARCH.md` §2 (cited **R-D1 … R-D53**), on the measured design baseline
+(`docs/saas/research/design-baseline.md`, cited **DB §x** and by target id N*/C*/T*/K*/I*/R*/D*/RTL*/F*), on the two
+rethinks (`rethink-features.md`, cited **rf §x** and **SF-01 … SF-12**; `rethink-ai.md`, cited **ra §x**) and on
+`qa/ref/anti-slop-frontend-rubric.md` (cited **rubric §x**, adopted where it does not conflict with the owner rules: its
+orange-family palette suggestions are void and Arabic keeps its own type rules). It covers every storefront feature id
+**ST-01 … ST-22**, the "both" mode ids **LP-07** (attach a landing to a product) and **LP-08** (campaign vs inherit,
+storefront side), the store registers of **DG-11** where they are storefront-specific, the TENANCY-MAP items the core
+hands to this part (LND-01, LND-03, LND-04, LND-06, LND-09, LND-10, LND-11, LND-15, LND-30, LND-31, LND-33, LND-34,
+ORD-19, ORD-20, PUB-23), and the **store side of the signature features** the core assigns to this track (core §K.2,
+§L.2): SF-02 Design DNA visible on store pages, SF-03 Store Health inputs, SF-05 Test-order mode on store pages, SF-08
+Delivery Promise with ETA as dates, SF-10 Experiments (consumer of landing's engine), SF-12 Catalog from photos, plus
+WhatsApp-first ordering on the store (rf §1.11). Section ids carry the prefix **STO-§** so references to the core
+(`core §E.2`) and to sibling parts (`design.md DES-§11`, `ai.md AI-11`, `landing.md LAN-§17`, `operations.md OPE-§26`,
+`platform.md`) stay unambiguous. The section **STO-§31 Elevation changes (rev 2)** lists what changed and why, with
+the source of each change.
 
 This document refines only what core §D.9 gives the storefront part: the tables `products`, `collections`,
 `collection_products`, `inventory_levels`, `reviews`, `review_requests`, `coupons`, `coupon_redemptions`, `stock_holds`;
@@ -15,19 +25,36 @@ the values of `pages.kind`; and the schemas of the store settings `storefront`, 
 `reviews` (core §D.10). Everything else it needs (a new table, a shared-file change, a resolver, a budget key, a route
 class, a permission) is listed in **STO-§29 Requests to the core** with the exact change. Nothing here edits the core.
 
-Inputs: `docs/STORE-GEN-BRIEF.md` items 1, 5, 7, 8, 9, 14, 15, 16 · `docs/HANDOFF.md` §2 (owner rules), §4 (Hostinger) ·
-core (mostly §A.2, §A.3, §A.4, §C.4.1, §C.6, §C.8, §C.9, §D.2, §D.6, §D.9, §D.10, §E, §F.6, §H.3, §K.4, §K.5) ·
-RESEARCH §2-§4 · `docs/saas/research/storefront.md` (the area study, cited **sf §x**) · `docs/saas/research/cod-ops.md`,
-`design-gen.md`, `rethink-features.md` (cited **rf §x**) · `docs/saas/TENANCY-MAP.md` · `docs/saas/spec/design.md`
-revision 1 (DES-§11 registers, DS13 no dashes, DS15/DS16 store theme) · `docs/saas/spec/ai.md` revision 1 (AI-09,
-AI-10, AI-11) · `docs/OFFERS.md` (items, offers, options, pricing, payload v2: cited **OFFERS §X**). Code facts are
-`path:line` at commit `68c3793`. Next.js is 16.4: store pages are **route handlers** that return HTML (the pattern of
-`src/app/[slug]/route.ts:11-40`: `await connection()`, then a `Response`), not React Server Components; the request
-hook is `src/proxy.ts` (core §C.3), untouched by this part; `after()` is used from route handlers
+Inputs: `docs/STORE-GEN-BRIEF.md` items 1, 5, 7, 8, 9, 14, 15, 16 (item 16 = this elevation pass) · `docs/HANDOFF.md`
+§2 (owner rules), §4 (Hostinger) · core rev 2 (mostly §0 D50-D64, §A.2, §A.3, §A.4, §C.4.1, §C.6, §C.8, §C.9, §D.2,
+§D.6, §D.9, §D.10, §E, §F.6, §H.3, §H.12, §H.13, §I.4, §I.7, §I.8, §J, §K.4, §K.5, §M, §Q.2) · RESEARCH §2-§4 ·
+`docs/saas/research/storefront.md` (the area study, cited **sf §x**) · `docs/saas/research/cod-ops.md`,
+`design-gen.md` · `docs/saas/research/design-baseline.md` (DB; §4 root causes, §5 targets, §6 keep-list) ·
+`docs/saas/research/rethink-features.md` (rf; §1.6 Delivery Promise, §1.10 Catalog from photos, §1.11 WhatsApp-first,
+§1.2 Design DNA, §1.3 Store Health, §1.8 Experiments, §3.1 SF-05, §4 the wow demo) · `docs/saas/research/rethink-ai.md`
+(ra; §1 Director loop, §1.5 the job model, §4.9 store blueprint, §9 changes) · `docs/saas/TENANCY-MAP.md` ·
+`docs/saas/spec/design.md` revision 1 (DES-§4 genome and `GRAMMARS`, DES-§5 choreography incl. §5.6 store page kinds
+and §5.3 height model, DES-§8 gates, DES-§11 registers, DES-§14.4 store generation, DES-§15.4 DNA card, DES-§16.17
+screen checklist) · `docs/saas/spec/landing.md` revision 1 (LAN-§5 add-ons, LAN-§7 delivery API and `etaWindow`,
+LAN-§11 WhatsApp order, LAN-§14 test links, LAN-§17 attached landings incl. LD21 overrides, LAN-§18 experiments) ·
+`docs/saas/spec/ai.md` revision 1 (AI-04, AI-09, AI-10, AI-11) · `docs/saas/spec/operations.md` revision 1 (OPE-§3.6
+hooks, OPE-§12.7 drawer, OPE-§19.4 Sheets row, OPE-§26 test orders) · `docs/OFFERS.md` (items, offers, options,
+pricing, payload v2: cited **OFFERS §X**) · `docs/DESIGN.md` (v2 today; v3 = DG-01 at step C0). Code facts are
+`path:line` at commit `a0ffec1` (`src/**`, `scripts/**` and `package.json` are byte-identical to `68c3793`, where
+revision 1 verified them: `git diff --stat 68c3793 a0ffec1 -- src scripts package.json` is empty). Next.js is 16.4:
+store pages are **route handlers** that return HTML (the pattern of `src/app/[slug]/route.ts:11-40`: `await
+connection()`, then a `Response`), not React Server Components; the request hook is `src/proxy.ts` (core §C.3),
+untouched by this part; `after()` is used from route handlers
 (`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/after.md`).
 
 Reading order for a build agent: STO-§0 (decisions) → STO-§1 (your feature rows) → STO-§27 (the files you own) → the
-sections your files touch → STO-§26 (tests you must keep green) → STO-§29 (what the maintainer still has to give you).
+sections your files touch → STO-§26 (tests you must keep green) → STO-§29 (what the core decided and the second-round
+requests) → STO-§31 (what changed in this revision).
+
+Frozen for the whole of R2, unchanged by this revision (core header): landing **PageDoc v2**, **runtime config v2**,
+**order payload v2**, the **PHP export** and the landing runtime chunk at **24,200 B gz**
+(`src/landing/runtime/budgets.json:3`). Every store behaviour ships in **new chunks** with their own budgets (core D62,
+§H.13; STO-§14).
 
 ### Owner summary (plain English)
 
@@ -67,13 +94,36 @@ sections your files touch → STO-§26 (tests you must keep green) → STO-§29 
     with the first EU shop.
 13. What you need to do: nothing for R2 beyond typing your delivery zones (or one delivery fee) before the checkout can
     go live, and choosing your buy model (the app suggests one).
+14. **New in revision 2.** Your shop is **art-directed, not templated**: the home page and the product page each have
+    six to eight structurally different layouts ("hero grammars") chosen from your store's design DNA, and no single
+    layout may dominate a niche. Every product page keeps the photo, the name, the price, the cash-on-delivery line and
+    the buy button on the first phone screen, whatever the layout. The server refuses to publish a home page that is
+    too long, too heavy or that shows a proof section without real material, and tells you what to fix.
+15. **Test orders without side effects.** "Open a test order" from your address card walks home → product → checkout
+    → thank-you → the agent's queue on a phone; the order is marked TEST, never reaches Sheets, pixels, your numbers
+    or the learning tables, and you can delete it afterwards.
+16. **Delivery dates by city** on the product page, in the cart and at checkout ("Livraison estimée entre mer. 29 et
+    jeu. 30 oct. · 25 DH"), from the zones and the calendar you typed; a city you don't serve shows a WhatsApp button
+    instead of a buy button.
+17. **Order on WhatsApp from the shop**: the shopper's exact selection is priced by the server, saved as a lead your
+    agent can convert in one tap, then opened in WhatsApp with the real total.
+18. **Landing pages attached to a product show their prices honestly**: item prices come from the product and are
+    locked; a campaign pack price that differs from "units × product price" is marked as an **override** with the
+    product price next to it, both in your editor and in your product's "Sales pages" tab; a product price change
+    re-publishes every attached page.
+19. **Your Store Health ring** now includes shop checks (a checkout that cannot charge a fee, a dead menu link, an
+    active product out of stock for a week, a product page without photos), each with one tap to the fix. "Catalog
+    from photos" builds product drafts from a batch of photos: items, options and descriptions proposed, prices
+    always yours, facts ticked by you.
 
 ---
 
 ## STO-§0 Decisions at a glance
 
 R-D22, R-D41, R-D42, R-D43, R-D44, R-D45, R-D46, R-D48 and R-D49 are the storefront decisions this spec builds on,
-adopted as settled. Rows marked **refines** or **deviates** say why.
+adopted as settled, together with core rev 2's D50 (refined for reason `product`), D51-D52 (publish gates and page
+budgets), D54 (test-order mode), D57 (pulse), D58 (mSPRT), D62 (add-on chunks) and D64 (verdict bands). Rows marked
+**refines** or **deviates** say why; rows marked **rev 2** are new or changed in this revision (details in STO-§31).
 
 | # | Decision | Why |
 |---|---|---|
@@ -82,18 +132,18 @@ adopted as settled. Rows marked **refines** or **deviates** say why.
 | STO-D3 | **A catalog product = an Offers v2 document plus presentation.** `products.doc = { product, items, offers }` (OFFERS §B-§D shapes) validated by building a full PageDoc around it and running `PageDocObject` (every Offers v2 rule reused); `products.content = { v: 1, sections }` holds the product's own content sections (benefits, specs, FAQ…); `products.rev` (ULID) changes on every priced or availability change; `products.public_key` (random, global) is the product's public key. | One pricing engine for server, runtime and PHP (OFFERS D9; `src/lib/page/pricing.ts` unchanged, ST-01). Product-specific content cannot live in a template shared by every product (STO-D4). |
 | STO-D4 | **The PDP template is a layout, the content is the product's.** The `product` template holds `productDetail` (the buy region, required), a **`productContent` slot** that renders `products.content.sections` with the product's context, and shared sections (related grid, trust strip, store FAQ). Landing section types are reused through an **eligibility table** (`src/storefront/sections/eligibility.ts`), never by editing their definitions. | Resolves LND-01 and LND-03 without touching `SectionDefinition` (`src/landing/types.ts:240-255`) or any landing section file; one template serves 2,000 products. |
 | STO-D5 | **Inventory = manual flags + optional counts, per stock key.** Each item tracks stock on one **axis**: the item, its matrix combinations, or one choice group's options. Availability = the doc's own sold-out flags **or** `on_hand − held ≤ 0` when counted. R2: counts decrement when the order's `ship_state` becomes `shipped` (idempotent through `inventory_moves`), never at placement. R3: a soft hold at creation, released on cancel/fake/unreachable/refused (R-D48). A count is shown to shoppers only when the owner turns on "show low stock" and the real count is ≤ the owner's threshold. | R-D48 (many COD orders never ship: holding hard at placement shows false "sold out"); owner rule 4 (never invented stock). |
-| STO-D6 | **On-request rendering with one store-wide version.** Cache key = core §E.6 `${storeId}:${path}:${locale}:${catalogVersion}:${addressVersion}` plus a time-window id `:w<n>` (n = announcement boundaries already passed; request STO-R7); `stores.catalog_version` is bumped by any change that can alter a store page (product, collection, inventory crossing, menu, template publish, theme, zones, storefront settings). ETag = `"s1-" + sha256(cacheKey + BUILD_ID)[:20]` answers 304 **before** rendering; `Cache-Control: public, max-age=0, s-maxage=60, stale-while-revalidate=300`; concurrent misses on one key share one render (single flight). | R-D42; one Node process, no queue workers; a store-wide counter makes invalidation trivially correct at our scale (≤ 2,000 products per store, `products_max`). |
+| STO-D6 | **On-request rendering with one store-wide version.** Cache key = core §E.6 `${storeId}:${path}:${locale}:${catalogVersion}:${addressVersion}:w${windowId}` (the window id = announcement boundaries already passed; accepted as STO-R7, core §E.6); `stores.catalog_version` is bumped by any change that can alter a store page (product, collection, inventory crossing, menu, template publish, theme, zones, storefront settings). ETag = `"s1-" + sha256(cacheKey + BUILD_ID)[:20]` answers 304 **before** rendering; `Cache-Control: public, max-age=0, s-maxage=60, stale-while-revalidate=300`; concurrent misses on one key share one render through the core's `ScopedCache.getOrLoad` single flight (STO-R24 accepted, core §E.6). **rev 2:** a request carrying a valid test token (STO-D33) or an experiment arm (`?xv=`, R3) bypasses the shared entry (test: never cached; arm: its own key). | R-D42; one Node process, no queue workers; a store-wide counter makes invalidation trivially correct at our scale (≤ 2,000 products per store, `products_max`). |
 | STO-D7 | **New runtime chunks, the landing chunk untouched** (R-D43): `pdp` = a new **entry** over the existing landing runtime modules (bundles, units, gallery, tabs, accordion, video, sticky, analytics) + a selection **bridge**; `store` (chrome), `cart`, `checkout`, `store-pixels`, `store-thanks`; `search` in R3. Store pages other than the PDP load no landing module; their motion is CSS-only. The generated landing chunk stays **byte-identical** (sha256 asserted by `qa:storefront-render`). | LND-15, LND-16: the landing chunk sits within 30 B of its 24,200 B budget; source-level reuse keeps the pickers, units and option rules exactly as on landing pages. |
 | STO-D8 | **Both buy models on payload v3, as settled (R-D44).** `inline` = the checkout block rendered under the buy box on the PDP (one line, `surface: "pdp"`); `cart` = "Ajouter au panier" + "Commander maintenant" (buy now = `/checkout` with that line only). Default when a store first enters store/both mode: `inline` when it has ≤ 3 active products, else `cart`; a suggestion chip after that, never an automatic switch. | An ad click → order needs zero page loads (sf §4.4); bigger catalogues need a cart. One server path for both. |
 | STO-D9 | **Payload v3 carries per-line proof**: each line sends the product's public key, the `rev` it was priced with and the line subtotal shown; the server re-prices every line with `resolveSelection` + `orderTotals` (unchanged) and answers **per-line verdicts** (`ok`, `changed` with the new amount, `unavailable`, `removed`). A changed line refuses the order (`stale`) and the checkout updates the line in place and asks to confirm: **no page reload**. Order bumps and thank-you upsells are not part of store products in R2 (stripped at save with a note). | ORD-19, ORD-20, LND-33; reloading would loop behind a 60 s edge cache; v3 knows exactly which line moved. |
-| STO-D10 | **Delivery fee in store mode** (refines R-D22 for store checkout): `free_offer` when every line's offer has free delivery → else the shopper's **zone** (`delivery_zones`, landing.md): `not_served` refuses, `free_from_cents ≤ subtotal` → 0, `fee_cents` → that fee → else the store's **fallback fee** (`checkout.store.fallbackFeeCents`). No zone and no fallback = the checkout template cannot be published (checklist error). The checkout and the inline PDP block show the same number the server charges. Landing pages keep their flat page fee until LP-16 (R-D22). | Owner rule 4 (never invent a fee); the zone fee is the trust lever (sf §1.4); R-D22. |
-| STO-D11 | **Attached landing = mirror + live re-pricing** (LP-07): `pages.product_id` set; the landing doc's `items` are a mirror of the product's items (ids, prices, compare-at, groups, sold-out, SKUs; names and photos may stay the landing's own); its offers stay its own and may reference only the product's items. Orders on an attached landing price against **the live product items + the version's offers** and always run the v2 **fallback** comparison (any total ≠ `st` → `stale`). A product change enqueues `render_jobs` reason `product` for each attached live page (≤ 5 also rendered at once in `after()`), and serving self-heals when `page_versions.product_rev` ≠ `products.rev`. Default `noindex` + canonical to the PDP (R-D49), owner toggle. | One price and stock truth (sf §8); core D50 forbids rewriting the version doc on re-render, so the live overlay happens at order time and at render time. |
+| STO-D10 | **Delivery fee in store mode** (refines R-D22 for store checkout): `free_offer` when every line's offer has free delivery → else the shopper's **zone** (`delivery_zones`, landing.md LAN-§7.1 `DeliveryZoneRow` through `zoneForCity`): `not_served` refuses, `free_from_cents ≤ subtotal` → 0, `fee_cents` → that fee → else the store's **fallback fee** (`checkout.store.fallbackFeeCents`). No zone and no fallback = the checkout template cannot be published (publish gate `storefront:checkout_fee_unset`, STO-§23.6). The checkout and the inline PDP block show the same number the server charges. Landing pages keep their flat page fee until LP-16 (R-D22). **rev 2, deviates landing.md LD6 for store checkout only:** a v3 order whose city maps to a not-served zone answers `not_served` (the browser already hid the submit and offered WhatsApp; the lead was captured first, STO-§15.11), because a zone-charged checkout has no honest total for a city the store does not serve; landing pages keep LD6 (accept + flag) since they charge their own flat fee. | Owner rule 4 (never invent a fee); the zone fee is the trust lever (sf §1.4; rf §1.6); R-D22. |
+| STO-D11 | **Attached landing = materialised mirror + `sync` republish + live re-pricing, with overrides shown as overrides** (LP-07; **rev 2**, aligned with landing.md LD20/LD21 and core D50 refined, §H.3, Q24). `pages.product_id` set; the landing doc's `items` are **materialised** from the product by landing's `materializeAttached(doc, product)` (`src/lib/landing/attach.ts`, an S1 "landing part", LAN-§26.2): ids, prices, compare-at, groups and deltas, SKUs, sold-out states after `applyStock`; names and photos stay the landing's when `attach_opts.keepNames` / `keepPhotos`. Its **offers stay its own** and reference only the product's items; every offer price that differs from `units × product price` is an **override** (LAN-§17.3): the builder shows the chip "Override · product price 2 × 249 = 498 DH · this pack 449 DH (−49 DH)", the product editor's "Sales pages" tab lists every override per page (STO-§17.3), and the PDP never shows a landing's pack price. A product change (`prices`, `options`, `stock_transition`) calls `onProductChanged` → `render_jobs` reason `product` → `republishAttached` publishes a **`sync` version** (new row, checksum, gates, `product_rev`); `content` changes re-render in place. Orders on an attached landing price against **the live product items + the version's offers** (`attachedDocFor(target)`, STO-R12 accepted, core §K.4) and always run the v2 **fallback** comparison (any total ≠ `st` → `stale`). Default `noindex` + canonical to the PDP (R-D49), owner toggle (`landing.attach.noindexDefault`). | One price and stock truth (sf §8); the server prices orders from the version doc (OFFERS D8), so a price change must be a publish, not an HTML rewrite (LAN LD20, core Q24); a campaign pack price is legitimate only when the shopper can see what it overrides (owner rule 4). |
 | STO-D12 | **No review display before verified reviews exist** (R-D46): in R2 store pages render no stars, no rating badge and no `aggregateRating`; `products.doc.product.rating` is dropped on every write; landing review sections are not eligible on store kinds. R3 (ST-13) shows verified reviews only; imported reviews are labelled and excluded from aggregates. | EU Omnibus Annex I 23b, owner rule 4 (sf §4.9). |
 | STO-D13 | **Facts-only commerce rendering**: every badge and number on a store page comes from data the server can prove (STO-§12.6 table): "Livraison offerte", savings, compare-at, "Dès", bestseller, low stock, ETA, returns window, "vérifiez avant de payer", "un conseiller vous appelle". Generators write copy, never facts. | Owner rule 4; Morocco law 31-08 (seller identity and total price up front, sf §2). |
-| STO-D14 | **Registers per page kind** (DG-11, DES-§11): home and custom pages = `marketing`; product, collection, search, cart, checkout, not_found = `commerce`; thank-you and track = `transactional`. Commerce kinds: no glass surface, no motion longer than 250 ms, accent fill ≤ 8 % of the viewport area, store sections only CSS motion. | One brand across registers (R-D41); commerce pages must read as precise tools, not posters. |
+| STO-D14 | **Registers per page kind, with marketing islands** (DG-11, DES-§11.1; **rev 2** refines): home and custom pages = `marketing`; product, collection, search, cart, checkout, not_found = `commerce`; thank-you and track = `transactional`. Inside a commerce document exactly two slots are **marketing islands** that may use the full gene set: `collectionHeader:banner` and the PDP's gallery + `productContent` sections; the info column (price, options, buy box, delivery line), grids, cart and checkout are pure commerce: G16 = 0 (no glass), motion ≤ 250 ms with one reveal kind, accent area ≤ 8 % of the viewport, `G22 = start`, no decor (ghost word, ring, chips over photos, aurora). The islands inherit the motion and glass clamps of the document (`[data-register="commerce"]`). | One brand across registers (R-D41); commerce pages must read as precise tools, not posters (DES-§11.1 names the PDP info column and the collection grid as commerce and the banner as marketing). |
 | STO-D15 | **Chrome is store-level, not per page**: header (`navHeader`), announcement bar, footer and WhatsApp float are configured once in the store setting `storefront` and rendered around every store kind; the landing `header` section stays nav-free (`src/landing/sections/header/index.tsx:1-4`). | LND-31; one menu edit updates every page; the landing header is nav-free on purpose. |
 | STO-D16 | **Store thank-you lives at `/checkout/merci?o=<orderId>`**, renders the landing.md LP-04 blocks (confirm on WhatsApp, expectation block, tracking link) inside the store chrome, and is filled client-side from `sessionStorage` written by the checkout: the HTML holds no order data; `Cache-Control: private, no-store` (core §F.6). | Uses the `/checkout` route the core already lists (core §C.4.1); no new top-level path. |
-| STO-D17 | **ETA as dates (ST-17) ships with store pages in R2.** **Deviates** RESEARCH §3.3 (R3): store surfaces call landing.md's `etaWindow()` (`src/lib/delivery/eta.ts`); if landing.md did not ship it in R1 (rf §3.2 raises it to R1), S1 writes it there under the same signature. | Baymard's delivery-date finding (sf §2); the engine is small (S) and zones exist from R1. |
+| STO-D17 | **ETA as dates (ST-17) ships with store pages in R2** (the landing side ships in R1: core §L.2, rf §3.2). Store surfaces call landing.md's engine with its exact signatures (LAN-§7.2): `etaWindow(cal, zone, now): EtaWindow \| null`, `etaText(w, zone, locale, dateLocale, now)`, `zoneForCity(zones, cityKey)`, `zoneLineFor(scope, cityKey, at?)`; every rendered date carries the marker "(estimation)" / "(تقريبي)" / "(estimated)"; no dash inside a range (words carry it). **rev 2:** the rev 1 signature `etaWindow(zone, now, cal, locale)` is withdrawn; S1 writes nothing in `src/lib/delivery/**` (P3 ships it in R1). | Baymard's delivery-date finding (sf §2, rf §1.6); one implementation for the landing line, the store PDP, cart and checkout avoids two promises (LAN LD5). |
 | STO-D18 | **Store pixels = one storefront-level pixel answer** (library pixels or "No pixel", Offers D6 extended to the store), fired by the `store-pixels` chunk on every store kind: PageView, ViewContent (PDP), AddToCart (add or buy now), InitiateCheckout (first checkout interaction), Lead (valid phone), Purchase (thank-you, event id = order id). **Content ids** = item SKU, else `<productKey>.<itemId>` (`<productKey>` for item `main`) on the PDP, in the cart, in server events and on attached landings (LND-11). | Landing, PDP and cart events must match one ad catalog; the landing `pixels` chunk is a landing-runtime module and cannot boot without it. |
 | STO-D19 | **Cart persistence** = `localStorage` key `sg:<handle>:cart` (≤ 20 lines, `n` ≤ 10 per line, 30-day expiry, identical lines merge), re-priced through `POST /api/public/store/cart` when the shown catalog version differs or a line is older than 10 minutes. No server-side cart, no cookie. | No customer accounts for COD (sf §4.18); store hosts never carry cookies (core §C.9); shared origin in P mode needs the handle prefix (core §C.9). |
 | STO-D20 | **Search in R2 is server-side** (`/search?q=`, normalised Arabic / Arabizi / French-accent folding, ranking by name match then real sales), `noindex`. R3 (ST-11) adds the instant client index (≤ 500 products) and filters. | The `search` kind is part of ST-02 (R2); instant search is a separate chunk and a P1 feature. |
@@ -107,6 +157,18 @@ adopted as settled. Rows marked **refines** or **deviates** say why.
 | STO-D28 | **Store states** follow core §A.5.3: `active` and `restricted` serve store pages; in `restricted` the checkout answers `unavailable` and the checkout block switches to its "temporarily unavailable · WhatsApp" state; every other state answers the neutral 404 (or 410 after purge). Store kinds are served only when `modeAllows(mode, "storefront")` (core §A.2). | No oracle for suspended stores; a seller under review keeps pages visible. |
 | STO-D29 | **Pagination and sorting are plain links** in R2 (`?page=n`, `?sort=`): no JavaScript, real URLs, canonical rules of STO-§20.2. | SEO-friendly, zero bytes; infinite scroll would need a fragment API the CSP does not allow (`connect-src` is narrowed to `/api/public/`, `src/lib/render/csp.ts:20-29`). |
 | STO-D30 | **Product-level limits follow PageDoc**: ≤ 8 items, ≤ 30 product photos, ≤ 8 offers, ≤ 4 option groups per item (OFFERS §J.1), ≤ 20 content sections per product. A catalogue item that needs more is several products in one collection. | Reuses every Offers v2 cap, parity test and editor. |
+| STO-D31 | **rev 2 · Hero grammars per page kind, driven by the Brand Genome, never by the archetype alone.** The store home has **8 hero families** (`storeHero` variants, STO-§9.3) and the PDP **6 families** (`productDetail` variants, STO-§12.8); each family maps to one or two of design's composition grammars (`GRAMMARS`, DES-§4.1) and is drawn from the store's G2 with the archetype as a prior (DS1). Over any 100 live stores of one niche no hero family may exceed **30 %** (DB C1), and the same seed with a different catalogue must never give the same (family, pairing, section order) (DB N6). | DB §4.2 root causes 1, 2, 9 (archetype locks the hero; stage on 23 of 39 pages); owner rule "generation dynamic and never repetitive". |
+| STO-D32 | **rev 2 · Fold contract per kind.** PDP (every family, ar and fr, 390 × 844): the first image, the product name, the price, the COD line and the primary action are inside the first 844 px; the checkout block (`inline`) or the cart buttons start before 1,688 px. Home (every family): the hero image or colour moment, one primary CTA and the store identity inside 844 px; a product-bound hero also shows the real "Dès" price. Collection: header + the first card row inside 1,266 px. Declared by each hero variant (`fold: FoldLayout`) and verified by the height model (DES-§5.3, per-variant `features.h`) at publish and by Playwright in `qa:storefront-e2e`. Hard publish gate (`budget:C2` for store kinds). | DB C2 (price and CTA below the fold on 23 heroes), F1; core D52. |
+| STO-D33 | **rev 2 · Test-order mode on store pages** (SF-05, core D54): the address card's "Open a test order" for a `store` / `both` shop mints `storeUrl(store, "/") + "?sg-test=<token>"` (`hmac(exp, "test-order:<storeId>")`, 2 h). A store route that sees a valid token renders **on request** with no pixel chunk, the "test" banner (`RenderAddons.banner = "test"`, core §H.13), `noindex`, `private, no-store`, never cached; the `store` chunk stores the token in `sessionStorage sg:<h>:test` so it survives home → PDP → cart → checkout; the `checkout` chunk sends it as payload v3 `test`; the server verifies it with `resolveTestToken(store, token)` (core §E.2, lint L12) and sets `orders.is_test` / `leads.is_test`. Everything downstream follows core D54 and OPE-§26 (TEST chip, no Sheets, no CAPI, no stats, no learning, "[TEST]" Telegram, "Delete test orders"). | rf §3.1 SF-05, §4 demo step 1:55; today's owner test orders poison stats (HANDOFF §5). |
+| STO-D34 | **rev 2 · WhatsApp-first ordering on the store** (rf §1.11, LP-11 store side): "Commander sur WhatsApp" posts the cart or PDP selection to `POST /api/public/store/lead` with `kind: "whatsapp"`; the server **re-prices every line** (`priceLine`), inserts a `leads` row of kind `whatsapp` (`phone` NULL, `ref WA-XXXXXX`, `sel` v3, `total_cents`), and answers the composed text with the server's total, the real delivery line for the chosen city (or "livraison selon la ville") and the reference; the browser then opens `wa.me/<store digits>?text=`. The client never prices the message (rev 1's client-side composition is withdrawn). No new route: the lead endpoint gains a `kind` (core §C.4 route list unchanged). | LAN LD13 ("the price in the chat is the server's"); core §D.2 `leads.kind = 'whatsapp'`; agents convert the lead in one tap (OPE-§11.4). |
+| STO-D35 | **rev 2 · Store templates publish through the core gate registry** (core D51, §M): `publishStorePage` renders the template with the store's heaviest product (PDP) or its real data (home, collection), then awaits `runPrePublishChecks(ctx)` with `doc: StorePageDoc`; refusals are typed (`budget_blocked` / `honesty_blocked` / `design_blocked`) with `GateItem[]`, never a generic error. Storefront contributes `src/lib/render/prepublish/storefront.ts` (STO-§23.6: fee unset, hero without product, announcement claim unsupported, bound product inactive, dead menu link as a note). The rev 1 "checklist as the gate" is now the builder's live mirror of the same items (core §M.5). | DB §4 (the checklist ran only in the browser); core §M.1 rule 6 (the dialog is never the first time an item appears). |
+| STO-D36 | **rev 2 · Page budgets per kind as hard gates** (core D52 adapted): HTML ≤ 90 KB gz soft / **140 KB hard** for every store document (rev 1's 160 KB cap is withdrawn); PDP ≤ 14 in-flow sections incl. product content / **16 hard**, estimated height ≤ 12,000 px / **15,000 hard**; home 5-10 in-flow / **12 hard**, ≤ 9,000 px / **12,000 hard**; collection ≤ 24 cards per page + ≤ 3 template sections; cart and checkout single column, ≤ 45 KB. CTA budget: PDP ≤ 3 primary CTAs (sticky bar counts as 1) and ≤ 2 visible at once; home ≤ 6; glass: commerce 0, marketing kinds ≤ 2; reveals: commerce 0, home ≤ 40 nodes; images: one photo ≤ 3 appearances per document (the PDP gallery counts once), ≥ 3 distinct crops on the home. | DB C3, F5, R1, R4, R5, I1, I2; core §M.2. |
+| STO-D37 | **rev 2 · Facts-only proof on store pages is a server gate, not a convention**: a store document that would render a number, rating, review, "bestseller" or countdown without its merchant source answers `honesty_blocked` at publish (`honesty:*` items from landing's gate on eligible landing sections, `storefront:*` items of STO-§23.6 for store sections) and renders nothing at request time (the renderer drops the element and logs `fact_missing`). The facts table STO-§12.6 is the single list of sources. | DB I4, D1, D2; core §M.3; owner rule 4. |
+| STO-D38 | **rev 2 · Store blueprint and catalog-from-photos are detached jobs** (core D56, §H.12 pattern B): `store_blueprint` (deep Director, Fable 5.1 `high`, 2-6 min) and `catalog_from_photos` (> 6 photos) insert `ai_jobs`, answer `job_queued`, heartbeat every 10 s and are polled every 2 s visibility-aware; the UI never blocks and Cloud AI off falls to the rules path in < 2 s (`defaultTemplate("home")`, matrix proposal from detected variants). Results are **drafts** (collections, `@home`, product drafts), never published by the job. | ra §1.5, §4.9, §9.6; AI-11, AI-04; rf §1.10; Hostinger's 120 s cap. |
+| STO-D39 | **rev 2 · Design DNA is visible on store pages**: the store page editor's Theme panel shows P6's DNA card (chips, "why this design" line, novelty **words** per DS27, lock toggles); the storefront overview shows the store's brand DNA card and "Generate my store design"; the home and every template carry `page_versions.generation_source` / `critic_picks` provenance like landing pages (core §D.2). Numbers of distance are never shown (DS7). | SF-02 (rf §1.2), DES-§15.4, core §L.2 SF-02. |
+| STO-D40 | **rev 2 · Store Health inputs** (SF-03): `src/lib/health/rules/storefront.ts` contributes R2 rules (STO-§23.8: checkout fee unset, home not published, dead menu link, active product out of stock > 7 days, product without photo or description, store pixels unanswered, SEO missing on ≥ 30 % of active products, compare-at not higher, slug redirects still hit after 6 months); each rule is store-data-only, silent below `minN`, with one `HealthFix`. The storefront overview checklist ring of rev 1 is replaced by the one Store Health ring (core D53, §I.7). | rf §1.3, core D53 ("one computation, two audiences"). |
+| STO-D41 | **rev 2 · Experiments on store pages consume landing's engine** (SF-10, core D58, LAN-§18): `experiments.surface = 'store_page'`; in-page arms (`headline`, `hero`, `section`) on `home` and `page` kinds and on PDP template sections outside the buy box; URL arms (`?xv=<arm>`) for `home`, `collection` and `product` templates (cache key + canonical to the control); the buy box, prices, delivery and the checkout are never arms (the pricing fingerprint of a store template is empty by construction, so the guard is "no `productDetail` data in any arm"). Storefront renders the `.lp-xa` wrapper, the `exp-head` script and the `exp` chunk exactly as landing specifies; statistics, screens and the tables are landing's (D3). | One engine, honest statistics (rf §1.8); no second A/B system. |
+| STO-D42 | **rev 2 · 3G performance budgets are per chunk and per kind, in bytes and milliseconds** (STO-§21.4-§21.5): critical bytes ≤ 300 KB gz for a PDP (HTML ≤ 90 KB incl. ≤ 36 KB JS, LCP image ≤ 120 KB, fonts ≤ 2 files ≤ 80 KB), ≤ 220 KB for home and collection; boot ≤ 45 ms (`pdp`) / ≤ 30 ms (other chunks) at 4× CPU slowdown; LCP ≤ 3.0 s lab on the 1.6 Mbps / 150 ms RTT profile; INP ≤ 200 ms; CLS ≤ 0.05; pixels after `load` + idle, Turnstile after the first checkout interaction. Measured by `qa:storefront-perf` per kind fixture; a budget over its value fails the R2 exit. | Brief item 16 (power of the features on cheap phones); DB F5 (170 KB gz today). |
 
 ---
 
@@ -122,22 +184,22 @@ the verification agent checks; each row points to the section with the detail an
 | ST-01 | Catalog | R2 | S1 | `products` (Offers v2 doc, content sections, SEO, rev, public key), `collections` (manual; rules in R3), `collection_products`, `inventory_levels` + `inventory_moves`, stock axis, decrement at shipped, `catalog_redirects`, product and collection editors, inventory screen, limits and audit | A product saved with any valid Offers v2 shape round-trips byte-identically through `ProductDoc`; `orderTotals` of every fixture equals the landing result for the same items and offers; `products_max` refuses the 201st draft/active product on `beta` with the limit sheet; a slug change answers 308 from the old slug; a `shipped` transition decrements each counted stock key exactly once even when the hook runs twice | STO-§3, §4, §5, §23 |
 | ST-02 | Store page kinds + chrome | R2 | S1 | `StorePageDoc` v1, the 8 kinds + reserved `policy`, template set creation and auto-publish, `StoreRenderContext`, store document shell, `navHeader` (bar, centered, drawer), announcement bar, footer, menus editor, WhatsApp float, branded 404 | Every kind renders at 360/768/1440 in ar (RTL) and fr with no horizontal overflow; a store in `landing` mode answers 404 on `/p/x`, `/c/x`, `/cart`; the branded 404 returns status 404 with the store chrome and `noindex`; a menu link to a deleted product disappears from the header and shows a warning in the menus editor | STO-§6, §7, §8, §10 |
 | ST-03 | productCard + productGrid + collection page | R2 | S1 | Card variants (minimal, framed, overlay, editorial), grid variants (grid, carousel, editorial, dense), sources (collection, manual, bestsellers, newest, related), collection page with sort and `?page=n` links, bestsellers from real orders | Sort `price_asc` orders by `price_min_cents` ascending across pages; "Meilleures ventes" absent from sort and labels when no product has `sold_30d ≥ 3`; a sold-out product card shows the sold-out state and still links to its PDP; page 2 has its own canonical | STO-§9.4, §13 |
-| ST-04 | PDP anatomy | R2 | S1 | `productDetail` (gallery with option image swap, title, price block with genuine compare-at and per-unit, Offers v2 pickers, options and fields, buy box, delivery line by city, trust row from facts, sticky buy bar), `productContent` slot, related grid, ProductGroup JSON-LD | The first 360 × 740 screen shows image, name, price, the COD promise and the primary action; a choice whose matrix cell has a photo swaps the gallery; the trust row shows "vérifiez avant de payer" only when the store policy fact `inspection` is true; the sticky bar never covers the checkout block | STO-§12 |
-| ST-05 | Cart + one-page COD checkout + payload v3 | R2 | S1 | `cart` and `checkout` chunks, cart drawer and page, checkout page and inline block, `contract-v3.ts`, `/api/public/store/{order,lead,cart}`, per-line server re-pricing and verdicts, zone fee, store thank-you, abandoned-checkout leads, WhatsApp alternative | 20 lines × `n` = 10 checkout succeeds with the server total equal to the shown total; a price changed between add and submit answers `stale` with the new line amount and the order succeeds after the shopper confirms; two stores' product keys in one cart answer `invalid` and create nothing; an idempotent replay answers `ok` with `duplicate: true` and the same order id | STO-§14, §15, §16 |
+| ST-04 | PDP anatomy, 6 hero families | R2 | S1 (+ P6/S2 pools) | `productDetail` in six families (`split`, `stacked`, `rail`, `immersive`, `specimen`, `quiet`; STO-§12.8) each with a declared fold layout; gallery with option image swap, title, price block with genuine compare-at and per-unit, Offers v2 pickers, options and fields, buy box, delivery line by city with dates, trust row from facts, sticky buy bar; `productContent` slot, related grid, ProductGroup JSON-LD | **Fold contract (STO-D32):** for every family, in ar and fr at 390 × 844 and 360 × 740, the first image, name, price, COD line and primary action are inside the first screen (Playwright gate); a choice whose matrix cell has a photo swaps the gallery; the trust row shows "vérifiez avant de payer" only when `policies.inspection = "allowed"`; the sticky bar never covers the checkout block and hides while any in-flow primary CTA is ≥ 50 % visible (DB R7); no family exceeds 30 % of PDP templates in a niche over 100 stores (DB C1) | STO-§12 |
+| ST-05 | Cart + one-page COD checkout + payload v3 | R2 | S1 | `cart` and `checkout` chunks, cart drawer and page, checkout page and inline block, `contract-v3.ts`, `/api/public/store/{order,lead,cart}`, per-line server re-pricing and verdicts, zone fee, store thank-you, abandoned-checkout leads, **server-priced WhatsApp order** (STO-D34), **test-order token** (STO-D33) | 20 lines × `n` = 10 checkout succeeds with the server total equal to the shown total; a price changed between add and submit answers `stale` with the new line amount and the order succeeds after the shopper confirms; two stores' product keys in one cart answer `invalid` and create nothing; an idempotent replay answers `ok` with `duplicate: true` and the same order id; a WhatsApp order's text total equals `orderTotals` for the same lines (100 % on the fixtures) and its lead has `kind = 'whatsapp'` and no phone; an order carrying a valid test token is `is_test` and never reaches Sheets, CAPI, `stats_daily` or the learning tables; store A's test token on store B's checkout is an ordinary order | STO-§14, §15, §16 |
 | ST-06 | Checkout field model + phone and city UX | R2 | S1 | Market field model (R-D45), autocomplete tokens, `dir=ltr` phone in RTL, as-you-type grouping, Arabic-digit-safe phone, city combobox over the 147 cities with folded matching and "Autre ville" | MA form = exactly 4 required inputs + optional note; typing "٠٦١٢٣٤٥٦٧٨" shows "06 12 34 56 78" and the server stores `+212612345678`; "tanja", "طنجة" and "Tanger" all select Tanger; EU markets show street, postal code and city with the correct `autocomplete` tokens | STO-§15.5-§15.7 |
 | ST-07 | On-request render cache | R2 | S1 | Cache key, ETag before render, single flight, `catalog_version` bumps, compressed representations, attached-landing dependency (with STO-D11), load test | A second GET of a PDP is served from memory in ≤ 5 ms p95; a price save makes the next GET of that PDP, its collections and the home show the new price; 200 concurrent cold requests for one PDP render it once; HEAD with a matching ETag answers 304 without a render | STO-§7 |
 | ST-08 | Store SEO | R2 | S1 | Organization, WebSite + SearchAction, Product / ProductGroup with `hasVariant`/`variesBy`, ItemList on collections, OG per kind, clean URLs and 308s, canonical rules, per-store sitemap entries for products and collections, `noindex` kinds, title template without dashes | Google's structured-data validator (manual, R2 exit) passes on 3 fixtures; no document contains `priceValidUntil` unless a real end date exists and is in the future; no `aggregateRating` in R2; `sitemap.xml` lists active products and collections only, at the canonical origin | STO-§20 |
-| ST-09 | Home grammar, 4 archetypes | R2 | S1 (+ S2 generator fill) | Slot lists for hero product, category bento, editorial lookbook, catalogue-dense; invariants; default selection by catalogue shape; `applyStoreBlueprint` for AI-11 | 4 archetypes × 3 catalogue fixtures produce valid docs satisfying every invariant of STO-§11.3; two stores with identical inputs get home docs whose genome distance passes design's novelty check (DES-§7) | STO-§11 |
-| ST-10 | Accessibility AA pass | R2 | S1 (+ every track for its own sections) | Landmarks, skip link, dialogs (drawer, sheets) with focus trap and Escape, live regions for cart changes, labelled steppers and swatches, announced errors, 44 px targets, reduced motion, contrast through the theme engine, RTL; automated static check + keyboard scripts | `qa:storefront-a11y` reports 0 errors on every kind fixture; the keyboard-only script completes browse → add → checkout → thank-you; VoiceOver/TalkBack manual pass recorded at R2 exit | STO-§22 |
+| ST-09 | Home grammar: 8 hero families × 4 storylines (R2) | R2 | S1 (+ P6/S2 pools and priors) | Storylines (hero product, category bento, editorial lookbook, catalogue-dense) as slot lists; **hero families drawn from the Brand Genome G2** (`stage`, `editorial-split`, `poster-type`, `bento-lead`, `cinematic-bleed`, `quiet-luxe`, `catalogue-index`, `specimen-sheet`; STO-§9.3) with the archetype as a prior; invariants H1-H12; default selection by catalogue shape; `applyStoreBlueprint` for AI-11 as a detached job (STO-D38) | 4 storylines × 8 families × 3 catalogue fixtures × 50 seeds produce valid docs satisfying every invariant of STO-§11.3 and the fold contract; over 100 generated homes of one niche no family exceeds 30 % and ≥ 60 distinct in-flow sequences appear (DB C1, N3); two stores with identical inputs get home docs whose genome verdict is `ok` (DES-§7, bands only); the same seed with two catalogues never shares (family, pairing, order) (DB N6) | STO-§11 |
+| ST-10 | Accessibility AA pass (WCAG 2.1 AA + the 2.2 criteria of STO-§22.1) | R2 | S1 (+ every track for its own sections) | Landmarks, skip link, dialogs (drawer, sheets) with focus trap and Escape, live regions for cart changes and price updates, labelled steppers and swatches, announced errors, 44 px targets, focus never obscured by the sticky bar (2.4.11), drag alternatives (2.5.7), no redundant entry (3.3.7: remembered city), reduced motion, contrast through the theme engine, RTL1-RTL8; automated static check + keyboard scripts + contrast sampling | `qa:storefront-a11y` reports 0 errors on every kind fixture in ar and fr; the keyboard-only script completes browse → add → checkout → thank-you with the focused element visible at every step; the stale banner, the price update after a city change and the cart count are each announced once; VoiceOver/TalkBack manual pass recorded at R2 exit | STO-§22 |
 | ST-11 | Filters, quick add, instant search | R3 | D3 | Instant search chunk over a per-store index (≤ 500 products), bottom-sheet filters (price, option values, availability), quick add for products with one offer and ≤ 1 choice group | Index JSON ≤ 12 KB gz for 500 products; filters update the count without a page load and the URL keeps the state (`?f=`); quick add is never offered for products with matrix groups, fields or several offers | STO-§13.4-§13.6 |
 | ST-12 | Multi-locale siblings + hreflang + locale chip | R3 | D3 | `products.i18n` text overlay per locale, `/<locale>/…` prefixes, `hreflang` + `x-default`, a client chip from `Accept-Language`, no redirect | Every sibling page links all siblings and `x-default`; prices and ids are identical across siblings; no response varies on `Accept-Language` | STO-§19.7, §20.6 |
 | ST-13 | Verified review collection | R3 | D3 | Signed post-delivery links, review page, photos through the media pipeline, hide-only moderation with audit, "Achat vérifié" badge, automatic disclosure, "imported" label, aggregates and JSON-LD from verified only | A review can be written once per order line and only after `delivered`; editing text or stars is impossible in the admin; imported reviews never enter `aggregateRating`; the disclosure line renders wherever ratings render | STO-§18 |
 | ST-14 | Coupons | R3 | D3 | Server-validated codes (percent, fixed, free delivery), scope, caps, per-phone limit, real dates, checkout field, discount row, allocation for pixels and accounting | An expired or capped code answers `coupon: invalid` without revealing which rule failed; a percent coupon never makes a line negative; redemptions are unique per order | STO-§19.1 |
 | ST-15 | Stock soft hold + decrement at shipping | R3 | D3 | `stock_holds` at order creation (TTL 7 days), release on cancel/fake/unreachable/refused/duplicate, decrement at shipped consumes the hold | Two concurrent orders for the last counted unit: the first holds it, the second answers `unavailable` for that line; a cancelled order frees the unit within the same request | STO-§5.6 |
 | ST-16 | Size guide | R3 | D3 | Per-product chart (rows × columns, units cm/in by market), bottom sheet from the size option, empty skeleton proposed for garments (never invented measurements) | The skeleton has headers only; the sheet opens from the size group label and traps focus | STO-§19.3 |
-| ST-17 | ETA as dates | **R2** (raised, STO-D17) | S1 (engine: landing.md or S1) | `etaWindow` with cut-off hour, working days, holiday table; dates on PDP, checkout, cart | Cut-off and weekend crossings, holidays skipped, ar and fr date rendering match the selftest; a zone without ETA shows no date | STO-§15.8 |
+| ST-17 | ETA as dates (store side; SF-08) | R1 landing (P3) / **R2 store** (STO-D17) | S1 consumes landing's `src/lib/delivery/eta.ts` | `etaWindow` / `etaText` / `zoneLineFor` with cut-off hour, working days, holiday table; dated lines on PDP, cart, checkout and thank-you; "(estimation)" marker | PDP, cart and checkout show byte-identical ETA text for the same city and instant as landing's `etaText`; cut-off and weekend crossings, holidays, ar and fr rendering match `test:delivery`; a zone without ETA shows the day range or nothing; a not-served city disables the buy actions and shows WhatsApp | STO-§15.8 |
 | ST-18 | Speculation Rules + bfcache hygiene | R3 | D3 | `moderate` prefetch from grids to PDPs, no `unload`, no `no-store` on public kinds | Chrome DevTools bfcache test passes on home, collection and PDP; prefetch fires only on hover/touch-start | STO-§21.6 |
-| ST-19 | Home archetypes 5-8 | R3 | D3 | Drop, routine, gift guide, local maker (modern visuals only) | Same invariants as ST-09; the drop archetype is unavailable without a real launch date | STO-§11.2 |
+| ST-19 | Home storylines 5-8 | R3 | D3 | Drop, routine, gift guide, local maker (modern visuals only), each drawing its hero family from the G2 pool like the R2 storylines | Same invariants as ST-09 incl. H11-H13; the drop storyline is unavailable without a real launch date | STO-§11.2 |
 | ST-20 | Breadcrumbs | R3 | D3 | Visible breadcrumbs on PDP and collection + BreadcrumbList JSON-LD from `primary_collection_id` | The JSON-LD trail equals the visible trail; RTL order mirrored visually only | STO-§19.4 |
 | ST-21 | EU legal pack | at the first EU store | D3 or the R-at-hand track | 30-day lowest price next to compare-at, consent banner with Consent Mode v2, review disclosure, EU address fields, AA gate | An EU store cannot activate checkout until each item is green in the EU gate | STO-§19.8 |
 | ST-22 | PWA per store, "my orders" with OTP, recently viewed, co-purchase cross-sell | later | — | Each gated on owner demand and a messaging provider | Own acceptance when scheduled | STO-§19.9 |
@@ -167,6 +229,18 @@ the verification agent checks; each row points to the section with the detail an
 | LND-34 | Store microcopy `src/storefront/i18n.ts` (ar/fr/en written; es/de/it/nl/pt flagged for review before an EU store) | STO-§24 |
 | PUB-23 | Branded `not_found` kind under the store base; neutral 404 everywhere else | STO-§6.1, §7.4 |
 
+### STO-§1.4 Signature features, store side (rev 2; rf §1, §3; core §K.2 ownership paragraph)
+
+| ID | Feature (store side) | Rel. | Track | Scope here | Acceptance | Spec |
+|---|---|---|---|---|---|---|
+| SF-02 | Design DNA visible | R2 | S1 (UI mounts P6's components) | DNA card in the store page editor's Theme panel, brand DNA card on the storefront overview, "why this design" line per generated home, novelty words (bands), provenance columns on template versions | A generated home shows its DNA chips and a one-sentence why line in the admin locale; no numeric distance appears anywhere (grep on the rendered admin HTML); two stores from the same photos get `ok` bands and different chips | STO-§11.6, §23.5 |
+| SF-03 | Store Health inputs | R2 | S1 (`src/lib/health/rules/storefront.ts`) | 9 rules (STO-§23.8), each with evidence `n`, a fix link and `minN`; `markHealthDirty` on every catalog, template and storefront-settings write | `test:health` fixtures per rule with and without `minN`; a rule never reads another store (two-store fixture); fixing an issue never lowers the score | STO-§23.8 |
+| SF-05 | Test-order mode on store pages | R2 | S1 (+ T3's `resolveTestToken`, P4/P5/P7 exclusions) | token carried through the store session, on-request test render of every kind, `test` in payload v3 and the WhatsApp lead | STO-D33 acceptance; the R2 store demo (STO-§26.4) places one test order end to end with revenue at 0 | STO-§7.2, §14.5, §16.2 |
+| SF-08 | Delivery Promise on the store | R2 | S1 (engine: P3) | dated ETA + zone fee on PDP, cart, checkout, thank-you; not-served handling; calendar from `checkout` | ST-17 acceptance plus: the fee shown on the PDP for a city equals the fee charged for that city and subtotal in 100 % of `test:catalog` zone fixtures | STO-§12.3, §15.8, §15.9 |
+| SF-10 | Experiments on store pages (consumer) | R3 | D3 (engine) + S1 files | arm wrapper, head script and `exp` chunk on store kinds; URL arms on templates; the "no `productDetail` data in an arm" guard | `test:experiments` runs its render fixtures on a store home and a PDP template; an arm that touches the buy box is refused (`exp.buy_box`) | STO-§19.10 |
+| SF-12 | Catalog from photos | R2 | S1 (+ S2 brand, S7 AI) | `createProductsFromPhotos` (drafts only, prices never proposed, facts ticked), the "À partir de photos" entry, the detached job for > 6 photos, the blueprint hand-off | 12 fixture photos → 8 ± 1 product drafts; no price field in any proposal; a suggested fact absent from copy until ticked; Cloud AI off → the same drafts from SigLIP + rules in < 2 s | STO-§4.7 |
+| LP-11 (store) | WhatsApp-first ordering | R2 | S1 | server-priced WhatsApp order from the PDP, cart and checkout; lead kind `whatsapp`; agent conversion | STO-D34 acceptance; 50 parallel intents in one store yield 50 distinct refs | STO-§15.13 |
+
 ---
 
 ## STO-§2 Today (read before changing)
@@ -187,7 +261,13 @@ the verification agent checks; each row points to the section with the detail an
 | Product JSON-LD (Offer / AggregateOffer, brand omitted for placeholder names) | `src/landing/document.tsx:247-293` | Replaced on store kinds by ProductGroup / Organization / ItemList builders (STO-§20.4); landing JSON-LD unchanged |
 | Order text grammar v2 (warehouse / customer) | `src/lib/orders/text.ts:188-288`; OFFERS §G.4 | Each v3 line prints its v2 text; lines joined by the v3 grammar (STO-§16.7) |
 | Stats per page per day | `src/lib/stats/index.ts`, `stats_daily (page_id, day)` | Product views and checkout starts keyed by product id (STO-D23) |
-| Core additions this part relies on | core §C.4.1 (`/p`, `/c`, `/cart`, `/checkout`, `/search`), §C.6 URL builders, §D.2 `pages.kind` / `pages.product_id` / `orders.catalog_version` / nullable `orders.page_id`, §D.6 catalog tables, §E.6 render cache key, §H.3 render jobs | Everything below |
+| Landing hero variants today: `stage`, `editorial`, `poster`, `scrapbook`, `spec`, `split` (`src/landing/sections/hero/index.tsx:108-140`); `stage` renders on 23 of 39 baseline pages (DB §3.1) | `src/landing/sections/hero/**` | The store hero families of STO-§9.3 and §12.8 are store sections with their own CSS; they borrow the stage/spec/editorial craft (DB §6 keep-list 7) and never `scrapbook` (banned, DESIGN v3) |
+| Sticky bar gate (steps in only after the hero CTA, hides while the form is visible, `aria-hidden` + `inert` when hidden) | `src/landing/runtime/sticky.ts:1-14` | Reused by the PDP; the DB R7 rule "hidden while any in-flow primary CTA is ≥ 50 % visible" is already its contract |
+| Runtime budgets today: `landing 24200`, `thanks 6650`, `pixels 3900`, `turnstile 1300`, `units-matrix 2200`, `units-fields 1000`, `fill-steps-box 1750`, `whatsapp 5800`, `page 32000` | `src/landing/runtime/budgets.json`; render-check `scripts/qa/render-check.ts:119-131` | The store keys (STO-§14.1) join the same file and the same +5 % rule (core §H.13) |
+| Design engine contracts this part consumes (R1 deliverables of P6): `GRAMMARS` and the genome types (DES-§4.1), the choreography expander and the height model (DES-§5.3, §5.5), the kind grammars for store pages (DES-§5.6), `runGates` / `GateReport` (DES-§8.1), registers (DES-§11.1), the DNA card (DES-§15.4) | `src/lib/design/**` (P6, R1) | Store sections register `features` (DES-§8.4) and per-kind grammars; the storefront never re-implements a gate |
+| Delivery engine this part consumes (R1 deliverable of P3): `DeliveryZoneRow`, `StoreCalendar`, `EtaWindow`, `ZoneLine`, `listZones`, `zoneForCity`, `zoneLineFor`, `etaWindow`, `etaText`, the MA holiday seed | `src/lib/delivery/**` (LAN-§7.1-7.2) | STO-§12.3, §15.8, §15.9 call these; nothing is re-implemented |
+| Test-order plumbing (R1.0, T3): `resolveTestToken(store, token)`, `is_test` columns, `renderTestDocument()`, `RenderAddons.banner = "test"` | core §E.2, §C.4.1, §H.13 | Store routes reuse the token and the banner (STO-D33) |
+| Core additions this part relies on | core §C.4.1 (`/p`, `/c`, `/cart`, `/checkout`, `/search`, `/<slug>/[...rest]`, locale-prefix and `@` slugs), §C.6 URL builders, §D.2 `pages.kind` / `pages.product_id` / `pages.attach_opts` / `page_versions.product_rev` / `kind 'sync'` / `orders.catalog_version` / nullable `orders.page_id` / nullable `leads.page_id` / `is_test`, §D.6 catalog tables incl. `catalog_redirects` and `inventory_moves`, §E.2 `resolveProductKey` / `resolveContextKey`, §E.6 render cache key with `:w${windowId}` and `getOrLoad`, §H.3 render jobs incl. `republishAttached`, §H.13 store chunk budgets, §M gate registry | Everything below |
 
 What does **not** exist and is built here: store page kinds, `StorePageDoc`, `StoreRenderContext`, store sections and
 chrome, catalog tables and editors, inventory, cart, checkout, payload v3, the content of the store SEO files, the store
@@ -222,7 +302,15 @@ runtime chunks, product ↔ landing attachment.
 - `pages.name` of a template row = the kind label ("Product page"); of a custom page = the owner's title.
 - `page_versions` rows of non-landing kinds keep `html`, `thank_you_html`, `csp`, `thank_you_csp` NULL and `runtime_v =
   2` (the landing runtime contract the PDP buy box embeds); `checksum` = sha256 of the validated `StorePageDoc` JSON
-  (the landing rule, extended by request STO-R3 for the boot task).
+  (the landing rule, extended by request STO-R3, accepted: core §D.8, §H.4 validate `kind ≠ 'landing'` versions against
+  `StorePageDoc`).
+- **rev 2:** template versions carry the same provenance as landing versions: `generation_source` (`manual` for an
+  owner publish, `instant` for `defaultTemplate`, `director` / `deep` when the blueprint job produced the doc) and
+  `critic_picks` (≤ 2 KB: grammar slot, hero family, repair ops, prompt versions; never page text) (core §D.2 0005,
+  ra §5.6). The DNA card (STO-D39) reads them.
+- `pages.attach_opts` (0006, STO-R6 accepted) on attached `landing` rows: `{ v: 1, indexable: boolean = false,
+  keepNames: boolean = true, keepPhotos: boolean = true }`; overrides are **computed** at render and in the editor
+  (LAN-§17.3), never stored.
 
 ### STO-§3.2 Catalog tables (0006, refined from core §D.6)
 
@@ -466,6 +554,11 @@ export const ProductContent = z.object({
 - `stores.catalog_version` is bumped (`UPDATE stores SET catalog_version = catalog_version + 1 WHERE id = ?`) in the same
   transaction as every write listed in STO-§7.5, then `invalidateStore(storeId)` (core §E.6) drops the cached store row
   so the next request in this process sees the new version.
+- **rev 2 · `onProductChanged(scope, productId, change)`** (landing's hook, LAN-§17.4; `change ∈ { "prices", "options",
+  "stock_transition", "content" }`) is called in `after()` by every product write that changes `rev` (`prices` /
+  `options`), by an inventory crossing (`stock_transition`) and by a content-only save that changed the name or the
+  photos (`content`); it enqueues the attached-landing republish (STO-§17.3). A decrement that stays above 0 calls
+  nothing.
 
 ### STO-§4.4 Store rules on top of Offers v2
 
@@ -510,8 +603,10 @@ export function collectionPage(scope: StoreScope, c: CollectionRow, opts: { sort
 `saveProduct` order: `checkProductDoc` → content and SEO schemas → `assertOwned` → `deriveProduct` → one transaction
 (`UPDATE products … WHERE id = ? AND store_id = ? AND rev = ?` compare-and-set; 0 rows → `conflict`; slug change →
 `catalog_redirects` upsert; collection membership; `catalog_version` bump) → `syncAssetRefs(scope, "product", id, ids,
-{ live: status === "active" })` (core §G.5) → audit → `invalidateStore` → `after()`: attached-landing fan-out when `rev`
-changed (STO-§17.3).
+{ live: status === "active" })` (core §G.5) → audit (`store.catalog.product_updated`, plus `store.catalog.price_changed`
+with the before/after `from` per offer when a price moved) → `invalidateStore` → `markHealthDirty(storeId)` (core §I.7)
+→ `after()`: `onProductChanged(scope, id, change)` when `rev` or the story changed (STO-§4.3, §17.3), and the first 5
+attached live pages republished at once through the same handler (their job rows then finish `skipped`).
 
 Server actions (`src/app/app/[store]/catalog/**/actions.ts`, each body `return storeAction(…)`, core §E.2 and lint L9):
 
@@ -540,6 +635,46 @@ Server actions (`src/app/app/[store]/catalog/**/actions.ts`, each body `return s
 - An empty active collection renders its page with the empty state (STO-§13.1) and `noindex`; a draft or archived one
   answers the branded 404.
 - Limits: 100 collections per store, 500 members per collection, 8 collections per product.
+
+### STO-§4.7 Catalog from photos (SF-12, rf §1.10; R2, S1 with S7's tasks and S2's brand step)
+
+The entry "À partir de photos" on `/app/<h>/catalog/products/new` turns a batch of photos into **product drafts**. The
+owner types every price; the engine never proposes one.
+
+```ts
+// src/lib/catalog/from-photos.server.ts (S1)
+export interface FromPhotosInput { assetIds: string[] /* 1-40, this store's assets (assertOwned) */; hints?: { category?: ProductCategory; locale?: Locale }; group?: "auto" | "one-per-photo" }
+export interface ProductProposal {
+  key: string;                                   // local id of the proposal
+  photos: { assetId: string; box?: AssetRef["box"]; role: "main" | "detail" | "group" }[];   // crops from group photos through AssetRef.box (OFFERS §B.4)
+  name: Record<Locale, string>;                  // drafts from the Worker, library fallback (AI-02 pattern)
+  description: Record<Locale, string>;
+  items: { id: string; name: string; groups: OptionGroupProposal[] }[];   // variants detected from photo differences; NO prices
+  suggestedFacts: { text: string; from: "photo" | "name"; ticked: false }[];   // AI-04 honesty rule
+  category: ProductCategory; confidence: "high" | "medium" | "low";
+}
+export function proposeProductsFromPhotos(ctx: StoreCtx, input: FromPhotosInput): Promise<{ ok: true; proposals: ProductProposal[] } | { ok: false; jobId: string }>;   // ≤ 6 photos: interactive (≤ 20 s); more: ai_jobs kind "catalog_from_photos" (pattern B)
+/** @write */ export function createProductsFromProposals(ctx: StoreCtx, accepted: AcceptedProposal[]): Promise<{ drafts: string[]; needsReview: string[] }>;   // AcceptedProposal = proposal + typed prices + ticked facts
+```
+
+1. **Grouping**: the wizard's existing crop and group logic (`src/components/admin/items/crop-dialog.tsx`,
+   `AssetRef.box`) splits group photos into items; SigLIP (local) or the server `analyze` task (≤ 2 images ≤ 1,024 px,
+   AI-04) classifies each group; `group: "one-per-photo"` skips detection.
+2. **Proposal**: names and descriptions as drafts (Worker `product.describe`, library when cloud is off), an option
+   matrix proposed only from visible differences (colour swatches detected in the photos; sizes never guessed), facts
+   as unticked chips. Every text passes the guard; no number survives that is not in a ticked fact.
+3. **Review screen**: one card per proposal with the price field empty and required, the fact chips, the item list and
+   a "merge with …" action; "Create {n} drafts" writes `products` rows with `status = 'draft'`, charges the `products`
+   gauge per draft (refused with the limit sheet when over), audits `store.catalog.products_from_photos` (`{ count }`),
+   then offers "Generate my store design" (the blueprint, STO-§11.5) when ≥ 3 drafts exist and no `@home` is published.
+4. **SEO and alt** fill through AI-09 in Batches when ≥ 20 items (owner reviews in bulk); never overwriting a typed
+   field.
+
+Acceptance (`test:catalog` + `qa:storefront-e2e`): the 12-photo fixture (3 group photos + 9 singles of 8 products)
+yields 8 ± 1 proposals; no `price` key exists in `ProductProposal` (type test) and no digit appears in a proposal name or
+description unless a ticked fact carries it; with Cloud AI off the same fixture yields proposals in < 2 s from SigLIP +
+rules; a batch of 30 photos answers `job_queued` and the job finishes with heartbeats ≤ 10 s apart; drafts of store A
+never appear in store B's review screen (tenancy case).
 
 ---
 
@@ -664,6 +799,25 @@ singleton type appears once; `productDetail` is the first section of `product`; 
 `checkout`; a `bind.productId` must belong to the store (checked at save and publish with `assertOwned(scope,
 "product", ids)`); at most one section with a bento variant per page (design budget DES-§3, R-D38).
 
+**Per-kind budgets (rev 2, STO-D36; DB C3, F5, R1, R4, R5, I1):** soft items lower Q and appear as notes; hard items
+refuse publish through the core gate (`budget:*` ids, core §M.2, with the store-kind thresholds below passed by
+`src/lib/render/prepublish/storefront.ts` as a `BudgetProfile`; second-round request STO-R25).
+
+| Kind | In-flow sections (soft / hard) | Estimated height at 390 (soft / hard) | Primary CTAs | Glass | Reveal nodes | Same photo | HTML gz |
+|---|---|---|---|---|---|---|---|
+| `home`, `page` | 5-10 / 12 | ≤ 9,000 / 12,000 px | ≤ 6 (sticky none) | ≤ 2 / 4 | ≤ 40 / 80 | ≤ 3 / 4 | ≤ 60 KB / 140 KB |
+| `product` (template + product content, rendered with the store's heaviest product) | 8-14 / 16 | ≤ 12,000 / 15,000 px | ≤ 3 (sticky bar = 1) / 4, ≤ 2 visible at once | 0 / 0 | 0 / 0 (CSS-only motion) | gallery = 1 appearance, then ≤ 2 / 3 | ≤ 90 KB / 140 KB |
+| `collection` | header + grid + ≤ 3 / 4 | 24 cards per page; ≤ 9,000 / 12,000 px with 24 cards | ≤ 2 | 0 | 0 | — | ≤ 60 KB / 140 KB |
+| `search`, `not_found` | ≤ 4 | ≤ 6,000 px | ≤ 2 | 0 | 0 | — | ≤ 45 KB |
+| `cart`, `checkout` | single column, no choreography | ≤ 4,000 px default state | 1 (+ WhatsApp alternative) | 0 | 0 | — | ≤ 45 KB |
+
+The height comes from the design height model (DES-§5.3) with store sections' `features.h` values (STO-§9.2:
+`storeHero` 1.0, `collectionTiles` 0.9, `productGrid` 1.2 per 8 cards, `productDetail` 1.9 (`inline` model) / 1.4
+(`cart` model), `productContent` = Σ of its landing sections, `trustStrip` 0.15, `mediaText` 1.0, `richText` 0.6,
+`whatsappCta` 0.4, `collectionHeader` 0.5 (`banner` 0.9), `collectionProducts` 1.2 per 8 cards, `searchResults` as the
+grid, `cartView` 1.2, `checkoutForm` 1.8, `notFoundBlock` 0.6), calibrated against the R2 render set the same way DG-09
+calibrates landing pages (ratio 0.8-1.25 on ≥ 90 % of fixtures).
+
 ### STO-§6.2 `StorePageDoc` v1
 
 ```ts
@@ -708,15 +862,16 @@ The doc carries no theme: store pages use the store theme (STO-§8.4).
 export const TEMPLATE_KINDS = ["home", "product", "collection", "search", "cart", "checkout", "not_found"] as const;
 export const UTILITY_KINDS = ["product", "collection", "search", "cart", "checkout", "not_found"] as const;
 /** Creates the missing template rows (drafts from defaults) and publishes the missing utility kinds (STO-D2). Idempotent. */
-export function ensureTemplateSet(ctx: StoreCtx | SystemCtx & { scope: StoreScope }): Promise<{ created: StorePageKind[]; published: StorePageKind[] }>;
+export function ensureTemplateSet(scope: StoreScope, opts?: { actor?: Actor }): Promise<{ created: StorePageKind[]; published: StorePageKind[] }>;   // core §A.2 calls it with systemScope(ctx, storeId); R1 ships a typed no-op stub
 export function defaultTemplate(kind: StorePageKind, shape: CatalogShape, store: StoreRow): StorePageDoc;   // pure; home uses STO-§11
 export function getLiveTemplate(scope: StoreScope, kind: StorePageKind): Promise<{ pageId: string; versionId: string; publicKey: string; doc: StorePageDoc } | null>;
 /** @write */ export function saveStorePage(ctx: StoreCtx, pageId: string, doc: unknown, expectedVersionId: string | null): Promise<SavePageResult>;
 /** @write */ export function publishStorePage(ctx: StoreCtx, pageId: string): Promise<PublishStorePageResult>;   // checklist gate, then version kind "publish"
 ```
 - Runs under `withNamedLock(storeLock(storeId, "templates"), 5, …)` (core §E.7).
-- Called (a) after a mode change to `store` or `both` (request STO-R17: the mode-change action calls it), (b) lazily on
-  the first open of `/app/<h>/storefront`, (c) by the store blueprint apply (STO-§11.5).
+- Called (a) after a mode change to `store` or `both` and on the `pending → active` transition of such a store
+  (STO-R17 accepted: core §A.2, §A.5.1 call `ensureTemplateSet(systemScope(ctx, storeId))`), (b) lazily on the first
+  open of `/app/<h>/storefront`, (c) by the store blueprint apply (STO-§11.5).
 - Auto-publish of utility kinds is refused in states without `publish` (pending, restricted…; core §A.5.2): the rows
   stay drafts and publish themselves on approval (the approval transition calls `ensureTemplateSet`, request STO-R17).
 - Template versions use `page_versions` (`save`, `autosave`, `publish`, `restore`); history, restore and starred
@@ -724,9 +879,19 @@ export function getLiveTemplate(scope: StoreScope, kind: StorePageKind): Promise
 - Publish = new `publish` version + `pages.published_version_id` + `pages.status = 'published'` + `catalog_version`
   bump, in one transaction. Unpublishing a utility template is impossible (it would break the store); the editor shows
   "Restore the default" instead.
-- `publishStorePage` gate: `storefront.write`, entitlement `publish` (state cap), kill switch `publishing_enabled`,
-  `s:<sid>:publish` 60/h (core §E.8), the store-page checklist (STO-§23.6) with no error, design's static gates on the
-  doc (DES-§8; dependency STO-§29.2).
+- `publishStorePage` gate (rev 2, STO-D35): `storefront.write`, entitlement `publish` (state cap), kill switch
+  `publishing_enabled`, `s:<sid>:publish` 60/h (core §E.8); then the template is **rendered** (home and collection
+  with the store's real data, `product` with the store's heaviest product by rendered bytes, `checkout` with a 20-line
+  cart fixture) and `runPrePublishChecks(ctx)` (core §M.1) runs with `doc: StorePageDoc`: `budget` (STO-§6.1 profile),
+  `honesty` (landing's gate on the eligible landing sections, STO-D37), `design` (`runGates` with `register` set,
+  DES-§8.1, §11.1) and the storefront check file (STO-§23.6). A refusal returns `{ ok: false, error: "budget_blocked" |
+  "honesty_blocked" | "design_blocked", items }` to the publish dialog, one row per item with its fix; the builder's
+  checklist panel shows the same items live, so the dialog is never the first time an item appears (core §M.5).
+  Listeners after the commit: design (`published` genome row), storefront (`markHealthDirty`, `catalog_version` bump
+  already in the transaction), ai (`recordPublishFeedback`, R2).
+- Auto-published utility templates (STO-D2) pass the same checks with their defaults; a default that fails a hard gate
+  is a bug caught by `test:catalog` (every `defaultTemplate(kind, shape)` × 3 shapes × ar/fr passes `runPrePublishChecks`
+  in `block` mode).
 
 ### STO-§6.4 Custom pages (`page` kind)
 
@@ -798,19 +963,29 @@ the cache key, so `utm_*`, `fbclid` and `ttclid` traffic hits the cache.
 
 ```ts
 // src/lib/storefront/serve.server.ts
-export interface StoreRoute { kind: StorePageKind | "thanks" | "policy" | "track"; slug?: string; query: { page?: number; sort?: SortKey; q?: string }; status?: 200 | 404 }
+export interface StoreRoute {
+  kind: StorePageKind | "thanks" | "policy" | "track"; slug?: string;
+  query: { page?: number; sort?: SortKey; q?: string; xv?: string /* R3 URL arm, LAN-§18.5 */ };
+  test: string | null;                                    // the `sg-test` token when present (STO-D33)
+  status?: 200 | 404;
+}
 export function serveStorePage(req: Request, handle: string, route: StoreRoute): Promise<Response>;
 ```
 1. `await connection()`; `store = resolveStoreByHandle(handle)` (core §E.5); missing → neutral 404.
 2. Canonical check (core §C.8): non-canonical host, renamed handle or uppercase slug → 308 with the raw query.
 3. State gate (STO-D28) and mode gate (`modeAllows(store.mode, "storefront")`); failing → neutral 404 (or 410 after a
    purge, core §A.5.3).
-4. `scope = publicScope(store)`; `cacheKey = storeCacheKey(store, route, storeWindowId(settings, now))` (STO-§7.4,
+4. **Test render** (rev 2, STO-D33): `resolveTestToken(store, route.test).test` → `renderStorePage(scope, store, route,
+   { mode: "test" })` on request (no pixel chunk, `banner: "test"`, `noindex`, `Cache-Control: private, no-store`),
+   bucket `s:<sid>:test-render` 60/h (core §E.8); an invalid, expired or over-limit token is an ordinary visit. Never
+   cached, never 304.
+5. `scope = publicScope(store)`; `cacheKey = storeCacheKey(store, route, storeWindowId(settings, now))` (STO-§7.4,
    the `storefront` setting comes from the settings cache); `etag = storeEtag(cacheKey)`.
-5. `If-None-Match` matches → **304** with the document headers, no render, no DB beyond the cached store row.
-6. Cache hit → `storeDocumentResponse` (compressed representation per `Accept-Encoding`, created once and kept).
-7. Miss → `singleFlight(cacheKey, () => renderStorePage(scope, store, route))`, cache set, respond.
-8. A render that throws → the neutral "temporarily unavailable" 503 (`unavailableResponse`,
+6. `If-None-Match` matches → **304** with the document headers, no render, no DB beyond the cached store row.
+7. Cache hit → `storeDocumentResponse` (compressed representation per `Accept-Encoding`, created once and kept).
+8. Miss → `renderCache.getOrLoad(storeId, cacheKey, () => renderStorePage(scope, store, route))` (core §E.6 single
+   flight; a rejected render is evicted at once), respond.
+9. A render that throws → the neutral "temporarily unavailable" 503 (`unavailableResponse`,
    `src/lib/render/serve.server.ts:231`) + `recordError("storefront", err, { storeId, route })`; nothing cached.
 
 ### STO-§7.3 Render pipeline
@@ -818,7 +993,7 @@ export function serveStorePage(req: Request, handle: string, route: StoreRoute):
 ```ts
 // src/lib/storefront/render.server.ts
 export interface RenderedStorePage { html: string; csp: string; etag: string; status: 200 | 404; bytes: number; noindex: boolean }
-export function renderStorePage(scope: StoreScope, store: StoreRow, route: StoreRoute, opts?: { mode?: "live" | "preview"; draft?: StorePageDoc; productDraft?: ProductRow }): Promise<RenderedStorePage>;
+export function renderStorePage(scope: StoreScope, store: StoreRow, route: StoreRoute, opts?: { mode?: "live" | "preview" | "test"; draft?: StorePageDoc; productDraft?: ProductRow }): Promise<RenderedStorePage>;
 ```
 1. Template: `getLiveTemplate(scope, kind)` (cached per version id in `scopedCache("store-templates")`, 512 entries,
    15 min) or the draft in preview.
@@ -835,10 +1010,15 @@ export function renderStorePage(scope: StoreScope, store: StoreRow, route: Store
    `#sg-config` (and `#lp-config` on the PDP) via `inlineJson` (`src/lib/render/config.ts:333`).
 7. CSP: `buildLandingCsp({ mode: "live", scriptHashes, styleHashes, pixels, turnstile })` from `inlineHashes(html)`
    (`src/lib/render/core.ts:135`); per-host CSP narrowing as core §C.9.
-8. Size check: document > 160 KB gzip → still served, `recordError("storefront", "page_cap")`; the template publish
-   gate (STO-§23.6) renders the template with the store's heaviest product and refuses publish above the cap.
-9. Budget: p95 ≤ 120 ms server time for a cold PDP render on the Hostinger plan [proposal, measured in the R2 load
-   test]; a warm hit ≤ 5 ms.
+8. Size check (rev 2, core D52): a document > 90 KB gzip is served and noted (`recordError("storefront", "page_soft")`,
+   once per template version per day); a document > **140 KB** gzip is still served (a live store never breaks on a
+   data change) but the template is flagged `over_budget` in Store Health (`sf:page_over_budget`) until the next
+   publish, which the gate refuses above the cap (STO-§6.3; the publish gate renders with the heaviest product and the
+   fullest grids).
+9. Test and preview modes (`opts.mode`): `test` embeds no pixel chunk, sets `addons.banner = "test"` and `noindex`;
+   `preview` sends no beacon, loads no pixel and the checkout block says it does not send (STO-§7.7).
+10. Budget: p95 ≤ 120 ms server time for a cold PDP render on the Hostinger plan [proposal, measured in the R2 load
+    test]; a warm hit ≤ 5 ms; a 304 ≤ 2 ms with no DB query.
 
 ### STO-§7.4 Cache key, ETag, single flight
 
@@ -849,7 +1029,7 @@ export function storeCacheKey(store: StoreRow, route: StoreRoute, windowId: numb
 /** number of announcement start/end instants (storefront setting, cached) at or before `now`: changes exactly when the rendered chrome must change */
 export function storeWindowId(settings: StorefrontSettings, now: Date): number;
 export function storeEtag(cacheKey: string): string;                         // `"s1-" + sha256(cacheKey + BUILD_ID).slice(0, 20) + '"'`
-export function singleFlight<T>(key: string, fn: () => Promise<T>): Promise<T>;   // map in scopedCache("store-render-inflight", 2,000 entries, 30 s)
+// single flight = the core's `ScopedCache.getOrLoad` on `scopedCache("render")` (STO-R24 accepted, core §E.6): no inflight map, no lint entry
 ```
 - Entries live in the core's byte-bounded `scopedCache("render")` (32 MB shared with landing pages); a value =
   `{ html, csp, etag, status, br?, gz? }`, size = Σ byte lengths.
@@ -869,9 +1049,10 @@ export function singleFlight<T>(key: string, fn: () => Promise<T>): Promise<T>; 
 | collection save, membership, archive | S1 | yes |
 | store template publish or restore-and-publish | S1 | yes |
 | `storefront` or `checkout` setting write | S1 / landing.md | yes |
-| delivery zone write | landing.md | yes (request STO-R19) |
-| store theme / brand change | design S2 | yes (request STO-R19) |
-| `store` setting (name, contacts, legal facts) and `policies` facts | core / landing.md | yes (request STO-R19) |
+| delivery zone write | landing.md | yes (STO-R19 accepted, core §K.4 contract step) |
+| store theme / brand change | design S2 | yes (STO-R19 accepted) |
+| `store` setting (name, contacts, legal facts) and `policies` facts | core / landing.md | yes (STO-R19 accepted) |
+| template publish through the gate, blueprint apply, `sync` republish of an attached landing (rev 2) | S1 | yes (publish) · no (`sync`: a landing version; the PDP never shows a landing's pack price) |
 | verified review published or hidden (R3) | D3 | yes |
 | handle, mode, domain change | core | `address_version` instead (core §C.6) |
 
@@ -880,7 +1061,7 @@ export function singleFlight<T>(key: string, fn: () => Promise<T>): Promise<T>; 
 | Route | Method | Body limit | What | Buckets | Answer |
 |---|---|---|---|---|---|
 | `order/route.ts` | POST | 48 KB | payload v3 (STO-§16) | `p:api:order:<ipHash>` 60/10 min, `s:<sid>:order:ip:<ipHash>` 8/10 min, `s:<sid>:orders` 600/10 min (core §E.8) | `OrderResponseV3` |
-| `lead/route.ts` | POST | 16 KB | abandoned-checkout lead (STO-§15.11) | `s:<sid>:lead:ip:<ipHash>` 30/10 min | `{ ok: true }` always (no oracle) |
+| `lead/route.ts` | POST | 16 KB | `kind: "form"`: abandoned-checkout lead (STO-§15.11) · **`kind: "whatsapp"`** (rev 2, STO-D34): server-priced WhatsApp order intent (STO-§15.13) | `s:<sid>:lead:ip:<ipHash>` 30/10 min; `whatsapp` kind also `p:wa:ip:<h>` 30/10 min and `s:<sid>:wa:ip:<h>` 10/10 min (core §E.8, the landing buckets) | `form`: `{ ok: true }` always (no oracle) · `whatsapp`: `{ ok: true, wa: { ref, number, text } }` or `{ ok: false, error: "unavailable" \| "rate_limited" \| "invalid" }` |
 | `cart/route.ts` | POST | 24 KB | re-price ≤ 20 lines (STO-§15.3) | `p:cart:ip:<ipHash>` 120/10 min, `s:<sid>:cart:ip:<ipHash>` 60/10 min | `CartPriceResponse` |
 | `event/route.ts` | POST | 4 KB | analytics beacon, the landing `EventPayload` shape with a template or product key | `p:evt:ip:<net>` (core) | 204 |
 | `search-index/route.ts` | GET | — | R3 instant-search index (`?cv=`) | `p:search:ip:<ipHash>` 60/10 min | JSON, `public, max-age=0, s-maxage=300` |
@@ -929,7 +1110,9 @@ export interface DeliverySummary {                  // from delivery_zones + fal
   etaMinDays: number | null; etaMaxDays: number | null;     // over served zones
 }
 export interface StoreRenderContext {
-  mode: "live" | "preview"; kind: StoreDocKind; register: Register;
+  mode: "live" | "preview" | "test"; kind: StoreDocKind; register: Register;
+  addons: RenderAddons;                             // core §H.13 (D62): add-on chunks, data blocks, extra CSS, `banner: "test"` (STO-D33); `exp-head` / `exp` in R3
+  genome: { grammar: Grammar; heroFamily: string; why: string[] } | null;   // the compiled page genes the document was built with (DNA card, STO-D39); null for utility kinds
   locale: Locale; dir: "rtl" | "ltr";
   store: StoreContext & { id: string; handle: string; market: Market; currency: string; key: string /* storage prefix = handle */ };
   links: StoreLinks; theme: BuiltTheme; catalogVersion: number; contextKey: string /* pages.public_key of the template */;
@@ -981,11 +1164,15 @@ A dead link is dropped from the rendered menu and listed as a warning in the men
 
 ### STO-§8.4 Registers and theme (DG-11, storefront side)
 
-| Kind | Register | Storefront-enforced rules (design owns the tokens and gates, DES-§11) |
+| Kind | Register | Storefront-enforced rules (design owns the tokens and gates, DES-§11.1) |
 |---|---|---|
-| home, page | marketing | the page may use every gene of the store's Brand Genome; one hero signature (DESIGN v3 budgets) |
-| product, collection, search, cart, checkout, not_found, policy | commerce | store sections use no glass or blur surface; CSS transitions ≤ 180 ms (store sections) and the document sets `data-register="commerce"` so landing content sections are clamped to ≤ 250 ms by design's CSS; accent fill limited to actions, selection and badges (≤ 8 % of the viewport in the render-matrix measurement); no ornament layer |
-| thanks, track | transactional | header without menu (logo + WhatsApp), no grid, no promotion before the order summary |
+| home, page | marketing | the page may use every gene of the store's Brand Genome; one hero signature + ≤ 3 secondary details (DESIGN v3 budgets); glass ≤ 2; reveals ≤ 40 nodes, one easing family (G23); `G22` may be `mixed` but ≤ 2 centred sections in a row |
+| product, collection, search, cart, checkout, not_found, policy | commerce | **G16 = 0** (no glass or blur surface anywhere, sticky bar and header included); motion ≤ 250 ms with one reveal kind (`fade-rise`) on the two marketing islands only, CSS transitions ≤ 180 ms on store sections, no scroll-linked motion; accent area ≤ 8 % of the viewport (actions, selection, badges); `G22 = start`; no decor (ghost word, ring badge, chips over photos, aurora, ticker); `G2 ∈ {catalogue, split-tension}` for the info column and grids. **Marketing islands (rev 2, STO-D14):** `collectionHeader:banner` and the PDP gallery + `productContent` slot may use the store's full gene set (grammar, treatment, type scale) under the document's motion and glass clamps |
+| thanks, track | transactional | header without menu (logo + WhatsApp), single column, no motion, no decoration, no grid, no promotion before the order summary; accent only on the one CTA and links |
+
+`compileRegister(brand, register, page?)` (DES-§11.1) gives the store document its tokens; `runGates` runs with the
+same `register`, so a commerce template with glass, motion > 250 ms or accent area > 8 % is a **hard** design item at
+publish (DG-11 acceptance). The render matrix (`qa:storefront-render`) measures all three on every kind fixture.
 
 - `getStoreTheme(scope, register)` (design S2, frozen as a stub in the R2 contract step, request STO-R19) returns the
   compiled `BuiltTheme` of the store's active `store_themes` row for that register. Until S2 lands, the stub returns
@@ -1031,6 +1218,11 @@ export interface StoreSectionDefinition<S extends z.ZodTypeAny = z.ZodTypeAny> {
   requiredIn?: readonly StorePageKind[];
   variants: VariantDef[];                                       // VariantDef of src/landing/types.ts:218-227 (archetypes, bgs)
   bento?: readonly string[];                                    // variant ids that count toward the one-bento budget
+  /** rev 2: per-variant features for the slop score and the height model (DES-§8.4 `VariantFeatures`, incl. `h`, `slots`, `glass`, `centered`, `signature`); required for every variant (registry test) */
+  features: Record<string, VariantFeatures>;
+  /** rev 2: hero families only (storeHero, productDetail, collectionHeader): the design grammars the variant serves and its declared fold layout (STO-§9.5) */
+  grammars?: Record<string, readonly Grammar[]>;
+  fold?: Record<string, FoldLayout>;
   schema: S;
   defaults(input: StoreDefaultsInput): z.infer<S>;              // { kind, store, shape: CatalogShape, locale, rng }
   fields: FieldSpec[];                                          // inspector (src/landing/types.ts:178-204 vocabulary)
@@ -1049,10 +1241,10 @@ no hook, no browser global (the rules of `src/landing/types.ts:1-14`), ar/fr/en 
 
 | Type | Kinds | Variants | Props (zod, summarised exactly) | Notes |
 |---|---|---|---|---|
-| `storeHero` | home, page | `product-stage`, `editorial-split`, `type-led`, `bento-lead` (bento), `media-full` | `{ eyebrow?: str ≤ 40, heading: str 1-90, sub?: str ≤ 200, cta: { label: str 1-30, link: LinkRef }, cta2?: same, media: AssetRef[] ≤ 3, productId?: Ulid, tiles: { collectionId: Ulid, label?: str ≤ 30, image?: AssetRef }[] ≤ 2, align: "start" \| "center" = "start" }` | `product-stage` requires `productId` (an active product): its cutout, its name and its real "Dès" price; `bento-lead` requires 2 tiles; `media-full` uses a scrim token, never glass on text |
+| `storeHero` | home, page | **8 hero families (rev 2, STO-D31):** `stage`, `editorial-split`, `poster-type`, `bento-lead` (bento), `cinematic-bleed`, `quiet-luxe`, `catalogue-index`, `specimen-sheet` (rev 1's `product-stage` / `type-led` / `media-full` are renamed `stage` / `poster-type` / `cinematic-bleed`) | `{ eyebrow?: str ≤ 40, heading: str 1-90, sub?: str ≤ 200 (≤ 20 words, rubric §4.7), cta: { label: str 1-30, link: LinkRef }, cta2?: same, media: AssetRef[] ≤ 3, productId?: Ulid, tiles: { collectionId: Ulid, label?: str ≤ 30, image?: AssetRef }[] ≤ 4, align: "start" \| "center" = "start", ghost: false /* fixed: no giant decorative word on store pages, DS12 */ }` | `stage` and `specimen-sheet` require `productId` (an active product with an alpha cutout, DES V13): its cutout, its name and its real "Dès" price; `bento-lead` requires 2-4 tiles (exactly as many cells as tiles, rubric §4.7); `cinematic-bleed` uses a scrim token, never glass on text, and needs a photo ≥ 1,600 px wide (DES V11); `catalogue-index` needs ≥ 3 active collections; ≤ 4 text elements in any family (rubric §4.7 hero stack); the fold layout per family is STO-§9.5 |
 | `collectionTiles` | home, page | `bento` (bento), `row`, `stack`, `index-list` | `{ heading?: str ≤ 60, items: { collectionId: Ulid, label?: str ≤ 30, image?: AssetRef }[] 2-8, showCount: bool = false }` | count = real `productCount`; a tile of an archived collection is skipped |
 | `productGrid` | home, page, product, collection, search, cart, not_found | `grid`, `carousel`, `editorial`, `dense` | `{ heading?: str ≤ 60, source: { kind: "collection", collectionId } \| { kind: "manual", productIds: Ulid[] 1-24 } \| { kind: "bestsellers" } \| { kind: "newest" } \| { kind: "related" }, limit: int 2-24 = 8, card: "auto" \| "minimal" \| "framed" \| "overlay" \| "editorial" = "auto", link?: { label: str ≤ 30, link: LinkRef } }` | `related` only on product (same primary collection, then shared tags, then newest; the current product excluded); `bestsellers` hidden unless STO-D22 allows; < 2 products → section not rendered; carousel: scroll-snap, no autoplay, arrow buttons on pointer devices |
-| `productDetail` | product (required, first) | `split`, `stacked`, `rail`, `immersive` | `{ gallery: "swipe" \| "grid" = "swipe", zoom: bool = true, showSku: bool = false, showPerUnit: bool = true, trust: ("cod" \| "delivery" \| "inspection" \| "returns" \| "whatsapp")[] ≤ 4 = ["cod","delivery","returns","whatsapp"], stickyBar: bool = true, description: "below_buy" \| "content" = "below_buy" }` | STO-§12; each trust item renders only with its fact |
+| `productDetail` | product (required, first) | **6 PDP families (rev 2, STO-D31):** `split`, `stacked`, `rail`, `immersive`, `specimen`, `quiet` (STO-§12.8) | `{ gallery: "swipe" \| "grid" = "swipe", zoom: bool = true, showSku: bool = false, showPerUnit: bool = true, trust: ("cod" \| "delivery" \| "inspection" \| "returns" \| "whatsapp")[] ≤ 4 = ["cod","delivery","returns","whatsapp"], stickyBar: bool = true, description: "below_buy" \| "content" = "below_buy" }` | STO-§12; each trust item renders only with its fact; every family declares its fold layout (STO-§9.5) and keeps the buy box as the one `#order` (LND-08) |
 | `productContent` | product (required) | `flow` | `{ spacing: "normal" \| "airy" = "normal" }` | renders `products.content.sections` with the PDP context |
 | `collectionHeader` | collection (required, first) | `minimal`, `banner`, `split` | `{ showDescription: bool = true, showCount: bool = true }` | name, description, image from the collection row |
 | `collectionProducts` | collection (required) | `grid`, `grid-large`, `list` | `{ perPage: 12 \| 24 \| 36 = 24, sorts: SortKey[] ≥ 1 = all, card: as productGrid }` | STO-§13.1 |
@@ -1090,6 +1282,60 @@ export function ProductCard(p: { data: ProductCardData; variant: CardVariant; ct
 - Variants: `minimal` (no frame, text under), `framed` (surface card, radius tier `--r-card`), `overlay` (text on a
   bottom scrim, marketing kinds only), `editorial` (large type, asymmetric caption).
 
+### STO-§9.5 Hero families, grammars and fold layouts (rev 2; STO-D31, D32; DB C1, C2, N4)
+
+A **hero family** is a structurally different first screen, not a re-skin: the position and size of the image, the
+type scale, the alignment and what the shopper can tap differ. Each family names the design grammars it serves
+(`GRAMMARS`, DES-§4.1), so the store's G2 (sampled per store with the archetype as a prior, DS1-DS3) picks the family
+through the pool table below, exactly as landing heroes are picked by DES-§5.4; the archetype never locks it.
+
+```ts
+// src/storefront/fold.ts (pure, isomorphic; frozen in the R2 contract step, STO-§27.1)
+export const HERO_FAMILIES = ["stage", "editorial-split", "poster-type", "bento-lead", "cinematic-bleed", "quiet-luxe", "catalogue-index", "specimen-sheet"] as const;   // storeHero variants (home, page)
+export const PDP_FAMILIES = ["split", "stacked", "rail", "immersive", "specimen", "quiet"] as const;                                                                   // productDetail variants (STO-§12.8)
+export type HeroFamily = (typeof HERO_FAMILIES)[number]; export type PdpFamily = (typeof PDP_FAMILIES)[number];
+export const FAMILY_GRAMMARS: Record<HeroFamily | PdpFamily, readonly Grammar[]>;   // the "grammars served" columns below and in STO-§12.8; the pools are the inverse map with weights
+export interface FoldLayout {
+  /** elements that must sit inside the first 844 px at 390 (and 740 px at 360) in every locale; verified by the height model at publish and by Playwright in qa:storefront-e2e */
+  mustShow: ("image" | "name" | "price" | "cod" | "cta" | "identity" | "collections")[];
+  /** estimated px from the top for the primary CTA's bottom edge at 390 (the height model's input) */
+  ctaBottomPx: number;
+  /** where the hero's single text block sits: start-aligned column, centred statement (≤ 2 per page, DES V08) or overlapping the image */
+  text: "column" | "statement" | "overlap";
+}
+export function checkFold(doc: StorePageDoc | ProductView, kind: StorePageKind, variant: string, locale: Locale): FoldIssue[];   // uses features.h + FoldLayout; gate budget:C2
+```
+
+| Family (`storeHero` variant, home) | Grammars served (G2) | First screen at 390 × 844 | `mustShow` | Treatment (G18) it suits |
+|---|---|---|---|---|
+| `stage` | stage | cutout on a lit stage ground (`cutout-stage`), name, real "Dès" price, one CTA; text column start-aligned; no hotspots unless merchant anchors exist (DB I5) | image, name, price, cta, identity | cutout-stage |
+| `editorial-split` | editorial-column, split-tension | 5:7 split: photo block + type column; CTA inside the column; a caption line under the photo (FIG.-style allowed once, DB §6 keep 7) | image, cta, identity | framed, tight-detail |
+| `poster-type` | poster | display type ≥ 52 px at 390 (≤ 3 lines, `text-wrap: balance`, T2), one photo below the type edge crossing the section boundary (DB C4), CTA under the type | image, cta, identity | full-bleed-crop |
+| `bento-lead` | gallery-led | 2-4 collection tiles of unequal size (exactly as many cells as tiles) with one headline; the first tile is the CTA | collections, cta, identity | grid-contact, framed |
+| `cinematic-bleed` | cinematic | one full-bleed photo (≥ 1,600 px), a scrim, short type at the bottom start corner, one CTA; no glass | image, cta, identity | full-bleed-crop |
+| `quiet-luxe` | quiet-luxe | generous space, one small photo or none, type ≤ 36 px, hairline rule, one CTA; ≤ 35 words (a "quiet" screen, DB C4) | cta, identity (+ image when present) | tonal-duotone, framed |
+| `catalogue-index` | catalogue, specimen | a search field as the hero action, an index list of ≥ 3 collections with counts, a small product thumbnail strip | collections, cta (search), identity | grid-contact |
+| `specimen-sheet` | specimen | product cutout on a neutral ground with a data column (3-4 real facts from `product.facts`, no invented numbers), price, CTA | image, name, price, cta, identity | cutout-stage, tight-detail |
+
+Pool weights (the home's G2 → `storeHero` variant), the storefront's row of DES-§5.4: `stage`: stage .7, specimen-sheet
+.3 · `editorial-column`: editorial-split .6, quiet-luxe .4 · `poster`: poster-type .7, bento-lead .3 · `gallery-led`:
+bento-lead .6, editorial-split .4 · `specimen`: specimen-sheet .6, catalogue-index .4 · `catalogue`: catalogue-index .7,
+bento-lead .3 · `split-tension`: editorial-split .7, stage .3 · `cinematic`: cinematic-bleed .8, poster-type .2 ·
+`quiet-luxe`: quiet-luxe .7, editorial-split .3. A family whose data requirement is not met (no cutout, < 3 collections,
+no ≥ 1,600 px photo) is skipped and the next weight wins; `scrapbook`-like collages and rotating ring badges do not exist
+on store pages (DESIGN v3 banned list, DS12).
+
+Share caps (measured by the DG-09-style store corpus, STO-§26.1, and in production by `gene_stats` on the `heroFamily`
+value): any one family ≤ 30 % of live homes in a niche over 100 stores (DB C1); the distinct (family × G4 pairing × G9
+strategy) count over 100 generated homes of one niche ≥ 40 (DB N4); the pairing and strategy come from the Brand Genome,
+so the storefront only has to keep the family draw seeded by `deriveSeed(brand_seed, inputHash, "home")` (DS5).
+
+Every family keeps the rubric's hero discipline where it does not conflict with the owner rules: ≤ 4 text elements
+(eyebrow or none, headline ≤ 2 lines at 1440 and ≤ 3 at 390, subtext ≤ 20 words, CTAs 1 + ≤ 1), no trust strip or logo
+wall inside the hero (the `trustStrip` section follows it), no version label, no scroll cue, no decorative text strip
+(rubric §4.7, §9.F); Arabic type keeps T2-T3 (whole-line reveals, ≥ 1.25 display leading) and never uppercase or
+tracking (RTL7).
+
 ---
 
 ## STO-§10 Header, navigation, footer and chrome (ST-02, LND-31)
@@ -1126,7 +1372,11 @@ export const StorefrontSettings = z.object({
   }).default({}),
   whatsapp: z.object({ float: z.enum(["bubble", "tab", "off"]).default("bubble"), prefill: z.string().max(120).optional() }).default({}),
   pixels: Tracking.default({}),                                       // library ids or { none: true } (STO-D18)
-  home: z.object({ archetype: z.enum(HOME_ARCHETYPES).default("hero-product") }).default({}),
+  home: z.object({
+    storyline: z.enum(HOME_STORYLINES).default("hero-product"),      // rev 2: the slot list (STO-§11.1); rev 1's `archetype` field renamed
+    heroFamily: z.enum(HERO_FAMILIES).optional(),                     // owner override of the G2 pool draw (STO-§9.5); unset = drawn from the Brand Genome
+  }).default({}),
+  pdpFamily: z.enum(PDP_FAMILIES).optional(),                         // owner override of the PDP family (STO-§12.8); unset = drawn
   productCard: z.enum(["minimal", "framed", "overlay", "editorial"]).default("minimal"),
   imageRatio: z.enum(["4:5", "1:1", "3:4"]).default("4:5"),
   digits: z.enum(["latin", "arabic"]).default("latin"),               // Arabic-Indic digits on ar pages only when "arabic"
@@ -1174,30 +1424,43 @@ WhatsApp icon when a number is set. No menu, no search, no cart icon.
 
 ```ts
 // src/storefront/home/grammar.ts (pure)
-export const HOME_ARCHETYPES = ["hero-product", "category-bento", "editorial", "catalogue-dense", /* R3 */ "drop", "routine", "gift-guide", "local-maker"] as const;
-export interface CatalogShape { activeProducts: number; collections: number; bestsellers: boolean; cutouts: number; categories: ProductCategory[]; heroProductId?: string; launchAt?: string /* drop */ }
-export interface HomeSlot { id: string; options: { type: string; variants: readonly string[]; bind?: "hero" | "any" }[]; required: boolean; when?: (s: CatalogShape) => boolean }
-export interface HomeArchetype { id: HomeArchetypeId; release: "R2" | "R3"; fits(s: CatalogShape): boolean; slots: readonly HomeSlot[] }
-export function expandHome(a: HomeArchetype, shape: CatalogShape, seed: () => number, hints?: GeneHints): StoreSectionInstance[];   // seeded alternates, then invariants
-export function checkHomeDoc(doc: StorePageDoc, shape: CatalogShape): HomeIssue[];   // STO-§11.3
-export function defaultArchetype(shape: CatalogShape): HomeArchetypeId;
+export const HOME_STORYLINES = ["hero-product", "category-bento", "editorial", "catalogue-dense", /* R3 */ "drop", "routine", "gift-guide", "local-maker"] as const;   // rev 1 called them "archetypes"; renamed: a storyline is a slot list, never a look
+export interface CatalogShape { activeProducts: number; collections: number; bestsellers: boolean; cutouts: number; wideImages: number /* ≥ 1,600 px */; categories: ProductCategory[]; heroProductId?: string; launchAt?: string /* drop */ }
+export interface HomeSlot { id: string; options: { type: string; variants: readonly string[]; bind?: "hero" | "any" }[]; required: boolean; when?: (s: CatalogShape) => boolean; density: "airy" | "balanced" | "dense" }
+export interface HomeStoryline { id: HomeStorylineId; release: "R2" | "R3"; fits(s: CatalogShape): boolean; slots: readonly HomeSlot[] }
+export interface HomeGenes { grammar: Grammar; treatment: Treatment; density: PageGenes["G20"]; align: PageGenes["G22"]; hints?: GeneHints }   // from the Brand Genome's house genes (DES-§11.2) + the page draw
+export function expandHome(s: HomeStoryline, genes: HomeGenes, shape: CatalogShape, rng: () => number): { sections: StoreSectionInstance[]; record: PageGenes["G24"]; heroFamily: string } | null;   // hero family from the STO-§9.5 pool for genes.grammar; alternates seeded; invariants checked; null after 50 failed draws
+export function checkHomeDoc(doc: StorePageDoc, shape: CatalogShape, locale: Locale): HomeIssue[];   // STO-§11.3 (H1-H13)
+export function defaultStoryline(shape: CatalogShape): HomeStorylineId;
+export function homeSeed(store: Pick<StoreRow, "brandSeed">, shape: CatalogShape, attempt: number): number;   // deriveSeed(brandSeed, inputHash(shape), "home", attempt) (DS5; DB N6)
 ```
-The seed is `seededRandom(hash32(stores.brand_seed + ":home"), attempt)` (`src/landing/context.ts:38,65`); design's
-genome G2 (composition grammar, DES-§5) may choose among the archetypes whose `fits` is true and passes `GeneHints`
-for variant weights; the novelty check (DES-§7) runs on the compiled page genome before the owner sees it.
+**rev 2:** the storyline (slot list) and the look are separated. The storyline comes from the catalogue shape; the
+**hero family, the variant pools, the treatment and the density come from the store's Brand Genome** (G2, G18, G20,
+G22 of the `house` genes, DES-§11.2; the archetype G1 is only a prior, DS1). The seed mixes the brand seed **and the
+catalogue shape** (`homeSeed`), so two stores with the same photos, or one store with two catalogues, never share
+(family, pairing, order) (DB N6; rev 1's `seededRandom(hash32(brand_seed + ":home"))` ignored the product). Design's
+`GeneHints` (DES-§4.6, from the blueprint's Director brief when Cloud AI is on) weight the draws; the solver, the gates
+and the novelty check still decide. The novelty check (DES-§7.4, verdict bands only) runs on the compiled page genome
+before the owner sees a draft; `close` or `too_close` resamples one bold gene (≤ 8 tries) and never blocks generation.
 
-### STO-§11.2 Archetypes and slots
+### STO-§11.2 Storylines and slots (rev 2: "archetypes" renamed; the look comes from the genome, STO-§11.1)
 
-| Archetype | Fits | Slots in order (alternates) |
+| Storyline | Fits | Slots in order (alternates; the `storeHero` family comes from the G2 pool of STO-§9.5, constrained to the families listed) |
 |---|---|---|
-| `hero-product` (R2) | 1-3 active products, or an ad-driven store | 1 storeHero (`product-stage` \| `editorial-split`, bound to the hero product) · 2 trustStrip (`inline` \| `rail`) · 3 benefits \| showcase (bound) · 4 productGrid (`manual`, other products, `carousel` \| `grid`) when ≥ 2 products · 5 steps \| story (optional) · 6 faq (optional) · 7 whatsappCta (`banner`) |
-| `category-bento` (R2) | ≥ 5 products and ≥ 3 collections | 1 storeHero (`type-led` \| `bento-lead`) · 2 collectionTiles (`bento` unless the hero used `bento-lead`, then `row`) · 3 productGrid (`bestsellers` \| `newest`, `grid`) · 4 trustStrip (`cards`) · 5 mediaText (`split` \| `overlap`) · 6 productGrid (one collection, `carousel`, optional) · 7 whatsappCta (`card`, optional) |
-| `editorial` (R2) | categories ∩ {fashion, jewelry, accessories, beauty} and ≥ 4 products with photos | 1 storeHero (`editorial-split` \| `media-full`) · 2 mediaText (`full-bleed`) · 3 productGrid (`editorial`) · 4 collectionTiles (`stack` \| `index-list`) when ≥ 2 collections · 5 trustStrip (`inline`) · 6 story (optional) |
-| `catalogue-dense` (R2) | ≥ 50 products | 1 storeHero (`type-led`, short, search-first) · 2 collectionTiles (`row`) · 3 productGrid (`newest`, `dense`) · 4 productGrid (`bestsellers`, `dense`) when allowed · 5 trustStrip (`rail`) · 6 whatsappCta (`card`) |
-| `drop` (R3) | a real launch date set by the owner | storeHero (`media-full`) with the real countdown · product reveal (mediaText bound) · whatsappCta ("Être prévenu(e)") · trustStrip |
-| `routine` (R3) | beauty / care, ≥ 3 products | storeHero · steps (bound per step) · productGrid (`manual`, the routine) · trustStrip · faq |
-| `gift-guide` (R3) | ≥ 6 products, owner-typed budgets | storeHero (`type-led`) · collectionTiles (`row`, budget collections) · productGrid × 2 · trustStrip |
-| `local-maker` (R3) | owner opts in | storeHero (`editorial-split`) · story · mediaText (`full-bleed`, workshop photos) · productGrid · trustStrip (modern visuals only, no craft motifs, DESIGN §1.1) |
+| `hero-product` (R2) | 1-3 active products, or an ad-driven store | 1 storeHero (families `stage` \| `editorial-split` \| `specimen-sheet` \| `quiet-luxe`, bound to the hero product) · 2 trustStrip (`inline` \| `rail`) · 3 benefits \| showcase (bound) · 4 productGrid (`manual`, other products, `carousel` \| `grid`) when ≥ 2 products · 5 steps \| story (optional) · 6 faq (optional) · 7 whatsappCta (`banner`) |
+| `category-bento` (R2) | ≥ 5 products and ≥ 3 collections | 1 storeHero (`poster-type` \| `bento-lead` \| `cinematic-bleed`) · 2 collectionTiles (`bento` unless the hero used `bento-lead`, then `row`) · 3 productGrid (`bestsellers` \| `newest`, `grid`) · 4 trustStrip (`cards`) · 5 mediaText (`split` \| `overlap`) · 6 productGrid (one collection, `carousel`, optional) · 7 whatsappCta (`card`, optional) |
+| `editorial` (R2) | categories ∩ {fashion, jewelry, accessories, beauty} and ≥ 4 products with photos | 1 storeHero (`editorial-split` \| `cinematic-bleed` \| `quiet-luxe`) · 2 mediaText (`full-bleed`) · 3 productGrid (`editorial`) · 4 collectionTiles (`stack` \| `index-list`) when ≥ 2 collections · 5 trustStrip (`inline`) · 6 story (optional) |
+| `catalogue-dense` (R2) | ≥ 50 products | 1 storeHero (`catalogue-index` \| `poster-type`, search-first) · 2 collectionTiles (`row`) · 3 productGrid (`newest`, `dense`) · 4 productGrid (`bestsellers`, `dense`) when allowed · 5 trustStrip (`rail`) · 6 whatsappCta (`card`) |
+| `drop` (R3) | a real launch date set by the owner | storeHero (`cinematic-bleed` \| `poster-type`) with the real countdown · product reveal (mediaText bound) · whatsappCta ("Être prévenu(e)") · trustStrip |
+| `routine` (R3) | beauty / care, ≥ 3 products | storeHero (`quiet-luxe` \| `editorial-split`) · steps (bound per step) · productGrid (`manual`, the routine) · trustStrip · faq |
+| `gift-guide` (R3) | ≥ 6 products, owner-typed budgets | storeHero (`poster-type` \| `bento-lead`) · collectionTiles (`row`, budget collections) · productGrid × 2 · trustStrip |
+| `local-maker` (R3) | owner opts in | storeHero (`editorial-split` \| `quiet-luxe`) · story · mediaText (`full-bleed`, workshop photos) · productGrid · trustStrip (modern visuals only, no craft motifs, DESIGN §1.1) |
+
+Composition devices per home (DB C4, soft): ≥ 1 full-bleed image or colour moment, ≥ 1 boundary-crossing element
+(the hero photo or a tile crossing a section edge; `record.cross`), ≥ 1 quiet screen (≤ 35 words, one image or none).
+Density follows the brand's `G20.p` pattern (ABAC / AAB / ABAB) over the slots' `density` values; no three consecutive
+sections with the same density (DES V08). Section openers: ≤ 30 % of sections carry an eyebrow; ≥ 3 opener structures
+per home (bare headline, caption column, number-led, image-first; DB C5).
 
 ### STO-§11.3 Invariants (`checkHomeDoc`, also run by the store checklist)
 
@@ -1205,7 +1468,7 @@ for variant weights; the novelty check (DES-§7) runs on the compiled page genom
 |---|---|
 | H1 | The first section is a `storeHero`. |
 | H2 | The first section links to a product or a collection. |
-| H3 | At least one `productGrid`, or a `product-stage` hero bound to an active product. |
+| H3 | At least one `productGrid`, or a `stage` / `specimen-sheet` hero bound to an active product. |
 | H4 | At most one bento variant on the page (DESIGN v3 budget). |
 | H5 | No two adjacent sections with the same `bg`. |
 | H6 | At most 2 centre-aligned sections in a row. |
@@ -1213,32 +1476,79 @@ for variant weights; the novelty check (DES-§7) runs on the compiled page genom
 | H8 | 4 to 9 sections. |
 | H9 | `bestsellers` sources only when STO-D22 allows them. |
 | H10 | Every bound product is active; every referenced collection is active. |
+| H11 (rev 2) | The fold contract of the hero family holds at 390 × 844 and 360 × 740 in the store's locale (`checkFold`, STO-§9.5): hero image or colour moment, one primary CTA and the store identity inside the first screen; the price too when the hero is product-bound. Hard (gate `budget:C2`). |
+| H12 (rev 2) | The hero family is in the G2 pool of the page's grammar (STO-§9.5) and its data requirements are met (cutout for `stage` / `specimen-sheet`, ≥ 3 collections for `catalogue-index`, a ≥ 1,600 px photo for `cinematic-bleed`). Hard. |
+| H13 (rev 2) | Per-kind budgets of STO-§6.1 (sections, height, CTAs, glass 0-2, reveals, photo reuse); ≤ 30 % of sections with an eyebrow; ≤ 2 centred sections in a row. Soft; hard at the hard column. |
 
 ### STO-§11.4 Generation contract
 
-- R2 without Cloud AI: `defaultTemplate("home")` = `expandHome(defaultArchetype(shape), …)` with copy from the copy
-  library (design's cliché detector and the honesty guard apply, DES-§9, ai.md AI-§D). With Cloud AI on, the store
-  blueprint (AI-11) supplies the archetype choice, collection drafts and copy (STO-§11.5).
-- Every generated home passes `checkHomeDoc` and design's gates, else the generator re-rolls (≤ 3 attempts) and then
-  falls back to the plainest valid alternate of each slot.
-- Owner edits are never blocked by H2-H8; they show as checklist warnings with a one-click fix (H1, H3 and H10 are
-  errors at publish).
+- R2 without Cloud AI (the **instant path**, always available, < 2 s): `defaultTemplate("home", shape, store)` =
+  `expandHome(defaultStoryline(shape), houseGenes(brand), shape, rngFor(homeSeed(store, shape, attempt)))` with copy from
+  the copy library (design's cliché detector and the honesty guard apply, DES-§9, ai.md AI-§D); three candidates are
+  built (slots `best-fit` / `contrast` / `explore`, ra §0.6) and the owner picks one on the storefront overview, each
+  with its DNA card (STO-D39).
+- With Cloud AI on, the **store blueprint** (AI-11, deep Director, STO-D38) runs as a detached job: stage 1 brand brief
+  → `GeneHints` for the brand genes (S2's `sampleBrand`), stage 2 collections from the owner's own products + the home
+  storyline and slot plan, stage 3 about and policy drafts from `policies` facts only (`needsReview`). The job's result
+  is applied as drafts by `applyStoreBlueprint` (STO-§11.5); the instant candidates stay available and the owner can
+  toggle back (ra §1.2 "the Director pass is an upgrade").
+- Every generated home passes `checkHomeDoc` (H1-H13), `runGates` (`register: "marketing"`) and the novelty check,
+  else the generator re-rolls (≤ 8 draws, resampling one bold gene when the novelty band is `close` / `too_close`) and
+  then falls back to the plainest valid alternate of each slot with `why += "fallback-order"`.
+- Owner edits are never blocked by H2, H4-H9, H13 (soft); they show as checklist warnings with a one-click fix (H1,
+  H3, H10, H11, H12 are hard at publish through the core gate, STO-D35).
+- Acceptance (`test:catalog`, the store corpus of STO-§26.1): 4 storylines × 3 shapes × ar/fr × 50 seeds = 1,200 homes
+  with 0 hard items; ≥ 60 distinct in-flow sequences per 100 homes of one niche and no 4-section subsequence in > 50 %
+  of them (DB N3); no family > 30 % per niche (C1); fold contract 100 % (C2); same seed, two shapes → never the same
+  (family, pairing, order) (N6); ar and fr of one genome differ in type scale and hero arrangement (N7).
 
 ### STO-§11.5 Applying a store blueprint (AI-11 consumer)
 
 ```ts
 // src/lib/catalog/blueprint.server.ts
-export interface StoreBlueprint {                      // produced by ai.md AI-11 (shape frozen by ai.md; storefront consumes)
-  archetype: HomeArchetypeId;
-  collections: { name: string; description?: string; productIds: string[] }[];   // owner's own products only
+export interface StoreBlueprint {                      // produced by ai.md AI-11 (shape frozen by ai.md; storefront consumes); every value from closed vocabularies
+  storyline: HomeStorylineId;
+  hints: GeneHints;                                     // brand and page gene weights (DES-§4.6), applied by S2's sampleBrand and expandHome; never a raw genome
+  collections: { name: Record<Locale, string>; description?: Record<Locale, string>; productIds: string[] }[];   // owner's own products only (assertOwned)
   home: { slots: { type: string; variant: string; data: Record<string, unknown>; bind?: string }[] };
-  pages?: { title: string; slug: string; sections: { type: string; variant: string; data: Record<string, unknown> }[] }[];   // about, FAQ drafts
+  pages?: { title: Record<Locale, string>; slug: string; sections: { type: string; variant: string; data: Record<string, unknown> }[]; needsReview: true }[];   // about, FAQ, policy drafts from `policies` facts only
+  provenance: { source: "director" | "deep" | "instant"; runIds: string[]; promptVersions: Record<string, string> };   // written into page_versions.generation_source / critic_picks on publish
 }
+/** Interactive entry: returns at once with the instant candidates and, when Cloud AI and `store_ai.deepPass` are on, the job id of the deep blueprint (ai_jobs kind "store_blueprint", pattern B, core §H.12). */
+export function startStoreDesign(ctx: StoreCtx): Promise<{ instant: { candidates: StoreBlueprint[] /* 3 */ }; job: { jobId: string } | null }>;
 /** @write */ export function applyStoreBlueprint(ctx: StoreCtx, bp: StoreBlueprint): Promise<{ collections: string[]; homeDraftVersionId: string; pages: string[]; dropped: string[] }>;
 ```
-Creates draft collections (ids checked with `assertOwned(scope, "product", …)`), the `@home` draft (validated by
-`StorePageDoc` + `checkHomeDoc`; invalid slots are dropped and listed), draft custom pages; never publishes; one audit
-row `store.storefront.blueprint_applied`.
+`startStoreDesign` builds the three instant candidates in the request (< 2 s), then, when the deep pass is allowed
+(`store_ai.deepPass`, `deepPassesPerStorePerDay`, `s:<sid>:ai:jobs` 10/h), inserts the `ai_jobs` row through P7's
+`enqueueAiJob` and answers `job_queued` semantics inside the result; the storefront overview polls
+`GET /api/app/<h>/ai/jobs/<id>` every 2 s visibility-aware (core §H.12), shows the stage line ("Reading your products →
+Briefing the brand → Planning the home → Drafting the pages"), and offers "Apply" when done, with the instant
+candidates still applicable and an undo (the previous `@home` draft version). A failed or orphaned job keeps the instant
+result (core §H.12 orphan rule); the pulse's `jobs.done` wakes a closed tab's next visit.
+
+`applyStoreBlueprint` creates draft collections (ids checked with `assertOwned(scope, "product", …)`), the `@home` draft
+(validated by `StorePageDoc` + `checkHomeDoc`; invalid slots are dropped and listed), draft custom pages flagged
+`needsReview`; never publishes; one audit row `store.storefront.blueprint_applied` (`{ source, dropped }`); the
+provenance is stored on the draft and copied to the version at publish. Acceptance (with AI-11): 0 hard gate items on
+the compiled home; brand distance verdict `ok` for every live store in the niche or one bold gene resampled; no fact,
+number or policy appears that the owner did not give (guard with the `policies` facts as the only allowed source); the
+whole flow passes with Cloud AI off (instant candidates only).
+
+### STO-§11.6 Design DNA on store pages (SF-02, STO-D39)
+
+- **DNA card** (P6's component, DES-§15.4, mounted by S1): in the store page editor's Theme panel for `home` and
+  `page` kinds and read-only for utility kinds: the bold-gene chips ("Editorial column · Fraunces/Readex · ink + one ·
+  tight-detail crops"), the hero family, the one-sentence **why** line (`genome.why` → DES-§4.8 keys in the admin
+  locale), the novelty **words** per band (DS27: "Distinct across the platform · Distinct in your niche · Distinct from
+  your other pages"), and lock toggles ("Lock for my brand", `brand.write`). No number of distance ever renders (DS7).
+- **Brand DNA card** on the storefront overview (STO-§23.5): the Brand Genome's chips, the active `store_themes`
+  version and "Generate my store design" / "Design studio" (S2).
+- **Provenance**: the template version's `generation_source` and `critic_picks` (STO-§3.1) feed the card's footer
+  ("Designed by the instant engine" / "Designed with the deep pass on 24 Oct") so "which AI wrote this" is always
+  answerable (ra §5.6).
+- Acceptance: the rendered admin HTML of the storefront overview and the store page editor contains no decimal in a
+  novelty context (regex over the DNA card markup); two stores generated from the same photos show different chips and
+  `ok` bands; a store created before the genome shipped shows "Generated before design DNA; remix to upgrade".
 
 ---
 
@@ -1246,7 +1556,11 @@ row `store.storefront.blueprint_applied`.
 
 ### STO-§12.1 Anatomy on a 360 px phone (top to bottom)
 
-The first screen (360 × 740) shows the first image, the name, the price, the COD line and the primary action (sf §4.4).
+The first screen shows the first image, the name, the price, the COD line and the primary action in **every** PDP
+family and locale (STO-D32; at 390 × 844 and 360 × 740; sf §4.4, DB C2): this is the fold contract each
+`productDetail` variant declares (`fold`, STO-§9.5) and the publish gate verifies; the families themselves are
+STO-§12.8. The order below is the `split` family on a phone; the other families move the gallery and the info column
+but keep the same elements in the same reading order.
 
 1. **Gallery**: swipeable 4:5 (store `imageRatio`), dots + "1/6" counter, tap opens a zoom dialog (focus trapped,
    pinch on touch, Escape closes); video slot from R3 (LP-14). Choosing an option whose choice, matrix value or cell has
@@ -1282,16 +1596,24 @@ The first screen (360 × 740) shows the first image, the name, the price, the CO
 
 ### STO-§12.3 Delivery line by city (R-D22, ST-17)
 
-- Data: the zone table for the checkout (`zonesForCheckout(scope)`, landing.md, request STO-R19) embedded in
-  `#sg-config` (STO-§14.4): city key → zone index, per zone `{ fee, freeFrom, etaMin, etaMax, notServed }`, plus the store
-  calendar `{ tz, cutoffHour, workdays, holidays (next 60 days) }`.
-- Server HTML (no JS fallback): the store range "Livraison {etaMin}-{etaMax} jours ouvrés · {minFee} à {maxFee}" built
-  from `DeliverySummary`, each part only when set; nothing at all when zones are off and no fallback fee exists.
+- Data: the zone table for the checkout (`listZones(scope)` → `DeliveryZoneRow[]`, LAN-§7.1; the STO-R19 stub name
+  `zonesForCheckout` resolves to it) embedded in `#sg-config` (STO-§14.4): city key → zone index, per zone `{ fee,
+  free, eta: [min, max] | null, ns }`, plus the store calendar `{ tz, cutoffHour, workdays, holidays (next 60 days) }`
+  from the `checkout` setting (`StoreCalendar`, LAN-§7.1) and the localized strings; ≈ 2-3 KB gz for 147 cities (the
+  landing `lp-assist.dz` block has the same shape, LAN-§7.4).
+- Server HTML (no JS fallback): the store range "Livraison en {min} à {max} jours ouvrés selon la ville · {minFee} à
+  {maxFee}" built from `DeliverySummary`, each part only when set; nothing at all when zones are off and no fallback
+  fee exists (the same text rule as LAN-§7.4's no-city state).
 - With JS: the city chip ("Votre ville : Tanger · changer") remembers the city in `sg:<handle>:city`
-  (`localStorage`); the line becomes "Livraison à Tanger : mer. 29 ou jeu. 30 oct. · 25 DH" through `etaWindow()`
-  (landing.md `src/lib/delivery/eta.ts`, isomorphic, STO-D17) and `storeDeliveryFee()` (STO-§15.9); "offerte" when the
-  rule says free; a `notServed` city shows "Nous ne livrons pas encore à {city}" with the WhatsApp button and the buy
-  actions disabled for that city.
+  (`localStorage`); the line becomes "Livraison à Tanger : entre mer. 29 et jeu. 30 oct. · 25 DH (estimation)"
+  through landing's `etaWindow(cal, zone, now)` and `etaText(w, zone, locale, cfg.money.locale, now)` (`src/lib/delivery/
+  eta.ts`, bundled into the `checkout` and `pdp` chunks like `assist` bundles it, LAN-§5.2) and `storeDeliveryFee()`
+  (STO-§15.9); "offerte" when the rule says free; a `notServed` city shows "Nous ne livrons pas encore à {city}" with the
+  WhatsApp button and the buy actions disabled for that city (`data-sg-dz-state="ns"`); a zone without days shows
+  "Livraison à Tanger · 25 DH"; a city outside every zone with no `*` zone and no fallback shows no line (no promise).
+- Every date carries the muted "(estimation)" / "(تقريبي)" / "(estimated)" marker and no dash inside the range
+  (LAN-§7.2 steps 4-5); the ETA text is byte-identical to what the landing `assist` chunk and the tracking page render
+  for the same city and instant (`test:catalog` asserts it against `test:delivery` fixtures).
 - The fee shown is always the fee the checkout and the server compute for that city and that subtotal.
 
 ### STO-§12.4 Gallery and media
@@ -1342,6 +1664,60 @@ glass on commerce kinds (solid surface + hairline).
 | Store `restricted` | 200; buy box and checkout replaced by "Commande temporairement indisponible" + WhatsApp (STO-D28) |
 | Synthetic doc invalid (bug) | 200; buy box replaced by the WhatsApp ask; error logged (STO-§4.1) |
 | Preview | as live; checkout says it does not send |
+| Test token (STO-D33) | as live, rendered on request: no pixel chunk, "Commande test : non comptée" banner, `noindex`, `private, no-store`; the token travels in `sessionStorage` to the checkout |
+
+### STO-§12.8 PDP hero families (rev 2; STO-D31, DB C1, C2)
+
+The PDP template's `productDetail` variant is a **family**: the arrangement of gallery, info column, buy box and
+content. One template serves every product of the store, so the family is a brand-level choice (drawn from the Brand
+Genome's G2 with the archetype as a prior, like the home hero; pools below); the owner may override it in the template
+editor. The buy box and the checkout block are byte-identical across families (one `form[data-lp-form]`, one
+`#order`, LND-08, STO-§12.2).
+
+| Family | Grammars served (G2) | ≥ 1,024 px | 390 px (fold = `mustShow` image, name, price, cod, cta inside 844 px; `ctaBottomPx`) | Suits |
+|---|---|---|---|---|
+| `split` | split-tension, editorial-column | gallery column 7/12 at inline-start, sticky info column 5/12 | gallery 4:5 full width (≈ 488 px), then name, price, buy box; `ctaBottomPx` ≈ 780 with a 2-line name (ar +6 % type: ≈ 800) | most catalogues |
+| `stacked` | poster, catalogue | gallery as a 2-column grid of photos, info below centred-start | gallery swipe 1:1 (≈ 390 px), info; `ctaBottomPx` ≈ 700 | few photos, long names |
+| `rail` | catalogue, specimen | vertical thumbnail rail + large image, info column | large image 4:5 with a horizontal thumbnail rail under it (56 px), info; `ctaBottomPx` ≈ 820 | 6-30 photos, variants with photos |
+| `immersive` | cinematic | full-bleed gallery (`full-bleed-crop`), info panel overlapping the image's lower edge (the one boundary crossing, DB C4) | 3:4 bleed image (≈ 520 px) with the info panel overlapping by 48 px; `ctaBottomPx` ≈ 830 | photo-led brands with ≥ 1,600 px photos (DES V11) |
+| `specimen` | specimen | cutout on a neutral stage at inline-start, info as a data column (name, price, 3-4 real facts, options, buy) | cutout 1:1 on the stage (≈ 360 px), data column; `ctaBottomPx` ≈ 760 | tech, tools, products with an alpha cutout (DES V13) |
+| `quiet` | quiet-luxe | one large image with generous margins (inline 64 px), small type, hairline rules, info column narrow | image 4:5 inset (≈ 420 px), name ≤ 28 px, price, buy; `ctaBottomPx` ≈ 800 | perfume, jewellery, premium (calm mood) |
+
+Pool weights (the store's G2 → PDP family): `split-tension` split .7, immersive .3 · `editorial-column` split .6, quiet
+.4 · `poster` stacked .6, immersive .4 · `gallery-led` rail .6, immersive .4 · `stage` specimen .5, split .5 ·
+`specimen` specimen .7, rail .3 · `catalogue` rail .5, stacked .5 · `cinematic` immersive .7, split .3 · `quiet-luxe`
+quiet .8, split .2. A family whose data requirement fails for the store's products (no cutouts for `specimen`, no
+≥ 1,600 px photos for `immersive`) falls to the next weight; the fold estimate uses the store's **longest active product
+name** in its locale and the tallest offer picker the store uses, so a template that passes the gate passes for every
+product. Share cap: ≤ 30 % of PDP templates per family in a niche over 100 stores (DB C1), measured like the home.
+
+Art direction rules every family keeps (DB §6 keep-list 3, 5, 7; rubric §4.1-4.7 where the owner rules allow): the
+price cluster is one inline-flex unit with tabular lining numerals and the discount chip adjacent (T1, RTL4); the
+struck reference only when real (OFFERS §C.3); the display name ≤ 3 lines at 390 with `text-wrap: balance` and whole-
+line reveals in Arabic (T2); no eyebrow above the name; no glass anywhere (commerce register); one CTA label per intent
+("Commander" everywhere in the inline model, "Ajouter au panier" + "Commander maintenant" in the cart model, rubric
+§4.5); the sticky bar hides while the buy box or the checkout block is ≥ 50 % visible (R7); hotspots never (I5); the
+gallery counter "1/6" as text, no overlay pills on photos (rubric §9.F).
+
+### STO-§12.9 PDP budgets and gates (rev 2; STO-D36, D37)
+
+| Measure | Soft (note, lowers Q) | Hard (publish refused) | Gate id |
+|---|---|---|---|
+| In-flow sections (template + product content, heaviest product) | > 14 | > 16 | `budget:C3` |
+| Estimated height at 390 | > 12,000 px | > 15,000 px | `budget:C3` |
+| Fold contract (family's `mustShow` inside 844 px, ar and fr) | — | any element below | `budget:C2` |
+| Primary CTAs (sticky bar = 1) | > 3 | > 4; or > 2 visible at once at 390 | `budget:R1` |
+| Glass surfaces | — | > 0 (commerce register) | `design:V06` |
+| Reveal nodes on store sections | — | > 0 (CSS-only motion) | `design:V23` |
+| Same photo appearances (gallery = 1) | > 2 | > 3 | `budget:I1` |
+| HTML gz (rendered with the heaviest product) | > 90 KB | > 140 KB | `budget:F5` |
+| Proof without source (rating, review, bestseller label, countdown, stock line, trust fact) | — | any | `honesty:*`, `storefront:fact_missing` |
+| Checkout block fee rule `not_set` for any served city | — | yes (`inline` model) | `storefront:checkout_fee_unset` |
+| Buy box without an offer, or offers that cannot be rendered by the landing picker | — | yes | `storefront:buy_box_invalid` |
+
+Items on owner-typed fields are notes except honesty items (core §M.1 rule 2). The dialog names the measured value and
+the limit ("hauteur estimée 15 400 px à 390 · limite 15 000") and offers one fix (open the section, remove the
+duplicate, set a fee).
 
 ---
 
@@ -1425,7 +1801,7 @@ shows "Choisir" (link to the PDP).
 | Chunk | Entry | Loaded on | Contains | Budget (gzip -9 B) |
 |---|---|---|---|---|
 | `pdp` | `src/storefront/runtime/entry-pdp.ts` | `product` kind | landing modules (source imports): `analytics` (once), `gallery`, `tabs`, `accordion`, `video`, `bundles`, `units`, `sticky`, `countdown`; store modules: `chrome`, `bridge`, `buy`, `cityChip` | **23,500** [proposal: fixed by a spike as OFFERS D11 did; may move once by ≤ 10 %, then frozen] |
-| `store` | `entry-store.ts` | home, collection, page, search, not_found, cart, policy, track (store chrome) | `chrome` (compact header, drawer, cart badge, sort disclosure helpers), announcement rotation, `captureUtm` (source reuse of `src/landing/runtime/tracking.ts`), view beacon | 2,500 |
+| `store` | `entry-store.ts` | home, collection, page, search, not_found, cart, policy, track (store chrome) | `chrome` (compact header, drawer, cart badge, sort disclosure helpers), announcement rotation, `captureUtm` (source reuse of `src/landing/runtime/tracking.ts`), view beacon, **test-session capture** (rev 2: `?sg-test=<token>` → `sessionStorage sg:<h>:test`; every in-page link of a test session keeps the query so a reload stays a test render, STO-D33) | 2,500 |
 | `cart` | `entry-cart.ts` | `cart` kind; PDP in the `cart` model | cart storage, cart sheet, cart page lines, steppers, re-price call, buy-now handoff | 6,000 |
 | `checkout` | `entry-checkout.ts` | `checkout` kind; PDP in the `inline` model | fields, phone formatting, city combobox, zones + fee + ETA dates, totals, v3 submit with retry and verdicts, lead beacon, Turnstile loader, WhatsApp alternative | 8,000 |
 | `store-pixels` | `entry-store-pixels.ts` | every store kind whose pixel answer is not `none` | vendor loaders (source reuse of the landing `pixels.ts` loaders), store event map (STO-D18) | 4,200 |
@@ -1538,6 +1914,8 @@ measured by `qa:storefront-render`].
 | `sg:<h>:lead:<idem>` | session | lead already sent | session |
 | `sg:<h>:order` | session | thank-you record `{ orderId, name, total, currency, lines, delivery, track, wa, ts }` | session |
 | `sg:<h>:px:<orderId>` | session | Purchase fired | session |
+| `sg:<h>:test` (rev 2) | session | the test-order token of the current session (STO-D33); read by `checkout` (payload `test`) and by `store` (query carried on in-page links) | until the tab closes or the token expires (2 h) |
+| `sg:<h>:x:<e>` (R3) | local | experiment arm per visitor (landing's key, LAN-§18.5) | 60 days |
 | landing module keys on the PDP | as core §C.9 (`lp:<h>:utm`, `lp-b:<productKey>`) | unchanged landing behaviour | unchanged |
 
 Names, phones and addresses never go to `localStorage`. Every access is wrapped (`sget`/`sset` pattern,
@@ -1549,9 +1927,35 @@ Names, phones and addresses never go to `localStorage`. Every access is wrapped 
   `scripts/build-landing-assets.mjs` (IIFE, es2019, minified) into `src/storefront/generated/` (committed, like
   `src/landing/generated/`), runs in `prebuild` / `predev` after the landing build (request STO-R13), and prints the
   gzip size of each chunk.
-- Budget keys `pdp`, `store`, `cart`, `checkout`, `store-pixels`, `store-thanks`, `search`, `store-page` join
-  `src/landing/runtime/budgets.json` (request STO-R13); `qa:storefront-render` fails above budget + 5 % (the
-  render-check rule).
+- Budget keys `pdp 23500`, `store 2500`, `cart 6000`, `checkout 8000`, `store-pixels 4200`, `store-thanks 3000`,
+  `search 5000`, `store-page 41000` join `src/landing/runtime/budgets.json` (STO-R13 accepted, core §H.13);
+  `qa:storefront-render` fails above budget + 5 % (the render-check rule). R3: `exp-head` (450) and `exp` (1,200) on
+  store pages raise the worst PDP (inline + matrix + fields + steps-box + pixels) above 41,000 B: second-round request
+  STO-R26 raises `store-page` to 43,000 B when the experiment chunks land.
+
+### STO-§14.7 3G budgets per chunk (rev 2, STO-D42)
+
+Profile: Playwright msedge, 360 × 740 and 390 × 844, DPR 2, CPU 4× slower, 1.6 Mbps down / 750 kbps up / 150 ms RTT
+(the "cheap Android on 3G" profile of STO-§21.1). Every number is a budget `qa:storefront-perf` asserts per kind
+fixture; the measured value is printed next to it.
+
+| Chunk | gz bytes | Parse + boot at 4× CPU | Main-thread tasks | Loads | Must not |
+|---|---|---|---|---|---|
+| `store` | ≤ 2,500 | ≤ 20 ms | none > 16 ms | inline, end of body | touch the DOM before `DOMContentLoaded`; register `unload` |
+| `pdp` | ≤ 23,500 | ≤ 45 ms (modules boot in order: analytics once, gallery, tabs, accordion, video, bundles, units, sticky, countdown, chrome, bridge, buy) | none > 50 ms; first `__sgBuy.priced()` ≤ 10 ms after boot | inline, end of body | reflow in a loop (reads batched in one rAF, `src/landing/runtime/sticky.ts` pattern) |
+| `cart` | ≤ 6,000 | ≤ 25 ms | re-price request only when `cv` differs or a line is > 10 min old | inline on `/cart` and PDP (`cart` model) | block the add animation on the network |
+| `checkout` | ≤ 8,000 | ≤ 30 ms; city combobox filter ≤ 8 ms per keystroke over 147 cities; `etaWindow` + `storeDeliveryFee` ≤ 2 ms per city change | keypress-to-paint ≤ 50 ms p95 | inline on `/checkout` and PDP (`inline` model) | load Turnstile before the first interaction with a field |
+| `store-pixels` | ≤ 4,200 | ≤ 10 ms of our code; vendor loaders after `load` + `requestIdleCallback` (≤ 2 s cap) | vendor scripts are off the critical path | inline, deferred execution | fire before consent on EU stores (ST-21) |
+| `store-thanks` | ≤ 3,000 | ≤ 15 ms | fills the summary from `sessionStorage` in one frame | inline on `/checkout/merci` | fetch anything |
+| `search` (R3) | ≤ 5,000 | ≤ 20 ms; index fetch ≤ 12 KB gz, after idle | ranking ≤ 8 ms per keystroke for 500 products | after idle, when the store has ≤ 500 products | block the header |
+| page cap `store-page` | ≤ 41,000 (R3: 43,000) | Σ boot ≤ 90 ms on the worst PDP | — | — | — |
+
+Critical bytes per kind (HTML gz + LCP image + fonts, the bytes before LCP): PDP ≤ 300 KB (HTML ≤ 90 KB incl. ≤ 36 KB
+JS, LCP image ≤ 120 KB AVIF, ≤ 2 font files ≤ 80 KB), home ≤ 220 KB, collection ≤ 220 KB (first card row eager, the
+rest lazy), cart and checkout ≤ 130 KB (no LCP image beyond thumbnails). On the profile, 300 KB transfer ≈ 1.5 s plus
+three round trips (HTML, image, font) ≈ 0.45 s, so LCP ≤ 3.0 s lab leaves ≈ 1 s for server time, parse and paint; the
+server budget is 120 ms cold / 5 ms warm (STO-§7.3). INP ≤ 200 ms (no handler > 16 ms, no boot task > 50 ms); CLS ≤
+0.05 (every box reserved, STO-§21.3).
 
 ---
 
@@ -1679,23 +2083,38 @@ kept (no layout shift).
 
 ### STO-§15.8 ETA as dates (ST-17, raised to R2)
 
-`etaWindow(zone: { etaMinDays, etaMaxDays }, now: Date, cal: { tz, cutoffHour, workdays, holidays }, locale): { from:
-Date; to: Date; text: string } | null` (landing.md `src/lib/delivery/eta.ts`, isomorphic; written by S1 with this exact
-signature if absent, STO-D17): start = the next working day when the store-local time is past `cutoffHour`, else today
-when it is a working day; `from` / `to` = start + `etaMinDays` / `etaMaxDays` working days skipping `holidays`; text via
-`Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", timeZone: tz })`:
-"Livraison entre mer. 29 et jeu. 30 oct." · "التوصيل بين الأربعاء 29 والخميس 30 أكتوبر" · "Delivery between Wed 29 and
-Thu 30 Oct". A zone without ETA days, or a store without a calendar, shows the day range ("2 à 4 jours ouvrés") or
-nothing. The lines say "estimée" in the summary ("Livraison estimée …").
+The store consumes landing's engine (`src/lib/delivery/eta.ts`, P3, R1; LAN-§7.2) with its exact signatures (rev 2,
+STO-D17):
+
+```ts
+export function localParts(now: Date, tz: string): { ymd: string; hour: number; isoWeekday: number } | null;
+export function addWorkingDays(ymd: string, n: number, cal: StoreCalendar): string;
+export function etaWindow(cal: StoreCalendar, zone: { etaMinDays: number; etaMaxDays: number }, now: Date): EtaWindow | null;
+export function etaText(w: EtaWindow | null, zone: { etaMinDays: number; etaMaxDays: number }, locale: "ar" | "fr" | "en", dateLocale: string, now: Date): string;
+// StoreCalendar = { tz, workdays, cutoffHour, holidays } from the `checkout` setting (LAN-§2.3); EtaWindow = { from: "YYYY-MM-DD", to, minDays, maxDays }
+```
+
+Start day = today when it is a working day and before `cutoffHour`, else the next working day; `from` / `to` = start +
+`etaMinDays` / `etaMaxDays` working days skipping holidays; text: one date when `from === to`, the day range when `to`
+is more than 21 days away, otherwise "entre {from} et {to}" formatted with `Intl.DateTimeFormat(dateLocale, { weekday:
+"short", day: "numeric", month: "short", timeZone: "UTC" })` on the `ymd` at 12:00 UTC; `dateLocale` = `cfg.money.locale`
+(carries the digit choice, e.g. `ar-MA` with Latin digits); no dash inside the range; every date carries "(estimation)"
+/ "(تقريبي)" / "(estimated)": "Livraison estimée entre mer. 29 et jeu. 30 oct. (estimation)" · "التوصيل المتوقع بين
+الأربعاء 29 والخميس 30 أكتوبر (تقريبي)" · "Estimated delivery between Wed 29 and Thu 30 Oct (estimated)". A zone without
+ETA days, or a store without a calendar, shows the day range ("en 2 à 4 jours ouvrés") or nothing. The server uses
+`zoneLineFor(scope, cityKey, at?)` (`ZoneLine.etaText` per locale) for the order confirmation text, the thank-you
+expectation block and the tracking page, so the shopper reads one promise everywhere (`test:catalog` asserts PDP, cart,
+checkout and `zoneLineFor` texts are identical for one city and instant).
 
 ### STO-§15.9 Delivery fee rule (STO-D10)
 
 ```ts
 // src/lib/catalog/delivery.ts (isomorphic, pure; used by the server, the checkout chunk and the cart summary)
-export type DeliveryRule = "free_offer" | "free_threshold" | "zone" | "fallback";
-export interface ZoneLine { zoneId: string; name: string; feeCents: number | null; freeFromCents: number | null; etaMinDays: number | null; etaMaxDays: number | null; notServed: boolean }
-export type DeliveryResult = { ok: true; cents: number; rule: DeliveryRule; zone: ZoneLine | null } | { ok: false; reason: "not_served" | "not_set" };
-export function storeDeliveryFee(i: { zone: ZoneLine | null; fallbackFeeCents: number | null; subtotalCents: number; allLinesFree: boolean }): DeliveryResult;
+import type { DeliveryZoneRow } from "@/lib/delivery/types";   // landing's row shape (LAN-§7.1): id, name, cities, feeCents, freeFromCents, etaMinDays, etaMaxDays, notServed, note, position
+export type DeliveryRule = "free_offer" | "free_threshold" | "zone" | "fallback" | /* R3 */ "coupon";
+export type DeliveryResult = { ok: true; cents: number; rule: DeliveryRule; zone: DeliveryZoneRow | null } | { ok: false; reason: "not_served" | "not_set" };
+export function storeDeliveryFee(i: { zone: DeliveryZoneRow | null; fallbackFeeCents: number | null; subtotalCents: number; allLinesFree: boolean }): DeliveryResult;
+// rev 2: the rev 1 `ZoneLine` shape of this file is withdrawn; `ZoneLine` is landing's display type (zoneId, zoneName, notServed, eta, etaText, feeCents)
 ```
 1. `allLinesFree` (every line's offer has `freeShipping`) → `{ cents: 0, rule: "free_offer" }`.
 2. `zone?.notServed` → `{ ok: false, reason: "not_served" }`.
@@ -1705,13 +2124,17 @@ export function storeDeliveryFee(i: { zone: ZoneLine | null; fallbackFeeCents: n
 6. else `{ ok: false, reason: "not_set" }` (the checkout template cannot be published in this state, STO-§23.6; if it
    happens anyway, the server answers `unavailable`).
 
-`zone` comes from `zoneLineFor(scope, cityKey)` (landing.md, frozen in core §K.2 P0) on the server and from the
-config's zone table in the browser; both resolve "Autre ville" and unknown cities to the `*` zone when one exists.
+`zone` comes from `zoneForCity(await listZones(scope), cityKey)` (landing's pure matcher over the cached rows,
+LAN-§7.1; the STO-R19 stubs `zonesForCheckout` / `zoneLineFor` are the same module) on the server and from the config's
+zone table in the browser; both resolve "Autre ville" and unknown cities to the `*` zone when one exists. The browser
+and the server run the same `storeDeliveryFee` on the same inputs, so the delivery row the shopper saw (`dl`) equals the
+server's except after a zone edit, which bumps `catalog_version` and is answered `stale` (STO-§16.2 step 14).
 
 ### STO-§15.10 Submit flow and states
 
 1. First interaction: `idem` (uuid v4) and `eventId` created and kept in `sg:<h>:idem`; `form_start` beacon; event
-   `sg:checkout-start`.
+   `sg:checkout-start`; the test token of the session, when any (`sg:<h>:test`, STO-D33), is attached to every v3 body
+   as `test` and the form shows the "Commande test : non comptée" banner.
 2. Client validation with the server's rules; on submit, an error summary at the top (`role="alert"`, links to each
    field) and focus on the first error; each field error is linked with `aria-describedby`.
 3. Turnstile token when `turnstileSiteKey` is set (wait ≤ 12 s, the landing value).
@@ -1736,15 +2159,20 @@ Once the phone is valid and after 1.2 s idle, or on `pagehide`, one keepalive PO
 
 ```ts
 export const LeadPayloadV3 = z.object({
-  v: z.literal(3), ctx: Key, idem: z.string().regex(/^[a-f0-9-]{36}$/),
-  phone: S(24), name: S(80).optional(), city: S(80).optional(),
+  v: z.literal(3), kind: z.enum(["form", "whatsapp"]).default("form"),   // rev 2: "whatsapp" = a server-priced order intent (STO-§15.13)
+  ctx: Key, idem: z.string().regex(/^[a-f0-9-]{36}$/),
+  phone: S(24).optional(),                             // required for kind "form"; absent for "whatsapp" (leads.phone is NULL-able, core §D.2)
+  name: S(80).optional(), city: S(80).optional(),
   lines: z.array(z.unknown()).max(20).optional(),     // tolerant: each parsed with LineIn.omit({ ls }).safeParse, bad entries dropped
-  utm: Utm.default({}),
+  utm: Utm.default({}), locale: z.string().max(5).optional(),
+  test: z.string().max(80).optional(),                 // the session's test token (STO-D33) → leads.is_test
 });
 ```
-Stored through `upsertLead` with `page_id` NULL (request STO-R9) and `selection = { v: 3, lines: [{ productId, bundleId,
-units, n }] }`; always answers `{ ok: true }` (no oracle). An order with the same `idem` marks the lead `converted`
-(landing.md's rule).
+Stored through `upsertLead` with `page_id` NULL (STO-R9 accepted, core §D.2 0006) and `sel = { v: 3, lines: [{ productId,
+bundleId, units, n }] }` (`leads.sel`, core §D.2 0005); `kind = 'form'` always answers `{ ok: true }` (no oracle); the
+`resolveTestToken` call sets `is_test` (lint L12). An order with the same `idem` marks the lead `converted`, an order
+from the same phone within 7 days `recovered` or `converted` (landing's attribution rule LD12, run by landing's order
+hook; v3 orders reach it through the shared `createOrderRow`).
 
 ### STO-§15.12 Store thank-you (`/checkout/merci`, STO-D16)
 
@@ -1758,10 +2186,36 @@ units, n }] }`; always answers `{ ok: true }` (no oracle). An order with the sam
 
 ### STO-§15.13 WhatsApp alternative
 
-"Commander sur WhatsApp" (shown when `whatsappAlternative` and a store number exist): sends the v3 lead first (so the
-agent sees the selection), then opens `https://wa.me/<digits>?text=` with a message composed from the cart's own lines
-and totals (customer text of each line, delivery, total; the client never prices on its own), capped at 3,800
-URL-encoded characters by dropping lines from the end with " … (+{n} articles)" (OFFERS §G.5 rule).
+**rev 2 (STO-D34, rf §1.11, LAN LD13): the message is priced by the server, never composed in the browser.**
+"Commander sur WhatsApp" (shown when `whatsappAlternative` and a store number exist; on the PDP in both buy models, in
+the cart sheet and page, and under the checkout submit):
+
+1. The `checkout` (or `cart`) chunk posts `POST /api/public/store/lead` with `kind: "whatsapp"`, the lines (`LineIn`
+   without `ls`), `city` when chosen, `utm`, `locale` and the test token (4 s timeout, one intent per page view per 30 s;
+   buckets `p:wa:ip` 30/10 min, `s:<sid>:wa:ip` 10/10 min, core §E.8).
+2. The server resolves every key to one store (else `invalid`), checks `take_orders` (else `unavailable`), **re-prices
+   every line** with `priceLine` (STO-§16.3) and computes the delivery row with `storeDeliveryFee` for the chosen city
+   (or "livraison selon la ville" when none), inserts a `leads` row (`kind = 'whatsapp'`, `phone` NULL, `ref` =
+   `WA-` + 6 Crockford chars unique per store with 3 retries, server uuid `idem`, `sel` v3, `total_cents`, `utm`,
+   `is_test`, `status = 'new'`; `page_id` NULL, `version_id` NULL for store intents), and answers `{ ok: true, wa: {
+   ref, number, text } }`. Lines that no longer resolve are listed "à confirmer" in the text and priced at the offer's
+   real "from" (LAN-§11.4 rule); unavailable lines are named, never priced.
+3. The text = the store's `wa_order` template when customised (vars `{lines}` `{total}` `{delivery}` `{ref}`
+   `{options_to_confirm}` `{store}`; landing's `message_templates` kind, LAN-§2.3), else the store composer
+   (`composeStoreWaMessage`, `src/lib/catalog/wa-text.ts`, pure): one line per cart line (customer text of each pack,
+   `n ×`), the delivery row, the total, the reference; ≤ 1,000 characters, whole lines dropped from the end with
+   " … (+{n} articles)" (OFFERS §G.5 rule); `number` = `store.whatsapp` digits.
+4. The browser opens `https://wa.me/<number>?text=<text>` (new tab; same-tab inside in-app browsers, the
+   `entry-whatsapp.ts` rule) and shows "Votre message est prêt dans WhatsApp · Réf. WA-7K3Q9X". Any error or timeout
+   opens the plain `wa.me` link with the product names only (never a price).
+5. In the admin the intent appears in the Leads inbox (kind WhatsApp, ref, phone empty); ⌘K resolves a typed `WA-…`;
+   **Convert** opens the manual-order sheet prefilled from `sel` (OPE-§11.4); the order has `source = 'whatsapp'`
+   (core D42) and re-prices on the server.
+
+Acceptance: the text total equals `orderTotals` for the same lines on the `duo`, `tshirt` and `colors` fixtures
+(100 %); the request schema has no price field (type test), so a tampered body cannot change the total; 50 parallel
+intents in one store yield 50 distinct refs; a ref of store A is not found from store B; a test session's intent has
+`is_test = 1`; the fallback link opens when the API fails or exceeds 4 s.
 
 ---
 
@@ -1806,6 +2260,7 @@ export const OrderPayloadV3 = z.object({
   utm: Utm.default({}), fbp: S(200).optional(), fbc: S(500).optional(), ttp: S(200).optional(),
   ref: S(500).optional(), locale: z.string().max(5).optional(), cf: z.string().max(2048).optional(),
   coupon: z.string().regex(/^[A-Za-z0-9-]{3,32}$/).optional(),   // R3 (ST-14); ignored before
+  test: z.string().max(80).optional(),                           // rev 2: the session's test token (STO-D33); verified with resolveTestToken, never trusted as a flag
 });
 export type OrderPayloadV3 = z.infer<typeof OrderPayloadV3>;
 
@@ -1830,6 +2285,7 @@ Field error values: `required`, `invalid`, `unavailable`, `too_long`, `duplicate
 | 2 | `burstLimit` + `p:api:order:<ipHash>` (core §E.8) | 429 `rate_limited` |
 | 3 | Resolve every `pk` with `resolveProductKey` and `ctx` with the page-key resolver (request STO-R1); all must belong to one store | 400 `invalid` (generic, nothing written) |
 | 4 | Store state (`take_orders`), mode (`storefront` for `pdp`, `cart` for `cart`/`buy_now`), entitlement | 409 `unavailable` |
+| 4b | **Test session** (rev 2): `test = resolveTestToken(store, payload.test).test` (core §E.2, pure, store-bound; lint L12). True → the order is created with `is_test = 1`, flag `test`, `sheet_status = 'disabled'`, no CAPI / Telegram items (except "[TEST]" when the store asks), no `bumpOrderStats`, no customer counters beyond `test_count`, and risk scoring still runs (the demo needs the queue, rf §4). Store A's token on store B is `false` | — |
 | 5 | `checkOrigin(storeHosts(store))`, `Sec-Fetch-Site: cross-site` refused (core §C.9) | 403 `blocked` |
 | 6 | `s:<sid>:order:ip:<ipHash>`, `s:<sid>:orders` flood breaker | 429 `rate_limited` |
 | 7 | Honeypot (`website` non-empty → decoy success like v2 `decoyResponse`, nothing stored); `t` < 1,500 ms → risk flag | — |
@@ -1842,7 +2298,7 @@ Field error values: `required`, `invalid`, `unavailable`, `too_long`, `duplicate
 | 14 | `total = subtotal − discount + delivery`; `st ≠ total`: when `cv ≠ store.catalogVersion` or `dl ≠ delivery` → 409 `stale` (all lines `ok`, the new delivery); else log `[orders] v3 parity mismatch` and the server total wins | — |
 | 15 | R3: stock holds (STO-§5.6); a failed hold → 409 `stale` with that line `unavailable` | as stated |
 | 16 | Blocklist, per-phone limit, risk score (`src/lib/orders/risk.ts`, store-scoped), then `createOrderRow(draft, ctx)` (request STO-R12): the order row, `order_events` "created", order hooks (Sheets, CAPI per IN-02, Telegram) through the outbox drained in `after()` | blocked → 403 `blocked` |
-| 17 | `bumpOrderStats` for each line's product id and for the `ctx` page (request STO-R11) | — |
+| 17 | `bumpOrderStats({ kind: "product", id })` for each line's product and `{ kind: "page", id: ctxPageId }` (STO-R11 accepted, core §D.2 `stats_daily`); skipped for a test order (core D54) | — |
 | 18 | 200 `ok` with `track = signedTrackPath(store, orderId)` (landing.md) and `wa = waConfirmText(store, order, locale)` (LP-04 text, server-formatted) | — |
 
 ### STO-§16.3 Per-line validation and re-pricing
@@ -1939,50 +2395,71 @@ storefront pixel answer (`storefront.pixels`) and `event_source_url = storeUrl(s
 
 - `pages.product_id` (core §D.2) on a `landing` row = attached. One product may have **≤ 10** attached landing pages
   (the 11th attach answers "Un produit peut avoir 10 pages de vente au plus.").
-- `pages.attach_opts longtext NULL` (request STO-R6): `{ indexable: boolean = false, keepNames: boolean = true,
-  keepPhotos: boolean = true }`.
-- `page_versions.product_rev char(26) NULL` (request STO-R6): the `products.rev` a published version (or its last
-  re-render) was rendered with.
+- `pages.attach_opts longtext NULL` (STO-R6 accepted, core §D.2 0006): `{ v: 1, indexable: boolean = false, keepNames:
+  boolean = true, keepPhotos: boolean = true }`; the default of `indexable` is the store setting
+  `landing.attach.noindexDefault` (LAN-§2.3).
+- `page_versions.product_rev char(26) NULL` (STO-R6 accepted): the `products.rev` a published or `sync` version was
+  materialised against; an in-place re-render for another reason (`brand`, `address`, `store_info`) rewrites it too
+  (core §H.3).
+- `page_versions.kind` gains `'sync'` (core §D.2 0006, LAN Q24): the version a product change publishes.
+- **rev 2:** the attachment is **one implementation shared with landing.md** (LAN-§17; both files are S1's in R2,
+  LAN-§26.2): `materializeAttached` and `republishAttached` live in `src/lib/landing/attach.ts` /
+  `attach.server.ts`; this part owns the catalog side (`onProductChanged`, the product editor's "Pages de vente" tab,
+  the content ids) and `attachedDocFor` for the order path. Rev 1's `attachMirror` in `src/lib/catalog/attach.ts` is
+  withdrawn.
 
-### STO-§17.2 The mirror
+### STO-§17.2 The mirror (`materializeAttached`, landing.md LAN-§17.1; S1)
 
 ```ts
-// src/lib/catalog/attach.ts (isomorphic, pure)
-export interface MirrorReport { appended: string[]; dropped: string[]; offersOff: string[] }   // item ids, item ids, offer ids
-export function attachMirror(landing: PageDoc, product: ProductDocJson, stock: { levels: readonly InventoryLevelRow[]; config: StockConfig }, opts: AttachOpts): { doc: PageDoc; report: MirrorReport };
+// src/lib/landing/attach.ts (isomorphic, pure; landing.md owns the name, this part the stock input)
+export interface MirrorReport { appended: string[]; dropped: string[]; offersOff: string[]; overrides: OfferOverride[] }   // item ids, item ids, offer ids, computed overrides
+export interface OfferOverride { offerId: string; referenceCents: number /* Σ units × product price */; priceCents: number; deltaCents: number /* price − reference, may be negative */; perUnit: boolean }
+export interface AttachStock { levels: readonly InventoryLevelRow[]; config: StockConfig }
+export function materializeAttached(landing: PageDoc, product: ProductDocJson, stock: AttachStock, opts: AttachOpts): { doc: PageDoc; report: MirrorReport };
+export function offerOverrides(doc: PageDoc, product: ProductDocJson): OfferOverride[];   // pure; the chip data (LAN-§17.3)
 ```
-- For every product item: the landing item with the same id takes the product's `price`, `compareAt`, `groups`,
-  `soldOut` (after `applyStock`) and `sku`; `name`, `short`, `images`, `cutout` stay the landing's when `keepNames` /
-  `keepPhotos`, else the product's. Product items absent from the landing are appended (usable by new offers).
+- For every product item: the landing item with the same id takes the product's `price`, `compareAt`, `groups` (option
+  ids, deltas, codes), `soldOut` (after `applyStock`) and `sku`; `name`, `short`, `images`, `cutout` stay the landing's
+  when `keepNames` / `keepPhotos`, else the product's. Product items absent from the landing are appended (usable by
+  new offers).
 - Landing items unknown to the product are dropped; every landing offer with a line on a dropped item is left out of
   the rendered doc and refused at order time (`bundleId: unavailable`); the builder shows the error "Cette offre utilise
   un article qui n'est plus dans le produit".
-- The landing's own offers, display, extras, bump, upsell, form, theme, sections, SEO and its flat `shippingFee` stay as
-  they are (the landing runtime and PHP export are frozen, R-D22).
+- The landing's own **offers** (pack prices), display, extras, bump, upsell, form, theme, sections, SEO and its flat
+  `shippingFee` stay as they are (the landing runtime and PHP export are frozen, R-D22).
+- **Overrides shown as overrides (LAN-§17.3, LD21):** an offer whose price equals Σ units × product price has no chip;
+  an offer whose price differs is allowed (a campaign pack price) and carries the chip **"Override"** everywhere the
+  offer is edited or listed: "Prix produit 2 × 249 = 498 DH · ce pack 449 DH (−49 DH)"; a 1-unit offer below the product
+  price is allowed with the warning "Les clients qui voient aussi la page produit voient deux prix pour une unité"; an
+  offer `compareAt` may only be the computed reference or the product's compare-at × units (anything else is the
+  checklist and gate error `attach.compare_not_real`); savings and "per unit" display derive from the reference, so they
+  are real by construction. The PDP shows product prices only; a landing's pack price never appears on a store page.
 - The result passes `PageDocObject`; when no offer remains, the order form renders its unavailable state with the
   WhatsApp alternative.
 
-### STO-§17.3 Where the mirror applies
+### STO-§17.3 Where the mirror applies (rev 2, aligned with LAN-§17.4 and core D50 refined)
 
 | Moment | What happens |
 |---|---|
-| Attach (builder "Relier à un produit du catalogue", or the product editor's "Pages de vente" tab) | item mapping dialog: landing items paired with product items (same id, else suggestions by SKU then by name); the draft is rewritten with the product item ids (offers follow the new ids); `pages.product_id` set; audit `store.landing.attached` |
-| Builder open / save | the draft is re-mirrored; price, compare-at, options and stock fields of the items are read-only with the banner "Prix, options et stock viennent du produit {name} · Modifier le produit" (request STO-R18 for the landing editor) |
-| Publish | the published version doc = the mirrored draft; `product_rev` = `products.rev` |
-| Product `rev` change | `enqueueRenders(scope, attachedLivePageIds, "product", 2)` (core §H.3); in `after()` the first 5 are rendered at once through the same code path (their job rows then finish `skipped`) |
-| Re-render (render job) | renders `attachMirror(versionDoc, liveProduct)`; rewrites `html`, `csp`, `etag` **and** `product_rev` of the published version row (core D50 extended, request STO-R6); the version doc never changes |
-| Serve | when `page_versions.product_rev ≠ products.rev` (product rev read from `scopedCache("product-rev")`, 15 s), the route renders now (single flight), writes back with compare-and-set, and serves the fresh HTML |
-| Order (payload v2) | `attachedDocFor(target)` overlays the live product items and stock on the version doc, and the comparison runs in **fallback** mode: any `st ≠ total` or a selection error answers `stale` (request STO-R12) |
+| Attach (builder "Relier à un produit du catalogue" (`src/components/builder/attach/**`, S1), or the product editor's "Pages de vente" tab → "Relier une page existante") | item mapping sheet: landing items paired with product items (same id, else suggestions by SKU then by name); offers whose lines lose their item are listed and dropped only after confirmation; the draft is rewritten with the product item ids; `pages.product_id` set; audit `page.attached` (`{ productId }`, landing's name; the core's `store.landing.attached` stays unused) |
+| Builder open / save | the draft is re-materialised; price, compare-at, options and stock fields of the items are read-only with the banner "Prix, options et stock viennent du produit {name} · Modifier le produit" (STO-R18 accepted, core §K.4 S1); the Offers panel shows the override chips |
+| Publish | the published version doc = the materialised draft; `product_rev` = `products.rev`; the publish gate runs (`attach.compare_not_real` is hard) |
+| Product change: `prices`, `options`, `stock_transition` | `onProductChanged(scope, productId, change)` (LAN-§17.4) → one `render_jobs` row per live attached page, reason `product`, priority 2 (dedupe per page, core D25); the handler is **`republishAttached(scope, pageId)`**: materialise the new mirror into a copy of the **published** version's doc, validate, render, run the gates, commit a **`sync`** version ("Synced with product «X»") and make it live; the draft gets the same mirror; `product_rev` = the new rev. In `after()` of the product save the first 5 pages are republished at once (their job rows finish `skipped`). A sync that fails validation keeps the old version live, marks the page "Out of sync" and notifies `landing.sync_failed` (landing's kind) |
+| Product change: `content` (name, photos) | in-place re-render for inherit-story pages only (`keepNames` / `keepPhotos` false), reason `product`, no new version (core D50: no price changes) |
+| Serve | the published (or `sync`) HTML is served from the version row like any landing page; when `page_versions.product_rev ≠ products.rev` and no `render_jobs` row is pending for the page (a failed or lagging sync), the route enqueues the republish again in `after()` (idempotent through the dedupe key) and serves the current HTML; the order path (next row) protects the price meanwhile. Rev 1's render-on-serve with an in-place HTML write is withdrawn (a price change is a publish, LAN LD20) |
+| Order (payload v2) | `orderVersion(target)` applies `attachedDocFor(target)` (`src/lib/catalog/attach.server.ts`: the live product items and stock overlaid on the version doc, the version's offers kept) and forces **fallback** mode: any `st ≠ total` or a selection error answers `stale` (STO-R12 accepted, core §K.4) |
 
-Bound on staleness: a shopper may hold old HTML for at most the edge TTL (60 s) plus the time the tab stays open; the
-order is then refused with `stale` and the reload shows the new price (the landing runtime's stale flow,
-`src/landing/runtime/form.ts:309-322`). A shopper is never charged a price they did not see.
+Bound on staleness: a shopper may hold old HTML for at most the edge TTL (60 s) plus the time the tab stays open; open
+tabs keep the price they show for 72 h (OFFERS D8: the version they loaded stays orderable) **unless** the product
+price moved, in which case the live overlay answers `stale` and the reload shows the new price (the landing runtime's
+stale flow, `src/landing/runtime/form.ts:309-322`). A shopper is never charged a price they did not see.
 
 ### STO-§17.4 Detach
 
-"Détacher du produit": the last mirrored items become the landing's own copy, `product_id` and `attach_opts` are cleared,
-the page keeps its offers; a re-publish is needed for the published version to drop the overlay (until then orders
-still use the overlay of the version's `product_rev`: the detach dialog offers "Détacher et publier").
+"Détacher du produit": the last materialised items become the landing's own copy, `product_id` and `attach_opts` are
+cleared, the page keeps its offers (the override chips disappear, since there is no reference any more); a re-publish
+is needed for the published version to drop the overlay (until then orders still use the overlay of the version's
+`product_rev`: the detach dialog offers "Détacher et publier"). Audit `page.detached`.
 
 ### STO-§17.5 Create a campaign page from a product
 
@@ -2099,7 +2576,7 @@ collection.
 - No store chunk registers `unload` (a grep in `qa:storefront-render`); public kinds never send `no-store` (only
   `/checkout/merci` and `/track`, by design).
 
-### STO-§19.6 Home archetypes 5-8 (ST-19)
+### STO-§19.6 Home storylines 5-8 (ST-19)
 
 STO-§11.2.
 
@@ -2137,6 +2614,38 @@ PWA per store (manifest with `start_url` and `scope` = the store base, icons fro
 that caches only the offline page and static assets, never an API answer); "Mes commandes" with a one-time code (needs a
 messaging provider); recently viewed (`sg:<h>:seen`, ≤ 12 ids); co-purchase cross-sell from the store's own order lines
 (minimum support 5 orders). Each gets its own acceptance when scheduled.
+
+### STO-§19.10 Experiments on store pages (SF-10 consumer side; R3, D3 engine, S1 render files; STO-D41)
+
+**Who owns what.** The Experiments engine is landing.md's (LAN-§18: tables `experiments`, `experiment_arms`,
+`experiment_exposures`; `src/lib/experiments/**`; mSPRT statistics with `τ = 0.1`, ≥ 100 uniques per arm, auto-end at 28
+days, core D58; the screens `/app/<h>/experiments`; the `exp-head` and `exp` chunks; `/api/public/exp`). The storefront
+**consumes** it: it says which store kinds and sections may host arms, renders the arm wrapper, the head script and the
+chunk through its on-request renderer, and keys its cache per arm.
+
+| Surface (`experiments.surface = 'store_page'`) | In-page arms (`headline`, `hero`, `section`; all arms in the HTML, `.lp-xa` wrapper, `exp-head` picks before first paint) | URL arms (`version`; `?xv=<arm>`, one published template version per arm) |
+|---|---|---|
+| `home`, `page` | `storeHero` heading / sub / family (`hero` arm = variant within the G2 pool and its fold contract), any one non-grid section (`section` arm) | yes: the whole `@home` doc |
+| `product` template | `trustStrip`, `mediaText`, `richText`, `whatsappCta`, `productGrid` placement (`section` arm); the `productDetail` family may be a `hero` arm **only** with identical buy box markup (the family changes gallery and column arrangement, never the form) | yes: the whole template; every PDP of the store splits the same way |
+| `collection` template | `collectionHeader` variant and copy | yes |
+| `cart`, `checkout`, `search`, `not_found`, thank-you, track | **never** (commerce and transactional utility kinds; the checkout is a conversion instrument, not an arm) | never |
+
+Guards (server-side, at start and at every publish of an arm; landing's `exp.*` codes plus the storefront's): no arm
+may touch `productDetail` data, the buy box, offers, prices, the delivery line or the checkout block (`exp.buy_box`);
+the pricing fingerprint of a store template is empty by construction (templates hold no prices), so the storefront
+guard is structural; every arm passes the store publish gate (STO-§6.3) with its own fold contract; a publish of the
+template while running stops the experiment (LAN-§18.2).
+
+Rendering: the cache key appends `:xv<arm>` for URL arms (canonical = the control URL); in-page arms are part of the one
+cached document; `exp-head` (≤ 450 B, hashed into the CSP) and `exp` (≤ 1,200 B) join the document's add-ons (core
+§H.13) and count toward `store-page` (second-round request STO-R26). Exposures post `POST /api/public/exp` with the
+template's context key as `pageKey`; conversions = v3 orders whose `variant_key` was set by the `exp` chunk's `idem`
+hand-off (LAN-§18.5), re-scored to confirmed and delivered as statuses arrive; test orders excluded. Store Health gets
+no experiment rule (results live on the experiments screen).
+
+Acceptance (`test:experiments` fixtures on a store home and a PDP template; `qa:storefront-render`): the control shows
+with JS off; the head script precedes the first section; an arm that touches `productDetail` data is refused
+`exp.buy_box`; the same visitor keeps the arm across home → PDP; exposures and weights of store A are invisible to B.
 
 ---
 
@@ -2230,20 +2739,22 @@ organic reach waits for S mode (subdomains) and R3 custom domains (core §C.10).
 | Measure | Target | How it is checked |
 |---|---|---|
 | Field p75 (Core Web Vitals "good") | LCP ≤ 2.5 s, INP ≤ 200 ms, CLS ≤ 0.1 | R3: optional LCP/INP/CLS fields on the view beacon (PerformanceObserver, ≤ 600 B in the `store` chunk) |
-| Lab "cheap Android on 3G" (Playwright msedge, 360 × 740, DPR 2, CPU 4× slower, 1.6 Mbps down / 750 kbps up / 150 ms RTT **[proposal]**) | PDP and home LCP ≤ 3.0 s, TBT ≤ 200 ms, CLS ≤ 0.05; checkout keypress-to-paint ≤ 50 ms p95 | `qa:storefront-perf` on fixtures (STO-§26.3) |
-| Server | cache hit ≤ 5 ms p95; miss ≤ 120 ms p95; 304 without a DB query; ≤ 4 queries per miss | `qa:storefront-perf` server timings + R2 load test (core §K.4) |
+| Lab "cheap Android on 3G" (Playwright msedge, 360 × 740 and 390 × 844, DPR 2, CPU 4× slower, 1.6 Mbps down / 750 kbps up / 150 ms RTT **[proposal, fixed at the R2 perf baseline]**) | per kind: PDP LCP ≤ 3.0 s, home ≤ 2.6 s, collection ≤ 2.6 s, cart ≤ 2.0 s, checkout ≤ 2.0 s, thank-you ≤ 1.8 s; TBT ≤ 200 ms everywhere; CLS ≤ 0.05; checkout keypress-to-paint ≤ 50 ms p95; city pick → new total ≤ 100 ms | `qa:storefront-perf` on fixtures (STO-§26.3), one run per kind × locale × buy model |
+| Lab 4G (the wow-demo profile, rf §4: 9 Mbps / 170 ms RTT) | PDP LCP ≤ 2.5 s (the demo's step 1:55 condition), checkout submit → thank-you ≤ 1.5 s incl. the server | `qa:storefront-demo` (STO-§26.4) |
+| Server | cache hit ≤ 5 ms p95; miss ≤ 120 ms p95; 304 ≤ 2 ms without a DB query; ≤ 4 queries per miss; `publishStorePage` incl. the gate render ≤ 1.5 s p95 | `qa:storefront-perf` server timings + R2 load test (core §K.4: 200 concurrent cold PDP requests render once, p95 ≤ 400 ms end to end on XAMPP) |
 
-### STO-§21.2 Byte budgets (gzip)
+### STO-§21.2 Byte budgets (gzip; rev 2 aligned with core D52)
 
-| Item | Budget |
-|---|---|
-| Document (HTML + inline CSS + inline JS + configs): home, collection, page | ≤ 60 KB |
-| Document: PDP | ≤ 90 KB (≈ 36 KB of it is JavaScript, STO-§14.1) |
-| Document: cart, checkout | ≤ 45 KB |
-| Hard cap, every store document | 160 KB (STO-§7.3) |
-| LCP image | ≤ 120 KB AVIF at 1× mobile width (WebP fallback), preloaded with `imagesrcset`, `fetchpriority="high"` |
-| Fonts | ≤ 2 preloaded files; the Arabic subset only on `ar` documents; `font-display: swap` with metric overrides (`src/lib/theme/fonts.ts`) |
-| Third parties | pixels (after the `load` event and idle, ≤ 2 s) and Turnstile (only after the first checkout interaction); nothing else (core §C.9: no tenant JS) |
+| Item | Soft | Hard |
+|---|---|---|
+| Document (HTML + inline CSS + inline JS + configs): home, collection, page | ≤ 60 KB | 140 KB (`budget:F5`, publish refused; a live render above it is served and flagged, STO-§7.3) |
+| Document: PDP (heaviest product, inline model) | ≤ 90 KB (≤ 36 KB of it JavaScript, STO-§14.1; ≤ 4 KB city table; ≤ 24 KB CSS incl. the `css` key margin, DES-R5) | 140 KB |
+| Document: cart, checkout, search, not_found | ≤ 45 KB | 140 KB |
+| `<picture>` elements per document | ≤ 16 on home and PDP (gallery thumbnails count once as a group); collection: 24 cards + header | 32 |
+| LCP image | ≤ 120 KB AVIF at 1× mobile width (WebP fallback), preloaded with `imagesrcset`, `fetchpriority="high"`; ≥ 1.5 × the slot width at DPR 2 (DES V11) | — |
+| Fonts | ≤ 2 preloaded files ≤ 80 KB together; ≤ 2 families / ≤ 4 files per document (DB F5); the Arabic subset only on `ar` documents; `font-display: swap` with metric overrides (`src/lib/theme/fonts.ts`) | > 4 files |
+| Critical bytes before LCP (HTML + LCP image + fonts) | PDP ≤ 300 KB; home, collection ≤ 220 KB; cart, checkout ≤ 130 KB | — |
+| Third parties | pixels (after the `load` event and idle, ≤ 2 s) and Turnstile (only after the first checkout interaction); nothing else (core §C.9: no tenant JS) | any other origin in the CSP |
 
 ### STO-§21.3 Rendering rules
 
@@ -2256,6 +2767,39 @@ organic reach waits for S mode (subdomains) and R3 custom domains (core §C.10).
   handlers ≤ 16 ms; passive scroll and touch listeners; reads and writes of layout batched in rAF.
 - No `unload`; public kinds are bfcache-eligible (STO-§19.5).
 - Motion: CSS only on store sections, ≤ 180 ms, `transform`/`opacity` only; none under `prefers-reduced-motion`.
+
+### STO-§21.4 The 3G waterfall per kind (rev 2, STO-D42)
+
+What a cold visit downloads before the first screen is usable, on the lab profile (1.6 Mbps ≈ 200 KB/s, 150 ms RTT).
+Each row is a budget `qa:storefront-perf` asserts; the "then" column is deferred work that must not move LCP.
+
+| Kind | Round trip 1: HTML (gz) | Round trip 2 (parallel): LCP image · fonts | Then (after `load` / idle) | LCP budget |
+|---|---|---|---|---|
+| PDP, inline model | ≤ 90 KB (≈ 0.45 s + RTT) incl. `pdp` + `checkout` + `store-pixels` + feature chunks (≤ 36 KB) and the city table (≤ 4 KB) | first gallery image ≤ 120 KB AVIF (preloaded) · ≤ 2 fonts ≤ 80 KB | other gallery images (lazy), pixel vendors (idle), Turnstile (first field interaction) | ≤ 3.0 s |
+| PDP, cart model | ≤ 85 KB (`pdp` + `cart` + `store-pixels`) | same | same | ≤ 3.0 s |
+| Home | ≤ 60 KB (`store` + `store-pixels` ≈ 6.7 KB JS) | hero image ≤ 120 KB or a colour moment (0 bytes) · fonts | grid images lazy, first row eager | ≤ 2.6 s |
+| Collection | ≤ 60 KB | header image ≤ 80 KB or the first card ≤ 60 KB · fonts | rows 2+ lazy | ≤ 2.6 s |
+| Cart | ≤ 45 KB (`store` + `cart` + `store-pixels` ≈ 12.7 KB JS); lines from `localStorage` | thumbnails 64 px ≤ 8 KB each · fonts | re-price request only when stale | ≤ 2.0 s |
+| Checkout | ≤ 45 KB (`checkout` + `store-pixels` ≈ 12.2 KB JS + city table) | fonts only | Turnstile on first interaction | ≤ 2.0 s |
+| Thank-you | ≤ 30 KB (`store-thanks` + `store-pixels` ≈ 7.2 KB) | fonts | Purchase pixel once | ≤ 1.8 s |
+
+Rules that keep the waterfall flat: exactly one HTML round trip (no client fetch before LCP on any kind); the LCP image
+is the first `<link rel="preload" as="image">` in `<head>` with `imagesrcset` and `fetchpriority="high"`; fonts are
+preloaded only for the two faces the first screen uses; `content-visibility: auto` below the fold; no `@import`, no
+external CSS; the `#sg-config` block is ≤ 6 KB gz on the checkout (the MA city list ≈ 3.5 KB, STO-§14.4) and ≤ 1 KB
+elsewhere.
+
+### STO-§21.5 Boot and interaction budgets
+
+| Interaction | Budget (4× CPU) | How |
+|---|---|---|
+| Chunk boot (`store` / `cart` / `checkout` / `store-pixels` / `store-thanks`) | ≤ 20 / 25 / 30 / 10 / 15 ms | one pass over the DOM, listeners delegated on `document` |
+| `pdp` boot | ≤ 45 ms, no task > 50 ms | module order of STO-§14.2; `gallery` defers off-screen slides |
+| Offer or option change → price shown | ≤ 16 ms | the bridge reads the units module's selection; no layout read in the handler |
+| City pick → delivery row + total | ≤ 100 ms end to end (≤ 2 ms compute) | `storeDeliveryFee` + `etaWindow` are pure over the config |
+| Add to cart → sheet open | ≤ 180 ms animation, ≤ 16 ms of script | `localStorage` write, one `CustomEvent` |
+| Checkout keypress → paint | ≤ 50 ms p95 | phone formatting without reflow; combobox filter ≤ 8 ms |
+| Submit → thank-you (4G) | ≤ 1.5 s incl. the server (≤ 400 ms p95 for the order endpoint) | one POST, `location.assign` |
 
 ---
 
@@ -2279,6 +2823,9 @@ WCAG 2.1 AA everywhere (EN 301 549 for EU stores, ST-21).
 | Contrast | the theme engine's guarantees (text 4.5:1, large text 3:1, UI components 3:1); store CSS adds no colour outside tokens |
 | Motion | `prefers-reduced-motion` = no movement, opacity only |
 | Zoom and reflow | usable at 200 % zoom and at 320 px width without horizontal scrolling |
+| **WCAG 2.2 additions (rev 2)** | 2.4.11 Focus not obscured: the sticky buy bar and the announcement bar never cover the focused element (`scroll-padding-block` = fixed heights; the sticky bar hides while the buy box or the checkout has focus) · 2.5.7 Dragging movements: every carousel and the gallery have previous/next buttons; the cart stepper has buttons; no drag-only control · 2.5.8 Target size: ≥ 24 × 24 CSS px minimum, 44 × 44 on touch (above) · 3.3.7 Redundant entry: the chosen city is remembered (`sg:<h>:city`) and prefilled at checkout; the buy-now hand-off keeps the selection · 3.3.8 Accessible authentication: not applicable (no accounts) |
+| Announcements (one polite region per page) | cart count change ("Panier, 3 articles"), price update after an option change (the buy box's live price, `aria-live` on the price node only), the new total after a city change, the stale banner (`role="status"`), the error summary on submit (`role="alert"`, focus moved to it); never two announcements for one action |
+| Images | the gallery's slides have `alt` = `AssetRef.alt` or "{product} · photo {n}"; decorative stage grounds are `aria-hidden`; the sold-out veil carries no text (the badge does) |
 
 ### STO-§22.2 Right-to-left
 
@@ -2301,8 +2848,14 @@ WCAG 2.1 AA everywhere (EN 301 549 for EU stores, ST-21).
   order and one `h1`, landmarks, `lang`/`dir`, ARIA attributes from an allowlist, labelled dialogs, minimum target-size
   tokens); keyboard scripts in Playwright msedge (tab order header → main → buy box → checkout; Escape closes each
   dialog; focus returns); computed-colour contrast sampling of text on its background at 360 px.
-- Manual pass at R2 exit: TalkBack (Android Chrome) and VoiceOver (iOS Safari) through PDP → checkout → thank-you,
-  recorded in the R2 checklist.
+- **rev 2 additions:** the focused element's rect never intersects the sticky bar's or the announcement bar's rect at
+  every Tab stop of the keyboard script (2.4.11); every `[draggable]` or scroll-snap control has a keyboard and a tap
+  alternative (2.5.7); target sizes measured from the rendered boxes (≥ 44 px on touch fixtures, ≥ 24 px everywhere);
+  the live-region script asserts exactly one announcement per action (cart add, option change, city pick, stale,
+  submit error); RTL1-RTL8 checks run on the ar fixtures (ranges in `<bdi dir="ltr">`, price cluster adjacency in the
+  screenshot, no rotated Arabic, no clipped Arabic glyph box, the skip link invisible on plain scroll).
+- Manual pass at R2 exit: TalkBack (Android Chrome) and VoiceOver (iOS Safari) through home → PDP → add → cart →
+  checkout → thank-you (cart model) and PDP → inline checkout → thank-you (inline model), recorded in the R2 checklist.
 
 ---
 
@@ -2356,8 +2909,11 @@ density, motion ≤ 240 ms with no bounce, real-data KPIs) and design's admin sy
   sections: list, add from the eligible library, inspector driven by `FieldSpec`, "Générer" through ai.md tasks) ·
   **Stock** (axis per item, counts table, low thresholds, "Afficher le stock bas aux clients") · **Référencement**
   (slug with the live URL, title and description with counters, OG image, `noindex`, Google and WhatsApp preview
-  cards) · **Collections** (multi-select, primary collection) · **Pages de vente** (attached landings with status;
-  "Créer une page de vente"; "Relier une page existante"; "Détacher") · R3: **Guide des tailles**, **Traductions**.
+  cards) · **Collections** (multi-select, primary collection) · **Pages de vente** (rev 2: one row per attached
+  landing with its status (En ligne / Synced with the product / Out of sync / Brouillon), the sync time, and its
+  **override chips** computed by `offerOverrides` ("Pack Duo 449 DH · prix produit 2 × 249 = 498 DH · −49 DH"; a 1-unit
+  offer below the product price carries the two-prices warning); "Créer une page de vente"; "Relier une page existante";
+  "Détacher"; "Resynchroniser" when out of sync) · R3: **Guide des tailles**, **Traductions**.
 - Validation: `checkProductDoc` issues and `offerWarnings` listed at the top with jump links; errors block save,
   warnings do not.
 - Conflict (another member saved): a sheet "Ce produit a été modifié par {name} à {time}" with "Recharger" (keeps a copy
@@ -2374,13 +2930,18 @@ density, motion ≤ 240 ms with no bounce, real-data KPIs) and design's admin sy
 
 ### STO-§23.5 Storefront overview (`/app/<h>/storefront`)
 
-Cards, in order: **Adresse de la boutique** (live URL, copy, QR and WhatsApp share from UX-05) · **Pages de la boutique**
-(Accueil, Page produit, Collection, Recherche, Panier, Paiement, Page introuvable, then the custom pages; each with "En
-ligne" / "Modifications non publiées" / "Brouillon", Modifier, Aperçu) · **Mode d'achat** (inline or cart, with the
-recommendation from STO-D8 explained in one line) · **Livraison** (zones summary or the fallback fee, link to the
-delivery settings; an error card when neither exists) · **Pixels de la boutique** (the library picker, Offers D6 rule) ·
-**En-tête et menus** · **Pied de page et annonce** · **Générer le design de ma boutique** (AI-11 blueprint applied as
-drafts, STO-§11.5) · the checklist ring (STO-§23.6), which feeds the store health score (rf SF-03, platform.md).
+Cards, in order: **Adresse de la boutique** (P2's live address card, core §I.4: canonical URL with copy, QR, "Share on
+WhatsApp", **"Open a test order"** minting the STO-D33 store token, "Create a campaign") · **Design de la boutique**
+(rev 2, STO-D39: the brand DNA card with chips and the why line, the active theme version, "Generate my store design"
+(`startStoreDesign`: three instant candidates at once, the deep pass as a job with its stage line when Cloud AI is on,
+STO-§11.5), "Design studio" (S2)) · **Pages de la boutique** (Accueil, Page produit, Collection, Recherche, Panier,
+Paiement, Page introuvable, then the custom pages; each with "En ligne" / "Modifications non publiées" / "Brouillon" /
+"Hors budget" (STO-§7.3), Modifier, Aperçu) · **Mode d'achat** (inline or cart, with the recommendation from STO-D8
+explained in one line) · **Livraison** (zones summary with the dated example line for a sample city, or the fallback
+fee; link to the delivery settings; an error card when neither exists) · **Pixels de la boutique** (the library picker,
+Offers D6 rule) · **En-tête et menus** · **Pied de page et annonce**. The rev 1 checklist ring is **replaced** by the
+one Store Health ring (core D53, §I.7): the store's issues from every track appear on the dashboard and here with the
+storefront rules of STO-§23.8; no second score exists.
 
 ### STO-§23.6 Store page editor and checklist
 
@@ -2390,18 +2951,36 @@ drafts, STO-§11.5) · the checklist ring (STO-§23.6), which feeds the store he
   library filtered by `KIND_RULES` and `ELIGIBILITY`, variant picker, `bg` / spacing / divider, the data inspector
   (`FieldSpec`), a product binder for landing sections on home and custom pages, drag and keyboard reorder (Alt + ↑ ↓),
   undo/redo, versions, and the publish dialog.
-- `storePageChecklist(doc, ctx)` (`src/lib/editor/store-page.ts`, pure over preloaded data):
+- The editor mounts P6's **Design check panel** and **DNA card** (DES-§15.1, §15.4; STO-D39) for `home` and `page`
+  kinds; the Design check runs `runGates` with the kind's register on every change (≤ 8 ms) and offers the same
+  one-click fixes as the landing builder.
+- `storePageChecklist(doc, ctx)` (`src/lib/editor/store-page.ts`, pure over preloaded data) is the **builder mirror** of
+  the server gate: it produces the same `GateItem` ids the publish gate produces (core §M.5), so the publish dialog is
+  never the first time an item appears. The server side is `src/lib/render/prepublish/storefront.ts` (STO-D35), one
+  check function registered with `registerPrePublishCheck("storefront", …)`:
 
-| Level | Item |
-|---|---|
-| error | a required section is missing (KIND_RULES) |
-| error | `checkout` template while `storeDeliveryFee` would answer `not_set` for some city (no zone covers it and no fallback fee) |
-| error | home H1, H3, H10 (STO-§11.3) |
-| error | a bound product or a hand-picked grid whose every product is inactive |
-| error | design hard gates on the doc (DES-§8, dependency STO-§29.2) |
-| error | the template rendered with the store's heaviest product exceeds the 160 KB document cap |
-| error | the storefront has no pixel answer ("Choisissez les pixels de la boutique ou « Aucun pixel »") |
-| warning | home H2, H4-H8; dead menu links; images without alt; missing SEO description; sold-out products in a hand-picked grid; an empty collection in a tile section; missing returns or contact facts; an announcement claim ("Livraison offerte") the delivery data does not support |
+| Level (gate code) | Id | Item | Fix |
+|---|---|---|---|
+| hard (`budget_blocked`) | `storefront:required_missing` | a required section is missing (KIND_RULES) | add the section |
+| hard (`budget_blocked`) | `budget:C2`, `budget:C3`, `budget:F5`, `budget:R1`, `budget:I1` | the per-kind budgets of STO-§6.1 (fold contract, sections, height, HTML gz, CTAs, photo reuse), measured on the template rendered with the heaviest product / fullest grids | open the section named; remove the duplicate |
+| hard (`honesty_blocked`) | `storefront:checkout_fee_unset` | `checkout` template (or a PDP in the `inline` model) while `storeDeliveryFee` would answer `not_set` for some served city (no zone covers it and no fallback fee) | open delivery settings |
+| hard (`honesty_blocked`) | `storefront:hero_price_without_product` | a `stage` / `specimen-sheet` hero without an active product with a cutout | pick a product or another family |
+| hard (`honesty_blocked`) | `storefront:announcement_claim` | an announcement message claiming free delivery, a delay or a discount the delivery data or the catalogue does not support (regex over the message against the facts of STO-§12.6) | edit the message |
+| hard (`honesty_blocked`) | `storefront:fact_missing` | a trust fact, bestseller label, countdown, stock line or rating that would render without its source (STO-D37; normally impossible by construction, this catches a hand-edited doc) | remove it |
+| hard (`honesty_blocked`) | `attach.compare_not_real` | an attached landing's offer compare-at that is neither the computed reference nor the product compare-at × units (LAN-§17.3) | reset the compare-at |
+| hard (`honesty_blocked`) | `storefront:pixel_unanswered` | the storefront has no pixel answer ("Choisissez les pixels de la boutique ou « Aucun pixel »") | open the pixels card |
+| hard (`design_blocked`) | `design:*` hard rows | `runGates` with the kind's register (DES-§8.2; commerce: glass, motion, accent area, decor are hard), the clone block N01 | the gate's `fix` ops |
+| hard (`design_blocked`) | `storefront:home_invariant` | home H1, H3, H10, H11, H12 (STO-§11.3) | the invariant's fix |
+| hard | `storefront:bound_inactive` | a bound product or a hand-picked grid whose every product is inactive | rebind |
+| note | `storefront:home_soft` | home H2, H4-H9, H13; eyebrow share > 30 %; > 2 centred sections in a row | one-click fix each |
+| note | `storefront:menu_dead` | dead menu links (dropped at render) | open the menus editor |
+| note | `storefront:alt_missing`, `storefront:seo_missing` | images without alt; missing SEO description | fill (AI-09 offer) |
+| note | `storefront:grid_soldout`, `storefront:tile_empty` | sold-out products in a hand-picked grid; an empty collection in a tile section | edit the source |
+| note | `storefront:facts_missing` | missing returns or contact facts (the trust strip renders fewer items) | open policies |
+
+Every id has a title in ar/fr/en (`test:i18n-coverage` covers gate titles, core §I.5), names the measured value and the
+limit, and offers one fix (core §M.5). Re-renders run the same checks in `warn` mode and surface the notes in Store
+Health (core §M.1 rule 5).
 
 ### STO-§23.7 Admin copy keys (`src/lib/i18n/admin/<locale>/storefront.ts`; en and fr in R2, ar in R3, core D36)
 
@@ -2435,6 +3014,67 @@ drafts, STO-§11.5) · the checklist ring (STO-§23.6), which feeds the store he
 | `storefront.checklist.title` | Before you publish |
 | `storefront.publish.home` | Use the store home as your home page? |
 | `storefront.menu.dead` | This link points to something that is no longer published. |
+| `storefront.design.generate` (rev 2) | Generate my store design |
+| `storefront.design.deepRunning` | Deep design pass running · {stage} |
+| `storefront.design.apply` / `.undo` | Apply this design / Back to the previous home |
+| `storefront.design.why` | Why this design |
+| `storefront.test.open` | Open a test order |
+| `storefront.test.banner` | Test order: not counted |
+| `catalog.fromPhotos.review` | Check the facts, type the prices, then create {n} drafts. |
+| `catalog.fromPhotos.noPrice` | Price (required, never guessed) |
+| `catalog.landings.override` | Override: product price {reference} · this pack {price} ({delta}) |
+| `catalog.landings.singleBelow` | Shoppers who also see the product page see two prices for one unit. |
+| `catalog.landings.synced` / `.outOfSync` | Synced with the product / Out of sync: the last update could not be published |
+| `health.sf.checkoutFee` … (STO-§23.8 texts) | see STO-§23.8 |
+
+### STO-§23.8 Store Health rules (SF-03 inputs; `src/lib/health/rules/storefront.ts`, R2; core §I.7, STO-D40)
+
+Each rule is `HealthRule` (core §I.7): store data only, ≤ 40 ms, silent below `minN`, one `HealthFix`, `release: "R2"`,
+`mode: "storefront"` or `"catalog"`. Points follow the core's severity ladder (1 → 3, 2 → 6, 3 → 10) inside the group
+caps (setup 20, trust 15, design 15, conversion 15, operations 15, integrations 15, quota 5).
+
+| Id | Group | Sev. | Rule (evidence `{ metric, value, window, n }`) | Fix |
+|---|---|---|---|---|
+| `sf:checkout_fee_unset` | setup | 3 | store mode `store` / `both`, checkout published or inline model, and `storeDeliveryFee` answers `not_set` for ≥ 1 served city (`metric: "cities_without_fee"`) | `/settings/delivery` |
+| `sf:home_unpublished` | setup | 2 | `store` / `both` with ≥ 1 active product and no published `@home` for > 24 h | `/storefront` |
+| `sf:pixel_unanswered` | conversion | 2 | `storefront.pixels` unanswered while a store page is live | `/storefront` pixels card |
+| `sf:menu_dead` | conversion | 1 | ≥ 1 dead `main` menu link dropped at render (`metric: "dead_links"`) | `/storefront/menus` |
+| `sf:product_no_photo` | conversion | 2 | active products without a photo (`n ≥ 1`) | `/catalog/products?filter=no_photo` |
+| `sf:product_no_description` | conversion | 1 | ≥ 30 % of active products without a description (`minN` 5 products) | `/catalog/products?filter=no_description` |
+| `sf:seo_missing` | conversion | 1 | ≥ 30 % of active products without `seo.description` (`minN` 5) | "Fill SEO for {n} products" (AI-09 action) |
+| `sf:out_of_stock_live` | operations | 2 | an active product with every offer unavailable for > 7 days (`metric: "days_out"`) | `/catalog/inventory?filter=out` |
+| `sf:compare_not_higher` | trust | 2 | an active product with `compareAt ≤ price` on any item | the product editor |
+| `sf:page_over_budget` | design | 2 | a live template rendered > 140 KB gz or above the hard section/height budget since its last publish (STO-§7.3) | the template editor |
+| `sf:redirect_hits` | conversion | 1 | a `catalog_redirects` row still receiving ≥ 20 hits/week after 6 months (an ad still points at an old slug) | the campaign links |
+
+`markHealthDirty(storeId)` is called by every catalog write, template publish, storefront-settings write and inventory
+crossing (core §I.7). Design-quality issues of store templates (`q < 70`, slop) come from P6's `designHealth(scope)`,
+not from this file. Acceptance: `test:health` fixtures for each rule with and without `minN`; the two-store fixture
+proves no cross-store evidence; fixing an issue never lowers the score.
+
+### STO-§23.9 Admin UX ceiling compliance (core §I.8 rules on the storefront screens)
+
+Every screen of STO-§23 ships against DES-§16.17 and the eight rules of core §I.8:
+
+1. **Instant**: product and collection lists hydrate from a cached first page; saves are optimistic with rollback
+   (`saveProduct` conflict → the sheet, never a silent overwrite); every write carries the idempotency of the
+   compare-and-set `rev`; skeleton rows mirror the final rows (40 px thumbnail, name, status pill, price) and appear
+   after 150-300 ms.
+2. **Keyboard**: chords `G K` → products (Katalog), `G B` → storefront (Boutique) registered in
+   `src/components/admin/shell/commands/storefront.ts`; `C` → "New product" in store/both mode; `E` edit, `Enter` open,
+   `X` select, `J/K` move in the product list; `⌘S` save in the editors; `?` lists them.
+3. **Honest data**: the product list's "Dès 199 DH" is the computed `price_min_cents`; stock chips show the real count;
+   the storefront overview shows no rate below `n ≥ 20` (page vitals come from P3's component with its `n ≥ 20` rule).
+4. **One accent, one glass, no bounce**: tokens only; the live preview iframe is sandboxed; no spring in any storefront
+   component (`test:admin-motion`).
+5. **Dense but breathing**: compact density for the inventory table (32 px rows), comfortable elsewhere; tabular
+   numerals in every price and count column.
+6. **Phone-first**: the product editor collapses to a single column with a sticky save bar; the inventory table becomes
+   two-line rows; 44 px targets.
+7. **RTL by construction**: logical properties only (`test:admin-rtl`); SKUs, prices and slugs in `<bdi dir="ltr">`.
+8. **No AI tells**: labels above inputs, no placeholder-as-label, no decorative dots on status pills (the pill text
+   carries the state), no em or en dash in any copy key, no "Step 1/2/3" (the "À partir de photos" flow uses verb
+   labels: "Déposer", "Vérifier", "Créer").
 
 ---
 
@@ -2511,6 +3151,22 @@ numbers that must stay left-to-right are wrapped with the `ltr()` isolate. es, d
 | `reviews.verified` (R3) | Achat vérifié | شراء مؤكَّد | Verified purchase |
 | `reviews.disclosure` (R3) | Les avis proviennent de clients ayant reçu leur commande ; nous vérifions chaque avis par son numéro de commande. | التقييمات كتجي من زبناء توصلو بالطلب ديالهم، وكنتأكدو من كل تقييم برقم الطلب. | Reviews come from customers who received their order; we check each one against its order number. |
 | `reviews.imported` (R3) | Avis importé | تقييم مستورد | Imported review |
+| `delivery.estimated` (rev 2) | (estimation) | (تقريبي) | (estimated) |
+| `delivery.estimatedBetween` | Livraison estimée entre {from} et {to} (estimation) | التوصيل المتوقع بين {from} و{to} (تقريبي) | Estimated delivery between {from} and {to} (estimated) |
+| `delivery.estimatedOn` | Livraison estimée le {date} (estimation) | التوصيل المتوقع نهار {date} (تقريبي) | Estimated delivery on {date} (estimated) |
+| `delivery.byCity` | Livraison selon la ville | التوصيل على حساب المدينة | Delivery depends on your city |
+| `wa.order` | Commander sur WhatsApp | اطلب عبر واتساب | Order on WhatsApp |
+| `wa.ready` | Votre message est prêt dans WhatsApp · Réf. {ref} | الرسالة واجدة فواتساب · المرجع {ref} | Your message is ready in WhatsApp · Ref. {ref} |
+| `wa.toConfirm` | À confirmer : {options} | باقي نأكدو: {options} | To confirm: {options} |
+| `test.banner` | Commande test : non comptée | طلب تجريبي: ما كيتحسبش | Test order: not counted |
+| `test.thanks` | Commande test reçue. Rien n'a été envoyé à vos outils. | توصلنا بالطلب التجريبي. ما تصيفط والو للأدوات ديالك. | Test order received. Nothing was sent to your tools. |
+| `pdp.gallery.counter` | {i}/{n} | {i}/{n} | {i}/{n} |
+| `pdp.chooseOptions` | Choisissez vos options | اختار الخيارات ديالك | Choose your options |
+| `hero.shopCollection` | Voir la collection | شوف المجموعة | Shop the collection |
+| `hero.searchPlaceholder` | Que cherchez-vous ? | شنو كتقلب عليه؟ | What are you looking for? |
+
+Every key is checked by `test:i18n-coverage` (core §I.5) for ar/fr/en completeness and for the absence of em and en
+dashes and "Step n" labels; Arabic strings use Latin digits by default (RTL7) and wrap ranges in isolates (RTL1).
 
 ---
 
@@ -2536,6 +3192,17 @@ numbers that must stay left-to-right are wrapped with the `ltr()` isolate. es, d
   `sg:<h>:pxu` in `sessionStorage`).
 - **Admin**: every action through `storeAction` (lint L9); impersonation is read-only (core §B.8); preview iframes are
   sandboxed (core §I.2).
+- **Test tokens (rev 2)**: `hmac(exp, "test-order:<storeId>")` is store-bound and 2 h (core D54); a token minted for
+  store A is an ordinary visit on store B; a test render is never cached and never indexed; `is_test` is set only by
+  `resolveTestToken`, never from a body flag (lint L12 covers the store order and lead handlers).
+- **WhatsApp intents (rev 2)**: the lead endpoint's `whatsapp` kind prices from the catalogue only (no price field in
+  the schema), writes no phone, and its reference is unique per store; a ref of store A resolves nowhere from store B.
+- **Experiments (R3)**: exposures carry an HMAC-hashed visitor id per store (`experiment_exposures.vid_hash`, core
+  §D.6); an exposure posted with store A's context key from store B's host is refused (`storeHosts`).
+- **Attack cases** this part adds to the suite (`scripts/qa/tenancy-cases/storefront.ts`, core §F.1): B's product key
+  inside A's checkout and cart re-price; A's test token on B; A's product slug under B's handle; A's `WA-` ref from B's
+  ⌘K; B's member calling every catalog, inventory, template and storefront action with A's ids; render-cache keys of one
+  slug in two stores; a `sync` republish of A's attached page never reads B's product.
 
 ---
 
@@ -2545,9 +3212,10 @@ numbers that must stay left-to-right are wrapped with the `ltr()` isolate. es, d
 
 | Script | File | Checks |
 |---|---|---|
-| `test:catalog` | `src/lib/catalog/selftest.ts` (+ `facts.selftest.ts`, `delivery.selftest.ts`, `eta.selftest.ts` when S1 writes the engine) | `checkProductDoc` round-trips every Offers v2 fixture (`src/lib/page/fixtures.ts`); store rules strip rating, bump, upsell, `stockLeft`; `productAsPageDoc` valid for every fixture; `applyStock` on item, matrix and choice axes; stock-key hashing above 64 chars; `deriveProduct` ranges; `storeDeliveryFee` every branch; `etaWindow` cut-off, weekend, holiday, ar and fr text; `parseOrderPayloadV3` error keys; `priceLine` parity: for every fixture offer and selection, `n × orderTotals().subtotal` equals the runtime money module's value; `orderTextV3` examples and the 1,000-character cap; `contentsOfV3`; `attachMirror` (appended, dropped, offers off); `foldText` / `tokens` / `arabiziToLatin`; search ranking fixtures; JSON-LD builders (no `priceValidUntil`, no `aggregateRating` in R2, `variesBy` mapping, `ItemList`); canonical rules table; `storeDocIssues` per kind; `checkHomeDoc` over 4 archetypes × 3 shapes × 50 seeds; the facts table (each fact absent → its line absent) |
-| `test:store-runtime` | `src/storefront/runtime/selftest.ts` | cart store (merge, caps, expiry, cross-tab), storage keys per handle, phone formatting and digit folding, city combobox matching, v3 payload builder ↔ parser round trip, bridge contract on the runtime's fixture DOM (the approach of `src/landing/runtime/selftest*.ts`) |
-| `qa:storefront-render` | `scripts/qa/storefront-render-check.ts` | every kind fixture rendered in P and S bases, ar and fr: chunk budgets and the page cap (budget + 5 %); the landing chunk's sha256 unchanged; no `/admin` link; absolute canonical, og and JSON-LD URLs; CSP hashes match the inline scripts; orange check on the inlined CSS; commerce register (no glass token, no transition > 250 ms); every image with width/height or aspect ratio; no `unload` in store chunks |
+| `test:catalog` | `src/lib/catalog/selftest.ts` (+ `facts.selftest.ts`, `delivery.selftest.ts`, `fold.selftest.ts`, `from-photos.selftest.ts`) | `checkProductDoc` round-trips every Offers v2 fixture (`src/lib/page/fixtures.ts`); store rules strip rating, bump, upsell, `stockLeft`; `productAsPageDoc` valid for every fixture; `applyStock` on item, matrix and choice axes; stock-key hashing above 64 chars; `deriveProduct` ranges; `storeDeliveryFee` every branch over landing's `DeliveryZoneRow` fixtures; the ETA text of PDP, cart, checkout and `zoneLineFor` byte-identical for one city and instant against `test:delivery`'s expectations; `parseOrderPayloadV3` error keys incl. `test`; `priceLine` parity: for every fixture offer and selection, `n × orderTotals().subtotal` equals the runtime money module's value; `orderTextV3` examples and the 1,000-character cap; `contentsOfV3`; `composeStoreWaMessage` totals equal `orderTotals` and the schema has no price field; `materializeAttached` (appended, dropped, offers off) and `offerOverrides` (reference, delta, the single-unit warning, `attach.compare_not_real`); `foldText` / `tokens` / `arabiziToLatin`; search ranking fixtures; JSON-LD builders (no `priceValidUntil`, no `aggregateRating` in R2, `variesBy` mapping, `ItemList`); canonical rules table; `storeDocIssues` per kind incl. the per-kind budgets; **the store corpus**: `checkHomeDoc` and `checkFold` over 4 storylines × 8 hero families × 3 shapes × ar/fr × 50 seeds (1,200 homes) and the 6 PDP families × 3 shapes × ar/fr with the longest name fixture: 0 hard items, no family > 30 % per niche, ≥ 60 distinct sequences per 100, fold contract 100 %, same seed two shapes never the same (family, pairing, order); `defaultTemplate(kind, shape)` × 3 shapes × ar/fr passes `runPrePublishChecks` in `block` mode; `proposeProductsFromPhotos` on the 12-photo fixture (8 ± 1, no price key, facts unticked); the facts table (each fact absent → its line absent); `storefront:*` gate items each fire on their fixture and nowhere else |
+| `test:store-runtime` | `src/storefront/runtime/selftest.ts` | cart store (merge, caps, expiry, cross-tab), storage keys per handle incl. `sg:<h>:test`, the test token carried from the `store` chunk to the v3 body, phone formatting and digit folding, city combobox matching, v3 payload builder ↔ parser round trip, bridge contract on the runtime's fixture DOM (the approach of `src/landing/runtime/selftest*.ts`), the WhatsApp intent request shape and the fallback link |
+| `qa:storefront-render` | `scripts/qa/storefront-render-check.ts` | every kind fixture rendered in P and S bases, ar and fr, both buy models, every hero family: chunk budgets and the page cap (budget + 5 %); the landing chunk's sha256 unchanged; no `/admin` link; absolute canonical, og and JSON-LD URLs; CSP hashes match the inline scripts; orange check on the inlined CSS; commerce register (no glass token, no transition > 250 ms, accent area ≤ 8 % by the height model); every image with width/height or aspect ratio; no `unload` in store chunks; the test render has no pixel script, the banner, `noindex`; the per-kind HTML gz and `<picture>` counts within STO-§21.2; the critical-byte sum per kind; no em or en dash in any rendered string; RTL1-RTL8 regexes on the ar fixtures |
+| `test:health` (storefront rows) | `src/lib/health/rules/storefront.ts` fixtures inside P1's `test:health` | STO-§23.8 rules with and without `minN`; no cross-store evidence |
 
 ### STO-§26.2 Database (`test:storefront-db`, `scripts/qa/storefront-db-check.ts`, throwaway `cod_test_*` databases, core §J.2 guard)
 
@@ -2556,22 +3224,57 @@ membership and counts · every write of STO-§7.5 bumps `catalog_version` · the
 once · a crossing changes `rev` · v3 orders: 2 lines × `n` happy path, price change → `stale` → confirm → success,
 option sold out → `unavailable`, archived product → `removed`, `not_served` city, fallback fee, free threshold, free
 offer, duplicate `idem` → same order id, honeypot decoy, two stores' keys → `invalid` with no row written, restricted
-store → `unavailable`, landing-mode store → `unavailable` · v3 lead stored with `page_id` NULL · attached landing:
-mirror at publish, product change → re-render writes `product_rev`, an order from old HTML → `stale` · tenancy: a member
-of store B cannot list, read, save or delete A's products, collections, inventory or templates through any action
-(identical not-found answers, A's rows byte-identical); B's product key inside A's checkout refused; A's product slug
-under B's handle → 404; render-cache keys distinct for one slug in two stores · R3: two parallel orders for the last
-counted unit (one `unavailable`), 20 parallel redemptions of a 10-use coupon (exactly 10 succeed), a review token used
-twice (second refused).
+store → `unavailable`, landing-mode store → `unavailable` · **test session** (rev 2): a v3 order with a valid token is
+`is_test = 1`, `sheet_status = 'disabled'`, no outbox item, no `stats_daily` row, `customers.test_count` only; the same
+token on another store is an ordinary order; "Delete test orders" removes it after 1 h · v3 lead stored with `page_id`
+NULL · **WhatsApp intent** (rev 2): a `whatsapp` lead with `phone` NULL, a unique `ref`, `total_cents` = the server's
+total; 50 parallel intents → 50 refs · attached landing (rev 2): materialise at publish, a price change → a `sync`
+version with the new `product_rev` and the old version kept, a content change → in-place re-render with no new row, an
+order from old HTML → `stale`, a failed sync keeps the old version live and notifies, an override chip computed from
+the fixture (449 vs 2 × 249) · template publish through `runPrePublishChecks`: a 17-section home is refused
+`budget_blocked`, a checkout with no fee is refused `honesty_blocked` with `storefront:checkout_fee_unset`, a commerce
+template with a glass variant is refused `design_blocked`; `warn` mode publishes and audits · tenancy
+(`scripts/qa/tenancy-cases/storefront.ts`): a member of store B cannot list, read, save or delete A's products,
+collections, inventory or templates through any action (identical not-found answers, A's rows byte-identical); B's
+product key inside A's checkout refused; A's product slug under B's handle → 404; render-cache keys distinct for one
+slug in two stores; A's test token on B; A's `WA-` ref from B · R3: two parallel orders for the last counted unit (one
+`unavailable`), 20 parallel redemptions of a 10-use coupon (exactly 10 succeed), a review token used twice (second
+refused), an experiment arm touching `productDetail` refused `exp.buy_box`.
 
 ### STO-§26.3 Browser and live
 
 | Script | Checks |
 |---|---|
-| `qa:storefront-e2e` (Playwright msedge, production build on port 3451+, core §J.3) | cart model: home → collection → PDP → add → cart → checkout → thank-you; inline model: PDP → order; buy now; price changed in the admin mid-checkout → stale → confirm; city combobox with "طنجة", "tanja", "Tanger"; ar RTL screenshots at 360 px for every kind; keyboard-only path; pixels fired in order (ViewContent, AddToCart, InitiateCheckout, Lead, Purchase) against a stub |
-| `qa:storefront-perf` | the throttled profile of STO-§21.1 per kind fixture; server timings for hit, miss and 304 |
-| `qa:storefront-a11y` | STO-§22.3 |
-| Live (after the R2 deploy, core §H.10) | a `both` test store: product, collection, attached landing, one cart order and one inline order, the Sheets row, thank-you, tracking link; Rich Results Test on 3 URLs; a WhatsApp link preview |
+| `qa:storefront-e2e` (Playwright msedge, production build on port 3451+, core §J.3) | cart model: home → collection → PDP → add → cart → checkout → thank-you; inline model: PDP → order; buy now; price changed in the admin mid-checkout → stale → confirm; city combobox with "طنجة", "tanja", "Tanger"; the dated delivery line changes with the city and matches the thank-you expectation text; **fold contract** (rev 2): for every hero family × ar/fr at 390 × 844 and 360 × 740 the `mustShow` elements' rects are inside the viewport before any scroll (the `budget:C2` Playwright gate, core §M.2); the sticky bar is hidden while the buy box is ≥ 50 % visible; ar RTL screenshots at 360 and 1440 px for every kind (segmented ≤ 8,000 px, DB §1.4); keyboard-only path; pixels fired in order (ViewContent, AddToCart, InitiateCheckout, Lead, Purchase) against a stub and **not at all** in a test session; WhatsApp order opens `wa.me` with the server's total |
+| `qa:storefront-perf` | the throttled profiles of STO-§21.1 per kind × locale × buy model: LCP, TBT, CLS, keypress-to-paint, city-pick latency; chunk boot times at 4× CPU (STO-§14.7); critical bytes per kind (STO-§21.4); server timings for hit, miss, 304 and the publish gate; 200 concurrent cold PDP requests render once |
+| `qa:storefront-a11y` | STO-§22.3 incl. the rev 2 additions |
+| `qa:storefront-demo` (rev 2) | the R2 store acceptance scenario of STO-§26.4, asserted end to end |
+| Live (after the R2 deploy, core §H.10) | a `both` test store: product, collection, attached landing with an override chip, one cart order and one inline order placed through a **test session** (nothing in Sheets, nothing in CAPI, revenue 0), then one real order, the Sheets row, thank-you, tracking link; Rich Results Test on 3 URLs; a WhatsApp link preview; the home's DNA card and bands |
+
+### STO-§26.4 The R2 store demo (three minutes from a photo batch to a confirmed test order; rf §4 adapted to the store)
+
+Two screens like the R1 wow demo (core §K.2 criterion 12): persona 1 (the seller) on a mid-range Android phone on 4G,
+persona 2 (the owner or an agent) on a laptop. Cloud AI **off** (the instant path must pass); the local model cache
+empty. Test data: 12 photos of 8 products (3 group photos), a never-used phone number.
+
+| Clock | Seller (phone) | Agent (laptop) | Budget (p75) | Pass condition |
+|---|---|---|---|---|
+| 0:00 | Opens `/app/<h>/catalog/products/new` → "À partir de photos", drops 12 photos | | upload ≤ 12 s on 4G; proposals ≤ 2 s after the last photo (rules path) | 8 ± 1 proposals, every price field empty, facts unticked |
+| 0:30 | Types 8 prices, ticks 2 facts, "Créer 8 brouillons", activates them | | ≤ 1 s per save | 8 active products, `products` gauge 8 |
+| 0:55 | Storefront overview → "Generate my store design" | | 3 instant candidates ≤ 2 s; the preview of each ≤ 1 s server | three homes with distinct hero families and `ok` bands; DNA cards show chips and a why line; no number of distance |
+| 1:10 | Picks one, taps Publish | | render + gate ≤ 1.5 s | published; the dialog shows no refusal (fixtures pass the budgets); utility templates auto-published earlier |
+| 1:20 | Address card → "Open a test order" | | — | `/?sg-test=<token>` on the store host; the banner shows; no pixel script |
+| 1:30 | Home → PDP of product 3 → picks an option → inline checkout: name, phone, city "tanja" → Tanger, address → Confirmer | | PDP LCP ≤ 2.5 s on 4G; city pick → dated line ≤ 100 ms; submit → thank-you ≤ 1.5 s | the line reads "Livraison estimée entre … (estimation)" with the zone fee; the order is `is_test`, risk < 70, `sheet_status = 'disabled'`, no outbox item; the thank-you shows the test notice and "Confirm on WhatsApp" |
+| 2:10 | | Queue → `N` → the TEST order claimed → `1` confirmed | claim ≤ 300 ms; outcome ≤ 500 ms | `confirm_state = confirmed`; the drawer shows the TEST chip, the v3 lines with the option text and the delivery rule `zone` |
+| 2:30 | Dashboard | | pulse ≤ 15 s | revenue KPIs at 0; the Store Health ring shows no `sf:*` issue except `sf:seo_missing` (a suggestion); "Delete test orders" available |
+| 2:50 | PDP of product 3 → "Commander sur WhatsApp" | | lead ≤ 400 ms | `wa.me` opens with the server's total and a `WA-` ref; the lead appears in the inbox with kind WhatsApp and no phone |
+| 3:00 | Done | Done | | total wall time ≤ 3:30 with human typing modelled at 150 ms per character |
+
+Acceptance checks (automated in `qa:storefront-demo`): every pass condition; the run passes with Cloud AI off; the run
+twice in two stores with the same photos yields homes whose novelty verdict is `ok` and whose hero families or pairings
+differ; every page passes the no-orange scan; the test order never reaches Sheets, CAPI, `stats_daily`,
+`stats_version_daily`, `agent_stats_daily` beyond the TEST-excluded columns, `customers` counters beyond `test_count`
+or `ai_feedback`; a second agent pressing `N` does not get the same order; the tenancy gate is green on the same build.
 
 ---
 
@@ -2579,10 +3282,19 @@ twice (second refused).
 
 ### STO-§27.1 R2 contract step (maintainer)
 
-Writes from this spec: the §STO-3 tables and columns into `src/lib/db/schema.ts` and `drizzle/0006_r2.sql`;
-`src/lib/orders/contract-v3.ts` (STO-§16.1, §16.4, §15.11); `src/storefront/types.ts`, `src/storefront/schema.ts`
-and `src/storefront/kinds.ts` as frozen contracts; the budget keys; the package scripts; the resolver additions; the
-typed stubs of request STO-R19; the settings keys `storefront` and `checkout.store` with their first schemas.
+Writes from this spec (every item accepted in core §Q.2 and listed in core §K.4's contract step): the §STO-3 tables and
+columns into `src/lib/db/schema.ts` and `drizzle/0006_r2.sql` (incl. `catalog_redirects`, `inventory_moves`,
+`pages.attach_opts`, `page_versions.product_rev`, `page_versions.kind` + `'sync'`, `leads.page_id` NULL-able);
+`src/lib/orders/contract-v3.ts` (STO-§16.1 incl. `test`, §16.4, §15.11 incl. `kind`); `src/storefront/types.ts`,
+`src/storefront/schema.ts`, `src/storefront/kinds.ts` and `src/storefront/fold.ts` (`FoldLayout`, STO-§9.5) as frozen
+contracts; the budget keys (core §H.13); the package scripts (core §J); `resolveProductKey` / `resolveContextKey`;
+`createOrderRow`, `attachedDocFor` applied by `orderVersion`, `contentIdOf` (STO-R12); `ensureTemplateSet` (STO-R17);
+the STO-R19 stubs (`getStoreTheme`, `zonesForCheckout` = `listZones`, `zoneLineFor`, `etaWindow` / `etaText`,
+`signedTrackPath`, `waConfirmText`) and the `catalog_version` bumps on zone, theme, brand, `store` and `policies`
+writes; `republishAttached` as the `product` render handler and `onProductChanged` (LAN Q24); lint L11; the typed
+`orders.items` / `pages.draft` unions (STO-R2, R8); the settings keys `storefront` and `checkout.store` with their
+first schemas; the import line of `src/lib/render/prepublish/storefront.ts` in `prepublish.ts` and the per-kind
+`BudgetProfile` hook (second-round request STO-R25).
 
 ### STO-§27.2 Track S1 STOREFRONT (R2) owns
 
@@ -2593,15 +3305,17 @@ typed stubs of request STO-R19; the settings keys `storefront` and `checkout.sto
 | Store routes | `src/app/s/[store]/{p,products,c,collections,cart,checkout,search}/**`, `src/app/s/[store]/[slug]/[...rest]/route.ts`; the store branches of `src/app/s/[store]/route.ts`, `[slug]/route.ts`, `policies/**` and the chrome wrapper of `track/**` (request STO-R18) |
 | Public store APIs | `src/app/api/public/store/{order,lead,cart,event}/**` |
 | Admin | `src/app/app/[store]/{catalog,storefront}/**`, `src/components/admin/{catalog,storefront}/**`, `src/lib/editor/store-page.ts` |
-| Extension files | `src/lib/orders/hooks/storefront.ts`, `src/lib/jobs/tracks/storefront.ts` (jobs `catalog.bestsellers` nightly 03:40, `catalog.stock_reconcile` nightly), `src/components/admin/shell/nav/storefront.ts`, `src/lib/i18n/admin/{en,fr,ar}/storefront.ts`, `src/lib/settings/keys/{storefront,checkout-store}.ts` |
-| Build and QA | `scripts/build-store-assets.mjs`, `scripts/qa/storefront-{render-check,db-check,e2e,perf,a11y}.ts` |
+| Extension files (core §K.3 extension points; rev 2 adds the rows marked +) | `src/lib/orders/hooks/storefront.ts` (stock decrement at `shipped`, hold release R3), `src/lib/jobs/tracks/storefront.ts` (jobs `catalog.bestsellers` nightly 03:40, `catalog.stock_reconcile` nightly, R3 `stock.holds_expire` per tick, `catalog.collections` nightly), `src/components/admin/shell/nav/storefront.ts`, `src/lib/i18n/admin/{en,fr,ar}/storefront.ts`, `src/lib/settings/keys/{storefront,checkout-store}.ts`, + `src/lib/render/prepublish/storefront.ts` (STO-D35), + `src/lib/health/rules/storefront.ts` (STO-§23.8), + `src/lib/pulse/contributors/storefront.ts` (`lowStock`, `outOfStock`, `templateDrafts`), + `src/lib/notify/kinds/storefront.ts` (`catalog.low_stock`, `catalog.out_of_stock`, `storefront.checkout_blocked`; core §I.4), + `src/lib/flags/defs/storefront.ts` (`store_experiments_arms` R3), + `src/components/admin/shell/commands/storefront.ts` (`G K`, `G B`, "New product", "Publish home", "Open a test order (store)"), + `src/lib/admin-data/search/storefront.ts` (products by name / SKU / slug, collections), + `scripts/qa/tenancy-cases/storefront.ts` |
+| Landing parts owned by S1 in R2 (LAN-§26.2) | `src/lib/landing/{attach.ts, attach.server.ts, copy.server.ts}` (`materializeAttached`, `offerOverrides`, `republishAttached`, `copyPageToStore`), `src/components/builder/attach/**`, the product editor's "Pages de vente" tab (inside this part's admin files), the `product` render handler registration |
+| Build and QA | `scripts/build-store-assets.mjs`, `scripts/qa/storefront-{render-check,db-check,e2e,perf,a11y,demo}.ts` |
 
-Read-only for S1 (changes through CCRs, core §K.3): `src/landing/**` (runtime modules, sections, document), `src/lib/page/**`,
-`src/lib/orders/{contract,validate,create,resolve,text}.ts`, `src/lib/render/**`, `src/lib/delivery/**` (landing.md; S1
-writes `eta.ts` only if absent, STO-D17), `src/lib/theme/**` (design). Expected CCRs: exports from landing runtime
-modules and `orderForm` internals with no landing byte change; `orderText` dispatch (STO-R8); `createOrderRow`,
-`attachedDocFor`, attached content ids (STO-R12); read-only mirrored item fields in the landing editor (STO-R18); blend
-registrations for store colour mixes (design).
+Read-only for S1 (changes through CCRs, core §K.3): `src/landing/**` (runtime modules, sections, document),
+`src/lib/page/**`, `src/lib/orders/{contract,validate,create,resolve,text}.ts`, `src/lib/render/**` except
+`prepublish/storefront.ts`, `src/lib/delivery/**` (P3 ships it in R1; rev 1's "S1 writes `eta.ts` if absent" is
+withdrawn), `src/lib/design/**` and `src/lib/theme/**` (P6/S2), `src/lib/experiments/**` (D3). Expected CCRs: exports
+from landing runtime modules and `orderForm` internals with no landing byte change; blend registrations for store
+colour mixes (design); the DES-§5.4-style pool rows for store sections in design's registry if P6 keeps the pools
+centrally (else they live in `src/storefront/registry.ts`).
 
 ### STO-§27.3 Track D3 GROWTH (R3) owns the R3 additions
 
@@ -2613,10 +3327,14 @@ ST-11 … ST-20 (S1 is finished by then).
 
 ### STO-§27.4 Order inside R2
 
-Contract step → S1, S2 (design: `getStoreTheme`, store themes), S3/S4 (operations: hooks, Sheets v3 mapping, drawer
-lines) and S7 (ai: AI-09, AI-10, AI-11) in parallel; S1 merges before S7's blueprint UI (it calls
-`applyStoreBlueprint`). R2 exit (core §K.4): a `both` store with catalog, cart and attached landings live, the gate green,
-the load test of on-request store pages through the edge cache.
+Contract step → S1, S2 (design: `getStoreTheme`, `sampleBrand`, store themes, the store hero and PDP family CSS pools
+with S1), S3/S4 (operations: hooks, Sheets v3 mapping, drawer lines, the returns restock action) and S7 (ai: AI-09,
+AI-10, AI-11 as the `store_blueprint` job, `product.describe` for catalog-from-photos) in parallel; S1 merges before
+S7's blueprint UI (it calls `applyStoreBlueprint` and `startStoreDesign`). R2 exit (core §K.4, extended by this
+revision): a `both` store with catalog, cart and attached landings live with an override chip; the gate green;
+`qa:storefront-demo` passing on XAMPP and live (STO-§26.4); the store corpus of STO-§26.1 at 0 hard items with every
+share cap met; `qa:storefront-perf` within every STO-§21 budget; the load test of on-request store pages through the
+edge cache.
 
 ---
 
@@ -2636,8 +3354,15 @@ the load test of on-request store pages through the edge cache.
 | Search query · tokens · page size | 80 code points · 8 · 24/36 | search |
 | Instant search index (R3) | 500 products | `search-index` |
 | Tags per product | 20 × 32 chars | product input |
-| Document gzip cap | 160 KB | render (STO-§7.3) |
-| Chunk budgets | STO-§14.1 | `budgets.json` |
+| Document gzip | 90 KB soft · **140 KB hard** (core D52) | publish gate `budget:F5`; render flags a live overrun (STO-§7.3) |
+| Per-kind sections · height · CTAs · glass · reveals · photo reuse | STO-§6.1 table | `storeDocIssues` (soft) + publish gate (hard) |
+| Hero families · share per niche | 8 home + 6 PDP · ≤ 30 % over 100 stores | pool draw + `gene_stats`; store corpus (STO-§26.1) |
+| Critical bytes before LCP | PDP 300 KB · home / collection 220 KB · cart / checkout 130 KB | `qa:storefront-perf` |
+| Chunk boot at 4× CPU | `pdp` 45 ms · others ≤ 30 ms · Σ worst PDP 90 ms | `qa:storefront-perf` |
+| Catalog from photos | 40 photos per batch · interactive ≤ 6 photos, job above | `proposeProductsFromPhotos` |
+| Test token | 2 h · 60 test renders per store per hour | `resolveTestToken`, `s:<sid>:test-render` |
+| WhatsApp intents | 1 per page view per 30 s · 10 per IP per 10 min per store | `checkout` chunk, `s:<sid>:wa:ip` |
+| Chunk budgets | STO-§14.1 (`store-page` 41,000; R3 43,000, STO-R26) | `budgets.json` |
 | Coupons (R3): percent range | 1 %-90 % | coupon schema |
 | Review (R3): text · photos · token lifetime | 2,000 chars · 4 · 60 days | review endpoint |
 
@@ -2645,7 +3370,15 @@ the load test of on-request store pages through the edge cache.
 
 ## STO-§29 Requests to the core and dependencies
 
-### STO-§29.1 Requests to the core (exact changes; the core integrates them in revision 2)
+### STO-§29.1 Requests to the core (revision 1; **decided in core rev 2 §Q.2: all 24 accepted**)
+
+Core §Q.2 accepted every row below as written (none with changes, none rejected) and names where each landed:
+STO-R1 → core §E.2, D28 · R2 → §D.2, §F.1 L11 · R3 → §D.8, §H.4 · R4, R5 → §D.3, §D.6, §C.4.1 · R6 → §D.2, §H.3 · R7 →
+§E.6 · R8 → §D.2, §K.4 · R9 → §D.2 · R10 → §C.4, §C.4.1, §F.6 · R11 → §D.2 · R12 → §K.4 · R13 → §H.13, §J, §K.4 · R14 →
+§C.4.1 · R15 → §C.4 · R16 → §D.10 · R17 → §A.2, §A.5.1 · R18 → §K.4 S1 · R19 → §K.4 · R20 → §A.4, §D.7 · R21 → §A.3,
+§A.4, §F.5, §I.4 · R22 → §F.9 · R23 → covered by OPE-§3.6's hook event (`before` / `after` snapshots) · R24 → §E.6
+`getOrLoad`. This revision's text follows those placements (STO-§31 lists each alignment). The table is kept for the
+record.
 
 | # | Change | Why |
 |---|---|---|
@@ -2682,10 +3415,70 @@ the load test of on-request store pages through the edge cache.
 | landing.md | `delivery_zones`, `zoneLineFor`, `zonesForCheckout`, `etaWindow`, the `checkout` R1 fields (field model, `callPromise`), LP-04 thank-you blocks reusable inside the store document, LP-05 tracking and its signed links, the LP-06 leads inbox showing v3 selections, read-only mirrored items in the landing editor |
 | operations.md | Sheets mapping and drawer display of v3 orders, the returns "restock" action, the WhatsApp channel for review requests, server ad events built with `contentsOfV3`, accounting attribution of attached-landing orders to products |
 | ai.md | AI-09 (SEO and alt), AI-10 (translations), AI-11 (`StoreBlueprint` shape), the honesty guard on generated store copy |
-| platform.md | the console store profile "Catalog & pages" tab (read through `platformScope`), the health ring fed by the store checklist |
+| platform.md | the console store profile "Catalog & pages" tab (R2, read through `platformScope`, PLA-§7.5), the Store Health engine that imports `src/lib/health/rules/storefront.ts` (core §I.7), the live address card hosting "Open a test order" for store mode (core §I.4) |
+
+### STO-§29.3 Second-round requests to the core (revision 2; only what this revision could not resolve inside its own files)
+
+| # | Change | Why |
+|---|---|---|
+| STO-R25 | `src/lib/render/prepublish/budget.ts` (core) exports `registerBudgetProfile(kind: StorePageKind, profile: BudgetProfile)` so the STO-§6.1 per-kind thresholds (sections, height, CTAs, glass, reveals, photo reuse, HTML gz) replace the landing constants when `ctx.doc` is a `StorePageDoc`; and `prepublish.ts` imports `src/lib/render/prepublish/storefront.ts` like the other track files | core §M.2 fixes one landing profile; store kinds need theirs without a second registry |
+| STO-R26 | `src/landing/runtime/budgets.json` key `store-page` raised from 41,000 to **43,000** B in the R3 contract step, when `exp-head` (450) and `exp` (1,200) join store documents | the worst PDP (inline + matrix + fields + steps-box + pixels) already measures ≈ 40,650 B; the experiment chunks push it over (STO-§14.6) |
+| STO-R27 | Core §F.5: note that the attach flow writes landing's `page.attached` / `page.detached` and that `store.landing.attached` / `detached` stay unused (or drop them at the next revision) | one audit name per event (STO-§17.3) |
+
+Everything else this revision needed existed in core rev 2 (extension points for health rules, pulse contributors,
+notification kinds, flags, commands, search providers and tenancy cases; the test-token resolver; `getOrLoad`; the
+`lead` route's `kind` needs no new route).
 
 ---
 
 ## STO-§30 Review decisions
 
-(Empty in revision 1. Filled after the reviews: each row = reviewer, point, decision, section changed.)
+(Empty in revision 1 and 2. Filled after the reviews: each row = reviewer, point, decision, section changed.)
+
+---
+
+## STO-§31 Elevation changes (rev 2)
+
+Every change of this revision, what it does and where it came from. Codes: **D** = core rev 2 decision, **Q** = core
+§Q.2 decision on a rev 1 request, **DB** = design-baseline target, **rf** / **ra** = rethink section, **LAN** / **DES** /
+**OPE** / **AI** = sibling part section, **rubric** = `qa/ref/anti-slop-frontend-rubric.md`.
+
+| # | Change | Why | Source |
+|---|---|---|---|
+| 1 | Status → revision 2; inputs widened to core rev 2 (§Q.2), the baseline, both rethinks and the rubric; code facts restated at `a0ffec1` (`src/**` byte-identical to `68c3793`); the frozen set restated | brief item 16; every citation re-verified | header |
+| 2 | Owner summary items 14-19 (art-directed layouts and the fold promise, test orders, delivery dates, WhatsApp order, overrides, Store Health inputs and catalog from photos) | the owner reads this first | rf §1.2, §1.6, §1.10, §1.11, §3.1; LAN LD21 |
+| 3 | STO-D6 cache: `getOrLoad` single flight, test and arm bypass | STO-R24 accepted; D54; LAN-§18.5 | Q R24, D57, LAN Q38 |
+| 4 | STO-D10: `not_served` refusal kept for store checkout as an explicit, scoped deviation from LAN LD6 (leads captured first) | a zone-charged checkout has no honest total for an unserved city | LAN LD6, owner rule 4 |
+| 5 | STO-D11 and the whole of STO-§17: attached landings = `materializeAttached` (landing's) + `sync` republish + `attachedDocFor` live re-pricing + **override chips**; rev 1's `attachMirror`, render-on-serve and in-place HTML rewrite withdrawn | the server prices from the version doc, so a price change is a publish; overrides must be visible | D50 refined, Q R6/R12, LAN LD20/LD21, LAN Q24, brief ("price overrides shown as overrides") |
+| 6 | STO-D14 and §8.4: registers per DES-§11.1 with two marketing islands in commerce documents; `compileRegister` and the hard commerce rows | design's register table names the PDP info column and the collection grid as commerce and the banner as marketing | DES-§11.1 |
+| 7 | STO-D17, §12.3, §15.8, §15.9: landing's `etaWindow` / `etaText` / `zoneForCity` / `zoneLineFor` / `DeliveryZoneRow` signatures adopted verbatim; "(estimation)" marker; identical texts across PDP, cart, checkout, tracking; rev 1's `ZoneLine` and `etaWindow` signatures withdrawn; S1 writes nothing in `src/lib/delivery/**` | ST-17 ships on landing pages in R1 (P3); one engine, one promise | D62 §H.13, LAN-§7.1-7.2, LAN LD5, core §L.2 ST-17, rf §1.6 |
+| 8 | STO-D31, §9.5, §11.1-11.2, §12.8: **hero grammars per kind** (8 home families, 6 PDP families) mapped to design's `GRAMMARS`, drawn from the Brand Genome's G2 with the archetype as a prior, seeded by brand seed + catalogue shape; pool tables; share caps ≤ 30 % per niche; rev 1 "archetypes" renamed storylines | the baseline's root cause: the archetype locks the hero (stage on 23 of 39 pages) | DB §4.2 (1, 2, 9), C1, N4, N6; DES-§4.1, §5.4, §5.6, DS1-DS5 |
+| 9 | STO-D32, §9.5 `FoldLayout` / `checkFold`, §12.1, H11: **fold contract per kind** verified by the height model at publish and Playwright in e2e | price and CTA below the fold on 23 heroes today | DB C2, F1; D52; DES-§5.3 |
+| 10 | STO-D33, §7.2 step 4, §14.1, §14.5, §15.10, §16.1, §16.2 step 4b, §25: **test-order mode on store pages** (token in the session, test render, `test` in payload v3 and the lead, exclusions) | SF-05 assigned to this track's store side; the demo needs it | D54, rf §3.1 SF-05, §4; LAN-§14; OPE-§26; core §C.4.1, §E.2 |
+| 11 | STO-D34, §15.11, §15.13, §7.6: **server-priced WhatsApp order** through `POST /api/public/store/lead` `kind: "whatsapp"`; rev 1's client-side composition withdrawn; no new route | the price in the chat is the server's | rf §1.11, LAN LD13, LAN-§11.4, core §D.2 `leads.kind` |
+| 12 | STO-D35, §6.3, §23.6: store templates publish through `runPrePublishChecks`; `src/lib/render/prepublish/storefront.ts` with typed `GateItem` ids; the checklist becomes the builder mirror | the server must refuse what the owner rules forbid; one registry | D51, §M.1-M.5, DES-R3, LAN Q13 |
+| 13 | STO-D36, §6.1 per-kind budgets table, §12.9, §21.2, §28: page budgets as hard gates (90 / **140 KB**, sections, height, CTAs, glass, reveals, photo reuse); rev 1's 160 KB cap withdrawn | measured baseline 170 KB, 27 sections; the core fixed 140 KB | D52, DB C3, F5, R1, R4, R5, I1 |
+| 14 | STO-D37, §12.6, §12.9, §23.6: facts-only proof as a server gate (`storefront:fact_missing`, `honesty:*`) and a render-time drop | invented proof on every baseline page | DB I4, D1, D2; §M.3 |
+| 15 | STO-D38, §4.7, §11.4-11.5: catalog from photos and the store blueprint as **detached jobs** (`ai_jobs`, heartbeat, 2 s polling, instant fallback); `startStoreDesign`; the `StoreBlueprint` shape gains `hints`, `provenance`, locale maps, `needsReview` | Fable 5.1 runs for minutes; nothing may block the seller | D56, §H.12, ra §1.5, §4.9, §9.6; AI-04, AI-11; rf §1.10 |
+| 16 | STO-D39, §11.6, §23.5, §23.6, §3.1: Design DNA visible (DNA card, brand DNA card, why line, novelty words, provenance columns on template versions) | SF-02 made visible on store pages | rf §1.2, DES-§15.4, DS27, ra §5.6, core §D.2 |
+| 17 | STO-D40, §23.8: Store Health rules file with 11 rules; the rev 1 checklist ring replaced by the one health ring | one computation, two audiences | D53, §I.7, rf §1.3, OPE-§27.2 pattern |
+| 18 | STO-D41, §19.10: experiments on store pages as a consumer of landing's engine (which kinds and sections, URL arms, the buy-box guard, cache keys) | one engine with honest statistics; the brief asked who owns it | D58, LAN-§18, rf §1.8 |
+| 19 | STO-D42, §14.7, §21.1, §21.4, §21.5: 3G budgets per chunk and per kind in bytes and milliseconds (critical bytes, boot times, waterfall, interaction budgets) | "power of the features" on cheap phones must be measurable | brief item 16; DB F5; rf §4 |
+| 20 | STO-§1: feature rows ST-04, ST-05, ST-09, ST-10, ST-17 raised; new STO-§1.4 signature-feature table (SF-02, SF-03, SF-05, SF-08, SF-10, SF-12, LP-11 store) | every assigned id has an acceptance row | core §K.2 ownership paragraph, §L.2 |
+| 21 | STO-§2: today's hero variants, sticky-bar gate, budgets, design and delivery contracts, test plumbing listed as consumed facts | build agents read what exists first | code at `a0ffec1`; LAN-§7, DES-§5, §8 |
+| 22 | STO-§3.1: provenance columns on template versions; `attach_opts` shape; overrides computed, never stored | provenance and honesty | core §D.2, LAN-§17.3 |
+| 23 | STO-§4.3, §4.5: `onProductChanged`, `markHealthDirty`, the price-change audit in the save path | the attach republish and the health ring need the signal | LAN-§17.4, core §I.7, §F.5 |
+| 24 | STO-§6.3: `ensureTemplateSet(scope)` signature per core §A.2; defaults must pass the gate (test) | the core calls it with a system scope | Q R17, core §A.2 |
+| 25 | STO-§7.3: soft 90 KB note, hard 140 KB flag, `test` / `preview` modes; §7.4 single flight through `getOrLoad` | core D52, STO-R24 | D52, Q R24 |
+| 26 | STO-§8.1: `addons` and `genome` on the render context | add-on hook and DNA card | D62, §H.13 |
+| 27 | STO-§9.2-9.3: `features`, `grammars`, `fold` on store section definitions; `storeHero` and `productDetail` rows rewritten; `ghost: false`; hero stack discipline | the slop score and the height model need registry data; rubric hero rules where the owner allows | DES-§8.4, rubric §4.7, §9.F, DS12 |
+| 28 | STO-§11.3 H11-H13; §11.4 instant path with three candidates and the deep pass as an upgrade; acceptance numbers (1,200-home corpus) | measurable novelty and fold | DB N3, N6, N7, C1, C2; ra §1.2 |
+| 29 | STO-§13 unchanged except the sort control; STO-§14.6 `store-page` R3 note | budgets | LAN Q5 pattern |
+| 30 | STO-§16.2 step 17: `bumpOrderStats` by kind, skipped for test orders | STO-R11 accepted; D54 | Q R11, core §D.2 |
+| 31 | STO-§22.1, §22.3: WCAG 2.2 criteria (2.4.11, 2.5.7, 2.5.8, 3.3.7), one announcement per action, RTL1-RTL8 checks | accessibility raised as the brief asks | WCAG 2.2; DB RTL1-RTL8 |
+| 32 | STO-§23.5, §23.7, §23.9: storefront overview with the address card's test order and the design card; new copy keys; admin UX ceiling compliance with chords `G K`, `G B` | core §I.8 rules on this track's screens | core §I.4, §I.8, DES-§16.17, rf §2 |
+| 33 | STO-§24: shopper keys for estimated dates, WhatsApp order, test banner, gallery counter, hero CTAs; i18n coverage note | ar/fr/en completeness, no dashes | core §I.5, DES DS13, rubric §9.G |
+| 34 | STO-§25: test token, WhatsApp intent, experiments and attack cases | new public surfaces in the suites | core §F.1, §J.5 |
+| 35 | STO-§26: `test:catalog` corpus and gate fixtures, `qa:storefront-render` fold / budget / test-render assertions, DB cases for test, WhatsApp, sync, overrides and gates, `qa:storefront-demo` and **STO-§26.4 the R2 store demo** | every new contract has a test; the demo is the R2 acceptance | rf §4; core §J, §K.2 criterion 12 |
+| 36 | STO-§27: contract-step list aligned with core §K.4; extension files (prepublish, health, pulse, notify, flags, commands, search, tenancy cases); landing parts owned by S1; `src/lib/delivery/**` and `src/lib/design/**` read-only; R2 exit extended | file ownership consistent with the core | core §K.3, §K.4, LAN-§26.2 |
+| 37 | STO-§28 limits rows; STO-§29.1 decisions recorded; STO-§29.3 three second-round requests (R25-R27); STO-§31 this table | traceability | core §Q.2 |
