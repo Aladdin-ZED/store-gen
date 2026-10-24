@@ -10,7 +10,9 @@ running, and how to restart it. Newest state at the top of "Running now".
 | 0 | First deploy of the cloned code | live site, build 01a16abd | **done** 2026-10-23 |
 | 1 | Understand: subsystem maps | docs/saas/TENANCY-MAP.md | **done** 2026-10-23 (run wf_2ff1c4b9-e11) |
 | 1b | Research + brainstorm (owner items 8-15): domains/subdomains, COD ops+agents+accounting+integrations, AI learning loop, generative design, platform admin, storefront/landing | docs/saas/research/*.md + docs/saas/RESEARCH.md | **done** 2026-10-24 |
-| 2 | Spec: architect → reviews (COD operator, principal engineer, premium designer, security) → revision → critic | docs/STORE-SAAS.md | todo (first attempt wf_1620a313-a04 was stopped on purpose to add owner items 8-15: do NOT resume it, relaunch with the research as input) |
+| 2a | Spec writing: core contract + 6 part specs | docs/STORE-SAAS.md, docs/saas/spec/*.md | **done** 2026-10-24 |
+| 2b | ELEVATE (owner item 16, Fable): core rev 2 integrates requests + rethink; 6 parts rev 2 raise ceilings; core rev 2.1 | same files | running |
+| 2c | Reviews (operator, principal engineer, premium designer, security, AI/design-quality) → revise → critic loop | same files + §P | todo |
 | 3 | Build phase 0: core tenancy (schema, migration, store scope, auth/memberships, routing) | code | todo |
 | 4 | Build phase 1: parallel tracks (store pages, landing+, brand kit/logo, team/invites, platform admin, storage) | code | todo |
 | 5 | Adversarial verification incl. cross-tenant attack tests, fix loop | tests + fixes | todo |
@@ -36,7 +38,7 @@ running, and how to restart it. Newest state at the top of "Running now".
   (owner rules win over it: no orange ever). Then Phase 2c reviews (operator, principal engineer, premium designer,
   security, AI/design-quality lens) → 2d revise + critic loop → R1 build.
 
-- **Phase 2a spec writing** — started 2026-10-24 ~00:10. Task `wf817bkqi`, run `wf_7baa2790-029`.
+- **Phase 2a spec writing** — DONE 2026-10-24 ~02:20 (12 agents; 5 ENOTFOUND first attempts auto-retried; 0 missing): docs/STORE-SAAS.md rev 1 (2,885 lines) + docs/saas/spec/*.md (13,9k lines). Was: started 2026-10-24 ~00:10. Task `wf817bkqi`, run `wf_7baa2790-029`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\store-saas-spec-write-wf_7baa2790-029.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_7baa2790-029"})`.
   Output: docs/STORE-SAAS.md (core, lead architect) then docs/saas/spec/{platform,storefront,landing,operations,ai,design}.md.
