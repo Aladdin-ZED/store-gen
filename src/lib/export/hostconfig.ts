@@ -66,7 +66,7 @@ const deny = (indent: string) =>
 export function rootHtaccess(input: HostConfigInput): string {
   const base = /^\/(?:[A-Za-z0-9._~-]+\/)*$/.test(input.basePath) ? input.basePath : "/";
   const lines = [
-    "# COD Studio export — Apache / LiteSpeed (Hostinger, cPanel…)",
+    "# Landing page export — Apache / LiteSpeed (Hostinger, cPanel…)",
     "# Each page also carries its Content-Security-Policy in a <meta> tag. If you add your own scripts",
     "# (chat widget, analytics…), remove that tag AND the Content-Security-Policy lines below.",
     "",

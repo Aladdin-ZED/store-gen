@@ -11,7 +11,11 @@
  *    phone, contents per item from allocate() incl. the bump item, one request per pixel with a token,
  *    tokens never in URLs; health classes of failures;
  *  - transport: retry on 5xx, failures never throw, TikTok non-zero codes are failures;
- *  - "Send test event": test_event_code always set, the platform's answer is reported.
+ *  - "Send test event": test_event_code always set, the platform's answer is reported, the platform's brand
+ *    names the test product and the user agent (PIX-09);
+ *  - per store (docs/STORE-SAAS.md §E.6, SET-11, SHT-09): the health throttle is keyed by store (one store's write
+ *    never suppresses another's for the same pixel id); the Sheets ownership proof (code format, only the hash
+ *    compared, found alone or inside other text, case-insensitive, never a near miss).
  *
  *   npx tsx scripts/qa/conversions-check.ts      (exit code 1 on failure)
  */
@@ -37,6 +41,8 @@ import {
   type PixelLibraryView,
 } from "@/lib/pixels/library";
 import { collectPixels, migrationLabel } from "@/lib/pixels/migrate";
+import { dueHealthUpdates, forgetHealthWrites, noteHealthWrite } from "@/lib/pixels/throttle";
+import { newProofCode, proofFound, proofHash } from "@/lib/sheets/proof";
 import { runtimePixels, trackingFlags } from "@/lib/pixels/tracking";
 import { PixelLibrarySettings, TrackingSecretsSettings, redactSetting } from "@/lib/settings/schemas";
 
@@ -120,6 +126,27 @@ ok("missingPixels: no ids, no none", missingPixels({}) && !missingPixels({ none:
 eq("pixelLabel: label, else platform + masked id", [pixelLabel({ platform: "meta", id: META_A, label: "Compte principal" }), pixelLabel(undefined, "tiktok", TT_2)], ["Compte principal", "TikTok ••••0002"]);
 eq("usageText", [usageText({ pages: 3, live: 2, exports: 1, drafts: 3 }), usageText({ pages: 1, live: 0, exports: 0, drafts: 1 })], ["Used on 3 pages · 2 live · 1 export", "Used on 1 page"]);
 ok("health throttle: first write, changes and 10 min", healthWriteDue(undefined, { state: "ok" }, NOW) && !healthWriteDue({ state: "ok", at: NOW }, { state: "ok" }, NOW + 60_000) && healthWriteDue({ state: "ok", at: NOW }, { state: "refused", code: "token" }, NOW + 1) && healthWriteDue({ state: "ok", at: NOW }, { state: "ok" }, NOW + 10 * 60_000));
+
+/* ---------------- per store: health throttle, Sheets proof ---------------- */
+{
+  const STORE_A = "0000000000000000000000QA01";
+  const STORE_B = "0000000000000000000000QA02";
+  const u = { platform: "meta" as const, id: META_A, state: "ok" };
+  noteHealthWrite(STORE_A, u, NOW);
+  eq("health throttle per store: A's write throttles A only", [dueHealthUpdates(STORE_A, [u], NOW + 1000).length, dueHealthUpdates(STORE_B, [u], NOW + 1000).length], [0, 1]);
+  eq("health throttle per store: a changed state is due", dueHealthUpdates(STORE_A, [{ ...u, state: "refused", code: "token" }], NOW + 1000).length, 1);
+  forgetHealthWrites(STORE_A, [`meta:${META_A}`]);
+  eq("health throttle per store: a forgotten pixel is due again", dueHealthUpdates(STORE_A, [u], NOW + 1000).length, 1);
+
+  const code = newProofCode(Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7, 30, 31]));
+  eq("proof code: SG- + 10 Crockford base32", code, "SG-01234567YZ");
+  ok("proof code: random codes have the format", Array.from({ length: 20 }, () => newProofCode()).every((c) => /^SG-[0-9A-HJKMNP-TV-Z]{10}$/.test(c)));
+  const h = proofHash(code);
+  ok("proof hash: sha256 hex, trimmed and case-insensitive", /^[0-9a-f]{64}$/.test(h) && proofHash(` ${code.toLowerCase()} `) === h);
+  ok("proof found: the code alone in a cell of the first rows", proofFound([["", ""], ["x", code]], h));
+  ok("proof found: inside other text, any case", proofFound([[`ma boutique ${code.toLowerCase()} merci`]], h));
+  ok("proof not found: another code, a near miss, numbers, empty", !proofFound([[newProofCode(), code.slice(0, -1), "SG-01234567YY"], [12345]], h) && !proofFound(undefined, h) && !proofFound([[]], h));
+}
 
 /* ---------------- checklist ---------------- */
 {
@@ -395,6 +422,13 @@ async function main() {
   respond = () => "throw";
   const t4 = await sendTestEvent({ platform: "tiktok", pixelId: TT_1, token: "tiktokTokenXYZ123", testCode: "TEST42", siteUrl: null, currency: "MAD", country: "MA" });
   ok("unreachable platform reported", !t4.ok && t4.status === null && /Couldn't reach TikTok/.test(t4.message), t4);
+  // PIX-09: the test product and the user agent carry the platform's brand, never a hard-coded one
+  respond = (url) => okAnswer(url);
+  calls.length = 0;
+  await sendTestEvent({ platform: "meta", pixelId: META_B, token: "metaTokenBBBB2222", testCode: "TEST999", siteUrl: "https://shop.example/", currency: "MAD", country: "MA", brand: "Store Gen" });
+  const brandEvent = (calls[0]!.body.data as Record<string, Record<string, unknown>>[])[0]!;
+  eq("test event brand: product name and user agent", [brandEvent.custom_data!.content_name, brandEvent.user_data!.client_user_agent], ["Test product (Store Gen)", "Mozilla/5.0 (compatible; Store-Gen-test-event/1.0)"]);
+  ok("test event brand: no legacy name", !JSON.stringify(calls[0]!.body).includes("COD"));
 
   globalThis.fetch = realFetch;
   for (const f of failures) console.log(`✗ ${f}`);

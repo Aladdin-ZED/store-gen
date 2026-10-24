@@ -16,18 +16,20 @@ import "server-only";
  *
  * Multi-tenant (docs/STORE-SAAS.md §D.10, §E.3; PIX-01, PIX-02): the scoped forms load the order's store's secrets and
  * library, and the fallback event URL is the store's page URL (`storeUrl`). Store B firing store A's pixel id never
- * uses A's token. The store-less forms are today's single-tenant path (the global settings), kept only until the
- * public order route passes its target's scope (CCR r1.0-t4-1); the maintainer deletes them at the R1.0 integration.
+ * uses A's token, and the health it records is B's. The store-less form is today's public order route's, kept only
+ * until it passes its target's scope (CCR r1.0-t4-1): it finds the store of the conversion's page (an id the order
+ * path resolved itself, never input) and takes the scoped path; the maintainer deletes it at the R1.0 integration.
  */
 import { eq } from "drizzle-orm";
 import { after } from "next/server";
 import { db } from "@/lib/db/client";
 import { pages } from "@/lib/db/schema";
+import { systemCtx, systemScope } from "@/lib/jobs/scope";
 import { recordPixelHealth } from "@/lib/pixels/health.server";
-import { getSettings, getStoreSettings, type SettingValue } from "@/lib/settings";
+import { getStoreSettings, type SettingValue } from "@/lib/settings";
 import { getStoreById } from "@/lib/tenancy/public";
 import { byId } from "@/lib/tenancy/sql";
-import type { StoreScope } from "@/lib/tenancy/types";
+import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { storeUrl } from "@/lib/urls";
 import { dispatchPurchase, type PurchaseConversion } from "./conversions-core";
 
@@ -69,24 +71,15 @@ async function storeFallbackUrl(scope: StoreScope, c: PurchaseConversion): Promi
   return row && store ? storeUrl(store, `/${row.slug}`) : null;
 }
 
-/** @deprecated the store-less fallback (PUBLIC_URL/<slug>); deleted with the store-less send at the R1.0 integration */
-async function legacyFallbackUrl(c: PurchaseConversion): Promise<string | null> {
-  if (c.source !== "live") return null;
-  const origin = siteOrigin();
-  if (!origin) return null;
-  // tenancy: legacy single-tenant send (store #1), removed at the R1.0 integration with its caller
-  const [row] = await db.select({ slug: pages.slug }).from(pages).where(eq(pages.id, c.pageId)).limit(1);
-  return row ? `${origin}/${row.slug}` : null;
-}
-
 /** Dispatch, log the failures, record the pixels' health (the callers catch). */
-async function dispatchAndRecord(event: PurchaseConversion, secrets: Secrets, library: Library): Promise<void> {
+async function dispatchAndRecord(scope: WriteScope, event: PurchaseConversion, secrets: Secrets, library: Library): Promise<void> {
   const results = await dispatchPurchase(event, secrets, library);
   for (const r of results) {
     if (!r.ok) console.error(`${LOG} ${r.platform} purchase for order ${event.orderId} (pixel …${r.pixelId.slice(-4)}) failed: ${r.detail ?? "unknown error"}`);
   }
   if (results.length) {
     await recordPixelHealth(
+      scope,
       results.map((r) => ({ platform: r.platform, id: r.pixelId, state: r.ok ? ("ok" as const) : ("refused" as const), code: r.code, testMode: r.testMode })),
       { throttle: true },
     );
@@ -100,24 +93,28 @@ const logFailure = (c: PurchaseConversion, err: unknown) =>
  * Send the order's Purchase to every pixel of the store that has its own server token. Never throws. `secrets` /
  * `library` default to the store's settings (pass them when already loaded).
  */
-export async function sendPurchaseConversions(scope: StoreScope, c: PurchaseConversion, opts: { secrets?: Secrets; library?: Library } = {}): Promise<void> {
+export async function sendPurchaseConversions(scope: WriteScope, c: PurchaseConversion, opts: { secrets?: Secrets; library?: Library } = {}): Promise<void> {
   try {
     const stored = opts.secrets && opts.library ? null : await getStoreSettings(scope, ["tracking_secrets", "pixel_library"]);
     const secrets = opts.secrets ?? stored!.tracking_secrets;
     const library = opts.library ?? stored!.pixel_library;
     const event: PurchaseConversion = c.sourceUrl ? c : { ...c, sourceUrl: await storeFallbackUrl(scope, c).catch(() => null) };
-    await dispatchAndRecord(event, secrets, library);
+    await dispatchAndRecord(scope, event, secrets, library);
   } catch (err) {
     logFailure(c, err);
   }
 }
 
-/** @deprecated today's store-less send (the global settings); deleted with its overload at the R1.0 integration */
+/**
+ * @deprecated the store-less send of today's public order route: the store of the conversion's page (the order path
+ * resolved it from the page key, never input) takes the scoped path. Deleted with its overload at the R1.0 integration.
+ */
 async function sendLegacyPurchaseConversions(c: PurchaseConversion): Promise<void> {
   try {
-    const stored = await getSettings(["tracking_secrets", "pixel_library"]);
-    const event: PurchaseConversion = c.sourceUrl ? c : { ...c, sourceUrl: await legacyFallbackUrl(c).catch(() => null) };
-    await dispatchAndRecord(event, stored.tracking_secrets, stored.pixel_library);
+    // tenancy: legacy store-less send, removed at the R1.0 integration with its caller (CCR r1.0-t4-1)
+    const [row] = await db.select({ storeId: pages.storeId }).from(pages).where(eq(pages.id, c.pageId)).limit(1);
+    if (!row) return;
+    await sendPurchaseConversions(systemScope(systemCtx("orders.capi_legacy"), row.storeId), c);
   } catch (err) {
     logFailure(c, err);
   }
@@ -128,14 +125,15 @@ async function sendLegacyPurchaseConversions(c: PurchaseConversion): Promise<voi
  * never delays the shopper's confirmation.
  */
 export function sendConversionsAfterResponse(scope: StoreScope, c: PurchaseConversion | null | undefined): void;
-/** @deprecated store-less (global settings): the public order route's form until it passes its scope (CCR r1.0-t4-1) */
+/** @deprecated store-less: the public order route's form until it passes its scope (CCR r1.0-t4-1); the page's store is looked up */
 export function sendConversionsAfterResponse(c: PurchaseConversion | null | undefined): void;
 export function sendConversionsAfterResponse(a: StoreScope | PurchaseConversion | null | undefined, b?: PurchaseConversion | null): void {
   const scope = a && !("orderId" in a) ? a : null;
   const c = scope ? b : (a as PurchaseConversion | null | undefined);
   if (!c) return;
   try {
-    after(() => (scope ? sendPurchaseConversions(scope, c) : sendLegacyPurchaseConversions(c)));
+    // after the response the send is background work of the order's store (the outbox handler's scope later, OPE-§20.4)
+    after(() => (scope ? sendPurchaseConversions(systemScope(systemCtx("orders.capi"), scope.storeId), c) : sendLegacyPurchaseConversions(c)));
   } catch (err) {
     console.error(`${LOG} could not schedule order ${c.orderId}:`, err instanceof Error ? err.message : "unknown error");
   }

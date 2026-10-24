@@ -94,7 +94,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 /** The store's sheet queue (ADM-03): its own orders only. */
 export async function getSheetHealth(scope: StoreScope): Promise<SheetHealth> {
   const [cfg, counts, [oldest], [lastFailed]] = await Promise.all([
-    getSheetsConfig(),
+    getSheetsConfig(scope),
     db.select({ s: orders.sheetStatus, n: count() }).from(orders).where(inStore(orders, scope)).groupBy(orders.sheetStatus),
     db
       .select({ at: orders.createdAt })

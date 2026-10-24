@@ -1,18 +1,23 @@
 "use server";
 /**
- * Pixel library actions (docs/OFFERS.md §A.3): the library view, entries, usage, Replace / Remove on
- * pages, the pixels-only live update, per-page test windows and "Send test event". Tokens never leave
- * the server unmasked.
+ * Pixel library actions of store #1 (the legacy panel, docs/STORE-SAAS.md §K.1 T4; docs/OFFERS.md §A.3): the
+ * library view, entries, usage, Replace / Remove on pages, the pixels-only live update, per-page test windows
+ * and "Send test event". Tokens never leave the server unmasked.
+ *
+ * Every action reaches the store through the seam (legacy-store.ts): reads with the store's read ctx, writes with
+ * its write ctx. The role checks are the store's matrix (`pixels.manage` for library ids, `integrations.manage`
+ * for tokens and test codes, PIX-03) and page ids are the store's own (another store's id = not found, PIX-04).
  */
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { z } from "zod";
 import { adminAction, fail, type ActionResult } from "@/lib/admin-data/action";
-import { can } from "@/lib/auth";
+import { platformBrandName } from "@/lib/admin-data/brand";
+import { legacyReadCtx, legacyWriteCtx } from "@/lib/admin-data/legacy-store";
+import { affected } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { pages } from "@/lib/db/schema";
-import { siteOrigin } from "@/lib/orders/conversions";
 import { ownToken, savedTestCode, sendTestEvent, type TestEventResult } from "@/lib/orders/conversions-core";
 import type { Tracking } from "@/lib/page/schema";
 import { TEST_CODE_RE, TOKEN_RE, isMask } from "@/lib/pixels/form";
@@ -34,7 +39,10 @@ import { emptySummary, type StorePixelSummary } from "@/lib/pixels/summary";
 import { trackingIds, withTrackingIds } from "@/lib/pixels/tracking";
 import { invalidatePixelUsage, livePagePixels, pixelUsageOf, recentPagesWithPixels, type LivePagePixels, type PixelPageUse, type RecentPagePixels } from "@/lib/pixels/usage.server";
 import { PublishError, publishTrackingOnly } from "@/lib/render/publish.server";
-import { getSetting } from "@/lib/settings";
+import { getStoreSetting, getStoreSettings } from "@/lib/settings";
+import { byId } from "@/lib/tenancy/sql";
+import type { StoreCtx, WritePermission } from "@/lib/tenancy/types";
+import { storeUrl } from "@/lib/urls";
 
 const Platform = z.enum(PIXEL_PLATFORMS);
 const ServerPlatformSchema = z.enum(SERVER_PLATFORMS);
@@ -51,11 +59,15 @@ async function guarded<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-const refresh = () => {
-  invalidatePixelUsage();
+const refresh = (storeId: string) => {
+  invalidatePixelUsage(storeId);
   revalidatePath("/admin/settings/pixels");
   revalidatePath("/admin/pages");
 };
+
+/** The library as this member may see it: add / edit with pixels.manage, token masks only with integrations.manage. */
+const viewOf = (ctx: StoreCtx, opts: { fresh?: boolean } = {}) =>
+  pixelLibraryView(ctx.scope, { canCreate: ctx.can("pixels.manage"), canSeeTokens: ctx.can("integrations.manage"), fresh: opts.fresh });
 
 /* ------------------------------------------------------------------ */
 /* library                                                             */
@@ -63,7 +75,7 @@ const refresh = () => {
 
 /** Entries + flags (server token, test code saved, active tests) + health + usage. Never a token. */
 export async function pixelLibraryAction(): Promise<ActionResult<PixelLibraryView>> {
-  return adminAction("pages.read", async ({ user }) => pixelLibraryView({ canCreate: can(user.role, "settings.write") }));
+  return adminAction("pages.read", async () => viewOf(await legacyReadCtx("pages.read")));
 }
 
 const EntryInput = z.object({
@@ -76,29 +88,35 @@ const EntryInput = z.object({
 
 /** Add (≤ 100) or edit a pixel: label, token ("" remove · mask keep · new replace), test code. */
 export async function savePixelEntryAction(input: z.input<typeof EntryInput>): Promise<ActionResult<{ created: boolean; view: PixelLibraryView }>> {
-  return adminAction("settings.write", async ({ actor }) => {
+  return adminAction("settings.write", async () => {
     const v = EntryInput.parse(input);
-    const res = await guarded(() => savePixelEntry(v, actor));
-    refresh();
-    return { created: res.created, view: await pixelLibraryView({ canCreate: true, fresh: true }) };
+    // a token or a test code is an integration secret (sensitive): integrations.manage on top of pixels.manage
+    const permission: WritePermission[] = v.token !== undefined || v.testCode !== undefined ? ["pixels.manage", "integrations.manage"] : ["pixels.manage"];
+    const ctx = await legacyWriteCtx(permission);
+    const res = await guarded(() => savePixelEntry(ctx.scope, v, ctx.actor));
+    refresh(ctx.scope.storeId);
+    return { created: res.created, view: await viewOf(ctx, { fresh: true }) };
   });
 }
 
 /** Delete a pixel (refused `pixel_in_use` while any draft, live page or export uses it). */
 export async function removePixelEntryAction(input: { platform: PixelPlatform; id: string }): Promise<ActionResult<{ view: PixelLibraryView }>> {
-  return adminAction("settings.write", async ({ actor }) => {
+  return adminAction("settings.write", async () => {
     const v = z.object({ platform: Platform, id: RawId }).parse(input);
-    await guarded(() => removePixelEntry(v, actor));
-    refresh();
-    return { view: await pixelLibraryView({ canCreate: true, fresh: true }) };
+    // removing a pixel deletes its token and test code too
+    const ctx = await legacyWriteCtx(["pixels.manage", "integrations.manage"]);
+    await guarded(() => removePixelEntry(ctx.scope, v, ctx.actor));
+    refresh(ctx.scope.storeId);
+    return { view: await viewOf(ctx, { fresh: true }) };
   });
 }
 
 /** The pages (and exports) using one pixel. */
 export async function pixelUsageAction(input: { platform: PixelPlatform; id: string }): Promise<ActionResult<PixelPageUse[]>> {
   return adminAction("settings.read", async () => {
+    const { scope } = await legacyReadCtx("settings.read");
     const v = z.object({ platform: Platform, id: RawId }).parse(input);
-    return pixelUsageOf(v.platform, v.id);
+    return pixelUsageOf(scope, v.platform, v.id);
   });
 }
 
@@ -140,17 +158,19 @@ function swapIds(ids: readonly string[], from: string, to: string | null): strin
 export async function replacePixelAction(
   input: z.input<typeof ReplaceInput>,
 ): Promise<ActionResult<{ results: ReplacePageResult[]; reexport: { pageId: string; name: string; exports: number }[] }>> {
-  return adminAction("pages.write", async ({ user, actor }) => {
+  return adminAction("pages.write", async () => {
+    const ctx = await legacyWriteCtx("pages.write");
+    const { scope, actor, user } = ctx;
     const v = ReplaceInput.parse(input);
     const from = normalizePixelId(v.platform, v.from);
     const to = v.to === null ? null : normalizePixelId(v.platform, v.to);
     if (!PIXEL_ID_RE[v.platform].test(from)) fail("Choose the pixel to replace.");
     if (to !== null && !PIXEL_ID_RE[v.platform].test(to)) fail("This new pixel ID isn't valid.");
     if (to === from) fail("Choose a different pixel.");
-    if (v.live && !can(user.role, "pages.publish")) fail("Your role can't update live pages. Untick “Also update live pages now”.");
-    if (to !== null && !findEntry(await getLibrary(), v.platform, to)) {
-      if (!can(user.role, "settings.write")) fail("Only owners can add new pixels. Pick one from the library.");
-      await ensureInLibrary([{ platform: v.platform, id: to }], actor);
+    if (v.live && !ctx.can("pages.publish")) fail("Your role can't update live pages. Untick “Also update live pages now”.");
+    if (to !== null && !findEntry(await getLibrary(scope), v.platform, to)) {
+      if (!ctx.can("pixels.manage")) fail("Only owners can add new pixels. Pick one from the library.");
+      await ensureInLibrary(scope, [{ platform: v.platform, id: to }], actor);
     }
 
     const results: ReplacePageResult[] = [];
@@ -158,7 +178,7 @@ export async function replacePixelAction(
       const r: ReplacePageResult = { pageId, name: "", draft: "unchanged", live: v.live ? "unchanged" : "skipped" };
       results.push(r);
       // draft: compare-and-swap on its stamp (an editor saving meanwhile wins: "conflict")
-      const [row] = await db.select({ name: pages.name, draft: pages.draft, updatedAt: pages.updatedAt, status: pages.status }).from(pages).where(eq(pages.id, pageId)).limit(1);
+      const [row] = await db.select({ name: pages.name, draft: pages.draft, updatedAt: pages.updatedAt, status: pages.status }).from(pages).where(byId(pages, scope, pageId)).limit(1);
       if (!row) {
         r.draft = "not_found";
         r.live = v.live ? "not_live" : "skipped";
@@ -177,12 +197,11 @@ export async function replacePixelAction(
         const res = await db
           .update(pages)
           .set({ draft: { ...(draft as object), tracking: nextTracking } as never, updatedAt: stamp })
-          .where(and(eq(pages.id, pageId), eq(pages.updatedAt, row.updatedAt)));
-        const n = (Array.isArray(res) ? (res[0] as { affectedRows?: number }) : (res as { affectedRows?: number }))?.affectedRows ?? 0;
-        r.draft = n === 1 ? "ok" : "conflict";
+          .where(and(byId(pages, scope, pageId), eq(pages.updatedAt, row.updatedAt)));
+        r.draft = affected(res) === 1 ? "ok" : "conflict";
       }
       if (!v.live) continue;
-      const live = await liveTracking(pageId);
+      const live = await liveTracking(scope, pageId);
       if (!live) {
         r.live = "not_live";
         continue;
@@ -191,6 +210,7 @@ export async function replacePixelAction(
       if (!liveIdsList.includes(from)) continue;
       const nextLive = withTrackingIds(idsOnly(live.tracking), v.platform, swapIds(liveIdsList, from, to).slice(0, PIXEL_LIMIT[v.platform]));
       try {
+        // the page is the store's (read above); the publish path is T3's store-less form until it takes a scope
         await publishTrackingOnly(pageId, user.id, nextLive, live.versionId, { patchDraft: false });
         r.live = "ok";
       } catch (err) {
@@ -199,8 +219,8 @@ export async function replacePixelAction(
         if (!(err instanceof PublishError || err instanceof PixelError)) console.error("[pixels] replace live failed:", err instanceof Error ? err.message : err);
       }
     }
-    refresh();
-    const reexport = (await pixelUsageOf(v.platform, from)).filter((u) => u.exports > 0).map((u) => ({ pageId: u.pageId, name: u.name, exports: u.exports }));
+    refresh(scope.storeId);
+    const reexport = (await pixelUsageOf(scope, v.platform, from)).filter((u) => u.exports > 0).map((u) => ({ pageId: u.pageId, name: u.name, exports: u.exports }));
     return { results, reexport };
   });
 }
@@ -218,26 +238,29 @@ export interface PagePixelsState {
 
 /** What the builder's pixels section and the publish block need about one page. */
 export async function pagePixelsAction(pageId: string): Promise<ActionResult<PagePixelsState>> {
-  return adminAction("pages.read", async ({ user }) => {
+  return adminAction("pages.read", async () => {
+    const ctx = await legacyReadCtx("pages.read");
     const id = PageIdSchema.parse(pageId);
-    const [library, live] = await Promise.all([pixelLibraryView({ canCreate: can(user.role, "settings.write") }), liveTracking(id)]);
+    const [library, live] = await Promise.all([viewOf(ctx), liveTracking(ctx.scope, id)]);
     return {
       library,
       live: live ? { versionId: live.versionId, tracking: { ...idsOnly(live.tracking), ...(live.tracking.none === true ? { none: true as const } : {}) } } : null,
-      canPublish: can(user.role, "pages.publish"),
+      canPublish: ctx.can("pages.publish"),
     };
   });
 }
 
 /** Publish the draft's current pixels alone onto the live version ("Update live page now"). */
 export async function applyLiveTrackingAction(input: { pageId: string; baseVersionId: string }): Promise<ActionResult<{ versionId: string; live: Tracking }>> {
-  return adminAction("pages.publish", async ({ user }) => {
+  return adminAction("pages.publish", async () => {
+    const { scope, user } = await legacyWriteCtx("pages.publish");
     const v = z.object({ pageId: PageIdSchema, baseVersionId: PageIdSchema }).parse(input);
-    const [row] = await db.select({ draft: pages.draft }).from(pages).where(eq(pages.id, v.pageId)).limit(1);
+    const [row] = await db.select({ draft: pages.draft }).from(pages).where(byId(pages, scope, v.pageId)).limit(1);
     if (!row) fail("This page no longer exists.");
     const tracking = ((row!.draft as unknown as { tracking?: Tracking } | null)?.tracking ?? {}) as Tracking;
+    // the page is the store's (read above); the publish path is T3's store-less form until it takes a scope
     const res = await guarded(() => publishTrackingOnly(v.pageId, user.id, tracking, v.baseVersionId));
-    refresh();
+    refresh(scope.storeId);
     return { versionId: res.versionId, live: idsOnly(tracking) };
   });
 }
@@ -246,19 +269,21 @@ const TestInput = z.object({ pageId: PageIdSchema, platform: ServerPlatformSchem
 
 /** Test this page: the pixel's server events of THIS page carry its test code for 30 / 60 / 120 min. */
 export async function startPixelTestAction(input: z.input<typeof TestInput>): Promise<ActionResult<{ until: string }>> {
-  return adminAction("pages.publish", async ({ actor }) => {
+  return adminAction("pages.publish", async () => {
+    const { scope, actor } = await legacyWriteCtx("pages.publish");
     const v = TestInput.parse(input);
     if (!(TEST_MINUTES as readonly number[]).includes(v.minutes)) fail("Choose 30, 60 or 120 minutes.");
-    const res = await guarded(() => startPixelTest({ ...v, id: normalizePixelId(v.platform, v.id), minutes: v.minutes as TestMinutes }, actor));
+    const res = await guarded(() => startPixelTest(scope, { ...v, id: normalizePixelId(v.platform, v.id), minutes: v.minutes as TestMinutes }, actor));
     revalidatePath("/admin/settings/pixels");
     return res;
   });
 }
 
 export async function stopPixelTestAction(input: { pageId: string; platform: "meta" | "tiktok"; id: string }): Promise<ActionResult<null>> {
-  return adminAction("pages.publish", async ({ actor }) => {
+  return adminAction("pages.publish", async () => {
+    const { scope, actor } = await legacyWriteCtx("pages.publish");
     const v = z.object({ pageId: PageIdSchema, platform: ServerPlatformSchema, id: RawId }).parse(input);
-    await guarded(() => stopPixelTest({ ...v, id: normalizePixelId(v.platform, v.id) }, actor));
+    await guarded(() => stopPixelTest(scope, { ...v, id: normalizePixelId(v.platform, v.id) }, actor));
     revalidatePath("/admin/settings/pixels");
     return null;
   });
@@ -267,7 +292,8 @@ export async function stopPixelTestAction(input: { pageId: string; platform: "me
 /** Live pixels of every live page (Pages list chips and the "No pixel" filter), with labels. */
 export async function pagesPixelsAction(): Promise<ActionResult<{ pages: Record<string, LivePagePixels>; labels: Record<string, string> }>> {
   return adminAction("pages.read", async () => {
-    const [byPage, lib] = await Promise.all([livePagePixels(), getSetting("pixel_library")]);
+    const { scope } = await legacyReadCtx("pages.read");
+    const [byPage, lib] = await Promise.all([livePagePixels(scope), getStoreSetting(scope, "pixel_library")]);
     const labels: Record<string, string> = {};
     for (const p of lib.pixels) if (p.label) labels[`${p.platform}:${p.id}`] = p.label;
     return { pages: byPage, labels };
@@ -276,8 +302,9 @@ export async function pagesPixelsAction(): Promise<ActionResult<{ pages: Record<
 
 /** The library + the 8 most recent pages with pixels ("Same as…"): the wizard's tracking step. */
 export async function wizardPixelsAction(): Promise<ActionResult<{ library: PixelLibraryView; recent: RecentPagePixels[] }>> {
-  return adminAction("pages.read", async ({ user }) => {
-    const [library, recent] = await Promise.all([pixelLibraryView({ canCreate: can(user.role, "settings.write") }), recentPagesWithPixels(8)]);
+  return adminAction("pages.read", async () => {
+    const ctx = await legacyReadCtx("pages.read");
+    const [library, recent] = await Promise.all([viewOf(ctx), recentPagesWithPixels(ctx.scope, 8)]);
     return { library, recent };
   });
 }
@@ -295,16 +322,24 @@ const SendTestInput = z.object({
   testCode: z.string().max(40).default(""),
 });
 
+/** An absolute page URL for Meta's website events: the store's address, else the host serving the admin. */
+async function testEventUrl(storePageUrl: string): Promise<string | null> {
+  if (/^https?:\/\//.test(storePageUrl)) return storePageUrl;
+  const host = (await headers()).get("host") ?? "";
+  return /^[a-z0-9.-]+(:[0-9]{1,5})?$/i.test(host) ? `https://${host}${storePageUrl.startsWith("/") ? storePageUrl : "/"}` : null;
+}
+
 /**
  * Send a synthetic Purchase with the platform's test event code (it shows in Events Manager → Test
  * events and never counts in reports). Also writes the pixel's health.
  */
 export async function sendPixelTestAction(input: z.input<typeof SendTestInput>): Promise<ActionResult<TestEventResult>> {
   return adminAction("settings.write", async () => {
+    const { scope, store } = await legacyWriteCtx("integrations.manage");
     const v = SendTestInput.parse(input);
     const pixelId = normalizePixelId(v.platform, v.id);
     if (!PIXEL_ID_RE[v.platform].test(pixelId)) fail("Enter a valid pixel ID first.");
-    const secrets = await getSetting("tracking_secrets", { fresh: true });
+    const { tracking_secrets: secrets, defaults } = await getStoreSettings(scope, ["tracking_secrets", "defaults"]);
     const typedCode = v.testCode.replace(/\s+/g, "").toUpperCase();
     const code = typedCode || savedTestCode(secrets, v.platform, pixelId);
     if (!TEST_CODE_RE.test(code)) fail("Add the test event code from Events Manager → Test events first.");
@@ -312,25 +347,20 @@ export async function sendPixelTestAction(input: z.input<typeof SendTestInput>):
     const token = !typed || isMask(typed) ? ownToken(secrets, v.platform, pixelId) : typed;
     if (!token) fail(v.platform === "meta" ? "Add the Conversions API token first." : "Add the Events API access token first.");
     if (!TOKEN_RE.test(token)) fail("This doesn't look like a valid token — paste it again.");
-    const defaults = await getSetting("defaults");
-    // Meta requires a page URL for website events: the site (PUBLIC_URL), else the host serving the admin
-    let siteUrl = siteOrigin();
-    if (!siteUrl) {
-      const host = (await headers()).get("host") ?? "";
-      siteUrl = /^[a-z0-9.-]+(:[0-9]{1,5})?$/i.test(host) ? `https://${host}` : null;
-    }
     const res = await sendTestEvent({
       platform: v.platform,
       pixelId,
       token,
       testCode: code,
-      siteUrl: siteUrl ? `${siteUrl}/` : null,
-      currency: defaults.currency,
+      // the store's address, not the platform's (PIX-08)
+      siteUrl: await testEventUrl(storeUrl(store)),
+      currency: store.currency,
       country: defaults.phoneCountry,
+      brand: await platformBrandName(),
     });
     // health describes the STORED token: only when the stored one was used
     if (token === ownToken(secrets, v.platform, pixelId)) {
-      await recordPixelHealth([{ platform: v.platform, id: pixelId, state: res.ok ? "ok" : "refused", code: res.code, testMode: true }]);
+      await recordPixelHealth(scope, [{ platform: v.platform, id: pixelId, state: res.ok ? "ok" : "refused", code: res.code, testMode: true }]);
       revalidatePath("/admin/settings/pixels");
     }
     return res;

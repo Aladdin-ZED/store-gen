@@ -1,35 +1,46 @@
 import "server-only";
 /**
- * Export service (admin route handlers call these after requireUser / adminGuard):
+ * Export service of one store (the export routes call these with the seam's scope, docs/STORE-SAAS.md §E.3):
  *
- *   getExportContext(pageId, user)       versions, recent exports and defaults for the ExportDialog
- *   estimateExport(request, user)        approximate ZIP size + warnings (no database writes)
- *   buildExport(request, user, ip)       records an exports row (new public key) and returns the ZIP stream
- *   revokeExport(exportId, user, ip)     stops a connected export from taking orders
+ *   getExportContext(scope, pageId, opts)          versions, recent exports and defaults for the ExportDialog
+ *   estimateExport(scope, request)                 approximate ZIP size + warnings (no database writes)
+ *   buildExport(scope, request, actor, opts)       records an exports row (new public key) and returns the ZIP stream
+ *   revokeExport(scope, exportId, actor)           stops a connected export from taking orders
+ *
+ * Per store (EXP-01 … EXP-05): a version, a page and an export are found only inside the scope's store (another
+ * store's id answers exactly like a missing one), the store facts (name, contacts, logo, WhatsApp) and the Google
+ * Sheet are the store's, images are the store's own assets, and a PHP export embeds only the store's own export key
+ * (`export_key`), never a platform key. Connected exports post to the platform's order API, whose page key
+ * resolves the store (EXP-06).
  *
  * Connected exports are validated by the order API against the version they are bound to; when the
  * stored document needs repairs to render, the repaired document is saved as a new version first, so
  * the API checks orders against exactly what the exported page shows.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, isNull, ne, type SQL } from "drizzle-orm";
-import { audit } from "@/lib/audit";
-import { can, type SessionUser } from "@/lib/auth";
+import { and, desc, eq, inArray, isNull, ne, type SQL } from "drizzle-orm";
+import { platformBrandName } from "@/lib/admin-data/brand";
+import { affected, auditIn } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { newId, newPublicKey } from "@/lib/db/ids";
-import { exportsTable, pages, pageVersions, users } from "@/lib/db/schema";
+import { assets as assetsTable, exportsTable, pages, pageVersions, users } from "@/lib/db/schema";
 import { getAssetsByIds, getMediaFile, getMediaMeta } from "@/lib/media";
 import { PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
 import { whatsappDigits, whatsappNumber } from "@/lib/render/config";
-import { publicOrigin, storeInfo } from "@/lib/render/publish.server";
+import { publicOrigin } from "@/lib/render/publish.server";
 import { invalidateExportOrigins } from "@/lib/orders/export-origins";
 import { errorSummary } from "@/lib/orders/log";
-import { getSetting } from "@/lib/settings";
+import { getStoreSettings } from "@/lib/settings";
+import { getSheetsConfig } from "@/lib/sheets/config";
+import { scopedCache } from "@/lib/tenancy/cache";
+import { getStoreById } from "@/lib/tenancy/public";
+import { byId, inStore, storeValues, whereStore } from "@/lib/tenancy/sql";
+import type { Actor, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { collectAssetIds, type StoreInfo } from "@/landing/context";
 import { buildBundle, bundleSize, type BundleInput, type MediaSource } from "./bundle";
 import { exportFileName, isExportMode, normalizeAllowedOrigins, WHATSAPP_HINT, type ExportMode, type ExportRequest, type ExportRequestField } from "./options";
-import { exportServiceAccount, type ExportKey } from "./service-account";
+import { storeExportKey, type ExportKey } from "./service-account";
 import type { ExportContextResponse, ExportEstimateResponse, ExportRecordJson, ExportVersionJson } from "./types";
 import { zipStream } from "./zip";
 
@@ -68,7 +79,8 @@ interface VersionRow {
   page: { id: string; name: string; slug: string; status: "draft" | "published" | "archived"; publishedVersionId: string | null };
 }
 
-async function loadVersion(versionId: string): Promise<VersionRow> {
+/** A version of one of the store's pages (EXP-01: another store's version id answers "no longer exists"). */
+async function loadVersion(scope: StoreScope, versionId: string): Promise<VersionRow> {
   const [row] = await db
     .select({
       id: pageVersions.id,
@@ -81,8 +93,8 @@ async function loadVersion(versionId: string): Promise<VersionRow> {
       publishedVersionId: pages.publishedVersionId,
     })
     .from(pageVersions)
-    .innerJoin(pages, eq(pages.id, pageVersions.pageId))
-    .where(eq(pageVersions.id, versionId))
+    .innerJoin(pages, and(eq(pages.id, pageVersions.pageId), inStore(pages, scope)))
+    .where(byId(pageVersions, scope, versionId))
     .limit(1);
   if (!row) throw new ExportError("not_found", "This version no longer exists.", { versionId: "Choose another version." });
   return {
@@ -108,6 +120,44 @@ function apiOriginState(): { origin: string | null; blocker: string | null } {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname);
   if (u.protocol !== "https:" && !local) return { origin: null, blocker: "PUBLIC_URL must be an https:// address for connected exports." };
   return { origin, blocker: null };
+}
+
+/**
+ * The store's identity for its exported documents: `stores.name`, Settings → Store and the brand logo (D76,
+ * DES-R16), sanitized again by storeContext() when rendering.
+ */
+async function storeInfoOf(scope: StoreScope): Promise<StoreInfo> {
+  const [row, { store: s, brand }] = await Promise.all([getStoreById(scope.storeId), getStoreSettings(scope, ["store", "brand"])]);
+  if (!row) throw new ExportError("not_found", "This store no longer exists.");
+  const socials = Object.fromEntries(Object.entries(s.socials ?? {}).filter((e): e is [string, string] => typeof e[1] === "string" && !!e[1]));
+  return {
+    name: row.name,
+    country: s.country,
+    ...(s.legalName ? { legalName: s.legalName } : {}),
+    ...(s.phone ? { phone: s.phone } : {}),
+    ...(s.whatsapp ? { whatsapp: s.whatsapp } : {}),
+    ...(s.email ? { email: s.email } : {}),
+    ...(s.address ? { address: s.address } : {}),
+    ...(s.city ? { city: s.city } : {}),
+    ...(s.ice ? { ice: s.ice } : {}),
+    ...(s.rc ? { rc: s.rc } : {}),
+    ...(brand.logo.primary ? { logo: { id: brand.logo.primary, alt: row.name } } : {}),
+    ...(Object.keys(socials).length ? { socials } : {}),
+  };
+}
+
+/** The asset rows of `ids` that belong to the store (§E.3 rule 5: a document naming another store's image exports without it). */
+async function storeAssets(scope: StoreScope, ids: readonly string[]) {
+  if (!ids.length) return [];
+  const own = new Set<string>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const rows = await db
+      .select({ id: assetsTable.id })
+      .from(assetsTable)
+      .where(whereStore(assetsTable, scope, inArray(assetsTable.id, ids.slice(i, i + 500))));
+    for (const r of rows) own.add(r.id);
+  }
+  return (await getAssetsByIds([...own])).filter((a) => own.has(a.id));
 }
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -136,7 +186,7 @@ function recordJson(r: {
   };
 }
 
-async function exportRecords(where: SQL, limit: number): Promise<ExportRecordJson[]> {
+async function exportRecords(scope: StoreScope, where: SQL, limit: number): Promise<ExportRecordJson[]> {
   const rows = await db
     .select({
       id: exportsTable.id,
@@ -151,7 +201,7 @@ async function exportRecords(where: SQL, limit: number): Promise<ExportRecordJso
     })
     .from(exportsTable)
     .leftJoin(users, eq(users.id, exportsTable.createdBy))
-    .where(where)
+    .where(whereStore(exportsTable, scope, where))
     .orderBy(desc(exportsTable.createdAt))
     .limit(limit);
   return rows.map(recordJson);
@@ -163,27 +213,28 @@ async function exportRecords(where: SQL, limit: number): Promise<ExportRecordJso
 
 /**
  * `opts.versionId` (e.g. "download again" from the exports history) is listed even when it is older
- * than the 40 most recent versions, as long as it belongs to the page.
+ * than the 40 most recent versions, as long as it belongs to the page. `opts.canEmbedKey`: the member may
+ * put the store's export key into a PHP export (integrations.manage).
  */
-export async function getExportContext(pageId: string, user: SessionUser, opts: { versionId?: string } = {}): Promise<ExportContextResponse> {
+export async function getExportContext(scope: StoreScope, pageId: string, opts: { canEmbedKey: boolean; versionId?: string }): Promise<ExportContextResponse> {
   const [page] = await db
     .select({ id: pages.id, name: pages.name, slug: pages.slug, status: pages.status, publishedVersionId: pages.publishedVersionId, draft: pages.draft })
     .from(pages)
-    .where(eq(pages.id, pageId))
+    .where(byId(pages, scope, pageId))
     .limit(1);
   if (!page) throw new ExportError("not_found", "Page not found.");
 
   const versionRows = await db
     .select({ id: pageVersions.id, kind: pageVersions.kind, label: pageVersions.label, createdAt: pageVersions.createdAt })
     .from(pageVersions)
-    .where(and(eq(pageVersions.pageId, pageId), ne(pageVersions.kind, "autosave")))
+    .where(whereStore(pageVersions, scope, eq(pageVersions.pageId, pageId), ne(pageVersions.kind, "autosave")))
     .orderBy(desc(pageVersions.createdAt))
     .limit(40);
   if (opts.versionId && !versionRows.some((v) => v.id === opts.versionId)) {
     const [extra] = await db
       .select({ id: pageVersions.id, kind: pageVersions.kind, label: pageVersions.label, createdAt: pageVersions.createdAt })
       .from(pageVersions)
-      .where(and(eq(pageVersions.id, opts.versionId), eq(pageVersions.pageId, pageId)))
+      .where(and(byId(pageVersions, scope, opts.versionId), eq(pageVersions.pageId, pageId)))
       .limit(1);
     if (extra) versionRows.push(extra);
   }
@@ -195,20 +246,19 @@ export async function getExportContext(pageId: string, user: SessionUser, opts: 
     published: v.id === page.publishedVersionId,
   }));
 
-  const exports = await exportRecords(eq(exportsTable.pageId, pageId), 20);
+  const exports = await exportRecords(scope, eq(exportsTable.pageId, pageId), 20);
 
   // suggestions: the last connected export's first full origin; WhatsApp of the live page or the store
   const lastOrigin = exports.flatMap((e) => e.allowedOrigins).find((o) => /^https:\/\/[^*]+$/.test(o)) ?? null;
-  const [store, sheets] = await Promise.all([storeInfo(), getSetting("sheets")]);
+  const [store, sheet] = await Promise.all([storeInfoOf(scope), getSheetsConfig(scope)]);
   let liveDoc: PageDoc | null = null;
   if (page.publishedVersionId) {
-    const [pv] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(eq(pageVersions.id, page.publishedVersionId)).limit(1);
+    const [pv] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(byId(pageVersions, scope, page.publishedVersionId)).limit(1);
     liveDoc = pv ? validateDoc(pv.doc).doc : null;
   }
   liveDoc ??= validateDoc(page.draft).doc;
   const api = apiOriginState();
-  const owner = can(user.role, "settings.write");
-  const exportKey = owner ? exportServiceAccount() : null;
+  const exportKey = opts.canEmbedKey ? await storeExportKey(scope) : null;
   return {
     ok: true,
     page: { id: page.id, name: page.name, slug: page.slug, status: page.status, publishedVersionId: page.publishedVersionId },
@@ -219,7 +269,7 @@ export async function getExportContext(pageId: string, user: SessionUser, opts: 
       whatsapp: liveDoc ? whatsappNumber(liveDoc, store.whatsapp) : null,
       apiOrigin: api.origin,
       connectedBlocker: api.blocker,
-      sheetConnected: !!sheets.spreadsheetId,
+      sheetConnected: !!sheet,
       canEmbedServiceAccount: !!exportKey?.key,
       embedKeyBlocker: exportKey?.problem ?? null,
       exportServiceAccountEmail: exportKey?.key?.email ?? null,
@@ -238,10 +288,10 @@ interface Prepared {
   input: Omit<BundleInput, "exportId" | "pageKey" | "php">;
 }
 
-async function prepare(req: ExportRequest): Promise<Prepared> {
-  const version = await loadVersion(req.versionId);
+async function prepare(scope: StoreScope, req: ExportRequest): Promise<Prepared> {
+  const version = await loadVersion(scope, req.versionId);
   const doc = validDoc(version.doc);
-  const store = await storeInfo();
+  const [store, brand] = await Promise.all([storeInfoOf(scope), platformBrandName()]);
 
   let apiOrigin: string | undefined;
   if (req.mode === "connected") {
@@ -262,7 +312,7 @@ async function prepare(req: ExportRequest): Promise<Prepared> {
     }
   }
   const ids = collectAssetIds(doc, [store.logo]);
-  const assets = await getAssetsByIds(ids);
+  const assets = await storeAssets(scope, ids);
   const found = new Set(assets.map((a) => a.id));
   const lost = ids.filter((id) => !found.has(id)).length;
   return {
@@ -271,6 +321,7 @@ async function prepare(req: ExportRequest): Promise<Prepared> {
     store,
     input: {
       mode: req.mode,
+      brand,
       doc,
       pageName: version.page.name,
       store,
@@ -290,7 +341,8 @@ async function prepare(req: ExportRequest): Promise<Prepared> {
   };
 }
 
-const estimateCache = new Map<string, { at: number; value: ExportEstimateResponse }>();
+/** Estimates per store (60 s): the key never crosses stores, and a store's invalidation drops its entries. */
+const estimateCache = () => scopedCache<ExportEstimateResponse>({ name: "export-estimate", maxEntries: 200, ttlMs: 60_000 });
 
 /**
  * Approximate ZIP size and the warnings of an export (renders the pages, writes nothing). The
@@ -298,11 +350,12 @@ const estimateCache = new Map<string, { at: number; value: ExportEstimateRespons
  * by a few bytes, and the dialog asks again on every typed digit — one full render per number would
  * be wasted work.
  */
-export async function estimateExport(req: ExportRequest): Promise<ExportEstimateResponse> {
-  const p = await prepare(req);
+export async function estimateExport(scope: StoreScope, req: ExportRequest): Promise<ExportEstimateResponse> {
+  const p = await prepare(scope, req);
   const key = JSON.stringify([req.versionId, req.mode, req.options.hostConfigs, req.options.siteUrl?.base ?? ""]);
-  const hit = estimateCache.get(key);
-  if (hit && Date.now() - hit.at < 60_000) return hit.value;
+  const cache = estimateCache();
+  const hit = cache.get(scope.storeId, key);
+  if (hit) return hit;
   const bundle = await buildBundle({
     ...p.input,
     // placeholder ids: same lengths as real ones, nothing is recorded
@@ -312,10 +365,7 @@ export async function estimateExport(req: ExportRequest): Promise<ExportEstimate
     php: req.mode === "php" ? { secret: "0".repeat(64) } : undefined,
   });
   const size = bundleSize(bundle);
-  const value: ExportEstimateResponse = { ok: true, ...size, warnings: bundle.warnings };
-  estimateCache.set(key, { at: Date.now(), value });
-  while (estimateCache.size > 50) estimateCache.delete(estimateCache.keys().next().value!);
-  return value;
+  return cache.set(scope.storeId, key, { ok: true, ...size, warnings: bundle.warnings });
 }
 
 /** Fields the order API validates against — if they differ, the export gets its own version. */
@@ -327,20 +377,22 @@ const stable = (v: unknown): string =>
   );
 const orderView = (d: PageDoc) => stable([d.locale, d.market, d.currency, d.product, d.offers, d.form]);
 
-async function orderVersionFor(p: Prepared, user: SessionUser): Promise<string> {
+async function orderVersionFor(scope: WriteScope, p: Prepared, actor: Actor): Promise<string> {
   const stored = PageDoc.safeParse(p.version.doc);
   if (stored.success && orderView(stored.data) === orderView(p.doc)) return p.version.id;
   const id = newId();
-  await db.insert(pageVersions).values({
-    id,
-    pageId: p.version.pageId,
-    kind: "save",
-    label: "Export snapshot",
-    doc: p.doc,
-    checksum: createHash("sha256").update(JSON.stringify(p.doc), "utf8").digest("hex"),
-    createdBy: user.id,
-    createdAt: new Date(),
-  });
+  await db.insert(pageVersions).values(
+    storeValues(scope, {
+      id,
+      pageId: p.version.pageId,
+      kind: "save" as const,
+      label: "Export snapshot",
+      doc: p.doc,
+      checksum: createHash("sha256").update(JSON.stringify(p.doc), "utf8").digest("hex"),
+      createdBy: actor.userId,
+      createdAt: new Date(),
+    }),
+  );
   return id;
 }
 
@@ -353,24 +405,26 @@ export interface BuiltExport {
 }
 
 /**
- * Records the export (new public key) and returns its ZIP as a stream. The row's size is filled in
- * when the stream completes; an interrupted download deletes the row (its archive is unusable).
+ * Records the store's export (new public key) and returns its ZIP as a stream. The row's size is filled in
+ * when the stream completes; an interrupted download deletes the row (its archive is unusable). A PHP export
+ * carries the store's own sheet and, when asked and allowed (`opts.canEmbedKey`, integrations.manage), the
+ * store's own export key; never a platform key (EXP-03).
  */
-export async function buildExport(req: ExportRequest, user: SessionUser, ip: string): Promise<BuiltExport> {
+export async function buildExport(scope: WriteScope, req: ExportRequest, actor: Actor, opts: { canEmbedKey: boolean }): Promise<BuiltExport> {
   if (!isExportMode(req.mode)) throw new ExportError("invalid", "Unknown export mode.");
   if (req.mode === "connected" && !normalizeAllowedOrigins(req.allowedOrigins).origins.length) {
     throw new ExportError("invalid", "Add the domain where the page will be hosted.", { allowedOrigins: "Add the domain where the page will be hosted." });
   }
   let embedded: ExportKey | undefined;
   if (req.options.embedServiceAccount) {
-    if (!can(user.role, "settings.write")) throw new ExportError("forbidden", "Only owners can include the Google key in an export.");
-    const sa = exportServiceAccount();
+    if (!opts.canEmbedKey) throw new ExportError("forbidden", "Only owners and admins can include the Google key in an export.");
+    const sa = await storeExportKey(scope);
     if (!sa.key) throw new ExportError("unavailable", sa.problem, { embedServiceAccount: sa.problem });
     embedded = sa.key;
   }
-  const p = await prepare(req);
-  const versionId = req.mode === "connected" ? await orderVersionFor(p, user) : p.version.id;
-  const sheets = req.mode === "php" ? await getSetting("sheets") : null;
+  const p = await prepare(scope, req);
+  const versionId = req.mode === "connected" ? await orderVersionFor(scope, p, actor) : p.version.id;
+  const sheet = req.mode === "php" ? await getSheetsConfig(scope) : null;
 
   const exportId = newId();
   const pageKey = newPublicKey();
@@ -384,32 +438,32 @@ export async function buildExport(req: ExportRequest, user: SessionUser, ip: str
       req.mode === "php"
         ? {
             secret: randomBytes(32).toString("hex"),
-            spreadsheetId: sheets?.spreadsheetId,
-            sheetTab: sheets?.sheetTitle,
+            spreadsheetId: sheet?.spreadsheetId,
+            sheetTab: sheet?.sheetTitle,
             serviceAccountB64: embedded?.b64,
             serviceAccountEmail: embedded?.email,
           }
         : undefined,
   });
 
-  await db.insert(exportsTable).values({
-    id: exportId,
-    pageId: p.version.pageId,
-    versionId,
-    mode: req.mode,
-    publicKey: pageKey,
-    allowedOrigins: p.input.allowedOrigins,
-    fileName,
-    bytes: null,
-    createdBy: user.id,
-    createdAt: now,
-  });
+  await db.insert(exportsTable).values(
+    storeValues(scope, {
+      id: exportId,
+      pageId: p.version.pageId,
+      versionId,
+      mode: req.mode,
+      publicKey: pageKey,
+      allowedOrigins: p.input.allowedOrigins,
+      fileName,
+      bytes: null,
+      createdBy: actor.userId,
+      createdAt: now,
+    }),
+  );
   // the order API answers this export's origins from now on (CORS preflights read a cached list)
   invalidateExportOrigins();
-  await audit("export.created", {
-    userId: user.id,
+  await auditIn(scope, actor, "export.created", {
     target: exportId,
-    ip,
     meta: {
       pageId: p.version.pageId,
       versionId,
@@ -426,12 +480,12 @@ export async function buildExport(req: ExportRequest, user: SessionUser, ip: str
     onDone: (bytes) => {
       db.update(exportsTable)
         .set({ bytes })
-        .where(eq(exportsTable.id, exportId))
+        .where(byId(exportsTable, scope, exportId))
         .catch((err: unknown) => console.error("[export] size update failed:", errorSummary(err)));
     },
     onAbort: () => {
       db.delete(exportsTable)
-        .where(and(eq(exportsTable.id, exportId), isNull(exportsTable.bytes)))
+        .where(and(byId(exportsTable, scope, exportId), isNull(exportsTable.bytes)))
         .then(() => invalidateExportOrigins())
         .catch((err: unknown) => console.error("[export] cleanup failed:", errorSummary(err)));
     },
@@ -443,18 +497,25 @@ export async function buildExport(req: ExportRequest, user: SessionUser, ip: str
 /* revoke                                                              */
 /* ------------------------------------------------------------------ */
 
-export async function revokeExport(exportId: string, user: SessionUser, ip: string): Promise<ExportRecordJson> {
+/** Revoke one of the store's exports (EXP-04: another store's id is "not found"). */
+export async function revokeExport(scope: WriteScope, exportId: string, actor: Actor): Promise<ExportRecordJson> {
   const [row] = await db
     .select({ id: exportsTable.id, revokedAt: exportsTable.revokedAt, pageId: exportsTable.pageId, mode: exportsTable.mode })
     .from(exportsTable)
-    .where(eq(exportsTable.id, exportId))
+    .where(byId(exportsTable, scope, exportId))
     .limit(1);
   if (!row) throw new ExportError("not_found", "Export not found.");
   if (!row.revokedAt) {
-    await db.update(exportsTable).set({ revokedAt: new Date() }).where(and(eq(exportsTable.id, exportId), isNull(exportsTable.revokedAt)));
-    invalidateExportOrigins();
-    await audit("export.revoked", { userId: user.id, target: exportId, ip, meta: { pageId: row.pageId, mode: row.mode } });
+    const res = await db
+      .update(exportsTable)
+      .set({ revokedAt: new Date() })
+      .where(and(byId(exportsTable, scope, exportId), isNull(exportsTable.revokedAt)));
+    if (affected(res) === 1) {
+      invalidateExportOrigins();
+      await auditIn(scope, actor, "export.revoked", { target: exportId, meta: { pageId: row.pageId, mode: row.mode } });
+    }
   }
-  const [record] = await exportRecords(eq(exportsTable.id, exportId), 1);
-  return record!;
+  const [record] = await exportRecords(scope, eq(exportsTable.id, exportId), 1);
+  if (!record) throw new ExportError("not_found", "Export not found.");
+  return record;
 }

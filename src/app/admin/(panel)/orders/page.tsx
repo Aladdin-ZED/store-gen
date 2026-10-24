@@ -39,7 +39,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
     tabCounts(scope),
     tab === "orders" ? statusCounts(scope, query, tz) : Promise.resolve({ all: 0 }),
     pageOptions(scope, { includeArchived: true }),
-    getSheetsConfig(),
+    getSheetsConfig(scope),
     tab === "orders" ? listOrders(scope, toOrderFilters(query, tz), { page: query.page, pageSize: PAGE_SIZE }) : Promise.resolve(null),
     tab === "leads"
       ? listLeads(scope, { q: query.q || undefined, pageId: query.pageId ?? undefined, ...rangeBounds(query, tz) }, { page: query.page, pageSize: PAGE_SIZE })

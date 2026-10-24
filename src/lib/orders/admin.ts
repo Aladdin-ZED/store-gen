@@ -200,7 +200,7 @@ export async function updateOrderStatus(scope: WriteScope, id: string, status: O
   let sheet: "updated" | "not_found" | "skipped" | "queued" = synced || o.sheetStatus === "disabled" ? "skipped" : "queued";
   if (mayBeInSheet) {
     try {
-      const pushed = await pushOrderStatus(id, status);
+      const pushed = await pushOrderStatus(scope, id, status);
       if (synced || pushed === "updated") sheet = pushed;
     } catch (err) {
       return { ok: false, error: explain(err, serviceAccountEmail()) };
@@ -235,7 +235,7 @@ export async function retryFailedSync(scope: WriteScope, actor: Actor): Promise<
     .set({ sheetStatus: "pending", sheetAttempts: sql`GREATEST(${orders.sheetAttempts}, 1)` })
     .where(whereStore(orders, scope, eq(orders.sheetStatus, "failed")));
   await auditIn(scope, actor, "orders.sheet_retry_all");
-  return syncPendingOrders({ force: true, limit: 200 });
+  return syncPendingOrders(scope, { force: true, limit: 200 });
 }
 
 /**

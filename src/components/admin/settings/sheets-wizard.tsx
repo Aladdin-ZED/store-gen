@@ -5,6 +5,7 @@ import {
   ArrowUpRightIcon,
   CheckIcon,
   ClockIcon,
+  FingerprintIcon,
   KeyRoundIcon,
   Link2Icon,
   Loader2Icon,
@@ -38,6 +39,8 @@ export interface SheetsState {
   problem: string | null;
   serviceAccountEmail: string | null;
   sheet: { url: string; sheetTitle: string; connectedAt: string | null; enabled: boolean } | null;
+  /** an ownership proof is waiting (SHT-09): when it expires (the code itself is only shown when issued) */
+  pendingProof: { expiresAt: string } | null;
   health: SheetHealth;
   /** url: browser test with ?key=; endpoint: what the cron job calls with the X-Cron-Key header */
   cron: { configured: boolean; url: string; endpoint: string };
@@ -64,8 +67,41 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
   const [spreadsheetTitle, setSpreadsheetTitle] = useState<string | null>(null);
   const [busy, setBusy] = useState<"pause" | "test" | "sync" | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  // the ownership proof of a new spreadsheet: the code is known only right after it is issued
+  const [proof, setProof] = useState<{ code: string | null; expiresAt: string } | null>(state.pendingProof ? { code: null, expiresAt: state.pendingProof.expiresAt } : null);
+  const [verifying, setVerifying] = useState(false);
 
   const { configured, serviceAccountEmail: email, sheet, health } = state;
+
+  const connected = (data: Record<string, unknown>) => {
+    const title = typeof data.spreadsheetTitle === "string" ? data.spreadsheetTitle : null;
+    const tab = (data.sheet as { sheetTitle?: string } | undefined)?.sheetTitle ?? "Commandes";
+    setSpreadsheetTitle(title);
+    setLink("");
+    setChanging(false);
+    setProof(null);
+    toast.success(data.created ? `Connected — the “${tab}” tab was created and formatted` : `Connected to the “${tab}” tab`, {
+      description: title ? `Spreadsheet: ${title}` : undefined,
+    });
+    router.refresh();
+  };
+
+  const verify = async () => {
+    setVerifying(true);
+    setError(null);
+    try {
+      const { status, data } = await call("verify", "POST");
+      if (data.ok) connected(data);
+      else {
+        if (data.error === "no_proof") setProof(null);
+        setError(status === 429 ? "Too many attempts — wait a few minutes." : msg(data, "The check failed. Try again in a minute."));
+      }
+    } catch {
+      setError("Network problem — check your connection and try again.");
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const connect = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,16 +109,11 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
     setError(null);
     try {
       const { status, data } = await call("connect", "POST", { url: link });
-      if (data.ok) {
-        const title = typeof data.spreadsheetTitle === "string" ? data.spreadsheetTitle : null;
-        const tab = (data.sheet as { sheetTitle?: string } | undefined)?.sheetTitle ?? "Commandes";
-        setSpreadsheetTitle(title);
-        setLink("");
-        setChanging(false);
-        toast.success(data.created ? `Connected — the “${tab}” tab was created and formatted` : `Connected to the “${tab}” tab`, {
-          description: title ? `Spreadsheet: ${title}` : undefined,
-        });
-        router.refresh();
+      const issued = data.proof as { code?: unknown; expiresAt?: unknown } | undefined;
+      if (data.ok && issued && typeof issued.code === "string" && typeof issued.expiresAt === "string") {
+        setProof({ code: issued.code, expiresAt: issued.expiresAt });
+      } else if (data.ok) {
+        connected(data);
       } else {
         setError(status === 429 ? "Too many attempts — wait a few minutes." : msg(data, "Connection failed. Check the link and the sharing settings."));
       }
@@ -292,7 +323,7 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
                 )}
               </div>
             </Step>
-            <Step n={3} state={!configured ? "todo" : "current"} title="Paste the link" last>
+            <Step n={3} state={!configured ? "todo" : proof ? "done" : "current"} title="Paste the link" last={false}>
               <form onSubmit={connect} className="grid grid-cols-1 gap-3">
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <TextInput
@@ -315,7 +346,7 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
                   </Button>
                 </div>
                 <AnimatePresence>
-                  {error && (
+                  {error && !proof && (
                     <motion.p
                       role="alert"
                       initial={{ opacity: 0, y: -4 }}
@@ -333,6 +364,52 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
                   status dropdown. Your other tabs are never touched.
                 </p>
               </form>
+            </Step>
+            <Step n={4} state={proof ? "current" : "todo"} title="Prove it's your sheet" last>
+              <div className="grid grid-cols-1 gap-3 text-sm">
+                <p className="text-muted-foreground">
+                  Many stores share our service account, so we check that you can edit this sheet before writing to it. Type the code below into any cell
+                  of the sheet&apos;s first row (A1 is fine), then click Verify. You can delete it afterwards.
+                </p>
+                {proof?.code ? (
+                  <div className="flex items-center gap-2 rounded-2xl bg-foreground/[0.04] py-2 ps-4 pe-2 ring-1 ring-foreground/[0.07] ring-inset">
+                    <FingerprintIcon className="size-4 shrink-0 text-muted-foreground" />
+                    <code className="min-w-0 flex-1 truncate font-mono text-lg font-semibold tracking-[0.12em] tabular-nums select-all">{proof.code}</code>
+                    <CopyButton value={proof.code} label="Copy the code" toastMessage="Code copied — paste it into the first row of your sheet" />
+                  </div>
+                ) : (
+                  proof && (
+                    <p className="text-xs text-muted-foreground">
+                      A code was issued earlier. If it is already in your sheet, verify now; otherwise paste the link again for a new code.
+                    </p>
+                  )
+                )}
+                {proof && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button className="h-10 rounded-xl px-5" onClick={verify} disabled={verifying || !canWrite}>
+                      {verifying ? <Loader2Icon className="animate-spin" /> : <ShieldCheckIcon />}
+                      {verifying ? "Checking the sheet…" : "Verify"}
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      The code expires <RelativeTime iso={proof.expiresAt} />
+                    </span>
+                  </div>
+                )}
+                <AnimatePresence>
+                  {error && proof && (
+                    <motion.p
+                      role="alert"
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0 }}
+                      className="flex gap-2 rounded-xl bg-destructive/8 px-3.5 py-2.5 text-sm leading-relaxed text-destructive ring-1 ring-destructive/15 ring-inset"
+                    >
+                      <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
+                      <span lang="fr">{error}</span>
+                    </motion.p>
+                  )}
+                </AnimatePresence>
+              </div>
             </Step>
           </ol>
         </SettingsSection>

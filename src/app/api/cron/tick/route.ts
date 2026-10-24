@@ -1,7 +1,9 @@
 /**
  * GET /api/cron/tick — hPanel cron (every 5 min), key in the `X-Cron-Key` header (kept out of URL
  * access logs) or as `?key=<CRON_KEY>` (handy for a first test in a browser):
- * push queued orders to Google Sheets, pull agent statuses (≤ every 5 min), housekeeping
+ * push queued orders to each store's Google Sheet and pull its agents' statuses (≤ every 5 min per store; the
+ * stores with Sheets work one by one within a time budget, one store's failure never stopping the others, SHT-11),
+ * housekeeping
  * (rate-limit buckets, visitor markers > 2 days, abandoned leads > 30 days per store, expired sessions).
  * Also keeps the Node process warm.
  *
@@ -20,7 +22,7 @@ import { clientContext, errorSummary, json, logError } from "@/lib/orders/http";
 import { burstLimit } from "@/lib/security/burst-limit";
 import { hashIp, safeEqual } from "@/lib/security/crypto";
 import { purgeRateLimits, rateLimit } from "@/lib/security/rate-limit";
-import { pullStatuses, syncPendingOrders } from "@/lib/sheets/sync";
+import { syncStores } from "@/lib/sheets/sync";
 import { purgeVisitorMarkers } from "@/lib/stats";
 
 export const maxDuration = 120;
@@ -67,8 +69,8 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   const started = Date.now();
-  const sync = await step("sync", () => syncPendingOrders({ limit: 100 }));
-  const pull = await step("pull", () => pullStatuses());
+  // ~18 s of the tick for Sheets (core §H.2 slot 1), push + due pull per store
+  const sheets = await step("sheets", () => syncStores(systemCtx("sheets.push"), { budgetMs: 18_000 }));
   const purged = {
     rateLimits: await step("rate_limits", async () => {
       await purgeRateLimits();
@@ -78,7 +80,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     abandonedLeads: await step("leads", purgeLeadsPerStore),
     sessions: await step("sessions", () => purgeExpiredSessions()),
   };
-  return json({ ok: true, ms: Date.now() - started, sync, pull, purged });
+  return json({ ok: true, ms: Date.now() - started, sheets, purged });
 }
 
 /*

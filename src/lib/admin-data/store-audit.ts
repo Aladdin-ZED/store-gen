@@ -28,3 +28,6 @@ export function affected(res: unknown): number {
 
 /** A LIKE operand matching `s` literally. */
 export const likeEscape = (s: string) => s.replace(/[\\%_]/g, (m) => "\\" + m);
+
+/** The settings API's actor for a seam actor (`SettingsActor`; a job writes as "system"). */
+export const settingsActor = (actor: Actor): { id: string; ip: string | null } => ({ id: actor.userId ?? "system", ip: actor.ip });
