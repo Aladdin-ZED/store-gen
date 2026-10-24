@@ -1,0 +1,86 @@
+{
+  "//": "The npm test wall-time budget of docs/STORE-SAAS.md §J.1 (rev 5, CRIT2-9) as data: seconds on the owner's PC per group, read by scripts/qa/test-budget.ts. The sum of a release's groups must not exceed its ceiling and must equal its declared total; a group's scripts are the §J.1 / §J.6 rows its track owns. A release with `extends` adds its groups to that release's. Maintainer-owned (§K.3): a part changes its share through a CCR.",
+  "current": "R1",
+  "releases": {
+    "R1": {
+      "ceilingSec": 180,
+      "totalSec": 175,
+      "groups": [
+        {
+          "id": "existing",
+          "label": "pretest asset builds + the existing chain (package.json test: theme, runtime, generator, render, money, conversions, offers, orders)",
+          "owner": "maintainer",
+          "budgetSec": 30,
+          "scripts": ["pretest", "theme:check", "test:runtime", "test:generator", "test:render", "test:money", "test:conversions", "test:offers", "test:orders"],
+          "note": "measured by this harness at C0b; above 30 s the maintainer moves the slowest of these suites' sweeps to test:slow"
+        },
+        {
+          "id": "core",
+          "label": "core suites",
+          "owner": "maintainer",
+          "budgetSec": 20,
+          "scripts": ["test:tenancy-lint", "test:ownership", "test:hosts", "test:permissions", "test:tenancy-unit", "test:envelope", "test:security", "test:jobs", "test:prepublish"]
+        },
+        {
+          "id": "platform",
+          "label": "platform (P1 + P2 suites)",
+          "owner": "P1, P2",
+          "budgetSec": 20,
+          "scripts": ["test:platform", "test:health", "test:pulse", "test:admin-tokens", "test:admin-motion", "test:admin-rtl", "test:i18n-coverage"],
+          "note": "PLA-§O.1"
+        },
+        {
+          "id": "landing",
+          "label": "landing (P3)",
+          "owner": "P3",
+          "budgetSec": 20,
+          "scripts": ["test:delivery", "test:landing-addons", "test:policies", "test:wa-price", "test:test-orders", "test:kit", "test:links", "test:tracking", "test:leads", "test:honesty", "test:cod-invariants"],
+          "note": "LAN-§25.1"
+        },
+        {
+          "id": "operations",
+          "label": "operations (P4 + P5)",
+          "owner": "P4, P5",
+          "budgetSec": 25,
+          "scripts": ["test:ops", "test:queue", "test:state", "test:profit"],
+          "note": "OPE-§O.1; P5's offline suite test:conversions runs in the existing chain"
+        },
+        {
+          "id": "ai",
+          "label": "ai (P7: test:ai only)",
+          "owner": "P7",
+          "budgetSec": 20,
+          "scripts": ["test:ai"],
+          "note": "AI-§Q.1; test:ai-eval is in test:slow"
+        },
+        {
+          "id": "design",
+          "label": "design (P6)",
+          "owner": "P6",
+          "budgetSec": 40,
+          "scripts": ["test:design", "test:registry", "test:copylib"],
+          "note": "DES-§25.1"
+        }
+      ]
+    },
+    "R2": {
+      "extends": "R1",
+      "ceilingSec": 240,
+      "totalSec": 230,
+      "groups": [
+        { "id": "storefront", "label": "storefront (S1, 192 homes)", "owner": "S1", "budgetSec": 40, "scripts": ["test:catalog", "test:store-runtime", "qa:storefront-render"], "note": "the 1,200-home sweep is in test:slow" },
+        { "id": "logo", "label": "test:logo (S2)", "owner": "S2", "budgetSec": 8, "scripts": ["test:logo"] },
+        { "id": "imports", "label": "test:imports (S3)", "owner": "S3", "budgetSec": 4, "scripts": ["test:imports"] },
+        { "id": "webhooks", "label": "test:webhooks (S5)", "owner": "S5", "budgetSec": 3, "scripts": ["test:webhooks"] }
+      ]
+    },
+    "R3": {
+      "extends": "R2",
+      "ceilingSec": 240,
+      "totalSec": 235,
+      "groups": [
+        { "id": "experiments", "label": "test:experiments (D3, 2,000 seeded A/A)", "owner": "D3", "budgetSec": 5, "scripts": ["test:experiments"], "note": "any further R3 script fits the remaining headroom or its contract step moves a seeded subset to test:slow" }
+      ]
+    }
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "//": "gzip -9 bytes per runtime chunk, measured 2026-10-17 (docs/OFFERS.md §F.9); render-check fails above budget + 5%. page = the heaviest product page's scripts in one document (pixels + turnstile + every feature chunk + landing): the page cap that replaces DESIGN §10's 20 KB.",
+  "//": "gzip -9 bytes per runtime chunk, measured 2026-10-17 (docs/OFFERS.md §F.9); render-check fails above budget + 5%, except the frozen landing chunk (tolerance 0). Page caps (page, thanks-page) are the scripts of one document; the chunks each cap sums are listed in compositions (docs/STORE-SAAS.md §H.13, ENGP-12), so a new chunk needs no harness change. assist, assist-ty and track are the R1 add-on chunks of LAN-§5.2 (P3); page 32000 -> 34800 makes room for assist.",
   "landing": 24200,
   "thanks": 6650,
   "pixels": 3900,
@@ -8,5 +8,13 @@
   "units-fields": 1000,
   "fill-steps-box": 1750,
   "whatsapp": 5800,
-  "page": 32000
+  "assist": 2600,
+  "assist-ty": 1500,
+  "track": 2400,
+  "page": 34800,
+  "thanks-page": 12600,
+  "compositions": {
+    "page": ["pixels", "turnstile", "units-matrix", "units-fields", "fill-steps-box", "assist", "landing"],
+    "thanks-page": ["thanks", "pixels", "assist-ty"]
+  }
 }
