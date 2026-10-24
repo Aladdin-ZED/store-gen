@@ -1,7 +1,7 @@
 "use server";
 /**
  * Media library actions of store #1 (the legacy panel, §K.1 T4) that aren't uploads (those go through
- * /api/admin/media): alt text, and the usage lookup shown before a file is deleted. The store's ctx comes from the
+ * /api/app/<handle>/media): alt text, and the usage lookup shown before a file is deleted. The store's ctx comes from the
  * seam; the alt write audits inside the repository.
  */
 import { revalidatePath } from "next/cache";

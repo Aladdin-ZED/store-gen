@@ -18,12 +18,12 @@ import "server-only";
  * the API checks orders against exactly what the exported page shows.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, inArray, isNull, ne, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, type SQL } from "drizzle-orm";
 import { platformBrandName } from "@/lib/admin-data/brand";
 import { affected, auditIn } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { newId, newPublicKey } from "@/lib/db/ids";
-import { assets as assetsTable, exportsTable, pages, pageVersions, users } from "@/lib/db/schema";
+import { exportsTable, pages, pageVersions, users } from "@/lib/db/schema";
 import { getAssetsByIds, getMediaFile, getMediaMeta } from "@/lib/media";
 import { PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
@@ -147,17 +147,8 @@ async function storeInfoOf(scope: StoreScope): Promise<StoreInfo> {
 }
 
 /** The asset rows of `ids` that belong to the store (§E.3 rule 5: a document naming another store's image exports without it). */
-async function storeAssets(scope: StoreScope, ids: readonly string[]) {
-  if (!ids.length) return [];
-  const own = new Set<string>();
-  for (let i = 0; i < ids.length; i += 500) {
-    const rows = await db
-      .select({ id: assetsTable.id })
-      .from(assetsTable)
-      .where(whereStore(assetsTable, scope, inArray(assetsTable.id, ids.slice(i, i + 500))));
-    for (const r of rows) own.add(r.id);
-  }
-  return (await getAssetsByIds([...own])).filter((a) => own.has(a.id));
+function storeAssets(scope: StoreScope, ids: readonly string[]) {
+  return getAssetsByIds(scope, ids);
 }
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);

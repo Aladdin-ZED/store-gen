@@ -4,10 +4,11 @@ import "@/components/admin/styles/admin.css";
 import { AppSidebar } from "@/components/admin/shell/app-sidebar";
 import { CommandPaletteProvider } from "@/components/admin/shell/command-palette";
 import { AdminProviders } from "@/components/admin/shell/providers";
+import { StoreHandleMeta } from "@/components/admin/shell/store-handle";
 import { Topbar } from "@/components/admin/shell/topbar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { navCounts } from "@/lib/admin-data/dashboard";
-import { legacyStoreCtx } from "@/lib/admin-data/legacy-store";
+import { legacyStoreCtx, legacyStoreHandle } from "@/lib/admin-data/legacy-store";
 import { can, getCspNonce, requireUser } from "@/lib/auth";
 import { AuthError } from "@/lib/auth/errors";
 import { publicOrigin } from "@/lib/render/publish.server";
@@ -32,17 +33,20 @@ async function storeCounts() {
  */
 export default async function PanelLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
-  const [nonce, store, counts, jar] = await Promise.all([
+  const [nonce, store, counts, jar, handle] = await Promise.all([
     getCspNonce(),
     getSetting("store"),
     storeCounts(),
     cookies(),
+    legacyStoreHandle(),
   ]);
   const sidebarOpen = jar.get("sidebar_state")?.value !== "false";
   const origin = publicOrigin();
 
   return (
     <AdminProviders nonce={nonce}>
+      {/* the media clients call store #1's /api/app/<handle>/media */}
+      <StoreHandleMeta handle={handle} />
       <CommandPaletteProvider role={user.role} search={searchAction}>
         <SidebarProvider defaultOpen={sidebarOpen} className="bg-sidebar">
           <AppSidebar

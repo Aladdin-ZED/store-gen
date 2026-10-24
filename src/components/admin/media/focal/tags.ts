@@ -44,7 +44,7 @@ export function sameFocal(a: FocalPoint | null | undefined, b: FocalPoint | null
   return !!a && !!b && Math.abs(a.x - b.x) <= eps && Math.abs(a.y - b.y) <= eps;
 }
 
-/** What GET /api/admin/media/[id] answers for an image. */
+/** What GET /api/app/<handle>/media/[id] answers for an image. */
 export interface FocalInfo {
   id: string;
   width: number;

@@ -1,16 +1,31 @@
 /**
- * Media store self-test against the local database (writes and removes its own test rows):
- *   npx tsx --conditions=react-server src/lib/media/selftest-store.ts
+ * Media store self-test against a throwaway database it creates, migrates and drops (MariaDB root@127.0.0.1:3306,
+ * no password; MEDIA_TEST_DB_URL overrides the server URL):
+ *   node --import tsx src/lib/media/selftest-store.ts
  *
  * Checks the public-read hardening: single-flight loads, the 60 s miss cache, the dedicated read
  * pool failing fast when saturated while the main (order) pool stays responsive, and the verified
  * disk cache for large files (one copy from the database, ranges from disk, tamper detection,
- * database fallback, removal on delete).
+ * database fallback, removal on delete). Files are written the way the upload pipeline writes them: rows
+ * of one store (./files.ts; `store_id` is NOT NULL since 0004). The disk cache directory is still today's
+ * `tmpdir()/cod-studio-media` (MEDIA_CACHE_DIR is P8's, docs/STORE-SAAS.md §G.2).
  */
 import { randomBytes, createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import Module from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// the modules under test are marked `import "server-only"`; outside Next that import throws
+{
+  const M = Module as unknown as { _resolveFilename: (req: string, ...rest: unknown[]) => string };
+  const orig = M._resolveFilename;
+  const stub = require.resolve("drizzle-orm"); // any resolvable module: server-only exports nothing used
+  M._resolveFilename = function (req: string, ...rest: unknown[]) {
+    return req === "server-only" ? stub : orig.call(this, req, ...rest);
+  };
+}
+const load = <T>(id: string): T => Module.createRequire(__filename)(id) as T;
 
 let failures = 0;
 let passes = 0;
@@ -24,11 +39,9 @@ function check(name: string, ok: boolean, detail = ""): void {
 const section = (title: string) => console.log(`\n${title}`);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-if (!process.env.DATABASE_URL) {
-  const env = readFileSync(join(process.cwd(), ".env.local"), "utf8");
-  const url = /^DATABASE_URL=(.*)$/m.exec(env)?.[1]?.trim();
-  if (url) process.env.DATABASE_URL = url;
-}
+const SERVER = (process.env.MEDIA_TEST_DB_URL ?? "mysql://root@127.0.0.1:3306").replace(/\/+$/, "");
+const DB_NAME = `cod_test_t4_mstore_${randomBytes(3).toString("hex")}`;
+const STORE_ID = "00000000000000000000000001";
 
 async function readAll(stream: ReadableStream<Uint8Array>): Promise<Buffer> {
   const parts: Buffer[] = [];
@@ -42,8 +55,29 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<Buffer> {
 }
 
 async function main(): Promise<void> {
-  const store = await import("./store");
-  const { pool } = await import("@/lib/db/client");
+  const mysql = load<typeof import("mysql2/promise")>("mysql2/promise");
+  const admin = await mysql.createConnection(`${SERVER}/`);
+  await admin.query(`CREATE DATABASE \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+  process.env.DATABASE_URL = `${SERVER}/${DB_NAME}`;
+  try {
+    await load<typeof import("@/lib/db/migrate")>("@/lib/db/migrate").runMigrations();
+    await checks();
+  } finally {
+    await admin.query(`DROP DATABASE IF EXISTS \`${DB_NAME}\``);
+    await admin.end();
+  }
+  console.log(`\n${passes} passed, ${failures} failed`);
+  if (failures) process.exit(1);
+}
+
+async function checks(): Promise<void> {
+  const store = load<typeof import("./store")>("./store");
+  const fileStore = load<typeof import("./files")>("./files");
+  const { db, pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { stores } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  await db.insert(stores).values({ id: STORE_ID, handle: "media-store", name: "Media store", status: "active", brandSeed: "0123456789abcdef" });
+  const scope = systemScope(systemCtx("qa.media_store"), STORE_ID);
   const assetId = `5e1f7e57${randomBytes(12).toString("hex")}`;
   const smallKey = `${assetId}-640.webp`;
   const bigKey = `${assetId}-1280.mp4`;
@@ -74,7 +108,7 @@ async function main(): Promise<void> {
     const conn = await pool().getConnection();
     try {
       await conn.beginTransaction();
-      await store.insertFiles(conn, assetId, [
+      await fileStore.insertStoreFiles(conn, scope, assetId, [
         { key: smallKey, mime: "image/webp", data: small },
         { key: bigKey, mime: "video/mp4", data: big },
       ]);
@@ -82,7 +116,10 @@ async function main(): Promise<void> {
     } finally {
       conn.release();
     }
+    fileStore.forgetMisses([smallKey, bigKey]);
     check("insert clears the miss", store.peekMediaMeta(smallKey) === undefined);
+    const [owned] = (await pool().query("SELECT COUNT(*) AS n FROM media_files WHERE store_id = ? AND asset_id = ? AND storage = 'db'", [STORE_ID, assetId])) as unknown as [{ n: number }[]];
+    check("files are rows of their store on the DB backend", Number(owned[0]?.n) === 2);
 
     section("whole files · single-flight");
     queries = 0;
@@ -170,8 +207,6 @@ async function main(): Promise<void> {
     await readPool.end().catch(() => undefined);
     await pool().end().catch(() => undefined);
   }
-  console.log(`\n${passes} passed, ${failures} failed`);
-  if (failures) process.exit(1);
 }
 
 main().catch((err: unknown) => {

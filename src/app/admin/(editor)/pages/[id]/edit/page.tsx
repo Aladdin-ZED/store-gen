@@ -5,6 +5,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Builder } from "@/components/builder/Builder";
 import { Button } from "@/components/ui/button";
+import { legacyStoreCtx } from "@/lib/admin-data/legacy-store";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { pages } from "@/lib/db/schema";
@@ -26,9 +27,11 @@ export default async function EditPagePage({ params }: Props) {
   const { id } = await params;
   if (!RowId.safeParse(id).success) notFound();
 
+  // store #1's builder (the legacy panel): its files are the ones the canvas resolves
+  const ctx = await legacyStoreCtx({ permission: "pages.read" });
   let boot;
   try {
-    boot = await loadBootstrap(id, user);
+    boot = await loadBootstrap(ctx.scope, id, user);
   } catch (err) {
     if (err instanceof EditorError) return <Damaged message={err.message} />;
     throw err;

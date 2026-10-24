@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: "Media" };
 
 export default async function MediaPage() {
   const ctx = await legacyStoreCtx({ permission: "media.read" });
-  const [first, counts, ai, storage] = await Promise.all([listAssets({ page: 1, pageSize: 48 }), mediaCounts(ctx.scope), getSetting("ai"), getDbUsage()]);
+  const [first, counts, ai, storage] = await Promise.all([listAssets(ctx.scope, { page: 1, pageSize: 48 }), mediaCounts(ctx.scope), getSetting("ai"), getDbUsage()]);
 
   return (
     <Screen wide>

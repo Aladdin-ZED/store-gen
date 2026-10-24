@@ -24,7 +24,7 @@ import { PageDoc, type PageDoc as PageDocT } from "@/lib/page/schema";
 import { sanitizeDeep, validateDoc } from "@/lib/page/validate";
 import { invalidatePublished, isServableSlug, storeInfo } from "@/lib/render/publish.server";
 import { getSetting } from "@/lib/settings";
-import type { WriteScope } from "@/lib/tenancy/types";
+import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { collectAssetIds } from "@/landing/context";
 import type { ActionErrorCode, EditorAsset, EditorBootstrap, EditorPageMeta, PageStatus, VersionKind, VersionSummary } from "./types";
 import { jsonBytes, MAX_DOC_BYTES } from "./types";
@@ -81,8 +81,9 @@ export function toEditorAsset(a: AssetRecord): EditorAsset {
  * (and stored) within a small time budget, so the canvas and the next publish fit them alike — both
  * read the same stored row; the rest are analysed on a later open.
  */
-export async function assetsFor(doc: PageDocT, extra: Parameters<typeof collectAssetIds>[1] = []): Promise<Record<string, EditorAsset>> {
-  const rows = await ensureFocusMany(await getAssetsByIds(collectAssetIds(doc, extra)), { budgetMs: 2000 });
+export async function assetsFor(scope: StoreScope, doc: PageDocT, extra: Parameters<typeof collectAssetIds>[1] = []): Promise<Record<string, EditorAsset>> {
+  // the store's own files only (MED-18): another store's id in a document resolves like a deleted file
+  const rows = await ensureFocusMany(await getAssetsByIds(scope, collectAssetIds(doc, extra)), { budgetMs: 2000 });
   return Object.fromEntries(rows.map((r) => [r.id, toEditorAsset(r)]));
 }
 
@@ -129,7 +130,7 @@ async function versionRow(pageId: string, versionId: string) {
  * Everything the builder needs to open a page. A draft that no longer validates at page level is
  * replaced by the newest version that does (reported in `notices`); null when the page is unknown.
  */
-export async function loadBootstrap(pageId: string, user: SessionUser): Promise<EditorBootstrap | null> {
+export async function loadBootstrap(scope: StoreScope, pageId: string, user: SessionUser): Promise<EditorBootstrap | null> {
   const row = await pageRow(pageId);
   if (!row) return null;
   const notices: string[] = [];
@@ -165,7 +166,7 @@ export async function loadBootstrap(pageId: string, user: SessionUser): Promise<
       ? db.select({ checksum: pageVersions.checksum }).from(pageVersions).where(eq(pageVersions.id, row.publishedVersionId)).limit(1)
       : Promise.resolve([] as { checksum: string }[]),
   ]);
-  const assets = await assetsFor(doc, [store.logo]);
+  const assets = await assetsFor(scope, doc, [store.logo]);
 
   return {
     page: metaOf(row),
@@ -195,13 +196,13 @@ export async function loadBootstrap(pageId: string, user: SessionUser): Promise<
 }
 
 /** A version's document (repaired) and the asset rows to preview it. */
-export async function versionPreview(pageId: string, versionId: string): Promise<{ doc: PageDocT; assets: Record<string, EditorAsset> } | null> {
+export async function versionPreview(scope: StoreScope, pageId: string, versionId: string): Promise<{ doc: PageDocT; assets: Record<string, EditorAsset> } | null> {
   const v = await versionRow(pageId, versionId);
   if (!v) return null;
   const { doc } = validateDoc(v.doc);
   if (!doc) return null;
   const store = await storeInfo();
-  return { doc, assets: await assetsFor(doc, [store.logo]) };
+  return { doc, assets: await assetsFor(scope, doc, [store.logo]) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -336,6 +337,7 @@ export async function createVersion(
  * docs/OFFERS.md §A.4): an old version must never silently swap the ads' pixels.
  */
 export async function restoreVersion(
+  scope: StoreScope,
   user: SessionUser,
   input: { pageId: string; versionId: string; baseUpdatedAt: number; pixels?: boolean },
 ): Promise<{ doc: PageDocT; updatedAt: number; versions: VersionSummary[]; assets: Record<string, EditorAsset> }> {
@@ -367,7 +369,7 @@ export async function restoreVersion(
   created.unshift({ ...(await insertVersion(input.pageId, "restore", label, doc, user.id, now)), author: user.name });
   await pruneAutosaves(input.pageId);
   const store = await storeInfo();
-  return { doc, updatedAt: now.getTime(), versions: created, assets: await assetsFor(doc, [store.logo]) };
+  return { doc, updatedAt: now.getTime(), versions: created, assets: await assetsFor(scope, doc, [store.logo]) };
 }
 
 export async function setVersionStar(pageId: string, versionId: string, starred: boolean): Promise<void> {

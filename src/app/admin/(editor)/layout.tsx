@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { AdminProviders } from "@/components/admin/shell/providers";
+import { StoreHandleMeta } from "@/components/admin/shell/store-handle";
+import { legacyStoreHandle } from "@/lib/admin-data/legacy-store";
 import { getCspNonce, requireUser } from "@/lib/auth";
 
 /*
@@ -8,6 +10,12 @@ import { getCspNonce, requireUser } from "@/lib/auth";
  */
 export default async function EditorLayout({ children }: { children: ReactNode }) {
   await requireUser({ permission: "pages.read" });
-  const nonce = await getCspNonce();
-  return <AdminProviders nonce={nonce}>{children}</AdminProviders>;
+  const [nonce, handle] = await Promise.all([getCspNonce(), legacyStoreHandle()]);
+  return (
+    <AdminProviders nonce={nonce}>
+      {/* the builder's uploads and pickers call store #1's /api/app/<handle>/media */}
+      <StoreHandleMeta handle={handle} />
+      {children}
+    </AdminProviders>
+  );
 }

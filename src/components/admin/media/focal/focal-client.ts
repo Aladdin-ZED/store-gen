@@ -1,13 +1,16 @@
 "use client";
 /**
- * Browser client for /api/admin/media/[id] (crop data): one shared cache per tab, so the library,
- * the builder fields and the generator read each image's analysis once.
+ * Browser client for /api/app/<handle>/media/[id] (crop data of an image of the store on screen): one shared cache
+ * per tab, keyed by store and id, so the library, the builder fields and the generator read each image's analysis
+ * once and a tab that moves to another store never answers from the first store's entries.
  *
  *   const { info, loading } = useFocalInfo(assetId);   // subject analysis + the library default
  *   await saveFocal(assetId, { x, y } | null);          // library default (null = back to auto)
  *   const ref = await withLibraryDefault({ id, alt });  // fx/fy pre-filled when the library has one
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { currentStoreHandle, requireStoreHandle } from "@/components/admin/shell/store-handle";
+import { apiHref } from "@/lib/urls";
 import type { FocalPoint } from "./frames";
 import { roundFocal, type FocalInfo } from "./tags";
 
@@ -20,14 +23,23 @@ const inflight = new Map<string, Promise<FocalInfo>>();
 const listeners = new Set<() => void>();
 let version = 0;
 
+/** cache key: the store on screen + the asset id */
+const keyOf = (id: string) => `${currentStoreHandle() ?? ""}:${id}`;
+
 function publish(info: FocalInfo) {
-  resolved.set(info.id, info);
+  resolved.set(keyOf(info.id), info);
   version++;
   for (const l of listeners) l();
 }
 
 async function request(id: string, init?: RequestInit): Promise<FocalInfo> {
-  const res = await fetch(`/api/admin/media/${encodeURIComponent(id)}`, {
+  let url: string;
+  try {
+    url = apiHref(requireStoreHandle(), `/media/${encodeURIComponent(id)}`);
+  } catch (err) {
+    throw new FocalApiError(err instanceof Error ? err.message : "Couldn't read the crop data of this image.");
+  }
+  const res = await fetch(url, {
     ...init,
     credentials: "same-origin",
     headers: { Accept: "application/json", ...(init?.body ? { "Content-Type": "application/json" } : {}) },
@@ -70,22 +82,23 @@ function gated<T>(task: () => Promise<T>): Promise<T> {
 /** Cached crop data of an image (one request per id and tab). */
 export function loadFocal(id: string): Promise<FocalInfo> {
   if (!ASSET_ID.test(id)) return Promise.reject(new FocalApiError("Unknown image."));
-  const hit = resolved.get(id);
+  const key = keyOf(id);
+  const hit = resolved.get(key);
   if (hit) return Promise.resolve(hit);
-  let p = inflight.get(id);
+  let p = inflight.get(key);
   if (!p) {
     p = gated(() => request(id))
       .then((info) => {
         publish(info);
         return info;
       })
-      .finally(() => inflight.delete(id));
-    inflight.set(id, p);
+      .finally(() => inflight.delete(key));
+    inflight.set(key, p);
   }
   return p;
 }
 
-export const peekFocal = (id: string | null | undefined): FocalInfo | undefined => (id ? resolved.get(id) : undefined);
+export const peekFocal = (id: string | null | undefined): FocalInfo | undefined => (id ? resolved.get(keyOf(id)) : undefined);
 
 /** Save (or clear with null) the library's default point of an image. */
 export async function saveFocal(id: string, focal: FocalPoint | null): Promise<FocalInfo> {
@@ -102,10 +115,10 @@ const subscribe = (l: () => void) => {
 /** Crop data of one image, loaded on demand and shared across every mounted picker. */
 export function useFocalInfo(id: string | null | undefined, enabled = true) {
   useSyncExternalStore(subscribe, () => version, () => 0);
-  const info = id ? (resolved.get(id) ?? null) : null;
+  const info = id ? (resolved.get(keyOf(id)) ?? null) : null;
   const [failed, setFailed] = useState<{ id: string; message: string } | null>(null);
   useEffect(() => {
-    if (!enabled || !id || resolved.has(id)) return;
+    if (!enabled || !id || resolved.has(keyOf(id))) return;
     let live = true;
     loadFocal(id).catch((err: unknown) => {
       if (live) setFailed({ id, message: err instanceof Error ? err.message : "Couldn't read the crop data." });

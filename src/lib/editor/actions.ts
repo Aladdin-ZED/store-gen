@@ -10,7 +10,7 @@
 import { unstable_rethrow } from "next/navigation";
 import type { z } from "zod";
 import { ActionError } from "@/lib/admin-data/action";
-import { legacyWriteCtx } from "@/lib/admin-data/legacy-store";
+import { legacyReadCtx, legacyWriteCtx } from "@/lib/admin-data/legacy-store";
 import { unpublishPage as unpublishPageRow } from "@/lib/admin-data/pages";
 import { auditIn } from "@/lib/admin-data/store-audit";
 import { audit } from "@/lib/audit";
@@ -112,7 +112,8 @@ async function ip(): Promise<string> {
 /** Fresh bootstrap of a page (reload after a conflict). */
 export async function loadPage(raw: z.input<typeof PageRefInput>): Promise<ActionResult<{ boot: EditorBootstrap }>> {
   return run("pages.read", PageRefInput, raw, async (user, { pageId }) => {
-    const boot = await loadBootstrap(pageId, user);
+    const { scope } = await legacyReadCtx("pages.read");
+    const boot = await loadBootstrap(scope, pageId, user);
     return boot ? { ok: true, boot } : fail("not_found", "This page no longer exists.");
   });
 }
@@ -147,7 +148,8 @@ export async function listVersions(raw: z.input<typeof ListVersionsInput>): Prom
 /** A version's document + its asset rows (versions drawer thumbnail). */
 export async function getVersionPreview(raw: z.input<typeof VersionRefInput>): Promise<ActionResult<{ doc: PageDoc; assets: Record<string, EditorAsset> }>> {
   return run("pages.read", VersionRefInput, raw, async (_user, input) => {
-    const res = await versionPreview(input.pageId, input.versionId);
+    const { scope } = await legacyReadCtx("pages.read");
+    const res = await versionPreview(scope, input.pageId, input.versionId);
     return res ? { ok: true, ...res } : fail("not_found", "This version cannot be previewed.");
   });
 }
@@ -156,7 +158,8 @@ export async function restoreVersion(
   raw: z.input<typeof RestoreVersionInput>,
 ): Promise<ActionResult<{ doc: PageDoc; updatedAt: number; versions: VersionSummary[]; assets: Record<string, EditorAsset> }>> {
   return run("pages.write", RestoreVersionInput, raw, async (user, input) => {
-    const res = await restoreVersionRow(user, input);
+    const { scope } = await legacyWriteCtx("pages.write");
+    const res = await restoreVersionRow(scope, user, input);
     await audit("page.version_restored", { userId: user.id, target: input.pageId, meta: { versionId: input.versionId }, ip: await ip() });
     return { ok: true, ...res };
   });

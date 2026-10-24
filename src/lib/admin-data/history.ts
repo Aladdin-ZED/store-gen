@@ -172,7 +172,7 @@ export async function restoreVersion(scope: WriteScope, id: string, user: Sessio
     .where(byId(pageVersions, scope, id))
     .limit(1);
   if (!v) throw new EditorError("not_found", "This version no longer exists.");
-  await restoreDraft(user, { pageId: v.pageId, versionId: id, baseUpdatedAt: v.updatedAt.getTime() });
+  await restoreDraft(scope, user, { pageId: v.pageId, versionId: id, baseUpdatedAt: v.updatedAt.getTime() });
   await auditIn(scope, actor, "page.version_restored", { target: v.pageId, meta: { versionId: id } });
   return { pageId: v.pageId };
 }

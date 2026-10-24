@@ -44,6 +44,14 @@ async function legacyHandle(): Promise<string | null> {
   return (await getStoreById(LEGACY_STORE_ID))?.handle ?? null;
 }
 
+/**
+ * Store #1's handle for the panel's and the builder's browser clients (`<StoreHandleMeta>`: they call
+ * `/api/app/<handle>/…` like the dashboard will), after the admin gate. Null when store #1 doesn't exist.
+ */
+export function legacyStoreHandle(): Promise<string | null> {
+  return legacyHandle();
+}
+
 /** A seam refusal as adminAction answers it: role → AuthError (its "role doesn't allow" text), the rest → a message. */
 function refusal(code: string): Error {
   if (code === "unauthenticated" || code === "mfa_required" || code === "forbidden") return new AuthError(code);

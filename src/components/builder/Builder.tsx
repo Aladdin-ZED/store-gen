@@ -3,7 +3,7 @@
  * The page builder: top bar, left rail + panels, live canvas, inspector. Owns the per-page store,
  * persistence (autosave/serial server calls), media picker and keyboard shortcuts.
  *
- *   <Builder boot={await loadBootstrap(pageId, user)} />
+ *   <Builder boot={await loadBootstrap(scope, pageId, user)} />
  */
 import "./builder.css";
 import { MotionConfig } from "motion/react";
