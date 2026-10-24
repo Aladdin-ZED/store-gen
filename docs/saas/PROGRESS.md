@@ -25,7 +25,7 @@ running, and how to restart it. Newest state at the top of "Running now".
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_ba647c5b-5cb"})`.
   Output: docs/saas/research/rethink-ai.md, docs/saas/research/rethink-features.md (inputs of Phase 2b ELEVATE).
 
-- **Phase 1c design baseline audit** — started 2026-10-24 ~00:40 (Fable 5.1). Task `wos2qnru9`, run `wf_21efd09c-0c8`.
+- **Phase 1c design baseline audit** — DONE 2026-10-24 ~01:55: docs/saas/research/design-baseline.md (482 lines; score 4.3/10, distinctiveness 2/10; 60+ targets). 2 ENOTFOUND first attempts auto-retried. Was: started 2026-10-24 ~00:40 (Fable 5.1). Task `wos2qnru9`, run `wf_21efd09c-0c8`.
   Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\design-baseline-audit-wf_21efd09c-0c8.js`
   Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_21efd09c-0c8"})`.
   Output: qa/saas-baseline/ (html, shots, index.json; git-ignored) + docs/saas/research/design-baseline.md.
