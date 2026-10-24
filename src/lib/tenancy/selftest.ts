@@ -18,7 +18,9 @@
  *     folding, a disabled seed, allowProtected), history availability, the 30-day rename rule, the conversion's
  *     handle derivation (ENGC-30);
  *  8. ScopedCache bounds (entries, bytes, TTL), single flight, a delete during a load, invalidateStore;
- *  9. storeBase / storeUrl / mediaUrl per addressing mode.
+ *  9. storeBase / storeUrl / mediaUrl per addressing mode;
+ * 10. the boot configuration lines (src/lib/db/boot-config.ts): aliases, S mode, DATA_DIR, APP_TIMEZONE, the test
+ *     context in production, never a value.
  *
  * Not here yet: the `Bucket` builders (C0b, §E.8) and `landingPathFor` (T2) join when their files exist.
  */
@@ -512,6 +514,40 @@ async function main(): Promise<void> {
     delete env.STORE_ROOT_DOMAIN;
     delete env.EDGE_KEY;
     delete env.PLATFORM_URL;
+  }
+
+  /* 10. boot configuration lines (§H.4 step 1; src/lib/db/boot-config.ts) --------------------------- */
+  {
+    const { platformConfigLines } = await import("@/lib/db/boot-config");
+    const KEYS = ["PLATFORM_URL", "PUBLIC_URL", "STORE_ROOT_DOMAIN", "EDGE_KEY", "DATA_DIR", "APP_TIMEZONE", "SG_TEST_CONTEXT", "NODE_ENV"] as const;
+    const saved = Object.fromEntries(KEYS.map((k) => [k, env[k]]));
+    const linesFor = async (vars: Partial<Record<(typeof KEYS)[number], string>>) => {
+      for (const k of KEYS) delete env[k];
+      Object.assign(env, vars);
+      return (await platformConfigLines()).filter((l) => !l.text.includes("gate"));
+    };
+    const has = (lines: { level: string; text: string }[], level: string, re: RegExp) => lines.some((l) => l.level === level && re.test(l.text));
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const outside = join(tmpdir(), "sg-selftest-data");
+    eq("boot config: a complete setup logs nothing", await linesFor({ PLATFORM_URL: "https://app.example.com", DATA_DIR: outside }), []);
+    check("boot config: PUBLIC_URL alone is the alias", has(await linesFor({ PUBLIC_URL: "https://app.example.com", DATA_DIR: outside }), "warn", /PUBLIC_URL is used as its alias/));
+    check("boot config: PLATFORM_URL and PUBLIC_URL differ", has(await linesFor({ PLATFORM_URL: "https://a.example.com", PUBLIC_URL: "https://b.example.com", DATA_DIR: outside }), "warn", /differ/));
+    check("boot config: a PLATFORM_URL that is not http(s) is an error", has(await linesFor({ PLATFORM_URL: "ftp://x", DATA_DIR: outside }), "error", /not an http/));
+    check("boot config: no PLATFORM_URL in production is an error", has(await linesFor({ NODE_ENV: "production", DATA_DIR: outside }), "error", /PLATFORM_URL is not set/));
+    check("boot config: STORE_ROOT_DOMAIN without EDGE_KEY", has(await linesFor({ PLATFORM_URL: "https://app.example.com", DATA_DIR: outside, STORE_ROOT_DOMAIN: "stores.example.com" }), "warn", /set together/));
+    check("boot config: a short EDGE_KEY", has(await linesFor({ PLATFORM_URL: "https://app.example.com", DATA_DIR: outside, STORE_ROOT_DOMAIN: "stores.example.com", EDGE_KEY: "short" }), "warn", /shorter than 32/));
+    check("boot config: DATA_DIR inside the app folder", has(await linesFor({ PLATFORM_URL: "https://app.example.com", DATA_DIR: join(process.cwd(), "data") }), "warn", /inside the app folder/));
+    check("boot config: a relative DATA_DIR", has(await linesFor({ PLATFORM_URL: "https://app.example.com", DATA_DIR: "data" }), "warn", /absolute path/));
+    check("boot config: no DATA_DIR is a production warning", has(await linesFor({ PLATFORM_URL: "https://app.example.com", NODE_ENV: "production" }), "warn", /DATA_DIR is not set/));
+    check("boot config: an unknown APP_TIMEZONE", has(await linesFor({ PLATFORM_URL: "https://app.example.com", DATA_DIR: outside, APP_TIMEZONE: "Mars/Olympus" }), "warn", /APP_TIMEZONE/));
+    check("boot config: SG_TEST_CONTEXT in production is an error", has(await linesFor({ PLATFORM_URL: "https://app.example.com", DATA_DIR: outside, NODE_ENV: "production", SG_TEST_CONTEXT: "1" }), "error", /SG_TEST_CONTEXT/));
+    const secretish = "https://user:pa55word@app.example.com";
+    check("boot config: never a value in a line", (await linesFor({ PLATFORM_URL: secretish, EDGE_KEY: "e".repeat(40) })).every((l) => !l.text.includes("pa55word") && !l.text.includes("eeee")));
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete env[k];
+      else env[k] = saved[k];
+    }
   }
 }
 

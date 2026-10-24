@@ -11,13 +11,20 @@
  *
  * Used by scripts/qa/upgrade-dry-run.ts (deploy gate, `--db <mysql url>`) and once at boot
  * (instrumentation, non-blocking, `[upgrade-check]` log lines). Framework-free: mysql2 + page libs.
+ *
+ * Multi-tenant (R1.0): the documents are read across every store (a read-only platform gate in src/lib/db/**), and
+ * the tenancy section below (`runTenancyCheck`, `[tenancy-check]` at boot) checks the store #1 conversion and the
+ * store boundaries.
  */
+import { is } from "drizzle-orm";
+import { MySqlTable, getTableConfig } from "drizzle-orm/mysql-core";
 import type { Connection } from "mysql2/promise";
 import { offerSheetLabel } from "@/lib/page/catalog";
 import { emptySelection, fromCents, offerMath, orderTotals } from "@/lib/page/pricing";
 import { PageDoc, type PageDoc as PageDocT } from "@/lib/page/schema";
 import { upgradeDocReport, type RepairKind } from "@/lib/page/upgrade";
 import { validateDoc } from "@/lib/page/validate";
+import * as schema from "./schema";
 
 export interface UpgradeCheckReport {
   scanned: { drafts: number; versions: number; exportVersions: number; v1: number; v2: number };
@@ -224,6 +231,7 @@ export async function runUpgradeCheck(conn: Connection, opts: { batch?: number }
     checkDoc(doc, source, id, report);
   };
 
+  // tenancy: platform upgrade dry run over every store's documents (read-only)
   const [exportRows] = (await conn.query("SELECT version_id AS v FROM exports WHERE revoked_at IS NULL")) as unknown as [{ v: string }[]];
   const exportVersions = new Set(exportRows.map((r) => r.v));
 
@@ -246,4 +254,305 @@ export async function runUpgradeCheck(conn: Connection, opts: { batch?: number }
     if (rows.length < batch) break;
   }
   return report;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tenancy dry run (docs/STORE-SAAS.md §D.8 "Read-only gates", §H.10)   */
+/* ------------------------------------------------------------------ */
+/*
+ * `runTenancyCheck(conn)`: READ ONLY, like runUpgradeCheck. Two modes, picked from the schema:
+ *  - "pre-tenancy" (a dump taken before the R1.0 deploy: no `stores` table): what 0004 and the conversion will
+ *    find, i.e. whether store #1 will be made, its handle, that it will have an active owner, and whether the legacy
+ *    envelopes open with this APP_SECRET (a problem with `requireEnvelopes`, run with the production secret);
+ *  - "tenancy" (0004 applied): rows with a NULL store_id, stores without an active owner, cross-store references
+ *    (order → page / version / export, lead → page, stats → page, export → page / version, version → page, a page's
+ *    live version, a store's home page, asset_refs → asset, media_files → asset, store_members → user),
+ *    store_settings rows still in a v1 envelope, legacy rows left in settings, duplicate or malformed handles, the
+ *    tenancy_v1 marker.
+ * Both modes check that the tenant tables enumerated from schema.ts (every table with a store_id column, what the
+ * purge and the lint use) are the T / P* / P (opt. store) rows of §D.2 / §D.3 (ENGC-31), as recorded in TABLE_LEVELS.
+ */
+
+/** §D.2 / §D.3 levels: T tenant, P* platform about one store, P-opt platform with an optional store, P platform, root = stores. */
+export type TableLevel = "T" | "P*" | "P-opt" | "P" | "root";
+
+/**
+ * Every table of the schema up to 0004 with its §D.3 level (the 0000 tables per §D.2). A new table is added here in
+ * the release that cuts it; test:migrate compares this list with the §D.3 rows of the document.
+ * Recorded drift (docs/saas/ccr/r1.0-t1-3.md): §D.3 lists `legal_acceptances` as P, but PLA-§2.1 gave it an optional
+ * store_id (the store whose policy was accepted), so it is P (opt. store) here; §D.3 groups `notification_reads` with
+ * `notifications` as P (opt. store), but the read rows carry no store_id (they hang off the notification), so P here.
+ */
+export const TABLE_LEVELS: Readonly<Record<string, TableLevel>> = {
+  // 0000-0003 (§D.2)
+  users: "P",
+  sessions: "P",
+  pages: "T",
+  page_versions: "T",
+  assets: "T",
+  media_files: "T",
+  media_chunks: "P", // keyed by the global media key; drains to empty with the FS backend
+  orders: "T",
+  leads: "T",
+  blocklist: "T",
+  exports: "T",
+  settings: "P",
+  rate_limits: "P",
+  audit_log: "P-opt",
+  stats_daily: "T",
+  stats_visitors: "P", // global page ids, purged after 2 days
+  // 0004 (§D.3)
+  stores: "root",
+  store_members: "T",
+  store_invites: "T",
+  store_settings: "T",
+  store_handle_history: "P*",
+  plans: "P",
+  store_entitlements: "P*",
+  store_usage: "T",
+  store_subscriptions: "P*",
+  platform_invites: "P",
+  waitlist: "P",
+  password_resets: "P",
+  impersonation_sessions: "P*",
+  signup_reviews: "P*",
+  identity_links: "P",
+  protected_brands: "P",
+  legal_documents: "P",
+  legal_acceptances: "P-opt",
+  notifications: "P-opt",
+  notification_reads: "P",
+  flags: "P",
+  flag_overrides: "P",
+  asset_refs: "T",
+  page_slug_history: "T",
+  preview_tokens: "T",
+};
+
+/** Every schema.ts table and its store_id column ("required" NOT NULL, "optional", or none). */
+export function schemaStoreColumns(): { table: string; storeId: "required" | "optional" | null }[] {
+  const out: { table: string; storeId: "required" | "optional" | null }[] = [];
+  for (const value of Object.values(schema)) {
+    if (!is(value, MySqlTable)) continue;
+    const config = getTableConfig(value);
+    const column = config.columns.find((c) => c.name === "store_id");
+    out.push({ table: config.name, storeId: column ? (column.notNull ? "required" : "optional") : null });
+  }
+  return out.sort((a, b) => a.table.localeCompare(b.table));
+}
+
+/** The tenant set of schema.ts (every table with a store_id) against TABLE_LEVELS (ENGC-31); [] when they agree. */
+export function tenantSetProblems(): string[] {
+  const problems: string[] = [];
+  const tables = schemaStoreColumns();
+  for (const { table, storeId } of tables) {
+    const level = TABLE_LEVELS[table];
+    if (!level) problems.push(`table ${table} is in schema.ts but has no §D.3 level (TABLE_LEVELS)`);
+    else if (storeId === "required" && level !== "T" && level !== "P*") problems.push(`${table}: store_id NOT NULL, but §D.3 says ${level}`);
+    else if (storeId === "optional" && level !== "P-opt") problems.push(`${table}: store_id NULL-able, but §D.3 says ${level}`);
+    else if (storeId === null && (level === "T" || level === "P*" || level === "P-opt")) problems.push(`${table}: no store_id, but §D.3 says ${level}`);
+  }
+  const known = new Set(tables.map((t) => t.table));
+  for (const table of Object.keys(TABLE_LEVELS)) if (!known.has(table)) problems.push(`TABLE_LEVELS lists ${table}, which schema.ts does not define`);
+  return problems;
+}
+
+export interface TenancyCheckReport {
+  mode: "pre-tenancy" | "tenancy";
+  /** gate: must be empty */
+  problems: string[];
+  /** facts worth reading (never values, never customer data) */
+  info: string[];
+}
+
+export interface TenancyCheckOptions {
+  /** an envelope that does not open with this APP_SECRET is a problem (run it with the production secret) */
+  requireEnvelopes?: boolean;
+}
+
+const LEGACY_STORE = "00000000000000000000000001";
+/** the legacy store-level keys the conversion moves out of `settings` (src/lib/tenancy/convert.server.ts MOVED_KEYS) */
+const MOVED_KEYS = ["store", "defaults", "sheets", "pixel_library", "pixel_health", "tracking_secrets", "turnstile", "ai", "home", "pixels"] as const;
+const LEGACY_KEYS = new Set<string>([...MOVED_KEYS, "doc_schema"]);
+
+type Rows = Record<string, unknown>[];
+async function rows(conn: Connection, q: string, params: unknown[] = []): Promise<Rows> {
+  const [r] = (await conn.query(q, params)) as unknown as [Rows];
+  return r;
+}
+async function count(conn: Connection, q: string, params: unknown[] = []): Promise<number> {
+  const [r] = await rows(conn, q, params);
+  return Number(r ? Object.values(r)[0] : 0);
+}
+async function tableNames(conn: Connection): Promise<Set<string>> {
+  const r = await rows(conn, "SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE()");
+  return new Set(r.map((x) => String(Object.values(x)[0])));
+}
+
+/** Whether a stored envelope opens: true, false, or null when this environment has no usable APP_SECRET. */
+function envelopeOpens(raw: unknown, open: (envelope: string) => string): boolean | null {
+  let envelope: unknown;
+  try {
+    envelope = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return false;
+  }
+  if (typeof envelope !== "string") return false;
+  try {
+    open(envelope);
+    return true;
+  } catch (err) {
+    return err instanceof Error && /APP_SECRET/.test(err.message) ? null : false;
+  }
+}
+
+/** Counts the envelopes of `sealed` that do not open; `push` gets the line (problem or info). */
+function envelopeLine(label: string, sealed: Rows, opener: (r: Record<string, unknown>) => (envelope: string) => string, push: (line: string) => void, ok: (line: string) => void): void {
+  if (!sealed.length) return;
+  let unreadable = 0;
+  for (const r of sealed) {
+    const res = envelopeOpens(r.value, opener(r));
+    if (res === null) {
+      ok(`${sealed.length} ${label} not checked: no usable APP_SECRET in this environment`);
+      return;
+    }
+    if (!res) unreadable++;
+  }
+  if (unreadable) push(`${unreadable} of ${sealed.length} ${label} do not open with this APP_SECRET`);
+  else ok(`${sealed.length} ${label} open with this APP_SECRET`);
+}
+
+async function preTenancyChecks(conn: Connection, report: TenancyCheckReport, opts: TenancyCheckOptions): Promise<void> {
+  const { decrypt } = await import("@/lib/security/crypto");
+  const { handleFromName } = await import("@/lib/tenancy/handles");
+  const legacy = await count(
+    conn,
+    `SELECT (SELECT COUNT(*) FROM users) + (SELECT COUNT(*) FROM pages) + (SELECT COUNT(*) FROM page_versions) + (SELECT COUNT(*) FROM assets)
+          + (SELECT COUNT(*) FROM media_files) + (SELECT COUNT(*) FROM orders) + (SELECT COUNT(*) FROM leads) + (SELECT COUNT(*) FROM blocklist)
+          + (SELECT COUNT(*) FROM exports) + (SELECT COUNT(*) FROM stats_daily) + (SELECT COUNT(*) FROM audit_log WHERE action NOT LIKE 'auth.%') AS n`,
+  );
+  if (!legacy) {
+    report.info.push("empty install: 0004 makes no store #1; the conversion only writes its marker");
+    return;
+  }
+  const owners = await count(conn, "SELECT COUNT(*) AS n FROM users WHERE role = 'owner' AND disabled = 0");
+  if (!owners) report.problems.push("no active owner user: store #1 would have no active owner and no super_admin");
+  report.info.push(`store #1 will hold ${legacy} legacy row(s); ${owners} owner(s) become its owners and super_admin`);
+
+  const settingRows = await rows(conn, "SELECT `key`, value, encrypted FROM settings ORDER BY `key`");
+  const json = (key: string): { value: unknown } | null => {
+    const row = settingRows.find((r) => r.key === key && !Number(r.encrypted));
+    if (!row) return null;
+    try {
+      return { value: JSON.parse(String(row.value)) };
+    } catch {
+      report.problems.push(`the legacy "${key}" setting is not valid JSON`);
+      return null;
+    }
+  };
+  const store = json("store")?.value as { storeName?: unknown } | null | undefined;
+  const name = typeof store?.storeName === "string" ? store.storeName : "";
+  report.info.push(`store #1 handle: "${(name && handleFromName(name)) || "store-1"}" (from the store name; the conversion re-checks the live lists)`);
+  const unknown = settingRows.map((r) => String(r.key)).filter((k) => !LEGACY_KEYS.has(k));
+  if (unknown.length) report.info.push(`settings keys the conversion leaves in place: ${unknown.join(", ")}`);
+
+  const sealed = settingRows.filter((r) => Number(r.encrypted));
+  const push = (line: string) => (opts.requireEnvelopes ? report.problems : report.info).push(`${line} (the conversion stops on such a row)`);
+  envelopeLine("legacy envelope(s)", sealed, (r) => (e) => decrypt(e, `settings:${String(r.key)}`), push, (line) => report.info.push(line));
+
+  const home = json("home")?.value as { pageId?: unknown } | null | undefined;
+  if (typeof home?.pageId === "string" && !(await count(conn, "SELECT COUNT(*) AS n FROM pages WHERE id = ?", [home.pageId]))) {
+    report.info.push("the legacy home setting names a page that no longer exists (store #1 gets no home page from it)");
+  }
+}
+
+async function tenancyChecks(conn: Connection, have: Set<string>, report: TenancyCheckReport, opts: TenancyCheckOptions): Promise<void> {
+  const { open } = await import("@/lib/security/crypto");
+  const { isHandle } = await import("@/lib/tenancy/handles");
+
+  // NULL store_id where it is required (an interrupted 0004, or a writer that bypassed the seam)
+  for (const { table, storeId } of schemaStoreColumns()) {
+    if (storeId !== "required" || !have.has(table)) continue;
+    const n = await count(conn, `SELECT COUNT(*) AS n FROM \`${table}\` WHERE store_id IS NULL`);
+    if (n) report.problems.push(`${table}: ${n} row(s) with a NULL store_id`);
+  }
+
+  const noOwner = await rows(
+    conn,
+    `SELECT s.id FROM stores s WHERE s.status NOT IN ('purged', 'rejected')
+       AND NOT EXISTS (SELECT 1 FROM store_members m WHERE m.store_id = s.id AND m.role = 'owner' AND m.status = 'active')`,
+  );
+  if (noOwner.length) report.problems.push(`${noOwner.length} store(s) without an active owner: ${noOwner.slice(0, 10).map((r) => String(r.id)).join(", ")}`);
+
+  const crossStore: [string, string][] = [
+    ["order → page", "SELECT COUNT(*) AS n FROM orders o JOIN pages p ON p.id = o.page_id WHERE p.store_id <> o.store_id"],
+    ["order → version", "SELECT COUNT(*) AS n FROM orders o JOIN page_versions v ON v.id = o.version_id WHERE v.store_id <> o.store_id"],
+    ["order → export", "SELECT COUNT(*) AS n FROM orders o JOIN exports e ON e.id = o.export_id WHERE e.store_id <> o.store_id"],
+    ["lead → page", "SELECT COUNT(*) AS n FROM leads l JOIN pages p ON p.id = l.page_id WHERE p.store_id <> l.store_id"],
+    ["stats → page", "SELECT COUNT(*) AS n FROM stats_daily d JOIN pages p ON p.id = d.page_id WHERE p.store_id <> d.store_id"],
+    ["export → page", "SELECT COUNT(*) AS n FROM exports e JOIN pages p ON p.id = e.page_id WHERE p.store_id <> e.store_id"],
+    ["export → version", "SELECT COUNT(*) AS n FROM exports e JOIN page_versions v ON v.id = e.version_id WHERE v.store_id <> e.store_id"],
+    ["version → page", "SELECT COUNT(*) AS n FROM page_versions v JOIN pages p ON p.id = v.page_id WHERE p.store_id <> v.store_id"],
+    ["page → live version", "SELECT COUNT(*) AS n FROM pages p JOIN page_versions v ON v.id = p.published_version_id WHERE v.store_id <> p.store_id"],
+    ["store → home page", "SELECT COUNT(*) AS n FROM stores s JOIN pages p ON p.id = s.home_page_id WHERE p.store_id <> s.id"],
+    ["asset_refs → asset", "SELECT COUNT(*) AS n FROM asset_refs r JOIN assets a ON a.id = r.asset_id WHERE a.store_id <> r.store_id"],
+    ["media_files → asset", "SELECT COUNT(*) AS n FROM media_files f JOIN assets a ON a.id = f.asset_id WHERE a.store_id <> f.store_id"],
+    ["store_members → user", "SELECT COUNT(*) AS n FROM store_members m LEFT JOIN users u ON u.id = m.user_id WHERE u.id IS NULL"],
+  ];
+  for (const [label, q] of crossStore) {
+    const n = await count(conn, q);
+    if (n) report.problems.push(`cross-store reference ${label}: ${n} row(s)`);
+  }
+  const missingAsset = await count(conn, "SELECT COUNT(*) AS n FROM asset_refs r LEFT JOIN assets a ON a.id = r.asset_id WHERE a.id IS NULL");
+  if (missingAsset) report.info.push(`asset_refs naming a deleted asset: ${missingAsset}`);
+
+  const [markerRow] = await rows(conn, "SELECT value FROM settings WHERE `key` = 'tenancy_v1'");
+  let marker: { store1?: unknown } | null = null;
+  try {
+    marker = markerRow ? JSON.parse(String(markerRow.value)) : null;
+  } catch {
+    marker = null;
+  }
+  const store1 = await count(conn, "SELECT COUNT(*) AS n FROM stores WHERE id = ?", [LEGACY_STORE]);
+  if (!marker) report.problems.push("the tenancy_v1 marker is missing: the store #1 conversion has not finished (it runs at boot)");
+  else if (store1 && marker.store1 !== true) report.problems.push("store #1 exists but the tenancy_v1 marker says the install was empty");
+  else report.info.push(`tenancy_v1 marker present (${store1 ? "store #1 converted" : "empty install"})`);
+  // before the marker these are the conversion's backlog (info); after it, leftovers (problems)
+  const backlog = marker ? report.problems : report.info;
+  const legacyEnc = await count(conn, "SELECT COUNT(*) AS n FROM store_settings WHERE purpose_v = 0 AND encrypted = 1");
+  if (legacyEnc) backlog.push(`${legacyEnc} store_settings row(s) still in a v1 envelope (purpose_v = 0)`);
+  const legacyPlain = await count(conn, "SELECT COUNT(*) AS n FROM store_settings WHERE purpose_v = 0 AND encrypted = 0");
+  if (legacyPlain) report.info.push(`${legacyPlain} plain store_settings row(s) still marked purpose_v = 0`);
+  const leftovers = await count(conn, "SELECT COUNT(*) AS n FROM settings WHERE `key` IN (?)", [MOVED_KEYS]);
+  if (leftovers) backlog.push(`${leftovers} legacy store-level row(s) still in settings`);
+
+  const sealed = await rows(conn, "SELECT store_id, `key`, value FROM store_settings WHERE encrypted = 1 AND purpose_v = 2");
+  const push = (line: string) => (opts.requireEnvelopes ? report.problems : report.info).push(line);
+  envelopeLine("sealed store setting(s)", sealed, (r) => (e) => open(e, { store: String(r.store_id) }, `settings:${String(r.key)}`), push, (line) => report.info.push(line));
+
+  const dup = await rows(conn, "SELECT handle FROM stores WHERE handle IS NOT NULL GROUP BY handle HAVING COUNT(*) > 1");
+  if (dup.length) report.problems.push(`${dup.length} duplicate handle(s)`);
+  const handles = await rows(conn, "SELECT id, handle, status FROM stores");
+  const bad = handles.filter((h) => (h.handle === null ? h.status !== "purged" : !isHandle(String(h.handle))));
+  if (bad.length) report.problems.push(`${bad.length} store(s) with a missing or malformed handle: ${bad.slice(0, 10).map((r) => String(r.id)).join(", ")}`);
+  report.info.push(`${handles.length} store(s)`);
+}
+
+/** Run the tenancy dry run over a database (read-only transactions first, like runUpgradeCheck). */
+export async function runTenancyCheck(conn: Connection, opts: TenancyCheckOptions = {}): Promise<TenancyCheckReport> {
+  await conn.query("SET SESSION TRANSACTION READ ONLY");
+  const have = await tableNames(conn);
+  const report: TenancyCheckReport = { mode: have.has("stores") ? "tenancy" : "pre-tenancy", problems: [], info: [] };
+  report.problems.push(...tenantSetProblems());
+  if (report.mode === "pre-tenancy") await preTenancyChecks(conn, report, opts);
+  else await tenancyChecks(conn, have, report, opts);
+  return report;
+}
+
+/** True when the tenancy gate passes. */
+export const tenancyCheckOk = (r: TenancyCheckReport): boolean => r.problems.length === 0;
+
+/** Human summary lines (ids and counts only, never values). */
+export function tenancyCheckSummary(r: TenancyCheckReport): string[] {
+  return [`mode ${r.mode}: ${r.problems.length} problem(s)`, ...r.problems.map((p) => `  ✗ ${p}`), ...r.info.map((i) => `  · ${i}`)];
 }

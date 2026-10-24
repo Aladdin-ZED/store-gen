@@ -1,14 +1,20 @@
 /**
- * Runs once per server start, before the first request is handled (Node.js runtime only):
- *  - warns about missing/weak security configuration (never prints secret values); an unusable
- *    APP_SECRET is logged as an error, since every order fails with it
- *  - applies pending database migrations (serialised across processes with a DB lock)
- *  - purges expired sessions
- *  - one-time boot tasks in ONE process (withBootLock, src/lib/db/boot-lock.ts), in the background:
- *    published checksums in the v2 document form (marker setting doc_schema = 2), then the read-only
- *    Offers v2 upgrade dry run (`[upgrade-check]` lines) — they never delay serving
- * Failures are logged and never crash the process: the app keeps serving what it can and
- * the next start retries.
+ * Runs once per server start, before the first request is handled (Node.js runtime only). The boot order of
+ * docs/STORE-SAAS.md §H.4, never crashing the process (a failure is logged; the app keeps serving what it can and the
+ * next start retries):
+ *  1. configuration warnings (never secret values): auth (an unusable APP_SECRET is logged as an error, since every
+ *     order fails with it), addressing and the edge (§C.1, §H.7), the data directory, env aliases, the test context
+ *     (§E.4); the gate SHA the build was cleared by (§H.10)
+ *  2. pending database migrations (serialised across processes with a DB lock)
+ *  3. the media storage check: arrives with the filesystem backend (§G.2, src/lib/media/storage/check.ts); while
+ *     media lives in the database there is nothing to check
+ *  4. expired sessions purged
+ *  5. in ONE process (withBootLock), in the background so they never delay serving: published checksums, the store #1
+ *     conversion (tenancy_v1, with the pixel library migration inside it), the protected brands and flags seeds
+ *     (src/lib/db/boot-tasks.ts runBootTasks)
+ *  6. the read-only checks `[upgrade-check]` and `[tenancy-check]` (runBootChecks)
+ * Until the conversion has re-sealed them, store #1's legacy settings are read through openLegacy (ENGC-19), so
+ * serving during step 5 is safe.
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -17,6 +23,7 @@ export async function register(): Promise<void> {
   if (g.__codBooted) return;
   g.__codBooted = true;
 
+  // 1. configuration
   const { authConfigWarnings, isAppSecretConfigured } = await import("./lib/auth/config");
   // visitor IPs are hashed with APP_SECRET: without a usable one every order fails too, not only the
   // admin, so its line goes out at error level (hosts' log views filter and colour by level)
@@ -25,12 +32,19 @@ export async function register(): Promise<void> {
     if (secretBroken && warning.startsWith("APP_SECRET")) console.error(`[boot] ERROR: ${warning}`);
     else console.warn(`[boot] ${warning}`);
   }
+  const { platformConfigLines } = await import("./lib/db/boot-config");
+  for (const line of await platformConfigLines()) {
+    if (line.level === "error") console.error(`[boot] ERROR: ${line.text}`);
+    else if (line.level === "warn") console.warn(`[boot] ${line.text}`);
+    else console.info(`[boot] ${line.text}`);
+  }
 
   if (!process.env.DATABASE_URL) {
     console.error("[boot] DATABASE_URL is not set — skipping migrations.");
     return;
   }
 
+  // 2. migrations
   try {
     const { runMigrations } = await import("./lib/db/migrate");
     const result = await runMigrations();
@@ -46,6 +60,9 @@ export async function register(): Promise<void> {
     return;
   }
 
+  // 3. media storage check: none while media lives in the database (§G.2)
+
+  // 4. sessions
   try {
     const { purgeExpiredSessions } = await import("./lib/auth/session");
     const purged = await purgeExpiredSessions();
@@ -54,29 +71,16 @@ export async function register(): Promise<void> {
     console.error("[boot] session cleanup failed:", err instanceof Error ? err.message : err);
   }
 
+  // 5. and 6., in the background
   void bootTasks();
 }
 
-/** One-time tasks, run by the process that gets the boot lock (others skip them). Never throws. */
+/** Steps 5 and 6: the one-time tasks in the process that gets the boot lock, then the read-only checks. Never throws. */
 async function bootTasks(): Promise<void> {
   try {
-    const { withBootLock } = await import("./lib/db/boot-lock");
-    const { bootUpgradeCheck, syncPublishedChecksums } = await import("./lib/db/boot-tasks");
-    const res = await withBootLock(async () => {
-      const checksums = await syncPublishedChecksums();
-      if (!checksums.skipped) console.info(`[boot] published checksums in the v2 document form: ${checksums.updated} of ${checksums.pages} updated.`);
-      // pixel library migration (docs/OFFERS.md §A.6): one-time, idempotent, marker written last
-      try {
-        const { migratePixelLibrary } = await import("./lib/pixels/migrate.server");
-        const px = await migratePixelLibrary();
-        if (px.ran) console.info(`[boot] pixel library created: ${px.entries} pixel(s), ${px.tokensCopied} token(s) copied, ${px.testCodesDeactivated} test code(s) deactivated.`);
-      } catch (err) {
-        console.error("[boot] pixel library migration failed:", err instanceof Error ? err.message : err);
-      }
-      return true;
-    });
-    if (!res.ran) return;
-    await bootUpgradeCheck().catch((err) => console.error("[upgrade-check] failed:", err instanceof Error ? err.message : err));
+    const { runBootChecks, runBootTasks } = await import("./lib/db/boot-tasks");
+    const res = await runBootTasks();
+    if (res.ran) await runBootChecks();
   } catch (err) {
     console.error("[boot] one-time tasks failed:", err instanceof Error ? err.message : err);
   }
