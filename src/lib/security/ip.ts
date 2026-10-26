@@ -19,10 +19,16 @@
  * address: the origin of a managed Node.js app stays reachable directly (shared IP + Host header,
  * hosting sub-domain), so the header alone proves nothing.
  *
+ * Store hosts in S mode reach the app through the Store Gen Worker (docs/STORE-SAAS.md §C.2, §C.5): when its
+ * key and timestamp verify (edgeVerified), the Worker's x-sg-ip (Cloudflare's CF-Connecting-IP as the Worker
+ * saw it) is the visitor and wins over every rule above. An x-sg-ip without a verified key is ignored, here
+ * and in the proxy, which deletes it; handlers never rely on that deletion (D18).
+ *
  * Limits, the IP blocklist and velocity signals key on rateKeyIp(): an IPv6 client controls its whole
  * /64 (2^64 source addresses), so per-address buckets would be free to rotate.
  */
 import { BlockList, isIP } from "node:net";
+import { edgeClientIp } from "@/lib/edge/host";
 import { CLOUDFLARE_IPV4, CLOUDFLARE_IPV6 } from "./cloudflare-ips";
 
 /**
@@ -217,13 +223,15 @@ export function clientIp(headers: Headers): string {
   return resolveClientIp(headers).ip;
 }
 
-function resolveClientIp(headers: Headers): { ip: string; viaCloudflare: boolean } {
+function resolveClientIp(headers: Headers): { ip: string; viaCloudflare: boolean; viaEdge: boolean } {
+  const edge = canonicalIp(edgeClientIp(headers));
+  if (edge) return { ip: edge, viaCloudflare: true, viaEdge: true };
   const hop = proxyHop(headers);
   if (process.env.BEHIND_CLOUDFLARE === "1" && hop && isCloudflareIp(hop)) {
     const cf = canonicalIp(headers.get("cf-connecting-ip"));
-    if (cf) return { ip: cf, viaCloudflare: true };
+    if (cf) return { ip: cf, viaCloudflare: true, viaEdge: false };
   }
-  return { ip: hop ?? "0.0.0.0", viaCloudflare: false };
+  return { ip: hop ?? "0.0.0.0", viaCloudflare: false, viaEdge: false };
 }
 
 /**
@@ -248,8 +256,10 @@ export interface ClientIpReport {
   trustedHops: number;
   /** what clientIp() returns for this request */
   clientIp: string;
-  /** BEHIND_CLOUDFLARE=1 and the used hop is a Cloudflare edge: clientIp is CF-Connecting-IP */
+  /** BEHIND_CLOUDFLARE=1 and the used hop is a Cloudflare edge: clientIp is CF-Connecting-IP (also true via the Worker) */
   viaCloudflare: boolean;
+  /** the Store Gen Worker verified (store hosts in S mode): clientIp is its x-sg-ip */
+  viaEdge: boolean;
 }
 
 export function clientIpReport(headers: Headers): ClientIpReport {
@@ -271,5 +281,6 @@ export function clientIpReport(headers: Headers): ClientIpReport {
     trustedHops: trustedProxyHops(),
     clientIp: resolved.ip.slice(0, 64),
     viaCloudflare: resolved.viaCloudflare,
+    viaEdge: resolved.viaEdge,
   };
 }

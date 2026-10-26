@@ -103,15 +103,16 @@ const INVALID = { cls: "invalid", label: null } as const;
 /**
  * The §C.2 table. Order matters: the platform and console hosts first (at launch STORE_ROOT_DOMAIN is the
  * platform apex), legacy hosts only when reached directly, then store subdomains (edge only), then the rest.
- * Without PLATFORM_URL / PUBLIC_URL outside production, a local host (localhost, an IP) is the platform, so
- * `next dev` works with no env; in production an unset platform host fails closed (`foreign`).
+ * Outside production a local host (localhost, 127.0.0.1, a LAN address) is the platform whatever PLATFORM_URL
+ * says, so `next dev` works with no env and with a production PLATFORM_URL copied into .env.local; in
+ * production an unset platform host fails closed (`foreign`) and an IP literal is `invalid`.
  */
 export function classifyHost(host: string, via: HostVia): Omit<EffectiveHost, "host" | "via" | "workerVersion"> {
   const h = normalizeHost(host);
   if (!h) return INVALID;
   const platform = platformHost();
   if (platform !== null && h === platform) return { cls: "platform", label: null };
-  if (platform === null && !IS_PROD && isInternalHost(h)) return { cls: "platform", label: null };
+  if (!IS_PROD && via === "direct" && isInternalHost(h)) return { cls: "platform", label: null };
   const admin = adminHostName();
   if (admin !== null && h === admin) return { cls: "console", label: null };
   if (via === "direct" && legacyPlatformHosts().has(h)) return { cls: "legacy", label: null };

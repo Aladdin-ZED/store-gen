@@ -7,6 +7,11 @@ import "server-only";
  * A catalog-item upsell (`upsell.item`, docs/OFFERS.md §G.3–G.4) records the item, its own unit (name,
  * short, sku: the Sheets Variante / SKU / Articles cells) and, when the item has options, that they are
  * still to be confirmed by phone: "… + [UPSELL] 1 × Sérum (options à confirmer)".
+ *
+ * In the order's store (docs/STORE-SAAS.md §E.3, ORD-17): the public resolver `resolveUpsellOrder` finds the
+ * order's store from its id, and every read and write here is that store's; the network budget is the store's
+ * (`s:<sid>:upsell:ip:<hash>`, 20 per 10 min). A test order (D54) takes its upsell like any order but, like the
+ * order itself, never reaches the stats or the sheet.
  */
 import { timingSafeEqual } from "node:crypto";
 import { and, eq, notInArray, sql } from "drizzle-orm";
@@ -18,9 +23,11 @@ import type { PageDoc } from "@/lib/page/schema";
 import { hashIp } from "@/lib/security/crypto";
 import { rateLimit } from "@/lib/security/rate-limit";
 import { bumpOrderStats } from "@/lib/stats";
-import { versionDoc } from "./resolve";
-import { upsellTokenHash } from "./create";
+import { byId } from "@/lib/tenancy/sql";
+import type { WriteScope } from "@/lib/tenancy/types";
+import { storeBucketKey, upsellTokenHash } from "./create";
 import { logError } from "./log";
+import { versionDoc } from "./resolve";
 
 export type UpsellResponse =
   | { ok: true; orderId: string; total: number; currency: string }
@@ -38,18 +45,19 @@ export interface UpsellResult {
   retryAfter?: number;
 }
 
-export async function acceptUpsell(input: { orderId: string; token: string }, ctx: { ip: string }): Promise<UpsellResult> {
-  const gate = await rateLimit(`upsell:ip:${hashIp(ctx.ip)}`, 20, 600);
+/** The upsell of `input.orderId`, an order of the scope's store (the public scope of `resolveUpsellOrder`). */
+export async function acceptUpsell(scope: WriteScope, input: { orderId: string; token: string }, ctx: { ip: string }): Promise<UpsellResult> {
+  const gate = await rateLimit(storeBucketKey(scope, "upsell:ip", hashIp(ctx.ip)), 20, 600);
   if (!gate.ok) return { response: { ok: false, error: "rate_limited" }, sync: false, retryAfter: gate.retryAfter };
 
-  const [order] = await db.select().from(orders).where(eq(orders.id, input.orderId)).limit(1);
+  const [order] = await db.select().from(orders).where(byId(orders, scope, input.orderId)).limit(1);
   const hash = upsellTokenHash(input.token);
   if (!order?.upsellTokenHash || !sameHash(order.upsellTokenHash, hash) || order.items.upsell) {
     return { response: { ok: false, error: "invalid" }, sync: false };
   }
   // the call center already closed this order (cancelled / fake): nothing to add to
   if (CLOSED.has(order.status)) return { response: { ok: false, error: "expired" }, sync: false };
-  const doc = order.versionId ? await versionDoc(order.versionId) : null;
+  const doc = order.versionId ? await versionDoc(scope, order.versionId) : null;
   const offer = doc?.offers.upsell;
   if (!doc || !offer?.enabled) return { response: { ok: false, error: "invalid" }, sync: false };
 
@@ -68,17 +76,18 @@ export async function acceptUpsell(input: { orderId: string; token: string }, ct
       sheetStatus: sql`IF(${orders.sheetStatus} = 'disabled', 'disabled', 'pending')`,
       updatedAt: new Date(),
     })
-    .where(and(eq(orders.id, order.id), eq(orders.upsellTokenHash, hash), notInArray(orders.status, [...CLOSED])));
+    .where(and(byId(orders, scope, order.id), eq(orders.upsellTokenHash, hash), notInArray(orders.status, [...CLOSED])));
   const head = (Array.isArray(res) ? res[0] : res) as { affectedRows?: number };
   if (head?.affectedRows !== 1) return { response: { ok: false, error: "invalid" }, sync: false }; // lost a race
 
-  const honeypot = order.sheetStatus === "disabled";
-  if (!honeypot) {
-    await bumpOrderStats(order.pageId, order.createdAt, { revenue: price }).catch((err) => logError("orders:upsell-stats", err));
+  // honeypot rows (sheet disabled) and test orders (D54) stay out of the stats and the sheet
+  const quiet = order.sheetStatus === "disabled" || order.isTest;
+  if (!quiet) {
+    await bumpOrderStats(scope, order.pageId, order.createdAt, { revenue: price }).catch((err) => logError("orders:upsell-stats", err));
   }
   return {
     response: { ok: true, orderId: order.id, total: round2(Number(order.total) + price), currency: order.currency },
-    sync: !honeypot,
+    sync: !quiet,
   };
 }
 

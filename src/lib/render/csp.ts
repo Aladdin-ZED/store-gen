@@ -48,6 +48,11 @@ export interface LandingCspInput {
    * their public API path (PUBLIC_API_PATH) is allowed, never the whole origin
    */
   apiOrigins?: readonly string[];
+  /**
+   * origins media is served from when it is not the document's own (S / C modes: the platform host, R-D11,
+   * docs/STORE-SAAS.md §C.9); added to img-src and media-src. P-mode documents load /media/* from 'self'.
+   */
+  mediaOrigins?: readonly string[];
   /** Cloudflare Turnstile widget embedded */
   turnstile?: boolean;
   /** live pages: add upgrade-insecure-requests (off for http://localhost development) */
@@ -139,6 +144,8 @@ export function buildLandingCsp(input: LandingCspInput): string {
     for (const h of PIXEL_HOSTS[key].img) img.add(h);
     for (const h of PIXEL_HOSTS[key].connect) connect.add(h);
   }
+  const media = [...new Set((input.mediaOrigins ?? []).filter((o) => ORIGIN.test(o)))];
+  for (const o of media) img.add(o);
   const api = [...new Set((input.apiOrigins ?? []).filter((o) => ORIGIN.test(o)))].map(publicApiSource);
   for (const s of api) connect.add(s);
   if (input.turnstile) {
@@ -157,7 +164,7 @@ export function buildLandingCsp(input: LandingCspInput): string {
     ["img-src", [...img]],
     ["font-src", ["'self'"]],
     ["connect-src", [...connect]],
-    ["media-src", ["'self'"]],
+    ["media-src", ["'self'", ...media]],
     ["frame-src", input.turnstile ? [TURNSTILE_ORIGIN] : ["'none'"]],
     ["worker-src", ["'none'"]],
     ["manifest-src", ["'self'"]],
@@ -177,16 +184,16 @@ export function buildLandingCsp(input: LandingCspInput): string {
  * Narrows a stored live policy to the origin(s) the document is served from: in connect-src and
  * form-action, 'self' becomes "<origin>/api/public/" for each origin. A same-origin script — any
  * sub-resource of a pixel loader — can still call the public API, but can no longer fetch, beacon
- * or post to /admin/**, /api/admin/** or anything else the admin's cookies unlock. Every other
+ * or post to /admin/**, /api/admin/**, /app/** or anything else the viewer's cookies unlock. Every other
  * directive is copied unchanged. Applies to policies stored before this rule too (served per request).
  *
- * `origins`: where the browser may be showing the document (PUBLIC_URL's origin, the request's own
- * host). With none usable the policy is returned as is: a page that cannot reach its own API would
- * silently stop taking orders.
+ * `origins`: where the browser may be showing the document (the platform origin, the request's own
+ * host, the store's own host behind the Worker). With none usable (a request whose Host is no host), the
+ * same-origin part is dropped rather than kept (docs/STORE-SAAS.md §C.9, SEC-2: never a bare 'self'): such a
+ * document cannot post, which is the safe failure.
  */
 export function scopeToPublicApi(csp: string, origins: readonly string[]): string {
   const sources = [...new Set(origins.map((o) => o.toLowerCase()).filter((o) => ORIGIN.test(o)))].map(publicApiSource);
-  if (!sources.length) return csp;
   return csp
     .split(";")
     .map((part) => part.trim())
@@ -195,7 +202,8 @@ export function scopeToPublicApi(csp: string, origins: readonly string[]): strin
       const [name = "", ...values] = part.split(/\s+/);
       const isSelf = (v: string) => v.toLowerCase() === "'self'";
       if (!SCOPED_DIRECTIVES.has(name.toLowerCase()) || !values.some(isSelf)) return part;
-      return [name, ...new Set([...sources, ...values.filter((v) => !isSelf(v))])].join(" ");
+      const kept = [...new Set([...sources, ...values.filter((v) => !isSelf(v))])];
+      return [name, ...(kept.length ? kept : ["'none'"])].join(" ");
     })
     .join("; ");
 }

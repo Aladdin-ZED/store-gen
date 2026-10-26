@@ -18,6 +18,7 @@
  */
 import { createHash } from "node:crypto";
 import { createElement, type ReactElement } from "react";
+import type { RenderHookFields } from "@/landing/addons/types";
 import { createRenderContext, type AssetResolver, type LandingRenderContext, type LegalKind, type StoreInfo } from "@/landing/context";
 import { LandingDocument, LegalDocument, ThankYouDocument, variantChunksIn, type DocumentProps, type DocumentUrls, type RenderedCss } from "@/landing/document";
 import { renderPageBody } from "@/landing/page";
@@ -30,7 +31,7 @@ import { buildLandingCsp, originOf } from "./csp";
 
 export type { BlockingIssue } from "./caps";
 
-export interface RenderHtmlOptions {
+export interface RenderHtmlOptions extends RenderHookFields {
   mode: "live" | "export";
   assets: AssetResolver;
   /** public page key baked into the runtime config */
@@ -58,6 +59,10 @@ export interface RenderHtmlOptions {
    * the version the shopper saw). Live publishes only; previews and exports leave it out.
    */
   ver?: string;
+  /** false: no pixel on the page nor in its CSP (test renders, D54) */
+  pixels?: boolean;
+  /** origins media is loaded from besides 'self' (S / C modes: the platform host, docs/STORE-SAAS.md §C.9) */
+  mediaOrigins?: readonly string[];
 }
 
 export interface LegalHtmlOptions {
@@ -75,6 +80,8 @@ export interface LegalHtmlOptions {
   qa?: boolean;
   /** add upgrade-insecure-requests (live only); default: production */
   upgradeInsecureRequests?: boolean;
+  /** origins media is loaded from besides 'self' (S / C modes) */
+  mediaOrigins?: readonly string[];
 }
 
 export interface RenderIssue {
@@ -237,11 +244,14 @@ interface FinishInput {
   page: "landing" | "thanks" | "legal";
   /** the runtime may load pixels / call the API (false: offline previews, legal documents) */
   online: boolean;
+  /** the page fires the doc's pixels (false: test renders, a thank-you page without the browser Purchase) */
+  pixels: boolean;
   doc: PageDoc;
   origin?: string;
   endpoints: Record<string, string | undefined>;
   turnstileSiteKey?: string;
   upgradeInsecureRequests?: boolean;
+  mediaOrigins?: readonly string[];
 }
 
 /** Fonts referenced by the inlined @font-face rules ("fonts/<family>/<file>.woff2"). */
@@ -259,9 +269,10 @@ function finish(html: string, input: FinishInput, issues: RenderIssue[]): Render
     mode: input.mode,
     scriptHashes: scripts,
     styleHashes: styles,
-    // exactly the platforms the document loads (none offline / in previews)
-    pixels: input.online ? trackingFlags(input.doc.tracking) : {},
+    // exactly the platforms the document loads (none offline / in previews / on test renders)
+    pixels: input.online && input.pixels ? trackingFlags(input.doc.tracking) : {},
     apiOrigins: [...new Set(apiOrigins)],
+    mediaOrigins: input.mediaOrigins,
     turnstile: input.page === "landing" && input.online && !!turnstileKeyFor("landing", input.mode, input.turnstileSiteKey),
     // only when the site is really served over https (Hostinger) — never for `npm run start` on http://localhost
     upgradeInsecureRequests:
@@ -285,11 +296,13 @@ function finishPage(html: string, doc: PageDoc, opts: RenderHtmlOptions, page: "
       mode: opts.mode,
       page,
       online: (opts.runtimeMode ?? opts.mode) !== "preview",
+      pixels: opts.pixels !== false && !(page === "thanks" && opts.purchaseInBrowser === false),
       doc,
       origin: opts.origin,
       endpoints: { ...opts.urls.endpoints },
       turnstileSiteKey: opts.turnstileSiteKey,
       upgradeInsecureRequests: opts.upgradeInsecureRequests,
+      mediaOrigins: opts.mediaOrigins,
     },
     issues,
   );
@@ -305,6 +318,10 @@ function documentProps(doc: PageDoc, ctx: LandingRenderContext, opts: RenderHtml
     turnstileSiteKey: opts.turnstileSiteKey,
     qa: opts.qa,
     ver: opts.mode === "live" ? opts.ver : undefined,
+    // the render hook (§H.13): passed only when set, so a document without it renders today's bytes
+    ...(opts.addons ? { addons: opts.addons } : {}),
+    ...(opts.purchaseInBrowser === false ? { purchaseInBrowser: false } : {}),
+    ...(opts.pixels === false ? { pixels: false } : {}),
   };
 }
 
@@ -343,5 +360,9 @@ export async function renderLegalHtml(doc: PageDoc, kind: LegalKind, opts: Legal
   });
   const updatedAt = opts.updatedAt && Number.isFinite(Date.parse(opts.updatedAt)) ? new Date(opts.updatedAt).toISOString() : ctx.now;
   const html = withDoctype(markup(createElement(LegalDocument, { doc, ctx, kind, updatedAt, qa: opts.qa })));
-  return finish(html, { mode: opts.mode, page: "legal", online: false, doc, endpoints: {}, upgradeInsecureRequests: opts.upgradeInsecureRequests }, []);
+  return finish(
+    html,
+    { mode: opts.mode, page: "legal", online: false, pixels: false, doc, endpoints: {}, upgradeInsecureRequests: opts.upgradeInsecureRequests, mediaOrigins: opts.mediaOrigins },
+    [],
+  );
 }
