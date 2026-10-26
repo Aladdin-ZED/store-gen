@@ -5,6 +5,7 @@
  */
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AssetRowLike, StoreInfo } from "@/landing/context";
+import type { CheckContextData } from "@/lib/editor/check-context";
 import type { EditorBootstrap, EditorUser, StoreHealth } from "@/lib/editor/types";
 import { buildTheme, type BuiltTheme } from "@/lib/theme";
 import { useEditor } from "./context";
@@ -12,6 +13,8 @@ import { useEditor } from "./context";
 export interface BuilderEnv {
   store: StoreInfo;
   storeHealth: StoreHealth;
+  /** the checklist's store facts from the server preload (LAN Q15) */
+  check: CheckContextData;
   user: EditorUser;
   ai: EditorBootstrap["ai"];
 }

@@ -14,13 +14,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { pixelUsageAction, replacePixelAction, type PixelPageUse, type ReplacePageResult } from "@/app/admin/(panel)/settings/pixels/actions";
+import { pixelUsageAction, replacePixelAction, type PixelPageUse, type ReplacePageResult } from "@/lib/pixels/actions";
 import { ID_HELP } from "@/lib/pixels/form";
 import { PIXEL_ID_RE, normalizePixelId } from "@/lib/pixels/ids";
 import { pixelLabel, type LibraryPixel, type PixelLibraryView } from "@/lib/pixels/library";
 import { cn } from "@/lib/utils";
 import { runAction } from "../lib/action-result";
 import { Field, TextInput } from "../settings/form-kit";
+import { useStore } from "../shell/store-context";
 import { MaskedId, PLATFORM_META, PlatformMark } from "./parts";
 
 const NEW = "__new__";
@@ -265,6 +266,7 @@ const DRAFT_TEXT: Record<ReplacePageResult["draft"], string> = { ok: "Draft upda
 const LIVE_TEXT: Record<ReplacePageResult["live"], string> = { ok: "Live updated", unchanged: "Live unchanged", not_live: "Not live", error: "Live not updated", skipped: "Live at next publish" };
 
 function Results({ mode, label, done, onClose }: { mode: "replace" | "remove"; label: string; done: { results: ReplacePageResult[]; reexport: { pageId: string; name: string; exports: number }[] }; onClose: () => void }) {
+  const storeView = useStore();
   const problems = done.results.filter((r) => r.draft === "conflict" || r.live === "error");
   return (
     <div className="grid">
@@ -284,7 +286,7 @@ function Results({ mode, label, done, onClose }: { mode: "replace" | "remove"; l
       <ul className="grid max-h-80 gap-1 overflow-y-auto px-6 py-4 adm-scroll">
         {done.results.map((r) => (
           <li key={r.pageId} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg px-2 py-2 odd:bg-foreground/[0.025]">
-            <Link href={`/admin/pages/${r.pageId}/edit`} className="min-w-0 truncate text-sm font-medium hover:underline" dir="auto">
+            <Link href={storeView.href(`/pages/${r.pageId}/edit`)} className="min-w-0 truncate text-sm font-medium hover:underline" dir="auto">
               {r.name || "Page"}
             </Link>
             <span className="flex flex-wrap items-center gap-1.5 text-[0.72rem]">

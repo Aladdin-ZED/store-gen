@@ -19,6 +19,7 @@ import { Segmented } from "../common/segmented";
 import { StatusChip } from "../common/status-chip";
 import { RelativeTime } from "../common/time";
 import { runAction, type ActionResult } from "../lib/action-result";
+import { useStore } from "../shell/store-context";
 import { dateTime } from "../lib/format";
 import { VERSION_KIND_META } from "../lib/status";
 import { useQueryState } from "../lib/use-query-state";
@@ -84,6 +85,7 @@ export function HistoryView({
   timeZone: string;
 }) {
   const router = useRouter();
+  const storeView = useStore();
   const query = useQueryState();
   const kind = query.get("starred") ? "starred" : query.get("kind") || "all";
   const pageId = query.get("page_id");
@@ -117,7 +119,7 @@ export function HistoryView({
 
   const duplicate = async (v: VersionItem) => {
     const res = await runAction(actions.duplicate(v.id), { success: "New draft page created from this version" });
-    if (res) router.push(`/admin/pages?focus=${res.id}`);
+    if (res) router.push(storeView.href(`/pages?focus=${res.id}`));
   };
 
   const filtered = kind !== "all" || !!pageId;
@@ -171,7 +173,7 @@ export function HistoryView({
             actions={
               canWrite ? (
                 <Button asChild variant="brand" className="h-10 rounded-full px-5">
-                  <Link href="/admin/generate">
+                  <Link href={storeView.href("/generate")}>
                     <SparklesIcon />
                     Generate a page
                   </Link>
@@ -233,7 +235,7 @@ export function HistoryView({
           pendingLabel="Restoring…"
           onConfirm={async () => {
             const res = await runAction(actions.restore(restoring.id), { success: "Version restored as the draft" });
-            if (res) router.push(`/admin/pages/${res.pageId}/edit`);
+            if (res) router.push(storeView.href(`/pages/${res.pageId}/edit`));
             return !!res;
           }}
         />
@@ -266,6 +268,7 @@ function VersionCard({
   style?: React.CSSProperties;
 }) {
   const meta = VERSION_KIND_META[v.kind] ?? { label: v.kind, tone: "neutral" as const };
+  const storeView = useStore();
   const [copying, setCopying] = useState(false);
   return (
     <article className="adm-surface adm-lift adm-rise group/card flex flex-col overflow-hidden p-2" style={style}>
@@ -340,14 +343,14 @@ function VersionCard({
               )}
               {canWrite && v.pageStatus !== "archived" && (
                 <DropdownMenuItem asChild>
-                  <Link href={`/admin/pages/${v.pageId}/edit`}>
+                  <Link href={storeView.href(`/pages/${v.pageId}/edit`)}>
                     <PencilIcon /> Open page in builder
                   </Link>
                 </DropdownMenuItem>
               )}
               {v.live && (
                 <DropdownMenuItem asChild>
-                  <a href={`/${v.pageSlug}`} target="_blank" rel="noopener noreferrer">
+                  <a href={storeView.live(v.pageSlug)} target="_blank" rel="noopener noreferrer">
                     <ArrowUpRightIcon /> Open live page
                   </a>
                 </DropdownMenuItem>

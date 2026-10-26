@@ -2,23 +2,35 @@ import "server-only";
 /**
  * Upload pipeline: sniff → decode (EXIF auto-rotate, sRGB, ALL metadata stripped by re-encoding) →
  * master ≤ 2048 px → responsive WebP/AVIF variants → palette → subject analysis (focal point,
- * subject box, heads/hands — ./focus-analyze.ts) → chunked storage in one transaction.
+ * subject box, heads/hands — ./focus-analyze.ts) → quota charge → chunked storage in one transaction.
  *
- * Asset id = first 32 hex of sha256(master WebP bytes): identical uploads dedupe to the same asset.
+ * Multi-tenant (docs/STORE-SAAS.md §G.4, D21; TENANCY-MAP MED-01 … MED-04):
+ *  - asset id = HMAC(master bytes, "media-id:<storeId>")[:32] (./ids.ts): identical uploads dedupe to the same
+ *    asset inside the store only; another store's identical bytes make another asset, so nothing answers
+ *    "deduped" (or faster) because a different store holds the file;
+ *  - a cutout's `sourceAssetId` is kept only when it is an asset of the same store;
+ *  - the files' total size (`stored_bytes`: master + variants + AVIF) is charged to the store's quota before the
+ *    transaction and refunded when it fails or a concurrent upload of the same content won the race;
+ *  - the sharp gate is shared fairly: at most one job running and one waiting per store inside the process-wide
+ *    2 running + 4 waiting.
  */
-import { createHash } from "node:crypto";
 import sharp, { type Metadata, type Sharp, type SharpOptions } from "sharp";
-import { eq } from "drizzle-orm";
 import { db, pool } from "@/lib/db/client";
 import { assets, type AssetVariant } from "@/lib/db/schema";
+import { byId } from "@/lib/tenancy/sql";
+import type { WriteScope } from "@/lib/tenancy/types";
 import { extractPalette, type ExtractedPalette } from "@/lib/theme";
 import { MEDIA_WIDTHS, MIME, variantKey } from "./keys";
 import { ASSET_ID_RE, VIDEO_MIME, getAsset, videoKey, type AssetRecord } from "./assets";
 import { MediaError } from "./errors";
+import { acquireMediaGate, releaseMediaGate } from "./gate";
+import { forgetMisses, insertStoreFiles, storedBytesOf } from "./files";
 import { FOCUS_VERSION, type AssetFocus } from "./focus";
 import { analyzeImageFocus } from "./focus-analyze";
+import { mediaAssetId } from "./ids";
+import { chargeMediaBytes, type MediaStore } from "./quota";
 import { sniff } from "./sniff";
-import { insertFiles, type FileToStore } from "./store";
+import type { FileToStore } from "./store";
 import { inspectVideo } from "./video";
 
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
@@ -28,14 +40,11 @@ const MIN_SIDE = 32;
 const MASTER_MAX = 2048;
 /** AVIF encoding is slow: skip it above this width (WebP covers the largest sizes). */
 const AVIF_MAX_WIDTH = 1440;
-const MAX_CONCURRENT = 2;
-/** jobs allowed to wait for a slot; beyond that uploads fail fast with "busy" (each waiter holds its file) */
-export const MAX_WAITING = 4;
 
 export interface ProcessOptions {
   /** background-removed product image (from the in-browser AI); transparent margins are trimmed */
   cutout?: boolean;
-  /** asset this one was derived from (e.g. the original photo of a cutout) */
+  /** asset this one was derived from (e.g. the original photo of a cutout); kept only when it is the store's own */
   sourceAssetId?: string | null;
   createdBy?: string | null;
   tags?: string[];
@@ -54,36 +63,13 @@ export interface UploadResult {
 /*
  * libvips sizes each operation's thread pool from the CPU count the OS reports, which on shared
  * hosting is the whole server's, not the plan's 2 cores. Two threads per operation (and at most
- * MAX_CONCURRENT operations) fit the plan; the operation cache stays in memory only (no open file
+ * MAX_CONCURRENT operations, ./gate.ts) fit the plan; the operation cache stays in memory only (no open file
  * handles kept between uploads). Both settings are process-wide.
  */
 sharp.concurrency(2);
 sharp.cache({ memory: 64, files: 0 });
 
-declare global {
-  var __codMediaGate: { active: number; waiters: (() => void)[] } | undefined;
-}
-const gate = () => (globalThis.__codMediaGate ??= { active: 0, waiters: [] });
-
-async function acquire(): Promise<void> {
-  const g = gate();
-  if (g.active < MAX_CONCURRENT) {
-    g.active++;
-    return;
-  }
-  if (g.waiters.length >= MAX_WAITING) throw new MediaError("busy");
-  await new Promise<void>((resolve) => g.waiters.push(resolve)); // slot handed over by release()
-}
-function release(): void {
-  const g = gate();
-  const next = g.waiters.shift();
-  if (next) next();
-  else g.active--;
-}
-
 /* ------------------------------------------------------------------ */
-
-const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 
 const cleanName = (name: string) =>
   name
@@ -206,12 +192,12 @@ async function focusOf(img: RawImage, alpha: boolean): Promise<AssetFocus | null
 }
 
 /** A re-upload of an asset analysed by an older algorithm (or never): refresh its focus in place. */
-async function refreshFocus(existing: AssetRecord, img: RawImage, alpha: boolean): Promise<AssetRecord> {
+async function refreshFocus(scope: WriteScope, existing: AssetRecord, img: RawImage, alpha: boolean): Promise<AssetRecord> {
   if (existing.kind !== "image" || (existing.focusVersion ?? 0) >= FOCUS_VERSION) return existing;
   const focus = await focusOf(img, alpha);
   if (!focus) return existing;
   try {
-    await db.update(assets).set({ focus, focusVersion: FOCUS_VERSION }).where(eq(assets.id, existing.id));
+    await db.update(assets).set({ focus, focusVersion: FOCUS_VERSION }).where(byId(assets, scope, existing.id));
     return { ...existing, focus, focusVersion: FOCUS_VERSION };
   } catch {
     return existing;
@@ -236,26 +222,38 @@ interface NewAsset {
 const isDuplicateKey = (err: unknown) =>
   typeof err === "object" && err !== null && (err as { code?: string }).code === "ER_DUP_ENTRY";
 
-async function persist(a: NewAsset, originalName: string, opts: ProcessOptions): Promise<UploadResult> {
+/** The upload's store: the seam's write scope and what the quota charge needs of the store's row. */
+interface Target {
+  scope: WriteScope;
+  store: MediaStore;
+}
+
+async function persist(t: Target, a: NewAsset, originalName: string, opts: ProcessOptions): Promise<UploadResult> {
   const tags = [...new Set([...(opts.tags ?? []), ...(opts.cutout ? ["cutout"] : [])])]
     .map((t) => t.trim().slice(0, 40))
     .filter(Boolean)
     .slice(0, 20);
-  const source = opts.sourceAssetId && ASSET_ID_RE.test(opts.sourceAssetId) ? opts.sourceAssetId : null;
+  // MED-02: only an asset of the same store can be the source (another store's id reads as missing)
+  const source = opts.sourceAssetId && ASSET_ID_RE.test(opts.sourceAssetId) && (await getAsset(t.scope, opts.sourceAssetId)) ? opts.sourceAssetId : null;
+  const storedBytes = storedBytesOf(a.files);
+  // charged before anything is written (a QuotaError writes nothing); every failure below gives it back
+  const refund = await chargeMediaBytes(t.scope, t.store, storedBytes);
   const conn = await pool().getConnection();
   try {
     await conn.beginTransaction();
     await conn.execute(
-      `INSERT INTO assets (id, kind, mime, width, height, bytes, alpha, dominant, palette, variants,
+      `INSERT INTO assets (id, store_id, kind, mime, width, height, bytes, stored_bytes, alpha, dominant, palette, variants,
          original_name, source_asset_id, tags, focus, focus_version, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         a.id,
+        t.scope.storeId,
         a.kind,
         a.mime,
         a.width,
         a.height,
         a.bytes,
+        storedBytes,
         a.alpha ? 1 : 0,
         a.dominant,
         a.palette ? JSON.stringify(a.palette) : null,
@@ -269,25 +267,27 @@ async function persist(a: NewAsset, originalName: string, opts: ProcessOptions):
         new Date(),
       ],
     );
-    await insertFiles(conn, a.id, a.files);
+    await insertStoreFiles(conn, t.scope, a.id, a.files);
     await conn.commit();
   } catch (err) {
     await conn.rollback().catch(() => undefined);
+    await refund();
     if (isDuplicateKey(err)) {
-      // a concurrent upload of the same content won the race
-      const existing = await getAsset(a.id);
+      // a concurrent upload of the same content in this store won the race (ids are per store, never another's)
+      const existing = await getAsset(t.scope, a.id);
       if (existing) return { asset: existing, deduped: true };
     }
     throw err;
   } finally {
     conn.release();
   }
-  const stored = await getAsset(a.id);
+  forgetMisses(a.files.map((f) => f.key));
+  const stored = await getAsset(t.scope, a.id);
   if (!stored) throw new Error(`asset ${a.id} vanished after insert`);
   return { asset: stored, deduped: false };
 }
 
-async function processImage(file: Buffer, format: "jpeg" | "png" | "webp" | "avif", originalName: string, opts: ProcessOptions): Promise<UploadResult> {
+async function processImage(t: Target, file: Buffer, format: "jpeg" | "png" | "webp" | "avif", originalName: string, opts: ProcessOptions): Promise<UploadResult> {
   if (file.length > MAX_IMAGE_BYTES) throw new MediaError("too_large");
   let img = await decodeImage(file, format);
   let alpha = hasTransparency(img);
@@ -306,9 +306,9 @@ async function processImage(file: Buffer, format: "jpeg" | "png" | "webp" | "avi
   }
 
   const masterWebp = await encode(img, alpha, img.width, "webp");
-  const id = sha256(masterWebp).slice(0, 32);
-  const existing = await getAsset(id);
-  if (existing) return { asset: await refreshFocus(existing, img, alpha), deduped: true };
+  const id = mediaAssetId(t.scope, masterWebp);
+  const existing = await getAsset(t.scope, id);
+  if (existing) return { asset: await refreshFocus(t.scope, existing, img, alpha), deduped: true };
 
   const widths = [...MEDIA_WIDTHS.filter((w) => w < img.width), img.width];
   const variants: AssetVariant[] = [];
@@ -331,6 +331,7 @@ async function processImage(file: Buffer, format: "jpeg" | "png" | "webp" | "avi
 
   const [{ palette, dominant }, focus] = await Promise.all([paletteOf(img, alpha), focusOf(img, alpha)]);
   return persist(
+    t,
     {
       id,
       kind: "image",
@@ -350,14 +351,15 @@ async function processImage(file: Buffer, format: "jpeg" | "png" | "webp" | "avi
   );
 }
 
-async function processVideo(file: Buffer, format: "mp4" | "webm", originalName: string, opts: ProcessOptions): Promise<UploadResult> {
+async function processVideo(t: Target, file: Buffer, format: "mp4" | "webm", originalName: string, opts: ProcessOptions): Promise<UploadResult> {
   if (file.length > MAX_VIDEO_BYTES) throw new MediaError("too_large");
   const info = inspectVideo(file, format);
-  const id = sha256(info.data).slice(0, 32);
-  const existing = await getAsset(id);
+  const id = mediaAssetId(t.scope, info.data);
+  const existing = await getAsset(t.scope, id);
   if (existing) return { asset: existing, deduped: true };
   const key = videoKey(id, info.width, format);
   return persist(
+    t,
     {
       id,
       kind: "video",
@@ -380,19 +382,21 @@ async function processVideo(file: Buffer, format: "mp4" | "webm", originalName: 
 
 /**
  * Validate, process and store an uploaded image (JPEG/PNG/WebP/AVIF ≤ 15 MB, ≤ 40 MP) or video
- * (MP4/WebM ≤ 25 MB). Throws MediaError for user-facing rejections ("busy" when the processing
- * queue is full). Video bytes are scrubbed in place: hand over a buffer nothing else reads.
+ * (MP4/WebM ≤ 25 MB) in the scope's store. Throws MediaError for user-facing rejections ("busy" when the
+ * processing queue, or the store's share of it, is full) and QuotaError when the store's media quota (or the
+ * budget pending stores share) is full. Video bytes are scrubbed in place: hand over a buffer nothing else reads.
  */
-export async function processUpload(file: Buffer, originalName: string, opts: ProcessOptions = {}): Promise<UploadResult> {
+export async function processUpload(scope: WriteScope, store: MediaStore, file: Buffer, originalName: string, opts: ProcessOptions = {}): Promise<UploadResult> {
   if (file.length > Math.max(MAX_IMAGE_BYTES, MAX_VIDEO_BYTES)) throw new MediaError("too_large");
   const kind = sniff(file);
   if (!kind) throw new MediaError("unsupported");
-  await acquire();
+  const t: Target = { scope, store };
+  await acquireMediaGate(scope.storeId);
   try {
     return kind.kind === "image"
-      ? await processImage(file, kind.format, originalName, opts)
-      : await processVideo(file, kind.format, originalName, opts);
+      ? await processImage(t, file, kind.format, originalName, opts)
+      : await processVideo(t, file, kind.format, originalName, opts);
   } finally {
-    release();
+    releaseMediaGate(scope.storeId);
   }
 }

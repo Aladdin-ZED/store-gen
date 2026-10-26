@@ -1,8 +1,10 @@
 /**
  * GET /api/cron/tick — hPanel cron (every 5 min), key in the `X-Cron-Key` header (kept out of URL
  * access logs) or as `?key=<CRON_KEY>` (handy for a first test in a browser):
- * push queued orders to Google Sheets, pull agent statuses (≤ every 5 min), housekeeping
- * (rate-limit buckets, visitor markers > 2 days, abandoned leads > 30 days, expired sessions).
+ * push queued orders to each store's Google Sheet and pull its agents' statuses (≤ every 5 min per store; the
+ * stores with Sheets work one by one within a time budget, one store's failure never stopping the others, SHT-11),
+ * housekeeping
+ * (rate-limit buckets, visitor markers > 2 days, abandoned leads > 30 days per store, expired sessions).
  * Also keeps the Node process warm.
  *
  * Invisible unless the key is right: a wrong or missing key, too many guesses from one network
@@ -14,12 +16,13 @@ import type { NextRequest } from "next/server";
 import { purgeExpiredSessions } from "@/lib/auth";
 import { cronKeySecret } from "@/lib/auth/config";
 import { unknownPageResponse } from "@/lib/auth/unknown-page";
+import { forEachStore, systemCtx, systemScope } from "@/lib/jobs/scope";
 import { purgeAbandonedLeads } from "@/lib/orders/admin";
 import { clientContext, errorSummary, json, logError } from "@/lib/orders/http";
 import { burstLimit } from "@/lib/security/burst-limit";
 import { hashIp, safeEqual } from "@/lib/security/crypto";
 import { purgeRateLimits, rateLimit } from "@/lib/security/rate-limit";
-import { pullStatuses, syncPendingOrders } from "@/lib/sheets/sync";
+import { syncStores } from "@/lib/sheets/sync";
 import { purgeVisitorMarkers } from "@/lib/stats";
 
 export const maxDuration = 120;
@@ -27,6 +30,17 @@ export const maxDuration = 120;
 const hidden = (req: NextRequest) => unknownPageResponse(req.method);
 
 const digest = (v: string) => createHash("sha256").update(v, "utf8").digest("hex");
+
+/** Abandoned leads older than 30 days, store by store (ORD-13; every store that still keeps data). */
+async function purgeLeadsPerStore(): Promise<number> {
+  const ctx = systemCtx("orders.leads_purge");
+  let removed = 0;
+  await forEachStore(ctx, { job: ctx.job, states: ["pending", "active", "restricted", "suspended", "closed"], budgetMs: 10_000 }, async (_scope, store) => {
+    // the frozen callback types its scope as a StoreScope; the delete needs the job's own WriteScope
+    removed += await purgeAbandonedLeads(systemScope(ctx, store.id), 30);
+  });
+  return removed;
+}
 
 async function step<T>(name: string, fn: () => Promise<T>): Promise<T | { error: string }> {
   try {
@@ -55,18 +69,18 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   const started = Date.now();
-  const sync = await step("sync", () => syncPendingOrders({ limit: 100 }));
-  const pull = await step("pull", () => pullStatuses());
+  // ~18 s of the tick for Sheets (core §H.2 slot 1), push + due pull per store
+  const sheets = await step("sheets", () => syncStores(systemCtx("sheets.push"), { budgetMs: 18_000 }));
   const purged = {
     rateLimits: await step("rate_limits", async () => {
       await purgeRateLimits();
       return true;
     }),
     visitorMarkers: await step("visitors", () => purgeVisitorMarkers(2)),
-    abandonedLeads: await step("leads", () => purgeAbandonedLeads(30)),
+    abandonedLeads: await step("leads", purgeLeadsPerStore),
     sessions: await step("sessions", () => purgeExpiredSessions()),
   };
-  return json({ ok: true, ms: Date.now() - started, sync, pull, purged });
+  return json({ ok: true, ms: Date.now() - started, sheets, purged });
 }
 
 /*

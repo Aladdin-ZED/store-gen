@@ -14,6 +14,7 @@ import { Segmented } from "../common/segmented";
 import { StatusChip, TONE_CLASSES } from "../common/status-chip";
 import { RelativeTime } from "../common/time";
 import { runAction, type ActionResult } from "../lib/action-result";
+import { useStore } from "../shell/store-context";
 import { int, money, phone as fmtPhone } from "../lib/format";
 import { runSheetSync } from "../lib/sheets-client";
 import { ORDER_STATUS_META, ORDER_STATUS_ORDER, riskLevel, SHEET_STATUS_META } from "../lib/status";
@@ -35,6 +36,10 @@ export interface OrdersViewProps {
   blocked: { items: BlockRow[]; total: number; page: number; pageSize: number } | null;
   pages: { id: string; name: string }[];
   canWrite: boolean;
+  /** blocklist.write (owner, admin, manager); defaults to canWrite */
+  canBlock?: boolean;
+  /** orders.export: the CSV button; defaults to shown */
+  canExport?: boolean;
   sheetConnected: boolean;
   actions: OrderDrawerActions & BlocklistActions & { retryFailed: () => Promise<ActionResult<{ sent: number; failed: number }>> };
 }
@@ -80,19 +85,22 @@ export function OrdersView(props: OrdersViewProps) {
             { value: "blocked", label: "Blocklist", count: tabCounts.blocked, icon: <BanIcon /> },
           ]}
         />
-        {((tab === "orders" && tabCounts.orders > 0) || (tab === "leads" && tabCounts.leads > 0)) && <ExportButton leads={tab === "leads"} />}
+        {props.canExport !== false && ((tab === "orders" && tabCounts.orders > 0) || (tab === "leads" && tabCounts.leads > 0)) && (
+          <ExportButton leads={tab === "leads"} />
+        )}
       </div>
 
       {tab === "orders" && props.orders && (
         <OrdersPanel {...props} orders={props.orders} openId={openId} onOpen={openOrder} />
       )}
       {tab === "leads" && props.leads && <LeadsPanel leads={props.leads} pages={props.pages} />}
-      {tab === "blocked" && props.blocked && <BlocklistPanel blocked={props.blocked} canWrite={canWrite} actions={props.actions} />}
+      {tab === "blocked" && props.blocked && <BlocklistPanel blocked={props.blocked} canWrite={props.canBlock ?? canWrite} actions={props.actions} />}
 
       <OrderDrawer
         orderId={openId}
         onOpenChange={(o) => !o && openOrder(null)}
         canWrite={canWrite}
+        canBlock={props.canBlock ?? canWrite}
         actions={props.actions}
         onChanged={() => router.refresh()}
       />
@@ -103,13 +111,14 @@ export function OrdersView(props: OrdersViewProps) {
 /** CSV of what the screen shows (filters kept); on the Abandoned tab, the leads with their selection. */
 function ExportButton({ leads }: { leads?: boolean }) {
   const query = useQueryState();
+  const storeView = useStore();
   const params = new URLSearchParams(query.params.toString());
   for (const k of ["tab", "order", "page"]) params.delete(k);
   if (leads) params.set("tab", "leads");
   const qs = params.toString();
   return (
     <Button asChild variant="outline" className="h-9 rounded-full px-4">
-      <a href={`/admin/orders/export${qs ? `?${qs}` : ""}`} download>
+      <a href={`${storeView.api("/orders/export")}${qs ? `?${qs}` : ""}`} download>
         <DownloadIcon />
         Export CSV
       </a>

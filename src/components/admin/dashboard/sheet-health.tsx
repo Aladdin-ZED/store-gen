@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { StatusChip } from "../common/status-chip";
 import { int } from "../lib/format";
 import { runSheetSync } from "../lib/sheets-client";
+import { useStore } from "../shell/store-context";
 
 /**
  * Google Sheets sync health as a KPI-sized tile: state chip, three counters separated by hairlines,
@@ -18,6 +19,7 @@ import { runSheetSync } from "../lib/sheets-client";
  */
 export function SheetHealthCard({ health, canSync, className }: { health: SheetHealth; canSync: boolean; className?: string }) {
   const router = useRouter();
+  const store = useStore();
   const [syncing, setSyncing] = useState(false);
   const stuck = health.enabled && health.oldestPendingMinutes !== null && health.oldestPendingMinutes > 15;
 
@@ -32,7 +34,7 @@ export function SheetHealthCard({ health, canSync, className }: { health: SheetH
           : { label: "Healthy", tone: "emerald" as const };
 
   const problem = stuck
-    ? `Orders have waited ${health.oldestPendingMinutes} min — is the 5-minute cron job set up?`
+    ? `Orders have waited ${health.oldestPendingMinutes} min to reach the sheet`
     : health.failed > 0
       ? (health.lastError ?? `${int(health.failed)} order${health.failed === 1 ? "" : "s"} didn't reach the sheet — open them to retry`)
       : null;
@@ -63,7 +65,7 @@ export function SheetHealthCard({ health, canSync, className }: { health: SheetH
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Link
-                    href={health.failed > 0 ? "/admin/orders?sheet=failed" : "/admin/settings/sheets"}
+                    href={store.href(health.failed > 0 ? "/orders?sheet=failed" : "/integrations/sheets")}
                     className="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-medium text-warn-ink hover:underline"
                   >
                     <AlertTriangleIcon className="size-3.5 shrink-0" />
@@ -111,10 +113,10 @@ export function SheetHealthCard({ health, canSync, className }: { health: SheetH
           <p className="max-w-sm text-sm leading-relaxed text-pretty text-muted-foreground">
             {health.configured
               ? "Paste your sheet link once — orders flow in with statuses your agents can edit."
-              : "The Google service account isn't configured on the server yet (GOOGLE_SA_JSON_B64)."}
+              : "Google Sheets isn't available on this platform yet."}
           </p>
           <Button asChild size="sm" variant="outline" className="rounded-full">
-            <Link href="/admin/settings/sheets">Set up Google Sheets</Link>
+            <Link href={store.href("/integrations/sheets")}>Set up Google Sheets</Link>
           </Button>
         </div>
       )}

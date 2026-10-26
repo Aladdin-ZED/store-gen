@@ -3,8 +3,8 @@
 import dynamic from "next/dynamic";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import type { Role } from "@/lib/auth/permissions";
 import type { SearchHit } from "@/lib/admin-data/search";
+import type { ActionResult } from "../lib/action-result";
 import { usePrefetchOnIdle } from "../lib/lazy";
 
 export { Kbd } from "./kbd";
@@ -25,16 +25,8 @@ export function useCommandPalette() {
   return ctx;
 }
 
-/** ⌘K / Ctrl+K anywhere in the panel; "/" too when not typing. */
-export function CommandPaletteProvider({
-  role,
-  search,
-  children,
-}: {
-  role: Role;
-  search: (q: string) => Promise<SearchHit[]>;
-  children: ReactNode;
-}) {
+/** ⌘K / Ctrl+K anywhere in the store's dashboard; "/" too when not typing. Search answers for the store on screen only. */
+export function CommandPaletteProvider({ search, children }: { search: (q: string) => Promise<ActionResult<SearchHit[]>>; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const value = useMemo(() => ({ open: () => setOpen(true) }), []);
   usePrefetchOnIdle(PREFETCH);
@@ -64,9 +56,9 @@ export function CommandPaletteProvider({
         >
           <DialogHeader className="sr-only">
             <DialogTitle>Command palette</DialogTitle>
-            <DialogDescription>Search pages and orders, or jump anywhere in the studio.</DialogDescription>
+            <DialogDescription>Search this store&apos;s pages and orders, or jump anywhere in its dashboard.</DialogDescription>
           </DialogHeader>
-          {open && <Palette role={role} search={search} close={() => setOpen(false)} />}
+          {open && <Palette search={search} close={() => setOpen(false)} />}
         </DialogContent>
       </Dialog>
     </PaletteContext.Provider>

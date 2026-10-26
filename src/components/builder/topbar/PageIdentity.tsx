@@ -18,6 +18,7 @@ import { useEditor, useEditorApi, useEditorStore } from "../context";
 import { useEnv } from "../env";
 import { usePersistence } from "../persistence";
 import { EASE, Hint } from "../ui";
+import { useStore } from "@/components/admin/shell/store-context";
 
 /* ------------------------------------------------------------------ */
 /* name                                                                */
@@ -142,7 +143,9 @@ export function SlugControl() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const storeView = useStore();
+  // the store's public base ("https://<host>/s/<h>" in P mode): the prefix of every page address
+  const origin = storeView.live("");
   const published = page.status === "published";
   const parsed = SlugInput.safeParse(value);
   const next = parsed.success ? parsed.data : null;
@@ -177,12 +180,12 @@ export function SlugControl() {
       st.markLive(st.savedDoc);
     }
     setOpen(false);
-    toast.success(published ? `Live page moved to /${res.page.slug}` : `Address set to /${res.page.slug}`);
+    toast.success(published ? `Live page moved to ${storeView.livePath(res.page.slug)}` : `Address set to ${storeView.livePath(res.page.slug)}`);
   };
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(`${origin}/${page.slug}`);
+      await navigator.clipboard.writeText(storeView.live(page.slug));
       setCopied(true);
       setTimeout(() => setCopied(false), 1400);
     } catch {
@@ -208,7 +211,7 @@ export function SlugControl() {
           aria-label="Page address"
         >
           <Globe className="size-3.5 shrink-0" />
-          <span className="truncate">/{page.slug}</span>
+          <span className="truncate">{storeView.livePath(page.slug)}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={8} className="w-[22rem] p-0">
@@ -275,7 +278,7 @@ export function SlugControl() {
                 </Button>
                 {published ? (
                   <Button type="button" variant="ghost" size="sm" asChild>
-                    <a href={`/${page.slug}`} target="_blank" rel="noopener noreferrer">
+                    <a href={storeView.live(page.slug)} target="_blank" rel="noopener noreferrer">
                       <ArrowUpRight />
                       Open
                     </a>

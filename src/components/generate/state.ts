@@ -294,9 +294,15 @@ export function keepPhotos(d: Details, kept: ReadonlySet<string>): Details {
 /* Session persistence                                                 */
 /* ------------------------------------------------------------------ */
 
-const STORAGE_KEY = "cod-studio:generate:v2";
+/**
+ * The wizard's session keys, per store (GEN-03): `sg:<storeId>:generate:v2`, so a draft of store A (its photos are
+ * A's files) never comes back in store B's generator in the same tab. The single-tenant keys
+ * (`cod-studio:generate:*`) are only ever cleared.
+ */
+const storageKey = (storeId: string) => `sg:${storeId}:generate:v2`;
 /** drafts saved before the Offers step (4 steps): restored, the directions step moves to 4 */
-const STORAGE_KEY_V1 = "cod-studio:generate:v1";
+const storageKeyV1 = (storeId: string) => `sg:${storeId}:generate:v1`;
+const LEGACY_KEYS = ["cod-studio:generate:v2", "cod-studio:generate:v1"];
 
 /** A stored option group: v1 drafts saved choice groups without a kind (text). */
 const StoredGroup = z.preprocess(
@@ -352,11 +358,12 @@ const Stored = z.object({
   seedBase: z.number().int().min(0).max(2_147_483_647),
 });
 
-/** Saved wizard (photos that finished uploading only), or null. Browser only. */
-export function loadState(): WizardState | null {
+/** The store's saved wizard (photos that finished uploading only), or null. Browser only. */
+export function loadState(storeId: string): WizardState | null {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    const old = raw ? null : sessionStorage.getItem(STORAGE_KEY_V1);
+    for (const k of LEGACY_KEYS) sessionStorage.removeItem(k);
+    const raw = sessionStorage.getItem(storageKey(storeId));
+    const old = raw ? null : sessionStorage.getItem(storageKeyV1(storeId));
     if (!raw && !old) return null;
     const json = JSON.parse((raw ?? old)!) as { step?: number; reached?: number };
     // v1 had 4 steps: its directions step (3) is now 4, the Offers step comes before it
@@ -376,23 +383,23 @@ export function loadState(): WizardState | null {
   }
 }
 
-export function saveState(state: WizardState): void {
+export function saveState(storeId: string, state: WizardState): void {
   try {
     const photos = state.photos.flatMap((p) => (p.status === "ready" && p.asset ? [{ key: p.key, name: p.name, width: p.width, height: p.height, palette: p.palette, asset: p.asset }] : []));
     if (!photos.length && !state.details.name.trim()) {
-      sessionStorage.removeItem(STORAGE_KEY);
+      sessionStorage.removeItem(storageKey(storeId));
       return;
     }
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, photos }));
+    sessionStorage.setItem(storageKey(storeId), JSON.stringify({ ...state, photos }));
   } catch {
     // storage full or disabled (private mode): the wizard simply won't survive a reload
   }
 }
 
-export function clearState(): void {
+export function clearState(storeId: string): void {
   try {
-    sessionStorage.removeItem(STORAGE_KEY_V1);
-    sessionStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(storageKeyV1(storeId));
+    sessionStorage.removeItem(storageKey(storeId));
   } catch {
     // ignore
   }

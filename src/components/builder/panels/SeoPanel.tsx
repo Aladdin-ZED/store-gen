@@ -6,6 +6,7 @@
  */
 import { Globe } from "lucide-react";
 import { PagePixels } from "@/components/admin/pixels/page-pixels";
+import { useStore } from "@/components/admin/shell/store-context";
 import { Switch } from "@/components/ui/switch";
 import { plainLabel } from "@/lib/editor/paths";
 import { MARKET_SPECS, PHONE_SPECS } from "@/lib/markets/specs";
@@ -34,6 +35,8 @@ export function SeoPanel() {
   const pageId = useEditor((s) => s.page.id);
   const { flush } = usePersistence();
   const api = useEditorApi();
+  // the store's own host in the search preview (its subdomain in S mode), else the host serving the dashboard
+  const liveHost = /^https?:\/\/([^/]+)/i.exec(useStore().live(""))?.[1] ?? (typeof window === "undefined" ? "" : window.location.host);
   const set = (recipe: (d: PageDoc) => void, group?: string) => api.updateDoc((d) => recipe(d as PageDoc), group ?? null);
   const title = doc.seo.title?.trim() || doc.product.name;
   const description = doc.seo.description?.trim() || plainLabel(doc.product.tagline ?? doc.product.description ?? "", 160);
@@ -90,7 +93,7 @@ export function SeoPanel() {
           <div className="rounded-xl bg-card p-3 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--border)_90%,transparent)]" aria-label="Search result preview">
             <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <Globe className="size-3" />
-              {typeof window === "undefined" ? "" : window.location.host}
+              {liveHost}
             </p>
             <p className="mt-1 line-clamp-1 text-[15px] leading-snug text-[#1a0dab] dark:text-[#8ab4f8]" dir="auto">
               {title}

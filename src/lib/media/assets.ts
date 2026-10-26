@@ -1,14 +1,23 @@
 import "server-only";
 /**
  * Asset rows: lookup for the renderer, media-library listing and deletion.
- * Assets are immutable (id = content hash); deleting one leaves pages referencing it rendering
+ * Assets are immutable (id = keyed content hash); deleting one leaves pages referencing it rendering
  * gracefully (RenderContext.asset() returns null for missing ids).
+ *
+ * Multi-tenant (docs/STORE-SAAS.md §E.3, §G.4; TENANCY-MAP MED-05, MED-06, MED-15): every function takes the scope
+ * and reads or writes the scope's store only. Ids are per store (D21), so another store's id answers exactly like a
+ * missing one; the delete is the store's own row, resets only the store's derived cutouts and gives the bytes back
+ * to the store's quota.
  */
 import { and, count, desc, eq, inArray, isNotNull, like, or, type SQL } from "drizzle-orm";
 import { db, pool } from "@/lib/db/client";
 import { assets } from "@/lib/db/schema";
+import { logError } from "@/lib/orders/log";
+import { byId, whereStore } from "@/lib/tenancy/sql";
+import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { parseFocus } from "./focus";
 import { liveMediaUrl } from "./keys";
+import { refundMediaBytes, type MediaStore } from "./quota";
 import { deleteFilesOfAsset, evictKeys } from "./store";
 
 export type AssetRecord = typeof assets.$inferSelect;
@@ -30,23 +39,35 @@ export function videoSource(a: Pick<AssetRecord, "id" | "kind" | "mime" | "width
   return { key, url: liveMediaUrl(key), mime: a.mime };
 }
 
-export async function getAsset(id: string): Promise<AssetRecord | null> {
+/** One asset of the scope's store (null for a malformed, missing or other store's id). */
+export async function getAsset(scope: StoreScope, id: string): Promise<AssetRecord | null> {
   if (!ASSET_ID_RE.test(id)) return null;
-  const [row] = await db.select().from(assets).where(eq(assets.id, id)).limit(1);
+  const [row] = await db.select().from(assets).where(byId(assets, scope, id)).limit(1);
   return row ?? null;
 }
 
-/** Rows for the given ids (unknown / malformed ids are skipped). Order follows the input. */
-export async function getAssetsByIds(ids: readonly string[]): Promise<AssetRecord[]> {
+/** The scope's store's rows for the given ids (unknown, malformed and other stores' ids are skipped). Order follows the input. */
+export async function getAssetsByIds(scope: StoreScope, ids: readonly string[]): Promise<AssetRecord[]>;
+/**
+ * @deprecated store-less: any store's rows. Kept for `src/lib/render/publish.server.ts` (T3) until CCR r1.0-t4-6
+ * passes the page's scope; the maintainer deletes it at the R1.0 integration.
+ */
+export async function getAssetsByIds(ids: readonly string[]): Promise<AssetRecord[]>;
+export async function getAssetsByIds(a: StoreScope | readonly string[], b?: readonly string[]): Promise<AssetRecord[]> {
+  const scope = isIdList(a) ? null : a;
+  const ids = isIdList(a) ? a : (b ?? []);
   const wanted = [...new Set(ids.filter((id) => typeof id === "string" && ASSET_ID_RE.test(id)))];
   if (!wanted.length) return [];
   const found = new Map<string, AssetRecord>();
   for (let i = 0; i < wanted.length; i += 500) {
-    const rows = await db.select().from(assets).where(inArray(assets.id, wanted.slice(i, i + 500)));
+    const chunk = inArray(assets.id, wanted.slice(i, i + 500));
+    const rows = await db.select().from(assets).where(scope ? whereStore(assets, scope, chunk) : chunk);
     for (const r of rows) found.set(r.id, r);
   }
   return wanted.map((id) => found.get(id)).filter((r): r is AssetRecord => !!r);
 }
+
+const isIdList = (v: StoreScope | readonly string[]): v is readonly string[] => Array.isArray(v);
 
 export interface ListAssetsInput {
   page?: number;
@@ -67,7 +88,8 @@ export interface AssetPage {
   pageSize: number;
 }
 
-export async function listAssets(input: ListAssetsInput = {}): Promise<AssetPage> {
+/** The scope's store's library, newest first (served by `assets_store_created_idx`). */
+export async function listAssets(scope: StoreScope, input: ListAssetsInput = {}): Promise<AssetPage> {
   const page = Math.max(1, Math.floor(input.page ?? 1));
   const pageSize = Math.min(100, Math.max(1, Math.floor(input.pageSize ?? 48)));
   const where: SQL[] = [];
@@ -81,7 +103,7 @@ export async function listAssets(input: ListAssetsInput = {}): Promise<AssetPage
     const pattern = `%${q.replace(/[\\%_]/g, (m) => "\\" + m)}%`;
     where.push(or(like(assets.originalName, pattern), and(isNotNull(assets.tags), like(assets.tags, pattern)))!);
   }
-  const cond = where.length ? and(...where) : undefined;
+  const cond = whereStore(assets, scope, ...where);
   const [items, [totalRow]] = await Promise.all([
     db
       .select()
@@ -95,27 +117,41 @@ export async function listAssets(input: ListAssetsInput = {}): Promise<AssetPage
   return { items, total: Number(totalRow?.n ?? 0), page, pageSize };
 }
 
-/** Assets derived from `id` (cutouts made from a photo) — kept when the source is deleted. */
-export async function hasDerivedAssets(id: string): Promise<boolean> {
-  const [row] = await db.select({ id: assets.id }).from(assets).where(eq(assets.sourceAssetId, id)).limit(1);
+/** Assets of the store derived from `id` (cutouts made from a photo) — kept when the source is deleted. */
+export async function hasDerivedAssets(scope: StoreScope, id: string): Promise<boolean> {
+  const [row] = await db.select({ id: assets.id }).from(assets).where(whereStore(assets, scope, eq(assets.sourceAssetId, id))).limit(1);
   return !!row;
 }
 
-/** Delete an asset and all its stored files atomically. Returns false when it did not exist. */
-export async function deleteAsset(id: string): Promise<boolean> {
+/** Replace the library tags of one of the store's assets (alt text, the framing default). False when unknown. */
+export async function setAssetTags(scope: WriteScope, id: string, tags: string[]): Promise<boolean> {
   if (!ASSET_ID_RE.test(id)) return false;
+  const [res] = (await db.update(assets).set({ tags }).where(byId(assets, scope, id))) as unknown as [{ affectedRows?: number }];
+  return (res?.affectedRows ?? 0) > 0;
+}
+
+/**
+ * Delete one of the store's assets and all its stored files atomically, then give its stored bytes back to the
+ * store's quota. Returns false when the store has no such asset (another store's id included).
+ */
+export async function deleteAsset(scope: WriteScope, store: MediaStore, id: string): Promise<boolean> {
+  if (!ASSET_ID_RE.test(id)) return false;
+  const storeId = scope.storeId;
   const conn = await pool().getConnection();
   let keys: string[] = [];
+  let freed = 0;
   try {
     await conn.beginTransaction();
-    const [res] = (await conn.query("DELETE FROM assets WHERE id = ?", [id])) as unknown as [{ affectedRows: number }];
-    if (!res.affectedRows) {
+    const [rows] = (await conn.query("SELECT stored_bytes FROM assets WHERE id = ? AND store_id = ? FOR UPDATE", [id, storeId])) as unknown as [{ stored_bytes: number | string }[]];
+    if (!rows.length) {
       await conn.rollback();
       return false;
     }
+    freed = Number(rows[0]!.stored_bytes) || 0;
+    await conn.query("DELETE FROM assets WHERE id = ? AND store_id = ?", [id, storeId]);
     keys = await deleteFilesOfAsset(conn, id);
-    // derived cutouts keep living on their own
-    await conn.query("UPDATE assets SET source_asset_id = NULL WHERE source_asset_id = ?", [id]);
+    // the store's derived cutouts keep living on their own
+    await conn.query("UPDATE assets SET source_asset_id = NULL WHERE store_id = ? AND source_asset_id = ?", [storeId, id]);
     await conn.commit();
   } catch (err) {
     await conn.rollback().catch(() => undefined);
@@ -124,10 +160,14 @@ export async function deleteAsset(id: string): Promise<boolean> {
     conn.release();
   }
   evictKeys(keys);
+  await refundMediaBytes(scope, store, freed).catch((e: unknown) => logError("media:delete:refund", e));
   return true;
 }
 
-/** Public JSON for the admin (media library, upload response). */
+/**
+ * Public JSON for the store's dashboard (media library, upload response). Never the uploader (`created_by`) or the
+ * store id (MED-06).
+ */
 export function assetToJson(a: AssetRecord) {
   const best =
     a.variants.filter((v) => v.fmt === "webp").sort((x, y) => y.w - x.w)[0] ?? a.variants[a.variants.length - 1];
@@ -156,4 +196,3 @@ export function assetToJson(a: AssetRecord) {
   };
 }
 export type AssetJson = ReturnType<typeof assetToJson>;
-

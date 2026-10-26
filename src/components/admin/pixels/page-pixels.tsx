@@ -13,7 +13,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { applyLiveTrackingAction, startPixelTestAction, stopPixelTestAction } from "@/app/admin/(panel)/settings/pixels/actions";
+import { applyLiveTrackingAction, startPixelTestAction, stopPixelTestAction } from "@/lib/pixels/actions";
 import type { Tracking } from "@/lib/page/schema";
 import { PIXEL_LIMIT, isServerPlatform, type PixelPlatform, type ServerPlatform } from "@/lib/pixels/ids";
 import { TEST_MINUTES, editTracking, findEntryView, idsOnly, pixelLabel, pixelStatus, sameIds, trackingRefs, type LibraryPixel } from "@/lib/pixels/library";
@@ -23,6 +23,7 @@ import { runAction } from "../lib/action-result";
 import { PixelEntryDialog, type EntryMode } from "./entry-dialog";
 import { MaskedId, PLATFORM_META, PixelHealthLine, PixelStatusChip, PlatformMark } from "./parts";
 import { PixelPicker } from "./pixel-picker";
+import { useStore } from "../shell/store-context";
 import { useNow, usePagePixels } from "./use-page-pixels";
 
 export interface PagePixelsProps {
@@ -36,6 +37,7 @@ export interface PagePixelsProps {
 
 export function PagePixels({ pageId, tracking, onChange, flush }: PagePixelsProps) {
   const { state, failed, reload, set } = usePagePixels(pageId);
+  const storeView = useStore();
   const [entry, setEntry] = useState<EntryMode | null>(null);
   const [updating, setUpdating] = useState(false);
   const now = useNow();
@@ -180,8 +182,8 @@ export function PagePixels({ pageId, tracking, onChange, flush }: PagePixelsProp
 
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         They fire on the live page only, never in the builder or previews. Tokens and test codes live in{" "}
-        <Link href="/admin/settings/pixels" target="_blank" rel="noopener" className="font-medium text-foreground underline decoration-foreground/25 underline-offset-2 hover:decoration-foreground">
-          Settings → Pixels
+        <Link href={storeView.href("/integrations/pixels")} target="_blank" rel="noopener" className="font-medium text-foreground underline decoration-foreground/25 underline-offset-2 hover:decoration-foreground">
+          Connect → Pixels
         </Link>
         .
       </p>

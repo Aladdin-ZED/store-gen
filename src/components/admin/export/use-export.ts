@@ -6,6 +6,8 @@
 import { useEffect, useState } from "react";
 import type { ExportMode } from "@/lib/export/options";
 import { EXPORT_HEADERS, type ExportContextResponse, type ExportErrorResponse, type ExportEstimateResponse, type ExportRecordJson } from "@/lib/export/types";
+import { apiHref } from "@/lib/urls";
+import { requireStoreHandle } from "../shell/store-handle";
 
 async function readJson<T>(res: Response): Promise<T | ExportErrorResponse> {
   try {
@@ -56,7 +58,7 @@ export function useExportContext(pageId: string, open: boolean, versionId?: stri
         data: body.ok ? body : prev?.scope === scope ? prev.data : undefined,
         error: body.ok ? undefined : body,
       }));
-    fetch(`/api/admin/export?${query.toString()}`, { signal: ctl.signal, cache: "no-store" })
+    fetch(`${apiHref(requireStoreHandle(), "/export")}?${query.toString()}`, { signal: ctl.signal, cache: "no-store" })
       .then((res) => readJson<ExportContextResponse>(res))
       .then(settle)
       .catch(() => {
@@ -102,7 +104,7 @@ export function useEstimate(params: EstimateParams | null) {
     if (!query) return;
     const ctl = new AbortController();
     const timer = window.setTimeout(() => {
-      fetch(`/api/admin/export/estimate?${query}`, { signal: ctl.signal, cache: "no-store" })
+      fetch(`${apiHref(requireStoreHandle(), "/export/estimate")}?${query}`, { signal: ctl.signal, cache: "no-store" })
         .then((res) => readJson<ExportEstimateResponse>(res))
         .then((body) => setState(body.ok ? { key: query, data: body } : { key: query, error: body }))
         .catch(() => {
@@ -139,7 +141,7 @@ export type DownloadResult = { ok: true; fileName: string; exportId: string; byt
 export async function downloadExport(req: DownloadRequest, onProgress: (p: number) => void, signal?: AbortSignal): Promise<DownloadResult> {
   let res: Response;
   try {
-    res = await fetch("/api/admin/export", {
+    res = await fetch(apiHref(requireStoreHandle(), "/export"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
@@ -182,7 +184,7 @@ export async function downloadExport(req: DownloadRequest, onProgress: (p: numbe
 
 export async function revokeExportRequest(exportId: string): Promise<{ ok: true; export: ExportRecordJson } | ExportErrorResponse> {
   try {
-    const res = await fetch(`/api/admin/export/${encodeURIComponent(exportId)}`, { method: "DELETE" });
+    const res = await fetch(apiHref(requireStoreHandle(), `/export/${encodeURIComponent(exportId)}`), { method: "DELETE" });
     return await readJson<{ ok: true; export: ExportRecordJson }>(res);
   } catch {
     return networkError();

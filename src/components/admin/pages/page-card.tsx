@@ -37,7 +37,8 @@ import { RelativeTime } from "../common/time";
 import { compact } from "../lib/format";
 import { PAGE_STATUS_META } from "../lib/status";
 import { LivePixelChips } from "./page-pixels";
-import type { LivePagePixels } from "@/app/admin/(panel)/settings/pixels/actions";
+import type { LivePagePixels } from "@/lib/pixels/actions";
+import { useStore } from "../shell/store-context";
 
 export type PageAction = "edit" | "preview" | "publish" | "unpublish" | "home" | "home-auto" | "duplicate" | "export" | "archive" | "restore" | "delete" | "copy-link";
 
@@ -61,8 +62,9 @@ const ARCH_LABEL: Record<string, string> = {
   garage: "Garage",
 };
 
-export function editHref(id: string) {
-  return `/admin/pages/${id}/edit`;
+/** The builder of one of the store's pages: "/app/<h>/pages/<id>/edit". */
+export function editHref(store: { href(path: `/${string}`): string }, id: string) {
+  return store.href(`/pages/${id}/edit`);
 }
 
 /** Page tile: live thumbnail, status, address, 7-day numbers and every page action. */
@@ -90,6 +92,7 @@ export function PageCard({
   onAction: (action: PageAction, page: PageListItem) => void;
   style?: React.CSSProperties;
 }) {
+  const storeView = useStore();
   const meta = PAGE_STATUS_META[page.status] ?? PAGE_STATUS_META.draft!;
   const live = page.status === "published";
   const archived = page.status === "archived";
@@ -158,7 +161,7 @@ export function PageCard({
           )}
           {can.write && !archived && (
             <Button asChild size="sm" className="h-8 rounded-full px-3 shadow-lg">
-              <Link href={editHref(page.id)}>
+              <Link href={editHref(storeView, page.id)}>
                 <PencilIcon /> Edit
               </Link>
             </Button>
@@ -173,7 +176,7 @@ export function PageCard({
               {page.name}
             </h3>
             <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-              <span className="truncate font-mono">/{page.slug}</span>
+              <span className="truncate font-mono">{storeView.livePath(page.slug)}</span>
               <CopyButton value={liveUrl} label="Copy page link" toastMessage="Page link copied" size="icon-xs" className="-my-1 text-muted-foreground" />
             </div>
             {live && livePixels ? <LivePixelChips live={livePixels.live} labels={livePixels.labels} className="mt-1" /> : null}
@@ -212,6 +215,7 @@ export function PageCard({
 }
 
 function PageMenu({ page, can, onAction, liveUrl }: { page: PageListItem; can: PagePermissions; onAction: (a: PageAction, p: PageListItem) => void; liveUrl: string }) {
+  const storeView = useStore();
   const live = page.status === "published";
   const archived = page.status === "archived";
   return (
@@ -224,7 +228,7 @@ function PageMenu({ page, can, onAction, liveUrl }: { page: PageListItem; can: P
       <DropdownMenuContent align="end" className="w-56 rounded-xl p-1.5">
         {can.write && !archived && (
           <DropdownMenuItem asChild>
-            <Link href={editHref(page.id)}>
+            <Link href={editHref(storeView, page.id)}>
               <PencilIcon /> Edit in builder
             </Link>
           </DropdownMenuItem>

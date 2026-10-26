@@ -2,15 +2,21 @@ import "server-only";
 /**
  * Orders screen helpers on top of @/lib/orders: URL filters → OrderFilters (store-day ranges),
  * status counts for the filter chips, and serializable rows / details for client components.
+ *
+ * Multi-tenant (docs/STORE-SAAS.md §E.3, ADM-22, ADM-23): counts and details are the scope's store only (another
+ * store's order id answers like a missing one) and day ranges use the store's time zone, never the platform's.
  */
-import { and, count, eq, gte, isNull, lt, type SQL } from "drizzle-orm";
+import { count, eq, gte, isNull, lt, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { blocklist, leads, orders } from "@/lib/db/schema";
+import { blocklist, leads, orders, pageVersions } from "@/lib/db/schema";
 import { orderView, type OrderView, type SwatchOf } from "@/components/admin/orders/parts";
 import type { OrderItems } from "@/lib/db/schema";
-import { getOrder, isOrderStatus, versionDoc, type OrderFilters, type OrderRecord } from "@/lib/orders";
+import { getOrder, isOrderStatus, type OrderFilters, type OrderRecord } from "@/lib/orders";
 import type { OrderStatus } from "@/lib/orders/contract";
 import { optionText, sanitizeLabel } from "@/lib/orders/text";
+import { orderDocOf } from "@/lib/orders/versions";
+import { byId, inStore, whereStore } from "@/lib/tenancy/sql";
+import type { StoreScope } from "@/lib/tenancy/types";
 import { isChoiceGroup, isMatrixGroup, type PageDoc } from "@/lib/page/schema";
 import { orderTextOf } from "@/lib/sheets/row";
 import { addDays, dayKey, dayStart, isDay } from "./time";
@@ -54,29 +60,30 @@ export function parseOrderQuery(sp: Params): OrderQuery {
   };
 }
 
-/** [from, to) instants of a range in the store's time zone. */
-export function rangeBounds(q: Pick<OrderQuery, "range" | "from" | "to">): { from?: Date; to?: Date } {
-  const today = dayKey();
+/** [from, to) instants of a range in the store's time zone (`stores.timezone`, ADM-23). */
+export function rangeBounds(q: Pick<OrderQuery, "range" | "from" | "to">, timeZone: string): { from?: Date; to?: Date } {
+  const today = dayKey(new Date(), timeZone);
+  const start = (day: string) => dayStart(day, timeZone);
   switch (q.range) {
     case "today":
-      return { from: dayStart(today) };
+      return { from: start(today) };
     case "7d":
-      return { from: dayStart(addDays(today, -6)) };
+      return { from: start(addDays(today, -6)) };
     case "30d":
-      return { from: dayStart(addDays(today, -29)) };
+      return { from: start(addDays(today, -29)) };
     case "90d":
-      return { from: dayStart(addDays(today, -89)) };
+      return { from: start(addDays(today, -89)) };
     case "custom": {
       const [a, b] = q.from && q.to && q.from > q.to ? [q.to, q.from] : [q.from, q.to];
-      return { from: a ? dayStart(a) : undefined, to: b ? dayStart(addDays(b, 1)) : undefined };
+      return { from: a ? start(a) : undefined, to: b ? start(addDays(b, 1)) : undefined };
     }
     default:
       return {};
   }
 }
 
-export function toOrderFilters(q: OrderQuery): OrderFilters {
-  const { from, to } = rangeBounds(q);
+export function toOrderFilters(q: OrderQuery, timeZone: string): OrderFilters {
+  const { from, to } = rangeBounds(q, timeZone);
   return {
     q: q.q || undefined,
     status: q.status ?? undefined,
@@ -88,9 +95,9 @@ export function toOrderFilters(q: OrderQuery): OrderFilters {
   };
 }
 
-/** Orders per status inside the current range / page scope (chips). */
-export async function statusCounts(q: OrderQuery): Promise<Record<string, number> & { all: number }> {
-  const { from, to } = rangeBounds(q);
+/** The store's orders per status inside the current range / page filter (chips). */
+export async function statusCounts(scope: StoreScope, q: OrderQuery, timeZone: string): Promise<Record<string, number> & { all: number }> {
+  const { from, to } = rangeBounds(q, timeZone);
   const where: SQL[] = [];
   if (from) where.push(gte(orders.createdAt, from));
   if (to) where.push(lt(orders.createdAt, to));
@@ -98,7 +105,7 @@ export async function statusCounts(q: OrderQuery): Promise<Record<string, number
   const rows = await db
     .select({ status: orders.status, n: count() })
     .from(orders)
-    .where(where.length ? and(...where) : undefined)
+    .where(whereStore(orders, scope, ...where))
     .groupBy(orders.status);
   const out: Record<string, number> & { all: number } = { all: 0 };
   for (const r of rows) {
@@ -108,11 +115,12 @@ export async function statusCounts(q: OrderQuery): Promise<Record<string, number
   return out;
 }
 
-export async function tabCounts(): Promise<{ orders: number; leads: number; blocked: number }> {
+/** The store's tab badges: orders, abandoned leads, blocklist entries. */
+export async function tabCounts(scope: StoreScope): Promise<{ orders: number; leads: number; blocked: number }> {
   const [[o], [l], [b]] = await Promise.all([
-    db.select({ n: count() }).from(orders),
-    db.select({ n: count() }).from(leads).where(isNull(leads.convertedOrderId)),
-    db.select({ n: count() }).from(blocklist),
+    db.select({ n: count() }).from(orders).where(inStore(orders, scope)),
+    db.select({ n: count() }).from(leads).where(whereStore(leads, scope, isNull(leads.convertedOrderId))),
+    db.select({ n: count() }).from(blocklist).where(inStore(blocklist, scope)),
   ]);
   return { orders: Number(o?.n ?? 0), leads: Number(l?.n ?? 0), blocked: Number(b?.n ?? 0) };
 }
@@ -198,8 +206,9 @@ export interface OrderDetailJson extends OrderRow {
   hasIp: boolean;
 }
 
-export async function orderDetailJson(id: string): Promise<OrderDetailJson | null> {
-  const o = await getOrder(id);
+/** One order of the store for the drawer (null: missing or another store's; customer fields masked like getOrder). */
+export async function orderDetailJson(scope: StoreScope, id: string): Promise<OrderDetailJson | null> {
+  const o = await getOrder(scope, id);
   if (!o) return null;
   return {
     ...toOrderRow({ ...o, pageName: o.page?.name ?? null }),
@@ -221,7 +230,7 @@ export async function orderDetailJson(id: string): Promise<OrderDetailJson | nul
       deltas: typeof o.items.deltas === "number" ? o.items.deltas : null,
       reasons: o.items.reasons ?? [],
     },
-    view: orderView(o.items, { swatchOf: await swatches(o.versionId, o.items) }),
+    view: orderView(o.items, { swatchOf: await swatches(scope, o.versionId, o.items) }),
     warehouseText: orderTextOf(o.items, { mode: "warehouse", orderId: o.id }),
     utm: o.utm ?? {},
     ref: o.ref,
@@ -242,13 +251,19 @@ export async function orderDetailJson(id: string): Promise<OrderDetailJson | nul
 }
 
 /**
- * Swatch colours of the options an order shows, read from the version it was validated against
+ * Swatch colours of the options an order shows, read from the store's version it was validated against
  * (best effort: a snapshot label is matched back to its option; no version → no dots).
  */
-async function swatches(versionId: string | null, items: OrderItems): Promise<SwatchOf | undefined> {
+async function swatches(scope: StoreScope, versionId: string | null, items: OrderItems): Promise<SwatchOf | undefined> {
   if (!versionId || !(items.units?.length || items.variants?.length || items.bump?.unit)) return undefined;
-  const doc = await versionDoc(versionId).catch(() => null);
+  const doc = await versionDocIn(scope, versionId).catch(() => null);
   return doc ? swatchesOf(doc) : undefined;
+}
+
+/** The document of one of the store's versions (repaired like the order path reads it), or null. */
+async function versionDocIn(scope: StoreScope, versionId: string): Promise<PageDoc | null> {
+  const [row] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(byId(pageVersions, scope, versionId)).limit(1);
+  return row ? orderDocOf(row.doc, versionId) : null;
 }
 
 export function swatchesOf(doc: Pick<PageDoc, "items">): SwatchOf {

@@ -18,8 +18,13 @@ export { DEVICES, type PreviewAssets, type PreviewDevice } from "./devices";
 /** Store identity used when the builder passes none (the localized "My store" fallback name applies). */
 const NO_STORE: StoreInfo = { name: "" };
 
-/** Base + every section chunk: the preview must render any section the editor adds. */
-export const PREVIEW_CSS = [baseCss, ...Object.values(sectionCss)].filter(Boolean).join("\n");
+/**
+ * Base + the section chunks of the types the document uses (LND-26), hidden sections included so showing one again
+ * needs no new styles; a section the editor adds brings its chunk with the next render.
+ */
+export function previewCss(types: readonly string[]): string {
+  return [baseCss, ...[...new Set(types)].sort().map((t) => sectionCss[t])].filter(Boolean).join("\n");
+}
 
 /** Styles for preview-only placeholders (section render errors). */
 export const FRAME_EXTRA_CSS =
@@ -145,10 +150,14 @@ export function useFrameHead(frameDoc: Document | null, doc: PageDoc, theme: Bui
     prevAttrs.current = syncHtml(frameDoc, doc.locale, theme.attrs, prevAttrs.current, classKey.split(" "), page);
   }, [frameDoc, doc.locale, theme.attrs, classKey, page]);
 
+  // the type list as the key: typing in a section must not rebuild the stylesheet
+  const typesKey = [...new Set(doc.sections.map((x) => x.type))].sort().join(" ");
+  const base = useMemo(() => previewCss(typesKey.split(" ")), [typesKey]);
+
   useIsoLayoutEffect(() => {
     if (!frameDoc) return;
-    syncStyles(frameDoc, { fonts, theme: theme.css, base: PREVIEW_CSS, extra: extraCss ?? "" });
-  }, [frameDoc, fonts, theme.css, extraCss]);
+    syncStyles(frameDoc, { fonts, theme: theme.css, base, extra: extraCss ?? "" });
+  }, [frameDoc, fonts, theme.css, base, extraCss]);
 }
 
 /** Observed size of an element (content box). */

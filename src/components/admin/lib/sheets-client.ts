@@ -1,9 +1,11 @@
 "use client";
 /**
- * Browser helpers for the Google Sheets admin API (/api/admin/sheets/*): plain-language toasts,
- * the server's French explanations passed through as-is.
+ * Browser helpers for the store's Google Sheets API (/api/app/<handle>/sheets/*, the dashboard on screen):
+ * plain-language toasts, the server's French explanations passed through as-is.
  */
 import { toast } from "sonner";
+import { apiHref } from "@/lib/urls";
+import { requireStoreHandle } from "../shell/store-handle";
 import { int } from "./format";
 
 interface SyncResponse {
@@ -17,7 +19,7 @@ interface SyncResponse {
 export async function runSheetSync(): Promise<boolean> {
   let res: Response;
   try {
-    res = await fetch("/api/admin/sheets/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    res = await fetch(apiHref(requireStoreHandle(), "/sheets/sync"), { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   } catch {
     toast.error("Network problem — the sync didn't start.");
     return false;

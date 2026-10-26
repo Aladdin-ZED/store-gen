@@ -22,6 +22,7 @@ import { MOD, Segmented, TipButton } from "../ui";
 import { LiveStatus, PageNameField, SlugControl } from "./PageIdentity";
 import { RemixMenu } from "./RemixMenu";
 import { SaveStatus } from "./SaveStatus";
+import { useStore } from "@/components/admin/shell/store-context";
 
 const ZOOMS: { value: ZoomLevel; label: string }[] = [
   { value: "fit", label: "Fit" },
@@ -50,6 +51,7 @@ export function TopBar() {
   const publishMounted = useOpenedOnce(publishOpen);
   const versionsMounted = useOpenedOnce(versionsOpen);
   const exportMounted = useOpenedOnce(exportOpen);
+  const storeView = useStore();
 
   const openPreview = async () => {
     // open the tab inside the click (popup blockers), then point it at the saved draft
@@ -57,7 +59,7 @@ export function TopBar() {
     if (tab) tab.opener = null;
     const ok = await flush();
     if (!ok) toast.warning("Showing the last saved version — your latest edits are not saved yet.");
-    const url = `/admin/preview/${page.id}`;
+    const url = storeView.href(`/preview/${page.id}`);
     if (tab) tab.location.href = url;
     else window.open(url, "_blank", "noopener");
   };
@@ -109,7 +111,7 @@ export function TopBar() {
       {/* identity */}
       <div className="flex min-w-0 flex-1 items-center gap-1">
         <TipButton label="All pages" asChild>
-          <Link href="/admin/pages">
+          <Link href={storeView.href("/pages")}>
             <ArrowLeft />
           </Link>
         </TipButton>
@@ -192,7 +194,7 @@ export function TopBar() {
               {page.status === "published" ? (
                 <>
                   <DropdownMenuItem asChild>
-                    <a href={`/${page.slug}`} target="_blank" rel="noopener noreferrer">
+                    <a href={storeView.live(page.slug)} target="_blank" rel="noopener noreferrer">
                       <ArrowUpRight />
                       Open live page
                     </a>
@@ -220,7 +222,7 @@ export function TopBar() {
         title="Take this page offline?"
         description={
           <>
-            Visitors of <span className="font-mono text-foreground/80">/{page.slug}</span> will see a “page not found” and can no longer order. Ads pointing here stop
+            Visitors of <span className="font-mono text-foreground/80">{storeView.livePath(page.slug)}</span> will see a “page not found” and can no longer order. Ads pointing here stop
             converting. You can publish it again at any time.
           </>
         }

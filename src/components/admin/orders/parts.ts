@@ -6,7 +6,7 @@
  *
  * Reads v1 rows too (orderUnits: units rebuilt from `variants`, item "main", no item name).
  */
-import type { OrderItems, OrderUnit } from "@/lib/db/schema";
+import type { OrderItems, OrderUnit } from "@/lib/orders";
 import { orderUnits } from "@/lib/orders/text";
 
 export type PartKind = "unit" | "free" | "bump" | "upsell";

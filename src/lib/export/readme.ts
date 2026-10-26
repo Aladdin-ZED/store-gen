@@ -1,11 +1,17 @@
 /**
  * README.md of an export — deploy steps (Hostinger File Manager, Netlify Drop, Vercel, Cloudflare
- * Pages), how orders flow in the chosen mode, how to revoke, and a launch checklist.
+ * Pages), how orders flow in the chosen mode, how to revoke, and a launch checklist. The tool is named by
+ * the platform's brand (`platform.brand.name`, EXP-07); the store's name is the one the page shows.
  */
 import type { ExportMode, SiteUrl } from "./options";
 
+/** The tool's name when the caller gives none (`platform.brand.name`'s default). */
+const DEFAULT_BRAND = "Store Gen";
+
 export interface ReadmeInput {
   mode: ExportMode;
+  /** the platform's name ("Store Gen"): where orders go, where to revoke */
+  brand?: string;
   pageName: string;
   storeName: string;
   exportId: string;
@@ -26,20 +32,23 @@ export interface ReadmeInput {
   warnings: string[];
 }
 
-const MODE_TITLE: Record<ExportMode, string> = {
-  connected: "Connected — orders go to COD Studio",
-  php: "PHP — orders handled by order.php on your hosting",
-  whatsapp: "WhatsApp — orders arrive as WhatsApp messages",
+const MODE_TITLE: Record<ExportMode, (brand: string) => string> = {
+  connected: (brand) => `Connected — orders go to ${brand}`,
+  php: () => "PHP — orders handled by order.php on your hosting",
+  whatsapp: () => "WhatsApp — orders arrive as WhatsApp messages",
 };
 
 const md = (s: string) => s.replace(/([\\`*_[\]<>|])/g, "\\$1");
 
+const brandOf = (i: ReadmeInput) => md(i.brand?.trim() || DEFAULT_BRAND);
+
 function ordersSection(i: ReadmeInput): string[] {
+  const brand = brandOf(i);
   if (i.mode === "connected") {
     return [
       "## How orders work",
       "",
-      `The page sends every order to your COD Studio app (\`${i.apiOrigin ?? "PUBLIC_URL"}\`). Prices, packs and stock rules are`,
+      `The page sends every order to your ${brand} store (\`${i.apiOrigin ?? "PUBLIC_URL"}\`). Prices, packs and stock rules are`,
       "checked again on the server, the order appears in **Orders**, and it is pushed to your Google Sheet like",
       "orders from your live pages. Abandoned forms, analytics and the thank-you upsell work too.",
       "",
@@ -61,19 +70,19 @@ function ordersSection(i: ReadmeInput): string[] {
       "limits abuse (honeypot, timing, per-IP / per-phone limits, duplicate detection) and then:",
       "",
       `1. appends the order to \`${i.privateDir}/data/orders.jsonl\` — your private backup, one JSON line per order;`,
-      "2. adds it to your Google Sheet (the orders tab of COD Studio — same columns and statuses), when configured;",
+      `2. adds it to your Google Sheet (the orders tab of ${brand} — same columns and statuses), when configured;`,
       "3. sends a Telegram message, when configured.",
       "",
       "Orders that cannot reach Google stay queued and are retried with the next orders (or open",
-      "`https://your-domain/order.php?sync=1`). These orders do **not** appear in COD Studio.",
+      `\`https://your-domain/order.php?sync=1\`). These orders do **not** appear in ${brand}.`,
       "",
       `### Configure \`${i.privateDir}/config.php\``,
       "",
-      `- \`spreadsheet_id\`: ${p.spreadsheet ? "already set to the sheet connected in COD Studio." : "the link or id of your Google Sheet."}`,
+      `- \`spreadsheet_id\`: ${p.spreadsheet ? `already set to the sheet connected in ${brand}.` : "the link or id of your Google Sheet."}`,
       `- \`service_account\`: ${
         p.serviceAccount
-          ? `already contains the key of your export service account${p.serviceAccountEmail ? ` (\`${p.serviceAccountEmail}\`)` : ""}, not COD Studio's own key. It can read and change **every row** of the orders sheet (every page's customers, not only this page's): treat this ZIP and \`${i.privateDir}/\` like a password.`
-          : `upload the JSON key of a service account used only by this site (never COD Studio's own \`GOOGLE_SA_JSON_B64\` key) into \`${i.privateDir}/data/\` (create the folder if needed) and write its path here: \`'data/service-account.json'\`.`
+          ? `already contains the key of your export service account${p.serviceAccountEmail ? ` (\`${p.serviceAccountEmail}\`)` : ""}, not the platform's own key. It can read and change **every row** of the orders sheet (every page's customers, not only this page's): treat this ZIP and \`${i.privateDir}/\` like a password.`
+          : `upload the JSON key of a service account used only by this site (never the platform's own key, nor one another site or app needs) into \`${i.privateDir}/data/\` (create the folder if needed) and write its path here: \`'data/service-account.json'\`.`
       }`,
       "- Share the spreadsheet with the service account's e-mail (`client_email` in the key) as **Editor**.",
       "- Optional: `telegram_bot_token` (from @BotFather) and `telegram_chat_id`.",
@@ -94,7 +103,7 @@ function ordersSection(i: ReadmeInput): string[] {
     "reaches you when the shopper taps send. The thank-you page keeps a one-tap “Open WhatsApp” button until then.",
     "In in-app browsers (Facebook, Instagram, TikTok) WhatsApp opens from that button, which they always allow.",
     "",
-    "These orders do **not** appear in COD Studio or your Google Sheet. To change the number, make a new export.",
+    `These orders do **not** appear in ${brand} or your Google Sheet. To change the number, make a new export.`,
   ];
 }
 
@@ -161,11 +170,12 @@ function deploySection(i: ReadmeInput): string[] {
 }
 
 function revokeSection(i: ReadmeInput): string[] {
+  const brand = brandOf(i);
   if (i.mode === "connected") {
     return [
       "## Stop or replace this export",
       "",
-      "COD Studio → the page → **Export** → *Recent exports* → **Revoke**. From that moment the API refuses orders,",
+      `${brand} → the page → **Export** → *Recent exports* → **Revoke**. From that moment the API refuses orders,`,
       "leads and analytics from this copy (shoppers see an error instead of a false confirmation) — remove the",
       "files from your host too. After publishing changes, make a new export, upload it, then revoke the old one.",
     ];
@@ -174,7 +184,7 @@ function revokeSection(i: ReadmeInput): string[] {
     return [
       "## Stop or replace this export",
       "",
-      "This copy runs entirely on your hosting: revoking it in COD Studio only marks it as retired. To stop it,",
+      `This copy runs entirely on your hosting: revoking it in ${brand} only marks it as retired. To stop it,`,
       `delete \`order.php\` (or the whole site). Then delete \`${i.privateDir}/\` after downloading`,
       "`data/orders.jsonl`.",
       "",
@@ -182,9 +192,9 @@ function revokeSection(i: ReadmeInput): string[] {
         ? [
             "**If this ZIP or your hosting may have leaked**, delete the key in Google Cloud right away: **IAM & Admin →",
             `Service accounts** → ${i.php.serviceAccountEmail ? `\`${i.php.serviceAccountEmail}\`` : "your export service account"} → **Keys** → delete the key. Removing the files`,
-            "is not enough: whoever copied `config.php` can keep reading and rewriting your orders sheet with it. COD Studio",
+            `is not enough: whoever copied \`config.php\` can keep reading and rewriting your orders sheet with it. ${brand}`,
             "syncs with another account and keeps working. Other PHP exports that carry the same key stop writing to the",
-            "sheet too: add a new key to the server (`GOOGLE_EXPORT_SA_JSON_B64`), then export and upload the pages you keep.",
+            "sheet too: add a new export key in Settings → Google Sheets, then export and upload the pages you keep.",
           ]
         : [
             "If this ZIP or your hosting may have leaked, delete the key you uploaded in Google Cloud (**IAM & Admin →",
@@ -196,7 +206,7 @@ function revokeSection(i: ReadmeInput): string[] {
   return [
     "## Stop or replace this export",
     "",
-    "This copy needs no server: revoking it in COD Studio only marks it as retired. Remove the files from your",
+    `This copy needs no server: revoking it in ${brand} only marks it as retired. Remove the files from your`,
     "host to take it offline.",
   ];
 }
@@ -220,7 +230,7 @@ export function readmeMd(i: ReadmeInput): string {
   const lines = [
     `# ${md(i.pageName)} — static export`,
     "",
-    `**${MODE_TITLE[i.mode]}** · ${md(i.storeName)} · export \`${i.exportId}\` · ${i.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC`,
+    `**${MODE_TITLE[i.mode](brandOf(i))}** · ${md(i.storeName)} · export \`${i.exportId}\` · ${i.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC`,
     "",
     "```",
     ...files,

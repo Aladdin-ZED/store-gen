@@ -54,9 +54,37 @@ export interface LandingCheckContext {
   facts: { allowed: string[]; byClass: Partial<Record<NumberClass, string[]>> }; // from allowedNumbersFor(), as the gate
   origin: Record<string, "generated" | "owner">; // per text-field path, who wrote it (LAN-§6.4)
   attestedFacts: string[]; // numerals attested through FactAttestSheet (audit page.fact_attested)
-  appHref: (path: `/${string}`) => string; // fix links (replaces the "/admin/settings/store" literal)
+  appHref: (path: `/${string}`) => string; // fix links under the store's dashboard ("/settings/general" → "/app/<h>/settings/general")
 }
 
-export function isLandingCheckContext(value: unknown): value is LandingCheckContext {
-  return typeof value === "object" && value !== null && (value as { saas?: unknown }).saas === true;
+/**
+ * The part of the context the server preload computes (`loadCheckContext`, ./check-context.server.ts): plain JSON,
+ * shipped in the builder's bootstrap. The browser adds what only it has: the store identity the panel already
+ * holds, the clock, the pixel context and the store's `appHref`.
+ */
+export type CheckContextData = Omit<LandingCheckContext, "store" | "now" | "pixels" | "appHref">;
+
+/** The full context from the server's data and the browser's parts. */
+export function checkContextOf(
+  data: CheckContextData,
+  parts: { store: StoreHealth; appHref: LandingCheckContext["appHref"]; now?: number; pixels?: PixelCheckContext },
+): LandingCheckContext {
+  return { ...data, ...parts };
+}
+
+/** A context with no store facts (fixtures, a page whose preload failed): every store-fact rule stays silent. */
+export function emptyCheckData(): CheckContextData {
+  return {
+    saas: true,
+    zones: { enabled: false, count: 0, hasMarketList: false, feesByTopCity: {} },
+    policiesReviewed: true,
+    confirmation: { callerPhone: true, whatsapp: true, callingWindow: true, callingWindowSaved: true },
+    waOrder: false,
+    addressMode: "required",
+    leadDays: 0,
+    published: null,
+    facts: { allowed: [], byClass: {} },
+    origin: {},
+    attestedFacts: [],
+  };
 }

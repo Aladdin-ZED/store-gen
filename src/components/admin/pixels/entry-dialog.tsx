@@ -9,7 +9,7 @@ import { CircleAlertIcon, CircleCheckIcon, Loader2Icon, SendIcon } from "lucide-
 import { useId, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { sendPixelTestAction, savePixelEntryAction } from "@/app/admin/(panel)/settings/pixels/actions";
+import { sendPixelTestAction, savePixelEntryAction } from "@/lib/pixels/actions";
 import type { TestEventResult } from "@/lib/orders/conversions-core";
 import { ID_HELP, TEST_CODE_RE, TOKEN_RE, isMask } from "@/lib/pixels/form";
 import { PIXEL_ID_RE, PIXEL_PLATFORMS, isServerPlatform, normalizePixelId, type PixelPlatform, type ServerPlatform } from "@/lib/pixels/ids";

@@ -1,10 +1,12 @@
 "use client";
 /**
- * Browser client for the media API (/api/admin/media): list, upload with real progress (XHR),
- * delete. Shared by the Media library and the MediaPicker.
+ * Browser client for the store's media API (/api/app/<handle>/media, the store on screen): list, upload with real
+ * progress (XHR), delete. Shared by the Media library and the MediaPicker.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { requireStoreHandle } from "@/components/admin/shell/store-handle";
 import type { AssetFocus } from "@/lib/media/focus";
+import { apiHref } from "@/lib/urls";
 
 export interface MediaAsset {
   id: string;
@@ -40,6 +42,15 @@ export const MAX_VIDEO_MB = 25;
 
 export class MediaApiError extends Error {}
 
+/** "/api/app/<handle>/media<rest>" for the store on screen (MediaApiError outside a store's dashboard). */
+function mediaApi(rest = ""): string {
+  try {
+    return `${apiHref(requireStoreHandle(), "/media")}${rest}`;
+  } catch (err) {
+    throw new MediaApiError(err instanceof Error ? err.message : "Couldn't reach the media library.");
+  }
+}
+
 /** DELETE refused (409): live pages or the store logo still show the file — confirm, then force. */
 export class MediaInUseError extends MediaApiError {
   constructor(
@@ -62,7 +73,7 @@ function query(filter: MediaFilter, q: string, page: number, pageSize: number, s
 }
 
 export async function fetchMedia(opts: { filter: MediaFilter; q: string; page: number; pageSize?: number; sourceAssetId?: string; signal?: AbortSignal }) {
-  const res = await fetch(`/api/admin/media?${query(opts.filter, opts.q, opts.page, opts.pageSize ?? 48, opts.sourceAssetId)}`, {
+  const res = await fetch(mediaApi(`?${query(opts.filter, opts.q, opts.page, opts.pageSize ?? 48, opts.sourceAssetId)}`), {
     signal: opts.signal,
     headers: { Accept: "application/json" },
   });
@@ -82,7 +93,7 @@ export function uploadMedia(
     if (opts.cutout) form.append("cutout", "1");
     if (opts.sourceAssetId) form.append("sourceAssetId", opts.sourceAssetId);
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/admin/media");
+    xhr.open("POST", mediaApi());
     xhr.responseType = "json";
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) opts.onProgress?.(e.loaded / e.total);
@@ -90,7 +101,7 @@ export function uploadMedia(
     xhr.onload = () => {
       const body = xhr.response as { ok?: boolean; asset?: MediaAsset; deduped?: boolean; message?: string; error?: string } | null;
       if (xhr.status >= 200 && xhr.status < 300 && body?.ok && body.asset) resolve({ asset: body.asset, deduped: !!body.deduped });
-      else if (xhr.status === 429) reject(new MediaApiError("Too many uploads at once — wait a few minutes."));
+      else if (xhr.status === 429) reject(new MediaApiError(body?.message ?? "Too many uploads at once — wait a few minutes."));
       else reject(new MediaApiError(body?.message ?? (xhr.status === 413 ? "This file is too large." : "Upload failed. Please try again.")));
     };
     xhr.onerror = () => reject(new MediaApiError("Network problem during the upload."));
@@ -107,7 +118,7 @@ export function uploadMedia(
 export async function deleteMedia(id: string, opts: { force?: boolean } = {}): Promise<void> {
   const p = new URLSearchParams({ id });
   if (opts.force) p.set("force", "1");
-  const res = await fetch(`/api/admin/media?${p}`, { method: "DELETE" });
+  const res = await fetch(mediaApi(`?${p}`), { method: "DELETE" });
   if (res.ok || res.status === 404) return;
   if (res.status === 409) {
     const body = (await res.json().catch(() => null)) as {

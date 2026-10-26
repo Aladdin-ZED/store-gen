@@ -7,12 +7,14 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { useOpenedOnce } from "@/components/admin/lib/lazy";
 import { MediaPicker } from "@/components/admin/on-demand";
+import { requireStoreHandle } from "@/components/admin/shell/store-handle";
 // the picker's material layer; the builder doesn't load the panel stylesheet, and the code-split
 // picker must not open unstyled on a slow first fetch
 import "@/components/admin/styles/admin.css";
 import { assetRowOf } from "@/lib/media/asset-row";
 import type { AssetFocus } from "@/lib/media/focus";
 import type { EditorAsset } from "@/lib/editor/types";
+import { apiHref } from "@/lib/urls";
 import { useEditorApi } from "./context";
 import { useEnv } from "./env";
 
@@ -104,7 +106,8 @@ export function MediaProvider({ children }: { children: ReactNode }) {
       form.append("file", file, opts.name ?? "upload.png");
       if (opts.cutout) form.append("cutout", "1");
       if (opts.sourceAssetId) form.append("sourceAssetId", opts.sourceAssetId);
-      const res = await fetch("/api/admin/media", { method: "POST", body: form, credentials: "same-origin" });
+      // the store's media API (the builder's page belongs to the store on screen)
+      const res = await fetch(apiHref(requireStoreHandle(), "/media"), { method: "POST", body: form, credentials: "same-origin" });
       const json = (await res.json().catch(() => null)) as { ok?: boolean; asset?: PickedAsset & { kind?: "image" | "video"; palette?: unknown }; message?: string } | null;
       if (!res.ok || !json?.ok || !json.asset) throw new Error(json?.message ?? "The upload failed.");
       const row = toEditorAsset(json.asset, json.asset.kind ?? "image", json.asset.palette ?? null);

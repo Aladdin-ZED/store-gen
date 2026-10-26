@@ -18,9 +18,21 @@ import { FormConfig, Offers, Product, Seo, ThankYou, type PageDoc } from "@/lib/
 import { sectionIssues, valuesOfKind } from "./fields";
 import { getAt, parsePath, setAt } from "./paths";
 import { duplicateOf, isRequired, normalizeOrder, planInsert, zoneRange } from "./sections";
-import type { EditorAsset, EditorBootstrap, EditorPageMeta, VersionSummary } from "./types";
+import type { EditorAsset, EditorBootstrap, EditorPageMeta, PageKind, VersionSummary } from "./types";
 
 export type LeftTab = "sections" | "theme" | "product" | "offers" | "form" | "seo";
+
+const LANDING_TABS: readonly LeftTab[] = ["sections", "theme", "product", "offers", "form", "seo"];
+const STORE_PAGE_TABS: readonly LeftTab[] = ["sections", "theme", "seo"];
+
+/**
+ * The builder panels of a page kind (LND-30): a landing page sells its own product with offers and an order form;
+ * a store page (R2 kinds: home, product, collection, …) takes its products from the catalog, so it has no
+ * Product, Offers or Order form panel.
+ */
+export function tabsFor(kind: PageKind): readonly LeftTab[] {
+  return kind === "landing" ? LANDING_TABS : STORE_PAGE_TABS;
+}
 export type ZoomLevel = "fit" | 0.5 | 0.75 | 1;
 
 /** Edits of the same group closer than this become one undo step. */

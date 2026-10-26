@@ -8,15 +8,18 @@
  *     re-validated after the rewrite. Real WebM samples in qa/video/media are checked when present.
  *  2. upload-body.ts — single-copy body reader (and the capped reader for chunked bodies) and the
  *     multipart parser against undici-encoded forms.
- *  3. upload-slots.ts / throttle.ts — in-flight upload slots and the per-IP media token bucket.
+ *  3. upload-slots.ts / throttle.ts — in-flight upload slots (per member of a store, per store, per process)
+ *     and the per-IP media token bucket.
+ *  4. gate.ts — the processing gate shared fairly between stores (≤ 1 running + 1 waiting per store).
  * The database/disk side lives in selftest-store.ts.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MediaError } from "./errors";
+import { MAX_CONCURRENT, MAX_WAITING, acquireMediaGate, releaseMediaGate } from "./gate";
 import { spendMediaTokens, BUCKET_SIZE, REFILL_PER_SECOND } from "./throttle";
 import { declaredLength, MAX_PARTS, multipartBoundary, parseMultipart, readCappedBody, readExactBody } from "./upload-body";
-import { MAX_UPLOADS, MAX_UPLOADS_PER_USER, takeUploadSlot } from "./upload-slots";
+import { MAX_UPLOADS, MAX_UPLOADS_PER_STORE, MAX_UPLOADS_PER_USER, takeUploadSlot } from "./upload-slots";
 import { inspectVideo, MAX_SIBLINGS } from "./video";
 
 let failures = 0;
@@ -505,21 +508,26 @@ async function uploadBodyTests(): Promise<void> {
 
 function slotAndThrottleTests(): void {
   section("upload slots");
-  const a1 = takeUploadSlot("a");
-  const a2 = takeUploadSlot("a");
-  const a3 = takeUploadSlot("a");
-  check(`per user ≤ ${MAX_UPLOADS_PER_USER}`, a1.ok && a2.ok && !a3.ok && a3.scope === "user");
-  const others = Array.from({ length: MAX_UPLOADS - 2 }, (_, i) => takeUploadSlot(`u${i}`));
-  const over = takeUploadSlot("z");
-  check(`per process ≤ ${MAX_UPLOADS}`, others.every((s) => s.ok) && !over.ok && over.scope === "server");
+  const a1 = takeUploadSlot("A", "a");
+  const a2 = takeUploadSlot("A", "a");
+  const a3 = takeUploadSlot("A", "a");
+  check(`per member of a store ≤ ${MAX_UPLOADS_PER_USER}`, a1.ok && a2.ok && !a3.ok && a3.scope === "user");
+  const sameUserOtherStore = takeUploadSlot("B", "a");
+  check("the same user in another store has their own slots", sameUserOtherStore.ok);
+  const a4 = takeUploadSlot("A", "b");
+  const a5 = takeUploadSlot("A", "c");
+  check(`per store ≤ ${MAX_UPLOADS_PER_STORE}`, a4.ok && !a5.ok && a5.scope === "store");
+  const over = takeUploadSlot("C", "z");
+  check(`per process ≤ ${MAX_UPLOADS}`, MAX_UPLOADS === 4 && !over.ok && over.scope === "server");
   if (a1.ok) {
     a1.release();
     a1.release(); // idempotent
   }
-  const again = takeUploadSlot("a");
-  check("release frees exactly one slot", again.ok && !takeUploadSlot("y").ok);
-  for (const s of [a2, again, ...others]) if (s.ok) s.release();
-  check("all released", globalThis.__codUploadSlots?.total === 0 && globalThis.__codUploadSlots.perUser.size === 0);
+  const again = takeUploadSlot("C", "z");
+  check("release frees exactly one slot (another store takes it)", again.ok && !takeUploadSlot("D", "y").ok);
+  for (const s of [a2, a4, sameUserOtherStore, again]) if (s.ok) s.release();
+  const st = globalThis.__codUploadSlots;
+  check("all released", st?.total === 0 && st.perUser.size === 0 && st.perStore.size === 0);
 
   section("media throttle");
   const t = 1_000_000;
@@ -533,9 +541,53 @@ function slotAndThrottleTests(): void {
   check("large cost waits proportionally", spendMediaTokens("198.51.100.7", 13, t + 1000) === Math.ceil(13 / REFILL_PER_SECOND));
 }
 
+/* ------------------------------------------------------------------ */
+/* 4. processing gate                                                  */
+/* ------------------------------------------------------------------ */
+
+async function gateTests(): Promise<void> {
+  section("processing gate · per-store fairness");
+  const busy = async (storeId: string) => {
+    try {
+      await acquireMediaGate(storeId);
+      return "ok";
+    } catch (err) {
+      return err instanceof MediaError && err.code === "busy" ? "busy" : "error";
+    }
+  };
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const order: string[] = [];
+  check("first job of a store runs at once", (await busy("A")) === "ok");
+  // A's second job waits even though the process has a free slot: one running per store
+  const a2 = acquireMediaGate("A").then(() => order.push("A2"));
+  await tick();
+  check("a store's second job waits while its first runs", order.length === 0 && globalThis.__codMediaGate?.active === 1);
+  check("a store's third job is refused (1 running + 1 waiting per store)", (await busy("A")) === "busy");
+  check("another store starts at once in the free process slot", (await busy("B")) === "ok" && globalThis.__codMediaGate?.active === MAX_CONCURRENT);
+  const waiting = ["C", "D", "E"].map((id) => acquireMediaGate(id).then(() => order.push(id)));
+  await tick();
+  check(`process queue ≤ ${MAX_WAITING}`, globalThis.__codMediaGate?.waiters.length === MAX_WAITING && (await busy("F")) === "busy");
+  releaseMediaGate("A");
+  await tick();
+  // the slot goes to the oldest waiter whose store has nothing running: A2 (queued first, A now idle)
+  check("a freed slot starts the oldest eligible waiter", order.join(",") === "A2", order.join(","));
+  releaseMediaGate("B");
+  await tick();
+  check("then the next store in line", order.join(",") === "A2,C", order.join(","));
+  releaseMediaGate("A");
+  releaseMediaGate("C");
+  await Promise.all([a2, ...waiting]);
+  check("every waiter ran in order", order.join(",") === "A2,C,D,E", order.join(","));
+  releaseMediaGate("D");
+  releaseMediaGate("E");
+  const g = globalThis.__codMediaGate;
+  check("gate empty afterwards", g?.active === 0 && g.waiters.length === 0 && g.stores.size === 0);
+}
+
 async function main(): Promise<void> {
   await uploadBodyTests();
   slotAndThrottleTests();
+  await gateTests();
   console.log(`\n${passes} passed, ${failures} failed`);
   if (failures) process.exit(1);
 }

@@ -5,7 +5,7 @@
  */
 import { RadarIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { pagesPixelsAction, type LivePagePixels } from "@/app/admin/(panel)/settings/pixels/actions";
+import { pagesPixelsAction, type LivePagePixels } from "@/lib/pixels/actions";
 import { PIXEL_NAMES } from "@/lib/pixels/ids";
 import { maskPixelId } from "@/lib/pixels/library";
 import { cn } from "@/lib/utils";

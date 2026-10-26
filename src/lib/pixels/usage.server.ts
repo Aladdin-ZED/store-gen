@@ -1,11 +1,15 @@
 import "server-only";
 /**
- * Pixel usage (docs/OFFERS.md §A.2 #5): computed, never stored. Which pages fire a pixel — in their
- * draft, on their live version — and how many non-revoked exports bake it in.
+ * Pixel usage (docs/OFFERS.md §A.2 #5): computed, never stored. Which pages of the store fire a pixel —
+ * in their draft, on their live version — and how many of its non-revoked exports bake it in.
  *
- *   pixelUsage()                 every pixel → usage (≤ 1000 non-archived pages; cached 30 s)
- *   pixelUsageOf(platform, id)   one pixel's pages (LIKE prefilter, confirmed on the tracking ids)
- *   invalidatePixelUsage()       after saves, publishes, replaces (this worker)
+ *   pixelUsage(scope)                   every pixel → usage (≤ 1000 non-archived pages; cached 30 s per store)
+ *   pixelUsageOf(scope, platform, id)   one pixel's pages (LIKE prefilter, confirmed on the tracking ids)
+ *   invalidatePixelUsage(storeId)       after saves, publishes, replaces (this worker)
+ *
+ * Per store (docs/STORE-SAAS.md §E.3, §E.6; PIX-05): every scan carries the store predicate on pages,
+ * versions and exports, and the index is the store's entry of `scopedCache("pixel-usage")`, so one
+ * store's pages never count in another store's library.
  *
  * Only `$.tracking` of each stored document is read (JSON_EXTRACT on the LONGTEXT column), never the
  * whole document, and ids are confirmed with pixelIdList on that value.
@@ -13,6 +17,9 @@ import "server-only";
 import { and, desc, eq, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { exportsTable, pages, pageVersions } from "@/lib/db/schema";
+import { scopedCache } from "@/lib/tenancy/cache";
+import { inStore, whereStore } from "@/lib/tenancy/sql";
+import type { StoreScope } from "@/lib/tenancy/types";
 import { PIXEL_ID_RE, type PixelPlatform } from "./ids";
 import { NO_USAGE, pixelKey, trackingRefs, type PixelUsageCount } from "./library";
 
@@ -31,14 +38,16 @@ export interface PixelPageUse {
 
 export type UsageIndex = Map<string, PixelPageUse[]>;
 
-interface Cache {
-  at: number;
-  index: UsageIndex;
-}
-const store = globalThis as { __codPixelUsage?: Cache | null };
+const usageCache = () => scopedCache<UsageIndex>({ name: "pixel-usage", maxEntries: 500, ttlMs: TTL_MS });
+const INDEX = "index";
 
-export function invalidatePixelUsage(): void {
-  store.__codPixelUsage = null;
+/**
+ * Drop the store's cached index. Without a store id every store's index goes: the form of today's
+ * store-less callers (the publish path), until they pass the page's store (T3).
+ */
+export function invalidatePixelUsage(storeId?: string): void {
+  if (storeId) usageCache().delete(storeId);
+  else usageCache().clear();
 }
 
 /** `$.tracking` of a JSON column as raw JSON text (null when absent). */
@@ -57,25 +66,28 @@ function parseTracking(raw: unknown): unknown {
 /** LIKE needle of an id inside stored JSON (pixel ids hold no LIKE wildcards: [0-9A-Za-z-]). */
 const needle = (id: string) => `%"${id}"%`;
 
-async function scan(filter?: { draft: SQL; version: SQL }): Promise<UsageIndex> {
+/** A page's live version, inside the store as well. */
+const liveJoin = (scope: StoreScope) => and(eq(pageVersions.id, pages.publishedVersionId), inStore(pageVersions, scope));
+
+async function scan(scope: StoreScope, filter?: { draft: SQL; version: SQL }): Promise<UsageIndex> {
   const [drafts, live, exps] = await Promise.all([
     db
       .select({ id: pages.id, name: pages.name, slug: pages.slug, tracking: trackingOf(pages.draft) })
       .from(pages)
-      .where(filter ? and(ne(pages.status, "archived"), filter.draft) : ne(pages.status, "archived"))
+      .where(whereStore(pages, scope, ne(pages.status, "archived"), filter?.draft))
       .limit(PAGE_LIMIT),
     db
       .select({ id: pages.id, name: pages.name, slug: pages.slug, tracking: trackingOf(pageVersions.doc) })
       .from(pages)
-      .innerJoin(pageVersions, eq(pageVersions.id, pages.publishedVersionId))
-      .where(filter ? and(eq(pages.status, "published"), filter.version) : eq(pages.status, "published"))
+      .innerJoin(pageVersions, liveJoin(scope))
+      .where(whereStore(pages, scope, eq(pages.status, "published"), filter?.version))
       .limit(PAGE_LIMIT),
     db
       .select({ pageId: exportsTable.pageId, name: pages.name, slug: pages.slug, tracking: trackingOf(pageVersions.doc) })
       .from(exportsTable)
-      .innerJoin(pageVersions, eq(pageVersions.id, exportsTable.versionId))
-      .innerJoin(pages, eq(pages.id, exportsTable.pageId))
-      .where(filter ? and(isNull(exportsTable.revokedAt), filter.version) : isNull(exportsTable.revokedAt))
+      .innerJoin(pageVersions, and(eq(pageVersions.id, exportsTable.versionId), inStore(pageVersions, scope)))
+      .innerJoin(pages, and(eq(pages.id, exportsTable.pageId), inStore(pages, scope)))
+      .where(whereStore(exportsTable, scope, isNull(exportsTable.revokedAt), filter?.version))
       .limit(PAGE_LIMIT * 2),
   ]);
   const index: UsageIndex = new Map();
@@ -92,20 +104,18 @@ async function scan(filter?: { draft: SQL; version: SQL }): Promise<UsageIndex> 
   return index;
 }
 
-/** Every pixel's pages (cached 30 s in this worker). */
-export async function pixelUsage(opts: { fresh?: boolean } = {}): Promise<UsageIndex> {
-  const hit = store.__codPixelUsage;
-  if (!opts.fresh && hit && Date.now() - hit.at < TTL_MS) return hit.index;
-  const index = await scan();
-  store.__codPixelUsage = { at: Date.now(), index };
-  return index;
+/** Every pixel of the store → its pages (cached 30 s per store in this worker). */
+export async function pixelUsage(scope: StoreScope, opts: { fresh?: boolean } = {}): Promise<UsageIndex> {
+  const cache = usageCache();
+  if (opts.fresh) cache.delete(scope.storeId, INDEX);
+  return cache.getOrLoad(scope.storeId, INDEX, () => scan(scope));
 }
 
-/** One pixel's pages, read now (LIKE prefilter, confirmed on the tracking ids). */
-export async function pixelUsageOf(platform: PixelPlatform, id: string): Promise<PixelPageUse[]> {
+/** One pixel's pages in the store, read now (LIKE prefilter, confirmed on the tracking ids). */
+export async function pixelUsageOf(scope: StoreScope, platform: PixelPlatform, id: string): Promise<PixelPageUse[]> {
   if (!PIXEL_ID_RE[platform].test(id)) return [];
   const like = needle(id);
-  const index = await scan({ draft: sql`${pages.draft} LIKE ${like}`, version: sql`${pageVersions.doc} LIKE ${like}` });
+  const index = await scan(scope, { draft: sql`${pages.draft} LIKE ${like}`, version: sql`${pageVersions.doc} LIKE ${like}` });
   return sortUses(index.get(pixelKey(platform, id)) ?? []);
 }
 
@@ -128,13 +138,13 @@ export interface LivePagePixels {
   none: boolean;
 }
 
-/** The live pixels of every live page (Pages list chips, "No pixel" filter). */
-export async function livePagePixels(): Promise<Record<string, LivePagePixels>> {
+/** The live pixels of every live page of the store (Pages list chips, "No pixel" filter). */
+export async function livePagePixels(scope: StoreScope): Promise<Record<string, LivePagePixels>> {
   const rows = await db
     .select({ id: pages.id, tracking: trackingOf(pageVersions.doc) })
     .from(pages)
-    .innerJoin(pageVersions, eq(pageVersions.id, pages.publishedVersionId))
-    .where(eq(pages.status, "published"))
+    .innerJoin(pageVersions, liveJoin(scope))
+    .where(whereStore(pages, scope, eq(pages.status, "published")))
     .limit(PAGE_LIMIT);
   const out: Record<string, LivePagePixels> = {};
   for (const r of rows) {
@@ -150,12 +160,12 @@ export interface RecentPagePixels {
   pixels: { platform: PixelPlatform; id: string }[];
 }
 
-/** The most recently edited non-archived pages whose draft has pixels ("Same as…" in the wizard). */
-export async function recentPagesWithPixels(limit = 8): Promise<RecentPagePixels[]> {
+/** The store's most recently edited non-archived pages whose draft has pixels ("Same as…" in the wizard). */
+export async function recentPagesWithPixels(scope: StoreScope, limit = 8): Promise<RecentPagePixels[]> {
   const rows = await db
     .select({ id: pages.id, name: pages.name, tracking: trackingOf(pages.draft) })
     .from(pages)
-    .where(ne(pages.status, "archived"))
+    .where(whereStore(pages, scope, ne(pages.status, "archived")))
     .orderBy(desc(pages.updatedAt))
     .limit(60);
   const out: RecentPagePixels[] = [];

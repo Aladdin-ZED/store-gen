@@ -7,6 +7,7 @@
  *   normalizeSiteUrl(raw)         → { origin, base, href } of the public address of the exported site
  */
 import { z } from "zod";
+import { adminHostName, hostOf, legacyPlatformHosts, platformHost, storeRootDomain } from "@/lib/edge/env";
 import { originAllowed } from "@/lib/orders/origin";
 import { whatsappDigits } from "@/lib/render/config";
 
@@ -124,13 +125,32 @@ function entryText(e: ParsedEntry): string {
 }
 
 /**
+ * An entry naming the platform itself (PLATFORM_HOST, a former platform host, the console's host) or a store address
+ * under STORE_ROOT_DOMAIN (the apex, a subdomain, a wildcard covering one): every store's pages are served there, so
+ * the export would take orders from all of them (docs/STORE-SAAS.md §C.9, SEC-23). Refused at save; `originAllowed`
+ * refuses it again at check time. The variables are server-only: in the dialog this check passes and the server
+ * answers the field error.
+ */
+function platformEntry(e: ParsedEntry): boolean {
+  const host = hostOf(e.host);
+  if (!host) return false;
+  const name = host.replace(/:\d+$/, "");
+  const covers = (h: string) => (e.wildcard ? h.replace(/:\d+$/, "").endsWith(`.${name}`) : h === host);
+  for (const h of [platformHost(), adminHostName(), ...legacyPlatformHosts()]) if (h && covers(h)) return true;
+  const root = storeRootDomain();
+  return !!root && (name === root || name.endsWith(`.${root}`) || (e.wildcard && root.endsWith(`.${name}`)));
+}
+
+/**
  * Validates allow-list entries for connected exports (full origins, bare hosts or "*.shop.ma"
  * wildcards). Every accepted entry is proven effective with the order API's own matcher, so the
- * dialog can never save an entry the server would silently ignore (e.g. "*.co.ma").
+ * dialog can never save an entry the server would silently ignore (e.g. "*.co.ma"). `platform` lists
+ * the entries refused because they name the platform's own addresses (also in `invalid`).
  */
-export function normalizeAllowedOrigins(input: readonly string[]): { origins: string[]; invalid: string[] } {
+export function normalizeAllowedOrigins(input: readonly string[]): { origins: string[]; invalid: string[]; platform: string[] } {
   const origins: string[] = [];
   const invalid: string[] = [];
+  const platform: string[] = [];
   for (const raw of input) {
     const trimmed = raw.trim();
     if (!trimmed) continue;
@@ -141,9 +161,14 @@ export function normalizeAllowedOrigins(input: readonly string[]): { origins: st
       invalid.push(trimmed);
       continue;
     }
+    if (platformEntry(e)) {
+      invalid.push(trimmed);
+      platform.push(trimmed);
+      continue;
+    }
     if (!origins.includes(text)) origins.push(text);
   }
-  return { origins, invalid };
+  return { origins, invalid, platform };
 }
 
 /** Is this origin covered by the allow-list (same rules as the order API)? */
@@ -205,8 +230,10 @@ export function parseExportRequest(input: unknown, opts: { phoneCountry?: string
 
   let allowedOrigins: string[] = [];
   if (r.mode === "connected") {
-    const { origins, invalid } = normalizeAllowedOrigins(r.allowedOrigins);
-    if (invalid.length) {
+    const { origins, invalid, platform } = normalizeAllowedOrigins(r.allowedOrigins);
+    if (platform.length) {
+      errors.allowedOrigins = `${platform[0]} is this platform's own address, shared by every store. Add the domain where you will host the page.`;
+    } else if (invalid.length) {
       errors.allowedOrigins = `Not a valid domain: ${invalid.slice(0, 3).join(", ")} — use shop.ma, https://shop.ma or *.shop.ma`;
     } else if (!origins.length && opts.requireOrigins !== false) {
       errors.allowedOrigins = "Add the domain where you will host the page — orders from other sites are refused.";

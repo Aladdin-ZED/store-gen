@@ -2,17 +2,25 @@ import "server-only";
 /**
  * Lazy subject analysis for rows uploaded before it existed (or analysed by an older FOCUS_VERSION).
  * Uploads analyse new images (./process.ts); scripts/media-backfill.ts recomputes in bulk; this is
- * the on-demand path: the framing picker's GET /api/admin/media/[id] and the builder bootstrap call
+ * the on-demand path: the framing picker's GET /api/app/<handle>/media/[id] and the builder bootstrap call
  * it, the result is stored, and from then on the builder canvas, every published version and every
  * export crop the image around its subject — all from the same stored row.
  *
  * Input is the same as the backfill's: the largest stored still rendition (the processed master,
  * EXIF-rotated and trimmed for cutouts — the pixels the upload analysed). One analysis per asset at a
  * time per process; a failure (busy media store, undecodable file) keeps the stored value.
+ *
+ * Multi-tenant (docs/STORE-SAAS.md §E.3; TENANCY-MAP MED-15): callers hand over rows they read through their own
+ * store scope (getAsset / getAssetsByIds), never an id from input. The analysis is a derived value of the row's
+ * own stored bytes, written back as the system (job "media.focus") to that row in its own store only, so a
+ * read-only viewer (an impersonating staff member, a builder open) fills it in like the backfill would and no
+ * write ever reaches another store's row.
  */
-import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { assets } from "@/lib/db/schema";
+import { systemCtx, systemScope } from "@/lib/jobs/scope";
+import { byId } from "@/lib/tenancy/sql";
+import type { WriteScope } from "@/lib/tenancy/types";
 import type { AssetRecord } from "./assets";
 import { FOCUS_VERSION, parseFocus, type AssetFocus } from "./focus";
 import { analyzeImageFocus } from "./focus-analyze";
@@ -24,6 +32,9 @@ declare global {
 }
 
 const flights = () => (globalThis.__codFocusFlights ??= new Map());
+
+/** The writer of the derived analysis (see the header). */
+const FOCUS_JOB = systemCtx("media.focus");
 
 /**
  * Images that could not be analysed (no stored rendition, undecodable pixels) → when to try again.
@@ -74,9 +85,14 @@ async function analyse(asset: AssetRecord, stored: AssetFocus | null): Promise<A
     rememberMiss(asset.id);
     return stored;
   }
-  await db.update(assets).set({ focus, focusVersion: FOCUS_VERSION }).where(eq(assets.id, asset.id));
+  await storeFocus(systemScope(FOCUS_JOB, asset.storeId), asset.id, focus);
   misses().delete(asset.id);
   return focus;
+}
+
+/** The analysis of one asset of the scope's store (0 rows when it was deleted meanwhile). */
+async function storeFocus(scope: WriteScope, id: string, focus: AssetFocus): Promise<void> {
+  await db.update(assets).set({ focus, focusVersion: FOCUS_VERSION }).where(byId(assets, scope, id));
 }
 
 /**

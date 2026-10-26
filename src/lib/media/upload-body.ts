@@ -1,5 +1,5 @@
 /**
- * Upload request body for POST /api/admin/media, read with ONE copy of the bytes.
+ * Upload request body for POST /api/app/<handle>/media, read with ONE copy of the bytes.
  *
  * The declared Content-Length (capped by the caller) sizes a single buffer the stream is copied
  * into; the multipart parser then hands out the file as a view into that buffer. No concatenated

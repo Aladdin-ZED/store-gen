@@ -3,14 +3,15 @@
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { Role } from "@/lib/auth/permissions";
 import { cn } from "@/lib/utils";
-import { settingsNavFor } from "../shell/nav";
+import { useStore } from "../shell/store-context";
+import { settingsNavFor } from "../shell/store-nav";
 
-/** Settings sub-navigation: a vertical list with a gliding highlight (horizontal scroller on phones). */
-export function SettingsNav({ role }: { role: Role }) {
+/** Settings sub-navigation of the store on screen: a vertical list with a gliding highlight (horizontal scroller on phones). */
+export function SettingsNav() {
   const pathname = usePathname();
-  const items = settingsNavFor(role);
+  const store = useStore();
+  const items = settingsNavFor(store.can).map((i) => ({ ...i, href: store.href(i.path) }));
   return (
     <nav aria-label="Settings" className="-mx-4 overflow-x-auto px-4 adm-scroll lg:mx-0 lg:overflow-visible lg:px-0">
       <ul className="flex gap-1 lg:sticky lg:top-20 lg:flex-col">

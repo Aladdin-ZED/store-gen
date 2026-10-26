@@ -4,14 +4,19 @@
  */
 import type { AssetRowLike, StoreInfo } from "@/landing/context";
 import type { PageDoc } from "@/lib/page/schema";
+import type { GateItem } from "@/lib/tenancy/types";
+import type { CheckContextData } from "./check-context";
 
 export type PageStatus = "draft" | "published" | "archived";
+/** `pages.kind` (§D.2): only `landing` until R2's storefront kinds */
+export type PageKind = "landing" | "home" | "product" | "collection" | "page" | "policy" | "search" | "cart" | "checkout" | "not_found";
 export type VersionKind = "generation" | "save" | "publish" | "restore" | "import" | "autosave";
 
 export const VERSION_KINDS: readonly VersionKind[] = ["generation", "save", "publish", "restore", "import", "autosave"];
 
 export interface EditorPageMeta {
   id: string;
+  kind: PageKind;
   name: string;
   slug: string;
   status: PageStatus;
@@ -60,6 +65,8 @@ export interface EditorBootstrap {
   assets: Record<string, EditorAsset>;
   store: StoreInfo;
   storeHealth: StoreHealth;
+  /** the checklist's store facts (LAN Q15); the browser adds the clock, the pixels and the store's links */
+  check: CheckContextData;
   versions: VersionSummary[];
   hasMoreVersions: boolean;
   user: EditorUser;
@@ -79,6 +86,10 @@ export type ActionErrorCode =
   | "slug_taken"
   | "slug_reserved"
   | "publish_failed"
+  /** the publish gates refused (§M.1): `items` lists every refusal and note */
+  | "budget_blocked"
+  | "honesty_blocked"
+  | "design_blocked"
   | "server";
 
 export interface ActionFailure {
@@ -89,6 +100,8 @@ export interface ActionFailure {
   serverUpdatedAt?: number;
   /** publish_failed / invalid: details for the checklist */
   issues?: { path: string; message: string; sectionId?: string }[];
+  /** *_blocked: the gates' items, one row each in the publish dialog (§M.1 rule 2) */
+  items?: GateItem[];
 }
 
 export type ActionResult<T extends object = object> = ({ ok: true } & T) | ActionFailure;

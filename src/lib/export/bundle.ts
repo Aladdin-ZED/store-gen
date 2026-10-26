@@ -72,6 +72,8 @@ export interface PhpBundleOptions {
 
 export interface BundleInput {
   mode: ExportMode;
+  /** the platform's name in the README (`platform.brand.name`, EXP-07); "Store Gen" when omitted */
+  brand?: string;
   /** a document that passed validateDoc() */
   doc: PageDoc;
   exportId: string;
@@ -359,6 +361,7 @@ export async function buildBundle(input: BundleInput): Promise<ExportBundle> {
 
   const readme = readmeMd({
     mode: input.mode,
+    brand: input.brand,
     pageName: input.pageName,
     storeName,
     exportId: input.exportId,

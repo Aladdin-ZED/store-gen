@@ -1,6 +1,7 @@
 import { ArrowRightIcon, ArrowUpRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { DashboardData } from "@/lib/admin-data/dashboard";
+import { appHref } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "../common/empty-state";
 import { StatusChip, TONE_CLASSES } from "../common/status-chip";
@@ -26,11 +27,11 @@ function CardHead({ title, description, href, cta }: { title: string; descriptio
 }
 
 /** Pages ranked by orders over 7 days, with a conversion bar. */
-export function TopPages({ pages, currency, className }: { pages: DashboardData["topPages"]; currency: string; className?: string }) {
+export function TopPages({ handle, pages, currency, className }: { handle: string; pages: DashboardData["topPages"]; currency: string; className?: string }) {
   const best = Math.max(...pages.map((p) => p.conversion), 0.0001);
   return (
     <section className={cn("adm-surface adm-rise flex flex-col gap-4 pb-3", className)} style={{ ["--i" as string]: 6 }} aria-label="Top pages">
-      <CardHead title="Top pages" description="Last 7 days, by orders" href="/admin/pages" cta="All pages" />
+      <CardHead title="Top pages" description="Last 7 days, by orders" href={appHref(handle, "/pages")} cta="All pages" />
       {pages.length === 0 ? (
         <div className="px-5 pb-3 sm:px-6">
           <EmptyState compact illustration="pages" title="No visits this week" description="Once a published page gets traffic, it shows up here with its conversion." />
@@ -84,10 +85,10 @@ export function TopPages({ pages, currency, className }: { pages: DashboardData[
 }
 
 /** The latest real orders (bots excluded), newest first. */
-export function RecentOrders({ orders, className }: { orders: DashboardData["recentOrders"]; className?: string }) {
+export function RecentOrders({ handle, orders, className }: { handle: string; orders: DashboardData["recentOrders"]; className?: string }) {
   return (
     <section className={cn("adm-surface adm-rise flex flex-col gap-3 pb-3", className)} style={{ ["--i" as string]: 7 }} aria-label="Recent orders">
-      <CardHead title="Recent orders" href="/admin/orders" cta="Open orders" />
+      <CardHead title="Recent orders" href={appHref(handle, "/orders")} cta="Open orders" />
       {orders.length === 0 ? (
         <div className="px-5 pb-3 sm:px-6">
           <EmptyState compact illustration="orders" title="No orders yet" description="New orders appear here the second they're placed." />
@@ -100,7 +101,7 @@ export function RecentOrders({ orders, className }: { orders: DashboardData["rec
             return (
               <li key={o.id} className="adm-fade" style={{ ["--i" as string]: i + 7 }}>
                 <Link
-                  href={`/admin/orders?order=${encodeURIComponent(o.id)}`}
+                  href={appHref(handle, `/orders?order=${encodeURIComponent(o.id)}`)}
                   className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-200 hover:bg-foreground/[0.035]"
                 >
                   <span className="grid min-w-0 flex-1 gap-0.5">

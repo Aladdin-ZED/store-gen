@@ -25,6 +25,7 @@ import { useEditor, useEditorStore } from "./context";
 import { fullTime, relativeTime, useEnv, useNow } from "./env";
 import { usePersistence } from "./persistence";
 import { EASE, Segmented } from "./ui";
+import { useStore } from "@/components/admin/shell/store-context";
 
 const KIND: Record<VersionKind, { label: string; dot: string }> = {
   generation: { label: "Generated", dot: "bg-violet-500" },
@@ -55,6 +56,7 @@ export function VersionsDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
   const { user, store: storeInfo } = useEnv();
   const { call, flush } = usePersistence();
   const router = useRouter();
+  const storeView = useStore();
   const now = useNow(30_000);
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<string | null>(null);
@@ -152,11 +154,11 @@ export function VersionsDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
       return;
     }
     toast.success("New page created", {
-      description: `/${res.slug}`,
+      description: storeView.livePath(res.slug),
       action: {
         label: "Open",
         onClick: () => {
-          void flush().then(() => router.push(`/admin/pages/${res.pageId}/edit`));
+          void flush().then(() => router.push(storeView.href(`/pages/${res.pageId}/edit`)));
         },
       },
     });
@@ -288,7 +290,7 @@ export function VersionsDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
                       </Button>
                     ) : null}
                     <Button size="sm" variant="outline" asChild className="justify-start">
-                      <a href={`/admin/preview/${page.id}?v=${sel.id}`} target="_blank" rel="noopener noreferrer">
+                      <a href={storeView.href(`/preview/${page.id}?v=${sel.id}`)} target="_blank" rel="noopener noreferrer">
                         <ArrowUpRight />
                         Full preview
                       </a>

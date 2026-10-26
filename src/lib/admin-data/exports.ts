@@ -1,14 +1,18 @@
 import "server-only";
 /**
- * Exported sites (zip downloads): list and key revocation. A revoked export's key stops accepting
+ * The store's exported sites (zip downloads): list and key revocation. A revoked export's key stops accepting
  * orders, leads and analytics; its CORS allow-list is dropped within a minute (cached per process).
+ *
+ * Multi-tenant (docs/STORE-SAAS.md §E.3, ADM-21): the store's exports only, their page and version joined inside the
+ * same store; revoking another store's export id answers like a missing one; the write takes a `WriteScope`.
  */
 import { and, count, desc, eq, isNull, type SQL } from "drizzle-orm";
-import { audit } from "@/lib/audit";
 import { db } from "@/lib/db/client";
 import { exportsTable, pages, pageVersions, users } from "@/lib/db/schema";
 import { invalidateExportOrigins } from "@/lib/orders/export-origins";
-import { affected, type Actor } from "./pages";
+import { byId, inStore, whereStore } from "@/lib/tenancy/sql";
+import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
+import { affected, auditIn, type Actor } from "./store-audit";
 
 export interface ExportItem {
   id: string;
@@ -29,13 +33,13 @@ export interface ExportItem {
   revokedAt: string | null;
 }
 
-export async function listExports(filters: { pageId?: string; active?: boolean; page?: number; pageSize?: number } = {}) {
+export async function listExports(scope: StoreScope, filters: { pageId?: string; active?: boolean; page?: number; pageSize?: number } = {}) {
   const page = Math.max(1, Math.floor(filters.page ?? 1));
   const pageSize = Math.min(100, Math.max(1, Math.floor(filters.pageSize ?? 50)));
   const where: SQL[] = [];
   if (filters.pageId) where.push(eq(exportsTable.pageId, filters.pageId));
   if (filters.active) where.push(isNull(exportsTable.revokedAt));
-  const cond = where.length ? and(...where) : undefined;
+  const cond = whereStore(exportsTable, scope, ...where);
   const [rows, [total]] = await Promise.all([
     db
       .select({
@@ -47,8 +51,8 @@ export async function listExports(filters: { pageId?: string; active?: boolean; 
         createdBy: users.name,
       })
       .from(exportsTable)
-      .leftJoin(pages, eq(pages.id, exportsTable.pageId))
-      .leftJoin(pageVersions, eq(pageVersions.id, exportsTable.versionId))
+      .leftJoin(pages, and(eq(pages.id, exportsTable.pageId), inStore(pages, scope)))
+      .leftJoin(pageVersions, and(eq(pageVersions.id, exportsTable.versionId), inStore(pageVersions, scope)))
       .leftJoin(users, eq(users.id, exportsTable.createdBy))
       .where(cond)
       .orderBy(desc(exportsTable.createdAt))
@@ -78,13 +82,14 @@ export async function listExports(filters: { pageId?: string; active?: boolean; 
   return { items, total: Number(total?.n ?? 0), page, pageSize };
 }
 
-export async function revokeExport(id: string, actor: Actor): Promise<boolean> {
+/** Revoke one of the store's exports (false: already revoked, missing, or another store's). */
+export async function revokeExport(scope: WriteScope, id: string, actor: Actor): Promise<boolean> {
   const res = await db
     .update(exportsTable)
     .set({ revokedAt: new Date() })
-    .where(and(eq(exportsTable.id, id), isNull(exportsTable.revokedAt)));
+    .where(and(byId(exportsTable, scope, id), isNull(exportsTable.revokedAt)));
   const ok = affected(res) === 1;
   if (ok) invalidateExportOrigins();
-  if (ok) await audit("export.revoked", { userId: actor.id, target: id, ip: actor.ip });
+  if (ok) await auditIn(scope, actor, "export.revoked", { target: id });
   return ok;
 }

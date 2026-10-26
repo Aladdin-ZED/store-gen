@@ -1,28 +1,44 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { DashboardView } from "@/components/admin/dashboard/dashboard-view";
+import { getDashboard } from "@/lib/admin-data/dashboard";
 import { requireStoreMember } from "@/lib/tenancy/seam";
+import { appHref } from "@/lib/urls";
 
-export const metadata: Metadata = { title: "Store", robots: { index: false, follow: false, nocache: true } };
+export const metadata: Metadata = { title: "Overview" };
+
+type Props = { params: Promise<{ store: string }> };
+
+function greeting(timeZone: string): string {
+  const hour = Number(new Intl.DateTimeFormat("en-GB", { hour: "numeric", hourCycle: "h23", timeZone }).format(new Date()));
+  if (hour < 5) return "Working late";
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
 
 /*
- * /app/<h>: the store home behind the minimal C0a seam (docs/STORE-SAAS.md §I.1, §K.1 exit: "one page under /app/<h>
- * renders through the minimal seam"). A placeholder: T4 replaces it with the dashboard it moves from /admin (Today
- * brief, KPIs, Store Health ring) and owns this folder from C0a's merge.
+ * /app/<h>: the store's dashboard (docs/STORE-SAAS.md §I.1, store.read): KPIs, the sales chart, Sheets health, top
+ * pages and the latest orders of this store only, in its time zone. The Today brief and the Store Health ring
+ * replace the checklist in R1 product (P2, §I.4, §I.7).
  */
-export default async function StoreHomePage({ params }: { params: Promise<{ store: string }> }) {
+export default async function StoreHomePage({ params }: Props) {
   const { store: handle } = await params;
   const ctx = await requireStoreMember({ handle, permission: "store.read" });
+  const { user, store } = ctx;
+  // call-center agents work the order queue (their own orders), not the store's numbers
+  if (!ctx.can("pages.read") && ctx.can("orders.read")) redirect(appHref(store.handle, "/orders"));
+
+  const canOrders = ctx.can("orders.read");
+  const data = await getDashboard(ctx.scope, store, user, { orders: canOrders });
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-6 py-12 sm:px-10">
-      <div className="w-full max-w-[22.5rem]">
-        <header className="mb-8 grid gap-2">
-          <p className="text-[0.8rem] font-medium text-muted-foreground tabular-nums">/app/{ctx.store.handle}</p>
-          <h1 className="font-display text-[2rem] leading-[1.08] font-semibold tracking-[-0.035em] text-balance">{ctx.store.name}</h1>
-          <p className="text-sm text-pretty text-muted-foreground" data-sg-seam={ctx.scope.kind}>
-            Signed in as <span className="font-medium text-foreground">{ctx.user.email}</span> ({ctx.membership.role}). This store&apos;s
-            dashboard is on its way.
-          </p>
-        </header>
-      </div>
-    </main>
+    <DashboardView
+      handle={store.handle}
+      data={data}
+      greeting={greeting(store.timezone)}
+      firstName={user.name.trim().split(/\s+/)[0] ?? user.name}
+      todayLabel={new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: store.timezone }).format(new Date())}
+      can={{ orders: canOrders, write: ctx.can("pages.write"), sync: ctx.can("orders.write") }}
+    />
   );
 }
