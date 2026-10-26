@@ -279,7 +279,7 @@ async function storeSitemap(req: Request, scope: StoreScope, store: StoreRow): P
 /**
  * The platform robots.txt (§C.8): marketing allowed; the dashboard, the console, previews and the APIs disallowed;
  * `/s/` too once S mode is on (stores then live on their subdomains). While S mode is off, one `Sitemap:` line per
- * live store with a published page, after the platform's own.
+ * indexable store (active, with a published page that is not noindex: listIndexableStoreHandles), after the platform's own.
  */
 export async function platformRobotsText(): Promise<string> {
   const origin = platformOrigin();

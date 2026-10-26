@@ -34,14 +34,14 @@ M._resolveFilename = function (request: string, ...rest: unknown[]) {
   return resolveFilename.call(this, request, ...rest);
 };
 
-const DB_RE = /^cod_test_t3_[a-z0-9_]{1,40}$/;
+const DB_RE = /^cod_test_(?:t3|m4)_[a-z0-9_]{1,40}$/;
 const arg = (name: string) => {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
 };
 const DB = arg("db") ?? "cod_test_t3_public";
 const KEEP = process.argv.includes("--keep");
-if (!DB_RE.test(DB)) throw new Error("the database must be named cod_test_t3_*");
+if (!DB_RE.test(DB)) throw new Error("the database must be named cod_test_t3_* or cod_test_m4_*");
 
 // test configuration: P mode on platform.test, a legacy host; random secrets (never a real one)
 process.env.APP_SECRET = randomBytes(32).toString("hex");
@@ -344,6 +344,9 @@ async function seed(): Promise<Seed> {
     const C = await store("cedre-shop", "Cedre Shop", "pending", "Africa/Casablanca");
     const D = await store("dune-store", "Dune Store", "suspended", "Africa/Casablanca", { suspendNotice: true });
     const E = await store("erg-market", "Erg Market", "closed", "Africa/Casablanca");
+    // review r1.0-t3 F4: not indexable, so never in the platform robots.txt: restricted, and every page noindex
+    const Rr = await store("rif-goods", "Rif Goods", "restricted", "Africa/Casablanca");
+    const N = await store("noor-hidden", "Noor Hidden", "active", "Africa/Casablanca");
     const htmlA = "<!DOCTYPE html><title>A argan</title>";
     const htmlB = "<!DOCTYPE html><title>B argan</title>";
     const a = await page(A, "argan", { published: true, html: htmlA, key: "pk_fixture_argan" });
@@ -352,6 +355,9 @@ async function seed(): Promise<Seed> {
     const b = await page(B, "argan", { published: true, html: htmlB });
     const c = await page(C, "argan", { published: true });
     const e = await page(E, "argan", { published: true });
+    await page(Rr, "argan", { published: true });
+    await page(N, "argan", { published: true, doc: hiddenJson });
+    await page(N, "serum", { published: false });
     await conn.query("UPDATE stores SET home_page_id = ? WHERE id = ?", [a.id, A]);
     // LP-20: A's old slug, an expired one; R-D53: a renamed handle of A, a deleted handle of E
     await conn.query("INSERT INTO page_slug_history (store_id, slug, page_id, until) VALUES (?, 'huile', ?, UTC_TIMESTAMP(3) + INTERVAL 30 DAY), (?, 'vieux', ?, UTC_TIMESTAMP(3) - INTERVAL 1 DAY)", [A, a.id, A, a.id]);
@@ -573,6 +579,10 @@ async function database(): Promise<void> {
     const platform = await routes.platformRobotsText();
     assert.ok(platform.includes("Sitemap: https://platform.test/s/atlas-argan/sitemap.xml") && platform.includes("Sitemap: https://platform.test/s/baraka-home/sitemap.xml"));
     assert.ok(!platform.includes("cedre-shop") && !platform.includes("erg-market"), "pending and closed stores are not listed");
+    assert.ok(!platform.includes("rif-goods"), "a restricted store (its robots.txt is Disallow: /) is not listed");
+    assert.ok(!platform.includes("noor-hidden"), "a store whose every published page is noindex (empty sitemap) is not listed");
+    const noor = await (await serve(`${P}/s/noor-hidden/sitemap.xml`, { page: "sitemap" }, "noor-hidden")).text();
+    assert.ok(!noor.includes("<loc>"), `the all-noindex store's own sitemap is empty too: ${noor}`);
     assert.ok(platform.includes("Disallow: /app/") && !platform.includes("Disallow: /s/"));
     setS(true);
     try {

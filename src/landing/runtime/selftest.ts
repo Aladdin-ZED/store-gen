@@ -2,20 +2,23 @@
  * Runtime pure-helper self-test:  npx tsx src/landing/runtime/selftest.ts
  * Covers phone normalization (MA + other markets), money formatting, totals parity with
  * src/lib/page/pricing.ts, id generation, locale-preserving number formatting, the countdown's
- * plural day label, LTR isolates in Arabic runtime strings, the sticky-header scroll offset and the
- * sticky buy bar's show rule (only after the hero CTA has been scrolled past).
+ * plural day label, LTR isolates in Arabic runtime strings, the sticky-header scroll offset, the
+ * sticky buy bar's show rule (only after the hero CTA has been scrolled past), and the frozen chunk's
+ * R1.0 edits held to the pre-R1.0 behaviour (storage names, captureUtm, adIds, flag / disable; CCR r1.0-m-7).
  */
 import { webcrypto } from "node:crypto";
 import { effectiveFree, emptySelection, offersMath, orderTotals, toCents } from "../../lib/page/pricing";
 import { Item, Offers, Product } from "../../lib/page/schema";
 import { createT, pluralForms } from "../i18n";
 import type { Ctx } from "./core";
+import { disable, flag, skey } from "./core";
 import { randomId, uuid } from "./ids";
 import { computeTotals, emptySel, formatMoney } from "./money";
 import { NUM_RUN, formatNum, numStyle, toAsciiDigits } from "./numbers";
 import { normalizePhone } from "./phone";
 import { headerOffset } from "./scroll";
 import { stickyVisible } from "./sticky";
+import { adIds, captureUtm } from "./tracking";
 import { RUNTIME_UI_KEYS } from "./strings";
 
 let pass = 0;
@@ -283,6 +286,151 @@ eq(
   eq("sticky hero CTA hidden at this breakpoint → fold rule", show([hidden, end(9000)], formAt(3000), vp(900)), true);
   eq("sticky hero CTA hidden at this breakpoint, first viewport", show([hidden, end(9000)], formAt(3000), vp(100)), false);
   eq("sticky scrolled back up above the hero CTA", show([box(900), end(9000)], formAt(3000), vp(0)), false);
+}
+
+/* ---------------- frozen-chunk parity (CCR r1.0-m-7): T3's byte-saving edits behave like the baseline ---------------- */
+{
+  // the pre-R1.0 implementations (776d24c core.ts / tracking.ts), with the storage name as a parameter (the sanctioned change)
+  const BASE_PARAMS: [string, string, number][] = [
+    ["utm_source", "source", 120], ["utm_medium", "medium", 120], ["utm_campaign", "campaign", 200], ["utm_content", "content", 200],
+    ["utm_term", "term", 200], ["fbclid", "fbclid", 500], ["ttclid", "ttclid", 500], ["ScCid", "sccid", 500], ["gclid", "gclid", 500],
+  ];
+  type Win = Parameters<typeof captureUtm>[0];
+  const baseCapture = (win: Win, name: string): Record<string, string> => {
+    const out: Record<string, string> = {};
+    let found = false;
+    try {
+      const q = new URLSearchParams(win.location.search);
+      for (const [param, key, max] of BASE_PARAMS) {
+        const v = (q.get(param) || q.get(param.toLowerCase()) || "").trim();
+        if (v) {
+          out[key] = v.slice(0, max);
+          found = true;
+        }
+      }
+    } catch {
+      /* malformed URL */
+    }
+    if (found) {
+      win.sessionStorage.setItem(name, JSON.stringify(out));
+      return out;
+    }
+    try {
+      const saved = JSON.parse(win.sessionStorage.getItem(name) || "null") as Record<string, unknown> | null;
+      if (saved && typeof saved === "object")
+        for (const [, key, max] of BASE_PARAMS) {
+          const v = saved[key];
+          if (typeof v === "string" && v) out[key] = v.slice(0, max);
+        }
+    } catch {
+      /* corrupted storage */
+    }
+    return out;
+  };
+  const baseAdIds = (cookies: Record<string, string>, fbclid: string | undefined) => {
+    const o: { fbp?: string; fbc?: string; ttp?: string } = {};
+    const fbp = cookies._fbp ?? "";
+    const fbc = cookies._fbc || (fbclid ? "fb.1." + Date.now() + "." + fbclid : "");
+    const ttp = cookies._ttp ?? "";
+    if (fbp) o.fbp = fbp.slice(0, 200);
+    if (fbc) o.fbc = fbc.slice(0, 500);
+    if (ttp) o.ttp = ttp.slice(0, 200);
+    return o;
+  };
+  const storage = (init: Record<string, string> = {}) => {
+    const m = new Map(Object.entries(init));
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), dump: () => Object.fromEntries(m) };
+  };
+  const win = (pathname: string, search: string, session: Record<string, string> = {}) =>
+    ({ location: { pathname, search }, sessionStorage: storage(session), localStorage: storage() }) as unknown as Win & { sessionStorage: ReturnType<typeof storage> };
+
+  eq("skey outside /s/: today's names", [skey(win("/promo", ""), "utm"), skey(win("/", ""), "vid")], ["lp-utm", "lp-vid"]);
+  eq("skey store home and pages share the store's prefix", [skey(win("/s/atlas-argan", ""), "utm"), skey(win("/s/atlas-argan/promo", ""), "utm")], ["lp:atlas-argan:utm", "lp:atlas-argan:utm"]);
+  eq("skey: /s/x (too short) and /s/atlas-argan-x2/… are not confused", [skey(win("/s/ab/x", ""), "utm"), skey(win("/sx/atlas-argan", ""), "utm")], ["lp-utm", "lp-utm"]);
+
+  const long = "x".repeat(700);
+  const searches = [
+    "",
+    "?utm_source=%20fb%20&utm_medium=cpc&utm_campaign=c1&utm_content=a&utm_term=t",
+    "?fbclid=AbC&ttclid=t1&ScCid=s1&gclid=g1",
+    "?sccid=lower&UTM_SOURCE=ignored",
+    `?utm_source=${long}&fbclid=${long}`,
+    "?utm_source=&fbclid=%20%20",
+    "?%E0%A4%A=bad&utm_source=ok",
+  ];
+  for (const path of ["/promo", "/s/atlas-argan/promo"]) {
+    for (const search of searches) {
+      const a = win(path, search);
+      const b = win(path, search);
+      eq(`captureUtm parity ${path}${search.slice(0, 40)}`, [captureUtm(a), a.sessionStorage.dump()], [baseCapture(b, skey(b, "utm")), b.sessionStorage.dump()]);
+    }
+    for (const saved of ['{"source":"fb","sccid":"s1","fbclid":"' + long + '","x":"y"}', '{"source":7,"medium":""}', "not json", "null"]) {
+      const a = win(path, "", { [skey(win(path, ""), "utm")]: saved });
+      const b = win(path, "", { [skey(win(path, ""), "utm")]: saved });
+      eq(`captureUtm session restore parity ${path} ${saved.slice(0, 24)}`, captureUtm(a), baseCapture(b, skey(b, "utm")));
+    }
+  }
+
+  const realNow = Date.now;
+  Date.now = () => 1_760_000_000_000;
+  try {
+    for (const [cookies, fbclid] of [
+      [{}, undefined],
+      [{}, "IwAR0abc"],
+      [{ _fbc: "fb.1.1.cookie" }, "IwAR0abc"],
+      [{ _fbp: "fb.1.2.p".padEnd(260, "p"), _ttp: "ttp".padEnd(240, "t") }, undefined],
+      [{ _fbp: "", _fbc: "", _ttp: "" }, "x".repeat(600)],
+    ] as [Record<string, string>, string | undefined][]) {
+      const doc = { cookie: Object.entries(cookies).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("; ") };
+      const c = { doc, st: { utm: fbclid ? { fbclid } : {} } } as unknown as Ctx;
+      eq(`adIds parity ${JSON.stringify(Object.keys(cookies))} fbclid=${!!fbclid}`, adIds(c), baseAdIds(cookies, fbclid));
+    }
+  } finally {
+    Date.now = realNow;
+  }
+
+  // flag / disable: the same attribute writes as the baseline
+  const element = (tagName: string, attrs: Record<string, string>) => {
+    const m = new Map(Object.entries(attrs));
+    const writes: string[] = [];
+    return {
+      tagName,
+      disabled: false,
+      writes,
+      attrs: () => Object.fromEntries(m),
+      hasAttribute: (n: string) => m.has(n),
+      setAttribute: (n: string, v: string) => {
+        writes.push(`set ${n}=${v}`);
+        m.set(n, v);
+      },
+      removeAttribute: (n: string) => {
+        writes.push(`del ${n}`);
+        m.delete(n);
+      },
+    };
+  };
+  const baseFlag = (el: ReturnType<typeof element>, name: string, on: boolean) => {
+    if (on) {
+      if (!el.hasAttribute(name)) el.setAttribute(name, "");
+    } else if (el.hasAttribute(name)) el.removeAttribute(name);
+  };
+  for (const start of [{}, { hidden: "" }, { hidden: "until-found" }] as Record<string, string>[]) {
+    for (const on of [true, false]) {
+      const a = element("DIV", start);
+      const b = element("DIV", start);
+      flag(a as unknown as Element, "hidden", on);
+      baseFlag(b, "hidden", on);
+      eq(`flag parity ${JSON.stringify(start)} on=${on}`, [a.writes, a.attrs()], [b.writes, b.attrs()]);
+    }
+  }
+  for (const tag of ["BUTTON", "A"]) {
+    for (const off of [true, false]) {
+      const a = element(tag, {});
+      disable(a as unknown as Element, off);
+      eq(`disable ${tag} off=${off}`, [a.writes, a.disabled], [[`set aria-disabled=${off ? "true" : "false"}`], tag === "BUTTON" ? off : false]);
+    }
+  }
+  disable(null, true); // never throws on a missing element
 }
 
 /* ---------------- report ---------------- */

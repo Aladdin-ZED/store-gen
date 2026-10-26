@@ -48,6 +48,9 @@ function baseHeaders(meta: MediaFileMeta): Headers {
     "Content-Type": meta.mime,
     ETag: `"${meta.sha256}"`,
     "Cache-Control": "public, max-age=31536000, immutable",
+    // the edge copy is bounded apart from the browser's (Cloudflare honours CDN-Cache-Control over Cache-Control):
+    // a store that stops being servable (§A.5.3, a D76 takedown) leaves Cloudflare within a day (CCR r1.0-m-6)
+    "CDN-Cache-Control": "public, max-age=86400",
     "Accept-Ranges": "bytes",
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; sandbox",

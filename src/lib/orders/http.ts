@@ -10,6 +10,7 @@ import { after } from "next/server";
 import { assertAdminAccess, AuthError, requireUser, type Permission, type SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { exportsTable } from "@/lib/db/schema";
+import { LEGACY_STORE_ID } from "@/lib/db/store-handles";
 import { checkSameOrigin } from "@/lib/security/csrf";
 import { baseSecurityHeaders } from "@/lib/security/headers";
 import { clientIp } from "@/lib/security/ip";
@@ -48,13 +49,23 @@ export function noContent(extra?: HeadersInit): Response {
 export { errorSummary, logError } from "./log";
 
 /**
+ * Interim fail-safe (R1.0 review of T3, finding 2): the platform-global integrations of the single-tenant app (the one
+ * Google Sheet, the legacy `tracking_secrets` / `pixel_library` CAPI tokens keyed by pixel id only) belong to store #1.
+ * Another store's order never reaches them: no sheet push, no server-side Purchase, whatever pixel id its page names.
+ * Removed when T4's per-store sync and `sendConversionsAfterResponse(scope, c)` land (CCR r1.0-t3-7).
+ */
+export function usesLegacyIntegrations(scope: StoreScope): boolean {
+  return scope.storeId === LEGACY_STORE_ID;
+}
+
+/**
  * Push the store's queued orders to its Google Sheet once the response has been sent (ORD-08). Never throws:
  * the order is already stored, and anything not pushed now is picked up by the next sync (cron tick).
  * `scope` is the order's store: the push moves to T4's per-store sync (`syncPendingOrders(scope, …)`,
- * CCR r1.0-t3-7); until it lands the push is today's single-sheet sync.
+ * CCR r1.0-t3-7); until it lands the push is today's single-sheet sync, for store #1 only.
  */
 export function syncSheetAfterResponse(scope: StoreScope, label: string): void {
-  void scope;
+  if (!usesLegacyIntegrations(scope)) return;
   try {
     after(async () => {
       try {

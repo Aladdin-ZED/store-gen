@@ -10,6 +10,7 @@
  *   LEGACY_PLATFORM_HOSTS  comma list of former platform hosts (308 forever, D19)
  *   ADMIN_HOST             the console's own host (from the domain move, D44)
  */
+import { isPlaceholderSecret } from "@/lib/edge/placeholder";
 
 const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 
@@ -82,9 +83,29 @@ export function storeRootDomain(): string | null {
   return host;
 }
 
-/** EDGE_KEY is set to something long enough to be a secret (32+ chars; host.ts also refuses template values). */
+/** Why an edge key value is unusable, or null when it is one: the one predicate of S mode and of host.ts edgeCheck. */
+export function edgeKeyProblem(raw: string | null | undefined): "unset" | "short" | "placeholder" | "app_secret" | null {
+  const value = raw?.trim();
+  if (!value) return "unset";
+  if (value.length < 32) return "short";
+  if (isPlaceholderSecret(value)) return "placeholder";
+  // §C.5: it differs from every other secret; APP_SECRET is the one the app signs and encrypts with
+  if (value === process.env.APP_SECRET?.trim()) return "app_secret";
+  return null;
+}
+
+/** EDGE_KEY_PREV / EDGE_KEY as the app verifies it (trimmed), or null when unusable (edgeKeyProblem). */
+export function usableEdgeKey(name: "EDGE_KEY" | "EDGE_KEY_PREV"): string | null {
+  const value = process.env[name];
+  return edgeKeyProblem(value) === null ? value!.trim() : null;
+}
+
+/**
+ * EDGE_KEY is a usable secret: 32+ characters, not a template value, not APP_SECRET. The same predicate as the
+ * edge check (host.ts), so S mode never turns on with a key the app then refuses on every Worker request.
+ */
 export function edgeKeyPresent(): boolean {
-  return (process.env.EDGE_KEY?.trim().length ?? 0) >= 32;
+  return usableEdgeKey("EDGE_KEY") !== null;
 }
 
 /** S mode: STORE_ROOT_DOMAIN and EDGE_KEY are both set (§C.1). */

@@ -6,17 +6,22 @@
  *     OFFLINE (no server, no database): the Worker's subrequest goes through a model of Cloudflare's cache
  *     (keyed by the subrequest URL, a zone "Cache Everything" rule assumed: the worst case) into src/proxy.ts
  *     and, for what the proxy forwards, the real document producers (documentResponse, permanentRedirect).
- *       1. the Worker alone: fail-closed bindings, refusals that never reach the origin (methods, Next-Action,
- *          platform-only areas incl. encoded spellings, the apex), stripped and stamped headers, the raw path
- *          and query byte for byte, the `cf` option (ENGC-2), Set-Cookie stripped, x-sg-mode, origin errors;
+ *       1. the Worker alone: fail-closed bindings, refusals whose path and body never reach the origin (methods,
+ *          Next-Action, platform-only areas incl. encoded spellings: forwarded as GET / HEAD `/s`; the apex never
+ *          forwarded), stripped and stamped headers, the raw path and query byte for byte, the `cf` option (ENGC-2:
+ *          a negative TTL for every status, never `cacheTtl`), Set-Cookie stripped, x-sg-mode, origin errors (503
+ *          with Retry-After and HSTS);
  *       2. Worker → proxy → app in S mode: the store home rewritten without a trailing slash (ENGC-15), store
  *          pages and public APIs reached cookie-less (SEC-2) with a verified edge and a proxy-signed path
  *          (SEC-3), the own-handle 308, other handles and platform areas 404, no Set-Cookie on store hosts,
  *          the document CSP naming the store host only (§C.9), a wrong key (SEC-4), the EDGE_KEY rotation,
- *          a replayed header set after 5 minutes;
+ *          a replayed header set after 5 minutes; the Worker's refusals byte-identical to the app's neutral 404
+ *          of an unknown path (`/admin` = `/login`, §F.6);
  *       3. the cache (ENGC-2): two store hosts on one path never share a body and the apex request of that
  *          path answers the platform page, with the `cf` option, and again with a zone rule that ignores it
- *          (the origin's `CDN-Cache-Control: no-store` holds); a negative control without either leaks;
+ *          (the origin's `CDN-Cache-Control: no-store` holds); a negative control without either leaks, and so does
+ *          the former `cf: { cacheTtl: 0 }` (Cloudflare: cacheTtl forces caching, 0 = stored, served stale while
+ *          it revalidates);
  *       4. platform cookies only with the `__Host-` prefix (SEC-13); a client x-sg-path never verifies on a
  *          path outside the proxy matcher (SEC-3).
  *
@@ -93,6 +98,7 @@ const section = (title: string) => console.log(`• ${title}`);
 interface CfOption {
   cacheTtl?: number;
   cacheEverything?: boolean;
+  cacheTtlByStatus?: Record<string, number>;
 }
 interface SubInit {
   method: string;
@@ -253,7 +259,11 @@ async function main(): Promise<void> {
   /* -------------------------------------------------------------- Cloudflare's cache, modelled */
 
   interface CacheMode {
-    /** the subrequest's `cf` option is applied (cacheEverything false + cacheTtl 0: never read, never stored) */
+    /**
+     * the subrequest's `cf` option is applied as Cloudflare documents it: a negative TTL in cacheTtlByStatus for
+     * every status = never read, never stored; `cacheTtl` (any value) forces caching over the origin's headers,
+     * and 0 means stored, expired at once and served stale while it revalidates (cf-cache-status UPDATING)
+     */
     honourCf: boolean;
     /** the origin's CDN-Cache-Control: no-store keeps a response out of the cache */
     honourCdn: boolean;
@@ -263,12 +273,13 @@ async function main(): Promise<void> {
     const store = new Map<string, { status: number; headers: [string, string][]; body: string }>();
     const fn = (async (url: string, init: SubInit) => {
       const cf = mode.honourCf ? init.cf : undefined;
-      const bypass = cf?.cacheEverything === false && cf.cacheTtl === 0;
+      const bypass = Object.entries(cf?.cacheTtlByStatus ?? {}).some(([range, ttl]) => range === "100-599" && ttl < 0);
+      const forced = !bypass && typeof cf?.cacheTtl === "number";
       const usable = (init.method === "GET" || init.method === "HEAD") && !bypass;
       const hit = usable ? store.get(url) : undefined;
-      if (hit) return new Response(hit.body, { status: hit.status, headers: [...hit.headers, ["cf-cache-status", "HIT"]] });
+      if (hit) return new Response(hit.body, { status: hit.status, headers: [...hit.headers, ["cf-cache-status", forced ? "UPDATING" : "HIT"]] });
       const res = await next(url, init);
-      const noStore = mode.honourCdn && /\bno-store\b/i.test(res.headers.get("cdn-cache-control") ?? "");
+      const noStore = !forced && mode.honourCdn && /\bno-store\b/i.test(res.headers.get("cdn-cache-control") ?? "");
       if (usable && !noStore && (res.status === 200 || res.status === 308)) {
         const headers: [string, string][] = [];
         res.headers.forEach((v, k) => headers.push([k, v]));
@@ -314,9 +325,11 @@ async function main(): Promise<void> {
     ["/kit/token", "/kit/token", {}],
   ];
   for (const [label, path, o] of refusals) {
-    const { res, reached } = await reachedOrigin(() => visit(SHOP1, path, o));
-    check(res.status === 404 && !reached, `${label} on a store host: the Worker's 404 without a subrequest (got ${res.status}, origin reached: ${reached})`);
-    check(res.headers.get("x-sg-mode") === "subdomain" && (await res.text()) === "", `${label}: the Worker's refusal is empty and marked`);
+    const { reached } = await reachedOrigin(() => visit(SHOP1, path, { ...o, headers: { ...o.headers, "content-type": "text/plain" } }));
+    const sub = lastSub()!;
+    const read = (o.method ?? "GET") === "GET" ? "GET" : "HEAD";
+    eq([reached, sub.url, sub.init.method, sub.init.body], [true, `https://${PLATFORM}/s`, read, null], `${label} on a store host: forwarded as ${read} /s, the path and body stay at the edge`);
+    check(!sub.init.headers.has("content-type") && sub.init.headers.get("x-sg-host") === SHOP1, `${label}: stamped, without the body's headers`);
   }
   for (const host of [PLATFORM, `www.${ROOT}`]) {
     const { res, reached } = await reachedOrigin(() => visit(host, "/"));
@@ -354,7 +367,7 @@ async function main(): Promise<void> {
     const sub = lastSub()!;
     const h = sub.init.headers;
     eq(sub.url, `https://${PLATFORM}/promo/x?fbclid=A%2Fb&utm_source=fb&&q=%20`, "subrequest URL: the origin + the raw path and query, byte for byte");
-    eq(sub.init.cf, { cacheTtl: 0, cacheEverything: false }, "the cf option (ENGC-2)");
+    eq(sub.init.cf, { cacheTtlByStatus: { "100-599": -1 } }, "the cf option: a negative TTL for every status, never cacheTtl (ENGC-2)");
     eq(sub.init.redirect, "manual", "redirects are the browser's, never followed by the Worker");
     eq(h.get("x-sg-host"), SHOP1, "x-sg-host: the request host, lower-case, no trailing dot");
     eq(h.get("x-sg-edge"), EDGE_KEY, "x-sg-edge: the Worker secret");
@@ -389,7 +402,11 @@ async function main(): Promise<void> {
       throw new Error("connection refused");
     };
     const down = await visit(SHOP1, "/");
-    eq([down.status, down.headers.get("x-sg-mode")], [503, "subdomain"], "origin unreachable: the Worker's neutral 503");
+    eq(
+      [down.status, down.headers.get("x-sg-mode"), down.headers.get("retry-after"), down.headers.get("strict-transport-security"), await down.text()],
+      [503, "subdomain", "30", "max-age=63072000", ""],
+      "origin unreachable: the Worker's neutral 503 (Retry-After, store-class HSTS, no body)",
+    );
   }
 
   /* ============================================================== 2. Worker → proxy → app */
@@ -431,6 +448,29 @@ async function main(): Promise<void> {
 
     const moved = await visit(SHOP1, "/moved");
     eq([moved.status, moved.headers.get("cache-control"), moved.headers.get("cdn-cache-control")], [308, "public, max-age=300", "no-store"], "a store route's canonical 308 through the edge: CDN-Cache-Control: no-store");
+
+    // §F.6: one neutral 404 whoever produces it; the Worker's refusals are the app's answer for an unknown path
+    const answer = async (res: Response) => {
+      const headers: [string, string][] = [];
+      res.headers.forEach((v, k) => headers.push([k, v]));
+      return { status: res.status, headers: headers.sort(), body: await res.text() };
+    };
+    const login = await answer(await visit(SHOP1, "/login"));
+    eq([login.status, login.body], [404, UNKNOWN_PAGE_HTML], "GET /login on a store host: the app's neutral 404");
+    check(login.headers.some(([k]) => k === "strict-transport-security") && login.headers.some(([k]) => k === "content-security-policy"), "the neutral 404 carries its full header set (CSP, HSTS)");
+    for (const path of ["/admin", "/%61dmin/x", "/app/shop1", "/api/cron/tick", "/kit/t"]) {
+      eq(await answer(await visit(SHOP1, path)), login, `GET ${path} on a store host = GET /login: status, headers and bytes`);
+    }
+    const postLogin = await answer(await visit(SHOP1, "/login", { method: "POST", body: "x" }));
+    eq([postLogin.status, postLogin.body], [404, ""], "POST /login on a store host: the empty neutral 404");
+    const refusedPosts: [string, string, Visit][] = [
+      ["POST /api/admin/media", "/api/admin/media", { method: "POST", body: "x" }],
+      ["a Next-Action POST", "/x", { method: "POST", headers: { "next-action": "abc" }, body: "[]" }],
+      ["PUT", "/x", { method: "PUT", body: "x" }],
+    ];
+    for (const [label, path, o] of refusedPosts) {
+      eq(await answer(await visit(SHOP1, path, o)), postLogin, `${label} on a store host = POST /login: status, headers and bytes`);
+    }
   }
   // the proxy's store-host refusals, with the Worker's own list bypassed (a stale Worker, a forged direct set)
   {
@@ -513,6 +553,20 @@ async function main(): Promise<void> {
   {
     const r = await sameUrl({ honourCf: false, honourCdn: false });
     check(r.b.includes("store shop1") || r.apex.includes("store shop1"), "negative control (no cf option, no CDN-Cache-Control): the model does leak, so the checks above mean something");
+  }
+  {
+    // the former option, replayed on the Worker's own subrequests: cacheTtl overrides cacheEverything:false and no-store
+    const cache = cfCache({ honourCf: true, honourCdn: true }, app);
+    origin = app;
+    const legacy = async (host: string) => {
+      await visit(host, "/promo");
+      const sub = lastSub()!;
+      const res = await cache(sub.url, { ...sub.init, headers: new Headers(sub.init.headers), cf: { cacheTtl: 0, cacheEverything: false } });
+      return { body: await res.text(), status: res.headers.get("cf-cache-status") };
+    };
+    await legacy(SHOP1);
+    const b = await legacy(SHOP2);
+    check(b.body.includes("store shop1") && b.status === "UPDATING", `negative control: cf { cacheTtl: 0 } serves store shop1's page to shop2 (${b.status})`);
   }
   origin = app;
 

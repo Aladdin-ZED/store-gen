@@ -523,6 +523,7 @@ async function online(): Promise<void> {
   if (media) {
     const r = await get(`/media/${media}`);
     eq([r.headers["content-security-policy"], r.headers["x-content-type-options"], r.headers["cross-origin-resource-policy"], !!r.headers["strict-transport-security"]], ["default-src 'none'; sandbox", "nosniff", "cross-origin", true], "online: media sandbox CSP, nosniff, CORP, HSTS");
+    eq([r.headers["cache-control"], r.headers["cdn-cache-control"]], ["public, max-age=31536000, immutable", "public, max-age=86400"], "online: media a year in the browser, a day at the edge (CCR r1.0-m-6)");
   }
 }
 

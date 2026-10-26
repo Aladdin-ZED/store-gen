@@ -26,6 +26,7 @@ import {
   preflight,
   readJson,
   syncSheetAfterResponse,
+  usesLegacyIntegrations,
 } from "@/lib/orders/http";
 import { burstLimit } from "@/lib/security/burst-limit";
 import { hashIp } from "@/lib/security/crypto";
@@ -116,7 +117,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       test,
     });
     if (result.sync) syncSheetAfterResponse(target.scope, "api/order:sync");
-    sendConversionsAfterResponse(result.conversion);
+    // the CAPI tokens are store #1's until T4's scoped sendConversionsAfterResponse(scope, c) (review r1.0-t3 F2)
+    if (usesLegacyIntegrations(target.scope)) sendConversionsAfterResponse(result.conversion);
     const status = result.response.ok ? 200 : STATUS[result.response.error];
     return json(result.response, status, {
       ...cors,

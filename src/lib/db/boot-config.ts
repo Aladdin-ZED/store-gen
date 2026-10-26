@@ -6,7 +6,7 @@ import "server-only";
  */
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { edgeKeyPresent, platformUrl, storeRootDomain } from "@/lib/edge/env";
+import { edgeKeyProblem, platformUrl, storeRootDomain } from "@/lib/edge/env";
 
 export interface ConfigLine {
   level: "error" | "warn" | "info";
@@ -31,7 +31,14 @@ export async function platformConfigLines(): Promise<ConfigLine[]> {
   const root = env.STORE_ROOT_DOMAIN?.trim();
   if (root && !storeRootDomain()) out.push({ level: "warn", text: "STORE_ROOT_DOMAIN is not a domain (no port, no IP, at least one dot); store subdomains stay off." });
   if (!!root !== !!env.EDGE_KEY?.trim()) out.push({ level: "warn", text: "STORE_ROOT_DOMAIN and EDGE_KEY must be set together; store subdomains stay off (path mode /s/<handle>)." });
-  else if (env.EDGE_KEY?.trim() && !edgeKeyPresent()) out.push({ level: "warn", text: "EDGE_KEY is shorter than 32 characters; store subdomains stay off." });
+  else if (env.EDGE_KEY?.trim()) {
+    const problem = edgeKeyProblem(env.EDGE_KEY);
+    if (problem === "short") out.push({ level: "warn", text: "EDGE_KEY is shorter than 32 characters; store subdomains stay off." });
+    else if (problem === "placeholder") out.push({ level: "warn", text: "EDGE_KEY looks like a template value; store subdomains stay off." });
+    else if (problem === "app_secret") out.push({ level: "warn", text: "EDGE_KEY is the same as APP_SECRET; use its own random value. Store subdomains stay off." });
+  }
+  const prevProblem = env.EDGE_KEY_PREV?.trim() ? edgeKeyProblem(env.EDGE_KEY_PREV) : null;
+  if (prevProblem) out.push({ level: "warn", text: "EDGE_KEY_PREV is not a usable key (32+ characters, not a template value, not APP_SECRET); it is ignored." });
 
   // the data directory (§G.2): media still lives in the database until the filesystem backend arrives
   const dataDir = env.DATA_DIR?.trim();

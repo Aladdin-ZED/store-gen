@@ -47,7 +47,9 @@ Frozen for the whole of R1, unchanged by this revision: landing **PageDoc v2**, 
 v2**, the **PHP export**, and the landing runtime chunk at **24,200 B gz** (`src/landing/runtime/budgets.json:3`). Every
 new runtime behaviour is a **new chunk** with its own budget (§H.13, LAN-§5); the frozen chunk gains only the storage
 prefix bytes of §C.9, **derived once in `core.ts`** (ENGC-10, ENGP-26), and nothing else (rev 4: no zone, city-key or
-calling-window code enters it; the browser zone tables are keyed by the posted `City.value`, D68). **Rev 3 freeze rule:** after T3's prefix edit,
+calling-window code enters it; the browser zone tables are keyed by the posted `City.value`, D68). The R1.0 integration
+also accepted T3's behaviour-equivalent byte-saving edits of `flag()`, `disable()` and `tracking.ts` that paid for the
+prefix (CCR r1.0-m-7; the runtime selftest pins them against the baseline). **Rev 3 freeze rule:** after T3's prefix edit,
 T3 re-measures the chunk; if it still fits 24,200 B the figure stands, otherwise the maintainer records the measured
 value in `budgets.json.landing` and in §P as an explicit re-freeze for the owner (expected ≤ +60 B); from the R1.0
 integration `render-check` enforces the `landing` chunk with **tolerance 0** against the recorded budget **and** the
@@ -1076,32 +1078,48 @@ the dashboard editor or `wrangler`). Bindings: secret `EDGE_KEY`; vars `ORIGIN` 
 **The console host is not a store host** (R1.0 integration, CCR r1.0-t3-8). Add a second Cloudflare route
 `console.<domain>/*` with Worker **None** (a route exclusion), and serve `console.<domain>` from Hostinger as its own
 hostname (the probe V2 decides how: a domain alias on the Node site, or a proxied record whose origin Host is
-`console.<domain>`). Through `edge/worker.js` the console would be unusable: the Worker answers `/admin/**` and
-`/api/admin/**` with its own 404, deletes `Cookie` (the `__Host-cs` / `__Host-csg` session and gate cookies) and strips
+`console.<domain>`). Through `edge/worker.js` the console would be unusable: the Worker never forwards `/admin/**` and
+`/api/admin/**` (the visitor gets the neutral 404), deletes `Cookie` (the `__Host-cs` / `__Host-csg` session and gate cookies) and strips
 every `Set-Cookie`, and Next's Server Actions check would compare `Origin: https://console.<domain>` with the apex `Host`
 of the subrequest.
 
 ```
 on fetch(request):
   host = lower(request.headers.host)
-  if method not in {GET, HEAD, POST, OPTIONS}                     → 404
-  if request.headers has "next-action"                            → 404
-  if path matches ^/(admin|app|api/app|api/admin|api/cron|api/v1|kit)(/|$)   → 404   (defense in depth; the app 404s too)
+  refused = method not in {GET, HEAD, POST, OPTIONS}
+         or request.headers has "next-action"
+         or path matches ^/(admin|app|api/app|api/admin|api/cron|api/v1|kit)(/|$)   (defense in depth; the app 404s too)
   headers = copy(request.headers) minus every "x-sg-*" and minus "cookie" (store hosts never use cookies)
+            (refused: also minus content-* and transfer-encoding, since no body leaves)
   headers["x-sg-host"] = host;  headers["x-sg-edge"] = EDGE_KEY;  headers["x-sg-ip"] = request.headers["cf-connecting-ip"]
   headers["x-sg-proto"] = "https";  headers["x-sg-worker"] = WORKER_VERSION;  headers["x-sg-ts"] = String(Date.now())
-  res = fetch(ORIGIN + path + rawQuery, { method, headers, body: request.body, redirect: "manual",
-                                          cf: { cacheTtl: 0, cacheEverything: false } })   // rev 3, ENGC-2: never through Cloudflare's cache
+  res = refused
+    ? fetch(ORIGIN + "/s", { method: GET if method = GET else HEAD, headers, body: null, ... })   // the proxy's neutral 404 (§F.6)
+    : fetch(ORIGIN + path + rawQuery, { method, headers, body: request.body, redirect: "manual",
+                                        cf: { cacheTtlByStatus: { "100-599": -1 } } })   // ENGC-2: never through Cloudflare's cache
   out = new Response(res.body, res);  out.headers.delete("set-cookie");  out.headers.set("x-sg-mode", "subdomain")
   return out
 ```
+
+The Worker answers by itself only when it is misconfigured (bindings missing or `EDGE_KEY` under 32 characters: 503;
+a route that catches the apex or `www`: 404) or the origin is unreachable (503): no body, `Cache-Control: private,
+no-store`, `nosniff`, `Strict-Transport-Security: max-age=63072000`, `Retry-After: 30` on the 503 (R1.0 review of T3,
+finding 6). Every other refusal is the app's own neutral 404, byte for byte the answer of an unknown path on that
+host (HTML for GET, empty otherwise): `/s` on a store host has no handle, so the proxy's onStore answers it for every
+method, and neither the refused path nor its body reaches the origin.
 
 **Edge cache key (rev 3, ENGC-2).** A Worker subrequest to a Cloudflare-proxied origin passes through Cloudflare's
 cache keyed by the **subrequest URL**, i.e. `https://<apex>/x` for every store host; the store lives only in a header.
 Store documents carry `s-maxage=60`, so with any "Cache Everything" rule on the apex zone store A's HTML and per-host CSP
 would become the cached answer for store B's `/x` and for apex visitors of `/x`. Hence the `cf` option above (the Worker
 fetch never reads or writes the cache), `CDN-Cache-Control: no-store` on every document served `via = edge` until OS-12
-exists (§F.6), and the rule that OS-12's Cache API keys by **effective host + path**, never by URL alone.
+exists (§F.6), and the rule that OS-12's Cache API keys by **effective host + path**, never by URL alone. The option is
+a negative TTL for every status, which Cloudflare documents as "do not cache at all" and which works on every
+compatibility date. It is never `cacheTtl`: that option *forces* caching (Cache Level "Cache Everything" plus an Edge
+TTL) over `cacheEverything: false` and the origin's `CDN-Cache-Control`, and `cacheTtl: 0` means stored, expired at once
+and served stale while it revalidates (`cf-cache-status: UPDATING`), store A's page to store B (R1.0 review of T3,
+finding 1; rev 3 had `{ cacheTtl: 0, cacheEverything: false }`). The Workers `cache: "no-store"` fetch option would do
+the same but needs compatibility date 2024-11-11 or later.
 `qa:edge-sim` asserts that two store hosts requesting the same path never share a cached body and that the apex
 direct request of that path answers the platform page. (`docs/saas/research/domains.md:260`'s sentence "Cloudflare's
 cache key includes the host" is true for the browser-facing request only; corrected there at its next revision.)
@@ -1214,7 +1232,10 @@ export function renameHandle(ctx: StoreCtx, next: string): Promise<void>;       
 | Tenant JS/HTML | **forbidden** on every host while stores share a registrable domain (PUB-25, TENANCY-MAP §7.8); console and builder previews render only in sandboxed iframes (SE-05) | same | — |
 
 The storage-key prefix is the one change to the frozen landing runtime allowed in R1 (one regex in `core.ts`, a
-parameter in the four modules); T3 re-measures the chunk afterwards and the header's freeze rule applies (tolerance 0
+parameter in the four modules; as built, `skey(win, key)` in `core.ts` is the one place the name is derived and the four
+modules call it), plus the behaviour-equivalent byte-saving edits recorded in CCR r1.0-m-7 (`flag()`, `disable()`,
+`tracking.ts` `PARAMS` / `collect()` / `adIds()`), which `src/landing/runtime/selftest.ts` holds to the pre-R1.0
+behaviour; T3 re-measures the chunk afterwards and the header's freeze rule applies (tolerance 0
 against the recorded budget and sha256 from the R1.0 integration, `render-check`). The runtime config v2, payload v2 and
 the markup contract do not change. `test:security` and `qa:headers` assert that **no served store document** (live,
 test render, `/preview/<token>`) carries a bare `'self'` or a bare app origin in `connect-src` or `form-action`.
@@ -1241,7 +1262,8 @@ Cache Rule, Worker + secret + route, Hostinger CDN off, TLS mode Full strict). T
    "console"`), a cookie-less `HEAD https://<root>/admin` answers the neutral 404, `consoleHref()` links point at
    `ADMIN_HOST`, and `curl -sI https://console.<domain>/admin` has no `x-sg-mode` header: CCR r1.0-t3-8), V3 extended
    with the cache check of CCR r1.0-t3-9 (RESEARCH §5.3: two store hosts on one path, `CDN-Cache-Control: no-store`,
-   `cf-cache-status` never `HIT`, each body its own store's; fallback the Workers `cache: "no-store"` fetch option),
+   `cf-cache-status` absent, `DYNAMIC` or `BYPASS` and nothing else (a `HIT`, `EXPIRED`, `REVALIDATED`, `UPDATING` or
+   `STALE` fails), each body its own store's; fallback the Workers `cache: "no-store"` fetch option),
    **and V13 "human check ready"** (rev 5, CRIT2-13: `platform_turnstile` is configured with the new
    domain among its hostnames and a test token verifies on `/signup`; the Domains page shows the check and links the
    Turnstile settings); then the signup mode default flips to `approval` (D9, §B.2: the same one rule), with the D69 ceilings in force.

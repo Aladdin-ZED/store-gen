@@ -16,13 +16,22 @@ import "server-only";
  *
  * pullStatuses(): statuses set by call-center agents in the sheet flow back to the database for
  * orders that are fully synced (the sheet is the source of truth for statuses once connected).
+ *
+ * Interim guard (R1.0 review of T3, finding 2): the one connected sheet is store #1's, so both directions only
+ * ever touch store #1's orders (`LEGACY_STORE_ID`). Since T3 merged the public order path, any active store can
+ * take orders with sheet_status 'pending'; without the guard their names, phones and addresses would be appended
+ * to store #1's sheet. Removed when T4's per-store sync (`syncPendingOrders(scope, …)`, SHT-04) lands.
  */
 import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { RowDataPacket } from "mysql2/promise";
 import { db, pool } from "@/lib/db/client";
 import { orders } from "@/lib/db/schema";
+import { LEGACY_STORE_ID } from "@/lib/db/store-handles";
+import { systemCtx, systemScope } from "@/lib/jobs/scope";
 import type { OrderStatus } from "@/lib/orders/contract";
 import { rateLimit } from "@/lib/security/rate-limit";
+import { inStore, whereStore } from "@/lib/tenancy/sql";
+import type { StoreScope } from "@/lib/tenancy/types";
 import { gapi, isSheetsConfigured, serviceAccountEmail, type GapiOptions } from "./client";
 import { activeSheet, getSheetsConfig, type SheetsConfig } from "./config";
 import { a1, colLetter } from "./format";
@@ -172,10 +181,22 @@ export interface SyncOptions {
   maxRetries?: number;
 }
 
-async function syncOnce(sheet: SheetsConfig, opts: SyncOptions): Promise<SyncResult & { selected: number }> {
+/** Store #1, the owner of the one connected sheet (the interim guard above), as a system scope. */
+const sheetScope = (): StoreScope => systemScope(systemCtx("sheets.sync"), LEGACY_STORE_ID);
+
+/**
+ * The orders a sync pass claims: store #1's only (the interim guard above), pending, or failed with their backoff
+ * elapsed (`force` ignores it); oldest first. Exported for test:public-api.
+ */
+export function selectSyncBatch(opts: SyncOptions = {}): Promise<(typeof orders.$inferSelect)[]> {
+  return pendingIn(sheetScope(), opts);
+}
+
+/** The sync batch of one store (T4's per-store sync, SHT-04, takes this shape over). */
+async function pendingIn(scope: StoreScope, opts: SyncOptions): Promise<(typeof orders.$inferSelect)[]> {
   const limit = opts.limit ?? 50;
   const now = new Date();
-  const eligible = opts.force
+  const status = opts.force
     ? inArray(orders.sheetStatus, ["pending", "failed"])
     : or(
         eq(orders.sheetStatus, "pending"),
@@ -184,7 +205,11 @@ async function syncOnce(sheet: SheetsConfig, opts: SyncOptions): Promise<SyncRes
           sql`${orders.updatedAt} <= DATE_SUB(${now}, INTERVAL LEAST(POW(2, ${orders.sheetAttempts}), 360) MINUTE)`,
         ),
       );
-  const batch = await db.select().from(orders).where(eligible).orderBy(orders.createdAt).limit(limit);
+  return db.select().from(orders).where(whereStore(orders, scope, status)).orderBy(orders.createdAt).limit(limit);
+}
+
+async function syncOnce(sheet: SheetsConfig, opts: SyncOptions): Promise<SyncResult & { selected: number }> {
+  const batch = await selectSyncBatch(opts);
   if (!batch.length) return { ...empty("ok"), selected: 0 };
 
   const ids = batch.map((o) => o.id);
@@ -333,7 +358,7 @@ export async function pullStatuses(opts: { force?: boolean } = {}): Promise<Pull
       const res = await db
         .update(orders)
         .set({ status, updatedAt: now })
-        .where(and(inArray(orders.id, ids.slice(i, i + 500)), eq(orders.sheetStatus, "synced"), ne(orders.status, status)));
+        .where(and(inStore(orders, sheetScope()), inArray(orders.id, ids.slice(i, i + 500)), eq(orders.sheetStatus, "synced"), ne(orders.status, status)));
       updated += affected(res);
     }
   }

@@ -26,7 +26,10 @@
  *    never block each other
  *  - createOrderRow (D72): idem replay, another store's idem refused, the inTx hooks see the row and roll it back
  *    on failure, the afterCommit hooks get the Purchase event
- *  - routes: store states (§A.5.3), ?sg-test tokens per store, store-host Origins in P and S mode, export CORS
+ *  - routes: store states (§A.5.3), ?sg-test tokens per store, store-host Origins in P and S mode, export CORS;
+ *    the upsell answers an origin refusal exactly like an unknown order (ORD-17), in S mode too
+ *  - the interim guard of the R1.0 T3 review (finding 2): only store #1's orders reach the one Google Sheet
+ *    (selectSyncBatch) and the legacy CAPI tokens; another store's order schedules neither
  *  - unique-visitor credit capped per network and page
  *
  * T1's settings API answers for real (the suite's settings double went at the R1.0 integration, after the T1 merge).
@@ -272,6 +275,9 @@ type OrderPayload = import("@/lib/orders/contract").OrderPayload;
 type PageDocT = import("@/lib/page/schema").PageDoc;
 
 interface Seed {
+  /** store #1 (LEGACY_STORE_ID), the owner of the single-tenant sheet and CAPI tokens */
+  L: string;
+  keyL: string;
   A: string;
   B: string;
   R: string;
@@ -327,6 +333,9 @@ async function seed(): Promise<Seed> {
       ]);
       return key;
     };
+    const { LEGACY_STORE_ID } = await import("@/lib/db/store-handles");
+    await conn.query("INSERT INTO stores (id, handle, name, status, brand_seed, currency) VALUES (?, 'store-1', 'Store 1', 'active', ?, 'MAD')", [LEGACY_STORE_ID, randomBytes(8).toString("hex")]);
+    const l = await page(LEGACY_STORE_ID, "argan");
     const A = await store("atlas-argan", "active");
     const B = await store("baraka-home", "active", "EUR");
     const R = await store("rif-goods", "restricted");
@@ -337,6 +346,7 @@ async function seed(): Promise<Seed> {
     const r = await page(R, "argan");
     const c = await page(C, "argan");
     return {
+      L: LEGACY_STORE_ID, keyL: l.key,
       A, B, R, C,
       keyA: a.key, keyA2: a2.key, keyB: b.key, keyR: r.key, keyC: c.key,
       keyExportA: await exportOf(A, a, ["https://shop.example"]),
@@ -816,11 +826,62 @@ async function scenarios(s: Seed) {
   await check("route /upsell: the order's store decides; unknown and foreign-origin requests learn nothing", async () => {
     const placed = await post(orderRoute, "/api/public/order", payload(newPhone(), s.keyA));
     const body = { orderId: placed.body!.orderId, token: placed.body!.upsellToken };
-    assert.equal((await post(upsellRoute, "/api/public/upsell", body, { origin: "https://evil.test" })).status, 403);
-    assert.equal((await post(upsellRoute, "/api/public/upsell", { orderId: "CMD-ZZZZZZ", token: body.token })).status, 422);
+    const placedB = await post(orderRoute, "/api/public/order", payload(newPhone(), s.keyB));
+    const bodyB = { orderId: placedB.body!.orderId, token: placedB.body!.upsellToken };
+    assert.ok(bodyB.token, "store B's page has its upsell on too");
+    /** what a caller can tell apart: status, body, Vary and the CORS grant */
+    const seen = (r: Awaited<ReturnType<typeof post>>) => [r.status, r.body, r.headers.get("vary"), r.headers.get("access-control-allow-origin")];
+    const unknown = seen(await post(upsellRoute, "/api/public/upsell", { orderId: "CMD-ZZZZZZ", token: body.token }));
+    assert.deepEqual(unknown, [422, { ok: false, error: "invalid" }, "Origin", null]);
+    // ORD-17: a refused Origin answers exactly the unknown-order response (no 403 oracle)
+    assert.deepEqual(seen(await post(upsellRoute, "/api/public/upsell", body, { origin: "https://evil.test" })), unknown, "a foreign Origin");
+    setS(true);
+    try {
+      const fromA = { origin: "https://atlas-argan.shops.test" };
+      assert.deepEqual(seen(await post(upsellRoute, "/api/public/upsell", { orderId: "CMD-ZZZZZZ", token: body.token }, fromA)), unknown, "S mode: an unknown id from A's host");
+      assert.deepEqual(seen(await post(upsellRoute, "/api/public/upsell", bodyB, fromA)), unknown, "S mode: store B's order from A's host");
+      assert.deepEqual(seen(await post(upsellRoute, "/api/public/upsell", { orderId: body.orderId, token: bodyB.token }, fromA)), unknown, "S mode: A's order with a wrong token");
+    } finally {
+      setS(false);
+    }
     const up = await post(upsellRoute, "/api/public/upsell", body);
     assert.equal(up.status, 200, JSON.stringify(up.body));
     assert.equal(up.body!.orderId, body.orderId);
+  });
+
+  await check("interim guard (review r1.0-t3 F2): only store #1's orders reach the sheet and the CAPI tokens", async () => {
+    const { selectSyncBatch } = await import("@/lib/sheets/sync");
+    const tL = await target(s.keyL);
+    const inB = await order(newPhone(), newIp(), { target: tB });
+    const inL = await order(newPhone(), newIp(), { target: tL });
+    assert.equal((await stored(orderId(inB)))?.sheetStatus, "pending", "store B's order is queued in its own store");
+    assert.ok(inB.sync && inB.conversion, "store B's order would sync and has a Purchase event built");
+    for (const opts of [{ force: true, limit: 200 }, { limit: 200 }]) {
+      const batch = await selectSyncBatch(opts);
+      assert.ok(batch.length > 0 && batch.every((o) => o.storeId === s.L), `only store #1's orders are selected (${JSON.stringify(opts)})`);
+      assert.ok(batch.some((o) => o.id === orderId(inL)) && !batch.some((o) => o.id === orderId(inB)), "store #1's order in, store B's out");
+    }
+    // the route: after() runs outside a request here and throws, so a scheduled sheet push or CAPI dispatch logs a line
+    const scheduled = async (key: string) => {
+      resetBurstLimits();
+      const lines: string[] = [];
+      const orig = console.error;
+      console.error = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
+      try {
+        const req = new Request("https://platform.test/api/public/order", {
+          method: "POST",
+          headers: { host: "platform.test", "content-type": "application/json", "x-forwarded-for": newIp(), "user-agent": "Mozilla/5.0 (QA)", origin: "https://platform.test" },
+          body: JSON.stringify(payload(newPhone(), key)),
+        });
+        const res = await orderRoute.POST(req as Next);
+        assert.equal(res.status, 200, await res.text());
+      } finally {
+        console.error = orig;
+      }
+      return { sheet: lines.some((l) => l.includes("api/order:sync")), capi: lines.some((l) => l.includes("could not schedule")) };
+    };
+    assert.deepEqual(await scheduled(s.keyL), { sheet: true, capi: true }, "positive control: store #1 schedules both");
+    assert.deepEqual(await scheduled(s.keyB), { sheet: false, capi: false }, "store B schedules neither the sheet push nor a CAPI Purchase");
   });
 }
 

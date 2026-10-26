@@ -21,7 +21,7 @@ import "server-only";
  */
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { exportsTable, mediaFiles, orders, pages, storeHandleHistory, stores } from "@/lib/db/schema";
+import { exportsTable, mediaFiles, orders, pages, pageVersions, storeHandleHistory, stores } from "@/lib/db/schema";
 import { PAGE_KEY_RE, versionDoc, type PageTarget, type ResolvePurpose } from "@/lib/orders/resolve";
 import { safeEqual, sign } from "@/lib/security/crypto";
 import { scopedCache } from "./cache";
@@ -451,19 +451,21 @@ export async function resolveMediaKey(key: string): Promise<{ store: StoreRow; s
 const indexable = scopedCache<string[]>({ name: "indexable-stores", maxEntries: 1, ttlMs: 5 * 60_000 });
 
 /**
- * Handles of the stores the platform robots.txt lists a `Sitemap:` line for while S mode is off (§C.8): active or
- * restricted, with at least one published page. At most 5,000, cached 5 minutes.
+ * Handles of the stores the platform robots.txt lists a `Sitemap:` line for while S mode is off (§C.8: "every
+ * indexable P-mode store"): active (a restricted store's robots.txt is `Disallow: /` and its sitemap empty), with at
+ * least one published page whose published version is not `seo.noindex`, the predicate of the store's own sitemap
+ * (store-pages.server.ts listSitemapPages). At most 5,000, cached 5 minutes.
  */
 export function listIndexableStoreHandles(): Promise<string[]> {
   return indexable.getOrLoad(P, "handles", async () => {
-    // tenancy: platform robots.txt (one line per live store; no store data beyond the handle)
+    // tenancy: platform robots.txt (one line per indexable store; no store data beyond the handle)
     const rows = await db
       .select({ handle: stores.handle })
       .from(stores)
       .where(
         and(
-          sql`${stores.status} IN ('active', 'restricted')`,
-          sql`EXISTS (SELECT 1 FROM ${pages} WHERE ${pages.storeId} = ${stores.id} AND ${pages.status} = 'published')`,
+          eq(stores.status, "active"),
+          sql`EXISTS (SELECT 1 FROM ${pages} INNER JOIN ${pageVersions} ON ${pageVersions.id} = ${pages.publishedVersionId} AND ${pageVersions.storeId} = ${pages.storeId} WHERE ${pages.storeId} = ${stores.id} AND ${pages.status} = 'published' AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(${pageVersions.doc}, '$.seo.noindex')), 'false') <> 'true')`,
         ),
       )
       .orderBy(stores.handle)

@@ -2,6 +2,7 @@
  * Auth constants and environment-derived configuration (no I/O).
  */
 import "server-only";
+import { isPlaceholderSecret } from "@/lib/edge/placeholder";
 
 export const IS_PROD = process.env.NODE_ENV === "production";
 
@@ -83,19 +84,8 @@ export const PLATFORM_TIMEZONE = "Africa/Casablanca";
 
 const SECRET_TOKEN_RE = /^[A-Za-z0-9_-]{8,128}$/;
 
-/**
- * Template values ("change-me…", "your-secret", "xxxxxx", "aaaaaaaa…") that are public wherever the
- * template is: in .env.example, the docs or any copy of the project. A secret matching this is treated as
- * unset, so a deploy with copied defaults stays closed (404) instead of open to anyone holding the
- * template. Generated values do not match in practice (8 equal characters in a row: about 1 in 5 million
- * for a 64-char hex secret, far less for base64url).
- */
-const PLACEHOLDER_RE = /change[-_ ]?me|replace[-_ ]?me|your[-_ ]?(?:app[-_ ]?)?(?:secret|key|token|gate|password)|placeholder|example|x{6,}|(.)\1{7,}/i;
-
-/** true for a known template / placeholder value (never for a randomly generated one). */
-export function isPlaceholderSecret(value: string): boolean {
-  return PLACEHOLDER_RE.test(value);
-}
+/** Template values ("change-me…", "xxxxxx", …) count as unset: src/lib/edge/placeholder.ts (shared with edge/env). */
+export { isPlaceholderSecret };
 
 /** First path segments owned by real routes — a gate equal to one of them would shadow it (or loop). */
 const RESERVED_SEGMENTS = new Set(["admin", "api", "media", "fonts", "_next", "administrator", "login", "setup"]);

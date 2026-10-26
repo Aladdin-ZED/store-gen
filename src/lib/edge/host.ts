@@ -15,12 +15,12 @@ import "server-only";
  *  4. classifyHost (the §C.2 table).
  */
 import { createHash } from "node:crypto";
-import { IS_PROD, isInternalHost, isPlaceholderSecret, normalizeHost, normalizeIp } from "@/lib/auth/config";
+import { IS_PROD, isInternalHost, normalizeHost, normalizeIp } from "@/lib/auth/config";
 import { requestHost } from "@/lib/auth/gate";
 import { releaseOn } from "@/lib/auth/permissions";
 import { safeEqual } from "@/lib/security/crypto";
 import { RESERVED_HANDLES, isHandle } from "@/lib/tenancy/handles";
-import { adminHostName, isIpLiteral, legacyPlatformHosts, platformHost, storeRootDomain } from "./env";
+import { adminHostName, isIpLiteral, legacyPlatformHosts, platformHost, storeRootDomain, usableEdgeKey } from "./env";
 
 export { subdomainMode } from "./env";
 
@@ -52,10 +52,8 @@ const WORKER_VERSION_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
 const digest = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 
-function edgeKey(name: "EDGE_KEY" | "EDGE_KEY_PREV"): string | null {
-  const value = process.env[name]?.trim();
-  return value && value.length >= 32 && !isPlaceholderSecret(value) ? value : null;
-}
+/** The configured keys, through the one predicate S mode also uses (env.ts edgeKeyProblem: 32+, no template, not APP_SECRET). */
+const edgeKey = usableEdgeKey;
 
 /**
  * Why the edge headers do or do not verify: `absent` (no x-sg-edge, a direct request), `verified` (with the

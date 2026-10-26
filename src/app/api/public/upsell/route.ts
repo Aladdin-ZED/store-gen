@@ -6,7 +6,8 @@
  * Per store (docs/STORE-SAAS.md §E.3 rule 6, §A.5.3, ORD-17): the order id resolves the order's store
  * (`resolveUpsellOrder`), the Origin must be one of that store's hosts or on the allow-list of the export that
  * placed the order, the token is checked inside the store, and a store whose public APIs are closed answers
- * "invalid" like an unknown order.
+ * "invalid" like an unknown order. A refused Origin gets that same 422 (an unknown id, another store's id and a
+ * wrong token are one answer: R1.0 review of T3, finding 5).
  */
 import type { NextRequest } from "next/server";
 import { UpsellPayload } from "@/lib/orders/contract";
@@ -51,7 +52,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     const found = await resolveUpsellOrder(parsed.data.orderId);
     const origins = found ? await exportOrigins(found.scope, found.exportId) : null;
     const verdict = checkOrigin(req, { store: found?.store ?? null, allowedOrigins: origins });
-    if (!verdict.ok) return json({ ok: false, error: "invalid" }, 403, { Vary: "Origin" });
+    // ORD-17: a refused Origin answers exactly the unknown-order response, so it never tells which store an id is in
+    if (!verdict.ok) return json({ ok: false, error: "invalid" } satisfies UpsellResponse, 422, { Vary: "Origin" });
     const cors = corsHeaders(verdict.cors);
     if (!found || publicApiAnswer(found.store.status, "upsell") !== "open") return json({ ok: false, error: "invalid" } satisfies UpsellResponse, 422, cors);
 

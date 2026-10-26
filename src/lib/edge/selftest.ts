@@ -787,6 +787,28 @@ async function main(): Promise<void> {
       eq(urls.mediaUrl(shop, "k.webp"), `https://${PLATFORM}/media/k.webp`, "S: media from the platform origin");
       eq([...urls.storeHosts(shop)], [PLATFORM, STORE, LEGACY], "S: platform, subdomain, legacy");
     });
+    // review r1.0-t3 F3: S mode and the edge check share one EDGE_KEY predicate (a key S mode accepts always verifies)
+    const { platformConfigLines } = await import("@/lib/db/boot-config");
+    for (const [label, key, warning] of [
+      ["a template EDGE_KEY", "change-me-to-a-long-random-edge-key-0123456789", "EDGE_KEY looks like a template value; store subdomains stay off."],
+      ["EDGE_KEY equal to APP_SECRET", APP_SECRET, "EDGE_KEY is the same as APP_SECRET; use its own random value. Store subdomains stay off."],
+      ["a short EDGE_KEY", "short-key-123", "EDGE_KEY is shorter than 32 characters; store subdomains stay off."],
+    ] as const) {
+      await withEnvAsync({ STORE_ROOT_DOMAIN: ROOT, EDGE_KEY: key, EDGE_KEY_PREV: undefined }, async () => {
+        eq([edgeEnv.edgeKeyPresent(), edgeEnv.subdomainMode(), urls.addressMode(shop)], [false, false, "P"], `${label}: S mode stays off`);
+        eq(urls.storeUrl(shop), `https://${PLATFORM}/s/shop1`, `${label}: store URLs stay on /s/<handle>`);
+        eq(host.edgeCheck(new Headers({ host: PLATFORM, ...workerHeaders(STORE, { key }) })).state, "invalid", `${label}: never verifies either`);
+        const lines = (await platformConfigLines()).map((l) => l.text);
+        check(lines.includes(warning), `${label}: the boot warns "${warning}" (${JSON.stringify(lines.filter((l) => l.includes("EDGE_KEY")))})`);
+      });
+    }
+    withEnv(S_MODE, () => {
+      check(edgeEnv.subdomainMode() && host.edgeCheck(new Headers({ host: PLATFORM, ...workerHeaders(STORE) })).state === "verified", "a usable EDGE_KEY: S mode on and the Worker verifies");
+    });
+    await withEnvAsync({ ...S_MODE, EDGE_KEY_PREV: APP_SECRET }, async () => {
+      eq(host.edgeCheck(new Headers({ host: PLATFORM, ...workerHeaders(STORE, { key: APP_SECRET }) })).state, "invalid", "EDGE_KEY_PREV equal to APP_SECRET is ignored");
+      check((await platformConfigLines()).some((l) => l.text.startsWith("EDGE_KEY_PREV is not a usable key")), "the boot warns about the unusable EDGE_KEY_PREV");
+    });
     eq([urls.consoleHref(), urls.consoleHref("/stores")], ["/admin", "/admin/stores"], "consoleHref without ADMIN_HOST");
     withEnv({ ADMIN_HOST: CONSOLE }, () => eq(urls.consoleHref("/stores"), `https://${CONSOLE}/admin/stores`, "consoleHref with ADMIN_HOST"));
     eq([urls.appHref("shop1"), urls.appHref("shop1", "/orders"), urls.apiHref("shop1", "/orders")], ["/app/shop1", "/app/shop1/orders", "/api/app/shop1/orders"], "appHref / apiHref");

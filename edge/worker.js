@@ -11,10 +11,11 @@
  * update the EDGE_KEY secret to <new> (a secret change deploys a new version; requests in flight finish with
  * the old one, which the app still accepts); (3) after 24 h remove EDGE_KEY_PREV on Hostinger and restart.
  * The app logs requests still signed with the previous key once per hour (error_events edge / prev_key).
+ * Any compatibility date works: the cache bypass is a `cf` option, not the newer `cache: "no-store"`.
  */
 
 const METHODS = new Set(["GET", "HEAD", "POST", "OPTIONS"]);
-/** platform-only areas: defense in depth, the app answers the same neutral 404 */
+/** platform-only areas: never forwarded (defense in depth); the visitor gets the app's neutral 404 for NEUTRAL_PATH */
 const REFUSED_PATH = /^\/(admin|app|api\/app|api\/admin|api\/cron|api\/v1|kit)(\/|$)/i;
 /**
  * Request headers a visitor may not hand to the origin: Host (the subrequest URL names the apex), the edge's
@@ -25,13 +26,20 @@ const DROP_EXACT = new Set(["host", "cookie", "x-nonce", "x-cs-pathname", "x-for
 const DROP_PREFIX = ["x-sg-", "x-middleware-", "x-invoke-", "x-next-"];
 const HOST_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
 const VERSION_RE = /^[A-Za-z0-9._-]{1,64}$/;
+/** `/s` on a store host: the proxy's own neutral 404 for every method (no handle), the bytes of any unknown path (§F.6) */
+const NEUTRAL_PATH = "/s";
+/**
+ * ENGC-2: Cloudflare keys the subrequest by the apex URL, which every store shares, so it never goes through the cache.
+ * A negative TTL is "do not cache at all", whatever the zone rules and origin headers say. (`cacheTtl: 0` would force
+ * caching: stored, expired at once, and served stale while it revalidates.)
+ */
+const NO_CACHE = { cacheTtlByStatus: { "100-599": -1 } };
 
-/** The neutral refusal of the edge itself: no body, nothing cached, nothing that names the platform. */
+/** The edge's own answer (misconfiguration, origin down): no body, nothing cached, store-class HSTS, x-sg-mode. */
 function refuse(status) {
-  return new Response(null, {
-    status,
-    headers: { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff", "x-sg-mode": "subdomain" },
-  });
+  const headers = { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff", "Strict-Transport-Security": "max-age=63072000", "x-sg-mode": "subdomain" };
+  if (status === 503) headers["Retry-After"] = "30";
+  return new Response(null, { status, headers });
 }
 
 /** The path as the app's areaOf() reads it: decoded, "\" → "/", "//" collapsed (REFUSED_PATH ignores case). */
@@ -68,14 +76,14 @@ const worker = {
     const root = String(env.STORE_ROOT || "").toLowerCase();
     // the apex (and www, which Cloudflare 301s first) never runs the Worker: a route that catches them is a mistake
     if (!HOST_RE.test(host) || host === new URL(origin).hostname || host === root || host === `www.${root}`) return refuse(404);
-    if (!METHODS.has(method)) return refuse(404);
-    if (request.headers.has("next-action")) return refuse(404);
-    if (REFUSED_PATH.test(plainPath(url.pathname))) return refuse(404);
+    // other methods, actions, platform-only areas: neither the path nor the body leaves; the app answers its neutral 404
+    const refused = !METHODS.has(method) || request.headers.has("next-action") || REFUSED_PATH.test(plainPath(url.pathname));
 
     const headers = new Headers();
     for (const [name, value] of request.headers) {
       const n = name.toLowerCase();
-      if (DROP_EXACT.has(n) || DROP_PREFIX.some((p) => n.startsWith(p))) continue;
+      // a refused request leaves without its body, so without the headers that describe one
+      if (DROP_EXACT.has(n) || DROP_PREFIX.some((p) => n.startsWith(p)) || (refused && (n.startsWith("content-") || n === "transfer-encoding"))) continue;
       headers.append(n, value);
     }
     headers.set("x-sg-host", host);
@@ -88,13 +96,12 @@ const worker = {
 
     let res;
     try {
-      res = await fetch(origin + url.pathname + url.search, {
-        method,
+      res = await fetch(origin + (refused ? NEUTRAL_PATH : url.pathname + url.search), {
+        method: refused ? (method === "GET" ? "GET" : "HEAD") : method, // HEAD: the neutral 404's empty-body form
         headers,
-        body: method === "GET" || method === "HEAD" ? null : request.body,
+        body: refused || method === "GET" || method === "HEAD" ? null : request.body,
         redirect: "manual",
-        // ENGC-2: Cloudflare keys this subrequest by the apex URL, which every store shares: never through its cache
-        cf: { cacheTtl: 0, cacheEverything: false },
+        cf: NO_CACHE,
       });
     } catch {
       return refuse(503); // origin unreachable: a neutral 503, not Cloudflare's error page naming the Worker
