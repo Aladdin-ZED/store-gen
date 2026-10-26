@@ -427,6 +427,7 @@ function envelopeLine(label: string, sealed: Rows, opener: (r: Record<string, un
 async function preTenancyChecks(conn: Connection, report: TenancyCheckReport, opts: TenancyCheckOptions): Promise<void> {
   const { decrypt } = await import("@/lib/security/crypto");
   const { handleFromName } = await import("@/lib/tenancy/handles");
+  // tenancy: platform upgrade dry run: the legacy row count over every tenant table, before 0004 (read-only)
   const legacy = await count(
     conn,
     `SELECT (SELECT COUNT(*) FROM users) + (SELECT COUNT(*) FROM pages) + (SELECT COUNT(*) FROM page_versions) + (SELECT COUNT(*) FROM assets)
@@ -463,6 +464,7 @@ async function preTenancyChecks(conn: Connection, report: TenancyCheckReport, op
   envelopeLine("legacy envelope(s)", sealed, (r) => (e) => decrypt(e, `settings:${String(r.key)}`), push, (line) => report.info.push(line));
 
   const home = json("home")?.value as { pageId?: unknown } | null | undefined;
+  // tenancy: platform upgrade dry run: does the legacy home page exist (pre-tenancy dump, one store, read-only)
   if (typeof home?.pageId === "string" && !(await count(conn, "SELECT COUNT(*) AS n FROM pages WHERE id = ?", [home.pageId]))) {
     report.info.push("the legacy home setting names a page that no longer exists (store #1 gets no home page from it)");
   }
@@ -475,6 +477,7 @@ async function tenancyChecks(conn: Connection, have: Set<string>, report: Tenanc
   // NULL store_id where it is required (an interrupted 0004, or a writer that bypassed the seam)
   for (const { table, storeId } of schemaStoreColumns()) {
     if (storeId !== "required" || !have.has(table)) continue;
+    // tenancy: platform upgrade dry run: rows without a store, per tenant table read from schema.ts (read-only)
     const n = await count(conn, `SELECT COUNT(*) AS n FROM \`${table}\` WHERE store_id IS NULL`);
     if (n) report.problems.push(`${table}: ${n} row(s) with a NULL store_id`);
   }
@@ -486,6 +489,7 @@ async function tenancyChecks(conn: Connection, have: Set<string>, report: Tenanc
   );
   if (noOwner.length) report.problems.push(`${noOwner.length} store(s) without an active owner: ${noOwner.slice(0, 10).map((r) => String(r.id)).join(", ")}`);
 
+  // tenancy: platform upgrade dry run: references that cross stores, each join over every store (read-only, 13 queries)
   const crossStore: [string, string][] = [
     ["order → page", "SELECT COUNT(*) AS n FROM orders o JOIN pages p ON p.id = o.page_id WHERE p.store_id <> o.store_id"],
     ["order → version", "SELECT COUNT(*) AS n FROM orders o JOIN page_versions v ON v.id = o.version_id WHERE v.store_id <> o.store_id"],
@@ -505,6 +509,7 @@ async function tenancyChecks(conn: Connection, have: Set<string>, report: Tenanc
     const n = await count(conn, q);
     if (n) report.problems.push(`cross-store reference ${label}: ${n} row(s)`);
   }
+  // tenancy: platform upgrade dry run: asset_refs naming a deleted asset, over every store (read-only)
   const missingAsset = await count(conn, "SELECT COUNT(*) AS n FROM asset_refs r LEFT JOIN assets a ON a.id = r.asset_id WHERE a.id IS NULL");
   if (missingAsset) report.info.push(`asset_refs naming a deleted asset: ${missingAsset}`);
 
@@ -521,13 +526,16 @@ async function tenancyChecks(conn: Connection, have: Set<string>, report: Tenanc
   else report.info.push(`tenancy_v1 marker present (${store1 ? "store #1 converted" : "empty install"})`);
   // before the marker these are the conversion's backlog (info); after it, leftovers (problems)
   const backlog = marker ? report.problems : report.info;
+  // tenancy: platform upgrade dry run: v1 envelopes left in any store's settings (a count, read-only)
   const legacyEnc = await count(conn, "SELECT COUNT(*) AS n FROM store_settings WHERE purpose_v = 0 AND encrypted = 1");
   if (legacyEnc) backlog.push(`${legacyEnc} store_settings row(s) still in a v1 envelope (purpose_v = 0)`);
+  // tenancy: platform upgrade dry run: plain settings rows still marked v1, any store (a count, read-only)
   const legacyPlain = await count(conn, "SELECT COUNT(*) AS n FROM store_settings WHERE purpose_v = 0 AND encrypted = 0");
   if (legacyPlain) report.info.push(`${legacyPlain} plain store_settings row(s) still marked purpose_v = 0`);
   const leftovers = await count(conn, "SELECT COUNT(*) AS n FROM settings WHERE `key` IN (?)", [MOVED_KEYS]);
   if (leftovers) backlog.push(`${leftovers} legacy store-level row(s) still in settings`);
 
+  // tenancy: platform upgrade dry run: opens every store's sealed settings with that row's own store id (console-only, read-only)
   const sealed = await rows(conn, "SELECT store_id, `key`, value FROM store_settings WHERE encrypted = 1 AND purpose_v = 2");
   const push = (line: string) => (opts.requireEnvelopes ? report.problems : report.info).push(line);
   envelopeLine("sealed store setting(s)", sealed, (r) => (e) => open(e, { store: String(r.store_id) }, `settings:${String(r.key)}`), push, (line) => report.info.push(line));

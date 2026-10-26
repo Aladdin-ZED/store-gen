@@ -131,6 +131,7 @@ function rethrow(err: unknown, r: Row): never {
 
 async function readValue(r: Row): Promise<number> {
   try {
+    // tenancy: platform the counter row: r.table is store_usage (keyWhere binds the scope's store id) or platform_usage (a P table, §D.3)
     const [rows] = await pool().query<RowDataPacket[]>(`SELECT value FROM ${r.table} WHERE ${keyWhere(r)}`, keyParams(r));
     return rows.length ? Number(rows[0]!.value) : 0;
   } catch (err) {
@@ -144,11 +145,13 @@ async function charge(r: Row, key: UsageMetric | PlatformUsageKey, delta: number
   const conn = await pool().getConnection();
   let res: ResultSetHeader;
   try {
-    // tenancy: platform_usage is a P table (§D.3); store_usage rows are keyed by the scope's store id
+    // platform_usage is a P table (§D.3); store_usage rows are keyed by the scope's store id
     const cols = r.storeId === null ? "metric, period" : "store_id, metric, period";
+    // tenancy: platform the counter row of r.table (see readValue): store_id is in cols for store_usage
     await conn.query(`INSERT IGNORE INTO ${r.table} (${cols}, value, updated_at) VALUES (${keyParams(r).map(() => "?").join(", ")}, 0, UTC_TIMESTAMP(3))`, keyParams(r));
     const guard = limit === null ? "" : " AND value + ? <= ?";
     const params = [delta, ...keyParams(r), ...(limit === null ? [] : [delta, limit])];
+    // tenancy: platform the counter row of r.table (see readValue): keyWhere binds the store id for store_usage
     [res] = await conn.query<ResultSetHeader>(`UPDATE ${r.table} SET value = LAST_INSERT_ID(value + ?), updated_at = UTC_TIMESTAMP(3) WHERE ${keyWhere(r)}${guard}`, params);
   } catch (err) {
     rethrow(err, r);
@@ -162,6 +165,7 @@ async function charge(r: Row, key: UsageMetric | PlatformUsageKey, delta: number
 async function refund(r: Row, delta: number): Promise<void> {
   if (delta === 0) return;
   try {
+    // tenancy: platform the counter row of r.table (see readValue): keyWhere binds the store id for store_usage
     await pool().query(`UPDATE ${r.table} SET value = GREATEST(0, value - ?), updated_at = UTC_TIMESTAMP(3) WHERE ${keyWhere(r)}`, [delta, ...keyParams(r)]);
   } catch (err) {
     rethrow(err, r);

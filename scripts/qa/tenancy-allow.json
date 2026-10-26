@@ -4,7 +4,7 @@
     "entries: process-wide state in src/lib/** that lint L4 accepts. Each one names the file, the symbol (the globalThis name, or the module variable) and why it holds no data of one store that another could see. A cache keyed by store goes through scopedCache() instead and needs no entry.",
     "A module-scope Map / Set that is never changed after module load (typed ReadonlySet / ReadonlyMap, or only read) needs no entry either.",
     "actions: exported server actions that cannot start with return storeAction / platformAction / userAction / publicAction (lint L9), each with why; added only by the maintainer (CCR r1.0-m-3).",
-    "pins: the most `// tenancy: platform` annotations each group may hold. A count may only grow with a reviewer's approval: the maintainer raises the pin in the same change. Counted at C0b; re-pinned at the R1.0 integration, the P1 merge (src/lib/platform/**) and the P7 merge (src/lib/ai/platform/**)."
+    "pins: the most queries a `// tenancy: platform` annotation may exempt in each group (a builder chain or one raw SQL text counts 1; an annotated statement that touches no tenant table counts 0; review C0b F7: queries, not comment lines). A count may only grow with a reviewer's approval: the maintainer raises the pin in the same change. Counted at C0b, re-counted as queries at the C0b review fixes; re-pinned at the R1.0 integration, the P1 merge (src/lib/platform/**) and the P7 merge (src/lib/ai/platform/**)."
   ],
   "entries": [
     { "file": "src/lib/db/client.ts", "symbol": "__codDb", "reason": "the 6-connection query pool (DB-16), one per process; it holds connections, no rows" },
@@ -57,10 +57,10 @@
     { "files": ["src/lib/design/**", "src/lib/jobs/tracks/design.ts"], "max": 3, "reason": "DES-R9: novelty.server.ts and the design-reserve job together" },
     { "files": ["src/lib/health/**"], "max": 1, "reason": "§E.3 rule 6: the one store_health upsert" },
     { "files": ["src/lib/ai/platform/**"], "max": 0, "reason": "counted at the P7 merge (§F.1); 0 before it" },
-    { "files": ["src/lib/platform/**"], "max": 2, "reason": "R1.0 (maintainer, C0b merge): the view-as row lookup by session and the store-less notify rows; counted again at the P1 merge (§F.1, rev 3)" },
-    { "files": ["src/lib/jobs/**"], "max": 4, "reason": "R1.0 (maintainer, C0b merge, after T1): the cron_cursors reads/writes and the forEachStore iterator" },
-    { "files": ["src/lib/tenancy/**"], "max": 9, "reason": "R1.0 (maintainer, C0b merge, after T1/T2): the 0004 conversion (4), the store row and kill switches of entitlements (2), the lifecycle's store row, CAS and step-up row (3)" },
-    { "files": ["src/lib/auth/**"], "max": 9, "reason": "R1.0 (maintainer, C0b merge, after T2): a user's own memberships (switcher, setup, account deletion, signup), the legacy /admin entry check and team (removed with /admin by T4)" },
-    { "files": ["src/lib/db/**"], "max": 12, "reason": "R1.0 (maintainer, C0b merge, after T1): boot tasks and seeds (4), handle uniqueness and lists (3), the upgrade dry run (3), the audit writer and staff listing (2)" }
+    { "files": ["src/lib/platform/**"], "max": 4, "reason": "R1.0 (maintainer, C0b review fixes, as queries): the view-as row by its id or by session (2) and the store-less notify row, batched or not (2); counted again at the P1 merge (§F.1, rev 3)" },
+    { "files": ["src/lib/jobs/**"], "max": 0, "reason": "R1.0 (maintainer, C0b review fixes, as queries): the annotated cron_cursors and stores statements touch no tenant table, so they exempt nothing" },
+    { "files": ["src/lib/tenancy/**"], "max": 6, "reason": "R1.0 (maintainer, C0b review fixes, as queries): the store_usage / platform_usage counter statements (4: read, insert, charge, refund), the lifecycle's step-up row and handle quarantine (2)" },
+    { "files": ["src/lib/auth/**"], "max": 8, "reason": "R1.0 (maintainer, C0b review fixes, as queries): a user's own memberships (switcher, setup, account deletion x3, signup), the legacy /admin entry check and team insert (removed with /admin by T4)" },
+    { "files": ["src/lib/db/**"], "max": 28, "reason": "R1.0 (maintainer as reviewer, C0b review fixes F13, as queries): the upgrade and tenancy dry runs (23, console-only and read-only: documents, drafts, versions, legacy counts, NULL store ids, 13 cross-store joins, envelopes), handle history (3), the audit writer and staff listing (2)" }
   ]
 }

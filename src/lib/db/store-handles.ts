@@ -114,6 +114,7 @@ export async function renameStoreHandle(ctx: StoreCtx, next: string): Promise<vo
 
     const until = new Date(now);
     until.setUTCMonth(until.getUTCMonth() + REDIRECT_MONTHS);
+    // tenancy: platform a handle is global (§C.7): its one history row points at the store that last held it
     await conn.query(
       `INSERT INTO store_handle_history (handle, store_id, reason, redirect_until, reserved_until, created_at) VALUES (?, ?, 'renamed', ?, ?, ?)
        ON DUPLICATE KEY UPDATE store_id = VALUES(store_id), reason = 'renamed', redirect_until = VALUES(redirect_until), reserved_until = VALUES(reserved_until), created_at = VALUES(created_at)`,

@@ -11,7 +11,9 @@
  * Static (every release of the table, so R2 / R3 shares cannot grow silently either): the sum of a release's group
  * budgets (with the groups of the release it `extends`) must not exceed its ceiling and must equal its declared total;
  * group ids and scripts are unique; every script that package.json's `test` chain runs, and `pretest`, belongs to a
- * group of the current release (a new suite joins `npm test` only with a budget).
+ * group of the current release (a new suite joins `npm test` only with a budget), and the `test` entry runs nothing
+ * but `npm run <script>` (a direct `tsx` / `node` command would join the chain unbudgeted and untimed). The harness
+ * checks its own chain parsing first and exits 2 when that self-check fails.
  *
  * Timed: each group's scripts run one after the other with package.json's command (node_modules/.bin on PATH, no
  * npm wrapper, so npm's own start-up is not billed to a suite). A script package.json does not define yet, or whose
@@ -100,10 +102,20 @@ function groupsOf(table: Table, release: string, seen: string[] = []): Group[] {
   return [...(r.extends ? groupsOf(table, r.extends, [...seen, release]) : []), ...r.groups];
 }
 
-/** The scripts `npm test` runs: `pretest` plus every `npm run <name>` of the test entry. */
-function testChain(scripts: Record<string, string>): string[] {
-  const chain = scripts.test ? [...scripts.test.matchAll(/npm run\s+(?:-s\s+|--silent\s+)?([\w:.-]+)/g)].map((m) => m[1]!) : [];
-  return scripts.pretest ? ["pretest", ...chain] : chain;
+/**
+ * The scripts `npm test` runs: `pretest` plus every `npm run <name>` of the test entry, split on `&&` / `||` / `;`.
+ * Any other command of the entry (`tsx scripts/qa/x.ts`, `node …`) is returned in `direct`: it would join the chain
+ * with no budget group and never be timed, so the static check fails on it (review C0b F16, §J.1 CRIT2-9).
+ */
+function testChain(scripts: Record<string, string>): { chain: string[]; direct: string[] } {
+  const chain: string[] = [];
+  const direct: string[] = [];
+  for (const part of (scripts.test ?? "").split(/&&|\|\||;/).map((s) => s.trim()).filter(Boolean)) {
+    const m = /^npm\s+run(?:\s+(?:-s|--silent))?\s+([\w:.-]+)(?:\s+--(?:\s+\S+)*)?$/.exec(part);
+    if (m) chain.push(m[1]!);
+    else direct.push(part);
+  }
+  return { chain: scripts.pretest ? ["pretest", ...chain] : chain, direct };
 }
 
 function staticChecks(table: Table, scripts: Record<string, string>): string[] {
@@ -127,10 +139,28 @@ function staticChecks(table: Table, scripts: Record<string, string>): string[] {
     for (const [id, n] of ids) if (n > 1) problems.push(`${name}: group id "${id}" appears ${n} times`);
   }
   const current = new Set(groupsOf(table, table.current).flatMap((g) => g.scripts));
-  for (const s of testChain(scripts)) {
+  const { chain, direct } = testChain(scripts);
+  for (const s of chain) {
     if (!current.has(s)) problems.push(`package.json test runs ${s}, which has no budget group in ${table.current} (add it to scripts/qa/test-budget.json through the maintainer)`);
   }
+  for (const c of direct) problems.push(`package.json test runs "${c}" directly: give it a script and run it as npm run <script>, so it gets a budget group and is timed`);
   return problems;
+}
+
+/** The harness checks its own parsing first (exit 2 when it is broken): a direct command never slips past the static check. */
+function selfCheck(): string[] {
+  const out: string[] = [];
+  const same = (name: string, got: unknown, want: unknown) => {
+    if (JSON.stringify(got) !== JSON.stringify(want)) out.push(`${name}: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  };
+  same("npm run chain", testChain({ test: "npm run a && npm run -s b; npm run --silent c || npm run d -- --flag" }), { chain: ["a", "b", "c", "d"], direct: [] });
+  same("pretest first", testChain({ pretest: "node x.mjs", test: "npm run a" }).chain, ["pretest", "a"]);
+  same("direct tsx / node", testChain({ test: "npm run a && tsx scripts/qa/x.ts && node scripts/y.mjs" }).direct, ["tsx scripts/qa/x.ts", "node scripts/y.mjs"]);
+  const table: Table = { current: "R", releases: { R: { ceilingSec: 10, totalSec: 5, groups: [{ id: "g", label: "g", owner: "m", budgetSec: 5, scripts: ["a"] }] } } };
+  same("static: budgeted chain passes", staticChecks(table, { test: "npm run a", a: "tsx a.ts" }), []);
+  same("static: a direct command fails", staticChecks(table, { test: "npm run a && tsx scripts/qa/x.ts", a: "tsx a.ts" }).length, 1);
+  same("static: an unbudgeted script fails", staticChecks(table, { test: "npm run a && npm run b", a: "tsx a.ts", b: "tsx b.ts" }).length, 1);
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -177,6 +207,8 @@ function runScript(script: string, scripts: Record<string, string>, env: NodeJS.
 const sec = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
 function main(): void {
+  const broken = selfCheck();
+  if (broken.length) die(`self-check failed:\n  ${broken.join("\n  ")}`);
   const table = loadTable();
   let scripts: Record<string, string>;
   try {

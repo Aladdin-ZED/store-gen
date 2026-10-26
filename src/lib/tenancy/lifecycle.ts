@@ -317,6 +317,7 @@ export async function transitionStore(ctx: PlatformCtx | StoreCtx | SystemCtx, s
     if (to === "purged" && store.handle) {
       // the handle is quarantined, never reused by another store for 180 days (§C.7); an expired row is reused
       const reservedUntil = new Date(now.getTime() + HANDLE_QUARANTINE_DAYS * DAY);
+      // tenancy: platform a handle is global (§C.7): the quarantine row re-points an expired row to this store
       await conn.query(
         `INSERT INTO store_handle_history (handle, store_id, reason, redirect_until, reserved_until, created_at) VALUES (?, ?, 'deleted', NULL, ?, ?)
          ON DUPLICATE KEY UPDATE store_id = VALUES(store_id), reason = 'deleted', redirect_until = NULL, reserved_until = VALUES(reserved_until), created_at = VALUES(created_at)`,

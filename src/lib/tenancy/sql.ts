@@ -25,9 +25,13 @@ export function inStore<T extends { storeId: AnyMySqlColumn }>(table: T, scope: 
   return eq(table.storeId, storeIdOf(scope));
 }
 
-/** The store predicate AND every given condition (undefined conditions are skipped, like drizzle's `and`). */
+/**
+ * The store predicate AND every given condition (undefined conditions are skipped, like drizzle's `and`). Each
+ * condition is wrapped in parentheses: drizzle inlines a nested SQL fragment without them, so a `sql\`a OR b\``
+ * condition would otherwise read `store_id = ? and a OR b` and widen to every store (review C0b F2).
+ */
 export function whereStore<T extends { storeId: AnyMySqlColumn }>(table: T, scope: StoreScope, ...conds: (SQL | undefined)[]): SQL {
-  return and(inStore(table, scope), ...conds)!;
+  return and(inStore(table, scope), ...conds.map((c) => (c === undefined ? undefined : sql`(${c})`)))!;
 }
 
 /** One row by its id, inside the scope's store: another store's id and a missing id both match nothing (§E.3 rule 3). */

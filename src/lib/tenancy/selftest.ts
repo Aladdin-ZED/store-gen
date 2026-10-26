@@ -20,7 +20,9 @@
  *  8. ScopedCache bounds (entries, bytes, TTL), single flight, a delete during a load, invalidateStore;
  *  9. storeBase / storeUrl / mediaUrl per addressing mode;
  * 10. the boot configuration lines (src/lib/db/boot-config.ts): aliases, S mode, DATA_DIR, APP_TIMEZONE, the test
- *     context in production, never a value.
+ *     context in production, never a value;
+ * 11. the store predicates as SQL: whereStore parenthesizes each condition (a `sql` fragment with an OR stays inside
+ *     the store predicate, review C0b F2), storeSql, a scope without a store id.
  *
  * Not here yet: the `Bucket` builders (C0b, §E.8) and `landingPathFor` (T2) join when their files exist.
  */
@@ -585,6 +587,23 @@ async function main(): Promise<void> {
       if (saved[k] === undefined) delete env[k];
       else env[k] = saved[k];
     }
+  }
+
+  /* 11. store predicates as SQL (review C0b F2) ---------------------------------------------------- */
+  {
+    const { sql } = await import("drizzle-orm");
+    const { MySqlDialect } = await import("drizzle-orm/mysql-core");
+    const { pages } = await import("@/lib/db/schema");
+    const S = await import("./sql");
+    const scope = { storeId: "s-1", kind: "member" } as unknown as import("./types").StoreScope;
+    const q = (x: import("drizzle-orm").SQL) => new MySqlDialect().sqlToQuery(x);
+    const widened = q(S.whereStore(pages, scope, sql`a = 1 OR b = 2`));
+    eq("whereStore parenthesizes a condition that holds an OR", widened.sql, "(`pages`.`store_id` = ? and (a = 1 OR b = 2))");
+    eq("whereStore binds the scope's store id", widened.params, ["s-1"]);
+    eq("whereStore with no condition is the bare predicate", q(S.whereStore(pages, scope)).sql, "`pages`.`store_id` = ?");
+    eq("whereStore skips undefined conditions", q(S.whereStore(pages, scope, undefined, sql`x = 1`)).sql, "(`pages`.`store_id` = ? and (x = 1))");
+    eq("storeSql is store_id = ? with the value bound", [q(S.storeSql(scope)).sql, q(S.storeSql(scope)).params], ["store_id = ?", ["s-1"]]);
+    throws("a hand-built scope without a store id fails loudly", () => S.inStore(pages, {} as unknown as import("./types").StoreScope), /without a store id/);
   }
 }
 

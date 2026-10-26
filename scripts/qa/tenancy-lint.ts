@@ -11,19 +11,39 @@
  *
  * Each violation prints as `file:line rule message`, then the counts per rule, the `// tenancy: platform` and
  * `// tenancy: public-key` annotations per directory, and the pins of scripts/qa/tenancy-allow.json (rule PIN: a
- * pinned group holds more `tenancy: platform` annotations than its pin; "the count may only grow with a reviewer's
- * approval", §F.1).
+ * pinned group holds more queries exempted by `tenancy: platform` than its pin; "the count may only grow with a
+ * reviewer's approval", §F.1).
  *
  * - Tenant tables = every mysqlTable of src/lib/db/schema.ts with a `store_id` column, read from the schema at run
- *   time (rev 3, ENGC-5), so a new table is covered the day it is added.
- * - The annotation exemption (§E.3 rule 6) needs both an allowlisted file and the annotation on the statement: in its
- *   leading comments or on one of its lines. It covers the statement-level rules (L1, L2, L2b, L3, L3b, L6, L10).
- * - An annotation is a `// tenancy:` comment on its own line before the statement or at the end of one of its lines.
- * - L9's only exemptions are the allow file's `actions` (file + exported name + reason, maintainer only, CCR r1.0-m-3).
- * - L2 takes only the four helpers (`eq(T.storeId, scope.storeId)` alone is not a store predicate, though not L2b).
+ *   time (rev 3, ENGC-5), so a new table is covered the day it is added. A builder argument is named by its type
+ *   (`_.name`), so a helper, a `let`, a ternary or a typed parameter cannot hide a tenant table; a table the type does
+ *   not name (a generic, `MySqlTable`, any, SQL as a source) is L1 `dynamic-table`, and a tenant table handed to an
+ *   app function without a StoreScope parameter is L1 `table-arg` (review C0b F6).
+ * - A scope parameter is a parameter typed StoreScope, or a ctx whose `scope` is one (StoreCtx / WriteCtx, D71 rev 4);
+ *   the predicate's scope is that parameter, `<ctx>.scope`, or a `scope` destructured from it (review C0b F15).
+ * - The annotation exemption (§E.3 rule 6) needs both an allowlisted file and the annotation on the query: an own-line
+ *   comment leading the innermost statement (or the expression-bodied function and its declaration) that holds the
+ *   query, an own-line comment leading the query expression, or a comment on one of the query's own lines. Never a
+ *   comment elsewhere in an enclosing statement, never across a function boundary (review C0b F7). It covers the
+ *   statement-level rules (L1, L2, L2b, L3, L3b, L6, L10). PIN counts the exempted queries, not comment lines.
+ * - L9's only exemptions are the allow file's `actions` (file + exported name + reason, maintainer only, CCR r1.0-m-3);
+ *   every export of a "use server" file the lint cannot read as a seam-wrapped function fails closed (review C0b F11).
+ * - L2 takes only the four helpers (`eq(T.storeId, scope.storeId)` alone is not a store predicate, though not L2b);
+ *   every `.where()` of a chain must carry one (drizzle keeps the last), a `$dynamic()` chain may not escape, storeSql()
+ *   in a template counts only as its first conjunct, and an and() sibling that may hold a top-level OR is reported
+ *   (drizzle inlines a nested SQL fragment without parentheses; whereStore() parenthesizes each condition).
+ * - L6 judges the scope each write uses (not the function), and outside the seam files any object literal that is a
+ *   StoreScope or spreads a scope / ctx, Object.assign / structuredClone of one, and any cast to a scope (review C0b
+ *   F1, F8). The brand is a symbol-keyed property a spread copies: the nominal brand is CCR r1.0-m-5 for R2.
+ * - L10 reads every SQL text of src/** (a string, template or `+` chain starting with a statement keyword, wherever it
+ *   goes, and every drizzle `sql` template), per query level (review C0b F5).
  * - L4 judges process state, so it skips the standalone `selftest*.ts` scripts, and a module-scope Map / Set that the
- *   type checker proves is never changed after module load (a ReadonlySet / ReadonlyMap slot, or only ever read) is a
- *   lookup table, not a cache: it needs no allow entry (see `frozen`).
+ *   type checker proves is never changed after module load (a ReadonlySet / ReadonlyMap slot, or only ever read, its
+ *   references found by resolved symbol through renaming imports) is a lookup table, not a cache: it needs no allow
+ *   entry (see `frozen`). A Map / Set a function, a static block or an IIFE stores in module scope, a static or a
+ *   globalThis property is judged too, and so is any globalThis.__cod… / __sg… access whatever its cast (F9).
+ * - The standalone selftests are also outside L10 (raw SQL) and L6's forged-scope checks: they seed and fake stores on
+ *   purpose, and the app never imports them; every other rule applies to them.
  * - The lint checks itself first: built-in fixtures (virtual files compiled in the same program, against the real
  *   schema, helpers and seam types) carry `//! <rules>` markers, and every rule must fire on exactly the marked lines,
  *   or the run stops with exit code 2 before src is judged.
@@ -55,21 +75,21 @@ function rel(fileName: string): string {
 }
 
 const RULES = {
-  L1: "tenant-table call in a function without a StoreScope parameter",
-  L2: "select/update/delete whose .where() has no store predicate on a scope parameter",
+  L1: "tenant-table call in a function without a StoreScope parameter, a table the lint cannot name, or a table handed off",
+  L2: "select/update/delete whose .where() has no store predicate on a scope parameter, or one that can be widened",
   L2b: "eq(<table>.storeId, …) instead of inStore()/whereStore()/byId()",
   L3: "tenant insert without storeValues(), or a call to the removed settings API",
-  L3b: ".set() on a tenant table names storeId",
+  L3b: ".set() / ON DUPLICATE KEY UPDATE on a tenant table whose value type has storeId",
   L4: "process-wide global or module-scope Map/Set outside scopedCache() and the allow file",
-  L5: "rate bucket that is not a Bucket, or GET_LOCK outside src/lib/db",
-  L6: "write without a WriteScope parameter, a cast to WriteScope, or a scope minted outside the seam",
-  L7: "src/app or src/components imports the db client or schema",
+  L5: "rate bucket that is not a Bucket (or a cast to one), rateLimit as a value, or GET_LOCK outside src/lib/db",
+  L6: "write through a scope that is not a WriteScope, a forged or cast scope, or a scope minted outside the seam",
+  L7: "src/app or src/components imports the db client or schema (directly or through a re-export)",
   L8: "hand-built /admin path or live URL (use appHref / storeUrl)",
   L9: "server action whose body does not start with return storeAction/platformAction/userAction/publicAction(",
-  L10: "raw SQL on a tenant table without store_id = / storeSql( in its WHERE or SET",
+  L10: "raw SQL on a tenant table without store_id = as a conjunct of its level's WHERE, or with a table name the lint cannot read",
   L12: "publish path without runPrePublishChecks(), or a public order/lead handler without resolveTestToken()",
   L13: "route handler that does not pass its seam first",
-  PIN: "more tenancy annotations than the allow file pins",
+  PIN: "more queries exempted by tenancy annotations than the allow file pins",
 } as const;
 type RuleId = keyof typeof RULES;
 
@@ -235,12 +255,83 @@ function isAncestor(a: ts.Node, n: ts.Node): boolean {
   return false;
 }
 
-/** the statement-list member that contains `n` (its annotation carrier) */
-function enclosingStatement(n: ts.Node): ts.Node {
-  let cur = n;
-  while (cur.parent && !ts.isBlock(cur.parent) && !ts.isSourceFile(cur.parent) && !ts.isModuleBlock(cur.parent) && !ts.isCaseClause(cur.parent) && !ts.isDefaultClause(cur.parent))
-    cur = cur.parent;
-  return cur;
+/** a statement (or a class property) whose own leading comment can carry an annotation */
+function isStatementLike(n: ts.Node): boolean {
+  return (
+    ts.isVariableStatement(n) ||
+    ts.isExpressionStatement(n) ||
+    ts.isReturnStatement(n) ||
+    ts.isIfStatement(n) ||
+    ts.isForStatement(n) ||
+    ts.isForOfStatement(n) ||
+    ts.isForInStatement(n) ||
+    ts.isWhileStatement(n) ||
+    ts.isDoStatement(n) ||
+    ts.isThrowStatement(n) ||
+    ts.isSwitchStatement(n) ||
+    ts.isLabeledStatement(n) ||
+    ts.isExportAssignment(n) ||
+    ts.isPropertyDeclaration(n)
+  );
+}
+
+/**
+ * The annotation carriers of `n` (review C0b F7): the innermost statement that contains it, or, when that is closer,
+ * the expression-bodied function it sits in together with the declaration that holds that function
+ * (`leak: async () => db…`, `export const f = () => db…`). Never crosses a function boundary: a comment on an outer
+ * statement does not reach a query inside a nested function.
+ */
+function annotationCarriers(n: ts.Node): ts.Node[] {
+  for (let p = n.parent; p; p = p.parent) {
+    if (isFnLike(p)) {
+      if (!p.body || ts.isBlock(p.body)) return [];
+      const out: ts.Node[] = [p];
+      let h: ts.Node = p.parent;
+      while (ts.isParenthesizedExpression(h) || ts.isAsExpression(h) || ts.isSatisfiesExpression(h)) h = h.parent;
+      if (ts.isPropertyAssignment(h) || ts.isPropertyDeclaration(h)) out.push(h);
+      else if (ts.isVariableDeclaration(h)) {
+        out.push(h);
+        if (ts.isVariableDeclarationList(h.parent) && h.parent.declarations.length === 1 && ts.isVariableStatement(h.parent.parent)) out.push(h.parent.parent);
+      }
+      return out;
+    }
+    if (isStatementLike(p)) return [p];
+  }
+  return [];
+}
+
+/** `(() => …)()` / `(async function () {…})()`: runs once, where it stands */
+function isIife(fn: FnLike): boolean {
+  if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) return false;
+  let e: ts.Node = fn;
+  while (ts.isParenthesizedExpression(e.parent)) e = e.parent;
+  return ts.isCallExpression(e.parent) && e.parent.expression === e;
+}
+
+/** the builder chain a call starts: every `.x(…)` call chained after it (`db.select().from(t).where(…).limit(1)`) */
+function chainAfter(start: ts.CallExpression): ts.CallExpression[] {
+  const out: ts.CallExpression[] = [];
+  let cur: ts.Expression = start;
+  for (;;) {
+    const pa = cur.parent;
+    if (!pa || !ts.isPropertyAccessExpression(pa) || pa.expression !== cur) break;
+    const call = pa.parent;
+    if (!call || !ts.isCallExpression(call) || call.expression !== pa) break;
+    out.push(call);
+    cur = call;
+  }
+  return out;
+}
+const methodOf = (c: ts.CallExpression): string => (ts.isPropertyAccessExpression(c.expression) ? c.expression.name.text : "");
+
+/** the whole query a tenant call belongs to: the outermost call of its chain, stopping before .then / .catch / .finally */
+function queryTop(call: ts.CallExpression): ts.Expression {
+  let top: ts.Expression = call;
+  for (const c of chainAfter(call)) {
+    if (["then", "catch", "finally"].includes(methodOf(c))) break;
+    top = c;
+  }
+  return top;
 }
 
 const lineOf = (sf: ts.SourceFile, pos: number) => sf.getLineAndCharacterOfPosition(pos).line + 1;
@@ -279,43 +370,412 @@ function fnName(fn: FnLike): string | null {
   return null;
 }
 
-/** function-like initializer of a declaration (`const f = async () => …`, `{ f: function () {} }`) */
-function fnInitializer(d: ts.Declaration): FnLike | null {
-  if (isFnLike(d) && (d as FnLike).body) return d as FnLike;
-  const init = ts.isVariableDeclaration(d) || ts.isPropertyAssignment(d) ? d.initializer : undefined;
-  if (!init) return null;
-  const e = unwrap(init);
-  return ts.isArrowFunction(e) || ts.isFunctionExpression(e) ? e : null;
-}
-
-interface ExportedFn {
+/** an export of a module: `fn` is the function it resolves to, or null when the lint cannot read one (`why`) */
+interface ExportedItem {
   name: string;
-  fn: FnLike;
+  fn: FnLike | null;
   at: ts.Node;
+  why?: string;
 }
 
-function exportedFunctions(sf: ts.SourceFile, checker: ts.TypeChecker): ExportedFn[] {
-  const out: ExportedFn[] = [];
+/** the function a value expression denotes: a function literal, or a `const` / function declaration it names (aliases followed) */
+function fnOfValue(e: ts.Expression | undefined, checker: ts.TypeChecker, depth = 0): FnLike | null {
+  if (!e || depth > 4) return null;
+  const x = unwrap(e);
+  if (ts.isArrowFunction(x) || ts.isFunctionExpression(x)) return x;
+  if (!ts.isIdentifier(x) && !ts.isPropertyAccessExpression(x)) return null;
+  let sym = checker.getSymbolAtLocation(ts.isPropertyAccessExpression(x) ? x.name : x);
+  if (sym && sym.flags & ts.SymbolFlags.Alias) sym = checker.getAliasedSymbol(sym);
+  return fnOfDecls(sym?.declarations ?? [], checker, depth);
+}
+
+function fnOfDecls(decls: readonly ts.Declaration[], checker: ts.TypeChecker, depth: number): FnLike | null {
+  for (const d of decls) {
+    if (d.getSourceFile().isDeclarationFile) continue;
+    if (isFnLike(d) && (d as FnLike).body) return d as FnLike;
+    if ((ts.isVariableDeclaration(d) && ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const) || ts.isPropertyAssignment(d)) {
+      const fn = fnOfValue(d.initializer, checker, depth + 1);
+      if (fn) return fn;
+    }
+  }
+  return null;
+}
+
+/**
+ * Every runtime export of a module (review C0b F11, F12): function declarations, `export const x = <fn | identifier>`,
+ * `export default <fn | identifier>`, local `export { a as b }` resolve to their function; a call result
+ * (`export const x = wrap(…)`), a re-export (`export { x } from`, `export *`) and a non-function value answer
+ * `fn: null` with the reason, so a seam rule can fail closed. Type-only exports are skipped.
+ */
+function moduleExports(sf: ts.SourceFile, checker: ts.TypeChecker): ExportedItem[] {
+  const out: ExportedItem[] = [];
   for (const s of sf.statements) {
-    if (ts.isFunctionDeclaration(s) && s.body && hasModifier(s, ts.SyntaxKind.ExportKeyword)) {
-      out.push({ name: hasModifier(s, ts.SyntaxKind.DefaultKeyword) ? "default" : (s.name?.text ?? "default"), fn: s, at: s.name ?? s });
-    } else if (ts.isVariableStatement(s) && hasModifier(s, ts.SyntaxKind.ExportKeyword)) {
+    if (ts.isFunctionDeclaration(s) && hasModifier(s, ts.SyntaxKind.ExportKeyword)) {
+      if (s.body) out.push({ name: hasModifier(s, ts.SyntaxKind.DefaultKeyword) ? "default" : (s.name?.text ?? "default"), fn: s, at: s.name ?? s });
+    } else if (ts.isVariableStatement(s) && hasModifier(s, ts.SyntaxKind.ExportKeyword) && !hasModifier(s, ts.SyntaxKind.DeclareKeyword)) {
       for (const d of s.declarationList.declarations) {
-        const fn = fnInitializer(d);
-        if (fn && ts.isIdentifier(d.name)) out.push({ name: d.name.text, fn, at: d.name });
+        if (!ts.isIdentifier(d.name)) {
+          out.push({ name: d.name.getText(sf), fn: null, at: d.name, why: "a destructured export" });
+          continue;
+        }
+        const fn = ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const ? fnOfValue(d.initializer, checker) : null;
+        const init = d.initializer ? unwrap(d.initializer) : undefined;
+        out.push({ name: d.name.text, fn, at: d.name, why: fn ? undefined : init && ts.isCallExpression(init) ? "a value built by a call" : "not a function the lint can read" });
       }
     } else if (ts.isExportAssignment(s) && !s.isExportEquals) {
-      const e = unwrap(s.expression);
-      if (ts.isArrowFunction(e) || ts.isFunctionExpression(e)) out.push({ name: "default", fn: e, at: s });
-    } else if (ts.isExportDeclaration(s) && !s.moduleSpecifier && s.exportClause && ts.isNamedExports(s.exportClause)) {
-      for (const spec of s.exportClause.elements) {
-        const sym = checker.getExportSpecifierLocalTargetSymbol(spec);
-        const fn = sym?.declarations?.map(fnInitializer).find((x): x is FnLike => !!x);
-        if (fn) out.push({ name: spec.name.text, fn, at: spec });
+      const fn = fnOfValue(s.expression, checker);
+      out.push({ name: "default", fn, at: s, why: fn ? undefined : "a default export that is not a function the lint can read" });
+    } else if (ts.isExportDeclaration(s) && !s.isTypeOnly) {
+      if (!s.exportClause || ts.isNamespaceExport(s.exportClause)) {
+        out.push({ name: s.exportClause ? s.exportClause.name.text : "*", fn: null, at: s, why: "export * re-exports a module" });
+        continue;
       }
+      for (const spec of s.exportClause.elements) {
+        if (spec.isTypeOnly) continue;
+        if (s.moduleSpecifier) {
+          out.push({ name: spec.name.text, fn: null, at: spec, why: "a re-export from another module" });
+          continue;
+        }
+        const sym = checker.getExportSpecifierLocalTargetSymbol(spec);
+        const target = sym && sym.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(sym) : sym;
+        if (target && !(target.flags & ts.SymbolFlags.Value)) continue; // a type
+        const fn = fnOfDecls(target?.declarations ?? [], checker, 0);
+        out.push({ name: spec.name.text, fn, at: spec, why: fn ? undefined : "not a function the lint can read" });
+      }
+    } else if ((ts.isClassDeclaration(s) || ts.isEnumDeclaration(s)) && hasModifier(s, ts.SyntaxKind.ExportKeyword) && !hasModifier(s, ts.SyntaxKind.DeclareKeyword)) {
+      out.push({ name: s.name?.text ?? "default", fn: null, at: s.name ?? s, why: "a class or enum export" });
     }
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* raw SQL (L2 templates, L10)                                         */
+/* ------------------------------------------------------------------ */
+
+/** a template span or a concatenated value inside SQL text: unknown SQL (a fragment, an identifier, a value) */
+const DYN = " \u0001 ";
+/** the start of a SQL statement in a string of the app (keywords in capitals, as the code base writes them) */
+const SQL_START = /^\s*\(?\s*(SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH|TRUNCATE)\b/;
+/** drizzle operators whose output is one comparison of their operands (no OR of their own) */
+const SAFE_OPS = new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull", "inArray", "notInArray", "like", "notLike", "ilike", "notIlike", "between", "notBetween", "exists", "notExists"]);
+
+type SqlTok = { t: "word"; v: string; up: string } | { t: "str" } | { t: "num" } | { t: "param" } | { t: "dyn" } | { t: "op"; v: string };
+interface SqlGroup {
+  t: "group";
+  items: SqlNode[];
+}
+type SqlNode = SqlTok | SqlGroup;
+
+function sqlTokens(text: string): SqlTok[] {
+  const out: SqlTok[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (/\s/.test(c)) i++;
+    else if (c === "\u0001") {
+      out.push({ t: "dyn" });
+      i++;
+    } else if ((c === "-" && text[i + 1] === "-") || c === "#") {
+      while (i < text.length && text[i] !== "\n") i++;
+    } else if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 2;
+    } else if (c === "'" || c === '"') {
+      i++;
+      while (i < text.length && !(text[i] === c && text[i + 1] !== c)) i += text[i] === "\\" || text[i] === c ? 2 : 1;
+      i++;
+      out.push({ t: "str" });
+    } else if (c === "`") {
+      const end = text.indexOf("`", i + 1);
+      const v = text.slice(i + 1, end < 0 ? text.length : end);
+      if (v.includes("\u0001")) out.push({ t: "dyn" }); // `${table}`: a name the lint cannot read
+      else out.push({ t: "word", v, up: `\`${v}` }); // a quoted identifier is never a keyword
+      i = end < 0 ? text.length : end + 1;
+    } else if (/[A-Za-z_$@]/.test(c)) {
+      let j = i + 1;
+      while (j < text.length && /[A-Za-z0-9_$@]/.test(text[j])) j++;
+      const v = text.slice(i, j);
+      out.push({ t: "word", v, up: v.toUpperCase() });
+      i = j;
+    } else if (/[0-9]/.test(c)) {
+      let j = i + 1;
+      while (j < text.length && /[0-9.eE]/.test(text[j])) j++;
+      out.push({ t: "num" });
+      i = j;
+    } else if (c === "?") {
+      out.push({ t: "param" });
+      i++;
+    } else {
+      const three = text.slice(i, i + 3);
+      const two = text.slice(i, i + 2);
+      const v = three === "<=>" ? three : ["||", "&&", ":=", "<>", "!=", ">=", "<="].includes(two) ? two : c;
+      out.push({ t: "op", v });
+      i += v.length;
+    }
+  }
+  return out;
+}
+
+/** the statements of a SQL text (split on `;` outside parentheses), each as a tree of parenthesised groups */
+function sqlStatements(text: string): SqlNode[][] {
+  const out: SqlNode[][] = [];
+  const stack: SqlNode[][] = [[]];
+  for (const tok of sqlTokens(text)) {
+    if (tok.t === "op" && tok.v === "(") stack.push([]);
+    else if (tok.t === "op" && tok.v === ")") {
+      if (stack.length > 1) {
+        const items = stack.pop()!;
+        stack[stack.length - 1].push({ t: "group", items });
+      } else stack[0].push({ t: "dyn" }); // an unbalanced `)`: the text breaks out of its context
+    } else if (tok.t === "op" && tok.v === ";" && stack.length === 1) {
+      if (stack[0].length) out.push(stack[0]);
+      stack[0] = [];
+    } else stack[stack.length - 1].push(tok);
+  }
+  while (stack.length > 1) {
+    const items = stack.pop()!;
+    stack[stack.length - 1].push({ t: "group", items }, { t: "dyn" }); // an unclosed `(`
+  }
+  if (stack[0].length) out.push(stack[0]);
+  return out;
+}
+
+const isWord = (n: SqlNode | undefined, ...ups: string[]): n is Extract<SqlTok, { t: "word" }> => !!n && n.t === "word" && (!ups.length || ups.includes(n.up));
+const isOp = (n: SqlNode | undefined, ...vs: string[]) => !!n && n.t === "op" && vs.includes(n.v);
+type Word = Extract<SqlTok, { t: "word" }>;
+const isSubquery = (n: SqlNode | undefined): boolean => !!n && n.t === "group" && isWord(n.items[0], "SELECT", "WITH");
+const wordOf = (n: SqlNode): n is Word => n.t === "word";
+
+/** clause keywords that end a table list, a SET list or a WHERE */
+const SQL_CLAUSE = new Set(["WHERE", "GROUP", "ORDER", "LIMIT", "HAVING", "UNION", "EXCEPT", "INTERSECT", "JOIN", "INNER", "LEFT", "RIGHT", "CROSS", "STRAIGHT_JOIN", "NATURAL", "FULL", "OUTER", "ON", "USING", "FOR", "LOCK", "WINDOW", "SET", "VALUES", "VALUE", "SELECT", "INTO", "PARTITION", "FROM", "RETURNING", "AS", "USE", "IGNORE", "FORCE", "DUPLICATE", "OFFSET"]);
+const WHERE_END = new Set(["GROUP", "ORDER", "LIMIT", "HAVING", "FOR", "LOCK", "WINDOW", "RETURNING", "ON", "UNION", "EXCEPT", "INTERSECT", "OFFSET"]);
+
+interface SqlFound {
+  tables: string[];
+  problems: string[];
+  dynamic: boolean;
+  insertTarget?: string;
+}
+
+/**
+ * L10 (review C0b F5): one statement, judged per query level. A level that names a tenant table (FROM / JOIN with
+ * comma lists, UPDATE, INSERT [INTO], REPLACE, DELETE … FROM, TRUNCATE [TABLE], schema-qualified names) needs
+ * `store_id = …` as a conjunct of its own WHERE (not in SET, not only inside a subquery, not under OR / NOT, no
+ * unknown fragment beside it); an UPDATE or ON DUPLICATE KEY UPDATE may not assign store_id; an INSERT names the
+ * store_id column; TRUNCATE is always reported; a table name the lint cannot read is reported.
+ */
+function analyzeSql(items: SqlNode[], tenant: (name: string) => boolean): SqlFound {
+  const found: SqlFound = { tables: [], problems: [], dynamic: false };
+  level(items, tenant, found);
+  return found;
+}
+
+/** the next table reference at `i`: [name | DYN | null (a derived table), the index after it and its alias] */
+function tableRef(items: SqlNode[], i: number): { name: string | null; dyn: boolean; next: number } {
+  const n = items[i];
+  if (!n) return { name: null, dyn: false, next: i };
+  if (n.t === "dyn") return { name: null, dyn: true, next: i + 1 };
+  if (n.t === "group") return { name: null, dyn: false, next: i + 1 };
+  if (!isWord(n) || SQL_CLAUSE.has(n.up)) return { name: null, dyn: false, next: i };
+  let name = n.v;
+  let j = i + 1;
+  while (isOp(items[j], ".") && (isWord(items[j + 1]) || items[j + 1]?.t === "dyn")) {
+    const part = items[j + 1]!;
+    if (part.t === "dyn") return { name: null, dyn: true, next: j + 2 };
+    name = (part as Extract<SqlTok, { t: "word" }>).v;
+    j += 2;
+  }
+  if (isOp(items[j], ".") && items[j + 1]?.t === "dyn") return { name: null, dyn: true, next: j + 2 };
+  return { name, dyn: false, next: j };
+}
+
+function level(items: SqlNode[], tenant: (name: string) => boolean, found: SqlFound): void {
+  // set operations: each SELECT of a UNION is its own level
+  const setOp = items.findIndex((n) => isWord(n, "UNION", "EXCEPT", "INTERSECT"));
+  if (setOp >= 0) {
+    level(items.slice(0, setOp), tenant, found);
+    let k = setOp + 1;
+    while (isWord(items[k], "ALL", "DISTINCT")) k++;
+    level(items.slice(k), tenant, found);
+    return;
+  }
+  // subqueries and derived tables: their own levels; other groups are searched for subqueries
+  const descend = (list: SqlNode[]) => {
+    for (const n of list) {
+      if (n.t !== "group") continue;
+      if (isSubquery(n)) level(n.items, tenant, found);
+      else descend(n.items);
+    }
+  };
+  descend(items);
+
+  let start = 0;
+  if (isWord(items[0], "WITH")) {
+    // WITH [RECURSIVE] name [(cols)] AS (…) [, …] <statement>: the CTE bodies were descended into above
+    start = items.findIndex((n, i) => i > 0 && isWord(n, "SELECT", "INSERT", "UPDATE", "DELETE", "REPLACE"));
+    if (start < 0) return;
+  }
+  const body = items.slice(start);
+  const head = body[0];
+  const tables: string[] = [];
+  let dyn = false;
+  const note = (r: { name: string | null; dyn: boolean }) => {
+    if (r.dyn) dyn = true;
+    else if (r.name && tenant(r.name)) tables.push(r.name.toLowerCase());
+  };
+  const problems: string[] = [];
+  const kw = isWord(head) ? head.up : "";
+
+  if (kw === "INSERT" || kw === "REPLACE") {
+    let i = 1;
+    while (isWord(body[i], "LOW_PRIORITY", "DELAYED", "HIGH_PRIORITY", "IGNORE")) i++;
+    if (isWord(body[i], "INTO")) i++;
+    const target = tableRef(body, i);
+    note(target);
+    let cols: string[] | null = null;
+    let j = target.next;
+    if (body[j]?.t === "group" && !isSubquery(body[j])) {
+      cols = (body[j] as SqlGroup).items.filter(wordOf).map((w) => w.v.toLowerCase());
+      j++;
+    }
+    const setAt = body.findIndex((n, k) => k >= j && isWord(n, "SET"));
+    const selAt = body.findIndex((n, k) => k >= j && isWord(n, "SELECT", "WITH"));
+    const dupAt = body.findIndex((n, k) => k >= j && isWord(n, "DUPLICATE"));
+    if (setAt >= 0 && (dupAt < 0 || setAt < dupAt)) cols = assignments(body.slice(setAt + 1, dupAt < 0 ? undefined : dupAt - 1)).map((a) => a.col);
+    if (target.name && tenant(target.name)) {
+      found.insertTarget ??= target.name.toLowerCase();
+      if (!cols?.includes("store_id")) problems.push(`INSERT into ${target.name} without a store_id column`);
+    }
+    if (target.dyn) problems.push("INSERT into a table the lint cannot read");
+    if (dupAt >= 0) {
+      const odku = assignments(body.slice(dupAt + 3));
+      if (target.name && tenant(target.name) && odku.some((a) => a.col === "store_id" || a.dyn)) problems.push("ON DUPLICATE KEY UPDATE assigns store_id (or an unknown list)");
+    }
+    if (selAt >= 0) level(body.slice(selAt, dupAt < 0 ? undefined : dupAt - 1), tenant, found);
+  } else if (kw === "TRUNCATE") {
+    const r = tableRef(body, isWord(body[1], "TABLE") ? 2 : 1);
+    note(r);
+    if (r.name && tenant(r.name)) problems.push(`TRUNCATE empties every store's ${r.name}`);
+    if (r.dyn) problems.push("TRUNCATE of a table the lint cannot read");
+  } else {
+    // SELECT / DELETE / UPDATE / a fragment: the tables of this level
+    for (let i = 0; i < body.length; i++) {
+      const n = body[i];
+      if (!isWord(n)) continue;
+      if (n.up === "FROM" || (n.up === "UPDATE" && i === 0) || n.up === "JOIN" || n.up === "STRAIGHT_JOIN" || (n.up === "USING" && kw === "DELETE")) {
+        let j = i + 1;
+        while (isWord(body[j], "LOW_PRIORITY", "IGNORE", "QUICK", "LATERAL")) j++;
+        for (;;) {
+          const r = tableRef(body, j);
+          if (r.next === j) break;
+          note(r);
+          j = r.next;
+          if (isWord(body[j], "AS")) j++;
+          if (isWord(body[j]) && !SQL_CLAUSE.has((body[j] as Extract<SqlTok, { t: "word" }>).up)) j++; // alias
+          if (body[j]?.t === "dyn") dyn = true; // a value spliced into the table list (`FROM orders ${x}`)
+          if (n.up === "JOIN" || n.up === "STRAIGHT_JOIN" || !isOp(body[j], ",")) break;
+          j++;
+        }
+      }
+    }
+    if (kw === "UPDATE" && (tables.length || dyn)) {
+      const setAt = body.findIndex((n) => isWord(n, "SET"));
+      const whereAt = body.findIndex((n) => isWord(n, "WHERE"));
+      if (setAt >= 0) {
+        const sets = assignments(body.slice(setAt + 1, whereAt < 0 ? undefined : whereAt));
+        if (sets.some((a) => a.col === "store_id")) problems.push("UPDATE assigns store_id in SET (rows would move to another store)");
+        else if (sets.some((a) => a.dyn)) problems.push("UPDATE with an unknown SET list (it could assign store_id)");
+      }
+    }
+    if (tables.length && !storeWhere(body)) problems.push("store_id = … is not a conjunct of this level's WHERE (not in SET, not only in a subquery, not under OR / NOT, no unknown fragment beside it)");
+    if (dyn) problems.push("a table name the lint cannot read (a template value or an unknown fragment)");
+  }
+  found.tables.push(...tables);
+  if (dyn) found.dynamic = true;
+  found.problems.push(...problems);
+}
+
+/** `col = …` items of a SET / ON DUPLICATE KEY UPDATE list (top level, comma-separated) */
+function assignments(items: SqlNode[]): { col: string; dyn: boolean }[] {
+  const out: { col: string; dyn: boolean }[] = [];
+  let cur: SqlNode[] = [];
+  const flush = () => {
+    if (!cur.length) return;
+    const eqAt = cur.findIndex((n) => isOp(n, "="));
+    const lhs = eqAt < 0 ? cur : cur.slice(0, eqAt);
+    const last = [...lhs].reverse().find(wordOf);
+    out.push({ col: last ? last.v.toLowerCase() : "", dyn: eqAt < 0 || lhs.some((n) => n.t === "dyn") });
+    cur = [];
+  };
+  for (const n of items) {
+    if (isOp(n, ",")) flush();
+    else cur.push(n);
+  }
+  flush();
+  return out;
+}
+
+/** this level's WHERE has `[x.]store_id = …` as a top-level conjunct */
+function storeWhere(items: SqlNode[]): boolean {
+  const at = items.findIndex((n) => isWord(n, "WHERE"));
+  if (at < 0) return false;
+  let end = items.findIndex((n, i) => i > at && isWord(n) && WHERE_END.has(n.up));
+  if (end < 0) end = items.length;
+  return storeConjunct(items.slice(at + 1, end));
+}
+
+function storeConjunct(items: SqlNode[]): boolean {
+  if (items.some((n) => isWord(n, "OR", "XOR") || isOp(n, "||", ":=") || n.t === "dyn")) return false;
+  let cur: SqlNode[] = [];
+  const conjuncts: SqlNode[][] = [];
+  let between = false; // BETWEEN a AND b: that AND is not a conjunction
+  for (const n of items) {
+    if (isWord(n, "BETWEEN")) between = true;
+    if ((isWord(n, "AND") || isOp(n, "&&")) && !(between && isWord(n, "AND"))) {
+      conjuncts.push(cur);
+      cur = [];
+    } else {
+      if (isWord(n, "AND")) between = false;
+      cur.push(n);
+    }
+  }
+  conjuncts.push(cur);
+  return conjuncts.some((c) => {
+    const g = c[0];
+    if (c.length === 1 && g.t === "group" && !isSubquery(g)) return storeConjunct(g.items);
+    let i = 0;
+    if (isWord(c[0]) && isOp(c[1], ".")) i = 2;
+    return isWord(c[i]) && (c[i] as Extract<SqlTok, { t: "word" }>).v.toLowerCase() === "store_id" && isOp(c[i + 1], "=") && c.length > i + 2;
+  });
+}
+
+/** a SQL text with no top-level OR / XOR / || / :=, no comment, no unknown fragment, and balanced parentheses */
+function closedSqlText(text: string): boolean {
+  if (/--|#|\/\*/.test(stripSqlStrings(text))) return false;
+  const stmts = sqlStatements(text);
+  if (stmts.length !== 1) return stmts.length === 0;
+  return !stmts[0].some((n) => isWord(n, "OR", "XOR") || isOp(n, "||", ":=", ";") || n.t === "dyn");
+}
+
+function stripSqlStrings(text: string): string {
+  return text.replace(/'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*"/g, "''");
+}
+
+/**
+ * L2 (review C0b F2): the text after `${storeSql(scope)}` keeps it a conjunct: `AND <conjunct>` with no top-level
+ * OR / XOR / || / := and no fragment (`fragment`: a nested SQL span sits in it), or `AND ( … )` around all the rest.
+ */
+function safeAndTail(tail: string, fragment: boolean): boolean {
+  if (/--|#|\/\*/.test(stripSqlStrings(tail))) return false;
+  const stmts = sqlStatements(tail);
+  if (stmts.length !== 1) return false;
+  const items = stmts[0];
+  if (!(isWord(items[0], "AND") || isOp(items[0], "&&")) || items.length < 2) return false;
+  const rest = items.slice(1);
+  if (rest.length === 1 && rest[0].t === "group") return true; // AND ( … ): an unbalanced ")" in a literal would have closed the group early
+  if (fragment) return false;
+  return !rest.some((n) => isWord(n, "OR", "XOR") || isOp(n, "||", ":=") || n.t === "dyn");
 }
 
 /* ------------------------------------------------------------------ */
@@ -335,6 +795,13 @@ interface Annotation {
   kind: "platform" | "public-key";
 }
 
+/** a query (a builder chain, or one raw SQL text) a `tenancy: platform` annotation exempts: what PIN counts */
+interface ExemptUnit {
+  file: string;
+  pos: number;
+  annotationLine: number;
+}
+
 class Lint {
   readonly violations: Violation[] = [];
   readonly annotations: Annotation[] = [];
@@ -345,8 +812,21 @@ class Lint {
   private readonly bucket: ts.Type | null;
   private readonly ops = new Map<ts.SourceFile, TenantOp[]>();
   private readonly annotationLines = new Map<ts.SourceFile, Map<number, Annotation["kind"]>>();
+  /** the exempted queries, keyed by their node (PIN counts these, not comment lines: review C0b F7) */
+  private readonly exemptUnits = new Map<ts.Node, ExemptUnit>();
+  /** the query tops (outermost chain calls) an annotation exempted: an eq() inside one is exempt too */
+  private readonly exemptTops = new Set<ts.Node>();
+  /** every identifier of src/** by its text (L4's reference search, built once) */
+  private idIndex: Map<string, ts.Identifier[]> | null = null;
+  /** import / export specifiers that rename (`{ a as b }`): a → [b] (L4's alias closure) */
+  private renameIndex: Map<string, string[]> | null = null;
+  /** local names of default imports (L4, for a default-exported const) */
+  private defaultImportNames: Set<string> | null = null;
   private readonly scopeParamMemo = new Map<FnLike, ts.ParameterDeclaration[]>();
   private readonly l6Reported = new Set<FnLike>();
+  private readonly l6ArgReported = new Set<ts.Node>();
+  private readonly l4GlobalSeen = new Set<string>();
+  private rateAliases = new Set<string>();
   private readonly l9Checked = new Set<FnLike>();
   private readonly reachMemo = new Map<string, Map<FnLike, boolean>>();
   private readonly targetsMemo = new Map<FnLike, FnLike[]>();
@@ -445,6 +925,44 @@ class Lint {
     const prop = t.getProperty("scope");
     return !!prop && this.isWriteType(this.checker.getTypeOfSymbolAtLocation(prop, at));
   }
+  /** a StoreScope, or an object (a StoreCtx / WriteCtx / PublicTarget) whose `scope` is one */
+  private carriesScope(t: ts.Type, at: ts.Node): boolean {
+    if (!this.isUsable(t)) return false;
+    if (this.isScopeType(t)) return true;
+    const prop = t.getProperty("scope");
+    return !!prop && this.isScopeType(this.checker.getTypeOfSymbolAtLocation(prop, at));
+  }
+  private typeAt(e: ts.Node): ts.Type {
+    return this.checker.getTypeAtLocation(e);
+  }
+
+  /** the literal of a `brand` / `name` property of drizzle's `_` config (`'Table'`, `"pages"`), or "" when not a literal */
+  private underProp(t: ts.Type, prop: string, at: ts.Node): string | null {
+    const u = t.getProperty("_");
+    if (!u) return null;
+    const p = this.checker.getTypeOfSymbolAtLocation(u, at).getProperty(prop);
+    if (!p) return null;
+    const pt = this.checker.getTypeOfSymbolAtLocation(p, at);
+    return pt.isStringLiteral() ? pt.value : "";
+  }
+
+  /**
+   * What a value inside a drizzle `sql` template becomes: a table or a column (an identifier), a nested SQL fragment
+   * (drizzle inlines it without parentheses, sql.js buildQueryFromSourceParams), a bound value, or unknown (any).
+   */
+  private sqlKind(e: ts.Expression): "table" | "column" | "sql" | "value" | "unknown" {
+    const t = this.typeAt(e);
+    if (!this.isUsable(t)) return "unknown";
+    let kind: "table" | "column" | "sql" | "value" = "value";
+    for (const m of t.isUnion() ? t.types : [t]) {
+      const a = this.checker.getApparentType(m);
+      if (!a.getProperty("getSQL")) continue;
+      if (this.underProp(a, "brand", e) === "Table") kind = kind === "value" ? "table" : kind;
+      else if (a.getProperty("columnType") && a.getProperty("table")) kind = kind === "value" ? "column" : kind;
+      else return "sql";
+    }
+    return kind;
+  }
 
   /** the SQL name of the tenant table an expression denotes (the table object, an alias() of it, or a const copy) */
   private tenantTableOf(e: ts.Expression | undefined, depth = 0): string | null {
@@ -463,6 +981,34 @@ class Lint {
     return null;
   }
 
+  /**
+   * The table a drizzle builder argument denotes, read from its type (review C0b F6): `_.name` of each member of the
+   * type (a helper's return, a `let`, a ternary, `TABLES[k]`, a destructured schema member, a `typeof pages`
+   * parameter). `dynamic` when it is a table whose name is not a literal (a generic, `MySqlTable`, any) or SQL used as
+   * a source; null when the argument is not a table (a subquery, a view, a CTE).
+   */
+  private tableOfType(e: ts.Expression): { tenant: string[]; dynamic: boolean } | null {
+    const t = this.typeAt(e);
+    if (t.flags & ts.TypeFlags.Any) return { tenant: [], dynamic: true };
+    if (!this.isUsable(t)) return null;
+    const out = { tenant: [] as string[], dynamic: false };
+    let table = false;
+    for (const m of t.isUnion() ? t.types : [t]) {
+      const a = this.checker.getApparentType(m);
+      const brand = this.underProp(a, "brand", e);
+      if (brand === "Table") {
+        table = true;
+        const name = this.underProp(a, "name", e);
+        if (!name) out.dynamic = true;
+        else if (this.isTenantSqlName(name)) out.tenant.push(name);
+      } else if (brand === "SQL" || (a.getProperty("queryChunks") && a.getProperty("getSQL"))) {
+        table = true;
+        out.dynamic = true; // sql`orders` as a source
+      }
+    }
+    return table ? out : null;
+  }
+
   /** the initializer of a `const` the identifier names, in the same file */
   private constInit(id: ts.Identifier): ts.Expression | null {
     const d = this.symbolOf(id)?.valueDeclaration;
@@ -470,24 +1016,53 @@ class Lint {
     return d.getSourceFile() === id.getSourceFile() ? d.initializer : null;
   }
 
-  /** parameters of `fn` typed StoreScope (or a narrower scope type); `any` never counts */
+  /**
+   * Parameters of `fn` typed StoreScope (or a narrower scope type), or a ctx whose `scope` is one (StoreCtx, WriteCtx,
+   * `{ scope }`: D71 rev 4 names ctx-taking repositories, review C0b F15); `any` never counts.
+   */
   private scopeParams(fn: FnLike): ts.ParameterDeclaration[] {
     let hit = this.scopeParamMemo.get(fn);
     if (!hit) {
-      hit = fn.parameters.filter((p) => this.isScopeType(this.checker.getTypeAtLocation(p.name)));
+      hit = fn.parameters.filter((p) => this.carriesScope(this.checker.getTypeAtLocation(p.name), p));
       this.scopeParamMemo.set(fn, hit);
     }
     return hit;
   }
 
-  /** an identifier bound to a StoreScope-typed parameter of a function enclosing `at` */
-  private isScopeParamRef(e: ts.Expression | undefined, at: ts.Node): boolean {
-    if (!e) return false;
+  private isOwnScopeParam(d: ts.ParameterDeclaration, at: ts.Node): boolean {
+    return isFnLike(d.parent) && isAncestor(d.parent, at) && this.scopeParams(d.parent).includes(d);
+  }
+
+  /** an identifier bound to a scope parameter (a scope or a ctx) of a function enclosing `at` */
+  private isParamRef(e: ts.Expression, at: ts.Node): boolean {
     const x = unwrap(e);
     if (!ts.isIdentifier(x)) return false;
     const d = this.checker.getSymbolAtLocation(x)?.valueDeclaration;
-    if (!d || !ts.isParameter(d) || !isFnLike(d.parent) || !isAncestor(d.parent, at)) return false;
-    return this.scopeParams(d.parent).includes(d);
+    return !!d && ts.isParameter(d) && this.isOwnScopeParam(d, at);
+  }
+
+  /**
+   * A StoreScope that comes straight from a scope parameter of a function enclosing `at`: the parameter itself,
+   * `<ctx parameter>.scope`, or `scope` destructured from such a parameter (`({ scope }: StoreCtx)`,
+   * `const { scope } = ctx`). A local copy or any other expression does not count.
+   */
+  private isScopeParamRef(e: ts.Expression | undefined, at: ts.Node): boolean {
+    if (!e) return false;
+    const x = unwrap(e);
+    if (!this.isScopeType(this.typeAt(x))) return false;
+    if (ts.isPropertyAccessExpression(x)) return x.name.text === "scope" && this.isParamRef(x.expression, at);
+    if (!ts.isIdentifier(x)) return false;
+    const d = this.checker.getSymbolAtLocation(x)?.valueDeclaration;
+    if (!d) return false;
+    if (ts.isParameter(d)) return this.isOwnScopeParam(d, at);
+    if (ts.isBindingElement(d) && ts.isObjectBindingPattern(d.parent) && !d.dotDotDotToken) {
+      const key = d.propertyName ?? d.name;
+      if (!ts.isIdentifier(key) || key.text !== "scope") return false;
+      const holder = d.parent.parent;
+      if (ts.isParameter(holder)) return this.isOwnScopeParam(holder, at);
+      if (ts.isVariableDeclaration(holder) && holder.initializer && ts.getCombinedNodeFlags(holder) & ts.NodeFlags.Const) return this.isParamRef(holder.initializer, at);
+    }
+    return false;
   }
 
   /* ---------------- annotations ---------------- */
@@ -518,20 +1093,58 @@ class Lint {
     this.annotationLines.set(sf, lines);
   }
 
-  /** the statement carries an annotation that its file is allowlisted for (§E.3 rule 6) */
-  private exempt(node: ts.Node): boolean {
+  /** an own-line `// tenancy:` comment among the leading comments of `n`, of one of `kinds` */
+  private leadingAnnotation(n: ts.Node, kinds: readonly Annotation["kind"][]): { line: number; kind: Annotation["kind"] } | null {
+    const sf = this.file;
+    const text = sf.text;
+    for (const c of ts.getLeadingCommentRanges(text, n.pos) ?? []) {
+      if (c.kind !== ts.SyntaxKind.SingleLineCommentTrivia) continue;
+      const lineStart = text.lastIndexOf("\n", c.pos - 1) + 1;
+      if (text.slice(lineStart, c.pos).trim() !== "") continue; // trailing comment of the previous line
+      const m = /^\/\/\s*tenancy:\s*(platform|public-key)\s+\S/.exec(text.slice(c.pos, c.end));
+      if (m && kinds.includes(m[1] as Annotation["kind"])) return { line: lineOf(sf, c.pos), kind: m[1] as Annotation["kind"] };
+    }
+    return null;
+  }
+
+  /**
+   * The annotation that exempts the query `node` belongs to (§E.3 rule 6, review C0b F7), in an allowlisted file only:
+   * an own-line comment that leads the query's carrier (the innermost statement, or the expression-bodied function
+   * and its declaration: `annotationCarriers`), an own-line comment that leads the query expression itself (an array
+   * element, an argument), or a comment on one of the query's own lines (`.from(T) // tenancy: platform …`). A comment
+   * elsewhere in an enclosing statement exempts nothing. `top` is the whole query (the outermost call of its builder
+   * chain, or the raw SQL text); each exempted query is one PIN unit.
+   */
+  private exempt(node: ts.Node, top: ts.Node = node): boolean {
     const kinds: Annotation["kind"][] = [];
     if (under(this.relFile, PLATFORM_DIRS)) kinds.push("platform");
     if (under(this.relFile, PUBLIC_KEY_FILES)) kinds.push("public-key");
     if (!kinds.length) return false;
     const lines = this.annotationLines.get(this.file);
     if (!lines?.size) return false;
-    const stmt = enclosingStatement(node);
     const sf = this.file;
-    let from = lineOf(sf, stmt.getStart(sf));
-    for (const c of ts.getLeadingCommentRanges(sf.text, stmt.pos) ?? []) from = Math.min(from, lineOf(sf, c.pos));
-    const to = lineOf(sf, stmt.getEnd());
-    for (const [line, kind] of lines) if (line >= from && line <= to && kinds.includes(kind)) return true;
+    let hit: { line: number; kind: Annotation["kind"] } | null = null;
+    for (const c of [...annotationCarriers(top), top]) if ((hit = this.leadingAnnotation(c, kinds))) break;
+    if (!hit) {
+      const from = lineOf(sf, top.getStart(sf));
+      const to = lineOf(sf, top.getEnd());
+      for (let l = from; l <= to && !hit; l++) {
+        const kind = lines.get(l);
+        if (kind && kinds.includes(kind)) hit = { line: l, kind };
+      }
+    }
+    if (!hit) return false;
+    this.exemptTops.add(top);
+    if (hit.kind === "platform" && !this.exemptUnits.has(top)) this.exemptUnits.set(top, { file: this.relFile, pos: top.getStart(sf), annotationLine: hit.line });
+    return true;
+  }
+
+  /** an eq() / predicate inside a query an annotation already exempted */
+  private insideExemptQuery(n: ts.Node): boolean {
+    for (let p = n.parent; p; p = p.parent) {
+      if (this.exemptTops.has(p)) return true;
+      if (isFnLike(p)) return false;
+    }
     return false;
   }
 
@@ -543,6 +1156,11 @@ class Lint {
       this.file = sf;
       this.relFile = rel(sf.fileName);
       this.ops.set(sf, []);
+      // L5: the local names rateLimit / rateLimitReached are imported under (`import { rateLimit as rl }`)
+      this.rateAliases = new Set();
+      for (const s of sf.statements)
+        if (ts.isImportDeclaration(s) && s.importClause?.namedBindings && ts.isNamedImports(s.importClause.namedBindings))
+          for (const el of s.importClause.namedBindings.elements) if (el.propertyName && ["rateLimit", "rateLimitReached"].includes(el.propertyName.text)) this.rateAliases.add(el.name.text);
       const visit = (n: ts.Node) => {
         this.visit(n);
         ts.forEachChild(n, visit);
@@ -566,12 +1184,14 @@ class Lint {
     if (ts.isCallExpression(n)) this.onCall(n);
     else if (ts.isTaggedTemplateExpression(n)) this.onTaggedTemplate(n);
     else if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) this.onLiteral(n);
-    else if ((ts.isAsExpression(n) || ts.isTypeAssertionExpression(n)) && f !== F.seam) this.onCast(n);
+    else if (ts.isAsExpression(n) || ts.isTypeAssertionExpression(n)) this.onCast(n);
     else if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier))
       this.onImport(n.moduleSpecifier.text, n, ts.isImportDeclaration(n) ? typeOnlyImport(n) : n.isTypeOnly);
     else if (ts.isModuleDeclaration(n) && n.flags & ts.NodeFlags.GlobalAugmentation && f.startsWith("src/lib/") && !SELFTEST.test(f)) this.onDeclareGlobal(n);
     else if (ts.isNewExpression(n) && f.startsWith("src/lib/")) this.onNew(n);
     else if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken) this.onConcat(n);
+    else if (ts.isObjectLiteralExpression(n)) this.onObjectLiteral(n);
+    else if (ts.isIdentifier(n) && (n.text === "rateLimit" || n.text === "rateLimitReached" || this.rateAliases.has(n.text))) this.onRateRef(n);
     if (isFnLike(n)) this.onFunction(n);
   }
 
@@ -590,15 +1210,24 @@ class Lint {
     }
     if (ts.isPropertyAccessExpression(callee)) {
       const m = callee.name.text;
-      if (DRIZZLE_TABLE_CALLS.has(m)) {
+      if (DRIZZLE_TABLE_CALLS.has(m) && call.arguments[0]) {
         const table = this.tenantTableOf(call.arguments[0]);
         if (table) this.onTenantCall(call, m, table);
+        else if (this.calleeRef(call)?.file.includes("drizzle-orm")) {
+          // review C0b F6: a table reached through a helper, a `let`, a ternary, TABLES[k], a destructured schema or a
+          // typed parameter is named by its type; a table the type does not name is reported, never skipped
+          const t = this.tableOfType(call.arguments[0]);
+          if (t?.tenant.length) this.onTenantCall(call, m, t.tenant[0]);
+          else if (t?.dynamic && !this.exempt(call, queryTop(call)))
+            this.report(call.arguments[0], "L1", "dynamic-table", `.${m}() on a table the lint cannot name (a generic or untyped table, a MySqlTable parameter, or SQL as a source): pass the table itself`);
+        }
       }
       if (m === "findFirst" || m === "findMany") this.onRelational(call, callee);
-      if ((m === "execute" || m === "query") && call.arguments[0] && !ts.isTaggedTemplateExpression(call.arguments[0])) this.onRawString(call.arguments[0]);
     }
 
     const ref = this.calleeRef(call);
+    if (!ref || (!ref.file.includes("drizzle-orm") && ref.file !== F.sql)) this.onTableArgs(call);
+    this.onScopeCopy(call);
     if (!ref) return;
     const f = this.relFile;
     if (ref.name === "eq" && ref.file.includes("drizzle-orm")) this.onEq(call);
@@ -620,44 +1249,146 @@ class Lint {
     }
   }
 
+  /**
+   * L1 (review C0b F6): a tenant table handed to a function of the app that takes no StoreScope (a generic
+   * `selectAll(orders)` repository helper) leaves the lint's sight; drizzle's own functions and the four helpers are
+   * judged where they are called.
+   */
+  private onTableArgs(call: ts.CallExpression): void {
+    let sig: ts.Signature | undefined;
+    for (const a of call.arguments) {
+      if (ts.isSpreadElement(a)) continue;
+      const table = this.tenantTableOf(a);
+      if (!table) continue;
+      sig ??= this.checker.getResolvedSignature(call);
+      const scoped = !!sig?.getParameters().some((p) => this.carriesScope(this.checker.getTypeOfSymbolAtLocation(p, call), call));
+      if (scoped || this.exempt(call)) continue;
+      this.report(a, "L1", "table-arg", `the tenant table ${table} passed to ${call.expression.getText(this.file).slice(0, 40)}(), which takes no StoreScope: query it where the scope is`);
+    }
+  }
+
+  /** L6 (review C0b F1): Object.assign / structuredClone of a scope or a ctx build a scope the seam did not mint */
+  private onScopeCopy(call: ts.CallExpression): void {
+    if (MINT_SITES.includes(this.relFile) || SELFTEST.test(this.relFile)) return;
+    const c = unwrap(call.expression);
+    const copy =
+      (ts.isIdentifier(c) && c.text === "structuredClone") ||
+      (ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression) && c.expression.text === "Object" && (c.name.text === "assign" || c.name.text === "create"));
+    if (!copy) return;
+    if (call.arguments.some((a) => !ts.isSpreadElement(a) && this.carriesScope(this.checker.getNonNullableType(this.typeAt(a)), a)))
+      this.report(call, "L6", "scope-copy", `${c.getText(this.file)}() copies a StoreScope (or a ctx carrying one): scopes come only from the seam (§E.1)`);
+  }
+
+  /**
+   * L6 (review C0b F1): a StoreScope's brand is a symbol-keyed property that an object spread copies, so
+   * `{ ...scope, storeId: id }` or `{ ...scope, kind: "member" }` forges another store's scope, or a write scope, with
+   * no cast. Outside the seam files an object literal that is itself a StoreScope, or that spreads a scope or a ctx, is
+   * reported. A literal without a spread cannot carry the brand (TS2741), so only literals with one are typed.
+   */
+  private onObjectLiteral(n: ts.ObjectLiteralExpression): void {
+    if (MINT_SITES.includes(this.relFile) || SELFTEST.test(this.relFile)) return; // selftests fake ctxs on purpose
+    const spreads = n.properties.filter(ts.isSpreadAssignment);
+    if (!spreads.length) return;
+    if (this.isScopeType(this.typeAt(n))) {
+      this.report(n, "L6", "forged-scope", "an object literal that is a StoreScope (a spread copies the brand): scopes come only from the seam (§E.1, D71)");
+      return;
+    }
+    const carries = (t: ts.Type, at: ts.Node) => (t.isUnion() ? t.types : [t]).some((m) => this.carriesScope(m, at));
+    if (spreads.some((s) => carries(this.typeAt(s.expression), s)))
+      this.report(n, "L6", "scope-spread", "an object literal spreads a StoreScope or a ctx carrying one: pass the scope or the ctx itself (§E.1, D71)");
+  }
+
+  /** L5 (review C0b F10): rateLimit / rateLimitReached only as the callee of a direct call, so its bucket is judged */
+  private onRateRef(id: ts.Identifier): void {
+    if (this.relFile === F.rateLimit) return;
+    const p = id.parent;
+    if (ts.isImportSpecifier(p) || ts.isExportSpecifier(p) || ts.isImportClause(p) || ts.isTypeQueryNode(p)) return;
+    let sym = this.checker.getSymbolAtLocation(id);
+    if (sym && sym.flags & ts.SymbolFlags.Alias) sym = this.checker.getAliasedSymbol(sym);
+    const decl = sym?.declarations?.[0];
+    if (!sym || !decl || rel(decl.getSourceFile().fileName) !== F.rateLimit || (sym.name !== "rateLimit" && sym.name !== "rateLimitReached")) return;
+    let e: ts.Node = ts.isPropertyAccessExpression(p) && p.name === id ? p : id;
+    while (ts.isParenthesizedExpression(e.parent) || ts.isNonNullExpression(e.parent)) e = e.parent;
+    if (ts.isCallExpression(e.parent) && e.parent.expression === e) return;
+    this.report(id, "L5", "rate-limit-ref", `${sym.name} used as a value (an alias or a callback): call it directly, so its bucket is checked (§E.8)`);
+  }
+
   private onTenantCall(call: ts.CallExpression, method: string, table: string): void {
     this.ops.get(this.file)!.push({ node: call, pos: call.getStart(this.file), table, method });
-    const exempt = this.exempt(call);
-    if (exempt) return;
+    const top = queryTop(call);
+    if (this.exempt(call, top)) return;
     const scopeFn = enclosingFns(call).find((fn) => this.scopeParams(fn).length > 0);
     const at = call.arguments[0];
     if (!scopeFn) this.report(at, "L1", "query", `.${method}(${table}) in a function without a StoreScope parameter`);
+    const chain = chainAfter(call);
+    /** the scope arguments the store predicate and storeValues use: L6 judges these, not the function (review C0b F8) */
+    const used: ts.Expression[] = [];
 
     if (method === "from" || method === "update" || method === "delete") {
-      const where = this.chainCall(call, "where");
-      if (!where) this.report(at, "L2", "no-where", `.${method}(${table}) has no .where()`);
-      else if (!this.hasStorePred(where.arguments[0], call))
-        this.report(at, "L2", "unscoped-where", `.${method}(${table}).where() has no inStore/whereStore/byId/storeSql on a StoreScope parameter (top level or inside and())`);
+      // review C0b F3: drizzle keeps only the last .where() (select.js, update.js overwrite config.where), so every
+      // .where() of the chain must carry the store predicate, and a $dynamic() builder must not escape
+      const wheres = chain.filter((c) => methodOf(c) === "where");
+      if (!wheres.length) this.report(at, "L2", "no-where", `.${method}(${table}) has no .where()`);
+      else {
+        const scopes = wheres.map((w) => this.predScopes(w.arguments[0], call));
+        if (scopes.some((s) => !s.length))
+          this.report(
+            at,
+            "L2",
+            wheres.length > 1 ? "where-replaced" : "unscoped-where",
+            wheres.length > 1
+              ? `.${method}(${table}) has ${wheres.length} .where() calls and one lacks the store predicate: drizzle keeps only the last one`
+              : `.${method}(${table}).where() has no inStore/whereStore/byId/storeSql on a StoreScope parameter (top level or inside and())`,
+          );
+        else for (const w of wheres) this.reportOpen(w.arguments[0], call, `.${method}(${table}).where()`);
+        used.push(...scopes.flat());
+      }
+      if (chain.some((c) => methodOf(c) === "$dynamic") && !this.consumedInPlace(top))
+        this.report(at, "L2", "dynamic", `.${method}(${table}).$dynamic() leaves the function unexecuted: a later .where() would replace the store predicate; await it where it is built`);
     }
-    if (method === "$count" && !this.hasStorePred(call.arguments[1], call))
-      this.report(at, "L2", "unscoped-where", `$count(${table}) has no store predicate on a StoreScope parameter`);
+    if (method === "$count") {
+      if (!this.predScopes(call.arguments[1], call).length) this.report(at, "L2", "unscoped-where", `$count(${table}) has no store predicate on a StoreScope parameter`);
+      else this.reportOpen(call.arguments[1], call, `$count(${table})`);
+    }
 
     if (method === "insert") {
-      const values = this.chainCall(call, "values");
-      if (values && !this.valuesOk(values.arguments[0])) this.report(at, "L3", "insert-values", `.insert(${table}).values() not wrapped in storeValues(scope, …)`);
-      const odku = this.chainCall(call, "onDuplicateKeyUpdate");
-      const arg = odku?.arguments[0] ? unwrap(odku.arguments[0]) : undefined;
-      if (arg && ts.isObjectLiteralExpression(arg)) {
-        const set = arg.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "set");
-        if (set && this.namesStoreId(set.initializer)) this.report(at, "L3b", "set-storeId", `.insert(${table}).onDuplicateKeyUpdate({ set }) names storeId`);
+      const values = chain.find((c) => methodOf(c) === "values");
+      if (values) {
+        const s = this.valuesScopes(values.arguments[0], call);
+        if (!s) this.report(at, "L3", "insert-values", `.insert(${table}).values() not wrapped in storeValues(scope, …), or a later spread may override its storeId`);
+        else used.push(...s);
       }
+      const odku = chain.find((c) => methodOf(c) === "onDuplicateKeyUpdate");
+      if (odku?.arguments[0] && this.propHasStoreId(odku.arguments[0], "set"))
+        this.report(at, "L3b", "set-storeId", `.insert(${table}).onDuplicateKeyUpdate({ set }): the set's type has storeId (a row could move to another store)`);
     }
-    if (method === "update") {
-      const set = this.chainCall(call, "set");
-      if (set && this.namesStoreId(set.arguments[0])) this.report(at, "L3b", "set-storeId", `.update(${table}).set() names storeId`);
-    }
-    if (WRITES.has(method) && scopeFn && !this.l6Reported.has(scopeFn)) {
-      const write = this.scopeParams(scopeFn).some((p) => this.isWriteType(this.checker.getTypeAtLocation(p.name)));
-      if (!write) {
+    if (method === "update")
+      for (const set of chain.filter((c) => methodOf(c) === "set"))
+        if (set.arguments[0] && this.typeHasStoreId(this.typeAt(set.arguments[0])))
+          this.report(at, "L3b", "set-storeId", `.update(${table}).set(): the value's type has storeId (a row could move to another store; type the patch without it)`);
+
+    if (WRITES.has(method) && scopeFn) {
+      if (used.length) {
+        for (const s of used) {
+          if (this.isWriteType(this.typeAt(s)) || this.l6ArgReported.has(s)) continue;
+          this.l6ArgReported.add(s);
+          this.report(s, "L6", "write-scope", `.${method}(${table}) writes through ${s.getText(this.file)}, which is not a WriteScope (D71): a read-only impersonation or platform scope cannot write`);
+        }
+      } else if (!this.l6Reported.has(scopeFn) && !this.scopeParams(scopeFn).some((p) => this.carriesWrite(this.typeAt(p.name), p))) {
         this.l6Reported.add(scopeFn);
         this.report(at, "L6", "write-scope", `.${method}(${table}) in ${fnName(scopeFn) ?? "a function"} whose scope parameter is not a WriteScope (D71)`);
       }
     }
+  }
+
+  /** the query is executed where it is built: awaited, or returned from an async function (its caller gets rows) */
+  private consumedInPlace(top: ts.Node): boolean {
+    let e: ts.Node = top;
+    while (ts.isParenthesizedExpression(e.parent)) e = e.parent;
+    const p = e.parent;
+    if (ts.isAwaitExpression(p)) return true;
+    const fn = ts.isReturnStatement(p) ? enclosingFns(p)[0] : ts.isArrowFunction(p) && p.body === e ? p : undefined;
+    return !!fn && hasModifier(fn, ts.SyntaxKind.AsyncKeyword);
   }
 
   /** `db.query.<table>.findFirst / findMany({ where })`: a select whose store predicate is the `where` option (L1, L2) */
@@ -673,89 +1404,224 @@ class Lint {
     const opts = call.arguments[0] ? unwrap(call.arguments[0]) : undefined;
     const where = opts && ts.isObjectLiteralExpression(opts) ? opts.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "where") : undefined;
     if (!where) this.report(call, "L2", "no-where", `query.${holder.name.text}.${callee.name.text}() has no where`);
-    else if (!this.hasStorePred(where.initializer, call))
+    else if (!this.predScopes(where.initializer, call).length)
       this.report(call, "L2", "unscoped-where", `query.${holder.name.text}.${callee.name.text}({ where }) has no inStore/whereStore/byId/storeSql on a StoreScope parameter (a callback where is not checked: pass the SQL)`);
+    else this.reportOpen(where.initializer, call, `query.${holder.name.text}.${callee.name.text}({ where })`);
   }
 
-  /** the next call named `name` in the builder chain that starts at `start` (`db.select().from(t).where(…)`) */
-  private chainCall(start: ts.CallExpression, name: string): ts.CallExpression | null {
-    let cur: ts.Expression = start;
-    for (;;) {
-      const pa = cur.parent;
-      if (!pa || !ts.isPropertyAccessExpression(pa) || pa.expression !== cur) return null;
-      const call = pa.parent;
-      if (!call || !ts.isCallExpression(call) || call.expression !== pa) return null;
-      if (pa.name.text === name) return call;
-      cur = call;
-    }
-  }
-
-  /** inStore / whereStore / byId / storeSql on a scope parameter, at the top level or inside and( (never or( / not() */
-  private hasStorePred(expr: ts.Expression | undefined, at: ts.Node, depth = 0): boolean {
-    if (!expr || depth > 4) return false;
+  /**
+   * The scope arguments of the store predicates in a where: inStore / whereStore / byId / storeSql on a scope
+   * parameter, at the top level or inside and( (never or( / not(). Empty when there is none.
+   */
+  private predScopes(expr: ts.Expression | undefined, at: ts.Node, depth = 0): ts.Expression[] {
+    if (!expr || depth > 4) return [];
     const e = unwrap(expr);
     if (ts.isCallExpression(e)) {
-      if (this.isCall(e, F.sql, "inStore", "whereStore", "byId")) return this.isScopeParamRef(e.arguments[1], at);
-      if (this.isCall(e, F.sql, "storeSql")) return this.isScopeParamRef(e.arguments[0], at);
-      if (this.isDrizzleCall(e, "and"))
-        return e.arguments.some((a) => (ts.isSpreadElement(a) ? this.spreadHasPred(a.expression, at, depth) : this.hasStorePred(a, at, depth + 1)));
-      return false;
+      if (this.isCall(e, F.sql, "inStore", "whereStore", "byId")) return this.isScopeParamRef(e.arguments[1], at) ? [e.arguments[1]] : [];
+      if (this.isCall(e, F.sql, "storeSql")) return this.isScopeParamRef(e.arguments[0], at) ? [e.arguments[0]] : [];
+      if (this.isDrizzleCall(e, "and")) return e.arguments.flatMap((a) => (ts.isSpreadElement(a) ? this.spreadScopes(a.expression, at, depth) : this.predScopes(a, at, depth + 1)));
+      return [];
     }
-    if (ts.isTaggedTemplateExpression(e) && this.isSqlTag(e) && ts.isTemplateExpression(e.template)) {
-      const raw = [e.template.head.text, ...e.template.templateSpans.map((s) => s.literal.text)].join(" ? ");
-      if (/\bor\b/i.test(raw)) return false;
-      return e.template.templateSpans.some((s) => {
-        const x = unwrap(s.expression);
-        return ts.isCallExpression(x) && this.isCall(x, F.sql, "storeSql") && this.isScopeParamRef(x.arguments[0], at);
-      });
+    if (ts.isTaggedTemplateExpression(e) && this.isSqlTag(e)) {
+      const s = this.templatePredScope(e, at);
+      return s ? [s] : [];
     }
-    if (ts.isConditionalExpression(e)) return this.hasStorePred(e.whenTrue, at, depth + 1) && this.hasStorePred(e.whenFalse, at, depth + 1);
+    if (ts.isConditionalExpression(e)) {
+      const a = this.predScopes(e.whenTrue, at, depth + 1);
+      const b = this.predScopes(e.whenFalse, at, depth + 1);
+      return a.length && b.length ? [...a, ...b] : [];
+    }
     if (ts.isIdentifier(e)) {
       const init = this.constInit(e);
-      return !!init && this.hasStorePred(init, at, depth + 1);
+      return init ? this.predScopes(init, at, depth + 1) : [];
     }
-    return false;
+    return [];
   }
 
-  private spreadHasPred(e: ts.Expression, at: ts.Node, depth: number): boolean {
+  private spreadScopes(e: ts.Expression, at: ts.Node, depth: number): ts.Expression[] {
+    const x = this.constArray(e);
+    return x ? x.elements.flatMap((el) => (ts.isSpreadElement(el) ? [] : this.predScopes(el, at, depth + 1))) : [];
+  }
+
+  private constArray(e: ts.Expression): ts.ArrayLiteralExpression | null {
     let x = unwrap(e);
-    if (ts.isIdentifier(x)) x = this.constInit(x) ?? x;
-    x = unwrap(x);
-    return ts.isArrayLiteralExpression(x) && x.elements.some((el) => !ts.isSpreadElement(el) && this.hasStorePred(el, at, depth + 1));
+    if (ts.isIdentifier(x)) x = unwrap(this.constInit(x) ?? x);
+    return ts.isArrayLiteralExpression(x) ? x : null;
   }
 
-  /** storeValues(scope, …), a literal with `storeId: <scope>.storeId`, an array or .map() of those, or a const of one */
-  private valuesOk(expr: ts.Expression | undefined, depth = 0): boolean {
-    if (!expr || depth > 4) return false;
+  /**
+   * L2 (review C0b F2): storeSql() inside a larger `sql` template counts only as its first conjunct:
+   * `${storeSql(scope)}` alone, `${storeSql(scope)} AND <conjunct>` with no OR / XOR / || / := and only bound values,
+   * tables and columns in the rest, or `${storeSql(scope)} AND ( … )` around all the rest. storeSql emits
+   * `store_id = ?` without parentheses, and drizzle inlines a nested SQL fragment without them, so NOT, a comparison
+   * or an OR applied to it, or a fragment outside the parentheses, could widen it to every store.
+   */
+  private templatePredScope(e: ts.TaggedTemplateExpression, at: ts.Node): ts.Expression | null {
+    if (!ts.isTemplateExpression(e.template) || e.template.head.text.trim()) return null;
+    const [first, ...rest] = e.template.templateSpans;
+    const x = unwrap(first.expression);
+    if (!ts.isCallExpression(x) || !this.isCall(x, F.sql, "storeSql") || !this.isScopeParamRef(x.arguments[0], at)) return null;
+    if (!rest.length && !first.literal.text.trim()) return x.arguments[0];
+    let tail = first.literal.text;
+    let fragment = false;
+    for (const s of rest) {
+      const v = unwrap(s.expression);
+      if (ts.isCallExpression(v) && this.isDrizzleCall(v, "raw")) {
+        const a = v.arguments[0];
+        if (!a || !ts.isStringLiteralLike(a)) return null;
+        tail += ` ${a.text} ${s.literal.text}`;
+        continue;
+      }
+      const k = this.sqlKind(s.expression);
+      if (k === "unknown") return null;
+      if (k === "sql") fragment = true;
+      tail += (k === "sql" ? " \u0001 " : " ? ") + s.literal.text;
+    }
+    return safeAndTail(tail, fragment) ? x.arguments[0] : null;
+  }
+
+  /** L2 (review C0b F2): an and() sibling of the store predicate that may expand to a top-level OR */
+  private reportOpen(expr: ts.Expression | undefined, at: ts.Node, what: string): void {
+    for (const o of this.openSiblings(expr, at))
+      this.report(
+        o,
+        "L2",
+        "open-condition",
+        `${what}: ${o.getText(this.file).slice(0, 60)} sits in and() beside the store predicate and may hold a top-level OR (drizzle inlines a nested SQL fragment without parentheses): use whereStore(table, scope, …), which parenthesizes each condition, or drizzle operators`,
+      );
+  }
+
+  private openSiblings(expr: ts.Expression | undefined, at: ts.Node, depth = 0): ts.Expression[] {
+    if (!expr || depth > 4) return [];
+    const e = unwrap(expr);
+    if (ts.isCallExpression(e) && this.isDrizzleCall(e, "and")) {
+      const out: ts.Expression[] = [];
+      for (const a of e.arguments) {
+        if (ts.isSpreadElement(a)) {
+          const arr = this.constArray(a.expression);
+          if (!arr) out.push(a.expression);
+          else for (const el of arr.elements) if (ts.isSpreadElement(el) || (!this.predScopes(el, at, depth + 1).length && !this.closedCond(el))) out.push(el);
+          continue;
+        }
+        if (this.predScopes(a, at, depth + 1).length) out.push(...this.openSiblings(a, at, depth + 1));
+        else if (!this.closedCond(a)) out.push(a);
+      }
+      return out;
+    }
+    if (ts.isConditionalExpression(e)) return [...this.openSiblings(e.whenTrue, at, depth + 1), ...this.openSiblings(e.whenFalse, at, depth + 1)];
+    if (ts.isIdentifier(e)) {
+      const init = this.constInit(e);
+      return init ? this.openSiblings(init, at, depth + 1) : [];
+    }
+    return [];
+  }
+
+  /**
+   * A condition that cannot expand to a top-level OR where drizzle inlines it: a drizzle operator over columns and
+   * bound values, and( / or( / not( of such conditions, the four helpers, a `sql` template whose text has no top-level
+   * OR / XOR / || / := and whose fragments are closed too, undefined, or a value that is not SQL at all.
+   */
+  private closedCond(expr: ts.Expression | undefined, depth = 0): boolean {
+    if (!expr) return true;
+    if (depth > 6) return false;
+    const e = unwrap(expr);
+    if ((ts.isIdentifier(e) && e.text === "undefined") || e.kind === ts.SyntaxKind.NullKeyword) return true;
+    if (ts.isCallExpression(e)) {
+      if (this.isCall(e, F.sql, "inStore", "whereStore", "byId", "storeSql")) return true;
+      const r = this.calleeRef(e);
+      if (r?.file.includes("drizzle-orm")) {
+        if (r.name === "and" || r.name === "or" || r.name === "not")
+          return e.arguments.every((a) => (ts.isSpreadElement(a) ? !!this.constArray(a.expression)?.elements.every((el) => !ts.isSpreadElement(el) && this.closedCond(el, depth + 1)) : this.closedCond(a, depth + 1)));
+        if (SAFE_OPS.has(r.name))
+          return e.arguments.every((a) => {
+            if (ts.isSpreadElement(a)) return false;
+            const k = this.sqlKind(a);
+            return k !== "unknown" && (k !== "sql" || this.closedCond(a, depth + 1));
+          });
+        if (r.name === "raw") return !!e.arguments[0] && ts.isStringLiteralLike(e.arguments[0]) && closedSqlText(e.arguments[0].text);
+      }
+    }
+    if (ts.isTaggedTemplateExpression(e) && this.isSqlTag(e)) {
+      if (ts.isNoSubstitutionTemplateLiteral(e.template)) return closedSqlText(e.template.text);
+      let text = e.template.head.text;
+      for (const s of e.template.templateSpans) {
+        const k = this.sqlKind(s.expression);
+        if (k === "unknown") return false;
+        text += (k === "sql" && !this.closedCond(s.expression, depth + 1) ? " \u0001 " : " ? ") + s.literal.text;
+      }
+      return closedSqlText(text);
+    }
+    if (ts.isConditionalExpression(e)) return this.closedCond(e.whenTrue, depth + 1) && this.closedCond(e.whenFalse, depth + 1);
+    if (ts.isIdentifier(e)) {
+      const init = this.constInit(e);
+      if (init) return this.closedCond(init, depth + 1);
+    }
+    const k = this.sqlKind(e);
+    return k !== "sql" && k !== "unknown";
+  }
+
+  /**
+   * The scope arguments of insert values (L3, review C0b F4): storeValues(<scope parameter>, …), a literal with
+   * `storeId: <scope parameter>.storeId` and no spread or storeId key after it, an array or .map() of those, or a
+   * const of one. Null when the values do not pin the scope's store.
+   */
+  private valuesScopes(expr: ts.Expression | undefined, at: ts.Node, depth = 0): ts.Expression[] | null {
+    if (!expr || depth > 4) return null;
     const e = unwrap(expr);
     if (ts.isCallExpression(e)) {
-      if (this.isCall(e, F.sql, "storeValues")) return true;
+      if (this.isCall(e, F.sql, "storeValues")) return this.isScopeParamRef(e.arguments[0], at) ? [e.arguments[0]] : null;
       const cb = e.arguments[0] ? unwrap(e.arguments[0]) : undefined;
       if (ts.isPropertyAccessExpression(e.expression) && e.expression.name.text === "map" && cb && (ts.isArrowFunction(cb) || ts.isFunctionExpression(cb))) {
-        if (!ts.isBlock(cb.body)) return this.valuesOk(cb.body, depth + 1);
+        if (!ts.isBlock(cb.body)) return this.valuesScopes(cb.body, at, depth + 1);
         const [only] = cb.body.statements;
-        return cb.body.statements.length === 1 && ts.isReturnStatement(only) && this.valuesOk(only.expression, depth + 1);
+        return cb.body.statements.length === 1 && ts.isReturnStatement(only) ? this.valuesScopes(only.expression, at, depth + 1) : null;
       }
-      return false;
+      return null;
     }
-    if (ts.isObjectLiteralExpression(e))
-      return e.properties.some((p) => {
-        if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name) || p.name.text !== "storeId") return false;
+    if (ts.isObjectLiteralExpression(e)) {
+      const key = (p: ts.ObjectLiteralElementLike) => (p.name && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) ? p.name.text : null);
+      const i = e.properties.findIndex((p) => {
+        if (!ts.isPropertyAssignment(p) || key(p) !== "storeId") return false;
         const v = unwrap(p.initializer);
-        return ts.isPropertyAccessExpression(v) && v.name.text === "storeId" && this.isScopeType(this.checker.getTypeAtLocation(v.expression));
+        return ts.isPropertyAccessExpression(v) && v.name.text === "storeId" && this.isScopeParamRef(v.expression, at);
       });
-    if (ts.isArrayLiteralExpression(e)) return e.elements.length > 0 && e.elements.every((el) => !ts.isSpreadElement(el) && this.valuesOk(el, depth + 1));
+      if (i < 0) return null;
+      if (e.properties.slice(i + 1).some((p) => ts.isSpreadAssignment(p) || key(p) === "storeId" || key(p) === "store_id")) return null;
+      return [unwrap(((e.properties[i] as ts.PropertyAssignment).initializer as ts.PropertyAccessExpression).expression)];
+    }
+    if (ts.isArrayLiteralExpression(e)) {
+      if (!e.elements.length) return null;
+      const out: ts.Expression[] = [];
+      for (const el of e.elements) {
+        const s = ts.isSpreadElement(el) ? null : this.valuesScopes(el, at, depth + 1);
+        if (!s) return null;
+        out.push(...s);
+      }
+      return out;
+    }
     if (ts.isIdentifier(e)) {
       const init = this.constInit(e);
-      return !!init && this.valuesOk(init, depth + 1);
+      return init ? this.valuesScopes(init, at, depth + 1) : null;
+    }
+    return null;
+  }
+
+  /** L3b (review C0b F4): the type has a storeId / store_id key, or a string index signature, or is any */
+  private typeHasStoreId(t: ts.Type): boolean {
+    if (t.flags & ts.TypeFlags.Any) return true;
+    for (const m of t.isUnion() ? t.types : [t]) {
+      if (m.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null)) continue;
+      if (m.getProperty("storeId") || m.getProperty("store_id")) return true;
+      if (this.checker.getIndexInfosOfType(m).some((ii) => !!(ii.keyType.flags & ts.TypeFlags.String))) return true;
     }
     return false;
   }
 
-  private namesStoreId(expr: ts.Expression | undefined): boolean {
-    if (!expr) return false;
-    const e = unwrap(expr);
-    return ts.isObjectLiteralExpression(e) && e.properties.some((p) => !!p.name && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) && (p.name.text === "storeId" || p.name.text === "store_id"));
+  private propHasStoreId(e: ts.Expression, prop: string): boolean {
+    const t = this.typeAt(e);
+    if (t.flags & ts.TypeFlags.Any) return true;
+    const p = t.getProperty(prop);
+    return !!p && this.typeHasStoreId(this.checker.getTypeOfSymbolAtLocation(p, e));
   }
 
   private storeIdColumn(e: ts.Expression): boolean {
@@ -773,7 +1639,7 @@ class Lint {
     if (sa && sb) return;
     const other = unwrap(sa ? b : a);
     if (ts.isPropertyAccessExpression(other) && other.name.text === "storeId" && this.isScopeParamRef(other.expression, call)) return;
-    if (this.exempt(call)) return;
+    if (this.insideExemptQuery(call) || this.exempt(call)) return;
     this.report(call, "L2b", "eq-storeId", "eq(<table>.storeId, …) with a value that is not a scope: use inStore(table, scope) / whereStore / byId");
   }
 
@@ -789,65 +1655,68 @@ class Lint {
 
   private onTaggedTemplate(t: ts.TaggedTemplateExpression): void {
     if (!this.isSqlTag(t)) return;
-    let text: string;
-    if (ts.isNoSubstitutionTemplateLiteral(t.template)) text = t.template.text;
-    else {
-      text = t.template.head.text;
-      for (const span of t.template.templateSpans) text += this.sqlPlaceholder(span.expression) + span.literal.text;
-    }
-    this.checkSqlText(text, t);
+    this.checkSqlText(this.sqlTemplateText(t, 0), t);
   }
 
-  private sqlPlaceholder(expr: ts.Expression): string {
+  /** a drizzle `sql` template as SQL text: tables and columns by name, bound values as `?`, an unknown fragment as DYN */
+  private sqlTemplateText(t: ts.TaggedTemplateExpression, depth: number): string {
+    if (ts.isNoSubstitutionTemplateLiteral(t.template)) return t.template.text;
+    let text = t.template.head.text;
+    for (const span of t.template.templateSpans) text += this.sqlPlaceholder(span.expression, depth) + span.literal.text;
+    return text;
+  }
+
+  private sqlPlaceholder(expr: ts.Expression, depth = 0): string {
     const e = unwrap(expr);
     const table = this.tenantTableOf(e);
     if (table) return ` ${table} `;
     if (ts.isPropertyAccessExpression(e) && e.name.text === "storeId" && this.tenantTableOf(e.expression)) return " store_id ";
-    if (ts.isCallExpression(e) && this.isCall(e, F.sql, "storeSql")) return " store_id = ? ";
-    if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression) && e.expression.name.text === "raw" && e.arguments[0] && ts.isStringLiteralLike(e.arguments[0]))
-      return e.arguments[0].text;
+    if (ts.isCallExpression(e)) {
+      const lit = e.arguments[0] && ts.isStringLiteralLike(e.arguments[0]) ? e.arguments[0].text : null;
+      if (this.isCall(e, F.sql, "storeSql")) return ` ${lit ?? "store_id"} = ? `;
+      if (this.isDrizzleCall(e, "raw")) return lit !== null ? ` ${lit} ` : DYN;
+      if (this.isDrizzleCall(e, "identifier")) return lit !== null ? ` \`${lit}\` ` : DYN;
+    }
+    if (depth < 3 && ts.isTaggedTemplateExpression(e) && this.isSqlTag(e)) return ` ${this.sqlTemplateText(e, depth + 1)} `;
+    if (depth < 3 && ts.isIdentifier(e)) {
+      const init = this.constInit(e);
+      if (init) return this.sqlPlaceholder(init, depth + 1);
+    }
+    const k = this.sqlKind(e);
+    if (k === "table") return ` \`${this.underProp(this.checker.getApparentType(this.typeAt(e)), "name", e) || "t"}\` `;
+    if (k === "column") return " c ";
+    if (k === "sql" || k === "unknown") return DYN;
     return " ? ";
   }
 
-  private onRawString(arg: ts.Expression): void {
-    const a = unwrap(arg);
-    let text: string | null = null;
-    if (ts.isStringLiteralLike(a)) text = a.text;
-    else if (ts.isTemplateExpression(a)) text = [a.head.text, ...a.templateSpans.map((s) => s.literal.text)].join(" ? ");
-    if (text !== null) this.checkSqlText(text, a);
+  /**
+   * L10 (review C0b F5) over every SQL text of src/**: a string or template whose text starts with SELECT / INSERT /
+   * UPDATE / DELETE / REPLACE / WITH / TRUNCATE (wherever it goes: a const, a helper, sql.raw), a `+` chain that starts
+   * with one, and every drizzle `sql` template. A template span or a concatenated value is DYN (unknown SQL).
+   */
+  private onRawText(text: string, node: ts.Node): void {
+    if (SELFTEST.test(this.relFile)) return;
+    if (SQL_START.test(text)) this.checkSqlText(text, node);
   }
 
   private checkSqlText(raw: string, node: ts.Node): void {
-    const text = raw.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(--|#)[^\n]*/g, " ");
-    for (const stmt of text.split(";")) {
-      const tables = new Set<string>();
-      for (const m of stmt.matchAll(/\b(?:FROM|JOIN|UPDATE|INTO)\s+`?([a-z_][a-z0-9_]*)`?/gi)) if (this.isTenantSqlName(m[1].toLowerCase())) tables.add(m[1].toLowerCase());
-      if (!tables.size) continue;
-      const insert = /^\s*(INSERT|REPLACE)\b/i.test(stmt);
-      this.ops.get(this.file)!.push({ node, pos: node.getStart(this.file), table: [...tables][0], method: insert ? "raw-insert" : "raw" });
-      if (this.exempt(node)) continue;
-      let ok: boolean;
-      if (insert) {
-        const cols = /\bINTO\s+`?[a-z_][a-z0-9_]*`?\s*\(([^)]*)\)/i.exec(stmt);
-        ok = !!cols && /\bstore_id\b/i.test(cols[1]);
-        if (ok && /\bFROM\b/i.test(stmt.slice(cols!.index + cols![0].length))) ok = this.predAfterWhere(stmt.slice(cols!.index + cols![0].length));
-      } else ok = this.predAfterWhere(stmt);
-      if (!ok) this.report(node, "L10", "raw-sql", `raw SQL on ${[...tables].join(", ")} without store_id = / storeSql( in its WHERE / SET`);
+    for (const stmt of sqlStatements(raw)) {
+      const found = analyzeSql(stmt, (n) => this.isTenantSqlName(n));
+      if (!found.tables.length && !found.problems.length) continue;
+      if (found.tables.length)
+        this.ops.get(this.file)!.push({ node, pos: node.getStart(this.file), table: found.insertTarget ?? found.tables[0], method: found.insertTarget ? "raw-insert" : "raw" });
+      if (!found.problems.length || this.exempt(node)) continue;
+      this.report(node, "L10", found.dynamic ? "dynamic-sql" : "raw-sql", `raw SQL${found.tables.length ? ` on ${[...new Set(found.tables)].join(", ")}` : ""}: ${[...new Set(found.problems)].join("; ")}`);
     }
-  }
-
-  private predAfterWhere(stmt: string): boolean {
-    const m = /\b(WHERE|SET)\b/i.exec(stmt);
-    return !!m && /\bstore_id\s*=/i.test(stmt.slice(m.index));
   }
 
   private tenantSqlNames: Set<string> | null = null;
   private isTenantSqlName(name: string): boolean {
     this.tenantSqlNames ??= new Set(this.tenantDecls.values());
-    return this.tenantSqlNames.has(name);
+    return this.tenantSqlNames.has(name.toLowerCase());
   }
 
-  /* ---------------- literals: L5 (GET_LOCK), L8 ---------------- */
+  /* ---------------- literals: L5 (GET_LOCK), L8, L10 ---------------- */
 
   private onLiteral(n: ts.StringLiteral | ts.NoSubstitutionTemplateLiteral | ts.TemplateExpression): void {
     const f = this.relFile;
@@ -855,33 +1724,81 @@ class Lint {
     if (ts.isExpressionStatement(n.parent)) return; // directives
     const text = ts.isTemplateExpression(n) ? [n.head.text, ...n.templateSpans.map((s) => s.literal.text)].join("${}") : n.text;
     if (/\bGET_LOCK\s*\(/i.test(text) && !f.startsWith("src/lib/db/")) this.report(n, "L5", "get-lock", "GET_LOCK outside src/lib/db/: use storeLock / platformLock with withNamedLock (§E.7)");
+    if (!ts.isTaggedTemplateExpression(n.parent) && !this.concatHandled.has(n)) this.onRawText(this.rawText(n), n);
     if (!f.startsWith("src/components/") && !f.startsWith("src/app/app/")) return;
     const head = ts.isTemplateExpression(n) ? n.head.text : n.text;
     if (/^\/admin(?=[/?#]|$)/.test(head)) this.report(n, "L8", "admin-path", `"${head.slice(0, 40)}" hard-codes an /admin path: use appHref() / the console URL builders (ADM-37)`);
     else if (ts.isTemplateExpression(n) && head === "/") this.report(n, "L8", "live-url", "`/${…}` builds a live URL by hand: use storeUrl() / appHref() (ADM-39)");
   }
 
+  private readonly concatHandled = new Set<ts.Node>();
+
+  /** the text of a plain string / template / value in raw SQL: a string `const` is inlined (a name in code), anything else is DYN */
+  private rawText(e: ts.Expression, depth = 0): string {
+    const x = unwrap(e);
+    if (ts.isStringLiteralLike(x)) return x.text;
+    if (ts.isTemplateExpression(x)) return x.head.text + x.templateSpans.map((s) => this.rawText(s.expression, depth + 1) + s.literal.text).join("");
+    if (depth < 3 && ts.isIdentifier(x)) {
+      const init = this.constInit(x);
+      if (init && (ts.isStringLiteralLike(unwrap(init)) || ts.isTemplateExpression(unwrap(init)))) return this.rawText(init, depth + 1);
+    }
+    return DYN;
+  }
+
   private onConcat(n: ts.BinaryExpression): void {
     const f = this.relFile;
+    // L10: a `+` chain whose text starts with SQL ("SELECT * FROM " + table + " WHERE …"); judged once, at its root
+    if (!(ts.isBinaryExpression(n.parent) && n.parent.operatorToken.kind === ts.SyntaxKind.PlusToken)) {
+      const parts: ts.Expression[] = [];
+      const flat = (e: ts.Expression) => {
+        const x = ts.isParenthesizedExpression(e) ? e.expression : e;
+        if (ts.isBinaryExpression(x) && x.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+          flat(x.left);
+          flat(x.right);
+        } else parts.push(x);
+      };
+      flat(n);
+      const first = parts[0];
+      if (first && (ts.isStringLiteralLike(first) || ts.isTemplateExpression(first))) {
+        const text = parts.map((p) => this.rawText(p)).join("");
+        if (SQL_START.test(text)) {
+          for (const p of parts) this.concatHandled.add(p);
+          this.onRawText(text, n);
+        }
+      }
+    }
     if (!f.startsWith("src/components/") && !f.startsWith("src/app/app/")) return;
     const left = unwrap(n.left);
     if (ts.isStringLiteralLike(left) && left.text === "/") this.report(n, "L8", "live-url", `"/" + … builds a live URL by hand: use storeUrl() / appHref() (ADM-39)`);
   }
 
-  /* ---------------- casts and predicates: L6 ---------------- */
+  /* ---------------- casts and predicates: L5, L6 ---------------- */
 
   private onCast(n: ts.AsExpression | ts.TypeAssertion): void {
     if (ts.isConstTypeReference(n.type)) return;
+    const f = this.relFile;
     const target = this.checker.getTypeFromTypeNode(n.type);
-    if (!this.carriesWrite(target, n)) return;
-    if (this.carriesWrite(this.checker.getTypeAtLocation(n.expression), n)) return;
-    this.report(n, "L6", "cast", "a cast or assertion to WriteScope (or a ctx carrying one) outside src/lib/tenancy/seam.ts (D71)");
+    const source = this.checker.getNonNullableType(this.typeAt(n.expression));
+    // L5 (review C0b F10): only rate-limit.ts brands a Bucket; a cast would let any code spend another store's bucket
+    if (this.bucket && f !== F.rateLimit && this.isUsable(target) && this.checker.isTypeAssignableTo(target, this.bucket) && !(this.isUsable(source) && this.checker.isTypeAssignableTo(source, this.bucket)))
+      this.report(n, "L5", "bucket-cast", "a cast to Bucket outside src/lib/security/rate-limit.ts: build it with platformBucket() / storeBucket() (§E.8)");
+    if (f === F.seam) return;
+    // L6 (review C0b F1): a cast to StoreScope forges a store; a cast to WriteScope upgrades a read-only scope. A
+    // downcast inside a union of real ctxs (`ctx as StoreCtx` from `StoreCtx | PlatformCtx`) mints nothing; the
+    // standalone selftests build fake ctxs on purpose (the app never imports them)
+    const fromUnion = source.isUnion() && source.types.some((t) => this.carriesScope(t, n));
+    if (this.carriesScope(target, n) && !this.carriesScope(source, n) && !fromUnion && !SELFTEST.test(f))
+      this.report(n, "L6", "cast", "a cast or assertion to StoreScope (or a ctx carrying one) outside src/lib/tenancy/seam.ts: scopes come only from the seam (§E.1)");
+    else if (this.carriesWrite(target, n) && !this.carriesWrite(source, n))
+      this.report(n, "L6", "cast", "a cast or assertion to WriteScope (or a ctx carrying one) outside src/lib/tenancy/seam.ts (D71)");
   }
 
   private onFunction(fn: FnLike): void {
     const f = this.relFile;
-    if (fn.type && ts.isTypePredicateNode(fn.type) && fn.type.type && f !== F.seam && this.carriesWrite(this.checker.getTypeFromTypeNode(fn.type.type), fn))
-      this.report(fn.type, "L6", "cast", "a type guard that narrows to WriteScope outside src/lib/tenancy/seam.ts (D71)");
+    if (fn.type && ts.isTypePredicateNode(fn.type) && fn.type.type && f !== F.seam) {
+      const t = this.checker.getTypeFromTypeNode(fn.type.type);
+      if (this.carriesWrite(t, fn) || this.carriesScope(t, fn)) this.report(fn.type, "L6", "cast", "a type guard that narrows to a StoreScope / WriteScope outside src/lib/tenancy/seam.ts (§E.1, D71)");
+    }
     // L9, inline server action (a function whose first statement is "use server")
     if (fn.body && ts.isBlock(fn.body) && isDirective(fn.body.statements[0], "use server")) this.checkActionBody(fn, fn.name ?? fn, true);
   }
@@ -893,8 +1810,39 @@ class Lint {
     if (!f.startsWith("src/app/") && !f.startsWith("src/components/")) return;
     const res = ts.resolveModuleName(spec, this.file.fileName, this.program.getCompilerOptions(), this.host, this.resolutionCache).resolvedModule;
     const target = res ? rel(res.resolvedFileName) : null;
-    if (target === F.dbClient || target === F.schema)
+    if (target === F.dbClient || target === F.schema) {
       this.report(at, "L7", typeOnly ? "db-type-import" : "db-import", `imports ${target} (ADM-38): call a repository instead${typeOnly ? " (row types come from the repository module)" : ""}`);
+      return;
+    }
+    if (typeOnly || (!ts.isImportDeclaration(at) && !ts.isExportDeclaration(at))) return;
+    // review C0b F14: a barrel or a renamed re-export reaches the client or a table too; judged by the declaration
+    // each imported value resolves to (types stay with the direct-path rule: a repository may re-export a row type)
+    const names: (ts.Identifier | ts.StringLiteral)[] = [];
+    let namespaceSym: ts.Symbol | undefined;
+    if (ts.isImportDeclaration(at)) {
+      const c = at.importClause;
+      if (c?.name) names.push(c.name);
+      if (c?.namedBindings && ts.isNamedImports(c.namedBindings)) {
+        for (const el of c.namedBindings.elements) if (!el.isTypeOnly) names.push(el.name);
+      }
+      if (c?.namedBindings && ts.isNamespaceImport(c.namedBindings)) namespaceSym = this.checker.getSymbolAtLocation(c.namedBindings.name);
+    } else if (ts.isExportDeclaration(at)) {
+      if (at.exportClause && ts.isNamedExports(at.exportClause)) {
+        for (const el of at.exportClause.elements) if (!el.isTypeOnly) names.push(el.name);
+      } else if (!at.exportClause && at.moduleSpecifier) namespaceSym = this.checker.getSymbolAtLocation(at.moduleSpecifier);
+    }
+    const fromDb = (sym: ts.Symbol | undefined): boolean => {
+      let s = sym;
+      if (s && s.flags & ts.SymbolFlags.Alias) s = this.checker.getAliasedSymbol(s);
+      return !!s && !!(s.flags & ts.SymbolFlags.Value) && !!s.declarations?.some((d) => [F.dbClient, F.schema].includes(rel(d.getSourceFile().fileName)));
+    };
+    let hit = names.find((n) => fromDb(this.checker.getSymbolAtLocation(n)))?.text;
+    if (!hit && namespaceSym) {
+      let m = namespaceSym;
+      if (m.flags & ts.SymbolFlags.Alias) m = this.checker.getAliasedSymbol(m);
+      hit = this.checker.getExportsOfModule(m).find((s) => fromDb(s))?.name;
+    }
+    if (hit) this.report(at, "L7", "db-reexport", `imports ${hit} from ${target ?? spec}, which re-exports src/lib/db/client.ts or schema.ts (ADM-38): call a repository instead`);
   }
 
   /* ---------------- globals and module caches: L4 ---------------- */
@@ -920,8 +1868,25 @@ class Lint {
     if (!ts.isIdentifier(n.expression) || (n.expression.text !== "Map" && n.expression.text !== "Set") || SELFTEST.test(this.relFile)) return;
     let symbol = "<module>";
     let binding: ts.VariableDeclaration | null = null;
+    let lazy = false;
+    /** the module-load IIFE the collection is built in (`const M: ReadonlyMap<…> = (() => { const m = new Map(); …; return m; })()`) */
+    let iife: ts.Node | null = null;
     for (let p: ts.Node = n.parent; p; p = p.parent) {
-      if (isFnLike(p) || ts.isClassStaticBlockDeclaration(p)) return;
+      if (isFnLike(p) && isIife(p) && !iife) {
+        iife = p.parent;
+        while (ts.isParenthesizedExpression(iife)) iife = iife.parent;
+        continue;
+      }
+      // review C0b F9: a function, a static block or an IIFE creates process state when it stores the collection in
+      // a module-scope binding, a static member or a globalThis property (`lazy ??= new Map()`, `X.c = new Set()`)
+      if ((isFnLike(p) && !isIife(p)) || ts.isClassStaticBlockDeclaration(p)) {
+        const target = this.lazyTarget(n);
+        if (!target) return;
+        symbol = target;
+        binding = null;
+        lazy = true;
+        break;
+      }
       if (ts.isPropertyDeclaration(p)) {
         if (!hasModifier(p, ts.SyntaxKind.StaticKeyword)) return; // per instance
         symbol = `${(p.parent as ts.ClassLikeDeclaration).name?.text ?? "<class>"}.${p.name.getText(this.file)}`;
@@ -935,11 +1900,102 @@ class Lint {
       }
       if (ts.isExportAssignment(p)) symbol = "default";
     }
+    if (symbol === "") return; // a globalThis property declared in `declare global`: judged there
     if (this.allowed(symbol)) return;
-    const direct = !!binding?.initializer && unwrap(binding.initializer) === n;
-    if (this.readonlySlot(n) || (direct && this.frozen(binding!))) return;
+    if (iife && !lazy) {
+      // built while the module loads, then judged by the binding that receives the IIFE's result
+      const outer = ts.isVariableDeclaration(iife.parent) && iife.parent.initializer && unwrap(iife.parent.initializer) === iife ? iife.parent : null;
+      if (ts.isExpression(iife) && this.readonlySlot(iife)) return;
+      if (outer && this.frozen(outer)) return;
+    }
+    const direct = !lazy && !iife && !!binding?.initializer && unwrap(binding.initializer) === n;
+    if (!lazy && !iife && (this.readonlySlot(n) || (direct && this.frozen(binding!)))) return;
     const hint = direct && ts.getCombinedNodeFlags(binding!) & ts.NodeFlags.Const ? `; a lookup table that is never changed: type it Readonly${n.expression.text}` : "";
-    this.report(n, "L4", "module-map", `module-scope new ${n.expression.text}() (${symbol}): use scopedCache() or list it in scripts/qa/tenancy-allow.json with a reason${hint}`);
+    this.report(n, "L4", "module-map", `${lazy ? "lazily created" : "module-scope"} new ${n.expression.text}() (${symbol}): use scopedCache() or list it in scripts/qa/tenancy-allow.json with a reason${hint}`);
+  }
+
+  /**
+   * Where a `new Map / Set` made inside a function is stored for the process (review C0b F9): the name of a
+   * module-scope binding, `Class.member` for a static, the property name of a globalThis property (`""` when that
+   * property is declared in `declare global`, which is judged at its declaration), or null for a local value.
+   */
+  private lazyTarget(n: ts.Expression): string | null {
+    let e: ts.Node = n;
+    for (;;) {
+      const p: ts.Node = e.parent;
+      if (ts.isParenthesizedExpression(p) || ts.isAsExpression(p) || ts.isSatisfiesExpression(p) || ts.isNonNullExpression(p)) e = p;
+      else if (ts.isConditionalExpression(p) && p.condition !== e) e = p;
+      else if (ts.isBinaryExpression(p) && p.right === e && [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.AmpersandAmpersandToken].includes(p.operatorToken.kind)) e = p;
+      else break;
+    }
+    const p = e.parent;
+    const ASSIGN = [ts.SyntaxKind.EqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken, ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.AmpersandAmpersandEqualsToken];
+    if (!ts.isBinaryExpression(p) || p.right !== e || !ASSIGN.includes(p.operatorToken.kind)) return null;
+    const left = unwrap(p.left);
+    if (ts.isIdentifier(left)) {
+      const d = this.checker.getSymbolAtLocation(left)?.valueDeclaration;
+      return d && ts.isVariableDeclaration(d) && ts.isVariableStatement(d.parent.parent) && ts.isSourceFile(d.parent.parent.parent) ? left.text : null;
+    }
+    if (!ts.isPropertyAccessExpression(left) && !ts.isElementAccessExpression(left)) return null;
+    const name = ts.isPropertyAccessExpression(left) ? left.name.text : ts.isStringLiteralLike(left.argumentExpression) ? left.argumentExpression.text : "<computed>";
+    const obj = unwrap(left.expression);
+    if (this.isGlobalThis(obj)) return this.declaredGlobal(left) ? "" : name;
+    if (obj.kind === ts.SyntaxKind.ThisKeyword) {
+      const cls = ts.findAncestor(left, ts.isClassLike);
+      const inStatic = ts.findAncestor(left, (x) => ts.isClassStaticBlockDeclaration(x) || ((ts.isMethodDeclaration(x) || ts.isPropertyDeclaration(x)) && hasModifier(x, ts.SyntaxKind.StaticKeyword)));
+      return cls && inStatic ? `${cls.name?.text ?? "<class>"}.${name}` : null;
+    }
+    if (ts.isIdentifier(obj)) {
+      const d = this.symbolOf(obj)?.valueDeclaration;
+      if (d && ts.isClassLike(d)) return `${obj.text}.${name}`;
+      if (d && ts.isVariableDeclaration(d) && ts.isVariableStatement(d.parent.parent) && ts.isSourceFile(d.parent.parent.parent)) return `${obj.text}.${name}`;
+    }
+    return null;
+  }
+
+  /** `globalThis`, or a const that holds it (`const g = globalThis as unknown as { … }`) */
+  private isGlobalThis(e: ts.Expression): boolean {
+    const x = unwrap(e);
+    if (!ts.isIdentifier(x)) return false;
+    if (x.text === "globalThis") return true;
+    const init = this.constInit(x);
+    return !!init && ts.isIdentifier(unwrap(init)) && (unwrap(init) as ts.Identifier).text === "globalThis";
+  }
+
+  /** the property resolves to a `var` of `declare global` (judged by onDeclareGlobal in its own file) */
+  private declaredGlobal(access: ts.PropertyAccessExpression | ts.ElementAccessExpression): boolean {
+    const sym = this.checker.getSymbolAtLocation(ts.isPropertyAccessExpression(access) ? access.name : access.argumentExpression);
+    return !!sym?.declarations?.some((d) => !!ts.findAncestor(d, (a) => ts.isModuleDeclaration(a) && !!(a.flags & ts.NodeFlags.GlobalAugmentation)));
+  }
+
+  /**
+   * L4 globals outside `declare global` (review C0b F9): the members of a type literal a globalThis cast or a
+   * globalThis-holding variable is typed with, and any globalThis property or element access named __cod… / __sg…,
+   * whatever the cast (`(globalThis as any).__codX`, `(globalThis as Record<string, unknown>)["__sgX"]`).
+   */
+  private globalsL4(sf: ts.SourceFile): void {
+    const flag = (name: string, at: ts.Node) => {
+      if (!/^__(cod|sg)/.test(name) || this.l4GlobalSeen.has(`${this.relFile}:${name}`)) return;
+      this.l4GlobalSeen.add(`${this.relFile}:${name}`);
+      if (!this.allowed(name)) this.report(at, "L4", "global", `globalThis.${name}: a process-wide global; use scopedCache() or list it in scripts/qa/tenancy-allow.json with a reason`);
+    };
+    const literalMembers = (type: ts.Node | undefined) => {
+      const visitType = (t: ts.Node) => {
+        if (ts.isTypeLiteralNode(t)) for (const m of t.members) if (m.name && (ts.isIdentifier(m.name) || ts.isStringLiteral(m.name))) flag(m.name.text, m);
+        ts.forEachChild(t, visitType);
+      };
+      if (type) visitType(type);
+    };
+    const visit = (n: ts.Node) => {
+      if ((ts.isAsExpression(n) || ts.isTypeAssertionExpression(n)) && ts.isIdentifier(unwrap(n.expression)) && (unwrap(n.expression) as ts.Identifier).text === "globalThis") literalMembers(n.type);
+      else if (ts.isVariableDeclaration(n) && n.type && n.initializer && this.isGlobalThis(n.initializer)) literalMembers(n.type);
+      else if ((ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) && this.isGlobalThis(n.expression) && !this.declaredGlobal(n)) {
+        const name = ts.isPropertyAccessExpression(n) ? n.name.text : ts.isStringLiteralLike(n.argumentExpression) ? n.argumentExpression.text : null;
+        if (name) flag(name, n);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
   }
 
   /**
@@ -963,43 +2019,80 @@ class Lint {
     return parts.length > 0 && parts.every((x) => READONLY_COLLECTIONS.has((x.aliasSymbol ?? x.getSymbol())?.name ?? ""));
   }
 
-  /** every reference of the `const` `decl` binds only reads (other files too when `crossFile` and it is exported) */
+  /** the identifiers of src/** by text, the renaming specifiers and the default-import names, built once */
+  private buildIdIndex(): void {
+    if (this.idIndex) return;
+    const ids = new Map<string, ts.Identifier[]>();
+    const renames = new Map<string, string[]>();
+    const defaults = new Set<string>();
+    for (const sf of this.program.getSourceFiles()) {
+      if (sf.isDeclarationFile || !rel(sf.fileName).startsWith("src/")) continue;
+      const walk = (n: ts.Node) => {
+        if (ts.isIdentifier(n)) {
+          const list = ids.get(n.text);
+          if (list) list.push(n);
+          else ids.set(n.text, [n]);
+        } else if ((ts.isImportSpecifier(n) || ts.isExportSpecifier(n)) && n.propertyName) {
+          const from = n.propertyName.text;
+          renames.set(from, [...(renames.get(from) ?? []), n.name.text]);
+        } else if (ts.isImportClause(n) && n.name) defaults.add(n.name.text);
+        ts.forEachChild(n, walk);
+      };
+      walk(sf);
+    }
+    this.idIndex = ids;
+    this.renameIndex = renames;
+    this.defaultImportNames = defaults;
+  }
+
+  /**
+   * Every reference of the `const` `decl` binds only reads (other files too when `crossFile` and it is exported).
+   * References are found by resolved symbol (review C0b F9): the names to look at are the const's own name plus every
+   * name an import / export specifier renames it to (`import { SEEN as S }`), transitively, and the default-import
+   * names when it is exported as default.
+   */
   private onlyRead(decl: ts.VariableDeclaration, crossFile: boolean, depth: number): boolean {
     if (depth > 3 || !ts.isIdentifier(decl.name)) return false;
     const sym = this.checker.getSymbolAtLocation(decl.name);
     if (!sym) return false;
-    const name = decl.name.text;
+    this.buildIdIndex();
     const own = decl.getSourceFile();
     const target = (id: ts.Identifier) => {
       let s = this.checker.getSymbolAtLocation(id);
       if (s && s.flags & ts.SymbolFlags.Alias) s = this.checker.getAliasedSymbol(s);
       return s === sym;
     };
-    let exported = hasModifier(decl.parent.parent, ts.SyntaxKind.ExportKeyword);
-    const uses = (sf: ts.SourceFile): boolean => {
-      let ok = true;
-      const walk = (n: ts.Node) => {
-        if (!ok) return;
-        if (ts.isIdentifier(n) && n !== decl.name && n.text === name && target(n)) {
-          if (ts.isExportSpecifier(n.parent) || ts.isExportAssignment(n.parent)) exported = true;
-          if (!this.readOnlyUse(n, depth)) ok = false;
+    const names = new Set([decl.name.text]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const n of [...names])
+        for (const to of this.renameIndex!.get(n) ?? []) {
+          if (names.has(to)) continue;
+          names.add(to);
+          grew = true;
         }
-        ts.forEachChild(n, walk);
-      };
-      walk(sf);
-      return ok;
-    };
-    if (!uses(own)) return false;
-    if (!exported) return true;
-    if (!crossFile) return false;
-    return this.program
-      .getSourceFiles()
-      .every((sf) => sf === own || sf.isDeclarationFile || !rel(sf.fileName).startsWith("src/") || !sf.text.includes(name) || uses(sf));
+      if (names.has("default") && !names.has("\0default")) {
+        names.add("\0default");
+        for (const d of this.defaultImportNames!) names.add(d);
+        grew = true;
+      }
+    }
+    let exported = hasModifier(decl.parent.parent, ts.SyntaxKind.ExportKeyword);
+    const refs: ts.Identifier[] = [];
+    for (const n of names) for (const id of this.idIndex!.get(n) ?? []) if (id !== decl.name && target(id)) refs.push(id);
+    for (const id of refs) if (id.getSourceFile() === own && (ts.isExportSpecifier(id.parent) || ts.isExportAssignment(id.parent))) exported = true;
+    if (exported && !crossFile) return false;
+    for (const id of refs) {
+      if (id.getSourceFile() !== own && !crossFile) continue;
+      if (!this.readOnlyUse(id, depth)) return false;
+    }
+    return true;
   }
 
   private readOnlyUse(e: ts.Expression, depth: number): boolean {
     const p = e.parent;
-    if (ts.isSpreadElement(p) || ts.isTypeQueryNode(p) || ts.isImportSpecifier(p) || ts.isExportSpecifier(p)) return true;
+    if (ts.isSpreadElement(p) || ts.isTypeQueryNode(p) || ts.isImportSpecifier(p) || ts.isExportSpecifier(p) || ts.isImportClause(p)) return true;
+    if (ts.isPropertyAccessExpression(p) && p.name === e) return this.readOnlyUse(p, depth); // M.SEEN through a namespace import
     if (ts.isPropertyAccessExpression(p) && p.expression === e) return READ_MEMBERS.has(p.name.text);
     if (ts.isForOfStatement(p)) return p.expression === e;
     if (this.readonlySlot(e)) return true;
@@ -1020,68 +2113,62 @@ class Lint {
   private fileRules(sf: ts.SourceFile): void {
     const f = this.relFile;
     const isRoute = /^src\/app\/.*(^|\/)route\.tsx?$/.test(f);
-    if (f.startsWith("src/lib/") && !SELFTEST.test(f)) this.casts4(sf);
+    if (f.startsWith("src/lib/") && !SELFTEST.test(f)) this.globalsL4(sf);
+    const exports = isUseServerFile(sf) || isRoute || f.startsWith("src/app/s/[store]/") ? moduleExports(sf, this.checker) : [];
     if (isUseServerFile(sf)) {
-      for (const ex of exportedFunctions(sf, this.checker)) {
+      // review C0b F11: Next.js registers every export of a "use server" file as an action, so an export the lint
+      // cannot read as a seam-wrapped function (a re-export, export *, a call result, a value) fails closed
+      for (const ex of exports) {
+        if (!ex.fn) {
+          const allowed = this.cfg.actions.find((a) => a.file === f && a.symbol === ex.name);
+          if (allowed) this.usedAllow.add(allowed);
+          else this.report(ex.at, "L9", "action-export", `${ex.name}: ${ex.why ?? "not a function"} in a "use server" file, which Next.js serves as a server action; export a function whose body starts with return storeAction( / … (AUTH-31)`);
+          continue;
+        }
         const inline = !!ex.fn.body && ts.isBlock(ex.fn.body) && isDirective(ex.fn.body.statements[0], "use server");
-        if (!inline) this.checkActionBody(ex.fn, ex.at, false);
+        if (!inline) this.checkActionBody(ex.fn, ex.at, false, ex.name);
         if (this.reach(ex.fn, "publish", (fn) => this.matches(fn, this.cfg.publishSinks)) && !this.reach(ex.fn, "gate", (fn) => this.matches(fn, this.cfg.prePublishGates)))
           this.report(ex.at, "L12", "publish-gate", `${ex.name}() reaches a publish without runPrePublishChecks() (§M.1)`);
       }
     }
     if (!isRoute && !f.startsWith("src/app/s/[store]/")) return;
-    const exported = exportedFunctions(sf, this.checker);
-    for (const ex of exported) {
+    const guarded = ["src/app/api/app/[store]/", "src/app/api/admin/", "src/app/api/public/", "src/app/s/[store]/"].some((p) => f.startsWith(p));
+    for (const ex of exports) {
       const handler = HTTP_METHODS.has(ex.name);
+      // review C0b F12: a handler that is a call result (`export const POST = wrap(…)`) or a re-export cannot be
+      // followed to its first statement, so in a guarded tree it fails closed
+      if (!ex.fn) {
+        if (handler && isRoute && guarded) this.report(ex.at, "L13", "unresolved-handler", `${ex.name}: ${ex.why ?? "not a function"}; a route handler here must be a function whose first await is its seam`);
+        continue;
+      }
+      const fn = ex.fn;
+      const item = { ...ex, fn };
       if (isRoute && handler && (f.startsWith("src/app/api/public/") || f.startsWith("src/app/s/"))) {
-        if (this.reach(ex.fn, "order-lead-insert", (fn) => this.opsIn(fn).some((o) => (o.table === "orders" || o.table === "leads") && (o.method === "insert" || o.method === "raw-insert"))) && !this.reach(ex.fn, "test-token", (fn) => this.matches(fn, this.cfg.testToken)))
+        if (this.reach(fn, "order-lead-insert", (x) => this.opsIn(x).some((o) => (o.table === "orders" || o.table === "leads") && (o.method === "insert" || o.method === "raw-insert"))) && !this.reach(fn, "test-token", (x) => this.matches(x, this.cfg.testToken)))
           this.report(ex.at, "L12", "test-token", `${ex.name} creates an order or lead without resolveTestToken() (D54)`);
       }
-      if (handler && f.startsWith("src/app/api/app/[store]/")) this.checkFirstAwait(ex, F.seam, "storeGuard");
-      else if (handler && f.startsWith("src/app/api/admin/")) this.checkFirstAwait(ex, F.platformSeam, "platformGuard");
+      if (handler && f.startsWith("src/app/api/app/[store]/")) this.checkFirstAwait(item, F.seam, "storeGuard");
+      else if (handler && f.startsWith("src/app/api/admin/")) this.checkFirstAwait(item, F.platformSeam, "platformGuard");
       else if (handler && f.startsWith("src/app/api/public/")) {
-        const hit = this.firstTouch(ex.fn, "public", (c) => this.isRef(c, this.cfg.publicResolvers));
+        const hit = this.firstTouch(fn, "public", (c) => this.isRef(c, this.cfg.publicResolvers));
         if (hit && hit !== "resolved") this.report(hit, "L13", "public-resolver", `${ex.name}: a tenant-table call before a public resolver (resolvePublicTarget / resolveStoreByHandle / …)`);
       } else if (f.startsWith("src/app/s/[store]/")) {
-        const hit = this.firstTouch(ex.fn, "handle", (c) => this.isCall(c, F.publicResolvers, "resolveStoreByHandle") && this.isParamsStore(c.arguments[0]));
+        const hit = this.firstTouch(fn, "handle", (c) => this.isCall(c, F.publicResolvers, "resolveStoreByHandle") && this.isParamsStore(c.arguments[0]));
         if (hit && hit !== "resolved") this.report(hit, "L13", "store-handle", `${ex.name}: a tenant-table call before resolveStoreByHandle(params.store)`);
       }
     }
   }
 
-  /** L4 also covers `globalThis as { __codX?: … }` declarations outside `declare global` */
-  private casts4(sf: ts.SourceFile): void {
-    const seen = new Set<string>();
-    const visit = (n: ts.Node) => {
-      if ((ts.isAsExpression(n) || ts.isTypeAssertionExpression(n)) && ts.isIdentifier(unwrap(n.expression)) && (unwrap(n.expression) as ts.Identifier).text === "globalThis") {
-        const lits: ts.TypeLiteralNode[] = [];
-        const collect = (t: ts.Node) => {
-          if (ts.isTypeLiteralNode(t)) lits.push(t);
-          ts.forEachChild(t, collect);
-        };
-        collect(n.type);
-        for (const lit of lits)
-          for (const m of lit.members) {
-            const name = m.name && ts.isIdentifier(m.name) ? m.name.text : null;
-            if (!name || !/^__(cod|sg)/.test(name) || seen.has(name)) continue;
-            seen.add(name);
-            if (!this.allowed(name)) this.report(m, "L4", "global", `globalThis.${name}: a process-wide global; use scopedCache() or list it in scripts/qa/tenancy-allow.json with a reason`);
-          }
-      }
-      ts.forEachChild(n, visit);
-    };
-    visit(sf);
-  }
-
-  private checkActionBody(fn: FnLike, at: ts.Node, inline: boolean): void {
+  private checkActionBody(fn: FnLike, at: ts.Node, inline: boolean, exportName?: string): void {
     if (this.l9Checked.has(fn) || !fn.body) return;
     this.l9Checked.add(fn);
     const name = fnName(fn);
-    const allowedAction = name ? this.cfg.actions.find((a) => a.file === this.relFile && a.symbol === name) : undefined;
+    const allowedAction = this.cfg.actions.find((a) => a.file === this.relFile && (a.symbol === name || a.symbol === exportName));
     if (allowedAction) {
       this.usedAllow.add(allowedAction);
       return;
     }
+
     const isSeam = (e: ts.Expression | undefined) => {
       if (!e) return false;
       const x = unwrap(e);
@@ -1131,7 +2218,7 @@ class Lint {
   }
 
   /** L13: the first awaited expression (after awaiting params) must be the guard, called with the request (and the handle) */
-  private checkFirstAwait(ex: ExportedFn, file: string, guard: "storeGuard" | "platformGuard"): void {
+  private checkFirstAwait(ex: { name: string; fn: FnLike; at: ts.Node }, file: string, guard: "storeGuard" | "platformGuard"): void {
     const body = ex.fn.body;
     if (!body) return;
     let first: ts.AwaitExpression | null = null;
@@ -1171,14 +2258,10 @@ class Lint {
   private resolveTarget(e: ts.Expression): FnLike | null {
     const x = unwrap(e);
     if (!ts.isIdentifier(x) && !ts.isPropertyAccessExpression(x)) return null;
-    const decls = this.symbolOf(x)?.declarations ?? [];
-    for (const d of decls) {
-      const file = rel(d.getSourceFile().fileName);
-      if (!file.startsWith("src/") || d.getSourceFile().isDeclarationFile) continue;
-      const fn = fnInitializer(d);
-      if (fn?.body) return fn;
-    }
-    return null;
+    // const aliases are followed (`const fn = touchOrders; await fn()`, review C0b F12)
+    const decls = (this.symbolOf(x)?.declarations ?? []).filter((d) => rel(d.getSourceFile().fileName).startsWith("src/"));
+    const fn = fnOfDecls(decls, this.checker, 0);
+    return fn?.body && rel(fn.getSourceFile().fileName).startsWith("src/") ? fn : null;
   }
 
   /** functions called (or passed as a callback) inside `fn`, nested functions included */
@@ -1265,26 +2348,35 @@ class Lint {
 
   /* ---------------- PIN ---------------- */
 
+  private pinOf(file: string): Pin | undefined {
+    return this.cfg.pins.find((p) => under(file, p.files.map((g) => (g.endsWith("/**") ? g.slice(0, -2) : g))));
+  }
+
+  /** PIN counts the queries `tenancy: platform` exempts (a builder chain, one raw SQL text), not comment lines (review C0b F7) */
   private checkPins(): void {
-    const groups = new Map<Pin, Annotation[]>();
-    for (const a of this.annotations) {
-      if (a.kind !== "platform") continue;
-      const pin = this.cfg.pins.find((p) => under(a.file, p.files.map((g) => (g.endsWith("/**") ? g.slice(0, -2) : g))));
-      if (pin) groups.set(pin, [...(groups.get(pin) ?? []), a]);
+    const groups = new Map<Pin, ExemptUnit[]>();
+    for (const u of this.exemptUnits.values()) {
+      const pin = this.pinOf(u.file);
+      if (pin) groups.set(pin, [...(groups.get(pin) ?? []), u]);
     }
     for (const [pin, list] of groups) {
       if (list.length <= pin.max) continue;
-      list.sort((x, y) => (x.file === y.file ? x.line - y.line : x.file < y.file ? -1 : 1));
-      const a = list[pin.max];
-      this.violations.push({ file: a.file, line: a.line, rule: "PIN", kind: "pin", message: `${list.length} "tenancy: platform" annotations in ${pin.files.join(" + ")}, pinned at ${pin.max} (${pin.reason})` });
+      list.sort((x, y) => (x.file === y.file ? x.pos - y.pos : x.file < y.file ? -1 : 1));
+      const u = list[pin.max];
+      this.violations.push({ file: u.file, line: u.annotationLine, rule: "PIN", kind: "pin", message: `${list.length} queries exempted by "tenancy: platform" in ${pin.files.join(" + ")}, pinned at ${pin.max} (${pin.reason})` });
     }
   }
 
   pinCounts(): { pin: Pin; count: number }[] {
-    return this.cfg.pins.map((pin) => ({
-      pin,
-      count: this.annotations.filter((a) => a.kind === "platform" && this.cfg.pins.find((p) => under(a.file, p.files.map((g) => (g.endsWith("/**") ? g.slice(0, -2) : g)))) === pin).length,
-    }));
+    const units = [...this.exemptUnits.values()];
+    return this.cfg.pins.map((pin) => ({ pin, count: units.filter((u) => this.pinOf(u.file) === pin).length }));
+  }
+
+  /** exempted queries per file (for the baseline record) */
+  exemptCounts(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const u of this.exemptUnits.values()) out.set(u.file, (out.get(u.file) ?? 0) + 1);
+    return out;
   }
 }
 
@@ -1299,11 +2391,13 @@ class Lint {
 const FX = "__tenancy_lint_fixture__";
 const FIXTURES: Record<string, string> = {
   [`src/lib/${FX}/repo.ts`]: `
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, or, sql, type SQL } from "drizzle-orm";
+import type { MySqlTable } from "drizzle-orm/mysql-core";
 import { db } from "@/lib/db/client";
+import * as schemaNs from "@/lib/db/schema";
 import { orders, pages, plans, storeMembers } from "@/lib/db/schema";
 import { byId, inStore, storeSql, storeValues, whereStore } from "@/lib/tenancy/sql";
-import type { ReadScope, StoreScope, WriteScope } from "@/lib/tenancy/types";
+import type { PlatformCtx, ReadScope, StoreCtx, StoreScope, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 
 export async function good(scope: StoreScope, id: string) {
   await db.select().from(pages).where(whereStore(pages, scope, eq(pages.id, id)));
@@ -1337,7 +2431,121 @@ export async function weakPredicates(scope: StoreScope, input: { storeId: string
 }
 export async function readOnlyWrites(scope: ReadScope, id: string) {
   await db.update(pages).set({ name: id }).where(inStore(pages, scope)); //! L6
-  await db.delete(pages).where(inStore(pages, scope));
+  await db.delete(pages).where(inStore(pages, scope)); //! L6
+}
+// review C0b F8: the scope a write uses must be the WriteScope, not any scope parameter of the function
+export async function copyPage(dst: WriteScope, src: ReadScope, id: string) {
+  await db.update(pages).set({ name: id }).where(inStore(pages, src)); //! L6
+  await db.insert(pages).values(storeValues(src, { id }) as never); //! L6
+  await db.insert(pages).values(storeValues(dst, { id }) as never);
+}
+// review C0b F1: a spread copies the symbol-keyed brand, so these forge a scope with no cast to WriteScope
+export function forge(scope: StoreScope, ctx: StoreCtx, id: string) {
+  const other = { ...scope, storeId: id }; //! L6
+  const upgraded: WriteScope = { ...scope, kind: "member" as const }; //! L6
+  const wctx: StoreCtx<WriteScope> = { ...ctx, scope: { ...ctx.scope, kind: "member" as const } }; //! L6 L6
+  const fake = { storeId: id, kind: "member" } as unknown as StoreScope; //! L6
+  const copied = Object.assign({}, scope); //! L6
+  const cloned = structuredClone(scope); //! L6
+  return [other, upgraded, wctx, fake, copied, cloned];
+}
+export function downcast(ctx: StoreCtx | PlatformCtx, maybe: StoreScope | null) {
+  return [(ctx as StoreCtx).scope, maybe as StoreScope, { ...ctx }]; //! L6
+}
+async function listPagesFx(scope: StoreScope) {
+  return db.select().from(pages).where(inStore(pages, scope));
+}
+export async function forgeCall(scope: StoreScope, input: { storeId: string }) {
+  return listPagesFx({ ...scope, storeId: input.storeId }); //! L6
+}
+// review C0b F2: storeSql() inside a larger template only as the first conjunct
+export async function templates(scope: StoreScope, from: string, extra: SQL, name: string) {
+  await db.select().from(pages).where(sql\`NOT \${storeSql(scope)}\`); //! L2
+  await db.select().from(pages).where(sql\`\${storeSql(scope)} || 1\`); //! L2
+  await db.select().from(pages).where(sql\`\${storeSql(scope)} XOR 1\`); //! L2
+  await db.select().from(pages).where(sql\`(\${storeSql(scope)}) IS NOT NULL\`); //! L2
+  await db.select().from(pages).where(sql\`\${storeSql(scope)} \${sql.raw("OR 1 = 1")}\`); //! L2
+  await db.select().from(pages).where(sql\`\${storeSql(scope)} AND \${extra}\`); //! L2
+  await db.select().from(pages).where(sql\`\${storeSql(scope)} AND slug >= \${from}\`);
+  await db.select().from(pages).where(sql\`\${storeSql(scope)} AND (\${extra})\`);
+  await db.select().from(pages).where(and(inStore(pages, scope), extra)); //! L2
+  await db.select().from(pages).where(and(inStore(pages, scope), sql\`\${pages.slug} = \${name}\`, or(eq(pages.id, name), eq(pages.slug, name))));
+  await db.select().from(pages).where(whereStore(pages, scope, extra));
+}
+// review C0b F3: drizzle keeps the last .where(), so a $dynamic() chain may not drop or escape the predicate
+export async function dynamicWhere(scope: WriteScope, id: string) {
+  await db.select().from(pages).$dynamic().where(inStore(pages, scope)).where(eq(pages.id, id)); //! L2
+  await db.update(pages).set({ name: id }).$dynamic().where(inStore(pages, scope)).where(eq(pages.id, id)); //! L2
+  await db.select().from(pages).$dynamic().where(inStore(pages, scope));
+  return db.select().from(pages).$dynamic().where(inStore(pages, scope));
+}
+export function dynamicEscape(scope: StoreScope) {
+  return db.select().from(pages).$dynamic().where(inStore(pages, scope)); //! L2
+}
+// review C0b F4: a patch typed with storeId, or a spread after storeId, can move a row to another store
+export async function patches(scope: WriteScope, id: string, patch: Partial<typeof pages.$inferInsert>) {
+  await db.insert(pages).values({ storeId: scope.storeId, ...patch } as never); //! L3
+  await db.update(pages).set(patch).where(byId(pages, scope, id)); //! L3b
+  await db.update(pages).set({ ...patch }).where(byId(pages, scope, id)); //! L3b
+  await db.insert(pages).values(storeValues(scope, { id }) as never).onDuplicateKeyUpdate({ set: patch }); //! L3b
+  await db.insert(pages).values({ ...patch, storeId: scope.storeId } as never);
+  await db.update(pages).set({ name: id, updatedAt: new Date() }).where(byId(pages, scope, id));
+}
+// review C0b F6: tables reached through a helper, a let, a ternary, an index, a destructuring or a typed parameter
+const tbl = () => pages;
+const TABLES = { pages, orders };
+const { leads: L } = schemaNs;
+export async function selectAll<T extends MySqlTable>(t: T) {
+  return db.select().from(t); //! L1
+}
+export async function tables(scope: StoreScope, f: boolean, name: "pages" | "orders", p: typeof pages) {
+  await db.select().from(tbl()).where(eq(pages.id, "x")); //! L2
+  let lt = pages;
+  lt = f ? lt : pages;
+  await db.select().from(lt).where(eq(pages.id, "x")); //! L2
+  await db.select().from(f ? pages : orders).where(eq(pages.id, "x")); //! L2
+  await db.select().from(TABLES[name]).where(eq(pages.id, "x")); //! L2
+  await db.select().from(L).where(eq(L.id, "x")); //! L2
+  await db.select().from(p).where(eq(p.id, "x")); //! L2
+  await db.select().from(sql\`orders\`); //! L1
+  return selectAll(orders); //! L1
+}
+// review C0b F15: ctx-taking repositories (D71 rev 4) and a destructured scope are scope parameters
+export async function ctxWrites(ctx: WriteCtx, id: string) {
+  await db.insert(pages).values(storeValues(ctx.scope, { id }) as never);
+  return db.select().from(pages).where(byId(pages, ctx.scope, id));
+}
+export async function destructured({ scope }: { scope: StoreScope }, id: string) {
+  return db.select().from(pages).where(byId(pages, scope, id));
+}
+export async function destructuredLocal(ctx: StoreCtx, id: string) {
+  const { scope } = ctx;
+  return db.select().from(pages).where(byId(pages, scope, id));
+}
+// review C0b F5: raw SQL anywhere, judged per query level
+async function runSql(q: string) {
+  return q;
+}
+export async function rawProbes(conn: { query(q: string): Promise<unknown> }, name: string, scope: StoreScope) {
+  await db.execute(sql.raw("DELETE FROM orders WHERE id = 'x'")); //! L10
+  const Q = "DELETE FROM leads WHERE id = 'x'"; //! L10
+  await conn.query(Q);
+  await runSql("SELECT id FROM pages WHERE slug = 'x'"); //! L10
+  await conn.query("SELECT u.id FROM users u, orders o WHERE u.id = o.created_by"); //! L10
+  await conn.query("TRUNCATE TABLE orders"); //! L10
+  await conn.query("INSERT pages (id, slug) VALUES (?, ?)"); //! L10
+  await conn.query("SELECT id FROM cod_storegen.orders WHERE id = ?"); //! L10
+  await db.execute(sql\`SELECT id FROM \${sql.identifier("pages")} WHERE id = 'x'\`); //! L10
+  await db.execute(sql\`SELECT id FROM \${sql.raw(name)} WHERE id = 'x'\`); //! L10
+  await conn.query("UPDATE pages SET store_id = 'B' WHERE store_id = 'A' AND id = 'x'"); //! L10
+  await conn.query("SELECT id FROM pages WHERE id = 'x' OR store_id = 'A'"); //! L10
+  await conn.query("DELETE FROM pages WHERE id IN (SELECT page_id FROM orders WHERE store_id = 'A')"); //! L10
+  await conn.query("SELECT id FROM orders " + name + " WHERE store_id = ?"); //! L10
+  await conn.query("SELECT id FROM orders WHERE store_id = ?");
+  await conn.query("SELECT o.id FROM orders o JOIN pages p ON p.id = o.page_id WHERE o.store_id = ? AND p.status = 'x'");
+  await conn.query("INSERT INTO orders (store_id, id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = VALUES(id)");
+  await conn.query("SELECT id FROM orders WHERE store_id = ? AND created_at BETWEEN ? AND ? FOR UPDATE");
+  await db.execute(sql\`SELECT id FROM orders WHERE \${storeSql(scope)} AND id IN (SELECT order_id FROM leads WHERE \${storeSql(scope)})\`);
 }
 export async function badInserts(scope: WriteScope, id: string) {
   await db.insert(pages).values({ id } as never); //! L3
@@ -1398,7 +2606,7 @@ export async function second() {
   [`src/lib/${FX}/cache.ts`]: `
 import { platformScope } from "@/lib/platform/seam";
 import type { PlatformCtx } from "@/lib/tenancy/types";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, type Bucket } from "@/lib/security/rate-limit";
 import { getSetting } from "@/lib/settings";
 
 declare global {
@@ -1432,10 +2640,88 @@ export class Holder {
   items = new Set<string>();
   static shared = new Map<string, string>(); //! L4
 }
-export async function legacy() {
+export async function legacy(storeId: string) {
   await rateLimit("api:order:x", 1, 1); //! L5
   const lock = "SELECT GET_LOCK('cod:x', 1)"; //! L5
+  await rateLimit(\`s:\${storeId}:orders\` as Bucket, 1, 1); //! L5
+  const rl = rateLimit; //! L5
+  await rl("p:x", 1, 1);
   return [lock, await getSetting("store")]; //! L3
+}
+// review C0b F9: state created lazily inside a function, a static block or an IIFE, and globals behind any cast
+let lazy: Map<string, number> | undefined;
+export function getLazy() { lazy ??= new Map(); return lazy; } //! L4
+let lazySet: Set<string> | undefined;
+export function getSet() { if (!lazySet) lazySet = new Set(); return lazySet; } //! L4
+export const IIFE = (() => { const m = new Map<string, number>(); m.set("a", 1); return m; })(); //! L4
+export const FROZEN_IIFE: ReadonlyMap<string, number> = (() => { const m = new Map<string, number>(); m.set("a", 1); return m; })();
+export function grow() { IIFE.set("b", 2); return FROZEN_IIFE.get("a"); }
+export class Statics {
+  static c: Map<string, number>;
+  static {
+    Statics.c = new Map(); //! L4
+  }
+}
+export function anyGlobal() {
+  (globalThis as any).__codFixtureAny ??= new Map(); //! L4 L4
+}
+export const gt: { __codFixtureTyped?: Map<string, number> } = globalThis as never; //! L4
+(globalThis as Record<string, unknown>)["__sgFixtureIndex"] = new Map(); //! L4 L4
+export function local() {
+  const m = new Map<string, number>();
+  const s = (() => new Set<string>())();
+  return [m, s];
+}
+`,
+  [`src/lib/${FX}/frozen-a.ts`]: `
+export const SEEN = new Set<string>(); //! L4
+export const READ_ONLY = new Set<string>(["a"]);
+`,
+  [`src/lib/${FX}/frozen-b.ts`]: `
+import { READ_ONLY as R, SEEN as S } from "@/lib/${FX}/frozen-a";
+export function mark(k: string) {
+  S.add(k);
+  return R.has(k);
+}
+`,
+  [`src/lib/jobs/${FX}/repo.ts`]: `
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { pages, storeMembers } from "@/lib/db/schema";
+// review C0b F7: an annotation exempts only the query it leads or sits on, never a sibling in the same statement
+export const repo = {
+  leak: async (id: string) => db.select().from(pages).where(eq(pages.id, id)), //! L1 L2
+  other: async () => {
+    // tenancy: platform a job-runner read in another member of the same statement
+    return db.select().from(storeMembers).where(eq(storeMembers.role, "owner"));
+  },
+  // tenancy: platform an expression-bodied member annotated on its own declaration
+  annotated: async () => db.select().from(storeMembers).where(eq(storeMembers.role, "agent")),
+};
+export async function both() {
+  // tenancy: platform one statement, two queries: two PIN units //! PIN
+  return Promise.all([db.select().from(storeMembers).where(eq(storeMembers.role, "a")), db.select().from(storeMembers).where(eq(storeMembers.role, "b"))]);
+}
+`,
+  [`src/lib/${FX}/barrel.ts`]: `
+export { db } from "@/lib/db/client";
+export * from "@/lib/db/schema";
+`,
+  [`src/lib/${FX}/tables.ts`]: `
+export { pages as reexported } from "@/lib/db/schema";
+export type { SignupBand as Band } from "@/lib/db/schema";
+`,
+  [`src/components/${FX}/barrel-user.tsx`]: `
+import { db, pages } from "@/lib/${FX}/barrel"; //! L7
+import { reexported } from "@/lib/${FX}/tables"; //! L7
+import type { Band } from "@/lib/${FX}/tables";
+export function Barrel({ band }: { band?: Band }) {
+  return <i data-a={typeof db} data-b={typeof pages} data-c={typeof reexported} data-d={band} />;
+}
+`,
+  [`src/lib/${FX}/handlers.ts`]: `
+export async function DELETE(req: Request) {
+  return new Response(req.url);
 }
 `,
   [`src/lib/${FX}/selftest.ts`]: `
@@ -1451,7 +2737,7 @@ export function Links({ slug, band }: { slug: string; band?: SignupBand }) {
   const notAdmin = "/administrators";
   const live = \`/\${slug}\`; //! L8
   const joined = "/" + slug; //! L8
-  return <a href="/admin/pages" data-k={String(pages)} data-p={band}>{live}{joined}{notAdmin}</a>; //! L8
+  return <a href="/admin/pages" data-k={String(pages)} data-p={band}>{live}{joined}{notAdmin}</a>; //! L8 L1
 }
 `,
   [`src/app/${FX}/actions.ts`]: `"use server";
@@ -1473,10 +2759,22 @@ export async function allowedAction(id: string) {
   const x = id.trim(); // listed in the fixture allow file's actions: no L9
   return x;
 }
+// review C0b F11: every export of a "use server" file is an action; what the lint cannot read fails closed
+function makeAction() {
+  return async () => 1;
+}
+const inner = async (id: string) => storeAction("pages.edit", async () => id);
+export { fixtureGate as reexported } from "@/lib/${FX}/publish"; //! L9
+export * from "@/lib/${FX}/publish"; //! L9
+export const viaFactory = makeAction(); //! L9
+export { inner as exposed };
+export default inner;
+export type { Exported } from "@/lib/${FX}/publish";
 `,
   [`src/lib/${FX}/publish.ts`]: `
 export async function fixturePublish(): Promise<void> {}
 export async function fixtureGate(): Promise<void> {}
+export type Exported = string;
 `,
   [`src/app/${FX}/inline.tsx`]: `
 import { storeAction } from "@/lib/tenancy/seam";
@@ -1495,16 +2793,24 @@ export default function Page() {
   [`src/lib/${FX}/orders.ts`]: `
 import { db } from "@/lib/db/client";
 import { orders } from "@/lib/db/schema";
-import { storeValues } from "@/lib/tenancy/sql";
-import type { WriteScope } from "@/lib/tenancy/types";
+import { inStore, storeValues } from "@/lib/tenancy/sql";
+import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 export async function insertOrder(scope: WriteScope) {
   await db.insert(orders).values(storeValues(scope, {}) as never);
 }
+export async function touchOrders(scope: StoreScope) {
+  return db.select().from(orders).where(inStore(orders, scope));
+}
 `,
   [`src/app/api/public/${FX}/order/route.ts`]: `
-import { insertOrder } from "@/lib/${FX}/orders";
+import { insertOrder, touchOrders } from "@/lib/${FX}/orders";
 import { publicScope, resolvePublicTarget, resolveTestToken } from "@/lib/tenancy/public";
 import { good } from "@/lib/${FX}/repo";
+export async function DELETE(req: Request) {
+  const fn = touchOrders; // review C0b F12: a const alias is followed
+  await fn(null as never); //! L13
+  return new Response(req.url);
+}
 export async function POST(req: Request) { //! L12
   const t = await resolvePublicTarget(req.url);
   if (!t) return new Response(null, { status: 404 });
@@ -1535,6 +2841,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ store: string 
   const g = await storeGuard(req, (await ctx.params).store, "pages.edit");
   return g.ok ? new Response(body) : g.response;
 }
+// review C0b F12: a handler bound by name is followed; a call result or a re-export fails closed
+const handler = async (req: Request) => new Response(req.url);
+const wrap = <T,>(f: T): T => f;
+export const PUT = handler; //! L13
+export const PATCH = wrap(async (req: Request) => new Response(req.url)); //! L13
+export { DELETE } from "@/lib/${FX}/handlers"; //! L13
+export const dynamic = "force-dynamic";
 `,
   [`src/app/api/admin/${FX}/route.ts`]: `
 import { platformGuard } from "@/lib/platform/seam";
@@ -1557,7 +2870,10 @@ const FIXTURE_CONFIG = (real: Config): Config => ({
     { file: `src/lib/${FX}/cache.ts`, symbol: "__sgFixtureAllowed", reason: "fixture: an allow-listed global" },
   ],
   actions: [{ file: `src/app/${FX}/actions.ts`, symbol: "allowedAction", reason: "fixture: an allow-listed action body" }],
-  pins: [{ files: [`src/lib/platform/${FX}/**`], max: 2, reason: "fixture pin" }],
+  pins: [
+    { files: [`src/lib/platform/${FX}/**`], max: 2, reason: "fixture pin" },
+    { files: [`src/lib/jobs/${FX}/**`], max: 3, reason: "fixture pin: queries, not comment lines" },
+  ],
   publishSinks: [{ file: `src/lib/${FX}/publish.ts`, name: "fixturePublish" }],
   prePublishGates: [{ file: `src/lib/${FX}/publish.ts`, name: "fixtureGate" }],
 });
@@ -1684,6 +3000,7 @@ function main(): number {
           kinds: Object.fromEntries([...byKind].sort()),
           annotations: Object.fromEntries([...annotationsByDir].sort()),
           pins: lint.pinCounts().map(({ pin, count }) => ({ files: pin.files, max: pin.max, count })),
+          exempted: Object.fromEntries([...lint.exemptCounts()].sort()),
           unusedAllowEntries: unused,
           tenantTables: [...tenant.values()].sort(),
           files: files.length - virtual.size,

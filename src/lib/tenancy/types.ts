@@ -3,8 +3,10 @@
  * nothing here runs, so client and server code may import it.
  *
  * A `StoreScope` is the only value a data function accepts as "which store". It carries a symbol-keyed
- * brand that no code outside the seam can produce without a cast (lint L6 pins the one allowed cast site,
- * src/lib/tenancy/seam.ts), so a store id taken from input never reaches a query.
+ * brand that no code outside the seam can produce without a cast or a spread of another scope (`{ ...scope,
+ * storeId }` copies the brand): lint L6 reports both, and Object.assign / structuredClone of a scope, outside
+ * the seam files (the one allowed cast site is src/lib/tenancy/seam.ts), so a store id taken from input never
+ * reaches a query. A brand a spread cannot copy is CCR r1.0-m-5 (R2 contract step).
  */
 import type { SessionUser } from "@/lib/auth";
 import type { PlatformPermission, PlatformRole, STORE_PERMISSIONS, StorePermission, StoreRole } from "@/lib/auth/permissions";
