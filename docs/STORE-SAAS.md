@@ -1073,6 +1073,14 @@ Source: `edge/worker.js` (plain ES module Worker, no build step, ≤ 120 lines, 
 the dashboard editor or `wrangler`). Bindings: secret `EDGE_KEY`; vars `ORIGIN` (`https://<apex>`), `STORE_ROOT`
 (`<apex>`), `WORKER_VERSION`. Route: `*.<domain>/*` only (the apex never runs the Worker; V3 confirms the pattern).
 
+**The console host is not a store host** (R1.0 integration, CCR r1.0-t3-8). Add a second Cloudflare route
+`console.<domain>/*` with Worker **None** (a route exclusion), and serve `console.<domain>` from Hostinger as its own
+hostname (the probe V2 decides how: a domain alias on the Node site, or a proxied record whose origin Host is
+`console.<domain>`). Through `edge/worker.js` the console would be unusable: the Worker answers `/admin/**` and
+`/api/admin/**` with its own 404, deletes `Cookie` (the `__Host-cs` / `__Host-csg` session and gate cookies) and strips
+every `Set-Cookie`, and Next's Server Actions check would compare `Origin: https://console.<domain>` with the apex `Host`
+of the subrequest.
+
 ```
 on fetch(request):
   host = lower(request.headers.host)
@@ -1217,7 +1225,8 @@ The owner steps are RESEARCH §5.2 (buy the domain, Cloudflare zone, `*` proxied
 Cache Rule, Worker + secret + route, Hostinger CDN off, TLS mode Full strict). The app side, in order:
 1. Env full replace (HANDOFF §4) adding `PLATFORM_URL=https://<domain>`, `PUBLIC_URL` (same value),
    `STORE_ROOT_DOMAIN=<domain>`, `EDGE_KEY`, `BEHIND_CLOUDFLARE=1`, `LEGACY_PLATFORM_HOSTS=lightgreen-hippopotamus-140853.hostingersite.com`,
-   `TRUSTED_PROXY_HOPS` per the Visitor IP check, and **`ADMIN_HOST=console.<domain>`** (D44 rev 3); **restart, no
+   `TRUSTED_PROXY_HOPS` per the Visitor IP check, and **`ADMIN_HOST=console.<domain>`** (D44 rev 3; reached directly,
+   never through the Worker: the route exclusion of §C.5, CCR r1.0-t3-8); **restart, no
    rebuild** (rev 3, ENGC-26: every one of these is a server-side `process.env` read and **none of the domain-move keys
    is a `NEXT_PUBLIC_*` variable**, so none is inlined at build time; rev 5, CRIT2-8: the rev 3 wording "`src/**` has no
    `NEXT_PUBLIC_*` variable" was false, `src/lib/page/features.ts:36` reads `process.env.NEXT_PUBLIC_OFFERS_FEATURES`,
@@ -1229,8 +1238,11 @@ Cache Rule, Worker + secret + route, Hostinger CDN off, TLS mode Full strict). T
 3. Verification V1 … V11 (RESEARCH §5.3) must pass (V4 now expects the neutral 404 for a wrong `x-sg-edge`, §C.2;
    RESEARCH records the change at its next revision), plus the app check **V12 "console on its own host"** (rev 4, PLA
    Q4.2 / PLA-§16.3: the Domains page running the check was served on `ADMIN_HOST` (`effectiveHost().cls ===
-   "console"`), a cookie-less `HEAD https://<root>/admin` answers the neutral 404, and `consoleHref()` links point at
-   `ADMIN_HOST`), **and V13 "human check ready"** (rev 5, CRIT2-13: `platform_turnstile` is configured with the new
+   "console"`), a cookie-less `HEAD https://<root>/admin` answers the neutral 404, `consoleHref()` links point at
+   `ADMIN_HOST`, and `curl -sI https://console.<domain>/admin` has no `x-sg-mode` header: CCR r1.0-t3-8), V3 extended
+   with the cache check of CCR r1.0-t3-9 (RESEARCH §5.3: two store hosts on one path, `CDN-Cache-Control: no-store`,
+   `cf-cache-status` never `HIT`, each body its own store's; fallback the Workers `cache: "no-store"` fetch option),
+   **and V13 "human check ready"** (rev 5, CRIT2-13: `platform_turnstile` is configured with the new
    domain among its hostnames and a test token verifies on `/signup`; the Domains page shows the check and links the
    Turnstile settings); then the signup mode default flips to `approval` (D9, §B.2: the same one rule), with the D69 ceilings in force.
    Until V13 passes, the default stays `invite`, whatever else is configured.
@@ -4213,7 +4225,8 @@ Owned by the maintainer for the whole of R1 product (and again in R2/R3): `src/l
 `src/lib/health/{types,registry}.ts`, **`src/lib/design/types.frozen.ts`** (rev 4, CRIT9: the frozen `HeightReport` /
 `FoldReport` / `VariantFeaturesResolved` shapes in a file of their own; P6's `src/lib/design/types.ts` re-exports them and
 owns everything else, so no file has two owners and `test:ownership` can express it as a glob), `next.config.ts`,
-`src/landing/runtime/budgets.json`,
+`src/app/fonts/**` (the root layout's self-hosted faces; the Arabic face of CCR r1.0-t2-9 item 3 added at the R1.0
+integration), `src/landing/runtime/budgets.json`,
 **`src/landing/runtime/landing.sha256`** (written by T3 at the R1.0 integration, frozen afterwards),
 `scripts/build-landing-assets.mjs`, `src/lib/orders/contract.ts`, **`src/lib/orders/create.ts`** (`createOrderRow`, D72;
 T3's in R1.0, read-only afterwards), `src/lib/page/schema.ts` (frozen; the one DES-R1

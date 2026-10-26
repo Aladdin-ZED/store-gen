@@ -446,7 +446,15 @@ async function online(): Promise<void> {
   eq([health.headers["cache-control"], health.headers["x-content-type-options"]], ["no-store", "nosniff"], "online: /api/health: no-store + base headers");
 
   // 404 uniformity: the proxy, the route handlers and the fallback rewrite
-  const platform404 = [await get("/admin"), await get("/d/x"), await get(`/s/${handle}/no-such-slug-qa`), await get("/s/no-such-handle-qa"), await get("/no/such/deep/path"), await get("/no-such-slug-qa")];
+  // in S mode the platform host 308s a live store's /s/<h>/** to its subdomain (asserted below), so that path is P only
+  const platform404 = [
+    await get("/admin"),
+    await get("/d/x"),
+    ...(sMode ? [] : [await get(`/s/${handle}/no-such-slug-qa`)]),
+    await get("/s/no-such-handle-qa"),
+    await get("/no/such/deep/path"),
+    await get("/no-such-slug-qa"),
+  ];
   for (const r of platform404) eq(r.status, 404, "online: platform 404 status");
   eq(new Set(platform404.map(comparable)).size, 1, "online: one 404 header set on the platform host (proxy, routes, fallback)");
   eq(new Set(platform404.map((r) => r.body)).size, 1, "online: one 404 body on the platform host");
@@ -455,7 +463,12 @@ async function online(): Promise<void> {
   eq([head404.status, head404.body], [404, ""], "online: HEAD 404 empty");
   const action = await get("/", { "next-action": "abc", origin: "null", "content-type": "text/plain" }, "POST");
   eq(action.status, 403, "online: Origin: null action → 403 (CRIT2-11)");
-  eq(comparable({ ...action, headers: { ...action.headers, "content-length": platform404[0]!.headers["content-length"] ?? "" } }), comparable(platform404[0]!), "online: the 403 carries the neutral set");
+  // the bodies differ in length only by the status line's text: compare with the 404's length (a chunked 404 has none)
+  const actionHeaders = { ...action.headers };
+  const length404 = platform404[0]!.headers["content-length"];
+  if (length404 === undefined) delete actionHeaders["content-length"];
+  else actionHeaders["content-length"] = length404;
+  eq(comparable({ ...action, headers: actionHeaders }), comparable(platform404[0]!), "online: the 403 carries the neutral set");
 
   // platform UI
   for (const path of ["/login", "/signup", "/invite/qa-token", "/reset/qa-token", `/report/${handle}`]) {
@@ -469,7 +482,8 @@ async function online(): Promise<void> {
   const home = await get("/");
   eq([home.headers["cache-control"], home.headers["x-robots-tag"]], ["public, max-age=0, s-maxage=300", undefined], "online: marketing / indexable");
   const manifest = await get("/app/manifest.webmanifest", { cookie: "__Host-cs=x" });
-  if (manifest.status === 404) console.log("  (manifest not served yet: P2 / T4 route)");
+  // until P2 / T4 add the route, /app/<h> answers it (a 404, or the sign-in redirect for a signed-out visitor)
+  if (manifest.status !== 200) console.log(`  (manifest not served yet: P2 / T4 route; status ${manifest.status})`);
   else eq([manifest.headers["content-type"]?.split(";")[0], manifest.headers["cache-control"], manifest.cookies.length, "content-security-policy" in manifest.headers], ["application/manifest+json", "public, max-age=3600", 0, false], "online: manifest public, max-age=3600, no cookie, no nonce CSP");
 
   // store documents (P mode on the platform host, or the canonical 308 in S mode)
@@ -481,7 +495,10 @@ async function online(): Promise<void> {
     const csp = viaEdge.headers["content-security-policy"] ?? "";
     check(!/(connect-src|form-action)[^;]*'self'/.test(csp) && csp.includes(`https://${handle}.${root}/api/public/`), "online: [S] store document CSP narrowed to the store host");
     const store404 = [await edge("/admin"), await edge("/no-such-slug-qa"), await edge("/s/other-handle/x")];
-    eq(new Set(store404.map(comparable)).size, 1, "online: [S] one 404 header set on the store host");
+    // these requests skip the Worker, which strips Next's x-middleware-* response headers (a rewritten route's 404
+    // carries x-middleware-rewrite; asserted by qa:edge-sim): compare what a visitor of the store host receives
+    const viaWorker = (a: Answer): Answer => ({ ...a, headers: Object.fromEntries(Object.entries(a.headers).filter(([k]) => !k.startsWith("x-middleware-"))) });
+    eq(new Set(store404.map((r) => comparable(viaWorker(r)))).size, 1, "online: [S] one 404 header set on the store host");
     eq(store404[0]!.headers["strict-transport-security"], HSTS, "online: [S] store host 404 HSTS");
     eq(store404.flatMap((r) => r.cookies), [], "online: [S] no Set-Cookie on the store host");
   } else {

@@ -21,7 +21,7 @@ import "server-only";
  * A database or render failure answers the neutral 503 and is logged without request data.
  */
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { pages } from "@/lib/db/schema";
 import { effectiveHost, type EffectiveHost } from "@/lib/edge/host";
@@ -29,7 +29,7 @@ import { subdomainMode } from "@/lib/edge/env";
 import { errorSummary } from "@/lib/orders/log";
 import { validateDoc } from "@/lib/page/validate";
 import { baseSecurityHeaders } from "@/lib/security/headers";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import {
   getStoreById,
   listIndexableStoreHandles,
@@ -38,9 +38,10 @@ import {
   publicStoreAnswer,
   resolveStoreHandle,
   resolveTestToken,
+  type StoreHandleLookup,
 } from "@/lib/tenancy/public";
-import { inStore } from "@/lib/tenancy/sql";
-import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
+import { whereStore } from "@/lib/tenancy/sql";
+import type { StoreRow, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { addressMode, platformOrigin, storePath, storeUrl, type StoreAddress } from "@/lib/urls";
 import { isLegalKind } from "@/landing/context";
 import { renderLandingHtml } from "./core";
@@ -69,6 +70,11 @@ export type StoreRoute =
   | { page: "sitemap" };
 
 export interface RouteDeps {
+  /**
+   * The handle as the route resolved it first (`resolveStoreByHandle(params.store, { detail: true })`, lint L13), or
+   * "error" when that lookup threw; omitted: serveStoreRoute looks the handle up itself (tests, QA scripts).
+   */
+  found?: StoreHandleLookup | null | "error";
   /** Next's `after()`: work that must not delay the answer (slug-history hit counters) */
   defer?: (task: () => Promise<void>) => void;
   /** the clock (tests) */
@@ -124,13 +130,16 @@ export async function serveStoreRoute(req: Request, handleParam: string, route: 
   const eff = effectiveHost(req.headers);
   if (eff.cls !== "platform" && eff.cls !== "store" && eff.cls !== "legacy") return notFoundResponse(req);
   const handle = handleParam.toLowerCase();
-  let found;
-  try {
-    found = await resolveStoreHandle(handle);
-  } catch (err) {
-    log("handle lookup failed", err);
-    return unavailableResponse(req);
+  let found = deps.found;
+  if (found === undefined) {
+    try {
+      found = await resolveStoreHandle(handle);
+    } catch (err) {
+      log("handle lookup failed", err);
+      found = "error";
+    }
   }
+  if (found === "error") return unavailableResponse(req);
   if (!found) return notFoundResponse(req);
   if (found.kind === "gone") return goneResponse(req);
   const store = found.store;
@@ -182,7 +191,7 @@ async function serveHome(req: Request, scope: StoreScope, store: StoreRow): Prom
   return documentResponse(req, placeholder, { kind: "landing", noindex: true, store: address });
 }
 
-async function servePage(req: Request, scope: StoreScope, store: StoreRow, slug: string, kind: "landing" | "thanks", deps: RouteDeps): Promise<Response> {
+async function servePage(req: Request, scope: WriteScope, store: StoreRow, slug: string, kind: "landing" | "thanks", deps: RouteDeps): Promise<Response> {
   if (!isStoreSlug(slug)) return notFoundResponse(req);
   const page = await getPublishedPage(scope, store, slug);
   const address = addressOf(store);
@@ -205,7 +214,7 @@ async function servePage(req: Request, scope: StoreScope, store: StoreRow, slug:
 
 /** The test render, or null when the store's hourly budget is spent (the visit then gets the normal page). */
 async function testDocument(scope: StoreScope, store: StoreRow, page: PublishedPage, token: string, kind: "landing" | "thanks") {
-  const gate = await rateLimit(`s:${store.id}:test-render`, TEST_RENDERS_PER_HOUR, 3_600);
+  const gate = await rateLimit(storeBucket(scope, "test-render"), TEST_RENDERS_PER_HOUR, 3_600);
   if (!gate.ok) return null;
   const rendered = await renderTestDocument(scope, store, page, token, kind);
   return rendered ? { html: rendered.html, csp: rendered.csp } : null;
@@ -337,11 +346,7 @@ export async function servePreview(req: Request, token: string): Promise<Respons
     const store = await getStoreById(opened.storeId);
     if (!store || !previewServable(store.status)) return notFoundResponse(req);
     const scope = publicScope(store);
-    const [page] = await db
-      .select({ id: pages.id, slug: pages.slug, publicKey: pages.publicKey, draft: pages.draft })
-      .from(pages)
-      .where(and(inStore(pages, scope), eq(pages.id, opened.pageId)))
-      .limit(1);
+    const page = await previewPage(scope, opened.pageId);
     if (!page) return notFoundResponse(req);
     const doc = validateDoc(page.draft).doc ?? (await getPublishedPage(scope, store, page.slug).then((p) => (p ? validateDoc(p.doc).doc : null)));
     if (!doc) return notFoundResponse(req);
@@ -353,4 +358,20 @@ export async function servePreview(req: Request, token: string): Promise<Respons
     log("preview failed", err);
     return unavailableResponse(req);
   }
+}
+
+/** The previewed page, in the token's store (another store's page id finds nothing). */
+async function previewPage(scope: StoreScope, pageId: string) {
+  const [page] = await db
+    .select({ id: pages.id, slug: pages.slug, publicKey: pages.publicKey, draft: pages.draft })
+    .from(pages)
+    .where(whereStore(pages, scope, eq(pages.id, pageId)))
+    .limit(1);
+  return page ?? null;
+}
+
+/** The route's handle lookup failed (the database): logged once here, answered as the neutral 503 by serveStoreRoute. */
+export function handleLookupFailed(err: unknown): "error" {
+  log("handle lookup failed", err);
+  return "error";
 }

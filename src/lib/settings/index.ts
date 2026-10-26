@@ -17,6 +17,7 @@ import { audit } from "@/lib/audit";
 import { db } from "@/lib/db/client";
 import { settings, storeSettings } from "@/lib/db/schema";
 import { errorSummary } from "@/lib/orders/log";
+import { invalidateStoreRender } from "@/lib/render/cache.server";
 import { decrypt, encrypt, open, openLegacy, seal } from "@/lib/security/crypto";
 import { scopedCache } from "@/lib/tenancy/cache";
 import { storeValues, whereStore } from "@/lib/tenancy/sql";
@@ -368,8 +369,13 @@ async function writeStoreRow<K extends StoreSettingKey>(exec: Executor, scope: W
 
 const fieldNames = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : []);
 
+/** The store keys the public documents read (legal pages, the "no page yet" home, the render context): CCR r1.0-t3-6. */
+const RENDER_KEYS: ReadonlySet<StoreSettingKey> = new Set<StoreSettingKey>(["store", "brand", "policies", "turnstile", "conversions"]);
+
 async function afterStoreWrite(scope: WriteScope, key: StoreSettingKey, value: unknown, actor: SettingsActor): Promise<void> {
   invalidateStoreSettings(scope.storeId, key);
+  // a seller who completes the store details sees the new legal text at once, not after the 60 s render TTL
+  if (RENDER_KEYS.has(key)) invalidateStoreRender(scope.storeId);
   await audit("store.settings.updated", {
     userId: userIdOf(actor.id),
     target: key,

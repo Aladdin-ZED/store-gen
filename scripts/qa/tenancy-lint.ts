@@ -174,6 +174,12 @@ interface Config {
   testToken: FnRef[];
   /** the public resolvers a /api/public handler passes before any tenant-table call (L13) */
   publicResolvers: FnRef[];
+  /**
+   * L13: platform reads a public handler may make before it knows the store, neither a touch nor a resolution (each
+   * one a `tenancy: platform` query of src/lib/tenancy/public.ts that returns no store's rows: the CORS preflight's
+   * union of export origins, §E.6 / PUB-21). Added at the T3 merge (R1.0 integration).
+   */
+  preResolveReads: FnRef[];
 }
 
 const AllowFile = z
@@ -195,9 +201,18 @@ const REAL_CONFIG = (allow: z.infer<typeof AllowFile>): Config => ({
   ],
   prePublishGates: [{ file: F.prepublish, name: "runPrePublishChecks" }],
   testToken: [{ file: F.publicResolvers, name: "resolveTestToken" }],
-  publicResolvers: ["resolvePublicTarget", "resolveStoreByHandle", "resolveOrderForTracking", "resolveKitShare", "resolveProductKey", "resolveContextKey"].map(
-    (name) => ({ file: F.publicResolvers, name }),
-  ),
+  // resolveUpsellOrder and resolveMediaKey: T3's public-key resolvers (orderId, mediaKey), added at the T3 merge
+  publicResolvers: [
+    "resolvePublicTarget",
+    "resolveStoreByHandle",
+    "resolveOrderForTracking",
+    "resolveKitShare",
+    "resolveProductKey",
+    "resolveContextKey",
+    "resolveUpsellOrder",
+    "resolveMediaKey",
+  ].map((name) => ({ file: F.publicResolvers, name })),
+  preResolveReads: [{ file: F.publicResolvers, name: "listActiveExportOrigins" }],
 });
 
 /* ------------------------------------------------------------------ */
@@ -2304,8 +2319,17 @@ class Lint {
     return result;
   }
 
-  private reachesTenant(fn: FnLike): boolean {
-    return this.reach(fn, "tenant", (f) => this.opsIn(f).length > 0);
+  /** does `fn` reach a tenant-table call, not counting the sanctioned pre-resolution platform reads (L13)? */
+  private reachesTenant(fn: FnLike, seen: Set<FnLike> = new Set()): boolean {
+    const memo = this.reachMemo.get("tenant-l13") ?? new Map<FnLike, boolean>();
+    this.reachMemo.set("tenant-l13", memo);
+    const hit = memo.get(fn);
+    if (hit !== undefined) return hit;
+    if (seen.has(fn) || this.matches(fn, this.cfg.preResolveReads)) return false; // a cycle answers "no" while in progress
+    seen.add(fn);
+    const result = this.opsIn(fn).length > 0 || this.targets(fn).some((t) => this.reachesTenant(t, seen));
+    memo.set(fn, result);
+    return result;
   }
 
   /**
@@ -2327,6 +2351,7 @@ class Lint {
         if (isResolver(ev)) return "resolved";
         if (ops.has(ev)) return ev;
         const t = this.resolveTarget(ev.expression);
+        if (t && this.matches(t, this.cfg.preResolveReads)) continue;
         if (t && this.resolvesFirst(t, key, isResolver)) return "resolved";
         if (t && this.reachesTenant(t)) return ev;
       } else return ev;

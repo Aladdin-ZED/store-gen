@@ -47,26 +47,26 @@ const docs = scopedCache<PageDoc | null>({ name: "version-docs", maxEntries: 64,
 const captcha = scopedCache<boolean>({ name: "version-captcha", maxEntries: 500, ttlMs: 60 * 60_000 });
 const MISS_TTL_MS = 10_000;
 
-async function loadDoc(where: ReturnType<typeof byId>, versionId: string): Promise<PageDoc | null> {
-  const [row] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(where).limit(1);
+async function loadDoc(scope: StoreScope, versionId: string): Promise<PageDoc | null> {
+  const [row] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(byId(pageVersions, scope, versionId)).limit(1);
   return row ? orderDocOf(row.doc, versionId) : null;
+}
+
+/** The single-tenant /admin's store #1 (`LEGACY_STORE_ID`), as a system scope; goes with T4's order detail move. */
+async function legacyScope(): Promise<StoreScope> {
+  const [{ systemCtx, systemScope }, { LEGACY_STORE_ID }] = await Promise.all([import("@/lib/jobs/scope"), import("@/lib/db/store-handles")]);
+  return systemScope(systemCtx("legacy-admin"), LEGACY_STORE_ID);
 }
 
 /** Parsed, validated document of a page version of the scope's store (cached; versions never change). */
 export function versionDoc(scope: StoreScope, versionId: string): Promise<PageDoc | null>;
-/** @deprecated single-tenant (T4's order detail): pass the scope */
+/** @deprecated single-tenant (T4's order detail): store #1's versions only; pass the scope */
 export function versionDoc(versionId: string): Promise<PageDoc | null>;
 export async function versionDoc(...args: [StoreScope, string] | [string]): Promise<PageDoc | null> {
-  if (typeof args[0] === "string") {
-    const versionId = args[0];
-    // tenancy: legacy single-tenant read, removed with its last caller (T4 moves to the scoped form)
-    const [row] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(eq(pageVersions.id, versionId)).limit(1);
-    return row ? orderDocOf(row.doc, versionId) : null;
-  }
-  const [scope, versionId] = args as [StoreScope, string];
+  const [scope, versionId] = typeof args[0] === "string" ? [await legacyScope(), args[0]] : (args as [StoreScope, string]);
   const hit = docs.get(scope.storeId, versionId);
   if (hit !== undefined) return hit;
-  const doc = await loadDoc(byId(pageVersions, scope, versionId), versionId);
+  const doc = await loadDoc(scope, versionId);
   return docs.set(scope.storeId, versionId, doc, doc ? undefined : { ttlMs: MISS_TTL_MS });
 }
 

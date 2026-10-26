@@ -17,8 +17,8 @@ import "server-only";
  * Pixels (docs/OFFERS.md §A.3): the library rule is the pixel library's (T4, per store); the scoped publish runs
  * it through `opts.libraryRule` before rendering (an unknown id → `pixel_not_in_library`), so the rule stays where
  * the library lives. The single-tenant forms (`publishPage(pageId, userId)`, `renderAndCommit(pageId, …)`,
- * `publishTrackingOnly`) keep compiling for today's callers until T4 moves them; their inserts carry no store and
- * are refused by the schema's legacy shim (`store_id is required`).
+ * `publishTrackingOnly`, `storeInfo`, `liveResolverFor`) keep today's /admin working until T4 moves its callers:
+ * since the R1.0 integration they run the scoped path in store #1 (the converted install, §D.8).
  *
  * Published HTML is rendered once at publish time and stored in page_versions (html, thank-you html, both CSPs,
  * etag, checksum); visitors get those bytes with zero React on the server per request.
@@ -33,21 +33,19 @@ import { isGatePath } from "@/lib/auth/gate";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
 import { pages, pageVersions } from "@/lib/db/schema";
-import { getAssetsByIds } from "@/lib/media";
 import type { PageDoc, Tracking } from "@/lib/page/schema";
 import { validateDoc, type DocIssue } from "@/lib/page/validate";
-import { getSetting } from "@/lib/settings";
+import { getStoreSettings } from "@/lib/settings";
 import { STORE_RESERVED_SLUGS } from "@/lib/tenancy/handles";
 import { getStoreById } from "@/lib/tenancy/public";
-import { inStore } from "@/lib/tenancy/sql";
+import { inStore, whereStore } from "@/lib/tenancy/sql";
 import type { Actor, GateItem, StoreRow, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { buildTheme } from "@/lib/theme";
-import { collectAssetIds, liveAssetResolver, liveLinks, type AssetResolver, type StoreInfo } from "@/landing/context";
-import type { DocumentUrls } from "@/landing/document";
-import { invalidatePublished, invalidateStoreRender } from "./cache.server";
+import { collectAssetIds, liveAssetResolver, type AssetResolver, type StoreInfo } from "@/landing/context";
+import { invalidateStoreRender } from "./cache.server";
 import { renderLandingHtml, renderThankYouHtml, type RenderIssue } from "./core";
 import { runPrePublishChecks, runPublishListeners, type AssetMeta, type PrePublishCode, type PrePublishCtx } from "./prepublish";
-import { loadStoreRenderContext, PUBLIC_ENDPOINTS, storeAssetResolver, storeRenderOptions } from "./store-context.server";
+import { loadStoreRenderContext, storeAssetResolver, storeAssetRows, storeInfoOf, storeRenderOptions } from "./store-context.server";
 
 export { invalidatePublished, invalidateStoreRender } from "./cache.server";
 export { PUBLIC_ENDPOINTS } from "./store-context.server";
@@ -531,7 +529,21 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
     });
   if (!committed) return "retry";
   invalidateStoreRender(scope.storeId);
-  await runPublishListeners({ ...gateCtx, versionId, event: "published" });
+  await runPublishListeners({
+    scope,
+    store,
+    pageId: gateCtx.pageId,
+    doc,
+    prev: gateCtx.prev,
+    theme: gateCtx.theme,
+    assets: gateCtx.assets,
+    actor,
+    now: gateCtx.now,
+    mode: gateCtx.mode,
+    html: gateCtx.html,
+    versionId,
+    event: "published",
+  });
   return {
     versionId,
     slug,
@@ -598,15 +610,7 @@ export async function publishPage(...args: [WriteScope, string, ScopedPublishOpt
     return publishInStore(scope, pageId, opts);
   }
   const [pageId, userId, opts = {}] = args as [string, string, PublishOptions?];
-  for (let attempt = 1; ; attempt++) {
-    const res = await publishOnce(pageId, userId, opts.expectedUpdatedAt);
-    if (res !== "retry") return res;
-    // an autosave landed while rendering (unchecked publish): render the newer draft
-    if (attempt >= PUBLISH_ATTEMPTS) {
-      const [row] = await db.select({ updatedAt: pages.updatedAt }).from(pages).where(eq(pages.id, pageId)).limit(1);
-      throw draftChanged(row?.updatedAt.getTime() ?? Date.now());
-    }
-  }
+  return publishLegacy(pageId, userId, opts);
 }
 
 /**
@@ -630,184 +634,50 @@ export async function renderAndCommit(...args: [WriteScope, string, PageDoc, Com
 }
 
 /* ------------------------------------------------------------------ */
-/* Single-tenant path (@deprecated: kept for today's callers, T4)      */
+/* Single-tenant forms (@deprecated: the legacy /admin's store #1, T4)  */
 /* ------------------------------------------------------------------ */
 
-/** Store identity for documents from the legacy global `store` setting. @deprecated store documents: loadStoreRenderContext */
-export async function storeInfo(): Promise<StoreInfo> {
-  const s = await getSetting("store");
-  const socials = Object.fromEntries(Object.entries(s.socials ?? {}).filter((e): e is [string, string] => typeof e[1] === "string" && !!e[1]));
-  return {
-    name: s.storeName,
-    country: s.country,
-    ...(s.legalName ? { legalName: s.legalName } : {}),
-    ...(s.phone ? { phone: s.phone } : {}),
-    ...(s.whatsapp ? { whatsapp: s.whatsapp } : {}),
-    ...(s.email ? { email: s.email } : {}),
-    ...(s.address ? { address: s.address } : {}),
-    ...(s.city ? { city: s.city } : {}),
-    ...(s.ice ? { ice: s.ice } : {}),
-    ...(s.rc ? { rc: s.rc } : {}),
-    ...(s.logo ? { logo: s.logo } : {}),
-    ...(Object.keys(socials).length ? { socials } : {}),
-  };
+/**
+ * The store today's single-tenant /admin edits: store #1 (`LEGACY_STORE_ID`, the converted install, §D.8), as a
+ * system write scope. The deprecated forms below run the scoped path in that store (every predicate carries its
+ * `store_id`, so a page of another store is `not_found`); the user who acts is the audited actor. Loaded lazily:
+ * the scoped path never pays for the jobs seam. Goes when T4 moves the last caller to `/app/<h>` (R1.0).
+ */
+async function legacyScope(): Promise<WriteScope> {
+  const [{ systemCtx, systemScope }, { LEGACY_STORE_ID }] = await Promise.all([import("@/lib/jobs/scope"), import("@/lib/db/store-handles")]);
+  return systemScope(systemCtx("legacy-admin"), LEGACY_STORE_ID);
 }
 
-/** Live asset resolver for every asset the document (and store logo) references. @deprecated unscoped (PUB-07): storeAssetResolver */
-export async function liveResolverFor(doc: PageDoc, store: StoreInfo): Promise<AssetResolver> {
-  const rows = await getAssetsByIds(collectAssetIds(doc, [store.logo]));
-  return liveAssetResolver(rows);
-}
+/** The legacy publish's library rule (the pixel library of today's /admin decides per user). */
+const legacyRule = (userId: string) => (tracking: Tracking) => enforceLibraryRule(tracking, userId);
 
-/** Turnstile site key to embed: only when a secret is configured too (the order API verifies tokens). */
-async function turnstileSiteKey(): Promise<string | undefined> {
-  const t = await getSetting("turnstile");
-  return t.siteKey && t.secretKey ? t.siteKey : undefined;
-}
-
-async function publishOnce(pageId: string, userId: string, expectedUpdatedAt: number | undefined): Promise<PublishResult | "retry"> {
-  const [page] = await db
-    .select({ id: pages.id, slug: pages.slug, draft: pages.draft, updatedAt: pages.updatedAt })
-    .from(pages)
-    .where(eq(pages.id, pageId))
-    .limit(1);
-  if (!page) throw notFound();
-  const readStamp = page.updatedAt.getTime();
-  // cheap early answer: no rendering for a draft the caller has not seen
-  if (expectedUpdatedAt !== undefined && readStamp !== expectedUpdatedAt) throw draftChanged(readStamp);
-  if (!isServableSlug(page.slug)) throw reservedSlug(page.slug);
-
-  const { doc, issues } = validateDoc(page.draft);
-  if (!doc) throw new PublishError("invalid", "The page has errors that must be fixed before publishing.", issues);
-  await asPublishError(() => enforceLibraryRule(doc.tracking, userId));
-  const before = await liveIds(page.id);
-
-  const res = await commitLegacy(page.id, doc, {
-    kind: "publish",
-    label: null,
-    userId,
-    draft: { readStamp, slug: page.slug, strict: expectedUpdatedAt !== undefined },
-  });
-  if (res === "retry") return "retry";
-  await audit("page.published", {
-    userId,
-    target: page.id,
-    meta: { versionId: res.versionId, slug: res.slug, warnings: issues.length, failedSections: res.renderIssues.map((i) => i.sectionId), turnstile: res.turnstile },
-  });
-  await auditPixels(page.id, userId, doc.tracking, before, "publish");
-  return { versionId: res.versionId, pageId: page.id, slug: res.slug, etag: res.etag, publishedAt: res.publishedAt, issues, renderIssues: res.renderIssues };
+async function publishLegacy(pageId: string, userId: string, opts: PublishOptions): Promise<PublishResult> {
+  return publishInStore(await legacyScope(), pageId, { actor: userActor(userId), expectedUpdatedAt: opts.expectedUpdatedAt, libraryRule: legacyRule(userId) });
 }
 
 async function commitLegacy(pageId: string, doc: PageDoc, opts: CommitOptions): Promise<CommitResult | "retry"> {
-  const [page] = await db.select({ id: pages.id, slug: pages.slug, publicKey: pages.publicKey }).from(pages).where(eq(pages.id, pageId)).limit(1);
-  if (!page) throw notFound();
-  const slug = opts.draft?.slug ?? page.slug;
-  if (!isServableSlug(slug)) throw reservedSlug(slug);
-
-  const [store, siteKey] = await Promise.all([storeInfo(), turnstileSiteKey()]);
-  const assets = await liveResolverFor(doc, store);
-  const urls: DocumentUrls = { landing: landingPath(slug), thankYou: thankYouPath(slug), endpoints: PUBLIC_ENDPOINTS };
-  const renderOpts = {
-    mode: "live" as const,
-    assets,
-    pageKey: page.publicKey,
-    store,
-    urls,
-    links: liveLinks(slug),
-    origin: publicOrigin(),
-    turnstileSiteKey: siteKey,
-  };
-  // the version id is known before rendering: #lp-config carries it as `ver` (§G.1)
-  const versionId = newId();
-  const landing = await renderLandingHtml(doc, { ...renderOpts, ver: versionId });
-  if (landing.blocking.length) throw blockingError(landing.blocking);
-  const thanks = await renderThankYouHtml(doc, renderOpts);
-  const runtimeV = landing.runtimeV ?? 1;
-  const heaviest = heaviestStatement(doc, landing, thanks);
-  const packetLimit = await maxPacket();
-  if (packetLimit && heaviest > packetLimit) throw tooHeavy(heaviest, packetLimit);
-
-  let publishedAt = new Date();
-  const committed = await db
-    .transaction(async (tx) => {
-      const [locked] = await tx
-        .select({ updatedAt: pages.updatedAt, slug: pages.slug, publishedVersionId: pages.publishedVersionId })
-        .from(pages)
-        .where(eq(pages.id, page.id))
-        .limit(1)
-        .for("update");
-      if (!locked) throw notFound();
-      if (locked.slug !== slug) {
-        if (opts.draft?.strict) throw draftChanged(locked.updatedAt.getTime());
-        return false;
-      }
-      if (opts.draft) {
-        const stamp = locked.updatedAt.getTime();
-        if (stamp !== opts.draft.readStamp) {
-          if (opts.draft.strict) throw draftChanged(stamp);
-          return false;
-        }
-        publishedAt = new Date(Math.max(publishedAt.getTime(), stamp + 1));
-      }
-      if (opts.baseVersionId !== undefined && locked.publishedVersionId !== opts.baseVersionId) {
-        throw new PublishError("live_changed", "The live page changed meanwhile. Reload, then try again.");
-      }
-      await tx.insert(pageVersions).values({
-        id: versionId,
-        pageId: page.id,
-        kind: opts.kind,
-        label: opts.label,
-        doc,
-        csp: landing.csp,
-        thankYouCsp: thanks.csp,
-        etag: landing.etag,
-        checksum: sha256hex(JSON.stringify(doc)),
-        runtimeV,
-        createdBy: opts.userId,
-        createdAt: publishedAt,
-      });
-      await tx.update(pageVersions).set({ html: landing.html }).where(eq(pageVersions.id, versionId));
-      await tx.update(pageVersions).set({ thankYouHtml: thanks.html }).where(eq(pageVersions.id, versionId));
-      await tx
-        .update(pages)
-        .set({
-          publishedVersionId: versionId,
-          status: "published",
-          locale: doc.locale,
-          firstPublishedAt: firstPublishedAt(publishedAt),
-          ...(opts.draft ? { updatedAt: publishedAt } : {}),
-        })
-        .where(eq(pages.id, page.id));
-      return true;
-    })
-    .catch((err: unknown) => {
-      const why = packetError(err);
-      if (why === "packet" || (why === "reset" && heaviest > (packetLimit ?? 1024 * 1024))) throw tooHeavy(heaviest, packetLimit);
-      throw err;
-    });
-  if (!committed) return "retry";
-  invalidatePublished();
-  return { versionId, slug, etag: landing.etag, publishedAt, renderIssues: landing.issues, runtimeV, turnstile: !!siteKey };
+  return commitInStore(await legacyScope(), pageId, doc, opts);
 }
 
-/** The live version's pixel ids (null when the page isn't live). */
-async function liveIds(pageId: string): Promise<Tracking | null> {
-  const [row] = await db
-    .select({ doc: pageVersions.doc, status: pages.status })
-    .from(pages)
-    .innerJoin(pageVersions, eq(pageVersions.id, pages.publishedVersionId))
-    .where(eq(pages.id, pageId))
-    .limit(1);
-  if (!row || row.status !== "published") return null;
-  return idsOnly((row.doc as { tracking?: Record<string, unknown> } | null)?.tracking ?? null);
+/**
+ * Store identity for documents: store #1's row and its `store` / `brand` settings (the legacy global `store` setting
+ * moved there at the conversion). An install without store #1 yet gets an empty identity.
+ * @deprecated store documents: loadStoreRenderContext
+ */
+export async function storeInfo(): Promise<StoreInfo> {
+  const scope = await legacyScope();
+  const store = await getStoreById(scope.storeId);
+  const s = await getStoreSettings(scope, ["store", "brand"] as const);
+  return store ? storeInfoOf(store, s) : { name: "", country: s.store.country };
 }
 
-/** audit("page.pixels_changed") when the live ids changed; refreshes the usage cache. */
-async function auditPixels(pageId: string, userId: string, next: Tracking, before: Tracking | null, mode: "publish" | "pixels_only"): Promise<void> {
-  invalidatePixelUsage();
-  const diff = trackingDiff(next, before);
-  if (!diff.added.length && !diff.removed.length) return;
-  await audit("page.pixels_changed", { userId, target: pageId, meta: { added: masked(diff.added), removed: masked(diff.removed), mode } });
+/**
+ * Live asset resolver for every asset the document (and store logo) references, among store #1's assets.
+ * @deprecated unscoped callers (PUB-07): storeAssetResolver
+ */
+export async function liveResolverFor(doc: PageDoc, store: StoreInfo): Promise<AssetResolver> {
+  const rows = await storeAssetRows(await legacyScope(), collectAssetIds(doc, [store.logo]));
+  return liveAssetResolver(rows);
 }
 
 export interface TrackingOnlyResult {
@@ -828,7 +698,8 @@ export interface TrackingOnlyResult {
  * "Pixels only" — the page row locked and checked against `baseVersionId` (PublishError
  * "live_changed"), never against the draft stamp. Then the draft's tracking is patched
  * (compare-and-swap, 3 attempts) unless it already matches. Open tabs keep ordering against the
- * previous version through the 72 h rule. @deprecated single-tenant; T4 rebuilds it on renderAndCommit(scope, …).
+ * previous version through the 72 h rule. Runs in store #1 (the legacy /admin).
+ * @deprecated single-tenant; T4 rebuilds it on renderAndCommit(scope, …).
  */
 export async function publishTrackingOnly(
   pageId: string,
@@ -838,11 +709,23 @@ export async function publishTrackingOnly(
   /** patchDraft false: the caller already patched the draft (Replace on pages…) */
   opts: { patchDraft?: boolean } = {},
 ): Promise<TrackingOnlyResult> {
+  return trackingOnlyInStore(await legacyScope(), pageId, userId, tracking, baseVersionId, opts);
+}
+
+async function trackingOnlyInStore(
+  scope: WriteScope,
+  pageId: string,
+  userId: string,
+  tracking: Tracking,
+  baseVersionId: string,
+  opts: { patchDraft?: boolean },
+): Promise<TrackingOnlyResult> {
+  const actor = userActor(userId);
   const [row] = await db
     .select({ status: pages.status, publishedVersionId: pages.publishedVersionId, doc: pageVersions.doc })
     .from(pages)
-    .leftJoin(pageVersions, eq(pageVersions.id, pages.publishedVersionId))
-    .where(eq(pages.id, pageId))
+    .leftJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
+    .where(whereStore(pages, scope, eq(pages.id, pageId)))
     .limit(1);
   if (!row) throw notFound();
   if (row.status !== "published" || !row.publishedVersionId || !row.doc) throw new PublishError("not_live", "This page isn't live. Publish it first.");
@@ -857,17 +740,21 @@ export async function publishTrackingOnly(
   await asPublishError(() => enforceLibraryRule(doc.tracking, userId));
   const before = idsOnly(liveDoc.tracking);
 
-  const res = await commitLegacy(pageId, doc, { kind: "publish", label: "Pixels only", userId, baseVersionId });
+  const res = await commitInStore(scope, pageId, doc, { kind: "publish", label: "Pixels only", userId, actor, baseVersionId });
   if (res === "retry") throw new PublishError("live_changed", "The live page changed meanwhile. Reload, then try again.");
-  await audit("page.published", { userId, target: pageId, meta: { versionId: res.versionId, slug: res.slug, pixelsOnly: true } });
-  await auditPixels(pageId, userId, doc.tracking, before, "pixels_only");
+  await audit("page.published", { userId, target: pageId, meta: { versionId: res.versionId, slug: res.slug, pixelsOnly: true }, scope: auditScope(scope, actor) });
+  await auditPixelsInStore(scope, actor, pageId, doc.tracking, before, "pixels_only");
 
   // the draft follows (compare-and-swap on its stamp; an editor saving meanwhile keeps its own)
   let draftUpdated = false;
   let draftConflict = false;
   let draftUpdatedAt: number | null = null;
   for (let attempt = 0; opts.patchDraft !== false && attempt < 3; attempt++) {
-    const [d] = await db.select({ draft: pages.draft, updatedAt: pages.updatedAt }).from(pages).where(eq(pages.id, pageId)).limit(1);
+    const [d] = await db
+      .select({ draft: pages.draft, updatedAt: pages.updatedAt })
+      .from(pages)
+      .where(whereStore(pages, scope, eq(pages.id, pageId)))
+      .limit(1);
     if (!d || !d.draft || typeof d.draft !== "object") break;
     const current = (d.draft as { tracking?: Record<string, unknown> }).tracking ?? {};
     if (sameIds(current, doc.tracking) && !!current.none === !!doc.tracking.none) break;
@@ -876,7 +763,7 @@ export async function publishTrackingOnly(
     const upd = await db
       .update(pages)
       .set({ draft: nextDraft, updatedAt: stamp })
-      .where(and(eq(pages.id, pageId), eq(pages.updatedAt, d.updatedAt)));
+      .where(whereStore(pages, scope, eq(pages.id, pageId), eq(pages.updatedAt, d.updatedAt)));
     if (affected(upd) === 1) {
       draftUpdated = true;
       draftUpdatedAt = stamp.getTime();

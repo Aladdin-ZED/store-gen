@@ -18,8 +18,8 @@ import { db } from "@/lib/db/client";
 import { pages, pageSlugHistory, pageVersions, storeSettings } from "@/lib/db/schema";
 import type { PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
-import { inStore } from "@/lib/tenancy/sql";
-import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
+import { inStore, whereStore } from "@/lib/tenancy/sql";
+import type { StoreRow, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { storePageLinks, type LegalKind } from "@/landing/context";
 import { cacheGet, cacheSet } from "./cache.server";
 import { renderLegalHtml, type RenderedHtml } from "./core";
@@ -67,7 +67,7 @@ async function loadPublished(scope: StoreScope, where: SQL): Promise<PublishedPa
     })
     .from(pages)
     .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
-    .where(and(inStore(pages, scope), where, eq(pages.status, "published")))
+    .where(whereStore(pages, scope, where, eq(pages.status, "published")))
     .limit(1);
   if (!row || !row.html || !row.csp || !row.etag || !row.thankYouHtml || !row.thankYouCsp) return null;
   return {
@@ -134,12 +134,12 @@ export async function slugHistoryTarget(scope: StoreScope, store: StoreRow, slug
 }
 
 /** Counts one redirect through an old slug (LAN-§15.1 "hits are counted like link clicks"); never throws. */
-export async function countSlugHit(scope: StoreScope, slug: string): Promise<void> {
+export async function countSlugHit(scope: WriteScope, slug: string): Promise<void> {
   try {
     await db
       .update(pageSlugHistory)
       .set({ hits: sql`${pageSlugHistory.hits} + 1` })
-      .where(and(inStore(pageSlugHistory, scope), eq(pageSlugHistory.slug, slug)));
+      .where(whereStore(pageSlugHistory, scope, eq(pageSlugHistory.slug, slug)));
   } catch {
     // a lost hit is not worth a failed redirect
   }

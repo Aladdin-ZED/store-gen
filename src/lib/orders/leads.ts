@@ -22,12 +22,11 @@ import { leads, orders } from "@/lib/db/schema";
 import { findCity, getMarket } from "@/lib/markets";
 import { normalizePhone } from "@/lib/markets/phone";
 import { hashIp } from "@/lib/security/crypto";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import type { PublicPageTarget } from "@/lib/tenancy/public";
 import { storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { WriteScope } from "@/lib/tenancy/types";
 import type { LeadPayload, UnitIn } from "./contract";
-import { storeBucketKey } from "./create";
 import { orderVersion } from "./resolve";
 import { leadSelectionText } from "./lead-text";
 import { cleanInput, validName } from "./validate";
@@ -48,7 +47,7 @@ export function upsertLead(payload: Lead, ctx: UpsertLeadContext): Promise<{ sto
 
 async function storeLead(scope: WriteScope, payload: Lead, ctx: UpsertLeadContext): Promise<{ stored: boolean }> {
   const { target } = ctx;
-  const gate = await rateLimit(storeBucketKey(scope, "lead:ip", hashIp(ctx.ip)), 30, 600);
+  const gate = await rateLimit(storeBucket(scope, "lead:ip", hashIp(ctx.ip)), 30, 600);
   if (!gate.ok) return { stored: false };
 
   const { doc } = target;

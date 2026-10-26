@@ -185,6 +185,10 @@ store #1 conversion. The first boot of this tree on a database with data migrate
 then: do not start the 3450 dev server on a database with real data (use a copy), and do not deploy main to Hostinger.
 The tenancy dry run (`scripts/qa/upgrade-dry-run.ts`) reports leftover legacy keys once the marker exists.
 
+**Domain move checklist (R1, RESEARCH §5.2 / STORE-SAAS §C.10):** after "Worker + secret + route", add the Cloudflare
+route exclusion `console.<domain>/*` with Worker **None** (the console never runs through `edge/worker.js`, CCR
+r1.0-t3-8), and run V3 with its cache check (CCR r1.0-t3-9) before sign-ups open.
+
 Suggested next engineering items:
 - Show "Sent to Meta ✓ / skipped (risk N)" per order in the admin order drawer.
 - Don't write a kept default no-cost extra ("Sans emballage") into the Sheets Variante or thank-you text.

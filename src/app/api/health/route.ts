@@ -20,7 +20,7 @@ async function serve(req: NextRequest): Promise<Response> {
   headers.set("Content-Type", "application/json; charset=utf-8");
   headers.set("X-Robots-Tag", "noindex, nofollow");
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
-  const gate = burstLimit("event", clientIp(req.headers));
+  const gate = burstLimit("health", clientIp(req.headers));
   if (!gate.ok) {
     headers.set("Retry-After", String(gate.retryAfter));
     return new Response(req.method === "HEAD" ? null : JSON.stringify({ ok: false, error: "rate_limited" }), { status: 429, headers });

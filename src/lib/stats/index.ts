@@ -9,7 +9,7 @@ import "server-only";
  * (`stores.timezone`; STAT-01), so "today" on a store's dashboard is its sellers' today. Test traffic never
  * reaches them (D54: the test render omits the event endpoint, test orders skip bumpOrderStats). The network
  * flood guard stays platform-wide (`p:evt:ip:<net>`); the unique-visitor credit is per page and network. The
- * single-tenant forms (APP_TIMEZONE days, no store) keep compiling for today's callers until they move.
+ * single-tenant `getPageStats(range)` / `deletePageStats(pageId)` read store #1 for today's /admin until T4 moves it.
  */
 import { createHash } from "node:crypto";
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
@@ -19,9 +19,9 @@ import { pages, statsDaily, statsVisitors } from "@/lib/db/schema";
 import type { z } from "zod";
 import type { EventPayload } from "@/lib/orders/contract";
 import { hashIp } from "@/lib/security/crypto";
-import { rateLimit, rateLimitReached } from "@/lib/security/rate-limit";
+import { platformBucket, rateLimit, rateLimitReached, storeBucket } from "@/lib/security/rate-limit";
 import { getStoreById } from "@/lib/tenancy/public";
-import { inStore } from "@/lib/tenancy/sql";
+import { storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 
 /** The single-tenant day zone (APP_TIMEZONE); store days use the store's own timezone (storeTimeZone). */
@@ -66,11 +66,11 @@ async function markOnce(pageId: string, day: string, hash: string): Promise<bool
   return res.affectedRows === 1;
 }
 
-async function bump(pageId: string, day: string, d: { views?: number; uniques?: number; formStarts?: number; orders?: number; revenue?: number }, storeId?: string) {
+async function bump(scope: WriteScope, pageId: string, day: string, d: { views?: number; uniques?: number; formStarts?: number; orders?: number; revenue?: number }) {
   const v = { views: 0, uniques: 0, formStarts: 0, orders: 0, revenue: 0, ...d };
   await db
     .insert(statsDaily)
-    .values({ pageId, day, views: v.views, uniques: v.uniques, formStarts: v.formStarts, orders: v.orders, revenue: v.revenue, ...(storeId ? { storeId } : {}) })
+    .values(storeValues(scope, { pageId, day, views: v.views, uniques: v.uniques, formStarts: v.formStarts, orders: v.orders, revenue: v.revenue }))
     .onDuplicateKeyUpdate({
       set: {
         views: sql`${statsDaily.views} + ${v.views}`,
@@ -102,20 +102,21 @@ type StatsEvent = Pick<z.output<typeof EventPayload>, "type" | "vid">;
 async function recordInStore(scope: WriteScope, pageId: string, e: StatsEvent, ip: string, now: Date): Promise<void> {
   if (e.type !== "view" && e.type !== "form_start") return;
   const net = hashIp(ip);
-  const gate = await rateLimit(`p:evt:ip:${net}`, EVENT_LIMIT, 600);
+  const gate = await rateLimit(platformBucket("evt:ip", net), EVENT_LIMIT, 600);
   if (!gate.ok) return;
   const day = dayKey(now, await storeTimeZone(scope));
   const credit = async (kind: "v:" | "fs:"): Promise<boolean> => {
-    const bucket = `s:${scope.storeId}:evt:uniq:${kind}${pageId}:${net}`;
+    // s:<storeId>:evt:uniq:<v|fs>:<pageId>.<net> (§E.8): the credit is per page and network, in the page's store
+    const bucket = storeBucket(scope, kind === "v:" ? "evt:uniq:v" : "evt:uniq:fs", `${pageId}.${net}`);
     if (await rateLimitReached(bucket, UNIQUES_PER_NETWORK)) return false;
     if (!(await markOnce(pageId, day, vidHash(kind, e.vid)))) return false;
     return (await rateLimit(bucket, UNIQUES_PER_NETWORK, 86_400)).ok;
   };
   if (e.type === "view") {
     const unique = await credit("v:");
-    await bump(pageId, day, { views: 1, uniques: unique ? 1 : 0 }, scope.storeId);
+    await bump(scope, pageId, day, { views: 1, uniques: unique ? 1 : 0 });
   } else if (await credit("fs:")) {
-    await bump(pageId, day, { formStarts: 1 }, scope.storeId);
+    await bump(scope, pageId, day, { formStarts: 1 });
   }
 }
 
@@ -123,52 +124,17 @@ async function recordInStore(scope: WriteScope, pageId: string, e: StatsEvent, i
  * Count an analytics beacon for a page resolved in the scope's store (resolvePublicTarget). "view" → views (+ a
  * unique visitor), "form_start" → unique form starts per visitor and day. Other event types are not stored.
  */
-export function recordEvent(scope: WriteScope, pageId: string, e: StatsEvent, ip: string, now?: Date): Promise<void>;
-/** @deprecated single-tenant; T3 moves the event route to the scoped overload */
-export function recordEvent(pageId: string, e: StatsEvent, ip: string): Promise<void>;
-export async function recordEvent(...args: [WriteScope, string, StatsEvent, string, Date?] | [string, StatsEvent, string]): Promise<void> {
-  if (typeof args[0] !== "string") {
-    const [scope, pageId, e, ip, now] = args as [WriteScope, string, StatsEvent, string, Date?];
-    return recordInStore(scope, pageId, e, ip, now ?? new Date());
-  }
-  const [pageId, e, ip] = args as [string, StatsEvent, string];
-  if (e.type !== "view" && e.type !== "form_start") return;
-  const net = hashIp(ip);
-  const gate = await rateLimit(`evt:ip:${net}`, EVENT_LIMIT, 600);
-  if (!gate.ok) return;
-  const day = dayKey();
-  const credit = async (scope: "v:" | "fs:"): Promise<boolean> => {
-    const bucket = `evt:uniq:${scope}${pageId}:${net}`;
-    if (await rateLimitReached(bucket, UNIQUES_PER_NETWORK)) return false;
-    if (!(await markOnce(pageId, day, vidHash(scope, e.vid)))) return false;
-    return (await rateLimit(bucket, UNIQUES_PER_NETWORK, 86_400)).ok;
-  };
-  if (e.type === "view") {
-    const unique = await credit("v:");
-    await bump(pageId, day, { views: 1, uniques: unique ? 1 : 0 });
-  } else if (await credit("fs:")) {
-    await bump(pageId, day, { formStarts: 1 });
-  }
+export async function recordEvent(scope: WriteScope, pageId: string, e: StatsEvent, ip: string, now?: Date): Promise<void> {
+  return recordInStore(scope, pageId, e, ip, now ?? new Date());
 }
 
 /**
  * Orders / revenue counters of a page in the scope's store, on the store's day of `at` (order creation, upsell
  * acceptance; never for a test order, D54). `revenue` in the order currency's units, rounded to cents.
  */
-export function bumpOrderStats(scope: WriteScope, pageId: string, at: Date, d: { orders?: number; revenue?: number }): Promise<void>;
-/** @deprecated single-tenant; T3 moves the order and upsell paths to the scoped overload */
-export function bumpOrderStats(pageId: string, at: Date, d: { orders?: number; revenue?: number }): Promise<void>;
-export async function bumpOrderStats(
-  ...args: [WriteScope, string, Date, { orders?: number; revenue?: number }] | [string, Date, { orders?: number; revenue?: number }]
-): Promise<void> {
-  if (typeof args[0] !== "string") {
-    const [scope, pageId, at, d] = args as [WriteScope, string, Date, { orders?: number; revenue?: number }];
-    const day = dayKey(at, await storeTimeZone(scope));
-    await bump(pageId, day, { orders: d.orders ?? 0, revenue: Math.round((d.revenue ?? 0) * 100) / 100 }, scope.storeId);
-    return;
-  }
-  const [pageId, at, d] = args as [string, Date, { orders?: number; revenue?: number }];
-  await bump(pageId, dayKey(at), { orders: d.orders ?? 0, revenue: Math.round((d.revenue ?? 0) * 100) / 100 });
+export async function bumpOrderStats(scope: WriteScope, pageId: string, at: Date, d: { orders?: number; revenue?: number }): Promise<void> {
+  const day = dayKey(at, await storeTimeZone(scope));
+  await bump(scope, pageId, day, { orders: d.orders ?? 0, revenue: Math.round((d.revenue ?? 0) * 100) / 100 });
 }
 
 /**
@@ -229,21 +195,23 @@ export function getPageStats(range: { from: string; to: string }, opts?: { pageI
 export async function getPageStats(
   ...args: [StoreScope, { from: string; to: string }, { pageIds?: string[] }?] | [{ from: string; to: string }, { pageIds?: string[] }?]
 ): Promise<PageStats> {
-  // STAT-02: the scoped form never aggregates another store's rows (the days are the store's own calendar days)
-  const scoped = "storeId" in args[0];
-  const scope = scoped ? (args[0] as StoreScope) : null;
-  const [range, opts = {}] = (scoped ? args.slice(1) : args) as [{ from: string; to: string }, { pageIds?: string[] }?];
+  if ("storeId" in args[0]) {
+    const [scope, range, opts] = args as [StoreScope, { from: string; to: string }, { pageIds?: string[] }?];
+    return statsInStore(scope, range, opts ?? {});
+  }
+  // the single-tenant /admin's dashboard: store #1 (the converted install, §D.8)
+  const [range, opts] = args as [{ from: string; to: string }, { pageIds?: string[] }?];
+  return statsInStore(await legacyScope(), range, opts ?? {});
+}
+
+/** STAT-02: never aggregates another store's rows (the days are the store's own calendar days). */
+async function statsInStore(scope: StoreScope, range: { from: string; to: string }, opts: { pageIds?: string[] }): Promise<PageStats> {
   let { from, to } = range;
   if (!DAY_RE.test(from) || !DAY_RE.test(to)) throw new Error("invalid stats range");
   if (from > to) [from, to] = [to, from];
   if (addDays(from, 366) < to) from = addDays(to, -366);
 
-  const where = and(
-    scope ? inStore(statsDaily, scope) : undefined,
-    gte(statsDaily.day, from),
-    lte(statsDaily.day, to),
-    opts.pageIds?.length ? inArray(statsDaily.pageId, opts.pageIds) : undefined,
-  );
+  const where = whereStore(statsDaily, scope, gte(statsDaily.day, from), lte(statsDaily.day, to), opts.pageIds?.length ? inArray(statsDaily.pageId, opts.pageIds) : undefined);
   const sums = {
     views: sql<number>`COALESCE(SUM(${statsDaily.views}), 0)`,
     uniques: sql<number>`COALESCE(SUM(${statsDaily.uniques}), 0)`,
@@ -256,7 +224,7 @@ export async function getPageStats(
     db
       .select({ pageId: statsDaily.pageId, name: pages.name, slug: pages.slug, ...sums })
       .from(statsDaily)
-      .leftJoin(pages, scope ? and(eq(pages.id, statsDaily.pageId), eq(pages.storeId, statsDaily.storeId)) : eq(pages.id, statsDaily.pageId))
+      .leftJoin(pages, and(eq(pages.id, statsDaily.pageId), eq(pages.storeId, statsDaily.storeId)))
       .where(where)
       .groupBy(statsDaily.pageId, pages.name, pages.slug),
   ]);
@@ -291,17 +259,28 @@ export function deletePageStats(pageId: string): Promise<void>;
 export async function deletePageStats(...args: [WriteScope, string] | [string]): Promise<void> {
   if (typeof args[0] !== "string") {
     const [scope, pageId] = args as [WriteScope, string];
-    // the markers carry no store: they go only when the page's counters were the scope's (a page id is global)
-    const [own] = await db
-      .select({ pageId: pages.id })
-      .from(pages)
-      .where(and(inStore(pages, scope), eq(pages.id, pageId)))
-      .limit(1);
-    await db.delete(statsDaily).where(and(inStore(statsDaily, scope), eq(statsDaily.pageId, pageId)));
-    if (own) await db.delete(statsVisitors).where(eq(statsVisitors.pageId, pageId));
-    return;
+    return deleteStatsInStore(scope, pageId);
   }
-  const [pageId] = args as [string];
-  await db.delete(statsVisitors).where(eq(statsVisitors.pageId, pageId));
-  await db.delete(statsDaily).where(eq(statsDaily.pageId, pageId));
+  // the single-tenant /admin's page deletion: store #1 (the converted install, §D.8)
+  return deleteStatsInStore(await legacyScope(), args[0]);
+}
+
+async function deleteStatsInStore(scope: WriteScope, pageId: string): Promise<void> {
+  // the markers carry no store: they go only when the page's counters were the scope's (a page id is global)
+  const [own] = await db
+    .select({ pageId: pages.id })
+    .from(pages)
+    .where(whereStore(pages, scope, eq(pages.id, pageId)))
+    .limit(1);
+  await db.delete(statsDaily).where(whereStore(statsDaily, scope, eq(statsDaily.pageId, pageId)));
+  if (own) await db.delete(statsVisitors).where(eq(statsVisitors.pageId, pageId));
+}
+
+/**
+ * The store today's single-tenant /admin reads: store #1 (`LEGACY_STORE_ID`), as a system scope. Loaded lazily (the
+ * scoped forms never pay for the jobs seam); goes when T4 moves the dashboard and the page deletion (R1.0).
+ */
+async function legacyScope(): Promise<WriteScope> {
+  const [{ systemCtx, systemScope }, { LEGACY_STORE_ID }] = await Promise.all([import("@/lib/jobs/scope"), import("@/lib/db/store-handles")]);
+  return systemScope(systemCtx("legacy-admin"), LEGACY_STORE_ID);
 }

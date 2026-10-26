@@ -22,6 +22,8 @@
 import Module from "node:module";
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { byId, storeValues, whereStore } from "@/lib/tenancy/sql"; // framework-free: no server-only, no connection
+import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 
 // run outside Next: `server-only` resolves to its empty build (the renderer needs the plain React builds, so the
 // react-server condition is not an option), every other module as in the app
@@ -409,7 +411,19 @@ async function database(): Promise<void> {
   const { mintScope } = await import("@/lib/tenancy/seam");
   const { db } = await import("@/lib/db/client");
   const schema = await import("@/lib/db/schema");
-  const { eq, and } = await import("drizzle-orm");
+  const { eq } = await import("drizzle-orm");
+  // the suite's own reads and fixture writes go through the store predicate like the app's (lint L1-L3)
+  const pageRow = async (scope: StoreScope, id: string) => (await db.select().from(schema.pages).where(byId(schema.pages, scope, id)).limit(1))[0];
+  const slugHits = async (scope: StoreScope, slug: string) =>
+    (await db.select({ hits: schema.pageSlugHistory.hits }).from(schema.pageSlugHistory).where(whereStore(schema.pageSlugHistory, scope, eq(schema.pageSlugHistory.slug, slug))).limit(1))[0]?.hits;
+  const statsRows = async (scope: StoreScope) => db.select().from(schema.statsDaily).where(whereStore(schema.statsDaily, scope));
+  const versionRow = async (scope: StoreScope, id: string) => (await db.select({ storeId: schema.pageVersions.storeId }).from(schema.pageVersions).where(byId(schema.pageVersions, scope, id)).limit(1))[0];
+  const setFirstPublished = async (scope: WriteScope, id: string, value: ReturnType<typeof import("./publish.server").firstPublishedAt> | null) =>
+    db.update(schema.pages).set({ firstPublishedAt: value }).where(byId(schema.pages, scope, id));
+  const auditRow = async (scope: StoreScope, action: string, target: string) =>
+    (await db.select().from(schema.auditLog).where(whereStore(schema.auditLog, scope, eq(schema.auditLog.action, action), eq(schema.auditLog.target, target))).limit(1))[0];
+  const insertToken = async (scope: WriteScope, values: { id: string; pageId: string; audience: "seller"; expiresAt: Date }) => db.insert(schema.previewTokens).values(storeValues(scope, values));
+  const tokenRow = async (scope: StoreScope, id: string) => (await db.select().from(schema.previewTokens).where(byId(schema.previewTokens, scope, id)).limit(1))[0];
   const deferredTasks: (() => Promise<void>)[] = [];
   const serve = (url: string, route: import("./store-routes.server").StoreRoute, handle: string, headers?: Record<string, string>) =>
     routes.serveStoreRoute(req(url, headers), handle, route, { defer: (t) => deferredTasks.push(t) });
@@ -478,8 +492,7 @@ async function database(): Promise<void> {
     const ty = await serve(`${P}/s/atlas-argan/huile/merci`, { page: "thanks", slug: "huile" }, "atlas-argan");
     assert.equal(ty.headers.get("location"), "/s/atlas-argan/argan/merci");
     for (const t of deferredTasks.splice(0)) await t();
-    const [row] = await db.select({ hits: schema.pageSlugHistory.hits }).from(schema.pageSlugHistory).where(and(eq(schema.pageSlugHistory.storeId, s.A), eq(schema.pageSlugHistory.slug, "huile")));
-    assert.equal(row?.hits, 2);
+    assert.equal(await slugHits(mintScope("public", s.A), "huile"), 2);
     assert.equal((await serve(`${P}/s/baraka-home/huile`, { page: "landing", slug: "huile" }, "baraka-home")).status, 404);
     assert.equal((await serve(`${P}/s/atlas-argan/vieux`, { page: "landing", slug: "vieux" }, "atlas-argan")).status, 404);
   });
@@ -633,9 +646,10 @@ async function database(): Promise<void> {
     const at = new Date(Date.UTC(2026, 9, 24, 23, 30));
     await stats.recordEvent(scopeA, s.pageA, { type: "view", vid: "v-1234567890" }, "203.0.113.7", at);
     await stats.bumpOrderStats(scopeB, s.pageB, at, { orders: 1, revenue: 199 });
-    const rows = await db.select().from(schema.statsDaily);
-    const ra = rows.find((r) => r.pageId === s.pageA);
-    const rb = rows.find((r) => r.pageId === s.pageB);
+    const [rowsA, rowsB] = await Promise.all([statsRows(scopeA), statsRows(scopeB)]);
+    const ra = rowsA.find((r) => r.pageId === s.pageA);
+    const rb = rowsB.find((r) => r.pageId === s.pageB);
+    assert.ok(!rowsB.some((r) => r.pageId === s.pageA) && !rowsA.some((r) => r.pageId === s.pageB), "each page's counters only in its own store");
     assert.equal(ra?.storeId, s.A);
     assert.equal(String(ra?.day).slice(0, 10), "2026-10-25");
     assert.equal(ra?.views, 1);
@@ -667,17 +681,17 @@ async function database(): Promise<void> {
     let message: string | null = null;
     try {
       const res = await publishPage(mintScope("member", s.A), s.pageADraft, { actor });
-      const [row] = await db.select().from(schema.pages).where(eq(schema.pages.id, s.pageADraft));
+      const row = await pageRow(mintScope("member", s.A), s.pageADraft);
       assert.equal(row?.status, "published");
       assert.equal(row?.publishedVersionId, res.versionId);
       assert.ok(row?.firstPublishedAt, "first_published_at set");
       const first = row!.firstPublishedAt!.getTime();
       const again = await publishPage(mintScope("member", s.A), s.pageADraft, { actor });
-      const [row2] = await db.select().from(schema.pages).where(eq(schema.pages.id, s.pageADraft));
+      const row2 = await pageRow(mintScope("member", s.A), s.pageADraft);
       assert.equal(row2?.publishedVersionId, again.versionId);
       assert.equal(row2?.firstPublishedAt?.getTime(), first, "COALESCE: the first publish instant is kept");
-      const [v] = await db.select({ storeId: schema.pageVersions.storeId }).from(schema.pageVersions).where(eq(schema.pageVersions.id, again.versionId));
-      assert.equal(v?.storeId, s.A);
+      assert.equal((await versionRow(mintScope("member", s.A), again.versionId))?.storeId, s.A);
+      assert.equal(await versionRow(mintScope("member", s.B), again.versionId), undefined, "the version row is in A only");
     } catch (err) {
       message = err instanceof Error ? err.message : String(err);
       deferIfStub(message);
@@ -687,13 +701,15 @@ async function database(): Promise<void> {
 
   await check("first_published_at: the publish SET fills it once and keeps it afterwards (COALESCE)", async () => {
     const { firstPublishedAt } = await import("./publish.server");
-    const inPage = and(eq(schema.pages.storeId, s.A), eq(schema.pages.id, s.pageADraft));
+    const scopeA = mintScope("member", s.A);
     const first = new Date(Date.UTC(2026, 9, 24, 8, 0, 0, 123));
-    await db.update(schema.pages).set({ firstPublishedAt: firstPublishedAt(first) }).where(inPage);
-    await db.update(schema.pages).set({ firstPublishedAt: firstPublishedAt(new Date(Date.UTC(2026, 9, 25))) }).where(inPage);
-    const [row] = await db.select({ at: schema.pages.firstPublishedAt }).from(schema.pages).where(inPage);
-    assert.equal(row?.at?.toISOString(), first.toISOString());
-    await db.update(schema.pages).set({ firstPublishedAt: null }).where(inPage);
+    // the publish check before this one set it (T1's envelope is real since the T1 merge): start from NULL
+    await setFirstPublished(scopeA, s.pageADraft, null);
+    await setFirstPublished(scopeA, s.pageADraft, firstPublishedAt(first));
+    await setFirstPublished(scopeA, s.pageADraft, firstPublishedAt(new Date(Date.UTC(2026, 9, 25))));
+    const row = await pageRow(scopeA, s.pageADraft);
+    assert.equal(row?.firstPublishedAt?.toISOString(), first.toISOString());
+    await setFirstPublished(scopeA, s.pageADraft, null);
   });
 
   await check("unpublish: another store's page untouched; the page goes offline, first_published_at stays", async () => {
@@ -701,11 +717,11 @@ async function database(): Promise<void> {
     const actor = { kind: "user" as const, userId: null, impersonatorId: null, ip: null };
     assert.equal(await unpublishPage(mintScope("member", s.B), s.pageAHidden, actor), false);
     assert.equal(await unpublishPage(mintScope("member", s.A), s.pageAHidden, actor), true);
-    const [row] = await db.select().from(schema.pages).where(eq(schema.pages.id, s.pageAHidden));
+    const row = await pageRow(mintScope("member", s.A), s.pageAHidden);
     assert.equal(row?.status, "draft");
     assert.equal(row?.firstPublishedAt?.toISOString(), "2026-10-01T10:00:00.000Z");
-    const [audit] = await db.select().from(schema.auditLog).where(and(eq(schema.auditLog.action, "page.unpublished"), eq(schema.auditLog.target, s.pageAHidden)));
-    assert.equal(audit?.storeId, s.A);
+    assert.equal((await auditRow(mintScope("member", s.A), "page.unpublished", s.pageAHidden))?.storeId, s.A);
+    assert.equal(await auditRow(mintScope("member", s.B), "page.unpublished", s.pageAHidden), undefined, "audited in A only");
     assert.equal(await unpublishPage(mintScope("member", s.A), s.pageAHidden, actor), false, "already offline");
   });
 
@@ -719,10 +735,10 @@ async function database(): Promise<void> {
     await assert.rejects(pt.mintPreviewToken(mintScope("member", s.B), { ...input, ttlSec: 300_000 }));
     const { newId } = await import("@/lib/db/ids");
     const jti = newId();
-    await db.insert(schema.previewTokens).values({ id: jti, storeId: s.B, pageId: s.pageB, audience: "seller", expiresAt: new Date(Date.now() + 3_600_000) });
+    await insertToken(mintScope("member", s.B), { id: jti, pageId: s.pageB, audience: "seller", expiresAt: new Date(Date.now() + 3_600_000) });
     await assert.rejects(pt.revokePreviewToken(mintScope("member", s.A), jti), (e: unknown) => e instanceof SeamError && e.code === "not_found");
     await pt.revokePreviewToken(mintScope("member", s.B), jti);
-    const [row] = await db.select().from(schema.previewTokens).where(eq(schema.previewTokens.id, jti));
+    const row = await tokenRow(mintScope("member", s.B), jti);
     assert.ok(row?.revokedAt, "revoked");
     await assert.rejects(pt.revokePreviewToken(mintScope("member", s.B), jti), "a second revoke is not_found");
     const garbage = await routes.servePreview(req(`${P}/preview/not-a-token`), "not-a-token");

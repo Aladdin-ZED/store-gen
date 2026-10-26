@@ -21,11 +21,11 @@ import { itemById, itemName, itemShort } from "@/lib/page/catalog";
 import { round2 } from "@/lib/page/pricing";
 import type { PageDoc } from "@/lib/page/schema";
 import { hashIp } from "@/lib/security/crypto";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { bumpOrderStats } from "@/lib/stats";
 import { byId } from "@/lib/tenancy/sql";
 import type { WriteScope } from "@/lib/tenancy/types";
-import { storeBucketKey, upsellTokenHash } from "./create";
+import { upsellTokenHash } from "./create";
 import { logError } from "./log";
 import { versionDoc } from "./resolve";
 
@@ -47,7 +47,7 @@ export interface UpsellResult {
 
 /** The upsell of `input.orderId`, an order of the scope's store (the public scope of `resolveUpsellOrder`). */
 export async function acceptUpsell(scope: WriteScope, input: { orderId: string; token: string }, ctx: { ip: string }): Promise<UpsellResult> {
-  const gate = await rateLimit(storeBucketKey(scope, "upsell:ip", hashIp(ctx.ip)), 20, 600);
+  const gate = await rateLimit(storeBucket(scope, "upsell:ip", hashIp(ctx.ip)), 20, 600);
   if (!gate.ok) return { response: { ok: false, error: "rate_limited" }, sync: false, retryAfter: gate.retryAfter };
 
   const [order] = await db.select().from(orders).where(byId(orders, scope, input.orderId)).limit(1);

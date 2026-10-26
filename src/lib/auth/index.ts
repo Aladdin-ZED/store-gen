@@ -23,6 +23,7 @@ import { audit } from "@/lib/audit";
 import { db } from "@/lib/db/client";
 import { storeMembers } from "@/lib/db/schema";
 import { LEGACY_STORE_ID } from "@/lib/db/store-handles";
+import { areaOf } from "@/lib/edge/areas";
 import { verifiedRequestPath } from "@/lib/edge/path-sig";
 import type { AdminLocale } from "@/lib/i18n/admin";
 import { getRequestIdentity } from "@/lib/tenancy/context";
@@ -33,7 +34,6 @@ import { AuthError, AuthInputError } from "./errors";
 import { CONSOLE_2FA_ENROL_PATH, FORBIDDEN_PATH, loginUrl, signInUrl, signInVerifyUrl, verifyUrl } from "./paths";
 import { legacyCan as can, type Permission, type PlatformRole, type Role } from "./permissions";
 import type { PublicActionCtx, PublicActionOpts } from "./public-action";
-import { ADMIN_PATH_HEADER } from "./config";
 import { assertAdminAccess, getRequestContext, getRequestedAdminPath, hasAdminAccess } from "./request";
 import { deleteSessionByToken, revokeUserSessions, rotateSession, validateSessionToken } from "./session";
 import { changeUserPassword } from "./users";
@@ -192,7 +192,18 @@ export async function legacyAdminRefusal(user: Pick<SessionUser, "id" | "platfor
   return "refused";
 }
 
-/** The legacy-admin entry check for one request: only inside the admin area (the proxy stamps ADMIN_PATH_HEADER there). */
+/**
+ * true when the proxy-signed request path (`x-sg-path`, §C.3 step 2) is in the console area (`/admin/**`,
+ * `/api/admin/**`); an unsigned or forged path is not (CCR r1.0-t3-1 replaced the `x-cs-pathname` stamp).
+ */
+function inConsoleArea(h: Headers): boolean {
+  const path = verifiedRequestPath(h);
+  if (path === null) return false;
+  const area = areaOf(path.split("?")[0] ?? "/");
+  return area === "console" || area === "console-api";
+}
+
+/** The legacy-admin entry check for one request: only inside the admin area (the signed request path says so). */
 async function assertLegacyAdmin(user: SessionUser, opts: { throwOnFail?: boolean }, inAdminArea: boolean): Promise<void> {
   if (!inAdminArea) return;
   const refusal = await legacyAdminRefusal(user);
@@ -214,7 +225,7 @@ async function requireGatedUser(opts: { permission?: Permission; throwOnFail?: b
   }
 
   // the gate cookie also rides along on /app requests (account pages): the entry check is for the admin area only
-  await assertLegacyAdmin(user, opts, opts.permission !== undefined || (await headers()).has(ADMIN_PATH_HEADER));
+  await assertLegacyAdmin(user, opts, opts.permission !== undefined || inConsoleArea(await headers()));
 
   if (opts.permission && !can(user.role, opts.permission)) {
     if (opts.throwOnFail) throw new AuthError("forbidden");

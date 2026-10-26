@@ -144,7 +144,14 @@ export async function resolveStoreHandle(handle: string): Promise<StoreHandleLoo
 }
 
 /** By handle (the seam, the dashboard): the current handle, else a renamed store's old handle; null otherwise. Cached. */
-export async function resolveStoreByHandle(handle: string): Promise<StoreRow | null> {
+export function resolveStoreByHandle(handle: string): Promise<StoreRow | null>;
+/**
+ * The store routes' form (`/s/<handle>/**`, the route's first step, lint L13): the handle as the URL spells it,
+ * lower-cased here, with what it answers (current, renamed, gone; see resolveStoreHandle). Cached.
+ */
+export function resolveStoreByHandle(handle: string, opts: { detail: true }): Promise<StoreHandleLookup | null>;
+export async function resolveStoreByHandle(handle: string, opts?: { detail: true }): Promise<StoreRow | StoreHandleLookup | null> {
+  if (opts?.detail) return resolveStoreHandle(handle.toLowerCase());
   const found = await resolveStoreHandle(handle);
   return found && found.kind !== "gone" ? found.store : null;
 }

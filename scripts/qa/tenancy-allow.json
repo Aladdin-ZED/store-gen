@@ -16,8 +16,6 @@
     { "file": "src/lib/media/throttle.ts", "symbol": "__codMediaThrottle", "reason": "a platform guard keyed by client IP (§E.6 unchanged)" },
     { "file": "src/lib/sheets/sync.ts", "symbol": "__codSheetsHeaders", "reason": "sheet header rows keyed by spreadsheet id and tab title, one sheet belongs to one store (§E.6 unchanged)" },
     { "file": "src/lib/sheets/client.ts", "symbol": "__codSheetsToken", "reason": "the shared service account's access token, per credential, never store data (§E.6 unchanged)" },
-    { "file": "src/lib/orders/resolve.ts", "symbol": "__codOrderCache", "reason": "pageKey / version id to public target; random global keys, and the cached targets carry storeId and status (ORD-01, §E.5)" },
-    { "file": "src/lib/orders/export-origins.ts", "symbol": "__codExportOrigins", "reason": "the union of export origins for the CORS preflight (PUB-21, §E.6); invalidateStore() clears it" },
     { "file": "src/lib/render/compress.ts", "symbol": "__codEncodedCache", "reason": "compressed bodies keyed by content hash: equal bytes, equal entry, whoever asks (§E.6 unchanged)" },
     { "file": "src/lib/render/serve.server.ts", "symbol": "__codForeignHosts", "reason": "a platform guard: the set of unknown hosts already logged (§E.6 unchanged)" },
     { "file": "src/lib/security/burst-limit.ts", "symbol": "__codBurst", "reason": "the in-memory burst limits keyed by IP, the platform floor before the database (§E.8)" },
@@ -43,7 +41,8 @@
     { "file": "src/lib/settings/index.ts", "symbol": "__codSettingsCache", "reason": "the legacy single-tenant API's cache of platform `settings` rows (30 s); store keys use scopedCache(\"settings\"); goes with the legacy API (§D.10)" },
     { "file": "src/lib/tenancy/handles.ts", "symbol": "__sgHandleLists", "reason": "the snapshot of platform.reservedHandles and the protected brand terms (§C.7): platform lists, no store data" },
     { "file": "src/lib/db/store-handles.ts", "symbol": "__sgHandleListsLoading", "reason": "the one in-flight reload of the platform handle lists (§C.7): a promise of platform data" },
-    { "file": "src/lib/jobs/scope.ts", "symbol": "__sgCronCursors", "reason": "forEachStore's in-memory cursor fallback while cron_cursors is missing (§H.4): one cursor per job name, store ids only" }
+    { "file": "src/lib/jobs/scope.ts", "symbol": "__sgCronCursors", "reason": "forEachStore's in-memory cursor fallback while cron_cursors is missing (§H.4): one cursor per job name, store ids only" },
+    { "file": "src/lib/edge/proxy-log.ts", "symbol": "__sgProxyLog", "reason": "the proxy's log tally (§C.3, T3): foreign hosts already logged (at most 20) and edge-key counters for the console health view; host names and counts, never store data, and it decides nothing (R1.0 integration)" }
   ],
   "actions": [
     { "file": "src/lib/auth/actions.ts", "symbol": "logout", "reason": "sign-out must work with an ended or half-open session, so no userAction; it checks the origin first and only ends this browser's own session (CCR r1.0-m-3)" },
@@ -59,7 +58,7 @@
     { "files": ["src/lib/ai/platform/**"], "max": 0, "reason": "counted at the P7 merge (§F.1); 0 before it" },
     { "files": ["src/lib/platform/**"], "max": 4, "reason": "R1.0 (maintainer, C0b review fixes, as queries): the view-as row by its id or by session (2) and the store-less notify row, batched or not (2); counted again at the P1 merge (§F.1, rev 3)" },
     { "files": ["src/lib/jobs/**"], "max": 0, "reason": "R1.0 (maintainer, C0b review fixes, as queries): the annotated cron_cursors and stores statements touch no tenant table, so they exempt nothing" },
-    { "files": ["src/lib/tenancy/**"], "max": 6, "reason": "R1.0 (maintainer, C0b review fixes, as queries): the store_usage / platform_usage counter statements (4: read, insert, charge, refund), the lifecycle's step-up row and handle quarantine (2)" },
+    { "files": ["src/lib/tenancy/**"], "max": 8, "reason": "R1.0 (maintainer, C0b review fixes, as queries): the store_usage / platform_usage counter statements (4: read, insert, charge, refund), the lifecycle's step-up row and handle quarantine (2); T3 merge (maintainer as reviewer): the public resolvers' handle history lookup and the CORS preflight's export-origin union (2, src/lib/tenancy/public.ts; robots.txt's live-store handles touch no tenant table)" },
     { "files": ["src/lib/auth/**"], "max": 8, "reason": "R1.0 (maintainer, C0b review fixes, as queries): a user's own memberships (switcher, setup, account deletion x3, signup), the legacy /admin entry check and team insert (removed with /admin by T4)" },
     { "files": ["src/lib/db/**"], "max": 28, "reason": "R1.0 (maintainer as reviewer, C0b review fixes F13, as queries): the upgrade and tenancy dry runs (23, console-only and read-only: documents, drafts, versions, legacy counts, NULL store ids, 13 cross-store joins, envelopes), handle history (3), the audit writer and staff listing (2)" }
   ]

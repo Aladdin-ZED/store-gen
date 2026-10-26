@@ -92,15 +92,23 @@ export function generateNonce(): string {
   return btoa(bin);
 }
 
-/** Nonce-based strict CSP for platform UI HTML (Next.js applies the nonce to its own scripts). */
-export function adminCsp(nonce: string, opts: { dev?: boolean } = {}): string {
+/** The platform's human check (Cloudflare Turnstile): its script and its iframe. */
+export const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
+
+/**
+ * Nonce-based strict CSP for platform UI HTML (Next.js applies the nonce to its own scripts). `turnstile` adds the
+ * widget's origin to `script-src` (CSP2 browsers; CSP3 ones trust the nonced script through 'strict-dynamic') and to
+ * `frame-src` (the auth and app areas render the platform widget, CCR r1.0-t2-9 item 3).
+ */
+export function adminCsp(nonce: string, opts: { dev?: boolean; turnstile?: boolean } = {}): string {
   if (!NONCE_RE.test(nonce)) throw new Error("invalid CSP nonce");
   const dev = opts.dev ?? !isProd();
+  const ts = opts.turnstile ? [TURNSTILE_ORIGIN] : [];
   const directives: [string, string[]][] = [
     ["default-src", ["'self'"]],
     [
       "script-src",
-      ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", "'wasm-unsafe-eval'", ...(dev ? ["'unsafe-eval'"] : [])],
+      ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", "'wasm-unsafe-eval'", ...ts, ...(dev ? ["'unsafe-eval'"] : [])],
     ],
     ["worker-src", ["'self'", "blob:"]],
     ["connect-src", ["'self'", ...ADMIN_CONNECT_SOURCES]],
@@ -108,7 +116,7 @@ export function adminCsp(nonce: string, opts: { dev?: boolean } = {}): string {
     ["media-src", ["'self'", "blob:"]],
     ["style-src", ["'self'", "'unsafe-inline'"]],
     ["font-src", ["'self'", "data:"]],
-    ["frame-src", ["'self'"]],
+    ["frame-src", ["'self'", ...ts]],
     ["frame-ancestors", ["'none'"]],
     ["object-src", ["'none'"]],
     ["base-uri", ["'none'"]],
@@ -133,7 +141,8 @@ export interface PlatformUiOptions {
 /**
  * Everything the proxy sets on a platform UI response (§F.6 "Platform UI"): base headers, the nonce CSP,
  * CORP `same-origin` and:
- *  - console, app, auth: `Referrer-Policy: same-origin`, `private, no-store`, `X-Robots-Tag: noindex`;
+ *  - console, app, auth: `Referrer-Policy: same-origin`, `private, no-store`, `X-Robots-Tag: noindex`; app and auth
+ *    also allow the Turnstile widget (`script-src` / `frame-src` https://challenges.cloudflare.com);
  *  - kit (`/kit/*`, no actions): the same with `Referrer-Policy: no-referrer` (rev 3, ENGC-16);
  *  - marketing: indexable, `public, max-age=0, s-maxage=300`.
  * "same-origin", not "no-referrer", wherever forms post: under no-referrer browsers serialize the Origin of a
@@ -145,7 +154,7 @@ export function platformUiHeaders(nonce: string, opts: PlatformUiOptions = {}): 
   const area = opts.area ?? "console";
   const headers: Record<string, string> = {
     ...baseSecurityHeaders({ frame: "deny", cls: opts.cls }),
-    "Content-Security-Policy": adminCsp(nonce, { dev: opts.dev }),
+    "Content-Security-Policy": adminCsp(nonce, { dev: opts.dev, turnstile: area === "auth" || area === "app" }),
     "Referrer-Policy": area === "kit" ? "no-referrer" : "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
     "Cache-Control": area === "marketing" ? "public, max-age=0, s-maxage=300" : "private, no-store",

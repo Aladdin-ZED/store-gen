@@ -10,11 +10,11 @@ export const SESSION_COOKIE = IS_PROD ? "__Host-cs" : "cs";
 export const GATE_COOKIE = IS_PROD ? "__Host-csg" : "csg";
 
 /**
- * Request headers set by src/proxy.ts on gated admin requests (any client-supplied value is
- * overwritten there). The nonce header is what Server Components read to nonce their own <Script>s.
+ * Request header set by src/proxy.ts on platform UI requests (any client-supplied value is overwritten there):
+ * what Server Components read to nonce their own <Script>s. The console's redirect-back path is the signed
+ * `x-sg-path` (src/lib/edge/path-sig.ts, CCR r1.0-t3-1), which replaced the old `x-cs-pathname` header.
  */
 export const NONCE_HEADER = "x-nonce";
-export const ADMIN_PATH_HEADER = "x-cs-pathname";
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;

@@ -10,8 +10,8 @@
  *  - store documents (docs/STORE-SAAS.md §C.6, §C.8): links and URLs under the store base (`/s/<h>/<slug>`,
  *    `/s/<h>/policies/<kind>?p=`), the canonical at the store's origin, and no aggregateRating in the JSON-LD even
  *    when the doc carries a rating;
- *  - runtime size budgets (docs/OFFERS.md §F.9, src/landing/runtime/budgets.json): every chunk and the
- *    heaviest page (every optional chunk + landing, in one document) at most the recorded gzip + 5%, except the
+ *  - runtime size budgets (docs/OFFERS.md §F.9, src/landing/runtime/budgets.json): every chunk and every page
+ *    cap of `compositions` (page, thanks-page: the chunks of one document) at most the recorded gzip + 5%, except the
  *    frozen `landing` chunk (docs/STORE-SAAS.md header freeze rule, ENGC-10): tolerance 0 against its recorded
  *    budget, and its bytes equal to the pin `src/landing/runtime/landing.sha256` (sha256 hex of the chunk text).
  *
@@ -23,7 +23,7 @@ import { DIVIDERS } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
 import { inlineHashes, renderLandingHtml, renderLegalHtml, renderThankYouHtml, styleAttrViolations } from "@/lib/render/core";
 import { runtimeScripts } from "@/landing/document";
-import { runtimeChunks, type RuntimeChunk } from "@/landing/generated/assets";
+import { runtimeChunks } from "@/landing/generated/assets";
 import type { LandingRuntimeConfig } from "@/landing/runtime/config";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -126,15 +126,27 @@ async function main() {
     console.log(`legacy migration: ${v.issues.filter((i) => i.message.startsWith("Retired")).length} retired values repaired`);
   }
 
-  // runtime budgets: gzip -9 of each chunk, and of the heaviest page's scripts in one document
-  const budgets = JSON.parse(readFileSync(join(__dirname, "..", "..", "src", "landing", "runtime", "budgets.json"), "utf8")) as Record<string, number>;
+  // runtime budgets: gzip -9 of each chunk, and of each page cap's chunks in one document (CCR r1.0-c0b-1)
+  const budgets = JSON.parse(readFileSync(join(__dirname, "..", "..", "src", "landing", "runtime", "budgets.json"), "utf8")) as Record<string, unknown> & {
+    compositions?: Record<string, string[]>;
+  };
+  const budgetOf = (name: string) => (typeof budgets[name] === "number" ? (budgets[name] as number) : undefined);
   const gz = (s: string) => gzipSync(Buffer.from(s, "utf8"), { level: 9 }).length;
+  // every chunk a document can embed: the core runtime chunks, plus the add-on chunks once the hook builds them (§H.13)
+  const chunks: Record<string, string> = { ...runtimeChunks };
   const sizes: Record<string, number> = {};
-  for (const [name, js] of Object.entries(runtimeChunks)) sizes[name] = gz(js);
-  const heaviest: RuntimeChunk[] = ["pixels", "turnstile", "units-matrix", "units-fields", "fill-steps-box", "landing"];
-  sizes.page = gz(heaviest.map((n) => runtimeChunks[n]).join("\n"));
+  for (const [name, js] of Object.entries(chunks)) sizes[name] = gz(js);
+  // page caps = the chunks of one document, from budgets.json (ENGP-12): a new chunk needs no change here
+  const compositions = budgets.compositions ?? {};
+  if (!compositions.page || !compositions["thanks-page"]) fail("budgets.json: compositions.page / compositions['thanks-page'] missing");
+  for (const [cap, names] of Object.entries(compositions)) {
+    const unbudgeted = names.filter((n) => budgetOf(n) === undefined);
+    if (unbudgeted.length) fail(`budgets.json compositions.${cap}: ${unbudgeted.join(", ")} have no budget`);
+    // a named chunk that is not built yet (the R1 add-ons before P3) adds nothing, so today's page measures as before
+    sizes[cap] = gz(names.filter((n) => n in chunks).map((n) => chunks[n]).join("\n"));
+  }
   for (const [name, size] of Object.entries(sizes)) {
-    const budget = budgets[name];
+    const budget = budgetOf(name);
     if (typeof budget !== "number") fail(`runtime ${name}: no budget in budgets.json`);
     else if (name === "landing" ? size > budget : size > budget * 1.05) fail(`runtime ${name} is ${size} B gzip — over its ${budget} B budget${name === "landing" ? " (frozen: tolerance 0)" : " + 5%"}`);
   }
@@ -144,7 +156,7 @@ async function main() {
   const landingSha = createHash("sha256").update(runtimeChunks.landing, "utf8").digest("hex");
   if (!/^[0-9a-f]{64}$/.test(pin)) fail("src/landing/runtime/landing.sha256 holds no sha256");
   else if (landingSha !== pin) fail(`runtime landing changed: sha256 ${landingSha} ≠ the pin ${pin} (frozen chunk: re-measure and re-record through the maintainer)`);
-  console.log(`runtime budgets: ${Object.entries(sizes).map(([k, v]) => `${k} ${v}/${budgets[k]}`).join(" · ")} · landing sha256 ${landingSha.slice(0, 12)}`);
+  console.log(`runtime budgets: ${Object.entries(sizes).map(([k, v]) => `${k} ${v}/${budgetOf(k)}`).join(" · ")} · landing sha256 ${landingSha.slice(0, 12)}`);
   console.log(failures ? `${failures} FAILURE(S)` : "ALL OK");
   process.exit(failures ? 1 : 0);
 }

@@ -282,7 +282,8 @@ async function main(): Promise<void> {
 
   /* ============================================================== 1. the Worker alone */
   section("Worker: bindings, refusals, stamping, response");
-  origin = async (url, init) => new Response(`origin ${init.method} ${url}`, { status: 200, headers: { "set-cookie": "a=1", "x-origin": "1" } });
+  origin = async (url, init) =>
+    new Response(`origin ${init.method} ${url}`, { status: 200, headers: { "set-cookie": "a=1", "x-origin": "1", "x-middleware-rewrite": "/s/shop1/x" } });
 
   for (const [label, bindings] of [
     ["no EDGE_KEY", { ...WORKER_ENV, EDGE_KEY: undefined }],
@@ -367,6 +368,7 @@ async function main(): Promise<void> {
     }
     eq(h.get("accept-language"), "fr-MA", "ordinary request headers pass");
     eq(res.headers.getSetCookie(), [], "Set-Cookie stripped from the response");
+    eq(res.headers.get("x-middleware-rewrite"), null, "Next's x-middleware-rewrite stripped from the response (ENGC-22)");
     eq(res.headers.get("x-sg-mode"), "subdomain", "x-sg-mode on the response");
     eq(res.headers.get("x-origin"), "1", "the origin's other headers pass");
   }

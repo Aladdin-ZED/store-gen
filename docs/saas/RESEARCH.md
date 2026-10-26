@@ -502,6 +502,9 @@ Cloudflare zone <domain> (Free plan: DNS + Universal SSL for the apex and first-
      Cloudflare Origin CA certificate uploaded as a custom SSL.
    - In Cloudflare, add the www Redirect Rule, the `/media/*` Cache Rule, the `sg-edge` Worker (code from the repo),
      the `EDGE_KEY` secret and the route `*.<domain>/*`.
+   - In Cloudflare, add the route exclusion `console.<domain>/*` with Worker **None**: the console host is reached
+     directly, never through the store Worker, which deletes cookies and refuses `/admin/**` (STORE-SAAS §C.5, CCR
+     r1.0-t3-8). Serve `console.<domain>` from Hostinger as its own hostname (V2 decides how).
    - In Hostinger, set the env vars with a full replace of all keys (HANDOFF §4), then rebuild.
    - Re-render all live pages, then switch on the permanent temp-domain → new-domain 308s.
    - Update the cron URL, the Meta and TikTok domain settings, the Turnstile hostnames and any Sheets links.
@@ -512,7 +515,7 @@ Cloudflare zone <domain> (Free plan: DNS + Universal SSL for the apex and first-
 |---|---|---|
 | V1 | `host-selftest.ts`: decision-table tests, forged `x-sg-*` without the key, `/s/` and `/_d/` on store hosts, reserved and deep labels, `Next-Action` POST on a store host | All 404s and rewrites as specified |
 | V2 | (Optional) probe: one Hostinger subdomain alias on the Node site; does it serve the app, and do processes grow by about 11 threads? Remove it afterwards | Recorded in HANDOFF |
-| V3 | `curl -sI https://probe.<domain>/` returns the app's neutral 404 with `x-sg-mode: subdomain`; the apex does not run the Worker; www 301s. Also confirms the route pattern excludes the apex | As stated |
+| V3 | `curl -sI https://probe.<domain>/` returns the app's neutral 404 with `x-sg-mode: subdomain`; the apex does not run the Worker; www 301s. Also confirms the route pattern excludes the apex. Cache check (CCR r1.0-t3-9, ENGC-2): two store hosts, each requested twice on one path (`curl -sI https://a.<domain>/x`, then `https://b.<domain>/x`); then `curl -sI https://<domain>/x` | As stated; every store response carries `CDN-Cache-Control: no-store`, `cf-cache-status` is absent, `DYNAMIC` or `BYPASS` (never `HIT`), each body names its own store, and the apex answers the platform's page. On a `HIT`: switch the Worker's subrequest to the `cache: "no-store"` fetch option (compatibility date 2024-11-11 or later) |
 | V4 | Direct-origin forgery with `--resolve` and a wrong `x-sg-edge` | Treated as the platform host; header ignored |
 | V5 | Playwright (msedge): no Cookie reaches store routes; a `__Host-cs` write from a store page is rejected; a dashboard POST with `Sec-Fetch-Site: same-site` is refused | As stated |
 | V6 | Order API: store A's page posting store B's pageKey is refused; correct posts from S and P addresses succeed | As stated |

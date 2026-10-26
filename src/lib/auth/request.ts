@@ -6,7 +6,8 @@ import { cookies, headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { clientIp } from "@/lib/security/ip";
 import { getRequestIdentity, identityHeaders } from "@/lib/tenancy/context";
-import { ADMIN_PATH_HEADER, DEVICE_COOKIE, GATE_COOKIE, NONCE_HEADER } from "./config";
+import { verifiedRequestPath } from "@/lib/edge/path-sig";
+import { DEVICE_COOKIE, GATE_COOKIE, NONCE_HEADER } from "./config";
 import { hasGateAccess } from "./gate";
 import { deviceMarkerFromCookieHeader, isDeviceMarker } from "./identity";
 import { safeAdminPath } from "./paths";
@@ -58,5 +59,5 @@ export async function getCspNonce(): Promise<string | undefined> {
 
 /** Path + query of the current admin request (set by the proxy), when safe to redirect back to. */
 export async function getRequestedAdminPath(): Promise<string | null> {
-  return safeAdminPath((await headers()).get(ADMIN_PATH_HEADER));
+  return safeAdminPath(verifiedRequestPath(await headers()));
 }

@@ -37,6 +37,20 @@ const mono = localFont({
   fallback: ["ui-monospace", "SFMono-Regular", "Consolas", "monospace"],
 });
 
+/** Arabic face of the platform UI (DS21, CCR r1.0-t2-9 item 3): the `[lang="ar"]` rule of globals.css puts it first. */
+const arabic = localFont({
+  src: [
+    { path: "./fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/ibm-plex-sans-arabic-arabic-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "./fonts/ibm-plex-sans-arabic-arabic-700-normal.woff2", weight: "700", style: "normal" },
+  ],
+  variable: "--font-arabic",
+  display: "swap",
+  preload: false,
+  fallback: ["Noto Sans Arabic", "Segoe UI", "Tahoma", "sans-serif"],
+});
+
 export const metadata: Metadata = {
   robots: { index: false, follow: false, nocache: true, googleBot: { index: false, follow: false } },
   referrer: "strict-origin-when-cross-origin",
@@ -56,7 +70,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     // suppressHydrationWarning: a theme provider may set the `class` on <html> before hydration.
     <html
       lang="en"
-      className={`${sans.variable} ${display.variable} ${mono.variable} h-full antialiased`}
+      className={`${sans.variable} ${display.variable} ${mono.variable} ${arabic.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="flex min-h-full flex-col">{children}</body>

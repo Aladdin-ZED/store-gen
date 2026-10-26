@@ -10,16 +10,14 @@ import "server-only";
  * it on `/s/<h>/**` (Path=/); it is never read there and the proxy deletes the Cookie header of store requests.
  * No Next.js request APIs and no shared state.
  */
-import { IS_PROD } from "@/lib/auth/config";
+import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE_SEC, DEVICE_MARKER_RE, IS_PROD } from "@/lib/auth/config";
 
-/** `__Host-` (Secure, Path=/, no Domain) in production, like every platform cookie (§C.9); a plain name in dev. */
-export const DEVICE_COOKIE = IS_PROD ? "__Host-sgd" : "sgd";
-
-/** 400 days, the longest lifetime browsers keep (RFC 6265bis caps Max-Age there). */
-export const DEVICE_COOKIE_MAX_AGE_SEC = 400 * 24 * 60 * 60;
-
-/** 16 random bytes, base64url without padding. */
-const DEVICE_ID_RE = /^[A-Za-z0-9_-]{22}$/;
+/**
+ * The name, format and lifetime are T2's constants (CCR r1.0-t2-7), so the proxy and `publicAction`'s fallback
+ * never differ: `__Host-sgd` (Secure, Path=/, no Domain) in production like every platform cookie (§C.9), a plain
+ * name in dev; 400 days, the longest lifetime browsers keep; 16 random bytes, base64url without padding.
+ */
+export { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE_SEC };
 
 /** A fresh marker: 128 bits from the Web Crypto RNG, base64url. */
 export function newDeviceId(): string {
@@ -30,7 +28,7 @@ export function newDeviceId(): string {
 
 /** The marker value when it is well formed, else null (a client can send anything in a cookie). */
 export function readDeviceId(value: string | null | undefined): string | null {
-  return value && DEVICE_ID_RE.test(value) ? value : null;
+  return value && DEVICE_MARKER_RE.test(value) ? value : null;
 }
 
 export function deviceCookieOptions() {

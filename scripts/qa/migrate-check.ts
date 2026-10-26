@@ -28,7 +28,8 @@
  *  (e) the tenant tables of schema.ts equal the §D.2 / §D.3 rows of the document (ENGC-31; TABLE_LEVELS).
  *  (f) SEC-24 on the converted database: 10 parallel accepts of one invite → one membership, one consumed invite and 9
  *      refusals (added at the T2 merge, CCR r1.0-t1-3 item 5).
- *  (g) first_published_at backfill is checked in (b); the publish → unpublish → republish half is pending T3.
+ *  (g) first_published_at backfill is checked in (b); on the converted database the scoped publishPage → unpublishPage
+ *      → publishPage keeps it (a backfilled page) or sets it once at the first publish (added at the T3 merge).
  *  (h) the system seam over the converted database: forEachStore round robin, budget, a throwing store, states,
  *      `pending_sheets` ordering, a `where` whose table does not exist yet.
  *
@@ -531,6 +532,47 @@ async function childMain(task: string): Promise<unknown> {
     };
   }
 
+  if (task === "republish") {
+    // (g) CRIT2-5, second half (CCR r1.0-t1-3 item 5, added at the T3 merge): the scoped publish sets
+    // first_published_at once; an unpublish keeps it and a republish never moves it
+    const { publishPage, unpublishPage, PublishError } = await import("@/lib/render/publish.server");
+    const actor = { kind: "user", userId: U_OWNER, impersonatorId: null, ip: null } as const;
+    const conn = await readConn();
+    const firstOf = async (pageId: string) => {
+      const [rows] = await conn.query<mysql.RowDataPacket[]>("SELECT first_published_at AS f, status FROM pages WHERE store_id = ? AND id = ?", [STORE1, pageId]);
+      const r = rows[0];
+      return r ? { f: r.f instanceof Date ? r.f.toISOString() : r.f === null ? null : String(r.f), status: String(r.status) } : null;
+    };
+    const step = async (fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+        return "ok";
+      } catch (err) {
+        return err instanceof PublishError ? `PublishError:${err.code}:${err.message}` : String(err);
+      }
+    };
+    try {
+      const out: Record<string, unknown> = {};
+      for (const pageId of [P1, P2]) {
+        const before = await firstOf(pageId);
+        const first = await step(() => publishPage(scope(), pageId, { actor }));
+        const afterPublish = await firstOf(pageId);
+        await new Promise((r) => setTimeout(r, 20)); // a later instant, so a moved stamp would show
+        const off = await step(async () => {
+          if (!(await unpublishPage(scope(), pageId, actor))) throw new Error("unpublishPage returned false");
+        });
+        const afterUnpublish = await firstOf(pageId);
+        await new Promise((r) => setTimeout(r, 20));
+        const again = await step(() => publishPage(scope(), pageId, { actor }));
+        const afterRepublish = await firstOf(pageId);
+        out[pageId] = { before, steps: [first, off, again], afterPublish, afterUnpublish, afterRepublish };
+      }
+      return out;
+    } finally {
+      await conn.end();
+    }
+  }
+
   if (task === "settings-unreadable") {
     // review fix: a stored row that does not open is never replaced by a merge into the defaults
     const { updateStoreSetting, SettingUnreadableError } = await import("@/lib/settings");
@@ -996,6 +1038,19 @@ async function main(): Promise<void> {
       same("(f) SEC-24: one store.member.accepted audit row", Number(accepted[0]?.n), 1);
     }
 
+    console.log("(g) publish → unpublish → republish");
+    {
+      type Fp = { f: string | null; status: string } | null;
+      type G = { before: Fp; steps: string[]; afterPublish: Fp; afterUnpublish: Fp; afterRepublish: Fp };
+      const g = await child<Record<string, G>>("republish", "cod_test_t1_legacy");
+      const p1 = g[P1]!;
+      const p2 = g[P2]!;
+      same("(g) CRIT2-5: publish, unpublish and republish succeed through the scoped API", [p1.steps, p2.steps], [["ok", "ok", "ok"], ["ok", "ok", "ok"]]);
+      same("(g) CRIT2-5: a page published before the conversion keeps its backfilled first_published_at", [p1.afterPublish?.f, p1.afterUnpublish?.f, p1.afterRepublish?.f], [at(2).toISOString(), at(2).toISOString(), at(2).toISOString()]);
+      check("(g) CRIT2-5: a never-published page gets first_published_at at its first publish", p2.before?.f === null && typeof p2.afterPublish?.f === "string", p2);
+      same("(g) CRIT2-5: unpublish → draft, republish → published, first_published_at unchanged", [p2.afterUnpublish?.status, p2.afterRepublish?.status, p2.afterUnpublish?.f, p2.afterRepublish?.f], ["draft", "published", p2.afterPublish?.f, p2.afterPublish?.f]);
+    }
+
     console.log("(h) system seam");
     {
       const conn = await connect("cod_test_t1_legacy");
@@ -1127,7 +1182,6 @@ async function main(): Promise<void> {
       same("(c) setup: the second boot writes no audit row", s2.audit.length, s1.audit.length);
     }
 
-    pending.push("(g) publish → unpublish → republish keeps first_published_at: publishPage(scope, …) is T3's (a stub until T3 merges)");
   } finally {
     rmSync(folder, { recursive: true, force: true });
     if (!process.argv.includes("--keep")) {

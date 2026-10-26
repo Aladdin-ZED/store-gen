@@ -181,6 +181,10 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Arabic surfaces: the identity shells set lang / dir on their own root, so the rule matches any element (DS21) */
+  [lang="ar"] {
+    font-family: var(--font-arabic), var(--font-sans);
+  }
   :where(h1, h2, h3, h4) {
     text-wrap: balance;
   }

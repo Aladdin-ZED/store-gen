@@ -5,14 +5,17 @@
  */
 import { connection, type NextRequest } from "next/server";
 import { notFoundResponse } from "@/lib/render/serve.server";
-import { serveStoreRoute } from "@/lib/render/store-routes.server";
+import { handleLookupFailed, serveStoreRoute } from "@/lib/render/store-routes.server";
+import { resolveStoreByHandle } from "@/lib/tenancy/public";
 
 type Params = { params: Promise<{ store: string }> };
 
 async function serve(req: NextRequest, ctx: Params): Promise<Response> {
   await connection();
   const { store } = await ctx.params;
-  return serveStoreRoute(req, store, { page: "home" });
+  // the store of the URL first (lint L13); serveStoreRoute answers per host class, state and address
+  const found = await resolveStoreByHandle(store, { detail: true }).catch(handleLookupFailed);
+  return serveStoreRoute(req, store, { page: "home" }, { found });
 }
 
 export function GET(req: NextRequest, ctx: Params): Promise<Response> {

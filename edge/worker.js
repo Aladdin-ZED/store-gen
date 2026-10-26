@@ -102,6 +102,8 @@ const worker = {
 
     const out = new Response(res.body, res);
     out.headers.delete("set-cookie");
+    // Next's rewrite marker (x-middleware-rewrite: /s/<handle>/…) would set a route's 404 apart from the proxy's (ENGC-22)
+    for (const name of [...out.headers.keys()]) if (name.startsWith("x-middleware-")) out.headers.delete(name);
     out.headers.set("x-sg-mode", "subdomain");
     return out;
   },

@@ -15,7 +15,7 @@
 import type { NextRequest } from "next/server";
 import { parseOrderPayload, type OrderResponse } from "@/lib/orders/contract";
 import { sendConversionsAfterResponse } from "@/lib/orders/conversions";
-import { createOrder, decoyResponse, platformBucketKey } from "@/lib/orders/create";
+import { createOrder, decoyResponse } from "@/lib/orders/create";
 import {
   checkOrigin,
   clientContext,
@@ -29,7 +29,7 @@ import {
 } from "@/lib/orders/http";
 import { burstLimit } from "@/lib/security/burst-limit";
 import { hashIp } from "@/lib/security/crypto";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { platformBucket, rateLimit } from "@/lib/security/rate-limit";
 import { publicApiAnswer, resolvePublicTarget, resolveTestToken, TEST_PARAM } from "@/lib/tenancy/public";
 
 type Failure = Extract<OrderResponse, { ok: false }>;
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       });
     }
 
-    const coarse = await rateLimit(platformBucketKey("api:order", hashIp(client.ip)), 60, 600);
+    const coarse = await rateLimit(platformBucket("api:order", hashIp(client.ip)), 60, 600);
     if (!coarse.ok) {
       return json({ ok: false, error: "rate_limited" } satisfies OrderResponse, 429, {
         ...corsHeaders(earlyCors),

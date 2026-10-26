@@ -29,10 +29,8 @@
  *  - routes: store states (§A.5.3), ?sg-test tokens per store, store-host Origins in P and S mode, export CORS
  *  - unique-visitor credit capped per network and page
  *
- * T1's settings API: while its C0a stubs are in place, the two keys the order path reads (`turnstile`,
- * `platform_turnstile`) are answered by a settings double of this process (empty keys: Turnstile off, like a
- * fresh install); once T1 has merged, the real API answers. Secrets are random test values made here; nothing
- * from .env.local is read or printed.
+ * T1's settings API answers for real (the suite's settings double went at the R1.0 integration, after the T1 merge).
+ * Secrets are random test values made here; nothing from .env.local is read or printed.
  */
 import Module from "node:module";
 import assert from "node:assert/strict";
@@ -80,55 +78,16 @@ const setS = (on: boolean) => {
   }
 };
 
-const T1_STUB = /not implemented: T1/;
-const doubled = new Set<string>();
-/** the store and platform values the settings double answers (empty widget keys: Turnstile off) */
-const doubleValues: Record<string, unknown> = { turnstile: { siteKey: "", secretKey: "" }, platform_turnstile: { siteKey: "", secretKey: "" } };
-
 /**
- * The settings double: every `require("@/lib/settings")` of the app gets the real module, except that a T1 stub's
- * "not implemented" answer of getStoreSettings / getStoreSetting / getPlatformSetting is replaced by
- * `doubleValues` for the keys above (any other key still throws). Also maps next/navigation to its server build,
- * as Next's route bundles do.
+ * Maps next/navigation to its server build, as Next's route bundles do: the seam's notFound / redirect need it, and
+ * the client build needs React's createContext, which the react-server condition's React does not have.
  */
-function installSettingsDouble(): void {
-  const M = Module as unknown as {
-    _resolveFilename: (request: string, ...rest: unknown[]) => string;
-    _cache: Record<string, { exports: unknown; loaded: boolean; filename: string; id: string }>;
-  };
+function installNavigationAlias(): void {
+  const M = Module as unknown as { _resolveFilename: (request: string, ...rest: unknown[]) => string };
   const resolve = M._resolveFilename;
-  const realPath = require.resolve("@/lib/settings");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const real = require(realPath) as Record<string, (...a: unknown[]) => Promise<unknown>>;
-  const DOUBLE = `${realPath}#settings-double`;
-  const stubbed = async <T>(name: string, run: () => Promise<T>, keys: readonly string[]): Promise<T | null> => {
-    try {
-      return await run();
-    } catch (err) {
-      if (!(err instanceof Error && T1_STUB.test(err.message)) || !keys.every((k) => k in doubleValues)) throw err;
-      doubled.add(name);
-      return null;
-    }
-  };
-  const exports = {
-    ...real,
-    getStoreSettings: async (scope: unknown, keys: readonly string[]) =>
-      (await stubbed("getStoreSettings", () => real.getStoreSettings!(scope, keys), keys)) ?? Object.fromEntries(keys.map((k) => [k, doubleValues[k]])),
-    getStoreSetting: async (scope: unknown, key: string, opts?: unknown) => (await stubbed("getStoreSetting", () => real.getStoreSetting!(scope, key, opts), [key])) ?? doubleValues[key],
-    getPlatformSetting: async (key: string, opts?: unknown) => (await stubbed("getPlatformSetting", () => real.getPlatformSetting!(key, opts), [key])) ?? doubleValues[key],
-  };
-  const mod = new (Module as unknown as new (id: string) => { exports: unknown; loaded: boolean; filename: string; id: string })(DOUBLE);
-  mod.exports = exports;
-  mod.loaded = true;
-  mod.filename = DOUBLE;
-  M._cache[DOUBLE] = mod;
-  // the seam's notFound / redirect: Next aliases next/navigation to its server build in route bundles; the
-  // client build needs React's createContext, which the react-server condition's React does not have
   const navigation = require.resolve("next/dist/client/components/navigation.react-server.js");
   M._resolveFilename = function (this: unknown, request: string, ...rest: unknown[]) {
-    if (request === "next/navigation") return navigation;
-    const resolved = resolve.call(this, request, ...rest);
-    return resolved === realPath ? DOUBLE : resolved;
+    return request === "next/navigation" ? navigation : resolve.call(this, request, ...rest);
   };
 }
 
@@ -425,12 +384,13 @@ async function scenarios(s: Seed) {
   const { and, eq, sql } = await import("drizzle-orm");
   const { orders, leads, statsDaily, statsVisitors, blocklist } = schema;
   const create = await import("@/lib/orders/create");
-  const { createOrder, createOrderRow, OrderIdemTaken, shopperActor, upsellTokenFor, storeBucketKey, STORE_FLOOD_LIMIT } = create;
+  const { createOrder, createOrderRow, OrderIdemTaken, shopperActor, upsellTokenFor, STORE_FLOOD_LIMIT } = create;
   const { upsertLead } = await import("@/lib/orders/leads");
   const { acceptUpsell } = await import("@/lib/orders/upsell");
   const { recordEvent } = await import("@/lib/stats");
   const { hashIp } = await import("@/lib/security/crypto");
   const { resetBurstLimits } = await import("@/lib/security/burst-limit");
+  const { storeBucket } = await import("@/lib/security/rate-limit");
   const pub = await import("@/lib/tenancy/public");
   const hooks = await import("@/lib/orders/hooks");
   const { UNPROTECTED_MIN_SCORE } = await import("@/lib/orders/risk");
@@ -511,17 +471,17 @@ async function scenarios(s: Seed) {
     }
     const real = await order(victim, newIp());
     assert.equal(real.response.ok, true, `real customer refused: ${JSON.stringify(real.response)}`);
-    assert.equal(await bucketCount(`order:page:${s.pageA}`), 1, "only the real order counted for the page");
-    assert.equal(await bucketCount(storeBucketKey(tA.scope, "orders")), 1, "honeypots never count for the store flood breaker");
+    assert.equal(await bucketCount(storeBucket(tA.scope, "order:page", s.pageA)), 1, "only the real order counted for the page");
+    assert.equal(await bucketCount(storeBucket(tA.scope, "orders")), 1, "honeypots never count for the store flood breaker");
   });
 
   await check("a page flood flags orders instead of refusing real shoppers", async () => {
-    await presetBucket(`order:page:${s.pageA}`, 5000);
+    await presetBucket(storeBucket(tA.scope, "order:page", s.pageA), 5000);
     const r = await order(newPhone(), newIp());
     assert.equal(r.response.ok, true, `refused: ${JSON.stringify(r.response)}`);
     const row = await stored(orderId(r));
     assert.ok(row?.flags?.includes("page_burst"), `flags: ${JSON.stringify(row?.flags)}`);
-    await db.execute(sql`DELETE FROM rate_limits WHERE bucket = ${`order:page:${s.pageA}`}`);
+    await db.execute(sql`DELETE FROM rate_limits WHERE bucket = ${storeBucket(tA.scope, "order:page", s.pageA)}`);
   });
 
   await check("duplicate: only the ordering network hears it, never with an order id", async () => {
@@ -561,13 +521,13 @@ async function scenarios(s: Seed) {
   });
 
   await check("store flood breaker: s:<sid>:orders at its limit answers 429 in that store only (ORD-21)", async () => {
-    await presetBucket(storeBucketKey(tA.scope, "orders"), STORE_FLOOD_LIMIT);
+    await presetBucket(storeBucket(tA.scope, "orders"), STORE_FLOOD_LIMIT);
     const refused = await order(newPhone(), newIp());
     assert.deepEqual(refused.response, { ok: false, error: "rate_limited" });
     assert.ok((refused.retryAfter ?? 0) > 0);
     assert.equal((await order(newPhone(), newIp(), { honeypot: true })).response.ok, true, "a bot still gets its decoy");
     assert.equal((await order(newPhone(), newIp(), { target: tB })).response.ok, true, "store B keeps taking orders");
-    await db.execute(sql`DELETE FROM rate_limits WHERE bucket = ${storeBucketKey(tA.scope, "orders")}`);
+    await db.execute(sql`DELETE FROM rate_limits WHERE bucket = ${storeBucket(tA.scope, "orders")}`);
   });
 
   await check("blocklist: one store's entry never blocks another store's shopper (ORD-03)", async () => {
@@ -718,7 +678,7 @@ async function scenarios(s: Seed) {
     await lead(tA, s.keyA, { idem: testIdem, test: true });
     assert.equal((await db.select().from(leads).where(eq(leads.idem, testIdem)))[0]?.isTest, true);
     const ip = newIp();
-    await presetBucket(storeBucketKey(tA.scope, "lead:ip", hashIp(ip)), 30);
+    await presetBucket(storeBucket(tA.scope, "lead:ip", hashIp(ip)), 30);
     assert.deepEqual(await lead(tA, s.keyA, { ip }), { stored: false }, "store A's budget for this network is spent");
     assert.deepEqual(await lead(tB, s.keyB, { ip }), { stored: true }, "store B has its own");
   });
@@ -865,11 +825,10 @@ async function scenarios(s: Seed) {
 }
 
 async function main() {
-  installSettingsDouble();
+  installNavigationAlias();
   await pure();
   if (!OFFLINE) await database();
   else console.log("--offline: database checks skipped");
-  if (doubled.size) console.log(`  · T1 settings API is a C0a stub: ${[...doubled].join(", ")} answered by the suite's double (Turnstile keys empty)`);
   console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
   process.exit(failures ? 1 : 0);
 }

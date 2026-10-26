@@ -40,7 +40,7 @@ import { db } from "@/lib/db/client";
 import { newOrderId } from "@/lib/db/ids";
 import { blocklist, leads, orders } from "@/lib/db/schema";
 import { hashIp, sign } from "@/lib/security/crypto";
-import { rateLimit, type RateResult } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket, type RateResult } from "@/lib/security/rate-limit";
 import { leadItem } from "@/lib/page/catalog";
 import { fromCents, offerMath } from "@/lib/page/pricing";
 import type { PageDoc } from "@/lib/page/schema";
@@ -61,13 +61,10 @@ import { validateOrder } from "./validate";
 /* Rate buckets of the public write path (§E.8)                        */
 /* ------------------------------------------------------------------ */
 
-/**
- * `s:<storeId>:<name>:<key>` and `p:<name>:<key>`, the §E.8 shapes (keys are hashes, never raw IPs). C0b's
- * `storeBucket` / `platformBucket` build the same strings; these become calls to them when the branded
- * `Bucket` type lands, with no bucket renamed.
+/*
+ * `s:<storeId>:<name>:<key>` and `p:<name>:<key>`, the §E.8 shapes (keys are hashes, never raw IPs), built by C0b's
+ * `storeBucket` / `platformBucket` (R1.0 integration: the same strings as T3's interim builders, no bucket renamed).
  */
-export const storeBucketKey = (scope: StoreScope, name: string, key?: string) => `s:${scope.storeId}:${name}${key ? `:${key}` : ""}`.slice(0, 191);
-export const platformBucketKey = (name: string, key?: string) => `p:${name}${key ? `:${key}` : ""}`.slice(0, 191);
 
 /** stored-order attempts per store per 10 min above which the store answers 429 (ORD-21, §E.8) */
 export const STORE_FLOOD_LIMIT = 600;
@@ -297,7 +294,17 @@ async function placeOrder(scope: WriteScope, payload: OrderPayload, ctx: CreateO
   // 2. fields & prices against the version the shopper saw (bots that filled the honeypot learn nothing)
   const version = await orderVersion(scope, resolved, payload as { v?: unknown; ver?: unknown });
   // the version validated against: stored on the order, and its pixels get the server events
-  const target: PageTarget = { ...resolved, versionId: version.versionId, doc: version.doc };
+  const target: PageTarget = {
+    kind: resolved.kind,
+    storeId: resolved.storeId,
+    pageId: resolved.pageId,
+    versionId: version.versionId,
+    exportId: resolved.exportId,
+    exportMode: resolved.exportMode,
+    allowedOrigins: resolved.allowedOrigins,
+    doc: version.doc,
+    source: resolved.source,
+  };
   const { doc } = target;
   const honeypot = !!payload.website || !!ctx.honeypot;
   const decoy = (): CreateOrderResult => ({ response: decoyResponse(doc, payload.bundleId, store), sync: false });
@@ -322,10 +329,10 @@ async function placeOrder(scope: WriteScope, payload: OrderPayload, ctx: CreateO
 
   // 4. per-IP limit in this store (8 / 10 min, ORD-02) — only the caller's own network fills it; then the store
   //    flood breaker (ORD-21), counted for stored-order attempts only (honeypots never count)
-  const byIp = await rateLimit(storeBucketKey(scope, "order:ip", ipHash), 8, 600);
+  const byIp = await rateLimit(storeBucket(scope, "order:ip", ipHash), 8, 600);
   if (!byIp.ok) return throttled([byIp]);
   if (!honeypot) {
-    const flood = await rateLimit(storeBucketKey(scope, "orders"), STORE_FLOOD_LIMIT, 600);
+    const flood = await rateLimit(storeBucket(scope, "orders"), STORE_FLOOD_LIMIT, 600);
     if (!flood.ok) return throttled([flood]);
   }
 
@@ -400,7 +407,7 @@ async function placeOrder(scope: WriteScope, payload: OrderPayload, ctx: CreateO
       const frees = recent[PHONE_DAILY_LIMIT - 1]!.createdAt.getTime() + PHONE_WINDOW_MS;
       return fail("rate_limited", { retryAfter: Math.max(1, Math.ceil((frees - now.getTime()) / 1000)) });
     }
-    const byPage = await rateLimit(`order:page:${target.pageId}`, PAGE_BURST, 600);
+    const byPage = await rateLimit(storeBucket(scope, "order:page", target.pageId), PAGE_BURST, 600);
     pageBurst = !byPage.ok;
   }
 

@@ -10,6 +10,8 @@
  */
 import "server-only";
 import { createHash } from "node:crypto";
+// a function-only import cycle (host.ts reads requestHost from here): nothing runs at module evaluation
+import { effectiveHost } from "@/lib/edge/host";
 import { safeEqual, sign } from "@/lib/security/crypto";
 import { isCloudflareIp, isInternalIp } from "@/lib/security/ip";
 import {
@@ -145,32 +147,17 @@ export function requestHost(headers: Headers): string | null {
   return host;
 }
 
-/** ADMIN_HOST check: true on the dedicated admin host, or anywhere when none is configured. */
+/**
+ * ADMIN_HOST check on the §C.2 effective host class, like the proxy (CCR r1.0-t3-2): true on the console host
+ * (ADMIN_HOST), or on the platform host while no ADMIN_HOST is set; never on a store, custom, legacy, reserved,
+ * invalid or foreign host. Outside production local hosts are `platform`, so development keeps working.
+ */
 export function isAdminHost(headers: Headers): boolean {
-  const dedicated = adminHost();
-  return dedicated === null || requestHost(headers) === dedicated;
+  const cls = effectiveHost(headers).cls;
+  return adminHost() === null ? cls === "platform" : cls === "console";
 }
 
 /** The whole gate check outside the proxy: admin host, IP allowlist and a valid gate cookie. */
 export function hasGateAccess(token: string | null | undefined, headers: Headers): boolean {
   return isAdminHost(headers) && isAdminIpAllowed(headers) && verifyGateToken(token);
-}
-
-export type AdminArea = "page" | "api";
-
-/**
- * Classifies a request path as admin UI, admin API, or neither. Percent-decoding, case-folding and
- * slash-collapsing make sure encoded or oddly-cased variants are still treated as admin paths.
- */
-export function adminAreaOf(pathname: string): AdminArea | null {
-  let path = pathname;
-  try {
-    path = decodeURIComponent(pathname);
-  } catch {
-    // keep the raw path; malformed escapes can't route anywhere sensible anyway
-  }
-  path = path.replace(/\\/g, "/").replace(/\/{2,}/g, "/").toLowerCase();
-  if (path === "/admin" || path.startsWith("/admin/")) return "page";
-  if (path === "/api/admin" || path.startsWith("/api/admin/")) return "api";
-  return null;
 }

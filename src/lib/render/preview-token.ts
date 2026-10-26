@@ -14,16 +14,17 @@ import "server-only";
  * Activity as a counter, no PII). Audit `store.preview_link.created` / `.revoked` in the page's store. Accepted
  * scopes: member and platform (staff mint with `platformScope`); a revoked or expired link answers the 404.
  */
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { eq, gt, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
 import { pages, previewTokens } from "@/lib/db/schema";
 import { open, seal } from "@/lib/security/crypto";
+import { getStoreById, publicScope } from "@/lib/tenancy/public";
 import { SeamError } from "@/lib/tenancy/seam";
-import { inStore } from "@/lib/tenancy/sql";
-import type { Actor, StoreScope } from "@/lib/tenancy/types";
+import { storeValues, whereStore } from "@/lib/tenancy/sql";
+import type { Actor, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { previewUrl } from "@/lib/urls";
 
 /** The longest a preview link may live: 3 days. */
@@ -64,6 +65,31 @@ const auditScope = (scope: StoreScope, actor?: Actor) => ({
   impersonatorId: actor?.impersonatorId ?? null,
 });
 
+/**
+ * The write scope of a preview link's row, in the caller's store. A platform scope is read-only by type (D71), and a
+ * preview link is the staff member's own bookkeeping row (who minted it is the audited actor), so both accepted
+ * callers write through a system scope of the same store, after the kind check (R1.0 integration, lint L6).
+ */
+async function linkScope(scope: StoreScope): Promise<WriteScope> {
+  const { systemCtx, systemScope } = await import("@/lib/jobs/scope");
+  return systemScope(systemCtx("preview-link"), scope.storeId);
+}
+
+type LinkRow = { id: string; pageId: string; audience: "staff" | "seller"; staffUserId: string | null; createdBy: string | null; expiresAt: Date };
+
+async function insertLink(scope: WriteScope, row: LinkRow): Promise<void> {
+  await db.insert(previewTokens).values(storeValues(scope, row));
+}
+
+/** Revokes a live link of the store; the number of rows changed (0: unknown, another store's, already revoked). */
+async function revokeLink(scope: WriteScope, tokenId: string): Promise<number> {
+  const res = await db
+    .update(previewTokens)
+    .set({ revokedAt: new Date() })
+    .where(whereStore(previewTokens, scope, eq(previewTokens.id, tokenId), isNull(previewTokens.revokedAt)));
+  return (Array.isArray(res) ? (res[0] as { affectedRows?: number }) : (res as { affectedRows?: number }))?.affectedRows ?? 0;
+}
+
 export async function mintPreviewToken(
   scope: StoreScope,
   input: { pageId: string; ttlSec: number /* ≤ 259200 */; audience: "staff" | "seller"; staffUserId?: string; /** who mints (created_by, audit) */ actor?: Actor },
@@ -74,7 +100,7 @@ export async function mintPreviewToken(
   const [page] = await db
     .select({ id: pages.id })
     .from(pages)
-    .where(and(inStore(pages, scope), eq(pages.id, v.pageId)))
+    .where(whereStore(pages, scope, eq(pages.id, v.pageId)))
     .limit(1);
   if (!page) throw new SeamError("not_found");
 
@@ -91,9 +117,8 @@ export async function mintPreviewToken(
   };
   // sealed before the row is written: a sealing failure leaves no orphan row
   const token = seal(JSON.stringify(payload), "platform", PURPOSE);
-  await db.insert(previewTokens).values({
+  await insertLink(await linkScope(scope), {
     id: jti,
-    storeId: scope.storeId,
     pageId: page.id,
     audience: v.audience,
     staffUserId: v.staffUserId ?? null,
@@ -114,12 +139,7 @@ export async function mintPreviewToken(
 export async function revokePreviewToken(scope: StoreScope, tokenId: string, actor?: Actor): Promise<void> {
   if (scope.kind !== "member" && scope.kind !== "platform") throw new SeamError("forbidden");
   if (!Id26.safeParse(tokenId).success) throw new SeamError("not_found");
-  const res = await db
-    .update(previewTokens)
-    .set({ revokedAt: new Date() })
-    .where(and(inStore(previewTokens, scope), eq(previewTokens.id, tokenId), isNull(previewTokens.revokedAt)));
-  const n = (Array.isArray(res) ? (res[0] as { affectedRows?: number }) : (res as { affectedRows?: number }))?.affectedRows ?? 0;
-  if (n !== 1) throw new SeamError("not_found");
+  if ((await revokeLink(await linkScope(scope), tokenId)) !== 1) throw new SeamError("not_found");
   await audit("store.preview_link.revoked", { userId: actor?.userId ?? null, ip: actor?.ip ?? null, target: tokenId, scope: auditScope(scope, actor) });
 }
 
@@ -139,15 +159,16 @@ export async function openPreviewToken(token: string, now = new Date()): Promise
     return null;
   }
   if (payload.exp * 1000 <= now.getTime()) return null;
-  // the envelope authenticated the store id: this read is in the token's store
-  const live = and(
-    eq(previewTokens.storeId, payload.storeId),
-    eq(previewTokens.id, payload.jti),
-    eq(previewTokens.pageId, payload.pageId),
-    isNull(previewTokens.revokedAt),
-    gt(previewTokens.expiresAt, now),
-  );
+  // the envelope authenticated the store id: this write is in the token's store (its public scope)
+  const store = await getStoreById(payload.storeId);
+  if (!store) return null;
+  return (await countOpen(publicScope(store), payload, now)) ? payload : null;
+}
+
+/** Bumps `opened` of the token's live row in its store; false when the row is missing, revoked or expired. */
+async function countOpen(scope: WriteScope, payload: PreviewPayload, now: Date): Promise<boolean> {
+  const live = whereStore(previewTokens, scope, eq(previewTokens.id, payload.jti), eq(previewTokens.pageId, payload.pageId), isNull(previewTokens.revokedAt), gt(previewTokens.expiresAt, now));
   const res = await db.update(previewTokens).set({ opened: sql`${previewTokens.opened} + 1`, lastOpenedAt: now }).where(live);
   const n = (Array.isArray(res) ? (res[0] as { affectedRows?: number }) : (res as { affectedRows?: number }))?.affectedRows ?? 0;
-  return n === 1 ? payload : null;
+  return n === 1;
 }

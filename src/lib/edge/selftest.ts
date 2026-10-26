@@ -441,7 +441,7 @@ async function main(): Promise<void> {
     const nonce = f.get("x-nonce") ?? "";
     check(nonce !== "forged" && (ui.headers.get("content-security-policy") ?? "").includes(`'nonce-${nonce}'`), "the forwarded x-nonce is the response CSP's nonce");
     eq(f.get("content-security-policy"), ui.headers.get("content-security-policy"), "the request carries the CSP (Next reads the nonce there)");
-    eq(f.get("x-cs-pathname"), "/admin/orders?page=2", "x-cs-pathname is the proxy's");
+    check(!f.has("x-cs-pathname"), "a client x-cs-pathname is deleted and never re-stamped (CCR r1.0-t3-1)");
     eq(verifiedRequestPath(f), "/admin/orders?page=2", "x-sg-path stamped and signed");
     eq(ui.headers.get("cache-control"), "private, no-store", "console: private, no-store");
     eq(ui.headers.get("referrer-policy"), "same-origin", "console: Referrer-Policy same-origin");
@@ -471,7 +471,7 @@ async function main(): Promise<void> {
     const app = run("/app/shop1/orders");
     check(isUi(app), "/app: platform UI");
     eq([app.headers.get("referrer-policy"), app.headers.get("cache-control")], ["same-origin", "private, no-store"], "/app: same-origin, private");
-    check(forwarded(app)?.has("x-cs-pathname") === false, "x-cs-pathname only on console requests");
+    check(forwarded(app)?.has("x-cs-pathname") === false, "no x-cs-pathname on /app either");
 
     const kit = run("/kit/tok");
     check(isUi(kit), "/kit: platform UI");
@@ -748,7 +748,19 @@ async function main(): Promise<void> {
     check(!gate.hasGateAccess(t, h({ host: PLATFORM })), "hasGateAccess: the platform host is refused");
     check(!gate.hasGateAccess(t, h({ host: PLATFORM, "x-forwarded-host": CONSOLE })), "hasGateAccess: a forged X-Forwarded-Host is refused");
     check(!gate.hasGateAccess(legacyT, h({ host: CONSOLE })), "hasGateAccess: a cookie from before ADMIN_HOST is refused");
+    check(!gate.hasGateAccess(t, h({ host: LEGACY })), "hasGateAccess (ADMIN_HOST): a legacy host is refused");
   });
+  {
+    // CCR r1.0-t3-2: the re-check decides on the effective host class, never wider than the proxy
+    const shared = gate.issueGateToken();
+    check(!gate.hasGateAccess(shared, h({ host: LEGACY })), "shared origin: a legacy host is refused");
+    check(!gate.hasGateAccess(shared, h({ host: "foreign.example.org" })), "shared origin: a foreign host is refused");
+    check(!gate.hasGateAccess(shared, h({ host: STORE })), "shared origin: a store host addressed directly is refused");
+    withEnv(S_MODE, () => {
+      check(!gate.hasGateAccess(shared, h({ host: PLATFORM, ...workerHeaders(STORE) })), "shared origin: a store host through the Worker is refused");
+      check(!gate.hasGateAccess(shared, h({ host: PLATFORM, ...workerHeaders(STORE, { key: "wrong-key-wrong-key-wrong-key-00" }) })), "shared origin: an unverifiable edge (invalid) is refused");
+    });
+  }
   {
     const shared = gate.issueGateToken();
     check(gate.hasGateAccess(shared, h({ host: PLATFORM })), "shared origin: hasGateAccess on the platform host");

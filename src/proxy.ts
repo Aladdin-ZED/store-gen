@@ -6,7 +6,7 @@
  *
  *  1. eff = effectiveHost(headers) (§C.2: the verified Worker headers, else the addressed Host; an x-sg-edge
  *     that does not verify is class "invalid", counted as `bad_key`), area = areaOf(pathname).
- *  2. Forwarded request headers: client copies of x-nonce / x-cs-pathname and of every x-sg-* deleted (the
+ *  2. Forwarded request headers: client copies of x-nonce / the legacy x-cs-pathname and of every x-sg-* deleted (the
  *     Worker's six kept when the edge verified, so handlers can re-verify, D18), the signed request path set
  *     (x-sg-path, x-sg-rid, x-sg-path-sig; SEC-3), the nonce headers for platform UI areas, and the Cookie
  *     header deleted wherever no cookie is ever needed (store pages, previews, public APIs; SEC-2).
@@ -35,7 +35,7 @@
  * hosts): this is the outer wall.
  */
 import { NextResponse, type NextRequest } from "next/server";
-import { ADMIN_PATH_HEADER, GATE_COOKIE, IS_PROD, NONCE_HEADER } from "@/lib/auth/config";
+import { GATE_COOKIE, IS_PROD, NONCE_HEADER } from "@/lib/auth/config";
 import { gateCookieOptions, gateTokenIssuedAt, isAdminIpAllowed, issueGateToken, shouldRenewGateToken } from "@/lib/auth/gate";
 import { UNKNOWN_PAGE_HTML, unknownPageHeaders } from "@/lib/auth/unknown-page";
 import { areaOf, isAppManifestPath, normalizePath, storePathParts, type Area } from "@/lib/edge/areas";
@@ -43,7 +43,7 @@ import { DEVICE_COOKIE, deviceCookieOptions, newDeviceId, readDeviceId } from "@
 import { adminHostName, platformUrl } from "@/lib/edge/env";
 import { EDGE_HEADERS, edgeCheck, effectiveHost, type EffectiveHost } from "@/lib/edge/host";
 import { noteEdgeCheck, reportForeignHost } from "@/lib/edge/proxy-log";
-import { PATH_HEADER_MAX, stampRequestPath } from "@/lib/edge/path-sig";
+import { stampRequestPath } from "@/lib/edge/path-sig";
 import { generateNonce, hstsValue, platformUiHeaders, redirectHeaders, type PlatformUiArea } from "@/lib/security/headers";
 
 interface Ctx {
@@ -112,11 +112,14 @@ function toPlatform(ctx: Ctx, status: 307 | 308): NextResponse | null {
   return redirect(ctx, urlOn(origin.origin, ctx.pathname, ctx.search), status);
 }
 
+/** The pre-R1.0 console path header: the app reads the signed x-sg-path now (CCR r1.0-t3-1); a client copy is still deleted. */
+const LEGACY_PATH_HEADER = "x-cs-pathname";
+
 /** The request headers the app sees (step 2). */
 function forwardHeaders(ctx: Ctx, opts: { cookie: boolean }): Headers {
   const headers = new Headers(ctx.req.headers);
   headers.delete(NONCE_HEADER);
-  headers.delete(ADMIN_PATH_HEADER);
+  headers.delete(LEGACY_PATH_HEADER);
   const keepEdge = ctx.eff.via === "edge";
   for (const name of [...headers.keys()]) {
     if (name.startsWith("x-sg-") && !(keepEdge && EDGE_KEEP.has(name))) headers.delete(name);
@@ -151,8 +154,6 @@ function platformUi(ctx: Ctx, area: PlatformUiArea): NextResponse {
   const requestHeaders = forwardHeaders(ctx, { cookie: true });
   requestHeaders.set(NONCE_HEADER, nonce);
   requestHeaders.set("Content-Security-Policy", headers["Content-Security-Policy"]!);
-  // the console's redirect-back path (src/lib/auth/request.ts) until it reads x-sg-path (CCR r1.0-t3-1)
-  if (area === "console") requestHeaders.set(ADMIN_PATH_HEADER, `${ctx.pathname}${ctx.search}`.slice(0, PATH_HEADER_MAX));
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   for (const [name, value] of Object.entries(headers)) res.headers.set(name, value);
   return res;
