@@ -15,35 +15,41 @@
  * Google (Sheets, CAPI) that records every request.
  *
  * Suites:
- *  - repositories: the store repositories called with B's scope and A's ids (identical to a missing id), the
- *    impersonation scope (customer fields masked), the console scope (`listPagesForConsole`, SEC-18)
+ *  - repositories: the store repositories called with B's scope and A's ids (identical to a missing id; every
+ *    scoped export of src/lib that takes an id, a slug or a document), the impersonation scope (customer fields
+ *    masked), the console scope (`listPagesForConsole`, SEC-18)
  *  - actions × roles: every exported server action (the "use server" files, derived from the tree) on B's path with
  *    A's ids, on A's path, with B's own record beside A's (B's page, A's version), and in B's own store for the role
  *    matrix (a key the role lacks → `forbidden`; a granted role reaches the body)
- *  - routes: every route handler under src/app/api/** and src/app/app/** (derived from the tree, SEC-9), every method,
- *    on A's handle and on B's handle with A's ids (the neutral 404, no canary), and the role matrix of each handler's
- *    own storeGuard key (403)
+ *  - routes: every route handler of src/app (derived from the tree, SEC-9), every method: the dashboard routes on A's
+ *    handle and on B's handle with A's ids (the neutral 404, no canary), the role matrix of each handler's own
+ *    storeGuard key (403 without it, the body with it); the public routes on A's address (no customer or secret
+ *    canary) and on B's address with A's slugs (nothing of A, never a redirect into A)
  *  - pages: every page and layout under /app/<handle> rendered as B's members on A's handle (the neutral 404), on B's
  *    handle with A's ids (no canary in the props that reach the client), and as A's owner (the canaries are found:
  *    the scan is not blind)
  *  - special cases: same slug, same pixel id with per-store tokens, a sheet listing A's order ids pulled for B, the
- *    blocklist, an identical image upload, A's `sourceAssetId`, a document naming A's asset (save, preview, export),
- *    the settings and pixel-usage caches, x-sg-path tampering, a store-host action, B connecting A's sheet, a
- *    client-sent x-sg-path on the upload route (SEC-3), the export allow-list (SEC-23), the cron tick's per-store
- *    loop, team, invites, preview tokens
+ *    blocklist, an identical image upload, A's `sourceAssetId`, a document naming A's asset (save, preview, export
+ *    estimate and ZIP), the settings and pixel-usage caches, x-sg-path tampering, a store-host action, B connecting
+ *    A's sheet, a client-sent x-sg-path on the upload route (SEC-3), the export allow-list (SEC-23), the cron tick's
+ *    per-store loop, a scope and a store row that disagree (the render cache), team, invites (reuse, expiry, escalation, enumeration, 10 parallel accepts, SEC-24), preview tokens (minted
+ *    from B, forged with A's page, SEC-7), a document naming A's asset at publish, the render of one slug in two
+ *    stores, a client-sent x-sg-path on a public route, a suspended store's page key, parallel uploads (the quota race)
+ *    and a pending store at the shared disk budget (D69)
  *  - impersonation (D70): staff "viewing as" a store through T2's seam: writes refused, no customer canary in any
- *    action, route or page payload
+ *    action, route or page payload; staff viewing B attacking A's paths, handle and ids like any member of B
+ *  - account and console: the pages outside /app/<handle> (picker, account, new store, console, sign-in) and the
+ *    account actions that take an id (another user's session, another store's id, another store's handle)
  *  - plug-ins: every scripts/qa/tenancy-cases/<track>.ts (`export const cases: TenancyCase[]`, DES-R13)
  *
- * Calls that reach another track's typed stub ("not implemented: T2 …") are listed as pending with the stub's name,
- * never counted as passes; they become real checks the day the stub is implemented. T1's settings, crypto,
- * entitlement, usage and store-loop stubs are answered by a local adapter instead (plain JSON rows, an HMAC and
- * AES-GCM under a random test key, everything allowed, in-memory counters, a plain loop over the stores), and T1's real
- * functions once they land (the adapter only answers "not implemented: T1"). Test secrets are random per run and never
- * printed. scripts/qa/action-replay.ts reuses this file's fixtures and cases. Exit code 1 when a check fails.
+ * All real code (R1.0: T1, T2, T3 and T4 merged): no adapter, no stand-in. A call that still ends in a typed stub
+ * ("not implemented: …") fails its check (until the R1.0 merge it was listed as pending). A case of the spec that has no
+ * code in R1.0 is listed under "not applicable" with its reason (`notApplicable`), never counted as a pass. Test
+ * secrets are random per run and never printed. scripts/qa/action-replay.ts reuses this file's fixtures and cases.
+ * Exit code 1 when a check fails.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createCipheriv, createDecipheriv, createHash, createHmac, generateKeyPairSync, randomBytes, randomInt } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, randomInt, randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import Module, { createRequire } from "node:module";
 import path from "node:path";
@@ -141,219 +147,11 @@ const M = Module as unknown as ModuleInternals;
 }
 
 /* ------------------------------------------------------------------ */
-/* T1 adapters (only while T1's functions answer "not implemented")    */
+/* typed stubs: every R1.0 track has merged, reaching one is a failure */
 /* ------------------------------------------------------------------ */
 
-type AnyFn = (...args: unknown[]) => unknown;
-/** true for the typed stub of `track` (C0a): "not implemented: T1 (getStoreSetting)" */
-export const stubError = (e: unknown, track?: string): boolean => e instanceof Error && e.message.startsWith(`not implemented: ${track ?? ""}`);
-/** "T3 (publishPage)" from a stub's error or log text */
-export const stubName = (text: string): string | null => /not implemented: (T\d|P\d|C0b|P0)[^"\n]*?\)/.exec(text)?.[0].replace("not implemented: ", "") ?? null;
-
-export const adapterUse = new Map<string, number>();
-const used = (name: string) => adapterUse.set(name, (adapterUse.get(name) ?? 0) + 1);
-/** usage counters of the adapter: `${owner}|${metric}|${period}` → value */
-export const usageCounters = new Map<string, number>();
-const TEST_KEY = randomBytes(32);
-
-type SettingsModule = typeof import("@/lib/settings/store-registry");
-async function adapterGet(scope: { storeId: string }, key: string): Promise<unknown> {
-  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
-  const { storeSettings } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
-  const { and, eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
-  const { STORE_SETTINGS, storeSettingSchema } = load<SettingsModule>("@/lib/settings/store-registry");
-  const [row] = await db
-    .select()
-    .from(storeSettings)
-    .where(and(eq(storeSettings.storeId, scope.storeId), eq(storeSettings.key, key)))
-    .limit(1);
-  const schema = storeSettingSchema(key as never);
-  const parsed = row ? schema.safeParse(row.value) : null;
-  return parsed?.success ? parsed.data : schema.parse(STORE_SETTINGS[key as keyof typeof STORE_SETTINGS].defaults() as never);
-}
-async function adapterSet(scope: { storeId: string }, key: string, input: unknown): Promise<unknown> {
-  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
-  const { storeSettings } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
-  const { storeSettingSchema } = load<SettingsModule>("@/lib/settings/store-registry");
-  const value = storeSettingSchema(key as never).parse(input as never);
-  await db
-    .insert(storeSettings)
-    .values({ storeId: scope.storeId, key, value, encrypted: false })
-    .onDuplicateKeyUpdate({ set: { value, encrypted: false } });
-  return structuredClone(value);
-}
-
-const cryptoKey = (scope: unknown, purpose: unknown) =>
-  createHash("sha256")
-    .update(TEST_KEY)
-    .update(`|${typeof scope === "string" ? scope : `store:${(scope as { store?: string }).store ?? "?"}`}|${String(purpose)}`)
-    .digest();
-
-const ADAPTERS: Record<string, (real: Record<string, AnyFn>) => Record<string, AnyFn>> = {
-  "src/lib/settings/index.ts": (real) => {
-    const fallback =
-      (name: string, impl: AnyFn): AnyFn =>
-      async (...args) => {
-        try {
-          return await real[name]!(...args);
-        } catch (e) {
-          if (!stubError(e, "T1")) throw e;
-          used(name);
-          return impl(...args);
-        }
-      };
-    return {
-      getStoreSetting: fallback("getStoreSetting", (scope, key) => adapterGet(scope as { storeId: string }, key as string)),
-      getStoreSettings: fallback("getStoreSettings", async (scope, keys) => {
-        const out: Record<string, unknown> = {};
-        for (const k of keys as string[]) out[k] = await adapterGet(scope as { storeId: string }, k);
-        return out;
-      }),
-      setStoreSetting: fallback("setStoreSetting", (scope, key, input) => adapterSet(scope as { storeId: string }, key as string, input)),
-      updateStoreSetting: fallback("updateStoreSetting", async (scope, key, patch) => {
-        const { STORE_SETTINGS } = load<SettingsModule>("@/lib/settings/store-registry");
-        const { isMaskedSecret } = load<typeof import("@/lib/settings/fields")>("@/lib/settings/fields");
-        const current = (await adapterGet(scope as { storeId: string }, key as string)) as Record<string, unknown>;
-        const next: Record<string, unknown> = { ...current, ...(patch as Record<string, unknown>) };
-        const sensitive = (STORE_SETTINGS[key as keyof typeof STORE_SETTINGS] as { sensitive?: readonly string[] }).sensitive ?? [];
-        for (const f of sensitive) if (isMaskedSecret(next[f])) next[f] = current[f];
-        return adapterSet(scope as { storeId: string }, key as string, next);
-      }),
-      getPlatformSetting: fallback("getPlatformSetting", (key) => {
-        const { platformSettingSchema } = load<typeof import("@/lib/settings/platform-registry")>("@/lib/settings/platform-registry");
-        return platformSettingSchema(key as never).parse({} as never);
-      }),
-    };
-  },
-  "src/lib/security/crypto.ts": (real) => {
-    const fallback =
-      (name: string, impl: AnyFn): AnyFn =>
-      (...args) => {
-        try {
-          return real[name]!(...args);
-        } catch (e) {
-          if (!stubError(e, "T1")) throw e;
-          used(name);
-          return impl(...args);
-        }
-      };
-    return {
-      hmacBytes: fallback("hmacBytes", (data, purpose) =>
-        createHmac("sha256", TEST_KEY)
-          .update(String(purpose))
-          .update(data as Uint8Array)
-          .digest("hex"),
-      ),
-      seal: fallback("seal", (plain, scope, purpose) => {
-        const iv = randomBytes(12);
-        const c = createCipheriv("aes-256-gcm", cryptoKey(scope, purpose), iv);
-        const ct = Buffer.concat([c.update(String(plain), "utf8"), c.final()]);
-        return `t1.${iv.toString("base64url")}.${c.getAuthTag().toString("base64url")}.${ct.toString("base64url")}`;
-      }),
-      open: fallback("open", (envelope, scope, purpose) => {
-        const [v, iv, tag, ct] = String(envelope).split(".");
-        if (v !== "t1" || !iv || !tag || ct === undefined) throw new Error("not an envelope");
-        const d = createDecipheriv("aes-256-gcm", cryptoKey(scope, purpose), Buffer.from(iv, "base64url"));
-        d.setAuthTag(Buffer.from(tag, "base64url"));
-        return Buffer.concat([d.update(Buffer.from(ct, "base64url")), d.final()]).toString("utf8");
-      }),
-    };
-  },
-  "src/lib/tenancy/entitlements.ts": (real) => {
-    const fallback =
-      (name: string, impl: AnyFn): AnyFn =>
-      async (...args) => {
-        try {
-          return await real[name]!(...args);
-        } catch (e) {
-          if (!stubError(e, "T1")) throw e;
-          used(name);
-          return impl(...args);
-        }
-      };
-    // features on, limits off: the suite is about which store, not about plans
-    return {
-      assertFeature: fallback("assertFeature", async () => undefined),
-      assertWithin: fallback("assertWithin", async () => undefined),
-      activeKillSwitches: fallback("activeKillSwitches", async () => []),
-    };
-  },
-  "src/lib/jobs/scope.ts": (real) => ({
-    // every store in the states, one by one, a failing store skipped (the job cursor and the budget are T1's)
-    forEachStore: async (...args) => {
-      try {
-        return await real.forEachStore!(...args);
-      } catch (e) {
-        if (!stubError(e, "T1")) throw e;
-        used("forEachStore");
-        const [ctx, opts, fn] = args as [unknown, { states: readonly string[] }, (scope: StoreScope, store: StoreRow) => Promise<void>];
-        const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
-        const { getStoreById } = load<typeof import("@/lib/tenancy/public")>("@/lib/tenancy/public");
-        const [rows] = (await pool().query("SELECT id FROM stores WHERE status IN (?) ORDER BY id", [opts.states])) as unknown as [{ id: string }[]];
-        let visited = 0;
-        for (const { id } of rows) {
-          const store = await getStoreById(id);
-          if (!store) continue;
-          visited++;
-          try {
-            await fn((real.systemScope as (c: unknown, id: string) => StoreScope)(ctx, id), store);
-          } catch (err) {
-            console.error(`[forEachStore adapter] store skipped: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        }
-        return { visited, done: true };
-      }
-    },
-  }),
-  "src/lib/tenancy/usage.ts": (real) => {
-    const key = (owner: string, metric: unknown, period?: unknown) =>
-      typeof metric === "object" && metric ? `${owner}|${(metric as { metric: string }).metric}|${(metric as { period: string }).period}` : `${owner}|${String(metric)}|${String(period)}`;
-    const add = (k: string, delta: number) => {
-      const v = Math.max(0, (usageCounters.get(k) ?? 0) + delta);
-      usageCounters.set(k, v);
-      return { value: v, limit: null };
-    };
-    const fallback =
-      (name: string, impl: AnyFn): AnyFn =>
-      async (...args) => {
-        try {
-          return await real[name]!(...args);
-        } catch (e) {
-          if (!stubError(e, "T1")) throw e;
-          used(name);
-          return impl(...args);
-        }
-      };
-    return {
-      chargeUsage: fallback("chargeUsage", (scope, metric, delta) => add(key((scope as { storeId: string }).storeId, metric), delta as number)),
-      refundUsage: fallback("refundUsage", (scope, metric, delta) => add(key((scope as { storeId: string }).storeId, metric), -(delta as number))),
-      chargePlatformUsage: fallback("chargePlatformUsage", (metric, period, delta) => add(key("platform", metric, period), delta as number)),
-      refundPlatformUsage: fallback("refundPlatformUsage", (metric, period, delta) => add(key("platform", metric, period), -(delta as number))),
-    };
-  },
-};
-{
-  const origLoad = M._load;
-  const proxied = new Map<string, unknown>();
-  M._load = function (request: string, parent: unknown, isMain: boolean) {
-    const exp = origLoad.call(this, request, parent, isMain);
-    if (!/settings|crypto|entitlements|usage|scope|^\.|^@\//.test(request)) return exp;
-    let rel = "";
-    try {
-      rel = path.relative(ROOT, M._resolveFilename(request, parent, isMain)).split(path.sep).join("/");
-    } catch {
-      return exp;
-    }
-    const make = ADAPTERS[rel];
-    if (!make) return exp;
-    if (!proxied.has(rel)) {
-      const real = exp as Record<string, AnyFn>;
-      const over = make(real);
-      proxied.set(rel, new Proxy(real, { get: (t, p) => (typeof p === "string" && p in over ? over[p] : Reflect.get(t, p)) }));
-    }
-    return proxied.get(rel);
-  };
-}
+/** "T3 (publishPage)" from a stub's error or log text ("not implemented: T3 (publishPage)") */
+export const stubName = (text: string): string | null => /not implemented: (T\d|P\d+|C0b|P0)[^"\n]*?\)/.exec(text)?.[0].replace("not implemented: ", "") ?? null;
 
 /* ------------------------------------------------------------------ */
 /* the network: a fake Google that records every request               */
@@ -402,14 +200,15 @@ export const fakeSheets = new Map<string, unknown[][]>();
 interface Tally {
   pass: number;
   fail: string[];
-  pending: Map<string, string[]>; // stub → check names
+  /** cases of the spec with no code in R1.0: "name · reason" */
+  na: string[];
   ms: number;
 }
 const tallies = new Map<string, Tally>();
 let currentSuite = "setup";
 const tally = (suite = currentSuite) => {
   let t = tallies.get(suite);
-  if (!t) tallies.set(suite, (t = { pass: 0, fail: [], pending: new Map(), ms: 0 }));
+  if (!t) tallies.set(suite, (t = { pass: 0, fail: [], na: [], ms: 0 }));
   return t;
 };
 let suiteStarted = Date.now();
@@ -434,20 +233,27 @@ export function check(name: string, ok: boolean, detail?: unknown): void {
   else t.fail.push(detail === undefined ? name : `${name}\n      ${short(detail)}`);
   if (VERBOSE || !ok) console.log(`${ok ? "  ✓" : "  ✗"} [${currentSuite}] ${name}${!ok && detail !== undefined ? ` · ${short(detail, 300)}` : ""}`);
 }
-/** A check that could not run: the code path ends in another track's typed stub. */
-export function pending(name: string, reason: string): void {
-  const t = tally();
-  const list = t.pending.get(reason) ?? [];
-  list.push(name);
-  t.pending.set(reason, list);
-  if (VERBOSE) console.log(`  … [${currentSuite}] ${name} · pending: ${reason}`);
+/**
+ * The calls behind a check ran real code. Every R1.0 track has merged, so a call that still ends in a typed stub
+ * ("not implemented: …") fails here (until the R1.0 merge such a check was listed as pending). True when none did.
+ */
+export function ranReal(label: string, ...outcomes: ({ stub: string | null } | null | undefined)[]): boolean {
+  const stub = outcomes.find((o) => o?.stub)?.stub ?? null;
+  if (stub) check(`${label}: runs real code`, false, `reached the typed stub ${stub}`);
+  return stub === null;
+}
+/** A case of the spec that has no code in R1.0 (named with its reason): listed, never a pass, never pending. */
+export function notApplicable(name: string, reason: string): void {
+  tally().na.push(`${name} · ${reason}`);
+  if (VERBOSE) console.log(`  – [${currentSuite}] ${name} · not applicable: ${reason}`);
 }
 
 /* ================================================================== */
 /* 2. calls inside Next's request stores                              */
 /* ================================================================== */
 
-export type Who = { userId: string } | { sessionToken: string } | { anonymous: true };
+/** who calls: a signed-in user (optionally with a fresh step-up, §B.7), a real session row, or nobody */
+export type Who = { userId: string; stepUpAt?: Date } | { sessionToken: string } | { anonymous: true };
 
 export interface Outcome<T = unknown> {
   ok: boolean;
@@ -1033,11 +839,22 @@ export async function snapshot(storeId: string): Promise<{ hash: string; tables:
   tables.stores = digest(store);
   const [members] = (await p.query("SELECT u.* FROM users u JOIN store_members m ON m.user_id = u.id WHERE m.store_id = ?", [storeId])) as unknown as [unknown[]];
   tables.users = digest(members);
+  // the account rows of A's members (sessions, resets, sign-in links, read marks: no store_id, keyed by the user)
+  const [userTables] = (await p.query(
+    "SELECT c.TABLE_NAME AS t FROM information_schema.COLUMNS c WHERE c.TABLE_SCHEMA = ? AND c.COLUMN_NAME = 'user_id' AND c.TABLE_NAME NOT IN (SELECT TABLE_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND COLUMN_NAME = 'store_id') ORDER BY 1",
+    [DB_NAME, DB_NAME],
+  )) as unknown as [{ t: string }[]];
+  for (const { t } of userTables) {
+    const [rows] = (await p.query("SELECT x.* FROM ?? x JOIN store_members m ON m.user_id = x.user_id WHERE m.store_id = ?", [t, storeId])) as unknown as [unknown[]];
+    tables[`${t} (A's members)`] = digest(rows);
+  }
+  // the visitor markers of A's pages (no store_id: a page id is global)
+  const [visitors] = (await p.query("SELECT v.* FROM stats_visitors v JOIN pages pg ON pg.id = v.page_id WHERE pg.store_id = ?", [storeId])) as unknown as [unknown[]];
+  tables.stats_visitors = digest(visitors);
   const [chunks] = (await p.query("SELECT c.`key`, c.idx, SHA2(c.data, 256) AS h FROM media_chunks c JOIN media_files f ON f.`key` = c.`key` WHERE f.store_id = ?", [storeId])) as unknown as [unknown[]];
   tables.media_chunks = digest(chunks);
   const [buckets] = (await p.query("SELECT bucket FROM rate_limits WHERE bucket LIKE ?", [`%${storeId}%`])) as unknown as [unknown[]];
   tables.rate_limits = digest(buckets);
-  tables.usage = digest([...usageCounters].filter(([k]) => k.startsWith(`${storeId}|`)));
   return { hash: createHash("sha256").update(text(tables)).digest("hex"), tables };
 }
 export function snapshotDiff(a: { tables: Record<string, string> }, b: { tables: Record<string, string> }): string[] {
@@ -1068,8 +885,6 @@ export interface ActionCase {
   own: (fx: Fixtures, fresh: Fresh) => Promise<unknown[]> | unknown[];
   /** arguments mixing the attacker's own record with A's (B's page, A's version): A's part answers as missing */
   mixed?: (fx: Fixtures, fresh: Fresh) => Promise<unknown[]> | unknown[];
-  /** the granted call ends in another track's store-less interim, refused or failing until the scoped form lands (named) */
-  interim?: string;
   /**
    * The caller acts on their own membership only (leaving the store): never posted on B's path by B's fixture members
    * nor by the member of both on A's path (they would leave), so A's path is attacked by every non-member of A and the
@@ -1119,7 +934,7 @@ function act(
   write: boolean,
   victim: ActionCase["victim"],
   own: ActionCase["own"],
-  opts: { interim?: string; mixed?: ActionCase["mixed"]; self?: true } = {},
+  opts: { mixed?: ActionCase["mixed"]; self?: true } = {},
 ): ActionCase {
   return { id: file.at(name), file: file.file, name, area, path, permission: Array.isArray(permission) ? permission : [permission], write, victim, own, ...opts };
 }
@@ -1219,7 +1034,6 @@ export const ACTION_CASES: ActionCase[] = [
   }),
   act(PIXELS, "pagePixelsAction", "pixels", "/pages", "pages.read", false, (fx) => [fx.A.page.live], (fx) => [fx.B.page.live]),
   act(PIXELS, "applyLiveTrackingAction", "pixels", "/pages", "pages.publish", true, (fx) => [{ pageId: fx.A.page.live, baseVersionId: fx.A.version.live }], (fx) => [{ pageId: fx.B.page.live, baseVersionId: fx.B.version.live }], {
-    interim: "T3 (publishTrackingOnly, scoped overload: CCR r1.0-t4-11)",
     mixed: (fx) => [{ pageId: fx.B.page.live, baseVersionId: fx.A.version.live }],
   }),
   act(PIXELS, "startPixelTestAction", "pixels", "/integrations/pixels", "pages.publish", true, (fx) => [{ pageId: fx.A.page.live, platform: "meta", id: fx.A.pixel.own, minutes: 30 }], (fx) => [{ pageId: fx.B.page.live, platform: "meta", id: fx.B.pixel.own, minutes: 30 }]),
@@ -1503,9 +1317,8 @@ export async function actionSuite(kit: Kit): Promise<void> {
       const label = `${c.id} · ${who.label} · B's path, A's ids`;
       if (namesA) {
         const ghost = await call({ userId: who.userId }, own, () => fn(...structuredClone(ghostArgs)));
-        if (real.stub || ghost.stub) pending(label, real.stub ?? ghost.stub!);
-        else check(`${label}: same answer as a missing id`, text(answerOf(real)) === text(unghost(fx, answerOf(ghost))), { real: answerOf(real), ghost: answerOf(ghost) });
-      } else if (real.stub) pending(label, real.stub);
+        if (ranReal(label, real, ghost)) check(`${label}: same answer as a missing id`, text(answerOf(real)) === text(unghost(fx, answerOf(ghost))), { real: answerOf(real), ghost: answerOf(ghost) });
+      } else ranReal(label, real);
       const leaked = leaks(fx, [answerOf(real), real.revalidated], { sent: args });
       check(`${label}: no canary of A`, leaked.length === 0, leaked);
       check(`${label}: revalidates only B's screens`, real.revalidated.every((t) => !t.includes(`/app/${fx.A.handle}`)), real.revalidated);
@@ -1531,8 +1344,7 @@ export async function actionSuite(kit: Kit): Promise<void> {
       const real = await call({ userId: fx.B.members.owner }, appPath(fx.B.handle, c.path), () => fn(...structuredClone(mixed)));
       const ghost = await call({ userId: fx.B.members.owner }, appPath(fx.B.handle, c.path), () => fn(...ghostify(fx, structuredClone(mixed))));
       const label = `${c.id} · B owner · B's record with A's`;
-      if (real.stub || ghost.stub) pending(label, real.stub ?? ghost.stub!);
-      else check(`${label}: same answer as a missing id`, text(answerOf(real)) === text(unghost(fx, answerOf(ghost))), { real: answerOf(real), ghost: answerOf(ghost) });
+      if (ranReal(label, real, ghost)) check(`${label}: same answer as a missing id`, text(answerOf(real)) === text(unghost(fx, answerOf(ghost))), { real: answerOf(real), ghost: answerOf(ghost) });
       check(`${label}: no canary of A`, leaks(fx, answerOf(real), { sent: mixed }).length === 0, leaks(fx, answerOf(real), { sent: mixed }));
     }
     const after = await snapshot(fx.A.id);
@@ -1548,8 +1360,7 @@ export async function actionSuite(kit: Kit): Promise<void> {
       const code = refusal(r);
       const label = `${c.id} · B ${role} · own store (${allowed ? "granted" : "not granted"})`;
       if (!allowed) check(`${label}: forbidden`, code === "forbidden", answerOf(r));
-      else if (r.stub) pending(label, r.stub);
-      else if (code === "server" && c.interim) pending(label, c.interim);
+      else if (!ranReal(label, r)) continue;
       // granted: the body runs (an answer of its own, never a refusal of the seam or a server error)
       else check(`${label}: reaches the body`, code !== "forbidden" && code !== "not_found" && code !== "threw" && code !== "server", answerOf(r));
     }
@@ -1571,19 +1382,17 @@ export interface RouteFile {
 
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
 
-/** Every route handler of the dashboard and the API (derived from src/app/api/** , src/app/app/** and src/app/s/**). */
+/** Every route handler of the app (derived from the whole src/app tree: dashboard, API, store routes, media, previews, SEO files). */
 export function deriveRoutes(): RouteFile[] {
   const out: RouteFile[] = [];
-  for (const base of ["api", "app", "s"]) {
-    for (const file of walk(path.join(ROOT, "src", "app", base), (f) => /[\\/]route\.(ts|tsx)$/.test(f))) {
-      const rel = path.relative(ROOT, file).split(path.sep).join("/");
-      const template = `/${rel.replace(/^src\/app\//, "").replace(/\/route\.tsx?$/, "")}`
-        .split("/")
-        .filter((seg) => !/^\(.*\)$/.test(seg))
-        .join("/");
-      const mod = load<Record<string, unknown>>(file);
-      out.push({ file: rel, template, methods: METHODS.filter((m) => typeof mod[m] === "function") });
-    }
+  for (const file of walk(path.join(ROOT, "src", "app"), (f) => /[\\/]route\.(ts|tsx)$/.test(f))) {
+    const rel = path.relative(ROOT, file).split(path.sep).join("/");
+    const template = `/${rel.replace(/^src\/app\//, "").replace(/\/?route\.tsx?$/, "")}`
+      .split("/")
+      .filter((seg) => !/^\(.*\)$/.test(seg))
+      .join("/");
+    const mod = load<Record<string, unknown>>(file);
+    out.push({ file: rel, template: template || "/", methods: METHODS.filter((m) => typeof mod[m] === "function") });
   }
   return out;
 }
@@ -1687,7 +1496,57 @@ function guardKey(route: RouteFile, method: string): StorePermission | null {
   if (start < 0) return null;
   const next = src.slice(start + 1).search(/^export\s/m);
   const body = next < 0 ? src.slice(start) : src.slice(start, start + 1 + next);
-  return (/storeGuard\([^)]*?"([a-z_.]+)"/.exec(body)?.[1] as StorePermission | undefined) ?? null;
+  // the first string literal of the call (`storeGuard(req, (await params).store, "media.read")`: the handle expression has parentheses)
+  return (/storeGuard\([^"]*?"([a-z_.]+)"/.exec(body)?.[1] as StorePermission | undefined) ?? null;
+}
+
+/**
+ * A public, platform or cron route (no store in a dashboard path): a member's session changes nothing and shows
+ * nothing it should not. On A's address (GET/HEAD): no customer or secret canary (A's published pages are public by
+ * design); on B's address with A's slug, A's old and draft slugs and `?p=` naming them: nothing of A at all and never
+ * a redirect into A; every other method (an empty body): the signed-out answer, no canary of A.
+ */
+async function publicRoute(fx: Fixtures, route: RouteFile, method: string, slugsA: string[]): Promise<void> {
+  const who = { userId: fx.B.members.owner };
+  const t = route.template;
+  const mediaKeyA = fx.canaries.ids.find((k) => k.startsWith(fx.A.asset.photo) && k !== fx.A.asset.photo) ?? "";
+  const params = (store: StoreFx, slug: string): Record<string, string> => {
+    const out: Record<string, string> = {};
+    if (t.includes("[store]")) out.store = store.handle;
+    if (t.includes("[slug]")) out.slug = slug;
+    if (t.includes("[id]")) out.id = idFor(fx, t, fx.A);
+    if (t.includes("[key]")) out.key = mediaKeyA;
+    if (t.includes("[token]")) out.token = "not-a-preview-token";
+    if (t.includes("[name]")) out.name = "argan";
+    if (t.includes("[doc]")) out.doc = "privacy";
+    if (t.includes("[kind]")) out.kind = "privacy";
+    return out;
+  };
+  const label = `${method} ${t}`;
+  if (method !== "GET" && method !== "HEAD") {
+    const r = await callRoute(who, route, method, params(fx.A, fx.A.slug), { body: {} });
+    const anon = await callRoute({ anonymous: true }, route, method, params(fx.A, fx.A.slug), { body: {} });
+    if (ranReal(`${label} · B owner, empty body`, r, anon)) check(`${label} · B owner, empty body: the signed-out answer`, text(routeAnswer(r)) === text(routeAnswer(anon)), { member: routeAnswer(r), anonymous: routeAnswer(anon) });
+    const leaked = leaks(fx, routeAnswer(r), { only: ["customer", "secret"] });
+    check(`${label} · B owner, empty body: no customer or secret canary of A`, leaked.length === 0, leaked);
+    return;
+  }
+  const onA = await callRoute(who, route, method, params(fx.A, fx.A.slug), {});
+  if (!ranReal(`${label} · B owner · A's address`, onA)) return;
+  const leakedA = leaks(fx, routeAnswer(onA), { only: ["customer", "secret"] });
+  check(`${label} · B owner · A's address: no customer or secret canary of A`, leakedA.length === 0, leakedA);
+  if (t === "/api/cron/tick") check(`${label} · B owner: refused without the cron key`, onA.ok && onA.value!.status >= 400, routeAnswer(onA));
+  if (!t.includes("[store]")) return;
+  for (const slug of [...new Set(slugsA)]) {
+    const p = params(fx.B, slug);
+    const onB = await callRoute(who, route, method, p, { query: { p: slug } });
+    const l = `${label} · B's address, A's slug "${slug}"`;
+    if (!ranReal(l, onB)) continue;
+    const leaked = leaks(fx, routeAnswer(onB), { sent: p });
+    check(`${l}: nothing of A`, leaked.length === 0, leaked);
+    const to = onB.ok ? (onB.value!.location ?? "") : "";
+    check(`${l}: never a redirect into A`, !to.includes(`/s/${fx.A.handle}`) && !(onB.ok && onB.value!.body.includes(`/s/${fx.A.handle}/`)), { status: onB.ok ? onB.value!.status : null, location: to });
+  }
 }
 
 export async function routeSuite(kit: Kit): Promise<void> {
@@ -1695,25 +1554,32 @@ export async function routeSuite(kit: Kit): Promise<void> {
   const { can } = load<typeof import("@/lib/auth/permissions")>("@/lib/auth/permissions");
   suite("routes");
   const routes = deriveRoutes();
-  check("the route list is derived from the tree (api/app/** and app/** handlers found)", routes.some((r) => r.template.startsWith("/api/app/")) && routes.some((r) => r.template.startsWith("/app/")), routes.map((r) => r.template));
+  check(
+    "the route list is derived from the tree (api/app/**, app/**, s/** and the root handlers found)",
+    ["/api/app/", "/app/", "/s/", "/media/", "/preview/", "/api/public/"].every((p) => routes.some((r) => r.template.startsWith(p))),
+    routes.map((r) => r.template),
+  );
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const [slugRows] = (await pool().query("SELECT slug FROM page_slug_history WHERE store_id = ?", [fx.A.id])) as unknown as [{ slug: string }[]];
+  // A's old slugs (a 308 to A's page on A's address): on B's address they are nobody's
+  const oldSlugsA = slugRows.map((r) => r.slug);
+  check("A has an old slug in its history (the redirect case below is not empty)", oldSlugsA.length > 0, oldSlugsA);
+  const [[draftRow]] = (await pool().query("SELECT slug FROM pages WHERE id = ?", [fx.A.page.draft])) as unknown as [[{ slug: string }]];
+  // the shared live slug, A's old slugs and the slug only A's draft uses
+  const slugsA = [fx.A.slug, ...oldSlugsA, draftRow.slug];
+  notApplicable(
+    "the public writes (POST /api/public/order, lead, event, upsell) with A's page key under a member's session",
+    "the public write path takes no session (a shopper's request): its two-store cases (A's page key from B's host in S mode, per-store limits, blocklist, idem, upsell) are test:public-api's",
+  );
   for (const route of routes) {
     const tenant = route.template.includes("[store]") && !route.template.startsWith("/s/");
     for (const method of route.methods) {
       const plan = routePlan(fx, method, route.template);
       const before = await snapshot(fx.A.id);
       if (!tenant) {
-        // public and cron routes: a member's session changes nothing and shows nothing of A (GET / HEAD only)
-        if (method !== "GET" && method !== "HEAD") continue;
-        for (const who of attackers(fx).slice(0, 1)) {
-          const params: Record<string, string> = {};
-          if (route.template.includes("[store]")) params.store = fx.A.handle;
-          if (route.template.includes("[slug]")) params.slug = fx.A.slug;
-          if (route.template.includes("[id]")) params.id = idFor(fx, route.template, fx.A);
-          const r = await callRoute({ userId: who.userId }, route, method, params, plan);
-          const leaked = leaks(fx, routeAnswer(r), { only: ["customer", "secret"] });
-          check(`${method} ${route.template} · ${who.label}: no customer or secret canary of A`, leaked.length === 0, leaked);
-          if (route.template === "/api/cron/tick") check(`${method} ${route.template} · ${who.label}: refused without the cron key`, r.ok && r.value!.status >= 400, routeAnswer(r));
-        }
+        await publicRoute(fx, route, method, slugsA);
+        const after = await snapshot(fx.A.id);
+        check(`${method} ${route.template}: A's rows unchanged by every attempt`, after.hash === before.hash, snapshotDiff(before, after));
         continue;
       }
       for (const who of attackers(fx)) {
@@ -1725,8 +1591,7 @@ export async function routeSuite(kit: Kit): Promise<void> {
           const la = `${method} ${route.template} · ${who.label} · A's handle`;
           const a = routeAnswer(onA);
           const g = JSON.parse(text(routeAnswer(onGhost)).split(fx.ghostHandle).join(fx.A.handle)) as unknown;
-          if (onA.stub) pending(la, onA.stub);
-          else {
+          if (ranReal(la, onA, onGhost)) {
             check(`${la}: same answer as an unknown handle`, text(a) === text(g), { onA: a, onGhost: g });
             check(`${la}: 404 (or the alias redirect)`, onA.ok && (onA.value!.status === 404 || (onA.value!.status === 307 && (onA.value!.location ?? "").includes(`/app/${fx.A.handle}/`))), a);
           }
@@ -1737,8 +1602,7 @@ export async function routeSuite(kit: Kit): Promise<void> {
         const real = await callRoute({ userId: who.userId }, route, method, { store: fx.B.handle, ...ids }, plan);
         const ghost = await callRoute({ userId: who.userId }, route, method, { store: fx.B.handle, ...ghostify(fx, ids) }, ghostify(fx, plan));
         const lb = `${method} ${route.template} · ${who.label} · B's handle, A's ids`;
-        if (real.stub || ghost.stub) pending(lb, real.stub ?? ghost.stub!);
-        else check(`${lb}: same answer as a missing id`, text(routeAnswer(real)) === text(unghost(fx, routeAnswer(ghost))), { real: routeAnswer(real), ghost: routeAnswer(ghost) });
+        if (ranReal(lb, real, ghost)) check(`${lb}: same answer as a missing id`, text(routeAnswer(real)) === text(unghost(fx, routeAnswer(ghost))), { real: routeAnswer(real), ghost: routeAnswer(ghost) });
         const leaked = leaks(fx, routeAnswer(real), { sent: [plan, ids] });
         check(`${lb}: no canary of A`, leaked.length === 0, leaked);
       }
@@ -1751,17 +1615,44 @@ export async function routeSuite(kit: Kit): Promise<void> {
       }
       const after = await snapshot(fx.A.id);
       check(`${method} ${route.template}: A's rows unchanged by every attempt`, after.hash === before.hash, snapshotDiff(before, after));
-      // the role matrix in B's own store: a role without the handler's key gets 403 before the body
-      if (key && route.template.startsWith("/api/app/")) {
-        for (const role of ROLES) {
-          if (can(role, key)) continue;
-          const ids: Record<string, string> = route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.B) } : {};
-          const r = await callRoute({ userId: fx.B.members[role] }, route, method, { store: fx.B.handle, ...ids }, {}, { photo: fx.B.photoBytes });
-          check(`${method} ${route.template} · B ${role} · own store: 403 without ${key}`, r.ok && r.value!.status === 403, routeAnswer(r));
-        }
+      // the role matrix in B's own store: a role without the handler's key is refused before the body (an API
+      // answers 403; a dashboard route the neutral 404 of a page), a granted role reaches the body with B's own
+      // records (so the refusals above are the code's, not a broken route's)
+      for (const role of ROLES) {
+        const granted = key === null ? role === "owner" : can(role, key);
+        if (key === null && !granted) continue;
+        const own = await ownRoutePlan(fx, kit.fresh, method, route.template);
+        // a granted member with a fresh step-up (a customer-data export asks for one, §B.7): the body runs
+        const r = await callRoute({ userId: fx.B.members[role], ...(granted ? { stepUpAt: new Date() } : {}) }, route, method, { store: fx.B.handle, ...own.ids }, granted ? own.plan : {}, { photo: fx.B.photoBytes });
+        const label = `${method} ${route.template} · B ${role} · own store`;
+        if (!ranReal(label, r)) continue;
+        const status = r.ok ? r.value!.status : 500;
+        if (!granted) check(`${label}: refused without ${key}`, route.template.startsWith("/api/app/") ? status === 403 : status === 403 || status === 404, routeAnswer(r));
+        else check(`${label}: reaches the handler${key ? ` with ${key}` : ""}`, r.ok && status < 500 && ![401, 403, 404].includes(status), routeAnswer(r));
       }
     }
   }
+}
+
+/** B's own records for one route method: the granted roles' positive control (destructive methods get fresh records). */
+async function ownRoutePlan(fx: Fixtures, fresh: Fresh, method: string, template: string): Promise<{ ids: Record<string, string>; plan: RoutePlan }> {
+  const B = fx.B;
+  const key = `${method} ${template}`;
+  if (key === "DELETE /api/app/[store]/media") return { ids: {}, plan: { query: { id: await fresh.asset(B), force: "1" } } };
+  if (key === "DELETE /api/app/[store]/export/[id]") return { ids: { id: await fresh.exportOf(B) }, plan: {} };
+  const plans: Record<string, RoutePlan> = {
+    "GET /api/app/[store]/media": { query: { sourceAssetId: B.asset.photo } },
+    "POST /api/app/[store]/media": { multipart: true },
+    "PATCH /api/app/[store]/media/[id]": { body: { focal: { x: 0.4, y: 0.6 } } },
+    "GET /api/app/[store]/export": { query: { pageId: B.page.live, versionId: B.version.live } },
+    "POST /api/app/[store]/export": { body: { versionId: B.version.live, mode: "connected", allowedOrigins: ["https://shop.example.org"], options: { hostConfigs: true } } },
+    "GET /api/app/[store]/export/estimate": { query: { versionId: B.version.live, mode: "php" } },
+    "GET /api/app/[store]/orders/export": { query: { page: B.page.live } },
+    "POST /api/app/[store]/sheets/connect": { body: { url: `https://docs.google.com/spreadsheets/d/${B.spreadsheetId}/edit#gid=0` } },
+    "PATCH /api/app/[store]/sheets/connect": { body: { enabled: true } },
+    "GET /app/[store]/preview/[id]": { query: { v: B.version.live } },
+  };
+  return { ids: template.includes("[id]") ? { id: idFor(fx, template, B) } : {}, plan: plans[key] ?? {} };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1907,8 +1798,7 @@ export async function pageSuite(kit: Kit): Promise<void> {
     // A's owner: the screen renders and carries A's data (the scan below is not blind)
     const mine = await renderPage({ userId: fx.A.members.owner }, page, { store: fx.A.handle, ...ids });
     const sees = ownerSees(fx, page.template);
-    if (mine.kind === "error" && mine.stub) pending(`${name} · A's owner renders`, mine.stub);
-    else check(`${name} · A's owner renders`, mine.kind === "render", mine);
+    if (ranReal(`${name} · A's owner renders`, mine.kind === "error" ? mine : null)) check(`${name} · A's owner renders`, mine.kind === "render", mine);
     if (sees && mine.kind === "render" && page.kind === "page") check(`${name} · A's owner sees A's data in the payload`, mine.payload.includes(sees), sees);
 
     for (const who of attackers(fx)) {
@@ -1926,7 +1816,7 @@ export async function pageSuite(kit: Kit): Promise<void> {
         const granted = perm ? can(who.role, perm) : true;
         if (!granted) check(`${label}: 404 for a role without ${perm}`, r.kind === "notFound", r.kind);
         else if (r.kind === "render") check(`${label}: no canary of A`, leaks(fx, r.payload, { sent: [sp, ids] }).length === 0, leaks(fx, r.payload, { sent: [sp, ids] }));
-        else if (r.kind === "error" && r.stub) pending(label, r.stub);
+        else if (!ranReal(label, r.kind === "error" ? r : null)) continue;
         // A's page id in B's builder: the neutral 404; an agent's dashboard: its own order queue
         else check(`${label}: 404 or a redirect inside B`, (r.kind === "notFound" && page.template.includes("[id]")) || (r.kind === "redirect" && r.to.startsWith(`/app/${fx.B.handle}/`)), r);
       }
@@ -1943,7 +1833,7 @@ async function same(fx: Fixtures, label: string, fn: (ids: Fixtures["A"]) => Pro
   const ghostA = ghostify(fx, structuredClone({ ...fx.A, photoBytes: undefined })) as unknown as Fixtures["A"];
   const real = await call({ anonymous: true }, "/", () => fn(fx.A));
   const ghost = await call({ anonymous: true }, "/", () => fn(ghostA));
-  if (real.stub || ghost.stub) return pending(label, real.stub ?? ghost.stub!);
+  if (!ranReal(label, real, ghost)) return;
   check(`${label}: same answer as a missing id`, text(answerOf(real)) === text(unghost(fx, answerOf(ghost))), { real: answerOf(real), ghost: answerOf(ghost) });
   const leaked = leaks(fx, answerOf(real), { sent: opts.sent });
   check(`${label}: no canary of A`, leaked.length === 0, leaked);
@@ -2085,17 +1975,121 @@ export async function repositorySuite(kit: Kit): Promise<void> {
   await same(fx, "listInvitesByScope(B)", () => INV.listInvitesByScope(B));
   // preview tokens (T3): A's page from B's scope
   const minted = await call({ anonymous: true }, "/", () => PT.mintPreviewToken(B, { pageId: fx.A.page.live, ttlSec: 3600, audience: "seller" }));
-  if (minted.stub) pending("mintPreviewToken(B, A's page) → not_found", minted.stub);
-  else check("mintPreviewToken(B, A's page) → not_found", !minted.ok && /not_found/.test(text(answerOf(minted))), answerOf(minted));
+  if (ranReal("mintPreviewToken(B, A's page) → not_found", minted)) check("mintPreviewToken(B, A's page) → not_found", !minted.ok && /not_found/.test(text(answerOf(minted))), answerOf(minted));
 
   const after = await snapshot(fx.A.id);
   check("A's rows unchanged by every repository attempt", after.hash === before.hash, snapshotDiff(before, after));
+
+
+  // the remaining scoped repositories of src/lib that take an id, a slug or a document, reached from B's scope with
+  // A's records (the store-wide ones: nothing of A); A's visit is recorded first, so its counters exist to protect
+  {
+    const SI = load<typeof import("@/lib/admin-data/store-info")>("@/lib/admin-data/store-info");
+    const AR = load<typeof import("@/lib/db/audit-rows")>("@/lib/db/audit-rows");
+    const RS = load<typeof import("@/lib/orders/resolve")>("@/lib/orders/resolve");
+    const HT = load<typeof import("@/lib/orders/http")>("@/lib/orders/http");
+    const UP = load<typeof import("@/lib/orders/upsell")>("@/lib/orders/upsell");
+    const TS = load<typeof import("@/lib/orders/turnstile")>("@/lib/orders/turnstile");
+    const RC = load<typeof import("@/lib/render/store-context.server")>("@/lib/render/store-context.server");
+    const SP = load<typeof import("@/lib/render/store-pages.server")>("@/lib/render/store-pages.server");
+    const CF = load<typeof import("@/lib/sheets/config")>("@/lib/sheets/config");
+    const SY = load<typeof import("@/lib/sheets/sync")>("@/lib/sheets/sync");
+    const ST = load<typeof import("@/lib/stats")>("@/lib/stats");
+    const OW = load<typeof import("@/lib/tenancy/owned")>("@/lib/tenancy/owned");
+    const MI = load<typeof import("@/lib/media/ids")>("@/lib/media/ids");
+    const GU = load<typeof import("@/lib/db/usage")>("@/lib/db/usage");
+    const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+    const scopeA = writeScope(fx.A.id);
+    const rowB = fx.rows.B;
+    await ST.recordEvent(scopeA, fx.A.page.live, { type: "view", vid: "tenancy-check-visitor" } as never, "203.0.113.20");
+    const minted = await PT.mintPreviewToken(scopeOf(fx.A.id), { pageId: fx.A.page.live, ttlSec: 3600, audience: "seller" });
+    fx.canaries.ids.push(minted.tokenId);
+    fx.ghosts.set(minted.tokenId, ghostOf(minted.tokenId));
+    const [[draftA]] = (await pool().query("SELECT slug FROM pages WHERE id = ?", [fx.A.page.draft])) as unknown as [[{ slug: string }]];
+    const [oldA] = (await pool().query("SELECT slug FROM page_slug_history WHERE store_id = ?", [fx.A.id])) as unknown as [{ slug: string }[]];
+    const before2 = await snapshot(fx.A.id);
+    // a document of B naming A's two files (a pasted id) beside B's own photo
+    const baseB = (await kit.fresh.doc(fx.B)) as unknown as import("@/lib/page/schema").PageDoc;
+    const naming = (a: StoreFx) => {
+      const d = structuredClone(baseB) as unknown as { product: { images: { id: string }[] } };
+      d.product.images = [{ id: fx.B.asset.photo }, { id: a.asset.photo }, { id: a.asset.cutout }];
+      return d as unknown as import("@/lib/page/schema").PageDoc;
+    };
+    await same(fx, "storeInfoFor(B)", () => SI.storeInfoFor(B));
+    await same(fx, "selectStoreAuditRows(B)", () => AR.selectStoreAuditRows(B, [], 200));
+    await same(fx, "assetsFor(B, a doc naming A's files)", (a) => ED.assetsFor(B, naming(a)), { sent: naming(fx.A) });
+    await same(fx, "previewSource(B, A's page, draft)", (a) => ED.previewSource(B, a.page.live, null));
+    await same(fx, "previewSource(B, A's page, A's version)", (a) => ED.previewSource(B, a.page.live, a.version.saved));
+    await same(fx, "previewSource(B, B's page, A's version)", (a) => ED.previewSource(B, fx.B.page.live, a.version.saved));
+    await same(fx, "versionDoc(B, A's version)", (a) => RS.versionDoc(B, a.version.live));
+    const siteKeyA = fx.canaries.data.find((c) => c.startsWith("0x4AAAAAAA"))!;
+    await same(fx, "versionEmbedsSiteKey(B, A's version, A's site key)", (a) => RS.versionEmbedsSiteKey(B, a.version.live, siteKeyA), { sent: siteKeyA });
+    await same(fx, "exportOrigins(B, A's export)", (a) => HT.exportOrigins(B, a.export));
+    await same(fx, "acceptUpsell(B, A's order)", (a) => UP.acceptUpsell(B, { orderId: a.order.main, token: "tenancy-check-upsell-token" }, { ip: "203.0.113.9" }));
+    await same(fx, "turnstileKeysFor(B)", () => TS.turnstileKeysFor(B));
+    await same(fx, "memberRole(B, A's owner)", (a) => PX.memberRole(B, a.members.owner));
+    await same(fx, "stopPixelTest(B, A's page, A's pixel)", (a) => PX.stopPixelTest(B, { pageId: a.page.live, platform: "meta", id: a.pixel.own }, bActor));
+    await same(fx, "revokePreviewToken(B, A's link)", () => PT.revokePreviewToken(scopeOf(fx.B.id), minted.tokenId), { sent: minted.tokenId });
+    // A's owner has no role in B: B's library rule refuses A's pixel for them (never A's grants)
+    const rule = await call({ anonymous: true }, "/", () => PX.enforceLibraryRule(B, { metaPixelId: [fx.A.pixel.own] }, userActor(fx.A.members.owner)));
+    check("enforceLibraryRule(B, A's pixel, actor = A's owner): refused (no role in B)", !rule.ok && /pixel_not_in_library/.test(text(answerOf(rule))), answerOf(rule));
+    // B's owner adds A's pixel id to B's library: B's own blank entry, nothing of A's entry (label, token, tests)
+    await PX.ensureInLibrary(B, [{ platform: "meta", id: fx.A.pixel.own }], bActor);
+    const entry = (await PX.pixelLibraryView(B, { canCreate: true, canSeeTokens: true, fresh: true })).pixels.find((p) => p.id === fx.A.pixel.own);
+    check("ensureInLibrary(B, A's pixel id): B's own blank entry, nothing of A's", !!entry && leaks(fx, entry, { sent: fx.A.pixel.own }).length === 0 && !text(entry).includes("EAAT"), entry);
+    // B's entry goes again (the id is one of A's canaries: B's own copy of it would read as a leak in the scans below)
+    await PX.removePixelEntry(B, { platform: "meta", id: fx.A.pixel.own }, bActor);
+    await same(fx, "hasHealthRow(B)", () => PH.hasHealthRow(B));
+    await same(fx, "storeAssetRows(B, A's files)", (a) => RC.storeAssetRows(B, [a.asset.photo, a.asset.cutout]));
+    const rcB = await RC.loadStoreRenderContext(B, rowB, { pageId: fx.A.page.live });
+    check("loadStoreRenderContext(B, pageId = A's page): nothing of A", leaks(fx, rcB, { sent: fx.A.page.live }).length === 0, leaks(fx, rcB, { sent: fx.A.page.live }));
+    const resolved = await RC.storeAssetResolver(B, rcB, naming(fx.A));
+    check("storeAssetResolver(B, a doc naming A's files): B's rows only", resolved.rows.every((r) => r.storeId === fx.B.id) && leaks(fx, resolved.rows).length === 0, resolved.rows.map((r) => r.id));
+    for (const slug of [fx.A.slug, draftA.slug, ...oldA.map((r) => r.slug)]) {
+      const pub = await SP.getPublishedPage(B, rowB, slug);
+      check(`getPublishedPage(B, "${slug}"): B's own page or none, nothing of A`, leaks(fx, pub, { sent: slug }).length === 0, leaks(fx, pub, { sent: slug }));
+      const moved = await SP.slugHistoryTarget(B, rowB, slug);
+      check(`slugHistoryTarget(B, "${slug}"): never a page of A`, oldA.some((r) => r.slug === slug) ? moved === null : leaks(fx, moved).length === 0, moved);
+    }
+    const storeWide: [string, () => Promise<unknown>][] = [
+      ["getStoreHomePage(B)", () => SP.getStoreHomePage(B, rowB)],
+      ["listSitemapPages(B)", () => SP.listSitemapPages(B, rowB)],
+      ["storeHasPublishedPage(B)", () => SP.storeHasPublishedPage(B, rowB)],
+      ["getStoreLegalDocument(B, privacy, ?p = A's slug)", () => SP.getStoreLegalDocument(B, rowB, "privacy", draftA.slug)],
+      ["activeSheet(B)", () => CF.activeSheet(B)],
+      ["pendingProof(B)", () => CF.pendingProof(B)],
+      ["selectSyncBatch(B)", () => SY.selectSyncBatch(B, {})],
+      ["getPageStats(B)", () => ST.getPageStats(B, { from: "2026-01-01", to: "2027-12-31" })],
+    ];
+    for (const [label, fn] of storeWide) {
+      const o = await call({ anonymous: true }, "/", fn);
+      if (ranReal(label, o)) check(`${label}: nothing of A`, o.ok && leaks(fx, o.value).length === 0, o.ok ? leaks(fx, o.value) : answerOf(o));
+    }
+    await same(fx, "getPageStats(B, pageIds = A's page)", (a) => ST.getPageStats(B, { from: "2026-01-01", to: "2027-12-31" }, { pageIds: [a.page.live] }));
+    await same(fx, "pushOrderStatus(B, A's order)", (a) => SY.pushOrderStatus(B, a.order.main, "confirmed"));
+    for (const [kind, pick] of [
+      ["page", (a: StoreFx) => a.page.live],
+      ["version", (a: StoreFx) => a.version.saved],
+      ["asset", (a: StoreFx) => a.asset.photo],
+      ["export", (a: StoreFx) => a.export],
+      ["pixel", (a: StoreFx) => a.pixel.own],
+    ] as const)
+      await same(fx, `assertOwned(B, ${kind}, A's)`, (a) => OW.assertOwned(B, kind, [pick(a)]));
+    check("mediaAssetId: A's bytes get another id in B (per-store ids, MED-01)", MI.mediaAssetId(B, fx.A.photoBytes) !== MI.mediaAssetId(scopeA, fx.A.photoBytes));
+    // writes keyed by A's page or slug from B's scope: A's counters, visitor markers and slug history stay
+    await same(fx, "deletePageStats(B, A's page)", (a) => ST.deletePageStats(B, a.page.live));
+    await same(fx, "countSlugHit(B, A's old slug)", () => SP.countSlugHit(B, oldA[0]!.slug));
+    await same(fx, "releaseOldSlug(B, A's old slug)", () => SH.releaseOldSlug(B, oldA[0]!.slug));
+    await same(fx, "recomputeStoreGauges(B)", () => GU.recomputeStoreGauges(B).then(() => null));
+    const after2 = await snapshot(fx.A.id);
+    check("A's rows (stats, visitor markers, slug history, preview link) unchanged by the repositories above", after2.hash === before2.hash, snapshotDiff(before2, after2));
+  }
 
   // impersonation scope of A (D70): the customer fields are masked in every read
   const imp = scopeOf(fx.A.id, "impersonation");
   const masked = async (label: string, fn: () => Promise<unknown>) => {
     const o = await call({ anonymous: true }, "/", fn);
-    if (o.stub) return pending(label, o.stub);
+    if (!ranReal(label, o)) return;
     check(`${label}: no customer canary under impersonation`, o.ok && leaks(fx, o.value, { only: ["customer"] }).length === 0, o.ok ? leaks(fx, o.value, { only: ["customer"] }) : answerOf(o));
   };
   await masked("listOrders(A, impersonation)", () => O.listOrders(imp, {}));
@@ -2178,8 +2172,7 @@ export async function specialSuite(kit: Kit): Promise<void> {
   const writes = network.slice(netCron).filter((n) => n.url.includes("sheets.googleapis.com") && n.method !== "GET");
   const toA = writes.filter((n) => n.url.includes(fx.A.spreadsheetId));
   const toB = writes.filter((n) => n.url.includes(fx.B.spreadsheetId));
-  if (tick.stub) pending("cron tick: each store's orders reach its own sheet", tick.stub);
-  else {
+  if (ranReal("cron tick: each store's orders reach its own sheet", tick)) {
     check("cron tick with the key: 200", tick.ok && tick.value!.status === 200, routeAnswer(tick));
     check("cron tick: A's queued order went to A's sheet, B's to B's", text(toA).includes(queuedA) && text(toB).includes(queuedB), { toA: toA.length, toB: toB.length });
     check("cron tick: no order of one store in the other's sheet", !text(toA).includes(queuedB) && !text(toB).includes(queuedA) && !text(toB).includes(fx.A.customer.name), { toA: toA.map((n) => n.url), toB: toB.map((n) => n.url) });
@@ -2203,8 +2196,7 @@ export async function specialSuite(kit: Kit): Promise<void> {
   // identical image in both stores, A's sourceAssetId, a client-sent x-sg-path (SEC-3)
   const up = await callRoute(ownerB, route("/api/app/[store]/media"), "POST", { store: fx.B.handle }, { multipart: true, body: { cutout: "1", sourceAssetId: fx.A.asset.photo } }, { photo: fx.A.photoBytes, headers: { "x-sg-path": `/app/${fx.A.handle}/media` } });
   const upBody = up.ok ? (JSON.parse(up.value!.body) as { ok?: boolean; deduped?: boolean; asset?: { id: string } }) : null;
-  if (up.stub) pending("identical image uploaded in B", up.stub);
-  else {
+  if (ranReal("identical image uploaded in B", up)) {
     check("identical image uploaded in B: a new asset of B, not deduped onto A's", up.ok && up.value!.status === 201 && upBody?.deduped === false && !!upBody.asset && upBody.asset.id !== fx.A.asset.photo, routeAnswer(up));
     const [row] = upBody?.asset ? await db.select({ storeId: S.assets.storeId, source: S.assets.sourceAssetId }).from(S.assets).where(eq(S.assets.id, upBody.asset.id)) : [];
     check("the upload belongs to B (the client-sent x-sg-path is ignored)", row?.storeId === fx.B.id, row);
@@ -2224,6 +2216,34 @@ export async function specialSuite(kit: Kit): Promise<void> {
   await db.update(S.pageVersions).set({ doc: docWithA as never }).where(eq(S.pageVersions.id, ver));
   const est = await callRoute(ownerB, route("/api/app/[store]/export/estimate"), "GET", { store: fx.B.handle }, { query: { versionId: ver, mode: "php" } });
   check("…its export estimate counts nothing of A", est.ok && leaks(fx, est.value!.body, { sent: docWithA }).length === 0, routeAnswer(est));
+  // …and its export ZIP (the files themselves): no entry named after A's ids, no text naming A's data, no file of A's bytes
+  const builtZip = await call(ownerB, appPath(fx.B.handle, "/exports"), async () => {
+    const EX = load<typeof import("@/lib/export/server")>("@/lib/export/server");
+    const built = await EX.buildExport(B, { versionId: ver, mode: "php", allowedOrigins: [], options: { hostConfigs: true } } as never, userActor(fx.B.members.owner), { canEmbedKey: false });
+    return new Uint8Array(await new Response(built.stream).arrayBuffer());
+  });
+  if (ranReal("…its export ZIP", builtZip)) {
+    check("…its export ZIP builds", builtZip.ok, answerOf(builtZip));
+    if (builtZip.ok) {
+      const { unzipSync, strFromU8 } = load<typeof import("fflate")>("fflate");
+      const entries = unzipSync(builtZip.value!);
+      const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+      const [chunks] = (await pool().query("SELECT f.`key` AS k, c.data AS d FROM media_files f JOIN media_chunks c ON c.`key` = f.`key` WHERE f.store_id = ? ORDER BY f.`key`, c.idx", [fx.A.id])) as unknown as [{ k: string; d: Buffer }[]];
+      const filesA = new Map<string, Buffer[]>();
+      for (const c of chunks) filesA.set(c.k, [...(filesA.get(c.k) ?? []), c.d]);
+      const hashesA = new Set([...filesA.values()].map((parts) => createHash("sha256").update(Buffer.concat(parts)).digest("hex")));
+      const names = Object.keys(entries);
+      const textual = names.filter((n) => /\.(html?|php|js|mjs|css|json|txt|md|htaccess|xml|webmanifest)$|(^|\/)\.[a-z]+$/i.test(n));
+      const leakedText = textual.flatMap((n) => leaks(fx, strFromU8(entries[n]!), { sent: docWithA }).map((l) => `${n}: ${l}`));
+      const sameBytes = names.filter((n) => hashesA.has(createHash("sha256").update(entries[n]!).digest("hex")));
+      check("…its export ZIP: no entry named after A's ids", names.every((n) => leaks(fx, n, { only: ["ids"] }).length === 0), names);
+      check("…its export ZIP: no text naming A's data", hashesA.size > 0 && textual.length > 0 && leakedText.length === 0, leakedText.slice(0, 5));
+      check("…its export ZIP: no file with the bytes of one of A's files", sameBytes.length === 0, sameBytes);
+    }
+  }
+  // that page goes again: B's own document names A's ids, which later scans of B's screens would read as leaks
+  const PG = load<typeof import("@/lib/admin-data/pages")>("@/lib/admin-data/pages");
+  check("…then B deletes that page (its versions with it)", await PG.deletePage(B, pageB, userActor(fx.B.members.owner)));
 
   // caches: A's change never shows in B (settings, store row, pixel usage)
   const SETTINGS_MOD = load<typeof import("@/lib/settings")>("@/lib/settings");
@@ -2289,18 +2309,359 @@ export async function specialSuite(kit: Kit): Promise<void> {
   });
   if (ctxB.ok) {
     const rev = await call(ownerB, appPath(fx.B.handle, "/team"), () => INV.revokeInvite(ctxB.value!, fx.A.invite));
-    if (rev.stub) pending("revokeInvite(B, A's invite) → not found", rev.stub);
-    else {
+    if (ranReal("revokeInvite(B, A's invite) → not found", rev)) {
       const [inv] = await db.select({ revoked: S.storeInvites.revokedAt }).from(S.storeInvites).where(and(eq(S.storeInvites.id, fx.A.invite), eq(S.storeInvites.storeId, fx.A.id)));
       check("revokeInvite(B, A's invite): refused, A's invite still open", !rev.ok && inv?.revoked === null, answerOf(rev));
     }
     const list = await call(ownerB, appPath(fx.B.handle, "/team"), () => INV.listInvites(ctxB.value!));
-    if (list.stub) pending("listInvites(B): nothing of A", list.stub);
-    else check("listInvites(B): nothing of A", list.ok && leaks(fx, list.value).length === 0, leaks(fx, list.value));
+    if (ranReal("listInvites(B): nothing of A", list)) check("listInvites(B): nothing of A", list.ok && leaks(fx, list.value).length === 0, leaks(fx, list.value));
   }
   const preview2 = await call({ anonymous: true }, "/", () => INV.previewInvite("SG-NOTATOKEN0000"));
-  if (preview2.stub) pending("previewInvite(unknown token) → null", preview2.stub);
-  else check("previewInvite(unknown token) → null (no enumeration)", preview2.ok && preview2.value === null, answerOf(preview2));
+  if (ranReal("previewInvite(unknown token) → null", preview2)) check("previewInvite(unknown token) → null (no enumeration)", preview2.ok && preview2.value === null, answerOf(preview2));
+}
+
+/**
+ * The rest of the §F.1 / TENANCY-MAP §10.2 special cases, all through real code: a document naming A's files at
+ * publish, the render of one slug in two stores (and a scope / store pair that disagree: the render cache never files
+ * one store's page under the other's key), preview tokens forged with A's page (SEC-7), a client-sent x-sg-path on a
+ * public route (SEC-3), a suspended store's page key, invites (reuse, expiry, escalation, 10 parallel accepts:
+ * SEC-24), parallel uploads (the quota race), the daily sandbox ceiling and a pending store at the shared disk budget
+ * (D69). The cases of the spec with no code in R1.0 are listed as not applicable, with their reason.
+ */
+export async function moreSpecialCases(kit: Kit): Promise<void> {
+  const { fx, fresh } = kit;
+  suite("special cases");
+  const { db, pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const PUB = load<typeof import("@/lib/render/publish.server")>("@/lib/render/publish.server");
+  const SP = load<typeof import("@/lib/render/store-pages.server")>("@/lib/render/store-pages.server");
+  const TP = load<typeof import("@/lib/tenancy/public")>("@/lib/tenancy/public");
+  const A = writeScope(fx.A.id);
+  const B = writeScope(fx.B.id);
+  const ownerA = { userId: fx.A.members.owner };
+  const ownerB = { userId: fx.B.members.owner };
+  const routes = deriveRoutes();
+  const route = (t: string) => routes.find((r) => r.template === t)!;
+  const tagOf = (store: StoreFx) => /Zk([A-Z]{6})$/.exec(store.customer.name)![1]!;
+  const register = (id: string) => {
+    if (!fx.canaries.ids.includes(id)) fx.canaries.ids.push(id);
+    if (!fx.ghosts.has(id)) fx.ghosts.set(id, ghostOf(id));
+  };
+
+  // 1. publish: A's /argan and B's /argan (each its own seeded document), then a page of B whose document names A's
+  // two files beside B's own photo (a pasted id): the publish resolves B's own files only
+  const seededDraft = async (store: StoreFx) => {
+    const [v] = await db.select({ doc: S.pageVersions.doc }).from(S.pageVersions).where(eq(S.pageVersions.id, store.version.live));
+    await db.update(S.pages).set({ draft: v!.doc as never }).where(eq(S.pages.id, store.page.live));
+  };
+  await seededDraft(fx.A);
+  await seededDraft(fx.B);
+  const pubA = await call(ownerA, appPath(fx.A.handle, "/pages"), () => PUB.publishPage(A, fx.A.page.live, { actor: userActor(fx.A.members.owner) }));
+  check("A publishes /argan (the real render)", pubA.ok, answerOf(pubA));
+  if (pubA.ok) register(pubA.value!.versionId);
+  const pubB = await call(ownerB, appPath(fx.B.handle, "/pages"), () => PUB.publishPage(B, fx.B.page.live, { actor: userActor(fx.B.members.owner) }));
+  check("B publishes /argan (the same slug)", pubB.ok, answerOf(pubB));
+  const naming = await fresh.page(fx.B);
+  const docB = (await fresh.doc(fx.B)) as unknown as { product: { images: { id: string }[] } };
+  docB.product.images = [{ id: fx.B.asset.photo }, { id: fx.A.asset.photo }, { id: fx.A.asset.cutout }];
+  await db.update(S.pages).set({ draft: docB as never }).where(eq(S.pages.id, naming));
+  const pubN = await call(ownerB, appPath(fx.B.handle, "/pages"), () => PUB.publishPage(B, naming, { actor: userActor(fx.B.members.owner) }));
+  check("B publishes a page whose document names A's files", pubN.ok, answerOf(pubN));
+  if (pubN.ok) {
+    const [ver] = await db.select({ html: S.pageVersions.html, ty: S.pageVersions.thankYouHtml }).from(S.pageVersions).where(eq(S.pageVersions.id, pubN.value!.versionId));
+    const leaked = leaks(fx, [ver?.html, ver?.ty]);
+    check("…its published HTML (landing and thank-you) names nothing of A: not A's files, not A's data", !!ver?.html && leaked.length === 0, leaked);
+  }
+  // that page goes again (B's own document names A's ids: the scans below would read B's own strings as leaks)
+  const P = load<typeof import("@/lib/admin-data/pages")>("@/lib/admin-data/pages");
+  check("…then B deletes that page (its versions with it)", await P.deletePage(B, naming, userActor(fx.B.members.owner)));
+
+  // 2. a scope and a store row that disagree are refused before the render cache is read or filled
+  const rowB = (await TP.resolveStoreByHandle(fx.B.handle))!;
+  const crossed = await call({ anonymous: true }, "/", () => SP.getPublishedPage(A, rowB, fx.A.slug));
+  check("getPublishedPage(A's scope, B's row): refused (one store's page is never filed under the other's cache key)", !crossed.ok, answerOf(crossed));
+  for (const [label, fn] of [
+    ["getStoreHomePage", () => SP.getStoreHomePage(A, rowB)],
+    ["listSitemapPages", () => SP.listSitemapPages(A, rowB)],
+    ["storeHasPublishedPage", () => SP.storeHasPublishedPage(A, rowB)],
+    ["slugHistoryTarget", () => SP.slugHistoryTarget(A, rowB, "before-x")],
+    ["getStoreLegalDocument", () => SP.getStoreLegalDocument(A, rowB, "privacy", fx.A.slug)],
+  ] as const) {
+    const r = await call({ anonymous: true }, "/", fn as () => Promise<unknown>);
+    check(`${label}(A's scope, B's row): refused`, !r.ok, answerOf(r));
+  }
+
+  // 3. the render of one slug in two stores: each address serves its own store's page
+  const slugRoute = route("/s/[store]/[slug]");
+  const liveA = await callRoute({ anonymous: true }, slugRoute, "GET", { store: fx.A.handle, slug: fx.A.slug }, {});
+  const liveB = await callRoute({ anonymous: true }, slugRoute, "GET", { store: fx.B.handle, slug: fx.B.slug }, {});
+  check("render: /s/<A>/argan serves A's page (A's product name)", liveA.ok && liveA.value!.status === 200 && liveA.value!.body.includes(`Argan ${tagOf(fx.A)}`), routeAnswer(liveA));
+  check("render: /s/<B>/argan serves B's page (B's product name)", liveB.ok && liveB.value!.status === 200 && liveB.value!.body.includes(`Argan ${tagOf(fx.B)}`), routeAnswer(liveB));
+  check("render: /s/<B>/argan carries nothing of A (same slug, the render cache per store)", liveB.ok && leaks(fx, liveB.value!.body).length === 0, liveB.ok ? leaks(fx, liveB.value!.body) : answerOf(liveB));
+  // a client-sent x-sg-path on a public route is ignored (SEC-3): the same answer as without it
+  const tampered = await callRoute({ anonymous: true }, slugRoute, "GET", { store: fx.B.handle, slug: fx.B.slug }, {}, { headers: { "x-sg-path": `/app/${fx.A.handle}/orders` } });
+  check("a client-sent x-sg-path naming A on B's public page: ignored (the same answer)", text(routeAnswer(tampered)) === text(routeAnswer(liveB)), { tampered: text(routeAnswer(tampered)).slice(0, 200), plain: text(routeAnswer(liveB)).slice(0, 200) });
+
+  // 4. preview tokens (SEC-7): B's genuine link works; the same envelope naming A's page, or A's store, is the 404
+  const PT = load<typeof import("@/lib/render/preview-token")>("@/lib/render/preview-token");
+  const { seal, open } = load<typeof import("@/lib/security/crypto")>("@/lib/security/crypto");
+  const mintedB = await PT.mintPreviewToken(scopeOf(fx.B.id), { pageId: fx.B.page.live, ttlSec: 3600, audience: "seller", actor: userActor(fx.B.members.owner) });
+  const tokenB = mintedB.url.split("/preview/")[1]!;
+  const payload = JSON.parse(open(tokenB, "platform", "preview:v1")) as Record<string, unknown>;
+  const previewRoute = route("/preview/[token]");
+  const genuine = await callRoute({ anonymous: true }, previewRoute, "GET", { token: tokenB }, {});
+  check("preview: B's genuine link renders B's page", genuine.ok && genuine.value!.status === 200, routeAnswer(genuine));
+  const unknown = await callRoute({ anonymous: true }, previewRoute, "GET", { token: "not-a-preview-token" }, {});
+  for (const [label, forged] of [
+    ["B's row with A's page id", { ...payload, pageId: fx.A.page.live }],
+    ["A's store and page with B's row id", { ...payload, storeId: fx.A.id, pageId: fx.A.page.live }],
+  ] as const) {
+    const token = seal(JSON.stringify(forged), "platform", "preview:v1");
+    const r = await callRoute({ anonymous: true }, previewRoute, "GET", { token }, {});
+    check(`preview: a token forged with ${label} → the 404 of an unknown token, nothing of A`, r.ok && r.value!.status === 404 && text(routeAnswer(r)) === text(routeAnswer(unknown)) && leaks(fx, routeAnswer(r)).length === 0, routeAnswer(r));
+  }
+  const revoke = await call({ anonymous: true }, "/", () => PT.revokePreviewToken(scopeOf(fx.A.id), String(payload.jti)));
+  check("revokePreviewToken(A, B's link id): not_found, B's link still works", !revoke.ok && /not_found/.test(text(answerOf(revoke))) && (await PT.openPreviewToken(tokenB)) !== null, answerOf(revoke));
+  notApplicable("mintPreviewLinkAction with A's page id from B (rev 3)", "no preview-link action in R1.0 (the share sheet arrives with P3); the repository it calls, mintPreviewToken, is attacked with B's scope and A's page above");
+
+  // 5. a suspended store's page key refuses orders like an unknown key (§A.5.3; an active store's key resolves)
+  const target = await TP.resolvePublicTarget(await pageKeyOf(fx.A.page.live));
+  check("resolvePublicTarget(A's live page key): A's page in A's store (the positive control)", target?.store.id === fx.A.id && target.pageId === fx.A.page.live, target ? { store: target.store.id, page: target.pageId } : null);
+  const suspended = await seedStore("suspended");
+  const suspTarget = await TP.resolvePublicTarget(suspended.pageKey);
+  check(
+    "a suspended store's page key: its own store, every public API refused (order, lead, upsell, event: unavailable; track: 404)",
+    suspTarget?.store.id === suspended.id && (["order", "lead", "upsell", "event"] as const).every((api) => TP.publicApiAnswer(suspTarget.store.status, api) === "unavailable") && TP.publicApiAnswer(suspTarget.store.status, "track") === "not_found",
+    suspTarget ? suspTarget.store.status : null,
+  );
+  // a schema-valid order (the route resolves the key before anything else of the store): the unknown key's answer
+  const orderRoute = route("/api/public/order");
+  const order = (pageKey: string) => ({ pageKey, idem: randomUUID(), eventId: `qa_${randomBytes(6).toString("hex")}`, bundleId: "b1", variants: [], bump: false, name: "Qa Tester", phone: "+212612345678", city: "Casablanca", address: "12 Rue Test, Maarif", email: "", website: "", t: 30_000, utm: {} });
+  const susp = await callRoute({ anonymous: true }, orderRoute, "POST", {}, { body: order(suspended.pageKey) }, { headers: { "x-forwarded-for": "198.51.100.71" } });
+  const unk = await callRoute({ anonymous: true }, orderRoute, "POST", {}, { body: order("pk_unknown_page_key_0") }, { headers: { "x-forwarded-for": "198.51.100.72" } });
+  check("POST /api/public/order with a suspended store's page key: 404 unavailable, the unknown key's answer", susp.ok && susp.value!.status === 404 && text(routeAnswer(susp)) === text(routeAnswer(unk)), { suspended: routeAnswer(susp), unknown: routeAnswer(unk) });
+  const [[suspOrders]] = (await pool().query("SELECT COUNT(*) AS n FROM orders WHERE store_id = ?", [suspended.id])) as unknown as [[{ n: number }]];
+  check("…and the suspended store has no order", Number(suspOrders.n) === 0, suspOrders);
+
+  // 6. invites: token reuse, expiry, escalation, enumeration (above), 10 parallel accepts → one membership (SEC-24)
+  await inviteCases(kit);
+
+  // 7. the quota race: parallel uploads into B charge B's own gauge exactly, A's rows stay
+  const GU = load<typeof import("@/lib/db/usage")>("@/lib/db/usage");
+  await GU.recomputeStoreGauges(B);
+  const snapA = await snapshot(fx.A.id);
+  const mediaRoute = route("/api/app/[store]/media");
+  // three members of B with two uploads each (the upload slots: 2 per member, 3 per store, 4 per process)
+  const uploaders = [fx.B.members.owner, fx.B.members.admin, fx.B.members.editor];
+  const images = await Promise.all(Array.from({ length: 6 }, (_, i) => png(40 + i, 36 + i, false)));
+  const ups = await Promise.all(images.map((photo, i) => callRoute({ userId: uploaders[i % 3]! }, mediaRoute, "POST", { store: fx.B.handle }, { multipart: true }, { photo })));
+  const statuses = ups.map((u) => (u.ok ? u.value!.status : 500));
+  check("quota race: 6 parallel uploads in B answer 201 or a busy 429/503, never a 500", statuses.every((s) => s === 201 || s === 429 || s === 503) && statuses.filter((s) => s === 201).length >= 2, statuses);
+  const drift = await GU.recomputeStoreGauges(B);
+  check("quota race: B's media gauge equals B's files afterwards (no lost or doubled charge)", drift.media_bytes.before === drift.media_bytes.after, drift.media_bytes);
+  check("quota race: A's rows unchanged (A's gauge, files, buckets)", (await snapshot(fx.A.id)).hash === snapA.hash, snapshotDiff(snapA, await snapshot(fx.A.id)));
+
+  // 8. D69: the day's sandbox ceiling (the 51st pending store lands in the waitlist) and the shared disk budget
+  await sandboxCases(kit);
+
+  notApplicable("addImpersonationNoteAction from a tenant session / from staff not viewing the store (rev 2.1)", "no impersonation-note action in R1.0 (the console's notes arrive with P1, PLA-§10)");
+  notApplicable("a store-side replay(ctx, id) of another store's outbox row (rev 2.1)", "no outbox in R1.0 (the jobs outbox arrives with P8)");
+  notApplicable("registerBudgetProfile with a kind other than the document's (rev 2.1)", "no budget-profile registry in R1.0 (the per-kind budgets arrive with P0/P3; R1.0 renders landing pages only)");
+  notApplicable("export allow-list entries naming the apex or a sibling store subdomain (SEC-23, S mode)", "this suite runs the platform in P mode (no STORE_ROOT_DOMAIN): the S-mode entries are test:public-api's, which runs both modes; the platform's own host is refused above");
+
+  async function pageKeyOf(pageId: string): Promise<string> {
+    const [[row]] = (await pool().query("SELECT public_key FROM pages WHERE id = ?", [pageId])) as unknown as [[{ public_key: string }]];
+    return row.public_key;
+  }
+
+  /** A third store in `status` with an owner and one published page (its page key). */
+  async function seedStore(status: "suspended" | "pending"): Promise<{ id: string; pageKey: string }> {
+    const { newId, newPublicKey } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+    const { sql } = load<typeof import("drizzle-orm")>("drizzle-orm");
+    const id = newId();
+    const owner = newId();
+    await db.insert(S.users).values({ id: owner, email: `owner-${id.toLowerCase()}@tenancy.test`, name: "Owner C", passwordHash: "tenancy-check:no-password", platformRole: "none" as never, totpEnabled: false });
+    await db.execute(sql`INSERT INTO stores (id, handle, name, status, brand_seed, created_by) VALUES (${id}, ${`c-${id.toLowerCase().slice(-10)}`}, ${"Store C"}, ${status}, ${randomBytes(8).toString("hex")}, ${owner})`);
+    await db.insert(S.storeMembers).values({ storeId: id, userId: owner, role: "owner" });
+    const doc = await fresh.doc(fx.B);
+    const pageId = newId();
+    const versionId = newId();
+    const pageKey = newPublicKey();
+    await db.insert(S.pages).values({ id: pageId, storeId: id, slug: "argan", name: "C page", status: "published", locale: (doc as { locale: string }).locale as never, publicKey: pageKey, draft: doc as never, createdBy: owner });
+    await db.insert(S.pageVersions).values({ id: versionId, storeId: id, pageId, kind: "publish", label: null, doc: doc as never, checksum: createHash("sha256").update(versionId).digest("hex"), createdBy: owner, html: "<!doctype html><p>c</p>", runtimeV: 2 });
+    await db.update(S.pages).set({ publishedVersionId: versionId }).where(eq(S.pages.id, pageId));
+    return { id, pageKey };
+  }
+}
+
+/** Invites (TENANCY-MAP §10.2, SEC-24): a token joins its own store with its own role, once, for its own e-mail. */
+async function inviteCases(kit: Kit): Promise<void> {
+  const { fx } = kit;
+  const { db, pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const INV = load<typeof import("@/lib/tenancy/invites")>("@/lib/tenancy/invites");
+  const { requireStoreMember } = load<typeof import("@/lib/tenancy/seam")>("@/lib/tenancy/seam");
+  const ownerA = { userId: fx.A.members.owner };
+  const ctxA = await call(ownerA, appPath(fx.A.handle, "/team"), () => requireStoreMember({ handle: fx.A.handle, permission: "members.invite", throwOnFail: true }));
+  if (!ranReal("invites: A's owner's team context", ctxA)) return;
+  if (!ctxA.ok) return check("invites: A's owner's team context", false, answerOf(ctxA));
+  const newUser = async (email: string) => {
+    const id = newId();
+    await db.insert(S.users).values({ id, email, name: "Joiner", passwordHash: "tenancy-check:no-password", platformRole: "none" as never, totpEnabled: false });
+    return id;
+  };
+  const mint = async (email: string) => {
+    const r = await call(ownerA, appPath(fx.A.handle, "/team"), () => INV.createInvite(ctxA.value!, { email, role: "agent" }));
+    if (!r.ok) throw new Error(`createInvite: ${text(answerOf(r))}`);
+    return r.value!.url.split("/invite/")[1]!;
+  };
+  const memberships = async (userId: string) =>
+    ((await pool().query("SELECT store_id, role FROM store_members WHERE user_id = ? ORDER BY store_id", [userId])) as unknown as [{ store_id: string; role: string }[]])[0];
+
+  // 10 parallel accepts of one invite: exactly one membership, the invite's role, in the invite's store (SEC-24)
+  const email = `joiner.${randomInt(1e9)}@mail.test`;
+  const joiner = await newUser(email);
+  const token = await mint(email);
+  const accepts = await Promise.all(Array.from({ length: 10 }, () => call({ anonymous: true }, "/", () => INV.acceptInvite(token, { userId: joiner }))));
+  const rows = await memberships(joiner);
+  check("10 parallel accepts of one invite: one membership, as agent, in A only (SEC-24)", rows.length === 1 && rows[0]!.store_id === fx.A.id && rows[0]!.role === "agent", { rows, answers: accepts.map((a) => (a.ok ? (a.value as { joined: boolean }).joined : text(answerOf(a)).slice(0, 60))) });
+  check("…exactly one of them joined", accepts.filter((a) => a.ok && (a.value as { joined: boolean }).joined).length === 1, accepts.map((a) => (a.ok ? (a.value as { joined: boolean }).joined : "refused")));
+  // reuse: the spent token joins nobody else (and answers what an unknown token answers)
+  const other = await newUser(`other.${randomInt(1e9)}@mail.test`);
+  const reuse = await call({ anonymous: true }, "/", () => INV.acceptInvite(token, { userId: other }));
+  const unknownTok = await call({ anonymous: true }, "/", () => INV.acceptInvite("SG-NOTATOKEN0000", { userId: other }));
+  check("a spent invite token: refused like an unknown token, no membership", !reuse.ok && text(answerOf(reuse)) === text(answerOf(unknownTok)) && (await memberships(other)).length === 0, { reuse: answerOf(reuse), unknown: answerOf(unknownTok) });
+  check("previewInvite(a spent token) → null", (await INV.previewInvite(token)) === null);
+  // escalation: B's owner (a member of B, another e-mail) takes nothing from A's invite; the role is the invite's
+  const email2 = `invitee2.${randomInt(1e9)}@mail.test`;
+  const token2 = await mint(email2);
+  const wrong = await call({ anonymous: true }, "/", () => INV.acceptInvite(token2, { userId: fx.B.members.owner }));
+  check("A's invite accepted by B's owner (another e-mail): refused, B's owner gets no role in A", !wrong.ok && !(await memberships(fx.B.members.owner)).some((m) => m.store_id === fx.A.id), answerOf(wrong));
+  // expiry: an expired invite previews as nothing and joins nobody
+  await pool().query("UPDATE store_invites SET expires_at = ? WHERE token_hash = ?", [new Date(Date.now() - 60_000), INV.hashInviteToken(token2)]);
+  const invitee2 = await newUser(email2);
+  const expired = await call({ anonymous: true }, "/", () => INV.acceptInvite(token2, { userId: invitee2 }));
+  check("an expired invite: previews as null, refused at accept, no membership", (await INV.previewInvite(token2)) === null && !expired.ok && (await memberships(invitee2)).length === 0, answerOf(expired));
+}
+
+/** D69: the daily sandbox ceiling and the shared disk budget of pending stores, through T2's signup and the media route. */
+async function sandboxCases(kit: Kit): Promise<void> {
+  const { fx } = kit;
+  const SU = load<typeof import("@/lib/auth/signup")>("@/lib/auth/signup");
+  const U = load<typeof import("@/lib/tenancy/usage")>("@/lib/tenancy/usage");
+  const { getPlatformSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const { signup } = await getPlatformSetting("platform");
+  const day = SU.platformDay();
+  const limit = signup.pendingStoresPerDay;
+  const approval = { mode: { mode: "approval" as const, stored: "approval" as const, unguarded: false, turnstile: null } } as never;
+  const form = (n: string) => ({
+    name: `Sandbox Seller ${n}`,
+    email: `sandbox.${n}@mail.test`,
+    password: `Tenancy-${randomBytes(9).toString("base64url")}-9q`,
+    phone: "+212612345678",
+    storeName: `Sandbox ${n}`,
+    handle: `sandbox-${n}`,
+    market: "MA",
+    acceptLegal: true,
+    formMs: 42_000,
+    locale: "fr" as const,
+  });
+  // rotating /64s: no per-network limit stands in for the ceiling
+  const ctx = (n: number) => ({ ip: `2001:db8:${(0x100 + n).toString(16)}::1`, ua: "Mozilla/5.0 (tenancy-check)", deviceId: null, turnstile: async () => "ok" as const });
+  // the day's first limit - 1 sandboxes are taken (charged on the real counter), so the next signup is the limit-th
+  await U.chargePlatformUsage("pending_stores", day, limit - 1, { limit });
+  const last = await call({ anonymous: true }, "/signup", () => SU.signupAccount(form(`a${randomInt(1e6)}`), ctx(1) as never, approval));
+  const over = await call({ anonymous: true }, "/signup", () => SU.signupAccount(form(`b${randomInt(1e6)}`), ctx(2) as never, approval));
+  check(`the day's ${limit}th signup in approval mode: a pending store`, last.ok && (last.value as { kind: string; storeStatus?: string }).kind === "created" && (last.value as { storeStatus?: string }).storeStatus === "pending", answerOf(last));
+  check(`the ${limit + 1}st: the waitlist (capped), no store (D69)`, over.ok && (over.value as { kind: string; reason?: string }).kind === "waitlisted" && (over.value as { reason?: string }).reason === "capped", answerOf(over));
+  await U.refundPlatformUsage("pending_stores", day, limit);
+  if (!last.ok || (last.value as { kind: string }).kind !== "created") return;
+  const created = last.value as { userId: string; handle: string; storeId: string };
+  // the pending store at the shared disk budget: an upload answers `quota` (413), never a 500, and charges nothing
+  const MiB = 1024 * 1024;
+  const budget = signup.pendingMediaTotalMiB * MiB;
+  await U.chargePlatformUsage("pending_media_bytes", "total", budget);
+  const before = await snapshot(created.storeId);
+  const up = await callRoute({ userId: created.userId }, deriveRoutes().find((r) => r.template === "/api/app/[store]/media")!, "POST", { store: created.handle }, { multipart: true }, { photo: await png(48, 40, false) });
+  check("a pending store at the shared disk budget: the upload answers 413 quota, never a 500 (D69)", up.ok && up.value!.status === 413 && /"quota"/.test(up.value!.body), routeAnswer(up));
+  // only the attempt's own bookkeeping moves (its rate bucket, the day's upload bytes, the member's last activity)
+  const moved = snapshotDiff(before, await snapshot(created.storeId));
+  check("…and stores nothing (no asset, no file)", !moved.some((t) => ["assets", "media_files", "media_chunks"].includes(t)), moved);
+  await U.refundPlatformUsage("pending_media_bytes", "total", budget);
+  check("…A's rows never involved", leaks(fx, routeAnswer(up)).length === 0, leaks(fx, routeAnswer(up)));
+}
+/* ------------------------------------------------------------------ */
+/* account and console: the pages and actions outside /app/<handle>    */
+/* ------------------------------------------------------------------ */
+
+/** Every page and layout of the app outside /app/[store] (the picker, account, new store, console, sign-in, marketing). */
+export function deriveOtherPages(): PageFile[] {
+  return walk(path.join(ROOT, "src", "app"), (f) => /[\\/](page|layout)\.tsx$/.test(f))
+    .map((file) => {
+      const rel = path.relative(ROOT, file).split(path.sep).join("/");
+      const template = `/${rel.replace(/^src\/app\//, "").replace(/\/?(page|layout)\.tsx$/, "")}`
+        .split("/")
+        .filter((seg) => !/^\(.*\)$/.test(seg))
+        .join("/");
+      return { file: rel, template: template || "/", kind: (rel.endsWith("layout.tsx") ? "layout" : "page") as PageFile["kind"] };
+    })
+    // the root layout is the document frame (next/font, a build-time loader that only runs inside Next) and reads no
+    // data: every page below renders inside it in the real app
+    .filter((p) => !p.file.startsWith("src/app/app/[store]/") && p.file !== "src/app/layout.tsx");
+}
+
+/**
+ * The pages outside a store (the store picker, the account pages, /app/new, the console home, sign-in and the
+ * marketing pages) rendered as every attacker of A: whatever they render carries nothing of A (a member of both sees
+ * A's name and handle in the picker, which are not canaries). The account actions that take an id or a handle, with
+ * A's: another member's session, A's store id, A's handle (start a view as a non-staff member): the answer of a
+ * missing one, A untouched.
+ */
+export async function accountSuite(kit: Kit): Promise<void> {
+  const { fx } = kit;
+  suite("account and console");
+  const pages = deriveOtherPages();
+  check("the pages outside /app/<handle> are derived from the tree (picker, account, new store, console)", ["/app", "/app/account", "/app/new", "/admin"].every((t) => pages.some((p) => p.template === t && p.kind === "page")), pages.map((p) => p.template));
+  const before = await snapshot(fx.A.id);
+  for (const page of pages) {
+    const params: Record<string, string> = page.template.includes("[token]") ? { token: "SG-NOTATOKEN0000" } : {};
+    for (const who of attackers(fx)) {
+      const r = await renderPage({ userId: who.userId }, page, params);
+      const label = `${page.template}${page.kind === "layout" ? " (layout)" : ""} · ${who.label}`;
+      if (!ranReal(label, r.kind === "error" ? r : null)) continue;
+      if (r.kind === "render") check(`${label}: nothing of A`, leaks(fx, r.payload).length === 0, leaks(fx, r.payload));
+      // a redirect never lands in A's dashboard (only the member of both may be sent there)
+      else if (r.kind === "redirect") check(`${label}: a redirect outside A`, who.userId === fx.dual || !r.to.includes(`/app/${fx.A.handle}`), r.to);
+      else check(`${label}: renders, redirects or 404s`, r.kind === "notFound", r);
+    }
+  }
+
+  // the account actions with A's ids, as B's owner on a real session row (the session-bound ones read it)
+  const AUTH = load<typeof import("@/lib/auth/actions")>("@/lib/auth/actions");
+  const ACC = load<typeof import("@/app/app/account/actions")>(path.join(ROOT, "src", "app", "app", "account", "actions.ts"));
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const sessionOf = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
+  const asB = { sessionToken: fx.B.ownerToken };
+  // setLastStoreAction(A's id): not B's owner's store, nothing remembered, the answer of an unknown id
+  const last = await call(asB, "/app", () => AUTH.setLastStoreAction(fx.A.id));
+  const lastGhost = await call(asB, "/app", () => AUTH.setLastStoreAction(ghostOf(fx.A.id)));
+  const [[sess]] = (await pool().query("SELECT last_store_id FROM sessions WHERE id = ?", [sessionOf(fx.B.ownerToken)])) as unknown as [[{ last_store_id: string | null }]];
+  check("setLastStoreAction(A's id) as B's owner: nothing remembered, the answer of an unknown id", ranReal("setLastStoreAction", last, lastGhost) && text(answerOf(last)) === text(answerOf(lastGhost)) && sess?.last_store_id !== fx.A.id, { real: answerOf(last), ghost: answerOf(lastGhost), lastStore: sess?.last_store_id });
+  // revokeSessionAction(A's owner's session id): another user's session matches nothing
+  const rev = await call(asB, "/app/account/sessions", () => ACC.revokeSessionAction(sessionOf(fx.A.ownerToken)));
+  const [[alive]] = (await pool().query("SELECT COUNT(*) AS n FROM sessions WHERE id = ?", [sessionOf(fx.A.ownerToken)])) as unknown as [[{ n: number }]];
+  check("revokeSessionAction(A's owner's session) as B's owner: A's owner stays signed in", ranReal("revokeSessionAction", rev) && Number(alive?.n) === 1, { answer: answerOf(rev), alive: alive?.n });
+  // startImpersonationAction(A's handle) by members and outsiders: refused, the answer of an unknown handle
+  for (const who of attackers(fx).filter((w) => w.userId !== fx.staff.id)) {
+    const real = await call({ userId: who.userId }, "/admin", () => AUTH.startImpersonationAction({ handle: fx.A.handle, reason: "ticket" as never, ticketRef: "X" }));
+    const ghost = await call({ userId: who.userId }, "/admin", () => AUTH.startImpersonationAction({ handle: fx.ghostHandle, reason: "ticket" as never, ticketRef: "X" }));
+    const label = `startImpersonationAction(A's handle) · ${who.label}`;
+    if (ranReal(label, real, ghost)) check(`${label}: refused, the answer of an unknown handle`, refusal(real) !== null && text(answerOf(real)) === text(answerOf(ghost)), { real: answerOf(real), ghost: answerOf(ghost) });
+  }
+  const after = await snapshot(fx.A.id);
+  check("A's rows (and its members' sessions) unchanged by every account-page render and account action", after.hash === before.hash, snapshotDiff(before, after));
 }
 
 // D71 (§F.1, rev 3): `platformScope()` is not a WriteScope; tsc fails here the day a write repository accepts one.
@@ -2315,8 +2676,8 @@ export function platformScopeNeverWrites(ctx: import("@/lib/tenancy/types").Plat
 /* impersonation through the seam (T2)                                 */
 /* ------------------------------------------------------------------ */
 
-/** A staff session viewing `store` through T2's seam, or the stub that blocks it. */
-export async function impersonate(fx: Fixtures, store: StoreFx): Promise<{ token: string } | { stub: string }> {
+/** A staff session viewing `store` through T2's seam (a real `sessions` row with a fresh step-up); null when T2 refused it. */
+export async function impersonate(fx: Fixtures, store: StoreFx): Promise<string | null> {
   const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
   const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
   const token = randomBytes(32).toString("base64url");
@@ -2327,28 +2688,27 @@ export async function impersonate(fx: Fixtures, store: StoreFx): Promise<{ token
     const ctx = await requirePlatform({ permission: "stores.impersonate", throwOnFail: true });
     return startImpersonation(ctx, { storeId: store.id, reason: "ticket", ticketRef: "TENANCY-CHECK", minutes: 15 });
   });
-  if (r.stub) return { stub: r.stub };
-  if (!r.ok) return { stub: `impersonation failed: ${text(answerOf(r)).slice(0, 120)}` };
-  return { token };
+  const label = `staff starts a read-only view of store ${store.key} (T2's seam)`;
+  if (!ranReal(label, r)) return null;
+  check(label, r.ok, answerOf(r));
+  return r.ok ? token : null;
 }
 
 export async function impersonationSuite(kit: Kit): Promise<void> {
   const { fx, fresh } = kit;
   suite("impersonation");
-  const onA = await impersonate(fx, fx.A);
-  if ("stub" in onA) {
-    for (const c of ACTION_CASES) pending(`${c.id} · staff viewing A`, onA.stub);
-    for (const p of derivePages()) pending(`${p.template} · staff viewing A: no customer canary`, onA.stub);
-    return;
-  }
-  const who = { sessionToken: onA.token };
+  const tokenA = await impersonate(fx, fx.A);
+  if (!tokenA) return;
+  const who = { sessionToken: tokenA };
   // every case's arguments first: a destructive case makes a fresh record of A, which must predate the fingerprint
   const victims = new Map<ActionCase, unknown[]>();
   for (const c of ACTION_CASES) victims.set(c, await c.victim(fx, fresh));
   const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
-  const auditRows = async (afterId: number) =>
-    ((await pool().query("SELECT id, action, user_id FROM audit_log WHERE store_id = ? AND id > ? ORDER BY id", [fx.A.id, afterId])) as unknown as [{ id: number; action: string; user_id: string | null }[]])[0];
-  const [[{ top }]] = (await pool().query("SELECT COALESCE(MAX(id), 0) AS top FROM audit_log WHERE store_id = ?", [fx.A.id])) as unknown as [[{ top: number }]];
+  const auditRows = async (storeId: string, afterId: number) =>
+    ((await pool().query("SELECT id, action, user_id FROM audit_log WHERE store_id = ? AND id > ? ORDER BY id", [storeId, afterId])) as unknown as [{ id: number; action: string; user_id: string | null }[]])[0];
+  const auditTop = async (storeId: string) =>
+    Number(((await pool().query("SELECT COALESCE(MAX(id), 0) AS top FROM audit_log WHERE store_id = ?", [storeId])) as unknown as [[{ top: number }]])[0][0].top);
+  const top = await auditTop(fx.A.id);
   const before = await snapshot(fx.A.id);
   for (const c of ACTION_CASES) {
     const args = victims.get(c)!;
@@ -2366,36 +2726,118 @@ export async function impersonationSuite(kit: Kit): Promise<void> {
       const label = `${page.template} · staff viewing A`;
       // the search box echoes what the staff member typed (`?q=` a customer's name): their own string, not a leak
       if (r.kind === "render") check(`${label}: no customer canary in the payload`, leaks(fx, r.payload, { only: ["customer", "secret"], sent: sp }).length === 0, leaks(fx, r.payload, { only: ["customer", "secret"], sent: sp }));
-      else if (r.kind === "error" && r.stub) pending(label, r.stub);
-      else check(`${label}: renders or 404`, r.kind === "notFound", r);
+      else if (ranReal(label, r.kind === "error" ? r : null)) check(`${label}: renders or 404`, r.kind === "notFound", r);
     }
   }
-  for (const route of deriveRoutes().filter((r) => r.template.includes("[store]") && r.methods.includes("GET"))) {
-    const ids: Record<string, string> = route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
-    const r = await callRoute(who, route, "GET", { store: fx.A.handle, ...ids }, routePlan(fx, "GET", route.template));
-    check(`GET ${route.template} · staff viewing A: no customer or secret canary`, leaks(fx, routeAnswer(r), { only: ["customer", "secret"] }).length === 0, leaks(fx, routeAnswer(r), { only: ["customer", "secret"] }));
+  const tenantRoutes = deriveRoutes().filter((r) => r.template.includes("[store]"));
+  for (const route of tenantRoutes) {
+    for (const method of route.methods) {
+      const ids: Record<string, string> = route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
+      const r = await callRoute(who, route, method, { store: fx.A.handle, ...ids }, routePlan(fx, method, route.template), { photo: fx.A.photoBytes });
+      const label = `${method} ${route.template} · staff viewing A`;
+      if (!ranReal(label, r)) continue;
+      check(`${label}: no customer or secret canary`, leaks(fx, routeAnswer(r), { only: ["customer", "secret"] }).length === 0, leaks(fx, routeAnswer(r), { only: ["customer", "secret"] }));
+      // a state-changing method of a dashboard API is refused before its body
+      if (method !== "GET" && method !== "HEAD" && route.template.startsWith("/api/app/")) check(`${label}: a write is refused (403, read-only)`, r.ok && r.value!.status === 403, routeAnswer(r));
+    }
   }
   const afterView = await snapshot(fx.A.id);
   // the one row the view may add (PLA-§10.2): `platform.impersonation.write_refused` per refused write, by the staff member
   const moved = snapshotDiff(before, afterView);
-  const added = await auditRows(Number(top));
+  const added = await auditRows(fx.A.id, top);
   // a refused call is audited whatever the case's own `write` flag says (sendPixelTestAction needs a write key)
-  const writes = ACTION_CASES.length;
+  const writes = ACTION_CASES.length + tenantRoutes.reduce((n, r) => n + r.methods.length, 0);
   check("A's rows unchanged while staff viewed A (but the audit of each refused write)", moved.every((t) => t === "audit_log"), moved);
   check(
-    `…A's audit gained only write_refused rows of the staff member, at most one per case (${writes})`,
+    `…A's audit gained only write_refused rows of the staff member, at most one per refused call (${writes})`,
     added.length > 0 && added.length <= writes && added.every((r) => r.action === "platform.impersonation.write_refused" && r.user_id === fx.staff.id),
     { rows: added.length, other: added.filter((r) => r.action !== "platform.impersonation.write_refused" || r.user_id !== fx.staff.id).slice(0, 5) },
   );
-  // staff viewing B, with A's ids: what a missing id answers
-  const onB = await impersonate(fx, fx.B);
-  if ("stub" in onB) return;
-  for (const c of ACTION_CASES.filter((x) => !x.write)) {
-    const args = await c.victim(fx, fresh);
-    const real = await call({ sessionToken: onB.token }, appPath(fx.B.handle, c.path), () => actionFn(c)(...args));
-    const ghost = await call({ sessionToken: onB.token }, appPath(fx.B.handle, c.path), () => actionFn(c)(...ghostify(fx, args)));
-    check(`${c.id} · staff viewing B, A's ids: same answer as a missing id`, text(answerOf(real)) === text(unghost(fx, answerOf(ghost))), { real: answerOf(real), ghost: answerOf(ghost) });
+
+  // staff viewing B attack A like any member of B: A's path / handle answer as an unknown handle, B's path with A's
+  // ids as missing ids, nothing of A in any answer, A's rows (its audit included) byte-identical
+  const tokenB = await impersonate(fx, fx.B);
+  if (!tokenB) return;
+  const viewB = { sessionToken: tokenB };
+  // the fresh records of A first (A's own audit rows), then the fingerprint and the audit mark
+  const victimsB = new Map<ActionCase, unknown[]>();
+  for (const c of ACTION_CASES) victimsB.set(c, await c.victim(fx, fresh));
+  const topA = await auditTop(fx.A.id);
+  const beforeB = await snapshot(fx.A.id);
+  for (const c of ACTION_CASES) {
+    const args = victimsB.get(c)!;
+    const onA = await call(viewB, appPath(fx.A.handle, c.path), () => actionFn(c)(...structuredClone(args)));
+    const onGhost = await call(viewB, appPath(fx.ghostHandle, c.path), () => actionFn(c)(...structuredClone(args)));
+    const la = `${c.id} · staff viewing B · A's path`;
+    if (ranReal(la, onA, onGhost)) {
+      check(`${la}: not_found`, refusal(onA) === "not_found", answerOf(onA));
+      check(`${la}: same answer as an unknown handle`, text(answerOf(onA)) === text(answerOf(onGhost)), { onA: answerOf(onA), onGhost: answerOf(onGhost) });
+    }
+    const ghostArgs = ghostify(fx, args);
+    const real = await call(viewB, appPath(fx.B.handle, c.path), () => actionFn(c)(...structuredClone(args)));
+    const ghost = await call(viewB, appPath(fx.B.handle, c.path), () => actionFn(c)(...structuredClone(ghostArgs)));
+    const lb = `${c.id} · staff viewing B · B's path, A's ids`;
+    if (ranReal(lb, real, ghost)) {
+      if (text(args) !== text(ghostArgs)) check(`${lb}: same answer as a missing id`, text(answerOf(real)) === text(unghost(fx, answerOf(ghost))), { real: answerOf(real), ghost: answerOf(ghost) });
+      if (c.write) check(`${lb}: refused`, refusal(real) !== null, answerOf(real));
+    }
+    const leaked = leaks(fx, [answerOf(onA), answerOf(real)], { sent: args });
+    check(`${c.id} · staff viewing B: no canary of A`, leaked.length === 0, leaked);
   }
+  for (const page of derivePages()) {
+    const ids: Record<string, string> = page.template.includes("[id]") ? { id: fx.A.page.live } : {};
+    const onA = await renderPage(viewB, page, { store: fx.A.handle, ...ids });
+    const dataFree = page.kind === "layout" && !/requireStoreMember\(|memberCtx\(/.test(readFileSync(path.join(ROOT, page.file), "utf8"));
+    const la = `${page.template}${page.kind === "layout" ? " (layout)" : ""} · staff viewing B · A's handle`;
+    if (ranReal(la, onA.kind === "error" ? onA : null)) {
+      if (dataFree) check(`${la}: nothing of A`, onA.kind === "notFound" || (onA.kind === "render" && leaks(fx, onA.payload).length === 0), onA);
+      else check(`${la}: 404`, onA.kind === "notFound", onA);
+    }
+    for (const sp of pageQueries(fx, page.template)) {
+      const r = await renderPage(viewB, page, { store: fx.B.handle, ...ids }, sp);
+      const lb = `${page.template}${Object.keys(sp).length ? `?${new URLSearchParams(sp)}` : ""} · staff viewing B · B's handle, A's ids`;
+      if (r.kind === "render") check(`${lb}: no canary of A`, leaks(fx, r.payload, { sent: [sp, ids] }).length === 0, leaks(fx, r.payload, { sent: [sp, ids] }));
+      else if (ranReal(lb, r.kind === "error" ? r : null)) check(`${lb}: 404 or a redirect inside B`, r.kind === "notFound" || (r.kind === "redirect" && r.to.startsWith(`/app/${fx.B.handle}/`)), r);
+    }
+  }
+  for (const route of tenantRoutes) {
+    for (const method of route.methods) {
+      const plan = routePlan(fx, method, route.template);
+      const ids: Record<string, string> = route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
+      if (route.template.startsWith("/s/")) {
+        // A's public store routes: the staff member viewing B is one more visitor there (the signed-out answer)
+        const params: Record<string, string> = { store: fx.A.handle, ...(route.template.includes("[slug]") ? { slug: fx.A.slug } : {}), ...(route.template.includes("[kind]") ? { kind: "privacy" } : {}) };
+        const seen = await callRoute(viewB, route, method, params, {});
+        const anon = await callRoute({ anonymous: true }, route, method, params, {});
+        const l = `${method} ${route.template} · staff viewing B · A's public address`;
+        if (ranReal(l, seen, anon)) {
+          check(`${l}: the signed-out answer, no customer or secret canary`, text(routeAnswer(seen)) === text(routeAnswer(anon)) && leaks(fx, routeAnswer(seen), { only: ["customer", "secret"] }).length === 0, { seen: routeAnswer(seen), anonymous: routeAnswer(anon), logs: seen.logs.slice(0, 3) });
+          check(`${l}: served (never a 5xx)`, anon.ok && anon.value!.status < 500, { status: anon.ok ? anon.value!.status : null, logs: anon.logs.slice(0, 3) });
+        }
+        continue;
+      }
+      const onA = await callRoute(viewB, route, method, { store: fx.A.handle, ...ids }, plan, { photo: fx.A.photoBytes });
+      const onGhost = await callRoute(viewB, route, method, { store: fx.ghostHandle, ...ids }, plan, { photo: fx.A.photoBytes });
+      const la = `${method} ${route.template} · staff viewing B · A's handle`;
+      const a = routeAnswer(onA);
+      if (ranReal(la, onA, onGhost)) {
+        const g = JSON.parse(text(routeAnswer(onGhost)).split(fx.ghostHandle).join(fx.A.handle)) as unknown;
+        check(`${la}: same answer as an unknown handle`, text(a) === text(g), { onA: a, onGhost: g });
+        check(`${la}: 404 (or the alias redirect)`, onA.ok && (onA.value!.status === 404 || (onA.value!.status === 307 && (onA.value!.location ?? "").includes(`/app/${fx.A.handle}/`))), a);
+      }
+      if (plan.skipIds) continue;
+      const real = await callRoute(viewB, route, method, { store: fx.B.handle, ...ids }, plan);
+      const ghost = await callRoute(viewB, route, method, { store: fx.B.handle, ...ghostify(fx, ids) }, ghostify(fx, plan));
+      const lb = `${method} ${route.template} · staff viewing B · B's handle, A's ids`;
+      if (ranReal(lb, real, ghost)) check(`${lb}: same answer as a missing id`, text(routeAnswer(real)) === text(unghost(fx, routeAnswer(ghost))), { real: routeAnswer(real), ghost: routeAnswer(ghost) });
+      const leaked = leaks(fx, [a, routeAnswer(real)], { sent: [plan, ids] });
+      check(`${method} ${route.template} · staff viewing B: no canary of A`, leaked.length === 0, leaked);
+    }
+  }
+  const afterB = await snapshot(fx.A.id);
+  check("A's rows byte-identical while staff viewed B and attacked A (its audit included)", afterB.hash === beforeB.hash, snapshotDiff(beforeB, afterB));
+  const strayAudit = await auditRows(fx.A.id, topA);
+  check("…no audit row of A from the view of B", strayAudit.length === 0, strayAudit);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2409,7 +2851,8 @@ export interface TenancyCase {
 }
 export interface TenancyKit extends Kit {
   check: typeof check;
-  pending: typeof pending;
+  ranReal: typeof ranReal;
+  notApplicable: typeof notApplicable;
   call: typeof call;
   callRoute: typeof callRoute;
   renderPage: typeof renderPage;
@@ -2425,7 +2868,8 @@ export async function pluginSuite(kit: Kit): Promise<void> {
   const tk: TenancyKit = {
     ...kit,
     check,
-    pending,
+    ranReal,
+    notApplicable,
     call,
     callRoute,
     renderPage,
@@ -2457,28 +2901,25 @@ export function report(title: string, extra: string[] = []): number {
   suite(currentSuite);
   let pass = 0;
   let fail = 0;
-  let pend = 0;
+  const na: string[] = [];
   console.log(`\n${title}`);
   for (const [name, t] of tallies) {
-    const p = [...t.pending.values()].reduce((n, l) => n + l.length, 0);
     pass += t.pass;
     fail += t.fail.length;
-    pend += p;
-    console.log(`  ${t.fail.length ? "✗" : "✓"} ${name}: ${t.pass} passed${t.fail.length ? `, ${t.fail.length} FAILED` : ""}${p ? `, ${p} pending` : ""} (${Math.round(t.ms / 1000)} s)`);
+    na.push(...t.na.map((n) => `[${name}] ${n}`));
+    console.log(`  ${t.fail.length ? "✗" : "✓"} ${name}: ${t.pass} passed${t.fail.length ? `, ${t.fail.length} FAILED` : ""}${t.na.length ? `, ${t.na.length} not applicable` : ""} (${Math.round(t.ms / 1000)} s)`);
   }
-  const blockers = new Map<string, number>();
-  for (const t of tallies.values()) for (const [why, list] of t.pending) blockers.set(why, (blockers.get(why) ?? 0) + list.length);
-  if (blockers.size) {
-    console.log("  pending (the code path ends in another track's typed stub; real checks once it is implemented):");
-    for (const [why, n] of [...blockers].sort((a, b) => b[1] - a[1])) console.log(`    · ${why}: ${n}`);
+  if (na.length) {
+    console.log("  not applicable in R1.0 (no code yet; each with its reason):");
+    for (const line of na) console.log(`    · ${line}`);
   }
-  if (adapterUse.size) console.log(`  T1 adapter answered: ${[...adapterUse].map(([k, n]) => `${k} ×${n}`).join(", ")}`);
   for (const line of extra) console.log(`  ${line}`);
   if (fail) {
     console.log("\nFAILURES");
     for (const [name, t] of tallies) for (const f of t.fail) console.log(`  ✗ [${name}] ${f}`);
   }
-  console.log(`\n${fail ? "✗" : "✓"} ${title}: ${pass} passed, ${fail} failed, ${pend} pending`);
+  // no check is ever pending since the R1.0 merge: a typed stub reached fails its check (ranReal)
+  console.log(`\n${fail ? "✗" : "✓"} ${title}: ${pass} passed, ${fail} failed, 0 pending, ${na.length} not applicable`);
   return fail;
 }
 
@@ -2492,7 +2933,9 @@ async function main(): Promise<void> {
     await routeSuite(kit);
     await pageSuite(kit);
     await specialSuite(kit);
+    await moreSpecialCases(kit);
     await impersonationSuite(kit);
+    await accountSuite(kit);
     await pluginSuite(kit);
     failed = 0;
   } catch (e) {

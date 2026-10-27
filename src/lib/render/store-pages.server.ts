@@ -86,7 +86,13 @@ async function loadPublished(scope: StoreScope, where: SQL): Promise<PublishedPa
   };
 }
 
-async function cached<T>(store: StoreRow, key: string, load: () => Promise<T | null>, bytes: (v: T) => number): Promise<T | null> {
+/**
+ * The store's cache entry `key`, loaded with `scope` on a miss. The entry is filed under the row's store and loaded
+ * with the scope, so the two must be one store: a mismatched pair would file one store's page under the other's key
+ * (a render-cache poisoning across stores), so it throws before any read.
+ */
+async function cached<T>(scope: StoreScope, store: StoreRow, key: string, load: () => Promise<T | null>, bytes: (v: T) => number): Promise<T | null> {
+  if (scope.storeId !== store.id) throw new Error("render: the scope and the store row disagree");
   const hit = cacheGet<T>(store.id, key);
   if (hit) return hit.value;
   const value = await load();
@@ -96,7 +102,7 @@ async function cached<T>(store: StoreRow, key: string, load: () => Promise<T | n
 /** The published version served at <base>/<slug> in this store (null: unknown, unpublished, reserved). */
 export function getPublishedPage(scope: StoreScope, store: StoreRow, slug: string): Promise<PublishedPage | null> {
   if (!isStoreSlug(slug)) return Promise.resolve(null);
-  return cached(store, keyOf(store, "page", slug), () => loadPublished(scope, eq(pages.slug, slug)), pageBytes);
+  return cached(scope, store, keyOf(store, "page", slug), () => loadPublished(scope, eq(pages.slug, slug)), pageBytes);
 }
 
 /**
@@ -106,7 +112,7 @@ export function getPublishedPage(scope: StoreScope, store: StoreRow, slug: strin
 export function getStoreHomePage(scope: StoreScope, store: StoreRow): Promise<PublishedPage | null> {
   const homeId = store.homePageId;
   if (!homeId) return Promise.resolve(null);
-  return cached(store, keyOf(store, "home", homeId), () => loadPublished(scope, eq(pages.id, homeId)), pageBytes);
+  return cached(scope, store, keyOf(store, "home", homeId), () => loadPublished(scope, eq(pages.id, homeId)), pageBytes);
 }
 
 /**
@@ -117,6 +123,7 @@ export function getStoreHomePage(scope: StoreScope, store: StoreRow): Promise<Pu
 export async function slugHistoryTarget(scope: StoreScope, store: StoreRow, slug: string): Promise<string | null> {
   if (!isStoreSlug(slug)) return null;
   const found = await cached(
+    scope,
     store,
     keyOf(store, "moved", slug),
     async () => {
@@ -154,6 +161,7 @@ async function legalSource(scope: StoreScope, store: StoreRow, themeSlug: string
   const home = await getStoreHomePage(scope, store);
   if (home) return home;
   return cached(
+    scope,
     store,
     keyOf(store, "latest", ""),
     async () => {
@@ -188,6 +196,7 @@ export async function getStoreLegalDocument(scope: StoreScope, store: StoreRow, 
   const page = await legalSource(scope, store, themeSlug);
   if (!page) return null;
   return cached(
+    scope,
     store,
     keyOf(store, "legal", `${page.versionId}:${page.slug}:${kind}`),
     async () => {
@@ -212,6 +221,7 @@ export async function getStoreLegalDocument(scope: StoreScope, store: StoreRow, 
 /** Does the store have a published page at all? (its robots.txt says `Disallow: /` otherwise, §C.8) */
 export async function storeHasPublishedPage(scope: StoreScope, store: StoreRow): Promise<boolean> {
   const found = await cached(
+    scope,
     store,
     keyOf(store, "any", ""),
     async () => {
@@ -235,6 +245,7 @@ export interface SitemapPage {
 /** The store's published, indexable pages for its sitemap (§C.8: canonical URLs only; at most 5,000). */
 export async function listSitemapPages(scope: StoreScope, store: StoreRow): Promise<SitemapPage[]> {
   const list = await cached(
+    scope,
     store,
     keyOf(store, "sitemap", ""),
     async () => {
