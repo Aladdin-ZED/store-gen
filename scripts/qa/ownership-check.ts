@@ -26,9 +26,10 @@
  * a path's owner is the strongest claim, in this order: a track's specific path (no `**`, no `*` in the file name) ·
  * the maintainer's specific path · a track's glob · the maintainer's glob. Two tracks at the strongest level is a
  * finding ("two tracks of the same phase"), whatever the files on disk; so is a file that is new since the phase began
- * (not in docs/saas/ownership-baseline.json) and that no row of the current phase claims. Overlaps are looked for on
- * every working-tree file (honouring .gitignore) and on a witness path made from every pattern of every phase, so a
- * glob intersection is found before either track writes a file. The current phase (the manifest's) fails the run;
+ * (not in docs/saas/ownership-baseline.json) and that no row of the current phase claims (not judged in an archive
+ * build without `.git`, whose commit the gate already judged). Overlaps are looked for on every working-tree file
+ * (honouring .gitignore) and on a witness path made from every pattern of every phase, so a glob intersection is
+ * found before either track writes a file. The current phase (the manifest's) fails the run;
  * later phases print warnings until their contract step makes them current (or `--phase` names them).
  * A missing or unparsable manifest fails the run, never a silent pass.
  */
@@ -927,9 +928,14 @@ function main(): void {
       }
     }
   }
-  for (const f of fresh) {
-    if (!claimsFor(rows, current, f).length) findings.push({ phase: current, kind: "unowned-new", path: f, witness: false, detail: `new since ${baseline.startedAt.slice(0, 7)} and no ${current} row claims it` });
-  }
+  // An archive build (no `.git`: `prebuild` on Hostinger, §J.5) judges the rows only: its tree is a commit the gate
+  // already judged (scripts/deploy/archive.mjs), and the host may add files of its own beside the extracted archive.
+  const archiveBuild = !existsSync(`${ROOT}/.git`);
+  if (!archiveBuild) {
+    for (const f of fresh) {
+      if (!claimsFor(rows, current, f).length) findings.push({ phase: current, kind: "unowned-new", path: f, witness: false, detail: `new since ${baseline.startedAt.slice(0, 7)} and no ${current} row claims it` });
+    }
+  } else log("ownership-check: no .git (an archive build): the new-file check is skipped; the gate ran it on this commit");
 
   const hard = findings.filter((f) => strict.has(f.phase));
   const soft = findings.filter((f) => !strict.has(f.phase));
@@ -948,7 +954,7 @@ function main(): void {
       log(`\n  ${current}: ${takenFromGlob.length} file(s) a specific claim takes out of another track's glob:`);
       for (const t of takenFromGlob) log(`    ${t}`);
     }
-    log(hard.length ? `\n${hard.length} finding(s) in ${[...strict].join(", ")}` : `✓ no file has two owners in ${[...strict].join(", ")}; every new file has an owner${soft.length ? ` (${soft.length} warning(s) in later phases)` : ""}`);
+    log(hard.length ? `\n${hard.length} finding(s) in ${[...strict].join(", ")}` : `✓ no file has two owners in ${[...strict].join(", ")}${archiveBuild ? "" : "; every new file has an owner"}${soft.length ? ` (${soft.length} warning(s) in later phases)` : ""}`);
   }
   process.exit(hard.length ? 1 : 0);
 }

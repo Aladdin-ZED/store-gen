@@ -72,7 +72,7 @@ export async function createSetupStore(userId: string, input: { storeName: strin
   const name = cleanStoreName(input.storeName);
   if (!name) fields.storeName = "auth.signup.store_name_invalid";
   const handle = input.handle.trim().toLowerCase();
-  const problem = await newHandleProblem(handle, setting);
+  const problem = await newHandleProblem(handle);
   if (problem) fields.handle = problem;
   if (Object.keys(fields).length || !name) throw new FieldsError(fields);
 

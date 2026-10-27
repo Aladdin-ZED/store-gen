@@ -20,7 +20,7 @@ import {
   SESSION_TOUCH_INTERVAL_MS,
 } from "./config";
 import { isAdminLocale, type AdminLocale } from "@/lib/i18n/admin";
-import type { PlatformRole, Role } from "./permissions";
+import type { PlatformRole } from "./permissions";
 
 /** newToken(32) → 43 base64url chars */
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
@@ -56,8 +56,6 @@ export interface ValidSession {
     id: string;
     email: string;
     name: string;
-    /** @deprecated the single-tenant role (STORE-SAAS §E.1: SessionUser loses it once T2 moves its callers) */
-    role: Role;
     totpEnabled: boolean;
     platformRole: PlatformRole | "none";
     /** admin UI locale; null = the browser's */
@@ -140,7 +138,6 @@ export async function validateSessionToken(token: string | null | undefined): Pr
       stepUpAt: sessions.stepUpAt,
       email: users.email,
       name: users.name,
-      role: users.role,
       totpEnabled: users.totpEnabled,
       platformRole: users.platformRole,
       locale: users.locale,
@@ -179,7 +176,6 @@ export async function validateSessionToken(token: string | null | undefined): Pr
       id: row.userId,
       email: row.email,
       name: row.name,
-      role: row.role,
       totpEnabled: row.totpEnabled,
       platformRole: row.platformRole,
       locale: isAdminLocale(row.locale) ? row.locale : null,

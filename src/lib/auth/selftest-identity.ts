@@ -166,7 +166,6 @@ async function cases(c: mysql.Connection): Promise<void> {
     id: u.id,
     email: u.email,
     name: u.name,
-    role: "owner",
     totpEnabled: !!u.totp_enabled,
     sessionId: sessionId ?? `ctx:${u.id}`,
     platformRole: (u.platform_role ?? "none") as PlatformRole | "none",
@@ -646,31 +645,9 @@ async function cases(c: mysql.Connection): Promise<void> {
     ok("delete: no reset link was issued", !(await one("SELECT id FROM password_resets WHERE user_id = ?", [victim.userId])));
   }
   {
-    // review r1.0-t2 F2: today's /admin (the legacy permission option) admits only active legacy-store members and
-    // staff with TOTP; a tenant account (users.role defaults to 'editor') is refused
-    const LEGACY = "00000000000000000000000001";
-    await c.query(
-      "INSERT INTO stores (id, handle, name, mode, status, plan_id, market, currency, timezone, default_locale, brand_seed, created_at, updated_at) VALUES (?, 'legacy-one', 'Legacy One', 'landing', 'active', 'internal', 'MA', 'MAD', 'Africa/Casablanca', 'ar', 'a1b2c3d4e5f60718', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))",
-      [LEGACY],
-    );
-    const legacyGuard = async (email: string, prep: (userId: string) => Promise<void>) => {
-      const acc = await users.createAccount({ email, name: email.split("@")[0]!, password: PASSWORD, locale: "fr" });
-      await prep(acc.userId);
-      const ses = await createSession(acc.userId, { mfaPassed: true, ip: "192.0.2.90", ua: UA });
-      return caught(asToken(ses.token, () => auth.requireUser({ permission: "orders.read", throwOnFail: true })));
-    };
-    const tenantRole = await one<{ role: string }>("SELECT role FROM users WHERE id = ?", [a.userId]);
-    ok("legacy /admin: a tenant account carries the legacy column default", tenantRole?.role === "editor", tenantRole);
-    ok("legacy /admin: a tenant account → forbidden", (await legacyGuard("tenant.only@example.ma", async () => undefined)) === "auth:forbidden");
-    ok("legacy /admin: an owner of another store → forbidden", (await caught(asToken(ownerSession.token, () => auth.requireUser({ permission: "orders.read", throwOnFail: true })))) === "auth:forbidden");
-    ok("legacy /admin: an active legacy member → in", (await legacyGuard("legacy.member@example.ma", async (id) => void (await c.query("INSERT INTO store_members (store_id, user_id, role, status) VALUES (?, ?, 'editor', 'active')", [LEGACY, id])))) === "ok");
-    ok("legacy /admin: a suspended legacy member → forbidden", (await legacyGuard("legacy.suspended@example.ma", async (id) => void (await c.query("INSERT INTO store_members (store_id, user_id, role, status) VALUES (?, ?, 'editor', 'suspended')", [LEGACY, id])))) === "auth:forbidden");
-    ok("legacy /admin: staff without TOTP → forbidden", (await legacyGuard("staff.nototp@example.ma", async (id) => void (await c.query("UPDATE users SET platform_role = 'support' WHERE id = ?", [id])))) === "auth:forbidden");
-    ok("legacy /admin: staff with TOTP → in", (await legacyGuard("staff.totp@example.ma", async (id) => void (await c.query("UPDATE users SET platform_role = 'support', totp_enabled = 1 WHERE id = ?", [id])))) === "ok");
-    ok("legacy /admin: the account guard (no permission) is unchanged for a tenant", (await caught(asToken(ownerSession.token, () => auth.requireUser({ throwOnFail: true })))) === "ok");
-    const created = await auth.createUser({ email: "legacy.new@example.ma", name: "Legacy New", role: "editor", password: PASSWORD }, { id: a.userId, ip: null });
-    const createdMember = await one<{ role: string; status: string }>("SELECT role, status FROM store_members WHERE store_id = ? AND user_id = ?", [LEGACY, created.id]);
-    ok("legacy /admin: createUser also joins the legacy store", createdMember?.role === "editor" && createdMember.status === "active", createdMember);
+    // R1.0 integration: today's /admin and its legacy entry check are gone; the account guard admits any signed-in
+    // account, gate or not, and never reads the legacy users.role column
+    ok("account guard: a tenant owner passes", (await caught(asToken(ownerSession.token, () => auth.requireUser({ throwOnFail: true })))) === "ok");
   }
 
   /* ---------------------------------------------------------------- */

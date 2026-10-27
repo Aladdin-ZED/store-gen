@@ -1,13 +1,11 @@
 "use client";
 /**
- * Security of the signed-in account (docs/STORE-SAAS.md §B.7, §B.9; PLA-§22.5), three exports:
+ * Security of the signed-in account (docs/STORE-SAAS.md §B.7, §B.9; PLA-§22.5), two exports:
  *
  *   AccountSecurityPanel  `/app/account/security`: password change, two-step status, the signed-in devices; in the
  *                         viewer's language (ar / fr / en)
  *   StepUpDialog          the step-up sheet (§B.7, SEC-17): a TOTP code when the account has one, else the password
  *                         ("sudo mode"); fresh for 5 minutes, then the refused action is retried
- *   SecurityPanel         today's /admin Settings → Security (English, legacy props) until the R1.0 integration
- *                         deletes that page
  */
 import { KeyRoundIcon, LaptopIcon, Loader2Icon, LogOutIcon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldIcon, SmartphoneIcon } from "lucide-react";
 import Link from "next/link";
@@ -18,7 +16,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { logout, stepUpPasswordAction, stepUpTotpAction } from "@/lib/auth/actions";
 import { useAuthT } from "@/lib/auth/i18n/client";
 import { ACCOUNT_TWO_FACTOR_PATH } from "@/lib/auth/paths";
-import type { DeviceSession, NetworkView } from "@/lib/admin-data/security";
 import type { ActionResult as SeamResult } from "@/lib/tenancy/types";
 import { cn } from "@/lib/utils";
 import { PasswordField } from "@/app/(public)/_components/form-ui";
@@ -27,12 +24,7 @@ import { OtpField } from "@/app/(public)/_components/otp-field";
 import { useRunAction } from "@/app/(public)/_components/run-action";
 import { DateText, When } from "@/app/(public)/_components/when";
 import { ConfirmDialog } from "../common/confirm-dialog";
-import { StatusChip } from "../common/status-chip";
-import { RelativeTime } from "../common/time";
-import { runAction, type ActionResult } from "../lib/action-result";
 import { clearDashboardDrafts } from "../lib/drafts";
-import { fullDate, shortDate } from "../lib/format";
-import { Field, SettingsSection, TextInput } from "./form-kit";
 
 /* ------------------------------------------------------------------ */
 /* Step-up sheet                                                       */
@@ -368,212 +360,5 @@ function DevicesSection({ devices, revoke, signOutOthers }: { devices: AccountDe
         }}
       />
     </Section>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Legacy: today's /admin Settings → Security (deleted at integration)  */
-/* ------------------------------------------------------------------ */
-
-interface PasswordInput {
-  current: string;
-  next: string;
-  confirm: string;
-}
-
-const EMPTY: PasswordInput = { current: "", next: "", confirm: "" };
-
-/** @deprecated today's /admin page; the account page uses AccountSecurityPanel */
-export function SecurityPanel({
-  email,
-  minLength,
-  twoFactor,
-  twoFactorTurnedOff = false,
-  sessions,
-  network = null,
-  actions,
-}: {
-  email: string;
-  minLength: number;
-  twoFactor: { enabled: boolean; recoveryCodesRemaining: number };
-  /** back from the two-step page after turning it off there */
-  twoFactorTurnedOff?: boolean;
-  sessions: DeviceSession[];
-  /** owners only: the visitor-IP check */
-  network?: NetworkView | null;
-  actions: {
-    changePassword: (input: PasswordInput) => Promise<ActionResult<null>>;
-    revokeSession: (id: string) => Promise<ActionResult<null>>;
-    revokeOthers: () => Promise<ActionResult<{ count: number }>>;
-  };
-}) {
-  return (
-    <>
-      <LegacyPasswordCard email={email} minLength={minLength} save={actions.changePassword} />
-      <LegacyTwoFactorCard {...twoFactor} turnedOff={twoFactorTurnedOff && !twoFactor.enabled} />
-      <LegacySessionsCard sessions={sessions} revoke={actions.revokeSession} revokeOthers={actions.revokeOthers} />
-      {network && <LegacyNetworkCard network={network} />}
-    </>
-  );
-}
-
-function LegacyPasswordCard({ email, minLength, save }: { email: string; minLength: number; save: (input: PasswordInput) => Promise<ActionResult<null>> }) {
-  const router = useRouter();
-  const [values, setValues] = useState(EMPTY);
-  const [errors, setErrors] = useState<Partial<Record<keyof PasswordInput, string>>>({});
-  const [saving, setSaving] = useState(false);
-
-  const set = (key: keyof PasswordInput, value: string) => {
-    setValues((v) => ({ ...v, [key]: value }));
-    setErrors((e) => ({ ...e, [key]: undefined }));
-  };
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const next: typeof errors = {};
-    if (!values.current) next.current = "Enter your current password.";
-    if ([...values.next.normalize("NFKC")].length < minLength) next.next = `Use at least ${minLength} characters.`;
-    if (values.next !== values.confirm) next.confirm = "The two new passwords don't match.";
-    setErrors(next);
-    if (Object.keys(next).length) return;
-    setSaving(true);
-    try {
-      const ok = await runAction(save(values), { success: "Password changed. Other devices were signed out." });
-      if (ok !== undefined) {
-        setValues(EMPTY);
-        router.refresh();
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <SettingsSection title="Password" description="Changing it signs you out everywhere else.">
-      <form onSubmit={submit} noValidate className="grid gap-4">
-        <input type="email" name="username" autoComplete="username" value={email} readOnly hidden />
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Current password" error={errors.current}>
-            {(fp) => <TextInput {...fp} type="password" autoComplete="current-password" value={values.current} onChange={(e) => set("current", e.target.value)} />}
-          </Field>
-          <Field label="New password" error={errors.next} hint={`${minLength}+ characters. A short sentence works well.`}>
-            {(fp) => <TextInput {...fp} type="password" autoComplete="new-password" value={values.next} onChange={(e) => set("next", e.target.value)} />}
-          </Field>
-          <Field label="Repeat new password" error={errors.confirm}>
-            {(fp) => <TextInput {...fp} type="password" autoComplete="new-password" value={values.confirm} onChange={(e) => set("confirm", e.target.value)} />}
-          </Field>
-        </div>
-        <div className="flex justify-end">
-          <Button type="submit" disabled={saving || !values.current || !values.next}>
-            {saving && <Loader2Icon className="animate-spin" />}
-            Change password
-          </Button>
-        </div>
-      </form>
-    </SettingsSection>
-  );
-}
-
-function LegacyTwoFactorCard({ enabled, recoveryCodesRemaining, turnedOff }: { enabled: boolean; recoveryCodesRemaining: number; turnedOff: boolean }) {
-  return (
-    <SettingsSection
-      title="Two-step verification"
-      description={enabled ? "Every sign-in asks for a code from your authenticator app." : "Add a 6-digit code from your phone to every sign-in."}
-      aside={<StatusChip tone={enabled ? "brand" : "warn"}>{enabled ? "On" : "Off"}</StatusChip>}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <p className="text-sm text-muted-foreground" role={turnedOff ? "status" : undefined}>
-          {enabled ? `${recoveryCodesRemaining} recovery codes left` : turnedOff ? "Two-step verification turned off." : "Not protected yet."}
-        </p>
-        <Button asChild variant="outline">
-          <Link href={`${ACCOUNT_TWO_FACTOR_PATH}?from=settings`}>
-            <KeyRoundIcon />
-            {enabled ? "Manage codes" : "Set up now"}
-          </Link>
-        </Button>
-      </div>
-    </SettingsSection>
-  );
-}
-
-function LegacySessionsCard({ sessions, revoke, revokeOthers }: { sessions: DeviceSession[]; revoke: (id: string) => Promise<ActionResult<null>>; revokeOthers: () => Promise<ActionResult<{ count: number }>> }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [confirmAll, setConfirmAll] = useState(false);
-  const others = sessions.filter((s) => !s.current).length;
-  return (
-    <SettingsSection
-      title="Signed-in devices"
-      description="Sessions last 30 days and end after a week without use."
-      aside={
-        others > 0 ? (
-          <Button variant="outline" size="sm" onClick={() => setConfirmAll(true)}>
-            <LogOutIcon />
-            Sign out other devices
-          </Button>
-        ) : undefined
-      }
-    >
-      <ul className="grid gap-2">
-        {sessions.map((s) => (
-          <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] border p-3">
-            <p className="text-sm">
-              <span className="font-medium">{s.device}</span>
-              {s.current && " · this device"}
-              <span className="text-xs text-muted-foreground">
-                {" "}
-                · active <RelativeTime iso={s.lastSeenAt} /> · since{" "}
-                <time dateTime={s.createdAt} title={fullDate(s.createdAt)} suppressHydrationWarning>
-                  {shortDate(s.createdAt)}
-                </time>
-              </span>
-            </p>
-            {!s.current && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy === s.id}
-                onClick={async () => {
-                  setBusy(s.id);
-                  try {
-                    if ((await runAction(revoke(s.id), { success: "Device signed out" })) !== undefined) router.refresh();
-                  } finally {
-                    setBusy(null);
-                  }
-                }}
-              >
-                Sign out
-              </Button>
-            )}
-          </li>
-        ))}
-      </ul>
-      <ConfirmDialog
-        open={confirmAll}
-        onOpenChange={setConfirmAll}
-        icon={<LogOutIcon />}
-        title={`Sign out ${others} other device${others === 1 ? "" : "s"}?`}
-        description="They will need your password (and two-step code) to come back."
-        confirmLabel="Sign them out"
-        pendingLabel="Signing out…"
-        onConfirm={async () => {
-          const res = await runAction(revokeOthers(), { success: (d) => `${d.count} device${d.count === 1 ? "" : "s"} signed out` });
-          if (res === undefined) return false;
-          router.refresh();
-        }}
-      />
-    </SettingsSection>
-  );
-}
-
-function LegacyNetworkCard({ network }: { network: NetworkView }) {
-  return (
-    <SettingsSection title="Visitor IP check" description="The address the app reads from your host's proxy headers. On the live site it must be your own public IP.">
-      <p className="font-mono text-sm">{network.clientIp}</p>
-      <p className="text-xs text-muted-foreground">
-        TRUSTED_PROXY_HOPS={network.trustedHops}
-        {network.hops.length ? ` · X-Forwarded-For: ${network.hops.map((h) => h.value).join(", ")}` : ""}
-      </p>
-    </SettingsSection>
   );
 }

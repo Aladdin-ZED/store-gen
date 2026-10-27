@@ -46,7 +46,7 @@ import { PLATFORM_TIMEZONE } from "./config";
 import { AuthRefusal, FieldsError } from "./errors";
 import { signupIdentityLinks } from "./identity";
 import { consumeInviteTx, findUsableInvite, normalizeInviteCode, type UsableInvite } from "./platform-invites";
-import { effectiveSignupMode, isT1Stub, killSwitchTripped, platformSetting, type EffectiveSignupMode, type SignupMode } from "./platform-config";
+import { effectiveSignupMode, killSwitchTripped, platformSetting, type EffectiveSignupMode, type SignupMode } from "./platform-config";
 import type { PublicActionCtx } from "./public-action";
 import { createSession, setSessionLastStore, type IssuedSession } from "./session";
 import { auditStoreCreated, cleanStoreName, insertStoreTx, newHandleProblem, type Tx } from "./stores";
@@ -165,7 +165,7 @@ async function checkStoreFields(form: { storeName: string; handle: string; mode:
   const storeName = cleanStoreName(form.storeName);
   if (!storeName) fields.storeName = "auth.signup.store_name_invalid";
   const handle = form.handle.trim().toLowerCase();
-  const handleProblem = await newHandleProblem(handle, setting);
+  const handleProblem = await newHandleProblem(handle);
   if (handleProblem) fields.handle = handleProblem;
   if (!selectableStoreModes().includes(form.mode)) fields.mode = "auth.signup.mode_unavailable";
   const market = allowedMarket(form.market, setting);
@@ -257,24 +257,10 @@ function autoApproval(mode: SignupMode, s: SignupScore, ctx: { trustedCreator: b
 /* The daily sandbox ceiling (D69)                                     */
 /* ------------------------------------------------------------------ */
 
-let ceilingStubWarned = false;
-
-/**
- * One of the day's `pending_stores` slots. false = no slot was taken (T1's counter is not merged yet: no ceiling,
- * logged once). A full day throws QuotaError.
- */
+/** One of the day's `pending_stores` slots (T1's platform counter): true = charged. A full day throws QuotaError. */
 async function chargePendingSlot(day: string, limit: number): Promise<boolean> {
-  try {
-    await chargePlatformUsage("pending_stores", day, 1, { limit });
-    return true;
-  } catch (err) {
-    if (!isT1Stub(err)) throw err;
-    if (!ceilingStubWarned) {
-      ceilingStubWarned = true;
-      console.warn("[signup] the daily sandbox ceiling is not enforced until T1's platform usage counter merges");
-    }
-    return false;
-  }
+  await chargePlatformUsage("pending_stores", day, 1, { limit });
+  return true;
 }
 
 async function refundPendingSlot(day: string): Promise<void> {

@@ -4261,7 +4261,7 @@ additive change is the maintainer's), `src/landing/document.tsx` (read-only in R
 **`scripts/qa/render-check.ts`** (the harness; tracks add fixtures through `render-cases/<track>.ts`, ENGP-12),
 **`scripts/qa/ownership-check.ts`** and its manifest **`docs/saas/ownership-baseline.json`** (rev 5, CRIT2-22),
 `scripts/qa/tenancy-allow.json` (the lint's allow file; entries through the maintainer, LAN Q23), **`scripts/qa/test-budget.ts`** (the 3-minute harness, §J.1; rev 4 named) and its table **`scripts/qa/test-budget.json`** (rev 5, CRIT2-9),
-**`scripts/deploy/archive.mjs`** (SEC-10), `src/landing/{types,context,i18n}.ts` (read-only in R1 product; the rev 4
+**`scripts/deploy/archive.mjs`** and its gate-file writer **`scripts/qa/gate-ok.ts`** (SEC-10), `docs/saas/ccr/r1.0-finale-report.md` (the integration report), `src/landing/{types,context,i18n}.ts` (read-only in R1 product; the rev 4
 report-link lines are the maintainer's P0 CCR, §K.2 P0), `scripts/sync-fonts.mjs` (the Arabic
 metrics step and the seven `@fontsource` faces of DES-R21 are a maintainer CCR applied in R1 product; the sample list
 `scripts/sync-fonts/ar-sample.json` is P6's), **`scripts/fonts/woff2-sfnt.mjs`** (rev 5, CRIT2-7: the WOFF2 table reader
@@ -5363,6 +5363,34 @@ The confirming critic's ten wording minors (drift only; no decision changes). On
 - **W9**: P2's e2e files are `scripts/qa/e2e/{pulse,admin-perf}.ts`, not the `e2e/*.ts` glob (P7 owns `e2e/wizard.ts`).
   Where: §K.2 closing paragraph.
 - **W10**: LAN-§27.4 N2 carries a rev 5 note: `calling-window.json` became `src/lib/callcenter/window.fixtures.ts` (P4).
+
+### P.5 R1.0 integration records (maintainer, 2026-10-27)
+
+What the integration step of §K.1 measured and decided; details in `docs/saas/ccr/r1.0-finale-report.md`.
+
+- **Landing chunk (header freeze rule, ENGC-10): no re-freeze.** `render-check` on the integrated tree measures the
+  `landing` chunk at **24,196 B gz** against the recorded **24,200 B** (tolerance 0; the figure T3 measured at its
+  merge, CCR r1.0-t3-report), sha256 `ab782be329119b2cc824ab9ea08f844c7fe3c9c495233e05ecb930b4312cef78` pinned in
+  `src/landing/runtime/landing.sha256`. It fits, so `budgets.json.landing` stays 24,200 and there is nothing for the
+  owner to approve. Headroom is 4 B: from here any byte the frozen chunk gains is an explicit re-freeze recorded in this
+  section. The other chunks on the same run (budget + 5 % rule): thanks 6,670 / 6,650, pixels 3,966 / 3,900, turnstile
+  1,278 / 1,300, units-matrix 2,184 / 2,200, units-fields 994 / 1,000, fill-steps-box 1,725 / 1,750, whatsapp 5,823 /
+  5,800; page caps: page 31,974 / 34,800, thanks-page 10,098 / 12,600.
+- **Media pipeline handover (ENGC-32).** `src/lib/media/{process,assets,upload-slots}.ts` are P8's from R1 product
+  (§K.2 P8 row, §G.4); `test:ownership` already resolves them to T4 in phase R1.0 and to P8 in phase R1, so the
+  handover takes effect when P0 re-writes `docs/saas/ownership-baseline.json` for phase R1 (rev 5, CRIT2-22); the
+  baseline is not edited at the integration.
+- **`prebuild` runs `gate:offline` (SEC-10).** In an archive build there is no `.git`; `test:ownership` then judges the
+  rows only and skips the new-file check (the host may add files beside the extracted archive, and the gate already
+  judged that commit). `scripts/qa/gate-ok.ts` (the tail of `npm run gate`) refuses to write `qa/.gate-ok` for a dirty
+  tree; `scripts/deploy/archive.mjs` packs `qa/.gate-ok` into the archive so the boot log names the gate commit.
+- **Deleted at the integration:** the legacy `/admin` entry check of review r1.0-t2 F2 (`legacyAdminRefusal`, the
+  `permission` option of `requireUser`), the legacy single-tenant matrix of `permissions.ts` (`legacyCan`, `ROLES`,
+  `PERMISSIONS`, `ROLE_LABELS`, `isRole`, `permissionsFor`; `SessionUser.role`), today's team functions of
+  `users.ts` (`createUser` with its legacy-store membership, `setUserRole`, `setUserDisabled`, `resetUserPassword`,
+  the owner form of `resetUserTwoFactor`), the legacy `SecurityPanel` / `TeamPanel`, and the "not implemented: T1/T2"
+  fallbacks the R1.0 stubs needed before their tracks merged. `adminAction`, `adminGuard` and the deprecated `rateLimit`
+  overload were already gone with T4.
 
 ---
 

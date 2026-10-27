@@ -22,7 +22,7 @@ import { alias } from "drizzle-orm/mysql-core";
 import { audit, auditFrom } from "@/lib/audit";
 import { AuthRefusal, FieldsError } from "@/lib/auth/errors";
 import { ACTIVE_STORE_ROLES, ROLE_RANK, canManageMember, invitableRoles, isStoreRole, type StoreRole } from "@/lib/auth/permissions";
-import { isT1Stub, killSwitchTripped } from "@/lib/auth/platform-config";
+import { killSwitchTripped } from "@/lib/auth/platform-config";
 import { ACCOUNT_REFUSED, EmailInput, getUserById, insertAccount, normalizeEmail, prepareAccount } from "@/lib/auth/users";
 import { db } from "@/lib/db/client";
 import { newId, newToken } from "@/lib/db/ids";
@@ -112,15 +112,8 @@ export function inviteState(row: { acceptedAt: Date | null; revokedAt: Date | nu
 }
 
 /* ------------------------------------------------------------------ */
-/* T1 limits, read as "no limit" until T1 merges                        */
+/* T1 limits                                                           */
 /* ------------------------------------------------------------------ */
-
-let limitStubWarned = false;
-function warnLimitStub(): void {
-  if (limitStubWarned) return;
-  limitStubWarned = true;
-  console.warn("[team] members_max / agents_max and the invites feature are not enforced until T1's entitlements merge");
-}
 
 type TeamRow = { userId: string; role: StoreRole; status: "active" | "suspended" };
 
@@ -140,12 +133,7 @@ async function assertSeats(scope: StoreScope, role: StoreRole, team: readonly Te
 }
 
 async function assertInvitesFeature(scope: StoreScope): Promise<void> {
-  try {
-    await assertFeature(scope, "invites");
-  } catch (err) {
-    if (!isT1Stub(err)) throw err;
-    warnLimitStub();
-  }
+  await assertFeature(scope, "invites");
 }
 
 /** The store's member rows, locked for the rest of the transaction (concurrent team writes queue here). */

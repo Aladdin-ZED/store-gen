@@ -12,7 +12,7 @@
     "assets:build": "node scripts/build-landing-assets.mjs",
     "css:admin": "node scripts/build-admin-css.mjs",
     "predev": "node scripts/build-landing-assets.mjs && node scripts/build-admin-css.mjs",
-    "prebuild": "node scripts/build-landing-assets.mjs && node scripts/build-admin-css.mjs",
+    "prebuild": "npm run gate:offline && node scripts/build-landing-assets.mjs && node scripts/build-admin-css.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",

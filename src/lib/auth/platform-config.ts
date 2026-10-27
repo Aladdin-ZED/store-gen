@@ -4,58 +4,31 @@ import "server-only";
  * signup mode and ceilings, new-store defaults, reserved handles), the platform Turnstile widget and the kill
  * switches.
  *
- * T1 owns the readers (`getPlatformSetting`, `activeKillSwitches`, 30 s caches). Until T1 merges they are typed
- * stubs that throw "not implemented: T1"; exactly that error is read as the documented default of a fresh 0004
- * database (the schema defaults, the env TURNSTILE_* keys of `platform_turnstile`, no switch tripped). Any other error
- * propagates, so a failed read never opens a gate.
+ * T1 owns the readers (`getPlatformSetting`, `activeKillSwitches`, 30 s caches); a fresh 0004 database reads as the
+ * registry defaults (the schema defaults, the env TURNSTILE_* keys of `platform_turnstile`, no switch tripped). A read
+ * error propagates, so a failed read never opens a gate.
  */
 import { subdomainMode } from "@/lib/edge/env";
 import type { KillKey } from "@/lib/flags/registry";
 import { getPlatformSetting } from "@/lib/settings";
-import { PlatformSettingSchema, type PlatformSetting } from "@/lib/settings/keys/platform";
-import { TurnstileSetting } from "@/lib/settings/keys/turnstile";
+import type { PlatformSetting } from "@/lib/settings/keys/platform";
 import { activeKillSwitches } from "@/lib/tenancy/entitlements";
 import { TOTP_ISSUER } from "./config";
 
-/** The typed-stub error of a T1 function not merged yet. */
-export function isT1Stub(err: unknown): boolean {
-  return err instanceof Error && err.message.startsWith("not implemented: T1");
-}
-
-async function orDefault<T>(read: () => Promise<T>, fallback: () => T): Promise<T> {
-  try {
-    return await read();
-  } catch (err) {
-    if (isT1Stub(err)) return fallback();
-    throw err;
-  }
-}
-
 /** The `platform` setting with every default filled in. */
 export function platformSetting(): Promise<PlatformSetting> {
-  return orDefault(
-    () => getPlatformSetting("platform"),
-    () => PlatformSettingSchema.parse({}),
-  );
+  return getPlatformSetting("platform");
 }
 
 /** The platform Turnstile widget (`platform_turnstile`, env TURNSTILE_* as defaults, SET-09), or null when not configured. */
 export async function platformTurnstileKeys(): Promise<{ siteKey: string; secretKey: string } | null> {
-  const value = await orDefault(
-    () => getPlatformSetting("platform_turnstile"),
-    () =>
-      TurnstileSetting.parse({
-        siteKey: process.env.TURNSTILE_SITE_KEY || undefined,
-        secretKey: process.env.TURNSTILE_SECRET_KEY || undefined,
-      }),
-  );
+  const value = await getPlatformSetting("platform_turnstile");
   return value.siteKey && value.secretKey ? { siteKey: value.siteKey, secretKey: value.secretKey } : null;
 }
 
 /** Is the kill switch tripped (§H.8: `signups_enabled` false, `platform_read_only` true, …)? */
 export async function killSwitchTripped(key: KillKey): Promise<boolean> {
-  const tripped = await orDefault(activeKillSwitches, () => []);
-  return tripped.includes(key);
+  return (await activeKillSwitches()).includes(key);
 }
 
 /** The platform brand (`platform.brand.name`, default "Store Gen"): the TOTP issuer, titles, mails. */

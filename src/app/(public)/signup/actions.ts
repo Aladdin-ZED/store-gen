@@ -13,7 +13,6 @@ import { redirect } from "next/navigation";
 import { publicAction } from "@/lib/auth";
 import { limits } from "@/lib/auth/attempts";
 import { setSessionCookie } from "@/lib/auth/cookies";
-import { platformSetting } from "@/lib/auth/platform-config";
 import { signupAccount, type SignupForm } from "@/lib/auth/signup";
 import { newHandleProblem } from "@/lib/auth/stores";
 import { isAdminLocale } from "@/lib/i18n/admin";
@@ -64,7 +63,7 @@ export async function checkHandleAction(handle: unknown): Promise<ActionResult<{
     async (ctx) => {
       if (typeof handle !== "string" || handle.length > 64) return { problem: "auth.signup.handle_format" };
       if (!(await limits.handleIp(ctx.ip)).ok) return { problem: null, limited: true as const };
-      return { problem: await newHandleProblem(handle.trim().toLowerCase(), await platformSetting()) };
+      return { problem: await newHandleProblem(handle.trim().toLowerCase()) };
     },
     { turnstile: "challenge", burst: "handle" },
   );

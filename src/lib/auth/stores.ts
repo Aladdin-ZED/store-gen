@@ -15,13 +15,11 @@ import type { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
 import { storeMembers, stores } from "@/lib/db/schema";
 import type { PlatformSetting } from "@/lib/settings/keys/platform";
-import { handleProblem as t1HandleProblem, checkHandleAvailable, isHandle, RESERVED_HANDLES } from "@/lib/tenancy/handles";
+import { handleProblem as t1HandleProblem, checkHandleAvailable, isHandle } from "@/lib/tenancy/handles";
 import { newStoreScope } from "@/lib/tenancy/seam";
 import { storeValues } from "@/lib/tenancy/sql";
 import type { MessageKey, StoreStatus, WriteScope } from "@/lib/tenancy/types";
 import type { StoreMode } from "@/lib/tenancy/mode";
-import { adminGateSecret } from "./config";
-import { isT1Stub } from "./platform-config";
 
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -84,26 +82,14 @@ export function cleanStoreName(input: unknown): string | null {
 
 /**
  * Why a new store may not take `handle` (§C.7), as the form's message key, or null. T1's `handleProblem` /
- * `checkHandleAvailable` decide (reserved lists, protected brands, history quarantine); until T1 merges, the format,
- * the static reserved list, ADMIN_GATE and `platform.reservedHandles` here, and the unique index at insert. Never
- * says why a handle is taken.
+ * `checkHandleAvailable` decide (reserved lists, protected brands, history quarantine), and the unique index at
+ * insert. Never says why a handle is taken.
  */
-export async function newHandleProblem(handle: string, setting: PlatformSetting): Promise<MessageKey | null> {
+export async function newHandleProblem(handle: string): Promise<MessageKey | null> {
   if (!isHandle(handle)) return "auth.signup.handle_format";
-  let problem: ReturnType<typeof t1HandleProblem>;
-  try {
-    problem = t1HandleProblem(handle, { allowProtected: false });
-  } catch (err) {
-    if (!isT1Stub(err)) throw err;
-    const gate = adminGateSecret()?.toLowerCase();
-    problem = RESERVED_HANDLES.has(handle) || handle === gate || setting.reservedHandles.includes(handle) ? "reserved" : null;
-  }
+  const problem = t1HandleProblem(handle, { allowProtected: false });
   if (problem === "format") return "auth.signup.handle_format";
   if (problem) return "auth.signup.handle_unavailable";
-  try {
-    if ((await checkHandleAvailable(handle)) === "unavailable") return "auth.signup.handle_unavailable";
-  } catch (err) {
-    if (!isT1Stub(err)) throw err;
-  }
+  if ((await checkHandleAvailable(handle)) === "unavailable") return "auth.signup.handle_unavailable";
   return null;
 }

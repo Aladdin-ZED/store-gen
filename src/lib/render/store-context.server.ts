@@ -15,8 +15,8 @@ import "server-only";
  *  - the render hook: `addons` (none until P3's `addonsFor`) and `purchaseInBrowser` (the `conversions` trigger of
  *    the page, OPE Q.6: false → the thank-you page carries no pixel; the server sends Purchase at the trigger).
  *
- * Settings come through T1's scoped API (`getStoreSettings`, `getPlatformSetting`); until T1 merges those are the
- * C0a stubs and a render answers `server`. Serving stored HTML never needs this module.
+ * Settings come through T1's scoped API (`getStoreSettings`, `getPlatformSetting`). Serving stored HTML never needs
+ * this module.
  */
 import { and, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";

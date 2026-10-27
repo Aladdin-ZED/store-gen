@@ -41,8 +41,8 @@ export async function switcherMemberships(userId: string): Promise<MembershipSum
   try {
     return await listMemberships(userId);
   } catch (err) {
-    // T2's stub throws until its merge; a real failure is logged and only hides the other stores
-    if (!(err instanceof Error && err.message.startsWith("not implemented"))) logError("shell:memberships", err);
+    // a failure is logged and only hides the other stores
+    logError("shell:memberships", err);
     return null;
   }
 }

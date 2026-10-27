@@ -6,10 +6,6 @@
  * The seam grants a store permission when
  *   can(role, p) && modeAllows(store.mode, def.mode) && releaseOn(def.release) && stateAllows(store.status, def)
  * and refuses every write or sensitive key to the impersonation membership (§B.8, D70, D71).
- *
- * The legacy single-tenant exports at the bottom (`Role`, `Permission`, `legacyCan`, …) keep today's
- * /admin compiling and behaving exactly as before until T2/T4 move their callers; the maintainer deletes
- * them at the R1.0 integration (§A.3).
  */
 import type { StoreStatus, WritePermission } from "@/lib/tenancy/types";
 import type { ModeFeature } from "@/lib/tenancy/mode";
@@ -408,67 +404,3 @@ export function canPlatform(role: PlatformRole, p: PlatformPermission): boolean 
 export const STEP_UP_PERMISSIONS: ReadonlySet<PlatformPermission> = new Set(
   PLATFORM_PERMISSION_KEYS.filter((p) => (PLATFORM_PERMISSIONS[p] as PlatformPermissionDef).stepUp),
 );
-
-/* ------------------------------------------------------------------ */
-/* Legacy single-tenant matrix (removed at the R1.0 integration)       */
-/* ------------------------------------------------------------------ */
-
-/** @deprecated single-tenant roles of today's /admin; use `StoreRole`. */
-export const ROLES = ["owner", "editor", "agent"] as const;
-/** @deprecated use `StoreRole`. */
-export type Role = (typeof ROLES)[number];
-
-/** @deprecated single-tenant keys of today's /admin; use `StorePermission`. */
-export const PERMISSIONS = [
-  "pages.read",
-  "pages.write",
-  "pages.publish",
-  "media.write",
-  "orders.read",
-  "orders.write",
-  "settings.read",
-  "settings.write",
-  "users.manage",
-  "export.create",
-] as const;
-/** @deprecated use `StorePermission`. */
-export type Permission = (typeof PERMISSIONS)[number];
-
-const LEGACY_MATRIX: Record<Role, ReadonlySet<Permission>> = {
-  /** full control, including users and settings */
-  owner: new Set<Permission>(PERMISSIONS),
-  /** builds, publishes and exports pages; can look at orders and settings */
-  editor: new Set<Permission>([
-    "pages.read",
-    "pages.write",
-    "pages.publish",
-    "media.write",
-    "export.create",
-    "orders.read",
-    "settings.read",
-  ]),
-  /** call-center agent: works the order queue only */
-  agent: new Set<Permission>(["orders.read", "orders.write"]),
-};
-
-/** @deprecated today's single-tenant check (re-exported as `can` by `@/lib/auth`); use `can(StoreRole, StorePermission)`. */
-export function legacyCan(role: Role, permission: Permission): boolean {
-  return LEGACY_MATRIX[role]?.has(permission) ?? false;
-}
-
-/** @deprecated */
-export function permissionsFor(role: Role): Permission[] {
-  return PERMISSIONS.filter((p) => legacyCan(role, p));
-}
-
-/** @deprecated use `isStoreRole`. */
-export function isRole(value: unknown): value is Role {
-  return typeof value === "string" && (ROLES as readonly string[]).includes(value);
-}
-
-/** @deprecated the i18n catalog names roles from R1.0 (§I.5). */
-export const ROLE_LABELS: Record<Role, string> = {
-  owner: "Owner",
-  editor: "Editor",
-  agent: "Order agent",
-};

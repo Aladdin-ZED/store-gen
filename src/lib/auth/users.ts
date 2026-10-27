@@ -1,55 +1,29 @@
 /**
- * User records: lookup, creation, password, 2FA reset and privilege changes.
+ * User records: lookup, account creation, password, 2FA reset, bans and reset links.
  * Every privilege-affecting change revokes the user's sessions so it takes effect immediately.
  *
- * Two generations live here until the R1.0 integration: today's single-tenant /admin team functions (`createUser`,
- * `setUserRole`, `setUserDisabled`, `resetUserPassword`, the owner form of `resetUserTwoFactor`), kept for their
- * callers, and the platform functions of PLA Q.19 (`createAccount`, `banUser`, `unbanUser`, `resetUserTwoFactor(ctx,
- * …)`, `createPasswordResetLink`) that the console and the public flows call. The staff functions take a
+ * The platform functions of PLA Q.19 (`createAccount`, `banUser`, `unbanUser`, `resetUserTwoFactor`,
+ * `createPasswordResetLink`) that the console and the public flows call. The staff functions take a
  * `PlatformCtx` and re-check `users.manage` with a fresh step-up themselves (PLA-§11.2: a reason, never oneself,
  * never a staff account: those change only through the staff screens of PLA-§14).
  */
 import "server-only";
 import { createHash } from "node:crypto";
-import { and, asc, count, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js/max";
 import { z } from "zod";
 import { audit, auditFrom } from "@/lib/audit";
 import { db } from "@/lib/db/client";
 import { newId, newToken } from "@/lib/db/ids";
-import { passwordResets, storeMembers, stores, users } from "@/lib/db/schema";
-import { LEGACY_STORE_ID } from "@/lib/db/store-handles";
+import { passwordResets, users } from "@/lib/db/schema";
 import { notify } from "@/lib/platform/notify";
 import type { MessageKey, PlatformCtx } from "@/lib/tenancy/types";
 import { platformOrigin } from "@/lib/urls";
 import { AuthInputError, AuthRefusal, FieldsError } from "./errors";
 import { checkPasswordPolicy, hashPassword, passwordProblem, verifyPassword } from "./password";
-import { isRole, type Role } from "./permissions";
 import { revokeUserSessions } from "./session";
 
 export type UserRow = typeof users.$inferSelect;
-
-export interface UserSummary {
-  id: string;
-  email: string;
-  name: string;
-  role: Role;
-  totpEnabled: boolean;
-  disabled: boolean;
-  createdAt: Date;
-  lastLoginAt: Date | null;
-}
-
-const toSummary = (u: UserRow): UserSummary => ({
-  id: u.id,
-  email: u.email,
-  name: u.name,
-  role: u.role,
-  totpEnabled: u.totpEnabled,
-  disabled: u.disabled,
-  createdAt: u.createdAt,
-  lastLoginAt: u.lastLoginAt,
-});
 
 /** NFKC + trim + lower-case. All lookups and uniqueness use this form. */
 export function normalizeEmail(input: string): string {
@@ -76,41 +50,6 @@ export async function getUserByEmail(email: string): Promise<UserRow | null> {
   return rows[0] ?? null;
 }
 
-export async function countUsers(): Promise<number> {
-  const [row] = await db.select({ n: count() }).from(users);
-  return Number(row?.n ?? 0);
-}
-
-export async function listUsers(): Promise<UserSummary[]> {
-  const rows = await db.select().from(users).orderBy(asc(users.createdAt));
-  return rows.map(toSummary);
-}
-
-export interface NewUserInput {
-  email: string;
-  name: string;
-  password: string;
-  role: Role;
-}
-
-async function prepareUser(input: NewUserInput) {
-  const email = EmailInput.safeParse(input.email);
-  if (!email.success) throw new AuthInputError(email.error.issues[0]?.message ?? "Invalid email.", "email");
-  const name = NameInput.safeParse(input.name);
-  if (!name.success) throw new AuthInputError(name.error.issues[0]?.message ?? "Invalid name.", "name");
-  if (!isRole(input.role)) throw new AuthInputError("Unknown role.", "role");
-  const problem = checkPasswordPolicy(input.password, email.data);
-  if (problem) throw new AuthInputError(problem, "password");
-  return {
-    id: newId(),
-    email: email.data,
-    name: name.data,
-    role: input.role,
-    passwordHash: await hashPassword(input.password),
-    createdAt: new Date(),
-  };
-}
-
 /** mysql2 error code, looking through drizzle's wrapping (`cause`). */
 function dbErrorCode(err: unknown): string | undefined {
   for (let e: unknown = err, depth = 0; e && typeof e === "object" && depth < 4; depth++) {
@@ -123,30 +62,6 @@ function dbErrorCode(err: unknown): string | undefined {
 
 /** ER_DUP_ENTRY, looking through drizzle's wrapping (a duplicate e-mail, handle or token). */
 export const isDuplicate = (err: unknown) => dbErrorCode(err) === "ER_DUP_ENTRY";
-
-/**
- * Creates a user (owner action). Throws AuthInputError on invalid input or a taken email. The user also joins the
- * legacy store (when it exists) with the 0004 role mapping: today's /admin admits only its members (review r1.0-t2 F2).
- */
-export async function createUser(input: NewUserInput, actor: { id: string; ip?: string | null }): Promise<UserSummary> {
-  const values = await prepareUser(input);
-  try {
-    await db.transaction(async (tx) => {
-      await tx.insert(users).values(values);
-      const [legacy] = await tx.select({ id: stores.id }).from(stores).where(eq(stores.id, LEGACY_STORE_ID)).limit(1); // tenancy: platform today's /admin team (legacy store only)
-      if (legacy) {
-        const role = values.role === "owner" ? "owner" : values.role === "editor" ? "editor" : "agent";
-        await tx.insert(storeMembers).values({ storeId: LEGACY_STORE_ID, userId: values.id, role, status: "active", invitedBy: actor.id }); // tenancy: platform today's /admin team (legacy store only)
-      }
-    });
-  } catch (err) {
-    if (isDuplicate(err)) throw new AuthInputError("A user with this email already exists.", "email");
-    throw err;
-  }
-  await audit("auth.user.created", { userId: actor.id, target: values.id, meta: { role: values.role }, ip: actor.ip });
-  const created = await getUserById(values.id);
-  return toSummary(created!);
-}
 
 /**
  * Self-service password change. Verifies the current password, enforces the policy, and ends
@@ -173,102 +88,13 @@ export async function changeUserPassword(
   await audit("auth.password.changed", { userId, target: userId, ip: ctx.ip });
 }
 
-/** Owner sets a new password for another user; all of that user's sessions end. */
-export async function resetUserPassword(
-  actor: { id: string; ip?: string | null },
-  userId: string,
-  newPassword: string,
-): Promise<void> {
-  const user = await getUserById(userId);
-  if (!user) throw new AuthInputError("User not found.");
-  const problem = checkPasswordPolicy(newPassword, user.email);
-  if (problem) throw new AuthInputError(problem, "newPassword");
-  await db
-    .update(users)
-    .set({ passwordHash: await hashPassword(newPassword), failedLogins: 0, lockedUntil: null })
-    .where(eq(users.id, userId));
-  await revokeUserSessions(userId);
-  await audit("auth.password.reset", { userId: actor.id, target: userId, ip: actor.ip });
-}
-
 /**
- * Owner turns off another user's two-step verification — a lost phone, or an authenticator that
- * someone else enrolled from a hijacked session. Clears the secret and the recovery codes and ends
- * all of that user's sessions, so their next sign-in asks for the password only. Never for the
- * actor's own account: that goes through disableTwoFactor, which asks for the password and a code.
+ * Staff turn off a user's two-step verification (PLA Q.19; `users.manage` with a fresh step-up, a reason, never
+ * oneself, never a staff account): a lost phone, or an authenticator someone else enrolled from a hijacked session.
+ * Clears the secret and the recovery codes and ends all of that user's sessions.
  */
-export function resetUserTwoFactor(ctx: PlatformCtx, userId: string, reason: string): Promise<void>;
-/** @deprecated today's owner reset in tenant settings (AUTH-09: deleted in R1.0); the platform overload is `users.manage` ↑ */
-export function resetUserTwoFactor(actor: { id: string; ip?: string | null }, userId: string): Promise<void>;
-export async function resetUserTwoFactor(actor: PlatformCtx | { id: string; ip?: string | null }, userId: string, reason?: string): Promise<void> {
-  if (!("id" in actor)) return resetTwoFactorAsStaff(actor, userId, reason ?? "");
-  if (userId === actor.id) throw new AuthInputError("Turn off your own two-step verification in Security.");
-  const user = await getUserById(userId);
-  if (!user) throw new AuthInputError("User not found.");
-  if (!user.totpEnabled) throw new AuthInputError("Two-step verification is already off for this member.");
-  await db.update(users).set({ totpEnabled: false, totpSecretEnc: null, recoveryCodes: null }).where(eq(users.id, userId));
-  await revokeUserSessions(userId);
-  await audit("auth.2fa.reset", { userId: actor.id, target: userId, ip: actor.ip });
-}
-
-type UserLock = Pick<UserRow, "id" | "role" | "disabled">;
-
-/**
- * Runs a role/disable change in a transaction that first locks every user row (the table holds a
- * handful of staff accounts). Concurrent changes therefore serialise in one lock order — no
- * deadlocks — and the "at least one active owner" rule is checked against committed state:
- * two owners demoting each other at the same moment can't both succeed.
- * `change` returns the update to apply, or null when there is nothing to do.
- */
-async function changeGuardingOwners(
-  userId: string,
-  change: (target: UserLock) => Partial<Pick<UserRow, "role" | "disabled">> | null,
-): Promise<{ before: UserLock } | null> {
-  return db.transaction(async (tx) => {
-    const all = await tx
-      .select({ id: users.id, role: users.role, disabled: users.disabled })
-      .from(users)
-      .orderBy(asc(users.id))
-      .for("update");
-    const target = all.find((u) => u.id === userId);
-    if (!target) throw new AuthInputError("User not found.");
-    const set = change(target);
-    if (!set) return null;
-
-    const after = { ...target, ...set };
-    const activeOwner = (u: UserLock) => u.role === "owner" && !u.disabled;
-    if (activeOwner(target) && !activeOwner(after) && !all.some((u) => u.id !== userId && activeOwner(u))) {
-      throw new AuthInputError("Keep at least one active owner.", "role" in set ? "role" : null);
-    }
-    await tx.update(users).set(set).where(eq(users.id, userId));
-    return { before: target };
-  });
-}
-
-/** Changes a user's role; refuses to remove the last active owner. Revokes the user's sessions. */
-export async function setUserRole(actor: { id: string; ip?: string | null }, userId: string, role: Role): Promise<void> {
-  if (!isRole(role)) throw new AuthInputError("Unknown role.", "role");
-  const result = await changeGuardingOwners(userId, (u) => (u.role === role ? null : { role }));
-  if (!result) return;
-  await revokeUserSessions(userId);
-  await audit("auth.user.role_changed", {
-    userId: actor.id,
-    target: userId,
-    meta: { from: result.before.role, to: role },
-    ip: actor.ip,
-  });
-}
-
-/** Disables/enables a user; refuses to disable the last active owner. Disabling revokes sessions. */
-export async function setUserDisabled(
-  actor: { id: string; ip?: string | null },
-  userId: string,
-  disabled: boolean,
-): Promise<void> {
-  const result = await changeGuardingOwners(userId, (u) => (u.disabled === disabled ? null : { disabled }));
-  if (!result) return;
-  if (disabled) await revokeUserSessions(userId);
-  await audit(disabled ? "auth.user.disabled" : "auth.user.enabled", { userId: actor.id, target: userId, ip: actor.ip });
+export function resetUserTwoFactor(ctx: PlatformCtx, userId: string, reason: string): Promise<void> {
+  return resetTwoFactorAsStaff(ctx, userId, reason);
 }
 
 /* ------------------------------------------------------------------ */

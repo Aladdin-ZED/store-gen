@@ -7,7 +7,7 @@
 > COD Studio's code and lessons still applies, but the deployment target is the Store Gen site in §4.
 
 Everything a new session (or a new engineer) needs to continue this project without the original chat.
-Last updated 2026-10-23, at commit `b995a48` plus this document.
+Last updated 2026-10-23, at commit `b995a48` plus this document; §4 (the R1.0 deploy method) rewritten 2026-10-27 at the R1.0 integration.
 
 ## 1. What this is
 
@@ -71,10 +71,55 @@ COD Studio has two parts:
 | Website | `lightgreen-hippopotamus-140853.hostingersite.com`, created 2026-10-23 through the Hostinger API. Use only the temporary domain until the owner says otherwise. |
 | hPanel user | `u641677794` (same hosting account as COD Studio) · Node **22** · build `npm run build` · output `.next` |
 | Database | `u641677794_storegen` / user `u641677794_storegen` (created by `hosting_databases_setup-website`). On 2026-10-23 Claude reset its password through the API (`hosting_databases_change-password`) so the full env set could be written in one call: all 6 DB keys (host 127.0.0.1) are now also in the local `.env.hostinger`. |
-| Env vars | 14 keys, set 2026-10-23: the 6 DB keys + APP_SECRET (**never change after launch**), ADMIN_GATE, SETUP_TOKEN, PUBLIC_URL (**= the site URL**), TRUSTED_PROXY_HOPS=1, BEHIND_CLOUDFLARE=0, CRON_KEY, APP_TIMEZONE. All values are in the local git-ignored `.env.hostinger` of this folder (comments at its top give the admin link and the cron line). `hosting_nodejs_replace-environment-variables` is a FULL replace: always send all 14 keys from `.env.hostinger`, then rebuild (PUBLIC_URL is read at build time too). |
+| Env vars | **16 keys from the R1.0 deploy on** (below). All values are in the local git-ignored `.env.hostinger` of this folder (comments at its top give the admin link and the cron line); never print or paste them. |
 | Local dev | `.env.local` points at the local database `cod_storegen` (XAMPP), with its own secrets. |
-| Admin | Hidden: `/admin` answers 404 until the owner opens `<site>/<ADMIN_GATE>`. |
-| Cron | hPanel → Advanced → Cron Jobs, every 5 min: `curl -fsS --max-time 110 "<site>/api/cron/tick?key=<CRON_KEY>" > /dev/null` |
+| Console | Hidden: `/admin` answers 404 until the owner opens `<site>/<ADMIN_GATE>`. Sellers use `/login` and `/app/<handle>`. |
+| Cron | Header form (below). |
+
+### Environment (R1.0: 16 keys; names only, values stay in `.env.hostinger`)
+
+`hosting_nodejs_replace-environment-variables` is a **full replace**: always send all 16 keys from `.env.hostinger`.
+
+| Key | Note |
+|---|---|
+| `DATABASE_URL` | `mysql://…@127.0.0.1:3306/u641677794_storegen` (Node uses 127.0.0.1, never `localhost`) |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Hostinger's own DB keys, unused by the code; kept because the replace is full |
+| `APP_SECRET` | **never changes after launch** (it seals every stored secret) |
+| `ADMIN_GATE` | the console's hidden path |
+| `SETUP_TOKEN` | first super_admin only (`/admin/setup`) |
+| `PUBLIC_URL` | alias of `PLATFORM_URL` for R1 (same value); removed in R2 |
+| `PLATFORM_URL` | **new in R1.0**: the site URL, `https://lightgreen-hippopotamus-140853.hostingersite.com`. Read at runtime: a change needs a restart, not a rebuild |
+| `TRUSTED_PROXY_HOPS` | `1` |
+| `BEHIND_CLOUDFLARE` | `0` (`1` after the domain move) |
+| `CRON_KEY` | the cron header's value |
+| `APP_TIMEZONE` | the platform default timezone (stores have their own) |
+| `DATA_DIR` | **new in R1.0**: `/home/u641677794/storegen-data` (decision below) |
+
+Optional, only when needed: `DATA_DIR_BUDGET_BYTES` (default 20 GiB), `SMTP_URL` + `MAIL_FROM` (mail off without them),
+`TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`, `GOOGLE_SA_JSON_B64` (Sheets), `ANTHROPIC_API_KEY`. The domain move adds
+`STORE_ROOT_DOMAIN`, `EDGE_KEY`, `LEGACY_PLATFORM_HOSTS`, `ADMIN_HOST` and flips `BEHIND_CLOUDFLARE` (20 keys,
+STORE-SAAS §H.7). Never set `NODE_ENV` (the build needs the devDependencies) or `SG_TEST_CONTEXT`.
+
+### `DATA_DIR`: the path decision and the persistence probe
+
+- **Decision:** `DATA_DIR=/home/u641677794/storegen-data`: outside every `domains/*/public_html` (the web server never
+  serves it), outside the build folder an archive deploy replaces, and its own folder on the hosting user COD Studio
+  shares (STORE-SAAS §G.2). Create nothing else by hand: from P8 the boot check writes the `.sg-owner` marker and its
+  subfolders when the parent is writable. In R1.0 media still live in the database; the boot log only checks the path
+  (`[boot]` warnings for a relative path, a path inside the app folder or under `public_html`).
+- **Persistence probe (§H.10, ENGC-14):** the path stays **[unverified]** until a probe file survives **two** archive
+  deploys. Before the first R1.0 deploy, create `/home/u641677794/storegen-data/.sg-probe` holding the commit being
+  deployed (hPanel File Manager, or a one-off hPanel cron command
+  `mkdir -p /home/u641677794/storegen-data && echo <sha7> > /home/u641677794/storegen-data/.sg-probe`). After that
+  deploy and after the next one, open the file: it must still be there with the same content. Record the date and the
+  two build ids in §6; only then drop `[unverified]`.
+
+### Cron (header form)
+
+hPanel → Advanced → Cron Jobs, every 5 minutes (the R1.0 deploy changes the old `?key=` line to this one; `?key=` still
+works in R1 and goes in R2):
+
+`curl -fsS --max-time 110 -H "X-Cron-Key: <CRON_KEY>" "<PLATFORM_URL>/api/cron/tick" > /dev/null`
 
 ### Why git pushes do not deploy
 
@@ -82,29 +127,56 @@ Hostinger's GitHub app is installed on another GitHub account, **aladdinzed35**,
 `Aladdin-ZED/store-gen`. The Store Gen site has no git link: it is deployed only by archive builds (below).
 (COD Studio's site has an old snapshot link to `aladdinzed35/landingPage-gen`.)
 
-### How to deploy (working method, about 2 minutes)
+### How to deploy (R1.0 method: gate → archive → upload → build)
 
-This needs the **Hostinger MCP connector** connected in Claude. If it says "sign in again", the owner
-reconnects it in the Claude connector settings.
+This needs the **Hostinger MCP connector** connected in Claude. If it says "sign in again", the owner reconnects it in
+the Claude connector settings. Nothing is deployed from a build that never saw the gate (STORE-SAAS §H.10, SEC-10).
 
-1. Commit and push to `origin main`.
-2. Run `git archive --format=zip -o app.zip HEAD`. It contains tracked files only, so no secrets.
-3. Hostinger MCP: `hosting_files_generate-upload-url` {username `u641677794`, domain `lightgreen-hippopotamus-140853.hostingersite.com`}. It
-   returns url, auth_key and rest_auth_key.
-4. `UP_URL=… UP_AUTH=… UP_REST=… bash scripts/deploy/hostinger-upload.sh app.zip cod-<random hex>.zip`
+1. **Commit and push** to `origin main` (a push does not deploy). The tree must be clean except
+   `docs/saas/PROGRESS.md`.
+2. **Gate:** `npm run gate` (typecheck, lint, `npm test`, `test:slow`, `test:db` on throwaway `cod_test_*` databases,
+   build, `test:e2e`, the secrets check). Only when every step is green does its last step (`scripts/qa/gate-ok.ts`)
+   write `qa/.gate-ok` = `{ sha: <HEAD>, at: <time> }`; it refuses a dirty tree. Before an R1 deploy also run the upgrade
+   dry run on the XAMPP DB and on a fresh dump of production imported into XAMPP:
+   `npm run qa:upgrade-dry-run -- --db <url>` must report 0 problems in its tenancy section.
+3. **Archive:** `node scripts/deploy/archive.mjs ../storegen-<sha7>.zip` (outside the repo). It refuses unless
+   `qa/.gate-ok` names the current `git rev-parse HEAD`, is younger than 24 h and the tree is clean; then it writes
+   `git archive --format=zip HEAD` (tracked files only, so no secrets) plus `qa/.gate-ok` (the boot log then names the
+   gate commit) and prints the size and sha256. It never uploads.
+4. **Upload:** Hostinger MCP `hosting_files_generate-upload-url` {username `u641677794`, domain
+   `lightgreen-hippopotamus-140853.hostingersite.com`} returns url, auth_key and rest_auth_key; then
+   `UP_URL=… UP_AUTH=… UP_REST=… bash scripts/deploy/hostinger-upload.sh ../storegen-<sha7>.zip cod-<random hex>.zip`
    uploads over TUS into public_html. Use a random file name.
-5. Hostinger MCP: `hosting_nodejs_start-build` {node_version 22, app_type next, root_directory "",
+5. **Env** (whenever the key set changed; the first R1.0 deploy adds `PLATFORM_URL` and `DATA_DIR`):
+   `hosting_nodejs_replace-environment-variables` with all 16 keys of `.env.hostinger`.
+6. **Build:** Hostinger MCP `hosting_nodejs_start-build` {node_version 22, app_type next, root_directory "",
    output_directory .next, build_script build, package_manager npm, source_type archive,
-   source_options {archive_path: "<that name>"}}.
-6. Poll `hosting_nodejs_build` / `hosting_nodejs_build-logs`. A build takes about 80 s. The log must show the
-   line `[admin-css] COD Studio build: admin Tailwind precompiled…`. "Syncing public_html" removes the archive.
-   A failed build keeps the previous version live.
-7. Smoke test:
-   - `/` returns 200
-   - `/admin` returns 404
-   - `/<ADMIN_GATE>` returns 303 to `/admin`
+   source_options {archive_path: "<that name>"}}. Poll `hosting_nodejs_build` / `hosting_nodejs_build-logs`. A build
+   takes about 80 s plus `gate:offline` (about 40 s here). `prebuild` runs `gate:offline` first: the log shows
+   `tenancy-lint: 0 violation(s)`, `ownership-check: no .git (an archive build)…`, then the permissions, hosts,
+   envelope and security selftests passing; a red one fails the build. The log must also show
+   `[admin-css] COD Studio build: admin Tailwind precompiled…`. "Syncing public_html" removes the archive. A failed
+   build keeps the previous version live.
+7. **First boot** of an R1.0 build runs migration 0004 (and the store #1 conversion when the old single-tenant setup
+   was used); the boot log names `gate passed on <sha>`.
+8. **Smoke test** (STORE-SAAS §H.10):
+   - `/` returns 200 (the marketing page)
+   - `/admin` returns 404; `/<ADMIN_GATE>` returns 303 to `/admin`
+   - `/login` returns 200
+   - `/s/<store-1 handle>` returns 200 or the store's neutral page
    - `POST /api/public/order {}` answers `{"ok":false,"error":"invalid",…}`
    - cron with the `X-Cron-Key` header answers `{"ok":true…}`
+   - `/api/health` answers with `app: "store-gen"`
+   - every 404 carries the security headers (STORE-SAAS §F.6)
+   - no client bundle (`/_next/static/**.js` of `/` and `/login`) contains the `PLATFORM_URL` value
+   - record `SHOW VARIABLES LIKE 'max_user_connections'` in §6: Store Gen holds up to 10 connections per process (query
+     pool 6, lock pool 2, media read pool 2) next to COD Studio's pool on the same account; if the limit is lower, stop
+     and decide before sign-ups open (the pool sizes are fixed in code in R1.0)
+   - the `DATA_DIR` probe above.
+9. **Rollback = fix forward.** A failed build keeps the previous version live, but once an R1.0 build has booted, 0004
+   has changed constraints the old build writes against (the global `pages_slug_uq` and `block_uq`, NOT NULL `store_id`):
+   redeploying an older archive is not a rollback. Fix on `main`, gate, archive and deploy again. Export the database
+   (hPanel → Databases → phpMyAdmin) before the first R1.0 deploy.
 
 hPanel "Redeploy" reuses the source of the **last** build. After an archive deploy it rebuilds that archive,
 so it's safe. It would rebuild the old snapshot only if the last build came from git.
@@ -184,6 +256,8 @@ store #1 conversion. The first boot of this tree on a database with data migrate
 `home`, `pixels`); single-tenant `getSetting(<moved key>)` readers then get defaults until T3 / T4 are merged. Until
 then: do not start the 3450 dev server on a database with real data (use a copy), and do not deploy main to Hostinger.
 The tenancy dry run (`scripts/qa/upgrade-dry-run.ts`) reports leftover legacy keys once the marker exists.
+**Resolved at the R1.0 integration (2026-10-27):** T3 and T4 are merged and every reader is store-scoped. main deploys
+only through §4 (green `npm run gate`, `scripts/deploy/archive.mjs`), after the upgrade dry run on a production dump.
 
 **Domain move checklist (R1, RESEARCH §5.2 / STORE-SAAS §C.10):** after "Worker + secret + route", add the Cloudflare
 route exclusion `console.<domain>/*` with Worker **None** (the console never runs through `edge/worker.js`, CCR
@@ -193,7 +267,7 @@ Suggested next engineering items:
 - Show "Sent to Meta ✓ / skipped (risk N)" per order in the admin order drawer.
 - Don't write a kept default no-cost extra ("Sans emballage") into the Sheets Variante or thank-you text.
   This needs an idle marker with parity across `text.ts`, `order.php` and the runtime.
-- Runtime budget headroom: the landing chunk is within 30 bytes of its budget.
+- Runtime budget headroom: the landing chunk is within 4 bytes of its budget (24,196 / 24,200 B, R1.0 integration).
 - Run the `scripts/qa/upgrade-dry-run.ts` gate against a production DB dump.
 - Make published HTML domain-independent (relative media URLs; re-render live pages automatically when
   PUBLIC_URL changes).

@@ -300,7 +300,6 @@ export async function requireSession(identity: RequestIdentity | null = getReque
       id: row.id,
       email: row.email,
       name: row.name,
-      role: row.role,
       totpEnabled: row.totpEnabled,
       sessionId: `ctx:${row.id}`,
       platformRole: row.platformRole,
@@ -333,17 +332,11 @@ const stepUpUntilOf = (at: Date | null): Date | null => (at ? new Date(at.getTim
 /* ------------------------------------------------------------------ */
 
 /**
- * Is the `platform_read_only` kill switch on (§H.8)? Read through T1's cached `activeKillSwitches()`. Until T1
- * merges that function is a typed stub, read as "no switch tripped" (the 0004 default); a real read error
+ * Is the `platform_read_only` kill switch on (§H.8)? Read through T1's cached `activeKillSwitches()`; a read error
  * propagates, so a write is never let through on a failed read (CCR r1.0-t2-3).
  */
 export async function platformReadOnly(): Promise<boolean> {
-  try {
-    return (await activeKillSwitches()).includes("platform_read_only");
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("not implemented: T1")) return false;
-    throw err;
-  }
+  return (await activeKillSwitches()).includes("platform_read_only");
 }
 
 /* ------------------------------------------------------------------ */
@@ -418,7 +411,6 @@ async function expireImpersonation(session: SeamSession): Promise<void> {
     const { endImpersonation } = await import("@/lib/platform/impersonation");
     await endImpersonation({ sessionId: session.user.sessionId }, "expired");
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith("not implemented: T2")) return;
     console.error("[seam] impersonation expiry", errorSummary(err));
   }
 }

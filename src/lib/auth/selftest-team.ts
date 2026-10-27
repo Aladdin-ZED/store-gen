@@ -84,6 +84,7 @@ async function cases(c: mysql.Connection): Promise<void> {
   const { canPlatform } = await import("@/lib/auth/permissions");
   const { PlatformSettingSchema } = await import("@/lib/settings/keys/platform");
   const imp = await import("@/lib/platform/impersonation");
+  const { invalidateStore } = await import("@/lib/tenancy/cache");
   const { notify, cleanNotifyVars } = await import("@/lib/platform/notify");
   const { safeAppPath, signInUrl } = await import("@/lib/auth/paths");
   const { authT, refusalText } = await import("@/lib/auth/i18n");
@@ -254,6 +255,7 @@ async function cases(c: mysql.Connection): Promise<void> {
   await c.query("UPDATE stores SET status = 'closed' WHERE id = ?", [B.storeId]);
   ok("a closed store takes no one", (await invites.previewInvite(tokenOf(lastB))) === null && (await caught(invites.acceptInvite(tokenOf(lastB), { email: "", name: "C", password: PASSWORD, locale: "en" }))) === "invalid:team.invite.invalid");
   await c.query("UPDATE stores SET status = 'pending' WHERE id = ?", [B.storeId]);
+  invalidateStore(B.storeId);
 
   /* §H.8 kill switches over the real flags rows (T1 merged; the integration check of the T2 report) */
   const { invalidateFlags } = await import("@/lib/tenancy/entitlements");
@@ -422,7 +424,7 @@ async function cases(c: mysql.Connection): Promise<void> {
   await c.query("UPDATE users SET totp_enabled = 1 WHERE id = ?", [superUser.userId]);
   const setupStore = await createSetupStore(superUser.userId, { storeName: "Maison Mère", handle: "maison-mere" }, { ip: null });
   const staffSession = await createSession(superUser.userId, { mfaPassed: true, ip: "203.0.113.9", ua: UA });
-  const staffUser: SessionUser = { id: superUser.userId, email: "owner@storegen.test", name: "Platform Owner", role: "owner", totpEnabled: true, sessionId: staffSession.id, platformRole: "super_admin", locale: null, lastStoreId: null };
+  const staffUser: SessionUser = { id: superUser.userId, email: "owner@storegen.test", name: "Platform Owner", totpEnabled: true, sessionId: staffSession.id, platformRole: "super_admin", locale: null, lastStoreId: null };
   const staffCtx = (role: PlatformRole, user: SessionUser = staffUser): PlatformCtx => ({
     user: { ...user, platformRole: role },
     role,
@@ -438,8 +440,10 @@ async function cases(c: mysql.Connection): Promise<void> {
   ok("view as: an unknown store → not_found", (await caught(imp.startImpersonation(sup, { storeId: "01J0000000000000000000ZZZZ", reason: "bug" }))) === "seam:not_found");
   ok("view as: a store one is a member of → impersonation_member", (await caught(imp.startImpersonation(sup, { storeId: setupStore.storeId, reason: "bug" }))) === "impersonation_member:console.impersonation.member");
   await c.query("UPDATE stores SET status = 'scheduled_deletion' WHERE id = ?", [B.storeId]);
+  invalidateStore(B.storeId); // the store row is cached 15 s (§E.5): a raw status change must drop it, as transitionStore does
   ok("view as: scheduled_deletion → impersonation_state", (await caught(imp.startImpersonation(sup, { storeId: B.storeId, reason: "bug" }))) === "impersonation_state:console.impersonation.state");
   await c.query("UPDATE stores SET status = 'pending' WHERE id = ?", [B.storeId]);
+  invalidateStore(B.storeId);
 
   const started = await imp.startImpersonation(sup, { storeId: A.storeId, reason: "onboarding", note: "first setup", ticketRef: "WA 24/10", minutes: 15 });
   ok("view as: started → the store's dashboard", started.url === `/app/${A.handle}`, started);
