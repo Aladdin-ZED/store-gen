@@ -14,7 +14,7 @@ running, and how to restart it. Newest state at the top of "Running now".
 | 2b | ELEVATE (owner item 16, Fable): core rev 2 integrates requests + rethink; 6 parts rev 2 raise ceilings; core rev 2.1 | same files | **done** 2026-10-24 (commit a2e9fc2) |
 | 2c | Reviews (6 lenses) → per-file revisers → critic loop | same files + §P | **done** 2026-10-24 (56db6eb) |
 | 2d | Integrate critic r2 residuals (single integrator) + confirming critic | same files | **done** 2026-10-24 (efd8849) |
-| 3 | R1.0 core tenancy: C0a contract step → tracks T1 DATA, T2 AUTH, T3 EDGE, T4 SCOPE + C0b (worktrees) → integration → verify → deploy | code | C0a done; tracks running |
+| 3 | R1.0 core tenancy: C0a contract step → tracks T1 DATA, T2 AUTH, T3 EDGE, T4 SCOPE + C0b (worktrees) → integration → verify → deploy | code | **LIVE 2026-10-27** |
 | 4 | Build phase 1: parallel tracks (store pages, landing+, brand kit/logo, team/invites, platform admin, storage) | code | todo |
 | 5 | Adversarial verification incl. cross-tenant attack tests, fix loop | tests + fixes | todo |
 | 6 | Deploy to the Store Gen site (archive method, HANDOFF §4) + live smoke | live | todo |
@@ -26,11 +26,11 @@ Weights = share of total work. Update the "done" column when a stage moves.
 | Stage | Weight | Done in stage | Contributes |
 |---|---|---|---|
 | Research + full spec | 12% | 100% | 12.0% |
-| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | 93% (all built, merged, reviewed; finale F1-F5 done; gate re-run + deploy left) | 16.7% |
+| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | **100% — LIVE 2026-10-27** (build 01a17eb4, smoke 22/22) | 18.0% |
 | R1 product (platform console + approvals + store profiles, landing+, call center, AI Director, design genome, onboarding wow) | 35% | 0% | 0% |
 | R2 full stores + accounting + logo designer | 22% | 0% | 0% |
 | R3 growth, custom domains, carrier APIs, learning AI | 13% | 0% | 0% |
-| **Total** | 100% | | **≈ 29%** |
+| **Total** | 100% | | **≈ 30%** |
 
 Milestones: R1.0 live ≈ 30% · R1 live ≈ 65% · R2 live ≈ 87% · R3 live = 100%. Owner inputs needed later: real domain +
 Cloudflare (subdomains, before public sign-ups), optional Claude API key + monthly cap, a carrier statement sample (R2), legal
@@ -40,6 +40,16 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **R1.0 LIVE** 2026-10-27 18:54: build `01a17eb4` (commit a2d923d, archive sha256 afb0607d…aa8f, Turbopack 4 workers,
+  2m 8s). First boot: gate SHA, 0004 applied, empty-install conversion, tenancy-check 0 problems; reboot idempotent.
+  Live smoke 22/22 (CDN headers accounted for). Cron created via API (uid YSkoD5krXj, */5, header form). Records in
+  HANDOFF §6. NEXT PHASE: R1 product (STORE-SAAS §K.2): P0 contract step (maintainer) then 8 parallel tracks P1-P8.
+  Owner steps (non-blocking): /admin/setup bootstrap; optional DATA_DIR probe; optional max_user_connections.
+- **CORRECTION (2026-10-27 ~18:55): the dot-name upload rule committed in a2d923d (HANDOFF §4, runbook §2.2) is WRONG.**
+  Tested: `/.sg-dotprobe.txt` was served publicly (200); only `/.env` is blocked by a specific rule. What works (tested:
+  403 for the file, the .htaccess and the listing): upload into `public_html/_sgdeploy/` which holds an `.htaccess`
+  with "Require all denied" (uploaded 2026-10-27, kept). Upload as `_sgdeploy/sg-<hex>.zip`, archive_path the same.
+  The docs are corrected in the first commit after this deploy (not before: it would invalidate the running gate).
 - **R1.0 DEPLOY ATTEMPT 1 FAILED (infra, not code)** 2026-10-27 18:26: build 01a17e99 passed install + gate:offline on
   Hostinger (lint 0 / 1011 files, 618 + 5997 + 66 + 251 selftests), compiled, then "Collecting page data using 63 workers"
   hit the build host thread limit (os error 11, SIGABRT; webpack fallback too). Old version stays live; env already 16 keys.

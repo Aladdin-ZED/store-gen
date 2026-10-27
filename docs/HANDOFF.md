@@ -246,12 +246,32 @@ so it's safe. It would rebuild the old snapshot only if the last build came from
 - **Local AI:** `@huggingface/transformers`, Qwen-class VLM + SigLIP + background removal in the browser, with a
   rule-based copy library fallback (`src/lib/ai`).
 
-## 6. Status and open items (2026-10-23)
+## 6. Status and open items (2026-10-27)
 
-Store Gen: **first version deployed 2026-10-23** (commit `3598537`: the cloned code + next 16.4.3 / zod 4.6.6 security
-patches; build 01a16abd, Turbopack, live smoke test green). `/` answers 404 until a page is published (by design).
-Owner steps left: open `<site>/<ADMIN_GATE>` → /admin/setup with SETUP_TOKEN to create the owner account, and add the
-cron job (both in the `.env.hostinger` comments). Next: the SaaS upgrade in docs/STORE-GEN-BRIEF.md (spec: docs/STORE-SAAS.md).
+Store Gen: **R1.0 "core tenancy" is LIVE since 2026-10-27** (multi-tenant platform: stores, accounts, teammates,
+invites, roles, per-store isolation, platform console, `/app/<handle>` dashboards, `/s/<handle>` storefront paths).
+- Deploy record: commit `a2d923d` (gate green, `qa/.gate-ok`), archive sha256 `afb0607df0f890057da40f88c98afe254541eda571ca1e09d1ef448ee220aa8f`
+  (10,789,145 B), build `01a17eb4-2746-707f-af1d-423689082ea4` (Turbopack, 4 workers, 2m 8s), `/api/health` build id
+  `p7AhMdc_`. First boot: `gate passed on a2d923d`, `applied 1 migration(s)` (0004), `tenancy: empty install, no store
+  #1 to convert`, `[tenancy-check] OK 0 problem(s)`; second boot `schema up to date (5)`. Live smoke 22/22.
+- Attempt 1 (build `01a17e99`, commit 097a0eb) failed on the build host's thread limit (63 page-data workers); fixed by
+  `experimental.cpus: 4`. Its uploaded archive was briefly public at the site root: deleted; uploads now go to the
+  htaccess-denied `public_html/_sgdeploy/` (§4 step 4).
+- Env: 16 keys set through the API (`.env.hostinger` holds them all). Cron: created through the API on 2026-10-27
+  (`hosting_cron-jobs_create`, uid `YSkoD5krXj`, `*/5`, header form `X-Cron-Key`). The account had no cron before
+  (not even COD Studio's: that project's cron is still to be set up by its owner).
+- Hostinger's CDN is on for the temporary domain (`Server: hcdn`): it adds `x-hcdn-request-id` and a second CSP
+  `upgrade-insecure-requests` to every response (harmless; the smoke script accounts for both).
+- **Owner steps now:** (1) open `<site>/<ADMIN_GATE>` → `/admin/setup` with `SETUP_TOKEN`: create the first platform
+  owner (super_admin) with 2FA (keep the recovery codes offline), then your first store (handle + name); setup closes
+  after that. (2) Optional: in hPanel → File Manager create `/home/u641677794/storegen-data/.sg-probe` (one line of
+  text) so the next deploy proves the `DATA_DIR` folder survives deploys (needed before the R1 media track). (3)
+  Optional: phpMyAdmin → SQL `SHOW VARIABLES LIKE 'max_user_connections'` and send the value (0 or ≥ 20 is fine).
+- Open: `npm audit` on Hostinger reports 12 vulnerabilities (7 moderate, 5 high) in the dependency tree, up from 8 on
+  2026-10-23: audit `--omit=dev` and patch at the R1 P0 contract step. Two runtime chunk budget warnings (`thanks`,
+  `pixels`) are known and re-measured in R1.
+Next: **R1 product phase** (STORE-SAAS §K.2): P0 contract step, then 8 tracks (platform console + approvals + store
+profiles, landing+, call center/agents, AI Director, design genome, storefront prep, onboarding wow, storage).
 
 COD Studio (myrizq.shop, separate project). Live and verified: Offers v2, per-page pixels, order outputs,
 PHP/WhatsApp exports. The owner still has to do these on myrizq.shop:
@@ -265,7 +285,8 @@ PHP/WhatsApp exports. The owner still has to do these on myrizq.shop:
   Visitor IP check.
 - Connect Google Sheets (`docs/GOOGLE-SHEETS-SETUP.md`). Optional: admin on `studio.myrizq.shop` + `ADMIN_HOST`.
 
-**R1.0 integration hazard (CCR r1.0-t1-3 item 7, from the T1 merge on 2026-10-24):** main now contains 0004 and the
+**(Resolved 2026-10-27: T3 and T4 are merged and R1.0 is deployed; kept for history.) R1.0 integration hazard (CCR
+r1.0-t1-3 item 7, from the T1 merge on 2026-10-24):** main now contains 0004 and the
 store #1 conversion. The first boot of this tree on a database with data migrates it and deletes the moved legacy
 `settings` keys (`store`, `defaults`, `sheets`, `pixel_library`, `pixel_health`, `tracking_secrets`, `turnstile`, `ai`,
 `home`, `pixels`); single-tenant `getSetting(<moved key>)` readers then get defaults until T3 / T4 are merged. Until
