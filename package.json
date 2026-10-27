@@ -42,7 +42,7 @@
     "test:jobs": "tsx src/lib/jobs/selftest.ts",
     "test:prepublish": "tsx src/lib/render/selftest-prepublish.ts",
     "test:budget": "tsx scripts/qa/test-budget.ts",
-    "test:slow": "npm run test:design:full && npm run test:ai:slow && npm run test:ai-eval -- --offline",
+    "test:slow": "npm run theme:check -- --full && npm run test:design:full && npm run test:ai:slow && npm run test:ai-eval -- --offline",
     "test:design:full": "tsx scripts/qa/design-check.ts --full",
     "test:ai:slow": "tsx src/lib/ai/selftest.ts --slow",
     "test:ai-eval": "tsx scripts/qa/ai-eval.ts",

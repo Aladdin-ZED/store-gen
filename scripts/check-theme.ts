@@ -2,6 +2,16 @@
  * Theme engine verification — run with: npx tsx scripts/check-theme.ts
  * (THEME_CHECK_ALL=1 prints every failure instead of the first 40)
  *
+ * Two sizes (docs/STORE-SAAS.md §J.1, CCR r1.0-c0b-3 item 1):
+ *   npx tsx scripts/check-theme.ts          the seeded subset of `npm test` (~30 s): every check runs. All 40 seeds' specs
+ *                                           are checked (validity, orange, dividers, determinism, the 8-look variety);
+ *                                           seeds 0-3 are built and verified, with the independent blend measure on
+ *                                           seeds 0-1 and the dense aurora grid on seed 0; the first 100 of the 600
+ *                                           hand-edited specs (blend on 50, dense on 17, the full sweep's shares); the
+ *                                           calm, adversarial, ranking, font and contract blocks run in full
+ *   npx tsx scripts/check-theme.ts --full   the full sweep below: 40 seeds built (blend on 0-3, dense on 0-2), 600
+ *                                           hand-edited specs (blend on 300, dense on 100); `npm run test:slow`
+ *
  * For every archetype × 40 seeds × synthetic product photos × locales (ar, fr):
  *   themeFromProduct → buildTheme must not throw, and every contrast guarantee is re-verified on the
  *   EMITTED tokens (not on internal structures): section text/accent pairs, frosted glass over any
@@ -61,6 +71,12 @@ const culoriRgb = converter("rgb");
 
 const ROOT = join(__dirname, "..");
 const SEEDS = 40;
+/** `--full` (test:slow) builds every seed and every hand-edited spec; npm test builds the first seeds only (see the header) */
+const FULL = process.argv.includes("--full");
+const BUILT_SEEDS = FULL ? SEEDS : 4;
+/** the seeds whose builds also get the independent CSS blend measure, and the dense 41-point aurora grid (9 points elsewhere) */
+const BLEND_SEEDS = FULL ? 4 : 2;
+const DENSE_SEEDS = FULL ? 3 : 1;
 const LOCALES: Locale[] = ["ar", "fr"];
 
 let failures = 0;
@@ -1018,6 +1034,7 @@ for (const archetype of ARCHETYPES as readonly Archetype[]) {
       const again = themeFromProduct({ category: "other", palette, aiVibe: null, archetype, seed });
       assert(JSON.stringify(again) === JSON.stringify(spec), `${label}: themeFromProduct not deterministic`);
       variety[key]!.add(`${spec.palette.accent}|${spec.palette.pop}|${spec.palette.base}|${spec.fonts.display}|${spec.fonts.displayAr}|${spec.surfaces}`);
+      if (seed >= BUILT_SEEDS) continue;
 
       for (const locale of LOCALES) {
         let theme: ReturnType<typeof buildTheme>;
@@ -1038,12 +1055,12 @@ for (const archetype of ARCHETYPES as readonly Archetype[]) {
         // no orange blends: the engine's own audit on every build, the independent CSS measure on a sample
         const audit = orangeMixesInTokens(t);
         if (audit.length) fail(`${label} ${locale}: engine blend audit: ${audit.slice(0, 2).join(" · ")}`);
-        if (seed < 4) {
+        if (seed < BLEND_SEEDS) {
           const bl = blendLeaks(t);
           if (bl.length) fail(`${label} ${locale}: orange blends: ${bl.slice(0, 3).join(" · ")}`);
         }
         // dense aurora sampling for a few seeds, a coarser lattice elsewhere (same guarantees)
-        checkSections(t, `${label} ${locale}`, seed < 3 ? 41 : 9);
+        checkSections(t, `${label} ${locale}`, seed < DENSE_SEEDS ? 41 : 9);
         // aurora hues come from the product: no indigo/violet light unless accent or pop is violet
         if (!violet(t["lp-accent"]!) && !violet(t["lp-pop"]!)) {
           const third = parseRgba(t["lp-aurora-3"]!);
@@ -1077,7 +1094,10 @@ for (const a of ARCHETYPES) {
 /* ------------------------------------------------------------------ */
 /* admin-edited specs: any valid ThemeSpec must keep the guarantees    */
 /* ------------------------------------------------------------------ */
-const FUZZ = 600;
+const FUZZ = FULL ? 600 : 100;
+/** the hand-edited specs that also get the blend measure, and the dense aurora grid: the same shares of FUZZ in both sizes */
+const FUZZ_BLEND = FUZZ / 2;
+const FUZZ_DENSE = Math.ceil(FUZZ / 6);
 let fuzzBuilds = 0;
 {
   const rnd = mulberry32(0xf00d);
@@ -1115,11 +1135,11 @@ let fuzzBuilds = 0;
       if (leaks.length) fail(`${label} ${locale}: orange in the emitted CSS: ${leaks.slice(0, 4).join(" ")}`);
       const audit = orangeMixesInTokens(theme.tokens);
       if (audit.length) fail(`${label} ${locale}: engine blend audit: ${audit.slice(0, 2).join(" · ")}`);
-      if (i < 300) {
+      if (i < FUZZ_BLEND) {
         const bl = blendLeaks(theme.tokens);
         if (bl.length) fail(`${label} ${locale}: orange blends: ${bl.slice(0, 3).join(" · ")}`);
       }
-      checkSections(theme.tokens, `${label} ${locale}`, i < 100 ? 41 : 9);
+      checkSections(theme.tokens, `${label} ${locale}`, i < FUZZ_DENSE ? 41 : 9);
       if (spec.dividers.length) assert(JSON.stringify(theme.dividers) === JSON.stringify(spec.dividers), `${label}: spec dividers ignored`);
     }
   }
@@ -1245,7 +1265,7 @@ const swatch = (hex: string) => {
   const [r, g, b] = hexRgb(hex);
   return `\x1b[48;2;${r};${g};${b}m    \x1b[0m ${hex}`;
 };
-console.log(`\nbuilds: ${builds} (${ARCHETYPES.length} archetypes × ${SEEDS} seeds × ${Object.keys(PALETTES).length} photos × ${LOCALES.length} locales) in ${(elapsed / 1000).toFixed(1)}s — buildTheme ${(buildMs / Math.max(1, builds)).toFixed(2)} ms/theme`);
+console.log(`\n${FULL ? "full sweep" : "seeded subset (--full for every seed)"} · builds: ${builds} (${ARCHETYPES.length} archetypes × ${BUILT_SEEDS} of ${SEEDS} seeds × ${Object.keys(PALETTES).length} photos × ${LOCALES.length} locales) in ${(elapsed / 1000).toFixed(1)}s — buildTheme ${(buildMs / Math.max(1, builds)).toFixed(2)} ms/theme`);
 console.log(`worst text contrast ${stats.worstText.toFixed(2)}:1 (≥ 4.5) · worst --sec-accent contrast ${stats.worstAccent.toFixed(2)}:1 (≥ 3)`);
 console.log(`glass: worst ink-over-any-backdrop ${stats.worstGlass.toFixed(2)}:1 (≥ 4.5) · fill opacity ${stats.minGlassAlpha}–${stats.maxGlassAlpha}`);
 console.log(`aurora: worst text ${stats.worstAuroraText.toFixed(2)}:1 (≥ 4.5) · worst accent ${stats.worstAuroraAccent.toFixed(2)}:1 (≥ 3) · weakest light alpha ${stats.minAurora} · violet leaks ${violetLeaks}`);

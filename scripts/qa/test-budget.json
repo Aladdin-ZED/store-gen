@@ -12,14 +12,15 @@
           "owner": "maintainer",
           "budgetSec": 30,
           "scripts": ["pretest", "theme:check", "test:runtime", "test:generator", "test:render", "test:money", "test:conversions", "test:offers", "test:orders"],
-          "note": "measured by this harness at C0b; above 30 s the maintainer moves the slowest of these suites' sweeps to test:slow"
+          "note": "measured by this harness at C0b; above 30 s the maintainer moves the slowest of these suites' sweeps to test:slow. Moved at the R1.0 T4 integration (CCR r1.0-c0b-3 item 1): theme:check runs its seeded subset here (4 of 40 seeds built, 100 of 600 hand-edited specs, every check kept; 30.3 s, the full sweep was 141.5 s) and its full sweep is `theme:check -- --full`, the first script of test:slow. Measured then on the shared PC: the group 82.5 s, the npm test chain 111 s, the timed total 121 s of 180 s; the group stays over its 30 s until the table is re-cut at P0 (item 2)"
         },
         {
           "id": "core",
           "label": "core suites",
           "owner": "maintainer",
           "budgetSec": 20,
-          "scripts": ["test:tenancy-lint", "test:ownership", "test:hosts", "test:permissions", "test:tenancy-unit", "test:envelope", "test:security", "test:jobs", "test:prepublish"]
+          "scripts": ["test:tenancy-lint", "test:ownership", "test:hosts", "test:permissions", "test:tenancy-unit", "test:envelope", "test:security", "test:jobs", "test:prepublish"],
+          "note": "npm test runs test:tenancy-lint (0 violations over all of src/**, since 7ffbc8c) and test:ownership; the others are timed here (hosts, permissions, envelope and security also run in gate:offline, tenancy-unit in gate:tenancy). Measured at the R1.0 T4 integration: the lint 26.5 s alone (1,004 files, its 19-fixture self-check included), the group 38.5 s with test:jobs and test:prepublish not written yet; the share is raised at P0 (CCR r1.0-c0b-3 item 3)"
         },
         {
           "id": "platform",
