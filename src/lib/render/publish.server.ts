@@ -268,6 +268,8 @@ const auditScope = (scope: StoreScope, actor: Actor) => ({ storeId: scope.storeI
 async function publishingStore(scope: StoreScope): Promise<StoreRow> {
   const store = await getStoreById(scope.storeId);
   if (!store) throw notFound();
+  // a store in review is a sandbox (§A.5.3): it builds and previews, and says when publishing opens
+  if (store.status === "pending") throw new PublishError("forbidden", "Your store is in review. Publishing opens once it's approved; until then, preview your pages.");
   if (store.status !== "active") throw new PublishError("forbidden", "This store can't publish pages right now.");
   return store;
 }

@@ -70,6 +70,7 @@ export const RISK_FLAG_LABELS: Record<string, string> = {
   ip_repeat: "Several orders from one network",
   history_bad: "Past fake / returned orders",
   returning_customer: "Returning customer",
+  test: "Test order",
 };
 
 export function riskFlagLabel(flag: string): string {

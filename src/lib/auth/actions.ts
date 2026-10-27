@@ -5,6 +5,7 @@
  *   <form action={logout}><button type="submit">Sign out</button></form>
  *   await setLastStoreAction(storeId);                        // the store switcher's choice (§B.4)
  *   await endImpersonationAction();                           // the view-as ribbon's End (§B.8)
+ *   await createInviteCodeAction({ label: "Atlas Argan" });    // the console's R1.0 invite code (§B.6), shown once
  *
  * Server Functions are reachable by their id from any route: each one checks the origin itself and acts only on the
  * caller's own session.
@@ -17,6 +18,7 @@ import { assertActionOrigin } from "@/lib/tenancy/seam";
 import type { ActionResult } from "@/lib/tenancy/types";
 import { consoleHref } from "@/lib/urls";
 import { FieldsError } from "./errors";
+import { createPlatformInvite } from "./platform-invites";
 import { signOut, userAction } from "./index";
 import { rememberLastStore } from "./landing";
 import { LOGIN_PATH } from "./paths";
@@ -64,4 +66,17 @@ export async function endImpersonationAction(): Promise<void> {
   const ctx = await requirePlatform({ permission: "stores.impersonate" });
   await endImpersonation(ctx, "ended");
   redirect(consoleHref());
+}
+
+/**
+ * The console home's invite code form in R1.0 (§B.6; `signups.decide`): one platform invite code, answered once (the
+ * database keeps its keyed hash only). P1's Settings → Signup replaces the form and keeps this call.
+ */
+export async function createInviteCodeAction(input: { label: string; usesMax?: number; expiresInDays?: 7 | 30 | 90 | null }): Promise<ActionResult<{ code: string; expiresAt: string | null }>> {
+  return platformAction("signups.decide", async (ctx) => {
+    const usesMax = typeof input?.usesMax === "number" ? input.usesMax : 1;
+    const days = input?.expiresInDays === 7 || input?.expiresInDays === 30 || input?.expiresInDays === 90 ? input.expiresInDays : input?.expiresInDays === null ? null : 30;
+    const created = await createPlatformInvite(ctx, { label: typeof input?.label === "string" ? input.label : "", usesMax, expiresInDays: days });
+    return { code: created.code, expiresAt: created.expiresAt ? created.expiresAt.toISOString() : null };
+  });
 }

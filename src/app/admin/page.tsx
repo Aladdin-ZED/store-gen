@@ -10,11 +10,13 @@ import { getCspNonce } from "@/lib/auth";
 import { dirOf } from "@/lib/i18n/admin";
 import { AdminI18nProvider } from "@/lib/i18n/admin/client";
 import { requestNetworkView } from "@/lib/admin-data/security";
+import { listPendingStores } from "@/lib/auth/signup-queue";
 import { activeImpersonation } from "@/lib/platform/impersonation";
 import { requirePlatform } from "@/lib/platform/seam";
 import { AdminProviders } from "@/components/admin/shell/providers";
 import { Fact, Notice, PageTitle, Pill, Section } from "@/app/(public)/_components/kit";
 import { When } from "@/app/(public)/_components/when";
+import { InviteCodeForm } from "./(auth)/_components/invite-code-form";
 import { ViewAsForm } from "./(auth)/_components/view-as-form";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -24,7 +26,8 @@ export async function generateMetadata(): Promise<Metadata> {
 /**
  * `/admin` in R1.0 (docs/STORE-SAAS.md §I.2): the console's minimal home behind `requirePlatform` (gate, session,
  * platform role, TOTP): who is signed in, the step-up freshness, the session's own "view as store" with End, the
- * start sheet of PLA-§10.1 by handle, and (`health.read`) how the app reads visitor addresses behind the proxies
+ * start sheet of PLA-§10.1 by handle, (`signups.decide`) the invite code form and the stores waiting in `pending`
+ * (§B.6, §B.2; read-only until P1's queue), and (`health.read`) how the app reads visitor addresses behind the proxies
  * (TRUSTED_PROXY_HOPS; the viewer's own request only, nothing logged). P1 replaces it with the overview (`(console)/page.tsx`) and deletes this file
  * (PLA Q.12). The teal console accent (hue 205) marks the surface; violet (295) is the view-as ribbon's.
  */
@@ -35,12 +38,14 @@ function minutesLeft(until: Date): number {
 
 export default async function ConsoleHomePage() {
   const ctx = await requirePlatform({ permission: "console.read" });
-  const [locale, brand, viewing, nonce, network] = await Promise.all([
+  const signups = ctx.can("signups.decide");
+  const [locale, brand, viewing, nonce, network, pending] = await Promise.all([
     viewerLocale(ctx.user),
     brandName(),
     activeImpersonation(ctx),
     getCspNonce(),
     ctx.can("health.read") ? requestNetworkView() : Promise.resolve(null),
+    signups ? listPendingStores(ctx) : Promise.resolve(null),
   ]);
   const t = authTranslator(locale);
   return (
@@ -118,6 +123,51 @@ export default async function ConsoleHomePage() {
                 </Fact>
               </dl>
             </Section>
+
+            {pending && (
+              <Section
+                id="queue"
+                title={t("console.queue.title")}
+                description={t("console.queue.lead")}
+                aside={pending.length > 0 ? <Pill tone="warn">{t("console.queue.count", { count: pending.length })}</Pill> : undefined}
+              >
+                {pending.length ? (
+                  <ul className="grid divide-y divide-[color-mix(in_oklab,var(--foreground)_8%,transparent)]" data-queue>
+                    {pending.map((s) => (
+                      <li key={s.id} data-store-handle={s.handle ?? ""} className="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-6">
+                        <div className="grid min-w-0 gap-0.5">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate font-medium">{s.name}</span>
+                            {s.handle && (
+                              <bdi dir="ltr" className="shrink-0 font-mono text-[0.8rem] text-muted-foreground">
+                                @{s.handle}
+                              </bdi>
+                            )}
+                          </span>
+                          {s.owner && (
+                            <span className="truncate text-sm text-muted-foreground">
+                              {t("console.queue.owner")}: {s.owner.name ? `${s.owner.name} · ` : ""}
+                              <bdi dir="ltr">{s.owner.email}</bdi>
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-sm text-muted-foreground">
+                          {t("console.queue.signed_up")} <When iso={s.createdAt.toISOString()} />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t("console.queue.empty")}</p>
+                )}
+              </Section>
+            )}
+
+            {signups && (
+              <Section id="invite-codes" title={t("console.invite.title")} description={t("console.invite.lead")}>
+                <InviteCodeForm />
+              </Section>
+            )}
 
             {ctx.can("stores.impersonate") && (
               <Section title={t("console.impersonation.title")} description={t("console.impersonation.lead")}>

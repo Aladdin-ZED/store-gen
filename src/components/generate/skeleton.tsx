@@ -12,8 +12,8 @@ export const WIZARD_TITLE = (
 
 export const WIZARD_LEAD = (
   <>
-    Drop product photos. They&apos;re read on this computer, then COD Studio designs three <span className="whitespace-nowrap">art-directed</span> pages for you to
-    choose from.
+    Drop product photos. They&apos;re read on this computer, then three <span className="whitespace-nowrap">art-directed</span> pages are designed for you
+    to choose from.
   </>
 );
 

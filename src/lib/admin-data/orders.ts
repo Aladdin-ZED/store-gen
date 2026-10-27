@@ -148,6 +148,8 @@ export interface OrderRow {
   sheetStatus: "pending" | "synced" | "failed" | "disabled";
   riskScore: number;
   flags: string[];
+  /** a test order (D54, placed through a `?sg-test` link): kept out of Sheets, CAPI and stats, marked "Test" on screen */
+  isTest: boolean;
 }
 
 export function toOrderRow(o: OrderRecord & { pageName: string | null }): OrderRow {
@@ -169,6 +171,7 @@ export function toOrderRow(o: OrderRecord & { pageName: string | null }): OrderR
     sheetStatus: o.sheetStatus,
     riskScore: o.riskScore,
     flags: o.flags ?? [],
+    isTest: o.isTest,
   };
 }
 

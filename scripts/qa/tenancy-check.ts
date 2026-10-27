@@ -2684,6 +2684,16 @@ export async function accountSuite(kit: Kit): Promise<void> {
     const label = `startImpersonationAction(A's handle) · ${who.label}`;
     if (ranReal(label, real, ghost)) check(`${label}: refused, the answer of an unknown handle`, refusal(real) !== null && text(answerOf(real)) === text(answerOf(ghost)), { real: answerOf(real), ghost: answerOf(ghost) });
   }
+  // createInviteCodeAction (the console's R1.0 invite code, §B.6; `signups.decide`): refused to every store member and
+  // outsider, and no code is minted (qa:r1-exit drives the staff path in the browser)
+  const invitesNow = async () => Number(((await pool().query("SELECT COUNT(*) AS n FROM platform_invites")) as unknown as [[{ n: number }]])[0][0]?.n);
+  const invitesBefore = await invitesNow();
+  for (const who of attackers(fx).filter((w) => w.userId !== fx.staff.id)) {
+    const r = await call({ userId: who.userId }, "/admin", () => AUTH.createInviteCodeAction({ label: `code of ${who.label}`, usesMax: 500, expiresInDays: null }));
+    const label = `createInviteCodeAction · ${who.label}`;
+    if (ranReal(label, r)) check(`${label}: refused`, refusal(r) !== null, answerOf(r));
+  }
+  check("no platform invite code minted by a non-staff caller", (await invitesNow()) === invitesBefore, { before: invitesBefore });
   const after = await snapshot(fx.A.id);
   check("A's rows (and its members' sessions) unchanged by every account-page render and account action", after.hash === before.hash, snapshotDiff(before, after));
 }

@@ -28,6 +28,15 @@ import { StatusMenu } from "./status-menu";
 
 export type OrdersTab = "orders" | "leads" | "blocked";
 
+/** A test order (D54): placed through a `?sg-test` link, kept out of Sheets, CAPI and the stats. */
+export function TestChip({ className }: { className?: string }) {
+  return (
+    <StatusChip tone="violet" dot={false} className={cn("h-5 shrink-0 px-2 text-[0.68rem]", className)} title="Placed through a test link: never sent to Sheets, ad platforms or the stats">
+      Test
+    </StatusChip>
+  );
+}
+
 export interface OrdersViewProps {
   tab: OrdersTab;
   query: OrderQuery;
@@ -329,7 +338,10 @@ function OrdersPanel({
                       >
                         <td className={cn("relative px-4 py-3", selected && "before:absolute before:inset-y-2 before:start-0 before:w-0.5 before:rounded-full before:bg-brand")}>
                           <div className="grid gap-0.5">
-                            <span className="font-mono text-[0.8rem] font-medium tracking-tight">{o.id}</span>
+                            <span className="flex items-center gap-1.5">
+                              <span className="font-mono text-[0.8rem] font-medium tracking-tight">{o.id}</span>
+                              {o.isTest && <TestChip />}
+                            </span>
                             <RelativeTime iso={o.createdAt} className="text-xs text-muted-foreground" />
                           </div>
                         </td>
@@ -409,8 +421,11 @@ function OrdersPanel({
                       ) : null}
                     </span>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs text-muted-foreground">
-                        <span className="font-mono">{o.id}</span> · <RelativeTime iso={o.createdAt} />
+                      <span className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
+                        {o.isTest && <TestChip />}
+                        <span className="truncate">
+                          <span className="font-mono">{o.id}</span> · <RelativeTime iso={o.createdAt} />
+                        </span>
                       </span>
                       <StatusChip tone={ORDER_STATUS_META[o.status as keyof typeof ORDER_STATUS_META]?.tone ?? "neutral"} className="h-6 text-[0.72rem]">
                         {ORDER_STATUS_META[o.status as keyof typeof ORDER_STATUS_META]?.label ?? o.status}

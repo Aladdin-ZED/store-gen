@@ -33,7 +33,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 /**
  * /app/<h>/pages/<id>/edit: the builder of one of the store's pages (`pages.read`; editing, publishing and uploads
- * follow the member's grants, each re-checked by its action). Another store's page id is the neutral 404.
+ * follow the member's grants, each re-checked by its action). Another store's page id answers exactly as a missing
+ * one: the store's not-found screen, rendered inside `[store]/loading.tsx`'s stream, so with HTTP 200 and Next's
+ * injected noindex (the status is committed once the stream starts); the preview route handler answers a real 404.
+ * qa:r1-exit compares the two answers.
  */
 export default async function EditPagePage({ params }: Props) {
   const { store, id } = await params;

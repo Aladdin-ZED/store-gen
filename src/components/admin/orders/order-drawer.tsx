@@ -161,6 +161,11 @@ export function OrderDrawer({
               <div className="flex flex-wrap items-center gap-2">
                 <StatusMenu status={order.status} onChange={canWrite ? changeStatus : undefined} pending={statusPending} />
                 <SheetChip status={order.sheetStatus} />
+                {order.isTest && (
+                  <StatusChip tone="violet" dot={false} title="Placed through a test link: never sent to Sheets, ad platforms or the stats">
+                    Test order
+                  </StatusChip>
+                )}
                 {riskLevel(order.riskScore) && <StatusChip tone={riskLevel(order.riskScore)!.tone}>{riskLevel(order.riskScore)!.label}</StatusChip>}
               </div>
             </SheetHeader>
@@ -235,7 +240,9 @@ export function OrderDrawer({
                       <span className="min-w-0 [overflow-wrap:anywhere]">{order.sheetError}</span>
                     </p>
                   )}
-                  {order.sheetStatus === "disabled" && <p className="text-xs text-muted-foreground">Bot-flagged orders are never sent to the sheet.</p>}
+                  {order.sheetStatus === "disabled" && (
+                    <p className="text-xs text-muted-foreground">{order.isTest ? "Test orders are never sent to the sheet." : "Bot-flagged orders are never sent to the sheet."}</p>
+                  )}
                 </div>
               </Block>
 
