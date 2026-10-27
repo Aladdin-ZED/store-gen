@@ -26,11 +26,11 @@ Weights = share of total work. Update the "done" column when a stage moves.
 | Stage | Weight | Done in stage | Contributes |
 |---|---|---|---|
 | Research + full spec | 12% | 100% | 12.0% |
-| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | 31% (C0a done = 15 pts; tracks 6/22 steps of 60 pts; integration+verify+deploy 25 pts left) | 5.6% |
+| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | 83% (C0a + all 22 track steps done; T1, T2, C0b merged + reviewed; T3 merging; T4 merge, finale, deploy left) | 15.0% |
 | R1 product (platform console + approvals + store profiles, landing+, call center, AI Director, design genome, onboarding wow) | 35% | 0% | 0% |
 | R2 full stores + accounting + logo designer | 22% | 0% | 0% |
 | R3 growth, custom domains, carrier APIs, learning AI | 13% | 0% | 0% |
-| **Total** | 100% | | **≈ 18%** |
+| **Total** | 100% | | **≈ 27%** |
 
 Milestones: R1.0 live ≈ 30% · R1 live ≈ 65% · R2 live ≈ 87% · R3 live = 100%. Owner inputs needed later: real domain +
 Cloudflare (subdomains, before public sign-ups), optional Claude API key + monthly cap, a carrier statement sample (R2), legal
@@ -40,6 +40,53 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **MERGE T4** — DONE 2026-10-27: c93c8a0 merge, 7ffbc8c + 151d721 CCRs (all stopgaps, adminAction/adminGuard and string
+  rateLimit removed), 83f9b5c + e851f92 lint at 0 over 1,004 files and in npm test, 0164239 attack suite on real code
+  (test:tenancy 6,424 / 0 / 0 pending; action-replay 4,080 / 0 / 0), 5583286 review fixes (20 findings, 7 serious: Sheets
+  ownership proof via titles only, step-up on integration secrets, audit redaction, cron pull, CSV export, RTL shell).
+  ALL R1.0 TRACKS MERGED. Next: R1.0 FINALE (integration chores, gated archive script, exit-scenario e2e, npm run gate,
+  upgrade dry run on a production-equivalent DB, deploy checklist) then the deploy (16 env keys, DATA_DIR probe x2).
+- **Phase 3 R1.0 / MERGE T4 into main** — started 2026-10-27 (after T3). Task `wtdbg51y9`, run `wf_850c39cb-71e`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\r1-0-merge-t4-wf_850c39cb-71e.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_850c39cb-71e"})` (no args). Steps: merge + conflicts + CCRs →
+  lint to 0 in src/lib → lint to 0 everywhere + lint into npm test → full attack suite with 0 pending → 2 parallel reviews
+  (isolation, dashboard regressions) → fix. Every step commits + pushes on main. Next: R1.0 FINALE (§K.1 integration list +
+  exit criteria) then the gated deploy.
+- **MERGE T3** — DONE: 04b0404 merge, fa880e4 + 315a806 CCRs (T3 lint 101 → 0), c8d8a48 review fixes (8 findings, 2 majors:
+  Worker subrequest cache could serve store A's page to store B → cacheTtlByStatus -1; legacy Sheets/CAPI path limited to store
+  #1 until T4). Online P/S-mode HTTP isolation checked.
+- (old) **Phase 3 R1.0 / MERGE T3 into main** — started 2026-10-26 ~15:05. Task `wzv7nvq7c`, run `wf_7da03428-30c` (generic merge
+  script, args key t3, n 4, branch r1.0/t3, base c54c12b; exact args in the run's journal). Resume with the same args.
+  Next: MERGE T4 (branch head 9c54cde), then the R1.0 finale.
+- **MERGE C0b** — DONE 2026-10-26 ~14:55: 0505558 merge, 54de35c + 07638f0 CCRs, c54c12b review fixes (16 findings, 1 blocker
+  + 11 majors: forged-scope detection, OR-injection, unscoped chains, raw SQL anywhere, store_id overwrite; all fixed, every
+  probe a permanent lint fixture).
+- **C0b fix round RESUMED** 2026-10-26 ~14:40 as task `wnhb0ri5c` (same run `wf_d63d1781-d50`; merge + review replayed from cache).
+  A ~40 h network outage (2026-10-24 evening → 2026-10-26) killed all 6 attempts of fix-c0b; its partial edits stayed
+  uncommitted on main and the fix prompt now tells the agent to finish them. C0b review headline: a StoreScope can be forged
+  with an object spread (no cast; tsc and lint silent) and src/lib/db/upgrade-check.ts runs ~20 unannotated cross-store raw
+  SQL statements L10 cannot see. Next after it: MERGE T3, then T4, then the R1.0 finale.
+- **R1.0 TRACKS ALL DONE** 2026-10-24 ~18:45 (22/22 steps, 0 agent errors after the relaunch). Branch heads: t1 c59cd40,
+  t2 fb4583f, t3 99a613f, t4 9c54cde, c0b (merged). T4 attack suite 4,600 pass / 0 fail / 101 pending; action replay 2,489 /
+  0 / 31 (pending = checks ending in T2/T3 stubs). Remaining merges: T3 then T4 (generic merge script, new args), then the
+  R1.0 FINALE (delete adminAction/adminGuard + deprecated overloads + stubs, lint into npm test, gate:offline into prebuild,
+  npm run gate, exit criteria §K.1, deploy).
+- **Phase 3 R1.0 / MERGE C0b into main** — started 2026-10-24 ~17:35. Task `wnptvb4ra`, run `wf_d63d1781-d50` (generic merge
+  script below, args key c0b, n 3, branch r1.0/c0b, base 1d1a83f). Resume with the same args from the run's journal.
+  Then: MERGE T3 (done, waiting), then T4 (on its last step).
+- **Phase 3 R1.0 / MERGE T2** — DONE 2026-10-24 ~17:30: 6ae3e7b merge, 958f5db + 0e66662 CCRs, 1d1a83f review fixes (9 findings,
+  3 majors: step-up on admin/owner invites, legacy /admin admission, login challenge race; all fixed with tests).
+- (old entry) **Phase 3 R1.0 / MERGE T2 into main** — started 2026-10-24 ~16:25. Task `w7qq2ybye`, run `wf_6252808c-e3f`.
+  GENERIC merge script (reused for C0b, T3, T4 with new args): `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\r1-0-merge-track-wf_6252808c-e3f.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_6252808c-e3f", args: <the same T2 args: key t2, n 2, branch r1.0/t2, base f132495, …; see the run's journal "launched" entry>})`.
+  The integrator commits on main: the lead does not commit on main while it runs.
+- **Phase 3 R1.0 / MERGE T1** — DONE 2026-10-24 ~16:20: 955b520 merge, 3389943 + cb6b1ba CCRs, f132495 review fixes (1 major +
+  6 minors, all fixed with regression tests). Was: started 2026-10-24 ~15:10.
+- (old entry) **Phase 3 R1.0 / MERGE T1 into main** — started 2026-10-24 ~15:10. Task `wv3x3wg8p`, run `wf_3b2b82ba-9c2`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\r1-0-merge-t1-wf_3b2b82ba-9c2.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_3b2b82ba-9c2"})`. Merge agent → adversarial review → fix.
+  THE INTEGRATOR COMMITS ON MAIN: the lead does not commit on main while it runs. T1 and C0b tracks are DONE (4/4 each).
+  Merge order after it: T2 → C0b → T3 → T4 (each as its own merge workflow when its track is done).
 - **Phase 3 R1.0 / TRACKS RELAUNCHED** 2026-10-24 ~12:58 as task `wji9seiv8` (same run `wf_ddc6f9d4-22c`, same script): the
   first launch died at ~12:50 on a network outage (ENOTFOUND; all 3 immediate retries of every first step failed). Script now
   has 6 retries per step and a FIRST ACTION note so each agent continues from the partial uncommitted work in its worktree.
