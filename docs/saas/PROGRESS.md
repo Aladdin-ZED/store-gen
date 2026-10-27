@@ -26,11 +26,11 @@ Weights = share of total work. Update the "done" column when a stage moves.
 | Stage | Weight | Done in stage | Contributes |
 |---|---|---|---|
 | Research + full spec | 12% | 100% | 12.0% |
-| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | 83% (C0a + all 22 track steps done; T1, T2, C0b merged + reviewed; T3 merging; T4 merge, finale, deploy left) | 15.0% |
+| R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | 93% (all built, merged, reviewed; finale F1-F5 done; gate re-run + deploy left) | 16.7% |
 | R1 product (platform console + approvals + store profiles, landing+, call center, AI Director, design genome, onboarding wow) | 35% | 0% | 0% |
 | R2 full stores + accounting + logo designer | 22% | 0% | 0% |
 | R3 growth, custom domains, carrier APIs, learning AI | 13% | 0% | 0% |
-| **Total** | 100% | | **≈ 27%** |
+| **Total** | 100% | | **≈ 29%** |
 
 Milestones: R1.0 live ≈ 30% · R1 live ≈ 65% · R2 live ≈ 87% · R3 live = 100%. Owner inputs needed later: real domain +
 Cloudflare (subdomains, before public sign-ups), optional Claude API key + monthly cap, a carrier statement sample (R2), legal
@@ -40,6 +40,27 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **FINALE DONE** (F5 eb5304f: runbook docs/saas/ccr/r1.0-deploy-checklist.md; its one blocker = runbook ownership row, fixed
+  by the lead in §K.3). NOW: `npm run gate` on the final HEAD (writes qa/.gate-ok) → then deploy per the runbook.
+- **2026-10-27 resumed:** Hostinger connector RECONNECTED by the owner (works: 14 env keys, 1 completed build 01a16abd, account
+  has NO cron job at all). Finale F1-F4 done (bd03f6e, 1981729, 1a703da gate green, 2da7720 F4 fix: 0004 would have created an
+  ownerless store #1 from the old boot's pixel-library audit rows; fixed before production). F5 readiness resumed as task
+  `wlc1l72tp` (same run wf_d05b9e9b-e40). ORDER: F5 commits the runbook docs/saas/ccr/r1.0-deploy-checklist.md → commit this
+  log → re-run `npm run gate` on that HEAD (qa/.gate-ok must name HEAD) → deploy per the runbook (env 16 keys from
+  .env.hostinger, archive.mjs, TUS upload, build, smoke, create the cron in header form via hosting_cron-jobs_create, second
+  deploy for the DATA_DIR probe).
+- (resolved) **BLOCKED ON OWNER (2026-10-27 ~05:20): the Hostinger MCP connector signed out** ("needs you to sign in again"). The owner
+  must reconnect Hostinger in Claude's connector settings (or /mcp in a terminal). Until then: no env replace, no upload, no
+  build. Everything else continues. Heartbeat: if the connector works again (mcp__hostinger__search answers), continue the deploy
+  per docs/saas/ccr/r1.0-deploy-checklist.md.
+- **Phase 3 R1.0 / FINALE** — started 2026-10-27. Task `w4pesqcs8`, run `wf_d05b9e9b-e40`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\r1-0-finale-wf_d05b9e9b-e40.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_d05b9e9b-e40"})` (no args). Steps: F1 chores + scripts/deploy/
+  archive.mjs (gated on qa/.gate-ok) → F2 exit-scenario e2e (production build on 3452, Playwright msedge) → F3 npm run gate until
+  green → F4 upgrade dry run on a production-equivalent DB (temp worktree of 3598537 at C:\Users\SICO\sg-wt\prod-equiv) → F5
+  readiness review + docs/saas/ccr/r1.0-deploy-checklist.md. The finale commits on main: the lead does not commit while it runs.
+  NEXT (lead): follow r1.0-deploy-checklist.md: env full replace (16 keys from .env.hostinger + PLATFORM_URL + DATA_DIR),
+  archive.mjs → upload → build → smoke → second deploy for the DATA_DIR probe.
 - **MERGE T4** — DONE 2026-10-27: c93c8a0 merge, 7ffbc8c + 151d721 CCRs (all stopgaps, adminAction/adminGuard and string
   rateLimit removed), 83f9b5c + e851f92 lint at 0 over 1,004 files and in npm test, 0164239 attack suite on real code
   (test:tenancy 6,424 / 0 / 0 pending; action-replay 4,080 / 0 / 0), 5583286 review fixes (20 findings, 7 serious: Sheets

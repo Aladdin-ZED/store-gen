@@ -4265,7 +4265,7 @@ additive change is the maintainer's), `src/landing/document.tsx` (read-only in R
 **`scripts/qa/render-check.ts`** (the harness; tracks add fixtures through `render-cases/<track>.ts`, ENGP-12),
 **`scripts/qa/ownership-check.ts`** and its manifest **`docs/saas/ownership-baseline.json`** (rev 5, CRIT2-22),
 `scripts/qa/tenancy-allow.json` (the lint's allow file; entries through the maintainer, LAN Q23), **`scripts/qa/test-budget.ts`** (the 3-minute harness, §J.1; rev 4 named) and its table **`scripts/qa/test-budget.json`** (rev 5, CRIT2-9),
-**`scripts/deploy/archive.mjs`** and its gate-file writer **`scripts/qa/gate-ok.ts`** (SEC-10), `docs/saas/ccr/r1.0-finale-report.md` (the integration report), **`scripts/qa/e2e/r1.0-exit.ts`** (the R1.0 exit scenario of §K.1 criterion 5 as an e2e, `qa:r1-exit` in `test:e2e`), `src/landing/{types,context,i18n}.ts` (read-only in R1 product; the rev 4
+**`scripts/deploy/archive.mjs`** and its gate-file writer **`scripts/qa/gate-ok.ts`** (SEC-10), `docs/saas/ccr/r1.0-finale-report.md` (the integration report), `docs/saas/ccr/r1.0-deploy-checklist.md` (the R1.0 deploy runbook), **`scripts/qa/e2e/r1.0-exit.ts`** (the R1.0 exit scenario of §K.1 criterion 5 as an e2e, `qa:r1-exit` in `test:e2e`), `src/landing/{types,context,i18n}.ts` (read-only in R1 product; the rev 4
 report-link lines are the maintainer's P0 CCR, §K.2 P0), `scripts/sync-fonts.mjs` (the Arabic
 metrics step and the seven `@fontsource` faces of DES-R21 are a maintainer CCR applied in R1 product; the sample list
 `scripts/sync-fonts/ar-sample.json` is P6's), **`scripts/fonts/woff2-sfnt.mjs`** (rev 5, CRIT2-7: the WOFF2 table reader
