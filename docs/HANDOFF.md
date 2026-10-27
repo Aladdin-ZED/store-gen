@@ -158,12 +158,16 @@ the Claude connector settings. Nothing is deployed from a build that never saw t
    `[admin-css] COD Studio build: admin Tailwind precompiled…`. "Syncing public_html" removes the archive. A failed
    build keeps the previous version live.
 7. **First boot** of an R1.0 build runs migration 0004 (and the store #1 conversion when the old single-tenant setup
-   was used); the boot log names `gate passed on <sha>`.
+   was used); the boot log names `gate passed on <sha>`. The Store Gen database booted once on 3598537 and setup was
+   never run, so expect `tenancy: empty install, no store #1 to convert (marker written, the pre-tenancy boot's empty
+   pixel_library row removed)` and `[tenancy-check] OK` (rehearsed on a copy of that state, R1.0 finale F4). There is
+   no store #1: `/<ADMIN_GATE>` → `/admin/setup` with `SETUP_TOKEN` makes the first super_admin, its TOTP and the
+   first store.
 8. **Smoke test** (STORE-SAAS §H.10):
    - `/` returns 200 (the marketing page)
    - `/admin` returns 404; `/<ADMIN_GATE>` returns 303 to `/admin`
    - `/login` returns 200
-   - `/s/<store-1 handle>` returns 200 or the store's neutral page
+   - `/s/<handle of the store setup created>` returns 200 or the store's neutral page
    - `POST /api/public/order {}` answers `{"ok":false,"error":"invalid",…}`
    - cron with the `X-Cron-Key` header answers `{"ok":true…}`
    - `/api/health` answers with `app: "store-gen"`

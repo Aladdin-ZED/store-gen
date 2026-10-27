@@ -429,6 +429,8 @@ INSERT IGNORE INTO `flags` (`key`, `kind`, `description`, `default_value`, `type
 -- store name lower-cased, non [a-z0-9] runs -> '-', cut to 30, outer '-' trimmed (ENGC-30), used only when it passes
 -- isHandle (HANDLE_RE, ASCII only, no '--' at positions 3-4), is not reserved (RESERVED_HANDLES as of C0a) or
 -- protected, and is free; else 'store-1'. T1's convertLegacyStore() does the rest (names, envelopes, the marker).
+-- An audit row counts only when a user wrote it: the pre-tenancy build's first boot writes two system rows (its pixel
+-- library migration, user_id NULL) even on an install nobody set up, which must stay an empty install (R1.0 finale F4).
 INSERT INTO `stores` (`id`, `handle`, `name`, `mode`, `status`, `plan_id`, `market`, `currency`, `timezone`, `default_locale`, `brand_seed`, `created_at`, `updated_at`)
 SELECT '00000000000000000000000001',
        COALESCE((SELECT d.h FROM (SELECT TRIM(BOTH '-' FROM LEFT(REGEXP_REPLACE(LOWER(COALESCE((SELECT CASE WHEN JSON_VALID(`value`) THEN JSON_UNQUOTE(JSON_EXTRACT(`value`, '$.storeName')) END FROM `settings` WHERE `key` = 'store'), '')), '[^a-z0-9]+', '-'), 30)) AS h) d
@@ -450,7 +452,7 @@ WHERE NOT EXISTS (SELECT 1 FROM `stores` WHERE `id` = '0000000000000000000000000
        OR EXISTS (SELECT 1 FROM `blocklist`)
        OR EXISTS (SELECT 1 FROM `exports`)
        OR EXISTS (SELECT 1 FROM `stats_daily`)
-       OR EXISTS (SELECT 1 FROM `audit_log` WHERE `action` NOT LIKE 'auth.%'));--> statement-breakpoint
+       OR EXISTS (SELECT 1 FROM `audit_log` WHERE `action` NOT LIKE 'auth.%' AND `user_id` IS NOT NULL));--> statement-breakpoint
 -- 4. store_id on the nine legacy tenant tables: added NULL, backfilled with store #1 (a no-op on an empty database),
 -- then tightened to NOT NULL without a default while still nullable. The FKs come after the indexes (step 7).
 SET @ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `pages` ADD `store_id` varchar(26) NULL', 'DO 0') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'pages' AND column_name = 'store_id');--> statement-breakpoint

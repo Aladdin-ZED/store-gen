@@ -2121,6 +2121,8 @@ SELECT '00000000000000000000000001',
 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM stores WHERE id = '00000000000000000000000001')
   AND ((SELECT COUNT(*) FROM users) + (SELECT COUNT(*) FROM pages) + (SELECT COUNT(*) FROM orders) + (SELECT COUNT(*) FROM assets)) > 0;
+-- (as built, drizzle/0004_tenancy.sql: any row of the nine backfilled tables, or an audit_log row that is not auth.* AND
+-- has a user_id; the pre-tenancy boot's own system audit rows never make a store #1, R1.0 finale F4)
 -- S2: the old global home page becomes store #1's home
 UPDATE stores SET home_page_id = (SELECT id FROM pages WHERE is_home = 1 ORDER BY updated_at DESC LIMIT 1)
 WHERE id = '00000000000000000000000001' AND home_page_id IS NULL;
@@ -2141,7 +2143,8 @@ WHERE `key` IN ('store', 'defaults', 'sheets', 'pixel_library', 'pixel_health', 
 
 **JS conversion task** `convertLegacyStore()` (`src/lib/tenancy/convert.server.ts`), run from
 `src/instrumentation.ts` inside `withBootLock` after migrations, marker = platform setting `tenancy_v1`:
-1. Marker present → return. No store `0…01` → write the marker (empty install) → return.
+1. Marker present → return. No store `0…01` → delete the empty `pixel_library` row the pre-tenancy build's first
+   boot writes (`{"v":1,"pixels":[]}`, unencrypted), write the marker (empty install) → return (R1.0 finale F4, §P.5).
 2. Re-encrypt every `store_settings` row with `purpose_v = 0` and `encrypted = 1`: decrypt v1 with purpose
    `settings:<key>`, encrypt v2 with scope `store:0…01` (§F.3), set `purpose_v = 2` (compare-and-set on the old
    value).
@@ -5407,6 +5410,16 @@ What the integration step of §K.1 measured and decided; details in `docs/saas/c
   `test:slow` runs the sweep that exists, `theme:check -- --full`. The three script names stay in `package.json` as C0a
   declared them, and each joins `test:slow` in the merge that writes its file (P6, P7), the way the R1 suites join
   `npm test` (`test:jobs` and `test:prepublish` are declared and not chained either). §J.1's list is the R1 target.
+- **Upgrade dry run on a production-equivalent database (step F4, exit criterion 6).** Production booted once on
+  3598537 and nobody ran setup. That first boot's pixel library migration writes an empty `pixel_library` row and two
+  system audit rows (`settings.updated`, `pixels.library_migrated`, `user_id` NULL). 0004's S1 counted every non-`auth.*`
+  audit row as single-tenant data, so the R1.0 deploy would have created an ownerless store #1 (`store-1`, active,
+  `internal`): the gate red at every boot and an orphan store beside the owner's setup store. Fixed before 0004 ever ran
+  in production: S1 counts an audit row only when it has a `user_id`; on an empty install `convertLegacyStore()` deletes
+  that empty library row before the marker; the pre-tenancy dry run uses the same rule and reports any other
+  store-level key left without a store. Editing an applied migration is safe here: drizzle runs files by `folderMillis`
+  and never re-reads one it recorded. A database that already ran the old 0004 keeps its result. `test:migrate` (i)
+  locks the case.
 
 ---
 

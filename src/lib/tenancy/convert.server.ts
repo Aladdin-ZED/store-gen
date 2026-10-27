@@ -7,7 +7,8 @@ import "server-only";
  *
  *   const r = await convertLegacyStore();   // { status: "converted" | "empty" | "already", … }
  *
- *  0. marker `tenancy_v1` present → "already". No store #1 (an empty install) → the marker { store1: false } → "empty".
+ *  0. marker `tenancy_v1` present → "already". No store #1 (an empty install) → the empty `pixel_library` row the
+ *     pre-tenancy build's first boot wrote is deleted, then the marker { store1: false } → "empty".
  *  1. catch up S4: a store-level key the old build wrote after 0004 copied the row (a deploy overlapping a restart)
  *     is copied again while its row is untouched (`purpose_v = 0`).
  *  2. every `purpose_v = 0` row: encrypted → opened as v1 (`settings:<key>`), sealed v2 for `store:0…01` and
@@ -522,6 +523,15 @@ export async function convertLegacyStore(opts: ConvertOptions = {}): Promise<Con
   // tenancy: platform the store #1 row (P* root)
   const [store1] = await pool().query<RowDataPacket[]>("SELECT id FROM stores WHERE id = ?", [STORE1]);
   if (!store1.length) {
+    // An install nobody set up still went through the pre-tenancy build's first boot, whose pixel library migration
+    // wrote an EMPTY library row (R1.0 finale F4). No store owns it; it goes before the marker. Any other legacy key
+    // here stays, and the tenancy gate reports it.
+    // tenancy: platform the pre-tenancy boot's empty pixel_library row, on an install without store #1 (§D.8 step 1)
+    const [del] = await pool().query<ResultSetHeader>(
+      "DELETE FROM settings WHERE `key` = 'pixel_library' AND encrypted = 0 AND JSON_VALID(value) AND JSON_TYPE(JSON_EXTRACT(value, '$.pixels')) = 'ARRAY' AND JSON_LENGTH(value, '$.pixels') = 0",
+    );
+    r.deleted = del.affectedRows;
+    if (r.deleted) invalidateSettings();
     await setPlatformSetting("tenancy_v1", { v: 1, at: new Date().toISOString(), store1: false, freeRename: false }, SYSTEM);
     r.status = "empty";
     return done();

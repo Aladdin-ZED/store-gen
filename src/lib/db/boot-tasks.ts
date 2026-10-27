@@ -197,7 +197,7 @@ export async function runBootTasks(opts: { lockTimeoutSec?: number; migrationsFo
         const { convertLegacyStore } = await import("@/lib/tenancy/convert.server");
         const r = await convertLegacyStore();
         if (r.status === "already") return null;
-        if (r.status === "empty") return "tenancy: empty install, no store #1 to convert (marker written).";
+        if (r.status === "empty") return `tenancy: empty install, no store #1 to convert (marker written${r.deleted ? `, the pre-tenancy boot's empty pixel_library row removed` : ""}).`;
         const px = r.pixels.ran ? `, pixel library ${r.pixels.entries} pixel(s) / ${r.pixels.tokensCopied} token(s) copied` : "";
         const handle = r.handle ? `, handle "${r.handle.from}" replaced by "${r.handle.to}"` : "";
         return `tenancy: store #1 converted in ${r.ms} ms: ${r.resealed} envelope(s) re-sealed, moved ${r.moved.join(", ") || "nothing"}${handle}${px}, ${r.assetRefs} asset ref(s), ${r.deleted} legacy row(s) removed.`;

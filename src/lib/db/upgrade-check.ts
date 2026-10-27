@@ -424,6 +424,16 @@ function envelopeLine(label: string, sealed: Rows, opener: (r: Record<string, un
   else ok(`${sealed.length} ${label} open with this APP_SECRET`);
 }
 
+/** An unencrypted pixel_library value with no pixel (what the pre-tenancy boot writes when there is no page). */
+function emptyLibrary(raw: unknown): boolean {
+  try {
+    const v = JSON.parse(String(raw)) as { pixels?: unknown };
+    return Array.isArray(v?.pixels) && v.pixels.length === 0;
+  } catch {
+    return false;
+  }
+}
+
 async function preTenancyChecks(conn: Connection, report: TenancyCheckReport, opts: TenancyCheckOptions): Promise<void> {
   const { decrypt } = await import("@/lib/security/crypto");
   const { handleFromName } = await import("@/lib/tenancy/handles");
@@ -432,10 +442,18 @@ async function preTenancyChecks(conn: Connection, report: TenancyCheckReport, op
     conn,
     `SELECT (SELECT COUNT(*) FROM users) + (SELECT COUNT(*) FROM pages) + (SELECT COUNT(*) FROM page_versions) + (SELECT COUNT(*) FROM assets)
           + (SELECT COUNT(*) FROM media_files) + (SELECT COUNT(*) FROM orders) + (SELECT COUNT(*) FROM leads) + (SELECT COUNT(*) FROM blocklist)
-          + (SELECT COUNT(*) FROM exports) + (SELECT COUNT(*) FROM stats_daily) + (SELECT COUNT(*) FROM audit_log WHERE action NOT LIKE 'auth.%') AS n`,
+          + (SELECT COUNT(*) FROM exports) + (SELECT COUNT(*) FROM stats_daily) + (SELECT COUNT(*) FROM audit_log WHERE action NOT LIKE 'auth.%' AND user_id IS NOT NULL) AS n`,
   );
   if (!legacy) {
-    report.info.push("empty install: 0004 makes no store #1; the conversion only writes its marker");
+    report.info.push("empty install: 0004 makes no store #1; the conversion writes the empty-install marker");
+    // the pre-tenancy build's first boot writes an empty pixel_library row even here (R1.0 finale F4); the conversion
+    // removes exactly that row, and the tenancy gate would report any other store-level key left without a store
+    // tenancy: platform upgrade dry run: legacy store-level keys on an install without store #1 (read-only)
+    const left = await rows(conn, "SELECT `key`, value, encrypted FROM settings WHERE `key` IN (?) ORDER BY `key`", [MOVED_KEYS]);
+    for (const r of left) {
+      if (String(r.key) === "pixel_library" && !Number(r.encrypted) && emptyLibrary(r.value)) report.info.push("the pre-tenancy boot's empty pixel_library row: the conversion removes it");
+      else report.problems.push(`the legacy "${String(r.key)}" setting exists on an install with no store #1: nothing would own it`);
+    }
     return;
   }
   const owners = await count(conn, "SELECT COUNT(*) AS n FROM users WHERE role = 'owner' AND disabled = 0");

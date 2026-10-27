@@ -32,6 +32,9 @@
  *      → publishPage keeps it (a backfilled page) or sets it once at the first publish (added at the T3 merge).
  *  (h) the system seam over the converted database: forEachStore round robin, budget, a throwing store, states,
  *      `pending_sheets` ordering, a `where` whose table does not exist yet.
+ *  (i) an empty install the pre-tenancy build booted once (production's state at R1.0, finale F4): its empty
+ *      pixel_library row and two system audit rows make no store #1; the conversion removes that row; booted twice →
+ *      no change; the SETUP_TOKEN bootstrap makes the first super_admin and its store, then closes.
  *
  * Test values only (a random APP_SECRET per run, example.test addresses); nothing secret is printed. Exit code 1 when
  * a check fails.
@@ -207,6 +210,26 @@ async function fullFixture(encrypt: (plain: string, purpose: string) => string):
 }
 
 /** The second legacy shape (c): the owner's /admin/setup, the Offers v2 boot markers, one page home in settings.home only. */
+/**
+ * (i) What the pre-tenancy build (3598537, deployed to the Store Gen site) leaves after its first boot on an install
+ * nobody set up: its checksum marker and the pixel library migration's empty library with its two system audit rows
+ * (user_id NULL). The rows are those of a real boot of that commit (R1.0 finale F4), dates aside.
+ */
+function preTenancyBootFixture(): Fixture {
+  return {
+    tables: {
+      audit_log: [
+        { user_id: null, action: "settings.updated", target: "pixel_library", meta: JSON.stringify({ fields: ["v", "pixels"] }), ip: null, created_at: at(3) },
+        { user_id: null, action: "pixels.library_migrated", target: null, meta: JSON.stringify({ entries: 0, tokensCopied: "[redacted]", testCodesDeactivated: 0 }), ip: null, created_at: at(3) },
+      ],
+    },
+    settings: [
+      { key: "doc_schema", value: 2, secret: false, at: at(3) },
+      { key: "pixel_library", value: { v: 1, pixels: [] }, secret: false, at: at(3) },
+    ],
+  };
+}
+
 async function setupFixture(): Promise<Fixture> {
   const { getFixture } = await import("@/lib/page/fixtures");
   const doc = getFixture("massage", { now: FIXTURE_NOW }).doc;
@@ -329,6 +352,29 @@ async function childMain(task: string): Promise<unknown> {
       for (const label of (argOf("labels") ?? "").split(",").filter(Boolean)) hit.push(await once((unit) => unit === label));
     }
     return { hit };
+  }
+
+  if (task === "setup") {
+    // §B.11 on an empty install: SETUP_TOKEN opens /admin/setup until the first super_admin exists; then the TOTP
+    // enrolment (the code computed from the staged secret, as an authenticator does) and the owner's first store
+    const { bootstrapSuperAdmin, createSetupStore, setupOpen } = await import("@/lib/auth/bootstrap");
+    const { beginTotpEnrollment, confirmTotpEnrollment } = await import("@/lib/auth/mfa");
+    const { totpCode } = await import("@/lib/auth/totp");
+    const pw = () => `Qa-${randomBytes(18).toString("base64url")}`;
+    const password = pw();
+    const openBefore = await setupOpen();
+    const first = await bootstrapSuperAdmin({ name: "Owner Qa", email: "owner.i@example.test", password }, { ip: null });
+    const second = await bootstrapSuperAdmin({ name: "Second Qa", email: "second.i@example.test", password: pw() }, { ip: null });
+    const openAfter = await setupOpen();
+    let store: { storeId: string; handle: string } | null = null;
+    let recoveryCodes = 0;
+    if (first) {
+      const challenge = await beginTotpEnrollment(first.userId);
+      const enrolled = await confirmTotpEnrollment(first.userId, { code: totpCode(challenge.secretDisplay.replace(/\s+/g, "")), password });
+      recoveryCodes = enrolled.recoveryCodes.length;
+      store = await createSetupStore(first.userId, { storeName: "Nour Qa", handle: "nour-qa" }, { ip: null });
+    }
+    return { openBefore, first: first !== null, second, openAfter, recoveryCodes, store };
   }
 
   if (task === "read") {
@@ -1180,6 +1226,59 @@ async function main(): Promise<void> {
       const s2 = await snapshot(name, false, since);
       same("(c) setup: the second boot changes nothing", diffSnapshots(s1, s2), []);
       same("(c) setup: the second boot writes no audit row", s2.audit.length, s1.audit.length);
+    }
+
+    console.log("(i) an empty install the pre-tenancy build booted once (production's state, R1.0 finale F4)");
+    {
+      const name = "cod_test_t1_prod_boot";
+      await legacyDb(name, preTenancyBootFixture(), encrypt, folder);
+      const conn = await connect(name);
+      try {
+        const pre = await runTenancyCheck(conn, { requireEnvelopes: true });
+        check("(i) pre-tenancy dry run: 0 problems, an empty install", pre.mode === "pre-tenancy" && tenancyCheckOk(pre) && pre.info.some((i) => i.startsWith("empty install")), pre);
+        check("(i) pre-tenancy dry run: names the boot's empty pixel_library row", pre.info.some((i) => i.includes("empty pixel_library row")), pre.info);
+      } finally {
+        await conn.end();
+      }
+      const preCli = await dryRunCli(name);
+      check("(i) dry run CLI (pre-tenancy): exit 0", preCli.code === 0 && /✓ upgrade dry run passed/.test(preCli.out), preCli.out.slice(-600));
+      const i1 = await child<BootResult>("boot", name);
+      bootOk("(i) boot 1", i1, 1);
+      const conv = i1.boot.steps.find((s) => s.name === "store #1 conversion")?.detail ?? "";
+      check("(i) boot 1: an empty install, the boot's pixel_library row removed", /empty install/.test(conv) && /pixel_library row removed/.test(conv), conv);
+      same("(i) no store #1, no membership", [(await query(name, "SELECT id FROM stores")).length, (await query(name, "SELECT store_id FROM store_members")).length], [0, 0]);
+      const [iMarker] = await query(name, "SELECT value FROM settings WHERE `key` = 'tenancy_v1'");
+      const im = JSON.parse(String(iMarker?.value ?? "null")) as Row | null;
+      check("(i) marker { store1: false, freeRename: false }", im?.store1 === false && im.freeRename === false, im);
+      same("(i) settings left", (await query(name, "SELECT `key` FROM settings ORDER BY `key`")).map((r) => r.key), ["doc_schema", "tenancy_v1"]);
+      same(
+        "(i) the boot's two system audit rows stay platform rows (store_id NULL)",
+        (await query(name, "SELECT action, store_id FROM audit_log WHERE action IN ('settings.updated', 'pixels.library_migrated') ORDER BY id")).map((r) => [r.action, r.store_id]),
+        [["settings.updated", null], ["pixels.library_migrated", null]],
+      );
+      const postCli = await dryRunCli(name);
+      check("(i) dry run CLI (migrated): exit 0", postCli.code === 0 && /✓ upgrade dry run passed/.test(postCli.out), postCli.out.slice(-600));
+      const s1 = await snapshot(name, false, since);
+      const i2 = await child<BootResult>("boot", name);
+      bootOk("(i) boot 2", i2, 0);
+      const s2 = await snapshot(name, false, since);
+      same("(i) the second boot changes nothing", diffSnapshots(s1, s2), []);
+      same("(i) the second boot writes no audit row", s2.audit.length, s1.audit.length);
+      const st = await child<{ openBefore: boolean; first: boolean; second: unknown; openAfter: boolean; recoveryCodes: number; store: { storeId: string; handle: string } | null }>("setup", name, { SETUP_TOKEN: randomBytes(24).toString("base64url") });
+      same("(i) SETUP_TOKEN bootstrap: open, one super_admin, a second attempt refused, then closed", [st.openBefore, st.first, st.second, st.openAfter], [true, true, null, false]);
+      check("(i) the owner enrols TOTP (recovery codes issued) and creates the first store", st.recoveryCodes > 0 && st.store?.handle === "nour-qa", st);
+      same(
+        "(i) the owner: super_admin, owner of the setup store (active, internal plan)",
+        await query(name, "SELECT u.platform_role, m.role, m.status, s.handle, s.status AS store_status, s.plan_id FROM users u JOIN store_members m ON m.user_id = u.id JOIN stores s ON s.id = m.store_id"),
+        [{ platform_role: "super_admin", role: "owner", status: "active", handle: "nour-qa", store_status: "active", plan_id: "internal" }],
+      );
+      const after = await connect(name);
+      try {
+        const t = await runTenancyCheck(after, { requireEnvelopes: true });
+        check("(i) after setup: tenancy gate 0 problems", tenancyCheckOk(t), t.problems);
+      } finally {
+        await after.end();
+      }
     }
 
   } finally {
