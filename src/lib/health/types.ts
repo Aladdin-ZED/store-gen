@@ -77,3 +77,16 @@ export interface HealthFlag {
   value?: number;
   detail?: string; // key, metric or kind
 }
+
+/** store_health.metrics (PLA-§6.3; frozen with the 0005 column at P0) */
+export interface HealthMetrics {
+  orders7d: number;
+  risky7d: number;
+  lastActiveAt: string | null;
+  lastOrderAt: string | null;
+  publishedPages: number;
+  mediaPct: number | null;
+}
+
+/** store_health.milestones keys: the ISO date each was first reached (PD40) */
+export type Milestone = "first_draft" | "first_publish" | "first_order" | "tenth_order" | "first_member" | "first_delivered";

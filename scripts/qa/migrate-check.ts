@@ -1,13 +1,14 @@
 /**
  * test:migrate (docs/STORE-SAAS.md §J.2, §D.8, §H.4; R1.0 exit criterion 3) on XAMPP's MariaDB (root, no password,
- * 127.0.0.1:3306). Every database it makes is named cod_test_t1_* and dropped at the end (unless --keep).
+ * 127.0.0.1:3306). Every database it makes is named cod_test_t1_* (the 0004 cases) or cod_test_p0_* (the 0005 cases,
+ * R1 contract step P0) and dropped at the end (unless --keep).
  *
  *   npm run test:migrate          (tsx scripts/qa/migrate-check.ts [--keep] [--verbose])
  *
  * Each "boot" runs in a fresh child process (this file with --child), like a server start: the migrations, then the
  * §H.4 boot tasks (runBootTasks: published checksums, the store #1 conversion, the seeds) and the read-only checks.
  *
- *  (a) EMPTY database → 0000…0004: the live columns equal meta/0004_snapshot.json and schema.ts; the conversion
+ *  (a) EMPTY database → 0000…0005: the live columns equal the newest meta snapshot and schema.ts; the conversion
  *      writes the empty-install marker; booted twice → the second boot changes nothing.
  *  (b) LEGACY database: 0000-0003 only, seeded as today's single-tenant install writes it (owner, editor, agents,
  *      pages with is_home, versions, an export, orders, leads, blocklist, stats, media, v1-sealed tracking_secrets and
@@ -35,6 +36,16 @@
  *  (i) an empty install the pre-tenancy build booted once (production's state at R1.0, finale F4): its empty
  *      pixel_library row and two system audit rows make no store #1; the conversion removes that row; booted twice →
  *      no change; the SETUP_TOKEN bootstrap makes the first super_admin and its store, then closes.
+ *  (j) 0005 (P0), as 0004 is covered above:
+ *      - schema parity on the empty database: every table, column (type, nullability, default), index, unique,
+ *        primary key, FK and CHECK that schema.ts declares exists in the database, nothing else does, and
+ *        meta/0005_snapshot.json declares the same indexes, FKs and checks; the 'tick' lease row is seeded;
+ *      - every 0005 statement run a second time on a migrated database changes nothing (schema and rows);
+ *      - 0005 cut after N statements (several N, on the empty database and on the R1.0 one), resumed by the next run
+ *        = the clean run (schema and rows);
+ *      - an R1.0-shaped database WITH DATA (0000-0004, two stores, pages, versions, orders of every R1.0 source, leads
+ *        with phones): 0005 applies, every row survives column for column, the new columns hold their defaults, the
+ *        R1.0 enum values read back unchanged (value and index), leads.phone takes NULL, the new sources insert.
  *
  * Test values only (a random APP_SECRET per run, example.test addresses); nothing secret is printed. Exit code 1 when
  * a check fails.
@@ -58,7 +69,7 @@ import mysql from "mysql2/promise";
 }
 
 const ROOT = resolve(__dirname, "..", "..");
-const DB_RE = /^cod_test_t1_[a-z0-9_]{1,40}$/;
+const DB_RE = /^cod_test_(?:t1|p0)_[a-z0-9_]{1,40}$/;
 const STORE1 = "00000000000000000000000001";
 const RESULT = "@@result ";
 const verbose = process.argv.includes("--verbose");
@@ -674,8 +685,12 @@ async function dropAll(): Promise<string[]> {
   const conn = await rootConn();
   try {
     for (const name of created) if (DB_RE.test(name)) await conn.query(`DROP DATABASE IF EXISTS \`${name}\``);
-    const [rows] = (await conn.query("SHOW DATABASES LIKE 'cod\\_test\\_t1\\_%'")) as unknown as [Row[]];
-    return rows.map((r) => String(Object.values(r)[0]));
+    const left: string[] = [];
+    for (const like of ["cod\\_test\\_t1\\_%", "cod\\_test\\_p0\\_%"]) {
+      const [rows] = (await conn.query(`SHOW DATABASES LIKE '${like}'`)) as unknown as [Row[]];
+      left.push(...rows.map((r) => String(Object.values(r)[0])));
+    }
+    return left;
   } finally {
     await conn.end();
   }
@@ -790,22 +805,32 @@ async function query(dbName: string, q: string, params: unknown[] = []): Promise
   }
 }
 
-/** drizzle/ with only 0000-0003 in its journal: the schema of today's single-tenant install. */
-function legacyMigrationsFolder(): string {
+const JOURNAL = JSON.parse(readFileSync(join(ROOT, "drizzle", "meta", "_journal.json"), "utf8")) as { entries: { idx: number; tag: string }[] };
+/** migrations on disk (0000…0005 at P0) */
+const TOTAL = JOURNAL.entries.length;
+/** migrations after 0003: what a legacy (single-tenant) database still applies */
+const AFTER_LEGACY = JOURNAL.entries.filter((e) => e.idx > 3).length;
+
+/** drizzle/ with only 0000-`maxIdx` in its journal: 3 = today's single-tenant install, 4 = the R1.0 schema. */
+function migrationsFolderUpTo(maxIdx: number): string {
   const dir = mkdtempSync(join(tmpdir(), "sg-t1-mig-"));
   mkdirSync(join(dir, "meta"));
-  const journal = JSON.parse(readFileSync(join(ROOT, "drizzle", "meta", "_journal.json"), "utf8")) as { entries: { idx: number; tag: string }[] };
-  journal.entries = journal.entries.filter((e) => e.idx <= 3);
+  const journal = { ...JOURNAL, entries: JOURNAL.entries.filter((e) => e.idx <= maxIdx) };
   for (const e of journal.entries) copyFileSync(join(ROOT, "drizzle", `${e.tag}.sql`), join(dir, `${e.tag}.sql`));
   writeFileSync(join(dir, "meta", "_journal.json"), JSON.stringify(journal, null, 2));
   return dir;
 }
 
-/** The first `n` statements of 0004 on one connection, then the connection dies (a crash mid-migration). */
-async function partial0004(dbName: string, n: number): Promise<number> {
+/** The statements of migration `idx` as drizzle's migrator splits them. */
+async function migrationStatements(idx: number): Promise<string[]> {
   const { readMigrationFiles } = await import("drizzle-orm/migrator");
   const files = readMigrationFiles({ migrationsFolder: join(ROOT, "drizzle") });
-  const statements = files[4]!.sql.filter((s) => s.trim());
+  return files[idx]!.sql.filter((s) => s.trim());
+}
+
+/** The first `n` statements of migration `idx` on one connection, then the connection dies (a crash mid-migration). */
+async function partialMigration(dbName: string, idx: number, n: number): Promise<number> {
+  const statements = await migrationStatements(idx);
   const conn = await connect(dbName);
   try {
     for (const s of statements.slice(0, n)) await conn.query(s);
@@ -814,6 +839,7 @@ async function partial0004(dbName: string, n: number): Promise<number> {
   }
   return statements.length;
 }
+const partial0004 = (dbName: string, n: number) => partialMigration(dbName, 4, n);
 
 async function legacyDb(name: string, fixture: Fixture, encrypt: (plain: string, purpose: string) => string, folder: string): Promise<void> {
   const { runMigrations } = await import("@/lib/db/migrate");
@@ -831,7 +857,7 @@ interface BootResult {
 }
 
 function bootOk(label: string, r: BootResult, applied: number): void {
-  check(`${label}: migrations ${applied ? `applied ${applied}` : "up to date"}`, r.migrate.applied === applied && r.migrate.total === 5, r.migrate);
+  check(`${label}: migrations ${applied ? `applied ${applied}` : "up to date"}`, r.migrate.applied === applied && r.migrate.total === TOTAL, r.migrate);
   // §H.4 step 5 in order; "legal templates" joined with CCR r1.0-t1-3 item 1 (a no-op while LEGAL_SEED_VERSION = 0)
   const names = ["published checksums", "store #1 conversion", "protected brands", "legal templates", "flags"];
   check(`${label}: every boot task ran and succeeded`, r.boot.ran && r.boot.steps.map((s) => s.name).join("|") === names.join("|") && r.boot.steps.every((s) => s.ok), r.boot.steps);
@@ -843,8 +869,11 @@ function bootOk(label: string, r: BootResult, applied: number): void {
 /* The checks                                                          */
 /* ------------------------------------------------------------------ */
 
+/** meta/<last tag's number>_snapshot.json: drizzle-kit's view of schema.ts at the newest migration */
+const LAST_SNAPSHOT = `${JOURNAL.entries.at(-1)!.tag.slice(0, 4)}_snapshot.json`;
+
 async function schemaMatchesSnapshot(dbName: string): Promise<void> {
-  const snap = JSON.parse(readFileSync(join(ROOT, "drizzle", "meta", "0004_snapshot.json"), "utf8")) as { tables: Record<string, { columns: Record<string, { name: string; type: string; notNull: boolean }> }> };
+  const snap = JSON.parse(readFileSync(join(ROOT, "drizzle", "meta", LAST_SNAPSHOT), "utf8")) as { tables: Record<string, { columns: Record<string, { name: string; type: string; notNull: boolean }> }> };
   const live = await query(dbName, "SELECT table_name AS t, column_name AS c, column_type AS ty, is_nullable AS n FROM information_schema.columns WHERE table_schema = DATABASE()");
   const norm = (t: string) => t.toLowerCase().replace(/^boolean$/, "tinyint").replace(/^(tinyint|smallint|mediumint|int|bigint)\(\d+\)/, "$1");
   const liveCols = new Map<string, string>();
@@ -854,7 +883,7 @@ async function schemaMatchesSnapshot(dbName: string): Promise<void> {
   const missing = [...snapCols.keys()].filter((k) => !liveCols.has(k));
   const extra = [...liveCols.keys()].filter((k) => !snapCols.has(k));
   const typed = [...snapCols].filter(([k, v]) => liveCols.has(k) && liveCols.get(k) !== v).map(([k, v]) => `${k}: snapshot ${v}, live ${liveCols.get(k)}`);
-  check(`(a) live columns = 0004_snapshot.json (${snapCols.size} columns)`, !missing.length && !extra.length && !typed.length, { missing, extra, typed: typed.slice(0, 10) });
+  check(`(a) live columns = ${LAST_SNAPSHOT} (${snapCols.size} columns)`, !missing.length && !extra.length && !typed.length, { missing, extra, typed: typed.slice(0, 10) });
 
   const { is } = await import("drizzle-orm");
   const { MySqlTable, getTableConfig } = await import("drizzle-orm/mysql-core");
@@ -863,10 +892,10 @@ async function schemaMatchesSnapshot(dbName: string): Promise<void> {
   for (const value of Object.values(schema)) if (is(value, MySqlTable)) for (const c of getTableConfig(value).columns) fromSchema.add(`${getTableConfig(value).name}.${c.name}`);
   const notInSchema = [...snapCols.keys()].filter((k) => !fromSchema.has(k));
   const notInSnap = [...fromSchema].filter((k) => !snapCols.has(k));
-  check("(a) schema.ts columns = 0004_snapshot.json", !notInSchema.length && !notInSnap.length, { notInSchema, notInSnap });
+  check(`(a) schema.ts columns = ${LAST_SNAPSHOT}`, !notInSchema.length && !notInSnap.length, { notInSchema, notInSnap });
 }
 
-/** (e) the §D.3 rows (0004) and the §D.2 tenant tables of the document against TABLE_LEVELS and schema.ts. */
+/** (e) the §D.3 rows (0004, 0005) and the §D.2 tenant tables of the document against TABLE_LEVELS and schema.ts. */
 async function tenantSetMatchesDocument(): Promise<void> {
   const { TABLE_LEVELS, tenantSetProblems } = await import("@/lib/db/upgrade-check");
   same("(e) schema.ts tenant set = TABLE_LEVELS", tenantSetProblems(), []);
@@ -884,8 +913,11 @@ async function tenantSetMatchesDocument(): Promise<void> {
   const docLevels: Record<string, string> = {};
   for (const line of section("### D.3 Table registry", "### D.4").split("\n")) {
     const cells = line.split("|").map((c) => c.trim());
-    if (cells.length < 6 || !/\b0004\b/.test(cells[1] ?? "")) continue;
-    for (const m of (cells[2] ?? "").matchAll(/`([a-z_]+)`/g)) docLevels[m[1]!] = levelOf(cells[3] ?? "");
+    if (cells.length < 6 || !/\b000[45]\b/.test(cells[1] ?? "")) continue;
+    const tables = [...(cells[2] ?? "").matchAll(/`([a-z_]+)`/g)].map((m) => m[1]!);
+    // a shared row may give one level per table ("P (opt. store) / P"), in the order of the tables
+    const levels = (cells[3] ?? "").split(" / ");
+    tables.forEach((t, i) => (docLevels[t] = levelOf(levels.length === tables.length ? levels[i]! : cells[3] ?? "")));
   }
   for (const line of section("### D.2 Changes to existing tables", "### D.3").split("\n")) {
     const cells = line.split("|").map((c) => c.trim());
@@ -893,8 +925,9 @@ async function tenantSetMatchesDocument(): Promise<void> {
     const table = /`([a-z_]+)`/.exec(cells[1] ?? "")?.[1];
     if (table) docLevels[table] = /store_id varchar\(26\) NULL/.test(cells[3] ?? "") ? "P-opt" : "T";
   }
-  // the document's level where it differs from the schema (empty since CCR r1.0-t1-3 item 2 fixed §D.3)
-  const DRIFT: Record<string, string> = {};
+  // the document's level where it differs from the schema: §D.3 shares the row "`job_runs`, `cron_cursors` · P (opt.
+  // store)", but §D.5 gives cron_cursors no store_id (P0; the §D.3 row is split in the spec, TABLE_LEVELS says P)
+  const DRIFT: Record<string, string> = { cron_cursors: "P-opt" };
   const mismatches: string[] = [];
   for (const [table, level] of Object.entries(docLevels)) {
     const code = TABLE_LEVELS[table];
@@ -902,7 +935,7 @@ async function tenantSetMatchesDocument(): Promise<void> {
     else if (code !== level && DRIFT[table] !== level) mismatches.push(`${table}: document ${level}, code ${code}`);
   }
   const zeroThree = new Set(["users", "sessions", "settings", "rate_limits", "media_chunks", "stats_visitors"]);
-  for (const table of Object.keys(TABLE_LEVELS)) if (!docLevels[table] && !zeroThree.has(table)) mismatches.push(`${table}: in TABLE_LEVELS, not a 0004 row of §D.2 / §D.3`);
+  for (const table of Object.keys(TABLE_LEVELS)) if (!docLevels[table] && !zeroThree.has(table)) mismatches.push(`${table}: in TABLE_LEVELS, not a 0004 / 0005 row of §D.2 / §D.3`);
   check(`(e) TABLE_LEVELS = the §D.2 / §D.3 rows (${Object.keys(docLevels).length} tables, drift recorded: ${Object.keys(DRIFT).join(", ") || "none"})`, !mismatches.length, mismatches);
 }
 
@@ -984,6 +1017,257 @@ async function legacyAssertions(dbName: string, fixture: Fixture): Promise<void>
   check(`${L} protected brands seeded (${PROTECTED_BRANDS.length})`, Number(brands) === PROTECTED_BRANDS.length);
 }
 
+/* ------------------------------------------------------------------ */
+/* 0005 (R1 contract step P0)                                          */
+/* ------------------------------------------------------------------ */
+
+const normType = (t: string) => t.toLowerCase().replace(/^boolean$/, "tinyint").replace(/^(tinyint|smallint|mediumint|int|bigint)\(\d+\)/, "$1");
+/** MariaDB's COLUMN_DEFAULT: NULL / 'NULL' = none, quoted strings, numbers (decimals as numbers), current_timestamp(3) */
+function normLiveDefault(d: unknown): string {
+  if (d === null || d === undefined || d === "NULL") return "none";
+  const s = String(d);
+  return /^-?\d+(?:\.\d+)?$/.test(s) ? String(Number(s)) : s.toLowerCase();
+}
+
+/**
+ * The live schema as sorted lines (every table but drizzle's journal): columns with type, nullability and default;
+ * every index with its uniqueness and column order (PRIMARY included); every FK with its columns, target and rules;
+ * every CHECK by name. Equal lines = the same schema, whatever order the columns were added in.
+ */
+async function schemaShape(dbName: string): Promise<string[]> {
+  const lines: string[] = [];
+  const skip = "table_name <> '__drizzle_migrations'";
+  for (const r of await query(dbName, `SELECT table_name AS t, column_name AS c, column_type AS ty, is_nullable AS n, column_default AS d FROM information_schema.columns WHERE table_schema = DATABASE() AND ${skip}`)) {
+    lines.push(`col ${String(r.t)}.${String(r.c)} ${normType(String(r.ty))} ${r.n === "YES" ? "null" : "not null"} default=${normLiveDefault(r.d)}`);
+  }
+  const idx = new Map<string, { unique: boolean; cols: [number, string][] }>();
+  for (const r of await query(dbName, `SELECT table_name AS t, index_name AS i, non_unique AS u, seq_in_index AS q, column_name AS c FROM information_schema.statistics WHERE table_schema = DATABASE() AND ${skip}`)) {
+    const key = `${String(r.t)}.${String(r.i)}`;
+    const e = idx.get(key) ?? { unique: Number(r.u) === 0, cols: [] };
+    e.cols.push([Number(r.q), String(r.c)]);
+    idx.set(key, e);
+  }
+  for (const [key, e] of idx) lines.push(`idx ${key} ${e.unique ? "unique" : "index"} (${e.cols.sort((a, b) => a[0] - b[0]).map((c) => c[1]).join(",")})`);
+  const fkRows = await query(
+    dbName,
+    `SELECT r.table_name AS t, r.constraint_name AS k, r.referenced_table_name AS rt, r.delete_rule AS dr, r.update_rule AS ur, u.column_name AS c, u.referenced_column_name AS rc, u.ordinal_position AS q
+       FROM information_schema.referential_constraints r
+       JOIN information_schema.key_column_usage u ON u.constraint_schema = r.constraint_schema AND u.table_name = r.table_name AND u.constraint_name = r.constraint_name
+      WHERE r.constraint_schema = DATABASE()`,
+  );
+  const fks = new Map<string, { rt: string; rules: string; cols: [number, string, string][] }>();
+  for (const r of fkRows) {
+    const key = `${String(r.t)}.${String(r.k)}`;
+    const e = fks.get(key) ?? { rt: String(r.rt), rules: `${String(r.dr)}/${String(r.ur)}`.toLowerCase(), cols: [] };
+    e.cols.push([Number(r.q), String(r.c), String(r.rc)]);
+    fks.set(key, e);
+  }
+  for (const [key, e] of fks) {
+    const cols = e.cols.sort((a, b) => a[0] - b[0]);
+    lines.push(`fk ${key} (${cols.map((c) => c[1]).join(",")}) -> ${e.rt}(${cols.map((c) => c[2]).join(",")}) ${e.rules}`);
+  }
+  for (const r of await query(dbName, "SELECT table_name AS t, constraint_name AS k FROM information_schema.check_constraints WHERE constraint_schema = DATABASE()")) {
+    lines.push(`ck ${String(r.t)}.${String(r.k)}`);
+  }
+  return lines.sort();
+}
+
+/** The same lines from schema.ts (getTableConfig): what the database must hold, no more, no less. */
+async function schemaTsShape(): Promise<string[]> {
+  const { is, getTableName, SQL } = await import("drizzle-orm");
+  const { MySqlTable, getTableConfig } = await import("drizzle-orm/mysql-core");
+  const schema = await import("@/lib/db/schema");
+  const lines: string[] = [];
+  const defaultOf = (c: { hasDefault: boolean; default: unknown }): string => {
+    if (!c.hasDefault || c.default === undefined || c.default === null) return "none";
+    const d = c.default;
+    if (is(d, SQL)) return (d as InstanceType<typeof SQL>).queryChunks.map((ch) => (ch as { value?: string[] }).value?.join("") ?? "").join("").toLowerCase();
+    if (typeof d === "boolean") return d ? "1" : "0";
+    if (typeof d === "number") return String(d);
+    return `'${String(d).replace(/'/g, "''")}'`.toLowerCase();
+  };
+  for (const value of Object.values(schema)) {
+    if (!is(value, MySqlTable)) continue;
+    const cfg = getTableConfig(value);
+    const t = cfg.name;
+    for (const c of cfg.columns) lines.push(`col ${t}.${c.name} ${normType(c.getSQLType())} ${c.notNull ? "not null" : "null"} default=${defaultOf(c)}`);
+    const pk = cfg.primaryKeys[0]?.columns.map((c) => c.name) ?? cfg.columns.filter((c) => c.primary).map((c) => c.name);
+    if (pk.length) lines.push(`idx ${t}.PRIMARY unique (${pk.join(",")})`);
+    for (const i of cfg.indexes) lines.push(`idx ${t}.${i.config.name} ${i.config.unique ? "unique" : "index"} (${i.config.columns.map((c) => (c as { name: string }).name).join(",")})`);
+    for (const fk of cfg.foreignKeys) {
+      const ref = fk.reference();
+      lines.push(`fk ${t}.${fk.getName()} (${ref.columns.map((c) => c.name).join(",")}) -> ${getTableName(ref.foreignTable)}(${ref.foreignColumns.map((c) => c.name).join(",")}) ${fk.onDelete ?? "restrict"}/${fk.onUpdate ?? "restrict"}`);
+    }
+    for (const ck of cfg.checks) lines.push(`ck ${t}.${ck.name}`);
+  }
+  return lines.sort();
+}
+
+/** meta/<newest>_snapshot.json as index / FK / check lines (columns are (a)'s). */
+function snapshotKeyShape(): string[] {
+  type SnapTable = {
+    columns: Record<string, { name: string; primaryKey: boolean }>;
+    indexes: Record<string, { name: string; columns: string[]; isUnique: boolean }>;
+    foreignKeys: Record<string, { name: string; tableTo: string; columnsFrom: string[]; columnsTo: string[]; onDelete?: string; onUpdate?: string }>;
+    compositePrimaryKeys: Record<string, { columns: string[] }>;
+    uniqueConstraints: Record<string, { name: string; columns: string[] }>;
+    checkConstraint?: Record<string, { name: string }>;
+  };
+  const snap = JSON.parse(readFileSync(join(ROOT, "drizzle", "meta", LAST_SNAPSHOT), "utf8")) as { tables: Record<string, SnapTable> };
+  const lines: string[] = [];
+  for (const [t, d] of Object.entries(snap.tables)) {
+    const cpk = Object.values(d.compositePrimaryKeys)[0]?.columns ?? Object.values(d.columns).filter((c) => c.primaryKey).map((c) => c.name);
+    if (cpk.length) lines.push(`idx ${t}.PRIMARY unique (${cpk.join(",")})`);
+    for (const i of Object.values(d.indexes)) lines.push(`idx ${t}.${i.name} ${i.isUnique ? "unique" : "index"} (${i.columns.join(",")})`);
+    for (const u of Object.values(d.uniqueConstraints)) lines.push(`idx ${t}.${u.name} unique (${u.columns.join(",")})`);
+    for (const f of Object.values(d.foreignKeys)) lines.push(`fk ${t}.${f.name} (${f.columnsFrom.join(",")}) -> ${f.tableTo}(${f.columnsTo.join(",")}) ${f.onDelete ?? "restrict"}/${f.onUpdate ?? "restrict"}`);
+    for (const c of Object.values(d.checkConstraint ?? {})) lines.push(`ck ${t}.${c.name}`);
+  }
+  return lines.sort();
+}
+
+const setDiff = (a: string[], b: string[]) => {
+  const B = new Set(b);
+  return a.filter((x) => !B.has(x));
+};
+
+/** (j) schema.ts = the live database (both directions), and the snapshot's keys = schema.ts's. */
+async function schemaParity(dbName: string, label: string): Promise<void> {
+  const want = await schemaTsShape();
+  const live = await schemaShape(dbName);
+  const missing = setDiff(want, live);
+  const extra = setDiff(live, want);
+  check(
+    `${label} schema parity: ${want.filter((l) => l.startsWith("col ")).length} columns, ${want.filter((l) => l.startsWith("idx ")).length} indexes / uniques / primary keys, ${want.filter((l) => l.startsWith("fk ")).length} FKs, ${want.filter((l) => l.startsWith("ck ")).length} check(s) of schema.ts exist with their type, nullability and default; nothing else does`,
+    !missing.length && !extra.length,
+    { missing: missing.slice(0, 12), extra: extra.slice(0, 12) },
+  );
+  const keys = want.filter((l) => !l.startsWith("col "));
+  const snap = snapshotKeyShape();
+  check(`${label} ${LAST_SNAPSHOT} declares the same indexes, uniques, primary keys, FKs and checks as schema.ts`, !setDiff(keys, snap).length && !setDiff(snap, keys).length, {
+    notInSnapshot: setDiff(keys, snap).slice(0, 10),
+    notInSchema: setDiff(snap, keys).slice(0, 10),
+  });
+}
+
+/** Every statement of migration `idx` once more, in order, on one connection (what "safe to run twice" means). */
+async function rerunMigration(dbName: string, idx: number): Promise<number> {
+  const statements = await migrationStatements(idx);
+  const conn = await connect(dbName);
+  try {
+    for (const s of statements) await conn.query(s);
+  } finally {
+    await conn.end();
+  }
+  return statements.length;
+}
+
+const ST_A = id26("ST", 21);
+const ST_B = id26("ST", 22);
+/** The tables the R1.0 fixture seeds, in insert order (parents first). */
+const R10_TABLES = ["users", "stores", "store_members", "pages", "page_versions", "orders", "leads", "stats_daily", "blocklist"] as const;
+
+/**
+ * (j) An R1.0-shaped database's rows (0004 shapes, as R1.0 code writes them): two stores, their owners, a published
+ * page each with its live version, orders of every R1.0 source (live, export, php; one a test order), leads with
+ * phones (one converted, one a test lead), stats and a blocked phone.
+ */
+function r10Fixture(full: Fixture): Fixture {
+  const t = full.tables;
+  const without = (r: Row, ...keys: string[]): Row => Object.fromEntries(Object.entries(r).filter(([k]) => !keys.includes(k)));
+  const storeOf = (pageId: unknown) => (pageId === P3 ? ST_B : ST_A);
+  const order1 = t.orders!.find((o) => o.id === "CMD-TEST01")!;
+  const lead = (n: number, pageId: string, phone: string, extra: Row = {}): Row => ({
+    id: id26("QD", 20 + n), store_id: storeOf(pageId), page_id: pageId, idem: `00000000-0000-4000-8000-0000000000${20 + n}`, phone, name: `Lead ${n}`, city: "Casablanca",
+    bundle_id: null, selection: null, utm: null, converted_order_id: null, created_at: at(14 + n), is_test: 0, ...extra,
+  });
+  return {
+    tables: {
+      users: t.users!.slice(0, 2),
+      stores: [ST_A, ST_B].map((id, i) => ({
+        id, handle: `p0-store-${i + 1}`, name: `P0 store ${i + 1}`, mode: "landing", status: "active", plan_id: "beta", market: "MA", currency: "MAD", timezone: "Africa/Casablanca",
+        default_locale: "fr", brand_seed: "0123456789abcdef", created_at: at(1), updated_at: at(1),
+      })),
+      store_members: [
+        { store_id: ST_A, user_id: U_OWNER, role: "owner", status: "active", joined_at: at(1), updated_at: at(1) },
+        { store_id: ST_B, user_id: U_EDITOR, role: "owner", status: "active", joined_at: at(1), updated_at: at(1) },
+      ],
+      pages: t.pages!.filter((p) => p.id === P1 || p.id === P3).map((p) => ({ ...without(p, "is_home"), store_id: storeOf(p.id) })),
+      page_versions: t.page_versions!.filter((v) => v.id === V1B || v.id === V3A).map((v) => ({ ...v, store_id: storeOf(v.page_id) })),
+      orders: [
+        ...t.orders!.map((o) => ({ ...o, store_id: storeOf(o.page_id), is_test: 0 })),
+        { ...order1, id: "CMD-TEST03", source: "export", idem: "00000000-0000-4000-8000-000000000003", store_id: ST_A, is_test: 1, created_at: at(16), updated_at: at(16) },
+      ],
+      leads: [lead(1, P1, "+212600000021"), lead(2, P3, "+212600000003", { converted_order_id: "CMD-TEST02" }), lead(3, P1, "+212600000023", { is_test: 1 })],
+      stats_daily: t.stats_daily!.map((r) => ({ ...r, store_id: ST_A })),
+      blocklist: t.blocklist!.map((r) => ({ ...r, store_id: ST_A })),
+    },
+    settings: [],
+  };
+}
+
+/** A database at 0000-0004 seeded with the R1.0 fixture. Returns each seeded table's 0004 column list. */
+async function r10Db(name: string, fixture: Fixture, r10Folder: string): Promise<Record<string, string[]>> {
+  const { runMigrations } = await import("@/lib/db/migrate");
+  await createDb(name);
+  const res = await runMigrations({ migrationsFolder: r10Folder, databaseUrl: urlOf(name) });
+  check(`(j) ${name}: 0000-0004 applied (${res.applied})`, res.applied === TOTAL - 1);
+  const conn = await connect(name);
+  try {
+    for (const table of R10_TABLES) await insertRows(conn, table, fixture.tables[table] ?? []);
+  } finally {
+    await conn.end();
+  }
+  const cols: Record<string, string[]> = {};
+  for (const table of R10_TABLES) {
+    cols[table] = (await query(name, "SELECT column_name AS c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? ORDER BY ordinal_position", [table])).map((r) => String(r.c));
+  }
+  return cols;
+}
+
+/** Each seeded table's rows over its 0004 columns, as sorted JSON lines (what must survive 0005 unchanged). */
+async function r10Rows(dbName: string, cols: Record<string, string[]>): Promise<Record<string, string[]>> {
+  const out: Record<string, string[]> = {};
+  for (const table of R10_TABLES) {
+    const rows = await query(dbName, `SELECT ${cols[table]!.map((c) => `\`${c}\``).join(", ")} FROM \`${table}\``);
+    out[table] = rows.map((r) => JSON.stringify(Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v instanceof Date ? v.toISOString() : Buffer.isBuffer(v) ? sha(v.toString("base64")) : v])))).sort();
+  }
+  return out;
+}
+
+/** (j) the 0005 columns of the R1.0 tables hold the defaults schema.ts declares on every surviving row. */
+async function newColumnsHoldDefaults(dbName: string, cols: Record<string, string[]>, startedAt: number): Promise<void> {
+  const { is, SQL } = await import("drizzle-orm");
+  const { MySqlTable, getTableConfig } = await import("drizzle-orm/mysql-core");
+  const schema = await import("@/lib/db/schema");
+  const problems: string[] = [];
+  let checked = 0;
+  for (const value of Object.values(schema)) {
+    if (!is(value, MySqlTable)) continue;
+    const cfg = getTableConfig(value);
+    const before = cols[cfg.name];
+    if (!before) continue;
+    for (const c of cfg.columns.filter((x) => !before.includes(x.name))) {
+      const rows = await query(dbName, `SELECT \`${c.name}\` AS v FROM \`${cfg.name}\``);
+      checked++;
+      for (const { v } of rows) {
+        const d = c.default;
+        const ok = !c.hasDefault
+          ? v === null
+          : is(d, SQL)
+            ? v instanceof Date && v.getTime() >= startedAt - 2_000 && v.getTime() <= Date.now() + 2_000
+            : typeof d === "boolean"
+              ? Number(v) === (d ? 1 : 0)
+              : typeof d === "number"
+                ? Number(v) === d
+                : v === d;
+        if (!ok) problems.push(`${cfg.name}.${c.name} = ${JSON.stringify(v)}`);
+      }
+    }
+  }
+  check(`(j) R1.0 data: the ${checked} new 0005 columns of the R1.0 tables hold their declared defaults on every row (NULL where none)`, checked > 0 && !problems.length, problems.slice(0, 10));
+}
+
 async function main(): Promise<void> {
   const since = Date.now() - 1_000;
   env.APP_SECRET = randomBytes(36).toString("base64url"); // a test secret for this run only (never printed)
@@ -991,7 +1275,8 @@ async function main(): Promise<void> {
   delete env.SG_TEST_CONTEXT;
   delete env.DATABASE_URL; // the parent only uses explicit connections
   const { encrypt } = await import("@/lib/security/crypto");
-  const folder = legacyMigrationsFolder();
+  const folder = migrationsFolderUpTo(3);
+  const r10Folder = migrationsFolderUpTo(4);
   const { runMigrations } = await import("@/lib/db/migrate");
   const { runTenancyCheck, tenancyCheckOk } = await import("@/lib/db/upgrade-check");
   const full = await fullFixture(encrypt);
@@ -1003,7 +1288,7 @@ async function main(): Promise<void> {
     console.log("(a) empty database");
     await createDb("cod_test_t1_empty");
     const a1 = await child<BootResult>("boot", "cod_test_t1_empty");
-    bootOk("(a) boot 1", a1, 5);
+    bootOk("(a) boot 1", a1, TOTAL);
     await schemaMatchesSnapshot("cod_test_t1_empty");
     const [aMarker] = await query("cod_test_t1_empty", "SELECT value FROM settings WHERE `key` = 'tenancy_v1'");
     const am = JSON.parse(String(aMarker?.value ?? "null")) as Row | null;
@@ -1026,7 +1311,7 @@ async function main(): Promise<void> {
     check("(d) empty: 0000-0003 applied", (await runMigrations({ migrationsFolder: folder, databaseUrl: urlOf("cod_test_t1_empty_int") })).applied === 4);
     const total = await partial0004("cod_test_t1_empty_int", 150);
     const ai = await child<BootResult>("boot", "cod_test_t1_empty_int");
-    bootOk("(d) empty: resumed boot", ai, 1);
+    bootOk("(d) empty: resumed boot", ai, AFTER_LEGACY);
     same(`(d) empty: 0004 cut after 150 of ${total} statements, resumed = the clean run`, diffSnapshots(aRef, await snapshot("cod_test_t1_empty_int", true, since)), []);
 
     console.log("(b) legacy database");
@@ -1044,7 +1329,7 @@ async function main(): Promise<void> {
     const preCli = await dryRunCli("cod_test_t1_legacy");
     check("(b) dry run CLI on the legacy database (pre-tenancy): exit 0", preCli.code === 0, preCli.out.slice(-600));
     const mo = await child<{ migrate: { applied: number }; turnstileReadable: boolean; secretsReadable: boolean; storeReadable: boolean; tenancy: { problems: string[] } }>("migrate-only", "cod_test_t1_legacy");
-    check("(b) 0004 applied on the legacy database", mo.migrate.applied === 1, mo.migrate);
+    check("(b) 0004 and 0005 applied on the legacy database", mo.migrate.applied === AFTER_LEGACY, mo.migrate);
     check("(b) ENGC-19: store #1's turnstile readable BEFORE the conversion", mo.turnstileReadable);
     check("(b) ENGC-19: store #1's tracking secrets and store setting readable before the conversion", mo.secretsReadable && mo.storeReadable);
     check("(b) the tenancy gate flags the unconverted database", mo.tenancy.problems.some((p) => p.includes("tenancy_v1 marker is missing")), mo.tenancy.problems);
@@ -1120,7 +1405,7 @@ async function main(): Promise<void> {
       check("(h) forEachStore: the next run resumes after the cursor", j.budget2!.seen[0] === active[j.budget1!.seen.length], j.budget2);
       same("(h) forEachStore: other states", j.other!.seen, [id26("ST", 3), id26("ST", 4)]);
       same("(h) pending_sheets: Sheets on and an order to push, the oldest pending order first", j.sheets!.seen, [id26("ST", 2), STORE1]);
-      same("(h) pending_outbox before 0005: nothing to visit, done", [j.outbox!.visited, j.outbox!.done], [0, true]);
+      same("(h) pending_outbox: no outbox item due, nothing to visit, done", [j.outbox!.visited, j.outbox!.done], [0, true]);
       check('(h) the job name "tick" and a non-system actor are refused', j.tickRefused && j.userRefused);
 
       // the lifecycle over the database (review fixes)
@@ -1167,7 +1452,7 @@ async function main(): Promise<void> {
         check("(d) the boot tasks refuse to run while a migration is pending (no conversion, no marker)", early.boot.ran === false && early.marker === 0, early);
       }
       const r = await child<BootResult>("boot", name);
-      bootOk(`(d) 0004 cut after ${n}: resumed boot`, r, 1);
+      bootOk(`(d) 0004 cut after ${n}: resumed boot`, r, AFTER_LEGACY);
       same(`(d) 0004 cut after ${n} of ${totalStatements} statements, resumed = the clean run`, diffSnapshots(bRef, await snapshot(name, true, since)), []);
     }
 
@@ -1209,7 +1494,7 @@ async function main(): Promise<void> {
       await legacyDb(name, setup, encrypt, folder);
       const tz = { APP_TIMEZONE: "Europe/Paris" };
       const c1 = await child<BootResult>("boot", name, tz, []);
-      bootOk("(c) setup: boot 1", c1, 1);
+      bootOk("(c) setup: boot 1", c1, AFTER_LEGACY);
       const conv = c1.boot.steps.find((s) => s.name === "store #1 conversion")?.detail ?? "";
       check('(c) setup: the derived protected handle "meta-deals" is replaced, no pixel migration (the library exists)', /handle "meta-deals" replaced by "store-1"/.test(conv) && !/pixel library/.test(conv), conv);
       same(
@@ -1243,7 +1528,7 @@ async function main(): Promise<void> {
       const preCli = await dryRunCli(name);
       check("(i) dry run CLI (pre-tenancy): exit 0", preCli.code === 0 && /✓ upgrade dry run passed/.test(preCli.out), preCli.out.slice(-600));
       const i1 = await child<BootResult>("boot", name);
-      bootOk("(i) boot 1", i1, 1);
+      bootOk("(i) boot 1", i1, AFTER_LEGACY);
       const conv = i1.boot.steps.find((s) => s.name === "store #1 conversion")?.detail ?? "";
       check("(i) boot 1: an empty install, the boot's pixel_library row removed", /empty install/.test(conv) && /pixel_library row removed/.test(conv), conv);
       same("(i) no store #1, no membership", [(await query(name, "SELECT id FROM stores")).length, (await query(name, "SELECT store_id FROM store_members")).length], [0, 0]);
@@ -1281,8 +1566,132 @@ async function main(): Promise<void> {
       }
     }
 
+    console.log("(j) 0005: schema parity, rerun, interrupted, an R1.0 database with data");
+    {
+      const empty = "cod_test_t1_empty";
+      await schemaParity(empty, "(j) empty → 0005:");
+      same("(j) 0005 seeds the tick lease row (cursor '', no state)", (await query(empty, "SELECT job, `cursor`, state FROM cron_cursors")).map((r) => [r.job, r.cursor, r.state]), [["tick", "", null]]);
+      const cleanShape = await schemaShape(empty);
+
+      // every statement a second time on the migrated empty database
+      const rowsBefore = await snapshot(empty, false, since);
+      const n0005 = await rerunMigration(empty, 5);
+      same(`(j) empty: all ${n0005} statements of 0005 run a second time → the schema is unchanged`, setDiff(await schemaShape(empty), cleanShape).concat(setDiff(cleanShape, await schemaShape(empty))), []);
+      same("(j) empty: … and no row changes", diffSnapshots(rowsBefore, await snapshot(empty, false, since)), []);
+
+      // the per-column fallback: an R1.0 database where one column of each wide row already exists
+      {
+        const name = "cod_test_p0_fallback";
+        await createDb(name);
+        check(`(j) ${name}: 0000-0004 applied`, (await runMigrations({ migrationsFolder: r10Folder, databaseUrl: urlOf(name) })).applied === TOTAL - 1);
+        const conn = await connect(name);
+        try {
+          await conn.query("ALTER TABLE `orders` ADD `rev` int NOT NULL DEFAULT 0");
+          await conn.query("ALTER TABLE `leads` ADD `kind` enum('form','whatsapp') NOT NULL DEFAULT 'form'");
+        } finally {
+          await conn.end();
+        }
+        const r = await runMigrations({ databaseUrl: urlOf(name) });
+        check("(j) fallback: 0005 applied over a partial wide row", r.applied === 1, r);
+        const shape = await schemaShape(name);
+        same("(j) fallback: the per-column statements complete orders and leads = the clean schema", setDiff(shape, cleanShape).concat(setDiff(cleanShape, shape)), []);
+      }
+
+      // 0005 cut after N statements on an empty R1.0 database, then a boot = the clean run
+      for (const n of [20, 54, 120]) {
+        const name = `cod_test_p0_empty_int_${n}`;
+        await createDb(name);
+        check(`(j) ${name}: 0000-0004 applied`, (await runMigrations({ migrationsFolder: r10Folder, databaseUrl: urlOf(name) })).applied === TOTAL - 1);
+        const total = await partialMigration(name, 5, n);
+        const r = await child<BootResult>("boot", name);
+        bootOk(`(j) empty: 0005 cut after ${n} of ${total} statements, resumed boot`, r, 1);
+        const shape = await schemaShape(name);
+        same(`(j) empty: 0005 cut after ${n}, resumed: schema = the clean run`, setDiff(shape, cleanShape).concat(setDiff(cleanShape, shape)), []);
+        same(`(j) empty: 0005 cut after ${n}, resumed: rows = the clean run`, diffSnapshots(aRef, await snapshot(name, true, since)), []);
+      }
+
+      // an R1.0-shaped database WITH DATA
+      const fixture = r10Fixture(full);
+      const name = "cod_test_p0_r10";
+      const cols = await r10Db(name, fixture, r10Folder);
+      const before = await r10Rows(name, cols);
+      const enumBefore = await query(name, "SELECT id, source, source + 0 AS si FROM orders ORDER BY id");
+      const leadsBefore = await query(name, "SELECT id, phone FROM leads ORDER BY id");
+      const startedAt = Date.now();
+      const applied = await runMigrations({ databaseUrl: urlOf(name) });
+      check("(j) R1.0 data: 0005 applied", applied.status === "applied" && applied.applied === 1, applied);
+      same("(j) R1.0 data: every row of the 9 seeded tables survives, column for column", R10_TABLES.map((t) => [t, before[t]!.length]), R10_TABLES.map((t) => [t, fixture.tables[t]!.length]));
+      same("(j) R1.0 data: … and their 0004 columns are unchanged", (await r10Rows(name, cols)), before);
+      await newColumnsHoldDefaults(name, cols, startedAt);
+      same("(j) R1.0 data: the R1.0 orders.source values read back unchanged (value and enum index)", await query(name, "SELECT id, source, source + 0 AS si FROM orders ORDER BY id"), enumBefore);
+      same(
+        "(j) R1.0 data: orders.source = the R1.0 values then the appended ones",
+        (await query(name, "SELECT column_type AS t FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'orders' AND column_name = 'source'")).map((r) => r.t),
+        ["enum('live','export','php','manual','api','storefront','whatsapp')"],
+      );
+      same("(j) R1.0 data: lead phones kept; leads.phone is NULL-able", [await query(name, "SELECT id, phone FROM leads ORDER BY id"), (await query(name, "SELECT is_nullable AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'leads' AND column_name = 'phone'")).map((r) => r.n)], [leadsBefore, ["YES"]]);
+      const r10Shape = await schemaShape(name);
+      same("(j) R1.0 data: the upgraded schema = a fresh install's", setDiff(r10Shape, cleanShape).concat(setDiff(cleanShape, r10Shape)), []);
+
+      // every statement a second time on the upgraded database
+      const r10Raw = await snapshot(name, false, since);
+      await rerunMigration(name, 5);
+      same("(j) R1.0 data: 0005 run a second time → no schema change", setDiff(await schemaShape(name), r10Shape).concat(setDiff(r10Shape, await schemaShape(name))), []);
+      same("(j) R1.0 data: … and no row changes", diffSnapshots(r10Raw, await snapshot(name, false, since)), []);
+      const r10Ref = await snapshot(name, true, since);
+
+      // 0005 cut after N statements on the R1.0 database with data, resumed by the next run = the clean upgrade
+      for (const n of [56, 231]) {
+        const iname = `cod_test_p0_r10_int_${n}`;
+        const icols = await r10Db(iname, fixture, r10Folder);
+        const total = await partialMigration(iname, 5, n);
+        const r = await runMigrations({ databaseUrl: urlOf(iname) });
+        check(`(j) R1.0 data: 0005 cut after ${n} of ${total} statements, resumed`, r.applied === 1, r);
+        const shape = await schemaShape(iname);
+        same(`(j) R1.0 data: cut after ${n}, resumed: schema = the clean upgrade`, setDiff(shape, cleanShape).concat(setDiff(cleanShape, shape)), []);
+        same(`(j) R1.0 data: cut after ${n}, resumed: rows = the clean upgrade`, diffSnapshots(r10Ref, await snapshot(iname, true, since)), []);
+        same(`(j) R1.0 data: cut after ${n}, resumed: the 0004 columns unchanged`, await r10Rows(iname, icols), before);
+      }
+
+      // the new values and rules the R1 tracks build on, on the upgraded database
+      {
+        const conn = await connect(name);
+        const refused = async (sql: string, params: unknown[]): Promise<string> => {
+          try {
+            await conn.query(sql, params);
+            return "accepted";
+          } catch (err) {
+            // a CHECK violation: MariaDB ER_CONSTRAINT_FAILED (4025), MySQL 8 ER_CHECK_CONSTRAINT_VIOLATED (3819)
+            const e = err as { code?: string; errno?: number };
+            return e.errno === 4025 || e.errno === 3819 ? "check_failed" : (e.code ?? String(err));
+          }
+        };
+        try {
+          const order1 = fixture.tables.orders![0]!;
+          await conn.query("INSERT INTO orders SET ?", [{ ...order1, id: "CMD-TESTWA", source: "whatsapp", idem: "00000000-0000-4000-8000-000000000099", created_at: at(20), updated_at: at(20) }]);
+          const wa = { id: id26("QD", 30), store_id: ST_A, page_id: P1, idem: "00000000-0000-4000-8000-000000000030", phone: null, kind: "whatsapp", ref: "WA-7K3Q9X" };
+          const waLead = await refused("INSERT INTO leads SET ?", [wa]);
+          const dupRef = await refused("INSERT INTO leads SET ?", [{ ...wa, id: id26("QD", 31), idem: "00000000-0000-4000-8000-000000000031" }]);
+          const otherStore = await refused("INSERT INTO leads SET ?", [{ ...wa, id: id26("QD", 32), idem: "00000000-0000-4000-8000-000000000032", store_id: ST_B, page_id: P3 }]);
+          const req = { id: id26("RQ", 1), store_id: ST_A, kind: "store_purge", mode: "four_eyes", payload: "{}", reason_code: "owner_request", requested_by: U_OWNER };
+          const pending = await refused("INSERT INTO platform_requests SET ?", [req]);
+          const self = await refused("UPDATE platform_requests SET confirmed_by = requested_by, status = 'confirmed' WHERE id = ?", [req.id]);
+          const second = await refused("UPDATE platform_requests SET confirmed_by = ?, status = 'confirmed' WHERE id = ?", [U_EDITOR, req.id]);
+          same(
+            "(j) R1.0 data: a whatsapp order and a phone-less WhatsApp lead insert; a ref is unique per store only; the four-eyes CHECK refuses a self-confirmation",
+            { waLead, dupRef, otherStore, pending, self, second },
+            { waLead: "accepted", dupRef: "ER_DUP_ENTRY", otherStore: "accepted", pending: "accepted", self: "check_failed", second: "accepted" },
+          );
+          same("(j) R1.0 data: the R1.0 orders still read back unchanged beside the new source", (await query(name, "SELECT id, source, source + 0 AS si FROM orders WHERE id <> 'CMD-TESTWA' ORDER BY id")), enumBefore);
+        } finally {
+          await conn.end();
+        }
+      }
+    }
+
   } finally {
     rmSync(folder, { recursive: true, force: true });
+    rmSync(r10Folder, { recursive: true, force: true });
     if (!process.argv.includes("--keep")) {
       const left = await dropAll();
       check("throwaway databases dropped", left.length === 0, left);

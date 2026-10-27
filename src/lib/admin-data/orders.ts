@@ -10,7 +10,7 @@ import { count, eq, gte, isNull, lt, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { blocklist, leads, orders, pageVersions } from "@/lib/db/schema";
 import { orderView, type OrderView, type SwatchOf } from "@/components/admin/orders/parts";
-import type { OrderItems } from "@/lib/db/schema";
+import type { OrderItems, OrderSource } from "@/lib/db/schema";
 import { getOrder, isOrderStatus, type OrderFilters, type OrderRecord } from "@/lib/orders";
 import type { OrderStatus } from "@/lib/orders/contract";
 import { optionText, sanitizeLabel } from "@/lib/orders/text";
@@ -144,7 +144,7 @@ export interface OrderRow {
   total: number;
   currency: string;
   pageName: string | null;
-  source: "live" | "export" | "php";
+  source: OrderSource;
   sheetStatus: "pending" | "synced" | "failed" | "disabled";
   riskScore: number;
   flags: string[];
@@ -310,7 +310,7 @@ export function toLeadRow(l: {
   id: string;
   createdAt: Date;
   name: string | null;
-  phone: string;
+  phone: string | null;
   city: string | null;
   bundleId: string | null;
   selection?: string | null;
@@ -321,7 +321,8 @@ export function toLeadRow(l: {
     id: l.id,
     createdAt: l.createdAt.toISOString(),
     name: l.name,
-    phone: l.phone,
+    // leads.phone is NULL-able from 0005 (a WhatsApp intent, LAN Q2); every lead this screen lists today has one
+    phone: l.phone ?? "",
     city: l.city,
     bundleId: l.bundleId,
     selection: l.selection ?? null,

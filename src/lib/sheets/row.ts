@@ -15,7 +15,7 @@
  *
  * order.php mirrors every value here (`cod_sheet_extras`), checked by scripts/qa/php-parity.ts.
  */
-import type { OrderItems, OrderUnit } from "@/lib/db/schema";
+import type { OrderItems, OrderSource, OrderUnit } from "@/lib/db/schema";
 import { phoneToNational } from "@/lib/markets/phone";
 import { ORDER_TEXT_MAX, orderText, orderUnits, unitsText, type TextMode } from "@/lib/orders/text";
 import { cleanText, toSheetsSerial } from "./format";
@@ -60,7 +60,8 @@ export interface SheetOrder {
   email: string | null;
   riskScore: number;
   utm: Record<string, string> | null;
-  source: "live" | "export" | "php";
+  /** order.php's queue only ever has live / export / php; 0005 appended the R1 sources (D42) */
+  source: OrderSource;
   ref: string | null;
 }
 

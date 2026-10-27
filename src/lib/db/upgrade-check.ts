@@ -279,10 +279,12 @@ export async function runUpgradeCheck(conn: Connection, opts: { batch?: number }
 export type TableLevel = "T" | "P*" | "P-opt" | "P" | "root";
 
 /**
- * Every table of the schema up to 0004 with its §D.3 level (the 0000 tables per §D.2). A new table is added here in
+ * Every table of the schema up to 0005 with its §D.3 level (the 0000 tables per §D.2). A new table is added here in
  * the release that cuts it; test:migrate compares this list with the §D.3 rows of the document.
- * No recorded drift: CCR r1.0-t1-3 item 2 split the §D.3 rows of `legal_acceptances` (P (opt. store), PLA-§2.1) and
+ * CCR r1.0-t1-3 item 2 split the §D.3 rows of `legal_acceptances` (P (opt. store), PLA-§2.1) and
  * `notification_reads` (P, no store_id) to match the schema; CCR r1.0-t1-1 moved `platform_usage` (P) to 0004.
+ * One recorded drift since P0: §D.3 shares the row "`job_runs`, `cron_cursors` · P (opt. store)", but `cron_cursors`
+ * has no store_id in §D.5 (job-keyed cursors and the tick lease), so it is P here (test:migrate's DRIFT list).
  */
 export const TABLE_LEVELS: Readonly<Record<string, TableLevel>> = {
   // 0000-0003 (§D.2)
@@ -329,6 +331,45 @@ export const TABLE_LEVELS: Readonly<Record<string, TableLevel>> = {
   asset_refs: "T",
   page_slug_history: "T",
   preview_tokens: "T",
+  // 0005 (§D.3)
+  store_health: "P*",
+  platform_requests: "P-opt",
+  staff_invites: "P",
+  campaigns: "T",
+  short_links: "T",
+  abuse_reports: "P*",
+  integration_status: "T",
+  product_costs: "T",
+  carrier_rates: "T",
+  ad_spend_daily: "T",
+  profit_alerts: "T",
+  ai_jobs: "T",
+  ai_batches: "P",
+  ai_batch_items: "P-opt",
+  ai_eval_runs: "P",
+  ai_usage_daily: "T",
+  platform_notes: "P-opt",
+  job_runs: "P-opt",
+  cron_cursors: "P", // §D.3 says P (opt. store) on the shared row; §D.5 gives it no store_id (recorded drift)
+  error_events: "P-opt",
+  outbox: "P-opt",
+  render_jobs: "T",
+  export_jobs: "T",
+  backup_runs: "P",
+  order_events: "T",
+  customers: "T",
+  agent_profiles: "T",
+  agent_stats_daily: "T",
+  saved_views: "T",
+  message_templates: "T",
+  delivery_zones: "T",
+  sheet_bindings: "T",
+  ai_runs: "T",
+  ai_cache: "T",
+  ai_memory: "T",
+  prompt_versions: "P",
+  design_genomes: "T",
+  headline_shingles: "P", // cross-tenant MinHash, no store id (R-D37, D35)
 };
 
 /** Every schema.ts table and its store_id column ("required" NOT NULL, "optional", or none). */
