@@ -47,7 +47,9 @@
  *    refused, a fresh one works and is named on the audit row); the cron pulls a store whose orders are all synced
  *    (SHT-11); the agent's R1.0 queue (§A.3.2 interim); the store-named titles of the overview and the builder
  *  - plug-ins: every scripts/qa/tenancy-cases/<track>.ts of `TENANCY_CASE_FILES` (`export const cases: TenancyCase[]`,
- *    DES-R13; an empty file, as created at P0, is listed as not applicable)
+ *    DES-R13; an empty file, as created at P0, is listed as not applicable), and the optional
+ *    `export const actions: TrackActionCase[]` of the same files: a track's server actions join `ACTION_CASES` at
+ *    setup, so the coverage rule ("every store action has an attack case") never needs an edit of this harness
  *
  * All real code (R1.0: T1, T2, T3 and T4 merged): no adapter, no stand-in. A call that still ends in a typed stub
  * ("not implemented: …") fails its check (until the R1.0 merge it was listed as pending). A case of the spec that has no
@@ -1158,7 +1160,32 @@ export async function setup(): Promise<Kit> {
   const migrated = await runMigrations();
   check("migrations applied on the throwaway database", (migrated as { status?: string }).status === "applied", migrated);
   const fx = await seed();
+  loadTrackActionCases();
   return { fx, fresh: freshFactory(fx) };
+}
+
+/**
+ * A track's attack case of one of its server actions (`export const actions` of scripts/qa/tenancy-cases/<track>.ts,
+ * R1 P0): an `ActionCase` without its derived `id`. Case files import only types from this harness (it runs at load).
+ */
+export type TrackActionCase = Omit<ActionCase, "id">;
+
+/** Appends the tracks' action cases to `ACTION_CASES` once (both this suite and qa:action-replay go through setup()). */
+function loadTrackActionCases(): void {
+  const dir = path.join(ROOT, "scripts", "qa", "tenancy-cases");
+  for (const name of TENANCY_CASE_FILES) {
+    const file = path.join(dir, `${name}.ts`);
+    if (!existsSync(file)) continue;
+    const actions = load<{ actions?: TrackActionCase[] }>(file).actions ?? [];
+    check(`${name}.ts: its actions are a list`, Array.isArray(actions));
+    if (!Array.isArray(actions)) continue;
+    for (const a of actions) {
+      const id = `${a.file}#${a.name}`;
+      const twice = ACTION_CASES.some((c) => c.id === id);
+      check(`${name}.ts: action case ${id} is not already in the catalogue`, !twice);
+      if (!twice) ACTION_CASES.push({ ...a, id });
+    }
+  }
 }
 
 function freshFactory(fx: Fixtures): Fresh {

@@ -2,7 +2,7 @@
  * qa:r1-exit, the R1.0 exit scenario (docs/STORE-SAAS.md §K.1 exit criterion 5) as one browser run against a
  * PRODUCTION build (`next build`, then `next start` on port 3452) with a throwaway database and its own environment:
  *
- *   npm run qa:r1-exit [-- --port 3452] [--db cod_test_fin_e2e] [--data-dir <dir>] [--build | --no-build]
+ *   npm run qa:r1-exit [-- --port 3452] [--db cod_test_fin_e2e | cod_test_p0_*] [--data-dir <dir>] [--build | --no-build]
  *                         [--keep] [--headed] [--shots <dir>] [--verbose]
  *
  *  a) console: `/admin` is the neutral 404 without the gate; `/<ADMIN_GATE>` 303s and sets the gate cookie; the first
@@ -43,7 +43,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 
 const ROOT = resolve(__dirname, "..", "..", "..");
 const OWNER_PORTS = new Set([3400, 3450]);
-const DB_RE = /^cod_test_fin_[a-z0-9_]{1,40}$/;
+const DB_RE = /^cod_test_(?:fin|p0)_[a-z0-9_]{1,40}$/;
 const SERVER_READY_MS = 180_000;
 const NAV_MS = 60_000;
 

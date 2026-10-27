@@ -1,6 +1,6 @@
 /**
  * test:migrate (docs/STORE-SAAS.md §J.2, §D.8, §H.4; R1.0 exit criterion 3) on XAMPP's MariaDB (root, no password,
- * 127.0.0.1:3306). Every database it makes is named cod_test_t1_* (the 0004 cases) or cod_test_p0_* (the 0005 cases,
+ * 127.0.0.1:3306). Every database it makes is named cod_test_p0_t1_* (the 0004 cases) or cod_test_p0_* (the 0005 cases,
  * R1 contract step P0) and dropped at the end (unless --keep).
  *
  *   npm run test:migrate          (tsx scripts/qa/migrate-check.ts [--keep] [--verbose])
@@ -1286,38 +1286,38 @@ async function main(): Promise<void> {
     await tenantSetMatchesDocument();
 
     console.log("(a) empty database");
-    await createDb("cod_test_t1_empty");
-    const a1 = await child<BootResult>("boot", "cod_test_t1_empty");
+    await createDb("cod_test_p0_t1_empty");
+    const a1 = await child<BootResult>("boot", "cod_test_p0_t1_empty");
     bootOk("(a) boot 1", a1, TOTAL);
-    await schemaMatchesSnapshot("cod_test_t1_empty");
-    const [aMarker] = await query("cod_test_t1_empty", "SELECT value FROM settings WHERE `key` = 'tenancy_v1'");
+    await schemaMatchesSnapshot("cod_test_p0_t1_empty");
+    const [aMarker] = await query("cod_test_p0_t1_empty", "SELECT value FROM settings WHERE `key` = 'tenancy_v1'");
     const am = JSON.parse(String(aMarker?.value ?? "null")) as Row | null;
-    check("(a) empty install: marker { store1: false, freeRename: false }, no store", am?.store1 === false && am.freeRename === false && (await query("cod_test_t1_empty", "SELECT id FROM stores")).length === 0, am);
+    check("(a) empty install: marker { store1: false, freeRename: false }, no store", am?.store1 === false && am.freeRename === false && (await query("cod_test_p0_t1_empty", "SELECT id FROM stores")).length === 0, am);
     same("(a) seeds: 3 plans, 7 kill switches, doc_schema 2", [
-      (await query("cod_test_t1_empty", "SELECT id FROM plans ORDER BY id")).map((r) => r.id),
-      (await query("cod_test_t1_empty", "SELECT COUNT(*) AS n FROM flags WHERE kind = 'kill'")).map((r) => Number(r.n)),
-      (await query("cod_test_t1_empty", "SELECT value FROM settings WHERE `key` = 'doc_schema'")).map((r) => String(r.value)),
+      (await query("cod_test_p0_t1_empty", "SELECT id FROM plans ORDER BY id")).map((r) => r.id),
+      (await query("cod_test_p0_t1_empty", "SELECT COUNT(*) AS n FROM flags WHERE kind = 'kill'")).map((r) => Number(r.n)),
+      (await query("cod_test_p0_t1_empty", "SELECT value FROM settings WHERE `key` = 'doc_schema'")).map((r) => String(r.value)),
     ], [["beta", "internal", "pro"], [7], ["2"]]);
-    const aSnap = await snapshot("cod_test_t1_empty", false, since);
-    const a2 = await child<BootResult>("boot", "cod_test_t1_empty");
+    const aSnap = await snapshot("cod_test_p0_t1_empty", false, since);
+    const a2 = await child<BootResult>("boot", "cod_test_p0_t1_empty");
     bootOk("(a) boot 2", a2, 0);
-    const aSnap2 = await snapshot("cod_test_t1_empty", false, since);
+    const aSnap2 = await snapshot("cod_test_p0_t1_empty", false, since);
     same("(c) empty: the second boot changes nothing", diffSnapshots(aSnap, aSnap2), []);
     same("(c) empty: the second boot writes no audit row", aSnap2.audit.length, aSnap.audit.length);
-    const aRef = await snapshot("cod_test_t1_empty", true, since);
+    const aRef = await snapshot("cod_test_p0_t1_empty", true, since);
 
     console.log("(d) empty database, 0004 interrupted");
-    await createDb("cod_test_t1_empty_int");
-    check("(d) empty: 0000-0003 applied", (await runMigrations({ migrationsFolder: folder, databaseUrl: urlOf("cod_test_t1_empty_int") })).applied === 4);
-    const total = await partial0004("cod_test_t1_empty_int", 150);
-    const ai = await child<BootResult>("boot", "cod_test_t1_empty_int");
+    await createDb("cod_test_p0_t1_empty_int");
+    check("(d) empty: 0000-0003 applied", (await runMigrations({ migrationsFolder: folder, databaseUrl: urlOf("cod_test_p0_t1_empty_int") })).applied === 4);
+    const total = await partial0004("cod_test_p0_t1_empty_int", 150);
+    const ai = await child<BootResult>("boot", "cod_test_p0_t1_empty_int");
     bootOk("(d) empty: resumed boot", ai, AFTER_LEGACY);
-    same(`(d) empty: 0004 cut after 150 of ${total} statements, resumed = the clean run`, diffSnapshots(aRef, await snapshot("cod_test_t1_empty_int", true, since)), []);
+    same(`(d) empty: 0004 cut after 150 of ${total} statements, resumed = the clean run`, diffSnapshots(aRef, await snapshot("cod_test_p0_t1_empty_int", true, since)), []);
 
     console.log("(b) legacy database");
-    await legacyDb("cod_test_t1_legacy", full, encrypt, folder);
+    await legacyDb("cod_test_p0_t1_legacy", full, encrypt, folder);
     {
-      const conn = await connect("cod_test_t1_legacy");
+      const conn = await connect("cod_test_p0_t1_legacy");
       try {
         const pre = await runTenancyCheck(conn, { requireEnvelopes: true });
         check("(b) pre-tenancy dry run: 0 problems", pre.mode === "pre-tenancy" && tenancyCheckOk(pre), pre);
@@ -1326,46 +1326,46 @@ async function main(): Promise<void> {
         await conn.end();
       }
     }
-    const preCli = await dryRunCli("cod_test_t1_legacy");
+    const preCli = await dryRunCli("cod_test_p0_t1_legacy");
     check("(b) dry run CLI on the legacy database (pre-tenancy): exit 0", preCli.code === 0, preCli.out.slice(-600));
-    const mo = await child<{ migrate: { applied: number }; turnstileReadable: boolean; secretsReadable: boolean; storeReadable: boolean; tenancy: { problems: string[] } }>("migrate-only", "cod_test_t1_legacy");
+    const mo = await child<{ migrate: { applied: number }; turnstileReadable: boolean; secretsReadable: boolean; storeReadable: boolean; tenancy: { problems: string[] } }>("migrate-only", "cod_test_p0_t1_legacy");
     check("(b) 0004 and 0005 applied on the legacy database", mo.migrate.applied === AFTER_LEGACY, mo.migrate);
     check("(b) ENGC-19: store #1's turnstile readable BEFORE the conversion", mo.turnstileReadable);
     check("(b) ENGC-19: store #1's tracking secrets and store setting readable before the conversion", mo.secretsReadable && mo.storeReadable);
     check("(b) the tenancy gate flags the unconverted database", mo.tenancy.problems.some((p) => p.includes("tenancy_v1 marker is missing")), mo.tenancy.problems);
-    const b1 = await child<BootResult>("boot", "cod_test_t1_legacy");
+    const b1 = await child<BootResult>("boot", "cod_test_p0_t1_legacy");
     bootOk("(b) boot 1", b1, 0);
     check("(b) boot 1 converted store #1", b1.boot.steps.some((s) => s.name === "store #1 conversion" && /converted/.test(s.detail ?? "")), b1.boot.steps);
-    await legacyAssertions("cod_test_t1_legacy", full);
-    const postCli = await dryRunCli("cod_test_t1_legacy");
+    await legacyAssertions("cod_test_p0_t1_legacy", full);
+    const postCli = await dryRunCli("cod_test_p0_t1_legacy");
     check("(b) dry run CLI on the converted database: exit 0", postCli.code === 0 && /✓ upgrade dry run passed/.test(postCli.out), postCli.out.slice(-600));
-    const bSnap = await snapshot("cod_test_t1_legacy", false, since);
-    const b2 = await child<BootResult>("boot", "cod_test_t1_legacy");
+    const bSnap = await snapshot("cod_test_p0_t1_legacy", false, since);
+    const b2 = await child<BootResult>("boot", "cod_test_p0_t1_legacy");
     bootOk("(b) boot 2", b2, 0);
-    const bSnap2 = await snapshot("cod_test_t1_legacy", false, since);
+    const bSnap2 = await snapshot("cod_test_p0_t1_legacy", false, since);
     same("(c) legacy: the second boot changes nothing", diffSnapshots(bSnap, bSnap2), []);
     same("(c) legacy: the second boot writes no audit row", bSnap2.audit.length, bSnap.audit.length);
-    const bRef = await snapshot("cod_test_t1_legacy", true, since);
+    const bRef = await snapshot("cod_test_p0_t1_legacy", true, since);
 
-    const read = await child<Record<string, unknown>>("read", "cod_test_t1_legacy");
+    const read = await child<Record<string, unknown>>("read", "cod_test_p0_t1_legacy");
     check("(b) settings readable under v2 through getStoreSettings", read.turnstile === true && read.secrets === true && read.store === true && read.defaults === true && read.storeAi === true && read.brand === true && read.sheets === true, read);
     same("(b) pixel library through getStoreSettings", read.library, [`meta:${META_STORE}`, `meta:${META_P1}`, `meta:${META_P3}`, `tiktok:${TIKTOK_P3}`]);
     same("(b) ENGC-30: the free rename works once, then the 30-day rule", [read.grantBefore, read.first, read.second, read.grantAfter], [true, "ok", "too_soon", false]);
     same(
       "(b) the old handle redirects (store_handle_history)",
-      (await query("cod_test_t1_legacy", "SELECT handle, store_id, reason FROM store_handle_history")).map((r) => [r.handle, r.store_id, r.reason]),
+      (await query("cod_test_p0_t1_legacy", "SELECT handle, store_id, reason FROM store_handle_history")).map((r) => [r.handle, r.store_id, r.reason]),
       [["nour-beaut", STORE1, "renamed"]],
     );
 
     console.log("(f) concurrent invite accepts");
     {
-      const f = await child<{ inviteId: string; won: number; refused: number; other: string[] }>("invite-race", "cod_test_t1_legacy");
+      const f = await child<{ inviteId: string; won: number; refused: number; other: string[] }>("invite-race", "cod_test_p0_t1_legacy");
       same("(f) SEC-24: 10 parallel accepts of one invite → 1 accepted, 9 refused with the one invalid answer", [f.won, f.refused, f.other], [1, 9, []]);
-      const members = await query("cod_test_t1_legacy", "SELECT m.role FROM store_members m JOIN users u ON u.id = m.user_id WHERE m.store_id = ? AND u.email = 'race.f@example.ma'", [STORE1]);
+      const members = await query("cod_test_p0_t1_legacy", "SELECT m.role FROM store_members m JOIN users u ON u.id = m.user_id WHERE m.store_id = ? AND u.email = 'race.f@example.ma'", [STORE1]);
       same("(f) SEC-24: one account, one membership with the invited role", members.map((r) => r.role), ["agent"]);
-      const inv = await query("cod_test_t1_legacy", "SELECT accepted_at IS NOT NULL AS consumed, accepted_by IS NOT NULL AS by_set FROM store_invites WHERE id = ?", [f.inviteId]);
+      const inv = await query("cod_test_p0_t1_legacy", "SELECT accepted_at IS NOT NULL AS consumed, accepted_by IS NOT NULL AS by_set FROM store_invites WHERE id = ?", [f.inviteId]);
       same("(f) SEC-24: the invite consumed once", inv.map((r) => [Number(r.consumed), Number(r.by_set)]), [[1, 1]]);
-      const accepted = await query("cod_test_t1_legacy", "SELECT COUNT(*) AS n FROM audit_log WHERE store_id = ? AND action = 'store.member.accepted' AND target = ?", [STORE1, f.inviteId]);
+      const accepted = await query("cod_test_p0_t1_legacy", "SELECT COUNT(*) AS n FROM audit_log WHERE store_id = ? AND action = 'store.member.accepted' AND target = ?", [STORE1, f.inviteId]);
       same("(f) SEC-24: one store.member.accepted audit row", Number(accepted[0]?.n), 1);
     }
 
@@ -1373,7 +1373,7 @@ async function main(): Promise<void> {
     {
       type Fp = { f: string | null; status: string } | null;
       type G = { before: Fp; steps: string[]; afterPublish: Fp; afterUnpublish: Fp; afterRepublish: Fp };
-      const g = await child<Record<string, G>>("republish", "cod_test_t1_legacy");
+      const g = await child<Record<string, G>>("republish", "cod_test_p0_t1_legacy");
       const p1 = g[P1]!;
       const p2 = g[P2]!;
       same("(g) CRIT2-5: publish, unpublish and republish succeed through the scoped API", [p1.steps, p2.steps], [["ok", "ok", "ok"], ["ok", "ok", "ok"]]);
@@ -1384,7 +1384,7 @@ async function main(): Promise<void> {
 
     console.log("(h) system seam");
     {
-      const conn = await connect("cod_test_t1_legacy");
+      const conn = await connect("cod_test_p0_t1_legacy");
       try {
         const sid = (n: number) => id26("ST", n);
         for (const [n, status] of [[1, "active"], [2, "active"], [3, "suspended"], [4, "pending"]] as const) {
@@ -1396,7 +1396,7 @@ async function main(): Promise<void> {
       } finally {
         await conn.end();
       }
-      const j = await child<Record<string, { seen: string[]; visited: number; done: boolean }> & { tickRefused: boolean; userRefused: boolean }>("jobs", "cod_test_t1_legacy", {}, ["--throw-for", id26("ST", 1)]);
+      const j = await child<Record<string, { seen: string[]; visited: number; done: boolean }> & { tickRefused: boolean; userRefused: boolean }>("jobs", "cod_test_p0_t1_legacy", {}, ["--throw-for", id26("ST", 1)]);
       const active = [STORE1, id26("ST", 1), id26("ST", 2)];
       same("(h) forEachStore: every active store once, in id order, done", [j.all!.seen, j.all!.done], [active, true]);
       same("(h) forEachStore: the next run starts after the cursor and wraps around", [j.again!.seen, j.again!.done], [active, true]);
@@ -1410,14 +1410,14 @@ async function main(): Promise<void> {
 
       // the lifecycle over the database (review fixes)
       {
-        const conn = await connect("cod_test_t1_legacy");
+        const conn = await connect("cod_test_p0_t1_legacy");
         try {
           await conn.query("INSERT INTO store_usage (store_id, metric, period, value) VALUES (?, 'media_bytes', 'total', 1000)", [id26("ST", 4)]);
           await conn.query("INSERT INTO platform_usage (metric, period, value) VALUES ('pending_media_bytes', 'total', 5000) ON DUPLICATE KEY UPDATE value = 5000");
         } finally {
           await conn.end();
         }
-        const lc = await child<{ tenant: Row[]; console: Row[]; usage: number[] }>("lifecycle", "cod_test_t1_legacy", {}, ["--active", id26("ST", 2), "--pending", id26("ST", 4)]);
+        const lc = await child<{ tenant: Row[]; console: Row[]; usage: number[] }>("lifecycle", "cod_test_p0_t1_legacy", {}, ["--active", id26("ST", 2), "--pending", id26("ST", 4)]);
         same("(h) lifecycle: the store's Activity hides a staff note it was not shown, shows the one it was; staff are a name only", lc.tenant, [
           { action: "platform.store.restored", note: "thanks for fixing the pages", userId: null, actorName: "Test user 1" },
           { action: "platform.store.restricted", note: null, userId: null, actorName: "Test user 1" },
@@ -1428,22 +1428,22 @@ async function main(): Promise<void> {
 
       // a row that does not open is never overwritten by a merge into the defaults (review fix)
       {
-        const conn = await connect("cod_test_t1_legacy");
+        const conn = await connect("cod_test_p0_t1_legacy");
         try {
           await conn.query("UPDATE store_settings SET value = ? WHERE store_id = ? AND `key` = 'turnstile'", [JSON.stringify("v2.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCCCCCCCCCCCCCCCCCCCC"), STORE1]);
         } finally {
           await conn.end();
         }
-        const before = (await query("cod_test_t1_legacy", "SELECT value, purpose_v FROM store_settings WHERE store_id = ? AND `key` = 'turnstile'", [STORE1]))[0];
-        const su = await child<{ refused: string }>("settings-unreadable", "cod_test_t1_legacy");
-        const after = (await query("cod_test_t1_legacy", "SELECT value, purpose_v FROM store_settings WHERE store_id = ? AND `key` = 'turnstile'", [STORE1]))[0];
+        const before = (await query("cod_test_p0_t1_legacy", "SELECT value, purpose_v FROM store_settings WHERE store_id = ? AND `key` = 'turnstile'", [STORE1]))[0];
+        const su = await child<{ refused: string }>("settings-unreadable", "cod_test_p0_t1_legacy");
+        const after = (await query("cod_test_p0_t1_legacy", "SELECT value, purpose_v FROM store_settings WHERE store_id = ? AND `key` = 'turnstile'", [STORE1]))[0];
         check("(h) settings: updateStoreSetting refuses a row that does not open and leaves it as stored", su.refused === "unreadable" && JSON.stringify(after) === JSON.stringify(before), { su, before, after });
       }
     }
 
     console.log("(d) legacy database, 0004 interrupted");
     for (const n of [40, 260]) {
-      const name = `cod_test_t1_int_${n}`;
+      const name = `cod_test_p0_t1_int_${n}`;
       await legacyDb(name, full, encrypt, folder);
       const totalStatements = await partial0004(name, n);
       if (n === 40) {
@@ -1458,7 +1458,7 @@ async function main(): Promise<void> {
 
     console.log("(d) legacy database, conversion interrupted");
     {
-      const name = "cod_test_t1_conv_steps";
+      const name = "cod_test_p0_t1_conv_steps";
       await legacyDb(name, full, encrypt, folder);
       const steps = await child<{ hit: { label: string | null; aborted: boolean; seen: string[] }[] }>("convert-abort", name, {}, ["--progressive"]);
       const aborted = steps.hit.filter((h) => h.aborted).map((h) => h.label!);
@@ -1469,7 +1469,7 @@ async function main(): Promise<void> {
       same("(d) interrupted after every unit, then resumed by a new boot = the clean run", diffSnapshots(bRef, await snapshot(name, true, since)), []);
     }
     {
-      const name = "cod_test_t1_conv_crash";
+      const name = "cod_test_p0_t1_conv_crash";
       await legacyDb(name, full, encrypt, folder);
       const crash = await child<{ hit: { aborted: boolean }[] }>("convert-abort", name, {}, ["--labels", "pixels:health"]);
       check("(d) a boot crashed in the middle of the conversion", crash.hit[0]?.aborted === true);
@@ -1480,7 +1480,7 @@ async function main(): Promise<void> {
 
     console.log("(d) writes during the background conversion");
     {
-      const name = "cod_test_t1_conv_race";
+      const name = "cod_test_p0_t1_conv_race";
       await legacyDb(name, full, encrypt, folder);
       const race = await child<{ metaTokenIds: string[]; raceToken: boolean; p1Refs: string[]; p2Refs: string[] }>("convert-race", name);
       check("(d) an owner's CAPI token saved during the pixel migration survives it", race.raceToken && race.metaTokenIds.includes(META_RACE) && race.metaTokenIds.includes(META_P1), race.metaTokenIds);
@@ -1489,7 +1489,7 @@ async function main(): Promise<void> {
 
     console.log("(c) the owner's setup only");
     {
-      const name = "cod_test_t1_setup";
+      const name = "cod_test_p0_t1_setup";
       const setup = await setupFixture();
       await legacyDb(name, setup, encrypt, folder);
       const tz = { APP_TIMEZONE: "Europe/Paris" };
@@ -1515,7 +1515,7 @@ async function main(): Promise<void> {
 
     console.log("(i) an empty install the pre-tenancy build booted once (production's state, R1.0 finale F4)");
     {
-      const name = "cod_test_t1_prod_boot";
+      const name = "cod_test_p0_t1_prod_boot";
       await legacyDb(name, preTenancyBootFixture(), encrypt, folder);
       const conn = await connect(name);
       try {
@@ -1568,7 +1568,7 @@ async function main(): Promise<void> {
 
     console.log("(j) 0005: schema parity, rerun, interrupted, an R1.0 database with data");
     {
-      const empty = "cod_test_t1_empty";
+      const empty = "cod_test_p0_t1_empty";
       await schemaParity(empty, "(j) empty → 0005:");
       same("(j) 0005 seeds the tick lease row (cursor '', no state)", (await query(empty, "SELECT job, `cursor`, state FROM cron_cursors")).map((r) => [r.job, r.cursor, r.state]), [["tick", "", null]]);
       const cleanShape = await schemaShape(empty);

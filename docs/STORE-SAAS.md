@@ -4273,9 +4273,19 @@ choice open. The tracks build against the result; a change goes through a CCR.
     per live landing (footer shown or hidden) and none in exports.
 11. **Rows and ownership (step C onward).** §K.3 claims the maintainer files no row named: `src/lib/settings/selftest.ts`,
     `src/lib/admin-data/search/registry.ts`, `scripts/qa/{registries-check,tenancy-check}.ts`, `docs/saas/ccr/README.md`,
-    `src/lib/contracts/r1-p0.ts`, `scripts/qa/stub-lock.ts`, `scripts/deploy/gate-file.mjs`. `test:ownership --phase R1`
-    finds no file with two owners and none without one.
-12. **Deferred, with the reason.** Narrowing `MessageKey` and `NotificationKind` to strict unions (C0a's note): the
+    `src/lib/contracts/r1-p0.ts`, `scripts/qa/stub-lock.ts`, `scripts/deploy/gate-file.mjs`, `docs/saas/ccr/p0-report.md`.
+    `test:ownership --phase R1` finds no file with two owners and none without one.
+12. **Verification (step F, `docs/saas/ccr/p0-report.md`).** The whole P0 tree passed tsc, lint, `npm test`, `test:slow`,
+    every `test:db` suite on `cod_test_p0_*` databases, the build and `test:e2e` with `SG_STUB_BUILD_OK=1`, `qa:secrets`,
+    and an upgrade dry run of a production-equivalent database (pre-tenancy data → R1.0 deploy → R1.0 writes, then
+    0005 with the app's migrator): 0 problems before and after, every R1.0 row unchanged. Two fixes: (a) **track
+    action cases.** `test:tenancy` requires an attack case for every store server action, and the cases lived only in
+    the maintainer's `ACTION_CASES`, so every track that adds an action would have had to edit the harness (DES-R13
+    intends the opposite). A case file may now also export `actions: TrackActionCase[]` (an `ActionCase` without its
+    derived `id`; type imports only), merged into `ACTION_CASES` at `setup()` for both `test:tenancy` and
+    `qa:action-replay`; P6's stub `checkHeadlinesAction` has its case in `tenancy-cases/design.ts`. (b) the throwaway
+    database names of `test:migrate`'s 0004 cases are `cod_test_p0_t1_*` and `qa:r1-exit` accepts `cod_test_p0_*`.
+13. **Deferred, with the reason.** Narrowing `MessageKey` and `NotificationKind` to strict unions (C0a's note): the
     R1.0 code calls keys and kinds that no catalog or kinds file declares yet, so narrowing at P0 would break today's
     callers; each track declares its keys and kinds at its merge and the maintainer narrows at the R1 integration.
     `checkBrandTerms("wordmark", …)` (DES-§13, S2): an R2 field, added to `BrandField` at the R2 contract step.
@@ -4374,7 +4384,7 @@ additive change is the maintainer's), `src/landing/document.tsx` (read-only in R
 **`scripts/qa/render-check.ts`** (the harness; tracks add fixtures through `render-cases/<track>.ts`, ENGP-12), **`scripts/qa/tenancy-check.ts`** (the attack-suite harness, maintainer from R1 product; tracks add cases through `tenancy-cases/<track>.ts`, listed in its `TENANCY_CASE_FILES` at P0), **`scripts/qa/registries-check.ts`** (P0, `test:registries`: every extension file on disk is imported by its registry, so a forgotten import fails `npm test`), **`src/lib/contracts/r1-p0.ts`** (P0: the compile-time contract of the cross-track stubs frozen at P0, types only; a track that renames, removes or re-types a frozen export breaks `tsc`, and a change goes through a CCR), `docs/saas/ccr/README.md` (the CCR rules),
 **`scripts/qa/ownership-check.ts`** and its manifest **`docs/saas/ownership-baseline.json`** (rev 5, CRIT2-22),
 `scripts/qa/tenancy-allow.json` (the lint's allow file; entries through the maintainer, LAN Q23), **`scripts/qa/test-budget.ts`** (the 3-minute harness, §J.1; rev 4 named) and its table **`scripts/qa/test-budget.json`** (rev 5, CRIT2-9),
-**`scripts/deploy/archive.mjs`** and its gate-file writer **`scripts/qa/gate-ok.ts`** (SEC-10), **`scripts/deploy/gate-file.mjs`** (P0: the archive's gate-file rule as a pure function, `stubBuild: true` refused) and **`scripts/qa/stub-lock.ts`** (P0: the STUB-BUILD LOCK's prebuild check, see the maintainer build note in §K.2), `docs/saas/ccr/r1.0-finale-report.md` (the integration report), `docs/saas/ccr/r1.0-deploy-checklist.md` (the R1.0 deploy runbook), **`scripts/qa/e2e/r1.0-exit.ts`** (the R1.0 exit scenario of §K.1 criterion 5 as an e2e, `qa:r1-exit` in `test:e2e`), `src/landing/{types,context,i18n}.ts` (read-only in R1 product; the rev 4
+**`scripts/deploy/archive.mjs`** and its gate-file writer **`scripts/qa/gate-ok.ts`** (SEC-10), **`scripts/deploy/gate-file.mjs`** (P0: the archive's gate-file rule as a pure function, `stubBuild: true` refused) and **`scripts/qa/stub-lock.ts`** (P0: the STUB-BUILD LOCK's prebuild check, see the maintainer build note in §K.2), **`docs/saas/ccr/p0-report.md`** (P0: what the contract step delivers, the stub table, the verification), `docs/saas/ccr/r1.0-finale-report.md` (the integration report), `docs/saas/ccr/r1.0-deploy-checklist.md` (the R1.0 deploy runbook), **`scripts/qa/e2e/r1.0-exit.ts`** (the R1.0 exit scenario of §K.1 criterion 5 as an e2e, `qa:r1-exit` in `test:e2e`), `src/landing/{types,context,i18n}.ts` (read-only in R1 product; the rev 4
 report-link lines are the maintainer's P0 CCR, §K.2 P0), `scripts/sync-fonts.mjs` (the Arabic
 metrics step and the seven `@fontsource` faces of DES-R21 are a maintainer CCR applied in R1 product; the sample list
 `scripts/sync-fonts/ar-sample.json` is P6's), **`scripts/fonts/woff2-sfnt.mjs`** (rev 5, CRIT2-7: the WOFF2 table reader
@@ -4396,7 +4406,8 @@ webhooks by S5 in R2, stock moves by S1 in R2), `src/lib/render/prepublish/<trac
 §M: design by P6, honesty by P3, budgets by the core), `src/lib/pulse/contributors/<track>.ts` (pulse counters, §I.4),
 `src/lib/notify/kinds/<track>.ts` (notification kinds), `src/lib/flags/defs/<track>.ts` (release/ops flags, §D.4),
 `src/lib/health/rules/<track>.ts` (Store Health rules, §I.7), `scripts/qa/tenancy-cases/<track>.ts` (attack-suite
-cases, §F.1), `scripts/qa/wow-demo/steps/<track>.ts` (rev 2.1: demo steps, each exporting `steps: DemoStep[]`, imported
+cases, §F.1; from P0 also `actions: TrackActionCase[]`, the attack cases of the track's own server actions, which the
+harness merges into its action catalogue, so a new action never needs a harness edit), `scripts/qa/wow-demo/steps/<track>.ts` (rev 2.1: demo steps, each exporting `steps: DemoStep[]`, imported
 by `scripts/qa/wow-demo.ts`; §J.3), **`scripts/qa/render-cases/<track>.ts`** (rev 3, ENGP-12: render-check fixtures,
 each exporting `cases: RenderCase[]`, imported by the maintainer's harness), `src/landing/runtime/addons/<chunk>.ts`
 (runtime add-on chunks, P3 in R1; each needs its `budgets.json` key through a CCR, §H.13), and
