@@ -145,13 +145,17 @@ the Claude connector settings. Nothing is deployed from a build that never saw t
    gate commit) and prints the size and sha256. It never uploads.
 4. **Upload:** Hostinger MCP `hosting_files_generate-upload-url` {username `u641677794`, domain
    `lightgreen-hippopotamus-140853.hostingersite.com`} returns url, auth_key and rest_auth_key; then
-   `UP_URL=… UP_AUTH=… UP_REST=… bash scripts/deploy/hostinger-upload.sh ../storegen-<sha7>.zip .sg-<12 random hex>.zip`
-   uploads over TUS into public_html. **The name must start with a dot** (lesson of 2026-10-27): public_html files
-   are served by the web server until the build's "Syncing public_html" removes them, and a failed build never gets
-   there, so `sg-….zip` was publicly downloadable (200 application/zip) after build 01a17e99 failed. The web server
-   refuses dotfiles (403, like `/.env`). Check `curl -sI <site>/.sg-….zip` answers 403 before starting the build.
+   `UP_URL=… UP_AUTH=… UP_REST=… bash scripts/deploy/hostinger-upload.sh ../storegen-<sha7>.zip _sgdeploy/sg-<12 random hex>.zip`
+   uploads over TUS into **`public_html/_sgdeploy/`**, a folder whose `.htaccess` holds `Require all denied`
+   (lesson of 2026-10-27, tested: 403 for a file in it, for the `.htaccess` and for the listing). Files elsewhere in
+   public_html are **served by the web server** until the build's "Syncing public_html" removes them, and a failed
+   build never gets there: `sg-….zip` at the root was publicly downloadable (200 application/zip) after build
+   01a17e99 failed. A dot-prefixed name does **not** help (tested: `/.sg-dotprobe.txt` → 200; only `/.env` is blocked).
+   If the sync removed the folder, re-upload the `.htaccess` first (`_sgdeploy/.htaccess`, content
+   `Require all denied` plus the `Order allow,deny` / `Deny from all` fallback) and check `curl -sI <site>/_sgdeploy/
+   <name>` answers **403** before starting the build; `archive_path` is then `_sgdeploy/<name>`.
    **If a build fails, delete the archive at once:** `curl -X DELETE <url without /api/tus/public_html>/api/resources/
-   public_html/<name> -H "X-Auth: <auth_key>" -H "X-Auth-Rest: <rest_auth_key>"` (expect 204, then 404 on the site).
+   public_html/_sgdeploy/<name> -H "X-Auth: <auth_key>" -H "X-Auth-Rest: <rest_auth_key>"` (expect 204).
 5. **Env** (whenever the key set changed; the first R1.0 deploy adds `PLATFORM_URL` and `DATA_DIR`):
    `hosting_nodejs_replace-environment-variables` with all 16 keys of `.env.hostinger`.
 6. **Build:** Hostinger MCP `hosting_nodejs_start-build` {node_version 22, app_type next, root_directory "",
