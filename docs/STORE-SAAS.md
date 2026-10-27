@@ -4247,7 +4247,7 @@ Owned by the maintainer for the whole of R1 product (and again in R2/R3): `src/l
 `src/lib/platform/{seam,impersonation}.ts`, `src/lib/orders/hooks.ts`, `src/proxy.ts`, `src/lib/edge/**`, `src/lib/urls/**`,
 `src/lib/settings/{index,platform-registry,store-registry}.ts`, **`src/lib/settings/selftest.ts`** (P0, `test:settings`: every §D.10 key's level, secrecy, default and redaction), `src/lib/jobs/registry.ts`,
 `src/components/admin/shell/nav/{types,index}.ts`, `src/components/admin/shell/commands/{types,index}.ts`,
-`src/lib/admin-data/search/types.ts` (C0a's frozen `SearchProvider` skeleton),
+`src/lib/admin-data/search/types.ts` (C0a's frozen `SearchProvider` skeleton), **`src/lib/admin-data/search/registry.ts`** (P0: `SEARCH_PROVIDERS`, the import lines of the tracks' providers; P2's `search.ts` reads it),
 `src/lib/i18n/admin/{index,en,fr,ar}.ts` (base catalogs and runtime; the per-track files are the tracks', D67),
 `src/lib/render/prepublish.ts`, `src/lib/render/prepublish/{budget,budget-limits}.ts` (the core's budget gate and its
 `registerBudgetProfile` hook, §M.2; rev 2.1 names them explicitly), `src/lib/render/selftest-prepublish.ts`,
@@ -4262,7 +4262,7 @@ integration), `src/landing/runtime/budgets.json`,
 T3's in R1.0, read-only afterwards), `src/lib/page/schema.ts` (frozen; the one DES-R1
 additive change is the maintainer's), `src/landing/document.tsx` (read-only in R1 product after T3; DES-R11's
 `brandIcon` swap is a CCR applied by the maintainer), `scripts/qa/wow-demo.ts`, `scripts/qa/publish-gates-e2e.ts`,
-**`scripts/qa/render-check.ts`** (the harness; tracks add fixtures through `render-cases/<track>.ts`, ENGP-12),
+**`scripts/qa/render-check.ts`** (the harness; tracks add fixtures through `render-cases/<track>.ts`, ENGP-12), **`scripts/qa/tenancy-check.ts`** (the attack-suite harness, maintainer from R1 product; tracks add cases through `tenancy-cases/<track>.ts`, listed in its `TENANCY_CASE_FILES` at P0), **`scripts/qa/registries-check.ts`** (P0, `test:registries`: every extension file on disk is imported by its registry, so a forgotten import fails `npm test`), `docs/saas/ccr/README.md` (the CCR rules),
 **`scripts/qa/ownership-check.ts`** and its manifest **`docs/saas/ownership-baseline.json`** (rev 5, CRIT2-22),
 `scripts/qa/tenancy-allow.json` (the lint's allow file; entries through the maintainer, LAN Q23), **`scripts/qa/test-budget.ts`** (the 3-minute harness, §J.1; rev 4 named) and its table **`scripts/qa/test-budget.json`** (rev 5, CRIT2-9),
 **`scripts/deploy/archive.mjs`** and its gate-file writer **`scripts/qa/gate-ok.ts`** (SEC-10), `docs/saas/ccr/r1.0-finale-report.md` (the integration report), `docs/saas/ccr/r1.0-deploy-checklist.md` (the R1.0 deploy runbook), **`scripts/qa/e2e/r1.0-exit.ts`** (the R1.0 exit scenario of §K.1 criterion 5 as an e2e, `qa:r1-exit` in `test:e2e`), `src/landing/{types,context,i18n}.ts` (read-only in R1 product; the rev 4

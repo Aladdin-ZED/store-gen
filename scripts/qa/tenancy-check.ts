@@ -46,7 +46,8 @@
  *    the integrations secrets and the exports of customer data ask for a fresh step-up (§B.7: none or a stale one
  *    refused, a fresh one works and is named on the audit row); the cron pulls a store whose orders are all synced
  *    (SHT-11); the agent's R1.0 queue (§A.3.2 interim); the store-named titles of the overview and the builder
- *  - plug-ins: every scripts/qa/tenancy-cases/<track>.ts (`export const cases: TenancyCase[]`, DES-R13)
+ *  - plug-ins: every scripts/qa/tenancy-cases/<track>.ts of `TENANCY_CASE_FILES` (`export const cases: TenancyCase[]`,
+ *    DES-R13; an empty file, as created at P0, is listed as not applicable)
  *
  * All real code (R1.0: T1, T2, T3 and T4 merged): no adapter, no stand-in. A call that still ends in a typed stub
  * ("not implemented: …") fails its check (until the R1.0 merge it was listed as pending). A case of the spec that has no
@@ -3140,9 +3141,19 @@ export interface TenancyKit extends Kit {
   scope: (store: "A" | "B", kind?: StoreScope["kind"]) => StoreScope;
 }
 
+/**
+ * The tracks' case files, in track order (§K.2, written at P0 so no track edits this harness). They are loaded with
+ * `load()` once the environment is in place, never imported statically (a case file's imports would run first).
+ * `scripts/qa/registries-check.ts` proves this list equals the folder, and the suite fails on a file it does not list.
+ */
+export const TENANCY_CASE_FILES = ["platform", "landing", "ops", "integrations", "design", "ai"] as const;
+
 export async function pluginSuite(kit: Kit): Promise<void> {
   const dir = path.join(ROOT, "scripts", "qa", "tenancy-cases");
-  const files = walk(dir, (f) => /\.ts$/.test(f));
+  const onDisk = walk(dir, (f) => /\.ts$/.test(f)).map((f) => path.relative(dir, f).replace(/\\/g, "/").replace(/\.ts$/, ""));
+  const unlisted = onDisk.filter((f) => !(TENANCY_CASE_FILES as readonly string[]).includes(f));
+  suite("cases");
+  check("every case file of scripts/qa/tenancy-cases is listed in TENANCY_CASE_FILES", unlisted.length === 0, unlisted);
   const tk: TenancyKit = {
     ...kit,
     check,
@@ -3156,11 +3167,14 @@ export async function pluginSuite(kit: Kit): Promise<void> {
     ghostify: (value) => ghostify(kit.fx, value),
     scope: (store, kind = "member") => scopeOf(kit.fx[store].id, kind),
   };
-  for (const file of files) {
-    suite(`cases: ${path.basename(file, ".ts")}`);
-    const mod = load<{ cases?: TenancyCase[]; default?: TenancyCase[] }>(file);
-    const cases = mod.cases ?? mod.default ?? [];
-    check(`${path.basename(file)} exports its cases`, Array.isArray(cases) && cases.length > 0);
+  for (const name of TENANCY_CASE_FILES) {
+    suite(`cases: ${name}`);
+    const mod = load<{ cases?: TenancyCase[] }>(path.join(dir, `${name}.ts`));
+    const cases = mod.cases;
+    check(`${name}.ts exports its cases`, Array.isArray(cases));
+    if (!Array.isArray(cases)) continue;
+    // created empty at P0; the track's cases arrive with its merge, and the maintainer checks they are not empty then
+    if (cases.length === 0) notApplicable(`${name}.ts`, "no cases yet (the file is filled when its track merges)");
     for (const c of cases) {
       try {
         await c.run(tk);

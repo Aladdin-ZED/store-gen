@@ -1,14 +1,45 @@
 /**
  * The admin's base catalog (docs/STORE-SAAS.md §I.5, D36, D67), English: the reference every other catalog falls
- * back to. Maintainer-owned: it holds the core keys (the §E.2 action error codes the shell maps) and, from P0, one
- * spread per track file `./en/<track>.ts` (each track owns the keys under its own prefix). Values: ICU-lite `{var}`
+ * back to. Maintainer-owned: it holds the core keys (the §E.2 action error codes the shell maps) and, since P0, one
+ * spread per track file `./en/<file>.ts` (each track owns the keys under its own prefix, D67). Values: ICU-lite `{var}`
  * placeholders and `{n, plural, one {…} other {…}}`; no em-dash and no "Step n" label (§I.8 rule 8).
  */
 import { messages as identity } from "@/lib/auth/i18n/en";
+import { messages as aiMessages } from "./en/ai";
+import { messages as authMessages } from "./en/auth";
+import { messages as briefMessages } from "./en/brief";
+import { messages as consoleMessages } from "./en/console";
+import { messages as designMessages } from "./en/design";
+import { messages as financeMessages } from "./en/finance";
+import { messages as healthMessages } from "./en/health";
+import { messages as integrationsMessages } from "./en/integrations";
+import { messages as landingMessages } from "./en/landing";
+import { messages as notifyMessages } from "./en/notify";
+import { messages as onboardingMessages } from "./en/onboarding";
+import { messages as opsMessages } from "./en/ops";
+import { messages as shellMessages } from "./en/shell";
+import { messages as teamMessages } from "./en/team";
 
 export const messages = {
   // T2 identity surfaces (CCR r1.0-t2-9 item 1, supersedes the tables of r1.0-t2-5); the core keys below win on a clash
   ...identity,
+  // the tracks' files ./en/<file>.ts (D67; spread here at P0, `scripts/qa/registries-check.ts` proves none is left out):
+  // P1 console + notify, P2 shell + auth + onboarding + team + health + brief, P3 landing, P4 ops + finance,
+  // P5 integrations, P6 design, P7 ai; each owns the keys under its prefix, and the core keys below win on a clash
+  ...consoleMessages,
+  ...notifyMessages,
+  ...shellMessages,
+  ...authMessages,
+  ...onboardingMessages,
+  ...teamMessages,
+  ...healthMessages,
+  ...briefMessages,
+  ...landingMessages,
+  ...opsMessages,
+  ...financeMessages,
+  ...integrationsMessages,
+  ...designMessages,
+  ...aiMessages,
   "error.invalid": "Some fields need a fix.",
   "error.not_found": "This item doesn't exist or is no longer available.",
   "error.forbidden": "Your role doesn't allow this action.",

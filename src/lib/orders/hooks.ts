@@ -19,6 +19,9 @@ import type { orders } from "@/lib/db/schema";
 import { logError } from "@/lib/orders/log";
 import type { StoreScope } from "@/lib/tenancy/types";
 import type { PurchaseConversion } from "./conversions-core";
+import { hooks as integrationsHooks } from "./hooks/integrations";
+import { hooks as landingHooks } from "./hooks/landing";
+import { hooks as opsHooks } from "./hooks/ops";
 
 export type OrderRow = typeof orders.$inferSelect;
 /** The handle of the order's transaction (inTx hooks write with it). */
@@ -51,8 +54,12 @@ export interface OrderHook {
   run(scope: StoreScope, e: OrderHookEvent, tx?: Tx): Promise<void>;
 }
 
-/** Every contributed hook, in track order (P0: `...<track>Hooks` per `./hooks/<track>.ts`). */
-export const ORDER_HOOKS: readonly OrderHook[] = [];
+/**
+ * Every contributed hook, in run order (written at P0; `scripts/qa/registries-check.ts` proves no file is left out):
+ * operations first (OPE-§3.6: `ops.created` sets `customer_id` and `city_key`, which landing's attribution and
+ * `zone_not_served` read), then landing, then integrations (the CAPI and Telegram outbox items, the Sheets push).
+ */
+export const ORDER_HOOKS: readonly OrderHook[] = [...opsHooks, ...landingHooks, ...integrationsHooks];
 
 /**
  * Runs the hooks registered for (`on`, `phase`) in order. An `inTx` failure is rethrown so the caller's transaction

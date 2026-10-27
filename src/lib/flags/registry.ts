@@ -9,6 +9,10 @@
  * `activeKillSwitches()` (src/lib/tenancy/entitlements.ts, T1, cached 30 s; `invalidateFlags()` beside it).
  */
 import type { FlagValue } from "@/lib/db/schema";
+import { flags as aiFlags } from "./defs/ai";
+import { flags as designFlags } from "./defs/design";
+import { flags as opsFlags } from "./defs/ops";
+import { flags as platformFlags } from "./defs/platform";
 
 export type { FlagRule, FlagValue } from "@/lib/db/schema";
 
@@ -42,8 +46,8 @@ export function killTripped(key: KillKey, value: boolean): boolean {
   return key === "platform_read_only" ? value : !value;
 }
 
-/** Every declared flag, in track order. P0 adds `...<track>Flags` per `src/lib/flags/defs/<track>.ts`. */
-export const FLAG_DEFS: readonly FlagDef[] = [];
+/** Every declared flag, in track order (P1, P4, P6, P7; written at P0, `scripts/qa/registries-check.ts` proves none is left out). */
+export const FLAG_DEFS: readonly FlagDef[] = [...platformFlags, ...opsFlags, ...designFlags, ...aiFlags];
 
 export function flagDef(key: string): FlagDef | undefined {
   return FLAG_DEFS.find((f) => f.key === key);

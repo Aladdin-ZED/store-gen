@@ -1,13 +1,44 @@
 /**
  * French catalog (docs/STORE-SAAS.md §I.5): a partial of the English one, every missing key falls back to `en`.
- * From P0, one spread per track file `./fr/<track>.ts`.
+ * One spread per track file `./fr/<file>.ts` (D67, written at P0).
  */
 import { messages as identity } from "@/lib/auth/i18n/fr";
+import { messages as aiMessages } from "./fr/ai";
+import { messages as authMessages } from "./fr/auth";
+import { messages as briefMessages } from "./fr/brief";
+import { messages as consoleMessages } from "./fr/console";
+import { messages as designMessages } from "./fr/design";
+import { messages as financeMessages } from "./fr/finance";
+import { messages as healthMessages } from "./fr/health";
+import { messages as integrationsMessages } from "./fr/integrations";
+import { messages as landingMessages } from "./fr/landing";
+import { messages as notifyMessages } from "./fr/notify";
+import { messages as onboardingMessages } from "./fr/onboarding";
+import { messages as opsMessages } from "./fr/ops";
+import { messages as shellMessages } from "./fr/shell";
+import { messages as teamMessages } from "./fr/team";
 import type { BaseMessages } from "./index";
 
 export const messages: Partial<BaseMessages> = {
   // T2 identity surfaces (CCR r1.0-t2-9 item 1); the core keys below win on a clash
   ...identity,
+  // the tracks' files ./fr/<file>.ts (D67; spread here at P0, `scripts/qa/registries-check.ts` proves none is left out):
+  // P1 console + notify, P2 shell + auth + onboarding + team + health + brief, P3 landing, P4 ops + finance,
+  // P5 integrations, P6 design, P7 ai; each owns the keys under its prefix, and the core keys below win on a clash
+  ...consoleMessages,
+  ...notifyMessages,
+  ...shellMessages,
+  ...authMessages,
+  ...onboardingMessages,
+  ...teamMessages,
+  ...healthMessages,
+  ...briefMessages,
+  ...landingMessages,
+  ...opsMessages,
+  ...financeMessages,
+  ...integrationsMessages,
+  ...designMessages,
+  ...aiMessages,
   "error.invalid": "Certains champs sont à corriger.",
   "error.not_found": "Cet élément n'existe pas ou n'est plus disponible.",
   "error.forbidden": "Votre rôle ne permet pas cette action.",

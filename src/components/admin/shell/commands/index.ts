@@ -4,12 +4,16 @@
  */
 import { permissionDef, releaseOn } from "@/lib/auth/permissions";
 import { modeAllows } from "@/lib/tenancy/mode";
+import { commands as integrationsCommands } from "./integrations";
+import { commands as landingCommands } from "./landing";
+import { commands as opsCommands } from "./ops";
+import { commands as shellCommands } from "./shell";
 import type { CommandCtx, CommandDef } from "./types";
 
 export type { CommandCtx, CommandDef } from "./types";
 
-/** Every contributed command, in track order (P0: `...<track>Commands` per `./<track>.ts`). */
-export const COMMANDS: readonly CommandDef[] = [];
+/** Every contributed command, in track order (P2 … P5; written at P0, `scripts/qa/registries-check.ts` proves none is left out). */
+export const COMMANDS: readonly CommandDef[] = [...shellCommands, ...landingCommands, ...opsCommands, ...integrationsCommands];
 
 /** The commands this member may run in this store (permission, mode, release), in registry order. */
 export function commandsFor(ctx: Pick<CommandCtx, "store" | "can">, commands: readonly CommandDef[] = COMMANDS): CommandDef[] {

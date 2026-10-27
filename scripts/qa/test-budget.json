@@ -19,8 +19,8 @@
           "label": "core suites",
           "owner": "maintainer",
           "budgetSec": 20,
-          "scripts": ["test:tenancy-lint", "test:ownership", "test:settings", "test:hosts", "test:permissions", "test:tenancy-unit", "test:envelope", "test:security", "test:jobs", "test:prepublish"],
-          "note": "npm test runs test:tenancy-lint (0 violations over all of src/**, since 7ffbc8c) and test:ownership; the others are timed here (hosts, permissions, envelope and security also run in gate:offline, tenancy-unit in gate:tenancy). Measured at the R1.0 T4 integration: the lint 26.5 s alone (1,004 files, its 19-fixture self-check included), the group 38.5 s with test:jobs and test:prepublish not written yet; the share is raised at P0 (CCR r1.0-c0b-3 item 3). P0 step B adds test:settings to npm test (the §D.10 key schemas, offline, about 2 s)"
+          "scripts": ["test:tenancy-lint", "test:ownership", "test:settings", "test:registries", "test:hosts", "test:permissions", "test:tenancy-unit", "test:envelope", "test:security", "test:jobs", "test:prepublish"],
+          "note": "npm test runs test:tenancy-lint (0 violations over all of src/**, since 7ffbc8c) and test:ownership; the others are timed here (hosts, permissions, envelope and security also run in gate:offline, tenancy-unit in gate:tenancy). Measured at the R1.0 T4 integration: the lint 26.5 s alone (1,004 files, its 19-fixture self-check included), the group 38.5 s with test:jobs and test:prepublish not written yet; the share is raised at P0 (CCR r1.0-c0b-3 item 3). P0 step B adds test:settings to npm test (the §D.10 key schemas, offline, about 2 s); P0 step C adds test:registries (every extension file imported by its registry, offline, about 1 s)"
         },
         {
           "id": "platform",

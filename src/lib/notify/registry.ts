@@ -9,6 +9,11 @@
  * `notify()` itself is src/lib/platform/notify.ts (T2's minimal insert in R1.0, P1's from R1 product).
  */
 import type { z } from "zod";
+import { kinds as aiKinds } from "./kinds/ai";
+import { kinds as integrationsKinds } from "./kinds/integrations";
+import { kinds as landingKinds } from "./kinds/landing";
+import { kinds as opsKinds } from "./kinds/ops";
+import { kinds as platformKinds } from "./kinds/platform";
 
 export type NotificationGroup = "store" | "security" | "orders" | "team" | "integrations" | "ai" | "health" | "platform" | (string & {});
 export type NotificationSeverity = "info" | "success" | "warn" | "danger";
@@ -30,8 +35,8 @@ export interface NotificationKindDef<V extends Record<string, unknown> = Record<
 export type NotificationKind = string;
 export type NotificationVars<K extends NotificationKind> = K extends NotificationKind ? Record<string, string | number | boolean | null> : never;
 
-/** Every declared kind, in track order. P0 adds `...<track>Kinds` per `src/lib/notify/kinds/<track>.ts`. */
-export const NOTIFICATION_KINDS: readonly NotificationKindDef[] = [];
+/** Every declared kind, in track order (P1, P3, P4, P5, P7; written at P0, `scripts/qa/registries-check.ts` proves none is left out). */
+export const NOTIFICATION_KINDS: readonly NotificationKindDef[] = [...platformKinds, ...landingKinds, ...opsKinds, ...integrationsKinds, ...aiKinds];
 
 export function notificationKind(kind: string): NotificationKindDef | undefined {
   return NOTIFICATION_KINDS.find((k) => k.kind === kind);

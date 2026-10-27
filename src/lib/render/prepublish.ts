@@ -12,13 +12,20 @@ import "server-only";
  * items become notes and the publish goes through, audited; honesty items have no warn mode. Re-renders run the checks
  * in `warn` mode; exports in `block` mode; previews never.
  *
- * Maintainer-owned (§K.3). The track files `./prepublish/{budget,landing,design}.ts` register at import; their import
- * lines are pre-written at P0. R2 adds `StorePageDoc` to the doc types and `./prepublish/storefront.ts`.
+ * Maintainer-owned (§K.3). The track files `./prepublish/{landing,design}.ts` register at import; their import lines
+ * are written here at P0 (`scripts/qa/registries-check.ts` proves no file is left out), and the core's
+ * `./prepublish/budget.ts` joins them with its own stub. R2 adds `StorePageDoc` to the doc types and
+ * `./prepublish/storefront.ts`.
+ *
+ * The import is circular (a track file imports the register functions from here while this module is still being
+ * evaluated), so everything a registration touches is a hoisted function declaration: `registry()` included.
  */
 import { errorSummary } from "@/lib/orders/log";
 import type { PageDoc } from "@/lib/page/schema";
 import type { BuiltTheme } from "@/lib/theme/types";
 import type { Actor, GateItem, StoreRow, StoreScope } from "@/lib/tenancy/types";
+import "./prepublish/design";
+import "./prepublish/landing";
 
 export type { GateItem } from "@/lib/tenancy/types";
 
@@ -56,7 +63,10 @@ declare global {
   var __sgPrePublish: { checks: Map<string, PrePublishCheck>; listeners: Map<string, PublishListener> } | undefined;
 }
 
-const registry = () => (globalThis.__sgPrePublish ??= { checks: new Map<string, PrePublishCheck>(), listeners: new Map<string, PublishListener>() });
+/** A function declaration, not a const: a track file registers while this module is still evaluating (see above). */
+function registry(): { checks: Map<string, PrePublishCheck>; listeners: Map<string, PublishListener> } {
+  return (globalThis.__sgPrePublish ??= { checks: new Map<string, PrePublishCheck>(), listeners: new Map<string, PublishListener>() });
+}
 
 /** The order a refusal's code is chosen in: a page that is too heavy is told so before its design is judged. */
 const CODE_ORDER: readonly PrePublishCode[] = ["budget_blocked", "honesty_blocked", "design_blocked"];

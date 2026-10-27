@@ -13,12 +13,15 @@
  *  - runtime size budgets (docs/OFFERS.md §F.9, src/landing/runtime/budgets.json): every chunk and every page
  *    cap of `compositions` (page, thanks-page: the chunks of one document) at most the recorded gzip + 5%, except the
  *    frozen `landing` chunk (docs/STORE-SAAS.md header freeze rule, ENGC-10): tolerance 0 against its recorded
- *    budget, and its bytes equal to the pin `src/landing/runtime/landing.sha256` (sha256 hex of the chunk text).
+ *    budget, and its bytes equal to the pin `src/landing/runtime/landing.sha256` (sha256 hex of the chunk text);
+ *  - the tracks' cases (docs/STORE-SAAS.md §J.1 render-check, §K.3, ENGP-12): every `./render-cases/<track>.ts`
+ *    exports `cases: RenderCase[]`, imported below (written at P0, `scripts/qa/registries-check.ts` proves none is
+ *    left out), so no track edits this harness. A case file imports only types from here: this module runs at load.
  *
  *   npx tsx scripts/qa/render-check.ts        (exit code 1 on any failure)
  */
 import { LEGAL_KINDS, storePageLinks } from "@/landing/context";
-import { FIXTURE_NAMES, fixtureAssets, getFixture } from "@/lib/page/fixtures";
+import { FIXTURE_NAMES, fixtureAssets, getFixture, type Fixture, type FixtureName } from "@/lib/page/fixtures";
 import { DIVIDERS } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
 import { inlineHashes, renderLandingHtml, renderLegalHtml, renderThankYouHtml, styleAttrViolations } from "@/lib/render/core";
@@ -29,6 +32,9 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
+import { cases as aiCases } from "./render-cases/ai";
+import { cases as designCases } from "./render-cases/design";
+import { cases as landingCases } from "./render-cases/landing";
 /** Same values as PUBLIC_ENDPOINTS in src/lib/render/store-context.server.ts (server-only, not importable here). */
 const PUBLIC_ENDPOINTS = { order: "/api/public/order", lead: "/api/public/lead", event: "/api/public/event", upsell: "/api/public/upsell" };
 
@@ -40,6 +46,45 @@ const fail = (m: string) => {
   console.log("  FAIL " + m);
 };
 
+/** The live store-page options every fixture is rendered with: a store document in P mode (docs/STORE-SAAS.md §C.6). */
+function liveOptions(name: FixtureName, fx: Fixture) {
+  return {
+    mode: "live" as const,
+    assets: fixtureAssets("/"),
+    pageKey: fx.pageKey,
+    store: fx.store,
+    urls: { landing: `${STORE_BASE}/${name}`, thankYou: `${STORE_BASE}/${name}/merci`, endpoints: PUBLIC_ENDPOINTS },
+    links: storePageLinks(STORE_BASE, name),
+    origin: "https://shop.example",
+    now,
+    upgradeInsecureRequests: true,
+  };
+}
+
+/** What a case gets: the harness's fixtures, options and failure counter (a case renders with the live renderer itself). */
+export interface RenderKit {
+  now: string;
+  storeBase: typeof STORE_BASE;
+  fixtures: readonly FixtureName[];
+  getFixture: typeof getFixture;
+  liveOptions: typeof liveOptions;
+  /** counts one failure (the run exits 1) and prints it under the case's name */
+  fail(message: string): void;
+}
+
+/** What a track's case file exports: `export const cases: RenderCase[]` (scripts/qa/render-cases/<track>.ts). */
+export interface RenderCase {
+  name: string;
+  run(kit: RenderKit): void | Promise<void>;
+}
+
+/** Every case file, in track order (P3, P6, P7). */
+const RENDER_CASES: readonly (readonly [track: string, cases: readonly RenderCase[]])[] = [
+  ["landing", landingCases],
+  ["design", designCases],
+  ["ai", aiCases],
+];
+
 async function main() {
   for (const name of FIXTURE_NAMES) {
     for (const locale of ["ar", "fr", "en"] as const) {
@@ -50,17 +95,7 @@ async function main() {
         continue;
       }
       // a store document in P mode (docs/STORE-SAAS.md §C.6): store base "/s/qa-store", platform origin
-      const opts = {
-        mode: "live" as const,
-        assets: fixtureAssets("/"),
-        pageKey: fx.pageKey,
-        store: fx.store,
-        urls: { landing: `${STORE_BASE}/${name}`, thankYou: `${STORE_BASE}/${name}/merci`, endpoints: PUBLIC_ENDPOINTS },
-        links: storePageLinks(STORE_BASE, name),
-        origin: "https://shop.example",
-        now,
-        upgradeInsecureRequests: true,
-      };
+      const opts = liveOptions(name, fx);
       const pages = [
         ["landing", await renderLandingHtml(doc, opts)],
         ["merci", await renderThankYouHtml(doc, opts)],
@@ -125,6 +160,21 @@ async function main() {
     if (v.doc.sections[3]!.divider !== "auto" || v.doc.sections[4]!.bg !== "base") fail("legacy section values not migrated");
     console.log(`legacy migration: ${v.issues.filter((i) => i.message.startsWith("Retired")).length} retired values repaired`);
   }
+
+  // the tracks' cases (ENGP-12): a case that throws is one failure, and the next case still runs
+  let caseCount = 0;
+  for (const [track, cases] of RENDER_CASES) {
+    for (const c of cases) {
+      caseCount++;
+      const kit: RenderKit = { now, storeBase: STORE_BASE, fixtures: FIXTURE_NAMES, getFixture, liveOptions, fail: (m) => fail(`[${track}] ${c.name}: ${m}`) };
+      try {
+        await c.run(kit);
+      } catch (e) {
+        fail(`[${track}] ${c.name} threw: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+  console.log(`render cases: ${caseCount} (${RENDER_CASES.map(([t, c]) => `${t} ${c.length}`).join(" · ")})`);
 
   // runtime budgets: gzip -9 of each chunk, and of each page cap's chunks in one document (CCR r1.0-c0b-1)
   const budgets = JSON.parse(readFileSync(join(__dirname, "..", "..", "src", "landing", "runtime", "budgets.json"), "utf8")) as Record<string, unknown> & {

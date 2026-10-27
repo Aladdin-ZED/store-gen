@@ -7,6 +7,12 @@ import { permissionDef, releaseOn } from "@/lib/auth/permissions";
 import { modeAllows } from "@/lib/tenancy/mode";
 import type { StorePermission } from "@/lib/auth/permissions";
 import type { StoreRow } from "@/lib/tenancy/types";
+import { nav as aiNav } from "./ai";
+import { nav as consoleNav } from "./console";
+import { nav as designNav } from "./design";
+import { nav as integrationsNav } from "./integrations";
+import { nav as landingNav } from "./landing";
+import { nav as opsNav } from "./ops";
 import { nav as t4Nav } from "./t4";
 import type { NavContribution, NavGroup, NavGroupId, NavItem } from "./types";
 
@@ -24,8 +30,11 @@ export const NAV_GROUPS: readonly { id: NavGroupId; label: NavGroup["label"] }[]
   { id: "settings", label: "nav.group.settings" },
 ];
 
-/** Every contributed item, in track order (P0: `...<track>Nav` per `./<track>.ts`). R1.0: T4's dashboard (CCR r1.0-t4-8). */
-export const NAV_CONTRIBUTIONS: readonly NavContribution[] = [...t4Nav];
+/**
+ * Every contributed item, in track order: T4's R1.0 dashboard (CCR r1.0-t4-8; P2's file in R1), then P1, P3 … P7
+ * (written at P0; `scripts/qa/registries-check.ts` proves no file is left out).
+ */
+export const NAV_CONTRIBUTIONS: readonly NavContribution[] = [...t4Nav, ...consoleNav, ...landingNav, ...opsNav, ...integrationsNav, ...designNav, ...aiNav];
 
 /** What the filter reads of a member: the store's mode and the grants (a `StoreCtx`, or the browser's `useStore()`). */
 export interface NavCtx {
