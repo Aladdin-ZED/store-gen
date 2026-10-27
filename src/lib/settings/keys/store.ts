@@ -10,7 +10,8 @@ import { httpsUrl, optional, optionalText, phone } from "../fields";
 /**
  * What the thank-you page and the form promise about the confirmation call (LP-04). `withinHours` omitted = no
  * promise (never invented). The calling hours are not here: they come from `ops.callingWindow` through
- * `callingWindowFor(scope)` (rev 3, D73).
+ * `callingWindowFor(scope)` (rev 3, D73): a stored block that still carries `hours` parses with the field stripped,
+ * never mirrored (no build ever wrote it; src/lib/settings/selftest.ts checks the strip).
  */
 export const StoreConfirmation = z.object({
   /** E.164: the number agents call from (shown in full: it is the store's own) */

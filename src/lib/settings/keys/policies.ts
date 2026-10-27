@@ -38,7 +38,7 @@ export const PoliciesSetting = z.object({
     .object({ method: z.enum(["cash", "transfer", "store_credit", "unset"]).default("unset"), withinDays: z.number().int().min(1).max(60).nullable().default(null) })
     .prefault({}),
   warranty: z.object({ months: z.number().int().min(1).max(120).nullable().default(null), text: LocText.optional() }).prefault({}),
-  /** rev 3 (OPS-11): `hours` removed */
+  /** rev 3 (OPS-11): `hours` removed; a stored value that still has it parses with the field stripped (D73, no mirror) */
   contact: z.object({ channels: z.array(z.enum(["phone", "whatsapp", "email"])).max(3).default([]) }).prefault({}),
   extras: z
     .array(z.object({ id: z.string().regex(/^[a-z0-9-]{2,24}$/), text: LocText }))

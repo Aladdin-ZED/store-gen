@@ -4,9 +4,11 @@
  * packaging cost stays NULL). The R2/R3 fields (tolerance, export format, tax profile…) arrive with S3.
  */
 import { z } from "zod";
-import { currencyCode, isoDate, isoDateTime } from "../fields";
+import { isoDate, isoDateTime } from "../fields";
 
 const AdPlatform = z.enum(["meta", "tiktok", "snap", "google", "other"]);
+/** ISO 4217, typed in any case and stored upper-case (OPE-§2.9 `.toUpperCase()`), so "mad" and "MAD" are one currency */
+const Currency = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, { error: "Use the 3-letter currency code, e.g. USD." });
 
 export const AccountingSetting = z.object({
   /** per order, integer cents; null = not set */
@@ -18,10 +20,10 @@ export const AccountingSetting = z.object({
     .object({ settlement: z.enum(["at_delivery", "statement"]).default("at_delivery"), confirmedAt: isoDateTime.nullable().default(null) })
     .prefault({}),
   /** the billing currency of each ad account (absent = the store currency, OD56) */
-  adAccounts: z.partialRecord(AdPlatform, z.object({ currency: currencyCode })).default({}),
+  adAccounts: z.partialRecord(AdPlatform, z.object({ currency: Currency })).default({}),
   /** the owner's dated rates to the store currency: 1 unit = rateMilli / 1000 store units ("your rate, estimate") */
   adRates: z
-    .array(z.object({ currency: currencyCode, fromDay: isoDate, rateMilli: z.number().int().min(1).max(100_000_000) }))
+    .array(z.object({ currency: Currency, fromDay: isoDate, rateMilli: z.number().int().min(1).max(100_000_000) }))
     .max(120)
     .default([])
     .refine((rates) => new Set(rates.map((r) => `${r.currency}:${r.fromDay}`)).size === rates.length, { error: "One rate per currency and day." }),

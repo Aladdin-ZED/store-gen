@@ -4245,7 +4245,7 @@ two agents never claim the same order, **the `N` press from the demo store owner
 Owned by the maintainer for the whole of R1 product (and again in R2/R3): `src/lib/db/schema.ts`, `drizzle/**`,
 `package.json`, `package-lock.json`, `src/lib/auth/permissions.ts`, `src/lib/tenancy/{types,seam,public}.ts`,
 `src/lib/platform/{seam,impersonation}.ts`, `src/lib/orders/hooks.ts`, `src/proxy.ts`, `src/lib/edge/**`, `src/lib/urls/**`,
-`src/lib/settings/{index,platform-registry,store-registry}.ts`, `src/lib/jobs/registry.ts`,
+`src/lib/settings/{index,platform-registry,store-registry}.ts`, **`src/lib/settings/selftest.ts`** (P0, `test:settings`: every §D.10 key's level, secrecy, default and redaction), `src/lib/jobs/registry.ts`,
 `src/components/admin/shell/nav/{types,index}.ts`, `src/components/admin/shell/commands/{types,index}.ts`,
 `src/lib/admin-data/search/types.ts` (C0a's frozen `SearchProvider` skeleton),
 `src/lib/i18n/admin/{index,en,fr,ar}.ts` (base catalogs and runtime; the per-track files are the tracks', D67),
