@@ -18,7 +18,7 @@ export default function PanelError({ error, retry }: { error: Error & { digest?:
         title="This screen couldn't load"
         description={
           <>
-            Something went wrong on our side — your data is safe. Try again in a moment.
+            Something went wrong on our side. Your data is safe. Try again in a moment.
             {error.digest && <span className="mt-2 block font-mono text-xs text-muted-foreground/80">Ref. {error.digest}</span>}
           </>
         }

@@ -182,9 +182,13 @@ export function PagePixels({ pageId, tracking, onChange, flush }: PagePixelsProp
 
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         They fire on the live page only, never in the builder or previews. Tokens and test codes live in{" "}
-        <Link href={storeView.href("/integrations/pixels")} target="_blank" rel="noopener" className="font-medium text-foreground underline decoration-foreground/25 underline-offset-2 hover:decoration-foreground">
-          Connect → Pixels
-        </Link>
+        {storeView.can("pixels.manage") ? (
+          <Link href={storeView.href("/integrations/pixels")} target="_blank" rel="noopener" className="font-medium text-foreground underline decoration-foreground/25 underline-offset-2 hover:decoration-foreground">
+            Connect → Pixels
+          </Link>
+        ) : (
+          <span className="font-medium text-foreground">Connect → Pixels</span>
+        )}
         .
       </p>
 

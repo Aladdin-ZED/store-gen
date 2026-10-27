@@ -137,7 +137,7 @@ export async function saveTurnstileAction(input: Partial<SettingInput<"turnstile
     const { turnstile: current } = await getStoreSettings(ctx.scope, ["turnstile"]);
     const pick = (next: string | undefined, stored: string | undefined) => (next === undefined || isMaskedSecret(next) ? stored : next.trim() || undefined);
     if (!!pick(v.siteKey, current.siteKey) !== !!pick(v.secretKey, current.secretKey)) {
-      fail("Add both keys — the site key and the secret key work together.");
+      fail("Add both keys: the site key and the secret key work together.");
     }
     // a masked secret reaches updateStoreSetting as the mask, which keeps the stored one (§D.10)
     const saved = await updateStoreSetting(ctx.scope, "turnstile", masked ? { ...v, secretKey: input.secretKey } : v, settingsActor(ctx.actor));
@@ -154,8 +154,9 @@ export async function saveTurnstileAction(input: Partial<SettingInput<"turnstile
 const AuditQuery = z.object({ beforeId: z.number().int().positive().optional(), area: z.enum(AUDIT_AREAS).optional() });
 
 export async function loadAuditAction(opts: { beforeId?: number; area?: string }): Promise<ActionResult<{ items: AuditRow[]; nextBefore: number | null }>> {
-  return storeAction("audit.read", async ({ scope }) => {
+  return storeAction("audit.read", async (ctx) => {
     const parsed = AuditQuery.parse({ beforeId: opts.beforeId, area: opts.area || undefined });
-    return auditPage(scope, { ...parsed, limit: 50 });
+    // T1's tenant reader: staff rows carry a display name only, never an e-mail, a user id or a hidden note (§F.5)
+    return auditPage(ctx, { ...parsed, limit: 50 });
   });
 }

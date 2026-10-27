@@ -47,7 +47,7 @@ export async function resendToSheetAction(id: string): Promise<ActionResult<{ sy
     if (!(await requeueOrderSync(scope, orderId, actor))) fail("This order isn't sent to the sheet (bot-flagged orders never are).");
     const res = await syncPendingOrders(scope, { force: true, limit: 50, maxRetries: 2 });
     refresh(store.handle);
-    if (res.status === "not_configured") fail("Queued — but Google Sheets isn't connected yet, so it will be sent once you connect it.");
+    if (res.status === "not_configured") fail("Queued. Google Sheets isn't connected yet, so it will be sent once you connect it.");
     if (res.status === "error") fail(res.error ?? "Google Sheets refused the update. It stays queued and will retry.");
     return { synced: res.status === "ok" };
   });

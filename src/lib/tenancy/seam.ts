@@ -588,6 +588,29 @@ export function assertStepUp(ctx: StoreCtx): void {
   if (!ctx.stepUpUntil || ctx.stepUpUntil.getTime() <= Date.now()) throw new SeamError("step_up");
 }
 
+/** How the member stepped up, named again on the step-up-gated audit row (`meta.stepUp`, §F.5 rev 4). */
+export type StepUpMethod = "totp" | "password";
+
+/**
+ * A conditional §B.7 write: the secret writes under integrations.manage (connecting a Sheet, the export key, a CAPI
+ * token or test code, the export key in a ZIP) and the exports of customer data. `assertStepUp`, then the method for
+ * the audit row (an account with TOTP steps up with TOTP only, src/lib/auth/step-up.ts).
+ */
+export function requireStepUp(ctx: StoreCtx): StepUpMethod {
+  assertStepUp(ctx);
+  return ctx.user.totpEnabled ? "totp" : "password";
+}
+
+/** `requireStepUp` for a route handler: the 403 `{ error: "step_up" }` storeGuard answers (the UI opens the sheet). */
+export function stepUpGuard(ctx: StoreCtx): { ok: true; stepUp: StepUpMethod } | { ok: false; response: Response } {
+  try {
+    return { ok: true, stepUp: requireStepUp(ctx) };
+  } catch (err) {
+    if (err instanceof SeamError) return { ok: false, response: guardResponse(err.code, err.status) };
+    throw err;
+  }
+}
+
 /** The write guards after the grant: the platform kill switch for write keys, the step-up for the §B.7 keys. */
 async function guardWrites(ctx: StoreCtx, required: readonly StorePermission[], opts: { killSwitch: boolean }): Promise<void> {
   if (opts.killSwitch && required.some((p) => permissionDef(p).write) && (await platformReadOnly())) throw new SeamError("read_only", PLATFORM_READ_ONLY);

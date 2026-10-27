@@ -30,6 +30,7 @@ import { ConfirmDialog } from "../common/confirm-dialog";
 import { StatusChip } from "../common/status-chip";
 import { RelativeTime } from "../common/time";
 import { runAction, type ActionResult } from "../lib/action-result";
+import { clearDashboardDrafts } from "../lib/drafts";
 import { fullDate, shortDate } from "../lib/format";
 import { Field, SettingsSection, TextInput } from "./form-kit";
 
@@ -334,7 +335,7 @@ function DevicesSection({ devices, revoke, signOutOthers }: { devices: AccountDe
                 </div>
               </div>
               {d.current ? (
-                <form action={logout}>
+                <form action={logout} onSubmit={clearDashboardDrafts}>
                   <Button type="submit" variant="ghost" size="sm">
                     <LogOutIcon aria-hidden="true" className="rtl:rotate-180" />
                     {t("app.bar.sign_out")}

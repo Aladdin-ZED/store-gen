@@ -2,7 +2,8 @@
  * /api/app/<handle>/sheets/connect — the store's connected sheet (docs/STORE-SAAS.md §I.1; storeGuard per method).
  *   POST   { url }        → the store's current spreadsheet: reconnect at once (find/create & format the "Commandes"
  *                           tab, prove Editor access, save) · any other: start the ownership proof (SHT-09) and
- *                           answer { ok: true, proof: { code, expiresAt, serviceAccountEmail } }; POST ./verify ends it
+ *                           answer { ok: true, proof: { code, expiresAt, serviceAccountEmail } }; POST ./verify ends it.
+ *                           A fresh step-up first (403 { error: "step_up" }: the panel opens the step-up sheet, §B.7)
  *   PATCH  { enabled }    → pause / resume appending orders & pulling statuses (orders keep queuing while paused;
  *                           status edits made in the admin still reach rows already in the sheet)
  *   DELETE                → forget the connected sheet
@@ -24,7 +25,7 @@ import {
   SheetsConfigError,
   syncPendingOrders,
 } from "@/lib/sheets";
-import { storeGuard } from "@/lib/tenancy/seam";
+import { stepUpGuard, storeGuard } from "@/lib/tenancy/seam";
 import type { WriteScope } from "@/lib/tenancy/types";
 
 type Params = { params: Promise<{ store: string }> };
@@ -46,6 +47,9 @@ function pushQueued(scope: WriteScope, label: string): void {
 export async function POST(req: NextRequest, { params }: Params): Promise<Response> {
   const g = await storeGuard(req, (await params).store, "integrations.manage");
   if (!g.ok) return g.response;
+  // connecting a sheet is a secret write under integrations.manage: a fresh step-up (§B.7, SEC-17)
+  const up = stepUpGuard(g.ctx);
+  if (!up.ok) return up.response;
   const { scope, actor, store, user } = g.ctx;
   const gate = await rateLimit(storeBucket(scope, "sheets:connect", user.id), 20, 600);
   if (!gate.ok) return json({ ok: false, error: "rate_limited" }, 429, { "Retry-After": String(gate.retryAfter) });
@@ -58,7 +62,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
   const problem = sheetsConfigProblem();
   if (problem) return json({ ok: false, error: "not_configured", message: explain(problem, email) }, 409);
   try {
-    const r = await startSheetConnect(scope, parsed.data.url, actor, { currency: store.currency });
+    const r = await startSheetConnect(scope, parsed.data.url, actor, { currency: store.currency, stepUp: up.stepUp });
     if (r.kind === "proof") return json({ ok: true, proof: { code: r.code, expiresAt: r.expiresAt, serviceAccountEmail: email } });
     pushQueued(scope, "connect-sync");
     return json({ ok: true, created: r.result.created, spreadsheetTitle: r.result.spreadsheetTitle, sheet: r.sheet });

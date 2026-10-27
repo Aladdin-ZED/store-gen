@@ -13,6 +13,7 @@ import { ConfirmDialog } from "../common/confirm-dialog";
 import { StatusChip } from "../common/status-chip";
 import { RelativeTime } from "../common/time";
 import { runAction } from "../lib/action-result";
+import { useStoreStepUp } from "../shell/step-up";
 import { SettingsSection } from "./form-kit";
 
 export function ExportKeyCard({ initial }: { initial: ExportKeyInfo }) {
@@ -21,11 +22,13 @@ export function ExportKeyCard({ initial }: { initial: ExportKeyInfo }) {
   const [saving, setSaving] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const stepUp = useStoreStepUp();
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    const next = await runAction(saveExportKeyAction(raw), { success: "Export key saved — PHP exports can now include it" });
+    // a secret write: a fresh step-up first (§B.7), the sheet opens on the answer and the save runs again
+    const next = await runAction(stepUp.action(() => saveExportKeyAction(raw)), { success: "Export key saved. PHP exports can now include it" });
     setSaving(false);
     if (next) {
       setInfo(next);

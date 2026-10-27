@@ -143,8 +143,9 @@ ok("health throttle: first write, changes and 10 min", healthWriteDue(undefined,
   ok("proof code: random codes have the format", Array.from({ length: 20 }, () => newProofCode()).every((c) => /^SG-[0-9A-HJKMNP-TV-Z]{10}$/.test(c)));
   const h = proofHash(code);
   ok("proof hash: sha256 hex, trimmed and case-insensitive", /^[0-9a-f]{64}$/.test(h) && proofHash(` ${code.toLowerCase()} `) === h);
-  ok("proof found: the code alone in a cell of the first rows", proofFound([["", ""], ["x", code]], h));
-  ok("proof found: inside other text, any case", proofFound([[`ma boutique ${code.toLowerCase()} merci`]], h));
+  // the values are the spreadsheet's title and its tab titles (src/lib/sheets/connect.ts: never a cell, SHT-09)
+  ok("proof found: the code as a tab's name", proofFound([["Ventes", "Commandes", code]], h));
+  ok("proof found: inside the spreadsheet's name, any case", proofFound([[`ma boutique ${code.toLowerCase()} merci`, "Feuille 1"]], h));
   ok("proof not found: another code, a near miss, numbers, empty", !proofFound([[newProofCode(), code.slice(0, -1), "SG-01234567YY"], [12345]], h) && !proofFound(undefined, h) && !proofFound([[]], h));
 }
 

@@ -28,6 +28,7 @@ export function storeClientInfo(ctx: StoreCtx): StoreClientInfo {
     mode: store.mode,
     status: store.status,
     role: ctx.membership.role,
+    viewerId: ctx.user.id,
     grants: STORE_PERMISSION_KEYS.filter((p) => ctx.can(p)),
     liveBase: liveBaseOf(store),
     timeZone: store.timezone,

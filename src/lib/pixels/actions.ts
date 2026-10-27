@@ -27,6 +27,7 @@ import { TEST_MINUTES, findEntry, idsOnly, trackingRefs, type PixelLibraryView, 
 import {
   PixelError,
   ensureInLibrary,
+  entrySetsSecret,
   getLibrary,
   liveTracking,
   pixelLibraryView,
@@ -40,7 +41,7 @@ import { trackingIds, withTrackingIds } from "@/lib/pixels/tracking";
 import { invalidatePixelUsage, livePagePixels, pixelUsageOf, recentPagesWithPixels, type LivePagePixels, type PixelPageUse, type RecentPagePixels } from "@/lib/pixels/usage.server";
 import { PublishError, publishTrackingOnly } from "@/lib/render/publish.server";
 import { getStoreSetting, getStoreSettings } from "@/lib/settings";
-import { storeAction } from "@/lib/tenancy/seam";
+import { requireStepUp, storeAction } from "@/lib/tenancy/seam";
 import { byId } from "@/lib/tenancy/sql";
 import type { ActionResult, StoreCtx, WritePermission } from "@/lib/tenancy/types";
 import { storeUrl } from "@/lib/urls";
@@ -93,11 +94,16 @@ function entryKeys(input: unknown): WritePermission[] {
   return secret ? ["pixels.manage", "integrations.manage"] : ["pixels.manage"];
 }
 
-/** Add (≤ 100) or edit a pixel: label, token ("" remove · mask keep · new replace), test code. */
+/**
+ * Add (≤ 100) or edit a pixel: label, token ("" remove · mask keep · new replace), test code. Planting or replacing a
+ * token or a test code is a secret write under integrations.manage: a fresh step-up first (§B.7, SEC-17), named on
+ * the `integrations.conversions.changed` row. A label edit, a kept mask or a removal needs none.
+ */
 export async function savePixelEntryAction(input: z.input<typeof EntryInput>): Promise<ActionResult<{ created: boolean; view: PixelLibraryView }>> {
   return storeAction(entryKeys(input), async (ctx) => {
     const v = EntryInput.parse(input);
-    const res = await guarded(() => savePixelEntry(ctx.scope, v, ctx.actor));
+    const stepUp = entrySetsSecret(v) ? requireStepUp(ctx) : undefined;
+    const res = await guarded(() => savePixelEntry(ctx.scope, v, ctx.actor, { stepUp }));
     refresh(ctx.store);
     return { created: res.created, view: await viewOf(ctx, { fresh: true }) };
   });
@@ -339,7 +345,7 @@ export async function sendPixelTestAction(input: z.input<typeof SendTestInput>):
     const typed = v.token.trim();
     const token = !typed || isMask(typed) ? ownToken(secrets, v.platform, pixelId) : typed;
     if (!token) fail(v.platform === "meta" ? "Add the Conversions API token first." : "Add the Events API access token first.");
-    if (!TOKEN_RE.test(token)) fail("This doesn't look like a valid token — paste it again.");
+    if (!TOKEN_RE.test(token)) fail("This doesn't look like a valid token. Paste it again.");
     const res = await sendTestEvent({
       platform: v.platform,
       pixelId,

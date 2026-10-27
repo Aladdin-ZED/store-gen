@@ -1,25 +1,26 @@
 import "server-only";
 /**
- * Account security helpers for Settings → Security / Team: the signed-in devices of a user,
- * revoking one of them, temporary passwords for invited users, the store's audit log with user names, and
- * the owner's view of the proxy headers the client IP is read from.
+ * Account security helpers: the signed-in devices of a user, revoking one of them, temporary passwords for invited
+ * users, the store's audit log (Settings → Audit log) and the console's view of the proxy headers the client IP is
+ * read from.
  *
- * Multi-tenant (docs/STORE-SAAS.md §E.3, §F.5, ADM-25): the audit log is the scope's store only, and its target labels
- * resolve only the store's own pages and members (never a name from another store). Devices and sessions are the
+ * Multi-tenant (docs/STORE-SAAS.md §E.3, §F.5, ADM-25): the audit log is the ctx's store only, read through T1's tenant
+ * reader (staff rows redacted to a display name), and its target labels resolve only the store's own pages and members
+ * (never a name from another store). Devices and sessions are the
  * signed-in user's own (no store).
  */
 import { randomInt } from "node:crypto";
-import { and, desc, eq, gt, inArray, like, lt, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, inArray } from "drizzle-orm";
 import { headers } from "next/headers";
-import { audit } from "@/lib/audit";
+import { audit, listStoreAudit } from "@/lib/audit";
 import { adminIpAllowlist } from "@/lib/auth/config";
 import { allowlistAddress } from "@/lib/auth/gate";
 import { db } from "@/lib/db/client";
-import { auditLog, pages, sessions, storeMembers, users } from "@/lib/db/schema";
+import { pages, sessions, storeMembers, users } from "@/lib/db/schema";
 import { deleteSession } from "@/lib/auth/session";
 import { clientIpReport, type ClientIpReport } from "@/lib/security/ip";
 import { inStore, whereStore } from "@/lib/tenancy/sql";
-import type { StoreScope } from "@/lib/tenancy/types";
+import type { Actor, StoreCtx, StoreScope } from "@/lib/tenancy/types";
 
 export interface DeviceSession {
   id: string;
@@ -100,32 +101,29 @@ export interface AuditRow {
   targetLabel: string | null;
   meta: Record<string, unknown> | null;
   createdAt: string;
-  user: { id: string; name: string; email: string } | null;
+  /**
+   * Who acted, as a display name only: the member's name, or the platform staff member's on a platform or
+   * impersonation row (§F.5, PLA-§8.1: never an e-mail, a user id or an IP hash). Null for a job or a deleted user.
+   */
+  user: { name: string } | null;
+  actorKind: Actor["kind"];
 }
 
 /** Audit areas offered as filters (action prefixes). */
 export const AUDIT_AREAS = ["auth", "page", "orders", "blocklist", "media", "settings", "export"] as const;
 export type AuditArea = (typeof AUDIT_AREAS)[number];
 
-/** The store's audit entries (newest first, keyset-paginated) with the acting user resolved. */
-export async function auditPage(
-  scope: StoreScope,
-  opts: { beforeId?: number; area?: AuditArea; userId?: string; limit?: number },
-): Promise<{ items: AuditRow[]; nextBefore: number | null }> {
+/**
+ * The store's audit entries (newest first, keyset-paginated) for its own Settings → Audit log: T1's tenant reader
+ * (`listStoreAudit`, `audit.read`), so a platform or impersonation row shows the staff member's display name only
+ * and a staff note the store was not shown stays hidden (`tenantAuditEntry`); target labels resolve the store's own
+ * pages and members only.
+ */
+export async function auditPage(ctx: StoreCtx, opts: { beforeId?: number; area?: AuditArea; limit?: number }): Promise<{ items: AuditRow[]; nextBefore: number | null }> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
-  const where: SQL[] = [];
-  if (opts.beforeId !== undefined) where.push(lt(auditLog.id, opts.beforeId));
-  if (opts.userId) where.push(eq(auditLog.userId, opts.userId));
-  if (opts.area) where.push(like(auditLog.action, `${opts.area}.%`));
-  const rows = await db
-    .select({ id: auditLog.id, action: auditLog.action, target: auditLog.target, meta: auditLog.meta, createdAt: auditLog.createdAt, userId: auditLog.userId, name: users.name, email: users.email })
-    .from(auditLog)
-    .leftJoin(users, eq(users.id, auditLog.userId))
-    .where(whereStore(auditLog, scope, ...where))
-    .orderBy(desc(auditLog.id))
-    .limit(limit + 1);
+  const rows = await listStoreAudit(ctx, { beforeId: opts.beforeId, area: opts.area, limit: limit + 1 });
   const page = rows.slice(0, limit);
-  const labels = await targetLabels(scope, page);
+  const labels = await targetLabels(ctx.scope, page);
   return {
     items: page.map((e) => ({
       id: e.id,
@@ -134,7 +132,8 @@ export async function auditPage(
       targetLabel: (e.target && labels.get(e.target)) ?? null,
       meta: e.meta ?? null,
       createdAt: e.createdAt.toISOString(),
-      user: e.userId && e.name && e.email ? { id: e.userId, name: e.name, email: e.email } : null,
+      user: e.actorName ? { name: e.actorName } : null,
+      actorKind: e.actorKind,
     })),
     nextBefore: rows.length > limit ? (page[page.length - 1]?.id ?? null) : null,
   };
@@ -165,8 +164,8 @@ async function targetLabels(scope: StoreScope, rows: { action: string; target: s
 }
 
 /**
- * The current request as the app sees it behind the host's proxies (Settings → Security, owners
- * only): the address rate limits and the order blocklist use must be the viewer's own public IP,
+ * The current request as the app sees it behind the host's proxies (the console home, `health.read`; P1's
+ * /admin/health takes it over): the address rate limits and the order blocklist use must be the viewer's own public IP,
  * or TRUSTED_PROXY_HOPS does not match the proxies in front of the app. The viewer's own request
  * only; nothing here is logged or stored.
  */

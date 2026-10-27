@@ -16,10 +16,11 @@ const WIZARD_LOCALES = new Set(["ar", "fr", "en"]);
 /**
  * The generator: drop product photos → on-device reading → product facts → three art-directed
  * directions → a draft page in the builder. Everything heavy runs in the member's browser; the store's
- * AI choices, market and page defaults come from the store (GEN-01), never from the platform.
+ * AI choices, market and page defaults come from the store (GEN-01), never from the platform. `pages.write` +
+ * `ai.use` (§I.1).
  */
 export default async function GeneratePage({ params }: { params: Params }) {
-  const ctx = await requireStoreMember({ handle: (await params).store, permission: "pages.write" });
+  const ctx = await requireStoreMember({ handle: (await params).store, permission: ["pages.write", "ai.use"] });
   const [{ store_ai: ai, defaults }, store] = await Promise.all([getStoreSettings(ctx.scope, ["store_ai", "defaults"]), storeInfoOf(ctx.scope, ctx.store)]);
   const storeAssets = await previewAssetsFor(ctx.scope, [], [store.logo]);
   // the first page locale the store offers, else its default locale (§D.10 `defaults.locales`)

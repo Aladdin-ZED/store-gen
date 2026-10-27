@@ -249,7 +249,12 @@ export function AuditLog({
                           </span>
                           <div className="grid min-w-0 flex-1 gap-1">
                             <p className="text-sm text-pretty">
-                              <span className="font-medium">{row.user?.name ?? (row.action.startsWith("auth.") ? "Someone" : "System")}</span>{" "}
+                              <span className="font-medium">{row.user?.name ?? (row.action.startsWith("auth.") ? "Someone" : "System")}</span>
+                              {(row.actorKind === "platform" || row.actorKind === "impersonation") && (
+                                <span className="ms-1.5 inline-flex h-5 items-center rounded-md bg-foreground/[0.06] px-1.5 align-[0.08em] text-[0.68rem] font-medium text-muted-foreground">
+                                  Platform team
+                                </span>
+                              )}{" "}
                               <span className={cn(problem ? "text-destructive" : "text-foreground/80")}>{phrase(row.action)}</span>
                               {row.targetLabel && row.targetLabel !== row.user?.name ? (
                                 <span className="font-medium"> “{row.targetLabel}”</span>

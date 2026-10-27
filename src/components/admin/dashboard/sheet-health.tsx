@@ -65,7 +65,8 @@ export function SheetHealthCard({ health, canSync, className }: { health: SheetH
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Link
-                    href={store.href(health.failed > 0 ? "/orders?sheet=failed" : "/integrations/sheets")}
+                    // the Sheets screen is integrations.manage's (§I.1); everyone with this card can open the failed orders
+                    href={store.href(health.failed > 0 || !store.can("integrations.manage") ? "/orders?sheet=failed" : "/integrations/sheets")}
                     className="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-medium text-warn-ink hover:underline"
                   >
                     <AlertTriangleIcon className="size-3.5 shrink-0" />
@@ -115,9 +116,11 @@ export function SheetHealthCard({ health, canSync, className }: { health: SheetH
               ? "Paste your sheet link once — orders flow in with statuses your agents can edit."
               : "Google Sheets isn't available on this platform yet."}
           </p>
-          <Button asChild size="sm" variant="outline" className="rounded-full">
-            <Link href={store.href("/integrations/sheets")}>Set up Google Sheets</Link>
-          </Button>
+          {store.can("integrations.manage") && (
+            <Button asChild size="sm" variant="outline" className="rounded-full">
+              <Link href={store.href("/integrations/sheets")}>Set up Google Sheets</Link>
+            </Button>
+          )}
         </div>
       )}
     </section>

@@ -2,11 +2,13 @@
  * The ownership proof of a Google Sheet (docs/STORE-SAAS.md TENANCY-MAP §7.7, OPE-§19.3; SHT-09), the pure part.
  * Every store's sheet is shared with the one platform service account, so a pasted link alone proves nothing:
  * store A could paste store B's link. Connecting a sheet the store does not already use therefore asks the owner to
- * type a one-time code into the first rows of the sheet; only someone who can edit the sheet can do that.
+ * put a one-time code in the spreadsheet's name or in a tab's name: only an editor of the spreadsheet can rename it.
+ * Never in a cell: the orders tab's rows hold what shoppers typed (an address, a note), so an attacker could place
+ * the code there by ordering from the victim's own page (T4 review).
  *
  *   const code = newProofCode();                       // "SG-7K2QX9M4TB", shown once
  *   const pending = { codeHash: proofHash(code), … }   // stored: the hash, never the code
- *   proofFound(cells, pending.codeHash)                // the cells read back (A1:AZ3)
+ *   proofFound([titles], pending.codeHash)             // the spreadsheet title and every tab title, read back
  *
  * Framework-free (the conversions check runs it offline).
  */
@@ -18,9 +20,6 @@ const CODE_RE = /SG-[0-9A-HJKMNP-TV-Z]{10}/gi;
 
 /** How long a code stays valid. */
 export const PROOF_TTL_MS = 24 * 60 * 60_000;
-/** The cells searched for the code: the first three rows, columns A to AZ (one read). */
-export const PROOF_RANGE = "A1:AZ3";
-
 /** "SG-" + 10 Crockford base32 characters (50 random bits). */
 export function newProofCode(bytes: Uint8Array = randomBytes(10)): string {
   let out = "";
@@ -35,7 +34,7 @@ export function proofHash(code: string): string {
 
 const sameHash = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 
-/** True when one of the cells holds the code whose hash is `codeHash` (alone or inside other text). */
+/** True when one of the values (the titles) holds the code whose hash is `codeHash` (alone or inside other text). */
 export function proofFound(cells: readonly (readonly unknown[])[] | undefined, codeHash: string): boolean {
   for (const row of cells ?? []) {
     for (const cell of row) {

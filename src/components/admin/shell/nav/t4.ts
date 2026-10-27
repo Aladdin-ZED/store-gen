@@ -1,6 +1,7 @@
 /**
  * The store dashboard's R1.0 navigation (docs/STORE-SAAS.md §I.1, §I.3; T4's dashboard move): today's screens at
- * their `/app/<handle>` homes, contributed to the tenant registry (./index.ts) like every track's items. Isomorphic.
+ * their `/app/<handle>` homes, contributed to the tenant registry (./index.ts) like every track's items, each with
+ * its screen's §I.1 key (exports `export.create`, Sheets `integrations.manage`, pixels `pixels.manage`). Isomorphic.
  *
  * Labels are message keys. Until the catalogs carry them (the R1 tracks' `src/lib/i18n/admin/<locale>/<track>.ts`
  * files, P0), `NAV_FALLBACK_LABELS` gives the English text, so the shell never shows a raw key; P2 takes these items
@@ -16,10 +17,10 @@ export const nav: NavContribution[] = [
   { group: "landing", order: 20, item: { id: "generate", label: "nav.generate", href: (h) => appHref(h, "/generate"), icon: "Sparkles", permission: "pages.write", mode: "landing" } },
   { group: "library", order: 10, item: { id: "media", label: "nav.media", href: (h) => appHref(h, "/media"), icon: "Images", permission: "media.read" } },
   { group: "library", order: 20, item: { id: "history", label: "nav.history", href: (h) => appHref(h, "/history"), icon: "History", permission: "pages.read" } },
-  { group: "library", order: 30, item: { id: "exports", label: "nav.exports", href: (h) => appHref(h, "/exports"), icon: "PackageOpen", permission: "pages.read", mode: "landing" } },
+  { group: "library", order: 30, item: { id: "exports", label: "nav.exports", href: (h) => appHref(h, "/exports"), icon: "PackageOpen", permission: "export.create", mode: "landing" } },
   { group: "team", order: 10, item: { id: "team", label: "nav.team", href: (h) => appHref(h, "/team"), icon: "UsersRound", permission: "members.read" } },
-  { group: "connect", order: 10, item: { id: "sheets", label: "nav.sheets", href: (h) => appHref(h, "/integrations/sheets"), icon: "Sheet", permission: "settings.read" } },
-  { group: "connect", order: 20, item: { id: "pixels", label: "nav.pixels", href: (h) => appHref(h, "/integrations/pixels"), icon: "Radar", permission: "settings.read" } },
+  { group: "connect", order: 10, item: { id: "sheets", label: "nav.sheets", href: (h) => appHref(h, "/integrations/sheets"), icon: "Sheet", permission: "integrations.manage" } },
+  { group: "connect", order: 20, item: { id: "pixels", label: "nav.pixels", href: (h) => appHref(h, "/integrations/pixels"), icon: "Radar", permission: "pixels.manage" } },
   { group: "settings", order: 10, item: { id: "settings", label: "nav.settings", href: (h) => appHref(h, "/settings"), icon: "Settings2", permission: "settings.read" } },
 ];
 

@@ -386,9 +386,11 @@ export interface BuiltExport {
  * Records the store's export (new public key) and returns its ZIP as a stream. The row's size is filled in
  * when the stream completes; an interrupted download deletes the row (its archive is unusable). A PHP export
  * carries the store's own sheet and, when asked and allowed (`opts.canEmbedKey`, integrations.manage), the
- * store's own export key; never a platform key (EXP-03).
+ * store's own export key; never a platform key (EXP-03). The key has Editor rights on the store's orders sheet, so
+ * embedding it is a secret write under integrations.manage: the caller passes the method of the member's fresh
+ * step-up (`opts.stepUp`, §B.7, SEC-17; the route's `stepUpGuard`), named on the `export.created` row.
  */
-export async function buildExport(scope: WriteScope, req: ExportRequest, actor: Actor, opts: { canEmbedKey: boolean }): Promise<BuiltExport> {
+export async function buildExport(scope: WriteScope, req: ExportRequest, actor: Actor, opts: { canEmbedKey: boolean; stepUp?: "totp" | "password" }): Promise<BuiltExport> {
   if (!isExportMode(req.mode)) throw new ExportError("invalid", "Unknown export mode.");
   if (req.mode === "connected" && !normalizeAllowedOrigins(req.allowedOrigins).origins.length) {
     throw new ExportError("invalid", "Add the domain where the page will be hosted.", { allowedOrigins: "Add the domain where the page will be hosted." });
@@ -396,6 +398,7 @@ export async function buildExport(scope: WriteScope, req: ExportRequest, actor: 
   let embedded: ExportKey | undefined;
   if (req.options.embedServiceAccount) {
     if (!opts.canEmbedKey) throw new ExportError("forbidden", "Only owners and admins can include the Google key in an export.");
+    if (!opts.stepUp) throw new ExportError("forbidden", "Confirm it's you before including the Google key in an export.");
     const sa = await storeExportKey(scope);
     if (!sa.key) throw new ExportError("unavailable", sa.problem, { embedServiceAccount: sa.problem });
     embedded = sa.key;
@@ -450,6 +453,7 @@ export async function buildExport(scope: WriteScope, req: ExportRequest, actor: 
       files: bundle.files.length,
       // which key went out, so a leaked ZIP can be matched to the key to delete in Google Cloud (never the key itself)
       serviceAccount: embedded ? { email: embedded.email, keyId: embedded.keyId } : null,
+      ...(embedded && opts.stepUp ? { stepUp: opts.stepUp } : {}),
     },
   });
 

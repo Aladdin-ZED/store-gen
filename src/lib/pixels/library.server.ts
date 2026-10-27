@@ -153,6 +153,15 @@ export interface SaveEntryInput {
   testCode?: string;
 }
 
+/**
+ * True when the input plants or replaces a server secret (a new token, a test code): the secret writes under
+ * integrations.manage that need a fresh step-up (§B.7, SEC-17). A mask (keep) or "" (remove) plants nothing. Pure.
+ */
+export function entrySetsSecret(input: Pick<SaveEntryInput, "token" | "testCode">): boolean {
+  const token = input.token?.trim() ?? "";
+  return (token !== "" && !isMask(token)) || (input.testCode?.replace(/\s+/g, "") ?? "") !== "";
+}
+
 const cleanLabel = (s: string) =>
   s
     .replace(/[\u0000-\u001f\u007f]/g, " ")
@@ -164,7 +173,7 @@ const cleanLabel = (s: string) =>
  * Add a pixel to the store's library (or edit one: the id is immutable — to move pages to another id
  * use Replace). A changed token sets the pixel's health to "unverified" until a send confirms it.
  */
-export async function savePixelEntry(scope: WriteScope, input: SaveEntryInput, actor: Actor): Promise<{ created: boolean }> {
+export async function savePixelEntry(scope: WriteScope, input: SaveEntryInput, actor: Actor, opts: { stepUp?: "totp" | "password" } = {}): Promise<{ created: boolean }> {
   const platform = input.platform;
   const id = normalizePixelId(platform, input.id);
   if (!PIXEL_ID_RE[platform].test(id)) throw new PixelError("invalid_id", ID_HELP[platform]);
@@ -181,26 +190,44 @@ export async function savePixelEntry(scope: WriteScope, input: SaveEntryInput, a
     const next: TrackingSecrets = { ...secrets, [TOKEN_KEY[platform]]: { ...secrets[TOKEN_KEY[platform]] }, [CODE_KEY[platform]]: { ...secrets[CODE_KEY[platform]] } };
     const tokens = next[TOKEN_KEY[platform]] as Record<string, string>;
     const codes = next[CODE_KEY[platform]] as Record<string, string>;
+    const hadCode = !!codes[id];
     if (input.token !== undefined) {
       const t = input.token.trim();
       if (!t) {
         tokenChanged = !!tokens[id];
         delete tokens[id];
       } else if (isMask(t)) {
-        if (!tokens[id]) throw new PixelError("token_invalid", "The saved token of this pixel is no longer there — paste it again.");
+        if (!tokens[id]) throw new PixelError("token_invalid", "The saved token of this pixel is no longer there. Paste it again.");
       } else {
-        if (!TOKEN_RE.test(t)) throw new PixelError("token_invalid", "This doesn't look like a valid token — paste it again.");
+        if (!TOKEN_RE.test(t)) throw new PixelError("token_invalid", "This doesn't look like a valid token. Paste it again.");
         tokenChanged = tokens[id] !== t;
         tokens[id] = t;
       }
     }
+    let codeChanged = false;
     if (input.testCode !== undefined) {
       const c = input.testCode.replace(/\s+/g, "").toUpperCase();
-      if (!c) delete codes[id];
-      else if (!TEST_CODE_RE.test(c)) throw new PixelError("token_invalid", "4–20 capital letters and digits, e.g. TEST12345.");
-      else codes[id] = c;
+      if (!c) {
+        codeChanged = hadCode;
+        delete codes[id];
+      } else if (!TEST_CODE_RE.test(c)) throw new PixelError("token_invalid", "4–20 capital letters and digits, e.g. TEST12345.");
+      else {
+        codeChanged = codes[id] !== c;
+        codes[id] = c;
+      }
     }
     await setStoreSetting(scope, "tracking_secrets", next, settingsActor(actor));
+    // the secret write's own row (§F.5 rev 4): what changed, never a value; the step-up method when one was asked
+    if (tokenChanged || codeChanged) {
+      await auditIn(scope, actor, "integrations.conversions.changed", {
+        target: pixelKey(platform, maskPixelId(id)),
+        meta: {
+          ...(tokenChanged ? { serverToken: tokens[id] ? "set" : "removed" } : {}),
+          ...(codeChanged ? { testEventCode: codes[id] ? "set" : "removed" } : {}),
+          ...(opts.stepUp ? { stepUp: opts.stepUp } : {}),
+        },
+      });
+    }
     if (tokenChanged && tokens[id]) await recordPixelHealth(scope, [{ platform, id, state: "unverified", testMode: false }]);
     if (tokenChanged && !tokens[id]) await forgetPixelHealth(scope, [pixelKey(platform, id)]);
   }

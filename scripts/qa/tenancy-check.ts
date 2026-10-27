@@ -4,7 +4,8 @@
  * stores, a signed-in outsider, platform staff without a membership and staff "viewing as" a store each try every
  * read and write against A's ids and A's handle: pages, versions, orders, leads, blocklist, media, exports, pixels,
  * Sheets, settings, team, search. Every attempt must answer exactly what a missing id (or an unknown handle) answers,
- * leave A's rows byte-identical and return none of A's canaries.
+ * leave A's rows byte-identical and return none of A's canaries. The attackers hold a fresh step-up (§B.7, `armed`):
+ * the strongest stolen session, so a step-up gate never hides a handler's body from the attack.
  *
  *   npx tsx scripts/qa/tenancy-check.ts [--db cod_test_tenancy_check] [--verbose] [--keep]
  *
@@ -40,6 +41,11 @@
  *    action, route or page payload; staff viewing B attacking A's paths, handle and ids like any member of B
  *  - account and console: the pages outside /app/<handle> (picker, account, new store, console, sign-in) and the
  *    account actions that take an id (another user's session, another store's id, another store's handle)
+ *  - T4 review: the tenant audit screen and action never carry a staff note the store was not shown, a staff e-mail
+ *    or a staff user id (§F.5); the Sheets proof code planted in A's order rows proves nothing (SHT-09: titles only);
+ *    the integrations secrets and the exports of customer data ask for a fresh step-up (§B.7: none or a stale one
+ *    refused, a fresh one works and is named on the audit row); the cron pulls a store whose orders are all synced
+ *    (SHT-11); the agent's R1.0 queue (§A.3.2 interim); the store-named titles of the overview and the builder
  *  - plug-ins: every scripts/qa/tenancy-cases/<track>.ts (`export const cases: TenancyCase[]`, DES-R13)
  *
  * All real code (R1.0: T1, T2, T3 and T4 merged): no adapter, no stand-in. A call that still ends in a typed stub
@@ -166,6 +172,8 @@ export interface NetCall {
 export const network: NetCall[] = [];
 /** spreadsheetId → rows (A2:M) the fake Sheets API answers */
 export const fakeSheets = new Map<string, unknown[][]>();
+/** spreadsheetId → its title and tab titles (the metadata GET; default "Orders" with one "Commandes" tab) */
+export const fakeSheetMeta = new Map<string, { title: string; tabs: string[] }>();
 {
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -178,14 +186,18 @@ export const fakeSheets = new Map<string, unknown[][]>();
     if (u.host === "oauth2.googleapis.com") return json({ access_token: "tenancy-check-token", expires_in: 3600 });
     if (u.host === "sheets.googleapis.com") {
       const m = /^\/v4\/spreadsheets\/([^/]+)(\/.*)?$/.exec(u.pathname);
-      const id = m ? decodeURIComponent(m[1]!) : "";
+      // "<id>:batchUpdate" (a method suffix) names the same spreadsheet
+      const id = m ? decodeURIComponent(m[1]!).replace(/:[A-Za-z]+$/, "") : "";
       const rows = fakeSheets.get(id);
       if (!rows) return json({ error: { code: 404, message: "Requested entity was not found.", status: "NOT_FOUND" } }, 404);
       const rest = m?.[2] ?? "";
       if (method === "GET" && rest.startsWith("/values/")) {
         return json({ values: u.searchParams.get("majorDimension") === "COLUMNS" ? [rows.map((r) => r[0])] : rows });
       }
-      if (method === "GET") return json({ spreadsheetId: id, properties: { title: "Orders" }, sheets: [{ properties: { sheetId: 0, title: "Commandes" } }] });
+      if (method === "GET") {
+        const meta = fakeSheetMeta.get(id) ?? { title: "Orders", tabs: ["Commandes"] };
+        return json({ spreadsheetId: id, properties: { title: meta.title }, sheets: meta.tabs.map((title, sheetId) => ({ properties: { sheetId, title } })) });
+      }
       return json({ spreadsheetId: id, replies: [], updates: { updatedRows: 0 } });
     }
     // CAPI and everything else: refused, recorded
@@ -254,6 +266,8 @@ export function notApplicable(name: string, reason: string): void {
 
 /** who calls: a signed-in user (optionally with a fresh step-up, §B.7), a real session row, or nobody */
 export type Who = { userId: string; stepUpAt?: Date } | { sessionToken: string } | { anonymous: true };
+/** A signed-in user who stepped up just now (§B.7): the attackers and the granted roles (a gate never hides a body). */
+export const armed = (userId: string): Who => ({ userId, stepUpAt: new Date() });
 
 export interface Outcome<T = unknown> {
   ok: boolean;
@@ -1307,16 +1321,16 @@ export async function actionSuite(kit: Kit): Promise<void> {
       // a self action of a member of B would act on that member (leave B): A's path below is the attack
       if (c.self && who.role !== null) {
         if (who.userId === fx.dual) continue;
-        const onA = await call({ userId: who.userId }, appPath(fx.A.handle, c.path), () => fn(...structuredClone(args)));
-        const onGhost = await call({ userId: who.userId }, appPath(fx.ghostHandle, c.path), () => fn(...structuredClone(args)));
+        const onA = await call(armed(who.userId), appPath(fx.A.handle, c.path), () => fn(...structuredClone(args)));
+        const onGhost = await call(armed(who.userId), appPath(fx.ghostHandle, c.path), () => fn(...structuredClone(args)));
         check(`${c.id} · ${who.label} · A's path: not_found`, refusal(onA) === "not_found", answerOf(onA));
         check(`${c.id} · ${who.label} · A's path: same answer as an unknown handle`, text(answerOf(onA)) === text(answerOf(onGhost)), { onA: answerOf(onA), onGhost: answerOf(onGhost) });
         continue;
       }
-      const real = await call({ userId: who.userId }, own, () => fn(...structuredClone(args)));
+      const real = await call(armed(who.userId), own, () => fn(...structuredClone(args)));
       const label = `${c.id} · ${who.label} · B's path, A's ids`;
       if (namesA) {
-        const ghost = await call({ userId: who.userId }, own, () => fn(...structuredClone(ghostArgs)));
+        const ghost = await call(armed(who.userId), own, () => fn(...structuredClone(ghostArgs)));
         if (ranReal(label, real, ghost)) check(`${label}: same answer as a missing id`, text(answerOf(real)) === text(unghost(fx, answerOf(ghost))), { real: answerOf(real), ghost: answerOf(ghost) });
       } else ranReal(label, real);
       const leaked = leaks(fx, [answerOf(real), real.revalidated], { sent: args });
@@ -1325,8 +1339,8 @@ export async function actionSuite(kit: Kit): Promise<void> {
 
       // 2. A's path: the neutral not_found, as for an unknown handle (the member of both is A's viewer: below)
       if (who.userId === fx.dual) continue;
-      const onA = await call({ userId: who.userId }, appPath(fx.A.handle, c.path), () => fn(...structuredClone(args)));
-      const onGhost = await call({ userId: who.userId }, appPath(fx.ghostHandle, c.path), () => fn(...structuredClone(args)));
+      const onA = await call(armed(who.userId), appPath(fx.A.handle, c.path), () => fn(...structuredClone(args)));
+      const onGhost = await call(armed(who.userId), appPath(fx.ghostHandle, c.path), () => fn(...structuredClone(args)));
       const la = `${c.id} · ${who.label} · A's path`;
       check(`${la}: not_found`, refusal(onA) === "not_found", answerOf(onA));
       check(`${la}: same answer as an unknown handle`, text(answerOf(onA)) === text(answerOf(onGhost)), { onA: answerOf(onA), onGhost: answerOf(onGhost) });
@@ -1341,8 +1355,8 @@ export async function actionSuite(kit: Kit): Promise<void> {
     // B's own record with A's: what the same call with a missing id answers
     if (c.mixed) {
       const mixed = await c.mixed(fx, fresh);
-      const real = await call({ userId: fx.B.members.owner }, appPath(fx.B.handle, c.path), () => fn(...structuredClone(mixed)));
-      const ghost = await call({ userId: fx.B.members.owner }, appPath(fx.B.handle, c.path), () => fn(...ghostify(fx, structuredClone(mixed))));
+      const real = await call(armed(fx.B.members.owner), appPath(fx.B.handle, c.path), () => fn(...structuredClone(mixed)));
+      const ghost = await call(armed(fx.B.members.owner), appPath(fx.B.handle, c.path), () => fn(...ghostify(fx, structuredClone(mixed))));
       const label = `${c.id} · B owner · B's record with A's`;
       if (ranReal(label, real, ghost)) check(`${label}: same answer as a missing id`, text(answerOf(real)) === text(unghost(fx, answerOf(ghost))), { real: answerOf(real), ghost: answerOf(ghost) });
       check(`${label}: no canary of A`, leaks(fx, answerOf(real), { sent: mixed }).length === 0, leaks(fx, answerOf(real), { sent: mixed }));
@@ -1356,13 +1370,14 @@ export async function actionSuite(kit: Kit): Promise<void> {
       const ownArgs = await c.own(fx, fresh);
       // a self action runs as a fresh member of B (the fixture's members stay)
       const caller = c.self ? await fresh.member(fx.B, role) : fx.B.members[role];
-      const r = await call({ userId: caller }, appPath(fx.B.handle, c.path), () => fn(...ownArgs));
+      // a granted member with a fresh step-up (the secret writes and exports ask for one, §B.7): the body runs
+      const r = await call(allowed ? armed(caller) : { userId: caller }, appPath(fx.B.handle, c.path), () => fn(...ownArgs));
       const code = refusal(r);
       const label = `${c.id} · B ${role} · own store (${allowed ? "granted" : "not granted"})`;
       if (!allowed) check(`${label}: forbidden`, code === "forbidden", answerOf(r));
       else if (!ranReal(label, r)) continue;
       // granted: the body runs (an answer of its own, never a refusal of the seam or a server error)
-      else check(`${label}: reaches the body`, code !== "forbidden" && code !== "not_found" && code !== "threw" && code !== "server", answerOf(r));
+      else check(`${label}: reaches the body`, code !== "forbidden" && code !== "not_found" && code !== "threw" && code !== "server" && code !== "step_up", answerOf(r));
     }
     slow.push([c.id, Date.now() - caseStarted]);
   }
@@ -1423,7 +1438,8 @@ function routePlan(fx: Fixtures, method: string, template: string): RoutePlan {
     "GET /api/app/[store]/export": { query: { pageId: A.page.live, versionId: A.version.live } },
     "POST /api/app/[store]/export": { body: { versionId: A.version.live, mode: "connected", allowedOrigins: ["https://shop.example.org"], options: { hostConfigs: true } } },
     "GET /api/app/[store]/export/estimate": { query: { versionId: A.version.live, mode: "php" } },
-    "GET /api/app/[store]/orders/export": { query: { page: A.page.live, q: A.customer.name } },
+    // the Orders filter is `page_id` (parseOrderQuery); `page` is the pager
+    "GET /api/app/[store]/orders/export": { query: { page_id: A.page.live, q: A.customer.name } },
     "POST /api/app/[store]/sheets/connect": { body: { url: `https://docs.google.com/spreadsheets/d/${A.spreadsheetId}/edit#gid=0` } },
     "PATCH /api/app/[store]/sheets/connect": { body: { enabled: true } },
     "GET /app/[store]/preview/[id]": { query: { v: A.version.live } },
@@ -1586,8 +1602,8 @@ export async function routeSuite(kit: Kit): Promise<void> {
         const ids: Record<string, string> = route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
         // 1. A's handle: the neutral 404 of an unknown handle
         if (who.userId !== fx.dual) {
-          const onA = await callRoute({ userId: who.userId }, route, method, { store: fx.A.handle, ...ids }, plan, { photo: fx.A.photoBytes });
-          const onGhost = await callRoute({ userId: who.userId }, route, method, { store: fx.ghostHandle, ...ids }, plan, { photo: fx.A.photoBytes });
+          const onA = await callRoute(armed(who.userId), route, method, { store: fx.A.handle, ...ids }, plan, { photo: fx.A.photoBytes });
+          const onGhost = await callRoute(armed(who.userId), route, method, { store: fx.ghostHandle, ...ids }, plan, { photo: fx.A.photoBytes });
           const la = `${method} ${route.template} · ${who.label} · A's handle`;
           const a = routeAnswer(onA);
           const g = JSON.parse(text(routeAnswer(onGhost)).split(fx.ghostHandle).join(fx.A.handle)) as unknown;
@@ -1599,8 +1615,8 @@ export async function routeSuite(kit: Kit): Promise<void> {
         }
         // 2. B's handle with A's ids: what a missing id answers
         if (plan.skipIds) continue;
-        const real = await callRoute({ userId: who.userId }, route, method, { store: fx.B.handle, ...ids }, plan);
-        const ghost = await callRoute({ userId: who.userId }, route, method, { store: fx.B.handle, ...ghostify(fx, ids) }, ghostify(fx, plan));
+        const real = await callRoute(armed(who.userId), route, method, { store: fx.B.handle, ...ids }, plan);
+        const ghost = await callRoute(armed(who.userId), route, method, { store: fx.B.handle, ...ghostify(fx, ids) }, ghostify(fx, plan));
         const lb = `${method} ${route.template} · ${who.label} · B's handle, A's ids`;
         if (ranReal(lb, real, ghost)) check(`${lb}: same answer as a missing id`, text(routeAnswer(real)) === text(unghost(fx, routeAnswer(ghost))), { real: routeAnswer(real), ghost: routeAnswer(ghost) });
         const leaked = leaks(fx, routeAnswer(real), { sent: [plan, ids] });
@@ -1647,7 +1663,7 @@ async function ownRoutePlan(fx: Fixtures, fresh: Fresh, method: string, template
     "GET /api/app/[store]/export": { query: { pageId: B.page.live, versionId: B.version.live } },
     "POST /api/app/[store]/export": { body: { versionId: B.version.live, mode: "connected", allowedOrigins: ["https://shop.example.org"], options: { hostConfigs: true } } },
     "GET /api/app/[store]/export/estimate": { query: { versionId: B.version.live, mode: "php" } },
-    "GET /api/app/[store]/orders/export": { query: { page: B.page.live } },
+    "GET /api/app/[store]/orders/export": { query: { page_id: B.page.live } },
     "POST /api/app/[store]/sheets/connect": { body: { url: `https://docs.google.com/spreadsheets/d/${B.spreadsheetId}/edit#gid=0` } },
     "PATCH /api/app/[store]/sheets/connect": { body: { enabled: true } },
     "GET /app/[store]/preview/[id]": { query: { v: B.version.live } },
@@ -1737,7 +1753,7 @@ async function renderProps(props: Record<string, unknown>, depth: number): Promi
 export type PageResult = { kind: "notFound" } | { kind: "redirect"; to: string } | { kind: "render"; payload: string } | { kind: "error"; message: string; stub: string | null };
 
 export async function renderPage(who: Who, page: PageFile, params: Record<string, string>, searchParams: Record<string, string> = {}, opts: { identityHeaders?: HeadersInit } = {}): Promise<PageResult> {
-  const mod = load<{ default: (p: unknown) => unknown }>(path.join(ROOT, page.file));
+  const mod = load<{ default: (p: unknown) => unknown; generateMetadata?: (p: unknown, parent: Promise<unknown>) => unknown; metadata?: unknown }>(path.join(ROOT, page.file));
   let urlPath = page.template;
   for (const [k, v] of Object.entries(params)) urlPath = urlPath.replace(`[${k}]`, v);
   const o = await call(
@@ -1745,7 +1761,10 @@ export async function renderPage(who: Who, page: PageFile, params: Record<string
     urlPath,
     async () => {
       const props = page.kind === "layout" ? { children: null, params: Promise.resolve(params) } : { params: Promise.resolve(params), searchParams: Promise.resolve(searchParams) };
-      return text(await renderTree(await mod.default(props)));
+      const body = text(await renderTree(await mod.default(props)));
+      // the document's <title> and meta tags too (LND-24: a page or store name in the title is a payload like any other)
+      const meta = typeof mod.generateMetadata === "function" ? await mod.generateMetadata(props, Promise.resolve({})) : mod.metadata;
+      return meta === undefined ? body : `${body}\n<metadata>${text(meta)}`;
     },
     opts,
   );
@@ -1762,7 +1781,8 @@ function pageQueries(fx: Fixtures, template: string): Record<string, string>[] {
   const q: Record<string, Record<string, string>[]> = {
     "/app/[store]/history": [{ page_id: A.page.live }, {}],
     "/app/[store]/pages": [{ focus: A.page.live, q: fx.canaries.data[0]! }, { status: "archived" }],
-    "/app/[store]/orders": [{ page: A.page.live, q: A.customer.name }, { tab: "leads" }, { tab: "blocked" }],
+    // the Orders filter is `page_id` (parseOrderQuery); `page` is the pager
+    "/app/[store]/orders": [{ page_id: A.page.live, q: A.customer.name }, { tab: "leads", page_id: A.page.live }, { tab: "blocked" }],
     "/app/[store]/exports": [{ page: A.page.live }],
   };
   return q[template] ?? [{}];
@@ -1790,7 +1810,10 @@ export async function pageSuite(kit: Kit): Promise<void> {
   check("the page list is derived from the tree", pages.length >= 10, pages.map((p) => p.template));
   for (const page of pages) {
     const source = readFileSync(path.join(ROOT, page.file), "utf8");
-    const perm = /permission: "([a-z_.]+)"/.exec(source)?.[1] as StorePermission | undefined;
+    // the page's own keys: `permission: "pages.read"` or `permission: ["pages.write", "ai.use"]` (all required)
+    const declared = /permission: (\[[^\]]*\]|"[a-z_.]+")/.exec(source)?.[1] ?? "";
+    const perms = [...declared.matchAll(/"([a-z_.]+)"/g)].map((m) => m[1] as StorePermission);
+    const perm = perms.join(" + ") || undefined;
     // a layout with no seam call reads no store data (the frame of a route group): it may render, empty of A
     const dataFree = page.kind === "layout" && !/requireStoreMember\(|memberCtx\(/.test(source);
     const name = `${page.template}${page.kind === "layout" ? " (layout)" : ""}`;
@@ -1813,7 +1836,7 @@ export async function pageSuite(kit: Kit): Promise<void> {
       for (const sp of pageQueries(fx, page.template)) {
         const r = await renderPage({ userId: who.userId }, page, { store: fx.B.handle, ...ids }, sp);
         const label = `${name}${Object.keys(sp).length ? `?${new URLSearchParams(sp)}` : ""} · ${who.label} · B's handle, A's ids`;
-        const granted = perm ? can(who.role, perm) : true;
+        const granted = perms.every((p) => can(who.role!, p));
         if (!granted) check(`${label}: 404 for a role without ${perm}`, r.kind === "notFound", r.kind);
         else if (r.kind === "render") check(`${label}: no canary of A`, leaks(fx, r.payload, { sent: [sp, ids] }).length === 0, leaks(fx, r.payload, { sent: [sp, ids] }));
         else if (!ranReal(label, r.kind === "error" ? r : null)) continue;
@@ -1966,7 +1989,8 @@ export async function repositorySuite(kit: Kit): Promise<void> {
   await same(fx, "syncHealth(B)", () => SC.syncHealth(B));
   // search, audit, dashboard
   for (const q of [fx.A.customer.name, fx.canaries.data[0]!, fx.A.order.main, "%%", "__", "%a%"]) await same(fx, `searchAdmin(B, "${q.slice(0, 12)}…")`, () => SE.searchAdmin(B, fx.rows.B, q, { pages: true, orders: true }), { sent: q });
-  await same(fx, "auditPage(B)", () => SEC.auditPage(B, { limit: 100 }));
+  // the tenant reader takes the store ctx (listStoreAudit: audit.read, the ctx's store)
+  await same(fx, "auditPage(B)", () => SEC.auditPage({ scope: B, store: fx.rows.B, can: () => true } as never, { limit: 100 }));
   await same(fx, "navCounts(B)", () => D.navCounts(B));
   await same(fx, "getSheetHealth(B)", () => D.getSheetHealth(B));
   await same(fx, "getDashboard(B)", () => D.getDashboard(B, fx.rows.B, { totpEnabled: false }));
@@ -2180,9 +2204,9 @@ export async function specialSuite(kit: Kit): Promise<void> {
   }
 
   // B connecting A's spreadsheet: a proof code, nothing about the sheet, A untouched
-  const connect = await callRoute(ownerB, route("/api/app/[store]/sheets/connect"), "POST", { store: fx.B.handle }, { body: { url: `https://docs.google.com/spreadsheets/d/${fx.A.spreadsheetId}/edit` } });
+  const connect = await callRoute(armed(fx.B.members.owner), route("/api/app/[store]/sheets/connect"), "POST", { store: fx.B.handle }, { body: { url: `https://docs.google.com/spreadsheets/d/${fx.A.spreadsheetId}/edit` } });
   check("B pasting A's sheet link gets a proof code, not a connection", connect.ok && connect.value!.status === 200 && /"proof"/.test(connect.value!.body), routeAnswer(connect));
-  const verify = await callRoute(ownerB, route("/api/app/[store]/sheets/verify"), "POST", { store: fx.B.handle }, {});
+  const verify = await callRoute(armed(fx.B.members.owner), route("/api/app/[store]/sheets/verify"), "POST", { store: fx.B.handle }, {});
   check("B verifying without the code in the sheet: refused", verify.ok && verify.value!.status === 409, routeAnswer(verify));
   const sheetsB = await SC.getSheetsConfig(B);
   check("B's connected sheet is still B's own", sheetsB?.spreadsheetId === fx.B.spreadsheetId, sheetsB);
@@ -2841,6 +2865,250 @@ export async function impersonationSuite(kit: Kit): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/* the T4 review's cases (R1.0 step 5)                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The defects the T4 review found, each with its regression case: the tenant audit screen redacts staff rows (§F.5,
+ * PLA-§8.1), the Sheets proof code planted through A's order rows proves nothing (SHT-09: the code goes in a title),
+ * the secret writes under integrations.manage and the customer-data exports ask for a fresh step-up (§B.7, SEC-17),
+ * the cron pulls a store with no order to push (SHT-11), the agent's R1.0 queue (§A.3.2 interim) and the store-named
+ * titles (the overview, the builder). Runs after the impersonation suite, so B's audit holds real staff rows.
+ */
+export async function reviewSuite(kit: Kit): Promise<void> {
+  const { fx } = kit;
+  suite("special cases (T4 review)");
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { can, ownQueueOnly } = load<typeof import("@/lib/auth/permissions")>("@/lib/auth/permissions");
+  const routes = deriveRoutes();
+  const route = (t: string) => routes.find((r) => r.template === t)!;
+  const pages = derivePages();
+  const pageOf = (t: string) => pages.find((p) => p.template === t && p.kind === "page")!;
+  const B = writeScope(fx.B.id);
+  const ownerB = fx.B.members.owner;
+  // a step-up of 6 minutes ago: past the 5-minute window (§B.7)
+  const stale = (userId: string): Who => ({ userId, stepUpAt: new Date(Date.now() - 6 * 60_000) });
+  const status = (r: Outcome<RouteAnswer>) => (r.ok ? r.value!.status : 500);
+  const bodyOf = (r: Outcome<RouteAnswer>) => (r.ok ? r.value!.body : "");
+  const lastMeta = async (storeId: string, action: string): Promise<string> => {
+    const [rows] = (await pool().query("SELECT meta FROM audit_log WHERE store_id = ? AND action = ? ORDER BY id DESC LIMIT 1", [storeId, action])) as unknown as [{ meta: unknown }[]];
+    return text(rows[0]?.meta ?? null);
+  };
+
+  // 1. the tenant audit screen (§F.5): a staff row shows the staff member's display name only, never a note the store
+  // was not shown, the staff e-mail or the staff user id; a note shown to the store is shown
+  {
+    const { auditFrom } = load<typeof import("@/lib/audit")>("@/lib/audit");
+    const { lifecycleAuditMeta } = load<typeof import("@/lib/tenancy/lifecycle")>("@/lib/tenancy/lifecycle");
+    const hidden = `staff-only ${randomBytes(5).toString("hex")}`;
+    const shown = `for-the-store ${randomBytes(5).toString("hex")}`;
+    // a platform ctx as auditFrom reads it (the staff member, no store ctx): the lifecycle's own row shape
+    const staffCtx = { user: { id: fx.staff.id }, actor: { kind: "platform", userId: fx.staff.id, impersonatorId: null, ip: "203.0.113.77" } } as never;
+    await auditFrom(staffCtx, "platform.store.restricted", { storeId: fx.B.id, target: fx.B.id, meta: lifecycleAuditMeta("active", "restricted", { reason: "abuse_review" }, hidden) });
+    await auditFrom(staffCtx, "platform.store.restored", { storeId: fx.B.id, target: fx.B.id, meta: lifecycleAuditMeta("restricted", "active", { reason: "resolved", notify: { showNote: true } }, shown) });
+    // and a row of B's own owner, newest (the staff views of B above wrote many rows: the page shows the latest 50)
+    const { auditIn } = load<typeof import("@/lib/admin-data/store-audit")>("@/lib/admin-data/store-audit");
+    await auditIn(B, userActor(ownerB), "store.settings.updated", { meta: { key: "store" } });
+    const staffMarks = [hidden, "staff@tenancy.test", fx.staff.id];
+    const page = await renderPage({ userId: ownerB }, pageOf("/app/[store]/settings/audit"), { store: fx.B.handle });
+    const action = await call({ userId: ownerB }, appPath(fx.B.handle, "/settings/audit"), () => actionFn({ file: SETTINGS.file, name: "loadAuditAction" })({}));
+    for (const [label, hay] of [
+      ["the audit page's payload", page.kind === "render" ? page.payload : ""],
+      ["loadAuditAction", refusal(action) === null ? text(answerOf(action)) : ""],
+    ] as const) {
+      check(`B's ${label}: lists the staff rows by display name (the scan is not blind)`, hay.includes("platform.store.restricted") && hay.includes("Platform staff") && hay.includes("Owner B"), hay.slice(0, 300));
+      check(`B's ${label}: no hidden staff note, staff e-mail or staff user id`, staffMarks.every((m) => !hay.includes(m)), staffMarks.filter((m) => hay.includes(m)));
+      check(`B's ${label}: the note shown to the store is there`, hay.includes(shown));
+    }
+  }
+
+  // 2. the Sheets proof (SHT-09): connect and verify ask for a fresh step-up; the code planted in A's order rows (what
+  // a shopper types: an address, a note) proves nothing, since no cell is read; the code in a title connects
+  {
+    const SC = load<typeof import("@/lib/sheets")>("@/lib/sheets");
+    const { saveSheetsConfig } = load<typeof import("@/lib/sheets/config")>("@/lib/sheets/config");
+    const connectRoute = route("/api/app/[store]/sheets/connect");
+    const verifyRoute = route("/api/app/[store]/sheets/verify");
+    const linkA = `https://docs.google.com/spreadsheets/d/${fx.A.spreadsheetId}/edit#gid=0`;
+    for (const [label, who] of [
+      ["no step-up", { userId: ownerB }],
+      ["a stale step-up (6 min)", stale(ownerB)],
+    ] as const) {
+      const c = await callRoute(who, connectRoute, "POST", { store: fx.B.handle }, { body: { url: linkA } });
+      check(`POST sheets/connect with ${label}: 403 step_up`, status(c) === 403 && /"step_up"/.test(bodyOf(c)), routeAnswer(c));
+      const v = await callRoute(who, verifyRoute, "POST", { store: fx.B.handle }, {});
+      check(`POST sheets/verify with ${label}: 403 step_up`, status(v) === 403 && /"step_up"/.test(bodyOf(v)), routeAnswer(v));
+    }
+    const start = await callRoute(armed(ownerB), connectRoute, "POST", { store: fx.B.handle }, { body: { url: linkA } });
+    const code = start.ok ? (JSON.parse(start.value!.body) as { proof?: { code?: string } }).proof?.code : undefined;
+    check("B pasting A's link with a fresh step-up: a proof code", typeof code === "string" && /^SG-/.test(code), routeAnswer(start));
+    if (code) {
+      const rowsA = fakeSheets.get(fx.A.spreadsheetId) ?? [];
+      // the code reached A's orders tab through an order on A's public page (lower-cased in the address, as typed in the note)
+      fakeSheets.set(fx.A.spreadsheetId, [[fx.A.order.main, "27/10/2026", "Nouvelle", "Shopper", "0612345678", "Casablanca", `derb ${code.toLowerCase()} rue 4`, "Argan", "", 1, 199, `merci ${code}`, "Live"]]);
+      const netBefore = network.length;
+      const v = await callRoute(armed(ownerB), verifyRoute, "POST", { store: fx.B.handle }, {});
+      check("the proof code in A's order rows (address, note): verify refused (code_missing)", status(v) === 409 && /code_missing/.test(bodyOf(v)), routeAnswer(v));
+      const touched = network.slice(netBefore).filter((n) => n.url.includes(fx.A.spreadsheetId));
+      check("…no cell of A's sheet read, nothing written to it (one metadata read of its titles)", touched.every((n) => n.method === "GET" && !n.url.includes("/values/")), touched.map((n) => `${n.method} ${n.url.slice(0, 120)}`));
+      check("…B's connected sheet is still B's own", (await SC.getSheetsConfig(B))?.spreadsheetId === fx.B.spreadsheetId);
+      fakeSheets.set(fx.A.spreadsheetId, rowsA);
+    }
+    // the positive control: B's own new spreadsheet; the code as a tab's name connects it, the row names the step-up
+    const ownSheet = `1x${rand("abcdefghijkmnopqrstuvwxyz0123456789", 38)}`;
+    fakeSheets.set(ownSheet, []);
+    fakeSheetMeta.set(ownSheet, { title: "Ventes Baraka", tabs: ["Feuille 1"] });
+    const own = await callRoute(armed(ownerB), connectRoute, "POST", { store: fx.B.handle }, { body: { url: `https://docs.google.com/spreadsheets/d/${ownSheet}/edit` } });
+    const ownCode = own.ok ? (JSON.parse(own.value!.body) as { proof?: { code?: string } }).proof?.code : undefined;
+    check("B's own new spreadsheet: a proof code", typeof ownCode === "string", routeAnswer(own));
+    if (ownCode) {
+      const early = await callRoute(armed(ownerB), verifyRoute, "POST", { store: fx.B.handle }, {});
+      check("…before the code is in a title: refused (code_missing)", status(early) === 409 && /code_missing/.test(bodyOf(early)), routeAnswer(early));
+      fakeSheetMeta.set(ownSheet, { title: "Ventes Baraka", tabs: ["Feuille 1", ownCode.toLowerCase()] });
+      const done = await callRoute(armed(ownerB), verifyRoute, "POST", { store: fx.B.handle }, {});
+      check("…with the code as a tab's name: connected", status(done) === 200 && (await SC.getSheetsConfig(B))?.spreadsheetId === ownSheet, routeAnswer(done));
+      check("…its integrations.sheets.connected row names the step-up (meta.stepUp)", /"stepUp":"password"/.test(await lastMeta(fx.B.id, "integrations.sheets.connected")), await lastMeta(fx.B.id, "integrations.sheets.connected"));
+    }
+    await saveSheetsConfig(B, { spreadsheetId: fx.B.spreadsheetId, sheetId: 0, sheetTitle: "Commandes", enabled: true }, { id: ownerB, ip: null });
+  }
+
+  // 3. the other secret writes and the exports of customer data (§B.7): none or a stale step-up is refused, a fresh
+  // one works and the audit row names its method (§F.5 rev 4); a write that plants no secret needs none
+  {
+    const { getStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+    const PX = load<typeof import("@/lib/pixels/library.server")>("@/lib/pixels/library.server");
+    const keyPath = appPath(fx.B.handle, "/integrations/sheets");
+    const saveKey = actionFn({ file: SHEETS.file, name: "saveExportKeyAction" });
+    const keyJson = serviceAccountJson("review@baraka.iam.gserviceaccount.com");
+    const k0 = await call({ userId: ownerB }, keyPath, () => saveKey(keyJson));
+    const k1 = await call(stale(ownerB), keyPath, () => saveKey(keyJson));
+    const k2 = await call(armed(ownerB), keyPath, () => saveKey(keyJson));
+    check("saveExportKeyAction without a step-up: step_up", refusal(k0) === "step_up", answerOf(k0));
+    check("…with a stale one: step_up", refusal(k1) === "step_up", answerOf(k1));
+    check("…with a fresh one: saved, integrations.export_key.set names the step-up", refusal(k2) === null && /"stepUp"/.test(await lastMeta(fx.B.id, "integrations.export_key.set")), answerOf(k2));
+
+    const pixPath = appPath(fx.B.handle, "/integrations/pixels");
+    const savePixel = actionFn({ file: PIXELS.file, name: "savePixelEntryAction" });
+    const pid = metaPixelId();
+    const token = `EAAR${randomBytes(18).toString("hex")}`;
+    const secrets = async () => text(await getStoreSetting(B, "tracking_secrets", { fresh: true }));
+    const l0 = await call({ userId: ownerB }, pixPath, () => savePixel({ platform: "meta", id: pid, label: "Review pixel" }));
+    check("savePixelEntryAction with no secret (id and label): no step-up needed", refusal(l0) === null, answerOf(l0));
+    const t0 = await call(stale(ownerB), pixPath, () => savePixel({ platform: "meta", id: pid, label: "Review pixel", token }));
+    check("…a new server token with a stale step-up: step_up, nothing stored", refusal(t0) === "step_up" && !(await secrets()).includes(token), answerOf(t0));
+    const c0 = await call(stale(ownerB), pixPath, () => savePixel({ platform: "meta", id: pid, label: "Review pixel", testCode: "TEST7777" }));
+    check("…a test event code with a stale step-up: step_up", refusal(c0) === "step_up", answerOf(c0));
+    const t1 = await call(armed(ownerB), pixPath, () => savePixel({ platform: "meta", id: pid, label: "Review pixel", token }));
+    check("…with a fresh one: stored, integrations.conversions.changed names the step-up", refusal(t1) === null && (await secrets()).includes(token) && /"stepUp"/.test(await lastMeta(fx.B.id, "integrations.conversions.changed")), answerOf(t1));
+    await PX.removePixelEntry(B, { platform: "meta", id: pid }, userActor(ownerB));
+
+    // the store's Google key in a ZIP (Editor on its orders sheet)
+    const exportRoute = route("/api/app/[store]/export");
+    const php = { versionId: fx.B.version.live, mode: "php", allowedOrigins: [], options: { hostConfigs: true, embedServiceAccount: true } };
+    const e0 = await callRoute(stale(ownerB), exportRoute, "POST", { store: fx.B.handle }, { body: php });
+    check("POST export with the store's Google key and a stale step-up: 403 step_up", status(e0) === 403 && /"step_up"/.test(bodyOf(e0)), routeAnswer(e0));
+    const e1 = await callRoute(armed(ownerB), exportRoute, "POST", { store: fx.B.handle }, { body: php });
+    check("…with a fresh one: the ZIP, export.created names the key and the step-up", status(e1) === 200 && /"stepUp"/.test(await lastMeta(fx.B.id, "export.created")) && /review@baraka/.test(await lastMeta(fx.B.id, "export.created")), routeAnswer(e1));
+    const e2 = await callRoute({ userId: ownerB }, exportRoute, "POST", { store: fx.B.handle }, { body: { ...php, options: { hostConfigs: true } } });
+    check("…a PHP export without the key needs no step-up", status(e2) === 200, routeAnswer(e2));
+
+    // the orders CSV (orders.export): the Orders screen fetches it and opens the step-up sheet on this answer
+    const csv = route("/api/app/[store]/orders/export");
+    const o0 = await callRoute(stale(ownerB), csv, "GET", { store: fx.B.handle }, {});
+    check("GET orders/export with a stale step-up: 403 step_up", status(o0) === 403 && /"step_up"/.test(bodyOf(o0)), routeAnswer(o0));
+    const o1 = await callRoute(armed(ownerB), csv, "GET", { store: fx.B.handle }, { query: { page_id: fx.B.page.live } });
+    check("…with a fresh one: the CSV, orders.exported names the step-up", status(o1) === 200 && /text\/csv/.test(o1.ok ? o1.value!.contentType : "") && /"stepUp"/.test(await lastMeta(fx.B.id, "orders.exported")), routeAnswer(o1));
+    const o2 = await callRoute(armed(ownerB), csv, "GET", { store: fx.B.handle }, { query: { page_id: fx.A.page.live } });
+    check("…filtered by A's page id (page_id): nothing of A", status(o2) === 200 && leaks(fx, bodyOf(o2), { sent: fx.A.page.live }).length === 0, leaks(fx, bodyOf(o2), { sent: fx.A.page.live }));
+  }
+
+  // 4. the cron (SHT-11): a store whose orders are all synced still gets the statuses its agents set in the sheet
+  {
+    await pool().query("UPDATE orders SET sheet_status = 'synced' WHERE store_id = ?", [fx.B.id]);
+    // no pull for a while: the store's sheets:pull window is over
+    await pool().query("DELETE FROM rate_limits WHERE bucket = ?", [`s:${fx.B.id}:sheets:pull`]);
+    const [[before]] = (await pool().query("SELECT status FROM orders WHERE id = ?", [fx.B.order.main])) as unknown as [[{ status: string }]];
+    fakeSheets.set(fx.B.spreadsheetId, [[fx.B.order.main, "", "delivered"]]);
+    const tick = await callRoute({ anonymous: true }, route("/api/cron/tick"), "GET", {}, {}, { headers: { "x-cron-key": process.env.CRON_KEY! } });
+    const [[after]] = (await pool().query("SELECT status FROM orders WHERE id = ?", [fx.B.order.main])) as unknown as [[{ status: string }]];
+    check("cron tick: a store with no order to push still has its sheet's statuses pulled (SHT-11)", status(tick) === 200 && before.status !== "delivered" && after.status === "delivered", { tick: routeAnswer(tick), before, after });
+    fakeSheets.set(fx.B.spreadsheetId, []);
+  }
+
+  // 5. the agent (§A.3.2 agent*, R1.0 interim: the store's whole queue until P4's assignment; no export, no blocklist,
+  // no screen beyond Orders)
+  {
+    const agent = fx.B.members.agent;
+    check(
+      "agent*: the order, lead and customer keys are the own-queue keys (P4's predicate switch)",
+      (["orders.read", "orders.write", "orders.reveal_phone", "leads.read", "customers.read"] as StorePermission[]).every((p) => ownQueueOnly("agent", p)) && !ownQueueOnly("manager", "orders.read"),
+    );
+    check(
+      "agent: none of orders.read_all, orders.export, blocklist.write, pages, settings, integrations, pixels, exports",
+      !(["orders.read_all", "orders.export", "blocklist.write", "pages.read", "settings.read", "integrations.manage", "pixels.manage", "export.create"] as StorePermission[]).some((p) => can("agent", p)),
+    );
+    const got = await call({ userId: agent }, appPath(fx.B.handle, "/orders"), () => actionFn({ file: ORDERS.file, name: "getOrderAction" })(fx.B.order.main));
+    check("agent (R1.0 interim): reads an order of its store's queue", refusal(got) === null, answerOf(got));
+    const gotA = await call({ userId: agent }, appPath(fx.B.handle, "/orders"), () => actionFn({ file: ORDERS.file, name: "getOrderAction" })(fx.A.order.main));
+    const gotGhost = await call({ userId: agent }, appPath(fx.B.handle, "/orders"), () => actionFn({ file: ORDERS.file, name: "getOrderAction" })(fx.ghosts.get(fx.A.order.main)!));
+    check("…never another store's (A's order answers as a missing one, no canary)", refusal(gotA) !== null && text(answerOf(gotA)) === text(unghost(fx, answerOf(gotGhost))) && leaks(fx, answerOf(gotA), { sent: fx.A.order.main }).length === 0, answerOf(gotA));
+    const csv = await callRoute(armed(agent), route("/api/app/[store]/orders/export"), "GET", { store: fx.B.handle }, {});
+    check("agent: the orders CSV is refused (403)", status(csv) === 403, routeAnswer(csv));
+    const home = await renderPage({ userId: agent }, pageOf("/app/[store]"), { store: fx.B.handle });
+    check("agent: the overview sends it to Orders", home.kind === "redirect" && home.to === `/app/${fx.B.handle}/orders`, home);
+    const { storeNav } = load<typeof import("@/components/admin/shell/store-nav")>("@/components/admin/shell/store-nav");
+    const ids = storeNav({ handle: fx.B.handle, mode: fx.rows.B.mode, can: (p) => can("agent", p) }).flatMap((g) => g.items.map((i) => i.id));
+    check("agent: its nav has Orders and no Overview (always redirected), Sheets, Pixels or Exports", ids.includes("orders") && !ids.some((i) => ["overview", "sheets", "pixels", "exports"].includes(i)), ids);
+  }
+
+  // 6. the titles name the member's own store and page only (LND-24): the metadata is part of every page scan above
+  {
+    const home = await renderPage({ userId: ownerB }, pageOf("/app/[store]"), { store: fx.B.handle });
+    check("the overview's title: \"Overview · <store>\" (the layout's template skips its own page)", home.kind === "render" && home.payload.includes(`Overview · ${fx.B.name}`), home.kind);
+    const builder = pageOf("/app/[store]/pages/[id]/edit");
+    const mine = await renderPage({ userId: fx.A.members.owner }, builder, { store: fx.A.handle, id: fx.A.page.live });
+    check("A's builder title names A's page (the metadata scan is not blind)", mine.kind === "render" && /<metadata>.*· Builder/.test(mine.payload) && mine.payload.includes(fx.canaries.data.find((c) => c.startsWith("Live "))!), mine.kind);
+    const theirs = await renderPage({ userId: ownerB }, builder, { store: fx.B.handle, id: fx.A.page.live });
+    check("B's builder with A's page id: the 404, no title of A", theirs.kind === "notFound" || (theirs.kind === "render" && leaks(fx, theirs.payload, { sent: fx.A.page.live }).length === 0), theirs.kind);
+  }
+
+  // 7. an owner whose language is Arabic: the English store dashboard stays left to right (§I.5: Arabic RTL is R3); the
+  // translated identity pages (the /app frame, the team page) follow the viewer
+  {
+    await pool().query("UPDATE users SET locale = 'ar' WHERE id = ?", [ownerB]);
+    try {
+      const frame = deriveOtherPages().find((p) => p.file === "src/app/app/layout.tsx")!;
+      const outer = await renderPage({ userId: ownerB }, frame, {});
+      check("ar owner: the /app frame is Arabic, right to left (the identity pages)", outer.kind === "render" && /"lang":"ar","dir":"rtl"/.test(outer.payload), outer.kind);
+      // by file: the builder's (editor) group layout has the same template
+      const shell = pages.find((p) => p.file === "src/app/app/[store]/layout.tsx")!;
+      const inner = await renderPage({ userId: ownerB }, shell, { store: fx.B.handle });
+      check("ar owner: the store shell is English, left to right (no mirrored English sidebar)", inner.kind === "render" && /"lang":"en","dir":"ltr"/.test(inner.payload) && !/"dir":"rtl"/.test(inner.payload), inner.kind);
+      const team = await renderPage({ userId: ownerB }, pageOf("/app/[store]/team"), { store: fx.B.handle });
+      check("ar owner: the team page (translated) is Arabic, right to left inside the shell", team.kind === "render" && /"lang":"ar","dir":"rtl"/.test(team.payload), team.kind);
+    } finally {
+      await pool().query("UPDATE users SET locale = NULL WHERE id = ?", [ownerB]);
+    }
+  }
+
+  // 8. links that lead somewhere: the account's danger page sends an owner to a screen that exists (no
+  // /settings/danger before P2), and the Orders CSV is fetched so its step-up refusal opens the sheet
+  {
+    const danger = deriveOtherPages().find((p) => p.template === "/app/account/danger" && p.kind === "page")!;
+    const r = await renderPage({ userId: ownerB }, danger, {});
+    const hrefs = r.kind === "render" ? [...r.payload.matchAll(/"href":"(\/app\/[^"]+)"/g)].map((m) => m[1]!) : [];
+    const known = [...pages.map((p) => p.template), ...deriveOtherPages().map((p) => p.template)].map((t) => new RegExp(`^${t.replace(/\[[^\]]+\]/g, "[^/]+")}$`));
+    check("the account danger page names B's team for B's owner", hrefs.includes(`/app/${fx.B.handle}/team`), hrefs);
+    check("…and every /app link of it is a screen of the tree", hrefs.length > 0 && hrefs.every((h) => known.some((re) => re.test(h.split(/[?#]/)[0]!))), hrefs);
+    const sources = ["src/components/admin/orders/orders-view.tsx", "src/components/admin/shell/command-palette-body.tsx"].map((f) => readFileSync(path.join(ROOT, f), "utf8"));
+    check(
+      "the Orders CSV buttons fetch the route (downloadFile: a step_up answer opens the sheet), never a bare download link",
+      sources.every((src) => src.includes("downloadFile(") && !/href=\{[^}]*\/orders\/export/.test(src) && !/\.href = store\.api\("\/orders\/export"\)/.test(src)),
+    );
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* plug-ins: scripts/qa/tenancy-cases/<track>.ts (DES-R13)             */
 /* ------------------------------------------------------------------ */
 
@@ -2935,6 +3203,7 @@ async function main(): Promise<void> {
     await specialSuite(kit);
     await moreSpecialCases(kit);
     await impersonationSuite(kit);
+    await reviewSuite(kit);
     await accountSuite(kit);
     await pluginSuite(kit);
     failed = 0;

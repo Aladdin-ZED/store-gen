@@ -32,7 +32,8 @@ export function SettingsNav() {
                     layoutId="settings-active"
                     aria-hidden="true"
                     className="absolute inset-0 rounded-xl bg-card shadow-[0_1px_2px_rgb(0_0_0/0.05),0_8px_20px_-14px_rgb(0_0_0/0.3)] ring-1 ring-border"
-                    transition={{ type: "spring", stiffness: 460, damping: 38 }}
+                    // a settle, never a bounce (D60, §I.6): the shell's ease-out curve
+                    transition={{ type: "tween", duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
                   />
                 )}
                 <span className="relative z-10 font-medium">{item.label}</span>

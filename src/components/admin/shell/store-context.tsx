@@ -22,6 +22,8 @@ export interface StoreClientInfo {
   mode: StoreMode;
   status: StoreStatus;
   role: StoreRole;
+  /** the signed-in member's own user id (the per-member keys of the browser drafts, §E.6) */
+  viewerId: string;
   /** every key `ctx.can` grants this member in this store (matrix ∧ mode ∧ release ∧ state) */
   grants: readonly StorePermission[];
   /** the store's public home without a trailing slash: "https://<host>/s/<h>" (P), "https://<h>.<root>" (S) */

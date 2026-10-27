@@ -14,8 +14,9 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 type Params = Promise<{ store: string }>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
+/** The store's exports (allowed origins, key hints, file names): `export.create` (§I.1), the members who make them. */
 export default async function ExportsPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
-  const ctx = await requireStoreMember({ handle: (await params).store, permission: "pages.read" });
+  const ctx = await requireStoreMember({ handle: (await params).store, permission: "export.create" });
   const sp = await searchParams;
   const activeOnly = one(sp.active) === "1";
   const page = Math.max(1, Math.min(10_000, Number.parseInt(one(sp.page), 10) || 1));

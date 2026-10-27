@@ -268,7 +268,14 @@ export const OWN_QUEUE_KEYS: ReadonlySet<StorePermission> = new Set<StorePermiss
   "customers.read",
 ]);
 
-/** true when the grant of `p` to `role` is limited to the member's own queue (the repositories add the predicate). */
+/**
+ * true when the grant of `p` to `role` is limited to the member's own queue (§A.3.2 `agent*`). The predicate is P4's:
+ * the queue (assignment and claims, `orders.assignee_id`, `agent_profiles`) arrives with the call center, and its
+ * order and lead repositories add `assignee = me` for these keys. **R1.0 interim (T4 review, recorded in §A.3.2):**
+ * there is no assignment yet, so an agent works the store's whole order and lead list, as the single-tenant `agent`
+ * role did (store #1's agents keep working); it still lacks `orders.read_all`, `orders.export`, `blocklist.write`
+ * and every page, settings and integrations key. test:tenancy models it (the agent cases of the T4 review suite).
+ */
 export function ownQueueOnly(role: StoreRole, p: StorePermission): boolean {
   return role === "agent" && OWN_QUEUE_KEYS.has(p);
 }

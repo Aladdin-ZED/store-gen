@@ -4,10 +4,18 @@ import { DashboardView } from "@/components/admin/dashboard/dashboard-view";
 import { getDashboard } from "@/lib/admin-data/dashboard";
 import { requireStoreMember } from "@/lib/tenancy/seam";
 import { appHref } from "@/lib/urls";
-
-export const metadata: Metadata = { title: "Overview" };
+import { memberCtx } from "./member-ctx";
 
 type Props = { params: Promise<{ store: string }> };
+
+/**
+ * "Overview · <store>" like every other screen: Next applies the `[store]` layout's `%s · <name>` template to its child
+ * segments only, never to the page of the segment that defines it (generate-metadata.md, `title.template`).
+ */
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { store } = await memberCtx((await params).store);
+  return { title: { absolute: `Overview · ${store.name}` } };
+}
 
 function greeting(timeZone: string): string {
   const hour = Number(new Intl.DateTimeFormat("en-GB", { hour: "numeric", hourCycle: "h23", timeZone }).format(new Date()));
@@ -30,7 +38,9 @@ export default async function StoreHomePage({ params }: Props) {
   if (!ctx.can("pages.read") && ctx.can("orders.read")) redirect(appHref(store.handle, "/orders"));
 
   const canOrders = ctx.can("orders.read");
-  const data = await getDashboard(ctx.scope, store, user, { orders: canOrders });
+  const dashboard = await getDashboard(ctx.scope, store, user, { orders: canOrders });
+  // the Sheets step links to a screen of integrations.manage (§I.1): not offered to a member who can't open it
+  const data = ctx.can("integrations.manage") ? dashboard : { ...dashboard, checklist: dashboard.checklist.filter((i) => i.id !== "sheets") };
   return (
     <DashboardView
       handle={store.handle}

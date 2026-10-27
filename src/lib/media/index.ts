@@ -30,6 +30,7 @@ export {
   openMediaRange,
   streamMediaRange,
   mediaCacheStats,
+  evictStore,
   MediaBusyError,
   CHUNK_SIZE,
   MAX_CACHED_FILE,

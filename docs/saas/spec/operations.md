@@ -3003,13 +3003,17 @@ export function disconnectSheet(ctx: StoreCtx): Promise<ActionResult<void>>;
 2. Already bound to this store → no proof needed (reconnect). Bound to another store → the generic answer "This sheet
    can't be connected. Create a new Google Sheet for this store." (no hint that another store uses it).
 3. Otherwise a code `SG-` + 10 Crockford base32 characters is generated, its sha256 stored in `sheets.pending`
-   (24 hours), and the screen shows two steps: share the sheet with `<service account e-mail>` as Editor; type the code
-   into any cell of the first row.
-4. **Verify** reads `A1:AZ3` of the tab (one call), looks for the code (case-insensitive, trimmed); found → `INSERT`
+   (24 hours), and the screen shows two steps: share the sheet with `<service account e-mail>` as Editor; add the code
+   to the spreadsheet's name or to a tab's name. **(R1.0 T4 review, CCR r1.0-m-8)** never a cell: the rows of an orders
+   tab carry what shoppers typed (address, note), so another store could plant the code there by ordering from the
+   owner's own page; only an editor can rename the spreadsheet or a tab.
+4. **Verify** reads the spreadsheet's title and its tab titles (one metadata call, `fields=properties(title),
+   sheets(properties(title))`; no cell is read), looks for the code (case-insensitive, trimmed); found → `INSERT`
    into `sheet_bindings` (a duplicate-key race with another store answers the generic refusal), then today's
    `connectSheet` (create or reuse the "Commandes" tab, header, formats, data validation with every label of
    OPE-§3.3), save the config (`enabled: true`, `pull: true`), clear `pending`,
-   `audit("integrations.sheets.connected")`. The screen then says "You can delete the code from the sheet."
+   `audit("integrations.sheets.connected")` with `meta.stepUp` (connect and verify are secret writes under
+   `integrations.manage`: a fresh step-up, core §B.7). The screen then says "You can rename it back afterwards."
 5. Google errors go through `explain()` (`orders-sheet.ts:409`): "Share the sheet with … as Editor", "The link is not a
    Google Sheet", "Too many requests, try again in a minute".
 6. Disconnect: delete the binding, `sheets = { enabled: false }`, audit; orders keep their `sheet_status`.

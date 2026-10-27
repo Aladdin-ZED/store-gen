@@ -51,6 +51,7 @@ import { StepOffers } from "./step-offers";
 import { StepPhotos } from "./step-photos";
 import { pixelTracking, type PixelStore } from "./tracking";
 import { WIZARD_LEAD, WIZARD_TITLE, WizardSkeleton } from "./skeleton";
+import { purgeForeignDrafts } from "@/components/admin/lib/drafts";
 import { useStore } from "@/components/admin/shell/store-context";
 
 export interface GenerateWizardProps {
@@ -69,7 +70,8 @@ export interface GenerateWizardProps {
 
 const MAX_PHOTOS = 12;
 /** The written copy of this tab, per store (GEN-03); the single-tenant key is only cleared. */
-const copyStorageKey = (storeId: string) => `sg:${storeId}:generate:copy:v1`;
+/** per store and member, like the wizard (`owner` = `<storeId>:<userId>`, ./state.ts) */
+const copyStorageKey = (owner: string) => `sg:${owner}:generate:copy:v1`;
 const LEGACY_COPY_KEY = "cod-studio:generate:copy:v1";
 
 /** Code-split parts fetched once the first step is idle: the generator, the page renderer of the
@@ -153,20 +155,20 @@ interface CopyJob {
   copy?: AiCopy;
   error?: string;
 }
-function loadCopy(storeId: string): CopyJob | null {
+function loadCopy(owner: string): CopyJob | null {
   try {
     sessionStorage.removeItem(LEGACY_COPY_KEY);
-    const raw = JSON.parse(sessionStorage.getItem(copyStorageKey(storeId)) ?? "null") as { key?: unknown; copy?: unknown } | null;
+    const raw = JSON.parse(sessionStorage.getItem(copyStorageKey(owner)) ?? "null") as { key?: unknown; copy?: unknown } | null;
     const copy = AiCopy.safeParse(raw?.copy);
     return typeof raw?.key === "string" && raw.key.length < 4000 && copy.success ? { key: raw.key, status: "done", copy: copy.data } : null;
   } catch {
     return null;
   }
 }
-function saveCopy(storeId: string, job: CopyJob | null) {
+function saveCopy(owner: string, job: CopyJob | null) {
   try {
-    if (job?.copy) sessionStorage.setItem(copyStorageKey(storeId), JSON.stringify({ key: job.key, copy: job.copy }));
-    else if (!job) sessionStorage.removeItem(copyStorageKey(storeId));
+    if (job?.copy) sessionStorage.setItem(copyStorageKey(owner), JSON.stringify({ key: job.key, copy: job.copy }));
+    else if (!job) sessionStorage.removeItem(copyStorageKey(owner));
   } catch {
     // storage unavailable: the copy is simply rewritten next time
   }
@@ -187,10 +189,15 @@ function classifyVibe(c: ClassifyResult | null): string | null {
 function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCreatePixels = false, afterSkeleton }: GenerateWizardProps & { afterSkeleton: boolean }) {
   const router = useRouter();
   const storeView = useStore();
+  // the drafts of this tab are the member's own in this store (GEN-03, §E.6): another member's go first
+  const owner = `${storeView.id}:${storeView.viewerId}`;
   const ai = useAi({ enabled: aiSettings.enabled, maxTier: aiSettings.tier });
   /** the process-wide AI manager: stable functions for the jobs below (the hook is for display) */
   const manager = getAi();
-  const [state, dispatch] = useReducer(reducer, undefined, () => loadState(storeView.id) ?? initialState({ locale: defaults.locale, market: defaults.market, aiCopy: aiSettings.enabled }));
+  const [state, dispatch] = useReducer(reducer, undefined, () => {
+    purgeForeignDrafts(storeView.id, storeView.viewerId);
+    return loadState(owner) ?? initialState({ locale: defaults.locale, market: defaults.market, aiCopy: aiSettings.enabled });
+  });
   const { details } = state;
 
   const blobs = useRef(new Map<string, Blob>());
@@ -221,7 +228,7 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
   const [errors, setErrors] = useState<{ name?: string; price?: string }>({});
   const [creating, setCreating] = useState<number | null>(null);
   const [styleOffset, setStyleOffset] = useState(0);
-  const [copyJob, setCopyJob] = useState<CopyJob | null>(() => loadCopy(storeView.id));
+  const [copyJob, setCopyJob] = useState<CopyJob | null>(() => loadCopy(owner));
   /** the store's ad pixels (ids and flags, never a token), read once for the Details step */
   const [pixelStore, setPixelStore] = useState<PixelStore>({ summary: null, failed: false });
   useEffect(() => {
@@ -242,11 +249,11 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
 
   useEffect(() => {
     const t = window.setTimeout(() => {
-      if (!finished.current) saveState(storeView.id, state);
+      if (!finished.current) saveState(owner, state);
     }, 300);
     return () => window.clearTimeout(t);
-  }, [storeView.id, state]);
-  useEffect(() => saveCopy(storeView.id, copyJob), [storeView.id, copyJob]);
+  }, [owner, state]);
+  useEffect(() => saveCopy(owner, copyJob), [owner, copyJob]);
   useEffect(() => {
     photoCount.current = state.photos.length;
   }, [state.photos.length]);
@@ -831,11 +838,11 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
         setCreating(null);
         return;
       }
-      clearState(storeView.id);
+      clearState(owner);
       setCopyJob(null);
       router.push(storeView.href(`/pages/${res.id}/edit`));
     },
-    [built.directions, copyState.state, stopCopy, name, facts, router, storeView, pixelStore.summary, pagePixels, details.tracking],
+    [built.directions, copyState.state, stopCopy, name, facts, router, storeView, owner, pixelStore.summary, pagePixels, details.tracking],
   );
 
   /* ---- navigation ---- */
@@ -903,7 +910,7 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
     analysisRun.current = null;
     auto.current = { classify: null, analysis: null, copy: null };
     photoCount.current = 0;
-    clearState(storeView.id);
+    clearState(owner);
     setCopyJob(null);
     setJobs({ classify: IDLE, analysis: IDLE, cutout: IDLE });
     setErrors({});

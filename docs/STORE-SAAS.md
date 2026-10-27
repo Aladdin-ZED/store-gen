@@ -379,7 +379,11 @@ are removed in R1.0; `homePathFor` is replaced by `landingPathFor(memberships)` 
 
 #### A.3.2 Store role matrix
 
-✓ = granted. `agent*` = only orders in the agent's own queue (assigned to or claimed by them).
+✓ = granted. `agent*` = only orders in the agent's own queue (assigned to or claimed by them). **R1.0 interim (T4
+review, CCR r1.0-m-8):** the queue (assignment, claims, `agent_profiles`) arrives with P4, which adds the `assignee`
+predicate to the order and lead repositories for the `OWN_QUEUE_KEYS` (`ownQueueOnly`, `src/lib/auth/permissions.ts`);
+until then an agent works the store's whole order and lead list, as the single-tenant `agent` role did, and still holds
+none of `orders.read_all`, `orders.export`, `blocklist.write` or any page, settings or integrations key.
 
 | Key | owner | admin | manager | editor | agent | logistics (R2) | accountant (R2) | viewer |
 |---|---|---|---|---|---|---|---|---|

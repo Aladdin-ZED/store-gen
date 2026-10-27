@@ -12,7 +12,7 @@
     { "file": "src/lib/db/usage.ts", "symbol": "__codDbUsage", "reason": "the size of the whole database, read by the console only (ADM-06, §E.6); tenants see store_usage" },
     { "file": "src/lib/media/ensure-focus.ts", "symbol": "__codFocusFlights", "reason": "in-flight focal-point jobs keyed by asset id; asset ids are per store and globally unique (D21, §E.6 unchanged)" },
     { "file": "src/lib/media/ensure-focus.ts", "symbol": "__codFocusMisses", "reason": "recent focal-point misses keyed by asset id; asset ids are per store and globally unique (D21, §E.6 unchanged)" },
-    { "file": "src/lib/media/store.ts", "symbol": "__codMediaState", "reason": "the media store's pools and disk index keyed by media key; keys are per store (D21, §E.6 unchanged; T4 adds evictStore(storeId))" },
+    { "file": "src/lib/media/store.ts", "symbol": "__codMediaState", "reason": "the media store's pools, memory caches keyed by media key (keys are per store, D21) and the disk index keyed by store and media key (<storeId>.<sha256(key)>, never by content); every entry carries its store, evictStore(storeId) drops them (§E.6)" },
     { "file": "src/lib/media/throttle.ts", "symbol": "__codMediaThrottle", "reason": "a platform guard keyed by client IP (§E.6 unchanged)" },
     { "file": "src/lib/sheets/sync.ts", "symbol": "__codSheetsHeaders", "reason": "sheet header rows keyed by spreadsheet id and tab title, one sheet belongs to one store (§E.6 unchanged)" },
     { "file": "src/lib/sheets/client.ts", "symbol": "__codSheetsToken", "reason": "the shared service account's access token, per credential, never store data (§E.6 unchanged)" },

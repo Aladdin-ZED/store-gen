@@ -17,6 +17,7 @@ import { LABEL_MAX, findEntryView, type LibraryPixel, type PixelLibraryView } fr
 import { cn } from "@/lib/utils";
 import { Segmented } from "../common/segmented";
 import { runAction } from "../lib/action-result";
+import { useStoreStepUp } from "../shell/step-up";
 import { Field, SecretInput, TextInput } from "../settings/form-kit";
 import { PLATFORM_META, PlatformMark } from "./parts";
 
@@ -57,6 +58,7 @@ function EntryForm({ mode, library, onSaved, onClose }: { mode: EntryMode; libra
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<TestEventResult | null>(null);
   const formId = useId();
+  const stepUp = useStoreStepUp();
   const meta = PLATFORM_META[platform];
   const server = isServerPlatform(platform);
   const id = normalizePixelId(platform, rawId);
@@ -68,7 +70,7 @@ function EntryForm({ mode, library, onSaved, onClose }: { mode: EntryMode; libra
     if (findEntryView(library, platform, id)) return "This pixel is already in the library.";
     return undefined;
   }, [editing, id, platform, touched, library]);
-  const tokenError = token && !isMask(token) && !TOKEN_RE.test(token.trim()) ? "This doesn't look like a valid token — paste it again." : undefined;
+  const tokenError = token && !isMask(token) && !TOKEN_RE.test(token.trim()) ? "This doesn't look like a valid token. Paste it again." : undefined;
   const codeValue = testCode ?? "";
   const codeError = testCode && !TEST_CODE_RE.test(testCode.replace(/\s+/g, "").toUpperCase()) ? "4–20 capital letters and digits, e.g. TEST12345." : undefined;
   const canSave = !idError && !!id && !tokenError && !codeError && !saving;
@@ -81,14 +83,17 @@ function EntryForm({ mode, library, onSaved, onClose }: { mode: EntryMode; libra
     if (!canSave) return;
     setSaving(true);
     try {
+      // a new token or test code is a secret write: the step-up sheet opens on that answer, then the save runs again
       const res = await runAction(
-        savePixelEntryAction({
-          platform,
-          id,
-          label,
-          ...(server ? { token: token.trim() } : {}),
-          ...(server && testCode !== null ? { testCode } : {}),
-        }),
+        stepUp.action(() =>
+          savePixelEntryAction({
+            platform,
+            id,
+            label,
+            ...(server ? { token: token.trim() } : {}),
+            ...(server && testCode !== null ? { testCode } : {}),
+          }),
+        ),
         { success: editing ? "Pixel saved" : "Pixel added to the library" },
       );
       if (res) {

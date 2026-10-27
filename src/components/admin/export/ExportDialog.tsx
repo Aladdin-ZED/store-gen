@@ -40,6 +40,7 @@ import { absoluteTime, displayPhone, formatBytes, versionTitle } from "./format"
 import { MODE_META, ModeCards } from "./mode-cards";
 import { RecentExports } from "./recent-exports";
 import { SizeSummary } from "./summary";
+import { useStoreStepUp } from "../shell/step-up";
 import { downloadExport, useEstimate, useExportContext } from "./use-export";
 
 export interface ExportDialogProps {
@@ -143,6 +144,7 @@ function ExportForm({
   onClose: () => void;
 }) {
   const uid = useId();
+  const stepUp = useStoreStepUp();
   const ids = {
     version: `${uid}-version`,
     mode: `${uid}-mode`,
@@ -204,8 +206,8 @@ function ExportForm({
       if (phase.kind === "done") setPhase({ kind: "idle" });
     };
 
-  const run = async () => {
-    if (blocker || downloading) return;
+  const run = async (retried = false): Promise<void> => {
+    if (blocker || (downloading && !retried)) return;
     const ctl = new AbortController();
     abort.current = ctl;
     setPhase({ kind: "downloading" });
@@ -239,6 +241,13 @@ function ExportForm({
     onBusy(false);
     if (ctl.signal.aborted) {
       setPhase({ kind: "idle" });
+      return;
+    }
+    // the store's Google key in the ZIP asks for a fresh step-up (§B.7): the sheet, then the export once more
+    if (!res.ok && res.error === "step_up" && !retried) {
+      setPhase({ kind: "idle" });
+      if (await stepUp.request()) return run(true);
+      setFailure("Confirm it's you to include the Google key in this export.");
       return;
     }
     if (!res.ok) {

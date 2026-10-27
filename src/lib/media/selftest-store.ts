@@ -6,9 +6,11 @@
  * Checks the public-read hardening: single-flight loads, the 60 s miss cache, the dedicated read
  * pool failing fast when saturated while the main (order) pool stays responsive, and the verified
  * disk cache for large files (one copy from the database, ranges from disk, tamper detection,
- * database fallback, removal on delete). Files are written the way the upload pipeline writes them: rows
- * of one store (./files.ts; `store_id` is NOT NULL since 0004). The disk cache directory is still today's
- * `tmpdir()/cod-studio-media` (MEDIA_CACHE_DIR is P8's, docs/STORE-SAAS.md §G.2).
+ * database fallback, removal on delete) and its per-store naming (two stores with the same bytes never share a copy;
+ * `evictStore` drops one store's entries only, MED-01, §E.6). Files are written the way the upload pipeline writes
+ * them: rows of one store (./files.ts; `store_id` is NOT NULL since 0004). The disk cache directory is
+ * `tmpdir()/store-gen-media` (MEDIA_CACHE_DIR is P8's, docs/STORE-SAAS.md §G.2). `--db <cod_test_*>` names the
+ * throwaway database (default: a random cod_test_t4_mstore_*).
  */
 import { randomBytes, createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -40,8 +42,10 @@ const section = (title: string) => console.log(`\n${title}`);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const SERVER = (process.env.MEDIA_TEST_DB_URL ?? "mysql://root@127.0.0.1:3306").replace(/\/+$/, "");
-const DB_NAME = `cod_test_t4_mstore_${randomBytes(3).toString("hex")}`;
+const dbFlag = process.argv.indexOf("--db");
+const DB_NAME = dbFlag > 0 && /^cod_test_[a-z0-9_]{1,48}$/.test(process.argv[dbFlag + 1] ?? "") ? process.argv[dbFlag + 1]! : `cod_test_t4_mstore_${randomBytes(3).toString("hex")}`;
 const STORE_ID = "00000000000000000000000001";
+const STORE_B = "00000000000000000000000002";
 
 async function readAll(stream: ReadableStream<Uint8Array>): Promise<Buffer> {
   const parts: Buffer[] = [];
@@ -83,8 +87,8 @@ async function checks(): Promise<void> {
   const bigKey = `${assetId}-1280.mp4`;
   const small = randomBytes(300 * 1024);
   const big = randomBytes(9 * 1024 * 1024 + 12345); // > MAX_CACHED_FILE → disk path
-  const bigSha = createHash("sha256").update(big).digest("hex");
-  const diskFile = join(tmpdir(), "cod-studio-media", bigSha);
+  // a disk copy is named after its store and media key, never after its bytes (MED-01)
+  const diskFile = join(tmpdir(), "store-gen-media", `${STORE_ID}.${createHash("sha256").update(bigKey).digest("hex")}`);
 
   // count every query on the media read pool
   let queries = 0;
@@ -171,6 +175,33 @@ async function checks(): Promise<void> {
     const whole = await store.getMediaFile(bigKey);
     check("whole large file read from disk", !!whole && whole.data.equals(big) && queries === 0, `${queries} queries`);
 
+    section("large files · per store (MED-01)");
+    await db.insert(stores).values({ id: STORE_B, handle: "media-store-b", name: "Media store B", status: "active", brandSeed: "fedcba9876543210" });
+    const scopeB = systemScope(systemCtx("qa.media_store"), STORE_B);
+    const assetB = `5e1f7e58${randomBytes(12).toString("hex")}`;
+    const bigKeyB = `${assetB}-1280.mp4`;
+    const diskFileB = join(tmpdir(), "store-gen-media", `${STORE_B}.${createHash("sha256").update(bigKeyB).digest("hex")}`);
+    const connB = await pool().getConnection();
+    try {
+      await connB.beginTransaction();
+      await fileStore.insertStoreFiles(connB, scopeB, assetB, [{ key: bigKeyB, mime: "video/mp4", data: big }]);
+      await connB.commit();
+    } finally {
+      connB.release();
+    }
+    fileStore.forgetMisses([bigKeyB]);
+    const metaB = (await store.getMediaMeta(bigKeyB))!;
+    check("the same bytes in another store: its meta names its store", metaB.storeId === STORE_B && bigMeta.storeId === STORE_ID);
+    check("…not cached for it although the first store's copy is", !store.mediaBodyCached(metaB) && store.mediaBodyCached(bigMeta));
+    queries = 0;
+    const firstB = await readAll(await store.openMediaRange(metaB, 0, 0));
+    check("…its first read copies its own file from the database (no shared copy, no timing oracle)", firstB.length === 1 && firstB[0] === big[0] && queries > 0, `${queries} queries`);
+    check("…into a disk file of its own", existsSync(diskFileB) && existsSync(diskFile));
+    await store.evictStore(STORE_B);
+    await sleep(50);
+    check("evictStore(B): B's disk copy and cache entries go", !existsSync(diskFileB) && !store.mediaBodyCached(metaB) && store.peekMediaMeta(bigKeyB) === undefined);
+    check("…the first store's copy stays", existsSync(diskFile) && store.mediaBodyCached(bigMeta));
+
     section("large files · tampering, fallback, delete");
     const corrupt = readFileSync(diskFile);
     corrupt[12345] = corrupt[12345]! ^ 0xff;
@@ -202,8 +233,8 @@ async function checks(): Promise<void> {
     check("deleted key resolves to null", (await store.getMediaMeta(bigKey)) === null);
   } finally {
     // never leave test rows behind, even on failure
-    await pool().query("DELETE FROM media_chunks WHERE `key` LIKE ?", [`${assetId}%`]);
-    await pool().query("DELETE FROM media_files WHERE asset_id = ?", [assetId]);
+    await pool().query("DELETE FROM media_chunks WHERE `key` LIKE ? OR `key` LIKE ?", [`${assetId}%`, "5e1f7e58%"]);
+    await pool().query("DELETE FROM media_files WHERE asset_id = ? OR asset_id LIKE ?", [assetId, "5e1f7e58%"]);
     await readPool.end().catch(() => undefined);
     await pool().end().catch(() => undefined);
   }

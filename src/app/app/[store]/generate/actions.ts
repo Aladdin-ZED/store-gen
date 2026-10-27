@@ -61,13 +61,13 @@ export async function createFromDirectionsAction(input: CreateFromDirectionsInpu
       if (JSON.stringify(d.doc ?? null).length > MAX_DOC_CHARS) fail("This direction is too large to save.");
       const { doc, issues } = validateDoc(d.doc);
       if (!doc) return fail(`This direction can't be saved: ${issues.find((i) => i.level === "error")?.message ?? "invalid page"}.`);
-      if (doc.theme.archetype !== d.archetype) fail("The directions changed while saving — generate again.");
+      if (doc.theme.archetype !== d.archetype) fail("The directions changed while saving. Generate them again.");
       docs.push({ label: d.label, doc });
     }
 
     // photos are uploaded before generating: a missing asset was deleted meanwhile (another store's id reads as missing)
     const ids = [...new Set(docs.flatMap((d) => collectAssetIds(d.doc)))];
-    if (ids.length && (await countStoreAssets(scope, ids)) < ids.length) fail("Some photos are no longer in the media library — add them again.");
+    if (ids.length && (await countStoreAssets(scope, ids)) < ids.length) fail("Some photos are no longer in the media library. Add them again.");
 
     const page = docs[chosen]!;
     const created = await createPageFromDirections(scope, { name, slugBase: slugBase(name, page.doc.product.category), chosen, directions: docs }, actor);

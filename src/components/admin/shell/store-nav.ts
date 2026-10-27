@@ -24,7 +24,6 @@ import {
 import type { StorePermission } from "@/lib/auth/permissions";
 import { messageOf, t, type AdminLocale } from "@/lib/i18n/admin";
 import type { StoreMode } from "@/lib/tenancy/mode";
-import type { StoreCtx } from "@/lib/tenancy/types";
 import { appHref } from "@/lib/urls";
 import { NAV_CONTRIBUTIONS, navFor, type NavContribution, type NavGroupId } from "./nav/index";
 import { NAV_FALLBACK_LABELS, NAV_KEYWORDS, nav as dashboardNav } from "./nav/t4";
@@ -76,21 +75,26 @@ function contributions(): readonly NavContribution[] {
   return [...NAV_CONTRIBUTIONS, ...dashboardNav.filter((c) => !ids.has(c.item.id))];
 }
 
+/** A call agent always lands on Orders (the overview redirects there, src/app/app/[store]/page.tsx): no Overview item. */
+const redirectedHome = (viewer: NavViewer) => !viewer.can("pages.read") && viewer.can("orders.read");
+
 export function storeNav(viewer: NavViewer, locale: AdminLocale = "en"): ShellNavGroup[] {
-  // navFor reads the store's mode and the member's grants only
-  const ctx = { store: { mode: viewer.mode }, membership: { role: "viewer", status: "active" }, can: viewer.can } as unknown as Pick<StoreCtx, "store" | "membership" | "can">;
-  return navFor(ctx, contributions()).map((g) => ({
-    id: g.id,
-    label: shellLabel(g.label, locale),
-    items: g.items.map((i) => ({
-      id: i.id,
-      label: shellLabel(i.label, locale),
-      href: i.href(viewer.handle),
-      icon: ICONS[i.icon] ?? CircleIcon,
-      ...(i.badge ? { badgeKey: i.badge.countKey } : {}),
-      keywords: [...(NAV_KEYWORDS[i.id] ?? [])],
-    })),
-  }));
+  const home = redirectedHome(viewer);
+  return navFor({ store: { mode: viewer.mode }, can: viewer.can }, contributions())
+    .map((g) => ({ ...g, items: home ? g.items.filter((i) => i.id !== "overview") : g.items }))
+    .filter((g) => g.items.length > 0)
+    .map((g) => ({
+      id: g.id,
+      label: shellLabel(g.label, locale),
+      items: g.items.map((i) => ({
+        id: i.id,
+        label: shellLabel(i.label, locale),
+        href: i.href(viewer.handle),
+        icon: ICONS[i.icon] ?? CircleIcon,
+        ...(i.badge ? { badgeKey: i.badge.countKey } : {}),
+        keywords: [...(NAV_KEYWORDS[i.id] ?? [])],
+      })),
+    }));
 }
 
 /** The nav item a pathname belongs to (longest href prefix wins; the overview only matches exactly). */

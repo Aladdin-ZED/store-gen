@@ -349,12 +349,12 @@ async function main() {
   /* ---------------- Sheets per store ---------------- */
   await setStoreSetting(A, "sheets", { enabled: true, spreadsheetId: SHEET_A, sheetId: 7, sheetTitle: "Commandes", connectedAt: new Date().toISOString() }, { id: "qa" });
   ok("sheets: A's config is A's, B has none", (await sheets.getSheetsConfig(A))?.spreadsheetId === SHEET_A && (await sheets.getSheetsConfig(B)) === null);
-  const start = await sheets.startSheetConnect(B, `https://docs.google.com/spreadsheets/d/${SHEET_B}/edit#gid=3`, actor(ownerB), { currency: "MAD" });
+  const start = await sheets.startSheetConnect(B, `https://docs.google.com/spreadsheets/d/${SHEET_B}/edit#gid=3`, actor(ownerB), { currency: "MAD", stepUp: "password" });
   ok("sheets proof: a new spreadsheet asks for a code (no Google call before the proof)", start.kind === "proof" && /^SG-[0-9A-HJKMNP-TV-Z]{10}$/.test(start.kind === "proof" ? start.code : ""), start);
   const proofB = await sheets.pendingProof(B);
   ok("sheets proof: only the code's hash is stored, for B's spreadsheet and tab", !!proofB && proofB.spreadsheetId === SHEET_B && proofB.sheetId === 3 && start.kind === "proof" && proofB.codeHash === sheets.proofHash(start.code) && !JSON.stringify(proofB).includes(start.code), proofB);
   ok("sheets proof: A has no pending proof and keeps its sheet", (await sheets.pendingProof(A)) === null && (await sheets.getSheetsConfig(A))?.spreadsheetId === SHEET_A);
-  eq2("sheets proof: verify without a pending proof → no_proof", await code(() => sheets.verifySheetConnect(A, actor(ownerA), { currency: "MAD" })), "no_proof");
+  eq2("sheets proof: verify without a pending proof → no_proof", await code(() => sheets.verifySheetConnect(A, actor(ownerA), { currency: "MAD", stepUp: "password" })), "no_proof");
   const mkOrder = async (storeId: string, pageId: string, status: "pending" | "synced" | "failed", isTest = false) => {
     const id = `QA-${newId().slice(-8)}`;
     await db.insert(orders).values({
@@ -407,7 +407,9 @@ async function main() {
   ok("export context: A's versions and exports, A's sheet", ctxA.exports.map((e) => e.id).join() === expA && ctxA.versions.some((v) => v.id === vExp) && ctxA.defaults.sheetConnected, { exports: ctxA.exports.length, sheet: ctxA.defaults.sheetConnected });
   ok("export context: no key embeddable while A has none", !ctxA.defaults.canEmbedServiceAccount && ctxA.defaults.embedKeyBlocker === NO_EXPORT_KEY);
   ok("export context: B's page shows B's (absent) sheet", !(await exp.getExportContext(B, pBx, { canEmbedKey: false })).defaults.sheetConnected);
-  eq2("export: embedding without a store key → unavailable", await code(() => exp.buildExport(A, { ...phpReq(vExp), options: { hostConfigs: true, embedServiceAccount: true } } as never, actor(ownerA), { canEmbedKey: true })), "unavailable");
+  // the route passes the method of the member's fresh step-up (§B.7): without one the key never goes in
+  eq2("export: embedding without a step-up → forbidden", await code(() => exp.buildExport(A, { ...phpReq(vExp), options: { hostConfigs: true, embedServiceAccount: true } } as never, actor(ownerA), { canEmbedKey: true })), "forbidden");
+  eq2("export: embedding without a store key → unavailable", await code(() => exp.buildExport(A, { ...phpReq(vExp), options: { hostConfigs: true, embedServiceAccount: true } } as never, actor(ownerA), { canEmbedKey: true, stepUp: "password" })), "unavailable");
   eq2("export: embedding without integrations.manage → forbidden", await code(() => exp.buildExport(A, { ...phpReq(vExp), options: { hostConfigs: true, embedServiceAccount: true } } as never, actor(editorA), { canEmbedKey: false })), "forbidden");
   const keyPem = `-----BEGIN PRIVATE KEY-----\n${"A".repeat(120)}\n-----END PRIVATE KEY-----\n`;
   await setStoreSetting(A, "export_key", { clientEmail: "exports@store-a.iam.gserviceaccount.com", privateKey: keyPem, privateKeyId: "key-a-1", setAt: new Date().toISOString() }, { id: "qa" });

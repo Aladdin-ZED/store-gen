@@ -14,6 +14,8 @@ import { Segmented } from "../common/segmented";
 import { StatusChip, TONE_CLASSES } from "../common/status-chip";
 import { RelativeTime } from "../common/time";
 import { runAction, type ActionResult } from "../lib/action-result";
+import { downloadFile } from "../lib/download";
+import { useStoreStepUp } from "../shell/step-up";
 import { useStore } from "../shell/store-context";
 import { int, money, phone as fmtPhone } from "../lib/format";
 import { runSheetSync } from "../lib/sheets-client";
@@ -108,20 +110,32 @@ export function OrdersView(props: OrdersViewProps) {
   );
 }
 
-/** CSV of what the screen shows (filters kept); on the Abandoned tab, the leads with their selection. */
+/**
+ * CSV of what the screen shows (filters kept); on the Abandoned tab, the leads with their selection. Exporting
+ * customer data asks for a fresh step-up (§B.7): the request is fetched, so that answer opens the step-up sheet and
+ * the export runs again after the proof.
+ */
 function ExportButton({ leads }: { leads?: boolean }) {
   const query = useQueryState();
   const storeView = useStore();
+  const stepUp = useStoreStepUp();
+  const [busy, setBusy] = useState(false);
   const params = new URLSearchParams(query.params.toString());
   for (const k of ["tab", "order", "page"]) params.delete(k);
   if (leads) params.set("tab", "leads");
   const qs = params.toString();
+  const run = async () => {
+    setBusy(true);
+    try {
+      await downloadFile(`${storeView.api("/orders/export")}${qs ? `?${qs}` : ""}`, stepUp, leads ? "abandoned-leads.csv" : "orders.csv");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Button asChild variant="outline" className="h-9 rounded-full px-4">
-      <a href={`${storeView.api("/orders/export")}${qs ? `?${qs}` : ""}`} download>
-        <DownloadIcon />
-        Export CSV
-      </a>
+    <Button variant="outline" className="h-9 rounded-full px-4" onClick={() => void run()} disabled={busy} aria-busy={busy}>
+      {busy ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
+      Export CSV
     </Button>
   );
 }

@@ -9,9 +9,13 @@ export const metadata: Metadata = { title: "Pixels" };
 
 type Params = Promise<{ store: string }>;
 
-/** Connect → Pixels: the store's pixel library (pages own their pixels; docs/OFFERS.md §A.4). */
+/**
+ * Connect → Pixels: the store's pixel library (pages own their pixels; docs/OFFERS.md §A.4), `pixels.manage` (§I.1:
+ * the library, health, usage and test windows are the owners' and admins'). The builder's and the generator's pixel
+ * pickers read the library through their own `pages.read` action.
+ */
 export default async function PixelsPage({ params }: { params: Params }) {
-  const ctx = await requireStoreMember({ handle: (await params).store, permission: "settings.read" });
+  const ctx = await requireStoreMember({ handle: (await params).store, permission: "pixels.manage" });
   // tokens leave the server only as masks (••••3f9a), and only for members who manage integrations
   const view = await pixelLibraryView(ctx.scope, { canCreate: ctx.can("pixels.manage"), canSeeTokens: ctx.can("integrations.manage"), fresh: true });
   return (

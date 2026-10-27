@@ -28,6 +28,11 @@ export class ByteLru<V> {
     }
   }
 
+  /** Drop every entry `match` selects (a store's entries, §E.6). */
+  deleteWhere(match: (value: V, key: string) => boolean): void {
+    for (const [key, hit] of [...this.map]) if (match(hit.value, key)) this.delete(key);
+  }
+
   delete(key: string): void {
     const hit = this.map.get(key);
     if (!hit) return;

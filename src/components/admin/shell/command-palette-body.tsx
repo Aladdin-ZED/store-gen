@@ -31,15 +31,19 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { logout } from "@/lib/auth/actions";
+import { clearDashboardDrafts } from "../lib/drafts";
 import type { SearchHit } from "@/lib/admin-data/search";
 import type { ActionResult } from "../lib/action-result";
+import { downloadFile } from "../lib/download";
 import { Kbd } from "./kbd";
+import { useStoreStepUp } from "./step-up";
 import { useStore } from "./store-context";
 import { storeNav } from "./store-nav";
 
 export function Palette({ search, close }: { search: (q: string) => Promise<ActionResult<SearchHit[]>>; close: () => void }) {
   const router = useRouter();
   const store = useStore();
+  const stepUp = useStoreStepUp();
   const can = store.can;
   const { setTheme } = useTheme();
   const [query, setQuery] = useState("");
@@ -155,11 +159,8 @@ export function Palette({ search, close }: { search: (q: string) => Promise<Acti
               keywords={["download", "excel"]}
               onSelect={() => {
                 close();
-                // a file download (route handler), not a page: let the browser fetch it
-                const a = document.createElement("a");
-                a.href = store.api("/orders/export");
-                a.download = "";
-                a.click();
+                // a file of the route handler, fetched: a step-up answer opens the sheet, then it runs again (§B.7)
+                void downloadFile(store.api("/orders/export"), stepUp, "orders.csv");
               }}
               className="gap-3 rounded-lg"
             >
@@ -167,7 +168,7 @@ export function Palette({ search, close }: { search: (q: string) => Promise<Acti
               Export all orders (CSV)
             </CommandItem>
           )}
-          {can("settings.read") && (
+          {can("integrations.manage") && (
             <CommandItem value="action google sheets" keywords={["connect", "sync"]} onSelect={() => go(store.href("/integrations/sheets"))} className="gap-3 rounded-lg">
               <SheetIcon className="text-muted-foreground" />
               Google Sheets connection
@@ -200,7 +201,7 @@ export function Palette({ search, close }: { search: (q: string) => Promise<Acti
           <Kbd>Esc</Kbd> to close
         </span>
       </div>
-      <form ref={formRef} action={logout} className="hidden" />
+      <form ref={formRef} action={logout} onSubmit={clearDashboardDrafts} className="hidden" />
     </Command>
   );
 }

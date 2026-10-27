@@ -34,6 +34,7 @@ import {
   ROOT,
   actionFn,
   answerOf,
+  armed,
   attackers,
   call,
   check,
@@ -65,7 +66,8 @@ const appPath = (handle: string, p: string) => `/app/${handle}${p}`;
 type Replayer = { label: string; who: Who; dual: boolean };
 function replayers(fx: Fixtures, viewB: string | null): Replayer[] {
   return [
-    ...attackers(fx).map((a) => ({ label: a.label, who: { userId: a.userId } as Who, dual: a.userId === fx.dual })),
+    // with a fresh step-up (§B.7): the strongest stolen session replays A's bodies
+    ...attackers(fx).map((a) => ({ label: a.label, who: armed(a.userId), dual: a.userId === fx.dual })),
     ...(viewB ? [{ label: "staff viewing B (impersonation)", who: { sessionToken: viewB } as Who, dual: false }] : []),
   ];
 }
@@ -119,7 +121,8 @@ async function replaySuite(kit: Kit): Promise<void> {
 
     // a self action (leaving the store) is A's own member's call: a fresh member of A, never A's only owner
     const caller = c.self ? await fresh.member(fx.A, "viewer") : fx.A.members.owner;
-    const live = await call({ userId: caller }, appPath(fx.A.handle, c.path), () => actionFn(c)(...structuredClone(args)));
+    // A's member has just stepped up (the secret writes ask for it, §B.7)
+    const live = await call(armed(caller), appPath(fx.A.handle, c.path), () => actionFn(c)(...structuredClone(args)));
     const liveLabel = `${c.id}: A's owner's own call works (the replayed body was live)`;
     if (ranReal(liveLabel, live)) check(liveLabel, refusal(live) === null, answerOf(live));
     // the replays never reached the network with A's secrets (a CAPI test event of B must use B's token, PIX-01)

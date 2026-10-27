@@ -39,6 +39,7 @@ import {
 import type { MembershipSummary } from "@/lib/auth/landing";
 import { ACCOUNT_PATH } from "@/lib/auth/paths";
 import { logout } from "@/lib/auth/actions";
+import { clearDashboardDrafts } from "../lib/drafts";
 import { cn } from "@/lib/utils";
 import { initials } from "../lib/format";
 import { STORE_ROLE_LABELS } from "../lib/store-labels";
@@ -102,7 +103,8 @@ export function AppSidebar({
                   layoutId="nav-active"
                   aria-hidden="true"
                   className="absolute inset-0 rounded-[10px] bg-background shadow-[0_1px_2px_rgb(0_0_0/0.05),0_6px_16px_-10px_rgb(0_0_0/0.25)] ring-1 ring-sidebar-border dark:bg-sidebar-accent"
-                  transition={{ type: "spring", stiffness: 480, damping: 38, mass: 0.7 }}
+                  // a settle, never a bounce (D60, §I.6): the shell's ease-out curve
+                  transition={{ type: "tween", duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
                 />
               )}
               <Icon className={cn("relative z-10 transition-colors", isActive ? "text-brand" : "text-sidebar-foreground/55")} />
@@ -146,7 +148,7 @@ export function AppSidebar({
                 )}
               >
                 <Link href={generate.href} onClick={closeMobile}>
-                  <span className="grid size-6 shrink-0 place-items-center rounded-md bg-brand text-brand-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.25)] transition-transform duration-500 ease-[cubic-bezier(.34,1.36,.64,1)] group-hover/gen:rotate-12 group-data-[collapsible=icon]:size-5 [&_svg]:size-3.5!">
+                  <span className="grid size-6 shrink-0 place-items-center rounded-md bg-brand text-brand-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.25)] transition-transform duration-200 ease-[cubic-bezier(.2,.8,.2,1)] group-hover/gen:scale-[1.06] group-data-[collapsible=icon]:size-5 [&_svg]:size-3.5!">
                     <SparklesIcon />
                   </span>
                   <span className="flex-1 truncate">Generate a page</span>
@@ -201,7 +203,8 @@ function UserMenu({ user, roleLabel }: { user: ShellUser; roleLabel: string }) {
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <form ref={signOut} action={logout} className="hidden" />
+        {/* signing out also forgets this browser's dashboard drafts (§E.6) */}
+        <form ref={signOut} action={logout} onSubmit={clearDashboardDrafts} className="hidden" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton

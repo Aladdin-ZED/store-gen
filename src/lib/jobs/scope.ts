@@ -133,14 +133,22 @@ const WHERE_TABLE: Record<NonNullable<ForEachStoreOpts["where"]>, string> = {
 };
 
 /**
- * The `where` predicate on `stores` (R1.0 shapes: Sheets enabled in the store's settings and an order still to push;
- * outbox items and render jobs pending once 0005 creates their tables). P5 / P8 refine the predicates in place.
+ * The `where` predicate on `stores` (R1.0 shapes; outbox items and render jobs pending once 0005 creates their
+ * tables). P5 / P8 refine the predicates in place.
+ *
+ * `pending_sheets` (§H.2 slot 1): Sheets enabled in the store's settings and either an order still to push, or a
+ * status pull due: "bring statuses back" on (the key's default) and the store's `sheets:pull` bucket (1 per 290 s,
+ * SHT-06) not inside a window. Without the second branch a store whose orders were all synced never had its agents'
+ * sheet statuses pulled by the cron (T4 review, SHT-11).
  */
 function wherePredicate(where: NonNullable<ForEachStoreOpts["where"]>): SQL {
   switch (where) {
     case "pending_sheets":
-      return sql`EXISTS (SELECT 1 FROM store_settings ss WHERE ss.store_id = ${stores.id} AND ss.\`key\` = 'sheets' AND ss.encrypted = 0 AND JSON_VALID(ss.value) AND JSON_UNQUOTE(JSON_EXTRACT(ss.value, '$.enabled')) = 'true')
-        AND EXISTS (SELECT 1 FROM orders o WHERE o.store_id = ${stores.id} AND o.is_test = 0 AND o.sheet_status IN ('pending', 'failed'))`;
+      return sql`EXISTS (SELECT 1 FROM store_settings ss WHERE ss.store_id = ${stores.id} AND ss.\`key\` = 'sheets' AND ss.encrypted = 0 AND JSON_VALID(ss.value)
+          AND JSON_UNQUOTE(JSON_EXTRACT(ss.value, '$.enabled')) = 'true'
+          AND (EXISTS (SELECT 1 FROM orders o WHERE o.store_id = ${stores.id} AND o.is_test = 0 AND o.sheet_status IN ('pending', 'failed'))
+            OR (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ss.value, '$.pull')), 'true') <> 'false'
+              AND NOT EXISTS (SELECT 1 FROM rate_limits rl WHERE rl.bucket = CONCAT('s:', ${stores.id}, ':sheets:pull') AND rl.reset_at > UTC_TIMESTAMP(3)))))`;
     case "pending_outbox":
       return sql`EXISTS (SELECT 1 FROM outbox x WHERE x.store_id = ${stores.id} AND x.state = 'pending' AND x.next_at <= UTC_TIMESTAMP(3))`;
     case "pending_renders":
@@ -165,17 +173,18 @@ async function storePage(states: readonly StoreStatus[], after: string, upTo: st
   return rows.map(toStoreRow).filter((r): r is StoreRow => r !== null);
 }
 
-/** `pending_sheets`: every matching store, the one with the oldest pending order first (ENGC-33). */
+/**
+ * `pending_sheets`: every matching store, the one with the oldest pending order first (ENGC-33); the stores with only
+ * a pull due come after every store with orders to push (MariaDB sorts the NULL of "no pending order" first otherwise).
+ */
 async function oldestPendingFirst(states: readonly StoreStatus[], where: SQL): Promise<StoreRow[]> {
+  const oldest = sql`(SELECT MIN(o.created_at) FROM orders o WHERE o.store_id = ${stores.id} AND o.is_test = 0 AND o.sheet_status IN ('pending', 'failed'))`;
   // tenancy: platform cron iterator over stores (§E.3 rule 6, src/lib/jobs/**)
   const rows = await db
     .select()
     .from(stores)
     .where(and(inArray(stores.status, [...states]), isNotNull(stores.handle), where))
-    .orderBy(
-      sql`(SELECT MIN(o.created_at) FROM orders o WHERE o.store_id = ${stores.id} AND o.is_test = 0 AND o.sheet_status IN ('pending', 'failed'))`,
-      asc(stores.id),
-    );
+    .orderBy(sql`${oldest} IS NULL`, oldest, asc(stores.id));
   return rows.map(toStoreRow).filter((r): r is StoreRow => r !== null);
 }
 

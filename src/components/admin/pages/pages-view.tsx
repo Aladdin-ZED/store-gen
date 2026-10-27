@@ -219,7 +219,7 @@ export function PagesView({
               className="adm-surface-flat adm-aurora adm-rise group flex min-h-72 flex-col items-center justify-center gap-3 p-6 text-center transition-colors hover:bg-muted/70"
               style={{ ["--i" as string]: pages.length + 3 }}
             >
-              <span className="flex size-12 items-center justify-center rounded-2xl bg-background shadow-sm ring-1 ring-border transition-transform duration-500 ease-[cubic-bezier(.34,1.36,.64,1)] group-hover:scale-110 group-hover:rotate-6">
+              <span className="flex size-12 items-center justify-center rounded-2xl bg-background shadow-sm ring-1 ring-border transition-transform duration-200 ease-[cubic-bezier(.2,.8,.2,1)] group-hover:scale-[1.04]">
                 <PlusIcon className="size-5 text-brand" />
               </span>
               <span className="grid gap-1">

@@ -31,6 +31,7 @@ import { StatusChip } from "../common/status-chip";
 import { RelativeTime } from "../common/time";
 import { int } from "../lib/format";
 import { runSheetSync } from "../lib/sheets-client";
+import { isStepUpAnswer, useStoreStepUp } from "../shell/step-up";
 import { requireStoreHandle } from "../shell/store-handle";
 import { useStore } from "../shell/store-context";
 import { SettingsSection, TextInput } from "./form-kit";
@@ -65,6 +66,9 @@ async function call(path: string, method: string, body?: unknown): Promise<{ sta
 
 const msg = (d: Record<string, unknown>, fallback: string) => (typeof d.message === "string" && d.message ? d.message : fallback);
 
+/** Shown when the member closes the step-up sheet instead of confirming (connecting a sheet is a §B.7 secret write). */
+const STEP_UP_NEEDED = "Confirm it's you to connect a sheet. Your password or authenticator code is asked once every 5 minutes.";
+
 export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState; canWrite: boolean; canSync: boolean }) {
   const router = useRouter();
   const store = useStore();
@@ -78,8 +82,17 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
   // the ownership proof of a new spreadsheet: the code is known only right after it is issued
   const [proof, setProof] = useState<{ code: string | null; expiresAt: string } | null>(state.pendingProof ? { code: null, expiresAt: state.pendingProof.expiresAt } : null);
   const [verifying, setVerifying] = useState(false);
+  const stepUp = useStoreStepUp();
 
   const { configured, serviceAccountEmail: email, sheet, health } = state;
+
+  /** A connect step: a `step_up` answer opens the step-up sheet, then the same request runs once more. */
+  const guarded = async (path: string, body?: unknown) => {
+    const first = await call(path, "POST", body);
+    if (!isStepUpAnswer(first.status, first.data)) return { ...first, stepUpDismissed: false };
+    if (!(await stepUp.request())) return { ...first, stepUpDismissed: true };
+    return { ...(await call(path, "POST", body)), stepUpDismissed: false };
+  };
 
   const connected = (data: Record<string, unknown>) => {
     const title = typeof data.spreadsheetTitle === "string" ? data.spreadsheetTitle : null;
@@ -88,7 +101,7 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
     setLink("");
     setChanging(false);
     setProof(null);
-    toast.success(data.created ? `Connected — the “${tab}” tab was created and formatted` : `Connected to the “${tab}” tab`, {
+    toast.success(data.created ? `Connected. The “${tab}” tab was created and formatted` : `Connected to the “${tab}” tab`, {
       description: title ? `Spreadsheet: ${title}` : undefined,
     });
     router.refresh();
@@ -98,14 +111,15 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
     setVerifying(true);
     setError(null);
     try {
-      const { status, data } = await call("verify", "POST");
+      const { status, data, stepUpDismissed } = await guarded("verify");
       if (data.ok) connected(data);
+      else if (stepUpDismissed) setError(STEP_UP_NEEDED);
       else {
         if (data.error === "no_proof") setProof(null);
-        setError(status === 429 ? "Too many attempts — wait a few minutes." : msg(data, "The check failed. Try again in a minute."));
+        setError(status === 429 ? "Too many attempts. Wait a few minutes." : msg(data, "The check failed. Try again in a minute."));
       }
     } catch {
-      setError("Network problem — check your connection and try again.");
+      setError("Network problem. Check your connection and try again.");
     } finally {
       setVerifying(false);
     }
@@ -116,17 +130,19 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
     setConnecting(true);
     setError(null);
     try {
-      const { status, data } = await call("connect", "POST", { url: link });
+      const { status, data, stepUpDismissed } = await guarded("connect", { url: link });
       const issued = data.proof as { code?: unknown; expiresAt?: unknown } | undefined;
       if (data.ok && issued && typeof issued.code === "string" && typeof issued.expiresAt === "string") {
         setProof({ code: issued.code, expiresAt: issued.expiresAt });
       } else if (data.ok) {
         connected(data);
+      } else if (stepUpDismissed) {
+        setError(STEP_UP_NEEDED);
       } else {
-        setError(status === 429 ? "Too many attempts — wait a few minutes." : msg(data, "Connection failed. Check the link and the sharing settings."));
+        setError(status === 429 ? "Too many attempts. Wait a few minutes." : msg(data, "Connection failed. Check the link and the sharing settings."));
       }
     } catch {
-      setError("Network problem — check your connection and try again.");
+      setError("Network problem. Check your connection and try again.");
     } finally {
       setConnecting(false);
     }
@@ -137,11 +153,11 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
     try {
       const { data } = await call("connect", "PATCH", { enabled });
       if (data.ok) {
-        toast.success(enabled ? "Sync resumed — queued orders are being sent" : "Sync paused — new orders will wait in the queue");
+        toast.success(enabled ? "Sync resumed. Queued orders are being sent" : "Sync paused. New orders will wait in the queue");
         router.refresh();
       } else toast.error("Couldn't change the sync state.");
     } catch {
-      toast.error("Network problem — the sync state didn't change.");
+      toast.error("Network problem. The sync state didn't change.");
     } finally {
       setBusy(null);
     }
@@ -155,7 +171,7 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
       else if (data.ok) toast.warning("The sheet is reachable, but its header row changed", { description: msg(data, "") });
       else toast.error("The sheet isn't reachable", { description: msg(data, "Check the sharing settings.") });
     } catch {
-      toast.error("Network problem — the test didn't run.");
+      toast.error("Network problem. The test didn't run.");
     } finally {
       setBusy(null);
     }
@@ -386,19 +402,20 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
             <Step n={4} state={proof ? "current" : "todo"} title="Prove it's your sheet" last>
               <div className="grid grid-cols-1 gap-3 text-sm">
                 <p className="text-muted-foreground">
-                  Many stores share our service account, so we check that you can edit this sheet before writing to it. Type the code below into any cell
-                  of the sheet&apos;s first row (A1 is fine), then click Verify. You can delete it afterwards.
+                  Many stores share our service account, so we check that you can edit this spreadsheet before writing to it. Add the code below to the
+                  spreadsheet&apos;s name (top left) or to the name of any tab, then click Verify. You can rename it back afterwards.
                 </p>
                 {proof?.code ? (
                   <div className="flex items-center gap-2 rounded-2xl bg-foreground/[0.04] py-2 ps-4 pe-2 ring-1 ring-foreground/[0.07] ring-inset">
                     <FingerprintIcon className="size-4 shrink-0 text-muted-foreground" />
                     <code className="min-w-0 flex-1 truncate font-mono text-lg font-semibold tracking-[0.12em] tabular-nums select-all">{proof.code}</code>
-                    <CopyButton value={proof.code} label="Copy the code" toastMessage="Code copied — paste it into the first row of your sheet" />
+                    <CopyButton value={proof.code} label="Copy the code" toastMessage="Code copied. Add it to the spreadsheet's name or a tab's name." />
                   </div>
                 ) : (
                   proof && (
                     <p className="text-xs text-muted-foreground">
-                      A code was issued earlier. If it is already in your sheet, verify now; otherwise paste the link again for a new code.
+                      A code was issued earlier. If it is already in the spreadsheet&apos;s name or a tab&apos;s name, verify now; otherwise paste the link again
+                      for a new code.
                     </p>
                   )
                 )}
@@ -453,7 +470,7 @@ export function SheetsWizard({ state, canWrite, canSync }: { state: SheetsState;
             <div className="flex items-center gap-2 rounded-xl bg-foreground/[0.04] py-1.5 ps-3.5 pe-1.5 ring-1 ring-foreground/[0.06] ring-inset">
               <KeyRoundIcon className="size-3.5 shrink-0 text-muted-foreground" />
               <code className="min-w-0 flex-1 truncate font-mono text-[0.78rem]">{state.cron.url}</code>
-              <CopyButton value={state.cron.url} label="Copy cron URL" toastMessage="Cron URL copied — paste your key at the end" />
+              <CopyButton value={state.cron.url} label="Copy cron URL" toastMessage="Cron URL copied. Paste your key at the end" />
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
               Then in Hostinger hPanel → your site → <span className="font-medium text-foreground">Advanced → Cron Jobs → Create Cron Job</span>, type Custom, every
@@ -498,7 +515,7 @@ function EmailChip({ email }: { email: string | null }) {
     <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-emerald-500/8 py-1 ps-3 pe-1 ring-1 ring-emerald-500/20 ring-inset">
       <ShieldCheckIcon className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
       <span className="truncate font-mono text-[0.78rem] text-foreground">{email}</span>
-      <CopyButton value={email} label="Copy service account email" toastMessage="Email copied — paste it in “Share”" size="icon-xs" />
+      <CopyButton value={email} label="Copy service account email" toastMessage="Email copied. Paste it in “Share”" size="icon-xs" />
     </span>
   );
 }

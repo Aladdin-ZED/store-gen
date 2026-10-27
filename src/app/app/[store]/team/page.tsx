@@ -5,6 +5,8 @@ import { StoreTeamPanel, type TeamInviteRow, type TeamMemberRow } from "@/compon
 import { ACTIVE_STORE_ROLES, ROLE_RANK, canManageMember, invitableRoles } from "@/lib/auth/permissions";
 import { authTranslator } from "@/lib/auth/i18n";
 import { viewerLocale } from "@/lib/auth/locale";
+import { dirOf } from "@/lib/i18n/admin";
+import { AdminI18nProvider } from "@/lib/i18n/admin/client";
 import { listInvites, listMembersByScope } from "@/lib/tenancy/invites";
 import { requireStoreMember } from "@/lib/tenancy/seam";
 import { changeMemberRoleAction, createInviteAction, leaveStoreAction, removeMemberAction, revokeInviteAction, setMemberStatusAction } from "./actions";
@@ -59,25 +61,30 @@ export default async function TeamPage({ params }: { params: Promise<{ store: st
   const canInvite = ctx.can("members.invite") || impersonating;
 
   return (
-    <Screen>
-      <PageHeader title={t("team.title")} description={t("team.lead", { store: ctx.store.name })} />
-      <StoreTeamPanel
-        storeName={ctx.store.name}
-        viewer={{ role, totp: ctx.user.totpEnabled }}
-        members={rows}
-        invites={inviteRows}
-        invitable={impersonating ? [] : canInvite ? [...invitableRoles(role)] : []}
-        canInvite={canInvite}
-        readOnly={impersonating}
-        actions={{
-          createInvite: createInviteAction,
-          revokeInvite: revokeInviteAction,
-          changeRole: changeMemberRoleAction,
-          setStatus: setMemberStatusAction,
-          remove: removeMemberAction,
-          leave: leaveStoreAction,
-        }}
-      />
-    </Screen>
+    // translated (ar / fr / en): the viewer's language and direction inside the English shell (§I.5)
+    <AdminI18nProvider locale={locale}>
+      <div lang={locale} dir={dirOf(locale)} className="contents">
+        <Screen>
+          <PageHeader title={t("team.title")} description={t("team.lead", { store: ctx.store.name })} />
+          <StoreTeamPanel
+            storeName={ctx.store.name}
+            viewer={{ role, totp: ctx.user.totpEnabled }}
+            members={rows}
+            invites={inviteRows}
+            invitable={impersonating ? [] : canInvite ? [...invitableRoles(role)] : []}
+            canInvite={canInvite}
+            readOnly={impersonating}
+            actions={{
+              createInvite: createInviteAction,
+              revokeInvite: revokeInviteAction,
+              changeRole: changeMemberRoleAction,
+              setStatus: setMemberStatusAction,
+              remove: removeMemberAction,
+              leave: leaveStoreAction,
+            }}
+          />
+        </Screen>
+      </div>
+    </AdminI18nProvider>
   );
 }

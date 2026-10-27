@@ -8,9 +8,9 @@ export const metadata: Metadata = { title: "Audit log" };
 
 type Params = Promise<{ store: string }>;
 
-/** Settings → Audit log: this store's rows only (ADM-25), in its time zone. */
+/** Settings → Audit log: this store's rows only (ADM-25), staff rows redacted to a display name (§F.5), in its time zone. */
 export default async function AuditSettingsPage({ params }: { params: Params }) {
   const ctx = await requireStoreMember({ handle: (await params).store, permission: "audit.read" });
-  const initial = await auditPage(ctx.scope, { limit: 50 });
+  const initial = await auditPage(ctx, { limit: 50 });
   return <AuditLog initial={initial} timeZone={ctx.store.timezone} load={loadAuditAction} />;
 }

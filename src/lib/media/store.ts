@@ -13,6 +13,13 @@ import "server-only";
  *     · larger files (videos) are copied once into a private disk cache (sha256-verified) and served
  *       from disk by byte range. The database is streamed per request only when that cache is
  *       unavailable.
+ *
+ * Per store (docs/STORE-SAAS.md §E.6, MED-01; T4 review): the disk copy of a file is named after its store and its
+ * media key (`<storeId>.<sha256(key)>`), never after its content, so two stores holding the same bytes never share a
+ * copy (no cross-store "is it cached" timing, and deleting one store's file never evicts the other's). Every cached
+ * entry carries its store: `evictStore(storeId)` drops a store's memory and disk entries (a purge, a suspension). The
+ * directory is `tmpdir()/store-gen-media` (no longer COD Studio's `cod-studio-media`, MED-07); P8's MEDIA_CACHE_DIR /
+ * DATA_DIR replaces it (§G.2).
  * CHUNK_SIZE is part of the on-disk format: never change it once files exist.
  */
 import { createHash, randomBytes } from "node:crypto";
@@ -41,15 +48,19 @@ const READ_WAIT_MS = 10_000;
 const MISS_TTL_MS = 60_000;
 const MAX_MISSES = 4096;
 
-const DISK_DIR = join(tmpdir(), "cod-studio-media");
+const DISK_DIR = join(tmpdir(), "store-gen-media");
 const DISK_BUDGET = 512 * 1024 * 1024;
 /** after a disk failure (full, read-only…), stay on the database fallback this long */
 const DISK_BACKOFF_MS = 10 * 60_000;
 const DISK_READ_BLOCK = 64 * 1024;
 const SHA_RE = /^[a-f0-9]{64}$/;
+/** a disk copy's file name: `<storeId>.<sha256(media key)>` */
+const DISK_NAME_RE = /^([0-9A-HJKMNP-TV-Z]{26})\.([a-f0-9]{64})$/;
 
 export interface MediaFileMeta {
   key: string;
+  /** the store the file belongs to (`media_files.store_id`): the per-store cache entries and `evictStore` */
+  storeId: string;
   assetId: string;
   mime: string;
   bytes: number;
@@ -76,6 +87,7 @@ export class MediaBusyError extends Error {
 }
 
 interface DiskEntry {
+  storeId: string;
   bytes: number;
   /** content hashed by this process (files adopted from an earlier run are checked on first use) */
   verified: boolean;
@@ -90,11 +102,11 @@ interface MediaState {
   read: { pool: mysql.Pool | null; active: number; waiters: { grant: () => void }[] };
   disk: {
     ready: Promise<boolean> | null;
-    /** sha256 → entry, least recently used first */
+    /** disk name (`<storeId>.<sha256(key)>`) → entry, least recently used first */
     index: Map<string, DiskEntry>;
     total: number;
     flights: Map<string, Promise<string | null>>;
-    /** sha256 (or "*" for the whole cache) → no disk attempt before this time */
+    /** disk name (or "*" for the whole cache) → no disk attempt before this time */
     backoff: Map<string, number>;
   };
 }
@@ -118,6 +130,9 @@ function state(): MediaState {
 }
 
 export const sha256hex = (data: Buffer | string) => createHash("sha256").update(data).digest("hex");
+
+/** The disk copy's name of one store's file: per store and media key, never per content (MED-01). */
+export const diskName = (meta: Pick<MediaFileMeta, "storeId" | "key">): string => `${meta.storeId}.${sha256hex(meta.key)}`;
 
 /** Concurrent callers for the same key share one in-flight load. */
 function singleFlight<T>(flights: Map<string, Promise<T>>, key: string, load: () => Promise<T>): Promise<T> {
@@ -223,14 +238,14 @@ export function forgetMisses(keys: readonly string[]): void {
 
 /** Delete every file of one asset of the scope's store (inside the caller's transaction) and drop their disk copies. */
 export async function deleteFilesOfAsset(conn: PoolConnection, scope: WriteScope, assetId: string): Promise<string[]> {
-  const [rows] = await conn.query<RowDataPacket[]>("SELECT `key`, sha256 FROM media_files WHERE store_id = ? AND asset_id = ?", [scope.storeId, assetId]);
+  const [rows] = await conn.query<RowDataPacket[]>("SELECT `key` FROM media_files WHERE store_id = ? AND asset_id = ?", [scope.storeId, assetId]);
   const keys = rows.map((r) => String(r.key));
   if (keys.length) {
     // media_chunks is keyed by the media key only (no store column): the keys are the store's, read above
     await conn.query("DELETE FROM media_chunks WHERE `key` IN (?)", [keys]);
     await conn.query("DELETE FROM media_files WHERE store_id = ? AND `key` IN (?)", [scope.storeId, keys]);
     // a cache: harmless to drop early even if the transaction rolls back
-    for (const r of rows) void forgetDisk(String(r.sha256));
+    for (const key of keys) void forgetDisk(diskName({ storeId: scope.storeId, key }));
   }
   return keys;
 }
@@ -241,6 +256,18 @@ export function evictKeys(keys: string[]): void {
     s.files.delete(k);
     s.metas.delete(k);
   }
+}
+
+/**
+ * Drop everything this process caches of one store (§E.6): its whole files and metadata in memory and its disk
+ * copies (index and files). A purge or a suspension calls it; the next read of a key that still exists loads again.
+ */
+export async function evictStore(storeId: string): Promise<void> {
+  const s = state();
+  s.files.deleteWhere((f) => f.storeId === storeId);
+  s.metas.deleteWhere((m) => m.storeId === storeId);
+  const names = [...s.disk.index.entries()].filter(([, e]) => e.storeId === storeId).map(([name]) => name);
+  await Promise.all(names.map((name) => forgetDisk(name)));
 }
 
 /* ------------------------------------------------------------------ */
@@ -276,13 +303,14 @@ export async function getMediaMeta(key: string): Promise<MediaFileMeta | null> {
   const s = state();
   return singleFlight(s.metaFlights, key, async () => {
     // tenancy: public-key mediaKey (§E.3 rule 6, §G.6: a media key is global and random; the media route resolves its store first, resolveMediaKey)
-    const [row] = await mediaQuery("SELECT `key`, asset_id, mime, bytes, chunks, sha256 FROM media_files WHERE `key` = ? LIMIT 1", [key]);
+    const [row] = await mediaQuery("SELECT `key`, store_id, asset_id, mime, bytes, chunks, sha256 FROM media_files WHERE `key` = ? LIMIT 1", [key]);
     if (!row) {
       rememberMissing(key);
       return null;
     }
     const meta: MediaFileMeta = {
       key: String(row.key),
+      storeId: String(row.store_id),
       assetId: String(row.asset_id),
       mime: String(row.mime),
       bytes: Number(row.bytes),
@@ -344,7 +372,7 @@ export function peekMediaFile(key: string): MediaFile | undefined {
 /** True when serving this file's bytes needs no database work. */
 export function mediaBodyCached(meta: MediaFileMeta): boolean {
   const s = state();
-  return meta.bytes <= MAX_CACHED_FILE ? s.files.get(meta.key) !== undefined : s.disk.index.get(meta.sha256)?.verified === true;
+  return meta.bytes <= MAX_CACHED_FILE ? s.files.get(meta.key) !== undefined : s.disk.index.get(diskName(meta))?.verified === true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -362,18 +390,19 @@ async function prepareDisk(): Promise<boolean> {
       if (st.mode & 0o077) await chmod(DISK_DIR, 0o700);
     }
     // adopt complete files from an earlier run (hashed again before first use); drop stale partial writes
-    const found: { sha: string; bytes: number; at: number }[] = [];
+    const found: { name: string; storeId: string; bytes: number; at: number }[] = [];
     for (const name of await readdir(DISK_DIR)) {
       const info = await stat(join(DISK_DIR, name)).catch(() => null);
       if (!info?.isFile()) continue;
-      if (SHA_RE.test(name)) found.push({ sha: name, bytes: info.size, at: info.mtimeMs });
+      const m = DISK_NAME_RE.exec(name);
+      if (m) found.push({ name, storeId: m[1]!, bytes: info.size, at: info.mtimeMs });
       else if (name.endsWith(".part") && Date.now() - info.mtimeMs > DISK_BACKOFF_MS) {
         await unlink(join(DISK_DIR, name)).catch(() => undefined);
       }
     }
     for (const f of found.sort((a, b) => a.at - b.at)) {
-      if (d.index.has(f.sha)) continue;
-      d.index.set(f.sha, { bytes: f.bytes, verified: false });
+      if (d.index.has(f.name)) continue;
+      d.index.set(f.name, { storeId: f.storeId, bytes: f.bytes, verified: false });
       d.total += f.bytes;
     }
     trimDisk();
@@ -388,15 +417,15 @@ function trimDisk(): void {
   while (d.total > DISK_BUDGET && d.index.size > 0) void forgetDisk(d.index.keys().next().value!);
 }
 
-/** Drop a disk copy (index + file). Await the result before writing the same file again. */
-function forgetDisk(sha: string): Promise<void> {
+/** Drop a disk copy (index + file) by its disk name. Await the result before writing the same file again. */
+function forgetDisk(name: string): Promise<void> {
   const d = state().disk;
-  const entry = d.index.get(sha);
+  const entry = d.index.get(name);
   if (entry) {
-    d.index.delete(sha);
+    d.index.delete(name);
     d.total -= entry.bytes;
   }
-  return SHA_RE.test(sha) ? unlink(join(DISK_DIR, sha)).catch(() => undefined) : Promise.resolve();
+  return DISK_NAME_RE.test(name) ? unlink(join(DISK_DIR, name)).catch(() => undefined) : Promise.resolve();
 }
 
 /** A local file-system failure (disk full, read-only, permissions) — distinct from database errors. */
@@ -465,24 +494,26 @@ async function diskCopy(meta: MediaFileMeta): Promise<string | null> {
   const d = state().disk;
   const sha = meta.sha256;
   if (!SHA_RE.test(sha)) return null;
+  const name = diskName(meta);
+  if (!DISK_NAME_RE.test(name)) return null;
   const now = Date.now();
-  if ((d.backoff.get("*") ?? 0) > now || (d.backoff.get(sha) ?? 0) > now) return null;
+  if ((d.backoff.get("*") ?? 0) > now || (d.backoff.get(name) ?? 0) > now) return null;
   if (!(await (d.ready ??= prepareDisk()))) return null;
-  const path = join(DISK_DIR, sha);
-  const entry = d.index.get(sha);
+  const path = join(DISK_DIR, name);
+  const entry = d.index.get(name);
   if (entry?.verified && entry.bytes === meta.bytes) {
-    d.index.delete(sha); // most recently used
-    d.index.set(sha, entry);
+    d.index.delete(name); // most recently used
+    d.index.set(name, entry);
     return path;
   }
-  return singleFlight(d.flights, sha, async () => {
-    const adopted = d.index.get(sha);
+  return singleFlight(d.flights, name, async () => {
+    const adopted = d.index.get(name);
     if (adopted && !adopted.verified) {
       if (adopted.bytes === meta.bytes && (await fileSha(path)) === sha) {
         adopted.verified = true;
         return path;
       }
-      await forgetDisk(sha);
+      await forgetDisk(name);
     }
     let ok: boolean;
     try {
@@ -492,18 +523,18 @@ async function diskCopy(meta: MediaFileMeta): Promise<string | null> {
       d.backoff.set("*", Date.now() + DISK_BACKOFF_MS); // disk full / not writable: stop trying for a while
       return null;
     }
-    // another process may have just written the same content-addressed file (our rename lost the race)
+    // another process may have just written the same file (our rename lost the race): its content is checked
     if (!ok && (await fileSha(path)) !== sha) {
-      d.backoff.set(sha, Date.now() + DISK_BACKOFF_MS); // stored data inconsistent: don't re-copy every request
+      d.backoff.set(name, Date.now() + DISK_BACKOFF_MS); // stored data inconsistent: don't re-copy every request
       return null;
     }
-    const previous = d.index.get(sha);
+    const previous = d.index.get(name);
     if (previous) d.total -= previous.bytes;
-    d.index.delete(sha);
-    d.index.set(sha, { bytes: meta.bytes, verified: true });
+    d.index.delete(name);
+    d.index.set(name, { storeId: meta.storeId, bytes: meta.bytes, verified: true });
     d.total += meta.bytes;
     trimDisk();
-    return d.index.has(sha) ? path : null;
+    return d.index.has(name) ? path : null;
   });
 }
 
@@ -552,7 +583,7 @@ export async function openMediaRange(meta: MediaFileMeta, start: number, end: nu
       // runtime cache under os.tmpdir(): without the ignore, Turbopack traces the whole project into the server output
       return fileRangeStream(await open(/* turbopackIgnore: true */ path, "r"), start, end);
     } catch {
-      await forgetDisk(meta.sha256); // removed under us (another process trimmed its cache): copy again once
+      await forgetDisk(diskName(meta)); // removed under us (another process trimmed its cache): copy again once
     }
   }
   return streamMediaRange(meta, start, end);
