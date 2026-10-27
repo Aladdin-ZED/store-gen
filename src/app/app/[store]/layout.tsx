@@ -3,13 +3,11 @@ import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 import { cache } from "react";
 import "@/components/admin/styles/admin.css";
-import { AdminProviders } from "@/components/admin/shell/providers";
 import { StoreProvider } from "@/components/admin/shell/store-context";
 import { StoreFrame } from "@/components/admin/shell/store-frame";
 import { StoreHandleMeta } from "@/components/admin/shell/store-handle";
 import { navCounts } from "@/lib/admin-data/dashboard";
 import { storeClientInfo, switcherMemberships } from "@/lib/admin-data/shell";
-import { getCspNonce } from "@/lib/auth";
 import { requireStoreMember } from "@/lib/tenancy/seam";
 import { consoleHref } from "@/lib/urls";
 import { searchAction } from "./actions";
@@ -35,13 +33,13 @@ export async function generateMetadata({ params }: Pick<Props, "params">): Promi
  * /app/<handle>/…: one store's dashboard (docs/STORE-SAAS.md §I.1). The seam resolves the member (signed out → the
  * sign-in page; no store, no membership, a closed door → the neutral 404) and the shell gets the store's context:
  * grants, links, the switcher. A layout never replaces the checks of its pages and actions (AUTH-31): each page
- * calls requireStoreMember with its own permission, each action storeAction, each route storeGuard.
+ * calls requireStoreMember with its own permission, each action storeAction, each route storeGuard. The theme,
+ * tooltips, toasts and the viewer's language come from `src/app/app/layout.tsx` (one set for all of /app).
  */
 export default async function StoreLayout({ children, params }: Props) {
   const { store: handle } = await params;
   const ctx = await memberCtx(handle);
-  const [nonce, jar, memberships, counts] = await Promise.all([
-    getCspNonce(),
+  const [jar, memberships, counts] = await Promise.all([
     cookies(),
     switcherMemberships(ctx.user.id),
     ctx.can("orders.read") ? navCounts(ctx.scope) : Promise.resolve(null),
@@ -49,7 +47,7 @@ export default async function StoreLayout({ children, params }: Props) {
   const sidebarOpen = jar.get("sidebar_state")?.value !== "false";
 
   return (
-    <AdminProviders nonce={nonce}>
+    <>
       {/* the media, framing and upload clients call this store's /api/app/<handle>/… */}
       <StoreHandleMeta handle={ctx.store.handle} />
       <StoreProvider value={storeClientInfo(ctx)}>
@@ -64,6 +62,6 @@ export default async function StoreLayout({ children, params }: Props) {
           {children}
         </StoreFrame>
       </StoreProvider>
-    </AdminProviders>
+    </>
   );
 }

@@ -16,11 +16,10 @@ import { newId, newPublicKey } from "@/lib/db/ids";
 import { pages, pageVersions, statsDaily, stores } from "@/lib/db/schema";
 import type { PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
-import { invalidatePublished } from "@/lib/render/cache.server";
-import { isServableSlug, RESERVED_SLUGS } from "@/lib/render/publish.server";
+import { invalidateStoreRender } from "@/lib/render/cache.server";
+import { isStoreSlug } from "@/lib/render/publish.server";
 import { deletePageStats } from "@/lib/stats";
 import { invalidateStore } from "@/lib/tenancy/cache";
-import { STORE_RESERVED_SLUGS } from "@/lib/tenancy/handles";
 import { getStoreById } from "@/lib/tenancy/public";
 import { byId, inStore, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
@@ -182,11 +181,11 @@ export function slugify(input: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 60)
     .replace(/-+$/g, "");
-  return s && !RESERVED_SLUGS.has(s) ? s : "page";
+  return s && isStoreSlug(s) ? s : "page";
 }
 
-/** A slug a page of the store can take: servable, and not one of the store's own route segments (§C.4.1). */
-const storeSlugFree = (slug: string) => isServableSlug(slug) && !STORE_RESERVED_SLUGS.has(slug);
+/** A slug a page of the store can take (§C.4.1): the slug pattern, none of the store's reserved segments. */
+const storeSlugFree = (slug: string) => isStoreSlug(slug);
 
 /** First free slug of the store: base, base-2, base-3… (each store has its own namespace, ADM-12). */
 export async function uniqueSlug(scope: StoreScope, base: string): Promise<string> {
@@ -369,7 +368,7 @@ export async function unpublishPage(scope: WriteScope, id: string, actor: Actor)
     .where(and(byId(pages, scope, id), eq(pages.status, "published")));
   const ok = affected(res) === 1;
   if (ok) {
-    invalidatePublished();
+    invalidateStoreRender(scope.storeId);
     await auditIn(scope, actor, "page.unpublished", { target: id });
   }
   return ok;
@@ -389,7 +388,7 @@ export async function archivePage(scope: WriteScope, id: string, actor: Actor): 
   const ok = affected(res) === 1;
   if (ok) {
     await clearHomeIf(scope, id);
-    invalidatePublished();
+    invalidateStoreRender(scope.storeId);
     await auditIn(scope, actor, "page.archived", { target: id });
   }
   return ok;
@@ -414,14 +413,14 @@ export async function deletePage(scope: WriteScope, id: string, actor: Actor): P
   const page = await getPageRow(scope, id);
   if (!page) return false;
   await clearHomeIf(scope, id);
+  // the analytics first: deletePageStats proves the page is this store's from its row (still there)
+  await deletePageStats(scope, id);
   const removed = await db.transaction(async (tx) => {
     await tx.delete(pageVersions).where(whereStore(pageVersions, scope, eq(pageVersions.pageId, id)));
     return affected(await tx.delete(pages).where(byId(pages, scope, id)));
   });
   if (removed !== 1) return false;
-  // the page was this store's (deleted above), so its analytics rows are too
-  await deletePageStats(id);
-  invalidatePublished();
+  invalidateStoreRender(scope.storeId);
   await auditIn(scope, actor, "page.deleted", { target: id, meta: { slug: page.slug, name: page.name } });
   return true;
 }
@@ -435,7 +434,7 @@ export async function setHomePage(scope: WriteScope, id: string | null, actor: A
   // the scope's own `stores` row only (ADM-18: the old flag was cleared on every page of every store)
   await db.update(stores).set({ homePageId: id, updatedAt: new Date() }).where(eq(stores.id, scope.storeId));
   invalidateStore(scope.storeId);
-  invalidatePublished();
+  invalidateStoreRender(scope.storeId);
   await auditIn(scope, actor, "page.home_set", { target: id ?? "auto" });
   return true;
 }

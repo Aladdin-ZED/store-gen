@@ -28,7 +28,6 @@ import { getAssetsByIds, getMediaFile, getMediaMeta } from "@/lib/media";
 import { PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
 import { whatsappDigits, whatsappNumber } from "@/lib/render/config";
-import { publicOrigin } from "@/lib/render/publish.server";
 import { invalidateExportOrigins } from "@/lib/orders/export-origins";
 import { errorSummary } from "@/lib/orders/log";
 import { storeInfoFor } from "@/lib/admin-data/store-info";
@@ -36,6 +35,7 @@ import { getSheetsConfig } from "@/lib/sheets/config";
 import { scopedCache } from "@/lib/tenancy/cache";
 import { byId, inStore, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { Actor, StoreScope, WriteScope } from "@/lib/tenancy/types";
+import { platformOrigin } from "@/lib/urls";
 import { collectAssetIds, type StoreInfo } from "@/landing/context";
 import { buildBundle, bundleSize, type BundleInput, type MediaSource } from "./bundle";
 import { exportFileName, isExportMode, normalizeAllowedOrigins, WHATSAPP_HINT, type ExportMode, type ExportRequest, type ExportRequestField } from "./options";
@@ -111,13 +111,13 @@ function validDoc(raw: unknown): PageDoc {
   return doc;
 }
 
-/** The app's public origin for connected exports, or why connected mode cannot be used. */
+/** The platform's public origin, where connected exports post their orders (§C.6), or why connected mode cannot be used. */
 function apiOriginState(): { origin: string | null; blocker: string | null } {
-  const origin = publicOrigin() ?? null;
-  if (!origin) return { origin: null, blocker: "Set PUBLIC_URL to the app's public https address to export connected pages." };
+  const origin = platformOrigin() || null;
+  if (!origin) return { origin: null, blocker: "Set PLATFORM_URL to the platform's public https address to export connected pages." };
   const u = new URL(origin);
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname);
-  if (u.protocol !== "https:" && !local) return { origin: null, blocker: "PUBLIC_URL must be an https:// address for connected exports." };
+  if (u.protocol !== "https:" && !local) return { origin: null, blocker: "PLATFORM_URL must be an https:// address for connected exports." };
   return { origin, blocker: null };
 }
 

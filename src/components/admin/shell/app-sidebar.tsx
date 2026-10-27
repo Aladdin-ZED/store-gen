@@ -37,6 +37,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import type { MembershipSummary } from "@/lib/auth/landing";
+import { ACCOUNT_PATH } from "@/lib/auth/paths";
 import { logout } from "@/lib/auth/actions";
 import { cn } from "@/lib/utils";
 import { initials } from "../lib/format";
@@ -55,9 +56,6 @@ export interface NavCounts {
   newOrders: number;
   syncFailed: number;
 }
-
-/** The account's own pages (T2, docs/STORE-SAAS.md §I.1): password, two-step verification, devices. */
-export const ACCOUNT_PATH = "/app/account";
 
 export function AppSidebar({
   user,

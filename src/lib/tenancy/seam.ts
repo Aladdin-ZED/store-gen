@@ -53,6 +53,7 @@ import { effectiveHost } from "@/lib/edge/host";
 import { verifiedRequestPath } from "@/lib/edge/path-sig";
 import { isAdminLocale } from "@/lib/i18n/admin";
 import { errorSummary } from "@/lib/orders/log";
+import type { PrePublishCode } from "@/lib/render/prepublish";
 import { CsrfError, checkSameOrigin } from "@/lib/security/csrf";
 import { baseSecurityHeaders } from "@/lib/security/headers";
 import { clientIp } from "@/lib/security/ip";
@@ -67,6 +68,7 @@ import type {
   ActionErrorCode,
   ActionResult,
   Actor,
+  GateItem,
   ImpersonationInfo,
   Membership,
   MessageKey,
@@ -169,6 +171,9 @@ export function actionFailure(err: unknown, area: string): Extract<ActionResult<
   if (err instanceof CsrfError) return { ok: false, error: "forbidden" };
   if (err instanceof EntitlementError) return { ok: false, error: "feature_off" };
   if (err instanceof QuotaError) return { ok: false, error: "quota" };
+  // a publish-gate refusal (§M.1 rule 2, D51; CCR r1.0-t4-12): `PublishError(code, …, items)` from the publisher
+  const gate = gateRefusal(err);
+  if (gate) return gate;
   // T1's typed refusals (CCR r1.0-t1-2): the close / reopen sheets and the rename sheet show why
   if (err instanceof LifecycleError) return { ok: false, error: err.code };
   if (err instanceof HandleError) {
@@ -180,6 +185,20 @@ export function actionFailure(err: unknown, area: string): Extract<ActionResult<
   if (err instanceof ZodError) return { ok: false, error: "invalid", message: err.issues[0]?.message ?? "Some fields are invalid." };
   console.error(`[${area}]`, errorSummary(err));
   return { ok: false, error: "server" };
+}
+
+const GATE_CODES: ReadonlySet<string> = new Set(["design_blocked", "honesty_blocked", "budget_blocked"] satisfies PrePublishCode[]);
+
+/**
+ * A thrown refusal of the publish gates as the §E.2 result `{ ok: false, error: code, items }` (the publish dialog lists
+ * one row per item). Read by shape (an error with a gate `code` and its `GateItem[]`), so the seam never loads the
+ * renderer: `PublishError` (src/lib/render/publish.server.ts) carries both.
+ */
+function gateRefusal(err: unknown): Extract<ActionResult<never>, { ok: false }> | null {
+  if (!(err instanceof Error)) return null;
+  const { code, items } = err as Error & { code?: unknown; items?: unknown };
+  if (typeof code !== "string" || !GATE_CODES.has(code) || !Array.isArray(items)) return null;
+  return { ok: false, error: code as PrePublishCode, items: items as GateItem[] };
 }
 
 /** JSON answer of a refused guard (the headers of today's apiHeaders(), src/lib/orders/http.ts). */

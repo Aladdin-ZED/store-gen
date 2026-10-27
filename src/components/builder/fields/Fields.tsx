@@ -184,7 +184,7 @@ function ListField({ spec, path, scope, error }: { spec: ListSpec; path: string;
           {spec.label}
           <span className="ms-1.5 font-mono text-[10.5px] tabular-nums text-muted-foreground">
             {items.length}
-            {spec.max ? `/${spec.max}` : ""}
+            {spec.max ? <>/{spec.max}</> : null}
           </span>
         </p>
         <Button type="button" variant="ghost" size="xs" onClick={add} disabled={items.length >= max} className="text-foreground/80">

@@ -108,7 +108,9 @@ async function replaySuite(kit: Kit): Promise<void> {
     const s1 = await snapshot(fx.A.id);
     check(`${c.id}: A's rows unchanged by the replays before A's call`, s1.hash === s0.hash, snapshotDiff(s0, s1));
 
-    const live = await call({ userId: fx.A.members.owner }, appPath(fx.A.handle, c.path), () => actionFn(c)(...structuredClone(args)));
+    // a self action (leaving the store) is A's own member's call: a fresh member of A, never A's only owner
+    const caller = c.self ? await fresh.member(fx.A, "viewer") : fx.A.members.owner;
+    const live = await call({ userId: caller }, appPath(fx.A.handle, c.path), () => actionFn(c)(...structuredClone(args)));
     const v = liveVerdict(c, live);
     if (v.pending) pending(`${c.id}: A's owner's own call works`, v.pending);
     else check(`${c.id}: A's owner's own call works (the replayed body was live)`, v.ok, answerOf(live));
@@ -130,7 +132,8 @@ async function originSuite(kit: Kit): Promise<void> {
   const { fx, fresh } = kit;
   suite("origin");
   const seam = readFileSync(path.join(ROOT, "src", "lib", "tenancy", "seam.ts"), "utf8");
-  const hardened = /export (async )?function storeAction[\s\S]*?assertSameOrigin\(/.test(seam);
+  // T2 names the check assertActionOrigin (the same-origin rule of §C.9, first in storeAction)
+  const hardened = /export (async )?function storeAction[\s\S]*?assert(?:SameOrigin|ActionOrigin)\(/.test(seam);
   const samples = ACTION_CASES.filter((c) => ["setAssetAltAction", "updateOrderStatusAction", "saveDraft", "starVersionAction"].includes(c.name));
   for (const c of samples) {
     const args = await c.victim(fx, fresh);
@@ -145,7 +148,7 @@ async function originSuite(kit: Kit): Promise<void> {
       const r = await call({ userId: fx.A.members.owner }, appPath(fx.A.handle, c.path), () => actionFn(c)(...structuredClone(args)), { identityHeaders: headers, headers: new Headers(headers) });
       const name = `${c.id} · A's owner · ${label}: ${allowed ? "works" : "forbidden (never a 500)"}`;
       if (allowed) check(name, refusal(r) === null, answerOf(r));
-      else if (!hardened) pending(name, "T2 (storeAction: assertSameOrigin first, §E.2)");
+      else if (!hardened) pending(name, "T2 (storeAction: assertActionOrigin first, §E.2)");
       else check(name, refusal(r) === "forbidden", answerOf(r));
     }
   }

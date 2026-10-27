@@ -189,19 +189,8 @@ function addDays(day: string, n: number): string {
  * Funnel stats for a day range (inclusive, "YYYY-MM-DD", max 366 days) — totals, a gap-free daily
  * series, and per-page rows. Optionally restricted to some pages.
  */
-export function getPageStats(scope: StoreScope, range: { from: string; to: string }, opts?: { pageIds?: string[] }): Promise<PageStats>;
-/** @deprecated single-tenant; T4 moves the dashboard and the console to the scoped overload */
-export function getPageStats(range: { from: string; to: string }, opts?: { pageIds?: string[] }): Promise<PageStats>;
-export async function getPageStats(
-  ...args: [StoreScope, { from: string; to: string }, { pageIds?: string[] }?] | [{ from: string; to: string }, { pageIds?: string[] }?]
-): Promise<PageStats> {
-  if ("storeId" in args[0]) {
-    const [scope, range, opts] = args as [StoreScope, { from: string; to: string }, { pageIds?: string[] }?];
-    return statsInStore(scope, range, opts ?? {});
-  }
-  // the single-tenant /admin's dashboard: store #1 (the converted install, §D.8)
-  const [range, opts] = args as [{ from: string; to: string }, { pageIds?: string[] }?];
-  return statsInStore(await legacyScope(), range, opts ?? {});
+export function getPageStats(scope: StoreScope, range: { from: string; to: string }, opts: { pageIds?: string[] } = {}): Promise<PageStats> {
+  return statsInStore(scope, range, opts);
 }
 
 /** STAT-02: never aggregates another store's rows (the days are the store's own calendar days). */
@@ -252,20 +241,11 @@ async function statsInStore(scope: StoreScope, range: { from: string; to: string
   return { from, to, totals, days, pages: pagesOut };
 }
 
-/** Remove all analytics of a page of the scope's store (call when the page is deleted). */
-export function deletePageStats(scope: WriteScope, pageId: string): Promise<void>;
-/** @deprecated single-tenant; T4 moves the page deletion to the scoped overload */
-export function deletePageStats(pageId: string): Promise<void>;
-export async function deletePageStats(...args: [WriteScope, string] | [string]): Promise<void> {
-  if (typeof args[0] !== "string") {
-    const [scope, pageId] = args as [WriteScope, string];
-    return deleteStatsInStore(scope, pageId);
-  }
-  // the single-tenant /admin's page deletion: store #1 (the converted install, §D.8)
-  return deleteStatsInStore(await legacyScope(), args[0]);
-}
-
-async function deleteStatsInStore(scope: WriteScope, pageId: string): Promise<void> {
+/**
+ * Remove all analytics of a page of the scope's store. Call it while the page row still exists (before the page is
+ * deleted): the visitor markers carry no store, so they go only once the page is proven to be the scope's.
+ */
+export async function deletePageStats(scope: WriteScope, pageId: string): Promise<void> {
   // the markers carry no store: they go only when the page's counters were the scope's (a page id is global)
   const [own] = await db
     .select({ pageId: pages.id })
@@ -274,13 +254,4 @@ async function deleteStatsInStore(scope: WriteScope, pageId: string): Promise<vo
     .limit(1);
   await db.delete(statsDaily).where(whereStore(statsDaily, scope, eq(statsDaily.pageId, pageId)));
   if (own) await db.delete(statsVisitors).where(eq(statsVisitors.pageId, pageId));
-}
-
-/**
- * The store today's single-tenant /admin reads: store #1 (`LEGACY_STORE_ID`), as a system scope. Loaded lazily (the
- * scoped forms never pay for the jobs seam); goes when T4 moves the dashboard and the page deletion (R1.0).
- */
-async function legacyScope(): Promise<WriteScope> {
-  const [{ systemCtx, systemScope }, { LEGACY_STORE_ID }] = await Promise.all([import("@/lib/jobs/scope"), import("@/lib/db/store-handles")]);
-  return systemScope(systemCtx("legacy-admin"), LEGACY_STORE_ID);
 }

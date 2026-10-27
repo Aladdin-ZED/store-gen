@@ -9,7 +9,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
 import { checkBrandTerms } from "@/lib/platform/brand-check";
-import { invalidatePublished } from "@/lib/render/cache.server";
+import { invalidateStoreRender } from "@/lib/render/cache.server";
 import { invalidateStore } from "@/lib/tenancy/cache";
 import type { StoreRow, WriteScope } from "@/lib/tenancy/types";
 import { ActionError } from "./action";
@@ -49,7 +49,7 @@ export async function updateStoreProfile(scope: WriteScope, current: StoreRow, p
   await db.update(stores).set(set).where(eq(stores.id, scope.storeId));
   invalidateStore(scope.storeId);
   // footers, legal pages and the order form read the store's identity and currency at request time
-  invalidatePublished();
+  invalidateStoreRender(scope.storeId);
   await auditIn(scope, actor, "store.profile_updated", { target: scope.storeId, meta: { fields } });
   return fields;
 }

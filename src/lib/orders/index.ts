@@ -9,7 +9,7 @@ export type { OrderItems, OrderUnit } from "@/lib/db/schema";
 export { createOrder, decoyResponse, upsellTokenFor, type CreateOrderContext, type CreateOrderResult } from "./create";
 export { acceptUpsell, type UpsellResponse, type UpsellResult } from "./upsell";
 export { upsertLead } from "./leads";
-export { resolvePageKey, versionDoc, PAGE_KEY_RE, type PageTarget, type ResolvePurpose } from "./resolve";
+export { versionDoc, PAGE_KEY_RE, type PageTarget, type ResolvePurpose } from "./resolve";
 export { validateOrder, validName, cleanInput, type ValidOrder, type OrderField, type FieldError } from "./validate";
 export { scoreRisk, type RiskInput, type CaptchaState } from "./risk";
 export { checkCaptcha, verifyTurnstile } from "./turnstile";

@@ -3,27 +3,27 @@
  * §E.3, PIX-*, SHT-*, EXP-*). Two stores, A (store #1) and B; every check asks "does B ever see, use or change A's
  * data". Exit code 1 on failure.
  *
- *   DATABASE_URL=mysql://root@127.0.0.1:3306/cod_test_px APP_SECRET=<random 64 hex> \
- *     node --import tsx scripts/qa/pixels-publish-check.ts   (npm run test:pixels-publish; NOT with
+ *   npm run test:pixels-publish [-- --db cod_test_pixels_publish] [--keep]   (tsx; NOT with
  *     --conditions=react-server: next/navigation then loads React without createContext)
  *
- * Refuses to run unless the database name starts with "cod_px" or "cod_test" (it empties tables).
- *  - migration (store #1 only): raw scan of the store's drafts (archived too), publish versions and non-revoked
- *    exports; legacy store ids first; legacy token copied to ids without their own, legacy test codes copied with
- *    no window, legacy fields kept, health "unverified"; pages untouched; idempotent; never another store's pages
+ * Creates a throwaway database on XAMPP's MariaDB (root, no password, 127.0.0.1:3306; the name must be cod_test_*),
+ * migrates it, seeds it and drops it at the end (unless --keep). A fresh APP_SECRET and a P-mode platform; nothing is
+ * read from the .env files.
+ *  - store A's library and tokens are seeded as the store #1 conversion leaves them (the migration itself is
+ *    test:migrate's, on the converted legacy database: CCR r1.0-t1-3 item 3)
  *  - library rule: the member's role in THIS store decides (an editor is refused an unknown id, the owner's joins the
  *    library, another store's owner is refused); B's library never changes
  *  - tokens per (store, pixel): A's token is never B's, even for the same pixel id; usage counts and test windows
  *    only see the store's own pages; health and its throttle are per store
  *  - Sheets: config, pending proof (only the code's hash stored), sync health, pull and push touch only the store
  *  - exports: another store's page, version and export answer "not found"; the PHP key is the store's own
- *  - publish (T3's scoped publish): the library rule and the pixels-only update, once T3 implements it
+ *  - publish (the scoped publish): the store's library rule by default, and the scoped pixels-only update
  *
- * Until T1 merges, the store-settings API is a typed stub: this check then reads and writes `store_settings` through
- * a local adapter (plain JSON, the test database only), so the per-store rules above are exercised today and
- * against T1's real API once it lands (the adapter only answers "not implemented: T1").
+ * The local store-settings adapter below only answers when T1's API says "not implemented: T1" (never since the T1
+ * merge): the checks run against T1's real, sealed store settings.
  */
 import Module from "node:module";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { and, desc, eq, sql } from "drizzle-orm";
 
@@ -109,15 +109,38 @@ let adapterUsed = false;
   };
 }
 
-const url = process.env.DATABASE_URL ?? "";
-const dbName = /\/([^/?]+)(\?|$)/.exec(url)?.[1] ?? "";
-if (!/^cod_(px|test)/.test(dbName)) {
-  console.error(`✗ refusing to run on database "${dbName || "(none)"}" — use a throwaway cod_px* / cod_test* database`);
+const flag = (name: string) => {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+};
+const dbName = flag("db") ?? "cod_test_pixels_publish";
+const KEEP = process.argv.includes("--keep");
+if (!/^cod_test_[a-z0-9_]{1,48}$/.test(dbName)) {
+  console.error(`✗ refusing to run on database "${dbName}": use a throwaway cod_test_* name`);
   process.exit(1);
+}
+const DB_SERVER = "mysql://root@127.0.0.1:3306";
+{
+  // this process's platform: a fresh secret, P mode, never the owner's environment
+  const env = process.env as Record<string, string | undefined>;
+  for (const k of ["PUBLIC_URL", "STORE_ROOT_DOMAIN", "EDGE_KEY", "ADMIN_HOST", "LEGACY_PLATFORM_HOSTS", "TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY", "GOOGLE_SA_JSON_B64"]) delete env[k];
+  env.DATABASE_URL = `${DB_SERVER}/${dbName}`;
+  env.APP_SECRET = randomBytes(32).toString("hex");
+  env.PLATFORM_URL = "http://localhost:3451";
+}
+
+/** Create (or empty) the throwaway database; drop it at the end. */
+async function rootQuery(q: string): Promise<void> {
+  const mysql = (await import("mysql2/promise")).default;
+  const conn = await mysql.createConnection({ uri: DB_SERVER, charset: "utf8mb4_unicode_ci" });
+  try {
+    await conn.query(q);
+  } finally {
+    await conn.end();
+  }
 }
 
 let pass = 0;
-let pending = 0;
 const failures: string[] = [];
 const ok = (label: string, cond: boolean, info?: unknown) => {
   if (cond) pass++;
@@ -152,6 +175,8 @@ const SHEET_B = "1BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 const load = <T>(id: string): T => Module.createRequire(__filename)(id) as T;
 
 async function main() {
+  await rootQuery(`DROP DATABASE IF EXISTS \`${dbName}\``);
+  await rootQuery(`CREATE DATABASE \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
   const { runMigrations } = load<typeof import("@/lib/db/migrate")>("@/lib/db/migrate");
   await runMigrations();
   const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
@@ -159,8 +184,7 @@ async function main() {
   const { newId, newPublicKey } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
   const { getFixture } = load<typeof import("@/lib/page/fixtures")>("@/lib/page/fixtures");
   const { validateDoc } = load<typeof import("@/lib/page/validate")>("@/lib/page/validate");
-  const { invalidateSettings, setSetting, getStoreSetting, setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
-  const { migratePixelLibrary } = load<typeof import("@/lib/pixels/migrate.server")>("@/lib/pixels/migrate.server");
+  const { invalidateSettings, getStoreSetting, setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
   const lib = load<typeof import("@/lib/pixels/library.server")>("@/lib/pixels/library.server");
   const { pixelUsage, pixelUsageOf, invalidatePixelUsage, usageCount, livePagePixels } = load<typeof import("@/lib/pixels/usage.server")>("@/lib/pixels/usage.server");
   const { getPixelHealth, recordPixelHealth } = load<typeof import("@/lib/pixels/health.server")>("@/lib/pixels/health.server");
@@ -170,7 +194,7 @@ async function main() {
   const sheets = load<typeof import("@/lib/sheets")>("@/lib/sheets");
   const exp = load<typeof import("@/lib/export/server")>("@/lib/export/server");
   const { storeExportKey, NO_EXPORT_KEY } = load<typeof import("@/lib/export/service-account")>("@/lib/export/service-account");
-  const { publishPage, publishTrackingOnly, PublishError } = load<typeof import("@/lib/render/publish.server")>("@/lib/render/publish.server");
+  const { publishPage, publishTrackingOnly } = load<typeof import("@/lib/render/publish.server")>("@/lib/render/publish.server");
 
   // empty the test tables (throwaway database only; children before their store)
   for (const t of ["audit_log", "exports", "orders", "page_versions", "pages", "store_settings", "store_members", "rate_limits", "settings"]) {
@@ -179,7 +203,8 @@ async function main() {
   await db.execute(sql.raw("DELETE FROM `stores`"));
   await db.execute(sql.raw("DELETE FROM `users`"));
   invalidateSettings();
-  invalidatePixelUsage();
+  invalidatePixelUsage(STORE_A);
+  invalidatePixelUsage(STORE_B);
 
   const ctx = systemCtx("qa.pixels_publish");
   const A = systemScope(ctx, STORE_A);
@@ -221,9 +246,7 @@ async function main() {
     return v;
   };
 
-  /* ---------------- migration (store #1) ---------------- */
-  await setSetting("pixels", { metaPixelId: [META_B] });
-  await setStoreSetting(A, "tracking_secrets", { metaCapiToken: "legacyMetaToken123", metaTestEventCode: "TEST111", tiktokToken: "legacyTikTok99", metaTokens: { [META_B]: "ownTokenBBBB2222" } }, { id: "qa" });
+  /* ---------------- store A's library and tokens (as the store #1 conversion leaves them) ---------------- */
   const pA = await insertPage(STORE_A, "Argan", "argan", docWith({ metaPixelId: [META_A] }), "published");
   const vA = await publishAt(STORE_A, pA, docWith({ metaPixelId: [META_A], snapPixelId: [SNAP] }));
   await insertPage(STORE_A, "Old page", "old", { ...docWith({}), tracking: { tiktokPixelId: [TT_1] } }, "archived");
@@ -234,28 +257,36 @@ async function main() {
   // store B: its own page firing A's pixel id and one of its own
   const pBx = await insertPage(STORE_B, "Store B page", "argan", docWith({ metaPixelId: [META_A, META_Y] }), "published");
   const vBx = await publishAt(STORE_B, pBx, docWith({ metaPixelId: [META_A, META_Y] }));
-  const draftsBefore = await db.select({ id: pages.id, draft: pages.draft, updatedAt: pages.updatedAt }).from(pages);
-
-  const mig = await migratePixelLibrary(A);
-  ok("migration ran for store #1", mig.ran, mig);
+  const at = new Date().toISOString();
+  const entry = (platform: "meta" | "tiktok" | "snap" | "ga4", id: string, label: string) => ({ platform, id, label, addedAt: at, tests: [] });
+  await setStoreSetting(
+    A,
+    "pixel_library",
+    {
+      v: 1,
+      pixels: [
+        entry("meta", META_B, "Pixel principal"),
+        entry("meta", META_A, "Argan · ••••1111"),
+        entry("tiktok", TT_1, "Old page · ••••0001"),
+        entry("snap", SNAP, "Argan · ••••5c6d"),
+        entry("ga4", GA4, "Exported · ••••1234"),
+      ],
+    },
+    { id: "qa" },
+  );
+  await setStoreSetting(
+    A,
+    "tracking_secrets",
+    {
+      metaTokens: { [META_A]: "legacyMetaToken123", [META_B]: "ownTokenBBBB2222" },
+      metaTestCodes: { [META_A]: "TEST111", [META_B]: "TEST111" },
+      tiktokTokens: { [TT_1]: "legacyTikTok99" },
+    },
+    { id: "qa" },
+  );
   const libA = await lib.getLibrary(A);
-  eq2("migration: store id first, then by usage (the store's drafts incl. archived, publish versions, exports)", libA.pixels.map((p) => `${p.platform}:${p.id}`), [`meta:${META_B}`, `meta:${META_A}`, `tiktok:${TT_1}`, `snap:${SNAP}`, `ga4:${GA4}`]);
-  ok("migration: another store's pixels never join store #1's library", !libA.pixels.some((p) => p.id === META_Y), libA.pixels);
-  eq2("migration: store label", libA.pixels[0]!.label, "Pixel principal");
-  ok("migration: other labels name the store's first page", libA.pixels.find((p) => p.id === META_A)?.label === "Argan · ••••1111" && libA.pixels.find((p) => p.id === TT_1)?.label === "Old page · ••••0001", libA.pixels);
-  const secretsA = await getStoreSetting(A, "tracking_secrets", { fresh: true });
-  eq2("migration: legacy token copied to ids without their own", [secretsA.metaTokens[META_A], secretsA.metaTokens[META_B], secretsA.tiktokTokens[TT_1]], ["legacyMetaToken123", "ownTokenBBBB2222", "legacyTikTok99"]);
-  eq2("migration: legacy test codes copied per id, legacy fields kept", [secretsA.metaTestCodes[META_A], secretsA.metaTestCodes[META_B], secretsA.metaCapiToken, secretsA.metaTestEventCode], ["TEST111", "TEST111", "legacyMetaToken123", "TEST111"]);
-  ok("migration: no test window active", libA.pixels.every((p) => p.tests.length === 0));
-  const healthA = await getPixelHealth(A);
-  ok("migration: copied tokens are unverified", healthA[`meta:${META_A}`]?.state === "unverified" && healthA[`tiktok:${TT_1}`]?.state === "unverified" && !healthA[`meta:${META_B}`], healthA);
-  const draftsAfter = await db.select({ id: pages.id, draft: pages.draft, updatedAt: pages.updatedAt }).from(pages);
-  ok("migration: pages untouched", JSON.stringify(draftsAfter) === JSON.stringify(draftsBefore));
-  ok("migration: idempotent (marker = the store's library row)", !(await migratePixelLibrary(A)).ran);
-  ok("migration: the legacy boot form finds store #1's library and does nothing", !(await migratePixelLibrary()).ran);
-  const migAudit = await db.select().from(auditLog).where(eq(auditLog.action, "pixels.library_migrated"));
-  ok("migration: audited once, in store #1", migAudit.length === 1 && migAudit[0]!.storeId === STORE_A, migAudit);
-  eq2("migration: store B has no library, no token", [(await lib.getLibrary(B)).pixels.length, Object.keys((await getStoreSetting(B, "tracking_secrets")).metaTokens).length], [0, 0]);
+  eq2("seed: store A's library as converted", libA.pixels.map((p) => `${p.platform}:${p.id}`), [`meta:${META_B}`, `meta:${META_A}`, `tiktok:${TT_1}`, `snap:${SNAP}`, `ga4:${GA4}`]);
+  eq2("seed: store B has no library, no token", [(await lib.getLibrary(B)).pixels.length, Object.keys((await getStoreSetting(B, "tracking_secrets")).metaTokens).length], [0, 0]);
 
   /* ---------------- library rule (membership role of THIS store) ---------------- */
   const rule = (scope: typeof A, who: { id: string }, tracking: Record<string, unknown>) => code(() => lib.enforceLibraryRule(scope, tracking, actor(who)));
@@ -267,7 +298,6 @@ async function main() {
   ok("library rule: label \"\" in A", libA2.pixels.some((p) => p.id === META_X && p.label === ""), libA2.pixels);
   ok("library rule: B's library unchanged", (await lib.getLibrary(B)).pixels.length === 0);
   eq2("library rule: an editor publishes ids the library knows", await rule(A, editorA, { metaPixelId: [META_X] }), "ok");
-  eq2("library rule: the legacy store-less form is store #1's", await code(() => lib.enforceLibraryRule({ metaPixelId: [META_X] }, editorA.id)), "ok");
 
   /* ---------------- tokens per (store, pixel) ---------------- */
   await lib.savePixelEntry(B, { platform: "meta", id: META_A, label: "B's own", token: "tokenOfStoreB_9999" }, actor(ownerB));
@@ -281,7 +311,8 @@ async function main() {
   ok("library view: the label of B's entry never reaches A", viewA.pixels.find((p) => p.id === META_A)?.label !== "B's own");
 
   /* ---------------- usage, live pages, delete, test windows ---------------- */
-  invalidatePixelUsage();
+  invalidatePixelUsage(STORE_A);
+  invalidatePixelUsage(STORE_B);
   const usageA = await pixelUsage(A, { fresh: true });
   eq2("usage: META_A in A's drafts + live only (B's page not counted)", usageCount(usageA.get(`meta:${META_A}`)), { pages: 1, live: 1, exports: 0, drafts: 1 });
   eq2("usage: GA4 only via A's export", usageCount(usageA.get(`ga4:${GA4}`)), { pages: 0, live: 0, exports: 1, drafts: 0 });
@@ -386,37 +417,53 @@ async function main() {
   const revAudit = await db.select().from(auditLog).where(and(eq(auditLog.action, "export.revoked"), eq(auditLog.target, expA)));
   ok("export: revoke audited once, in A", revAudit.length === 1 && revAudit[0]!.storeId === STORE_A, revAudit);
 
-  /* ---------------- publish (T3's scoped publish) ---------------- */
+  /* ---------------- publish (the scoped publish and the pixels-only update) ---------------- */
   const pB = await insertPage(STORE_A, "Duo", "duo-px", docWith({ metaPixelId: [META_Y] }));
-  let scopedPublish = true;
-  try {
-    await publishPage(A, pB, { actor: actor(editorA) });
-  } catch (e) {
-    if (e instanceof Error && /^not implemented: T3/.test(e.message)) scopedPublish = false;
-    else ok("publish: editor refused for an unknown id", e instanceof PublishError && e.code === "pixel_not_in_library", e instanceof Error ? e.message : e);
-  }
-  if (scopedPublish) {
-    const pub = await publishPage(A, pB, { actor: actor(ownerA) });
-    ok("publish: owner publishes and the id joins A's library", !!pub.versionId && (await lib.getLibrary(A)).pixels.some((p) => p.id === META_Y));
-    const changed = await db.select().from(auditLog).where(and(eq(auditLog.action, "page.pixels_changed"), eq(auditLog.target, pB))).orderBy(desc(auditLog.id));
-    ok("publish: audit page.pixels_changed in A, masked", changed[0]?.storeId === STORE_A && !JSON.stringify(changed).includes(META_Y), changed[0]);
-    void publishTrackingOnly;
-  } else {
-    pending++;
-    console.log("… publish checks pending: T3's scoped publishPage is still a stub in this tree");
-  }
+  eq2("publish: an editor is refused an unknown id (the store's rule runs by default)", await code(() => publishPage(A, pB, { actor: actor(editorA) })), "pixel_not_in_library");
+  eq2("publish: B can't publish A's page", await code(() => publishPage(B, pB, { actor: actor(ownerB) })), "not_found");
+  const pub = await publishPage(A, pB, { actor: actor(ownerA) });
+  ok("publish: owner publishes and the id joins A's library", !!pub.versionId && (await lib.getLibrary(A)).pixels.some((p) => p.id === META_Y));
+  ok("publish: B's library unchanged", !(await lib.getLibrary(B)).pixels.some((p) => p.id === META_Y));
+  const changed = await db.select().from(auditLog).where(and(eq(auditLog.action, "page.pixels_changed"), eq(auditLog.target, pB))).orderBy(desc(auditLog.id));
+  ok("publish: audit page.pixels_changed in A, masked", changed[0]?.storeId === STORE_A && !JSON.stringify(changed).includes(META_Y), changed[0]);
+  const META_Z = "777777777777777";
+  eq2("pixels only: B can't update A's live page", await code(() => publishTrackingOnly(B, pB, { metaPixelId: [META_X] }, pub.versionId, { actor: actor(ownerB) })), "not_found");
+  eq2("pixels only: an editor is refused an unknown id", await code(() => publishTrackingOnly(A, pB, { metaPixelId: [META_Z] }, pub.versionId, { actor: actor(editorA) })), "pixel_not_in_library");
+  eq2("pixels only: a stale base version is refused", await code(() => publishTrackingOnly(A, pB, { metaPixelId: [META_X] }, vA, { actor: actor(editorA) })), "live_changed");
+  const only = await publishTrackingOnly(A, pB, { metaPixelId: [META_X] }, pub.versionId, { actor: actor(editorA) });
+  const [liveRow] = await db.select({ v: pages.publishedVersionId, draft: pages.draft }).from(pages).where(eq(pages.id, pB));
+  ok("pixels only: an editor swaps to a known id; the live version and the draft follow", liveRow?.v === only.versionId && only.draftUpdated && JSON.stringify(liveRow.draft.tracking) === JSON.stringify({ metaPixelId: [META_X] }), { only, tracking: liveRow?.draft.tracking });
+  const onlyAudit = await db.select().from(auditLog).where(and(eq(auditLog.action, "page.published"), eq(auditLog.target, pB))).orderBy(desc(auditLog.id));
+  ok("pixels only: audited in A by the editor", onlyAudit[0]?.storeId === STORE_A && onlyAudit[0]?.userId === editorA.id && (onlyAudit[0]?.meta as { pixelsOnly?: boolean } | null)?.pixelsOnly === true, onlyAudit[0]);
   void trackingRefs;
   void storeSettings;
   void settings;
   void vExp;
 
+  if (adapterUsed) failures.push("store settings went through the local adapter: T1's API answered \"not implemented\"");
   for (const f of failures) console.log(`✗ ${f}`);
-  if (adapterUsed) console.log("… store settings went through the local adapter (T1's API is still a stub in this tree)");
-  console.log(failures.length ? `✗ ${failures.length} failure(s), ${pass} passed` : `✓ per-store pixels / sheets / exports check passed (${pass} assertions${pending ? `, ${pending} block pending T3` : ""})`);
-  process.exit(failures.length ? 1 : 0);
+  console.log(failures.length ? `✗ ${failures.length} failure(s), ${pass} passed` : `✓ per-store pixels / sheets / exports / publish check passed (${pass} assertions)`);
+  return failures.length ? 1 : 0;
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+async function cleanup(): Promise<void> {
+  try {
+    const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+    await pool().end();
+  } catch {
+    // the pool was never opened
+  }
+  if (KEEP) console.log(`… kept ${dbName}`);
+  else await rootQuery(`DROP DATABASE IF EXISTS \`${dbName}\``).catch((e: unknown) => console.error(`✗ could not drop ${dbName}:`, e instanceof Error ? e.message : e));
+}
+
+main()
+  .then(async (code) => {
+    await cleanup();
+    process.exit(code);
+  })
+  .catch(async (e) => {
+    console.error(e);
+    await cleanup();
+    process.exit(1);
+  });

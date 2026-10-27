@@ -70,7 +70,6 @@ same list with comments. Saving the variables redeploys the app.
 | Name | Value |
 |---|---|
 | `GOOGLE_SA_JSON_B64` | Google service-account key, base64 on one line: see [GOOGLE-SHEETS-SETUP.md](GOOGLE-SHEETS-SETUP.md) |
-| `GOOGLE_EXPORT_SA_JSON_B64` | a **second** service-account key, only for PHP exports that carry a Google key in `config.php` ([GOOGLE-SHEETS-SETUP.md, Part C](GOOGLE-SHEETS-SETUP.md#part-c--optional-a-key-for-php-exports)). It must be a different account from `GOOGLE_SA_JSON_B64`, or the export is refused. |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys (both or neither). These are defaults only: keys saved in *Settings → Anti-spam* take over (see §7). |
 | `ADMIN_HOST` | **Recommended.** A host name of its own for the admin, e.g. `studio.mystore.ma` (see §4a). |
 | `ADMIN_IP_ALLOWLIST` | comma-separated IPs allowed to reach the admin. Leave empty to allow all (see §6). |

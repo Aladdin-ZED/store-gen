@@ -2,16 +2,14 @@ import "server-only";
 /**
  * HTTP plumbing shared by the commerce route handlers (public API, admin media/sheets, cron):
  * JSON responses with security headers + no-store, capped body reading, origin / CORS policy
- * (per store, ./origin), the after-response Sheets push, and the admin guard (same-origin + requireUser;
- * deleted at the R1.0 integration once T4 has moved its last callers to storeGuard / platformGuard).
+ * (per store, ./origin) and the after-response Sheets push of the order's store. Dashboard and console routes guard
+ * themselves with `storeGuard` / `platformGuard` (src/lib/tenancy/seam.ts).
  */
 import { and, isNull } from "drizzle-orm";
 import { after } from "next/server";
-import { assertAdminAccess, AuthError, requireUser, type Permission, type SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { exportsTable } from "@/lib/db/schema";
-import { LEGACY_STORE_ID } from "@/lib/db/store-handles";
-import { checkSameOrigin } from "@/lib/security/csrf";
+import { systemCtx, systemScope } from "@/lib/jobs/scope";
 import { baseSecurityHeaders } from "@/lib/security/headers";
 import { clientIp } from "@/lib/security/ip";
 import { syncPendingOrders } from "@/lib/sheets/sync";
@@ -49,27 +47,16 @@ export function noContent(extra?: HeadersInit): Response {
 export { errorSummary, logError } from "./log";
 
 /**
- * Interim fail-safe (R1.0 review of T3, finding 2): the platform-global integrations of the single-tenant app (the one
- * Google Sheet, the legacy `tracking_secrets` / `pixel_library` CAPI tokens keyed by pixel id only) belong to store #1.
- * Another store's order never reaches them: no sheet push, no server-side Purchase, whatever pixel id its page names.
- * Removed when T4's per-store sync and `sendConversionsAfterResponse(scope, c)` land (CCR r1.0-t3-7).
- */
-export function usesLegacyIntegrations(scope: StoreScope): boolean {
-  return scope.storeId === LEGACY_STORE_ID;
-}
-
-/**
- * Push the store's queued orders to its Google Sheet once the response has been sent (ORD-08). Never throws:
- * the order is already stored, and anything not pushed now is picked up by the next sync (cron tick).
- * `scope` is the order's store: the push moves to T4's per-store sync (`syncPendingOrders(scope, …)`,
- * CCR r1.0-t3-7); until it lands the push is today's single-sheet sync, for store #1 only.
+ * Push the store's queued orders to the store's own Google Sheet once the response has been sent (ORD-08, SHT-02).
+ * Never throws: the order is already stored, and anything not pushed now is picked up by the next sync (cron
+ * tick). `scope` is the order's store; after the response the push is that store's background work, hence the
+ * job's `systemScope` (a `WriteScope`: the sync writes `sheet_status`).
  */
 export function syncSheetAfterResponse(scope: StoreScope, label: string): void {
-  if (!usesLegacyIntegrations(scope)) return;
   try {
     after(async () => {
       try {
-        await syncPendingOrders({ maxRetries: 2 });
+        await syncPendingOrders(systemScope(systemCtx("sheets.push"), scope.storeId), { maxRetries: 2 });
       } catch (err) {
         logError(label, err);
       }
@@ -165,27 +152,4 @@ export async function exportOrigins(scope: StoreScope, exportId: string | null):
     .where(and(byId(exportsTable, scope, exportId), isNull(exportsTable.revokedAt)))
     .limit(1);
   return row && Array.isArray(row.origins) ? row.origins.filter((o) => typeof o === "string") : null;
-}
-
-/* ------------------------------------------------------------------ */
-/* admin                                                               */
-/* ------------------------------------------------------------------ */
-
-export type AdminGuard = { ok: true; user: SessionUser; ip: string } | { ok: false; response: Response };
-
-/**
- * Admin route guard: the admin gate first, then same-origin for state-changing methods, then
- * requireUser(permission). Gate failures (Next notFound) propagate untouched so the route answers
- * 404 like an unknown URL, before any check whose answer (403) would show the route exists.
- */
-export async function adminGuard(req: Request, permission: Permission): Promise<AdminGuard> {
-  await assertAdminAccess();
-  if (!checkSameOrigin(req)) return { ok: false, response: json({ ok: false, error: "forbidden" }, 403) };
-  try {
-    const user = await requireUser({ permission, throwOnFail: true });
-    return { ok: true, user, ip: clientIp(req.headers) };
-  } catch (err) {
-    if (err instanceof AuthError) return { ok: false, response: json({ ok: false, error: err.code }, err.status) };
-    throw err;
-  }
 }

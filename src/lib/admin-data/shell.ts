@@ -60,9 +60,11 @@ export function revalidateStore(handle: string, ...paths: (`/${string}` | "" | {
 const NO_STORE = { "Cache-Control": "private, no-store" } as const;
 
 /**
- * A plain 307 from a store's alias URL to one of its screens (`/pages/new` → `/generate`): a route handler answers
- * before anything streams, so a document load lands once (see src/lib/auth/alias-route.ts). The handle is only
- * checked and echoed into the path; the target's own guard decides (sign-in, 404). An invalid handle gets a 404.
+ * A plain 307 from a store's alias URL to one of its screens (`/pages/new` → `/generate`). As a page, an alias sits
+ * inside the dashboard's loading boundary: Next has streamed the shell when `redirect()` runs, so it answers 200 and
+ * redirects on the client, and a document load fetches the target twice. A route handler answers before anything
+ * streams: one 307. The handle is only checked and echoed into the path; the target's own guard decides (sign-in,
+ * 404). An invalid handle gets a 404.
  */
 export function storeAliasRedirect(handle: string, path: `/${string}`): Response {
   if (!isHandle(handle)) return new Response(null, { status: 404, headers: NO_STORE });

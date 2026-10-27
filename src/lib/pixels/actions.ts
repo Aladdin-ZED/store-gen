@@ -161,7 +161,7 @@ export async function replacePixelAction(
   input: z.input<typeof ReplaceInput>,
 ): Promise<ActionResult<{ results: ReplacePageResult[]; reexport: { pageId: string; name: string; exports: number }[] }>> {
   return storeAction("pages.write", async (ctx) => {
-    const { scope, actor, user } = ctx;
+    const { scope, actor } = ctx;
     const v = ReplaceInput.parse(input);
     const from = normalizePixelId(v.platform, v.from);
     const to = v.to === null ? null : normalizePixelId(v.platform, v.to);
@@ -211,8 +211,8 @@ export async function replacePixelAction(
       if (!liveIdsList.includes(from)) continue;
       const nextLive = withTrackingIds(idsOnly(live.tracking), v.platform, swapIds(liveIdsList, from, to).slice(0, PIXEL_LIMIT[v.platform]));
       try {
-        // the page is the store's (read above); the publish path is T3's store-less form until it takes a scope
-        await publishTrackingOnly(pageId, user.id, nextLive, live.versionId, { patchDraft: false });
+        // looked up again in the store, with the store's library rule for this actor (CCR r1.0-t4-11 item 2)
+        await publishTrackingOnly(scope, pageId, nextLive, live.versionId, { actor, patchDraft: false });
         r.live = "ok";
       } catch (err) {
         r.live = "error";
@@ -252,13 +252,12 @@ export async function pagePixelsAction(pageId: string): Promise<ActionResult<Pag
 
 /** Publish the draft's current pixels alone onto the live version ("Update live page now"). */
 export async function applyLiveTrackingAction(input: { pageId: string; baseVersionId: string }): Promise<ActionResult<{ versionId: string; live: Tracking }>> {
-  return storeAction("pages.publish", async ({ scope, user, store }) => {
+  return storeAction("pages.publish", async ({ scope, actor, store }) => {
     const v = z.object({ pageId: PageIdSchema, baseVersionId: PageIdSchema }).parse(input);
     const [row] = await db.select({ draft: pages.draft }).from(pages).where(byId(pages, scope, v.pageId)).limit(1);
     if (!row) fail("This page no longer exists.");
     const tracking = ((row!.draft as unknown as { tracking?: Tracking } | null)?.tracking ?? {}) as Tracking;
-    // the page is the store's (read above); the publish path is T3's store-less form until it takes a scope
-    const res = await guarded(() => publishTrackingOnly(v.pageId, user.id, tracking, v.baseVersionId));
+    const res = await guarded(() => publishTrackingOnly(scope, v.pageId, tracking, v.baseVersionId, { actor }));
     refresh(store);
     return { versionId: res.versionId, live: idsOnly(tracking) };
   });

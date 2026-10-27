@@ -8,7 +8,7 @@ import { parseExportRequest } from "@/lib/export/options";
 import { estimateExport } from "@/lib/export/server";
 import type { ExportErrorResponse } from "@/lib/export/types";
 import { json } from "@/lib/orders/http";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { storeGuard } from "@/lib/tenancy/seam";
 import { exportErrorResponse, rateLimited } from "../errors";
 
@@ -17,8 +17,8 @@ type Params = { params: Promise<{ store: string }> };
 export async function GET(req: NextRequest, { params }: Params): Promise<Response> {
   const g = await storeGuard(req, (await params).store, "export.create");
   if (!g.ok) return g.response;
-  const { scope, actor } = g.ctx;
-  const gate = await rateLimit(`s:${scope.storeId}:export:estimate:${actor.userId}`, 150, 600);
+  const { scope, user } = g.ctx;
+  const gate = await rateLimit(storeBucket(scope, "export:estimate", user.id), 150, 600);
   if (!gate.ok) return rateLimited(gate.retryAfter, "Too many requests — wait a minute.");
   const q = req.nextUrl.searchParams;
   const parsed = parseExportRequest(

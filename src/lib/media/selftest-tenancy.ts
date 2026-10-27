@@ -319,9 +319,6 @@ async function run(db: typeof import("@/lib/db/client").db, pool: typeof import(
   ok("delete: another store's row naming the id is not reset", (await rows("SELECT source_asset_id s FROM assets WHERE id = ?", [cut1.asset.id]))[0]!.s === a1.asset.id);
   ok("delete: B's copy of the same bytes is untouched", (await media.getAsset(B, b1.asset.id)) !== null && Number((await rows("SELECT COUNT(*) n FROM media_files WHERE asset_id = ?", [b1.asset.id]))[0]!.n) > 0);
 
-  /* ---------------- the deprecated store-less read (T3's publish until CCR r1.0-t4-6) ---------------- */
-  ok("deprecated getByIds(ids) still resolves any store's row", (await media.getAssetsByIds([b1.asset.id])).length === 1);
-
   /* ---------------- daily byte budget per store (MED-14) ---------------- */
   const MB = 1024 * 1024;
   ok("daily bytes: within the budget", (await spendUploadBytes(A, 600 * MB)).ok);

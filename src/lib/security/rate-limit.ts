@@ -66,13 +66,7 @@ export function storeBucket(scope: StoreScope, name: string, key?: string): Buck
  * Fixed-window rate limiter stored in MariaDB (survives process restarts — Hostinger stops idle apps).
  * One atomic upsert per call. Build the bucket with `platformBucket()` / `storeBucket()`.
  */
-export function rateLimit(bucket: Bucket, limit: number, windowSec: number): Promise<RateResult>;
-/**
- * @deprecated R1.0 migration path (§E.8, ENGC-28): today's string buckets ("login:ip:<hash>") keep compiling until
- * each track converts its callers; the maintainer removes this overload at the R1.0 integration and lint L5 turns on.
- */
-export function rateLimit(bucket: string, limit: number, windowSec: number): Promise<RateResult>;
-export async function rateLimit(bucket: string | Bucket, limit: number, windowSec: number): Promise<RateResult> {
+export async function rateLimit(bucket: Bucket, limit: number, windowSec: number): Promise<RateResult> {
   const key = bucket.slice(0, BUCKET_MAX);
   await db.execute(sql`
     INSERT INTO rate_limits (bucket, count, reset_at)
@@ -89,10 +83,7 @@ export async function rateLimit(bucket: string | Bucket, limit: number, windowSe
 }
 
 /** Has `bucket` already used up `limit` in its current window? Read-only: counts nothing. */
-export function rateLimitReached(bucket: Bucket, limit: number): Promise<boolean>;
-/** @deprecated string buckets: see `rateLimit` (removed at the R1.0 integration). */
-export function rateLimitReached(bucket: string, limit: number): Promise<boolean>;
-export async function rateLimitReached(bucket: string | Bucket, limit: number): Promise<boolean> {
+export async function rateLimitReached(bucket: Bucket, limit: number): Promise<boolean> {
   const key = bucket.slice(0, BUCKET_MAX);
   const [rows] = (await db.execute(
     sql`SELECT count FROM rate_limits WHERE bucket = ${key} AND reset_at > UTC_TIMESTAMP(3)`,

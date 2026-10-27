@@ -14,11 +14,10 @@ import "server-only";
  * the commit. The version-row transaction sets `pages.first_published_at` once (COALESCE; never reset by
  * unpublish, republish, restore or a re-render; rev 5, CRIT2-5) and audits in the page's store.
  *
- * Pixels (docs/OFFERS.md §A.3): the library rule is the pixel library's (T4, per store); the scoped publish runs
- * it through `opts.libraryRule` before rendering (an unknown id → `pixel_not_in_library`), so the rule stays where
- * the library lives. The single-tenant forms (`publishPage(pageId, userId)`, `renderAndCommit(pageId, …)`,
- * `publishTrackingOnly`, `storeInfo`, `liveResolverFor`) keep today's /admin working until T4 moves its callers:
- * since the R1.0 integration they run the scoped path in store #1 (the converted install, §D.8).
+ * Pixels (docs/OFFERS.md §A.3): the library rule is the store's pixel library's (`enforceLibraryRule(scope, …)`,
+ * src/lib/pixels/library.server.ts); every scoped publish and pixels-only update runs it before rendering (an
+ * unknown id → `pixel_not_in_library` unless the actor's role in the store may add it). `opts.libraryRule` replaces
+ * it (tests); it is never skipped. The single-tenant forms went with the legacy /admin at the T4 merge (R1.0).
  *
  * Published HTML is rendered once at publish time and stored in page_versions (html, thank-you html, both CSPs,
  * etag, checksum); visitors get those bytes with zero React on the server per request.
@@ -29,43 +28,29 @@ import { audit } from "@/lib/audit";
 import { PixelError, enforceLibraryRule } from "@/lib/pixels/library.server";
 import { idsOnly, maskPixelId, sameIds, trackingDiff, type PixelRef } from "@/lib/pixels/library";
 import { invalidatePixelUsage } from "@/lib/pixels/usage.server";
-import { isGatePath } from "@/lib/auth/gate";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
 import { pages, pageVersions } from "@/lib/db/schema";
 import type { PageDoc, Tracking } from "@/lib/page/schema";
 import { validateDoc, type DocIssue } from "@/lib/page/validate";
-import { getStoreSettings } from "@/lib/settings";
 import { STORE_RESERVED_SLUGS } from "@/lib/tenancy/handles";
 import { getStoreById } from "@/lib/tenancy/public";
 import { inStore, whereStore } from "@/lib/tenancy/sql";
 import type { Actor, GateItem, StoreRow, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { buildTheme } from "@/lib/theme";
-import { collectAssetIds, liveAssetResolver, type AssetResolver, type StoreInfo } from "@/landing/context";
 import { invalidateStoreRender } from "./cache.server";
 import { renderLandingHtml, renderThankYouHtml, type RenderIssue } from "./core";
 import { runPrePublishChecks, runPublishListeners, type AssetMeta, type PrePublishCode, type PrePublishCtx } from "./prepublish";
-import { loadStoreRenderContext, storeAssetResolver, storeAssetRows, storeInfoOf, storeRenderOptions } from "./store-context.server";
+import { loadStoreRenderContext, storeAssetResolver, storeRenderOptions } from "./store-context.server";
 
-export { invalidatePublished, invalidateStoreRender } from "./cache.server";
+export { invalidateStoreRender } from "./cache.server";
 export { PUBLIC_ENDPOINTS } from "./store-context.server";
 
 /* ------------------------------------------------------------------ */
 /* Slugs                                                               */
 /* ------------------------------------------------------------------ */
 
-/** Slugs that can never be a single-tenant root page (app routes, the thank-you suffix, legal documents). */
-export const RESERVED_SLUGS: ReadonlySet<string> = new Set(["admin", "api", "media", "fonts", "dev", "_next", "merci", "dev-fixtures", "legal"]);
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/;
-
-/**
- * A slug a root landing page can live at: the slug pattern, not reserved, and never the secret admin gate path.
- * @deprecated single-tenant root pages; store pages use isStoreSlug (no gate check: the gate is a root path of the
- * platform host only, and refusing it inside a store would be an oracle for the secret)
- */
-export function isServableSlug(slug: string): boolean {
-  return SLUG_RE.test(slug) && !RESERVED_SLUGS.has(slug) && !isGatePath(`/${slug}`);
-}
 
 /** Root paths a store host passes to the app itself (static fonts, the dev fixtures), never a page slug. */
 const STORE_HOST_PATHS: ReadonlySet<string> = new Set(["fonts", "dev", "dev-fixtures"]);
@@ -76,23 +61,6 @@ const STORE_HOST_PATHS: ReadonlySet<string> = new Set(["fonts", "dev", "dev-fixt
  */
 export function isStoreSlug(slug: string): boolean {
   return SLUG_RE.test(slug) && !STORE_RESERVED_SLUGS.has(slug) && !STORE_HOST_PATHS.has(slug);
-}
-
-/** @deprecated single-tenant root paths; store pages: storePath(store, `/${slug}`) (./store-context.server.ts) */
-export const landingPath = (slug: string) => `/${slug}`;
-/** @deprecated single-tenant root paths; store pages: storePath(store, `/${slug}/merci`) */
-export const thankYouPath = (slug: string) => `/${slug}/merci`;
-
-/** Absolute public origin from PUBLIC_URL ("https://shop.ma"), or undefined when unset/invalid. @deprecated use platformOrigin() / storeOrigin() */
-export function publicOrigin(): string | undefined {
-  const raw = process.env.PUBLIC_URL;
-  if (!raw) return undefined;
-  try {
-    const u = new URL(raw);
-    return u.protocol === "https:" || u.protocol === "http:" ? u.origin : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -145,9 +113,9 @@ export interface PublishOptions {
 export interface ScopedPublishOptions extends PublishOptions {
   actor: Actor;
   /**
-   * The store's pixel library rule (T4, docs/OFFERS.md §A.3), run on the validated document before it renders:
-   * throws PixelError("pixel_not_in_library") for ids the actor may not add. Omitted: no pixel check (callers that
-   * publish a document whose pixels did not change).
+   * Replaces the store's pixel library rule (docs/OFFERS.md §A.3; default `enforceLibraryRule(scope, tracking,
+   * actor)`), run on the validated document before it renders: throws PixelError("pixel_not_in_library") for ids the
+   * actor may not add. There is no way to skip it.
    */
   libraryRule?: (tracking: Tracking) => Promise<void>;
 }
@@ -340,7 +308,7 @@ async function liveIdsInStore(scope: StoreScope, pageId: string): Promise<Tracki
 
 /** audit("page.pixels_changed") in the store when the live ids changed. */
 async function auditPixelsInStore(scope: StoreScope, actor: Actor, pageId: string, next: Tracking, before: Tracking | null, mode: "publish" | "pixels_only"): Promise<void> {
-  invalidatePixelUsage();
+  invalidatePixelUsage(scope.storeId);
   const diff = trackingDiff(next, before);
   if (!diff.added.length && !diff.removed.length) return;
   await audit("page.pixels_changed", {
@@ -382,8 +350,8 @@ async function publishInStoreOnce(scope: WriteScope, pageId: string, opts: Scope
 
   const { doc, issues } = validateDoc(page.draft);
   if (!doc) throw new PublishError("invalid", "The page has errors that must be fixed before publishing.", issues);
-  const rule = opts.libraryRule;
-  if (rule) await asPublishError(() => rule(doc.tracking));
+  const rule = opts.libraryRule ?? ((tracking: Tracking) => enforceLibraryRule(scope, tracking, opts.actor));
+  await asPublishError(() => rule(doc.tracking));
   const before = await liveIdsInStore(scope, page.id);
 
   const res = await commitInStore(scope, page.id, doc, {
@@ -590,7 +558,7 @@ export async function unpublishPage(scope: WriteScope, pageId: string, actor: Ac
 }
 
 /* ------------------------------------------------------------------ */
-/* Entry points (the scoped forms, and today's single-tenant ones)     */
+/* Entry points                                                        */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -601,16 +569,8 @@ export async function unpublishPage(scope: WriteScope, pageId: string, actor: Ac
  * The version always holds exactly the draft whose stamp is checked in the transaction: the row is
  * locked (FOR UPDATE) and its updated_at compared with the one read before rendering.
  */
-export function publishPage(scope: WriteScope, pageId: string, opts: ScopedPublishOptions): Promise<PublishResult>;
-/** @deprecated single-tenant; T4 moves the callers to the scoped overload */
-export function publishPage(pageId: string, userId: string, opts?: PublishOptions): Promise<PublishResult>;
-export async function publishPage(...args: [WriteScope, string, ScopedPublishOptions] | [string, string, PublishOptions?]): Promise<PublishResult> {
-  if (typeof args[0] !== "string") {
-    const [scope, pageId, opts] = args as [WriteScope, string, ScopedPublishOptions];
-    return publishInStore(scope, pageId, opts);
-  }
-  const [pageId, userId, opts = {}] = args as [string, string, PublishOptions?];
-  return publishLegacy(pageId, userId, opts);
+export function publishPage(scope: WriteScope, pageId: string, opts: ScopedPublishOptions): Promise<PublishResult> {
+  return publishInStore(scope, pageId, opts);
 }
 
 /**
@@ -621,64 +581,13 @@ export async function publishPage(...args: [WriteScope, string, ScopedPublishOpt
  * locked FOR UPDATE and checked against `draft` (publishPage) or `baseVersionId` (pixels-only
  * updates). Shared by every publish path.
  */
-export function renderAndCommit(scope: WriteScope, pageId: string, doc: PageDoc, opts: CommitOptions): Promise<CommitResult | "retry">;
-/** @deprecated single-tenant; T4 moves the publish paths (and P8 the render queue) to the scoped overload */
-export function renderAndCommit(pageId: string, doc: PageDoc, opts: CommitOptions): Promise<CommitResult | "retry">;
-export async function renderAndCommit(...args: [WriteScope, string, PageDoc, CommitOptions] | [string, PageDoc, CommitOptions]): Promise<CommitResult | "retry"> {
-  if (typeof args[0] !== "string") {
-    const [scope, pageId, doc, opts] = args as [WriteScope, string, PageDoc, CommitOptions];
-    return commitInStore(scope, pageId, doc, opts);
-  }
-  const [pageId, doc, opts] = args as [string, PageDoc, CommitOptions];
-  return commitLegacy(pageId, doc, opts);
+export function renderAndCommit(scope: WriteScope, pageId: string, doc: PageDoc, opts: CommitOptions): Promise<CommitResult | "retry"> {
+  return commitInStore(scope, pageId, doc, opts);
 }
 
 /* ------------------------------------------------------------------ */
-/* Single-tenant forms (@deprecated: the legacy /admin's store #1, T4)  */
+/* Pixels-only update                                                  */
 /* ------------------------------------------------------------------ */
-
-/**
- * The store today's single-tenant /admin edits: store #1 (`LEGACY_STORE_ID`, the converted install, §D.8), as a
- * system write scope. The deprecated forms below run the scoped path in that store (every predicate carries its
- * `store_id`, so a page of another store is `not_found`); the user who acts is the audited actor. Loaded lazily:
- * the scoped path never pays for the jobs seam. Goes when T4 moves the last caller to `/app/<h>` (R1.0).
- */
-async function legacyScope(): Promise<WriteScope> {
-  const [{ systemCtx, systemScope }, { LEGACY_STORE_ID }] = await Promise.all([import("@/lib/jobs/scope"), import("@/lib/db/store-handles")]);
-  return systemScope(systemCtx("legacy-admin"), LEGACY_STORE_ID);
-}
-
-/** The legacy publish's library rule (the pixel library of today's /admin decides per user). */
-const legacyRule = (userId: string) => (tracking: Tracking) => enforceLibraryRule(tracking, userId);
-
-async function publishLegacy(pageId: string, userId: string, opts: PublishOptions): Promise<PublishResult> {
-  return publishInStore(await legacyScope(), pageId, { actor: userActor(userId), expectedUpdatedAt: opts.expectedUpdatedAt, libraryRule: legacyRule(userId) });
-}
-
-async function commitLegacy(pageId: string, doc: PageDoc, opts: CommitOptions): Promise<CommitResult | "retry"> {
-  return commitInStore(await legacyScope(), pageId, doc, opts);
-}
-
-/**
- * Store identity for documents: store #1's row and its `store` / `brand` settings (the legacy global `store` setting
- * moved there at the conversion). An install without store #1 yet gets an empty identity.
- * @deprecated store documents: loadStoreRenderContext
- */
-export async function storeInfo(): Promise<StoreInfo> {
-  const scope = await legacyScope();
-  const store = await getStoreById(scope.storeId);
-  const s = await getStoreSettings(scope, ["store", "brand"] as const);
-  return store ? storeInfoOf(store, s) : { name: "", country: s.store.country };
-}
-
-/**
- * Live asset resolver for every asset the document (and store logo) references, among store #1's assets.
- * @deprecated unscoped callers (PUB-07): storeAssetResolver
- */
-export async function liveResolverFor(doc: PageDoc, store: StoreInfo): Promise<AssetResolver> {
-  const rows = await storeAssetRows(await legacyScope(), collectAssetIds(doc, [store.logo]));
-  return liveAssetResolver(rows);
-}
 
 export interface TrackingOnlyResult {
   versionId: string;
@@ -693,34 +602,33 @@ export interface TrackingOnlyResult {
 }
 
 /**
- * Pixels-only live update (§A.3): the LIVE version's document with only `tracking` replaced,
- * validated, rendered with the current renderer and committed as a new "publish" version labelled
- * "Pixels only" — the page row locked and checked against `baseVersionId` (PublishError
- * "live_changed"), never against the draft stamp. Then the draft's tracking is patched
- * (compare-and-swap, 3 attempts) unless it already matches. Open tabs keep ordering against the
- * previous version through the 72 h rule. Runs in store #1 (the legacy /admin).
- * @deprecated single-tenant; T4 rebuilds it on renderAndCommit(scope, …).
+ * Pixels-only live update (§A.3) of one of the store's pages: the LIVE version's document with only `tracking`
+ * replaced, validated, the store's library rule run for `opts.actor` (CCR r1.0-t4-2), rendered with the store's
+ * render context of now and committed as a new "publish" version labelled "Pixels only" — the page row locked and
+ * checked against `baseVersionId` (PublishError "live_changed"), never against the draft stamp. Then the draft's
+ * tracking is patched (compare-and-swap, 3 attempts) unless it already matches. Open tabs keep ordering against the
+ * previous version through the 72 h rule. Another store's page id is `not_found`.
  */
 export async function publishTrackingOnly(
+  scope: WriteScope,
   pageId: string,
-  userId: string,
   tracking: Tracking,
   baseVersionId: string,
   /** patchDraft false: the caller already patched the draft (Replace on pages…) */
-  opts: { patchDraft?: boolean } = {},
+  opts: { actor: Actor; patchDraft?: boolean },
 ): Promise<TrackingOnlyResult> {
-  return trackingOnlyInStore(await legacyScope(), pageId, userId, tracking, baseVersionId, opts);
+  return trackingOnlyInStore(scope, pageId, tracking, baseVersionId, opts);
 }
 
 async function trackingOnlyInStore(
   scope: WriteScope,
   pageId: string,
-  userId: string,
   tracking: Tracking,
   baseVersionId: string,
-  opts: { patchDraft?: boolean },
+  opts: { actor: Actor; patchDraft?: boolean },
 ): Promise<TrackingOnlyResult> {
-  const actor = userActor(userId);
+  const { actor } = opts;
+  const userId = actor.userId ?? "";
   const [row] = await db
     .select({ status: pages.status, publishedVersionId: pages.publishedVersionId, doc: pageVersions.doc })
     .from(pages)
@@ -737,12 +645,12 @@ async function trackingOnlyInStore(
   const nextTracking: Tracking = sameIds(ids, {}) && tracking.none ? { none: true } : ids;
   const { doc, issues } = validateDoc({ ...liveDoc, tracking: nextTracking });
   if (!doc) throw new PublishError("invalid", "These pixels can't be published.", issues);
-  await asPublishError(() => enforceLibraryRule(doc.tracking, userId));
+  await asPublishError(() => enforceLibraryRule(scope, doc.tracking, actor));
   const before = idsOnly(liveDoc.tracking);
 
   const res = await commitInStore(scope, pageId, doc, { kind: "publish", label: "Pixels only", userId, actor, baseVersionId });
   if (res === "retry") throw new PublishError("live_changed", "The live page changed meanwhile. Reload, then try again.");
-  await audit("page.published", { userId, target: pageId, meta: { versionId: res.versionId, slug: res.slug, pixelsOnly: true }, scope: auditScope(scope, actor) });
+  await audit("page.published", { userId: actor.userId, ip: actor.ip, target: pageId, meta: { versionId: res.versionId, slug: res.slug, pixelsOnly: true }, scope: auditScope(scope, actor) });
   await auditPixelsInStore(scope, actor, pageId, doc.tracking, before, "pixels_only");
 
   // the draft follows (compare-and-swap on its stamp; an editor saving meanwhile keeps its own)
@@ -771,6 +679,6 @@ async function trackingOnlyInStore(
     }
     if (attempt === 2) draftConflict = true;
   }
-  invalidatePixelUsage();
+  invalidatePixelUsage(scope.storeId);
   return { versionId: res.versionId, slug: res.slug, publishedAt: res.publishedAt, draftUpdated, draftConflict, draftUpdatedAt };
 }

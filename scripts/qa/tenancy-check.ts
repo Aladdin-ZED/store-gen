@@ -1048,7 +1048,7 @@ export function snapshotDiff(a: { tables: Record<string, string> }, b: { tables:
 /* 5. the action catalogue                                             */
 /* ================================================================== */
 
-export type Area = "pages" | "versions" | "orders" | "leads" | "blocklist" | "media" | "exports" | "pixels" | "sheets" | "settings" | "search" | "generate" | "audit";
+export type Area = "pages" | "versions" | "orders" | "leads" | "blocklist" | "media" | "exports" | "pixels" | "sheets" | "settings" | "search" | "generate" | "audit" | "team";
 
 export interface ActionCase {
   /** "<file>#<export>" */
@@ -1070,6 +1070,12 @@ export interface ActionCase {
   mixed?: (fx: Fixtures, fresh: Fresh) => Promise<unknown[]> | unknown[];
   /** the granted call ends in another track's store-less interim, refused or failing until the scoped form lands (named) */
   interim?: string;
+  /**
+   * The caller acts on their own membership only (leaving the store): never posted on B's path by B's fixture members
+   * nor by the member of both on A's path (they would leave), so A's path is attacked by every non-member of A and the
+   * role matrix runs as a fresh member of B per role.
+   */
+  self?: true;
 }
 
 /** Records made on demand (destructive cases get their own target). */
@@ -1082,6 +1088,10 @@ export interface Fresh {
   asset(store: StoreFx): Promise<string>;
   /** a Meta pixel of the store's library, with a token and a test code */
   pixel(store: StoreFx): Promise<string>;
+  /** a pending invite of the store (id) */
+  invite(store: StoreFx): Promise<string>;
+  /** a new user, member of the store with `role` (user id) */
+  member(store: StoreFx, role: Role): Promise<string>;
   updatedAt(pageId: string): Promise<number>;
   doc(store: StoreFx, opts?: { assetId?: string }): Promise<unknown>;
 }
@@ -1096,6 +1106,7 @@ const ORDERS = F("src/app/app/[store]/orders/actions.ts");
 const PAGES = F("src/app/app/[store]/pages/actions.ts");
 const SETTINGS = F("src/app/app/[store]/settings/actions.ts");
 const SHEETS = F("src/app/app/[store]/integrations/sheets/actions.ts");
+const TEAM = F("src/app/app/[store]/team/actions.ts");
 const EDITOR = F("src/lib/editor/actions.ts");
 const PIXELS = F("src/lib/pixels/actions.ts");
 
@@ -1108,7 +1119,7 @@ function act(
   write: boolean,
   victim: ActionCase["victim"],
   own: ActionCase["own"],
-  opts: { interim?: string; mixed?: ActionCase["mixed"] } = {},
+  opts: { interim?: string; mixed?: ActionCase["mixed"]; self?: true } = {},
 ): ActionCase {
   return { id: file.at(name), file: file.file, name, area, path, permission: Array.isArray(permission) ? permission : [permission], write, victim, own, ...opts };
 }
@@ -1160,6 +1171,14 @@ export const ACTION_CASES: ActionCase[] = [
   // the store's export key
   act(SHEETS, "saveExportKeyAction", "sheets", "/integrations/sheets", "integrations.manage", true, () => [serviceAccountJson("attack@other.iam.gserviceaccount.com")], () => [serviceAccountJson("own@b.iam.gserviceaccount.com")]),
   act(SHEETS, "deleteExportKeyAction", "sheets", "/integrations/sheets", "integrations.manage", true, () => [], () => []),
+  // team (T2's store actions; merged at the T4 merge): A's invites and members answer like missing ones
+  // agent invites: the one role every inviting role may invite and revoke (a manager only agents, invitableRoles)
+  act(TEAM, "createInviteAction", "team", "/team", "members.invite", true, () => [{ email: `attack.${randomInt(1e9)}@mail.test`, role: "agent" }], () => [{ email: `own.${randomInt(1e9)}@mail.test`, role: "agent" }]),
+  act(TEAM, "revokeInviteAction", "team", "/team", "members.invite", true, (fx, f) => f.invite(fx.A).then((id) => [{ inviteId: id }]), (fx, f) => f.invite(fx.B).then((id) => [{ inviteId: id }])),
+  act(TEAM, "changeMemberRoleAction", "team", "/team", "members.manage", true, (fx) => [{ userId: fx.A.members.editor, role: "viewer" }], (fx, f) => f.member(fx.B, "viewer").then((id) => [{ userId: id, role: "agent" }])),
+  act(TEAM, "setMemberStatusAction", "team", "/team", "members.manage", true, (fx) => [{ userId: fx.A.members.agent, status: "suspended" }], (fx, f) => f.member(fx.B, "viewer").then((id) => [{ userId: id, status: "suspended" }])),
+  act(TEAM, "removeMemberAction", "team", "/team", "members.manage", true, (fx, f) => f.member(fx.A, "viewer").then((id) => [{ userId: id }]), (fx, f) => f.member(fx.B, "viewer").then((id) => [{ userId: id }])),
+  act(TEAM, "leaveStoreAction", "team", "/team", "store.read", true, () => [], () => [], { self: true }),
   // builder
   act(EDITOR, "loadPage", "pages", "/pages", "pages.read", false, (fx) => [{ pageId: fx.A.page.live }], (fx) => [{ pageId: fx.B.page.live }]),
   act(EDITOR, "saveDraft", "pages", "/pages", "pages.write", true, async (fx, f) => [{ pageId: fx.A.page.draft, doc: await f.doc(fx.A), baseUpdatedAt: await f.updatedAt(fx.A.page.draft), force: true }], async (fx, f) => {
@@ -1213,10 +1232,17 @@ export const ACTION_CASES: ActionCase[] = [
 
 /** "use server" files that are not store actions (each with the reason); any other must have a case for every export. */
 export const NOT_STORE_ACTIONS: Record<string, string> = {
-  "src/app/admin/(auth)/login/actions.ts": "sign-in (T2): no store, no session yet",
-  "src/app/admin/(auth)/login/verify/actions.ts": "two-step sign-in (T2): no store",
+  "src/app/(public)/actions.ts": "the language menu (T2): signed out or in, no store",
+  "src/app/(public)/invite/[token]/actions.ts": "invite acceptance (T2): the store comes from the hashed one-time token, never a path (selftest-team)",
+  "src/app/(public)/login/actions.ts": "sign-in (T2): no store, no session yet",
+  "src/app/(public)/login/verify/actions.ts": "two-step sign-in (T2): no store",
+  "src/app/(public)/reset/[token]/actions.ts": "a password reset by its one-time link (T2): no store",
+  "src/app/(public)/signup/actions.ts": "sign-up and the handle check (T2): no store yet",
   "src/app/admin/(auth)/setup/actions.ts": "first-run bootstrap (T2): no store",
-  "src/app/admin/(auth)/two-factor/actions.ts": "the account's own two-step setup (T2): no store",
+  "src/app/admin/(auth)/setup/store/actions.ts": "the super_admin's first store (T2): before any membership",
+  "src/app/app/account/actions.ts": "the account's own profile, password, sessions and deletion (T2): no store",
+  "src/app/app/account/two-factor/actions.ts": "the account's own two-step setup (T2): no store",
+  "src/app/app/new/actions.ts": "a new store (T2): the caller is a member of nothing there yet",
   "src/lib/auth/actions.ts": "account session actions (T2): no store",
 };
 
@@ -1387,6 +1413,17 @@ function freshFactory(fx: Fixtures): Fresh {
       await db.insert(S.assets).values({ id, storeId: store.id, mime: "image/webp", width: 10, height: 10, bytes: 10, variants: [], tags: [] } as never);
       return register(store, id);
     },
+    async invite(store) {
+      const id = newId();
+      await db.insert(S.storeInvites).values({ id, storeId: store.id, emailNorm: `fresh.${id.toLowerCase()}@mail.test`, role: "agent", tokenHash: createHash("sha256").update(randomBytes(16)).digest("hex"), invitedBy: store.members.owner, expiresAt: new Date(Date.now() + 7 * 86_400_000) });
+      return register(store, id);
+    },
+    async member(store, role) {
+      const id = newId();
+      await db.insert(S.users).values({ id, email: `fresh.${id.toLowerCase()}@tenancy.test`, name: `Fresh ${role}`, passwordHash: "tenancy-check:no-password", platformRole: "none" as never, totpEnabled: false });
+      await db.insert(S.storeMembers).values({ storeId: store.id, userId: id, role });
+      return register(store, id);
+    },
     async updatedAt(pageId) {
       const [r] = await db.select({ u: S.pages.updatedAt }).from(S.pages).where(eq(S.pages.id, pageId)).limit(1);
       return r?.u.getTime() ?? 0;
@@ -1453,6 +1490,15 @@ export async function actionSuite(kit: Kit): Promise<void> {
     for (const who of attackers(fx)) {
       // 1. B's path (the attacker's own store, or none) with A's ids: what a missing id answers
       const own = appPath(fx.B.handle, c.path);
+      // a self action of a member of B would act on that member (leave B): A's path below is the attack
+      if (c.self && who.role !== null) {
+        if (who.userId === fx.dual) continue;
+        const onA = await call({ userId: who.userId }, appPath(fx.A.handle, c.path), () => fn(...structuredClone(args)));
+        const onGhost = await call({ userId: who.userId }, appPath(fx.ghostHandle, c.path), () => fn(...structuredClone(args)));
+        check(`${c.id} · ${who.label} · A's path: not_found`, refusal(onA) === "not_found", answerOf(onA));
+        check(`${c.id} · ${who.label} · A's path: same answer as an unknown handle`, text(answerOf(onA)) === text(answerOf(onGhost)), { onA: answerOf(onA), onGhost: answerOf(onGhost) });
+        continue;
+      }
       const real = await call({ userId: who.userId }, own, () => fn(...structuredClone(args)));
       const label = `${c.id} · ${who.label} · B's path, A's ids`;
       if (namesA) {
@@ -1473,8 +1519,8 @@ export async function actionSuite(kit: Kit): Promise<void> {
       check(`${la}: same answer as an unknown handle`, text(answerOf(onA)) === text(answerOf(onGhost)), { onA: answerOf(onA), onGhost: answerOf(onGhost) });
       check(`${la}: no canary of A`, leaks(fx, answerOf(onA), { sent: args }).length === 0, leaks(fx, answerOf(onA), { sent: args }));
     }
-    // the member of both stores on A's path is A's viewer: a write is forbidden
-    if (c.write) {
+    // the member of both stores on A's path is A's viewer: a write is forbidden (a self action would act on them)
+    if (c.write && !c.self) {
       const r = await call({ userId: fx.dual }, appPath(fx.A.handle, c.path), () => fn(...structuredClone(args)));
       const expect = c.permission.every((p) => can("viewer", p)) ? null : "forbidden";
       if (expect) check(`${c.id} · member of A and B · A's path (A's viewer): forbidden`, refusal(r) === expect, answerOf(r));
@@ -1496,7 +1542,9 @@ export async function actionSuite(kit: Kit): Promise<void> {
     for (const role of ROLES) {
       const allowed = c.permission.every((p) => can(role, p));
       const ownArgs = await c.own(fx, fresh);
-      const r = await call({ userId: fx.B.members[role] }, appPath(fx.B.handle, c.path), () => fn(...ownArgs));
+      // a self action runs as a fresh member of B (the fixture's members stay)
+      const caller = c.self ? await fresh.member(fx.B, role) : fx.B.members[role];
+      const r = await call({ userId: caller }, appPath(fx.B.handle, c.path), () => fn(...ownArgs));
       const code = refusal(r);
       const label = `${c.id} · B ${role} · own store (${allowed ? "granted" : "not granted"})`;
       if (!allowed) check(`${label}: forbidden`, code === "forbidden", answerOf(r));
@@ -2211,10 +2259,15 @@ export async function specialSuite(kit: Kit): Promise<void> {
 
   // a store-host action: only the platform host class serves the dashboard
   const ownerA = { userId: fx.A.members.owner };
-  const hostOk = await call(ownerA, appPath(fx.A.handle, "/orders"), () => getOrder(fx.A.order.main), { identityHeaders: { host: PLATFORM_HOST } });
-  const hostBad = await call(ownerA, appPath(fx.A.handle, "/orders"), () => getOrder(fx.A.order.main), { identityHeaders: { host: "atlas-argan.shop.example" } });
+  const hostOk = await call(ownerA, appPath(fx.A.handle, "/orders"), () => getOrder(fx.A.order.main), { identityHeaders: Object.fromEntries(platformHeaders()) });
+  // the same post from a store host's own page: T2's seam refuses its Origin first (CRIT2-11, §C.9: only the platform
+  // and console hosts may post a dashboard action), for A's handle exactly as for an unknown one
+  const storeHost = (handle: string) => ({ host: `${handle}.shop.example`, origin: `https://${handle}.shop.example`, "sec-fetch-site": "same-origin" });
+  const hostBad = await call(ownerA, appPath(fx.A.handle, "/orders"), () => getOrder(fx.A.order.main), { identityHeaders: storeHost(fx.A.handle) });
+  const hostGhost = await call(ownerA, appPath(fx.ghostHandle, "/orders"), () => getOrder(fx.A.order.main), { identityHeaders: storeHost(fx.ghostHandle) });
   check("A's owner on the platform host: the order", refusal(hostOk) === null, answerOf(hostOk));
-  check("A's owner posting the same action on another host: not_found", refusal(hostBad) === "not_found", answerOf(hostBad));
+  check("A's owner posting the same action from a store host: refused (forbidden)", refusal(hostBad) === "forbidden", answerOf(hostBad));
+  check("…the same answer as an unknown handle there, no canary", text(answerOf(hostBad)) === text(answerOf(hostGhost)) && leaks(fx, answerOf(hostBad)).length === 0, { bad: answerOf(hostBad), ghost: answerOf(hostGhost) });
 
   // the export allow-list never names the platform itself or a sibling (SEC-23)
   const { parseExportRequest } = load<typeof import("@/lib/export/options")>("@/lib/export/options");
@@ -2289,9 +2342,16 @@ export async function impersonationSuite(kit: Kit): Promise<void> {
     return;
   }
   const who = { sessionToken: onA.token };
+  // every case's arguments first: a destructive case makes a fresh record of A, which must predate the fingerprint
+  const victims = new Map<ActionCase, unknown[]>();
+  for (const c of ACTION_CASES) victims.set(c, await c.victim(fx, fresh));
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const auditRows = async (afterId: number) =>
+    ((await pool().query("SELECT id, action, user_id FROM audit_log WHERE store_id = ? AND id > ? ORDER BY id", [fx.A.id, afterId])) as unknown as [{ id: number; action: string; user_id: string | null }[]])[0];
+  const [[{ top }]] = (await pool().query("SELECT COALESCE(MAX(id), 0) AS top FROM audit_log WHERE store_id = ?", [fx.A.id])) as unknown as [[{ top: number }]];
   const before = await snapshot(fx.A.id);
   for (const c of ACTION_CASES) {
-    const args = await c.victim(fx, fresh);
+    const args = victims.get(c)!;
     const r = await call(who, appPath(fx.A.handle, c.path), () => actionFn(c)(...args));
     if (c.write) check(`${c.id} · staff viewing A: refused (read-only)`, ["impersonation_read_only", "forbidden"].includes(refusal(r) ?? ""), answerOf(r));
     else {
@@ -2304,7 +2364,8 @@ export async function impersonationSuite(kit: Kit): Promise<void> {
     for (const sp of pageQueries(fx, page.template)) {
       const r = await renderPage(who, page, { store: fx.A.handle, ...ids }, sp);
       const label = `${page.template} · staff viewing A`;
-      if (r.kind === "render") check(`${label}: no customer canary in the payload`, leaks(fx, r.payload, { only: ["customer", "secret"] }).length === 0, leaks(fx, r.payload, { only: ["customer", "secret"] }));
+      // the search box echoes what the staff member typed (`?q=` a customer's name): their own string, not a leak
+      if (r.kind === "render") check(`${label}: no customer canary in the payload`, leaks(fx, r.payload, { only: ["customer", "secret"], sent: sp }).length === 0, leaks(fx, r.payload, { only: ["customer", "secret"], sent: sp }));
       else if (r.kind === "error" && r.stub) pending(label, r.stub);
       else check(`${label}: renders or 404`, r.kind === "notFound", r);
     }
@@ -2314,7 +2375,18 @@ export async function impersonationSuite(kit: Kit): Promise<void> {
     const r = await callRoute(who, route, "GET", { store: fx.A.handle, ...ids }, routePlan(fx, "GET", route.template));
     check(`GET ${route.template} · staff viewing A: no customer or secret canary`, leaks(fx, routeAnswer(r), { only: ["customer", "secret"] }).length === 0, leaks(fx, routeAnswer(r), { only: ["customer", "secret"] }));
   }
-  check("A's rows unchanged while staff viewed A", (await snapshot(fx.A.id)).hash === before.hash);
+  const afterView = await snapshot(fx.A.id);
+  // the one row the view may add (PLA-§10.2): `platform.impersonation.write_refused` per refused write, by the staff member
+  const moved = snapshotDiff(before, afterView);
+  const added = await auditRows(Number(top));
+  // a refused call is audited whatever the case's own `write` flag says (sendPixelTestAction needs a write key)
+  const writes = ACTION_CASES.length;
+  check("A's rows unchanged while staff viewed A (but the audit of each refused write)", moved.every((t) => t === "audit_log"), moved);
+  check(
+    `…A's audit gained only write_refused rows of the staff member, at most one per case (${writes})`,
+    added.length > 0 && added.length <= writes && added.every((r) => r.action === "platform.impersonation.write_refused" && r.user_id === fx.staff.id),
+    { rows: added.length, other: added.filter((r) => r.action !== "platform.impersonation.write_refused" || r.user_id !== fx.staff.id).slice(0, 5) },
+  );
   // staff viewing B, with A's ids: what a missing id answers
   const onB = await impersonate(fx, fx.B);
   if ("stub" in onB) return;

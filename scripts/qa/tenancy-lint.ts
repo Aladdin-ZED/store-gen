@@ -112,8 +112,12 @@ const PLATFORM_DIRS = [
   "src/lib/design/novelty.server.ts",
   "src/lib/health/",
 ];
-/** §E.3 rule 6: where `// tenancy: public-key <key>` exempts a statement */
-const PUBLIC_KEY_FILES = ["src/lib/tenancy/public.ts", "src/lib/tenancy/invites.ts"];
+/**
+ * §E.3 rule 6: where `// tenancy: public-key <key>` exempts a statement. `src/lib/media/store.ts`: the chunk store's
+ * media-key read (§G.6: a media key is global and random; the media route resolves its store first with
+ * `resolveMediaKey`), CCR r1.0-m-4.
+ */
+const PUBLIC_KEY_FILES = ["src/lib/tenancy/public.ts", "src/lib/tenancy/invites.ts", "src/lib/media/store.ts"];
 const under = (file: string, prefixes: readonly string[]) => prefixes.some((p) => (p.endsWith("/") ? file.startsWith(p) : file === p));
 
 const F = {
@@ -2184,12 +2188,25 @@ class Lint {
       return;
     }
 
-    const isSeam = (e: ts.Expression | undefined) => {
-      if (!e) return false;
-      const x = unwrap(e);
+    const isSeamCall = (x: ts.Expression) => {
       if (!ts.isCallExpression(x)) return false;
       const r = this.calleeRef(x);
       return !!r && SEAM_ACTIONS[r.name] === r.file;
+    };
+    // `return storeAction(…).then(answer)` (R1.0, T4 merge): the seam call still opens the body and only its answer is
+    // reshaped, by a function named in the file (an identifier, never an inline callback that could do more work)
+    const isSeam = (e: ts.Expression | undefined) => {
+      if (!e) return false;
+      const x = unwrap(e);
+      if (isSeamCall(x)) return true;
+      return (
+        ts.isCallExpression(x) &&
+        ts.isPropertyAccessExpression(x.expression) &&
+        x.expression.name.text === "then" &&
+        x.arguments.length === 1 &&
+        ts.isIdentifier(x.arguments[0]!) &&
+        isSeamCall(unwrap(x.expression.expression))
+      );
     };
     let ok: boolean;
     if (!ts.isBlock(fn.body)) ok = isSeam(fn.body);
@@ -2783,6 +2800,16 @@ export async function gated(id: string) {
 export async function allowedAction(id: string) {
   const x = id.trim(); // listed in the fixture allow file's actions: no L9
   return x;
+}
+const shape = (r: unknown) => r;
+export async function reshaped(id: string) {
+  return storeAction("pages.edit", async () => id).then(shape);
+}
+export async function reshapedInline(id: string) { //! L9
+  return storeAction("pages.edit", async () => id).then((r) => r);
+}
+export async function thenOnOther(id: string) { //! L9
+  return Promise.resolve(id).then(shape);
 }
 // review C0b F11: every export of a "use server" file is an action; what the lint cannot read fails closed
 function makeAction() {

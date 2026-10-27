@@ -17,7 +17,7 @@ import { focalFromTags, withFocalTag, type FocalInfo } from "@/components/admin/
 import { auditIn } from "@/lib/admin-data/store-audit";
 import { ASSET_ID_RE, ensureFocus, getAsset, setAssetTags, type AssetRecord } from "@/lib/media";
 import { json, logError, readJson } from "@/lib/orders/http";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { storeGuard } from "@/lib/tenancy/seam";
 import type { StoreScope } from "@/lib/tenancy/types";
 
@@ -80,7 +80,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<Respo
   if (!parsed.success) return json({ ok: false, error: "invalid", message: "Send { focal: { x, y } } with values from 0 to 1, or { focal: null }." }, 400);
 
   try {
-    const gate = await rateLimit(`s:${scope.storeId}:media:focal:${user.id}`, 240, 600);
+    const gate = await rateLimit(storeBucket(scope, "media:focal", user.id), 240, 600);
     if (!gate.ok) return json({ ok: false, error: "rate_limited" }, 429, { "Retry-After": String(gate.retryAfter) });
 
     const asset = await imageAsset(scope, id);

@@ -42,7 +42,10 @@
     { "file": "src/lib/tenancy/handles.ts", "symbol": "__sgHandleLists", "reason": "the snapshot of platform.reservedHandles and the protected brand terms (§C.7): platform lists, no store data" },
     { "file": "src/lib/db/store-handles.ts", "symbol": "__sgHandleListsLoading", "reason": "the one in-flight reload of the platform handle lists (§C.7): a promise of platform data" },
     { "file": "src/lib/jobs/scope.ts", "symbol": "__sgCronCursors", "reason": "forEachStore's in-memory cursor fallback while cron_cursors is missing (§H.4): one cursor per job name, store ids only" },
-    { "file": "src/lib/edge/proxy-log.ts", "symbol": "__sgProxyLog", "reason": "the proxy's log tally (§C.3, T3): foreign hosts already logged (at most 20) and edge-key counters for the console health view; host names and counts, never store data, and it decides nothing (R1.0 integration)" }
+    { "file": "src/lib/edge/proxy-log.ts", "symbol": "__sgProxyLog", "reason": "the proxy's log tally (§C.3, T3): foreign hosts already logged (at most 20) and edge-key counters for the console health view; host names and counts, never store data, and it decides nothing (R1.0 integration)" },
+    { "file": "src/lib/media/gate.ts", "symbol": "__codMediaGate", "reason": "the process-wide upload concurrency (global 2 + 4) with each store's share counted by store id (MED-04): counters, never a store's data (CCR r1.0-t4-13)" },
+    { "file": "src/lib/media/upload-slots.ts", "symbol": "__codUploadSlots", "reason": "upload slots per process, per store id and per user id (MED-14): counters, never a store's data (CCR r1.0-t4-13)" },
+    { "file": "src/lib/sheets/sync.ts", "symbol": "__codSheetsSync", "reason": "the coalescing push state per store id (SHT-04): a store's caller only ever joins that store's own running pass and gets its own result (CCR r1.0-t4-13)" }
   ],
   "actions": [
     { "file": "src/lib/auth/actions.ts", "symbol": "logout", "reason": "sign-out must work with an ended or half-open session, so no userAction; it checks the origin first and only ends this browser's own session (CCR r1.0-m-3)" },

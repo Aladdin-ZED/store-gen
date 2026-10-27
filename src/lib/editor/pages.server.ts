@@ -17,7 +17,6 @@ import { and, desc, eq, inArray, lt, ne, notInArray } from "drizzle-orm";
 import { createPageFromDoc } from "@/lib/admin-data/pages";
 import type { Actor } from "@/lib/admin-data/store-audit";
 import type { SessionUser } from "@/lib/auth";
-import { isGatePath } from "@/lib/auth/gate";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
 import { pages, pageVersions, users } from "@/lib/db/schema";
@@ -26,9 +25,8 @@ import { assetRowOf } from "@/lib/media/asset-row";
 import { PageDoc, type PageDoc as PageDocT } from "@/lib/page/schema";
 import { sanitizeDeep, validateDoc } from "@/lib/page/validate";
 import { storeInfoFor, storeInfoOf } from "@/lib/admin-data/store-info";
-import { invalidatePublished, isServableSlug } from "@/lib/render/publish.server";
+import { invalidateStoreRender, isStoreSlug } from "@/lib/render/publish.server";
 import { getStoreSettings } from "@/lib/settings";
-import { STORE_RESERVED_SLUGS } from "@/lib/tenancy/handles";
 import { byId, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreCtx, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { collectAssetIds } from "@/landing/context";
@@ -455,11 +453,12 @@ export async function duplicateAsPage(scope: WriteScope, actor: Actor, input: { 
 /* ------------------------------------------------------------------ */
 
 /**
- * Why a slug cannot be used in the scope's store (null when it can): reserved app routes, the store's reserved
- * paths (§C.4.1) and the admin gate are refused; slugs are unique per store (`pages_store_slug_uq`).
+ * Why a slug cannot be used in the scope's store (null when it can): the slug pattern and the store's reserved
+ * paths (§C.4.1, `isStoreSlug`); slugs are unique per store (`pages_store_slug_uq`). The console gate is a root path
+ * of the platform host only, so it is never checked here (refusing it inside a store would reveal the secret).
  */
 export async function slugProblem(scope: StoreScope, slug: string, pageId: string): Promise<{ code: "slug_reserved" | "slug_taken"; message: string } | null> {
-  if (!isServableSlug(slug) || STORE_RESERVED_SLUGS.has(slug) || isGatePath(`/${slug}`)) return { code: "slug_reserved", message: `“/${slug}” is reserved. Choose another address.` };
+  if (!isStoreSlug(slug)) return { code: "slug_reserved", message: `“/${slug}” is reserved. Choose another address.` };
   const [taken] = await db
     .select({ id: pages.id })
     .from(pages)
@@ -486,7 +485,8 @@ export async function updateMeta(
     const problem = await slugProblem(scope, patch.slug!, pageId);
     if (problem) throw new EditorError(problem.code, problem.message);
   }
-  const set: Partial<typeof pages.$inferInsert> = {};
+  // the patch names only what may change (never `storeId`: a row can't move to another store, lint L3b)
+  const set: { name?: string; slug?: string } = {};
   if (patch.name !== undefined && patch.name !== row.name) set.name = patch.name;
   if (slugChanged) set.slug = patch.slug!;
   if (!Object.keys(set).length) return { page: metaOf(row), slugChanged: false, previousSlug: row.slug, historyKept: false };
@@ -501,7 +501,7 @@ export async function updateMeta(
   }
   const historyKept = slugChanged ? await recordSlugMove(scope, pageId, row.slug) : false;
   const next = await pageRow(scope, pageId);
-  if (slugChanged) invalidatePublished();
+  if (slugChanged) invalidateStoreRender(scope.storeId);
   return { page: metaOf(next!), slugChanged, previousSlug: row.slug, historyKept };
 }
 
@@ -509,7 +509,7 @@ export async function updateMeta(
 export async function revertSlug(scope: WriteScope, pageId: string, slug: string): Promise<void> {
   await db.update(pages).set({ slug }).where(byId(pages, scope, pageId));
   await releaseOldSlug(scope, slug);
-  invalidatePublished();
+  invalidateStoreRender(scope.storeId);
 }
 
 export async function currentMeta(scope: StoreScope, pageId: string): Promise<EditorPageMeta | null> {

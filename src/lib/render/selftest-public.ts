@@ -34,14 +34,14 @@ M._resolveFilename = function (request: string, ...rest: unknown[]) {
   return resolveFilename.call(this, request, ...rest);
 };
 
-const DB_RE = /^cod_test_(?:t3|m4)_[a-z0-9_]{1,40}$/;
+const DB_RE = /^cod_test_(?:t3|m4|m5)_[a-z0-9_]{1,40}$/;
 const arg = (name: string) => {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
 };
 const DB = arg("db") ?? "cod_test_t3_public";
 const KEEP = process.argv.includes("--keep");
-if (!DB_RE.test(DB)) throw new Error("the database must be named cod_test_t3_* or cod_test_m4_*");
+if (!DB_RE.test(DB)) throw new Error("the database must be named cod_test_t3_*, cod_test_m4_* or cod_test_m5_*");
 
 // test configuration: P mode on platform.test, a legacy host; random secrets (never a real one)
 process.env.APP_SECRET = randomBytes(32).toString("hex");

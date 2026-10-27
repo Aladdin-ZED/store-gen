@@ -41,13 +41,9 @@ export type UsageIndex = Map<string, PixelPageUse[]>;
 const usageCache = () => scopedCache<UsageIndex>({ name: "pixel-usage", maxEntries: 500, ttlMs: TTL_MS });
 const INDEX = "index";
 
-/**
- * Drop the store's cached index. Without a store id every store's index goes: the form of today's
- * store-less callers (the publish path), until they pass the page's store (T3).
- */
-export function invalidatePixelUsage(storeId?: string): void {
-  if (storeId) usageCache().delete(storeId);
-  else usageCache().clear();
+/** Drop the store's cached index (another store's stays: PIX-05). */
+export function invalidatePixelUsage(storeId: string): void {
+  usageCache().delete(storeId);
 }
 
 /** `$.tracking` of a JSON column as raw JSON text (null when absent). */

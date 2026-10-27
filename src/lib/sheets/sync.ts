@@ -18,20 +18,19 @@ import "server-only";
  *
  * pullStatuses(scope): statuses set by call-center agents in the store's sheet flow back to the store's
  * orders that are fully synced. Only the store's own orders are ever touched: an order id of another store
- * typed into the sheet changes nothing (SHT-05). At most once per 290 s per store (`s:<storeId>:sheets:pull`).
+ * typed into the sheet changes nothing (SHT-05). At most once per 290 s per store (`storeBucket(scope, "sheets:pull")`).
  *
  * Per store (SHT-01 … SHT-08): every query carries the store predicate, test orders never reach a sheet, and
  * the cron visits the stores with work one by one (syncStores, SHT-11).
  */
 import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
-import { LEGACY_STORE_ID } from "@/lib/admin-data/legacy-store";
 import { affected } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { storeLock, withNamedLock } from "@/lib/db/locks";
 import { orders } from "@/lib/db/schema";
-import { forEachStore, systemCtx, systemScope } from "@/lib/jobs/scope";
+import { forEachStore, systemScope } from "@/lib/jobs/scope";
 import type { OrderStatus } from "@/lib/orders/contract";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { getStoreById } from "@/lib/tenancy/public";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, SystemCtx, WriteScope } from "@/lib/tenancy/types";
@@ -158,7 +157,12 @@ export interface SyncOptions {
   maxRetries?: number;
 }
 
-async function syncOnce(scope: WriteScope, sheet: SheetsConfig, timeZone: string, opts: SyncOptions): Promise<SyncResult & { selected: number }> {
+/**
+ * The orders one sync pass of the store claims: the store's own, never a test order, pending, or failed with their
+ * backoff elapsed (`force` ignores it); oldest first. Exported for test:public-api (SHT-02: a store's batch never
+ * holds another store's order).
+ */
+export function selectSyncBatch(scope: StoreScope, opts: SyncOptions = {}): Promise<OrderRow[]> {
   const limit = opts.limit ?? 50;
   const now = new Date();
   const eligible = opts.force
@@ -171,12 +175,16 @@ async function syncOnce(scope: WriteScope, sheet: SheetsConfig, timeZone: string
         ),
       );
   // a test order never reaches a sheet, even requeued (the public path stores it as "disabled" already, D54)
-  const batch = await db
+  return db
     .select()
     .from(orders)
     .where(whereStore(orders, scope, eligible, eq(orders.isTest, false)))
     .orderBy(orders.createdAt)
     .limit(limit);
+}
+
+async function syncOnce(scope: WriteScope, sheet: SheetsConfig, timeZone: string, opts: SyncOptions): Promise<SyncResult & { selected: number }> {
+  const batch = await selectSyncBatch(scope, opts);
   if (!batch.length) return { ...empty("ok"), selected: 0 };
 
   const ids = batch.map((o) => o.id);
@@ -257,16 +265,7 @@ const MAX_PASSES = 5;
  * concurrent calls for the same store coalesce into the running pass, which then runs again to pick up new
  * orders (with the retry backoff ignored when a coalesced caller asked for `force`).
  */
-export async function syncPendingOrders(scope: WriteScope, opts?: SyncOptions): Promise<SyncResult>;
-/** @deprecated today's store-less after-order push (store #1 only); T3 passes the order's scope (CCR r1.0-t4-2) */
-export async function syncPendingOrders(opts?: SyncOptions): Promise<SyncResult>;
-export async function syncPendingOrders(a?: WriteScope | SyncOptions, b?: SyncOptions): Promise<SyncResult> {
-  if (!a || !("storeId" in a)) {
-    // the legacy single-tenant push is store #1's (§D.8 S1): never another store's orders into that sheet
-    return syncPendingOrders(systemScope(systemCtx("sheets.push_legacy"), LEGACY_STORE_ID), a as SyncOptions | undefined);
-  }
-  const scope = a;
-  const opts = b ?? {};
+export async function syncPendingOrders(scope: WriteScope, opts: SyncOptions = {}): Promise<SyncResult> {
   const st = syncState(scope.storeId);
   if (st.running) {
     st.rerun = true;
@@ -327,7 +326,7 @@ export async function pullStatuses(scope: WriteScope, opts: { force?: boolean } 
   // "Bring status changes back from the sheet" is off: the sheet is write-only for this store
   if (!sheet.pull) return { status: "ok", seen: 0, updated: 0 };
   if (!opts.force) {
-    const gate = await rateLimit(`s:${scope.storeId}:sheets:pull`, 1, 290);
+    const gate = await rateLimit(storeBucket(scope, "sheets:pull"), 1, 290);
     if (!gate.ok) return { status: "throttled", seen: 0, updated: 0 };
   }
   let statuses: Map<string, OrderStatus>;

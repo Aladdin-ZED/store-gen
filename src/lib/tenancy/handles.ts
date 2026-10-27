@@ -13,15 +13,11 @@
  * the first load the seeded brand list of src/lib/platform/data/protected-brands.ts applies.
  */
 import { PROTECTED_BRANDS, type ProtectedBrandMatch } from "@/lib/platform/data/protected-brands";
+import { HANDLE_RE, isHandle } from "@/lib/urls/handle";
 import type { StoreCtx } from "./types";
 
-/** 3-30 chars of a-z 0-9 and inner hyphens; see isHandle for the "--" rule. */
-export const HANDLE_RE = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/;
-
-/** The handle format: HANDLE_RE and no "--" at positions 3-4 (blocks `xn--` punycode and look-alike IDNs). */
-export function isHandle(value: string): boolean {
-  return HANDLE_RE.test(value) && value.slice(2, 4) !== "--";
-}
+// the format lives in src/lib/urls/handle.ts (client components import it there)
+export { HANDLE_RE, isHandle };
 
 /** The static (non-store) first segments under /app/ (§I.1); `/app/<one of these>` is never a store path. */
 export const APP_STATIC_SEGMENTS: ReadonlySet<string> = new Set(["new", "account", "security", "two-factor", "sessions", "danger", "manifest.webmanifest"]);

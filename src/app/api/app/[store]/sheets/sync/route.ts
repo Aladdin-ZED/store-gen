@@ -4,7 +4,7 @@
  */
 import type { NextRequest } from "next/server";
 import { json, logError } from "@/lib/orders/http";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { pullStatuses, syncPendingOrders } from "@/lib/sheets";
 import { storeGuard } from "@/lib/tenancy/seam";
 
@@ -15,8 +15,8 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest, { params }: Params): Promise<Response> {
   const g = await storeGuard(req, (await params).store, "orders.write");
   if (!g.ok) return g.response;
-  const { scope, actor } = g.ctx;
-  const gate = await rateLimit(`s:${scope.storeId}:sheets:sync:${actor.userId}`, 12, 600);
+  const { scope, user } = g.ctx;
+  const gate = await rateLimit(storeBucket(scope, "sheets:sync", user.id), 12, 600);
   if (!gate.ok) return json({ ok: false, error: "rate_limited" }, 429, { "Retry-After": String(gate.retryAfter) });
   try {
     const push = await syncPendingOrders(scope, { force: true, limit: 200 });

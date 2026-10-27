@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
+import { PageHeader } from "@/components/admin/common/page-header";
+import { Screen } from "@/components/admin/common/screen";
 import { StoreTeamPanel, type TeamInviteRow, type TeamMemberRow } from "@/components/admin/settings/team-panel";
 import { ACTIVE_STORE_ROLES, ROLE_RANK, canManageMember, invitableRoles } from "@/lib/auth/permissions";
 import { authTranslator } from "@/lib/auth/i18n";
 import { viewerLocale } from "@/lib/auth/locale";
 import { listInvites, listMembersByScope } from "@/lib/tenancy/invites";
 import { requireStoreMember } from "@/lib/tenancy/seam";
-import { PageTitle } from "@/app/(public)/_components/kit";
 import { changeMemberRoleAction, createInviteAction, leaveStoreAction, removeMemberAction, revokeInviteAction, setMemberStatusAction } from "./actions";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -58,8 +59,8 @@ export default async function TeamPage({ params }: { params: Promise<{ store: st
   const canInvite = ctx.can("members.invite") || impersonating;
 
   return (
-    <main className="mx-auto grid w-full max-w-5xl content-start gap-6 px-4 py-8 sm:px-6 md:py-10">
-      <PageTitle title={t("team.title")} lead={t("team.lead", { store: ctx.store.name })} />
+    <Screen>
+      <PageHeader title={t("team.title")} description={t("team.lead", { store: ctx.store.name })} />
       <StoreTeamPanel
         storeName={ctx.store.name}
         viewer={{ role, totp: ctx.user.totpEnabled }}
@@ -77,6 +78,6 @@ export default async function TeamPage({ params }: { params: Promise<{ store: st
           leave: leaveStoreAction,
         }}
       />
-    </main>
+    </Screen>
   );
 }

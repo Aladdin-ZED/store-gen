@@ -190,7 +190,7 @@ async function checks(): Promise<void> {
     const del = await pool().getConnection();
     try {
       await del.beginTransaction();
-      const keys = await store.deleteFilesOfAsset(del, assetId);
+      const keys = await store.deleteFilesOfAsset(del, scope, assetId);
       await del.commit();
       store.evictKeys(keys);
       check("rows deleted", keys.length === 2);

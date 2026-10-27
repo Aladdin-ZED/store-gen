@@ -465,8 +465,3 @@ export const ROLE_LABELS: Record<Role, string> = {
   editor: "Editor",
   agent: "Order agent",
 };
-
-/** @deprecated replaced by `landingPathFor(memberships)` (§B.4). Where a user lands after sign-in. */
-export function homePathFor(role: Role): string {
-  return role === "agent" ? "/admin/orders" : "/admin";
-}

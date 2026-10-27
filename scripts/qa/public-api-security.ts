@@ -28,8 +28,9 @@
  *    on failure, the afterCommit hooks get the Purchase event
  *  - routes: store states (§A.5.3), ?sg-test tokens per store, store-host Origins in P and S mode, export CORS;
  *    the upsell answers an origin refusal exactly like an unknown order (ORD-17), in S mode too
- *  - the interim guard of the R1.0 T3 review (finding 2): only store #1's orders reach the one Google Sheet
- *    (selectSyncBatch) and the legacy CAPI tokens; another store's order schedules neither
+ *  - per-store integrations (SHT-02, PIX-01; the T3 review's interim store #1 guard went at the T4 merge): a store's
+ *    sync batch holds its own orders only (selectSyncBatch), and every store's order schedules its own sheet push and
+ *    its own server-side Purchase
  *  - unique-visitor credit capped per network and page
  *
  * T1's settings API answers for real (the suite's settings double went at the R1.0 integration, after the T1 merge).
@@ -849,7 +850,7 @@ async function scenarios(s: Seed) {
     assert.equal(up.body!.orderId, body.orderId);
   });
 
-  await check("interim guard (review r1.0-t3 F2): only store #1's orders reach the sheet and the CAPI tokens", async () => {
+  await check("per store (SHT-02, PIX-01): a store's sheet batch holds its own orders; every store schedules its own push and Purchase", async () => {
     const { selectSyncBatch } = await import("@/lib/sheets/sync");
     const tL = await target(s.keyL);
     const inB = await order(newPhone(), newIp(), { target: tB });
@@ -857,9 +858,12 @@ async function scenarios(s: Seed) {
     assert.equal((await stored(orderId(inB)))?.sheetStatus, "pending", "store B's order is queued in its own store");
     assert.ok(inB.sync && inB.conversion, "store B's order would sync and has a Purchase event built");
     for (const opts of [{ force: true, limit: 200 }, { limit: 200 }]) {
-      const batch = await selectSyncBatch(opts);
-      assert.ok(batch.length > 0 && batch.every((o) => o.storeId === s.L), `only store #1's orders are selected (${JSON.stringify(opts)})`);
-      assert.ok(batch.some((o) => o.id === orderId(inL)) && !batch.some((o) => o.id === orderId(inB)), "store #1's order in, store B's out");
+      const batchL = await selectSyncBatch(tL.scope, opts);
+      const batchB = await selectSyncBatch(tB.scope, opts);
+      assert.ok(batchL.length > 0 && batchL.every((o) => o.storeId === s.L), `store #1's batch has its own orders only (${JSON.stringify(opts)})`);
+      assert.ok(batchB.length > 0 && batchB.every((o) => o.storeId === tB.store.id), `store B's batch has its own orders only (${JSON.stringify(opts)})`);
+      assert.ok(batchL.some((o) => o.id === orderId(inL)) && !batchL.some((o) => o.id === orderId(inB)), "store #1's order in its batch, store B's out");
+      assert.ok(batchB.some((o) => o.id === orderId(inB)) && !batchB.some((o) => o.id === orderId(inL)), "store B's order in its batch, store #1's out");
     }
     // the route: after() runs outside a request here and throws, so a scheduled sheet push or CAPI dispatch logs a line
     const scheduled = async (key: string) => {
@@ -880,8 +884,8 @@ async function scenarios(s: Seed) {
       }
       return { sheet: lines.some((l) => l.includes("api/order:sync")), capi: lines.some((l) => l.includes("could not schedule")) };
     };
-    assert.deepEqual(await scheduled(s.keyL), { sheet: true, capi: true }, "positive control: store #1 schedules both");
-    assert.deepEqual(await scheduled(s.keyB), { sheet: false, capi: false }, "store B schedules neither the sheet push nor a CAPI Purchase");
+    assert.deepEqual(await scheduled(s.keyL), { sheet: true, capi: true }, "store #1 schedules its sheet push and its Purchase");
+    assert.deepEqual(await scheduled(s.keyB), { sheet: true, capi: true }, "store B schedules its own sheet push and its own Purchase");
   });
 }
 

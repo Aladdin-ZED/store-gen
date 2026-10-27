@@ -23,6 +23,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createConnection as tcpConnect } from "node:net";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import mysql from "mysql2/promise";
 import { newId } from "@/lib/db/ids";
@@ -180,7 +181,7 @@ function startServer(port: number, databaseUrl: string, log: string[]): ChildPro
   });
   const keep = (b: Buffer) => {
     log.push(...b.toString("utf8").split(/\r?\n/).filter(Boolean));
-    if (log.length > 400) log.splice(0, log.length - 400);
+    if (log.length > 4000) log.splice(0, log.length - 4000);
   };
   child.stdout?.on("data", keep);
   child.stderr?.on("data", keep);
@@ -196,9 +197,6 @@ async function stopServer(child: ChildProcess, port: number): Promise<boolean> {
   }
   return !(await portOpen(port));
 }
-
-/** The placeholder page prints "(<role>)"; React's SSR may separate the text nodes with empty comments. */
-const roleShown = (html: string, role: string) => new RegExp(`\\((?:<!-- -->)?${role}(?:<!-- -->)?\\)`).test(html);
 
 interface Probe {
   status: number;
@@ -269,11 +267,19 @@ async function main() {
     const owner = await get(port, pathA, s.ownerA.token);
     check(
       "owner of A → 200 through the seam",
-      owner.status === 200 && owner.body.includes(s.a.name) && owner.body.includes('data-sg-seam="member"') && roleShown(owner.body, "owner"),
+      // the store's dashboard (CCR r1.0-t4-9): its name in the title and the switcher, the role in the sidebar
+      owner.status === 200 && owner.body.includes(s.a.name) && owner.body.includes("Owner"),
       `status ${owner.status}`,
     );
     const agent = await get(port, pathA, s.agentA.token);
-    check("agent of A → 200 (store.read)", agent.status === 200 && roleShown(agent.body, "agent"), `status ${agent.status}`);
+    // a call agent has store.read but not pages.read: the dashboard sends them to the order queue (a 307, or the
+    // streamed redirect once [store]/loading.tsx's boundary has flushed the shell)
+    const toOrders = `/app/${s.a.handle}/orders`;
+    check(
+      "agent of A → sent to the orders",
+      (agent.status === 307 && (agent.location ?? "").endsWith(toOrders)) || (agent.status === 200 && agent.body.includes(toOrders)),
+      `status ${agent.status}`,
+    );
     const outsider = await get(port, pathA, s.outsider.token);
     check("signed-in non-member → 404", outsider.status === 404 && !outsider.body.includes(s.a.name), `status ${outsider.status}`);
     const staff = await get(port, pathA, s.staff.token);
@@ -304,7 +310,12 @@ async function main() {
       const left = await dropDatabase(dbName);
       check(`database ${dbName} dropped`, !left.includes(dbName), `cod_test_* left: ${left.length ? left.join(", ") : "none"}`);
     }
-    if (results.some((r) => !r.ok) && log.length) console.log(`--- next dev (last lines) ---\n${log.slice(-40).join("\n")}`);
+    if (results.some((r) => !r.ok) && log.length) {
+      // the whole server log goes to the OS temp folder (the Edge instrumentation warnings can fill the tail)
+      const file = join(tmpdir(), `c0a-smoke-next-${port}.log`);
+      writeFileSync(file, log.join("\n"));
+      console.log(`--- next dev (last lines; the whole log: ${file}) ---\n${log.slice(-40).join("\n")}`);
+    }
   }
 }
 

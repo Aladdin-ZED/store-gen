@@ -115,6 +115,9 @@ export async function isStoreLogo(scope: StoreScope, id: string): Promise<boolea
 /** Where a file of the store is used (drafts, live versions, store logo), so deleting it never breaks a page by surprise. */
 export async function assetUsage(scope: StoreScope, id: string): Promise<AssetUsage> {
   if (!ASSET_ID_RE.test(id)) return { pages: [], storeLogo: false };
+  // another store's asset answers like a missing one (§E.3), even when one of this store's documents names its id
+  const [own] = await db.select({ id: assets.id }).from(assets).where(byId(assets, scope, id)).limit(1);
+  if (!own) return { pages: [], storeLogo: false };
   const [drafts, live, storeLogo] = await Promise.all([
     db
       .select({ id: pages.id, name: pages.name, slug: pages.slug })

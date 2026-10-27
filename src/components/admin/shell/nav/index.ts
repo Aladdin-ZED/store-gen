@@ -6,6 +6,7 @@
 import { permissionDef, releaseOn } from "@/lib/auth/permissions";
 import { modeAllows } from "@/lib/tenancy/mode";
 import type { StoreCtx } from "@/lib/tenancy/types";
+import { nav as t4Nav } from "./t4";
 import type { NavContribution, NavGroup, NavGroupId, NavItem } from "./types";
 
 export type { IconName, NavBadge, NavContribution, NavGroup, NavGroupId, NavItem } from "./types";
@@ -22,8 +23,8 @@ export const NAV_GROUPS: readonly { id: NavGroupId; label: NavGroup["label"] }[]
   { id: "settings", label: "nav.group.settings" },
 ];
 
-/** Every contributed item, in track order (P0: `...<track>Nav` per `./<track>.ts`). */
-export const NAV_CONTRIBUTIONS: readonly NavContribution[] = [];
+/** Every contributed item, in track order (P0: `...<track>Nav` per `./<track>.ts`). R1.0: T4's dashboard (CCR r1.0-t4-8). */
+export const NAV_CONTRIBUTIONS: readonly NavContribution[] = [...t4Nav];
 
 /** An item is shown when the member holds its permission and the store's mode and the release allow it. */
 export function navItemVisible(ctx: Pick<StoreCtx, "store" | "can">, item: NavItem): boolean {

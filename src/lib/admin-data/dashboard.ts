@@ -9,6 +9,7 @@ import "server-only";
  * names come back masked under an impersonation scope (D70).
  */
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, ne } from "drizzle-orm";
+import { ACCOUNT_TWO_FACTOR_PATH } from "@/lib/auth/paths";
 import { db } from "@/lib/db/client";
 import { orders, pages } from "@/lib/db/schema";
 import { getStoreSetting } from "@/lib/settings";
@@ -81,9 +82,6 @@ export interface ChecklistItem {
   done: boolean;
   href: string;
 }
-
-/** The account's own security pages (T2, §I.1). */
-const ACCOUNT_PATH = "/app/account";
 
 const sumRows = (rows: StatsRow[]) =>
   rows.reduce((a, r) => ({ orders: a.orders + r.orders, revenue: a.revenue + r.revenue, uniques: a.uniques + r.uniques }), {
@@ -183,7 +181,7 @@ export async function getDashboard(
   const checklist: ChecklistItem[] = [
     { id: "store", done: named && !!(contacts.phone || contacts.whatsapp), href: appHref(h, "/settings/general") },
     { id: "sheets", done: sheet.connected && sheet.enabled, href: appHref(h, "/integrations/sheets") },
-    { id: "twofactor", done: user.totpEnabled, href: ACCOUNT_PATH },
+    { id: "twofactor", done: user.totpEnabled, href: ACCOUNT_TWO_FACTOR_PATH },
     { id: "publish", done: Number(publishedCount[0]?.n ?? 0) > 0, href: appHref(h, "/pages") },
     { id: "home", done: homeSet, href: appHref(h, "/pages") },
   ];
@@ -258,7 +256,8 @@ function recentOrders(scope: StoreScope) {
 /** Sidebar badges of the store: orders waiting for a first call, sync failures (ADM-08). */
 export async function navCounts(scope: StoreScope): Promise<{ newOrders: number; syncFailed: number }> {
   const [[n], [f]] = await Promise.all([
-    db.select({ n: count() }).from(orders).where(whereStore(orders, scope, eq(orders.status, "new"), ne(orders.sheetStatus, "disabled"))),
+    // real orders only: a test order (D54, `?sg-test`) never counts as work to do
+    db.select({ n: count() }).from(orders).where(whereStore(orders, scope, eq(orders.status, "new"), ne(orders.sheetStatus, "disabled"), eq(orders.isTest, false))),
     db.select({ n: count() }).from(orders).where(whereStore(orders, scope, eq(orders.sheetStatus, "failed"))),
   ]);
   return { newOrders: Number(n?.n ?? 0), syncFailed: Number(f?.n ?? 0) };

@@ -36,7 +36,7 @@ import { spendUploadBytes } from "@/lib/media/daily-bytes";
 import { declaredLength, multipartBoundary, parseMultipart, readCappedBody, readExactBody } from "@/lib/media/upload-body";
 import { takeUploadSlot } from "@/lib/media/upload-slots";
 import { json, logError } from "@/lib/orders/http";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { activeKillSwitches } from "@/lib/tenancy/entitlements";
 import { storeGuard } from "@/lib/tenancy/seam";
 import type { WriteCtx } from "@/lib/tenancy/types";
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
   // the member's or the store's own share is full → 429; the whole process is busy → 503
   if (!slot.ok) return slot.scope === "server" ? busy(503, 10) : busy(429, 10);
   try {
-    const gate = await rateLimit(`s:${g.ctx.scope.storeId}:media:upload:${g.ctx.user.id}`, 120, 600);
+    const gate = await rateLimit(storeBucket(g.ctx.scope, "media:upload", g.ctx.user.id), 120, 600);
     if (!gate.ok) return json({ ok: false, error: "rate_limited" }, 429, { "Retry-After": String(gate.retryAfter) });
     return await receive(req, boundary, length, g.ctx);
   } finally {

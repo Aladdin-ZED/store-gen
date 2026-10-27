@@ -52,18 +52,8 @@ async function loadDoc(scope: StoreScope, versionId: string): Promise<PageDoc | 
   return row ? orderDocOf(row.doc, versionId) : null;
 }
 
-/** The single-tenant /admin's store #1 (`LEGACY_STORE_ID`), as a system scope; goes with T4's order detail move. */
-async function legacyScope(): Promise<StoreScope> {
-  const [{ systemCtx, systemScope }, { LEGACY_STORE_ID }] = await Promise.all([import("@/lib/jobs/scope"), import("@/lib/db/store-handles")]);
-  return systemScope(systemCtx("legacy-admin"), LEGACY_STORE_ID);
-}
-
 /** Parsed, validated document of a page version of the scope's store (cached; versions never change). */
-export function versionDoc(scope: StoreScope, versionId: string): Promise<PageDoc | null>;
-/** @deprecated single-tenant (T4's order detail): store #1's versions only; pass the scope */
-export function versionDoc(versionId: string): Promise<PageDoc | null>;
-export async function versionDoc(...args: [StoreScope, string] | [string]): Promise<PageDoc | null> {
-  const [scope, versionId] = typeof args[0] === "string" ? [await legacyScope(), args[0]] : (args as [StoreScope, string]);
+export async function versionDoc(scope: StoreScope, versionId: string): Promise<PageDoc | null> {
   const hit = docs.get(scope.storeId, versionId);
   if (hit !== undefined) return hit;
   const doc = await loadDoc(scope, versionId);
@@ -104,15 +94,6 @@ export async function orderVersion(scope: StoreScope, target: PageTarget, payloa
     console.error("[orders] version lookup failed, using the current version:", err instanceof Error ? err.message : "unknown error");
     return current;
   }
-}
-
-/**
- * @deprecated pageKey → target without its store row: use `resolvePublicTarget` (src/lib/tenancy/public.ts), which
- * answers the store, its public scope and the same fields. Kept for the re-export in ./index until T4 drops it.
- */
-export async function resolvePageKey(pageKey: string, purpose: ResolvePurpose): Promise<PageTarget | null> {
-  const { resolvePublicTarget } = await import("@/lib/tenancy/public");
-  return resolvePublicTarget(pageKey, { purpose });
 }
 
 /** Does the published HTML of this version (in the scope's store) embed the Turnstile widget for `siteKey`? (cached) */

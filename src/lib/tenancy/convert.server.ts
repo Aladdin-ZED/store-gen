@@ -19,7 +19,7 @@ import "server-only";
  *     derived handle is checked again with the live reserved and protected lists (S1 ran before the boot seeded
  *     `protected_brands`): a handle with a problem becomes "store-1". `settings.ai` → `store_ai` (AI R16: today's
  *     "local AI off" survives), `settings.home.pageId` → `stores.home_page_id` when still NULL, and the pixel library
- *     migration (OFFERS §A.6, the port of src/lib/pixels/migrate.server.ts for this store only, PIX-07) when the
+ *     migration (OFFERS §A.6, the single-tenant migration ported for this store only, PIX-07) when the
  *     store has no library yet.
  *  4. `asset_refs` of every page draft (owner `page`, not live) and published version (owner `page_version`, live)
  *     with the editor's extractor (collectAssetIds, §G.5), plus the brand logo; then the `store_usage` gauges.
@@ -339,8 +339,8 @@ function copyLegacySecrets(
 }
 
 /**
- * Step 3d: the pixel library migration (docs/OFFERS.md §A.6) for store #1 only, the same rules as
- * src/lib/pixels/migrate.server.ts over this store's rows: ids from the legacy `pixels` key first, then every draft,
+ * Step 3d: the pixel library migration (docs/OFFERS.md §A.6) for store #1 only, the same rules as the single-tenant
+ * migration had (its module went at the T4 merge), over this store's rows: ids from the legacy `pixels` key first, then every draft,
  * publish version and non-revoked export; legacy tokens copied to the ids without their own, legacy test codes kept
  * with no window; pixel_health, tracking_secrets, then pixel_library LAST (its row is this step's marker).
  */

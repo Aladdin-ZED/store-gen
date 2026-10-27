@@ -113,17 +113,3 @@ export async function exportKeyInfo(scope: StoreScope): Promise<ExportKeyInfo> {
   const key = storedKey(s);
   return { set: !!key, email: key?.client_email ?? null, keyId: key?.private_key_id ?? null, setAt: s.setAt };
 }
-
-/**
- * @deprecated the platform-wide export key of before R1.0 (env GOOGLE_EXPORT_SA_JSON_B64, removed by §H.7): no
- * export embeds it any more. Kept only for scripts/qa/secrets-check.ts until the maintainer moves its checks to
- * `exportKeyState` (CCR r1.0-t4-3).
- */
-export function exportServiceAccount(): ExportKeyState {
-  const raw = process.env.GOOGLE_EXPORT_SA_JSON_B64?.trim();
-  if (!raw) return { key: null, problem: NO_EXPORT_KEY };
-  if (raw === process.env.GOOGLE_SA_JSON_B64?.trim()) return { key: null, problem: SAME_AS_APP_KEY };
-  const sa = parseServiceAccountKey(raw);
-  if (!sa) return { key: null, problem: INVALID_EXPORT_KEY };
-  return exportKeyState(sa);
-}

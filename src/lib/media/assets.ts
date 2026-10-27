@@ -47,27 +47,17 @@ export async function getAsset(scope: StoreScope, id: string): Promise<AssetReco
 }
 
 /** The scope's store's rows for the given ids (unknown, malformed and other stores' ids are skipped). Order follows the input. */
-export async function getAssetsByIds(scope: StoreScope, ids: readonly string[]): Promise<AssetRecord[]>;
-/**
- * @deprecated store-less: any store's rows. Kept for `src/lib/render/publish.server.ts` (T3) until CCR r1.0-t4-6
- * passes the page's scope; the maintainer deletes it at the R1.0 integration.
- */
-export async function getAssetsByIds(ids: readonly string[]): Promise<AssetRecord[]>;
-export async function getAssetsByIds(a: StoreScope | readonly string[], b?: readonly string[]): Promise<AssetRecord[]> {
-  const scope = isIdList(a) ? null : a;
-  const ids = isIdList(a) ? a : (b ?? []);
+export async function getAssetsByIds(scope: StoreScope, ids: readonly string[]): Promise<AssetRecord[]> {
   const wanted = [...new Set(ids.filter((id) => typeof id === "string" && ASSET_ID_RE.test(id)))];
   if (!wanted.length) return [];
   const found = new Map<string, AssetRecord>();
   for (let i = 0; i < wanted.length; i += 500) {
     const chunk = inArray(assets.id, wanted.slice(i, i + 500));
-    const rows = await db.select().from(assets).where(scope ? whereStore(assets, scope, chunk) : chunk);
+    const rows = await db.select().from(assets).where(whereStore(assets, scope, chunk));
     for (const r of rows) found.set(r.id, r);
   }
   return wanted.map((id) => found.get(id)).filter((r): r is AssetRecord => !!r);
 }
-
-const isIdList = (v: StoreScope | readonly string[]): v is readonly string[] => Array.isArray(v);
 
 export interface ListAssetsInput {
   page?: number;
@@ -149,7 +139,7 @@ export async function deleteAsset(scope: WriteScope, store: MediaStore, id: stri
     }
     freed = Number(rows[0]!.stored_bytes) || 0;
     await conn.query("DELETE FROM assets WHERE id = ? AND store_id = ?", [id, storeId]);
-    keys = await deleteFilesOfAsset(conn, id);
+    keys = await deleteFilesOfAsset(conn, scope, id);
     // the store's derived cutouts keep living on their own
     await conn.query("UPDATE assets SET source_asset_id = NULL WHERE store_id = ? AND source_asset_id = ?", [storeId, id]);
     await conn.commit();

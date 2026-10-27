@@ -1,18 +1,17 @@
 import "server-only";
 /**
  * Full-page draft preview (GET /app/<handle>/preview/<pageId>): renders a stored draft or version of one store with
- * the real publish renderer, made safe to show inside the dashboard (LND-25: the store's identity, its own files and
- * its addresses; the caller passes them from the seam's scope):
+ * the real publish renderer, made safe to show inside the dashboard (LND-25: the store render context of now, i.e. the
+ * store's identity, its own files, its addresses and legal links; the caller builds it from the seam's scope):
  *  - pixels removed and noindex forced; the runtime runs in "preview" mode (no orders, events);
  *  - every <script> carries the admin CSP nonce (the response travels under the admin CSP);
  *  - a fixed "Preview · not live" badge so it is never mistaken for the live page.
  */
-import type { AssetResolver, StoreInfo } from "@/landing/context";
-import { liveLinks } from "@/landing/context";
+import { storePageLinks, type AssetResolver } from "@/landing/context";
 import type { PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
 import { renderLandingHtml } from "@/lib/render/render.server";
-import { PUBLIC_ENDPOINTS } from "@/lib/render/publish.server";
+import { storeDocumentUrls, type StoreRenderContext } from "@/lib/render/store-context.server";
 
 const NONCE = /^[A-Za-z0-9+/=_-]{16,128}$/;
 
@@ -25,29 +24,29 @@ const BADGE =
 export type DraftPreview = { ok: true; html: string } | { ok: false; reason: "invalid" };
 
 /**
- * `opts.store` and `opts.assets` are the page's store's (its identity, a resolver over its own files only);
- * `opts.paths` its public addresses ("/s/<h>/<slug>" in P mode).
+ * `opts.rc` is the page's store's render context (`loadStoreRenderContext(scope, store)`: identity, base, origin);
+ * `opts.assets` a resolver over the store's own files only (`storeAssetResolver`).
  */
 export async function renderDraftPreview(
   source: unknown,
   slug: string,
-  opts: { nonce?: string | null; store: StoreInfo; assets: (doc: PageDoc) => Promise<AssetResolver>; paths?: { landing: string; thankYou: string } },
+  opts: { nonce?: string | null; rc: StoreRenderContext; assets: (doc: PageDoc) => Promise<AssetResolver> },
 ): Promise<DraftPreview> {
   const { doc } = validateDoc(source);
   if (!doc) return { ok: false, reason: "invalid" };
 
   // never load pixels from a preview, never let it be indexed
   const previewDoc = { ...doc, tracking: {}, seo: { ...doc.seo, noindex: true } };
-  const store = opts.store;
   const assets = await opts.assets(previewDoc);
   const rendered = await renderLandingHtml(previewDoc, {
     mode: "live",
     runtimeMode: "preview",
     assets,
     pageKey: "pk_preview_page",
-    store,
-    urls: { landing: opts.paths?.landing ?? `/${slug}`, thankYou: opts.paths?.thankYou ?? `/${slug}/merci`, endpoints: PUBLIC_ENDPOINTS },
-    links: liveLinks(slug),
+    store: opts.rc.info,
+    // the store's own addresses ("/s/<h>/<slug>" in P mode) and legal links
+    urls: storeDocumentUrls(opts.rc, slug),
+    links: storePageLinks(opts.rc.base, slug),
     upgradeInsecureRequests: false,
   });
 

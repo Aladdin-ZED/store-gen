@@ -17,7 +17,7 @@ import { AUDIT_AREAS, auditPage, type AuditRow } from "@/lib/admin-data/security
 import { revalidateStore } from "@/lib/admin-data/shell";
 import { settingsActor } from "@/lib/admin-data/store-audit";
 import { updateStoreProfile } from "@/lib/admin-data/store-profile";
-import { invalidatePublished } from "@/lib/render/cache.server";
+import { invalidateStoreRender } from "@/lib/render/cache.server";
 import { getStoreSettings, isMaskedSecret, updateStoreSetting } from "@/lib/settings";
 import { redactStoreSetting } from "@/lib/settings/store-registry";
 import { AiSettings, DefaultsSettings, StoreSettings, TurnstileSettings, type SettingInput } from "@/lib/settings/schemas";
@@ -60,7 +60,7 @@ export async function saveStoreAction(input: SettingInput<"store">): Promise<Act
       actor,
     );
     // legal pages and footers read the store identity at request time
-    invalidatePublished();
+    invalidateStoreRender(ctx.store.id);
     refreshSettings(ctx.store.handle);
     return null;
   });
@@ -141,7 +141,7 @@ export async function saveTurnstileAction(input: Partial<SettingInput<"turnstile
     }
     // a masked secret reaches updateStoreSetting as the mask, which keeps the stored one (§D.10)
     const saved = await updateStoreSetting(ctx.scope, "turnstile", masked ? { ...v, secretKey: input.secretKey } : v, settingsActor(ctx.actor));
-    invalidatePublished();
+    invalidateStoreRender(ctx.store.id);
     refreshSettings(ctx.store.handle);
     return redactStoreSetting("turnstile", saved);
   });

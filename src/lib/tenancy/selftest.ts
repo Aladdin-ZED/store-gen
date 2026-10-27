@@ -542,7 +542,8 @@ async function main(): Promise<void> {
     eq("P: mediaUrl is relative", URLS.mediaUrl(store, "ab c"), "/media/ab%20c");
     env.STORE_ROOT_DOMAIN = "stores.example.com";
     eq("STORE_ROOT_DOMAIN without EDGE_KEY stays P", URLS.addressMode(store), "P");
-    env.EDGE_KEY = "k".repeat(32);
+    // a usable key: a repeated character is a placeholder since the T3 review fixes (edgeKeyProblem, c8d8a48)
+    env.EDGE_KEY = "Zq3vL8pN2wR6tY1uB5mK9xC4hJ7dF0sG";
     eq("S: addressMode", URLS.addressMode(store), "S");
     eq("S: storeBase", URLS.storeBase(store), "");
     eq("S: storeUrl", URLS.storeUrl(store, "/promo"), "https://nour-shop.stores.example.com/promo");

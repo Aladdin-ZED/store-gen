@@ -71,7 +71,7 @@ export const SheetsSettings = z.object({
 
 /**
  * Store-level ad pixels from before per-page pixels (docs/OFFERS.md §A): read once by the pixel
- * library migration (src/lib/pixels/migrate.server.ts), ignored afterwards, deleted in the cleanup
+ * library migration (the store #1 conversion, src/lib/tenancy/convert.server.ts), ignored afterwards, deleted in the cleanup
  * release. Pages own their pixels; nothing copies this value into pages any more.
  */
 export const PixelsSettings = Tracking;

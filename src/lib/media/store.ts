@@ -23,6 +23,7 @@ import { join } from "node:path";
 import mysql, { type PoolConnection, type RowDataPacket } from "mysql2/promise";
 import { ByteLru } from "./lru";
 import { databaseUrl } from "@/lib/db/url";
+import type { WriteScope } from "@/lib/tenancy/types";
 
 export const CHUNK_SIZE = 512 * 1024;
 /** files above this size are served from the disk cache instead of the memory cache */
@@ -189,14 +190,19 @@ async function mediaQuery(sql: string, params: unknown[]): Promise<RowDataPacket
 /* writes (admin, inside the caller's transaction)                     */
 /* ------------------------------------------------------------------ */
 
-/** Insert files (metadata + chunks) using an open transaction connection. */
-export async function insertFiles(conn: PoolConnection, assetId: string, files: FileToStore[]): Promise<void> {
+/**
+ * Insert the files (metadata + chunks) of one asset of the scope's store using an open transaction connection: each
+ * `media_files` row carries the store (0004: NOT NULL, MED-09) and its backend (`storage = 'db'`, P8's FS backend
+ * sits next to it). The caller clears the 60 s miss memory again after its commit (`forgetMisses`): a reader between
+ * this insert and the commit could otherwise remember the key as missing.
+ */
+export async function insertFiles(conn: PoolConnection, scope: WriteScope, assetId: string, files: readonly FileToStore[]): Promise<void> {
   const s = state();
   for (const f of files) {
     const chunks = Math.max(1, Math.ceil(f.data.length / CHUNK_SIZE));
     await conn.execute(
-      "INSERT INTO media_files (`key`, asset_id, mime, bytes, chunks, sha256) VALUES (?, ?, ?, ?, ?, ?)",
-      [f.key, assetId, f.mime, f.data.length, chunks, sha256hex(f.data)],
+      "INSERT INTO media_files (`key`, store_id, asset_id, mime, bytes, chunks, sha256, storage) VALUES (?, ?, ?, ?, ?, ?, ?, 'db')",
+      [f.key, scope.storeId, assetId, f.mime, f.data.length, chunks, sha256hex(f.data)],
     );
     for (let i = 0; i < chunks; i++) {
       await conn.execute("INSERT INTO media_chunks (`key`, idx, data) VALUES (?, ?, ?)", [
@@ -209,13 +215,20 @@ export async function insertFiles(conn: PoolConnection, assetId: string, files: 
   }
 }
 
-/** Delete every file of an asset (inside the caller's transaction) and drop their disk copies. */
-export async function deleteFilesOfAsset(conn: PoolConnection, assetId: string): Promise<string[]> {
-  const [rows] = await conn.query<RowDataPacket[]>("SELECT `key`, sha256 FROM media_files WHERE asset_id = ?", [assetId]);
+/** After the caller's commit: forget the 60 s "unknown key" memory of new keys (a re-upload is served at once). */
+export function forgetMisses(keys: readonly string[]): void {
+  const s = state();
+  for (const k of keys) s.misses.delete(k);
+}
+
+/** Delete every file of one asset of the scope's store (inside the caller's transaction) and drop their disk copies. */
+export async function deleteFilesOfAsset(conn: PoolConnection, scope: WriteScope, assetId: string): Promise<string[]> {
+  const [rows] = await conn.query<RowDataPacket[]>("SELECT `key`, sha256 FROM media_files WHERE store_id = ? AND asset_id = ?", [scope.storeId, assetId]);
   const keys = rows.map((r) => String(r.key));
   if (keys.length) {
+    // media_chunks is keyed by the media key only (no store column): the keys are the store's, read above
     await conn.query("DELETE FROM media_chunks WHERE `key` IN (?)", [keys]);
-    await conn.query("DELETE FROM media_files WHERE `key` IN (?)", [keys]);
+    await conn.query("DELETE FROM media_files WHERE store_id = ? AND `key` IN (?)", [scope.storeId, keys]);
     // a cache: harmless to drop early even if the transaction rolls back
     for (const r of rows) void forgetDisk(String(r.sha256));
   }
@@ -262,10 +275,8 @@ export async function getMediaMeta(key: string): Promise<MediaFileMeta | null> {
   if (cached !== undefined) return cached;
   const s = state();
   return singleFlight(s.metaFlights, key, async () => {
-    const [row] = await mediaQuery(
-      "SELECT `key`, asset_id, mime, bytes, chunks, sha256 FROM media_files WHERE `key` = ? LIMIT 1",
-      [key],
-    );
+    // tenancy: public-key mediaKey (§E.3 rule 6, §G.6: a media key is global and random; the media route resolves its store first, resolveMediaKey)
+    const [row] = await mediaQuery("SELECT `key`, asset_id, mime, bytes, chunks, sha256 FROM media_files WHERE `key` = ? LIMIT 1", [key]);
     if (!row) {
       rememberMissing(key);
       return null;

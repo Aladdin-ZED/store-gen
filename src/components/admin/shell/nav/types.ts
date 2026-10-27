@@ -2,9 +2,7 @@
  * Tenant dashboard navigation types (docs/STORE-SAAS.md §I.3, ADM-28). Isomorphic and maintainer-owned (§K.3).
  * Items are contributed by the track files `./<track>.ts` (each exports `nav: NavContribution[]`) and filtered by
  * permission, store mode and release in `navFor` (./index.ts); the sidebar, ⌘K and the checklists use the same filter.
- *
- * Note: the single-tenant `../nav.ts` (today's /admin) still exists beside this folder, so import these modules by
- * their full path (`@/components/admin/shell/nav/index`); T4 deletes `../nav.ts` when the dashboard moves.
+ * The shell's view of the registry (labels, icons, the settings tabs) is `../store-nav.ts`.
  */
 import type { Release, StorePermission } from "@/lib/auth/permissions";
 import type { ModeFeature } from "@/lib/tenancy/mode";

@@ -2,19 +2,17 @@
  * GET /app/<handle>/preview/<pageId>[?v=<versionId>] — the member's full-page preview of one of the store's drafts (or
  * of one of its versions), rendered by the real publish renderer in a new tab (`pages.read` through storeGuard;
  * docs/STORE-SAAS.md §I.1). The page and the version are looked up in the store (another store's id is a 404,
- * LND-25), the document renders with the store's identity and its own files, and nothing is cached or indexed.
+ * LND-25), the document renders with the store render context of now (identity, its own files, its addresses), and
+ * nothing is cached or indexed.
  *
  * The landing runtime's inline <script> gets the request's CSP nonce when the proxy set one (see renderDraftPreview).
  */
 import type { NextRequest } from "next/server";
-import { collectAssetIds, liveAssetResolver } from "@/landing/context";
-import { storeInfoOf } from "@/lib/admin-data/store-info";
 import { getCspNonce } from "@/lib/auth";
 import { previewSource } from "@/lib/editor/pages.server";
 import { renderDraftPreview } from "@/lib/editor/preview.server";
-import { getAssetsByIds } from "@/lib/media";
+import { loadStoreRenderContext, storeAssetResolver } from "@/lib/render/store-context.server";
 import { storeGuard } from "@/lib/tenancy/seam";
-import { storePath } from "@/lib/urls";
 
 type Ctx = { params: Promise<{ store: string; id: string }> };
 
@@ -40,13 +38,12 @@ export async function GET(req: NextRequest, ctx: Ctx): Promise<Response> {
   const found = await previewSource(scope, id, versionId);
   if (!found) return plain(404, "Not found");
 
-  const info = await storeInfoOf(scope, store);
+  const rc = await loadStoreRenderContext(scope, store, { pageId: id });
   const preview = await renderDraftPreview(found.doc, found.slug, {
     nonce: await getCspNonce(),
-    store: info,
+    rc,
     // the store's own files only (MED-18): another store's id in a document resolves like a deleted file
-    assets: async (doc) => liveAssetResolver(await getAssetsByIds(scope, collectAssetIds(doc, [info.logo]))),
-    paths: { landing: storePath(store, `/${found.slug}`), thankYou: storePath(store, `/${found.slug}/merci`) },
+    assets: async (doc) => (await storeAssetResolver(scope, rc, doc)).resolver,
   });
   if (!preview.ok) return plain(422, "This draft has errors that prevent a preview. Fix them in the builder.");
 

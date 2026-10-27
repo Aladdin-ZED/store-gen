@@ -8,16 +8,17 @@
  *    boot warning that never quotes the value; generated secrets are never mistaken for templates.
  * 2. Database errors are logged by code only: a failed query's message lists every bound value
  *    (customer name, phone, address, e-mail, password hash) and must never reach the log.
- * 3. PHP exports only ever embed a dedicated export key, never the app's own Sheets key, and their
- *    README tells the owner how to revoke it.
+ * 3. PHP exports only ever embed the store's own export key (store setting `export_key`, sealed and write-only), never
+ *    the platform's own Sheets key, and their README tells the owner how to revoke it (EXP-03, §F.10).
  */
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { DrizzleQueryError } from "drizzle-orm";
 import { adminGateSecret, authConfigWarnings, cronKeySecret, isAppSecretConfigured, isPlaceholderSecret, setupTokenSecret } from "@/lib/auth/config";
 import { readmeMd } from "@/lib/export/readme";
-import { exportServiceAccount, INVALID_EXPORT_KEY, NO_EXPORT_KEY, SAME_AS_APP_KEY } from "@/lib/export/service-account";
+import { exportKeyState, NO_EXPORT_KEY, parseServiceAccountKey, SAME_AS_APP_KEY, storedKey } from "@/lib/export/service-account";
 import { errorSummary } from "@/lib/orders/log";
 import { deriveKey } from "@/lib/security/crypto";
+import { redactStoreSetting, STORE_SETTINGS } from "@/lib/settings/store-registry";
 
 let failures = 0;
 let checks = 0;
@@ -140,26 +141,29 @@ const exportKey = keyJson("php-exports@cod-studio.iam.gserviceaccount.com", "exp
 
 process.env.GOOGLE_SA_JSON_B64 = b64(appKey);
 delete process.env.GOOGLE_EXPORT_SA_JSON_B64;
-check(exportServiceAccount().problem === NO_EXPORT_KEY, "no dedicated export key → nothing can be embedded (never the app's key)");
+check(exportKeyState(null).problem === NO_EXPORT_KEY, "no store key → nothing can be embedded (never the app's key)");
+check(exportKeyState(parseServiceAccountKey(JSON.stringify(appKey))).problem === SAME_AS_APP_KEY, "the app's own key is refused as a store export key");
+check(exportKeyState(parseServiceAccountKey(b64(keyJson(appKey.client_email, "app-key-2")))).problem === SAME_AS_APP_KEY, "another key of the app's own service account is refused");
+check(
+  exportKeyState(parseServiceAccountKey(b64({ ...appKey, client_email: "renamed@cod-studio.iam.gserviceaccount.com", private_key_id: "other" }))).problem === SAME_AS_APP_KEY,
+  "the app's private key under another e-mail is refused",
+);
+check(parseServiceAccountKey("bm90IGEga2V5") === null, "an invalid key is not parsed (the settings card answers INVALID_EXPORT_KEY)");
 
-process.env.GOOGLE_EXPORT_SA_JSON_B64 = process.env.GOOGLE_SA_JSON_B64;
-check(exportServiceAccount().problem === SAME_AS_APP_KEY, "the app's own key is refused as export key");
-process.env.GOOGLE_EXPORT_SA_JSON_B64 = b64({ ...keyJson(appKey.client_email, "app-key-2") });
-check(exportServiceAccount().problem === SAME_AS_APP_KEY, "another key of the app's own service account is refused");
-process.env.GOOGLE_EXPORT_SA_JSON_B64 = b64({ ...appKey, client_email: "renamed@cod-studio.iam.gserviceaccount.com", private_key_id: "other" });
-check(exportServiceAccount().problem === SAME_AS_APP_KEY, "the app's private key under another e-mail is refused");
-process.env.GOOGLE_EXPORT_SA_JSON_B64 = "bm90IGEga2V5";
-check(exportServiceAccount().problem === INVALID_EXPORT_KEY, "an invalid export key is reported");
-
-process.env.GOOGLE_EXPORT_SA_JSON_B64 = b64(exportKey);
-const ok = exportServiceAccount();
-check(ok.key?.email === exportKey.client_email && ok.key.keyId === "export-key-1", "a dedicated export key is embedded, with its e-mail and key id");
+const ok = exportKeyState(parseServiceAccountKey(b64(exportKey)));
+check(ok.key?.email === exportKey.client_email && ok.key.keyId === "export-key-1", "a store's own export key is embedded, with its e-mail and key id");
 const embedded = ok.key ? (JSON.parse(Buffer.from(ok.key.b64, "base64").toString("utf8")) as Record<string, unknown>) : {};
 check(
   JSON.stringify(Object.keys(embedded).sort()) === JSON.stringify(["client_email", "private_key", "private_key_id", "type"]) && embedded.private_key === exportKey.private_key,
   "only the minimal fields of the export key go into config.php",
 );
 check(embedded.private_key !== appKey.private_key && embedded.client_email !== appKey.client_email, "the embedded key is not the app's");
+
+// the store's key is a secret store key (§F.10: the check gains the new key names): sealed, write-only, never echoed
+const storedExportKey = { clientEmail: exportKey.client_email, privateKey: exportKey.private_key, privateKeyId: exportKey.private_key_id, setAt: "2026-10-26T12:00:00.000Z" };
+check(STORE_SETTINGS.export_key.secret, "export_key is a secret store key (encrypted, bound to the store)");
+check(!JSON.stringify(redactStoreSetting("export_key", storedExportKey)).includes(exportKey.private_key.slice(30, 80)), "a redacted export_key never carries the private key");
+check(storedKey(storedExportKey)?.client_email === exportKey.client_email, "the stored setting reads back as the store's key");
 
 const readme = (serviceAccount: boolean) =>
   readmeMd({
@@ -179,10 +183,10 @@ const readme = (serviceAccount: boolean) =>
 const withKey = readme(true);
 check(!withKey.includes("if it is not used elsewhere"), "README no longer gives the impossible revoke advice");
 check(withKey.includes(exportKey.client_email) && withKey.includes("IAM & Admin") && withKey.includes("delete the key"), "README names the export key to delete when a ZIP leaks");
-check(withKey.includes("every row") && withKey.includes("not COD Studio's own key"), "README says what the embedded key can reach");
+check(withKey.includes("every row") && withKey.includes("not the platform's own key"), "README says what the embedded key can reach");
 check(!withKey.includes(exportKey.private_key.slice(30, 80)), "README never contains the key itself");
 const withoutKey = readme(false);
-check(withoutKey.includes("never COD Studio's own") && withoutKey.includes("delete the key you uploaded"), "README (own key) warns against the app's key and explains revocation");
+check(withoutKey.includes("never the platform's own key") && withoutKey.includes("delete the key you uploaded"), "README (own key) warns against the app's key and explains revocation");
 
 console.log(failures ? `✗ secrets check: ${failures} of ${checks} failed` : `✓ secrets check: ${checks} checks passed`);
 process.exit(failures ? 1 : 0);

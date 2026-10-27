@@ -21,7 +21,7 @@ import { purgeAbandonedLeads } from "@/lib/orders/admin";
 import { clientContext, errorSummary, json, logError } from "@/lib/orders/http";
 import { burstLimit } from "@/lib/security/burst-limit";
 import { hashIp, safeEqual } from "@/lib/security/crypto";
-import { purgeRateLimits, rateLimit } from "@/lib/security/rate-limit";
+import { platformBucket, purgeRateLimits, rateLimit } from "@/lib/security/rate-limit";
 import { syncStores } from "@/lib/sheets/sync";
 import { purgeVisitorMarkers } from "@/lib/stats";
 
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   // key guessing is throttled per network (the real cron calls twice per 10 min at most)
   if (!burstLimit("cron", ip).ok) return hidden(req);
   try {
-    const gate = await rateLimit(`cron:ip:${hashIp(ip)}`, 60, 600);
+    const gate = await rateLimit(platformBucket("cron:ip", hashIp(ip)), 60, 600);
     // digests: constant time whatever the lengths of the two keys
     if (!gate.ok || !safeEqual(digest(given), digest(expected))) return hidden(req);
   } catch (err) {

@@ -63,8 +63,7 @@ async function main() {
 }
 
 async function run(db: typeof import("@/lib/db/client").db, pool: typeof import("@/lib/db/client").pool) {
-  const { pages, pageVersions, stores } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
-  const { eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const { stores } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
   const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
   const { createPageFromDirections, createPageFromDoc } = load<typeof import("@/lib/admin-data/pages")>("@/lib/admin-data/pages");
   const editor = load<typeof import("./pages.server")>("./pages.server");
@@ -88,7 +87,8 @@ async function run(db: typeof import("@/lib/db/client").db, pool: typeof import(
   const rows = async (q: string, params: unknown[] = []) => ((await pool().query(q, params)) as unknown as [Record<string, unknown>[]])[0];
   const history = (storeId: string) => rows("SELECT slug, page_id, until, hits FROM page_slug_history WHERE store_id = ? ORDER BY slug", [storeId]);
   const doc = getFixture("argan").doc;
-  const markPublished = (id: string) => db.update(pages).set({ status: "published", firstPublishedAt: new Date() }).where(eq(pages.id, id));
+  // fixture writes as raw SQL on the throwaway database (the self-tests' convention: no scope to fake)
+  const markPublished = (id: string) => rows("UPDATE pages SET status = 'published', first_published_at = ? WHERE id = ?", [new Date(), id]);
 
   /* ---------------- slug history (LP-20, LAN Q22) ---------------- */
   const a1 = await createPageFromDoc(A, { name: "Argan", doc, versionLabel: "qa" }, actor);
@@ -165,9 +165,16 @@ async function run(db: typeof import("@/lib/db/client").db, pool: typeof import(
   for (const p of publishes) {
     const v = { ...doc, offers: { ...doc.offers, urgency: { stockLeft: p.stock, countdownEnd: new Date(now + 5 * day).toISOString() } } };
     liveId = newId();
-    await db.insert(pageVersions).values({ id: liveId, storeId: STORE_A, pageId: g.id, kind: "publish", label: null, doc: v, checksum: liveId, createdBy: null, createdAt: new Date(p.at) });
+    await rows("INSERT INTO page_versions (id, store_id, page_id, kind, label, doc, checksum, created_by, created_at) VALUES (?, ?, ?, 'publish', NULL, ?, ?, NULL, ?)", [
+      liveId,
+      STORE_A,
+      g.id,
+      JSON.stringify(v),
+      liveId.padEnd(64, "0"),
+      new Date(p.at),
+    ]);
   }
-  await db.update(pages).set({ status: "published", publishedVersionId: liveId, firstPublishedAt: new Date(publishes[0]!.at) }).where(eq(pages.id, g.id));
+  await rows("UPDATE pages SET status = 'published', published_version_id = ?, first_published_at = ? WHERE id = ?", [liveId, new Date(publishes[0]!.at), g.id]);
   const draft = JSON.parse(JSON.stringify(doc)) as typeof doc;
   const titled = draft.sections.find((s) => typeof (s.data as Record<string, unknown>).title === "string");
   if (titled) (titled.data as Record<string, unknown>).title = "Notre huile, pressée chez nous";

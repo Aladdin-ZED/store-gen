@@ -41,17 +41,18 @@ dropdown with colors). New orders appear as rows:
 Phone numbers keep their leading zero, and customer text is sanitized so it can never become a formula.
 
 ## Part C — optional: a key for PHP exports
-A **PHP export** can carry a Google key in `cod-private/config.php`, so its `order.php` writes to the same
-sheet without COD Studio. That key can read and change **every row** of the sheet. COD Studio never puts its
-own key (`GOOGLE_SA_JSON_B64`) in a ZIP, because a leaked copy could then only be stopped by deleting the key
-the app itself syncs with. Exports use a second account instead:
+A **PHP export** can carry a Google key in `cod-private/config.php`, so its `order.php` writes to the store's
+sheet without the platform. That key can read and change **every row** of the sheet. The platform never puts its
+own key (`GOOGLE_SA_JSON_B64`) in a ZIP, because a leaked copy could then only be stopped by deleting the key every
+store's sync uses. Each store brings a key of its own instead:
 
-1. Repeat Part A steps 3–5 with a new service account, e.g. `php-exports`.
-2. Set `GOOGLE_EXPORT_SA_JSON_B64` to its base64 key and restart the app.
+1. Repeat Part A steps 3–5 with a new service account, e.g. `php-exports`, in the store owner's Google Cloud project.
+2. In the store's dashboard, open **Connect → Google Sheets → Key for PHP exports** and paste the JSON key. It is
+   encrypted for this store and write-only: the page only shows which key is set, never the key.
 3. Share the sheet with that account's email as **Editor** too.
 
-The export dialog then offers *Include the Google key in config.php* to owners, and each export's audit entry
-records which key went out. If a ZIP or a hosting account leaks: Google Cloud → **IAM & Admin → Service
-accounts** → `php-exports` → **Keys** → delete the key. COD Studio keeps syncing; put a new key in
-`GOOGLE_EXPORT_SA_JSON_B64` and re-export the PHP pages you keep. The export is refused if this key belongs to
-the same account as `GOOGLE_SA_JSON_B64`.
+The export dialog then offers *Include the Google key in config.php* to members who may manage integrations, and
+each export's audit entry records which key went out. If a ZIP or a hosting account leaks: Google Cloud →
+**IAM & Admin → Service accounts** → `php-exports` → **Keys** → delete the key. The store's sync keeps working;
+paste a new key in the same place and re-export the PHP pages you keep. The platform's own key is refused there
+(same account, private key or key id as `GOOGLE_SA_JSON_B64`).

@@ -157,13 +157,14 @@ export function normalizeAllowedOrigins(input: readonly string[]): { origins: st
     const e = parseEntry(trimmed);
     const text = e ? entryText(e) : "";
     const probe = e ? `${e.scheme ?? "https"}://${e.wildcard ? "www." : ""}${e.host}` : "";
-    if (!e || !originAllowed(probe, [text])) {
-      invalid.push(trimmed);
-      continue;
-    }
-    if (platformEntry(e)) {
+    // the platform's own addresses first: originAllowed refuses them too (T3, SEC-23), and the seller is told why
+    if (e && platformEntry(e)) {
       invalid.push(trimmed);
       platform.push(trimmed);
+      continue;
+    }
+    if (!e || !originAllowed(probe, [text])) {
+      invalid.push(trimmed);
       continue;
     }
     if (!origins.includes(text)) origins.push(text);

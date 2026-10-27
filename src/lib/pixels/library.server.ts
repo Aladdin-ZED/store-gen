@@ -19,10 +19,8 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { can, type StoreRole } from "@/lib/auth/permissions";
 import { auditIn, settingsActor } from "@/lib/admin-data/store-audit";
-import { LEGACY_STORE_ID } from "@/lib/admin-data/legacy-store";
 import { db } from "@/lib/db/client";
 import { pages, pageVersions, storeMembers } from "@/lib/db/schema";
-import { systemCtx, systemScope } from "@/lib/jobs/scope";
 import { ownToken, savedTestCode, type TrackingSecrets } from "@/lib/orders/conversions-core";
 import { getStoreSetting, getStoreSettings, setStoreSetting } from "@/lib/settings";
 import type { PixelLibraryEntry } from "@/lib/settings/schemas";
@@ -265,23 +263,7 @@ export async function ensureInLibrary(scope: WriteScope, refs: readonly PixelRef
  * actor's role in this store may manage pixels (pixels.manage) — then they join the library. Customer
  * hashes (advanced matching) can only reach pixels an owner registered in the store.
  */
-export async function enforceLibraryRule(scope: WriteScope, tracking: Partial<Record<string, unknown>> | null | undefined, actor: Actor): Promise<void>;
-/** @deprecated today's store-less publish path (store #1, the legacy panel); T3 moves it to the scoped form (CCR r1.0-t4-2) */
-export async function enforceLibraryRule(tracking: Partial<Record<string, unknown>> | null | undefined, userId: string, ip?: string | null): Promise<void>;
-export async function enforceLibraryRule(
-  ...args: [WriteScope, Partial<Record<string, unknown>> | null | undefined, Actor] | [Partial<Record<string, unknown>> | null | undefined, string, (string | null)?]
-): Promise<void> {
-  if (typeof args[1] === "string") {
-    const [tracking, userId, ip] = args as [Partial<Record<string, unknown>> | null | undefined, string, (string | null)?];
-    // the legacy single-tenant publish is store #1's (§D.8 S1); removed with its caller at the R1.0 integration
-    const scope = systemScope(systemCtx("pixels.library_rule"), LEGACY_STORE_ID);
-    return libraryRule(scope, tracking, { kind: "user", userId, impersonatorId: null, ip: ip ?? null });
-  }
-  const [scope, tracking, actor] = args as [WriteScope, Partial<Record<string, unknown>> | null | undefined, Actor];
-  return libraryRule(scope, tracking, actor);
-}
-
-async function libraryRule(scope: WriteScope, tracking: Partial<Record<string, unknown>> | null | undefined, actor: Actor): Promise<void> {
+export async function enforceLibraryRule(scope: WriteScope, tracking: Partial<Record<string, unknown>> | null | undefined, actor: Actor): Promise<void> {
   const unknown = unknownPixels(await getLibrary(scope), tracking);
   if (!unknown.length) return;
   const role = actor.kind === "user" ? await memberRole(scope, actor.userId) : null;

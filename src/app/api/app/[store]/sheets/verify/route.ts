@@ -6,7 +6,7 @@
  */
 import { after, type NextRequest } from "next/server";
 import { json, logError } from "@/lib/orders/http";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { explain, serviceAccountEmail, sheetsConfigProblem, SheetsConfigError, SheetsProofError, syncPendingOrders, verifySheetConnect } from "@/lib/sheets";
 import { storeGuard } from "@/lib/tenancy/seam";
 
@@ -15,8 +15,8 @@ type Params = { params: Promise<{ store: string }> };
 export async function POST(req: NextRequest, { params }: Params): Promise<Response> {
   const g = await storeGuard(req, (await params).store, "integrations.manage");
   if (!g.ok) return g.response;
-  const { scope, actor, store } = g.ctx;
-  const gate = await rateLimit(`s:${scope.storeId}:sheets:verify:${actor.userId}`, 30, 600);
+  const { scope, actor, store, user } = g.ctx;
+  const gate = await rateLimit(storeBucket(scope, "sheets:verify", user.id), 30, 600);
   if (!gate.ok) return json({ ok: false, error: "rate_limited" }, 429, { "Retry-After": String(gate.retryAfter) });
 
   const email = serviceAccountEmail();

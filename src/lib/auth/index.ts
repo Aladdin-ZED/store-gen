@@ -40,7 +40,7 @@ import { changeUserPassword } from "./users";
 
 export type { Role, Permission } from "./permissions";
 // legacy single-tenant API (`can` = legacyCan) until T2/T4 move the callers; new code imports `can` from ./permissions
-export { legacyCan as can, ROLES, PERMISSIONS, ROLE_LABELS, isRole, permissionsFor, homePathFor } from "./permissions";
+export { legacyCan as can, ROLES, PERMISSIONS, ROLE_LABELS, isRole, permissionsFor } from "./permissions";
 export { AuthBusyError, AuthError, AuthInputError, AuthRefusal, FieldsError, type AuthErrorCode } from "./errors";
 export {
   ADMIN_HOME_PATH,

@@ -10,7 +10,7 @@
  * Under /app/<handle>/… the path names the store too; the meta wins (the legacy /admin panel and builder are store
  * #1's and carry it). Pure and isomorphic: nothing runs at import time.
  */
-import { HANDLE_RE } from "@/lib/tenancy/handles";
+import { HANDLE_RE } from "@/lib/urls/handle";
 
 export const STORE_HANDLE_META = "sg-store";
 

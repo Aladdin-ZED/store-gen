@@ -11,7 +11,7 @@ import { buildExport, getExportContext } from "@/lib/export/server";
 import { ULID_RE, parseExportRequest } from "@/lib/export/options";
 import { EXPORT_HEADERS, type ExportErrorResponse } from "@/lib/export/types";
 import { apiHeaders, json, readJson } from "@/lib/orders/http";
-import { rateLimit } from "@/lib/security/rate-limit";
+import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { storeGuard } from "@/lib/tenancy/seam";
 import { exportErrorResponse, rateLimited } from "./errors";
 
@@ -33,10 +33,10 @@ export async function GET(req: NextRequest, { params }: Params): Promise<Respons
 export async function POST(req: NextRequest, { params }: Params): Promise<Response> {
   const g = await storeGuard(req, (await params).store, "export.create");
   if (!g.ok) return g.response;
-  const { scope, actor } = g.ctx;
-  const gate = await rateLimit(`s:${scope.storeId}:export:create:${actor.userId}`, 20, 600);
+  const { scope, actor, user } = g.ctx;
+  const gate = await rateLimit(storeBucket(scope, "export:create", user.id), 20, 600);
   if (!gate.ok) return rateLimited(gate.retryAfter, "Too many exports in a row — wait a few minutes.");
-  const store = await rateLimit(`s:${scope.storeId}:export:create`, 20, 3600);
+  const store = await rateLimit(storeBucket(scope, "export:create"), 20, 3600);
   if (!store.ok) return rateLimited(store.retryAfter, "This store made many exports in the last hour — wait a little.");
   const body = await readJson(req, 16 * 1024);
   if (!body.ok) return json({ ok: false, error: "invalid" } satisfies ExportErrorResponse, body.status);
