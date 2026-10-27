@@ -283,8 +283,8 @@ export type TableLevel = "T" | "P*" | "P-opt" | "P" | "root";
  * the release that cuts it; test:migrate compares this list with the §D.3 rows of the document.
  * CCR r1.0-t1-3 item 2 split the §D.3 rows of `legal_acceptances` (P (opt. store), PLA-§2.1) and
  * `notification_reads` (P, no store_id) to match the schema; CCR r1.0-t1-1 moved `platform_usage` (P) to 0004.
- * One recorded drift since P0: §D.3 shares the row "`job_runs`, `cron_cursors` · P (opt. store)", but `cron_cursors`
- * has no store_id in §D.5 (job-keyed cursors and the tick lease), so it is P here (test:migrate's DRIFT list).
+ * P0 step E split the §D.3 row "`job_runs`, `cron_cursors` · P (opt. store)": `cron_cursors` has no store_id in §D.5
+ * (job-keyed cursors and the tick lease), so its own row and this list say P.
  */
 export const TABLE_LEVELS: Readonly<Record<string, TableLevel>> = {
   // 0000-0003 (§D.2)
@@ -350,7 +350,7 @@ export const TABLE_LEVELS: Readonly<Record<string, TableLevel>> = {
   ai_usage_daily: "T",
   platform_notes: "P-opt",
   job_runs: "P-opt",
-  cron_cursors: "P", // §D.3 says P (opt. store) on the shared row; §D.5 gives it no store_id (recorded drift)
+  cron_cursors: "P", // no store_id (§D.5): job-keyed cursors and the tick lease
   error_events: "P-opt",
   outbox: "P-opt",
   render_jobs: "T",

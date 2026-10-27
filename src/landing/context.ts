@@ -14,8 +14,9 @@
  *   exportAssetResolver(rows)      → assets/img|video/<key>           (+ usedKeys() for the zip)
  *   fixtureAssetResolver(rows, b)  → <b>dev-fixtures/<key>            (dev fixtures, QA renders)
  *
- * Page links (footer legal links, "back to the page"):
- *   storePageLinks(base, slug) → "<base>/<slug>", "<base>/policies/privacy?p=<slug>", … (live store pages)
+ * Page links (footer legal links, "back to the page", "Report this store"):
+ *   storePageLinks(base, slug, report?) → "<base>/<slug>", "<base>/policies/privacy?p=<slug>", …, and `report` = the
+ *                      absolute reportUrl(store, path) the server computed (live, test and preview renders, §C.6)
  *   liveLinks(slug)    → "/<slug>", "/legal/privacy?p=<slug>", … (deprecated root paths: QA renders)
  *   exportLinks(depth) → "index.html", "legal/privacy.html", … (depth 1: from inside legal/)
  *   PREVIEW_LINKS      → "#" everywhere (the admin preview never navigates)
@@ -387,8 +388,12 @@ export const isLegalKind = (v: string): v is LegalKind => (LEGAL_KINDS as readon
  * A store's live page (PUB-16, docs/STORE-SAAS.md §C.4.1): the page at "<base>/<slug>", the store's legal pages at
  * "<base>/policies/<kind>?p=<slug>" (themed like the page). `base` is `storeBase(store)`: "/s/<handle>" in P mode,
  * "" on the store's own host (S, C).
+ *
+ * `report` (docs/STORE-SAAS.md D76, §C.6, CRIT15): the served document's "Report this store" URL, computed on the
+ * server by `reportUrl(store, path)` (src/lib/urls; this module stays isomorphic, so it never builds the platform
+ * origin itself). Live, test and preview renders pass it; exports never do, so their links carry no `report`.
  */
-export function storePageLinks(base: "" | `/s/${string}`, slug: string): PageLinks {
+export function storePageLinks(base: "" | `/s/${string}`, slug: string, report?: string): PageLinks {
   const p = encodeURIComponent(slug);
   return {
     home: `${base}/${p}`,
@@ -396,6 +401,7 @@ export function storePageLinks(base: "" | `/s/${string}`, slug: string): PageLin
     terms: `${base}/policies/terms?p=${p}`,
     shipping: `${base}/policies/shipping?p=${p}`,
     contact: `${base}/policies/contact?p=${p}`,
+    ...(report ? { report } : {}),
   };
 }
 

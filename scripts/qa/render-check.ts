@@ -14,13 +14,17 @@
  *    cap of `compositions` (page, thanks-page: the chunks of one document) at most the recorded gzip + 5%, except the
  *    frozen `landing` chunk (docs/STORE-SAAS.md header freeze rule, ENGC-10): tolerance 0 against its recorded
  *    budget, and its bytes equal to the pin `src/landing/runtime/landing.sha256` (sha256 hex of the chunk text);
+ *  - "Report this store" (docs/STORE-SAAS.md D76, §C.6, §K.2 P0 maintainer CCR, CRIT15): every live landing document
+ *    carries exactly one link to its absolute `reportUrl` (the Shell's `.lp-report` row until P6's footer draws it,
+ *    before the floating layers), with its footer shown or hidden; thank-you and legal documents at most one (P3 draws
+ *    them); an export carries none;
  *  - the tracks' cases (docs/STORE-SAAS.md §J.1 render-check, §K.3, ENGP-12): every `./render-cases/<track>.ts`
  *    exports `cases: RenderCase[]`, imported below (written at P0, `scripts/qa/registries-check.ts` proves none is
  *    left out), so no track edits this harness. A case file imports only types from here: this module runs at load.
  *
  *   npx tsx scripts/qa/render-check.ts        (exit code 1 on any failure)
  */
-import { LEGAL_KINDS, storePageLinks } from "@/landing/context";
+import { exportLinks, LEGAL_KINDS, storePageLinks } from "@/landing/context";
 import { FIXTURE_NAMES, fixtureAssets, getFixture, type Fixture, type FixtureName } from "@/lib/page/fixtures";
 import { DIVIDERS } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
@@ -40,6 +44,10 @@ const PUBLIC_ENDPOINTS = { order: "/api/public/order", lead: "/api/public/lead",
 
 const now = "2026-10-07T12:00:00.000Z";
 const STORE_BASE = "/s/qa-store" as const;
+/** What the server's `reportUrl(store, storePath(store, "/<slug>"))` answers for the QA store (src/lib/urls, §C.6). */
+const reportFor = (path: string) => `https://platform.example/report/qa-store?p=${encodeURIComponent(path)}`;
+const REPORT_LINK = /<a href="https:\/\/platform\.example\/report\/qa-store[?"]/g;
+const reportLinks = (html: string) => (html.match(REPORT_LINK) ?? []).length;
 let failures = 0;
 const fail = (m: string) => {
   failures++;
@@ -54,7 +62,7 @@ function liveOptions(name: FixtureName, fx: Fixture) {
     pageKey: fx.pageKey,
     store: fx.store,
     urls: { landing: `${STORE_BASE}/${name}`, thankYou: `${STORE_BASE}/${name}/merci`, endpoints: PUBLIC_ENDPOINTS },
-    links: storePageLinks(STORE_BASE, name),
+    links: storePageLinks(STORE_BASE, name, reportFor(`${STORE_BASE}/${name}`)),
     origin: "https://shop.example",
     now,
     upgradeInsecureRequests: true,
@@ -126,6 +134,10 @@ async function main() {
         for (const a of ["data-surfaces", "data-arch", "data-btn", "data-shadow", "data-texture"]) if (!html.includes(a + "=")) fail(`${tag}: <html> lacks ${a}`);
         if (/data-kind="(marquee-tape|scallop|zigzag|torn|stitch|zellige-band)"/.test(r.html.replace(/<style[\s\S]*?<\/style>/g, ""))) fail(`${tag}: retired divider/edge name in markup`);
         if (!/frame-ancestors 'none'/.test(r.csp) || !/upgrade-insecure-requests/.test(r.csp)) fail(`${tag}: live CSP lacks frame-ancestors/upgrade`);
+        // D76 / CRIT15: one report link per landing document; P3 adds the thank-you and legal ones (at most one each)
+        const reports = reportLinks(r.html);
+        if (kind === "landing" ? reports !== 1 : reports > 1) fail(`${tag}: ${reports} "Report this store" links, expected ${kind === "landing" ? "exactly 1" : "at most 1"}`);
+        if (kind === "landing" && !r.html.includes(`href="${reportFor(`${STORE_BASE}/${name}`)}"`)) fail(`${tag}: the report link is not the document's absolute reportUrl`);
         if (kind === "landing") {
           if (!r.html.includes(`<link rel="canonical" href="https://shop.example${STORE_BASE}/${name}"/>`)) fail(`${tag}: canonical is not the store URL`);
           if (/aggregateRating/i.test(r.html)) fail(`${tag}: aggregateRating in the document (§C.8)`);
@@ -142,6 +154,25 @@ async function main() {
       }
     }
   }
+
+  /* "Report this store" (D76, CRIT15): the Shell row with the footer hidden, its place, and never in an export */
+  for (const name of FIXTURE_NAMES) {
+    const fx = getFixture(name, { now, locale: name === "argan" ? "ar" : "fr" });
+    const { doc } = validateDoc(fx.doc);
+    if (!doc) continue;
+    const noFooter = { ...doc, sections: doc.sections.map((x) => (x.type === "footer" ? { ...x, hidden: true } : x)) };
+    const live = await renderLandingHtml(noFooter, liveOptions(name, fx));
+    const tag = `${name}/report`;
+    if (reportLinks(live.html) !== 1 || !live.html.includes('<p class="lp-report">')) fail(`${tag}: footer hidden, ${reportLinks(live.html)} report links (expected the Shell row)`);
+    const row = live.html.indexOf('<p class="lp-report">');
+    const floating = live.html.search(/<(?:aside|div|a)\b[^>]*class="lp-(?:sticky|wa)\b/);
+    if (row >= 0 && floating >= 0 && floating < row) fail(`${tag}: the report row comes after a floating layer`);
+    const { styles } = inlineHashes(live.html);
+    for (const h of styles) if (!live.csp.includes(`'${h}'`)) fail(`${tag}: style hash missing from the CSP`);
+    const exported = await renderLandingHtml(doc, { mode: "export", assets: fixtureAssets("./"), pageKey: fx.pageKey, store: fx.store, urls: { landing: "./", thankYou: "merci/index.html", endpoints: PUBLIC_ENDPOINTS }, links: exportLinks(0), now });
+    if (/\/report\/|lp-report/.test(exported.html)) fail(`${name}/export: an exported document carries the report link`);
+  }
+  console.log("report link: one per live landing (footer shown or hidden), none in exports");
 
   /* legacy (v1) theme values are migrated, not fatal */
   const fx = getFixture("argan", { now });

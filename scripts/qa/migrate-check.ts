@@ -925,9 +925,9 @@ async function tenantSetMatchesDocument(): Promise<void> {
     const table = /`([a-z_]+)`/.exec(cells[1] ?? "")?.[1];
     if (table) docLevels[table] = /store_id varchar\(26\) NULL/.test(cells[3] ?? "") ? "P-opt" : "T";
   }
-  // the document's level where it differs from the schema: §D.3 shares the row "`job_runs`, `cron_cursors` · P (opt.
-  // store)", but §D.5 gives cron_cursors no store_id (P0; the §D.3 row is split in the spec, TABLE_LEVELS says P)
-  const DRIFT: Record<string, string> = { cron_cursors: "P-opt" };
+  // the document's level where it differs from the schema: none since P0 step E split the §D.3 row "`job_runs`,
+  // `cron_cursors` · P (opt. store)" (§D.5 gives cron_cursors no store_id, so its own row says P)
+  const DRIFT: Record<string, string> = {};
   const mismatches: string[] = [];
   for (const [table, level] of Object.entries(docLevels)) {
     const code = TABLE_LEVELS[table];

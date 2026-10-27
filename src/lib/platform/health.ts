@@ -4,6 +4,7 @@ import "server-only";
  * the console's `/admin/health` panels and the `platform.alarms` job read. P8 owns the data, P1 the screens and the
  * alarms. Typed stub frozen at P0 with the core §H.5 field list and PLA Q.25's `edge`, `commerce` and `sheetsTop`.
  */
+import type { AiHealth } from "@/lib/ai/summary.server";
 import type { DbUsage } from "@/lib/db/usage";
 import type { OutboxKind, OutboxState } from "@/lib/jobs/outbox";
 import type { RenderSummary } from "@/lib/jobs/renders";
@@ -45,8 +46,8 @@ export interface PlatformHealth {
   commerce: { lastOrderAt: string | null; ordersPerHour24: number[] };
   /** PLA Q.25: the stores with the oldest Sheets backlog */
   sheetsTop: { storeId: string; oldestMin: number }[];
-  /** P7's `aiHealth()` (AI R13, R18); its type is ai.md's, typed open until the P7 contract entries */
-  ai: Readonly<Record<string, unknown>> | null;
+  /** P7's `aiHealth()` (AI R13, R18); null while it is unavailable (its P0 stub throws) */
+  ai: AiHealth | null;
   /** DES-R12: the design tables' bytes (alarm at 300 MB) */
   design: { genomesBytes: number; shinglesBytes: number };
   /** the `platform.health` job (§I.7) */

@@ -34,14 +34,14 @@ M._resolveFilename = function (request: string, ...rest: unknown[]) {
   return resolveFilename.call(this, request, ...rest);
 };
 
-const DB_RE = /^cod_test_(?:t3|m4|m5)_[a-z0-9_]{1,40}$/;
+const DB_RE = /^cod_test_(?:t3|m4|m5|p0)_[a-z0-9_]{1,40}$/;
 const arg = (name: string) => {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
 };
 const DB = arg("db") ?? "cod_test_t3_public";
 const KEEP = process.argv.includes("--keep");
-if (!DB_RE.test(DB)) throw new Error("the database must be named cod_test_t3_*, cod_test_m4_* or cod_test_m5_*");
+if (!DB_RE.test(DB)) throw new Error("the database must be named cod_test_t3_*, cod_test_m4_*, cod_test_m5_* or cod_test_p0_*");
 
 // test configuration: P mode on platform.test, a legacy host; random secrets (never a real one)
 process.env.APP_SECRET = randomBytes(32).toString("hex");
@@ -192,6 +192,17 @@ async function pure(): Promise<void> {
     const cfg = JSON.parse(/<script type="application\/json" id="lp-config">([\s\S]*?)<\/script>/.exec(r.html)![1]!);
     assert.equal(cfg.thankYouUrl, "/s/atlas-argan/argan/merci");
     assert.equal(cfg.endpoints.order, "/api/public/order");
+  });
+
+  await check("report link (D76, CRIT15): the live landing carries its absolute reportUrl once; the thank-you links name their own path", async () => {
+    setS(false);
+    const rc = rcFor(A);
+    const r = await renderLandingHtml(doc!, optsFor(rc));
+    const href = "https://platform.test/report/atlas-argan?p=%2Fs%2Fatlas-argan%2Fargan";
+    assert.equal(r.html.split(`href="${href}"`).length - 1, 1, "one report link on the landing page");
+    assert.ok(r.html.includes('<p class="lp-report">'), "the Shell row (until P6's footer draws the link)");
+    assert.equal(ctxMod.thankYouLinks(rc, "argan").report, "https://platform.test/report/atlas-argan?p=%2Fs%2Fatlas-argan%2Fargan%2Fmerci");
+    assert.equal(ctxMod.storeReportUrl(rc, "/policies/terms"), "https://platform.test/report/atlas-argan?p=%2Fs%2Fatlas-argan%2Fpolicies%2Fterms");
   });
 
   await check("store render (S): media from the platform origin, listed in img-src and media-src", async () => {

@@ -11,7 +11,7 @@ import { storePageLinks, type AssetResolver } from "@/landing/context";
 import type { PageDoc } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
 import { renderLandingHtml } from "@/lib/render/render.server";
-import { storeDocumentUrls, type StoreRenderContext } from "@/lib/render/store-context.server";
+import { storeDocumentUrls, storeReportUrl, type StoreRenderContext } from "@/lib/render/store-context.server";
 
 const NONCE = /^[A-Za-z0-9+/=_-]{16,128}$/;
 
@@ -46,7 +46,7 @@ export async function renderDraftPreview(
     store: opts.rc.info,
     // the store's own addresses ("/s/<h>/<slug>" in P mode) and legal links
     urls: storeDocumentUrls(opts.rc, slug),
-    links: storePageLinks(opts.rc.base, slug),
+    links: storePageLinks(opts.rc.base, slug, storeReportUrl(opts.rc, `/${slug}`)),
     upgradeInsecureRequests: false,
   });
 

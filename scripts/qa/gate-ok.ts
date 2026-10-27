@@ -1,8 +1,13 @@
 /**
  * The last step of `npm run gate` (docs/STORE-SAAS.md §J.5, §H.10; SEC-10): every earlier step was green, so this
- * writes `qa/.gate-ok` = `{ "sha": <git rev-parse HEAD>, "at": <ISO time> }`. `scripts/deploy/archive.mjs` refuses to
- * build a deploy archive without that file for the current HEAD, younger than 24 h; the archive carries it so the boot
- * log (`src/lib/db/boot-config.ts`) names the commit the gate passed on.
+ * writes `qa/.gate-ok` = `{ "sha": <git rev-parse HEAD>, "at": <ISO time>, "stubBuild"?: true }`.
+ * `scripts/deploy/archive.mjs` refuses to build a deploy archive without that file for the current HEAD, younger than
+ * 24 h, or with `stubBuild: true`; the archive carries it so the boot log (`src/lib/db/boot-config.ts`) names the
+ * commit the gate passed on.
+ *
+ * `stubBuild` (STUB-BUILD LOCK, P0 maintainer decision 5; docs/STORE-SAAS.md §K.2 P0 stub rule, §H.10) is written
+ * whenever design's height model is still the P0 stub. It asks the module (`heightModelIsStub()`), never
+ * SG_STUB_BUILD_OK: a gate that ran with the variable proves a merge, not that the build may ship.
  *
  *   npx tsx scripts/qa/gate-ok.ts            (only as the tail of `npm run gate`)
  *
@@ -13,6 +18,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { heightModelIsStub } from "@/lib/render/prepublish/budget-limits";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const GATE_FILE = path.join(ROOT, "qa", ".gate-ok");
@@ -46,12 +52,14 @@ function main(): void {
     if (dirty.length > 20) console.error(`  … ${dirty.length - 20} more`);
     process.exit(1);
   }
-  const body = `${JSON.stringify({ sha, at: new Date().toISOString() })}\n`;
+  const stubBuild = heightModelIsStub();
+  const body = `${JSON.stringify({ sha, at: new Date().toISOString(), ...(stubBuild ? { stubBuild: true } : {}) })}\n`;
   mkdirSync(path.dirname(GATE_FILE), { recursive: true });
   const tmp = `${GATE_FILE}.${process.pid}.tmp`;
   writeFileSync(tmp, body, { mode: 0o644 });
   renameSync(tmp, GATE_FILE);
-  console.log(`gate-ok: ✓ qa/.gate-ok names ${sha} (valid 24 h for scripts/deploy/archive.mjs)`);
+  if (stubBuild) console.log(`gate-ok: ✓ qa/.gate-ok names ${sha}, marked stubBuild (the P0 height stub): scripts/deploy/archive.mjs refuses it`);
+  else console.log(`gate-ok: ✓ qa/.gate-ok names ${sha} (valid 24 h for scripts/deploy/archive.mjs)`);
 }
 
 main();

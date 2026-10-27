@@ -6,7 +6,8 @@
  *
  * It refuses (exit 1, nothing written) unless
  *   - `qa/.gate-ok` exists, names the current `git rev-parse HEAD` and is younger than 24 h (only a green
- *     `npm run gate` writes it: scripts/qa/gate-ok.ts);
+ *     `npm run gate` writes it: scripts/qa/gate-ok.ts), and does not say `stubBuild: true` (the STUB-BUILD LOCK: a commit
+ *     whose design height model is still the P0 stub is never archived; the rule is scripts/deploy/gate-file.mjs);
  *   - the working tree is clean except `docs/saas/PROGRESS.md` (the lead's log, never committed), so the archive is
  *     exactly the commit the gate passed on;
  *   - no tracked file looks like a secret (`.env*` other than `.env.example`, `*.pem`);
@@ -20,11 +21,10 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gateFileProblem } from "./gate-file.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const GATE_FILE = path.join(ROOT, "qa", ".gate-ok");
-const GATE_MAX_AGE_MS = 24 * 60 * 60_000;
-const CLOCK_SKEW_MS = 5 * 60_000;
 const ALLOWED_DIRTY = new Set(["docs/saas/PROGRESS.md"]);
 
 const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -89,7 +89,7 @@ function main() {
   const dirty = dirtyPaths(git("status", "--porcelain=v1", "--untracked-files=all")).filter((p) => !ALLOWED_DIRTY.has(p));
   if (dirty.length) refuse(`the tree has ${dirty.length} uncommitted change(s); commit them and run npm run gate again:`, dirty);
 
-  // 2. the gate file: this HEAD, younger than 24 h
+  // 2. the gate file
   if (!existsSync(GATE_FILE)) refuse("qa/.gate-ok is missing: run npm run gate (it writes the file when every step is green)");
   let gate;
   try {
@@ -97,14 +97,9 @@ function main() {
   } catch {
     refuse("qa/.gate-ok is not valid JSON: run npm run gate again");
   }
-  if (typeof gate?.sha !== "string" || gate.sha !== head) {
-    refuse(`qa/.gate-ok names ${typeof gate?.sha === "string" ? gate.sha.slice(0, 12) : "no commit"}, not HEAD ${head.slice(0, 12)}: run npm run gate on this commit`);
-  }
-  const at = typeof gate.at === "string" ? Date.parse(gate.at) : NaN;
-  if (!Number.isFinite(at)) refuse("qa/.gate-ok has no valid time (at): run npm run gate again");
-  const age = Date.now() - at;
-  if (age < -CLOCK_SKEW_MS) refuse(`qa/.gate-ok is dated in the future (${gate.at}): run npm run gate again`);
-  if (age > GATE_MAX_AGE_MS) refuse(`qa/.gate-ok is ${(age / 3_600_000).toFixed(1)} h old (limit 24 h): run npm run gate again`);
+  // this HEAD, younger than 24 h, never a stub build (scripts/deploy/gate-file.mjs, the STUB-BUILD LOCK)
+  const problem = gateFileProblem(gate, { head, now: Date.now() });
+  if (problem) refuse(problem);
 
   // 3. nothing secret is tracked
   const tracked = git("ls-tree", "-r", "--name-only", "-z", "HEAD").split("\0").filter(Boolean);

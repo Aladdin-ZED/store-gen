@@ -1384,7 +1384,8 @@ Owner = the part spec allowed to refine its columns (§D.9).
 | 0005 | `ai_batch_items`, `ai_eval_runs` | P (opt. store) / P | ai | batch item queue; eval gate runs (AI R2) |
 | 0005 | `ai_usage_daily` | T | ai | AI usage rollups (the console reads it cross-store through `src/lib/ai/platform/**`, D64) |
 | 0005 | `platform_notes` | P (opt. store) | platform | staff notes |
-| 0005 | `job_runs`, `cron_cursors` | P (opt. store) | core | job runner |
+| 0005 | `job_runs` | P (opt. store) | core | job runner: one row per job run |
+| 0005 | `cron_cursors` | P | core | job runner: the tick lease and the per-job cursors (no `store_id` column, §D.5; P0 split this row, which rev 5 listed with `job_runs` as "P (opt. store)") |
 | 0005 | `error_events` | P (opt. store) | core | error ring |
 | 0005 | `outbox` | P (opt. store) | core | async deliveries (§H.1) |
 | 0005 | `render_jobs` | T | core | render queue (§H.3) |
@@ -4171,6 +4172,114 @@ registry), run `test:ownership` over the rows below (ENGC-8), and freeze the cro
   enables their hard fixtures at the P6 merge. Two locks keep the D52 hard gates from shipping disabled (rev 3,
   ENGC-21): no production deploy happens between P0 and the R1 integration (§H.10), **and** `prepublish/budget.ts` throws
   at module load when `NODE_ENV === "production"` and the report is a stub, so `npm run build` is red until P6 merges.
+
+**Maintainer build note (P0, 2026-10-27).** What the P0 step built (commits `0042571` lead packages, `df46028` A,
+`78559ef` B, `e709178` C, `0abe4da` D, and step E), and the decisions the step took where this section or a part left a
+choice open. The tracks build against the result; a change goes through a CCR.
+1. **Packages.** `@anthropic-ai/sdk` pinned at 0.133.0 for P7 (AI R1). `npm audit fix` took 12 advisories to 4; the 4
+   left are moderate and dev-only (drizzle-kit's `@esbuild-kit/esbuild` chain and the esbuild dev-server advisory, whose
+   only npm fix is a breaking drizzle-kit downgrade) and are accepted. No track runs `npm install`.
+2. **Scripts.** Every R1 script §J names is in `package.json` from P0 (46 at step C, pointing at the files the owning
+   tracks write), so tracks never touch it. A script whose file does not exist yet is in no aggregate: the maintainer
+   adds each track's suites to `npm test` / `test:db` / `test:e2e` / `gate` at that track's merge, inside the
+   `test-budget.json` shares. P0 added `test:settings`, `test:registries` and `test:prepublish` to `npm test`.
+   `gate:r1` = `gate` + `qa:wow-demo` + `qa:publish-gates` + `qa:design-corpus` + `test:ai-eval`, then
+   `qa:ai-eval-live` only when `ANTHROPIC_API_KEY` is set; `qa:wow-demo` (and so `gate:r1`) fails by design until the R1
+   integration writes its browser runner.
+3. **Stubs.** Each typed stub compiles and either answers the documented safe default (`DEFAULT_WINDOW`, empty cells,
+   `{ running: 0, done: [] }`, height reports flagged `stub: true`, identity masks outside impersonation, `"ok"` brand
+   checks, `null` = health not computed yet, "Cloud AI off") or throws `not implemented: P<n> <name>`; a stub never
+   invents data (a measurement, a genome, a distance, a queue id). A stub in an existing file keeps today's callers
+   working. Each new stub file names its owning track and spec section in its header. Every frozen signature and shape
+   is asserted in **`src/lib/contracts/r1-p0.ts`** (maintainer, types only): a rename, removal or re-type breaks `tsc`.
+4. **Extension files.** Created with typed empty contents and imported by their registries (95 at step C, the outbox
+   handler files `jobs/handlers/{capi,telegram}.ts` at step D; `test:registries` proves every file on disk is imported);
+   only files a row above names were created. P2's `commands/shell.ts` exists (covered by P2's `shell/**` glob; the
+   "Recompute health" action needs it); P3 has no flags file (LAN-§23.10). Order hooks run ops → landing →
+   integrations (OPE-§3.6). The tenancy harness keeps lazy loading with an explicit `TENANCY_CASE_FILES` list; an empty
+   case file is "not applicable".
+5. **STUB-BUILD LOCK** (resolves "red until P6 merges" against "each merge: `npm run gate` green", ENGC-21). Build time:
+   `prebuild` starts with `scripts/qa/stub-lock.ts`, which exits 1 while design's height model is the stub
+   (`heightModelIsStub()` in `src/lib/render/prepublish/budget-limits.ts`: `HEIGHT_MODEL_VERSION === 0`, and every
+   report then carries `stub: true`) unless `SG_STUB_BUILD_OK=1`. Run time: `src/lib/render/prepublish/budget.ts` throws
+   at module load under `NODE_ENV === "production"` on the same condition. The lead's merge gates before P6 run with
+   `SG_STUB_BUILD_OK=1`, so build and e2e keep running. `scripts/qa/gate-ok.ts` writes `"stubBuild": true` into
+   `qa/.gate-ok` whenever the model is the stub (it asks the module, never the variable) and `scripts/deploy/archive.mjs`
+   refuses it (`scripts/deploy/gate-file.mjs`). A stub build is never archived or deployed, and Hostinger's build is red
+   because it never sets the variable: both locks of §H.10 hold. **The whole budget gate is advisory before P6:**
+   besides C2 / C3 / F1, the rows F5, R1, R4, R5, K2 and I1 are measured and classified but published as notes
+   (`vars.stub = 1`) while the stub is in place, because today's engine output is the baseline they were written
+   against (the argan fixture: 171 KB gz, 20 primary order buttons, 315 reveal nodes, 6 colour bands) and the plans that
+   bring a page under them are P6's; enforcing them at P0 would refuse every publish and turn every earlier merge gate
+   red. Every row is hard from the P6 merge on (`test:prepublish` then enables the calibration fixtures).
+6. **Schema (step A, `drizzle/0005_r1.sql`, 38 tables).** Where the core and a part disagree, the part's cut list wins
+   (`ai_jobs.kind` an enum of the four job kinds plus `task`, `class`, `model`, `effort`, `transport`,
+   `reserved_credits`; the full AI-§M.1 lists of `ai_runs`, `ai_cache`, `ai_memory`, `prompt_versions`; DES-§2.1
+   `design_genomes`; `headline_shingles.kind` and `hs_niche_owner_idx`; `delivery_zones.note`, `updated_by`,
+   `created_at`; the operations refinements; `pc_sku_idx` on (store, sku, variant_key, effective_from);
+   `carrier_rates.city_key` NOT NULL). `agent_stats_daily`'s R2 counters exist from 0005 (default 0). Open defaults:
+   `carrier_rates.active` true and fees NULL-able, `ad_spend_daily.source` `'manual'`. The four-eyes rule is the CHECK
+   `preq_four_eyes_ck`. Every `store_id`, optional ones included, has an `fk_<table>_store` RESTRICT FK. The JSON
+   column shapes are exported from `schema.ts` for the owning tracks to re-export; `HealthMetrics` / `Milestone` live in
+   `src/lib/health/types.ts`; open shapes are typed loosely. The batched-ALTER guard counts columns with `column_name IN
+   (...)`; `orders.source` changes only while it is exactly the R1.0 enum, `leads.phone` only while NOT NULL. The §D.3
+   row `job_runs`, `cron_cursors` was split (`cron_cursors` is P: no `store_id`).
+7. **Settings (step B).** A stored `store.confirmation.hours` / `policies.contact.hours` is dropped on read, not moved
+   (D73, no build ever wrote them). `platform_ai.prices` defaults to empty (no invented price; P7 adds rows once the
+   probe confirms them). Task ids in `routes` / `autoPrefersCloud` are checked by format until P7 narrows them to
+   `src/lib/ai/tasks.ts`. Model info keeps the API's field names. `src/lib/settings/selftest.ts` (`test:settings`)
+   checks every §D.10 key.
+8. **Cross-track stubs, part 1 (step D).** The five R1 statuses (`refused`, `duplicate`, `unreachable`, `in_transit`,
+   `lost`) are appended to `src/lib/orders/contract.ts` with the OPE-§3.3 labels and colours. Every write stub takes a
+   `WriteScope` (D71, over the parts' older `StoreScope`), order hooks included; `createManualOrder` /
+   `convertLeadToOrder` take a `WriteCtx`. Implemented for real where the spec gives the code: `projectStatus`, the
+   `cityKey` slug rule, `zoneForCity`, `buildZoneTable`, `etaWindow` and its helpers, the window helpers
+   (`nextCallableAt` throws a `RangeError` for a window with no range in 400 days). Left as stubs where the parts
+   disagree: `hoursText`, `etaText`, `etaWindowText`, `codInvariants` (P0 proposed `CodInvariantInputs`; only the
+   result is frozen), `renderTemplate`, `legacyToWanted`, `signedTrackPath`. Operations' console-read signatures win
+   over PLA Q.11; open shapes were filled and frozen in the contract file.
+9. **Cross-track stubs, part 2 (step E).** P1: `notify` keeps T2's working body; the PLA-§18.1 read API
+   (`listNotifications`, `unreadCount`, `markRead`) is frozen as throwing stubs (rows exist since R1.0, so no empty answer
+   is pretended); `getStoreHealth` → `null`, `requestHealthRecompute` marks dirty and answers `queuedAt`,
+   `snoozeHealthIssue` throws; `HealthInputs` is frozen with the PLA-§6.3.1 fields, every source field `| null` (a
+   failing source leaves it null), and `StoreHealthView` and the rev 3 flag codes (`brand_term_live`,
+   `brand_near_live`, `abuse_reports_new`) are in the maintainer's `src/lib/health/types.ts`; `mask.ts` and
+   `brand-check.ts` needed nothing; `recordAbuseReport` throws. P2: `renameHandle` (R1.0, honours `freeRename`) and the
+   pulse types needed nothing. P7: `src/lib/ai/{tasks,policy,provider/types,router/server,jobs/enqueue,jobs/pulse,
+   summary.server,feedback.server}.ts` answer the documented "Cloud AI off" state (`aiPolicyFor`: cloud unavailable with
+   `platform_off`, `state` under impersonation, no live task; `runAi` and `enqueueAiJob`: the typed failure
+   `disabled`; `aiUsageForStore`: nothing used, `creditsLimit: null`; `linkAiRuns` / `recordPublishFeedback`:
+   no-ops), `registerBatchResultHandler` works, `queueAi`, `aiStoreSummary` and `aiHealth` throw (P8's
+   `PlatformHealth.ai` is `AiHealth | null`); `TaskIO` types `injection.screen` and leaves the other tasks `unknown`
+   until P7's schemas land. P6: `src/lib/design/**` (genome types, `GENE_VOCAB` with the enumerated genes the gene table
+   and the frozen look vocabulary fix, P6 completing G4, ranges and structs; `validateHints` drops every entry with
+   `why: "vocab"`; `clicheScore` no hit; `checkNovelty` the documented "novelty off" bands; `nicheShares` "k < 10";
+   `checkHeadlineNovelty` / `checkHeadlinesAction` `ok` with no band (`pages.write`, 60 / 10 min); `designHealth` empty;
+   `renderDigest` flagged `stub: true`; `variantFeatures` the documented defaults with `family: "grid"` and the two
+   fixed layers; `estimateAlpha` → `null`; `sampleGenome`, `genomeOf`, `genomeDistance` throw), the Director vocabulary
+   (`GenomeCard`, `Band`, `RepairOp`, `AI_REPAIR_OPS`, `DIRECTOR_TASKS`) and the `RevealFolds` stub (the three docs'
+   first sections through the admin thumbnail, both slots). `src/lib/design/types.frozen.ts` is the maintainer's.
+   `PrePublishCtx.scope` is a `WriteScope` (D71: a publish, a re-render and an export are writes).
+10. **Report link (rev 4, CRIT15).** `reportUrl` / `consoleHref` existed since R1.0. `PageLinks.report?: string`;
+    `storePageLinks(base, slug, report?)`; the server's `storeReportUrl(rc, path)` sets it for live, test and preview
+    renders with each document's own path (the thank-you and legal pages get theirs, P3 draws them); exports never set
+    it. The Shell draws `<p class="lp-report">` after the last in-flow section, before the floating layers, whenever
+    the footer does not draw the link: P6 flips `FOOTER_RENDERS_REPORT` (`src/landing/sections/footer/report.ts`) in
+    the change that makes `legalLinks(ctx)` draw it, and from then on the row appears only without a visible footer, so
+    every live document carries the link exactly once. UiKey `footer.report` carries platform's `shell.report.link`
+    wording (ar الإبلاغ عن هذا المتجر · fr Signaler cette boutique · en Report this store). Proof at P0: every export
+    file (connected, PHP and WhatsApp bundles of every fixture in ar / fr / en) is byte-identical to before; live
+    landing documents change by the one row; thank-you and legal documents are unchanged; `test:render` asserts one link
+    per live landing (footer shown or hidden) and none in exports.
+11. **Rows and ownership (step C onward).** §K.3 claims the maintainer files no row named: `src/lib/settings/selftest.ts`,
+    `src/lib/admin-data/search/registry.ts`, `scripts/qa/{registries-check,tenancy-check}.ts`, `docs/saas/ccr/README.md`,
+    `src/lib/contracts/r1-p0.ts`, `scripts/qa/stub-lock.ts`, `scripts/deploy/gate-file.mjs`. `test:ownership --phase R1`
+    finds no file with two owners and none without one.
+12. **Deferred, with the reason.** Narrowing `MessageKey` and `NotificationKind` to strict unions (C0a's note): the
+    R1.0 code calls keys and kinds that no catalog or kinds file declares yet, so narrowing at P0 would break today's
+    callers; each track declares its keys and kinds at its merge and the maintainer narrows at the R1 integration.
+    `checkBrandTerms("wordmark", …)` (DES-§13, S2): an R2 field, added to `BrandField` at the R2 contract step.
+
 Then:
 
 | Track | Part spec | Feature ids (rev 2) | Owns |
@@ -4265,7 +4374,7 @@ additive change is the maintainer's), `src/landing/document.tsx` (read-only in R
 **`scripts/qa/render-check.ts`** (the harness; tracks add fixtures through `render-cases/<track>.ts`, ENGP-12), **`scripts/qa/tenancy-check.ts`** (the attack-suite harness, maintainer from R1 product; tracks add cases through `tenancy-cases/<track>.ts`, listed in its `TENANCY_CASE_FILES` at P0), **`scripts/qa/registries-check.ts`** (P0, `test:registries`: every extension file on disk is imported by its registry, so a forgotten import fails `npm test`), **`src/lib/contracts/r1-p0.ts`** (P0: the compile-time contract of the cross-track stubs frozen at P0, types only; a track that renames, removes or re-types a frozen export breaks `tsc`, and a change goes through a CCR), `docs/saas/ccr/README.md` (the CCR rules),
 **`scripts/qa/ownership-check.ts`** and its manifest **`docs/saas/ownership-baseline.json`** (rev 5, CRIT2-22),
 `scripts/qa/tenancy-allow.json` (the lint's allow file; entries through the maintainer, LAN Q23), **`scripts/qa/test-budget.ts`** (the 3-minute harness, §J.1; rev 4 named) and its table **`scripts/qa/test-budget.json`** (rev 5, CRIT2-9),
-**`scripts/deploy/archive.mjs`** and its gate-file writer **`scripts/qa/gate-ok.ts`** (SEC-10), `docs/saas/ccr/r1.0-finale-report.md` (the integration report), `docs/saas/ccr/r1.0-deploy-checklist.md` (the R1.0 deploy runbook), **`scripts/qa/e2e/r1.0-exit.ts`** (the R1.0 exit scenario of §K.1 criterion 5 as an e2e, `qa:r1-exit` in `test:e2e`), `src/landing/{types,context,i18n}.ts` (read-only in R1 product; the rev 4
+**`scripts/deploy/archive.mjs`** and its gate-file writer **`scripts/qa/gate-ok.ts`** (SEC-10), **`scripts/deploy/gate-file.mjs`** (P0: the archive's gate-file rule as a pure function, `stubBuild: true` refused) and **`scripts/qa/stub-lock.ts`** (P0: the STUB-BUILD LOCK's prebuild check, see the maintainer build note in §K.2), `docs/saas/ccr/r1.0-finale-report.md` (the integration report), `docs/saas/ccr/r1.0-deploy-checklist.md` (the R1.0 deploy runbook), **`scripts/qa/e2e/r1.0-exit.ts`** (the R1.0 exit scenario of §K.1 criterion 5 as an e2e, `qa:r1-exit` in `test:e2e`), `src/landing/{types,context,i18n}.ts` (read-only in R1 product; the rev 4
 report-link lines are the maintainer's P0 CCR, §K.2 P0), `scripts/sync-fonts.mjs` (the Arabic
 metrics step and the seven `@fontsource` faces of DES-R21 are a maintainer CCR applied in R1 product; the sample list
 `scripts/sync-fonts/ar-sample.json` is P6's), **`scripts/fonts/woff2-sfnt.mjs`** (rev 5, CRIT2-7: the WOFF2 table reader

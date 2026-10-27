@@ -5,4 +5,9 @@
  */
 import type { messages as en } from "../en/design";
 
-export const messages: Partial<Record<keyof typeof en, string>> = {};
+export const messages: Partial<Record<keyof typeof en, string>> = {
+  "design.reveal.use": "Utiliser ce design",
+  "design.reveal.analysing": "Lecture de vos photos",
+  "design.reveal.error": "Les designs n’ont pas pu être préparés.",
+  "design.reveal.retry": "Réessayer",
+};

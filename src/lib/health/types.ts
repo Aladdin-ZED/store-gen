@@ -3,9 +3,19 @@
  * (§K.3). One computation, two audiences: the tenant ring (issues, never console flags) and the console (both). The
  * score is advisory and monotonic: fixing an issue never lowers it, and it never gates anything (publish gates are §M).
  *
- * `HealthInputs` holds the two core fields every rule reads; P1's src/lib/health/inputs.ts widens it at P0 (through
- * the maintainer) with the read APIs of PLA-§6.3.1.
+ * `HealthInputs` is frozen at P0 with the read APIs of PLA-§6.3.1 (P1's src/lib/health/inputs.ts `collectHealthInputs`
+ * fills it through `systemScope`, one read pass per store): every track's rules read the same shape. A source that
+ * fails leaves its field `null` and the rules that need it stay silent. `StoreHealthView` is the row both audiences
+ * read through P1's `getStoreHealth(scope)` (src/lib/platform/health-snapshot.ts).
  */
+import type { ConsolePageRow } from "@/lib/admin-data/pages";
+import type { AiUsageSummary } from "@/lib/ai/summary.server";
+import type { DesignHealth } from "@/lib/design/health.server";
+import type { IntegrationHealthRow } from "@/lib/integrations/health";
+import type { CityKey } from "@/lib/orders/address";
+import type { OrderKpis } from "@/lib/orders/profile";
+import type { StoreSettingValue } from "@/lib/settings/store-registry";
+import type { UsageMetric } from "@/lib/tenancy/entitlement-keys";
 import type { MessageKey, StoreRow, StoreScope } from "@/lib/tenancy/types";
 import type { ModeFeature } from "@/lib/tenancy/mode";
 
@@ -37,9 +47,35 @@ export interface HealthIssue {
   snoozedUntil?: string;
 }
 
+/** PLA-§6.3.1: one read pass per store through systemScope(ctx, storeId) and the P0 read APIs (≤ 250 ms per store). */
 export interface HealthInputs {
   store: StoreRow;
   now: Date;
+  slaHours: number | null;
+  /** listPagesForConsole (T4), renderSummary (P8); `name` and `seoTitle` feed platform:brand_term_live */
+  pages: { published: number; drafts: number; lastPublishAt: Date | null; renderFailed: number; live: Pick<ConsolePageRow, "id" | "slug" | "updatedAt" | "name" | "seoTitle">[] } | null;
+  /** the strings the live brand rule scans (the store row and the `store` / `policies` settings already loaded) */
+  brand: { storeName: string; legalName: string | null; whatsappName: string | null; policyTexts: string[] } | null;
+  /** abuse_reports counts for the store (ar_store_idx) */
+  abuseReports: { new24h: number; total: number } | null;
+  /** orderKpis, queueCounts, orderRiskMix (P4) */
+  orders: (OrderKpis & { risky7d: number; firstTouchP50Ms: number | null; unattempted2h: number; unreachable7d: number; unreachable28d: number }) | null;
+  /** integrationHealth (P5) */
+  integrations: IntegrationHealthRow[] | null;
+  /** sheetsBacklog (P5) */
+  sheets: { pending: number; oldestMin: number | null; lastRunFailedAt: Date | null } | null;
+  /** aiUsageForStore (P7): metadata only */
+  ai: AiUsageSummary | null;
+  /** designHealth(scope) (P6): q, slop, distances per live page, verdict bands only */
+  design: DesignHealth | null;
+  /** entitlements + store_usage (T1) */
+  usage: readonly { metric: UsageMetric["metric"]; period: string; used: number; limit: number | null }[] | null;
+  settings: { store: StoreSettingValue<"store">; policies: StoreSettingValue<"policies">; checkout: StoreSettingValue<"checkout">; conversions: StoreSettingValue<"conversions"> } | null;
+  /** listMembersByScope (T2) */
+  members: { total: number; withoutTotpWithOrdersReadAll: number; lastActiveAt: Date | null; lastLoginAt: Date | null } | null;
+  review: { submittedAt: Date | null; status: string } | null;
+  /** built on the server from zoneFeesFor (P3) over the top-5 CityKeys of opsAggregates(dims: city) (P4), never from a browser ZoneTable */
+  zones: { count: number; pageShowsFlatFee: boolean; feeMismatchTop5: { cityKey: CityKey; pageFeeCents: number; zoneFeeCents: number }[] } | null;
 }
 
 export interface HealthRule {
@@ -68,7 +104,11 @@ export type HealthFlagCode =
   | "render_failed"
   | "review_waiting"
   | "restricted"
-  | "suspended";
+  | "suspended"
+  // rev 3 (PD70, SEC-18): the live brand guard and the R1 abuse-report slice, staff-only, 0 points
+  | "brand_term_live"
+  | "brand_near_live"
+  | "abuse_reports_new";
 
 export interface HealthFlag {
   code: HealthFlagCode;
@@ -90,3 +130,21 @@ export interface HealthMetrics {
 
 /** store_health.milestones keys: the ISO date each was first reached (PD40) */
 export type Milestone = "first_draft" | "first_publish" | "first_order" | "tenth_order" | "first_member" | "first_delivered";
+
+/** The `store_health` row as both audiences read it (PLA-§2.2): the tenant without `flags`, the console with them. */
+export interface StoreHealthView {
+  score: number;
+  attention: 0 | 1 | 2 | 3;
+  components: Record<HealthGroup, number>;
+  issues: HealthIssue[];
+  snoozed: Record<string, string>;
+  metrics: HealthMetrics;
+  milestones: Partial<Record<Milestone, string>>;
+  dormant: boolean;
+  computedAt: string;
+  dirty: boolean;
+  /** platform scopes only */
+  flags?: HealthFlag[];
+  /** rev 4 (PD78, PLA Q4.4): max(platform.health.staleAlarmMinutes, 1.5 × the job's measured cycleMin) */
+  staleAfterMin: number;
+}

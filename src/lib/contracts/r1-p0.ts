@@ -6,9 +6,72 @@
  * updates the entry with it. Append-only lists (event types, template variables) are checked for their P0 members
  * only, so an append needs no change here.
  *
- * Part 1 (step D): P4 CALL CENTER, P5 INTEGRATIONS, P3 LANDING, P8 PLATFORM OPS. Step E appends P1, P2, P6 and P7.
+ * Part 1 (step D): P4 CALL CENTER, P5 INTEGRATIONS, P3 LANDING, P8 PLATFORM OPS. Part 2 (step E): P1 CONSOLE, P2 SHELL,
+ * P6 DESIGN (the maintainer-frozen measurement shapes of src/lib/design/types.frozen.ts included), P7 AI and the
+ * maintainer's own P0 seams (the budget gate's profile API and bands, the report link, the publish gate's scope).
  */
-import type { StorePermission, StoreRole } from "@/lib/auth/permissions";
+import type { ReactNode } from "react";
+import type { PlatformRole, StorePermission, StoreRole } from "@/lib/auth/permissions";
+import type * as handles from "@/lib/tenancy/handles";
+import type * as revealMod from "@/components/generate/reveal/RevealFolds";
+import type { PageLinks } from "@/landing/types";
+import type { UiKey } from "@/landing/i18n";
+import type * as aiFeedback from "@/lib/ai/feedback.server";
+import type * as aiEnqueue from "@/lib/ai/jobs/enqueue";
+import type { AiJobInput, AiJobKind } from "@/lib/ai/jobs/enqueue";
+import type * as aiPulse from "@/lib/ai/jobs/pulse";
+import type { AiPolicy, CloudBlock } from "@/lib/ai/policy";
+import type { AiFailCode, AiFailure, AiOutcome, AiResult, AiRunOpts, AiTaskInput, AiTaskOutput } from "@/lib/ai/provider/types";
+import type * as aiRouter from "@/lib/ai/router/server";
+import type * as aiSummary from "@/lib/ai/summary.server";
+import type { AiHealth, AiStoreSummary, AiUsageSummary } from "@/lib/ai/summary.server";
+import type { AiProviderId, AiTaskId } from "@/lib/ai/tasks";
+import type * as designActions from "@/lib/design/actions";
+import type * as cliche from "@/lib/design/cliche";
+import type { ClicheHit } from "@/lib/design/cliche";
+import type * as derive from "@/lib/design/derive";
+import type * as digest from "@/lib/design/digest";
+import type { GenomeCard, RenderDigest } from "@/lib/design/digest";
+import type * as distance from "@/lib/design/distance";
+import type { DistanceView } from "@/lib/design/distance";
+import type * as features from "@/lib/design/features";
+import type { GateId, GateReport } from "@/lib/design/gates/types";
+import type { AI_REPAIR_OPS, RepairOp } from "@/lib/design/gates/repair";
+import type { BoldGene, DesignGenome, GeneKey, SampleInput, SampleOpts } from "@/lib/design/genome";
+import type * as headlines from "@/lib/design/headlines.server";
+import type * as designHealthMod from "@/lib/design/health.server";
+import type { DesignHealth } from "@/lib/design/health.server";
+import type * as heights from "@/lib/design/heights";
+import type * as hints from "@/lib/design/hints";
+import type { GeneHints, HintIntake } from "@/lib/design/hints";
+import type { DirectorTask } from "@/lib/design";
+import type * as novelty from "@/lib/design/novelty.server";
+import type { NicheShares, NoveltyContext, NoveltyRequest, NoveltyVerdict } from "@/lib/design/novelty.server";
+import type * as photoFacts from "@/lib/design/photo-facts";
+import type { AlphaBBox, PhotoFacts } from "@/lib/design/photo-facts";
+import type * as solve from "@/lib/design/solve";
+import type * as designTypes from "@/lib/design/types";
+import type { FoldItem, FoldReport, HeightReport, VariantFeaturesResolved } from "@/lib/design/types.frozen";
+import type * as vocab from "@/lib/design/vocab";
+import type { GeneVocabEntry } from "@/lib/design/vocab";
+import type { KillKey } from "@/lib/flags/registry";
+import type { HealthFlag, HealthGroup, HealthInputs, HealthIssue, HealthMetrics, HealthRule, Milestone, StoreHealthView } from "@/lib/health/types";
+import type { NotificationGroup, NotificationKind, NotificationVars } from "@/lib/notify/registry";
+import type * as abuse from "@/lib/platform/abuse-report";
+import type { AbuseReportInput } from "@/lib/platform/abuse-report";
+import type * as brandCheck from "@/lib/platform/brand-check";
+import type { BrandField } from "@/lib/platform/brand-check";
+import type * as healthSnapshot from "@/lib/platform/health-snapshot";
+import type * as mask from "@/lib/platform/mask";
+import type { CustomerFieldsIn, CustomerFieldsMasked, Masked } from "@/lib/platform/mask";
+import type * as notifyMod from "@/lib/platform/notify";
+import type { NotificationItem, NotifyOpts, NotifyTarget, Reader } from "@/lib/platform/notify";
+import type { PrePublishCtx } from "@/lib/render/prepublish";
+import type * as budgetMod from "@/lib/render/prepublish/budget";
+import type { BudgetProfile, PageKind } from "@/lib/render/prepublish/budget";
+import type * as budgetLimits from "@/lib/render/prepublish/budget-limits";
+import type { BuiltTheme } from "@/lib/theme/types";
+import type * as urlsMod from "@/lib/urls";
 import type { SearchHit } from "@/lib/admin-data/search/types";
 import type * as aggregates from "@/lib/callcenter/aggregates";
 import type { AggCell, AggDim, ISODate } from "@/lib/callcenter/aggregates";
@@ -62,15 +125,15 @@ import type * as state from "@/lib/orders/state";
 import type { CancelReason, ConfirmState, MoneyState, OrderStates, ReturnReason, ShipState, TransitionSource } from "@/lib/orders/state";
 import type * as transition from "@/lib/orders/transition";
 import type { OrderActor, TransitionError, TransitionInput, TransitionResult } from "@/lib/orders/transition";
-import type { Locale, PageDoc } from "@/lib/page/schema";
+import type { Locale, PageDoc, ThemeLook } from "@/lib/page/schema";
 import type * as platformHealth from "@/lib/platform/health";
 import type { PlatformHealth } from "@/lib/platform/health";
-import type { PulseContributor } from "@/lib/pulse/types";
+import type { PulseContributor, StorePulse } from "@/lib/pulse/types";
 import type { StoreConfirmation } from "@/lib/settings/keys/store";
 import type * as push from "@/lib/sheets/push";
 import type * as testing from "@/lib/testing/links";
 import type * as tracking from "@/lib/tracking/links";
-import type { ActionResult, PlatformCtx, StoreCtx, StoreRow, StoreScope, SystemCtx, WriteCtx, WriteScope } from "@/lib/tenancy/types";
+import type { ActionResult, Actor, PlatformCtx, StoreCtx, StoreRow, StoreScope, StoreStatus, SystemCtx, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 import type { City } from "@/lib/markets/types";
 import type { StoreAddress } from "@/lib/urls";
 import type { z } from "zod";
@@ -504,4 +567,389 @@ export type P8HealthAndExports = [
   Assert<Equals<typeof exportsStore.exportPartStream, (scope: StoreScope, jobId: string, part: string) => Promise<ReadableStream | null>>>,
   Assert<Equals<typeof backup.listBackupRuns, () => Promise<BackupRunSummary[]>>>,
   Assert<Equals<typeof backup.backupFiles, (day: string) => Promise<{ name: string; path: string; bytes: number }[]>>>,
+];
+
+/* ------------------------------------------------------------------ */
+/* P1 CONSOLE (platform.md)                                            */
+/* ------------------------------------------------------------------ */
+
+export type P1Notify = [
+  Assert<
+    Equals<
+      NotifyTarget,
+      | { audience: "user"; userId: string; storeId?: string | null }
+      | { audience: "store"; storeId: string }
+      | { audience: "store_role"; storeId: string; roles: readonly StoreRole[] }
+      | { audience: "platform_staff"; minRole?: PlatformRole }
+    >
+  >,
+  Assert<Equals<NotifyOpts, { link?: string; severity?: "info" | "success" | "warn" | "danger"; dedupeKey?: string; text?: string; expiresInDays?: number; batch?: { windowMin: number } }>>,
+  Assert<Equals<typeof notifyMod.notify, <K extends NotificationKind>(target: NotifyTarget, kind: K, vars: NotificationVars<K>, opts?: NotifyOpts) => Promise<{ id: number } | { deduped: true }>>>,
+  // the read API (PLA-§18.1, PLA Q.15 (a)): P2's notification centre and bell build against it
+  Assert<Equals<Reader, { userId: string; storeId: string | null; role: StoreRole | null; platformRole: PlatformRole | "none" }>>,
+  Assert<
+    Equals<NotificationItem, { id: number; kind: NotificationKind; group: NotificationGroup; severity: string; title: string; body: string | null; link: string | null; createdAt: string; read: boolean }>
+  >,
+  Assert<
+    Equals<typeof notifyMod.listNotifications, (reader: Reader, opts: { beforeId?: number; limit?: number; group?: NotificationGroup; unreadOnly?: boolean }) => Promise<NotificationItem[]>>
+  >,
+  Assert<Equals<typeof notifyMod.unreadCount, (reader: Reader) => Promise<number>>>,
+  Assert<Equals<typeof notifyMod.markRead, (reader: Reader, ids: readonly number[] | "all") => Promise<void>>>,
+];
+
+export type P1Health = [
+  Assert<Equals<typeof healthSnapshot.markHealthDirty, (storeId: string) => Promise<void>>>,
+  Assert<Equals<typeof healthSnapshot.getStoreHealth, (scope: StoreScope) => Promise<StoreHealthView | null>>>,
+  Assert<Equals<typeof healthSnapshot.snoozeHealthIssue, (ctx: StoreCtx, issueId: string, days: 7) => Promise<void>>>,
+  Assert<Equals<typeof healthSnapshot.requestHealthRecompute, (ctx: StoreCtx) => Promise<{ queuedAt: string }>>>,
+  Assert<
+    Equals<
+      StoreHealthView,
+      {
+        score: number;
+        attention: 0 | 1 | 2 | 3;
+        components: Record<HealthGroup, number>;
+        issues: HealthIssue[];
+        snoozed: Record<string, string>;
+        metrics: HealthMetrics;
+        milestones: Partial<Record<Milestone, string>>;
+        dormant: boolean;
+        computedAt: string;
+        dirty: boolean;
+        flags?: HealthFlag[];
+        staleAfterMin: number;
+      }
+    >
+  >,
+  // every track's rules read one input shape (PLA-§6.3.1); a failing source is null
+  Assert<Equals<HealthRule["collect"], (scope: StoreScope, inputs: HealthInputs) => Promise<HealthIssue | null>>>,
+  Assert<
+    Equals<
+      keyof HealthInputs,
+      "store" | "now" | "slaHours" | "pages" | "brand" | "abuseReports" | "orders" | "integrations" | "sheets" | "ai" | "design" | "usage" | "settings" | "members" | "review" | "zones"
+    >
+  >,
+  Assert<Equals<HealthInputs["ai"], AiUsageSummary | null>>,
+  Assert<Equals<HealthInputs["design"], DesignHealth | null>>,
+  Assert<Equals<HealthInputs["integrations"], IntegrationHealthRow[] | null>>,
+  Assert<Equals<NonNullable<HealthInputs["zones"]>["feeMismatchTop5"], { cityKey: CityKey; pageFeeCents: number; zoneFeeCents: number }[]>>,
+  Assert<Has<"brand_term_live" | "brand_near_live" | "abuse_reports_new", HealthFlag["code"]>>,
+];
+
+export type P1Guards = [
+  Assert<Equals<typeof mask.maskCustomerFields, (f: CustomerFieldsIn) => CustomerFieldsMasked>>,
+  Assert<Equals<typeof mask.maskIfImpersonation, <T extends CustomerFieldsIn>(scope: StoreScope, row: T) => T | (Omit<T, keyof CustomerFieldsIn> & CustomerFieldsMasked)>>,
+  Assert<Equals<typeof mask.maskPhone, (e164: string) => Masked>>,
+  Assert<Equals<keyof CustomerFieldsIn, "name" | "phone" | "address" | "city" | "landmark" | "note">>,
+  Assert<Equals<typeof brandCheck.checkBrandTerms, (kind: BrandField, value: string) => Promise<"ok" | "near" | "exact">>>,
+  Assert<Has<"store_name" | "legal_name" | "whatsapp_name" | "brand_name" | "handle" | "page_name" | "seo_title" | "policy_text", BrandField>>,
+  Assert<Equals<typeof abuse.recordAbuseReport, (input: AbuseReportInput) => Promise<void>>>,
+  Assert<Equals<AbuseReportInput["reason"], "phishing" | "scam" | "counterfeit" | "prohibited" | "impersonation" | "other">>,
+];
+
+/* ------------------------------------------------------------------ */
+/* P2 SHELL (platform.md + design.md UX)                               */
+/* ------------------------------------------------------------------ */
+
+export type P2Shell = [
+  // the R1.0 rename (T1) honours the conversion's one free rename (ENGC-30); P2 owns the rename in R1
+  Assert<Equals<typeof handles.renameHandle, (ctx: StoreCtx, next: string) => Promise<void>>>,
+  Assert<Equals<typeof handles.checkHandleAvailable, (value: string) => Promise<"available" | "unavailable">>>,
+  Assert<
+    Equals<
+      StorePulse,
+      {
+        v: 1;
+        at: string;
+        build: string;
+        unread: number;
+        store: { status: StoreStatus; statusReason: string | null; review: "none" | "pending" | "submitted" | "needs_info" | "approved" | "rejected" };
+        kill: KillKey[];
+        impersonation: { endsAt: string } | null;
+        reaccept: boolean;
+        health: { score: number; attention: 0 | 1 | 2 | 3; computedAt: string } | null;
+        jobs: { running: number; done: string[] };
+        counts: Record<string, number>;
+      }
+    >
+  >,
+  Assert<Equals<PulseContributor, { id: string; contribute(scope: StoreScope, viewer: { userId: string; role: string }): Promise<Record<string, number>> }>>,
+  // the frozen `jobs` field is produced by P7's stub
+  Assert<Equals<StorePulse["jobs"], Awaited<ReturnType<typeof aiPulse.aiJobsForPulse>>>>,
+];
+
+/* ------------------------------------------------------------------ */
+/* P6 DESIGN (design.md); the measurement shapes are the maintainer's  */
+/* ------------------------------------------------------------------ */
+
+export type P6Measurement = [
+  Assert<Equals<FoldItem, "image" | "price" | "cta" | "cod">>,
+  Assert<Equals<FoldReport, { family: string; ok: boolean; items: Partial<Record<FoldItem, number>>; limit: 844 }>>,
+  Assert<
+    Equals<
+      HeightReport,
+      {
+        v: 1;
+        viewport: 390;
+        sections: { id: string; type: string; variant: string; top: number; height: number }[];
+        total: number;
+        screens: number;
+        formTop: number | null;
+        formHeight: number | null;
+        fold: FoldReport;
+        inFlow: number;
+        stub?: true;
+      }
+    >
+  >,
+  Assert<Equals<VariantFeaturesResolved["family"], "split" | "grid" | "list" | "statement" | "ledger" | "table" | "media">>,
+  Assert<Equals<VariantFeaturesResolved["fixed"], "bar" | "float" | null>>,
+  Assert<Equals<VariantFeaturesResolved["h"], number | { base: number; fixed: true; per?: Partial<Record<"offerRow" | "optionGroup" | "bump", number>> } | undefined>>,
+  Assert<
+    Equals<
+      keyof VariantFeaturesResolved,
+      | "glass"
+      | "aurora"
+      | "centered"
+      | "equalCards"
+      | "iconHeads"
+      | "bento"
+      | "scroller"
+      | "signature"
+      | "details"
+      | "ghostWord"
+      | "ring"
+      | "overlayChips"
+      | "dots"
+      | "numberedEyebrow"
+      | "animatesLayout"
+      | "family"
+      | "ctas"
+      | "cardGrid"
+      | "picker"
+      | "fixed"
+      | "fixedPx"
+      | "revealNodes"
+      | "slots"
+      | "fold"
+      | "openers"
+      | "textRuns"
+      | "h"
+    >
+  >,
+  // P6's types.ts re-exports the maintainer's shapes (the same types, never copies)
+  Assert<Equals<designTypes.HeightReport, HeightReport>>,
+  Assert<Equals<designTypes.FoldReport, FoldReport>>,
+  Assert<Equals<designTypes.VariantFeaturesResolved, VariantFeaturesResolved>>,
+  Assert<
+    Equals<
+      typeof heights.estimateHeights,
+      (doc: PageDoc, opts: { look: ThemeLook | null; locale: Locale; features: (type: string, variant: string, data: unknown) => VariantFeaturesResolved }) => HeightReport
+    >
+  >,
+  Assert<Equals<typeof heights.HEIGHT_MODEL_VERSION, number>>,
+  Assert<Equals<typeof features.variantFeatures, (type: string, variant: string, data: unknown) => VariantFeaturesResolved>>,
+  Assert<Equals<typeof photoFacts.estimateAlpha, (bitmap: ImageBitmap) => { hasCutout: "estimated"; bbox: AlphaBBox } | null>>,
+];
+
+export type P6Genome = [
+  Assert<Equals<BoldGene, "G1" | "G2" | "G4" | "G9" | "G18" | "G23" | "G28">>,
+  Assert<Equals<typeof solve.sampleGenome, (input: SampleInput, opts?: SampleOpts) => DesignGenome>>,
+  // rev 4 (DES N9): the pin is a sibling of the hints, ≤ 1 bold gene
+  Assert<Equals<keyof SampleOpts, "hints" | "pins" | "priors" | "locks">>,
+  Assert<Equals<SampleOpts["pins"], Partial<Record<BoldGene, string>> | undefined>>,
+  Assert<Equals<SampleOpts["hints"], GeneHints | undefined>>,
+  Assert<Equals<GeneHints, Partial<Record<BoldGene | "G10" | "G16" | "G20", { value: string; weight: 1 | 2 | 3 }[]>>>>,
+  Assert<Equals<HintIntake, { accepted: GeneKey[]; pinned: GeneKey[]; dropped: { gene: string; value: string; why: "vocab" | "hard_rule" | "locked" | "photo" | "pin" | "second_pin" }[] }>>,
+  Assert<Equals<typeof hints.validateHints, (raw: unknown) => { hints: GeneHints; pins: SampleOpts["pins"]; intake: HintIntake }>>,
+  Assert<
+    Equals<keyof SampleInput, "archetype" | "brandSeed" | "inputHash" | "directionIndex" | "attempt" | "mood" | "locale" | "market" | "photos" | "niche" | "brand" | "ranked" | "shares" | "priorsV">
+  >,
+  Assert<Equals<SampleInput["photos"], PhotoFacts>>,
+  Assert<Equals<SampleInput["shares"], NicheShares | null>>,
+  Assert<Equals<keyof DesignGenome, "v" | "seed" | "priorsV" | "brand" | "page" | "sections" | "why" | "hints">>,
+  Assert<Equals<typeof derive.genomeOf, (doc: PageDoc, opts?: { photos?: PhotoFacts }) => DesignGenome>>,
+  Assert<Equals<typeof cliche.clicheScore, (text: string, locale: Locale) => { score: number; hits: ClicheHit[] }>>,
+  Assert<Equals<ClicheHit, { p: string; w: 1 | 2 | 3; k: "word" | "phrase" | "frame"; at: number }>>,
+  Assert<Equals<typeof distance.genomeDistance, (a: DistanceView, b: DistanceView, scope?: "full" | "page" | "brand") => number>>,
+  Assert<Equals<keyof DistanceView, "v" | "kind" | "locale" | "cat" | "accent" | "pop" | "num" | "hero" | "seq" | "tags" | "openers" | "crops">>,
+  Assert<
+    Equals<GeneVocabEntry, { level: "brand" | "page" | "section"; kind: "enum" | "range" | "struct"; bold: boolean; values?: readonly string[]; range?: readonly [min: number, max: number, step: number] }>
+  >,
+  // P6 completes the vocabulary at its merge (G4, ranges, structs); a full Record still satisfies this
+  Assert<Has<typeof vocab.GENE_VOCAB, Readonly<Partial<Record<GeneKey, GeneVocabEntry>>>>>,
+];
+
+export type P6Novelty = [
+  Assert<Equals<designTypes.Band, "ok" | "close" | "too_close">>,
+  Assert<Equals<NoveltyContext, "wizard" | "remix" | "studio" | "publish" | "theme">>,
+  Assert<Equals<NoveltyRequest, { candidates: { key: string; view: DistanceView }[]; niche: string; pageId?: string | null }>>,
+  Assert<Equals<NoveltyVerdict, { key: string; platform: designTypes.Band; niche: designTypes.Band; own: designTypes.Band | "first"; clone: boolean }>>,
+  Assert<Equals<typeof novelty.checkNovelty, (scope: StoreScope, req: NoveltyRequest, ctx: NoveltyContext) => Promise<NoveltyVerdict[]>>>,
+  Assert<Equals<typeof novelty.nicheShares, (niche: string) => NicheShares>>,
+  Assert<
+    Equals<keyof NicheShares, "n" | "grammar" | "strategy" | "heroFamily" | "heroArrangement" | "displayFamily" | "arDisplay" | "arDisplayClass" | "motion" | "ghost" | "seq4" | "tells">
+  >,
+  Assert<
+    Equals<typeof headlines.checkHeadlineNovelty, (scope: StoreScope, niche: string, texts: readonly string[]) => Promise<{ verdict: "ok" | "close"; band: "low" | "mid" | "high" | null }[]>>
+  >,
+  Assert<
+    Equals<
+      typeof designActions.checkHeadlinesAction,
+      (niche: string, texts: readonly string[]) => Promise<ActionResult<{ verdict: "ok" | "close"; band: "low" | "mid" | "high" | null }[]>>
+    >
+  >,
+  Assert<Equals<typeof designHealthMod.designHealth, (scope: StoreScope) => Promise<DesignHealth>>>,
+  Assert<
+    Equals<DesignHealth, { pages: { pageId: string; q: number | null; slop: number | null; hasLook: boolean; genomeId: string | null }[]; closePairs: [string, string][] }>
+  >,
+];
+
+export type P6Director = [
+  Assert<
+    Equals<
+      GenomeCard,
+      {
+        id: string;
+        slot: "best_fit" | "contrast" | "explore";
+        bold: Record<BoldGene, string>;
+        derived: Record<string, string | number>;
+        q: number;
+        slop: number;
+        composition: number;
+        gateFails: GateId[];
+        distance: { own: designTypes.Band | "first"; niche: designTypes.Band; platform: designTypes.Band };
+        explanation: string[];
+      }
+    >
+  >,
+  Assert<Equals<typeof AI_REPAIR_OPS, readonly ["swapVariant", "changeGene", "rewriteLine", "dropKicker", "setOpener", "setAlign", "moveSection", "trimCopy", "swapHeroFamily"]>>,
+  Assert<Has<(typeof AI_REPAIR_OPS)[number], RepairOp["op"]>>,
+  Assert<Equals<Extract<RepairOp, { op: "changeGene" }>, { op: "changeGene"; gene: GeneKey; to: string }>>,
+  // the Director task names are ai's task ids
+  Assert<Equals<DirectorTask, "design.plan" | "design.critique" | "design.verify">>,
+  Assert<Has<DirectorTask, AiTaskId>>,
+  Assert<Equals<typeof digest.renderDigest, (doc: PageDoc, theme: BuiltTheme, genome: DesignGenome, report: GateReport) => RenderDigest>>,
+  Assert<Equals<keyof RenderDigest, "v" | "sections" | "hero" | "counts" | "type" | "colour" | "gates" | "heights" | "honesty" | "stub">>,
+  Assert<Equals<RenderDigest["gates"], { hard: GateId[]; soft: GateId[]; slop: number; q: number }>>,
+  Assert<Equals<RenderDigest["hero"]["fold"], FoldReport>>,
+  // the reveal component P2 mounts (CRIT2-6): props exactly as §K.2
+  Assert<Equals<revealMod.RevealDirection, { id: string; doc: PageDoc; card: GenomeCard; label: string }>>,
+  Assert<
+    Equals<
+      revealMod.RevealFoldsProps,
+      {
+        directions: readonly [revealMod.RevealDirection, revealMod.RevealDirection, revealMod.RevealDirection];
+        state: "analysing" | "revealed" | "error";
+        dnaSlot?: (directionId: string) => ReactNode;
+        actionSlot?: ReactNode;
+        onUse(directionId: string): void;
+        onRetry?(): void;
+      }
+    >
+  >,
+  Assert<Equals<Parameters<typeof revealMod.RevealFolds>, [revealMod.RevealFoldsProps]>>,
+];
+
+/* ------------------------------------------------------------------ */
+/* P7 AI (ai.md)                                                       */
+/* ------------------------------------------------------------------ */
+
+export type P7Router = [
+  Assert<
+    Has<
+      "classify" | "removeBackground" | "analyze" | "copy.page" | "copy.hero" | "copy.field" | "design.plan" | "design.critique" | "injection.screen" | "ad.brief" | "callcenter.script" | "eval.judge",
+      AiTaskId
+    >
+  >,
+  Assert<Equals<AiProviderId, "server" | "local" | "library">>,
+  Assert<Equals<AiTaskInput<"injection.screen">, { text: string; source: "import" | "sheet" | "note" }>>,
+  Assert<Equals<AiTaskOutput<"injection.screen">, { suspicious: boolean; reason: string }>>,
+  Assert<Equals<AiOutcome<string>, AiResult<string> | AiFailure>>,
+  Assert<
+    Equals<
+      keyof AiResult<unknown>,
+      "ok" | "value" | "provider" | "class" | "model" | "effort" | "promptVersion" | "rubricVersion" | "runId" | "jobId" | "usage" | "ms" | "ttftMs" | "rejected" | "flags" | "notes"
+    >
+  >,
+  Assert<Equals<AiFailure, { ok: false; code: AiFailCode; retryable: boolean; provider: AiProviderId; runId: string | null; retryAfterSec?: number }>>,
+  Assert<Has<"disabled" | "flag_off" | "state" | "quota_platform_pending" | "quota_director" | "pii_blocked" | "input_invalid" | "refused" | "timeout" | "provider_auth" | "oom" | "unknown", AiFailCode>>,
+  Assert<Equals<Omit<aiRouter.RunAiServerOpts, keyof AiRunOpts>, { actor: Actor; ladder?: "server-then-library" | "server-only" }>>,
+  Assert<Equals<typeof aiRouter.runAi, <T extends AiTaskId>(scope: StoreScope, task: T, input: AiTaskInput<T>, opts: aiRouter.RunAiServerOpts) => Promise<AiOutcome<AiTaskOutput<T>>>>>,
+  Assert<
+    Equals<
+      typeof aiRouter.queueAi,
+      <T extends AiTaskId>(scope: StoreScope | "platform", task: T, input: AiTaskInput<T>, ref: { kind: string; id: string }) => Promise<{ itemId: string; deduped: boolean }>
+    >
+  >,
+  Assert<
+    Equals<
+      typeof aiRouter.registerBatchResultHandler,
+      <T extends AiTaskId>(task: T, h: (scope: StoreScope | "platform", ref: { kind: string; id: string }, out: AiOutcome<AiTaskOutput<T>>) => Promise<void>) => void
+    >
+  >,
+  Assert<Equals<typeof aiRouter.aiPolicyFor, (ctx: StoreCtx) => Promise<AiPolicy>>>,
+  Assert<Equals<keyof AiPolicy, "mode" | "cloud" | "local" | "autoPrefersCloud" | "live" | "transport" | "promptVersions" | "voiceLocal" | "workerName">>,
+  Assert<
+    Equals<
+      keyof AiPolicy["cloud"],
+      "available" | "block" | "creditsLeft" | "dayLeft" | "director" | "directorBlock" | "directorPassCredits" | "directorPassesLeft" | "deepPass" | "deepPassesLeft" | "deepTransport"
+    >
+  >,
+  Assert<Equals<AiPolicy["cloud"]["block"], CloudBlock | null>>,
+  Assert<Equals<AiPolicy["live"], AiTaskId[]>>,
+];
+
+export type P7Jobs = [
+  Assert<Equals<AiJobKind, "director_deep" | "store_blueprint" | "logo_system" | "health_report">>,
+  Assert<Equals<AiJobInput<"director_deep">, { kind: "director_deep"; task: AiTaskId; input: unknown; instant?: unknown }>>,
+  Assert<
+    Equals<typeof aiEnqueue.enqueueAiJob, <K extends AiJobKind>(ctx: StoreCtx, job: AiJobInput<K>) => Promise<{ ok: true; jobId: string; deduped: boolean } | { ok: false; code: AiFailCode }>>
+  >,
+  Assert<Equals<typeof aiPulse.aiJobsForPulse, (scope: StoreScope, viewer: { userId: string }, since: Date) => Promise<{ running: number; done: string[] }>>>,
+];
+
+export type P7Reads = [
+  Assert<Equals<typeof aiSummary.aiUsageForStore, (scope: StoreScope, month: string) => Promise<AiUsageSummary>>>,
+  Assert<Equals<AiUsageSummary, { month: string; creditsUsed: number; creditsLimit: number | null; costMicros: number }>>,
+  Assert<Equals<typeof aiSummary.aiStoreSummary, (ctx: PlatformCtx, storeId: string) => Promise<AiStoreSummary>>>,
+  Assert<Equals<typeof aiSummary.aiHealth, () => Promise<AiHealth>>>,
+  // P8's getHealth carries it (null while unavailable)
+  Assert<Equals<PlatformHealth["ai"], AiHealth | null>>,
+  Assert<Equals<typeof aiFeedback.linkAiRuns, (scope: WriteScope, runIds: readonly string[], ref: { kind: string; id: string }) => Promise<void>>>,
+  Assert<Equals<typeof aiFeedback.recordPublishFeedback, (scope: WriteScope, pageId: string, versionId: string) => Promise<void>>>,
+];
+
+/* ------------------------------------------------------------------ */
+/* Maintainer seams frozen at P0 (§M.2 budget gate, §C.6 report link)  */
+/* ------------------------------------------------------------------ */
+
+export type MaintainerP0 = [
+  Assert<Equals<PageKind, "landing" | "home" | "product" | "collection" | "page" | "policy" | "search" | "cart" | "checkout" | "not_found">>,
+  Assert<
+    Equals<
+      BudgetProfile,
+      {
+        sections: { soft: number; hard: number };
+        heightPx: { soft: number; hard: number };
+        formTopPx: { soft: number; hard: number | null } | null;
+        ctas: { soft: number; hard: number };
+        glass: { soft: number; hard: number };
+        reveals: { soft: number; hard: number };
+        photoReuse: { soft: number; hard: number };
+        htmlGz: { soft: number; hard: number };
+        fold: "hero-family" | "kind-layout" | "none";
+      }
+    >
+  >,
+  Assert<Equals<typeof budgetMod.registerBudgetProfile, (kind: Exclude<PageKind, "landing">, profile: BudgetProfile) => void>>,
+  Assert<Equals<typeof budgetMod.LANDING_PROFILE, BudgetProfile>>,
+  Assert<Equals<typeof budgetLimits.HEIGHT_BAND, 0.8>>,
+  Assert<Equals<typeof budgetLimits.FOLD_BAND, 0.9>>,
+  Assert<Equals<typeof budgetLimits.heightModelIsStub, () => boolean>>,
+  Assert<Equals<PrePublishCtx["scope"], WriteScope>>,
+  Assert<Equals<typeof urlsMod.reportUrl, (store: StoreAddress, pagePath?: string) => string>>,
+  Assert<Equals<typeof urlsMod.consoleHref, (path?: `/${string}`) => string>>,
+  Assert<Equals<PageLinks["report"], string | undefined>>,
+  Assert<Has<"footer.report", UiKey>>,
 ];

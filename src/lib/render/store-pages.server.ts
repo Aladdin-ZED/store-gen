@@ -24,7 +24,7 @@ import { storePageLinks, type LegalKind } from "@/landing/context";
 import { cacheGet, cacheSet } from "./cache.server";
 import { renderLegalHtml, type RenderedHtml } from "./core";
 import { isStoreSlug } from "./publish.server";
-import { loadStoreRenderContext, storeAssetRows, storeResolver } from "./store-context.server";
+import { loadStoreRenderContext, storeAssetRows, storeReportUrl, storeResolver } from "./store-context.server";
 
 export interface PublishedPage {
   pageId: string;
@@ -209,7 +209,7 @@ export async function getStoreLegalDocument(scope: StoreScope, store: StoreRow, 
         mode: "live",
         assets: storeResolver(rc.address, rows),
         store: rc.info,
-        links: storePageLinks(rc.base, page.slug),
+        links: storePageLinks(rc.base, page.slug, storeReportUrl(rc, `/policies/${kind}`)),
         updatedAt,
         mediaOrigins: rc.mediaOrigins,
       });

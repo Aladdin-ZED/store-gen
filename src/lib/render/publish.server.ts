@@ -41,7 +41,7 @@ import { buildTheme } from "@/lib/theme";
 import { invalidateStoreRender } from "./cache.server";
 import { renderLandingHtml, renderThankYouHtml, type RenderIssue } from "./core";
 import { runPrePublishChecks, runPublishListeners, type AssetMeta, type PrePublishCode, type PrePublishCtx } from "./prepublish";
-import { loadStoreRenderContext, storeAssetResolver, storeRenderOptions } from "./store-context.server";
+import { loadStoreRenderContext, storeAssetResolver, storeRenderOptions, thankYouLinks } from "./store-context.server";
 
 export { invalidateStoreRender } from "./cache.server";
 export { PUBLIC_ENDPOINTS } from "./store-context.server";
@@ -408,7 +408,7 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
   const versionId = newId();
   const landing = await renderLandingHtml(doc, { ...renderOpts, ver: versionId });
   if (landing.blocking.length) throw blockingError(landing.blocking);
-  const thanks = await renderThankYouHtml(doc, renderOpts);
+  const thanks = await renderThankYouHtml(doc, { ...renderOpts, links: thankYouLinks(rc, slug) });
   const runtimeV = landing.runtimeV ?? 1;
 
   // §M.1: every registered gate runs before the version row; a refusal names its items

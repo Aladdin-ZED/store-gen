@@ -15,7 +15,7 @@ import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { validateDoc } from "@/lib/page/validate";
 import { renderLandingHtml, renderThankYouHtml, type RenderedHtml } from "./core";
 import type { PublishedPage } from "./store-pages.server";
-import { loadStoreRenderContext, PUBLIC_ENDPOINTS, storeAssetResolver, storeDocumentUrls, storeRenderOptions } from "./store-context.server";
+import { loadStoreRenderContext, PUBLIC_ENDPOINTS, storeAssetResolver, storeDocumentUrls, storeRenderOptions, thankYouLinks } from "./store-context.server";
 
 export { TEST_PARAM };
 
@@ -40,5 +40,5 @@ export async function renderTestDocument(scope: StoreScope, store: StoreRow, pag
     },
   };
   const opts = { ...base, urls, ver: page.versionId, pixels: false, addons: { ...rc.addons, banner: "test" as const } };
-  return kind === "landing" ? renderLandingHtml(doc, opts) : renderThankYouHtml(doc, opts);
+  return kind === "landing" ? renderLandingHtml(doc, opts) : renderThankYouHtml(doc, { ...opts, links: thankYouLinks(rc, page.slug) });
 }

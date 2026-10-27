@@ -22,7 +22,7 @@ import type { PlatformRole, StoreRole } from "@/lib/auth/permissions";
 import { db } from "@/lib/db/client";
 import { notifications } from "@/lib/db/schema";
 import { systemCtx, systemScope } from "@/lib/jobs/scope";
-import { notificationKind, safeNotifyLink, type NotificationKind, type NotificationSeverity, type NotificationVars } from "@/lib/notify/registry";
+import { notificationKind, safeNotifyLink, type NotificationGroup, type NotificationKind, type NotificationSeverity, type NotificationVars } from "@/lib/notify/registry";
 import { errorSummary } from "@/lib/orders/log";
 import { storeValues } from "@/lib/tenancy/sql";
 import type { WriteScope } from "@/lib/tenancy/types";
@@ -154,4 +154,49 @@ export async function notify<K extends NotificationKind>(target: NotifyTarget, k
     console.error(`[notify] "${String(kind).slice(0, 40)}" not stored:`, errorSummary(err));
     return { deduped: true };
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Read API (PLA-§18.1, PLA Q.15 (a)): frozen at P0, P1's bodies       */
+/* ------------------------------------------------------------------ */
+
+/** Who reads: a member of one store (role) or staff (platformRole); the reads filter on these. */
+export interface Reader {
+  userId: string;
+  storeId: string | null;
+  role: StoreRole | null;
+  platformRole: PlatformRole | "none";
+}
+
+/** One row as the centre shows it: title and body rendered in the reader's locale. */
+export interface NotificationItem {
+  id: number;
+  kind: NotificationKind;
+  group: NotificationGroup;
+  severity: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  createdAt: string;
+  read: boolean;
+}
+
+/** Newest first; P0 stub (P1 writes the reads: rows exist since R1.0, so no empty answer is pretended). */
+export async function listNotifications(reader: Reader, opts: { beforeId?: number; limit?: number; group?: NotificationGroup; unreadOnly?: boolean }): Promise<NotificationItem[]> {
+  void reader;
+  void opts;
+  throw new Error("not implemented: P1 listNotifications");
+}
+
+/** Cached 5 s per (user, store); P0 stub. */
+export async function unreadCount(reader: Reader): Promise<number> {
+  void reader;
+  throw new Error("not implemented: P1 unreadCount");
+}
+
+/** "Mark all read" inserts one read row per unread id shown (≤ 200); P0 stub. */
+export async function markRead(reader: Reader, ids: readonly number[] | "all"): Promise<void> {
+  void reader;
+  void ids;
+  throw new Error("not implemented: P1 markRead");
 }

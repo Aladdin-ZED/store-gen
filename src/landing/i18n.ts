@@ -100,6 +100,7 @@ const fr = {
   "footer.terms": "Conditions de vente",
   "footer.shipping": "Livraison & retours",
   "footer.contact": "Contact",
+  "footer.report": "Signaler cette boutique", // platform's shell.report.link (D76, CRIT15): one wording on every surface
   "thanks.title": "Merci {name}, c'est noté !",
   "thanks.message":
     "Votre commande est bien reçue. Un conseiller vous appelle sous 24h pour confirmer l'adresse et l'heure de livraison. Gardez votre téléphone à portée de main.",
@@ -206,6 +207,7 @@ const ar: Dict = {
   "footer.terms": "شروط البيع",
   "footer.shipping": "التوصيل والإرجاع",
   "footer.contact": "تواصل معنا",
+  "footer.report": "الإبلاغ عن هذا المتجر",
   "thanks.title": "شكرا {name}، توصلنا بالطلب!",
   "thanks.message":
     "الطلب ديالك وصل. غادي يعيط ليك واحد من الفريق ديالنا خلال 24 ساعة باش يأكد العنوان ووقت التوصيل. خلي التيليفون قريب منك.",
@@ -309,6 +311,7 @@ const en: Dict = {
   "footer.terms": "Terms of sale",
   "footer.shipping": "Shipping & returns",
   "footer.contact": "Contact",
+  "footer.report": "Report this store",
   "thanks.title": "Thank you {name}, it's on its way!",
   "thanks.message":
     "We've received your order. Someone from our team will call you within 24 hours to confirm your address and delivery time. Keep your phone close.",

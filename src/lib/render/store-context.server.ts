@@ -25,9 +25,10 @@ import type { PageDoc } from "@/lib/page/schema";
 import { getPlatformSetting, getStoreSettings } from "@/lib/settings";
 import { inStore } from "@/lib/tenancy/sql";
 import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
-import { addressMode, mediaUrl, platformOrigin, storeBase, storeOrigin, storePath, type StoreAddress } from "@/lib/urls";
+import { addressMode, mediaUrl, platformOrigin, reportUrl, storeBase, storeOrigin, storePath, type StoreAddress } from "@/lib/urls";
 import { noAddons, type RenderAddons } from "@/landing/addons/types";
 import { collectAssetIds, rowAssetResolver, storePageLinks, type AssetResolver, type AssetRowLike, type StoreInfo } from "@/landing/context";
+import type { PageLinks } from "@/landing/types";
 import type { DocumentUrls } from "@/landing/document";
 import { originOf } from "./csp";
 
@@ -148,6 +149,21 @@ export function storeDocumentUrls(rc: Pick<StoreRenderContext, "address">, slug:
   return { landing: storePath(rc.address, `/${slug}`), thankYou: storePath(rc.address, `/${slug}/merci`), endpoints };
 }
 
+/**
+ * The "Report this store" URL of a served store document (docs/STORE-SAAS.md D76, §C.6, CRIT15): `reportUrl(store,
+ * path)` with the document's own path, never its query: the landing "<base>/<slug>", the thank-you
+ * "<base>/<slug>/merci", a legal page "<base>/policies/<kind>". Live, test and preview renders carry it as
+ * `links.report`; exports never call this, so their documents carry no link.
+ */
+export function storeReportUrl(rc: Pick<StoreRenderContext, "address">, path: `/${string}`): string {
+  return reportUrl(rc.address, storePath(rc.address, path));
+}
+
+/** The thank-you page's links: the landing page's, with its own report path (the thank-you path without `?o=`). */
+export function thankYouLinks(rc: Pick<StoreRenderContext, "address" | "base">, slug: string): PageLinks {
+  return storePageLinks(rc.base, slug, storeReportUrl(rc, `/${slug}/merci`));
+}
+
 /** The renderer options of a live store document (the caller adds `ver`, and the test-render overrides). */
 export function storeRenderOptions(rc: StoreRenderContext, input: { slug: string; pageKey: string; assets: AssetResolver }) {
   return {
@@ -156,7 +172,7 @@ export function storeRenderOptions(rc: StoreRenderContext, input: { slug: string
     pageKey: input.pageKey,
     store: rc.info,
     urls: storeDocumentUrls(rc, input.slug),
-    links: storePageLinks(rc.base, input.slug),
+    links: storePageLinks(rc.base, input.slug, storeReportUrl(rc, `/${input.slug}`)),
     origin: rc.origin,
     turnstileSiteKey: rc.turnstileSiteKey,
     mediaOrigins: rc.mediaOrigins,

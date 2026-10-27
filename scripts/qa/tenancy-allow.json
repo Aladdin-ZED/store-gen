@@ -24,6 +24,8 @@
     { "file": "src/lib/tenancy/context.ts", "symbol": "__sgIdentity", "reason": "the AsyncLocalStorage of the test identity seam (§E.4): one value per async context, honoured only with SG_TEST_CONTEXT=1 outside production" },
     { "file": "src/lib/render/prepublish.ts", "symbol": "__sgPrePublish", "reason": "the pre-publish check and listener registry (§M.1); functions registered at import, no data" },
     { "file": "src/lib/jobs/outbox.ts", "symbol": "__sgOutboxHandlers", "reason": "the outbox handler registry by kind (§H.1, R1 P0); handlers registered at import, no data" },
+    { "file": "src/lib/render/prepublish/budget.ts", "symbol": "__sgBudgetProfiles", "reason": "the budget gate's per-kind threshold profiles (§M.2, D66, R1 P0); numbers registered at import, no store data" },
+    { "file": "src/lib/ai/router/server.ts", "symbol": "__sgAiBatchHandlers", "reason": "the AI batch result handler registry by task (AI-§B.8, R1 P0); handlers registered at import, no data" },
     { "file": "src/lib/markets/info.ts", "symbol": "symbolGap", "reason": "Intl currency-symbol spacing per currency and locale; platform data, no store data" },
     { "file": "src/lib/markets/info.ts", "symbol": "optionsCache", "reason": "the city <select> options per market code and locale, built from the static market table; no store data" },
     { "file": "src/lib/markets/info.ts", "symbol": "indexCache", "reason": "the city lookup index per market code, built from the static market table; no store data" },

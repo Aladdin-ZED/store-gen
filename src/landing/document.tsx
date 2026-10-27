@@ -18,6 +18,10 @@
  * (`banner: "test"`, D54); `purchaseInBrowser: false` leaves the pixels out of the thank-you page (the server sends
  * Purchase at the store's trigger, OPE Q.6) and `pixels: false` out of both pages (test renders). A document
  * rendered without them is byte-identical to one rendered before the hook existed.
+ *
+ * "Report this store" (D76, CRIT15): a landing document whose `ctx.links.report` is set (live, test, preview) gets
+ * the Shell's `<p class="lp-report">` row until P6's footer draws the link (`reportRow`); exports never set it, so
+ * an exported document is byte-identical to one rendered before the link existed.
  */
 import type { ReactElement, ReactNode } from "react";
 import type { AddonChunk, RenderAddons } from "./addons/types";
@@ -28,6 +32,7 @@ import { sectionChunkCss, sectionVariants } from "./generated/chunks";
 import { LegalBody, legalLang, legalTitle, type LegalKind } from "./legal";
 import { renderPageBody, usedSectionTypes, type PageBodyOptions } from "./page";
 import { brandName, isPlaceholderStoreName, plainText } from "./primitives";
+import { FOOTER_RENDERS_REPORT } from "./sections/footer/report";
 import { ThankYouBody } from "./thankyou/ThankYou";
 import type { RenderMode } from "./types";
 import { offersMath } from "@/lib/page/pricing";
@@ -463,6 +468,32 @@ function Shell({ ctx, theme, page, lang, qa, head, css, config, jsonLd, addons, 
   );
 }
 
+/** The Shell's "Report this store" row: muted, 12 px, centred; it clears the sticky bar when the page has one. */
+const REPORT_CSS =
+  ".lp-report{margin:0;padding:1.5rem 1rem;text-align:center;font:400 .75rem/1.5 var(--lp-font-body,system-ui,sans-serif);color:var(--lp-ink-soft)}" +
+  ".lp-report a{color:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:.2em}" +
+  "html:has(.lp-sticky) .lp-report{padding-block-end:calc(5.5rem + env(safe-area-inset-bottom,0px))}";
+
+/**
+ * "Report this store" (docs/STORE-SAAS.md D76, §C.6, §K.2 P0 maintainer CCR, CRIT15; landing.md LAN-§3.9): a live,
+ * test or preview landing document carries the link exactly once, an export never (`ctx.links.report` is unset
+ * there). P6's footer draws it once `FOOTER_RENDERS_REPORT` is true (src/landing/sections/footer/report.ts); until
+ * then, and always for a document whose footer is hidden or absent, this row does, after the last in-flow section
+ * and before the floating layers. The href is used as given: the server built it with `reportUrl(store, path)`.
+ */
+function reportRow(doc: PageDoc, ctx: LandingRenderContext): ReactElement | null {
+  const href = ctx.links.report;
+  if (!href || ctx.mode === "export") return null;
+  if (FOOTER_RENDERS_REPORT && doc.sections.some((s) => s.type === "footer" && !s.hidden)) return null;
+  return (
+    <p className="lp-report">
+      <a href={href} rel="nofollow">
+        {ctx.t("footer.report")}
+      </a>
+    </p>
+  );
+}
+
 function configFor(props: DocumentProps, page: "landing" | "thanks") {
   const { doc, ctx, urls } = props;
   const cfg = buildRuntimeConfig(doc, ctx, {
@@ -487,7 +518,8 @@ export function LandingDocument(props: DocumentProps): ReactElement {
   const theme = buildTheme(doc.theme, doc.locale);
   const meta = seoMeta(doc, ctx, urls, origin);
   const icon = faviconHref(ctx, theme);
-  const css = documentCss(ctx, theme, [...sectionChunks(doc, props.rendered), ...addonCss(props.addons, "landing")], qa);
+  const report = reportRow(doc, ctx);
+  const css = documentCss(ctx, theme, [...sectionChunks(doc, props.rendered), ...addonCss(props.addons, "landing"), ...(report ? [REPORT_CSS] : [])], qa);
   const head = (
     <>
       <title>{meta.title}</title>
@@ -534,7 +566,7 @@ export function LandingDocument(props: DocumentProps): ReactElement {
       jsonLd={productJsonLd(doc, ctx, meta, origin)}
       addons={props.addons}
     >
-      {renderPageBody(doc, ctx, props.body)}
+      {renderPageBody(doc, ctx, report ? { ...props.body, after: report } : props.body)}
     </Shell>
   );
 }

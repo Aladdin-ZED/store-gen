@@ -33,6 +33,8 @@ export interface PageBodyOptions {
   guard?: (section: SectionInstance, node: ReactNode) => ReactNode;
   /** called when a section's render() throws; may return a replacement node (preview placeholder) */
   onError?: (section: SectionInstance, error: unknown) => ReactNode | void;
+  /** a row after the last in-flow section and before the floating layers (the Shell's "Report this store" fallback) */
+  after?: ReactNode;
 }
 
 /** DOM ids the document shell or runtime own; a section with such an id gets an "s-" prefix. */
@@ -349,6 +351,7 @@ export function renderPageBody(doc: PageDoc, ctx: RenderContext, opts: PageBodyO
         </main>
       ) : null}
       {bottom}
+      {opts.after ?? null}
       {floating.map((p) => (
         <Fragment key={p.inst.id}>{wrap(p, floatingRoot(p))}</Fragment>
       ))}

@@ -13,9 +13,9 @@ import "server-only";
  * in `warn` mode; exports in `block` mode; previews never.
  *
  * Maintainer-owned (§K.3). The track files `./prepublish/{landing,design}.ts` register at import; their import lines
- * are written here at P0 (`scripts/qa/registries-check.ts` proves no file is left out), and the core's
- * `./prepublish/budget.ts` joins them with its own stub. R2 adds `StorePageDoc` to the doc types and
- * `./prepublish/storefront.ts`.
+ * are written here at P0 (`scripts/qa/registries-check.ts` proves no file is left out), next to the core's budget
+ * gate `./prepublish/budget.ts` (§M.2; its thresholds in `./prepublish/budget-limits.ts`). R2 adds `StorePageDoc` to
+ * the doc types and `./prepublish/storefront.ts`.
  *
  * The import is circular (a track file imports the register functions from here while this module is still being
  * evaluated), so everything a registration touches is a hoisted function declaration: `registry()` included.
@@ -23,7 +23,8 @@ import "server-only";
 import { errorSummary } from "@/lib/orders/log";
 import type { PageDoc } from "@/lib/page/schema";
 import type { BuiltTheme } from "@/lib/theme/types";
-import type { Actor, GateItem, StoreRow, StoreScope } from "@/lib/tenancy/types";
+import type { Actor, GateItem, StoreRow, WriteScope } from "@/lib/tenancy/types";
+import "./prepublish/budget";
 import "./prepublish/design";
 import "./prepublish/landing";
 
@@ -40,7 +41,8 @@ export interface AssetMeta {
 }
 
 export interface PrePublishCtx {
-  scope: StoreScope;
+  /** D71: a publish, a re-render and an export are writes, and the listeners write (genomes, shingles, feedback) */
+  scope: WriteScope;
   store: StoreRow;
   pageId: string;
   doc: PageDoc;

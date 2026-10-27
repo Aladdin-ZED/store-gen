@@ -108,6 +108,12 @@ export interface PageLinks {
   terms: string;
   shipping: string;
   contact: string;
+  /**
+   * "Report this store" (docs/STORE-SAAS.md D76, §C.6; CRIT15): the absolute `reportUrl(store, path)` of the served
+   * document, set for live, test and preview renders, undefined in every export (the page runs on the seller's own
+   * server). Renderers print it as given: P6's footer, the Shell's fallback row, P3's thank-you and legal pages.
+   */
+  report?: string;
 }
 
 export interface MarketInfo {
