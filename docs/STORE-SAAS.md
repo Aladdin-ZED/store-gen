@@ -3075,11 +3075,15 @@ Tick budget: 100 s total inside the 120 s route cap (`maxDuration = 120`, `src/a
 **The tick shares the serving process (rev 3, ENGC-11):** `runTick()` holds the **tick lease** for its whole duration
 (rev 5, CRIT2-18: rev 3's `platformLock("tick")` held one of the two lock-pool connections for ~100 s, and with
 `sheets.push` holding the other the request-path locks of §E.7 had none left; the lease holds no connection: the
-`cron_cursors` row `job = 'tick'`, seeded by 0005, acquired by one compare-and-set `UPDATE cron_cursors SET cursor =
-:tickId, updated_at = now(3) WHERE job = 'tick' AND (cursor = '' OR updated_at < now(3) - INTERVAL 110 SECOND)` with
-`affectedRows === 1`, renewed at every job boundary by `UPDATE … SET updated_at = now(3) WHERE job = 'tick' AND cursor =
-:tickId`, released in `finally` by setting `cursor = ''` under the same predicate; a crashed tick's lease expires after
-110 s, inside the 5-minute cron period), so a manual `curl` plus the cron, or a late hPanel firing, never run two ticks
+`cron_cursors` row `job = 'tick'`, seeded by 0005, acquired by one compare-and-set ``UPDATE cron_cursors SET `cursor` =
+:tickId, updated_at = now(3) WHERE job = 'tick' AND (`cursor` = '' OR updated_at < now(3) - INTERVAL 110 SECOND)`` with
+`affectedRows === 1`, renewed at every job boundary by ``UPDATE … SET updated_at = now(3) WHERE job = 'tick' AND `cursor` =
+:tickId``, released in `finally` by setting `` `cursor` = '' `` under the same predicate; a crashed tick's lease expires after
+110 s, inside the 5-minute cron period; **P0 review G5:** `cursor` (and `profit_alerts.key`) are reserved words in
+MariaDB 10.4 and MySQL 8, so raw SQL quotes them with backticks as `src/lib/jobs/scope.ts` does (unquoted, all three
+statements fail with ER 1064); P8 may also run ``INSERT IGNORE INTO cron_cursors (job, `cursor`, updated_at) VALUES
+('tick', '', UTC_TIMESTAMP(3))`` before the compare-and-set, so a lost seed row cannot turn every tick into
+`{ skipped: true }`), so a manual `curl` plus the cron, or a late hPanel firing, never run two ticks
 that race `cron_cursors` and the `dailyAt` bookkeeping (the second answers `{ skipped: true }`); every job awaits `ctx.yield()` between units; the runner
 samples event-loop lag and, when lag p95 > 100 ms, shortens the budget of the CPU-bound jobs (`renders`, `backup`,
 `exports`) for the rest of the tick; renders are capped by a **per-tick CPU budget of 4 s** (measured with
@@ -3318,7 +3322,12 @@ purge never runs as a cascade or in one request.
   deploy happens** (XAMPP smoke only; the stub rule of §K.2 relies on it and, as a second lock, `prepublish/budget.ts`
   throws at module load in a production build while `estimateHeights` reports `stub: true`, so `npm run build` is red
   until P6 merges). The integration deploy runs 0005 and the same smoke plus the console, signup in invite mode, one
-  order through the call-center queue.
+  order through the call-center queue. **P0 review G9:** live pages are served from the stored `page_versions.html`, so
+  a page published under R1.0 has no "Report this store" row (§K.2 build note item 10) until it is rendered again; after
+  0005 and the boot, the integration deploy re-renders every live page of every store with the `runtime` reason (§H.3:
+  `forEachStore(systemCtx("deploy.rerender"), { states: ["active", "restricted", "pending"], … }, (scope) =>
+  enqueueRenders(scope, "all-live", "runtime", 5))`, drained by the `renders` job over the next ticks) and the smoke
+  then checks one R1.0 page of store #1 for exactly one `lp-report` row.
 - **Domain move**: §C.10; V1 … V11.
 - A failed Hostinger build keeps the previous version live (HANDOFF §4); migrations are forward-only and additive, so
   the previous build keeps working on the migrated schema **except** where 0004 changed constraints the old build
@@ -3778,7 +3787,7 @@ nav are reworked or redesigned; topbar, KPI card, media, builder, export dialog,
 
 ### J.1 `npm test` (offline, no DB, no server; must stay green on every merge)
 
-**Wall time ≤ 3 minutes on the owner's PC (rev 3, ENGP-24).** Every suite below runs a seeded, bounded subset; the
+**Wall time ≤ 4 minutes on the owner's PC (rev 3, ENGP-24: 3 minutes; raised at P0, review G7, from a timed run: the existing chain and the core suites alone measure about 135 s).** Every suite below runs a seeded, bounded subset; the
 full sweeps (`test:design:full` 11 × 3 × 200 genomes + 10,000 choreography expansions, the storefront 1,200-home
 `test:catalog` sweep, landing's 10,000 A/A simulations, the capacity simulation, **`test:ai:slow`** (the 30-store
 niche-novelty corpus and the 1,000-run reward simulations, rev 4) **and, rev 5 (CRIT2-9), `test:ai-eval --offline`**
@@ -3789,18 +3798,19 @@ and their wall-time budgets on the owner's PC:
 
 | Group | R1 budget | Notes |
 |---|---|---|
-| `pretest` asset builds + the existing chain (`package.json:22`: theme, runtime, generator, render, money, conversions, offers, orders) | ≤ 30 s | measured by the harness at C0b; above 30 s the maintainer moves the slowest of those suites' sweeps to `test:slow` |
-| core suites (`test:tenancy-lint` (TS compiler API over `src/**`), `test:ownership`, `test:hosts`, `test:permissions`, `test:tenancy-unit`, `test:envelope`, `test:security`, `test:jobs`, `test:prepublish`) | ≤ 20 s | maintainer |
-| platform (P1 + P2 suites) | ≤ 20 s | PLA-§O.1 |
+| `pretest` asset builds + the existing chain (`package.json:22`: theme, runtime, generator, render, money, conversions, offers, orders) | ≤ 90 s | measured 88.5 s at P0 (rev 5 had 30 s, 82.5 s measured at T4); a further cut moves a sweep to `test:slow` through the suite's owning track |
+| core suites (`test:tenancy-lint` (TS compiler API over `src/**`), `test:ownership`, `test:settings`, `test:registries`, `test:hosts`, `test:permissions`, `test:tenancy-unit`, `test:envelope`, `test:security`, `test:jobs`, `test:prepublish`) | ≤ 55 s | maintainer; measured 46.1 s at P0 once `test:prepublish`'s ar fixtures and lock child processes moved to `test:prepublish -- --slow` in `test:slow` (63.0 s before); `test:jobs` (P8) not written yet |
+| platform (P1 + P2 suites) | ≤ 15 s | PLA-§O.1 (20 s before the P0 re-cut) |
 | landing (P3) | ≤ 20 s | LAN-§25.1 |
-| operations (P4 + P5) | ≤ 25 s | OPE-§O.1 |
-| ai (P7: `test:ai` only) | ≤ 20 s | AI-§Q.1; `test:ai-eval` is in `test:slow` |
-| design (P6) | ≤ 40 s | DES-§25.1 |
-| **R1 total** | **≤ 175 s** | under the **180 s** ceiling (5 s headroom) |
+| operations (P4 + P5) | ≤ 15 s | OPE-§O.1 (25 s before) |
+| ai (P7: `test:ai` only) | ≤ 15 s | AI-§Q.1 (20 s before); `test:ai-eval` is in `test:slow` |
+| design (P6) | ≤ 25 s | DES-§25.1 (40 s before) |
+| **R1 total** | **≤ 235 s** | under the **240 s** ceiling (5 s headroom); P0 re-cut (review G7, CCR r1.0-c0b-3 items 2 and 3): the rev 5 table declared 175 s of 180 s while the two maintainer groups alone measured about 150 s; each group's `measuredSec` is in the table and the static check (`npm run test:budget-static`, in `gate`) refuses a share below it; the maintainer runs the timed `npm run test:budget` at every track merge that adds suites to `npm test` |
 
-**R2 (raised explicitly at the R2 contract step):** the ceiling becomes **240 s**, with storefront (S1, 192 homes)
-≤ 40 s, `test:logo` (S2) ≤ 8 s, `test:imports` (S3) ≤ 4 s, `test:webhooks` (S5) ≤ 3 s added to the table (R2 total
-≤ 230 s); **R3:** `test:experiments` (D3, 2,000 seeded A/A) ≤ 5 s (≤ 235 s), and any further R3 script either fits the
+**R2 (raised explicitly at the R2 contract step):** the ceiling becomes **300 s** (240 s before the P0 re-cut, which
+raised every release by the same 60 s), with storefront (S1, 192 homes) ≤ 40 s, `test:logo` (S2) ≤ 8 s,
+`test:imports` (S3) ≤ 4 s, `test:webhooks` (S5) ≤ 3 s added to the table (R2 total ≤ 290 s; the R2 contract step
+re-cuts from a timed run); **R3:** `test:experiments` (D3, 2,000 seeded A/A) ≤ 5 s (≤ 295 s of 300 s), and any further R3 script either fits the
 remaining headroom or its contract step moves a seeded subset to `test:slow`. The harness (`scripts/qa/test-budget.ts`,
 maintainer, rev 4 named) **reads this table** (as a committed `scripts/qa/test-budget.json`), **fails when the sum of
 the declared budgets exceeds the ceiling** (a static check, so a part cannot grow its share silently), prints each
@@ -4158,8 +4168,11 @@ registry), run `test:ownership` over the rows below (ENGC-8), and freeze the cro
   actionSlot?: ReactNode /* P7's <DirectorPassControl>, the bottom action row beside "Use this design" */; onUse(directionId:
   string): void; onRetry?(): void }` with `RevealDirection = { id: string; doc: PageDoc; card: GenomeCard; label: string }`;
   the stub renders the three docs' folds statically with both slots, DES-§14.3); **`RenderDigest`** and
-  `renderDigest(doc, theme, genome, report): RenderDigest` (`src/lib/design/digest.ts`, DES-§8.9; the stub answers a
-  digest with empty counts and `gates: { hard: [], soft: [], slop: 0, q: 0 }`); **`NicheShares`** and
+  `renderDigest(doc, theme, genome, report, cod?: CodDigestInputs): RenderDigest` (`src/lib/design/digest.ts`, DES-§8.9;
+  **P0 review G1:** the digest carries `cod: CodInvariants | null`, P3's `codInvariants` result over the report's heights
+  and the store facts of the optional fifth argument (`CodDigestInputs` = `CodInvariantInputs` without `heights`), `null`
+  without them; the stub answers a digest with empty counts, `gates: { hard: [], soft: [], slop: 0, q: 0 }` and
+  `cod: null`); **`NicheShares`** and
   `nicheShares(niche): NicheShares` (`src/lib/design/novelty.server.ts`, DES-§7.4; the stub answers `n: 0` and empty maps,
   `seq4: []`, `tells: []`, i.e. "k < 10"); **`checkHeadlinesAction`** (the `storeAction` wrapper of
   `checkHeadlineNovelty(scope, niche, texts)`, DES-§9.8: `(niche: string, texts: readonly string[] /* ≤ 60 */) =>
@@ -4239,8 +4252,9 @@ choice open. The tracks build against the result; a change goes through a CCR.
    result is frozen), `renderTemplate`, `legacyToWanted`, `signedTrackPath`. Operations' console-read signatures win
    over PLA Q.11; open shapes were filled and frozen in the contract file.
 9. **Cross-track stubs, part 2 (step E).** P1: `notify` keeps T2's working body; the PLA-§18.1 read API
-   (`listNotifications`, `unreadCount`, `markRead`) is frozen as throwing stubs (rows exist since R1.0, so no empty answer
-   is pretended); `getStoreHealth` → `null`, `requestHealthRecompute` marks dirty and answers `queuedAt`,
+   (`listNotifications`, `unreadCount`, `markRead`) works over the R1.0 rows from step G (P0 review G2: P2 merges before
+   P1 and its pulse needs `unread` on every poll; step E had frozen throwing stubs), with the PLA-§18.1 read rules, the
+   `notify-unread` cache (5 s) and a count that stops at 100; P1 refines the bodies; `getStoreHealth` → `null`, `requestHealthRecompute` marks dirty and answers `queuedAt`,
    `snoozeHealthIssue` throws; `HealthInputs` is frozen with the PLA-§6.3.1 fields, every source field `| null` (a
    failing source leaves it null), and `StoreHealthView` and the rev 3 flag codes (`brand_term_live`,
    `brand_near_live`, `abuse_reports_new`) are in the maintainer's `src/lib/health/types.ts`; `mask.ts` and
@@ -4266,7 +4280,8 @@ choice open. The tracks build against the result; a change goes through a CCR.
     it. The Shell draws `<p class="lp-report">` after the last in-flow section, before the floating layers, whenever
     the footer does not draw the link: P6 flips `FOOTER_RENDERS_REPORT` (`src/landing/sections/footer/report.ts`) in
     the change that makes `legalLinks(ctx)` draw it, and from then on the row appears only without a visible footer, so
-    every live document carries the link exactly once. UiKey `footer.report` carries platform's `shell.report.link`
+    every live document rendered from P0 on carries the link exactly once. Pages published under R1.0 are served from
+    their stored HTML and get the link from the integration deploy's `runtime` re-render (§H.10, P0 review G9). UiKey `footer.report` carries platform's `shell.report.link`
     wording (ar الإبلاغ عن هذا المتجر · fr Signaler cette boutique · en Report this store). Proof at P0: every export
     file (connected, PHP and WhatsApp bundles of every fixture in ar / fr / en) is byte-identical to before; live
     landing documents change by the one row; thank-you and legal documents are unchanged; `test:render` asserts one link
@@ -4289,6 +4304,25 @@ choice open. The tracks build against the result; a change goes through a CCR.
     R1.0 code calls keys and kinds that no catalog or kinds file declares yet, so narrowing at P0 would break today's
     callers; each track declares its keys and kinds at its merge and the maintainer narrows at the R1 integration.
     `checkBrandTerms("wordmark", …)` (DES-§13, S2): an R2 field, added to `BrandField` at the R2 contract step.
+14. **Review fixes (step G, `docs/saas/ccr/p0-report.md` "Review and fixes").** (G1) `RenderDigest.cod` exists as this
+    section and LAN-§3.7 say (`cod: CodInvariants | null`, the optional fifth argument of `renderDigest`); the core
+    wins over DES-§8.9 / AI R46, which listed the shape without it; R9 of rubric v3 reads `digest.cod` and, while it is
+    `null`, only the form position and the fold. (G2) The notification reads work (item 9). **A source that throws
+    `not implemented` is "unavailable", never zero:** P2's pulse and Today brief omit the key or the line a throwing
+    source would fill (`opsPulse`, `queueCounts`, `aiStoreSummary`, …; a pulse contributor already omits its keys on a
+    failure, §I.4), and no track writes a made-up 0 or "no orders yet" in its place. (G3) `aiPolicyFor` takes `mode`
+    and the local rung from the store's `store_ai` (the R1.0 on-device AI and background removal keep working before
+    P7), the local rung off only under impersonation (AI-§A.4); the cloud stays "off" (`platform_off`). (G4) §M.2's
+    measurement paragraph says what item 5 does. (G5) §H.2's lease SQL quotes `cursor`. (G6) `test:migrate` also
+    compares table engines and collations, column collations, AUTO_INCREMENT and CHECK expressions, and builds its
+    upgrade databases with a `utf8mb4_general_ci` default. (G7) The `npm test` budget table is re-cut from a timed run
+    (§J.1, CCR r1.0-c0b-3 items 2 and 3): existing 90 s (88.5 measured), core 55 s (46.1 measured once
+    `test:prepublish` runs its ar fixtures and lock child processes only under `--slow`, which `test:slow` adds),
+    platform 15, landing 20, operations 15, ai 15, design 25; the R1 ceiling is 240 s (R2 / R3 300 s), each group
+    records `measuredSec`, and `test:budget-static` (in `gate`) refuses a share below its measurement. (G8) P1's `nav/console.ts` exports `StaffNavItem[]`, not sidebar
+    contributions: the registry hands it out as `STAFF_NAV` / `staffNavFor(platformRole)` for the store switcher
+    (PD36) and keeps it out of `NAV_CONTRIBUTIONS`, so no member sees a console item. (G9) The integration deploy
+    re-renders every live page (§H.10) so pages published under R1.0 carry the report link.
 
 Then:
 
@@ -4905,8 +4939,11 @@ from R1 / R5 / I1: each arm is gated as its own document (rev 3, ENGP-18 / LAN R
 `variantFeatures(type, variant, data)` supplies the CTA, glass, reveal, fixed-layer and photo counts of rows R1, R4, R5,
 K2 and I1 (DS33: one data source for the design, budget and health computations). Store sections (R2) enter the same
 model through their registry `features.h` (STO-§6.1). While a report carries `stub: true` (before P6 merges, §K.2 P0
-stub rule) rows C2, C3 and F1 are emitted as notes with `vars.stub = 1`; F5, R1, R4, R5, K2 and I1 need no height and
-stay hard from day one.
+stub rule) **every row** (C2, C3, F1 and also F5, R1, R4, R5, K2, I1) is measured and classified but emitted as a note
+with `vars.stub = 1` (§K.2 maintainer build note item 5, P0 review G4: today's engine output is the baseline these rows
+were written against, and the plans that bring a page under them are P6's); every row is hard from the P6 merge on,
+when `test:prepublish` enables the calibration fixtures. If the lead rejects build note item 5, `budgetResult`
+(`src/lib/render/prepublish/budget.ts`) softens only C2, C3 and F1 and this paragraph returns to that wording.
 
 **Per-kind profiles (rev 2.1, D66, STO-R25).** One registry, several thresholds:
 

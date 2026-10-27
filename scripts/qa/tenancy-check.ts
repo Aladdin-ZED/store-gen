@@ -2517,6 +2517,9 @@ export async function moreSpecialCases(kit: Kit): Promise<void> {
   // 8. D69: the day's sandbox ceiling (the 51st pending store lands in the waitlist) and the shared disk budget
   await sandboxCases(kit);
 
+  // 9. the notification reads (PLA-§18.1, PL-13; working since P0, review G2): who reads which row, unread, mark read
+  await notificationCases(kit);
+
   notApplicable("addImpersonationNoteAction from a tenant session / from staff not viewing the store (rev 2.1)", "no impersonation-note action in R1.0 (the console's notes arrive with P1, PLA-§10)");
   notApplicable("a store-side replay(ctx, id) of another store's outbox row (rev 2.1)", "no outbox in R1.0 (the jobs outbox arrives with P8)");
   notApplicable("registerBudgetProfile with a kind other than the document's (rev 2.1)", "no budget-profile registry in R1.0 (the per-kind budgets arrive with P0/P3; R1.0 renders landing pages only)");
@@ -2545,6 +2548,102 @@ export async function moreSpecialCases(kit: Kit): Promise<void> {
     await db.update(S.pages).set({ publishedVersionId: versionId }).where(eq(S.pages.id, pageId));
     return { id, pageKey };
   }
+}
+
+/**
+ * The notification read API (PLA-§18.1, PL-13 acceptance; P0 review G2): a member reads their store's rows, their role's
+ * `store_role` rows and their own `user` rows; an agent never reads a row addressed to owners; another store's member,
+ * and staff viewing the store without a role, read none of them; staff read the staff feed from the console only;
+ * expired rows are hidden; `unreadCount` and `markRead` agree, per reader, and ignore ids the reader may not read.
+ */
+async function notificationCases(kit: Kit): Promise<void> {
+  const { fx } = kit;
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const N = load<typeof import("@/lib/platform/notify")>("@/lib/platform/notify");
+  const tag = randomBytes(4).toString("hex");
+  const put = async (target: Parameters<typeof N.notify>[0], kind: string, opts: Parameters<typeof N.notify>[3] = {}) => {
+    const r = await N.notify(target, kind, { n: 1 }, { dedupeKey: `tenancy-check:${kind}:${tag}:${randomInt(1e9)}`, ...opts });
+    if (!("id" in r)) throw new Error(`notify ${kind}: not stored`);
+    return r.id;
+  };
+  const ids = {
+    aStore: await put({ audience: "store", storeId: fx.A.id }, "health.issue_new", { link: `/app/${fx.A.handle}` }),
+    aOwners: await put({ audience: "store_role", storeId: fx.A.id, roles: ["owner"] }, "ops.new_orders"),
+    aAgentOwn: await put({ audience: "user", userId: fx.A.members.agent, storeId: fx.A.id }, "member.role_changed"),
+    aOwnerPlatform: await put({ audience: "user", userId: fx.A.members.owner, storeId: null }, "user.password_reset", { link: "/app/account/security" }),
+    aExpired: await put({ audience: "store", storeId: fx.A.id }, "health.issue_old", { expiresInDays: 1 }),
+    bStore: await put({ audience: "store", storeId: fx.B.id }, "health.issue_new"),
+    staffAdmin: await put({ audience: "platform_staff", minRole: "admin" }, "staff.alarm", { text: "tenancy-check staff line" }),
+    staffAll: await put({ audience: "platform_staff" }, "staff.signup_capped"),
+  };
+  await pool().query("UPDATE notifications SET expires_at = ? WHERE id = ?", [new Date(Date.now() - 60_000), ids.aExpired]);
+  const mine = new Set(Object.values(ids));
+  type Reader = Parameters<typeof N.listNotifications>[0];
+  const member = (store: StoreFx, role: Role): Reader => ({ userId: store.members[role], storeId: store.id, role, platformRole: "none" });
+  const seen = async (reader: Reader, opts: Parameters<typeof N.listNotifications>[1] = {}) => (await N.listNotifications(reader, { limit: 50, ...opts })).filter((i) => mine.has(i.id));
+  const idsOf = (items: { id: number }[]) => items.map((i) => i.id).sort((a, b) => a - b);
+  const sorted = (...xs: number[]) => xs.sort((a, b) => a - b);
+  const sameIds = (items: { id: number }[], ...want: number[]) => JSON.stringify(idsOf(items)) === JSON.stringify(sorted(...want));
+
+  const ownerA = member(fx.A, "owner");
+  const agentA = member(fx.A, "agent");
+  const owner = await seen(ownerA);
+  check(
+    "notifications: A's owner reads A's store row, the owners' row and their own platform-wide row; nothing of B, of the agent, of staff, nothing expired",
+    sameIds(owner, ids.aStore, ids.aOwners, ids.aOwnerPlatform),
+    { got: idsOf(owner), ids },
+  );
+  check(
+    "notifications: newest first, ISO times, titles rendered (never empty), unread",
+    owner.every((i, k) => k === 0 || owner[k - 1]!.id > i.id) && owner.every((i) => !Number.isNaN(Date.parse(i.createdAt)) && i.title.length > 0 && i.read === false),
+    owner,
+  );
+  const agent = await seen(agentA);
+  check("notifications: A's agent never reads the row addressed to A's owners (PL-13); reads the store row and their own", sameIds(agent, ids.aStore, ids.aAgentOwn), { got: idsOf(agent), ids });
+  const ownerB = await seen(member(fx.B, "owner"));
+  const dualB = await seen({ userId: fx.dual, storeId: fx.B.id, role: "owner", platformRole: "none" });
+  check("notifications: B's owner and the dual member reading B see B's row and nothing of A", sameIds(ownerB, ids.bStore) && sameIds(dualB, ids.bStore), { ownerB: idsOf(ownerB), dualB: idsOf(dualB), ids });
+  const staffConsole = await seen({ userId: fx.staff.id, storeId: null, role: null, platformRole: "super_admin" });
+  const supportConsole = await seen({ userId: fx.staff.id, storeId: null, role: null, platformRole: "support" });
+  const staffViewingA = await seen({ userId: fx.staff.id, storeId: fx.A.id, role: null, platformRole: "super_admin" });
+  check(
+    "notifications: staff read the staff feed in the console (support: only the row for every staff role) and no store row",
+    sameIds(staffConsole, ids.staffAdmin, ids.staffAll) && sameIds(supportConsole, ids.staffAll),
+    { staff: idsOf(staffConsole), support: idsOf(supportConsole), ids },
+  );
+  check("notifications: staff viewing A without a role read none of A's rows, and no staff row inside a store", staffViewingA.length === 0, idsOf(staffViewingA));
+  check("notifications: the staff line is the body as typed", staffConsole.find((i) => i.id === ids.staffAdmin)?.body === "tenancy-check staff line", staffConsole);
+  const outsider = await seen({ userId: fx.outsider, storeId: fx.A.id, role: null, platformRole: "none" });
+  check("notifications: a signed-in outsider naming A's store reads nothing", outsider.length === 0, idsOf(outsider));
+
+  // paging, groups, unread, mark read
+  const page2 = (await N.listNotifications(ownerA, { limit: 50, beforeId: ids.aOwnerPlatform })).filter((i) => mine.has(i.id));
+  check("notifications: keyset paging (beforeId) answers the older rows only", sameIds(page2, ids.aStore, ids.aOwners), idsOf(page2));
+  const stores = await seen(ownerA, { group: "store" });
+  const orders = await seen(ownerA, { group: "orders" });
+  check("notifications: kinds no track registered yet read as group 'store'", stores.length === 3 && stores.every((i) => i.group === "store") && orders.length === 0, { store: idsOf(stores), orders: idsOf(orders) });
+  const before = await N.unreadCount(ownerA);
+  check("notifications: unreadCount counts what the owner may read (at least this case's 3 rows, at most the cap)", before >= 3 && before <= N.UNREAD_CAP, before);
+  await N.markRead(ownerA, [ids.aStore, ids.bStore, ids.aAgentOwn]);
+  const afterOne = await N.unreadCount(ownerA);
+  const [readRows] = (await pool().query("SELECT notification_id AS id, user_id AS u FROM notification_reads WHERE notification_id IN (?)", [[...mine]])) as unknown as [{ id: number; u: string }[]];
+  check(
+    "notifications: markRead marks only the ids the reader may read (B's row and the agent's row ignored), and the count drops at once",
+    readRows.length === 1 && Number(readRows[0]!.id) === ids.aStore && readRows[0]!.u === fx.A.members.owner && afterOne === before - 1,
+    { readRows, before, afterOne },
+  );
+  const ownerAfter = await seen(ownerA);
+  const agentAfter = await seen(agentA);
+  check(
+    "notifications: the read flag is per reader (the owner's read leaves the agent's row unread)",
+    ownerAfter.find((i) => i.id === ids.aStore)?.read === true && agentAfter.find((i) => i.id === ids.aStore)?.read === false,
+    { owner: ownerAfter, agent: agentAfter },
+  );
+  check("notifications: unreadOnly hides the read row", !(await seen(ownerA, { unreadOnly: true })).some((i) => i.id === ids.aStore));
+  await N.markRead(ownerA, "all");
+  const ownerLeft = await N.unreadCount(ownerA);
+  const agentLeft = await seen(agentA, { unreadOnly: true });
+  check("notifications: 'Mark all read' leaves the owner nothing unread; the agent keeps theirs", ownerLeft === 0 && agentLeft.length === 2, { ownerLeft, agentLeft: idsOf(agentLeft) });
 }
 
 /** Invites (TENANCY-MAP §10.2, SEC-24): a token joins its own store with its own role, once, for its own e-mail. */

@@ -7,13 +7,16 @@ import "server-only";
  * user). Frozen at P0 (src/lib/contracts/r1-p0.ts): P2 (onboarding), P1, P8 and P6 call these before P7 merges.
  *
  * P0 stubs, the documented "Cloud AI off" state of a platform without P7 (AI-§A.4: `platform_ai.enabled` false):
- *   - `aiPolicyFor`: cloud unavailable (`platform_off`; `state` under a read-only impersonation, D70), no live task
- *     through the router and no local rung, so a caller shows its library path, never a model promise;
+ *   - `aiPolicyFor`: cloud unavailable (`platform_off`; `state` under a read-only impersonation, D70) and no live task
+ *     through the router, so a caller shows its library path, never a model promise; `mode` and the local rung are the
+ *     store's own `store_ai` choices (the R1.0 on-device AI and background removal keep working), off only under
+ *     impersonation (AI-§A.4) or when the setting cannot be read (P0 review G3);
  *   - `runAi`: the typed failure `disabled` (not retryable), so the caller takes its library rung;
  *   - `queueAi`: throws (nothing may be queued without the Batches queue);
  *   - `registerBatchResultHandler`: works for real (a registry, like the outbox handlers), so P7's handler files and the
  *     tracks' handlers register from day one.
  */
+import { getStoreSetting } from "@/lib/settings";
 import type { Actor, StoreCtx, StoreScope } from "@/lib/tenancy/types";
 import type { AiPolicy } from "../policy";
 import type { AiOutcome, AiRunOpts, AiTaskInput, AiTaskOutput } from "../provider/types";
@@ -63,10 +66,23 @@ export function batchResultHandler<T extends AiTaskId>(task: T): BatchResultHand
   return batchHandlers().get(task) as BatchResultHandler<T> | undefined;
 }
 
+/** The store's own `store_ai` choices for `mode` and the local rung; local off under impersonation (AI-§A.4) or on a read failure. */
+async function localPolicy(ctx: StoreCtx): Promise<Pick<AiPolicy, "mode" | "local">> {
+  const off: Pick<AiPolicy, "mode" | "local"> = { mode: "auto", local: { enabled: false, tierMax: "lite", bgRemoval: false } };
+  try {
+    const ai = await getStoreSetting(ctx.scope, "store_ai");
+    if (ctx.scope.kind === "impersonation") return { ...off, mode: ai.mode };
+    return { mode: ai.mode, local: { enabled: ai.localEnabled, tierMax: ai.localTierCeiling, bgRemoval: ai.bgRemoval } };
+  } catch {
+    return off;
+  }
+}
+
 /** Server-only; cached 15 s per (store, user) once P7 computes it. */
 export async function aiPolicyFor(ctx: StoreCtx): Promise<AiPolicy> {
+  const { mode, local } = await localPolicy(ctx);
   return {
-    mode: "auto",
+    mode,
     cloud: {
       available: false,
       block: ctx.scope.kind === "impersonation" ? "state" : "platform_off",
@@ -80,7 +96,7 @@ export async function aiPolicyFor(ctx: StoreCtx): Promise<AiPolicy> {
       deepPassesLeft: null,
       deepTransport: "job",
     },
-    local: { enabled: false, tierMax: "lite", bgRemoval: false },
+    local,
     autoPrefersCloud: {},
     live: [],
     transport: "stream",

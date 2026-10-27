@@ -5,7 +5,7 @@
  */
 import { permissionDef, releaseOn } from "@/lib/auth/permissions";
 import { modeAllows } from "@/lib/tenancy/mode";
-import type { StorePermission } from "@/lib/auth/permissions";
+import type { PlatformRole, StorePermission } from "@/lib/auth/permissions";
 import type { StoreRow } from "@/lib/tenancy/types";
 import { nav as aiNav } from "./ai";
 import { nav as consoleNav } from "./console";
@@ -14,9 +14,9 @@ import { nav as integrationsNav } from "./integrations";
 import { nav as landingNav } from "./landing";
 import { nav as opsNav } from "./ops";
 import { nav as t4Nav } from "./t4";
-import type { NavContribution, NavGroup, NavGroupId, NavItem } from "./types";
+import type { NavContribution, NavGroup, NavGroupId, NavItem, StaffNavItem } from "./types";
 
-export type { IconName, NavBadge, NavContribution, NavGroup, NavGroupId, NavItem } from "./types";
+export type { IconName, NavBadge, NavContribution, NavGroup, NavGroupId, NavItem, StaffNavItem } from "./types";
 
 export const NAV_GROUPS: readonly { id: NavGroupId; label: NavGroup["label"] }[] = [
   { id: "workspace", label: "nav.group.workspace" },
@@ -31,10 +31,19 @@ export const NAV_GROUPS: readonly { id: NavGroupId; label: NavGroup["label"] }[]
 ];
 
 /**
- * Every contributed item, in track order: T4's R1.0 dashboard (CCR r1.0-t4-8; P2's file in R1), then P1, P3 … P7
- * (written at P0; `scripts/qa/registries-check.ts` proves no file is left out).
+ * Every contributed sidebar item, in track order: T4's R1.0 dashboard (CCR r1.0-t4-8; P2's file in R1), then P3 … P7
+ * (written at P0; `scripts/qa/registries-check.ts` proves no file is left out). P1's `./console.ts` is not a sidebar
+ * contribution (PD36): its staff entry is `STAFF_NAV` below.
  */
-export const NAV_CONTRIBUTIONS: readonly NavContribution[] = [...t4Nav, ...consoleNav, ...landingNav, ...opsNav, ...integrationsNav, ...designNav, ...aiNav];
+export const NAV_CONTRIBUTIONS: readonly NavContribution[] = [...t4Nav, ...landingNav, ...opsNav, ...integrationsNav, ...designNav, ...aiNav];
+
+/** The staff entries of the tenant shell (PD36): the store switcher renders them only for `platformRole` not "none". */
+export const STAFF_NAV: readonly StaffNavItem[] = consoleNav;
+
+/** `STAFF_NAV` for a viewer: nothing for a member who is not staff. */
+export function staffNavFor(platformRole: PlatformRole | "none"): readonly StaffNavItem[] {
+  return platformRole === "none" ? [] : STAFF_NAV;
+}
 
 /** What the filter reads of a member: the store's mode and the grants (a `StoreCtx`, or the browser's `useStore()`). */
 export interface NavCtx {

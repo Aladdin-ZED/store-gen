@@ -14,7 +14,11 @@
  * After P6 merges the real model, the stub-only checks flip to the C2 / C3 / F1 hard fixtures of
  * src/lib/design/calibration/heights.json (enabled at the P6 merge, §K.2).
  *
- *   npx tsx src/lib/render/selftest-prepublish.ts
+ * `npm test` runs the in-process checks over the fr fixtures; `--slow` (the second script of `npm run test:slow`, so
+ * every `npm run gate`) adds the ar fixtures and the four child processes of the lock proof (P0 review G7: the
+ * npm test budget re-cut; `prebuild` runs scripts/qa/stub-lock.ts itself on every build).
+ *
+ *   npx tsx src/lib/render/selftest-prepublish.ts [--slow]
  */
 import Module from "node:module";
 import assert from "node:assert/strict";
@@ -31,6 +35,7 @@ M._resolveFilename = function (request: string, ...rest: unknown[]) {
 };
 
 const ROOT = path.resolve(__dirname, "..", "..", "..");
+const SLOW = process.argv.includes("--slow");
 let failures = 0;
 let passed = 0;
 async function check(name: string, fn: () => unknown | Promise<unknown>): Promise<void> {
@@ -68,7 +73,7 @@ async function main() {
   const { gateFileProblem } = await import("../../../scripts/deploy/gate-file.mjs");
   const now = "2026-10-27T12:00:00.000Z";
   const stub = limits.heightModelIsStub();
-  console.log(`test:prepublish · height model ${stub ? "is the P0 stub (HEIGHT_MODEL_VERSION 0)" : `v${HEIGHT_MODEL_VERSION}`}`);
+  console.log(`test:prepublish${SLOW ? " --slow" : ""} · height model ${stub ? "is the P0 stub (HEIGHT_MODEL_VERSION 0)" : `v${HEIGHT_MODEL_VERSION}`}`);
 
   const argan = validateDoc(getFixture("argan", { now, locale: "fr" }).doc).doc;
   assert.ok(argan, "the argan fixture validates");
@@ -102,11 +107,11 @@ async function main() {
     assert.ok(globalThis.__sgPrePublish?.checks.has("budget"));
   });
 
-  await check("fixtures: while design's stubs are in place, no fixture (live, fr and ar) is refused; every budget item is a note flagged stub", async () => {
+  await check(`fixtures: while design's stubs are in place, no fixture (live, ${SLOW ? "fr and ar" : "fr"}) is refused; every budget item is a note flagged stub`, async () => {
     if (!stub) return; // the P6 merge enables the hard fixtures of src/lib/design/calibration/heights.json instead
     let baselineHard = 0;
     for (const name of FIXTURE_NAMES) {
-      for (const locale of ["fr", "ar"] as const) {
+      for (const locale of SLOW ? (["fr", "ar"] as const) : (["fr"] as const)) {
         const fx = getFixture(name, { now, locale });
         const d = validateDoc(fx.doc).doc!;
         const html = (
@@ -191,7 +196,8 @@ async function main() {
     budget.assertStubBuildAllowed({});
   });
 
-  await check("lock: scripts/qa/stub-lock.ts exits 1 without SG_STUB_BUILD_OK and 0 with it; budget.ts throws at load in production", async () => {
+  if (!SLOW) console.log("  · lock: the child-process proof (stub-lock.ts exit codes, budget.ts loaded in production) runs with --slow (npm run test:slow)");
+  else await check("lock: scripts/qa/stub-lock.ts exits 1 without SG_STUB_BUILD_OK and 0 with it; budget.ts throws at load in production", async () => {
     const budgetUrl = new URL(`file:///${path.join(ROOT, "src", "lib", "render", "prepublish", "budget.ts").replace(/\\/g, "/")}`).href;
     const load = `import(${JSON.stringify(budgetUrl)}).then(() => { console.log("loaded"); process.exit(0); }, (e) => { console.log(String(e && e.message)); process.exit(3); });`;
     const [without, withVar, prodLoad, prodOk] = await Promise.all([

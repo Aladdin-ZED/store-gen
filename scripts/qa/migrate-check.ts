@@ -669,12 +669,17 @@ const rootConn = () => mysql.createConnection({ host: "127.0.0.1", port: 3306, u
 const urlOf = (dbName: string) => `mysql://root@127.0.0.1:3306/${dbName}`;
 const connect = (dbName: string) => mysql.createConnection({ uri: urlOf(dbName), charset: "utf8mb4_unicode_ci", timezone: "Z", supportBigNumbers: true });
 
-async function createDb(name: string): Promise<void> {
+/**
+ * A throwaway database. `collation` is its default: every table declares `utf8mb4_unicode_ci` itself, so the (j)
+ * upgrade databases are created with `utf8mb4_general_ci` and a CREATE TABLE that drops the clause shows up in the
+ * schema comparison (P0 review G6: a server whose database default differs would otherwise fail on the FKs).
+ */
+async function createDb(name: string, collation: "utf8mb4_unicode_ci" | "utf8mb4_general_ci" = "utf8mb4_unicode_ci"): Promise<void> {
   if (!DB_RE.test(name)) throw new Error(`refusing database name ${name}`);
   const conn = await rootConn();
   try {
     await conn.query(`DROP DATABASE IF EXISTS \`${name}\``);
-    await conn.query(`CREATE DATABASE \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    await conn.query(`CREATE DATABASE \`${name}\` CHARACTER SET utf8mb4 COLLATE ${collation}`);
     created.add(name);
   } finally {
     await conn.end();
@@ -1029,16 +1034,28 @@ function normLiveDefault(d: unknown): string {
   return /^-?\d+(?:\.\d+)?$/.test(s) ? String(Number(s)) : s.toLowerCase();
 }
 
+/** The one table collation of the project: every CREATE TABLE of drizzle/*.sql declares it (and InnoDB). */
+const TABLE_COLLATION = "utf8mb4_unicode_ci";
+/** The column types that carry a collation (MariaDB / MySQL): their collation is the table's. */
+const COLLATED_TYPE = /^(?:char|varchar|tinytext|text|mediumtext|longtext|enum|set)\b/;
+/** A CHECK expression without quoting, case and spacing differences (MariaDB keeps backticks; drizzle's text has none). */
+const normCheck = (clause: string) => clause.replace(/[`()]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+
 /**
- * The live schema as sorted lines (every table but drizzle's journal): columns with type, nullability and default;
- * every index with its uniqueness and column order (PRIMARY included); every FK with its columns, target and rules;
- * every CHECK by name. Equal lines = the same schema, whatever order the columns were added in.
+ * The live schema as sorted lines (every table but drizzle's journal): each table's engine and collation; columns with
+ * type, nullability, default, collation and AUTO_INCREMENT; every index with its uniqueness and column order (PRIMARY
+ * included); every FK with its columns, target and rules; every CHECK with its expression. Equal lines = the same
+ * schema, whatever order the columns were added in.
  */
 async function schemaShape(dbName: string): Promise<string[]> {
   const lines: string[] = [];
   const skip = "table_name <> '__drizzle_migrations'";
-  for (const r of await query(dbName, `SELECT table_name AS t, column_name AS c, column_type AS ty, is_nullable AS n, column_default AS d FROM information_schema.columns WHERE table_schema = DATABASE() AND ${skip}`)) {
-    lines.push(`col ${String(r.t)}.${String(r.c)} ${normType(String(r.ty))} ${r.n === "YES" ? "null" : "not null"} default=${normLiveDefault(r.d)}`);
+  for (const r of await query(dbName, `SELECT table_name AS t, engine AS e, table_collation AS co FROM information_schema.tables WHERE table_schema = DATABASE() AND ${skip}`)) {
+    lines.push(`tbl ${String(r.t)} ${String(r.e).toLowerCase()} ${String(r.co)}`);
+  }
+  for (const r of await query(dbName, `SELECT table_name AS t, column_name AS c, column_type AS ty, is_nullable AS n, column_default AS d, collation_name AS co, extra AS x FROM information_schema.columns WHERE table_schema = DATABASE() AND ${skip}`)) {
+    const ai = /auto_increment/i.test(String(r.x ?? "")) ? " auto_increment" : "";
+    lines.push(`col ${String(r.t)}.${String(r.c)} ${normType(String(r.ty))} ${r.n === "YES" ? "null" : "not null"} default=${normLiveDefault(r.d)} collation=${r.co ? String(r.co) : "-"}${ai}`);
   }
   const idx = new Map<string, { unique: boolean; cols: [number, string][] }>();
   for (const r of await query(dbName, `SELECT table_name AS t, index_name AS i, non_unique AS u, seq_in_index AS q, column_name AS c FROM information_schema.statistics WHERE table_schema = DATABASE() AND ${skip}`)) {
@@ -1066,8 +1083,8 @@ async function schemaShape(dbName: string): Promise<string[]> {
     const cols = e.cols.sort((a, b) => a[0] - b[0]);
     lines.push(`fk ${key} (${cols.map((c) => c[1]).join(",")}) -> ${e.rt}(${cols.map((c) => c[2]).join(",")}) ${e.rules}`);
   }
-  for (const r of await query(dbName, "SELECT table_name AS t, constraint_name AS k FROM information_schema.check_constraints WHERE constraint_schema = DATABASE()")) {
-    lines.push(`ck ${String(r.t)}.${String(r.k)}`);
+  for (const r of await query(dbName, "SELECT table_name AS t, constraint_name AS k, check_clause AS cc FROM information_schema.check_constraints WHERE constraint_schema = DATABASE()")) {
+    lines.push(`ck ${String(r.t)}.${String(r.k)} ${normCheck(String(r.cc))}`);
   }
   return lines.sort();
 }
@@ -1086,11 +1103,17 @@ async function schemaTsShape(): Promise<string[]> {
     if (typeof d === "number") return String(d);
     return `'${String(d).replace(/'/g, "''")}'`.toLowerCase();
   };
+  const checkText = (v: unknown) => (is(v, SQL) ? (v as InstanceType<typeof SQL>).queryChunks.map((ch) => (ch as { value?: string[] }).value?.join("") ?? "").join("") : String(v));
   for (const value of Object.values(schema)) {
     if (!is(value, MySqlTable)) continue;
     const cfg = getTableConfig(value);
     const t = cfg.name;
-    for (const c of cfg.columns) lines.push(`col ${t}.${c.name} ${normType(c.getSQLType())} ${c.notNull ? "not null" : "null"} default=${defaultOf(c)}`);
+    lines.push(`tbl ${t} innodb ${TABLE_COLLATION}`);
+    for (const c of cfg.columns) {
+      const type = normType(c.getSQLType());
+      const ai = (c as { autoIncrement?: boolean }).autoIncrement === true ? " auto_increment" : "";
+      lines.push(`col ${t}.${c.name} ${type} ${c.notNull ? "not null" : "null"} default=${defaultOf(c)} collation=${COLLATED_TYPE.test(type) ? TABLE_COLLATION : "-"}${ai}`);
+    }
     const pk = cfg.primaryKeys[0]?.columns.map((c) => c.name) ?? cfg.columns.filter((c) => c.primary).map((c) => c.name);
     if (pk.length) lines.push(`idx ${t}.PRIMARY unique (${pk.join(",")})`);
     for (const i of cfg.indexes) lines.push(`idx ${t}.${i.config.name} ${i.config.unique ? "unique" : "index"} (${i.config.columns.map((c) => (c as { name: string }).name).join(",")})`);
@@ -1098,7 +1121,7 @@ async function schemaTsShape(): Promise<string[]> {
       const ref = fk.reference();
       lines.push(`fk ${t}.${fk.getName()} (${ref.columns.map((c) => c.name).join(",")}) -> ${getTableName(ref.foreignTable)}(${ref.foreignColumns.map((c) => c.name).join(",")}) ${fk.onDelete ?? "restrict"}/${fk.onUpdate ?? "restrict"}`);
     }
-    for (const ck of cfg.checks) lines.push(`ck ${t}.${ck.name}`);
+    for (const ck of cfg.checks) lines.push(`ck ${t}.${ck.name} ${normCheck(checkText(ck.value))}`);
   }
   return lines.sort();
 }
@@ -1111,7 +1134,7 @@ function snapshotKeyShape(): string[] {
     foreignKeys: Record<string, { name: string; tableTo: string; columnsFrom: string[]; columnsTo: string[]; onDelete?: string; onUpdate?: string }>;
     compositePrimaryKeys: Record<string, { columns: string[] }>;
     uniqueConstraints: Record<string, { name: string; columns: string[] }>;
-    checkConstraint?: Record<string, { name: string }>;
+    checkConstraint?: Record<string, { name: string; value: string }>;
   };
   const snap = JSON.parse(readFileSync(join(ROOT, "drizzle", "meta", LAST_SNAPSHOT), "utf8")) as { tables: Record<string, SnapTable> };
   const lines: string[] = [];
@@ -1121,7 +1144,7 @@ function snapshotKeyShape(): string[] {
     for (const i of Object.values(d.indexes)) lines.push(`idx ${t}.${i.name} ${i.isUnique ? "unique" : "index"} (${i.columns.join(",")})`);
     for (const u of Object.values(d.uniqueConstraints)) lines.push(`idx ${t}.${u.name} unique (${u.columns.join(",")})`);
     for (const f of Object.values(d.foreignKeys)) lines.push(`fk ${t}.${f.name} (${f.columnsFrom.join(",")}) -> ${f.tableTo}(${f.columnsTo.join(",")}) ${f.onDelete ?? "restrict"}/${f.onUpdate ?? "restrict"}`);
-    for (const c of Object.values(d.checkConstraint ?? {})) lines.push(`ck ${t}.${c.name}`);
+    for (const c of Object.values(d.checkConstraint ?? {})) lines.push(`ck ${t}.${c.name} ${normCheck(c.value)}`);
   }
   return lines.sort();
 }
@@ -1138,11 +1161,11 @@ async function schemaParity(dbName: string, label: string): Promise<void> {
   const missing = setDiff(want, live);
   const extra = setDiff(live, want);
   check(
-    `${label} schema parity: ${want.filter((l) => l.startsWith("col ")).length} columns, ${want.filter((l) => l.startsWith("idx ")).length} indexes / uniques / primary keys, ${want.filter((l) => l.startsWith("fk ")).length} FKs, ${want.filter((l) => l.startsWith("ck ")).length} check(s) of schema.ts exist with their type, nullability and default; nothing else does`,
+    `${label} schema parity: ${want.filter((l) => l.startsWith("tbl ")).length} tables (InnoDB, ${TABLE_COLLATION}), ${want.filter((l) => l.startsWith("col ")).length} columns, ${want.filter((l) => l.startsWith("idx ")).length} indexes / uniques / primary keys, ${want.filter((l) => l.startsWith("fk ")).length} FKs, ${want.filter((l) => l.startsWith("ck ")).length} check(s) of schema.ts exist with their type, nullability, default, collation, AUTO_INCREMENT and CHECK text; nothing else does`,
     !missing.length && !extra.length,
     { missing: missing.slice(0, 12), extra: extra.slice(0, 12) },
   );
-  const keys = want.filter((l) => !l.startsWith("col "));
+  const keys = want.filter((l) => !l.startsWith("col ") && !l.startsWith("tbl "));
   const snap = snapshotKeyShape();
   check(`${label} ${LAST_SNAPSHOT} declares the same indexes, uniques, primary keys, FKs and checks as schema.ts`, !setDiff(keys, snap).length && !setDiff(snap, keys).length, {
     notInSnapshot: setDiff(keys, snap).slice(0, 10),
@@ -1209,7 +1232,9 @@ function r10Fixture(full: Fixture): Fixture {
 /** A database at 0000-0004 seeded with the R1.0 fixture. Returns each seeded table's 0004 column list. */
 async function r10Db(name: string, fixture: Fixture, r10Folder: string): Promise<Record<string, string[]>> {
   const { runMigrations } = await import("@/lib/db/migrate");
-  await createDb(name);
+  // a database default other than the tables' (P0 review G6): "upgraded schema = a fresh install's" then also proves
+  // that every CREATE TABLE of 0000-0005 carries its own charset and collation
+  await createDb(name, "utf8mb4_general_ci");
   const res = await runMigrations({ migrationsFolder: r10Folder, databaseUrl: urlOf(name) });
   check(`(j) ${name}: 0000-0004 applied (${res.applied})`, res.applied === TOTAL - 1);
   const conn = await connect(name);
@@ -1582,7 +1607,7 @@ async function main(): Promise<void> {
       // the per-column fallback: an R1.0 database where one column of each wide row already exists
       {
         const name = "cod_test_p0_fallback";
-        await createDb(name);
+        await createDb(name, "utf8mb4_general_ci");
         check(`(j) ${name}: 0000-0004 applied`, (await runMigrations({ migrationsFolder: r10Folder, databaseUrl: urlOf(name) })).applied === TOTAL - 1);
         const conn = await connect(name);
         try {

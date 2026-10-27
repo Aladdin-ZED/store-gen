@@ -1,34 +1,36 @@
 {
-  "//": "The npm test wall-time budget of docs/STORE-SAAS.md §J.1 (rev 5, CRIT2-9) as data: seconds on the owner's PC per group, read by scripts/qa/test-budget.ts. The sum of a release's groups must not exceed its ceiling and must equal its declared total; a group's scripts are the §J.1 / §J.6 rows its track owns. A release with `extends` adds its groups to that release's. Maintainer-owned (§K.3): a part changes its share through a CCR.",
+  "//": "The npm test wall-time budget of docs/STORE-SAAS.md §J.1 (rev 5, CRIT2-9) as data: seconds on the owner's PC per group, read by scripts/qa/test-budget.ts. The sum of a release's groups must not exceed its ceiling and must equal its declared total; a group's scripts are the §J.1 / §J.6 rows its track owns. A release with `extends` adds its groups to that release's. `measuredSec` is the group's time in the last timed run (`npm run test:budget`) that re-cut the table; the static check refuses a share below it. Maintainer-owned (§K.3): a part changes its share through a CCR. Re-cut at P0 (review G7, CCR r1.0-c0b-3 items 2 and 3) from the timed run of 2026-10-28 on the owner's PC (heavy mutex held, 1.7 GB free): existing 88.5 s, core 63.0 s, then 46.1 s once test:prepublish's ar fixtures and lock child processes moved to test:slow; the R1 ceiling is raised from 180 s to 240 s and the track shares cut to fit (the declared 175 s could not hold the 150 s the two maintainer groups measure).",
   "current": "R1",
   "releases": {
     "R1": {
-      "ceilingSec": 180,
-      "totalSec": 175,
+      "ceilingSec": 240,
+      "totalSec": 235,
       "groups": [
         {
           "id": "existing",
           "label": "pretest asset builds + the existing chain (package.json test: theme, runtime, generator, render, money, conversions, offers, orders)",
           "owner": "maintainer",
-          "budgetSec": 30,
+          "budgetSec": 90,
+          "measuredSec": 88.5,
           "scripts": ["pretest", "theme:check", "test:runtime", "test:generator", "test:render", "test:money", "test:conversions", "test:offers", "test:orders"],
-          "note": "measured by this harness at C0b; above 30 s the maintainer moves the slowest of these suites' sweeps to test:slow. Moved at the R1.0 T4 integration (CCR r1.0-c0b-3 item 1): theme:check runs its seeded subset here (4 of 40 seeds built, 100 of 600 hand-edited specs, every check kept; 30.3 s, the full sweep was 141.5 s) and its full sweep is `theme:check -- --full`, the first script of test:slow. Measured then on the shared PC: the group 82.5 s, the npm test chain 111 s, the timed total 121 s of 180 s; the group stays over its 30 s until the table is re-cut at P0 (item 2)"
+          "note": "measured by this harness at C0b; above 30 s the maintainer moves the slowest of these suites' sweeps to test:slow. Moved at the R1.0 T4 integration (CCR r1.0-c0b-3 item 1): theme:check runs its seeded subset here (4 of 40 seeds built, 100 of 600 hand-edited specs, every check kept; 30.3 s, the full sweep was 141.5 s) and its full sweep is `theme:check -- --full`, the first script of test:slow. Measured then on the shared PC: the group 82.5 s, the npm test chain 111 s, the timed total 121 s of 180 s; the group stays over its 30 s until the table is re-cut at P0 (item 2). Re-cut at P0 (review G7): 88.5 s measured (theme:check 31.2, test:generator 17.2, test:render 13.1, test:offers 11.6, test:conversions 5.1, test:runtime 4.1, test:orders 2.7, test:money 2.5, pretest 1.1), share 90 s. Its suites are P6's, P5's and read-only files; a further cut moves a sweep to test:slow through the owning track"
         },
         {
           "id": "core",
           "label": "core suites",
           "owner": "maintainer",
-          "budgetSec": 20,
+          "budgetSec": 55,
+          "measuredSec": 46.1,
           "scripts": ["test:tenancy-lint", "test:ownership", "test:settings", "test:registries", "test:hosts", "test:permissions", "test:tenancy-unit", "test:envelope", "test:security", "test:jobs", "test:prepublish"],
-          "note": "npm test runs test:tenancy-lint (0 violations over all of src/**, since 7ffbc8c) and test:ownership; the others are timed here (hosts, permissions, envelope and security also run in gate:offline, tenancy-unit in gate:tenancy). Measured at the R1.0 T4 integration: the lint 26.5 s alone (1,004 files, its 19-fixture self-check included), the group 38.5 s with test:jobs and test:prepublish not written yet; the share is raised at P0 (CCR r1.0-c0b-3 item 3). P0 step B adds test:settings to npm test (the §D.10 key schemas, offline, about 2 s); P0 step C adds test:registries (every extension file imported by its registry, offline, about 1 s); P0 step E adds test:prepublish (the budget gate and the STUB-BUILD LOCK, offline, about 8 s with its four child processes run in parallel)"
+          "note": "npm test runs test:tenancy-lint (0 violations over all of src/**, since 7ffbc8c) and test:ownership; the others are timed here (hosts, permissions, envelope and security also run in gate:offline, tenancy-unit in gate:tenancy). Measured at the R1.0 T4 integration: the lint 26.5 s alone (1,004 files, its 19-fixture self-check included), the group 38.5 s with test:jobs and test:prepublish not written yet; the share is raised at P0 (CCR r1.0-c0b-3 item 3). P0 step B adds test:settings to npm test (the §D.10 key schemas, offline, about 2 s); P0 step C adds test:registries (every extension file imported by its registry, offline, about 1 s); P0 step E adds test:prepublish (the budget gate and the STUB-BUILD LOCK, offline, about 8 s with its four child processes run in parallel). Re-cut at P0 (review G7): 63.0 s measured (tenancy-lint 28.2, prepublish 15.6), then 46.1 s (tenancy-lint 25.3, prepublish 6.0) once test:prepublish runs its ar fixtures and the lock's child processes only with --slow (test:slow); share 55 s, test:jobs (P8, not written yet) included"
         },
         {
           "id": "platform",
           "label": "platform (P1 + P2 suites)",
           "owner": "P1, P2",
-          "budgetSec": 20,
+          "budgetSec": 15,
           "scripts": ["test:platform", "test:health", "test:pulse", "test:admin-tokens", "test:admin-motion", "test:admin-rtl", "test:i18n-coverage"],
-          "note": "PLA-§O.1"
+          "note": "PLA-§O.1; 20 s until the P0 re-cut (review G7)"
         },
         {
           "id": "landing",
@@ -42,32 +44,32 @@
           "id": "operations",
           "label": "operations (P4 + P5)",
           "owner": "P4, P5",
-          "budgetSec": 25,
+          "budgetSec": 15,
           "scripts": ["test:ops", "test:queue", "test:state", "test:profit"],
-          "note": "OPE-§O.1; P5's offline suite test:conversions runs in the existing chain"
+          "note": "OPE-§O.1; P5's offline suite test:conversions runs in the existing chain; 25 s until the P0 re-cut (review G7)"
         },
         {
           "id": "ai",
           "label": "ai (P7: test:ai only)",
           "owner": "P7",
-          "budgetSec": 20,
+          "budgetSec": 15,
           "scripts": ["test:ai"],
-          "note": "AI-§Q.1; test:ai-eval is in test:slow"
+          "note": "AI-§Q.1; test:ai-eval is in test:slow; 20 s until the P0 re-cut (review G7)"
         },
         {
           "id": "design",
           "label": "design (P6)",
           "owner": "P6",
-          "budgetSec": 40,
+          "budgetSec": 25,
           "scripts": ["test:design", "test:registry", "test:copylib"],
-          "note": "DES-§25.1"
+          "note": "DES-§25.1; 40 s until the P0 re-cut (review G7); test:copylib measured 2.3-3.8 s"
         }
       ]
     },
     "R2": {
       "extends": "R1",
-      "ceilingSec": 240,
-      "totalSec": 230,
+      "ceilingSec": 300,
+      "totalSec": 290,
       "groups": [
         { "id": "storefront", "label": "storefront (S1, 192 homes)", "owner": "S1", "budgetSec": 40, "scripts": ["test:catalog", "test:store-runtime", "qa:storefront-render"], "note": "the 1,200-home sweep is in test:slow" },
         { "id": "logo", "label": "test:logo (S2)", "owner": "S2", "budgetSec": 8, "scripts": ["test:logo"] },
@@ -77,8 +79,8 @@
     },
     "R3": {
       "extends": "R2",
-      "ceilingSec": 240,
-      "totalSec": 235,
+      "ceilingSec": 300,
+      "totalSec": 295,
       "groups": [
         { "id": "experiments", "label": "test:experiments (D3, 2,000 seeded A/A)", "owner": "D3", "budgetSec": 5, "scripts": ["test:experiments"], "note": "any further R3 script fits the remaining headroom or its contract step moves a seeded subset to test:slow" }
       ]

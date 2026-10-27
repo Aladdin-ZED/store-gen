@@ -31,7 +31,7 @@ import type * as cliche from "@/lib/design/cliche";
 import type { ClicheHit } from "@/lib/design/cliche";
 import type * as derive from "@/lib/design/derive";
 import type * as digest from "@/lib/design/digest";
-import type { GenomeCard, RenderDigest } from "@/lib/design/digest";
+import type { CodDigestInputs, GenomeCard, RenderDigest } from "@/lib/design/digest";
 import type * as distance from "@/lib/design/distance";
 import type { DistanceView } from "@/lib/design/distance";
 import type * as features from "@/lib/design/features";
@@ -129,11 +129,14 @@ import type { Locale, PageDoc, ThemeLook } from "@/lib/page/schema";
 import type * as platformHealth from "@/lib/platform/health";
 import type { PlatformHealth } from "@/lib/platform/health";
 import type { PulseContributor, StorePulse } from "@/lib/pulse/types";
+import type * as consoleNavMod from "@/components/admin/shell/nav/console";
+import type * as navRegistry from "@/components/admin/shell/nav/index";
+import type { NavContribution, StaffNavItem } from "@/components/admin/shell/nav/types";
 import type { StoreConfirmation } from "@/lib/settings/keys/store";
 import type * as push from "@/lib/sheets/push";
 import type * as testing from "@/lib/testing/links";
 import type * as tracking from "@/lib/tracking/links";
-import type { ActionResult, Actor, PlatformCtx, StoreCtx, StoreRow, StoreScope, StoreStatus, SystemCtx, WriteCtx, WriteScope } from "@/lib/tenancy/types";
+import type { ActionResult, Actor, MessageKey, PlatformCtx, StoreCtx, StoreRow, StoreScope, StoreStatus, SystemCtx, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 import type { City } from "@/lib/markets/types";
 import type { StoreAddress } from "@/lib/urls";
 import type { z } from "zod";
@@ -676,6 +679,13 @@ export type P2Shell = [
   Assert<Equals<PulseContributor, { id: string; contribute(scope: StoreScope, viewer: { userId: string; role: string }): Promise<Record<string, number>> }>>,
   // the frozen `jobs` field is produced by P7's stub
   Assert<Equals<StorePulse["jobs"], Awaited<ReturnType<typeof aiPulse.aiJobsForPulse>>>>,
+  // P0 review G8 (PD36): P1's nav/console.ts holds the staff entry the store switcher renders, never a sidebar
+  // contribution; a StaffNavItem cannot be spread into NAV_CONTRIBUTIONS, so P1 filling the file adds no member item
+  Assert<Equals<typeof consoleNavMod.nav, StaffNavItem[]>>,
+  Assert<Equals<StaffNavItem, { id: string; label: MessageKey; href: () => string; icon: string }>>,
+  Assert<Equals<Has<StaffNavItem, NavContribution>, false>>,
+  Assert<Equals<typeof navRegistry.STAFF_NAV, readonly StaffNavItem[]>>,
+  Assert<Equals<typeof navRegistry.staffNavFor, (platformRole: PlatformRole | "none") => readonly StaffNavItem[]>>,
 ];
 
 /* ------------------------------------------------------------------ */
@@ -829,8 +839,12 @@ export type P6Director = [
   // the Director task names are ai's task ids
   Assert<Equals<DirectorTask, "design.plan" | "design.critique" | "design.verify">>,
   Assert<Has<DirectorTask, AiTaskId>>,
-  Assert<Equals<typeof digest.renderDigest, (doc: PageDoc, theme: BuiltTheme, genome: DesignGenome, report: GateReport) => RenderDigest>>,
-  Assert<Equals<keyof RenderDigest, "v" | "sections" | "hero" | "counts" | "type" | "colour" | "gates" | "heights" | "honesty" | "stub">>,
+  // P0 review G1: `cod` (core §K.2, LAN-§3.7) is P3's `codInvariants` result over the report's heights and the store
+  // facts of the optional fifth argument; null without them. R9 of the Director rubric reads it (ai.md AI-§A.8.3).
+  Assert<Equals<typeof digest.renderDigest, (doc: PageDoc, theme: BuiltTheme, genome: DesignGenome, report: GateReport, cod?: CodDigestInputs) => RenderDigest>>,
+  Assert<Equals<keyof RenderDigest, "v" | "sections" | "hero" | "counts" | "type" | "colour" | "gates" | "heights" | "honesty" | "cod" | "stub">>,
+  Assert<Equals<RenderDigest["cod"], CodInvariants | null>>,
+  Assert<Equals<CodDigestInputs, Omit<CodInvariantInputs, "heights">>>,
   Assert<Equals<RenderDigest["gates"], { hard: GateId[]; soft: GateId[]; slop: number; q: number }>>,
   Assert<Equals<RenderDigest["hero"]["fold"], FoldReport>>,
   // the reveal component P2 mounts (CRIT2-6): props exactly as §K.2

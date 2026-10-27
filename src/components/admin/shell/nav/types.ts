@@ -42,3 +42,15 @@ export interface NavContribution {
   item: NavItem;
   order?: number;
 }
+
+/**
+ * The one staff entry of the tenant shell (platform.md PD36, rev 2; P0 review G8): "Platform console", rendered by the
+ * store switcher (core §B.4) only when `user.platformRole` is not "none", never by the sidebar. P1's `./console.ts`
+ * exports these; the registry hands them out as `STAFF_NAV`, outside `NAV_CONTRIBUTIONS`, so no member sees them.
+ */
+export interface StaffNavItem {
+  id: string;
+  label: MessageKey;
+  href: () => string; // consoleHref("/")
+  icon: IconName;
+}

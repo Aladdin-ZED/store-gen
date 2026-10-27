@@ -2,7 +2,8 @@
 
 Date 2026-10-27 · branch `main` · contract: docs/STORE-SAAS.md core rev 6, §K.2 "Step P0" and §K.3, with the
 maintainer build note of §K.2 (items 1-13). Commits: `0042571` (lead: packages), `df46028` (A), `78559ef` (B),
-`e709178` (C), `0abe4da` (D), `1f4d6ed` (E) and step F (this report, the verification and its two fixes).
+`e709178` (C), `0abe4da` (D), `1f4d6ed` (E), `70862b9` (F: this report, the verification and its two fixes) and
+step G (the review fixes, "Review and fixes" at the end).
 
 ## Summary
 
@@ -126,7 +127,7 @@ section in its header.
 | File | Export | Stub behaviour |
 |---|---|---|
 | `src/lib/platform/notify.ts` (existing) | `notify` | T2's working body |
-| `src/lib/platform/notify.ts` (existing) | `listNotifications`, `unreadCount`, `markRead` | throws: rows exist since R1.0, so an empty answer would pretend |
+| `src/lib/platform/notify.ts` (existing) | `listNotifications`, `unreadCount`, `markRead` | **real** from step G (review G2): the PLA-§18.1 read rules over the R1.0 rows, P1 refines |
 | `src/lib/platform/health-snapshot.ts` | `getStoreHealth` | `null` = not computed yet |
 | `src/lib/platform/health-snapshot.ts` | `markHealthDirty` | no-op |
 | `src/lib/platform/health-snapshot.ts` | `requestHealthRecompute` | marks the store dirty and answers `queuedAt` |
@@ -147,7 +148,7 @@ section in its header.
 
 | File | Export | Stub behaviour |
 |---|---|---|
-| `src/lib/ai/router/server.ts` | `aiPolicyFor` | cloud unavailable with `platform_off` (`state` under impersonation); no live task |
+| `src/lib/ai/router/server.ts` | `aiPolicyFor` | cloud unavailable with `platform_off` (`state` under impersonation); no live task; `mode` and the local rung from `store_ai`, local off under impersonation (review G3) |
 | `src/lib/ai/router/server.ts` | `runAi` | the typed failure `disabled` |
 | `src/lib/ai/router/server.ts` | `registerBatchResultHandler`, `batchResultHandler` | **real** registry |
 | `src/lib/ai/router/server.ts` | `queueAi` | throws |
@@ -174,7 +175,7 @@ section in its header.
 | `src/lib/design/cliche.ts` | `clicheScore` | no hit |
 | `src/lib/design/hints.ts` | `validateHints` | accepts nothing; every entry is dropped with `why: "vocab"` |
 | `src/lib/design/health.server.ts` | `designHealth` | empty |
-| `src/lib/design/digest.ts` | `renderDigest` | a digest with empty counts and `gates: { hard: [], soft: [], slop: 0, q: 0 }`, flagged `stub: true` |
+| `src/lib/design/digest.ts` | `renderDigest` | a digest with empty counts, `gates: { hard: [], soft: [], slop: 0, q: 0 }` and `cod: null` (review G1), flagged `stub: true` |
 | `src/lib/design/heights.ts` | `estimateHeights` | report flagged `stub: true`: `fold.ok = true`, every section 600 px, `formTop = null` |
 | `src/lib/design/heights.ts` | `HEIGHT_MODEL_VERSION` | `0` (the stub) |
 | `src/lib/design/features.ts` | `variantFeatures` | the documented defaults: `family: "grid"`; the two fixed layers (sticky bar, WhatsApp float) |
@@ -206,7 +207,7 @@ disk is imported (17 registries).
 
 | Track | Files |
 |---|---|
-| P1 | `health/rules/platform.ts`, `notify/kinds/platform.ts`, `flags/defs/platform.ts`, `jobs/tracks/platform.ts`, nav `console.ts`, i18n `{console,notify}.ts` × 3 locales, `tenancy-cases/platform.ts`, `wow-demo/steps/platform.ts` |
+| P1 | `health/rules/platform.ts`, `notify/kinds/platform.ts`, `flags/defs/platform.ts`, `jobs/tracks/platform.ts`, nav `console.ts` (the staff entry, `StaffNavItem[]`, read as `STAFF_NAV` outside the sidebar: review G8), i18n `{console,notify}.ts` × 3 locales, `tenancy-cases/platform.ts`, `wow-demo/steps/platform.ts` |
 | P2 | `health/rules/shell.ts`, `pulse/contributors/shell.ts`, `commands/shell.ts`, i18n `{shell,auth,onboarding,team,health,brief}.ts` × 3, `wow-demo/steps/shell.ts` |
 | P3 | `health/rules/landing.ts`, `pulse/contributors/landing.ts`, `notify/kinds/landing.ts`, `orders/hooks/landing.ts`, `render/prepublish/landing.ts`, `admin-data/search/landing.ts`, `commands/landing.ts`, nav `landing.ts`, `jobs/tracks/landing.ts`, i18n `landing.ts` × 3, `tenancy-cases/landing.ts`, `wow-demo/steps/landing.ts`, `render-cases/landing.ts`. No flags file (LAN-§23.10). |
 | P4 | `health/rules/ops.ts`, `pulse/contributors/ops.ts`, `notify/kinds/ops.ts`, `flags/defs/ops.ts`, `orders/hooks/ops.ts`, `admin-data/search/ops.ts`, `commands/ops.ts`, nav `ops.ts`, `jobs/tracks/ops.ts`, i18n `{ops,finance}.ts` × 3, `tenancy-cases/ops.ts`, `wow-demo/steps/ops.ts` |
@@ -231,7 +232,7 @@ names: storefront, logo, ledger, imports, carriers, webhooks, experiments. 47 sc
 
 | In an aggregate now | Scripts |
 |---|---|
-| `npm test` (P0 added three) | `test:settings`, `test:registries`, `test:prepublish`, alongside the existing suites. `test-budget --static`: 175 of 180 s declared. |
+| `npm test` (P0 added three) | `test:settings`, `test:registries`, `test:prepublish`, alongside the existing suites. `test-budget --static`: 235 of 240 s declared after the step G re-cut (175 of 180 s before; review G7). |
 | `gate:r1` | `gate` + `qa:wow-demo` + `qa:publish-gates` + `qa:design-corpus` + `test:ai-eval`, then `qa:ai-eval-live` only when `ANTHROPIC_API_KEY` is set. `qa:wow-demo` fails by design until the R1 integration writes its browser runner. |
 | in no aggregate yet: the file does not exist, so the maintainer adds it at that track's merge | `test:platform`, `test:health`, `test:pulse`, `test:admin-{tokens,motion,rtl}`, `test:i18n-coverage`, `test:delivery`, `test:landing-addons`, `test:policies`, `test:wa-price`, `test:test-orders`, `test:kit`, `test:links`, `test:tracking`, `test:leads`, `test:honesty`, `test:cod-invariants`, `test:ops`, `test:queue`, `test:state`, `test:profit`, `test:ai`, `test:design`, `test:registry`, `test:storage`, `test:{health,ops,integrations,design,ai}-db`, `qa:publish-gates`, `qa:pulse-e2e`, `qa:admin-perf`, `qa:wizard-e2e`, `qa:design-corpus`, `qa:design-report`, `qa:ai-probe`, `qa:ai-stream`, `qa:ai-eval-{live,local}`, `qa:detached-job-probe` |
 | exists, but not in `npm test` | `test:copylib` (the existing selftest) |
@@ -319,6 +320,8 @@ Each one is recorded in the §K.2 maintainer build note.
 - `callingWindowFacts` (`src/lib/editor/check-facts.ts`, T4, read-only) ignores ranges that cross midnight. This
   contradicts OPE-§5.5 and needs a CCR.
 - One existing lint warning in `src/lib/orders/text.ts`, a read-only file not touched by P0.
+- The `runtime` re-render of every live page, so pages published under R1.0 carry the report link (review G9): it
+  needs P8's `enqueueRenders` and the `renders` job, so it runs at the R1 integration deploy (§H.10 now lists it).
 
 ## 7. Verification (step F, final tree; heavy commands through the machine mutex)
 
@@ -386,3 +389,194 @@ Results:
   7 platform usage metrics) is in `src/lib/auth/permissions.ts` and `src/lib/tenancy/entitlement-keys.ts`.
 - A scan of the five R1 part specs found no permission or entitlement key outside those lists, and none was added.
 - Every R1 script name of §J is in `package.json`.
+
+## Review and fixes (step G, 2026-10-28)
+
+The P0 review raised nine findings: four major, five minor, no blocker. Eight are fixed and one (G9) is fixed in the
+spec, with the work deferred to the integration deploy because it needs P8's render queue. Each major fix has a
+regression test. Each finding was re-verified on the tree before it was fixed. The §K.2 build note records the
+decisions as item 14.
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| G1 | major | `RenderDigest` had no `cod`, although core §K.2 and LAN-§3.7 say it carries the COD invariants that R9 reads | **fixed** |
+| G2 | major | the notification read API threw, but P2 (merging before P1) must fill `StorePulse.unread` on every poll | **fixed** |
+| G3 | minor | `aiPolicyFor` turned off the local AI rung and ignored `store_ai` | **fixed** |
+| G4 | minor | §M.2 still said F5 / R1 / R4 / R5 / K2 / I1 stay hard before P6; build note item 5 and `budget.ts` say otherwise | **fixed** (spec) |
+| G5 | minor | §H.2's lease SQL used the reserved word `cursor` unquoted | **fixed** (spec) |
+| G6 | minor | `test:migrate` ignored collations, engines, AUTO_INCREMENT and CHECK text | **fixed** |
+| G7 | major | the `npm test` budget table was never re-cut (CCR r1.0-c0b-3 items 2 and 3); the timed run failed | **fixed** |
+| G8 | major | P1's `nav/console.ts` was merged into the sidebar contributions every member sees | **fixed** |
+| G9 | minor | pages published under R1.0 get the report link only when re-rendered, and nothing scheduled that | **fixed in the spec; the re-render runs at the integration deploy** |
+
+### G1: `RenderDigest.cod` (major, fixed)
+
+- **Re-verified.** `digest.ts` had no `cod`; the contract pinned the key set without it; core §K.2 (the landing item)
+  and LAN-§3.7 name `RenderDigest.cod`.
+- **Decision: the core wins.** DES-§8.9 and AI R46 listed the shape without `cod`, but that was an omission, not a
+  choice: R46 asks design to confirm the shape "with no field added for ai", and `cod` is landing's field.
+- **The fix.**
+  - `RenderDigest` gains `cod: CodInvariants | null`.
+  - `renderDigest` takes an optional fifth argument, `cod?: CodDigestInputs`. `CodDigestInputs` is
+    `CodInvariantInputs` without `heights`: the store facts zones-line, zones-with-line and WhatsApp. Without that
+    argument the answer is `null`. With it, P6 calls P3's `codInvariants(doc, { heights: report.heights, ...cod })`.
+  - The stub answers `cod: null`. `CodDigestInputs` is exported from `src/lib/design/index.ts`.
+  - The frozen signature changes only by the optional argument, so today's callers compile unchanged.
+  - R9 reads `digest.cod`. While it is `null`, R9 is scored from the form position and the fold alone, never from
+    guessed store facts.
+- **Regression test.** Four assertions in `src/lib/contracts/r1-p0.ts` (two new, two amended) pin the new signature,
+  the key set with `cod`, `RenderDigest["cod"]` and `CodDigestInputs`. Dropping or re-typing `cod` breaks `tsc`.
+
+### G2: working notification reads (major, fixed)
+
+- **Re-verified.** `listNotifications`, `unreadCount` and `markRead` threw `not implemented: P1 …`. The R1.0
+  `notifications` and `notification_reads` tables exist, and P2 merges before P1.
+- **The fix** (`src/lib/platform/notify.ts`): the PLA-§18.1 read rules, implemented over the R1.0 rows.
+
+  | Reader | Reads |
+  |---|---|
+  | a member of a store | the store's `store` rows; its `store_role` rows whose `roles` contain the member's role (`JSON_CONTAINS`); the member's own `user` rows in the store; the member's platform-wide `user` rows |
+  | `role: null` (staff viewing a store) | only rows addressed to the reader |
+  | staff in the console | `platform_staff` rows up to their rank (`NULL` = every staff role), plus their own platform-wide rows |
+
+  - Expired rows are hidden.
+  - Titles and bodies are `notify.<kind>.title` / `.body` in `users.locale`, falling back to English. Staff free text
+    is the body as typed. Kinds that no track has registered yet are in group "store".
+  - Paging is keyset (`beforeId`): default 20, at most 50 per page.
+  - `unreadCount` is cached for 5 s in the `notify-unread` `scopedCache` (PLA-§M.5) and stops at `UNREAD_CAP = 100`.
+  - `markRead` marks only ids the reader may read (at most 200) and clears the reader's cached count.
+  - Store rows go through `whereStore` with the system seam, as `notify()`'s writes do. The store-less rows are one
+    annotated query, so the `src/lib/platform/**` pin goes from 4 to 5 (`scripts/qa/tenancy-allow.json`).
+    `test:tenancy-lint` still reports 0 violations.
+- **P4's sources.** Build note item 14 now states the rule: a source that throws `not implemented` is "unavailable".
+  P2's pulse and Today brief leave out the key or line it would fill (`opsPulse`, `queueCounts`, …), and never write a
+  made-up 0. A pulse contributor already omits its keys on failure (§I.4).
+- **Regression test.** `test:tenancy` has 15 new checks in `notificationCases` (special cases, step 9). They cover:
+  - who reads which row: A's owner, A's agent, B's owner, the member of both stores, an outsider, staff in the
+    console, staff with the support role, and staff viewing A;
+  - that an agent never reads a row addressed to owners (PL-13);
+  - the expiry filter;
+  - keyset paging and the group filter;
+  - `unreadCount` against `markRead`: per reader, with other readers' ids ignored, and "Mark all read".
+
+  The suite went from 6,551 to 6,566 checks, all passing.
+
+### G3: `aiPolicyFor` keeps the store's local AI (minor, fixed)
+
+- **The fix.** `mode` and `local` (`enabled` = `localEnabled`, `tierMax` = `localTierCeiling`, `bgRemoval`) are read
+  from `getStoreSetting(ctx.scope, "store_ai")`.
+- `local.enabled` is false under impersonation (AI-§A.4) and when the setting cannot be read.
+- The cloud block is unchanged: `platform_off`, or `state` under impersonation, with `live: []`.
+- No regression test: the finding is minor, and the frozen return shape is already asserted.
+
+### G4: §M.2 matches build note item 5 (minor, fixed in the spec)
+
+- §M.2's "Measurement" paragraph now says that before P6 every row is a note with `vars.stub = 1`, and that every row
+  is hard from the P6 merge.
+- It also names the one-line alternative if the lead rejects build note item 5: `budgetResult` would soften only C2,
+  C3 and F1. That decision still awaits the lead's sign-off; the spec and the code now agree.
+
+### G5: §H.2 lease SQL (minor, fixed in the spec)
+
+- The acquire, renew and release statements now quote `` `cursor` ``.
+- A note tells P8 that `cursor` and `profit_alerts.key` need backticks in raw SQL.
+- It also offers P8 an optional hardening: `INSERT IGNORE` of the `tick` seed row before the compare-and-set.
+- No code runs this SQL yet: the tick runner is P8's. `src/lib/jobs/scope.ts` already quotes the column.
+
+### G6: `test:migrate` compares collations, engines, AUTO_INCREMENT and CHECK text (minor, fixed)
+
+- **The fix** (`scripts/qa/migrate-check.ts`). Both the live shape and schema.ts's expected shape now carry:
+  - a `tbl` line per table (engine, collation);
+  - each column's collation (`utf8mb4_unicode_ci` for character types, none otherwise) and AUTO_INCREMENT;
+  - each CHECK's normalized expression. The snapshot comparison also uses the expression.
+- `createDb` takes a default collation. The two (j) upgrade databases (`cod_test_p0_r10` and
+  `cod_test_p0_fallback`) are created with `utf8mb4_general_ci`. A CREATE TABLE that drops its own clause therefore
+  differs from a fresh install.
+- **Mutation probe** (not committed). With the clause removed from 0005's `cron_cursors`, `test:migrate` failed 4
+  checks: the fallback and R1.0-data "= the clean schema" checks and the two interrupted-upgrade checks. Before the fix
+  it passed. With 0005 restored, 217/217 pass.
+
+### G7: the `npm test` budget re-cut (major, fixed)
+
+- **The timed run.** `npm run test:budget`, through the mutex on 2026-10-28, exited 1:
+
+  | Group | Measured | Budget | Largest suites |
+  |---|---|---|---|
+  | existing | 88.5 s | 30 s | `theme:check` 31.2, `test:generator` 17.2, `test:render` 13.1, `test:offers` 11.6 |
+  | core | 63.0 s | 20 s | `test:tenancy-lint` 28.2, `test:prepublish` 15.6 |
+  | design (`test:copylib` only) | 3.8 s | 40 s | |
+  | **total** | **155.3 s** | | the R1 track suites are still pending |
+
+  The declared 175 s of 180 s could not hold the roughly 150 s that the two maintainer groups measure, let alone the
+  125 s promised to the tracks.
+- **What moved.** In `npm test`, `test:prepublish` now runs its in-process checks over the fr fixtures only. The ar
+  fixtures and the four child processes of the lock proof run under `--slow`, which is the second script of
+  `test:slow` and so runs in every `gate`. `prebuild` still runs `stub-lock.ts` on every build. `test:prepublish`
+  went from 15.6 s to 6.0 s, and core from 63.0 s to 46.1 s.
+- **The new R1 table** (`scripts/qa/test-budget.json` and §J.1). The track groups are cut from 125 s to 90 s in all.
+
+  | Group | Budget | Before |
+  |---|---|---|
+  | existing | 90 s (88.5 s measured) | 30 s |
+  | core | 55 s (46.1 s measured; P8's `test:jobs` still to come) | 20 s |
+  | platform | 15 s | 20 s |
+  | landing | 20 s | 20 s |
+  | operations | 15 s | 25 s |
+  | ai | 15 s | 20 s |
+  | design | 25 s | 40 s |
+  | **total** | **235 s of a 240 s ceiling** | 175 s of 180 s |
+
+  - §J.1's "≤ 3 minutes" becomes "≤ 4 minutes", with the reason.
+  - The R2 and R3 ceilings rise by the same 60 s, to 300 s (290 s and 295 s declared), so their static checks still
+    hold. Their contract steps re-cut from a timed run.
+- **Regression test.**
+  - Each maintainer group records `measuredSec`. The static check refuses a share below its own measurement, and the
+    harness self-check has a case for that.
+  - The static check now runs in `gate` as `npm run test:budget-static`; before, nothing ran it. It reports 235 of
+    240 s, consistent.
+  - The maintainer runs the timed `test:budget` at every merge that adds suites to `npm test` (§J.1).
+
+### G8: the staff entry stays out of the sidebar (major, fixed)
+
+- **Re-verified.** `NAV_CONTRIBUTIONS` spread `consoleNav`, and `storeNav` renders `NAV_CONTRIBUTIONS` for every
+  member. `NavItem` / `NavCtx` cannot express "staff only".
+- **The fix.**
+  - `src/components/admin/shell/nav/types.ts` (maintainer) adds `StaffNavItem` (`{ id; label; href: () => string;
+    icon }`).
+  - P1's `nav/console.ts` exports `StaffNavItem[]`, still empty.
+  - The registry drops it from `NAV_CONTRIBUTIONS` and exports it as `STAFF_NAV` and `staffNavFor(platformRole)`, which
+    returns nothing for `"none"`. The store switcher (P2) renders it behind the platform-role check, as PD36 says.
+  - `test:registries` still finds the file imported and used.
+- **Regression test.** Five assertions in the contract file:
+  - the console file's type is `StaffNavItem[]`;
+  - the `StaffNavItem` shape;
+  - a `StaffNavItem` is not a `NavContribution`, so it cannot be spread into the sidebar list without breaking `tsc`;
+  - the types of `STAFF_NAV` and `staffNavFor`.
+
+### G9: report link on pages published under R1.0 (minor, fixed in the spec, work deferred)
+
+- **Re-verified.** `loadPublished` serves the stored `page_versions.html`.
+- **The fix.** §H.10's R1 integration deploy now re-renders every live page of every store after 0005 and the boot:
+  `forEachStore` → `enqueueRenders(scope, "all-live", "runtime", 5)`, drained by the `renders` job. The smoke then
+  checks an R1.0 page of store #1 for exactly one `lp-report` row.
+- Build note item 10 now says "every live document rendered from P0 on".
+- **Why deferred.** `enqueueRenders` and the `renders` job are P8's stubs at P0, and no production deploy happens
+  between P0 and the integration (§H.10).
+
+### Verification after the fixes (heavy commands through the machine mutex)
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit -p .` | exit 0 |
+| `npm run lint` | 0 errors; 1 old warning (`src/lib/orders/text.ts`) |
+| `npm test` | exit 0, 153 s wall time with npm. Includes `test:prepublish` 9/9, `test:registries` 17 registries, ownership, and tenancy-lint at 0 violations (1,166 files). |
+| `npm run test:slow` | exit 0: every theme check, and `test:prepublish --slow` 10/10 (the lock's child processes included) |
+| `npm run test:budget` (timed, before the re-cut) | exit 1, as G7 describes |
+| `npx tsx scripts/qa/test-budget.ts --group core,design` (after the prepublish split) | core 46.1 s, design 2.3 s |
+| `npm run test:budget-static` | 235 of 240 s, consistent |
+| `npm run test:migrate` | 217/217; the mutation probe failed 4 checks as intended; every throwaway DB dropped |
+| `npm run test:tenancy -- --db cod_test_p0_tenancy` | 6,566 passed, 0 failed, 12 not applicable |
+| `npm run qa:action-replay -- --db cod_test_p0_action_replay` | 4,128 passed, 0 failed |
+| `SG_STUB_BUILD_OK=1 npm run build` | exit 0, 145 s. The stub-lock warning was printed, `gate:offline` passed (tenancy-lint 0), and the build compiled. |
+| `ownership-check --phase R1` | 0 findings: no file has two owners and every new file has an owner (no new file in step G) |
+| `cod_test_*` databases left | 0 |

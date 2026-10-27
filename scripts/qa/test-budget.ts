@@ -3,13 +3,15 @@
  * whose sum is checked, not a list of shares"). Reads the committed table scripts/qa/test-budget.json:
  *
  *   npm run test:budget                                   (static checks, then runs every group's scripts and times them)
- *   npx tsx scripts/qa/test-budget.ts --static            (the static checks only; no suite runs, < 1 s)
+ *   npx tsx scripts/qa/test-budget.ts --static            (the static checks only; no suite runs, < 1 s; npm run test:budget-static, in npm run gate)
  *   npx tsx scripts/qa/test-budget.ts --group core,design (only these groups; the ceiling is then not judged)
  *   npx tsx scripts/qa/test-budget.ts --verbose           (also print each suite's output)
  *   npx tsx scripts/qa/test-budget.ts --json              (one JSON document on stdout)
  *
  * Static (every release of the table, so R2 / R3 shares cannot grow silently either): the sum of a release's group
  * budgets (with the groups of the release it `extends`) must not exceed its ceiling and must equal its declared total;
+ * a group's `measuredSec` (its time in the timed run that last re-cut the table, P0 review G7) must not exceed its
+ * budget, so a re-cut cannot declare a share below its own measurement;
  * group ids and scripts are unique; every script that package.json's `test` chain runs, and `pretest`, belongs to a
  * group of the current release (a new suite joins `npm test` only with a budget), and the `test` entry runs nothing
  * but `npm run <script>` (a direct `tsx` / `node` command would join the chain unbudgeted and untimed). The harness
@@ -36,6 +38,7 @@ const Group = z.object({
   label: z.string().min(1),
   owner: z.string().min(1),
   budgetSec: z.number().int().positive(),
+  measuredSec: z.number().nonnegative().optional(),
   scripts: z.array(z.string().min(1)).min(1),
   note: z.string().optional(),
 });
@@ -130,6 +133,7 @@ function staticChecks(table: Table, scripts: Record<string, string>): string[] {
     const owners = new Map<string, string>();
     for (const g of groups) {
       ids.set(g.id, (ids.get(g.id) ?? 0) + 1);
+      if (g.measuredSec !== undefined && g.measuredSec > g.budgetSec) problems.push(`${name}: group ${g.id} measured ${g.measuredSec} s in the run that re-cut the table, over its ${g.budgetSec} s share`);
       for (const s of g.scripts) {
         const prev = owners.get(s);
         if (prev && prev !== g.id) problems.push(`${name}: script ${s} is in two groups (${prev}, ${g.id})`);
@@ -160,6 +164,8 @@ function selfCheck(): string[] {
   same("static: budgeted chain passes", staticChecks(table, { test: "npm run a", a: "tsx a.ts" }), []);
   same("static: a direct command fails", staticChecks(table, { test: "npm run a && tsx scripts/qa/x.ts", a: "tsx a.ts" }).length, 1);
   same("static: an unbudgeted script fails", staticChecks(table, { test: "npm run a && npm run b", a: "tsx a.ts", b: "tsx b.ts" }).length, 1);
+  const under: Table = { current: "R", releases: { R: { ceilingSec: 10, totalSec: 5, groups: [{ id: "g", label: "g", owner: "m", budgetSec: 5, measuredSec: 6, scripts: ["a"] }] } } };
+  same("static: a share below its own measurement fails", staticChecks(under, { test: "npm run a", a: "tsx a.ts" }).length, 1);
   return out;
 }
 

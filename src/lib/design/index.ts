@@ -17,7 +17,7 @@ export { clicheScore, type ClicheHit, type CopyReport } from "./cliche";
 export { genomeDistance, type DistanceView } from "./distance";
 export { estimateHeights, HEIGHT_MODEL_VERSION } from "./heights";
 export { variantFeatures } from "./features";
-export { renderDigest, type GenomeCard, type RenderDigest } from "./digest";
+export { renderDigest, type CodDigestInputs, type GenomeCard, type RenderDigest } from "./digest";
 export { AI_REPAIR_OPS, type AiRepairOp, type RepairOp } from "./gates/repair";
 export type { CompositionKey, DesignGateItem, GateId, GateReport, OriginClass, Register } from "./gates/types";
 export type { PhotoFacts } from "./photo-facts";
