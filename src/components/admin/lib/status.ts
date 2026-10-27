@@ -18,10 +18,20 @@ export const ORDER_STATUS_META: Record<OrderStatus, { label: string; fr: string;
   returned: { label: "Returned", fr: "Retournée", tone: "rose", hint: "Refused or returned" },
   cancelled: { label: "Cancelled", fr: "Annulée", tone: "neutral", hint: "Cancelled before shipping" },
   fake: { label: "Fake", fr: "Fausse commande", tone: "red", hint: "Not a real order" },
+  // R1 projections of the state axes (operations.md OPE-§3.3), appended to the contract at P0; set by P4's state machine
+  refused: { label: "Refused", fr: "Refusée", tone: "rose", hint: "Refused at the door" },
+  duplicate: { label: "Duplicate", fr: "Doublon", tone: "neutral", hint: "Same order as another one" },
+  unreachable: { label: "Unreachable", fr: "Injoignable clôturée", tone: "neutral", hint: "Closed after the call attempts" },
+  in_transit: { label: "In transit", fr: "En livraison", tone: "blue", hint: "On its way to the customer" },
+  lost: { label: "Lost", fr: "Perdue", tone: "red", hint: "Lost on the way" },
 };
 
-/** Workflow order — ORDER_STATUS_META lists the statuses in the contract's ORDER_STATUSES order. */
-export const ORDER_STATUS_ORDER = Object.keys(ORDER_STATUS_META) as OrderStatus[];
+/**
+ * Workflow order of the statuses a person sets by hand (the status menu and its filter): the nine of the
+ * single-tenant workflow, as before P0. The R1 projections above are labelled wherever an order shows one; P4's
+ * "Move to…" menu (OPE-§12.6) replaces this list.
+ */
+export const ORDER_STATUS_ORDER: OrderStatus[] = ["new", "confirmed", "no_answer", "callback", "shipped", "delivered", "returned", "cancelled", "fake"];
 
 export function orderStatusMeta(status: string) {
   return ORDER_STATUS_META[status as OrderStatus] ?? { label: status, fr: status, tone: "neutral" as Tone, hint: "" };

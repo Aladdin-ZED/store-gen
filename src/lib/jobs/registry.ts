@@ -3,7 +3,13 @@ import "server-only";
  * The job registry (docs/STORE-SAAS.md §H.2, §K.3): every job of every track, read by the runner (P8). Maintainer-
  * owned: a job is registered only from its track's `./tracks/<track>.ts`, so no track edits this file. `test:jobs`
  * fails when the guaranteed budgets sum above 95 s, a job declares no budget or two jobs share a name.
+ *
+ * It also loads the outbox handlers (§H.1): each `./handlers/<kind>.ts` registers itself with
+ * `registerOutboxHandler` at import, so whatever drains the outbox (the runner's `outbox` slot, the `after()` drain of a
+ * request) loads this registry first. The import lines are written at P0 (`scripts/qa/registries-check.ts`).
  */
+import "./handlers/capi";
+import "./handlers/telegram";
 import type { Job } from "./runner";
 import { jobs as aiJobs } from "./tracks/ai";
 import { jobs as coreJobs } from "./tracks/core";

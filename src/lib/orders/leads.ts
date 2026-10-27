@@ -106,3 +106,22 @@ async function storeLead(scope: WriteScope, payload: Lead, ctx: UpsertLeadContex
     });
   return { stored: true };
 }
+
+/**
+ * An agent's conversion of a lead into an order (P3 LANDING; landing.md LAN-§10.2, operations.md OPE-§11.4;
+ * docs/STORE-SAAS.md §K.2 P0): sets `converted_order_id` and `converted_via = 'agent'`. Idempotent: a lead converted
+ * already answers its existing order id (`already: true`); a lead of another store answers `not_found`. Called by P4's
+ * `convertLeadToOrder`. Typed stub frozen at P0.
+ */
+export async function markLeadConverted(
+  scope: WriteScope,
+  leadId: string,
+  orderId: string,
+  via: "agent",
+): Promise<{ ok: true; orderId: string; already: boolean } | { ok: false; error: "not_found" }> {
+  void scope;
+  void leadId;
+  void orderId;
+  void via;
+  throw new Error("not implemented: P3 markLeadConverted");
+}

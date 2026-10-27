@@ -8,10 +8,10 @@
  *
  * Per registry: each `<folder>/<file>.ts` is imported by the registry with a value import (never `import type`) of the
  * name the extension point exports (`rules`, `jobs`, `nav`, …), and that binding is used beyond its import line; each
- * extension file exports that name. Side-effect registries (`prepublish`) import the file for its effects. The
- * tenancy harness loads its case files lazily, so its `TENANCY_CASE_FILES` list must equal the folder instead. The
- * three admin locales hold the same i18n files. The checker proves itself first on in-memory fixtures (exit 2 when that
- * self-check fails).
+ * extension file exports that name. Side-effect registries (`prepublish`, the outbox handlers) import the file for its
+ * effects. The tenancy harness loads its case files lazily, so its `TENANCY_CASE_FILES` list must equal the folder
+ * instead. The three admin locales hold the same i18n files. The checker proves itself first on in-memory fixtures
+ * (exit 2 when that self-check fails).
  */
 import path from "node:path";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -40,6 +40,8 @@ export const REGISTRIES: readonly RegistrySpec[] = [
   { id: "notification kinds (§I.4)", dir: "src/lib/notify/kinds", registry: "src/lib/notify/registry.ts", exportName: "kinds" },
   { id: "flags (§D.4)", dir: "src/lib/flags/defs", registry: "src/lib/flags/registry.ts", exportName: "flags" },
   { id: "jobs (§H.2)", dir: "src/lib/jobs/tracks", registry: "src/lib/jobs/registry.ts", exportName: "jobs" },
+  // each handler registers itself at import (registerOutboxHandler, §H.1)
+  { id: "outbox handlers (§H.1)", dir: "src/lib/jobs/handlers", registry: "src/lib/jobs/registry.ts", exportName: null },
   { id: "order hooks (OPE-§3.6)", dir: "src/lib/orders/hooks", registry: "src/lib/orders/hooks.ts", exportName: "hooks" },
   {
     id: "publish checks (§M.1)",

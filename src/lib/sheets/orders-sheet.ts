@@ -55,6 +55,12 @@ const STATUS_TEXT: Record<OrderStatus, { fg: string; bold?: boolean; strikethrou
   returned: { fg: "#9B2C22" },
   cancelled: { fg: "#80868B", strikethrough: true },
   fake: { fg: "#8C1D18", bold: true },
+  // the R1 projections (operations.md OPE-§3.3), appended at P0 with the contract's rows
+  refused: { fg: "#9B1C3A" },
+  duplicate: { fg: "#5F6368" },
+  unreachable: { fg: "#5B3A8C" },
+  in_transit: { fg: "#00695C" },
+  lost: { fg: "#3C4043" },
 };
 
 const LABEL_TO_STATUS = new Map<string, OrderStatus>(

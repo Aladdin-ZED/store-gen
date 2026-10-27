@@ -2,11 +2,15 @@
  * Store setting `ops` (docs/STORE-SAAS.md §D.10, operations.md OPE-§2.9; owner: operations, P4): the call centre.
  * `callingWindow` is the ONE source of the store's calling hours (D73), read through `callingWindowFor(scope)`;
  * weekdays are ISO numbers, 1 = Monday … 7 = Sunday, the same numbers as `checkout.calendar.workdays` (CRIT3).
- * The R1.0 first schema: P4 widens it (R2 assignment rules, R3 routing and the WhatsApp bot) and moves the
- * defaults to src/lib/callcenter/defaults.ts; every default is a reasoned starting value, not researched (OD9, OD10).
+ * The R1.0 first schema: P4 widens it (R2 assignment rules, R3 routing and the WhatsApp bot) and moves the other
+ * defaults to src/lib/callcenter/defaults.ts, where DEFAULT_WINDOW lives since P0; every default is a reasoned
+ * starting value, not researched (OD9, OD10).
  */
 import { z } from "zod";
+import { DEFAULT_WINDOW } from "@/lib/callcenter/defaults";
 import { hhmm, id26, isoDate, isoDateTime } from "../fields";
+
+export { DEFAULT_WINDOW };
 
 export const OpsRange = z.object({ from: hhmm, to: hhmm });
 const DayRanges = z.array(OpsRange).max(3);
@@ -28,16 +32,6 @@ export const LadderStep = z.discriminatedUnion("kind", [
 ]);
 export type LadderStep = z.output<typeof LadderStep>;
 
-const WORK = [
-  { from: "09:30", to: "13:00" },
-  { from: "14:30", to: "21:00" },
-];
-/** Mon-Thu, Sat, Sun 09:30-13:00 + 14:30-21:00; Friday 09:30-12:15 + 14:30-21:00; never confirmed by a person (savedAt null). */
-export const DEFAULT_WINDOW = {
-  days: { 1: WORK, 2: WORK, 3: WORK, 4: WORK, 5: [{ from: "09:30", to: "12:15" }, WORK[1]!], 6: WORK, 7: WORK },
-  closedDates: [] as string[],
-  savedAt: null as string | null,
-};
 /** delays after attempts 1…5; attempt 6 is the last (OD10) */
 export const DEFAULT_LADDER: LadderStep[] = [
   { kind: "after", minutes: 60 },

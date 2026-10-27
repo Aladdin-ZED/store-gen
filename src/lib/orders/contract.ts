@@ -300,7 +300,12 @@ export const EventPayload = z.object({
   utm: Utm.default({}),
 });
 
-/** Sheet / admin order statuses (French labels are what call-center agents see in Google Sheets). */
+/**
+ * Sheet / admin order statuses (French labels are what call-center agents see in Google Sheets). From R1 `status` is
+ * the projection of the order's state axes (operations.md OPE-§3.3, `projectStatus` in src/lib/orders/state.ts). The
+ * first nine rows never move; the last five are appended for P4 at P0 (OPE-§Q.2, Q.9a: the maintainer appends them,
+ * so P4 needs no CCR).
+ */
 export const ORDER_STATUSES = [
   { id: "new", fr: "Nouvelle", color: "#E8F0FE" },
   { id: "confirmed", fr: "Confirmée", color: "#E6F4EA" },
@@ -311,5 +316,12 @@ export const ORDER_STATUSES = [
   { id: "returned", fr: "Retournée", color: "#FCE8E6" },
   { id: "cancelled", fr: "Annulée", color: "#F1F3F4" },
   { id: "fake", fr: "Fausse commande", color: "#F6D6D3" },
+  // R1 (OPE-§3.3): refused at the door; a closed duplicate; unreachable after the ladder ("Injoignable" stays no_answer's);
+  // in transit or out for delivery; a lost parcel (not a return)
+  { id: "refused", fr: "Refusée", color: "#F8D7DD" },
+  { id: "duplicate", fr: "Doublon", color: "#ECEFF1" },
+  { id: "unreachable", fr: "Injoignable clôturée", color: "#EDE7F6" },
+  { id: "in_transit", fr: "En livraison", color: "#E0F7FA" },
+  { id: "lost", fr: "Perdue", color: "#E8EAED" },
 ] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number]["id"];
