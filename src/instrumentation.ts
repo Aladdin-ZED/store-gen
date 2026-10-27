@@ -18,78 +18,81 @@
  * serving during step 5 is safe.
  */
 export async function register(): Promise<void> {
-  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  // The runtime test wraps the whole body, never an early `return`: the bundler folds it to `false` in the Edge
+  // instrumentation build and drops every Node-only import below with it (no Edge Runtime warnings in `next build`).
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const g = globalThis as typeof globalThis & { __codBooted?: boolean };
+    if (g.__codBooted) return;
+    g.__codBooted = true;
 
-  const g = globalThis as typeof globalThis & { __codBooted?: boolean };
-  if (g.__codBooted) return;
-  g.__codBooted = true;
-
-  // 1. configuration
-  const { authConfigWarnings, isAppSecretConfigured } = await import("./lib/auth/config");
-  // visitor IPs are hashed with APP_SECRET: without a usable one every order fails too, not only the
-  // admin, so its line goes out at error level (hosts' log views filter and colour by level)
-  const secretBroken = !isAppSecretConfigured();
-  for (const warning of authConfigWarnings()) {
-    if (secretBroken && warning.startsWith("APP_SECRET")) console.error(`[boot] ERROR: ${warning}`);
-    else console.warn(`[boot] ${warning}`);
-  }
-  const { platformConfigLines } = await import("./lib/db/boot-config");
-  for (const line of await platformConfigLines()) {
-    if (line.level === "error") console.error(`[boot] ERROR: ${line.text}`);
-    else if (line.level === "warn") console.warn(`[boot] ${line.text}`);
-    else console.info(`[boot] ${line.text}`);
-  }
-  // §E.4 (CCR r1.0-t2-3): marks the test identity context as misconfigured for this process at start-up, so the
-  // first request never logs it again (it never throws)
-  const { identityContextMisconfigured } = await import("./lib/tenancy/context");
-  identityContextMisconfigured();
-
-  if (!process.env.DATABASE_URL) {
-    console.error("[boot] DATABASE_URL is not set — skipping migrations.");
-    return;
-  }
-
-  // 2. migrations
-  let migrationsSettled = true;
-  try {
-    const { runMigrations } = await import("./lib/db/migrate");
-    const result = await runMigrations();
-    if (result.status === "lock-timeout") {
-      // that process may still be inside 0004: it runs steps 5 and 6 itself once it has migrated
-      migrationsSettled = false;
-      console.warn("[boot] another process held the migration lock for too long; skipped migrations and the one-time tasks this time.");
-    } else if (result.status === "applied") {
-      console.info(`[boot] applied ${result.applied} migration(s) in ${result.durationMs} ms.`);
-    } else {
-      console.info(`[boot] database schema up to date (${result.total} migration(s)).`);
+    // 1. configuration
+    const { authConfigWarnings, isAppSecretConfigured } = await import("./lib/auth/config");
+    // visitor IPs are hashed with APP_SECRET: without a usable one every order fails too, not only the
+    // admin, so its line goes out at error level (hosts' log views filter and colour by level)
+    const secretBroken = !isAppSecretConfigured();
+    for (const warning of authConfigWarnings()) {
+      if (secretBroken && warning.startsWith("APP_SECRET")) console.error(`[boot] ERROR: ${warning}`);
+      else console.warn(`[boot] ${warning}`);
     }
-  } catch (err) {
-    console.error("[boot] database migration failed:", err instanceof Error ? err.message : err);
-    return;
-  }
+    const { platformConfigLines } = await import("./lib/db/boot-config");
+    for (const line of await platformConfigLines()) {
+      if (line.level === "error") console.error(`[boot] ERROR: ${line.text}`);
+      else if (line.level === "warn") console.warn(`[boot] ${line.text}`);
+      else console.info(`[boot] ${line.text}`);
+    }
+    // §E.4 (CCR r1.0-t2-3): marks the test identity context as misconfigured for this process at start-up, so the
+    // first request never logs it again (it never throws)
+    const { identityContextMisconfigured } = await import("./lib/tenancy/context");
+    identityContextMisconfigured();
 
-  // 3. media storage check: none while media lives in the database (§G.2)
+    if (!process.env.DATABASE_URL) {
+      console.error("[boot] DATABASE_URL is not set — skipping migrations.");
+      return;
+    }
 
-  // 4. sessions
-  try {
-    const { purgeExpiredSessions } = await import("./lib/auth/session");
-    const purged = await purgeExpiredSessions();
-    if (purged > 0) console.info(`[boot] purged ${purged} expired session(s).`);
-  } catch (err) {
-    console.error("[boot] session cleanup failed:", err instanceof Error ? err.message : err);
-  }
+    // 2. migrations
+    let migrationsSettled = true;
+    try {
+      const { runMigrations } = await import("./lib/db/migrate");
+      const result = await runMigrations();
+      if (result.status === "lock-timeout") {
+        // that process may still be inside 0004: it runs steps 5 and 6 itself once it has migrated
+        migrationsSettled = false;
+        console.warn("[boot] another process held the migration lock for too long; skipped migrations and the one-time tasks this time.");
+      } else if (result.status === "applied") {
+        console.info(`[boot] applied ${result.applied} migration(s) in ${result.durationMs} ms.`);
+      } else {
+        console.info(`[boot] database schema up to date (${result.total} migration(s)).`);
+      }
+    } catch (err) {
+      console.error("[boot] database migration failed:", err instanceof Error ? err.message : err);
+      return;
+    }
 
-  // 5. and 6., in the background (not after a lock timeout; runBootTasks also refuses while a migration is pending)
-  if (migrationsSettled) void bootTasks();
-}
+    // 3. media storage check: none while media lives in the database (§G.2)
 
-/** Steps 5 and 6: the one-time tasks in the process that gets the boot lock, then the read-only checks. Never throws. */
-async function bootTasks(): Promise<void> {
-  try {
-    const { runBootChecks, runBootTasks } = await import("./lib/db/boot-tasks");
-    const res = await runBootTasks();
-    if (res.ran) await runBootChecks();
-  } catch (err) {
-    console.error("[boot] one-time tasks failed:", err instanceof Error ? err.message : err);
+    // 4. sessions
+    try {
+      const { purgeExpiredSessions } = await import("./lib/auth/session");
+      const purged = await purgeExpiredSessions();
+      if (purged > 0) console.info(`[boot] purged ${purged} expired session(s).`);
+    } catch (err) {
+      console.error("[boot] session cleanup failed:", err instanceof Error ? err.message : err);
+    }
+
+    // 5. and 6., in the background (not after a lock timeout; runBootTasks also refuses while a migration is pending):
+    // the one-time tasks in the process that gets the boot lock, then the read-only checks. Never throws. (Inside
+    // the runtime test like every other import, so the Edge build drops it too.)
+    if (migrationsSettled) {
+      void (async () => {
+        try {
+          const { runBootChecks, runBootTasks } = await import("./lib/db/boot-tasks");
+          const res = await runBootTasks();
+          if (res.ran) await runBootChecks();
+        } catch (err) {
+          console.error("[boot] one-time tasks failed:", err instanceof Error ? err.message : err);
+        }
+      })();
+    }
   }
 }

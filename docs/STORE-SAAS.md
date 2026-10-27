@@ -5401,6 +5401,12 @@ What the integration step of §K.1 measured and decided; details in `docs/saas/c
   the owner form of `resetUserTwoFactor`), the legacy `SecurityPanel` / `TeamPanel`, and the "not implemented: T1/T2"
   fallbacks the R1.0 stubs needed before their tracks merged. `adminAction`, `adminGuard` and the deprecated `rateLimit`
   overload were already gone with T4.
+- **`test:slow` in R1.0 (step F3, the first full `npm run gate`).** C0a wired `test:slow` with the R1 product sweeps
+  (`test:design:full` of P6, `test:ai:slow` and `test:ai-eval -- --offline` of P7) before their files existed, so the
+  gate stopped at `ERR_MODULE_NOT_FOUND` (`scripts/qa/design-check.ts`) and could not be green in R1.0. In R1.0
+  `test:slow` runs the sweep that exists, `theme:check -- --full`. The three script names stay in `package.json` as C0a
+  declared them, and each joins `test:slow` in the merge that writes its file (P6, P7), the way the R1 suites join
+  `npm test` (`test:jobs` and `test:prepublish` are declared and not chained either). §J.1's list is the R1 target.
 
 ---
 
