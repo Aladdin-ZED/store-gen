@@ -40,6 +40,18 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **R1.0 DEPLOY ATTEMPT 1 FAILED (infra, not code)** 2026-10-27 18:26: build 01a17e99 passed install + gate:offline on
+  Hostinger (lint 0 / 1011 files, 618 + 5997 + 66 + 251 selftests), compiled, then "Collecting page data using 63 workers"
+  hit the build host thread limit (os error 11, SIGABRT; webpack fallback too). Old version stays live; env already 16 keys.
+  The uploaded sg-a0d930792752.zip was PUBLIC (200) because a failed build never syncs public_html: deleted via the file
+  service API (204 → 404). Fixes: next.config experimental.cpus 4; uploads now dot-named (.sg-<hex>.zip, 403 by the web
+  server); delete-on-failure step; HANDOFF §4 + runbook updated. NEXT: commit → gate → archive → upload .sg-… → verify 403
+  → build → smoke.
+- **R1.0 DEPLOY IN PROGRESS** 2026-10-27 ~18:22: gate green on 097a0eb (qa/.gate-ok), archive storegen-097a0eb.zip
+  (10,787,593 B, sha256 b9c976e6…a805fe), uploaded as sg-a0d930792752.zip, env replaced (16 keys verified by name), build
+  `01a17e99-23cc-73f8-9794-64f939ed6b92` started. Next: poll hosting_get-deployment → runtime logs (3.3) → smoke (4.1,
+  scratchpad/sg-smoke.mjs) → cron via hosting_cron-jobs_create (header form) → report. Owner afterwards: /admin/setup,
+  DATA_DIR probe (File Manager), max_user_connections (phpMyAdmin).
 - **FINALE DONE** (F5 eb5304f: runbook docs/saas/ccr/r1.0-deploy-checklist.md; its one blocker = runbook ownership row, fixed
   by the lead in §K.3). NOW: `npm run gate` on the final HEAD (writes qa/.gate-ok) → then deploy per the runbook.
 - **2026-10-27 resumed:** Hostinger connector RECONNECTED by the owner (works: 14 env keys, 1 completed build 01a16abd, account

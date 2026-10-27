@@ -21,6 +21,11 @@ const nextConfig: NextConfig = {
     // Only the Pages Router reads this filter (the app has none); left on, the build publishes a bloom
     // filter of every route (/admin/…, /api/cron/…) in the public _buildManifest.js.
     clientRouterFilter: false,
+    // Build workers ("Collecting page data"). Next defaults to os.cpus() - 1: 63 on Hostinger's 64-CPU
+    // build host, each loading the native binding with its own thread pool, which hit the host's thread
+    // limit ("OS can't spawn worker thread", SIGABRT, build 01a17e99 on 2026-10-27; 52 had fit before).
+    // Build-time only; 4 is ample for this app's ~40 routes.
+    cpus: 4,
   },
   /*
    * Any path no route matches is answered by the /[slug] route as an unknown slug ("-" is never a

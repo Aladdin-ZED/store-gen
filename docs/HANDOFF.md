@@ -145,8 +145,13 @@ the Claude connector settings. Nothing is deployed from a build that never saw t
    gate commit) and prints the size and sha256. It never uploads.
 4. **Upload:** Hostinger MCP `hosting_files_generate-upload-url` {username `u641677794`, domain
    `lightgreen-hippopotamus-140853.hostingersite.com`} returns url, auth_key and rest_auth_key; then
-   `UP_URL=… UP_AUTH=… UP_REST=… bash scripts/deploy/hostinger-upload.sh ../storegen-<sha7>.zip cod-<random hex>.zip`
-   uploads over TUS into public_html. Use a random file name.
+   `UP_URL=… UP_AUTH=… UP_REST=… bash scripts/deploy/hostinger-upload.sh ../storegen-<sha7>.zip .sg-<12 random hex>.zip`
+   uploads over TUS into public_html. **The name must start with a dot** (lesson of 2026-10-27): public_html files
+   are served by the web server until the build's "Syncing public_html" removes them, and a failed build never gets
+   there, so `sg-….zip` was publicly downloadable (200 application/zip) after build 01a17e99 failed. The web server
+   refuses dotfiles (403, like `/.env`). Check `curl -sI <site>/.sg-….zip` answers 403 before starting the build.
+   **If a build fails, delete the archive at once:** `curl -X DELETE <url without /api/tus/public_html>/api/resources/
+   public_html/<name> -H "X-Auth: <auth_key>" -H "X-Auth-Rest: <rest_auth_key>"` (expect 204, then 404 on the site).
 5. **Env** (whenever the key set changed; the first R1.0 deploy adds `PLATFORM_URL` and `DATA_DIR`):
    `hosting_nodejs_replace-environment-variables` with all 16 keys of `.env.hostinger`.
 6. **Build:** Hostinger MCP `hosting_nodejs_start-build` {node_version 22, app_type next, root_directory "",
@@ -156,7 +161,9 @@ the Claude connector settings. Nothing is deployed from a build that never saw t
    `tenancy-lint: 0 violation(s)`, `ownership-check: no .git (an archive build)…`, then the permissions, hosts,
    envelope and security selftests passing; a red one fails the build. The log must also show
    `[admin-css] COD Studio build: admin Tailwind precompiled…`. "Syncing public_html" removes the archive. A failed
-   build keeps the previous version live.
+   build keeps the previous version live. `next.config.ts` caps the build at `experimental.cpus: 4` workers: the
+   default (CPUs - 1 = 63 on Hostinger's build host) exhausted its thread limit during "Collecting page data"
+   ("OS can't spawn worker thread", SIGABRT in Turbopack and the webpack fallback, build 01a17e99, 2026-10-27).
 7. **First boot** of an R1.0 build runs migration 0004 (and the store #1 conversion when the old single-tenant setup
    was used); the boot log names `gate passed on <sha>`. The Store Gen database booted once on 3598537 and setup was
    never run, so expect `tenancy: empty install, no store #1 to convert (marker written, the pre-tenancy boot's empty
