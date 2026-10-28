@@ -1,3 +1,4 @@
+// proves: IN-05, OP-05, LP-04, AI-15
 /**
  * Ad pixels — server side, offline (fetch is mocked; no network, no database), docs/OFFERS.md §A:
  *  - Tracking schema: legacy single ids → lists, dedupe, limits, empty → unset; `none` / `copiedFrom`;
@@ -16,6 +17,9 @@
  *  - per store (docs/STORE-SAAS.md §E.6, SET-11, SHT-09): the health throttle is keyed by store (one store's write
  *    never suppresses another's for the same pixel id); the Sheets ownership proof (code format, only the hash
  *    compared, found alone or inside other text, case-insensitive, never a near miss).
+ *  - templates (R1 P5, operations.md OPE-§O.1): the template language, the WhatsApp built-ins over 40 orders in ar,
+ *    fr and en with zero invented numbers, `confirm_number` / `confirm_hours`, the WhatsApp link caps and the
+ *    repository's draft rule (src/lib/integrations/templates.selftest.ts, offline like the rest of this file).
  *
  *   npx tsx scripts/qa/conversions-check.ts      (exit code 1 on failure)
  */
@@ -45,6 +49,7 @@ import { dueHealthUpdates, forgetHealthWrites, noteHealthWrite } from "@/lib/pix
 import { newProofCode, proofFound, proofHash } from "@/lib/sheets/proof";
 import { runtimePixels, trackingFlags } from "@/lib/pixels/tracking";
 import { PixelLibrarySettings, TrackingSecretsSettings, redactSetting } from "@/lib/settings/schemas";
+import { templatesSelftest } from "@/lib/integrations/templates.selftest";
 
 let pass = 0;
 const failures: string[] = [];
@@ -432,6 +437,13 @@ async function main() {
   ok("test event brand: no legacy name", !JSON.stringify(calls[0]!.body).includes("COD"));
 
   globalThis.fetch = realFetch;
+
+  /* ---------------- templates (OPE-§O.1; IN-05, OP-05, LP-04, AI-15) ---------------- */
+  const templates = templatesSelftest();
+  pass += templates.pass;
+  failures.push(...templates.failures);
+  for (const n of templates.notes) console.log(`· ${n}`);
+
   for (const f of failures) console.log(`✗ ${f}`);
   console.log(failures.length ? `✗ ${failures.length} failure(s), ${pass} passed` : `✓ conversions check passed (${pass} assertions)`);
   process.exit(failures.length ? 1 : 0);
