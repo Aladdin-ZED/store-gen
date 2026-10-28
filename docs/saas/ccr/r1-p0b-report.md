@@ -33,8 +33,8 @@ differences. The asset `version` stays `b46315093004`. Tenancy lint is 0, and `t
 `drizzle/0005_r1.sql` is still deployed nowhere; its one P0b change (`ai_jobs.kind` gains `'probe'`) passed
 `test:migrate` (twice = no-op, interrupted re-run, R1.0-shaped DB with data).
 
-Step V ran the whole gate on the finished tree, green on the first run, and made one maintainer change the triage
-had left open (V-1: the console media route keeps its own sandbox CSP). Section 4 has the numbers.
+Step V ran the whole gate twice on the finished tree, green both times (no fix was needed), and made one maintainer
+change the triage had left open (V-1: the console media route keeps its own sandbox CSP). Section 4 has the numbers.
 
 ## 1. Every need: decision, reason, where
 
@@ -392,7 +392,13 @@ wins over the handler's. The row was pending and would have failed the moment P1
 
 ### The gate, run 2 (after V-1)
 
-Recorded by the commit that follows this one (the gate runs on the commit that carries V-1).
+`SG_STUB_BUILD_OK=1 npm run gate` on `ca8162d` (V-1 and this report): **exit 0**. Same numbers as run 1 (lint 0
+errors and the one P0-5 warning; tenancy-lint 0; `test:ownership` green; `test:migrate` 217; `test:tenancy` 6,570;
+`qa:action-replay` 4,129; build compiled in 28 s; `qa:headers` 677 passed and 24 pending, since P1's media route does
+not exist yet; `qa:edge-sim` 145 and 1 pending; `qa:r1-exit` 73; `qa:secrets` 62). `test:hosts` now has 626 checks
+with the V-1 cases. `qa/.gate-ok` = `{"sha":"ca8162d…","at":"2026-10-28T04:52:58Z","stubBuild":true}`, and
+`archive.mjs` refused it again (exit 1, no zip, no `qa/.build-sha`). No `cod_test_*` database is left. This report's
+final edit (this paragraph) is documentation only, so the gate file names the commit before it.
 
 
 ## 5. What each track should know
