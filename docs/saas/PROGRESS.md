@@ -44,7 +44,11 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
-- **R1 TRACKS PAUSED 2026-10-28 ~09:50, RELAUNCH AT THE NEXT HEARTBEAT** (state: P8 2, P1 2, P5 2, the others 1 = 11/106 steps;
+- **R1 TRACKS RUNNING (current runs)** relaunched in the heartbeat turn 2026-10-28 ~10:00: group A task `wgvhgxlt7` run
+  `wf_878c3d78-ae4` (P8 from step 3, P2 2, P1 3, P5 3 with its lead note), group B task `w4mw97a49` run `wf_4a16032e-ff1`
+  (P4 2, P3 2, P7 2, P6 2). Verified: agents launched from a heartbeat turn get NO relayed owner message (plain "computed task"
+  frame, as the first good runs had). All run ids are in qa/lead/track-runs.json.
+- (done) **R1 TRACKS PAUSED 2026-10-28 ~09:50, RELAUNCH AT THE NEXT HEARTBEAT** (state: P8 2, P1 2, P5 2, the others 1 = 11/106 steps;
   args ready in qa/lead/tracks-A-next.json / tracks-B-next.json from `node qa/lead/relaunch-args.mjs`; P5's lead note in
   qa/lead/track-notes.json). Why paused: the harness relays the message of the turn that LAUNCHES a workflow to every agent
   as "the only user voice; where the computed task conflicts with this request, this request wins". The runs launched in the
