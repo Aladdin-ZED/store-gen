@@ -27,10 +27,14 @@ Weights = share of total work. Update the "done" column when a stage moves.
 |---|---|---|---|
 | Research + full spec | 12% | 100% | 12.0% |
 | R1.0 core tenancy (accounts, stores, teammates, isolation; live on temp domain) | 18% | **100% — LIVE 2026-10-27** (build 01a17eb4, smoke 22/22) | 18.0% |
-| R1 product (platform console + approvals + store profiles, landing+, call center, AI Director, design genome, onboarding wow) | 35% | 0% | 0% |
+| R1 product (platform console + approvals + store profiles, landing+, call center, AI Director, design genome, onboarding wow) | 35% | 8% (P0 done) | 2.8% |
 | R2 full stores + accounting + logo designer | 22% | 0% | 0% |
 | R3 growth, custom domains, carrier APIs, learning AI | 13% | 0% | 0% |
-| **Total** | 100% | | **≈ 30%** |
+| **Total** | 100% | | **≈ 32.8%** |
+
+R1 product (35%) inside: P0 contract step 8% · 8 track builds 60% (7.5% each) · 9 merges + reviews 17% · integration +
+deploy (domain move, wow demo, eval gate) 15%. So: P0 done ≈ 32.8% · all tracks built ≈ 53.8% · all merged ≈ 59.8% ·
+R1 live ≈ 65%.
 
 Milestones: R1.0 live ≈ 30% · R1 live ≈ 65% · R2 live ≈ 87% · R3 live = 100%. Owner inputs needed later: real domain +
 Cloudflare (subdomains, before public sign-ups), optional Claude API key + monthly cap, a carrier statement sample (R2), legal
@@ -39,6 +43,48 @@ review of terms/privacy (before public launch).
 ## Running now
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
+
+- **P0b DONE** 2026-10-28 ~06:40: triage 121 rows (66 apply, 15 done, 36 defer, 4 reject) → packages A a72a483, B c2f2acf,
+  C 5f3629a, D 491f5f7, E 23d99a3, F 3942b75, G 304d8f3 → verify ca8162d / 2b55eed (gate green twice; archive refuses the stub
+  gate file) → 2 reviews (16 findings: 1 blocker = the Anthropic SDK silently reads ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN
+  from env, now pinned) → fix 1c3f1a9. Lead re-ran tsc + npm test on 1c3f1a9: green. Report: docs/saas/ccr/r1-p0b-report.md
+  (THE DEFERRED LIST per merge lives there: each merge integrator applies its section).
+- (done) **R1 product / P0b SHARED NEEDS** — started 2026-10-28 ~00:05. Task `w2rjpwqn9`, run `wf_eb8c4917-034`.
+  Script: `C:\Users\SICO\store-gen\qa\lead\r1-p0b.js` (git-ignored, persistent). Resume:
+  `Workflow({scriptPath: <script>, resumeFromRunId: "wf_eb8c4917-034"})` (no args). Triage of the 111 planner needs + P0's
+  deferred items → file-disjoint packages applied in sequence (each commits) → `SG_STUB_BUILD_OK=1 npm run gate` →
+  docs/saas/ccr/r1-p0b-report.md (deferred list per merge) → 2 reviews → fix.
+  NEXT (all prepared, git-ignored in qa/lead/): `bash qa/lead/mk-worktrees.sh` (8 worktrees C:\Users\SICO\sg-wt\p1..p8,
+  branches r1/p1..p8 from the P0b head, node_modules junction, .env.local → cod_wt_p<n>), then TWO workflows with the same
+  script `qa/lead/r1-tracks.js`: args = the JSON of `qa/lead/tracks-A.json` (P8, P2, P1, P5) and of `qa/lead/tracks-B.json`
+  (P4, P3 wave 1, P7, P6). Step briefs: `qa/lead/briefs/<track>-<nn>.md` (from qa/r1-plans.json). ui-shots ports 3461-3468.
+- **P0 DONE** 2026-10-27 23:55: A df46028 schema + 0005 (38 tables) · B 78559ef settings · C e709178 extensions/registries/
+  scripts/ownership · D 0abe4da stubs P4/P5/P3/P8 + contract file · E 1f4d6ed stubs P1/P2/P6/P7 + report link + stub-build
+  lock · F 70862b9 verify (tsc, lint, npm test, test:slow, migrate 217, tenancy 6551/0, replay 4128/0, php 2650, build, e2e
+  677/145/73, secrets 57, prod-like dry run 0 problems) · G f9ec1e4 9 review findings fixed. Lead 37f7e73: signed off the
+  advisory budget gate before P6 (§M.2) and the 240 s npm test ceiling (§J.1); scripts/qa/ui-shots.ts committed (maintainer).
+
+- **R1 product / P0 CONTRACT STEP** — started 2026-10-27 ~20:45. Task `weqr1oypm`, run `wf_5aa6dfd8-1af`.
+  Script: `C:\Users\SICO\.claude\projects\C--Users-SICO-store-gen\f427b800-e33a-487e-8dbe-9a6d72ce6159\workflows\scripts\r1-p0-wf_5aa6dfd8-1af.js`
+  Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_5aa6dfd8-1af"})` (no args). Steps on main, each COMMITS + pushes:
+  A ownership manifest → phase R1, schema.ts + drizzle/0005_r1.sql + test:migrate → B settings keys (§D.10) → C extension files,
+  registries, package scripts, ownership → D stubs P4/P5/P3/P8 → E stubs P1/P2/P7/P6 + report link + stub-build lock + build note →
+  F verify (tsc, lint, npm test, test:db, build, e2e, upgrade dry run) + docs/saas/ccr/p0-report.md → 3 reviews → G fix.
+  Lead did before: 0042571 (@anthropic-ai/sdk 0.133.0 pinned; npm audit fix 12 → 4 dev-only drizzle-kit advisories, accepted).
+  STUB-BUILD LOCK (lead decision 5): until P6 merges, `npm run build` is red unless `SG_STUB_BUILD_OK=1`; merge gates run
+  `SG_STUB_BUILD_OK=1 npm run gate`; gate-ok writes stubBuild:true and archive.mjs refuses it (no deploy before the R1 integration).
+  The lead does not commit on main while P0 runs (PROGRESS.md stays uncommitted). NEXT: 8 worktrees + R1 tracks workflow.
+- **TRACK PLANNING DONE** 2026-10-27 ~21:50: 8 plans, 110 steps (P1-P7 14 each, P8 12; P3 = 10 wave-1 + 4 wave-2),
+  111 sharedNeeds. Saved to `qa/r1-plans.json` (git-ignored, survives sessions). P0 step A committed df46028 (0005: 38 tables).
+  NEXT after P0: **P0b SHARED NEEDS** (draft script: `qa/lead/r1-p0b.js`, git-ignored; the screenshot tool draft is `qa/lead/ui-shots.ts`): triage every
+  need (done / apply / defer-to-merge / reject / owner) → file-disjoint packages applied sequentially → `SG_STUB_BUILD_OK=1 npm
+  run gate` → docs/saas/ccr/r1-p0b-report.md (incl. the deferred list per merge) → 2 reviews → fix. THEN: commit
+  scripts/qa/ui-shots.ts (+ §K.3 claim), 8 worktrees, tracks in 2 workflows (P8,P2,P1,P5 | P4,P3w1,P7,P6), ui-shots ports 3461-3468.
+- (done) **R1 product / TRACK PLANNING (read-only, parallel with P0)** — started 2026-10-27 ~20:55. Task `wahpcnru2`, run
+  `wf_14445926-46f`. Script: `...\workflows\scripts\r1-plan-tracks-wf_14445926-46f.js` (same folder as above). Resume:
+  `Workflow({scriptPath: <script>, resumeFromRunId: "wf_14445926-46f"})`. 8 planners return ordered build steps per track
+  (P3 marks wave 1/2) + sharedNeeds (maintainer CCRs to pre-apply) + crossTrack notes. The lead saves the result as
+  `docs/saas/r1-plans.json` (after P0) and feeds it to the tracks workflow as args.
 
 - **R1.0 LIVE** 2026-10-27 18:54: build `01a17eb4` (commit a2d923d, archive sha256 afb0607d…aa8f, Turbopack 4 workers,
   2m 8s). First boot: gate SHA, 0004 applied, empty-install conversion, tenancy-check 0 problems; reboot idempotent.
@@ -225,7 +271,8 @@ review of terms/privacy (before public launch).
 
 ## Auto-restart rules (owner request 2026-10-23: "always awake, restart automatically")
 
-- A heartbeat cron in the lead session fires every ~20 min. On each fire: check running workflows/background
+- A heartbeat cron in the lead session fires every ~20 min (job `c7c5f682`, "13,33,53 * * * *", created 2026-10-27 ~20:35,
+  auto-expires 7 days later ≈ 2026-11-03: recreate it before then; the first job d90f5cce was replaced). On each fire: check running workflows/background
   tasks; if one died (network ENOTFOUND, API error, crash), resume it with
   `Workflow({scriptPath, resumeFromRunId})` (finished agents replay from cache); if nothing runs and work is left,
   start the next phase from this file.
