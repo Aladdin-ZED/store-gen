@@ -1,20 +1,142 @@
 /**
- * Admin messages (fr) of the notify file (P1 CONSOLE, platform.md; D67).
+ * Admin messages (fr) of the notify file (P1 CONSOLE, platform.md PLA-§18.2, §N.1-§N.3; D67).
  * Extension file (docs/STORE-SAAS.md §I.5, §K.3), created empty at P0 and spread by src/lib/i18n/admin/fr.ts;
- * a partial of ../en/notify.ts (a missing key falls back to English).
- * P0b (CCR P2-15, D67): holds the identity keys moved from src/lib/auth/i18n/fr.ts, without renames and with the
- * same values.
+ * a partial of ../en/notify.ts (a missing key falls back to English). Complete for the tenant kinds and their labels;
+ * the staff kinds stay English (PLA-§N.1).
  */
 import type { messages as en } from "../en/notify";
 
 export const messages: Partial<Record<keyof typeof en, string>> = {
-  /* ---- notifications ---- */
-  "notify.store.impersonation_started.title": "Le support consulte votre boutique",
-  "notify.store.impersonation_started.body": "En lecture seule, pour le motif « {reason} ». Les données des clients étaient masquées.",
-  "notify.store.impersonation_ended.title": "Le support a terminé la consultation",
-  "notify.store.impersonation_ended.body": "La consultation en lecture seule est terminée.",
+  /* ---- inscription et vérification ---- */
+  "notify.signup.received.title": "Nous avons reçu votre boutique",
+  "notify.signup.received.body": "Store Gen va l'examiner. Vous pouvez continuer à préparer vos pages en attendant.",
+  "notify.signup.info_requested.title": "Store Gen a une question sur votre boutique",
+  "notify.signup.info_requested.body": "Ouvrez votre tableau de bord pour la lire et y répondre.",
+  "notify.signup.approved.title": "Votre boutique est validée",
+  "notify.signup.approved.body": "Publiez votre première page pour commencer à recevoir des commandes.",
+  "notify.signup.rejected.title": "Votre boutique n'a pas été validée",
+  "notify.signup.rejected.body": "Ouvrez votre tableau de bord pour en connaître la raison et la suite possible.",
+  "notify.signup.reopened.title": "Votre boutique est de nouveau en vérification",
+  "notify.signup.reopened.body": "Store Gen va l'examiner à nouveau. Vous pouvez continuer à préparer vos pages en attendant.",
+
+  /* ---- cycle de vie ---- */
+  "notify.store.restricted.title": "Votre boutique est restreinte",
+  "notify.store.restricted.body": "Motif : {reason}. Vos pages restent en ligne ; certaines actions sont suspendues.",
+  "notify.store.suspended.title": "Votre boutique est suspendue",
+  "notify.store.suspended.body": "Motif : {reason}. Vos pages sont hors ligne jusqu'à ce que Store Gen rétablisse la boutique.",
+  "notify.store.restored.title": "Votre boutique est rétablie",
+  "notify.store.restored.body": "Motif : {reason}. Tout fonctionne comme avant.",
+  "notify.store.closed.title": "Votre boutique est fermée",
+  "notify.store.closed.body": "Motif : {reason}. Vos pages sont hors ligne. Vous pouvez rouvrir la boutique depuis son tableau de bord.",
+  "notify.store.reopened.title": "Votre boutique est de nouveau ouverte",
+  "notify.store.reopened.body": "Motif : {reason}. Vos pages sont revenues telles qu'elles étaient.",
+  "notify.store.deletion_scheduled.title": "La suppression de votre boutique est programmée",
+  "notify.store.deletion_scheduled.body": "Motif : {reason}. Contactez le support Store Gen s'il s'agit d'une erreur.",
+  "notify.store.deletion_cancelled.title": "La suppression de votre boutique est annulée",
+  "notify.store.deletion_cancelled.body": "Motif : {reason}. Votre boutique reste fermée jusqu'à ce que vous la rouvriez.",
+
+  /* ---- consultations du support, exports ---- */
+  "notify.store.impersonation_started.title": "Le support Store Gen a consulté votre boutique",
+  "notify.store.impersonation_started.body": "Motif : {reason}. De {from} à {to}. En lecture seule. Les données clients étaient masquées.",
+  "notify.store.impersonation_ended.title": "Le support Store Gen a terminé la consultation",
+  "notify.store.impersonation_ended.body": "Motif : {reason}. De {from} à {to}. En lecture seule.",
+  "notify.store.export_by_platform.title": "Store Gen a exporté les données de votre boutique",
+  "notify.store.export_by_platform.body": "Motif : {reason}. L'export figure dans l'activité de votre boutique.",
+
+  /* ---- demandes, offre et quotas ---- */
+  "notify.request.answered.title": "Votre demande a reçu une réponse",
+  "notify.request.answered.body": "{requestKind} : {outcome}.",
+  "notify.plan.changed.title": "Votre offre a changé",
+  "notify.plan.changed.body": "Votre boutique est maintenant sur l'offre {plan}.",
+  "notify.plan.boost_granted.title": "Votre offre bénéficie d'un bonus temporaire",
+  "notify.plan.boost_granted.body": "Il dure jusqu'au {until}.",
+  "notify.plan.boost_ending.title": "Le bonus de votre offre se termine bientôt",
+  "notify.plan.boost_ending.body": "Il se termine le {until}. Les limites habituelles de votre offre s'appliquent ensuite.",
+  "notify.quota.80.title": "{metric} est rempli à {percent} %",
+  "notify.quota.80.body": "Ouvrez Offre et usage pour voir ce que comprend votre offre ou demander davantage.",
+  "notify.quota.100.title": "{metric} a atteint la limite de votre offre",
+  "notify.quota.100.body": "Ouvrez Offre et usage pour voir ce que comprend votre offre ou demander davantage.",
+
+  /* ---- santé de la boutique ---- */
+  "notify.health.issue_new.title": "Votre boutique demande votre attention",
+  "notify.health.issue_new.body": "Un nouveau point à corriger maintenant est apparu dans le bilan de santé de votre boutique.",
+
+  /* ---- équipe ---- */
+  "notify.member.joined.title": "{member} a rejoint votre équipe",
+  "notify.member.joined.body": "Rôle : {role}.",
+
+  /* ---- sécurité du compte ---- */
+  "notify.security.2fa_required.title": "La validation en deux étapes est désormais obligatoire",
+  "notify.security.2fa_required.body": "Cette boutique la demande à chaque membre. Activez-la dans la page Sécurité de votre compte.",
   "notify.user.password_reset.title": "Votre mot de passe a été réinitialisé",
   "notify.user.password_reset.body": "Tous vos appareils ont été déconnectés. Connectez-vous avec le nouveau mot de passe.",
   "notify.user.2fa_reset.title": "La validation en deux étapes a été réinitialisée",
   "notify.user.2fa_reset.body": "L'équipe de la plateforme l'a désactivée à votre demande. Réactivez-la dans Sécurité.",
+
+  /* ---- documents légaux ---- */
+  "notify.legal.updated.title": "Mise à jour : {kind}",
+  "notify.legal.updated.body": "Version {version}. Ouvrez-la pour voir ce qui a changé.",
+
+  /* ---- message de Store Gen ---- */
+  "notify.staff.message.title": "Un message de Store Gen",
+  "notify.staff.message.body": "Ouvrez-le pour lire le message.",
+
+  /* ---- libellés des codes ---- */
+  "notify.reason.fake_orders": "Fausses commandes",
+  "notify.reason.customer_complaints": "Plaintes de clients",
+  "notify.reason.policy_review": "Vérification des règles",
+  "notify.reason.brand_complaint": "Plainte d'une marque",
+  "notify.reason.other": "Autre",
+  "notify.reason.scam_suspected": "Soupçon d'arnaque",
+  "notify.reason.phishing": "Hameçonnage",
+  "notify.reason.prohibited_goods": "Produits interdits",
+  "notify.reason.counterfeit": "Contrefaçon",
+  "notify.reason.legal_request": "Demande légale",
+  "notify.reason.security_incident": "Incident de sécurité",
+  "notify.reason.owner_banned": "Compte du propriétaire banni",
+  "notify.reason.issue_resolved": "Problème résolu",
+  "notify.reason.appeal_accepted": "Recours accepté",
+  "notify.reason.mistake": "Erreur de notre part",
+  "notify.reason.owner_request": "Demande du propriétaire",
+  "notify.reason.abandoned": "Boutique inactive",
+  "notify.reason.terms_violation": "Non-respect des conditions d'utilisation",
+  "notify.reason.retention": "Fin de la durée de conservation",
+  "notify.reason.owner_request_urgent": "Demande urgente du propriétaire",
+  "notify.reason.abuse": "Abus",
+  "notify.reason.approved": "Validée",
+  "notify.reason.rejected": "Non validée",
+  "notify.reason.appeal": "Recours",
+  "notify.reason.console_created": "Créée par Store Gen",
+  "notify.reason.owner_closed": "Fermée par le propriétaire",
+  "notify.reason.expired": "Expirée",
+  "notify.visit_reason.onboarding": "Aide au démarrage",
+  "notify.visit_reason.ticket": "Votre demande d'assistance",
+  "notify.visit_reason.abuse_review": "Contrôle de sécurité",
+  "notify.visit_reason.bug": "Correction d'un bug",
+  "notify.visit_reason.other": "Autre",
+  "notify.request_kind.signup": "Vérification de la boutique",
+  "notify.request_kind.reopen": "Vérification de la boutique",
+  "notify.request_kind.go_live": "Mise en ligne",
+  "notify.request_kind.plan_change": "Changement d'offre",
+  "notify.request_kind.limit_raise": "Limite plus élevée",
+  "notify.request_kind.mode_change": "Changement de type de boutique",
+  "notify.request_kind.domain": "Domaine",
+  "notify.outcome.granted": "acceptée",
+  "notify.outcome.declined": "refusée",
+  "notify.metric.media_bytes": "Le stockage des médias",
+  "notify.metric.pages": "Le quota de pages",
+  "notify.metric.products": "Le quota de produits",
+  "notify.metric.members": "Le quota de membres",
+  "notify.metric.agents": "Le quota d'agents",
+  "notify.metric.webhooks": "Le quota de webhooks",
+  "notify.metric.custom_domains": "Le quota de domaines",
+  "notify.metric.campaigns": "Le quota de campagnes",
+  "notify.metric.short_links": "Le quota de liens courts",
+  "notify.metric.exports": "Le quota d'exports du mois",
+  "notify.metric.ai_credits": "Le quota de crédits IA du mois",
+  "notify.metric.orders": "Le quota de commandes du mois",
+  "notify.legal_kind.tos": "Conditions d'utilisation",
+  "notify.legal_kind.privacy": "Politique de confidentialité",
+  "notify.legal_kind.aup": "Politique d'utilisation acceptable",
+  "notify.legal_kind.dpa": "Accord de traitement des données",
 };

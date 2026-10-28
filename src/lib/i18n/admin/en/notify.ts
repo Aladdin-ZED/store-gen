@@ -1,18 +1,181 @@
 /**
- * Admin messages (en) of the notify file (P1 CONSOLE, platform.md; D67).
+ * Admin messages (en) of the notify file (P1 CONSOLE, platform.md PLA-§18.2, §N.1-§N.3; D67).
  * Extension file (docs/STORE-SAAS.md §I.5, §K.3), created empty at P0 and spread by src/lib/i18n/admin/en.ts;
  * English is the reference: the fr and ar files type their keys against this one.
- * P0b (CCR P2-15, D67): holds the identity keys moved from src/lib/auth/i18n/en.ts, without renames and with the
- * same values.
+ *
+ * Holds `notify.<kind>.title` / `.body` of the kinds in src/lib/notify/kinds/platform.ts (the team and member kinds
+ * are P2's `team.ts`, moved at P0b, CCR P2-15; `member.joined` is here, CCR r1-p1-3), the code labels the kinds name
+ * (`notify.reason.*`, `notify.metric.*`, …: read-time labels of a var, src/lib/platform/notify-kinds.ts) and, from
+ * step 3, P1's tenant health sentences `health.platform.*`. Tenant kinds and their labels exist in ar, fr and en;
+ * staff kinds (`notify.staff.*` except `staff.message`) in en only. Placeholders are identical in every locale.
  */
 export const messages = {
-  /* ---- notifications T2 sends (PLA-§18.2; P1 owns the kinds from P0) ---- */
-  "notify.store.impersonation_started.title": "Support is viewing your store",
-  "notify.store.impersonation_started.body": "Read-only, for the reason \"{reason}\". Customer details were hidden.",
-  "notify.store.impersonation_ended.title": "Support finished viewing your store",
-  "notify.store.impersonation_ended.body": "The read-only view has ended.",
+  /* ---- signup and review ---- */
+  "notify.signup.received.title": "We received your store",
+  "notify.signup.received.body": "Store Gen will review it. You can keep building your pages meanwhile.",
+  "notify.signup.info_requested.title": "Store Gen has a question about your store",
+  "notify.signup.info_requested.body": "Open your dashboard to read it and answer.",
+  "notify.signup.approved.title": "Your store is approved",
+  "notify.signup.approved.body": "Publish your first page to start taking orders.",
+  "notify.signup.rejected.title": "Your store was not approved",
+  "notify.signup.rejected.body": "Open your dashboard to see why and what you can do next.",
+  "notify.signup.reopened.title": "Your store is back in review",
+  "notify.signup.reopened.body": "Store Gen will look at it again. You can keep building your pages meanwhile.",
+
+  /* ---- lifecycle ---- */
+  "notify.store.restricted.title": "Your store is restricted",
+  "notify.store.restricted.body": "Reason: {reason}. Your pages stay online; some actions are paused.",
+  "notify.store.suspended.title": "Your store is suspended",
+  "notify.store.suspended.body": "Reason: {reason}. Your pages are offline until Store Gen restores the store.",
+  "notify.store.restored.title": "Your store is restored",
+  "notify.store.restored.body": "Reason: {reason}. Everything works as before.",
+  "notify.store.closed.title": "Your store is closed",
+  "notify.store.closed.body": "Reason: {reason}. Your pages are offline. You can reopen the store from its dashboard.",
+  "notify.store.reopened.title": "Your store is open again",
+  "notify.store.reopened.body": "Reason: {reason}. Your pages are back as they were.",
+  "notify.store.deletion_scheduled.title": "Your store is scheduled for deletion",
+  "notify.store.deletion_scheduled.body": "Reason: {reason}. Contact Store Gen support if this is a mistake.",
+  "notify.store.deletion_cancelled.title": "The deletion of your store was cancelled",
+  "notify.store.deletion_cancelled.body": "Reason: {reason}. Your store stays closed until you reopen it.",
+
+  /* ---- support visits, platform exports ---- */
+  "notify.store.impersonation_started.title": "Store Gen support viewed your store",
+  "notify.store.impersonation_started.body": "Reason: {reason}. From {from} to {to}. Read-only. Customer details were hidden.",
+  "notify.store.impersonation_ended.title": "Store Gen support finished viewing your store",
+  "notify.store.impersonation_ended.body": "Reason: {reason}. From {from} to {to}. Read-only.",
+  "notify.store.export_by_platform.title": "Store Gen exported your store's data",
+  "notify.store.export_by_platform.body": "Reason: {reason}. The export is listed in your store's activity.",
+
+  /* ---- requests, plan and quota ---- */
+  "notify.request.answered.title": "Your request was answered",
+  "notify.request.answered.body": "{requestKind}: {outcome}.",
+  "notify.plan.changed.title": "Your plan changed",
+  "notify.plan.changed.body": "Your store is now on the {plan} plan.",
+  "notify.plan.boost_granted.title": "Your plan got a temporary boost",
+  "notify.plan.boost_granted.body": "It lasts until {until}.",
+  "notify.plan.boost_ending.title": "Your plan boost ends soon",
+  "notify.plan.boost_ending.body": "It ends on {until}. Your plan's usual limits apply after that.",
+  "notify.quota.80.title": "{metric} is {percent} % full",
+  "notify.quota.80.body": "Open Plan & usage to see what your plan includes or to ask for more.",
+  "notify.quota.100.title": "{metric} has reached your plan's limit",
+  "notify.quota.100.body": "Open Plan & usage to see what your plan includes or to ask for more.",
+
+  /* ---- Store Health ---- */
+  "notify.health.issue_new.title": "Your store needs attention",
+  "notify.health.issue_new.body": "A new issue to fix now appeared in your store's health check.",
+
+  /* ---- team (the other team kinds are in P2's team.ts) ---- */
+  "notify.member.joined.title": "{member} joined your team",
+  "notify.member.joined.body": "They joined as {role}.",
+
+  /* ---- account security ---- */
+  "notify.security.2fa_required.title": "Two-step verification is now required",
+  "notify.security.2fa_required.body": "This store asks every member to turn it on. Turn it on in your account's Security page.",
   "notify.user.password_reset.title": "Your password was reset",
   "notify.user.password_reset.body": "All your devices were signed out. Sign in with the new password.",
   "notify.user.2fa_reset.title": "Two-step verification was reset",
   "notify.user.2fa_reset.body": "The platform team turned it off at your request. Turn it back on in Security.",
+
+  /* ---- legal ---- */
+  "notify.legal.updated.title": "We updated the {kind}",
+  "notify.legal.updated.body": "Version {version}. Open it to read what changed.",
+
+  /* ---- a message from Store Gen (the body is the staff text) ---- */
+  "notify.staff.message.title": "A message from Store Gen",
+  "notify.staff.message.body": "Open it to read the message.",
+
+  /* ---- labels of the codes the tenant kinds carry (no full stop: labels) ---- */
+  "notify.reason.fake_orders": "Fake orders",
+  "notify.reason.customer_complaints": "Customer complaints",
+  "notify.reason.policy_review": "Policy review",
+  "notify.reason.brand_complaint": "Brand complaint",
+  "notify.reason.other": "Other",
+  "notify.reason.scam_suspected": "Suspected scam",
+  "notify.reason.phishing": "Phishing",
+  "notify.reason.prohibited_goods": "Prohibited goods",
+  "notify.reason.counterfeit": "Counterfeit goods",
+  "notify.reason.legal_request": "Legal request",
+  "notify.reason.security_incident": "Security incident",
+  "notify.reason.owner_banned": "Owner account banned",
+  "notify.reason.issue_resolved": "Issue resolved",
+  "notify.reason.appeal_accepted": "Appeal accepted",
+  "notify.reason.mistake": "Our mistake",
+  "notify.reason.owner_request": "Owner's request",
+  "notify.reason.abandoned": "Store inactive",
+  "notify.reason.terms_violation": "Terms of service violation",
+  "notify.reason.retention": "Data retention period over",
+  "notify.reason.owner_request_urgent": "Owner's urgent request",
+  "notify.reason.abuse": "Abuse",
+  "notify.reason.approved": "Approved",
+  "notify.reason.rejected": "Not approved",
+  "notify.reason.appeal": "Appeal",
+  "notify.reason.console_created": "Created by Store Gen",
+  "notify.reason.owner_closed": "Closed by the owner",
+  "notify.reason.expired": "Expired",
+  "notify.visit_reason.onboarding": "Onboarding help",
+  "notify.visit_reason.ticket": "Your support request",
+  "notify.visit_reason.abuse_review": "Safety review",
+  "notify.visit_reason.bug": "Fixing a bug",
+  "notify.visit_reason.other": "Other",
+  "notify.request_kind.signup": "Store review",
+  "notify.request_kind.reopen": "Store review",
+  "notify.request_kind.go_live": "Going live",
+  "notify.request_kind.plan_change": "Plan change",
+  "notify.request_kind.limit_raise": "Higher limit",
+  "notify.request_kind.mode_change": "Store type change",
+  "notify.request_kind.domain": "Domain",
+  "notify.outcome.granted": "granted",
+  "notify.outcome.declined": "declined",
+  "notify.metric.media_bytes": "Media storage",
+  "notify.metric.pages": "Page quota",
+  "notify.metric.products": "Product quota",
+  "notify.metric.members": "Team member quota",
+  "notify.metric.agents": "Agent quota",
+  "notify.metric.webhooks": "Webhook quota",
+  "notify.metric.custom_domains": "Custom domain quota",
+  "notify.metric.campaigns": "Campaign quota",
+  "notify.metric.short_links": "Short link quota",
+  "notify.metric.exports": "Monthly export quota",
+  "notify.metric.ai_credits": "Monthly AI credit quota",
+  "notify.metric.orders": "Monthly order quota",
+  "notify.legal_kind.tos": "Terms of service",
+  "notify.legal_kind.privacy": "Privacy policy",
+  "notify.legal_kind.aup": "Acceptable use policy",
+  "notify.legal_kind.dpa": "Data processing agreement",
+
+  /* ---- staff kinds (en only) ---- */
+  "notify.staff.signup_new.title": "{count, plural, one {# new store to review} other {# new stores to review}}",
+  "notify.staff.signup_new.body": "Open the queue to review them.",
+  "notify.staff.signup_hold.title": "@{store} was held for review",
+  "notify.staff.signup_hold.body": "Its sign-up risk put it in the hold band.",
+  "notify.staff.info_answered.title": "@{store} answered your question",
+  "notify.staff.info_answered.body": "The store is back in the Review tab.",
+  "notify.staff.appeal.title": "@{store} appealed its rejection",
+  "notify.staff.appeal.body": "The appeal is in the Review tab.",
+  "notify.staff.request.title": "@{store} sent a request",
+  "notify.staff.request.body": "Open the queue to answer it.",
+  "notify.staff.purge_requested.title": "A purge needs a second super admin",
+  "notify.staff.purge_requested.body": "Confirm or refuse it in Break-glass.",
+  "notify.staff.purge_confirmed.title": "A purge was confirmed",
+  "notify.staff.purge_confirmed.body": "It runs after the delay. Break-glass lists it.",
+  "notify.staff.super_admin_requested.title": "A promotion to super admin needs your confirmation",
+  "notify.staff.super_admin_requested.body": "Confirm or refuse it in Break-glass.",
+  "notify.staff.alarm.title": "Alarm: {alarm}",
+  "notify.staff.alarm.body": "Open System health for the details.",
+  "notify.staff.kill_changed.title": "Kill switch {key} changed",
+  "notify.staff.kill_changed.body": "Open Flags for the reason and the history.",
+  "notify.staff.mention.title": "You were mentioned on @{store}",
+  "notify.staff.mention.body": "Open the store's notes to read it.",
+  "notify.staff.impersonation_started.title": "A staff member is viewing @{store}",
+  "notify.staff.impersonation_started.body": "Read-only, for {minutes} minutes at most.",
+  "notify.staff.abuse_report.title": "@{store} was reported",
+  "notify.staff.abuse_report.body": "{count24h, plural, one {# report in the last 24 hours} other {# reports in the last 24 hours}}. Newest reason: {reason}.",
+  "notify.staff.signup_capped.title": "Today's sign-up cap is reached",
+  "notify.staff.signup_capped.body": "New sign-ups join the waitlist until tomorrow.",
+  "notify.abuse_reason.phishing": "Phishing",
+  "notify.abuse_reason.scam": "Scam",
+  "notify.abuse_reason.counterfeit": "Counterfeit goods",
+  "notify.abuse_reason.prohibited": "Prohibited goods",
+  "notify.abuse_reason.impersonation": "Impersonation",
+  "notify.abuse_reason.other": "Other",
 } as const satisfies Record<string, string>;

@@ -16,7 +16,15 @@
  *     keyset cursor (a tampered token → null), the reason codes and the risk flags against the console catalogs, the
  *     `PlatformSettingSchema` defaults and refusals (TN-04), and `FEATURE_PROOFS` (PD77) against the PLA-§O lists
  *     mirrored below;
- *   - two copies pinned to their sources (the BOT_UA pattern, `describeUserAgent`) until CCR r1-p1-1 shares them.
+ *   - two copies pinned to their sources (the BOT_UA pattern, `describeUserAgent`) until CCR r1-p1-1 shares them;
+ *   - notification kinds (PL-13): every PLA-§18.2 kind registered, every registered kind's vars a `z.object` without a
+ *     phone / name / address / email / note key, tenant kinds titled and bodied in ar / fr / en with the same
+ *     placeholders (each a var of the kind), staff kinds titled in en, the code labels per locale, the link rule
+ *     fixtures of PLA-§O.1 rev 4 and each kind's link builder, the R1.0 senders' vars, dates shown with Latin digits;
+ *   - flags (PL-12): the platform declarations, `resolveFlag`'s order, a 20 % rollout stable per store, an expired
+ *     override ignored;
+ *   - the brand match (PD70: exact / near / none, an Arabic term, an offensive term never named, the 200 cap) and the
+ *     abuse report input (reason enum, the 2,000 cap, the same-host path rule).
  * Exits 1 on any failure.
  */
 import { readFileSync } from "node:fs";
@@ -230,6 +238,16 @@ async function main(): Promise<void> {
   const { messages: arConsole } = await import("@/lib/i18n/admin/ar/console");
   const { messages: enAll } = await import("@/lib/i18n/admin/en");
   const disposableMod = await import("./data/disposable-domains.json");
+  const notifyKinds = await import("./notify-kinds");
+  const notifyRegistry = await import("@/lib/notify/registry");
+  const flagEval = await import("./flag-eval");
+  const flagRegistry = await import("@/lib/flags/registry");
+  const brandMatch = await import("./brand-match");
+  const abuseInput = await import("./abuse-input");
+  const { USAGE_METRICS } = await import("@/lib/tenancy/entitlement-keys");
+  const { messages: frAll } = await import("@/lib/i18n/admin/fr");
+  const { messages: arAll } = await import("@/lib/i18n/admin/ar");
+  const { z } = await import("zod");
   const disposable = ("default" in disposableMod ? disposableMod.default : disposableMod) as { license: string; domains: string[] };
 
   type Input = import("./signup-risk").SignupRiskInput;
@@ -919,6 +937,239 @@ async function main(): Promise<void> {
   const uaMine = pinned("src/lib/platform/signup-risk.ts", uaRe);
   const uaTheirs = pinned("src/lib/admin-data/security.ts", uaRe);
   check(uaMine !== null && uaMine === uaTheirs, "describeUserAgent: the copy equals src/lib/admin-data/security.ts");
+
+  /* ---------------------------------------------------------------- */
+  /* 11. notification kinds (PLA-§18, PL-13)                          */
+  /* ---------------------------------------------------------------- */
+
+  type Catalog = Readonly<Record<string, string | undefined>>;
+  const catalogs: Record<"en" | "fr" | "ar", Catalog> = { en: enAll as Catalog, fr: frAll as Catalog, ar: arAll as Catalog };
+  const KINDS = notifyRegistry.NOTIFICATION_KINDS;
+  const kindNames = KINDS.map((k) => k.kind);
+  check(new Set(kindNames).size === kindNames.length, "notification kinds: every name once across the tracks");
+  /** PLA-§18.2 (and the R1.0 kind T1 already sends: signup.reopened) */
+  const PLATFORM_KINDS = [
+    "signup.received", "signup.info_requested", "signup.approved", "signup.rejected", "signup.reopened",
+    "store.restricted", "store.suspended", "store.restored", "store.closed", "store.reopened", "store.deletion_scheduled", "store.deletion_cancelled",
+    "store.impersonation_started", "store.impersonation_ended", "store.export_by_platform",
+    "request.answered", "plan.changed", "plan.boost_granted", "plan.boost_ending", "quota.80", "quota.100", "health.issue_new",
+    "member.joined", "invite.accepted", "member.role_changed", "member.suspended",
+    "security.2fa_required", "user.2fa_reset", "user.password_reset", "legal.updated", "staff.message",
+    "staff.signup_new", "staff.signup_hold", "staff.info_answered", "staff.appeal", "staff.request",
+    "staff.purge_requested", "staff.purge_confirmed", "staff.super_admin_requested", "staff.alarm", "staff.kill_changed",
+    "staff.mention", "staff.impersonation_started", "staff.abuse_report", "staff.signup_capped",
+  ];
+  for (const name of PLATFORM_KINDS) check(kindNames.includes(name), `${name}: registered (PLA-§18.2)`);
+  check(notifyRegistry.notificationKind("staff.signup_new")?.batch?.windowMin === 60, "staff.signup_new is batched hourly");
+
+  for (const k of KINDS) {
+    const keys = notifyKinds.varKeysOf(k.vars);
+    check(keys !== null, `${k.kind}: vars is a z.object`);
+    const banned = (keys ?? []).filter((key) => notifyKinds.isBannedVarKey(key));
+    check(banned.length === 0, `${k.kind}: no vars key named phone, name, address, email or note (${banned.join(", ")})`);
+    for (const key of Object.keys(notifyKinds.labelsOf(k))) check((keys ?? []).includes(key), `${k.kind}: label for a declared var (${key})`);
+    const locales = k.tenant ? (["en", "fr", "ar"] as const) : (["en"] as const);
+    for (const part of ["title", "body"] as const) {
+      const key = `notify.${k.kind}.${part}`;
+      const ref = catalogs.en[key];
+      // a staff kind needs its English title; a tenant kind its title and body in every locale
+      if (part === "body" && !k.tenant && ref === undefined) continue;
+      for (const loc of locales) check(typeof catalogs[loc][key] === "string" && catalogs[loc][key]!.length > 0, `${key}: ${loc}`);
+      if (ref === undefined) continue;
+      const want = notifyKinds.placeholdersOf(ref);
+      check(want.every((p) => (keys ?? []).includes(p)), `${key}: every placeholder is a var of the kind (${want.join(", ")})`);
+      for (const loc of locales) {
+        const text = catalogs[loc][key];
+        if (text !== undefined) check(eq(notifyKinds.placeholdersOf(text), want), `${key}: ${loc} has the same placeholders as en`);
+      }
+    }
+  }
+  // the code labels the kinds name, in every locale of the kinds that use them
+  const labelSets: [prefix: string, codes: readonly string[], locales: readonly ("en" | "fr" | "ar")[]][] = [
+    ["notify.reason", reasons.STORE_STATUS_REASONS, ["en", "fr", "ar"]],
+    ["notify.visit_reason", ["onboarding", "ticket", "abuse_review", "bug", "other"] satisfies import("@/lib/tenancy/types").ImpersonationReason[], ["en", "fr", "ar"]],
+    ["notify.request_kind", ["signup", "reopen", "go_live", "plan_change", "limit_raise", "mode_change", "domain"], ["en", "fr", "ar"]],
+    ["notify.outcome", ["granted", "declined"], ["en", "fr", "ar"]],
+    ["notify.metric", Object.entries(USAGE_METRICS).filter(([, d]) => d.limit !== null).map(([m]) => m), ["en", "fr", "ar"]],
+    ["notify.legal_kind", ["tos", "privacy", "aup", "dpa"], ["en", "fr", "ar"]],
+    ["notify.abuse_reason", abuseInput.ABUSE_REASONS, ["en"]],
+  ];
+  for (const [prefix, codes, locales] of labelSets) {
+    const missing = codes.flatMap((code) => locales.filter((loc) => typeof catalogs[loc][`${prefix}.${code}`] !== "string").map((loc) => `${code}/${loc}`));
+    check(missing.length === 0, `${prefix}.*: a label per code (${missing.join(", ")})`);
+  }
+  // no dashes or "Step n" in this file's copy (PLA-§N.1, core §I.8 rule 8)
+  for (const [loc, cat] of Object.entries(catalogs)) {
+    for (const [key, text] of Object.entries(cat)) {
+      if (!key.startsWith("notify.") || typeof text !== "string") continue;
+      check(!/[–—]|\bStep \d/.test(text), `${key} (${loc}): no em or en dash, no "Step n"`);
+    }
+  }
+  check(
+    catalogs.en["notify.store.impersonation_started.body"]!.endsWith("Customer details were hidden.") &&
+      catalogs.fr["notify.store.impersonation_started.body"]!.endsWith("Les données clients étaient masquées.") &&
+      catalogs.ar["notify.store.impersonation_started.body"]!.endsWith("كانت بيانات الزبناء مخفية."),
+    "store.impersonation_started.body ends with the masking sentence in ar / fr / en (PD69)",
+  );
+
+  // the declaration guard
+  const refusesDecl = (decl: () => unknown) => {
+    try {
+      decl();
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  const base = { group: "store", defaultSeverity: "info", audienceHint: "store", tenant: true } as const;
+  check(refusesDecl(() => notifyKinds.defineKind({ ...base, kind: "x.leak", vars: z.object({ phone: z.string() }) })), "defineKind refuses a customer-data vars key");
+  check(refusesDecl(() => notifyKinds.defineKind({ ...base, kind: "x.leak", vars: z.object({ Email: z.string() }) })), "defineKind refuses it in any case");
+  check(refusesDecl(() => notifyKinds.defineKind({ ...base, kind: "x.label", vars: z.object({ a: z.string() }), labels: { b: "notify.reason" } })), "defineKind refuses a label for an unknown var");
+  check(refusesDecl(() => notifyKinds.defineKind({ ...base, kind: "NoDot", vars: z.object({}) })), "defineKind refuses a malformed kind name");
+  check(eq(notifyKinds.placeholdersOf("{count, plural, one {# x} other {# y}} for {store} by {by} {store}"), ["by", "count", "store"]), "placeholdersOf reads {var} and plural variables");
+
+  // the link rule (PLA-§O.1 rev 4 fixtures) and the registry's shapes
+  for (const link of ["/app/atlas-argan", "/app/atlas-argan/x", "/app/atlas-argan?a", "/admin/x", "/app/account?doc=tos", "/admin", "/app/atlas-argan#health", "/admin/queue?r=01JQUEUE000000000000000000"]) {
+    check(notifyKinds.notifyLinkOk(link) === link, `link rule: "${link}" passes`);
+  }
+  const refusedLinks = [
+    "https://evil.example", "//evil", "/app/../admin", "javascript:alert(1)", "/app/atlas-argan/../../admin", "/app/atlas-argan/%2e%2e/admin",
+    "/app/atlas-argan/%2E%2E/admin", "/admin\\evil", "/app/atlas-argan//evil.example", "/admin x", "", "/app/ab", "/apps/atlas-argan",
+    `/admin/${"x".repeat(300)}`, "/app/atlas-argan/%zz",
+  ];
+  for (const link of refusedLinks) check(notifyKinds.notifyLinkOk(link) === null, `link rule: "${link.slice(0, 40)}" is stored as null`);
+  check(eq(notifyKinds.NOTIFY_LINK_SHAPES.map(String), notifyRegistry.NOTIFY_LINK_RES.map(String)), "the link shapes equal the registry's NOTIFY_LINK_RES");
+  // every kind's builder makes a link of its own audience, and none without a handle for a store link
+  for (const k of KINDS) {
+    if (!k.link) continue;
+    const built = notifyKinds.notifyLinkOk(k.link({}, { handle: "atlas-argan" }));
+    const shape = k.tenant ? /^\/app\/(?:atlas-argan|account)(?:[/?#]|$)/ : /^\/admin(?:[/?#]|$)/;
+    check(built !== null && shape.test(built), `${k.kind}: the link builder makes a ${k.tenant ? "tenant" : "console"} link (${built})`);
+    if (k.tenant && built?.startsWith("/app/atlas-argan")) check(notifyKinds.notifyLinkOk(k.link({}, { handle: null })) === null, `${k.kind}: no handle, no link`);
+  }
+  const linkOf = (kind: string, vars: Record<string, unknown>) => notifyRegistry.notificationKind(kind)!.link!(vars, { handle: "atlas-argan" });
+  const SID = "01JSTORE000000000000000000";
+  check(linkOf("signup.approved", {}) === "/app/atlas-argan/pages" && linkOf("health.issue_new", {}) === "/app/atlas-argan#health" && linkOf("store.impersonation_started", {}) === "/app/atlas-argan/settings/audit", "tenant links per PLA-§18.2");
+  check(linkOf("legal.updated", { kind: "tos" }) === "/app/account?doc=tos" && linkOf("user.password_reset", {}) === "/app/account/security", "user-level links per PLA-§18.2");
+  check(
+    linkOf("staff.abuse_report", { storeId: SID }) === `/admin/stores/${SID}` &&
+      linkOf("staff.impersonation_started", { storeId: SID }) === `/admin/stores/${SID}/activity` &&
+      linkOf("staff.signup_new", {}) === "/admin/queue" &&
+      linkOf("staff.appeal", { requestId: SID }) === `/admin/queue?r=${SID}` &&
+      linkOf("staff.signup_capped", {}) === "/admin/settings/signup?tab=waitlist",
+    "staff links per PLA-§18.2",
+  );
+  // vars schemas: the R1.0 senders' shapes still parse (transitionStore, impersonation, signup, team)
+  const parses = (kind: string, vars: unknown) => notifyRegistry.notificationKind(kind)!.vars.safeParse(vars).success;
+  check(parses("store.restricted", { reason: "fake_orders" }) && parses("signup.approved", { reason: "approved" }) && parses("staff.signup_capped", { day: "2026-10-28" }), "the lifecycle and signup senders' vars parse");
+  check(
+    parses("store.impersonation_started", { reason: "ticket", from: "2026-10-28T09:00:00.000Z", to: "2026-10-28T09:30:00.000Z" }) && parses("staff.impersonation_started", { store: "atlas-argan", by: SID, minutes: 30 }),
+    "the impersonation senders' vars parse",
+  );
+  check(parses("invite.accepted", { member: "Salma B.", role: "manager" }) && parses("member.role_changed", { role: "agent" }) && parses("member.suspended", {}), "the team senders' vars parse");
+  check(!parses("quota.80", { metric: "pages", used: 8, limit: 10 }) && !parses("staff.abuse_report", { store: "x", reason: "spam", count24h: 1 }), "a missing var or a code outside the enum is refused");
+  // read-time display: dates in the reader's locale and time zone, Latin digits, codes unchanged
+  const at = "2026-10-28T10:00:00.000Z";
+  const enAt = String(notifyKinds.displayVar(at, "en", "Africa/Casablanca"));
+  const arAt = String(notifyKinds.displayVar(at, "ar", "Africa/Casablanca"));
+  check(enAt.includes("2026") && enAt.includes("11:00"), `displayVar: an instant in the store's time zone (${enAt})`);
+  check(arAt.includes("2026") && !/[٠-٩]/.test(arAt), `displayVar: Arabic with Latin digits (${arAt})`);
+  check(
+    String(notifyKinds.displayVar("2026-11-02", "fr", "UTC")).includes("2026") && notifyKinds.displayVar("fake_orders", "en", "UTC") === "fake_orders" && notifyKinds.displayVar(3, "en", "UTC") === 3,
+    "displayVar: a day as a date, codes and numbers unchanged",
+  );
+
+  /* ---------------------------------------------------------------- */
+  /* 12. flags (PLA-§12.2, PL-12)                                     */
+  /* ---------------------------------------------------------------- */
+
+  type FlagRowState = import("./flag-eval").FlagRowState;
+  type FlagContext = import("./flag-eval").FlagContext;
+  type OverrideScope = import("./flag-eval").OverrideScope;
+  const FLAGS = flagRegistry.FLAG_DEFS;
+  check(new Set(FLAGS.map((f) => f.key)).size === FLAGS.length, "flags: every key once across the tracks");
+  for (const f of FLAGS) {
+    check(/^[a-z][a-z0-9_]{1,63}$/.test(f.key) && f.description.length <= 300 && f.ownerTrack.length <= 16 && flagEval.valueFits(f.type, f.default), `flag ${f.key}: key, description, owner and a default of its type`);
+  }
+  const perf = flagRegistry.flagDef("console_perf_panel");
+  const ring = flagRegistry.flagDef("health_tenant_ring");
+  check(perf?.kind === "ops" && perf.default === false && perf.ownerTrack === "platform", "console_perf_panel: ops, false (PLA-§12.2)");
+  check(ring?.kind === "release" && ring.default === true && ring.ownerTrack === "platform", "health_tenant_ring: release, true (PLA-§12.2)");
+
+  const now = new Date("2026-10-28T12:00:00Z");
+  const future = new Date("2026-11-28T12:00:00Z");
+  const past = new Date("2026-10-27T12:00:00Z");
+  const flagDefF: import("@/lib/flags/registry").FlagDef = { key: "f", kind: "release", type: "boolean", description: "test", default: false, ownerTrack: "platform" };
+  const rowF: FlagRowState = { key: "f", kind: "release", type: "boolean", defaultValue: true, rules: [{ when: { plans: ["pro"] }, value: false }], archived: false };
+  const ovr = (scope: OverrideScope, scopeId: string, value: unknown, expiresAt: Date | null = null) => ({ flagKey: "f", scope, scopeId, value, expiresAt });
+  const overrides = [ovr("market", "MA", true), ovr("plan", "pro", true), ovr("store", "S1", false), ovr("user", "U1", true)];
+  const ctxAll: FlagContext = { userId: "U1", storeId: "S1", planId: "pro", market: "MA" };
+  const src = (ctx: FlagContext, o = overrides, row: FlagRowState | undefined = rowF) => flagEval.resolveFlag("f", ctx, { def: flagDefF, row, overrides: o, now })?.source;
+  check(src(ctxAll) === "override:user", "flagValue order: the user override first");
+  check(src({ ...ctxAll, userId: undefined }) === "override:store", "… then the store override");
+  check(src({ ...ctxAll, userId: undefined, storeId: undefined }) === "override:plan", "… then the plan override");
+  check(src({ market: "MA" }) === "override:market", "… then the market override");
+  check(src({ planId: "pro" }, []) === "rule:0", "… then the first matching rule");
+  check(src({ planId: "basic" }, []) === "row" && src({}, []) === "row", "… then the row's default (a rule whose condition the context lacks does not hold)");
+  check(flagEval.resolveFlag("f", {}, { def: flagDefF, overrides: [], now })?.source === "code", "… then the declaration's default");
+  check(src(ctxAll, [ovr("user", "U1", true, past), ovr("store", "S1", false, future)]) === "override:store", "an expired override is ignored, an unexpired one applies");
+  check(src(ctxAll, [ovr("user", "U1", "yes")]) === "rule:0", "an override of the wrong type is skipped");
+  check(flagEval.resolveFlag("g", {}, { overrides: [], now }) === null, "no row, no declaration: nothing answers");
+  const rolloutRow = (pct: number): FlagRowState => ({ key: "r", kind: "release", type: "boolean", defaultValue: false, rules: [{ when: {}, value: true, rollout: pct }], archived: false });
+  const inFlag = (storeId: string, pct = 20) => flagEval.resolveFlag("r", { storeId }, { row: rolloutRow(pct), overrides: [], now })?.value === true;
+  const storeIds = Array.from({ length: 2_000 }, (_, i) => `01JSTORE${String(i).padStart(18, "0")}`);
+  const share = storeIds.filter((s) => inFlag(s)).length / storeIds.length;
+  check(share > 0.16 && share < 0.24, `a 20 % rollout puts about 20 % of 2,000 stores in (${(share * 100).toFixed(1)} %)`);
+  check(storeIds.slice(0, 200).every((s) => [1, 2, 3, 4, 5].every(() => inFlag(s) === inFlag(s))), "the same store lands in the same bucket on every evaluation");
+  const { createHash } = await import("node:crypto");
+  const bucketOf = (text: string) => parseInt(createHash("sha256").update(text).digest("hex").slice(0, 8), 16) % 100;
+  check(storeIds.slice(0, 50).every((s) => flagEval.rolloutBucket("r", { storeId: s }) === bucketOf(`r:${s}`)), "the bucket is parseInt(sha256(key:storeId)[0..7], 16) % 100");
+  check(flagEval.rolloutBucket("r", { userId: "U9" }) === bucketOf("r:U9"), "without a store, the user decides the bucket");
+  check(storeIds.slice(0, 100).every((s) => !inFlag(s, 0) && inFlag(s, 100)), "rollout 0 takes no one, 100 everyone");
+  check(flagEval.ruleMatches({ when: { platformRoles: ["admin"] }, value: true }, { platformRole: "admin" }) && !flagEval.ruleMatches({ when: { platformRoles: ["admin"] }, value: true }, { platformRole: "none" }), "a platform-role rule holds for that role only");
+  check(
+    flagEval.ruleMatches({ when: { modes: ["store"], storeStatus: ["active"] }, value: 1 }, { mode: "store", storeStatus: "active" }) && !flagEval.ruleMatches({ when: { modes: ["store"], storeStatus: ["active"] }, value: 1 }, { mode: "store" }),
+    "every condition must hold",
+  );
+  check(flagEval.valueFits("json", { a: 1 }) && !flagEval.valueFits("json", [1]) && !flagEval.valueFits("number", Number.NaN) && flagEval.valueFits("string", ""), "valueFits per type");
+
+  /* ---------------------------------------------------------------- */
+  /* 13. brand guard (PLA-§13.3, PD70, D76)                           */
+  /* ---------------------------------------------------------------- */
+
+  type ProtectedTerm = import("./brand-match").ProtectedTerm;
+  const TERMS: ProtectedTerm[] = [...SEED_TERMS, { term: "اتصالات", kind: "brand", match: "exact" }, { term: "badword", kind: "offensive", match: "substring" }];
+  const bm = (value: string, field: import("./brand-match").BrandField = "store_name") => brandMatch.matchTerms(field, value, TERMS);
+  check(bm("CIH Bank · Vérification").verdict === "exact", 'matchTerms: "CIH Bank · Vérification" is exact');
+  check(bm("face-b00k-shop").verdict === "exact" && bm("face-b00k-shop").term === "facebook", "matchTerms: face-b00k-shop is exact on facebook (brandTokens)");
+  check(bm("Nour Argan Shop").verdict === "ok", "matchTerms: a clean name is ok");
+  check(bm("mybankshop").verdict === "near" && bm("mybankshop").term === "bank" && bm("mybankshop").termKind === "bank", "matchTerms: a substring term of 4+ chars inside the value is near, with the term");
+  check(bm("inwistore").verdict === "ok", "matchTerms: an exact-only term never answers near");
+  check(bm("اتـصـالات المغرب", "whatsapp_name").verdict === "exact" && bm("اتـصـالات المغرب").term === "اتصالات", "matchTerms: an Arabic term through tatweel");
+  check(eq(bm("The badword shop"), { verdict: "exact", termKind: "offensive" }), "matchTerms: an offensive term is exact and never named");
+  check(bm("").verdict === "ok" && bm("   ").verdict === "ok", "matchTerms: an empty value is ok");
+  check(bm(`${"a".repeat(brandMatch.BRAND_VALUE_MAX)} facebook`).verdict === "ok" && bm(`${"a".repeat(150)} facebook`).verdict === "exact", "matchTerms: the value is cut at 200 characters");
+  check(eq(bm("CIH Bank", "seo_title"), bm("CIH Bank", "store_name")), "matchTerms: one rule for every field");
+  check(!JSON.stringify(Object.keys(bm("CIH Bank"))).includes("value"), "matchTerms never echoes the value");
+
+  /* ---------------------------------------------------------------- */
+  /* 14. abuse report input (PLA-§24.2, PLA-§L)                       */
+  /* ---------------------------------------------------------------- */
+
+  const goodReport = { handle: " Atlas-Argan ", reason: "scam", details: "I paid and got nothing.", pagePath: "/s/atlas-argan/argan-oil?utm_source=fb#form", contact: "reporter@example.test", ip: "196.200.12.7" };
+  const parsedReport = abuseInput.parseAbuseReport(goodReport);
+  check(parsedReport.handle === "atlas-argan" && parsedReport.reason === "scam" && parsedReport.pagePath === "/s/atlas-argan/argan-oil", "parseAbuseReport: the handle lower-cased, the path without its query");
+  const reportRefused = (patch: Record<string, unknown>) => !abuseInput.AbuseReportSchema.safeParse({ ...goodReport, ...patch }).success;
+  check(reportRefused({ reason: "spam" }) && reportRefused({ reason: undefined }), "parseAbuseReport: the reason must be one of the six");
+  check(!reportRefused({ details: "x".repeat(2_000) }) && reportRefused({ details: "x".repeat(2_001) }), "parseAbuseReport: details up to 2,000 characters");
+  check(!reportRefused({ contact: "x".repeat(120) }) && reportRefused({ contact: "x".repeat(121) }), "parseAbuseReport: contact up to 120 characters");
+  check(abuseInput.parseAbuseReport({ ...goodReport, details: "  \u0007 ", contact: "" }).details === null && abuseInput.parseAbuseReport({ ...goodReport, contact: "" }).contact === null, "parseAbuseReport: empty text is null, control characters dropped");
+  check(abuseInput.parseAbuseReport({ ...goodReport, details: "line one\r\nline two\u0000" }).details === "line one\nline two", "parseAbuseReport: plain text keeps line breaks");
+  for (const path of ["https://evil.example/x", "//evil.example/x", "relative/path", "/a\\b", "/a b", `/${"p".repeat(300)}`, "javascript:alert(1)"]) {
+    check(abuseInput.sameHostPath(path) === null, `sameHostPath: "${path.slice(0, 30)}" is dropped`);
+  }
+  check(abuseInput.sameHostPath("/argan-oil#form") === "/argan-oil" && abuseInput.sameHostPath(`/${"p".repeat(299)}`)?.length === 300 && abuseInput.sameHostPath(null) === null, "sameHostPath: a path on the store's host, 300 characters at most");
+  check(abuseInput.REPORT_LIMITS.ipPerHour === 5 && abuseInput.REPORT_LIMITS.storePerDay === 20, "report buckets: 5 per hour per IP, 20 per day per store (core §E.8)");
 
   const ms = Math.round(performance.now() - t0);
   for (const s of skips) console.log(`  SKIP ${s}`);
