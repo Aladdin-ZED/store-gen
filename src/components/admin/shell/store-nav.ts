@@ -22,7 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { StorePermission } from "@/lib/auth/permissions";
-import { messageOf, t, type AdminLocale } from "@/lib/i18n/admin";
+import { ADMIN_LOCALES, messageOf, t, type AdminLocale } from "@/lib/i18n/admin";
 import type { StoreMode } from "@/lib/tenancy/mode";
 import { appHref } from "@/lib/urls";
 import { NAV_CONTRIBUTIONS, navFor, type NavContribution, type NavGroupId } from "./nav/index";
@@ -112,22 +112,125 @@ export function activeNav(pathname: string, groups: readonly ShellNavGroup[], ha
 
 export interface SettingsNavItem {
   id: string;
+  /** the English label (the item's fallback while a catalog lacks `labelKey`) */
   label: string;
+  labelKey: string;
   /** store-relative ("/settings/general") */
   path: `/${string}`;
   description: string;
+  descriptionKey: string;
   permission: StorePermission;
 }
 
 /** Today's settings tabs at their §I.1 homes (members, account security and the integrations have their own screens). */
 export const SETTINGS_NAV: readonly SettingsNavItem[] = [
-  { id: "general", label: "Store & legal", path: "/settings/general", description: "Name, contacts and legal identity", permission: "settings.read" },
-  { id: "market", label: "Market defaults", path: "/settings/market", description: "Currency, language, phone and shipping", permission: "settings.read" },
-  { id: "ai", label: "Local AI", path: "/settings/ai", description: "On-device models and background removal", permission: "settings.read" },
-  { id: "anti-spam", label: "Anti-spam", path: "/settings/anti-spam", description: "Cloudflare Turnstile keys", permission: "settings.read" },
-  { id: "audit", label: "Audit log", path: "/settings/audit", description: "Who changed what, and when", permission: "audit.read" },
+  {
+    id: "general",
+    label: "Store & legal",
+    labelKey: "shell.settings.general",
+    path: "/settings/general",
+    description: "Name, contacts and legal identity",
+    descriptionKey: "shell.settings.general_lead",
+    permission: "settings.read",
+  },
+  {
+    id: "market",
+    label: "Market defaults",
+    labelKey: "shell.settings.market",
+    path: "/settings/market",
+    description: "Currency, language, phone and shipping",
+    descriptionKey: "shell.settings.market_lead",
+    permission: "settings.read",
+  },
+  {
+    id: "ai",
+    label: "Local AI",
+    labelKey: "shell.settings.ai",
+    path: "/settings/ai",
+    description: "On-device models and background removal",
+    descriptionKey: "shell.settings.ai_lead",
+    permission: "settings.read",
+  },
+  {
+    id: "anti-spam",
+    label: "Anti-spam",
+    labelKey: "shell.settings.anti_spam",
+    path: "/settings/anti-spam",
+    description: "Cloudflare Turnstile keys",
+    descriptionKey: "shell.settings.anti_spam_lead",
+    permission: "settings.read",
+  },
+  {
+    id: "audit",
+    label: "Audit log",
+    labelKey: "shell.settings.audit",
+    path: "/settings/audit",
+    description: "Who changed what, and when",
+    descriptionKey: "shell.settings.audit_lead",
+    permission: "audit.read",
+  },
 ];
 
 export function settingsNavFor(can: (p: StorePermission) => boolean): readonly SettingsNavItem[] {
   return SETTINGS_NAV.filter((i) => can(i.permission));
+}
+
+/** A settings tab's label (or its one-line description) in `locale`; the English text while no catalog has the key. */
+export function settingsText(item: SettingsNavItem, part: "label" | "description", locale: AdminLocale = "en"): string {
+  const key = part === "label" ? item.labelKey : item.descriptionKey;
+  return messageOf(key, locale) !== undefined ? t(key, undefined, locale) : item[part];
+}
+
+/* ------------------------------------------------------------------ */
+/* Which screens render in the viewer's language (§I.5, D36)           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * P2's trilingual screens (PLA-§22 intro: ar, fr and en in R1), store-relative. The shell chrome always follows the
+ * viewer's language; a screen does only when it is listed here, so the dashboard's English screens (D36: fr R2, ar
+ * R3) never render mirrored under `dir="rtl"`. `ready` is flipped by the step that ships the screen's translated
+ * body; until then the route keeps English (the screen's text is still the R1.0 English one). Other tracks opt their
+ * screen in with `<ScreenLocale>` around its root, never through this list.
+ */
+export const TRILINGUAL_SCREENS: readonly { path: "" | `/${string}`; ready: boolean }[] = [
+  { path: "", ready: false }, // the overview: the dashboard redesign (p2-09)
+  { path: "/welcome", ready: false }, // onboarding (p2-12)
+  { path: "/notifications", ready: false }, // the notification centre (p2-09)
+  { path: "/team", ready: true }, // T2's translated team page (members and invites)
+  { path: "/settings/general", ready: false },
+  { path: "/settings/market", ready: false },
+  { path: "/settings/plan", ready: false },
+  { path: "/settings/address", ready: false },
+  { path: "/settings/security", ready: false },
+  { path: "/settings/danger", ready: false },
+  { path: "/settings/audit", ready: false }, // the settings pages (p2-10)
+];
+
+/** Inside a trilingual subtree but another track's screen (P4's agents and call center: fr R1, ar R3). */
+const ENGLISH_UNDER: readonly `/${string}`[] = ["/team/agents", "/team/callcenter"];
+
+const ENGLISH_ONLY: readonly AdminLocale[] = ["en"];
+
+const under = (rel: string, path: string) => rel === path || rel.startsWith(`${path}/`);
+
+/**
+ * The locales the screen at `rel` (the path after `/app/<handle>`, "" for the overview) renders in: all three for a
+ * ready trilingual screen, English otherwise. Pure.
+ */
+export function screenLocalesFor(rel: string): readonly AdminLocale[] {
+  const path = rel.replace(/[?#].*$/, "").replace(/\/+$/, "");
+  if (ENGLISH_UNDER.some((p) => under(path, p))) return ENGLISH_ONLY;
+  const screen = TRILINGUAL_SCREENS.find((s) => (s.path === "" ? path === "" : under(path, s.path)));
+  return screen?.ready ? ADMIN_LOCALES : ENGLISH_ONLY;
+}
+
+/** The locale a screen renders in: the viewer's when the screen supports it, else English. Pure. */
+export function screenLocale(viewer: AdminLocale, supported: readonly AdminLocale[]): AdminLocale {
+  return supported.includes(viewer) ? viewer : "en";
+}
+
+/** The store-relative part of a dashboard pathname ("/app/atlas/team" → "/team"); null outside the store's dashboard. */
+export function storeRelativePath(pathname: string, home: string): string | null {
+  if (pathname === home) return "";
+  return pathname.startsWith(`${home}/`) ? pathname.slice(home.length) : null;
 }

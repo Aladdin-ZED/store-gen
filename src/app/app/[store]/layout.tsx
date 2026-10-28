@@ -6,9 +6,10 @@ import { StepUpProvider } from "@/components/admin/shell/step-up";
 import { StoreProvider } from "@/components/admin/shell/store-context";
 import { StoreFrame } from "@/components/admin/shell/store-frame";
 import { StoreHandleMeta } from "@/components/admin/shell/store-handle";
+import { LocaleRoot } from "@/components/admin/common/screen-locale";
 import { navCounts } from "@/lib/admin-data/dashboard";
 import { storeClientInfo, switcherMemberships } from "@/lib/admin-data/shell";
-import { AdminI18nProvider } from "@/lib/i18n/admin/client";
+import { viewerLocale } from "@/lib/auth/locale";
 import { consoleHref } from "@/lib/urls";
 import { searchAction } from "./actions";
 import { memberCtx } from "./member-ctx";
@@ -34,40 +35,40 @@ export async function generateMetadata({ params }: Pick<Props, "params">): Promi
  * (AUTH-31): each page calls requireStoreMember with its own permission, each action storeAction, each route
  * storeGuard. The theme, tooltips and toasts come from `src/app/app/layout.tsx` (one set for all of /app).
  *
- * The store dashboard ships in English, left to right, until its catalogs exist (§I.5, D36: the French dashboard is
- * R2, the Arabic RTL one R3, UX-08), whatever the viewer's language: an `ar` viewer would otherwise get the English
- * shell mirrored under `dir="rtl"`. The translated screens inside it (the team page) set their own language.
+ * Language (§I.5, D36, UX-08): the shell chrome (sidebar, switcher, top bar) renders in the viewer's language and
+ * direction (`users.locale`, T2's `viewerLocale`); each screen inside it renders in that language only when it is
+ * translated, else in English left to right (`StoreFrame` wraps the content in `ScreenLocale` with the route's list
+ * from `screenLocalesFor`), so an `ar` viewer never gets an English screen mirrored under `dir="rtl"`.
  */
 export default async function StoreLayout({ children, params }: Props) {
   const { store: handle } = await params;
   const ctx = await memberCtx(handle);
-  const [jar, memberships, counts] = await Promise.all([
+  const [jar, memberships, counts, locale] = await Promise.all([
     cookies(),
     switcherMemberships(ctx.user.id),
     ctx.can("orders.read") ? navCounts(ctx.scope) : Promise.resolve(null),
+    viewerLocale(ctx.user),
   ]);
   const sidebarOpen = jar.get("sidebar_state")?.value !== "false";
 
   return (
-    <AdminI18nProvider locale="en">
-      <div lang="en" dir="ltr" className="contents">
-        {/* the media, framing and upload clients call this store's /api/app/<handle>/… */}
-        <StoreHandleMeta handle={ctx.store.handle} />
-        <StoreProvider value={storeClientInfo(ctx)}>
-          <StepUpProvider totp={ctx.user.totpEnabled}>
-            <StoreFrame
-              user={{ name: ctx.user.name, email: ctx.user.email, totpEnabled: ctx.user.totpEnabled }}
-              counts={counts}
-              memberships={memberships}
-              consoleHref={ctx.user.platformRole !== "none" ? consoleHref() : null}
-              sidebarOpen={sidebarOpen}
-              search={searchAction}
-            >
-              {children}
-            </StoreFrame>
-          </StepUpProvider>
-        </StoreProvider>
-      </div>
-    </AdminI18nProvider>
+    <LocaleRoot locale={locale}>
+      {/* the media, framing and upload clients call this store's /api/app/<handle>/… */}
+      <StoreHandleMeta handle={ctx.store.handle} />
+      <StoreProvider value={storeClientInfo(ctx)}>
+        <StepUpProvider totp={ctx.user.totpEnabled}>
+          <StoreFrame
+            user={{ name: ctx.user.name, email: ctx.user.email, totpEnabled: ctx.user.totpEnabled }}
+            counts={counts}
+            memberships={memberships}
+            consoleHref={ctx.user.platformRole !== "none" ? consoleHref() : null}
+            sidebarOpen={sidebarOpen}
+            search={searchAction}
+          >
+            {children}
+          </StoreFrame>
+        </StepUpProvider>
+      </StoreProvider>
+    </LocaleRoot>
   );
 }

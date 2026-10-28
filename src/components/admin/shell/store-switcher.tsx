@@ -18,10 +18,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import type { MembershipSummary } from "@/lib/auth/landing";
+import { useAdminLocale, useT } from "@/lib/i18n/admin/client";
 import { appHref } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { TONE_CLASSES } from "../common/status-chip";
-import { STORE_MODE_LABELS, STORE_ROLE_LABELS, STORE_STATUS, storeInitials } from "../lib/store-labels";
+import { STORE_STATUS, storeInitials } from "../lib/store-labels";
 import { useStore } from "./store-context";
 
 /** Where a new store starts (T2's onboarding skeleton, §I.1). */
@@ -46,6 +47,8 @@ export function StoreTile({ name, className }: { name: string; className?: strin
 export function StoreSwitcher({ memberships, consoleHref }: { memberships: readonly MembershipSummary[] | null; consoleHref: string | null }) {
   const store = useStore();
   const { isMobile, setOpenMobile } = useSidebar();
+  const t = useT();
+  const rtl = useAdminLocale() === "ar";
   const state = STORE_STATUS[store.status];
   const others = (memberships ?? []).filter((m) => m.storeId !== store.id && m.status === "active");
   const close = () => {
@@ -60,16 +63,21 @@ export function StoreSwitcher({ memberships, consoleHref }: { memberships: reado
             <SidebarMenuButton
               size="lg"
               className="h-12 gap-2.5 rounded-xl px-1.5 data-open:bg-sidebar-accent hover:bg-sidebar-accent/60"
-              aria-label={`Store: ${store.name}. Switch store`}
+              aria-label={t("shell.switcher.label", { store: store.name })}
             >
               <StoreTile name={store.name} />
               <span className="grid min-w-0 flex-1 gap-0.5 text-start leading-tight">
                 <span className="truncate text-[0.88rem] font-semibold tracking-[-0.015em]">{store.name}</span>
                 <span className="flex min-w-0 items-center gap-1.5 text-[0.72rem] text-sidebar-foreground/65">
-                  <span className="truncate">{STORE_MODE_LABELS[store.mode]}</span>
+                  <span className="truncate">{t(`shell.mode.${store.mode}`)}</span>
                   {state && (
-                    <span className={cn("inline-flex h-4 shrink-0 items-center rounded-full px-1.5 text-[0.64rem] font-medium ring-1 ring-inset", TONE_CLASSES[state.tone].chip)}>
-                      {state.label}
+                    <span
+                      className={cn(
+                        "inline-flex h-4 shrink-0 items-center rounded-full px-1.5 text-[0.64rem] font-medium ring-1 ring-inset",
+                        TONE_CLASSES[state.tone].chip,
+                      )}
+                    >
+                      {t(`shell.status.${store.status}`)}
                     </span>
                   )}
                 </span>
@@ -77,15 +85,17 @@ export function StoreSwitcher({ memberships, consoleHref }: { memberships: reado
               <ChevronsUpDownIcon className="ms-auto size-4 text-sidebar-foreground/45" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent side={isMobile ? "bottom" : "right"} align="start" sideOffset={10} className="w-72 rounded-xl p-1.5">
-            <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[0.72rem] font-medium text-muted-foreground">Your stores</DropdownMenuLabel>
+          <DropdownMenuContent side={isMobile ? "bottom" : rtl ? "left" : "right"} align="start" sideOffset={10} className="w-72 rounded-xl p-1.5">
+            <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[0.72rem] font-medium text-muted-foreground">
+              {t("shell.switcher.your_stores")}
+            </DropdownMenuLabel>
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
                 <Link href={store.href()} onClick={close} className="gap-2.5">
                   <StoreTile name={store.name} className="size-7 rounded-lg text-[0.66rem]" />
                   <span className="grid min-w-0 flex-1 leading-tight">
                     <span className="truncate text-sm font-medium">{store.name}</span>
-                    <span className="truncate text-xs text-muted-foreground">{STORE_ROLE_LABELS[store.role]}</span>
+                    <span className="truncate text-xs text-muted-foreground">{t(`team.role.${store.role}`)}</span>
                   </span>
                   <CheckIcon className="size-4 text-brand" />
                 </Link>
@@ -99,8 +109,8 @@ export function StoreSwitcher({ memberships, consoleHref }: { memberships: reado
                       <span className="grid min-w-0 flex-1 leading-tight">
                         <span className="truncate text-sm">{m.name}</span>
                         <span className="truncate text-xs text-muted-foreground">
-                          {STORE_ROLE_LABELS[m.role]}
-                          {pill ? ` · ${pill.label}` : ""}
+                          {t(`team.role.${m.role}`)}
+                          {pill ? ` · ${t(`shell.status.${m.storeStatus}`)}` : ""}
                         </span>
                       </span>
                     </Link>
@@ -112,14 +122,14 @@ export function StoreSwitcher({ memberships, consoleHref }: { memberships: reado
             <DropdownMenuItem asChild>
               <Link href={NEW_STORE_PATH} onClick={close}>
                 <PlusIcon />
-                Create a store
+                {t("shell.switcher.create")}
               </Link>
             </DropdownMenuItem>
             {consoleHref && (
               <DropdownMenuItem asChild>
                 <a href={consoleHref}>
                   <ShieldIcon />
-                  <span className="flex-1">Platform console</span>
+                  <span className="flex-1">{t("shell.switcher.console")}</span>
                   <ArrowUpRightIcon className="size-3.5 text-muted-foreground" />
                 </a>
               </DropdownMenuItem>

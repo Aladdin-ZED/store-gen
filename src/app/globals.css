@@ -133,6 +133,18 @@
   /* Arabic surfaces: the identity shells set lang / dir on their own root, so the rule matches any element (DS21) */
   [lang="ar"] {
     font-family: var(--font-arabic), var(--font-sans);
+    line-height: 1.6;
+  }
+  /* an English or French screen inside the Arabic shell chrome (ScreenLocale) gets the Latin face back */
+  :where([lang]:not([lang="ar"])) {
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+  /* DES-§16.3: Arabic line-height ≥ 1.6 at every step, also under a `text-*` utility (it reads --tw-leading first);
+     an explicit `leading-*` utility (utilities layer) still wins. `:lang()` follows the nearest `lang`, so a nested
+     English screen keeps its own leading. */
+  :where(:lang(ar)) {
+    --tw-leading: 1.6;
   }
   :where(h1, h2, h3, h4) {
     text-wrap: balance;
@@ -219,4 +231,10 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* DES-§16.3 (UX-33): Arabic text is never smaller than 12 px; the shell's caption sizes step up under `lang="ar"`
+   (unlayered, so it wins over the utilities layer) */
+:where(:lang(ar)):is(.text-\[0\.62rem\], .text-\[0\.64rem\], .text-\[0\.66rem\], .text-\[0\.68rem\], .text-\[0\.7rem\], .text-\[0\.72rem\], .text-\[10px\], .text-\[11px\]) {
+  font-size: 0.75rem;
 }

@@ -3,15 +3,22 @@
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAdminLocale } from "@/lib/i18n/admin/client";
 import { cn } from "@/lib/utils";
 import { useStore } from "../shell/store-context";
-import { settingsNavFor } from "../shell/store-nav";
+import { settingsNavFor, settingsText } from "../shell/store-nav";
 
 /** Settings sub-navigation of the store on screen: a vertical list with a gliding highlight (horizontal scroller on phones). */
 export function SettingsNav() {
   const pathname = usePathname();
   const store = useStore();
-  const items = settingsNavFor(store.can).map((i) => ({ ...i, href: store.href(i.path) }));
+  const locale = useAdminLocale();
+  const items = settingsNavFor(store.can).map((i) => ({
+    ...i,
+    label: settingsText(i, "label", locale),
+    description: settingsText(i, "description", locale),
+    href: store.href(i.path),
+  }));
   return (
     <nav aria-label="Settings" className="-mx-4 overflow-x-auto px-4 adm-scroll lg:mx-0 lg:overflow-visible lg:px-0">
       <ul className="flex gap-1 lg:sticky lg:top-20 lg:flex-col">
