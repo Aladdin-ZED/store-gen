@@ -17,8 +17,11 @@
  *  4. locks      §E.7 on a fake 2-connection pool: with both connections busy a request-path lock answers
  *                { ran: false } within its 1 s timeout (§J.1), the late connection goes back, a nested lock throws,
  *                GET_LOCK refused / RELEASE_LOCK failed, the waits reach the lock-pool window;
- *  5. registry   every registered job has a unique valid name and a positive budget (the 95 s sum joins with the
- *                runner's slot table, P8 step 3).
+ *  5. registry   every registered job has a unique valid name and a positive budget;
+ *  6. runner     (./selftest-runner.ts, P8 step 3) the slot table and the job budget rules, the Sheets capacity
+ *                arithmetic, the due logic, the round robin's fairness, and runTickWith on a fake lease and fake clocks:
+ *                skipped on overlap, an expired lease taken over, no lock-pool connection between jobs, the budget
+ *                allocation, lag shortening, the yield contract, isolation, job_runs rows, the legacy Sheets shim.
  */
 import Module from "node:module";
 import { EventEmitter } from "node:events";
@@ -560,6 +563,34 @@ async function main(): Promise<void> {
     t.eq("job names are unique", new Set(names).size, names.length);
     t.check("job names are valid (≤ 48 chars, not 'tick')", JOBS.every((j) => /^[a-z][a-z0-9_.:-]{0,47}$/.test(j.name) && j.name !== "tick"), names.join(", "));
     t.check("every job declares a positive budget", JOBS.every((j) => Number.isFinite(j.budgetMs) && j.budgetMs > 0));
+  });
+
+  /* ---------------------------------------------------------------- */
+  const { runnerSections } = await import("./selftest-runner");
+  const { databaseUrl } = await import("@/lib/db/url");
+  const savedLockPool = globalThis.__sgLockPool;
+  let gets = 0;
+  runnerSections(h, {
+    R: await import("./runner"),
+    S: await import("./slots"),
+    D: await import("./due"),
+    C: await import("./capacity"),
+    SC: await import("./scope"),
+    REC: await import("./recorder"),
+    L,
+    JOBS,
+    Clock: FakeClock,
+    installLockPool() {
+      const p = fakeLockPool(2);
+      gets = 0;
+      const counted = { getConnection: () => (gets++, p.getConnection()) };
+      // the process's lock pool for this database name: withNamedLock takes it from here
+      globalThis.__sgLockPool = { url: databaseUrl()!, pool: counted as unknown as NonNullable<typeof globalThis.__sgLockPool>["pool"] };
+      return { pool: counted, free: () => p.free(), gets: () => gets };
+    },
+    restoreLockPool() {
+      globalThis.__sgLockPool = savedLockPool;
+    },
   });
 
   await h.run();

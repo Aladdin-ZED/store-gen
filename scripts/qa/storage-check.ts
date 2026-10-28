@@ -26,6 +26,14 @@
  *                              flip is followed by readers that cached the old row
  *  - disk cache                the large-file cache lives in DATA_DIR/cache/media once DATA_DIR passed its check
  *  - usage                     the fs backend reads the last walk snapshot; the db backend measures its table
+ *  - runner (P8 step 3)        the tick lease on the real cron_cursors row: two concurrent ticks → one skipped, an
+ *                              expired lease taken over, a lost seed row re-seeded, the lease cleared after each tick;
+ *                              job_runs rows (run, per store through forEachStore, tick, skipped); the due state merged
+ *                              into a job's own state; the legacy Sheets shim (a fake syncStores); runTick() itself with
+ *                              the registered housekeeping (an abandoned lead > 30 days purged, a fresh one kept)
+ *  - forEachStore (P8 step 3)  the round robin over the real stores table (cursor row, wrap, budget stop, a throwing
+ *                              store counted in the error ring and skipped), the refined pending_renders /
+ *                              pending_outbox predicates (pending and due, store rows only), "tick" refused
  */
 import Module from "node:module";
 import { randomBytes, createHash } from "node:crypto";
@@ -560,6 +568,182 @@ async function main(): Promise<number> {
     const u = await dbStorage.usage();
     const [rows] = (await pool().query("SELECT COUNT(*) AS n FROM media_chunks WHERE idx = 0")) as unknown as [{ n: number }[]];
     t.check("db usage: the chunk table's size and its file count", u.bytes > 0 && u.files === Number(rows[0]?.n) && u.files >= 1 && u.freeBytes === null, JSON.stringify(u));
+  });
+
+  /* ================================================================ */
+  h.section("runner", async (t) => {
+    const R = await import("@/lib/jobs/runner");
+    const { forEachStore } = await import("@/lib/jobs/scope");
+    type Job = import("@/lib/jobs/runner").Job;
+    type Row = { job: string; store_id: string | null; ok: number; processed: number; summary: string | null; error_code: string | null };
+    const runsOf = async (tickId: string) =>
+      ((await pool().query("SELECT job, store_id, ok, processed, summary, error_code FROM job_runs WHERE tick_id = ? ORDER BY id", [tickId])) as unknown as [Row[]])[0].map((r) => ({
+        ...r,
+        summary: r.summary ? (JSON.parse(r.summary) as Record<string, unknown>) : null,
+      }));
+    const one = async <T>(q: string, v: unknown[] = []) => ((await pool().query(q, v)) as unknown as [T[]])[0][0];
+    const lease = async () => (await one<{ c: string }>("SELECT `cursor` AS c FROM cron_cursors WHERE job = 'tick'"))?.c ?? null;
+    const base = await R.defaultRunnerDeps();
+    const legacy: { job: string; budgetMs: number }[] = [];
+    const fakeSheets: typeof base.legacySheets = async (ctx, budgetMs) => {
+      legacy.push({ job: ctx.job, budgetMs });
+      return { done: true, processed: 0, summary: { visited: 0, appended: 0, pulled: 0, failedStores: 0 } };
+    };
+
+    // two concurrent ticks: the second is skipped while the first holds the lease
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let entered!: () => void;
+    const inside = new Promise<void>((r) => (entered = r));
+    const waitJob: Job = { name: "qa.wait", every: "tick", budgetMs: 2_000, run: async () => (entered(), await gate, { done: true, summary: { waited: true } }) };
+    const deps = { ...base, jobs: [waitJob], legacySheets: fakeSheets };
+    t.eq("0005 seeded the lease row, free", await lease(), "");
+    const first = R.runTickWith(deps);
+    await inside;
+    const held = await lease();
+    const second = await R.runTickWith(deps);
+    t.check("two concurrent ticks: the second answers skipped", second.skipped && second.jobs.length === 0, JSON.stringify(second));
+    t.check("…while the first holds the lease (its tick id in `cursor`)", !!held && held.length === 26 && held !== second.tickId, String(held));
+    t.eq("…and the skipped tick wrote its job_runs row", (await runsOf(second.tickId)).map((r) => [r.job, r.ok, r.summary]), [["tick", 1, { skipped: true }]]);
+    release();
+    const a = await first;
+    t.check("the first tick ran to the end", !a.skipped && a.tickId === held, JSON.stringify(a));
+    t.eq("the lease is cleared after the tick", await lease(), "");
+    const rows = await runsOf(a.tickId);
+    t.eq("job_runs: the shim's run, the job's run, then the tick row", rows.map((r) => [r.job, r.store_id, r.ok]), [["sheets.push", null, 1], ["qa.wait", null, 1], ["tick", null, 1]]);
+    t.check("the legacy shim ran as sheets.push with slot 1's budget", legacy.length === 1 && legacy[0]!.job === "sheets.push" && legacy[0]!.budgetMs > 17_000 && legacy[0]!.budgetMs <= 18_000, JSON.stringify(legacy));
+    t.eq("…its row says legacy", rows[0]?.summary?.legacy, true);
+    const tickSummary = rows[2]?.summary ?? {};
+    t.check(
+      "the tick row: skipped false, lagP95Ms, cpuMs per job, the job list",
+      tickSummary.skipped === false && "lagP95Ms" in tickSummary && typeof (tickSummary.cpuMs as Record<string, number>)?.["qa.wait"] === "number" && Array.isArray(tickSummary.jobs),
+      JSON.stringify(tickSummary),
+    );
+    t.eq("the tick row counts its runs", rows[2]?.processed, 2);
+
+    // an expired lease (> 110 s) is taken over; a recent one is not; a lost seed row is put back
+    const idle = { ...deps, jobs: [] };
+    await pool().query("UPDATE cron_cursors SET `cursor` = 'CRASHED', updated_at = UTC_TIMESTAMP(3) - INTERVAL 100 SECOND WHERE job = 'tick'");
+    t.check("a lease renewed 100 s ago: skipped", (await R.runTickWith(idle)).skipped && (await lease()) === "CRASHED");
+    await pool().query("UPDATE cron_cursors SET updated_at = UTC_TIMESTAMP(3) - INTERVAL 111 SECOND WHERE job = 'tick'");
+    t.check("a lease older than 110 s: taken over, then cleared", !(await R.runTickWith(idle)).skipped && (await lease()) === "");
+    await pool().query("DELETE FROM cron_cursors WHERE job = 'tick'");
+    t.check("a lost seed row: re-seeded and acquired (not skipped forever)", !(await R.runTickWith(idle)).skipped && (await lease()) === "");
+
+    // per-store rows through forEachStore's recorder: only the store that did work
+    const storesJob: Job = {
+      name: "qa.stores",
+      every: "tick",
+      budgetMs: 2_000,
+      run: async (ctx) => {
+        const r = await forEachStore(ctx, { job: "qa.stores", states: ["active"], budgetMs: 1_000 }, async (_scope, store) => (store.id === STORE_A ? 2 : 0));
+        return { done: r.done, summary: { visited: r.visited } };
+      },
+    };
+    const s = await R.runTickWith({ ...deps, jobs: [storesJob] });
+    const sRows = (await runsOf(s.tickId)).filter((r) => r.job === "qa.stores");
+    t.eq("forEachStore in a run: the run row, then one row for the store that did work", sRows.map((r) => [r.store_id, r.processed, r.ok]), [[null, 2, 1], [STORE_A, 2, 1]]);
+    t.eq("…the run's summary counts the visits", [sRows[0]?.summary?.stores, sRows[0]?.summary?.storesWorked, sRows[0]?.summary?.visited], [2, 1, 2]);
+    t.eq("…and the job's cursor moved (round robin)", (await one<{ c: string }>("SELECT `cursor` AS c FROM cron_cursors WHERE job = 'qa.stores'"))?.c, STORE_B);
+
+    // the due state is merged into the job's own state, once per hour
+    await pool().query("INSERT INTO cron_cursors (job, `cursor`, state, updated_at) VALUES ('qa.hourly', 'C1', ?, UTC_TIMESTAMP(3))", [JSON.stringify({ keep: { n: 1 } })]);
+    let hourlyRuns = 0;
+    const hourly: Job = { name: "qa.hourly", every: "hourly", budgetMs: 1_000, run: async (ctx) => (hourlyRuns++, { done: true, summary: { cursor: ctx.cursor } }) };
+    const h1 = await R.runTickWith({ ...deps, jobs: [hourly] });
+    await R.runTickWith({ ...deps, jobs: [hourly] });
+    const st = await one<{ c: string; state: string }>("SELECT `cursor` AS c, state FROM cron_cursors WHERE job = 'qa.hourly'");
+    const state = JSON.parse(st?.state ?? "{}") as { keep?: unknown; due?: { lastHour?: string } };
+    t.eq("an hourly job runs once in two ticks of the same hour", hourlyRuns, 1);
+    t.eq("…its ctx.cursor came from its row", (await runsOf(h1.tickId)).find((r) => r.job === "qa.hourly")?.summary?.cursor, "C1");
+    t.eq("…the due state merged in, the job's own keys and cursor kept", [state.due?.lastHour, state.keep, st?.c], [h1.startedAt.slice(0, 13), { n: 1 }, "C1"]);
+
+    // runTick() itself: the registered housekeeping, the real (unconfigured) Sheets step
+    const old = new Date(Date.now() - 31 * 86_400_000);
+    for (const [id, at] of [
+      ["01JB8ZK3Q4R5S6T7V8W9LEAD01", old],
+      ["01JB8ZK3Q4R5S6T7V8W9LEAD02", new Date()],
+    ] as const) {
+      await pool().query("INSERT INTO leads (id, store_id, page_id, idem, phone, created_at) VALUES (?, ?, ?, ?, ?, ?)", [id, STORE_A, "01JB8ZK3Q4R5S6T7V8W9PAGE01", `00000000-0000-4000-8000-0000000000${id.slice(-2)}`, "+212600000000", at]);
+    }
+    const real = await R.runTick();
+    const realRows = await runsOf(real.tickId);
+    const hk = realRows.find((r) => r.job === "housekeeping" && r.store_id === null);
+    t.check("runTick(): housekeeping ran in its slot with its budget", !!hk && hk.ok === 1 && hk.summary?.slot === "8" && Number(hk.summary?.budgetMs) <= 4_000, JSON.stringify(hk));
+    t.check("…purged the lead older than 30 days", Number(hk?.summary?.abandonedLeads) >= 1, JSON.stringify(hk?.summary));
+    const leadsLeft = ((await pool().query("SELECT id FROM leads WHERE id LIKE '01JB8ZK3Q4R5S6T7V8W9LEAD%' ORDER BY id")) as unknown as [{ id: string }[]])[0].map((r) => r.id);
+    t.eq("…and kept the fresh one", leadsLeft, ["01JB8ZK3Q4R5S6T7V8W9LEAD02"]);
+    t.eq("…a per-store row for the store whose lead went", realRows.filter((r) => r.job === "housekeeping" && r.store_id).map((r) => [r.store_id, r.processed]), [[STORE_A, 1]]);
+    t.check("runTick(): the legacy Sheets step ran as sheets.push (not configured here: nothing to push)", realRows.some((r) => r.job === "sheets.push" && r.summary?.legacy === true && r.ok === 1), JSON.stringify(realRows.map((r) => r.job)));
+    t.eq("…and the lease is free again", await lease(), "");
+  });
+
+  /* ================================================================ */
+  h.section("forEachStore", async (t) => {
+    const SC = await import("@/lib/jobs/scope");
+    const STORE_C = "01JB8ZK3Q4R5S6T7V8W9XYZ0CC";
+    const STORE_D = "01JB8ZK3Q4R5S6T7V8W9XYZ0DD";
+    await db.insert(stores).values([
+      { id: STORE_C, handle: "storage-c", name: "storage-c", status: "active", brandSeed: "0123456789abcdef" },
+      { id: STORE_D, handle: "storage-d", name: "storage-d", status: "suspended", brandSeed: "0123456789abcdef" },
+    ]);
+    const fctx = systemCtx("qa.foreach");
+    const run = async (job: string, opts: { budgetMs?: number; where?: "pending_outbox" | "pending_renders"; states?: ("active" | "suspended")[]; sleepMs?: number; throwFor?: string } = {}) => {
+      const seen: string[] = [];
+      const r = await SC.forEachStore(fctx, { job, states: opts.states ?? ["active"], budgetMs: opts.budgetMs ?? 5_000, where: opts.where }, async (scope, store) => {
+        if (scope.storeId !== store.id || scope.kind !== "system") throw new Error("scope mismatch");
+        seen.push(store.id);
+        if (opts.sleepMs) await new Promise((r) => setTimeout(r, opts.sleepMs));
+        if (opts.throwFor === store.id) throw new Error("boom");
+      });
+      return { seen, ...r };
+    };
+    const all = await run("qa.rr");
+    t.eq("every active store once, in id order, done", [all.seen, all.done], [[STORE_A, STORE_B, STORE_C], true]);
+    t.eq("the cursor row holds the last store served", ((await pool().query("SELECT `cursor` AS c FROM cron_cursors WHERE job = 'qa.rr'")) as unknown as [{ c: string }[]])[0][0]?.c, STORE_C);
+    const budget1 = await run("qa.budget", { budgetMs: 150, sleepMs: 200 });
+    t.eq("a spent budget stops after the store in flight, done false", [budget1.seen, budget1.done], [[STORE_A], false]);
+    const budget2 = await run("qa.budget", { budgetMs: 150, sleepMs: 200 });
+    t.eq("the next run starts after the cursor", budget2.seen, [STORE_B]);
+    E.resetErrorBuffer();
+    const origError = console.error;
+    console.error = () => undefined;
+    let thrown: Awaited<ReturnType<typeof run>>;
+    try {
+      thrown = await run("qa.throw", { throwFor: STORE_B });
+    } finally {
+      console.error = origError;
+    }
+    t.eq("a throwing store is skipped, the others still run", [thrown.seen, thrown.done], [[STORE_A, STORE_B, STORE_C], true]);
+    // a fresh buffer's first flush is immediate (its timer may already have run): flush, then read the ring's table
+    await E.flushErrors();
+    const ring = ((await pool().query("SELECT area, code, route, store_id, count FROM error_events WHERE route = 'job:qa.throw'")) as unknown as [{ area: string; code: string; route: string; store_id: string | null; count: number }[]])[0];
+    t.check("…and counted in the error ring under the job, with its store", ring.length === 1 && ring[0]!.area === "jobs" && ring[0]!.store_id === STORE_B && ring[0]!.code === "Error" && Number(ring[0]!.count) === 1, JSON.stringify(ring));
+    E.resetErrorBuffer();
+    t.eq("other states", (await run("qa.states", { states: ["suspended"] })).seen, [STORE_D]);
+
+    // pending_renders: pending and due only
+    const page = "01JB8ZK3Q4R5S6T7V8W9PAGE01";
+    for (const [id, storeId, state, inSec] of [
+      ["01JB8ZK3Q4R5S6T7V8W9RJ0001", STORE_A, "pending", -5],
+      ["01JB8ZK3Q4R5S6T7V8W9RJ0002", STORE_B, "pending", 600],
+      ["01JB8ZK3Q4R5S6T7V8W9RJ0003", STORE_C, "running", -5],
+    ] as const) {
+      await pool().query("INSERT INTO render_jobs (id, store_id, page_id, reason, state, not_before) VALUES (?, ?, ?, 'runtime', ?, UTC_TIMESTAMP(3) + INTERVAL ? SECOND)", [id, storeId, page, state, inSec]);
+    }
+    t.eq("pending_renders: a pending job that is due (not one waiting for not_before, not a running one)", (await run("qa.renders", { where: "pending_renders" })).seen, [STORE_A]);
+
+    // pending_outbox: pending and due store items only
+    for (const [id, storeId, state, inSec] of [
+      ["01JB8ZK3Q4R5S6T7V8W9OB0001", null, "pending", -5],
+      ["01JB8ZK3Q4R5S6T7V8W9OB0002", STORE_B, "dead", -5],
+      ["01JB8ZK3Q4R5S6T7V8W9OB0003", STORE_C, "pending", -5],
+      ["01JB8ZK3Q4R5S6T7V8W9OB0004", STORE_A, "pending", 600],
+    ] as const) {
+      await pool().query("INSERT INTO outbox (id, store_id, kind, topic, dedupe_key, payload, state, next_at) VALUES (?, ?, 'telegram', 'qa', ?, '{}', ?, UTC_TIMESTAMP(3) + INTERVAL ? SECOND)", [id, storeId, `qa:${id}`, state, inSec]);
+    }
+    t.eq("pending_outbox: a store's pending item that is due (not a platform row, a dead one or a later one)", (await run("qa.outbox", { where: "pending_outbox" })).seen, [STORE_C]);
+    await t.rejects('the job name "tick" (the lease row) is refused', () => SC.forEachStore(fctx, { job: "tick", states: ["active"], budgetMs: 10 }, async () => undefined), /bad job name/);
   });
 
   await h.run();
