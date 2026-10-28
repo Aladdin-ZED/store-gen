@@ -9,12 +9,29 @@
  *  - EU markets: GDPR and the 14-day withdrawal right; other markets: neutral wording.
  *  - Nothing is invented: missing company details (legal name, address, ICE, RC…) become visible
  *    gaps (`ph`) the merchant must complete in Settings → Store; no registration number is ever made up.
+ *  - Every promise comes from the store's answers (landing.md LAN-§3.3, LD29): delivery coverage and times, opening
+ *    the parcel before paying, the confirmation call, returns, exchanges, refunds, the store's warranty and the
+ *    calling hours are built by ./promises.ts from `LegalPolicy` (./policy.ts); an unset answer is a visible gap
+ *    (Settings → Policies), never a sentence. The lines quoting the law (withdrawal right, legal guarantee) are
+ *    flagged "needs legal review" (core D39).
+ *  - `returns` (returns, exchanges, refunds) is written here for every page. It is served as its own document once
+ *    the maintainer widens `LEGAL_KINDS` (CCR docs/saas/ccr/r1-p3-2.md); until then the shipping page carries its
+ *    sections, so no page loses them.
  */
+import { LEGAL_KINDS } from "../context";
 import type { PageLinks, RenderContext, StoreContext } from "../types";
-import { b, callout, link, list, p, ph, type Block, type Inline, type LegalChrome, type LegalKind, type LegalSection, type LegalText } from "./model";
+import { b, callout, link, list, p, ph, type Block, type Inline, type LegalChrome, type LegalKind, type LegalSection, type LegalText, type LegalTextKind } from "./model";
+import { resolveLegalPolicy, type LegalPolicy, type LegalPolicyInput } from "./policy";
+import { legalPromises, type LegalRegime } from "./promises";
 
 export type LegalLang = "ar" | "fr" | "en";
-type Regime = "MA" | "EU" | "INTL";
+type Regime = LegalRegime;
+
+/** `returns` is its own served document once `LEGAL_KINDS` lists it (P0b P3-4); the shipping page carries it until then. */
+export const RETURNS_SERVED = (LEGAL_KINDS as readonly string[]).includes("returns");
+
+/** Every document this part writes: the served kinds, and `returns` whether it is served yet or not. */
+export type LegalTexts = Record<LegalKind, LegalText> & Record<"returns", LegalText>;
 
 const EU_MARKETS = new Set(["FR", "BE", "ES", "DE", "IT", "NL", "PT"]);
 
@@ -26,14 +43,18 @@ interface Facts {
   /** delivery fee per order (0 = free) and its formatted amount */
   fee: number;
   feeText: string;
-  /** delivery promise as written on the page ("Livraison 24–48h partout au Maroc") */
-  delivery: string;
+  /** the store's answers (policies, the confirmation call, the zones' dates, the calling hours) */
+  pol: LegalPolicy;
   /** names of the ad / analytics pixels configured on the page */
   pixels: string[];
   /** platforms among them that can also receive server events (Meta, TikTok): hashed contact data */
   serverPlatforms: string[];
   fields: { city: boolean; citySelect: boolean; address: boolean; note: boolean; email: boolean };
   links: PageLinks;
+  /** the returns document's address: its own page once served, else the shipping page that carries it */
+  returnsHref: string;
+  /** WhatsApp is one of the channels the contact page offers (the store has a number and the Contact card allows it) */
+  whatsappFirst: boolean;
 }
 
 /** Page language → legal text language (other locales read the English text). */
@@ -69,17 +90,22 @@ interface Channel {
   external: boolean;
 }
 
-export function contactChannels(store: StoreContext): Channel[] {
+/**
+ * The store's contact channels, in the order a shopper reaches fastest. `only` is the Contact card's answer
+ * (`policies.contact.channels`): when the owner picked channels, only those show; an empty answer shows every channel
+ * the store details hold.
+ */
+export function contactChannels(store: StoreContext, only: readonly Channel["key"][] = []): Channel[] {
   const out: Channel[] = [];
   if (store.whatsapp) out.push({ key: "whatsapp", text: displayWhatsapp(store.whatsapp), href: whatsappHref(store.whatsapp), external: true });
   if (store.phone) out.push({ key: "phone", text: displayPhone(store.phone), href: telHref(store.phone), external: false });
   if (store.email) out.push({ key: "email", text: store.email, href: mailHref(store.email), external: false });
-  return out;
+  return only.length ? out.filter((c) => only.includes(c.key)) : out;
 }
 
-/** "WhatsApp +212 6…, phone 05… or e-mail x@y" — or a gap when the store has no contact at all. */
+/** "WhatsApp +212 6…, phone 05… or e-mail x@y", or a gap when the store has no contact at all. */
 function contactLine(f: Facts, lang: LegalLang, words: { whatsapp: string; phone: string; email: string; or: string; missing: string }): Inline[] {
-  const chans = contactChannels(f.store);
+  const chans = contactChannels(f.store, f.pol.policies.contact.channels);
   if (!chans.length) return [ph(words.missing)];
   const out: Inline[] = [];
   chans.forEach((c, i) => {
@@ -158,7 +184,7 @@ const sec = (id: string, title: string, ...blocks: (Block | null | false)[]): Le
 /* Français                                                            */
 /* ------------------------------------------------------------------ */
 
-function fr(f: Facts): Record<LegalKind, LegalText> {
+function fr(f: Facts): LegalTexts {
   const MA = f.regime === "MA";
   const EU = f.regime === "EU";
   const s = f.store;
@@ -189,6 +215,9 @@ function fr(f: Facts): Record<LegalKind, LegalText> {
     ...(f.fields.email ? ["adresse e-mail"] : []),
   ];
   const days = MA ? "7 jours" : EU ? "14 jours" : null;
+  const P = legalPromises({ lang: "fr", regime: f.regime, pol: f.pol, contact, citySelect: f.fields.citySelect });
+  // "Livraison & retours" while it carries the returns sections, "Livraison" once the returns page is served
+  const shipTitle = RETURNS_SERVED ? "Livraison" : "Livraison & retours";
   const feeLine: Inline[] = f.fee > 0
     ? ["Des frais de livraison de ", b(f.feeText), " par commande s'ajoutent au prix des produits ; ils figurent dans le récapitulatif du formulaire, avant la confirmation."]
     : [b("La livraison est offerte"), ", quel que soit le pack choisi."];
@@ -297,7 +326,7 @@ function fr(f: Facts): Record<LegalKind, LegalText> {
     title: "Conditions générales de vente",
     summary: [
       ["Commande en 30 secondes, sans compte, et ", b("paiement en espèces à la livraison"), "."],
-      ["Nous vous appelons pour confirmer avant d'expédier."],
+      ...(P.callSummary ? [P.callSummary] : []),
       days ? ["Vous disposez de ", b(days), " après réception pour changer d'avis", MA ? " (loi n° 31-08)." : "."] : ["Vous pouvez changer d'avis après réception, dans les conditions décrites ci-dessous."],
     ],
     sections: [
@@ -325,7 +354,7 @@ function fr(f: Facts): Record<LegalKind, LegalText> {
         list(
           ["Vous choisissez votre pack et vos options, puis remplissez le formulaire."],
           ["Un numéro de commande s'affiche sur la page de confirmation."],
-          ["Nous vous appelons ou vous écrivons sur WhatsApp pour confirmer la commande et l'adresse : la commande est expédiée après cette confirmation."],
+          P.orderConfirm,
         ),
         p("Nous pouvons refuser ou annuler une commande manifestement fausse ou incomplète, ou passée de mauvaise foi (par exemple des commandes répétées jamais retirées)."),
       ),
@@ -333,34 +362,11 @@ function fr(f: Facts): Record<LegalKind, LegalText> {
         "payment",
         "Paiement à la livraison",
         callout("cash-hand", "Le paiement s'effectue ", b("en espèces, au livreur, à la réception du colis"), ". Aucun paiement n'est demandé en ligne."),
-        p("Vous pouvez vérifier votre colis à la réception, avant de payer. S'il est endommagé ou ne correspond pas à votre commande, vous pouvez le refuser sans rien payer."),
+        P.payment,
       ),
-      sec("delivery", "Livraison", p("Les zones, délais et frais de livraison sont détaillés dans la page ", link("Livraison & retours", f.links.shipping), ".")),
-      sec(
-        "withdrawal",
-        "Droit de rétractation",
-        MA
-          ? p("Conformément à la ", b("loi n° 31-08"), " édictant des mesures de protection du consommateur, vous disposez d'un délai de ", b("7 jours"), " à compter de la réception de votre commande pour exercer votre droit de rétractation, sans avoir à vous justifier ni à payer de pénalité, à l'exception des frais de retour.")
-          : EU
-            ? p("Conformément à la réglementation européenne sur les contrats à distance, vous disposez d'un délai de ", b("14 jours"), " à compter de la réception de votre commande pour vous rétracter, sans avoir à vous justifier. Les frais de retour restent à votre charge.")
-            : p("Vous pouvez vous rétracter après réception de votre commande dans le délai prévu par la loi applicable ; les frais de retour restent à votre charge."),
-        p("Pour l'exercer, contactez-nous ", ...contact, " en indiquant votre numéro de commande. Le produit doit être retourné complet, dans son état d'origine. ",
-          MA
-            ? "Nous vous remboursons les sommes versées sans délai, et au plus tard dans les 15 jours suivant l'exercice de votre droit de rétractation."
-            : EU
-              ? "Nous vous remboursons les sommes versées au plus tard 14 jours après votre rétractation ; nous pouvons attendre d'avoir reçu le produit en retour."
-              : "Nous vous remboursons les sommes versées dans les délais prévus par la loi applicable.",
-        ),
-        p(
-          "Ce droit ne s'applique pas, dans les cas prévus par la loi, aux produits confectionnés selon vos spécifications ou personnalisés, ni aux produits qui, du fait de leur nature, ne peuvent être réexpédiés ou sont susceptibles de se détériorer rapidement",
-          EU ? ", ni aux produits d'hygiène ou cosmétiques descellés après la livraison." : ".",
-        ),
-      ),
-      sec(
-        "warranty",
-        "Garanties",
-        p("Les produits bénéficient de la garantie légale contre les défauts de la chose vendue. Si votre produit présente un défaut ou ne correspond pas à votre commande, contactez-nous avec une photo : nous l'échangeons ou vous remboursons, et les frais de retour sont à notre charge."),
-      ),
+      sec("delivery", "Livraison", p("Les zones, délais et frais de livraison sont détaillés dans la page ", link(shipTitle, f.links.shipping), ".")),
+      sec("withdrawal", "Droit de rétractation", ...P.withdrawal),
+      sec("warranty", "Garanties", ...P.warranty),
       sec("data", "Données personnelles", p("Les informations du formulaire servent uniquement à traiter et livrer votre commande. Voir notre ", link("Politique de confidentialité", f.links.privacy), ".")),
       sec(
         "disputes",
@@ -377,99 +383,71 @@ function fr(f: Facts): Record<LegalKind, LegalText> {
 
   const shipping: LegalText = {
     kind: "shipping",
-    title: "Livraison & retours",
+    title: shipTitle,
     summary: [
-      [b(f.delivery)],
+      ...P.deliverySummary,
       f.fee > 0 ? ["Frais de livraison : ", b(f.feeText), " par commande."] : [b("Livraison offerte"), " sur toutes les commandes."],
-      ["Paiement en espèces à la réception, ", b("après vérification du colis"), "."],
-      days ? ["Échange ou retour possible pendant ", b(days), " après réception."] : ["Échange ou retour possible après réception, selon les conditions ci-dessous."],
+      P.paySummary,
+      ...(RETURNS_SERVED ? [] : P.returnsSummary),
     ],
     sections: [
-      sec(
-        "zones",
-        "Où nous livrons",
-        MA
-          ? p(
-              "Nous livrons dans toutes les villes du Maroc desservies par notre société de livraison.",
-              f.fields.citySelect ? " Si votre ville n'apparaît pas dans la liste du formulaire, choisissez « Autre ville » et précisez votre localité dans l'adresse." : "",
-            )
-          : p("Nous livrons dans les zones desservies par notre société de livraison. En cas de doute, contactez-nous avant de commander."),
-      ),
-      sec(
-        "times",
-        "Délais",
-        p("Délai indicatif : ", b(f.delivery), ". Il court à partir de la confirmation de votre commande par téléphone et peut être plus long pour les zones éloignées, les jours fériés ou en période de forte affluence ; nous vous prévenons en cas de retard."),
-      ),
+      sec("zones", "Où nous livrons", P.coverage),
+      sec("times", "Délais", P.times),
       sec("fees", "Frais de livraison", p(...feeLine)),
       sec(
         "steps",
         "Comment se passe la livraison",
-        list(
-          [b("Confirmation"), " — nous vous appelons ou vous écrivons sur WhatsApp pour confirmer la commande et l'adresse."],
-          [b("Expédition"), " — votre colis est remis à notre société de livraison."],
-          [b("Livraison"), " — le livreur vous appelle avant de passer : gardez votre téléphone à portée de main."],
-          [b("Paiement"), " — vous vérifiez le colis, puis vous payez le livreur en espèces."],
-        ),
+        list(...P.steps),
         p("Si vous êtes absent ou injoignable, le livreur vous recontacte pour convenir d'un nouveau passage. Un colis non retiré après plusieurs tentatives nous est retourné et la commande est annulée."),
       ),
-      sec("check", "À la réception", callout("shield-check", "Vérifiez l'état du colis et son contenu ", b("avant de payer"), ". S'il est endommagé, incomplet ou ne correspond pas à votre commande, vous pouvez le refuser : vous ne payez rien.")),
-      sec(
-        "returns",
-        "Rétractation et retours",
-        days
-          ? p("Vous disposez de ", b(days), " à compter de la réception pour retourner un produit qui ne vous convient pas, sans justification", MA ? " (loi n° 31-08)" : "", ". Les frais de retour sont à votre charge, sauf produit défectueux ou erreur de notre part.")
-          : p("Vous pouvez retourner un produit qui ne vous convient pas dans le délai prévu par la loi applicable. Les frais de retour sont à votre charge, sauf produit défectueux ou erreur de notre part."),
-        list(
-          ["Contactez-nous ", ...contact, " en indiquant votre numéro de commande."],
-          ["Renvoyez le produit complet, dans son état et son emballage d'origine, selon les instructions que nous vous donnons."],
-          ["Après réception et vérification du produit, nous vous remboursons par virement ou par un autre moyen convenu ensemble."],
-        ),
-        p("Voir aussi les exceptions prévues dans nos ", link("Conditions générales de vente", f.links.terms), "."),
-      ),
-      sec(
-        "exchange",
-        "Échanges",
-        p("Une autre taille, une autre couleur ou un autre article ? Contactez-nous ", days ? `dans les ${days} suivant la réception` : "après réception", " : nous organisons l'échange selon les stocks disponibles. Les éventuels frais de réexpédition vous sont indiqués avant l'échange."),
-      ),
-      sec(
-        "defects",
-        "Produit défectueux ou erreur",
-        p("Si vous recevez un produit défectueux ou différent de votre commande, signalez-le-nous dès que possible avec une photo. Nous le remplaçons ou vous remboursons, et les frais de retour sont à notre charge."),
-      ),
+      sec("check", "À la réception", P.check),
+      ...(RETURNS_SERVED ? [sec("returns", "Retours", p("Les retours, échanges et remboursements sont détaillés dans la page ", link("Retours & remboursements", f.returnsHref), "."))] : P.returnsSections),
     ],
+  };
+
+  const returns: LegalText = {
+    kind: "returns",
+    title: "Retours & remboursements",
+    summary: [...P.returnsSummary, ["Pour un retour ou un échange, contactez-nous avec votre numéro de commande."]],
+    sections: P.returnsSections,
   };
 
   const contactDoc: LegalText = {
     kind: "contact",
     title: "Contact",
     summary: [
-      s.whatsapp ? ["Le plus rapide : ", b("écrivez-nous sur WhatsApp"), "."] : ["Une question sur un produit ou une commande ? Nous sommes là pour vous aider."],
+      f.whatsappFirst ? ["Le plus rapide : ", b("écrivez-nous sur WhatsApp"), "."] : ["Une question sur un produit ou une commande ? Nous sommes là pour vous aider."],
       ["Pour une commande, indiquez votre numéro de commande et le téléphone utilisé."],
     ],
     sections: [
-      sec("reach", "Nous joindre", p("Écrivez-nous ou appelez-nous ", ...contact, ".")),
-      sec(
-        "orders",
-        "Suivi de commande",
-        p("Après votre commande, nous vous appelons pour la confirmer. Pour toute question sur une livraison en cours, contactez-nous avec votre numéro de commande (affiché sur la page de confirmation) et le numéro de téléphone utilisé pour commander."),
-      ),
+      sec("reach", "Nous joindre", p("Écrivez-nous ou appelez-nous ", ...contact, "."), P.hours),
+      sec("orders", "Suivi de commande", P.contactOrders),
       sec(
         "company",
         "Informations légales",
         ident,
-        p("Consultez aussi notre ", link("Politique de confidentialité", f.links.privacy), ", nos ", link("Conditions générales de vente", f.links.terms), " et la page ", link("Livraison & retours", f.links.shipping), "."),
+        p(
+          "Consultez aussi notre ",
+          link("Politique de confidentialité", f.links.privacy),
+          ", nos ",
+          link("Conditions générales de vente", f.links.terms),
+          RETURNS_SERVED ? ", la page " : " et la page ",
+          link(shipTitle, f.links.shipping),
+          ...(RETURNS_SERVED ? [" et la page ", link("Retours & remboursements", f.returnsHref)] : []),
+          ".",
+        ),
       ),
     ],
   };
 
-  return { privacy, terms, shipping, contact: contactDoc };
+  return { privacy, terms, shipping, returns, contact: contactDoc };
 }
 
 /* ------------------------------------------------------------------ */
 /* العربية                                                             */
 /* ------------------------------------------------------------------ */
 
-function ar(f: Facts): Record<LegalKind, LegalText> {
+function ar(f: Facts): LegalTexts {
   const MA = f.regime === "MA";
   const EU = f.regime === "EU";
   const s = f.store;
@@ -500,6 +478,8 @@ function ar(f: Facts): Record<LegalKind, LegalText> {
     ...(f.fields.email ? ["البريد الإلكتروني"] : []),
   ];
   const days = MA ? "7 أيام" : EU ? "14 يوما" : null;
+  const P = legalPromises({ lang: "ar", regime: f.regime, pol: f.pol, contact, citySelect: f.fields.citySelect });
+  const shipTitle = RETURNS_SERVED ? "التوصيل" : "التوصيل والإرجاع";
   const feeLine: Inline[] = f.fee > 0
     ? ["تضاف إلى ثمن المنتجات مصاريف توصيل قدرها ", b(f.feeText), " عن كل طلب، وتظهر في ملخص الاستمارة قبل التأكيد."]
     : [b("التوصيل مجاني"), " مهما كان العرض الذي تختاره."];
@@ -584,9 +564,9 @@ function ar(f: Facts): Record<LegalKind, LegalText> {
         "rights",
         "حقوقك",
         MA
-          ? p("طبقا لـ", b("القانون رقم 09.08"), " المتعلق بحماية الأشخاص الذاتيين تجاه معالجة المعطيات ذات الطابع الشخصي، لك الحق في الولوج إلى معطياتك وتصحيحها، والتعرض لأسباب مشروعة على معالجتها. ويمكنك أيضا طلب حذفها.")
+          ? p("طبقا ", b("للقانون رقم 09.08"), " المتعلق بحماية الأشخاص الذاتيين تجاه معالجة المعطيات ذات الطابع الشخصي، لك الحق في الولوج إلى معطياتك وتصحيحها، والتعرض لأسباب مشروعة على معالجتها. ويمكنك أيضا طلب حذفها.")
           : EU
-            ? p("طبقا لـ", b("النظام الأوروبي العام لحماية البيانات"), "، لك الحق في الولوج إلى معطياتك وتصحيحها ومحوها وتقييد معالجتها والاعتراض عليها ونقلها، ويمكنك سحب موافقتك في أي وقت.")
+            ? p("طبقا ", b("للنظام الأوروبي العام لحماية البيانات"), "، لك الحق في الولوج إلى معطياتك وتصحيحها ومحوها وتقييد معالجتها والاعتراض عليها ونقلها، ويمكنك سحب موافقتك في أي وقت.")
             : p("يمكنك طلب الاطلاع على معطياتك أو تصحيحها أو حذفها."),
         p("لممارسة هذه الحقوق، تواصل معنا ", ...contact, "، مع ذكر رقم الهاتف الذي استعملته في الطلب."),
         MA
@@ -604,7 +584,7 @@ function ar(f: Facts): Record<LegalKind, LegalText> {
     title: "الشروط العامة للبيع",
     summary: [
       ["طلب في 30 ثانية بلا حساب، و", b("الدفع نقدا عند الاستلام"), "."],
-      ["نتصل بك لتأكيد الطلب قبل الإرسال."],
+      ...(P.callSummary ? [P.callSummary] : []),
       days ? ["لديك ", b(days), " بعد الاستلام لتغيير رأيك", MA ? " (القانون رقم 31.08)." : "."] : ["يمكنك تغيير رأيك بعد الاستلام وفق الشروط المبينة أسفله."],
     ],
     sections: [
@@ -632,7 +612,7 @@ function ar(f: Facts): Record<LegalKind, LegalText> {
         list(
           ["تختار العرض والخيارات، ثم تملأ الاستمارة."],
           ["يظهر رقم طلبك في صفحة التأكيد."],
-          ["نتصل بك هاتفيا أو عبر واتساب لتأكيد الطلب والعنوان، ولا يُرسل الطلب إلا بعد هذا التأكيد."],
+          P.orderConfirm,
         ),
         p("يحق لنا رفض أو إلغاء أي طلب يتبين أنه وهمي أو ناقص أو تم بسوء نية (مثل الطلبات المتكررة التي لا يتم تسلمها)."),
       ),
@@ -640,27 +620,11 @@ function ar(f: Facts): Record<LegalKind, LegalText> {
         "payment",
         "الدفع عند الاستلام",
         callout("cash-hand", "يتم الأداء ", b("نقدا لعامل التوصيل عند استلام الطرد"), "، ولا يُطلب منك أي أداء عبر الإنترنت."),
-        p("يمكنك معاينة طردك عند الاستلام وقبل الأداء. وإذا كان متضررا أو لا يطابق طلبك، يمكنك رفضه دون أداء أي شيء."),
+        P.payment,
       ),
-      sec("delivery", "التوصيل", p("تجد مناطق التوصيل وآجاله ومصاريفه في صفحة ", link("التوصيل والإرجاع", f.links.shipping), ".")),
-      sec(
-        "withdrawal",
-        "حق التراجع",
-        MA
-          ? p("طبقا لـ", b("القانون رقم 31.08"), " القاضي بتحديد تدابير لحماية المستهلك، لك أجل ", b("7 أيام"), " ابتداء من تاريخ استلام طلبك لممارسة حقك في التراجع، دون الحاجة إلى تبرير ودون أداء أي غرامة، باستثناء مصاريف الإرجاع.")
-          : EU
-            ? p("طبقا للتنظيم الأوروبي الخاص بالعقود عن بعد، لك أجل ", b("14 يوما"), " ابتداء من تاريخ استلام طلبك للتراجع دون الحاجة إلى تبرير، وتبقى مصاريف الإرجاع على عاتقك.")
-            : p("يمكنك التراجع بعد استلام طلبك داخل الأجل الذي ينص عليه القانون المعمول به، وتبقى مصاريف الإرجاع على عاتقك."),
-        p("لممارسة هذا الحق، تواصل معنا ", ...contact, " مع ذكر رقم الطلب. يجب إرجاع المنتج كاملا وفي حالته الأصلية. ",
-          MA
-            ? "ونرد لك المبالغ المؤداة دون تأخير، وفي أجل أقصاه 15 يوما من تاريخ ممارستك لحق التراجع."
-            : EU
-              ? "ونرد لك المبالغ المؤداة في أجل أقصاه 14 يوما من تاريخ تراجعك، ويمكننا انتظار توصلنا بالمنتج المرجع."
-              : "ونرد لك المبالغ المؤداة داخل الآجال التي ينص عليها القانون المعمول به.",
-        ),
-        p("لا يسري هذا الحق، في الحالات التي ينص عليها القانون، على المنتجات المصنوعة حسب مواصفاتك أو المخصصة لك، ولا على المنتجات التي لا يمكن إعادة إرسالها بحكم طبيعتها أو المعرضة للتلف السريع", EU ? "، ولا على منتجات النظافة أو التجميل التي فُتح غلافها بعد التسليم." : "."),
-      ),
-      sec("warranty", "الضمانات", p("تستفيد المنتجات من الضمان القانوني لعيوب الشيء المبيع. وإذا كان منتجك معيبا أو لا يطابق طلبك، تواصل معنا مع صورة: نستبدله أو نرد لك ثمنه، وتكون مصاريف الإرجاع على عاتقنا.")),
+      sec("delivery", "التوصيل", p("تجد مناطق التوصيل وآجاله ومصاريفه في صفحة ", link(shipTitle, f.links.shipping), ".")),
+      sec("withdrawal", "حق التراجع", ...P.withdrawal),
+      sec("warranty", "الضمانات", ...P.warranty),
       sec("data", "المعطيات الشخصية", p("لا تُستعمل معلومات الاستمارة إلا لمعالجة طلبك وتوصيله. اطلع على ", link("سياسة الخصوصية", f.links.privacy), ".")),
       sec(
         "disputes",
@@ -677,84 +641,71 @@ function ar(f: Facts): Record<LegalKind, LegalText> {
 
   const shipping: LegalText = {
     kind: "shipping",
-    title: "التوصيل والإرجاع",
+    title: shipTitle,
     summary: [
-      [b(f.delivery)],
+      ...P.deliverySummary,
       f.fee > 0 ? ["مصاريف التوصيل: ", b(f.feeText), " عن كل طلب."] : [b("التوصيل مجاني"), " لجميع الطلبات."],
-      ["الدفع نقدا عند الاستلام، ", b("بعد معاينة الطرد"), "."],
-      days ? ["الاستبدال أو الإرجاع ممكن خلال ", b(days), " بعد الاستلام."] : ["الاستبدال أو الإرجاع ممكن بعد الاستلام وفق الشروط أسفله."],
+      P.paySummary,
+      ...(RETURNS_SERVED ? [] : P.returnsSummary),
     ],
     sections: [
-      sec(
-        "zones",
-        "أين نوصل",
-        MA
-          ? p("نوصل إلى جميع مدن المغرب التي تخدمها شركة التوصيل التي نتعامل معها.", f.fields.citySelect ? " وإذا لم تجد مدينتك في لائحة الاستمارة، اختر «مدينة أخرى» واكتب اسم منطقتك في العنوان." : "")
-          : p("نوصل إلى المناطق التي تخدمها شركة التوصيل التي نتعامل معها. وإذا كان لديك شك، تواصل معنا قبل الطلب."),
-      ),
-      sec("times", "آجال التوصيل", p("الأجل التقريبي: ", b(f.delivery), ". يبدأ احتسابه من تأكيد طلبك هاتفيا، وقد يطول بالنسبة للمناطق البعيدة أو في أيام العطل أو فترات الضغط، وسنخبرك في حال حدوث أي تأخير.")),
+      sec("zones", "أين نوصل", P.coverage),
+      sec("times", "آجال التوصيل", P.times),
       sec("fees", "مصاريف التوصيل", p(...feeLine)),
       sec(
         "steps",
         "كيف يتم التوصيل",
-        list(
-          [b("التأكيد"), " — نتصل بك هاتفيا أو عبر واتساب لتأكيد الطلب والعنوان."],
-          [b("الإرسال"), " — نسلم طردك لشركة التوصيل."],
-          [b("التسليم"), " — يتصل بك عامل التوصيل قبل المرور، فاحرص على أن يكون هاتفك قريبا منك."],
-          [b("الأداء"), " — تعاين الطرد، ثم تؤدي الثمن نقدا لعامل التوصيل."],
-        ),
+        list(...P.steps),
         p("إذا كنت غائبا أو تعذر الاتصال بك، يعيد عامل التوصيل الاتصال بك للاتفاق على موعد جديد. والطرد الذي لا يُتسلم بعد عدة محاولات يُعاد إلينا ويُلغى الطلب."),
       ),
-      sec("check", "عند الاستلام", callout("shield-check", "عاين حالة الطرد ومحتواه ", b("قبل الأداء"), ". وإذا كان متضررا أو ناقصا أو لا يطابق طلبك، يمكنك رفضه دون أداء أي شيء.")),
-      sec(
-        "returns",
-        "التراجع والإرجاع",
-        days
-          ? p("لديك ", b(days), " ابتداء من تاريخ الاستلام لإرجاع منتج لم يناسبك دون الحاجة إلى تبرير", MA ? " (القانون رقم 31.08)" : "", ". وتكون مصاريف الإرجاع على عاتقك، إلا إذا كان المنتج معيبا أو كان الخطأ من جهتنا.")
-          : p("يمكنك إرجاع منتج لم يناسبك داخل الأجل الذي ينص عليه القانون المعمول به. وتكون مصاريف الإرجاع على عاتقك، إلا إذا كان المنتج معيبا أو كان الخطأ من جهتنا."),
-        list(
-          ["تواصل معنا ", ...contact, " مع ذكر رقم الطلب."],
-          ["أرجع المنتج كاملا، في حالته وتغليفه الأصليين، حسب التعليمات التي نقدمها لك."],
-          ["بعد توصلنا بالمنتج والتحقق منه، نرد لك المبلغ بتحويل بنكي أو بوسيلة أخرى نتفق عليها معا."],
-        ),
-        p("اطلع أيضا على الاستثناءات المذكورة في ", link("الشروط العامة للبيع", f.links.terms), "."),
-      ),
-      sec(
-        "exchange",
-        "الاستبدال",
-        p("مقاس آخر أو لون آخر أو منتج آخر؟ تواصل معنا ", days ? `خلال ${days} بعد الاستلام` : "بعد الاستلام", "، وسننظم الاستبدال حسب المخزون المتوفر. ونخبرك بمصاريف إعادة الإرسال، إن وجدت، قبل الاستبدال."),
-      ),
-      sec("defects", "منتج معيب أو خطأ في الطلب", p("إذا توصلت بمنتج معيب أو مختلف عن طلبك، أخبرنا في أقرب وقت مع صورة. نستبدله أو نرد لك ثمنه، وتكون مصاريف الإرجاع على عاتقنا.")),
+      sec("check", "عند الاستلام", P.check),
+      ...(RETURNS_SERVED ? [sec("returns", "الإرجاع", p("تجد تفاصيل الإرجاع والاستبدال واسترداد المبلغ في صفحة ", link("الإرجاع والاسترداد", f.returnsHref), "."))] : P.returnsSections),
     ],
+  };
+
+  const returns: LegalText = {
+    kind: "returns",
+    title: "الإرجاع والاسترداد",
+    summary: [...P.returnsSummary, ["للإرجاع أو الاستبدال، تواصل معنا مع ذكر رقم الطلب."]],
+    sections: P.returnsSections,
   };
 
   const contactDoc: LegalText = {
     kind: "contact",
     title: "تواصل معنا",
     summary: [
-      s.whatsapp ? ["الأسرع: ", b("راسلنا عبر واتساب"), "."] : ["عندك سؤال على منتج أو طلب؟ نحن هنا لمساعدتك."],
+      f.whatsappFirst ? ["الأسرع: ", b("راسلنا عبر واتساب"), "."] : ["عندك سؤال على منتج أو طلب؟ نحن هنا لمساعدتك."],
       ["بخصوص طلب، اذكر رقم الطلب ورقم الهاتف الذي استعملته."],
     ],
     sections: [
-      sec("reach", "كيف تتواصل معنا", p("راسلنا أو اتصل بنا ", ...contact, ".")),
-      sec("orders", "تتبع الطلب", p("بعد طلبك، نتصل بك لتأكيده. ولأي سؤال عن توصيل جار، تواصل معنا مع ذكر رقم الطلب (الظاهر في صفحة التأكيد) ورقم الهاتف الذي استعملته في الطلب.")),
+      sec("reach", "كيف تتواصل معنا", p("راسلنا أو اتصل بنا ", ...contact, "."), P.hours),
+      sec("orders", "تتبع الطلب", P.contactOrders),
       sec(
         "company",
         "المعلومات القانونية",
         ident,
-        p("اطلع أيضا على ", link("سياسة الخصوصية", f.links.privacy), " و", link("الشروط العامة للبيع", f.links.terms), " وصفحة ", link("التوصيل والإرجاع", f.links.shipping), "."),
+        p(
+          "اطلع أيضا على ",
+          link("سياسة الخصوصية", f.links.privacy),
+          " و",
+          link("الشروط العامة للبيع", f.links.terms),
+          RETURNS_SERVED ? "، وصفحة " : " وصفحة ",
+          link(shipTitle, f.links.shipping),
+          ...(RETURNS_SERVED ? [" وصفحة ", link("الإرجاع والاسترداد", f.returnsHref)] : []),
+          ".",
+        ),
       ),
     ],
   };
 
-  return { privacy, terms, shipping, contact: contactDoc };
+  return { privacy, terms, shipping, returns, contact: contactDoc };
 }
 
 /* ------------------------------------------------------------------ */
 /* English                                                             */
 /* ------------------------------------------------------------------ */
 
-function en(f: Facts): Record<LegalKind, LegalText> {
+function en(f: Facts): LegalTexts {
   const MA = f.regime === "MA";
   const EU = f.regime === "EU";
   const s = f.store;
@@ -777,6 +728,8 @@ function en(f: Facts): Record<LegalKind, LegalText> {
     phEmail: "contact e-mail",
   });
   const currency = f.currency === "MAD" ? "Moroccan dirhams (MAD)" : f.currency === "EUR" ? "euros (EUR)" : f.currency;
+  const P = legalPromises({ lang: "en", regime: f.regime, pol: f.pol, contact, citySelect: f.fields.citySelect });
+  const shipTitle = RETURNS_SERVED ? "Shipping" : "Shipping & returns";
   const fields = [
     "full name",
     "phone number",
@@ -889,7 +842,7 @@ function en(f: Facts): Record<LegalKind, LegalText> {
     title: "Terms of sale",
     summary: [
       ["Order in 30 seconds, no account needed, and ", b("pay in cash on delivery"), "."],
-      ["We call you to confirm before shipping."],
+      ...(P.callSummary ? [P.callSummary] : []),
       days ? ["You have ", b(days), " after delivery to change your mind", MA ? " (Law No. 31-08)." : "."] : ["You can change your mind after delivery, under the conditions below."],
     ],
     sections: [
@@ -917,7 +870,7 @@ function en(f: Facts): Record<LegalKind, LegalText> {
         list(
           ["You choose your pack and options, then fill in the form."],
           ["An order number is shown on the confirmation page."],
-          ["We call you or message you on WhatsApp to confirm the order and the address; the order ships after this confirmation."],
+          P.orderConfirm,
         ),
         p("We may refuse or cancel an order that is clearly fake, incomplete or placed in bad faith (for example repeated orders that are never collected)."),
       ),
@@ -925,27 +878,11 @@ function en(f: Facts): Record<LegalKind, LegalText> {
         "payment",
         "Cash on delivery",
         callout("cash-hand", "You pay ", b("in cash, to the courier, when you receive the parcel"), ". No online payment is ever requested."),
-        p("You can check your parcel on delivery, before paying. If it is damaged or does not match your order, you can refuse it and pay nothing."),
+        P.payment,
       ),
-      sec("delivery", "Delivery", p("Delivery areas, times and fees are detailed on the ", link("Shipping & returns", f.links.shipping), " page.")),
-      sec(
-        "withdrawal",
-        "Right of withdrawal",
-        MA
-          ? p("Under Moroccan ", b("Law No. 31-08"), " on consumer protection, you have ", b("7 days"), " from receiving your order to withdraw from the purchase, without giving a reason or paying any penalty, except for the return costs.")
-          : EU
-            ? p("Under EU rules on distance contracts, you have ", b("14 days"), " from receiving your order to withdraw, without giving a reason. Return costs are yours to bear.")
-            : p("You can withdraw after receiving your order within the period set by the applicable law; return costs are yours to bear."),
-        p("To do so, contact us ", ...contact, " with your order number. The product must be returned complete and in its original condition. ",
-          MA
-            ? "We refund the amounts paid without delay, and at the latest within 15 days of the day you exercised your right of withdrawal."
-            : EU
-              ? "We refund the amounts paid at the latest 14 days after your withdrawal; we may wait until we have received the product back."
-              : "We refund the amounts paid within the time limits set by the applicable law.",
-        ),
-        p("As provided by law, this right does not apply to products made to your specifications or personalised, nor to products which by their nature cannot be sent back or may deteriorate quickly", EU ? ", nor to hygiene or cosmetic products unsealed after delivery." : "."),
-      ),
-      sec("warranty", "Warranty", p("Products are covered by the legal warranty against defects in the goods sold. If your product is faulty or does not match your order, contact us with a photo: we exchange or refund it, and return costs are on us.")),
+      sec("delivery", "Delivery", p("Delivery areas, times and fees are detailed on the ", link(shipTitle, f.links.shipping), " page.")),
+      sec("withdrawal", "Right of withdrawal", ...P.withdrawal),
+      sec("warranty", "Warranty", ...P.warranty),
       sec("data", "Personal data", p("The information in the form is only used to process and deliver your order. See our ", link("Privacy policy", f.links.privacy), ".")),
       sec(
         "disputes",
@@ -962,73 +899,64 @@ function en(f: Facts): Record<LegalKind, LegalText> {
 
   const shipping: LegalText = {
     kind: "shipping",
-    title: "Shipping & returns",
+    title: shipTitle,
     summary: [
-      [b(f.delivery)],
+      ...P.deliverySummary,
       f.fee > 0 ? ["Delivery fee: ", b(f.feeText), " per order."] : [b("Free delivery"), " on every order."],
-      ["Pay in cash on delivery, ", b("after checking the parcel"), "."],
-      days ? ["Exchange or return within ", b(days), " of delivery."] : ["Exchange or return after delivery, under the conditions below."],
+      P.paySummary,
+      ...(RETURNS_SERVED ? [] : P.returnsSummary),
     ],
     sections: [
-      sec(
-        "zones",
-        "Where we deliver",
-        MA
-          ? p("We deliver to every Moroccan city served by our delivery company.", f.fields.citySelect ? " If your city is not in the form's list, choose “Other city” and add your locality to the address." : "")
-          : p("We deliver to the areas served by our delivery company. If in doubt, contact us before ordering."),
-      ),
-      sec("times", "Delivery times", p("Estimated time: ", b(f.delivery), ". It starts when your order is confirmed by phone and may be longer for remote areas, on public holidays or at busy times; we let you know about any delay.")),
+      sec("zones", "Where we deliver", P.coverage),
+      sec("times", "Delivery times", P.times),
       sec("fees", "Delivery fees", p(...feeLine)),
       sec(
         "steps",
         "How delivery works",
-        list(
-          [b("Confirmation"), " — we call you or message you on WhatsApp to confirm the order and address."],
-          [b("Shipping"), " — your parcel is handed to our delivery company."],
-          [b("Delivery"), " — the courier calls you before coming: keep your phone close."],
-          [b("Payment"), " — you check the parcel, then pay the courier in cash."],
-        ),
+        list(...P.steps),
         p("If you are away or unreachable, the courier contacts you again to arrange a new visit. A parcel not collected after several attempts is returned to us and the order is cancelled."),
       ),
-      sec("check", "On delivery", callout("shield-check", "Check the parcel and its contents ", b("before paying"), ". If it is damaged, incomplete or does not match your order, you can refuse it: you pay nothing.")),
-      sec(
-        "returns",
-        "Withdrawal and returns",
-        days
-          ? p("You have ", b(days), " from delivery to return a product that does not suit you, without giving a reason", MA ? " (Law No. 31-08)" : "", ". Return costs are yours, unless the product is faulty or we made a mistake.")
-          : p("You can return a product that does not suit you within the period set by the applicable law. Return costs are yours, unless the product is faulty or we made a mistake."),
-        list(
-          ["Contact us ", ...contact, " with your order number."],
-          ["Send the product back complete, in its original condition and packaging, following our instructions."],
-          ["Once we have received and checked it, we refund you by bank transfer or another method agreed together."],
-        ),
-        p("See also the exceptions listed in our ", link("Terms of sale", f.links.terms), "."),
-      ),
-      sec("exchange", "Exchanges", p("Another size, colour or item? Contact us ", days ? `within ${days} of delivery` : "after delivery", " and we arrange the exchange subject to stock. Any re-shipping cost is quoted before the exchange.")),
-      sec("defects", "Faulty product or mistake", p("If you receive a faulty product or one that differs from your order, tell us as soon as possible with a photo. We replace or refund it, and return costs are on us.")),
+      sec("check", "On delivery", P.check),
+      ...(RETURNS_SERVED ? [sec("returns", "Returns", p("Returns, exchanges and refunds are detailed on the ", link("Returns & refunds", f.returnsHref), " page."))] : P.returnsSections),
     ],
+  };
+
+  const returns: LegalText = {
+    kind: "returns",
+    title: "Returns & refunds",
+    summary: [...P.returnsSummary, ["For a return or an exchange, contact us with your order number."]],
+    sections: P.returnsSections,
   };
 
   const contactDoc: LegalText = {
     kind: "contact",
     title: "Contact",
     summary: [
-      s.whatsapp ? ["Fastest: ", b("message us on WhatsApp"), "."] : ["A question about a product or an order? We are here to help."],
+      f.whatsappFirst ? ["Fastest: ", b("message us on WhatsApp"), "."] : ["A question about a product or an order? We are here to help."],
       ["About an order? Include your order number and the phone number you used."],
     ],
     sections: [
-      sec("reach", "Reach us", p("Message or call us ", ...contact, ".")),
-      sec("orders", "Order follow-up", p("After you order, we call you to confirm it. For any question about a delivery in progress, contact us with your order number (shown on the confirmation page) and the phone number you ordered with.")),
+      sec("reach", "Reach us", p("Message or call us ", ...contact, "."), P.hours),
+      sec("orders", "Order follow-up", P.contactOrders),
       sec(
         "company",
         "Legal information",
         ident,
-        p("See also our ", link("Privacy policy", f.links.privacy), ", our ", link("Terms of sale", f.links.terms), " and the ", link("Shipping & returns", f.links.shipping), " page."),
+        p(
+          "See also our ",
+          link("Privacy policy", f.links.privacy),
+          ", our ",
+          link("Terms of sale", f.links.terms),
+          RETURNS_SERVED ? ", the " : " and the ",
+          link(shipTitle, f.links.shipping),
+          RETURNS_SERVED ? " page" : " page.",
+          ...(RETURNS_SERVED ? [" and the ", link("Returns & refunds", f.returnsHref), " page."] : []),
+        ),
       ),
     ],
   };
 
-  return { privacy, terms, shipping, contact: contactDoc };
+  return { privacy, terms, shipping, returns, contact: contactDoc };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1109,9 +1037,12 @@ const SERVER_EVENT_PLATFORMS = {
   tiktokPixelId: "TikTok",
 } as const;
 
-function factsOf(ctx: RenderContext): Facts {
+function factsOf(ctx: RenderContext, policy: LegalPolicyInput | null | undefined): Facts {
   const { doc } = ctx;
   const market = doc.market;
+  // the returns page's address once served (CCR r1-p3-2 adds `returns` to PageLinks), else the shipping page
+  const returnsHref = (RETURNS_SERVED ? (ctx.links as Partial<Record<LegalTextKind, string>>).returns : undefined) ?? ctx.links.shipping;
+  const pol = resolveLegalPolicy(policy, legalLang(ctx.locale), ctx.now);
   return {
     regime: market === "MA" ? "MA" : EU_MARKETS.has(market) ? "EU" : "INTL",
     store: ctx.store,
@@ -1119,7 +1050,7 @@ function factsOf(ctx: RenderContext): Facts {
     currency: doc.currency,
     fee: doc.offers.shippingFee,
     feeText: ctx.money(doc.offers.shippingFee),
-    delivery: ctx.t("trust.delivery"),
+    pol,
     pixels: (Object.keys(PIXEL_NAMES) as (keyof typeof PIXEL_NAMES)[]).filter((k) => !!doc.tracking[k]).map((k) => PIXEL_NAMES[k]),
     serverPlatforms: (Object.keys(SERVER_EVENT_PLATFORMS) as (keyof typeof SERVER_EVENT_PLATFORMS)[]).filter((k) => !!doc.tracking[k]).map((k) => SERVER_EVENT_PLATFORMS[k]),
     fields: {
@@ -1130,16 +1061,22 @@ function factsOf(ctx: RenderContext): Facts {
       email: doc.form.email !== "hidden",
     },
     links: ctx.links,
+    returnsHref,
+    whatsappFirst: contactChannels(ctx.store, pol.policies.contact.channels).some((c) => c.key === "whatsapp"),
   };
 }
 
-/** The four legal documents of a page, in its language (ar / fr; other locales: English). */
-export function legalTexts(ctx: RenderContext): Record<LegalKind, LegalText> {
-  const f = factsOf(ctx);
+/**
+ * The legal documents of a page, in its language (ar / fr; other locales: English), with the store's answers.
+ * `policy` is what the server read at serve time (`LegalPolicyInput`); without it every answer reads as unset, so
+ * the pages show their gaps and promise nothing.
+ */
+export function legalTexts(ctx: RenderContext, policy?: LegalPolicyInput | null): LegalTexts {
+  const f = factsOf(ctx, policy);
   const lang = legalLang(ctx.locale);
   return lang === "ar" ? ar(f) : lang === "fr" ? fr(f) : en(f);
 }
 
-export function legalText(kind: LegalKind, ctx: RenderContext): LegalText {
-  return legalTexts(ctx)[kind];
+export function legalText(kind: LegalTextKind, ctx: RenderContext, policy?: LegalPolicyInput | null): LegalText {
+  return legalTexts(ctx, policy)[kind];
 }
