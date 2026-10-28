@@ -3,8 +3,9 @@ import { cn } from "@/lib/utils";
 import { Illustration, type IllustrationName } from "./illustrations";
 
 /**
- * Delightful empty state: an illustration floating on a soft brand aurora with a faint dot grid
- * and film grain, a short title, one sentence, and the next action.
+ * Quiet empty state: an illustration over a faint dot grid on a flat surface (no gradient field or
+ * texture, D60), a short title, one sentence, and the next action. Reworked into the PLA-§22.12
+ * primitive (skeleton preview of the real UI) with the shared primitives.
  */
 export function EmptyState({
   illustration,
@@ -25,7 +26,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "adm-aurora adm-grain adm-fade relative flex flex-col items-center justify-center overflow-hidden rounded-[var(--adm-radius)] text-center",
+        "adm-fade relative flex flex-col items-center justify-center overflow-hidden rounded-[var(--adm-radius)] text-center",
         compact ? "gap-3 px-6 py-10" : "gap-5 px-6 py-16 sm:py-20",
         "ring-1 ring-border/70 ring-inset",
         className,

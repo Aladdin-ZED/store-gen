@@ -68,7 +68,7 @@ export function TopPages({ handle, pages, currency, className }: { handle: strin
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2.5">
                         <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-foreground/[0.06]">
-                          <span className="block h-full rounded-full bg-brand transition-[width] duration-700" style={{ width: `${Math.max(4, (p.conversion / best) * 100)}%` }} />
+                          <span className="block h-full rounded-full bg-brand transition-[width] duration-300 ease-out" style={{ width: `${Math.max(4, (p.conversion / best) * 100)}%` }} />
                         </span>
                         <span className="w-11 text-end text-xs font-medium tabular-nums">{percent(p.conversion)}</span>
                       </div>

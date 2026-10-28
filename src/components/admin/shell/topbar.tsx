@@ -47,7 +47,7 @@ export function Topbar() {
         </Link>
         {section && (
           <>
-            <ChevronRightIcon className="size-3.5 text-muted-foreground/60" />
+            <ChevronRightIcon className="size-3.5 text-muted-foreground/60 rtl:rotate-180" />
             {sub ? (
               <Link href={section.href} className="text-muted-foreground transition-colors hover:text-foreground">
                 {section.label}
@@ -59,7 +59,7 @@ export function Topbar() {
         )}
         {sub && (
           <>
-            <ChevronRightIcon className="size-3.5 text-muted-foreground/60" />
+            <ChevronRightIcon className="size-3.5 text-muted-foreground/60 rtl:rotate-180" />
             <span className="truncate font-medium text-foreground">{sub.label}</span>
           </>
         )}
@@ -89,8 +89,8 @@ export function Topbar() {
               onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
               aria-label="Toggle dark mode"
             >
-              <SunIcon className="scale-100 rotate-0 transition-transform duration-500 dark:scale-0 dark:-rotate-90" />
-              <MoonIcon className="absolute scale-0 rotate-90 transition-transform duration-500 dark:scale-100 dark:rotate-0" />
+              <SunIcon className="scale-100 rotate-0 transition-transform duration-200 dark:scale-0 dark:-rotate-90" />
+              <MoonIcon className="absolute scale-0 rotate-90 transition-transform duration-200 dark:scale-100 dark:rotate-0" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Light / dark</TooltipContent>

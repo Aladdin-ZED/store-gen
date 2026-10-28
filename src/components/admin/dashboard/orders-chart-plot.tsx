@@ -68,7 +68,7 @@ export function OrdersPlot({ series, metric, currency }: { series: Point[]; metr
           strokeWidth={2.25}
           fill={`url(#fill-${gid})`}
           activeDot={{ r: 4.5, strokeWidth: 2, stroke: "var(--card)", fill: "var(--brand)" }}
-          animationDuration={900}
+          animationDuration={400}
           animationEasing="ease-out"
           name={String(config[metric]?.label)}
         />

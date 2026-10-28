@@ -46,7 +46,7 @@ export function KpiCard({
   /** values for the sparkline (oldest → newest) */
   spark?: number[];
   comparedTo?: string;
-  /** brand-tinted hero tile */
+  /** hero tile: the larger value and a 2 px inline-start brand bar (DES-§16.9; no gradient field, D60) */
   emphasis?: boolean;
   className?: string;
   style?: React.CSSProperties;
@@ -55,9 +55,10 @@ export function KpiCard({
   const up = d ? d.ratio >= 0 : null;
   return (
     <div
-      className={cn("adm-surface adm-rise group relative flex min-h-[9.5rem] flex-col justify-between gap-4 overflow-hidden p-5", emphasis && "adm-aurora adm-grain", className)}
+      className={cn("adm-surface adm-rise group relative flex min-h-[9.5rem] flex-col justify-between gap-4 overflow-hidden p-5", className)}
       style={style}
     >
+      {emphasis && <span aria-hidden="true" className="absolute inset-y-5 start-0 w-0.5 rounded-e-full bg-brand" />}
       <div className="relative z-10 flex items-center justify-between gap-3">
         <span className="flex items-center gap-2 text-[0.8rem] font-medium text-muted-foreground">
           {icon && (

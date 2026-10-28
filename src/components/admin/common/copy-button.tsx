@@ -79,7 +79,7 @@ export function CopyButton({
             initial={{ opacity: 0, scale: 0.6, filter: "blur(2px)" }}
             animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
             exit={{ opacity: 0, scale: 0.6, filter: "blur(2px)" }}
-            transition={{ type: "spring", stiffness: 520, damping: 30 }}
+            transition={{ type: "tween", duration: 0.16, ease: [0.2, 0.8, 0.2, 1] }}
             className="absolute inline-flex"
           >
             {copied ? <CheckIcon className="size-4 text-emerald-600 dark:text-emerald-400" /> : <CopyIcon className="size-4" />}

@@ -107,7 +107,7 @@ export function Palette({ search, close }: { search: (q: string) => Promise<Acti
                   <span className="truncate">{h.title}</span>
                   <span className="truncate text-xs text-muted-foreground">{h.subtitle}</span>
                 </span>
-                <ArrowRightIcon className="size-3.5 text-muted-foreground" />
+                <ArrowRightIcon className="size-3.5 text-muted-foreground rtl:rotate-180" />
               </CommandItem>
             ))}
           </CommandGroup>
@@ -121,7 +121,7 @@ export function Palette({ search, close }: { search: (q: string) => Promise<Acti
                   <span className="truncate font-mono text-[0.82rem]">{h.title}</span>
                   <span className="truncate text-xs text-muted-foreground">{h.subtitle}</span>
                 </span>
-                <ArrowRightIcon className="size-3.5 text-muted-foreground" />
+                <ArrowRightIcon className="size-3.5 text-muted-foreground rtl:rotate-180" />
               </CommandItem>
             ))}
           </CommandGroup>

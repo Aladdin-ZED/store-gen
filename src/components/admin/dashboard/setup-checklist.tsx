@@ -30,7 +30,7 @@ export function SetupChecklist({ items, className }: { items: ChecklistItem[]; c
               fill="none"
               strokeWidth="4"
               strokeLinecap="round"
-              className="stroke-brand transition-[stroke-dashoffset] duration-1000 ease-out"
+              className="stroke-brand transition-[stroke-dashoffset] duration-400 ease-out"
               strokeDasharray={c}
               strokeDashoffset={c * (1 - ratio)}
             />
