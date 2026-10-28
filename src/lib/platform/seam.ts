@@ -50,7 +50,7 @@ import {
   platformReadOnly,
   requireSession,
 } from "@/lib/tenancy/seam";
-import type { ActionResult, PlatformCtx, StoreScope } from "@/lib/tenancy/types";
+import type { ActionResult, PlatformCtx, StoreScope, WriteScope } from "@/lib/tenancy/types";
 
 export { STEP_UP_TTL_MS };
 
@@ -144,4 +144,16 @@ export async function platformGuard(req: Request, permission: PlatformPermission
 export function platformScope(ctx: PlatformCtx, storeId: string): StoreScope & { readonly kind: "platform" } {
   if (!ctx.can("console.read")) throw new SeamError("forbidden");
   return mintScope("platform", storeId); // not a WriteScope: no write repository accepts it (D71, lint L6)
+}
+
+/**
+ * The one sanctioned staff write (D71; P0b, CCR P4-8): the `phone_revealed` event of `recordPlatformReveal`
+ * (src/lib/orders/profile.ts, PLA-§7.4), on the store's order. `pii.reveal` with a fresh step-up, checked here again
+ * whatever the caller checked; the scope is a system one, so the event repository accepts it without a cast. Lint L6
+ * (`reveal-scope`) refuses a call anywhere but src/lib/orders/profile.ts.
+ */
+export function platformRevealScope(ctx: PlatformCtx, storeId: string): WriteScope {
+  if (!ctx.can("pii.reveal")) throw new SeamError("forbidden");
+  if (!ctx.stepUpFresh) throw new SeamError("step_up");
+  return mintScope("system", storeId);
 }

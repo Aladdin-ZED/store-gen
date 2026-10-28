@@ -159,6 +159,53 @@ export function open(envelope: string, scope: CryptoScope, purpose: string): str
   }
 }
 
+/*
+ * Binary envelopes (P0b, CCR P8-3; §H.6: one envelope per ≤ 8 MB gzip backup part, scope "platform", purpose
+ * "backup:v1"): the v2 cipher without the base64 text (about 1.8× smaller). Layout: ASCII "SGB2", one length byte and
+ * the ASCII key id seal() uses, the 12-byte IV, the 16-byte GCM tag, the ciphertext. Key and AAD are seal()'s: HKDF
+ * info and AAD "<scope>:<purpose>:<kid>", so a part of store A never opens as store B's, the platform's or under
+ * another purpose. selftest-envelope.ts pins a golden vector.
+ */
+const BYTES_MAGIC = Buffer.from("SGB2", "ascii");
+const IV_BYTES = 12;
+const TAG_BYTES = 16;
+
+/** Seal bytes for one store (or the platform) and one purpose: "SGB2" ‖ len ‖ kid ‖ iv ‖ tag ‖ ct. */
+export function sealBytes(data: Buffer, scope: CryptoScope, purpose: string): Buffer {
+  if (!Buffer.isBuffer(data)) throw new Error("crypto: sealBytes takes a Buffer");
+  const info = infoFor(scope, purpose, SEAL_KID);
+  const iv = randomBytes(IV_BYTES);
+  const c = createCipheriv("aes-256-gcm", v2Key(info, SEAL_KID), iv, { authTagLength: TAG_BYTES });
+  c.setAAD(Buffer.from(info, "utf8"));
+  const ct = Buffer.concat([c.update(data), c.final()]);
+  const kid = Buffer.from(SEAL_KID, "ascii");
+  return Buffer.concat([BYTES_MAGIC, Buffer.from([kid.length]), kid, iv, c.getAuthTag(), ct]);
+}
+
+/**
+ * Open a binary envelope sealed for this scope and purpose. Throws on anything else: another magic (a string
+ * envelope included), an unknown or re-encoded kid, another store, another purpose, a tampered or truncated buffer.
+ * The message never carries the bytes.
+ */
+export function openBytes(buf: Buffer, scope: CryptoScope, purpose: string): Buffer {
+  if (!Buffer.isBuffer(buf) || buf.length < BYTES_MAGIC.length + 1 || !buf.subarray(0, BYTES_MAGIC.length).equals(BYTES_MAGIC)) throw new Error("bad binary envelope");
+  const kidLen = buf[BYTES_MAGIC.length]!;
+  const ivAt = BYTES_MAGIC.length + 1 + kidLen;
+  if (kidLen === 0 || buf.length < ivAt + IV_BYTES + TAG_BYTES) throw new Error("bad binary envelope");
+  // latin1 maps each byte to itself: a kid byte with the high bit set never reads as another ASCII kid
+  const kid = buf.subarray(BYTES_MAGIC.length + 1, ivAt).toString("latin1");
+  if (!isKeyId(kid)) throw new Error("bad binary envelope (unknown key id)");
+  const info = infoFor(scope, purpose, kid);
+  const d = createDecipheriv("aes-256-gcm", v2Key(info, kid), buf.subarray(ivAt, ivAt + IV_BYTES), { authTagLength: TAG_BYTES });
+  d.setAAD(Buffer.from(info, "utf8"));
+  d.setAuthTag(buf.subarray(ivAt + IV_BYTES, ivAt + IV_BYTES + TAG_BYTES));
+  try {
+    return Buffer.concat([d.update(buf.subarray(ivAt + IV_BYTES + TAG_BYTES)), d.final()]);
+  } catch {
+    throw new Error("binary envelope does not open (another store, purpose or key)");
+  }
+}
+
 /** Today's decrypt() (v1), for the store #1 conversion, legacy settings rows (`purpose_v = 0`) and TOTP. */
 export function openLegacy(envelope: string, purpose: string): string {
   return decrypt(envelope, purpose);

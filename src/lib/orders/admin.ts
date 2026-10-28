@@ -537,3 +537,15 @@ export function leadsCsv(scope: StoreScope, filters: LeadFilters = {}): Readable
     },
   });
 }
+
+/**
+ * Housekeeping's test-order delete (OPE-§26; core §H.11; P0b, CCR P8-13): the store's `is_test` orders older than
+ * `olderThan`, at most `limit` per call, with their order_events, and `customers.test_count` recomputed. P8's
+ * housekeeping schedules it after 30 days; P4 implements the body. Typed stub: answers `{ deleted: 0 }`, deletes
+ * nothing.
+ */
+export async function deleteTestOrders(scope: WriteScope, opts: { olderThan: Date; limit: number }): Promise<{ deleted: number }> {
+  void scope;
+  void opts;
+  return { deleted: 0 };
+}

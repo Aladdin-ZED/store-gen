@@ -19,9 +19,10 @@ import "server-only";
  * T3 implements the bodies in R1.0 (§K.1, ENGC-27); the maintainer owns the file from P0. `resolveProductKey` and
  * `resolveContextKey` arrive with the R2 contract step (their row types do not exist yet).
  */
+import { createHash } from "node:crypto";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { exportsTable, mediaFiles, orders, pages, pageVersions, storeHandleHistory, stores } from "@/lib/db/schema";
+import { campaigns, exportsTable, mediaFiles, orders, pages, pageVersions, storeHandleHistory, stores } from "@/lib/db/schema";
 import { PAGE_KEY_RE, versionDoc, type PageTarget, type ResolvePurpose } from "@/lib/orders/resolve";
 import { safeEqual, sign } from "@/lib/security/crypto";
 import { scopedCache } from "./cache";
@@ -33,6 +34,8 @@ const STORE_ID_RE = /^[0-9A-Z]{26}$/;
 /** "CMD-7K3Q9X" (src/lib/db/ids.ts newOrderId), any prefix of 2-8 capitals; ≤ 20 chars like orders.id */
 const ORDER_ID_RE = /^[A-Z]{2,8}-[0-9A-Z]{4,11}$/;
 const MEDIA_KEY_RE = /^[A-Za-z0-9._-]{8,120}$/;
+/** a kit share token as `/kit/<token>` carries it (base64url, LAN-§13.5) */
+const SHARE_TOKEN_RE = /^[A-Za-z0-9_-]{16,128}$/;
 /** platform-keyed entries of the caches below (§E.6: the store id "p") */
 const P = "p";
 
@@ -176,19 +179,20 @@ export async function publicStoreAnswer(store: StoreRow): Promise<"live" | "not_
   return (await cachedStore(store.id))?.suspendNotice ? "unavailable" : "not_found";
 }
 
-export type PublicApi = "order" | "lead" | "event" | "upsell" | "track";
+/** `wa` (P0b, CCR P3-6): `/api/public/wa`, the WhatsApp order intent of LAN-§11.4, which needs `take_orders` like `order` */
+export type PublicApi = "order" | "lead" | "event" | "upsell" | "track" | "wa";
 
 /**
  * The public APIs per state (§A.5.3): `open`; `unavailable` (the runtime shows its generic try-again state);
  * `ignored` (events of a pending store: 204, nothing stored); `not_found` (the tracking API outside active and
- * restricted, every API of a closed, deleted or rejected store).
+ * restricted, every API of a closed, deleted or rejected store). `wa` answers exactly like `order`.
  */
 export function publicApiAnswer(status: StoreStatus, api: PublicApi): "open" | "unavailable" | "ignored" | "not_found" {
   switch (status) {
     case "active":
       return "open";
     case "restricted":
-      return api === "order" || api === "lead" ? "unavailable" : "open";
+      return api === "order" || api === "lead" || api === "wa" ? "unavailable" : "open";
     case "pending":
       if (api === "event") return "ignored";
       return api === "track" ? "not_found" : "unavailable";
@@ -410,13 +414,20 @@ export function resolveTestToken(store: StoreRow, token: string | null, now = Da
 /* ------------------------------------------------------------------ */
 
 /**
- * LAN Q11: `/kit/<token>` by sha256(token) = campaigns.share_token_hash. The `campaigns` table is cut in 0005 (P0)
- * and P3 fills this body in R1 product; until then no share token exists, so every token answers null (the page's
- * neutral 404).
+ * LAN Q11, LAN-§13.5: `/kit/<token>` → the shared campaign and its store, by sha256(token) =
+ * campaigns.share_token_hash (unique, `cp_share_uq`), for active and restricted stores. Null for a malformed token,
+ * an unknown or revoked share (`share_token_hash` NULL) and any other store state: the page's neutral 404. Never
+ * cached, so a revoked share 404s at once (the store row is the usual 15 s cache). P0b (CCR P3-6).
  */
 export async function resolveKitShare(token: string): Promise<(PublicTarget & { campaignId: string }) | null> {
-  void token;
-  return null;
+  if (typeof token !== "string" || !SHARE_TOKEN_RE.test(token)) return null;
+  const h = createHash("sha256").update(token, "utf8").digest("hex");
+  // tenancy: public-key share token hash (unique, cp_share_uq)
+  const [row] = await db.select({ id: campaigns.id, storeId: campaigns.storeId }).from(campaigns).where(eq(campaigns.shareTokenHash, h)).limit(1);
+  if (!row) return null;
+  const store = await getStoreById(row.storeId);
+  if (!store || (store.status !== "active" && store.status !== "restricted")) return null;
+  return { store, scope: publicScope(store), campaignId: row.id };
 }
 
 const mediaStores = scopedCache<string | null>({ name: "media-stores", maxEntries: 8_192, ttlMs: 30 * 60_000 });

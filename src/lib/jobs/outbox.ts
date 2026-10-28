@@ -10,6 +10,7 @@ import "server-only";
  * registration works; `enqueue`, `drainOutbox`, `replay` and `outboxSummary` are P8's typed stubs.
  */
 import type { outbox } from "@/lib/db/schema";
+import type { Tx } from "@/lib/orders/hooks";
 import type { PlatformCtx, StoreCtx, StoreScope, WriteScope } from "@/lib/tenancy/types";
 
 export type OutboxKind = "webhook" | "capi" | "telegram" | "whatsapp" | "mail" | "carrier" | "push" /* 0007, PLA Q.21 */;
@@ -44,12 +45,45 @@ export interface ClaimedItem<P = unknown> {
 
 export type SendResult = { ok: true; status?: number } | { ok: false; retry: boolean; status?: number; error: string };
 
+/**
+ * The delay before retry n (n = attempts after the failing send, 1-based): 1 min, 5 min, 30 min, 2 h, 6 h, 24 h (§H.1;
+ * P0b, CCR P5-1). A send that fails after the last step is final: the row goes `dead`.
+ */
+export const OUTBOX_BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000, 86_400_000] as const;
+
+/**
+ * Is this failing send the item's last (P0b, CCR P5-1)? True for a refusal (`retry: false`) and for a retryable
+ * failure once the ladder is used up: `attempts` counts the sends tried before this one, so the 7th failing send is
+ * final. P5's handlers fire `int.delivery_dead` and the failing notices once, at this dead transition (OPE-§21.3,
+ * §28.2), never on every retry.
+ */
+export function isFinalFailure(item: Pick<ClaimedItem, "attempts">, result: SendResult): boolean {
+  return !result.ok && (!result.retry || item.attempts >= OUTBOX_BACKOFF_MS.length);
+}
+
 export interface OutboxHandler<P> {
   kind: OutboxKind;
   maxPerTick: number;
   perStorePerTick: number;
   timeoutMs: number;
   send(item: ClaimedItem<P>): Promise<SendResult>;
+  /**
+   * The kind's pause (P0b, CCR P5-1; §H.8 `capi_enabled`: "handler pauses, items wait"). `drainOutbox` asks once per
+   * drain and kind, before claiming; while it answers true the kind's rows are not claimed, no attempt is counted and
+   * `next_at` does not move, so the items go out unchanged when the switch comes back.
+   */
+  paused?(): Promise<boolean>;
+  /**
+   * Merged sends (P0b, CCR P5-1; OPE-§21.3: a store's Telegram `new_order` items in one message, ≤ 10). The drainer
+   * groups the claimed items of one store that share a non-null `key` (at most `max` per group) into one `send`
+   * call; an item whose key is null goes through the handler's own `send`. The result applies to every item of the
+   * group, with `attempts`, the backoff and `isFinalFailure` judged per item.
+   */
+  batch?: {
+    max: number;
+    key(item: ClaimedItem<P>): string | null;
+    send(items: readonly ClaimedItem<P>[]): Promise<SendResult>;
+  };
 }
 
 export interface DrainReport {
@@ -68,10 +102,15 @@ export interface OutboxSummary {
   dead: { id: string; kind: OutboxKind; topic: string; attempts: number; lastError: string | null; at: string }[];
 }
 
-/** INSERT IGNORE on dedupe_key; `duplicates` is surfaced by the order hooks, never swallowed (ENGC-29). */
-export async function enqueue(scope: WriteScope | "platform", items: readonly OutboxItem[]): Promise<{ inserted: number; duplicates: number }> {
+/**
+ * INSERT IGNORE on dedupe_key; `duplicates` is surfaced by the order hooks, never swallowed (ENGC-29). With `opts.tx`
+ * (P0b, CCR P5-1) the INSERT IGNORE runs on the caller's transaction handle, so an inTx hook's items roll back with
+ * the order (OD6, OPE-§3.6): a delivery is exactly as durable as the state that decided it.
+ */
+export async function enqueue(scope: WriteScope | "platform", items: readonly OutboxItem[], opts?: { tx?: Tx }): Promise<{ inserted: number; duplicates: number }> {
   void scope;
   void items;
+  void opts;
   throw new Error("not implemented: P8 enqueue");
 }
 
@@ -94,7 +133,12 @@ export function outboxHandler(kind: OutboxKind): OutboxHandler<unknown> | null {
   return handlers().get(kind) ?? null;
 }
 
-/** Claims due rows (lease pattern, no SKIP LOCKED on 10.4), sends them through their handler within `budgetMs`. */
+/**
+ * Claims due rows (lease pattern, no SKIP LOCKED on 10.4), sends them through their handler within `budgetMs`. Per
+ * kind, a handler's `paused()` is asked once before claiming (a paused kind is skipped untouched), and a handler's
+ * `batch` merges one store's claimed items of one key into a single send; the backoff (`OUTBOX_BACKOFF_MS`) and the
+ * dead transition (`isFinalFailure`) are judged per item (P0b, CCR P5-1).
+ */
 export async function drainOutbox(opts: { budgetMs: number; storeId?: string; kinds?: OutboxKind[] }): Promise<DrainReport> {
   void opts;
   throw new Error("not implemented: P8 drainOutbox");

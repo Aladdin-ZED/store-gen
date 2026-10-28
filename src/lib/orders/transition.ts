@@ -76,12 +76,18 @@ export async function transitionOrder(actor: OrderActor, scope: WriteScope, inpu
   throw new Error("not implemented: P4 transitionOrder");
 }
 
-/** Sheets, carrier files, imports and the API: never forced, never role-checked, legality and implication kept (OPE-§3.4). */
+/**
+ * Sheets, carrier files, imports and the API: never forced, never role-checked, legality and implication kept (OPE-§3.4).
+ *
+ * `src.agentLabel` (≤ 60 characters, OD54, OPE-§19.6; P0b, CCR P4-2 / P5-2, additive): the sheet's Agent cell. The
+ * confirmation the call applies (explicit or implied) writes `orders.confirmed_by_label`, or `confirmed_by` when
+ * `ops.agentLabels` maps the label, and `meta.agentLabel` on its `state_changed` event.
+ */
 export async function applyExternalStatus(
   scope: WriteScope,
   orderId: string,
   ext: { legacy?: OrderStatus; ship?: ShipState; money?: MoneyState; at?: Date },
-  src: { kind: "sheet" | "carrier" | "import" | "api"; ref?: string },
+  src: { kind: "sheet" | "carrier" | "import" | "api"; ref?: string; agentLabel?: string },
 ): Promise<TransitionResult | { ok: true; changed: false; noop: true }> {
   void scope;
   void orderId;

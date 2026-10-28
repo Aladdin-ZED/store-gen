@@ -22,7 +22,8 @@
  * 10. the boot configuration lines (src/lib/db/boot-config.ts): aliases, S mode, DATA_DIR, APP_TIMEZONE, the test
  *     context in production, never a value;
  * 11. the store predicates as SQL: whereStore parenthesizes each condition (a `sql` fragment with an OR stays inside
- *     the store predicate, review C0b F2), storeSql, a scope without a store id.
+ *     the store predicate, review C0b F2), storeSql, a scope without a store id;
+ * 12. the public API answers of `wa` (P0b, CCR P3-6): in every store state exactly `order`'s (§A.5.3, LAN-§11.4).
  *
  * Not here yet: the `Bucket` builders (C0b, §E.8) and `landingPathFor` (T2) join when their files exist.
  */
@@ -605,6 +606,25 @@ async function main(): Promise<void> {
     eq("whereStore skips undefined conditions", q(S.whereStore(pages, scope, undefined, sql`x = 1`)).sql, "(`pages`.`store_id` = ? and (x = 1))");
     eq("storeSql is store_id = ? with the value bound", [q(S.storeSql(scope)).sql, q(S.storeSql(scope)).params], ["store_id = ?", ["s-1"]]);
     throws("a hand-built scope without a store id fails loudly", () => S.inStore(pages, {} as unknown as import("./types").StoreScope), /without a store id/);
+  }
+
+  /* 12. the `wa` public API answers like `order` (P0b, CCR P3-6) ----------------------------------- */
+  {
+    const P = await import("./public");
+    const want: Record<(typeof STATES)[number], string> = {
+      pending: "unavailable",
+      active: "open",
+      restricted: "unavailable",
+      suspended: "unavailable",
+      closed: "not_found",
+      scheduled_deletion: "not_found",
+      purged: "not_found",
+      rejected: "not_found",
+    };
+    for (const st of STATES) {
+      eq(`publicApiAnswer(${st}, "wa")`, P.publicApiAnswer(st, "wa"), want[st]);
+      eq(`publicApiAnswer(${st}, "wa") = publicApiAnswer(${st}, "order")`, P.publicApiAnswer(st, "wa"), P.publicApiAnswer(st, "order"));
+    }
   }
 }
 

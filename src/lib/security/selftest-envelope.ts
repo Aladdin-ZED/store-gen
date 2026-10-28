@@ -13,9 +13,12 @@
  *  5. a store-A ciphertext fails under store B, under the platform and under another purpose (and the reverse);
  *  6. v1 never opens through open(), v2 never through openLegacy(); tampered, truncated and malformed envelopes fail;
  *     bad scopes and purposes throw;
- *  7. hmacBytes / hmac golden values; the derived-key LRU stays at 512 keys; no APP_SECRET → nothing seals.
+ *  7. hmacBytes / hmac golden values; the derived-key LRU stays at 512 keys; no APP_SECRET → nothing seals;
+ *  8. binary envelopes (P0b, CCR P8-3, §H.6): a golden SGB2 vector (fixed key material, IV and plaintext give fixed
+ *     bytes) opens through openBytes and is rebuilt byte for byte independently; the layout of a fresh seal; a store-A
+ *     part refused under store B, the platform and another purpose; wrong magic, kid, truncation and tampering refused.
  */
-import { createDecipheriv, hkdfSync } from "node:crypto";
+import { createCipheriv, createDecipheriv, hkdfSync } from "node:crypto";
 import Module from "node:module";
 
 // crypto.ts and auth/config are marked `import "server-only"`; outside Next that import throws
@@ -73,6 +76,14 @@ const GOLDEN = {
   hmacBytes: "d0d1790cbe3f59a63292e97b4268c77e6f6935572ee0d74cb0a004e0301ac9d0",
   /** hmac("203.0.113.7", "ip"), the hashIp key */
   hmacIp: "3e04edcf52c9135af663cbd048d31ec31f03f08da2697ffbd66147d21f657797",
+  /** SGB2 binary envelope (hex), scope platform, purpose backup:v1, IV "SGB2 golden!": a gzip head, bytes 00-0f, fd fe ff, UTF-8 text */
+  bytesPlatform: {
+    purpose: "backup:v1",
+    iv: "5347423220676f6c64656e21",
+    plain: "1f8b0800000102030405060708090a0b0c0d0e0ffdfeff6261636b7570207061727420c2b720d8acd8b2d8a1",
+    sealed:
+      "53474232026b315347423220676f6c64656e21872d112c894af2a497a7ae802c2c0fc1d11d4297e36185b2356ccfc2a5697baa4984eb1d52b5de0bb42061ca7c5f29bf7506cc67e85bda81f10e055c",
+  },
 };
 
 let passes = 0;
@@ -104,6 +115,24 @@ function independentOpen(envelope: string, info: string, salt = "cod-studio"): s
   d.setAAD(Buffer.from(info, "utf8"));
   d.setAuthTag(Buffer.from(tag!, "base64url"));
   return Buffer.concat([d.update(Buffer.from(ct!, "base64url")), d.final()]).toString("utf8");
+}
+
+/** Independent SGB2 seal with raw node:crypto and a given IV: pins the binary layout, the derivation and AAD = info. */
+function independentSealBytes(plain: Buffer, info: string, iv: Buffer): Buffer {
+  const key = Buffer.from(hkdfSync("sha256", Buffer.from(TEST_SECRET, "utf8"), Buffer.from("cod-studio"), Buffer.from(info, "utf8"), 32));
+  const ci = createCipheriv("aes-256-gcm", key, iv, { authTagLength: 16 });
+  ci.setAAD(Buffer.from(info, "utf8"));
+  const ct = Buffer.concat([ci.update(plain), ci.final()]);
+  return Buffer.concat([Buffer.from("SGB2", "ascii"), Buffer.from([2]), Buffer.from("k1", "ascii"), iv, ci.getAuthTag(), ct]);
+}
+
+/** Independent SGB2 open with raw node:crypto (kid "k1", 2 bytes). */
+function independentOpenBytes(buf: Buffer, info: string): Buffer {
+  const key = Buffer.from(hkdfSync("sha256", Buffer.from(TEST_SECRET, "utf8"), Buffer.from("cod-studio"), Buffer.from(info, "utf8"), 32));
+  const d = createDecipheriv("aes-256-gcm", key, buf.subarray(7, 19), { authTagLength: 16 });
+  d.setAAD(Buffer.from(info, "utf8"));
+  d.setAuthTag(buf.subarray(19, 35));
+  return Buffer.concat([d.update(buf.subarray(35)), d.final()]);
 }
 
 /** Flip one character of one dot-separated part (base64url alphabet kept). */
@@ -208,6 +237,54 @@ async function main(): Promise<void> {
   env.APP_SECRET = "change-me-change-me-change-me-change-me";
   throws("a template APP_SECRET: nothing seals", () => c.seal("x", { store: "NEVERSEEN2" }, "settings:telegram"), /template/);
   env.APP_SECRET = TEST_SECRET;
+
+  /* 8. binary envelopes (SGB2) ------------------------------------------------------------------ */
+  const gb = GOLDEN.bytesPlatform;
+  const goldenBuf = Buffer.from(gb.sealed, "hex");
+  const goldenPlain = Buffer.from(gb.plain, "hex");
+  eq("SGB2 golden: openBytes", c.openBytes(goldenBuf, "platform", gb.purpose).toString("hex"), gb.plain);
+  eq("SGB2 golden: fixed key material, IV and plaintext give the fixed bytes", independentSealBytes(goldenPlain, "platform:backup:v1:k1", Buffer.from(gb.iv, "hex")).toString("hex"), gb.sealed);
+  throws("SGB2 golden: refused under store #1", () => c.openBytes(goldenBuf, scopeA, gb.purpose), /does not open/);
+  throws("SGB2 golden: refused under another purpose", () => c.openBytes(goldenBuf, "platform", "backup:v2"), /does not open/);
+
+  const part = Buffer.concat([goldenPlain, Buffer.from("x".repeat(1000), "ascii")]);
+  const sealedPart = c.sealBytes(part, scopeA, "backup:v1");
+  eq("SGB2 layout: magic, kid length, kid", [sealedPart.subarray(0, 4).toString("latin1"), sealedPart[4], sealedPart.subarray(5, 7).toString("latin1")], ["SGB2", 2, "k1"]);
+  eq("SGB2 layout: 7 + iv 12 + tag 16 + ciphertext of the plaintext's length", sealedPart.length, 7 + 12 + 16 + part.length);
+  eq("SGB2: an independent open of a fresh seal", independentOpenBytes(sealedPart, `store:${STORE_1}:backup:v1:k1`).equals(part), true);
+  check("SGB2: two seals differ (random IV)", !sealedPart.equals(c.sealBytes(part, scopeA, "backup:v1")));
+  for (const size of [0, 1, 1 << 20]) {
+    const data = Buffer.alloc(size, size % 251);
+    eq(`SGB2 round trip (${size} bytes)`, c.openBytes(c.sealBytes(data, scopeA, "backup:v1"), scopeA, "backup:v1").equals(data), true);
+  }
+
+  // cross-store refusal: a part of store A never opens as store B's, the platform's or under another purpose
+  throws("SGB2: store A part under store B fails", () => c.openBytes(sealedPart, scopeB, "backup:v1"), /does not open/);
+  throws("SGB2: store A part under the platform fails", () => c.openBytes(sealedPart, "platform", "backup:v1"), /does not open/);
+  throws("SGB2: store A part under another purpose fails", () => c.openBytes(sealedPart, scopeA, "backup:v2"), /does not open/);
+  throws("SGB2: store B part under store A fails", () => c.openBytes(c.sealBytes(part, scopeB, "backup:v1"), scopeA, "backup:v1"), /does not open/);
+
+  // malformed buffers
+  const withByte = (buf: Buffer, at: number, value: number) => {
+    const copy = Buffer.from(buf);
+    copy[at] = value;
+    return copy;
+  };
+  throws("SGB2: another magic fails", () => c.openBytes(withByte(sealedPart, 3, 0x33), scopeA, "backup:v1"), /bad binary envelope/);
+  throws("SGB2: a string envelope is not a binary one", () => c.openBytes(Buffer.from(c.seal("x", scopeA, "backup:v1"), "utf8"), scopeA, "backup:v1"), /bad binary envelope/);
+  throws("SGB2: an unknown kid (k2) fails", () => c.openBytes(withByte(sealedPart, 6, 0x32), scopeA, "backup:v1"), /unknown key id/);
+  throws("SGB2: a kid with the high bit set never reads as k1", () => c.openBytes(withByte(withByte(sealedPart, 5, 0xeb), 6, 0xb1), scopeA, "backup:v1"), /unknown key id/);
+  throws("SGB2: a zero kid length fails", () => c.openBytes(withByte(sealedPart, 4, 0), scopeA, "backup:v1"), /bad binary envelope/);
+  throws("SGB2: a kid length past the end fails", () => c.openBytes(withByte(sealedPart, 4, 255), scopeA, "backup:v1"));
+  throws("SGB2: a truncated buffer fails", () => c.openBytes(sealedPart.subarray(0, 30), scopeA, "backup:v1"), /bad binary envelope/);
+  throws("SGB2: a tampered IV fails", () => c.openBytes(withByte(sealedPart, 8, sealedPart[8]! ^ 1), scopeA, "backup:v1"), /does not open/);
+  throws("SGB2: a tampered tag fails", () => c.openBytes(withByte(sealedPart, 20, sealedPart[20]! ^ 1), scopeA, "backup:v1"), /does not open/);
+  throws("SGB2: a tampered ciphertext fails", () => c.openBytes(withByte(sealedPart, sealedPart.length - 1, sealedPart[sealedPart.length - 1]! ^ 1), scopeA, "backup:v1"), /does not open/);
+  throws("SGB2: a dropped ciphertext byte fails", () => c.openBytes(sealedPart.subarray(0, sealedPart.length - 1), scopeA, "backup:v1"), /does not open/);
+  throws("SGB2: not a Buffer fails", () => c.openBytes("SGB2" as unknown as Buffer, scopeA, "backup:v1"), /bad binary envelope/);
+  throws("sealBytes refuses a bad scope", () => c.sealBytes(part, { store: "a:b" }, "backup:v1"), /bad envelope scope/);
+  throws("sealBytes refuses an empty purpose", () => c.sealBytes(part, scopeA, ""), /bad envelope purpose/);
+  throws("sealBytes refuses a string", () => c.sealBytes("x" as unknown as Buffer, scopeA, "backup:v1"), /takes a Buffer/);
 }
 
 main().then(

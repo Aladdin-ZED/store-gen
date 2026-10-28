@@ -10,7 +10,7 @@
  * under 4 KB. Retention (400 days, then rolled up) is a job (OS-11).
  */
 import "server-only";
-import { eq, like, lt, or, type SQL } from "drizzle-orm";
+import { eq, gte, like, lt, or, type SQL } from "drizzle-orm";
 import { insertAuditRow, selectPlatformAuditRows, selectStoreAuditRows, type AuditRowJoined } from "@/lib/db/audit-rows";
 import { auditLog } from "@/lib/db/schema";
 import { errorSummary } from "@/lib/orders/log";
@@ -75,7 +75,7 @@ type StoreAction =
   | `store.catalog.${string}`
   | `store.storefront.${string}`
   | `store.coupon.${string}`
-  | `store.ai.${"settings_updated" | "voice_updated" | "memory_added" | "memory_deleted" | "proposal_executed"}`
+  | `store.ai.${"settings_updated" | "voice_updated" | "memory_added" | "memory_deleted" | "memory_pinned" | "proposal_executed"}`
   | "store.brand.updated"
   | "store.theme.activated"
   | "store.brand_term.refused"; // meta { field }, never the matched term (D76)
@@ -127,7 +127,7 @@ type PlatformAction =
   | "platform.breakglass.reviewed"
   | "platform.design.changed"
   | "platform.abuse.reported" // meta { storeId, reason }, no reporter data
-  | `platform.ai.${"settings_changed" | "key_set" | "key_removed" | "model_changed" | "model_emergency_switch" | "prompt_activated" | "prompt_rolled_back" | "cap_changed" | "eval_started" | "batch_canceled" | "transport_changed" | "director_default_changed"}`;
+  | `platform.ai.${"settings_changed" | "key_set" | "key_removed" | "model_changed" | "model_emergency_switch" | "prompt_activated" | "prompt_rolled_back" | "cap_changed" | "eval_started" | "batch_canceled" | "transport_changed" | "director_default_changed" | "prompt_canaried" | "preference_recorded" | "calibration_recorded" | "screen_cleared" | "probe_recorded"}`;
 
 /** Known actions (dot-namespaced, §F.5). Other areas may log their own namespaced actions too. */
 export type AuditAction = AuthAction | StoreAction | StoreAreaAction | PlatformAction | (string & {});
@@ -158,7 +158,11 @@ export interface AuditEntry {
   impersonatorName: string | null;
 }
 
-const SENSITIVE_KEY = /pass|secret|token|otp|cookie|authorization|recovery|^code$|private.?key|api.?key/i;
+/**
+ * The meta keys whose values are redacted on write (§F.5). Exported unchanged (P0b, CCR P8-9) so the purge's
+ * `redactMetaForPurge` (§F.9, SEC-20) applies this very rule beside its PII key list, never a copy.
+ */
+export const AUDIT_SECRET_KEY_RE = /pass|secret|token|otp|cookie|authorization|recovery|^code$|private.?key|api.?key/i;
 /** §F.5: meta ≤ 4 KB, counted in UTF-8 bytes (Arabic text is 2 bytes a character) */
 const MAX_META_BYTES = 4096;
 
@@ -171,7 +175,7 @@ function sanitize(value: unknown, depth = 0): unknown {
   if (typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>).slice(0, 50)) {
-      out[k] = SENSITIVE_KEY.test(k) ? "[redacted]" : sanitize(v, depth + 1);
+      out[k] = AUDIT_SECRET_KEY_RE.test(k) ? "[redacted]" : sanitize(v, depth + 1);
     }
     return out;
   }
@@ -311,12 +315,29 @@ export async function listAuditEntries(opts: { limit?: number; beforeId?: number
  * ("orders", "store.member"). Platform and impersonation rows on the store are included, with the staff member's
  * name only (no IP hash, user id or impersonator id) and without a staff note the store was not shown
  * (tenantAuditEntry). Needs `audit.read`.
+ *
+ * P0b (CCR P2-12, PLA-§22.10.6): `actorKind` (one actor kind; an unknown one answers []), `from` (created_at ≥) and
+ * `to` (created_at <), filtered in SQL like `listPlatformAudit`'s, so the keyset by `beforeId` pages the filtered
+ * rows. An invalid date answers [].
  */
-export async function listStoreAudit(ctx: StoreCtx, opts: { beforeId?: number; limit?: number; area?: string } = {}): Promise<AuditEntry[]> {
+export async function listStoreAudit(
+  ctx: StoreCtx,
+  opts: { beforeId?: number; limit?: number; area?: string; actorKind?: "user" | "platform" | "impersonation" | "system" | "api"; from?: Date; to?: Date } = {},
+): Promise<AuditEntry[]> {
   if (!ctx.can("audit.read")) throw new Error("forbidden: audit.read");
   if (ctx.scope.storeId !== ctx.store.id) throw new Error("tenancy: the ctx scope and store disagree");
   if (opts.area !== undefined && !AREA_RE.test(opts.area)) return [];
-  const conds = [opts.beforeId !== undefined ? lt(auditLog.id, opts.beforeId) : undefined, opts.area !== undefined ? inArea(opts.area) : undefined];
+  const kind = opts.actorKind !== undefined ? ACTOR_KINDS.find((k) => k === opts.actorKind) : undefined;
+  if (opts.actorKind !== undefined && !kind) return [];
+  const badDate = (d: Date | undefined) => d !== undefined && !(d instanceof Date && Number.isFinite(d.getTime()));
+  if (badDate(opts.from) || badDate(opts.to)) return [];
+  const conds = [
+    opts.beforeId !== undefined ? lt(auditLog.id, opts.beforeId) : undefined,
+    opts.area !== undefined ? inArea(opts.area) : undefined,
+    kind !== undefined ? eq(auditLog.actorKind, kind) : undefined,
+    opts.from !== undefined ? gte(auditLog.createdAt, opts.from) : undefined,
+    opts.to !== undefined ? lt(auditLog.createdAt, opts.to) : undefined,
+  ];
   return toEntries(await selectStoreAuditRows(ctx.scope, conds, pageSize(opts.limit)), true);
 }
 

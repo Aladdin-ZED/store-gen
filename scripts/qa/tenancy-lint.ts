@@ -34,7 +34,9 @@
  *   (drizzle inlines a nested SQL fragment without parentheses; whereStore() parenthesizes each condition).
  * - L6 judges the scope each write uses (not the function), and outside the seam files any object literal that is a
  *   StoreScope or spreads a scope / ctx, Object.assign / structuredClone of one, and any cast to a scope (review C0b
- *   F1, F8). The brand is a symbol-keyed property a spread copies: the nominal brand is CCR r1.0-m-5 for R2.
+ *   F1, F8). The brand is a symbol-keyed property a spread copies: the nominal brand is CCR r1.0-m-5 for R2. Its
+ *   `reveal-scope` kind (P0b, CCR P4-8) pins the one staff write scope, `platformRevealScope()`, to
+ *   src/lib/orders/profile.ts.
  * - L10 reads every SQL text of src/** (a string, template or `+` chain starting with a statement keyword, wherever it
  *   goes, and every drizzle `sql` template), per query level (review C0b F5).
  * - L4 judges process state, so it skips the standalone `selftest*.ts` scripts, and a module-scope Map / Set that the
@@ -142,6 +144,8 @@ const LEGACY_SETTINGS = new Set(["getSetting", "getSettings", "setSetting", "upd
 const SEAM_ACTIONS: Record<string, string> = { storeAction: F.seam, platformAction: F.platformSeam, userAction: F.auth, publicAction: F.auth };
 /** C0a's mintScope callers (src/lib/tenancy/seam.ts: "lint L6 pins them") */
 const MINT_SITES = [F.seam, F.platformSeam, F.publicResolvers, "src/lib/jobs/scope.ts"];
+/** the one caller of `platformRevealScope` (P0b, CCR P4-8, D71): recordPlatformReveal's `phone_revealed` event */
+const REVEAL_SITE = "src/lib/orders/profile.ts";
 const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 const DRIZZLE_TABLE_CALLS = new Set(["from", "update", "delete", "insert", "innerJoin", "leftJoin", "rightJoin", "fullJoin", "$count"]);
 const WRITES = new Set(["insert", "update", "delete"]);
@@ -1259,6 +1263,8 @@ class Lint {
         this.report(call, "L5", "string-bucket", `${ref.name}() bucket is not a Bucket; build it with platformBucket() / storeBucket() (§E.8)`);
     } else if (ref.file === F.platformSeam && ref.name === "platformScope" && !f.startsWith("src/app/admin/") && !f.startsWith("src/lib/platform/"))
       this.report(call, "L6", "platform-scope", "platformScope() outside src/app/admin/** and src/lib/platform/**");
+    else if (ref.file === F.platformSeam && ref.name === "platformRevealScope" && f !== REVEAL_SITE)
+      this.report(call, "L6", "reveal-scope", `platformRevealScope() outside ${REVEAL_SITE}: the staff write scope is recordPlatformReveal's only (D71, PLA-§7.4)`);
     else if (ref.file === F.seam && ref.name === "mintScope" && !MINT_SITES.includes(f))
       this.report(call, "L6", "mint-scope", "mintScope() outside the four seam files: build scopes through requireStoreMember / platformScope / publicScope / systemScope");
     else if (ref.file === F.seam && ref.name === "requireStoreMember" && /(^|\/)route\.tsx?$/.test(f)) {
@@ -2625,7 +2631,7 @@ export async function relationalNoScope() {
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { storeMembers } from "@/lib/db/schema";
-import { platformScope } from "@/lib/platform/seam";
+import { platformRevealScope, platformScope } from "@/lib/platform/seam";
 import { mintScope } from "@/lib/tenancy/seam";
 import type { PlatformCtx } from "@/lib/tenancy/types";
 
@@ -2638,7 +2644,8 @@ export async function crossStore(ctx: PlatformCtx) {
     .where(eq(storeMembers.userId, "t"));
   const one = platformScope(ctx, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
   const minted = mintScope("member", "01ARZ3NDEKTSV4RRFFQ69G5FAV"); //! L6
-  return [rows, trailing, one, minted];
+  const revealed = platformRevealScope(ctx, "01ARZ3NDEKTSV4RRFFQ69G5FAV"); //! L6
+  return [rows, trailing, one, minted, revealed];
 }
 export async function second() {
   // tenancy: platform second annotation over the fixture pin //! PIN

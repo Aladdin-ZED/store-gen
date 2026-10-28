@@ -66,6 +66,7 @@ import type * as mask from "@/lib/platform/mask";
 import type { CustomerFieldsIn, CustomerFieldsMasked, Masked } from "@/lib/platform/mask";
 import type * as notifyMod from "@/lib/platform/notify";
 import type { NotificationItem, NotifyOpts, NotifyTarget, Reader } from "@/lib/platform/notify";
+import type * as platformSeam from "@/lib/platform/seam";
 import type { PrePublishCtx } from "@/lib/render/prepublish";
 import type * as budgetMod from "@/lib/render/prepublish/budget";
 import type { BudgetProfile, PageKind } from "@/lib/render/prepublish/budget";
@@ -108,6 +109,7 @@ import type * as facts from "@/lib/landing/honesty/facts.server";
 import type * as modePlan from "@/lib/landing/mode-plan";
 import type * as landingTemplates from "@/lib/landing/templates";
 import type * as address from "@/lib/orders/address";
+import type * as ordersAdmin from "@/lib/orders/admin";
 import type { CityKey } from "@/lib/orders/address";
 import type { ORDER_STATUSES, OrderStatus } from "@/lib/orders/contract";
 import type * as events from "@/lib/orders/events";
@@ -212,7 +214,8 @@ export type P4Transition = [
         scope: WriteScope,
         orderId: string,
         ext: { legacy?: OrderStatus; ship?: ShipState; money?: MoneyState; at?: Date },
-        src: { kind: "sheet" | "carrier" | "import" | "api"; ref?: string },
+        // P0b (CCR P4-2 / P5-2, OD54): the sheet's Agent cell, additive
+        src: { kind: "sheet" | "carrier" | "import" | "api"; ref?: string; agentLabel?: string },
       ) => Promise<TransitionResult | { ok: true; changed: false; noop: true }>
     >
   >,
@@ -265,6 +268,8 @@ export type P4OrdersApi = [
   >,
   Assert<Equals<typeof manual.createManualOrder, (ctx: WriteCtx, input: ManualOrderInput) => Promise<ActionResult<{ orderId: string; rev: number; replayed?: true }>>>>,
   Assert<Equals<typeof manual.convertLeadToOrder, (ctx: WriteCtx, leadId: string, input: Omit<ManualOrderInput, "fromLead" | "pageId" | "source">) => Promise<ActionResult<{ orderId: string }>>>>,
+  // housekeeping's test-order delete (OPE-§26, core §H.11; P0b, CCR P8-13): P8 schedules it, P4 implements it
+  Assert<Equals<typeof ordersAdmin.deleteTestOrders, (scope: WriteScope, opts: { olderThan: Date; limit: number }) => Promise<{ deleted: number }>>>,
 ];
 
 export type P4ConsoleReads = [
@@ -341,7 +346,20 @@ export type P4ConsoleReads = [
     >
   >,
   Assert<Equals<typeof profile.getOrderForConsole, (scope: StoreScope, orderId: string) => Promise<ConsoleOrderDetail | null>>>,
-  Assert<Equals<typeof profile.recordPlatformReveal, (ctx: PlatformCtx, scope: StoreScope, orderId: string, reason: string) => Promise<{ e164: string } | null>>>,
+  // P0b (CCR P1-9, PLA-§7.4): the revealed customer fields; the single writer of the audit row and the order event
+  Assert<
+    Equals<
+      typeof profile.recordPlatformReveal,
+      (
+        ctx: PlatformCtx,
+        scope: StoreScope,
+        orderId: string,
+        reason: string,
+      ) => Promise<{ e164: string; name: string; address: string | null; city: string | null; note: string | null } | null>
+    >
+  >,
+  // P0b (CCR P4-8, D71): the one staff write scope, for the reveal's event only (lint L6 `reveal-scope`)
+  Assert<Equals<typeof platformSeam.platformRevealScope, (ctx: PlatformCtx, storeId: string) => WriteScope>>,
   Assert<Equals<typeof profile.orderRiskMix, (scope: StoreScope, days: 28) => Promise<{ low: number; check: number; high: number; honeypot: number; n: number }>>>,
   Assert<Equals<typeof profile.searchOrders, (scope: StoreScope, q: string, viewer: { userId: string; role: StoreRole }, limit: 8) => Promise<SearchHit[]>>>,
 ];
@@ -541,10 +559,24 @@ export type P8Outbox = [
   Assert<Equals<OutboxKind, "webhook" | "capi" | "telegram" | "whatsapp" | "mail" | "carrier" | "push">>,
   Assert<Equals<OutboxItem, { kind: OutboxKind; topic: string; targetId?: string; dedupeKey: string; payload: unknown; pii?: boolean; notBefore?: Date }>>,
   Assert<Equals<SendResult, { ok: true; status?: number } | { ok: false; retry: boolean; status?: number; error: string }>>,
-  Assert<Equals<keyof OutboxHandler<unknown>, "kind" | "maxPerTick" | "perStorePerTick" | "timeoutMs" | "send">>,
+  // P0b (CCR P5-1): `paused` (§H.8 capi_enabled) and `batch` (OPE-§21.3 Telegram) are optional, so today's handlers
+  // compile unchanged
+  Assert<Equals<keyof OutboxHandler<unknown>, "kind" | "maxPerTick" | "perStorePerTick" | "timeoutMs" | "send" | "paused" | "batch">>,
   Assert<Equals<OutboxHandler<unknown>["send"], (item: ClaimedItem<unknown>) => Promise<SendResult>>>,
+  Assert<Equals<OutboxHandler<unknown>["paused"], (() => Promise<boolean>) | undefined>>,
+  Assert<
+    Equals<
+      OutboxHandler<unknown>["batch"],
+      { max: number; key(item: ClaimedItem<unknown>): string | null; send(items: readonly ClaimedItem<unknown>[]): Promise<SendResult> } | undefined
+    >
+  >,
   Assert<Equals<keyof ClaimedItem, "id" | "storeId" | "kind" | "topic" | "targetId" | "dedupeKey" | "payload" | "attempts" | "createdAt">>,
-  Assert<Equals<typeof outbox.enqueue, (scope: WriteScope | "platform", items: readonly OutboxItem[]) => Promise<{ inserted: number; duplicates: number }>>>,
+  // P0b (CCR P5-1, OD6): an inTx hook enqueues on the order's transaction handle
+  Assert<
+    Equals<typeof outbox.enqueue, (scope: WriteScope | "platform", items: readonly OutboxItem[], opts?: { tx?: Tx }) => Promise<{ inserted: number; duplicates: number }>>
+  >,
+  Assert<Equals<typeof outbox.OUTBOX_BACKOFF_MS, readonly [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000, 86_400_000]>>,
+  Assert<Equals<typeof outbox.isFinalFailure, (item: Pick<ClaimedItem, "attempts">, result: SendResult) => boolean>>,
   Assert<Equals<typeof outbox.registerOutboxHandler, <P>(h: OutboxHandler<P>) => void>>,
   Assert<Equals<typeof outbox.drainOutbox, (opts: { budgetMs: number; storeId?: string; kinds?: OutboxKind[] }) => Promise<DrainReport>>>,
   Assert<Equals<typeof outbox.replay, (ctx: StoreCtx | PlatformCtx, id: string) => Promise<void>>>,
