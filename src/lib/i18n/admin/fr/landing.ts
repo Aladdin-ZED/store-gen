@@ -5,4 +5,8 @@
  */
 import type { messages as en } from "../en/landing";
 
-export const messages: Partial<Record<keyof typeof en, string>> = {};
+export const messages: Partial<Record<keyof typeof en, string>> = {
+  /* ---- notifications (LAN-§23.6) ---- */
+  "notify.delivery.holidays_review.title": "Vérifiez vos jours fériés de {year}",
+  "notify.delivery.holidays_review.body": "Les dates de livraison sautent les jours fériés de votre calendrier. Ajoutez ceux de cette année, puis marquez-les vérifiés.",
+};

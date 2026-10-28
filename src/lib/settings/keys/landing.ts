@@ -15,6 +15,8 @@ export const LandingSetting = z.object({
     .object({
       capture: z.enum(["market_default", "on", "off"]).default("market_default"),
       followUpHours: z.array(z.number().int().min(1).max(168)).max(3).default([2, 24]),
+      /** minutes; the `landing:leads_slow` health rule compares the 28-day first-contact p50 with it (LAN-§10.3, §23.7) */
+      firstContactTargetMin: z.number().int().min(5).max(1_440).default(30),
     })
     .prefault({}),
   /** LP-11 */
