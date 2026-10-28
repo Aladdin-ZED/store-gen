@@ -44,6 +44,8 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **R1 TRACKS RESUMED** 2026-10-28 ~09:05 after the previous Claude session ended (both workflows had stopped; network OK; 10/106 steps
+  committed, partial work kept in the worktrees): group A now task `wdph3x53b`, group B task `wtadjnmjx` (same run ids below).
 - **R1 TRACKS RUNNING** — started 2026-10-28 ~06:55 from base 25293bb (worktrees C:\Users\SICO\sg-wt\p1..p8, branches
   r1/p1..p8, DBs cod_wt_p<n>, ui-shots ports 3461-3468). Same script for both: `C:\Users\SICO\store-gen\qa\lead\r1-tracks.js`.
   · Group A (P8 12 steps, P2 14, P1 14, P5 14): task `w6lgi8y5x`, run `wf_3d64a8d2-4d6`, args = contents of
@@ -52,7 +54,8 @@ review of terms/privacy (before public launch).
     `qa/lead/tracks-B.json`. Resume: `Workflow({scriptPath: <script>, resumeFromRunId: "wf_ce9b2981-6dc", args: <tracks-B.json>})`.
   Each step reads `qa/lead/briefs/<track>-<nn>.md`, commits in its worktree (no push). Track progress = commits on r1/<track>
   (`git log --oneline 25293bb..r1/p8`). A finished step replays from cache on resume; a track stops at a step that failed 6x.
-  NEXT: as each track finishes, merge in order P8 → P2 → P1 → P5 → P4 → P3w1 → P7 → P6 (merge workflow to write: merge + its
+  NEXT: as each track finishes, merge in order P8 → P2 → P1 → P5 → P4 → P3w1 → P7 → P6 with `qa/lead/r1-merge.js` (args: key,
+  name, mergeId, order, spec, merged[], stubBuild (true until P6), ui, uiPaths) = merge + its
   section of the r1-p0b-report DEFERRED LIST + CCRs + aggregates + `SG_STUB_BUILD_OK=1 npm run gate` + 3 reviews (tenancy/
   security, spec+acceptance, UX with ui-shots) + fix), then P3 wave 2 in a fresh worktree from main, then the integration.
 - **P0b DONE** 2026-10-28 ~06:40: triage 121 rows (66 apply, 15 done, 36 defer, 4 reject) → packages A a72a483, B c2f2acf,
