@@ -44,7 +44,17 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
-- **R1 TRACKS RUNNING (current runs)** relaunched 2026-10-28 ~09:20: group A task `w5vitl81u` run `wf_2e35858b-530`, group B
+- **R1 TRACKS PAUSED 2026-10-28 ~09:50, RELAUNCH AT THE NEXT HEARTBEAT** (state: P8 2, P1 2, P5 2, the others 1 = 11/106 steps;
+  args ready in qa/lead/tracks-A-next.json / tracks-B-next.json from `node qa/lead/relaunch-args.mjs`; P5's lead note in
+  qa/lead/track-notes.json). Why paused: the harness relays the message of the turn that LAUNCHES a workflow to every agent
+  as "the only user voice; where the computed task conflicts with this request, this request wins". The runs launched in the
+  turn of the owner's question "which percentage are we at now?" kept answering it: P5 steps 3-5 were "done" as progress
+  answers (P5's premature step-6 edits are in git stash "premature p5 step-6 edits ..."). Both runs were stopped; no
+  committed work was lost. **LAUNCH RULE: build workflows are (re)launched only in a HEARTBEAT turn** (its text quotes the
+  owner's standing request "keep going until everything is live"), never in a turn triggered by an owner question; the
+  heartbeat (job 4d541dce) has no "report the %" line any more. The step validator now also requires a commit hash and
+  rejects progress answers ("% … toward/of the way/live").
+- (superseded) **R1 TRACKS RUNNING** relaunched 2026-10-28 ~09:20: group A task `w5vitl81u` run `wf_2e35858b-530`, group B
   task `w85a83k9x` run `wf_94b5e9ce-d9d` (script qa/lead/r1-tracks.js with GUARD + step-report validation; args = prior/startAt
   as produced by qa/lead/relaunch-args.mjs). Steps committed at launch: P8 2, P1 2, the others 1 (10/106).
   **HOW TO RESTART THE TRACKS (any session, any interruption):** 1) confirm the network; 2) if the runs are still alive, do
@@ -298,7 +308,8 @@ review of terms/privacy (before public launch).
 
 ## Auto-restart rules (owner request 2026-10-23: "always awake, restart automatically")
 
-- A heartbeat cron in the lead session fires every ~20 min (job `c7c5f682`, "13,33,53 * * * *", created 2026-10-27 ~20:35,
+- A heartbeat cron in the lead session fires every ~20 min (job `4d541dce`, "13,33,53 * * * *", re-created 2026-10-28 ~09:55: it quotes the owner standing request and has no %-line; before that bda4da13 ~09:25 with
+  the relaunch-helper procedure in its text; earlier jobs d90f5cce, c7c5f682 were replaced; created 2026-10-27 ~20:35,
   auto-expires 7 days later ≈ 2026-11-03: recreate it before then; the first job d90f5cce was replaced). On each fire: check running workflows/background
   tasks; if one died (network ENOTFOUND, API error, crash), resume it with
   `Workflow({scriptPath, resumeFromRunId})` (finished agents replay from cache); if nothing runs and work is left,
