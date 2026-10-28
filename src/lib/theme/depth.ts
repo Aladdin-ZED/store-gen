@@ -582,3 +582,165 @@ export function sectionAurora(sec: SectionColors, hues: readonly [AuroraHue, Aur
   const stage = `radial-gradient(closest-side,${lights[0]},${rgba(tones[0]!, a * 0.45)} 50%,${clear[0]})`;
   return { lights, field, stage };
 }
+
+/**
+ * The stage glow of a section without the aurora field (core D60 rev 3, V40): --lp-aurora and --lp-aurora-1..3 are
+ * no longer emitted, but a document without `look` keeps today's --lp-stage-glow, which is the first light of the
+ * section's solved field (the same tones, the same contrast-safe alpha).
+ */
+export function sectionStageGlow(sec: SectionColors, hues: readonly [AuroraHue, AuroraHue, AuroraHue], geo: AuroraGeometry): string {
+  return sectionAurora(sec, hues, geo).stage;
+}
+
+/* ------------------------------------------------------------------ */
+/* Depth recipes (design.md DES-§4.10.1; G15 × base, DS48)             */
+/* ------------------------------------------------------------------ */
+
+/** The ground tiers the recipes key on: light (L ≥ 0.8), tinted (0.5 ≤ L < 0.8), dark (L < 0.5). */
+export type GroundTier = "light" | "tinted" | "dark";
+export const groundTier = (bg: Hex): GroundTier => {
+  const l = toOklch(bg).l;
+  return l >= 0.8 ? "light" : l >= 0.5 ? "tinted" : "dark";
+};
+
+/** The archetypes whose `directional` depth is a drawn offset plate (DES-§4.10.1); the others cast an angled shadow. */
+const PLATE_ARCHETYPES = ["circuit", "kinetic", "garage", "playground"];
+
+export interface LookDepth {
+  /** --lp-shadow-card */
+  shadowCard: string;
+  /** --lp-shadow-float: sticky bar, float, popover */
+  shadowFloat: string;
+  /** --lp-line: the recipe's hairline, or null where the recipe draws none (the palette's line stays) */
+  line: string | null;
+  /** --lp-highlight: the 1 px inner top highlight, composable (NO_SHADOW when none) */
+  highlight: string;
+  /** --lp-ring: the focus ring, ≥ 3:1 on the ground and the card */
+  ring: Hex;
+}
+
+/** A translucent colour whose wash over the block or its card stays out of the orange band, else the block's shadow tone. */
+function cleanWashColor(color: Hex, sec: SectionColors, alpha: number): Hex {
+  const washes = stepsIn([0.02, Math.min(0.98, Math.max(0.03, alpha))]);
+  const clean = (c: Hex) => blendHit(c, sec.bg, BLEND_GUARD, "srgb", washes) === null && blendHit(c, sec.card, BLEND_GUARD, "srgb", washes) === null;
+  if (clean(color)) return color;
+  if (clean(sec.shadow)) return sec.shadow;
+  const o = toOklch(sec.shadow);
+  return uiColor({ l: o.l, c: Math.min(o.c, 0.01), h: o.h });
+}
+
+/**
+ * The five depth recipes (G15) on a section (DES-§4.10.1). Shadow colours are the block's shadow tone tinted toward
+ * the accent (85 / 15), so a shadow never reads grey on a tinted ground and never blooms orange (every wash is checked
+ * against the block and its card, else the plain shadow tone is used). Every value is composable and built from
+ * computed colours and numbers only.
+ */
+export function lookDepth(depth: "flat" | "hairline" | "tonal" | "ambient" | "directional", sec: SectionColors, archetype: string): LookDepth {
+  const tier = groundTier(sec.bg);
+  const sh = cleanWashColor(mix(sec.shadow, sec.accent, 0.15), sec, 0.45);
+  const plain = cleanWashColor(sec.shadow, sec, 0.32);
+  const floatFlat = `0 8px 24px -12px ${rgba(plain, 0.18)}`;
+  const hair = (a: number) => rgba(cleanWashColor(sec.ink, sec, a), a);
+  const ring = ensureContrast(sec.accent, [sec.bg, sec.card], 3);
+  const top = (a: number) => `inset 0 1px 0 0 ${rgba("#ffffff", a)}`;
+  switch (depth) {
+    case "flat":
+      return { shadowCard: NO_SHADOW, shadowFloat: floatFlat, line: null, highlight: NO_SHADOW, ring };
+    case "hairline":
+      return { shadowCard: NO_SHADOW, shadowFloat: floatFlat, line: hair(tier === "light" ? 0.09 : tier === "tinted" ? 0.14 : 0.18), highlight: tier === "dark" ? top(0.35) : NO_SHADOW, ring };
+    case "tonal":
+      return { shadowCard: NO_SHADOW, shadowFloat: floatFlat, line: hair(0.06), highlight: NO_SHADOW, ring };
+    case "ambient": {
+      const [a1, a2] = tier === "light" ? [0.06, 0.14] : tier === "tinted" ? [0.08, 0.18] : [0.28, 0.4];
+      return {
+        shadowCard: `0 1px 2px ${rgba(sh, a1)},0 12px 32px -16px ${rgba(sh, a2)}`,
+        shadowFloat: `0 16px 48px -20px ${rgba(sh, 0.32)}`,
+        line: tier === "light" ? hair(0.06) : null,
+        highlight: tier === "dark" ? top(0.45) : NO_SHADOW,
+        ring,
+      };
+    }
+    case "directional": {
+      const plate = PLATE_ARCHETYPES.includes(archetype);
+      const angled = `0 10px 28px -12px ${rgba(plain, 0.24)}`;
+      const acc = cleanWashColor(sec.accent, sec, 0.22);
+      return {
+        shadowCard: plate ? `0 8px 0 -2px ${rgba(acc, 0.22)}` : angled,
+        // plate shadows never on floating layers
+        shadowFloat: `0 14px 40px -18px ${rgba(plain, 0.3)}`,
+        line: hair(0.12),
+        highlight: NO_SHADOW,
+        ring,
+      };
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Stage presets (design.md DES-§4.11.1; DS48)                         */
+/* ------------------------------------------------------------------ */
+
+export interface LookStage {
+  /** --lp-stage-glow: the product-tinted radial (≤ 0.10 alpha, the core D60 ceiling) */
+  glow: string;
+  /** --lp-stage-glow-2: the tighter second radial */
+  glow2: string;
+  /** --lp-stage-contact: the contact-shadow colour */
+  contact: string;
+  /** --lp-stage-plinth: the plinth slab */
+  plinth: Hex;
+  /** --lp-stage-plinth-line: its top hairline */
+  plinthLine: Hex;
+}
+
+/**
+ * The colours of the three stage presets on a section (DES-§4.11.1). `dominant` is the product's colour (the
+ * palette accent, which the vibe engine draws from the photo). Geometry belongs to the hero CSS (the preset's
+ * bbox-relative sizes); these tokens carry colour and alpha only.
+ */
+export function lookStage(sec: SectionColors, dominant: Hex): LookStage {
+  const tier = groundTier(sec.bg);
+  const glowC = cleanWashColor(mix(dominant, sec.bg, 0.3), sec, 0.1);
+  const a = tier === "light" ? 0.074 : tier === "tinted" ? 0.058 : 0.1;
+  const glow = `radial-gradient(closest-side,${rgba(glowC, a)},${rgba(glowC, 0)})`;
+  const glow2 = `radial-gradient(closest-side,${rgba(glowC, 0.032)},${rgba(glowC, 0)} 50%)`;
+  const contactC = cleanWashColor(mix(sec.shadow, dominant, 0.2), sec, 0.45);
+  const contact = rgba(contactC, tier === "light" ? 0.22 : tier === "tinted" ? 0.26 : 0.45);
+  const g = toOklch(sec.bg);
+  const plinth = tier === "dark" ? uiColor({ l: clamp(g.l + 0.06, 0, 1), c: g.c, h: g.h }) : mix(sec.bg, dominant, 0.12);
+  return { glow, glow2, contact, plinth, plinthLine: sec.line };
+}
+
+/**
+ * The `blob` mask (DES-§4.11.1): a 6-point closed spline on a unit circle, radii r_i ∈ [0.82, 1.0] from
+ * `rng("mask:blob")`, tangents at ±0.55 of the chord, as a CSS `polygon()` in percentages of the media box (48 points,
+ * so it scales with the slot and needs no SVG `clipPath`). RTL mirrors it in CSS (`scale(-1, 1)`).
+ */
+export function blobPolygon(seed: number): string {
+  const rng = rngFor(seed, "mask:blob");
+  const n = 6;
+  const pts = Array.from({ length: n }, (_, i) => {
+    const t = (i / n) * Math.PI * 2 - Math.PI / 2;
+    const r = range(rng, 0.82, 1);
+    return [Math.cos(t) * r, Math.sin(t) * r] as const;
+  });
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n]!;
+    const p1 = pts[i]!;
+    const p2 = pts[(i + 1) % n]!;
+    const p3 = pts[(i + 2) % n]!;
+    // Catmull-Rom tangents scaled to 0.55 of the chord: a smooth, closed cubic through the six points
+    const k = 0.55 / 2;
+    const c1 = [p1[0] + (p2[0] - p0[0]) * k, p1[1] + (p2[1] - p0[1]) * k];
+    const c2 = [p2[0] - (p3[0] - p1[0]) * k, p2[1] - (p3[1] - p1[1]) * k];
+    for (let s = 0; s < 8; s++) {
+      const t = s / 8;
+      const u = 1 - t;
+      const x = u * u * u * p1[0] + 3 * u * u * t * c1[0]! + 3 * u * t * t * c2[0]! + t * t * t * p2[0];
+      const y = u * u * u * p1[1] + 3 * u * u * t * c1[1]! + 3 * u * t * t * c2[1]! + t * t * t * p2[1];
+      out.push(`${num(50 + x * 50)}% ${num(50 + y * 50)}%`);
+    }
+  }
+  return `polygon(${out.join(",")})`;
+}

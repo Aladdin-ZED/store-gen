@@ -12,10 +12,12 @@ export interface BuiltTheme {
    * tinted by that block:
    * --lp-shadow-s/m/l/glow, --lp-highlight(-accent), --lp-shadow-product(-filter), frosted glass
    * (--sec-glass, --sec-glass-ink ≥ 4.5:1 over any backdrop, --sec-glass-border, --sec-glass-solid)
-   * and aurora light (--lp-aurora-1/2/3, --lp-aurora, --lp-stage-glow), plus the product stage tint
+   * and the stage glow (--lp-stage-glow; no aurora field since core D60 rev 3), plus the product stage tint
    * --mx-stage / --mx-stage-hi / --mx-stage-lo (one clean hue per block — the accent's light ramp on
    * pale grounds, tone on tone on color blocks — with --sec-ink ≥ 4.5:1 on all three; these outrank
    * the color-mix fallbacks base.css declares at zero specificity).
+   * With `theme.look` the map also carries the look tokens (design.md DES-§4.5.3): the radius ladder, grid, type,
+   * motion, the depth recipes (--lp-shadow-card, --lp-shadow-float, --lp-ring) and the stage presets.
    * Built only from enums, computed hex and numbers: safe to inline in <style>.
    */
   css: string;
@@ -34,9 +36,10 @@ export interface BuiltTheme {
    * Discrete archetype choices exposed as attributes on <html> so CSS can switch styles — exactly the
    * value sets of docs/DESIGN.md §2.5 (THEME_ATTR_VALUES), e.g.
    * { "data-arch": "souk", "data-btn": "pill", "data-card": "soft", "data-emphasis": "swoosh",
-   *   "data-mask": "arch", "data-glyph": "spark", "data-texture": "grain", "data-radius": "soft",
+   *   "data-mask": "arch", "data-glyph": "spark", "data-texture": "none", "data-radius": "soft",
    *   "data-shadow": "glow", "data-surfaces": "flush", "data-motion": "lively", "data-base": "tinted",
    *   "data-density": "balanced" }
+   * plus, with `theme.look` only, data-look … data-corner (DES-§4.5.2).
    */
   attrs: Record<string, string>;
   /** divider family for this page (spec.dividers, or the archetype's family when empty) */

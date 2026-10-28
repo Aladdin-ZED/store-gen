@@ -933,14 +933,9 @@
   container-type: inline-size;
 }
 
-/* aurora: three soft lights in the product's hues (contrast-solved by the theme) */
-:where(.lp-aurora) {
-  background-image: var(--lp-aurora, radial-gradient(60% 55% at 20% 18%, var(--mx-tint-2), transparent), radial-gradient(55% 50% at 85% 30%, var(--mx-tint), transparent));
-}
-
-/* film grain finish — only on dark, color and light-field blocks (≤ 3% opacity, theme-tinted) */
-:where(:root[data-texture="grain"] :is(.lp-main > .lp-section, .lp-main ~ .lp-section):is([data-bg="dark"], [data-bg="accent"], [data-bg="pop"], .lp-aurora))::before,
-:where(:root[data-texture="grain"][data-base="dark"] :is(.lp-main > .lp-section, .lp-main ~ .lp-section))::before,
+/* no aurora mesh and no page grain on generated pages (core D60 rev 3, V40): the theme emits neither --lp-aurora nor
+   --lp-grain, and data-texture is always "none". The explicit .lp-grain layer of the light kit stays inert until the
+   light kit drops it with the sections that mount it. */
 :where(.lp-grain)::before {
   content: "";
   position: absolute;

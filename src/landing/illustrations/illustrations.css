@@ -21,10 +21,12 @@ svg.lp-ill.lp-layer {
   --ill-c2: var(--sec-accent, var(--lp-accent));
   --ill-c3: var(--sec-bg, var(--lp-bg));
   --ill-on: var(--sec-ink, var(--lp-ink));
-  /* product light: aurora hues when the theme emits them, else accent / pop / a soft tint */
-  --ill-glow: var(--lp-aurora-1, var(--lp-accent));
-  --ill-glow-2: var(--lp-aurora-2, var(--lp-pop));
-  --ill-glow-3: var(--lp-aurora-3, var(--lp-a-300, var(--lp-accent-soft)));
+  /* product light: the block's accent, the pop and a soft tint. The theme no longer emits the aurora lights (core D60
+     rev 3, V40), so the light carries its own alpha below: ≤ 10 % (the glow ceiling, DES-§3.2 S06); engines without
+     color-mix() get the palest accent tint instead of a solid accent */
+  --ill-glow: var(--lp-a-100, var(--lp-accent-soft));
+  --ill-glow-2: var(--lp-accent-soft);
+  --ill-glow-3: var(--lp-a-100, var(--lp-accent-soft));
   /* beams & spotlights: a pale tint of the product hue */
   --ill-beam: var(--lp-a-200, var(--lp-accent-soft));
   /* light strength multiplier (dark blocks need less to read as light) */
@@ -32,10 +34,17 @@ svg.lp-ill.lp-layer {
   /* gaussian falloff used by every soft light (alpha mask) */
   --ill-gauss: radial-gradient(closest-side, #000, rgb(0 0 0 / 0.89) 20%, rgb(0 0 0 / 0.62) 40%, rgb(0 0 0 / 0.34) 60%, rgb(0 0 0 / 0.14) 80%, transparent);
 }
-/* The aurora lights (--lp-aurora-1..3) are re-solved by the theme on every [data-bg] block (a pale
-   glow on light grounds, a deeper bloom on mid-tones, a dim colored glow on near-black), so glows
-   need no per-block overrides. Beams use a pale tint, paler still on color and dark blocks so it
-   reads as light, never as a stain. */
+/* the lights at ≤ 10 % alpha: the block's action colour (contrast-solved against its own ground, so the wash never
+   blooms orange) and the pop; every opacity multiplier below stays under the ceiling */
+@supports (color: color-mix(in oklab, black 50%, transparent)) {
+  .lp-ill {
+    --ill-glow: color-mix(in oklab, var(--sec-accent, var(--lp-accent)) 10%, transparent);
+    --ill-glow-2: color-mix(in oklab, var(--lp-pop) 10%, transparent);
+    --ill-glow-3: color-mix(in oklab, var(--lp-a-300, var(--lp-accent-soft)) 10%, transparent);
+  }
+}
+/* Glows need no per-block overrides (the block's own accent). Beams use a pale tint, paler still on color and dark
+   blocks so it reads as light, never as a stain. */
 [data-bg="accent"] .lp-ill,
 [data-bg="pop"] .lp-ill,
 [data-bg="dark"] .lp-ill,
@@ -429,8 +438,8 @@ g.lp-idle {
   display: block;
   pointer-events: none;
 }
-/* multipliers of the theme's lights, which already carry a contrast-solved alpha (<= 0.55): "strong"
-   is exactly the light the theme guarantees text over, the others stay below it */
+/* multipliers of the lights, which carry ≤ 10 % alpha (the glow ceiling): "strong" is the ceiling itself, the
+   others stay below it */
 .lp-light[data-i="subtle"] { --ill-o: 0.4; }
 .lp-light[data-i="soft"] { --ill-o: 0.65; }
 .lp-light[data-i="medium"] { --ill-o: 0.85; }

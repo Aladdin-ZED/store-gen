@@ -2,9 +2,10 @@
  * Light & depth — soft product-tinted light built from CSS gradients and masks (no SVG filters,
  * no blur): cheap to paint, smooth at any size, animated only through transform/opacity.
  *
- * Colors are section-aware (illustrations.css): the default light ("glow") is the product hue —
- * --lp-aurora-1..3 when the theme emits them, else the accent/pop pair — and beams/spotlights use a
- * pale tint that reads as light on dark blocks and as a soft tinted wash on light ones.
+ * Colors are section-aware (illustrations.css): the default light ("glow") is the block's action colour at ≤ 10 %
+ * alpha (the theme emits no aurora lights since core D60 rev 3), and beams/spotlights use a pale tint that reads as
+ * light on dark blocks and as a soft tinted wash on light ones. The Aurora mesh below leaves with the section redraws
+ * that mount it (design.md DES-§4.10.1).
  * Every piece is decorative (aria-hidden) and ignores pointer events.
  */
 import type { ReactElement, ReactNode } from "react";

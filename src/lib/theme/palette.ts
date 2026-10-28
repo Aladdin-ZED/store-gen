@@ -29,7 +29,7 @@
  * crimson, not cocoa), quieter or accent-tinted grounds, then a pop and finally an accent nudged
  * further from the band (crimson → raspberry, amber-gold → lemon gold).
  */
-import type { SectionBg } from "@/lib/page/schema";
+import type { Archetype, ColorStrategy, Depth, SectionBg } from "@/lib/page/schema";
 import type { BaseMood, Harmony } from "./archetypes";
 import { BLEND_GUARD, blendHit, forEachMixHit, neutralOf, pairHit, SECTION_MIXES, stepsIn, type Block, type MixPair } from "./blend";
 import {
@@ -70,6 +70,11 @@ export interface PaletteSpec {
 export interface PaletteOptions {
   /** archetype hairline strength 0..1 */
   lineStrength: number;
+  /**
+   * G11 contrast level (documents with `look` only): "high" moves the ink 0.04 further from the ground and strengthens
+   * hairlines × 1.25 (DES-§4.2 G11). Absent = standard, today's palette.
+   */
+  contrastLevel?: "standard" | "high";
 }
 
 export interface SectionColors {
@@ -837,14 +842,19 @@ function finishPalette(spec: PaletteSpec, opts: PaletteOptions, tw: Tweak, g: Gr
   const R = HARMONY_RECIPES[spec.harmony];
   const { accent, pop, A, PO, quiet, base, isDark, nh, nc, bgL, bg, surface, surface2, soft, dark, darkC, darkHue } = g;
   const markC = quiet ? 0.045 : 0.16;
-  const s = clamp(opts.lineStrength, 0, 1);
+  const high = opts.contrastLevel === "high";
+  const s = clamp(opts.lineStrength * (high ? 1.25 : 1), 0, 1);
+  const inkSep = high ? 0.04 : 0;
   const page = [bg, surface, surface2];
 
   /* inks ---------------------------------------------------------------- */
   const inkHue = tw.inkHue ?? hueOf(R.ink.hue, A, PO, nh);
   const inkC0 = R.ink.hue === "accent" ? Math.min(R.ink.c, A.c * 0.3 + 0.006) : R.ink.c;
   const inkC = tw.inkHue === undefined ? inkC0 : Math.min(inkC0, 0.022);
-  const ink = text(isDark ? uiColor({ l: 0.955, c: Math.min(nc, 0.012), h: nh }) : uiColor({ l: R.ink.l, c: inkC, h: inkHue }), page);
+  const ink = text(
+    isDark ? uiColor({ l: Math.min(0.99, 0.955 + inkSep), c: Math.min(nc, 0.012), h: nh }) : uiColor({ l: Math.max(0.05, R.ink.l - inkSep), c: inkC, h: inkHue }),
+    page,
+  );
   const inkSoft = ensureContrast(mix(ink, bg, 0.3), page, 5.5);
   const inkMute = ensureContrast(mix(ink, bg, 0.48), page, 4.6);
   const line = mix(bg, ink, 0.1 + 0.75 * s);
@@ -1265,5 +1275,218 @@ export function contrastAudit(p: Palette): { name: string; ratio: number; min: n
     }
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* G9 colour strategies (design.md DES-§4.10, DES-§4.4; DS38, H25, H34) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How a strategy derives its pop from the accent (H25, the "Pop rule" column of DES-§4.10):
+ *  - tint: the accent's own hue, lighter, chroma within ±0.04 (ink+one; dark-luxe, where a dark base allows no third hue)
+ *  - split: analogous ±30° or complement 150-210°, chroma within ±0.04 (duotone, color-field)
+ *  - same-hue: the same hue at another lightness, chroma within ±0.04 (tonal)
+ *  - pastel: analogous, chroma ≤ 0.08 (high-key)
+ *  - desaturated: the accent's hue at chroma ≤ 0.04 (mono+signal)
+ */
+export type PopRule = "tint" | "split" | "same-hue" | "pastel" | "desaturated";
+
+/** A colour strategy as a complete plan (DES-§4.10): base, harmonies, moments, accent area, pop and surfaces. */
+export interface ColorPlan {
+  strategy: ColorStrategy;
+  /** page bases the strategy allows (H27 decides between them from the photo) */
+  bases: readonly BaseMood[];
+  /**
+   * The harmonies of the "G9 → palette" sets (DES-§4.4) that keep H25. A harmony recipe still gives the neutrals, ink,
+   * soft and dark tones; on a document with `look` the pop always comes from `planPop` (the recipes' own `pop`
+   * functions, which pick partners 55-150° away and gold champagnes, belong to documents without look only).
+   */
+  harmonies: readonly Harmony[];
+  /** harmonies allowed only for some archetypes (contrast-neon: playground, kinetic) */
+  only?: Partial<Record<Harmony, readonly Archetype[]>>;
+  /** colour moments per page (I4) */
+  moments: readonly [number, number];
+  /** the G10 accent-area band (H21) */
+  area: readonly [number, number];
+  pop: PopRule;
+  /** full-bleed accent / pop moments per page (≤ 2; color-field ≤ 4, never more than one per screen) */
+  fullBleed: number;
+  /** the card tiers (G15) the strategy's surfaces allow (H26) */
+  cards: readonly Depth[];
+  /** tonal may add one tinted layer (the one exception to one card tier) */
+  extraLayer: boolean;
+}
+
+export const COLOR_PLANS: Readonly<Record<ColorStrategy, ColorPlan>> = {
+  "ink+one": { strategy: "ink+one", bases: ["light", "tinted"], harmonies: ["ink-accent", "cool-precise", "mono-luxe"], moments: [1, 1], area: [0.03, 0.08], pop: "tint", fullBleed: 1, cards: ["flat", "hairline"], extraLayer: false },
+  duotone: { strategy: "duotone", bases: ["light", "tinted"], harmonies: ["pop-complement", "blush-berry", "clay-sage", "earth-triad"], moments: [2, 2], area: [0.12, 0.22], pop: "split", fullBleed: 2, cards: ["flat", "hairline", "tonal", "ambient", "directional"], extraLayer: false },
+  "color-field": { strategy: "color-field", bases: ["light"], harmonies: ["pop-complement", "warm-butter", "contrast-neon"], only: { "contrast-neon": ["playground", "kinetic"] }, moments: [2, 3], area: [0.25, 0.35], pop: "split", fullBleed: 4, cards: ["flat", "hairline"], extraLayer: false },
+  tonal: { strategy: "tonal", bases: ["tinted"], harmonies: ["clay-sage", "mono-luxe", "earth-triad"], moments: [1, 2], area: [0.08, 0.16], pop: "same-hue", fullBleed: 2, cards: ["tonal", "flat", "hairline"], extraLayer: true },
+  "dark-luxe": { strategy: "dark-luxe", bases: ["dark"], harmonies: ["mono-luxe", "ink-accent"], moments: [1, 1], area: [0.04, 0.1], pop: "tint", fullBleed: 1, cards: ["flat", "hairline"], extraLayer: false },
+  "high-key": { strategy: "high-key", bases: ["light"], harmonies: ["blush-berry", "warm-butter", "cool-precise"], moments: [1, 1], area: [0.1, 0.2], pop: "pastel", fullBleed: 1, cards: ["flat", "hairline"], extraLayer: false },
+  "mono+signal": { strategy: "mono+signal", bases: ["light", "dark"], harmonies: ["ink-accent", "cool-precise"], moments: [1, 1], area: [0.03, 0.06], pop: "desaturated", fullBleed: 1, cards: ["hairline"], extraLayer: false },
+};
+
+/** The gold band of the accent and pop roles (H34, V37): hue 75-95° at chroma > 0.10, measured on the 8-bit colour. */
+export function goldBand(hex: Hex): boolean {
+  const o = toOklch(hex);
+  return o.c > 0.1 && o.h >= 75 && o.h <= 95;
+}
+
+/** Hue distance below which a pop counts as analogous, and the complement window (H25). */
+const ANALOGOUS = 30;
+const COMPLEMENT: readonly [number, number] = [150, 210];
+/** 8-bit rounding and gamut mapping move a chroma by a few thousandths: the H25 chroma checks allow this much. */
+const CHROMA_EPS = 0.008;
+
+/**
+ * Chroma below which an accent or a pop has no hue identity (a near-neutral): the hue relations of H25 do not apply to
+ * it (a taupe accent beside an olive pop is a neutral beside one colour, not two hues).
+ */
+const HUELESS = 0.06;
+
+/**
+ * The H25 rule a pop breaks for a strategy, or null. The ±0.04 chroma window binds the analogous / complement pop of
+ * `split`; a tint, a same-hue step, a pastel or a signal grey keeps the accent's hue and takes the chroma its
+ * lightness allows (a light tint of a vivid accent cannot keep its chroma in sRGB).
+ */
+export function popRuleViolation(accentHex: Hex, popHex: Hex, strategy: ColorStrategy): string | null {
+  const A = toOklch(accentHex);
+  const P = toOklch(popHex);
+  const rule = COLOR_PLANS[strategy].pop;
+  const dh = A.c < HUELESS || P.c < HUELESS ? 0 : hueDistance(A.h, P.h);
+  const dc = Math.abs(A.c - P.c);
+  if (goldBand(popHex)) return `pop in the gold band (h ${P.h.toFixed(0)}°, C ${P.c.toFixed(3)})`;
+  switch (rule) {
+    case "split":
+      if (!(dh <= ANALOGOUS || (dh >= COMPLEMENT[0] && dh <= COMPLEMENT[1]))) return `pop ${dh.toFixed(0)}° from the accent (analogous ≤ 30° or complement 150-210°)`;
+      if (A.c >= HUELESS && dc > 0.04 + CHROMA_EPS) return `pop chroma ${dc.toFixed(3)} from the accent's (≤ 0.04)`;
+      return null;
+    case "tint":
+    case "same-hue":
+      if (dh > ANALOGOUS) return `pop ${dh.toFixed(0)}° from the accent (a tint keeps the accent's hue)`;
+      return null;
+    case "pastel":
+      if (dh > ANALOGOUS) return `pastel pop ${dh.toFixed(0)}° from the accent (analogous ≤ 30°)`;
+      if (P.c > 0.08 + CHROMA_EPS) return `pastel pop chroma ${P.c.toFixed(3)} (≤ 0.08)`;
+      return null;
+    case "desaturated":
+      if (P.c > 0.04 + CHROMA_EPS) return `signal pop chroma ${P.c.toFixed(3)} (≤ 0.04)`;
+      return null;
+  }
+}
+
+/** A pop candidate is usable when it is outside the orange guard and the gold band. */
+const usablePop = (o: Oklch) => {
+  const hex = uiColor(o);
+  return !goldBand(hex) && !nearOrange(toOklch(hex)) ? hex : null;
+};
+
+/**
+ * The pop of a strategy from its accent (H25). `u` ∈ [0, 1) is the caller's seeded draw (the analogous / complement
+ * choice and the offset); every candidate leaves the orange guard and the gold band, and the first that keeps the
+ * rule wins (a tint of the accent is the last resort, which every rule accepts but `split`'s complement).
+ */
+export function planPop(accentHex: Hex, strategy: ColorStrategy, base: BaseMood, u = 0.5): Hex {
+  const A = toOklch(accentHex);
+  const dark = base === "dark";
+  const tint = (): Oklch => ({ l: dark ? clamp(A.l + 0.2, 0.55, 0.86) : clamp(A.l + 0.28, 0.78, 0.92), c: Math.max(0.012, A.c - 0.04), h: A.h });
+  const cands: Oklch[] = [];
+  switch (COLOR_PLANS[strategy].pop) {
+    case "tint":
+      cands.push(tint(), { ...tint(), c: Math.max(0.012, A.c - 0.02) });
+      break;
+    case "split": {
+      // a contrasting lightness for a visible second field first, then steps back toward the accent's lightness
+      // until the hue holds its chroma in sRGB (a light complement of a vivid crimson clips to a pastel); chroma
+      // within ±0.04 of the accent's
+      const far = A.l < 0.58 ? clamp(A.l + 0.24, 0.62, 0.84) : clamp(A.l - 0.22, 0.38, 0.6);
+      const ls = [far, (far + A.l) / 2, A.l, A.l < 0.58 ? A.l - 0.08 : A.l + 0.08].map((l) => clamp(l, 0.3, 0.9));
+      const c = clamp(A.c + (u - 0.5) * 0.06, 0.04, Math.max(0.04, A.c + 0.04));
+      const comp = 150 + u * 60;
+      const ana = (u < 0.5 ? -1 : 1) * (18 + (u % 0.5) * 24);
+      const order = u < 0.55 ? [comp, ana, 180, -ana] : [ana, comp, -ana, 180];
+      for (const dh of order) for (const l of ls) for (const k of [c, Math.max(0.04, A.c - 0.03)]) cands.push({ l, c: k, h: normHue(A.h + dh) });
+      break;
+    }
+    case "same-hue":
+      cands.push({ l: A.l < 0.6 ? clamp(A.l + 0.25, 0.7, 0.9) : clamp(A.l - 0.25, 0.3, 0.55), c: Math.max(0.012, A.c - 0.03), h: A.h });
+      break;
+    case "pastel":
+      for (const dh of [(u - 0.5) * 50, 20, -20, 0]) cands.push({ l: 0.88, c: Math.min(0.075, Math.max(0.03, A.c)), h: normHue(A.h + dh) });
+      break;
+    case "desaturated":
+      cands.push({ l: dark ? 0.32 : 0.86, c: Math.min(0.035, A.c), h: A.h });
+      break;
+  }
+  for (const o of cands) {
+    const hex = usablePop(o);
+    if (hex && !popRuleViolation(accentHex, hex, strategy)) return hex;
+  }
+  return usablePop(tint()) ?? uiColor({ ...tint(), c: 0.02 });
+}
+
+/** The colour families that flatter gold, outside 22-95° (H34): olive, teal, majorelle. */
+export const SIGNAL_FAMILIES = { olive: 122, teal: 200, majorelle: 250 } as const;
+export type SignalFamily = keyof typeof SIGNAL_FAMILIES;
+
+/**
+ * "Sand + signal" (H34, DES-§4.10 worked example): a gold accent or pop becomes the page's warm neutral (its hue at
+ * chroma ≤ 0.06, the "sand") and the accent moves to a signal family outside 22-95° (the nearest in hue by default,
+ * olive for every gold), at a lightness that holds AA on sand; the pop follows the strategy from the new accent (H25).
+ */
+export function sandSignal(goldHex: Hex, opts: { family?: SignalFamily; strategy?: ColorStrategy; base?: BaseMood; u?: number } = {}): { sand: Hex; neutralHue: number; accent: Hex; pop: Hex; family: SignalFamily } {
+  const G = toOklch(goldHex);
+  const family = opts.family ?? (Object.entries(SIGNAL_FAMILIES).sort((a, b) => hueDistance(a[1], G.h) - hueDistance(b[1], G.h))[0]![0] as SignalFamily);
+  const sand = uiColor({ l: clamp(Math.max(G.l, 0.9), 0.9, 0.97), c: Math.min(0.045, G.c), h: G.h });
+  const accent = uiColor({ l: clamp(G.l, 0.42, 0.5), c: clamp(G.c * 0.75, 0.08, 0.12), h: SIGNAL_FAMILIES[family] });
+  const pop = planPop(accent, opts.strategy ?? "duotone", opts.base ?? "light", opts.u ?? 0.7);
+  return { sand, neutralHue: normHue(G.h), accent, pop, family };
+}
+
+/**
+ * The palette half of a compiled genome (DES-§4.4 "G9 → palette"): the strategy's base and harmony (the input's when
+ * the plan allows them), the accent out of the gold band (sand + signal), and the H25 pop. Every colour still goes
+ * through the no-orange stack (uiColor, buildPalette's blend audit).
+ */
+export function planPalette(
+  input: { accent: Hex; base: BaseMood; harmony: Harmony; neutralHue?: number },
+  strategy: ColorStrategy,
+  opts: { archetype?: Archetype; u?: number } = {},
+): { accent: Hex; pop: Hex; base: BaseMood; harmony: Harmony; neutralHue?: number } {
+  const plan = COLOR_PLANS[strategy];
+  const allowed = plan.harmonies.filter((h) => !plan.only?.[h] || (opts.archetype && plan.only[h]!.includes(opts.archetype)));
+  const harmony = allowed.includes(input.harmony) ? input.harmony : allowed[0]!;
+  const base = plan.bases.includes(input.base) ? input.base : plan.bases[0]!;
+  let accent = noOrange(input.accent);
+  let neutralHue = input.neutralHue;
+  // a margin around the gold band: the palette's darker and lighter accent steps (sections' action colours, the
+  // strong accent) move the hue a few degrees, so a gold-adjacent accent takes the sand + signal path too
+  const A = toOklch(accent);
+  if (goldBand(accent) || (A.c > 0.08 && A.h >= 68 && A.h <= 102)) {
+    const s = sandSignal(accent, { strategy, base, u: opts.u });
+    accent = s.accent;
+    neutralHue = s.neutralHue;
+  }
+  const pop = planPop(accent, strategy, base, opts.u);
+  return { accent, pop, base, harmony, ...(neutralHue === undefined ? {} : { neutralHue }) };
+}
+
+/**
+ * Chromatic hues of a dark-base palette beyond the accent's family (H25 "no third hue on a dark base"): every token
+ * colour with chroma > 0.06 must sit within ±30° of the accent or the pop. Returns the offending token names.
+ */
+export function thirdHues(tokens: Readonly<Record<string, string>>, names: readonly string[] = ["lp-soft", "lp-dark", "lp-surface", "lp-bg", "lp-accent-soft"]): string[] {
+  const acc = tokens["lp-accent"];
+  const pop = tokens["lp-pop"];
+  if (!acc || !pop) return [];
+  const A = toOklch(acc);
+  const P = toOklch(pop);
+  return names.filter((n) => {
+    const v = tokens[n];
+    if (!v || !/^#[0-9a-f]{6}$/i.test(v)) return false;
+    const o = toOklch(v);
+    return o.c > 0.06 && hueDistance(o.h, A.h) > ANALOGOUS && hueDistance(o.h, P.h) > ANALOGOUS;
+  });
 }
 

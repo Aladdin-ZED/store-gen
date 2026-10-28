@@ -309,9 +309,12 @@ export const SECTION_MIXES: readonly MixPair[] = [
 ];
 
 /**
- * Translucent materials of a section (every rgb(… / a) inside shadows, glows, glass, the product
- * floor and the aurora lights): composited over the block and its cards (sRGB, 0 … a), and the three
- * aurora lights over one another where they overlap.
+ * Translucent materials of a section (every rgb(… / a) inside shadows, glows, glass, highlights, the product floor and
+ * the stage presets): composited over the block and its cards (sRGB, 0 … a). This is the registry of every emitted
+ * shadow and translucent colour (owner rule 1, DS48): `scripts/check-theme.ts` fails on an emitted token that carries a
+ * translucent colour and is not listed here. The look tokens of DES-§4.10.1 / §4.11.1 (card and float shadows, the
+ * recipe hairline, the stage glow, contact and plinth) are registered with the rest; the aurora lights are gone
+ * (core D60 rev 3, V40).
  */
 export const SECTION_WASHES: readonly string[] = [
   "lp-shadow-s",
@@ -320,11 +323,16 @@ export const SECTION_WASHES: readonly string[] = [
   "lp-shadow-glow",
   "lp-shadow-product",
   "lp-shadow-product-filter",
+  "lp-highlight",
+  "lp-highlight-accent",
   "sec-glass",
-  "lp-aurora-1",
-  "lp-aurora-2",
-  "lp-aurora-3",
+  "sec-glass-border",
   "lp-stage-glow",
+  "lp-shadow-card",
+  "lp-shadow-float",
+  "lp-line",
+  "lp-stage-glow-2",
+  "lp-stage-contact",
 ];
 
 /** Page-level pairs: the UGC ring (conic pop → accent → a-300 → pop, sRGB). */
@@ -465,22 +473,12 @@ export function orangeMixesInTokens(tokens: Readonly<Record<string, string>>, m:
   for (const bg of BLOCKS) {
     const ground = hex(tokens[`${bg}:sec-bg`]);
     const card = hex(tokens[`${bg}:sec-card`]);
-    const lights: { hex: Hex; alpha: number }[] = [];
     for (const name of SECTION_WASHES) {
       const v = tokens[`${bg}:${name}`];
       if (!v) continue;
       for (const w of washesOf(v)) {
         if (ground) report(`${bg}:${name}/bg`, w.hex, ground, blendHit(w.hex, ground, m, "srgb", stepsIn([0.02, w.alpha])));
         if (card) report(`${bg}:${name}/card`, w.hex, card, blendHit(w.hex, card, m, "srgb", stepsIn([0.02, w.alpha])));
-        if (name.startsWith("lp-aurora-") && !lights.some((l) => l.hex === w.hex)) lights.push(w);
-      }
-    }
-    for (let i = 0; i < lights.length && ground; i++) {
-      for (let j = 0; j < lights.length; j++) {
-        if (i === j) continue;
-        const L = lights[i]!;
-        const U = lights[j]!;
-        report(`${bg}:aurora overlap`, L.hex, U.hex, stackHit(L.hex, L.alpha, U.hex, U.alpha, ground, m));
       }
     }
   }

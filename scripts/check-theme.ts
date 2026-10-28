@@ -3,22 +3,32 @@
  * (THEME_CHECK_ALL=1 prints every failure instead of the first 40)
  *
  * Two sizes (docs/STORE-SAAS.md §J.1, CCR r1.0-c0b-3 item 1):
- *   npx tsx scripts/check-theme.ts          the seeded subset of `npm test` (~30 s): every check runs. All 40 seeds' specs
+ *   npx tsx scripts/check-theme.ts          the seeded subset of `npm test`: every check runs. All 40 seeds' specs
  *                                           are checked (validity, orange, dividers, determinism, the 8-look variety);
  *                                           seeds 0-3 are built and verified, with the independent blend measure on
- *                                           seeds 0-1 and the dense aurora grid on seed 0; the first 100 of the 600
- *                                           hand-edited specs (blend on 50, dense on 17, the full sweep's shares); the
- *                                           calm, adversarial, ranking, font and contract blocks run in full
- *   npx tsx scripts/check-theme.ts --full   the full sweep below: 40 seeds built (blend on 0-3, dense on 0-2), 600
- *                                           hand-edited specs (blend on 300, dense on 100); `npm run test:slow`
+ *                                           seeds 0-1; the first 100 of the 600 hand-edited specs (blend on 50); 2,000
+ *                                           seeded ThemeLooks sized, 120 of them built; the calm, adversarial,
+ *                                           ranking, font, pairing, DESIGN.md and contract blocks run in full
+ *   npx tsx scripts/check-theme.ts --full   the full sweep below: 40 seeds built (blend on 0-3), 600 hand-edited specs
+ *                                           (blend on 300), all 2,000 ThemeLooks built; `npm run test:slow`
  *
  * For every archetype × 40 seeds × synthetic product photos × locales (ar, fr):
  *   themeFromProduct → buildTheme must not throw, and every contrast guarantee is re-verified on the
  *   EMITTED tokens (not on internal structures): section text/accent pairs, frosted glass over any
- *   backdrop, and the aurora light field sampled from its CSS on a grid. Also checks the v2 contract
- *   (DESIGN.md §2.5 attribute value sets, modern dividers, grain ≤ 3%, composable shadows, the modern
- *   font palette, variant ids of SECTIONS.md), determinism, seed variety, CSS safety, font files on
- *   disk, the extractor, the gamut mapper against culori, and the archetype ranking. Exits 1 on failure.
+ *   backdrop and the stage glow. Also checks the contract (DESIGN.md §2.5 attribute value sets, modern dividers, no
+ *   grain and no aurora on any build (core D60, V40), no overshoot easing outside playground (DS28), every
+ *   translucent token registered with the blend audit (DS48), composable shadows, the modern font palette, variant
+ *   ids of SECTIONS.md), determinism, seed variety, CSS safety, font files on disk, the extractor, the gamut mapper
+ *   against culori, and the archetype ranking. Exits 1 on failure.
+ *
+ * Design engine (P6 DESIGN, design.md DES-§25.1 `theme:check`, DES-§1.4 DG-01 / DG-08):
+ *   - DESIGN.md v3: the §2.5 code block = THEME_ATTR_VALUES in both directions; the orange colour words only in §0;
+ *     the DES-§3.2 budgets table present verbatim;
+ *   - the pairing catalogue: F1-F15 (src/lib/design/pairings.ts), the ink-density ratio (scripts/qa/design-ink.ts),
+ *     the `metrics_missing` list and the `pending_font` rows, the known-glyph fixture of DES-R21;
+ *   - ThemeLook emission: 2,000 seeded looks ≤ 700 B of JSON; the built ones keep AA, no orange (emitted and blended),
+ *     the gold band hard for accent / pop (H34), H25, no third hue on a dark base, the radius ladder, the motion
+ *     clamps; the gold band on documents without look is listed, not failed.
  *
  * Owner rules (2026-10-10), verified on every build (product-derived AND hand-edited):
  *   - NO ORANGE: every color in the emitted CSS (hex and rgb(), shadows, glass, aurora, stage, status,
@@ -39,7 +49,25 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { converter, formatHex, modeLrgb, modeOklab, modeOklch, modeRgb, parse as culoriParse, toGamut, useMode as registerMode, wcagContrast } from "culori/fn";
-import { ARCHETYPES, DIVIDERS, HARMONIES, ProductCategory, SECTION_BGS, ThemeSpec, type Archetype, type Locale } from "../src/lib/page/schema";
+import {
+  ARCHETYPES,
+  COLOR_STRATEGIES,
+  DEPTHS,
+  DIVIDERS,
+  EASE_FAMILIES,
+  GRAMMARS,
+  HARMONIES,
+  LADDERS,
+  MASKS,
+  ProductCategory,
+  REVEALS,
+  SECTION_BGS,
+  ThemeLook,
+  ThemeSpec,
+  TREATMENTS,
+  type Archetype,
+  type Locale,
+} from "../src/lib/page/schema";
 import {
   ARCHETYPE_DEFS,
   CALM_ARCHETYPES,
@@ -47,6 +75,7 @@ import {
   THEME_ATTR_VALUES,
   THEME_SECTION_TYPES,
   GROUND_TOKENS,
+  SECTION_WASHES,
   buildTheme,
   extractPalette,
   orangeMixesInTokens,
@@ -58,8 +87,15 @@ import {
   themeFromProduct,
   type ExtractedPalette,
 } from "../src/lib/theme";
+import { LOOK_ATTRS, LOOK_ONLY_VALUES, OVERSHOOT_ARCHETYPES, SPRING_ZETA_MIN, TOKEN_LIST_ATTRS, type ThemeAttr } from "../src/lib/theme/archetypes";
 import { composite, contrast, deltaE, fromOklch, hueDistance, luminance, toOklch } from "../src/lib/theme/color";
+import { COLOR_PLANS, goldBand, planPalette, popRuleViolation, thirdHues } from "../src/lib/theme/palette";
 import { mulberry32 } from "../src/lib/theme/rng";
+import { LADDER_PX, SPRING_EASINGS } from "../src/lib/theme/tokens";
+import { loadCatalogue, pairingRules, pendingFaces } from "../src/lib/design/pairings";
+import { arabicMetrics } from "../src/lib/design/typography";
+import { inkRatio, INK_BAND, referenceCoverage } from "./qa/design-ink";
+import { Font, glyphBox } from "./qa/design-font";
 
 registerMode(modeRgb);
 registerMode(modeLrgb);
@@ -74,9 +110,8 @@ const SEEDS = 40;
 /** `--full` (test:slow) builds every seed and every hand-edited spec; npm test builds the first seeds only (see the header) */
 const FULL = process.argv.includes("--full");
 const BUILT_SEEDS = FULL ? SEEDS : 4;
-/** the seeds whose builds also get the independent CSS blend measure, and the dense 41-point aurora grid (9 points elsewhere) */
+/** the seeds whose builds also get the independent CSS blend measure */
 const BLEND_SEEDS = FULL ? 4 : 2;
-const DENSE_SEEDS = FULL ? 3 : 1;
 const LOCALES: Locale[] = ["ar", "fr"];
 
 let failures = 0;
@@ -485,7 +520,9 @@ function blendLeaks(t: Record<string, string>): string[] {
         for (const g of c.alpha >= 0.999 ? grounds.slice(0, 1) : grounds) measureBlend(paintOver(c, g), `[${sbg}] ${m.src.slice(0, 90)}`, out);
       }
     }
-    for (const name of ["lp-shadow-s", "lp-shadow-m", "lp-shadow-l", "lp-shadow-glow", "lp-shadow-product", "lp-shadow-product-filter", "sec-glass", "lp-aurora", "lp-stage-glow"]) {
+    // every registered translucent material (blend.ts SECTION_WASHES: shadows, glows, glass, highlights, the look's
+    // card / float shadows, hairline and stage presets)
+    for (const name of SECTION_WASHES) {
       for (const m of (t[`${sbg}:${name}`] ?? "").matchAll(RGB_ALPHA)) {
         const c = { r: Number(m[1]) / 255, g: Number(m[2]) / 255, b: Number(m[3]) / 255, alpha: Number(m[4]) };
         if (c.alpha <= 0) continue;
@@ -729,40 +766,6 @@ function parseRgba(v: string): { hex: string; a: number } | null {
   return { hex, a: Number(m[4]) };
 }
 
-interface Light {
-  w: number;
-  h: number;
-  x: number;
-  y: number;
-  hex: string;
-  a: number;
-  hint: number;
-}
-const GRADIENT = /radial-gradient\(([\d.]+)% ([\d.]+)% at ([\d.]+)% ([\d.]+)%,(rgb\([^)]*\)),([\d.]+)%,(rgb\([^)]*\))\)/g;
-function parseField(v: string): Light[] {
-  const out: Light[] = [];
-  for (const m of v.matchAll(GRADIENT)) {
-    const c = parseRgba(m[5]!);
-    const end = parseRgba(m[7]!);
-    if (!c || !end || end.a !== 0 || end.hex !== c.hex) return [];
-    out.push({ w: Number(m[1]), h: Number(m[2]), x: Number(m[3]), y: Number(m[4]), hex: c.hex, a: c.a, hint: Number(m[6]) / 100 });
-  }
-  return out;
-}
-
-/** The field's color at (x, y) in % of the box, as CSS renders it (color hint falloff, top layer first). */
-function fieldAt(bg: string, lights: Light[], x: number, y: number): string {
-  let c = bg;
-  for (let i = lights.length - 1; i >= 0; i--) {
-    const L = lights[i]!;
-    const t = Math.hypot((x - L.x) / L.w, (y - L.y) / L.h);
-    if (t >= 1) continue;
-    const p = t ** (Math.log(0.5) / Math.log(L.hint));
-    c = composite(L.hex, L.a * (1 - p), c);
-  }
-  return c;
-}
-
 /* ------------------------------------------------------------------ */
 /* the big matrix                                                      */
 /* ------------------------------------------------------------------ */
@@ -803,16 +806,16 @@ const DISTINCT: [string, string, number][] = [
   ["pop:sec-bg", "base:sec-bg", 0.06],
 ];
 
-const stats = { worstText: 21, worstAccent: 21, worstGlass: 21, worstAuroraText: 21, worstAuroraAccent: 21, minAurora: 1, maxGlassAlpha: 0, minGlassAlpha: 1, maxCss: 0, minHighlight: 1, worstStageText: 21, minStageDelta: 1, maxStageHueDrift: 0 };
+const stats = { worstText: 21, worstAccent: 21, worstGlass: 21, maxStageGlow: 0, maxGlassAlpha: 0, minGlassAlpha: 1, maxCss: 0, minHighlight: 1, worstStageText: 21, minStageDelta: 1, maxStageHueDrift: 0 };
 
 /** Stage tones may only drift this far (OKLCH hue, degrees) from the accent's or the block's own hue. */
 const STAGE_HUE_DRIFT = 20;
 
 /**
  * Section pairs that must hold for every theme (product-derived or hand-edited), plus glass over any
- * backdrop and the aurora field sampled on a `grid`×`grid` lattice (+ each light's center).
+ * backdrop and the stage glow.
  */
-function checkSections(t: Record<string, string>, label: string, grid: number) {
+function checkSections(t: Record<string, string>, label: string) {
   for (const sbg of SECTION_BGS) {
     const k = (name: string) => t[`${sbg}:${name}`]!;
     for (const [fg, bg, min] of PAIRS_SECTION) {
@@ -848,37 +851,18 @@ function checkSections(t: Record<string, string>, label: string, grid: number) {
       assert(parseRgba(k("sec-glass-border")), `${label}: [${sbg}] --sec-glass-border is not rgb(… / a)`);
     }
 
-    // aurora: three soft lights from product hues; text and buttons keep contrast everywhere on it
-    const lights = parseField(k("lp-aurora"));
-    if (lights.length !== 3) {
-      fail(`${label}: [${sbg}] --lp-aurora is not three radial lights: ${k("lp-aurora").slice(0, 120)}`);
-      continue;
-    }
-    for (let i = 0; i < 3; i++) {
-      const own = parseRgba(k(`lp-aurora-${i + 1}`));
-      assert(own && own.hex === lights[i]!.hex && own.a === lights[i]!.a, `${label}: [${sbg}] --lp-aurora-${i + 1} ≠ field light ${i + 1}`);
-      stats.minAurora = Math.min(stats.minAurora, lights[i]!.a);
-      assert(lights[i]!.a <= 0.55, `${label}: [${sbg}] aurora light ${i + 1} too strong (${lights[i]!.a})`);
-    }
-    const pts: [number, number][] = lights.map((l) => [l.x, l.y]);
-    for (let gx = 0; gx < grid; gx++) for (let gy = 0; gy < grid; gy++) pts.push([(gx * 100) / (grid - 1), (gy * 100) / (grid - 1)]);
-    const fieldLeaks: string[] = [];
-    for (const [x, y] of pts) {
-      const c = fieldAt(k("sec-bg"), lights, x, y);
-      measureBlend(c, `[${sbg}] aurora at ${x.toFixed(0)}%,${y.toFixed(0)}%`, fieldLeaks);
-      const ri = Math.min(contrast(k("sec-ink"), c), contrast(k("sec-ink-soft"), c));
-      const ra = contrast(k("sec-accent"), c);
-      stats.worstAuroraText = Math.min(stats.worstAuroraText, ri);
-      stats.worstAuroraAccent = Math.min(stats.worstAuroraAccent, ra);
-      if (ri < 4.5) fail(`${label}: [${sbg}] text on aurora at ${x.toFixed(0)}%,${y.toFixed(0)}% = ${ri.toFixed(2)} < 4.5`);
-      if (ra < 3) fail(`${label}: [${sbg}] --sec-accent on aurora at ${x.toFixed(0)}%,${y.toFixed(0)}% = ${ra.toFixed(2)} < 3`);
-    }
-    if (fieldLeaks.length) fail(`${label}: orange in the aurora field: ${fieldLeaks.slice(0, 2).join(" · ")}`);
-    // stage glow (behind a cutout, over the plain section): its center is light 1 at full strength
+    // no aurora (core D60 rev 3, V40): the field and its lights are never emitted, on any block
+    for (const name of ["lp-aurora", "lp-aurora-1", "lp-aurora-2", "lp-aurora-3"]) assert(t[`${sbg}:${name}`] === undefined, `${label}: [${sbg}] --${name} is emitted (V40)`);
+    // stage glow (behind a cutout, over the plain section): the block's text keeps AA at its centre
     const stage = /^radial-gradient\(closest-side,(rgb\([^)]*\)),/.exec(k("lp-stage-glow"));
     const center = stage ? parseRgba(stage[1]!) : null;
     if (!center) fail(`${label}: [${sbg}] --lp-stage-glow malformed`);
     else {
+      // a look's stage glow is the DES-§4.11.1 recipe: never above the core D60 ceiling of 0.10
+      if (t["lp-shadow-card"] !== undefined) {
+        stats.maxStageGlow = Math.max(stats.maxStageGlow, center.a);
+        assert(center.a <= 0.1, `${label}: [${sbg}] look stage glow alpha ${center.a} > 0.10 (D60)`);
+      }
       const c = composite(center.hex, center.a, k("sec-bg"));
       assert(contrast(k("sec-ink"), c) >= 4.5 && contrast(k("sec-accent"), c) >= 3, `${label}: [${sbg}] stage glow lowers contrast below AA`);
     }
@@ -916,12 +900,6 @@ function checkSections(t: Record<string, string>, label: string, grid: number) {
   }
 }
 
-/** Violet/indigo band an aurora light may only use when the product itself lives there. */
-const violet = (hex: string) => {
-  const o = toOklch(hex);
-  return o.c >= 0.035 && o.h >= 262 && o.h <= 318;
-};
-
 const REQUIRED_TOKENS = [
   "lp-bg", "lp-surface", "lp-surface-2", "lp-soft", "lp-ink", "lp-ink-soft", "lp-ink-mute", "lp-line", "lp-line-strong", "lp-accent", "lp-accent-ink",
   "lp-accent-soft", "lp-accent-strong", "lp-pop", "lp-pop-ink", "lp-dark", "lp-dark-ink", "lp-success", "lp-danger", "lp-warn", "lp-a-50", "lp-a-950",
@@ -932,24 +910,78 @@ const REQUIRED_TOKENS = [
   "lp-radius-panel", "lp-panel-inset", "lp-panel-gap", "lp-border-w", "lp-border-style",
   "lp-shadow-s", "lp-shadow-m", "lp-shadow-l", "lp-shadow-glow", "lp-highlight", "lp-highlight-accent", "lp-shadow-product", "lp-shadow-product-filter",
   "lp-glass-blur", "lp-glass-filter", "sec-glass", "sec-glass-ink", "sec-glass-border", "sec-glass-solid",
-  "lp-aurora-1", "lp-aurora-2", "lp-aurora-3", "lp-aurora", "lp-stage-glow", "mx-stage", "mx-stage-hi", "mx-stage-lo",
-  "lp-ease", "lp-ease-out", "lp-ease-spring", "lp-ease-in-out", "lp-ease-expo-out", "lp-ease-quint-out", "lp-ease-pop",
+  "lp-stage-glow", "mx-stage", "mx-stage-hi", "mx-stage-lo",
+  "lp-ease", "lp-ease-out", "lp-ease-in-out", "lp-ease-expo-out", "lp-ease-quint-out", "lp-ease-pop",
   "lp-dur-s", "lp-dur-m", "lp-dur-l", "lp-stagger", "lp-reveal-distance", "lp-space-section", "lp-container", "lp-gutter",
-  "lp-grain", "lp-grain-opacity", "lp-tilt-min", "lp-tilt-max", "lp-ornament",
+  "lp-tilt-min", "lp-tilt-max", "lp-ornament",
   "sec-bg", "sec-ink", "sec-ink-soft", "sec-line", "sec-line-strong", "sec-accent", "sec-accent-ink", "sec-card", "sec-card-ink", "sec-chip", "sec-chip-ink",
   "sec-highlight", "sec-success", "sec-danger", "sec-warn",
 ];
-const ATTR_KEYS = ["data-arch", ...Object.keys(THEME_ATTR_VALUES)].sort();
+/** The look tokens of DES-§4.5.3 (only with `look`). */
+const LOOK_TOKENS = [
+  "lp-radius-chip", "lp-radius-control", "lp-radius-card", "lp-unit", "lp-split-a", "lp-split-b", "lp-display-weight-ar", "lp-display-pad",
+  "lp-num-copy", "lp-ar-scale", "lp-em-offset", "lp-shadow-card", "lp-shadow-float", "lp-ring", "lp-stage-glow-2", "lp-stage-contact",
+  "lp-stage-plinth", "lp-stage-plinth-line", "lp-mask-cut",
+];
+const BASE_ATTR_KEYS = ["data-arch", ...Object.keys(THEME_ATTR_VALUES).filter((k) => !(LOOK_ATTRS as readonly string[]).includes(k))].sort();
+const LOOK_ATTR_KEYS = ["data-arch", ...Object.keys(THEME_ATTR_VALUES)].sort();
+
+/**
+ * DS28: no overshoot outside `playground`. A cubic-bezier with y1 < 0 or y2 > 1, or a linear() spring that passes
+ * 1 by more than the ζ 0.85 overshoot (≈ 0.6 %), on an easing token of a non-playground theme is a failure.
+ */
+const SPRING_OVERSHOOT_MAX = Math.exp((-SPRING_ZETA_MIN * Math.PI) / Math.sqrt(1 - SPRING_ZETA_MIN ** 2));
+function overshoots(easing: string): boolean {
+  const cb = /^cubic-bezier\(([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)\)$/.exec(easing);
+  if (cb) return Number(cb[2]) < 0 || Number(cb[4]) > 1;
+  const lin = /^linear\((.*)\)$/.exec(easing);
+  if (lin) return Math.max(...lin[1]!.split(",").map(Number)) > 1 + SPRING_OVERSHOOT_MAX + 1e-9;
+  return false;
+}
+const EASING_TOKENS = ["lp-ease", "lp-ease-out", "lp-ease-spring", "lp-ease-in-out", "lp-ease-expo-out", "lp-ease-quint-out", "lp-ease-pop"];
+const overshootStats = { checked: 0, playgroundBouncy: 0 };
+
+/** Every emitted token with a translucent colour, outside the blend registry (owner rule 1, DS48). */
+const TRANSLUCENT = /rgba?\([^()]*\/\s*0?\.\d+\s*\)|rgba\([^()]*,\s*0?\.\d+\s*\)/;
+function unregisteredWashes(t: Record<string, string>): string[] {
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(t)) {
+    const name = k.includes(":") ? k.slice(k.indexOf(":") + 1) : k;
+    if (TRANSLUCENT.test(v) && !SECTION_WASHES.includes(name)) out.push(name);
+  }
+  return [...new Set(out)];
+}
 
 /** Contract checks shared by product-derived and hand-edited builds. */
 function checkContract(theme: ReturnType<typeof buildTheme>, spec: ThemeSpec, locale: Locale, label: string) {
   const t = theme.tokens;
+  const look = !!spec.look;
   for (const name of REQUIRED_TOKENS) assert(typeof t[name] === "string" && t[name]!.length > 0, `${label}: missing token ${name}`);
-  assert(JSON.stringify(Object.keys(theme.attrs).sort()) === JSON.stringify(ATTR_KEYS), `${label}: attrs keys ${Object.keys(theme.attrs)}`);
+  for (const name of LOOK_TOKENS) assert(look ? typeof t[name] === "string" && t[name]!.length > 0 : t[name] === undefined, `${label}: look token ${name} ${look ? "missing" : "emitted without look"}`);
+  assert(JSON.stringify(Object.keys(theme.attrs).sort()) === JSON.stringify(look ? LOOK_ATTR_KEYS : BASE_ATTR_KEYS), `${label}: attrs keys ${Object.keys(theme.attrs)}`);
   assert((ARCHETYPES as readonly string[]).includes(theme.attrs["data-arch"]!), `${label}: bad data-arch`);
-  for (const [attr, values] of Object.entries(THEME_ATTR_VALUES)) {
-    assert((values as readonly string[]).includes(theme.attrs[attr]!), `${label}: ${attr}="${theme.attrs[attr]}" is not in the DESIGN.md §2.5 value set`);
+  for (const [attr, values] of Object.entries(THEME_ATTR_VALUES) as [ThemeAttr, readonly string[]][]) {
+    const v = theme.attrs[attr];
+    if (v === undefined) continue;
+    const tokens = TOKEN_LIST_ATTRS.includes(attr) ? v.split(" ") : [v];
+    assert(tokens.length >= 1 && tokens.length <= 2 && tokens.every((x) => values.includes(x)), `${label}: ${attr}="${v}" is not in the DESIGN.md §2.5 value set`);
+    if (!look) assert(!(LOOK_ONLY_VALUES[attr] ?? []).includes(v), `${label}: ${attr}="${v}" exists only with look`);
   }
+  // D60, DS4: no grain, whatever the archetype or the builder says
+  assert(theme.attrs["data-texture"] === "none" && !Object.keys(t).some((k) => /(^|:)lp-grain/.test(k)), `${label}: grain emitted (data-texture ${theme.attrs["data-texture"]})`);
+  // DS28: no overshoot easing outside playground
+  for (const name of EASING_TOKENS) {
+    const v = t[name];
+    if (v === undefined) continue;
+    overshootStats.checked++;
+    if (overshoots(v)) {
+      if (OVERSHOOT_ARCHETYPES.includes(spec.archetype)) overshootStats.playgroundBouncy++;
+      else fail(`${label}: ${name} overshoots outside playground (${v.slice(0, 60)})`);
+    }
+  }
+  // every translucent colour is registered with the blend audit (blend.ts SECTION_WASHES)
+  const unregistered = unregisteredWashes(t);
+  if (unregistered.length) fail(`${label}: translucent tokens outside the blend registry: ${unregistered.join(", ")}`);
   assert(!/undefined|NaN|null|Infinity|<\/|@import|javascript:|expression\(/i.test(theme.css), `${label}: unsafe/invalid CSS`);
   assert((theme.css.match(/{/g) ?? []).length === (theme.css.match(/}/g) ?? []).length, `${label}: unbalanced braces`);
   assert((theme.css.match(/\(/g) ?? []).length === (theme.css.match(/\)/g) ?? []).length, `${label}: unbalanced parentheses`);
@@ -957,10 +989,6 @@ function checkContract(theme: ReturnType<typeof buildTheme>, spec: ThemeSpec, lo
   // ≥ 1: an admin may pick one family for display and body with no accent
   assert(theme.fontIds.length >= 1 && theme.fontIds.every((id) => id in FONT_DATA), `${label}: bad fontIds ${theme.fontIds}`);
   assert(theme.dividers.length > 0 && theme.dividers.every((d) => (DIVIDERS as readonly string[]).includes(d)), `${label}: dividers ${theme.dividers}`);
-  // grain: the only texture, never above 3%
-  const grain = Number(t["lp-grain-opacity"]);
-  assert(grain >= 0 && grain <= GRAIN_MAX, `${label}: grain opacity ${grain}`);
-  assert((theme.attrs["data-texture"] === "none") === (t["lp-grain"] === "none"), `${label}: --lp-grain disagrees with data-texture`);
   // surfaces: panels are inset + rounded, flush is edge to edge
   const panels = theme.attrs["data-surfaces"] === "panels";
   assert(panels ? t["lp-panel-inset"] !== "0px" : t["lp-panel-inset"] === "0px" && t["lp-radius-panel"] === "0px", `${label}: panel tokens vs data-surfaces`);
@@ -977,10 +1005,11 @@ function checkContract(theme: ReturnType<typeof buildTheme>, spec: ThemeSpec, lo
   if (spec.surfaces !== "archetype") assert(theme.attrs["data-surfaces"] === spec.surfaces, `${label}: surfaces override ignored`);
   if (spec.shadow !== "archetype") assert(theme.attrs["data-shadow"] === spec.shadow, `${label}: shadow override ignored`);
   // motion off: no movement anywhere
-  if (spec.motion === "off") assert(t["lp-dur-m"] === "0ms" && t["lp-ease-spring"] === "linear" && t["lp-reveal-distance"] === "0px", `${label}: motion off still moves`);
+  if (spec.motion === "off") assert(t["lp-dur-m"] === "0ms" && (t["lp-ease-spring"] ?? "linear") === "linear" && t["lp-reveal-distance"] === "0px", `${label}: motion off still moves`);
   if (locale === "ar") {
     assert(FONT_DATA[theme.fontIds[0] as keyof typeof FONT_DATA].scripts.includes("arabic"), `${label}: ar display font lacks arabic`);
-    assert(t["lp-display-tracking"] === "0" && t["lp-display-case"] === "none" && t["lp-label-tracking"] === "0" && Number(t["lp-body-lh"]) >= 1.7, `${label}: arabic overrides`);
+    const zero = (v: string | undefined) => v === "0" || v === "0em";
+    assert(zero(t["lp-display-tracking"]) && t["lp-display-case"] === "none" && zero(t["lp-label-tracking"]) && Number(t["lp-body-lh"]) >= 1.7, `${label}: arabic overrides`);
     assert(theme.attrs["data-emphasis"] !== "italic" && t["lp-emphasis-style"] === "normal", `${label}: italic emphasis in arabic`);
     // every Arabic-facing stack leads with an Arabic face: a Latin face first would also own the
     // space (U+0020) between Arabic words — a mono label face splits Arabic labels into islands
@@ -991,12 +1020,23 @@ function checkContract(theme: ReturnType<typeof buildTheme>, spec: ThemeSpec, lo
     }
   }
   // root --sec-* and materials equal the base map
-  for (const k of ["sec-bg", "sec-ink", "sec-accent", "sec-card", "sec-glass", "lp-aurora", "lp-shadow-m"]) assert(t[k] === t[`base:${k}`], `${label}: root ${k} ≠ base`);
+  for (const k of ["sec-bg", "sec-ink", "sec-accent", "sec-card", "sec-glass", "lp-stage-glow", "lp-shadow-m"]) assert(t[k] === t[`base:${k}`], `${label}: root ${k} ≠ base`);
   for (const [fg, bg, min] of PAIRS_GLOBAL) {
     const r = contrast(t[fg]!, t[bg]!);
     if (min >= 4.5) stats.worstText = Math.min(stats.worstText, r);
     if (r < min) fail(`${label}: ${fg} on ${bg} = ${r.toFixed(2)} < ${min} (${t[fg]} / ${t[bg]})`);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* the gold band (H34, V37) on documents without look: listed          */
+/* ------------------------------------------------------------------ */
+const legacyGoldStats = { builds: 0, accentPop: 0, other: 0 };
+function legacyGold(t: Record<string, string>, label: string) {
+  void label;
+  legacyGoldStats.builds++;
+  if (goldBand(t["lp-accent"]!) || goldBand(t["lp-pop"]!)) legacyGoldStats.accentPop++;
+  else if (Object.entries(t).some(([k, v]) => /^#[0-9a-f]{6}$/i.test(v) && !/lp-(accent|pop)$/.test(k) && goldBand(v))) legacyGoldStats.other++;
 }
 
 /** Minimum ΔEOK between a chip and its block (product-derived themes; dark = block luminance < 0.05). */
@@ -1009,7 +1049,6 @@ const worstChip = { light: 1, dark: 1 };
 const variety: Record<string, Set<string>> = {};
 const surfacesSeen: Record<string, Set<string>> = {};
 const samples: { label: string; tokens: Record<string, string>; spec: ThemeSpec }[] = [];
-let violetLeaks = 0;
 const t0 = performance.now();
 let buildMs = 0;
 
@@ -1059,13 +1098,8 @@ for (const archetype of ARCHETYPES as readonly Archetype[]) {
           const bl = blendLeaks(t);
           if (bl.length) fail(`${label} ${locale}: orange blends: ${bl.slice(0, 3).join(" · ")}`);
         }
-        // dense aurora sampling for a few seeds, a coarser lattice elsewhere (same guarantees)
-        checkSections(t, `${label} ${locale}`, seed < DENSE_SEEDS ? 41 : 9);
-        // aurora hues come from the product: no indigo/violet light unless accent or pop is violet
-        if (!violet(t["lp-accent"]!) && !violet(t["lp-pop"]!)) {
-          const third = parseRgba(t["lp-aurora-3"]!);
-          if (third && third.a > 0 && violet(third.hex)) violetLeaks++;
-        }
+        checkSections(t, `${label} ${locale}`);
+        legacyGold(t, `${label} ${locale}`);
         for (const [a, b, min] of DISTINCT) {
           const d = deltaE(t[a]!, t[b]!);
           worstDistinct[a] = Math.min(worstDistinct[a] ?? 1, d);
@@ -1086,7 +1120,6 @@ for (const archetype of ARCHETYPES as readonly Archetype[]) {
   }
 }
 const elapsed = performance.now() - t0;
-assert(violetLeaks === 0, `aurora: ${violetLeaks} themes put a violet light on a non-violet product`);
 for (const a of ARCHETYPES) {
   if (ARCHETYPE_DEFS[a].surfaces.alt > 0) assert(surfacesSeen[a]!.size === 2, `${a}: surfaces never varies across seeds`);
 }
@@ -1095,9 +1128,8 @@ for (const a of ARCHETYPES) {
 /* admin-edited specs: any valid ThemeSpec must keep the guarantees    */
 /* ------------------------------------------------------------------ */
 const FUZZ = FULL ? 600 : 100;
-/** the hand-edited specs that also get the blend measure, and the dense aurora grid: the same shares of FUZZ in both sizes */
+/** the hand-edited specs that also get the blend measure: the same share of FUZZ in both sizes */
 const FUZZ_BLEND = FUZZ / 2;
-const FUZZ_DENSE = Math.ceil(FUZZ / 6);
 let fuzzBuilds = 0;
 {
   const rnd = mulberry32(0xf00d);
@@ -1139,7 +1171,7 @@ let fuzzBuilds = 0;
         const bl = blendLeaks(theme.tokens);
         if (bl.length) fail(`${label} ${locale}: orange blends: ${bl.slice(0, 3).join(" · ")}`);
       }
-      checkSections(theme.tokens, `${label} ${locale}`, i < FUZZ_DENSE ? 41 : 9);
+      checkSections(theme.tokens, `${label} ${locale}`);
       if (spec.dividers.length) assert(JSON.stringify(theme.dividers) === JSON.stringify(spec.dividers), `${label}: spec dividers ignored`);
     }
   }
@@ -1202,7 +1234,7 @@ let adversarialMoved = 0;
       if (audit.length) fail(`${label}: engine blend audit: ${audit.slice(0, 2).join(" · ")}`);
       const bl = blendLeaks(theme.tokens);
       if (bl.length) fail(`${label}: orange blends: ${bl.slice(0, 3).join(" · ")}`);
-      checkSections(theme.tokens, label, 17);
+      checkSections(theme.tokens, label);
     }
   }
   // a calm, already-clean pair is left exactly as designed (the guard only moves what blends orange)
@@ -1258,6 +1290,265 @@ let adversarialMoved = 0;
 }
 
 /* ------------------------------------------------------------------ */
+/* DESIGN.md v3 (DG-01): §2.5 = THEME_ATTR_VALUES, colour words, budgets */
+/* ------------------------------------------------------------------ */
+const designDoc = readFileSync(join(ROOT, "docs", "DESIGN.md"), "utf8");
+{
+  // the §2.5 code block, one attribute per line: name, then its values separated by " | "
+  const sec = designDoc.slice(designDoc.indexOf("### 2.5"), designDoc.indexOf("### 2.6"));
+  const block = /```\n([\s\S]*?)\n```/.exec(sec)?.[1] ?? "";
+  const doc = new Map<string, string[]>();
+  for (const line of block.split("\n").filter((l) => l.trim())) {
+    const m = /^(data-[a-z-]+)\s+(.+)$/.exec(line.trim());
+    if (!m) fail(`DESIGN.md §2.5: unreadable line "${line}"`);
+    else doc.set(m[1]!, m[2]!.split(" | ").map((v) => v.trim()));
+  }
+  const engine = new Map<string, readonly string[]>([["data-arch", ARCHETYPES], ...(Object.entries(THEME_ATTR_VALUES) as [string, readonly string[]][])]);
+  for (const [attr, values] of engine) {
+    const d = doc.get(attr);
+    if (!d) fail(`DESIGN.md §2.5 lacks ${attr}`);
+    else if (d.join("|") !== values.join("|")) fail(`DESIGN.md §2.5 ${attr} = ${d.join(" | ")} ≠ THEME_ATTR_VALUES ${values.join(" | ")}`);
+  }
+  for (const attr of doc.keys()) if (!engine.has(attr)) fail(`DESIGN.md §2.5 lists ${attr}, which THEME_ATTR_VALUES does not`);
+  console.log(`DESIGN.md §2.5: ${doc.size} attributes = THEME_ATTR_VALUES (both directions)`);
+
+  // DES-§3.5 (C0b, CCR r1.0-c0b-4): the orange-family colour words appear only in §0's owner-rule paragraph
+  const COLOR_WORDS = /\b(amber|terracotta|saffron|tomato|coral|ochre|apricot|peach|copper|rust|tangerine)\b/i;
+  const s0 = designDoc.indexOf("## 0.");
+  const s1 = designDoc.indexOf("## 1.");
+  let hits = 0;
+  designDoc.split("\n").forEach((line, i) => {
+    if (!COLOR_WORDS.test(line)) return;
+    const at = designDoc.split("\n").slice(0, i).join("\n").length;
+    if (at < s0 || at > s1) fail(`DESIGN.md line ${i + 1}: an orange colour word outside §0 ("${line.slice(0, 80)}")`);
+    else hits++;
+  });
+  console.log(`DESIGN.md colour words: ${hits} line(s), all in §0`);
+
+  // DES-§3.2: the budgets table is in v3 §1.1 verbatim (row by row)
+  const spec = readFileSync(join(ROOT, "docs", "saas", "spec", "design.md"), "utf8");
+  const s32 = spec.slice(spec.indexOf("### DES-§3.2"), spec.indexOf("### DES-§3.3"));
+  const rows = s32.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Budget |"));
+  const missing = rows.filter((r) => !designDoc.includes(r));
+  for (const r of missing.slice(0, 5)) fail(`DESIGN.md §1.1 lacks the DES-§3.2 row "${r.slice(0, 90)}"`);
+  console.log(`DESIGN.md budgets: ${rows.length - missing.length} of ${rows.length} DES-§3.2 rows verbatim`);
+}
+
+/* ------------------------------------------------------------------ */
+/* pairings: F1-F15, the ink ratio, metrics_missing (DG-08, DES-§10)   */
+/* ------------------------------------------------------------------ */
+{
+  const t0p = performance.now();
+  const cat = loadCatalogue();
+  const hits = pairingRules(cat, { ink: (p) => inkRatio(p) });
+  for (const h of hits.filter((x) => x.level === "fail")) fail(`pairing ${h.rule} ${h.id}: ${h.message}`);
+  const warns = hits.filter((x) => x.level === "warn");
+  const metricsMissing = warns.filter((h) => h.message.startsWith("metrics_missing")).map((h) => h.id);
+  let inkMin = Infinity;
+  let inkMax = 0;
+  let measured = 0;
+  for (const p of cat.pairings) {
+    const r = inkRatio(p);
+    if (!r) continue;
+    measured++;
+    inkMin = Math.min(inkMin, r.ratio);
+    inkMax = Math.max(inkMax, r.ratio);
+  }
+  // every Arabic display face of the catalogue has metrics.ar or a fallback row (F13: never silently Latin-measured)
+  for (const p of cat.pairings) assert(arabicMetrics(p.displayAr), `pairing ${p.id}: ${p.displayAr} has neither metrics.ar nor a fallback row`);
+  const perArch = ARCHETYPES.map((a) => cat.pairings.filter((p) => p.archetype === a).length);
+  console.log(
+    `pairings: ${cat.pairings.length} loaded (${Math.min(...perArch)}-${Math.max(...perArch)} per archetype), ${new Set(cat.pairings.map((p) => `${p.display}|${p.body}|${p.displayAr}|${p.bodyAr}`)).size} unique tuples, F1-F15 ${hits.filter((h) => h.level === "fail").length ? "FAILED" : "pass"} in ${(performance.now() - t0p).toFixed(0)} ms`,
+  );
+  console.log(`  ink-density ratio (F15, ${INK_BAND.join("-")}): ${measured} pairings in ${inkMin.toFixed(3)}-${inkMax.toFixed(3)} (regular-text references: latin ${referenceCoverage("latin").toFixed(3)}, arabic ${referenceCoverage("arabic").toFixed(3)})`);
+  console.log(`  pending_font (DES-R21 faces not in the manifest: ${pendingFaces().join(", ") || "none"}): ${cat.pending.length} rows skipped`);
+  for (const w of warns.filter((h) => !h.message.startsWith("metrics_missing"))) console.log(`  warn ${w.rule}: ${w.message}`);
+  console.log(`  metrics_missing (warn until R1 exit, DG-08): ${metricsMissing.join(", ") || "none"}`);
+}
+
+/* ------------------------------------------------------------------ */
+/* the known-glyph fixture (DES-R21, CRIT2-7)                          */
+/* ------------------------------------------------------------------ */
+{
+  const fx = JSON.parse(readFileSync(join(ROOT, "scripts", "sync-fonts", "ar-glyph-fixture.json"), "utf8")) as {
+    face: string;
+    source: string;
+    shipped: string;
+    unitsPerEm: number;
+    alefHeight: number;
+    glyphs: Record<string, { box: [number, number, number, number] }>;
+  };
+  const woff = existsSync(join(ROOT, fx.source)) ? Font.open(join(ROOT, fx.source)) : null;
+  const woff2 = Font.open(join(ROOT, fx.shipped));
+  assert(woff2.upem === fx.unitsPerEm, `glyph fixture: ${fx.shipped} has ${woff2.upem} units per em`);
+  for (const [cp, g] of Object.entries(fx.glyphs)) {
+    const code = Number.parseInt(cp.slice(2), 16);
+    // the WOFF2 glyf / loca reconstruction gives the boxes the untransformed file stores (CRIT2-7 self-check)
+    const box2 = glyphBox(woff2, woff2.gid(code));
+    assert(box2 && box2.join() === g.box.join(), `glyph fixture ${cp}: the WOFF2 reconstruction gives ${box2} ≠ ${g.box}`);
+    if (woff) assert(woff.storedBox(woff.gid(code))?.join() === g.box.join(), `glyph fixture ${cp}: ${fx.source} stores ${woff.storedBox(woff.gid(code))} ≠ ${g.box}`);
+  }
+  assert(fx.alefHeight === fx.glyphs["U+0627"]!.box[3], "glyph fixture: alefHeight ≠ the alef box top");
+  const manifestAr = (FONT_DATA[fx.face as keyof typeof FONT_DATA]?.metrics as { ar?: { alefHeight?: number; measured?: boolean } } | undefined)?.ar;
+  if (manifestAr?.measured) assert(manifestAr.alefHeight === fx.alefHeight, `glyph fixture: the manifest's ${fx.face} alefHeight ${manifestAr.alefHeight} ≠ ${fx.alefHeight}`);
+  console.log(`glyph fixture: ${fx.face} alef + beh boxes = the WOFF2 reconstruction${woff ? " = the .woff" : ""}; manifest metrics.ar ${manifestAr?.measured ? "matches" : "not written yet (DES-R21 pending)"}`);
+}
+
+/* ------------------------------------------------------------------ */
+/* ThemeLook emission: 2,000 seeded looks (DES-§4.5, DS2, DS4, DS28)    */
+/* ------------------------------------------------------------------ */
+const LOOKS = 2000;
+const LOOK_BUILDS = FULL ? LOOKS : 120;
+const lookStats = { maxBytes: 0, builds: 0, gold: 0, h25: 0, thirdHue: 0, ms: 0 };
+{
+  const rnd = mulberry32(0x10c4);
+  const any = <T,>(items: readonly T[]) => items[Math.floor(rnd() * items.length)]!;
+  const r3 = (v: number) => Math.round(v * 1000) / 1000;
+  const intIn = (lo: number, hi: number, step = 1) => lo + step * Math.floor(rnd() * (Math.floor((hi - lo) / step) + 1));
+  const ULID = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  const randomLook = (): ThemeLook => {
+    const r = [...REVEALS].sort(() => rnd() - 0.5).slice(0, rnd() < 0.5 ? 1 : 2);
+    const look = {
+      v: 1,
+      g: any(GRAMMARS),
+      grid: { c: any([4, 8, 12] as const), s: any(["1:1", "5:7", "4:8", "3:9", "golden"] as const), m: any(["narrow", "wide", "offset"] as const), w: intIn(1080, 1440, 40), u: any([4, 8] as const) },
+      type: { rm: r3(1.125 + rnd() * 0.125), rd: r3(1.2 + rnd() * 0.3), dmax: intIn(48, 160), w: intIn(100, 900, 10), wAr: intIn(100, 900, 10), tk: r3(rnd() * 0.03), dc: any(["none", "uppercase"] as const), lb: any(["mono", "smallcaps", "plain"] as const), nu: any(["lining", "oldstyle"] as const) },
+      cs: any(COLOR_STRATEGIES),
+      area: r3(0.03 + rnd() * 0.32),
+      hc: rnd() < 0.3,
+      ladder: any(LADDERS),
+      corner: any(["circle", "squircle"] as const),
+      hair: { w: any([0, 1, 1.5] as const), s: r3(0.08 + rnd() * 0.22) },
+      depth: any(DEPTHS),
+      glass: any([0, 1, 2] as const),
+      mask: any(MASKS),
+      img: any(TREATMENTS),
+      dens: any(["airy", "balanced", "dense"] as const),
+      space: r3(0.75 + rnd() * 0.85),
+      align: any(["start", "mixed", "center-statement"] as const),
+      mo: { f: any(EASE_FAMILIES), d: intIn(180, 900), r, st: intIn(30, 80), sc: rnd() < 0.3, scope: any(["heads", "hero", "none"] as const) },
+      kit: { gl: any(["dot", "spark", "diamond", "none"] as const), nb: any(["none", "plain", "padded"] as const), cap: any(["mono", "smallcaps", "italic-serif", "plain"] as const) },
+      em: any(["none", "swoosh", "highlight", "color", "italic"] as const),
+      btn: any(["solid", "pill", "soft", "outline", "underline", "glow"] as const),
+      ...(rnd() < 0.5 ? { gid: Array.from({ length: 26 }, () => any([...ULID])).join("") } : {}),
+      ...(rnd() < 0.5 ? { locks: (["G1", "G2", "G4", "G9", "G18", "G23", "G28"] as const).filter(() => rnd() < 0.6) } : {}),
+    };
+    return ThemeLook.parse(look);
+  };
+  const cat = loadCatalogue();
+  const photos = Object.values(PALETTES);
+  const t0l = performance.now();
+  for (let i = 0; i < LOOKS; i++) {
+    const look = randomLook();
+    const bytes = Buffer.byteLength(JSON.stringify(look), "utf8");
+    lookStats.maxBytes = Math.max(lookStats.maxBytes, bytes);
+    if (bytes > 700) fail(`look ${i}: ${bytes} B of JSON (≤ 700 B, DS2)`);
+    if (i >= LOOK_BUILDS) continue;
+    // a compiled-genome-like spec: the product theme, the strategy's palette plan, a catalogue pairing and its weights
+    const archetype = ARCHETYPES[i % ARCHETYPES.length]!;
+    const base = themeFromProduct({ category: "other", palette: photos[i % photos.length]!, aiVibe: null, archetype, seed: i });
+    const choices = cat.pairings.filter((p) => p.archetype === archetype);
+    const pairing = choices[i % choices.length]!;
+    const plan = planPalette({ accent: base.palette.accent, base: base.palette.base, harmony: base.palette.harmony, neutralHue: base.palette.neutralHue }, look.cs, { archetype, u: rnd() });
+    const soft = look.mo.f === "soft-spring" && archetype !== "playground" ? { ...look.mo, f: "critical" as const } : look.mo;
+    const spec = ThemeSpec.parse({
+      ...base,
+      palette: plan,
+      fonts: { display: pairing.display, body: pairing.body, ...(pairing.accent ? { accent: pairing.accent } : {}), displayAr: pairing.displayAr, bodyAr: pairing.bodyAr },
+      radius: i % 9 === 0 ? "round" : "archetype",
+      surfaces: i % 13 === 0 ? "panels" : "archetype",
+      texture: i % 5 === 0 ? "grain" : "archetype",
+      look: { ...look, mo: soft, type: { ...look.type, w: pairing.displayWeight, wAr: pairing.displayWeightAr } },
+    });
+    const label = `look ${i} (${archetype}/${look.cs}/${look.depth}/${look.ladder}/${look.mo.f})`;
+    for (const locale of LOCALES) {
+      let theme: ReturnType<typeof buildTheme>;
+      const b0 = performance.now();
+      try {
+        theme = buildTheme(spec, locale);
+      } catch (e) {
+        fail(`${label} ${locale}: buildTheme threw ${(e as Error).message}`);
+        continue;
+      }
+      lookStats.ms += performance.now() - b0;
+      lookStats.builds++;
+      const t = theme.tokens;
+      checkContract(theme, spec, locale, `${label} ${locale}`);
+      const leaks = orangeLeaks(theme.css);
+      if (leaks.length) fail(`${label} ${locale}: orange in the emitted CSS: ${leaks.slice(0, 4).join(" ")}`);
+      const audit = orangeMixesInTokens(t);
+      if (audit.length) fail(`${label} ${locale}: engine blend audit: ${audit.slice(0, 2).join(" · ")}`);
+      if (i < (FULL ? 200 : 20)) {
+        const bl = blendLeaks(t);
+        if (bl.length) fail(`${label} ${locale}: orange blends: ${bl.slice(0, 3).join(" · ")}`);
+      }
+      checkSections(t, `${label} ${locale}`);
+      if (locale !== "fr") continue;
+      // the look's attributes and locks replaced the archetype's (DS4: an explicit radius still wins)
+      assert(theme.attrs["data-look"] === "1" && theme.attrs["data-grammar"] === look.g && theme.attrs["data-depth"] === look.depth && theme.attrs["data-img"] === look.img, `${label}: look attributes`);
+      assert(theme.attrs["data-btn"] === look.btn && theme.attrs["data-mask"] === look.mask && theme.attrs["data-glyph"] === look.kit.gl && theme.attrs["data-density"] === look.dens, `${label}: archetype locks not replaced`);
+      assert(theme.attrs["data-corner"] === "circle", `${label}: squircle emitted before DG-19`);
+      // the gold band is hard for the accent and pop roles (H34, V37); listed for the other roles
+      const roles = ["lp-accent", "lp-pop", ...SECTION_BGS.map((b) => `${b}:sec-accent`)];
+      const gold = roles.filter((k) => goldBand(t[k]!));
+      if (gold.length) {
+        lookStats.gold++;
+        fail(`${label}: accent / pop in the gold band (${gold.map((k) => `${k} ${t[k]}`).join(", ")})`);
+      }
+      // H25 on the emitted pair (buildPalette's blend audit may have nudged it)
+      const h25 = popRuleViolation(t["lp-accent"]!, t["lp-pop"]!, look.cs);
+      if (h25) {
+        lookStats.h25++;
+        fail(`${label}: H25 ${h25} (${t["lp-accent"]} / ${t["lp-pop"]})`);
+      }
+      if (spec.palette.base === "dark") {
+        const third = thirdHues(t);
+        if (third.length) {
+          lookStats.thirdHue++;
+          fail(`${label}: a third hue on a dark base (${third.map((k) => `${k} ${t[k]}`).join(", ")})`);
+        }
+      }
+      // the radius ladder: chip < control ≤ card < media in effective radius, pills exempt, mixed media is a mask
+      if (spec.radius === "archetype") {
+        const [chip, control, card, media] = LADDER_PX[look.ladder];
+        const eff = [chip, control, card, media].filter((v) => v > 0 && v < 999);
+        assert(eff.every((v, k) => k === 0 || v >= eff[k - 1]!) && (chip >= 999 || chip < control) && (media >= 999 || media === 0 || card < media), `${label}: radius ladder ${look.ladder} does not increase`);
+        assert(t["lp-radius-control"] === `${control}px`, `${label}: --lp-radius-control ${t["lp-radius-control"]}`);
+      }
+      // durations: G23.d × 0.45 / 0.8 / 1.15, clamped 160-1000 ms
+      if (spec.motion !== "off") for (const k of ["lp-dur-s", "lp-dur-m", "lp-dur-l"]) assert(Number.parseInt(t[k]!) >= 160 && Number.parseInt(t[k]!) <= 1000, `${label}: ${k} ${t[k]}`);
+      // --lp-ease-spring only for the soft-spring family on playground (DS28, DES-§4.12)
+      assert((t["lp-ease-spring"] !== undefined) === (spec.look!.mo.f === "soft-spring" && spec.motion !== "off"), `${label}: --lp-ease-spring ${t["lp-ease-spring"] ? "emitted" : "absent"}`);
+    }
+  }
+  console.log(
+    `looks: ${LOOKS} seeded ThemeLooks ≤ ${lookStats.maxBytes} B of JSON (≤ 700); ${lookStats.builds} look builds in ${(lookStats.ms / Math.max(1, lookStats.builds)).toFixed(2)} ms/theme (${((performance.now() - t0l) / 1000).toFixed(1)} s): AA, no orange, gold band ${lookStats.gold}, H25 ${lookStats.h25}, third hue on dark ${lookStats.thirdHue}`,
+  );
+  console.log(`  gold band on documents without look (listed, not a failure: the vibe engine's palettes): accent / pop in ${legacyGoldStats.accentPop} of ${legacyGoldStats.builds} builds, other roles in ${legacyGoldStats.other}`);
+  // the strategies' palette plans themselves: H25, the gold band and no third hue on dark, over accent hues 0-355°
+  let planChecks = 0;
+  for (const cs of COLOR_STRATEGIES) {
+    const plan = COLOR_PLANS[cs];
+    for (const harmony of plan.harmonies) {
+      for (const baseMood of plan.bases) {
+        for (let h = 0; h < 360; h += 15) {
+          for (const [l, c] of [[0.5, 0.14], [0.7, 0.1], [0.35, 0.08]] as const) {
+            const accent = fromOklch({ l, c, h });
+            const p = planPalette({ accent, base: baseMood, harmony }, cs, { archetype: plan.only?.[harmony]?.[0] ?? "editorial", u: (h % 7) / 7 });
+            planChecks++;
+            const v = popRuleViolation(p.accent, p.pop, cs);
+            if (v) fail(`plan ${cs}/${harmony}/${baseMood} accent ${accent}: ${v}`);
+            if (goldBand(p.accent) || goldBand(p.pop)) fail(`plan ${cs}/${harmony}: gold accent or pop (${p.accent} / ${p.pop})`);
+            if (bandOrange(p.accent) || bandOrange(p.pop)) fail(`plan ${cs}/${harmony}: orange accent or pop (${p.accent} / ${p.pop})`);
+          }
+        }
+      }
+    }
+  }
+  console.log(`  colour plans: ${planChecks} planned palettes (7 strategies × their harmonies × bases × 24 hues × 3 tones) keep H25, the gold band and no orange`);
+}
+
+/* ------------------------------------------------------------------ */
 /* report                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -1268,13 +1559,13 @@ const swatch = (hex: string) => {
 console.log(`\n${FULL ? "full sweep" : "seeded subset (--full for every seed)"} · builds: ${builds} (${ARCHETYPES.length} archetypes × ${BUILT_SEEDS} of ${SEEDS} seeds × ${Object.keys(PALETTES).length} photos × ${LOCALES.length} locales) in ${(elapsed / 1000).toFixed(1)}s — buildTheme ${(buildMs / Math.max(1, builds)).toFixed(2)} ms/theme`);
 console.log(`worst text contrast ${stats.worstText.toFixed(2)}:1 (≥ 4.5) · worst --sec-accent contrast ${stats.worstAccent.toFixed(2)}:1 (≥ 3)`);
 console.log(`glass: worst ink-over-any-backdrop ${stats.worstGlass.toFixed(2)}:1 (≥ 4.5) · fill opacity ${stats.minGlassAlpha}–${stats.maxGlassAlpha}`);
-console.log(`aurora: worst text ${stats.worstAuroraText.toFixed(2)}:1 (≥ 4.5) · worst accent ${stats.worstAuroraAccent.toFixed(2)}:1 (≥ 3) · weakest light alpha ${stats.minAurora} · violet leaks ${violetLeaks}`);
+console.log(`no aurora and no grain on any build (D60, V40) · look stage glow max alpha ${stats.maxStageGlow} (≤ 0.10) · easing tokens checked for overshoot ${overshootStats.checked} (playground bouncy ${overshootStats.playgroundBouncy})`);
 console.log(`highlight: min ΔEOK vs its block ${stats.minHighlight.toFixed(3)} (≥ 0.04)`);
 console.log(`stage: worst ink on --mx-stage(-hi/-lo) ${stats.worstStageText.toFixed(2)}:1 (≥ 4.5) · min ΔEOK vs block ${stats.minStageDelta.toFixed(3)} (≥ 0.03) · max hue drift ${stats.maxStageHueDrift.toFixed(1)}° (≤ ${STAGE_HUE_DRIFT}°)`);
 console.log(`hand-edited specs: ${fuzzBuilds} builds (${FUZZ} random valid ThemeSpecs × ${LOCALES.length} locales)`);
 console.log(`no orange: ${noOrangeStats.colors} emitted colors measured in ${noOrangeStats.builds} builds (culori OKLCH) · closest chromatic hue ${noOrangeStats.nearest.toFixed(1)}° outside the 25–75° band`);
 console.log(
-  `no orange blends: ${cssMixCount} color-mix() in src/landing (${CSS_MIXES.length} distinct) evaluated per block in ${blendStats.builds} builds + fades, ring, washes, aurora field — ${blendStats.measured} blended colors (culori) · closest chromatic blend ${blendStats.nearest.toFixed(2)}° outside the band (${blendStats.worst.slice(0, 120)})`,
+  `no orange blends: ${cssMixCount} color-mix() in src/landing (${CSS_MIXES.length} distinct) evaluated per block in ${blendStats.builds} builds + fades, ring, washes — ${blendStats.measured} blended colors (culori) · closest chromatic blend ${blendStats.nearest.toFixed(2)}° outside the band (${blendStats.worst.slice(0, 120)})`,
 );
 console.log(`adversarial hand-edited specs: ${adversarialBuilds} builds clean (${adversarialMoved} accents nudged) · calm bloom soft band max C ${bloomCalmSoftMax.toFixed(3)} (≤ 0.026)`);
 console.log(`block separation (min ΔEOK vs base): ${DISTINCT.map(([a, , min]) => `${a.split(":")[0]} ${(worstDistinct[a] ?? 0).toFixed(3)} (≥ ${min})`).join(" · ")}`);
