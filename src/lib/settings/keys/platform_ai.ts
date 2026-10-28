@@ -1,14 +1,21 @@
 /**
  * Platform setting `platform_ai` (docs/STORE-SAAS.md §D.10, ai.md AI-§M.5; not secret; owner: ai, P7). The paths §D.10
  * names (`enabled`, `classes` (D55), `prices`, `caps`, `directorAutoDefault`, `promptVersions`, `evalGate`,
- * `patternLibrary`, `retentionNotice`) and, from P0, the ai-owned extras of AI-§M.5 (`classesCanary`, `killSwitch`,
+ * `patternLibrary`, `retentionNotice`) and the ai-owned extras of AI-§M.5 (`classesCanary`, `killSwitch`,
  * `localPromptVersions`, `rubricVersion`, `preferenceTest`, `fallbacks`, `callShape`, `streamTransport`, `routes`,
- * `autoPrefersCloud`, `cacheTtl`, `vision`, `genePins`, `modelInfo`, `probe`), so P7 builds against the whole R1 list.
- * The API key is not here: it lives in `platform_ai_secret`. `prices` starts empty (P7 seeds the rows the probe and the
- * pricing check confirm; no price is invented here). Task ids are checked by shape until P7's task registry
- * (src/lib/ai/tasks.ts, `AI_TASK_IDS`) exists; P7 narrows `TaskIdZ` to it (keep the records partial: no stored row changes).
+ * `autoPrefersCloud`, `cacheTtl`, `vision`, `genePins`, `modelInfo`, `probe`). The API key is not here: it lives in
+ * `platform_ai_secret`.
+ *
+ * Prices (AI-§B.2): the stored `prices` start empty (P0 decision: a stored default never invents a price) and hold the
+ * rows the console or the probe confirmed. `SEED_PRICES` are the published list prices AI-§B.2 seeds, checked against
+ * the bundled Claude API reference (cached 2026-10-06); `SEED_PRICE_NOTES` marks the cells derived from a published
+ * multiplier rather than read as a figure, and the one cell two sources disagree on (Sonnet 5.5 cache reads: the
+ * higher figure is kept, an over-reservation is refunded). `effectivePrices` merges the seed under the stored rows, so
+ * a confirmed row replaces its seed row and its notes. Task ids and prompt families are the registry's
+ * (src/lib/ai/tasks.ts); the route and family records stay partial.
  */
 import { z } from "zod";
+import { AI_TASK_IDS, PROMPT_FAMILIES } from "@/lib/ai/tasks";
 import { isoDateTime } from "../fields";
 
 export const ModelId = z.string().regex(/^claude-[a-z0-9][a-z0-9.-]{2,60}$/);
@@ -23,10 +30,10 @@ export const PriceRow = z.object({
   batchIn: z.number().min(0),
   batchOut: z.number().min(0),
 });
-/** a prompt family id, e.g. "copy.landing" */
-const FamilyZ = z.string().regex(/^[a-z][a-z0-9_.-]{1,40}$/);
-/** an AI task id of AI-§A.2 ("copy.page", "removeBackground", "design.critique"); P7 narrows it to `AI_TASK_IDS` */
-export const TaskIdZ = z.string().regex(/^[a-z][A-Za-z0-9]{1,30}(\.[a-z][A-Za-z0-9]{1,30})?$/);
+/** a prompt family of AI-D27 (`PROMPT_FAMILIES`) */
+const FamilyZ = z.enum(PROMPT_FAMILIES);
+/** an AI task id of AI-§A.2 (`AI_TASK_IDS`) */
+export const TaskIdZ = z.enum(AI_TASK_IDS);
 /** a design gene id ("G1" … "G99") */
 const GeneIdZ = z.string().regex(/^G[1-9]\d?$/);
 
@@ -104,6 +111,7 @@ export const PlatformAi = z.object({
     .object({ class: TaskClassZ, patch: ClassZ.partial(), bp: z.number().int().min(0).max(10_000), startedAt: isoDateTime })
     .nullable()
     .default(null),
+  /** confirmed rows (console, probe); the seed rows apply under them (`effectivePrices`) */
   prices: z.record(ModelId, PriceRow).default({}),
   caps: z
     .object({
@@ -129,9 +137,9 @@ export const PlatformAi = z.object({
   /** mirrors the flag ai_generation_enabled for the console tile (the flag is authoritative) */
   killSwitch: z.boolean().default(false),
   /** the active version per prompt family */
-  promptVersions: z.record(FamilyZ, z.string().max(32)).default({}),
+  promptVersions: z.partialRecord(FamilyZ, z.string().max(32)).default({}),
   /** the active version per family of the on-device prompts */
-  localPromptVersions: z.record(FamilyZ, z.string().max(32)).default({}),
+  localPromptVersions: z.partialRecord(FamilyZ, z.string().max(32)).default({}),
   /** the Director rubric version (AI-§A.8.3) */
   rubricVersion: z.string().max(16).default("v3"),
   evalGate: z
@@ -192,9 +200,9 @@ export const PlatformAi = z.object({
   callShape: z.enum(["parse", "create"]).default("parse"),
   /** NDJSON streaming or the poll fallback (probe line 8) */
   streamTransport: z.enum(["stream", "poll"]).default("stream"),
-  routes: z.record(TaskIdZ, RouteZ).default({}),
+  routes: z.partialRecord(TaskIdZ, RouteZ).default({}),
   /** tasks whose `auto` mode prefers the cloud; set only through the eval gate (AI-§F.6) */
-  autoPrefersCloud: z.record(TaskIdZ, z.literal(true)).default({}),
+  autoPrefersCloud: z.partialRecord(TaskIdZ, z.literal(true)).default({}),
   cacheTtl: z.object({ platform: z.enum(["1h", "5m"]).default("1h") }).prefault({}),
   vision: z
     .object({
@@ -210,5 +218,59 @@ export const PlatformAi = z.object({
   modelInfo: z.record(ModelId, ModelInfo).default({}),
   /** the last probe run (AI-§B.12); null = never probed */
   probe: ProbeResult.nullable().default(null),
+}).superRefine((v, ctx) => {
+  // AI-D28, QUAL-13: the judge is never the model under test, and no jury contains it
+  for (const cls of ["director_interactive", "director_deep", "fast"] as const) {
+    if ((v.evalGate.jury[cls] as readonly string[]).includes(v.classes[cls].model)) {
+      ctx.addIssue({ code: "custom", path: ["evalGate", "jury", cls], message: `the ${cls} jury contains the ${cls} model` });
+    }
+  }
+  if (v.evalGate.judgeModel === v.classes.worker.model) {
+    ctx.addIssue({ code: "custom", path: ["evalGate", "judgeModel"], message: "the judge is the worker model under test" });
+  }
+  // QUAL-11: "auto" for stores that never chose only with a recorded passing preference test
+  if (v.directorAutoDefault && v.preferenceTest === null) {
+    ctx.addIssue({ code: "custom", path: ["directorAutoDefault"], message: "needs a recorded preference test" });
+  }
 });
 export type PlatformAiSetting = z.output<typeof PlatformAi>;
+export type PriceRowValue = z.output<typeof PriceRow>;
+export type PriceCell = keyof PriceRowValue;
+export type PriceTable = Readonly<Record<string, PriceRowValue>>;
+
+/**
+ * The AI-§B.2 seed rows, USD per million tokens (published list prices; prices change, so the console edits them and a
+ * stored row wins). Haiku 5.5's row is its card for prompts up to 100K tokens (`LONG_PROMPT_PRICING`).
+ */
+export const SEED_PRICES: PriceTable = {
+  "claude-fable-5-1": { in: 10, out: 50, cacheRead: 0.25, cacheWrite5m: 12.5, cacheWrite1h: 20, batchIn: 5, batchOut: 25 },
+  "claude-opus-5-5": { in: 4, out: 20, cacheRead: 0.2, cacheWrite5m: 5, cacheWrite1h: 8, batchIn: 2, batchOut: 10 },
+  "claude-opus-5": { in: 5, out: 25, cacheRead: 0.5, cacheWrite5m: 6.25, cacheWrite1h: 10, batchIn: 2.5, batchOut: 12.5 },
+  "claude-opus-4-8": { in: 5, out: 25, cacheRead: 0.5, cacheWrite5m: 6.25, cacheWrite1h: 10, batchIn: 2.5, batchOut: 12.5 },
+  "claude-sonnet-5-5": { in: 2, out: 10, cacheRead: 0.2, cacheWrite5m: 2.5, cacheWrite1h: 4, batchIn: 1, batchOut: 5 },
+  "claude-haiku-5-5": { in: 0.1, out: 0.5, cacheRead: 0.01, cacheWrite5m: 0.125, cacheWrite1h: 0.2, batchIn: 0.05, batchOut: 0.25 },
+};
+
+/**
+ * Seed cells that are not a published figure: "derived" = computed from a published multiplier (cache reads 0.1x,
+ * writes 1.25x / 2x, batch 0.5x); "verify" = sources disagree, the higher figure is seeded until `qa:ai-probe` (line 4)
+ * or the console records the live row.
+ */
+export const SEED_PRICE_NOTES: Readonly<Record<string, Partial<Record<PriceCell, "derived" | "verify">>>> = {
+  "claude-opus-5": { cacheWrite5m: "derived", cacheWrite1h: "derived", batchIn: "derived", batchOut: "derived" },
+  "claude-opus-4-8": { cacheRead: "derived", cacheWrite5m: "derived", cacheWrite1h: "derived", batchIn: "derived", batchOut: "derived" },
+  "claude-sonnet-5-5": { cacheRead: "verify", batchIn: "derived", batchOut: "derived" },
+  "claude-haiku-5-5": { cacheRead: "derived", cacheWrite5m: "derived", cacheWrite1h: "derived", batchIn: "derived", batchOut: "derived" },
+};
+
+/** A model whose price card switches above a prompt size (AI-§B.2: Haiku 5.5 is $0.50 / $2.50 above 100K tokens, 5x). */
+export const LONG_PROMPT_PRICING: Readonly<Record<string, { aboveTokens: number; factor: number }>> = {
+  "claude-haiku-5-5": { aboveTokens: 100_000, factor: 5 },
+};
+
+/** The rows the router prices with: the seed under the stored rows, and the notes of the seed rows still in use. */
+export function effectivePrices(stored: Readonly<Record<string, PriceRowValue>>): { rows: PriceTable; notes: typeof SEED_PRICE_NOTES } {
+  const notes: Record<string, Partial<Record<PriceCell, "derived" | "verify">>> = {};
+  for (const [model, n] of Object.entries(SEED_PRICE_NOTES)) if (!Object.hasOwn(stored, model)) notes[model] = n;
+  return { rows: { ...SEED_PRICES, ...stored }, notes };
+}
