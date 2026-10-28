@@ -17,7 +17,7 @@ import type { AdBriefInput, AdBriefOut } from "../schema/tasks/ad-brief";
 import type { AnalysisOut, AnalyzeInput } from "../schema/tasks/analyze";
 import type { CallScriptInput, CallScriptOut } from "../schema/tasks/callcenter-script";
 import type { FieldRewriteInput, FieldRewriteOut } from "../schema/tasks/copy-field";
-import type { HeroPack, HeroPackInput } from "../schema/tasks/copy-hero";
+import type { HeroPackInput, HeroPackOut } from "../schema/tasks/copy-hero";
 import type { CopyPageInput, CopyPageOut } from "../schema/tasks/copy-page";
 import type { JudgeInput, JudgeOut } from "../schema/tasks/eval-judge";
 import type { InjectionScreenInput, InjectionScreenOut } from "../schema/tasks/injection-screen";
@@ -33,7 +33,7 @@ interface DeclaredTaskIO {
   removeBackground: { in: RemoveBackgroundInput; out: Blob };
   analyze: { in: AnalyzeInput; out: AnalysisOut };
   "copy.page": { in: CopyPageInput; out: CopyPageOut };
-  "copy.hero": { in: HeroPackInput; out: HeroPack };
+  "copy.hero": { in: HeroPackInput; out: HeroPackOut };
   "copy.field": { in: FieldRewriteInput; out: FieldRewriteOut };
   "injection.screen": { in: InjectionScreenInput; out: InjectionScreenOut };
   "ad.brief": { in: AdBriefInput; out: AdBriefOut };

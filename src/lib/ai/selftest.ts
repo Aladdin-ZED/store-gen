@@ -21,6 +21,8 @@
  *   - partial-json: escapes, nested arrays, split deltas at every UTF-8 byte offset of a recorded stream, garbage;
  *   - pii, injection, canary; stream events; jobs (the stage plans, the transitions on a fake clock); settings;
  *     protocol and the fail-code table.
+ * Sections (step 2, guard v2 and the task contracts; ./selftest-guard.ts): copy-schema, guard-merge, numbers, claims,
+ * policies, darija, library, finalize-analyze, finalize-copy, finalize-brief, finalize-script.
  * Exits 1 on any failure.
  */
 import { isDeepStrictEqual } from "node:util";
@@ -54,6 +56,7 @@ import { DEFAULT_TOK_PER_SEC, LEASE_MARGIN_MS, MAX_BLUEPRINT_STAGES, MAX_STAGE_I
 import { PlatformAi, SEED_PRICES, SEED_PRICE_NOTES, effectivePrices, type PlatformAiSetting, type ProbeResult } from "@/lib/settings/keys/platform_ai";
 import { ANTHROPIC_KEY_RE, PlatformAiSecret } from "@/lib/settings/keys/platform_ai_secret";
 import { StoreAi } from "@/lib/settings/keys/store_ai";
+import { registerGuardSections } from "./selftest-guard";
 
 /* ------------------------------------------------------------------ */
 /* The runner                                                          */
@@ -1098,6 +1101,8 @@ section("protocol", () => {
   // the analysis schema the analyze output extends stays the R1.0 one
   check(AnalysisSchema.safeParse({ category: "skincare", vibe: "natural", secondaryVibe: null, materials: [], colorsDescribed: ["vert"], audience: "x", summary: "y" }).success, "Analysis unchanged");
 });
+
+registerGuardSections({ section, check, eq, strict: STRICT });
 
 /* ------------------------------------------------------------------ */
 /* run                                                                 */
