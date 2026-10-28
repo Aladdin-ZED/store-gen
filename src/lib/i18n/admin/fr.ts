@@ -2,7 +2,6 @@
  * French catalog (docs/STORE-SAAS.md §I.5): a partial of the English one, every missing key falls back to `en`.
  * One spread per track file `./fr/<file>.ts` (D67, written at P0).
  */
-import { messages as identity } from "@/lib/auth/i18n/fr";
 import { messages as aiMessages } from "./fr/ai";
 import { messages as authMessages } from "./fr/auth";
 import { messages as briefMessages } from "./fr/brief";
@@ -20,8 +19,6 @@ import { messages as teamMessages } from "./fr/team";
 import type { BaseMessages } from "./index";
 
 export const messages: Partial<BaseMessages> = {
-  // T2 identity surfaces (CCR r1.0-t2-9 item 1); the core keys below win on a clash
-  ...identity,
   // the tracks' files ./fr/<file>.ts (D67; spread here at P0, `scripts/qa/registries-check.ts` proves none is left out):
   // P1 console + notify, P2 shell + auth + onboarding + team + health + brief, P3 landing, P4 ops + finance,
   // P5 integrations, P6 design, P7 ai; each owns the keys under its prefix, and the core keys below win on a clash
@@ -57,6 +54,17 @@ export const messages: Partial<BaseMessages> = {
   "error.server": "Un problème est survenu de notre côté. Veuillez réessayer.",
   "error.session_ended": "Votre session a expiré. Reconnectez-vous.",
   "error.platform_2fa_required": "Activez la validation en deux étapes pour ouvrir la console.",
+  // les codes d'action de l'identité de T2 (D65 ; déplacés de src/lib/auth/i18n/fr.ts au P0b, CCR P2-15)
+  "error.challenge": "Validez la vérification anti-robot, puis réessayez.",
+  "error.totp_required": "Utilisez le code de votre application d'authentification.",
+  "error.last_owner": "Une boutique a besoin d'au moins un propriétaire. Nommez d'abord un autre propriétaire.",
+  "error.owns_store": "Vous êtes encore propriétaire d'une boutique. Fermez-la ou transférez-la d'abord.",
+  "error.is_staff": "C'est un compte de l'équipe. Retirez d'abord son rôle.",
+  "error.member_2fa_required": "Cette boutique exige la validation en deux étapes. Activez-la pour continuer.",
+  "error.platform_read_only": "Les modifications sont suspendues pour maintenance. Réessayez sous peu.",
+  "error.closed": "C'est fermé pour le moment. Réessayez un peu plus tard.",
+  "error.impersonation_member": "Vous êtes membre de cette boutique. Ouvrez-la depuis vos boutiques.",
+  "error.impersonation_state": "Cette boutique ne peut pas être consultée dans son état actuel.",
   // T1 lifecycle and handle refusals (CCR r1.0-t1-2; mapped in seam.ts actionFailure by T2)
   "error.status_changed": "Cette boutique vient d'être modifiée par quelqu'un d'autre. Vérifiez son état actuel et réessayez.",
   "error.handle_format": "Utilisez 3 à 30 lettres minuscules, chiffres ou tirets, en commençant et en terminant par une lettre ou un chiffre.",

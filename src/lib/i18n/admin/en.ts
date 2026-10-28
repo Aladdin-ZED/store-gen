@@ -4,7 +4,6 @@
  * spread per track file `./en/<file>.ts` (each track owns the keys under its own prefix, D67). Values: ICU-lite `{var}`
  * placeholders and `{n, plural, one {…} other {…}}`; no em-dash and no "Step n" label (§I.8 rule 8).
  */
-import { messages as identity } from "@/lib/auth/i18n/en";
 import { messages as aiMessages } from "./en/ai";
 import { messages as authMessages } from "./en/auth";
 import { messages as briefMessages } from "./en/brief";
@@ -21,8 +20,6 @@ import { messages as shellMessages } from "./en/shell";
 import { messages as teamMessages } from "./en/team";
 
 export const messages = {
-  // T2 identity surfaces (CCR r1.0-t2-9 item 1, supersedes the tables of r1.0-t2-5); the core keys below win on a clash
-  ...identity,
   // the tracks' files ./en/<file>.ts (D67; spread here at P0, `scripts/qa/registries-check.ts` proves none is left out):
   // P1 console + notify, P2 shell + auth + onboarding + team + health + brief, P3 landing, P4 ops + finance,
   // P5 integrations, P6 design, P7 ai; each owns the keys under its prefix, and the core keys below win on a clash
@@ -58,6 +55,17 @@ export const messages = {
   "error.server": "Something went wrong on our side. Please try again.",
   "error.session_ended": "Your session has ended. Sign in again.",
   "error.platform_2fa_required": "Turn on two-step verification to open the console.",
+  // T2's identity action codes (D65; moved from src/lib/auth/i18n/en.ts at P0b, CCR P2-15)
+  "error.challenge": "Complete the human check, then try again.",
+  "error.totp_required": "Use the code from your authenticator app.",
+  "error.last_owner": "A store needs at least one owner. Make someone else an owner first.",
+  "error.owns_store": "You still own a store. Close it or hand it over first.",
+  "error.is_staff": "This is a team account. Remove its team role first.",
+  "error.member_2fa_required": "This store requires two-step verification. Turn it on to continue.",
+  "error.platform_read_only": "Changes are paused for maintenance. Try again shortly.",
+  "error.closed": "This is closed for now. Try again a little later.",
+  "error.impersonation_member": "You're a member of this store. Open it from your stores.",
+  "error.impersonation_state": "This store can't be viewed in its current state.",
   // T1 lifecycle and handle refusals (CCR r1.0-t1-2; mapped in seam.ts actionFailure by T2)
   "error.status_changed": "This store was changed by someone else a moment ago. Check the latest state and try again.",
   "error.handle_format": "Use 3 to 30 lowercase letters, digits or hyphens, starting and ending with a letter or digit.",

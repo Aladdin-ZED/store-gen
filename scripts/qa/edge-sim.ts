@@ -25,13 +25,18 @@
  *       4. platform cookies only with the `__Host-` prefix (SEC-13); a client x-sg-path never verifies on a
  *          path outside the proxy matcher (SEC-3).
  *
- *   npm run qa:edge-sim -- --base http://127.0.0.1:3451 --store <handle A> --store-b <handle B> [--slug <live slug of A>]
+ *   npm run qa:edge-sim -- --base http://127.0.0.1:3451 --store <handle A> --store-b <handle B> [--slug <live slug of A>] [--strict]
  *     ONLINE (§J.3: a production build on port 3451+ against a cod_test_* database), run with the server's own
  *     PLATFORM_URL, STORE_ROOT_DOMAIN and EDGE_KEY in this process's environment (never printed). The requests
  *     are built by edge/worker.js itself and sent to --base with the apex as Host; the offline part runs first.
  *     Without --base the online part is reported as not run (exit code from the offline part).
+ *
+ * PENDING RULE (P0b): an R1 route case (P1-7: `GET https://<h>.<root>/report/<h>` → the neutral 404, PLA-§24.2) names
+ * the route module it needs; while that file does not exist the case is listed as `pending (route not built: <file>)`,
+ * counted neither as a pass nor as a failure. `--strict` (the R1 integration) turns every pending case into a failure.
  */
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import Module from "node:module";
@@ -58,6 +63,8 @@ const arg = (name: string): string | null => {
 const ONLINE_BASE = arg("base");
 /** the online part keeps the caller's (= the server's) configuration; the offline part sets its own */
 const ONLINE_ENV = { PLATFORM_URL: env.PLATFORM_URL ?? env.PUBLIC_URL, STORE_ROOT_DOMAIN: env.STORE_ROOT_DOMAIN, EDGE_KEY: env.EDGE_KEY };
+const STRICT = ARGS.includes("--strict");
+const REPO = join(__dirname, "..", "..");
 
 const PLATFORM = "storegen.example";
 const ROOT = PLATFORM;
@@ -92,6 +99,19 @@ function eq<T>(actual: T, expected: T, msg: string): void {
   check(a === e, `${msg}: got ${a}, expected ${e}`);
 }
 const section = (title: string) => console.log(`• ${title}`);
+
+/** The P0b pending rule: run `fn` once `route` (a file under src/app/**) exists; else list it, or fail it under --strict. */
+const pendingCases: string[] = [];
+async function routeCase(label: string, route: string, fn: () => unknown | Promise<unknown>): Promise<void> {
+  if (existsSync(join(REPO, route))) {
+    await fn();
+    return;
+  }
+  const reason = `route not built: ${route}`;
+  pendingCases.push(label);
+  if (STRICT) check(false, `${label}: pending (${reason}) under --strict`);
+  else console.log(`  … ${label}: pending (${reason})`);
+}
 
 /* ------------------------------------------------------------------ the Worker */
 
@@ -461,6 +481,12 @@ async function main(): Promise<void> {
     for (const path of ["/admin", "/%61dmin/x", "/app/shop1", "/api/cron/tick", "/kit/t"]) {
       eq(await answer(await visit(SHOP1, path)), login, `GET ${path} on a store host = GET /login: status, headers and bytes`);
     }
+    // P1-7 (PLA-§24.2 rev 4): store hosts answer the neutral 404 for /report/* (never a 308 to the platform host)
+    await routeCase("GET https://<h>.<root>/report/<h> (P1-7)", "src/app/(public)/report/[handle]/page.tsx", async () => {
+      for (const path of ["/report/shop1", "/report/shop1?p=%2Fpromo", "/report/shop2", "/REPORT/shop1"]) {
+        eq(await answer(await visit(SHOP1, path)), login, `GET ${path} on a store host = GET /login: the neutral 404, status, headers and bytes`);
+      }
+    });
     const postLogin = await answer(await visit(SHOP1, "/login", { method: "POST", body: "x" }));
     eq([postLogin.status, postLogin.body], [404, ""], "POST /login on a store host: the empty neutral 404");
     const refusedPosts: [string, string, Visit][] = [
@@ -590,7 +616,8 @@ async function main(): Promise<void> {
   if (ONLINE_BASE) await online(worker);
   else console.log("online part: not run (pass --base http://127.0.0.1:3451 against a production build, §J.3)");
 
-  console.log(failures ? `qa:edge-sim: ${failures} of ${checks} checks FAILED` : `qa:edge-sim: all ${checks} checks passed`);
+  const pendingNote = !pendingCases.length ? (STRICT ? "; --strict: nothing pending" : "") : STRICT ? `; ${pendingCases.length} pending case(s) counted as failures (--strict)` : `; ${pendingCases.length} case(s) pending, listed above (--strict fails them)`;
+  console.log(failures ? `qa:edge-sim: ${failures} of ${checks} checks FAILED${pendingNote}` : `qa:edge-sim: all ${checks} checks passed${pendingNote}`);
   process.exit(failures ? 1 : 0);
 }
 
@@ -685,6 +712,19 @@ async function online(worker: Worker): Promise<void> {
   const own = await viaEdge(hostA, `/s/${a}/x?fbclid=1&utm_source=fb`);
   eq([own.status, own.headers.get("location")], [308, `https://${hostA}/x?fbclid=1&utm_source=fb`], "online: own-handle 308 with the raw query");
   for (const path of ["/admin", `/app/${a}`, "/login", "/signup", "/kit/t"]) eq((await edgeDirect(hostA, path)).status, 404, `online: store host ${path} → 404 at the app`);
+  // P1-7 (PLA-§24.2 rev 4): GET https://<h>.<root>/report/<h> → the neutral 404, through the Worker and at the app
+  await routeCase("online: GET https://<A>.<root>/report/<A> (P1-7)", "src/app/(public)/report/[handle]/page.tsx", async () => {
+    const login = await viaEdge(hostA, "/login");
+    for (const path of [`/report/${a}`, `/report/${a}?p=%2F`]) {
+      const r = await viaEdge(hostA, path);
+      eq(
+        [r.status, r.body === login.body, r.headers.get("content-security-policy") === login.headers.get("content-security-policy"), r.headers.get("cache-control"), r.headers.get("location")],
+        [404, true, true, login.headers.get("cache-control"), null],
+        `online: ${path} on a store host = /login's neutral 404 (no 308)`,
+      );
+    }
+    eq((await edgeDirect(hostA, `/report/${a}`)).status, 404, "online: store host /report/<h> → 404 at the app");
+  });
   eq((await edgeDirect(hostA, "/x", "POST", { "next-action": "a1", origin: `https://${hostA}` })).status, 404, "online: store host Next-Action → 404 at the app");
   const neutralStore = await edgeDirect(hostA, "/admin");
   const wrong = await edgeDirect(hostA, "/", "GET", {}, "edgeSimWrongKey-1Ab2Cd3Ef4Gh5Ij6Kl7Mn8Op9Qr0St");

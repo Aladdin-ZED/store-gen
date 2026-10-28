@@ -10,14 +10,22 @@
  *    (customer name, phone, address, e-mail, password hash) and must never reach the log.
  * 3. PHP exports only ever embed the store's own export key (store setting `export_key`, sealed and write-only), never
  *    the platform's own Sheets key, and their README tells the owner how to revoke it (EXP-03, §F.10).
+ * 4. The test seams never reach Hostinger (§H.7, P0b CCR P5-6 / P7-9): no Hostinger env file (every `.env.hostinger*`
+ *    file of the repository root, and the env template the owner copies them from, `.env.example`) sets any of
+ *    TEST_SEAM_VARS or SG_TEST_CONTEXT. A finding names the file and the variable, never a value; the files' values
+ *    are never printed. Self-checked first on synthetic scratch files, in both directions.
  */
 import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { DrizzleQueryError } from "drizzle-orm";
 import { adminGateSecret, authConfigWarnings, cronKeySecret, isAppSecretConfigured, isPlaceholderSecret, setupTokenSecret } from "@/lib/auth/config";
 import { readmeMd } from "@/lib/export/readme";
 import { exportKeyState, NO_EXPORT_KEY, parseServiceAccountKey, SAME_AS_APP_KEY, storedKey } from "@/lib/export/service-account";
 import { errorSummary } from "@/lib/orders/log";
 import { deriveKey } from "@/lib/security/crypto";
+import { TEST_SEAM_VARS } from "@/lib/security/test-seams";
 import { redactStoreSetting, STORE_SETTINGS } from "@/lib/settings/store-registry";
 
 let failures = 0;
@@ -187,6 +195,87 @@ check(withKey.includes("every row") && withKey.includes("not the platform's own 
 check(!withKey.includes(exportKey.private_key.slice(30, 80)), "README never contains the key itself");
 const withoutKey = readme(false);
 check(withoutKey.includes("never the platform's own key") && withoutKey.includes("delete the key you uploaded"), "README (own key) warns against the app's key and explains revocation");
+
+/* ------------------------------------------------------------------ */
+/* 4. test seams in Hostinger env files                                */
+/* ------------------------------------------------------------------ */
+
+/** Variables a Hostinger env file must never set: the seams of src/lib/security/test-seams.ts and §E.4's context seam. */
+const NEVER_ON_HOSTINGER: readonly string[] = [...TEST_SEAM_VARS, "SG_TEST_CONTEXT"];
+/** The env template the Hostinger files are copied from (its header points at hPanel); committed, so it is checked too. */
+const HOSTINGER_TEMPLATE = ".env.example";
+
+/** The Hostinger env files of `dir`: every `.env.hostinger*` file, then the template. */
+function hostingerEnvFiles(dir: string): string[] {
+  const own = readdirSync(dir).filter((n) => n.startsWith(".env.hostinger")).sort();
+  return [...own, ...(existsSync(join(dir, HOSTINGER_TEMPLATE)) ? [HOSTINGER_TEMPLATE] : [])].map((n) => join(dir, n));
+}
+
+/** The variable names `text` assigns (`NAME=…`, `export NAME=…`; comment lines skipped). Values are never kept. */
+function assignedNames(text: string): string[] {
+  const names: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line);
+    if (m) names.push(m[1]!);
+  }
+  return names;
+}
+
+/** Each test-seam variable a file sets, even to an empty value: { file (its name only), name }. */
+function seamFindings(files: readonly string[]): { file: string; name: string }[] {
+  const out: { file: string; name: string }[] = [];
+  for (const f of files) {
+    for (const name of new Set(assignedNames(readFileSync(f, "utf8")))) {
+      if (NEVER_ON_HOSTINGER.includes(name)) out.push({ file: basename(f), name });
+    }
+  }
+  return out;
+}
+const findingText = (f: { file: string; name: string }) => `${f.file} sets ${f.name}: a test seam must never be set on Hostinger (§H.7)`;
+
+// self-check on synthetic scratch files (never the real ones): both directions
+{
+  const marker = `seamFixtureValue-${randomBytes(6).toString("hex")}`;
+  const bad = mkdtempSync(join(tmpdir(), "sg-secrets-bad-"));
+  const good = mkdtempSync(join(tmpdir(), "sg-secrets-good-"));
+  try {
+    writeFileSync(join(bad, ".env.hostinger"), `APP_SECRET=${marker}\nSG_E2E=1\n# SG_AI_HARNESS=1\nexport SG_AI_BASE_URL=http://127.0.0.1:4011/${marker}\r\nSG_E2E=1\n`);
+    writeFileSync(join(bad, ".env.hostinger.previous"), `SG_TEST_CONTEXT = 1\nCRON_KEY=${marker}\n`);
+    writeFileSync(join(bad, HOSTINGER_TEMPLATE), "# template\nSG_E2E_MOCK_ORIGIN=\nSG_AI_NO_AFTER=1\n");
+    writeFileSync(join(bad, ".env.local"), `SG_AI_HARNESS=${marker}\n`);
+    const found = seamFindings(hostingerEnvFiles(bad));
+    check(
+      JSON.stringify(found) ===
+        JSON.stringify([
+          { file: ".env.hostinger", name: "SG_E2E" },
+          { file: ".env.hostinger", name: "SG_AI_BASE_URL" },
+          { file: ".env.hostinger.previous", name: "SG_TEST_CONTEXT" },
+          { file: ".env.example", name: "SG_E2E_MOCK_ORIGIN" },
+          { file: ".env.example", name: "SG_AI_NO_AFTER" },
+        ]),
+      `seam self-check: every .env.hostinger* file and the template are read, a variable set even empty is found once per file, comments and .env.local are not (${JSON.stringify(found)})`,
+    );
+    check(!found.map(findingText).some((t) => t.includes(marker) || t.includes("127.0.0.1")), "seam self-check: a finding names the file and the variable, never a value");
+    writeFileSync(join(good, ".env.hostinger"), `APP_SECRET=${marker}\n# SG_E2E=1 (never on Hostinger)\nPLATFORM_URL=https://example.test\nSG_E2EX=1\nXSG_E2E=1\n`);
+    writeFileSync(join(good, HOSTINGER_TEMPLATE), "# SG_TEST_CONTEXT is never set here\nDATABASE_URL=\n");
+    writeFileSync(join(good, ".env.local"), "SG_E2E=1\nSG_TEST_CONTEXT=1\n");
+    const clean = seamFindings(hostingerEnvFiles(good));
+    check(clean.length === 0, `seam self-check: clean Hostinger files pass (a comment, a longer name and a local file are not findings: ${JSON.stringify(clean)})`);
+  } finally {
+    rmSync(bad, { recursive: true, force: true });
+    rmSync(good, { recursive: true, force: true });
+  }
+}
+// the real tree: names only are read into the findings, nothing is printed but the file and variable names
+{
+  const root = join(__dirname, "..", "..");
+  const files = hostingerEnvFiles(root);
+  check(files.some((f) => basename(f) === HOSTINGER_TEMPLATE), `the Hostinger env template ${HOSTINGER_TEMPLATE} is present and read`);
+  const found = seamFindings(files);
+  if (found.length) for (const f of found) check(false, findingText(f));
+  else check(true, "no Hostinger env file sets a test seam");
+  console.log(`  test seams: ${files.length} Hostinger env file(s) read (${files.map((f) => basename(f)).join(", ")}), ${found.length} finding(s)`);
+}
 
 console.log(failures ? `✗ secrets check: ${failures} of ${checks} failed` : `✓ secrets check: ${checks} checks passed`);
 process.exit(failures ? 1 : 0);

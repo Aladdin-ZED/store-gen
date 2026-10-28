@@ -2,7 +2,6 @@
  * Arabic catalog (docs/STORE-SAAS.md §I.5; `dir="rtl"`): a partial of the English one, every missing key falls back
  * to `en`. One spread per track file `./ar/<file>.ts` (D67, written at P0).
  */
-import { messages as identity } from "@/lib/auth/i18n/ar";
 import { messages as aiMessages } from "./ar/ai";
 import { messages as authMessages } from "./ar/auth";
 import { messages as briefMessages } from "./ar/brief";
@@ -20,8 +19,6 @@ import { messages as teamMessages } from "./ar/team";
 import type { BaseMessages } from "./index";
 
 export const messages: Partial<BaseMessages> = {
-  // T2 identity surfaces (CCR r1.0-t2-9 item 1); the core keys below win on a clash
-  ...identity,
   // the tracks' files ./ar/<file>.ts (D67; spread here at P0, `scripts/qa/registries-check.ts` proves none is left out):
   // P1 console + notify, P2 shell + auth + onboarding + team + health + brief, P3 landing, P4 ops + finance,
   // P5 integrations, P6 design, P7 ai; each owns the keys under its prefix, and the core keys below win on a clash
@@ -57,6 +54,17 @@ export const messages: Partial<BaseMessages> = {
   "error.server": "حدث خطأ من جهتنا. يرجى المحاولة مرة أخرى.",
   "error.session_ended": "انتهت جلستك. سجّل الدخول من جديد.",
   "error.platform_2fa_required": "فعّل التحقق بخطوتين لفتح لوحة الإدارة.",
+  // T2's identity action codes (D65; moved from src/lib/auth/i18n/ar.ts at P0b, CCR P2-15)
+  "error.challenge": "أكمل التحقق البشري ثم أعد المحاولة.",
+  "error.totp_required": "استخدم الرمز من تطبيق المصادقة.",
+  "error.last_owner": "يحتاج المتجر إلى مالك واحد على الأقل. اجعل شخصًا آخر مالكًا أولًا.",
+  "error.owns_store": "ما زلت مالكًا لمتجر. أغلقه أو انقل ملكيته أولًا.",
+  "error.is_staff": "هذا حساب ضمن الفريق. أزل دوره أولًا.",
+  "error.member_2fa_required": "يتطلب هذا المتجر التحقق بخطوتين. فعّله للمتابعة.",
+  "error.platform_read_only": "التعديلات متوقفة مؤقتًا للصيانة. أعد المحاولة بعد قليل.",
+  "error.closed": "هذا مغلق حاليًا. أعد المحاولة بعد قليل.",
+  "error.impersonation_member": "أنت عضو في هذا المتجر. افتحه من متاجرك.",
+  "error.impersonation_state": "لا يمكن عرض هذا المتجر في حالته الحالية.",
   // T1 lifecycle and handle refusals (CCR r1.0-t1-2; mapped in seam.ts actionFailure by T2)
   "error.status_changed": "غيّر شخص آخر حالة هذا المتجر قبل لحظات. تحقّق من حالته الحالية ثم أعد المحاولة.",
   "error.handle_format": "استعمل من 3 إلى 30 حرفًا لاتينيًا صغيرًا أو رقمًا أو شرطة، يبدأ وينتهي بحرف أو رقم.",

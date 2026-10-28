@@ -22,6 +22,10 @@
  *  9. Web storage on the shared origin (§C.9, LND-12 … 14): the runtime's storage names carry the store under
  *     /s/<handle> (one derivation, core skey), so two stores' UTM, visitor id, order hand-off and hashed
  *     advanced-matching data never meet; outside /s/ today's names stay.
+ * 10. The test seams (§H.7, P0b CCR P5-6 / P7-9; ./test-seams): the truth table of every guard (the flag, an https
+ *     origin, a non-loopback host, credentials or a path in the URL, a database not cod_test_, the boolean seams'
+ *     own value and the app origin), on with every guard in production and in any NODE_ENV, off with one missing;
+ *     testSeam() computed per call and logging one refusal line per process and seam, never a value.
  * The export allow-list rule (`originAllowed`, SEC-23) is proven by test:public-api; T2's `allowlistAddress()` behind
  * Cloudflare (SEC-14) and `p:login:acct` (SEC-22) join when their code merges.
  */
@@ -600,6 +604,97 @@ async function main(): Promise<void> {
     [...session.keys(), ...local.keys()].filter((k) => k.startsWith("lp:")),
     ["lp:atlas-argan:order", "lp:atlas-argan:px-u", "lp:atlas-argan:utm", "lp:atlas-argan:vid", "lp:baraka-home:vid"],
   );
+
+  /* 10. The test seams (§H.7, P0b CCR P5-6 / P7-9) --------------------------------------------- */
+  console.log("test seams (§H.7)");
+  const seams = await import("./test-seams");
+  type SeamEnv = Record<string, string | undefined>;
+  const TEST_DB = "mysql://root@127.0.0.1:3306/cod_test_p0b_seams";
+  /** every guard holds: the flag, loopback origins (the mock, the fake AI endpoint, the app), a cod_test_ database */
+  const all: SeamEnv = {
+    NODE_ENV: "production",
+    SG_E2E: "1",
+    SG_E2E_MOCK_ORIGIN: "http://127.0.0.1:4010",
+    SG_AI_BASE_URL: "http://localhost:4011/",
+    SG_AI_NO_AFTER: "1",
+    SG_AI_HARNESS: "1",
+    PLATFORM_URL: "http://127.0.0.1:3452",
+    DATABASE_URL: TEST_DB,
+  };
+  const decide = (seam: import("./test-seams").TestSeam, env: SeamEnv) => seams.decideTestSeam(seam, env);
+  eq("TEST_SEAM_VARS: the five names of §H.7", [...seams.TEST_SEAM_VARS], ["SG_E2E", "SG_E2E_MOCK_ORIGIN", "SG_AI_BASE_URL", "SG_AI_NO_AFTER", "SG_AI_HARNESS"]);
+  eq("production with every guard: e2e-mocks on, the mock origin", decide("e2e-mocks", all), { on: true, origin: "http://127.0.0.1:4010" });
+  eq("production with every guard: ai-base-url on, its origin without the slash", decide("ai-base-url", all), { on: true, origin: "http://localhost:4011" });
+  eq("production with every guard: ai-no-after on (a boolean seam: no origin)", decide("ai-no-after", all), { on: true, origin: null });
+  eq("production with every guard: ai-harness on", decide("ai-harness", all), { on: true, origin: null });
+  for (const nodeEnv of ["development", "test", undefined]) {
+    eq(`never relaxed nor stricter outside production (NODE_ENV ${nodeEnv ?? "unset"})`, (["e2e-mocks", "ai-base-url", "ai-no-after", "ai-harness"] as const).map((s) => decide(s, { ...all, NODE_ENV: nodeEnv }).on), [true, true, true, true]);
+  }
+  eq("[::1] is loopback", decide("e2e-mocks", { ...all, SG_E2E_MOCK_ORIGIN: "http://[::1]:4010" }), { on: true, origin: "http://[::1]:4010" });
+  eq("PUBLIC_URL is the app origin when PLATFORM_URL is unset", decide("ai-harness", { ...all, PLATFORM_URL: undefined, PUBLIC_URL: "http://localhost:3452" }).on, true);
+  // the truth table: production with one guard missing → off, and the guard named
+  const truth: [string, import("./test-seams").TestSeam, SeamEnv, import("./test-seams").TestSeamGuard | null | "on"][] = [
+    ["the seam's own variable unset: off, nothing to log", "e2e-mocks", { ...all, SG_E2E_MOCK_ORIGIN: undefined }, null],
+    ["a blank own variable: off, nothing to log", "ai-base-url", { ...all, SG_AI_BASE_URL: "  " }, null],
+    ["flag missing", "e2e-mocks", { ...all, SG_E2E: undefined }, "flag"],
+    ["flag not exactly \"1\"", "ai-base-url", { ...all, SG_E2E: "true" }, "flag"],
+    ["flag missing (boolean seam)", "ai-no-after", { ...all, SG_E2E: "" }, "flag"],
+    ["https origin", "e2e-mocks", { ...all, SG_E2E_MOCK_ORIGIN: "https://127.0.0.1:4010" }, "origin.protocol"],
+    ["https AI endpoint", "ai-base-url", { ...all, SG_AI_BASE_URL: "https://api.anthropic.com" }, "origin.protocol"],
+    ["non-loopback host", "e2e-mocks", { ...all, SG_E2E_MOCK_ORIGIN: "http://10.0.0.5:4010" }, "origin.host"],
+    ["non-loopback host (a look-alike name)", "ai-base-url", { ...all, SG_AI_BASE_URL: "http://localhost.evil.example:4011" }, "origin.host"],
+    ["non-loopback host (127.0.0.2)", "e2e-mocks", { ...all, SG_E2E_MOCK_ORIGIN: "http://127.0.0.2:4010" }, "origin.host"],
+    ["credentials in the URL", "e2e-mocks", { ...all, SG_E2E_MOCK_ORIGIN: "http://user:pass@127.0.0.1:4010" }, "origin.credentials"],
+    ["credentials in the URL (user only)", "ai-base-url", { ...all, SG_AI_BASE_URL: "http://key@localhost:4011" }, "origin.credentials"],
+    ["a path beyond /", "ai-base-url", { ...all, SG_AI_BASE_URL: "http://localhost:4011/v1" }, "origin.path"],
+    ["a query", "e2e-mocks", { ...all, SG_E2E_MOCK_ORIGIN: "http://127.0.0.1:4010/?x=1" }, "origin.path"],
+    ["a host:port without a scheme (read as the scheme)", "e2e-mocks", { ...all, SG_E2E_MOCK_ORIGIN: "localhost:4010" }, "origin.protocol"],
+    ["not a URL (an address and a port)", "e2e-mocks", { ...all, SG_E2E_MOCK_ORIGIN: "127.0.0.1:4010" }, "origin.parse"],
+    ["not a URL at all", "ai-base-url", { ...all, SG_AI_BASE_URL: "http://" }, "origin.parse"],
+    ["database not cod_test_", "e2e-mocks", { ...all, DATABASE_URL: "mysql://root@127.0.0.1:3306/cod_storegen" }, "database"],
+    ["database not cod_test_ (the production name)", "ai-base-url", { ...all, DATABASE_URL: "mysql://u@127.0.0.1:3306/u641677794_storegen" }, "database"],
+    ["database cod_testx (no underscore)", "ai-harness", { ...all, DATABASE_URL: "mysql://root@127.0.0.1:3306/cod_testx" }, "database"],
+    ["database with capitals", "ai-no-after", { ...all, DATABASE_URL: "mysql://root@127.0.0.1:3306/cod_test_A" }, "database"],
+    ["database name with a second path segment", "e2e-mocks", { ...all, DATABASE_URL: "mysql://root@127.0.0.1:3306/cod_test_x/y" }, "database"],
+    ["no DATABASE_URL", "e2e-mocks", { ...all, DATABASE_URL: undefined }, "database"],
+    ["boolean seam: its own variable not \"1\"", "ai-harness", { ...all, SG_AI_HARNESS: "yes" }, "value"],
+    ["boolean seam: \"0\" is a refusal, not an off switch to trust", "ai-no-after", { ...all, SG_AI_NO_AFTER: "0" }, "value"],
+    ["boolean seam: the app origin is https", "ai-no-after", { ...all, PLATFORM_URL: "https://storegen.example" }, "app-origin.protocol"],
+    ["boolean seam: the app origin is not loopback", "ai-harness", { ...all, PLATFORM_URL: "http://192.168.1.20:3452" }, "app-origin.host"],
+    ["boolean seam: no app origin", "ai-harness", { ...all, PLATFORM_URL: undefined, PUBLIC_URL: undefined }, "app-origin.missing"],
+    ["boolean seam: PLATFORM_URL wins over a loopback PUBLIC_URL", "ai-no-after", { ...all, PLATFORM_URL: "https://storegen.example", PUBLIC_URL: "http://127.0.0.1:3452" }, "app-origin.protocol"],
+    ["boolean seam: the app origin with a path", "ai-harness", { ...all, PLATFORM_URL: "http://127.0.0.1:3452/app" }, "app-origin.path"],
+    ["boolean seams ignore SG_E2E_MOCK_ORIGIN / SG_AI_BASE_URL problems", "ai-harness", { ...all, SG_E2E_MOCK_ORIGIN: "https://x.example", SG_AI_BASE_URL: "https://x.example" }, "on"],
+  ];
+  for (const [name, seam, env, guard] of truth) {
+    eq(`${seam}: ${name}`, decide(seam, env), guard === "on" ? { on: true, origin: null } : { on: false, guard });
+  }
+  // testSeam(): process.env per call, one refusal line per process and seam, never a value
+  {
+    const lines: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
+    const secretish = "seamSecretValue-7Hq2Lm9Xc4";
+    try {
+      withEnv({ ...all, SG_AI_BASE_URL: `https://${secretish}@ai.example` }, () => {
+        eq("testSeam: a refused seam is null", seams.testSeam("ai-base-url"), null);
+        eq("testSeam: a refused seam stays null on the next call", seams.testSeam("ai-base-url"), null);
+        eq("testSeam: another seam is answered on its own", seams.testSeam("e2e-mocks"), { origin: "http://127.0.0.1:4010" });
+      });
+      eq("testSeam: one refusal line per process and seam, naming the seam and the guard", lines, ["[security] test seam ai-base-url refused: origin.protocol"]);
+      check("testSeam: the line never carries a value", !lines.some((l) => l.includes(secretish) || l.includes("ai.example")), lines.join(" | "));
+      withEnv({ ...all, SG_E2E: undefined }, () => eq("testSeam: computed per call (the flag removed → off)", seams.testSeam("e2e-mocks"), null));
+      eq("testSeam: e2e-mocks logs its own line once", lines.slice(1), ["[security] test seam e2e-mocks refused: flag"]);
+      withEnv({ ...all, SG_E2E: undefined }, () => seams.testSeam("e2e-mocks"));
+      withEnv({ ...all, SG_AI_HARNESS: undefined, SG_AI_NO_AFTER: undefined }, () => {
+        eq("testSeam: unrequested boolean seams are null", [seams.testSeam("ai-harness"), seams.testSeam("ai-no-after")], [null, null]);
+      });
+      eq("testSeam: no second line, and nothing for unrequested seams", lines.length, 2);
+      withEnv(all, () => eq("testSeam: a boolean seam on", seams.testSeam("ai-harness"), { origin: null }));
+    } finally {
+      console.error = orig;
+    }
+  }
 }
 
 main().then(

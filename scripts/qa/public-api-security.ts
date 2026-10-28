@@ -3,7 +3,7 @@
  * docs/STORE-SAAS.md §C.9, §E.2, §E.3, §E.8, D54, D72, SEC-23; ORD-01 … ORD-07, ORD-17, ORD-18, ORD-21).
  * Exit code 1 on any failure.
  *
- *   node --conditions=react-server --import tsx scripts/qa/public-api-security.ts [--db cod_test_t3_publicapi] [--keep] [--offline]
+ *   node --conditions=react-server --import tsx scripts/qa/public-api-security.ts [--db cod_test_t3_publicapi] [--keep] [--offline] [--strict]
  *
  * Pure checks always run:
  *  - client IP: CF-Connecting-IP only believed from Cloudflare's edge; IPv6 grouped by /64
@@ -32,6 +32,14 @@
  *    sync batch holds its own orders only (selectSyncBatch), and every store's order schedules its own sheet push and
  *    its own server-side Purchase
  *  - unique-visitor credit capped per network and page
+ *  - P3's R1 routes (P0b, P3-8; core §J.2, §E.8, LAN-§9.3, §11.4, §25.2): POST /api/public/track (per-store and
+ *    platform buckets; an order of a store that is not servable and a lookup from a foreign host answer the uniform
+ *    not_found) and POST /api/public/wa (buckets; take_orders false → unavailable; a foreign host refused; a tampered
+ *    body cannot change the total; a test token gives an is_test whatsapp lead without a phone)
+ *
+ * PENDING RULE (P0b): a case that needs a route module not built yet (its file under src/app/**) is listed as
+ * `pending (route not built: <file>)`, counted neither as a pass nor as a failure; `--strict` (the R1 integration)
+ * turns every pending case into a failure.
  *
  * T1's settings API answers for real (the suite's settings double went at the R1.0 integration, after the T1 merge).
  * Secrets are random test values made here; nothing from .env.local is read or printed.
@@ -39,6 +47,8 @@
 import Module from "node:module";
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { DrizzleQueryError } from "drizzle-orm";
 
 /* ------------------------------------------------------------------ */
@@ -53,6 +63,8 @@ const arg = (name: string) => {
 const DB = arg("db") ?? "cod_test_t3_publicapi";
 const KEEP = process.argv.includes("--keep");
 const OFFLINE = process.argv.includes("--offline");
+const STRICT = process.argv.includes("--strict");
+const REPO = join(__dirname, "..", "..");
 if (!DB_RE.test(DB)) throw new Error("the database must be named cod_test_*");
 
 const env = process.env as Record<string, string | undefined>;
@@ -105,6 +117,25 @@ async function check(name: string, fn: () => unknown | Promise<unknown>) {
     failures++;
     console.log("  ✗", name, "\n     ", err instanceof Error ? err.message : err);
   }
+}
+
+/** A route module's POST, imported by its src/app path (the specifier is built at run time: the file may not exist yet). */
+type RouteModule = { POST: (req: never) => Promise<Response> };
+let pending = 0;
+/** The P0b pending rule: `fn` runs once `route` exists; else the case is listed (or fails under --strict). */
+async function routeCheck(name: string, route: string, fn: (mod: RouteModule) => unknown | Promise<unknown>) {
+  if (!existsSync(join(REPO, route))) {
+    if (STRICT) {
+      failures++;
+      console.log("  ✗", name, `\n      pending (route not built: ${route}) under --strict`);
+    } else {
+      pending++;
+      console.log("  …", name, `: pending (route not built: ${route})`);
+    }
+    return;
+  }
+  const specifier = `@/${route.replace(/^src\//, "").replace(/\.ts$/, "")}`;
+  await check(name, async () => fn((await import(specifier)) as RouteModule));
 }
 
 /** Runs `fn` with console.error lines matching `quiet` dropped (expected "outside a request" after() notices). */
@@ -887,6 +918,157 @@ async function scenarios(s: Seed) {
     assert.deepEqual(await scheduled(s.keyL), { sheet: true, capi: true }, "store #1 schedules its sheet push and its Purchase");
     assert.deepEqual(await scheduled(s.keyB), { sheet: true, capi: true }, "store B schedules its own sheet push and its own Purchase");
   });
+
+  /* ---------------- P3's R1 routes (P0b, P3-8): each pending until its route exists ---------------- */
+
+  const { platformBucket } = await import("@/lib/security/rate-limit");
+  type Answer = { status: number; body: Record<string, unknown> | null };
+  /** POST to a route module as a browser on `ip` (Origin = the platform unless `headers` say otherwise) */
+  const postAs = async (route: RouteModule, path: string, body: unknown, ip: string, headers: Record<string, string> = {}): Promise<Answer> => {
+    resetBurstLimits();
+    const req = new Request(`https://platform.test${path}`, {
+      method: "POST",
+      headers: { host: "platform.test", "content-type": "application/json", "x-forwarded-for": ip, "user-agent": "Mozilla/5.0 (QA)", origin: "https://platform.test", ...headers },
+      body: JSON.stringify(body),
+    });
+    const res = await hushed(() => route.POST(req as never));
+    const text = await res.text();
+    return { status: res.status, body: text ? (JSON.parse(text) as Record<string, unknown>) : null };
+  };
+  /** the Worker's verified header set for a store host (S mode on), with the store host as the Origin */
+  const edgeFor = (host: string) => ({ "x-sg-host": host, "x-sg-edge": EDGE_KEY, "x-sg-ip": newIp(), "x-sg-proto": "https", "x-sg-worker": "w-public-api", "x-sg-ts": String(Date.now()), origin: `https://${host}` });
+  const clearBuckets = (...buckets: string[]) => Promise.all(buckets.map((b) => db.execute(sql`DELETE FROM rate_limits WHERE bucket = ${b}`)));
+  /** an order placed through the public pipeline in `t`'s store, with the last 4 digits of its E.164 phone */
+  const placed = async (t: PublicPageTarget) => {
+    const r = await order(newPhone(), newIp(), { target: t });
+    assert.equal(r.response.ok, true, JSON.stringify(r.response));
+    const row = await stored(orderId(r));
+    return { id: row!.id, last4: row!.phone.slice(-4) };
+  };
+
+  // core §E.8 buckets, LAN-§9.3: <h> is the client address hashed (hashIp), as for the order and lead buckets
+  await routeCheck("route /track: per-store buckets (s:<sid>:track:ip:<h> 10/10 min) under the platform floor (p:track:ip:<h> 30/10 min)", "src/app/api/public/track/route.ts", async (route) => {
+    const a = await placed(tA);
+    const b = await placed(tB);
+    const ip = newIp();
+    const lookup = (o: { id: string; last4: string }) => postAs(route, "/api/public/track", { op: "lookup", o: o.id, last4: o.last4 }, ip);
+    const first = await lookup(a);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(first.body?.ok, true, "store A's order with its right digits");
+    const inA = storeBucket(tA.scope, "track:ip", hashIp(ip));
+    const floor = platformBucket("track:ip", hashIp(ip));
+    try {
+      await presetBucket(inA, 10);
+      assert.deepEqual((await lookup(a)).body, { ok: false, error: "rate_limited" }, "store A's bucket for this network is spent");
+      const inB = await lookup(b);
+      assert.equal(inB.body?.ok, true, `store B has its own bucket: ${JSON.stringify(inB.body)}`);
+      await presetBucket(floor, 30);
+      assert.deepEqual((await lookup(b)).body, { ok: false, error: "rate_limited" }, "the platform floor holds across stores");
+    } finally {
+      await clearBuckets(inA, floor);
+    }
+  });
+
+  // LAN-§9.1, §9.3: unknown order, another store's order, a non-servable store's order: one answer, one status
+  await routeCheck("route /track: an order of a store that is not servable and a lookup from a foreign host answer the uniform not_found", "src/app/api/public/track/route.ts", async (route) => {
+    const ask = (o: string, last4: string, headers: Record<string, string> = {}) => postAs(route, "/api/public/track", { op: "lookup", o, last4 }, newIp(), headers);
+    const unknown = await ask("CMD-ZZZZZZ", "0000");
+    assert.deepEqual(unknown, { status: 404, body: { ok: false, error: "not_found" } }, "an unknown order");
+    // the pending store's order, asked with its right digits
+    const tC = await target(s.keyC);
+    const draft = {
+      pageId: tC.pageId, versionId: null, exportId: null, source: "live" as const, status: "new", name: "Qa", phone: "+212600000123", productName: "Argan",
+      items: { bundleId: "b", bundleLabel: "x1", qty: 1, unitPrice: 100, variants: [] }, qty: 1, subtotal: 100, shipping: 0, total: 100, currency: "MAD", idem: randomUUID(),
+    };
+    const c = await hushed(() => createOrderRow(draft, { scope: tC.scope, test: false, upsell: false, actor: shopperActor("198.51.100.251"), conversion: null }));
+    assert.deepEqual(await ask(c.orderId, "0123"), unknown, "a pending store's order (not servable)");
+    // a foreign host: an unrelated Host and Origin (P mode), then store B's host asking for store A's order (S mode)
+    const a = await placed(tA);
+    assert.deepEqual(await ask(a.id, a.last4, { host: "evil.test", origin: "https://evil.test" }), unknown, "a foreign host");
+    setS(true);
+    try {
+      const own = await ask(a.id, a.last4, edgeFor("atlas-argan.shops.test"));
+      assert.equal(own.body?.ok, true, `store A's own host finds its order: ${JSON.stringify(own.body)}`);
+      assert.deepEqual(await ask(a.id, a.last4, edgeFor("baraka-home.shops.test")), unknown, "store B's host asking for store A's order");
+    } finally {
+      setS(false);
+    }
+  });
+
+  const waBody = (pageKey: string, extra: Record<string, unknown> = {}) => ({ pageKey, bundleId: bundle.id, utm: {}, ...extra });
+  const waLead = async (storeId: string, ref: unknown) => (await db.select().from(leads).where(and(eq(leads.storeId, storeId), eq(leads.ref, String(ref)))).limit(1))[0];
+  const waLeads = async (storeId: string) => Number((await db.select({ n: sql<number>`COUNT(*)` }).from(leads).where(and(eq(leads.storeId, storeId), eq(leads.kind, "whatsapp"))))[0]?.n);
+
+  // LAN-§11.4 steps 1 and 4, core §E.8
+  await routeCheck("route /wa: a priced intent in the page's store; per-store buckets (s:<sid>:wa:ip:<h> 10/10 min) under the platform floor (p:wa:ip:<h> 30/10 min)", "src/app/api/public/wa/route.ts", async (route) => {
+    const ip = newIp();
+    const first = await postAs(route, "/api/public/wa", waBody(s.keyA), ip);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const ref = String(first.body?.ref);
+    assert.ok(first.body?.ok === true && /^WA-[0-9A-Z]{6}$/.test(ref) && String(first.body.text).includes(ref), `the answer: ${JSON.stringify(first.body)}`);
+    const row = await waLead(s.A, ref);
+    assert.deepEqual([row?.storeId, row?.kind, row?.phone, row?.isTest], [s.A, "whatsapp", null, false], "a whatsapp lead of store A, no phone, not a test");
+    const inA = storeBucket(tA.scope, "wa:ip", hashIp(ip));
+    const floor = platformBucket("wa:ip", hashIp(ip));
+    try {
+      await presetBucket(inA, 10);
+      assert.deepEqual((await postAs(route, "/api/public/wa", waBody(s.keyA), ip)).body, { ok: false, error: "rate_limited" }, "store A's bucket for this network is spent");
+      assert.equal((await postAs(route, "/api/public/wa", waBody(s.keyB), ip)).body?.ok, true, "store B has its own bucket");
+      await presetBucket(floor, 30);
+      assert.deepEqual((await postAs(route, "/api/public/wa", waBody(s.keyB), ip)).body, { ok: false, error: "rate_limited" }, "the platform floor holds across stores");
+    } finally {
+      await clearBuckets(inA, floor);
+    }
+  });
+
+  await routeCheck("route /wa: take_orders false (restricted, pending) → unavailable, nothing stored", "src/app/api/public/wa/route.ts", async (route) => {
+    for (const [key, storeId, state] of [[s.keyR, s.R, "restricted"], [s.keyC, s.C, "pending"]] as const) {
+      const r = await postAs(route, "/api/public/wa", waBody(key), newIp());
+      assert.deepEqual(r.body, { ok: false, error: "unavailable" }, state);
+      assert.equal(await waLeads(storeId), 0, `no intent stored for the ${state} store`);
+    }
+  });
+
+  await routeCheck("route /wa: a foreign host is refused (an unrelated Origin; store B's host posting store A's page key)", "src/app/api/public/wa/route.ts", async (route) => {
+    const before = await waLeads(s.A);
+    const evil = await postAs(route, "/api/public/wa", waBody(s.keyA), newIp(), { host: "evil.test", origin: "https://evil.test" });
+    assert.equal(evil.body?.ok, false, `an unrelated host: ${JSON.stringify(evil.body)}`);
+    setS(true);
+    try {
+      const own = await postAs(route, "/api/public/wa", waBody(s.keyA), newIp(), edgeFor("atlas-argan.shops.test"));
+      assert.equal(own.body?.ok, true, `store A's own host: ${JSON.stringify(own.body)}`);
+      const cross = await postAs(route, "/api/public/wa", waBody(s.keyA), newIp(), edgeFor("baraka-home.shops.test"));
+      assert.equal(cross.body?.ok, false, `store B's host (V6): ${JSON.stringify(cross.body)}`);
+    } finally {
+      setS(false);
+    }
+    assert.equal(await waLeads(s.A), before + 1, "only the own-host intent was stored");
+  });
+
+  // LAN-§11.4 step 3, §11.6: no price ever comes from the request
+  await routeCheck("route /wa: a tampered body cannot change the total", "src/app/api/public/wa/route.ts", async (route) => {
+    const clean = await postAs(route, "/api/public/wa", waBody(s.keyA2), newIp());
+    const forged = { total: 1, totalCents: 1, total_cents: 1, price: 1, unitPrice: 1, subtotal: 1, shipping: 0, delivery: 0, fee: 0, currency: "EUR", prices: { [bundle.id]: 1 } };
+    const tampered = await postAs(route, "/api/public/wa", waBody(s.keyA2, forged), newIp());
+    assert.ok(clean.body?.ok === true && tampered.body?.ok === true, JSON.stringify([clean.body, tampered.body]));
+    const c = await waLead(s.A, clean.body!.ref);
+    const t = await waLead(s.A, tampered.body!.ref);
+    assert.ok(c?.totalCents != null && c.totalCents > 1, `the server's total: ${c?.totalCents}`);
+    assert.equal(t?.totalCents, c.totalCents, "the tampered intent carries the server's total");
+    const text = (a: Answer) => String(a.body!.text).split(String(a.body!.ref)).join("WA-REF");
+    assert.equal(text(tampered), text(clean), "the message is the same, its reference aside");
+  });
+
+  // LAN-§11.4 step 4, §14.3, core D54
+  await routeCheck("route /wa: a test token gives an is_test whatsapp lead without a phone; another store's token does not", "src/app/api/public/wa/route.ts", async (route) => {
+    const t = await postAs(route, `/api/public/wa?sg-test=${encodeURIComponent(tokenA)}`, waBody(s.keyA), newIp());
+    assert.equal(t.body?.ok, true, JSON.stringify(t.body));
+    const row = await waLead(s.A, t.body!.ref);
+    assert.deepEqual([row?.kind, row?.phone, row?.isTest], ["whatsapp", null, true]);
+    const foreign = await postAs(route, `/api/public/wa?sg-test=${encodeURIComponent(tokenB)}`, waBody(s.keyA), newIp());
+    assert.equal(foreign.body?.ok, true, JSON.stringify(foreign.body));
+    assert.equal((await waLead(s.A, foreign.body!.ref))?.isTest, false, "store B's token on store A's page is an ordinary visit");
+  });
 }
 
 async function main() {
@@ -894,7 +1076,8 @@ async function main() {
   await pure();
   if (!OFFLINE) await database();
   else console.log("--offline: database checks skipped");
-  console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
+  const pendingNote = pending ? ` (${pending} case(s) pending, listed above; --strict fails them)` : STRICT ? " (--strict: pending cases counted as failures)" : "";
+  console.log(failures ? `\n${failures} check(s) failed${pendingNote}` : `\nall checks passed${pendingNote}`);
   process.exit(failures ? 1 : 0);
 }
 

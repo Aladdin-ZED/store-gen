@@ -1,32 +1,24 @@
 /**
- * The identity surfaces' catalog (docs/STORE-SAAS.md §I.5, D36, D65): `/login`, `/signup`, `/invite`, `/reset`, the
+ * The identity surfaces' lookup (docs/STORE-SAAS.md §I.5, D36, D65): `/login`, `/signup`, `/invite`, `/reset`, the
  * store picker, `/app/new`, the account pages, the team page (ar / fr / en) and the console's R1.0 screens (en, the
  * others fall back). Isomorphic.
  *
- * It sits behind the admin i18n skeleton, not beside it: the base catalogs (`src/lib/i18n/admin/{en,fr,ar}.ts`) win
- * whenever they hold a key, so the day the maintainer spreads these files into them (CCR r1.0-t2-9; at P0 they move
- * to P2's `<locale>/{auth,team,onboarding}.ts` and P1's `<locale>/console.ts` without renames) nothing changes on
- * screen. The lookup order is the skeleton's: the reader's locale, then English, then the key itself.
+ * Since P0b (CCR P2-15, D67) the keys live in their owners' files, spread by the base catalogs
+ * (`src/lib/i18n/admin/{en,fr,ar}.ts`): `auth.*`, `team.*` (+ `notify.invite.*`, `notify.member.*`), `account.*`,
+ * `app.*` and `store.security.*` in P2's `<locale>/{auth,team,shell}.ts`, `console.*` and the other `notify.*` keys
+ * in P1's `<locale>/{console,notify}.ts`, `error.*` among the core keys. `./{en,fr,ar}.ts` stay as empty headers. The
+ * lookup is the skeleton's, unchanged: the reader's locale, then English, then the key itself.
  *
  *   const t = authTranslator(locale);   t("auth.login.title")   t("team.invite.expires", { date })
  */
-import { formatMessage, type AdminLocale, type MessageKey, type MessageVars } from "@/lib/i18n/admin";
-import { messages as baseAr } from "@/lib/i18n/admin/ar";
-import { messages as baseEn } from "@/lib/i18n/admin/en";
-import { messages as baseFr } from "@/lib/i18n/admin/fr";
-import { messages as ar } from "./ar";
-import { messages as en } from "./en";
-import { messages as fr } from "./fr";
+import { formatMessage, messageOf, type AdminLocale, type MessageKey, type MessageVars } from "@/lib/i18n/admin";
 
-export type AuthMessageKey = keyof typeof en;
-
-type Catalog = Partial<Record<string, string>>;
-const BASE: Record<AdminLocale, Catalog> = { en: baseEn, fr: baseFr, ar: baseAr };
-const OWN: Record<AdminLocale, Catalog> = { en, fr, ar };
+/** Every identity key is a base catalog key since P0b (the owners' files are spread there). */
+export type AuthMessageKey = MessageKey;
 
 /** The raw template of `key` in `locale`, falling back to English; undefined when no catalog has it. */
 export function authTemplate(key: MessageKey, locale: AdminLocale): string | undefined {
-  return BASE[locale][key] ?? OWN[locale][key] ?? BASE.en[key] ?? OWN.en[key];
+  return messageOf(key, locale);
 }
 
 /** The message of `key` (an identity key or any base key) in `locale`; the key itself when no catalog has it. */

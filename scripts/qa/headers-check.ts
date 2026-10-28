@@ -24,17 +24,36 @@
  *          referrer, COOP `same-origin-allow-popups`, CORP, `CDN-Cache-Control: no-store` only via the edge,
  *          and no bare 'self' or bare app origin in connect-src / form-action (SEC-2).
  *       6. Public JSON APIs (apiHeaders): base headers, `no-store`, noindex.
+ *       7. The R1 routes (P0b: P1-7, P2-14, P3-7, P8-12), at the proxy: the console's JSON, CSV, media and download
+ *          routes behind the gate (`private, no-store`, noindex, `same-origin`; the media route keeps the handler's
+ *          sandbox CSP), the dashboard's pulse, search and export download passed with the session and nothing that
+ *          would override the handler's ETag / Cache-Control / Content-Disposition, `/track` and `/go/<code>`
+ *          reaching their store routes cookie-less (rewritten with the raw query on a store host).
  *
- *   npm run qa:headers -- --base http://127.0.0.1:3451 --store <handle> --slug <live slug> [--go <code>] [--media <key>]
+ *   npm run qa:headers -- --base http://127.0.0.1:3451 --store <handle> --slug <live slug> [--go <code>] [--go-paused <code>]
+ *                         [--media <key>] [--store-id <id of --store>] [--backup-day <YYYY-MM-DD>] [--strict]
  *     ONLINE (§J.3: a production build on port 3451+ against a cod_test_* database), run with the server's
  *     PLATFORM_URL (and, for the store-host cases, STORE_ROOT_DOMAIN and EDGE_KEY; never printed) in this
  *     process's environment: the same classes over HTTP, incl. the fallback rewrite, the route 404s, /api/health,
- *     the media route and, when given, the `/go/<code>` 308 (`private, no-store`). The offline part runs first;
- *     without --base the online part is reported as not run.
+ *     the media route and, when given, the `/go/<code>` 308 (`private, no-store`) and its 410 page. The offline part
+ *     runs first; without --base the online part is reported as not run. The R1 route cases that need a session or a
+ *     bearer value read it from the environment, never printed: QA_HEADERS_MEMBER_COOKIE (the Cookie header of an
+ *     owner of --store), QA_HEADERS_OUTSIDER_COOKIE (a signed-in user who is not a member), QA_HEADERS_STAFF_COOKIE
+ *     (a gated super_admin console session with a fresh step-up), QA_HEADERS_TEST_TOKEN (a ?sg-test token of --store),
+ *     QA_HEADERS_KIT_TOKEN (a live kit share token), QA_HEADERS_EXPORT_PATH, QA_HEADERS_EXPORT_EXPIRED_PATH,
+ *     QA_HEADERS_EXPORT_FOREIGN_PATH (signed `/api/app/<h>/exports/<jobId>/<part>?t=…` paths: valid, expired, another
+ *     store's job under --store's handle) and QA_HEADERS_CONSOLE_EXPORT_PATH (a signed console export part).
+ *
+ * PENDING RULE (P0b): every R1 route case names the route module it needs (its file under src/app/**). While that
+ * file does not exist the case is listed as `pending (route not built: <file>)` and counted neither as a pass nor as
+ * a failure; an online case whose route exists but whose input the run did not get is listed as `pending (needs …)`.
+ * `--strict` (the R1 integration) turns every pending case into a failure.
  */
+import { existsSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import Module from "node:module";
+import { join } from "node:path";
 import type { NextRequest as NextRequestType, NextResponse as NextResponseType } from "next/server";
 
 // the modules under test are marked `import "server-only"`; outside Next that import throws
@@ -55,6 +74,20 @@ const arg = (name: string): string | null => {
 };
 const ONLINE_BASE = arg("base");
 const ONLINE_ENV = { PLATFORM_URL: env.PLATFORM_URL ?? env.PUBLIC_URL, STORE_ROOT_DOMAIN: env.STORE_ROOT_DOMAIN, EDGE_KEY: env.EDGE_KEY };
+/** the online inputs that carry a session or a bearer value (see the header): read once, never printed */
+const SECRET_INPUTS = {
+  member: env.QA_HEADERS_MEMBER_COOKIE,
+  outsider: env.QA_HEADERS_OUTSIDER_COOKIE,
+  staff: env.QA_HEADERS_STAFF_COOKIE,
+  testToken: env.QA_HEADERS_TEST_TOKEN,
+  kitToken: env.QA_HEADERS_KIT_TOKEN,
+  exportPath: env.QA_HEADERS_EXPORT_PATH,
+  exportExpired: env.QA_HEADERS_EXPORT_EXPIRED_PATH,
+  exportForeign: env.QA_HEADERS_EXPORT_FOREIGN_PATH,
+  consoleExport: env.QA_HEADERS_CONSOLE_EXPORT_PATH,
+};
+const STRICT = ARGS.includes("--strict");
+const REPO = join(__dirname, "..", "..");
 
 const PLATFORM = "storegen.example";
 const ROOT = PLATFORM;
@@ -64,6 +97,8 @@ const GATE = "gate-headers-q7m2x9k4";
 const EDGE_KEY = "headersCheckEdgeKey-5Jr8Wq2Lm6Xv1Nc9Tb3Zk7Hp4Df0";
 const HSTS = "max-age=63072000";
 const HSTS_SUB = "max-age=63072000; includeSubDomains";
+/** the media routes' CSP (core §F.6 "Media": today's sandbox CSP) */
+const MEDIA_SANDBOX_CSP = "default-src 'none'; sandbox";
 
 // IS_PROD is read once at import
 env.NODE_ENV = "production";
@@ -89,6 +124,29 @@ function eq<T>(actual: T, expected: T, msg: string): void {
   check(a === e, `${msg}: got ${a}, expected ${e}`);
 }
 const section = (title: string) => console.log(`• ${title}`);
+
+/* ------------------------------------------------------------------ the P0b pending rule */
+
+const pendingCases: string[] = [];
+/**
+ * Runs an R1 route case once `route` (a file under src/app/**) exists and every input in `missing` is given;
+ * otherwise lists it as pending (counted neither as a pass nor as a failure), or fails it under --strict.
+ */
+async function routeCase(label: string, route: string, fn: () => unknown | Promise<unknown>, missing: readonly string[] = []): Promise<void> {
+  const reason = !existsSync(join(REPO, route)) ? `route not built: ${route}` : missing.length ? `needs ${missing.join(", ")}` : null;
+  if (reason === null) {
+    await fn();
+    return;
+  }
+  pendingCases.push(`${label}: pending (${reason})`);
+  if (STRICT) check(false, `${label}: pending (${reason}) under --strict`);
+  else console.log(`  … ${label}: pending (${reason})`);
+}
+/** the names of the inputs a case lacks (the values are never printed) */
+const lacking = (inputs: Record<string, string | null | undefined>): string[] =>
+  Object.entries(inputs)
+    .filter(([, v]) => !v)
+    .map(([name]) => name);
 
 /** S mode on (STORE_ROOT_DOMAIN + EDGE_KEY) for the duration of `fn`. */
 async function inSMode<T>(fn: () => Promise<T> | T): Promise<T> {
@@ -376,12 +434,126 @@ async function main(): Promise<void> {
     eq(h.get("access-control-allow-origin"), "https://shop.example", "apiHeaders: CORS only as the caller allowed it");
     check(!apiHeaders().has("access-control-allow-origin"), "apiHeaders: no CORS by default");
   }
+
+  /* ============================================================== 7. R1 routes at the proxy (P0b) */
+  section("R1 routes at the proxy (P0b: P1-7, P2-14, P3-7, P8-12; each pending until its route exists)");
+  {
+    const ULID_A = "01JAAAAAAAAAAAAAAAAAAAAAAA";
+    const ULID_B = "01JBBBBBBBBBBBBBBBBBBBBBBB";
+    const SESSION = "__Host-cs=headersCheckSessionToken";
+    const gated = () => `${GATE_COOKIE}=${issueGateToken()}; ${SESSION}`;
+    /** the Cookie header the handler receives (null: deleted by the proxy) */
+    const forwardedCookie = (res: NextResponseType) => res.headers.get("x-middleware-request-cookie");
+    const neutralSet = (o: Req = {}) => sorted(visible(unknownPageResponse("GET", request("/x", o).headers).headers));
+    /** path + query of the proxy's internal rewrite */
+    const rewrittenTo = (res: NextResponseType) => {
+      const target = res.headers.get("x-middleware-rewrite");
+      if (!target) return null;
+      const u = new URL(target);
+      return `${u.pathname}${u.search}`;
+    };
+    // P1-7: the console's route handlers (PLA-§M.2), behind the gate: the proxy's console headers win over a handler's
+    // (Next appends a handler header only when the proxy set none), so they are the client's values
+    const consoleRows: [string, string, string][] = [
+      ["GET /api/admin/pulse", "src/app/api/admin/pulse/route.ts", "/api/admin/pulse"],
+      ["GET /api/admin/search", "src/app/api/admin/search/route.ts", "/api/admin/search?q=xx"],
+      ["GET /api/admin/stores.csv", "src/app/api/admin/stores.csv/route.ts", "/api/admin/stores.csv?status=active"],
+      ["GET /api/admin/audit.csv", "src/app/api/admin/audit.csv/route.ts", "/api/admin/audit.csv"],
+      ["the console export download", "src/app/api/admin/stores/[id]/exports/[jobId]/[part]/route.ts", `/api/admin/stores/${ULID_A}/exports/${ULID_B}/1?t=x`],
+      ["the backup download", "src/app/api/admin/backups/[day]/route.ts", "/api/admin/backups/2026-10-27"],
+    ];
+    // P2-14, P8-12: the dashboard's route handlers: passed with the session, nothing set over the handler's headers
+    const appRows: [string, string, string][] = [
+      ["GET /api/app/<h>/pulse (P2-14)", "src/app/api/app/[store]/pulse/route.ts", "/api/app/shop1/pulse"],
+      ["GET /api/app/<h>/search (P2-14)", "src/app/api/app/[store]/search/route.ts", "/api/app/shop1/search?q=xx"],
+      ["GET /api/app/<h>/exports/<jobId>/<part> (P8-12)", "src/app/api/app/[store]/exports/[jobId]/[part]/route.ts", `/api/app/shop1/exports/${ULID_B}/1?t=x`],
+    ];
+    for (const mode of ["P", "S"] as const) {
+      const label = (s: string) => `[${mode}] ${s}`;
+      const inMode = (fn: () => void) => (mode === "S" ? inSMode(fn) : fn());
+      const hsts = mode === "S" ? HSTS_SUB : HSTS;
+      for (const [name, route, path] of consoleRows) {
+        await routeCase(label(`${name} (P1-7)`), route, () =>
+          inMode(() => {
+            const res = run(path, { cookie: gated() });
+            eq(
+              [res.headers.get("x-middleware-next"), res.headers.get("cache-control"), res.headers.get("x-robots-tag"), res.headers.get("referrer-policy"), res.headers.get("x-content-type-options"), res.headers.get("strict-transport-security")],
+              ["1", "private, no-store", "noindex, nofollow, noarchive", "same-origin", "nosniff", hsts],
+              label(`${name}: gated, passed with private, no-store, noindex, same-origin`),
+            );
+            check(forwardedCookie(res) !== null, label(`${name}: the session reaches the handler`));
+            const open = run(path);
+            eq([open.status, sorted(visible(open.headers))], [404, neutralSet()], label(`${name}: without the gate, the neutral 404`));
+          }),
+        );
+      }
+      // the console media proxy (PLA-§M.2, core §F.6 "Media"): the sandbox CSP must reach the client, so the proxy may not
+      // put its console nonce CSP on this path (today it does, for every /api/admin/** path: the P1 merge needs the
+      // proxy to pass this path like the dashboard manifest, a maintainer change; until then this row fails once built)
+      await routeCase(label("GET /api/admin/stores/<id>/media/<key> (P1-7)"), "src/app/api/admin/stores/[id]/media/[key]/route.ts", () =>
+        inMode(() => {
+          const res = run(`/api/admin/stores/${ULID_A}/media/headers-check-media-key`, { cookie: gated() });
+          const csp = res.headers.get("content-security-policy");
+          const cache = res.headers.get("cache-control");
+          check(res.headers.get("x-middleware-next") === "1" && forwardedCookie(res) !== null, label("console media: gated, passed to the handler with the session"));
+          check(csp === null || csp === MEDIA_SANDBOX_CSP, label(`console media: the proxy leaves the handler's sandbox CSP in place (a proxy CSP would win; got ${csp})`));
+          check(cache === null || cache === "private, no-store", label(`console media: never stored (got ${cache})`));
+          check([null, "nosniff"].includes(res.headers.get("x-content-type-options")), label("console media: nothing but nosniff for X-Content-Type-Options"));
+        }),
+      );
+      for (const [name, route, path] of appRows) {
+        await routeCase(label(name), route, () =>
+          inMode(() => {
+            const res = run(path, { cookie: SESSION, headers: { "if-none-match": '"headers-check-etag"' } });
+            check(res.headers.get("x-middleware-next") === "1", label(`${name}: passed to the handler`));
+            eq(
+              ["content-security-policy", "cache-control", "x-robots-tag", "content-disposition", "etag", "referrer-policy"].map((h) => res.headers.get(h)),
+              [null, null, null, null, null, null],
+              label(`${name}: the proxy sets none of the handler's headers (ETag, Cache-Control, Content-Disposition reach the client)`),
+            );
+            eq(res.headers.get("strict-transport-security"), hsts, label(`${name}: HSTS`));
+            check(forwardedCookie(res) !== null && res.headers.get("x-middleware-request-if-none-match") === '"headers-check-etag"', label(`${name}: the session and If-None-Match reach the handler`));
+            eq(res.headers.getSetCookie(), [], label(`${name}: no Set-Cookie from the proxy`));
+            if (mode === "S") {
+              const viaStore = run(path, { edge: STORE, cookie: SESSION });
+              eq([viaStore.status, sorted(visible(viaStore.headers))], [404, neutralSet({ edge: STORE })], label(`${name}: on a store host, the neutral 404`));
+            }
+          }),
+        );
+      }
+      // P3-7: /track (wave 1) and /go/<code> (wave 2) reach their store routes cookie-less; the documents' headers are theirs
+      const storeRows: [string, string, string][] = [
+        ["GET <base>/track (P3-7 wave 1)", "src/app/s/[store]/track/route.ts", "/track?o=CMD-7K3Q9X&s=k1.headersCheckSig"],
+        ["GET <base>/go/<code> (P3-7 wave 2)", "src/app/s/[store]/go/[code]/route.ts", "/go/abc123?fbclid=A%2Fb&utm_x=1"],
+      ];
+      for (const [name, route, path] of storeRows) {
+        await routeCase(label(name), route, () =>
+          inMode(() => {
+            const direct = run(`/s/shop1${path}`, { cookie: SESSION });
+            eq(
+              [direct.headers.get("x-middleware-next"), forwardedCookie(direct), direct.headers.get("content-security-policy"), direct.headers.get("cache-control"), direct.headers.get("referrer-policy")],
+              ["1", null, null, null, null],
+              label(`${name}: /s/<h>${path.split("?")[0]} passed cookie-less, with the route's own document headers`),
+            );
+            if (mode === "S") {
+              const viaEdge = run(path, { edge: STORE, cookie: SESSION });
+              eq([rewrittenTo(viaEdge), forwardedCookie(viaEdge), viaEdge.headers.get("cache-control")], [`/s/shop1${path}`, null, null], label(`${name}: on the store host, rewritten with the raw query, cookie-less`));
+            }
+          }),
+        );
+      }
+    }
+    // P3-7: the test render keeps its §F.6 row (section 5 asserts `private, no-store`, `noindex, nofollow` and the
+    // narrowed connect-src / form-action without a bare 'self' for kind "test" on the platform and store hosts),
+    // `/kit/*` the auth class with `no-referrer` (section 2); the online part adds both over HTTP.
+  }
   console.warn = warn;
 
   if (ONLINE_BASE) await online();
   else console.log("online part: not run (pass --base http://127.0.0.1:3451 against a production build, §J.3)");
 
-  console.log(failures ? `qa:headers: ${failures} of ${checks} checks FAILED` : `qa:headers: all ${checks} checks passed`);
+  const pendingNote = !pendingCases.length ? (STRICT ? "; --strict: nothing pending" : "") : STRICT ? `; ${pendingCases.length} pending case(s) counted as failures (--strict)` : `; ${pendingCases.length} case(s) pending, listed above (--strict fails them)`;
+  console.log(failures ? `qa:headers: ${failures} of ${checks} checks FAILED${pendingNote}` : `qa:headers: all ${checks} checks passed${pendingNote}`);
   process.exit(failures ? 1 : 0);
 }
 
@@ -470,8 +642,8 @@ async function online(): Promise<void> {
   else actionHeaders["content-length"] = length404;
   eq(comparable({ ...action, headers: actionHeaders }), comparable(platform404[0]!), "online: the 403 carries the neutral set");
 
-  // platform UI
-  for (const path of ["/login", "/signup", "/invite/qa-token", "/reset/qa-token", `/report/${handle}`]) {
+  // platform UI (`/report/<h>` and `/invite/staff/<token>` are R1 route cases, below)
+  for (const path of ["/login", "/signup", "/invite/qa-token", "/reset/qa-token"]) {
     const r = await get(path);
     eq([r.headers["referrer-policy"], r.headers["cache-control"]?.includes("no-store"), /noindex/.test(r.headers["x-robots-tag"] ?? "")], ["same-origin", true, true], `online: ${path} same-origin, no-store, noindex`);
     check(/'nonce-/.test(r.headers["content-security-policy"] ?? ""), `online: ${path} nonce CSP`);
@@ -514,17 +686,177 @@ async function online(): Promise<void> {
   }
   const order = await get("/api/public/order", { "content-type": "application/json", origin: `https://${apex}` }, "POST");
   eq([order.headers["cache-control"], order.headers["x-content-type-options"]], ["no-store", "nosniff"], "online: public API: no-store + base headers");
-  const go = arg("go");
-  if (go) {
-    const r = sMode ? await edge(`/go/${go}`) : await get(`/s/${handle}/go/${go}`);
-    eq([r.status, r.headers["cache-control"]], [308, "private, no-store"], "online: /go/<code> 308 is private, no-store (not canonical)");
-  }
   const media = arg("media");
   if (media) {
     const r = await get(`/media/${media}`);
-    eq([r.headers["content-security-policy"], r.headers["x-content-type-options"], r.headers["cross-origin-resource-policy"], !!r.headers["strict-transport-security"]], ["default-src 'none'; sandbox", "nosniff", "cross-origin", true], "online: media sandbox CSP, nosniff, CORP, HSTS");
+    eq([r.headers["content-security-policy"], r.headers["x-content-type-options"], r.headers["cross-origin-resource-policy"], !!r.headers["strict-transport-security"]], [MEDIA_SANDBOX_CSP, "nosniff", "cross-origin", true], "online: media sandbox CSP, nosniff, CORP, HSTS");
     eq([r.headers["cache-control"], r.headers["cdn-cache-control"]], ["public, max-age=31536000, immutable", "public, max-age=86400"], "online: media a year in the browser, a day at the edge (CCR r1.0-m-6)");
   }
+
+  /* ---------------- the R1 routes (P0b: P1-7, P2-14, P3-7, P8-12; the pending rule) ---------------- */
+  section("online: R1 routes (P0b; each pending until its route exists)");
+  const { member, outsider, staff, testToken, kitToken, exportPath, exportExpired, exportForeign, consoleExport } = SECRET_INPUTS;
+  const neutral404 = platform404[0]!;
+  /** §F.6: the neutral 404, its header set byte-identical to the other 404 producers (the proxy's, the routes', the fallback) */
+  const isNeutral404 = (r: Answer, label: string) => {
+    eq([r.status, r.body === neutral404.body], [404, true], `${label}: the neutral 404`);
+    eq(comparable(r), comparable(neutral404), `${label}: the neutral 404's header set, byte for byte`);
+  };
+  /** the platform UI auth class (§F.6, PLA-§M.2, LAN-§13.5): nonce CSP, noindex, `private, no-store`, the referrer policy */
+  const authClass = (r: Answer, label: string, referrer: "same-origin" | "no-referrer") => {
+    eq([r.headers["referrer-policy"], r.headers["cache-control"], /noindex/.test(r.headers["x-robots-tag"] ?? "")], [referrer, "private, no-store", true], `${label}: ${referrer}, private, no-store, noindex`);
+    check(/'nonce-/.test(r.headers["content-security-policy"] ?? ""), `${label}: nonce CSP`);
+    for (const c of r.cookies) check(c.startsWith("__Host-"), `${label}: cookie ${c.split("=")[0]} with __Host-`);
+  };
+  const attachment = (r: Answer) => /^attachment\b/i.test(r.headers["content-disposition"] ?? "");
+  /** the same signed path with its `t` changed in its last character */
+  const tamperedT = (path: string) => {
+    const u = new URL(path, "http://qa.invalid");
+    const t = u.searchParams.get("t") ?? "";
+    u.searchParams.set("t", t ? `${t.slice(0, -1)}${t.endsWith("A") ? "B" : "A"}` : "invalid");
+    return `${u.pathname}${u.search}`;
+  };
+  /** a store document path: through the edge in S mode, under /s/<h> in P mode */
+  const docPath = (path: string) => (sMode ? edge(path) : get(`/s/${handle}${path}`));
+
+  // P1-7 (PLA-§M.2, PLA-§24.2): the public staff-invite and report pages
+  await routeCase("online: GET /invite/staff/<token> (P1-7)", "src/app/(public)/invite/staff/[token]/page.tsx", async () => authClass(await get("/invite/staff/qa-token"), "online: /invite/staff/<token>", "same-origin"));
+  await routeCase("online: GET /report/<handle> (P1-7)", "src/app/(public)/report/[handle]/page.tsx", async () => authClass(await get(`/report/${handle}`), "online: /report/<handle>", "same-origin"));
+  // P1-7: the console's route handlers, as a gated super_admin
+  const consoleRoutes: [string, string, string, boolean][] = [
+    ["GET /api/admin/pulse", "src/app/api/admin/pulse/route.ts", "/api/admin/pulse", false],
+    ["GET /api/admin/search", "src/app/api/admin/search/route.ts", "/api/admin/search?q=xx", false],
+    ["GET /api/admin/stores.csv", "src/app/api/admin/stores.csv/route.ts", "/api/admin/stores.csv", true],
+    ["GET /api/admin/audit.csv", "src/app/api/admin/audit.csv/route.ts", "/api/admin/audit.csv", true],
+  ];
+  for (const [name, route, path, csv] of consoleRoutes) {
+    await routeCase(
+      `online: ${name} (P1-7)`,
+      route,
+      async () => {
+        const r = await get(path, { cookie: staff! });
+        eq([r.status, r.headers["cache-control"], r.headers["x-content-type-options"]], [200, "private, no-store", "nosniff"], `online: ${name}: 200, private, no-store`);
+        if (csv) check(attachment(r), `online: ${name}: Content-Disposition attachment`);
+      },
+      lacking({ QA_HEADERS_STAFF_COOKIE: staff }),
+    );
+  }
+  const storeId = arg("store-id");
+  await routeCase(
+    "online: GET /api/admin/stores/<id>/media/<key> (P1-7)",
+    "src/app/api/admin/stores/[id]/media/[key]/route.ts",
+    async () => {
+      const r = await get(`/api/admin/stores/${storeId}/media/${media}`, { cookie: staff! });
+      eq([r.status, r.headers["content-security-policy"], r.headers["x-content-type-options"], r.headers["cache-control"]], [200, MEDIA_SANDBOX_CSP, "nosniff", "private, no-store"], "online: console media: the sandbox CSP, nosniff, private, no-store");
+    },
+    lacking({ QA_HEADERS_STAFF_COOKIE: staff, "--store-id": storeId, "--media": media }),
+  );
+  await routeCase(
+    "online: the console export download (P1-7)",
+    "src/app/api/admin/stores/[id]/exports/[jobId]/[part]/route.ts",
+    async () => {
+      const r = await get(consoleExport!, { cookie: staff! });
+      eq([r.status, r.headers["cache-control"], attachment(r)], [200, "private, no-store", true], "online: console export download: private, no-store, attachment");
+    },
+    lacking({ QA_HEADERS_STAFF_COOKIE: staff, QA_HEADERS_CONSOLE_EXPORT_PATH: consoleExport }),
+  );
+  const backupDay = arg("backup-day");
+  await routeCase(
+    "online: the backup download (P1-7)",
+    "src/app/api/admin/backups/[day]/route.ts",
+    async () => {
+      const r = await get(`/api/admin/backups/${backupDay}`, { cookie: staff! });
+      eq([r.status, r.headers["cache-control"], attachment(r)], [200, "private, no-store", true], "online: backup download: private, no-store, attachment");
+    },
+    lacking({ QA_HEADERS_STAFF_COOKIE: staff, "--backup-day": backupDay }),
+  );
+
+  // P2-14 (core §F.6 public JSON row: the pulse adds ETag and answers 304; PLA-§M.2)
+  await routeCase(
+    "online: GET /api/app/<h>/pulse (P2-14)",
+    "src/app/api/app/[store]/pulse/route.ts",
+    async () => {
+      const path = `/api/app/${handle}/pulse`;
+      const r = await get(path, { cookie: member! });
+      const etag = r.headers["etag"];
+      eq([r.status, r.headers["cache-control"], !!etag], [200, "private, no-store", true], "online: pulse: 200 with an ETag, private, no-store");
+      if (etag) {
+        const again = await get(path, { cookie: member!, "if-none-match": etag });
+        eq([again.status, again.body], [304, ""], "online: pulse: a matching If-None-Match → 304, no body");
+      }
+      isNeutral404(await get(path, { cookie: outsider! }), "online: pulse for a non-member");
+    },
+    lacking({ QA_HEADERS_MEMBER_COOKIE: member, QA_HEADERS_OUTSIDER_COOKIE: outsider }),
+  );
+  await routeCase(
+    "online: GET /api/app/<h>/search (P2-14)",
+    "src/app/api/app/[store]/search/route.ts",
+    async () => {
+      const r = await get(`/api/app/${handle}/search?q=xx`, { cookie: member! });
+      eq([r.status, r.headers["cache-control"], r.cookies.length], [200, "private, no-store", 0], "online: search: private, no-store, no Set-Cookie");
+    },
+    lacking({ QA_HEADERS_MEMBER_COOKIE: member }),
+  );
+
+  // P3-7 (LAN-§9.1, §12.1, §13.5, §14.2, §25.3; core §F.6 store documents and redirects)
+  await routeCase("online: GET <base>/track (P3-7 wave 1)", "src/app/s/[store]/track/route.ts", async () => {
+    const r = await docPath("/track");
+    eq([r.status, r.headers["cache-control"], /noindex/.test(r.headers["x-robots-tag"] ?? ""), r.headers["referrer-policy"]], [200, "private, no-store", true, "no-referrer"], "online: /track (the lookup form): noindex, private, no-store, no-referrer");
+    const csp = r.headers["content-security-policy"] ?? "";
+    check(!/(connect-src|form-action)[^;]*'self'/.test(csp) && csp.includes("/api/public/"), "online: /track: CSP narrowed to the serving origin's public API (SEC-2)");
+    eq(r.cookies, [], "online: /track: no Set-Cookie");
+  });
+  const go = arg("go");
+  const goPaused = arg("go-paused");
+  await routeCase(
+    "online: GET <base>/go/<code> (P3-7 wave 2)",
+    "src/app/s/[store]/go/[code]/route.ts",
+    async () => {
+      const r = await docPath(`/go/${go}`);
+      eq([r.status, r.headers["cache-control"]], [308, "private, no-store"], "online: /go/<code> 308 is private, no-store (not canonical)");
+      const paused = await docPath(`/go/${goPaused}`);
+      eq([paused.status, /no-store/.test(paused.headers["cache-control"] ?? ""), paused.headers["x-content-type-options"], paused.cookies.length], [410, true, "nosniff", 0], "online: a paused /go/<code> → its 410 page, never stored");
+    },
+    lacking({ "--go": go, "--go-paused": goPaused }),
+  );
+  await routeCase(
+    "online: GET /kit/<token> (P3-7 wave 2)",
+    "src/app/(public)/kit/[token]/page.tsx",
+    async () => {
+      const r = await get(`/kit/${encodeURIComponent(kitToken!)}`);
+      eq(r.status, 200, "online: /kit/<token>: the share page");
+      authClass(r, "online: /kit/<token>", "no-referrer");
+    },
+    lacking({ QA_HEADERS_KIT_TOKEN: kitToken }),
+  );
+  await routeCase(
+    "online: the test render (P3-7)",
+    "src/app/s/[store]/[slug]/route.ts",
+    async () => {
+      const r = await docPath(`/${slug}?sg-test=${encodeURIComponent(testToken!)}`);
+      eq([r.status, r.headers["cache-control"], /noindex/.test(r.headers["x-robots-tag"] ?? "")], [200, "private, no-store", true], "online: test render: private, no-store, noindex");
+      const csp = r.headers["content-security-policy"] ?? "";
+      for (const name of ["connect-src", "form-action"]) {
+        const values = directive(csp, name);
+        check(!values.includes("'self'") && values.some((v) => v.endsWith("/api/public/")), `online: test render: ${name} narrowed to <serving origin>/api/public/, no bare 'self' (${values.join(" ")})`);
+      }
+    },
+    lacking({ QA_HEADERS_TEST_TOKEN: testToken }),
+  );
+
+  // P8-12 (core §F.9 download, §F.6)
+  await routeCase(
+    "online: GET /api/app/<h>/exports/<jobId>/<part> (P8-12)",
+    "src/app/api/app/[store]/exports/[jobId]/[part]/route.ts",
+    async () => {
+      const valid = await get(exportPath!, { cookie: member! });
+      eq([valid.status, attachment(valid), valid.headers["cache-control"], valid.headers["x-content-type-options"]], [200, true, "private, no-store", "nosniff"], "online: a valid signed download: attachment, private, no-store, nosniff");
+      isNeutral404(await get(tamperedT(exportPath!), { cookie: member! }), "online: a bad t");
+      isNeutral404(await get(exportExpired!, { cookie: member! }), "online: an expired t");
+      isNeutral404(await get(exportForeign!, { cookie: member! }), "online: another store's job");
+    },
+    lacking({ QA_HEADERS_MEMBER_COOKIE: member, QA_HEADERS_EXPORT_PATH: exportPath, QA_HEADERS_EXPORT_EXPIRED_PATH: exportExpired, QA_HEADERS_EXPORT_FOREIGN_PATH: exportForeign }),
+  );
 }
 
 main().catch((err) => {
