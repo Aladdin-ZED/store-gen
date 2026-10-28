@@ -15,6 +15,8 @@
  *   - the rev 3 / rev 4 fields of §K.2 P0 parse and refuse what they must (confirmationLeadDays 0-3, addressMode,
  *     the ISO `days` container, ≤ 3 ranges a day, ≤ 4 non-overlapping windowOverrides, agentLabels ≤ 50, carrierCsv,
  *     myCarrier, adAccounts / adRates, brand genes incl. G1 and G9); `platform_ai.classes` use the §D.10 model ids;
+ *   - the P0b fields: `platform_backup` retention within PLA-§17's bounds (daily 3-30, weekly 1-12) and its
+ *     `purgeRequests` (a { storeId, at } list of at most 1,000, empty by default; CCR P8-6);
  *   - old stored rows keep parsing: `store.confirmation.hours` and `policies.contact.hours` (removed by D73) are
  *     stripped while every other owner-typed field survives; the R1.0 conversion shapes of `store_ai`, `defaults`,
  *     `sheets` and `tracking_secrets` parse;
@@ -257,6 +259,7 @@ expectDefaults("platform_ai", {
 });
 expectDefaults("platform_ai_secret", { apiKey: undefined });
 expectDefaults("platform_design", { gatesAtPublish: "block", novelty: "on" });
+expectDefaults("platform_backup", { "retention.daily": 7, "retention.weekly": 4, lastDownloadAt: null, purgeRequests: [] });
 
 // platform_ai classes: exactly the §D.10 model ids and efforts (D55), fast mode off
 const CLASS_MODELS: Record<string, [string, string]> = {
@@ -362,6 +365,22 @@ check(ok("accounting", { myCarrier: { settlement: "statement" } }), "accounting.
     "platform_ai.probe: a measured run accepted",
   );
   check(!ok("platform_ai", { classes: { worker: { model: "gpt-4o", effort: "low", maxTokens: 8_000, timeoutMs: 60_000, fallbacks: "default", batch: "allowed" } } }), "platform_ai: a non-claude model id refused");
+}
+
+// platform_backup (P0b, CCR P8-6): the PLA-§17 retention bounds and the SEC-20 purgeRequests
+check(ok("platform_backup", { retention: { daily: 3, weekly: 1 } }) && ok("platform_backup", { retention: { daily: 30, weekly: 12 } }), "platform_backup.retention: daily 3-30 and weekly 1-12 accepted at the bounds");
+check(!ok("platform_backup", { retention: { daily: 2 } }) && !ok("platform_backup", { retention: { daily: 31 } }), "platform_backup.retention.daily outside 3-30 refused");
+check(!ok("platform_backup", { retention: { weekly: 0 } }) && !ok("platform_backup", { retention: { weekly: 13 } }), "platform_backup.retention.weekly outside 1-12 refused");
+check(!ok("platform_backup", { retention: { daily: 7.5 } }), "platform_backup.retention.daily: integers only");
+{
+  const purge = { storeId: "01JBQ8Z9X7K3M2N4P5R6S7T8V9", at: "2026-10-27T10:00:00.000Z" };
+  const b = value<{ purgeRequests: unknown[]; retention: { daily: number; weekly: number } }>("platform_backup", { purgeRequests: [purge] }, "a purge request");
+  check(isDeepStrictEqual(b.purgeRequests, [purge]) && b.retention?.daily === 7 && b.retention?.weekly === 4, "platform_backup.purgeRequests: a { storeId, at } entry kept beside the default retention");
+  check(!ok("platform_backup", { purgeRequests: [{ ...purge, storeId: "01jbq8z9x7k3m2n4p5r6s7t8v9" }] }), "platform_backup.purgeRequests: a lower-case store id refused");
+  check(!ok("platform_backup", { purgeRequests: [{ ...purge, storeId: "01JBQ8Z9X7K3M2N4P5R6S7T8V" }] }), "platform_backup.purgeRequests: a 25-character store id refused");
+  check(!ok("platform_backup", { purgeRequests: [{ ...purge, at: "yesterday" }] }), "platform_backup.purgeRequests: a non-ISO instant refused");
+  check(ok("platform_backup", { purgeRequests: Array.from({ length: 1000 }, () => purge) }), "platform_backup.purgeRequests: 1,000 entries accepted");
+  check(!ok("platform_backup", { purgeRequests: Array.from({ length: 1001 }, () => purge) }), "platform_backup.purgeRequests: 1,001 entries refused");
 }
 
 /* ------------------------------------------------------------------ */

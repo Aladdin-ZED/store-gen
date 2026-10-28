@@ -114,6 +114,16 @@ export const USAGE_METRICS = {
   ai_credits_director: { period: "month", limit: null },
   /** rev 3 (AI R3, R30): daily AI counter, limit max(floor, ceil(ai_credits_month × storeDailyCapPct / 100)), floor 50 / 10 while pending */
   ai_credits_day: { period: "day", limit: null },
+  /**
+   * AI-§A.4, §C.2, §C.3: Director / deep passes per store day; the limit comes from platform_ai.caps through chargeUsage
+   * opts.limit; daily rows purged after 7 days like ai_credits_day (P8 housekeeping purges every period "day" metric)
+   */
+  ai_director_passes: { period: "day", limit: null },
+  /**
+   * AI-§A.4, §C.2, §C.3: Director / deep passes per store day; the limit comes from platform_ai.caps through chargeUsage
+   * opts.limit; daily rows purged after 7 days like ai_credits_day (P8 housekeeping purges every period "day" metric)
+   */
+  ai_deep_passes: { period: "day", limit: null },
 } as const satisfies Record<string, UsageMetricDef>;
 
 export type UsageMetricName = keyof typeof USAGE_METRICS;

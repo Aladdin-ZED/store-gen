@@ -1311,7 +1311,7 @@
         },
         "kind": {
           "name": "kind",
-          "type": "enum('director_deep','store_blueprint','logo_system','health_report')",
+          "type": "enum('director_deep','store_blueprint','logo_system','health_report','probe')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false

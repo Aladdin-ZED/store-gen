@@ -2034,7 +2034,8 @@ export const aiJobs = mysqlTable(
   {
     id: id26().primaryKey(),
     storeId: storeRef(),
-    kind: mysqlEnum("kind", ["director_deep", "store_blueprint", "logo_system", "health_report"]).notNull(),
+    /** "probe": the staff-only detached-job probe (AI-§B.13 step 5, §H.12 rule 1), appended last */
+    kind: mysqlEnum("kind", ["director_deep", "store_blueprint", "logo_system", "health_report", "probe"]).notNull(),
     /** the AiTaskId of the first stage */
     task: varchar("task", { length: 32 }).notNull(),
     status: mysqlEnum("status", ["queued", "running", "done", "failed", "cancelled"]).notNull().default("queued"),
@@ -2168,7 +2169,13 @@ export const aiMemory = mysqlTable(
     text: varchar("text", { length: 500 }).notNull(),
     /** NULL = every locale */
     locale: varchar("locale", { length: 5 }),
-    evidence: jsonText<{ edits?: number; examples?: string[]; deleted?: true }>("evidence"),
+    /** `screen` (AI-08 (3)): a row the injection screen marks suspicious stays out of every prompt until staff clear it */
+    evidence: jsonText<{
+      edits?: number;
+      examples?: string[];
+      deleted?: true;
+      screen?: { suspicious: boolean; reason: string; at: string; clearedBy?: string; clearedAt?: string };
+    }>("evidence"),
     source: mysqlEnum("source", ["explicit", "learned"]).notNull().default("explicit"),
     active: boolean("active").notNull().default(true),
     pinned: boolean("pinned").notNull().default(false),

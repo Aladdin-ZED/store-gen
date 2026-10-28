@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS `ai_eval_runs` (
 CREATE TABLE IF NOT EXISTS `ai_jobs` (
 	`id` varchar(26) NOT NULL,
 	`store_id` varchar(26) NOT NULL,
-	`kind` enum('director_deep','store_blueprint','logo_system','health_report') NOT NULL,
+	`kind` enum('director_deep','store_blueprint','logo_system','health_report','probe') NOT NULL,
 	`task` varchar(32) NOT NULL,
 	`status` enum('queued','running','done','failed','cancelled') NOT NULL DEFAULT 'queued',
 	`active` char(1),

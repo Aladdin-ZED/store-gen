@@ -13,7 +13,8 @@ import type { StoreCtx } from "@/lib/tenancy/types";
 import type { AiFailCode } from "../provider/types";
 import type { AiTaskId } from "../tasks";
 
-export type AiJobKind = (typeof aiJobs.$inferSelect)["kind"];
+/** probe: the staff-only detached-job probe of AI-§B.13 / core §H.12 rule 1, never enqueued through enqueueAiJob */
+export type AiJobKind = Exclude<(typeof aiJobs.$inferSelect)["kind"], "probe">;
 
 export interface AiJobInput<K extends AiJobKind> {
   kind: K;
