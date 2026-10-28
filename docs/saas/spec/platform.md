@@ -956,7 +956,12 @@ P0b (CCR P1-12; the "two" of revision 3 undercounted them):** the tenant-callabl
 `submitAppeal` (`requests.ts`; they read or write the `signup_reviews` rows **of the caller's own store only**, the
 store taken from `ctx` / the scope, never from input); `pendingReacceptance` and `recordReacceptance` (`legal.ts`; the
 caller's own rows); and `checkBrandTerms()` (`brand-check.ts`, PLA-§13.3, rev 3, PD70; no store scope, it reads
-platform rows only). `createStoreRequest` needs permission `billing.manage`; it writes `signup_reviews` with `store_id` from `ctx`, `score = 0`, `band = review`,
+platform rows only). **P0b review F-9 (the list was incomplete):** also the notification reads P2's centre and pulse
+call, `listNotifications(reader, opts)`, `unreadCount(reader)` and `markRead(reader, ids)` (`notify.ts`; a `Reader` is
+the caller's own user and membership, PLA-§18.1), and the store side of the health snapshot, `getStoreHealth(scope)`,
+`snoozeHealthIssue(ctx, issueId, 7)`, `unsnoozeHealthIssue(ctx, issueId)` and `requestHealthRecompute(ctx)`
+(`health-snapshot.ts`; the caller's own store's row only); `markHealthDirty(storeId)` is called by the other tracks'
+write paths, never with input from a request. `createStoreRequest` needs permission `billing.manage`; it writes `signup_reviews` with `store_id` from `ctx`, `score = 0`, `band = review`,
 `signals = { v: 1, flags: [], band: "review", inputs: <store facts>, cluster: { users: 0, banned: 0, kinds: [] },
 partial: false, ms: 0 }`. `withdrawStoreRequestAction` sets `withdrawn`.
 
@@ -1248,6 +1253,11 @@ PLA-§2.2 and import every track's `src/lib/health/rules/<track>.ts`; P1 writes 
 and the platform rules; P2 the tenant surface (PLA-§22.16). Nothing in the engine reads another store.
 
 #### PLA-§6.3.1 Engine (`src/lib/health/engine.ts`, P1; pure over its inputs, selftested)
+
+**Rev 6 P0b (frozen exports; P0b review F-9, so a track finds them in its part):** the one fixture shape of every rules file (CCR P5-8, P6-13; PD79): `HealthRuleFile`, `HEALTH_RULE_PREFIXES`
+(each file's id prefixes, e.g. `int:` / `conv:` for `rules/integrations.ts`) and `HealthRuleFixture` in
+`src/lib/health/types.ts`; every `rules/*.ts` exports `fixtures: HealthRuleFixture[]` and `src/lib/health/registry.ts`
+collects them as `HEALTH_RULE_FIXTURES` for `test:health` (asserted in `src/lib/contracts/r1-p0b-platform.ts`).
 
 ```ts
 // src/lib/health/inputs.ts (P1): one read pass per store through systemScope(ctx, storeId) and the P0 read APIs (core §K.2)
@@ -1546,8 +1556,10 @@ both parts build against; OPE-§27.1):** `recordPlatformReveal(ctx, scope, order
 address, city, note } | null>` (`e164: string; name: string; address, city, note: string | null`; `null` = no such
 order in that store) is the **single writer** of both the `platform.pii.revealed` audit row (store_id = the store,
 meta `{ orderId, reason }`) and the order's `phone_revealed` event (`actor_kind` `platform`), through
-`platformRevealScope(ctx, storeId)` (`src/lib/platform/seam.ts`, maintainer: it requires `pii.reveal` and a fresh
-step-up, and lint L6 allows it only in `src/lib/orders/profile.ts`); **`revealOrderPiiAction` writes no audit row of
+`platformRevealScope(ctx, scope)` (`src/lib/platform/seam.ts`, maintainer: it requires `pii.reveal` and a fresh
+step-up and upgrades the `platformScope(ctx, storeId)` that `revealOrderPiiAction` passes to `recordPlatformReveal`,
+never a bare store id (P0b review F-3); lint L6 allows the call only in `src/lib/orders/profile.ts`, refuses the
+function as a value anywhere, and refuses its WriteScope leaving that file); **`revealOrderPiiAction` writes no audit row of
 its own**, so PL-07's "exactly one audit row and one order event per reveal" holds. **No CSV export** of orders exists in the console (core §F.11).
 
 ### PLA-§7.5 Catalog & pages tab (R2, S6; the R1 data lives in Overview strip 3)
@@ -2034,6 +2046,10 @@ each save is `savePlatformSettingsAction({ section, patch, opId })` (`platform.s
 
 ### PLA-§13.1 General (`/admin/settings/general`)
 
+**Rev 6 P0b (frozen exports; P0b review F-9, so a track finds them in its part):** P6's field group `PlatformDesignFields(p: { value: PlatformDesignSetting; onSave(v: PlatformDesignSetting):
+Promise<void> }): ReactElement | null` (`src/components/admin/brand/platform-design-fields.tsx`, CCR P1-5; the P0b
+stub renders nothing, P1 mounts it here, P6 fills it at its merge; asserted in `src/lib/contracts/r1-p0b-design.ts`).
+
 - **Brand**: platform name (used by the TOTP issuer, titles, the manifest; changing it never touches the HKDF salt or
   purpose strings, core §F.3), support WhatsApp (E.164, with a "Test" link that opens `wa.me`), support hours (free
   text, shown as typed).
@@ -2117,6 +2133,10 @@ a seeded active store to "CIH Bank · Vérification" from the tenant General pag
 `brand_term_live` and exactly one `staff.alarm` in the week; the term never appears in a tenant-visible issue.
 
 ### PLA-§13.4 Legal documents (`/admin/settings/legal`, `legal.manage`)
+
+**Rev 6 P0b (frozen exports; P0b review F-9, so a track finds them in its part):** the placeholder fields the legal editor offers come from P3's `POLICY_TEMPLATE_FIELDS: readonly string[]`
+(`src/lib/policies/fields.ts`, CCR P1-11: the scalar leaf paths of `PoliciesSetting`, no invented field; P3 appends
+names and never renames one; asserted in `src/lib/contracts/r1-p0b-design.ts`).
 
 List grouped by kind (`tos`, `privacy`, `aup`, `dpa` (**R2**: the kind stays in the enum, no R1 seed text and no R1
 editor row; RF §3.3, core §L.2 PL-14), `store_privacy`, `store_terms`, `store_shipping`, `store_returns`,
@@ -2652,7 +2672,7 @@ place. The "Download local AI" consent card (AI-03) never shows on a connection 
 |---|---|---|---|
 | `photos` | A large drop zone "Drop 1 to 5 product photos" (click to pick, camera capture on phones), thumbnails appear as each upload finishes, "Start without photos" link | uploads through `POST /api/app/<h>/media` (pending cap `signup.pendingMediaMiBBeforeSubmit`, PD68, so 5 × 2 MB phone photos fit); palette extracted in the browser; **(rev 3, PD74, UX-39)** P6's model-free alpha estimate `estimateAlpha(bitmap)` (design.md DES-§4.11, pure, browser: edge flood-fill with tolerance on the 32 × 32 facts pass, confirmed at 1024 px, < 150 ms per photo) runs on each photo and sets `PhotoFacts.hasCutout = "estimated"` when the background is uniform, so stage / specimen / dark-base directions are eligible at the reveal with a `plinth` / `contact` preset; the real background cutout (BiRefNet, AI-21) is queued by the existing pipeline and, when its mask lands, P8's `render_jobs` reason `cutout` (PLA-§Q.3) upgrades the chosen page's hero in place | 3 × ≈ 600 KB ≤ 8 s; palette + alpha estimate ≤ 0.5 s (0:25 → 0:35) |
 | `details` (shown while the uploads finish) | category chips with the suggested one highlighted (a tap is required, PD23), product name with "Use suggestion" (never auto-filled), **price** (required, numeric keypad, currency suffix), compare-at price (optional, hint `onboarding.compare_hint` "Only a price you really sold at before"), one optional fact; the store name and handle with the live address preview when the owner came from `/app/new` | `rankDirections()` input assembled client-side; P7 `useAiTask("analyze", …)` runs in the background and updates the suggestions; suggested facts are unticked chips | typing is never blocked; availability check ≤ 300 ms per keystroke (debounced) |
-| `reveal` | **Three real folds (rev 3, PD73, UX-20).** Mobile (390 px): direction 1 renders as the real page **edge-to-edge** (the live fold at 100 %, no device bezel, no scaled screenshot); the three folds sit in a horizontal **snap carousel** with an 8 % peek of the next fold so all three are seen to exist; a swipe or the dots (with labels) move between them; the DNA chips, the why line and the novelty words live in a **bottom sheet** pulled up from a 56 px handle; "Use this design" is **sticky** at the bottom with "Show 3 more" beside it. Desktop (≥ 1024 px): the three folds **side by side at equal width** (≤ 440 px each, real page rendering, scrollable inside each frame), hover or focus expands one to a full-height scrollable preview (the other two shrink to 25 %), the DNA card under each; "Use this design" under the focused one. Each direction carries its novelty certificate (verdict bands, SF-02). Motion: the folds enter with the 420 ms quint-out scale 0.96 → 1 and an 80 ms stagger; reduced motion: a 180 ms crossfade. Every swipe has a tap alternative (dots, arrow keys) | P6's reveal component `RevealFolds` (`src/components/generate/reveal/**`, P6) and generator (design.md DES-§14.3 follows this layout, PLA-§Q.3); **rev 5 (CRIT2-6): P2 merges second and mounts the core §K.2 P0 stub of `RevealFolds` (props `directions`, `state`, `dnaSlot`, `actionSlot`, `onUse`, `onRetry`), so this row's measurements are proven at the R1 integration once P6's body exists**; each fold is a sandboxed iframe of the draft render at the real viewport width; `reportRevealAction` records `revealMs` | generation ≤ 1.5 s client-side **[measure]**, three preview renders ≤ 1 s server in parallel (reveal at 0:50); pairwise `d ≥ 0.25`, no orange, Design check green; the three folds are visible together at 390 px (screenshot) |
+| `reveal` | **Three real folds (rev 3, PD73, UX-20).** Mobile (390 px): direction 1 renders as the real page **edge-to-edge** (the live fold at 100 %, no device bezel, no scaled screenshot); the three folds sit in a horizontal **snap carousel** with an 8 % peek of the next fold so all three are seen to exist; a swipe or the dots (with labels) move between them; the DNA chips, the why line and the novelty words live in a **bottom sheet** pulled up from a 56 px handle; "Use this design" is **sticky** at the bottom with "Show 3 more" beside it. Desktop (≥ 1024 px): the three folds **side by side at equal width** (≤ 440 px each, real page rendering, scrollable inside each frame), hover or focus expands one to a full-height scrollable preview (the other two shrink to 25 %), the DNA card under each; "Use this design" under the focused one. Each direction carries its novelty certificate (verdict bands, SF-02). Motion: the folds enter with the 420 ms quint-out scale 0.96 → 1 and an 80 ms stagger; reduced motion: a 180 ms crossfade. Every swipe has a tap alternative (dots, arrow keys) | P6's reveal component `RevealFolds` (`src/components/generate/reveal/**`, P6) and generator (design.md DES-§14.3 follows this layout, PLA-§Q.3); **rev 5 (CRIT2-6): P2 merges second and mounts the core §K.2 P0 stub of `RevealFolds` (props `directions`, `state`, `dnaSlot`, `actionSlot`, `onUse`, `onRetry`), so this row's measurements are proven at the R1 integration once P6's body exists**; **rev 6 P0b review F-8:** the directions come from P6's `buildRevealDirections(input): Promise<RevealDirections>` (never built by P2), `directions` is `null` while it is pending (`analysing`) and when it rejected (`error`, with Retry), and a direction's `card` may be `null` (no DNA chips, never an invented card; DES-§14.3); each fold is a sandboxed iframe of the draft render at the real viewport width; `reportRevealAction` records `revealMs` | generation ≤ 1.5 s client-side **[measure]**, three preview renders ≤ 1 s server in parallel (reveal at 0:50); pairwise `d ≥ 0.25`, no orange, Design check green; the three folds are visible together at 390 px (screenshot) |
 | `contact` | "Where should customers reach you?": WhatsApp number (toggle "Use my phone +212 6•• ••• •34"), delivery fee left empty with `onboarding.fee_note` ("Add delivery fees in Checkout & delivery when you know them") | `updateStoreSetting(scope, "store", { whatsapp })` | — |
 | `done` | the dashboard (PLA-§22.17) with the In-review card (§22.7), the **Store Health ring** (PLA-§22.16; the setup group shows what is missing, e.g. "delivery zones empty" as an issue, not a blocker) and the **address card** (PD61) with Copy, QR, WhatsApp share, "Open a test order" and "Create a campaign" (the last two from P3; "Open a test order" is disabled with "after publishing" while no page is live) | `getStoreHealth(scope)`, the address card | first dashboard paint ≤ 1 s after `contact` |
 
@@ -2837,6 +2857,12 @@ less than 30 s ago (design.md UX-06 row).
 
 ### PLA-§22.7 Pending state: the In-review card (PL-02)
 
+**Rev 6 P0b (frozen exports; P0b review F-9, so a track finds them in its part):** the card reads `getReviewCard(scope): Promise<ReviewCard>` and the plan page `listStoreRequests(scope):
+Promise<StoreRequestRow[]>` (`src/lib/platform/requests.ts`, CCR P1-6 / P2-5; real reads through `whereStore`;
+`StoreRequestRow = { id, kind, status, createdAt, outcome: "granted" | "declined" | null }`, P0b review F-15; the
+writes `createStoreRequest`, `withdrawStoreRequest`, `submitForReview`, `answerReviewQuestion`, `submitAppeal` throw
+until P1; asserted in `src/lib/contracts/r1-p0b-platform.ts`).
+
 On the dashboard of a `pending` store (and in a compact form on Pages and Generate):
 - **Before submitting**: title `shell.review.title` ("Your store is in review"), "Works now": build pages, preview,
   upload up to **20 MB until you submit, 100 MB after** (rev 4: `shell.review.works_now` with `{mediaMb}` from
@@ -2941,6 +2967,10 @@ to it ("Calling hours are set in Call center") and P2 builds no hours field here
 
 #### PLA-§22.10.2 Address (`settings/address`) and the live address card (UX-05, **R1**, PD61; core §I.4)
 
+**Rev 6 P0b (frozen exports; P0b review F-9, so a track finds them in its part):** the card's two P3 slots are `TestOrderSlot(p: { pageId: string | null; live: boolean })` and `CampaignSlot()`
+(`src/components/admin/landing/address-slots.tsx`, CCR P2-9; both `ReactElement | null`, render nothing until P3's
+merge; asserted in `src/lib/contracts/r1-p0b-design.ts`).
+
 **The address card** (`src/components/admin/common/address-card.tsx`, P2; props below) is one component used in
 three places: the pages list header (P3 mounts it), the dashboard after the first publish (PLA-§22.17) and the
 onboarding `done` step (PLA-§22.2). Content, top to bottom: the canonical URL (`storeUrl`) in a `<bdi dir="ltr">`
@@ -2980,7 +3010,12 @@ Plan name and its one-line description (no prices: "Beta: free while Store Gen i
 pages, members, agents, exports this month, AI credits this month; versions kept per page as information), the
 feature list (on / off with the lock reason), active boosts with their end date, and **Requests** (owner,
 `billing.manage`): Request a plan change (active, non-hidden plans), Ask for more of a metric, the open requests with
-status and Withdraw (`withdrawStoreRequestAction`), answered requests with the outcome. Subscription history
+status and Withdraw (`withdrawStoreRequestAction`), answered requests with the outcome. **Rev 6 P0b review F-15:** the
+outcome is `listStoreRequests`' `outcome: "granted" | "declined" | null` (`approved` → granted, `rejected` → declined,
+the words of `resolveRequestAction`'s `grant` / `decline` and of `request.answered`); the staff's note (`reason_note`,
+required for a decline) is **internal and never shown to the seller**, exactly like a signup decision (the seller reads
+the category sentence only, PLA-§Q.27), so no read of `src/lib/platform/requests.ts` returns it. A seller-facing
+answer text would be a new field P1 defines through a CCR. Subscription history
 (`store_subscriptions`). Members without `billing.manage` see the page read-only (`billing.read`).
 
 #### PLA-§22.10.5 Market (`settings/market`)
@@ -3104,6 +3139,11 @@ suite); an agent's phone search is refused; results render masked phones only.
 §20.1 (P2 component `src/components/admin/shell/help-sheet.tsx`).
 
 ### PLA-§22.15 Legal re-acceptance sheet (PD17)
+
+**Rev 6 P0b (frozen exports; P0b review F-9, so a track finds them in its part):** `pendingReacceptance(userId): Promise<{ docs: LegalDocSummary[] } | null>` and `recordReacceptance(ctx: UserCtx,
+documentIds, meta: { ipHash: string | null; uaLabel: string }): Promise<void>` (`src/lib/platform/legal.ts`, P1's,
+CCR P2-6; `LegalDocSummary` is the sheet's row; the stub answers `null` (no publisher before P1) and the write throws;
+asserted in `src/lib/contracts/r1-p0b-platform.ts`).
 
 When a published platform document with `requiresReacceptance` is effective and the viewer has not accepted that
 version (checked at layout render, cached 5 min per session, and through `pulse.reaccept`), a blocking sheet (focus
@@ -3506,7 +3546,7 @@ Decision recorded (§3.3): invite codes are `signups.decide` (daily ops) althoug
 | `GET /api/admin/search?q=` | `src/app/api/admin/search/route.ts` | `console.read` | `private, no-store` |
 | `GET /api/admin/stores.csv` | `src/app/api/admin/stores.csv/route.ts` | `console.read` + admin rank | `private, no-store`, `Content-Disposition: attachment` |
 | `GET /api/admin/audit.csv` | `src/app/api/admin/audit.csv/route.ts` | `audit.platform` | same |
-| `GET /api/admin/stores/<id>/media/<key>` | `src/app/api/admin/stores/[id]/media/[key]/route.ts` | `console.read` | `private, no-store`, sandbox CSP (the handler's own: the proxy passes a gated read without the console header set, core §C.3, P0b V-1) |
+| `GET /api/admin/stores/<id>/media/<key>` | `src/app/api/admin/stores/[id]/media/[key]/route.ts` | `console.read` | `private, no-store`, sandbox CSP, nosniff (the handler's own: the proxy passes a gated read without the console CSP and Cache-Control, core §C.3, P0b V-1) and, from the proxy (P0b review F-4), CORP `same-origin`, frame `DENY`, `Referrer-Policy: same-origin`, `X-Robots-Tag: noindex`: the handler never sets CORP `cross-origin` (the store media's value), and the proxy's values win anyway |
 | `GET /api/admin/stores/<id>/exports/<jobId>/<part>` | `src/app/api/admin/stores/[id]/exports/[jobId]/[part]/route.ts` | `stores.close` + signature + fresh step-up | `private, no-store` |
 | `GET /api/admin/backups/<day>` | `src/app/api/admin/backups/[day]/route.ts` | `backups.manage` + fresh step-up | `private, no-store` |
 | `GET /api/app/<h>/pulse` | `src/app/api/app/[store]/pulse/route.ts` (P2) | `storeGuard(req, h, "store.read")` | ETag, `private, no-store` |
@@ -4094,7 +4134,10 @@ git-ignored) and chained into `test:e2e` at their track's merge (core §J.3).
 2. **Onboarding timing** (UX-01 AC): 3 photos, 4× CPU throttle, Cloud AI off, empty model cache → `revealMs ≤ 90,000`;
    "Start without photos" → ≤ 15 s; the typed price is the only price on the generated draft. **Rev 5 (CRIT2-6):** runs
    at the R1 integration (after P6's merge); at P2's own merge the step runs against P6's P0 stubs (`RevealFolds`,
-   `estimateAlpha`) and asserts only the step's flow, routing and `reportRevealAction`.
+   `estimateAlpha`, and the P0b `buildRevealDirections`, whose stub resolves today's generator's three documents with
+   `card: null`, DES-§14.3; P0b review F-8) and asserts only the step's flow (`analysing` with `directions: null`, then
+   `revealed`; a refused product → `error` with Retry), routing ("Use this design" on a stub direction) and
+   `reportRevealAction`.
 3. **Impersonation**: start (30 min) → the ribbon and countdown render → a save attempt toasts and the server refuses →
    End → the profile Activity lists the session; the store's notification exists.
 4. **Kill switches**: `publishing_enabled` off → the tenant banner within 45 s and publish → limit sheet (kill);

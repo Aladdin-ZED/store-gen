@@ -12,8 +12,11 @@
  *    the platform's own Sheets key, and their README tells the owner how to revoke it (EXP-03, §F.10).
  * 4. The test seams never reach Hostinger (§H.7, P0b CCR P5-6 / P7-9): no Hostinger env file (every `.env.hostinger*`
  *    file of the repository root, and the env template the owner copies them from, `.env.example`) sets any of
- *    TEST_SEAM_VARS or SG_TEST_CONTEXT. A finding names the file and the variable, never a value; the files' values
- *    are never printed. Self-checked first on synthetic scratch files, in both directions.
+ *    NEVER_DEPLOYED_VARS: TEST_SEAM_VARS, SG_TEST_CONTEXT and (P0b review F-1) the Anthropic SDK's own
+ *    ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN and ANTHROPIC_CUSTOM_HEADERS, which the SDK reads unguarded and which
+ *    would send the platform key and every prompt elsewhere. A finding names the file and the variable, never a
+ *    value; the files' values are never printed. Self-checked first on synthetic scratch files, in both directions.
+ *    The environment pushed to Hostinger is checked after each push by HANDOFF §4's variable-name listing.
  */
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -25,7 +28,7 @@ import { readmeMd } from "@/lib/export/readme";
 import { exportKeyState, NO_EXPORT_KEY, parseServiceAccountKey, SAME_AS_APP_KEY, storedKey } from "@/lib/export/service-account";
 import { errorSummary } from "@/lib/orders/log";
 import { deriveKey } from "@/lib/security/crypto";
-import { TEST_SEAM_VARS } from "@/lib/security/test-seams";
+import { NEVER_DEPLOYED_VARS, TEST_SEAM_VARS } from "@/lib/security/test-seams";
 import { redactStoreSetting, STORE_SETTINGS } from "@/lib/settings/store-registry";
 
 let failures = 0;
@@ -200,8 +203,16 @@ check(withoutKey.includes("never the platform's own key") && withoutKey.includes
 /* 4. test seams in Hostinger env files                                */
 /* ------------------------------------------------------------------ */
 
-/** Variables a Hostinger env file must never set: the seams of src/lib/security/test-seams.ts and §E.4's context seam. */
-const NEVER_ON_HOSTINGER: readonly string[] = [...TEST_SEAM_VARS, "SG_TEST_CONTEXT"];
+/**
+ * Variables a Hostinger env file must never set: the seams of src/lib/security/test-seams.ts, §E.4's context seam and
+ * the Anthropic SDK's redirecting variables (P0b review F-1); one list with the boot check (`NEVER_DEPLOYED_VARS`).
+ */
+const NEVER_ON_HOSTINGER: readonly string[] = NEVER_DEPLOYED_VARS;
+check(
+  [...TEST_SEAM_VARS, "SG_TEST_CONTEXT", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS"].every((v) => NEVER_ON_HOSTINGER.includes(v)),
+  `the refused list holds the seams, SG_TEST_CONTEXT and the SDK's ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_CUSTOM_HEADERS (${NEVER_ON_HOSTINGER.join(", ")})`,
+);
+check(!NEVER_ON_HOSTINGER.includes("ANTHROPIC_API_KEY"), "ANTHROPIC_API_KEY stays allowed on Hostinger (the fallback key, §H.7)");
 /** The env template the Hostinger files are copied from (its header points at hPanel); committed, so it is checked too. */
 const HOSTINGER_TEMPLATE = ".env.example";
 
@@ -240,7 +251,8 @@ const findingText = (f: { file: string; name: string }) => `${f.file} sets ${f.n
   const good = mkdtempSync(join(tmpdir(), "sg-secrets-good-"));
   try {
     writeFileSync(join(bad, ".env.hostinger"), `APP_SECRET=${marker}\nSG_E2E=1\n# SG_AI_HARNESS=1\nexport SG_AI_BASE_URL=http://127.0.0.1:4011/${marker}\r\nSG_E2E=1\n`);
-    writeFileSync(join(bad, ".env.hostinger.previous"), `SG_TEST_CONTEXT = 1\nCRON_KEY=${marker}\n`);
+    writeFileSync(join(bad, ".env.hostinger.previous"), `SG_TEST_CONTEXT = 1\nCRON_KEY=${marker}\nANTHROPIC_API_KEY=sk-ant-${marker}\nANTHROPIC_BASE_URL=https://${marker}.example\nexport ANTHROPIC_AUTH_TOKEN=${marker}\n`);
+    writeFileSync(join(bad, ".env.hostinger.sdk"), `# ANTHROPIC_BASE_URL=https://api.anthropic.com\nANTHROPIC_CUSTOM_HEADERS=x-probe: ${marker}\n`);
     writeFileSync(join(bad, HOSTINGER_TEMPLATE), "# template\nSG_E2E_MOCK_ORIGIN=\nSG_AI_NO_AFTER=1\n");
     writeFileSync(join(bad, ".env.local"), `SG_AI_HARNESS=${marker}\n`);
     const found = seamFindings(hostingerEnvFiles(bad));
@@ -250,13 +262,16 @@ const findingText = (f: { file: string; name: string }) => `${f.file} sets ${f.n
           { file: ".env.hostinger", name: "SG_E2E" },
           { file: ".env.hostinger", name: "SG_AI_BASE_URL" },
           { file: ".env.hostinger.previous", name: "SG_TEST_CONTEXT" },
+          { file: ".env.hostinger.previous", name: "ANTHROPIC_BASE_URL" },
+          { file: ".env.hostinger.previous", name: "ANTHROPIC_AUTH_TOKEN" },
+          { file: ".env.hostinger.sdk", name: "ANTHROPIC_CUSTOM_HEADERS" },
           { file: ".env.example", name: "SG_E2E_MOCK_ORIGIN" },
           { file: ".env.example", name: "SG_AI_NO_AFTER" },
         ]),
-      `seam self-check: every .env.hostinger* file and the template are read, a variable set even empty is found once per file, comments and .env.local are not (${JSON.stringify(found)})`,
+      `seam self-check: every .env.hostinger* file and the template are read, a variable set even empty is found once per file, the SDK's redirecting variables are found and ANTHROPIC_API_KEY is not, comments and .env.local are not (${JSON.stringify(found)})`,
     );
     check(!found.map(findingText).some((t) => t.includes(marker) || t.includes("127.0.0.1")), "seam self-check: a finding names the file and the variable, never a value");
-    writeFileSync(join(good, ".env.hostinger"), `APP_SECRET=${marker}\n# SG_E2E=1 (never on Hostinger)\nPLATFORM_URL=https://example.test\nSG_E2EX=1\nXSG_E2E=1\n`);
+    writeFileSync(join(good, ".env.hostinger"), `APP_SECRET=${marker}\n# SG_E2E=1 (never on Hostinger)\nPLATFORM_URL=https://example.test\nSG_E2EX=1\nXSG_E2E=1\nANTHROPIC_API_KEY=sk-ant-${marker}\nANTHROPIC_BASE_URLS=1\n`);
     writeFileSync(join(good, HOSTINGER_TEMPLATE), "# SG_TEST_CONTEXT is never set here\nDATABASE_URL=\n");
     writeFileSync(join(good, ".env.local"), "SG_E2E=1\nSG_TEST_CONTEXT=1\n");
     const clean = seamFindings(hostingerEnvFiles(good));

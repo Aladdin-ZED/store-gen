@@ -18,7 +18,7 @@ import type { ReactElement } from "react";
 import type * as platformDesignFields from "@/components/admin/brand/platform-design-fields";
 import type * as addressSlots from "@/components/admin/landing/address-slots";
 import type * as revealDirections from "@/components/generate/reveal/directions";
-import type { RevealDirection } from "@/components/generate/reveal/RevealFolds";
+import type { RevealDirections } from "@/components/generate/reveal/RevealFolds";
 import type { LandingRenderContext } from "@/landing/context";
 import type * as generatedAssets from "@/landing/generated/assets";
 import type { AiPolicy, DeviceInfo } from "@/lib/ai/policy";
@@ -63,10 +63,14 @@ export type P6Design = [
         category: Product["category"];
         locale: Locale;
         photos: readonly PhotoFacts[];
+        // P0b review F-8: what today's generator needs for the degraded stub (and P6's run for its seed)
+        market: GenerateInput["market"];
+        seedBase: number;
       }
     >
   >,
-  Assert<Equals<typeof revealDirections.buildRevealDirections, (input: revealDirections.RevealInput) => readonly [RevealDirection, RevealDirection, RevealDirection]>>,
+  // P0b review F-8: async (DES-§14.2 has server round trips); the stub resolves today's generator's docs with no card
+  Assert<Equals<typeof revealDirections.buildRevealDirections, (input: revealDirections.RevealInput) => Promise<RevealDirections>>>,
   // PLA-§13.1: P1 mounts it on /admin/settings/general
   Assert<Equals<typeof platformDesignFields.PlatformDesignFields, (p: { value: PlatformDesignSetting; onSave(v: PlatformDesignSetting): Promise<void> }) => El>>,
 ];

@@ -10,6 +10,11 @@
  * and its "Use this design" button, the action slot under them; a skeleton while analysing, one sentence and "Try
  * again" on error. P6 replaces the body (the live 390 px folds, the carousel with its 8 % peek, the DNA bottom sheet,
  * the motion of DES-§14.3) and never changes the props.
+ *
+ * The degraded contract (P0b review F-8, DES-§14.3): `directions` is null while `analysing` (P2 mounts the reveal
+ * before `buildRevealDirections` resolves) and on `error` (it rejected); `revealed` always has three. A direction's
+ * `card` is null when no GenomeCard exists (P6's P0b stub builds the directions with today's generator and invents no
+ * card): the fold, its label and "Use this design" render, the DNA chips do not.
  */
 import type { ReactNode } from "react";
 import { LandingThumbnail, type PreviewAssets } from "@/components/preview";
@@ -18,25 +23,35 @@ import type { GenomeCard } from "@/lib/design/digest";
 import { useT } from "@/lib/i18n/admin/client";
 import type { PageDoc } from "@/lib/page/schema";
 
-export type RevealDirection = { id: string; doc: PageDoc; card: GenomeCard; label: string };
+/** `card` null: no DNA card for this direction (P6's engine not merged, or its digest failed); never an invented one */
+export type RevealDirection = { id: string; doc: PageDoc; card: GenomeCard | null; label: string };
+export type RevealDirections = readonly [RevealDirection, RevealDirection, RevealDirection];
 
-export interface RevealFoldsProps {
-  directions: readonly [RevealDirection, RevealDirection, RevealDirection];
-  state: "analysing" | "revealed" | "error";
+export type RevealFoldsProps = {
   /** P7's <DirectorWhy directionId>, inside each DNA card / bottom sheet */
   dnaSlot?: (directionId: string) => ReactNode;
   /** P7's <DirectorPassControl>, the bottom action row beside "Use this design" */
   actionSlot?: ReactNode;
   onUse(directionId: string): void;
   onRetry?(): void;
-}
+} & (
+  | { state: "revealed"; directions: RevealDirections }
+  /** null until buildRevealDirections resolves */
+  | { state: "analysing"; directions: RevealDirections | null }
+  /** null when it rejected */
+  | { state: "error"; directions: RevealDirections | null }
+);
 
 /** The stub renders without the store's files: images resolve to nothing until P6's reveal loads them. */
 const NO_ASSETS: PreviewAssets = {};
 
-export function RevealFolds({ directions, state, dnaSlot, actionSlot, onUse, onRetry }: RevealFoldsProps) {
+/** The analysing skeleton's three placeholders when the directions are not built yet. */
+const PENDING = ["pending-1", "pending-2", "pending-3"] as const;
+
+export function RevealFolds(props: RevealFoldsProps) {
+  const { dnaSlot, actionSlot, onUse, onRetry } = props;
   const t = useT();
-  if (state === "error") {
+  if (props.state === "error") {
     return (
       <div className="adm-surface-flat flex flex-wrap items-center gap-3 p-5 text-sm" role="alert">
         <p className="min-w-0 flex-1 text-pretty">{t("design.reveal.error")}</p>
@@ -48,18 +63,19 @@ export function RevealFolds({ directions, state, dnaSlot, actionSlot, onUse, onR
       </div>
     );
   }
-  if (state === "analysing") {
+  if (props.state === "analysing") {
     return (
       <div className="grid gap-3" aria-busy="true">
         <p className="text-[0.85rem] text-muted-foreground">{t("design.reveal.analysing")}</p>
         <ul className="grid gap-4 md:grid-cols-3">
-          {directions.map((d) => (
-            <li key={d.id} className="aspect-[9/16] max-h-[520px] rounded-xl bg-muted" />
+          {(props.directions?.map((d) => d.id) ?? PENDING).map((id) => (
+            <li key={id} className="aspect-[9/16] max-h-[520px] rounded-xl bg-muted" />
           ))}
         </ul>
       </div>
     );
   }
+  const { directions } = props;
   return (
     <div className="grid gap-4">
       <ul className="grid gap-4 md:grid-cols-3">

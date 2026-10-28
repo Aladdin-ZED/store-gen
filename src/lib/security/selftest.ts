@@ -26,10 +26,21 @@
  *     origin, a non-loopback host, credentials or a path in the URL, a database not cod_test_, the boolean seams'
  *     own value and the app origin), on with every guard in production and in any NODE_ENV, off with one missing;
  *     testSeam() computed per call and logging one refusal line per process and seam, never a value.
+ * 11. The Anthropic client endpoint (AI-§B.1, P0b review F-1): `@anthropic-ai/sdk` reads ANTHROPIC_BASE_URL,
+ *     ANTHROPIC_AUTH_TOKEN and ANTHROPIC_LOG for any option left undefined; with all three set to hostile values, a
+ *     real SDK client built as AI-§B.1 says (`...anthropicEndpoint()`) talks to api.anthropic.com with X-Api-Key and
+ *     no Authorization header, and logs nothing; the seam's loopback origin only with every guard; the boot check
+ *     names the variables (never a value) outside a cod_test_ database.
+ * 12. The seam variables are read nowhere else (P0b review F-2): no identifier or string literal of src/** names one
+ *     of TEST_SEAM_VARS or the SDK's redirecting variables outside test-seams.ts and these selftests (comments are
+ *     free); self-checked on fixtures first.
  * The export allow-list rule (`originAllowed`, SEC-23) is proven by test:public-api; T2's `allowlistAddress()` behind
  * Cloudflare (SEC-14) and `p:login:acct` (SEC-22) join when their code merges.
  */
 import Module from "node:module";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import ts from "typescript";
 import type { PlatformUiArea } from "./headers";
 
 // the modules under test are marked `import "server-only"`; outside Next that import throws
@@ -85,6 +96,55 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void): void
       else env[k] = v;
     }
   }
+}
+
+async function withEnvAsync(vars: Record<string, string | undefined>, fn: () => Promise<void>): Promise<void> {
+  const prev: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(vars)) {
+    prev[k] = env[k];
+    if (v === undefined) delete env[k];
+    else env[k] = v;
+  }
+  try {
+    await fn();
+  } finally {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete env[k];
+      else env[k] = v;
+    }
+  }
+}
+
+/**
+ * Section 12: the identifiers and string literals of `text` that name one of `names` (a string counts when it holds
+ * the name as a whole word, so "SG_E2EX" is not "SG_E2E"); comments are not code and are skipped. `line` is 1-based.
+ */
+function seamNameUses(file: string, text: string, names: readonly string[]): { line: number; name: string }[] {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const wanted = new Set(names);
+  const out: { line: number; name: string }[] = [];
+  const hit = (n: ts.Node, name: string) => out.push({ line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, name });
+  const visit = (n: ts.Node) => {
+    if (ts.isIdentifier(n) || ts.isPrivateIdentifier(n)) {
+      if (wanted.has(n.text)) hit(n, n.text);
+    } else if (ts.isStringLiteralLike(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) {
+      for (const name of names) if (new RegExp(`(^|[^A-Za-z0-9_])${name}($|[^A-Za-z0-9_])`).test(n.text)) hit(n, name);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/** Every .ts / .tsx file under `dir` (node_modules and generated output never sit under src/). */
+function sourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...sourceFiles(p));
+    else if (/\.tsx?$/.test(e.name)) out.push(p);
+  }
+  return out;
 }
 
 const xff = (value: string, extra: Record<string, string> = {}) => new Headers({ "x-forwarded-for": value, ...extra });
@@ -694,6 +754,119 @@ async function main(): Promise<void> {
     } finally {
       console.error = orig;
     }
+  }
+
+  /* 11. The Anthropic client endpoint (AI-§B.1, core §H.7; P0b review F-1) ----------------------- */
+  console.log("anthropic endpoint (AI-§B.1)");
+  {
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const key = "sk-ant-securitySelftestProbe-4Kq9Zx2Lm7Wv3Tn8";
+    const envToken = "envTokenProbe-8Jd3Hs6Qa1Rk5";
+    /** what a hostile or stray environment carries: the SDK reads all three for an option left undefined */
+    const hostile = { ANTHROPIC_BASE_URL: "https://attacker.example", ANTHROPIC_AUTH_TOKEN: envToken, ANTHROPIC_LOG: "debug" };
+    const seen: { url: string; headers: Headers }[] = [];
+    const recorder = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      seen.push({ url: String(url instanceof Request ? url.url : url), headers: new Headers(init?.headers) });
+      return new Response(JSON.stringify({ data: [], has_more: false, first_id: null, last_id: null }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const logged: string[] = [];
+    const quiet = { log: console.log, info: console.info, debug: console.debug, warn: console.warn, error: console.error };
+    // the control: the SDK constructor on its own still follows the environment (why the helper exists)
+    withEnv({ ...hostile, SG_E2E: undefined, SG_AI_BASE_URL: undefined }, () => {
+      const bare = new Anthropic({ apiKey: key, maxRetries: 0, timeout: 90_000 });
+      check("control: a bare `new Anthropic({ apiKey })` follows ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN (the SDK has no guard)", bare.baseURL === "https://attacker.example" && bare.authToken === envToken, `${bare.baseURL} / ${bare.authToken === envToken}`);
+      const undef = new Anthropic({ apiKey: key, baseURL: undefined });
+      check("control: `baseURL: undefined` (a seam read that answered null) is the environment's too", undef.baseURL === "https://attacker.example", undef.baseURL);
+    });
+    await withEnvAsync({ ...hostile, SG_E2E: undefined, SG_AI_BASE_URL: undefined }, async () => {
+      eq("anthropicEndpoint: seam off → the Claude API, no Bearer token, the SDK log pinned", seams.anthropicEndpoint(), { baseURL: "https://api.anthropic.com", authToken: null, logLevel: "warn" });
+      const client = new Anthropic({ apiKey: key, ...seams.anthropicEndpoint(), maxRetries: 0, timeout: 90_000, fetch: recorder });
+      eq("the AI-§B.1 client: baseURL api.anthropic.com whatever ANTHROPIC_BASE_URL says", client.baseURL, "https://api.anthropic.com");
+      eq("the AI-§B.1 client: authToken null whatever ANTHROPIC_AUTH_TOKEN says", client.authToken, null);
+      for (const k of Object.keys(quiet) as (keyof typeof quiet)[]) console[k] = (...a: unknown[]) => void logged.push(a.map(String).join(" "));
+      try {
+        await client.models.list();
+      } finally {
+        Object.assign(console, quiet);
+      }
+    });
+    const req = seen[0];
+    check("the AI-§B.1 client: one request, to https://api.anthropic.com/v1/", seen.length === 1 && !!req && req.url.startsWith("https://api.anthropic.com/v1/"), seen.map((r) => r.url).join(" "));
+    check("the AI-§B.1 client: the key goes as X-Api-Key, no Authorization header", req?.headers.get("x-api-key") === key && req.headers.get("authorization") === null, req ? [...req.headers.keys()].join(",") : "no request");
+    check("the AI-§B.1 client: ANTHROPIC_LOG=debug logs nothing (no URL, no key, no token)", !logged.some((l) => l.includes(key) || l.includes(envToken) || l.includes("/v1/") || l.includes("attacker")), logged.join(" | ").slice(0, 300));
+    withEnv({ ...all, ...hostile }, () => {
+      eq("anthropicEndpoint: the seam's loopback origin with every guard (the SDK's own variable never wins)", seams.anthropicEndpoint().baseURL, "http://localhost:4011");
+      eq("the AI-§B.1 client on the seam: the loopback origin, no Bearer token", ((c) => [c.baseURL, c.authToken])(new Anthropic({ apiKey: key, ...seams.anthropicEndpoint() })), ["http://localhost:4011", null]);
+    });
+    const prodDb = "mysql://u@127.0.0.1:3306/u641677794_storegen";
+    withEnv({ ...all, ...hostile, DATABASE_URL: prodDb }, () => {
+      eq("anthropicEndpoint: a refused seam (production database) → the Claude API, never the environment's", seams.anthropicEndpoint().baseURL, "https://api.anthropic.com");
+    });
+    eq("NEVER_DEPLOYED_VARS: the seams, SG_TEST_CONTEXT, the SDK's redirecting variables", [...seams.NEVER_DEPLOYED_VARS], [...seams.TEST_SEAM_VARS, "SG_TEST_CONTEXT", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS"]);
+    eq("deployedTestVars: the set ones in list order, blank ones skipped", seams.deployedTestVars({ DATABASE_URL: prodDb, ANTHROPIC_BASE_URL: "https://x.example", SG_E2E: "1", SG_TEST_CONTEXT: " ", ANTHROPIC_API_KEY: key }), ["SG_E2E", "ANTHROPIC_BASE_URL"]);
+    eq("deployedTestVars: nothing on a cod_test_ database (the e2e runs set them on purpose)", seams.deployedTestVars({ ...all, ...hostile, DATABASE_URL: TEST_DB }), []);
+    eq("deployedTestVars: no DATABASE_URL counts as not a test database", seams.deployedTestVars({ ANTHROPIC_AUTH_TOKEN: envToken }), ["ANTHROPIC_AUTH_TOKEN"]);
+    {
+      const lines: string[] = [];
+      const orig = console.error;
+      console.error = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
+      const unset = { SG_AI_BASE_URL: undefined, SG_E2E_MOCK_ORIGIN: undefined, SG_AI_NO_AFTER: undefined, SG_AI_HARNESS: undefined, SG_TEST_CONTEXT: undefined, ANTHROPIC_CUSTOM_HEADERS: undefined };
+      try {
+        withEnv({ ...unset, ...hostile, DATABASE_URL: prodDb, SG_E2E: "1" }, () => check("bootSeamCheck: true when one is set", seams.bootSeamCheck()));
+        withEnv({ ...unset, ...hostile, DATABASE_URL: TEST_DB }, () => check("bootSeamCheck: false on a cod_test_ database", !seams.bootSeamCheck()));
+      } finally {
+        console.error = orig;
+      }
+      eq("bootSeamCheck: one [security] line naming the variables", lines, ["[security] test-only variables set outside a cod_test_ database: SG_E2E, ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN. Remove them (§H.7)."]);
+      check("bootSeamCheck: never a value", !lines.some((l) => l.includes(envToken) || l.includes("attacker")), lines.join(" | "));
+    }
+  }
+
+  /* 12. The seam variables are read nowhere else in src/** (P0b review F-2) ------------------------ */
+  console.log("seam variables read only through test-seams.ts (§H.7)");
+  {
+    const guarded = [...seams.TEST_SEAM_VARS, ...seams.ANTHROPIC_SDK_ENV_VARS];
+    const uses = (text: string) => seamNameUses("fixture.ts", text, guarded).map((u) => `${u.line}:${u.name}`);
+    eq(
+      "self-check: a property read, an index, a destructuring, a string, a template part, a key are found",
+      uses(
+        [
+          "const a = process.env.SG_AI_BASE_URL;",
+          'const b = process.env["SG_E2E_MOCK_ORIGIN"];',
+          "const { SG_E2E } = process.env;",
+          'const c = "ANTHROPIC_BASE_URL";',
+          "const d = `${a} SG_AI_NO_AFTER`;",
+          "const e = { ANTHROPIC_AUTH_TOKEN: 1 };",
+        ].join("\n"),
+      ),
+      ["1:SG_AI_BASE_URL", "2:SG_E2E_MOCK_ORIGIN", "3:SG_E2E", "4:ANTHROPIC_BASE_URL", "5:SG_AI_NO_AFTER", "6:ANTHROPIC_AUTH_TOKEN"],
+    );
+    eq(
+      "self-check: comments, longer names and other variables are not uses",
+      uses(
+        [
+          "// SG_E2E=1 is never set here",
+          "/** SG_AI_HARNESS: see test-seams.ts */",
+          'const a = process.env.SG_E2EX ?? process.env["XSG_E2E"] ?? process.env.ANTHROPIC_API_KEY;',
+          'const b = "SG_TEST_CONTEXT";',
+        ].join("\n"),
+      ),
+      [],
+    );
+    const root = join(__dirname, "..", "..", "..");
+    const allowed = (rel: string) => rel === "src/lib/security/test-seams.ts" || /^src\/lib\/security\/selftest[^/]*\.ts$/.test(rel);
+    const quick = new RegExp(guarded.join("|"));
+    const found: string[] = [];
+    let scanned = 0;
+    for (const file of sourceFiles(join(root, "src"))) {
+      const rel = relative(root, file).replace(/\\/g, "/");
+      if (allowed(rel)) continue;
+      scanned++;
+      const text = readFileSync(file, "utf8");
+      if (!quick.test(text)) continue;
+      for (const u of seamNameUses(rel, text, guarded)) found.push(`${rel}:${u.line} ${u.name}`);
+    }
+    check(`no file of src/** names a seam or SDK variable in code outside test-seams.ts (${scanned} files)`, found.length === 0 && scanned > 500, found.join(", ") || `only ${scanned} files scanned`);
   }
 }
 

@@ -14,8 +14,10 @@
  * budget, so a re-cut cannot declare a share below its own measurement;
  * group ids and scripts are unique; every script that package.json's `test` chain runs, and `pretest`, belongs to a
  * group of the current release (a new suite joins `npm test` only with a budget), and the `test` entry runs nothing
- * but `npm run <script>` (a direct `tsx` / `node` command would join the chain unbudgeted and untimed). The harness
- * checks its own chain parsing first and exits 2 when that self-check fails.
+ * but `npm run <script>` (a direct `tsx` / `node` command would join the chain unbudgeted and untimed); and (P0b review
+ * F-6) no script the core spec lists as DB-backed (the script cells of docs/STORE-SAAS.md §J.2's table) or that
+ * `test:db` chains sits in a group of any release, since `npm test` runs with no database. The harness checks its own
+ * chain and table parsing first and exits 2 when that self-check fails.
  *
  * Timed: each group's scripts run one after the other with package.json's command (node_modules/.bin on PATH, no
  * npm wrapper, so npm's own start-up is not billed to a suite). A script package.json does not define yet, or whose
@@ -32,6 +34,7 @@ import { z } from "zod";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const TABLE_FILE = path.join(ROOT, "scripts", "qa", "test-budget.json");
+const SPEC_FILE = path.join(ROOT, "docs", "STORE-SAAS.md");
 
 const Group = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]*$/),
@@ -121,8 +124,33 @@ function testChain(scripts: Record<string, string>): { chain: string[]; direct: 
   return { chain: scripts.pretest ? ["pretest", ...chain] : chain, direct };
 }
 
-function staticChecks(table: Table, scripts: Record<string, string>): string[] {
+/**
+ * The DB-backed scripts of the core spec (P0b review F-6): every `test:` / `qa:` name in the first cell of a row of
+ * §J.2's table ("DB-backed (`npm run test:db`; …)"), from its heading to the next `### ` heading. A name only mentioned
+ * in a row's other cells is not one of them.
+ */
+function dbBackedScripts(spec: string): string[] {
+  const start = spec.search(/^### J\.2 /m);
+  if (start < 0) return [];
+  const rest = spec.slice(start + 1);
+  const end = rest.search(/^### /m);
+  const out = new Set<string>();
+  for (const line of (end < 0 ? rest : rest.slice(0, end)).split(/\r?\n/)) {
+    if (!line.startsWith("| `")) continue;
+    const first = line.slice(2).split(" | ")[0] ?? "";
+    for (const m of first.matchAll(/`((?:test|qa):[\w:.-]+)`/g)) out.add(m[1]!);
+  }
+  return [...out];
+}
+
+/** The scripts `npm run test:db` chains (`npm run <name>` parts). */
+function dbChain(scripts: Record<string, string>): string[] {
+  return (scripts["test:db"] ?? "").split(/&&|\|\||;/).flatMap((p) => /^\s*npm\s+run\s+([\w:.-]+)/.exec(p)?.[1] ?? []);
+}
+
+function staticChecks(table: Table, scripts: Record<string, string>, dbBacked: readonly string[] = []): string[] {
   const problems: string[] = [];
+  const db = new Set([...dbBacked, ...dbChain(scripts)]);
   for (const [name, r] of Object.entries(table.releases)) {
     const groups = groupsOf(table, name);
     const sum = groups.reduce((n, g) => n + g.budgetSec, 0);
@@ -138,6 +166,7 @@ function staticChecks(table: Table, scripts: Record<string, string>): string[] {
         const prev = owners.get(s);
         if (prev && prev !== g.id) problems.push(`${name}: script ${s} is in two groups (${prev}, ${g.id})`);
         owners.set(s, g.id);
+        if (db.has(s)) problems.push(`${name}: group ${g.id} budgets ${s}, which is DB-backed (core §J.2 or the test:db chain): npm test runs with no database, so it belongs in test:db, never in a group`);
       }
     }
     for (const [id, n] of ids) if (n > 1) problems.push(`${name}: group id "${id}" appears ${n} times`);
@@ -166,6 +195,24 @@ function selfCheck(): string[] {
   same("static: an unbudgeted script fails", staticChecks(table, { test: "npm run a && npm run b", a: "tsx a.ts", b: "tsx b.ts" }).length, 1);
   const under: Table = { current: "R", releases: { R: { ceilingSec: 10, totalSec: 5, groups: [{ id: "g", label: "g", owner: "m", budgetSec: 5, measuredSec: 6, scripts: ["a"] }] } } };
   same("static: a share below its own measurement fails", staticChecks(under, { test: "npm run a", a: "tsx a.ts" }).length, 1);
+  // P0b review F-6: a DB-backed suite in an offline group fails, from the spec's §J.2 table or from the test:db chain
+  const spec = [
+    "### J.1 `npm test`",
+    "| `test:a` | x | y |",
+    "### J.2 DB-backed (`npm run test:db`; local XAMPP MariaDB)",
+    "| Script | File | Checks |",
+    "|---|---|---|",
+    "| `test:q`, `test:r` (P0b: run as `node --conditions=react-server`, like `test:s`) | `scripts/qa/q.ts` | mentions `test:t` |",
+    "| `qa:u` | f | c |",
+    "### J.3 HTTP",
+    "| `qa:v` | f | c |",
+  ].join("\n");
+  same("§J.2 parsing: first cells only, from the J.2 heading to the next", dbBackedScripts(spec), ["test:q", "test:r", "test:s", "qa:u"]);
+  same("test:db chain parsing", dbChain({ "test:db": "npm run m && npm run n -- --x; npm run o" }), ["m", "n", "o"]);
+  const offline: Table = { current: "R", releases: { R: { ceilingSec: 10, totalSec: 5, groups: [{ id: "g", label: "g", owner: "m", budgetSec: 5, scripts: ["a", "test:q"] }] } } };
+  same("static: a §J.2 script in a group fails", staticChecks(offline, { test: "npm run a", a: "tsx a.ts" }, ["test:q"]).length, 1);
+  same("static: a test:db script in a group fails", staticChecks(offline, { test: "npm run a", a: "tsx a.ts", "test:db": "npm run test:q" }).length, 1);
+  same("static: the same table passes with no DB-backed script", staticChecks(offline, { test: "npm run a", a: "tsx a.ts" }, ["test:z"]).length, 0);
   return out;
 }
 
@@ -223,7 +270,15 @@ function main(): void {
     die(`cannot read package.json: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  const problems = staticChecks(table, scripts);
+  let spec: string;
+  try {
+    spec = readFileSync(SPEC_FILE, "utf8");
+  } catch (e) {
+    die(`cannot read ${path.relative(ROOT, SPEC_FILE)} (the §J.2 DB-backed list): ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const dbBacked = dbBackedScripts(spec);
+  if (dbBacked.length < 5) die(`docs/STORE-SAAS.md §J.2 lists ${dbBacked.length} DB-backed scripts: the table was not found or not parsed`);
+  const problems = staticChecks(table, scripts, dbBacked);
   const staticCount = problems.length;
   const release = table.releases[table.current]!;
   const groups = groupsOf(table, table.current);

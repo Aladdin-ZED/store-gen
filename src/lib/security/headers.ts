@@ -164,6 +164,22 @@ export function platformUiHeaders(nonce: string, opts: PlatformUiOptions = {}): 
 }
 
 /**
+ * The console media proxy (`GET /api/admin/stores/<id>/media/<key>`, PLA-§M.2; P0b V-1 and review F-4): the console
+ * set without the two headers its handler owns. The handler's sandbox CSP and `private, no-store` must reach the
+ * client, so the proxy sets neither; everything else stays the console's (frame DENY, `Referrer-Policy: same-origin`,
+ * CORP `same-origin`, noindex), and since the proxy's value wins a handler cannot loosen CORP to `cross-origin` (a
+ * tenant page on a sibling store host must never embed another store's console media with a staff session).
+ */
+export function consoleMediaHeaders(cls?: HostClass | null): Record<string, string> {
+  return {
+    ...baseSecurityHeaders({ frame: "deny", cls }),
+    "Referrer-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "X-Robots-Tag": "noindex, nofollow, noarchive",
+  };
+}
+
+/**
  * Every redirect the proxy produces (§C.3 step 4; the 303 gate, the 307 / 308 host moves): base headers and
  * `Cache-Control: private, no-store`. (Canonical store 308s from the store routes are `public, max-age=300`.)
  */

@@ -352,14 +352,15 @@ export type P4ConsoleReads = [
       typeof profile.recordPlatformReveal,
       (
         ctx: PlatformCtx,
-        scope: StoreScope,
+        // P0b review F-3: the console's platform scope of the store (platformScope), which the reveal scope upgrades
+        scope: StoreScope & { readonly kind: "platform" },
         orderId: string,
         reason: string,
       ) => Promise<{ e164: string; name: string; address: string | null; city: string | null; note: string | null } | null>
     >
   >,
   // P0b (CCR P4-8, D71): the one staff write scope, for the reveal's event only (lint L6 `reveal-scope`)
-  Assert<Equals<typeof platformSeam.platformRevealScope, (ctx: PlatformCtx, storeId: string) => WriteScope>>,
+  Assert<Equals<typeof platformSeam.platformRevealScope, (ctx: PlatformCtx, scope: StoreScope & { readonly kind: "platform" }) => WriteScope>>,
   Assert<Equals<typeof profile.orderRiskMix, (scope: StoreScope, days: 28) => Promise<{ low: number; check: number; high: number; honeypot: number; n: number }>>>,
   Assert<Equals<typeof profile.searchOrders, (scope: StoreScope, q: string, viewer: { userId: string; role: StoreRole }, limit: 8) => Promise<SearchHit[]>>>,
 ];
@@ -880,18 +881,23 @@ export type P6Director = [
   Assert<Equals<RenderDigest["gates"], { hard: GateId[]; soft: GateId[]; slop: number; q: number }>>,
   Assert<Equals<RenderDigest["hero"]["fold"], FoldReport>>,
   // the reveal component P2 mounts (CRIT2-6): props exactly as §K.2
-  Assert<Equals<revealMod.RevealDirection, { id: string; doc: PageDoc; card: GenomeCard; label: string }>>,
+  // P0b review F-8 (the degraded contract, DES-§14.3): a card may be null (never invented), and the directions are
+  // null while analysing and on error, so P2 mounts the reveal before buildRevealDirections resolves
+  Assert<Equals<revealMod.RevealDirection, { id: string; doc: PageDoc; card: GenomeCard | null; label: string }>>,
+  Assert<Equals<revealMod.RevealDirections, readonly [revealMod.RevealDirection, revealMod.RevealDirection, revealMod.RevealDirection]>>,
   Assert<
     Equals<
       revealMod.RevealFoldsProps,
       {
-        directions: readonly [revealMod.RevealDirection, revealMod.RevealDirection, revealMod.RevealDirection];
-        state: "analysing" | "revealed" | "error";
         dnaSlot?: (directionId: string) => ReactNode;
         actionSlot?: ReactNode;
         onUse(directionId: string): void;
         onRetry?(): void;
-      }
+      } & (
+        | { state: "revealed"; directions: revealMod.RevealDirections }
+        | { state: "analysing"; directions: revealMod.RevealDirections | null }
+        | { state: "error"; directions: revealMod.RevealDirections | null }
+      )
     >
   >,
   Assert<Equals<Parameters<typeof revealMod.RevealFolds>, [revealMod.RevealFoldsProps]>>,

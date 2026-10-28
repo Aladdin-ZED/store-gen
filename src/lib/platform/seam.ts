@@ -148,12 +148,16 @@ export function platformScope(ctx: PlatformCtx, storeId: string): StoreScope & {
 
 /**
  * The one sanctioned staff write (D71; P0b, CCR P4-8): the `phone_revealed` event of `recordPlatformReveal`
- * (src/lib/orders/profile.ts, PLA-§7.4), on the store's order. `pii.reveal` with a fresh step-up, checked here again
- * whatever the caller checked; the scope is a system one, so the event repository accepts it without a cast. Lint L6
- * (`reveal-scope`) refuses a call anywhere but src/lib/orders/profile.ts.
+ * (src/lib/orders/profile.ts, PLA-§7.4), on the store's order. It upgrades the console's own platform scope of that
+ * store (`platformScope(ctx, storeId)`, the scope recordPlatformReveal receives), never a bare store id (P0b review
+ * F-3). `pii.reveal` with a fresh step-up, checked here again whatever the caller checked; the scope is a system one,
+ * so the event repository accepts it without a cast. Lint L6 refuses a call anywhere but src/lib/orders/profile.ts
+ * (`reveal-scope`), any use of the function as a value (`scope-ref`), and the result leaving that file
+ * (`reveal-escape`: returned, stored, exported, or out of an exported function).
  */
-export function platformRevealScope(ctx: PlatformCtx, storeId: string): WriteScope {
+export function platformRevealScope(ctx: PlatformCtx, scope: StoreScope & { readonly kind: "platform" }): WriteScope {
+  if (scope.kind !== "platform") throw new SeamError("forbidden");
   if (!ctx.can("pii.reveal")) throw new SeamError("forbidden");
   if (!ctx.stepUpFresh) throw new SeamError("step_up");
-  return mintScope("system", storeId);
+  return mintScope("system", scope.storeId);
 }

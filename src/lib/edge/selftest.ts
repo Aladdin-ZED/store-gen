@@ -462,7 +462,14 @@ async function main(): Promise<void> {
     // P0b V-1: the console media proxy keeps its handler's sandbox CSP; still gated, still with the session
     const media = run("/api/admin/stores/01HZX/media/k.webp", { cookie: `${gateCookie}; cs=session` });
     expectKind(media, "next", "console media: a gated read passes");
-    check(media.headers.get("content-security-policy") === null && media.headers.get("cache-control") === null, "console media: no console header set (the handler's sandbox CSP wins)");
+    check(media.headers.get("content-security-policy") === null && media.headers.get("cache-control") === null, "console media: no proxy CSP or Cache-Control (the handler's sandbox CSP and no-store win)");
+    // P0b review F-4: the rest of the console set stays (a handler cannot loosen CORP: the proxy's value wins)
+    eq(
+      ["x-frame-options", "cross-origin-resource-policy", "referrer-policy", "x-content-type-options", "cross-origin-opener-policy"].map((h) => media.headers.get(h)),
+      ["DENY", "same-origin", "same-origin", "nosniff", "same-origin"],
+      "console media: frame DENY, CORP same-origin, Referrer-Policy same-origin, nosniff, COOP",
+    );
+    check((media.headers.get("x-robots-tag") ?? "").startsWith("noindex"), "console media: noindex");
     check(forwarded(media)?.has("cookie") === true && !forwarded(media)?.has("x-nonce"), "console media: the session reaches the handler, no nonce");
     await expectNeutral(run("/api/admin/stores/01HZX/media/k.webp"), "platform", "console media without the gate");
     check(isUi(run("/api/admin/stores/01HZX/media/k.webp", { method: "POST", cookie: gateCookie })), "console media: a non-read keeps the console headers");

@@ -3533,7 +3533,7 @@ export function queueCounts(scope: StoreScope): Promise<{ toCallNow: number; cal
   deliveryRescue: number; oldestRescueMin: number | null; toShip: number; oldestToShipDays: number | null; holds: number; nextHoldDay: string | null; inboundLookupsHour: number }>;   // board tiles, Today brief; rev 3 fields: OD48, OPS-29, OD49, OD53
 export function listOrdersForConsole(scope: StoreScope, q: { state?: ConfirmState | ShipState; from?: string; to?: string; after?: string; limit?: number /* ≤ 50 */ }): Promise<{ items: ConsoleOrderRow[]; next: string | null }>;   // ConsoleOrderRow: id, created, states, status, total, city, firstName + initial, phoneMasked, risk, isTest; never address, note or e-mail
 export function getOrderForConsole(scope: StoreScope, orderId: string): Promise<ConsoleOrderDetail | null>;     // + items text, timeline (masked), integration states; still masked
-export function recordPlatformReveal(ctx: PlatformCtx, scope: StoreScope, orderId: string, reason: string): Promise<{ e164: string; name: string; address: string | null; city: string | null; note: string | null } | null>;   // pii.reveal ↑ (core §A.3.3); rev 6 P0b (CCR P1-9, PLA-§7.4): the five fields of the console's reveal dialog; the SINGLE writer of both the audit row `platform.pii.revealed` (store_id, meta { orderId, reason }) and the `phone_revealed` event (actor_kind "platform"), through `platformRevealScope(ctx, storeId)` (src/lib/platform/seam.ts: pii.reveal + a fresh step-up; lint L6 allows it only in this file); P1's revealOrderPiiAction writes no audit row; never cached, never logged; the only way platform code sees a phone
+export function recordPlatformReveal(ctx: PlatformCtx, scope: StoreScope & { readonly kind: "platform" }, orderId: string, reason: string): Promise<{ e164: string; name: string; address: string | null; city: string | null; note: string | null } | null>;   // pii.reveal ↑ (core §A.3.3); rev 6 P0b (CCR P1-9, PLA-§7.4): the five fields of the console's reveal dialog; the SINGLE writer of both the audit row `platform.pii.revealed` (store_id, meta { orderId, reason }) and the `phone_revealed` event (actor_kind "platform"), through `platformRevealScope(ctx, scope)` (src/lib/platform/seam.ts: pii.reveal + a fresh step-up; it upgrades the console's platformScope of that store, never a bare id, P0b review F-3; lint L6 allows the call only in this file, refuses the function as a value and the WriteScope leaving the file: returned, stored, exported); P1's revealOrderPiiAction writes no audit row; never cached, never logged; the only way platform code sees a phone
 export function orderRiskMix(scope: StoreScope, days: 28): Promise<{ low: number; check: number; high: number; honeypot: number; n: number }>;   // signup-risk and store-risk signals (platform.md), bands only
 export function searchOrders(scope: StoreScope, q: string, viewer: { userId: string; role: StoreRole }, limit: 8): Promise<SearchHit[]>;   // ⌘K provider body (OPE-§27.7): id prefix or ≥ 4 phone digits or an exact tracking_ref (rev 3); agents: their queue only, plus the exact-phone inbound lookup of OPE-§5.7 when q has ≥ 8 digits (rev 3, OD53); results masked
 ```
@@ -4016,8 +4016,8 @@ exclamation mark outside greetings, sentence case (core §I.8 rule 8; rubric §9
 
 ### OPE-§O.1 `npm test` (offline; must stay green on every merge)
 
-Script names are the core's (core §J.1: `test:state`, `test:ops`, `test:queue`, `test:profit`, `test:conversions`
-extended; §J.2: `test:ops-db`, `test:integrations-db`); `package.json` is the maintainer's, so P5's offline checks are
+Script names are the core's (core §J.1: `test:state`, `test:ops`, `test:profit`, `test:conversions` extended; §J.2:
+`test:queue`, `test:ops-db`, `test:integrations-db`; rev 6 P0b review F-6: `test:queue` is DB-backed, OPE-§O.2); `package.json` is the maintainer's, so P5's offline checks are
 sections of the existing `conversions-check.ts` rather than new scripts. **Rev 6 P0b (CCR P5-7):** `test:conversions`
 counts in the **operations** group of `scripts/qa/test-budget.json` (≤ 20 s with P4's suites; 5.1 s at the P0 timed
 run), no longer in the existing chain's group, so P5's additions are judged against a share P4 and P5 own.
@@ -4035,8 +4035,8 @@ run), no longer in the existing chain's group, so P5's additions are judged agai
 
 **Wall time (rev 3, ENGP-24):** the operations scripts of `npm test` run on fixtures, never on corpora: `test:state`,
 `test:ops` and `test:profit` together stay **≤ 25 s** on the owner's PC (rev 6 note: since the P0 re-cut and P0b the
-core §J.1 operations group is **≤ 20 s** for `test:ops`, `test:queue`, `test:state`, `test:profit` and
-`test:conversions` together, which is the binding figure) (HANDOFF §3; the 40 order fixtures, the 96-cell
+core §J.1 operations group is **≤ 20 s** for `test:ops`, `test:state`, `test:profit` and `test:conversions` together,
+which is the binding figure; `test:queue` counts in no `npm test` group, P0b review F-6) (HANDOFF §3; the 40 order fixtures, the 96-cell
 golden table and the ladder's fake-clock sweeps are the whole input); the concurrency and seeded-store checks are
 DB-backed (`test:queue`, `test:ops-db`) and the e2e budgets live in `qa:wow-demo`. `scripts/qa/ops-check.ts` prints
 its own wall time and fails above 25 s so the ceiling the core sets for `npm test` (≤ 3 min, core §J.1) is never spent

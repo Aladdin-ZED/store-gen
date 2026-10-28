@@ -36,7 +36,10 @@
  *   StoreScope or spreads a scope / ctx, Object.assign / structuredClone of one, and any cast to a scope (review C0b
  *   F1, F8). The brand is a symbol-keyed property a spread copies: the nominal brand is CCR r1.0-m-5 for R2. Its
  *   `reveal-scope` kind (P0b, CCR P4-8) pins the one staff write scope, `platformRevealScope()`, to
- *   src/lib/orders/profile.ts.
+ *   src/lib/orders/profile.ts; P0b review F-3 adds `scope-ref` (platformRevealScope, platformScope or mintScope used as
+ *   a value anywhere: an alias, a callback, a shorthand property, so no call can hide behind a local name the callee
+ *   check never resolves) and `reveal-escape` (in profile.ts the reveal scope goes straight into a call of an app
+ *   function, or into a `const` read only that way; never returned, stored, spread or out of an export).
  * - L10 reads every SQL text of src/** (a string, template or `+` chain starting with a statement keyword, wherever it
  *   goes, and every drizzle `sql` template), per query level (review C0b F5).
  * - L4 judges process state, so it skips the standalone `selftest*.ts` scripts, and a module-scope Map / Set that the
@@ -146,6 +149,12 @@ const SEAM_ACTIONS: Record<string, string> = { storeAction: F.seam, platformActi
 const MINT_SITES = [F.seam, F.platformSeam, F.publicResolvers, "src/lib/jobs/scope.ts"];
 /** the one caller of `platformRevealScope` (P0b, CCR P4-8, D71): recordPlatformReveal's `phone_revealed` event */
 const REVEAL_SITE = "src/lib/orders/profile.ts";
+/** the scope builders whose every use must be a direct call (P0b review F-3, kind `scope-ref`): name → declaring file */
+const SCOPE_FNS: Readonly<Record<string, string>> = { platformRevealScope: F.platformSeam, platformScope: F.platformSeam, mintScope: F.seam };
+/** the reveal site, and its self-check twin in the fixture folder */
+function isRevealSite(f: string): boolean {
+  return f === REVEAL_SITE || f === `src/lib/orders/${FX}/profile.ts`;
+}
 const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 const DRIZZLE_TABLE_CALLS = new Set(["from", "update", "delete", "insert", "innerJoin", "leftJoin", "rightJoin", "fullJoin", "$count"]);
 const WRITES = new Set(["insert", "update", "delete"]);
@@ -850,6 +859,8 @@ class Lint {
   private readonly l6ArgReported = new Set<ts.Node>();
   private readonly l4GlobalSeen = new Set<string>();
   private rateAliases = new Set<string>();
+  /** the local names SCOPE_FNS are imported under (`import { platformScope as ps }`), per file */
+  private scopeAliases = new Set<string>();
   private readonly l9Checked = new Set<FnLike>();
   private readonly reachMemo = new Map<string, Map<FnLike, boolean>>();
   private readonly targetsMemo = new Map<FnLike, FnLike[]>();
@@ -1181,9 +1192,13 @@ class Lint {
       this.ops.set(sf, []);
       // L5: the local names rateLimit / rateLimitReached are imported under (`import { rateLimit as rl }`)
       this.rateAliases = new Set();
+      this.scopeAliases = new Set();
       for (const s of sf.statements)
         if (ts.isImportDeclaration(s) && s.importClause?.namedBindings && ts.isNamedImports(s.importClause.namedBindings))
-          for (const el of s.importClause.namedBindings.elements) if (el.propertyName && ["rateLimit", "rateLimitReached"].includes(el.propertyName.text)) this.rateAliases.add(el.name.text);
+          for (const el of s.importClause.namedBindings.elements) {
+            if (el.propertyName && ["rateLimit", "rateLimitReached"].includes(el.propertyName.text)) this.rateAliases.add(el.name.text);
+            if (el.propertyName && Object.hasOwn(SCOPE_FNS, el.propertyName.text)) this.scopeAliases.add(el.name.text);
+          }
       const visit = (n: ts.Node) => {
         this.visit(n);
         ts.forEachChild(n, visit);
@@ -1215,6 +1230,7 @@ class Lint {
     else if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken) this.onConcat(n);
     else if (ts.isObjectLiteralExpression(n)) this.onObjectLiteral(n);
     else if (ts.isIdentifier(n) && (n.text === "rateLimit" || n.text === "rateLimitReached" || this.rateAliases.has(n.text))) this.onRateRef(n);
+    else if (ts.isIdentifier(n) && (Object.hasOwn(SCOPE_FNS, n.text) || this.scopeAliases.has(n.text))) this.onScopeRef(n);
     if (isFnLike(n)) this.onFunction(n);
   }
 
@@ -1263,8 +1279,10 @@ class Lint {
         this.report(call, "L5", "string-bucket", `${ref.name}() bucket is not a Bucket; build it with platformBucket() / storeBucket() (§E.8)`);
     } else if (ref.file === F.platformSeam && ref.name === "platformScope" && !f.startsWith("src/app/admin/") && !f.startsWith("src/lib/platform/"))
       this.report(call, "L6", "platform-scope", "platformScope() outside src/app/admin/** and src/lib/platform/**");
-    else if (ref.file === F.platformSeam && ref.name === "platformRevealScope" && f !== REVEAL_SITE)
-      this.report(call, "L6", "reveal-scope", `platformRevealScope() outside ${REVEAL_SITE}: the staff write scope is recordPlatformReveal's only (D71, PLA-§7.4)`);
+    else if (ref.file === F.platformSeam && ref.name === "platformRevealScope") {
+      if (!isRevealSite(f)) this.report(call, "L6", "reveal-scope", `platformRevealScope() outside ${REVEAL_SITE}: the staff write scope is recordPlatformReveal's only (D71, PLA-§7.4)`);
+      else this.onRevealResult(call);
+    }
     else if (ref.file === F.seam && ref.name === "mintScope" && !MINT_SITES.includes(f))
       this.report(call, "L6", "mint-scope", "mintScope() outside the four seam files: build scopes through requireStoreMember / platformScope / publicScope / systemScope");
     else if (ref.file === F.seam && ref.name === "requireStoreMember" && /(^|\/)route\.tsx?$/.test(f)) {
@@ -1324,6 +1342,77 @@ class Lint {
   }
 
   /** L5 (review C0b F10): rateLimit / rateLimitReached only as the callee of a direct call, so its bucket is judged */
+  /**
+   * L6 `scope-ref` (P0b review F-3): a scope builder of SCOPE_FNS used as a value (an alias, a callback, a shorthand
+   * property, `const f = seam.platformScope`). The call rules match the callee's declared symbol, and a local alias
+   * resolves to the local variable, so every use must be the call itself. Imports, re-exports and `typeof` are not uses.
+   */
+  private onScopeRef(id: ts.Identifier): void {
+    const p = id.parent;
+    if (ts.isImportSpecifier(p) || ts.isExportSpecifier(p) || ts.isImportClause(p) || ts.isTypeQueryNode(p) || ts.isQualifiedName(p)) return;
+    if ((ts.isFunctionDeclaration(p) || ts.isVariableDeclaration(p)) && p.name === id) return;
+    let sym = ts.isShorthandPropertyAssignment(p) && p.name === id ? this.checker.getShorthandAssignmentValueSymbol(p) : this.checker.getSymbolAtLocation(id);
+    if (sym && sym.flags & ts.SymbolFlags.Alias) sym = this.checker.getAliasedSymbol(sym);
+    const decl = sym?.declarations?.[0];
+    if (!sym || !decl || !Object.hasOwn(SCOPE_FNS, sym.name) || rel(decl.getSourceFile().fileName) !== SCOPE_FNS[sym.name]) return;
+    let e: ts.Node = ts.isPropertyAccessExpression(p) && p.name === id ? p : id;
+    while (ts.isParenthesizedExpression(e.parent) || ts.isNonNullExpression(e.parent)) e = e.parent;
+    if (ts.isCallExpression(e.parent) && e.parent.expression === e) return;
+    this.report(id, "L6", "scope-ref", `${sym.name} used as a value (an alias, a callback, a property): call it directly, so L6 judges every call (D71)`);
+  }
+
+  /**
+   * L6 `reveal-escape` (P0b review F-3): in the reveal site the staff WriteScope goes straight into a call of an app
+   * function (declared under src/), or into a `const` that is only ever read that way; returned, assigned, stored in
+   * an object or array, spread, or handed to a library method (Array#push, Map#set), it could leave the file.
+   */
+  private onRevealResult(call: ts.CallExpression): void {
+    const intoAppCall = (n: ts.Node): boolean => {
+      let e: ts.Node = n;
+      while (ts.isParenthesizedExpression(e.parent) || ts.isNonNullExpression(e.parent) || ts.isAwaitExpression(e.parent)) e = e.parent;
+      const c = e.parent;
+      if (!ts.isCallExpression(c) || !c.arguments.some((a) => a === e)) return false;
+      return this.calleeRef(c)?.file.startsWith("src/") ?? false;
+    };
+    if (intoAppCall(call)) return;
+    let e: ts.Node = call;
+    while (ts.isParenthesizedExpression(e.parent) || ts.isNonNullExpression(e.parent)) e = e.parent;
+    const d = e.parent;
+    if (ts.isVariableDeclaration(d) && d.initializer === e && ts.isIdentifier(d.name) && ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const) {
+      const name = d.name;
+      const sym = this.checker.getSymbolAtLocation(name);
+      const body = enclosingFns(d)[0] ?? this.file;
+      const bad: ts.Node[] = [];
+      const walk = (n: ts.Node) => {
+        if (ts.isIdentifier(n) && n !== name) {
+          const p = n.parent;
+          const s = ts.isShorthandPropertyAssignment(p) && p.name === n ? this.checker.getShorthandAssignmentValueSymbol(p) : this.checker.getSymbolAtLocation(n);
+          if (s === sym && !(ts.isPropertyAccessExpression(p) && p.name === n) && !intoAppCall(n)) bad.push(n);
+        }
+        ts.forEachChild(n, walk);
+      };
+      walk(body);
+      for (const n of bad) this.report(n, "L6", "reveal-escape", `the reveal scope ${name.text} is used other than as an argument of an app call: it must never leave ${REVEAL_SITE} (D71)`);
+      return;
+    }
+    this.report(call, "L6", "reveal-escape", "platformRevealScope()'s result must go straight into an app call or a const used only that way, never returned or stored (D71)");
+  }
+
+  /** L6 `reveal-escape` (P0b review F-3): no export of the reveal site returns, resolves to or is a WriteScope (or a ctx carrying one). */
+  private revealExports(sf: ts.SourceFile): void {
+    for (const ex of moduleExports(sf, this.checker)) {
+      const types: ts.Type[] = [];
+      if (ex.fn) {
+        const sig = this.checker.getSignatureFromDeclaration(ex.fn);
+        const ret = sig ? this.checker.getReturnTypeOfSignature(sig) : undefined;
+        if (ret) types.push(this.checker.getAwaitedType(ret) ?? ret);
+      } else types.push(this.checker.getTypeAtLocation(ex.at));
+      const members = types.flatMap((t) => (t.isUnion() ? t.types : [t]));
+      if (members.some((t) => this.carriesWrite(t, ex.at)))
+        this.report(ex.at, "L6", "reveal-escape", `${ex.name}: an export of ${REVEAL_SITE} hands out a WriteScope; the reveal scope never leaves the file (D71)`);
+    }
+  }
+
   private onRateRef(id: ts.Identifier): void {
     if (this.relFile === F.rateLimit) return;
     const p = id.parent;
@@ -2137,6 +2226,7 @@ class Lint {
 
   private fileRules(sf: ts.SourceFile): void {
     const f = this.relFile;
+    if (isRevealSite(f)) this.revealExports(sf);
     const isRoute = /^src\/app\/.*(^|\/)route\.tsx?$/.test(f);
     if (f.startsWith("src/lib/") && !SELFTEST.test(f)) this.globalsL4(sf);
     const exports = isUseServerFile(sf) || isRoute || f.startsWith("src/app/s/[store]/") ? moduleExports(sf, this.checker) : [];
@@ -2627,11 +2717,44 @@ export async function relationalNoScope() {
   return db.query.orders.findMany({ where: eq(orders.id, "x") }); //! L1 L2
 }
 `,
+  // P0b review F-3: the reveal site's twin (isRevealSite): the scope goes into app calls only and never out of the file
+  [`src/lib/orders/${FX}/profile.ts`]: `
+import { platformRevealScope } from "@/lib/platform/seam";
+import type { PlatformCtx, StoreScope, WriteScope } from "@/lib/tenancy/types";
+
+type ConsoleScope = StoreScope & { readonly kind: "platform" };
+async function writeEvent(scope: WriteScope, orderId: string): Promise<void> {
+  void scope;
+  void orderId;
+}
+export async function goodReveal(ctx: PlatformCtx, scope: ConsoleScope) {
+  await writeEvent(platformRevealScope(ctx, scope), "o1");
+  const w = platformRevealScope(ctx, scope);
+  await writeEvent(w, "o2");
+  await writeEvent((w), "o3");
+  return null;
+}
+export async function leaks(ctx: PlatformCtx, scope: ConsoleScope) { //! L6
+  const w = platformRevealScope(ctx, scope);
+  const kept: WriteScope[] = [];
+  kept.push(w); //! L6
+  const box = { w }; //! L6
+  void [kept, box];
+  return w; //! L6
+}
+export function direct(ctx: PlatformCtx, scope: ConsoleScope) { return platformRevealScope(ctx, scope); } //! L6 L6
+export function later(ctx: PlatformCtx, scope: ConsoleScope) {
+  let v = platformRevealScope(ctx, scope); //! L6
+  v = platformRevealScope(ctx, scope); //! L6
+  void v;
+}
+`,
   [`src/lib/platform/${FX}/console.ts`]: `
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { storeMembers } from "@/lib/db/schema";
-import { platformRevealScope, platformScope } from "@/lib/platform/seam";
+import { platformRevealScope, platformScope, platformScope as ps } from "@/lib/platform/seam";
+import * as seamNs from "@/lib/platform/seam";
 import { mintScope } from "@/lib/tenancy/seam";
 import type { PlatformCtx } from "@/lib/tenancy/types";
 
@@ -2644,8 +2767,18 @@ export async function crossStore(ctx: PlatformCtx) {
     .where(eq(storeMembers.userId, "t"));
   const one = platformScope(ctx, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
   const minted = mintScope("member", "01ARZ3NDEKTSV4RRFFQ69G5FAV"); //! L6
-  const revealed = platformRevealScope(ctx, "01ARZ3NDEKTSV4RRFFQ69G5FAV"); //! L6
-  return [rows, trailing, one, minted, revealed];
+  const revealed = platformRevealScope(ctx, one); //! L6
+  // P0b review F-3: an alias hides the call from the callee check, so the alias itself is the finding
+  const alias = platformRevealScope; //! L6
+  const aliased = alias(ctx, one);
+  const viaNs = seamNs.platformRevealScope; //! L6
+  const scopes = [platformScope, mintScope].length; //! L6 L6
+  const shorthand = { platformScope }; //! L6
+  const renamed = ps; //! L6
+  const called = ps(ctx, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+  type RevealFn = typeof platformRevealScope;
+  const typed: RevealFn | null = null;
+  return [rows, trailing, one, minted, revealed, aliased, viaNs, scopes, shorthand, renamed, called, typed, seamNs.platformScope(ctx, "01ARZ3NDEKTSV4RRFFQ69G5FAV")];
 }
 export async function second() {
   // tenancy: platform second annotation over the fixture pin //! PIN

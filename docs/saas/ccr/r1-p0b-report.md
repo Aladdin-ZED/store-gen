@@ -15,16 +15,20 @@ the P0 report, core rev 6 and the part specs, and found one more need nobody lis
 
 | Decision | Track needs | P0 items | Found in triage |
 |---|---|---|---|
-| done (already in the tree at P0) | 14 | 1 (P0-9) | — |
-| apply (in P0b, packages A-G) | 65 | — | 1 (X-1) |
+| done (already in the tree at P0) | 11 | 1 (P0-9) | — |
+| apply (in P0b, packages A-G; P4-6 in step F) | 66 | — | 1 (X-1) |
 | defer (to a named merge) | 29 | 7 | — |
-| reject | 3 | 1 | — |
+| reject | 5 | 1 | — |
 | owner | 0 | 0 | — |
+
+The counts are after the review (section 6): P4-6 moved from done to apply (F-6), P6-3 and P7-5 from done to reject
+(F-11); P2-10 is counted as apply but was only partly applied (F-14).
 
 The 66 apply items went into seven packages whose file sets do not overlap: **A** first (the ownership rows, the
 script names, the `src/lib/contracts/**` maintainer glob and the tenancy-harness classification the others need),
-then B, C, D, E, F and G, one commit each. Only E staged `src/landing/generated/**`; only A edited the spec, and its
-spec sync records the shapes B-G implement, so the spec and the code agree.
+then B, C, D, E, F and G, one commit each. Only E staged `src/landing/generated/**`; only A edited the spec. Its spec
+sync recorded most of the shapes B-G implement, not all of them: the review found twenty frozen names in no spec
+section (F-9), and step F added each to its part (section 6).
 
 Every frozen landing contract is as P0 left it: PageDoc v2, runtime config v2, payload v2, the PHP export, the chunk
 budgets and `landing.sha256`. Packages E and F hashed every live, test and preview document, every legal page and
@@ -49,7 +53,7 @@ change the triage had left open (V-1: the console media route keeps its own sand
 | P1-3 | done | P0 step E. | `src/lib/health/types.ts` `HealthFlagCode` (`brand_term_live`, `brand_near_live`, `abuse_reports_new`), `HealthInputs` frozen, asserted in `src/lib/contracts/r1-p0.ts`. |
 | P1-4 | apply (C) | Cross-track stub P1 needs from P2. | `src/components/admin/common/*.tsx`: the 21 PLA-§22.12 primitives with the exact props (`<Name>Props`), `ReactElement \| null`, minimal unstyled bodies; `issue-list.tsx` holds `IssueRow` and `IssueList`, `locked-control.tsx` exports `LockReason`. Skeleton and `useChords` are not frozen. |
 | P1-5 | apply (E) | Cross-track stub P1 needs from P6 (PLA-§13.1). | `src/components/admin/brand/platform-design-fields.tsx` `PlatformDesignFields({ value, onSave })`, renders nothing. |
-| P1-6 | apply (C) | Stubs P2 needs from P1 that P0 did not write. | `src/lib/platform/requests.ts` (server-only): `StoreRequestRow`, `ReviewCard`, `ReviewRequest` re-export; real reads `listStoreRequests`, `getReviewCard` (`whereStore`); `createStoreRequest`, `withdrawStoreRequest`, `submitForReview`, `answerReviewQuestion`, `submitAppeal` throw `not implemented: P1 <name>`. |
+| P1-6 | apply (C) | Stubs P2 needs from P1 that P0 did not write. | `src/lib/platform/requests.ts` (server-only): `StoreRequestRow`, `ReviewCard`, `ReviewRequest` re-export; real reads `listStoreRequests`, `getReviewCard` (`whereStore`); `createStoreRequest`, `withdrawStoreRequest`, `submitForReview`, `answerReviewQuestion`, `submitAppeal` throw `not implemented: P1 <name>`. Review F-15: `StoreRequestRow.outcome` is `"granted" \| "declined" \| null`, never the staff note. |
 | P1-7 | apply (G) | The maintainer's harness. | `scripts/qa/headers-check.ts` and `edge-sim.ts`: console pulse, search, `stores.csv`, `audit.csv`, media, export and backup downloads, `/invite/staff/<t>`, `/report/<h>`; pending while the route file is absent, `--strict` fails pending. |
 | P1-8 | defer → P1 | Pins are re-counted at the owning track's merge. | `scripts/qa/tenancy-allow.json` `src/lib/platform/**` pin. |
 | P1-9 | apply (D) | One reveal shape for P1 and P4. | `src/lib/orders/profile.ts` `recordPlatformReveal` returns `{ e164, name, address, city, note } \| null` and is the single writer of `platform.pii.revealed` and `phone_revealed`; PLA-§7.4, OPE-§27.1 synced. |
@@ -71,8 +75,8 @@ change the triage had left open (V-1: the console media route keeps its own sand
 | P2-7 | apply (C) | P1 stub. | `src/lib/platform/health-snapshot.ts` `unsnoozeHealthIssue(ctx, issueId)` throws. |
 | P2-8 | apply (C) | Cross-track stub through `platformAction` (L9). | `src/app/admin/(console)/stores/[id]/actions.ts` `addImpersonationNoteAction` (`platformAction("stores.notes", …)`), classified a console platform action (X-1). |
 | P2-9 | apply (E) | Stub P2 needs from P3 (PD61). | `src/components/admin/landing/address-slots.tsx` `TestOrderSlot({ pageId, live })`, `CampaignSlot()`, render nothing. |
-| P2-10 | apply (E) | AI-§A.7 hook signatures. | `src/lib/ai/router/client.ts` `AiTaskState`, `useAiTask`, `useDeviceInfo`, `cancelStoreAiJobs`. Component mounts wait for P7 (P7-11). |
-| P2-11 | apply (E) | One swap point. | `src/components/generate/reveal/directions.ts` `RevealInput`, `buildRevealDirections` (throws: no GenomeCard invented). |
+| P2-10 | partly applied (E); components deferred to P7-11 | AI-§A.7 hook signatures. The `DirectorWhy`, `DirectorPassControl` and `SuggestedFacts` stubs P2-10 also asked for were not written (review F-14). | `src/lib/ai/router/client.ts` `AiTaskState`, `useAiTask`, `useDeviceInfo`, `cancelStoreAiJobs`. No AI component exists before P7: P2 leaves `dnaSlot` / `actionSlot` empty and mounts no AI chip until the P7 merge (P7-11). |
+| P2-11 | apply (E; degraded contract in step F) | One swap point. | `src/components/generate/reveal/directions.ts` `RevealInput` (+ `market`, `seedBase`), async `buildRevealDirections` whose stub resolves today's `generateDirections` documents with `card: null` (no GenomeCard invented); `RevealFolds` takes `directions: null` while analysing and on error (review F-8, DES-§14.3). |
 | P2-12 | apply (D) | Paging needs SQL filters. | `src/lib/audit.ts` `listStoreAudit` opts `actorKind`, `from`, `to`, keyset kept. |
 | P2-13 | defer → P2 | Maintainer CCR at the P2 merge. | Motion, aurora and physical-side fixes in the unowned admin files. |
 | P2-14 | apply (G) | Harness cases. | `headers-check.ts`: `/api/app/<h>/pulse` (ETag, 304, neutral 404 for a non-member) and `/search`. |
@@ -87,7 +91,7 @@ change the triage had left open (V-1: the console media route keeps its own sand
 | P3-3 | apply (F) | No lead endpoint when capture is off. | `src/lib/landing/lead-capture.ts` `leadCaptureOn` (→ `true`, today's behaviour); `store-context.server.ts` endpoints. |
 | P3-4 | defer → P3w1 | Widening `LEGAL_KINDS` now changes exports. | `LEGAL_KINDS`, `PageLinks`, sitemap. |
 | P3-5 | defer → P3w1 | Needs functions that do not exist yet. | `check-context.server.ts`, `check-context.ts`. |
-| P3-6 | apply (D) | The maintainer owns `public.ts`. | `src/lib/tenancy/public.ts` `resolveKitShare` (real, uncached, `cp_share_uq`); `PublicApi` gains `'wa'`; `test:tenancy-unit` rows. |
+| P3-6 | apply (D) | The maintainer owns `public.ts`. | `src/lib/tenancy/public.ts` `resolveKitShare` (real, uncached, `cp_share_uq`); `PublicApi` gains `'wa'`; `test:tenancy-unit` rows for `wa` (now in `npm test`); the resolver's cases are in `test:store` (review F-13). |
 | P3-7 | apply (G) | Harness cases. | `headers-check.ts`: `/track`, `/go/<code>` (308 and the 410 page), `/kit/<token>`, an online test-render case. |
 | P3-8 | apply (G) | Harness cases. | `scripts/qa/public-api-security.ts`: `POST /api/public/track`, `POST /api/public/wa`. |
 | P3-9 | apply (A) | L4 entry with a fixed symbol. | `scripts/qa/tenancy-allow.json` `src/lib/links/clicks.ts` `__sgLinkClicks`; LAN-§12.1. |
@@ -106,9 +110,9 @@ change the triage had left open (V-1: the console media route keeps its own sand
 | P4-3 | done | P0 step D. | `src/lib/orders/contract.ts` statuses `refused`, `duplicate`, `unreachable`, `in_transit`, `lost`. |
 | P4-4 | defer → P4 | The barrel drops `updateOrderStatus` once P4 no longer calls it. | `src/lib/orders` barrel. |
 | P4-5 | apply (A) | Named e2e file. | `qa:ops-e2e`; `scripts/qa/e2e/ops.ts` in the §K.2 P4 row and OPE-§P. |
-| P4-6 | done | P0 step C. | `test:state`, `test:ops`, `test:profit`, `test:queue`, `test:ops-db`; operations budget group. |
+| P4-6 | apply (step F, review F-6) | P0 step C put the DB-backed `test:queue` in the offline operations group. | `test:state`, `test:ops`, `test:profit` in the operations group (they join `npm test` at the P4 merge); `test:queue` and `test:ops-db` join `test:db` at the P4 merge (core §J.2); `test:budget-static` refuses a §J.2 script in any group. |
 | P4-7 | done | P0 step A. | `schema.ts` and `0005_r1.sql` columns and indexes. |
-| P4-8 | apply (D) | The sanctioned reveal write path (D71). | `src/lib/platform/seam.ts` `platformRevealScope(ctx, storeId): WriteScope` (`pii.reveal` + fresh step-up); `scripts/qa/tenancy-lint.ts` L6 kind `reveal-scope` allows it only in `src/lib/orders/profile.ts`, with a `//! L6` self-check line. |
+| P4-8 | apply (D; narrowed in step F) | The sanctioned reveal write path (D71). | `src/lib/platform/seam.ts` `platformRevealScope(ctx, scope: StoreScope & { kind: "platform" }): WriteScope` (`pii.reveal` + fresh step-up; review F-3: it upgrades the console's platform scope, never a bare id); `scripts/qa/tenancy-lint.ts` L6 kinds `reveal-scope` (calls only in `src/lib/orders/profile.ts`), `scope-ref` (the function, `platformScope` or `mintScope` used as a value) and `reveal-escape` (the WriteScope leaving the file), with `//! L6` fixtures. |
 | P4-9 | defer → P4 | `appendEvents` and `rev` are P4's. | `acceptUpsell` in `upsell.ts`. |
 | P4-10 | defer → integration | P8 merges first. | P8's ZIP job rewired to P4's writers. |
 
@@ -121,7 +125,7 @@ change the triage had left open (V-1: the console media route keeps its own sand
 | P5-3 | done | Already there. | `src/lib/orders/events.ts` `AppendOrderEventInput.note`, `actorKind` incl. `'sheet'`. |
 | P5-4 | apply (A) | P5's check imports server-only modules. | `test:integrations-db` runs `node --conditions=react-server --import tsx`; `qa:integrations-e2e` added. |
 | P5-5 | apply (A) | Named e2e file. | `scripts/qa/e2e/integrations.ts` in the §K.2 P5 row and OPE-§P. |
-| P5-6 | apply (G) | Guarded test seams. | `src/lib/security/test-seams.ts` (maintainer, server-only) `TestSeam`, `TEST_SEAM_VARS`, `testSeam()`, `decideTestSeam()`; `SG_E2E`, `SG_E2E_MOCK_ORIGIN` inert unless `SG_E2E=1`, loopback http and a `cod_test_*` database, also in production; `qa:secrets` fails a Hostinger env file that sets them; §H.7. |
+| P5-6 | apply (G) | Guarded test seams. | `src/lib/security/test-seams.ts` (maintainer, server-only) `TestSeam`, `TEST_SEAM_VARS`, `testSeam()`, `decideTestSeam()`; `SG_E2E`, `SG_E2E_MOCK_ORIGIN` inert unless `SG_E2E=1`, loopback http and a `cod_test_*` database, also in production; `qa:secrets` fails a Hostinger env file that sets them; §H.7. Review F-1, F-2, F-5: `anthropicEndpoint()`, `NEVER_DEPLOYED_VARS` (+ the SDK's `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_CUSTOM_HEADERS`), `bootSeamCheck()`, `test:security`'s `src/**` scan. |
 | P5-7 | apply (A) | Budget move. | `test:conversions` existing (90 → 85 s) → operations (15 → 20 s); total 235 of 240 s. |
 | P5-8 | apply (C) | One fixture shape. | `src/lib/health/types.ts` `HealthRuleFile`, `HEALTH_RULE_PREFIXES`, `HealthRuleFixture`; every `rules/*.ts` exports `fixtures`; `src/lib/health/registry.ts` `HEALTH_RULE_FIXTURES`. |
 | P5-9 | reject | `outbox` has `store_id`, so the lint already treats it as a tenant table. | — |
@@ -133,8 +137,8 @@ change the triage had left open (V-1: the console media route keeps its own sand
 | Id | Decision | Reason | Where |
 |---|---|---|---|
 | P6-1 | defer → P6 | Scripts exist; chaining waits for the files. | `test:design`, `test:registry`, `test:copylib` → `npm test`; `test:design:full` → `test:slow`; `test:design-db` → `test:db`. |
-| P6-2 | apply (A) | `labels.json` must be committable. | `.gitignore`: `/qa/*`, `!/qa/design-corpus/`, `/qa/design-corpus/*`, `!/qa/design-corpus/labels.json`. |
-| P6-3 | done | P0 G7. | `test-budget.json` design group (25 s). |
+| P6-2 | apply (A; owned in step F) | `labels.json` must be committable. | `.gitignore`: `/qa/*`, `!/qa/design-corpus/`, `/qa/design-corpus/*`, `!/qa/design-corpus/labels.json`, `!/qa/design-corpus/cliche-fixture.*.json` (step F). Review F-7: both are P6's (§K.2 P6 row, DES-§26), and `test:ownership` fails on a re-included file no row owns. |
+| P6-3 | reject (P0 G7 re-cut) | The planner asked a ≤ 40 s design row; the G7 re-cut gave the design group 25 s (review F-11). | `test-budget.json` design group: 25 s for `test:design`, `test:registry`, `test:copylib`. |
 | P6-4 | apply (E) | DES-R5. | `src/landing/runtime/budgets.json` `css` 106677 (P 102581 on duo/ar + 4096), `css-base` 23607 (B 22071), `css-variants` 79778 (V 77013), measured 2026-10-28. |
 | P6-5 | apply (E) | Drift visible in P6's worktree. | `scripts/qa/render-check.ts` css line (base, variants, page) failing per key. |
 | P6-6 | apply (E) | DES-R11 swap point. | `src/lib/logo/favicon.ts` `brandIcon(ctx, theme)` (today's `faviconHref` body verbatim); `src/landing/document.tsx` calls it at its three sites. |
@@ -157,14 +161,14 @@ change the triage had left open (V-1: the console media route keeps its own sand
 | Id | Decision | Reason | Where |
 |---|---|---|---|
 | P7-1 | apply (E) | DES-R20, AI-D26. | `src/lib/generator/overlay.ts` `PatchEntry.value` may be `undefined`; `applyPatch` skips it. |
-| P7-2 | apply (B) | Before P7 step 6. | `src/lib/tenancy/entitlement-keys.ts` `USAGE_METRICS` + `ai_director_passes`, `ai_deep_passes` (16 metrics). |
+| P7-2 | apply (B) | Before P7 step 6. | `src/lib/tenancy/entitlement-keys.ts` `USAGE_METRICS` + `ai_director_passes`, `ai_deep_passes` (16 metrics). Review F-10: core §H.2 slot 8 and §H.11 purge every `period: "day"` metric's rows after 7 days. |
 | P7-3 | apply (B) | 0005 is not deployed. | `ai_jobs.kind` + `'probe'` (`schema.ts`, `0005_r1.sql`, `0005_snapshot.json`); `src/lib/ai/jobs/enqueue.ts` `AiJobKind` excludes it; `aiMemory.evidence` type + `screen`. |
 | P7-4 | apply (A) | Decided and recorded. | §J.3: `qa:ai-stream` (stub provider, no key) joins `test:e2e` at the P7 merge, with the other P7 suites. |
-| P7-5 | done | P0 G7. | `test-budget.json` ai group. |
+| P7-5 | reject (P0 G7 re-cut) | The planner asked `test:ai` ≤ 20 s; the G7 re-cut gave the ai group 15 s (review F-11). | `test-budget.json` ai group: 15 s for `test:ai`. |
 | P7-6 | defer → P7 | P7's module. | `instrumentation.ts` boot call to `syncPromptVersions`. |
 | P7-7 | defer → P7 | Pins at the merge. | `src/lib/ai/platform/**` pin. |
 | P7-8 | apply (D) | Audit names. | `src/lib/audit.ts`: `platform.ai.{prompt_canaried, preference_recorded, calibration_recorded, screen_cleared, probe_recorded}`, `store.ai.memory_pinned`. |
-| P7-9 | apply (G) | Shared seam guard. | `test-seams.ts`: `SG_AI_BASE_URL`, `SG_AI_NO_AFTER`, `SG_AI_HARNESS`; `qa:secrets`; §H.7. |
+| P7-9 | apply (G) | Shared seam guard. | `test-seams.ts`: `SG_AI_BASE_URL`, `SG_AI_NO_AFTER`, `SG_AI_HARNESS`; `qa:secrets`; §H.7. Review F-1: the seam reaches the SDK only through `anthropicEndpoint()` (AI-§B.1). |
 | P7-10 | defer → P7 | P1's navigation. | Console AI item (`/admin/ai`, `ai.platform`). |
 | P7-11 | defer → P7 | Props frozen in P7's README only. | Mount `AiProviderChip`, `SuggestedFacts`, `ModelConsent`, `DirectorWhy`, `DirectorPassControl` in P2's slots. |
 | P7-12 | reject | Operations R23 schedules it for R3. | — |
@@ -241,6 +245,15 @@ them (build note item 2), the maintainer runs the timed `npm run test:budget`, a
 - **P8-4** Raise the `src/lib/jobs/**` and `src/lib/platform/**` pins to P8's counted report.
 - `rerenderInPlace` (P8-2), `sealBytes` / `openBytes` (P8-3), `deleteTestOrders` stub (P8-13), `AUDIT_SECRET_KEY_RE`
   (P8-9) and `qa/.build-sha` (P8-11) already exist: P8 builds on them, it does not re-create them.
+- **Review F-12** Run the full timed `npm run test:budget` under the mutex on a quiet PC (no dev server running, at
+  least 2 GB free) and re-record `measuredSec` of the existing and core groups from it: the existing group's 83.4 s is
+  derived (the G7 run minus `test:conversions`), not timed. Step F's run on a loaded PC: existing 80.6 s of 85 s, core
+  65.9 s of 55 s (`test:tenancy-lint` 38.5 s; 26.5-28.6 s by its own clock in the other runs of the day). If the lint
+  stays above 30 s on a quiet PC, the maintainer re-cuts the core share or moves its fixture self-check to `test:slow`.
+- **Review F-10** Housekeeping (§H.2 slot 8, §H.11) purges every `store_usage` row of a `period: "day"` metric after
+  7 days: `ai_credits_day`, `ai_director_passes`, `ai_deep_passes` (the rule is the period, not a list).
+- **Review F-5** Keep `bootSeamCheck()` in boot step 1 when P8 adds its boot steps; HANDOFF §4 step 5 now lists the
+  deployed variable names after every push.
 
 ### P2 merge
 
@@ -252,12 +265,18 @@ them (build note item 2), the maintainer runs the timed `npm run test:budget`, a
   `qa:pulse-e2e`, `qa:admin-perf`, `qa:shell-e2e` into `test:e2e`; add `node scripts/build-app-icons.mjs` to `prebuild`
   after `build-admin-css.mjs`.
 - `scripts/qa/tenancy-cases/shell.ts` must hold an attack case for every new store action (X-1).
+- **Review F-8** The welcome step mounts `RevealFolds` with `state: "analysing", directions: null`, awaits P6's
+  `buildRevealDirections`, then `revealed` with its result, or `error` with `directions: null` and Retry when it
+  rejects; PLA-§O.4 #2 at this merge runs the whole flow on the stub's real documents (`card: null`).
+- **Review F-14** No AI component before P7: `dnaSlot` / `actionSlot` stay empty and no AI chip is mounted.
 
 ### P1 merge
 
 - **P1-8** Raise the `src/lib/platform/**` pin to `r1-p1-report.md`; `src/lib/health/**` stays 1.
-- **V-1 (applied in step V, section 4)** Check that the `headers-check` console media row passes once P1's route
-  exists (the proxy no longer puts the console header set on it).
+- **V-1 (applied in step V, section 4; review F-4)** Check that the `headers-check` console media row passes once
+  P1's route exists: the handler sets the sandbox CSP, nosniff and `private, no-store` (never CORP `cross-origin`), and
+  the proxy adds CORP `same-origin`, frame `DENY`, `Referrer-Policy: same-origin` and noindex (`consoleMediaHeaders`).
+- **Review F-15** `listStoreRequests` returns `outcome: "granted" | "declined" | null`; the staff note stays internal.
 - **P6-17 (first half)** P1 mounts the `PlatformDesignFields` stub on settings/general.
 - **P7-10 (first half)** P1 ships the console AI item (`/admin/ai`, `ai.platform`) in its own navigation.
 - Check `report.*` keys are complete in ar, fr, en (P1-10).
@@ -274,7 +293,10 @@ them (build note item 2), the maintainer runs the timed `npm run test:budget`, a
 - **P4-4** Drop `updateOrderStatus` from the orders barrel once P4's `orders/actions.ts` no longer calls it.
 - **P4-9** `acceptUpsell`: bump `rev`, set `sheet_dirty |= 4`, write `field_edited`.
 - **P3-14** Check `saveCallingWindowAction` calls `enqueueRenders(scope, 'all-live', 'store_info')` after a save.
-- Chain `qa:ops-e2e` into `test:e2e` (P4's offline suites as §J.1 lists them).
+- Chain `test:ops`, `test:state` and `test:profit` into `npm test`; `test:queue` and `test:ops-db` into `test:db`;
+  `qa:ops-e2e` into `test:e2e` (review F-6; core §J.1 join paragraph).
+- **Review F-3** `recordPlatformReveal(ctx, scope, …)` takes the console's platform scope and passes it to
+  `platformRevealScope(ctx, scope)`; the WriteScope only goes into P4's event writer (lint L6 `reveal-escape`).
 
 ### P3 wave 1 merge
 
@@ -294,6 +316,8 @@ them (build note item 2), the maintainer runs the timed `npm run test:budget`, a
   onboarding and reveal slots from P7's README.
 - **P7-13** Delete `ai-settings.tsx`, `saveAiAction` and their tenancy case.
 - **P0-3** Narrow `TaskIO`'s AI task inputs and outputs; update the `r1-p0.ts` entries.
+- **Review F-1** P7's client is `new Anthropic({ apiKey, ...anthropicEndpoint(), maxRetries: 0, timeout: 90_000 })`
+  with no `baseURL` of its own; `test:security` sections 11 and 12 stay green.
 - Chain `test:ai` into `npm test`; `test:ai-eval`, `test:ai:slow` into `test:slow`; `test:ai-db` into `test:db`;
   `qa:wizard-e2e`, `qa:ai-stream` into `test:e2e`.
 
@@ -308,6 +332,10 @@ them (build note item 2), the maintainer runs the timed `npm run test:budget`, a
 - **P6-17 (second half)** P6's real field group replaces the `PlatformDesignFields` stub (`platform.settings`,
   `platform.design.changed`).
 - **P6-18** Re-count the design pin only if the lint reports more.
+- **Review F-7** `qa/design-corpus/labels.json` and `qa/design-corpus/cliche-fixture.<locale>.json` are P6's and
+  committed (re-included by `.gitignore`).
+- **Review F-8** P6's `buildRevealDirections` body replaces the stub (async, the cards computed), and `RevealFolds`
+  keeps the degraded props (`card: null` renders no DNA chips; `directions: null` while analysing and on error).
 - From this merge `HEIGHT_MODEL_VERSION` > 0: `SG_STUB_BUILD_OK` is no longer needed and every budget row is hard.
 
 ### P3 wave 2 merge
@@ -412,13 +440,18 @@ yours to fill. Mount `PlatformDesignFields` (P6's stub) and `POLICY_TEMPLATE_FIE
 calls P4's `recordPlatformReveal` and writes no audit itself. Your row gained `scripts/qa/e2e/console.ts`; scripts:
 `test:platform` (now `src/lib/platform/selftest.ts`), `test:platform-db`, `qa:platform-perf` (manual), `qa:console-e2e`.
 Keep `report.*` keys in your `console.ts`, complete in three locales. `headers-check` already holds your route cases
-(pending until the route files exist); the console media route keeps its own sandbox CSP because the proxy no longer
-puts console headers on it (V-1).
+(pending until the route files exist); on the console media route your handler sets the sandbox CSP, nosniff and
+`private, no-store` and the proxy adds CORP `same-origin`, frame `DENY`, `Referrer-Policy` and noindex (V-1, review
+F-4). `StoreRequestRow.outcome` is `"granted" | "declined" | null`: the staff's `reason_note` is internal and no read of
+`requests.ts` returns it (review F-15).
 
 **P2 SHELL.** Fill the 21 primitive bodies in `src/components/admin/common/` without changing their props; skeleton and
 `useChords` are yours to shape. Build against P1's `requests.ts`, `legal.ts`, `notify.ts`, `unsnoozeHealthIssue`,
-P3's `TestOrderSlot` / `CampaignSlot`, P6's `buildRevealDirections` (throws: treat as unavailable) and P7's
-`useAiTask` / `useDeviceInfo` / `cancelStoreAiJobs`. `listStoreAudit` filters `actorKind`, `from`, `to`. The identity
+P3's `TestOrderSlot` / `CampaignSlot`, P6's async `buildRevealDirections` (its stub resolves today's generator's three
+documents with `card: null`: mount `RevealFolds` with `directions: null` while analysing and on error, review F-8) and
+P7's `useAiTask` / `useDeviceInfo` / `cancelStoreAiJobs`. The `DirectorWhy`, `DirectorPassControl` and `SuggestedFacts`
+components do not exist before P7: leave `dnaSlot` / `actionSlot` empty and mount no AI chip until the P7 merge (P7-11,
+review F-14). `listStoreAudit` filters `actorKind`, `from`, `to`. The identity
 catalog keys now live in your `src/lib/i18n/admin/<l>/{auth,team,shell}.ts` (and `notify.ts`'s team and member kinds),
 unrenamed. Your row gained the R1.0 shell files (PLA-§P.2), `admin.css` with `styles/**`, and
 `scripts/qa/tenancy-cases/shell.ts`, where every new store action needs its attack case or `test:tenancy` fails at your
@@ -428,7 +461,7 @@ merge. Scripts: `test:shell`, `qa:shell-e2e` (plus the P0 ones); budget: platfor
 (`src/lib/landing/lead-capture.ts`), `TestOrderSlot` / `CampaignSlot` (`address-slots.tsx`) and extend
 `POLICY_TEMPLATE_FIELDS` (never rename an entry). Add-on chunks are `src/landing/runtime/addons/<AddonChunk>.ts` with a
 `budgets.json` key; add-on CSS is `src/landing/addons/css/*.css`; both are built into `addonChunks` / `addonCss` and
-measured by `render-check`. `resolveKitShare` and the `wa` public API are real; use `__sgLinkClicks` exactly in
+measured by `render-check`. `resolveKitShare` and the `wa` public API are real (`test:store` holds the resolver's cases, review F-13); use `__sgLinkClicks` exactly in
 `src/lib/links/clicks.ts`. The origin builder is the maintainer's `src/lib/render/origin.ts`. `test:checklist` is in
 `npm test`; `test:tracking` / `test:leads` join `test:db` at your merges. Header and public-API cases for `/track`,
 `/go`, `/kit`, `/api/public/track`, `/api/public/wa` are pending until your routes exist. `returns` legal kind waits for
@@ -436,7 +469,9 @@ the wave 1 merge (key it locally).
 
 **P4 CALL CENTER.** `applyExternalStatus` takes `agentLabel?` (P5 calls the stub first). `recordPlatformReveal`
 returns `{ e164, name, address, city, note } | null` and is the single writer of both the audit row and
-`phone_revealed`, through `platformRevealScope` (lint L6 allows it only in `profile.ts`). Fill `deleteTestOrders`
+`phone_revealed`, through `platformRevealScope(ctx, scope)`, where `scope` is the console's platform scope your
+function receives (review F-3); lint L6 allows the call only in `profile.ts` and refuses the WriteScope leaving it
+(returned, stored, exported). `test:queue` is DB-backed: it joins `test:db` with `test:ops-db` (review F-6). Fill `deleteTestOrders`
 (P8 builds against it). Your row gained `scripts/qa/e2e/ops.ts`; script `qa:ops-e2e`. `saveCallingWindowAction`
 must re-render all live pages (P3-14), and `acceptUpsell` changes at your merge (P4-9).
 
@@ -450,17 +485,69 @@ gained `scripts/qa/e2e/integrations.ts`; `test:integrations-db` runs with `--con
 **P6 DESIGN.** Fill `brandIcon` (`src/lib/logo/favicon.ts`), `PlatformDesignFields`, `buildRevealDirections` and
 `recordDraftDesign` (`src/lib/design/save.server.ts`, warn mode). `PatchEntry.value` may be `undefined`. The css
 budget is `css` / `css-base` / `css-variants` in `budgets.json`, printed by `render-check`. Your commands file is
-`src/components/admin/shell/commands/design.ts`; `qa/design-corpus/labels.json` is committable. Design health
+`src/components/admin/shell/commands/design.ts`; `qa/design-corpus/labels.json` and
+`qa/design-corpus/cliche-fixture.<locale>.json` are yours and committable (review F-7). `buildRevealDirections` is
+async and `RevealDirection.card` may be null (review F-8). Your `npm test` share is **25 s** (the G7 re-cut, not the
+40 s you planned; review F-11). Design health
 fixtures go in `rules/design.ts`. Before your merge the lead installs the `@fontsource` packages.
 
 **P7 AI.** `src/lib/ai/router/client.ts` holds the frozen `useAiTask` / `useDeviceInfo` / `cancelStoreAiJobs` stubs;
 fill them. `ai_jobs.kind` has `'probe'` (excluded from `AiJobKind`), `ai_memory.evidence` has `screen`, and
 `USAGE_METRICS` has `ai_director_passes` and `ai_deep_passes`. The audit unions have your six names. Test seams
 `ai-base-url`, `ai-no-after`, `ai-harness` go through `testSeam()`; `qa:ai-stream` joins `test:e2e` at your merge.
-`upsertCallScriptDraft` is R3 (P7-12 rejected).
+`upsertCallScriptDraft` is R3 (P7-12 rejected). Your `npm test` share is **15 s** for `test:ai` (the G7 re-cut, not
+the 20 s you planned; review F-11). Build every Claude client as `new Anthropic({ apiKey, ...anthropicEndpoint(),
+maxRetries: 0, timeout: 90_000 })` (`src/lib/security/test-seams.ts`, AI-§B.1): the SDK reads `ANTHROPIC_BASE_URL` and
+`ANTHROPIC_AUTH_TOKEN` itself, and never read `SG_AI_*` or those names directly (`test:security` fails; review F-1,
+F-2).
 
 **P8 PLATFORM OPS.** `rerenderInPlace` is real in `publish.server.ts`; `sealBytes` / `openBytes` are in
 `crypto.ts`; `AUDIT_SECRET_KEY_RE` is exported from `audit.ts`; `deleteTestOrders` is P4's stub; `platform_backup`
 has PLA-§17 bounds and `purgeRequests`; `DB_POOL_SIZE` is read; the archive ships `qa/.build-sha`. Use
 `__sgErrorBuffer`, `__sgOpsMetrics`, `__sgMediaBackend` exactly. The export download route's header cases are pending
-until your route exists. Your merge is first.
+until your route exists. Your merge is first. Housekeeping purges every daily `store_usage` metric after 7 days
+(review F-10); re-time `npm run test:budget` at your merge (F-12); keep `bootSeamCheck()` in boot step 1 (F-5).
+
+## 6. Review and fixes (step F)
+
+The P0b review sent 16 findings (1 blocker, 3 majors, 12 minors). Step F fixed all 16, rejected none, and added a
+regression test for the blocker, each major and several minors. No migration changed (0005 is as P0b left it), no frozen
+landing contract changed (PageDoc v2, runtime config v2, payload v2, the PHP export, the chunk budgets and
+`landing.sha256`; `render-check` green, landing assets `b46315093004` unchanged), tenancy lint is 0 and
+`test:ownership` (phase R1) is green.
+
+| Id | Severity | File | Decision | What changed | Regression test |
+|---|---|---|---|---|---|
+| F-1 | blocker | `docs/saas/spec/ai.md` AI-§B.1 | fixed | Reproduced: `@anthropic-ai/sdk` 0.133.0 reads `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_LOG` for any option left `undefined`. New maintainer helper `anthropicEndpoint()` in `src/lib/security/test-seams.ts`: `{ baseURL: testSeam("ai-base-url")?.origin ?? "https://api.anthropic.com", authToken: null, logLevel: "warn" }`, so a null seam answer never reaches the SDK. AI-§B.1's constructor is now `new Anthropic({ apiKey, ...anthropicEndpoint(), maxRetries: 0, timeout: 90_000 })`, and its false "explicit apiKey prevents this" claim is corrected. `NEVER_DEPLOYED_VARS` = the seams + `SG_TEST_CONTEXT` + `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_CUSTOM_HEADERS` (headers cannot be pinned by an option); `qa:secrets` refuses all of them; core §H.7 has the row. | `test:security` section 11: a real SDK client built per AI-§B.1 with all three variables set to hostile values has baseURL `https://api.anthropic.com` and `authToken` null; its one request (recorded through a custom `fetch`) goes to `/v1/` with `X-Api-Key` and no `Authorization`; nothing is logged; the seam's loopback origin wins only with every guard; two control checks prove the bare SDK still follows the variables. `qa:secrets` self-check lines for the three names and for `ANTHROPIC_API_KEY` staying allowed. |
+| F-2 | minor | `src/lib/security/test-seams.ts` | fixed | "The only reader" is now enforced. | `test:security` section 12: a TypeScript AST scan of `src/**` (identifiers and string or template parts; comments free) fails on any of `TEST_SEAM_VARS` or the SDK's three names outside `test-seams.ts` and the security selftests, with a self-check fixture in both directions. |
+| F-3 | minor | `src/lib/platform/seam.ts` | fixed | `platformRevealScope(ctx, scope: StoreScope & { kind: "platform" })` takes the store from the console's platform scope (and rechecks `kind`); `recordPlatformReveal`'s `scope` has the same type; contracts, PLA-§7.4, OPE-§27.1 and core §F.11 synced. Lint L6 gains `scope-ref` (`platformRevealScope`, `platformScope` or `mintScope` used as a value anywhere: alias, namespace member, shorthand property, renamed import) and `reveal-escape` (in `profile.ts` the WriteScope goes only into a call of an app function, directly or through a `const` read only that way; returned, assigned, stored, pushed into an array or a Map, or an export whose type carries a WriteScope is reported). The narrower scope kind for the event writer stays an R2 idea, as the finding allows. | The reviewer's alias line is now a `//! L6` fixture in `console.ts`, beside namespace, shorthand, renamed-import and `typeof` lines; a new reveal-site twin fixture (`src/lib/orders/__tenancy_lint_fixture__/profile.ts`) holds the allowed uses and eight escape reports; self-check 20 fixtures ok, 0 violations on the tree. |
+| F-4 | minor | `src/proxy.ts` | fixed | The media branch now sets `consoleMediaHeaders()` (`src/lib/security/headers.ts`): the console set minus the nonce CSP and `Cache-Control`, i.e. frame `DENY`, CORP `same-origin`, `Referrer-Policy: same-origin`, noindex, nosniff, COOP; the proxy's values win, so the handler cannot loosen CORP. PLA-§M.2 row, core §C.3 and the harness comment synced. | `test:hosts`: the passed media read carries those headers and still no CSP / Cache-Control (628 checks). `headers-check` offline row (both host modes) and online row assert CORP `same-origin` and noindex; proven against a placeholder route file (687 passed, 22 pending; the placeholder was removed). |
+| F-5 | minor | `scripts/qa/secrets-check.ts` | fixed | HANDOFF §4 step 5: after every push, list the deployed variable names through the Hostinger MCP (values masked) and stop on any of `NEVER_DEPLOYED_VARS`; step 8 smoke checks the boot log. `src/instrumentation.ts` step 1 calls `bootSeamCheck()`: one `[security]` line naming the variables (never a value) when one is set and `DATABASE_URL` is not a `cod_test_*` database. Core §H.4 / §H.7 synced. | `test:security` section 11: `deployedTestVars` and `bootSeamCheck` (list order, blank values skipped, nothing on a test database, the one line, never a value). The e2e server log (cod_test_fin_e2e) has no `[security]` line. |
+| F-6 | major | `scripts/qa/test-budget.json` | fixed | `test:queue` left the operations group; §J.1's row and group note, a new §J.2 row, OPE-§O.1's two sentences, the §J.1 join paragraph ("P4 merge: `test:ops`, `test:state`, `test:profit` join `npm test`; `test:queue`, `test:ops-db` join `test:db`") and the report (P4-6 re-labelled apply, section 2 P4 merge) synced. The share stays 20 s. | `test:budget-static` now parses §J.2's script cells and the `test:db` chain and fails when any of them sits in a budget group of any release (self-checked on a synthetic spec; putting `test:queue` back fails all three releases). |
+| F-7 | major | `.gitignore` | fixed | `qa/design-corpus/labels.json` and `qa/design-corpus/cliche-fixture.<locale>.json` are in the §K.2 P6 row and DES-§26; `.gitignore` re-includes the cliché fixtures too (DES-§11 says so). | `test:ownership` now treats every file a `.gitignore` `!` rule re-includes (a name with an extension; Next's `!.yarn/*` directories are skipped) as committable: it must be in the manifest or owned in the current phase, else `unowned-new`. Before the spec fix it reported `labels.json`; now green. Self-check line for the parser. |
+| F-8 | major | `src/components/generate/reveal/directions.ts` | fixed | The degraded contract (DES-§14.3, PLA-§22.2, PLA-§O.4 #2, core §K.2): `RevealDirection.card` is `GenomeCard \| null`; `RevealFoldsProps` is a union where `directions` is null while `analysing` and on `error`; `buildRevealDirections` is async (DES-§14.2 has server round trips, so a synchronous signature could not be implemented) and its `RevealInput` gains `market` and `seedBase`; the stub resolves today's `generateDirections` documents (code-split through `kit.ts`) with `card: null` and rejects a product the generator refuses. P2's merge can run the whole flow on real documents. Both contracts updated. | `test:generator`: the stub resolves three directions with distinct ids, documents that validate, no invented card, a label; a product without name and price rejects. `tsc` asserts the new props and signature. |
+| F-9 | minor | `docs/saas/ccr/r1-p0b-report.md` | fixed | One "Rev 6 P0b (frozen exports)" line per name in its part: PLA-§13.1 (`PlatformDesignFields`), §13.4 (`POLICY_TEMPLATE_FIELDS`), §22.10.2 (`TestOrderSlot`, `CampaignSlot`), §22.7 (`StoreRequestRow`, `ReviewCard`), §22.15 (`LegalDocSummary`), §6.3.1 (`HEALTH_RULE_PREFIXES`, `HealthRuleFixture`, `HEALTH_RULE_FIXTURES`), AI-§A.7 (`cancelStoreAiJobs`), DES-§8.7 (`recordDraftDesign`), DES-§14.3 (`buildRevealDirections`, `RevealInput`), LAN-§5.3 (`loadRenderAddons`, `AddonMode`, `thanksAddons`), LAN-§10.1 (`leadCaptureOn`), core §H.6 (`sealBytes`, `openBytes`), §F.9 (`AUDIT_SECRET_KEY_RE`), each with its contract file. PLA-§3.7's tenant-callable list gains the notify reads and the health-snapshot functions. The summary sentence is corrected. | — (a grep now finds every one of the twenty names in the specs) |
+| F-10 | minor | `docs/STORE-SAAS.md` | fixed | §H.2 slot 8 and §H.11: every `store_usage` row of a `period: "day"` metric is purged after 7 days (`ai_credits_day`, `ai_director_passes`, `ai_deep_passes`); P8 notes in sections 2 and 5. | — (spec) |
+| F-11 | minor | `docs/saas/ccr/r1-p0b-report.md` | fixed | P6-3 and P7-5 re-labelled "reject (P0 G7 re-cut)" with the shares; section 5 tells P6 "25 s" and P7 "15 s". | — (report) |
+| F-12 | minor | `scripts/qa/test-budget.json` | fixed | 83.4 is marked derived in the table note and the report; the P8 merge section says to re-time and re-record on a quiet PC. Step F's own timed run (below) is recorded, not used to re-cut: the PC was loaded. | — |
+| F-13 | minor | `src/lib/tenancy/public.ts` | fixed | `test:store` (a gated `test:db` suite) seeds five kit shares and asserts: a known token → its campaign, store and public scope; store B's token → store B (same campaign slug); revoked (hash NULL), malformed, unknown and hash-as-token → null; restricted resolves, suspended and pending do not. `test:tenancy-unit` is chained into `npm test` (it ran in no gate step before). | The `test:store` cases themselves; `npm test` now runs `test:tenancy-unit` (583 checks). |
+| F-14 | minor | `docs/saas/ccr/r1-p0b-report.md` | fixed | P2-10 re-labelled "partly applied; components deferred to P7-11"; sections 2 and 5 tell P2 to leave `dnaSlot` / `actionSlot` empty and mount no AI chip until P7; AI-§A.7 says the components are not stubbed. | — (report) |
+| F-15 | minor | `src/lib/platform/requests.ts` | fixed | `StoreRequestRow.outcome` is `"granted" \| "declined" \| null` (from `approved` / `rejected`), the words of `resolveRequestAction` and `request.answered`; the staff's `reason_note` is internal and no longer read (PLA-§22.10.4 now says so: a seller-facing answer would be a new P1 field through a CCR). Contract updated. | `test:store`: four requests of store A and one of B → granted / declined / null per status, no staff note and no other store's row in the list. |
+
+### Step F verification (all through the mutex)
+
+| Step | Result |
+|---|---|
+| `tsc --noEmit` | pass |
+| `eslint` on the 21 changed code files | 0 problems |
+| `npm test` | pass: theme, runtime 208, generator (with the reveal cases), render, money parity, conversions 108, offers 1,219, orders 138, settings 512, registries (17), **`test:tenancy-unit` 583 (new in the chain)**, prepublish 12, checklist 36, `test:ownership` green (with the re-included-file check), `test:tenancy-lint` 0 violations, self-check 20 fixtures |
+| `test:budget-static` | consistent (235 s of 240 s; the new §J.2 check passes) |
+| `test:security` | 324 passed (sections 11 and 12 new) |
+| `test:hosts` | 628 passed (626 before) |
+| `qa:secrets` | 64 checks passed (62 before); 2 Hostinger env files read, 0 findings |
+| `test:store` | ALL OK on `cod_test_p0b_store` (dropped), with the three new cases |
+| `SG_STUB_BUILD_OK=1 npm run build` | green; `gate:offline` green in `prebuild`; landing assets `b46315093004` unchanged; compiled in 26.7 s |
+| `SG_STUB_BUILD_OK=1 npm run test:e2e` | `qa:headers` 677 passed, 24 pending; `qa:edge-sim` 145 passed, 1 pending; `qa:r1-exit` 73 passed (port 3452, `cod_test_fin_e2e` dropped). A first run without the flag failed at the wizard step on the server's stub lock, as designed: the gate sets the flag for the whole run. |
+| `npm run test:budget` (timed, informative) | exit 1 on a loaded PC (1.6 GB free): existing 80.6 s of 85 s (the first timing under the share since G7), core 65.9 s of 55 s (`test:tenancy-lint` 38.5 s), operations 5.8 s, landing 3.2 s, design 2.6 s; total 158.0 s of 240 s. Re-timed at the P8 merge (F-12). |
+
+No `cod_test_*` database is left. `docs/saas/PROGRESS.md` (the lead's) is not part of the commit.

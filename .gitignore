@@ -49,3 +49,4 @@ next-env.d.ts
 !/qa/design-corpus/
 /qa/design-corpus/*
 !/qa/design-corpus/labels.json
+!/qa/design-corpus/cliche-fixture.*.json

@@ -26,7 +26,7 @@
  *       6. Public JSON APIs (apiHeaders): base headers, `no-store`, noindex.
  *       7. The R1 routes (P0b: P1-7, P2-14, P3-7, P8-12), at the proxy: the console's JSON, CSV, media and download
  *          routes behind the gate (`private, no-store`, noindex, `same-origin`; the media route keeps the handler's
- *          sandbox CSP), the dashboard's pulse, search and export download passed with the session and nothing that
+ *          sandbox CSP and `private, no-store`, with the proxy's CORP `same-origin`, frame DENY and noindex), the dashboard's pulse, search and export download passed with the session and nothing that
  *          would override the handler's ETag / Cache-Control / Content-Disposition, `/track` and `/go/<code>`
  *          reaching their store routes cookie-less (rewritten with the raw query on a store host).
  *
@@ -499,6 +499,12 @@ async function main(): Promise<void> {
           check(csp === null || csp === MEDIA_SANDBOX_CSP, label(`console media: the proxy leaves the handler's sandbox CSP in place (a proxy CSP would win; got ${csp})`));
           check(cache === null || cache === "private, no-store", label(`console media: never stored (got ${cache})`));
           check([null, "nosniff"].includes(res.headers.get("x-content-type-options")), label("console media: nothing but nosniff for X-Content-Type-Options"));
+          // P0b review F-4: the rest of the console set stays on the passed read (the proxy's values win over the handler's)
+          eq(
+            [res.headers.get("cross-origin-resource-policy"), res.headers.get("x-frame-options"), res.headers.get("referrer-policy"), (res.headers.get("x-robots-tag") ?? "").split(",")[0]],
+            ["same-origin", "DENY", "same-origin", "noindex"],
+            label("console media: CORP same-origin, frame DENY, Referrer-Policy same-origin, noindex from the proxy"),
+          );
         }),
       );
       for (const [name, route, path] of appRows) {
@@ -747,7 +753,11 @@ async function online(): Promise<void> {
     "src/app/api/admin/stores/[id]/media/[key]/route.ts",
     async () => {
       const r = await get(`/api/admin/stores/${storeId}/media/${media}`, { cookie: staff! });
-      eq([r.status, r.headers["content-security-policy"], r.headers["x-content-type-options"], r.headers["cache-control"]], [200, MEDIA_SANDBOX_CSP, "nosniff", "private, no-store"], "online: console media: the sandbox CSP, nosniff, private, no-store");
+      eq(
+        [r.status, r.headers["content-security-policy"], r.headers["x-content-type-options"], r.headers["cache-control"], r.headers["cross-origin-resource-policy"], (r.headers["x-robots-tag"] ?? "").split(",")[0]],
+        [200, MEDIA_SANDBOX_CSP, "nosniff", "private, no-store", "same-origin", "noindex"],
+        "online: console media: the sandbox CSP, nosniff, private, no-store, CORP same-origin, noindex (P0b review F-4)",
+      );
     },
     lacking({ QA_HEADERS_STAFF_COOKIE: staff, "--store-id": storeId, "--media": media }),
   );

@@ -45,7 +45,7 @@ import { adminHostName, platformUrl } from "@/lib/edge/env";
 import { EDGE_HEADERS, edgeCheck, effectiveHost, type EffectiveHost } from "@/lib/edge/host";
 import { noteEdgeCheck, reportForeignHost } from "@/lib/edge/proxy-log";
 import { stampRequestPath } from "@/lib/edge/path-sig";
-import { generateNonce, hstsValue, platformUiHeaders, redirectHeaders, type PlatformUiArea } from "@/lib/security/headers";
+import { consoleMediaHeaders, generateNonce, hstsValue, platformUiHeaders, redirectHeaders, type PlatformUiArea } from "@/lib/security/headers";
 
 interface Ctx {
   req: NextRequest;
@@ -176,14 +176,25 @@ function gate(ctx: Ctx, otherwise: () => NextResponse): NextResponse {
 }
 
 /**
+ * A read of the console media proxy: passed with the session and no nonce, under the console set minus the CSP and
+ * Cache-Control its handler owns (P0b V-1; review F-4: frame DENY, CORP same-origin, Referrer-Policy and noindex
+ * stay, and the proxy's values win over the handler's).
+ */
+function consoleMedia(ctx: Ctx): NextResponse {
+  const res = pass(ctx);
+  for (const [name, value] of Object.entries(consoleMediaHeaders(ctx.eff.cls))) res.headers.set(name, value);
+  return res;
+}
+
+/**
  * /admin/**, /api/admin/**: platform UI behind the gate cookie, re-issued once a day (sliding lifetime). A read of the
- * console media proxy passes behind the same gate with the session but without the console header set, so the
- * handler's sandbox CSP, nosniff and `private, no-store` are what the client gets (P0b V-1, like the manifest).
+ * console media proxy passes behind the same gate with the session and the console headers except the nonce CSP and
+ * Cache-Control, so the handler's sandbox CSP, nosniff and `private, no-store` are what the client gets (P0b V-1).
  */
 function consoleArea(ctx: Ctx): NextResponse {
   const issuedAt = gatedAt(ctx);
   if (issuedAt === null) return neutral(ctx);
-  const res = isRead(ctx) && isConsoleMediaPath(ctx.pathname) ? pass(ctx) : platformUi(ctx, "console");
+  const res = isRead(ctx) && isConsoleMediaPath(ctx.pathname) ? consoleMedia(ctx) : platformUi(ctx, "console");
   if (shouldRenewGateToken(issuedAt)) res.cookies.set(GATE_COOKIE, issueGateToken(), gateCookieOptions());
   return res;
 }

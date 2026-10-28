@@ -14,7 +14,9 @@
  * Request objects on the platform, legacy and store (Worker) hosts, the resolvers, stats per store and timezone,
  * the publish / unpublish guards and the preview-token rows; P0b package F: the in-place re-render (`rerenderInPlace`:
  * rendered in place, runtime_v 1 skipped, not live, a publish meanwhile → live_changed) and the generation record
- * read (`generationRecordFor`).
+ * read (`generationRecordFor`); P0b review F-13: the kit share resolver (`resolveKitShare`: a known token, a revoked
+ * share, malformed tokens, the store states, one store's token never another's) and the store's request list
+ * (`listStoreRequests`: the decision as granted / declined, never the staff note; F-15).
  *
  * Paths that read T1's settings API (rendering at publish, test renders, legal pages) or its envelope (`seal` /
  * `open` of preview tokens) are checked for what they must do once T1 has merged; while its C0a stubs are in place
@@ -363,6 +365,9 @@ interface Seed {
   mediaD: string;
   htmlA: string;
   htmlB: string;
+  Rr: string;
+  /** P0b review F-13: kit share tokens (the raw token; the row holds its sha256) */
+  shares: { a: { id: string; token: string }; b: { id: string; token: string }; revoked: string; restricted: string; suspended: string; pending: string };
 }
 
 async function seed(): Promise<Seed> {
@@ -420,7 +425,7 @@ async function seed(): Promise<Seed> {
     const b = await page(B, "argan", { published: true, html: htmlB });
     const c = await page(C, "argan", { published: true });
     const e = await page(E, "argan", { published: true });
-    await page(Rr, "argan", { published: true });
+    const rr = await page(Rr, "argan", { published: true });
     await page(N, "argan", { published: true, doc: hiddenJson });
     await page(N, "serum", { published: false });
     await conn.query("UPDATE stores SET home_page_id = ? WHERE id = ?", [a.id, A]);
@@ -449,7 +454,31 @@ async function seed(): Promise<Seed> {
     const mediaD = await media(D);
     const keyExportPhp = `pk_${randomBytes(12).toString("base64url")}`;
     await conn.query("INSERT INTO exports (id, store_id, page_id, version_id, mode, public_key, allowed_origins) VALUES (?, ?, ?, ?, 'php', ?, '[]')", [newId(), A, a.id, a.versionId, keyExportPhp]);
+    // P0b review F-13: kit shares (campaigns.share_token_hash = sha256(token), cp_share_uq)
+    const share = async (storeId: string, pageId: string, slug: string) => {
+      const id = newId();
+      const token = randomBytes(24).toString("base64url");
+      await conn.query(
+        "INSERT INTO campaigns (id, store_id, name, slug, page_id, product_ref, channels, kit, offers_hash, share_token_hash, status) VALUES (?, ?, ?, ?, ?, ?, '[]', '{}', ?, ?, 'live')",
+        [id, storeId, slug, slug, pageId, JSON.stringify({ kind: "landing_items", id: pageId }), "0".repeat(16), sha(token)],
+      );
+      return { id, token };
+    };
+    const shareA = await share(A, a.id, "ramadan");
+    const shareB = await share(B, b.id, "ramadan");
+    const shareRevoked = await share(A, a.id, "ete");
+    await conn.query("UPDATE campaigns SET share_token_hash = NULL WHERE id = ?", [shareRevoked.id]);
+    const shares = {
+      a: shareA,
+      b: shareB,
+      revoked: shareRevoked.token,
+      restricted: (await share(Rr, rr.id, "ramadan")).token,
+      suspended: (await share(D, a.id, "ramadan")).token,
+      pending: (await share(C, c.id, "ramadan")).token,
+    };
     return {
+      Rr,
+      shares,
       A, B, C, D, E, pageA: a.id, pageAHidden: aHidden.id, pageADraft: aDraft.id, pageB: b.id, pageC: c.id, pageE: e.id, versionA: a.versionId!,
       pageAGlow: aGlow.id, pageARetro: aRetro.id, pageAOff: aOff.id, versionGlow: aGlow.versionId!, versionRetro: aRetro.versionId!,
       keyA: a.key, keyC: c.key, keyE: e.key, keyExportPhp, orderA, orderD, mediaA, mediaD, htmlA, htmlB,
@@ -703,6 +732,49 @@ async function database(): Promise<void> {
     assert.equal((await pub.resolveStoreByHandle("old-atlas"))?.id, s.A);
     assert.equal(await pub.resolveStoreByHandle("gone-shop"), null);
     assert.equal(await pub.resolveStoreByHandle("BAD HANDLE"), null);
+  });
+
+  await check("kit shares (P0b review F-13): a known token → its campaign and store, never another store's", async () => {
+    const a = await pub.resolveKitShare(s.shares.a.token);
+    assert.equal(a?.store.id, s.A);
+    assert.equal(a?.campaignId, s.shares.a.id);
+    assert.equal(a?.scope.storeId, s.A);
+    assert.equal(a?.scope.kind, "public");
+    const b = await pub.resolveKitShare(s.shares.b.token);
+    assert.equal(b?.store.id, s.B, "store B's token resolves to store B, though both campaigns share the slug");
+    assert.equal(b?.campaignId, s.shares.b.id);
+    assert.notEqual(a?.campaignId, b?.campaignId);
+  });
+
+  await check("kit shares (P0b review F-13): revoked, malformed and unknown tokens, and the store states", async () => {
+    assert.equal(await pub.resolveKitShare(s.shares.revoked), null, "a revoked share (share_token_hash NULL)");
+    for (const bad of ["", "short", "x".repeat(129), `${s.shares.a.token} `, `${s.shares.a.token.slice(0, 20)}/../x`, "é".repeat(20)])
+      assert.equal(await pub.resolveKitShare(bad), null, `malformed ${JSON.stringify(bad.slice(0, 24))}`);
+    assert.equal(await pub.resolveKitShare(randomBytes(24).toString("base64url")), null, "an unknown token");
+    assert.equal(await pub.resolveKitShare(createHash("sha256").update(s.shares.a.token).digest("hex")), null, "the stored hash is not a token");
+    assert.equal((await pub.resolveKitShare(s.shares.restricted))?.store.id, s.Rr, "a restricted store's share resolves");
+    assert.equal(await pub.resolveKitShare(s.shares.suspended), null, "a suspended store's share");
+    assert.equal(await pub.resolveKitShare(s.shares.pending), null, "a pending store's share");
+  });
+
+  await check("store requests (P0b review F-15): the decision as granted / declined, never the staff's note", async () => {
+    const { newId } = await import("@/lib/db/ids");
+    const conn = await (await import("mysql2/promise")).default.createConnection({ uri: process.env.DATABASE_URL!, charset: "utf8mb4_unicode_ci", timezone: "Z" });
+    try {
+      const rows: [string, string, string | null][] = [["plan_change", "approved", "internal: upsold"], ["limit_raise", "rejected", "internal: abuse suspicion"], ["mode_change", "pending", null], ["go_live", "withdrawn", null]];
+      for (const [kind, status, note] of rows)
+        await conn.query(
+          "INSERT INTO signup_reviews (id, store_id, user_id, kind, score, signals, status, reason_note, band, request) VALUES (?, ?, ?, ?, 0, '{}', ?, ?, 'review', ?)",
+          [newId(), s.A, newId(), kind, status, note, JSON.stringify({ kind })],
+        );
+      await conn.query("INSERT INTO signup_reviews (id, store_id, user_id, kind, score, signals, status, reason_note, band) VALUES (?, ?, ?, 'plan_change', 0, '{}', 'rejected', 'other store', 'review')", [newId(), s.B, newId()]);
+    } finally {
+      await conn.end();
+    }
+    const { listStoreRequests } = await import("@/lib/platform/requests");
+    const list = await listStoreRequests(mintScope("member", s.A));
+    assert.deepEqual(list.map((r) => [r.kind, r.status, r.outcome]).sort(), [["go_live", "withdrawn", null], ["limit_raise", "rejected", "declined"], ["mode_change", "pending", null], ["plan_change", "approved", "granted"]]);
+    assert.ok(!JSON.stringify(list).includes("internal:") && !JSON.stringify(list).includes("other store"), "no staff note, no other store's row");
   });
 
   await check("media keys: the key's store; a suspended store's media is not servable", async () => {

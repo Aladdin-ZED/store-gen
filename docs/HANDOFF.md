@@ -98,7 +98,9 @@ COD Studio has two parts:
 Optional, only when needed: `DATA_DIR_BUDGET_BYTES` (default 20 GiB), `SMTP_URL` + `MAIL_FROM` (mail off without them),
 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`, `GOOGLE_SA_JSON_B64` (Sheets), `ANTHROPIC_API_KEY`. The domain move adds
 `STORE_ROOT_DOMAIN`, `EDGE_KEY`, `LEGACY_PLATFORM_HOSTS`, `ADMIN_HOST` and flips `BEHIND_CLOUDFLARE` (20 keys,
-STORE-SAAS §H.7). Never set `NODE_ENV` (the build needs the devDependencies) or `SG_TEST_CONTEXT`.
+STORE-SAAS §H.7). Never set `NODE_ENV` (the build needs the devDependencies), `SG_TEST_CONTEXT`, the test seams
+(`SG_E2E*`, `SG_AI_*`) or the Anthropic SDK's `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_CUSTOM_HEADERS`
+(the SDK reads them itself; step 5 checks the deployed names).
 
 ### `DATA_DIR`: the path decision and the persistence probe
 
@@ -158,6 +160,13 @@ the Claude connector settings. Nothing is deployed from a build that never saw t
    public_html/_sgdeploy/<name> -H "X-Auth: <auth_key>" -H "X-Auth-Rest: <rest_auth_key>"` (expect 204).
 5. **Env** (whenever the key set changed; the first R1.0 deploy adds `PLATFORM_URL` and `DATA_DIR`):
    `hosting_nodejs_replace-environment-variables` with all 16 keys of `.env.hostinger`.
+   **Then, after every push and before step 6 (STORE-SAAS §H.7, P0b review F-5):** list the deployed variable
+   **names** with the Hostinger MCP's read operation for the Node.js environment variables (find it with `search`
+   "nodejs environment variables"; values come back masked, never print one). Stop the deploy if any of these names is
+   present: `SG_E2E`, `SG_E2E_MOCK_ORIGIN`, `SG_AI_BASE_URL`, `SG_AI_NO_AFTER`, `SG_AI_HARNESS`, `SG_TEST_CONTEXT`,
+   `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_CUSTOM_HEADERS` (`NEVER_DEPLOYED_VARS` in
+   `src/lib/security/test-seams.ts`); remove it with a full replace from `.env.hostinger` first. `qa:secrets` checks the
+   local files only, so this listing is the check of what Hostinger really holds.
 6. **Build:** Hostinger MCP `hosting_nodejs_start-build` {node_version 22, app_type next, root_directory "",
    output_directory .next, build_script build, package_manager npm, source_type archive,
    source_options {archive_path: "<that name>"}}. Poll `hosting_nodejs_build` / `hosting_nodejs_build-logs`. A build
@@ -188,6 +197,8 @@ the Claude connector settings. Nothing is deployed from a build that never saw t
      pool 6, lock pool 2, media read pool 2) next to COD Studio's pool on the same account; if the limit is lower, stop
      and decide before sign-ups open (the pool sizes are fixed in code in R1.0)
    - the `DATA_DIR` probe above.
+   - the boot log has no `[security] test-only variables set outside a cod_test_ database` line (`bootSeamCheck`, step 5's
+     names) and no `[security] test seam … refused` line.
 9. **Rollback = fix forward.** A failed build keeps the previous version live, but once an R1.0 build has booted, 0004
    has changed constraints the old build writes against (the global `pages_slug_uq` and `block_uq`, NOT NULL `store_id`):
    redeploying an older archive is not a rollback. Fix on `main`, gate, archive and deploy again. Export the database

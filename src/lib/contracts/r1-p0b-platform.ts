@@ -186,7 +186,8 @@ export type P1Requests = [
         kind: ReviewRequest["kind"];
         status: "pending" | "needs_info" | "approved" | "rejected" | "snoozed" | "withdrawn";
         createdAt: string;
-        outcome: string | null;
+        // P0b review F-15: the decision, never the internal staff note
+        outcome: "granted" | "declined" | null;
       }
     >
   >,

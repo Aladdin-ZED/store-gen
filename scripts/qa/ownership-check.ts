@@ -31,7 +31,9 @@
  * (honouring .gitignore) and on a witness path made from every pattern of every phase, so a glob intersection is
  * found before either track writes a file. The current phase (the manifest's) fails the run;
  * later phases print warnings until their contract step makes them current (or `--phase` names them).
- * A missing or unparsable manifest fails the run, never a silent pass.
+ * A missing or unparsable manifest fails the run, never a silent pass. P0b review F-7: a file the root .gitignore
+ * re-includes (a `!` rule naming a file, e.g. `!/qa/design-corpus/labels.json`) is meant to be committed, so it must be
+ * owned in the current phase (or be in the manifest) before anyone writes it: otherwise the first commit of it fails.
  */
 import path from "node:path";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -691,6 +693,23 @@ function ignored(rules: IgnoreRule[], rel: string, isDir: boolean): boolean {
   return verdict;
 }
 
+/**
+ * The file paths a .gitignore re-includes (P0b review F-7): every `!` rule that names a file (its last segment has an
+ * extension; `dir/` and bare names such as Next's `!.yarn/patches` are directories), relative to the root, a `*` in it
+ * turned into a witness segment (`cliche-fixture.*.json` → `cliche-fixture.__w__.json`).
+ */
+function reincludedFiles(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line.startsWith("!") || line.endsWith("/")) continue;
+    const rel = line.slice(1).replace(/^\//, "");
+    if (!/^.+\.[^./]+$/.test(rel.split("/").pop() ?? "")) continue;
+    out.push(witness(rel));
+  }
+  return out;
+}
+
 /** `.git/info/exclude` (when a `.git` directory exists): the clone's own ignore rules, read like a root .gitignore. */
 function excludeRules(): IgnoreRule[] {
   const file = `${ROOT}/.git/info/exclude`;
@@ -809,6 +828,8 @@ function selfCheck(): string[] {
   if (!globToRegExp("a/**/b.ts").test("a/b.ts") || !globToRegExp("a/**/b.ts").test("a/x/y/b.ts") || globToRegExp("a/*.ts").test("a/x/b.ts")) fails.push("globToRegExp");
   const rules = [{ base: "", re: /^qa$/, negate: false, dirOnly: false }, { base: "", re: /(?:^|\/)\.env[^/]*$/, negate: false, dirOnly: false }, { base: "", re: /(?:^|\/)\.env\.example$/, negate: true, dirOnly: false }];
   if (!ignored(rules, "qa", true) || !ignored(rules, ".env.local", false) || ignored(rules, ".env.example", false)) fails.push("gitignore rules");
+  const re = reincludedFiles("!.yarn/patches\n/qa/*\n!/qa/design-corpus/\n/qa/design-corpus/*\n!/qa/design-corpus/labels.json\n# !/qa/no.json\n!.env.example\n!/qa/design-corpus/cliche-fixture.*.json\n").join(" ");
+  if (re !== "qa/design-corpus/labels.json .env.example qa/design-corpus/cliche-fixture.__w__.json") fails.push(`reincludedFiles: ${re}`);
   return fails;
 }
 
@@ -936,6 +957,14 @@ function main(): void {
       if (!claimsFor(rows, current, f).length) findings.push({ phase: current, kind: "unowned-new", path: f, witness: false, detail: `new since ${baseline.startedAt.slice(0, 7)} and no ${current} row claims it` });
     }
   } else log("ownership-check: no .git (an archive build): the new-file check is skipped; the gate ran it on this commit");
+  // P0b review F-7: what .gitignore re-includes is committable, so it is owned before it is written (files on disk
+  // and pattern witnesses alike; a path the manifest already holds was tracked at the phase start)
+  const gitignore = `${ROOT}/.gitignore`;
+  for (const f of existsSync(gitignore) ? reincludedFiles(readFileSync(gitignore, "utf8")) : []) {
+    if (known.has(f) || claimsFor(rows, current, f).length) continue;
+    if (findings.some((x) => x.kind === "unowned-new" && x.path === f)) continue;
+    findings.push({ phase: current, kind: "unowned-new", path: f.replace(/__w__/g, "*"), witness: !onDisk.has(f), detail: `.gitignore re-includes it (committable), and no ${current} row claims it` });
+  }
 
   const hard = findings.filter((f) => strict.has(f.phase));
   const soft = findings.filter((f) => !strict.has(f.phase));

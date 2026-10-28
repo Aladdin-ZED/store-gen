@@ -125,13 +125,15 @@ export async function getOrderForConsole(scope: StoreScope, orderId: string): Pr
 /**
  * `pii.reveal` ↑ (core §A.3.3): the only way platform code sees an order's customer fields, null for an order of
  * another store. The single writer of both the `platform.pii.revealed` audit row (store_id, meta { orderId, reason })
- * and the `phone_revealed` order event (actor_kind "platform"), through `platformRevealScope` (src/lib/platform/seam.ts,
- * lint L6 `reveal-scope`); P1's `revealOrderPiiAction` calls it and writes no audit row. The answer is never cached,
- * never logged (PLA-§7.4, PL-07). P0b (CCR P1-9): the fields beyond `e164` are additive.
+ * and the `phone_revealed` order event (actor_kind "platform"), through `platformRevealScope(ctx, scope)`
+ * (src/lib/platform/seam.ts, lint L6 `reveal-scope`); P1's `revealOrderPiiAction` calls it with
+ * `platformScope(ctx, storeId)` and writes no audit row. The answer is never cached, never logged (PLA-§7.4, PL-07).
+ * P0b (CCR P1-9): the fields beyond `e164` are additive. P0b review F-3: `scope` is the console's platform scope (the
+ * reveal scope upgrades it, never a bare id), and the WriteScope never leaves this file (lint L6 `reveal-escape`).
  */
 export async function recordPlatformReveal(
   ctx: PlatformCtx,
-  scope: StoreScope,
+  scope: StoreScope & { readonly kind: "platform" },
   orderId: string,
   reason: string,
 ): Promise<{ e164: string; name: string; address: string | null; city: string | null; note: string | null } | null> {

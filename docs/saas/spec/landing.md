@@ -1131,6 +1131,12 @@ and fails if any reaches that file.
 
 ### LAN-§5.3 Modes, preview and exports
 
+**Rev 6 P0b (frozen exports; P0b review F-9, so a track finds them in its part):** every render path calls P3's loader `loadRenderAddons(scope, store, { pageId, doc, mode: AddonMode }):
+Promise<{ landing: RenderAddons; thanks: RenderAddons }>` (`src/landing/addons/load.server.ts`, CCR P3-2; `AddonMode =
+"live" | "preview" | "test" | "export-static" | "export-connected" | "export-php" | "export-whatsapp"`, the rows below);
+the store render context carries both halves as `addons` and `thanksAddons` (`StoreRenderContext`; `hasAddons(addons)` false keeps today's bytes);
+the P0b body answers no add-ons; legal pages take none (asserted in `src/lib/contracts/r1-p0b-render.ts`).
+
 | Mode | assist | assist-ty | Notes |
 |---|---|---|---|
 | live | yes | yes | the thank-you omits the `pixels` chunk when the store's Purchase trigger is not `order` (`purchaseInBrowser = false`, core §H.3, OPE Q.6): zero runtime bytes, config v2 unchanged |
@@ -1767,6 +1773,11 @@ isolates; 360 px clean.
 ## LAN-§10 Abandoned-lead recovery (LP-06, R1)
 
 ### LAN-§10.1 Capture and consent
+
+**Rev 6 P0b (frozen exports; P0b review F-9, so a track finds them in its part):** the decision below is `leadCaptureOn(market: string, capture: "market_default" | "on" | "off"): boolean`
+(`src/lib/landing/lead-capture.ts`, CCR P3-3); `store-context.server.ts` omits `endpoints.lead` when it answers false;
+the P0b body answers `true` (today's behaviour) until P3 writes the market rule (asserted in
+`src/lib/contracts/r1-p0b-render.ts`).
 
 The runtime beacon is unchanged (`src/landing/runtime/lead.ts:1-40`). Capture is decided at render (LD11):
 `leadCapture(store.market, landing.leads.capture)` → `on` for MA and INTL by default, **off** for the EU markets (FR, BE,

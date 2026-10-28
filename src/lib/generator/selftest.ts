@@ -1073,5 +1073,28 @@ check(merged.copy.benefits.items === lib.benefits.items || JSON.stringify(merged
 const arabicInFr = mergeAiCopy(lib, { ...ai, sub: "هذا نص عربي طويل لا يجب أن يظهر في صفحة فرنسية أبداً" }, { locale: "fr", productName: "Sérum Argan", facts: [], price: 199 });
 check(arabicInFr.rejected.includes("sub"), "guard: wrong-language field accepted");
 
-console.log(failures ? `✗ ${failures} failure(s)` : "✓ all generator checks passed");
-process.exit(failures ? 1 : 0);
+// P0b review F-8: the onboarding reveal's degraded contract (DES-§14.3). buildRevealDirections resolves three
+// directions with distinct ids and valid documents and invents no GenomeCard (a card is null or one P6 computed); a
+// product the generator refuses rejects, which P2 shows as the `error` state with Retry (directions null).
+void (async () => {
+  const { buildRevealDirections } = await import("@/components/generate/reveal/directions");
+  const base = { palette: null, facts: [], category: "beauty" as const, locale: "fr" as const, photos: [], market: "MA" as const, seedBase: 4242 };
+  try {
+    const dirs = await buildRevealDirections({ ...base, product: { name: "Sérum Argan", category: "beauty", price: 199, images: [] } });
+    check(dirs.length === 3 && new Set(dirs.map((d) => d.id)).size === 3, `reveal: three directions with distinct ids (${dirs.map((d) => d.id).join(", ")})`);
+    for (const d of dirs) {
+      check(validateDoc(d.doc).issues.length === 0, `reveal ${d.id}: the document validates`);
+      check(d.card === null || typeof d.card.explanation?.length === "number", `reveal ${d.id}: a card is null or a computed GenomeCard, never invented`);
+      check(d.label.length > 0, `reveal ${d.id}: a label`);
+    }
+  } catch (e) {
+    fail(`reveal: buildRevealDirections rejected a complete product: ${String(e)}`);
+  }
+  const refused = await buildRevealDirections({ ...base, product: { category: "beauty" } }).then(
+    () => false,
+    () => true,
+  );
+  check(refused, "reveal: a product without a name or price rejects (P2's error state)");
+  console.log(failures ? `✗ ${failures} failure(s)` : "✓ all generator checks passed");
+  process.exit(failures ? 1 : 0);
+})();

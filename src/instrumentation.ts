@@ -4,7 +4,8 @@
  * next start retries):
  *  1. configuration warnings (never secret values): auth (an unusable APP_SECRET is logged as an error, since every
  *     order fails with it), addressing and the edge (§C.1, §H.7), the data directory, env aliases, the test context
- *     (§E.4); the gate SHA the build was cleared by (§H.10)
+ *     (§E.4), the test-only variables outside a cod_test_ database (§H.7, bootSeamCheck); the gate SHA the build was
+ *     cleared by (§H.10)
  *  2. pending database migrations (serialised across processes with a DB lock); a process that times out on the lock
  *     skips steps 5 and 6, which the process holding it runs
  *  3. the media storage check: arrives with the filesystem backend (§G.2, src/lib/media/storage/check.ts); while
@@ -44,6 +45,10 @@ export async function register(): Promise<void> {
     // first request never logs it again (it never throws)
     const { identityContextMisconfigured } = await import("./lib/tenancy/context");
     identityContextMisconfigured();
+    // §H.7 (P0b review F-5): the test seams, SG_TEST_CONTEXT and the Anthropic SDK's redirecting variables never reach
+    // a deployed process; one `[security]` line naming them (never a value) unless the database is a cod_test_ one
+    const { bootSeamCheck } = await import("./lib/security/test-seams");
+    bootSeamCheck();
 
     if (!process.env.DATABASE_URL) {
       console.error("[boot] DATABASE_URL is not set — skipping migrations.");

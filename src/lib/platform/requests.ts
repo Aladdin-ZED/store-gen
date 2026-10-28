@@ -24,14 +24,18 @@ export type { ReviewRequest } from "@/lib/db/schema";
 
 type ReviewRow = typeof signupReviews.$inferSelect;
 
-/** One request of the store (kinds other than signup / reopen), as P2's plan page and limit sheet list it. */
+/**
+ * One request of the store (kinds other than signup / reopen), as P2's plan page and limit sheet list it. P0b review
+ * F-15: `outcome` is the decision in the words of `resolveRequestAction` / `request.answered` (`grant` → "granted",
+ * `decline` → "declined"), never the staff's `reason_note`, which is internal (PLA-§22.10.4: no note reaches the seller).
+ */
 export interface StoreRequestRow {
   id: string;
   kind: ReviewRequest["kind"];
   status: (typeof signupReviews.$inferSelect)["status"];
   createdAt: string;
-  /** staff's note once the request is decided (approved or rejected), else null */
-  outcome: string | null;
+  /** "granted" (approved) or "declined" (rejected) once decided; null while open, snoozed or withdrawn */
+  outcome: "granted" | "declined" | null;
 }
 
 /** The In-review card's state (PLA-§22.7), from the store's newest signup or reopen row. */
@@ -52,7 +56,7 @@ export interface ReviewCard {
 const CARD_KINDS = ["signup", "reopen"] as const;
 const LIST_MAX = 20;
 const isRequestKind = (kind: ReviewRow["kind"]): kind is ReviewRequest["kind"] => kind !== "signup" && kind !== "reopen";
-const decided = (status: ReviewRow["status"]) => status === "approved" || status === "rejected";
+const outcomeOf = (status: ReviewRow["status"]): StoreRequestRow["outcome"] => (status === "approved" ? "granted" : status === "rejected" ? "declined" : null);
 
 /** billing.manage: one open request per kind per store (`sr_store_kind_idx`), else `{ already: true }`; bucket `s:<sid>:request` 5/day. */
 export async function createStoreRequest(ctx: StoreCtx, req: ReviewRequest): Promise<{ id: string } | { already: true }> {
@@ -71,7 +75,7 @@ export async function withdrawStoreRequest(ctx: StoreCtx, requestId: string): Pr
 /** The store's requests, newest first, at most 20. */
 export async function listStoreRequests(scope: StoreScope): Promise<StoreRequestRow[]> {
   const rows = await db
-    .select({ id: signupReviews.id, kind: signupReviews.kind, status: signupReviews.status, createdAt: signupReviews.createdAt, reasonNote: signupReviews.reasonNote })
+    .select({ id: signupReviews.id, kind: signupReviews.kind, status: signupReviews.status, createdAt: signupReviews.createdAt })
     .from(signupReviews)
     .where(whereStore(signupReviews, scope, notInArray(signupReviews.kind, [...CARD_KINDS])))
     .orderBy(desc(signupReviews.createdAt), desc(signupReviews.id))
@@ -79,7 +83,7 @@ export async function listStoreRequests(scope: StoreScope): Promise<StoreRequest
   const out: StoreRequestRow[] = [];
   for (const r of rows) {
     if (!isRequestKind(r.kind)) continue;
-    out.push({ id: r.id, kind: r.kind, status: r.status, createdAt: r.createdAt.toISOString(), outcome: decided(r.status) ? r.reasonNote : null });
+    out.push({ id: r.id, kind: r.kind, status: r.status, createdAt: r.createdAt.toISOString(), outcome: outcomeOf(r.status) });
   }
   return out;
 }

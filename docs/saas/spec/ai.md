@@ -544,6 +544,12 @@ Wraps the existing deterministic code; it never fails and costs nothing:
 
 ### AI-§A.7 Browser ↔ server transport
 
+**Rev 6 P0b (frozen exports; P0b review F-9, so a track finds them in its part):** the browser rung's hooks are frozen in `src/lib/ai/router/client.ts` (CCR P2-10): `AiTaskState`,
+`useAiTask(task, ctx)`, `useDeviceInfo()` and **`cancelStoreAiJobs(storeId: string): void`**, which P2's
+`clearStoreClientState` calls on a store switch and at sign-out (PLA-§22.3); stubs until P7 (asserted in
+`src/lib/contracts/r1-p0b-design.ts`). The components P2's slots will hold (`DirectorWhy`, `DirectorPassControl`,
+`SuggestedFacts`, `AiProviderChip`, `ModelConsent`) are **not** stubbed: P7 mounts them at its merge (P7-11).
+
 Route handlers (P7-owned, `src/app/api/app/[store]/ai/**`, each `export const maxDuration = 120`, **except the three
 that may start or advance a pattern-B job, which export `maxDuration = 360`** (rev 4, core D56 / §H.12, ENGC-18:
 `[task]` for the B tasks, `director/critique` for the < 80 tok/s critique stage of AI-§A.8.6, and `jobs/[id]`; `after()`
@@ -1028,15 +1034,27 @@ The UI says so plainly: "Director pass: needs Cloud AI" with the credits link, n
 export function anthropic(): Anthropic | null;          // null when no key → cloud.block "no_key"
 export function keySource(): "console" | "env" | "none";   // for the console status tile; never the key itself
 export function resetAnthropic(): void;                  // after the key changes in the console
-// new Anthropic({ apiKey, maxRetries: 0, timeout: 90_000 })  — per request: { timeout, signal } override; pattern A ≤ 90 s (core §H.12),
+// new Anthropic({ apiKey, ...anthropicEndpoint(), maxRetries: 0, timeout: 90_000 })  — rev 6 P0b review F-1: anthropicEndpoint() is
+//   { baseURL: testSeam("ai-base-url")?.origin ?? "https://api.anthropic.com", authToken: null, logLevel: "warn" } (src/lib/security/test-seams.ts);
+//   per request: { timeout, signal } override; pattern A ≤ 90 s (core §H.12),
 //                                                                 pattern B stages ≤ 90 s each (rev 4: revision 2's "≤ 600 s inside the job" predates the
 //                                                                 stage-resumable jobs of rev 3 and is withdrawn), pattern C has no client timeout (Batches)
 ```
 
 - **Key resolution**: the encrypted platform secret `platform_ai_secret.apiKey` (envelope v2, scope `platform`, core §F.3;
   set only from the console with `ai.platform` + step-up, AI-§K.2) wins; else `process.env.ANTHROPIC_API_KEY`; else
-  none. The key is passed **explicitly** (`apiKey`), so the SDK never silently picks an `ant auth` profile or
-  `ANTHROPIC_AUTH_TOKEN` from a developer machine **[api]**. The key is never logged, never in `error_events`, audit
+  none. The key is passed **explicitly** (`apiKey`), so the SDK never silently picks an `ant auth` profile **[api]**.
+  **Rev 6 P0b (review F-1): an explicit `apiKey` alone is not enough.** `@anthropic-ai/sdk` 0.133.0 reads
+  `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_LOG` for every constructor option left `undefined`, with no
+  guard (`client.mjs`: `baseURL = readEnv('ANTHROPIC_BASE_URL')`), so a stray `ANTHROPIC_BASE_URL` would send the platform
+  key (`X-Api-Key`) and every prompt to that host and `ANTHROPIC_AUTH_TOKEN` would add an `Authorization: Bearer` header
+  beside it, whatever the seams decide. Every client is therefore built with the spread of the maintainer's
+  `anthropicEndpoint()` (`src/lib/security/test-seams.ts`): `baseURL` is the `ai-base-url` seam's loopback origin when the
+  seam is on and `https://api.anthropic.com` otherwise (a seam answer of `null` never reaches the SDK as `undefined`),
+  `authToken: null`, and the SDK's `logLevel: "warn"` pinned so `ANTHROPIC_LOG=debug` cannot log a request; P7 builds no
+  `baseURL` of its own. `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_CUSTOM_HEADERS` (headers cannot be
+  pinned) are refused on Hostinger by `qa:secrets` and named at boot (core §H.7); `test:security` builds a real client
+  with all three set and asserts `api.anthropic.com`, `X-Api-Key` only and no log line. The key is never logged, never in `error_events`, audit
   meta, job summaries or responses (core §F.10); the console shows only "set in console / set in env / not set" and the
   date it was set.
 - `maxRetries: 0` on the client: retries are ours (AI-§A.4 step 10), because the SDK default (2 retries, 10 min timeout
