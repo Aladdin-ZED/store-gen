@@ -44,7 +44,20 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
-- **R1 TRACKS RESUMED** 2026-10-28 ~09:05 after the previous Claude session ended (both workflows had stopped; network OK; 10/106 steps
+- **R1 TRACKS RUNNING (current runs)** relaunched 2026-10-28 ~09:20: group A task `w5vitl81u` run `wf_2e35858b-530`, group B
+  task `w85a83k9x` run `wf_94b5e9ce-d9d` (script qa/lead/r1-tracks.js with GUARD + step-report validation; args = prior/startAt
+  as produced by qa/lead/relaunch-args.mjs). Steps committed at launch: P8 2, P1 2, the others 1 (10/106).
+  **HOW TO RESTART THE TRACKS (any session, any interruption):** 1) confirm the network; 2) if the runs are still alive, do
+  nothing; 3) else make sure every run id is in qa/lead/track-runs.json, run `node qa/lead/relaunch-args.mjs`, and launch TWO
+  new workflows with scriptPath `C:\Users\SICO\store-gen\qa\lead\r1-tracks.js`, args = the JSON of qa/lead/tracks-A-next.json,
+  then the same with tracks-B-next.json; 4) append the new run ids to track-runs.json. Do NOT rely on resumeFromRunId across
+  sessions: on 2026-10-28 the harness re-framed agent prompts ("computed task" → "user request"), every cache key changed, and
+  a resume re-ran step 1 of every track (stopped within minutes, no damage).
+  **LESSON 2026-10-28:** the harness relays the owner's latest chat message to workflow agents; two P2 step agents answered
+  "which percentage are we at now?" instead of building, and the chain advanced on those answers (stopped, no damage). Fixed:
+  every step prompt starts with GUARD, and a result counts only if it is a real step report (names the step, mentions the
+  commit, is not a progress answer); otherwise the step retries with a corrective note.
+- (superseded) **R1 TRACKS RESUMED** 2026-10-28 ~09:05 after the previous Claude session ended (both workflows had stopped; network OK; 10/106 steps
   committed, partial work kept in the worktrees): group A now task `wdph3x53b`, group B task `wtadjnmjx` (same run ids below).
 - **R1 TRACKS RUNNING** — started 2026-10-28 ~06:55 from base 25293bb (worktrees C:\Users\SICO\sg-wt\p1..p8, branches
   r1/p1..p8, DBs cod_wt_p<n>, ui-shots ports 3461-3468). Same script for both: `C:\Users\SICO\store-gen\qa\lead\r1-tracks.js`.
