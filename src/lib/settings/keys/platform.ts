@@ -2,7 +2,9 @@
  * Platform setting `platform` (docs/STORE-SAAS.md §D.10, platform.md PLA-§2.4; owner: platform, P1 from P0). Written
  * by C0a with exactly the PLA-§2.4 paths T1/T2 read in R1.0 (`brand.name`, `signup.mode`, `signup.allowedMarkets`,
  * the `signup.pending*` sandbox ceilings, `newStore.*`, `allowSellerBrandOrange`, `reservedHandles`, `analytics.k`;
- * PLA Q.28), so P1 widens it without renames or a data migration.
+ * PLA Q.28), so P1 widens it without renames or a data migration. P1: the two sandbox media tiers are ordered
+ * (`pendingMediaMiBBeforeSubmit` ≤ `pendingMediaMiB`, error `pending_media_order`) and `{}` still parses to the
+ * PLA-§2.4 defaults (ceilings 20 / 100 / 5,000 MiB and 50 sandboxes a day).
  */
 import { z } from "zod";
 import { isoDateTime } from "../fields";
@@ -53,6 +55,8 @@ export const PlatformSettingSchema = z.object({
       /** the review target shown to sellers only when set */
       slaHours: z.number().int().min(1).max(168).nullable().default(null),
     })
+    // the cap before "Submit for review" never exceeds the cap after it (PD68's two tiers)
+    .refine((s) => s.pendingMediaMiBBeforeSubmit <= s.pendingMediaMiB, { message: "pending_media_order", path: ["pendingMediaMiBBeforeSubmit"] })
     .prefault({}),
   newStore: z
     .object({
