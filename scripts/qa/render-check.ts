@@ -13,7 +13,14 @@
  *  - runtime size budgets (docs/OFFERS.md §F.9, src/landing/runtime/budgets.json): every chunk and every page
  *    cap of `compositions` (page, thanks-page: the chunks of one document) at most the recorded gzip + 5%, except the
  *    frozen `landing` chunk (docs/STORE-SAAS.md header freeze rule, ENGC-10): tolerance 0 against its recorded
- *    budget, and its bytes equal to the pin `src/landing/runtime/landing.sha256` (sha256 hex of the chunk text);
+ *    budget, and its bytes equal to the pin `src/landing/runtime/landing.sha256` (sha256 hex of the chunk text); the
+ *    add-on chunks (§H.13, `addonChunks`) are measured with them once the asset build emits them, each against its own
+ *    budget, and count in the compositions that name them;
+ *  - inlined CSS budgets (design.md DES-R5, DS24, DES-§19, DES-§4.5.4; budgets.json `css`, `css-base`, `css-variants`):
+ *    over every live landing document, the gzip -9 bytes of the shared base stylesheet (`baseCss`), of the page's
+ *    section and variant chunks (`sectionChunks`, checked to be exactly what the document inlines after the base) and
+ *    of its whole inline stylesheet; each maximum fails above its key, so a chunk that drifts into base.css fails its
+ *    own line;
  *  - "Report this store" (docs/STORE-SAAS.md D76, §C.6, §K.2 P0 maintainer CCR, CRIT15): every live landing document
  *    carries exactly one link to its absolute `reportUrl` (the Shell's `.lp-report` row until P6's footer draws it,
  *    before the floating layers), with its footer shown or hidden; thank-you and legal documents at most one (P3 draws
@@ -29,8 +36,8 @@ import { FIXTURE_NAMES, fixtureAssets, getFixture, type Fixture, type FixtureNam
 import { DIVIDERS } from "@/lib/page/schema";
 import { validateDoc } from "@/lib/page/validate";
 import { inlineHashes, renderLandingHtml, renderLegalHtml, renderThankYouHtml, styleAttrViolations } from "@/lib/render/core";
-import { runtimeScripts } from "@/landing/document";
-import { runtimeChunks } from "@/landing/generated/assets";
+import { runtimeScripts, sectionChunks, variantChunksIn } from "@/landing/document";
+import { addonChunks, baseCss, runtimeChunks } from "@/landing/generated/assets";
 import type { LandingRuntimeConfig } from "@/landing/runtime/config";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -53,6 +60,35 @@ const fail = (m: string) => {
   failures++;
   console.log("  FAIL " + m);
 };
+const gz = (s: string) => gzipSync(Buffer.from(s, "utf8"), { level: 9 }).length;
+
+/** The document's one inline stylesheet (documentCss: font faces, theme tokens, base, section chunks, add-on CSS, rows). */
+const STYLE = /<style>([\s\S]*?)<\/style>/;
+const SECTION_TYPE = /\sdata-section="([A-Za-z][A-Za-z0-9]{0,40})"/g;
+/** The largest inlined-CSS figures over the live landing documents, gzip -9 bytes, with the page they come from. */
+const cssMax = { base: { bytes: 0, at: "" }, variants: { bytes: 0, at: "" }, page: { bytes: 0, at: "" } };
+const keepMax = (m: { bytes: number; at: string }, bytes: number, at: string) => {
+  if (bytes > m.bytes) Object.assign(m, { bytes, at });
+};
+
+/**
+ * Measures a live landing document's inline stylesheet: the whole of it, the shared base, and the page's section and
+ * variant chunks, i.e. `sectionChunks(doc, rendered)` with `rendered` read back from the markup (the section roots'
+ * data-section types, `variantChunksIn`). The chunks must be exactly what the document inlines after the base.
+ */
+function measureCss(tag: string, doc: Parameters<typeof sectionChunks>[0], html: string) {
+  const style = STYLE.exec(html)?.[1] ?? "";
+  const body = html.slice(html.indexOf("<body")).replace(/<script\b[\s\S]*?<\/script>/g, "");
+  const rendered = { types: new Set([...body.matchAll(SECTION_TYPE)].map((m) => m[1]!)), variants: variantChunksIn(body) };
+  const sections = sectionChunks(doc, rendered).join("\n");
+  if (!style.includes(sections ? `${baseCss}\n${sections}` : baseCss)) {
+    fail(`${tag}: the inline stylesheet is not the base then the section chunks render-check measures (css budgets unreliable)`);
+    return;
+  }
+  keepMax(cssMax.base, gz(baseCss), tag);
+  keepMax(cssMax.variants, gz(sections), tag);
+  keepMax(cssMax.page, gz(style), tag);
+}
 
 /** The live store-page options every fixture is rendered with: a store document in P mode (docs/STORE-SAAS.md §C.6). */
 function liveOptions(name: FixtureName, fx: Fixture) {
@@ -150,6 +186,7 @@ async function main() {
           console.log(`   ${surfaces} dividers: ${kinds.join(" ") || "-"} · ${Math.round(r.html.length / 1024)} KB`);
           const cfg = /<script type="application\/json" id="lp-config">([\s\S]*?)<\/script>/.exec(r.html)?.[1];
           if (!cfg || JSON.parse(cfg).v !== 2) fail(`${tag}: lp-config missing or not v2`);
+          measureCss(`${name}/${locale}`, doc, r.html);
         }
       }
     }
@@ -212,9 +249,8 @@ async function main() {
     compositions?: Record<string, string[]>;
   };
   const budgetOf = (name: string) => (typeof budgets[name] === "number" ? (budgets[name] as number) : undefined);
-  const gz = (s: string) => gzipSync(Buffer.from(s, "utf8"), { level: 9 }).length;
   // every chunk a document can embed: the core runtime chunks, plus the add-on chunks once the hook builds them (§H.13)
-  const chunks: Record<string, string> = { ...runtimeChunks };
+  const chunks: Record<string, string> = { ...runtimeChunks, ...addonChunks };
   const sizes: Record<string, number> = {};
   for (const [name, js] of Object.entries(chunks)) sizes[name] = gz(js);
   // page caps = the chunks of one document, from budgets.json (ENGP-12): a new chunk needs no change here
@@ -238,6 +274,20 @@ async function main() {
   if (!/^[0-9a-f]{64}$/.test(pin)) fail("src/landing/runtime/landing.sha256 holds no sha256");
   else if (landingSha !== pin) fail(`runtime landing changed: sha256 ${landingSha} ≠ the pin ${pin} (frozen chunk: re-measure and re-record through the maintainer)`);
   console.log(`runtime budgets: ${Object.entries(sizes).map(([k, v]) => `${k} ${v}/${budgetOf(k)}`).join(" · ")} · landing sha256 ${landingSha.slice(0, 12)}`);
+
+  // inlined CSS (DES-R5, DS24, DES-§19): the maxima over the live landing documents, each against its own key
+  const cssBudget = { base: budgetOf("css-base"), variants: budgetOf("css-variants"), page: budgetOf("css") };
+  const cssKey = { base: "css-base", variants: "css-variants", page: "css" } as const;
+  for (const line of ["base", "variants", "page"] as const) {
+    const budget = cssBudget[line];
+    const { bytes, at } = cssMax[line];
+    if (budget === undefined) fail(`budgets.json: no "${cssKey[line]}" budget`);
+    else if (!at) fail(`css ${line}: no live landing document was measured`);
+    else if (bytes > budget) fail(`css ${line} is ${bytes} B gzip on ${at} — over its ${budget} B budget ("${cssKey[line]}")`);
+  }
+  console.log(
+    `css: base ${cssMax.base.bytes}/${cssBudget.base} · variants ${cssMax.variants.bytes}/${cssBudget.variants} · page ${cssMax.page.bytes}/${cssBudget.page} (${cssMax.page.at})`,
+  );
   console.log(failures ? `${failures} FAILURE(S)` : "ALL OK");
   process.exit(failures ? 1 : 0);
 }

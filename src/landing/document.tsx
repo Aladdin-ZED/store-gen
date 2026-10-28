@@ -41,6 +41,7 @@ import { fromCents } from "@/lib/page/money";
 import type { PageDoc } from "@/lib/page/schema";
 import type { LandingRuntimeConfig, RuntimeFeature } from "./runtime/config";
 import { buildRuntimeConfig, inlineJson, type RuntimeEndpoints } from "@/lib/render/config";
+import { brandIcon } from "@/lib/logo/favicon";
 import { buildTheme, fontFaceCss, fontPreloads, type BuiltTheme } from "@/lib/theme";
 
 export type { StoreInfo } from "./context";
@@ -198,27 +199,10 @@ function absolute(url: string | undefined | null, origin: string | undefined): s
   }
 }
 
-const xmlEscape = (s: string) => s.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
-
 /**
- * Store logo, or a monogram of the brand in the page accent (data: SVG — allowed by img-src): a soft
- * squircle with a top light, the initial set in the accent ink. Colors are theme tokens only.
+ * <link rel="icon"> of `brandIcon` (src/lib/logo/favicon.ts, P6: the store logo or the brand monogram); no
+ * apple-touch-icon: renditions are WebP, which iOS home screens do not take.
  */
-function faviconHref(ctx: LandingRenderContext, theme: BuiltTheme): { href: string; type: string } {
-  const logo = ctx.store.logo ? ctx.assets.url({ id: ctx.store.logo.id, alt: "" }, 64) : null;
-  if (logo) return { href: logo.url, type: logo.mime };
-  const bg = HEX6.test(theme.tokens["lp-accent"] ?? "") ? theme.tokens["lp-accent"]! : HEX6.test(theme.tokens["lp-ink"] ?? "") ? theme.tokens["lp-ink"]! : "#1f1d1b";
-  const ink = HEX6.test(theme.tokens["lp-accent-ink"] ?? "") ? theme.tokens["lp-accent-ink"]! : "#fbfaf8";
-  const letter = Array.from(brandName(ctx).trim())[0]?.toLocaleUpperCase(ctx.locale) ?? "*";
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="l" x1="0" y1="0" x2="0" y2="1">` +
-    `<stop offset="0" stop-color="#fff" stop-opacity=".18"/><stop offset=".6" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>` +
-    `<rect width="64" height="64" rx="18" fill="${bg}"/><rect width="64" height="64" rx="18" fill="url(#l)"/>` +
-    `<text x="32" y="43.5" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Arial,sans-serif" font-size="34" font-weight="600" fill="${ink}">${xmlEscape(letter)}</text></svg>`;
-  return { href: `data:image/svg+xml,${encodeURIComponent(svg)}`, type: "image/svg+xml" };
-}
-
-/** <link rel="icon"> (no apple-touch-icon: renditions are WebP, which iOS home screens do not take). */
 function IconLinks({ icon }: { icon: { href: string; type: string } }): ReactElement {
   return <link rel="icon" href={icon.href} type={icon.type} />;
 }
@@ -517,7 +501,7 @@ export function LandingDocument(props: DocumentProps): ReactElement {
   const { doc, ctx, urls, origin, qa = false } = props;
   const theme = buildTheme(doc.theme, doc.locale);
   const meta = seoMeta(doc, ctx, urls, origin);
-  const icon = faviconHref(ctx, theme);
+  const icon = brandIcon(ctx, theme);
   const report = reportRow(doc, ctx);
   const css = documentCss(ctx, theme, [...sectionChunks(doc, props.rendered), ...addonCss(props.addons, "landing"), ...(report ? [REPORT_CSS] : [])], qa);
   const head = (
@@ -574,7 +558,7 @@ export function LandingDocument(props: DocumentProps): ReactElement {
 export function ThankYouDocument(props: DocumentProps): ReactElement {
   const { doc, ctx, urls, qa = false } = props;
   const theme = buildTheme(doc.theme, doc.locale);
-  const icon = faviconHref(ctx, theme);
+  const icon = brandIcon(ctx, theme);
   const css = documentCss(ctx, theme, [...(thankYouCss ? [thankYouCss] : []), ...addonCss(props.addons, "thanks")], qa);
   const head = (
     <>
@@ -605,7 +589,7 @@ export interface LegalDocumentProps {
  */
 export function LegalDocument({ doc, ctx, kind, updatedAt, qa = false }: LegalDocumentProps): ReactElement {
   const theme = buildTheme(doc.theme, doc.locale);
-  const icon = faviconHref(ctx, theme);
+  const icon = brandIcon(ctx, theme);
   const css = documentCss(ctx, theme, legalCss ? [legalCss] : [], qa);
   // pages in other languages read the English text: say so (screen readers, translation prompts)
   const lang = legalLang(doc.locale);

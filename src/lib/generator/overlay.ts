@@ -16,7 +16,8 @@ export type SemanticItem = Record<string, string | number | boolean | undefined>
 export interface PatchEntry {
   /** candidate field names, most specific first */
   keys: readonly string[];
-  value: string | boolean | number | readonly string[] | readonly SemanticItem[];
+  /** undefined: no write, the section's default stays (an optional AI copy field left out; DES-R20, AI-D26) */
+  value: string | boolean | number | readonly string[] | readonly SemanticItem[] | undefined;
 }
 
 /**
@@ -123,6 +124,7 @@ export function applyPatch(schema: z.ZodTypeAny, data: Record<string, unknown>, 
   if (!shape) return data;
   let out: Record<string, unknown> = { ...data };
   for (const entry of patch) {
+    if (entry.value === undefined) continue;
     const key = entry.keys.find((k) => k in shape);
     if (!key) continue;
     const field = shape[key]!;

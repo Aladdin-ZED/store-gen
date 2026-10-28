@@ -1,5 +1,5 @@
 {
-  "//": "gzip -9 bytes per runtime chunk, measured 2026-10-17 (docs/OFFERS.md §F.9); render-check fails above budget + 5%, except the frozen landing chunk (tolerance 0). Page caps (page, thanks-page) are the scripts of one document; the chunks each cap sums are listed in compositions (docs/STORE-SAAS.md §H.13, ENGP-12), so a new chunk needs no harness change. assist, assist-ty and track are the R1 add-on chunks of LAN-§5.2 (P3); page 32000 -> 34800 makes room for assist. landing re-measured at the R1.0 integration (2026-10-27): 24196 B, its sha256 pinned in landing.sha256, no re-freeze (docs/STORE-SAAS.md §P.5).",
+  "//": "gzip -9 bytes per runtime chunk, measured 2026-10-17 (docs/OFFERS.md §F.9); render-check fails above budget + 5%, except the frozen landing chunk (tolerance 0). Page caps (page, thanks-page) are the scripts of one document; the chunks each cap sums are listed in compositions (docs/STORE-SAAS.md §H.13, ENGP-12), so a new chunk needs no harness change. assist, assist-ty and track are the R1 add-on chunks of LAN-§5.2 (P3); page 32000 -> 34800 makes room for assist. landing re-measured at the R1.0 integration (2026-10-27): 24196 B, its sha256 pinned in landing.sha256, no re-freeze (docs/STORE-SAAS.md §P.5). css, css-base and css-variants (DES-R5, DS24, DES-§19): inlined CSS, gzip -9 bytes, measured 2026-10-28 by render-check over the live landing document of every fixture in ar, fr and en; render-check fails above each key. css = P + 4096, P = the heaviest whole inline stylesheet of one page, 102581 B (fixture duo/ar); css-base = B + 1536, B = the shared base stylesheet, 22071 B; css-variants = V + 2765, V = the heaviest section and variant chunk CSS of one page, 77013 B.",
   "landing": 24200,
   "thanks": 6650,
   "pixels": 3900,
@@ -13,6 +13,9 @@
   "track": 2400,
   "page": 34800,
   "thanks-page": 12600,
+  "css": 106677,
+  "css-base": 23607,
+  "css-variants": 79778,
   "compositions": {
     "page": ["pixels", "turnstile", "units-matrix", "units-fields", "fill-steps-box", "assist", "landing"],
     "thanks-page": ["thanks", "pixels", "assist-ty"]

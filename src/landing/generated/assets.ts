@@ -80,5 +80,15 @@ export const runtimeChunkHashes: Readonly<Record<RuntimeChunk, string>> = {
   "whatsapp": "sha256-pAg80YURJMnE1BfC2zFLJGOs5B5Q2jHFi1bnNLbSPzI=",
 };
 
+/**
+ * Add-on chunks (docs/STORE-SAAS.md §H.13): src/landing/runtime/addons/<AddonChunk>.ts for each name with a budget,
+ * an IIFE built like the runtime chunks. A document inlines the ones its render hook names (head: before any
+ * section; body: after the core chunk). Empty until the entries exist.
+ */
+export const addonChunks: Record<string, string> = {};
+
+/** Add-on stylesheets (src/landing/addons/css/<name>.css, minified like the section CSS), keyed by <name>. */
+export const addonCss: Record<string, string> = {};
+
 /** Content version of this asset set (assets.ts + chunks.ts). */
 export const version: string = "b46315093004";

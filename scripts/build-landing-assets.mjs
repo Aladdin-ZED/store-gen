@@ -43,6 +43,14 @@
  *                      whatsapp        runtime/entry-whatsapp.ts   WhatsApp exports: the bridge (WA_BRIDGE_JS), after the core
  *                    Optional chunks go BEFORE the core chunk (they register on window.__lpx).
  *   runtimeChunkHashes  "sha256-<base64>" of each chunk (CSP).
+ *   addonChunks     the add-on chunks of the render hook (docs/STORE-SAAS.md §H.13; landing.md LAN-§5.1, LAN-§5.2):
+ *                    src/landing/runtime/addons/<name>.ts is an entry when <name> is an AddonChunk
+ *                    (src/landing/addons/types.ts) with a key in budgets.json (R1: assist, assist-ty, track), built
+ *                    with exactly the runtime chunks' esbuild options; every other file in that folder (select.ts,
+ *                    storage.ts …) is a module the entries import. src/landing/document.tsx inlines the ones a
+ *                    document's `addons` names.
+ *   addonCss        src/landing/addons/css/<name>.css, compiled like the section CSS, keyed by <name> (`addons.css`).
+ *                    Both records are {} while the folders are absent or empty: an add-on-free build keeps its bytes.
  *   Budgets (gzip -9 bytes, src/landing/runtime/budgets.json): a warning here; render-check fails above
  *   the recorded number + 5%.
  *
@@ -56,8 +64,9 @@
  * Files are rewritten only when their content changes. Runs on predev/prebuild (`npm run
  * assets:build`). Missing or empty sources yield empty strings; invalid CSS rules are dropped with a
  * warning (lightningcss error recovery) so one broken section can never take the whole site down.
- * Budgets (warnings, never a failure here): each runtime chunk per budgets.json, and the heaviest page
- * (every optional chunk + landing) under the page cap (budgets.json "page", docs/OFFERS.md §F.9). `--report` prints every chunk's size.
+ * Budgets (warnings, never a failure here): each runtime and add-on chunk per budgets.json, and the heaviest page
+ * (the built chunks of compositions.page: every optional chunk, the add-ons, landing) under the page cap (budgets.json
+ * "page", docs/OFFERS.md §F.9). `--report` prints every chunk's size.
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -92,6 +101,22 @@ const BUDGETS = (() => {
     return {};
   }
 })();
+
+/** Add-on entries and stylesheets (§H.13): src/landing/runtime/addons/<name>.ts · src/landing/addons/css/<name>.css. */
+const ADDON_DIR = join(LANDING, "runtime", "addons");
+const ADDON_CSS_DIR = join(LANDING, "addons", "css");
+
+/**
+ * The AddonChunk names, read from the union in src/landing/addons/types.ts (one source of truth; the shapes there are
+ * frozen). An unreadable union builds no add-on, with a warning.
+ */
+function addonChunkNames() {
+  const file = join(LANDING, "addons", "types.ts");
+  const m = existsSync(file) ? /export type AddonChunk\s*=\s*([^;]+);/.exec(readFileSync(file, "utf8")) : null;
+  const names = m ? [...m[1].matchAll(/"([a-z0-9]+(?:-[a-z0-9]+)*)"/g)].map((x) => x[1]) : [];
+  if (!names.length) warn(`${rel(file)}: no AddonChunk union found — no add-on chunk is built`);
+  return names;
+}
 
 /** Browser floor of the landing pages (DESIGN.md §9): chrome 90, safari 14, firefox 90, samsung 14. */
 const v = (major, minor = 0) => (major << 16) | (minor << 8);
@@ -428,6 +453,43 @@ function listPickerCss() {
   return out;
 }
 
+/**
+ * The add-on chunks: one IIFE per src/landing/runtime/addons/<name>.ts whose <name> is an AddonChunk with a budget
+ * (budgets.json), in AddonChunk order. A name without its file is simply not built yet (P3 adds the entries).
+ */
+async function buildAddonChunks() {
+  const out = {};
+  if (!existsSync(ADDON_DIR)) return out;
+  for (const name of addonChunkNames()) {
+    if (typeof BUDGETS[name] !== "number" || !isNonEmptyFile(join(ADDON_DIR, `${name}.ts`))) continue;
+    try {
+      const js = await compileRuntime(`addons/${name}.ts`);
+      if (js) out[name] = js;
+    } catch (err) {
+      const msg = err?.errors?.map?.((e) => `${e.location?.file ?? ""}:${e.location?.line ?? ""} ${e.text}`).join("; ") ?? String(err);
+      throw new Error(`add-on bundle ${name} failed: ${msg}`);
+    }
+  }
+  return out;
+}
+
+/** src/landing/addons/css/<name>.css → { name: css } (sorted), compiled like the section stylesheets. */
+function listAddonCss() {
+  const out = {};
+  if (!existsSync(ADDON_CSS_DIR)) return out;
+  for (const name of readdirSync(ADDON_CSS_DIR).sort()) {
+    if (!name.endsWith(".css")) continue;
+    const id = name.slice(0, -".css".length);
+    if (!VARIANT_ID.test(id)) {
+      warn(`${rel(join(ADDON_CSS_DIR, name))}: "${id}" is not an add-on CSS name (lowercase, digits, single dashes) — skipped`);
+      continue;
+    }
+    const css = compileCss(join(ADDON_CSS_DIR, name));
+    if (css) out[id] = css;
+  }
+  return out;
+}
+
 async function compileRuntime(file) {
   const entry = join(LANDING, "runtime", file);
   if (!isNonEmptyFile(entry)) {
@@ -504,13 +566,23 @@ async function main() {
   const runtimeJs = runtimeChunks.landing;
   const runtimeHash = runtimeChunkHashes.landing;
 
-  const versionHash = sha256(JSON.stringify([base, sectionCss, sectionChunkCss, sectionVariants, pickerCss, thankYouCss, legalCss, runtimeChunks])).digest("hex").slice(0, 12);
+  const addonChunks = await buildAddonChunks();
+  const addonCss = listAddonCss();
+  const addonCount = Object.keys(addonChunks).length + Object.keys(addonCss).length;
+
+  // the add-ons join the hash once one exists, so an add-on-free build keeps its version
+  const versionHash = sha256(
+    JSON.stringify([base, sectionCss, sectionChunkCss, sectionVariants, pickerCss, thankYouCss, legalCss, runtimeChunks, ...(addonCount ? [addonChunks, addonCss] : [])]),
+  )
+    .digest("hex")
+    .slice(0, 12);
 
   const lit = (s) => JSON.stringify(s);
   const entries = (obj) =>
     Object.entries(obj)
       .map(([k, v]) => `  ${lit(k)}: ${lit(v)},`)
       .join("\n");
+  const record = (obj) => (Object.keys(obj).length ? `{\n${entries(obj)}\n}` : "{}");
   const out = `// GENERATED by scripts/build-landing-assets.mjs — do not edit (npm run assets:build).
 
 /** Landing base stylesheet (styles/base.css + illustrations/illustrations.css), minified. */
@@ -552,6 +624,16 @@ ${entries(runtimeChunks)}
 export const runtimeChunkHashes: Readonly<Record<RuntimeChunk, string>> = {
 ${entries(runtimeChunkHashes)}
 };
+
+/**
+ * Add-on chunks (docs/STORE-SAAS.md §H.13): src/landing/runtime/addons/<AddonChunk>.ts for each name with a budget,
+ * an IIFE built like the runtime chunks. A document inlines the ones its render hook names (head: before any
+ * section; body: after the core chunk). Empty until the entries exist.
+ */
+export const addonChunks: Record<string, string> = ${record(addonChunks)};
+
+/** Add-on stylesheets (src/landing/addons/css/<name>.css, minified like the section CSS), keyed by <name>. */
+export const addonCss: Record<string, string> = ${record(addonCss)};
 
 /** Content version of this asset set (assets.ts + chunks.ts). */
 export const version: string = ${lit(versionHash)};
@@ -597,8 +679,14 @@ ${entries(pickerCss)}
     const budget = BUDGETS[name];
     if (typeof budget === "number" && size > budget) warn(`runtime chunk ${name} is ${kb(size)} KB gzip — over its ${kb(budget)} KB budget`);
   }
-  // the heaviest product page: every optional chunk + landing, as separate scripts and as one document
-  const worst = ["pixels", "turnstile", "units-matrix", "units-fields", "fill-steps-box", "landing"].map((n) => runtimeChunks[n]);
+  for (const [name, js] of Object.entries(addonChunks)) {
+    if (gz(js) > BUDGETS[name]) warn(`add-on chunk ${name} is ${kb(gz(js))} KB gzip — over its ${kb(BUDGETS[name])} KB budget`);
+  }
+  // the heaviest product page: the chunks of budgets.json compositions.page that are built (every optional chunk,
+  // the add-ons once they exist, landing), as separate scripts and as one document
+  const allChunks = { ...runtimeChunks, ...addonChunks };
+  const pageNames = Array.isArray(BUDGETS.compositions?.page) ? BUDGETS.compositions.page : ["pixels", "turnstile", "units-matrix", "units-fields", "fill-steps-box", "landing"];
+  const worst = pageNames.filter((n) => n in allChunks).map((n) => allChunks[n]);
   const worstSum = worst.reduce((n, js) => n + gz(js), 0);
   const worstDoc = gz(worst.join("\n"));
   if (typeof BUDGETS.page === "number" && worstDoc > BUDGETS.page) warn(`heaviest page scripts are ${kb(worstDoc)} KB gzip in one document — over the ${kb(BUDGETS.page)} KB cap`);
@@ -615,6 +703,8 @@ ${entries(pickerCss)}
     for (const [id, css] of Object.entries(pickerCss)) rows.push([`  picker ${id}`, css]);
     rows.push(["thank-you", thankYouCss], ["legal", legalCss]);
     for (const [name] of RUNTIME_CHUNKS) rows.push([`runtime ${name}`, runtimeChunks[name]]);
+    for (const [name, js] of Object.entries(addonChunks)) rows.push([`add-on ${name}`, js]);
+    for (const [name, css] of Object.entries(addonCss)) rows.push([`add-on css ${name}`, css]);
     for (const [name, s] of rows) console.log(`  ${name.padEnd(34)} ${kb(bytes(s)).padStart(6)} KB ${kb(gz(s)).padStart(6)} KB gz`);
   }
   console.log(
@@ -622,7 +712,9 @@ ${entries(pickerCss)}
       `${Object.keys(sectionCss).length} section types ${kb(sum(sectionCss))} KB complete · ` +
       `${Object.keys(sectionVariants).length} split into ${variantCount} variant chunks (${kb(sum(sectionChunkCss))} KB) · ` +
       `thank-you ${kb(bytes(thankYouCss))} KB · legal ${kb(bytes(legalCss))} KB · ` +
-      `runtime ${kb(bytes(runtimeJs))} KB (${kb(runtimeGz)} KB gz) + ${RUNTIME_CHUNKS.length - 1} chunks, heaviest page ${kb(worstSum)} KB gz ` +
+      `runtime ${kb(bytes(runtimeJs))} KB (${kb(runtimeGz)} KB gz) + ${RUNTIME_CHUNKS.length - 1} chunks` +
+      (addonCount ? ` + ${Object.keys(addonChunks).length} add-on chunk(s), ${Object.keys(addonCss).length} add-on stylesheet(s)` : "") +
+      `, heaviest page ${kb(worstSum)} KB gz ` +
       `(${kb(worstDoc)} KB in one document) · ${Math.round(performance.now() - t0)} ms` +
       (warnings ? ` · ${warnings} warning(s)` : ""),
   );
