@@ -1,0 +1,48 @@
+{
+  "//": "The committed snapshot of src/lib/design/tokens-table.ts (P6 step 2, 2026-10-28). test:design (tokens-table) fails when a table no longer starts with its list here: the tables are append-only, so stored design_genomes.vec vectors stay comparable across releases. Extend a list only by appending what its table appended.",
+  "sections": [
+    "announcement:ticker", "announcement:static", "announcement:split", "header:minimal", "header:centered",
+    "header:none", "hero:stage", "hero:editorial", "hero:poster", "hero:scrapbook", "hero:spec", "hero:split",
+    "trustBar:chips", "trustBar:stamps", "trustBar:ledger", "trustBar:ribbon", "marquee:tape", "marquee:outline",
+    "marquee:double", "problem:crossed", "problem:chat", "problem:split", "problem:quote", "benefits:numbered",
+    "benefits:bento", "benefits:zigzag", "benefits:icons", "benefits:stack", "showcase:hotspots",
+    "showcase:exploded", "showcase:ingredients", "showcase:dimensions", "steps:timeline", "steps:cards",
+    "steps:illustrated", "steps:strip", "story:letter", "story:image-text", "story:manifesto", "gallery:carousel",
+    "gallery:masonry", "gallery:filmstrip", "gallery:lookbook", "video:framed", "video:phone", "video:fullbleed",
+    "beforeAfter:slider", "beforeAfter:cards", "beforeAfter:timeline", "comparison:table", "comparison:versus",
+    "comparison:checklist", "specs:sheet", "specs:tabs", "specs:accordion", "specs:label", "reviews:wall",
+    "reviews:carousel", "reviews:summary", "reviews:notes", "socialProof:whatsapp", "socialProof:ugc",
+    "socialProof:counter", "stats:big-numbers", "stats:rings", "stats:ticker", "offer:stacked", "offer:tickets",
+    "offer:shelf", "urgency:countdown", "urgency:stock", "urgency:banner", "guarantee:seal", "guarantee:split",
+    "guarantee:letter", "orderForm:card", "orderForm:split", "orderForm:minimal", "orderForm:bold", "cta:banner",
+    "cta:stamp", "cta:poster", "faq:accordion", "faq:two-col", "faq:chat", "footer:simple", "footer:big",
+    "stickyCta:bar", "stickyCta:pill", "whatsappFloat:bubble", "whatsappFloat:tab", "hero:cinema", "hero:quiet",
+    "hero:index", "hero:contact", "hero:statement", "benefits:hanging", "showcase:figure", "gallery:contact",
+    "offer:showcase"
+  ],
+  "heroes": [
+    "stage", "editorial", "poster", "scrapbook", "spec", "split", "cinema", "quiet", "index", "contact", "statement",
+    "split/5:7", "split/4:8", "split/1:1", "cinema/below", "cinema/beside", "quiet/4:5", "quiet/1:1", "contact/tl",
+    "contact/tr", "contact/bl", "contact/br", "statement/word-subline", "statement/contrast-pair"
+  ],
+  "pairings": [
+    "couture", "atelier", "salon", "nocturne", "gallery", "satin", "monolith", "prive", "velours", "noir",
+    "lab-serif", "dermo", "formula", "clinic", "ritual", "assay", "botanica", "serum", "batch", "tonic", "vial",
+    "riad", "medina", "atlas", "majorelle", "dar", "kasbah", "sahara", "agadir", "sabra", "sticker", "candy",
+    "bounce", "pop", "jelly", "block", "sprout", "parade", "confetti", "fizz", "stadium", "velocity", "track",
+    "sprint", "pulse", "lane", "drive", "arena", "relay", "spec-sheet", "firmware", "silicon", "kernel", "lumen",
+    "array", "orbit", "signal", "trace", "lattice", "kitchen", "pantry", "sunday", "terrace", "loft", "brunch",
+    "ceramic", "nest", "supper", "petal", "gloss", "cover", "rosewater", "peony", "dew", "blossom", "silk", "rosa",
+    "pollen", "harvest", "herbarium", "fresh", "meadow", "terroir", "ridge", "orchard", "cedar", "market", "grove",
+    "acre", "masthead", "feuilleton", "swiss", "broadsheet", "column", "folio", "index", "runway", "gazette",
+    "dispatch", "broadside", "workshop", "torque", "chrome", "piston", "alloy", "gauge", "carbon", "rally", "forge",
+    "rivet"
+  ],
+  "fonts": [
+    "bodoni-moda", "fraunces", "gloock", "young-serif", "instrument-serif", "bricolage-grotesque",
+    "big-shoulders-display", "archivo", "schibsted-grotesk", "hanken-grotesk", "instrument-sans", "figtree",
+    "dm-sans", "jetbrains-mono", "ibm-plex-mono", "el-messiri", "reem-kufi", "lemonada", "marhey", "changa",
+    "alexandria", "noto-kufi-arabic", "noto-naskh-arabic", "readex-pro", "baloo-bhaijaan-2", "ibm-plex-sans-arabic",
+    "tajawal", "cairo", "kufam", "vazirmatn", "cormorant-garamond", "dm-serif-display", "syne", "manrope"
+  ]
+}

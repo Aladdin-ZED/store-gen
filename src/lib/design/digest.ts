@@ -15,6 +15,7 @@
  * report's heights and fold) with empty counts, zero measurements, `gates: { hard: [], soft: [], slop: 0, q: 0 }`,
  * `cod: null` (P3's `codInvariants` is itself a stub) and `stub: true`, so a reader can tell nothing was measured.
  */
+import { z } from "zod";
 import type { CodInvariantInputs, CodInvariants } from "@/lib/landing/cod-invariants";
 import type { PageDoc, SectionBg } from "@/lib/page/schema";
 import type { BuiltTheme } from "@/lib/theme/types";
@@ -83,6 +84,28 @@ export interface GenomeCard {
   /** the DES-§4.8 chips as text, e.g. "Editorial column · Fraunces/Readex Pro · ink+one · tight-detail crops" */
   explanation: string[];
 }
+
+const BandZ = z.enum(["ok", "close", "too_close"]);
+const GateIdZ = z.string().regex(/^(V|S|C|N|T|K|I|R|RTL|D)[A-Za-z0-9_.-]{0,23}$/) as z.ZodType<GateId>;
+
+/**
+ * The GenomeCard as a strict schema (RD-1, DS7, DS59): what P7 validates a card against before it enters a prompt.
+ * The distance is three bands and the first-page marker, never a number; the bold genes are their seven values.
+ */
+export const GenomeCardSchema: z.ZodType<GenomeCard> = z
+  .object({
+    id: z.string().min(1).max(40),
+    slot: z.enum(["best_fit", "contrast", "explore"]),
+    bold: z.object({ G1: z.string().max(48), G2: z.string().max(48), G4: z.string().max(48), G9: z.string().max(48), G18: z.string().max(48), G23: z.string().max(48), G28: z.string().max(48) }).strict(),
+    derived: z.record(z.string().max(32), z.union([z.string().max(64), z.number()])),
+    q: z.number().min(0).max(100),
+    slop: z.number().min(0).max(100),
+    composition: z.number().min(0).max(15),
+    gateFails: z.array(GateIdZ).max(40),
+    distance: z.object({ own: z.union([BandZ, z.literal("first")]), niche: BandZ, platform: BandZ }).strict(),
+    explanation: z.array(z.string().max(120)).max(6),
+  })
+  .strict();
 
 /** What `renderDigest` needs of the store besides the doc to fill `cod` (the heights come from the gate report). */
 export type CodDigestInputs = Omit<CodInvariantInputs, "heights">;

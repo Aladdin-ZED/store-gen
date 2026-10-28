@@ -8,6 +8,8 @@
  * Exit code 1 on any failure; each group prints its ids, its checks and its time.
  */
 import { DESIGN_GROUPS, type GroupCtx } from "@/lib/design/selftest";
+// step 2 (genome core): determinism, H-rules, compile, genomeOf, gene spread, hints, distance, tokens, Director vocabulary
+import "@/lib/design/selftest-genome";
 
 async function main() {
   const full = process.argv.includes("--full");
