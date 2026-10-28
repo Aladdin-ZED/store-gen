@@ -335,8 +335,9 @@ export function storePlaceholder(store: Pick<StoreRow, "name" | "defaultLocale">
 /**
  * A private preview: platform host only; the token opens and its row is live (./preview-token.ts); the store is
  * servable for previews (pending, active, restricted); the page is still in that store. Renders the latest draft
- * (else the published version) on request with an offline runtime (no order, no pixel, no network), `noindex`,
- * `private, no-store`, no referrer. Every refusal is the neutral 404.
+ * (else the published version) on request with an offline runtime (no order, no pixel, no network) and the page's
+ * add-ons for the preview mode (P3's `loadRenderAddons`, mode "preview"), `noindex`, `private, no-store`, no
+ * referrer. Every refusal is the neutral 404.
  */
 export async function servePreview(req: Request, token: string): Promise<Response> {
   if (effectiveHost(req.headers).cls !== "platform") return notFoundResponse(req);
@@ -350,7 +351,7 @@ export async function servePreview(req: Request, token: string): Promise<Respons
     if (!page) return notFoundResponse(req);
     const doc = validateDoc(page.draft).doc ?? (await getPublishedPage(scope, store, page.slug).then((p) => (p ? validateDoc(p.doc).doc : null)));
     if (!doc) return notFoundResponse(req);
-    const rc = await loadStoreRenderContext(scope, store, { pageId: page.id });
+    const rc = await loadStoreRenderContext(scope, store, { pageId: page.id, addons: { doc, mode: "preview" } });
     const { resolver } = await storeAssetResolver(scope, rc, doc);
     const rendered = await renderLandingHtml(doc, { ...storeRenderOptions(rc, { slug: page.slug, pageKey: page.publicKey, assets: resolver }), runtimeMode: "preview" });
     return documentResponse(req, { html: rendered.html, csp: rendered.csp }, { kind: "preview", store: addressOf(store), encoding: "once" });

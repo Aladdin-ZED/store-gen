@@ -10,7 +10,10 @@
  *  - `registerBudgetProfile` clamps to the D52 ceilings and refuses a second registration and "landing";
  *  - the lock: `assertStubBuildAllowed` throws under NODE_ENV=production without SG_STUB_BUILD_OK=1 and not with it;
  *    importing budget.ts in a production process throws; scripts/qa/stub-lock.ts exits 1 without the variable and 0
- *    with it; the deploy archive's gate-file rule refuses `stubBuild: true`.
+ *    with it; the deploy archive's gate-file rule refuses `stubBuild: true`;
+ *  - the one origin builder (§M.1 rule 2, P0b CCR P3-11; src/lib/render/origin.ts, re-exported here): an edited field
+ *    → owner, an unedited recorded field → its class, no record → library, a path absent from a present record →
+ *    owner; `hash16` deterministic (the FNV-1a 64 test vectors), NFC- and trim-insensitive.
  * After P6 merges the real model, the stub-only checks flip to the C2 / C3 / F1 hard fixtures of
  * src/lib/design/calibration/heights.json (enabled at the P6 merge, §K.2).
  *
@@ -105,6 +108,53 @@ async function main() {
   await check("registry: the budget check is registered with the publish checks", async () => {
     await import("./prepublish");
     assert.ok(globalThis.__sgPrePublish?.checks.has("budget"));
+  });
+
+  await check("origin: textFieldsOf walks every string leaf of each section at <section.id>.<dot.path>, array indices included", async () => {
+    const { textFieldsOf } = await import("./origin");
+    const d = { ...doc, sections: [{ ...doc.sections[0]!, id: "hero1", data: { title: "Huile d'argan", n: 3, on: true, items: [{ q: "Q1", a: "A1" }], img: { id: "x", alt: "" } } }] };
+    assert.deepEqual([...textFieldsOf(d)], [["hero1.title", "Huile d'argan"], ["hero1.items.0.q", "Q1"], ["hero1.items.0.a", "A1"], ["hero1.img.id", "x"], ["hero1.img.alt", ""]]);
+    const all = textFieldsOf(doc);
+    assert.ok(all.size > 10 && [...all.keys()].every((k) => doc.sections.some((sec) => k.startsWith(`${sec.id}.`))), "every path starts with its section id");
+  });
+
+  await check("origin: an edited field → owner; an unedited recorded field → its class; no record → library; a path absent from a present record → owner", async () => {
+    const origin = await import("./origin");
+    const pre = await import("./prepublish");
+    assert.ok(pre.originFrom === origin.originFrom && pre.textFieldsOf === origin.textFieldsOf && pre.hash16 === origin.hash16, "prepublish re-exports the one builder");
+    const at = (title: string) => ({ ...doc, sections: [{ ...doc.sections[0]!, id: "hero1", data: { title, lead: "Pressée à froid", kicker: "Nouveau" } }] });
+    const d = at("Huile d'argan");
+    const gen = {
+      "hero1.title": { h: origin.hash16("Huile d'argan"), o: "cloud" as const },
+      "hero1.lead": { h: origin.hash16("Pressée à froid"), o: "library" as const },
+    };
+    const m = origin.originFrom(null, d, gen);
+    assert.deepEqual([...m], [["hero1.title", "cloud"], ["hero1.lead", "library"], ["hero1.kicker", "owner"]], "recorded fields keep their class; the unrecorded one is owner");
+    assert.equal(origin.originFrom(null, at("Huile d'argan bio"), gen).get("hero1.title"), "owner", "an edited field");
+    for (const none of [undefined, null]) assert.deepEqual([...origin.originFrom(null, d, none).values()], ["library", "library", "library"], `no record (${none})`);
+    assert.deepEqual([...origin.originFrom(null, d, {}).values()], ["owner", "owner", "owner"], "an empty record names no field");
+    assert.deepEqual(origin.originFrom(d, d, gen), m, "prev is not consulted in R1");
+    // the record survives Unicode normalisation and outer whitespace; a class outside the five never leaks
+    assert.equal(origin.originFrom(null, at("  Huile d'argan \n"), gen).get("hero1.title"), "cloud");
+    const nfd = { "hero1.lead": { h: origin.hash16("Presse\u0301e a\u0300 froid"), o: "engine" as const } };
+    assert.equal(origin.originFrom(null, d, nfd).get("hero1.lead"), "engine");
+    assert.equal(origin.originFrom(null, d, { "hero1.title": { h: gen["hero1.title"].h, o: "robot" as never } }).get("hero1.title"), "owner");
+  });
+
+  await check("origin: hash16 is FNV-1a 64 over NFC(trim(text)) as 16 lowercase hex, deterministic", async () => {
+    const { hash16 } = await import("./origin");
+    // the published FNV-1a 64-bit vectors
+    assert.equal(hash16(""), "cbf29ce484222325");
+    assert.equal(hash16("a"), "af63dc4c8601ec8c");
+    assert.equal(hash16("foobar"), "85944171f73967e8");
+    for (const t of ["Huile d'argan", "زيت الأركان الأصلي", "Crème 100 % bio ✓", "😀"]) {
+      assert.match(hash16(t), /^[0-9a-f]{16}$/);
+      assert.equal(hash16(t), hash16(t), "deterministic");
+      assert.equal(hash16(` ${t}\t`), hash16(t), "trim-insensitive");
+    }
+    assert.equal(hash16("Cre\u0300me"), hash16("Cr\u00e8me"), "NFC-insensitive");
+    assert.equal(hash16("e\u0301"), hash16("\u00e9"));
+    assert.notEqual(hash16("Huile d'argan"), hash16("Huile d'Argan"), "case-sensitive");
   });
 
   await check(`fixtures: while design's stubs are in place, no fixture (live, ${SLOW ? "fr and ar" : "fr"}) is refused; every budget item is a note flagged stub`, async () => {

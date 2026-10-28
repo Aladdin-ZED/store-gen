@@ -5,6 +5,7 @@ import "server-only";
  *   const v = await publishPage(scope, pageId, { actor, expectedUpdatedAt });   // draft → validated → rendered → immutable version
  *   const r = await renderAndCommit(scope, pageId, doc, { kind: "publish", label, userId, actor, baseVersionId });
  *   await unpublishPage(scope, pageId, actor);
+ *   const x = await rerenderInPlace(scope, pageId, { reason: "store_info", actor });   // the live version's rendered columns, rewritten
  *
  * The scoped forms read and write the scope's store only (every predicate carries `store_id`; another store's page
  * id is `not_found`), render with the store render context of now (./store-context.server.ts: base, origin,
@@ -31,6 +32,7 @@ import { invalidatePixelUsage } from "@/lib/pixels/usage.server";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
 import { pages, pageVersions } from "@/lib/db/schema";
+import type { RenderReason } from "@/lib/jobs/renders";
 import type { PageDoc, Tracking } from "@/lib/page/schema";
 import { validateDoc, type DocIssue } from "@/lib/page/validate";
 import { STORE_RESERVED_SLUGS } from "@/lib/tenancy/handles";
@@ -41,7 +43,7 @@ import { buildTheme } from "@/lib/theme";
 import { invalidateStoreRender } from "./cache.server";
 import { renderLandingHtml, renderThankYouHtml, type RenderIssue } from "./core";
 import { runPrePublishChecks, runPublishListeners, type AssetMeta, type PrePublishCode, type PrePublishCtx } from "./prepublish";
-import { loadStoreRenderContext, storeAssetResolver, storeRenderOptions, thankYouLinks } from "./store-context.server";
+import { loadStoreRenderContext, storeAssetResolver, storeRenderOptions } from "./store-context.server";
 
 export { invalidateStoreRender } from "./cache.server";
 export { PUBLIC_ENDPOINTS } from "./store-context.server";
@@ -401,14 +403,14 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
   if (!isStoreSlug(slug)) throw reservedSlug(slug);
   const actor = opts.actor ?? userActor(opts.userId);
 
-  const rc = await loadStoreRenderContext(scope, store, { pageId: page.id });
+  const rc = await loadStoreRenderContext(scope, store, { pageId: page.id, addons: { doc, mode: "live" } });
   const { resolver, rows } = await storeAssetResolver(scope, rc, doc);
-  const renderOpts = storeRenderOptions(rc, { slug, pageKey: page.publicKey, assets: resolver });
+  const input = { slug, pageKey: page.publicKey, assets: resolver };
   // the version id is known before rendering: #lp-config carries it as `ver` (§G.1)
   const versionId = newId();
-  const landing = await renderLandingHtml(doc, { ...renderOpts, ver: versionId });
+  const landing = await renderLandingHtml(doc, { ...storeRenderOptions(rc, input), ver: versionId });
   if (landing.blocking.length) throw blockingError(landing.blocking);
-  const thanks = await renderThankYouHtml(doc, { ...renderOpts, links: thankYouLinks(rc, slug) });
+  const thanks = await renderThankYouHtml(doc, storeRenderOptions(rc, { ...input, page: "thanks" }));
   const runtimeV = landing.runtimeV ?? 1;
 
   // §M.1: every registered gate runs before the version row; a refusal names its items
@@ -683,4 +685,103 @@ async function trackingOnlyInStore(
   }
   invalidatePixelUsage(scope.storeId);
   return { versionId: res.versionId, slug: res.slug, publishedAt: res.publishedAt, draftUpdated, draftConflict, draftUpdatedAt };
+}
+
+/* ------------------------------------------------------------------ */
+/* In-place re-render (§H.3, D50; P0b, CCR P8-2)                       */
+/* ------------------------------------------------------------------ */
+
+export interface RerenderResult {
+  /**
+   * rendered: the live version's html, thank_you_html, csp, thank_you_csp and etag were rewritten in place;
+   * skipped_runtime_v1: a runtime_v 1 version (listed for a manual republish, §H.3); not_live: the page is not
+   * published in the scope's store (another store's id included); live_changed: a publish or a pixels-only update
+   * moved the live version while this one rendered (nothing written; the new version carries the context of now)
+   */
+  status: "rendered" | "skipped_runtime_v1" | "not_live" | "live_changed";
+  /** the version rendered (or skipped) */
+  versionId?: string;
+  /** the new etag ("rendered" only) */
+  etag?: string;
+  /** what the gates said, in warn mode: a re-render never refuses a live page (§H.3); P8 records them as notes */
+  notes: GateItem[];
+}
+
+/**
+ * Re-renders a live page in place (§H.3, D50: the `renders` job of every reason, P8): the published version's doc,
+ * rendered (ver = that version's id) with the store render context of now and the page's live add-ons, the gates run
+ * in `warn` mode (their items come back as `notes`, a refusal included: honesty has no warn mode, and the page is
+ * already live), then, under the page's row lock in the store and only while `pages.published_version_id` is still
+ * that version, `UPDATE page_versions SET html, thank_you_html, csp, thank_you_csp, etag WHERE store_id = ? AND id = ?`.
+ * The doc, the checksum, runtime_v and every other row stay as they are: no new version row, no publish listener, no
+ * draft stamp; then the store's render cache is dropped. Still refused, like a publish, because they are no gates: a
+ * page cap (`page_too_large`), a write over max_allowed_packet (`page_too_large`), a version whose doc no longer
+ * validates or whose runtime contract would change (`invalid`). `opts.reason` is the render job's reason (the caller
+ * records it); `opts.actor` is who the gates see.
+ */
+export async function rerenderInPlace(scope: WriteScope, pageId: string, opts: { reason: RenderReason; actor: Actor }): Promise<RerenderResult> {
+  const [live] = await db
+    .select({ slug: pages.slug, publicKey: pages.publicKey, status: pages.status, versionId: pageVersions.id, doc: pageVersions.doc, runtimeV: pageVersions.runtimeV })
+    .from(pages)
+    .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
+    .where(whereStore(pages, scope, eq(pages.id, pageId)))
+    .limit(1);
+  if (!live || live.status !== "published") return { status: "not_live", notes: [] };
+  const versionId = live.versionId;
+  if (live.runtimeV === 1) return { status: "skipped_runtime_v1", versionId, notes: [] };
+  const store = await getStoreById(scope.storeId);
+  if (!store) throw notFound();
+  const { doc } = validateDoc(live.doc);
+  if (!doc) throw new PublishError("invalid", "The live version can't be read. Publish the page from the builder instead.");
+
+  const rc = await loadStoreRenderContext(scope, store, { pageId, addons: { doc, mode: "live" } });
+  const { resolver, rows } = await storeAssetResolver(scope, rc, doc);
+  const input = { slug: live.slug, pageKey: live.publicKey, assets: resolver };
+  const landing = await renderLandingHtml(doc, { ...storeRenderOptions(rc, input), ver: versionId });
+  if (landing.blocking.length) throw blockingError(landing.blocking);
+  // runtime_v stays: it must keep describing the bytes an open tab posts against
+  if ((landing.runtimeV ?? 1) !== live.runtimeV) throw new PublishError("invalid", "This page's runtime changed since it was published. Publish it again to update it.");
+  const thanks = await renderThankYouHtml(doc, storeRenderOptions(rc, { ...input, page: "thanks" }));
+
+  const gate = await runPrePublishChecks({
+    scope,
+    store,
+    pageId,
+    doc,
+    // the version being re-rendered is the one live
+    prev: doc,
+    theme: buildTheme(doc.theme, doc.locale),
+    assets: assetMeta(rows),
+    actor: opts.actor,
+    now: new Date(),
+    mode: "warn",
+    html: landing.html,
+  });
+  const notes = gate.ok ? gate.notes : gate.items;
+
+  const heaviest = heaviestStatement(doc, landing, thanks);
+  const packetLimit = await maxPacket();
+  if (packetLimit && heaviest > packetLimit) throw tooHeavy(heaviest, packetLimit);
+
+  const inPage = whereStore(pages, scope, eq(pages.id, pageId));
+  const inVersion = whereStore(pageVersions, scope, eq(pageVersions.id, versionId));
+  const outcome = await db
+    .transaction(async (tx) => {
+      const [locked] = await tx.select({ status: pages.status, publishedVersionId: pages.publishedVersionId }).from(pages).where(inPage).limit(1).for("update");
+      if (!locked || locked.status !== "published") return "not_live" as const;
+      if (locked.publishedVersionId !== versionId) return "live_changed" as const;
+      // the version row's own statements, one big value each (the packet rule of the publish)
+      await tx.update(pageVersions).set({ csp: landing.csp, thankYouCsp: thanks.csp, etag: landing.etag }).where(inVersion);
+      await tx.update(pageVersions).set({ html: landing.html }).where(inVersion);
+      await tx.update(pageVersions).set({ thankYouHtml: thanks.html }).where(inVersion);
+      return "rendered" as const;
+    })
+    .catch((err: unknown) => {
+      const why = packetError(err);
+      if (why === "packet" || (why === "reset" && heaviest > (packetLimit ?? 1024 * 1024))) throw tooHeavy(heaviest, packetLimit);
+      throw err;
+    });
+  if (outcome !== "rendered") return { status: outcome, versionId, notes };
+  invalidateStoreRender(scope.storeId);
+  return { status: "rendered", versionId, etag: landing.etag, notes };
 }

@@ -12,7 +12,9 @@
  * stores with the same slug, a pending, a suspended (notice on) and a closed store, renamed and deleted handles,
  * slug history, an order, media keys, an export; then every store route through `serveStoreRoute` with real
  * Request objects on the platform, legacy and store (Worker) hosts, the resolvers, stats per store and timezone,
- * the publish / unpublish guards and the preview-token rows.
+ * the publish / unpublish guards and the preview-token rows; P0b package F: the in-place re-render (`rerenderInPlace`:
+ * rendered in place, runtime_v 1 skipped, not live, a publish meanwhile → live_changed) and the generation record
+ * read (`generationRecordFor`).
  *
  * Paths that read T1's settings API (rendering at publish, test renders, legal pages) or its envelope (`seal` /
  * `open` of preview tokens) are checked for what they must do once T1 has merged; while its C0a stubs are in place
@@ -34,14 +36,14 @@ M._resolveFilename = function (request: string, ...rest: unknown[]) {
   return resolveFilename.call(this, request, ...rest);
 };
 
-const DB_RE = /^cod_test_(?:t3|m4|m5|p0)_[a-z0-9_]{1,40}$/;
+const DB_RE = /^cod_test_(?:t3|m4|m5|p0b?)_[a-z0-9_]{1,40}$/;
 const arg = (name: string) => {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
 };
 const DB = arg("db") ?? "cod_test_t3_public";
 const KEEP = process.argv.includes("--keep");
-if (!DB_RE.test(DB)) throw new Error("the database must be named cod_test_t3_*, cod_test_m4_*, cod_test_m5_* or cod_test_p0_*");
+if (!DB_RE.test(DB)) throw new Error("the database must be named cod_test_t3_*, cod_test_m4_*, cod_test_m5_*, cod_test_p0_* or cod_test_p0b_*");
 
 // test configuration: P mode on platform.test, a legacy host; random secrets (never a real one)
 process.env.APP_SECRET = randomBytes(32).toString("hex");
@@ -176,7 +178,7 @@ async function pure(): Promise<void> {
     const mode = urls.addressMode(address);
     return {
       store: s, address, base: urls.storeBase(address), origin: urls.storeOrigin(address), mediaOrigins: mode === "P" ? [] : [urls.platformOrigin()],
-      info: fx.store, addons: noAddons(), purchaseInBrowser: true, ...extra,
+      info: fx.store, endpoints: ctxMod.PUBLIC_ENDPOINTS, addons: noAddons(), thanksAddons: noAddons(), purchaseInBrowser: true, ...extra,
     };
   };
   const optsFor = (rc: import("./store-context.server").StoreRenderContext) => ({ ...ctxMod.storeRenderOptions(rc, { slug: "argan", pageKey: fx.pageKey, assets: fixtureAssets("/") }), now, upgradeInsecureRequests: true });
@@ -260,6 +262,49 @@ async function pure(): Promise<void> {
     assert.ok(landing.csp.includes("connect.facebook.net"));
   });
 
+  await check("render context (P0b F): lead kept while capture is on; hasAddons; the thank-you options carry their own report path and add-ons", async () => {
+    const { LandingSetting } = await import("@/lib/settings/keys/landing");
+    for (const capture of ["market_default", "on", "off"] as const) {
+      // P3's stub answers true (today's behaviour): every page keeps its lead endpoint until the EU rule lands
+      assert.deepEqual(ctxMod.storeEndpoints(A, LandingSetting.parse({ leads: { capture } })), ctxMod.PUBLIC_ENDPOINTS, capture);
+    }
+    assert.equal(ctxMod.hasAddons(noAddons()), false);
+    for (const set of [{ css: ["assist"] }, { body: ["assist" as const] }, { head: ["exp-head" as const] }, { data: { "lp-assist": {} } }, { banner: "test" as const }]) {
+      assert.equal(ctxMod.hasAddons({ ...noAddons(), ...set }), true, JSON.stringify(set));
+    }
+    const rc = rcFor(A, { thanksAddons: { ...noAddons(), css: ["thanks-block"] } });
+    const input = { slug: "argan", pageKey: fx.pageKey, assets: fixtureAssets("/") };
+    const landing = ctxMod.storeRenderOptions(rc, input);
+    const thanks = ctxMod.storeRenderOptions(rc, { ...input, page: "thanks" });
+    assert.equal("addons" in landing, false, "an empty landing set is never passed");
+    assert.deepEqual(thanks.addons, { ...noAddons(), css: ["thanks-block"] });
+    assert.deepEqual(thanks.links, ctxMod.thankYouLinks(rc, "argan"));
+    assert.deepEqual(landing.urls.endpoints, ctxMod.PUBLIC_ENDPOINTS);
+    const noLead = ctxMod.storeRenderOptions({ ...rc, endpoints: { order: "/api/public/order", event: "/api/public/event", upsell: "/api/public/upsell" } }, input);
+    const r = await renderLandingHtml(doc!, { ...noLead, now, upgradeInsecureRequests: true });
+    const cfg = JSON.parse(/<script type="application\/json" id="lp-config">([\s\S]*?)<\/script>/.exec(r.html)![1]!);
+    assert.equal(cfg.endpoints.lead, undefined, "a store without lead capture: no endpoints.lead (LD11)");
+    assert.equal(cfg.endpoints.order, "/api/public/order");
+  });
+
+  await check("one Purchase trigger rule (OD18): purchaseInBrowserFor is triggerFor(conversions, pageId) === 'order'", async () => {
+    const { triggerFor } = await import("@/lib/orders/conversions-core");
+    const P = "01JPPPPPPPPPPPPPPPPPPPPPPP";
+    const base = { customEvents: true, manualOrders: false };
+    const matrix: import("@/lib/settings/keys/conversions").ConversionsSetting[] = [
+      { ...base, purchaseTrigger: "order", pageOverrides: { [P]: "confirmed" } },
+      { ...base, purchaseTrigger: "delivered", pageOverrides: { [P]: "order" } },
+      { ...base, purchaseTrigger: "confirmed", pageOverrides: {} },
+    ];
+    for (const conversions of matrix) {
+      for (const pageId of [P, "01JQQQQQQQQQQQQQQQQQQQQQQQ", null]) {
+        const want = (pageId ? conversions.pageOverrides[pageId] : undefined) ?? conversions.purchaseTrigger;
+        assert.equal(triggerFor(conversions, pageId), want);
+        assert.equal(ctxMod.purchaseInBrowserFor(conversions, pageId), want === "order");
+      }
+    }
+  });
+
   await check("placeholder home: the store's name escaped, static, its one style in the CSP", () => {
     const p = routes.storePlaceholder({ name: `Atlas <b>"Argan"</b>`, defaultLocale: "ar" });
     assert.ok(p.html.includes("Atlas &#60;b&#62;&#34;Argan&#34;&#60;/b&#62;"));
@@ -302,7 +347,12 @@ interface Seed {
   pageB: string;
   pageC: string;
   pageE: string;
+  pageAGlow: string;
+  pageARetro: string;
+  pageAOff: string;
   versionA: string;
+  versionGlow: string;
+  versionRetro: string;
   keyA: string;
   keyC: string;
   keyE: string;
@@ -331,7 +381,7 @@ async function seed(): Promise<Seed> {
       ]);
       return id;
     };
-    const page = async (storeId: string, slug: string, opts: { published: boolean; html?: string; doc?: string; key?: string }) => {
+    const page = async (storeId: string, slug: string, opts: { published: boolean; html?: string; doc?: string; key?: string; runtimeV?: number }) => {
       const id = newId();
       const key = opts.key ?? `pk_${randomBytes(12).toString("base64url")}`;
       await conn.query("INSERT INTO pages (id, store_id, slug, name, status, locale, public_key, draft) VALUES (?, ?, ?, ?, ?, 'fr', ?, ?)", [
@@ -342,8 +392,8 @@ async function seed(): Promise<Seed> {
         versionId = newId();
         const html = opts.html ?? `<!DOCTYPE html><title>${slug}</title>`;
         await conn.query(
-          "INSERT INTO page_versions (id, store_id, page_id, kind, doc, html, thank_you_html, csp, thank_you_csp, etag, checksum, runtime_v) VALUES (?, ?, ?, 'publish', ?, ?, ?, ?, ?, ?, ?, 2)",
-          [versionId, storeId, id, opts.doc ?? docJson, html, `<!DOCTYPE html><title>merci ${slug}</title>`, "default-src 'self'; connect-src 'self'; form-action 'self'", "default-src 'self'; connect-src 'self'", sha(html), sha(opts.doc ?? docJson)],
+          "INSERT INTO page_versions (id, store_id, page_id, kind, doc, html, thank_you_html, csp, thank_you_csp, etag, checksum, runtime_v) VALUES (?, ?, ?, 'publish', ?, ?, ?, ?, ?, ?, ?, ?)",
+          [versionId, storeId, id, opts.doc ?? docJson, html, `<!DOCTYPE html><title>merci ${slug}</title>`, "default-src 'self'; connect-src 'self'; form-action 'self'", "default-src 'self'; connect-src 'self'", sha(html), sha(opts.doc ?? docJson), opts.runtimeV ?? 2],
         );
         await conn.query("UPDATE pages SET published_version_id = ?, first_published_at = '2026-10-01 10:00:00.000' WHERE id = ?", [versionId, id]);
       }
@@ -363,6 +413,10 @@ async function seed(): Promise<Seed> {
     const a = await page(A, "argan", { published: true, html: htmlA, key: "pk_fixture_argan" });
     const aHidden = await page(A, "hidden", { published: true, doc: hiddenJson });
     const aDraft = await page(A, "serum", { published: false });
+    // P0b F: the in-place re-render's pages (a live v2 page, a live runtime_v 1 page, a page never published)
+    const aGlow = await page(A, "glow", { published: true });
+    const aRetro = await page(A, "retro", { published: true, runtimeV: 1 });
+    const aOff = await page(A, "brouillon", { published: false });
     const b = await page(B, "argan", { published: true, html: htmlB });
     const c = await page(C, "argan", { published: true });
     const e = await page(E, "argan", { published: true });
@@ -397,6 +451,7 @@ async function seed(): Promise<Seed> {
     await conn.query("INSERT INTO exports (id, store_id, page_id, version_id, mode, public_key, allowed_origins) VALUES (?, ?, ?, ?, 'php', ?, '[]')", [newId(), A, a.id, a.versionId, keyExportPhp]);
     return {
       A, B, C, D, E, pageA: a.id, pageAHidden: aHidden.id, pageADraft: aDraft.id, pageB: b.id, pageC: c.id, pageE: e.id, versionA: a.versionId!,
+      pageAGlow: aGlow.id, pageARetro: aRetro.id, pageAOff: aOff.id, versionGlow: aGlow.versionId!, versionRetro: aRetro.versionId!,
       keyA: a.key, keyC: c.key, keyE: e.key, keyExportPhp, orderA, orderD, mediaA, mediaD, htmlA, htmlB,
     };
   } finally {
@@ -779,6 +834,123 @@ async function database(): Promise<void> {
     assert.equal(r.headers.get("cache-control"), "private, no-store");
     await pt.revokePreviewToken(mintScope("member", s.A), minted.tokenId);
     assert.equal((await routes.servePreview(req(minted.url), token)).status, 404);
+  });
+
+  /* ---- P0b package F: the in-place re-render (§H.3, D50; CCR P8-2) and the generation record (CCR P3-11) ---- */
+  const versionFull = async (scope: StoreScope, id: string) => (await db.select().from(schema.pageVersions).where(byId(schema.pageVersions, scope, id)).limit(1))[0]!;
+  const versionCount = async (scope: StoreScope, pageId: string) => (await db.select({ id: schema.pageVersions.id }).from(schema.pageVersions).where(whereStore(schema.pageVersions, scope, eq(schema.pageVersions.pageId, pageId)))).length;
+  const reActor = { kind: "system" as const, userId: null, impersonatorId: null, ip: null };
+
+  await check("rerenderInPlace: the live version is rewritten in place (same version id, new etag, doc and checksum unchanged, no new row, cache dropped)", async () => {
+    const { rerenderInPlace } = await import("./publish.server");
+    const scopeA = mintScope("system", s.A);
+    // the stored (seeded) bytes are served, and cached, first
+    const servedBefore = await serve(`${P}/s/atlas-argan/glow`, { page: "landing", slug: "glow" }, "atlas-argan");
+    const before = await versionFull(scopeA, s.versionGlow);
+    assert.equal(await servedBefore.text(), before.html);
+    const pageBefore = await pageRow(scopeA, s.pageAGlow);
+    const rows = await versionCount(scopeA, s.pageAGlow);
+    const r = await rerenderInPlace(scopeA, s.pageAGlow, { reason: "store_info", actor: reActor });
+    assert.equal(r.status, "rendered");
+    assert.equal(r.versionId, s.versionGlow);
+    assert.ok(Array.isArray(r.notes), "the warn-mode notes");
+    const after = await versionFull(scopeA, s.versionGlow);
+    assert.notEqual(after.etag, before.etag, "a new etag");
+    assert.equal(r.etag, after.etag);
+    assert.equal(after.etag, sha(after.html!), "the etag is the new html's");
+    assert.ok(after.html!.startsWith("<!DOCTYPE html>") && after.html!.includes(s.versionGlow), "the real document, ver = the same version id");
+    assert.ok(after.thankYouHtml !== before.thankYouHtml && after.csp !== before.csp && after.thankYouCsp !== before.thankYouCsp, "every rendered column rewritten");
+    assert.equal(JSON.stringify(after.doc), JSON.stringify(before.doc), "the doc is untouched");
+    assert.equal(after.checksum, before.checksum, "the checksum is untouched");
+    assert.equal(after.runtimeV, 2, "runtime_v is untouched");
+    assert.equal(after.createdAt.getTime(), before.createdAt.getTime());
+    assert.equal(await versionCount(scopeA, s.pageAGlow), rows, "no new version row");
+    const pageAfter = await pageRow(scopeA, s.pageAGlow);
+    assert.equal(pageAfter?.publishedVersionId, s.versionGlow);
+    assert.equal(pageAfter?.updatedAt.getTime(), pageBefore?.updatedAt.getTime(), "the draft stamp never moves");
+    const servedAfter = await serve(`${P}/s/atlas-argan/glow`, { page: "landing", slug: "glow" }, "atlas-argan");
+    assert.equal(await servedAfter.text(), after.html, "the store's render cache was dropped");
+    // nothing changed in the store meanwhile: a second re-render writes the same bytes
+    const again = await rerenderInPlace(scopeA, s.pageAGlow, { reason: "brand", actor: reActor });
+    assert.equal(again.etag, after.etag, "deterministic");
+  });
+
+  await check("rerenderInPlace: runtime_v 1 → skipped_runtime_v1; unpublished, never published and other-store pages → not_live; nothing written", async () => {
+    const { rerenderInPlace } = await import("./publish.server");
+    const scopeA = mintScope("system", s.A);
+    const retro = await versionFull(scopeA, s.versionRetro);
+    const r = await rerenderInPlace(scopeA, s.pageARetro, { reason: "runtime", actor: reActor });
+    assert.deepEqual(r, { status: "skipped_runtime_v1", versionId: s.versionRetro, notes: [] });
+    assert.equal((await versionFull(scopeA, s.versionRetro)).etag, retro.etag);
+    assert.equal((await rerenderInPlace(scopeA, s.pageAOff, { reason: "address", actor: reActor })).status, "not_live", "never published");
+    assert.equal((await rerenderInPlace(scopeA, s.pageAHidden, { reason: "address", actor: reActor })).status, "not_live", "unpublished (its version kept)");
+    const bVersion = (await pageRow(mintScope("system", s.B), s.pageB))!.publishedVersionId!;
+    const bBefore = await versionFull(mintScope("system", s.B), bVersion);
+    assert.equal((await rerenderInPlace(scopeA, s.pageB, { reason: "address", actor: reActor })).status, "not_live", "another store's page id");
+    assert.equal((await versionFull(mintScope("system", s.B), bVersion)).etag, bBefore.etag, "store B's version untouched");
+  });
+
+  await check("rerenderInPlace: a publish between the load and the commit → live_changed, the new version left as published", async () => {
+    const { publishPage, rerenderInPlace } = await import("./publish.server");
+    const scopeA = mintScope("member", s.A);
+    const actor = { kind: "user" as const, userId: null, impersonatorId: null, ip: null };
+    const old = await versionFull(scopeA, s.versionGlow);
+    const rows = await versionCount(scopeA, s.pageAGlow);
+    // the re-render's commit transaction is the first one it opens: a real publish lands right before it
+    const real = globalThis.__codDb!.db as unknown as { transaction: (...args: unknown[]) => Promise<unknown> };
+    const original = real.transaction;
+    let published: string | null = null;
+    real.transaction = async (...args: unknown[]) => {
+      delete (real as { transaction?: unknown }).transaction;
+      published = (await publishPage(scopeA, s.pageAGlow, { actor })).versionId;
+      return original.apply(real, args);
+    };
+    try {
+      const r = await rerenderInPlace(scopeA, s.pageAGlow, { reason: "conversions", actor });
+      assert.ok(published, "the publish ran");
+      assert.equal(r.status, "live_changed");
+      assert.equal(r.etag, undefined);
+      const page = await pageRow(scopeA, s.pageAGlow);
+      assert.equal(page?.publishedVersionId, published);
+      const fresh = await versionFull(scopeA, published!);
+      assert.equal(fresh.etag, sha(fresh.html!), "the new version keeps the publish's own bytes");
+      assert.equal((await versionFull(scopeA, s.versionGlow)).etag, old.etag, "the old version is not written either");
+      assert.equal(await versionCount(scopeA, s.pageAGlow), rows + 1, "only the publish's row");
+    } finally {
+      delete (real as { transaction?: unknown }).transaction;
+    }
+  });
+
+  await check("generationRecordFor: report.gen of the page's newest chosen page genome in the store, cleaned; none → null; another store → null", async () => {
+    const { generationRecordFor, hash16 } = await import("./prepublish");
+    const { newId } = await import("@/lib/db/ids");
+    const scopeA = mintScope("member", s.A);
+    assert.equal(await generationRecordFor(scopeA, s.pageA), null, "no genome row");
+    // P6's wizard writes these rows; the suite's fixture writes go through the store predicate like the app's
+    const insertGenome = async (scope: WriteScope, source: "chosen" | "generated", gen: Record<string, unknown> | undefined, at: Date) =>
+      db.insert(schema.designGenomes).values(
+        storeValues(scope, {
+          id: newId(),
+          pageId: s.pageA,
+          kind: "page" as const,
+          source,
+          niche: "beauty",
+          bucket: "beauty|grid|mono",
+          vec: [0],
+          genome: { v: 1 as const, s: 1, b: {}, p: {}, x: [] },
+          seed: 1,
+          report: { v: 1 as const, hard: [], soft: [], slop: [], copy: { cliche: 0, spec: 0 }, ...(gen ? { gen: gen as never } : {}) },
+          createdAt: at,
+        }),
+      );
+    const h = hash16("Huile d'argan");
+    await insertGenome(scopeA, "chosen", { "hero1.title": { h, o: "cloud" } }, new Date(Date.UTC(2026, 9, 1)));
+    await insertGenome(scopeA, "chosen", { "hero1.title": { h, o: "engine" }, "hero1.lead": { h: "XYZ", o: "cloud" }, "hero1.kicker": { h, o: "robot" } }, new Date(Date.UTC(2026, 9, 2)));
+    await insertGenome(scopeA, "generated", { "hero1.title": { h, o: "local" } }, new Date(Date.UTC(2026, 9, 3)));
+    assert.deepEqual(await generationRecordFor(scopeA, s.pageA), { "hero1.title": { h, o: "engine" } }, "the newest chosen row; malformed entries dropped");
+    assert.equal(await generationRecordFor(mintScope("member", s.B), s.pageA), null, "never across stores");
+    await insertGenome(scopeA, "chosen", undefined, new Date(Date.UTC(2026, 9, 4)));
+    assert.equal(await generationRecordFor(scopeA, s.pageA), null, "the newest chosen row has no record");
   });
 }
 

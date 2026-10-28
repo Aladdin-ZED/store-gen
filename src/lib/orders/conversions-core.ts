@@ -9,6 +9,7 @@
  *                                         pixel that has ITS OWN server token; the test code only
  *                                         inside an active test window of the event's page; never throws
  *   sendTestEvent(…)                      Settings → Pixels "Send test event" (test_event_code only)
+ *   triggerFor(conversions, pageId)       the page's Purchase trigger: the one rule the browser and the server follow
  *
  * Deduplication with the browser pixels (src/landing/runtime/pixels.ts): the same event names
  * (PIXEL_EVENTS) and event_id = purchaseEventId(orderId) — the order id the thank-you page reports
@@ -26,6 +27,7 @@ import { allocate, bumpOffered, fromCents, round2 } from "@/lib/page/pricing";
 import type { PageDoc } from "@/lib/page/schema";
 import { PIXEL_EVENTS, PIXEL_NAMES, pixelIdList, purchaseEventId, type ServerPlatform } from "@/lib/pixels/ids";
 import { testWindow, type PixelLibrary } from "@/lib/pixels/library";
+import type { ConversionsSetting } from "@/lib/settings/keys/conversions";
 import type { PixelHealthEntry, SettingValue } from "@/lib/settings/schemas";
 import type { OrderPayload } from "./contract";
 import type { PageTarget } from "./resolve";
@@ -48,6 +50,16 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const RETRY_DELAY_MS = 1_200;
 
 export type TrackingSecrets = SettingValue<"tracking_secrets">;
+
+/**
+ * The Purchase trigger of a page (operations.md OPE Q.6, OD18; P0b, CCR P5-11): its `pageOverrides` entry, else the
+ * store's `purchaseTrigger`. The one rule both sides follow: the thank-you page fires the browser Purchase exactly when
+ * this is "order" (`purchaseInBrowserFor`, src/lib/render/store-context.server.ts), and the server sends it at this
+ * trigger otherwise, so a Purchase is never counted twice nor lost.
+ */
+export function triggerFor(conversions: ConversionsSetting, pageId: string | null): ConversionsSetting["purchaseTrigger"] {
+  return (pageId ? conversions.pageOverrides[pageId] : undefined) ?? conversions.purchaseTrigger;
+}
 
 /** One line of the event's contents: a content id, its units and the average paid price per unit. */
 export interface ContentLine {

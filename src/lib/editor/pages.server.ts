@@ -20,6 +20,7 @@ import type { SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
 import { pages, pageVersions, users } from "@/lib/db/schema";
+import { recordDraftDesign } from "@/lib/design/save.server";
 import { ensureFocusMany, getAssetsByIds, type AssetRecord } from "@/lib/media";
 import { assetRowOf } from "@/lib/media/asset-row";
 import { PageDoc, type PageDoc as PageDocT } from "@/lib/page/schema";
@@ -318,7 +319,8 @@ async function maybeAutosaveVersion(scope: WriteScope, pageId: string, doc: Page
 
 /**
  * Write the draft if the page was not changed elsewhere since `baseUpdatedAt` (or `force`).
- * Returns the new updatedAt and the autosave version created on the way, if any.
+ * Returns the new updatedAt and the autosave version created on the way, if any. Once the draft is written, P6's
+ * draft design hook runs in warn mode (`recordDraftDesign`, DES-§8.7; P0b CCR P6-8): its failure never fails the save.
  */
 export async function saveDraft(
   scope: WriteScope,
@@ -334,6 +336,7 @@ export async function saveDraft(
     if (!row[0]) throw new EditorError("not_found", "This page no longer exists.");
     throw new EditorError("conflict", "This page was changed somewhere else.", { serverUpdatedAt: row[0].updatedAt.getTime() });
   }
+  await recordDraftDesign(scope, input.pageId, doc).catch(() => undefined);
   const version = await maybeAutosaveVersion(scope, input.pageId, doc, user.id, now);
   return { updatedAt: now.getTime(), version: version ? { ...version, author: user.name } : null, forced: input.force };
 }

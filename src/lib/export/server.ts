@@ -16,6 +16,10 @@ import "server-only";
  * Connected exports are validated by the order API against the version they are bound to; when the
  * stored document needs repairs to render, the repaired document is saved as a new version first, so
  * the API checks orders against exactly what the exported page shows.
+ *
+ * Add-ons (§H.13, LAN-§5.3; P0b CCR P3-2): every export (and its size estimate) renders with the page's add-ons for
+ * its mode, from P3's `loadRenderAddons` (connected → "export-connected", php → "export-php", whatsapp →
+ * "export-whatsapp"), each set handed to the bundle only when it is not empty.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq, isNull, ne, type SQL } from "drizzle-orm";
@@ -36,7 +40,10 @@ import { scopedCache } from "@/lib/tenancy/cache";
 import { byId, inStore, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { Actor, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { platformOrigin } from "@/lib/urls";
+import { loadRenderAddons, type AddonMode } from "@/landing/addons/load.server";
 import { collectAssetIds, type StoreInfo } from "@/landing/context";
+import { hasAddons } from "@/lib/render/store-context.server";
+import { getStoreById } from "@/lib/tenancy/public";
 import { buildBundle, bundleSize, type BundleInput, type MediaSource } from "./bundle";
 import { exportFileName, isExportMode, normalizeAllowedOrigins, WHATSAPP_HINT, type ExportMode, type ExportRequest, type ExportRequestField } from "./options";
 import { storeExportKey, type ExportKey } from "./service-account";
@@ -139,6 +146,16 @@ function storeAssets(scope: StoreScope, ids: readonly string[]) {
 }
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
+
+/** The add-on mode of each export mode (LAN-§5.3; "export-static" belongs to no export mode in R1). */
+const ADDON_MODE: Record<ExportMode, AddonMode> = { connected: "export-connected", php: "export-php", whatsapp: "export-whatsapp" };
+
+/** The page's add-ons for an export mode, each set kept only when it changes the document (today's bytes otherwise). */
+async function exportAddons(scope: StoreScope, pageId: string, doc: PageDoc, mode: ExportMode): Promise<BundleInput["addons"]> {
+  const store = (await getStoreById(scope.storeId)) ?? fail404();
+  const set = await loadRenderAddons(scope, store, { pageId, doc, mode: ADDON_MODE[mode] });
+  return { ...(hasAddons(set.landing) ? { landing: set.landing } : {}), ...(hasAddons(set.thanks) ? { thanks: set.thanks } : {}) };
+}
 
 function recordJson(r: {
   id: string;
@@ -290,7 +307,7 @@ async function prepare(scope: StoreScope, req: ExportRequest): Promise<Prepared>
     }
   }
   const ids = collectAssetIds(doc, [store.logo]);
-  const assets = await storeAssets(scope, ids);
+  const [assets, addons] = await Promise.all([storeAssets(scope, ids), exportAddons(scope, version.pageId, doc, req.mode)]);
   const found = new Set(assets.map((a) => a.id));
   const lost = ids.filter((id) => !found.has(id)).length;
   return {
@@ -315,6 +332,7 @@ async function prepare(scope: StoreScope, req: ExportRequest): Promise<Prepared>
       warnings: lost
         ? [`${lost} image${lost > 1 ? "s" : ""} used by this version ${lost > 1 ? "were" : "was"} deleted from the media library and ${lost > 1 ? "are" : "is"} left out — replace ${lost > 1 ? "them" : "it"} in the builder.`]
         : [],
+      addons,
     },
   };
 }

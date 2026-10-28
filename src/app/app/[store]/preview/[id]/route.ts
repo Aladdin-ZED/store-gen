@@ -2,8 +2,8 @@
  * GET /app/<handle>/preview/<pageId>[?v=<versionId>] — the member's full-page preview of one of the store's drafts (or
  * of one of its versions), rendered by the real publish renderer in a new tab (`pages.read` through storeGuard;
  * docs/STORE-SAAS.md §I.1). The page and the version are looked up in the store (another store's id is a 404,
- * LND-25), the document renders with the store render context of now (identity, its own files, its addresses), and
- * nothing is cached or indexed.
+ * LND-25), the document renders with the store render context of now (identity, its own files, its addresses) and
+ * the page's add-ons for the preview mode (P3's `loadRenderAddons`), and nothing is cached or indexed.
  *
  * The landing runtime's inline <script> gets the request's CSP nonce when the proxy set one (see renderDraftPreview).
  */
@@ -11,6 +11,7 @@ import type { NextRequest } from "next/server";
 import { getCspNonce } from "@/lib/auth";
 import { previewSource } from "@/lib/editor/pages.server";
 import { renderDraftPreview } from "@/lib/editor/preview.server";
+import { loadRenderAddons } from "@/landing/addons/load.server";
 import { loadStoreRenderContext, storeAssetResolver } from "@/lib/render/store-context.server";
 import { storeGuard } from "@/lib/tenancy/seam";
 
@@ -44,6 +45,7 @@ export async function GET(req: NextRequest, ctx: Ctx): Promise<Response> {
     rc,
     // the store's own files only (MED-18): another store's id in a document resolves like a deleted file
     assets: async (doc) => (await storeAssetResolver(scope, rc, doc)).resolver,
+    addons: async (doc) => (await loadRenderAddons(scope, store, { pageId: id, doc, mode: "preview" })).landing,
   });
   if (!preview.ok) return plain(422, "This draft has errors that prevent a preview. Fix them in the builder.");
 

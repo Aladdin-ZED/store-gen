@@ -9,13 +9,15 @@
  *                 order.php                                                                  (PHP mode)
  *   cod-private/  config.php · lib/gsheets.php · .htaccess                                   (PHP mode)
  *
- * Pages are rendered with the publish renderer in "export" mode (relative URLs), then finished here:
- * favicon/manifest links, the WhatsApp bridge (WhatsApp mode) and each document's own hash CSP as a
- * <meta> tag, computed from its final bytes.
+ * Pages are rendered with the publish renderer in "export" mode (relative URLs), with the page's add-ons for the
+ * export mode when the caller has any (`addons`: the export service's `loadRenderAddons` call, §H.13), then finished
+ * here: favicon/manifest links, the WhatsApp bridge (WhatsApp mode) and each document's own hash CSP as a <meta> tag,
+ * computed from its final bytes.
  */
 import { randomBytes } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import type { RenderAddons } from "@/landing/addons/types";
 import { createRenderContext, exportAssetResolver, exportLinks, LEGAL_KINDS, type AssetRowLike, type StoreInfo } from "@/landing/context";
 import { legalGaps } from "@/landing/legal";
 import type { PageLinks } from "@/landing/types";
@@ -98,6 +100,11 @@ export interface BundleInput {
   /** warnings known before rendering (e.g. images deleted from the media library) */
   warnings?: string[];
   paths?: Partial<BundlePaths>;
+  /**
+   * The add-ons of the exported landing and thank-you documents (§H.13, LAN-§5.3; the export service passes a set
+   * only when it is not empty, so an export without add-ons keeps today's bytes). Absent: none.
+   */
+  addons?: { landing?: RenderAddons; thanks?: RenderAddons };
 }
 
 export interface BundleFile extends ZipEntry {
@@ -203,6 +210,7 @@ export async function buildBundle(input: BundleInput): Promise<ExportBundle> {
     links: exportLinks(0),
     base: "./",
     origin,
+    ...(input.addons?.landing ? { addons: input.addons.landing } : {}),
   });
   const thanks = await renderThankYouHtml(doc, {
     ...common,
@@ -210,6 +218,7 @@ export async function buildBundle(input: BundleInput): Promise<ExportBundle> {
     urls: { landing: "../index.html", thankYou: "index.html", endpoints: subEndpoints },
     links: MERCI_LINKS,
     base: "../",
+    ...(input.addons?.thanks ? { addons: input.addons.thanks } : {}),
   });
   const legal = [];
   for (const kind of LEGAL_KINDS) {

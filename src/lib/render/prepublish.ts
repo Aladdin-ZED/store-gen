@@ -19,16 +19,26 @@ import "server-only";
  *
  * The import is circular (a track file imports the register functions from here while this module is still being
  * evaluated), so everything a registration touches is a hoisted function declaration: `registry()` included.
+ *
+ * The field origins (§M.1 rule 2, P0b CCR P3-11): the one builder lives in ./origin.ts (pure, isomorphic) and is
+ * re-exported here with the server read of its input, so a gate builds its map as
+ * `originFrom(ctx.prev, ctx.doc, await generationRecordFor(ctx.scope, ctx.pageId))`.
  */
+import { desc, eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { designGenomes } from "@/lib/db/schema";
 import { errorSummary } from "@/lib/orders/log";
 import type { PageDoc } from "@/lib/page/schema";
 import type { BuiltTheme } from "@/lib/theme/types";
-import type { Actor, GateItem, StoreRow, WriteScope } from "@/lib/tenancy/types";
+import { whereStore } from "@/lib/tenancy/sql";
+import type { Actor, GateItem, StoreRow, StoreScope, WriteScope } from "@/lib/tenancy/types";
+import type { GenerationRecord, OriginClass } from "./origin";
 import "./prepublish/budget";
 import "./prepublish/design";
 import "./prepublish/landing";
 
 export type { GateItem } from "@/lib/tenancy/types";
+export { hash16, originFrom, textFieldsOf, type GenerationRecord, type OriginClass } from "./origin";
 
 /** What a gate needs to know about an asset the document references (no bytes). */
 export interface AssetMeta {
@@ -115,4 +125,34 @@ export async function runPublishListeners(ctx: PrePublishCtx & { versionId: stri
       }
     }),
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* The generation record (§M.1 rule 2, DES-§9.8)                       */
+/* ------------------------------------------------------------------ */
+
+const ORIGIN_CLASSES: readonly string[] = ["owner", "library", "engine", "local", "cloud"] satisfies readonly OriginClass[];
+const HASH16 = /^[0-9a-f]{16}$/;
+
+/**
+ * The generation record of a page: `report.gen` of its newest `design_genomes` row of kind `page` and source `chosen`
+ * in the scope's store (P6's wizard writes it), or null (no such row, or a row without a record: `originFrom` then
+ * answers "library" for every field). Entries that are not `{ h: 16 hex, o: OriginClass }` are dropped, so they read
+ * as "owner".
+ */
+export async function generationRecordFor(scope: StoreScope, pageId: string): Promise<GenerationRecord | null> {
+  const [row] = await db
+    .select({ report: designGenomes.report })
+    .from(designGenomes)
+    .where(whereStore(designGenomes, scope, eq(designGenomes.pageId, pageId), eq(designGenomes.kind, "page"), eq(designGenomes.source, "chosen")))
+    .orderBy(desc(designGenomes.createdAt), desc(designGenomes.id))
+    .limit(1);
+  const gen: unknown = row?.report?.gen;
+  if (!gen || typeof gen !== "object" || Array.isArray(gen)) return null;
+  const out: GenerationRecord = {};
+  for (const [path, rec] of Object.entries(gen as Record<string, unknown>)) {
+    const r = rec as { h?: unknown; o?: unknown } | null;
+    if (r && typeof r.h === "string" && HASH16.test(r.h) && typeof r.o === "string" && ORIGIN_CLASSES.includes(r.o)) out[path] = { h: r.h, o: r.o as OriginClass };
+  }
+  return out;
 }

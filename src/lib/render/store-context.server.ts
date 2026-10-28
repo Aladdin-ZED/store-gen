@@ -3,17 +3,24 @@ import "server-only";
  * The store render context (docs/STORE-SAAS.md §H.3, §H.13, §C.6, §C.9; PUB-06 … PUB-17): everything a store's
  * documents are rendered with, read for that store at render time, never from another store or the process.
  *
- *   const rc = await loadStoreRenderContext(scope, store, { pageId });
- *   const assets = await storeAssetResolver(scope, rc, doc);
- *   renderLandingHtml(doc, { ...renderOptionsFor(rc, { slug, pageKey, assets }), ver });
+ *   const rc = await loadStoreRenderContext(scope, store, { pageId, addons: { doc, mode: "live" } });
+ *   const { resolver } = await storeAssetResolver(scope, rc, doc);
+ *   renderLandingHtml(doc, { ...storeRenderOptions(rc, { slug, pageKey, assets: resolver }), ver });
+ *   renderThankYouHtml(doc, storeRenderOptions(rc, { slug, pageKey, assets: resolver, page: "thanks" }));
  *
  *  - address: `storeBase` for in-page links, `storeOrigin` for canonical / og / JSON-LD, `mediaUrl` for media
  *    (relative `/media/<key>` in P mode, the platform origin in S / C modes, which the CSP then lists);
  *  - identity: `stores.name` (authoritative, D76), contacts and legal facts from the `store` setting, the logo from
  *    `brand.logo.primary` (DES-R16);
  *  - Turnstile: the store's own keys, else the platform widget (`platform_turnstile`, SET-09);
- *  - the render hook: `addons` (none until P3's `addonsFor`) and `purchaseInBrowser` (the `conversions` trigger of
- *    the page, OPE Q.6: false → the thank-you page carries no pixel; the server sends Purchase at the trigger).
+ *  - the endpoints: the public API (relative), without `lead` when the store's market and its `landing.leads.capture`
+ *    turn lead capture off (P3's `leadCaptureOn`, LD11; P0b CCR P3-3); live, test and preview documents use them;
+ *  - the render hook: `addons` for the landing document and `thanksAddons` for its thank-you document, from P3's
+ *    `loadRenderAddons(scope, store, { pageId, doc, mode })` when the caller names the document (`opts.addons`; none
+ *    otherwise and until P3 merges; P0b CCR P3-2), and `purchaseInBrowser` (the page's Purchase trigger,
+ *    `triggerFor(conversions, pageId) === "order"`, OPE Q.6, OD18: false → the thank-you page carries no pixel; the
+ *    server sends Purchase at the trigger). An add-on set reaches the renderer only when it is not empty
+ *    (`hasAddons`), so a document with every add-on off keeps today's bytes (T3's rule).
  *
  * Settings come through T1's scoped API (`getStoreSettings`, `getPlatformSetting`). Serving stored HTML never needs
  * this module.
@@ -21,11 +28,14 @@ import "server-only";
 import { and, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { assets } from "@/lib/db/schema";
+import { leadCaptureOn } from "@/lib/landing/lead-capture";
+import { triggerFor } from "@/lib/orders/conversions-core";
 import type { PageDoc } from "@/lib/page/schema";
 import { getPlatformSetting, getStoreSettings } from "@/lib/settings";
 import { inStore } from "@/lib/tenancy/sql";
 import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { addressMode, mediaUrl, platformOrigin, reportUrl, storeBase, storeOrigin, storePath, type StoreAddress } from "@/lib/urls";
+import { loadRenderAddons, type AddonMode } from "@/landing/addons/load.server";
 import { noAddons, type RenderAddons } from "@/landing/addons/types";
 import { collectAssetIds, rowAssetResolver, storePageLinks, type AssetResolver, type AssetRowLike, type StoreInfo } from "@/landing/context";
 import type { PageLinks } from "@/landing/types";
@@ -51,8 +61,18 @@ export interface StoreRenderContext {
   mediaOrigins: string[];
   info: StoreInfo;
   turnstileSiteKey?: string;
+  /** the runtime's public API: PUBLIC_ENDPOINTS, without `lead` when lead capture is off for the store */
+  endpoints: DocumentUrls["endpoints"];
+  /** the landing document's add-ons (the render hook, §H.13) */
   addons: RenderAddons;
+  /** the thank-you document's add-ons */
+  thanksAddons: RenderAddons;
   purchaseInBrowser: boolean;
+}
+
+/** Does an add-on set change the document? An empty one is never passed to the renderer (today's bytes, T3's rule). */
+export function hasAddons(a: RenderAddons): boolean {
+  return a.head.length > 0 || a.body.length > 0 || a.css.length > 0 || Object.keys(a.data).length > 0 || !!a.banner;
 }
 
 /** The address of a store row for the URL builders (C mode arrives with store_domains, R3). */
@@ -65,7 +85,7 @@ function absoluteOrigin(value: string): string | undefined {
   return originOf(value) ?? undefined;
 }
 
-type StoreSettings = Awaited<ReturnType<typeof getStoreSettings<"store" | "brand" | "turnstile" | "conversions">>>;
+type StoreSettings = Awaited<ReturnType<typeof getStoreSettings<"store" | "brand" | "turnstile" | "conversions" | "landing">>>;
 
 /** Store identity for documents (sanitized again by storeContext() in the renderer). */
 export function storeInfoOf(store: StoreRow, s: Pick<StoreSettings, "store" | "brand">): StoreInfo {
@@ -88,20 +108,34 @@ export function storeInfoOf(store: StoreRow, s: Pick<StoreSettings, "store" | "b
   };
 }
 
-/** The page's Purchase trigger (`conversions.pageOverrides[pageId] ?? purchaseTrigger`) is "order": the browser fires it. */
+/** The page's Purchase trigger (P5's `triggerFor`, the one rule) is "order": the browser fires it. */
 export function purchaseInBrowserFor(conversions: StoreSettings["conversions"], pageId: string | null): boolean {
-  const trigger = (pageId ? conversions.pageOverrides[pageId] : undefined) ?? conversions.purchaseTrigger;
-  return trigger === "order";
+  return triggerFor(conversions, pageId) === "order";
+}
+
+/** The public API a store document calls: every endpoint, `lead` only while lead capture is on (LD11). */
+export function storeEndpoints(store: Pick<StoreRow, "market">, landing: StoreSettings["landing"]): DocumentUrls["endpoints"] {
+  if (leadCaptureOn(store.market, landing.leads.capture)) return PUBLIC_ENDPOINTS;
+  return { order: PUBLIC_ENDPOINTS.order, event: PUBLIC_ENDPOINTS.event, upsell: PUBLIC_ENDPOINTS.upsell };
 }
 
 /**
  * The render context of one store, now (§H.3: re-renders use the context of now, never the one of the first
- * publish). `pageId` picks the page's Purchase trigger.
+ * publish). `pageId` picks the page's Purchase trigger; `addons` names the document being rendered and its render
+ * path, and loads its add-ons (without it the context carries none: legal documents render no add-on).
  */
-export async function loadStoreRenderContext(scope: StoreScope, store: StoreRow, opts: { pageId?: string | null } = {}): Promise<StoreRenderContext> {
+export async function loadStoreRenderContext(
+  scope: StoreScope,
+  store: StoreRow,
+  opts: { pageId?: string | null; addons?: { doc: PageDoc; mode: AddonMode } } = {},
+): Promise<StoreRenderContext> {
   if (scope.storeId !== store.id) throw new Error("render: the scope and the store row disagree");
   const address = addressOf(store);
-  const s = await getStoreSettings(scope, ["store", "brand", "turnstile", "conversions"] as const);
+  const pageId = opts.pageId ?? null;
+  const [s, set] = await Promise.all([
+    getStoreSettings(scope, ["store", "brand", "turnstile", "conversions", "landing"] as const),
+    opts.addons ? loadRenderAddons(scope, store, { pageId, doc: opts.addons.doc, mode: opts.addons.mode }) : null,
+  ]);
   const own = s.turnstile.siteKey && s.turnstile.secretKey ? s.turnstile.siteKey : undefined;
   let siteKey = own;
   if (!siteKey) {
@@ -118,8 +152,10 @@ export async function loadStoreRenderContext(scope: StoreScope, store: StoreRow,
     mediaOrigins: media ? [media] : [],
     info: storeInfoOf(store, s),
     ...(siteKey ? { turnstileSiteKey: siteKey } : {}),
-    addons: noAddons(),
-    purchaseInBrowser: purchaseInBrowserFor(s.conversions, opts.pageId ?? null),
+    endpoints: storeEndpoints(store, s.landing),
+    addons: set?.landing ?? noAddons(),
+    thanksAddons: set?.thanks ?? noAddons(),
+    purchaseInBrowser: purchaseInBrowserFor(s.conversions, pageId),
   };
 }
 
@@ -164,20 +200,25 @@ export function thankYouLinks(rc: Pick<StoreRenderContext, "address" | "base">, 
   return storePageLinks(rc.base, slug, storeReportUrl(rc, `/${slug}/merci`));
 }
 
-/** The renderer options of a live store document (the caller adds `ver`, and the test-render overrides). */
-export function storeRenderOptions(rc: StoreRenderContext, input: { slug: string; pageKey: string; assets: AssetResolver }) {
+/**
+ * The renderer options of a live store document (the caller adds `ver`, and the test-render overrides): the landing
+ * document's by default, the thank-you document's with `page: "thanks"` (its own report path and add-ons).
+ */
+export function storeRenderOptions(rc: StoreRenderContext, input: { slug: string; pageKey: string; assets: AssetResolver; page?: "landing" | "thanks" }) {
+  const thanks = input.page === "thanks";
+  const addons = thanks ? rc.thanksAddons : rc.addons;
   return {
     mode: "live" as const,
     assets: input.assets,
     pageKey: input.pageKey,
     store: rc.info,
-    urls: storeDocumentUrls(rc, input.slug),
-    links: storePageLinks(rc.base, input.slug, storeReportUrl(rc, `/${input.slug}`)),
+    urls: storeDocumentUrls(rc, input.slug, rc.endpoints),
+    links: thanks ? thankYouLinks(rc, input.slug) : storePageLinks(rc.base, input.slug, storeReportUrl(rc, `/${input.slug}`)),
     origin: rc.origin,
     turnstileSiteKey: rc.turnstileSiteKey,
     mediaOrigins: rc.mediaOrigins,
     // the render hook: passed only when it changes something, so a hook-free document keeps today's bytes
-    ...(rc.addons.head.length || rc.addons.body.length || rc.addons.css.length || Object.keys(rc.addons.data).length || rc.addons.banner ? { addons: rc.addons } : {}),
+    ...(hasAddons(addons) ? { addons } : {}),
     ...(rc.purchaseInBrowser ? {} : { purchaseInBrowser: false }),
   };
 }
