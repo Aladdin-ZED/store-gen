@@ -8,6 +8,11 @@
  * R1 P5 step 1, the template repository and the template values (src/lib/integrations/whatsapp/templates.server.ts,
  * src/lib/integrations/templates.ts): B never resolves, lists, overwrites or resets A's rows, a page of A is
  * `not_found` from B, an AI draft of A is never served to A's agents, and template values never read A's data.
+ *
+ * R1 P5 step 2, integration health (src/lib/integrations/{health,deliveries}.ts, src/lib/sheets/history.ts, the pulse
+ * contributor): B's deliveries log never lists A's rows, also filtered on A's ids and kinds (OPE-§28.3 (3));
+ * `integrationHealth`, `sheetsBacklog`, `syncFailedCount`, the run history and the pulse never count A; A's own rows
+ * carry no phone, name or sealed payload (OPE-§28.3 (4)).
  */
 import { createRequire } from "node:module";
 import type { TenancyCase, TenancyKit } from "../tenancy-check";
@@ -138,6 +143,103 @@ export const cases: TenancyCase[] = [
         kit.check("templates: B's order naming A's version id reads no upsell", !!foreignDoc && foreignDoc.order_id === orderB!.id && !("upsell_title" in foreignDoc), foreignDoc);
       } finally {
         await db.delete(pageVersions).where(byId(pageVersions, a, versionId));
+      }
+    },
+  },
+  {
+    name: "integrations health: B's reads never list or count A's rows (OPE-§28.3 (3), §27.3)",
+    async run(kit) {
+      const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+      const { cronCursors, integrationStatus, orders, outbox } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+      const { byId, inStore, storeValues, whereStore } = load<typeof import("@/lib/tenancy/sql")>("@/lib/tenancy/sql");
+      const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+      const { eq, inArray } = load<typeof import("drizzle-orm")>("drizzle-orm");
+      const health = load<typeof import("@/lib/integrations/health")>("@/lib/integrations/health");
+      const { listDeliveries } = load<typeof import("@/lib/integrations/deliveries")>("@/lib/integrations/deliveries");
+      const history = load<typeof import("@/lib/sheets/history")>("@/lib/sheets/history");
+      const { contributor } = load<typeof import("@/lib/pulse/contributors/integrations")>("@/lib/pulse/contributors/integrations");
+      const a = write(kit, "A");
+      const b = kit.scope("B");
+      const owner = { userId: kit.fx.B.members.owner, role: "owner" };
+
+      // B's own answers before A's rows exist
+      const before = {
+        health: await health.integrationHealth(b),
+        backlog: await health.sheetsBacklog(b),
+        failed: await health.syncFailedCount(b),
+        dead: await health.deadDeliveryCount(b),
+        list: await listDeliveries(b, {}),
+      };
+
+      // A's rows: a failing pixel and Telegram, dead deliveries carrying canaries, a failed sheet row, a run
+      const pixelA = "meta:555555555555555";
+      await db.insert(integrationStatus).values([
+        storeValues(a, { kind: "capi" as const, targetId: pixelA, state: "failing" as const, failures: 9, lastErrorCode: "token_revoked", lastErrorAt: new Date() }),
+        storeValues(a, { kind: "telegram" as const, targetId: "", state: "failing" as const, failures: 1, lastErrorCode: "chat_not_found", lastErrorAt: new Date() }),
+      ]);
+      const deadIds = [newId(), newId(), newId()];
+      await db.insert(outbox).values(
+        deadIds.map((id, i) =>
+          storeValues(a, {
+            id,
+            kind: (i === 2 ? "telegram" : "capi") as "capi" | "telegram",
+            topic: i === 2 ? "new_order" : "Purchase",
+            targetId: i === 2 ? "chat" : pixelA,
+            dedupeKey: `capi:${pixelA}:${kit.fx.A.order.main}:A-CANARY-${id}`,
+            payload: JSON.stringify({ canary: "A-SEALED-PAYLOAD-CANARY", phone: kit.fx.A.customer.phone, name: kit.fx.A.customer.name }),
+            encrypted: true,
+            state: "dead" as const,
+            attempts: 7,
+            lastStatus: 400,
+            lastError: `refused ${kit.fx.A.customer.phone}`,
+          }),
+        ),
+      );
+      const [mainBefore] = await db.select({ sheetStatus: orders.sheetStatus }).from(orders).where(byId(orders, a, kit.fx.A.order.main)).limit(1);
+      await db.update(orders).set({ sheetStatus: "failed" }).where(byId(orders, a, kit.fx.A.order.main));
+      await history.recordSheetsRun(a, { at: new Date().toISOString(), ms: 9, appended: 4, updated: 0, pulled: 0, calls: 1, ok: false, error: "sheet_not_shared" });
+      try {
+        const ownA = await listDeliveries(kit.scope("A"), { state: "dead" });
+        kit.check("deliveries: A lists its own dead rows", deadIds.every((id) => ownA.rows.some((r) => r.id === id)), ownA.rows.map((r) => r.id));
+        kit.check(
+          "deliveries: A's own rows carry no phone, name or sealed payload",
+          kit.leaks(ownA, { only: ["customer"] }).length === 0 && !JSON.stringify(ownA).includes("A-SEALED-PAYLOAD-CANARY"),
+          kit.leaks(ownA),
+        );
+
+        const answers: unknown[] = [];
+        const listB = await listDeliveries(b, {});
+        answers.push(listB);
+        kit.check("deliveries: B's log never lists A's rows", !listB.rows.some((r) => deadIds.includes(r.id)) && JSON.stringify(listB.rows) === JSON.stringify(before.list.rows), listB.rows.map((r) => r.id));
+        for (const q of [{ kind: "capi" as const }, { state: "dead" as const }, { kind: "telegram" as const, state: "dead" as const }, { after: `2.${deadIds[0]}` }, { after: `10.${deadIds[2]}` }]) {
+          const got = await listDeliveries(b, q);
+          answers.push(got);
+          kit.check(`deliveries: B filtered on A's ids or kinds lists none of A's rows (${JSON.stringify(q)})`, !got.rows.some((r) => deadIds.includes(r.id)), got.rows.map((r) => r.id));
+        }
+
+        const healthB = await health.integrationHealth(b);
+        answers.push(healthB);
+        kit.check("integrationHealth: B never reads A's targets", JSON.stringify(healthB) === JSON.stringify(before.health) && !healthB.some((r) => r.targetId === pixelA), healthB);
+        const backlogB = await health.sheetsBacklog(b);
+        answers.push(backlogB);
+        kit.check("sheetsBacklog: B never counts A's orders or runs", JSON.stringify(backlogB) === JSON.stringify(before.backlog), { before: before.backlog, after: backlogB });
+        const failedB = await health.syncFailedCount(b);
+        kit.check("syncFailedCount: B never counts A's failed rows or dead deliveries", failedB === before.failed, { before: before.failed, after: failedB });
+        kit.check("deadDeliveryCount: B never counts A's", (await health.deadDeliveryCount(b)) === before.dead);
+        kit.check("syncFailedCount: A counts its own", (await health.syncFailedCount(kit.scope("A"))) >= 4);
+        const pulseB = await contributor.contribute(b, owner);
+        answers.push(pulseB);
+        kit.check("pulse: B's syncFailed never counts A's rows", !("syncFailed" in pulseB) || pulseB.syncFailed === before.failed, pulseB);
+        const runsB = await history.sheetsRunHistory(b);
+        answers.push(runsB);
+        kit.check("run history: B never reads A's runs", !runsB.some((r) => r.appended === 4 && r.error === "sheet_not_shared" && r.ms === 9), runsB);
+        const text = JSON.stringify(answers);
+        kit.check("integrations health: B's answers carry no canary of A", kit.leaks(answers).length === 0 && !text.includes("A-CANARY") && !text.includes(pixelA), kit.leaks(answers));
+      } finally {
+        await db.delete(outbox).where(whereStore(outbox, a, inArray(outbox.id, deadIds)));
+        await db.delete(integrationStatus).where(inStore(integrationStatus, a));
+        if (mainBefore) await db.update(orders).set({ sheetStatus: mainBefore.sheetStatus }).where(byId(orders, a, kit.fx.A.order.main));
+        await db.delete(cronCursors).where(eq(cronCursors.job, `sheets.push:${kit.fx.A.id}`));
       }
     },
   },

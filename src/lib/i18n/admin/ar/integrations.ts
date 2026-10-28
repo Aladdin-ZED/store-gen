@@ -17,4 +17,28 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "int.wa.thank_you_confirm": "السلام، كنأكد الطلب ديالي {order_id}.",
   "int.tpl.shipping.paid": "التوصيل {amount}",
   "int.tpl.shipping.free": "التوصيل فابور",
+  // OPE-§21.4 notifications (tenant-facing: ar in R1)
+  "notify.int.sheets_failing.title": "مزامنة Google Sheets لا تعمل",
+  "notify.int.sheets_failing.body":
+    "لم تعد الطلبات الجديدة تصل إلى ورقتك منذ {sinceMinutes, plural, zero {أقل من دقيقة} one {دقيقة} two {دقيقتين} few {# دقائق} other {# دقيقة}}.{backlog, plural, zero {} other { الطلبات المنتظرة: #.}} افتح صفحة التكاملات لمعرفة ما يجب التحقق منه.",
+  "notify.int.capi_failing.title": "أحداث الخادم لا تعمل",
+  "notify.int.capi_failing.body": "لم يرسل أحد البكسلات أحداث الخادم منذ {sinceMinutes, plural, zero {أقل من دقيقة} one {دقيقة} two {دقيقتين} few {# دقائق} other {# دقيقة}}. افتح صفحة التكاملات لمعرفة ما يجب التحقق منه.",
+  "notify.int.telegram_failing.title": "رسائل Telegram لا تصل",
+  "notify.int.telegram_failing.body": "لم تعد رسائل الطلبات تصل إلى محادثتك على Telegram. افتح صفحة التكاملات لمعرفة ما يجب التحقق منه.",
+  "notify.int.delivery_dead.title": "فشلت بعض الإرسالات نهائيًا",
+  "notify.int.delivery_dead.body": "عدد الإرسالات التي لن تُعاد محاولتها: {count}. أصلح السبب ثم أعد إرسالها من صفحة التكاملات.",
+  // OPE-§27.2 Store Health (tenant-facing: ar in R1)
+  "health.integrations.sheets_backlog.text": "أقدم طلب ينتظر الوصول إلى ورقة Google منذ {value} دقيقة (الطلبات المنتظرة: {n}).",
+  "health.integrations.capi_failing.text": "عدد البكسلات التي لم ترسل أي حدث خادم بنجاح خلال آخر 24 ساعة: {value}.",
+  "health.integrations.telegram_failing.text": "رسائل الطلبات على Telegram تفشل (محاولات فاشلة متتالية: {value}).",
+  "health.integrations.delivery_dead.text": "عدد الإرسالات التي فشلت نهائيًا: {value}. أعد إرسالها بعد إصلاح السبب.",
+  "health.integrations.turnstile.text": "لم تتمكن الحماية من الروبوتات من التحقق من {value}% من طلبات يوم واحد (عدد الطلبات: {n}).",
+  "health.integrations.trigger_hint.text":
+    "تؤكد {value}% من الطلبات المعالَجة عبر الهاتف (عدد الطلبات: {n})، لكن حدث Purchase يُرسل عند تسجيل الطلب. إرساله عند التأكيد يحتسب الطلبات المؤكدة فقط.",
+  "health.integrations.fix.sheets": "افتح Google Sheets",
+  "health.integrations.fix.pixels": "افتح أحداث الخادم",
+  "health.integrations.fix.telegram": "افتح Telegram",
+  "health.integrations.fix.deliveries": "افتح الإرسالات",
+  "health.integrations.fix.antispam": "افتح الحماية من الرسائل المزعجة",
+  "health.integrations.fix.trigger": "راجع توقيت حدث Purchase",
 };

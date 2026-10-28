@@ -1,4 +1,4 @@
-// proves: IN-05, OP-05, LP-04, AI-15
+// proves: IN-05, OP-05, LP-04, AI-15, IN-03, SF-03, SF-06
 /**
  * Ad pixels — server side, offline (fetch is mocked; no network, no database), docs/OFFERS.md §A:
  *  - Tracking schema: legacy single ids → lists, dedupe, limits, empty → unset; `none` / `copiedFrom`;
@@ -20,6 +20,10 @@
  *  - templates (R1 P5, operations.md OPE-§O.1): the template language, the WhatsApp built-ins over 40 orders in ar,
  *    fr and en with zero invented numbers, `confirm_number` / `confirm_hours`, the WhatsApp link caps and the
  *    repository's draft rule (src/lib/integrations/templates.selftest.ts, offline like the rest of this file).
+ *  - integrations health (R1 P5, operations.md OPE-§28.2, §27.2, §21.4): the integration_status state rules, the
+ *    scaled Sheets backlog threshold, the causes and What to check, the int:* / conv:* rules on their fixtures, the
+ *    notification kinds, the pulse role gate and the copy (src/lib/integrations/selftest.ts; the DB half is
+ *    scripts/qa/integrations-db-check.ts).
  *
  *   npx tsx scripts/qa/conversions-check.ts      (exit code 1 on failure)
  */
@@ -49,6 +53,7 @@ import { dueHealthUpdates, forgetHealthWrites, noteHealthWrite } from "@/lib/pix
 import { newProofCode, proofFound, proofHash } from "@/lib/sheets/proof";
 import { runtimePixels, trackingFlags } from "@/lib/pixels/tracking";
 import { PixelLibrarySettings, TrackingSecretsSettings, redactSetting } from "@/lib/settings/schemas";
+import { integrationsHealthSelftest } from "@/lib/integrations/selftest";
 import { templatesSelftest } from "@/lib/integrations/templates.selftest";
 
 let pass = 0;
@@ -443,6 +448,12 @@ async function main() {
   pass += templates.pass;
   failures.push(...templates.failures);
   for (const n of templates.notes) console.log(`· ${n}`);
+
+  /* ---------------- integrations health (OPE-§28.2, §27.2, §21.4; IN-03, SF-03, SF-06) ---------------- */
+  const health = await integrationsHealthSelftest();
+  pass += health.pass;
+  failures.push(...health.failures);
+  for (const n of health.notes) console.log(`· ${n}`);
 
   for (const f of failures) console.log(`✗ ${f}`);
   console.log(failures.length ? `✗ ${failures.length} failure(s), ${pass} passed` : `✓ conversions check passed (${pass} assertions)`);
