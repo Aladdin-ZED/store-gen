@@ -138,13 +138,13 @@ export function errorCode(err: unknown, override?: string | null): string {
   return cleanCode(override) ?? cleanCode(driverCode(err)) ?? (err instanceof Error ? cleanCode(err.name) : null) ?? "unknown";
 }
 
-/** errorSummary with e-mail addresses and digit runs of 6+ masked, at most 200 characters. */
-export function redactSummary(summary: string): string {
+/** errorSummary with e-mail addresses and digit runs of 6+ masked, at most `max` characters (200; the outbox's 300). */
+export function redactSummary(summary: string, max: number = SUMMARY_MAX): string {
   return summary
     .replace(/[^\s@<>()"',;:]+@[^\s@<>()"',;:]+\.[A-Za-z]{2,}/g, "<email>")
     .replace(/\+?\d(?:[\s.\-/]?\d){5,}/g, "<n>")
     .replace(/[\u0000-\u001f\u007f]+/g, " ")
-    .slice(0, SUMMARY_MAX);
+    .slice(0, max);
 }
 
 /* ------------------------------------------------------------------ */

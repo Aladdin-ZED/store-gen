@@ -21,7 +21,11 @@
  *  6. runner     (./selftest-runner.ts, P8 step 3) the slot table and the job budget rules, the Sheets capacity
  *                arithmetic, the due logic, the round robin's fairness, and runTickWith on a fake lease and fake clocks:
  *                skipped on overlap, an expired lease taken over, no lock-pool connection between jobs, the budget
- *                allocation, lag shortening, the yield contract, isolation, job_runs rows, the legacy Sheets shim.
+ *                allocation, lag shortening, the yield contract, isolation, job_runs rows, the legacy Sheets shim;
+ *  7. outbox     (./selftest-outbox.ts, P8 step 4) the backoff ladder and dead rules, httpRetryable, resendKey, the
+ *                replay rule table, the §H.1 claim statement, the enqueue refusals; the drainer on an in-memory outbox:
+ *                per-kind and per-store caps, timeouts, the kill switch, a missing handler, the budget, merged sends,
+ *                mail's caps, unreadable payloads, lost claims and claim contention.
  */
 import Module from "node:module";
 import { EventEmitter } from "node:events";
@@ -591,6 +595,17 @@ async function main(): Promise<void> {
     restoreLockPool() {
       globalThis.__sgLockPool = savedLockPool;
     },
+  });
+
+  /* ---------------------------------------------------------------- */
+  const { outboxSections } = await import("./selftest-outbox");
+  const SC = await import("./scope");
+  outboxSections(h, {
+    O: await import("./outbox"),
+    RU: await import("./outbox/rules"),
+    DR: await import("./outbox/drain"),
+    Clock: FakeClock,
+    scope: (storeId) => SC.systemScope(SC.systemCtx("qa.outbox"), storeId),
   });
 
   await h.run();

@@ -33,7 +33,17 @@
  *                              the registered housekeeping (an abandoned lead > 30 days purged, a fresh one kept)
  *  - forEachStore (P8 step 3)  the round robin over the real stores table (cursor row, wrap, budget stop, a throwing
  *                              store counted in the error ring and skipped), the refined pending_renders /
- *                              pending_outbox predicates (pending and due, store rows only), "tick" refused
+ *                              pending_outbox predicates (pending and due, or running past its lease; store rows only),
+ *                              "tick" refused
+ *  - outbox (P8 step 4)        enqueue twice → duplicates 1 (and reportDuplicates in the ring), a rolled-back
+ *                              transaction takes its items with it, impersonation / platform scopes and bad items
+ *                              refused; a pii payload stored sealed (no canary in the row) and opened for the handler;
+ *                              20 parallel drains never deliver one item twice; an expired lease is re-claimed, a live
+ *                              one is not; a dead transition counted (dead_<kind>); the capi_enabled kill switch pauses
+ *                              capi only; mail's per-minute cap reschedules (platform items); replay: B's scope on A's
+ *                              row → not_found and A's row unchanged, impersonation refused, a done capi row refused, a
+ *                              done telegram row re-sent, a second click a no-op, the audit rows; outboxSummary(B) shows
+ *                              nothing of A and never a payload; the platform summary; runTick() runs the outbox in slot 3
  */
 import Module from "node:module";
 import { randomBytes, createHash } from "node:crypto";
@@ -71,6 +81,8 @@ const DATA = join(ROOT, "data");
   for (const k of ["MEDIA_DIR", "MEDIA_CACHE_DIR", "DATA_DIR_BUDGET_BYTES", "PUBLIC_URL", "STORE_ROOT_DOMAIN", "EDGE_KEY"]) delete env[k];
   env.DATABASE_URL = `${DB_SERVER}/${dbName}`;
   env.DATA_DIR = DATA;
+  // the envelopes of the outbox's pii payloads (§F.3): a throwaway key, never the owner's
+  env.APP_SECRET = randomBytes(32).toString("hex");
   env.PLATFORM_URL = "http://localhost:3451";
 }
 
@@ -743,7 +755,293 @@ async function main(): Promise<number> {
       await pool().query("INSERT INTO outbox (id, store_id, kind, topic, dedupe_key, payload, state, next_at) VALUES (?, ?, 'telegram', 'qa', ?, '{}', ?, UTC_TIMESTAMP(3) + INTERVAL ? SECOND)", [id, storeId, `qa:${id}`, state, inSec]);
     }
     t.eq("pending_outbox: a store's pending item that is due (not a platform row, a dead one or a later one)", (await run("qa.outbox", { where: "pending_outbox" })).seen, [STORE_C]);
+    await pool().query(
+      "INSERT INTO outbox (id, store_id, kind, topic, dedupe_key, payload, state, next_at, claim, lease_until) VALUES (?, ?, 'telegram', 'qa', ?, '{}', 'running', UTC_TIMESTAMP(3), ?, UTC_TIMESTAMP(3) - INTERVAL 1 SECOND), (?, ?, 'telegram', 'qa', ?, '{}', 'running', UTC_TIMESTAMP(3), ?, UTC_TIMESTAMP(3) + INTERVAL 1 MINUTE)",
+      ["01JB8ZK3Q4R5S6T7V8W9OB0005", STORE_B, "qa:01JB8ZK3Q4R5S6T7V8W9OB0005", "01JB8ZK3Q4R5S6T7V8W9CLAIM1", "01JB8ZK3Q4R5S6T7V8W9OB0006", STORE_A, "qa:01JB8ZK3Q4R5S6T7V8W9OB0006", "01JB8ZK3Q4R5S6T7V8W9CLAIM2"],
+    );
+    t.eq("pending_outbox: …or one claimed by a drain that died (running past its lease; not a live lease)", (await run("qa.outbox2", { where: "pending_outbox" })).seen, [STORE_B, STORE_C]);
     await t.rejects('the job name "tick" (the lease row) is refused', () => SC.forEachStore(fctx, { job: "tick", states: ["active"], budgetMs: 10 }, async () => undefined), /bad job name/);
+  });
+
+  /* ================================================================ */
+  h.section("outbox", async (t) => {
+    const O = await import("@/lib/jobs/outbox");
+    const R = await import("@/lib/jobs/runner");
+    const { mintScope } = await import("@/lib/tenancy/seam");
+    const { invalidateFlags } = await import("@/lib/tenancy/entitlements");
+    const crypto = await import("@/lib/security/crypto");
+    type StoreCtx = import("@/lib/tenancy/types").StoreCtx;
+    type PlatformCtx = import("@/lib/tenancy/types").PlatformCtx;
+    type WriteScope = import("@/lib/tenancy/types").WriteScope;
+    type ClaimedItem = import("@/lib/jobs/outbox").ClaimedItem;
+    await import("@/lib/jobs/registry"); // P5's handler files register first; the fakes below replace them for this section
+    await pool().query("DELETE FROM outbox"); // the forEachStore section's probe rows
+    const scopeB = systemScope(ctx, STORE_B);
+    const canary = "+212612345678";
+
+    type Row = { id: string; store_id: string | null; kind: string; state: string; attempts: number; payload: string; encrypted: number; next_at: Date; claim: string | null; done_at: Date | null; last_error: string | null; last_status: number | null };
+    const rowOf = async (id: string) => ((await pool().query("SELECT * FROM outbox WHERE id = ?", [id])) as unknown as [Row[]])[0][0];
+    const rowByKey = async (key: string) => ((await pool().query("SELECT * FROM outbox WHERE dedupe_key = ?", [key])) as unknown as [Row[]])[0][0];
+    const count = async (where: string, params: unknown[] = []) => Number(((await pool().query(`SELECT COUNT(*) AS n FROM outbox WHERE ${where}`, params)) as unknown as [{ n: number }[]])[0][0]!.n);
+    const tg = (key: string, over: Partial<import("@/lib/jobs/outbox").OutboxItem> = {}) => ({ kind: "telegram" as const, topic: "new_order", dedupeKey: key, payload: { orderId: "CMD-QA0001" }, ...over });
+    const refusal = async (fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+        return "ok";
+      } catch (err) {
+        return (err as { code?: string }).code ?? (err as Error).name;
+      }
+    };
+
+    // fake handlers (restored at the end): every send recorded
+    const saved = new Map(globalThis.__sgOutboxHandlers ?? []);
+    const sent: ClaimedItem[] = [];
+    let capiAnswer: (item: ClaimedItem) => import("@/lib/jobs/outbox").SendResult = () => ({ ok: true, status: 200 });
+    const fake = (kind: import("@/lib/jobs/outbox").OutboxKind, per: number, answer: (item: ClaimedItem) => import("@/lib/jobs/outbox").SendResult = () => ({ ok: true, status: 200 })) =>
+      O.registerOutboxHandler({
+        kind,
+        maxPerTick: 1_000,
+        perStorePerTick: per,
+        timeoutMs: 5_000,
+        send: async (item) => {
+          sent.push(item);
+          await new Promise((r) => setTimeout(r, 1 + Math.floor(Math.random() * 3)));
+          return answer(item);
+        },
+      });
+    fake("telegram", 10);
+    fake("capi", 20, (item) => capiAnswer(item));
+    fake("mail", 20);
+    const memberCtx = (storeId: string, o: { impersonation?: boolean; can?: boolean } = {}): StoreCtx =>
+      ({
+        user: { id: "01JB8ZK3Q4R5S6T7V8W9USER01" },
+        store: { id: storeId, handle: storeId === STORE_A ? "storage-a" : "storage-b" },
+        membership: o.impersonation ? { role: "owner", status: "active", synthetic: "impersonation" } : { role: "owner", status: "active" },
+        scope: mintScope(o.impersonation ? "impersonation" : "member", storeId),
+        actor: { kind: o.impersonation ? "impersonation" : "user", userId: "01JB8ZK3Q4R5S6T7V8W9USER01", impersonatorId: o.impersonation ? "01JB8ZK3Q4R5S6T7V8W9STAFF1" : null, ip: null },
+        impersonation: o.impersonation ? { id: "01JB8ZK3Q4R5S6T7V8W9IMP001", storeId, staffUserId: "01JB8ZK3Q4R5S6T7V8W9STAFF1", mode: "read", reason: "ticket", expiresAt: new Date(Date.now() + 60_000) } : null,
+        stepUpUntil: null,
+        can: () => o.can ?? true,
+      }) as unknown as StoreCtx;
+    const staffCtx = (can = true): PlatformCtx =>
+      ({ user: { id: "01JB8ZK3Q4R5S6T7V8W9STAFF1" }, role: "super_admin", actor: { kind: "platform", userId: "01JB8ZK3Q4R5S6T7V8W9STAFF1", impersonatorId: null, ip: null }, can: () => can, stepUpFresh: false, stepUpUntil: null }) as unknown as PlatformCtx;
+    const audits = async (action: string, target: string) => ((await pool().query("SELECT store_id, actor_kind, meta FROM audit_log WHERE action = ? AND target = ?", [action, target])) as unknown as [{ store_id: string | null; actor_kind: string; meta: string | null }[]])[0];
+
+    try {
+      // ---- enqueue: INSERT IGNORE on dedupe_key, the re-send rule's duplicates
+      const k1 = `qa:tg:${hex(4)}`;
+      const first = await O.enqueue(scopeA, [tg(k1)]);
+      const again = await O.enqueue(scopeA, [tg(k1)]);
+      t.eq("enqueue twice → inserted 1, then duplicates 1", [first, again], [
+        { inserted: 1, duplicates: 0 },
+        { inserted: 0, duplicates: 1 },
+      ]);
+      const k2 = `qa:tg:${hex(4)}`;
+      t.eq("the same key twice in one batch → one row, one duplicate", await O.enqueue(scopeA, [tg(k2), tg(k2)]), { inserted: 1, duplicates: 1 });
+      const r1 = await rowByKey(k1);
+      t.check("the row: store A, pending, attempts 0, plain JSON, due now", r1?.store_id === STORE_A && r1.state === "pending" && r1.attempts === 0 && r1.encrypted === 0 && JSON.parse(r1.payload).orderId === "CMD-QA0001" && r1.next_at.getTime() <= Date.now() + 1_000, JSON.stringify(r1));
+      E.resetErrorBuffer();
+      t.eq("reportDuplicates returns the result", O.reportDuplicates(again, { area: "qa:hooks", storeId: STORE_A }), again);
+      t.check("…and counts duplicate_enqueue in the ring (area outbox, the caller's area, the store)", E.pendingErrors().some((e) => e.area === "outbox" && e.code === "duplicate_enqueue" && e.route === "qa:hooks" && e.storeId === STORE_A && e.count === 1));
+      E.resetErrorBuffer();
+      const later = new Date(Date.now() + 3_600_000);
+      const k3 = `qa:tg:${hex(4)}`;
+      await O.enqueue(scopeA, [tg(k3, { notBefore: later, targetId: "chat:9f2c" })]);
+      const r3 = await rowByKey(k3);
+      t.check("notBefore becomes next_at; targetId kept", Math.abs(r3!.next_at.getTime() - later.getTime()) < 5 && (r3 as unknown as { target_id: string }).target_id === "chat:9f2c");
+
+      // ---- the caller's transaction (OD6): items roll back with it
+      const kTx = `qa:tg:${hex(4)}`;
+      await db
+        .transaction(async (tx) => {
+          await O.enqueue(scopeA, [tg(kTx)], { tx });
+          throw new Error("order rolled back");
+        })
+        .catch(() => undefined);
+      t.eq("enqueue on a rolled-back transaction leaves no row", await count("dedupe_key = ?", [kTx]), 0);
+      await db.transaction(async (tx) => void (await O.enqueue(scopeA, [tg(kTx)], { tx })));
+      t.eq("…and a committed one keeps it", await count("dedupe_key = ?", [kTx]), 1);
+
+      // ---- refusals
+      t.eq("an impersonation scope is refused (impersonation_read_only)", await refusal(() => O.enqueue(mintScope("impersonation", STORE_A) as unknown as WriteScope, [tg(`qa:${hex(4)}`)])), "impersonation_read_only");
+      t.eq("a platform read scope is refused (forbidden)", await refusal(() => O.enqueue(mintScope("platform", STORE_A) as unknown as WriteScope, [tg(`qa:${hex(4)}`)])), "forbidden");
+      t.eq("a kind 0005 does not store is refused before the database", await refusal(() => O.enqueue(scopeA, [tg(`qa:${hex(4)}`, { kind: "push" })])), "RangeError");
+      t.eq("an empty batch is a no-op", await O.enqueue(scopeA, []), { inserted: 0, duplicates: 0 });
+
+      // ---- pii: sealed at rest, opened for the handler
+      const kPii = `qa:capi:${hex(4)}`;
+      await O.enqueue(scopeA, [{ kind: "capi", topic: "Purchase", dedupeKey: kPii, payload: { phone: canary, name: "Canary Name" }, pii: true }]);
+      const pii = await rowByKey(kPii);
+      t.check("a pii payload is stored sealed: encrypted = 1, a v2 envelope, no canary in the row", pii?.encrypted === 1 && pii.payload.startsWith("v2.k1.") && !JSON.stringify(pii).includes("212612345678") && !JSON.stringify(pii).includes("Canary"));
+      t.eq("…it opens with store A's key and purpose outbox:v1", JSON.parse(crypto.open(pii!.payload, { store: STORE_A }, "outbox:v1")).phone, canary);
+      t.throws("…never with store B's", () => crypto.open(pii!.payload, { store: STORE_B }, "outbox:v1"), /does not open/);
+      sent.length = 0;
+      const d1 = await O.drainOutbox({ storeId: STORE_A, budgetMs: 10_000 });
+      const piiSent = sent.find((i) => i.dedupeKey === kPii);
+      t.check("the drain opens it for the handler", (piiSent?.payload as { phone?: string } | undefined)?.phone === canary && piiSent?.storeId === STORE_A);
+      t.check("drainOutbox({ storeId: A }): A's due items only, then done (the later one waits)", d1.done >= 4 && sent.every((i) => i.storeId === STORE_A) && !sent.some((i) => i.dedupeKey === k3) && (await rowByKey(k1))?.state === "done", JSON.stringify(d1));
+      const done1 = await rowByKey(k1);
+      t.check("…a done row: done_at, last_status, last_ms, no claim, no lease", done1?.done_at instanceof Date && done1.last_status === 200 && done1.claim === null && (done1 as unknown as { lease_until: Date | null }).lease_until === null);
+
+      // ---- 20 parallel drains: one delivery per item
+      await pool().query("DELETE FROM outbox");
+      const keys: string[] = [];
+      for (const [scope, n] of [
+        [scopeA, 120],
+        [scopeB, 60],
+      ] as const) {
+        const batch = Array.from({ length: n }, (_, i) => tg(`qa:par:${scope.storeId.slice(-2)}:${i}`));
+        keys.push(...batch.map((b) => b.dedupeKey));
+        await O.enqueue(scope, batch);
+      }
+      sent.length = 0;
+      let rounds = 0;
+      while ((await count("state IN ('pending', 'running')")) > 0 && rounds < 6) {
+        rounds++;
+        await Promise.all(Array.from({ length: 20 }, (_, i) => O.drainOutbox(i % 2 ? { budgetMs: 20_000 } : { budgetMs: 20_000, storeId: i % 4 ? STORE_A : STORE_B })));
+      }
+      const ids = sent.map((i) => i.id);
+      t.eq("20 parallel drains: every item delivered exactly once", [ids.length, new Set(ids).size, await count("state = 'done'")], [180, 180, 180]);
+      t.check(`…within ${rounds} round(s) of 20 drains`, rounds >= 1 && rounds <= 3, String(rounds));
+
+      // ---- an expired lease is re-claimed; a live one is not
+      await pool().query("DELETE FROM outbox");
+      await pool().query(
+        "INSERT INTO outbox (id, store_id, kind, topic, dedupe_key, payload, state, next_at, claim, lease_until) VALUES (?, ?, 'telegram', 'new_order', ?, '{}', 'running', UTC_TIMESTAMP(3), ?, UTC_TIMESTAMP(3) - INTERVAL 1 SECOND), (?, ?, 'telegram', 'new_order', ?, '{}', 'running', UTC_TIMESTAMP(3), ?, UTC_TIMESTAMP(3) + INTERVAL 2 MINUTE)",
+        ["01JB8ZK3Q4R5S6T7V8W9EXP001", STORE_B, "qa:exp:1", "01JB8ZK3Q4R5S6T7V8W9DEAD01", "01JB8ZK3Q4R5S6T7V8W9LIV001", STORE_B, "qa:live:1", "01JB8ZK3Q4R5S6T7V8W9LIVE01"],
+      );
+      sent.length = 0;
+      await O.drainOutbox({ budgetMs: 10_000 }); // no store given: the stores with due work (pending_outbox) are visited
+      t.eq("an expired lease is re-claimed and sent (the cron finds the store by it)", [(await rowOf("01JB8ZK3Q4R5S6T7V8W9EXP001"))?.state, sent.map((i) => i.id)], ["done", ["01JB8ZK3Q4R5S6T7V8W9EXP001"]]);
+      t.eq("…a live lease is left to its drain", [(await rowOf("01JB8ZK3Q4R5S6T7V8W9LIV001"))?.state, (await rowOf("01JB8ZK3Q4R5S6T7V8W9LIV001"))?.claim], ["running", "01JB8ZK3Q4R5S6T7V8W9LIVE01"]);
+
+      // ---- dead transitions are counted; retries move up the ladder
+      E.resetErrorBuffer();
+      capiAnswer = (item) => (item.topic === "Refused" ? { ok: false, retry: false, status: 400, error: `(#100) Invalid parameter for ${canary}` } : { ok: false, retry: true, status: 503, error: "HTTP 503" });
+      const kDead = `qa:capi:${hex(4)}`;
+      const kRetry = `qa:capi:${hex(4)}`;
+      await O.enqueue(scopeA, [
+        { kind: "capi", topic: "Refused", dedupeKey: kDead, payload: {} },
+        { kind: "capi", topic: "Purchase", dedupeKey: kRetry, payload: {} },
+      ]);
+      const before = Date.now();
+      const d2 = await O.drainOutbox({ storeId: STORE_A, budgetMs: 10_000, kinds: ["capi"] });
+      const dead = await rowByKey(kDead);
+      const retry = await rowByKey(kRetry);
+      t.eq("retry: false → dead at once with its status", [dead?.state, dead?.attempts, dead?.last_status, dead?.done_at instanceof Date], ["dead", 1, 400, true]);
+      t.check("…last_error is plain text with the digits masked (never a phone)", dead?.last_error === "(#100) Invalid parameter for <n>", String(dead?.last_error));
+      t.check("a retryable failure → pending, attempts 1, next try in ~1 min", retry?.state === "pending" && retry.attempts === 1 && Math.abs(retry.next_at.getTime() - before - 60_000) < 5_000 && retry.last_error === "HTTP 503");
+      t.eq("…the report", [d2.claimed, d2.dead, d2.retried, d2.done], [2, 1, 1, 0]);
+      // a fresh buffer's first flush is immediate (its timer may already have run): flush, then read the ring's table
+      await E.flushErrors();
+      const deadRing = ((await pool().query("SELECT store_id, count FROM error_events WHERE area = 'outbox' AND code = 'dead_capi'")) as unknown as [{ store_id: string | null; count: number }[]])[0];
+      t.check("…the dead transition is counted (area outbox, dead_capi, store A)", deadRing.length === 1 && deadRing[0]!.store_id === STORE_A && Number(deadRing[0]!.count) === 1, JSON.stringify(deadRing));
+      E.resetErrorBuffer();
+      capiAnswer = () => ({ ok: true, status: 200 });
+
+      // ---- the capi_enabled kill switch pauses capi only
+      const kCapi = `qa:capi:${hex(4)}`;
+      const kTg = `qa:tg:${hex(4)}`;
+      await O.enqueue(scopeB, [
+        { kind: "capi", topic: "Purchase", dedupeKey: kCapi, payload: {} },
+        tg(kTg),
+      ]);
+      await pool().query("UPDATE flags SET default_value = 'false' WHERE `key` = 'capi_enabled'");
+      invalidateFlags();
+      const capiBefore = await rowByKey(kCapi);
+      await O.drainOutbox({ storeId: STORE_B, budgetMs: 10_000 });
+      t.eq("capi_enabled off: the capi item waits untouched (state, attempts, next_at, claim)", JSON.stringify(await rowByKey(kCapi)), JSON.stringify(capiBefore));
+      t.eq("…telegram still goes", (await rowByKey(kTg))?.state, "done");
+      await pool().query("UPDATE flags SET default_value = 'true' WHERE `key` = 'capi_enabled'");
+      invalidateFlags();
+      await O.drainOutbox({ storeId: STORE_B, budgetMs: 10_000 });
+      t.eq("…and goes out unchanged once the switch is back", [(await rowByKey(kCapi))?.state, (await rowByKey(kCapi))?.attempts], ["done", 0]);
+
+      // ---- mail (platform items): 4 a minute, the rest rescheduled, never attempted
+      const mails = Array.from({ length: 6 }, (_, i) => ({ kind: "mail" as const, topic: "payout_ready", dedupeKey: `qa:mail:${hex(3)}:${i}`, payload: { to: "<owner>" } }));
+      t.eq("enqueue('platform', …): platform items, store_id NULL", await O.enqueue("platform", mails), { inserted: 6, duplicates: 0 });
+      sent.length = 0;
+      await O.drainOutbox({ budgetMs: 10_000, kinds: ["mail"] });
+      const mailRows = ((await pool().query("SELECT state, attempts, next_at, store_id FROM outbox WHERE kind = 'mail' ORDER BY dedupe_key")) as unknown as [{ state: string; attempts: number; next_at: Date; store_id: string | null }[]])[0];
+      t.eq("4 mails a minute: four sent, two rescheduled (pending, attempts 0, later)", [sent.length, mailRows.filter((r) => r.state === "done").length, mailRows.filter((r) => r.state === "pending" && r.attempts === 0 && r.next_at.getTime() > Date.now()).length], [4, 4, 2]);
+      t.check("…every mail row is a platform item", mailRows.every((r) => r.store_id === null));
+      const hourValue = ((await pool().query("SELECT value FROM platform_usage WHERE metric = 'mail_sent'")) as unknown as [{ value: number }[]])[0];
+      t.eq("…mail_sent charged for the hour, once per send", hourValue.map((r) => Number(r.value)), [4]);
+
+      // ---- replay
+      const kDeadA = `qa:tg:${hex(4)}`;
+      await O.enqueue(scopeA, [tg(kDeadA)]);
+      await pool().query("UPDATE outbox SET state = 'dead', attempts = 7, last_error = 'Forbidden: bot was blocked', last_status = 403, done_at = UTC_TIMESTAMP(3) WHERE dedupe_key = ?", [kDeadA]);
+      const deadA = (await rowByKey(kDeadA))!;
+      const snap = JSON.stringify(deadA);
+      t.eq("replay: store B's scope on A's row → not_found", await refusal(() => O.replay(memberCtx(STORE_B), deadA.id)), "not_found");
+      t.eq("…A's row unchanged", JSON.stringify(await rowOf(deadA.id)), snap);
+      t.eq("replay: an impersonation scope → impersonation_read_only, row unchanged", [await refusal(() => O.replay(memberCtx(STORE_A, { impersonation: true }), deadA.id)), JSON.stringify(await rowOf(deadA.id)) === snap], ["impersonation_read_only", true]);
+      t.eq("replay: without integrations.manage → forbidden", await refusal(() => O.replay(memberCtx(STORE_A, { can: false }), deadA.id)), "forbidden");
+      t.eq("replay: an id that is no row id → not_found", await refusal(() => O.replay(memberCtx(STORE_A), "../../x")), "not_found");
+      t.eq("replay: A's own dead row", await refusal(() => O.replay(memberCtx(STORE_A), deadA.id)), "ok");
+      const back = (await rowOf(deadA.id))!;
+      t.check("…dead → pending, attempts 0, due now, not finished; the last error kept", back.state === "pending" && back.attempts === 0 && back.done_at === null && back.next_at.getTime() <= Date.now() + 1_000 && back.last_error === "Forbidden: bot was blocked");
+      const audited = await audits("integrations.outbox.replayed", deadA.id);
+      t.check("…audited integrations.outbox.replayed with { kind, topic, outboxId } on store A", audited.length === 1 && audited[0]!.store_id === STORE_A && /"kind":"telegram"/.test(audited[0]!.meta ?? "") && /"outboxId"/.test(audited[0]!.meta ?? ""), JSON.stringify(audited));
+      t.eq("…a second click while it is pending is a no-op (no second audit row)", [await refusal(() => O.replay(memberCtx(STORE_A), deadA.id)), (await audits("integrations.outbox.replayed", deadA.id)).length], ["ok", 1]);
+
+      const kDoneCapi = `qa:capi:${hex(4)}`;
+      const kDoneTg = `qa:tg:${hex(4)}`;
+      const kCancelled = `qa:capi:${hex(4)}`;
+      await O.enqueue(scopeA, [{ kind: "capi", topic: "Purchase", dedupeKey: kDoneCapi, payload: {} }, tg(kDoneTg), { kind: "capi", topic: "Purchase", dedupeKey: kCancelled, payload: {} }]);
+      await pool().query("UPDATE outbox SET state = 'done', done_at = UTC_TIMESTAMP(3) WHERE dedupe_key IN (?, ?)", [kDoneCapi, kDoneTg]);
+      await pool().query("UPDATE outbox SET state = 'cancelled' WHERE dedupe_key = ?", [kCancelled]);
+      const doneCapi = (await rowByKey(kDoneCapi))!;
+      t.eq("replay: a done capi row is refused (invalid), row unchanged", [await refusal(() => O.replay(memberCtx(STORE_A), doneCapi.id)), JSON.stringify(await rowOf(doneCapi.id)) === JSON.stringify(doneCapi)], ["invalid", true]);
+      t.eq("replay: a cancelled row is refused (invalid)", await refusal(async () => O.replay(memberCtx(STORE_A), (await rowByKey(kCancelled))!.id)), "invalid");
+      const doneTg = (await rowByKey(kDoneTg))!;
+      t.eq("replay: a done telegram row is sent again (the deliberate re-send)", [await refusal(() => O.replay(memberCtx(STORE_A), doneTg.id)), (await rowOf(doneTg.id))?.state], ["ok", "pending"]);
+
+      const kDeadB = `qa:tg:${hex(4)}`;
+      await O.enqueue(scopeB, [tg(kDeadB)]);
+      await pool().query("UPDATE outbox SET state = 'dead', attempts = 7, done_at = UTC_TIMESTAMP(3) WHERE dedupe_key = ?", [kDeadB]);
+      const deadB = (await rowByKey(kDeadB))!;
+      t.eq("replay from the console without stores.lifecycle → forbidden", await refusal(() => O.replay(staffCtx(false), deadB.id)), "forbidden");
+      t.eq("replay from the console (any store)", [await refusal(() => O.replay(staffCtx(), deadB.id)), (await rowOf(deadB.id))?.state], ["ok", "pending"]);
+      const staffAudit = await audits("platform.outbox.replayed", deadB.id);
+      t.check("…audited platform.outbox.replayed on store B, actor platform", staffAudit.length === 1 && staffAudit[0]!.store_id === STORE_B && staffAudit[0]!.actor_kind === "platform", JSON.stringify(staffAudit));
+
+      // ---- summaries
+      await O.enqueue(scopeA, [{ kind: "capi", topic: "Purchase", dedupeKey: `qa:capi:${hex(4)}`, payload: { phone: canary }, pii: true }]);
+      await pool().query("UPDATE outbox SET state = 'dead', attempts = 7, last_error = 'HTTP 410', last_status = 410, done_at = UTC_TIMESTAMP(3) WHERE store_id = ? AND kind = 'capi' AND state = 'pending'", [STORE_A]);
+      const grouped = async (storeId: string) =>
+        ((await pool().query("SELECT kind, state, COUNT(*) AS n FROM outbox WHERE store_id = ? GROUP BY kind, state", [storeId])) as unknown as [{ kind: string; state: string; n: number }[]])[0];
+      const sumA = await O.outboxSummary(scopeA);
+      const sumB = await O.outboxSummary(scopeB);
+      const flat = (s: typeof sumA) => s.byKind.flatMap((k) => (["pending", "running", "done", "dead", "cancelled"] as const).filter((st) => k[st] > 0).map((st) => `${k.kind}:${st}:${k[st]}`)).sort();
+      t.eq("outboxSummary(B): exactly B's rows by kind × state", flat(sumB), (await grouped(STORE_B)).map((r) => `${r.kind}:${r.state}:${Number(r.n)}`).sort());
+      t.eq("outboxSummary(A): exactly A's", flat(sumA), (await grouped(STORE_A)).map((r) => `${r.kind}:${r.state}:${Number(r.n)}`).sort());
+      const aIds = ((await pool().query("SELECT id FROM outbox WHERE store_id = ?", [STORE_A])) as unknown as [{ id: string }[]])[0].map((r) => r.id);
+      t.check("outboxSummary(B) names no row of A", aIds.length > 0 && !aIds.some((id) => JSON.stringify(sumB).includes(id)));
+      t.check("outboxSummary(A): the dead rows (≤ 5, newest first) with kind, topic, attempts, last status and error", sumA.deadCount >= 2 && sumA.dead.length >= 2 && sumA.dead.length <= 5 && sumA.dead.every((d) => d.attempts >= 1 && typeof d.at === "string") && sumA.dead.some((d) => d.lastStatus === 410 && d.lastError === "HTTP 410"), JSON.stringify(sumA.dead));
+      t.check("…never a payload (no canary in either summary)", !JSON.stringify(sumA).includes("212612345678") && !JSON.stringify(sumB).includes("212612345678") && !/payload/.test(JSON.stringify(sumA)));
+      t.check("…the oldest pending as a time and an age in minutes", sumB.byKind.filter((k) => k.pending > 0).every((k) => typeof k.oldestPendingAt === "string" && typeof k.oldestPendingMin === "number" && k.oldestPendingMin >= 0));
+      const plat = await O.platformOutboxSummary();
+      const total = ((await pool().query("SELECT COUNT(*) AS n FROM outbox")) as unknown as [{ n: number }[]])[0][0]!.n;
+      t.eq("platformOutboxSummary: every row counted once (stores and platform items)", plat.byKind.reduce((n, r) => n + r.count, 0), Number(total));
+      t.check("…dead rows carry their store; oldest pending per store and kind; no payload", plat.dead.some((d) => d.storeId === STORE_A) && plat.oldestPending.length > 0 && !JSON.stringify(plat).includes("212612345678"));
+
+      // ---- the cron: runTick() runs the outbox in slot 3, with a per-store row
+      await pool().query("DELETE FROM outbox WHERE state IN ('pending', 'running')");
+      await O.enqueue(scopeB, [tg(`qa:tick:${hex(4)}`)]);
+      const tick = await R.runTick();
+      const runs = ((await pool().query("SELECT job, store_id, ok, processed, summary FROM job_runs WHERE tick_id = ? AND job = 'outbox'", [tick.tickId])) as unknown as [{ job: string; store_id: string | null; ok: number; processed: number; summary: string | null }[]])[0];
+      const run = runs.find((r) => r.store_id === null);
+      const summary = run?.summary ? (JSON.parse(run.summary) as Record<string, unknown>) : {};
+      t.check("runTick(): the outbox job ran in slot 3 within 13 s, delivered the item", run?.ok === 1 && summary.slot === "3" && Number(summary.budgetMs) <= 13_000 && summary.delivered === 1 && Number(run.processed) === 1, JSON.stringify(runs));
+      t.eq("…with a per-store job_runs row for B", runs.filter((r) => r.store_id).map((r) => [r.store_id, Number(r.processed)]), [[STORE_B, 1]]);
+      t.check("…job_runs holds counts only (no payload, no canary)", !JSON.stringify(runs).includes("orderId") && !JSON.stringify(runs).includes("212612345678"));
+    } finally {
+      globalThis.__sgOutboxHandlers = saved;
+      await pool().query("UPDATE flags SET default_value = 'true' WHERE `key` = 'capi_enabled'");
+      invalidateFlags();
+    }
   });
 
   await h.run();

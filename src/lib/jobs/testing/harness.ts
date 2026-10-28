@@ -82,10 +82,22 @@ export class Harness {
     };
   }
 
-  /** Runs every section in order (a section that throws is one failure), prints the timings, sets the exit code. */
+  /**
+   * Runs every section in order (a section that throws is one failure), prints the timings, sets the exit code. A
+   * process that exits before the last section finished (an awaited promise nothing keeps alive, so the event loop
+   * emptied) exits 1 with the section it stopped in, never 0.
+   */
   async run(): Promise<void> {
     const started = performance.now();
+    let current = "(start)";
+    let finished = false;
+    process.once("exit", () => {
+      if (finished) return;
+      console.error(`\n  ✗ ${this.title}: the process ended inside section "${current}" before every section ran`);
+      process.exitCode = 1;
+    });
     for (const { name, fn } of this.sections) {
+      current = name;
       const t0 = performance.now();
       const before = this.passes + this.failures.length;
       try {
@@ -96,6 +108,7 @@ export class Harness {
       const n = this.passes + this.failures.length - before;
       console.log(`  ${name.padEnd(28)} ${String(n).padStart(4)} checks  ${(performance.now() - t0).toFixed(0).padStart(5)} ms`);
     }
+    finished = true;
     for (const f of this.failures) console.error(`  ✗ ${f}`);
     console.log(`\n${this.title}: ${this.passes} passed, ${this.failures.length} failed · ${((performance.now() - started) / 1000).toFixed(2)} s`);
     if (this.failures.length) process.exitCode = 1;

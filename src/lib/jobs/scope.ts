@@ -149,8 +149,9 @@ const WHERE_TABLE: Record<NonNullable<ForEachStoreOpts["where"]>, string> = {
  *   status pull due: "bring statuses back" on (the key's default) and the store's `sheets:pull` bucket (1 per 290 s,
  *   SHT-06) not inside a window. Without the second branch a store whose orders were all synced never had its agents'
  *   sheet statuses pulled by the cron (T4 review, SHT-11).
- * - `pending_outbox` (§H.1): an item of the store waiting and due (`pending`, `next_at` passed). Platform items
- *   (`store_id` NULL) are never a store's work; the drain takes them on its own.
+ * - `pending_outbox` (§H.1): an item of the store waiting and due (`pending`, `next_at` passed), or claimed by a drain
+ *   that died (`running` past its lease: the claim takes it over, P8 step 4). Platform items (`store_id` NULL) are never
+ *   a store's work; the drain takes them on its own.
  * - `pending_renders` (§H.3): a job of the store waiting and due (`pending`, `not_before` passed). A `running` job is
  *   the drain's own claim, never a reason to visit again.
  */
@@ -163,7 +164,7 @@ function wherePredicate(where: NonNullable<ForEachStoreOpts["where"]>): SQL {
             OR (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ss.value, '$.pull')), 'true') <> 'false'
               AND NOT EXISTS (SELECT 1 FROM rate_limits rl WHERE rl.bucket = CONCAT('s:', ${stores.id}, ':sheets:pull') AND rl.reset_at > UTC_TIMESTAMP(3)))))`;
     case "pending_outbox":
-      return sql`EXISTS (SELECT 1 FROM outbox x WHERE x.store_id = ${stores.id} AND x.state = 'pending' AND x.next_at <= UTC_TIMESTAMP(3))`;
+      return sql`EXISTS (SELECT 1 FROM outbox x WHERE x.store_id = ${stores.id} AND ((x.state = 'pending' AND x.next_at <= UTC_TIMESTAMP(3)) OR (x.state = 'running' AND x.lease_until < UTC_TIMESTAMP(3))))`;
     case "pending_renders":
       return sql`EXISTS (SELECT 1 FROM render_jobs r WHERE r.store_id = ${stores.id} AND r.state = 'pending' AND r.not_before <= UTC_TIMESTAMP(3))`;
   }
