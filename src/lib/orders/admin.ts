@@ -1,7 +1,7 @@
 import "server-only";
 /**
  * Store-side order queries & mutations (call through the seam with the right permission): orders list/detail,
- * status updates (mirrored to the sheet), sheet re-sync, abandoned leads, blocklist, per-page order stats and
+ * status updates (through the one writer, ./transition.ts), sheet re-sync, abandoned leads, blocklist, per-page order stats and
  * streamed CSV exports (orders, abandoned leads).
  *
  * Multi-tenant (docs/STORE-SAAS.md §E.3, D71; ORD-09 … ORD-15): every function takes the scope first and every
@@ -20,12 +20,13 @@ import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
 import { blocklist, leads, orders, pages } from "@/lib/db/schema";
 import { normalizePhone, toAsciiDigits } from "@/lib/markets/phone";
-import { cleanText, explain, pushOrderStatus, serviceAccountEmail, syncPendingOrders, type SyncResult } from "@/lib/sheets";
+import { cleanText, syncPendingOrders, type SyncResult } from "@/lib/sheets";
 import { skuCell, variantCell } from "@/lib/sheets/row";
 import { byId, inStore, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 import type { OrderItems } from "@/lib/db/schema";
 import { ORDER_STATUSES, type OrderStatus } from "./contract";
+import { moveToLegacyAs, type TransitionError } from "./transition";
 
 export type OrderRecord = typeof orders.$inferSelect;
 export type LeadRecord = typeof leads.$inferSelect;
@@ -178,38 +179,42 @@ export type UpdateStatusResult =
   | { ok: true; sheet: "updated" | "not_found" | "skipped" | "queued" }
   | { ok: false; error: string };
 
+/** The grants of the R1.0 status write: its one caller checked `orders.write`, and R1.0 had no own-queue rule. */
+const LEGACY_GRANTS: ReadonlySet<string> = new Set(["orders.read_all", "orders.write", "shipments.write"]);
+
+/** The R1.0 messages of a refused status write (the orders screen shows them as they are). */
+export const MOVE_ERROR_TEXT: Record<TransitionError, string> = {
+  not_found: "Order not found.",
+  illegal: "This move isn't possible from the order's current state.",
+  conflict: "Someone else just changed this order. Refresh and try again.",
+  reason_required: "Pick a reason for this move.",
+  forbidden: "You can't make this move.",
+  locked_ship: "The parcel is already with the carrier.",
+  bad_due: "Pick a callback time within the next 30 days.",
+  bad_duplicate: "Pick the order this one duplicates.",
+  bad_hold: "Pick a date within the next 60 days.",
+  bad_amount: "The amount doesn't match the order.",
+};
+
 /**
- * Change an order's status. When the order may already be in the connected sheet (synced, or a
- * previous push attempt may have appended it before failing), the sheet cell is written FIRST — even
- * while sync is paused — because the sheet is the source of truth for statuses: if Google fails,
- * nothing changes locally and the French explanation is returned, so the two never diverge.
- * Orders not in the sheet yet keep the change locally ("queued"): their append carries the new status.
+ * Deprecated (OPE-§3.7; P0b P4-4): the R1.0 status write, now a thin wrapper over the one writer (`moveToLegacyAs`,
+ * ./transition.ts): no direct status write, and the sheet is a mirror pushed after the commit, never written first
+ * (OD2). The orders screen calls `moveToLegacy` itself; this name stays for the barrel (src/lib/orders/index.ts,
+ * maintainer) until CCR r1-p4-2 drops it, then it is deleted. A cancellation carries the code `other`: R1.0's menu
+ * had no reason picker.
  */
 export async function updateOrderStatus(scope: WriteScope, id: string, status: OrderStatus, actor: Actor): Promise<UpdateStatusResult> {
   if (!isOrderStatus(status)) return { ok: false, error: "Unknown status." };
-  const [o] = await db
-    .select({ id: orders.id, status: orders.status, sheetStatus: orders.sheetStatus, sheetAttempts: orders.sheetAttempts })
-    .from(orders)
-    .where(byId(orders, scope, id))
-    .limit(1);
-  if (!o) return { ok: false, error: "Order not found." };
-  if (o.status === status) return { ok: true, sheet: "skipped" };
-
-  const synced = o.sheetStatus === "synced";
-  const mayBeInSheet = synced || (o.sheetStatus !== "disabled" && o.sheetAttempts > 0);
-  let sheet: "updated" | "not_found" | "skipped" | "queued" = synced || o.sheetStatus === "disabled" ? "skipped" : "queued";
-  if (mayBeInSheet) {
-    try {
-      const pushed = await pushOrderStatus(scope, id, status);
-      if (synced || pushed === "updated") sheet = pushed;
-    } catch (err) {
-      return { ok: false, error: explain(err, serviceAccountEmail()) };
-    }
-  }
-  const res = await db.update(orders).set({ status, updatedAt: new Date() }).where(byId(orders, scope, id));
-  if (affected(res) !== 1) return { ok: false, error: "Order not found." };
-  await auditIn(scope, actor, "orders.status_changed", { target: id, meta: { from: o.status, to: status, sheet } });
-  return { ok: true, sheet };
+  const res = await moveToLegacyAs(
+    { kind: actor.kind === "user" ? "user" : "system", userId: actor.userId, can: (p) => LEGACY_GRANTS.has(p) },
+    scope,
+    id,
+    status,
+    undefined,
+    status === "cancelled" ? { reason: "other" } : {},
+  );
+  if (!res.ok) return { ok: false, error: MOVE_ERROR_TEXT[res.error] };
+  return { ok: true, sheet: res.changed ? "queued" : "skipped" };
 }
 
 /** "Resend to sheet": re-queue one order of the store (looked up in the sheet first, so no duplicate row). */

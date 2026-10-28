@@ -11,7 +11,8 @@
  *   ladder      ladderNext / keepOpenNext / rescueNext with a fake clock across the Africa/Casablanca offset changes (OP-04)
  *   priority    priorityOf (delivery lane 650 > callback 600 > new 500 > attempting 300, amount, risk, attempts, pin)
  *   iso         the ISO weekday keys 1-7 of EffectiveWindow, OpsSetting.callingWindow.days, windowOverrides[].days
- *   catalog     the ops.* keys this part renders (reasons, ship states, risk) in en / fr / ar; no em dash, no "Step n"
+ *   catalog     the ops.* keys this part renders (reasons, ship states, risk, the timeline) and its notify.ops.* texts in
+ *               en / fr / ar; no em dash, no "Step n"
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,7 +28,7 @@ import { MA_CITIES, OTHER_CITY } from "@/lib/markets/cities-ma";
 import { CITY_KEYS, cityKey, cityLabel, normalizeCity, type CityKey } from "@/lib/orders/address";
 import { maskPhone, maskPhonesIn, phoneLast4 } from "@/lib/orders/masking";
 import { customerHistoryOf, explainRisk, RISK_FLAGS, RISK_POINTS, riskLevel } from "@/lib/orders/risk-explain";
-import { CANCEL_REASONS, RETURN_REASONS, SHIP_STATES } from "@/lib/orders/state";
+import { CANCEL_REASONS, CONFIRM_STATES, MONEY_STATES, RETURN_REASONS, SHIP_STATES } from "@/lib/orders/state";
 import { CityKeyZ, OpsSetting, WeekRanges } from "@/lib/settings/keys/ops";
 import { DEFAULT_WINDOW, RAMADAN_PRESET } from "./defaults";
 import { keepOpenNext, ladderNext, nextDue, rescueNext } from "./ladder";
@@ -393,15 +394,20 @@ export function runCallcenterSelftest(): SelftestResult {
       ...RETURN_REASONS.map((r) => `ops.reason.return.${r}`),
       "ops.reason.return.none",
       ...SHIP_STATES.map((s) => `ops.ship.${s}`),
+      // the timeline (OPE-§4.1, agents read it) and the notifications (OD45) are trilingual in R1
+      ...Object.keys(en).filter((k) => k.startsWith("ops.tl.") || k.startsWith("notify.ops.")),
+      ...CONFIRM_STATES.map((s) => `ops.tl.state_changed.confirm.${s}`),
+      ...SHIP_STATES.map((s) => `ops.tl.state_changed.ship.${s}`),
+      ...MONEY_STATES.map((s) => `ops.tl.state_changed.money.${s}`),
     ];
     for (const l of ["en", "fr", "ar"] as const) {
       const missing = need.filter((k) => !all[l][k]);
-      eq(`reasons and ship states complete in ${l}`, missing, []);
+      eq(`reasons, ship states, timeline and notifications complete in ${l}`, missing, []);
       const extra = Object.keys(all[l]).filter((k) => !(k in en));
       eq(`${l}: no key outside the English reference`, extra, []);
       const bad = Object.entries(all[l]).filter(([, v]) => !v || v.includes("—") || /\bStep \d/i.test(v) || /!/.test(v));
       eq(`${l}: no empty value, em dash, "Step n" or exclamation mark`, bad.map(([k]) => k), []);
-      eq(`${l}: every key under ops.`, Object.keys(all[l]).filter((k) => !k.startsWith("ops.")), []);
+      eq(`${l}: every key under ops. (or notify.ops., D67)`, Object.keys(all[l]).filter((k) => !k.startsWith("ops.") && !k.startsWith("notify.ops.")), []);
     }
     eq("the §6.4 picker codes in English, verbatim", CANCEL_REASONS.filter((r) => r !== "blocked" && r !== "attempts_exhausted").map((r) => en[`ops.reason.${r}` as keyof typeof en]), [
       "Changed their mind",

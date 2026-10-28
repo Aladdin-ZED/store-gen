@@ -27,6 +27,17 @@ export async function opsPulse(scope: StoreScope, viewer: Parameters<PulseContri
 }
 
 /**
+ * The assignment of a new order (OPE-§5.6, the `ops.created` hook): round-robin or a rule in those modes, nothing in
+ * `pull` (the default) and `manual`. P4 step 2 calls it from the hook; until the queue step it assigns nothing, which
+ * is exactly `pull` mode: every new order waits in the pool.
+ */
+export async function assignOnCreate(scope: WriteScope, order: { id: string; isTest: boolean }): Promise<{ assigned: string | null }> {
+  void scope;
+  void order;
+  return { assigned: null };
+}
+
+/**
  * Every lease of the store, released: `claim_token` and `lease_until` cleared, one `released` event (why
  * "store_state", actor system) per order. Agents of a restricted store re-claim on their next `N` (OPE-§27.5).
  */

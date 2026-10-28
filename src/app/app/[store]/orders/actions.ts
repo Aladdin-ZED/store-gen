@@ -1,6 +1,6 @@
 "use server";
 /**
- * Orders screen of the store on screen: order details, status changes (mirrored to Google Sheets first), sheet
+ * Orders screen of the store on screen: order details, status changes (the one writer; the sheet mirrors them), sheet
  * re-send, blocklist management. Every action goes through the store's seam (the signed request path): `orders.read`
  * / `orders.write` for orders, `blocklist.write` (owner, admin, manager) for the blocklist. Another store's order or
  * entry id answers like a missing one.
@@ -9,7 +9,9 @@ import { z } from "zod";
 import { fail } from "@/lib/admin-data/action";
 import { orderDetailJson, type OrderDetailJson } from "@/lib/admin-data/orders";
 import { revalidateStore } from "@/lib/admin-data/shell";
-import { blockFromOrder, blockPhone, isOrderStatus, requeueOrderSync, retryFailedSync, unblock, updateOrderStatus } from "@/lib/orders";
+import { blockFromOrder, blockPhone, isOrderStatus, requeueOrderSync, retryFailedSync, unblock } from "@/lib/orders";
+import { MOVE_ERROR_TEXT } from "@/lib/orders/admin";
+import { moveToLegacy } from "@/lib/orders/transition";
 import type { OrderStatus } from "@/lib/orders/contract";
 import { getStoreSetting } from "@/lib/settings";
 import { syncPendingOrders } from "@/lib/sheets";
@@ -32,12 +34,18 @@ export async function getOrderAction(id: string): Promise<ActionResult<OrderDeta
   });
 }
 
+/**
+ * The status menu: a legacy label through the one writer (`moveToLegacy`, OPE-§3.7, §12.6). The sheet is a mirror
+ * pushed after the commit (OD2), so a saved move answers "queued". R1.0's menu has no reason picker yet (the drawer
+ * redesign, P4 step 10, adds it): a cancellation from it carries the code `other`.
+ */
 export async function updateOrderStatusAction(id: string, status: string): Promise<ActionResult<{ sheet: "updated" | "not_found" | "skipped" | "queued" }>> {
-  return storeAction("orders.write", async ({ scope, actor, store }) => {
-    const res = await updateOrderStatus(scope, OrderId.parse(id), Status.parse(status), actor);
-    if (!res.ok) return fail(res.error);
-    refresh(store.handle);
-    return { sheet: res.sheet };
+  return storeAction("orders.write", async (ctx) => {
+    const label = Status.parse(status);
+    const res = await moveToLegacy(ctx, OrderId.parse(id), label, undefined, label === "cancelled" ? { reason: "other" } : {});
+    if (!res.ok) return fail(MOVE_ERROR_TEXT[res.error]);
+    refresh(ctx.store.handle);
+    return { sheet: res.changed ? "queued" : "skipped" };
   });
 }
 

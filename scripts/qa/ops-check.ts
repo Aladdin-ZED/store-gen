@@ -1,4 +1,4 @@
-// proves: OP-04, OP-07, OP-13, OP-14
+// proves: OP-01, OP-04, OP-07, OP-13, OP-14
 /**
  * `test:ops` (P4 CALL CENTER; operations.md OPE-§O.1, §O.4; docs/STORE-SAAS.md §J.1): the call centre's offline
  * checks, in named sections. Static lints over P4's own files, then the pure suite src/lib/callcenter/selftest.ts.
@@ -12,6 +12,11 @@
  *   static · masking      no P4 file declares maskName / maskAddress / maskCustomerFields (OD61, CRIT14)
  *   static · defaults     every default of src/lib/callcenter/defaults.ts says "reasoned starting value, not researched"
  *   static · cityKey size `cityKey` alone, minified like the landing chunks: ≤ 400 B (OPE-§10.1)
+ *   static · state writer only src/lib/orders/transition.ts and createOrderRow write `status` / `confirm_state` /
+ *                         `ship_state` / `money_state` anywhere in src/** (drizzle `.set` and raw SQL; OPE-§3.7, OP-01),
+ *                         with one named temporary exemption (P5's src/lib/sheets/sync.ts, removed by the P4 verify step
+ *                         after rebasing on P5; a stale exemption fails); a single `insert(orders)` call site (OD62)
+ *   static · timeline     `TimelineItem` carries no phone, email, address or note field, at any depth (OPE-§O.1)
  *   pure                  masking, cities and the city-key.json parity fixture, risk, the ISO window, the ladder on a
  *                         fake clock, priorityOf, the ISO keys, the ops catalog (src/lib/callcenter/selftest.ts)
  *
@@ -19,6 +24,7 @@
  * above 25 s for test:state + test:ops + test:profit together (OPE-§O.1; src/lib/callcenter/suite-clock.ts).
  */
 import Module from "node:module";
+import ts from "typescript";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { recordSuiteTime } from "@/lib/callcenter/suite-clock";
@@ -130,6 +136,88 @@ const HOURS_KEY = { test: (src: string) => HOURS_ACCESS.test(codeOnly(src)) || H
 const MASK_DECL_RE = /\b(?:function\*?|const|let|var|class)\s+(maskName|maskAddress|maskCustomerFields)\b|\bas\s+(maskName|maskAddress|maskCustomerFields)\b/;
 const MASK_DECL = { test: (src: string) => MASK_DECL_RE.test(codeOnly(src)) };
 
+/** The text inside the parentheses that open at `open` (the index of "("), balanced. */
+function balanced(text: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth === 0) return text.slice(open + 1, i);
+  }
+  return text.slice(open + 1);
+}
+const STATE_KEY = /(?<![\w$.])(status|confirmState|shipState|moneyState)\s*(?=[:,}])/g;
+const STATE_SQL = /\bUPDATE\s+(?:`?orders`?|\$\{\s*orders\s*\})\s[\s\S]{0,600}?\bSET\b([\s\S]{0,600})/gi;
+const STATE_SQL_COL = /(?<![\w`.])`?(status|confirm_state|ship_state|money_state)`?\s*=/i;
+/**
+ * The writes of the four state columns in one source file (OPE-§3.7): a drizzle `.update(orders).set({ … })` naming
+ * one of them (a `.set(x)` or a spread the lint cannot read counts too), or raw SQL `UPDATE orders … SET status = …`.
+ */
+function stateWrites(src: string): string[] {
+  const out: string[] = [];
+  const code = codeOnly(src);
+  for (const m of code.matchAll(/\.update\(\s*orders\s*\)/g)) {
+    const from = (m.index ?? 0) + m[0].length;
+    const rest = code.slice(from);
+    const setAt = rest.search(/\.set\(/);
+    const end = rest.search(/;/);
+    if (setAt < 0 || (end >= 0 && end < setAt)) continue;
+    const arg = balanced(rest, setAt + 4).trim();
+    const line = code.slice(0, from).split("\n").length;
+    if (!arg.startsWith("{")) out.push(`:${line} .update(orders).set(<not an object literal>)`);
+    else if (arg.includes("...")) out.push(`:${line} .update(orders).set({ ...spread })`);
+    else for (const k of arg.matchAll(STATE_KEY)) out.push(`:${line} .update(orders).set({ ${k[1]} })`);
+  }
+  const text = noComments(src);
+  for (const m of text.matchAll(STATE_SQL)) if (STATE_SQL_COL.test(m[1] ?? "")) out.push(`:${text.slice(0, m.index).split("\n").length} raw UPDATE orders SET <state column>`);
+  return out;
+}
+/** `.insert(orders)` call sites and raw `INSERT INTO orders` of one source file. */
+function orderInserts(src: string): number {
+  const drizzle = [...codeOnly(src).matchAll(/\.insert\(\s*orders\s*\)/g)].length;
+  const raw = [...noComments(src).matchAll(/\bINSERT\s+(?:IGNORE\s+)?INTO\s+(?:`?orders`?|\$\{\s*orders\s*\})[\s(]/gi)].length;
+  return drizzle + raw;
+}
+/** selftests that seed their own throwaway database, and the lint fixtures: not the product's writes */
+const TEST_SEED = /(?:^|\/)[^/]*selftest[^/]*\.tsx?$|__tenancy_lint_fixture__/;
+/** the one writer and the creation insert (OPE-§3.7) */
+const STATE_WRITERS: ReadonlySet<string> = new Set(["src/lib/orders/transition.ts", "src/lib/orders/create.ts"]);
+/**
+ * Named temporary exemptions (never a silent skip): each names who removes it and when. A listed file that no longer
+ * writes a state column fails the check, so the exemption cannot outlive its reason.
+ */
+const STATE_WRITER_EXEMPT: Readonly<Record<string, string>> = {
+  "src/lib/sheets/sync.ts": "P5's legacy Sheets pull writes `status` on main until P5 merges (OPE-§19.6 moves it onto applyExternalStatus); the P4 verify step removes this line after rebasing on P5",
+};
+
+/** Property names declared anywhere inside `typeName` (type literals, and the interfaces / aliases of the same file it names). */
+function typeFields(src: string, typeName: string, file = "x.ts"): string[] {
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const decls = new Map<string, ts.Node>();
+  sf.forEachChild((n) => {
+    if (ts.isInterfaceDeclaration(n) || ts.isTypeAliasDeclaration(n)) decls.set(n.name.text, n);
+  });
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const visit = (n: ts.Node): void => {
+    if ((ts.isPropertySignature(n) || ts.isPropertyDeclaration(n)) && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name))) names.push(n.name.text);
+    if (ts.isTypeReferenceNode(n) && ts.isIdentifier(n.typeName)) {
+      const ref = n.typeName.text;
+      const d = decls.get(ref);
+      if (d && !seen.has(ref)) {
+        seen.add(ref);
+        visit(d);
+      }
+    }
+    n.forEachChild(visit);
+  };
+  const root = decls.get(typeName);
+  if (!root) return ["<missing type>"];
+  seen.add(typeName);
+  visit(root);
+  return names;
+}
+const PII_FIELD = /^(phone|phoneRaw|phone_raw|email|address|note)$/i;
+
 /* ------------------------------------------------------------------ */
 /* static                                                              */
 /* ------------------------------------------------------------------ */
@@ -167,6 +255,18 @@ section = "static · lint self-check";
   for (const decl of [`export function ${mn}(`, `const ${ma} = (`, `export { maskFields as ${mc} }`, `let ${mc}`]) check(`the masking lint catches \`${decl}\``, MASK_DECL.test(decl));
   check("the masking lint allows calling the platform's helper", !MASK_DECL.test('import { maskIfImpersonation } from "@/lib/platform/mask"; maskIfImpersonation(scope, row); maskPhone(e164);'));
   check("the P4 file list resolves", files.length > 20 && files.some((f) => rel(f) === "src/lib/orders/address.ts") && files.some((f) => rel(f) === "scripts/qa/ops-check.ts"), files.length);
+  // the state-writer lint (OPE-§3.7): planted writers are caught, the table's other writes are not
+  const [U, O, Q] = ["update", "orders", "`"];
+  check("the writer lint catches .set({ status })", stateWrites(`await db.${U}(${O}).set({ status, updatedAt: now }).where(x);`).length === 1);
+  check("the writer lint catches .set({ confirmState: … }) over several lines", stateWrites(`await tx\n  .${U}(${O})\n  .set({\n    confirmState: "confirmed",\n  })\n  .where(x);`).length === 1);
+  check("the writer lint catches a .set(variable)", stateWrites(`await db.${U}(${O}).set(patch).where(x);`).length === 1);
+  check("the writer lint catches a spread", stateWrites(`await db.${U}(${O}).set({ ...patch, updatedAt }).where(x);`).length === 1);
+  check("the writer lint catches raw SQL", stateWrites(`await conn.query("${U.toUpperCase()} ${Q}${O}${Q} SET ship_state = 'delivered' WHERE store_id = ?");`).length === 1);
+  check("the writer lint allows sheetStatus, cityKey and other tables", stateWrites(`await db.${U}(${O}).set({ sheetStatus: "pending", cityKey, priority }).where(x);\nawait db.${U}(pages).set({ status: "published" }).where(y);`).length === 0);
+  check("the writer lint ignores comments", stateWrites(`// db.${U}(${O}).set({ status })`).length === 0);
+  check("the insert lint counts drizzle and raw inserts", orderInserts(`tx.insert(${O}).values(v); conn.query("INSERT INTO ${Q}${O}${Q} (id) VALUES (?)");`) === 2);
+  check("the timeline lint finds nested note and phone fields", typeFields("interface A { b: B; c: { note: string } }\ninterface B { phone: string }", "A").filter((n) => PII_FIELD.test(n)).length === 2);
+  check("the timeline lint allows actor.name and text refs", typeFields("interface A { actor: { kind: string; name: string | null }; text: R }\ninterface R { key: string }", "A").filter((n) => PII_FIELD.test(n)).length === 0);
 }
 
 section = "static · isomorphic";
@@ -185,6 +285,48 @@ section = "static · masking";
 {
   const hits = files.filter((f) => MASK_DECL.test(sources.get(f)!)).map(rel);
   check("no P4 file declares maskName, maskAddress or maskCustomerFields (OD61)", hits.length === 0, hits);
+}
+
+section = "static · state writer";
+{
+  const all: string[] = [];
+  walk(join(ROOT, "src"), all);
+  const writes: string[] = [];
+  const exemptHits = new Map<string, number>();
+  const inserts: string[] = [];
+  const seeds: string[] = [];
+  for (const f of all) {
+    const r = rel(f);
+    const src = readFileSync(f, "utf8");
+    // a selftest seeding its own throwaway database is not an order insert of the product: listed, not counted
+    if (TEST_SEED.test(r)) {
+      if (orderInserts(src) || stateWrites(src).length) seeds.push(r);
+      continue;
+    }
+    for (let i = orderInserts(src); i > 0; i--) inserts.push(r);
+    if (STATE_WRITERS.has(r)) continue;
+    const hits = stateWrites(src);
+    if (!hits.length) continue;
+    if (Object.hasOwn(STATE_WRITER_EXEMPT, r)) exemptHits.set(r, hits.length);
+    else writes.push(...hits.map((h) => `${r}${h}`));
+  }
+  check("only transition.ts and createOrderRow write status / confirm_state / ship_state / money_state (OPE-§3.7)", writes.length === 0, writes);
+  for (const [file, why] of Object.entries(STATE_WRITER_EXEMPT)) {
+    const n = exemptHits.get(file) ?? 0;
+    console.log(`  exempt (temporary): ${file}, ${n} state write(s): ${why}`);
+    check(`the temporary exemption of ${file} is still needed (remove it once the file stops writing a state column)`, n > 0);
+  }
+  check("a single insert(orders) call site in src/**, in src/lib/orders/create.ts (OD62)", inserts.length === 1 && inserts[0] === "src/lib/orders/create.ts", inserts);
+  if (seeds.length) console.log(`  test seeds (throwaway databases, not counted): ${seeds.join(", ")}`);
+  const tx = readFileSync(join(ROOT, "src", "lib", "orders", "transition.ts"), "utf8");
+  check("the lint reads the writer itself as a writer (it watches the right shape)", stateWrites(tx).length > 0, stateWrites(tx));
+}
+
+section = "static · timeline";
+{
+  const fields = typeFields(readFileSync(join(ROOT, "src", "lib", "orders", "events.ts"), "utf8"), "TimelineItem");
+  check("TimelineItem is declared in src/lib/orders/events.ts", !fields.includes("<missing type>"), fields);
+  check("TimelineItem carries no phone, email, address or note field (OPE-§O.1)", fields.filter((n) => PII_FIELD.test(n)).length === 0, fields);
 }
 
 section = "static · defaults";
