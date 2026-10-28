@@ -8,7 +8,8 @@
  *   - `getStoreHealth`: `null` = not computed yet (the ring's "computing" state, PLA Q4.4);
  *   - `requestHealthRecompute`: marks the store dirty and answers when it did (`queuedAt`); the rate limit
  *     `s:<sid>:health:recompute` 6/h is the calling action's (PLA-§M.1 `recomputeHealthAction`);
- *   - `snoozeHealthIssue`: throws, because no issue exists to snooze before P1 computes one.
+ *   - `snoozeHealthIssue`: throws, because no issue exists to snooze before P1 computes one;
+ *   - `unsnoozeHealthIssue` (P0b, CCR P2-7: PLA-§22.16's "n snoozed" with Unsnooze): throws, for the same reason.
  */
 import type { StoreHealthView } from "@/lib/health/types";
 import type { StoreCtx, StoreScope } from "@/lib/tenancy/types";
@@ -32,6 +33,13 @@ export async function snoozeHealthIssue(ctx: StoreCtx, issueId: string, days: 7)
   void issueId;
   void days;
   throw new Error("not implemented: P1 snoozeHealthIssue");
+}
+
+/** health.snooze: removes `snoozed[issueId]`, audits store.health.snoozed with `{ unsnoozed: true }`, invalidates the cache. */
+export async function unsnoozeHealthIssue(ctx: StoreCtx, issueId: string): Promise<void> {
+  void ctx;
+  void issueId;
+  throw new Error("not implemented: P1 unsnoozeHealthIssue");
 }
 
 /** "Recompute now" (§I.7, PLA-§6.3): markHealthDirty; the job computes within ≤ 5 min. */

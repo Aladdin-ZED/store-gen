@@ -88,6 +88,35 @@ export interface HealthRule {
   collect(scope: StoreScope, inputs: HealthInputs): Promise<HealthIssue | null>;
 }
 
+/** The rules files of src/lib/health/rules (one per track, P0b: CCR P5-8, P6-13). */
+export type HealthRuleFile = "platform" | "shell" | "landing" | "ops" | "integrations" | "design" | "ai";
+
+/**
+ * PD79: a rule id is `<prefix>:<rule>`, and its prefix is one of its own file's (P1's `test:health` checks every
+ * registered rule against this table). P4 writes `ops:` and `fin:`, P5 `int:` and `conv:` (OPE-§27.2, PLA-§6.3.2).
+ */
+export const HEALTH_RULE_PREFIXES: Readonly<Record<HealthRuleFile, readonly string[]>> = {
+  platform: ["platform"],
+  shell: ["shell"],
+  landing: ["landing"],
+  ops: ["ops", "fin"],
+  integrations: ["int", "conv"],
+  design: ["design"],
+  ai: ["ai"],
+};
+
+/**
+ * One rule's `test:health` fixture (P0b: CCR P5-8, P6-13), exported by its rules file as `fixtures`. `fires` and
+ * `silent` are merged over P1's empty base inputs: with `fires` the rule answers an issue (with `expect`'s severity
+ * and evidence metric when given), with `silent` it answers null (below its `minN`, or without the data it needs).
+ */
+export interface HealthRuleFixture {
+  rule: string;
+  fires: Partial<HealthInputs>;
+  silent: Partial<HealthInputs>;
+  expect?: { severity?: 1 | 2 | 3; metric?: string };
+}
+
 /** The console-only flags (PLA-§6.3); a flag that mirrors a track's issue adds no points of its own (rev 4, PD79). */
 export type HealthFlagCode =
   | "sheets_backlog"
