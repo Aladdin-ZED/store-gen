@@ -139,4 +139,23 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "notify.legal_kind.privacy": "سياسة الخصوصية",
   "notify.legal_kind.aup": "سياسة الاستخدام المقبول",
   "notify.legal_kind.dpa": "اتفاقية معالجة البيانات",
+
+  /* ---- صحة المتجر: جمل P1 (D67) ---- */
+  "health.platform.render_failed.text": "بعض الصفحات المنشورة ما تحدّثتش خلال آخر 24 ساعة ({n} محاولات فاشلة). أعد نشرها باش تعاود المحاولة.",
+  "health.platform.render_failed.fix": "أعد النشر",
+  "health.platform.risky_orders.text": "{value} من أصل {n} طلبات هذا الأسبوع ظهرت مشبوهة لفحص المخاطر.",
+  "health.platform.risky_orders.fix": "افتح الطلبات المشبوهة",
+  "health.platform.quota.fix": "اطّلع على باقتك",
+  "health.platform.quota.media_bytes.text": "تخزين الصور والفيديو وصل إلى {value}% من باقتك ({n} ميغابايت مستعملة).",
+  "health.platform.quota.pages.text": "الصفحات وصلت إلى {value}% من حد باقتك (المستعمل: {n}).",
+  "health.platform.quota.products.text": "المنتجات وصلت إلى {value}% من حد باقتك (المستعمل: {n}).",
+  "health.platform.quota.members.text": "أعضاء الفريق وصلوا إلى {value}% من حد باقتك (المستعمل: {n}).",
+  "health.platform.quota.agents.text": "وكلاء الاتصال وصلوا إلى {value}% من حد باقتك (المستعمل: {n}).",
+  "health.platform.quota.webhooks.text": "الـ Webhooks وصلت إلى {value}% من حد باقتك (المستعمل: {n}).",
+  "health.platform.quota.custom_domains.text": "النطاقات وصلت إلى {value}% من حد باقتك (المستعمل: {n}).",
+  "health.platform.quota.campaigns.text": "الحملات وصلت إلى {value}% من حد باقتك (المستعمل: {n}).",
+  "health.platform.quota.short_links.text": "الروابط القصيرة وصلت إلى {value}% من حد باقتك (المستعمل: {n}).",
+  "health.platform.quota.exports.text": "تصديرات هذا الشهر وصلت إلى {value}% من باقتك (المستعمل: {n}).",
+  "health.platform.quota.ai_credits.text": "رصيد الذكاء الاصطناعي لهذا الشهر وصل إلى {value}% من باقتك (المستعمل: {n}).",
+  "health.platform.quota.orders.text": "طلبات هذا الشهر وصلت إلى {value}% من الرقم المرجعي لباقتك ({n} طلبات). الطلبات ما كتوقفش أبدًا.",
 };

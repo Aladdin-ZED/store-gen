@@ -139,4 +139,23 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "notify.legal_kind.privacy": "Politique de confidentialité",
   "notify.legal_kind.aup": "Politique d'utilisation acceptable",
   "notify.legal_kind.dpa": "Accord de traitement des données",
+
+  /* ---- Store Health : les phrases de P1 (D67) ---- */
+  "health.platform.render_failed.text": "Certaines pages en ligne n'ont pas pu être mises à jour ces dernières 24 heures ({n} échecs). Republiez-les pour réessayer.",
+  "health.platform.render_failed.fix": "Republier",
+  "health.platform.risky_orders.text": "{value} commandes sur {n} cette semaine ont paru risquées à la vérification des risques.",
+  "health.platform.risky_orders.fix": "Voir les commandes risquées",
+  "health.platform.quota.fix": "Voir votre offre",
+  "health.platform.quota.media_bytes.text": "Le stockage des médias atteint {value} % de votre offre ({n} Mo utilisés).",
+  "health.platform.quota.pages.text": "Vos pages atteignent {value} % de la limite de votre offre (utilisé : {n}).",
+  "health.platform.quota.products.text": "Vos produits atteignent {value} % de la limite de votre offre (utilisé : {n}).",
+  "health.platform.quota.members.text": "Votre équipe atteint {value} % de la limite de votre offre (utilisé : {n}).",
+  "health.platform.quota.agents.text": "Vos agents d'appel atteignent {value} % de la limite de votre offre (utilisé : {n}).",
+  "health.platform.quota.webhooks.text": "Vos webhooks atteignent {value} % de la limite de votre offre (utilisé : {n}).",
+  "health.platform.quota.custom_domains.text": "Vos domaines atteignent {value} % de la limite de votre offre (utilisé : {n}).",
+  "health.platform.quota.campaigns.text": "Vos campagnes atteignent {value} % de la limite de votre offre (utilisé : {n}).",
+  "health.platform.quota.short_links.text": "Vos liens courts atteignent {value} % de la limite de votre offre (utilisé : {n}).",
+  "health.platform.quota.exports.text": "Les exports du mois atteignent {value} % de votre offre (utilisé : {n}).",
+  "health.platform.quota.ai_credits.text": "Les crédits IA du mois atteignent {value} % de votre offre (utilisé : {n}).",
+  "health.platform.quota.orders.text": "Les commandes du mois atteignent {value} % du repère de votre offre ({n} commandes). Les commandes ne sont jamais bloquées.",
 };

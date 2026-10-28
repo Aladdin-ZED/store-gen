@@ -143,6 +143,25 @@ export const messages = {
   "notify.legal_kind.aup": "Acceptable use policy",
   "notify.legal_kind.dpa": "Data processing agreement",
 
+  /* ---- Store Health: P1's tenant sentences (D67; the evidence value and n as variables) ---- */
+  "health.platform.render_failed.text": "Some live pages could not be updated in the last 24 hours ({n} failed). Publish them again to retry.",
+  "health.platform.render_failed.fix": "Publish again",
+  "health.platform.risky_orders.text": "{value} of {n} orders this week looked risky to the risk check.",
+  "health.platform.risky_orders.fix": "Open the risky orders",
+  "health.platform.quota.fix": "See your plan",
+  "health.platform.quota.media_bytes.text": "Media storage is at {value} % of your plan ({n} MiB used).",
+  "health.platform.quota.pages.text": "Pages are at {value} % of your plan's limit ({n} used).",
+  "health.platform.quota.products.text": "Products are at {value} % of your plan's limit ({n} used).",
+  "health.platform.quota.members.text": "Team members are at {value} % of your plan's limit ({n} used).",
+  "health.platform.quota.agents.text": "Call agents are at {value} % of your plan's limit ({n} used).",
+  "health.platform.quota.webhooks.text": "Webhooks are at {value} % of your plan's limit ({n} used).",
+  "health.platform.quota.custom_domains.text": "Custom domains are at {value} % of your plan's limit ({n} used).",
+  "health.platform.quota.campaigns.text": "Campaigns are at {value} % of your plan's limit ({n} used).",
+  "health.platform.quota.short_links.text": "Short links are at {value} % of your plan's limit ({n} used).",
+  "health.platform.quota.exports.text": "This month's exports are at {value} % of your plan ({n} used).",
+  "health.platform.quota.ai_credits.text": "This month's AI credits are at {value} % of your plan ({n} used).",
+  "health.platform.quota.orders.text": "This month's orders are at {value} % of your plan's guide figure ({n} orders). Orders are never blocked.",
+
   /* ---- staff kinds (en only) ---- */
   "notify.staff.signup_new.title": "{count, plural, one {# new store to review} other {# new stores to review}}",
   "notify.staff.signup_new.body": "Open the queue to review them.",

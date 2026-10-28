@@ -24,7 +24,11 @@
  *   - flags (PL-12): the platform declarations, `resolveFlag`'s order, a 20 % rollout stable per store, an expired
  *     override ignored;
  *   - the brand match (PD70: exact / near / none, an Arabic term, an offensive term never named, the 200 cap) and the
- *     abuse report input (reason enum, the 2,000 cap, the same-host path rule).
+ *     abuse report input (reason enum, the 2,000 cap, the same-host path rule);
+ *   - Store Health on the console side (step 3): `staleAfterMin` and the measured cycle, every PLA-§15.2 alarm code with
+ *     its `console.attention.*` sentence and `console.alarm.*` label, `alarmsFrom` fixtures and the run state (raised
+ *     once, recovered silently, the hour key), the live brand scan (store name / SEO title / policy text / nowhere, a
+ *     5-character substring never live, the weekly key hashed), the console flags per code.
  * Exits 1 on any failure.
  */
 import { readFileSync } from "node:fs";
@@ -1170,6 +1174,141 @@ async function main(): Promise<void> {
   }
   check(abuseInput.sameHostPath("/argan-oil#form") === "/argan-oil" && abuseInput.sameHostPath(`/${"p".repeat(299)}`)?.length === 300 && abuseInput.sameHostPath(null) === null, "sameHostPath: a path on the store's host, 300 characters at most");
   check(abuseInput.REPORT_LIMITS.ipPerHour === 5 && abuseInput.REPORT_LIMITS.storePerDay === 20, "report buckets: 5 per hour per IP, 20 per day per store (core §E.8)");
+
+  /* ---------------------------------------------------------------- */
+  /* 15. Store Health on the console side (PLA-§6.3, §15.2; step 3)   */
+  /* ---------------------------------------------------------------- */
+
+  // a check with a detail printed on failure (this section's fixtures are objects)
+  const checkD = (ok: unknown, msg: string, detail?: unknown) => check(Boolean(ok), detail === undefined || ok ? msg : `${msg} ${JSON.stringify(detail)?.slice(0, 300)}`);
+  const hscore = await import("./health-score");
+  const alarmRules = await import("./alarm-rules");
+  const hfx = await import("@/lib/health/fixtures");
+  const hflags = await import("@/lib/health/platform-flags");
+  const hrules = await import("@/lib/health/rules/platform");
+  const hnotices = await import("@/lib/health/notices");
+  type HInputs = import("@/lib/health/types").HealthInputs;
+  type HIssue = import("@/lib/health/types").HealthIssue;
+  const HNOW = hfx.FIXTURE_NOW;
+  const HDAY = 86_400_000;
+
+  // staleAfterMin = max(staleAlarmMinutes, 1.5 × cycleMin) (PD78)
+  checkD(hscore.staleAfterMin(60, null) === 60 && hscore.staleAfterMin(60, 30) === 60 && hscore.staleAfterMin(60, 50) === 75 && hscore.staleAfterMin(60, 150) === 225, "staleAfterMin: the setting, or 1.5 × the measured cycle");
+  checkD(hscore.staleAfterMin(15, 0) === 15 && hscore.staleAfterMin(15, Number.NaN) === 15 && hscore.staleAfterMin(0, null) === 1, "staleAfterMin: an unknown cycle is the setting alone, never below 1");
+  checkD(hscore.cycleMinutes(300, [10, 10, 10]) === 150 && hscore.cycleMinutes(100, []) === null && hscore.cycleMinutes(5, [20]) === 5, "cycleMin = ceil(rotation / storesPerTickP50) × 5 (PLA-§6.3.4)");
+  checkD(hscore.cycleMinutes(240, [...Array(20).fill(1), ...Array(12).fill(12)]) === 100, "cycleMin: the median of the last 12 runs only");
+
+  // every alarm code: its Needs-attention sentence with its variables, its short label without any
+  const enCatalog = enAll as Record<string, string>;
+  checkD(new Set(alarmRules.ALARM_CODES).size === alarmRules.ALARM_CODES.length && alarmRules.ALARM_CODES.length >= 37, "ALARM_CODES: every PLA-§15.2 code once", alarmRules.ALARM_CODES.length);
+  for (const code of alarmRules.ALARM_CODES) {
+    const sentence = enCatalog[`console.attention.${code}`];
+    checkD(sentence && notifyKinds.placeholdersOf(sentence).join() === [...alarmRules.ALARM_VARS[code]].sort().join(), `console.attention.${code} with {${alarmRules.ALARM_VARS[code].join("}, {")}}`, sentence);
+    const label = enCatalog[`console.alarm.${code}`];
+    checkD(label && notifyKinds.placeholdersOf(label).length === 0, `console.alarm.${code}: a label without variables (staff.alarm's {alarm})`);
+  }
+  for (const gone of ["disk_low", "signup_cap_reached"]) checkD(!(alarmRules.ALARM_CODES as readonly string[]).includes(gone), `${gone} is a withdrawn code (rev 3 / rev 4)`);
+  checkD(notifyKinds.labelsOf(notifyRegistry.notificationKind("staff.alarm")).alarm === "console.alarm", "staff.alarm labels its code with console.alarm.<code>");
+
+  // alarmsFrom: pure fixtures
+  const baseAlarm: import("./alarm-rules").AlarmInputs = { now: HNOW, machine: null, ai: null, health: null, flagged: null, signup: null, backup: null, breakglass: null };
+  const codes = (patch: Partial<import("./alarm-rules").AlarmInputs>) => alarmRules.alarmsFrom({ ...baseAlarm, ...patch }).map((a) => `${a.code}:${a.level}`);
+  checkD(codes({}).length === 0, "alarms: every source missing → nothing raised (never guessed)");
+  const health = (stale: number, active = 300) => ({ activeStores: active, staleActive: stale, staleAfterMin: 225, slowStreak: 0, lastP50Ms: 300 });
+  checkD(codes({ health: health(0) }).length === 0 && codes({ health: health(3) }).join() === "health_stale:warn" && codes({ health: health(31) }).join() === "health_stale:danger", "health_stale: yellow when any active store is stale, red past 10 %");
+  checkD(codes({ health: { ...health(0), slowStreak: 2 } }).length === 0 && codes({ health: { ...health(0), slowStreak: 3, lastP50Ms: 900 } }).join() === "health_job_slow:warn", "health_job_slow after three slow runs in a row");
+  const signup = (p: Partial<NonNullable<import("./alarm-rules").AlarmInputs["signup"]>>) => ({ unguarded: false, pendingToday: 0, cap: 50, pendingMediaBytes: 0, pendingMediaBudgetBytes: 5_000 * 1024 * 1024, ...p });
+  checkD(codes({ signup: signup({ pendingMediaBytes: 3_900 * 1024 * 1024 }) }).length === 0 && codes({ signup: signup({ pendingMediaBytes: 4_000 * 1024 * 1024 }) }).join() === "pending_media_budget:warn" && codes({ signup: signup({ pendingMediaBytes: 4_750 * 1024 * 1024 }) }).join() === "pending_media_budget:danger", "pending_media_budget: 80 % yellow, 95 % red (core §H.5)");
+  checkD(codes({ signup: signup({ unguarded: true }) }).join() === "signup_unguarded:danger", "signup_unguarded: red");
+  const capped = alarmRules.alarmsFrom({ ...baseAlarm, signup: signup({ pendingToday: 50 }) });
+  checkD(capped.length === 1 && capped[0]!.code === "signup_capped" && capped[0]!.level === "info" && capped[0]!.notify === "never", "signup_capped: information, never a staff.alarm (staff.signup_capped is the sign-up's)");
+  const flaggedStore = { storeId: "01JH000000000000000000STA1", flags: [{ code: "brand_term_live" as const, severity: 2 as const, since: HNOW.toISOString(), detail: hflags.brandDetail({ term: "cih", field: "seo_title", pageId: "P1" }) }, { code: "abuse_reports_new" as const, severity: 2 as const, since: HNOW.toISOString(), value: 4 }] };
+  const perStore = alarmRules.alarmsFrom({ ...baseAlarm, flagged: [flaggedStore] });
+  checkD(perStore.length === 2 && perStore.every((a) => a.storeId === flaggedStore.storeId && a.notify === "elsewhere"), "brand_term_live and abuse_reports_spike per store, notified by their own writer", perStore);
+  checkD(perStore.find((a) => a.code === "brand_term_live")?.vars.term === "cih", "brand_term_live names the term and field for staff");
+  const machine = {
+    at: HNOW.toISOString(),
+    cron: { lastTickAt: new Date(HNOW.getTime() - 11 * 60_000).toISOString(), lastTickMs: 900, lastTickOk: true, jobs: [] },
+    outbox: { byKind: [], oldestPending: [] },
+    renders: { byReason: [], oldestPending: null, failed24h: [], doneLastHour: 0, notes: 0 },
+    sheets: [],
+    storage: { db: { bytes: 86, quotaBytes: 100, ratio: 0.86, level: "warn" as const }, tables: [], stores: [] },
+    dataDir: { bytes: 0, budgetBytes: null, files: 10 },
+    errors24h: [],
+    runtime: { node: "v22", memory: { rss: 1, heapUsed: 1, heapTotal: 1 }, uptimeSec: 1, bootWarnings: [] },
+    edge: { sMode: false, workerVersion: null, lastEdgeAt: null, prevKeyRequests24h: 0, badKey24h: 0, foreignHosts24h: 0 },
+    build: { id: null, gateSha: null, gateAt: null },
+    db: { poolWaitP95Ms: null, lockPoolWaitP95Ms: null },
+    tick: { lagP95Ms: null, skipped24h: 0 },
+    commerce: { lastOrderAt: null, ordersPerHour24: [] },
+    sheetsTop: [],
+    ai: null,
+    design: { genomesBytes: 0, shinglesBytes: 0 },
+    health: { staleSnapshots: 0, dirtyRows: 0 },
+  } as import("./health").PlatformHealth;
+  checkD(codes({ machine }).join() === "no_tick:danger,db_85:danger", "machinery: no tick for 11 min and the DB at 86 % (one of db_70 / db_85)", codes({ machine }));
+  checkD(codes({ machine: { ...machine, edge: { ...machine.edge, sMode: true } }, health: health(0, 1) }).includes("edge_silent:danger") && !codes({ machine, health: health(0, 1) }).includes("edge_silent:danger"), "edge_silent only while S mode is on and a store is live");
+
+  // the run's state: a newly raised alarm once, a recovery recorded, one key per code and hour
+  const first = alarmRules.alarmsFrom({ ...baseAlarm, health: health(3) });
+  const d1 = alarmRules.diffAlarms({ raised: {}, recovered: {} }, first, HNOW);
+  const d2 = alarmRules.diffAlarms(d1.next, first, new Date(HNOW.getTime() + 5 * 60_000));
+  const d3 = alarmRules.diffAlarms(d2.next, [], new Date(HNOW.getTime() + 10 * 60_000));
+  checkD(d1.raisedNow.length === 1 && d2.raisedNow.length === 0 && d2.next.raised.health_stale === d1.next.raised.health_stale, "an alarm notifies when raised, not while it stays raised");
+  checkD(d3.recoveredNow.join() === "health_stale" && d3.raisedNow.length === 0 && typeof d3.next.recovered.health_stale === "string", "a recovered alarm sends nothing and keeps its time (\"Recovered 14:20\")");
+  checkD(alarmRules.alarmDedupeKey({ code: "no_tick" }, HNOW) === "alarm:no_tick:2026-10-28T10" && alarmRules.alarmDedupeKey({ code: "brand_term_live", storeId: "S1" }, HNOW) === "alarm:brand_term_live:S1:2026-10-28T10", "alarm dedupe alarm:<code>:<YYYY-MM-DDTHH> (per store after the code)");
+
+  // platform:brand_term_live (PD70): store name, a live page's SEO title, a policy text, nowhere; a 5-char substring never live
+  const terms: import("./brand-match").ProtectedTerm[] = [
+    { term: "cih", kind: "bank", match: "exact" },
+    { term: "facebook", kind: "brand", match: "substring" },
+    { term: "bank", kind: "bank", match: "substring" },
+    { term: "jumia", kind: "brand", match: "substring" },
+    { term: "badword", kind: "offensive", match: "substring" },
+  ];
+  const brandIn = (patch: Partial<HInputs>) => hrules.brandScan(hfx.emptyHealthInputs(patch), terms);
+  const brand = (p: Partial<NonNullable<HInputs["brand"]>>) => ({ storeName: "Nour Argan", legalName: null, whatsappName: null, policyTexts: [], ...p });
+  checkD(brandIn({ brand: brand({ storeName: "CIH Bank · Vérification" }) }).live?.field === "store_name", "brand_term_live: an exact term in the store name");
+  const seoHit = brandIn({ brand: brand({}), pages: hfx.fixturePages(2, { live: [{ id: "PAGE1", slug: "a", updatedAt: HNOW, name: "Huile", seoTitle: "Paiement facebook officiel" }] }) }).live;
+  checkD(seoHit?.field === "seo_title" && seoHit.pageId === "PAGE1" && seoHit.term === "facebook", "brand_term_live: a live page's SEO title, with its page id", seoHit);
+  const policyHit = brandIn({ brand: brand({ policyTexts: [`${"Retours acceptés sous 7 jours. ".repeat(12)}Contact via facebook.`] }) }).live;
+  checkD(policyHit?.field === "policy_text", "brand_term_live: inside a long policy text (200-character windows)", policyHit);
+  checkD(brandIn({ brand: brand({}), pages: hfx.fixturePages(1) }).live === null && brandIn({}).live === null, "brand_term_live: nowhere → none (the empty base too)");
+  const nearOnly = brandIn({ brand: brand({ storeName: "Mybankshop" }) });
+  checkD(nearOnly.live === null && nearOnly.near?.term === "bank", "a substring term under 6 characters is never live, only near (brand_near_live)", nearOnly);
+  checkD(brandIn({ brand: brand({ storeName: "Jumiadeals" }) }).live === null, "a 5-character substring term (jumia) inside a word never raises brand_term_live");
+  checkD(brandIn({ brand: brand({ storeName: "The badword shop" }) }).live === null, "offensive terms are not brands (the write path refuses them)");
+  const flagsOf = (patch: Partial<HInputs>) => hflags.platformFlags(hfx.emptyHealthInputs(patch), [], { terms }).map((f) => f.code);
+  checkD(flagsOf({ brand: brand({ storeName: "CIH Bank" }) }).includes("brand_term_live") && flagsOf({ brand: brand({ storeName: "Mybankshop" }) }).includes("brand_near_live"), "platformFlags: brand_term_live / brand_near_live from the scan");
+  checkD(!hflags.platformFlags(hfx.emptyHealthInputs({ brand: brand({ storeName: "CIH Bank" }) }), []).some((f) => f.code.startsWith("brand_")), "without the terms no brand flag (never guessed)");
+  const wk1 = hnotices.healthDedupe.brandTermLive("S1", "CIH", new Date("2026-10-26T01:00:00Z"));
+  checkD(wk1 === hnotices.healthDedupe.brandTermLive("S1", "cih", new Date("2026-11-01T23:00:00Z")) && wk1 !== hnotices.healthDedupe.brandTermLive("S1", "cih", new Date("2026-11-02T01:00:00Z")), "brand_term_live alarm: once per store, term and ISO week");
+  checkD(/^alarm:brand_term_live:S1:[0-9a-f]{12}:2026-W44$/.test(wk1) && !wk1.includes("cih"), "… keyed by a hash of the term, never the term", wk1);
+
+  // the console flags per code (PLA-§6.3.3)
+  const issueOf = (id: string, sev: 1 | 2 | 3): HIssue => ({ id, group: "integrations", severity: sev, points: hscore.pointsFor(sev), evidence: { metric: id, value: 1, window: "24h", n: 1 }, fix: { kind: "action", actionId: "ops.open_queue", label: "health.platform.quota.fix" }, text: "health.platform.quota.fix" });
+  const flagFixtures: [string, Partial<HInputs>, HIssue[]][] = [
+    ["sheets_backlog", {}, [issueOf("int:sheets_backlog", 3)]],
+    ["outbox_dead", {}, [issueOf("int:delivery_dead", 2)]],
+    ["capi_failing", {}, [issueOf("int:capi_failing", 2)]],
+    ["telegram_failing", {}, [issueOf("int:telegram_failing", 1)]],
+    ["sheets_error", { sheets: { pending: 0, oldestMin: null, lastRunFailedAt: new Date(HNOW.getTime() - 30 * 60_000) } }, []],
+    ["quota_high", { usage: [{ metric: "pages", period: "total", used: 8, limit: 10 }] }, []],
+    ["quota_full", { usage: [{ metric: "pages", period: "total", used: 10, limit: 10 }] }, []],
+    ["risky_orders", { orders: hfx.fixtureOrders(20, { risky7d: 6 }) }, []],
+    ["render_failed", { pages: hfx.fixturePages(1, { renderFailed: 1 }) }, []],
+    ["review_waiting", { store: hfx.fixtureStore({ status: "pending" }), review: { submittedAt: new Date(HNOW.getTime() - 25 * 3_600_000), status: "pending" } }, []],
+    ["restricted", { store: hfx.fixtureStore({ status: "restricted" }) }, []],
+    ["suspended", { store: hfx.fixtureStore({ status: "suspended" }) }, []],
+    ["abuse_reports_new", { abuseReports: { new24h: 1, total: 1 } }, []],
+  ];
+  for (const [code, patch, issues] of flagFixtures) {
+    const got = hflags.platformFlags(hfx.emptyHealthInputs(patch), issues).map((f) => f.code);
+    checkD(got.includes(code as never), `platformFlags: ${code}`, got);
+  }
+  checkD(!hflags.platformFlags(hfx.emptyHealthInputs({ store: hfx.fixtureStore({ status: "pending" }), review: { submittedAt: new Date(HNOW.getTime() - 23 * 3_600_000), status: "pending" } })).some((f) => f.code === "review_waiting"), "review_waiting: not before slaHours (24 h when unset)");
+  checkD(hflags.platformFlags(hfx.emptyHealthInputs({ abuseReports: { new24h: 3, total: 9 } })).find((f) => f.code === "abuse_reports_new")?.severity === 2, "abuse_reports_new: 3 in 24 h → severity 2");
+  checkD(hflags.platformFlags(hfx.emptyHealthInputs({ sheets: { pending: 0, oldestMin: null, lastRunFailedAt: new Date(HNOW.getTime() - 2 * HDAY) } })).length === 0, "sheets_error: a failed run older than an hour is quiet");
 
   const ms = Math.round(performance.now() - t0);
   for (const s of skips) console.log(`  SKIP ${s}`);

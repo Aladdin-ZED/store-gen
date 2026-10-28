@@ -17,8 +17,8 @@
  *   - B "Baraka Home" (`pending`): an owner; C "Corail Deco" (`suspended`): an owner; D (`purged`, its handle still on
  *     the row): no member;
  *   - staff: one of each platform role with TOTP on, and an admin invited without TOTP yet; an outsider seller.
- * Cases filled so far: 6 (notifications) and the brand and report half of 15; the others print "pending" with the
- * step that fills them.
+ * Cases filled so far: 5 (the health job), 6 (notifications) and 15 (brand guard, reports, the health-run half); the
+ * others print "pending" with the step that fills them.
  */
 import Module from "node:module";
 import mysql from "mysql2/promise";
@@ -323,7 +323,7 @@ async function case6(fx: Fixtures): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
-/* case 15: brand guard and reports (PD70; the health-run half: step 3) */
+/* case 15: brand guard, reports and the live brand scan (PD70)        */
 /* ------------------------------------------------------------------ */
 
 async function case15(fx: Fixtures): Promise<void> {
@@ -449,6 +449,87 @@ async function case15(fx: Fixtures): Promise<void> {
   ok("no notification carries a report's details or contact", Number(leaks[0]?.n) === 0);
   const audits = await rows<{ n: number }>(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE meta LIKE '%paid and got%' OR meta LIKE '%reporter@%'");
   ok("no audit row carries them", Number(audits[0]?.n) === 0);
+
+  // the health-run half (PLA-§13.3 item 2): a near term → brand_near_live on the next run; an exact term in a live SEO
+  // title → brand_term_live and one staff.alarm over three runs in a week; the term never in a tenant-visible column
+  const { markHealthDirty } = await import("@/lib/platform/health-snapshot");
+  const { invalidateStore } = await import("@/lib/tenancy/cache");
+  const flagsOf = async (storeId: string) => JSON.parse((await rows<{ flags: string }>(fx.conn, "SELECT flags FROM store_health WHERE store_id = ?", [storeId]))[0]?.flags ?? "[]") as { code: string; detail?: string }[];
+  await fx.conn.query("UPDATE stores SET name = 'Atlas Bankshop' WHERE id = ?", [A.id]);
+  invalidateStore(A.id);
+  await markHealthDirty(A.id);
+  await healthTick(fx);
+  const near = await flagsOf(A.id);
+  ok("a near term in the store name → brand_near_live on the next run", near.some((f) => f.code === "brand_near_live") && !near.some((f) => f.code === "brand_term_live"), near.map((f) => f.code));
+  await seedLivePage(fx, A.id, "paiement", "Paiement", "CIH Bank paiement sécurisé");
+  for (let i = 0; i < 3; i++) {
+    await markHealthDirty(A.id);
+    await healthTick(fx);
+  }
+  const live = await flagsOf(A.id);
+  const liveFlag = live.find((f) => f.code === "brand_term_live");
+  ok("an exact term in a live SEO title → brand_term_live with { term, field, pageId }", liveFlag && /"term":"cih"/.test(liveFlag.detail ?? "") && /"field":"seo_title"/.test(liveFlag.detail ?? "") && /"pageId":"/.test(liveFlag.detail ?? ""), liveFlag);
+  const brandAlarms = await rows<{ dedupe_key: string; vars: string; platform_min_role: string }>(fx.conn, "SELECT dedupe_key, vars, platform_min_role FROM notifications WHERE kind = 'staff.alarm' AND dedupe_key LIKE ?", [`alarm:brand_term_live:${A.id}:%`]);
+  ok("… and exactly one staff.alarm over three runs in a week (admins)", brandAlarms.length === 1 && brandAlarms[0]!.platform_min_role === "admin" && JSON.parse(brandAlarms[0]!.vars).term === "cih", brandAlarms);
+  const tenantSide = (await rows<{ b: string }>(fx.conn, "SELECT CONCAT(issues, metrics) AS b FROM store_health WHERE store_id = ?", [A.id]))[0]?.b ?? "";
+  ok("the term never appears in a tenant-visible column (issues, metrics)", !/cih/i.test(tenantSide));
+  await fx.conn.query("UPDATE stores SET name = ? WHERE id = ?", [A.name, A.id]);
+  invalidateStore(A.id);
+}
+
+/* ------------------------------------------------------------------ */
+/* case 5: the health job (PL-18; PLA-§6.3.4)                          */
+/* ------------------------------------------------------------------ */
+
+/** One `platform.health` run with a test JobCtx (P8's runner is a stub on r1/p1), store A's pages quota at 85 %. */
+async function healthTick(fx: Fixtures, budgetMs = 60_000): Promise<{ order: string[]; summary: Record<string, unknown>; done: boolean }> {
+  const { runHealthTick } = await import("@/lib/health/run");
+  const { DEFAULT_SOURCES } = await import("@/lib/health/inputs");
+  const { systemCtx } = await import("@/lib/jobs/scope");
+  const A = fx.stores.A.id;
+  const order: string[] = [];
+  const res = await runHealthTick(
+    { ...systemCtx("platform.health"), deadline: Date.now() + budgetMs, tickId: "platform-check", cursor: "", setCursor: async () => undefined, yield: () => new Promise((r) => setImmediate(r)), lagMs: () => 0 },
+    {
+      sources: { ...DEFAULT_SOURCES, usage: async (scope, store, now) => (store.id === A ? [{ metric: "pages", period: "total", used: 17, limit: 20 }] : DEFAULT_SOURCES.usage(scope, store, now)) },
+      onStore: (r) => order.push(r.storeId),
+    },
+  );
+  return { order, summary: res.summary, done: res.done };
+}
+
+async function seedLivePage(fx: Fixtures, storeId: string, slug: string, name: string, seoTitle: string): Promise<string> {
+  const pageId = fx.newId();
+  const versionId = fx.newId();
+  await fx.conn.query("INSERT INTO page_versions (id, store_id, page_id, kind, doc, checksum) VALUES (?, ?, ?, 'publish', ?, ?)", [versionId, storeId, pageId, JSON.stringify({ seo: { title: seoTitle } }), "0".repeat(64)]);
+  await fx.conn.query("INSERT INTO pages (id, store_id, slug, name, status, public_key, draft, published_version_id) VALUES (?, ?, ?, ?, 'published', ?, '{}', ?)", [pageId, storeId, slug, name, fx.newId().toLowerCase(), versionId]);
+  return pageId;
+}
+
+async function case5(fx: Fixtures): Promise<void> {
+  const { markHealthDirty } = await import("@/lib/platform/health-snapshot");
+  const { A, B, C, D } = fx.stores;
+  const healthRow = async (storeId: string) => (await rows<{ score: number; attention: number; flags: string; dirty_at: Date | null }>(fx.conn, "SELECT score, attention, flags, dirty_at FROM store_health WHERE store_id = ?", [storeId]))[0];
+  const codes = async (storeId: string) => (JSON.parse((await healthRow(storeId))?.flags ?? "[]") as { code: string }[]).map((f) => f.code);
+
+  await markHealthDirty(C.id);
+  await new Promise((r) => setTimeout(r, 15));
+  await markHealthDirty(B.id);
+  const first = await healthTick(fx);
+  ok("dirty stores first (oldest mark first), then the store without a snapshot; the purged store never", first.order.slice(0, 3).join() === [C.id, B.id, A.id].join() && !first.order.includes(D.id), first.order);
+  ok("every visited row is written with dirty_at NULL", (await Promise.all([A, B, C].map((s) => healthRow(s.id)))).every((r) => r && r.dirty_at === null));
+  ok("A: quota_high from the pages quota at 85 %", (await codes(A.id)).includes("quota_high") && (await healthRow(A.id))!.score === 97, { codes: await codes(A.id), score: (await healthRow(A.id))?.score });
+  ok("C (suspended): flag suspended, attention 3, no point change", (await codes(C.id)).includes("suspended") && (await healthRow(C.id))!.attention === 3 && (await healthRow(C.id))!.score === 100);
+  ok("B (pending): no flag of an active store", !(await codes(B.id)).some((c) => c === "inactive_14d" || c === "setup_incomplete"));
+  const milestones = () => rows<{ n: number }>(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'store.milestone.reached' AND store_id = ?", [A.id]).then((r) => Number(r[0]?.n));
+  const quota80 = () => rows<{ n: number }>(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'quota.80' AND store_id = ? AND dedupe_key = ?", [A.id, `quota80:${A.id}:pages:total`]).then((r) => Number(r[0]?.n));
+  const m1 = await milestones();
+  ok("A: first_member (five members) reached and audited by the system", m1 >= 1, m1);
+  ok("quota.80 sent once for pages", (await quota80()) === 1);
+  for (const s of [A, B, C]) await markHealthDirty(s.id);
+  await healthTick(fx);
+  ok("milestones written once over two runs", (await milestones()) === m1);
+  ok("quota.80 deduplicated per metric and period", (await quota80()) === 1);
 }
 
 /* ------------------------------------------------------------------ */
@@ -461,7 +542,7 @@ const CASES: Record<number, { run?: CaseFn; pending?: string }> = {
   2: { pending: "step 4 (store requests)" },
   3: { pending: "step 4 (platform requests)" },
   4: { pending: "step 5 (plans)" },
-  5: { pending: "step 3 (health)" },
+  5: { run: case5 },
   6: { run: case6 },
   7: { pending: "step 5 (staff)" },
   8: { pending: "step 5 (legal)" },
@@ -471,7 +552,7 @@ const CASES: Record<number, { run?: CaseFn; pending?: string }> = {
   12: { pending: "step 6 (console pulse)" },
   13: { pending: "step 4 (sandbox ceilings)" },
   14: { pending: "step 7 (masking at the repository)" },
-  15: { run: case15, pending: "the health-run half: step 3" },
+  15: { run: case15 },
   16: { pending: "step 7 (account deletion)" },
   17: { pending: "step 7 (tenant step-up ladder)" },
   18: { pending: "step 4 (refund paths)" },

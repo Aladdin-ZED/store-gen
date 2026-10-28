@@ -175,7 +175,8 @@ const staffKinds: DeclaredKind[] = [
     // brand_term_live carries the store, the matched term and the field (PLA-§13.3); staff only, never a tenant
     vars: z.object({ alarm: v.code, value: z.number().optional(), store: v.label.optional(), storeId: v.id.optional(), term: v.label.optional(), field: v.code.optional() }),
     link: consolePath("/health"),
-    labels: { alarm: "console.attention" },
+    // the short label of the code (`console.alarm.<code>`); the Needs-attention sentence with its numbers is `console.attention.<code>`
+    labels: { alarm: "console.alarm" },
   }),
   defineKind({ kind: "staff.kill_changed", group: "staff", defaultSeverity: "warn", audienceHint: "platform_staff", tenant: false, vars: z.object({ key: v.code, to: z.boolean() }), link: consolePath("/flags") }),
   defineKind({ kind: "staff.mention", group: "staff", defaultSeverity: "info", audienceHint: "user", tenant: false, vars: z.object({ store: v.label, by: v.id, storeId: v.id.optional() }), link: storeLink("/notes") }),
