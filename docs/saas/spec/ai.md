@@ -428,7 +428,9 @@ of the month is not spent (`ai_credits_director`, AI-§C.2), else `"unavailable"
 `cloud.deepPass` = `store_ai.deepPass` ∧ the `director_deep` class reachable ∧ `deepPassesLeft > 0` ∧ no deep job
 `running` for the store (`aj_active_uq`, core §D.5). The two counters are the daily `store_usage` metrics
 `ai_director_passes` and `ai_deep_passes` (period `YYYY-MM-DD`, limits `platform_ai.caps.directorPassesPerStorePerDay`
-30 and `deepPassesPerStorePerDay` 5; AI-§C.3).
+30 and `deepPassesPerStorePerDay` 5; AI-§C.3; rev 6 P0b, CCR P7-2: in `USAGE_METRICS` of
+`src/lib/tenancy/entitlement-keys.ts` as `{ period: "day", limit: null }`, the limit passed through `chargeUsage`'s
+`opts.limit`, daily rows purged after 7 days like `ai_credits_day`; core §A.4 now counts 16 metrics).
 
 **Impersonation (rev 4, SEC-5 / core D70, D71).** Under a "View as store" session (`ctx.scope.kind = "impersonation"`)
 `aiPolicyFor` returns `live: []`, `cloud.available = false` with `block = "state"` and `local.enabled = false`, so no AI
@@ -1389,7 +1391,7 @@ Run by the owner or the maintainer with a real key on a throwaway database (the 
 
 ```ts
 // src/lib/ai/jobs/enqueue.ts (server-only; frozen at core §K.2 step P0 as `enqueueAiJob`)
-export type AiJobKind = "director_deep" | "store_blueprint" | "logo_system" | "health_report";
+export type AiJobKind = "director_deep" | "store_blueprint" | "logo_system" | "health_report";   // rev 6 P0b (CCR P7-3): written as Exclude<(typeof aiJobs.$inferSelect)["kind"], "probe">, the same four kinds
 export interface AiJobInput<K extends AiJobKind> { kind: K; task: AiTaskId; input: unknown; instant?: unknown /* the engine result kept on failure */ }
 export function enqueueAiJob<K extends AiJobKind>(ctx: StoreCtx, job: AiJobInput<K>): Promise<{ ok: true; jobId: string; deduped: boolean } | { ok: false; code: AiFailCode }>;
 export function getAiJob(scope: StoreScope, id: string): Promise<AiJobView | null>;          // `GET /api/app/<h>/ai/jobs/[id]`; null for another store's id
@@ -3304,7 +3306,7 @@ export const aiRuns = mysqlTable("ai_runs", {
 
 export const aiJobs = mysqlTable("ai_jobs", {   // core §D.5 shape (D56) + the ai refinements marked ⊕
   id: id26().primaryKey(), storeId: storeRef(),
-  kind: mysqlEnum("kind", ["director_deep", "store_blueprint", "logo_system", "health_report"]).notNull(),   // ⊕ enum of the varchar(32)
+  kind: mysqlEnum("kind", ["director_deep", "store_blueprint", "logo_system", "health_report", "probe"]).notNull(),   // ⊕ enum of the varchar(32); rev 6 P0b (CCR P7-3, core §D.5): "probe" appended last, the staff-only detached-job probe of AI-§B.13 / core §H.12 rule 1, never enqueued through enqueueAiJob
   task: varchar("task", { length: 32 }).notNull(),                                   // ⊕ the AiTaskId of the first stage
   status: mysqlEnum("status", ["queued", "running", "done", "failed", "cancelled"]).notNull().default("queued"),
   active: char("active", { length: 1 }),                                             // ⊕ rev 3 (ENGP-3): '1' while queued/running, NULL in every terminal status (set in the same statement); the dedupe key, like render_jobs.dedupe (core §D.5)
@@ -3729,7 +3731,11 @@ unchanged; the pool-hold case of AI-§B.11 (12 stubbed 2-s calls on a pool of 4,
 
 ### AI-§Q.3 HTTP / e2e (core §J.3 rows `qa:ai-stream`, `qa:ai-probe`, `qa:ai-eval-live`, `qa:ai-eval-local`, `qa:detached-job-probe`)
 
-- `scripts/qa/ai-stream-check.ts` (local production build on port ≥ 3451, stub provider via `SG_TEST_CONTEXT`): NDJSON
+- `scripts/qa/ai-stream-check.ts` (local production build on port ≥ 3451, stub provider via `SG_TEST_CONTEXT`; **rev 6 P0b,
+  CCR P7-9 / P7-4:** a production build ignores `SG_TEST_CONTEXT` (core §E.4), so the stub provider is reached through
+  `SG_AI_BASE_URL` (a loopback http fake Anthropic endpoint, with `SG_AI_NO_AFTER` and `SG_AI_HARNESS` the other two
+  seams), honoured only through `testSeam()` with `SG_E2E=1` and a `cod_test_*` database, core §H.7; `qa:ai-stream` runs
+  with **no key** and is **auto**: it joins `test:e2e` at the P7 merge, core §J.3): NDJSON
   route order of events, heartbeat, abort on client disconnect cancels the upstream call, poll transport parity, 120 s cap
   respected, headers (`no-store`, `no-transform`); the Director routes answer `410 pass_superseded` when a newer pass
   started; a pattern-B route answers `202` within 500 ms and the job row heartbeats.
@@ -3754,7 +3760,9 @@ unchanged; the pool-hold case of AI-§B.11 (12 stubbed 2-s calls on a pool of 4,
 
 ### AI-§Q.4 Live (manual, needs the key or the live site)
 
-`npm run qa:ai-probe` (AI-§B.12) after every SDK upgrade and before enabling cloud AI in production; `npm run
+`npm run qa:ai-probe` (AI-§B.12) after every SDK upgrade and before enabling cloud AI in production (rev 6 P0b, CCR P7-8:
+the probe's record is audited `platform.ai.probe_recorded`; the other new names are `platform.ai.prompt_canaried`,
+`preference_recorded`, `calibration_recorded`, `screen_cleared` and `store.ai.memory_pinned`, core §F.5); `npm run
 qa:detached-job-probe` (AI-§B.13) against the live site before the deep pass is enabled, result recorded in HANDOFF;
 `npm run qa:ai-eval-live` (submits a live eval through Batches on a throwaway DB; the oracle and the null first); `npm run
 qa:ai-eval-local` (Playwright msedge with WebGPU on the owner's PC for local prompt and model changes).

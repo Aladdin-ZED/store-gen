@@ -7,7 +7,7 @@
     "pins: the most queries a `// tenancy: platform` annotation may exempt in each group (a builder chain or one raw SQL text counts 1; an annotated statement that touches no tenant table counts 0; review C0b F7: queries, not comment lines). A count may only grow with a reviewer's approval: the maintainer raises the pin in the same change. Counted at C0b, re-counted as queries at the C0b review fixes; re-pinned at the R1.0 integration, the P1 merge (src/lib/platform/**) and the P7 merge (src/lib/ai/platform/**)."
   ],
   "entries": [
-    { "file": "src/lib/db/client.ts", "symbol": "__codDb", "reason": "the 6-connection query pool (DB-16), one per process; it holds connections, no rows" },
+    { "file": "src/lib/db/client.ts", "symbol": "__codDb", "reason": "the query pool (DB_POOL_SIZE connections, default 6, DB-16), one per process; it holds connections, no rows" },
     { "file": "src/lib/db/locks.ts", "symbol": "__sgLockPool", "reason": "the 2-connection named-lock pool (§E.7, CRIT2-18); it holds connections, no rows" },
     { "file": "src/lib/db/usage.ts", "symbol": "__codDbUsage", "reason": "the size of the whole database, read by the console only (ADM-06, §E.6); tenants see store_usage" },
     { "file": "src/lib/media/ensure-focus.ts", "symbol": "__codFocusFlights", "reason": "in-flight focal-point jobs keyed by asset id; asset ids are per store and globally unique (D21, §E.6 unchanged)" },
@@ -48,7 +48,11 @@
     { "file": "src/lib/edge/proxy-log.ts", "symbol": "__sgProxyLog", "reason": "the proxy's log tally (§C.3, T3): foreign hosts already logged (at most 20) and edge-key counters for the console health view; host names and counts, never store data, and it decides nothing (R1.0 integration)" },
     { "file": "src/lib/media/gate.ts", "symbol": "__codMediaGate", "reason": "the process-wide upload concurrency (global 2 + 4) with each store's share counted by store id (MED-04): counters, never a store's data (CCR r1.0-t4-13)" },
     { "file": "src/lib/media/upload-slots.ts", "symbol": "__codUploadSlots", "reason": "upload slots per process, per store id and per user id (MED-14): counters, never a store's data (CCR r1.0-t4-13)" },
-    { "file": "src/lib/sheets/sync.ts", "symbol": "__codSheetsSync", "reason": "the coalescing push state per store id (SHT-04): a store's caller only ever joins that store's own running pass and gets its own result (CCR r1.0-t4-13)" }
+    { "file": "src/lib/sheets/sync.ts", "symbol": "__codSheetsSync", "reason": "the coalescing push state per store id (SHT-04): a store's caller only ever joins that store's own running pass and gets its own result (CCR r1.0-t4-13)" },
+    { "file": "src/lib/links/clicks.ts", "symbol": "__sgLinkClicks", "reason": "the per-store click counters of the short links (LAN-§12.1, Q23): counts keyed by store id then link id, flushed by the links.flush job; never a store's rows, and a store only ever adds to its own keys (P0b, CCR P3-9)" },
+    { "file": "src/lib/jobs/errors.ts", "symbol": "__sgErrorBuffer", "reason": "pending error_events counts keyed by a dedupe hash (errorSummary only, never a store's data), flushed within 30 s (§H.5; P0b, CCR P8-4)" },
+    { "file": "src/lib/jobs/metrics.ts", "symbol": "__sgOpsMetrics", "reason": "event-loop lag and pool-wait samples, numbers only (ENGC-12; P0b, CCR P8-4)" },
+    { "file": "src/lib/media/storage/index.ts", "symbol": "__sgMediaBackend", "reason": "the DATA_DIR boot-check verdict and the backend choice (§G.2), no store data (P0b, CCR P8-4)" }
   ],
   "actions": [
     { "file": "src/lib/auth/actions.ts", "symbol": "logout", "reason": "sign-out must work with an ended or half-open session, so no userAction; it checks the origin first and only ends this browser's own session (CCR r1.0-m-3)" },

@@ -1,5 +1,5 @@
 {
-  "//": "The npm test wall-time budget of docs/STORE-SAAS.md §J.1 (rev 5, CRIT2-9) as data: seconds on the owner's PC per group, read by scripts/qa/test-budget.ts. The sum of a release's groups must not exceed its ceiling and must equal its declared total; a group's scripts are the §J.1 / §J.6 rows its track owns. A release with `extends` adds its groups to that release's. `measuredSec` is the group's time in the last timed run (`npm run test:budget`) that re-cut the table; the static check refuses a share below it. Maintainer-owned (§K.3): a part changes its share through a CCR. Re-cut at P0 (review G7, CCR r1.0-c0b-3 items 2 and 3) from the timed run of 2026-10-28 on the owner's PC (heavy mutex held, 1.7 GB free): existing 88.5 s, core 63.0 s, then 46.1 s once test:prepublish's ar fixtures and lock child processes moved to test:slow; the R1 ceiling is raised from 180 s to 240 s and the track shares cut to fit (the declared 175 s could not hold the 150 s the two maintainer groups measure).",
+  "//": "The npm test wall-time budget of docs/STORE-SAAS.md §J.1 (rev 5, CRIT2-9) as data: seconds on the owner's PC per group, read by scripts/qa/test-budget.ts. The sum of a release's groups must not exceed its ceiling and must equal its declared total; a group's scripts are the §J.1 / §J.6 rows its track owns. A release with `extends` adds its groups to that release's. `measuredSec` is the group's time in the last timed run (`npm run test:budget`) that re-cut the table; the static check refuses a share below it. Maintainer-owned (§K.3): a part changes its share through a CCR. Re-cut at P0 (review G7, CCR r1.0-c0b-3 items 2 and 3) from the timed run of 2026-10-28 on the owner's PC (heavy mutex held, 1.7 GB free): existing 88.5 s, core 63.0 s, then 46.1 s once test:prepublish's ar fixtures and lock child processes moved to test:slow; the R1 ceiling is raised from 180 s to 240 s and the track shares cut to fit (the declared 175 s could not hold the 150 s the two maintainer groups measure). P0b (2026-10-28, the track planners' shared needs): test:conversions moved from existing (90 to 85 s) to operations (15 to 20 s, CCR P5-7), test:shell joined platform (CCR P2-2), and test:tracking / test:leads left landing for test:db while test:checklist joined it (CCR P3-10); the total stays 235 s of 240 s.",
   "current": "R1",
   "releases": {
     "R1": {
@@ -8,12 +8,12 @@
       "groups": [
         {
           "id": "existing",
-          "label": "pretest asset builds + the existing chain (package.json test: theme, runtime, generator, render, money, conversions, offers, orders)",
+          "label": "pretest asset builds + the existing chain (package.json test: theme, runtime, generator, render, money, offers, orders)",
           "owner": "maintainer",
-          "budgetSec": 90,
-          "measuredSec": 88.5,
-          "scripts": ["pretest", "theme:check", "test:runtime", "test:generator", "test:render", "test:money", "test:conversions", "test:offers", "test:orders"],
-          "note": "measured by this harness at C0b; above 30 s the maintainer moves the slowest of these suites' sweeps to test:slow. Moved at the R1.0 T4 integration (CCR r1.0-c0b-3 item 1): theme:check runs its seeded subset here (4 of 40 seeds built, 100 of 600 hand-edited specs, every check kept; 30.3 s, the full sweep was 141.5 s) and its full sweep is `theme:check -- --full`, the first script of test:slow. Measured then on the shared PC: the group 82.5 s, the npm test chain 111 s, the timed total 121 s of 180 s; the group stays over its 30 s until the table is re-cut at P0 (item 2). Re-cut at P0 (review G7): 88.5 s measured (theme:check 31.2, test:generator 17.2, test:render 13.1, test:offers 11.6, test:conversions 5.1, test:runtime 4.1, test:orders 2.7, test:money 2.5, pretest 1.1), share 90 s. Its suites are P6's, P5's and read-only files; a further cut moves a sweep to test:slow through the owning track"
+          "budgetSec": 85,
+          "measuredSec": 83.4,
+          "scripts": ["pretest", "theme:check", "test:runtime", "test:generator", "test:render", "test:money", "test:offers", "test:orders"],
+          "note": "measured by this harness at C0b; above 30 s the maintainer moves the slowest of these suites' sweeps to test:slow. Moved at the R1.0 T4 integration (CCR r1.0-c0b-3 item 1): theme:check runs its seeded subset here (4 of 40 seeds built, 100 of 600 hand-edited specs, every check kept; 30.3 s, the full sweep was 141.5 s) and its full sweep is `theme:check -- --full`, the first script of test:slow. Measured then on the shared PC: the group 82.5 s, the npm test chain 111 s, the timed total 121 s of 180 s; the group stays over its 30 s until the table is re-cut at P0 (item 2). Re-cut at P0 (review G7): 88.5 s measured (theme:check 31.2, test:generator 17.2, test:render 13.1, test:offers 11.6, test:conversions 5.1, test:runtime 4.1, test:orders 2.7, test:money 2.5, pretest 1.1), share 90 s. Its suites are P6's and read-only files; a further cut moves a sweep to test:slow through the owning track. P0b (CCR P5-7): test:conversions (P5) moved to the operations group, so the share is 85 s and measuredSec 83.4 s (the G7 run's 88.5 s minus the 5.1 s test:conversions took in that run; not a new timing)"
         },
         {
           "id": "core",
@@ -29,24 +29,24 @@
           "label": "platform (P1 + P2 suites)",
           "owner": "P1, P2",
           "budgetSec": 15,
-          "scripts": ["test:platform", "test:health", "test:pulse", "test:admin-tokens", "test:admin-motion", "test:admin-rtl", "test:i18n-coverage"],
-          "note": "PLA-§O.1; 20 s until the P0 re-cut (review G7)"
+          "scripts": ["test:platform", "test:health", "test:pulse", "test:shell", "test:admin-tokens", "test:admin-motion", "test:admin-rtl", "test:i18n-coverage"],
+          "note": "PLA-§O.1; 20 s until the P0 re-cut (review G7). P0b (CCR P2-2): + test:shell (P2, src/components/admin/shell/selftest.ts: the shell's pure selftests, which cannot run inside P1's test:platform before P1 merges); P2's suites (test:pulse, test:shell, test:admin-tokens, test:admin-motion, test:admin-rtl, test:i18n-coverage) take at most 8 s together, so the share stays 15 s"
         },
         {
           "id": "landing",
           "label": "landing (P3)",
           "owner": "P3",
           "budgetSec": 20,
-          "scripts": ["test:delivery", "test:landing-addons", "test:policies", "test:wa-price", "test:test-orders", "test:kit", "test:links", "test:tracking", "test:leads", "test:honesty", "test:cod-invariants"],
-          "note": "LAN-§25.1"
+          "scripts": ["test:delivery", "test:landing-addons", "test:policies", "test:wa-price", "test:test-orders", "test:kit", "test:links", "test:honesty", "test:cod-invariants", "test:checklist"],
+          "note": "LAN-§25.1. P0b (CCR P3-10): test:tracking and test:leads left this group (they are DB-backed, LAN-§25.2, and join test:db at the P3 wave 1 merge; test:leads gains its LP-11 cases at wave 2); test:checklist (src/lib/editor/selftest-checklist.ts, the builder checklist in its store context, T4's file, P3's in R1) joined it and npm test (after test:prepublish): 36 checks, 2.6 s measured on 2026-10-28 (test-budget --group landing, heavy mutex held)"
         },
         {
           "id": "operations",
           "label": "operations (P4 + P5)",
           "owner": "P4, P5",
-          "budgetSec": 15,
-          "scripts": ["test:ops", "test:queue", "test:state", "test:profit"],
-          "note": "OPE-§O.1; P5's offline suite test:conversions runs in the existing chain; 25 s until the P0 re-cut (review G7)"
+          "budgetSec": 20,
+          "scripts": ["test:ops", "test:queue", "test:state", "test:profit", "test:conversions"],
+          "note": "OPE-§O.1; 25 s until the P0 re-cut (review G7). P5's offline suite test:conversions moved here at P0b (CCR P5-7): 5.1 s in the G7 run, so the share is 20 s (15 s before); OPE-§O.1 puts P5's offline checks (templates, the Sheets planner, Telegram) inside scripts/qa/conversions-check.ts"
         },
         {
           "id": "ai",

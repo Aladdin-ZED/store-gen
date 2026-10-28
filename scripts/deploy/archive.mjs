@@ -12,19 +12,24 @@
  *     exactly the commit the gate passed on;
  *   - no tracked file looks like a secret (`.env*` other than `.env.example`, `*.pem`);
  *   - the output path is outside the repository or git-ignored (an untracked zip would dirty the tree).
- * Then `git archive --format=zip HEAD` (tracked files only) plus `qa/.gate-ok` itself, so the boot log names the gate
- * commit (src/lib/db/boot-config.ts), and it prints the size and sha256. It never uploads (the lead does, HANDOFF §4)
- * and never reads an env file.
+ * Then `git archive --format=zip HEAD` (tracked files only) plus two files under `qa/`: `qa/.gate-ok` itself, so the
+ * boot log names the gate commit (src/lib/db/boot-config.ts), and `qa/.build-sha` (P0b, CCR P8-11: the 40-hex HEAD and
+ * a newline, written just before the archive), because the archive build has no `.git` and `getHealth().build` (§H.5,
+ * SEC-10) compares the gate's sha with the commit the build was made from (`gateMismatch`). It prints the size and
+ * sha256. It never uploads (the lead does, HANDOFF §4) and never reads an env file.
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gateFileProblem } from "./gate-file.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const GATE_FILE = path.join(ROOT, "qa", ".gate-ok");
+const BUILD_SHA_FILE = path.join(ROOT, "qa", ".build-sha");
+/** The untracked files the archive adds under `qa/` (both git-ignored in the tree). */
+const ADDED = ["qa/.gate-ok", "qa/.build-sha"];
 const ALLOWED_DIRTY = new Set(["docs/saas/PROGRESS.md"]);
 
 const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -118,21 +123,26 @@ function main() {
     if (!ignored) refuse(`${rel} is inside the repository and not git-ignored; write the archive outside it (e.g. ../storegen-deploy.zip)`);
   }
 
-  // 5. the archive: tracked files of HEAD + qa/.gate-ok (the last --prefix wins for the tree, so it stays at the root)
+  // 5. qa/.build-sha: the commit the archive is made from, for the build that has no .git (§H.5, getHealth().build)
+  writeFileSync(BUILD_SHA_FILE, `${head}\n`);
+  if (readFileSync(BUILD_SHA_FILE, "utf8") !== `${head}\n`) refuse("qa/.build-sha could not be written");
+
+  // 6. the archive: tracked files of HEAD + qa/.gate-ok + qa/.build-sha (each --add-file takes the last --prefix
+  //    before it; the final empty --prefix applies to the tree, so the tree stays at the root)
   rmSync(out, { force: true });
-  git("archive", "--format=zip", "-o", out, "--prefix=qa/", "--add-file=qa/.gate-ok", "--prefix=", "HEAD");
+  git("archive", "--format=zip", "-o", out, "--prefix=qa/", ...ADDED.map((f) => `--add-file=${f}`), "--prefix=", "HEAD");
 
   const names = zipEntries(out);
   const files = names.filter((n) => !n.endsWith("/"));
   const problems = [];
-  if (!names.includes("qa/.gate-ok")) problems.push("qa/.gate-ok is not in the archive");
+  for (const f of ADDED) if (!names.includes(f)) problems.push(`${f} is not in the archive`);
   if (!names.includes("package.json")) problems.push("package.json is not at the archive root");
   const leaked = files.filter(secretLike);
   if (leaked.length) problems.push(`secret-like entries: ${leaked.join(", ")}`);
   const trackedSet = new Set(tracked);
-  const extra = files.filter((n) => n !== "qa/.gate-ok" && !trackedSet.has(n));
+  const extra = files.filter((n) => !ADDED.includes(n) && !trackedSet.has(n));
   if (extra.length) problems.push(`entries that are not tracked files: ${extra.slice(0, 5).join(", ")}`);
-  if (files.length !== tracked.length + 1) problems.push(`${files.length} files in the archive, expected ${tracked.length} tracked + qa/.gate-ok`);
+  if (files.length !== tracked.length + ADDED.length) problems.push(`${files.length} files in the archive, expected ${tracked.length} tracked + ${ADDED.join(" + ")}`);
   if (problems.length) {
     rmSync(out, { force: true });
     refuse("the archive failed its own check (removed):", problems);
@@ -140,10 +150,12 @@ function main() {
 
   const bytes = statSync(out).size;
   const sha256 = createHash("sha256").update(readFileSync(out)).digest("hex");
+  // gateFileProblem already refused a missing or invalid `at`
+  const gateAgeH = (Date.now() - Date.parse(gate.at)) / 3_600_000;
   console.log(`archive: ✓ ${out}`);
   console.log(`  commit  ${head}`);
-  console.log(`  gate    passed ${(age / 3_600_000).toFixed(1)} h ago`);
-  console.log(`  files   ${files.length} (${tracked.length} tracked + qa/.gate-ok)`);
+  console.log(`  gate    passed ${Math.max(0, gateAgeH).toFixed(1)} h ago`);
+  console.log(`  files   ${files.length} (${tracked.length} tracked + ${ADDED.join(" + ")})`);
   console.log(`  size    ${bytes} bytes (${(bytes / 1_048_576).toFixed(1)} MiB)`);
   console.log(`  sha256  ${sha256}`);
 }

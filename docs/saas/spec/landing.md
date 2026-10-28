@@ -774,7 +774,12 @@ registerPublishListener("landing", async (ctx) => { /* kit staleness (offers_has
   `src/lib/landing/honesty/facts.server.ts`, cached 60 s per store); `origin` from the core's shared builder
   `originFrom(prev, doc)` (`src/lib/render/prepublish.ts`, core §M.1 rule 2: the version's provenance block,
   `generation_source`, the generated field paths and the builder's edit marks), folded to `generated` / `owner` as typed
-  above; the checklist's `LandingCheckContext.origin` (LAN-§3.2) is the same fold of the same builder's output, served
+  above (**rev 6 P0b, CCR P3-11, the builder as built:** `originFrom(prev, doc, gen?)` lives in
+  `src/lib/render/origin.ts`, pure and isomorphic, with `textFieldsOf` and `hash16`, re-exported by `prepublish.ts`
+  with `generationRecordFor(scope, pageId)`, which reads `report.gen` of the page's newest `chosen` `design_genomes`
+  row; with no record at all every field is `library`, so `generated` after the fold; a recorded path whose `hash16`
+  matches keeps its class; any other field is `owner`; `prev` is part of the frozen signature and is not consulted in
+  R1); the checklist's `LandingCheckContext.origin` (LAN-§3.2) is the same fold of the same builder's output, served
   by the editor preload, so the panel and the gate classify a field identically.
 - `test:prepublish` (core, `src/lib/render/selftest-prepublish.ts`) imports this part's fixtures
   (`src/lib/render/prepublish/landing.fixtures.ts`): a sample-review page, a one-image before/after, a still "video",
@@ -1976,7 +1981,9 @@ city and address, please, and we confirm.") beside the row.
   Click ids (`fbclid`, `ttclid`, `gclid`, `ScCid`) pass byte for byte (the core V7 rule).
 - Clicks: an in-memory per-store counter flushed every 30 s and at the end of each tick (`links.flush` job) with
   `UPDATE short_links SET clicks = clicks + ?, last_click_at = ? WHERE store_id = ? AND id = ?`; the counter Map is
-  registered in `scripts/qa/tenancy-allow.json` (lint L4, request Q23). Counts are labelled "clicks" (not visitors).
+  registered in `scripts/qa/tenancy-allow.json` (lint L4, request Q23; **rev 6 P0b, CCR P3-9:** the entry is file
+`src/lib/links/clicks.ts`, symbol `__sgLinkClicks`, counts keyed by store id then link id, so P3's counter must use
+exactly that `globalThis` name). Counts are labelled "clicks" (not visitors).
 
 ### LAN-§12.2 Screen `/app/<h>/links` (`pages.read`; edit `campaigns.write`, core §I.1)
 
@@ -2824,10 +2831,14 @@ Arabic is Moroccan-friendly (Darija vocabulary, Arabic script); no dashes in any
 | `test:experiments` (R3) | `src/lib/experiments/selftest.ts` | LAN-§18.8: 2,000 seeded A/A simulations in `npm test` (10,000 + the τ sweep in `test:slow`, rev 3 ENGP-24), the `0.05 / (arms − 1)` stop rule, fingerprint stability, `pMin` monotone under daily peeking |
 | `test:policies` (extended) | `src/lib/policies/selftest.ts` | rev 3 (ENGP-8): `policyClaims` on a 120-line claim fixture and a 120-line clean fixture per locale (≥ 95 % / ≤ 2 %), the contradiction vs unset matrix |
 | `npm test` wall time | `scripts/qa/test-budget.ts` (core) | the P3 suites together ≤ 20 s on the owner's PC (`npm test` ≤ 3 min overall; accepted, core §J.1 rev 3 "landing ≤ 20 s", the harness prints each script's time and fails the chain above 180 s); the heavy sweeps live in `test:slow` |
-| checklist fixtures | `src/lib/editor/selftest-checklist.ts` (new) | every LAN-§3.2 item fires and clears; each id equals its gate id |
+| `test:checklist` (rev 6 P0b, CCR P3-10: the script for the checklist fixtures, in `npm test` after `test:prepublish` and in the landing group of `scripts/qa/test-budget.json`; T4's file passes today, 36 checks, 2.6 s) | `src/lib/editor/selftest-checklist.ts` | every LAN-§3.2 item fires and clears; each id equals its gate id |
 | render-check (extended) | `scripts/qa/render-check.ts` (the maintainer's harness; this part's cases in **`scripts/qa/render-cases/landing.ts`**, P3's file, imported by the harness, core §J.1 rev 3, so P3 never edits the harness) | new chunk budgets and page caps, delivery fallback text, thank-you timelines × policies, no `aggregateRating`, test render without pixels, byte identity when add-ons are off; **rev 2:** order-form contract per variant (≤ 1,100 px estimate, one submit, 0 glass, ≤ 4 reveals, no kicker, visible boundaries ≥ 3:1, no one-value picker), COD line exactly twice, ≤ 1 `[data-countdown]`, ≤ 1 `.lp-trust`, thank-you ≤ 8 reveals / 0 glass, every id and price in `<bdi dir="ltr">` with `tabular-nums`; **rev 3:** thank-you 0 aurora / 0 grain (`.lp-ty__tint` only), form controls ≥ 52 px at 16 px, the `lp-assist.dz.city` map complete, the `assist` chunk free of `IntersectionObserver` and of writes to `<html>` attributes; **rev 4:** the frozen `landing` chunk at tolerance 0 against `budgets.json.landing` and `src/landing/runtime/landing.sha256` (every other chunk and cap at +5 %), exactly one report link per live fixture and none per export fixture (LAN-§3.9), the `lp-assist.dz.city` key set equal to the `City.value` set, the R2 `lp.reload` button only on attached pages |
 
 ### LAN-§25.2 DB-backed (`npm run test:db`, throwaway `cod_test_*` databases)
+
+**Rev 6 P0b (CCR P3-10):** `test:tracking` and `test:leads` are DB-backed, so they left the offline landing group of
+`scripts/qa/test-budget.json` (core §J.1) and join `test:db` at the P3 wave 1 merge (`test:leads` gains its LP-11
+cases at wave 2); `test:checklist` took their place in the group.
 
 | Script | Checks |
 |---|---|

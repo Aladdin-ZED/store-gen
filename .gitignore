@@ -45,4 +45,7 @@ next-env.d.ts
 # local storage / generated
 /storage
 /test-results
-/qa
+/qa/*
+!/qa/design-corpus/
+/qa/design-corpus/*
+!/qa/design-corpus/labels.json

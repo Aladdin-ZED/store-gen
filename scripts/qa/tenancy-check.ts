@@ -21,7 +21,9 @@
  *    masked), the console scope (`listPagesForConsole`, SEC-18)
  *  - actions × roles: every exported server action (the "use server" files, derived from the tree) on B's path with
  *    A's ids, on A's path, with B's own record beside A's (B's page, A's version), and in B's own store for the role
- *    matrix (a key the role lacks → `forbidden`; a granted role reaches the body)
+ *    matrix (a key the role lacks → `forbidden`; a granted role reaches the body); a "use server" file under
+ *    src/app/admin/(console)/ is P1's platform action file, never a store action (P0b, CCR X-1: each export must
+ *    return platformAction(, and its tenant-session refusal is a case of tenancy-cases/platform.ts)
  *  - routes: every route handler of src/app (derived from the tree, SEC-9), every method: the dashboard routes on A's
  *    handle and on B's handle with A's ids (the neutral 404, no canary), the role matrix of each handler's own
  *    storeGuard key (403 without it, the body with it); the public routes on A's address (no customer or secret
@@ -1061,6 +1063,22 @@ export const ACTION_CASES: ActionCase[] = [
   act(PIXELS, "storePixelSummaryAction", "pixels", "/generate", "pages.read", false, () => [], () => []),
 ];
 
+/**
+ * The console's action folder (P1, PLA-§4.1, §M.1): a "use server" file anywhere under it is a platform action file
+ * (`storeScoped: false`), never a store action, so a new console action needs no edit of the list below (P0b, CCR
+ * X-1). Declared before `NOT_STORE_ACTIONS`, which reads them at module load.
+ */
+export const CONSOLE_ACTION_DIR = "src/app/admin/(console)";
+export const CONSOLE_ACTION_REASON =
+  "console platformAction (P1): staff only; L9 requires return platformAction(; the tenant-session refusal of each action is a PLA-§O.3 / §F.1 case in tenancy-cases/platform.ts";
+
+/** The "use server" files under `CONSOLE_ACTION_DIR`, repo-relative and sorted (P0b: package C's stub file only). */
+export function consoleActionFiles(): string[] {
+  return walk(path.join(ROOT, ...CONSOLE_ACTION_DIR.split("/")), (f) => /\.(ts|tsx)$/.test(f))
+    .filter((file) => directiveOf(readFileSync(file, "utf8")) === "use server")
+    .map((file) => path.relative(ROOT, file).split(path.sep).join("/"));
+}
+
 /** "use server" files that are not store actions (each with the reason); any other must have a case for every export. */
 export const NOT_STORE_ACTIONS: Record<string, string> = {
   "src/app/(public)/actions.ts": "the language menu (T2): signed out or in, no store",
@@ -1075,6 +1093,8 @@ export const NOT_STORE_ACTIONS: Record<string, string> = {
   "src/app/app/account/two-factor/actions.ts": "the account's own two-step setup (T2): no store",
   "src/app/app/new/actions.ts": "a new store (T2): the caller is a member of nothing there yet",
   "src/lib/auth/actions.ts": "account session actions (T2): no store",
+  // every "use server" file of P1's console, derived from the tree (P0b, CCR X-1)
+  ...Object.fromEntries(consoleActionFiles().map((file) => [file, CONSOLE_ACTION_REASON])),
 };
 
 /** Every exported function of every "use server" file under src/ (derived from the tree, so a new action is attacked the day it is added). */
@@ -1331,6 +1351,11 @@ export async function actionSuite(kit: Kit): Promise<void> {
   for (const [file, why] of Object.entries(NOT_STORE_ACTIONS)) {
     const src = existsSync(path.join(ROOT, file)) ? readFileSync(path.join(ROOT, file), "utf8") : "";
     check(`${file} is not a store action file (${why})`, !src.includes("storeAction("));
+  }
+  // a console action is a staff action: every export goes through platformAction (P0b, CCR X-1)
+  for (const d of derived) {
+    if (!d.file.startsWith(`${CONSOLE_ACTION_DIR}/`)) continue;
+    check(`console action ${d.file}#${d.name} returns platformAction(`, /^\s*return\s+platformAction\(/m.test(functionSource(d.file, d.name)));
   }
 
   const slow: [string, number][] = [];
@@ -3271,8 +3296,10 @@ export interface TenancyKit extends Kit {
  * The tracks' case files, in track order (§K.2, written at P0 so no track edits this harness). They are loaded with
  * `load()` once the environment is in place, never imported statically (a case file's imports would run first).
  * `scripts/qa/registries-check.ts` proves this list equals the folder, and the suite fails on a file it does not list.
+ * P0b (CCR X-1): `shell.ts` (P2) holds the action cases of P2's own store actions; P1 keeps the PLA-§O.3 special
+ * cases, the shell's included, in `platform.ts`.
  */
-export const TENANCY_CASE_FILES = ["platform", "landing", "ops", "integrations", "design", "ai"] as const;
+export const TENANCY_CASE_FILES = ["platform", "shell", "landing", "ops", "integrations", "design", "ai"] as const;
 
 export async function pluginSuite(kit: Kit): Promise<void> {
   const dir = path.join(ROOT, "scripts", "qa", "tenancy-cases");

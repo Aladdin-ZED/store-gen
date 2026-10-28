@@ -950,9 +950,13 @@ Created by the store owner from the limit sheet (§22.9), the plan page (§22.10
 restricted store, the restricted banner ("Ask for a review", kind `go_live`). One open request per kind per store
 (`sr_store_kind_idx`), else `already_requested`; bucket `s:<sid>:request` 5/day. `createStoreRequestAction`
 (`src/app/app/[store]/settings/plan/actions.ts`, P2) calls `createStoreRequest(ctx: StoreCtx, req: ReviewRequest)`
-in `src/lib/platform/requests.ts` (P1). It is one of the **two** tenant-callable functions in `src/lib/platform/**`
-(the other is `checkBrandTerms()` of PLA-§13.3, rev 3, PD70; both take no store scope and write or read platform rows
-only). `createStoreRequest` needs permission `billing.manage`; it writes `signup_reviews` with `store_id` from `ctx`, `score = 0`, `band = review`,
+in `src/lib/platform/requests.ts` (P1). It is one of the tenant-callable functions in `src/lib/platform/**`. **Rev 6
+P0b (CCR P1-12; the "two" of revision 3 undercounted them):** the tenant-callable functions are `createStoreRequest`,
+`withdrawStoreRequest`, `listStoreRequests`, `getReviewCard`, `submitForReview`, `answerReviewQuestion` and
+`submitAppeal` (`requests.ts`; they read or write the `signup_reviews` rows **of the caller's own store only**, the
+store taken from `ctx` / the scope, never from input); `pendingReacceptance` and `recordReacceptance` (`legal.ts`; the
+caller's own rows); and `checkBrandTerms()` (`brand-check.ts`, PLA-§13.3, rev 3, PD70; no store scope, it reads
+platform rows only). `createStoreRequest` needs permission `billing.manage`; it writes `signup_reviews` with `store_id` from `ctx`, `score = 0`, `band = review`,
 `signals = { v: 1, flags: [], band: "review", inputs: <store facts>, cluster: { users: 0, banned: 0, kinds: [] },
 partial: false, ms: 0 }`. `withdrawStoreRequestAction` sets `withdrawn`.
 
@@ -1268,7 +1272,7 @@ export function collectHealthInputs(scope: StoreScope, store: StoreRow, now: Dat
 export interface HealthComputation { score: number; attention: 0 | 1 | 2 | 3; components: Record<HealthGroup, number>; issues: HealthIssue[]; flags: HealthFlag[]; dormant: boolean; reached: Milestone[] }
 export function runRules(rules: readonly HealthRule[], scope: StoreScope, inputs: HealthInputs, opts: { release: "R1" | "R2" | "R3"; mode: StoreMode }): Promise<HealthIssue[]>;   // filters by release and mode; each rule ≤ 40 ms, a throwing rule is skipped and recorded (error_events area "health")
 export function computeHealth(issues: HealthIssue[], flags: HealthFlag[], snoozed: Record<string, string>, now: Date): Pick<HealthComputation, "score" | "components" | "attention">;   // core §I.7 signature
-export function platformFlags(inputs: HealthInputs): HealthFlag[];        // src/lib/health/platform-flags.ts: the console codes of the table below
+export function platformFlags(inputs: HealthInputs, issues?: readonly HealthIssue[]): HealthFlag[];        // src/lib/health/platform-flags.ts: the console codes of the table below; rev 6 P0b (CCR P1-12, PD79): with `issues`, the mirrored flags (sheets_backlog, outbox_dead, capi_failing, telegram_failing, setup_incomplete) are derived from the P5 / P3 issues, never emitted on their own
 export function milestonesOf(inputs: HealthInputs): Milestone[];
 ```
 
@@ -1535,10 +1539,16 @@ other; no console code assumes a page.
 
 **Reveal one order**: "Reveal customer details" in the drawer → dialog with a reason (`ticket`, `fraud_review`,
 `legal_request`, `delivery_dispute`, `other` + note) → `revealOrderPiiAction({ storeId, orderId, reason, note })`
-(`pii.reveal` ↑) → returns `{ name, phone, address, city, note }` for display only (never cached, never logged), shown
-for 60 s then masked again; writes `platform.pii.revealed` (store_id = the store, meta `{ orderId, reason }`) and an
-`order_events` row through P4's `recordPlatformReveal(scope, orderId, staff)`; the store's Activity shows it with the
-staff name. Bucket `p:pii:reveal:<userId>` 20/day. **No CSV export** of orders exists in the console (core §F.11).
+(`pii.reveal` ↑) → calls P4's `recordPlatformReveal(ctx, scope, orderId, reason)` (`src/lib/orders/profile.ts`) and
+returns its fields for display only (never cached, never logged), shown for 60 s then masked again; the store's
+Activity shows the reveal with the staff name. Bucket `p:pii:reveal:<userId>` 20/day. **Rev 6 P0b (CCR P1-9, the shape
+both parts build against; OPE-§27.1):** `recordPlatformReveal(ctx, scope, orderId, reason): Promise<{ e164, name,
+address, city, note } | null>` (`e164: string; name: string; address, city, note: string | null`; `null` = no such
+order in that store) is the **single writer** of both the `platform.pii.revealed` audit row (store_id = the store,
+meta `{ orderId, reason }`) and the order's `phone_revealed` event (`actor_kind` `platform`), through
+`platformRevealScope(ctx, storeId)` (`src/lib/platform/seam.ts`, maintainer: it requires `pii.reveal` and a fresh
+step-up, and lint L6 allows it only in `src/lib/orders/profile.ts`); **`revealOrderPiiAction` writes no audit row of
+its own**, so PL-07's "exactly one audit row and one order event per reveal" holds. **No CSV export** of orders exists in the console (core §F.11).
 
 ### PLA-§7.5 Catalog & pages tab (R2, S6; the R1 data lives in Overview strip 3)
 
@@ -2982,8 +2992,12 @@ store timezone link to General.
 
 The store's own activity log, the route core §I.1 lists and the deep-link target of `store.impersonation_started` /
 `store.impersonation_ended` (PLA-§18.2) and of `store.export_by_platform`'s "see who downloaded". Data:
-`listStoreAudit(scope, { beforeId?, actorKind?, area?, from?, to?, limit })` (T1's audit v2 read API over
-`audit_store_idx (store_id, id)`, store rows only; the `(string & {})`-free projection `StoreAuditRow = { id; at;
+`listStoreAudit(ctx, { beforeId, limit, area, actorKind?, from?, to? })` (T1's audit v2 read API over
+`audit_store_idx (store_id, id)`, store rows only; **rev 6 P0b (CCR P2-12, core §F.5):** the signature as built,
+`listStoreAudit(ctx: StoreCtx, opts: { beforeId?: number; limit?: number; area?: string; actorKind?: "user" |
+"platform" | "impersonation" | "system" | "api"; from?: Date; to?: Date })`, with `actorKind`, `from` and `to`
+filtered in SQL (`actor_kind =`, `created_at >= from`, `created_at < to`; an unknown `actorKind` answers `[]`) and the
+keyset by `beforeId` unchanged, mirroring `listPlatformAudit`; the `(string & {})`-free projection `StoreAuditRow = { id; at;
 actorKind: "user" | "platform" | "impersonation" | "system" | "api"; actorLabel: string /* member name, "Store Gen
 support (<first name>)", "System", the API key label */; action; sentence: MessageKey; target: { kind; id; label } |
 null; metaSummary: string }`). Rows: time (store timezone), actor with a chip per kind (Member · Store Gen · Support
@@ -3590,7 +3604,7 @@ per month; the console reads them for the ceilings card, the Storage and AI pane
 
 | File (`src/lib/i18n/admin/<locale>/…`) | Owner | Locales in R1 | Prefixes |
 |---|---|---|---|
-| `console.ts` | P1 | en (fr R2, ar R3) | `console.*` |
+| `console.ts` | P1 | en (fr R2, ar R3); **`report.*` en, fr, ar in R1** (rev 6 P0b, §N.2) | `console.*`, `report.*` (the public report page) |
 | `notify.ts` | P1 | en, fr, ar for tenant kinds and for `health.platform.*`; en for `staff.*` | `notify.<kind>.title`, `notify.<kind>.body`; **(rev 4, D67 / core §I.5)** P1's tenant health sentences `health.platform.<rule>.*` |
 | `auth.ts` | P2 | en, fr, ar | `auth.*` |
 | `onboarding.ts` | P2 | en, fr, ar | `onboarding.*` |
@@ -3672,6 +3686,11 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
   `kill.<key>.effect`, `health.*`, `lifecycle.*` (rev 2: `preview.title`, `store_sees`, `affects.<key>`,
   `will_write`, `arm`, `cancel`, `cooldown`), `strip.<id>.title`, `profile.arrives_r2`, `impersonation.chip`,
   `domains.*`, `legal.*`, `staff.*`, `people.*`, `profile.tab.<tab>`, `empty.*`, `err.*`.
+- **`report.*` (rev 6 P0b, CCR P1-10):** the public report page's keys (`report.title`, `report.reason.<reason>`,
+  `report.details`, `report.contact`, `report.submit`, `report.thanks`, PD70) live in **P1's
+  `src/lib/i18n/admin/<locale>/console.ts`**, and unlike the rest of that file they are **complete in ar, fr and en in
+  R1** (the page is public and tenant-facing; `shell.report.link` stays P2's). P2's `test:i18n-coverage` lists the
+  `report.` prefix among the R1-complete prefixes, so a missing ar or fr report key fails it.
 
 ### PLA-§N.3 Reference texts (tenant-facing, R1)
 
@@ -3905,6 +3924,7 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 | `test:platform` (rev 4 additions) | `src/lib/platform/selftest.ts` | P1 | **`FEATURE_PROOFS`** (PD77): every R1 id of PLA-§1 has ≥ 1 entry, every entry names a script of PLA-§O and, for `test:db` / attack / e2e entries, a case or step number that exists in this document's lists (the lists are mirrored as constants in the same file); `checkBrandTerms(kind, value)` answers `"ok" \| "near" \| "exact"` and never the term, `brandMatches` returns the term (one-field signature, PD70 rev 4); `reportUrl` fixtures (absolute platform origin, `?p=` path only, query and host stripped, 300-char cap); the notification link rule (`/app/<h>`, `/app/<h>/x`, `/app/<h>?a`, `/admin/x`, `/app/account?doc=tos` pass; `https://evil.example`, `//evil`, `/app/../admin`, `javascript:` stored as `null`); `staleAfterMin` = `max(staleAlarmMinutes, 1.5 × cycleMin)` on fixtures; `platformFlags()` derives `sheets_backlog` / `outbox_dead` / `capi_failing` / `telegram_failing` / `setup_incomplete` from the P5 / P3 issue fixtures and emits no issue of its own for them |
 | `test:platform` (rev 3 additions) | `src/lib/platform/selftest.ts` | P1 | `checkBrandTerms` fixtures (exact / near / none; Arabic term; a staff actor gets the same result, the refusal is the caller's); `maskCustomerFields` and `maskIfImpersonation` (identity for `member` / `system`, every field masked for `impersonation`, `city` kept); the `__Host-sgl` parser (`"fr"` ok; `"FR"`, `"ar; Domain=x"`, `""`, a 300-char value → fallback; two cookies → the host-only one); `platform:brand_term_live` fixtures (term in the store name / a page `seoTitle` / a policy text / nowhere; a `substring` term of 5 chars never matches; weekly alarm dedupe key); the two Turnstile flags never appear on a fixture scored with `mode ∈ {approval, open}`; `modeSummary` bullets agree with `modeAllows` and differ across modes; the `PlatformSettingSchema` ceilings parse their defaults (20 / 100 / 5,000 / 50) and refuse `pendingMediaMiBBeforeSubmit > pendingMediaMiB`; `recordAbuseReport` input parsing (reason enum, 2,000-char cap, same-host path rule) |
 | `test:health` (rev 2; core §J.1) | `src/lib/health/selftest.ts` | P1 (fixtures per rule from every track's `rules/<track>.ts`) | **(rev 4, PD79)** registry scan: no two registered rules emit the same evidence `metric` in the same group (one condition, one issue), every registered rule id is `<track>:<rule>` with the track matching its file; §6.3: fixtures per rule with and without `minN`; score monotonic (1,000 random removals and snoozes never lower it, seeded RNG); group caps; severity → points; snooze expiry on a fake clock; `platformFlags` ↔ issues consistency (every flag that maps onto a group has its issue); milestones once; `health.issue_new` dedupe per week; i18n templates of every tenant-visible rule render with every variable in ar/fr/en; a two-store fixture proves no cross-store evidence; a throwing rule is skipped and recorded, the others still score |
+| `test:shell` (rev 6 P0b, CCR P2-1; core §J.1) | `src/components/admin/shell/selftest.ts` | P2 | the shell's pure selftests, which cannot run inside P1's `test:platform` before P1 merges: `modeSummary` / `roleSummary` agree with `modeAllows` / `can()`, the zero-data brief gives `brief.empty`, the props guards refuse dishonest props, the banner order, error-map exhaustiveness, chords never fire in editable fields or open overlays, the QR size and WhatsApp text cap, the shell rule fixtures (a two-store fixture, no cross-store evidence); in the platform group of `scripts/qa/test-budget.json` |
 | `test:pulse` (rev 2; core §J.1) | `src/lib/pulse/selftest.ts` | P2 | `StorePulse` shape; ETag stability for identical payloads and change on any field; contributor budget (a 60 ms contributor is dropped, its keys omitted) and failure isolation; per-user parts never cached across users (two viewers, two bodies); the poller election with a fake `BroadcastChannel` (one leader, re-election after 40 s of silence) |
 | `test:admin-motion` (rev 2; core D60, §J.1) | `scripts/qa/admin-motion-check.ts` | P2 | no `type: "spring"`, no overshoot cubic-bezier (y1 or y2 outside 0-1), no duration > 400 ms outside `src/components/builder/**`; `--ui-spring` absent from the tokens; the two revision-1 sites (`app-sidebar.tsx:96`, `:146`) are the regression fixtures |
 | `test:admin-rtl` (rev 2; DES-R2, core §I.5) | `scripts/qa/admin-rtl-lint.ts` | P2 | fails on physical-side classes `(^| )(ml|mr|pl|pr|left|right|text-left|text-right)-` in `src/components/admin/**`, `src/components/console/**` and `src/app/app/**`, and on directional icons outside the mirrored allow-list |
@@ -3913,17 +3933,19 @@ neutral form common in Moroccan apps, and a native Darija speaker reviews every 
 | `test:permissions` (core) | `src/lib/auth/selftest-permissions.ts` | maintainer | gains `orders.lookup`, `stores.create`, `abuse.handle` (accepted, core §A.3.3) in the platform matrix; `health.snooze` granted to owner and admin only |
 
 **Wall time (rev 3, ENGP-24).** The suites this part contributes to `npm test` (`test:platform`, `test:health`,
-`test:pulse`, `test:admin-motion`, `test:admin-rtl`, `test:i18n-coverage`, `test:admin-tokens`) finish in **≤ 20 s
-together** on the owner's PC (HANDOFF §3): the 1,000-removal monotonic property uses a seeded RNG over 40 fixture
+`test:pulse`, `test:shell` (rev 6 P0b), `test:admin-motion`, `test:admin-rtl`, `test:i18n-coverage`, `test:admin-tokens`)
+finish in **≤ 15 s together** (the core §J.1 platform group since the P0 re-cut; P2's suites ≤ 8 s of it) on the owner's PC (HANDOFF §3): the 1,000-removal monotonic property uses a seeded RNG over 40 fixture
 issues (pure arithmetic, ≈ 50 ms), the golden signup fixtures are ≥ 30 and ≤ 60, and no suite renders React or reads
 the DB. The core's ceiling for the whole of `npm test` is ≤ 3 minutes (PLA-§Q.3 asks core §J.1 to state it and to move
-the design corpus, the catalog sweep and the A/A simulations to `test:slow`); `scripts/qa/platform-check.ts --perf`
+the design corpus, the catalog sweep and the A/A simulations to `test:slow`); `scripts/qa/platform-check.ts` (`test:platform-db`; `--perf` = `qa:platform-perf`, manual)
 and `health-db-check.ts` are `test:db`, not `npm test`.
 
 ### PLA-§O.2 DB-backed (`npm run test:db`, `cod_test_*` only)
 
-`scripts/qa/platform-check.ts` (P1): seeds 3 stores (+ a 2,000-store / 1,000,000-order performance fixture behind
-`--perf`), staff of each role, and runs:
+`scripts/qa/platform-check.ts` (P1; rev 6 P0b, CCR P1-1: the script is **`test:platform-db`**, in `test:db` from the P1
+merge, while `test:platform` is the offline `src/lib/platform/selftest.ts` of §O.1; the performance run is the manual
+**`qa:platform-perf`** = `platform-check.ts --perf`, core §J.2 / §J.3): seeds 3 stores (+ a 2,000-store /
+1,000,000-order performance fixture behind `--perf`), staff of each role, and runs:
 1. Queue: two parallel approvals of one row → exactly one `approved`, the other `already_decided`; bulk approve skips
    rows outside the fast lane; `needs_info` → answer → back in Review; one appeal only; snooze re-entry by time.
 2. Requests: one open request per kind and store; `s:<sid>:request` limit; resolve grant applies the plan / boost.
@@ -4062,6 +4084,11 @@ note `canary-note-77`, seller e-mail `canary.seller@example.test`. Cases:
 
 ### PLA-§O.4 HTTP / e2e (`npm run test:e2e`, production build on 3451+, Playwright `channel: "msedge"`)
 
+**Rev 6 P0b (CCR P1-2, P2-1): where the steps live.** P1's steps (1, 3, 4, 6, 12, 13, 16, 17, 20, 21) are
+`scripts/qa/e2e/console.ts` (`qa:console-e2e`, P1); P2's (2, 5, 6, 7, 13, 14, 19, 20) are `scripts/qa/e2e/shell.ts`
+(`qa:shell-e2e`, P2), beside `scripts/qa/e2e/{pulse,admin-perf}.ts` (#10, #11); all committed (CRIT19: `qa/` is
+git-ignored) and chained into `test:e2e` at their track's merge (core §J.3).
+
 1. **Approval flow**: invite-mode signup on a 390 px viewport → pending store → console keyboard triage (`J`, `A`) →
    the seller's dashboard unlocks within one pulse (≤ 15 s) without a reload.
 2. **Onboarding timing** (UX-01 AC): 3 photos, 4× CPU throttle, Cloud AI off, empty model cache → `revealMs ≤ 90,000`;
@@ -4188,7 +4215,8 @@ hidden" line before `V` (PD69), and the Risk strip reads "No protected term on l
 - `scripts/qa/platform-check.ts`, `scripts/qa/health-db-check.ts` (rev 2), **`scripts/qa/tenancy-cases/platform.ts`**
   (rev 4: the attack cases of PLA-§O.3, incl. the shell's; core §K.2 P1 row), `scripts/qa/wow-demo/steps/platform.ts`
   (rev 2, contributed steps), `scripts/platform/refresh-disposable.mjs` (manual refresh of the CC0 list, prints the
-  diff; never run at runtime).
+  diff; never run at runtime), **`scripts/qa/e2e/console.ts`** (rev 6 P0b, CCR P1-2, core §K.2 P1 row: `qa:console-e2e`,
+  committed, not under the git-ignored `qa/e2e`, CRIT19; the §O.4 steps P1 owns).
 - Not P1's although this part specifies them (read-only for P1): `src/lib/urls/index.ts` (`reportUrl`, `consoleHref`
   are core builders, PLA-§Q.4), the landing footer section (`src/landing/sections/footer/**`, P6) and the legal pages
   (P3) that render the report link, `src/lib/auth/**` (T2's `deleteUserAccount`, `stepUpWithPasswordAction`).
@@ -4233,6 +4261,15 @@ hidden" line before `V` (PD69), and the Risk strip reads "No protected term on l
   `scripts/qa/{admin-motion-check,admin-rtl-lint}.ts`, `scripts/qa/wow-demo/steps/shell.ts` (contributed steps),
   **`scripts/qa/e2e/{pulse,admin-perf}.ts`** (`qa:pulse-e2e`, `qa:admin-perf`; committed, core §K.2 P2 row / §J.3, CRIT19;
   rev 5, CRIT2-14: rev 4's "steps under `qa/e2e`" is withdrawn, `qa/` is git-ignored, `.gitignore:48`).
+- **Rev 6 P0b (core §K.2 P2 row, CCR P2-3, X-1):** `src/app/app/[store]/{actions.ts, loading.tsx, error.tsx,
+  not-found.tsx, member-ctx.ts}` (`actions.ts` holds the old ⌘K `searchAction` the palette rework removes and PLA-§M.1's
+  `dismissAddressCardAction`; `loading.tsx` drops the infinite shimmer, §I.6), `src/app/app/[store]/settings/{layout.tsx,
+  loading.tsx, route.ts}` and `src/components/admin/settings/settings-nav.tsx` (the registry-driven settings frame),
+  `src/components/admin/styles/**` (`admin.css`: D60 / UX-38 delete `adm-aurora`, `adm-grain` and the shimmer),
+  `src/app/globals.compiled.css` (the committed output of `scripts/build-admin-css.mjs`), `src/app/dev/fixture/shell/**`
+  (the §22.12 primitives' story fixtures), **`scripts/qa/e2e/shell.ts`** (`qa:shell-e2e`, committed: the §O.4 steps 2, 5,
+  6, 7, 13, 14, 19 and 20) and `scripts/qa/tenancy-cases/shell.ts` (the attack cases of P2's own store actions; P1 keeps
+  the §O.3 special cases, the shell's included, in `tenancy-cases/platform.ts`).
 
 ### PLA-§P.3 D5 PLATFORM (R3)
 
