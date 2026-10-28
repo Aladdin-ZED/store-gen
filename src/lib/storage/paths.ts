@@ -14,8 +14,8 @@
  * - Roots: `DATA_DIR` must be absolute (else `dataDir()` is null and no area resolves). `MEDIA_DIR` overrides
  *   `DATA_DIR/media` and must be absolute too: a relative one turns the media root off (null) rather than putting files
  *   somewhere nobody chose. `MEDIA_CACHE_DIR` (a cache, so a bad value only falls back) replaces
- *   `DATA_DIR/cache/media`, else `tmpdir()/store-gen-media` while `DATA_DIR` is unset (never COD Studio's directory,
- *   MED-07).
+ *   `DATA_DIR/cache/media`, else `tmpdir()/store-gen-media` while `DATA_DIR` is unset or refused by the boot check
+ *   (never COD Studio's directory, MED-07). The fs backend's temp files live in `<media root>/tmp` (`mediaTmpDir()`).
  *
  * Pure: reads process.env on every call (nothing cached) and touches no file; the filesystem work is the storage
  * driver's (src/lib/media/storage/**) and the jobs'.
@@ -49,6 +49,9 @@ export const STORE_DIR_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 /** the disk cache when DATA_DIR is unset (store-gen's own name, never COD Studio's `cod-studio-media`, MED-07) */
 export const FALLBACK_MEDIA_CACHE = "store-gen-media";
 
+/** the temp folder under the media root (`<media root>/tmp/<random>`, §G.2) */
+export const MEDIA_TMP = "tmp";
+
 const MAX_SEGMENT = 255;
 const BAD_SEGMENT_CHARS = /[/\\:\0]/;
 
@@ -71,12 +74,22 @@ export function mediaRoot(): string | null {
   return dir ? join(dir, "media") : null;
 }
 
-/** The media disk cache: `MEDIA_CACHE_DIR`, else `DATA_DIR/cache/media`, else `tmpdir()/store-gen-media`. */
-export function mediaCacheDir(): string {
+/**
+ * The media disk cache: `MEDIA_CACHE_DIR`, else `DATA_DIR/cache/media`, else `tmpdir()/store-gen-media`. Pass
+ * `useDataDir = false` when `DATA_DIR` failed its boot check (src/lib/media/storage/check.ts): a directory the check
+ * refused (another app's, a symlink…) never receives the cache either.
+ */
+export function mediaCacheDir(useDataDir = true): string {
   const override = absoluteEnv("MEDIA_CACHE_DIR");
   if (override) return override;
-  if (dataDir()) return dataPath("cache", null, "media");
+  if (useDataDir && dataDir()) return dataPath("cache", null, "media");
   return join(tmpdir(), FALLBACK_MEDIA_CACHE);
+}
+
+/** `<media root>/tmp`: the fs backend's temp files (same file system as `v1`, so the rename is atomic); null when off. */
+export function mediaTmpDir(): string | null {
+  const root = mediaRoot();
+  return root ? join(root, MEDIA_TMP) : null;
 }
 
 export function isDataArea(area: string): area is DataArea {
@@ -89,14 +102,22 @@ function assertSegment(segment: unknown, what: string): asserts segment is strin
   if (segment.length > MAX_SEGMENT || BAD_SEGMENT_CHARS.test(segment) || isAbsolute(segment)) throw new Error(`storage: bad ${what}`);
 }
 
-/** The base directory of an area (media: under the media root), or null when its root is not configured. */
-function areaBase(area: DataArea): string | null {
+/**
+ * The base directory of `area` under explicit roots (pure; the boot check passes the values it is judging): the media
+ * area under the media root, every other area under `dataDir`. Null when that root is null.
+ */
+export function areaBaseUnder(area: DataArea, roots: { dataDir: string | null; mediaRoot: string | null }): string | null {
   const def: DataAreaDef = DATA_AREAS[area];
   const [top, ...rest] = (def.root ?? area).split("/");
-  const root = area === "media" ? mediaRoot() : dataDir();
+  const root = area === "media" ? roots.mediaRoot : roots.dataDir;
   if (!root) return null;
   // the media root already is `DATA_DIR/media` (or MEDIA_DIR, which replaces it): only the rest of `media/v1` follows
   return area === "media" ? join(root, ...rest) : join(root, top!, ...rest);
+}
+
+/** The base directory of an area from the environment's roots, or null when its root is not configured. */
+export function areaBase(area: DataArea): string | null {
+  return areaBaseUnder(area, { dataDir: dataDir(), mediaRoot: mediaRoot() });
 }
 
 /** The store's own directory inside an area (media keeps a 2-char shard level above it). */

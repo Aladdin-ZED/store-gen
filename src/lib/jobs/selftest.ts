@@ -1,10 +1,15 @@
 /**
- * Jobs and platform-ops self-test (offline: no database, no server, no file written):
+ * Jobs and platform-ops self-test (offline: no database, no server; the walk section builds and removes one small
+ * tree under os.tmpdir(), nothing else is written):
  *   npm run test:jobs   (tsx src/lib/jobs/selftest.ts; docs/STORE-SAAS.md §J.1, core group, ≤ 3 s)
  *
- * Sections (P8 step 1; later steps add theirs):
+ * Sections (P8 steps 1-2; later steps add theirs):
  *  1. paths      the DATA_AREAS registry (§G.7, SEC-21), the roots, dataPath's layouts and refusals, mediaFilePath,
- *                perStoreDirs;
+ *                perStoreDirs, the media temp folder and the cache fallback after a refused DATA_DIR;
+ *  1b. walk      the bounded DATA_DIR walk on a temp tree (§G.2, ENGC-14): totals, one-directory slices resumed to the
+ *                same totals, a JSON round trip of the cursor, yields between directories, unsafe or foreign cursors
+ *                never followed, links never followed; DATA_DIR_BUDGET_BYTES, the 70 / 85 % levels, the 300,000-file
+ *                warning, the snapshot reader (≤ 200 ms);
  *  2. errors     the §H.5 error ring: hour bucket, dedupe key, code choice, no raw message or customer value in a
  *                sample, the 500-key bound, the flush SQL, its errno 1452 / 1146 / other-failure handling;
  *  3. metrics    the percentile helper, the rolling 5-minute wait windows on a fake clock, the query-pool sampler
@@ -18,6 +23,7 @@
 import Module from "node:module";
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { FakeClock, Harness, sleep } from "./testing/harness";
@@ -51,6 +57,7 @@ function roots(r: { DATA_DIR?: string; MEDIA_DIR?: string; MEDIA_CACHE_DIR?: str
 
 async function main(): Promise<void> {
   const P = await import("@/lib/storage/paths");
+  const W = await import("@/lib/storage/walk");
   const E = await import("./errors");
   const M = await import("./metrics");
   const L = await import("@/lib/db/locks");
@@ -94,6 +101,19 @@ async function main(): Promise<void> {
     t.eq("mediaCacheDir: MEDIA_CACHE_DIR first", P.mediaCacheDir(), CACHE);
     roots({ DATA_DIR: DATA, MEDIA_CACHE_DIR: "rel-cache" });
     t.eq("mediaCacheDir: a relative MEDIA_CACHE_DIR falls back", P.mediaCacheDir(), join(DATA, "cache", "media"));
+    roots({ DATA_DIR: DATA });
+    t.eq("mediaCacheDir(false): a refused DATA_DIR gets no cache, tmpdir() instead", P.mediaCacheDir(false), join(tmpdir(), "store-gen-media"));
+    roots({ DATA_DIR: DATA, MEDIA_CACHE_DIR: CACHE });
+    t.eq("mediaCacheDir(false): MEDIA_CACHE_DIR still wins", P.mediaCacheDir(false), CACHE);
+    roots({ DATA_DIR: DATA });
+    t.eq("mediaTmpDir: <media root>/tmp", P.mediaTmpDir(), join(DATA, "media", "tmp"));
+    roots({ DATA_DIR: DATA, MEDIA_DIR: MEDIA });
+    t.eq("mediaTmpDir: under MEDIA_DIR (same file system as v1)", P.mediaTmpDir(), join(MEDIA, "tmp"));
+    roots({});
+    t.eq("mediaTmpDir: no media root → null", P.mediaTmpDir(), null);
+    t.eq("areaBaseUnder: explicit roots, no environment", P.areaBaseUnder("media", { dataDir: DATA, mediaRoot: MEDIA }), join(MEDIA, "v1"));
+    t.eq("areaBaseUnder: backups under dataDir", P.areaBaseUnder("backups", { dataDir: DATA, mediaRoot: null }), join(DATA, "backups"));
+    t.eq("areaBaseUnder: a null root → null", P.areaBaseUnder("exports", { dataDir: null, mediaRoot: MEDIA }), null);
   });
 
   h.section("paths: layouts", (t) => {
@@ -160,6 +180,86 @@ async function main(): Promise<void> {
     roots({});
     t.eq("nothing configured: nothing to purge on disk", P.perStoreDirs(OTHER), []);
     t.throws("perStoreDirs refuses a bad id", () => P.perStoreDirs("../x"), /bad store id/);
+  });
+
+
+  /* ---------------------------------------------------------------- */
+  h.section("walk: accounting", async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "sg-walk-"));
+    try {
+      // root/f1 (10) · a/f2 (100) · a/b/f3 (1000) · a/b/f4 (0) · c/f5 (7): 5 files, 1117 bytes, 4 directories
+      mkdirSync(join(root, "a", "b"), { recursive: true });
+      mkdirSync(join(root, "c"));
+      writeFileSync(join(root, "f1"), Buffer.alloc(10));
+      writeFileSync(join(root, "a", "f2"), Buffer.alloc(100));
+      writeFileSync(join(root, "a", "b", "f3"), Buffer.alloc(1000));
+      writeFileSync(join(root, "a", "b", "f4"), Buffer.alloc(0));
+      writeFileSync(join(root, "c", "f5"), Buffer.alloc(7));
+      const want = { bytes: 1117, files: 5, dirs: 4, skipped: 0 };
+      const totals = (r: { bytes: number; files: number; dirs: number; skipped: number }) => ({ bytes: r.bytes, files: r.files, dirs: r.dirs, skipped: r.skipped });
+
+      let yields = 0;
+      const full = await W.walkDataDir({ budgetMs: 60_000, root, yieldFn: async () => void yields++ });
+      t.eq("one slice: the whole tree", { ...totals(full), complete: full.complete, cursor: full.cursor }, { ...want, complete: true, cursor: null });
+      t.eq("it yields between directories (dirs − 1 times)", yields, 3);
+
+      // budget 0: one directory per slice, each cursor resumed after a JSON round trip (as cron_cursors keeps it)
+      let slices = 0;
+      let r = await W.walkDataDir({ budgetMs: 0, root });
+      slices++;
+      t.check("budget 0 still makes progress (the root)", !r.complete && r.dirs === 1 && r.files === 1 && r.bytes === 10 && (r.cursor?.stack.length ?? 0) > 0);
+      while (!r.complete && slices < 20) {
+        r = await W.walkDataDir({ budgetMs: 0, root, resume: JSON.parse(JSON.stringify(r.cursor)) as typeof r.cursor });
+        slices++;
+      }
+      t.eq("resumed slices reach the same totals", { ...totals(r), complete: r.complete }, { ...want, complete: true });
+      t.eq("one directory per slice", slices, 4);
+
+      const now = { t: 0 };
+      const clocked = await W.walkDataDir({ budgetMs: 5, root, now: () => (now.t += 3) });
+      t.check("the budget is checked after each directory", !clocked.complete && clocked.dirs === 2, JSON.stringify(totals(clocked)));
+
+      const foreign = await W.walkDataDir({ budgetMs: 60_000, root, resume: { v: 1, root: join(root, "elsewhere"), stack: ["a"], bytes: 999, files: 9, dirs: 9, skipped: 0 } });
+      t.eq("a cursor of another root is not resumed (fresh walk)", totals(foreign), want);
+      const unsafe = await W.walkDataDir({ budgetMs: 60_000, root, resume: { v: 1, root, stack: ["../x", "/etc", "a\\b", "a/../c", "C:", "", "gone"], bytes: 0, files: 0, dirs: 0, skipped: 0 } });
+      t.eq("unsafe entries are skipped, never followed; a vanished folder is ignored", totals(unsafe), { ...want, skipped: 5 });
+
+      let linked = false;
+      try {
+        symlinkSync(join(root, "a"), join(root, "link"), process.platform === "win32" ? "junction" : "dir");
+        linked = true;
+      } catch {
+        // no link privilege here: the case is skipped
+      }
+      if (linked) {
+        const withLink = await W.walkDataDir({ budgetMs: 60_000, root });
+        t.eq("a link is one file, never followed", totals(withLink), { ...want, files: want.files + 1 });
+      }
+      await t.rejects("no root configured → throws", () => W.walkDataDir({ budgetMs: 0 }), /DATA_DIR is not set/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  h.section("walk: budget and levels", (t) => {
+    const GiB = 1024 ** 3;
+    t.eq("budgetBytes: unset → 20 GiB", W.budgetBytes(undefined), 20 * GiB);
+    t.eq("budgetBytes: an integer", W.budgetBytes(" 1073741824 "), GiB);
+    for (const bad of ["", "abc", "-5", "0", "1.5", "1e9", "20GiB", "99999999999999999999"]) t.eq(`budgetBytes: "${bad}" → default`, W.budgetBytes(bad), 20 * GiB);
+    const B = 1000;
+    t.eq("level: below 70 % → null", W.dataDirLevel(699, B), null);
+    t.eq("level: 70 % → data_dir_70", W.dataDirLevel(700, B), "data_dir_70");
+    t.eq("level: 84.9 % → data_dir_70", W.dataDirLevel(849, B), "data_dir_70");
+    t.eq("level: 85 % → data_dir_85", W.dataDirLevel(850, B), "data_dir_85");
+    t.eq("level: over budget → data_dir_85", W.dataDirLevel(5 * B, B), "data_dir_85");
+    t.eq("level: no budget → null", W.dataDirLevel(5, 0), null);
+    t.eq("inodes: 300,000 files → no warning", W.inodeWarning(300_000), false);
+    t.eq("inodes: 300,001 files → warning", W.inodeWarning(300_001), true);
+    const snap = { bytes: 5, files: 2, dirs: 1, budgetBytes: B, complete: true, at: "2026-10-28T02:15:00.000Z" };
+    t.eq("snapshot: read back", W.readWalkSnapshot({ snapshot: snap, cursor: null }), snap);
+    t.eq("snapshot: none", W.readWalkSnapshot(null), null);
+    t.eq("snapshot: an incomplete one is ignored", W.readWalkSnapshot({ snapshot: { ...snap, complete: false } }), null);
+    t.eq("snapshot: a malformed one is ignored", W.readWalkSnapshot({ snapshot: { ...snap, bytes: -1 } }), null);
   });
 
   /* ---------------------------------------------------------------- */

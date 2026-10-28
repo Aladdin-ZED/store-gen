@@ -18,23 +18,35 @@ import "server-only";
  * media key (`<storeId>.<sha256(key)>`), never after its content, so two stores holding the same bytes never share a
  * copy (no cross-store "is it cached" timing, and deleting one store's file never evicts the other's). Every cached
  * entry carries its store: `evictStore(storeId)` drops a store's memory and disk entries (a purge, a suspension). The
- * directory is `tmpdir()/store-gen-media` (no longer COD Studio's `cod-studio-media`, MED-07); P8's MEDIA_CACHE_DIR /
- * DATA_DIR replaces it (§G.2).
+ * directory is `mediaCacheDir()` (src/lib/storage/paths.ts, §G.2, MED-07): MEDIA_CACHE_DIR, else DATA_DIR/cache/media
+ * once the DATA_DIR boot check passed, else `tmpdir()/store-gen-media` (never COD Studio's `cod-studio-media`).
+ *
+ * Two backends behind one front (§G.1, R1 P8): every `media_files` row says where its bytes live (`storage`). The
+ * metadata cache, the LRU and the read pool serve both; a `db` row's bytes are the chunks below, an `fs` row's are a
+ * file under DATA_DIR read through src/lib/media/storage/fs.ts (no disk copy needed: it already is one). An fs file
+ * that is missing or differs from its row is a 404 counted in the error ring (`media` / `missing_file`,
+ * `file_mismatch`), never served.
  * CHUNK_SIZE is part of the on-disk format: never change it once files exist.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, readFile, rename, stat, unlink, type FileHandle } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, lstat, mkdir, open, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import mysql, { type PoolConnection, type RowDataPacket } from "mysql2/promise";
 import { ByteLru } from "./lru";
 import { databaseUrl } from "@/lib/db/url";
+import { recordError } from "@/lib/jobs/errors";
+import { mediaCacheDir } from "@/lib/storage/paths";
 import type { WriteScope } from "@/lib/tenancy/types";
+import { mediaStorageChecked } from "./storage/check";
+import { fsStorage, readFsFile } from "./storage/fs";
+import { fileRangeStream, fileSha, sha256hex } from "./storage/io";
+import { MAX_READ_ALL, StoredFileError } from "./storage/types";
+
+export { sha256hex };
 
 export const CHUNK_SIZE = 512 * 1024;
 /** files above this size are served from the disk cache instead of the memory cache */
-export const MAX_CACHED_FILE = 8 * 1024 * 1024;
+export const MAX_CACHED_FILE = MAX_READ_ALL;
 const CACHE_BYTES = 64 * 1024 * 1024;
 /** chunks fetched per round trip when copying or streaming a large file */
 const STREAM_BATCH = 4;
@@ -48,11 +60,9 @@ const READ_WAIT_MS = 10_000;
 const MISS_TTL_MS = 60_000;
 const MAX_MISSES = 4096;
 
-const DISK_DIR = join(tmpdir(), "store-gen-media");
 const DISK_BUDGET = 512 * 1024 * 1024;
 /** after a disk failure (full, read-only…), stay on the database fallback this long */
 const DISK_BACKOFF_MS = 10 * 60_000;
-const DISK_READ_BLOCK = 64 * 1024;
 const SHA_RE = /^[a-f0-9]{64}$/;
 /** a disk copy's file name: `<storeId>.<sha256(media key)>` */
 const DISK_NAME_RE = /^([0-9A-HJKMNP-TV-Z]{26})\.([a-f0-9]{64})$/;
@@ -66,6 +76,8 @@ export interface MediaFileMeta {
   bytes: number;
   chunks: number;
   sha256: string;
+  /** where the bytes live (`media_files.storage`): the chunk store or DATA_DIR (§G.1) */
+  storage: "db" | "fs";
 }
 
 export interface MediaFile extends MediaFileMeta {
@@ -102,6 +114,8 @@ interface MediaState {
   read: { pool: mysql.Pool | null; active: number; waiters: { grant: () => void }[] };
   disk: {
     ready: Promise<boolean> | null;
+    /** the cache directory, set by prepareDisk (mediaCacheDir after the boot check); optional so a test reset may omit it */
+    dir?: string | null;
     /** disk name (`<storeId>.<sha256(key)>`) → entry, least recently used first */
     index: Map<string, DiskEntry>;
     total: number;
@@ -124,12 +138,10 @@ function state(): MediaState {
     metaFlights: new Map(),
     fileFlights: new Map(),
     read: { pool: null, active: 0, waiters: [] },
-    disk: { ready: null, index: new Map(), total: 0, flights: new Map(), backoff: new Map() },
+    disk: { ready: null, dir: null, index: new Map(), total: 0, flights: new Map(), backoff: new Map() },
   };
   return globalThis.__codMediaState;
 }
-
-export const sha256hex = (data: Buffer | string) => createHash("sha256").update(data).digest("hex");
 
 /** The disk copy's name of one store's file: per store and media key, never per content (MED-01). */
 export const diskName = (meta: Pick<MediaFileMeta, "storeId" | "key">): string => `${meta.storeId}.${sha256hex(meta.key)}`;
@@ -303,7 +315,7 @@ export async function getMediaMeta(key: string): Promise<MediaFileMeta | null> {
   const s = state();
   return singleFlight(s.metaFlights, key, async () => {
     // tenancy: public-key mediaKey (§E.3 rule 6, §G.6: a media key is global and random; the media route resolves its store first, resolveMediaKey)
-    const [row] = await mediaQuery("SELECT `key`, store_id, asset_id, mime, bytes, chunks, sha256 FROM media_files WHERE `key` = ? LIMIT 1", [key]);
+    const [row] = await mediaQuery("SELECT `key`, store_id, asset_id, mime, bytes, chunks, sha256, storage FROM media_files WHERE `key` = ? LIMIT 1", [key]);
     if (!row) {
       rememberMissing(key);
       return null;
@@ -316,6 +328,7 @@ export async function getMediaMeta(key: string): Promise<MediaFileMeta | null> {
       bytes: Number(row.bytes),
       chunks: Number(row.chunks),
       sha256: String(row.sha256),
+      storage: row.storage === "fs" ? "fs" : "db",
     };
     s.metas.set(key, meta, 1);
     return meta;
@@ -335,8 +348,8 @@ async function selectChunks(key: string, from: number, to: number): Promise<{ id
 }
 
 /**
- * Whole file (cached when ≤ 8 MB; larger files come from the verified disk cache when possible).
- * Integrity is checked on cold loads: chunk count, length and sha256.
+ * Whole file (cached when ≤ 8 MB; larger db files come from the verified disk cache when possible, larger fs files
+ * straight from DATA_DIR). Integrity is checked on cold loads: chunk count, length and sha256 (fs: length and sha256).
  * Returns null when the key does not exist or the stored data is inconsistent.
  */
 export async function getMediaFile(key: string): Promise<MediaFile | null> {
@@ -344,24 +357,63 @@ export async function getMediaFile(key: string): Promise<MediaFile | null> {
   const hit = s.files.get(key);
   if (hit) return hit;
   return singleFlight(s.fileFlights, key, async () => {
-    const meta = await getMediaMeta(key);
+    let meta = await getMediaMeta(key);
     if (!meta) return null;
-    if (meta.bytes > MAX_CACHED_FILE) {
-      const path = await diskCopy(meta);
-      if (path) {
-        const data = await readFile(path).catch(() => null);
-        if (data && data.length === meta.bytes) return { ...meta, data };
-      }
+    if (meta.storage === "db") {
+      const file = await loadFromChunks(meta);
+      if (file !== "gone") return file;
+      // no chunk at all: the migrator may have moved the file to DATA_DIR after this process cached its row (§G.3)
+      meta = await reloadMeta(key);
+      if (meta?.storage !== "fs") return null;
     }
-    const rows = await selectChunks(key, 0, meta.chunks - 1);
-    if (rows.length !== meta.chunks || rows.some((r, i) => r.idx !== i)) return null;
-    const data = rows.length === 1 ? rows[0]!.data : Buffer.concat(rows.map((r) => r.data));
-    if (data.length !== meta.bytes) return null;
-    if (meta.bytes <= MAX_CACHED_FILE && sha256hex(data) !== meta.sha256) return null;
-    const file: MediaFile = { ...meta, data };
-    s.files.set(key, file, data.length);
-    return file;
+    return loadFromFs(meta);
   });
+}
+
+/** A db row's bytes: the file, null when its chunks are inconsistent, "gone" when it has none left. */
+async function loadFromChunks(meta: MediaFileMeta): Promise<MediaFile | null | "gone"> {
+  if (meta.bytes > MAX_CACHED_FILE) {
+    const path = await diskCopy(meta);
+    if (path) {
+      const data = await readFile(/* turbopackIgnore: true */ path).catch(() => null);
+      if (data && data.length === meta.bytes) return { ...meta, data };
+    }
+  }
+  const rows = await selectChunks(meta.key, 0, meta.chunks - 1);
+  if (rows.length === 0) return "gone";
+  if (rows.length !== meta.chunks || rows.some((r, i) => r.idx !== i)) return null;
+  const data = rows.length === 1 ? rows[0]!.data : Buffer.concat(rows.map((r) => r.data));
+  if (data.length !== meta.bytes) return null;
+  if (meta.bytes <= MAX_CACHED_FILE && sha256hex(data) !== meta.sha256) return null;
+  const file: MediaFile = { ...meta, data };
+  state().files.set(meta.key, file, data.length);
+  return file;
+}
+
+/** An fs row's bytes, checked against the row; a missing or different file is counted and answers null. */
+async function loadFromFs(meta: MediaFileMeta): Promise<MediaFile | null> {
+  try {
+    const data = await readFsFile(meta);
+    const file: MediaFile = { ...meta, data };
+    if (meta.bytes <= MAX_CACHED_FILE) state().files.set(meta.key, file, data.length);
+    return file;
+  } catch (err) {
+    if (!(err instanceof StoredFileError)) throw err; // EIO, EMFILE…: the caller's 503, never a cacheable 404
+    countStoredFileError(err, meta);
+    return null;
+  }
+}
+
+function countStoredFileError(err: StoredFileError, meta: Pick<MediaFileMeta, "storeId">): void {
+  recordError("media", null, { code: err.code === "missing" ? "missing_file" : "file_mismatch", storeId: meta.storeId });
+}
+
+/** The key's row read again (its cached metadata and miss memory dropped first). */
+export function reloadMeta(key: string): Promise<MediaFileMeta | null> {
+  const s = state();
+  s.metas.delete(key);
+  s.misses.delete(key);
+  return getMediaMeta(key);
 }
 
 /** Cached whole file if present, without touching the database. */
@@ -369,8 +421,9 @@ export function peekMediaFile(key: string): MediaFile | undefined {
   return state().files.get(key);
 }
 
-/** True when serving this file's bytes needs no database work. */
+/** True when serving this file's bytes needs no database work (an fs row's never does). */
 export function mediaBodyCached(meta: MediaFileMeta): boolean {
+  if (meta.storage === "fs") return true;
   const s = state();
   return meta.bytes <= MAX_CACHED_FILE ? s.files.get(meta.key) !== undefined : s.disk.index.get(diskName(meta))?.verified === true;
 }
@@ -382,22 +435,25 @@ export function mediaBodyCached(meta: MediaFileMeta): boolean {
 async function prepareDisk(): Promise<boolean> {
   const d = state().disk;
   try {
-    await mkdir(DISK_DIR, { recursive: true, mode: 0o700 });
-    const st = await lstat(DISK_DIR);
+    // DATA_DIR/cache/media only once DATA_DIR passed its boot check: a refused directory gets no cache either
+    const dir = mediaCacheDir((await mediaStorageChecked()).ok);
+    d.dir = dir;
+    await mkdir(/* turbopackIgnore: true */ dir, { recursive: true, mode: 0o700 });
+    const st = await lstat(/* turbopackIgnore: true */ dir);
     if (!st.isDirectory()) return false; // e.g. a planted symlink
     if (process.platform !== "win32") {
       if (typeof process.getuid === "function" && st.uid !== process.getuid()) return false;
-      if (st.mode & 0o077) await chmod(DISK_DIR, 0o700);
+      if (st.mode & 0o077) await chmod(/* turbopackIgnore: true */ dir, 0o700);
     }
     // adopt complete files from an earlier run (hashed again before first use); drop stale partial writes
     const found: { name: string; storeId: string; bytes: number; at: number }[] = [];
-    for (const name of await readdir(DISK_DIR)) {
-      const info = await stat(join(DISK_DIR, name)).catch(() => null);
+    for (const name of await readdir(/* turbopackIgnore: true */ dir)) {
+      const info = await stat(/* turbopackIgnore: true */ join(dir, name)).catch(() => null);
       if (!info?.isFile()) continue;
       const m = DISK_NAME_RE.exec(name);
       if (m) found.push({ name, storeId: m[1]!, bytes: info.size, at: info.mtimeMs });
       else if (name.endsWith(".part") && Date.now() - info.mtimeMs > DISK_BACKOFF_MS) {
-        await unlink(join(DISK_DIR, name)).catch(() => undefined);
+        await unlink(/* turbopackIgnore: true */ join(dir, name)).catch(() => undefined);
       }
     }
     for (const f of found.sort((a, b) => a.at - b.at)) {
@@ -425,7 +481,7 @@ function forgetDisk(name: string): Promise<void> {
     d.index.delete(name);
     d.total -= entry.bytes;
   }
-  return DISK_NAME_RE.test(name) ? unlink(join(DISK_DIR, name)).catch(() => undefined) : Promise.resolve();
+  return d.dir && DISK_NAME_RE.test(name) ? unlink(/* turbopackIgnore: true */ join(d.dir, name)).catch(() => undefined) : Promise.resolve();
 }
 
 /** A local file-system failure (disk full, read-only, permissions) — distinct from database errors. */
@@ -440,20 +496,10 @@ const onDisk = <T>(op: Promise<T>): Promise<T> =>
     throw new DiskError(err);
   });
 
-async function fileSha(path: string): Promise<string | null> {
-  try {
-    const h = createHash("sha256");
-    for await (const chunk of createReadStream(path)) h.update(chunk as Buffer);
-    return h.digest("hex");
-  } catch {
-    return null;
-  }
-}
-
 /** Copy a stored file from the database to `path`, a batch of chunks at a time, verifying its sha256. */
 async function copyToDisk(meta: MediaFileMeta, path: string): Promise<boolean> {
   const tmp = `${path}.${process.pid}-${randomBytes(4).toString("hex")}.part`;
-  const fh = await onDisk(open(tmp, "wx", 0o600));
+  const fh = await onDisk(open(/* turbopackIgnore: true */ tmp, "wx", 0o600));
   const hash = createHash("sha256");
   let written = 0;
   let ok = false;
@@ -474,14 +520,14 @@ async function copyToDisk(meta: MediaFileMeta, path: string): Promise<boolean> {
     ok = written === meta.bytes && hash.digest("hex") === meta.sha256;
   } finally {
     await fh.close().catch(() => undefined);
-    if (!ok) await unlink(tmp).catch(() => undefined);
+    if (!ok) await unlink(/* turbopackIgnore: true */ tmp).catch(() => undefined);
   }
   if (!ok) return false;
   try {
-    await rename(tmp, path);
+    await rename(/* turbopackIgnore: true */ tmp, path);
     return true;
   } catch {
-    await unlink(tmp).catch(() => undefined);
+    await unlink(/* turbopackIgnore: true */ tmp).catch(() => undefined);
     return false;
   }
 }
@@ -498,8 +544,8 @@ async function diskCopy(meta: MediaFileMeta): Promise<string | null> {
   if (!DISK_NAME_RE.test(name)) return null;
   const now = Date.now();
   if ((d.backoff.get("*") ?? 0) > now || (d.backoff.get(name) ?? 0) > now) return null;
-  if (!(await (d.ready ??= prepareDisk()))) return null;
-  const path = join(DISK_DIR, name);
+  if (!(await (d.ready ??= prepareDisk())) || !d.dir) return null;
+  const path = join(d.dir, name);
   const entry = d.index.get(name);
   if (entry?.verified && entry.bytes === meta.bytes) {
     d.index.delete(name); // most recently used
@@ -538,49 +584,25 @@ async function diskCopy(meta: MediaFileMeta): Promise<string | null> {
   });
 }
 
-/** Bytes [start, end] of an open cache file, read on demand (64 KB at a time). */
-function fileRangeStream(fh: FileHandle, start: number, end: number): ReadableStream<Uint8Array> {
-  let pos = start;
-  let closed = false;
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    fh.close().catch(() => undefined);
-  };
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const want = Math.min(DISK_READ_BLOCK, end - pos + 1);
-        const buf = Buffer.allocUnsafe(want);
-        const { bytesRead } = await fh.read(buf, 0, want, pos);
-        if (bytesRead <= 0) throw new Error("media cache file is shorter than expected");
-        pos += bytesRead;
-        controller.enqueue(new Uint8Array(buf.buffer, buf.byteOffset, bytesRead));
-        if (pos > end) {
-          close();
-          controller.close();
-        }
-      } catch (err) {
-        close();
-        controller.error(err);
-      }
-    },
-    cancel() {
-      close();
-    },
-  });
-}
-
 /**
- * Bytes [start, end] (inclusive) of a large file: from the disk cache (filled from the database once),
- * or streamed from the database when the disk cache is unavailable.
+ * Bytes [start, end] (inclusive) of a large file: an fs row's straight from DATA_DIR; a db row's from the disk cache
+ * (filled from the database once), or streamed from the database when the disk cache is unavailable.
  */
 export async function openMediaRange(meta: MediaFileMeta, start: number, end: number): Promise<ReadableStream<Uint8Array>> {
+  if (meta.storage === "fs") {
+    try {
+      return await fsStorage.readRange(meta, start, end);
+    } catch (err) {
+      if (err instanceof StoredFileError) countStoredFileError(err, meta);
+      throw err;
+    }
+  }
   for (let attempt = 0; attempt < 2; attempt++) {
     const path = await diskCopy(meta);
     if (!path) break;
     try {
-      // runtime cache under os.tmpdir(): without the ignore, Turbopack traces the whole project into the server output
+      // a runtime cache path (DATA_DIR or os.tmpdir()): without the ignore, Turbopack traces the whole project into the
+      // server output
       return fileRangeStream(await open(/* turbopackIgnore: true */ path, "r"), start, end);
     } catch {
       await forgetDisk(diskName(meta)); // removed under us (another process trimmed its cache): copy again once
