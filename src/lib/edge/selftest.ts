@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   const host = await import("./host");
   const edgeEnv = await import("./env");
   const { hostOf } = edgeEnv;
-  const { areaOf, appPathHandle, isAppManifestPath, storePathParts } = await import("./areas");
+  const { areaOf, appPathHandle, isAppManifestPath, isConsoleMediaPath, storePathParts } = await import("./areas");
   const { PATH_HEADERS, stampRequestPath, verifiedRequestPath } = await import("./path-sig");
   const { DEVICE_COOKIE } = await import("./device");
   const { edgeTally, resetProxyLog } = await import("./proxy-log");
@@ -373,6 +373,15 @@ async function main(): Promise<void> {
   eq(areaOf(`/${GATE}`), "gate", "the gate path");
   eq(areaOf(`/${GATE.toUpperCase()}`), "other", "the gate is an exact match");
   check(isAppManifestPath("/app/manifest.webmanifest") && isAppManifestPath("/app/Manifest.webmanifest") && !isAppManifestPath("/app/manifest.json"), "isAppManifestPath");
+  check(
+    isConsoleMediaPath("/api/admin/stores/01HZX/media/abc.webp") &&
+      isConsoleMediaPath("/API/admin//stores/01HZX/media/k") &&
+      !isConsoleMediaPath("/api/admin/stores/01HZX/media") &&
+      !isConsoleMediaPath("/api/admin/stores/01HZX/media/a/b") &&
+      !isConsoleMediaPath("/api/admin/stores/01HZX/exports/j/1") &&
+      !isConsoleMediaPath("/admin/stores/01HZX/media/k"),
+    "isConsoleMediaPath (P0b V-1)",
+  );
   eq(storePathParts("/s/shop1"), { handle: "shop1", rest: "" }, "storePathParts: the store home");
   eq(storePathParts("/s/shop1/"), { handle: "shop1", rest: "/" }, "storePathParts: trailing slash kept in rest");
   eq(storePathParts("/s/Shop1/A/b"), { handle: "shop1", rest: "/a/b" }, "storePathParts: normalised");
@@ -450,6 +459,13 @@ async function main(): Promise<void> {
     const old = run("/admin", { cookie: `${GATE_COOKIE}=${gate.issueGateToken(Date.now() - 2 * 86_400_000)}` });
     check(isUi(old) && (old.headers.get("set-cookie") ?? "").startsWith(`${GATE_COOKIE}=`), "a day-old gate cookie is re-issued (sliding)");
     check(isUi(run("/api/admin/media/x", { method: "POST", cookie: gateCookie })), "gated admin API: platform UI headers");
+    // P0b V-1: the console media proxy keeps its handler's sandbox CSP; still gated, still with the session
+    const media = run("/api/admin/stores/01HZX/media/k.webp", { cookie: `${gateCookie}; cs=session` });
+    expectKind(media, "next", "console media: a gated read passes");
+    check(media.headers.get("content-security-policy") === null && media.headers.get("cache-control") === null, "console media: no console header set (the handler's sandbox CSP wins)");
+    check(forwarded(media)?.has("cookie") === true && !forwarded(media)?.has("x-nonce"), "console media: the session reaches the handler, no nonce");
+    await expectNeutral(run("/api/admin/stores/01HZX/media/k.webp"), "platform", "console media without the gate");
+    check(isUi(run("/api/admin/stores/01HZX/media/k.webp", { method: "POST", cookie: gateCookie })), "console media: a non-read keeps the console headers");
 
     await expectNeutral(run("/d/shop.ma/x"), "platform", "/d/** direct on the platform host");
 

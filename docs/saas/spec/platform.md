@@ -3506,7 +3506,7 @@ Decision recorded (§3.3): invite codes are `signups.decide` (daily ops) althoug
 | `GET /api/admin/search?q=` | `src/app/api/admin/search/route.ts` | `console.read` | `private, no-store` |
 | `GET /api/admin/stores.csv` | `src/app/api/admin/stores.csv/route.ts` | `console.read` + admin rank | `private, no-store`, `Content-Disposition: attachment` |
 | `GET /api/admin/audit.csv` | `src/app/api/admin/audit.csv/route.ts` | `audit.platform` | same |
-| `GET /api/admin/stores/<id>/media/<key>` | `src/app/api/admin/stores/[id]/media/[key]/route.ts` | `console.read` | `private, no-store`, sandbox CSP |
+| `GET /api/admin/stores/<id>/media/<key>` | `src/app/api/admin/stores/[id]/media/[key]/route.ts` | `console.read` | `private, no-store`, sandbox CSP (the handler's own: the proxy passes a gated read without the console header set, core §C.3, P0b V-1) |
 | `GET /api/admin/stores/<id>/exports/<jobId>/<part>` | `src/app/api/admin/stores/[id]/exports/[jobId]/[part]/route.ts` | `stores.close` + signature + fresh step-up | `private, no-store` |
 | `GET /api/admin/backups/<day>` | `src/app/api/admin/backups/[day]/route.ts` | `backups.manage` + fresh step-up | `private, no-store` |
 | `GET /api/app/<h>/pulse` | `src/app/api/app/[store]/pulse/route.ts` (P2) | `storeGuard(req, h, "store.read")` | ETag, `private, no-store` |

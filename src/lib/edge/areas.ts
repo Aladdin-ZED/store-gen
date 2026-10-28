@@ -67,6 +67,15 @@ export function isAppManifestPath(pathname: string): boolean {
   return normalizePath(pathname) === "/app/manifest.webmanifest";
 }
 
+/**
+ * `/api/admin/stores/<id>/media/<key>`, the console's media proxy (PLA-§M.2, core §F.6 "Media"): in the `console-api`
+ * area and behind the gate, but without the console header set, so the handler's sandbox CSP reaches the client (a
+ * header the proxy sets wins over the handler's). P0b step V, decision V-1.
+ */
+export function isConsoleMediaPath(pathname: string): boolean {
+  return /^\/api\/admin\/stores\/[^/]+\/media\/[^/]+$/.test(normalizePath(pathname));
+}
+
 const HANDLE_SEGMENT_RE = /^[a-z0-9-]{1,63}$/;
 
 /**

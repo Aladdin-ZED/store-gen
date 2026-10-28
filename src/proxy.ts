@@ -14,7 +14,8 @@
  *     platform  the gate, /admin and /api/admin as before (behind the gate cookie, or 404); with ADMIN_HOST set
  *               the console lives on its own host and is a 404 here. /d/** 404. Platform UI areas (console,
  *               app, auth, kit, marketing) get the nonce CSP + platformUiHeaders, except the dashboard
- *               manifest; area-auth GETs without a device marker get `__Host-sgd` (SEC-12). The rest passes.
+ *               manifest and the console media proxy (gated, the handler's headers; P0b V-1); area-auth GETs
+ *               without a device marker get `__Host-sgd` (SEC-12). The rest passes.
  *     console   ADMIN_HOST: the gate, /admin, /api/admin and the sign-in pages; framework paths pass; any other
  *               path sends a gated browser to the same path on the platform host and anyone else to the 404.
  *     legacy    a former platform host: store paths, the cron tick, /api/health and the public POST APIs pass;
@@ -38,7 +39,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { GATE_COOKIE, IS_PROD, NONCE_HEADER } from "@/lib/auth/config";
 import { gateCookieOptions, gateTokenIssuedAt, isAdminIpAllowed, issueGateToken, shouldRenewGateToken } from "@/lib/auth/gate";
 import { UNKNOWN_PAGE_HTML, unknownPageHeaders } from "@/lib/auth/unknown-page";
-import { areaOf, isAppManifestPath, normalizePath, storePathParts, type Area } from "@/lib/edge/areas";
+import { areaOf, isAppManifestPath, isConsoleMediaPath, normalizePath, storePathParts, type Area } from "@/lib/edge/areas";
 import { DEVICE_COOKIE, deviceCookieOptions, newDeviceId, readDeviceId } from "@/lib/edge/device";
 import { adminHostName, platformUrl } from "@/lib/edge/env";
 import { EDGE_HEADERS, edgeCheck, effectiveHost, type EffectiveHost } from "@/lib/edge/host";
@@ -174,11 +175,15 @@ function gate(ctx: Ctx, otherwise: () => NextResponse): NextResponse {
   return res;
 }
 
-/** /admin/**, /api/admin/**: platform UI behind the gate cookie, re-issued once a day (sliding lifetime). */
+/**
+ * /admin/**, /api/admin/**: platform UI behind the gate cookie, re-issued once a day (sliding lifetime). A read of the
+ * console media proxy passes behind the same gate with the session but without the console header set, so the
+ * handler's sandbox CSP, nosniff and `private, no-store` are what the client gets (P0b V-1, like the manifest).
+ */
 function consoleArea(ctx: Ctx): NextResponse {
   const issuedAt = gatedAt(ctx);
   if (issuedAt === null) return neutral(ctx);
-  const res = platformUi(ctx, "console");
+  const res = isRead(ctx) && isConsoleMediaPath(ctx.pathname) ? pass(ctx) : platformUi(ctx, "console");
   if (shouldRenewGateToken(issuedAt)) res.cookies.set(GATE_COOKIE, issueGateToken(), gateCookieOptions());
   return res;
 }

@@ -488,8 +488,8 @@ async function main(): Promise<void> {
         );
       }
       // the console media proxy (PLA-§M.2, core §F.6 "Media"): the sandbox CSP must reach the client, so the proxy may not
-      // put its console nonce CSP on this path (today it does, for every /api/admin/** path: the P1 merge needs the
-      // proxy to pass this path like the dashboard manifest, a maintainer change; until then this row fails once built)
+      // put its console nonce CSP on this path; since P0b V-1 it passes a gated read like the dashboard manifest
+      // (isConsoleMediaPath, src/lib/edge/areas.ts)
       await routeCase(label("GET /api/admin/stores/<id>/media/<key> (P1-7)"), "src/app/api/admin/stores/[id]/media/[key]/route.ts", () =>
         inMode(() => {
           const res = run(`/api/admin/stores/${ULID_A}/media/headers-check-media-key`, { cookie: gated() });
