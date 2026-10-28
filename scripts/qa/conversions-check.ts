@@ -1,4 +1,4 @@
-// proves: IN-05, OP-05, LP-04, AI-15, IN-03, SF-03, SF-06
+// proves: IN-05, OP-05, LP-04, AI-15, IN-03, SF-03, SF-06, IN-01, IN-09, OP-16
 /**
  * Ad pixels — server side, offline (fetch is mocked; no network, no database), docs/OFFERS.md §A:
  *  - Tracking schema: legacy single ids → lists, dedupe, limits, empty → unset; `none` / `copiedFrom`;
@@ -24,6 +24,10 @@
  *    scaled Sheets backlog threshold, the causes and What to check, the int:* / conv:* rules on their fixtures, the
  *    notification kinds, the pulse role gate and the copy (src/lib/integrations/selftest.ts; the DB half is
  *    scripts/qa/integrations-db-check.ts).
+ *  - sheets (R1 P5, operations.md OPE-§O.1 "sheets"; IN-01 planner half, IN-09 R1, OP-16 R1): the pure run planner
+ *    (≤ 1 read + 1 append + 1 batchUpdate per store per run, bits → cells with the optional headers, the widened read,
+ *    is_test = 0 in every work predicate, the conflict table, the row-deleted case, Note / Tracking / Agent pulls,
+ *    "Statut livraison" in the sheet's locale; src/lib/sheets/selftest.ts).
  *
  *   npx tsx scripts/qa/conversions-check.ts      (exit code 1 on failure)
  */
@@ -55,6 +59,7 @@ import { runtimePixels, trackingFlags } from "@/lib/pixels/tracking";
 import { PixelLibrarySettings, TrackingSecretsSettings, redactSetting } from "@/lib/settings/schemas";
 import { integrationsHealthSelftest } from "@/lib/integrations/selftest";
 import { templatesSelftest } from "@/lib/integrations/templates.selftest";
+import { sheetsSelftest } from "@/lib/sheets/selftest";
 
 let pass = 0;
 const failures: string[] = [];
@@ -454,6 +459,12 @@ async function main() {
   pass += health.pass;
   failures.push(...health.failures);
   for (const n of health.notes) console.log(`· ${n}`);
+
+  /* ---------------- sheets run planner (OPE-§19.5-§19.7; IN-01, IN-09, OP-16) ---------------- */
+  const sheets = sheetsSelftest();
+  pass += sheets.pass;
+  failures.push(...sheets.failures);
+  for (const n of sheets.notes) console.log(`· ${n}`);
 
   for (const f of failures) console.log(`✗ ${f}`);
   console.log(failures.length ? `✗ ${failures.length} failure(s), ${pass} passed` : `✓ conversions check passed (${pass} assertions)`);

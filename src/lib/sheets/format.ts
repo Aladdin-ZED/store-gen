@@ -51,10 +51,12 @@ export function cleanText(v: unknown, max = 500): string {
   return s.slice(0, max);
 }
 
-/** Google Sheets serial date (days since 1899-12-30) in the wall-clock time of `timeZone`. */
-export function toSheetsSerial(d: Date, timeZone: string): number {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
+// the last zone's formatter: building an Intl.DateTimeFormat costs far more than using it, and a run formats up to
+// 300 rows of one store (one zone). It holds no store data, only the zone name.
+let lastClock: { timeZone: string; f: Intl.DateTimeFormat } | null = null;
+function wallClock(timeZone: string): Intl.DateTimeFormat {
+  if (lastClock?.timeZone !== timeZone) {
+    const f = new Intl.DateTimeFormat("en-CA", {
       timeZone,
       hourCycle: "h23",
       year: "numeric",
@@ -63,10 +65,24 @@ export function toSheetsSerial(d: Date, timeZone: string): number {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
-    })
+    });
+    lastClock = { timeZone, f };
+  }
+  return lastClock.f;
+}
+
+/** The wall-clock parts of `d` in `timeZone` (year, month, day, hour, minute, second; zero-padded strings). */
+export function wallParts(d: Date, timeZone: string): Record<string, string> {
+  return Object.fromEntries(
+    wallClock(timeZone)
       .formatToParts(d)
       .map((x) => [x.type, x.value]),
   ) as Record<string, string>;
+}
+
+/** Google Sheets serial date (days since 1899-12-30) in the wall-clock time of `timeZone`. */
+export function toSheetsSerial(d: Date, timeZone: string): number {
+  const p = wallParts(d, timeZone);
   const wall = Date.UTC(+p.year!, +p.month! - 1, +p.day!, +p.hour!, +p.minute!, +p.second!);
   return Math.round((wall / 86_400_000 + 25_569) * 1e6) / 1e6; // 25569 = days 1899-12-30 → 1970-01-01
 }

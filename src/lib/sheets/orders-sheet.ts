@@ -6,6 +6,7 @@ import "server-only";
 import { ORDER_STATUSES, type OrderStatus } from "@/lib/orders/contract";
 import { gapi, SheetsConfigError, SheetsError, type GapiOptions } from "./client";
 import { a1, colLetter, parseSheetUrl, sheetUrl, type SheetLinkError } from "./format";
+import { statusFromLabel, statusLabel } from "./row";
 
 export const TAB = "Commandes";
 
@@ -63,23 +64,8 @@ const STATUS_TEXT: Record<OrderStatus, { fg: string; bold?: boolean; strikethrou
   lost: { fg: "#3C4043" },
 };
 
-const LABEL_TO_STATUS = new Map<string, OrderStatus>(
-  ORDER_STATUSES.flatMap((s) => [
-    [foldLabel(s.fr), s.id],
-    [foldLabel(s.id), s.id],
-  ]),
-);
-
-function foldLabel(s: string): string {
-  return s
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036F]/g, "")
-    .trim()
-    .toLowerCase();
-}
-
-export const statusLabel = (id: string): string => ORDER_STATUSES.find((s) => s.id === id)?.fr ?? ORDER_STATUSES[0].fr;
-export const statusFromLabel = (label: string): OrderStatus | null => LABEL_TO_STATUS.get(foldLabel(label)) ?? null;
+// column C labels live in ./row.ts (pure: the run planner parses them offline); re-exported for the existing callers
+export { statusFromLabel, statusLabel };
 
 const rgb = (hex: string) => {
   const h = hex.replace("#", "");
