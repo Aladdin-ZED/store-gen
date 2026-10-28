@@ -9,8 +9,9 @@
  * closed date has no range that starts on it.
  *
  * Frozen at P0. `isoWeekday`, `rangesForDay`, `isCallable`, `nextCallableAt` and `shopperPromiseAllowed` are the spec's
- * rules implemented exactly; `hoursText` is a typed stub (its per-locale wording is P4's). P4 adds
- * `windowMinutesBetween` and `snapIntoWindow` here. The shared cases are `./window.fixtures.ts`.
+ * rules implemented exactly. P4 filled `hoursText` and added `windowMinutesBetween` (the first-touch KPI, OD17),
+ * `snapIntoWindow` (ladder results), `effectiveWindow` (the `ops` setting + the store time zone → the one type) and
+ * the store-clock helpers `storeYmd`, `addDaysYmd`, `instantAt`. The shared cases are `./window.fixtures.ts`.
  */
 import type { Locale } from "@/lib/page/schema";
 
@@ -116,12 +117,8 @@ function scan(t: number, w: EffectiveWindow): { open: true } | { open: false; at
   // from yesterday: a range crossing midnight belongs to the day it starts
   for (let i = -1; i <= HORIZON_DAYS; i++) {
     const day = addDays(today, i);
-    const ranges = rangesForDay(day, w)
-      .filter((r) => HHMM.test(r.from) && HHMM.test(r.to) && r.from !== r.to)
-      .sort((a, b) => a.from.localeCompare(b.from));
-    for (const r of ranges) {
-      const start = instantOf(day, r.from, w.tz);
-      const end = instantOf(r.to < r.from ? addDays(day, 1) : day, r.to, w.tz);
+    for (const r of validRanges(day, w)) {
+      const [start, end] = boundsOf(day, r, w.tz);
       if (t >= start && t < end) return { open: true };
       if (start > t) return { open: false, at: start };
     }
@@ -155,13 +152,132 @@ export function nextCallableAt(t: Date, w: EffectiveWindow): Date {
   return new Date(s.at);
 }
 
-/** "09:30-13:00, 14:30-21:00" for today's ranges; always renders (staff screens); shopper-facing callers check `shopperPromiseAllowed` first. */
+/** a store-local day's valid ranges, in order */
+function validRanges(ymd: string, w: EffectiveWindow): Range[] {
+  return rangesForDay(ymd, w)
+    .filter((r) => HHMM.test(r.from) && HHMM.test(r.to) && r.from !== r.to)
+    .sort((a, b) => a.from.localeCompare(b.from));
+}
+
+/** [start, end) of a range that starts on `ymd` (the end on the next day when it crosses midnight) */
+const boundsOf = (ymd: string, r: Range, tz: string): [number, number] => [instantOf(ymd, r.from, tz), instantOf(r.to < r.from ? addDays(ymd, 1) : ymd, r.to, tz)];
+
+/**
+ * `t` when the window is open at `t`, else the start of the next range; never throws (a ladder always needs a due
+ * time): a window with no range in the next 400 days leaves `t` unchanged, and the queue's `outside_window` answers it.
+ */
+export function snapIntoWindow(t: Date, w: EffectiveWindow): Date {
+  const at = t.getTime();
+  if (overrideOpen(at, w)) return t;
+  const s = scan(at, w);
+  return s.open || s.at === null ? t : new Date(s.at);
+}
+
+/**
+ * The minutes of [a, b) that fall inside the window's ranges (overrides and closed dates applied; "Open calls now"
+ * is not counted): the first-touch KPI measures an agent in calling-window minutes, so a night order is not a slow
+ * agent (OD17). Overlapping ranges count once; b ≤ a gives 0.
+ */
+export function windowMinutesBetween(a: Date, b: Date, w: EffectiveWindow): number {
+  const t0 = a.getTime();
+  const t1 = b.getTime();
+  if (!(t1 > t0)) return 0;
+  const parts: [number, number][] = [];
+  const last = ymdOf(t1, w.tz);
+  // from the day before a: a range crossing midnight belongs to the day it starts
+  for (let day = addDays(ymdOf(t0, w.tz), -1), n = 0; day <= last && n <= HORIZON_DAYS * 4; day = addDays(day, 1), n++) {
+    for (const r of validRanges(day, w)) {
+      const [s, e] = boundsOf(day, r, w.tz);
+      const lo = Math.max(s, t0);
+      const hi = Math.min(e, t1);
+      if (hi > lo) parts.push([lo, hi]);
+    }
+  }
+  parts.sort((x, y) => x[0] - y[0]);
+  let total = 0;
+  let open = -Infinity;
+  let close = -Infinity;
+  for (const [s, e] of parts) {
+    if (s > close) {
+      total += close - open > 0 ? close - open : 0;
+      open = s;
+      close = e;
+    } else if (e > close) close = e;
+  }
+  total += close - open > 0 ? close - open : 0;
+  return Math.floor(total / 60_000);
+}
+
+/** the separator between two ranges of one day: the Arabic comma in Arabic, ", " in every Latin-script locale */
+const LIST_SEP: Partial<Record<Locale, string>> = { ar: "، " };
+
+/** HH:MM with the digits of `dateLocale`'s numbering system (ar-MA keeps Latin digits; "ar" alone writes ٠-٩). */
+function digitsOf(dateLocale: string): (s: string) => string {
+  let map: string[] | null = null;
+  try {
+    const nf = new Intl.NumberFormat(dateLocale, { useGrouping: false });
+    const d = Array.from({ length: 10 }, (_, i) => nf.format(i));
+    if (d.some((x, i) => x !== String(i))) map = d;
+  } catch {
+    map = null;
+  }
+  return (s) => (map ? s.replace(/[0-9]/g, (c) => map![Number(c)]!) : s);
+}
+
+/**
+ * Today's ranges in the store time zone, "09:30-13:00, 14:30-21:00" (overrides and closed dates applied; a range
+ * crossing midnight reads "21:30-00:30"), for staff screens, the `confirm_hours` template variable and the tracking
+ * help. Renders whether or not the owner saved the window (shopper-facing callers check `shopperPromiseAllowed`
+ * first, OD63). A day without a range answers "" (so `confirm_hours`' optional block drops, OPE-§7.1).
+ */
 export function hoursText(w: EffectiveWindow, locale: Locale, dateLocale: string, now: Date): string {
-  void w;
-  void locale;
-  void dateLocale;
-  void now;
-  throw new Error("not implemented: P4 hoursText");
+  const digits = digitsOf(dateLocale);
+  return validRanges(ymdOf(now.getTime(), w.tz), w)
+    .map((r) => digits(`${r.from}-${r.to}`))
+    .join(LIST_SEP[locale] ?? ", ");
+}
+
+/* ------------------------------------------------------------------ */
+/* the ops setting → the one window type, and the store clock          */
+/* ------------------------------------------------------------------ */
+
+/** The fields of the `ops` setting a window is built from (src/lib/settings/keys/ops.ts `OpsSetting`). */
+export interface OpsWindowFields {
+  callingWindow: { days: Record<IsoWeekday, Range[]>; closedDates: readonly string[]; savedAt: string | null };
+  windowOverrides: readonly { label: string; from: string; to: string; days: Record<IsoWeekday, Range[]> }[];
+  openOverrideUntil: string | null;
+}
+
+/** The effective window of a store: its `ops` setting in its time zone; `configured` once the owner saved it (OD63). */
+export function effectiveWindow(ops: OpsWindowFields, tz: string): EffectiveWindow {
+  return {
+    tz,
+    days: ops.callingWindow.days,
+    closedDates: ops.callingWindow.closedDates,
+    overrides: ops.windowOverrides,
+    openOverrideUntil: ops.openOverrideUntil,
+    configured: ops.callingWindow.savedAt !== null,
+  };
+}
+
+/** The store-local calendar date (YYYY-MM-DD) of `d` in `tz`. */
+export function storeYmd(d: Date, tz: string): string {
+  return ymdOf(d.getTime(), tz);
+}
+
+/** `ymd` plus `n` calendar days. */
+export function addDaysYmd(ymd: string, n: number): string {
+  return addDays(ymd, n);
+}
+
+/** The instant at which the clock of `tz` reads `hhmm` on `ymd` (a time a shift skips resolves to the later offset). */
+export function instantAt(ymd: string, hhmm: string, tz: string): Date {
+  return new Date(instantOf(ymd, hhmm, tz));
+}
+
+/** The store-local days whose table has at least one range (not closed), so a ladder's "next open day" can skip the rest. */
+export function hasRanges(ymd: string, w: EffectiveWindow): boolean {
+  return validRanges(ymd, w).length > 0;
 }
 
 /** OD63: a shopper is told an hour only when the owner saved the window once. */

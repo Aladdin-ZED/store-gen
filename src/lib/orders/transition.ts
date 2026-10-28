@@ -8,19 +8,14 @@ import "server-only";
  * The scope is a `WriteScope` (D71: every repository that writes a tenant table takes one; OPE-§3.5 predates D71 and
  * writes `StoreScope`), so lint L6 passes P4's body without a cast. The order hooks receive the same scope.
  */
-import type { StorePermission, StoreRole } from "@/lib/auth/permissions";
 import type { AttemptOutcome, DeliveryOutcome } from "@/lib/callcenter/outcomes";
 import type { StoreCtx, SystemCtx, WriteScope } from "@/lib/tenancy/types";
 import type { OrderStatus } from "./contract";
 import type { OrderRow } from "./hooks";
-import type { CancelReason, MoneyState, OrderStates, ReturnReason, ShipState, TransitionSource } from "./state";
+import type { CancelReason, MoneyState, OrderActor, OrderStates, ReturnReason, ShipState, TransitionSource } from "./state";
 
-export interface OrderActor {
-  kind: "user" | "system" | "api" | "bot" | "customer" | "sheet" | "carrier";
-  userId: string | null;
-  can?: (p: StorePermission) => boolean;
-  role?: StoreRole;
-}
+/** P4 step 1: the actor type lives in the pure ./state.ts (the plan reads it); re-exported unchanged. */
+export type { OrderActor } from "./state";
 
 /** The actor of a member's request (kind "user") or of a job (kind "system"), for `transitionOrder`. */
 export function actorFrom(ctx: StoreCtx | SystemCtx, kind?: OrderActor["kind"]): OrderActor {
