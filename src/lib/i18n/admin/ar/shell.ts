@@ -180,6 +180,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "error.category_required": "اختر الفئة أولًا.",
   "error.already_requested": "لديك طلب مفتوح من هذا النوع. انتظر الرد أو اسحبه أولًا.",
   "error.too_soon": "قمت بهذا قبل لحظات. أعد المحاولة بعد قليل.",
+  "error.cooldown_handle_required": "اكتب معرّف المتجر لتأكيد هذا التغيير.",
 
   /* ---- إطار لوحة التحكم: الشريط الجانبي والشريط العلوي وقائمة الحساب ---- */
   "shell.chrome.generate": "أنشئ صفحة",
@@ -694,6 +695,10 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
 
   /* ---- رابط الإبلاغ العام (PD70) ---- */
   "shell.report.link": "الإبلاغ عن هذا المتجر",
+
+  /* ---- بيانات صادقة (PLA-§22.18 القاعدة 3) ---- */
+  "shell.honest.needs_orders": "{count, plural, zero {يلزم # طلب} one {يلزم طلب واحد} two {يلزم طلبان} few {يلزم # طلبات} many {يلزم # طلبًا} other {يلزم # طلب}}",
+  "shell.honest.r2_delivery": "يظهر مع تتبع التوصيل",
 
   /* ---- قواعد صحة المتجر التي تصدرها الواجهة (D67) ---- */
   "health.shell.contact.text": "لا يستطيع الزبناء التواصل معك: أضف رقم هاتف أو واتساب.",

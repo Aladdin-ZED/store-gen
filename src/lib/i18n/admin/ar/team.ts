@@ -148,6 +148,8 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "team.role.cannot_title": "لا يستطيع",
   "team.role.can.pages": "إنشاء الصفحات والوسائط وتعديلها",
   "team.role.cannot.pages": "إنشاء الصفحات أو تعديلها",
+  "team.role.can.view_pages": "رؤية الصفحات والوسائط",
+  "team.role.cannot.view_pages": "رؤية الصفحات والوسائط",
   "team.role.can.publish": "نشر الصفحات",
   "team.role.cannot.publish": "نشر الصفحات",
   "team.role.can.orders_all": "رؤية كل الطلبات ومعالجتها",

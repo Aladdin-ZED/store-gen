@@ -180,6 +180,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "error.category_required": "Choisissez d'abord une catégorie.",
   "error.already_requested": "Vous avez déjà une demande de ce type en cours. Attendez la réponse ou retirez-la d'abord.",
   "error.too_soon": "Vous venez de le faire. Réessayez un peu plus tard.",
+  "error.cooldown_handle_required": "Saisissez l'identifiant de la boutique pour confirmer ce changement.",
 
   /* ---- chrome : barre latérale, barre du haut, menu du compte ---- */
   "shell.chrome.generate": "Générer une page",
@@ -694,6 +695,10 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
 
   /* ---- lien de signalement public (PD70) ---- */
   "shell.report.link": "Signaler cette boutique",
+
+  /* ---- données honnêtes (PLA-§22.18 règle 3) ---- */
+  "shell.honest.needs_orders": "{count, plural, one {Il faut # commande} other {Il faut # commandes}}",
+  "shell.honest.r2_delivery": "S'affiche avec le suivi des livraisons",
 
   /* ---- règles de santé émises par le shell (D67) ---- */
   "health.shell.contact.text": "Vos clients ne peuvent pas vous joindre : ajoutez un téléphone ou un numéro WhatsApp.",

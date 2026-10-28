@@ -178,6 +178,7 @@ export const messages = {
   "error.category_required": "Choose a category first.",
   "error.already_requested": "You already have an open request of this kind. Wait for the answer or withdraw it first.",
   "error.too_soon": "You did this a moment ago. Try again a little later.",
+  "error.cooldown_handle_required": "Type the store's handle to confirm this change.",
 
   /* ---- chrome: sidebar, top bar, user menu ---- */
   "shell.chrome.generate": "Generate a page",
@@ -692,6 +693,10 @@ export const messages = {
 
   /* ---- the public report link (PD70; the report page's keys are P1's report.*) ---- */
   "shell.report.link": "Report this store",
+
+  /* ---- honest-data guards (PLA-§22.18 rule 3): what a KPI tile or the funnel says instead of a number ---- */
+  "shell.honest.needs_orders": "{count, plural, one {Needs # order} other {Needs # orders}}",
+  "shell.honest.r2_delivery": "Fills in with delivery tracking",
 
   /* ---- Store Health rules the shell emits (D67: health.shell.<rule>.* live here) ---- */
   "health.shell.contact.text": "Customers have no way to reach you: add a phone or WhatsApp number.",

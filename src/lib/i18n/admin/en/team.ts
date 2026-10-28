@@ -145,6 +145,8 @@ export const messages = {
   "team.role.cannot_title": "Can't",
   "team.role.can.pages": "Build and edit pages and media",
   "team.role.cannot.pages": "Build or edit pages",
+  "team.role.can.view_pages": "See pages and media",
+  "team.role.cannot.view_pages": "See pages and media",
   "team.role.can.publish": "Publish pages",
   "team.role.cannot.publish": "Publish pages",
   "team.role.can.orders_all": "See and handle every order",

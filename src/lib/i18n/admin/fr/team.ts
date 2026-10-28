@@ -148,6 +148,8 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "team.role.cannot_title": "Ne peut pas",
   "team.role.can.pages": "Créer et modifier les pages et les médias",
   "team.role.cannot.pages": "Créer ou modifier les pages",
+  "team.role.can.view_pages": "Voir les pages et les médias",
+  "team.role.cannot.view_pages": "Voir les pages et les médias",
   "team.role.can.publish": "Publier les pages",
   "team.role.cannot.publish": "Publier les pages",
   "team.role.can.orders_all": "Voir et traiter toutes les commandes",
