@@ -44,6 +44,16 @@
  *                              row → not_found and A's row unchanged, impersonation refused, a done capi row refused, a
  *                              done telegram row re-sent, a second click a no-op, the audit rows; outboxSummary(B) shows
  *                              nothing of A and never a payload; the platform summary; runTick() runs the outbox in slot 3
+ *  - renders (P8 step 5)       enqueueRenders all-live / ids (dedupe while pending, B's page id under A's scope inserts
+ *                              nothing and is counted, impersonation refused); the claim clears dedupe on the real
+ *                              table (an enqueue mid-render inserts a second job; a retry behind it is superseded; B's
+ *                              scope claims and writes nothing of A); rendersJob re-renders a seeded live page in place
+ *                              (same version row, doc / checksum / runtime_v unchanged, html and etag new) and again
+ *                              after a store contact change (store_info); runtime_v 1 skipped; a broken version: 3
+ *                              retries then failed, retried on request; renderSummary on fixtures (oldest 61 min,
+ *                              throughput, ETA, failures by code, notes, nothing of another store); the platform
+ *                              summary; the fan-out (forbidden without domains.manage, one at a time, store by store,
+ *                              its row shared with the runner's keys); runTick() runs renders in slot 4 and the fan-out in 7
  */
 import Module from "node:module";
 import { randomBytes, createHash } from "node:crypto";
@@ -700,6 +710,7 @@ async function main(): Promise<number> {
       { id: STORE_D, handle: "storage-d", name: "storage-d", status: "suspended", brandSeed: "0123456789abcdef" },
     ]);
     const fctx = systemCtx("qa.foreach");
+    const stopSeen: string[] = [];
     const run = async (job: string, opts: { budgetMs?: number; where?: "pending_outbox" | "pending_renders"; states?: ("active" | "suspended")[]; sleepMs?: number; throwFor?: string } = {}) => {
       const seen: string[] = [];
       const r = await SC.forEachStore(fctx, { job, states: opts.states ?? ["active"], budgetMs: opts.budgetMs ?? 5_000, where: opts.where }, async (scope, store) => {
@@ -744,6 +755,13 @@ async function main(): Promise<number> {
       await pool().query("INSERT INTO render_jobs (id, store_id, page_id, reason, state, not_before) VALUES (?, ?, ?, 'runtime', ?, UTC_TIMESTAMP(3) + INTERVAL ? SECOND)", [id, storeId, page, state, inSec]);
     }
     t.eq("pending_renders: a pending job that is due (not one waiting for not_before, not a running one)", (await run("qa.renders", { where: "pending_renders" })).seen, [STORE_A]);
+    await pool().query(
+      "INSERT INTO render_jobs (id, store_id, page_id, reason, state, not_before, claim, lease_until) VALUES (?, ?, ?, 'runtime', 'running', UTC_TIMESTAMP(3), ?, UTC_TIMESTAMP(3) - INTERVAL 1 SECOND), (?, ?, ?, 'runtime', 'running', UTC_TIMESTAMP(3), ?, UTC_TIMESTAMP(3) + INTERVAL 1 MINUTE)",
+      ["01JB8ZK3Q4R5S6T7V8W9RJ0004", STORE_B, page, "01JB8ZK3Q4R5S6T7V8W9CLAIM3", "01JB8ZK3Q4R5S6T7V8W9RJ0005", STORE_C, page, "01JB8ZK3Q4R5S6T7V8W9CLAIM4"],
+    );
+    t.eq("pending_renders: …or one claimed by a render that died (running past its lease; not a live lease)", (await run("qa.renders2", { where: "pending_renders" })).seen, [STORE_A, STORE_B]);
+    const stopAt = await SC.forEachStore(fctx, { job: "qa.stop", states: ["active"], budgetMs: 5_000, stop: () => stopSeen.length >= 2 }, async (_scope, store) => void stopSeen.push(store.id));
+    t.eq("stop: true ends the call before the next store (done false)", [stopSeen, stopAt.done], [[STORE_A, STORE_B], false]);
 
     // pending_outbox: pending and due store items only
     for (const [id, storeId, state, inSec] of [
@@ -1041,6 +1059,217 @@ async function main(): Promise<number> {
       globalThis.__sgOutboxHandlers = saved;
       await pool().query("UPDATE flags SET default_value = 'true' WHERE `key` = 'capi_enabled'");
       invalidateFlags();
+    }
+  });
+
+  /* ================================================================ */
+  h.section("renders", async (t) => {
+    const RQ = await import("@/lib/jobs/renders");
+    const RS = await import("@/lib/jobs/renders/sql");
+    const RU = await import("@/lib/jobs/renders/rules");
+    const R = await import("@/lib/jobs/runner");
+    const { mintScope } = await import("@/lib/tenancy/seam");
+    const { newId } = await import("@/lib/db/ids");
+    const { getFixture } = await import("@/lib/page/fixtures");
+    const { updateStoreSetting } = await import("@/lib/settings");
+    type PlatformCtx = import("@/lib/tenancy/types").PlatformCtx;
+    type WriteScope = import("@/lib/tenancy/types").WriteScope;
+    type JobCtx = import("@/lib/jobs/runner").JobCtx;
+    await pool().query("DELETE FROM render_jobs"); // the forEachStore section's probe rows
+    const STORE_C = "01JB8ZK3Q4R5S6T7V8W9XYZ0CC"; // forEachStore's active store: the summary fixtures
+    const scopeB = systemScope(ctx, STORE_B);
+    const scopeC = systemScope(ctx, STORE_C);
+
+    // seeded live pages (the argan fixture), as test:store seeds them: A has a v2 page, a runtime_v 1 page and a draft
+    const fx = getFixture("argan", { now: "2026-10-24T12:00:00.000Z", locale: "fr" });
+    const docJson = JSON.stringify({ ...fx.doc, seo: { ...fx.doc.seo, noindex: false } });
+    const seedPage = async (storeId: string, slug: string, opts: { published: boolean; runtimeV?: number }) => {
+      const id = newId();
+      await pool().query("INSERT INTO pages (id, store_id, slug, name, status, locale, public_key, draft) VALUES (?, ?, ?, ?, ?, 'fr', ?, ?)", [id, storeId, slug, slug, opts.published ? "published" : "draft", `pk_${hex(12)}`, docJson]);
+      if (!opts.published) return { id, versionId: null };
+      const versionId = newId();
+      const html = `<!DOCTYPE html><title>${slug}</title>`;
+      await pool().query(
+        "INSERT INTO page_versions (id, store_id, page_id, kind, doc, html, thank_you_html, csp, thank_you_csp, etag, checksum, runtime_v) VALUES (?, ?, ?, 'publish', ?, ?, ?, ?, ?, ?, ?, ?)",
+        [versionId, storeId, id, docJson, html, `<!DOCTYPE html><title>merci ${slug}</title>`, "default-src 'self'", "default-src 'self'", sha(Buffer.from(html)), sha(Buffer.from(docJson)), opts.runtimeV ?? 2],
+      );
+      await pool().query("UPDATE pages SET published_version_id = ? WHERE id = ?", [versionId, id]);
+      return { id, versionId };
+    };
+    const glow = await seedPage(STORE_A, "glow", { published: true });
+    const retro = await seedPage(STORE_A, "retro", { published: true, runtimeV: 1 });
+    const draft = await seedPage(STORE_A, "brouillon", { published: false });
+    const pageB = await seedPage(STORE_B, "argan", { published: true });
+
+    type Job = { id: string; store_id: string; page_id: string; reason: string; priority: number; dedupe: string | null; state: string; attempts: number; error: string | null; claim: string | null };
+    const jobsOf = async (pageId: string) => ((await pool().query("SELECT * FROM render_jobs WHERE page_id = ? ORDER BY created_at, id", [pageId])) as unknown as [Job[]])[0];
+    type Version = { id: string; doc: string; html: string; thank_you_html: string; csp: string; etag: string; checksum: string; runtime_v: number };
+    const versionOf = async (id: string) => ((await pool().query("SELECT id, doc, html, thank_you_html, csp, etag, checksum, runtime_v FROM page_versions WHERE id = ?", [id])) as unknown as [Version[]])[0][0]!;
+    const versionRows = async (pageId: string) => Number(((await pool().query("SELECT COUNT(*) AS n FROM page_versions WHERE page_id = ?", [pageId])) as unknown as [{ n: number }[]])[0][0]!.n);
+    const refusal = async (fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+        return "ok";
+      } catch (err) {
+        return (err as { code?: string }).code ?? (err as Error).name;
+      }
+    };
+    const jobCtx = (job: string, budgetMs = 10_000): JobCtx => ({ ...systemCtx(job), deadline: Date.now() + budgetMs, tickId: newId(), cursor: "", setCursor: async () => undefined, yield: async () => undefined, lagMs: () => 0 });
+    const staffCtx = (can = true): PlatformCtx =>
+      ({ user: { id: "01JB8ZK3Q4R5S6T7V8W9STAFF1" }, role: "super_admin", actor: { kind: "platform", userId: "01JB8ZK3Q4R5S6T7V8W9STAFF1", impersonatorId: null, ip: null }, can: () => can, stepUpFresh: false, stepUpUntil: null }) as unknown as PlatformCtx;
+
+    // ---- enqueue
+    t.eq("enqueueRenders(A, all-live): A's two live pages (not the draft)", await RQ.enqueueRenders(scopeA, "all-live", "store_info"), { enqueued: 2 });
+    t.eq("…again while pending: nothing (one pending job per page, D25)", await RQ.enqueueRenders(scopeA, [glow.id, retro.id], "brand"), { enqueued: 0 });
+    t.eq("…the pending job holds dedupe = its page id", (await jobsOf(glow.id)).map((j) => [j.state, j.dedupe, j.reason]), [["pending", glow.id, "store_info"]]);
+    E.resetErrorBuffer();
+    t.eq("store B's page id enqueued under A's scope inserts nothing", [await RQ.enqueueRenders(scopeA, [pageB.id, draft.id], "address"), (await jobsOf(pageB.id)).length], [{ enqueued: 1 }, 0]);
+    // a fresh buffer's first flush is immediate (its timer may already have run): flush, then read the ring's table
+    await E.flushErrors();
+    const ring = ((await pool().query("SELECT store_id, route, count FROM error_events WHERE area = 'renders' AND code = 'foreign_page'")) as unknown as [{ store_id: string | null; route: string; count: number }[]])[0];
+    t.check("…the foreign id counted in the error ring (renders / foreign_page, A, the reason's route)", ring.length === 1 && ring[0]!.store_id === STORE_A && ring[0]!.route === "renders:enqueue:address" && Number(ring[0]!.count) === 1, JSON.stringify(ring));
+    E.resetErrorBuffer();
+    await pool().query("DELETE FROM render_jobs WHERE page_id = ?", [draft.id]); // the draft's own job (a page of A): not needed here
+    t.eq("an impersonation scope is refused", await refusal(() => RQ.enqueueRenders(mintScope("impersonation", STORE_A) as unknown as WriteScope, "all-live", "brand")), "impersonation_read_only");
+    t.eq("a bad priority is refused", await refusal(() => RQ.enqueueRenders(scopeA, "all-live", "brand", 12)), "RangeError");
+
+    // ---- the claim clears dedupe (ENGC-4), on the real table
+    {
+      const token = newId();
+      const claimed = await RS.dbRenderRepo.claim(scopeA, 10, token);
+      t.eq("claim: A's due jobs; B's scope claims none of A's", [claimed.map((j) => j.pageId).sort(), (await RS.dbRenderRepo.claim(scopeB, 10, newId())).length], [[glow.id, retro.id].sort(), 0]);
+      t.eq("…running with dedupe NULL", (await jobsOf(glow.id)).map((j) => [j.state, j.dedupe, j.claim]), [["running", null, token]]);
+      t.eq("an enqueue during the render inserts a second, pending job", await RQ.enqueueRenders(scopeA, [glow.id], "store_info"), { enqueued: 1 });
+      const glowJob = claimed.find((j) => j.pageId === glow.id)!;
+      const retroJob = claimed.find((j) => j.pageId === retro.id)!;
+      t.eq("…a retry of the first behind it → superseded (UPDATE IGNORE)", await RS.dbRenderRepo.finish(scopeA, glowJob, token, { state: "pending", attempts: 1, retryInMs: 60_000, error: "TypeError" }), "superseded");
+      t.eq("…B's scope cannot write A's outcome", await RS.dbRenderRepo.finish(scopeB, retroJob, token, { state: "done", error: null, requeue: false }), "lost");
+      t.eq("…the rest of the claim released back to pending with its dedupe", await RS.dbRenderRepo.release(scopeA, [retroJob.id], token), { released: 1, superseded: 0 });
+      t.eq("…glow: the old job skipped (superseded), the new one pending", (await jobsOf(glow.id)).map((j) => [j.state, j.error, j.dedupe]), [["skipped", "superseded", null], ["pending", null, glow.id]]);
+    }
+
+    // ---- the renders job: in place, then again after a store contact change (store_info)
+    const before = await versionOf(glow.versionId!);
+    const rowsBefore = await versionRows(glow.id);
+    const r1 = await RQ.rendersJob(jobCtx("renders"));
+    const v1 = await versionOf(glow.versionId!);
+    t.check("rendersJob: one rendered, one skipped, done", r1.done && r1.summary?.rendered === 1 && r1.summary?.skipped === 1, JSON.stringify(r1));
+    t.check("in place: same version row, html / etag / csp rewritten, the real document", v1.etag !== before.etag && v1.html !== before.html && v1.html.startsWith("<!DOCTYPE html>") && v1.html.includes(glow.versionId!) && v1.csp !== before.csp);
+    t.eq("in place: doc, checksum and runtime_v unchanged; no version row created", [v1.doc === before.doc, v1.checksum, v1.runtime_v, await versionRows(glow.id)], [true, before.checksum, 2, rowsBefore]);
+    t.eq("runtime_v 1 → skipped (runtime_v1), its version untouched", [(await jobsOf(retro.id)).map((j) => [j.state, j.error]), (await versionOf(retro.versionId!)).etag], [[["skipped", "runtime_v1"]], sha(Buffer.from("<!DOCTYPE html><title>retro</title>"))]);
+    const phone = "+212612340077";
+    await updateStoreSetting(scopeA, "store", { phone, whatsapp: phone }, { id: "system", kind: "system" });
+    t.eq("a store contact change → enqueueRenders(store_info)", await RQ.enqueueRenders(scopeA, "all-live", "store_info"), { enqueued: 2 });
+    await RQ.rendersJob(jobCtx("renders"));
+    const v2 = await versionOf(glow.versionId!);
+    t.check("…re-rendered in place: a new etag and html carrying the new contact", v2.etag !== v1.etag && v2.html !== v1.html && (v2.html.includes("612340077") || v2.thank_you_html.includes("612340077")), `${v1.etag} → ${v2.etag}`);
+    t.eq("…doc, checksum, runtime_v and the row count still unchanged", [v2.doc === before.doc, v2.checksum, v2.runtime_v, await versionRows(glow.id)], [true, before.checksum, 2, rowsBefore]);
+    const glowJobs = await jobsOf(glow.id);
+    t.check("…every glow job finished (no error, or notes from the warn-mode gates ≤ 200)", glowJobs.filter((j) => j.state === "done").length === 2 && glowJobs.every((j) => j.error === null || j.error === "superseded" || (j.error.startsWith("notes:") && j.error.length <= 200)), JSON.stringify(glowJobs.map((j) => [j.state, j.error])));
+
+    // ---- failures: 3 retries then failed (a live version whose doc no longer validates)
+    {
+      const bad = await seedPage(STORE_A, "casse", { published: true });
+      await pool().query("UPDATE page_versions SET doc = '{\"v\":2}' WHERE id = ?", [bad.versionId]);
+      await RQ.enqueueRenders(scopeA, [bad.id], "brand");
+      const trail: string[] = [];
+      for (let i = 0; i < 4; i++) {
+        await RQ.rendersJob(jobCtx("renders"));
+        const [j] = await jobsOf(bad.id);
+        trail.push(`${j!.state}:${j!.attempts}`);
+        // the fake clock: the backoff has passed
+        await pool().query("UPDATE render_jobs SET not_before = UTC_TIMESTAMP(3) - INTERVAL 1 SECOND WHERE page_id = ? AND state = 'pending'", [bad.id]);
+      }
+      t.eq("a failing page: pending ×3 (1, 5, 30 min), then failed", trail, ["pending:1", "pending:2", "pending:3", "failed:4"]);
+      const [failed] = await jobsOf(bad.id);
+      t.check("…its code kept (invalid), never a message", failed!.error === "invalid", String(failed!.error));
+      t.eq("retryFailedRenders(A) queues the failed page again", await RQ.retryFailedRenders(scopeA), { enqueued: 1 });
+      t.eq("retryStoreRenders from the console needs domains.manage", await refusal(() => RQ.retryStoreRenders(staffCtx(false), STORE_A)), "forbidden");
+      await pool().query("DELETE FROM render_jobs WHERE page_id = ?", [bad.id]);
+      await pool().query("UPDATE pages SET status = 'draft', published_version_id = NULL WHERE id = ?", [bad.id]);
+    }
+
+    // ---- summaries on fixtures (store C: jobs only)
+    {
+      const pg = (n: number) => `01JB8ZK3Q4R5S6T7V8W9CP${String(n).padStart(4, "0")}`;
+      const rows: unknown[][] = [];
+      const add = (n: number, state: string, o: { reason?: string; doneMinAgo?: number; createdMinAgo?: number; error?: string | null } = {}) =>
+        rows.push([newId(), STORE_C, pg(n), o.reason ?? "address", state, state === "pending" ? pg(n) : null, o.error ?? null, o.createdMinAgo ?? 0, o.doneMinAgo ?? null]);
+      for (let i = 0; i < 30; i++) add(i, "pending", { createdMinAgo: i === 0 ? 61 : 5 });
+      for (let i = 0; i < 12; i++) add(100 + i, "done", { doneMinAgo: 10 });
+      for (let i = 0; i < 3; i++) add(200 + i, "skipped", { doneMinAgo: 20, error: "runtime_v1" });
+      add(300, "done", { doneMinAgo: 55, error: "notes:budget:F5,honesty:D2" });
+      add(301, "done", { doneMinAgo: 50, error: "notes:budget:F5" });
+      add(302, "done", { doneMinAgo: 150 });
+      add(400, "failed", { doneMinAgo: 120, error: "page_too_large" });
+      add(401, "failed", { doneMinAgo: 125, error: "page_too_large", reason: "store_info" });
+      add(402, "failed", { doneMinAgo: 30 * 60, error: "invalid" });
+      for (const r of rows) {
+        await pool().query(
+          "INSERT INTO render_jobs (id, store_id, page_id, reason, state, dedupe, error, created_at, done_at) VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(3) - INTERVAL ? MINUTE, IF(? IS NULL, NULL, UTC_TIMESTAMP(3) - INTERVAL ? MINUTE))",
+          [...r.slice(0, 8), r[8], r[8]],
+        );
+      }
+      const s = await RQ.renderSummary(scopeC);
+      t.check("renderSummary(C): a job pending 61 min → oldestMin ≥ 61 (render_stuck), with its page", s.oldestMin !== null && s.oldestMin >= 61 && s.oldestPending?.pageId === pg(0) && s.oldestPending.slug === null, JSON.stringify(s.oldestPending));
+      t.eq("…totals by state", [s.totals.pending, s.totals.done, s.totals.skipped, s.totals.failed], [30, 15, 3, 3]);
+      t.eq("…throughput: 17 finished in the hour (12 + 3 + 2 done with notes), 0.3 / min; done 14", [s.finishedLastHour, s.throughputPerMin, s.doneLastHour], [17, 0.3, 14]);
+      t.eq("…ETA = ceil(30 × 60 / 17) = 106 min", s.etaMin, 106);
+      t.eq("…failures of 24 h (2, page_too_large) and the old one", [s.failed24h.map((f) => [f.storeId, f.count, f.error]), s.failedOld], [[[STORE_C, 2, "page_too_large"]], 1]);
+      t.eq("…notes: 2 pages, the top ids", [s.notes, s.topNotes.map((n) => [n.id, n.count])], [2, [["budget:F5", 2], ["honesty:D2", 1]]]);
+      t.eq("…by reason", s.byReason.map((r) => [r.reason, r.pending, r.done, r.failed]), [["address", 30, 15, 2], ["store_info", 0, 0, 1]]);
+      const sumA = await RQ.renderSummary(scopeA);
+      t.check("renderSummary(A) names nothing of C, and lists A's runtime_v 1 page for a manual republish", !JSON.stringify(sumA).includes(pg(0)) && !JSON.stringify(sumA).includes(STORE_C) && sumA.republish.some((p) => p.pageId === retro.id), JSON.stringify(sumA.republish));
+      const sumB = await RQ.renderSummary(scopeB);
+      t.check("renderSummary(B) names no page or job of A", ![glow.id, retro.id, STORE_A].some((id) => JSON.stringify(sumB).includes(id)));
+      t.check("…never a document or HTML byte", !/DOCTYPE|"doc"|<html/i.test(JSON.stringify(s) + JSON.stringify(sumA)));
+      const p = await RQ.platformRenderSummary();
+      const total = Number(((await pool().query("SELECT COUNT(*) AS n FROM render_jobs")) as unknown as [{ n: number }[]])[0][0]!.n);
+      t.eq("platformRenderSummary: every job counted once", Object.values(p.totals).reduce((n, v) => n + v, 0), total);
+      t.check("…the oldest pending of any store (C's, 61 min), C first among the stores with failures", (p.oldestMin ?? 0) >= 61 && p.oldestPending?.storeId === STORE_C && p.stores[0]?.storeId === STORE_C && p.stores[0].failed === 3, JSON.stringify(p.stores.slice(0, 3)));
+      const pa = await RQ.platformRenderSummary({ reason: "store_info" });
+      t.eq("…narrowed to one reason (the Domains view uses address)", [pa.byReason.map((r) => r.reason), pa.totals.failed], [["store_info"], 1]);
+      t.eq("renderSummary() without a scope is the platform summary", (await RQ.renderSummary()).totals, p.totals);
+      await pool().query("DELETE FROM render_jobs WHERE store_id = ?", [STORE_C]);
+      // a render that died: its expired lease is taken over by the claim, the lost try counted
+      const dead = newId();
+      await pool().query("INSERT INTO render_jobs (id, store_id, page_id, reason, state, attempts, claim, lease_until) VALUES (?, ?, ?, 'address', 'running', 1, 'DEADCLAIM0000000000000000A', UTC_TIMESTAMP(3) - INTERVAL 1 SECOND)", [dead, STORE_C, pg(999)]);
+      const taken = await RS.dbRenderRepo.claim(scopeC, 10, newId());
+      t.eq("the claim takes over an expired lease and counts the lost try", taken.map((j) => [j.id, j.attempts]), [[dead, 2]]);
+      await pool().query("DELETE FROM render_jobs WHERE store_id = ?", [STORE_C]);
+    }
+
+    // ---- the fan-out (PLA-§16.2): the request returns at once, the job enqueues store by store
+    {
+      await pool().query("DELETE FROM render_jobs WHERE state = 'pending'");
+      t.eq("enqueueRendersEverywhere without domains.manage → forbidden", await refusal(() => RQ.enqueueRendersEverywhere(staffCtx(false), "address")), "forbidden");
+      t.eq("…a reason other than address / runtime is refused", await refusal(() => RQ.enqueueRendersEverywhere(staffCtx(), "brand" as "address")), "RangeError");
+      const req = await RQ.enqueueRendersEverywhere(staffCtx(), "address");
+      t.check("…started, nothing enqueued yet (the request returns at once)", req.started && req.fanout.stores === 0 && req.fanout.total >= 3 && !req.fanout.done && (await jobsOf(glow.id)).every((j) => j.state !== "pending"), JSON.stringify(req));
+      const again = await RQ.enqueueRendersEverywhere(staffCtx(), "runtime");
+      t.eq("…a second request while it runs → not started, the running one answered", [again.started, again.fanout.id, again.fanout.reason], [false, req.fanout.id, "address"]);
+      const run = await RQ.rendersFanoutJob(jobCtx("renders.fanout"));
+      const prog = await RQ.renderFanoutProgress();
+      t.check("renders.fanout: every store handled, done, 100 %", run.done && prog?.done === true && prog.stores === req.fanout.total && prog.pct === 100 && prog.enqueued === run.processed, JSON.stringify([run, prog]));
+      t.eq("…A's and B's live pages queued (address), store by store", [(await jobsOf(glow.id)).filter((j) => j.state === "pending").map((j) => j.reason), (await jobsOf(pageB.id)).map((j) => [j.state, j.reason])], [["address"], [["pending", "address"]]]);
+      t.eq("…an idle run reads the row and does nothing", await RQ.rendersFanoutJob(jobCtx("renders.fanout")), { done: true, processed: 0 });
+      // the runner's due keys (an hourly or daily job's) share the row: a fan-out write keeps them, and their merge keeps it
+      const { dbJobState } = await import("@/lib/jobs/runs");
+      await dbJobState.saveDue("renders.fanout", { lastHour: "2026-10-29T09", lastDay: null, fails: 0, failKey: null });
+      const retry = await RQ.retryFailedEverywhere(staffCtx(), "address");
+      t.check("a new request once it finished starts (Retry failed, address)", retry.started && retry.fanout.mode === "failed" && retry.fanout.id !== req.fanout.id);
+      await RQ.rendersFanoutJob(jobCtx("renders.fanout"));
+      // the cron: renders in slot 4 renders what the fan-out queued; the fan-out row keeps the runner's due keys
+      const tick = await R.runTick();
+      const state = ((await pool().query("SELECT state FROM cron_cursors WHERE job = 'renders.fanout'")) as unknown as [{ state: string }[]])[0][0]!.state;
+      t.check("…the row keeps the fan-out and the runner's keys side by side", RU.parseFanout(state)?.id === retry.fanout.id && (JSON.parse(state) as { due?: { lastHour?: string } }).due?.lastHour === "2026-10-29T09", state);
+      const runs = ((await pool().query("SELECT job, store_id, ok, processed, summary FROM job_runs WHERE tick_id = ? AND job IN ('renders', 'renders.fanout')", [tick.tickId])) as unknown as [{ job: string; store_id: string | null; ok: number; processed: number; summary: string | null }[]])[0];
+      const rendersRun = runs.find((r) => r.job === "renders" && r.store_id === null);
+      const sum = rendersRun?.summary ? (JSON.parse(rendersRun.summary) as Record<string, unknown>) : {};
+      t.check("runTick(): renders ran in slot 4 within 12 s and rendered the fan-out's pages", rendersRun?.ok === 1 && sum.slot === "4" && Number(sum.budgetMs) <= 12_000 && Number(sum.rendered) >= 2, JSON.stringify(runs));
+      t.check("…with per-store rows for A and B", [STORE_A, STORE_B].every((id) => runs.some((r) => r.job === "renders" && r.store_id === id)), JSON.stringify(runs.map((r) => [r.job, r.store_id])));
+      t.check("…renders.fanout ran in slot 7", runs.some((r) => r.job === "renders.fanout" && r.store_id === null && (JSON.parse(r.summary ?? "{}") as { slot?: string }).slot === "7"));
+      t.check("…job_runs hold counts only (no html, no doc)", !/DOCTYPE|"doc"/.test(JSON.stringify(runs)));
     }
   });
 

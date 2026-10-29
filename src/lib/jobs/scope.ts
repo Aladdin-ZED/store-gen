@@ -57,6 +57,11 @@ export interface ForEachStoreOpts {
   states: readonly StoreStatus[];
   budgetMs: number;
   where?: "pending_sheets" | "pending_outbox" | "pending_renders";
+  /**
+   * P8 step 5 (additive): asked before each store; true ends the call there (`done` false, the cursor on the last store
+   * served), so a job whose own budget is spent (the renders' CPU cap) visits no further store and writes no row for it
+   */
+  stop?: () => boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -152,8 +157,9 @@ const WHERE_TABLE: Record<NonNullable<ForEachStoreOpts["where"]>, string> = {
  * - `pending_outbox` (§H.1): an item of the store waiting and due (`pending`, `next_at` passed), or claimed by a drain
  *   that died (`running` past its lease: the claim takes it over, P8 step 4). Platform items (`store_id` NULL) are never
  *   a store's work; the drain takes them on its own.
- * - `pending_renders` (§H.3): a job of the store waiting and due (`pending`, `not_before` passed). A `running` job is
- *   the drain's own claim, never a reason to visit again.
+ * - `pending_renders` (§H.3): a job of the store waiting and due (`pending`, `not_before` passed), or claimed by a
+ *   render that died (`running` past its lease: the claim takes it over, P8 step 5). A running job with a live lease
+ *   is another drain's claim, never a reason to visit.
  */
 function wherePredicate(where: NonNullable<ForEachStoreOpts["where"]>): SQL {
   switch (where) {
@@ -166,7 +172,7 @@ function wherePredicate(where: NonNullable<ForEachStoreOpts["where"]>): SQL {
     case "pending_outbox":
       return sql`EXISTS (SELECT 1 FROM outbox x WHERE x.store_id = ${stores.id} AND ((x.state = 'pending' AND x.next_at <= UTC_TIMESTAMP(3)) OR (x.state = 'running' AND x.lease_until < UTC_TIMESTAMP(3))))`;
     case "pending_renders":
-      return sql`EXISTS (SELECT 1 FROM render_jobs r WHERE r.store_id = ${stores.id} AND r.state = 'pending' AND r.not_before <= UTC_TIMESTAMP(3))`;
+      return sql`EXISTS (SELECT 1 FROM render_jobs r WHERE r.store_id = ${stores.id} AND ((r.state = 'pending' AND r.not_before <= UTC_TIMESTAMP(3)) OR (r.state = 'running' AND r.lease_until < UTC_TIMESTAMP(3))))`;
   }
 }
 
@@ -185,6 +191,26 @@ async function storePage(states: readonly StoreStatus[], after: string, upTo: st
     .orderBy(asc(stores.id))
     .limit(limit);
   return rows.map(toStoreRow).filter((r): r is StoreRow => r !== null);
+}
+
+/**
+ * One pass over the stores in `states`, in id order after `after` (`limit` per call, ≤ 200): the platform-wide jobs
+ * that visit every store once from start to end (the render fan-out, P8 step 5) rather than round robin.
+ */
+export async function storesAfter(states: readonly StoreStatus[], after: string, limit: number = PAGE): Promise<StoreRow[]> {
+  if (!states.length || states.some((s) => !STATUSES.includes(s))) throw new Error("jobs: storesAfter needs store states");
+  return storePage(states, after, null, undefined, Math.min(200, Math.max(1, Math.trunc(limit))));
+}
+
+/** How many stores are in `states` (a fan-out's progress denominator). */
+export async function countStores(states: readonly StoreStatus[]): Promise<number> {
+  if (!states.length || states.some((s) => !STATUSES.includes(s))) throw new Error("jobs: countStores needs store states");
+  // tenancy: platform cron iterator over stores (§E.3 rule 6, src/lib/jobs/**): a count, no store data
+  const [row] = await db
+    .select({ n: sql<number>`COUNT(*)` })
+    .from(stores)
+    .where(and(inArray(stores.status, [...states]), isNotNull(stores.handle)));
+  return Number(row?.n ?? 0);
 }
 
 /**
@@ -218,6 +244,8 @@ export interface RoundRobinSource<T extends { id: string }> {
 
 export interface RoundRobinOpts {
   budgetMs: number;
+  /** asked before each item after the budget check: true ends the call (`done` false) */
+  stop?: () => boolean;
   /** the clock (epoch ms); tests pass a fake one */
   now?: () => number;
   /** items read per page (50) */
@@ -248,7 +276,7 @@ export async function roundRobin<T extends { id: string }>(
     for (;;) {
       const page = await src.page(after, phase.upTo, size);
       for (const item of page) {
-        if (now() >= deadline) {
+        if (now() >= deadline || opts.stop?.()) {
           await src.writeCursor(last);
           return { visited, done: false };
         }
@@ -306,7 +334,7 @@ export async function forEachStore(
   if (opts.where === "pending_sheets") {
     let visited = 0;
     for (const store of await oldestPendingFirst(opts.states, where!)) {
-      if (Date.now() >= deadline) return { visited, done: false };
+      if (Date.now() >= deadline || opts.stop?.()) return { visited, done: false };
       visited++;
       await visit(store);
     }
@@ -320,7 +348,7 @@ export async function forEachStore(
       writeCursor: (c) => writeJobCursor(opts.job, c),
     },
     // the predicate probe above counted against the budget; at least one store is still visited
-    { budgetMs: Math.max(1, deadline - Date.now()) },
+    { budgetMs: Math.max(1, deadline - Date.now()), stop: opts.stop },
     visit,
   );
 }

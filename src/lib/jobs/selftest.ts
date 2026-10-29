@@ -25,7 +25,12 @@
  *  7. outbox     (./selftest-outbox.ts, P8 step 4) the backoff ladder and dead rules, httpRetryable, resendKey, the
  *                replay rule table, the §H.1 claim statement, the enqueue refusals; the drainer on an in-memory outbox:
  *                per-kind and per-store caps, timeouts, the kill switch, a missing handler, the budget, merged sends,
- *                mail's caps, unreadable payloads, lost claims and claim contention.
+ *                mail's caps, unreadable payloads, lost claims and claim contention;
+ *  8. renders    (./selftest-renders.ts, P8 step 5) the enqueue checks, the §H.3 claim statement, the outcomes and the
+ *                retry ladder, the notes text, the CPU cap, the summary maths and the fan-out row; the drain on an
+ *                in-memory queue: dedupe cleared on claim (a second render after an enqueue mid-render, ENGC-4), two
+ *                enqueues while pending → one, priority order, ≤ 10 per store, the 4 s CPU cap, 3 retries then failed,
+ *                runtime_v 1 skipped; the fan-out across pages of stores, and forEachStore's `stop`.
  */
 import Module from "node:module";
 import { EventEmitter } from "node:events";
@@ -606,6 +611,17 @@ async function main(): Promise<void> {
     DR: await import("./outbox/drain"),
     Clock: FakeClock,
     scope: (storeId) => SC.systemScope(SC.systemCtx("qa.outbox"), storeId),
+  });
+
+  /* ---------------------------------------------------------------- */
+  const { renderSections } = await import("./selftest-renders");
+  renderSections(h, {
+    RU: await import("./renders/rules"),
+    DR: await import("./renders/drain"),
+    FO: await import("./renders/fanout"),
+    SC,
+    Clock: FakeClock,
+    scope: (storeId) => SC.systemScope(SC.systemCtx("qa.renders"), storeId),
   });
 
   await h.run();

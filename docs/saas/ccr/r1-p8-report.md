@@ -92,3 +92,86 @@ CCR list). Until then this file records the decisions the steps took, so none is
     per duplicate item, at most 100 a call, the caller's area as the route) are exported for P4's and P5's hooks.
 16. **`OUTBOX_BACKOFF_MS` and `isFinalFailure` moved** to `outbox/rules.ts` and are re-exported from `outbox.ts`
     unchanged (the contract file still pins them there), so the rules module needs no value from `outbox.ts`.
+
+### Step 5: the render queue (`src/lib/jobs/renders.ts`, `renders/{rules,drain,sql,summary,fanout}.ts`, `tracks/core.ts`)
+
+1. **The handler is `rerenderInPlace`** (`src/lib/render/publish.server.ts`, CCR r1-p8-2, applied at P0b). The brief's
+   fallback `renders/inplace.ts` is not needed and does not exist. The drain reaches it through a port
+   (`RerenderPort`), so test:jobs drives the queue with a fake one.
+2. **3 retries, then `failed`: 4 tries in all.** §H.3 says "failures retry 3 times then failed", and the backoff ladder
+   has 3 steps (1, 5, 30 min). The brief also says "after 3 attempts → failed", which would leave the 30 min step
+   unused. The ladder wins: the 4th failing try marks the job `failed` with `attempts = 4`, and `test:jobs` /
+   `test:storage` assert pending 1 → 2 → 3, then failed 4. A failed job marks the store's health dirty (P1's stub
+   today) and counts `renders` / <code> in the error ring once.
+3. **The CPU budget is measured as event-loop busy time** (`performance.eventLoopUtilization().active`, the perf_hooks
+   clock of `performance.now()`) around each `rerenderInPlace` call. §H.2 says "performance.now() around SSR +
+   gzip". Those calls are inside `publish.server.ts` (not P8's file), and wall time around the whole call would count
+   the database awaits as CPU. Busy time includes other requests' work during those awaits, so it is an upper bound:
+   the cap errs towards rendering fewer pages per tick. The cap is 4 s, 2 s while lag p95 > 100 ms. The runner also
+   halves the job's 12 s budget under lag, because `renders` is CPU-bound.
+4. **Claims are per store** (the §H.3 statement with `store_id = ?`, `ORDER BY priority, not_before, id LIMIT 10`), so
+   every statement binds the store from the job's system scope and the claim needs no annotation. `pending_renders`
+   now also picks a store whose job is `running` past its lease, as `pending_outbox` does. A take-over from an expired
+   lease counts the lost try (`attempts` is assigned before `state`). A job taken over after 3 retries fails at once
+   (`lease_expired`) without rendering.
+5. **No further store once a budget is spent.** `forEachStore` gains an optional `stop()` (additive), asked before each
+   store. When the CPU cap or the deadline is reached, the run ends there. The cursor stays on the last store served,
+   and no `job_runs` row is written for stores that were not visited. Inside a store the deadline and the cap are
+   checked before each job, and the rest of the claim goes back to `pending` untouched (`released`).
+6. **Outcomes.**
+   - `rendered` → `done`, with the warn-mode gate items as `notes:<ids>` (whole ids, ≤ 200 chars).
+   - `skipped_runtime_v1` → `skipped` / `runtime_v1`; the page is listed in the summary's `republish`.
+   - `not_live` → `skipped` / `not_live`.
+   - `live_changed` (a publish landed mid-render) → `done` / `live_changed`, and the page is queued again.
+   - A throw → a retry, stored as the refusal's own code (`invalid`, `page_too_large`) or the error ring's code,
+     never a message.
+7. **A retry behind a newer pending job is superseded.** When a job goes back to `pending` (a retry, or a release) it
+   takes `dedupe` back with `UPDATE IGNORE`. If a job enqueued during the render already holds `dedupe`, the older job
+   is closed as `skipped` / `superseded`, because the newer job carries the newer context. mysql2 connects with
+   `CLIENT_FOUND_ROWS`, so `affectedRows` counts matched rows. An `UPDATE IGNORE` that hits the unique key answers
+   "matched 1, changed 0", so these two statements are judged by `changedRows`. test:storage caught this on MariaDB
+   10.4.
+8. **Earlier failures are resolved.** Once a page renders (or leaves the queue for good: runtime_v 1, not live), its
+   older `failed` jobs become `skipped` / `resolved:<code>`. The failed list and `render_failed` then show only what
+   is still broken.
+9. **Enqueue.**
+   - A pending job keeps the lower of the two priorities, so a Purchase-trigger change (4) is not held behind a
+     pending address job (5).
+   - Ids that are not the store's pages are dropped and counted once per call (`renders` / `foreign_page`). The frozen
+     return type `{ enqueued }` is unchanged.
+   - An impersonation scope is refused at run time (`impersonation_read_only`).
+   - `retryFailedRenders(scope, reason?)` queues the failed jobs' pages again, each with its own reason (the Retry of
+     Store Health).
+10. **The fan-out (PLA-§16.2).**
+    - `enqueueRendersEverywhere(ctx, "address" | "runtime")` and `retryFailedEverywhere(ctx, reason?)` take a
+      `PlatformCtx` with `domains.manage`, or a system ctx for §H.10's integration-deploy re-render.
+    - They store one request in `cron_cursors` (`job = 'renders.fanout'`, `state.fanout`) and return at once.
+    - One fan-out runs at a time: a request made while one is in progress answers `started: false` with that one's
+      progress.
+    - The `renders.fanout` job (slot 7, every tick, 1 s) walks the stores once, in id order, from the request's own
+      `after` (not a round robin), and enqueues through each store's system scope. A store whose enqueue throws is
+      counted and skipped.
+    - The row is read and written under its row lock as one JSON document. `JSON_MERGE_PATCH` would delete
+      `doneAt: null`. The runner's `due` keys survive.
+    - The console's per-store Retry is `retryStoreRenders(ctx, storeId, reason?)` (`domains.manage`).
+    - P1's console actions audit `platform.domains.rerender`; this library does not audit.
+11. **Summaries.**
+    - `RenderSummary` gains fields (additive):
+      - in `byReason`: `done` and `skipped`;
+      - in `oldestPending`: `slug` and `reason`;
+      - in `failed24h`: `codes`;
+      - at the top level: `totals`, `oldestMin`, `finishedLastHour`, `throughputPerMin`, `etaMin`, `failedOld`,
+        `topNotes`, `republish` and `at`.
+    - Throughput counts every job finished in the last hour (done, skipped, failed). ETA = ceil(pending × 60 /
+      throughput), and null when nothing finished in the hour.
+    - `renderSummary()` without a scope is the platform summary (console code only).
+    - `platformRenderSummary({ reason? })` adds the 20 stores with the most failed (then pending) jobs and the
+      fan-out's progress.
+    - The reads are merged into 6 statements for a store and 7 platform-wide. Each platform statement is annotated.
+12. **Attached pages.** `pages.product_id` arrives with 0006. The port reads the column only when the schema has it
+    (`getTableColumns(pages).productId`). In R1 it does not, and every job renders in place. In R2, until S1 wires
+    `republishAttached`, such a page still renders in place and is counted as `attached_in_place`.
+13. **Caches.** `rerenderInPlace` drops the store's render cache per page. After a store in which a page was rewritten,
+    the job also calls `invalidateStoreRender` and `invalidateStore`.
+14. **Not in this step.** The media pipeline's `cutout` enqueue (step 6). The integration deploy's runtime re-render
+    (`enqueueRendersEverywhere(systemCtx("deploy"), "runtime")` at the merge, §H.10 / P0-6).

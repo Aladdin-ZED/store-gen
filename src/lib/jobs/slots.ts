@@ -110,6 +110,7 @@ const SLOT_OF_NAME: Readonly<Record<string, SlotId>> = Object.freeze({
   "catalog.bestsellers": "6",
   // 7 lifecycle and the small tick jobs
   lifecycle: "7",
+  "renders.fanout": "7", // the platform-wide re-render's store-by-store enqueue (PLA-§16.2, P8 step 5)
   "ops.presence": "7",
   "sheets.bind_legacy": "7",
   "int.telegram_daily": "7",
