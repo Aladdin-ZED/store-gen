@@ -44,6 +44,9 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **NETWORK OUTAGE 2026-10-28 ~13:12 → 2026-10-29 ~09:28** (agents died with ENOTFOUND "Can't reach the API server"). The
+  two runs survived: their retry loops restarted the interrupted steps when the network came back (P8 5, P1 4, P2 4, P5 4,
+  P4 3, P3 3, P7 3, P6 3 running again at 09:30, partial work kept in the worktrees). 21/106 steps validated before it.
 - **R1 TRACKS RUNNING (current runs)** relaunched in the heartbeat turn 2026-10-28 ~10:00: group A task `wgvhgxlt7` run
   `wf_878c3d78-ae4` (P8 from step 3, P2 2, P1 3, P5 3 with its lead note), group B task `w4mw97a49` run `wf_4a16032e-ff1`
   (P4 2, P3 2, P7 2, P6 2). Verified: agents launched from a heartbeat turn get NO relayed owner message (plain "computed task"
