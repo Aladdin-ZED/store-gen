@@ -1,4 +1,4 @@
-// proves: IN-03, SF-03, SF-06
+// proves: IN-01, IN-03, SF-03, SF-05, SF-06
 /**
  * Integration health against a real MariaDB (P5 INTEGRATIONS; operations.md OPE-§28.2, §28.3 (3)-(5), §27.2, §27.3,
  * §21.4, OPE-§L; OPE-§O.2 `test:integrations-db`, OPE-§O.4 IN-03, SF-03, SF-06). Two stores, A and B, and one question
@@ -18,11 +18,17 @@
  *    errors, the order summary from the store's own order, filters, ≤ 10 pages;
  *  - `integrationHealth`, `sheetsBacklog`, `syncFailedCount` and the run history (≤ 20 runs, ≤ 4 KB) per store;
  *  - the `int:*` rules on the seeded stores fire for A, stay silent for B and never count A's rows from B;
- *  - the pulse contributor: `{ syncFailed }` within 50 ms, nothing for an agent, a failure omits the key.
+ *  - the pulse contributor: `{ syncFailed }` within 50 ms, nothing for an agent, a failure omits the key;
+ *  - the Sheets push (IN-01, SF-05; OPE-§19.5, §19.7, §26, §28.2) against a fake Google (src/lib/sheets/client.ts
+ *    `setGapiDoubleForTests`: a call counter, scripted 429 / 403, a slow sheet): ≤ 3 calls per store per tick and ≤ 2 on
+ *    the after() path; the bucket stops a run and keeps its work; a 429 opens the 90 s breaker for every store; oldest
+ *    waiting order first across 20 stores, and a slow sheet never starves the others; a test order is never appended,
+ *    "Send again" included; rev-guarded marks; the deleted-row case; the run history; the integration_status
+ *    transitions; the preconditions; B's run never touches A; the `sheets.push` job; the transport seam.
  */
 import Module from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 const flag = (name: string) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -455,6 +461,573 @@ async function main() {
   eq2("pulse: a failure omits the key", await contributor.contribute({ ...A, storeId: "" } as typeof A, owner), {});
 
   void orderIds;
+  await sheetsPushSuite();
+}
+
+/* ================================================================== */
+/* 7. the Sheets push (IN-01, SF-05; OPE-§19.5, §19.7, §26, §28.2)     */
+/* ================================================================== */
+
+/** One Sheets API call as the fake Google saw it. */
+type CallKind = "read" | "append" | "update" | "other";
+interface FakeSheet {
+  /** the rows from A2 down: [id, date, label, …] */
+  rows: unknown[][];
+  calls: { kind: CallKind; at: number; body: string | null }[];
+  /** HTTP error statuses answered to the next calls, in order (429, 403) */
+  script: number[];
+  /** every answer waits this long (a slow sheet) */
+  delayMs: number;
+  /** runs before a call is applied (a person or another writer changing the order meanwhile) */
+  before?: (kind: CallKind) => Promise<void>;
+}
+
+async function sheetsPushSuite(): Promise<void> {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const http = await import("node:http");
+  const env = process.env as Record<string, string | undefined>;
+  // a throwaway service account: the fake never checks the token, the transport check signs a real JWT with it
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const sa = { client_email: "store-gen-qa@store-gen-qa.iam.gserviceaccount.com", private_key: privateKey.export({ type: "pkcs8", format: "pem" }).toString(), private_key_id: "qa" };
+  env.GOOGLE_SA_JSON_B64 = Buffer.from(JSON.stringify(sa)).toString("base64");
+
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { cronCursors, flags, integrationStatus, notifications, orders, sheetBindings, stores } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId, newOrderId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  const client = load<typeof import("@/lib/sheets/client")>("@/lib/sheets/client");
+  const push = load<typeof import("@/lib/sheets/push")>("@/lib/sheets/push");
+  const sync = load<typeof import("@/lib/sheets/sync")>("@/lib/sheets/sync");
+  const config = load<typeof import("@/lib/sheets/config")>("@/lib/sheets/config");
+  const history = load<typeof import("@/lib/sheets/history")>("@/lib/sheets/history");
+  const { ROW_NOT_FOUND } = load<typeof import("@/lib/sheets/plan")>("@/lib/sheets/plan");
+  const { statusLabel } = load<typeof import("@/lib/sheets/row")>("@/lib/sheets/row");
+  const status = load<typeof import("@/lib/integrations/status")>("@/lib/integrations/status");
+  const transport = load<typeof import("@/lib/integrations/transport")>("@/lib/integrations/transport");
+  const { testSeam } = load<typeof import("@/lib/security/test-seams")>("@/lib/security/test-seams");
+  const { invalidateFlags } = load<typeof import("@/lib/tenancy/entitlements")>("@/lib/tenancy/entitlements");
+  const { platformBucket } = load<typeof import("@/lib/security/rate-limit")>("@/lib/security/rate-limit");
+  const { setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const { hooks } = load<typeof import("@/lib/orders/hooks/integrations")>("@/lib/orders/hooks/integrations");
+  const { JOBS, TICK_GUARANTEED_MS } = load<typeof import("@/lib/jobs/registry")>("@/lib/jobs/registry");
+  type OrderStatus = import("@/lib/orders/contract").OrderStatus;
+  status.clearStatusCache();
+
+  /* ---------------- the fake Google (client.ts test double) ---------------- */
+  const fakes = new Map<string, FakeSheet>();
+  /** spreadsheet ids in the order of their first call (reset per scenario) */
+  const served: string[] = [];
+  const json = (v: unknown, code = 200) => new Response(JSON.stringify(v), { status: code, headers: { "content-type": "application/json" } });
+  const colIndex = (letters: string) => [...letters].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+  const GOOGLE_ERRORS: Record<number, { status: string; message: string }> = {
+    429: { status: "RESOURCE_EXHAUSTED", message: "Quota exceeded for quota metric 'Write requests'" },
+    403: { status: "PERMISSION_DENIED", message: "The caller does not have permission" },
+  };
+  client.setGapiDoubleForTests(async (call) => {
+    const [path = "", query = ""] = call.path.split("?");
+    const m = /^\/([^/]+)\/values(.*)$/.exec(path);
+    const id = m ? decodeURIComponent(m[1]!) : "";
+    const f = fakes.get(id);
+    if (!f) return json({ error: { code: 404, status: "NOT_FOUND", message: "Requested entity was not found." } }, 404);
+    const rest = m![2]!;
+    const kind: CallKind = rest === ":batchGet" ? "read" : rest.endsWith(":append") ? "append" : rest === ":batchUpdate" ? "update" : "other";
+    f.calls.push({ kind, at: Date.now(), body: call.body });
+    if (!served.includes(id)) served.push(id);
+    const scripted = f.script.shift();
+    if (scripted) return json({ error: { code: scripted, ...GOOGLE_ERRORS[scripted] } }, scripted);
+    if (f.delayMs) await new Promise((r) => setTimeout(r, f.delayMs));
+    if (f.before) await f.before(kind);
+    if (kind === "read") {
+      // the header range first (no optional columns in these sheets), then A2:C
+      const ranges = new URLSearchParams(query).getAll("ranges");
+      return json({ valueRanges: ranges.map((_, i) => (i === 0 ? {} : { values: f.rows.map((r) => r.slice(0, 3)) })) });
+    }
+    if (kind === "append") {
+      const body = JSON.parse(call.body ?? "{}") as { values: unknown[][] };
+      for (const row of body.values) f.rows.push([...row]);
+      return json({ updates: { updatedRows: body.values.length } });
+    }
+    if (kind === "update") {
+      const body = JSON.parse(call.body ?? "{}") as { data: { range: string; values: unknown[][] }[] };
+      for (const d of body.data) {
+        const cell = /!([A-Z]+)(\d+)/.exec(d.range);
+        if (!cell) continue;
+        const row = (f.rows[Number(cell[2]) - 2] ??= []);
+        d.values[0]!.forEach((v, j) => (row[colIndex(cell[1]!) + j] = v));
+      }
+      return json({ totalUpdatedCells: body.data.length });
+    }
+    return json({});
+  });
+
+  /* ---------------- stores, orders, helpers ---------------- */
+  const ctx = systemCtx("sheets.push");
+  const actor = { id: "qa-system", kind: "system" as const };
+  const SA_KEY = platformBucket(push.SA_BUCKET.name);
+  const resetBucket = () => db.execute(sql`DELETE FROM rate_limits WHERE bucket = ${SA_KEY}`);
+  const fillBucket = (used: number) =>
+    db.execute(sql`INSERT INTO rate_limits (bucket, count, reset_at) VALUES (${SA_KEY}, ${used}, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 60 SECOND))
+      ON DUPLICATE KEY UPDATE count = ${used}, reset_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 60 SECOND)`);
+  const closeBreaker = async () => {
+    await db.delete(cronCursors).where(eq(cronCursors.job, "sheets.push"));
+    push.forgetSheetsBreaker();
+  };
+  const fresh = async () => {
+    await resetBucket();
+    await closeBreaker();
+    served.length = 0;
+  };
+  let seq = 0;
+  async function sheetStore(handle: string, opts: { status?: "active" | "pending" } = {}) {
+    const id = newId();
+    await db.insert(stores).values({ id, handle, name: `Store ${handle}`, status: opts.status ?? "active", brandSeed: "0123456789abcdef" });
+    const scope = systemScope(ctx, id);
+    const spreadsheetId = `1QaSheet${String(++seq).padStart(3, "0")}${randomBytes(12).toString("hex")}`;
+    const fake: FakeSheet = { rows: [], calls: [], script: [], delayMs: 0 };
+    fakes.set(spreadsheetId, fake);
+    // saveSheetsConfig claims the binding (the ownership proof is step 5's; here the store owns its sheet)
+    await config.saveSheetsConfig(scope, { spreadsheetId, sheetId: 0, sheetTitle: "Commandes", enabled: true }, actor);
+    return { id, scope, spreadsheetId, fake };
+  }
+  type SheetStore = Awaited<ReturnType<typeof sheetStore>>;
+  /** one order of `s`; `label` puts its row in the fake sheet with that status label */
+  async function order(s: SheetStore, over: Partial<typeof orders.$inferInsert> = {}, label?: OrderStatus): Promise<string> {
+    const id = newOrderId();
+    await db.insert(orders).values({
+      id,
+      storeId: s.id,
+      pageId: newId(),
+      name: NAME,
+      phone: PHONE,
+      productName: "Argan oil",
+      items: { bundleId: "b1", bundleLabel: "1", qty: 1, unitPrice: 349, variants: [] } as never,
+      qty: 1,
+      subtotal: 349,
+      shipping: 0,
+      total: 349,
+      currency: "MAD",
+      idem: randomUUID(),
+      ...over,
+    });
+    if (label) s.fake.rows.push([id, "", statusLabel(label)]);
+    return id;
+  }
+  const rowOf = async (s: SheetStore, id: string) => (await db.select().from(orders).where(and(eq(orders.storeId, s.id), eq(orders.id, id))).limit(1))[0]!;
+  const inSheet = (s: SheetStore, id: string) => s.fake.rows.filter((r) => r?.[0] === id);
+  const kinds = (s: SheetStore, from = 0) => s.fake.calls.slice(from).map((c) => c.kind);
+  const statusRow = async (s: SheetStore) =>
+    (await db.select().from(integrationStatus).where(and(eq(integrationStatus.storeId, s.id), eq(integrationStatus.kind, "sheets"))).limit(1))[0];
+  const notesOf = async (s: SheetStore, kind: string) => db.select().from(notifications).where(and(eq(notifications.storeId, s.id), eq(notifications.kind, kind)));
+  const pause = async (...list: SheetStore[]) => {
+    for (const s of list) await config.setSheetsEnabled(s.scope, false, actor);
+  };
+
+  /* ---------------- 7.1 oldest pending first across 20 stores, ≤ 3 calls each, the bucket ---------------- */
+  await fresh();
+  const F: SheetStore[] = [];
+  const ageMin = (i: number) => 100 + ((i * 7) % 20); // a permutation of 100…119 (7 and 20 are coprime)
+  for (let i = 0; i < 20; i++) {
+    const s = await sheetStore(`sp-f${String(i).padStart(2, "0")}`);
+    await order(s, { sheetStatus: "pending", createdAt: new Date(Date.now() - ageMin(i) * MIN) });
+    await order(s, { sheetStatus: "synced", sheetDirty: 1, status: "confirmed", createdAt: new Date(Date.now() - 300 * MIN) }, "new");
+    F.push(s);
+  }
+  const oldestFirst = F.map((s, i) => ({ s, age: ageMin(i) }))
+    .sort((a, b) => b.age - a.age)
+    .map((x) => x.s);
+  const tick1 = await push.runSheetsPushTick(ctx, { budgetMs: 18_000 });
+  ok("fairness: no store's run makes more than 3 Google calls in a tick", F.every((s) => s.fake.calls.length <= 3), F.map((s) => s.fake.calls.length));
+  eq2("fairness: stores are served oldest waiting order first", served, oldestFirst.slice(0, served.length).map((s) => s.spreadsheetId));
+  eq2("fairness: the p:sheets:sa bucket (50 / 60 s) serves 16 stores fully and the 17th in part, then the slot stops", [served.length, tick1.calls, tick1.stoppedBy, tick1.done], [17, 50, "quota", false]);
+  ok("fairness: the 16 first stores got one read, one append, one batchUpdate", oldestFirst.slice(0, 16).every((s) => JSON.stringify(kinds(s)) === JSON.stringify(["read", "append", "update"])));
+  const s17 = oldestFirst[16]!;
+  eq2("fairness: the 17th got its read and its append; its batchUpdate waits for a token", kinds(s17), ["read", "append"]);
+  const s17rows = await db.select({ status: orders.sheetStatus, dirty: orders.sheetDirty }).from(orders).where(eq(orders.storeId, s17.id)).orderBy(orders.createdAt);
+  eq2("fairness: the 17th's changed row stays dirty for the next run", s17rows, [{ status: "synced", dirty: 1 }, { status: "synced", dirty: 0 }]);
+  const waiting = oldestFirst.slice(17);
+  const waitingRows = await db
+    .select({ status: orders.sheetStatus, attempts: orders.sheetAttempts, error: orders.sheetError })
+    .from(orders)
+    .where(and(inArray(orders.storeId, waiting.map((s) => s.id)), eq(orders.sheetStatus, "pending")));
+  eq2("fairness: the 3 last stores made no call and kept their work untouched", [waiting.map((s) => s.fake.calls.length), waitingRows.length, waitingRows.every((r) => r.attempts === 0 && r.error === null)], [[0, 0, 0], 3, true]);
+
+  await resetBucket();
+  served.length = 0;
+  const calls1 = F.map((s) => s.fake.calls.length);
+  const tick2 = await push.runSheetsPushTick(ctx, { budgetMs: 18_000 });
+  eq2("fairness: the next tick serves the stores that waited, oldest first, then the 17th's last write", served, [...waiting, s17].map((s) => s.spreadsheetId));
+  ok("fairness: ≤ 3 calls per store in the second tick too", F.every((s, i) => s.fake.calls.length - calls1[i]! <= 3));
+  const leftF = await db
+    .select({ n: sql<number>`COUNT(*)` })
+    .from(orders)
+    .where(and(inArray(orders.storeId, F.map((s) => s.id)), sql`(${orders.sheetStatus} <> 'synced' OR ${orders.sheetDirty} > 0)`));
+  eq2("fairness: after two ticks every order of the 20 stores is in its sheet", [Number(leftF[0]?.n), tick2.stoppedBy, F.every((s) => s.fake.rows.length === 2)], [0, null, true]);
+  await pause(...F);
+
+  /* ---------------- 7.2 a slow sheet never starves the stores behind it ---------------- */
+  await fresh();
+  const G = [await sheetStore("sp-g1"), await sheetStore("sp-g2"), await sheetStore("sp-g3")];
+  G[0]!.fake.delayMs = 1_500;
+  const gIds: string[] = [];
+  for (let i = 0; i < 3; i++) gIds.push(await order(G[i]!, { sheetStatus: "pending", createdAt: new Date(Date.now() - (90 - i) * MIN) }));
+  await push.runSheetsPushTick(ctx, { budgetMs: 18_000, storeSliceMs: 400 });
+  const g0 = await rowOf(G[0]!, gIds[0]!);
+  const g0run = (await history.sheetsRunHistory(G[0]!.scope))[0];
+  eq2("slow sheet: served first, it times out inside its slice and backs off", [served[0], g0.sheetStatus, g0.sheetAttempts, g0run?.ok, g0run?.error], [G[0]!.spreadsheetId, "failed", 1, false, "network"]);
+  ok("slow sheet: its run ended with its slice, not with the sheet", (g0run?.ms ?? Infinity) < 1_200, g0run?.ms);
+  ok("slow sheet: the drawer gets plain words", !!g0.sheetError && !g0.sheetError.includes("aborted"), g0.sheetError);
+  eq2("slow sheet: the two stores behind it are served in the same tick", [(await rowOf(G[1]!, gIds[1]!)).sheetStatus, (await rowOf(G[2]!, gIds[2]!)).sheetStatus], ["synced", "synced"]);
+  const gCalls = G[0]!.fake.calls.length;
+  await push.runSheetsPushTick(ctx, { budgetMs: 18_000, storeSliceMs: 400 });
+  eq2("slow sheet: backing off, it costs the next tick no call", G[0]!.fake.calls.length, gCalls);
+  await pause(...G);
+
+  /* ---------------- 7.3 the after() path: debounced, ≤ 2 calls; the R1.0 facade ---------------- */
+  await fresh();
+  const P = await sheetStore("sp-p1");
+  const p1 = await order(P, { sheetStatus: "pending" });
+  for (let i = 0; i < 3; i++) push.scheduleSheetPush(P.scope);
+  await push.settleSheetPushes(P.id);
+  let runsP = await history.sheetsRunHistory(P.scope);
+  eq2("after(): three changes inside 2 s share one push of 2 calls (the header read, the append)", [runsP.length, runsP[0]?.trigger, runsP[0]?.calls, runsP[0]?.appended, kinds(P)], [1, "after", 2, 1, ["read", "append"]]);
+  eq2("after(): appended → synced, sheet_label = the label written", [(await rowOf(P, p1)).sheetStatus, (await rowOf(P, p1)).sheetLabel, inSheet(P, p1).length], ["synced", "new", 1]);
+
+  // the admin's status write (OD2): mark dirty + schedule, the status itself written by the caller right after
+  const marked = await sync.pushOrderStatus(P.scope, p1, "confirmed");
+  await db.update(orders).set({ status: "confirmed", updatedAt: new Date() }).where(and(eq(orders.storeId, P.id), eq(orders.id, p1)));
+  const p1dirty = await rowOf(P, p1);
+  eq2("pushOrderStatus: never waits for Google: the status bit and a rev bump, then the push", [marked, p1dirty.sheetDirty & 1, p1dirty.rev], ["updated", 1, 1]);
+  const from = P.fake.calls.length;
+  await push.settleSheetPushes(P.id);
+  eq2("pushOrderStatus: the scheduled push rewrites column C (read + batchUpdate)", [kinds(P, from), inSheet(P, p1)[0]?.[2], (await rowOf(P, p1)).sheetDirty, (await rowOf(P, p1)).sheetLabel], [["read", "update"], statusLabel("confirmed"), 0, "confirmed"]);
+  const p2 = await order(P, { sheetStatus: "pending" });
+  eq2("pushOrderStatus: an order not in the sheet yet is not_found (its append carries the status)", await sync.pushOrderStatus(P.scope, p2, "confirmed"), "not_found");
+  // a new order and a changed row at once: the after() run spends its 2 calls, the rest waits for the tick
+  await db.update(orders).set({ sheetDirty: 2, rev: sql`${orders.rev} + 1` }).where(and(eq(orders.storeId, P.id), eq(orders.id, p1)));
+  push.scheduleSheetPush(P.scope);
+  await push.settleSheetPushes(P.id);
+  runsP = await history.sheetsRunHistory(P.scope);
+  const afterRuns = runsP.filter((r) => r.trigger === "after");
+  ok("after(): every after() run made ≤ 2 calls", afterRuns.length === 3 && afterRuns.every((r) => r.calls <= 2), runsP);
+  eq2("after(): the new order went out; the changed row waits (2 calls spent)", [(await rowOf(P, p2)).sheetStatus, (await rowOf(P, p1)).sheetDirty], ["synced", 2]);
+  const pTick = await push.pushStore(P.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("after(): the tick's run writes the rest", [pTick.updated, (await rowOf(P, p1)).sheetDirty], [1, 0]);
+  const p3 = await order(P, { sheetStatus: "pending" });
+  eq2("syncPendingOrders (R1.0 name): one run, the R1.0 answer", await sync.syncPendingOrders(P.scope, { force: true, limit: 200 }), { status: "ok", appended: 1, updated: 0, skipped: 0, failed: 0 });
+  eq2("syncPendingOrders: \"Sync now\" is a manual run", (await history.sheetsRunHistory(P.scope))[0]?.trigger, "manual");
+  eq2("selectSyncBatch (R1.0 name): whole rows of the store, nothing left once synced", [(await sync.selectSyncBatch(P.scope, {})).length, (await rowOf(P, p3)).sheetStatus], [0, "synced"]);
+  await pause(P);
+
+  /* ---------------- 7.4 the bucket: a token before every call; none left → stop, keep the work ---------------- */
+  await fresh();
+  const U = await sheetStore("sp-u1");
+  const u1 = await order(U, { sheetStatus: "pending" });
+  const u2 = await order(U, { sheetStatus: "synced", sheetDirty: 1, status: "confirmed" }, "new");
+  await fillBucket(push.SA_BUCKET.limit - 1);
+  const cut = await push.pushStore(U.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("bucket: one token left → one call (the read), then the run stops", [cut.calls, cut.stopped, cut.ok, kinds(U)], [1, "quota", true, ["read"]]);
+  const ru1 = await rowOf(U, u1);
+  eq2("bucket: the new order still waits, unclaimed and without an error; the changed row stays dirty", [ru1.sheetStatus, ru1.sheetAttempts, ru1.sheetError, (await rowOf(U, u2)).sheetDirty], ["pending", 0, null, 1]);
+  const empty = await push.pushStore(U.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("bucket: empty → skipped before any call, with the owner's words", [empty.skipped, empty.calls, U.fake.calls.length, !!empty.message, sync.syncResultOf(empty).status], ["quota", 0, 1, true, "error"]);
+  const tickQ = await push.runSheetsPushTick(ctx, { budgetMs: 5_000 });
+  eq2("bucket: the slot serves no store while the bucket is empty", [tickQ.calls, tickQ.stoppedBy], [0, "quota"]);
+  await resetBucket();
+  const resumed = await push.pushStore(U.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("bucket: refilled, the next run finishes the work", [resumed.appended, resumed.updated, (await rowOf(U, u1)).sheetStatus, (await rowOf(U, u2)).sheetDirty, inSheet(U, u1).length], [1, 1, "synced", 0, 1]);
+  await pause(U);
+
+  /* ---------------- 7.5 a 429 opens the platform breaker for 90 s, for every store ---------------- */
+  await fresh();
+  const Q1 = await sheetStore("sp-q1");
+  const Q2 = await sheetStore("sp-q2");
+  const q1 = await order(Q1, { sheetStatus: "pending" });
+  const q2 = await order(Q2, { sheetStatus: "pending" });
+  Q1.fake.script.push(429);
+  const t429 = Date.now();
+  const hit = await push.pushStore(Q1.scope, { maxCalls: 3, trigger: "tick" });
+  const rq1 = await rowOf(Q1, q1);
+  eq2("breaker: a 429 opens it; the run fails and marks nothing failed", [hit.breaker, hit.ok, hit.error, hit.calls, rq1.sheetStatus, rq1.sheetError, rq1.sheetAttempts], [true, false, "breaker", 1, "pending", null, 0]);
+  const [bRow] = await db.select().from(cronCursors).where(eq(cronCursors.job, "sheets.push"));
+  const until = Date.parse(String((bRow?.state as Record<string, unknown> | null)?.breakerUntil));
+  ok("breaker: 90 s, kept in cron_cursors.state of sheets.push", until >= t429 + push.BREAKER_MS - 1_000 && until <= Date.now() + push.BREAKER_MS + 1_000, { until, t429 });
+  eq2("breaker: the store whose run opened it is failing (OPE-§28.2)", [(await statusRow(Q1))?.state, (await statusRow(Q1))?.lastErrorCode], ["failing", "breaker"]);
+  const held = await push.pushStore(Q2.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("breaker: another store waits with no call (this process's copy)", [held.skipped, held.calls, Q2.fake.calls.length, (await rowOf(Q2, q2)).sheetStatus, !!held.message], ["breaker", 0, 0, "pending", true]);
+  push.forgetSheetsBreaker();
+  const cold = await push.pushStore(Q2.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("breaker: another process (no copy in memory) reads it from the row", [cold.skipped, Q2.fake.calls.length], ["breaker", 0]);
+  const tickB = await push.runSheetsPushTick(ctx, { budgetMs: 5_000 });
+  eq2("breaker: the slot calls Google for no store while it is open", [tickB.calls, tickB.stoppedBy, Q1.fake.calls.length + Q2.fake.calls.length], [0, "breaker", 1]);
+  await db.update(cronCursors).set({ state: { breakerUntil: new Date(Date.now() - 1_000).toISOString() } }).where(eq(cronCursors.job, "sheets.push"));
+  push.forgetSheetsBreaker();
+  const reopened = await push.pushStore(Q2.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("breaker: once closed, the waiting work goes out", [reopened.appended, (await rowOf(Q2, q2)).sheetStatus], [1, "synced"]);
+  await pause(Q1, Q2);
+
+  /* ---------------- 7.6 a test order never reaches a sheet (OPE-§26, D54), "Send again" included ---------------- */
+  await fresh();
+  const T = await sheetStore("sp-t1");
+  const tIds = [
+    await order(T, { isTest: true, sheetStatus: "disabled" }), // as the public path stores it
+    await order(T, { isTest: true, sheetStatus: "pending", sheetAttempts: 1 }), // "Send again" forced past its guard
+    await order(T, { isTest: true, sheetStatus: "failed", sheetAttempts: 3, updatedAt: new Date(Date.now() - 24 * 60 * MIN) }),
+    await order(T, { isTest: true, sheetStatus: "synced", sheetDirty: 7 }),
+  ];
+  const real = await order(T, { sheetStatus: "pending" });
+  await push.pushStore(T.scope, { maxCalls: 3, force: true, trigger: "manual" });
+  await sync.syncPendingOrders(T.scope, { force: true });
+  await push.pushStore(T.scope, { maxCalls: 3, trigger: "tick" });
+  const sentT = JSON.stringify(T.fake.calls.map((c) => c.body)) + JSON.stringify(T.fake.rows);
+  ok("test orders: none reaches the sheet, through Sync now, Send again or the tick", tIds.every((id) => !sentT.includes(id)), T.fake.rows);
+  eq2("test orders: the real order is appended, once", inSheet(T, real).length, 1);
+  const tRows = await Promise.all(tIds.map((id) => rowOf(T, id)));
+  eq2("test orders: their sheet bookkeeping is untouched", tRows.map((r) => [r.sheetStatus, r.sheetAttempts, r.sheetDirty]), [["disabled", 0, 0], ["pending", 1, 0], ["failed", 3, 0], ["synced", 0, 7]]);
+  eq2("test orders: never in a sync batch, never in the backlog", [(await sync.selectSyncBatch(T.scope, { force: true, limit: 200 })).filter((o) => tIds.includes(o.id)).length, (await statusRow(T))?.backlog], [0, 0]);
+
+  const hook = hooks.find((h) => h.name === "int.sheets");
+  eq2("int.sheets: afterCommit, on transition and edited", [hook?.phase, hook?.on], ["afterCommit", ["transition", "edited"]]);
+  const snap = (id: string, isTest: boolean) => ({ id, rev: 1, status: "confirmed", states: {}, isTest, customerId: null, assigneeId: null, cityKey: null, totalCents: 34900 });
+  const T2 = await sheetStore("sp-t2");
+  const t2real = await order(T2, { sheetStatus: "synced", sheetDirty: 1, status: "confirmed" }, "new");
+  const waitingReal = await order(T, { sheetStatus: "pending" }); // a push of T would take it
+  const tCalls = T.fake.calls.length;
+  const userActor = { kind: "user", userId: null };
+  await hook!.run(T.scope, { on: "transition", before: snap(tIds[1]!, true), after: snap(tIds[1]!, true), moves: [], actor: userActor, source: "ui" } as never);
+  await hook!.run(T2.scope, { on: "edited", before: snap(t2real, false), after: snap(t2real, false), fields: ["address"], actor: userActor } as never);
+  await Promise.all([push.settleSheetPushes(T.id), push.settleSheetPushes(T2.id)]);
+  eq2("int.sheets: a test order's transition schedules no push", [T.fake.calls.length, (await rowOf(T, waitingReal)).sheetStatus], [tCalls, "pending"]);
+  eq2("int.sheets: a real order's edit pushes its row (read + batchUpdate)", [kinds(T2), (await rowOf(T2, t2real)).sheetDirty, inSheet(T2, t2real)[0]?.[2]], [["read", "update"], 0, statusLabel("confirmed")]);
+  await pause(T, T2);
+
+  /* ---------------- 7.7 rev-guarded marks: an order changed meanwhile stays dirty ---------------- */
+  await fresh();
+  const R = await sheetStore("sp-r1");
+  const x = await order(R, { sheetStatus: "pending" }); // an R1 writer changes it during its append (rev + bit)
+  const z = await order(R, { sheetStatus: "pending" }); // an R1.0 writer changes it during its append (updated_at only)
+  const y = await order(R, { sheetStatus: "synced", sheetDirty: 1, status: "confirmed" }, "new"); // changed during its batchUpdate
+  const mine = (id: string) => and(eq(orders.storeId, R.id), eq(orders.id, id));
+  R.fake.before = async (kind) => {
+    if (kind === "append") {
+      await db.update(orders).set({ status: "confirmed", rev: sql`${orders.rev} + 1`, sheetDirty: sql`${orders.sheetDirty} | 1` }).where(mine(x));
+      await db.update(orders).set({ status: "cancelled", updatedAt: sql`DATE_ADD(${orders.updatedAt}, INTERVAL 1 SECOND)` }).where(mine(z));
+    }
+    if (kind === "update") await db.update(orders).set({ status: "delivered", rev: sql`${orders.rev} + 1`, sheetDirty: sql`${orders.sheetDirty} | 1` }).where(mine(y));
+  };
+  const firstR = await push.pushStore(R.scope, { maxCalls: 3, trigger: "tick" });
+  R.fake.before = undefined;
+  eq2("rev guard: one read, one append, one batchUpdate", [firstR.calls, firstR.appended, firstR.updated, kinds(R)], [3, 2, 1, ["read", "append", "update"]]);
+  const [rx, rz, ry] = [await rowOf(R, x), await rowOf(R, z), await rowOf(R, y)];
+  eq2("rev guard: changed during its append (rev) → not marked synced, its bit kept", [rx.sheetStatus, rx.sheetDirty & 1], ["pending", 1]);
+  eq2("rev guard: changed during its append by an R1.0 writer (updated_at) → not marked synced", rz.sheetStatus, "pending");
+  eq2("rev guard: changed during its batchUpdate → its bit is not cleared", [ry.sheetStatus, ry.sheetDirty & 1], ["synced", 1]);
+  for (let i = 0; i < 3; i++) await push.pushStore(R.scope, { maxCalls: 3, trigger: "tick" });
+  eq2(
+    "rev guard: the next runs converge: each order once in the sheet, with its latest status",
+    [x, z, y].map((id) => [inSheet(R, id).length, inSheet(R, id)[0]?.[2]]),
+    [
+      [1, statusLabel("confirmed")],
+      [1, statusLabel("cancelled")],
+      [1, statusLabel("delivered")],
+    ],
+  );
+  const finalR = await Promise.all([x, z, y].map((id) => rowOf(R, id)));
+  eq2("rev guard: all synced, nothing dirty, sheet_label = the label written", finalR.map((r) => [r.sheetStatus, r.sheetDirty, r.sheetLabel]), [["synced", 0, "confirmed"], ["synced", 0, "cancelled"], ["synced", 0, "delivered"]]);
+  await pause(R);
+
+  /* ---------------- 7.8 a row deleted in the sheet ---------------- */
+  await fresh();
+  const D = await sheetStore("sp-d1");
+  const kept = await order(D, { sheetStatus: "synced", sheetDirty: 1, status: "confirmed" }, "new");
+  const gone = await order(D, { sheetStatus: "synced", sheetDirty: 1, status: "confirmed" }); // its row was deleted by a person
+  const delRun = await push.pushStore(D.scope, { maxCalls: 3, trigger: "tick" });
+  const rg = await rowOf(D, gone);
+  eq2("deleted row: \"Row not found in the sheet\", sheet_dirty 0, still synced", [rg.sheetError, rg.sheetDirty, rg.sheetStatus, delRun.missing], [ROW_NOT_FOUND, 0, "synced", 1]);
+  eq2("deleted row: never re-appended; the other row is written", [kinds(D), D.fake.rows.length, inSheet(D, kept)[0]?.[2]], [["read", "update"], 1, statusLabel("confirmed")]);
+  const delAgain = await push.pushStore(D.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("deleted row: nothing left for the next run", [delAgain.calls, D.fake.calls.length], [0, 2]);
+  await pause(D);
+
+  /* ---------------- 7.9 the run history: ≤ 20 entries, ≤ 4 KB ---------------- */
+  await fresh();
+  const H = await sheetStore("sp-h1");
+  for (let i = 0; i < 22; i++) {
+    await order(H, { sheetStatus: "pending" });
+    await push.pushStore(H.scope, { maxCalls: 2, trigger: "manual" });
+  }
+  const runsH = await history.sheetsRunHistory(H.scope);
+  const [hRow] = await db.select().from(cronCursors).where(eq(cronCursors.job, `sheets.push:${H.id}`));
+  eq2("history: every run recorded, the last 20 kept", [runsH.length, runsH.every((r) => r.trigger === "manual" && r.ok && r.appended === 1 && r.calls === 1)], [20, true]);
+  ok("history: newest first", runsH.every((r, i) => i === 0 || r.at <= runsH[i - 1]!.at));
+  ok("history: ≤ 4 KB, counts and codes only", Buffer.byteLength(JSON.stringify(hRow?.state), "utf8") <= history.RUN_HISTORY_BYTES && !JSON.stringify(hRow?.state).includes(PHONE));
+  await pause(H);
+
+  /* ---------------- 7.10 integration_status (sheets): ok, warn, failing, ok, off ---------------- */
+  await fresh();
+  const S = await sheetStore("sp-s1");
+  await push.pushStore(S.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("status: a run with no error → ok", (await statusRow(S))?.state, "ok");
+  await order(S, { sheetStatus: "pending", createdAt: new Date(Date.now() - 10 * MIN) });
+  await push.pushStore(S.scope, { maxCalls: 1, trigger: "tick" }); // its one call reads the header: the order still waits
+  const warnRow = await statusRow(S);
+  eq2("status: the oldest waiting order > 5 min → warn, with the backlog", [warnRow?.state, warnRow?.backlog], ["warn", 1]);
+  S.fake.script.push(403, 403, 403);
+  for (let i = 0; i < 3; i++) await push.pushStore(S.scope, { maxCalls: 3, force: true, trigger: "manual" });
+  const failRow = await statusRow(S);
+  eq2("status: 3 failed runs in a row → failing, the cause as a code", [failRow?.state, failRow?.failures, failRow?.lastErrorCode], ["failing", 3, "sheet_not_shared"]);
+  eq2("status: the incident notifies once", (await notesOf(S, "int.sheets_failing")).length, 1);
+  const goodS = await push.pushStore(S.scope, { maxCalls: 3, force: true, trigger: "manual" });
+  eq2("status: a good run → ok, nothing waiting", [goodS.appended, (await statusRow(S))?.state, (await statusRow(S))?.backlog], [1, "ok", 0]);
+  await pause(S);
+  const paused = await push.pushStore(S.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("status: paused → off, no call", [paused.skipped, (await statusRow(S))?.state, S.fake.calls.length], ["disabled", "off", 6]);
+
+  /* ---------------- 7.11 preconditions: service account, binding, kill switch, pending store ---------------- */
+  await fresh();
+  const K = await sheetStore("sp-k1");
+  const k1 = await order(K, { sheetStatus: "pending" });
+  const saKey = env.GOOGLE_SA_JSON_B64;
+  delete env.GOOGLE_SA_JSON_B64;
+  const noSa = await push.pushStore(K.scope, { maxCalls: 3, trigger: "tick" });
+  env.GOOGLE_SA_JSON_B64 = saKey;
+  await db.delete(sheetBindings).where(eq(sheetBindings.spreadsheetId, K.spreadsheetId));
+  const unbound = await push.pushStore(K.scope, { maxCalls: 3, trigger: "tick" });
+  await config.claimSheetBinding(K.scope, K.spreadsheetId, actor);
+  // the kill switch (§H.8): its seeded row tripped, then restored as it was
+  const [killRow] = await db.select().from(flags).where(eq(flags.key, "sheets_sync_enabled")).limit(1);
+  await db.insert(flags).values({ key: "sheets_sync_enabled", kind: "kill", defaultValue: false }).onDuplicateKeyUpdate({ set: { defaultValue: false } });
+  invalidateFlags();
+  const killed = await push.pushStore(K.scope, { maxCalls: 3, trigger: "tick" });
+  if (killRow) await db.update(flags).set({ defaultValue: killRow.defaultValue }).where(eq(flags.key, "sheets_sync_enabled"));
+  else await db.delete(flags).where(eq(flags.key, "sheets_sync_enabled"));
+  invalidateFlags();
+  const Kp = await sheetStore("sp-k2", { status: "pending" });
+  await order(Kp, { sheetStatus: "pending" });
+  const pendingStore = await push.pushStore(Kp.scope, { maxCalls: 3, trigger: "tick" });
+  eq2(
+    "preconditions: no service account, unbound, kill switch, pending store → skipped",
+    [noSa.skipped, unbound.skipped, killed.skipped, killed.offReason, pendingStore.skipped, pendingStore.offReason],
+    ["not_configured", "unbound", "feature_off", "kill", "feature_off", "state"],
+  );
+  eq2("preconditions: no Google call, the order keeps waiting (§A.5.2, §H.8)", [K.fake.calls.length, Kp.fake.calls.length, (await rowOf(K, k1)).sheetStatus], [0, 0, "pending"]);
+  eq2("preconditions: the R1.0 answer reads them as not configured", [noSa, unbound, killed].map((r) => sync.syncResultOf(r).status), ["not_configured", "not_configured", "not_configured"]);
+  eq2("preconditions: all met again, the order goes out", [(await push.pushStore(K.scope, { maxCalls: 3, trigger: "tick" })).appended, (await rowOf(K, k1)).sheetStatus], [1, "synced"]);
+  await pause(K, Kp);
+
+  /* ---------------- 7.12 two stores: B's run never touches A's orders or A's sheet ---------------- */
+  await fresh();
+  const TA = await sheetStore("sp-ta");
+  const TB = await sheetStore("sp-tb");
+  const aOrders = [
+    await order(TA, { sheetStatus: "pending" }),
+    await order(TA, { sheetStatus: "synced", sheetDirty: 1, status: "confirmed" }, "new"),
+    await order(TA, { sheetStatus: "failed", sheetAttempts: 2, updatedAt: new Date(Date.now() - 24 * 60 * MIN) }),
+  ];
+  const b1 = await order(TB, { sheetStatus: "pending" });
+  await order(TB, { sheetStatus: "synced", sheetDirty: 1, status: "delivered" }, "new");
+  TB.fake.rows.push([aOrders[1], "", statusLabel("new")]); // B's sheet names A's order (ids are customer-visible)
+  const snapA = async () =>
+    JSON.stringify(
+      await db
+        .select({ id: orders.id, s: orders.sheetStatus, a: orders.sheetAttempts, d: orders.sheetDirty, l: orders.sheetLabel, e: orders.sheetError, r: orders.rev, u: orders.updatedAt })
+        .from(orders)
+        .where(eq(orders.storeId, TA.id))
+        .orderBy(orders.id),
+    );
+  const beforeA = await snapA();
+  const bRun = await push.pushStore(TB.scope, { maxCalls: 3, force: true, trigger: "manual" });
+  eq2("tenancy: B's run does its own work", [bRun.appended, bRun.updated, (await rowOf(TB, b1)).sheetStatus], [1, 1, "synced"]);
+  eq2("tenancy: B's run never reads, writes or marks A's orders, nor calls A's sheet", [(await snapA()) === beforeA, TA.fake.calls.length], [true, 0]);
+  ok("tenancy: nothing of A's orders reaches B's sheet", !aOrders.some((id) => JSON.stringify(TB.fake.calls.map((c) => c.body)).includes(id)));
+  // B configured with A's spreadsheet (a pasted id, written past saveSheetsConfig): unbound for B, so no call
+  await setStoreSetting(TB.scope, "sheets", { spreadsheetId: TA.spreadsheetId, sheetId: 0, sheetTitle: "Commandes", enabled: true }, actor);
+  await order(TB, { sheetStatus: "pending" });
+  const crossed = await push.pushStore(TB.scope, { maxCalls: 3, force: true, trigger: "manual" });
+  eq2("tenancy: B pointing at A's spreadsheet is unbound: no call reaches A's sheet", [crossed.skipped, TA.fake.calls.length, (await snapA()) === beforeA], ["unbound", 0, true]);
+  eq2("tenancy: B cannot claim A's spreadsheet", await config.claimSheetBinding(TB.scope, TA.spreadsheetId, actor).then(() => "claimed", (e: { code?: string }) => e.code), "binding_conflict");
+  await pause(TA, TB);
+
+  /* ---------------- 7.13 the sheets.push job (core §H.2 slot 1, OPE-§J) ---------------- */
+  await fresh();
+  const job = JOBS.find((j) => j.name === "sheets.push");
+  eq2("job: sheets.push every tick, 18 s, ≤ 50 stores over pending_sheets", [job?.every, job?.budgetMs, job?.perStore?.where, job?.perStore?.maxStoresPerTick], ["tick", 18_000, "pending_sheets", 50]);
+  ok("job: the registered budgets fit the 95 s tick; names are unique", JOBS.reduce((n, j) => n + j.budgetMs, 0) <= TICK_GUARANTEED_MS && new Set(JOBS.map((j) => j.name)).size === JOBS.length, JOBS.map((j) => [j.name, j.budgetMs]));
+  const J = await sheetStore("sp-j1");
+  const j1 = await order(J, { sheetStatus: "pending" });
+  let yields = 0;
+  const jobCtx = {
+    ...systemCtx("sheets.push"),
+    deadline: Date.now() + 18_000,
+    tickId: "qa-tick",
+    cursor: "",
+    setCursor: async () => undefined,
+    yield: async () => {
+      yields++;
+      await new Promise((r) => setImmediate(r));
+    },
+    lagMs: () => 0,
+  };
+  const jr = await job!.run(jobCtx);
+  eq2("job: one run serves the store, the summary holds counts and codes only", [jr.done, jr.summary?.appended, jr.summary?.stoppedBy, (await rowOf(J, j1)).sheetStatus], [true, 1, "none", "synced"]);
+  ok("job: ctx.yield() between stores", yields >= 1, yields);
+  ok("job: the summary carries no customer field", !JSON.stringify(jr).includes(PHONE) && !JSON.stringify(jr).includes(NAME));
+  await pause(J);
+
+  /* ---------------- 7.14 the transport seam (integrationFetch) and the client's test double ---------------- */
+  eq2("transport: seam off → the URL as it is", transport.routeIntegrationUrl("https://sheets.googleapis.com/v4/spreadsheets/x/values:batchGet?ranges=A1", null), { url: "https://sheets.googleapis.com/v4/spreadsheets/x/values:batchGet?ranges=A1", host: null });
+  eq2("transport: seam on → the mock origin, path and query kept", transport.routeIntegrationUrl("https://graph.facebook.com/v21.0/123/events?x=1", "http://127.0.0.1:4010"), { url: "http://127.0.0.1:4010/v21.0/123/events?x=1", host: "graph.facebook.com" });
+  eq2("transport: any other host never moves", [transport.routeIntegrationUrl("https://example.com/v4/x", "http://127.0.0.1:4010").host, transport.routeIntegrationUrl("http://sheets.googleapis.com/v4/x", "http://127.0.0.1:4010").host], [null, null]);
+  const recorded: { url: string; host: string; auth: boolean }[] = [];
+  const server = http.createServer((req, res) => {
+    recorded.push({ url: req.url ?? "", host: String(req.headers[transport.E2E_HOST_HEADER] ?? ""), auth: /^Bearer /.test(String(req.headers.authorization ?? "")) });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(req.url === "/token" ? JSON.stringify({ access_token: "qa-token", expires_in: 3600 }) : JSON.stringify({ valueRanges: [] }));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  env.SG_E2E = "1";
+  env.SG_E2E_MOCK_ORIGIN = `http://127.0.0.1:${port}`;
+  try {
+    const res = await transport.integrationFetch("https://api.telegram.org/botQA/sendMessage?x=1", { method: "POST", body: "{}" });
+    eq2("transport: SG_E2E=1, a loopback origin and a cod_test_* database → the recorder gets the call", [res.status, recorded[0]], [200, { url: "/botQA/sendMessage?x=1", host: "api.telegram.org", auth: false }]);
+    client.setGapiDoubleForTests(null);
+    await client.gapi("/1QaTransport0000000000000/values:batchGet?ranges=A1", {}, { maxRetries: 0 });
+    eq2(
+      "transport: the Sheets client goes through it (the OAuth token, then the API call with its Bearer)",
+      recorded.slice(1).map((r) => [r.url.split("?")[0], r.host, r.auth]),
+      [
+        ["/token", "oauth2.googleapis.com", false],
+        ["/v4/spreadsheets/1QaTransport0000000000000/values:batchGet", "sheets.googleapis.com", true],
+      ],
+    );
+    const dbUrl = env.DATABASE_URL;
+    env.DATABASE_URL = `${DB_SERVER}/cod_storegen`;
+    const refusedDb = testSeam("e2e-mocks");
+    env.DATABASE_URL = dbUrl;
+    env.SG_E2E = "0";
+    const refusedFlag = testSeam("e2e-mocks");
+    env.SG_E2E = "1";
+    env.SG_E2E_MOCK_ORIGIN = "https://mock.example.com";
+    const refusedOrigin = testSeam("e2e-mocks");
+    eq2("transport: a non-test database, SG_E2E ≠ 1 or a non-loopback origin keeps the seam off", [refusedDb, refusedFlag, refusedOrigin], [null, null, null]);
+  } finally {
+    delete env.SG_E2E;
+    delete env.SG_E2E_MOCK_ORIGIN;
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+  const nodeEnv = env.NODE_ENV;
+  env.NODE_ENV = "production";
+  let refused = false;
+  try {
+    client.setGapiDoubleForTests(async () => json({}));
+  } catch {
+    refused = true;
+  }
+  if (nodeEnv === undefined) delete env.NODE_ENV;
+  else env.NODE_ENV = nodeEnv;
+  ok("client: the gapi test double is refused under NODE_ENV=production", refused);
+  client.setGapiDoubleForTests(null);
+  delete env.GOOGLE_SA_JSON_B64;
 }
 
 main()

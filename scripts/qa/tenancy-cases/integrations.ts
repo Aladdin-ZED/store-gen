@@ -13,6 +13,10 @@
  * contributor): B's deliveries log never lists A's rows, also filtered on A's ids and kinds (OPE-§28.3 (3));
  * `integrationHealth`, `sheetsBacklog`, `syncFailedCount`, the run history and the pulse never count A; A's own rows
  * carry no phone, name or sealed payload (OPE-§28.3 (4)).
+ *
+ * R1 P5 step 4, the Sheets push (src/lib/sheets/push.ts `pushStore`): B's run never reads, appends, marks or calls A's
+ * orders or A's sheet, even when B's sheet names A's order; B's config pointing at A's spreadsheet is unbound for B and
+ * makes no call (SHT-02, SHT-05, OPE-§19.2).
  */
 import { createRequire } from "node:module";
 import type { TenancyCase, TenancyKit } from "../tenancy-check";
@@ -240,6 +244,64 @@ export const cases: TenancyCase[] = [
         await db.delete(integrationStatus).where(inStore(integrationStatus, a));
         if (mainBefore) await db.update(orders).set({ sheetStatus: mainBefore.sheetStatus }).where(byId(orders, a, kit.fx.A.order.main));
         await db.delete(cronCursors).where(eq(cronCursors.job, `sheets.push:${kit.fx.A.id}`));
+      }
+    },
+  },
+  {
+    name: "sheets push: B's run never touches A's orders or A's sheet (IN-01, SHT-02)",
+    async run(kit) {
+      const push = load<typeof import("@/lib/sheets/push")>("@/lib/sheets/push");
+      const client = load<typeof import("@/lib/sheets/client")>("@/lib/sheets/client");
+      const config = load<typeof import("@/lib/sheets/config")>("@/lib/sheets/config");
+      const { getStoreSetting, setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+      const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+      const { orders } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+      const { byId } = load<typeof import("@/lib/tenancy/sql")>("@/lib/tenancy/sql");
+      const a = write(kit, "A");
+      const b = write(kit, "B");
+      const sheetA = await config.getSheetsConfig(a);
+      const sheetB = await config.getSheetsConfig(b);
+      if (!sheetA || !sheetB) {
+        kit.check("sheets push: both stores have a connected sheet", false, { sheetA, sheetB });
+        return;
+      }
+      kit.check("sheets push: each store's sheet is bound to it alone", (await config.sheetBound(a, sheetA.spreadsheetId)) && (await config.sheetBound(b, sheetB.spreadsheetId)) && !(await config.sheetBound(b, sheetA.spreadsheetId)));
+
+      // A's order made due (pending) and B's too; B's sheet answers a row naming A's order (ids are customer-visible)
+      const keep = async (scope: WriteScope, id: string) => (await db.select({ s: orders.sheetStatus, a: orders.sheetAttempts, d: orders.sheetDirty, e: orders.sheetError }).from(orders).where(byId(orders, scope, id)).limit(1))[0];
+      const prevA = await keep(a, kit.fx.A.order.main);
+      const prevB = await keep(b, kit.fx.B.order.main);
+      await db.update(orders).set({ sheetStatus: "pending" }).where(byId(orders, a, kit.fx.A.order.main));
+      await db.update(orders).set({ sheetStatus: "pending", sheetAttempts: 1 }).where(byId(orders, b, kit.fx.B.order.main));
+      const called: string[] = [];
+      const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
+      client.setGapiDoubleForTests(async (call) => {
+        called.push(call.path.split("?")[0] ?? "");
+        if (call.path.includes(":batchGet")) return json({ valueRanges: [{}, { values: [[kit.fx.A.order.main, "", "Nouvelle"]] }] });
+        return json({ updates: { updatedRows: 1 } });
+      });
+      const prevSettingB = await getStoreSetting(b, "sheets", { fresh: true });
+      try {
+        const before = await kit.snapshotA();
+        const run = await push.pushStore(b, { maxCalls: 3, force: true, trigger: "manual" });
+        const ownB = `/${encodeURIComponent(sheetB.spreadsheetId)}`;
+        kit.check("sheets push: B's run calls B's sheet only", called.length > 0 && called.every((p) => p.startsWith(`${ownB}/`)), called);
+        kit.check("sheets push: B's run appends B's own order", run.appended === 1 && (await keep(b, kit.fx.B.order.main))?.s === "synced", run);
+        kit.check("sheets push: A's orders are not read, appended or marked by B's run", (await kit.snapshotA()) === before && (await keep(a, kit.fx.A.order.main))?.s === "pending");
+        const sent = JSON.stringify(called);
+        kit.check("sheets push: nothing of A reaches B's calls", !sent.includes(kit.fx.A.order.main) && !sent.includes(sheetA.spreadsheetId), called);
+
+        // B's settings naming A's spreadsheet (a pasted id written past the binding): unbound for B, so no call at all
+        await setStoreSetting(b, "sheets", { ...prevSettingB, spreadsheetId: sheetA.spreadsheetId, enabled: true }, { id: kit.fx.B.members.owner });
+        await db.update(orders).set({ sheetStatus: "pending" }).where(byId(orders, b, kit.fx.B.order.main));
+        called.length = 0;
+        const crossed = await push.pushStore(b, { maxCalls: 3, force: true, trigger: "manual" });
+        kit.check("sheets push: B configured with A's spreadsheet is unbound and calls nothing", crossed.skipped === "unbound" && called.length === 0 && (await kit.snapshotA()) === before, { crossed, called });
+      } finally {
+        client.setGapiDoubleForTests(null);
+        await setStoreSetting(b, "sheets", prevSettingB, { id: kit.fx.B.members.owner });
+        if (prevA) await db.update(orders).set({ sheetStatus: prevA.s, sheetAttempts: prevA.a, sheetDirty: prevA.d, sheetError: prevA.e }).where(byId(orders, a, kit.fx.A.order.main));
+        if (prevB) await db.update(orders).set({ sheetStatus: prevB.s, sheetAttempts: prevB.a, sheetDirty: prevB.d, sheetError: prevB.e }).where(byId(orders, b, kit.fx.B.order.main));
       }
     },
   },
