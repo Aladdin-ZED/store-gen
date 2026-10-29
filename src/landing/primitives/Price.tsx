@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { round2 } from "@/lib/page/pricing";
 import type { RenderContext } from "../types";
+import { lookOf } from "./RichText";
 import { cx } from "./util";
 
 export interface PriceProps {
@@ -110,6 +111,7 @@ export function Price({
 }: PriceProps): ReactElement {
   const saving = live ? null : savingsOf(amount, compareAt);
   const labels = saving && showSavings ? savingsLabel(ctx, saving) : {};
+  if (lookOf(ctx)) return <LookPrice ctx={ctx} amount={amount} compareAt={compareAt} size={size} live={live} from={from} animate={animate} className={className} saving={saving} labels={labels} />;
   // The " " text nodes between parts are dropped by the flex layout but keep copied text and the
   // spoken/accessible text readable ("À partir de 249 DH Au lieu de 299 DH"), not glued together.
   return (
@@ -147,6 +149,70 @@ export function Price({
           </span>
         </>
       ) : null}
+      {labels.amount ? (
+        <>
+          {" "}
+          <span className="lp-price__save-amt">{labels.amount}</span>
+        </>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * The price cluster under a look (design.md DES-§4.5.4 Price, DES-§10.5 Numerals; T1, RTL4): the price, the struck
+ * reference and the discount chip as one inline-flex unit that never splits across a line (.lp-price__cluster, logical
+ * gaps, tabular lining figures through data-num); the "save N DH" line and the "from" label sit beside it, outside the
+ * unit. A document without a look keeps the markup of Price above.
+ */
+function LookPrice({
+  ctx,
+  amount,
+  compareAt,
+  size,
+  live,
+  from,
+  animate,
+  className,
+  saving,
+  labels,
+}: Required<Pick<PriceProps, "size" | "live" | "from" | "animate">> &
+  Pick<PriceProps, "ctx" | "amount" | "compareAt" | "className"> & { saving: { amount: number; pct: number } | null; labels: { pct?: string; amount?: string } }): ReactElement {
+  return (
+    <span className={cx("lp-price", `lp-price--${size}`, className)}>
+      {from ? (
+        <>
+          <span className="lp-price__from">{ctx.t("price.from")}</span>{" "}
+        </>
+      ) : null}
+      <span className="lp-price__cluster" data-num="">
+        {live ? (
+          <bdi className="lp-price__now" data-lp-price="current">
+            {ctx.money(amount)}
+          </bdi>
+        ) : (
+          <span className="lp-price__now">
+            <Money ctx={ctx} amount={amount} />
+          </span>
+        )}
+        {saving ? (
+          <>
+            {" "}
+            <s className="lp-price__was" data-reveal={animate ? "draw" : undefined}>
+              <span className="lp-visually-hidden">{ctx.t("price.was")} </span>
+              <bdi>{ctx.money(compareAt!)}</bdi>
+            </s>
+          </>
+        ) : null}
+        {labels.pct ? (
+          <>
+            {" "}
+            <span className="lp-price__save">
+              <bdi dir="ltr">{labels.pct}</bdi>
+            </span>
+          </>
+        ) : null}
+      </span>
       {labels.amount ? (
         <>
           {" "}

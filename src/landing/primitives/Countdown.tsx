@@ -1,7 +1,15 @@
 import { Fragment, type ReactElement } from "react";
 import { pluralForms } from "../i18n";
 import type { RenderContext } from "../types";
+import { lookOf } from "./RichText";
 import { cx, pad2 } from "./util";
+
+/**
+ * The Arabic day label by Intl.PluralRules category, under a look (design.md DES-§4.5.4 Countdown; RTL2): 2 days read
+ * "يومان", never the oblique "يومين" after a numeral ("02 يومين"); 3-10 "أيام", 11-99 "يومًا". The runtime re-picks the
+ * label from these forms on its first tick (src/landing/runtime/countdown.ts, unchanged).
+ */
+const AR_DAY_FORMS: Readonly<Record<string, string>> = { one: "يوم", two: "يومان", few: "أيام", many: "يومًا", other: "يوم" };
 
 export interface CountdownProps {
   ctx: RenderContext;
@@ -103,9 +111,12 @@ export function Countdown({
   const seconds = s - minutes * 60;
   // Less than a day left at render time → no days slot (time only goes down, so hours never
   // exceed 23 and the runtime's "hours carry the days" rule keeps it exact).
-  const dayForms = days > 0 ? pluralForms(ctx.locale, "urgency.days") : null;
+  const look = lookOf(ctx);
+  const arLook = look && ctx.locale === "ar";
+  const dayForms = days > 0 ? (arLook ? { ...AR_DAY_FORMS } : pluralForms(ctx.locale, "urgency.days")) : null;
+  const dayLabel = arLook ? (AR_DAY_FORMS[new Intl.PluralRules("ar").select(days)] ?? AR_DAY_FORMS.other!) : ctx.t("urgency.days", { n: days });
   const units = [
-    ...(days > 0 ? [{ k: "d", v: days, lab: ctx.t("urgency.days", { n: days }) }] : []),
+    ...(days > 0 ? [{ k: "d", v: days, lab: dayLabel }] : []),
     { k: "h", v: hours, lab: ctx.t("urgency.hours") },
     { k: "m", v: minutes, lab: ctx.t("urgency.minutes") },
     { k: "s", v: seconds, lab: ctx.t("urgency.seconds") },
@@ -125,18 +136,36 @@ export function Countdown({
               :
             </span>
           ) : null}
-          <span className="lp-cd__unit" data-unit={u.k} data-cd-collapse={compact && u.k === "d" ? "" : undefined}>
-            <span className="lp-cd__num" data-cd={u.k}>
-              {pad2(u.v)}
+          {look ? (
+            // under a look the numeral and its unit are one LTR isolate (RTL1, RTL2), so the text around never reorders
+            // them; the compact Arabic day group still reads figure first from the right (base.css §17 sets its
+            // direction, as for a document without look)
+            <bdi className="lp-cd__unit" dir="ltr" data-unit={u.k} data-cd-collapse={compact && u.k === "d" ? "" : undefined}>
+              <span className="lp-cd__num" data-cd={u.k}>
+                {pad2(u.v)}
+              </span>
+              <span
+                className={cx("lp-cd__lab", compact && u.k !== "d" && "lp-visually-hidden")}
+                data-cd-label={u.k === "d" && dayForms ? "d" : undefined}
+                data-forms={u.k === "d" && dayForms ? JSON.stringify(dayForms) : undefined}
+              >
+                {u.lab}
+              </span>
+            </bdi>
+          ) : (
+            <span className="lp-cd__unit" data-unit={u.k} data-cd-collapse={compact && u.k === "d" ? "" : undefined}>
+              <span className="lp-cd__num" data-cd={u.k}>
+                {pad2(u.v)}
+              </span>
+              <span
+                className={cx("lp-cd__lab", compact && u.k !== "d" && "lp-visually-hidden")}
+                data-cd-label={u.k === "d" && dayForms ? "d" : undefined}
+                data-forms={u.k === "d" && dayForms ? JSON.stringify(dayForms) : undefined}
+              >
+                {u.lab}
+              </span>
             </span>
-            <span
-              className={cx("lp-cd__lab", compact && u.k !== "d" && "lp-visually-hidden")}
-              data-cd-label={u.k === "d" && dayForms ? "d" : undefined}
-              data-forms={u.k === "d" && dayForms ? JSON.stringify(dayForms) : undefined}
-            >
-              {u.lab}
-            </span>
-          </span>
+          )}
         </Fragment>
       ))}
     </div>

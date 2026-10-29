@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import type { RenderContext } from "../types";
 import { Ornament } from "./Ornament";
-import { RichText } from "./RichText";
+import { lookOf, RichText } from "./RichText";
 import { cx, reveal, type RevealKind } from "./util";
 
 export interface KickerProps {
@@ -21,10 +21,23 @@ export interface KickerProps {
   delay?: number;
 }
 
-/** Label above a title: glyph + small label type (“● Formule au karité”), as a pill or a bare label. */
+/**
+ * Label above a title: glyph + small label type (“● Formule au karité”), as a pill or a bare label. Under a look
+ * (design.md DES-§4.5.4, DES-§5.8) a kicker is plain topic words: a bare label in the look's label style
+ * (--lp-label-*), with the look's glyph only when its kit has one (data-glyph) and no pill unless asked for.
+ */
 export function Kicker({ ctx, text, ornament, look = "auto", as = "p", className, editPath, ...rv }: KickerProps): ReactElement | null {
   if (!text || !text.trim()) return null;
   const Tag = as;
+  if (lookOf(ctx)) {
+    const glyph = ornament ?? ctx.doc.theme.look?.kit.gl !== "none";
+    return (
+      <Tag className={cx("lp-kicker", `lp-kicker--${look === "pill" ? "pill" : "label"}`, className)} {...reveal(rv.reveal, rv.delay)}>
+        {glyph ? <Ornament ctx={ctx} className="lp-kicker__ornament" /> : null}
+        <RichText as="span" className="lp-kicker__text" text={text} ctx={ctx} decorate={false} editPath={editPath} />
+      </Tag>
+    );
+  }
   const glyph = ornament ?? ctx.ornament > 0;
   return (
     <Tag className={cx("lp-kicker", look !== "auto" && `lp-kicker--${look}`, className)} {...reveal(rv.reveal, rv.delay)}>

@@ -9,9 +9,29 @@
  *    (`--lp-ease-spring`, `--lp-ease-pop`), and core D60 / V40 (no `--lp-grain*`, `data-texture="none"`, no
  *    `--lp-aurora*`);
  *  - V40 on the rendered documents: no `--lp-aurora*` custom property, no `--lp-grain`, no `data-texture="grain"` in a
- *    live landing document (the `.lp-aurora` elements leave with the section redraws of a later step).
+ *    live landing document (the `.lp-aurora` elements leave with the section redraws of a later step);
+ *  - the seven primitives (DES-§4.5.4, DES-R18 additive props): their markup on documents without look equals the
+ *    goldens recorded from the pre-change primitives (src/lib/design/calibration/primitive-goldens.json, allow-list
+ *    `LEGACY_ALLOW` of scripts/qa/design-primitives.ts: empty); under a look, the TC-1 rows the primitives guarantee
+ *    and the SectionHeader opener matrix;
+ *  - TC-1 T1 CSS lint: tabular lining figures on `.lp-price*`, `.lp-count*`, `[data-num]` in the landing base
+ *    stylesheet, and the price cluster one unbroken inline-flex unit (RTL4);
+ *  - TC-1 RTL1 (ranges as LTR isolates), RTL2 (countdown plural forms, never "02 يومين"), RTL4 (the price cluster),
+ *    T2 (no word boxes, no particle before a breakable space in an Arabic heading) and T7 (Latin runs isolated in
+ *    Arabic headings and leads) on the ar fixtures rendered with a look, and RTL2 / RTL4 on a fr one.
  */
 import type { RenderCase } from "../render-check";
+
+/**
+ * The look documents of the TC-1 rows (design.md DES-§8.10 fixtures: argan T2 and its announcement's "24-48" RTL1,
+ * massage T7, parfum RTL4), and one Latin page; four renders keep the case inside test:render's share.
+ */
+const LOOK_DOCS = [
+  ["argan", "ar"],
+  ["massage", "ar"],
+  ["parfum", "ar"],
+  ["tshirt", "fr"],
+] as const;
 
 export const cases: RenderCase[] = [
   {
@@ -38,6 +58,48 @@ export const cases: RenderCase[] = [
           if (/--lp-grain(?:-opacity)?\s*:/.test(theme.css)) kit.fail(`${tag}: an --lp-grain custom property is declared`);
           if (theme.attrs["data-texture"] !== "none") kit.fail(`${tag}: data-texture="${theme.attrs["data-texture"]}" with texture "grain" in the doc`);
         }
+      }
+    },
+  },
+  {
+    name: "primitives: a document without look keeps the seven primitives' markup (goldens; allow-list empty)",
+    async run(kit) {
+      const { compareGoldens } = await import("../design-primitives");
+      for (const d of compareGoldens()) kit.fail(d);
+    },
+  },
+  {
+    name: "primitives under a look: TC-1 rows (T2, T7, RTL1, RTL2, RTL4) and the SectionHeader openers",
+    async run(kit) {
+      const { lookMatrixProblems } = await import("../design-primitives");
+      for (const p of lookMatrixProblems()) kit.fail(p);
+    },
+  },
+  {
+    name: "T1 CSS lint: tabular lining figures on .lp-price*, .lp-count*, [data-num]; the price cluster one unit (RTL4)",
+    async run(kit) {
+      const { numeralCssProblems } = await import("../design-primitives");
+      const { baseCss } = await import("@/landing/generated/assets");
+      for (const p of numeralCssProblems(baseCss)) kit.fail(`base.css: ${p}`);
+    },
+  },
+  {
+    name: "TC-1 on look documents: RTL1, RTL2, RTL4, T2, T7 (ar) and RTL2, RTL4 (fr)",
+    async run(kit) {
+      const { validateDoc } = await import("@/lib/page/validate");
+      const { renderLandingHtml } = await import("@/lib/render/core");
+      const { lookDocProblems, withLook } = await import("../design-primitives");
+      for (const [name, locale] of LOOK_DOCS) {
+        const fx = kit.getFixture(name, { now: kit.now, locale });
+        const { doc } = validateDoc(fx.doc);
+        if (!doc) {
+          kit.fail(`${name}/${locale}: invalid fixture`);
+          continue;
+        }
+        const r = await renderLandingHtml(withLook(doc), kit.liveOptions(name, fx));
+        if (r.issues.length) kit.fail(`${name}/${locale} with look: sections failed ${r.issues.map((i) => i.sectionId).join(", ")}`);
+        if (!/<html[^>]*\sdata-look="1"/.test(r.html)) kit.fail(`${name}/${locale}: the look document has no data-look`);
+        for (const p of lookDocProblems(r.html, locale)) kit.fail(`${name}/${locale} with look: ${p}`);
       }
     },
   },

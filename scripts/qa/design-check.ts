@@ -10,6 +10,8 @@
 import { DESIGN_GROUPS, type GroupCtx } from "@/lib/design/selftest";
 // step 2 (genome core): determinism, H-rules, compile, genomeOf, gene spread, hints, distance, tokens, Director vocabulary
 import "@/lib/design/selftest-genome";
+// step 3 (measurement core): the height model against the calibration, the fold contract, the form, the features
+import "@/lib/design/selftest-heights";
 
 async function main() {
   const full = process.argv.includes("--full");

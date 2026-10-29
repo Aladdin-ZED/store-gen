@@ -4424,6 +4424,105 @@ main[tabindex="-1"]:focus {
   }
 }
 
+/* ==========================================================================
+   20. Look primitives (design.md DES-§4.5.4, DES-§5.8, DES-§10.5; T1, T2,
+       T7, RTL1, RTL4, I7). Every rule is scoped to <html data-look>, which
+       buildTheme emits only with doc.theme.look: a document without a look
+       renders exactly as before.
+   ========================================================================== */
+/* T1: prices, counters, phones and quantities in tabular lining figures */
+:where([data-look] :is(.lp-price, .lp-price__cluster, .lp-price__from, .lp-price__save-amt, .lp-counter, .lp-counter__num, .lp-counter__fig, .lp-counter__affix, [data-num], a[href^="tel:"])) {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* RTL4: price, struck reference and discount chip are one unit that never splits across a line; the gaps are
+   logical, so the chip sits beside the price in both directions */
+:where([data-look] .lp-price__cluster) {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  column-gap: 0.55em;
+  white-space: nowrap;
+}
+
+/* T2: display lines balance, leads never end on a lone word (Arabic particles are bound by RichText) */
+:where([data-look] :is(h1, h2)) {
+  text-wrap: balance;
+}
+
+:where([data-look] :is(.lp-lead, .lp-sh__lead, .lp-sh__pull)) {
+  text-wrap: pretty;
+}
+
+/* T7: chips, badges and labels are bidi isolates in Arabic text (list items are their own paragraphs already) */
+:where([data-look]:lang(ar) :is(.lp-chip, .lp-badge, .lp-label, .lp-kicker__text)) {
+  unicode-bidi: isolate;
+}
+
+/* DES-§5.8 openers: a caption column, a plain list number, the lead pulled first, the section's first image */
+:where([data-look] .lp-sh__caption) {
+  margin: 0;
+  max-inline-size: 24ch;
+  font-family: var(--lp-font-label, var(--lp-font-body));
+  font-size: calc(var(--lp-step--1) * var(--lp-script-scale));
+  line-height: 1.45;
+  color: var(--sec-ink-soft);
+}
+
+:where([data-look] .lp-sh__index) {
+  font-family: var(--lp-font-label, var(--lp-font-body));
+  font-size: calc(max(0.8rem, var(--lp-step--1) * 0.95) * var(--lp-script-scale));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: var(--sec-ink-soft);
+}
+
+:where([data-look] .lp-sh__pull) {
+  max-inline-size: min(34rem, 100%);
+  font-family: var(--lp-font-display);
+  font-size: calc(var(--lp-step-2) * var(--lp-script-scale-display));
+  line-height: 1.35;
+  color: var(--sec-ink);
+}
+
+:where([data-look] .lp-sh__opener-img) {
+  max-inline-size: min(28rem, 100%);
+  border-radius: var(--lp-radius-media, var(--lp-sq-m));
+  overflow: hidden;
+}
+
+/* the caption column hangs at inline-start from 768 (mirrored in ar by the logical grid) */
+@media (min-width: 48rem) {
+  :where([data-look] .lp-sh[data-opener="caption"]:not(.lp-sh--split, .lp-sh--center)) {
+    grid-template-columns: minmax(7rem, 12rem) minmax(0, 1fr);
+    column-gap: clamp(1.5rem, 4vw, 3.5rem);
+    align-items: start;
+  }
+
+  :where([data-look] .lp-sh[data-opener="caption"]:not(.lp-sh--split, .lp-sh--center) > :not(.lp-sh__caption)) {
+    grid-column: 2;
+  }
+
+  :where([data-look] .lp-sh[data-opener="caption"]:not(.lp-sh--split, .lp-sh--center) > .lp-sh__caption) {
+    grid-row: 1 / span 2;
+    padding-block-start: 0.45em;
+  }
+
+  :where([data-look] .lp-sh--split > :is(.lp-sh__caption, .lp-sh__index, .lp-sh__pull, .lp-sh__opener-img)) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* I7: the band clips at its own box, never inside a word; every item keeps ≥ 0.5 em at both sides */
+:where([data-look] .lp-marquee) {
+  overflow: clip;
+}
+
+:where([data-look] .lp-marquee__content) {
+  padding-inline: 0.5em;
+}
+
 /* reduced motion: no transitions anywhere, marquees and loops still */
 @media (prefers-reduced-motion: reduce) {
   *,

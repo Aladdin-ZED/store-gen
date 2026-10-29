@@ -27,6 +27,11 @@ const PER_ITEM = { slow: 6.5, normal: 4.2, fast: 2.6 } as const;
  * Seamless CSS marquee (runtime: data-marquee → paused off-screen). The item list is repeated
  * until one half overfills the viewport, then the half is duplicated (aria-hidden) and the track
  * slides by exactly 50%. Only the first copy is exposed to assistive tech.
+ *
+ * The copies are always whole items (design.md DES-§4.5.4 MarqueeTrack, I7): a word is never cut at a copy boundary,
+ * and the travel follows the page direction (lp-marquee-rtl on RTL pages). Under a look the band clips with
+ * `overflow: clip` on the marquee box only and every item keeps `padding-inline` ≥ 0.5 em (base.css §20), so an outline
+ * or italic glyph is never cut at its own edge.
  */
 export function MarqueeTrack({
   ctx,
