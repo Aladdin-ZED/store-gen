@@ -5,14 +5,15 @@
  * `injection.screen` entry of `TaskIO`.
  *
  * `TaskIO` maps each task to its input and output (the type-only files of src/lib/ai/schema/tasks/*.ts; the schemas and
- * `finalize` bodies join them task by task). The Director tasks (`design.plan`, `design.critique`) get their shapes
- * with the Director layer (src/lib/ai/director/types.ts, built over design's imported types); until then, and for every
- * R2 / R3 task, an entry stays `unknown`, so a caller must narrow what it reads. Every input shape is merchant data or
+ * `finalize` bodies join them task by task). The Director tasks (`design.plan`, `design.critique`) take their shapes
+ * from the Director layer (src/lib/ai/director/types.ts, built over design's imported types; step 3); every R2 / R3
+ * task's entry stays `unknown`, so a caller must narrow what it reads. Every input shape is merchant data or
  * aggregates: no field exists for a customer's text (AI-D31).
  */
 import type { AiPolicy, DeviceInfo } from "../policy";
 import type { AiFlag } from "@/lib/db/schema";
 import type { Locale } from "@/lib/page/schema";
+import type { Critique, CritiqueInput, DirectorPlan, DirectorPlanInput } from "../director/types";
 import type { AdBriefInput, AdBriefOut } from "../schema/tasks/ad-brief";
 import type { AnalysisOut, AnalyzeInput } from "../schema/tasks/analyze";
 import type { CallScriptInput, CallScriptOut } from "../schema/tasks/callcenter-script";
@@ -35,6 +36,8 @@ interface DeclaredTaskIO {
   "copy.page": { in: CopyPageInput; out: CopyPageOut };
   "copy.hero": { in: HeroPackInput; out: HeroPackOut };
   "copy.field": { in: FieldRewriteInput; out: FieldRewriteOut };
+  "design.plan": { in: DirectorPlanInput; out: DirectorPlan };
+  "design.critique": { in: CritiqueInput; out: Critique };
   "injection.screen": { in: InjectionScreenInput; out: InjectionScreenOut };
   "ad.brief": { in: AdBriefInput; out: AdBriefOut };
   "callcenter.script": { in: CallScriptInput; out: CallScriptOut };

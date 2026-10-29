@@ -23,6 +23,8 @@
  *     protocol and the fail-code table.
  * Sections (step 2, guard v2 and the task contracts; ./selftest-guard.ts): copy-schema, guard-merge, numbers, claims,
  * policies, darija, library, finalize-analyze, finalize-copy, finalize-brief, finalize-script.
+ * Sections (step 3, the Director's pure layer; ./selftest-director.ts): director-seams, director-vocab, director-rubric,
+ * director-budgets, director-plan, director-critique, director-accept, director-brief (and director-strict).
  * Exits 1 on any failure.
  */
 import { isDeepStrictEqual } from "node:util";
@@ -56,6 +58,7 @@ import { DEFAULT_TOK_PER_SEC, LEASE_MARGIN_MS, MAX_BLUEPRINT_STAGES, MAX_STAGE_I
 import { PlatformAi, SEED_PRICES, SEED_PRICE_NOTES, effectivePrices, type PlatformAiSetting, type ProbeResult } from "@/lib/settings/keys/platform_ai";
 import { ANTHROPIC_KEY_RE, PlatformAiSecret } from "@/lib/settings/keys/platform_ai_secret";
 import { StoreAi } from "@/lib/settings/keys/store_ai";
+import { registerDirectorSections } from "./selftest-director";
 import { registerGuardSections } from "./selftest-guard";
 
 /* ------------------------------------------------------------------ */
@@ -1103,6 +1106,7 @@ section("protocol", () => {
 });
 
 registerGuardSections({ section, check, eq, strict: STRICT });
+registerDirectorSections({ section, check, eq, strict: STRICT });
 
 /* ------------------------------------------------------------------ */
 /* run                                                                 */

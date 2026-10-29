@@ -118,7 +118,7 @@ function cleanCopy(): AiCopy {
 }
 
 const LENGTH_KEYWORDS = ["minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"];
-function jsonKeywords(schema: unknown, out: string[] = [], path = "$"): string[] {
+export function jsonKeywords(schema: unknown, out: string[] = [], path = "$"): string[] {
   if (Array.isArray(schema)) schema.forEach((s, i) => jsonKeywords(s, out, `${path}[${i}]`));
   else if (schema && typeof schema === "object") {
     const o = schema as Record<string, unknown>;
@@ -135,7 +135,7 @@ function jsonKeywords(schema: unknown, out: string[] = [], path = "$"): string[]
 
 const sha = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, 16);
 const ROOT = process.cwd();
-function filesUnder(dir: string): string[] {
+export function filesUnder(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
