@@ -19,6 +19,9 @@
  *   static · timeline     `TimelineItem` carries no phone, email, address or note field, at any depth (OPE-§O.1)
  *   pure                  masking, cities and the city-key.json parity fixture, risk, the ISO window, the ladder on a
  *                         fake clock, priorityOf, the ISO keys, the ops catalog (src/lib/callcenter/selftest.ts)
+ *   pure · idempotency    the Idempotency-Key cache (src/lib/callcenter/idem.ts, OD36): nextOrder / recordOutcome
+ *                         results replayed per store and user, a double tap runs once, a throw is not kept, the
+ *                         10-minute expiry on a fake clock, the 2,000-entry store bound
  *
  * Each lint is proven on a planted fixture first (it must catch it), then run on the tree. Prints its wall time; fails
  * above 25 s for test:state + test:ops + test:profit together (OPE-§O.1; src/lib/callcenter/suite-clock.ts).
@@ -380,10 +383,139 @@ async function pure(): Promise<void> {
   console.log(`  pure: ${Object.entries(r.sections).map(([k, n]) => `${k} ${n}`).join(" · ")}`);
 }
 
+/* ------------------------------------------------------------------ */
+/* pure · idempotency (src/lib/callcenter/idem.ts, OD36)               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The hot path's Idempotency-Key cache on a fake clock: a replay answers the first result marked `replayed` and runs
+ * nothing (nextOrder's and recordOutcome's shapes), per store and user; a run that threw is not kept; the entry lives
+ * 10 minutes; a store's bound (2,000 entries) drops its own oldest first and never another store's. Runs after
+ * `pure()`, which stubbed `server-only`.
+ */
+async function idem(): Promise<void> {
+  section = "pure · idempotency";
+  const real = Date.now;
+  let clock = real.call(Date);
+  Date.now = () => clock;
+  try {
+    const { withIdem, isIdemKey, IDEM_TTL_MS, IDEM_MAX_PER_STORE } = await import("@/lib/callcenter/idem");
+    type Scope = Parameters<typeof withIdem>[0];
+    const store = (id: string) => ({ storeId: id, kind: "member" }) as unknown as Scope;
+    const A = store("0P4X0000000000000000000001");
+    const B = store("0P4X0000000000000000000002");
+    let runs = 0;
+    // nextOrder's result and its marker (src/lib/orders/queue.ts)
+    type Next = { ok: true; order: { id: string }; resumed: boolean; replayed?: true } | { ok: false; reason: string };
+    const nextMark = (r: Next): Next => (r.ok ? { ...r, replayed: true as const } : r);
+    const claim = (id: string) => async (): Promise<Next> => {
+      runs++;
+      return { ok: true, order: { id }, resumed: false };
+    };
+    const k1 = "6f0b8a52-3c1d-4e8f-9a7b-1c2d3e4f5a6b";
+    const first = await withIdem(A, "u1", k1, claim("AB-0001"), nextMark);
+    const again = await withIdem(A, "u1", k1, claim("AB-0002"), nextMark);
+    check("nextOrder: a replay answers the first card, replayed: true, and runs nothing", runs === 1 && JSON.stringify(again) === JSON.stringify({ ...first, replayed: true }) && !("replayed" in first), { runs, first, again });
+    await withIdem(A, "u2", k1, claim("AB-0003"), nextMark);
+    await withIdem(B, "u1", k1, claim("AB-0004"), nextMark);
+    check("the key is per store and per user (another user, another store: a fresh run)", runs === 3, runs);
+    check("an upper-case key is the same key", (await withIdem(A, "u1", k1.toUpperCase(), claim("AB-0005"), nextMark)).ok && runs === 3, runs);
+    const k1b = "a8d5c6e4-1b2a-4c3d-8e9f-0a1b2c3d4e5f";
+    const empty = await withIdem(A, "u1", k1b, async () => ({ ok: false, reason: "empty" }) as Next, nextMark);
+    const emptyAgain = await withIdem(A, "u1", k1b, claim("AB-0006"), nextMark);
+    check("a refusal (empty) is replayed as it was", JSON.stringify(empty) === JSON.stringify(emptyAgain) && runs === 3, { empty, emptyAgain });
+
+    // recordOutcome's shape: ActionResult<TransitionResult & …>, the marker on data
+    type Out = { ok: true; data: { ok: boolean; rev?: number; replayed?: true } } | { ok: false; error: string };
+    const outMark = (r: Out): Out => (r.ok ? { ...r, data: { ...r.data, replayed: true as const } } : r);
+    const k2 = "0c9d8e7f-6a5b-4c3d-9e2f-1a0b9c8d7e6f";
+    const o1 = await withIdem(A, "u1", k2, async (): Promise<Out> => ({ ok: true, data: { ok: true, rev: 4 } }), outMark);
+    const o2 = await withIdem(A, "u1", k2, async (): Promise<Out> => ({ ok: true, data: { ok: true, rev: 5 } }), outMark);
+    check(
+      "recordOutcome: a replay answers the first result with data.replayed",
+      JSON.stringify(o2) === JSON.stringify({ ok: true, data: { ok: true, rev: 4, replayed: true } }) && JSON.stringify(o1) === JSON.stringify({ ok: true, data: { ok: true, rev: 4 } }),
+      { o1, o2 },
+    );
+
+    // a double tap: the second waits for the first and gets its result
+    runs = 0;
+    const k3 = "1d2c3b4a-5f6e-4d7c-8b9a-0f1e2d3c4b5a";
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow = async (): Promise<Next> => {
+      runs++;
+      await gate;
+      return { ok: true, order: { id: "AB-0010" }, resumed: false };
+    };
+    const tapA = withIdem(A, "u1", k3, slow, nextMark);
+    const tapB = withIdem(A, "u1", k3, slow, nextMark);
+    release();
+    const [ta, tb] = await Promise.all([tapA, tapB]);
+    check("a double tap at once runs once; the second answers replayed", runs === 1 && ta.ok && tb.ok && tb.replayed === true && !("replayed" in ta), { runs, ta, tb });
+
+    // a run that threw is forgotten: its retry runs for real
+    runs = 0;
+    const k4 = "2e3d4c5b-6a7f-4e8d-9c0b-1a2f3e4d5c6b";
+    const thrown = await withIdem(
+      A,
+      "u1",
+      k4,
+      async (): Promise<Next> => {
+        runs++;
+        throw new Error("dropped");
+      },
+      nextMark,
+    ).then(
+      () => "resolved",
+      (e: Error) => e.message,
+    );
+    const retried = await withIdem(A, "u1", k4, claim("AB-0011"), nextMark);
+    check("a run that threw is not kept: the retry runs", thrown === "dropped" && runs === 2 && retried.ok && !("replayed" in retried), { thrown, runs, retried });
+
+    // the 10-minute life (fake clock)
+    runs = 0;
+    const k5 = "3f4e5d6c-7b8a-4f9e-8d1c-2b3a4f5e6d7c";
+    await withIdem(A, "u1", k5, claim("AB-0012"), nextMark);
+    clock += IDEM_TTL_MS - 1_000;
+    const late = await withIdem(A, "u1", k5, claim("AB-0013"), nextMark);
+    check("9 min 59 s later: still a replay", runs === 1 && late.ok && late.order.id === "AB-0012" && late.replayed === true, { runs, late });
+    clock += 1_000;
+    const expired = await withIdem(A, "u1", k5, claim("AB-0014"), nextMark);
+    check("at 10 minutes the entry has expired: the request runs again", runs === 2 && expired.ok && expired.order.id === "AB-0014" && !("replayed" in expired), { runs, expired });
+
+    // no key, or not a UUID: no cache at all
+    runs = 0;
+    await withIdem(A, "u1", undefined, claim("AB-0015"), nextMark);
+    await withIdem(A, "u1", undefined, claim("AB-0016"), nextMark);
+    await withIdem(A, "u1", "not-a-uuid", claim("AB-0017"), nextMark);
+    await withIdem(A, "u1", "not-a-uuid", claim("AB-0018"), nextMark);
+    check("without a UUID key every request runs (the routes refuse it with 400 idem_required)", runs === 4 && !isIdemKey("not-a-uuid") && isIdemKey(k1), runs);
+
+    // the per-store bound: the store's own oldest entry goes first, another store's stays
+    const keyN = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    const C = store("0P4X0000000000000000000003");
+    const D = store("0P4X0000000000000000000004");
+    await withIdem(D, "u1", keyN(0), claim("AB-D000"), nextMark);
+    for (let n = 0; n <= IDEM_MAX_PER_STORE; n++) await withIdem(C, "u1", keyN(n), claim(`AB-${n}`), nextMark);
+    const oldest = await withIdem(C, "u1", keyN(0), claim("AB-AGAIN"), nextMark);
+    const newest = await withIdem(C, "u1", keyN(IDEM_MAX_PER_STORE), claim("AB-AGAIN"), nextMark);
+    const otherStore = await withIdem(D, "u1", keyN(0), claim("AB-AGAIN"), nextMark);
+    check(
+      `above ${IDEM_MAX_PER_STORE} entries a store drops its own oldest; its newest and another store's stay`,
+      oldest.ok && oldest.order.id === "AB-AGAIN" && newest.ok && newest.replayed === true && otherStore.ok && otherStore.order.id === "AB-D000",
+      { oldest, newest, otherStore },
+    );
+  } finally {
+    Date.now = real;
+  }
+}
+
 cityKeySize()
   .catch((e: unknown) => failures.push(`[static · cityKey size] esbuild failed: ${e instanceof Error ? e.message : String(e)}`))
   .then(pure)
   .catch((e: unknown) => failures.push(`[pure] the selftest threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
+  .then(idem)
+  .catch((e: unknown) => failures.push(`[pure · idempotency] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .finally(() => {
     const ms = performance.now() - started;
     const clock = recordSuiteTime("ops", ms);

@@ -1,4 +1,4 @@
-// proves: OP-01, OP-02, OP-06, SF-05
+// proves: OP-01, OP-02, OP-04, OP-06, SF-05
 /**
  * `test:ops-db` (P4 CALL CENTER; operations.md OPE-§O.2, §O.4; docs/STORE-SAAS.md §J.2): the call centre against a
  * real MariaDB. Creates a throwaway `cod_test_p4_opsdb_*` database on XAMPP's MariaDB (root, no password,
@@ -15,6 +15,10 @@
  *                phone edit moves the counters; honeypot orders never become a customer
  *   duplicates   (OP-06) store-wide, test orders match test orders only, "Keep both" hides the pair
  *   test orders  (SF-05) the operations rows of the OPE-§3.6 exclusions table
+ *   outcomes     (OP-04) recordOutcome on the real writer: the ladder and first_touch_at, busy retried once,
+ *                exhaustion under `close` and `keep_open` (OPE-§6.3), the callback horizon (`bad_due`) and its
+ *                outside-window warning, the coded reasons, fake + block, duplicate rules, the hold, the delivery
+ *                lane's five outcomes (OD48), an inbound confirmation of an unreachable order (OD53)
  *   masking      (OD61) every read function of this step masks under an impersonation scope and is the identity
  *                under a member scope (canaries)
  */
@@ -543,6 +547,182 @@ async function main(): Promise<number> {
     const notified = await db.select().from(S.notifications).where(and(deq(S.notifications.storeId, STORE_A), deq(S.notifications.kind, "ops.new_orders")));
     ok("real orders notify owners, admins and managers, batched", notified.length >= 1 && notified.every((r) => JSON.stringify(r.roles) === JSON.stringify(["owner", "admin", "manager"]) && /^\d{2}:\d{2}$/.test(String((r.vars as { sinceTime?: string }).sinceTime))), notified.map((r) => [r.roles, r.vars]));
     ok("the notification link is the store's to-call view", notified.every((r) => r.link === "/app/ops-a/orders?view=to-call"), notified.map((r) => r.link));
+  }
+
+  /* ================================================================ */
+  section = "outcomes";
+  {
+    // OPE-§6.1, §6.1a, §6.3, §6.5 on the real writer (the queue's own suite, test:queue, covers the claims)
+    const O = load<typeof import("@/lib/callcenter/outcomes")>("@/lib/callcenter/outcomes");
+    const L = load<typeof import("@/lib/callcenter/ladder")>("@/lib/callcenter/ladder");
+    const W = load<typeof import("@/lib/callcenter/window")>("@/lib/callcenter/window");
+    const { callingWindowFor } = load<typeof import("@/lib/callcenter/window.server")>("@/lib/callcenter/window.server");
+    type OutcomeInput = import("@/lib/callcenter/outcomes").OutcomeInput;
+    const ops = await getStoreSetting(A, "ops");
+    const w = await callingWindowFor(A);
+    const tz = w.tz;
+    /** an order of A held by `ctx` (the agent sees only the orders they hold, OD12) */
+    const held = async (ctx: WriteCtx, o: Parameters<typeof order>[1] = {}) => {
+      const id = await order(A, o);
+      await db.update(S.orders).set({ assigneeId: ctx.user.id }).where(deq(S.orders.id, id));
+      return id;
+    };
+    const record = async (ctx: WriteCtx, id: string, input: Partial<OutcomeInput> & { outcome: OutcomeInput["outcome"] }) =>
+      O.recordOutcome(ctx, { orderId: id, expectRev: (await rowOf(id)).rev, channel: "call", idem: randomUUID(), ...input });
+    const data = (r: Awaited<ReturnType<typeof record>>) => (r.ok ? r.data : null);
+    const errorOf = (r: Awaited<ReturnType<typeof record>>) => (r.ok ? (r.data.ok ? "ok" : r.data.error) : `action:${r.error}`);
+    /** a due time the writer computed a few ms after `expected` was: equal, or within 5 s when nothing snapped it */
+    const near = (got: Date | null | undefined, expected: Date | "exhausted") => expected !== "exhausted" && !!got && Math.abs(got.getTime() - expected.getTime()) < 5_000;
+
+    // no_answer: the ladder, first_touch_at, the attempt's meta, the claim ended
+    const o1 = await held(agent);
+    await db.update(S.orders).set({ claimToken: "tok-1", leaseUntil: new Date(Date.now() + 600_000) }).where(deq(S.orders.id, o1));
+    const r1 = await record(agent, o1, { outcome: "no_answer", objectionId: "price_high" });
+    const row1 = await rowOf(o1);
+    ok("no_answer: attempting, one attempt", errorOf(r1) === "ok" && row1.confirmState === "attempting" && row1.attempts === 1, r1);
+    ok("… due at the ladder's first step, in the window", near(row1.dueAt, L.nextDue(1, new Date(), new Date(), ops, tz)), [row1.dueAt, L.nextDue(1, new Date(), new Date(), ops, tz)]);
+    eq("… first_touch_at set, the claim ended", [!!row1.firstTouchAt, row1.claimToken, row1.leaseUntil], [true, null, null]);
+    const at1 = (await eventsOf(o1, "call_attempt"))[0];
+    eq("… one call_attempt by the agent: channel, attemptNo, nextDueAt, the objection chip", [at1?.actorId, at1?.reasonCode, at1?.meta], [U.agentA.id, "no_answer", { channel: "call", outcome: "no_answer", attemptNo: 1, nextDueAt: row1.dueAt!.toISOString(), objectionId: "price_high" }]);
+    const ft = row1.firstTouchAt!.getTime();
+    await record(agent, o1, { outcome: "no_answer" });
+    eq("first_touch_at is set once", (await rowOf(o1)).firstTouchAt?.getTime(), ft);
+    eq("expectRev from an older card: conflict with the fresh state", data(await O.recordOutcome(agent, { orderId: o1, expectRev: 0, channel: "call", outcome: "no_answer", idem: randomUUID() })), {
+      ok: false,
+      error: "conflict",
+      current: { rev: (await rowOf(o1)).rev, states: { confirm: "attempting", ship: "none", money: "unpaid" }, status: "no_answer" },
+    });
+
+    // busy / switched_off: the first in a row after busyRetryMinutes, the next on the ladder
+    const o2 = await held(agent);
+    await record(agent, o2, { outcome: "busy" });
+    ok("the first busy: retried after busyRetryMinutes", near((await rowOf(o2)).dueAt, W.snapIntoWindow(new Date(Date.now() + ops.busyRetryMinutes * 60_000), w)), (await rowOf(o2)).dueAt);
+    await record(agent, o2, { outcome: "switched_off" });
+    ok("a second busy / switched off in a row: the ladder (attempt 2)", near((await rowOf(o2)).dueAt, L.ladderNext(2, new Date(), ops, tz)) && (await rowOf(o2)).attempts === 2, (await rowOf(o2)).dueAt);
+
+    // exhaustion, policy close (OPE-§6.3): the last attempt closes the order in the same transaction
+    const o3 = await held(agent);
+    for (let i = 0; i < ops.ladder.length; i++) await record(agent, o3, { outcome: "no_answer" });
+    eq(`${ops.ladder.length} unanswered attempts: still attempting`, [(await rowOf(o3)).confirmState, (await rowOf(o3)).attempts], ["attempting", ops.ladder.length]);
+    const last = await record(agent, o3, { outcome: "busy" });
+    const row3 = await rowOf(o3);
+    eq("the last attempt (even a first busy): unreachable, reason attempts_exhausted, no due time", [errorOf(last), row3.confirmState, row3.cancelReason, row3.dueAt, row3.attempts], ["ok", "unreachable", "attempts_exhausted", null, ops.ladder.length + 1]);
+    const closing = (await eventsOf(o3)).filter((e) => e.rev === row3.rev);
+    eq(
+      "… one transaction: the agent's attempt and the system's move",
+      closing.map((e) => [e.type, e.actorKind, e.reasonCode]),
+      [
+        ["call_attempt", "user", "busy"],
+        ["state_changed", "system", "attempts_exhausted"],
+      ],
+    );
+
+    // exhaustion, policy keep_open: one try a day until keepOpenDays after the first attempt
+    await setStoreSetting(A, "ops", { ...(await getStoreSetting(A, "ops")), unreachable: "keep_open", keepOpenDays: 7 }, { id: U.ownerA.id });
+    const opsKeep = await getStoreSetting(A, "ops");
+    const o4 = await held(agent);
+    for (let i = 0; i < opsKeep.ladder.length; i++) await record(agent, o4, { outcome: "no_answer" });
+    await record(agent, o4, { outcome: "no_answer" });
+    const row4 = await rowOf(o4);
+    ok("keep_open: after the ladder, attempting with one try the next open day", row4.confirmState === "attempting" && near(row4.dueAt, L.keepOpenNext(row4.firstTouchAt!, new Date(), opsKeep, tz)), [row4.confirmState, row4.dueAt]);
+    await db.update(S.orders).set({ firstTouchAt: new Date(Date.now() - 8 * 86_400_000) }).where(deq(S.orders.id, o4));
+    await record(agent, o4, { outcome: "no_answer" });
+    eq("keep_open: past keepOpenDays the next unanswered try closes it", [(await rowOf(o4)).confirmState, (await rowOf(o4)).cancelReason], ["unreachable", "attempts_exhausted"]);
+    await setStoreSetting(A, "ops", { ...opsKeep, unreachable: "close" }, { id: U.ownerA.id });
+
+    // callbacks (OPE-§6.5, §L "Callback horizon")
+    const o5 = await held(agent);
+    const soon = new Date(Date.now() + 4 * 60_000).toISOString();
+    const far = new Date(Date.now() + 31 * 86_400_000).toISOString();
+    eq("a callback in 4 minutes, in 31 days, or without a time: bad_due", [errorOf(await record(agent, o5, { outcome: "callback", dueAt: soon })), errorOf(await record(agent, o5, { outcome: "callback", dueAt: far })), errorOf(await record(agent, o5, { outcome: "callback" }))], ["bad_due", "bad_due", "bad_due"]);
+    const tomorrow = W.addDaysYmd(W.storeYmd(new Date(), tz), 1);
+    const night = W.instantAt(tomorrow, "03:00", tz);
+    const cb = await record(agent, o5, { outcome: "callback", dueAt: night.toISOString() });
+    const row5 = await rowOf(o5);
+    eq("outside the window a callback is a warning, never a refusal", [errorOf(cb), data(cb)?.warning], ["ok", "outside_window"]);
+    eq("… the owner keeps it until due + grace, no claim", [row5.confirmState, row5.dueAt?.getTime(), row5.assigneeId, row5.leaseUntil?.getTime(), row5.claimToken], ["callback", night.getTime(), U.agentA.id, night.getTime() + ops.callbackGraceMinutes * 60_000, null]);
+    const o5b = await held(agent);
+    const morning = await record(agent, o5b, { outcome: "callback", dueAt: W.instantAt(tomorrow, "10:00", tz).toISOString() });
+    ok("inside the window: no warning", errorOf(morning) === "ok" && data(morning)?.warning === undefined, morning);
+
+    // the decided outcomes
+    const o6 = await held(agent);
+    eq("cancelled needs a coded reason", errorOf(await record(agent, o6, { outcome: "cancelled" })), "reason_required");
+    eq("a system reason is not pickable", (await record(agent, o6, { outcome: "cancelled", reason: "attempts_exhausted" as never })).ok, false);
+    await record(agent, o6, { outcome: "cancelled", reason: "price" });
+    eq("cancelled with a reason", [(await rowOf(o6)).confirmState, (await rowOf(o6)).cancelReason], ["cancelled", "price"]);
+    const o7 = await held(agent);
+    await record(agent, o7, { outcome: "wrong_number" });
+    eq("wrong_number: cancelled (wrong_number), the attempt counted", [(await rowOf(o7)).confirmState, (await rowOf(o7)).cancelReason, (await rowOf(o7)).attempts], ["cancelled", "wrong_number", 1]);
+    const p = freshPhone();
+    const f1 = await held(agent, { phone: p });
+    const f2 = await order(A, { phone: p });
+    eq("fake + Block this number needs blocklist.write", errorOf(await record(agent, f1, { outcome: "fake", blockPhone: true })), "forbidden");
+    const fk = await record(manager, f1, { outcome: "fake", blockPhone: true });
+    eq("a manager's fake + block: the phone blocked, the phone's other open orders listed for review", [errorOf(fk), data(fk)?.review], ["ok", [f2]]);
+    eq("… on the blocklist", (await db.select().from(S.blocklist).where(and(deq(S.blocklist.storeId, STORE_A), deq(S.blocklist.value, p)))).length, 1);
+    const d1 = await held(agent, { phone: p });
+    eq("duplicate needs duplicateOf", errorOf(await record(agent, d1, { outcome: "duplicate" })), "bad_duplicate");
+    eq("duplicate of another phone's order", errorOf(await record(agent, d1, { outcome: "duplicate", duplicateOf: o6 })), "bad_duplicate");
+    eq("duplicate of an order that is itself a duplicate", await (async () => {
+      const d0 = await order(A, { phone: p });
+      await T.transitionOrder(T.actorFrom(owner), A, { orderId: d0, want: { confirm: "duplicate" }, source: "ui", duplicateOf: f2 });
+      return errorOf(await record(agent, d1, { outcome: "duplicate", duplicateOf: d0 }));
+    })(), "bad_duplicate");
+    await record(agent, d1, { outcome: "duplicate", duplicateOf: f2 });
+    eq("duplicate of an order of the same phone: merged_into", [(await rowOf(d1)).confirmState, (await rowOf(d1)).mergedInto], ["duplicate", f2]);
+    const confirmedNext = await record(manager, f2, { outcome: "confirmed", andNext: true });
+    ok("Save and next: the next answer rides on the outcome", errorOf(confirmedNext) === "ok" && !!data(confirmedNext)?.next, confirmedNext);
+    const hold = await record(manager, await order(A), { outcome: "confirmed", shipAfter: W.addDaysYmd(W.storeYmd(new Date(), tz), 5) });
+    ok("confirmed with Deliver from…: the hold and its event (OD49)", errorOf(hold) === "ok", hold);
+    eq("a hold beyond 60 days: bad_hold", errorOf(await record(manager, await order(A), { outcome: "confirmed", shipAfter: W.addDaysYmd(W.storeYmd(new Date(), tz), 61) })), "bad_hold");
+
+    // the delivery lane (OPE-§6.1a, OD48)
+    const failedParcel = async () => {
+      const id = await order(A);
+      await T.transitionOrder(system, A, { orderId: id, want: { confirm: "confirmed" }, source: "system" });
+      await T.applyExternalStatus(A, id, { ship: "shipped" }, { kind: "carrier" });
+      await T.applyExternalStatus(A, id, { ship: "attempt_failed" }, { kind: "carrier" });
+      await db.update(S.orders).set({ assigneeId: U.agentA.id }).where(deq(S.orders.id, id));
+      return id;
+    };
+    const l1 = await failedParcel();
+    const l1row = await rowOf(l1);
+    ok("a failed delivery attempt enters the lane (a due time)", l1row.shipState === "attempt_failed" && !!l1row.dueAt, [l1row.shipState, l1row.dueAt]);
+    eq("a confirm outcome on it: illegal", errorOf(await record(agent, l1, { outcome: "confirmed" })), "illegal");
+    await record(agent, l1, { outcome: "no_answer" });
+    const l1a = await rowOf(l1);
+    ok("rescue no_answer: retried after rescue.retryMinutes, attempts untouched", near(l1a.dueAt, W.snapIntoWindow(new Date(Date.now() + ops.rescue.retryMinutes * 60_000), w)) && l1a.attempts === 0 && l1a.confirmState === "confirmed", [l1a.dueAt, l1a.attempts]);
+    eq("… a call_attempt of the delivery lane", (await eventsOf(l1, "call_attempt")).map((e) => [(e.meta as { lane?: string }).lane, (e.meta as { attemptNo: number }).attemptNo]), [["delivery", 1]]);
+    await record(agent, l1, { outcome: "busy" });
+    eq("a second unanswered rescue call: the next open day at 11:00", (await rowOf(l1)).dueAt?.getTime(), (L.rescueNext(2, 2, new Date(), ops, tz) as Date).getTime());
+    for (let i = 2; i < ops.rescue.maxCalls; i++) await record(agent, l1, { outcome: "no_answer" });
+    eq(`after ${ops.rescue.maxCalls} rescue calls the parcel leaves the lane (rescue_exhausted)`, [(await rowOf(l1)).dueAt, (await eventsOf(l1, "delivery_rescue")).map((e) => e.reasonCode)], [null, ["rescue_exhausted"]]);
+    const l2 = await failedParcel();
+    eq("reschedule needs shipAfter", errorOf(await record(agent, l2, { outcome: "reschedule" })), "bad_hold");
+    const in3 = W.addDaysYmd(W.storeYmd(new Date(), tz), 3);
+    await record(agent, l2, { outcome: "reschedule", shipAfter: in3 });
+    const l2row = await rowOf(l2);
+    eq("reschedule: postponed with the hold, out of the lane", [l2row.shipState, l2row.shipAfter?.getTime(), l2row.dueAt], ["postponed", W.instantAt(in3, "00:00", tz).getTime(), null]);
+    eq("… hold_set and delivery_rescue in the same transaction", (await eventsOf(l2)).filter((e) => e.rev === l2row.rev).map((e) => e.type), ["call_attempt", "state_changed", "hold_set", "delivery_rescue"]);
+    const l3 = await failedParcel();
+    eq("cancel_recall needs a reason", errorOf(await record(agent, l3, { outcome: "cancel_recall" })), "reason_required");
+    await record(agent, l3, { outcome: "cancel_recall", reason: "changed_mind" });
+    eq("cancel_recall: recall_requested (carrier not notified), the ship axis untouched", [(await rowOf(l3)).shipState, (await rowOf(l3)).dueAt, (await eventsOf(l3, "recall_requested")).map((e) => e.meta)], ["attempt_failed", null, [{ reason: "changed_mind", carrierNotified: false }]]);
+    const l4 = await failedParcel();
+    await record(agent, l4, { outcome: "customer_informed", note: "Disponible demain matin" });
+    eq("customer_informed: out of the lane, the rescue and the note written", [(await rowOf(l4)).dueAt, (await eventsOf(l4)).filter((e) => ["delivery_rescue", "note"].includes(e.type)).map((e) => e.type)], [null, ["delivery_rescue", "note"]]);
+
+    // inbound (OPE-§5.7 acceptance b): an unreachable customer calls back
+    const u1 = await order(A);
+    await T.transitionOrder(system, A, { orderId: u1, want: { confirm: "unreachable" }, source: "system", reason: "attempts_exhausted" });
+    eq("inbound without a lookup: not_found", errorOf(await record(agent2, u1, { outcome: "confirmed", inbound: true })), "not_found");
+    rememberInbound(A, U.agent2A.id, [u1]);
+    eq("a non-inbound outcome on an order outside the lanes: illegal", errorOf(await record(agent2, u1, { outcome: "no_answer", inbound: true })), "illegal");
+    await record(agent2, u1, { outcome: "confirmed", inbound: true });
+    const u1row = await rowOf(u1);
+    eq("inbound confirmed on an unreachable order: confirmed_by the agent, meta inbound", [u1row.confirmState, u1row.confirmedBy, (await eventsOf(u1, "call_attempt")).map((e) => (e.meta as { inbound?: true }).inbound)], ["confirmed", U.agent2A.id, [true]]);
+    eq("another store's order: not_found", errorOf(await record(ownerBCtx, o1, { outcome: "no_answer" })), "not_found");
   }
 
   /* ================================================================ */

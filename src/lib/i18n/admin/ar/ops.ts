@@ -175,4 +175,6 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   /* ---- الإشعارات (OPE-§21.4) ---- */
   "notify.ops.new_orders.title": "{count, plural, one {طلب جديد} two {جوج طلبات جداد} few {# طلبات جداد} other {# طلب جديد}}",
   "notify.ops.new_orders.body": "من {sinceTime}. حل الطلبات اللي خاصها تعيّط.",
+  "notify.ops.abandoned_claims.title": "{count, plural, one {طلب رجع للطابور} two {جوج طلبات رجعو للطابور} few {# طلبات رجعو للطابور} other {# طلب رجع للطابور}}",
+  "notify.ops.abandoned_claims.body": "شي وكيل حلّو وخلّاه حتى سالا الوقت بلا نتيجة. اللوحة كتبيّن شكون.",
 };

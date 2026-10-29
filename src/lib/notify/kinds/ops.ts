@@ -19,4 +19,15 @@ export const kinds: NotificationKindDef[] = [
     tenant: true,
     batch: { windowMin: 5 },
   },
+  // the claim that takes over an expired lease (OD46, src/lib/orders/queue.ts), one row per 60-minute window
+  {
+    kind: "ops.abandoned_claims",
+    group: "orders",
+    defaultSeverity: "info",
+    audienceHint: "store_role",
+    vars: z.object({ count: z.number().int().min(1) }),
+    link: (_vars, { handle }) => (handle ? `/app/${handle}/queue/board` : "/app"),
+    tenant: true,
+    batch: { windowMin: 60 },
+  },
 ];

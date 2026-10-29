@@ -37,3 +37,13 @@ export const ScriptDoc = z.object({
     .default([]),
 });
 export type ScriptDoc = z.output<typeof ScriptDoc>;
+
+/**
+ * The script as the queue card carries it (OPE-§5.3, §7.2): each step's text already rendered for the order, with no
+ * template left in it. P4 step 3 declares the shape so the card type is complete; step 4 adds `compileScript` and
+ * may refine the fields (the steps' upsell gating, the objection answers).
+ */
+export interface CompiledScript {
+  steps: { id: string; title: string; say: string; checks: string[]; action: "none" | "add_upsell" | "edit_address" }[];
+  objections: { id: ScriptDoc["objections"][number]["id"]; say: string }[];
+}

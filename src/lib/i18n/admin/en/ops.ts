@@ -173,4 +173,6 @@ export const messages = {
   /* ---- notifications (OPE-§21.4; `notify.<kind>.*`, D67) ---- */
   "notify.ops.new_orders.title": "{count, plural, one {# new order} other {# new orders}}",
   "notify.ops.new_orders.body": "Since {sinceTime}. Open the orders to call.",
+  "notify.ops.abandoned_claims.title": "{count, plural, one {# order went back to the queue} other {# orders went back to the queue}}",
+  "notify.ops.abandoned_claims.body": "An agent opened it and let the claim expire without a result. The board shows who.",
 } as const satisfies Record<string, string>;

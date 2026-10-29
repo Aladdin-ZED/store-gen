@@ -126,6 +126,8 @@ export const ORDER_EVENT_META = {
     nextDueAt: ISO.optional(),
     lane: z.literal("delivery").optional(),
     inbound: z.literal(true).optional(),
+    /** the objection chip tapped before the outcome (OPE-§7.2), for the R3 script learner; an id, never a text */
+    objectionId: z.string().regex(/^[a-z0-9_]{1,20}$/).optional(),
   }),
   delivery_rescue: z.strictObject({ outcome: z.enum(["customer_informed", "reschedule", "cancel_recall", "rescue_exhausted"]), shipAfter: ISO.optional(), attemptNo: z.number().int().min(0).max(255) }),
   recall_requested: z.strictObject({ reason: CODE, carrierNotified: z.boolean().optional() }),
@@ -242,7 +244,8 @@ export async function appendEvents(tx: EventDb, scope: WriteScope, events: reado
     const [res] = await tx.insert(orderEvents).values(
       storeValues(scope, {
         orderId: e.orderId,
-        at: e.at ?? new Date(),
+        // Date.now() (not `new Date()`): a test's fake clock reaches the event times too
+        at: e.at ?? new Date(Date.now()),
         actorKind: e.actorKind,
         actorId: e.actorId ?? null,
         type: e.type,
@@ -257,6 +260,22 @@ export async function appendEvents(tx: EventDb, scope: WriteScope, events: reado
     ids.push(Number((res as { insertId: number | string }).insertId));
   }
   return ids;
+}
+
+/**
+ * The order's rescue calls so far (OD48, OPE-§6.1a, §L "rescue calls per order"): its `call_attempt` events of the
+ * delivery lane, whatever their outcome. `transitionOrder` reads it when a carrier reports another failed attempt
+ * (back in the lane while calls < `rescue.maxCalls`), the outcome to decide when the lane is exhausted, the card for
+ * "Rescue calls left". P4 step 3: counted from the attempts rather than from `delivery_rescue` (OPE-§3.2's wording),
+ * because a no-answer rescue call writes no `delivery_rescue` (its meta enum has no such outcome), so counting those
+ * would let a customer who never answers be called forever.
+ */
+export async function countRescueCalls(tx: EventDb, scope: StoreScope, orderId: string): Promise<number> {
+  const [n] = await tx
+    .select({ n: sql<number>`COUNT(*)` })
+    .from(orderEvents)
+    .where(whereStore(orderEvents, scope, eq(orderEvents.orderId, orderId), eq(orderEvents.type, "call_attempt"), sql`JSON_VALUE(${orderEvents.meta}, '$.lane') = 'delivery'`));
+  return Number(n?.n ?? 0);
 }
 
 export interface AppendOrderEventInput {
@@ -534,7 +553,7 @@ export async function orderTimeline(scope: StoreScope, viewer: StoreCtx, orderId
 export const NOTE_EDIT_WINDOW_MS = 5 * 60_000;
 
 /** Control characters out (newlines kept), at most two blank lines in a row, trimmed. */
-function cleanNote(text: unknown): string {
+export function cleanNote(text: unknown): string {
   return String(text ?? "")
     .replace(/\r\n?/g, "\n")
     .replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, " ")

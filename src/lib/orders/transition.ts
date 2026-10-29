@@ -25,23 +25,28 @@ import "server-only";
  * in the event meta only (the column arrives with 0006).
  *
  * The scope is a `WriteScope` (D71). The order hooks receive the same scope.
+ *
+ * P4 step 3: `transitionForOutcome` is the same write for a call outcome (src/lib/callcenter/outcomes.ts): the moves the
+ * outcome makes itself (exhaustion's unreachable, reschedule's postponed) get the system class, exhaustion's move is
+ * recorded as the system's, and the outcome's own events (delivery_rescue, recall_requested, its note) join the same
+ * transaction. The clock is `Date.now()`, so the queue's fake-clock suite reaches the writer too.
  */
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { after } from "next/server";
 import { audit } from "@/lib/audit";
 import { ladderNext } from "@/lib/callcenter/ladder";
 import { viewerSeesOrder } from "@/lib/callcenter/visibility";
 import type { AttemptOutcome, DeliveryOutcome } from "@/lib/callcenter/outcomes";
 import { db } from "@/lib/db/client";
-import { orderEvents, orders } from "@/lib/db/schema";
+import { orders } from "@/lib/db/schema";
 import { toCents } from "@/lib/finance/lite/cents";
 import { getStoreSetting } from "@/lib/settings";
 import type { OpsSetting } from "@/lib/settings/keys/ops";
 import { getStoreById } from "@/lib/tenancy/public";
-import { byId, whereStore } from "@/lib/tenancy/sql";
+import { byId } from "@/lib/tenancy/sql";
 import type { StoreCtx, SystemCtx, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 import type { OrderStatus } from "./contract";
-import { appendEvents, type NewOrderEvent } from "./events";
+import { appendEvents, countRescueCalls, type NewOrderEvent } from "./events";
 import { runOrderHooks, type OrderHookEvent, type OrderRow, type Tx } from "./hooks";
 import { logError } from "./log";
 import {
@@ -51,6 +56,8 @@ import {
   projectStatus,
   type CancelReason,
   type MoneyState,
+  type MoveClass,
+  type MovePerms,
   type OrderActor,
   type OrderSnapshot,
   type OrderStates,
@@ -207,17 +214,30 @@ interface Job {
   /** a "noop" answers the external shape */
   noopShape?: boolean;
   pre: Preload;
+  /** P4 step 3 (an outcome's own moves, OPE-§6.1a, §6.3): classes the plan may use beyond the actor's */
+  grant?: readonly MoveClass[];
+  /** the requested moves are the system's (OPE-§6.3: exhaustion closes the order, actor and source "system") */
+  systemMoves?: boolean;
+  /** the call_attempt meta the outcome sets itself: the rescue call's number (OD48), the objection chip (OPE-§7.2) */
+  attemptMeta?: { attemptNo?: number; objectionId?: string };
+  /** more events of the same transaction, after the transition's own (delivery_rescue, recall_requested, a note) */
+  events?: (base: { orderId: string; rev: number; at: Date }) => NewOrderEvent[];
 }
 
 type Attempt =
   | { kind: "done"; result: TransitionResult | NoopResult; hook?: OrderHookEvent; forced?: { from: string; to: string; axis: string; reason: string } }
   | { kind: "retry"; current: ReturnType<typeof currentOf> };
 
+/** The actor's move classes, plus the ones a job is granted (an outcome's own moves, OPE-§6.1a, §6.3). */
+function withGrant(perms: MovePerms, grant: readonly MoveClass[] | undefined): MovePerms {
+  return grant?.length ? { ...perms, classes: new Set([...perms.classes, ...grant]) } : perms;
+}
+
 const errCode = (err: unknown) => (err as { code?: string; cause?: { code?: string } })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
 const transient = (err: unknown) => ["ER_LOCK_DEADLOCK", "ER_LOCK_WAIT_TIMEOUT"].includes(String(errCode(err)));
 
 /** Work after the commit: inside after() in a request, inline (awaited) without one (jobs, tests). Never throws. */
-async function afterCommit(label: string, task: () => Promise<void>): Promise<void> {
+export async function runAfterCommit(label: string, task: () => Promise<void>): Promise<void> {
   const guarded = () => task().catch((err) => logError(label, err));
   try {
     after(guarded);
@@ -247,7 +267,7 @@ async function run(job: Job): Promise<TransitionResult | NoopResult> {
       return { ok: false, error: "conflict", current: fresh ? currentOf(fresh) : a.current };
     }
     const { hook, forced } = a;
-    if (hook) await afterCommit("orders:hooks", () => runOrderHooks("transition", "afterCommit", job.scope, hook));
+    if (hook) await runAfterCommit("orders:hooks", () => runOrderHooks("transition", "afterCommit", job.scope, hook));
     if (forced) {
       await audit("orders.status_forced", {
         userId: job.actor.userId,
@@ -262,7 +282,8 @@ async function run(job: Job): Promise<TransitionResult | NoopResult> {
 
 async function attempt(tx: Tx, job: Job): Promise<Attempt> {
   const { actor, scope } = job;
-  const now = new Date();
+  // Date.now() (not `new Date()`): a test's fake clock reaches the plan and its events (the queue's clock, OD8)
+  const now = new Date(Date.now());
   const [row] = await readRow(tx, scope, job.input.orderId);
   if (!row) return { kind: "done", result: { ok: false, error: "not_found" } };
   if (!viewerSeesOrder(scope, actor, row, !!job.input.inbound)) return { kind: "done", result: { ok: false, error: "not_found" } };
@@ -276,7 +297,7 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
   if (want === "noop") {
     return { kind: "done", result: job.noopShape ? { ok: true, changed: false, noop: true } : { ok: true, ...current, eventIds: [], changed: false } };
   }
-  const perms = movePermsOf(actor, input.source);
+  const perms = withGrant(movePermsOf(actor, input.source), job.grant);
   if (want === "reject") return perms.external ? rejected(tx, job, row, "illegal") : fail("illegal");
   // R2 (0006): partial deliveries and refunds have no columns yet
   if (input.lines?.length || want.money === "refunded") return fail("illegal");
@@ -288,11 +309,7 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
       .limit(1);
     if (!dup || dup.id === row.id) return fail("bad_duplicate");
   }
-  let rescueCallsSoFar = 0;
-  if (want.ship === "attempt_failed") {
-    const [n] = await tx.select({ n: count() }).from(orderEvents).where(whereStore(orderEvents, scope, eq(orderEvents.orderId, row.id), eq(orderEvents.type, "delivery_rescue")));
-    rescueCallsSoFar = Number(n?.n ?? 0);
-  }
+  const rescueCallsSoFar = want.ship === "attempt_failed" ? await countRescueCalls(tx, scope, row.id) : 0;
 
   const plan = planTransition(
     {
@@ -357,16 +374,18 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
       meta: {
         channel: input.attempt.channel,
         outcome: input.attempt.outcome,
-        attemptNo: NO_CONTACT.has(input.attempt.outcome) ? attempts : row.attempts + 1,
+        attemptNo: job.attemptMeta?.attemptNo ?? (NO_CONTACT.has(input.attempt.outcome) ? attempts : row.attempts + 1),
         ...(set.dueAt instanceof Date && set.dueAt.getTime() > now.getTime() ? { nextDueAt: set.dueAt.toISOString() } : {}),
         ...(input.attempt.lane === "delivery" ? { lane: "delivery" } : {}),
         ...(input.inbound ? { inbound: true } : {}),
+        ...(job.attemptMeta?.objectionId ? { objectionId: job.attemptMeta.objectionId } : {}),
       },
     });
   }
   let noteUsed = false;
   for (const m of plan.moves) {
-    const own = !m.auto;
+    // a person's (or source's) own move; an automatic side move, or a move the system makes for an outcome, is "system"
+    const own = !m.auto && !job.systemMoves;
     const meta: Record<string, unknown> = { axis: m.axis, source: own ? input.source : "system" };
     if (m.implied) meta.implied = true;
     if (m.forced) meta.forced = true;
@@ -383,7 +402,7 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
     if (m.axis === "money" && m.to === "remitted" && m.auto && plan.flags.settledAtDelivery) meta.settlement = "at_delivery";
     if (own && input.inbound) meta.inbound = true;
     if (own && job.external?.ref) meta.ref = job.external.ref.slice(0, 80);
-    const reasonCode = !own ? null : m.axis === "ship" && (m.to === "refused" || m.to === "returned" || m.to === "lost") ? (input.returnReason ?? null) : m.axis === "confirm" ? (coded ?? null) : null;
+    const reasonCode = m.auto ? null : m.axis === "ship" && (m.to === "refused" || m.to === "returned" || m.to === "lost") ? (input.returnReason ?? null) : m.axis === "confirm" ? (coded ?? null) : null;
     const note = own && !noteUsed && freeText ? freeText : null;
     if (note) noteUsed = true;
     events.push({ ...base, actorKind: own ? actor.kind : "system", actorId: own ? actor.userId : null, type: "state_changed", fromState: m.from, toState: m.to, reasonCode, note, meta });
@@ -391,6 +410,7 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
   if (plan.flags.hold !== undefined) {
     events.push({ ...base, actorKind: actor.kind, actorId: actor.userId, type: "hold_set", meta: { shipAfter: plan.flags.hold === null ? null : plan.flags.hold.toISOString() } });
   }
+  if (job.events) events.push(...job.events(base));
   const eventIds = await appendEvents(tx, scope, events);
 
   /* the inTx hooks (customer counters, outbox items) */
@@ -445,6 +465,30 @@ export async function transitionOrder(actor: OrderActor, scope: WriteScope, inpu
   if (!validId(input.orderId)) return { ok: false, error: "not_found" };
   const pre = await preload(scope, { delivered: input.want.ship === "delivered", rescue: input.want.ship === "attempt_failed", labels: false, ladder: false });
   return (await run({ actor, scope, input, pre })) as TransitionResult;
+}
+
+/** What an outcome adds to its transition (src/lib/callcenter/outcomes.ts, OPE-§6.1, §6.1a, §6.3). */
+export interface OutcomeTransitionOpts {
+  /** classes beyond the actor's for the outcome's own moves: "S" for exhaustion and for reschedule's postponed */
+  grant?: readonly MoveClass[];
+  /** exhaustion: the requested move is the system's (actor and source "system"); the call_attempt stays the agent's */
+  systemMoves?: boolean;
+  /** the call_attempt meta set by the outcome (the rescue call's number, the objection chip) */
+  attemptMeta?: { attemptNo?: number; objectionId?: string };
+  /** more events in the same transaction (delivery_rescue, recall_requested, the outcome's note) */
+  events?: (base: { orderId: string; rev: number; at: Date }) => NewOrderEvent[];
+  /** the ladder or the settlement, read once before the transaction */
+  preload?: { delivered?: boolean; rescue?: boolean };
+}
+
+/**
+ * `transitionOrder` for a call outcome (P4 step 3; OPE-§6.1, §6.1a, §6.3): the same one transaction, plus the
+ * outcome's own pieces. Not part of the P0 contract: `recordOutcome` is its only caller.
+ */
+export async function transitionForOutcome(actor: OrderActor, scope: WriteScope, input: TransitionInput, opts: OutcomeTransitionOpts = {}): Promise<TransitionResult> {
+  if (!validId(input.orderId)) return { ok: false, error: "not_found" };
+  const pre = await preload(scope, { delivered: !!opts.preload?.delivered, rescue: !!opts.preload?.rescue || input.want.ship === "attempt_failed", labels: false, ladder: false });
+  return (await run({ actor, scope, input, pre, grant: opts.grant, systemMoves: opts.systemMoves, attemptMeta: opts.attemptMeta, events: opts.events })) as TransitionResult;
 }
 
 const SHIP_LABELS: ReadonlySet<OrderStatus> = new Set(["shipped", "in_transit", "delivered", "refused", "returned", "lost"]);

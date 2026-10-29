@@ -174,4 +174,6 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   /* ---- notifications (OPE-§21.4) ---- */
   "notify.ops.new_orders.title": "{count, plural, one {# nouvelle commande} other {# nouvelles commandes}}",
   "notify.ops.new_orders.body": "Depuis {sinceTime}. Ouvrez les commandes à appeler.",
+  "notify.ops.abandoned_claims.title": "{count, plural, one {# commande est revenue dans la file} other {# commandes sont revenues dans la file}}",
+  "notify.ops.abandoned_claims.body": "Un agent l'a ouverte puis l'a laissée expirer sans résultat. Le tableau de bord indique qui.",
 };

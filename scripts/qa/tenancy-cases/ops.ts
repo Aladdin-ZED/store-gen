@@ -10,9 +10,15 @@
  *     hideNote and dismissDuplicate, and A's rows are byte-identical afterwards
  *   - impersonation (OD61): A's timeline and customer reads under a "view as store" scope carry no customer canary,
  *     while the member scope does (the positive control)
+ * Step 3 (the queue, presence, outcomes) adds:
+ *   - Next as B's agent never hands out A's orders; takeOrder (inbound or not, and with A's id forged into B's inbound
+ *     set), releaseOrder, recordOutcome (inbound or not) and renewLease with A's ids answer what missing ids answer;
+ *     assignOrders answers A's ids per id exactly like missing ones; A's Idempotency-Key replayed in B is a fresh
+ *     answer, never A's card; B's pulse counts B's rows only; releaseAllLeases(B) leaves A alone; A is byte-identical
  * Modules are loaded inside the cases (the harness has set the environment by then): this file imports types only.
  */
 import Module from "node:module";
+import { randomUUID } from "node:crypto";
 import type { TenancyCase, TenancyKit } from "../tenancy-check";
 import type { StoreCtx, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 
@@ -45,6 +51,15 @@ async function seedA(kit: TenancyKit): Promise<{ customerId: string; noteId: num
 async function asBOwner<T>(kit: TenancyKit, fn: (ctx: StoreCtx, write: WriteCtx) => Promise<T>) {
   const { requireStoreMember, memberWriteCtx } = load<typeof import("@/lib/tenancy/seam")>("@/lib/tenancy/seam");
   return kit.call({ userId: kit.fx.B.members.owner }, `/app/${kit.fx.B.handle}/orders`, async () => {
+    const ctx = await requireStoreMember({ handle: kit.fx.B.handle });
+    return fn(ctx, memberWriteCtx(ctx));
+  });
+}
+
+/** B's member of `role` (owner or agent), through the real seam (requireStoreMember with B's handle). */
+async function asB<T>(kit: TenancyKit, role: "owner" | "agent", fn: (ctx: StoreCtx, write: WriteCtx) => Promise<T>) {
+  const { requireStoreMember, memberWriteCtx } = load<typeof import("@/lib/tenancy/seam")>("@/lib/tenancy/seam");
+  return kit.call({ userId: kit.fx.B.members[role] }, `/app/${kit.fx.B.handle}/queue`, async () => {
     const ctx = await requireStoreMember({ handle: kit.fx.B.handle });
     return fn(ctx, memberWriteCtx(ctx));
   });
@@ -143,6 +158,97 @@ export const cases: TenancyCase[] = [
       kit.check("ops reads under A's member scope carry A's customer fields (the positive control)", kit.leaks(answer(member), { only: ["customer"] }).length > 0, answer(member));
       const leaked = kit.leaks(answer(staff), { only: ["customer"] });
       kit.check("ops reads under A's impersonation scope: no customer canary", leaked.length === 0, leaked);
+    },
+  },
+  {
+    name: "ops queue: B's agent and owner never claim, take, release, record, assign or count A's orders",
+    async run(kit) {
+      await seedOnce(kit);
+      const Q = load<typeof import("@/lib/orders/queue")>("@/lib/orders/queue");
+      const O = load<typeof import("@/lib/callcenter/outcomes")>("@/lib/callcenter/outcomes");
+      const I = load<typeof import("@/lib/callcenter/idem")>("@/lib/callcenter/idem");
+      const V = load<typeof import("@/lib/callcenter/visibility")>("@/lib/callcenter/visibility");
+      const { setStoreSetting, getStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+      const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+      const { sql } = load<typeof import("drizzle-orm")>("drizzle-orm");
+      const before = await kit.snapshotA();
+      const B = kit.scope("B") as WriteScope;
+      const real = { order: kit.fx.A.order.main, other: kit.fx.A.order.failed };
+      const ghost = { order: kit.ghostify(real.order), other: kit.ghostify(real.other) };
+      const uuid = () => randomUUID();
+      // B's calling window open for the duration of the case (restored, and B's claims released, at the end)
+      const opsB = await getStoreSetting(B, "ops");
+      await setStoreSetting(B, "ops", { ...opsB, openOverrideUntil: new Date(Date.now() + 3_600_000).toISOString() }, { id: kit.fx.B.members.owner });
+      try {
+        const nxt = await asB(kit, "agent", (_c, w) => Q.nextOrder(w, { idem: uuid() }));
+        const nxtA = answer(nxt);
+        kit.check("nextOrder(B's agent): never one of A's orders, no canary of A", nxt.ok && !JSON.stringify(nxtA).includes(real.order) && !JSON.stringify(nxtA).includes(real.other) && kit.leaks(nxtA).length === 0, nxtA);
+
+        // A's ids from B: the answer of a missing id, and A untouched
+        const attacks: [string, (x: typeof real) => ReturnType<typeof asB>][] = [
+          ["takeOrder(B's agent, A's order, inbound)", (x) => asB(kit, "agent", (_c, w) => Q.takeOrder(w, x.order, { inbound: true }))],
+          ["takeOrder(B's owner, A's order)", (x) => asB(kit, "owner", (_c, w) => Q.takeOrder(w, x.order, { inbound: false }))],
+          ["releaseOrder(B's agent, A's order)", (x) => asB(kit, "agent", (_c, w) => Q.releaseOrder(w, x.order, "skip"))],
+          ["recordOutcome(B's owner, A's order)", (x) => asB(kit, "owner", (_c, w) => O.recordOutcome(w, { orderId: x.order, expectRev: 0, channel: "call", outcome: "confirmed", idem: uuid() }))],
+          ["recordOutcome(B's agent, A's order, inbound)", (x) => asB(kit, "agent", (_c, w) => O.recordOutcome(w, { orderId: x.order, expectRev: 0, channel: "call", outcome: "confirmed", inbound: true, idem: uuid() }))],
+          ["renewLease(B, A's order)", (x) => asB(kit, "agent", (_c, w) => Q.renewLease(w.scope, x.order, w.user.id))],
+        ];
+        for (const [label, fn] of attacks) await same(kit, label, await fn(real), await fn(ghost));
+        // B's agent with A's ids in their inbound set (a forged lookup): still nothing of A
+        const forged = await asB(kit, "agent", async (_c, w) => {
+          V.rememberInbound(w.scope, w.user.id, [real.order]);
+          return Q.takeOrder(w, real.order, { inbound: true });
+        });
+        kit.check("takeOrder(B's agent) with A's id in B's inbound set: not_found", forged.ok && JSON.stringify(forged.value) === JSON.stringify({ ok: false, error: "not_found" }), answer(forged));
+        // assignOrders answers per id: A's ids read exactly like missing ones
+        const assign = async (x: typeof real) => asB(kit, "owner", (_c, w) => Q.assignOrders(w, [x.order, x.other], kit.fx.B.members.agent));
+        const [aReal, aGhost] = [await assign(real), await assign(ghost)];
+        const codes = (r: Awaited<ReturnType<typeof assign>>) => {
+          const v = r.ok ? r.value : undefined;
+          return v?.ok ? v.data.results.map((e) => (e.ok ? "ok" : e.error)) : answer(r);
+        };
+        if (kit.ranReal("assignOrders(B's owner, A's orders)", aReal, aGhost)) {
+          kit.check("assignOrders(B's owner, A's orders): the per-id answers of missing ids", JSON.stringify(codes(aReal)) === JSON.stringify(codes(aGhost)) && JSON.stringify(codes(aReal)) === JSON.stringify(["not_found", "not_found"]), [codes(aReal), codes(aGhost)]);
+          kit.check("assignOrders(B's owner, A's orders): no canary of A", kit.leaks(answer(aReal), { sent: [real.order, real.other] }).length === 0, kit.leaks(answer(aReal), { sent: [real.order, real.other] }));
+        }
+
+        // A's Idempotency-Key replayed in B (the member of both stores): a fresh result, never A's card
+        const key = uuid();
+        await kit.call({ anonymous: true }, "/", () =>
+          I.withIdem(
+            kit.scope("A"),
+            kit.fx.dual,
+            key,
+            async () => ({ ok: true, order: { id: real.order, customer: { firstName: kit.fx.A.customer.name } } }),
+            (r) => r,
+          ),
+        );
+        const replay = await kit.call({ userId: kit.fx.dual }, `/app/${kit.fx.B.handle}/queue`, async () => {
+          const { requireStoreMember, memberWriteCtx } = load<typeof import("@/lib/tenancy/seam")>("@/lib/tenancy/seam");
+          const ctx = await requireStoreMember({ handle: kit.fx.B.handle });
+          return Q.nextOrder(memberWriteCtx(ctx), { idem: key });
+        });
+        if (kit.ranReal("nextOrder(B, A's Idempotency-Key)", replay)) {
+          const r = answer(replay);
+          kit.check("nextOrder(B, A's Idempotency-Key): a fresh answer, no canary of A", !JSON.stringify(r).includes(real.order) && !JSON.stringify(r).includes('"replayed"') && kit.leaks(r).length === 0, r);
+        }
+
+        // the pulse counts B's rows only: the same numbers as a count over B's orders
+        const pulse = await kit.call({ anonymous: true }, "/", () => Q.opsPulse(B, { userId: kit.fx.B.members.owner, role: "owner" }));
+        const [[counts]] = (await db.execute(sql`
+          SELECT SUM((confirm_state IN ('new', 'attempting', 'callback') AND (due_at IS NULL OR due_at <= UTC_TIMESTAMP(3)) OR confirm_state = 'confirmed' AND due_at IS NOT NULL AND due_at <= UTC_TIMESTAMP(3)) AND (lease_until IS NULL OR lease_until < UTC_TIMESTAMP(3))) AS queueNow,
+                 SUM(confirm_state = 'callback' AND due_at <= UTC_TIMESTAMP(3)) AS dueCallbacks
+            FROM orders WHERE store_id = ${kit.fx.B.id}`)) as unknown as [[{ queueNow: unknown; dueCallbacks: unknown }]];
+        if (kit.ranReal("opsPulse(B)", pulse)) {
+          const v = pulse.value as { queueNow: number; dueCallbacks: number };
+          kit.check("opsPulse(B): the queue and the callbacks of B's own orders", v.queueNow === Number(counts?.queueNow ?? 0) && v.dueCallbacks === Number(counts?.dueCallbacks ?? 0), { pulse: v, counts });
+        }
+        const released = await kit.call({ anonymous: true }, "/", () => Q.releaseAllLeases(B));
+        kit.check("releaseAllLeases(B) runs on B's own claims", released.ok, answer(released));
+      } finally {
+        await setStoreSetting(B, "ops", opsB, { id: kit.fx.B.members.owner });
+      }
+      kit.check("ops queue: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
     },
   },
 ];
