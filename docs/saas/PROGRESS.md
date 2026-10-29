@@ -44,6 +44,8 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **NETWORK OUTAGE 2026-10-29 ~12:00 → ~14:54** (ENOTFOUND / request timeouts; P5 step 5 and P1 step 5 retried as #2, 26/106
+  steps validated at 14:55).
 - **NETWORK OUTAGE 2026-10-28 ~13:12 → 2026-10-29 ~09:28** (agents died with ENOTFOUND "Can't reach the API server"). The
   two runs survived: their retry loops restarted the interrupted steps when the network came back (P8 5, P1 4, P2 4, P5 4,
   P4 3, P3 3, P7 3, P6 3 running again at 09:30, partial work kept in the worktrees). 21/106 steps validated before it.
