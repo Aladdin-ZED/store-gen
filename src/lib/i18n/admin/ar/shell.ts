@@ -604,6 +604,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "shell.cmdk.shortcuts": "اختصارات لوحة المفاتيح",
   "shell.cmdk.toggle_theme": "التبديل بين الوضع الفاتح والداكن",
   "shell.cmdk.switch_store": "الانتقال إلى {store}",
+  "shell.cmdk.member_paused": "الوصول موقوف",
 
   /* ---- المهام في الخلفية (PLA-§22.8) ---- */
   "shell.jobs.working": "قيد التنفيذ في الخلفية",

@@ -1,89 +1,62 @@
 import "server-only";
 /**
- * Command palette search of one store: its pages (name / slug) and, for roles that can read orders, its orders
- * (id, customer name or phone in any format). Small, fast LIKE queries — never more than 6 hits each.
+ * The store's ⌘K search (P2 SHELL; platform.md PLA-§22.13, UX-02; docs/STORE-SAAS.md §I.3, ADM-02): what
+ * `GET /api/app/<h>/search?q=` answers. One store, the one in the URL: every provider receives the store's scope and
+ * the viewer, so a member of B never finds A's pages, orders or customers (the attack suite proves it).
  *
- * Multi-tenant (docs/STORE-SAAS.md §E.3, ADM-02): both queries carry the store predicate, so ⌘K never reaches another
- * store's pages or customers; order titles show the customer name through the impersonation mask (D70).
+ *   const { groups, slow } = await searchStore(ctx.scope, q, await searchViewerOf(ctx));
+ *
+ * The providers are the tracks' (`src/lib/admin-data/search/<track>.ts`, registered at P0: P3 pages, `WA-` refs and
+ * leads; P4 orders and customers, masked and agent-restricted; P6 design tags) plus the shell's own, here: the
+ * settings sections the viewer may open and, with `members.read`, the team's members. The shell never searches
+ * customer data. Each provider has `SEARCH_BUDGET_MS`; a later one is dropped and named in `slow`, never awaited
+ * (`runSearchProviders`, the pure part beside the route, with the shell's matching). R1.0's cross-table LIKE search is
+ * gone.
  */
-import { desc, eq, like, or } from "drizzle-orm";
-import { db } from "@/lib/db/client";
-import { orders, pages } from "@/lib/db/schema";
-import { toAsciiDigits } from "@/lib/markets/phone";
-import { whereStore } from "@/lib/tenancy/sql";
-import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
+import { flatHits, memberHits, runSearchProviders, settingHits, type SearchViewer, type StoreSearchResult } from "@/app/api/app/[store]/search/run";
+import type { StorePermission } from "@/lib/auth/permissions";
+import { viewerLocale } from "@/lib/auth/locale";
+import { logError } from "@/lib/orders/log";
+import { listMembersByScope } from "@/lib/tenancy/invites";
+import type { StoreCtx, StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { appHref } from "@/lib/urls";
-import { maskCustomer } from "./mask";
-import { likeEscape } from "./store-audit";
+import { SEARCH_BUDGET_MS, SEARCH_PROVIDERS, type SearchHit, type SearchProvider } from "./search/registry";
 
-export interface SearchHit {
-  kind: "page" | "order";
-  id: string;
-  title: string;
-  subtitle: string;
-  href: string;
+export type { SearchHit } from "./search/types";
+export type { SearchGroup, SearchViewer, SlowProvider, StoreSearchResult } from "@/app/api/app/[store]/search/run";
+
+/** A member's search identity: their membership's role and grants, their language. */
+export async function searchViewerOf(ctx: Pick<StoreCtx, "user" | "membership" | "store" | "can">): Promise<SearchViewer> {
+  return { userId: ctx.user.id, role: ctx.membership.role, locale: await viewerLocale(ctx.user), handle: ctx.store.handle, can: (p) => ctx.can(p) };
 }
 
-/** `store` is the scope's own row: the hits link into its dashboard (`/app/<handle>/…`). */
+/** The shell's provider for one viewer (it needs their grants and language, which the frozen provider viewer lacks). */
+function shellProvider(viewer: SearchViewer): SearchProvider {
+  return {
+    id: "shell",
+    kinds: ["setting", "member"],
+    search: async (scope, q) => {
+      const settings = settingHits(viewer, q);
+      if (!viewer.can("members.read")) return settings;
+      return [...settings, ...memberHits(await listMembersByScope(scope), viewer, q)];
+    },
+  };
+}
+
+/** Every provider for one store and query, in parallel within the budget; hits grouped for the palette. */
+export async function searchStore(scope: StoreScope, q: string, viewer: SearchViewer, opts: { budgetMs?: number } = {}): Promise<StoreSearchResult> {
+  const providers = [shellProvider(viewer), ...SEARCH_PROVIDERS];
+  const { result, failures } = await runSearchProviders(providers, scope, q, { userId: viewer.userId, role: viewer.role }, { budgetMs: opts.budgetMs ?? SEARCH_BUDGET_MS, home: appHref(viewer.handle) });
+  for (const f of failures) if (f.reason === "error") logError(`search:${f.id}`, f.detail ?? "error");
+  return result;
+}
+
+/**
+ * @deprecated R1.0's flat search, now `searchStore` with the least viewer (role "viewer", no member search). Kept only
+ * because the maintainer's tenancy harness calls it (CCR r1-p2-3 moves the harness to `searchStore`).
+ */
 export async function searchAdmin(scope: StoreScope, store: Pick<StoreRow, "handle">, q: string, opts: { pages: boolean; orders: boolean }): Promise<SearchHit[]> {
-  const term = q.trim().slice(0, 60);
-  if (term.length < 2) return [];
-  const pattern = `%${likeEscape(term)}%`;
-  // masked customer fields can't be searched for either (the hit list would confirm them): order ids only
-  const customer = scope.kind !== "impersonation";
-  const digits = toAsciiDigits(term).replace(/[^0-9]/g, "").replace(/^0+/, "");
-
-  const [pageRows, orderRows] = await Promise.all([
-    opts.pages
-      ? db
-          .select({ id: pages.id, name: pages.name, slug: pages.slug, status: pages.status })
-          .from(pages)
-          .where(whereStore(pages, scope, or(like(pages.name, pattern), like(pages.slug, `%${likeEscape(term.toLowerCase())}%`))))
-          .orderBy(desc(pages.updatedAt))
-          .limit(6)
-      : Promise.resolve([]),
-    opts.orders
-      ? db
-          .select({ id: orders.id, name: orders.name, city: orders.city, productName: orders.productName })
-          .from(orders)
-          .where(
-            whereStore(
-              orders,
-              scope,
-              or(
-                eq(orders.id, term.toUpperCase()),
-                like(orders.id, `%${likeEscape(term.toUpperCase())}%`),
-                ...(customer ? [like(orders.name, pattern)] : []),
-                ...(customer && digits.length >= 4 ? [like(orders.phone, `%${digits}%`)] : []),
-              ),
-            ),
-          )
-          .orderBy(desc(orders.createdAt))
-          .limit(6)
-      : Promise.resolve([]),
-  ]);
-
-  return [
-    ...pageRows.map(
-      (p): SearchHit => ({
-        kind: "page",
-        id: p.id,
-        title: p.name,
-        subtitle: `/${p.slug} · ${p.status}`,
-        // archived pages only show under the Archived filter
-        href: appHref(store.handle, `/pages?focus=${p.id}${p.status === "archived" ? "&status=archived" : ""}`),
-      }),
-    ),
-    ...orderRows
-      .map((row) => maskCustomer(scope, row))
-      .map(
-        (o): SearchHit => ({
-          kind: "order",
-          id: o.id,
-          title: `${o.id} · ${o.name}`,
-          subtitle: [o.productName, o.city].filter(Boolean).join(" · "),
-          href: appHref(store.handle, `/orders?order=${encodeURIComponent(o.id)}`),
-        }),
-      ),
-  ];
+  const grants = new Set<StorePermission>([...(opts.pages ? (["pages.read"] as const) : []), ...(opts.orders ? (["orders.read"] as const) : [])]);
+  const viewer: SearchViewer = { userId: "", role: "viewer", locale: "en", handle: store.handle, can: (p) => grants.has(p) };
+  return flatHits(await searchStore(scope, q, viewer));
 }

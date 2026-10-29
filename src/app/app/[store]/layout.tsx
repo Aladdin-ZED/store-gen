@@ -7,9 +7,10 @@ import { StoreProvider } from "@/components/admin/shell/store-context";
 import { StoreFrame } from "@/components/admin/shell/store-frame";
 import { StoreHandleMeta } from "@/components/admin/shell/store-handle";
 import { LocaleRoot } from "@/components/admin/common/screen-locale";
-import { navCounts } from "@/lib/admin-data/dashboard";
+import { storePulse } from "@/app/api/app/[store]/pulse/load";
 import { storeClientInfo, switcherMemberships } from "@/lib/admin-data/shell";
 import { viewerLocale } from "@/lib/auth/locale";
+import { logError } from "@/lib/orders/log";
 import { consoleHref } from "@/lib/urls";
 import { searchAction } from "./actions";
 import { memberCtx } from "./member-ctx";
@@ -43,12 +44,17 @@ export async function generateMetadata({ params }: Pick<Props, "params">): Promi
 export default async function StoreLayout({ children, params }: Props) {
   const { store: handle } = await params;
   const ctx = await memberCtx(handle);
-  const [jar, memberships, counts, locale] = await Promise.all([
+  const [jar, memberships, pulse, locale] = await Promise.all([
     cookies(),
     switcherMemberships(ctx.user.id),
-    ctx.can("orders.read") ? navCounts(ctx.scope) : Promise.resolve(null),
+    // the first paint's counts are the pulse's (D57): the same read as GET /api/app/<h>/pulse, so the poller agrees
+    storePulse(ctx).catch((err: unknown) => {
+      logError("app/layout:pulse", err);
+      return null;
+    }),
     viewerLocale(ctx.user),
   ]);
+  const counts = pulse?.body.counts ?? null;
   const sidebarOpen = jar.get("sidebar_state")?.value !== "false";
 
   return (

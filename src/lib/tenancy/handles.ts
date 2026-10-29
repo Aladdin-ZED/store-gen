@@ -228,15 +228,34 @@ export async function checkHandleAvailable(value: string): Promise<"available" |
 }
 
 /**
- * `domains.manage`, 1 rename / 30 days (the conversion's one free rename honoured once, ENGC-30). The old handle
- * moves to `store_handle_history` (`renamed`, 308 for 12 months, reserved as long), `address_version` is bumped and
- * the store's caches are dropped. Throws HandleError.
+ * `domains.manage` on the member's own scope (never "view as store": impersonation and platform scopes are refused),
+ * 1 rename / 30 days counted from the store's creation or its last rename (the conversion's one free rename honoured
+ * once, ENGC-30), the format, reserved, ADMIN_GATE and protected-brand checks of `handleProblem`, and a handle nobody
+ * holds or reserved (`handleFree`, in the row-locked transaction of src/lib/db/store-handles.ts). The old handle moves
+ * to `store_handle_history` (`renamed`, 308 for 12 months, reserved as long), `address_version` is bumped, the store's
+ * caches are dropped and the rename is audited (`store.handle_renamed`). Then every live page is queued for a
+ * re-render with the new address (P8's `enqueueRenders`, reason `address`, §C.6) and the store is marked for a health
+ * recompute (P1's `markHealthDirty`): both after the commit, so a failing queue never undoes a rename the seller saw
+ * succeed (a failure is logged). Throws HandleError.
  */
 export async function renameHandle(ctx: StoreCtx, next: string): Promise<void> {
-  if (!ctx.can("domains.manage") || ctx.scope.kind !== "member") throw new HandleError("forbidden");
+  if (!ctx.can("domains.manage") || ctx.scope.kind !== "member" || ctx.membership.synthetic || ctx.impersonation) throw new HandleError("forbidden");
   if (next === ctx.store.handle) return;
   const repo = await import("@/lib/db/store-handles");
   const problem = handleProblem(next, {}, await repo.loadHandleLists());
   if (problem) throw new HandleError("invalid", problem);
   await repo.renameStoreHandle(ctx, next);
+  await afterRename(ctx);
+}
+
+/** The rename's follow-ups (live pages re-rendered at the new address, health dirty); logged, never thrown. */
+async function afterRename(ctx: StoreCtx): Promise<void> {
+  const [{ memberWriteScope }, { enqueueRenders }, { markHealthDirty }, { logError }] = await Promise.all([
+    import("./seam"),
+    import("@/lib/jobs/renders"),
+    import("@/lib/platform/health-snapshot"),
+    import("@/lib/orders/log"),
+  ]);
+  const results = await Promise.allSettled([Promise.resolve().then(() => enqueueRenders(memberWriteScope(ctx), "all-live", "address")), markHealthDirty(ctx.store.id)]);
+  for (const r of results) if (r.status === "rejected") logError("handles:rename", r.reason);
 }

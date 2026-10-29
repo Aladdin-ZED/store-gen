@@ -6,7 +6,9 @@
  * contributor budget (a 60 ms contributor dropped, its keys omitted) and failure isolation; per-user parts never
  * cached across users (two viewers, two bodies); the poller election (one leader, re-election after 40 s of silence,
  * solo polling without a channel, pause while hidden and an immediate poll on return); `since` clamping.
- * Exits 1 on any failure.
+ * Step p2-04 (the route's pure path): the 304 branch and its headers, the per-user split as the route builds it, the
+ * viewer's own impersonation, the reader's role, the tenants' kill switches, and the shell contributor on fake sources
+ * (role filter, per-store cache, the unread cap). Exits 1 on any failure.
  */
 import {
   buildPulse,
@@ -14,8 +16,15 @@ import {
   clampSince,
   composePulse,
   etagMatches,
+  impersonationOf,
+  pulseAnswer,
   pulseEtag,
+  pulseHeaders,
+  readerRoleOf,
   runContributors,
+  STORE_PART_KEY,
+  TENANT_KILLS,
+  tenantKills,
   type PulseStorePart,
   type PulseUserPart,
 } from "@/app/api/app/[store]/pulse/compose";
@@ -28,7 +37,9 @@ import {
   type PulseElection,
   type PulseMessage,
 } from "@/components/admin/shell/pulse-election";
+import { KILL_SWITCHES } from "@/lib/flags/registry";
 import type { StoreScope } from "@/lib/tenancy/types";
+import { shellContributor, shellUnreadReader, type ShellPulseSources } from "./contributors/shell";
 import { PULSE_CONTRIBUTORS } from "./registry";
 import type { PulseContributor, StorePulse } from "./types";
 
@@ -43,6 +54,7 @@ function check(name: string, ok: boolean, detail?: unknown): void {
 }
 
 const scopeOf = (storeId: string) => ({ storeId, kind: "member" }) as unknown as StoreScope;
+const scopeOf2 = (storeId: string, kind: StoreScope["kind"]) => ({ storeId, kind }) as unknown as StoreScope;
 const SCOPE = scopeOf("s-atlas");
 const OWNER = { userId: "u-owner", role: "owner" };
 const AGENT = { userId: "u-agent", role: "agent" };
@@ -135,8 +147,13 @@ async function main() {
   check("only non-negative integer counts are kept (never coerced)", run.counts.ok === 1 && !("neg" in run.counts) && !("frac" in run.counts) && !("nan" in run.counts) && !("str" in run.counts));
   check("the first contributor keeps a repeated key", run.counts.newOrders === 2 && run.counts.dupOnly === 1);
   check("failures name only the failed contributors", run.failures.map((f) => f.id).sort().join() === "slow,sync,throws");
-  const registered = await runContributors(PULSE_CONTRIBUTORS, SCOPE, OWNER);
-  check("the registered contributors answer within budget (stubs give no key)", registered.failures.length === 0, registered);
+  check("the registered contributors have unique ids and a contribute function", new Set(PULSE_CONTRIBUTORS.map((c) => c.id)).size === PULSE_CONTRIBUTORS.length && PULSE_CONTRIBUTORS.every((c) => typeof c.contribute === "function"));
+  // the shell's own reads the database (its readers are wired by the server loader, not here); the others are P0 stubs
+  const stubs = PULSE_CONTRIBUTORS.filter((c) => c.id !== "shell");
+  const registered = await runContributors(stubs, SCOPE, OWNER);
+  check("the stub contributors answer within budget and give no key", registered.failures.length === 0 && Object.keys(registered.counts).length === 0, registered);
+  const offline = await runContributors(PULSE_CONTRIBUTORS, SCOPE, OWNER);
+  check("offline, the shell contributor's failure is its own (no other key lost, no throw)", offline.failures.every((f) => f.id === "shell") && !("membersPendingInvites" in offline.counts), offline.failures);
 
   /* ---- per-user parts are never cached across users ---- */
   const cacheStore = new Map<string, PulseStorePart>();
@@ -187,10 +204,116 @@ async function main() {
   check("absent since gives now − 30 s", clampSince(null, NOW).toISOString() === back(30_000) && clampSince(undefined, NOW).toISOString() === back(30_000));
   check("invalid since gives now − 30 s", ["", "yesterday", "2026-13-45", "x".repeat(200)].every((r) => clampSince(r, NOW).toISOString() === back(30_000)));
 
+  await routeChecks();
+  await shellContributorChecks();
   await electionChecks();
 
   console.log(`test:pulse ${failures === 0 ? "ok" : "FAILED"}: ${passed} passed, ${failures} failed`);
   if (failures > 0) process.exit(1);
+}
+
+/* ---------------------------------------------------------------- the route's pure path */
+
+async function routeChecks(): Promise<void> {
+  const body = composePulse(STORE_PART, USER_PART, { newOrders: 2 }, NOW);
+  const etag = pulseEtag(body);
+  const fresh = pulseAnswer({ body, etag }, null);
+  check("no If-None-Match: 200 with the body and its ETag", fresh.status === 200 && fresh.body === body && fresh.etag === etag);
+  const same = pulseAnswer({ body, etag }, etag);
+  check("If-None-Match naming the ETag: 304 without a body", same.status === 304 && same.body === null && same.etag === etag);
+  check("a weak or listed tag also gets the 304", pulseAnswer({ body, etag }, `"old", W/${etag}`).status === 304);
+  check("another tag gets the 200", pulseAnswer({ body, etag }, '"old"').status === 200);
+  // the poller sends back the ETag of its last 200: the next poll of unchanged data is a 304, even with a new `at`
+  const later = composePulse(STORE_PART, USER_PART, { newOrders: 2 }, new Date(NOW.getTime() + 15_000));
+  check("an unchanged pulse 15 s later answers 304 to the last ETag", pulseAnswer({ body: later, etag: pulseEtag(later) }, fresh.etag).status === 304);
+  const moved = composePulse(STORE_PART, USER_PART, { newOrders: 3 }, new Date(NOW.getTime() + 15_000));
+  check("a changed count answers 200 to the last ETag", pulseAnswer({ body: moved, etag: pulseEtag(moved) }, fresh.etag).status === 200);
+  const h = pulseHeaders(etag);
+  check("both answers are private, no-store and carry the ETag", h["Cache-Control"] === "private, no-store" && h.ETag === etag && Object.keys(h).sort().join() === "Cache-Control,ETag");
+
+  // the per-user split, as the route builds it: one cached store part, the user part per viewer
+  const parts = new Map<string, PulseStorePart>();
+  let loads = 0;
+  const cache = {
+    async getOrLoad(storeId: string, key: string, load: () => Promise<PulseStorePart>) {
+      check("the store part is cached under the store and the M.5 key", key === STORE_PART_KEY && storeId === SCOPE.storeId, { storeId, key });
+      const hit = parts.get(`${storeId}:${key}`);
+      if (hit) return hit;
+      loads++;
+      const v = await load();
+      parts.set(`${storeId}:${key}`, v);
+      return v;
+    },
+  };
+  const viewerBody = (userId: string, unread: number) =>
+    buildPulse({
+      scope: SCOPE,
+      viewer: { userId, role: "owner" },
+      cache,
+      loadStorePart: async () => STORE_PART,
+      loadUserPart: async () => ({ ...USER_PART, unread }),
+      contributors: [],
+      now: NOW,
+    });
+  const u1 = await viewerBody("u-1", 5);
+  const u2 = await viewerBody("u-2", 0);
+  check("two viewers share one store-part load and get their own unread", loads === 1 && u1.body.unread === 5 && u2.body.unread === 0 && u1.etag !== u2.etag);
+  check("one viewer's ETag never answers 304 to another's", pulseAnswer(u2, u1.etag).status === 200);
+
+  // impersonation: the countdown is the viewer's own session, never another staff member's or another store's
+  const info = { staffUserId: "u-staff", storeId: "s-atlas", expiresAt: new Date("2026-10-28T10:30:00.000Z") };
+  check("the impersonating staff member gets endsAt", impersonationOf({ userId: "u-staff", storeId: "s-atlas" }, info)?.endsAt === "2026-10-28T10:30:00.000Z");
+  check("a member of the store gets null", impersonationOf({ userId: "u-owner", storeId: "s-atlas" }, info) === null);
+  check("the same staff member on another store gets null", impersonationOf({ userId: "u-staff", storeId: "s-berber" }, info) === null);
+  check("no impersonation, null", impersonationOf({ userId: "u-staff", storeId: "s-atlas" }, null) === null);
+  check("a member reads by their role; staff viewing a store read only their own rows", readerRoleOf({ role: "manager" }) === "manager" && readerRoleOf({ role: "viewer", synthetic: "impersonation" }) === null);
+
+  // kill switches: the tenants' set (sign-ups affect no existing store)
+  check("every kill switch but sign-ups is a tenant's", [...TENANT_KILLS].sort().join() === KILL_SWITCHES.filter((k) => k !== "signups_enabled").sort().join());
+  check("tenantKills keeps the tenant switches only", tenantKills(["signups_enabled", "uploads_enabled", "platform_read_only"]).join() === "uploads_enabled,platform_read_only");
+  check("no tripped switch, none shown", tenantKills([]).length === 0);
+}
+
+/* ---------------------------------------------------------------- the shell's contributor (fake sources) */
+
+async function shellContributorChecks(): Promise<void> {
+  let inviteLoads = 0;
+  const unreadCalls: string[] = [];
+  const sources = (over: Partial<ShellPulseSources> = {}): ShellPulseSources => ({
+    async pendingInvites(scope) {
+      inviteLoads++;
+      return scope.storeId === "s-atlas" ? 3 : 1;
+    },
+    async unread(scope, viewer, inStore) {
+      unreadCalls.push(`${scope.storeId}:${viewer.userId}:${inStore ? "store" : "account"}`);
+      if (!inStore) return 2; // account-wide rows (a password change, …)
+      return viewer.userId === OWNER.userId ? 9 : 2;
+    },
+    ...over,
+  });
+  const shell = shellContributor(sources(), { cacheName: "selftest-shell-pulse-1" });
+  const owner = await shell.contribute(SCOPE, OWNER);
+  check("the owner sees the open invites and the store's unread without the account rows", owner.membersPendingInvites === 3 && owner.notificationsUnreadStore === 7, owner);
+  const agent = await shell.contribute(SCOPE, AGENT);
+  check("an agent (no members.read) gets no invite key at all, never a 0", !("membersPendingInvites" in agent) && agent.notificationsUnreadStore === 0, agent);
+  const manager = await shell.contribute(SCOPE, { userId: "u-manager", role: "manager" });
+  check("a manager sees the invites from the store's cached count", manager.membersPendingInvites === 3 && inviteLoads === 1, { manager, inviteLoads });
+  const other = await shell.contribute(scopeOf("s-berber"), OWNER);
+  check("another store gets its own count (the cache is per store)", other.membersPendingInvites === 1 && inviteLoads === 2, { other, inviteLoads });
+  check("the unread counts are read per viewer (P1's per-reader cache), never shared", unreadCalls.filter((c) => c.endsWith(":store")).length === 4, unreadCalls);
+  const unknownRole = await shell.contribute(SCOPE, { userId: "u-x", role: "not-a-role" });
+  check("an unknown role sees no invites", !("membersPendingInvites" in unknownRole));
+
+  const capped = shellContributor(sources({ unread: async (_s, _v, inStore) => (inStore ? 100 : 3) }), { cacheName: "selftest-shell-pulse-2" });
+  check("at P1's cap the store count says the cap (never cap minus the account rows)", (await capped.contribute(SCOPE, OWNER)).notificationsUnreadStore === 100);
+  const inStore = shellUnreadReader(SCOPE, OWNER, true);
+  const account = shellUnreadReader(SCOPE, OWNER, false);
+  check("the store reader reads the store by role; the account reader no store and no role", inStore.storeId === SCOPE.storeId && inStore.role === "owner" && account.storeId === null && account.role === null && account.platformRole === "none");
+  check("under impersonation the store reader has no role (rows addressed to the viewer only)", shellUnreadReader(scopeOf2("s-atlas", "impersonation"), OWNER, true).role === null);
+  check("an unknown role reads with no role", shellUnreadReader(SCOPE, { userId: "u", role: "nope" }, true).role === null);
+  const failing = shellContributor(sources({ pendingInvites: async () => Promise.reject(new Error("db down")) }), { cacheName: "selftest-shell-pulse-3" });
+  const run = await runContributors([failing], SCOPE, OWNER);
+  check("a failing read omits the shell's keys (runContributors records it)", run.failures[0]?.id === "shell" && Object.keys(run.counts).length === 0, run);
 }
 
 /* ---------------------------------------------------------------- the election, on fake time */

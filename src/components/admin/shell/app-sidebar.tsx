@@ -53,10 +53,11 @@ export interface ShellUser {
   totpEnabled: boolean;
 }
 
-export interface NavCounts {
-  newOrders: number;
-  syncFailed: number;
-}
+/**
+ * The pulse's counts (`StorePulse.counts`, core §I.4, D57): every track's contributed keys (P4 `newOrders`,
+ * `syncFailed`; the shell's `membersPendingInvites` …). A key that is absent shows no badge, never a 0 made up for it.
+ */
+export type NavCounts = Readonly<Record<string, number>>;
 
 export function AppSidebar({
   user,
@@ -81,7 +82,8 @@ export function AppSidebar({
     if (isMobile) setOpenMobile(false);
   };
 
-  const badgeFor = (item: ShellNavItem) => (item.badgeKey && counts ? (counts[item.badgeKey as keyof NavCounts] ?? 0) : 0);
+  const badgeFor = (item: ShellNavItem) => (item.badgeKey && counts ? (counts[item.badgeKey] ?? 0) : 0);
+  const syncFailed = counts?.syncFailed ?? 0;
 
   const renderItems = (list: ShellNavItem[]) =>
     list.map((item) => {
@@ -173,14 +175,14 @@ export function AppSidebar({
         ))}
         <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
-            {counts && counts.syncFailed > 0 && (
+            {syncFailed > 0 && (
               <Link
                 href={store.href("/orders?sheet=failed")}
                 onClick={closeMobile}
                 className="mx-1 mb-2 flex items-center gap-2 rounded-xl bg-destructive/8 px-3 py-2.5 text-[0.78rem] leading-snug text-destructive ring-1 ring-destructive/15 transition-colors ring-inset hover:bg-destructive/12 group-data-[collapsible=icon]:hidden"
               >
                 <ShieldAlertIcon className="size-4 shrink-0" />
-                <span>{t("shell.chrome.sync_failed", { count: counts.syncFailed })}</span>
+                <span>{t("shell.chrome.sync_failed", { count: syncFailed })}</span>
               </Link>
             )}
             <SidebarMenu className="gap-0.5">{renderItems(settings)}</SidebarMenu>

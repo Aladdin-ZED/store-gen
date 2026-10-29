@@ -8,18 +8,19 @@ import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts"
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
 import { compact, dayLabel, int, money } from "../lib/format";
 
-export type Metric = "orders" | "revenue" | "uniques";
+export type Metric = "orders" | "value" | "uniques";
 
 export interface Point {
   day: string;
   orders: number;
-  revenue: number;
+  /** the value of the orders placed that day (money, placed and not delivered) */
+  value: number;
   uniques: number;
 }
 
 const config: ChartConfig = {
   orders: { label: "Orders", color: "var(--brand)" },
-  revenue: { label: "Revenue", color: "var(--brand)" },
+  value: { label: "Placed", color: "var(--brand)" },
   uniques: { label: "Visitors", color: "var(--brand)" },
 };
 
@@ -44,7 +45,7 @@ export function OrdersPlot({ series, metric, currency }: { series: Point[]; metr
           minTickGap={28}
           tickFormatter={(d: string) => dayLabel(d)}
         />
-        <YAxis tickLine={false} axisLine={false} width={44} allowDecimals={false} tickFormatter={(n: number) => (metric === "revenue" ? compact(n) : int(n))} />
+        <YAxis tickLine={false} axisLine={false} width={44} allowDecimals={false} tickFormatter={(n: number) => (metric === "value" ? compact(n) : int(n))} />
         <Tooltip
           cursor={{ stroke: "var(--brand)", strokeOpacity: 0.35, strokeWidth: 1 }}
           content={({ active, payload }) => {
@@ -54,7 +55,7 @@ export function OrdersPlot({ series, metric, currency }: { series: Point[]; metr
               <div className="adm-glass grid min-w-40 gap-1.5 rounded-xl px-3 py-2.5 text-xs">
                 <span className="font-medium text-foreground">{dayLabel(p.day)}</span>
                 <Row label="Orders" value={int(p.orders)} active={metric === "orders"} />
-                <Row label="Revenue" value={money(p.revenue, currency)} active={metric === "revenue"} />
+                <Row label="Placed" value={money(p.value, currency)} active={metric === "value"} />
                 <Row label="Visitors" value={int(p.uniques)} active={metric === "uniques"} />
               </div>
             );

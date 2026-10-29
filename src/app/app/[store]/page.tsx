@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { DashboardView } from "@/components/admin/dashboard/dashboard-view";
-import { getDashboard } from "@/lib/admin-data/dashboard";
+import { dashboardPanels } from "@/lib/admin-data/dashboard";
 import { requireStoreMember } from "@/lib/tenancy/seam";
 import { appHref } from "@/lib/urls";
 import { memberCtx } from "./member-ctx";
@@ -26,9 +26,9 @@ function greeting(timeZone: string): string {
 }
 
 /*
- * /app/<h>: the store's dashboard (docs/STORE-SAAS.md §I.1, store.read): KPIs, the sales chart, Sheets health, top
- * pages and the latest orders of this store only, in its time zone. The Today brief and the Store Health ring
- * replace the checklist in R1 product (P2, §I.4, §I.7).
+ * /app/<h>: the store's dashboard (docs/STORE-SAAS.md §I.1, store.read; platform.md PLA-§22.17): one settled panel per
+ * block (`dashboardPanels`), this store only, in its time zone. The Today brief and the Store Health ring arrive with
+ * the redesign (p2-09); the R1.0 setup checklist is gone (the ring replaces it, §I.4).
  */
 export default async function StoreHomePage({ params }: Props) {
   const { store: handle } = await params;
@@ -38,9 +38,7 @@ export default async function StoreHomePage({ params }: Props) {
   if (!ctx.can("pages.read") && ctx.can("orders.read")) redirect(appHref(store.handle, "/orders"));
 
   const canOrders = ctx.can("orders.read");
-  const dashboard = await getDashboard(ctx.scope, store, user, { orders: canOrders });
-  // the Sheets step links to a screen of integrations.manage (§I.1): not offered to a member who can't open it
-  const data = ctx.can("integrations.manage") ? dashboard : { ...dashboard, checklist: dashboard.checklist.filter((i) => i.id !== "sheets") };
+  const data = await dashboardPanels(ctx, "7d");
   return (
     <DashboardView
       handle={store.handle}

@@ -10,8 +10,30 @@
  * brief gives `brief.empty`; the honest-data guards refuse dishonest props (type level and runtime); the banner order;
  * error-map exhaustiveness; chords never fire in editable fields or open overlays; the QR size math and the WhatsApp
  * text cap; the store-switch storage sweep; the shell health rules' fixtures with and without data, and a two-store
- * fixture with no cross-store evidence. Exits 1 on any failure.
+ * fixture with no cross-store evidence.
+ *
+ * Step p2-04 (reads and routes): the ⌘K orchestration (the budget, `slow`, a throwing provider, malformed and
+ * off-store hits dropped, groups capped and de-duplicated, `?q=` bounds, the shell provider's matching), and the
+ * installable dashboard (the manifest's fields and token colours, the icons' geometry, safe zone and colours).
+ * Exits 1 on any failure.
  */
+import {
+  flatHits,
+  foldSearch,
+  inStoreHref,
+  KIND_GROUPS,
+  memberHits,
+  OTHER_GROUP,
+  runSearchProviders,
+  SEARCH_GROUP_MAX,
+  SearchQuery,
+  settingHits,
+  SHELL_MAX,
+} from "@/app/api/app/[store]/search/run";
+import type { SearchHit, SearchProvider } from "@/lib/admin-data/search/types";
+import { APP_ICONS, appColors, appIconSvg, appManifest, GRID, markReach, MONOGRAM_BOX, MONOGRAM_S, SAFE_RADIUS, shortName } from "@/lib/admin-theme/app-icon";
+import { contrastRatio, inOrangeBand, oklchToHex } from "@/lib/admin-theme/contrast";
+import { generateColors, SURFACES } from "@/lib/admin-theme/generate";
 import { ACTIVE_STORE_ROLES, can, STORE_ROLES } from "@/lib/auth/permissions";
 import { addressQr, qrModules, qrSize, qrTarget, QR_SCREEN_PX_PER_MODULE, whatsappText, WA_TEXT_MAX } from "@/components/admin/common/address-math";
 import {
@@ -622,8 +644,124 @@ async function ruleChecks(): Promise<void> {
   check("a blank phone is no phone", localSetupIssues({ contact: { phone: "  ", whatsapp: null }, legalName: "x", members: null })[0]?.id === "shell:contact");
 }
 
+/* ---- ⌘K search orchestration (PLA-§22.13, UX-02; step p2-04) ---- */
+async function searchChecks(): Promise<void> {
+  const HOME = appHref("atlas");
+  const scopeA = { storeId: "s-atlas", kind: "member" } as unknown as StoreScope;
+  const viewer = { userId: "u-owner", role: "owner" as const };
+  const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const hit = (id: string, kind: string, extra: Partial<SearchHit> = {}): SearchHit => ({ id, kind, title: `T ${id}`, href: appHref("atlas", `/x/${id}`), ...extra });
+  const seen: { q: string; userId: string; role: string; storeId: string }[] = [];
+  const pages: SearchProvider = {
+    id: "landing",
+    kinds: ["page", "lead"],
+    search: async (scope, q, v) => {
+      seen.push({ q, userId: v.userId, role: v.role, storeId: scope.storeId });
+      return [hit("p1", "page"), hit("p1", "page"), hit("l1", "lead", { group: "landing.cmdk.leads" }), hit("bad", "order"), hit("x", "page", { href: "/app/other-store/pages" }), hit("y", "page", { href: "https://evil.example/app/atlas" }), { id: "", kind: "page", title: "", href: HOME } as SearchHit];
+    },
+  };
+  let slowFinished = false;
+  const slowOps: SearchProvider = {
+    id: "ops",
+    kinds: ["order", "customer"],
+    search: async () => {
+      await wait(80);
+      slowFinished = true;
+      return [hit("o1", "order")];
+    },
+  };
+  const broken: SearchProvider = {
+    id: "design",
+    kinds: ["page"],
+    search: () => {
+      throw new Error("boom");
+    },
+  };
+  const many: SearchProvider = { id: "many", kinds: ["setting"], search: async () => Array.from({ length: 20 }, (_, i) => hit(`s${i}`, "setting")) };
+  const t0 = performance.now();
+  const { result, failures } = await runSearchProviders([pages, slowOps, broken, many], scopeA, "argan", viewer, { budgetMs: 40, home: HOME });
+  const took = performance.now() - t0;
+  check("the search answers at the budget, before the slow provider ends", took < 75 && !slowFinished, took);
+  check("the slow provider is named in slow with its groups", result.slow.some((s) => s.id === "ops" && s.groups.join() === "shell.cmdk.group.orders,shell.cmdk.group.customers"), result.slow);
+  check("a throwing provider is dropped, named in slow, and its failure returned", result.slow.some((s) => s.id === "design") && failures.some((f) => f.id === "design" && f.reason === "error") && failures.some((f) => f.id === "ops" && f.reason === "timeout"), failures);
+  const pageGroup = result.groups.find((g) => g.id === "shell.cmdk.group.pages");
+  check("hits are de-duplicated, of the provider's kinds, and link into this store only", pageGroup?.hits.map((h) => h.id).join() === "p1", pageGroup);
+  check("a provider's own group label is kept", result.groups.some((g) => g.label === "landing.cmdk.leads" && g.hits[0]?.id === "l1"));
+  check(`a group keeps at most ${SEARCH_GROUP_MAX} hits`, result.groups.find((g) => g.id === "shell.cmdk.group.settings")?.hits.length === SEARCH_GROUP_MAX);
+  check("providers get the store's scope, the query and the viewer, nothing else", seen.length === 1 && seen[0]!.storeId === "s-atlas" && seen[0]!.q === "argan" && seen[0]!.role === "owner" && seen[0]!.userId === "u-owner");
+  check("the answer is JSON-safe ({ groups, slow })", Object.keys(JSON.parse(JSON.stringify(result))).sort().join() === "groups,slow");
+  check("flatHits lists the hits in group order", flatHits(result)[0]?.id === "p1");
+  check(
+    "inStoreHref: the store's root, paths, queries and fragments only",
+    inStoreHref(HOME, HOME) &&
+      inStoreHref(`${HOME}/orders?order=AB-1234`, HOME) &&
+      inStoreHref(`${HOME}?x=1`, HOME) &&
+      !inStoreHref(`${HOME}-evil/orders`, HOME) &&
+      !inStoreHref("/app/berber/orders", HOME) &&
+      !inStoreHref(`${HOME}//evil.example`, HOME) &&
+      !inStoreHref(`https://x.example${HOME}`, HOME) &&
+      !inStoreHref(`${HOME}/a\\b`, HOME) &&
+      !inStoreHref(42, HOME),
+  );
+  check("no provider at all answers empty", JSON.stringify((await runSearchProviders([], scopeA, "argan", viewer, { budgetMs: 40, home: HOME })).result) === '{"groups":[],"slow":[]}');
+
+  // ?q= (2-60 characters once trimmed)
+  const q = (v: unknown) => SearchQuery.safeParse(v);
+  check("q: 2-60 characters, trimmed and spaces collapsed", q("  ar ").success && q("a".repeat(60)).success && q("  argan   oil ").data === "argan oil");
+  check("q: too short, too long or not a string is refused", !q("a").success && !q(" a ").success && !q("a".repeat(61)).success && !q(null).success && !q(7).success);
+
+  // the shell provider's matching: settings by label in any language, members only by name or e-mail
+  const owner = { can: (p: string) => p === "settings.read" || p === "audit.read", locale: "fr" as const, handle: "atlas" };
+  const general = settingHits(owner, "general");
+  check("a settings section matches by its id for a French viewer, titled in French", general[0]?.id === "general" && general[0]?.title === settingsText(SETTINGS_NAV.find((i) => i.id === "general")!, "label", "fr") && general[0]?.href === "/app/atlas/settings/general", general);
+  check("case does not matter", settingHits({ ...owner, locale: "en" }, "AUDIT").some((h) => h.id === "audit"));
+  check("a section the viewer may not open is never found", settingHits({ ...owner, can: (p: string) => p === "settings.read" }, "audit").length === 0);
+  const members = [
+    { userId: "u1", name: "Salma Idrissi", email: "salma@atlas.ma", role: "manager" as const, status: "active" as const },
+    { userId: "u2", name: "", email: "k•••@atlas.ma", role: "agent" as const, status: "suspended" as const },
+  ];
+  const found = memberHits(members, { locale: "ar", handle: "atlas" }, "salma");
+  check("a member matches by name, with the role in the viewer's language", found.length === 1 && found[0]!.title === "Salma Idrissi" && found[0]!.subtitle === t("team.role.manager", undefined, "ar") && found[0]!.href === "/app/atlas/team");
+  const paused = memberHits(members, { locale: "en", handle: "atlas" }, "atlas.ma");
+  check("a nameless member shows the e-mail as listed; a paused one says so", paused.length === 2 && paused[1]!.title === "k•••@atlas.ma" && paused[1]!.subtitle === "Agent · Access paused", paused);
+  check("the shell's hits never exceed SHELL_MAX", settingHits({ can: () => true, locale: "en", handle: "atlas" }, "s").length <= SHELL_MAX);
+  check("every new search key exists in ar, fr and en", inCatalogs("shell.cmdk.member_paused") && Object.values(KIND_GROUPS).every(inCatalogs) && inCatalogs(OTHER_GROUP));
+  check("folding is idempotent and diacritic-free", foldSearch("Écran  Général") === "ecran general" && foldSearch(foldSearch("Écran")) === "ecran");
+}
+
+/* ---- the installable dashboard: manifest and icons (PLA-§23.1, DES-§16.14; step p2-04) ---- */
+function manifestChecks(): void {
+  const m = appManifest({ name: "Store Gen", locale: "ar" });
+  check(
+    "the manifest has PLA-§23.1's fields",
+    m.id === "/app/" && m.scope === "/app/" && m.start_url === "/app?source=pwa" && m.display === "standalone" && m.orientation === "portrait" && m.lang === "ar" && m.dir === "rtl",
+    m,
+  );
+  check("lang and dir follow the locale", appManifest({ name: "Store Gen", locale: "fr" }).dir === "ltr" && appManifest({ name: "Store Gen", locale: "en" }).lang === "en");
+  const light = generateColors(SURFACES.tenant, "light");
+  check("theme_color is the tenant --sidebar, background_color the --background (light, hex; DES-§16.14)", m.theme_color === oklchToHex(light["--sidebar"]) && m.background_color === oklchToHex(light["--background"]) && /^#[0-9a-f]{6}$/.test(m.theme_color));
+  check(
+    "three icons: 192, 512 and the maskable 512",
+    m.icons.map((i) => `${i.src}|${i.sizes}|${i.purpose ?? "any"}`).join() === "/icons/app-192.png|192x192|any,/icons/app-512.png|512x512|any,/icons/app-maskable-512.png|512x512|maskable",
+  );
+  check("short_name is at most 12 characters, never half a pair", shortName("Store Gen") === "Store Gen" && Array.from(shortName("متجر الأطلس الكبير جدا")).length <= 12 && shortName("A".repeat(11) + "😀😀") === "A".repeat(11) + "😀");
+  check("an empty brand falls back to the platform's name", appManifest({ name: "  ", locale: "en" }).name === "Store Gen");
+  const colors = appColors();
+  check("no colour of the manifest or the icon is orange (owner rule 1)", Object.values(colors).every((c) => !inOrangeBand(c)), colors);
+  check("the ink reads on the ground (≥ 7:1)", contrastRatio(colors.ink, colors.ground) >= 7 && contrastRatio(colors.ink, colors.groundTop) >= 7);
+  check("the maskable mark stays inside the inner 80 % circle", markReach("maskable") <= SAFE_RADIUS && markReach("maskable") < markReach("any"), { maskable: markReach("maskable"), any: markReach("any") });
+  check("the monogram's ink box is centred on the grid (DS32 optical centring)", (MONOGRAM_BOX.x0 + MONOGRAM_BOX.x1) / 2 === GRID / 2 && (MONOGRAM_BOX.y0 + MONOGRAM_BOX.y1) / 2 === GRID / 2);
+  for (const icon of APP_ICONS) {
+    const svg = appIconSvg(icon.size, icon.kind);
+    check(`${icon.file}: paths and rects only, no <text>, sized ${icon.size}`, !/<text|<image|<foreignObject/.test(svg) && svg.includes(`width="${icon.size}"`) && svg.includes(MONOGRAM_S));
+    check(`${icon.file}: deterministic`, appIconSvg(icon.size, icon.kind) === svg);
+  }
+}
+
 ruleChecks()
-  .catch((err: unknown) => check("the rule checks ran", false, String(err)))
+  .then(searchChecks)
+  .then(manifestChecks)
+  .catch((err: unknown) => check("the rule and search checks ran", false, String(err)))
   .finally(() => {
     console.log(`test:shell: ${passed} passed, ${failures} failed`);
     if (failures) process.exit(1);

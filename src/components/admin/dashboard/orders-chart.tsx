@@ -12,24 +12,26 @@ const OrdersPlot = dynamic(() => import("./orders-chart-plot").then((m) => m.Ord
   loading: () => <div className="h-64 w-full animate-pulse rounded-xl bg-muted/60 motion-reduce:animate-none" aria-hidden="true" />,
 });
 
-/** 30-day area chart with a metric switch; soft brand gradient, hairline grid, glass tooltip. */
+/** The daily area chart (four weeks) with a metric switch; soft brand gradient, hairline grid, glass tooltip. */
 export function OrdersChart({ series, currency }: { series: Point[]; currency: string }) {
   const [metric, setMetric] = useState<Metric>("orders");
   const totals = useMemo(
-    () => series.reduce((a, p) => ({ orders: a.orders + p.orders, revenue: a.revenue + p.revenue, uniques: a.uniques + p.uniques }), { orders: 0, revenue: 0, uniques: 0 }),
+    () => series.reduce((a, p) => ({ orders: a.orders + p.orders, value: a.value + p.value, uniques: a.uniques + p.uniques }), { orders: 0, value: 0, uniques: 0 }),
     [series],
   );
   const empty = totals.orders === 0 && totals.uniques === 0;
-  const fmt = (n: number) => (metric === "revenue" ? money(n, currency) : int(n));
+  const fmt = (n: number) => (metric === "value" ? money(n, currency) : int(n));
+  const title = `Last ${series.length} days`;
   const conversion = totals.uniques ? totals.orders / totals.uniques : 0;
 
   return (
-    <section className="adm-surface adm-rise flex flex-col gap-5 p-5 sm:p-6" style={{ ["--i" as string]: 4 }} aria-label="Last 30 days">
+    <section className="adm-surface adm-rise flex flex-col gap-5 p-5 sm:p-6" style={{ ["--i" as string]: 4 }} aria-label={title}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="grid gap-1">
-          <h2 className="text-[0.95rem] font-semibold">Last 30 days</h2>
+          <h2 className="text-[0.95rem] font-semibold">{title}</h2>
           <p className="text-sm text-muted-foreground">
-            {int(totals.orders)} orders · {money(totals.revenue, currency)} · {percent(conversion)} conversion
+            {/* a rate never without its n (core §I.8 rule 3): the conversion names the visitors it is of */}
+            {int(totals.orders)} orders · {money(totals.value, currency)} placed · {totals.uniques ? `${percent(conversion)} of ${int(totals.uniques)} visitors` : "no visitors yet"}
           </p>
         </div>
         <Segmented
@@ -39,7 +41,7 @@ export function OrdersChart({ series, currency }: { series: Point[]; currency: s
           onChange={setMetric}
           options={[
             { value: "orders", label: "Orders" },
-            { value: "revenue", label: "Revenue" },
+            { value: "value", label: "Placed" },
             { value: "uniques", label: "Visitors" },
           ]}
         />

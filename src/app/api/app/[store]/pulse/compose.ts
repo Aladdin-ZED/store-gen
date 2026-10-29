@@ -9,13 +9,17 @@
  *   const since = clampSince(url.searchParams.get("since"), now);                             // for aiJobsForPulse
  *
  * The two halves (PLA-§22.6): the store part (`build`, `store`, `kill`, `health`) may be cached 5 s per store in the
- * `pulse` scopedCache; the user part (`unread`, `impersonation`, `reaccept`, `jobs`) and the contributors' counts are
- * computed for every request and never cached, so one viewer's numbers never reach another (`buildPulse` keeps the
- * split by construction: only `loadStorePart` goes through the cache).
+ * `store-pulse` scopedCache (PLA-§M.5, key `"base"`); the user part (`unread`, `impersonation`, `reaccept`, `jobs`) and
+ * the contributors' counts are computed for every request and never cached, so one viewer's numbers never reach another
+ * (`buildPulse` keeps the split by construction: only `loadStorePart` goes through the cache). `./load.ts` reads the
+ * sources; the helpers at the end of this file (`pulseAnswer`, `impersonationOf`, `readerRoleOf`, `tenantKills`) are
+ * the route's pure decisions, so `test:pulse` covers its 304 branch and the per-user split without a server.
  */
 import { createHash } from "node:crypto";
+import type { StoreRole } from "@/lib/auth/permissions";
+import type { KillKey } from "@/lib/flags/registry";
 import type { PulseContributor, StorePulse } from "@/lib/pulse/types";
-import type { StoreScope } from "@/lib/tenancy/types";
+import type { ImpersonationInfo, Membership, StoreScope } from "@/lib/tenancy/types";
 
 /** The contributor budget of core §I.4 (each contributor, in parallel). */
 export const CONTRIBUTOR_BUDGET_MS = 50;
@@ -151,7 +155,10 @@ export function clampSince(raw: string | null | undefined, now: Date): Date {
   return new Date(Math.min(nowMs, Math.max(nowMs - SINCE_MAX_BACK_MS, ms)));
 }
 
-/** The store part's cache: the `pulse` scopedCache's `getOrLoad` in the route, a Map in the selftest. */
+/** The store part's cache key (PLA-§M.5: `store-pulse`, store id : "base"). */
+export const STORE_PART_KEY = "base";
+
+/** The store part's cache: the `store-pulse` scopedCache's `getOrLoad` in the route, a Map in the selftest. */
 export interface PulseStoreCache {
   getOrLoad(storeId: string, key: string, load: () => Promise<PulseStorePart>): Promise<PulseStorePart>;
 }
@@ -171,10 +178,46 @@ export async function buildPulse(deps: {
   budgetMs?: number;
 }): Promise<{ body: StorePulse; etag: string; failures: ContributorFailure[] }> {
   const [storePart, userPart, run] = await Promise.all([
-    deps.cache.getOrLoad(deps.scope.storeId, "store", deps.loadStorePart),
+    deps.cache.getOrLoad(deps.scope.storeId, STORE_PART_KEY, deps.loadStorePart),
     deps.loadUserPart(),
     runContributors(deps.contributors, deps.scope, deps.viewer, deps.budgetMs),
   ]);
   const body = composePulse(storePart, userPart, run.counts, deps.now);
   return { body, etag: pulseEtag(body), failures: run.failures };
+}
+
+/* ------------------------------------------------------------------ */
+/* the route's pure decisions                                          */
+/* ------------------------------------------------------------------ */
+
+/** What the route answers for one composed body: `304` (no body) when `If-None-Match` names its ETag, else `200`. */
+export function pulseAnswer(built: { body: StorePulse; etag: string }, ifNoneMatch: string | null | undefined): { status: 200; etag: string; body: StorePulse } | { status: 304; etag: string; body: null } {
+  return etagMatches(ifNoneMatch, built.etag) ? { status: 304, etag: built.etag, body: null } : { status: 200, etag: built.etag, body: built.body };
+}
+
+/** The response headers of both answers (core §F.6: `apiHeaders` + these): never stored, by a proxy or the browser cache. */
+export function pulseHeaders(etag: string): Record<string, string> {
+  return { ETag: etag, "Cache-Control": "private, no-store" };
+}
+
+/**
+ * The viewer's own impersonation of this store (the ribbon's countdown, PD56): `endsAt` only when the session is staff
+ * viewing this store as themselves; any other viewer, or a session of another staff member, gets null.
+ */
+export function impersonationOf(viewer: { userId: string; storeId: string }, info: Pick<ImpersonationInfo, "staffUserId" | "storeId" | "expiresAt"> | null): StorePulse["impersonation"] {
+  if (!info || info.staffUserId !== viewer.userId || info.storeId !== viewer.storeId) return null;
+  return { endsAt: info.expiresAt.toISOString() };
+}
+
+/** The notification reader's role (P0 review G2): a member reads by their role; staff viewing a store (synthetic membership) reads only rows addressed to them. */
+export function readerRoleOf(membership: Pick<Membership, "role" | "synthetic">): StoreRole | null {
+  return membership.synthetic ? null : membership.role;
+}
+
+/** The kill switches that change a store's dashboard (§H.8; PLA-§12.1: sign-ups affect no existing store). */
+export const TENANT_KILLS: readonly KillKey[] = ["publishing_enabled", "ai_generation_enabled", "sheets_sync_enabled", "capi_enabled", "uploads_enabled", "platform_read_only"];
+
+/** The tripped switches a tenant sees, in the registry's order (a fixed order: the ETag sorts them anyway). */
+export function tenantKills(tripped: readonly KillKey[]): KillKey[] {
+  return TENANT_KILLS.filter((k) => tripped.includes(k));
 }

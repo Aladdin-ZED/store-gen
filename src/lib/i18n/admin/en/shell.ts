@@ -602,6 +602,7 @@ export const messages = {
   "shell.cmdk.shortcuts": "Keyboard shortcuts",
   "shell.cmdk.toggle_theme": "Switch between light and dark",
   "shell.cmdk.switch_store": "Switch to {store}",
+  "shell.cmdk.member_paused": "Access paused",
 
   /* ---- background jobs (PLA-§22.8) ---- */
   "shell.jobs.working": "Working in the background",
