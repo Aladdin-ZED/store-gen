@@ -17,8 +17,9 @@
  *   - B "Baraka Home" (`pending`): an owner; C "Corail Deco" (`suspended`): an owner; D (`purged`, its handle still on
  *     the row): no member;
  *   - staff: one of each platform role with TOTP on, and an admin invited without TOTP yet; an outsider seller.
- * Cases filled so far: 5 (the health job), 6 (notifications) and 15 (brand guard, reports, the health-run half); the
- * others print "pending" with the step that fills them.
+ * Cases filled so far: 1 (the approval queue), 2 (store requests), 3 (platform requests), 5 (the health job), 6
+ * (notifications), 11 (lifecycle safety), 13 (its console part: the sandbox meters, invite codes, the waitlist) and 15
+ * (brand guard, reports, the health-run half); the others print "pending" with the step that fills them.
  */
 import Module from "node:module";
 import mysql from "mysql2/promise";
@@ -252,7 +253,7 @@ async function case6(fx: Fixtures): Promise<void> {
   // 50 parallel batched inserts → one row with count 50 (the kind's batch, and a caller's batch on a store row)
   await awayFromHourEdge();
   await Promise.all(Array.from({ length: 50 }, () => notify({ audience: "platform_staff", minRole: "admin" }, "staff.signup_new", { store: B.handle })));
-  const batched = await rows<{ vars: string }>(fx.conn, "SELECT vars FROM notifications WHERE kind = 'staff.signup_new'");
+  const batched = await rows<{ vars: string }>(fx.conn, "SELECT vars FROM notifications WHERE kind = 'staff.signup_new' AND dedupe_key LIKE 'staff.signup_new:%'");
   ok("50 parallel staff.signup_new → one row", batched.length === 1, batched.length);
   ok("with count 50", JSON.parse(batched[0]?.vars ?? "{}").count === 50, batched[0]?.vars);
   await Promise.all(Array.from({ length: 50 }, () => notify({ audience: "store_role", storeId: A.id, roles: ["owner"] }, "ops.new_orders", {}, { batch: { windowMin: 60 } })));
@@ -533,14 +534,559 @@ async function case5(fx: Fixtures): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/* step 4 helpers: staff and owner contexts, extra stores, review rows */
+/* ------------------------------------------------------------------ */
+
+type PlatformCtxT = import("@/lib/tenancy/types").PlatformCtx;
+type StoreCtxT = import("@/lib/tenancy/types").StoreCtx;
+type StoreStatusT = import("@/lib/tenancy/types").StoreStatus;
+
+const staffNames: Record<string, string> = {};
+
+/** A staff member's console context (as `platformAction` builds it), with or without a fresh step-up. */
+async function staffCtx(fx: Fixtures, role: StaffRole, opts: { userId?: string; stepUp?: boolean } = {}): Promise<PlatformCtxT> {
+  const { canPlatform } = await import("@/lib/auth/permissions");
+  const id = opts.userId ?? fx.staff[role];
+  return {
+    user: { id, email: `${role}@store-gen.test`, name: staffNames[id] ?? role, totpEnabled: true, sessionId: `sess-${id}`, platformRole: role, locale: null, lastStoreId: null },
+    role,
+    actor: { kind: "platform", userId: id, impersonatorId: null, ip: "203.0.113.7" },
+    can: (p) => canPlatform(role, p),
+    stepUpFresh: opts.stepUp === true,
+    stepUpUntil: opts.stepUp ? new Date(Date.now() + 5 * 60_000) : null,
+  };
+}
+
+/** A member's store context (as `storeAction` builds it) for the tenant-callable review functions. */
+async function memberCtx(fx: Fixtures, store: StoreFx & { defaultLocale?: string }, userId: string, role: SellerRole = "owner"): Promise<StoreCtxT> {
+  const { can } = await import("@/lib/auth/permissions");
+  const { mintScope } = await import("@/lib/tenancy/seam");
+  const [u] = await rows<{ email: string; name: string }>(fx.conn, "SELECT email, name FROM users WHERE id = ?", [userId]);
+  const [s] = await rows<{ status: string; default_locale: string }>(fx.conn, "SELECT status, default_locale FROM stores WHERE id = ?", [store.id]);
+  return {
+    user: { id: userId, email: u!.email, name: u!.name, totpEnabled: false, sessionId: `sess-${userId}`, platformRole: "none", locale: null, lastStoreId: store.id },
+    store: { id: store.id, handle: store.handle, name: store.name, mode: "landing", status: s!.status, planId: "beta", market: "MA", currency: "MAD", timezone: "Africa/Casablanca", defaultLocale: s!.default_locale, homePageId: null, brandSeed: "0".repeat(16), catalogVersion: 0, addressVersion: 0, requireMember2fa: false, primaryDomain: null },
+    membership: { role, status: "active" },
+    scope: mintScope("member", store.id),
+    actor: { kind: "user", userId, impersonatorId: null, ip: "198.51.100.4" },
+    impersonation: null,
+    stepUpUntil: null,
+    can: (p: Parameters<typeof can>[1]) => can(role, p),
+  } as unknown as StoreCtxT;
+}
+
+/** A store with its owner (a fresh seller account), for the cases that change a store's state. */
+async function extraStore(fx: Fixtures, handle: string, status: StoreStatusT, opts: { locale?: "ar" | "fr" | "en"; closedFrom?: StoreStatusT } = {}): Promise<StoreFx & { owner: string }> {
+  const owner = fx.newId();
+  await fx.conn.query("INSERT INTO users (id, email, name, password_hash, platform_role, totp_enabled) VALUES (?, ?, ?, 'platform-check:no-password', 'none', 0)", [owner, `${handle}@sellers.test`, `Owner ${handle}`]);
+  const id = fx.newId();
+  const closed = status === "closed" || status === "scheduled_deletion";
+  await fx.conn.query(
+    "INSERT INTO stores (id, handle, name, status, brand_seed, created_by, default_locale, status_changed_at, closed_at, purge_after) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(3) - INTERVAL 1 DAY, ?, ?)",
+    [id, handle, `Store ${handle}`, status, id.slice(-16).toLowerCase(), owner, opts.locale ?? "ar", closed ? new Date(Date.now() - 2 * 86_400_000) : null, closed ? new Date(Date.now() + (status === "closed" ? 28 : 1) * 86_400_000) : null],
+  );
+  await fx.conn.query("INSERT INTO store_members (store_id, user_id, role) VALUES (?, ?, 'owner')", [id, owner]);
+  if (opts.closedFrom) {
+    await fx.conn.query("INSERT INTO audit_log (user_id, action, target, meta, store_id, actor_kind) VALUES (NULL, 'platform.store.closed', ?, ?, ?, 'platform')", [id, JSON.stringify({ from: opts.closedFrom, to: "closed", reason: "owner_request" }), id]);
+  }
+  return { id, handle, name: `Store ${handle}`, status, owner };
+}
+
+type FlagSeed = { code: string; points: number };
+/** One signup_reviews row as the signup writes it (signals without any raw e-mail, phone, IP or UA). */
+async function reviewRow(fx: Fixtures, storeId: string, userId: string, p: { kind?: string; status?: string; band?: string; score?: number; flags?: FlagSeed[]; request?: unknown; ageMin?: number; decidedAt?: Date | null } = {}): Promise<string> {
+  const id = fx.newId();
+  const band = p.band ?? "fast";
+  const signals = {
+    v: 1,
+    flags: p.flags ?? [],
+    band,
+    inputs: { emailDomain: "sellers.test", phoneCountry: "MA", market: "MA", mode: "landing", locale: "fr", uaLabel: "Chrome on Android", turnstile: "ok", formMs: 41_000, via: "signup" },
+    cluster: { users: (p.flags ?? []).some((f) => f.code === "linked_banned") ? 1 : 0, banned: (p.flags ?? []).some((f) => f.code === "linked_banned") ? 1 : 0, kinds: [] },
+    partial: false,
+    ms: 140,
+  };
+  await fx.conn.query(
+    "INSERT INTO signup_reviews (id, store_id, user_id, kind, score, band, status, signals, request, created_at, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3) - INTERVAL ? MINUTE, ?)",
+    [id, storeId, userId, p.kind ?? "signup", p.score ?? (band === "fast" ? 8 : band === "hold" ? 64 : 30), band, p.status ?? "pending", JSON.stringify(signals), p.request ? JSON.stringify(p.request) : null, p.ageMin ?? 30, p.decidedAt ?? null],
+  );
+  return id;
+}
+
+async function count(conn: mysql.Connection, sql: string, args: unknown[] = []): Promise<number> {
+  const [r] = await rows<{ n: number }>(conn, sql, args);
+  return Number(r?.n ?? 0);
+}
+
+/** The refusal code a call throws (AuthRefusal / SeamError / LifecycleError / FieldsError / zod), or "ok". */
+async function codeOf(p: Promise<unknown>): Promise<string> {
+  try {
+    await p;
+    return "ok";
+  } catch (err) {
+    const e = err as { code?: unknown; fields?: Record<string, string>; name?: string };
+    if (e?.fields) return `fields:${Object.keys(e.fields).join(",")}`;
+    if (typeof e?.code === "string") return e.code;
+    if (e?.name === "ZodError") return "zod";
+    return `threw:${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+const statusOfStore = async (fx: Fixtures, storeId: string) => (await rows<{ status: string }>(fx.conn, "SELECT status FROM stores WHERE id = ?", [storeId]))[0]?.status;
+const reviewOf = async (fx: Fixtures, id: string) =>
+  (await rows<{ status: string; decided_by: string | null; staff_question: string | null; answered_at: Date | null; snooze_until: Date | null; submitted_at: Date | null; business_context: string | null; appeals: number; signals: string; blocked: number }>(fx.conn, "SELECT * FROM signup_reviews WHERE id = ?", [id]))[0];
+
+/* ------------------------------------------------------------------ */
+/* case 1: the approval queue (PL-04, PL-02; PLA-§3.5)                 */
+/* ------------------------------------------------------------------ */
+
+async function case1(fx: Fixtures): Promise<void> {
+  const queue = await import("@/lib/platform/queue");
+  const requests = await import("@/lib/platform/requests");
+  // its own pending store: the seeded B stays pending for the other cases
+  const B = await extraStore(fx, "qamar-review", "pending", { locale: "fr" });
+  const ownerOfB = B.owner;
+  for (const [role, name] of [["super_admin", "Platform Root"], ["admin", "Platform Ops"], ["support", "Platform Help"]] as const) staffNames[fx.staff[role]] = name;
+  const root = await staffCtx(fx, "super_admin");
+  const ops = await staffCtx(fx, "admin");
+  const help = await staffCtx(fx, "support");
+
+  // the tenant side first: "Submit for review" (owner only), then the row is in Review within the pulse
+  const bReview = await reviewRow(fx, B.id, ownerOfB, { band: "fast", ageMin: 90 });
+  const ownerB = await memberCtx(fx, B, ownerOfB);
+  ok("an admin member can't submit the store for review (owner only)", (await codeOf(requests.submitForReview({ ...ownerB, membership: { role: "admin", status: "active" } } as StoreCtxT, { sells: "x", link: null, whatsapp: null }))) === "forbidden");
+  const submitted = await requests.submitForReview(ownerB, { sells: "Argan oil and soap", link: "instagram.com/baraka.home", whatsapp: "+212 661 23 45 67" });
+  const again = await requests.submitForReview(ownerB, { sells: "Argan oil, soap and candles", link: null, whatsapp: "+212661234567" });
+  const bRow = await reviewOf(fx, bReview);
+  ok("submit writes business_context and submitted_at; a second press updates the fields (a cleared one goes) and keeps the time", !!bRow?.submitted_at && submitted.submittedAt === again.submittedAt && JSON.parse(bRow.business_context ?? "{}").sells === "Argan oil, soap and candles" && !("link" in JSON.parse(bRow.business_context ?? "{}")), bRow);
+  ok("submit: one staff.signup_new for the first press only (batched per hour)", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'staff.signup_new' AND dedupe_key LIKE 'signup_new:%'")) === 1);
+  const card = await requests.getReviewCard(ownerB.scope);
+  ok("the review card reads the submitted row", card.submittedAt === submitted.submittedAt && card.question === null, card);
+  const reviewTab = await queue.listQueue(help, "review");
+  ok("the submitted store is in Review for every staff role, with a masked e-mail", reviewTab.rows.some((r) => r.id === bReview && String(r.applicant.email).includes("•")), reviewTab.rows.map((r) => r.applicant.email));
+  ok("the list row's readiness is Submitted", reviewTab.rows.find((r) => r.id === bReview)?.readiness === "submitted");
+
+  // the detail pane: e-mail per role (PD35), the counterfactual line, "No page yet" and never a number for an absent check
+  const detailSupport = await queue.getReviewDetail(help, bReview);
+  const detailAdmin = await queue.getReviewDetail(ops, bReview);
+  ok("detail: support reads a masked e-mail, an admin the full one", String(detailSupport.applicant.email).includes("•") && detailAdmin.applicant.email === "qamar-review@sellers.test", { s: detailSupport.applicant.email, a: detailAdmin.applicant.email });
+  ok("detail: the WhatsApp number is masked for every role", !!detailAdmin.context?.whatsapp && String(detailAdmin.context.whatsapp).includes("•") && !JSON.stringify(detailAdmin).includes("661234567"), detailAdmin.context);
+  ok("detail: the band explanation and the thresholds", !!detailAdmin.scoreCard.explanation && detailAdmin.scoreCard.thresholds.fastLaneMax < detailAdmin.scoreCard.thresholds.holdMin);
+  ok("detail: no page yet → readiness from the submit, no design chip, no preview", detailAdmin.evidence.pageId === null && detailAdmin.evidence.design === null && detailAdmin.evidence.preview === null && detailAdmin.evidence.honesty === null, detailAdmin.evidence);
+
+  // two parallel approvals of one row → exactly one approved, the other already_decided with the decider's name
+  const auditBefore = await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.signup.approved' AND store_id = ?", [B.id]);
+  const [r1, r2] = await Promise.all([queue.approveReview(root, { reviewId: bReview }), queue.approveReview(ops, { reviewId: bReview })]);
+  const winners = [r1, r2].filter((r) => r.ok);
+  const loser = [r1, r2].find((r) => !r.ok) as import("@/lib/platform/queue").AlreadyDecided | undefined;
+  ok("two parallel approvals: exactly one approved", winners.length === 1 && (await reviewOf(fx, bReview))?.status === "approved", [r1, r2]);
+  ok("the other answers already_decided with the decider's name", loser?.error === "already_decided" && !!loser.by && ["Platform Root", "Platform Ops"].includes(loser.by.name), loser);
+  ok("the store is active", (await statusOfStore(fx, B.id)) === "active");
+  ok("one approval: one audit row platform.signup.approved", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.signup.approved' AND store_id = ?", [B.id])) === auditBefore + 1);
+  ok("one approval: one store notification signup.approved", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'signup.approved' AND store_id = ?", [B.id])) === 1);
+  ok("a third approval later answers already_decided too", !(await queue.approveReview(ops, { reviewId: bReview })).ok);
+
+  // bulk approve: only rows still waiting in the fast lane
+  const E = await extraStore(fx, "eko-fast", "pending", { locale: "fr" });
+  const F = await extraStore(fx, "foum-hold", "pending");
+  const G = await extraStore(fx, "ghar-linked", "pending");
+  const eRow = await reviewRow(fx, E.id, E.owner, { band: "fast" });
+  const fRow = await reviewRow(fx, F.id, F.owner, { band: "hold", flags: [{ code: "disposable_email", points: 35 }, { code: "dup_phone", points: 30 }] });
+  const gRow = await reviewRow(fx, G.id, G.owner, { band: "fast", score: 0, flags: [{ code: "linked_banned", points: 0 }] });
+  const bulk = await queue.approveBulk(ops, { reviewIds: [eRow, fRow, gRow, bReview] });
+  ok("bulk approve: the fast-lane row approved, the hold row, the hold-class flag and the decided row skipped", bulk.approved.join() === eRow && bulk.skipped.length === 3 && bulk.skipped.find((s) => s.id === fRow)?.why === "not_fast_lane" && bulk.skipped.find((s) => s.id === gRow)?.why === "not_fast_lane", bulk);
+  ok("bulk approve: one platform.signup.bulk_approved row and one approval row per store", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.signup.bulk_approved'")) === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.signup.approved' AND store_id = ?", [E.id])) === 1);
+  ok("bulk approve: the hold store is still pending", (await statusOfStore(fx, F.id)) === "pending" && (await statusOfStore(fx, E.id)) === "active");
+  ok("bulk approve: more than 50 ids refused", (await codeOf(queue.approveBulk(ops, { reviewIds: Array.from({ length: 51 }, () => fx.newId()) }))) === "zod");
+  ok("approve a hold row without a note → note required", (await codeOf(queue.approveReview(ops, { reviewId: fRow }))) === "fields:note");
+  // a store with a draft: Draft ready, a 10-minute staff preview, and no number for a Design check that hasn't run
+  const draftPage = fx.newId();
+  await fx.conn.query("INSERT INTO pages (id, store_id, slug, name, status, public_key, draft) VALUES (?, ?, 'savon', 'Savon noir', 'draft', ?, '{}')", [draftPage, G.id, fx.newId().toLowerCase()]);
+  const gDetail = await queue.getReviewDetail(ops, gRow);
+  const previewIn = gDetail.evidence.preview ? new Date(gDetail.evidence.preview.expiresAt).getTime() - Date.now() : 0;
+  ok("draft evidence: Draft ready, the newest page, a staff preview link living 10 minutes", gDetail.evidence.readiness === "draft" && gDetail.evidence.pageId === draftPage && previewIn > 9 * 60_000 && previewIn <= 10 * 60_000, gDetail.evidence);
+  ok("draft evidence: no Design check yet → no design chip; AI use with no invented limit, untinted", gDetail.evidence.design === null && gDetail.evidence.genomeBand === null && gDetail.evidence.ai?.creditsLimit === null && gDetail.evidence.ai.tint === false, gDetail.evidence);
+  ok("the hold-class flag is explained, and the list row says Draft ready", gDetail.scoreCard.flags.some((f) => f.code === "linked_banned" && f.text.length > 0) && (await queue.listQueue(ops, "review")).rows.find((r) => r.id === gRow)?.readiness === "draft");
+  ok("support can't decide (signups.decide is admin+)", (await codeOf(queue.approveReview(help, { reviewId: fRow }))) === "forbidden");
+
+  // needs_info → the seller's answer → back in Review
+  await queue.askInfo(ops, { reviewId: fRow, question: "Which brand do you sell, and where do you buy it?" });
+  ok("ask: needs_info with the staff question", (await reviewOf(fx, fRow))?.status === "needs_info" && (await reviewOf(fx, fRow))?.staff_question?.startsWith("Which brand") === true);
+  const [askNote] = await rows<{ text: string | null; roles: string }>(fx.conn, "SELECT text, roles FROM notifications WHERE kind = 'signup.info_requested' AND store_id = ?", [F.id]);
+  ok("ask: the owner hears signup.info_requested with the question as its text", askNote?.text?.startsWith("Which brand") === true && /owner/.test(askNote.roles), askNote);
+  ok("ask: the row is in Needs info, not in Review", (await queue.listQueue(ops, "needs_info")).rows.some((r) => r.id === fRow) && !(await queue.listQueue(ops, "review")).rows.some((r) => r.id === fRow));
+  const ownerF = await memberCtx(fx, F, F.owner);
+  await requests.answerReviewQuestion(ownerF, "Our own soap, made in Fès. We buy the oil from a cooperative.");
+  const answered = await reviewOf(fx, fRow);
+  ok("answer: the row is pending again with answered_at", answered?.status === "pending" && !!answered.answered_at, answered);
+  ok("answer: back in Review and in Hold", (await queue.listQueue(ops, "review")).rows.some((r) => r.id === fRow) && (await queue.listQueue(ops, "hold")).rows.some((r) => r.id === fRow));
+  ok("answer: staff hear staff.info_answered", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'staff.info_answered'")) === 1);
+  ok("a second answer finds no question (not_found)", (await codeOf(requests.answerReviewQuestion(ownerF, "again"))) === "not_found");
+
+  // snooze re-entry by time (query time, no job)
+  const now = new Date();
+  const snoozed = await queue.snoozeReview(ops, { reviewId: fRow, until: "1h" }, now);
+  ok("snooze: snoozed until now + 1 h", snoozed.ok && (await reviewOf(fx, fRow))?.status === "snoozed");
+  ok("snooze: in Snoozed now, not in Review", (await queue.listQueue(ops, "snoozed", {}, null, now)).rows.some((r) => r.id === fRow) && !(await queue.listQueue(ops, "review", {}, null, now)).rows.some((r) => r.id === fRow));
+  const later = new Date(now.getTime() + 61 * 60_000);
+  ok("snooze: back in Review 61 minutes later, counted there", (await queue.listQueue(ops, "review", {}, null, later)).rows.some((r) => r.id === fRow) && (await queue.listQueue(ops, "snoozed", {}, null, later)).counts.snoozed === 0);
+  ok("an approve of a snoozed hold row with a note works", (await queue.approveReview(ops, { reviewId: fRow, note: "Checked the cooperative's page." })).ok && (await statusOfStore(fx, F.id)) === "active");
+
+  // reject with block, then one appeal only, reopen and approve
+  const H = await extraStore(fx, "hamra-appeal", "pending");
+  const hRow = await reviewRow(fx, H.id, H.owner, { band: "review", score: 40 });
+  ok("reject with block needs a fresh step-up", (await codeOf(queue.rejectReview(ops, { reviewId: hRow, reason: "incomplete", block: true }))) === "step_up");
+  ok("reject with reason other needs a note", (await codeOf(queue.rejectReview(ops, { reviewId: hRow, reason: "other" }))) === "fields:note");
+  const rej = await queue.rejectReview(ops, { reviewId: hRow, reason: "incomplete" });
+  ok("reject: the row rejected, the store rejected, signup.rejected sent once", rej.ok && (await statusOfStore(fx, H.id)) === "rejected" && (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'signup.rejected' AND store_id = ?", [H.id])) === 1);
+  const ownerH = await memberCtx(fx, { ...H }, H.owner);
+  const appeal = await requests.submitAppeal(ownerH, "We sell our own soap; here is our cooperative's registration.");
+  ok("appeal: a reopen row, pending, signals copied with appeal: true", (await reviewOf(fx, appeal.id))?.status === "pending" && JSON.parse((await reviewOf(fx, appeal.id))!.signals).appeal === true);
+  ok("appeal: appeals + 1 on the original", (await reviewOf(fx, hRow))?.appeals === 1);
+  ok("one appeal only: a second is refused", (await codeOf(requests.submitAppeal(ownerH, "again"))) === "invalid");
+  const twice = await Promise.all([requests.submitAppeal(ownerH, "x"), requests.submitAppeal(ownerH, "y")].map((p) => codeOf(p)));
+  ok("one appeal only: two parallel presses make none more", twice.every((c) => c === "invalid") && (await count(fx.conn, "SELECT COUNT(*) AS n FROM signup_reviews WHERE store_id = ? AND kind = 'reopen'", [H.id])) === 1, twice);
+  ok("appeal: staff hear staff.appeal", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'staff.appeal'")) === 1);
+  ok("an appeal row can't be approved before it is reopened", (await codeOf(queue.approveReview(ops, { reviewId: appeal.id }))) === "invalid");
+  await queue.reopenReview(ops, { reviewId: appeal.id });
+  ok("reopen: the store is pending again (platform.signup.reopened, signup.reopened)", (await statusOfStore(fx, H.id)) === "pending" && (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'signup.reopened' AND store_id = ?", [H.id])) === 1);
+  ok("reopen → approve: the store is active", (await queue.approveReview(ops, { reviewId: appeal.id })).ok && (await statusOfStore(fx, H.id)) === "active");
+
+  // the counts the console pulse reads
+  const snap = await queue.queueSnapshot();
+  ok("the queue snapshot counts (decided rows of this case)", snap.counts.decided >= 5 && snap.sla.n >= 4, snap);
+}
+
+/* ------------------------------------------------------------------ */
+/* case 2: store requests (PLA-§3.7)                                   */
+/* ------------------------------------------------------------------ */
+
+async function case2(fx: Fixtures): Promise<void> {
+  const queue = await import("@/lib/platform/queue");
+  const requests = await import("@/lib/platform/requests");
+  const { A } = fx.stores;
+  const ownerA = await memberCtx(fx, A, fx.a.owner);
+  const viewerA = await memberCtx(fx, A, fx.a.viewer, "viewer");
+  const root = await staffCtx(fx, "super_admin");
+  const ops = await staffCtx(fx, "admin");
+  const help = await staffCtx(fx, "support");
+
+  ok("a viewer can't file a request (billing.manage)", (await codeOf(requests.createStoreRequest(viewerA, { kind: "go_live", message: null }))) === "forbidden");
+  const raise = await requests.createStoreRequest(ownerA, { kind: "limit_raise", key: "media_bytes", used: 1_000_000, limit: 2_000_000, asked: 4_000_000, message: "Photos for the Ramadan range" });
+  ok("a limit request is filed", "id" in raise);
+  ok("one open request per kind and store: the second answers already", "already" in (await requests.createStoreRequest(ownerA, { kind: "limit_raise", key: "pages_max", used: 9, limit: 10, asked: 20, message: null })));
+  const parallel = await Promise.all([requests.createStoreRequest(ownerA, { kind: "plan_change", planId: "pro", message: null }), requests.createStoreRequest(ownerA, { kind: "plan_change", planId: "pro", message: null })]);
+  ok("two parallel requests of one kind: one stands", parallel.filter((r) => "id" in r).length === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM signup_reviews WHERE store_id = ? AND kind = 'plan_change' AND status = 'pending'", [A.id])) === 1, parallel);
+  const planReq = parallel.find((r) => "id" in r) as { id: string };
+  const [row] = await rows<{ score: number; band: string; signals: string; user_id: string }>(fx.conn, "SELECT score, band, signals, user_id FROM signup_reviews WHERE id = ?", [planReq.id]);
+  ok("a request row: score 0, band review, no flags, the store's facts", row?.score === 0 && row.band === "review" && JSON.parse(row.signals).flags.length === 0 && JSON.parse(row.signals).inputs.emailDomain === "example.test", row);
+  ok("staff hear staff.request", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'staff.request'")) >= 2);
+  ok("requests are listed in the Requests tab", (await queue.listQueue(help, "requests")).rows.filter((r) => r.storeId === A.id).length === 2);
+
+  // the s:<sid>:request bucket: 5 a day (a request found open first costs nothing; a lost parallel race cost its slot)
+  await requests.withdrawStoreRequest(ownerA, planReq.id);
+  ok("withdraw: the row is withdrawn", (await reviewOf(fx, planReq.id))?.status === "withdrawn");
+  ok("withdraw again: not_found", (await codeOf(requests.withdrawStoreRequest(ownerA, planReq.id))) === "not_found");
+  const bucket = async () => Number((await rows<{ count: number }>(fx.conn, "SELECT count FROM rate_limits WHERE bucket = ?", [`s:${A.id}:request`]))[0]?.count ?? 0);
+  const charged = await bucket();
+  let filed = 0;
+  let refused = "";
+  for (let i = 0; i < 8 && !refused; i++) {
+    const r = await requests.createStoreRequest(ownerA, { kind: "go_live", message: null }).then(
+      (v) => v,
+      (err: { code?: string }) => {
+        refused = err.code ?? "error";
+        return null;
+      },
+    );
+    if (r && "id" in r) {
+      filed++;
+      await requests.withdrawStoreRequest(ownerA, r.id);
+    }
+  }
+  ok("the bucket allows 5 a day, then rate_limited", refused === "rate_limited" && charged + filed === 5 && (await bucket()) === 6, { charged, filed, refused });
+  ok("a refused request wrote no row", (await count(fx.conn, "SELECT COUNT(*) AS n FROM signup_reviews WHERE store_id = ? AND kind = 'go_live'", [A.id])) === filed);
+
+  // resolve: grant applies the boost / the plan, decline needs a note; one store notification each
+  const raiseId = (raise as { id: string }).id;
+  ok("support can't resolve a limit request (entitlements.override)", (await codeOf(queue.resolveRequest(help, { reviewId: raiseId, outcome: "grant" }))) === "forbidden");
+  const until = new Date(Date.now() + 14 * 86_400_000).toISOString();
+  const granted = await queue.resolveRequest(ops, { reviewId: raiseId, outcome: "grant", grant: { kind: "boost", key: "media_bytes", value: 4_000_000, expiresAt: until }, note: "Ramadan range" });
+  const [boost] = await rows<{ value: string; expires_at: Date | null; source: string }>(fx.conn, "SELECT value, expires_at, source FROM store_entitlements WHERE store_id = ? AND `key` = 'media_bytes'", [A.id]);
+  ok("grant: the boost row with its expiry", granted.ok && boost?.source === "boost" && JSON.parse(boost.value) === 4_000_000 && !!boost.expires_at, boost);
+  ok("grant: one request.answered (granted), no second plan notification", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'request.answered' AND store_id = ?", [A.id])) === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'plan.boost_granted' AND store_id = ?", [A.id])) === 0);
+  ok("grant: audit platform.request.resolved and platform.entitlement.set", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.request.resolved' AND store_id = ?", [A.id])) === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.entitlement.set' AND store_id = ?", [A.id])) === 1);
+  ok("a resolved request answers already_decided", !(await queue.resolveRequest(root, { reviewId: raiseId, outcome: "decline", note: "x" })).ok);
+  const plan2 = await requests.createStoreRequest(ownerA, { kind: "plan_change", planId: "pro", message: null }).catch(() => null);
+  // the bucket is full today: the plan grant is proven on a request row written as the store would have
+  const planRow = plan2 && "id" in plan2 ? plan2.id : await reviewRow(fx, A.id, fx.a.owner, { kind: "plan_change", band: "review", score: 0, request: { kind: "plan_change", planId: "pro", message: null } });
+  ok("decline needs a note", (await codeOf(queue.resolveRequest(ops, { reviewId: planRow, outcome: "decline" }))) === "fields:note");
+  const planGrant = await queue.resolveRequest(ops, { reviewId: planRow, outcome: "grant" });
+  const [plan] = await rows<{ plan_id: string }>(fx.conn, "SELECT plan_id FROM stores WHERE id = ?", [A.id]);
+  const subs = await rows<{ plan_id: string; status: string; provider: string }>(fx.conn, "SELECT plan_id, status, provider FROM store_subscriptions WHERE store_id = ? ORDER BY created_at", [A.id]);
+  ok("grant a plan request: the store moves to the plan asked for, a manual subscription starts", planGrant.ok && plan?.plan_id === "pro" && subs.some((s) => s.plan_id === "pro" && s.status === "active" && s.provider === "manual"), { plan, subs });
+  ok("grant a plan: request.answered, never plan.changed beside it", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'plan.changed' AND store_id = ?", [A.id])) === 0 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'request.answered' AND store_id = ?", [A.id])) === 2);
+  // take_orders false is refused in overrides (PD8)
+  const plans = await import("@/lib/platform/plans");
+  ok("an override of take_orders to false → take_orders_locked", (await codeOf(plans.setEntitlement(ops, { storeId: A.id, key: "take_orders", source: "override", value: false, reason: "test" }))) === "take_orders_locked");
+  ok("a boost without an expiry is refused", (await codeOf(plans.setEntitlement(ops, { storeId: A.id, key: "pages_max", source: "boost", value: 50, reason: "test" }))) === "fields:expiresAt");
+  ok("clearing the boost removes the row", (await plans.clearEntitlement(ops, { storeId: A.id, key: "media_bytes", source: "boost" })).cleared && (await count(fx.conn, "SELECT COUNT(*) AS n FROM store_entitlements WHERE store_id = ?", [A.id])) === 0);
+  // put store A back on its plan for the other cases
+  await plans.assignPlan(root, { storeId: A.id, planId: "beta", note: "platform-check reset" }, { notify: false });
+}
+
+/* ------------------------------------------------------------------ */
+/* case 3: platform requests (PD7, PLA-§2.2)                           */
+/* ------------------------------------------------------------------ */
+
+async function case3(fx: Fixtures): Promise<void> {
+  const preq = await import("@/lib/platform/platform-requests");
+  const { A } = fx.stores;
+  const second = fx.newId();
+  await fx.conn.query("INSERT INTO users (id, email, name, password_hash, platform_role, totp_enabled) VALUES (?, 'root2@store-gen.test', 'Second Root', 'platform-check:no-password', 'super_admin', 1)", [second]);
+  staffNames[second] = "Second Root";
+  const rootUp = await staffCtx(fx, "super_admin", { stepUp: true });
+  const root2Up = await staffCtx(fx, "super_admin", { userId: second, stepUp: true });
+  const opsUp = await staffCtx(fx, "admin", { stepUp: true });
+  const K = await extraStore(fx, "kasbah-closed", "closed");
+  const purge = (store: StoreFx, mode: "four_eyes" | "delayed", ctx = rootUp, now?: Date) => preq.requestPurge(ctx, { storeId: store.id, mode, reason: "legal_request", typedHandle: store.handle, typedWord: "purge" }, now);
+
+  ok("a purge request on an active store is refused (purge_not_closed)", (await codeOf(purge(A, "four_eyes"))) === "purge_not_closed");
+  ok("an admin can't request a purge (stores.purge)", (await codeOf(purge(K, "four_eyes", opsUp))) === "forbidden");
+  ok("a purge without a fresh step-up → step_up", (await codeOf(purge(K, "four_eyes", await staffCtx(fx, "super_admin")))) === "step_up");
+  ok("a mistyped handle is refused", (await codeOf(preq.requestPurge(rootUp, { storeId: K.id, mode: "four_eyes", reason: "legal_request", typedHandle: "kasbah", typedWord: "purge" }))) === "fields:typed");
+  const req = await purge(K, "four_eyes");
+  ok("a four-eyes purge request is pending, the store unchanged", req.mode === "four_eyes" && (await statusOfStore(fx, K.id)) === "closed");
+  ok("one pending request per store and kind (already_requested)", (await codeOf(purge(K, "delayed", root2Up))) === "already_requested");
+  ok("every other super_admin hears staff.purge_requested, the requester doesn't", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'staff.purge_requested' AND user_id = ?", [second])) === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'staff.purge_requested' AND user_id = ?", [fx.staff.super_admin])) === 0);
+  ok("the requester can't confirm their own request", (await codeOf(preq.confirmPlatformRequest(rootUp, { requestId: req.id, typedHandle: K.handle }))) === "forbidden");
+  // the SQL half: the table's CHECK refuses confirmed_by = requested_by whatever the code does
+  const sqlSelf = await fx.conn.query("UPDATE platform_requests SET status = 'confirmed', confirmed_by = requested_by WHERE id = ?", [req.id]).then(
+    () => "ok",
+    (err: { code?: string }) => err.code ?? "error",
+  );
+  ok("SQL: a self-confirmation violates preq_four_eyes_ck", sqlSelf !== "ok" && (await rows<{ status: string }>(fx.conn, "SELECT status FROM platform_requests WHERE id = ?", [req.id]))[0]?.status === "pending", sqlSelf);
+  const confirmed = await preq.confirmPlatformRequest(root2Up, { requestId: req.id, typedHandle: K.handle });
+  ok("the second super_admin confirms", confirmed.status === "confirmed");
+  ok("a second confirm answers already_decided", (await codeOf(preq.confirmPlatformRequest(root2Up, { requestId: req.id, typedHandle: K.handle }))) === "already_decided");
+  const ran = await preq.runDueRequests(new Date());
+  const [kRow] = await rows<{ status: string; purge_after: Date }>(fx.conn, "SELECT status, purge_after FROM stores WHERE id = ?", [K.id]);
+  ok("the job executes it: scheduled_deletion with purge_after now", ran.executed === 1 && kRow?.status === "scheduled_deletion" && Math.abs(kRow.purge_after.getTime() - Date.now()) < 60_000, { ran, kRow });
+  ok("the store heard store.deletion_scheduled once", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'store.deletion_scheduled' AND store_id = ?", [K.id])) === 1);
+  ok("a second run executes nothing more", (await preq.runDueRequests(new Date())).executed === 0);
+
+  // delayed: executes after 24 h on a fake clock, not before
+  const L = await extraStore(fx, "lalla-delayed", "closed");
+  const t0 = new Date();
+  const delayed = await purge(L, "delayed", rootUp, t0);
+  ok("a delayed request executes 24 h after it was made", delayed.mode === "delayed" && delayed.executeAfter === new Date(t0.getTime() + 24 * 3_600_000).toISOString());
+  ok("23 h later: nothing", (await preq.runDueRequests(new Date(t0.getTime() + 23 * 3_600_000))).executed === 0 && (await statusOfStore(fx, L.id)) === "closed");
+  ok("25 h later: executed", (await preq.runDueRequests(new Date(t0.getTime() + 25 * 3_600_000))).executed === 1 && (await statusOfStore(fx, L.id)) === "scheduled_deletion");
+
+  // expiry after 7 days unconfirmed; cancel by the requester or any super_admin
+  const M = await extraStore(fx, "medina-expire", "closed");
+  const old = await purge(M, "four_eyes", rootUp, new Date(Date.now() - 8 * 86_400_000));
+  const exp = await preq.runDueRequests(new Date());
+  ok("a four-eyes request unconfirmed for 7 days expires", exp.expired === 1 && (await rows<{ status: string }>(fx.conn, "SELECT status FROM platform_requests WHERE id = ?", [old.id]))[0]?.status === "expired" && (await statusOfStore(fx, M.id)) === "closed");
+  const again = await purge(M, "four_eyes");
+  ok("an admin can't cancel a super_admin's purge request", (await codeOf(preq.cancelPlatformRequest(opsUp, { requestId: again.id }))) === "forbidden");
+  await preq.cancelPlatformRequest(root2Up, { requestId: again.id });
+  ok("another super_admin cancels it; the job leaves it", (await rows<{ status: string }>(fx.conn, "SELECT status FROM platform_requests WHERE id = ?", [again.id]))[0]?.status === "cancelled" && (await preq.runDueRequests(new Date())).executed === 0);
+  ok("a cancelled request can't be confirmed", (await codeOf(preq.confirmPlatformRequest(rootUp, { requestId: again.id, typedHandle: M.handle }))) === "already_decided" || (await codeOf(preq.confirmPlatformRequest(rootUp, { requestId: again.id, typedHandle: M.handle }))) === "forbidden");
+  // a store that left `closed` before execution: the request is cancelled with its reason
+  const N = await extraStore(fx, "nador-reopened", "closed", { closedFrom: "active" });
+  const late = await purge(N, "delayed", rootUp, new Date(Date.now() - 25 * 3_600_000));
+  await fx.conn.query("UPDATE stores SET status = 'active' WHERE id = ?", [N.id]);
+  const lateRun = await preq.runDueRequests(new Date());
+  ok("a due request on a store no longer closed is cancelled with store_not_closed", lateRun.failed === 1 && (await rows<{ status: string; error: string }>(fx.conn, "SELECT status, error FROM platform_requests WHERE id = ?", [late.id]))[0]?.error === "store_not_closed");
+  ok("audit: purge_requested and purge_confirmed rows", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.store.purge_requested'")) >= 4 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.store.purge_confirmed'")) === 1);
+}
+
+/* ------------------------------------------------------------------ */
+/* case 11: lifecycle safety (PD54, PLA-§8.0-§8.2)                     */
+/* ------------------------------------------------------------------ */
+
+async function case11(fx: Fixtures): Promise<void> {
+  const preview = await import("@/lib/platform/lifecycle-preview");
+  const actions = await import("@/lib/platform/lifecycle-actions");
+  const rules = await import("@/lib/platform/lifecycle-rules");
+  const { kindText, labelsOf } = await import("@/lib/platform/notify-kinds");
+  const { notificationKind } = await import("@/lib/notify/registry");
+  const root = await staffCtx(fx, "super_admin", { stepUp: true });
+  const opsNoUp = await staffCtx(fx, "admin");
+  const help = await staffCtx(fx, "support", { stepUp: true });
+  // three stores, one per locale: active (with two agents holding a lease), pending (with an open review), suspended
+  const S1 = await extraStore(fx, "sahel-active", "active", { locale: "fr" });
+  const S2 = await extraStore(fx, "souss-pending", "pending", { locale: "ar" });
+  const S3 = await extraStore(fx, "saidia-suspended", "suspended", { locale: "en" });
+  const s2Review = await reviewRow(fx, S2.id, S2.owner, { band: "fast" });
+  for (const [i, agent] of [fx.a.agent, fx.a.manager].entries()) {
+    await fx.conn.query(
+      "INSERT INTO orders (id, store_id, page_id, name, phone, city, address, product_name, items, qty, subtotal, shipping, total, currency, idem, assignee_id, lease_until, claim_token) VALUES (?, ?, ?, 'Client', '+212600000001', 'Rabat', 'Rue 1', 'Savon', '[]', 1, 5000, 0, 5000, 'MAD', ?, ?, NOW(3) + INTERVAL 10 MINUTE, ?)",
+      [`CMD-L${i}${fx.newId().slice(-5)}`, S1.id, fx.newId(), fx.newId().slice(0, 36), agent, fx.newId()],
+    );
+  }
+  const counts = async (storeId: string) => ({
+    audit: await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE store_id = ?", [storeId]),
+    notes: await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE store_id = ?", [storeId]),
+  });
+
+  // the preview writes nothing (the sheet's Cancel during the arm window writes nothing because nothing was written)
+  const before = await counts(S1.id);
+  const p = await preview.lifecyclePreview(help, S1.id, "restricted", { reason: "fake_orders" });
+  ok("preview: support may read it, but can't take the edge (permission)", p.allowed === false && p.blockedBy === "permission" && p.requires?.permission === "stores.lifecycle");
+  ok("preview: the agents holding a lease (2) and leasesReleased", p.affects.agentsWithLease === 2 && p.willWrite.leasesReleased === true, p.affects);
+  ok("preview: unavailable sources are named, never a guessed 0 (P4 / P5 / P8 stubs)", p.affects.openOrders === null && p.affects.unavailable.includes("queue") && p.affects.unavailable.includes("integrations") && p.affects.unavailable.includes("renders"), p.affects.unavailable);
+  ok("preview: nothing written (no audit row, no notification)", JSON.stringify(await counts(S1.id)) === JSON.stringify(before));
+  ok("preview: a queue edge is blocked with use_queue", (await preview.lifecyclePreview(root, S2.id, "active")).blockedKey === "console.lifecycle.use_queue");
+
+  // every console edge on the three stores: preview = effect, one notification and one audit row per transition
+  type Step = { store: StoreFx & { owner: string }; to: StoreStatusT; reason: string; notice?: boolean };
+  const steps: Step[] = [
+    { store: S1, to: "restricted", reason: "fake_orders" },
+    { store: S1, to: "suspended", reason: "phishing", notice: true },
+    { store: S1, to: "restricted", reason: "issue_resolved" },
+    { store: S1, to: "active", reason: "mistake" },
+    { store: S1, to: "suspended", reason: "scam_suspected" },
+    { store: S1, to: "active", reason: "appeal_accepted" },
+    { store: S1, to: "closed", reason: "owner_request" },
+    { store: S1, to: "active", reason: "issue_resolved" },
+    { store: S1, to: "closed", reason: "abandoned" },
+    { store: S1, to: "scheduled_deletion", reason: "retention" },
+    { store: S1, to: "closed", reason: "mistake" },
+    { store: S2, to: "closed", reason: "owner_request" },
+    { store: S2, to: "pending", reason: "mistake" },
+    { store: S3, to: "restricted", reason: "issue_resolved" },
+    { store: S3, to: "suspended", reason: "counterfeit" },
+    { store: S3, to: "closed", reason: "terms_violation" },
+  ];
+  let walked = 0;
+  for (const s of steps) {
+    const from = (await statusOfStore(fx, s.store.id)) as StoreStatusT;
+    const pv = await preview.lifecyclePreview(root, s.store.id, s.to, { reason: s.reason, ...(s.notice ? { suspendNotice: true } : {}) });
+    const label = `${s.store.handle} ${from} → ${s.to}`;
+    ok(`${label}: allowed, with the reason it was asked for`, pv.allowed && pv.reason === s.reason && pv.action === rules.lifecycleActionOf(from, s.to), { allowed: pv.allowed, blockedBy: pv.blockedBy, key: pv.blockedKey });
+    const c0 = await counts(s.store.id);
+    await actions.runLifecycleAction(root, s.store.id, s.to, { reason: s.reason, expectedFrom: from, typedHandle: s.store.handle, ...(s.notice ? { suspendNotice: true } : {}) });
+    walked++;
+    const c1 = await counts(s.store.id);
+    const [after] = await rows<{ status: StoreStatusT; status_reason: string; closed_at: Date | null; purge_after: Date | null; suspend_notice: number; default_locale: string; timezone: string }>(fx.conn, "SELECT status, status_reason, closed_at, purge_after, suspend_notice, default_locale, timezone FROM stores WHERE id = ?", [s.store.id]);
+    const [note] = await rows<{ kind: string; vars: string | null; text: string | null }>(fx.conn, "SELECT kind, vars, text FROM notifications WHERE store_id = ? ORDER BY id DESC LIMIT 1", [s.store.id]);
+    const [audit] = await rows<{ action: string }>(fx.conn, "SELECT action FROM audit_log WHERE store_id = ? ORDER BY id DESC LIMIT 1", [s.store.id]);
+    const locale = rules.storeLocaleOf(after!.default_locale);
+    const rendered = note ? kindText(note.kind, labelsOf(notificationKind(note.kind)), note.vars ? JSON.parse(note.vars) : null, locale, after!.timezone, note.text) : null;
+    const actual = rules.storeSeesFor({ from, status: after!.status, reason: after!.status_reason, closedAt: after!.closed_at, purgeAfter: after!.purge_after, suspendNotice: !!after!.suspend_notice, locale, timeZone: after!.timezone, notification: rendered });
+    ok(`${label}: the status written`, after!.status === s.to, after);
+    ok(`${label}: exactly one store notification, of the previewed kind`, c1.notes === c0.notes + 1 && note?.kind === pv.willWrite.notification, { c0, c1, kind: note?.kind, want: pv.willWrite.notification });
+    ok(`${label}: exactly one audit row, the previewed action`, c1.audit === c0.audit + 1 && audit?.action === pv.willWrite.audit, { audit: audit?.action, want: pv.willWrite.audit });
+    ok(`${label}: storeSees = the words and the banner the store gets`, actual.title === pv.storeSees.title && actual.body === pv.storeSees.body && actual.banner === pv.storeSees.banner && actual.publicPages === pv.storeSees.publicPages && actual.publicOrders === pv.storeSees.publicOrders, { preview: pv.storeSees, actual });
+  }
+  ok("every console edge was walked (16 transitions over 3 stores)", walked === steps.length && walked === 16);
+  ok("closing the pending store withdrew its open review", (await reviewOf(fx, s2Review))?.status === "withdrawn");
+  console.log("    note: affects.agentsWithLease is counted from the store's live leases; the release itself (P4 releaseAllLeases, called by transitionStore) is proven at the R1 integration");
+
+  // the cooldown, server-side: S3 just changed, so even restore-class actions need the typed handle
+  const c0 = await counts(S3.id);
+  const cool = await preview.lifecyclePreview(root, S3.id, "active", { reason: "issue_resolved" });
+  ok("preview inside the cooldown: typedHandleRequired with who and when", cool.cooldown.typedHandleRequired && cool.cooldown.lastChangeBy === "Platform Root" && cool.cooldown.minutesAgo === 0 && cool.cooldown.lastReason === "terms_violation", cool.cooldown);
+  ok("a reopen inside the cooldown without the handle → cooldown_handle_required", (await codeOf(actions.runLifecycleAction(root, S3.id, "active", { reason: "issue_resolved", expectedFrom: "closed" }))) === "cooldown_handle_required");
+  ok("…and nothing was written", JSON.stringify(await counts(S3.id)) === JSON.stringify(c0) && (await statusOfStore(fx, S3.id)) === "closed");
+  ok("a stale from → status_changed, nothing written", (await codeOf(actions.runLifecycleAction(root, S3.id, "active", { reason: "issue_resolved", expectedFrom: "suspended", typedHandle: S3.handle }))) === "status_changed" && JSON.stringify(await counts(S3.id)) === JSON.stringify(c0));
+  ok("a reopen to another state than the one closed from is refused by the edge", (await preview.lifecyclePreview(root, S3.id, "active")).blockedKey === "console.lifecycle.reopen_to_previous" || (await codeOf(actions.runLifecycleAction(root, S3.id, "active", { reason: "issue_resolved", expectedFrom: "closed", typedHandle: S3.handle }))) === "invalid");
+  // outside the cooldown the restore needs no handle
+  await fx.conn.query("UPDATE stores SET status_changed_at = NOW(3) - INTERVAL 11 MINUTE WHERE id = ?", [S3.id]);
+  const s3From = (await rows<{ meta: string }>(fx.conn, "SELECT meta FROM audit_log WHERE store_id = ? AND action IN ('store.closed', 'platform.store.closed') ORDER BY id DESC LIMIT 1", [S3.id]))[0];
+  const reopenTo = (JSON.parse(s3From?.meta ?? "{}").from ?? "suspended") as StoreStatusT;
+  ok("outside the cooldown a reopen needs no typed handle", (await codeOf(actions.runLifecycleAction(root, S3.id, reopenTo, { reason: "issue_resolved", expectedFrom: "closed" }))) === "ok" && (await statusOfStore(fx, S3.id)) === reopenTo);
+  // the requirements, server-side
+  await fx.conn.query("UPDATE stores SET status_changed_at = NOW(3) - INTERVAL 1 HOUR WHERE id = ?", [S2.id]);
+  ok("a queue edge through the lifecycle action → invalid", (await codeOf(actions.runLifecycleAction(root, S2.id, "active", { reason: "issue_resolved", expectedFrom: "pending" }))) === "invalid");
+  const A = fx.stores.A;
+  await fx.conn.query("UPDATE stores SET status_changed_at = NOW(3) - INTERVAL 1 HOUR WHERE id = ?", [A.id]);
+  ok("restrict by support → forbidden", (await codeOf(actions.runLifecycleAction(help, A.id, "restricted", { reason: "fake_orders", expectedFrom: "active" }))) === "forbidden");
+  ok("suspend without a fresh step-up → step_up", (await codeOf(actions.runLifecycleAction(opsNoUp, A.id, "suspended", { reason: "phishing", expectedFrom: "active", typedHandle: A.handle }))) === "step_up");
+  ok("suspend without the typed handle → typed mismatch", (await codeOf(actions.runLifecycleAction(root, A.id, "suspended", { reason: "phishing", expectedFrom: "active" }))) === "fields:typedHandle");
+  ok("a reason of another action → refused", (await codeOf(actions.runLifecycleAction(root, A.id, "restricted", { reason: "retention", expectedFrom: "active" }))) === "fields:reason");
+  ok("reason other without a note → refused", (await codeOf(actions.runLifecycleAction(root, A.id, "restricted", { reason: "other", expectedFrom: "active" }))) === "fields:note");
+  ok("store A is still active after the refusals", (await statusOfStore(fx, A.id)) === "active");
+  // two staff restricting at once: one wins, the other sees status_changed
+  const restrictedBefore = await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE store_id = ? AND kind = 'store.restricted'", [A.id]);
+  const race = await Promise.all([root, await staffCtx(fx, "admin", { stepUp: true })].map((ctx) => codeOf(actions.runLifecycleAction(ctx, A.id, "restricted", { reason: "fake_orders", expectedFrom: "active" }))));
+  ok("two staff restricting at once: one ok, the other status_changed", race.filter((c) => c === "ok").length === 1 && race.filter((c) => c === "status_changed").length === 1, race);
+  ok("one notification for the one transition", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE store_id = ? AND kind = 'store.restricted'", [A.id])) === restrictedBefore + 1);
+  // store A back to active for the other cases (outside the cooldown)
+  await fx.conn.query("UPDATE stores SET status = 'active', status_changed_at = NOW(3) - INTERVAL 1 HOUR WHERE id = ?", [A.id]);
+}
+
+/* ------------------------------------------------------------------ */
+/* case 13 (console part): sandbox meters, invite codes and the waitlist */
+/* ------------------------------------------------------------------ */
+
+async function case13(fx: Fixtures): Promise<void> {
+  const admin = await import("@/lib/platform/signup-admin");
+  const { periodOf } = await import("@/lib/tenancy/entitlement-keys");
+  const { PLATFORM_TIMEZONE } = await import("@/lib/auth/config");
+  const ops = await staffCtx(fx, "admin");
+  const help = await staffCtx(fx, "support");
+  const day = periodOf("day", new Date(), PLATFORM_TIMEZONE);
+  const MiB = 1024 * 1024;
+
+  // the two D69 meters read the seeded counters
+  await fx.conn.query("INSERT INTO platform_usage (metric, period, value) VALUES ('pending_stores', ?, 3) ON DUPLICATE KEY UPDATE value = 3", [day]);
+  await fx.conn.query("INSERT INTO platform_usage (metric, period, value) VALUES ('pending_media_bytes', 'total', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [120 * MiB]);
+  const P1 = await extraStore(fx, "pending-big", "pending");
+  const P2 = await extraStore(fx, "pending-small", "pending");
+  await fx.conn.query("INSERT INTO store_usage (store_id, metric, period, value) VALUES (?, 'media_bytes', 'total', ?), (?, 'media_bytes', 'total', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [P1.id, 90 * MiB, P2.id, 30 * MiB]);
+  await fx.conn.query("INSERT INTO store_usage (store_id, metric, period, value) VALUES (?, 'media_bytes', 'total', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [fx.stores.A.id, 900 * MiB]);
+  const today = await admin.todaysSandboxes();
+  ok("todaysSandboxes: the platform day's pending_stores against pendingStoresPerDay (50)", today.day === day && today.used === 3 && today.limit === 50 && !today.full, today);
+  const media = await admin.pendingMediaBudget();
+  const pendingNow = await count(fx.conn, "SELECT COUNT(*) AS n FROM stores WHERE status = 'pending'");
+  ok("pendingMediaBudget: the shared counter against 5,000 MiB, the pending-store count", media.usedBytes === 120 * MiB && media.limitBytes === 5_000 * MiB && media.pendingStores === pendingNow, media);
+  ok("pendingMediaBudget: the largest pending stores first, an active store never listed", media.largest[0]?.storeId === P1.id && media.largest[1]?.storeId === P2.id && !media.largest.some((r) => r.storeId === fx.stores.A.id), media.largest);
+
+  // invite codes through T2's functions
+  ok("support can't manage codes (signups.decide)", (await codeOf(admin.createInviteCode(help, { label: "Beta sellers" }))) === "forbidden");
+  const code = await admin.createInviteCode(ops, { label: "Beta sellers Casablanca", usesMax: 10, expiresInDays: 30, autoApprove: false });
+  ok("a new code is shown once (SG-…) and stored as a hash", /^SG-[0-9A-Z]{12}$/.test(code.code) && (await count(fx.conn, "SELECT COUNT(*) AS n FROM platform_invites WHERE code_hash LIKE ?", [`%${code.code.slice(3)}%`])) === 0);
+  let listed = await admin.listInviteCodes(ops);
+  ok("the list shows it Active with 0 / 10 and its creator", listed.rows[0]?.id === code.id && listed.rows[0].state === "active" && listed.rows[0].usesMax === 10 && listed.rows[0].createdBy.name === "Platform Ops", listed.rows[0]);
+  await admin.revokeInviteCode(ops, code.id);
+  listed = await admin.listInviteCodes(ops);
+  ok("revoke: the chip reads Revoked", listed.rows.find((r) => r.id === code.id)?.state === "revoked");
+
+  // the waitlist: masked rows, the daily-cap chip, invite selected, drop
+  const wl = async (email: string, source: string | null) => {
+    const id = fx.newId();
+    await fx.conn.query("INSERT INTO waitlist (id, email_norm, phone, market, mode_interest, source) VALUES (?, ?, '+212612345678', 'MA', 'landing', ?)", [id, email, source]);
+    return id;
+  };
+  const w1 = await wl("ilyas@gmail.com", `cap:${day}`);
+  const w2 = await wl("meryem@outlook.com", "utm:instagram");
+  const w3 = await wl("anas@yahoo.fr", null);
+  const page = await admin.listWaitlist(ops, { status: "waiting" });
+  ok("listWaitlist: e-mails masked, phone country, the daily-cap chip", page.rows.length === 3 && page.rows.every((r) => String(r.email).includes("•") && r.phoneCountry === "MA") && page.rows.find((r) => r.id === w1)?.source?.kind === "daily_cap" && !JSON.stringify(page).includes("ilyas@"), page.rows);
+  ok("listWaitlist: the cap filter", (await admin.listWaitlist(ops, { source: "cap" })).rows.map((r) => r.id).join() === w1);
+  const sent = await admin.inviteWaitlist(ops, { ids: [w1, w2] });
+  ok("invite selected: one single-use 30-day code per row, the contact for the staff to send it", sent.invited.length === 2 && sent.invited.every((i) => /^SG-/.test(i.code) && !!i.expiresAt) && sent.invited.find((i) => i.id === w1)?.email === "ilyas@gmail.com", sent);
+  const invitedRows = await rows<{ status: string; invite_id: string | null }>(fx.conn, "SELECT status, invite_id FROM waitlist WHERE id IN (?, ?)", [w1, w2]);
+  const codes = await rows<{ label: string; uses_max: number; expires_at: Date }>(fx.conn, "SELECT label, uses_max, expires_at FROM platform_invites WHERE id IN (?)", [invitedRows.map((r) => r.invite_id)]);
+  ok("…the rows invited with their code, labelled 'Waitlist <day>', 1 use, 30 days", invitedRows.every((r) => r.status === "invited" && !!r.invite_id) && codes.length === 2 && codes.every((c) => c.label === `Waitlist ${day}` && c.uses_max === 1 && Math.abs(c.expires_at.getTime() - Date.now() - 30 * 86_400_000) < 120_000), { invitedRows, codes });
+  ok("invite selected again: the invited row is skipped", (await admin.inviteWaitlist(ops, { ids: [w1] })).skipped.join() === w1);
+  ok("invite selected: at most 100 rows per call", (await codeOf(admin.inviteWaitlist(ops, { ids: Array.from({ length: 101 }, () => fx.newId()) }))) === "zod");
+  ok("drop: the row is dropped", (await admin.dropWaitlist(ops, { ids: [w3] })).dropped === 1 && (await rows<{ status: string }>(fx.conn, "SELECT status FROM waitlist WHERE id = ?", [w3]))[0]?.status === "dropped");
+  ok("audit: platform.waitlist.invited and .dropped", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.waitlist.invited'")) === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.waitlist.dropped'")) === 1);
+}
+
+/* ------------------------------------------------------------------ */
 /* the registry (PLA-§O.2)                                             */
 /* ------------------------------------------------------------------ */
 
 type CaseFn = (fx: Fixtures) => Promise<void>;
 const CASES: Record<number, { run?: CaseFn; pending?: string }> = {
-  1: { pending: "step 4 (queue)" },
-  2: { pending: "step 4 (store requests)" },
-  3: { pending: "step 4 (platform requests)" },
+  1: { run: case1 },
+  2: { run: case2 },
+  3: { run: case3 },
   4: { pending: "step 5 (plans)" },
   5: { run: case5 },
   6: { run: case6 },
@@ -548,14 +1094,14 @@ const CASES: Record<number, { run?: CaseFn; pending?: string }> = {
   8: { pending: "step 5 (legal)" },
   9: { pending: "step 7 (impersonation from the console)" },
   10: { pending: "step 6 (query plans; --perf)" },
-  11: { pending: "step 4 (lifecycle safety)" },
+  11: { run: case11 },
   12: { pending: "step 6 (console pulse)" },
-  13: { pending: "step 4 (sandbox ceilings)" },
+  13: { run: case13, pending: "the signup half (the cap → waitlist, the two-tier upload cap, the Turnstile gate) is T2 / P8 code, run at the R1 integration" },
   14: { pending: "step 7 (masking at the repository)" },
   15: { run: case15 },
   16: { pending: "step 7 (account deletion)" },
   17: { pending: "step 7 (tenant step-up ladder)" },
-  18: { pending: "step 4 (refund paths)" },
+  18: { pending: "the R1 integration (T2 signup refund paths, P7 pending AI slice)" },
   19: { pending: "step 12 (machinery screens)" },
   20: { pending: "step 5 (invite consumption)" },
 };
@@ -574,7 +1120,10 @@ async function main(): Promise<number> {
     ?.split(",")
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n));
-  const wanted = picked?.length ? picked : Object.keys(CASES).map(Number);
+  // the step-4 cases add stores and move store states, so they run after the cases that count stores (5's dirty-first
+  // order) or read the seeded states (B pending, C suspended)
+  const RUNS_LAST = new Set([1, 2, 3, 11, 13]);
+  const wanted = (picked?.length ? picked : Object.keys(CASES).map(Number)).sort((x, y) => Number(RUNS_LAST.has(x)) - Number(RUNS_LAST.has(y)) || x - y);
   const unknown = wanted.filter((n) => !CASES[n]);
   if (unknown.length) {
     console.error(`platform-check: no case ${unknown.join(", ")} (PLA-§O.2 has 1-20)`);

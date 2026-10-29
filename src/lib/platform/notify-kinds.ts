@@ -18,6 +18,7 @@
  *     code when the key exists (a reason code reads "Fake orders", a role "Manager"); otherwise the code shows as is.
  */
 import { z } from "zod";
+import { messageOf, t, type AdminLocale, type MessageVars } from "@/lib/i18n/admin";
 import type { NotificationKindDef } from "@/lib/notify/registry";
 
 /** Keys a vars schema may never have (customer data never rides in a notification, core §I.4, PL-13). */
@@ -170,4 +171,28 @@ export function displayVar(value: string | number, locale: string, timeZone: str
     // an unknown time zone: the raw value
   }
   return value;
+}
+
+/**
+ * A notification's title and body as a reader sees them (pure): each var through its kind's label
+ * (`<prefix>.<value>` in the reader's locale when the key exists), ISO dates in `timeZone`, the kind's texts
+ * `notify.<kind>.title` / `.body`; staff free text is the body as typed. `notify.ts` renders the centre with it and
+ * the console's lifecycle preview shows the store the same words before anything is sent (PLA-§8.0).
+ */
+export function kindText(
+  kind: string,
+  labels: VarLabels,
+  vars: Readonly<Record<string, string | number>> | null,
+  locale: AdminLocale,
+  timeZone: string,
+  text: string | null,
+): { title: string; body: string | null } {
+  const shown: MessageVars = {};
+  for (const [key, value] of Object.entries(vars ?? {})) {
+    const prefix = labels[key];
+    const label = prefix && typeof value === "string" ? messageOf(`${prefix}.${value}`, locale) : undefined;
+    shown[key] = label ?? displayVar(value, locale, timeZone);
+  }
+  const bodyKey = `notify.${kind}.body`;
+  return { title: t(`notify.${kind}.title`, shown, locale), body: text ?? (messageOf(bodyKey, locale) !== undefined ? t(bodyKey, shown, locale) : null) };
 }

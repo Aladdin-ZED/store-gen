@@ -40,14 +40,14 @@ import { and, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql, type SQL }
 import { PLATFORM_ROLES, type PlatformRole, type StoreRole } from "@/lib/auth/permissions";
 import { db } from "@/lib/db/client";
 import { notificationReads, notifications, stores, users } from "@/lib/db/schema";
-import { isAdminLocale, messageOf, t, type AdminLocale, type MessageVars } from "@/lib/i18n/admin";
+import { isAdminLocale, type AdminLocale } from "@/lib/i18n/admin";
 import { systemCtx, systemScope } from "@/lib/jobs/scope";
 import { NOTIFICATION_KINDS, notificationKind, type NotificationGroup, type NotificationKind, type NotificationSeverity, type NotificationVars } from "@/lib/notify/registry";
 import { scopedCache } from "@/lib/tenancy/cache";
 import { storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { recordPlatformError } from "./log";
-import { displayVar, isBannedVarKey, labelsOf, notifyLinkOk } from "./notify-kinds";
+import { isBannedVarKey, kindText, labelsOf, notifyLinkOk } from "./notify-kinds";
 
 export type NotifyTarget =
   | { audience: "user"; userId: string; storeId?: string | null } // one person (in one store, or platform-wide)
@@ -437,21 +437,14 @@ async function readerContext(reader: Reader): Promise<{ locale: AdminLocale; tim
 
 /** A row as the reader sees it: labels for coded vars, dates in their time zone, the kind's texts in their locale. */
 function render(r: ReadRow, locale: AdminLocale, timeZone: string): NotificationItem {
-  const labels = labelsOf(notificationKind(r.kind));
-  const vars: MessageVars = {};
-  for (const [key, value] of Object.entries(r.vars ?? {})) {
-    const prefix = labels[key];
-    const label = prefix && typeof value === "string" ? messageOf(`${prefix}.${value}`, locale) : undefined;
-    vars[key] = label ?? displayVar(value, locale, timeZone);
-  }
-  const bodyKey = `notify.${r.kind}.body`;
+  const { title, body } = kindText(r.kind, labelsOf(notificationKind(r.kind)), r.vars, locale, timeZone, r.text);
   return {
     id: r.id,
     kind: r.kind,
     group: groupOf(r.kind),
     severity: r.severity,
-    title: t(`notify.${r.kind}.title`, vars, locale),
-    body: r.text ?? (messageOf(bodyKey, locale) !== undefined ? t(bodyKey, vars, locale) : null),
+    title,
+    body,
     // stored links were checked at write time; R1.0 rows are checked again with today's rule
     link: notifyLinkOk(r.link),
     createdAt: r.createdAt.toISOString(),

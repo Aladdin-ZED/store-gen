@@ -28,7 +28,13 @@
  *   - Store Health on the console side (step 3): `staleAfterMin` and the measured cycle, every PLA-§15.2 alarm code with
  *     its `console.attention.*` sentence and `console.alarm.*` label, `alarmsFrom` fixtures and the run state (raised
  *     once, recovered silently, the hour key), the live brand scan (store name / SEO title / policy text / nowhere, a
- *     5-character substring never live, the weekly key hashed), the console flags per code.
+ *     5-character substring never live, the weekly key hashed), the console flags per code;
+ *   - the queue and the lifecycle sheet (step 4): the tabs a row is listed in (snooze re-entry at query time, the hold
+ *     class out of the Fast lane), the counts, the SLA tile, keyset paging and search, the snooze times (platform time
+ *     zone, a DST change), the decisions' inputs, the grant check (`take_orders_locked`, a boost ≤ 90 days), every
+ *     console edge of lifecycle-rules.ts against T1's ALLOWED_TRANSITIONS (permission, ↑, audit, notification, dates),
+ *     the cooldown on a fake clock, `storeSees` per edge and locale, the console keys every refusal names, and the
+ *     sign-up admin chips.
  * Exits 1 on any failure.
  */
 import { readFileSync } from "node:fs";
@@ -1309,6 +1315,196 @@ async function main(): Promise<void> {
   checkD(!hflags.platformFlags(hfx.emptyHealthInputs({ store: hfx.fixtureStore({ status: "pending" }), review: { submittedAt: new Date(HNOW.getTime() - 23 * 3_600_000), status: "pending" } })).some((f) => f.code === "review_waiting"), "review_waiting: not before slaHours (24 h when unset)");
   checkD(hflags.platformFlags(hfx.emptyHealthInputs({ abuseReports: { new24h: 3, total: 9 } })).find((f) => f.code === "abuse_reports_new")?.severity === 2, "abuse_reports_new: 3 in 24 h → severity 2");
   checkD(hflags.platformFlags(hfx.emptyHealthInputs({ sheets: { pending: 0, oldestMin: null, lastRunFailedAt: new Date(HNOW.getTime() - 2 * HDAY) } })).length === 0, "sheets_error: a failed run older than an hour is quiet");
+
+  /* ---------------------------------------------------------------- */
+  /* Step 4: the queue's rules, the grant check, the lifecycle sheet's rules, sign-up admin (PLA-§3.3-§3.7, §8, §9.4) */
+  /* ---------------------------------------------------------------- */
+  const qr = await import("./queue-rules");
+  const lr = await import("./lifecycle-rules");
+  const lifecycle = await import("@/lib/tenancy/lifecycle");
+  const plansMod = await import("./plans");
+  const signupAdmin = await import("./signup-admin");
+  const { messageOf } = await import("@/lib/i18n/admin");
+  type QRow = import("./queue-rules").QueueIndexRow;
+  type LStatus = import("@/lib/tenancy/types").StoreStatus;
+  const QNOW = new Date("2026-10-29T10:00:00.000Z");
+  const QMIN = 60_000;
+  const QDAY = 86_400_000;
+  const qrow = (p: Partial<QRow>): QRow => ({
+    id: "01JQ0000000000000000000001",
+    storeId: "01JS0000000000000000000001",
+    kind: "signup",
+    status: "pending",
+    band: "fast",
+    score: 10,
+    codes: [],
+    snoozeUntil: null,
+    createdAt: new Date(QNOW.getTime() - 60 * QMIN),
+    submittedAt: null,
+    answeredAt: null,
+    decidedAt: null,
+    decidedBy: null,
+    storeName: "atlas argan",
+    handle: "atlas-argan",
+    email: "salma@gmail.com",
+    market: "MA",
+    ...p,
+  });
+  const tabs = (p: Partial<QRow>) => qr.tabsOf(qrow(p), QNOW).join();
+  checkD(tabs({}) === "review,fast", "queue tabs: a pending fast row is in Review and the Fast lane");
+  checkD(tabs({ codes: ["linked_banned"] }) === "review", "queue tabs: a hold-class flag keeps a fast row out of the Fast lane", tabs({ codes: ["linked_banned"] }));
+  checkD(tabs({ band: "hold" }) === "review,hold" && tabs({ band: "reject_candidate" }) === "review,hold" && tabs({ band: "review" }) === "review", "queue tabs: hold and reject_candidate rows are in Hold too");
+  checkD(tabs({ status: "snoozed", snoozeUntil: new Date(QNOW.getTime() + QMIN) }) === "snoozed", "queue tabs: a snooze before its time is Snoozed only");
+  checkD(tabs({ status: "snoozed", snoozeUntil: new Date(QNOW.getTime() - QMIN) }) === "review,fast", "queue tabs: a snooze past its time re-enters Review at query time");
+  checkD(tabs({ status: "needs_info" }) === "needs_info" && tabs({ status: "pending", answeredAt: QNOW }) === "review,fast", "queue tabs: Needs info waits on the seller; an answered row is back in Review");
+  checkD(tabs({ kind: "plan_change" }) === "requests" && tabs({ kind: "go_live" }) === "requests", "queue tabs: the other kinds are Requests, never the Fast lane");
+  checkD(tabs({ status: "approved", decidedAt: new Date(QNOW.getTime() - 10 * QDAY) }) === "decided" && tabs({ status: "rejected", decidedAt: new Date(QNOW.getTime() - 31 * QDAY) }) === "", "queue tabs: Decided keeps 30 days");
+  const counted = qr.tabCounts([qrow({}), qrow({ id: "01JQ0000000000000000000002", band: "hold" }), qrow({ id: "01JQ0000000000000000000003", kind: "limit_raise" }), qrow({ id: "01JQ0000000000000000000004", status: "needs_info" })], QNOW);
+  checkD(counted.review === 2 && counted.fast === 1 && counted.hold === 1 && counted.requests === 1 && counted.needs_info === 1 && counted.snoozed === 0 && counted.decided === 0, "queue tab counts", counted);
+  checkD(qr.inFastLane(qrow({}), QNOW) && !qr.inFastLane(qrow({ kind: "reopen", band: "review" }), QNOW) && !qr.inFastLane(qrow({ status: "needs_info" }), QNOW), "inFastLane: only a waiting fast review row without a hold flag (bulk approve's rule)");
+  // the SLA tile
+  const decidedRow = (id: string, minutes: number, by: string | null = "01JSTAFF000000000000000001") =>
+    qrow({ id, status: "approved", submittedAt: new Date(QNOW.getTime() - 2 * QDAY), decidedAt: new Date(QNOW.getTime() - 2 * QDAY + minutes * QMIN), decidedBy: by });
+  const sla = qr.slaTile([decidedRow("01JQ0000000000000000000011", 30), decidedRow("01JQ0000000000000000000012", 90), decidedRow("01JQ0000000000000000000013", 5, null), qrow({ createdAt: new Date(QNOW.getTime() - 192 * QMIN) })], QNOW, null);
+  checkD(sla.medianDecisionMin === 60 && sla.n === 2 && sla.oldestWaitingMin === 192 && sla.pastSla === null, "SLA tile: median of staff decisions (an automatic one is no sample), oldest waiting, no target → no past-SLA count", sla);
+  checkD(qr.slaTile([qrow({ createdAt: new Date(QNOW.getTime() - 25 * 60 * QMIN) })], QNOW, 24).pastSla === 1 && qr.slaTile([], QNOW, 24).medianDecisionMin === null, "SLA tile: rows past slaHours; no decision → no median");
+  // paging and search
+  const many = Array.from({ length: 5 }, (_, i) => qrow({ id: `01JQ000000000000000000010${i}`, createdAt: new Date(QNOW.getTime() - (10 - i) * QMIN) }));
+  const p1 = qr.pageOf(many, "review", {}, null, QNOW, 2);
+  const p2 = qr.pageOf(many, "review", {}, p1.next, QNOW, 2);
+  const p3 = qr.pageOf(many, "review", {}, p2.next, QNOW, 2);
+  checkD(p1.ids.join() === [many[0]!.id, many[1]!.id].join() && p2.ids.join() === [many[2]!.id, many[3]!.id].join() && p3.ids.join() === many[4]!.id && p3.next === null, "pageOf: oldest waiting first, keyset pages without overlap", { p1, p2, p3 });
+  checkD(
+    qr.matchesFilter(qrow({}), { q: "Atl" }) && qr.matchesFilter(qrow({}), { q: "@atlas" }) && qr.matchesFilter(qrow({}), { q: "SALMA@gmail.com" }) && !qr.matchesFilter(qrow({}), { q: "salma@" }) && !qr.matchesFilter(qrow({}), { q: "argan" }) && qr.matchesFilter(qrow({}), { q: "a" }),
+    "queue search: name or handle prefix, an exact e-mail only, under 2 characters ignored",
+  );
+  checkD(!qr.matchesFilter(qrow({}), { market: "TN" }) && qr.matchesFilter(qrow({}), { market: "MA" }), "queue filter: market");
+  // snooze times
+  checkD(qr.snoozeUntil("1h", QNOW, "Africa/Casablanca").getTime() === QNOW.getTime() + 60 * QMIN && qr.snoozeUntil("3d", QNOW, "Africa/Casablanca").getTime() === QNOW.getTime() + 3 * QDAY, "snooze: 1 h and 3 days");
+  const tomorrow = qr.snoozeUntil("tomorrow", QNOW, "Africa/Casablanca").toISOString();
+  checkD(tomorrow === "2026-10-30T08:00:00.000Z", "snooze: tomorrow 09:00 in the platform time zone (Casablanca, UTC+1)", tomorrow);
+  checkD(qr.snoozeUntil("tomorrow", new Date("2026-03-28T20:00:00.000Z"), "Europe/Paris").toISOString() === "2026-03-29T07:00:00.000Z", "snooze: tomorrow 09:00 across a DST change (Paris, CEST)");
+  // inputs (zod v4)
+  const ids51 = Array.from({ length: 51 }, (_, i) => `01JQ000000000000000000${String(i).padStart(4, "0")}`);
+  checkD(!qr.BulkApproveInput.safeParse({ reviewIds: ids51 }).success && qr.BulkApproveInput.safeParse({ reviewIds: ids51.slice(0, 50) }).success, "bulk approve: at most 50 ids");
+  checkD(!qr.AskInfoInput.safeParse({ reviewId: "01JQ0000000000000000000001", question: "x".repeat(501) }).success && !qr.AskInfoInput.safeParse({ reviewId: "01JQ0000000000000000000001", question: "   " }).success, "ask info: 1-500 characters once cleaned");
+  checkD(qr.cleanText(" a\u0007b\nc ") === "a b\nc" && qr.cleanText("ｆｕｌｌ") === "full", "plain text: NFKC, control characters out, newlines kept");
+  const ctxOk = qr.BusinessContextInput.safeParse({ sells: "  Argan oil ", link: null, whatsapp: "+212 6 61 23 45 67" });
+  checkD(ctxOk.success && ctxOk.data.sells === "Argan oil" && ctxOk.data.link === null && ctxOk.data.whatsapp === "+212661234567", "business context: trimmed, the WhatsApp number normalised to E.164", ctxOk);
+  checkD(!qr.BusinessContextInput.safeParse({ sells: null, link: null, whatsapp: "0661234567" }).success && !qr.BusinessContextInput.safeParse({ sells: "x".repeat(201), link: null, whatsapp: null }).success, "business context: a local number and a 201-character field refused");
+  const reqParsed = qr.ReviewRequestSchema.safeParse({ kind: "limit_raise", key: "media_bytes", used: 90, limit: 100, asked: 200, message: null, storeId: "01JS0000000000000000000009" });
+  checkD(reqParsed.success && !("storeId" in reqParsed.data), "store request: unknown keys (a store id) are dropped");
+  checkD(!qr.ReviewRequestSchema.safeParse({ kind: "limit_raise", key: "not_a_key", used: 1, limit: 1, asked: 2, message: null }).success, "store request: an unknown entitlement key refused");
+  checkD(qr.approveNeedsNote("hold") && qr.approveNeedsNote("reject_candidate") && !qr.approveNeedsNote("fast") && !qr.approveNeedsNote("review"), "approve: a note for hold and reject_candidate");
+  checkD(
+    qr.resolvePermission("plan_change") === "entitlements.override" && qr.resolvePermission("limit_raise") === "entitlements.override" && qr.resolvePermission("go_live") === "signups.decide" && qr.resolvePermission("mode_change") === "signups.decide" && qr.resolvePermission("domain") === "signups.decide",
+    "resolve: plan and limit requests need entitlements.override",
+  );
+  checkD(!qr.GrantSpecSchema.safeParse({ kind: "boost", key: "nope", value: 1 }).success && qr.GrantSpecSchema.safeParse({ kind: "plan", planId: "growth" }).success, "GrantSpec: known keys only");
+  for (const r of qr.REJECT_REASONS) checkD(typeof (enConsole as Record<string, string>)[`console.reject.${r}`] === "string", `console.reject.${r} has a staff label`);
+
+  // plans: the grant check of an override or boost (PLA-§9.4, PD8)
+  type GrantIn = Parameters<typeof plansMod.checkEntitlementGrant>[0];
+  const gc = (p: Partial<GrantIn>) => {
+    const r = plansMod.checkEntitlementGrant({ key: "media_bytes", source: "boost", value: 2048, expiresAt: new Date(QNOW.getTime() + 7 * QDAY), reason: "Launch week", ...p }, QNOW);
+    return r.ok ? "ok" : r.code;
+  };
+  checkD(gc({}) === "ok" && gc({ source: "override", expiresAt: null }) === "ok" && gc({ source: "override", value: null, expiresAt: null }) === "ok", "grant check: a boost with an expiry, an override without one, unlimited");
+  checkD(gc({ key: "take_orders", value: false }) === "take_orders_locked" && gc({ key: "take_orders", value: true }) === "ok", "grant check: take_orders false is refused (take_orders_locked)");
+  checkD(gc({ expiresAt: null }) === "boost_expiry_required" && gc({ expiresAt: new Date(QNOW.getTime() + 91 * QDAY) }) === "boost_too_long" && gc({ expiresAt: new Date(QNOW.getTime() - QMIN) }) === "expiry_past", "grant check: a boost expires within 90 days, never in the past");
+  checkD(gc({ value: -1 }) === "value_type" && gc({ value: 1.5 }) === "value_type" && gc({ value: true }) === "value_type" && gc({ key: "sheets", value: 3 }) === "value_type", "grant check: a limit is a whole number ≥ 0 or unlimited, a feature a boolean");
+  checkD(gc({ reason: "  " }) === "reason_length" && gc({ reason: "x".repeat(201) }) === "reason_length", "grant check: a reason of 1-200 characters");
+  for (const code of ["value_type", "boost_expiry_required", "expiry_past", "boost_too_long", "reason_length", "expiry_invalid"]) checkD(typeof (enConsole as Record<string, string>)[`console.entitlement.${code}`] === "string", `console.entitlement.${code} has a sentence`);
+
+  // the lifecycle sheet's rules against T1's edge table (the preview and the action decide with them)
+  const ALL_STATUSES: readonly LStatus[] = ["pending", "active", "restricted", "suspended", "closed", "scheduled_deletion", "purged", "rejected"];
+  let edgesChecked = 0;
+  for (const from of ALL_STATUSES) {
+    for (const to of ALL_STATUSES) {
+      if (from === to) continue;
+      const action = lr.lifecycleActionOf(from, to);
+      const edge = lifecycle.findEdge(from, to);
+      if (action && action !== "purge") {
+        edgesChecked++;
+        const req = lr.requirementsOf(action);
+        checkD(edge?.staff && edge.staff.permission === req.permission && edge.staff.stepUp === req.stepUp, `lifecycle ${from} → ${to} (${action}): the permission and ↑ of ALLOWED_TRANSITIONS`, { edge: edge?.staff, req });
+        const writes = lr.writesOf(from, to);
+        checkD(writes && edge && writes.audit === edge.audit.staff && writes.notification === edge.notify, `lifecycle ${from} → ${to}: the audit action and the one notification of the edge`, { writes, edge: edge?.audit });
+      } else if (edge?.staff && to !== "purged") {
+        checkD(lr.isQueueEdge(from, to), `lifecycle ${from} → ${to}: a staff edge without a console action is the queue's`);
+      }
+    }
+  }
+  checkD(edgesChecked === 16, "lifecycle: 16 console edges (restrict, suspend ×2, restore ×3, close ×4, reopen ×4 targets, deletion, cancel) map onto T1's table", edgesChecked);
+  checkD(lr.lifecycleActionOf("closed", "purged") === "purge" && lr.lifecycleActionOf("active", "purged") === null && lr.lifecycleActionOf("pending", "active") === null, "lifecycle: purge only from closed / scheduled_deletion; approve is not a console action");
+  checkD(
+    lr.REQUIREMENTS.restrict.reasons === reasons.RESTRICT_REASONS &&
+      lr.REQUIREMENTS.suspend.reasons === reasons.SUSPEND_REASONS &&
+      lr.REQUIREMENTS.close.reasons === reasons.CLOSE_REASONS &&
+      lr.REQUIREMENTS.schedule_deletion.reasons === reasons.DELETION_REASONS &&
+      lr.REQUIREMENTS.purge.reasons === reasons.PURGE_REASONS &&
+      lr.REQUIREMENTS.reopen.reasons === reasons.RESTORE_REASONS,
+    "lifecycle: each action offers its PLA-§8.2 reason list",
+  );
+  const typed = (a: import("./lifecycle-rules").LifecycleAction) => lr.REQUIREMENTS[a].typedHandle;
+  checkD(typed("suspend") && typed("close") && typed("schedule_deletion") && typed("purge") && !typed("restrict") && !typed("restore") && !typed("reopen") && !typed("cancel_deletion") && !lr.REQUIREMENTS.restrict.stepUp, "lifecycle: the typed handle of the PLA-§8.1 table; restrict stays light (no ↑, no typed confirmation)");
+  checkD(lr.typedHandleMatches(" @Atlas-Argan ", "atlas-argan") && !lr.typedHandleMatches("atlas", "atlas-argan") && !lr.typedHandleMatches("x", null) && !lr.typedHandleMatches(undefined, "atlas-argan"), "typed handle: trimmed, case-folded, '@' optional, exact");
+  // the cooldown on a fake clock (PD54)
+  const changed = new Date(QNOW.getTime() - 4 * QMIN);
+  const cd = lr.cooldownState(changed, QNOW, 10);
+  checkD(cd.inside && cd.minutesAgo === 4 && cd.until?.getTime() === changed.getTime() + 10 * QMIN, "cooldown: a change 4 minutes ago is inside a 10-minute window", cd);
+  checkD(!lr.cooldownState(new Date(QNOW.getTime() - 10 * QMIN), QNOW, 10).inside && !lr.cooldownState(null, QNOW, 10).inside && !lr.cooldownState(changed, QNOW, 0).inside, "cooldown: over at 10 minutes, never for a store that never changed, off at 0");
+  checkD(lr.typedHandleRequired("restrict", { inside: true }) && !lr.typedHandleRequired("restrict", { inside: false }) && lr.typedHandleRequired("suspend", { inside: false }), "cooldown: inside it, even restrict needs the typed handle");
+  // the dates the transition writes (lifecycle.ts transitionColumns)
+  const row0 = { closedAt: new Date(QNOW.getTime() - 3 * QDAY), purgeAfter: new Date(QNOW.getTime() + 27 * QDAY) };
+  const datePairs: [LStatus, LStatus][] = [["active", "closed"], ["pending", "closed"], ["closed", "active"], ["closed", "scheduled_deletion"], ["scheduled_deletion", "closed"], ["active", "restricted"]];
+  for (const [from, to] of datePairs) {
+    const cols = lifecycle.transitionColumns(from, to, QNOW, { userId: null });
+    const want = lr.predictedDates(from, to, QNOW, row0);
+    const colClosed = "closed_at" in cols ? (cols.closed_at as Date | null) : row0.closedAt;
+    const colPurge = "purge_after" in cols ? (cols.purge_after as Date | null) : row0.purgeAfter;
+    checkD((want.closedAt?.getTime() ?? null) === (colClosed?.getTime() ?? null) && (want.purgeAfter?.getTime() ?? null) === (colPurge?.getTime() ?? null), `predictedDates ${from} → ${to} = what transitionStore writes`, { want, cols });
+  }
+  // what the store sees, per edge and locale (PLA-§8.0: "rendered from shell.* keys in the store's default locale")
+  checkD(lr.pagesOf("active", false) === "live" && lr.pagesOf("restricted", true) === "live" && lr.pagesOf("suspended", false) === "neutral_404" && lr.pagesOf("suspended", true) === "neutral_503" && lr.pagesOf("closed", true) === "neutral_404", "public pages per state (core §A.5.3, D32)");
+  checkD(lr.ordersOf("active") === "open" && lr.ordersOf("restricted") === "unavailable" && lr.ordersOf("pending") === "unavailable" && lr.ordersOf("suspended") === "refused" && lr.ordersOf("closed") === "refused", "public orders per state (core §A.5.3)");
+  const sees = (status: LStatus, from: LStatus, locale: "ar" | "fr" | "en", reason: string, dates: { closedAt?: Date; purgeAfter?: Date } = {}, suspendNotice = false) =>
+    lr.storeSeesFor({ from, status, reason, closedAt: dates.closedAt ?? null, purgeAfter: dates.purgeAfter ?? null, suspendNotice, locale, timeZone: "Africa/Casablanca", notification: { title: "T", body: "B" } });
+  const in30 = new Date(QNOW.getTime() + 30 * QDAY);
+  for (const locale of ["ar", "fr", "en"] as const) {
+    const shellKey = messageOf("shell.banner.restricted", locale) !== undefined;
+    const r = sees("restricted", "active", locale, "fake_orders");
+    const reasonText = (shellKey ? (messageOf("shell.status_reason.fake_orders", locale) ?? messageOf("notify.reason.fake_orders", locale)) : messageOf("notify.reason.fake_orders", "en")) ?? "?";
+    checkD(r.banner?.includes(reasonText) && r.publicPages === "unchanged" && r.publicOrders === "unavailable" && r.locale === locale && r.fallback === !shellKey, `storeSees restrict (${locale}): the banner with the reason sentence, pages unchanged, orders unavailable`, r);
+    const s = sees("suspended", "active", locale, "phishing", {}, true);
+    checkD(s.publicPages === "neutral_503" && s.publicOrders === "refused" && !!s.banner, `storeSees suspend with the notice (${locale}): the neutral 503`, s);
+    const c = sees("closed", "active", locale, "owner_request", { closedAt: QNOW, purgeAfter: in30 });
+    const cLocale = messageOf("shell.banner.closed", locale) !== undefined ? locale : "en";
+    checkD(c.banner?.includes(lr.storeDay(QNOW, cLocale, "Africa/Casablanca")) && c.banner.includes(lr.storeDay(in30, cLocale, "Africa/Casablanca")) && c.publicPages === "neutral_404", `storeSees close (${locale}): closed today, reopen until +30 days`, c);
+    checkD(!/[٠-٩]/.test(lr.storeDay(QNOW, locale, "Africa/Casablanca")), `storeSees dates in ${locale} use Latin digits`);
+    const back = sees("active", "suspended", locale, "issue_resolved");
+    checkD(back.banner === null && back.publicPages === "live" && back.publicOrders === "open" && back.title === "T", `storeSees restore (${locale}): no banner, pages live again, orders open`, back);
+  }
+  const deletionDay = new Date("2026-10-30T10:00:00.000Z");
+  const del = lr.storeSeesFor({ from: "closed", status: "scheduled_deletion", reason: "retention", closedAt: QNOW, purgeAfter: deletionDay, suspendNotice: false, locale: "en", timeZone: "Africa/Casablanca", notification: null });
+  checkD(del.banner?.includes(lr.storeDay(deletionDay, "en", "Africa/Casablanca")) && del.title === null, "storeSees schedule deletion: the page names the deletion day", del);
+  checkD(lr.storeLocaleOf("fr") === "fr" && lr.storeLocaleOf("de") === "ar" && lr.storeLocaleOf(null) === "ar", "the store's locale: ar / fr / en, else the platform default ar");
+  if (messageOf("shell.status_reason.fake_orders", "en") === undefined) {
+    skips.push("lifecycle storeSees in the store's locale: shell.banner.* / shell.status_reason.* are P2's keys, not on r1/p1 yet; the PLA-§N.2 English texts stand in (fallback: true)");
+  }
+
+  // the keys this step's modules answer with exist (a refusal never shows a raw key)
+  const stepFiles = ["queue.ts", "queue-rules.ts", "plans.ts", "platform-requests.ts", "requests.ts", "lifecycle-rules.ts", "lifecycle-preview.ts", "lifecycle-actions.ts", "signup-admin.ts"];
+  const usedKeys = new Set<string>();
+  for (const f of stepFiles) for (const m of source(`src/lib/platform/${f}`).matchAll(/"(console\.[a-z_]+\.[a-z_.]+)"/g)) usedKeys.add(m[1]!);
+  const missingKeys = [...usedKeys].filter((k) => !(k in enConsole));
+  checkD(usedKeys.size >= 30 && missingKeys.length === 0, `every console.* key the queue, plans, requests and lifecycle modules answer with is in en/console.ts (${usedKeys.size})`, missingKeys);
+
+  // sign-up admin
+  const inv = (p: Partial<{ uses: number; usesMax: number; expiresAt: Date | null; revokedAt: Date | null }>) => signupAdmin.inviteStateOf({ uses: 0, usesMax: 1, expiresAt: null, revokedAt: null, ...p }, QNOW);
+  checkD(inv({}) === "active" && inv({ uses: 1 }) === "used_up" && inv({ expiresAt: QNOW }) === "expired" && inv({ revokedAt: QNOW, uses: 1, expiresAt: QNOW }) === "revoked" && inv({ uses: 3, usesMax: 10 }) === "active", "invite code state chips: revoked > expired > used up > active");
+  checkD(eq(signupAdmin.waitlistSourceOf("cap:2026-10-29"), { kind: "daily_cap", day: "2026-10-29" }) && eq(signupAdmin.waitlistSourceOf("utm:facebook"), { kind: "label", label: "utm:facebook" }) && signupAdmin.waitlistSourceOf(null) === null, "waitlist source: the daily-cap chip for cap:<day>");
+  checkD(signupAdmin.waitlistLabel(new Date("2026-10-29T23:30:00.000Z")) === "Waitlist 2026-10-30", "waitlist codes are labelled with the platform day (Casablanca)");
 
   const ms = Math.round(performance.now() - t0);
   for (const s of skips) console.log(`  SKIP ${s}`);

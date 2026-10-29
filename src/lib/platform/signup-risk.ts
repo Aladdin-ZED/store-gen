@@ -213,7 +213,8 @@ function inputsOf(input: SignupRiskInput, emailDomain: string, phoneCountry: str
   };
 }
 
-function phoneCountryOf(phone: string | null): string | null {
+/** The country of an E.164 number ("+212…" → "MA"), or null. */
+export function phoneCountryOf(phone: string | null): string | null {
   if (!phone) return null;
   try {
     return parsePhoneNumberFromString(phone)?.country ?? null;
