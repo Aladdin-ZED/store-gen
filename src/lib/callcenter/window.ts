@@ -265,6 +265,11 @@ export function storeYmd(d: Date, tz: string): string {
   return ymdOf(d.getTime(), tz);
 }
 
+/** The store-local hour (0-23) of `d` in `tz` (the attempt table's cells, OD44). */
+export function storeHour(d: Date, tz: string): number {
+  return wall(d.getTime(), tz)[3];
+}
+
 /** `ymd` plus `n` calendar days. */
 export function addDaysYmd(ymd: string, n: number): string {
   return addDays(ymd, n);

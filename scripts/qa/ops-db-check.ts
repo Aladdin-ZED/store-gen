@@ -1,4 +1,4 @@
-// proves: OP-01, OP-02, OP-04, OP-06, SF-05
+// proves: OP-01, OP-02, OP-03, OP-04, OP-06, OP-07, OP-14, SF-05
 /**
  * `test:ops-db` (P4 CALL CENTER; operations.md OPE-§O.2, §O.4; docs/STORE-SAAS.md §J.2): the call centre against a
  * real MariaDB. Creates a throwaway `cod_test_p4_opsdb_*` database on XAMPP's MariaDB (root, no password,
@@ -19,6 +19,12 @@
  *                exhaustion under `close` and `keep_open` (OPE-§6.3), the callback horizon (`bad_due`) and its
  *                outside-window warning, the coded reasons, fake + block, duplicate rules, the hold, the delivery
  *                lane's five outcomes (OD48), an inbound confirmation of an unreachable order (OD53)
+ *   hot path     (OP-03, OP-07, OP-14, OD53) OPE-§5.7 acceptance (b) and (c): the inbound lookup is the agent's
+ *                visibility (an unreachable customer calling back is confirmed by the agent who picked up, a second
+ *                agent without a lookup gets not_found), the 61st lookup in an hour is refused and counted; the reveal
+ *                (who may, exactly one phone_revealed per reveal and none on a replay, WhatsApp's whatsapp_sent, the
+ *                lease renewal, another store's template); riskBandOutcomes null below 30 decided and exact above;
+ *                attemptStats in store-local cells; the queue card from its reads; a stale card's fresh copy
  *   masking      (OD61) every read function of this step masks under an impersonation scope and is the identity
  *                under a member scope (canaries)
  */
@@ -587,11 +593,13 @@ async function main(): Promise<number> {
     const ft = row1.firstTouchAt!.getTime();
     await record(agent, o1, { outcome: "no_answer" });
     eq("first_touch_at is set once", (await rowOf(o1)).firstTouchAt?.getTime(), ft);
-    eq("expectRev from an older card: conflict with the fresh state", data(await O.recordOutcome(agent, { orderId: o1, expectRev: 0, channel: "call", outcome: "no_answer", idem: randomUUID() })), {
+    const staleCard = data(await O.recordOutcome(agent, { orderId: o1, expectRev: 0, channel: "call", outcome: "no_answer", idem: randomUUID() }));
+    eq("expectRev from an older card: conflict with the fresh state", staleCard && !staleCard.ok ? { ok: staleCard.ok, error: staleCard.error, current: staleCard.current } : staleCard, {
       ok: false,
       error: "conflict",
       current: { rev: (await rowOf(o1)).rev, states: { confirm: "attempting", ship: "none", money: "unpaid" }, status: "no_answer" },
     });
+    ok("… with the order's fresh card (its rev), and no other member named (the agent wrote it)", !!staleCard && !staleCard.ok && staleCard.card?.rev === (await rowOf(o1)).rev && staleCard.updatedBy === null, staleCard && !staleCard.ok && { card: staleCard.card?.rev, updatedBy: staleCard.updatedBy });
 
     // busy / switched_off: the first in a row after busyRetryMinutes, the next on the ladder
     const o2 = await held(agent);
@@ -726,6 +734,191 @@ async function main(): Promise<number> {
   }
 
   /* ================================================================ */
+  section = "hot path";
+  {
+    const O = load<typeof import("@/lib/callcenter/outcomes")>("@/lib/callcenter/outcomes");
+    const I = load<typeof import("@/lib/callcenter/inbound")>("@/lib/callcenter/inbound");
+    const R = load<typeof import("@/lib/callcenter/reveal")>("@/lib/callcenter/reveal");
+    const G = load<typeof import("@/lib/callcenter/aggregates")>("@/lib/callcenter/aggregates");
+    const K = load<typeof import("@/lib/callcenter/card")>("@/lib/callcenter/card");
+    type OutcomeInput = import("@/lib/callcenter/outcomes").OutcomeInput;
+    const member = async (label: string, role: StoreRole) => {
+      const u = person(label);
+      await db.insert(S.users).values(u);
+      await db.insert(S.storeMembers).values({ storeId: STORE_A, userId: u.id, role });
+      return { u, ctx: ctxOf("A", u, role) };
+    };
+    const { u: u3, ctx: agent3 } = await member("Agent-Three", "agent");
+    const { u: u4, ctx: agent4 } = await member("Agent-Four", "agent");
+    const record = async (ctx: WriteCtx, id: string, input: Partial<OutcomeInput> & { outcome: OutcomeInput["outcome"] }) =>
+      O.recordOutcome(ctx, { orderId: id, expectRev: (await rowOf(id)).rev, channel: "call", idem: randomUUID(), ...input });
+    const errorOf = (r: Awaited<ReturnType<typeof record>>) => (r.ok ? (r.data.ok ? "ok" : r.data.error) : `action:${r.error}`);
+    const national = (e164: string) => `0${e164.slice(4)}`;
+
+    // inbound (OPE-§5.7 acceptance b): the lookup is the agent's visibility
+    const p1 = freshPhone();
+    const u2 = await order(A, { phone: p1, name: "Hind Tazi" });
+    await T.transitionOrder(system, A, { orderId: u2, want: { confirm: "unreachable" }, source: "system", reason: "attempts_exhausted" });
+    const closed = await order(A, { phone: p1, name: "Hind Tazi" });
+    await T.transitionOrder(T.actorFrom(owner), A, { orderId: closed, want: { confirm: "cancelled" }, source: "ui", reason: "other" });
+    eq("inbound: fewer than 8 digits → too_short", await I.inboundLookup(agent3, "06 12 34 5"), { ok: false, error: "too_short" });
+    const look = await I.inboundLookup(agent3, national(p1));
+    const lo = look.ok ? look.data : null;
+    ok(
+      "inbound: the caller's open order (unreachable is open), the closed one as a count, the first name",
+      !!lo && lo.orders.map((o) => o.id).join() === u2 && lo.otherOrders === 1 && lo.customer?.firstName === "Hind" && lo.customer.history?.orders === 2,
+      look,
+    );
+    ok("inbound: unreachable is not claimable (no lane), nobody holds it", !!lo && lo.orders[0]!.callable === false && lo.orders[0]!.lane === null && lo.orders[0]!.held === null && lo.orders[0]!.status === "unreachable", lo?.orders);
+    ok("inbound: the phone leaves masked only", !!lo && lo.customer!.phoneMasked.includes("•") && !JSON.stringify(look).includes(p1.slice(4)), lo?.customer);
+    eq("inbound: a second agent without a lookup → not_found", errorOf(await record(agent2, u2, { outcome: "confirmed", inbound: true })), "not_found");
+    eq("inbound: the looked-up order confirmed by the agent who picked up", errorOf(await record(agent3, u2, { outcome: "confirmed", inbound: true })), "ok");
+    const u2row = await rowOf(u2);
+    const moved = (await eventsOf(u2, "state_changed")).filter((e) => e.toState === "confirmed");
+    eq(
+      "… confirmed_by and first_touch_at set, the move and the attempt marked inbound, decided by that agent",
+      [u2row.confirmState, u2row.confirmedBy, !!u2row.firstTouchAt, moved.map((e) => [e.actorId, (e.meta as { inbound?: true }).inbound]), (await eventsOf(u2, "call_attempt")).map((e) => (e.meta as { inbound?: true }).inbound)],
+      ["confirmed", u3.id, true, [[u3.id, true]], [true]],
+    );
+    eq("inbound: a number no customer has → the empty shape", await I.inboundLookup(agent3, national(freshPhone())), { ok: true, data: { customer: null, orders: [], otherOrders: 0 } });
+    eq("inbound: a number of no market → the empty shape", await I.inboundLookup(agent3, "99999999"), { ok: true, data: { customer: null, orders: [], otherOrders: 0 } });
+    eq("inbound: store B looking up A's customer → the empty shape", await I.inboundLookup(ownerBCtx, national(p1)), { ok: true, data: { customer: null, orders: [], otherOrders: 0 } });
+    const held = await order(A, { phone: p1, name: "Hind Tazi" });
+    await db.update(S.orders).set({ assigneeId: U.agentA.id, claimToken: "tok-held", leaseUntil: new Date(Date.now() + 600_000) }).where(deq(S.orders.id, held));
+    const look2 = await I.inboundLookup(agent3, `+${p1.slice(1)}`);
+    const h = look2.ok ? look2.data.orders.find((o) => o.id === held) : undefined;
+    ok("inbound: another agent's active claim shows who holds it and until when; a new order is claimable", !!h && h.callable && h.lane === "confirm" && h.held?.by === "Agent" && !!h.held.until, h);
+
+    // inbound (acceptance c): the 61st lookup in an hour is refused and the board sees 61
+    for (let i = 0; i < 60; i++) await I.inboundLookup(agent4, national(p1));
+    eq("inbound: the 61st lookup in an hour → rate_limited", await I.inboundLookup(agent4, national(p1)), { ok: false, error: "rate_limited" });
+    await I.inboundLookup(agent4, "06 12");
+    eq("inbound: the board's hourly count includes the refusal (61), too_short costs nothing", await I.inboundLookupsThisHour(A, [u4.id, U.ownerA.id]), { [u4.id]: 61, [U.ownerA.id]: 0 });
+
+    // the reveal (OP-07): exactly one phone_revealed per reveal, none on a replay
+    const pr = freshPhone();
+    const rv = await order(A, { phone: pr });
+    const key = randomUUID();
+    const r1 = await R.revealPhone(owner, rv, "call", { idem: key });
+    const { parsePhoneNumberFromString } = load<typeof import("libphonenumber-js/max")>("libphonenumber-js/max");
+    eq("reveal (owner, any order): e164, national, tel, wa", r1, { ok: true, data: { e164: pr, national: parsePhoneNumberFromString(pr)!.formatNational(), tel: `tel:${pr}`, wa: `https://wa.me/${pr.slice(1)}` } });
+    eq("reveal: a replay answers the same", await R.revealPhone(owner, rv, "call", { idem: key }), r1);
+    eq("reveal: exactly one phone_revealed (meta why), none for the replay", (await eventsOf(rv, "phone_revealed")).map((e) => [e.actorId, e.meta]), [[U.ownerA.id, { why: "call" }]]);
+    eq("reveal: the same key with another reason → invalid, no event", [await R.revealPhone(owner, rv, "view", { idem: key }), (await eventsOf(rv, "phone_revealed")).length], [{ ok: false, error: "invalid" }, 1]);
+    eq("reveal: an agent who never held the order → not_found", await R.revealPhone(agent3, rv, "call"), { ok: false, error: "not_found" });
+    await db.update(S.orders).set({ assigneeId: u3.id, claimToken: "tok-rv", leaseUntil: new Date(Date.now() + 60_000) }).where(deq(S.orders.id, rv));
+    await E.appendEvents(db, A, [{ orderId: rv, actorKind: "user", actorId: u3.id, type: "claimed", meta: { leaseUntil: new Date(Date.now() + 60_000).toISOString() } }]);
+    const r3 = await R.revealPhone(agent3, rv, "view");
+    const ops = await getStoreSetting(A, "ops");
+    ok("reveal: the claim holder → ok, and the lease renewed to now + leaseMinutes", r3.ok && ((await rowOf(rv)).leaseUntil?.getTime() ?? 0) > Date.now() + (ops.leaseMinutes - 1) * 60_000, [r3, (await rowOf(rv)).leaseUntil]);
+    await db.update(S.orders).set({ assigneeId: null, claimToken: null, leaseUntil: null }).where(deq(S.orders.id, rv));
+    ok("reveal: released, held in the last 30 minutes (OD60) → ok", (await R.revealPhone(agent3, rv, "whatsapp")).ok);
+    const realNow = Date.now;
+    Date.now = () => realNow.call(Date) + 31 * 60_000;
+    try {
+      eq("reveal: held 31 minutes ago → not_found", await R.revealPhone(agent3, rv, "call"), { ok: false, error: "not_found" });
+      await db.update(S.orders).set({ confirmState: "callback", assigneeId: u3.id, dueAt: new Date(Date.now() + 3_600_000) }).where(deq(S.orders.id, rv));
+      ok("reveal: the callback's owner → ok", (await R.revealPhone(agent3, rv, "call")).ok);
+    } finally {
+      Date.now = realNow;
+    }
+    const before = (await eventsOf(rv)).length;
+    const wa = await R.revealPhone(owner, rv, "whatsapp", { templateId: "builtin:wa:confirm" });
+    ok("reveal (WhatsApp, built-in template): the wa.me link (no text while P5's renderer is its stub)", wa.ok && wa.data.wa.startsWith(`https://wa.me/${pr.slice(1)}`), wa);
+    eq("… phone_revealed and whatsapp_sent", (await eventsOf(rv)).slice(before).map((e) => [e.type, e.meta]), [
+      ["phone_revealed", { why: "whatsapp" }],
+      ["whatsapp_sent", { template: "builtin:wa:confirm", locale: "fr" }],
+    ]);
+    const tplB = newId();
+    await db.insert(S.messageTemplates).values({ id: tplB, storeId: STORE_B, channel: "whatsapp", kind: "custom", locale: "fr", name: "B", body: "Bonjour {customer_first_name}" });
+    const n0 = (await eventsOf(rv)).length;
+    eq("reveal: another store's template id → not_found, nothing written", [await R.revealPhone(owner, rv, "whatsapp", { templateId: tplB }), (await eventsOf(rv)).length], [{ ok: false, error: "not_found" }, n0]);
+    eq("reveal: a template id outside the list → invalid", await R.revealPhone(owner, rv, "whatsapp", { templateId: "builtin:wa:refund" }), { ok: false, error: "invalid" });
+    eq("reveal: an impersonation scope → forbidden", await R.revealPhone(viewAs as WriteCtx, rv, "call"), { ok: false, error: "forbidden" });
+    eq("reveal: another store's order → not_found", await R.revealPhone(ownerBCtx, rv, "call"), { ok: false, error: "not_found" });
+
+    // the store calibration (OD39, OP-14): null below 30 decided orders of the band, exact from 30
+    const STORE_C = "0P4C0000000000000000000003";
+    await db.insert(S.stores).values({ id: STORE_C, handle: "ops-c", name: "OPS-C", status: "active", brandSeed: "0123456789abcdef" });
+    const Cs = mintScope("member", STORE_C) as WriteScope;
+    const decided = async (n: number, risk: number, state: "confirmed" | "cancelled" | "fake" | "unreachable" | "duplicate" | "new", o: { test?: boolean; flags?: string[]; daysAgo?: number } = {}) => {
+      for (let i = 0; i < n; i++) {
+        const id = await order(Cs, { test: o.test, flags: o.flags });
+        await db
+          .update(S.orders)
+          .set({ riskScore: risk, confirmState: state, ...(o.daysAgo ? { createdAt: new Date(Date.now() - o.daysAgo * 86_400_000) } : {}) })
+          .where(deq(S.orders.id, id));
+      }
+    };
+    await decided(10, 55, "fake");
+    await decided(5, 60, "cancelled");
+    await decided(4, 69, "unreachable");
+    await decided(10, 50, "confirmed");
+    // never counted: a test order, a honeypot, a duplicate, an open order, an order of 100 days ago, a low score
+    await decided(1, 55, "fake", { test: true });
+    await decided(1, 55, "fake", { flags: ["honeypot"] });
+    await decided(1, 55, "duplicate");
+    await decided(1, 55, "new");
+    await decided(1, 55, "fake", { daysAgo: 100 });
+    await decided(1, 40, "fake");
+    G.forgetOpsAggregates(Cs);
+    eq("calibration: 29 decided orders in the band → null", await G.riskBandOutcomes(Cs), { check: null, high: null });
+    await decided(1, 52, "confirmed");
+    eq("calibration: still the cached hour", (await G.riskBandOutcomes(Cs)).check, null);
+    G.forgetOpsAggregates(Cs);
+    eq("calibration: 30 decided → exact (19 fake + cancelled + unreachable of 30 = 6,333 bp)", await G.riskBandOutcomes(Cs), { check: { band: "check", decided: 30, bad: 19, badShareBp: 6333 }, high: null });
+
+    // attemptStats (OD44): store-local (ISO weekday, hour), contacted = not no_answer / busy / switched_off
+    const [cOrder] = await db.select({ id: S.orders.id }).from(S.orders).where(and(deq(S.orders.storeId, STORE_C), deq(S.orders.isTest, false))).limit(1);
+    const [cTest] = await db.select({ id: S.orders.id }).from(S.orders).where(and(deq(S.orders.storeId, STORE_C), deq(S.orders.isTest, true))).limit(1);
+    const at = new Date(Date.now() - 7 * 86_400_000);
+    at.setUTCMinutes(20, 0, 0);
+    const attempt = (orderId: string, code: string, when: Date) => ({ orderId, actorKind: "user" as const, actorId: U.agentA.id, type: "call_attempt" as const, reasonCode: code, meta: { channel: "call", outcome: code, attemptNo: 1 }, at: when });
+    await E.appendEvents(db, Cs, [
+      ...Array.from({ length: 20 }, () => attempt(cOrder!.id, "no_answer", at)),
+      ...Array.from({ length: 5 }, () => attempt(cOrder!.id, "busy", at)),
+      ...Array.from({ length: 12 }, () => attempt(cOrder!.id, "confirmed", at)),
+      attempt(cOrder!.id, "callback", at),
+      attempt(cTest!.id, "confirmed", at),
+      attempt(cOrder!.id, "confirmed", new Date(Date.now() - 100 * 86_400_000)),
+    ]);
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "Africa/Casablanca", weekday: "short", hour: "2-digit", hourCycle: "h23" }).formatToParts(at).map((p) => [p.type, p.value]));
+    const wd = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(parts.weekday!) + 1;
+    eq("attemptStats: one cell at the store-local weekday and hour, test and 90-day-old attempts left out", await G.attemptStats(Cs), [{ weekday: wd, hour: Number(parts.hour), attempts: 38, contacted: 13 }]);
+    eq("bestHourOf: the cell with ≥ 30 attempts", G.bestHourOf(await G.attemptStats(Cs), wd), { weekday: wd, hour: Number(parts.hour), attempts: 38, contacted: 13 });
+
+    // the card (OPE-§5.3): built from the row and its reads
+    const pc = freshPhone();
+    const c1 = await order(A, { phone: pc, name: "Nadia Berrada", note: "porte bleue" });
+    const c2 = await order(A, { phone: pc, name: "Nadia Berrada" });
+    const c2row = await rowOf(c2);
+    const tplA = newId();
+    await db.insert(S.messageTemplates).values({ id: tplA, storeId: STORE_A, channel: "whatsapp", kind: "confirm", locale: "fr", name: "Confirmation maison", body: "Bonjour {customer_first_name}, commande {order_id}." });
+    const scriptA = newId();
+    await db.insert(S.messageTemplates).values({ id: scriptA, storeId: STORE_A, channel: "call_script", kind: "script", locale: "fr", name: "Script", body: JSON.stringify({ v: 1, steps: [{ id: "hello", title: "Bonjour", say: "Bonjour {customer_first_name}." }] }) });
+    const card = await K.buildQueueOrder(A, (await K.cardRow(A, c2))!, owner, { leaseUntil: null, mine: false, maxCalls: 3 });
+    ok("card: the customer's counters, the masked phone, the address and note for the call", card.customer.history?.orders === 2 && card.customer.phoneMasked.includes("•") && card.customer.firstName === "Nadia" && card.customer.address === "Hay Salam 12", card.customer);
+    eq("card: the other open order of the phone is a possible duplicate", card.duplicates.map((d) => [d.id, d.status]), [[c1, "new"]]);
+    eq("card: the store's own confirm template replaces the built-in", card.templates.map((x) => x.id), [tplA, "builtin:wa:missed_call", "builtin:wa:address"]);
+    eq(
+      "card: the store-wide script row is picked; its text waits for P5's renderer (unavailable, no step)",
+      [card.script.source, card.script.templateId, card.script.locale, card.script.unavailable, card.script.steps.length],
+      ["store", scriptA, "fr", true, 0],
+    );
+    eq("card: no ETA while P3's zone line is its stub; no calibration below 30", [card.eta, card.risk.calibration], [{ text: null, cityKey: "fes" }, null]);
+    ok("card: money in cents, no full phone, ≤ 6 KB gzipped", card.totalCents === 24_990 && !JSON.stringify(card).includes(pc.slice(1)) && K.cardGzBytes(card) <= 6_144, K.cardGzBytes(card));
+    const masked = await K.buildQueueOrder(impA, c2row, viewAs, { leaseUntil: null, mine: false, maxCalls: 3 });
+    ok("card: under an impersonation scope the customer fields are masked (OD61)", masked.customer.firstName === "Nadia" && masked.customer.address !== "Hay Salam 12" && !JSON.stringify(masked).includes("Berrada"), masked.customer);
+
+    // a stale card (OPE-§13.2 step 5): the fresh card and who changed the order
+    await db.update(S.orders).set({ assigneeId: u3.id }).where(deq(S.orders.id, c2));
+    await T.transitionOrder(T.actorFrom(manager), A, { orderId: c2, want: { confirm: "attempting" }, source: "ui" });
+    const stale = await O.recordOutcome(agent3, { orderId: c2, expectRev: c2row.rev, channel: "call", outcome: "no_answer", idem: randomUUID() });
+    const sd = stale.ok ? stale.data : null;
+    ok("conflict: the fresh state, the fresh card and the manager's first name", !!sd && !sd.ok && sd.error === "conflict" && sd.card?.id === c2 && sd.card.rev === (await rowOf(c2)).rev && sd.updatedBy === "Manager", sd && { error: !sd.ok && sd.error, card: sd.card?.id, updatedBy: sd.updatedBy });
+  }
+
+  /* ================================================================ */
   section = "masking";
   {
     // canaries: a customer name and an internal note that must never reach an impersonating session (OD61)
@@ -752,6 +945,12 @@ async function main(): Promise<number> {
       ok(`${name}: no canary under an impersonation scope`, carries(s).length === 0, carries(s));
       if (name !== "duplicatesFor") ok(`${name}: the identity under a member scope (the canaries are there)`, carries(m).length > 0, carries(m));
       else ok(`${name}: ids, dates and states only, under any scope`, carries(m).length === 0 && JSON.stringify(m) === JSON.stringify(s));
+    }
+    // the inbound lookup (OPE-§5.7) hands out a first name, the masked phone and counts only, under any scope
+    const IN = load<typeof import("@/lib/callcenter/inbound")>("@/lib/callcenter/inbound");
+    for (const [label, ctx] of [["a member", owner], ["an impersonation", viewAs]] as const) {
+      const look = await IN.inboundLookup(ctx, `0${p.slice(4)}`);
+      ok(`inboundLookup under ${label} scope: the first name only, no canary`, look.ok && look.data.customer?.firstName === "Zineb" && look.data.orders.length === 1 && carries(look).length === 0, look);
     }
     eq("a search on a masked field finds nothing under impersonation", (await C.listCustomers(impA, viewAs, { search: "Zineb" })).items, []);
     const staffName = (await C.getCustomer(impA, viewAs, cust.id))?.name;

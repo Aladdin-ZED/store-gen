@@ -1,4 +1,4 @@
-// proves: OP-01, OP-04, OP-07, OP-13, OP-14
+// proves: OP-01, OP-03, OP-04, OP-05, OP-07, OP-13, OP-14
 /**
  * `test:ops` (P4 CALL CENTER; operations.md OPE-§O.1, §O.4; docs/STORE-SAAS.md §J.1): the call centre's offline
  * checks, in named sections. Static lints over P4's own files, then the pure suite src/lib/callcenter/selftest.ts.
@@ -17,11 +17,17 @@
  *                         with one named temporary exemption (P5's src/lib/sheets/sync.ts, removed by the P4 verify step
  *                         after rebasing on P5; a stale exemption fails); a single `insert(orders)` call site (OD62)
  *   static · timeline     `TimelineItem` carries no phone, email, address or note field, at any depth (OPE-§O.1)
+ *   static · queue card   `QueueOrder` carries no phone or e-mail field at any depth, and the address, landmark and note
+ *                         only inside `customer` (OPE-§5.3 read with §O.1); `TimelineItem`, `ConsoleOrderRow`, `AggCell`,
+ *                         `InboundResult` (and `OrderListRow` once declared) carry none of the five
  *   pure                  masking, cities and the city-key.json parity fixture, risk, the ISO window, the ladder on a
  *                         fake clock, priorityOf, the ISO keys, the ops catalog (src/lib/callcenter/selftest.ts)
  *   pure · idempotency    the Idempotency-Key cache (src/lib/callcenter/idem.ts, OD36): nextOrder / recordOutcome
  *                         results replayed per store and user, a double tap runs once, a throw is not kept, the
  *                         10-minute expiry on a fake clock, the 2,000-entry store bound
+ *   pure · card           the ScriptDoc caps (OP-05), the built-in script and WhatsApp texts, the compile rules (upsell
+ *                         gating, empty steps and missing facts dropped, no ETA sentence without an ETA), the wa.me
+ *                         limits, and the 40 queue-card fixtures (8 delivery-lane) each ≤ 6 KB gzipped (OPE-§5.3)
  *
  * Each lint is proven on a planted fixture first (it must catch it), then run on the tree. Prints its wall time; fails
  * above 25 s for test:state + test:ops + test:profit together (OPE-§O.1; src/lib/callcenter/suite-clock.ts).
@@ -220,6 +226,28 @@ function typeFields(src: string, typeName: string, file = "x.ts"): string[] {
   return names;
 }
 const PII_FIELD = /^(phone|phoneRaw|phone_raw|email|address|note)$/i;
+const CONTACT_FIELD = /^(phone|phoneRaw|phone_raw|e164|email)$/i;
+const ADDRESS_FIELD = /^(address|landmark|note)$/i;
+
+/** `typeFields` without the subtree of the top-level member `skip` (the card's `customer`). */
+function typeFieldsExcept(src: string, typeName: string, skip: string): string[] {
+  const sf = ts.createSourceFile("x.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let root: ts.InterfaceDeclaration | ts.TypeAliasDeclaration | undefined;
+  sf.forEachChild((n) => {
+    if ((ts.isInterfaceDeclaration(n) || ts.isTypeAliasDeclaration(n)) && n.name.text === typeName) root = n;
+  });
+  if (!root) return ["<missing type>"];
+  const members = ts.isInterfaceDeclaration(root) ? root.members : ts.isTypeLiteralNode(root.type) ? root.type.members : ts.factory.createNodeArray<ts.TypeElement>([]);
+  const out: string[] = [];
+  for (const m of members) {
+    if (!(ts.isPropertySignature(m) && (ts.isIdentifier(m.name) || ts.isStringLiteral(m.name)))) continue;
+    if (m.name.text === skip) continue;
+    out.push(m.name.text);
+    if (m.type) out.push(...typeFields(`${src}
+interface __Probe { x: ${m.type.getText(sf)} }`, "__Probe").slice(1));
+  }
+  return out;
+}
 
 /* ------------------------------------------------------------------ */
 /* static                                                              */
@@ -273,7 +301,7 @@ section = "static · lint self-check";
 }
 
 section = "static · isomorphic";
-for (const f of ["src/lib/orders/address.ts", "src/lib/callcenter/window.ts", "src/lib/callcenter/defaults.ts", "src/lib/callcenter/window.fixtures.ts", "src/lib/callcenter/priority.ts", "src/lib/callcenter/ladder.ts", "src/lib/orders/state.ts", "src/lib/orders/risk-explain.ts"]) {
+for (const f of ["src/lib/orders/address.ts", "src/lib/callcenter/window.ts", "src/lib/callcenter/defaults.ts", "src/lib/callcenter/window.fixtures.ts", "src/lib/callcenter/priority.ts", "src/lib/callcenter/ladder.ts", "src/lib/orders/state.ts", "src/lib/orders/risk-explain.ts", "src/lib/callcenter/script.ts", "src/lib/callcenter/script-builtins.ts", "src/lib/callcenter/wa.ts"]) {
   const bad = serverReach(join(ROOT, f));
   check(`${f} imports nothing server-side`, bad.length === 0, bad);
 }
@@ -330,6 +358,38 @@ section = "static · timeline";
   const fields = typeFields(readFileSync(join(ROOT, "src", "lib", "orders", "events.ts"), "utf8"), "TimelineItem");
   check("TimelineItem is declared in src/lib/orders/events.ts", !fields.includes("<missing type>"), fields);
   check("TimelineItem carries no phone, email, address or note field (OPE-§O.1)", fields.filter((n) => PII_FIELD.test(n)).length === 0, fields);
+}
+
+section = "static · queue card";
+{
+  // OPE-§O.1 read with OPE-§5.3 (spec drift, recorded in the step report): QueueOrder carries no phone or e-mail field
+  // at any depth; the address, the landmark and the note travel only inside QueueOrder.customer, because the agent
+  // confirms them on the call. The list, timeline, console and aggregate rows carry none of the five.
+  const cardSrc = readFileSync(join(ROOT, "src", "lib", "callcenter", "card.ts"), "utf8");
+  const all = typeFields(cardSrc, "QueueOrder");
+  const outside = typeFieldsExcept(cardSrc, "QueueOrder", "customer");
+  check("QueueOrder is declared in src/lib/callcenter/card.ts", !all.includes("<missing type>"), all);
+  check("QueueOrder carries no phone or e-mail field, at any depth", all.filter((n) => CONTACT_FIELD.test(n)).length === 0, all);
+  check("QueueOrder carries the address, landmark and note only inside `customer`", outside.filter((n) => ADDRESS_FIELD.test(n)).length === 0 && all.filter((n) => ADDRESS_FIELD.test(n)).length === 3, outside);
+  for (const [file, name] of [
+    ["src/lib/orders/events.ts", "TimelineItem"],
+    ["src/lib/orders/profile.ts", "ConsoleOrderRow"],
+    ["src/lib/callcenter/aggregates.ts", "AggCell"],
+    ["src/lib/callcenter/inbound.ts", "InboundResult"],
+    ["src/lib/orders/profile.ts", "OrderListRow"],
+  ] as const) {
+    const f = typeFields(readFileSync(join(ROOT, file), "utf8"), name);
+    // OrderListRow arrives with the orders list (P4 step 6): until then it is listed, not judged
+    if (f.includes("<missing type>") && name === "OrderListRow") {
+      console.log(`  ${name}: not declared yet (P4 step 6)`);
+      continue;
+    }
+    check(`${name} (${file}) carries no phone, e-mail, address, landmark or note field`, !f.includes("<missing type>") && f.filter((n) => CONTACT_FIELD.test(n) || ADDRESS_FIELD.test(n)).length === 0, f);
+  }
+  // the lint itself, on planted shapes
+  const planted = "interface Q { customer: { address: string; note: string | null; landmark: string }; delivery: D }\ninterface D { note: string }";
+  check("the card lint catches an address-like field outside `customer`", typeFieldsExcept(planted, "Q", "customer").filter((n) => ADDRESS_FIELD.test(n)).length === 1);
+  check("the card lint catches a nested phone field", typeFields("interface Q { a: { b: { phone: string } } }", "Q").filter((n) => CONTACT_FIELD.test(n)).length === 1);
 }
 
 section = "static · defaults";
@@ -510,12 +570,314 @@ async function idem(): Promise<void> {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* pure · card (src/lib/callcenter/{card,script,script-builtins,wa}.ts) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The ScriptDoc caps (OPE-§7.2, OP-05), the built-in script (OPE-§7.3) and the queue card's size (OPE-§5.3: the 40
+ * fixtures, 8 of them delivery-lane cards, each ≤ 6 KB gzipped before any trimming), built through the card's own pure
+ * assembler. P5's `renderTemplate` is still its P0 stub in this base (it throws), so the texts are rendered by a
+ * reference renderer of OPE-§7.1's grammar written here and only the structure is asserted: the zero-invented-numbers
+ * proof is P5's `test:conversions` templates section (re-run after the rebase on P5). Runs after `pure()` (server-only
+ * stubbed).
+ */
+async function card(): Promise<void> {
+  section = "pure · card";
+  const { ScriptDoc, compileScriptDoc, requiredVars, OBJECTION_IDS, SCRIPT_LOCALES } = await import("@/lib/callcenter/script");
+  const { BUILTIN_SCRIPTS, builtinScriptId } = await import("@/lib/callcenter/script-builtins");
+  const { TEMPLATE_VARS } = await import("@/lib/integrations/templates");
+  const W = await import("@/lib/callcenter/wa");
+  const C = await import("@/lib/callcenter/card");
+  const { mintScope } = await import("@/lib/tenancy/seam");
+  type Values = Parameters<typeof compileScriptDoc>[1];
+  type CardRow = import("@/lib/callcenter/card").CardRow;
+  type QueueOrder = import("@/lib/callcenter/card").QueueOrder;
+
+  /** OPE-§7.1 grammar: "{var}", "[[ … ]]" dropped when a variable inside is empty, "{{" / "}}" literal braces */
+  const render = (src: string, values: Values): string => {
+    const OPEN = "\u0000";
+    const CLOSE = "\u0001";
+    const get = (k: string) => values[k as keyof Values] ?? "";
+    const fill = (t: string) => t.replace(/\{([a-z_]+)\}/g, (_m, k: string) => get(k));
+    const esc = src.replace(/\{\{/g, OPEN).replace(/\}\}/g, CLOSE);
+    const blocks = esc.replace(/\[\[([\s\S]*?)\]\]/g, (_m, inner: string) => ([...inner.matchAll(/\{([a-z_]+)\}/g)].every((m) => get(m[1]!).trim() !== "") ? fill(inner) : ""));
+    return fill(blocks).split(OPEN).join("{").split(CLOSE).join("}");
+  };
+
+  // the schema's caps (OP-05)
+  const step = (i: number, say = "Bonjour {customer_first_name}.") => ({ id: `s${i}`, title: `Étape ${i}`, say });
+  const doc = (steps: number, objections = 0) => ({
+    v: 1,
+    steps: Array.from({ length: steps }, (_, i) => step(i)),
+    objections: [...OBJECTION_IDS.slice(0, Math.min(6, objections)).map((id) => ({ id, say: "{total}" })), ...(objections > 6 ? [{ id: "price", say: "{total}" }] : [])],
+  });
+  check("ScriptDoc: 12 steps and 6 objections pass", ScriptDoc.safeParse(doc(12, 6)).success);
+  check("ScriptDoc: a 13-step script fails", !ScriptDoc.safeParse(doc(13)).success);
+  check("ScriptDoc: a 7th objection fails", !ScriptDoc.safeParse(doc(3, 7)).success);
+  check("ScriptDoc: a script without a step fails", !ScriptDoc.safeParse(doc(0)).success);
+  check("ScriptDoc: a line over 400 characters fails", !ScriptDoc.safeParse({ v: 1, steps: [step(1, "x".repeat(401))] }).success && ScriptDoc.safeParse({ v: 1, steps: [step(1, "x".repeat(400))] }).success);
+  check("ScriptDoc: a 5th check fails", !ScriptDoc.safeParse({ v: 1, steps: [{ ...step(1), checks: ["a", "b", "c", "d", "e"] }] }).success);
+  check("ScriptDoc: an objection outside the closed list fails", !ScriptDoc.safeParse({ v: 1, steps: [step(1)], objections: [{ id: "quality", say: "x" }] }).success);
+  check("ScriptDoc: an objection answer over 300 characters fails", !ScriptDoc.safeParse({ v: 1, steps: [step(1)], objections: [{ id: "price", say: "x".repeat(301) }] }).success);
+  check("ScriptDoc: `when` and `action` are closed lists", !ScriptDoc.safeParse({ v: 1, steps: [{ ...step(1), when: "sometimes" }] }).success && !ScriptDoc.safeParse({ v: 1, steps: [{ ...step(1), action: "refund" }] }).success);
+
+  // the built-ins (OPE-§7.3)
+  const vars = new Set<string>(TEMPLATE_VARS);
+  for (const l of SCRIPT_LOCALES) {
+    const b = BUILTIN_SCRIPTS[l];
+    check(`built-in ${l}: a valid ScriptDoc`, ScriptDoc.safeParse(b).success, ScriptDoc.safeParse(b).error?.issues);
+    check(`built-in ${l}: the six steps in order and the six objections`, b.steps.map((x) => x.id).join() === "greeting,recap,address,availability,offer,close" && b.objections.map((o) => o.id).join() === OBJECTION_IDS.join());
+    check(`built-in ${l}: the offer step is upsell-gated with add_upsell, the address step edits the address`, b.steps[4]!.when === "upsell" && b.steps[4]!.action === "add_upsell" && b.steps[2]!.action === "edit_address" && b.steps[2]!.checks.length === 2);
+    const used = [...b.steps.map((x) => x.say), ...b.objections.map((o) => o.say)].flatMap((t) => [...t.matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]!));
+    check(`built-in ${l}: every variable is one of P5's TEMPLATE_VARS`, used.every((v) => vars.has(v)), used.filter((v) => !vars.has(v)));
+    check(`built-in ${l}: eta_text only inside optional blocks (no delivery timing without a zone ETA)`, [...b.steps, ...b.objections].every((x) => !requiredVars(x.say).includes("eta_text")));
+  }
+  check("built-in ids are builtin:script:<locale>", builtinScriptId("ar") === "builtin:script:ar");
+
+  // the agent WhatsApp built-ins and the link (OPE-§22.2, §22.3)
+  for (const k of W.AGENT_WA_KINDS) for (const l of SCRIPT_LOCALES) check(`wa ${k} ${l}: the order id is a required variable`, requiredVars(W.BUILTIN_WA[k][l]).includes("order_id"));
+  check(
+    "wa ids: built-ins and 26-character row ids parse, anything else does not",
+    JSON.stringify([W.parseWaTemplateId("builtin:wa:confirm"), W.parseWaTemplateId("01JC3X8Y0000000000000000AB"), W.parseWaTemplateId("builtin:wa:refund"), W.parseWaTemplateId("x")]) ===
+      JSON.stringify([{ builtin: "confirm" }, { rowId: "01JC3X8Y0000000000000000AB" }, null, null]),
+  );
+
+  const base: Values = {
+    customer_first_name: "سلمى",
+    order_id: "CMD-7K3Q9X",
+    product: "Huile d'argan",
+    offer_label: "2 flacons + 1 offert",
+    units_text: "Huile d'argan 50 ml × 3",
+    qty: "3",
+    total: "249,90 MAD",
+    shipping_text: "livraison gratuite",
+    city: "Fès",
+    address: "Hay Salam 12",
+    landmark: "",
+    eta_text: "",
+    store_name: "Argania",
+    agent_first_name: "Karim",
+    confirm_number: "",
+  };
+  const fr = compileScriptDoc(BUILTIN_SCRIPTS.fr, base, render, { locale: "fr", source: "builtin", templateId: builtinScriptId("fr") });
+  check("compile: no upsell → the offer step is dropped (5 steps)", fr.steps.map((x) => x.id).join() === "greeting,recap,address,availability,close", fr.steps.map((x) => x.id));
+  check("compile: an empty eta_text leaves no sentence about delivery timing", [...fr.steps.map((x) => x.text), ...fr.objections.map((o) => o.text)].every((t) => !/ivraison (est )?prévue/.test(t)), fr);
+  check("compile: the trust answer drops its missing confirm_number block and keeps its sentence", fr.objections.find((o) => o.id === "trust")?.text === "Vous payez le livreur en main propre après avoir vu le colis.");
+  check("compile: no template syntax is left in any text", [...fr.steps.map((x) => x.text), ...fr.objections.map((o) => o.text)].every((t) => !/[{}]|\[\[|\]\]/.test(t)));
+  check("compile: the six objection chips carry their label key", fr.objections.length === 6 && fr.objections.every((o) => o.label.key === `ops.script.obj.${o.id}`));
+  const up = compileScriptDoc(BUILTIN_SCRIPTS.en, { ...base, upsell_title: "Savon noir", upsell_price: "49 MAD", eta_text: "tomorrow or the day after" }, render, { locale: "en", source: "builtin", templateId: builtinScriptId("en") });
+  check("compile: an upsell on offer → the offer step, and the ETA sentences come back", up.steps.length === 6 && up.steps[4]!.id === "offer" && up.steps[5]!.text.includes("Delivery is planned tomorrow or the day after."), up.steps.map((x) => x.text));
+  const sparse = compileScriptDoc(
+    { v: 1, steps: [{ id: "a", title: "A", say: "[[{eta_text}]]", checks: [], when: "always", action: "none" }, { id: "b", title: "B", say: "ok", checks: [], when: "always", action: "none" }], objections: [{ id: "trust", say: "Call {confirm_number}." }] },
+    base,
+    render,
+    { locale: "fr", source: "store", templateId: "X" },
+  );
+  check("compile: a step that renders empty is dropped; an objection whose fact is missing is dropped", sparse.steps.map((x) => x.id).join() === "b" && sparse.objections.length === 0, sparse);
+
+  // the wa.me link's limits: optional blocks first, then units_text; the order id always kept
+  const phone = "+212612345678";
+  const longUnits = "Huile d'argan 50 ml × 3 · ".repeat(40);
+  const tmpl = "Commande {order_id} : {units_text}[[ Livraison prévue {eta_text}.]] Merci.";
+  const link = W.waLink(phone, tmpl, { ...base, units_text: longUnits, eta_text: "demain" }, render, "CMD-7K3Q9X");
+  const text = decodeURIComponent(link.split("?text=")[1] ?? "");
+  check("wa link: ≤ 2,000 characters, the order id kept, units shortened with …, the optional block dropped first", link.length <= W.WA_URL_MAX && text.includes("CMD-7K3Q9X") && text.includes("…") && !text.includes("Livraison prévue"), { length: link.length, text: text.slice(0, 120) });
+  const ar = W.waLink(phone, W.BUILTIN_WA.confirm.ar, base, render, "CMD-7K3Q9X");
+  check("wa link: the Arabic confirm text fits whole", ar.startsWith("https://wa.me/212612345678?text=") && decodeURIComponent(ar.split("?text=")[1]!).includes("CMD-7K3Q9X") && ar.length <= W.WA_URL_MAX);
+  const huge = W.waLink(phone, `${"ء".repeat(900)} {order_id}`, base, render, "CMD-7K3Q9X");
+  check("wa link: a custom text that cannot fit is cut, and the order id leads it", huge.length <= W.WA_URL_MAX && decodeURIComponent(huge.split("?text=")[1]!).startsWith("CMD-7K3Q9X"), huge.length);
+  check("wa link: no template → the bare chat", W.waUrl(phone) === "https://wa.me/212612345678");
+
+  // the 40 card fixtures (OPE-§5.3), built through the card's pure assembler
+  const scope = mintScope("member", "0P4C0000000000000000000001");
+  // a Wednesday, 11:30 in Casablanca
+  const now = new Date("2026-11-04T10:30:00Z");
+  const names = ["Salma Bennani", "عبد الرحيم الإدريسي", "Fatima-Zahra El Amrani", "Youssef", "Khadija Ait Lahcen", "محمد أمين"];
+  const notes = [null, "Appeler après 18h, travaille le matin.", "الزنقة 14 قرب الحمام، الباب الأخضر. عيط قبل ما توصل.", "Livrer au bureau, 2e étage, demander M. Alaoui à l'accueil. ".repeat(6).slice(0, 400)];
+  const flagsets: string[][] = [[], ["fast"], ["too_fast", "ip_repeat", "history_bad"], ["returning_customer"], ["no_ua", "captcha_missing", "page_burst", "duplicate"]];
+  const variants = (n: number) => Array.from({ length: n }, (_, i) => ({ Taille: ["S", "M", "L", "XL"][i % 4]!, Couleur: ["Noir", "Beige", "Bleu nuit", "Bordeaux"][i % 4]! }));
+  const maxScript = {
+    v: 1 as const,
+    steps: Array.from({ length: 12 }, (_, i) => ({
+      id: `step_${i}`,
+      title: `Étape ${i + 1} du script`,
+      say: "Bonjour {customer_first_name}, ici {agent_first_name} de {store_name}. Pour votre commande {order_id} de {offer_label}, je vérifie avec vous {units_text}, le total {total} et l'adresse à {city}. ".repeat(3).slice(0, 400),
+      checks: ["Ville confirmée", "Adresse et repère notés", "Créneau de livraison", "Disponibilité du client"],
+      when: "always" as const,
+      action: "none" as const,
+    })),
+    objections: OBJECTION_IDS.map((id) => ({ id, say: "Je comprends tout à fait. Le prix de {offer_label} est {total}, vous payez à la réception, rien avant, et {store_name} reste votre interlocuteur pour toute question. ".repeat(2).slice(0, 300) })),
+  };
+  const fixtures: { label: string; card: QueueOrder; raw: number }[] = [];
+  for (let i = 0; i < 40; i++) {
+    const delivery = i >= 32;
+    const l = SCRIPT_LOCALES[i % 3]!;
+    const qty = 1 + (i % 6);
+    const row = {
+      id: `CMD-${String(100000 + i)}`,
+      storeId: scope.storeId,
+      pageId: "01JC3X8Y0000000000000PAGE1",
+      versionId: null,
+      exportId: null,
+      source: "live",
+      status: "new",
+      name: names[i % names.length]!,
+      phone: `+2126${String(10000000 + i * 7919).slice(0, 8)}`,
+      phoneRaw: null,
+      city: i % 7 === 0 ? null : ["Fès", "Casablanca", "Tanger", "Agadir", "Oujda", "الدار البيضاء"][i % 6]!,
+      address:
+        i % 5 === 0
+          ? "Résidence Al Andalous, immeuble 7, appartement 12, en face de la pharmacie du quartier, derrière la mosquée, 3e rue à droite après le rond-point du marché central. ".repeat(2).slice(0, 300)
+          : "Hay Salam 12",
+      note: notes[i % notes.length]!,
+      email: null,
+      productName: i % 4 === 0 ? "Coffret soin visage huile d'argan pure pressée à froid, sérum, crème de nuit et savon noir beldi parfumé à l'eucalyptus" : "Huile d'argan",
+      items: { bundleId: "b", bundleLabel: qty > 1 ? `${qty} flacons + 1 offert` : "1 flacon", qty, unitPrice: 99.9, variants: variants(qty) },
+      qty,
+      subtotal: "249.90",
+      shipping: i % 2 ? "0.00" : "35.00",
+      total: "284.90",
+      currency: "MAD",
+      locale: l,
+      utm: null,
+      ref: null,
+      ipHash: "a".repeat(64),
+      ua: "Mozilla/5.0 (Linux; Android 14)",
+      eventId: null,
+      idem: "00000000-0000-4000-8000-000000000000",
+      riskScore: [10, 55, 75, 30, 90][i % 5]!,
+      flags: flagsets[i % flagsets.length]!,
+      upsellTokenHash: null,
+      sheetStatus: "pending",
+      sheetAttempts: 0,
+      sheetError: null,
+      createdAt: new Date(now.getTime() - (i + 1) * 3_600_000),
+      updatedAt: now,
+      isTest: i % 13 === 0,
+      confirmState: delivery ? "confirmed" : (["new", "attempting", "callback"] as const)[i % 3]!,
+      shipState: delivery ? "attempt_failed" : "none",
+      moneyState: "unpaid",
+      assigneeId: "01JC3X8Y00000000000AGENT01",
+      leaseUntil: new Date(now.getTime() + 900_000),
+      claimToken: "01JC3X8Y00000000000CLAIM01",
+      dueAt: null,
+      attempts: i % 4,
+      priority: 500,
+      cancelReason: null,
+      customerId: i % 3 === 0 ? null : "01JC3X8Y0000000000CUSTOM01",
+      mergedInto: null,
+      cityKey: i % 7 === 0 ? null : "fes",
+      createdBy: null,
+      rev: i,
+      confirmedBy: null,
+      confirmedAt: null,
+      firstTouchAt: null,
+      shippedAt: null,
+      deliveredAt: null,
+      finalAt: null,
+      landmark: i % 2 ? "Près de la grande mosquée, porte verte" : null,
+      adjustCents: 0,
+      sheetLabel: null,
+      sheetDirty: 0,
+      capiCtx: null,
+      trackingRef: delivery ? `TRK${i}ABC123456` : null,
+      carrierLabel: delivery ? "Amana Express" : null,
+      shipAfter: null,
+      deliveryAttempts: delivery ? 1 + (i % 3) : 0,
+    } as unknown as CardRow;
+    const upsell = i % 4 === 1;
+    const values: Values = {
+      ...base,
+      customer_first_name: row.name.split(" ")[0]!,
+      order_id: row.id,
+      offer_label: row.items.bundleLabel,
+      units_text: `Huile d'argan × ${qty}`,
+      eta_text: i % 2 ? "demain ou après-demain" : "",
+      upsell_title: upsell ? "Savon noir beldi" : "",
+      upsell_price: upsell ? "49 MAD" : "",
+    };
+    const max = i === 5 || i === 21;
+    const sdoc = max ? maxScript : BUILTIN_SCRIPTS[l];
+    const script = compileScriptDoc(sdoc, values, render, { locale: l, source: max ? "store" : "builtin", templateId: max ? "01JC3X8Y0000000000SCRIPT01" : builtinScriptId(l) });
+    const templates =
+      i % 2
+        ? Array.from({ length: 5 }, (_, k) => ({ id: `01JC3X8Y000000000000CUST0${k}`, channel: "whatsapp" as const, kind: "custom", pageId: null, name: `Relance personnalisée numéro ${k + 1} pour les clients fidèles`, body: "x", source: "user" as const }))
+        : [];
+    const parts = {
+      now,
+      tz: "Africa/Casablanca",
+      ui: (["fr", "ar", "en"] as const)[i % 3]!,
+      history: row.customerId ? { ordersCount: 4 + i, deliveredCount: 2, refusedCount: 1, returnedCount: 0, cancelledCount: 1, fakeCount: i % 2 } : null,
+      duplicates: i % 6 === 0 ? Array.from({ length: 5 }, (_, k) => ({ id: `CMD-9${String(i).padStart(2, "0")}00${k}`, createdAt: new Date(now.getTime() - k * 86_400_000), confirmState: "new" as const, shipState: "none" as const })) : [],
+      templates,
+      bands: { check: { band: "check" as const, decided: 52, bad: 20, badShareBp: 3846 }, high: i % 2 ? null : { band: "high" as const, decided: 40, bad: 30, badShareBp: 7500 } },
+      attempts: [
+        { weekday: 3, hour: 18, attempts: 212, contacted: 140 },
+        { weekday: 3, hour: 11, attempts: 90, contacted: 40 },
+        { weekday: 3, hour: 9, attempts: 12, contacted: 12 },
+      ],
+      eta: values.eta_text || null,
+      rescues: delivery ? i % 3 : 0,
+      script,
+    };
+    const opts = { leaseUntil: row.leaseUntil, mine: true, maxCalls: 3, ...(i % 9 === 0 ? { inbound: true } : {}) };
+    const built = C.assembleCard(scope, row, opts, parts);
+    // the card before any trimming: the bound must hold without `fitCard`'s help
+    const raw = C.cardGzBytes({ ...built, script });
+    fixtures.push({ label: `#${i} ${l}${delivery ? " delivery" : ""}${max ? " max-script" : ""}`, card: built, raw });
+  }
+  check("40 card fixtures, 8 of them delivery-lane cards", fixtures.length === 40 && fixtures.filter((f) => f.card.lane === "delivery").length === 8);
+  const over = fixtures.filter((f) => f.raw > 6_144);
+  check("every card fixture is ≤ 6 KB gzipped before any trimming (OPE-§5.3)", over.length === 0, over.map((f) => [f.label, f.raw]));
+  const biggest = fixtures.reduce((a, b) => (a.raw > b.raw ? a : b));
+  console.log(`  cards: ${Math.min(...fixtures.map((f) => f.raw))}-${biggest.raw} B gzipped (largest ${biggest.label})`);
+  const leaky = fixtures.filter((f) => {
+    const j = JSON.stringify(f.card);
+    return /\+?2126\d{8}/.test(j) || j.includes("Mozilla") || j.includes("a".repeat(64));
+  });
+  check("no card carries a full phone, the user agent or the IP hash", leaky.length === 0, leaky.map((f) => f.label));
+  const d = fixtures.find((f) => f.card.lane === "delivery")!.card;
+  const [f0, f1] = [fixtures[0]!.card, fixtures[1]!.card];
+  check("a delivery card has its strip (rescue calls left, carrier, tracking); a confirm card has none", !!d.delivery && d.delivery.rescueCallsLeft >= 0 && d.delivery.carrierLabel === "Amana Express" && f1.delivery === null);
+  check("a card's money is in integer cents", f1.totalCents === 28_490 && f1.shippingCents === 0 && f0.shippingCents === 3_500);
+  check("calibration only for a band with its n (check: 3846 bp of 52; low: none)", f1.risk.calibration?.badShareBp === 3846 && f1.risk.calibration?.n === 52 && f0.risk.calibration === null);
+  check(
+    "the built-in WhatsApp kinds per lane, then the store's customs",
+    f0.templates.map((x) => x.id).join() === "builtin:wa:confirm,builtin:wa:missed_call,builtin:wa:address" && d.templates[0]!.id === "builtin:wa:delivery_day" && f1.templates.length === 8,
+    [f0.templates, d.templates[0], f1.templates.length],
+  );
+  check("the built-in template names are in the viewer's language", f0.templates[0]!.name === "Confirmer la commande" && f1.templates[0]!.name === "تأكيد الطلب", [f0.templates[0], f1.templates[0]]);
+  check("bestHoursHint: the weekday's best cell with ≥ 30 attempts (Wednesday 18:00-19:00, n = 212)", f0.ui.bestHoursHint?.key === "ops.queue.bestHours" && JSON.stringify(f0.ui.bestHoursHint.vars) === JSON.stringify({ from: 18, to: 19, n: 212 }), f0.ui.bestHoursHint);
+  check("inbound cards say so; claimed ones do not", f0.inbound === true && f1.inbound === undefined);
+  check("history from the customer row; none without one", f0.customer.history === null && f1.customer.history?.orders === 5);
+  check("the masked phone only", f1.customer.phoneMasked.includes("•") && !/\d{6}/.test(f1.customer.phoneMasked.replace(/\s/g, "")), f1.customer.phoneMasked);
+  check("a city-less order has no ETA key", f0.eta.cityKey === null && f1.eta.cityKey === "fes");
+  // fitCard: a pathological card (caps bypassed) is trimmed under the bound, its first step kept
+  const f5 = fixtures[5]!.card;
+  // text gzip cannot shrink much: a linear congruential stream over 200 Arabic code points
+  let seed = 12_345;
+  const noise = () => {
+    seed = (Math.imul(seed, 1_103_515_245) + 12_345) >>> 0;
+    return String.fromCharCode(0x621 + ((seed >>> 16) % 200));
+  };
+  const fat: QueueOrder = {
+    ...f5,
+    script: { ...f5.script, steps: Array.from({ length: 40 }, (_, k) => ({ id: `x${k}`, title: "x", text: Array.from({ length: 400 }, noise).join(""), checks: [], action: "none" as const })) },
+  };
+  check("fitCard: the planted card is over the bound before trimming", C.cardGzBytes(fat) > C.CARD_GZ_MAX, C.cardGzBytes(fat));
+  const fitted = C.fitCard(fat);
+  check("fitCard: an oversized card is trimmed to ≤ 5.5 KB gz, its first step kept", C.cardGzBytes(fitted) <= C.CARD_GZ_MAX && fitted.script.steps[0]!.id === "x0" && fitted.script.objections.length === 0, C.cardGzBytes(fitted));
+}
+
 cityKeySize()
   .catch((e: unknown) => failures.push(`[static · cityKey size] esbuild failed: ${e instanceof Error ? e.message : String(e)}`))
   .then(pure)
   .catch((e: unknown) => failures.push(`[pure] the selftest threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .then(idem)
   .catch((e: unknown) => failures.push(`[pure · idempotency] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
+  .then(card)
+  .catch((e: unknown) => failures.push(`[pure · card] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .finally(() => {
     const ms = performance.now() - started;
     const clock = recordSuiteTime("ops", ms);

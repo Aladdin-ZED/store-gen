@@ -68,6 +68,28 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "ops.risk.returning_customer": "Client fidèle : {n} livrées",
   "ops.risk.returning_customer_nocount": "Client fidèle",
 
+  /* ---- la fiche de la file (OPE-§5.3, §7, §22) ---- */
+  "ops.queue.bestHours": "Vos clients décrochent le plus entre {from} h et {to} h (n = {n})",
+  "ops.script.title": "Script d'appel",
+  "ops.script.unavailable": "Le script n'est pas disponible pour l'instant. Suivez les détails de la commande.",
+  "ops.script.obj.price": "Prix",
+  "ops.script.obj.trust": "Confiance",
+  "ops.script.obj.delivery_time": "Délai",
+  "ops.script.obj.think": "Veut réfléchir",
+  "ops.script.obj.cheaper_elsewhere": "Moins cher ailleurs",
+  "ops.script.obj.wrong_size": "Mauvaise taille",
+  "ops.wa.kind.confirm": "Confirmer la commande",
+  "ops.wa.kind.missed_call": "Appel manqué",
+  "ops.wa.kind.address": "Demander l'adresse",
+  "ops.wa.kind.delivery_day": "Jour de livraison",
+  "ops.inbound.placeholder": "Un client appelle ? Saisissez le numéro",
+  "ops.inbound.none": "Aucune commande pour ce numéro",
+  "ops.inbound.take": "Prendre cette commande",
+  "ops.inbound.tooShort": "Saisissez au moins 8 chiffres du numéro",
+  "ops.inbound.paused": "Trop de recherches cette heure. Demandez à votre responsable.",
+  "ops.state.conflict": "Modifiée par {name} à l'instant",
+  "ops.state.conflictAnon": "Modifiée ailleurs à l'instant",
+
   /* ---- l'historique de la commande (OPE-§4.1) ---- */
   "ops.tl.created": "Commande passée",
   "ops.tl.state_changed.confirm.new": "Remise à nouvelle",

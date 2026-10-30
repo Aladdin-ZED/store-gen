@@ -69,6 +69,28 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "ops.risk.returning_customer": "كليان قديم: {n} توصلو",
   "ops.risk.returning_customer_nocount": "كليان قديم",
 
+  /* ---- بطاقة الطلب ف القائمة (OPE-§5.3، §7، §22) ---- */
+  "ops.queue.bestHours": "الكليان ديالك كيجاوبو كثر بين {from}:00 و{to}:00 (n = {n})",
+  "ops.script.title": "سكريبت المكالمة",
+  "ops.script.unavailable": "السكريبت ما متوفرش دابا. تبّع تفاصيل الطلب.",
+  "ops.script.obj.price": "الثمن",
+  "ops.script.obj.trust": "الثقة",
+  "ops.script.obj.delivery_time": "مدة التوصيل",
+  "ops.script.obj.think": "بغا يفكر",
+  "ops.script.obj.cheaper_elsewhere": "أرخص ف بلاصة أخرى",
+  "ops.script.obj.wrong_size": "القياس غالط",
+  "ops.wa.kind.confirm": "تأكيد الطلب",
+  "ops.wa.kind.missed_call": "مكالمة فايتة",
+  "ops.wa.kind.address": "طلب العنوان",
+  "ops.wa.kind.delivery_day": "نهار التوصيل",
+  "ops.inbound.placeholder": "كليان كيعيّط؟ كتب الرقم",
+  "ops.inbound.none": "ما كاين حتى طلب بهاد الرقم",
+  "ops.inbound.take": "خود هاد الطلب",
+  "ops.inbound.tooShort": "كتب على الأقل 8 ديال الأرقام",
+  "ops.inbound.paused": "بحثتي بزاف هاد الساعة. سول المسؤول ديالك.",
+  "ops.state.conflict": "{name} بدّلها دابا",
+  "ops.state.conflictAnon": "تبدّلات من بلاصة أخرى دابا",
+
   /* ---- تاريخ الطلب (OPE-§4.1) ---- */
   "ops.tl.created": "الطلب تدار",
   "ops.tl.state_changed.confirm.new": "رجع جديد",

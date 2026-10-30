@@ -67,6 +67,28 @@ export const messages = {
   "ops.risk.returning_customer": "Returning customer: {n} delivered",
   "ops.risk.returning_customer_nocount": "Returning customer",
 
+  /* ---- the queue card (OPE-§5.3, §7, §22; agent-facing: ar / fr / en, OD34) ---- */
+  "ops.queue.bestHours": "Your customers pick up most between {from}:00 and {to}:00 (n = {n})",
+  "ops.script.title": "Call script",
+  "ops.script.unavailable": "The script is not available right now. Follow the order details.",
+  "ops.script.obj.price": "Price",
+  "ops.script.obj.trust": "Trust",
+  "ops.script.obj.delivery_time": "Delivery time",
+  "ops.script.obj.think": "Wants to think",
+  "ops.script.obj.cheaper_elsewhere": "Cheaper elsewhere",
+  "ops.script.obj.wrong_size": "Wrong size",
+  "ops.wa.kind.confirm": "Confirm the order",
+  "ops.wa.kind.missed_call": "Missed call",
+  "ops.wa.kind.address": "Ask for the address",
+  "ops.wa.kind.delivery_day": "Delivery day",
+  "ops.inbound.placeholder": "Customer calling? Type the number",
+  "ops.inbound.none": "No order for this number",
+  "ops.inbound.take": "Take this order",
+  "ops.inbound.tooShort": "Type at least 8 digits of the number",
+  "ops.inbound.paused": "Too many lookups this hour. Ask your manager.",
+  "ops.state.conflict": "Updated by {name} just now",
+  "ops.state.conflictAnon": "Updated somewhere else just now",
+
   /* ---- the order timeline (OPE-§4.1, `ops.tl.<type>`; ar / fr / en: agents read it in the drawer) ---- */
   "ops.tl.created": "Order placed",
   "ops.tl.state_changed.confirm.new": "Set back to new",

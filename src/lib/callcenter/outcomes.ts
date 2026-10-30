@@ -32,12 +32,14 @@ import { orderEvents, orders } from "@/lib/db/schema";
 import { blockPhone } from "@/lib/orders/admin";
 import { cleanNote, viewerOf, type NewOrderEvent } from "@/lib/orders/events";
 import { forgetDecidedToday, nextOrderRun, type NextResult } from "@/lib/orders/queue";
+import type { OrderStatus } from "@/lib/orders/contract";
 import { CANCEL_REASONS, PRE_SHIP, projectStatus, SYSTEM_CANCEL_REASONS, type CancelReason, type MoneyState, type OrderStates } from "@/lib/orders/state";
 import { transitionForOutcome, type OutcomeTransitionOpts, type TransitionInput, type TransitionResult } from "@/lib/orders/transition";
 import { getStoreSetting } from "@/lib/settings";
 import { SeamError } from "@/lib/tenancy/seam";
 import { byId, whereStore } from "@/lib/tenancy/sql";
 import type { ActionResult, WriteCtx } from "@/lib/tenancy/types";
+import { conflictCard, type QueueOrder } from "./card";
 import { withIdem } from "./idem";
 import { nextDue, rescueNext } from "./ladder";
 import { opsNow } from "./presence";
@@ -97,6 +99,10 @@ export type OutcomeData = TransitionResult & {
   warning?: "outside_window";
   /** fake + blockPhone: the phone's other open orders, listed for review (OPE-§6.1) */
   review?: string[];
+  /** `conflict` (OPE-§13.2 step 5): the order's fresh card, null when the agent no longer sees it (OD12) */
+  card?: QueueOrder | null;
+  /** `conflict`: the first name of the member who changed the order ("Updated by Karim just now"), when it was not you */
+  updatedBy?: string | null;
   replayed?: true;
 };
 
@@ -149,7 +155,7 @@ async function run(ctx: WriteCtx, input: Input): Promise<ActionResult<OutcomeDat
   if (!row || !viewerSeesOrder(scope, viewerOf(ctx), row, !!input.inbound)) return ok({ ok: false, error: "not_found" });
   const states: OrderStates = { confirm: row.confirmState, ship: row.shipState, money: row.moneyState as MoneyState };
   const current = { rev: row.rev, states, status: projectStatus(states) };
-  if (row.rev !== input.expectRev) return ok({ ok: false, error: "conflict", current });
+  if (row.rev !== input.expectRev) return conflict(ctx, input, current);
 
   // the lanes (OD48): a delivery-lane order takes only the rescue grid, every other order only the confirm grid
   const deliveryLane = states.confirm === "confirmed" && states.ship === "attempt_failed";
@@ -283,7 +289,7 @@ async function run(ctx: WriteCtx, input: Input): Promise<ActionResult<OutcomeDat
   }
 
   const result = await transitionForOutcome({ kind: "user", userId: uid, can: (p) => ctx.can(p), role: ctx.membership.role }, scope, tin, opts);
-  if (!result.ok) return ok(result);
+  if (!result.ok) return result.error === "conflict" ? conflict(ctx, input, result.current ?? current) : ok(result);
   const data: OutcomeData = { ...result, ...(warning ? { warning } : {}) };
   if (DECIDING.has(result.states.confirm) && result.states.confirm !== states.confirm) forgetDecidedToday(scope, uid, tz);
 
@@ -307,6 +313,12 @@ async function run(ctx: WriteCtx, input: Input): Promise<ActionResult<OutcomeDat
     }
   }
   return ok(data);
+}
+
+/** A stale card (OPE-§13.2 step 5): the fresh state, the fresh card and who changed it. */
+async function conflict(ctx: WriteCtx, input: Input, current: { rev: number; states: OrderStates; status: OrderStatus }): Promise<ActionResult<OutcomeData>> {
+  const fresh = await conflictCard(ctx, input.orderId, { inbound: !!input.inbound });
+  return ok({ ok: false, error: "conflict", current, card: fresh.card, updatedBy: fresh.updatedBy });
 }
 
 const NO_CONTACT_BUSY: ReadonlySet<string> = new Set(["busy", "switched_off"]);

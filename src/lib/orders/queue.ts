@@ -17,6 +17,9 @@ import "server-only";
  *   takeOrder        "Take this order" (inbound, OD53, or a manager's drawer): the claim on one id
  *   opsPulse         the queue's pulse counters (OD33); markOrdersSeen moves the viewer's "new orders" cursor
  *
+ * Every answer that hands out an order carries its card (`buildQueueOrder`, src/lib/callcenter/card.ts: the reads after
+ * the claim, the compiled script, the masked customer, ≤ 6 KB gzipped).
+ *
  * The clock is `opsNow()` (`Date.now()`), passed to every statement as a parameter (OPE-§5.2 writes UTC_TIMESTAMP(3);
  * P4 step 3 binds the app's clock instead, so the DB-backed suite drives leases, callbacks and caps with a fake clock;
  * the app and MariaDB share one host). Every statement goes through the StoreScope seam (§E.3).
@@ -27,7 +30,7 @@ import { can, type StoreRole, STORE_ROLES } from "@/lib/auth/permissions";
 import { callingWindowFor } from "@/lib/callcenter/window.server";
 import { withIdem } from "@/lib/callcenter/idem";
 import { affectedRows, isLive, opsNow, profileOf, releaseClaims, renewHeldLease, touchAgent, writePresence } from "@/lib/callcenter/presence";
-import type { CompiledScript } from "@/lib/callcenter/script";
+import { buildQueueOrder, CARD, cardRow, type CardRow, type QueueOrder } from "@/lib/callcenter/card";
 import { addDaysYmd, instantAt, isCallable, nextCallableAt, storeYmd, type EffectiveWindow } from "@/lib/callcenter/window";
 import { laneOf } from "@/lib/callcenter/priority";
 import { viewerSeesOrder } from "@/lib/callcenter/visibility";
@@ -35,8 +38,6 @@ import { storeLock, withNamedLock } from "@/lib/db/locks";
 import { db, pool, schema } from "@/lib/db/client";
 import { agentProfiles, orderEvents, orders, outbox, storeMembers } from "@/lib/db/schema";
 import { newId } from "@/lib/db/ids";
-import { toCents } from "@/lib/finance/lite/cents";
-import { maskIfImpersonation } from "@/lib/platform/mask";
 import { notify } from "@/lib/platform/notify";
 import type { PulseContributor } from "@/lib/pulse/types";
 import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
@@ -47,70 +48,15 @@ import { SeamError } from "@/lib/tenancy/seam";
 import { getStoreById } from "@/lib/tenancy/public";
 import { byId, inStore, whereStore } from "@/lib/tenancy/sql";
 import type { ActionResult, StoreScope, WriteCtx, WriteScope } from "@/lib/tenancy/types";
-import type { CityKey } from "./address";
-import type { OrderStatus } from "./contract";
-import { appendEvents, countRescueCalls, viewerOf, type NewOrderEvent } from "./events";
-import { maskPhone } from "./masking";
-import { explainRisk, type MessageRef, type RiskReason } from "./risk-explain";
-import { projectStatus, type MoneyState, type OrderStates } from "./state";
+import { appendEvents, viewerOf, type NewOrderEvent } from "./events";
 import { runAfterCommit } from "./transition";
 
 /* ------------------------------------------------------------------ */
 /* the card and the answers (OPE-§5.2, §5.3)                           */
 /* ------------------------------------------------------------------ */
 
-/** The order card of the queue (OPE-§5.3): no full phone, no IP hash, no UA, no e-mail, nothing of another store. */
-export interface QueueOrder {
-  id: string;
-  rev: number;
-  createdAt: string;
-  ageMinutes: number;
-  isTest: boolean;
-  states: OrderStates;
-  status: OrderStatus;
-  attempts: number;
-  dueAt: string | null;
-  product: string;
-  offerLabel: string;
-  /** the warehouse text (src/lib/orders/text.ts), unchanged contract */
-  unitsText: string;
-  totalCents: number;
-  shippingCents: number;
-  currency: string;
-  locale: string | null;
-  customer: {
-    firstName: string;
-    phoneMasked: string;
-    city: string | null;
-    cityKey: string | null;
-    address: string | null;
-    landmark: string | null;
-    note: string | null;
-    history: { orders: number; delivered: number; refused: number; returned: number; cancelled: number; fake: number } | null;
-  };
-  /** OPE-§10.2; calibration = the store's own outcome share for this band (OD39), null below n = 30 */
-  risk: { score: number; level: "low" | "check" | "high"; reasons: RiskReason[]; positive: MessageRef | null; calibration: { badShareBp: number; n: number } | null };
-  /** OPE-§9.3 */
-  duplicates: { id: string; createdAt: string; status: OrderStatus }[];
-  /** OPE-§7 (steps + objection chips) */
-  script: CompiledScript;
-  /** WhatsApp, OPE-§22 */
-  templates: { id: string; kind: string; name: string }[];
-  /** zoneLineFor(scope, order.city_key) (P3): null text = no promise, the card shows nothing (OD47) */
-  eta: { text: string | null; cityKey: CityKey | null };
-  leaseUntil: string | null;
-  mine: boolean;
-  /** OD44: "Your customers pick up most 18h-20h (n = 212)" with ≥ 30 attempts in that cell; else null */
-  ui: { bestHoursHint: MessageRef | null };
-  /** OD48: which outcome grid the card shows */
-  lane: "confirm" | "delivery";
-  /** delivery lane only (lastCarrierStatus = the carrier's own label from shipment_events, R2; null in R1) */
-  delivery: { attempts: number; lastCarrierStatus: string | null; carrierLabel: string | null; trackingRef: string | null; shipAfter: string | null; rescueCallsLeft: number } | null;
-  /** OD49: a hold on a confirmed order */
-  shipAfter: string | null;
-  /** OD53: the card was opened from an inbound lookup, not a claim */
-  inbound?: true;
-}
+/** The order card (OPE-§5.3) is built in src/lib/callcenter/card.ts; re-exported for the queue's callers. */
+export type { QueueOrder } from "@/lib/callcenter/card";
 
 export type NextResult =
   | { ok: true; order: QueueOrder; leaseUntil: string; resumed: boolean; replayed?: true }
@@ -221,117 +167,6 @@ async function activeClaimOf(scope: StoreScope, userId: string, now: Date): Prom
     .where(whereStore(orders, scope, eq(orders.assigneeId, userId), isNotNull(orders.claimToken), gt(orders.leaseUntil, now), inLanes))
     .limit(1);
   return row ?? null;
-}
-
-/* ------------------------------------------------------------------ */
-/* the card                                                            */
-/* ------------------------------------------------------------------ */
-
-/** The columns the card is built from (one row read). */
-const CARD = {
-  id: orders.id,
-  rev: orders.rev,
-  createdAt: orders.createdAt,
-  isTest: orders.isTest,
-  confirmState: orders.confirmState,
-  shipState: orders.shipState,
-  moneyState: orders.moneyState,
-  attempts: orders.attempts,
-  dueAt: orders.dueAt,
-  productName: orders.productName,
-  items: orders.items,
-  total: orders.total,
-  shipping: orders.shipping,
-  currency: orders.currency,
-  locale: orders.locale,
-  name: orders.name,
-  phone: orders.phone,
-  city: orders.city,
-  cityKey: orders.cityKey,
-  address: orders.address,
-  landmark: orders.landmark,
-  note: orders.note,
-  riskScore: orders.riskScore,
-  flags: orders.flags,
-  deliveryAttempts: orders.deliveryAttempts,
-  carrierLabel: orders.carrierLabel,
-  trackingRef: orders.trackingRef,
-  shipAfter: orders.shipAfter,
-  leaseUntil: orders.leaseUntil,
-  assigneeId: orders.assigneeId,
-};
-const cardQuery = (scope: StoreScope, orderId: string) => db.select(CARD).from(orders).where(byId(orders, scope, orderId)).limit(1);
-type CardRow = Awaited<ReturnType<typeof cardQuery>>[number];
-
-async function cardRow(scope: StoreScope, orderId: string): Promise<CardRow | null> {
-  const [row] = await cardQuery(scope, orderId);
-  return row ?? null;
-}
-
-const firstNameOf = (name: string | null): string => (name ?? "").trim().split(/\s+/)[0] ?? "";
-
-/**
- * The queue card (OPE-§5.3). P4 step 3: a minimal typed body from the one row read (the masked customer, the risk
- * sentences, the lane and the delivery strip); step 4 replaces it with the full card (history, calibration,
- * duplicates, the compiled script, templates, ETA, best hours, the warehouse text). Customer fields pass through
- * `maskIfImpersonation` (OD61); the phone leaves masked (OD11).
- */
-export async function buildQueueOrder(scope: StoreScope, row: CardRow, o: { leaseUntil: Date | null; mine: boolean; maxCalls: number; inbound?: boolean }): Promise<QueueOrder> {
-  const states: OrderStates = { confirm: row.confirmState, ship: row.shipState, money: row.moneyState as MoneyState };
-  const lane = laneOf(states) === "delivery" ? "delivery" : "confirm";
-  const c = maskIfImpersonation(scope, { name: row.name, phone: null, address: row.address, city: row.city, landmark: row.landmark, note: row.note });
-  const risk = explainRisk(row.riskScore, row.flags ?? [], null);
-  const delivery =
-    lane === "delivery"
-      ? {
-          attempts: row.deliveryAttempts,
-          lastCarrierStatus: null,
-          carrierLabel: row.carrierLabel,
-          trackingRef: row.trackingRef,
-          shipAfter: iso(row.shipAfter),
-          rescueCallsLeft: Math.max(0, o.maxCalls - (await countRescueCalls(db, scope, row.id))),
-        }
-      : null;
-  return {
-    id: row.id,
-    rev: row.rev,
-    createdAt: row.createdAt.toISOString(),
-    ageMinutes: Math.max(0, Math.floor((Date.now() - row.createdAt.getTime()) / 60_000)),
-    isTest: row.isTest,
-    states,
-    status: projectStatus(states),
-    attempts: row.attempts,
-    dueAt: iso(row.dueAt),
-    product: row.productName,
-    offerLabel: row.items?.bundleLabel ?? "",
-    unitsText: "",
-    totalCents: toCents(row.total),
-    shippingCents: toCents(row.shipping),
-    currency: row.currency,
-    locale: row.locale,
-    customer: {
-      firstName: firstNameOf(c.name),
-      phoneMasked: maskPhone(row.phone),
-      city: c.city,
-      cityKey: row.cityKey,
-      address: c.address,
-      landmark: c.landmark,
-      note: c.note,
-      history: null,
-    },
-    risk: { score: row.riskScore, level: risk.level, reasons: risk.reasons, positive: risk.positive, calibration: null },
-    duplicates: [],
-    script: { steps: [], objections: [] },
-    templates: [],
-    eta: { text: null, cityKey: row.cityKey as CityKey | null },
-    leaseUntil: iso(o.leaseUntil),
-    mine: o.mine,
-    ui: { bestHoursHint: null },
-    lane,
-    delivery,
-    shipAfter: iso(row.shipAfter),
-    ...(o.inbound ? { inbound: true as const } : {}),
-  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -583,7 +418,7 @@ async function nextOrderTurn(ctx: WriteCtx): Promise<NextResult> {
     const row = await cardRow(scope, held.id);
     if (row) {
       const leaseUntil = row.leaseUntil ?? new Date(now.getTime() + ops.leaseMinutes * 60_000);
-      return { ok: true, order: await buildQueueOrder(scope, row, { leaseUntil, mine: true, maxCalls: ops.rescue.maxCalls }), leaseUntil: leaseUntil.toISOString(), resumed: true };
+      return { ok: true, order: await buildQueueOrder(scope, row, ctx, { leaseUntil, mine: true, maxCalls: ops.rescue.maxCalls }), leaseUntil: leaseUntil.toISOString(), resumed: true };
     }
   }
 
@@ -607,7 +442,7 @@ async function nextOrderTurn(ctx: WriteCtx): Promise<NextResult> {
   // 7. the card
   return {
     ok: true,
-    order: await buildQueueOrder(scope, claimed.row, { leaseUntil: claimed.until, mine: true, maxCalls: ops.rescue.maxCalls }),
+    order: await buildQueueOrder(scope, claimed.row, ctx, { leaseUntil: claimed.until, mine: true, maxCalls: ops.rescue.maxCalls }),
     leaseUntil: claimed.until.toISOString(),
     resumed: false,
   };
@@ -837,7 +672,7 @@ async function takeTurn(ctx: WriteCtx, orderId: string, opts: { inbound: boolean
   if (await claimEvents(scope, uid, claimed, now, opts.inbound ? "inbound" : "claim")) await runAfterCommit("ops:abandoned", () => notifyAbandoned(scope));
   return {
     ok: true,
-    order: await buildQueueOrder(scope, claimed.row, { leaseUntil: claimed.until, mine: true, maxCalls: ops.rescue.maxCalls, inbound: opts.inbound }),
+    order: await buildQueueOrder(scope, claimed.row, ctx, { leaseUntil: claimed.until, mine: true, maxCalls: ops.rescue.maxCalls, inbound: opts.inbound }),
     leaseUntil: claimed.until.toISOString(),
     resumed: false,
   };

@@ -15,11 +15,19 @@
  *     set), releaseOrder, recordOutcome (inbound or not) and renewLease with A's ids answer what missing ids answer;
  *     assignOrders answers A's ids per id exactly like missing ones; A's Idempotency-Key replayed in B is a fresh
  *     answer, never A's card; B's pulse counts B's rows only; releaseAllLeases(B) leaves A alone; A is byte-identical
+ * Step 4 (the card, the reveal, the inbound lookup, the hot-path routes) adds:
+ *   - revealPhone, addNote and inboundLookup as B's members with A's ids and A's customer phone: the answers of
+ *     missing ids, the empty inbound shape, no canary of A
+ *   - the four routes `POST /api/app/<h>/ops/*` through storeGuard with an Idempotency-Key: reveal and outcome with A's
+ *     ids answer the 404 of a missing id, next as B's agent never hands out A's orders; the key is required (400
+ *     `idem_required`) and a body over 2 KB is refused (413)
+ *   - `actions`: the attack cases of the nine queue actions (src/app/app/[store]/queue/actions.ts), which join the
+ *     harness's action × role suite
  * Modules are loaded inside the cases (the harness has set the environment by then): this file imports types only.
  */
 import Module from "node:module";
 import { randomUUID } from "node:crypto";
-import type { TenancyCase, TenancyKit } from "../tenancy-check";
+import type { TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
 import type { StoreCtx, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 
 const load = <T>(id: string): T => Module.createRequire(__filename)(id) as T;
@@ -251,4 +259,118 @@ export const cases: TenancyCase[] = [
       kit.check("ops queue: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
     },
   },
+  {
+    name: "ops hot path: B never reveals, looks up or records A's orders, through the functions and the four routes",
+    async run(kit) {
+      await seedOnce(kit);
+      const R = load<typeof import("@/lib/callcenter/reveal")>("@/lib/callcenter/reveal");
+      const I = load<typeof import("@/lib/callcenter/inbound")>("@/lib/callcenter/inbound");
+      const E = load<typeof import("@/lib/orders/events")>("@/lib/orders/events");
+      const before = await kit.snapshotA();
+      const real = { order: kit.fx.A.order.main };
+      const ghost = { order: kit.ghostify(real.order) };
+
+      // the functions: A's ids from B answer what missing ids answer
+      const attacks: [string, (x: typeof real) => ReturnType<typeof asB>][] = [
+        ["revealPhone(B's owner, A's order)", (x) => asB(kit, "owner", (_c, w) => R.revealPhone(w, x.order, "call", { idem: randomUUID() }))],
+        ["revealPhone(B's agent, A's order, WhatsApp)", (x) => asB(kit, "agent", (_c, w) => R.revealPhone(w, x.order, "whatsapp", { templateId: "builtin:wa:confirm", idem: randomUUID() }))],
+        ["addNote(B's agent, A's order)", (x) => asB(kit, "agent", (_c, w) => E.addNote(w, x.order, "pwned"))],
+      ];
+      for (const [label, fn] of attacks) await same(kit, label, await fn(real), await fn(ghost));
+
+      // B's agent looking A's customer up: the empty shape (or B's own orders of that number), never A's
+      const look = await asB(kit, "agent", (c) => I.inboundLookup(c, kit.fx.A.customer.phone));
+      if (kit.ranReal("inboundLookup(B's agent, A's customer phone)", look)) {
+        const v = look.value as Awaited<ReturnType<typeof I.inboundLookup>>;
+        const ids = v.ok ? v.data.orders.map((o) => o.id) : [];
+        kit.check("inboundLookup(B's agent, A's customer phone): no order of A, no canary of A", v.ok && !ids.includes(kit.fx.A.order.main) && !ids.includes(kit.fx.A.order.failed) && kit.leaks(answer(look), { sent: kit.fx.A.customer.phone }).length === 0, answer(look));
+      }
+
+      // the routes (OD36): the same answers through storeGuard, with an Idempotency-Key
+      const route = (name: string) => ({ file: `src/app/api/app/[store]/ops/${name}/route.ts`, template: `/api/app/[store]/ops/${name}`, methods: ["POST"] });
+      const post = (who: string, name: string, body: unknown, headers: Record<string, string> = { "idempotency-key": randomUUID() }) =>
+        kit.callRoute({ userId: who }, route(name), "POST", { store: kit.fx.B.handle }, { body }, { headers });
+      const status = (o: Awaited<ReturnType<typeof post>>) => (o.ok ? { status: o.value!.status, body: o.value!.body } : answer(o));
+      for (const [label, name, body] of [
+        ["POST /ops/reveal (B's owner, A's order)", "reveal", (x: typeof real) => ({ orderId: x.order, why: "call" })],
+        ["POST /ops/reveal (B's owner, A's order, WhatsApp)", "reveal", (x: typeof real) => ({ orderId: x.order, why: "whatsapp", templateId: "builtin:wa:confirm" })],
+        ["POST /ops/outcome (B's owner, A's order)", "outcome", (x: typeof real) => ({ orderId: x.order, expectRev: 0, channel: "call", outcome: "no_answer" })],
+        ["POST /ops/outcome (B's owner, A's order, inbound)", "outcome", (x: typeof real) => ({ orderId: x.order, expectRev: 0, channel: "call", outcome: "confirmed", inbound: true })],
+      ] as const) {
+        const r = await post(kit.fx.B.members.owner, name, body(real));
+        const g = await post(kit.fx.B.members.owner, name, body(ghost));
+        if (!kit.ranReal(label, r, g)) continue;
+        const rs = status(r) as { status?: number; body?: string };
+        const gs = status(g) as { status?: number; body?: string };
+        kit.check(`${label}: 404, the answer of a missing id`, rs.status === 404 && JSON.stringify(rs) === JSON.stringify(gs).split(ghost.order).join(real.order), { real: rs, ghost: gs });
+        kit.check(`${label}: no canary of A`, kit.leaks(rs, { sent: real.order }).length === 0, kit.leaks(rs, { sent: real.order }));
+      }
+      const next = await post(kit.fx.B.members.agent, "next", {});
+      if (kit.ranReal("POST /ops/next (B's agent)", next)) {
+        const n = status(next) as { status?: number; body?: string };
+        kit.check("POST /ops/next (B's agent): 200, never one of A's orders, no canary of A", n.status === 200 && !String(n.body).includes(kit.fx.A.order.main) && !String(n.body).includes(kit.fx.A.order.failed) && kit.leaks(n).length === 0, n);
+      }
+      // the hot-path contract itself (OD36): the key is required, the body is bounded
+      const noKey = await post(kit.fx.B.members.agent, "next", {}, {});
+      const big = await post(kit.fx.B.members.owner, "reveal", { orderId: "X", why: "call", templateId: "x".repeat(3_000) });
+      const pres = await kit.callRoute({ userId: kit.fx.B.members.agent }, route("presence"), "POST", { store: kit.fx.B.handle }, { body: { heartbeat: true } }, {});
+      if (kit.ranReal("the hot-path contract", noKey, big, pres)) {
+        kit.check("POST /ops/next without an Idempotency-Key: 400 idem_required", (status(noKey) as { status?: number }).status === 400 && String((status(noKey) as { body?: string }).body).includes("idem_required"), status(noKey));
+        kit.check("POST /ops/reveal with a body over 2 KB: 413", (status(big) as { status?: number }).status === 413, status(big));
+        kit.check("POST /ops/presence heartbeat: 200 without a key", (status(pres) as { status?: number }).status === 200, status(pres));
+      }
+      kit.check("ops hot path: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
+    },
+  },
+];
+
+/* ------------------------------------------------------------------ */
+/* the queue's server actions (src/app/app/[store]/queue/actions.ts)    */
+/* ------------------------------------------------------------------ */
+
+const QUEUE = "src/app/app/[store]/queue/actions.ts";
+/** an Idempotency-Key the cache refuses (not a UUID): the real and the ghost call each run, never a replay of the other */
+const NO_CACHE = "tenancy-no-cache";
+
+/** A note of `orderId` (its event id), or an id no note has. */
+async function noteOf(orderId: string): Promise<number> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { and, eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const [row] = await db
+    .select({ id: S.orderEvents.id })
+    .from(S.orderEvents)
+    .where(and(eq(S.orderEvents.orderId, orderId), eq(S.orderEvents.type, "note")))
+    .limit(1);
+  return row?.id ?? GHOST_EVENT;
+}
+
+export const actions: TrackActionCase[] = [
+  { file: QUEUE, name: "nextOrderAction", area: "orders", path: "/queue", permission: ["agents.self"], write: true, victim: () => [randomUUID()], own: () => [randomUUID()] },
+  { file: QUEUE, name: "releaseOrderAction", area: "orders", path: "/queue", permission: ["agents.self"], write: true, victim: (fx) => [fx.A.order.main, "skip"], own: (fx) => [fx.B.order.main, "skip"] },
+  { file: QUEUE, name: "setPresenceAction", area: "orders", path: "/queue", permission: ["agents.self"], write: true, victim: () => ["online"], own: () => ["online"] },
+  {
+    file: QUEUE,
+    name: "recordOutcomeAction",
+    area: "orders",
+    path: "/queue",
+    permission: ["orders.write"],
+    write: true,
+    victim: (fx) => [{ orderId: fx.A.order.main, expectRev: 0, channel: "call", outcome: "no_answer", idem: NO_CACHE }],
+    own: async (fx, fresh) => [{ orderId: await fresh.order(fx.B), expectRev: 0, channel: "call", outcome: "no_answer", idem: NO_CACHE }],
+  },
+  { file: QUEUE, name: "revealPhoneAction", area: "orders", path: "/queue", permission: ["orders.reveal_phone"], write: true, victim: (fx) => [fx.A.order.main, "call"], own: (fx) => [fx.B.order.main, "call"] },
+  { file: QUEUE, name: "addNoteAction", area: "orders", path: "/queue", permission: ["orders.write"], write: true, victim: (fx) => [fx.A.order.main, "pwned"], own: (fx) => [fx.B.order.main, "Rappeler après 18h"] },
+  {
+    file: QUEUE,
+    name: "editNoteAction",
+    area: "orders",
+    path: "/queue",
+    permission: ["orders.write"],
+    write: true,
+    victim: async (fx) => [fx.A.order.main, await noteOf(fx.A.order.main), "pwned"],
+    own: async (fx) => [fx.B.order.main, await noteOf(fx.B.order.main), "Rappeler après 19h"],
+  },
+  { file: QUEUE, name: "takeOrderAction", area: "orders", path: "/queue", permission: ["agents.self"], write: true, victim: (fx) => [fx.A.order.main, { inbound: true }], own: (fx) => [fx.B.order.main, {}] },
+  { file: QUEUE, name: "inboundLookupAction", area: "orders", path: "/queue", permission: ["agents.self"], write: true, victim: (fx) => [fx.A.customer.phone], own: (fx) => [fx.B.customer.phone] },
 ];
