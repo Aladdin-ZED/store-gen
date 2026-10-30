@@ -9,8 +9,20 @@
  *    B each get a canary in `store_ai.voice.wordsAvoid` and their own policies; B's context carries B's and none of
  *    A's (nor any harness canary of A), A's context carries A's (the check is not blind), and the read leaves A's rows
  *    as they were. The browser never sends these fields, so the scope is the only way in.
+ *
+ * Reads (step 4):
+ *  - `storeBlockCtxFor(scope, store, deps)` and `assembleFor(…)` (src/lib/ai/prompts/assemble.server.ts): block 3 of
+ *    a prompt (policies, voice, memory) is read through the scope. B's assembled copy prompt carries B's policy and
+ *    banned word and none of A's (nor any harness canary of A), and block 2 is byte-identical for A and B. A memory
+ *    repository that hands A's rows to B's scope (a planted bug) makes the assembly throw `cross_store_context`
+ *    with no row text in the error, and the refusal is reported with B's store id only.
  */
 import { randomBytes } from "node:crypto";
+import { assembleFor, storeBlockCtxFor } from "@/lib/ai/prompts/assemble.server";
+import { AiAssemblyError } from "@/lib/ai/prompts/assemble";
+import type { PromptMemoryRow } from "@/lib/ai/prompts/store-block";
+import { PROMPTS } from "@/lib/ai/prompts/registry";
+import type { AiTaskInput } from "@/lib/ai/provider/types";
 import { finalizeCtxFor } from "@/lib/ai/schema/tasks/ctx.server";
 import { setStoreSetting } from "@/lib/settings";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
@@ -45,6 +57,53 @@ export const cases: TenancyCase[] = [
       const asA = await finalizeCtxFor(kit.scope("A"), input);
       kit.check("ai/finalizeCtxFor(A): A's own banned words and policies (the check is not blind)", asA.wordsAvoid?.includes(avoid.A) === true && asA.policies.returns.windowDays === 23, { wordsAvoid: asA.wordsAvoid, returns: asA.policies.returns });
       kit.check("ai/finalizeCtxFor: the read leaves A's rows as they were", (await kit.snapshotA()) === before);
+    },
+  },
+  {
+    name: "ai: the prompt's store layer is read through the scope; another store's rows are refused",
+    async run(kit) {
+      const tag = randomBytes(4).toString("hex");
+      const avoid = { A: `ai-block-a-${tag}`, B: `ai-block-b-${tag}` };
+      for (const key of ["A", "B"] as const) {
+        const scope = kit.scope(key);
+        if (!writable(scope)) throw new Error(`ai: the harness scope of ${key} is not a member scope`);
+        const actor = { id: kit.fx[key].members.owner, ip: null };
+        await setStoreSetting(scope, "store_ai", { voice: { wordsAvoid: [avoid[key]] } }, actor);
+        await setStoreSetting(scope, "policies", { warranty: { months: key === "A" ? 17 : 5 } }, actor);
+      }
+      const store = { market: "MA" as const, currency: "MAD", primaryLocale: "fr" as const };
+      const row = (storeId: string, text: string): PromptMemoryRow => ({ id: `mem-${tag}`, storeId, kind: "prefer", text, locale: null, source: "explicit", active: true, pinned: false, evidence: null });
+      const memoryOf = (scope: { storeId: string }) => [row(scope.storeId, `note ${scope.storeId === kit.scope("A").storeId ? avoid.A : avoid.B}`)];
+      const before = await kit.snapshotA();
+      const input: AiTaskInput<"copy.page"> = { locale: "fr", market: "MA", product: { name: "Sérum", category: "skincare", priceMinor: 19_900, currency: "MAD", facts: [] }, analysis: null, deliveryText: null, direction: null, kickers: null };
+      const p = PROMPTS["copy.page@s1"]!;
+
+      const ctxB = await storeBlockCtxFor(kit.scope("B"), store, { memory: async (s) => memoryOf(s) });
+      kit.check("ai/storeBlockCtxFor(B): B's banned word and warranty", ctxB.voice.wordsAvoid.includes(avoid.B) && ctxB.policies.warranty.months === 5, { words: ctxB.voice.wordsAvoid, warranty: ctxB.policies.warranty });
+      kit.check("ai/storeBlockCtxFor(B): none of A's", !JSON.stringify(ctxB).includes(avoid.A) && kit.leaks(ctxB).length === 0, kit.leaks(ctxB));
+
+      const asB = await assembleFor(kit.scope("B"), p, input, store, {}, { memory: async (s) => memoryOf(s) });
+      const asA = await assembleFor(kit.scope("A"), p, input, store, {}, { memory: async (s) => memoryOf(s) });
+      if (asB.blocked || asA.blocked) throw new Error("ai: a clean input was blocked by the PII gate");
+      const bodyB = JSON.stringify(asB.prompt);
+      kit.check("ai/assembleFor(B): B's prompt carries B's policy and words", bodyB.includes("Warranty: 5 months.") && bodyB.includes(avoid.B), bodyB.length);
+      kit.check("ai/assembleFor(B): no A data, no canary of A", !bodyB.includes(avoid.A) && !bodyB.includes("Warranty: 17 months.") && kit.leaks(asB.prompt).length === 0, kit.leaks(asB.prompt));
+      kit.check("ai/assembleFor(A): A's own (the check is not blind)", JSON.stringify(asA.prompt).includes(avoid.A) && JSON.stringify(asA.prompt).includes("Warranty: 17 months."));
+      kit.check("ai/assembleFor: block 2 is byte-identical for A and B", asA.prompt.system[0]!.text === asB.prompt.system[0]!.text);
+      kit.check("ai/assembleFor: block 3 differs between A and B", asA.prompt.system[1]!.text !== asB.prompt.system[1]!.text && asA.prompt.voiceVersion !== asB.prompt.voiceVersion);
+
+      // a planted repository bug: A's memory rows handed to B's scope
+      const reported: string[] = [];
+      let refused: unknown = null;
+      try {
+        await assembleFor(kit.scope("B"), p, input, store, {}, { memory: async () => memoryOf(kit.scope("A")), recordError: (_area, _err, meta) => reported.push(meta.storeId) });
+      } catch (err) {
+        refused = err;
+      }
+      kit.check("ai/assembleFor(B) with A's memory rows: cross_store_context", refused instanceof AiAssemblyError && refused.code === "cross_store_context" && refused.area === "ai", String(refused));
+      kit.check("ai/assembleFor: the refusal carries no row text", !(refused instanceof Error && refused.message.includes(avoid.A)));
+      kit.check("ai/assembleFor: the refusal is reported with B's store id only", reported.length === 1 && reported[0] === kit.scope("B").storeId, reported);
+      kit.check("ai/assembleFor: the reads leave A's rows as they were", (await kit.snapshotA()) === before);
     },
   },
 ];

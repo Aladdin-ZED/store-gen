@@ -16,6 +16,7 @@
  *  - the upsell step only when the store configured an upsell;
  *  - the result parses with `ScriptDoc`, else null.
  */
+import { z } from "zod";
 import { ScriptDoc } from "@/lib/callcenter/script";
 import { TEMPLATE_VARS } from "@/lib/integrations/templates";
 import { allowedNumbersFor, guardText } from "../../guard";
@@ -42,6 +43,23 @@ export type { ScriptDoc as CallScriptOut } from "@/lib/callcenter/script";
 /** the variables an objection answer may use: the store's facts, never the customer's */
 export const OBJECTION_VARS: readonly string[] = ["eta_text", "total", "confirm_number", "confirm_hours", "store_name", "offer_label", "shipping_text", "product", "units_text", "qty"];
 
+export const OBJECTION_IDS = ["price", "trust", "delivery_time", "think", "cheaper_elsewhere", "wrong_size"] as const;
+/** The loose script the model writes (AI-§B.4): `ScriptDoc` without its version and its limits; finalize builds the doc. */
+export const CallScriptLoose = z.object({
+  steps: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      say: z.string(),
+      checks: z.array(z.string()),
+      when: z.enum(["always", "upsell"]),
+      action: z.enum(["none", "add_upsell", "edit_address"]),
+    }),
+  ),
+  objections: z.array(z.object({ id: z.enum(OBJECTION_IDS), say: z.string() })),
+});
+export const CALL_SCRIPT_LOOSE_JSON = z.toJSONSchema(CallScriptLoose) as Record<string, unknown>;
+
 /* ------------------------------------------------------------------ */
 /* Unconfigured offers (per locale, folded text)                       */
 /* ------------------------------------------------------------------ */
@@ -56,8 +74,10 @@ const DELAY = /(?<!\p{L})(?:reporter|decaler|plus\s+tard|livrer\s+la\s+semaine\s
 /* Address step (UX-31)                                                */
 /* ------------------------------------------------------------------ */
 
-type Step = ScriptDoc["steps"][number];
-const ADDRESS_STEP: Record<"optional" | "required", Record<CopyLocale, Step>> = {
+export type ScriptStep = ScriptDoc["steps"][number];
+type Step = ScriptStep;
+/** The canonical address step per `checkout.addressMode` (UX-31): finalize puts it back, the library script starts from it. */
+export const ADDRESS_STEP: Readonly<Record<"optional" | "required", Readonly<Record<CopyLocale, Step>>>> = {
   optional: {
     fr: { id: "address", title: "Adresse", say: "Vous êtes bien à {city} ? Quel est votre quartier, et un repère proche pour le livreur ?", checks: ["Quartier noté", "Repère noté"], when: "always", action: "edit_address" },
     ar: { id: "address", title: "العنوان", say: "واش انت ف {city}؟ شنو هو الحي ديالك، وشي علامة قريبة للموزع؟", checks: ["الحي", "العلامة القريبة"], when: "always", action: "edit_address" },

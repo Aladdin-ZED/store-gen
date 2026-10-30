@@ -4,6 +4,7 @@
  * direction's headline structure: `headlineStructureOf` (the detector) must read the structure the direction asked
  * for, so the three packs of one run differ in structure (AI-02 acceptance 1).
  */
+import { z } from "zod";
 import type { HeadlineStructure } from "@/lib/design/genome";
 import type { Locale } from "@/lib/page/schema";
 import { allowedNumbersFor, guardText } from "../../guard";
@@ -30,6 +31,10 @@ export interface HeroPack {
 export type HeroPackOut = Partial<HeroPack>;
 
 export const HERO_MAX = { kicker: 56, headline: 84, sub: 190, cta: 32 } as const;
+
+/** The loose pack the model writes (AI-§B.4): every key, no length (finalize enforces `HERO_MAX`), display order. */
+export const HeroPackLoose = z.object({ kicker: z.string(), headline: z.string(), sub: z.string(), cta: z.string() });
+export const HERO_PACK_LOOSE_JSON = z.toJSONSchema(HeroPackLoose) as Record<string, unknown>;
 
 /* ------------------------------------------------------------------ */
 /* Headline structure detector (G29, DES-§9.5)                         */

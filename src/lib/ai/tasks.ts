@@ -300,7 +300,8 @@ export const TASKS: Readonly<Record<AiTaskId, TaskDef>> = {
     fallbacks: "default",
     batch: "never",
     pii: "none",
-    untrusted: ["product.name", "product.facts[]"],
+    // DirectorPlanInput = { brief, images }: the owner-typed text sits under the brief (step 4 fix: the paths missed it)
+    untrusted: ["brief.product.name", "brief.product.facts[]"],
     estimate: { inTok: 4_900, cachedTok: 9_000, outTok: 4_300, images: 3 },
     payer: "store",
     cacheTtlDays: 0,

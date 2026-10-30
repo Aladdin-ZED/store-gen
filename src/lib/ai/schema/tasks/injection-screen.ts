@@ -6,11 +6,16 @@
  * characters of the screened text: a longer echo is cut out (a screen must not become the channel that carries the
  * payload into the console).
  */
+import { z } from "zod";
 import { fitText } from "../../copy-library";
 import { isRecord, type Finalize } from "./types";
 
 export type InjectionScreenInput = { text: string; source: "import" | "sheet" | "note" };
 export type InjectionScreenOut = { suspicious: boolean; reason: string };
+
+/** The loose answer (AI-§B.4); finalize caps the reason and cuts any echo of the screened text. */
+export const ScreenLoose = z.object({ suspicious: z.boolean(), reason: z.string() });
+export const SCREEN_LOOSE_JSON = z.toJSONSchema(ScreenLoose) as Record<string, unknown>;
 
 export const REASON_MAX = 120;
 /** the longest run of the screened text a reason may repeat */

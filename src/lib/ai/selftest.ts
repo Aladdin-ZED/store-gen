@@ -25,6 +25,9 @@
  * policies, darija, library, finalize-analyze, finalize-copy, finalize-brief, finalize-script.
  * Sections (step 3, the Director's pure layer; ./selftest-director.ts): director-seams, director-vocab, director-rubric,
  * director-budgets, director-plan, director-critique, director-accept, director-brief (and director-strict).
+ * Sections (step 4, the prompt registry, the assembly and the eval set; ./selftest-prompts.ts): prompts-sha,
+ * prompts-registry, prompts-text, prompts-blocks, prompts-voice, prompts-policies, prompts-canary, prompts-isolation,
+ * prompts-pii, prompts-fixtures, prompts-library (and prompts-strict).
  * Exits 1 on any failure.
  */
 import { isDeepStrictEqual } from "node:util";
@@ -60,6 +63,7 @@ import { ANTHROPIC_KEY_RE, PlatformAiSecret } from "@/lib/settings/keys/platform
 import { StoreAi } from "@/lib/settings/keys/store_ai";
 import { registerDirectorSections } from "./selftest-director";
 import { registerGuardSections } from "./selftest-guard";
+import { registerPromptSections } from "./selftest-prompts";
 
 /* ------------------------------------------------------------------ */
 /* The runner                                                          */
@@ -1107,6 +1111,7 @@ section("protocol", () => {
 
 registerGuardSections({ section, check, eq, strict: STRICT });
 registerDirectorSections({ section, check, eq, strict: STRICT });
+registerPromptSections({ section, check, eq, strict: STRICT });
 
 /* ------------------------------------------------------------------ */
 /* run                                                                 */

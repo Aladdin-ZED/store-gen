@@ -1,0 +1,10 @@
+{"family":"judge","version":"library","source":{"rung":"library","model":null},"fixturesHash":"5ff91854fc0807b25edd2631940c72a60a5bb3724e834275a88c6bae69eed771",
+  "outputs": {
+    "judge/core-blender-en-dont-know": {"verdict":"B","reason":"output A is empty or declines"},
+    "judge/core-blender-en-verbosity": {"verdict":"tie","reason":"library judge: no preference beyond the known negatives"},
+    "judge/core-serum-fr-empty": {"verdict":"A","reason":"output B is empty or declines"},
+    "judge/core-serum-fr-identical": {"verdict":"tie","reason":"library judge: no preference beyond the known negatives"},
+    "judge/core-serum-fr-invented-figure": {"verdict":"tie","reason":"library judge: no preference beyond the known negatives"},
+    "judge/core-serum-fr-wrong-product": {"verdict":"tie","reason":"library judge: no preference beyond the known negatives"}
+  }
+}

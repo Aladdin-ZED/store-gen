@@ -5,6 +5,7 @@
  * the guide's Darija, `formal` keeps the vouvoiement, `translate` keeps every number and unit of the source and the
  * product name as written, `differentiate` (the novelty re-ask) leaves the colliding structure and lines.
  */
+import { z } from "zod";
 import { allowedNumbersFor, guardText } from "../../guard";
 import { latinFold, numbersIn, type NumberToken } from "../../guard-numbers";
 import { DARIJA_WORDS } from "../../prompts/darija-orthography";
@@ -37,6 +38,10 @@ export interface FieldRewriteOut {
 }
 
 export const MAX_VARIANTS = 3;
+
+/** The loose answer (AI-§B.4): up to five candidates, no length; finalize keeps the first three that pass. */
+export const FieldRewriteLoose = z.object({ variants: z.array(z.string()) });
+export const FIELD_REWRITE_LOOSE_JSON = z.toJSONSchema(FieldRewriteLoose) as Record<string, unknown>;
 /** candidates read from the model before the three are kept (a failing one makes room for the next) */
 const MAX_CANDIDATES = 5;
 
