@@ -44,6 +44,9 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **TRACKS RELAUNCHED 2026-10-29 ~19:20** (heartbeat turn) after a THIRD outage (~15:00-19:15) made both runs give up
+  (6 failed attempts per track). New runs: group A task `wvimu8elw` run `wf_6bdfcf07-867` (P8 from 6, P2 5, P1 5, P5 5),
+  group B task `w765hey2d` run `wf_a7a5cb60-348` (P4 4, P3 3, P7 4, P6 4). 28/106 steps validated at relaunch.
 - **NETWORK OUTAGE 2026-10-29 ~12:00 → ~14:54** (ENOTFOUND / request timeouts; P5 step 5 and P1 step 5 retried as #2, 26/106
   steps validated at 14:55).
 - **NETWORK OUTAGE 2026-10-28 ~13:12 → 2026-10-29 ~09:28** (agents died with ENOTFOUND "Can't reach the API server"). The
