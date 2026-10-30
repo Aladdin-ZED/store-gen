@@ -44,6 +44,15 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **PAUSED BY THE OWNER 2026-10-30 ~23:24** ("stop everything for now until i tell you to continue"). The heartbeat cron
+  4d541dce is deleted (no scheduled jobs); both track runs stopped at 23:23 (wf_6bdfcf07-867, wf_a7a5cb60-348, already in
+  qa/lead/track-runs.json); no worktree processes or servers left. State: 31/106 steps validated (P8 6, P1 4, P2 4, P4 4, P5 4,
+  P7 4, P6 3, P3 2) = overall ≈ 38.9%; each worktree keeps its in-progress step's uncommitted work.
+  **TO RESUME (only when the owner says continue):** check the network; `node qa/lead/relaunch-args.mjs`; launch the two
+  workflows (scriptPath qa/lead/r1-tracks.js, args = JSON of qa/lead/tracks-A-next.json / tracks-B-next.json; 12 tries per
+  step); append the new run ids to track-runs.json; re-create the heartbeat cron (13,33,53 * * * *) with the standing-request
+  text of job 4d541dce (quoted in the memory file workflow-launch-relay.md / this log); renew request_keep_awake each heartbeat.
+
 - **PC ASLEEP ~2026-10-29 19:30 → 2026-10-30 21:40** (no progress for ~26 h; Windows time-resync events at wake; the runs
   resumed by themselves with 0 failures). Lead now calls request_keep_awake(session_idle) at every heartbeat; it prevents
   IDLE sleep only: a closed lid or a manual Sleep still stops everything (owner: keep the PC on, lid open, plugged in).
