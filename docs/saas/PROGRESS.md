@@ -44,6 +44,9 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **PC ASLEEP ~2026-10-29 19:30 → 2026-10-30 21:40** (no progress for ~26 h; Windows time-resync events at wake; the runs
+  resumed by themselves with 0 failures). Lead now calls request_keep_awake(session_idle) at every heartbeat; it prevents
+  IDLE sleep only: a closed lid or a manual Sleep still stops everything (owner: keep the PC on, lid open, plugged in).
 - **TRACKS RELAUNCHED 2026-10-29 ~19:20** (heartbeat turn) after a THIRD outage (~15:00-19:15) made both runs give up
   (6 failed attempts per track). New runs: group A task `wvimu8elw` run `wf_6bdfcf07-867` (P8 from 6, P2 5, P1 5, P5 5),
   group B task `w765hey2d` run `wf_a7a5cb60-348` (P4 4, P3 3, P7 4, P6 4). 28/106 steps validated at relaunch.
