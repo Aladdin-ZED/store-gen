@@ -3,21 +3,23 @@
  *   GET    ?page&pageSize&kind=image|video&filter=cutout|photo&q&sourceAssetId  → the store's assets (media.read)
  *   POST   multipart/form-data: file (required), cutout ("1"), sourceAssetId          → processed asset (media.write)
  *   DELETE ?id=<assetId>[&force=1]                                                    → { ok: true } (media.write)
- *          409 { error: "in_use", pages, storeLogo } when a live page of THIS store or one of its logos shows the
- *          file (only this store's page names): the caller confirms with the member, then repeats with force=1.
+ *          409 { error: "in_use", pages, storeLogo } when a live page of THIS store or its logo shows the file
+ *          (`deleteAsset` → AssetInUseError; only this store's page names, MED-12): the caller confirms with the
+ *          member, then repeats with force=1 (audited `forced`).
  * Pages referencing a deleted asset keep rendering (missing assets resolve to null).
  *
- * Every handler starts with `storeGuard(req, params.store, …)`: session, active membership of this store, the store
- * role matrix and state, the platform host class and (writes) the same-origin check. Another store's asset id
- * answers exactly like a missing one. This route is outside the proxy matcher (§C.3, MED-16), so the proxy never
- * buffers a copy of the (≤ 25 MB) upload body. Uploads then pass, in order: the `uploads_enabled` kill switch, the
- * platform database floor (DB backend only; a generic message, never the platform's fill level, MED-13), an
- * in-flight slot per store and member, the member's request bucket `s:<sid>:media:upload:<userId>`, the store's
- * daily byte budget `s:<sid>:media:bytes`, and finally the store's media quota inside the pipeline (413 `quota`).
+ * Every handler starts with `storeGuard(req, params.store, …)` (§F.1 L13): session, active membership of this store,
+ * the store role matrix and state, the platform host class and (writes) the same-origin check. Another store's asset
+ * id answers exactly like a missing one. This route is outside the proxy matcher (§C.3, MED-16), so the proxy never
+ * buffers a copy of the (≤ 25 MB) upload body. Uploads then pass, in order (§G.4): the `uploads_enabled` and
+ * `platform_read_only` kill switches, the platform database floor (only while media is stored in the database, the
+ * fallback of §G.3; a generic message, never the platform's fill level, MED-13), an in-flight slot per store and
+ * member, the member's request bucket `s:<sid>:media:upload:<userId>`, the store's daily byte budget
+ * `s:<sid>:media:bytes`, and finally the store's media quota inside the pipeline (413 `quota`, the sandbox message for
+ * a pending store).
  */
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { isStoreLogo, livePagesUsing } from "@/lib/admin-data/assets";
 import { auditIn } from "@/lib/admin-data/store-audit";
 import { getDbUsage, invalidateDbUsage } from "@/lib/db/usage";
 import {
@@ -30,13 +32,16 @@ import {
   MediaError,
   processUpload,
   QuotaError,
-  quotaKind,
 } from "@/lib/media";
+import { AssetInUseError, inUseAnswer } from "@/lib/media/assets";
+import { quotaRefusal } from "@/lib/media/process";
 import { spendUploadBytes } from "@/lib/media/daily-bytes";
+import { mediaBackendReady } from "@/lib/media/storage";
 import { declaredLength, multipartBoundary, parseMultipart, readCappedBody, readExactBody } from "@/lib/media/upload-body";
 import { takeUploadSlot } from "@/lib/media/upload-slots";
 import { json, logError } from "@/lib/orders/http";
 import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
+import { assetUsage } from "@/lib/storage/asset-refs";
 import { activeKillSwitches } from "@/lib/tenancy/entitlements";
 import { storeGuard } from "@/lib/tenancy/seam";
 import type { WriteCtx } from "@/lib/tenancy/types";
@@ -50,11 +55,6 @@ const MAX_BODY = MAX_FILE + 256 * 1024;
 const tooLarge = () => json({ ok: false, error: "too_large", message: new MediaError("too_large").message }, 413);
 const busy = (status: 429 | 503, retryAfter: number) =>
   json({ ok: false, error: "busy", message: new MediaError("busy").message }, status, { "Retry-After": String(retryAfter) });
-
-const QUOTA_MESSAGES = {
-  store: "Your store's media storage is full. Delete photos or videos you no longer use, then upload again.",
-  pending: "Uploads are limited while your store is waiting for review. Delete files you no longer use, or try again after the review.",
-} as const;
 
 const ListQuery = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
@@ -94,8 +94,9 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
     if (tripped.includes("uploads_enabled") || tripped.includes("platform_read_only")) {
       return json({ ok: false, error: "uploads_paused", message: "Uploads are paused for a few minutes. Try again shortly." }, 503, { "Retry-After": "120" });
     }
-    // the platform floor of the database backend: what is left is kept for orders (never the fill level itself)
-    if ((await getDbUsage())?.level === "full") {
+    // the platform floor of the database backend: what is left is kept for orders (never the fill level itself);
+    // files on DATA_DIR never fill the database, so the floor applies only while media falls back to it (§G.3)
+    if ((await mediaBackendReady()).kind === "db" && (await getDbUsage())?.level === "full") {
       return json({ ok: false, error: "storage_full", message: "Uploads are paused for now: storage is being freed up. Try again later." }, 507);
     }
   } catch (err) {
@@ -151,7 +152,10 @@ async function receive(req: NextRequest, boundary: string, length: number | null
   } catch (err) {
     if (err instanceof MediaError && err.code === "busy") return busy(503, 10);
     if (err instanceof MediaError) return json({ ok: false, error: err.code, message: err.message }, 422);
-    if (err instanceof QuotaError) return json({ ok: false, error: "quota", message: QUOTA_MESSAGES[quotaKind(err)] }, 413);
+    if (err instanceof QuotaError) {
+      const refusal = quotaRefusal(err);
+      return json(refusal.body, refusal.status);
+    }
     logError("api/app/media:upload", err);
     return json({ ok: false, error: "server", message: "Upload failed. Please try again." }, 500);
   }
@@ -165,29 +169,18 @@ export async function DELETE(req: NextRequest, { params }: Params): Promise<Resp
   if (!ASSET_ID_RE.test(id)) return json({ ok: false, error: "invalid" }, 400);
   const force = req.nextUrl.searchParams.get("force") === "1";
   try {
-    // what visitors see right now: the store's live versions (immutable HTML) and its logos on every page
-    const [live, storeLogo] = await Promise.all([livePagesUsing(scope, id, 50), isStoreLogo(scope, id)]);
-    if (!force && (live.length || storeLogo)) {
-      const where = live.length ? `${live.length === 1 ? "a live page" : `${live.length} live pages`}` : "your store logo";
-      return json(
-        {
-          ok: false,
-          error: "in_use",
-          message: `This file is shown on ${where}. Confirm to delete it anyway.`,
-          pages: live.map((p) => ({ id: p.id, name: p.name, slug: p.slug })),
-          storeLogo,
-        },
-        409,
-      );
-    }
-    if (!(await deleteAsset(scope, store, id))) return json({ ok: false, error: "not_found" }, 404);
+    // a confirmed delete records what visitors were shown (this store's live pages, its logo)
+    const confirmed = force ? inUseAnswer(await assetUsage(scope, id)) : null;
+    if (!(await deleteAsset(scope, store, id, { force }))) return json({ ok: false, error: "not_found" }, 404);
     invalidateDbUsage();
-    await auditIn(scope, actor, "media.deleted", {
-      target: id,
-      ...(live.length || storeLogo ? { meta: { forced: true, livePages: live.map((p) => p.slug), storeLogo } } : {}),
-    });
+    const forced = confirmed && (confirmed.pages.length || confirmed.storeLogo) ? { meta: { forced: true, livePages: confirmed.pages.map((p) => p.slug), storeLogo: confirmed.storeLogo } } : {};
+    await auditIn(scope, actor, "media.deleted", { target: id, ...forced });
     return json({ ok: true });
   } catch (err) {
+    if (err instanceof AssetInUseError) {
+      const { message, pages, storeLogo } = inUseAnswer(err.usage);
+      return json({ ok: false, error: "in_use", message, pages, storeLogo }, 409);
+    }
     logError("api/app/media:delete", err);
     return json({ ok: false, error: "server" }, 500);
   }

@@ -33,6 +33,7 @@ import { chmod, lstat, mkdir, open, readdir, readFile, rename, stat, unlink } fr
 import { join } from "node:path";
 import mysql, { type PoolConnection, type RowDataPacket } from "mysql2/promise";
 import { ByteLru } from "./lru";
+import { pool } from "@/lib/db/client";
 import { databaseUrl } from "@/lib/db/url";
 import { recordError } from "@/lib/jobs/errors";
 import { mediaCacheDir } from "@/lib/storage/paths";
@@ -242,16 +243,44 @@ export async function insertFiles(conn: PoolConnection, scope: WriteScope, asset
   }
 }
 
+/**
+ * The rows of one asset of the scope's store whose bytes are files under DATA_DIR (§G.4 step 5, the fs backend): the
+ * caller wrote the files through `fsStorage.put` BEFORE its transaction, so these rows carry no chunk. `chunks` is
+ * the count the chunk store would use (the migrator flips `storage` alone, §G.3, so both backends agree on it).
+ */
+export async function insertFsFileRows(conn: PoolConnection, scope: WriteScope, assetId: string, files: readonly FileToStore[]): Promise<void> {
+  const s = state();
+  for (const f of files) {
+    const chunks = Math.max(1, Math.ceil(f.data.length / CHUNK_SIZE));
+    await conn.execute(
+      "INSERT INTO media_files (`key`, store_id, asset_id, mime, bytes, chunks, sha256, storage) VALUES (?, ?, ?, ?, ?, ?, ?, 'fs')",
+      [f.key, scope.storeId, assetId, f.mime, f.data.length, chunks, sha256hex(f.data)],
+    );
+    s.misses.delete(f.key);
+  }
+}
+
 /** After the caller's commit: forget the 60 s "unknown key" memory of new keys (a re-upload is served at once). */
 export function forgetMisses(keys: readonly string[]): void {
   const s = state();
   for (const k of keys) s.misses.delete(k);
 }
 
-/** Delete every file of one asset of the scope's store (inside the caller's transaction) and drop their disk copies. */
-export async function deleteFilesOfAsset(conn: PoolConnection, scope: WriteScope, assetId: string): Promise<string[]> {
-  const [rows] = await conn.query<RowDataPacket[]>("SELECT `key` FROM media_files WHERE store_id = ? AND asset_id = ?", [scope.storeId, assetId]);
-  const keys = rows.map((r) => String(r.key));
+/** A stored file of an asset: its key and the backend its row names. */
+export interface AssetFileRef {
+  key: string;
+  storage: "db" | "fs";
+}
+
+/**
+ * Delete the rows of every file of one asset of the scope's store (inside the caller's transaction): the chunks of
+ * its `db` files with them, and their disk-cache copies. The caller removes the `fs` files after its commit
+ * (`storageFor(file).remove`), so a rollback never loses bytes a row still names.
+ */
+export async function deleteAssetFiles(conn: PoolConnection, scope: WriteScope, assetId: string): Promise<AssetFileRef[]> {
+  const [rows] = await conn.query<RowDataPacket[]>("SELECT `key`, storage FROM media_files WHERE store_id = ? AND asset_id = ?", [scope.storeId, assetId]);
+  const files: AssetFileRef[] = rows.map((r) => ({ key: String(r.key), storage: r.storage === "fs" ? "fs" : "db" }));
+  const keys = files.map((f) => f.key);
   if (keys.length) {
     // media_chunks is keyed by the media key only (no store column): the keys are the store's, read above
     await conn.query("DELETE FROM media_chunks WHERE `key` IN (?)", [keys]);
@@ -259,7 +288,26 @@ export async function deleteFilesOfAsset(conn: PoolConnection, scope: WriteScope
     // a cache: harmless to drop early even if the transaction rolls back
     for (const key of keys) void forgetDisk(diskName({ storeId: scope.storeId, key }));
   }
-  return keys;
+  return files;
+}
+
+/** Delete every file of one asset of the scope's store (inside the caller's transaction) and drop their disk copies. */
+export async function deleteFilesOfAsset(conn: PoolConnection, scope: WriteScope, assetId: string): Promise<string[]> {
+  return (await deleteAssetFiles(conn, scope, assetId)).map((f) => f.key);
+}
+
+/**
+ * The keys among `keys` that have a `media_files` row of the scope's store right now (read on the main pool, past
+ * every cache). A file is removed only when its key has none: two uploads of the same bytes in one store write the
+ * same files, and the one that lost the race must not take the winner's (§G.4 step 6).
+ */
+export async function keysWithRows(scope: WriteScope, keys: readonly string[]): Promise<Set<string>> {
+  const found = new Set<string>();
+  for (let i = 0; i < keys.length; i += 500) {
+    const [rows] = await pool().query<RowDataPacket[]>("SELECT `key` FROM media_files WHERE store_id = ? AND `key` IN (?)", [scope.storeId, keys.slice(i, i + 500)]);
+    for (const r of rows) found.add(String(r.key));
+  }
+  return found;
 }
 
 export function evictKeys(keys: string[]): void {

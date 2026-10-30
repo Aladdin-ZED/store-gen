@@ -18,6 +18,9 @@
  *                { ran: false } within its 1 s timeout (§J.1), the late connection goes back, a nested lock throws,
  *                GET_LOCK refused / RELEASE_LOCK failed, the waits reach the lock-pool window;
  *  5. registry   every registered job has a unique valid name and a positive budget;
+ *  5b. asset refs (P8 step 6, §G.5) extractAssetIds on fixtures: a landing document (every AssetRef of product, items,
+ *                offers, seo and sections, once; a damaged document), a theme (AssetRefs and *AssetId strings, the
+ *                depth bound), the brand setting's logo roles and another setting; usageByPage's per-page merge;
  *  6. runner     (./selftest-runner.ts, P8 step 3) the slot table and the job budget rules, the Sheets capacity
  *                arithmetic, the due logic, the round robin's fairness, and runTickWith on a fake lease and fake clocks:
  *                skipped on overlap, an expired lease taken over, no lock-pool connection between jobs, the budget
@@ -572,6 +575,54 @@ async function main(): Promise<void> {
     t.eq("job names are unique", new Set(names).size, names.length);
     t.check("job names are valid (≤ 48 chars, not 'tick')", JOBS.every((j) => /^[a-z][a-z0-9_.:-]{0,47}$/.test(j.name) && j.name !== "tick"), names.join(", "));
     t.check("every job declares a positive budget", JOBS.every((j) => Number.isFinite(j.budgetMs) && j.budgetMs > 0));
+  });
+
+  /* ---------------------------------------------------------------- */
+  const AR = await import("@/lib/storage/asset-refs");
+  h.section("asset refs: extractAssetIds", (t) => {
+    const id = (c: string) => c.repeat(32);
+    const [a1, a2, a3, a4, a5, a6] = ["a", "b", "c", "d", "e", "f"].map(id) as [string, string, string, string, string, string];
+    const doc = {
+      product: { images: [{ id: a1, alt: "Argan" }], hero: { id: a2, fx: 0.5, fy: 0.4 } },
+      items: [{ image: { id: a3 } }],
+      offers: [{ badge: { id: a1 } }],
+      seo: { ogImage: { id: a4 } },
+      sections: [
+        { type: "gallery", data: { photos: [{ id: a5, box: { x: 0, y: 0, w: 1, h: 1 } }, { id: "NOT-HEX" }, { id: a6, caption: "an object with more than an AssetRef's keys" }] } },
+        null,
+        "junk",
+      ],
+    };
+    t.eq("doc: every AssetRef in product, items, offers, seo and sections, once, in that order", AR.extractAssetIds({ kind: "doc", doc }), [a1, a2, a3, a4, a5]);
+    t.eq("doc: a damaged document yields what it can (no sections, no product)", AR.extractAssetIds({ kind: "doc", doc: { seo: { ogImage: { id: a4 } }, sections: "nope" } }), [a4]);
+    t.eq("doc: not an object → []", [AR.extractAssetIds({ kind: "doc", doc: null }), AR.extractAssetIds({ kind: "doc", doc: "x" })], [[], []]);
+    const theme = { header: { logo: { id: a1 } }, blocks: [{ heroAssetId: a2 }, { assetId: a3 }, { assetId: "BAD" }, { title: a4 }], nested: [[[{ id: a5, alt: "" }]]] };
+    t.eq("theme: AssetRefs and *AssetId / assetId strings, never a plain string", AR.extractAssetIds({ kind: "theme", theme }), [a1, a2, a3, a5]);
+    let deep: Record<string, unknown> = { id: a6 };
+    for (let i = 0; i < 20; i++) deep = { child: deep };
+    t.eq("theme: the walk stops at its depth bound", AR.extractAssetIds({ kind: "theme", theme: deep }), []);
+    const brand = { v: 1, logo: { primary: a1, mark: null, wordmark: a1, inverse: a2, source: "upload" }, colors: { accent: "#123456" } };
+    t.eq("brand settings: the logo roles (null skipped, unique)", AR.extractAssetIds({ kind: "settings", key: "brand", value: brand }), [a1, a2]);
+    t.eq("brand settings without a logo → []", AR.extractAssetIds({ kind: "settings", key: "brand", value: { v: 1 } }), []);
+    t.eq("another setting: the generic walk", AR.extractAssetIds({ kind: "settings", key: "store", value: { banner: { id: a3 }, coverAssetId: a4 } }), [a3, a4]);
+  });
+
+  h.section("asset refs: usageByPage", (t) => {
+    const uses: import("@/lib/storage/asset-refs").AssetUse[] = [
+      { ownerKind: "page", ownerId: "P1", live: false, pageId: "P1", pageName: "Zeta", pageSlug: "zeta" },
+      { ownerKind: "page_version", ownerId: "V1", live: true, pageId: "P1", pageName: "Zeta", pageSlug: "zeta" },
+      { ownerKind: "page", ownerId: "P2", live: false, pageId: "P2", pageName: "Alpha", pageSlug: "alpha" },
+      { ownerKind: "page_version", ownerId: "V9", live: false, pageId: "P3", pageName: "Old", pageSlug: "old" },
+      { ownerKind: "brand", ownerId: "brand", live: true },
+    ];
+    t.eq("per page: draft and live merged, live first, a version that is not live left out; the logo flag", AR.usageByPage(uses), {
+      pages: [
+        { id: "P1", name: "Zeta", slug: "zeta", inDraft: true, live: true },
+        { id: "P2", name: "Alpha", slug: "alpha", inDraft: true, live: false },
+      ],
+      storeLogo: true,
+    });
+    t.eq("nothing → no page, no logo", AR.usageByPage([]), { pages: [], storeLogo: false });
   });
 
   /* ---------------------------------------------------------------- */

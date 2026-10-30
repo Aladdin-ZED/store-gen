@@ -102,6 +102,15 @@ async function head(key: string): Promise<StoredFile | null> {
   return { storeId: meta.storeId, key: meta.key, assetId: meta.assetId, mime: meta.mime, bytes: meta.bytes, sha256: meta.sha256, storage: "fs" };
 }
 
+/**
+ * Whether the file of `meta` is on disk with its length (one stat, no hash): the upload pipeline asks it before a put
+ * (a file already there is not this upload's to remove) and after its commit (a twin upload's cleanup took it).
+ */
+export async function fsFilePresent(meta: Pick<StoredFile, "storeId" | "key" | "bytes">): Promise<boolean> {
+  const st = await stat(/* turbopackIgnore: true */ mediaFilePath(meta.storeId, meta.key)).catch(() => null);
+  return !!st?.isFile() && st.size === meta.bytes;
+}
+
 /** The whole file, checked against its row (length, sha256); `StoredFileError` when it is missing or differs. */
 export async function readFsFile(meta: Pick<StoredFile, "storeId" | "key" | "bytes" | "sha256">): Promise<Buffer> {
   let data: Buffer;

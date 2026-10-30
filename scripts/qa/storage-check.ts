@@ -9,7 +9,7 @@
  * DATA_DIR at a fresh folder under os.tmpdir(). Both are removed at the end (unless --keep). Nothing is read from
  * the .env files.
  *
- * Sections (P8 step 2; later steps add theirs under their own names: media, storage-jobs, export, backups, purge):
+ * Sections (P8 step 2; later steps add theirs under their own names: storage-jobs, export, backups, purge):
  *  - boot check: refusals      unset, relative, inside the app (or a parent of it), public_html, a symlink (and a
  *                              planted link inside), missing parent, a file, not writable, no database, POSIX owner
  *  - boot check: owner marker  written once (O_EXCL), a db X marker refuses db Y, another app's marker, a garbage
@@ -54,6 +54,17 @@
  *                              throughput, ETA, failures by code, notes, nothing of another store); the platform
  *                              summary; the fan-out (forbidden without domains.manage, one at a time, store by store,
  *                              its row shared with the runner's keys); runTick() runs renders in slot 4 and the fan-out in 7
+ *  - media (P8 step 6)         §G.4-§G.6 through the real pipeline (sharp, the quota counters, both backends): an fs
+ *                              upload's files on disk and no chunk; a same-store duplicate deduped, and two at once (one
+ *                              charge, the winner's files kept by the loser's cleanup); identical bytes in
+ *                              A and B → two ids and two file sets, A's delete never touching B's; the public route
+ *                              serving an fs row and its db twin byte for byte (ranges, HEAD, 304, 416), refusing bad
+ *                              keys, a missing file and a suspended (or closed) store's key with the neutral 404;
+ *                              asset_refs (own assets only, replace, parallel syncs); the delete 409 with this store's
+ *                              pages only, allowed when only B uses the same bytes, the brand logo (index and setting),
+ *                              force; one cutout render per live page that shows the source; the quota race (20
+ *                              parallel storage halves at the limit, no orphan file, the 413 body); D69 (the shared
+ *                              pending budget charged first, given back by the store's own cap and on pending → active)
  */
 import Module from "node:module";
 import { randomBytes, createHash } from "node:crypto";
@@ -491,7 +502,7 @@ async function main(): Promise<number> {
     const pending = () => E.pendingErrors().map((e) => `${e.area}/${e.code}/${e.storeId}`);
     t.check("…counted in the error ring (media / file_mismatch, its store)", pending().includes(`media/file_mismatch/${STORE_A}`), pending().join(","));
     rmSync(P.mediaFilePath(STORE_A, fb.key));
-    await t.rejects("a missing large file: the range read fails (503), never a wrong body", () => store.openMediaRange(bigMeta, 0, 10), /missing/);
+    await t.rejects("a missing large file: the range read fails (the route's 404), never a wrong body", () => store.openMediaRange(bigMeta, 0, 10), /missing/);
     t.check("…counted as media / missing_file", pending().includes(`media/missing_file/${STORE_A}`), pending().join(","));
     store.evictKeys([fb.key]);
     t.eq("getMediaFile of the missing file → null", await store.getMediaFile(fb.key), null);
@@ -1271,6 +1282,344 @@ async function main(): Promise<number> {
       t.check("…renders.fanout ran in slot 7", runs.some((r) => r.job === "renders.fanout" && r.store_id === null && (JSON.parse(r.summary ?? "{}") as { slot?: string }).slot === "7"));
       t.check("…job_runs hold counts only (no html, no doc)", !/DOCTYPE|"doc"/.test(JSON.stringify(runs)));
     }
+  });
+
+  /* ================================================================ */
+  h.section("media", async (t) => {
+    const sharp = (await import("sharp")).default;
+    const MP = await import("@/lib/media/process");
+    const MA = await import("@/lib/media/assets");
+    const AR = await import("@/lib/storage/asset-refs");
+    const U = await import("@/lib/tenancy/usage");
+    const { invalidateStore } = await import("@/lib/tenancy/cache");
+    const { invalidateEntitlements } = await import("@/lib/tenancy/entitlements");
+    const { transitionStore } = await import("@/lib/tenancy/lifecycle");
+    const { getPlatformSetting } = await import("@/lib/settings");
+    const { newId } = await import("@/lib/db/ids");
+    const mediaRoute = await import("@/app/media/[key]/route");
+    type WriteScope = import("@/lib/tenancy/types").WriteScope;
+    type PlatformCtx = import("@/lib/tenancy/types").PlatformCtx;
+    type MediaStore = import("@/lib/media/quota").MediaStore;
+    const env = process.env as Record<string, string | undefined>;
+    const active: MediaStore = { status: "active", timezone: "Africa/Casablanca" };
+    const scopeB = systemScope(ctx, STORE_B);
+    const STORE_Q = "01JB8ZK3Q4R5S6T7V8W9XYZ0QQ"; // the quota race
+    const STORE_P = "01JB8ZK3Q4R5S6T7V8W9XYZ0PP"; // a pending sandbox (D69)
+    const STORE_S = "01JB8ZK3Q4R5S6T7V8W9XYZ0SS"; // suspended later (§A.5.3)
+    for (const [id, status] of [
+      [STORE_Q, "active"],
+      [STORE_P, "pending"],
+      [STORE_S, "active"],
+    ] as const) {
+      await db.insert(stores).values({ id, handle: `media-${id.slice(-2).toLowerCase()}`, name: id.slice(-2), status, brandSeed: "0123456789abcdef" });
+    }
+    const scopeQ = systemScope(ctx, STORE_Q);
+    const scopeP = systemScope(ctx, STORE_P);
+    const scopeS = systemScope(ctx, STORE_S);
+
+    // ---- helpers: images, rows, files on disk, counters, pages, the public route
+    const png = (w: number, hgt: number, alpha = false): Promise<Buffer> => {
+      const ch = alpha ? 4 : 3;
+      return sharp(randomBytes(w * hgt * ch), { raw: { width: w, height: hgt, channels: ch } }).png().toBuffer();
+    };
+    type FileRow = { key: string; storage: string; bytes: number; sha256: string };
+    const fileRows = async (storeId: string, assetId?: string) =>
+      ((await pool().query(`SELECT \`key\`, storage, bytes, sha256 FROM media_files WHERE store_id = ?${assetId ? " AND asset_id = ?" : ""} ORDER BY \`key\``, assetId ? [storeId, assetId] : [storeId])) as unknown as [FileRow[]])[0];
+    const chunksOfAsset = async (assetId: string) =>
+      Number(((await pool().query("SELECT COUNT(*) AS n FROM media_chunks c JOIN media_files f ON f.`key` = c.`key` WHERE f.asset_id = ?", [assetId])) as unknown as [{ n: number }[]])[0][0]!.n);
+    const assetCount = async (storeId: string) => Number(((await pool().query("SELECT COUNT(*) AS n FROM assets WHERE store_id = ?", [storeId])) as unknown as [{ n: number }[]])[0][0]!.n);
+    /** every file under the store's media folder (key → path) */
+    const filesOnDisk = (storeId: string): Map<string, string> => {
+      const out = new Map<string, string>();
+      const root = join(DATA, "media", "v1", storeId.slice(0, 2), storeId);
+      const walk = (dir: string) => {
+        if (!existsSync(dir)) return;
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const p = join(dir, e.name);
+          if (e.isDirectory()) walk(p);
+          else out.set(e.name, p);
+        }
+      };
+      walk(root);
+      return out;
+    };
+    const gauge = async (storeId: string) =>
+      Number(((await pool().query("SELECT value FROM store_usage WHERE store_id = ? AND metric = 'media_bytes' AND period = 'total'", [storeId])) as unknown as [{ value: number }[]])[0][0]?.value ?? 0);
+    const pendingBudget = () => U.platformUsageValue("pending_media_bytes", "total");
+    const docWith = (ids: readonly string[]) => JSON.stringify({ v: 2, locale: "fr", product: { images: ids.map((id) => ({ id, alt: "" })) }, items: [], offers: [], seo: {}, sections: [] });
+    const seedPage = async (storeId: string, name: string, ids: readonly string[], opts: { live: boolean }) => {
+      const id = newId();
+      const slug = `${name}-${hex(2)}`;
+      await pool().query("INSERT INTO pages (id, store_id, slug, name, status, locale, public_key, draft) VALUES (?, ?, ?, ?, ?, 'fr', ?, ?)", [id, storeId, slug, name, opts.live ? "published" : "draft", `pk_${hex(12)}`, docWith(ids)]);
+      if (!opts.live) return id;
+      const versionId = newId();
+      const html = `<!DOCTYPE html><title>${slug}</title>`;
+      await pool().query(
+        "INSERT INTO page_versions (id, store_id, page_id, kind, doc, html, thank_you_html, csp, thank_you_csp, etag, checksum, runtime_v) VALUES (?, ?, ?, 'publish', ?, ?, ?, ?, ?, ?, ?, 2)",
+        [versionId, storeId, id, docWith(ids), html, html, "default-src 'self'", "default-src 'self'", sha(Buffer.from(html)), sha(Buffer.from(docWith(ids)))],
+      );
+      await pool().query("UPDATE pages SET published_version_id = ? WHERE id = ?", [versionId, id]);
+      return id;
+    };
+    const get = async (key: string, headers: Record<string, string> = {}, method: "GET" | "HEAD" = "GET") => {
+      const req = new Request(`http://localhost:3451/media/${key}`, { method, headers: { "x-forwarded-for": "203.0.113.9", ...headers } });
+      const handler = method === "GET" ? mediaRoute.GET : mediaRoute.HEAD;
+      const res = await handler(req as unknown as Parameters<typeof mediaRoute.GET>[0], { params: Promise.resolve({ key }) });
+      return { status: res.status, headers: res.headers, body: Buffer.from(await res.arrayBuffer()) };
+    };
+    const refusal = async (fn: () => Promise<unknown>): Promise<unknown> => {
+      try {
+        await fn();
+        return null;
+      } catch (err) {
+        return err;
+      }
+    };
+    const staffCtx = (): PlatformCtx =>
+      ({ user: { id: "01JB8ZK3Q4R5S6T7V8W9STAFF1" }, role: "super_admin", actor: { kind: "platform", userId: "01JB8ZK3Q4R5S6T7V8W9STAFF1", impersonatorId: null, ip: null }, can: () => true, stepUpFresh: true, stepUpUntil: null }) as unknown as PlatformCtx;
+    const upload = async (scope: WriteScope, store: MediaStore, data: Buffer, opts: import("@/lib/media/process").ProcessOptions = {}) => MP.processUpload(scope, store, Buffer.from(data), "photo.png", opts);
+
+    t.eq("the fs backend is on (DATA_DIR passed its check)", (await S.mediaBackendReady()).kind, "fs");
+
+    // ---- an fs-backend upload: files on disk, no chunk; stored_bytes = Σ files = the charge
+    const photo1 = await png(48, 40);
+    const g0 = await gauge(STORE_A);
+    const a1 = await upload(scopeA, active, photo1);
+    const rowsA1 = await fileRows(STORE_A, a1.asset.id);
+    t.check("an upload on the fs backend: a new asset", !a1.deduped && rowsA1.length >= 2, JSON.stringify(rowsA1.map((r) => r.key)));
+    t.check("…every file row says fs, and its file is at its path with its bytes", rowsA1.every((r) => r.storage === "fs" && existsSync(P.mediaFilePath(STORE_A, r.key)) && sha(readFileSync(P.mediaFilePath(STORE_A, r.key))) === r.sha256));
+    t.eq("…and no media_chunks row", await chunksOfAsset(a1.asset.id), 0);
+    const sum1 = rowsA1.reduce((n, r) => n + Number(r.bytes), 0);
+    t.eq("stored_bytes = Σ the files = the gauge's charge", [Number(a1.asset.storedBytes), (await gauge(STORE_A)) - g0], [sum1, sum1]);
+    const json1 = MA.assetToJson(a1.asset) as Record<string, unknown>;
+    t.check("assetToJson carries neither the uploader nor the store (MED-06)", !("createdBy" in json1) && !("storeId" in json1) && !JSON.stringify(json1).includes(STORE_A));
+
+    // ---- a same-store duplicate: deduped, nothing new stored or charged
+    const filesA = filesOnDisk(STORE_A).size;
+    const again = await upload(scopeA, active, photo1);
+    t.eq("the same bytes again in the same store → deduped: true, the same asset", [again.deduped, again.asset.id], [true, a1.asset.id]);
+    t.eq("…no new file, no new charge", [filesOnDisk(STORE_A).size, await gauge(STORE_A)], [filesA, g0 + sum1]);
+
+    // ---- identical bytes in A and B: two ids, two file sets; deleting A's never touches B's
+    const b1 = await upload(scopeB, active, photo1);
+    const rowsB1 = await fileRows(STORE_B, b1.asset.id);
+    t.check("identical bytes in B → another id, not deduped onto A's", !b1.deduped && b1.asset.id !== a1.asset.id);
+    t.check("…other keys and other files (B's folder)", rowsB1.length === rowsA1.length && rowsB1.every((r) => !rowsA1.some((x) => x.key === r.key) && existsSync(P.mediaFilePath(STORE_B, r.key))));
+    t.check("…the same bytes in both sets (the variants match one for one)", rowsB1.map((r) => r.sha256).sort().join() === rowsA1.map((r) => r.sha256).sort().join());
+    t.eq("deleting A's (no page uses it) → deleted", await MA.deleteAsset(scopeA, active, a1.asset.id), true);
+    t.check("…A's rows and files are gone", (await fileRows(STORE_A, a1.asset.id)).length === 0 && rowsA1.every((r) => !existsSync(P.mediaFilePath(STORE_A, r.key))));
+    t.check("…B's rows and files are all there, served with their bytes", (await fileRows(STORE_B, b1.asset.id)).length === rowsB1.length && rowsB1.every((r) => sha(readFileSync(P.mediaFilePath(STORE_B, r.key))) === r.sha256));
+    t.eq("…and A's gauge is refunded", await gauge(STORE_A), g0);
+    t.eq("B's scope cannot delete A's id (answers like a missing one)", await MA.deleteAsset(scopeB, active, (await upload(scopeA, active, await png(41, 33))).asset.id), false);
+
+    // ---- the deduped race (§G.4 step 6): two storage halves of the same bytes in one store, side by side
+    const twin = await png(46, 42);
+    const halves = await Promise.all([MP.prepareUpload(scopeA, Buffer.from(twin), "twin-1.png"), MP.prepareUpload(scopeA, Buffer.from(twin), "twin-2.png")]);
+    const gTwin = await gauge(STORE_A);
+    const twins = await Promise.all(halves.map((p) => ("ready" in p ? MP.persistUpload(scopeA, active, p.ready) : Promise.resolve(p.done))));
+    const twinRows = await fileRows(STORE_A, twins[0].asset.id);
+    t.check("two uploads of the same bytes at once: one stored, the other deduped onto it", twins[0].asset.id === twins[1].asset.id && twins.filter((r) => r.deduped).length === 1, JSON.stringify(twins.map((r) => r.deduped)));
+    t.check("…the loser removed none of the winner's files (every row's file on disk with its bytes)", twinRows.length > 0 && twinRows.every((r) => existsSync(P.mediaFilePath(STORE_A, r.key)) && sha(readFileSync(P.mediaFilePath(STORE_A, r.key))) === r.sha256));
+    t.eq("…charged once (the loser's charge given back)", (await gauge(STORE_A)) - gTwin, twinRows.reduce((n, r) => n + Number(r.bytes), 0));
+
+    // ---- the public route: fs and db rows byte-identical, Range included; HEAD; the key regex first
+    const photo2 = await png(64, 48);
+    const fsUp = await upload(scopeA, active, photo2);
+    delete env.DATA_DIR;
+    t.eq("DATA_DIR unset → the db backend (fallback)", [(await S.runMediaStorageCheck({ force: true })).ok, (await S.mediaBackendReady()).kind], [false, "db"]);
+    const dbUp = await upload(scopeB, active, photo2);
+    env.DATA_DIR = DATA;
+    t.eq("…restored: fs again", [(await S.runMediaStorageCheck({ force: true })).ok, (await S.mediaBackendReady()).kind], [true, "fs"]);
+    const fsRows = await fileRows(STORE_A, fsUp.asset.id);
+    const dbRows = await fileRows(STORE_B, dbUp.asset.id);
+    t.check("one upload on each backend (fs rows without chunks, db rows with)", fsRows.every((r) => r.storage === "fs") && dbRows.every((r) => r.storage === "db") && (await chunksOfAsset(fsUp.asset.id)) === 0 && (await chunksOfAsset(dbUp.asset.id)) >= dbRows.length);
+    const suffix = (k: string) => k.slice(k.indexOf("-"));
+    let same = 0;
+    for (const fr of fsRows) {
+      const dr = dbRows.find((r) => suffix(r.key) === suffix(fr.key));
+      if (!dr) continue;
+      const [a, b] = [await get(fr.key), await get(dr.key)];
+      const hdr = (x: typeof a) => ["content-type", "etag", "cache-control", "accept-ranges", "x-content-type-options", "content-security-policy", "cross-origin-resource-policy", "content-length"].map((n) => x.headers.get(n));
+      if (a.status === 200 && b.status === 200 && a.body.equals(b.body) && JSON.stringify(hdr(a)) === JSON.stringify(hdr(b))) same++;
+      const end = Math.min(60, Number(fr.bytes) - 1);
+      const [ra, rb] = [await get(fr.key, { range: `bytes=5-${end}` }), await get(dr.key, { range: `bytes=5-${end}` })];
+      if (!(ra.status === 206 && rb.status === 206 && ra.body.equals(rb.body) && ra.body.equals(a.body.subarray(5, end + 1)) && ra.headers.get("content-range") === rb.headers.get("content-range"))) same = -1000;
+      const [sa, sb] = [await get(fr.key, { range: "bytes=-10" }), await get(dr.key, { range: "bytes=-10" })];
+      if (!(sa.status === 206 && sa.body.equals(sb.body) && sa.body.equals(a.body.subarray(a.body.length - 10)))) same = -1000;
+    }
+    t.check("GET of every fs file and its db twin: the same bytes and headers; the same ranges (bytes=5-60, bytes=-10)", same === fsRows.length && same > 0, `matched ${same} of ${fsRows.length}`);
+    const probe = await get(fsRows[0]!.key);
+    t.eq("…immutable, sandboxed, nosniff, cross-origin embeddable", [probe.headers.get("cache-control"), probe.headers.get("content-security-policy"), probe.headers.get("x-content-type-options"), probe.headers.get("cross-origin-resource-policy")], ["public, max-age=31536000, immutable", "default-src 'none'; sandbox", "nosniff", "cross-origin"]);
+    const head = await get(fsRows[0]!.key, {}, "HEAD");
+    t.check("HEAD: the headers, no body", head.status === 200 && head.body.length === 0 && head.headers.get("content-length") === String(fsRows[0]!.bytes));
+    t.eq("If-None-Match → 304", (await get(fsRows[0]!.key, { "if-none-match": `"${fsRows[0]!.sha256}"` })).status, 304);
+    t.eq("an unsatisfiable range → 416", (await get(fsRows[0]!.key, { range: `bytes=${fsRows[0]!.bytes}-` })).status, 416);
+    const unknown = await get(`${hex(16)}-640.webp`);
+    t.eq("an unknown key → 404", unknown.status, 404);
+    for (const bad of ["..%2F..%2Fetc%2Fpasswd", "x".repeat(30), `${hex(16)}-640.exe`]) t.eq(`a key that fails the regex → 404 (${bad.slice(0, 16)}…)`, (await get(bad)).status, 404);
+    // a missing fs file: a 404 (counted), never a 503 a client would retry, never another file
+    const victim = fsRows[fsRows.length - 1]!;
+    rmSync(P.mediaFilePath(STORE_A, victim.key));
+    store.evictKeys([victim.key]);
+    t.eq("a row whose fs file is missing → 404", (await get(victim.key)).status, 404);
+
+    // ---- a suspended store's key → the neutral 404; pending and restricted are served (§A.5.3, §G.6)
+    const sUp = await upload(scopeS, active, await png(40, 36));
+    const sKey = (await fileRows(STORE_S, sUp.asset.id))[0]!.key;
+    t.eq("an active store's key → 200", (await get(sKey)).status, 200);
+    const answers: Record<string, number> = {};
+    for (const status of ["restricted", "suspended", "closed", "pending"] as const) {
+      await pool().query("UPDATE stores SET status = ? WHERE id = ?", [status, STORE_S]);
+      invalidateStore(STORE_S);
+      answers[status] = (await get(sKey)).status;
+    }
+    t.eq("restricted 200, suspended 404, closed 404, pending 200", answers, { restricted: 200, suspended: 404, closed: 404, pending: 200 });
+    await pool().query("UPDATE stores SET status = 'suspended' WHERE id = ?", [STORE_S]);
+    invalidateStore(STORE_S);
+    const susp = await get(sKey);
+    t.check("…a suspended store's key answers exactly like an unknown key (status, body, cache headers)", susp.status === 404 && susp.body.equals(unknown.body) && susp.headers.get("cache-control") === unknown.headers.get("cache-control") && susp.headers.get("etag") === null);
+
+    // ---- asset_refs: the store's own assets only, one owner's rows replaced, deadlocks retried
+    const photo4 = await png(52, 44);
+    const p4A = (await upload(scopeA, active, photo4)).asset.id;
+    const p4B = (await upload(scopeB, active, photo4)).asset.id;
+    const refsOf = async (storeId: string, ownerId: string) =>
+      ((await pool().query("SELECT asset_id, owner_kind, live FROM asset_refs WHERE store_id = ? AND owner_id = ? ORDER BY asset_id", [storeId, ownerId])) as unknown as [{ asset_id: string; owner_kind: string; live: number }[]])[0];
+    const ownerB = newId();
+    t.eq("syncAssetRefs(B, …, [A's id, B's id, junk]) indexes B's own id only", [await AR.syncAssetRefs(scopeB, "page", ownerB, [p4A, p4B, "zz"], { live: false }), (await refsOf(STORE_B, ownerB)).map((r) => r.asset_id)], [{ refs: 1 }, [p4B]]);
+    t.eq("…no row of A was written", (await refsOf(STORE_A, ownerB)).length, 0);
+    t.eq("a second sync replaces the owner's rows (live flag included)", [await AR.syncAssetRefs(scopeB, "page", ownerB, [p4B], { live: true }), (await refsOf(STORE_B, ownerB)).map((r) => [r.asset_id, r.live])], [{ refs: 1 }, [[p4B, 1]]]);
+    t.eq("…an empty list removes them", [await AR.syncAssetRefs(scopeB, "page", ownerB, [], { live: false }), (await refsOf(STORE_B, ownerB)).length], [{ refs: 0 }, 0]);
+    t.eq("an unknown owner kind is refused", ((await refusal(() => AR.syncAssetRefs(scopeB, "nope" as "page", ownerB, [], { live: false }))) as Error | null)?.name, "RangeError");
+    const extra = (await upload(scopeB, active, await png(42, 36))).asset.id;
+    const syncs = await Promise.allSettled(Array.from({ length: 10 }, (_, i) => AR.syncAssetRefs(scopeB, "page", ownerB, i % 2 ? [p4B] : [p4B, extra], { live: false })));
+    const finalRefs = (await refsOf(STORE_B, ownerB)).map((r) => r.asset_id);
+    t.check("10 parallel syncs of one owner all succeed and leave one of the lists (never a mix)", syncs.every((s) => s.status === "fulfilled") && (finalRefs.join() === [p4B].join() || finalRefs.join() === [p4B, extra].sort().join()), JSON.stringify([syncs.map((s) => s.status), finalRefs]));
+    await AR.syncAssetRefs(scopeB, "page", ownerB, [], { live: false });
+
+    // ---- the delete: 409 with this store's page names only; allowed when only B uses the same bytes
+    const liveA = await seedPage(STORE_A, "argan-live", [p4A], { live: true });
+    const draftA = await seedPage(STORE_A, "argan-draft", [p4A], { live: false });
+    const liveB = await seedPage(STORE_B, "b-secret-page", [p4A, p4B], { live: true }); // B's document names A's id too
+    const usageA = await AR.assetUsage(scopeA, p4A);
+    // the live page's draft is the document it published, so it shows the file too (live first, then by page name)
+    t.eq("assetUsage(A): A's live version, then the drafts that show it (the draft page's, the live page's), nothing of B", usageA.map((u) => [u.ownerKind, u.pageId, u.live]), [
+      ["page_version", liveA, true],
+      ["page", draftA, false],
+      ["page", liveA, false],
+    ]);
+    t.eq("assetUsage(B, A's id) → [] (B's document naming it is not B's asset)", await AR.assetUsage(scopeB, p4A), []);
+    t.eq("livePagesUsing(A) → A's live page; livePagesUsing(B, A's id) → []", [await AR.livePagesUsing(scopeA, p4A), await AR.livePagesUsing(scopeB, p4A)], [[liveA], []]);
+    const refused = await refusal(() => MA.deleteAsset(scopeA, active, p4A));
+    t.check("deleteAsset of a file a live page of A shows → AssetInUseError", refused instanceof MA.AssetInUseError);
+    const body409 = refused instanceof MA.AssetInUseError ? MA.inUseAnswer(refused.usage) : null;
+    t.eq("…the 409 lists A's live page only (never B's page, never a draft as live)", body409 && [body409.pages.map((p) => p.id), body409.storeLogo, body409.message], [[liveA], false, "This file is shown on a live page. Confirm to delete it anyway."]);
+    t.check("…and nothing of B in it", !!body409 && !JSON.stringify(body409).includes("b-secret-page") && !JSON.stringify(body409).includes(liveB));
+    t.check("…the asset and its files are still there", (await fileRows(STORE_A, p4A)).length > 0 && (await fileRows(STORE_A, p4A)).every((r) => existsSync(P.mediaFilePath(STORE_A, r.key))));
+    const photo5 = await png(50, 46);
+    const p5A = (await upload(scopeA, active, photo5)).asset.id;
+    const p5B = (await upload(scopeB, active, photo5)).asset.id;
+    await seedPage(STORE_B, "b-uses-its-own", [p5B], { live: true });
+    t.eq("the same bytes used only by B's live page: A's delete is allowed", await MA.deleteAsset(scopeA, active, p5A), true);
+    t.check("…B's copy is untouched", (await fileRows(STORE_B, p5B)).every((r) => existsSync(P.mediaFilePath(STORE_B, r.key))) && (await AR.livePagesUsing(scopeB, p5B)).length === 1);
+    const p6A = (await upload(scopeA, active, await png(47, 39))).asset.id;
+    await seedPage(STORE_B, "b-names-a", [p6A], { live: true });
+    t.eq("A's id named only in B's live document: A's delete is allowed", await MA.deleteAsset(scopeA, active, p6A), true);
+    // the brand logo: through the index (owner brand, live), then through the scan of the setting
+    const p7A = (await upload(scopeA, active, await png(45, 45))).asset.id;
+    await AR.syncAssetRefs(scopeA, "brand", "brand", [p7A], { live: true });
+    const logoRefused = await refusal(() => MA.deleteAsset(scopeA, active, p7A));
+    t.eq("an indexed brand logo → refused, storeLogo: true", logoRefused instanceof MA.AssetInUseError ? [MA.inUseAnswer(logoRefused.usage).storeLogo, MA.inUseAnswer(logoRefused.usage).message] : null, [true, "This file is shown on your store logo. Confirm to delete it anyway."]);
+    await AR.syncAssetRefs(scopeA, "brand", "brand", [], { live: true });
+    const { updateStoreSetting } = await import("@/lib/settings");
+    await updateStoreSetting(scopeA, "brand", (v) => ({ logo: { ...v.logo, primary: p7A } }), { id: "system", kind: "system" });
+    t.check("the logo in the brand setting (not indexed yet) → refused as well", (await refusal(() => MA.deleteAsset(scopeA, active, p7A))) instanceof MA.AssetInUseError);
+    t.eq("assetUsageByPage: the dashboard's shape", await AR.assetUsageByPage(scopeA, p4A), {
+      pages: [
+        { id: liveA, name: "argan-live", slug: (usageA[0]!.pageSlug ?? ""), inDraft: true, live: true },
+        { id: draftA, name: "argan-draft", slug: (usageA[1]!.pageSlug ?? ""), inDraft: true, live: false },
+      ],
+      storeLogo: false,
+    });
+    // a confirmed delete (force): rows, refs and files go; the gauge is refunded
+    await AR.syncAssetRefs(scopeA, "page", draftA, [p4A], { live: false });
+    const p4Rows = await fileRows(STORE_A, p4A);
+    const gBefore = await gauge(STORE_A);
+    t.eq("force → deleted", await MA.deleteAsset(scopeA, active, p4A, { force: true }), true);
+    const refsLeft = Number(((await pool().query("SELECT COUNT(*) AS n FROM asset_refs WHERE store_id = ? AND asset_id = ?", [STORE_A, p4A])) as unknown as [{ n: number }[]])[0][0]!.n);
+    t.check("…its rows, its refs and its files are gone, the gauge refunded", (await fileRows(STORE_A, p4A)).length === 0 && refsLeft === 0 && p4Rows.every((r) => !existsSync(P.mediaFilePath(STORE_A, r.key))) && (await gauge(STORE_A)) === gBefore - p4Rows.reduce((n, r) => n + Number(r.bytes), 0));
+    t.check("…B's twin of the same bytes is untouched", (await fileRows(STORE_B, p4B)).every((r) => existsSync(P.mediaFilePath(STORE_B, r.key))));
+
+    // ---- the cutout: one render per live page of A that shows the source, after the upload (DES-§4.11)
+    const photo9 = await png(56, 48);
+    const p9A = (await upload(scopeA, active, photo9)).asset.id;
+    const live1 = await seedPage(STORE_A, "cut-one", [p9A], { live: true });
+    const live2 = await seedPage(STORE_A, "cut-two", [p9A, p7A], { live: true });
+    const draft9 = await seedPage(STORE_A, "cut-draft", [p9A], { live: false });
+    const other = await seedPage(STORE_A, "cut-unrelated", [p7A], { live: true });
+    const bPage = await seedPage(STORE_B, "b-cut", [p9A], { live: true });
+    const jobs = async (pageId: string) => ((await pool().query("SELECT reason, state FROM render_jobs WHERE page_id = ?", [pageId])) as unknown as [{ reason: string; state: string }[]])[0];
+    const cutout = await png(56, 48, true);
+    const cut = await upload(scopeA, active, cutout, { cutout: true, sourceAssetId: p9A });
+    t.check("a cutout with the store's own photo as its source: stored with the source", !cut.deduped && cut.asset.sourceAssetId === p9A);
+    t.eq("…exactly one cutout render per live page that shows the source", [await jobs(live1), await jobs(live2)], [[{ reason: "cutout", state: "pending" }], [{ reason: "cutout", state: "pending" }]]);
+    t.eq("…none for the draft, a live page without the source, or B's page naming A's id", [(await jobs(draft9)).length, (await jobs(other)).length, (await jobs(bPage)).length], [0, 0, 0]);
+    await upload(scopeA, active, cutout, { cutout: true, sourceAssetId: p9A });
+    t.eq("the same cutout again (deduped) queues nothing more", [(await jobs(live1)).length, (await jobs(live2)).length], [1, 1]);
+    const b9 = (await upload(scopeB, active, await png(43, 37))).asset.id;
+    const cross = await upload(scopeA, active, await png(44, 38, true), { cutout: true, sourceAssetId: b9 });
+    t.check("a cutout naming B's photo as its source: the source is dropped (MED-02), nothing queued for B", cross.asset.sourceAssetId === null && (await jobs(bPage)).length === 0);
+
+    // ---- the quota race: 20 parallel storage halves at the limit → exactly the allowed ones, no orphan file
+    const tmpBefore = new Set(tmpEntries());
+    const readies: import("@/lib/media/process").PreparedUpload[] = [];
+    for (let i = 0; i < 20; i++) {
+      const p = await MP.prepareUpload(scopeQ, await png(36 + (i % 5), 34 + (i % 3)), `race-${i}.png`);
+      if ("ready" in p) readies.push(p.ready);
+    }
+    const sizes = readies.map((r) => r.asset.files.reduce((n, f) => n + f.data.length, 0));
+    const limit = Math.floor((sizes.reduce((a, b) => a + b, 0) / sizes.length) * 10.5);
+    await pool().query("INSERT INTO store_entitlements (store_id, `key`, source, value, set_by, reason) VALUES (?, 'media_bytes', 'override', ?, ?, 'qa quota race')", [STORE_Q, String(limit), "01JB8ZK3Q4R5S6T7V8W9STAFF1"]);
+    invalidateEntitlements(STORE_Q);
+    const race = await Promise.allSettled(readies.map((r) => MP.persistUpload(scopeQ, active, r)));
+    const okIdx = race.flatMap((r, i) => (r.status === "fulfilled" ? [i] : []));
+    const refusedIdx = race.flatMap((r, i) => (r.status === "rejected" && r.reason instanceof U.QuotaError ? [i] : []));
+    const okBytes = okIdx.reduce((n, i) => n + sizes[i]!, 0);
+    t.check("20 parallel uploads at the limit: each one stored or refused for the quota, nothing else", readies.length === 20 && okIdx.length + refusedIdx.length === 20 && okIdx.length > 0 && refusedIdx.length > 0, `${okIdx.length} stored, ${refusedIdx.length} refused of ${readies.length}`);
+    t.check("…the stored ones fit and no refused one would have fit (exactly the allowed ones)", okBytes <= limit && refusedIdx.every((i) => sizes[i]! > limit - okBytes), JSON.stringify({ limit, okBytes, refused: refusedIdx.map((i) => sizes[i]) }));
+    t.eq("…the gauge is exactly what is stored", await gauge(STORE_Q), okBytes);
+    const qRows = await fileRows(STORE_Q);
+    const qDisk = filesOnDisk(STORE_Q);
+    t.check("…no orphan file: the files on disk are exactly the rows'", (await assetCount(STORE_Q)) === okIdx.length && qRows.length === qDisk.size && qRows.every((r) => qDisk.has(r.key)), `${qRows.length} rows, ${qDisk.size} files`);
+    t.check("…and no temp file left", tmpEntries().every((e) => tmpBefore.has(e)));
+    const quota = refusedIdx.length ? (race[refusedIdx[0]!] as PromiseRejectedResult).reason : null;
+    const answer = quota instanceof U.QuotaError ? MP.quotaRefusal(quota) : null;
+    t.eq("the route's answer: 413 { error: quota } with the store's message", answer && [answer.status, answer.body.error, answer.body.message], [413, "quota", MP.QUOTA_MESSAGES.store]);
+    t.check("…never a figure (no limit, usage or percentage)", !!answer && !/\d|%/.test(answer.body.message));
+
+    // ---- D69: a pending store charges the shared sandbox budget first, and gets it back when it leaves pending
+    const pending: MediaStore = { status: "pending", timezone: "Africa/Casablanca" };
+    const MiB = 1024 * 1024;
+    const budget = (await getPlatformSetting("platform")).signup.pendingMediaTotalMiB * MiB;
+    const shared0 = await pendingBudget();
+    const filler = budget - shared0 - 200; // 200 bytes of headroom: less than any upload
+    await U.chargePlatformUsage("pending_media_bytes", "total", filler, { limit: budget });
+    const full = await refusal(() => upload(scopeP, pending, photo2));
+    t.check("the shared budget full → QuotaError on pending_media_bytes", full instanceof U.QuotaError && (full as InstanceType<typeof U.QuotaError>).metric.metric === "pending_media_bytes");
+    t.eq("…the store's own gauge was never charged (the shared budget is charged first), nothing stored", [await gauge(STORE_P), await assetCount(STORE_P), filesOnDisk(STORE_P).size], [0, 0, 0]);
+    t.eq("…the route's message is the sandbox one", full instanceof U.QuotaError ? MP.quotaRefusal(full).body.message : null, MP.QUOTA_MESSAGES.pending);
+    await U.refundPlatformUsage("pending_media_bytes", "total", filler);
+    await pool().query("INSERT INTO store_entitlements (store_id, `key`, source, value, set_by, reason) VALUES (?, 'media_bytes', 'override', '1000', ?, 'qa pending cap')", [STORE_P, "01JB8ZK3Q4R5S6T7V8W9STAFF1"]);
+    invalidateEntitlements(STORE_P);
+    const own = await refusal(() => upload(scopeP, pending, photo2));
+    t.check("the store's own cap refuses → its shared charge is given back", own instanceof U.QuotaError && (own as InstanceType<typeof U.QuotaError>).metric.metric === "media_bytes" && (await pendingBudget()) === shared0);
+    await pool().query("DELETE FROM store_entitlements WHERE store_id = ?", [STORE_P]);
+    invalidateEntitlements(STORE_P);
+    const pUp = await upload(scopeP, pending, photo2);
+    const pBytes = Number(pUp.asset.storedBytes);
+    t.eq("an upload in budget: both counters charged with stored_bytes", [(await pendingBudget()) - shared0, await gauge(STORE_P)], [pBytes, pBytes]);
+    await transitionStore(staffCtx(), STORE_P, "active", { reason: "qa_approved" });
+    t.eq("pending → active: the shared budget gets the store's bytes back, the store keeps its gauge", [await pendingBudget(), await gauge(STORE_P)], [shared0, pBytes]);
   });
 
   await h.run();

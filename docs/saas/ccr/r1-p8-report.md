@@ -175,3 +175,64 @@ CCR list). Until then this file records the decisions the steps took, so none is
     the job also calls `invalidateStoreRender` and `invalidateStore`.
 14. **Not in this step.** The media pipeline's `cutout` enqueue (step 6). The integration deploy's runtime re-render
     (`enqueueRendersEverywhere(systemCtx("deploy"), "runtime")` at the merge, §H.10 / P0-6).
+
+### Step 6: the media pipeline (`src/lib/media/{process,assets,store}.ts`, `src/lib/storage/asset-refs.ts`, the media routes)
+
+1. **Spec drift: `src/lib/storage/asset-refs.ts`, not `src/lib/media/refs.ts`.** §G.5 names `src/lib/media/refs.ts`,
+   but P8's row owns `src/lib/media/{store.ts, storage/**, process.ts, assets.ts, upload-slots.ts}` only, so a new file
+   in `src/lib/media/` would be nobody's in R1. The module lives under `src/lib/storage/**` (P8's). It exports
+   `extractAssetIds`, `syncAssetRefs`, `assetUsage`, `livePagesUsing`, plus `usageByPage` / `assetUsageByPage` (the
+   dashboard's `AssetUsage` shape, which CCR r1-p8-7 re-exports from `admin-data/assets.ts`).
+2. **`extractAssetIds` takes a tagged source**: `{ kind: "doc", doc }`, `{ kind: "theme", theme }`, or
+   `{ kind: "settings", key, value }`. Landing documents go through `collectAssetIds` (the renderer's own walk, so the
+   index, the renderer and the export agree); the `brand` setting through its four logo roles; a theme or another
+   setting through a bounded walk (AssetRef-shaped objects and `assetId` / `*AssetId` strings, depth 14, 20,000
+   nodes). R2's `product` source arrives with S1's product documents.
+3. **`syncAssetRefs` filters before it writes.** Only ids of the scope's store's own assets are indexed (the §E.3 rule 5
+   check as a filter: a document may name a missing or another store's id, which renders as nothing). The owner's rows
+   are replaced by one DELETE and one INSERT IGNORE in a transaction; a deadlock between two syncs of one owner is
+   retried (3 tries). An empty list removes the owner's rows.
+4. **The scan until CCR r1-p8-7 lands.** `assetUsage` and `livePagesUsing` unite the index with an exact scan of the
+   store's non-archived landing drafts, its live versions and its brand logo (`collectAssetIds` over the parsed JSON,
+   keyset batches of 20, at most `pages_max` documents of each kind, capped at 2,000; never a LIKE). Index rows whose
+   owner is gone are left out; a `page_version` row counts as live only while it is its page's published version.
+   Step 12 removes the scan if the CCR has landed.
+5. **The delete refuses only live usage** (a deviation from the brief's "409 when `assetUsage` is non-empty"). The
+   read-only dashboard (`media-library.tsx`) sends `force=1` only when its dialog showed live pages or the logo, and it
+   reads every page of a 409 as live ("Live right now on …"; with no page it says "It's your store logo"). A 409 for a
+   page used only in drafts would therefore show the wrong sentence and ask twice. So `deleteAsset` throws
+   `AssetInUseError` (the route's 409 `{ error: "in_use", message, pages, storeLogo }`) while a live version or the
+   brand logo of THIS store shows the file; drafts are listed by the dialog's "Used in" and the delete proceeds after its
+   confirmation, as in R1.0. The 409's `pages` are this store's live pages only (MED-12); another store's document
+   naming the id never counts, and another store's id answers 404 like a missing one. If the lead wants drafts refused
+   too, the dashboard needs a `drafts` field in the 409 and its wording first (a P2 / maintainer change).
+6. **Deleting.** One transaction deletes the asset row, its `media_files` rows, the chunks of its `db` files and its
+   `asset_refs` rows, and resets the store's derived cutouts. The `fs` files go after the commit through `storageFor`,
+   skipping any key that has a row again (the same bytes re-uploaded meanwhile); a failed removal is an orphan for
+   `media.sweep`, counted as `media` / `orphan_left`. The bytes are refunded after the commit.
+7. **The upload is split in two halves.** `prepareUpload` (sniff, decode, encode, analyse) runs under the per-store
+   media gate; `persistUpload` (§G.4 steps 4-6: charge, files, rows) runs after the gate is released, so a slow disk or
+   database never holds another store's processing slot. `processUpload` keeps its signature. `test:storage` races the
+   storage half alone.
+8. **Files before rows, and twin uploads.** Every file is `put` (durable, idempotent) before the transaction; the fs
+   backend's rows carry no chunk (`insertFsFileRows`), the db backend's chunks still go inside the transaction. Two
+   uploads of the same bytes in one store write the same keys, so:
+   - a file already on disk before this upload's `put` is never this upload's to remove;
+   - the cleanup of a failed upload keeps every file whose key now has a row (the deduped race: the winner's files);
+   - after its commit, an upload re-puts any of its files that a failing twin removed in between.
+9. **The quota answer.** `quotaRefusal(err)` builds the route's 413 `{ ok: false, error: "quota", message }`: the
+   sandbox message when the shared `pending_media_bytes` budget refused (D69), the store's own otherwise. It never
+   carries a limit, a usage figure or the platform database's fill level (MED-13). The platform DB floor (`DB_QUOTA_MB`)
+   now applies only while media falls back to the database backend (§G.4 step 4).
+10. **The cutout re-render** (DES-§4.11, DES-R22). After the commit of a cutout whose `sourceAssetId` is one of the
+    store's own assets, `enqueueRenders(scope, await livePagesUsing(scope, source), "cutout")` runs in Next's `after()`
+    (outside a request, in scripts and tests, it runs at once and is awaited). The render queue is imported on use, so
+    it stays out of the upload route's module graph. A failure is logged, never the upload's. A deduped cutout queues
+    nothing (nothing new was stored). The visual swap is P6's.
+11. **Reads.** `store.ts` stays the one front for both backends (metadata cache, LRU, read pool) and picks the backend
+    from the row's `storage`. It calls the fs backend directly rather than through `storageFor`, because
+    `storage/db.ts` wraps `store.ts` and importing `storage/index.ts` from it would be a cycle. `evictStore` is kept.
+    A row whose fs file is missing or differs answers the neutral 404 (counted), never a 503 a client would retry.
+12. **Tenancy.** No new lint finding: `asset-refs.ts` binds the store with `whereStore` / `inStore` / `storeValues`;
+    the raw statements in `assets.ts` and `store.ts` carry `store_id = ?`. The media routes were already in the derived
+    route list of `test:tenancy`.

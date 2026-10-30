@@ -1,5 +1,7 @@
 /**
- * GET/HEAD /media/<key> — immutable media bytes from the database.
+ * GET/HEAD /media/<key> — immutable media bytes from the row's own backend (docs/STORE-SAAS.md §G.1, §G.6): a file
+ * under DATA_DIR (`storage = 'fs'`) or the chunk store (`'db'`), through src/lib/media/store.ts's front (metadata
+ * cache, LRU, read pool), so both answer the same bytes and headers.
  * Content-addressed keys → cached forever by browsers/CDNs; strong ETag (sha256) + 304; byte ranges
  * (needed by Safari for <video>); sandboxed, nosniff, cross-origin embeddable.
  *
@@ -11,7 +13,9 @@
  *    (never cached) instead of queueing behind order traffic;
  *  - large files (videos) are served from a verified local disk copy, not re-read per request.
  * Served on every host class (§G.6); a key of a store that is not servable for media (suspended, closed,
- * scheduled for deletion, purged, rejected: docs/STORE-SAAS.md §A.5.3) answers the same 404 as an unknown key.
+ * scheduled for deletion, purged, rejected: docs/STORE-SAAS.md §A.5.3) answers the same 404 as an unknown key. The key
+ * shape is checked before anything else (no path is ever built from a key that fails it), and an fs file that is
+ * missing or differs from its row is a 404 counted in the error ring, never served.
  */
 import type { NextRequest } from "next/server";
 import {
@@ -26,6 +30,7 @@ import {
   type MediaFileMeta,
 } from "@/lib/media";
 import { KEY_RE } from "@/lib/media/keys";
+import { StoredFileError } from "@/lib/media/storage/types";
 import { effectiveHost } from "@/lib/edge/host";
 import { spendMediaTokens } from "@/lib/media/throttle";
 import { hstsValue } from "@/lib/security/headers";
@@ -153,7 +158,13 @@ async function serve(req: NextRequest, ctx: Params, head: boolean): Promise<Resp
     const bytes = new Uint8Array(file.data.buffer as ArrayBuffer, file.data.byteOffset + start, length);
     return new Response(bytes, { status, headers });
   }
-  return new Response(await openMediaRange(meta, start, end), { status, headers });
+  try {
+    return new Response(await openMediaRange(meta, start, end), { status, headers });
+  } catch (err) {
+    // the row's file is missing or not its bytes (counted by the store as media / missing_file, file_mismatch)
+    if (err instanceof StoredFileError) return notFound();
+    throw err;
+  }
 }
 
 async function answer(req: NextRequest, ctx: Params, head: boolean): Promise<Response> {

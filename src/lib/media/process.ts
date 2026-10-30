@@ -2,21 +2,37 @@ import "server-only";
 /**
  * Upload pipeline: sniff → decode (EXIF auto-rotate, sRGB, ALL metadata stripped by re-encoding) →
  * master ≤ 2048 px → responsive WebP/AVIF variants → palette → subject analysis (focal point,
- * subject box, heads/hands — ./focus-analyze.ts) → quota charge → chunked storage in one transaction.
+ * subject box, heads/hands — ./focus-analyze.ts) → quota charge → files on the storage backend → rows in one
+ * transaction.
  *
  * Multi-tenant (docs/STORE-SAAS.md §G.4, D21; TENANCY-MAP MED-01 … MED-04):
  *  - asset id = HMAC(master bytes, "media-id:<storeId>")[:32] (./ids.ts): identical uploads dedupe to the same
- *    asset inside the store only; another store's identical bytes make another asset, so nothing answers
- *    "deduped" (or faster) because a different store holds the file;
- *  - a cutout's `sourceAssetId` is kept only when it is an asset of the same store;
- *  - the files' total size (`stored_bytes`: master + variants + AVIF) is charged to the store's quota before the
- *    transaction and refunded when it fails or a concurrent upload of the same content won the race;
+ *    asset inside the store only; another store's identical bytes make another asset, with other files, so nothing
+ *    answers "deduped" (or faster) because a different store holds the file;
+ *  - a cutout's `sourceAssetId` is kept only when it is an asset of the same store (MED-02);
  *  - the sharp gate is shared fairly: at most one job running and one waiting per store inside the process-wide
- *    2 running + 4 waiting.
+ *    2 running + 4 waiting. It covers the CPU half only (`prepareUpload`); the storage half (`persistUpload`) runs
+ *    after the gate is released, so a slow disk or database never holds another store's processing slot.
+ *
+ * The storage half, §G.4 steps 4-6 (P8 from the R1.0 integration, ENGC-32):
+ *  4. the files' total size (`stored_bytes`: master + variants + AVIF) is charged: a pending store's shared sandbox
+ *     budget first, then the store's own gauge (./quota.ts, D69). A refused charge writes nothing (QuotaError → 413).
+ *  5. every file is written through `mediaBackendReady().put` (durable, idempotent) BEFORE the transaction that inserts
+ *     the `assets` row and its `media_files` rows: `storage = 'fs'` and no chunk on the filesystem backend, today's
+ *     chunks inside the transaction on the database backend.
+ *  6. any failure after the charge refunds both counters and removes the files this upload wrote, in one `finally`.
+ *     When the failure is the deduped race (another upload of the same bytes in this store committed first, with
+ *     the same keys and so the same files), files whose key now has a row are kept.
+ *  Once committed, a cutout made from one of the store's photos re-renders the store's live pages that show that
+ *  photo (render reason `cutout`, DES-§4.11, DES-R22), after the response.
  */
+import { after } from "next/server";
 import sharp, { type Metadata, type Sharp, type SharpOptions } from "sharp";
 import { db, pool } from "@/lib/db/client";
 import { assets, type AssetVariant } from "@/lib/db/schema";
+import { recordError } from "@/lib/jobs/errors";
+import { logError } from "@/lib/orders/log";
+import { livePagesUsing } from "@/lib/storage/asset-refs";
 import { byId } from "@/lib/tenancy/sql";
 import type { WriteScope } from "@/lib/tenancy/types";
 import { extractPalette, type ExtractedPalette } from "@/lib/theme";
@@ -28,9 +44,12 @@ import { forgetMisses, insertStoreFiles, storedBytesOf } from "./files";
 import { FOCUS_VERSION, type AssetFocus } from "./focus";
 import { analyzeImageFocus } from "./focus-analyze";
 import { mediaAssetId } from "./ids";
-import { chargeMediaBytes, type MediaStore } from "./quota";
+import { chargeMediaBytes, quotaKind, type MediaStore, type QuotaError } from "./quota";
 import { sniff } from "./sniff";
-import type { FileToStore } from "./store";
+import { mediaBackendReady, type MediaStorage, type StoredFile } from "./storage";
+import { fsFilePresent } from "./storage/fs";
+import { sha256hex } from "./storage/io";
+import { insertFsFileRows, keysWithRows, type FileToStore } from "./store";
 import { inspectVideo } from "./video";
 
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
@@ -219,75 +238,182 @@ interface NewAsset {
   files: FileToStore[];
 }
 
+/**
+ * The CPU half's result, ready for `persistUpload`: the processed asset (master, variants, AVIF in memory), its
+ * original name and the options. It belongs to the store it was prepared in.
+ */
+export interface PreparedUpload {
+  readonly storeId: string;
+  readonly asset: NewAsset;
+  readonly originalName: string;
+  readonly opts: ProcessOptions;
+}
+
+/** What `prepareUpload` answers: an identical asset of the store (`done`), or the work for `persistUpload` (`ready`). */
+export type Prepared = { done: UploadResult } | { ready: PreparedUpload };
+
 const isDuplicateKey = (err: unknown) =>
   typeof err === "object" && err !== null && (err as { code?: string }).code === "ER_DUP_ENTRY";
 
-/** The upload's store: the seam's write scope and what the quota charge needs of the store's row. */
-interface Target {
-  scope: WriteScope;
-  store: MediaStore;
+/** The stored file a variant becomes (§G.1 `StoredFile` without its backend). */
+const storedFileOf = (storeId: string, assetId: string, f: FileToStore): Omit<StoredFile, "storage"> => ({
+  storeId,
+  key: f.key,
+  assetId,
+  mime: f.mime,
+  bytes: f.data.length,
+  sha256: sha256hex(f.data),
+});
+
+/**
+ * Remove the files an upload wrote that no row names (§G.4 step 6). Never throws: a file left behind is an orphan the
+ * daily `media.sweep` deletes after an hour (§G.3), counted here as `media` / `orphan_left`.
+ */
+async function removeUnclaimed(scope: WriteScope, backend: MediaStorage, written: readonly Omit<StoredFile, "storage">[]): Promise<void> {
+  if (!written.length) return;
+  try {
+    // the deduped race: the winner in this store committed rows for the same keys, and so for the same files
+    const claimed = await keysWithRows(scope, written.map((f) => f.key));
+    for (const f of written) {
+      if (claimed.has(f.key)) continue;
+      await backend.remove({ storeId: f.storeId, key: f.key, storage: backend.kind }).catch((err: unknown) => {
+        recordError("media", err, { code: "orphan_left", storeId: scope.storeId });
+      });
+    }
+  } catch (err) {
+    recordError("media", err, { code: "orphan_left", storeId: scope.storeId });
+  }
 }
 
-async function persist(t: Target, a: NewAsset, originalName: string, opts: ProcessOptions): Promise<UploadResult> {
+/** `fn` after the response (Next's `after()`); outside a request (scripts, tests) it runs now and is awaited. */
+async function afterResponse(fn: () => Promise<void>): Promise<void> {
+  try {
+    after(fn);
+  } catch {
+    await fn();
+  }
+}
+
+/**
+ * A cutout made from one of the store's photos: the store's live pages that show the photo are re-rendered in place
+ * (reason `cutout`, DES-§4.11, DES-R22), so a page waiting on the real mask swaps its framed photo for the cutout.
+ * The visual swap is the renderer's (P6); this only queues the pages. A failure is logged, never the upload's.
+ */
+function enqueueCutoutRenders(scope: WriteScope, sourceAssetId: string): Promise<void> {
+  return afterResponse(async () => {
+    try {
+      const pageIds = await livePagesUsing(scope, sourceAssetId);
+      if (!pageIds.length) return;
+      // loaded on use: the render queue (and the renderer behind it) stays out of the upload route's module graph
+      const { enqueueRenders } = await import("@/lib/jobs/renders");
+      await enqueueRenders(scope, pageIds, "cutout");
+    } catch (err) {
+      logError("media:cutout:enqueue", err);
+    }
+  });
+}
+
+/**
+ * The storage half (§G.4 steps 4-6) of an upload `prepareUpload` processed in the same store: charge, files, rows.
+ * Throws QuotaError when the store's media quota (or the budget pending stores share) is full; nothing is then
+ * written. Runs outside the CPU gate.
+ */
+export async function persistUpload(scope: WriteScope, store: MediaStore, prepared: PreparedUpload): Promise<UploadResult> {
+  if (prepared.storeId !== scope.storeId) throw new Error("media: an upload prepared in another store");
+  const { asset: a, originalName, opts } = prepared;
   const tags = [...new Set([...(opts.tags ?? []), ...(opts.cutout ? ["cutout"] : [])])]
     .map((t) => t.trim().slice(0, 40))
     .filter(Boolean)
     .slice(0, 20);
   // MED-02: only an asset of the same store can be the source (another store's id reads as missing)
-  const source = opts.sourceAssetId && ASSET_ID_RE.test(opts.sourceAssetId) && (await getAsset(t.scope, opts.sourceAssetId)) ? opts.sourceAssetId : null;
+  const source = opts.sourceAssetId && ASSET_ID_RE.test(opts.sourceAssetId) && (await getAsset(scope, opts.sourceAssetId)) ? opts.sourceAssetId : null;
   const storedBytes = storedBytesOf(a.files);
-  // charged before anything is written (a QuotaError writes nothing); every failure below gives it back
-  const refund = await chargeMediaBytes(t.scope, t.store, storedBytes);
-  const conn = await pool().getConnection();
+
+  // step 4: charged before anything is written (a QuotaError writes nothing); every failure below gives it back
+  const refund = await chargeMediaBytes(scope, store, storedBytes);
+  const written: Omit<StoredFile, "storage">[] = [];
+  let backend: MediaStorage | null = null;
+  let committed = false;
   try {
-    await conn.beginTransaction();
-    await conn.execute(
-      `INSERT INTO assets (id, store_id, kind, mime, width, height, bytes, stored_bytes, alpha, dominant, palette, variants,
-         original_name, source_asset_id, tags, focus, focus_version, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        a.id,
-        t.scope.storeId,
-        a.kind,
-        a.mime,
-        a.width,
-        a.height,
-        a.bytes,
-        storedBytes,
-        a.alpha ? 1 : 0,
-        a.dominant,
-        a.palette ? JSON.stringify(a.palette) : null,
-        JSON.stringify(a.variants),
-        cleanName(originalName),
-        source,
-        tags.length ? JSON.stringify(tags) : null,
-        a.focus ? JSON.stringify(a.focus) : null,
-        a.focus ? FOCUS_VERSION : null,
-        opts.createdBy ?? null,
-        new Date(),
-      ],
-    );
-    await insertStoreFiles(conn, t.scope, a.id, a.files);
-    await conn.commit();
+    // step 5: every file durable on its backend before the rows that name it (the db backend checks the bytes here
+    // and writes its chunks with the rows, inside the transaction)
+    backend = await mediaBackendReady();
+    for (const f of a.files) {
+      const file = storedFileOf(scope.storeId, a.id, f);
+      // a file already on disk is not this upload's to remove (a twin upload of the same bytes in this store)
+      const there = backend.kind === "fs" && (await fsFilePresent(file));
+      await backend.put(file, f.data);
+      if (backend.kind === "fs" && !there) written.push(file);
+    }
+    const conn = await pool().getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.execute(
+        `INSERT INTO assets (id, store_id, kind, mime, width, height, bytes, stored_bytes, alpha, dominant, palette, variants,
+           original_name, source_asset_id, tags, focus, focus_version, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          a.id,
+          scope.storeId,
+          a.kind,
+          a.mime,
+          a.width,
+          a.height,
+          a.bytes,
+          storedBytes,
+          a.alpha ? 1 : 0,
+          a.dominant,
+          a.palette ? JSON.stringify(a.palette) : null,
+          JSON.stringify(a.variants),
+          cleanName(originalName),
+          source,
+          tags.length ? JSON.stringify(tags) : null,
+          a.focus ? JSON.stringify(a.focus) : null,
+          a.focus ? FOCUS_VERSION : null,
+          opts.createdBy ?? null,
+          new Date(),
+        ],
+      );
+      if (backend.kind === "fs") await insertFsFileRows(conn, scope, a.id, a.files);
+      else await insertStoreFiles(conn, scope, a.id, a.files);
+      await conn.commit();
+      committed = true;
+    } catch (err) {
+      await conn.rollback().catch(() => undefined);
+      throw err;
+    } finally {
+      conn.release();
+    }
   } catch (err) {
-    await conn.rollback().catch(() => undefined);
-    await refund();
     if (isDuplicateKey(err)) {
       // a concurrent upload of the same content in this store won the race (ids are per store, never another's)
-      const existing = await getAsset(t.scope, a.id);
+      const existing = await getAsset(scope, a.id);
       if (existing) return { asset: existing, deduped: true };
     }
     throw err;
   } finally {
-    conn.release();
+    // step 6: one place for every failure after the charge (the deduped answer above included)
+    if (!committed) {
+      await refund();
+      if (backend) await removeUnclaimed(scope, backend, written);
+    }
+  }
+
+  if (backend.kind === "fs") {
+    // a twin upload that failed between our put and our commit may have removed a file it took for its own: put it back
+    for (const f of a.files) {
+      const file = storedFileOf(scope.storeId, a.id, f);
+      if (!(await fsFilePresent(file))) await backend.put(file, f.data);
+    }
   }
   forgetMisses(a.files.map((f) => f.key));
-  const stored = await getAsset(t.scope, a.id);
+  const stored = await getAsset(scope, a.id);
   if (!stored) throw new Error(`asset ${a.id} vanished after insert`);
+  if (opts.cutout && source) await enqueueCutoutRenders(scope, source);
   return { asset: stored, deduped: false };
 }
 
-async function processImage(t: Target, file: Buffer, format: "jpeg" | "png" | "webp" | "avif", originalName: string, opts: ProcessOptions): Promise<UploadResult> {
+async function prepareImage(scope: WriteScope, file: Buffer, format: "jpeg" | "png" | "webp" | "avif", originalName: string, opts: ProcessOptions): Promise<Prepared> {
   if (file.length > MAX_IMAGE_BYTES) throw new MediaError("too_large");
   let img = await decodeImage(file, format);
   let alpha = hasTransparency(img);
@@ -306,9 +432,9 @@ async function processImage(t: Target, file: Buffer, format: "jpeg" | "png" | "w
   }
 
   const masterWebp = await encode(img, alpha, img.width, "webp");
-  const id = mediaAssetId(t.scope, masterWebp);
-  const existing = await getAsset(t.scope, id);
-  if (existing) return { asset: await refreshFocus(t.scope, existing, img, alpha), deduped: true };
+  const id = mediaAssetId(scope, masterWebp);
+  const existing = await getAsset(scope, id);
+  if (existing) return { done: { asset: await refreshFocus(scope, existing, img, alpha), deduped: true } };
 
   const widths = [...MEDIA_WIDTHS.filter((w) => w < img.width), img.width];
   const variants: AssetVariant[] = [];
@@ -330,54 +456,58 @@ async function processImage(t: Target, file: Buffer, format: "jpeg" | "png" | "w
   }
 
   const [{ palette, dominant }, focus] = await Promise.all([paletteOf(img, alpha), focusOf(img, alpha)]);
-  return persist(
-    t,
-    {
-      id,
-      kind: "image",
-      mime: MIME.webp,
-      width: img.width,
-      height: img.height,
-      bytes: masterWebp.length,
-      alpha,
-      dominant,
-      palette,
-      focus,
-      variants,
-      files,
+  return {
+    ready: {
+      storeId: scope.storeId,
+      asset: { id, kind: "image", mime: MIME.webp, width: img.width, height: img.height, bytes: masterWebp.length, alpha, dominant, palette, focus, variants, files },
+      originalName,
+      opts,
     },
-    originalName,
-    opts,
-  );
+  };
 }
 
-async function processVideo(t: Target, file: Buffer, format: "mp4" | "webm", originalName: string, opts: ProcessOptions): Promise<UploadResult> {
+async function prepareVideo(scope: WriteScope, file: Buffer, format: "mp4" | "webm", originalName: string, opts: ProcessOptions): Promise<Prepared> {
   if (file.length > MAX_VIDEO_BYTES) throw new MediaError("too_large");
   const info = inspectVideo(file, format);
-  const id = mediaAssetId(t.scope, info.data);
-  const existing = await getAsset(t.scope, id);
-  if (existing) return { asset: existing, deduped: true };
+  const id = mediaAssetId(scope, info.data);
+  const existing = await getAsset(scope, id);
+  if (existing) return { done: { asset: existing, deduped: true } };
   const key = videoKey(id, info.width, format);
-  return persist(
-    t,
-    {
-      id,
-      kind: "video",
-      mime: VIDEO_MIME[format],
-      width: info.width,
-      height: info.height,
-      bytes: info.data.length,
-      alpha: false,
-      dominant: "#111111",
-      palette: null,
-      focus: null,
-      // the playable file is addressed with videoSource(asset); `variants` lists image renditions only
-      variants: [],
-      files: [{ key, mime: VIDEO_MIME[format], data: info.data }],
+  return {
+    ready: {
+      storeId: scope.storeId,
+      asset: {
+        id,
+        kind: "video",
+        mime: VIDEO_MIME[format],
+        width: info.width,
+        height: info.height,
+        bytes: info.data.length,
+        alpha: false,
+        dominant: "#111111",
+        palette: null,
+        focus: null,
+        // the playable file is addressed with videoSource(asset); `variants` lists image renditions only
+        variants: [],
+        files: [{ key, mime: VIDEO_MIME[format], data: info.data }],
+      },
+      originalName,
+      opts: { ...opts, cutout: false },
     },
-    originalName,
-    { ...opts, cutout: false },
-  );
+  };
+}
+
+/**
+ * The CPU half of an upload (sniff, decode, encode, analyse) in the scope's store, without the gate: an identical
+ * asset of the store answers `{ done }` at once (its focus refreshed when an older algorithm analysed it), anything
+ * else `{ ready }` for `persistUpload`. `processUpload` runs it under the media gate; test:storage drives the two
+ * halves to race the storage half alone. Throws MediaError for user-facing rejections.
+ */
+export async function prepareUpload(scope: WriteScope, file: Buffer, originalName: string, opts: ProcessOptions = {}): Promise<Prepared> {
+  if (file.length > Math.max(MAX_IMAGE_BYTES, MAX_VIDEO_BYTES)) throw new MediaError("too_large");
+  const kind = sniff(file);
+  if (!kind) throw new MediaError("unsupported");
+  return kind.kind === "image" ? prepareImage(scope, file, kind.format, originalName, opts) : prepareVideo(scope, file, kind.format, originalName, opts);
 }
 
 /**
@@ -388,15 +518,32 @@ async function processVideo(t: Target, file: Buffer, format: "mp4" | "webm", ori
  */
 export async function processUpload(scope: WriteScope, store: MediaStore, file: Buffer, originalName: string, opts: ProcessOptions = {}): Promise<UploadResult> {
   if (file.length > Math.max(MAX_IMAGE_BYTES, MAX_VIDEO_BYTES)) throw new MediaError("too_large");
-  const kind = sniff(file);
-  if (!kind) throw new MediaError("unsupported");
-  const t: Target = { scope, store };
+  if (!sniff(file)) throw new MediaError("unsupported");
   await acquireMediaGate(scope.storeId);
+  let prepared: Prepared;
   try {
-    return kind.kind === "image"
-      ? await processImage(t, file, kind.format, originalName, opts)
-      : await processVideo(t, file, kind.format, originalName, opts);
+    prepared = await prepareUpload(scope, file, originalName, opts);
   } finally {
     releaseMediaGate(scope.storeId);
   }
+  return "done" in prepared ? prepared.done : persistUpload(scope, store, prepared.ready);
+}
+
+/* ------------------------------------------------------------------ */
+/* The route's answer to a refused charge (§G.4 step 4, MED-13)        */
+/* ------------------------------------------------------------------ */
+
+/** What the member reads: the store's own storage, or the sandbox while the store waits for review. Never a platform figure. */
+export const QUOTA_MESSAGES = {
+  store: "Your store's media storage is full. Delete photos or videos you no longer use, then upload again.",
+  pending: "Uploads are limited while your store is waiting for review. Delete files you no longer use, or try again after the review.",
+} as const;
+
+/**
+ * The upload route's 413 for a refused charge: `{ error: "quota" }` with the sandbox message when the shared pending
+ * budget refused (D69), the store's own otherwise. It never carries the limit, the usage or the platform database's
+ * fill level (MED-13).
+ */
+export function quotaRefusal(err: QuotaError): { status: 413; body: { ok: false; error: "quota"; message: string } } {
+  return { status: 413, body: { ok: false, error: "quota", message: QUOTA_MESSAGES[quotaKind(err)] } };
 }
