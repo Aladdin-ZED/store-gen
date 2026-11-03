@@ -51,8 +51,8 @@ review of terms/privacy (before public launch).
   `wf_452e7a6d-23d` (qa/lead/tracks-B-speed.json). Heartbeat job `e8c3b404`. 31/106 steps done at relaunch.
   PLAN TO LIVE: merge each finished track in order with `qa/lead/r1-merge-fast.js` (no reviews; core gate tsc + npm test +
   migrate/tenancy/action-replay + build), P6 may be merged at its latest green step if it is the last one blocking; then one
-  integration-lite pass (full npm run gate) and the archive deploy (HANDOFF §4). **BLOCKER FOR THE DEPLOY: the Hostinger connector
-  is disconnected (needs the owner to re-authorize it: /mcp in a terminal, or the connector settings).** P3 wave 2 (Campaign Kit,
+  integration-lite pass (full npm run gate) and the archive deploy (HANDOFF §4). (The Hostinger connector was
+  re-authorized by the owner on 2026-11-03 and verified: hosting_get-deployment answers; live build is still 01a17eb4.) P3 wave 2 (Campaign Kit,
   test links, WhatsApp order, short links) and the domain move (V1-V11) follow after the first R1 deploy.
 
 - **PAUSED BY THE OWNER 2026-10-30 ~23:24** ("stop everything for now until i tell you to continue"). The heartbeat cron
