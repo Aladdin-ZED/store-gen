@@ -7,19 +7,22 @@
  *
  *   await addImpersonationNoteAction({ storeId, text });       // the impersonation ribbon's Note (P2's ImpersonationRibbon)
  *
- * P0b stub: the track replaces the body, never the signature (src/lib/contracts/r1-p0b-platform.ts).
+ * The signature is frozen (src/lib/contracts/r1-p0b-platform.ts); the body is P1's.
  */
+import { FieldsError } from "@/lib/auth/errors";
+import { addNote } from "@/lib/platform/notes";
 import { platformAction } from "@/lib/platform/seam";
 import type { ActionResult } from "@/lib/tenancy/types";
 
 /**
- * stores.notes: `text` ≤ 300 chars. P1 writes one `platform_notes` row of kind `note` for the store (`author_id` = the
- * staff member, never a tenant row) and audits `platform.note.added`. P0b stub: throws inside the seam, which answers
- * the typed failure (a tenant session is refused before the body).
+ * stores.notes: `text` ≤ 300 chars. One `platform_notes` row of kind `note` for the store (`author_id` = the staff
+ * member, never a tenant row) through src/lib/platform/notes.ts `addNote`, audited `platform.note.added`; a tenant
+ * session is refused by the seam before the body.
  */
 export async function addImpersonationNoteAction(input: { storeId: string; text: string }): Promise<ActionResult<{ id: string }>> {
-  return platformAction("stores.notes", async () => {
-    void input;
-    throw new Error("not implemented: P1 addImpersonationNoteAction");
+  return platformAction("stores.notes", async (ctx) => {
+    const text = typeof input?.text === "string" ? input.text.trim() : "";
+    if (!text || text.length > 300) throw new FieldsError({ text: "console.notes.invalid" });
+    return addNote(ctx, { storeId: input.storeId, body: text, kind: "note" });
   });
 }

@@ -10,6 +10,8 @@ import type { QueueTab, SlaTile } from "./queue-rules";
 export interface QueueSnapshot {
   counts: Record<QueueTab, number>;
   sla: SlaTile;
+  /** review rows whose seller answered a staff question (back in Review with `answered_at`) */
+  answered: number;
 }
 
 export const queuePulseCache = scopedCache<QueueSnapshot>({ name: "console-pulse", maxEntries: 8, ttlMs: 5_000 });

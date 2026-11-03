@@ -18,8 +18,8 @@
  *     the row): no member;
  *   - staff: one of each platform role with TOTP on, and an admin invited without TOTP yet; an outsider seller.
  * Cases filled so far: 1 (the approval queue), 2 (store requests), 3 (platform requests), 4 (plans and entitlements, with
- * the server side of the kill switches and flags), 5 (the health job), 6 (notifications), 7 (staff), 8 (legal), 11
- * (lifecycle safety), 13 (its console part: the sandbox meters, invite codes, the waitlist), 15 (brand guard, reports,
+ * the server side of the kill switches and flags), 5 (the health job), 6 (notifications), 7 (staff), 8 (legal), 9
+ * (impersonation from the console), 11 (lifecycle safety), 12 (its pulse half), 16 (its staff half), 13 (its console part: the sandbox meters, invite codes, the waitlist), 15 (brand guard, reports,
  * the health-run half), 19 (the Domains half) and 20 (the staff-invite half); the others print "pending" with the step
  * that fills them.
  */
@@ -1554,6 +1554,221 @@ async function case19(fx: Fixtures): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/* case 9: impersonation from the console (PL-10; PLA-§10.1)           */
+/* case 12, the pulse half: ConsolePulse.impersonation (PLA-§4.6)      */
+/* ------------------------------------------------------------------ */
+
+async function case9(fx: Fixtures): Promise<void> {
+  const imp = await import("@/lib/platform/impersonation");
+  const member = await extraStore(fx, "case9-member", "active");
+  await fx.conn.query("INSERT INTO store_members (store_id, user_id, role) VALUES (?, ?, 'viewer')", [member.id, fx.staff.support]);
+  const sched = await extraStore(fx, "case9-sched", "scheduled_deletion");
+  const support = await staffCtx(fx, "support");
+  ok("start refused for a staff member who is an active member of the store (they open it as a member)", (await codeOf(imp.startImpersonation(support, { storeId: member.id, reason: "ticket", ticketRef: "T-9" }))) === "impersonation_member");
+  const admin = await staffCtx(fx, "admin");
+  ok("start refused for a store scheduled for deletion", (await codeOf(imp.startImpersonation(admin, { storeId: sched.id, reason: "bug", note: "case 9" }))) === "impersonation_state");
+  const other = await extraStore(fx, "case9-other", "active");
+  await imp.startImpersonation(admin, { storeId: fx.stores.A.id, reason: "onboarding" });
+  await imp.startImpersonation(admin, { storeId: other.id, reason: "onboarding" });
+  const open = await rows<{ store_id: string; ended_reason: string | null }>(fx.conn, "SELECT store_id, ended_reason FROM impersonation_sessions WHERE staff_user_id = ? ORDER BY started_at", [fx.staff.admin]);
+  ok("a second start ends the first (one open view-as per session)", open.length === 2 && open[0]?.store_id === fx.stores.A.id && open[0]?.ended_reason === "ended" && open[1]?.store_id === other.id && open[1]?.ended_reason === null, open);
+  await imp.endImpersonation(admin, "ended");
+}
+
+async function case12(fx: Fixtures): Promise<void> {
+  const imp = await import("@/lib/platform/impersonation");
+  const { consolePulse, pulseEtag } = await import("@/lib/platform/pulse");
+  const ops = await staffCtx(fx, "admin");
+  const before = await consolePulse(ops);
+  ok("ConsolePulse: v 1, no view-as yet, the queue counts and the audit head are numbers", before.v === 1 && before.impersonation === null && Number.isInteger(before.queue.review) && before.auditHead > 0, before);
+  ok("ConsolePulse: P8's render summary is unavailable on this branch, so `renders` is null (never a made-up 0)", before.renders === null);
+  const t0 = Date.now();
+  await imp.startImpersonation(ops, { storeId: fx.stores.A.id, reason: "ticket", ticketRef: "T-12" });
+  const during = await consolePulse(ops);
+  ok("ConsolePulse.impersonation is set within 5 s of the start", during.impersonation?.storeId === fx.stores.A.id && during.impersonation.handle === fx.stores.A.handle && Date.now() - t0 < 5_000, during.impersonation);
+  ok("the ETag changes with the view-as", pulseEtag(during) !== pulseEtag(before));
+  const another = await consolePulse(await staffCtx(fx, "super_admin"));
+  ok("another staff member's pulse carries no view-as of this one", another.impersonation === null);
+  const t1 = Date.now();
+  await imp.endImpersonation(ops, "ended");
+  const after = await consolePulse(ops);
+  ok("ConsolePulse.impersonation is null within 5 s of the end", after.impersonation === null && Date.now() - t1 < 5_000);
+  ok("an analyst's pulse answers too (console.read)", (await consolePulse(await staffCtx(fx, "analyst"))).v === 1);
+}
+
+/* ------------------------------------------------------------------ */
+/* case 10, the read-model half: every console read runs on the seed,  */
+/* masked per role (PLA-§5, §6, §7, §11; §O.3 cases 1-2 data side)     */
+/* ------------------------------------------------------------------ */
+
+async function case10(fx: Fixtures): Promise<void> {
+  const overview = await import("@/lib/platform/overview");
+  const list = await import("@/lib/platform/stores-list");
+  const header = await import("@/lib/platform/profile/header");
+  const strips = await import("@/lib/platform/profile/overview-strips");
+  const usage = await import("@/lib/platform/profile/usage");
+  const team = await import("@/lib/platform/profile/team");
+  const timeline = await import("@/lib/platform/profile/timeline");
+  const activity = await import("@/lib/platform/profile/activity");
+  const orders = await import("@/lib/platform/profile/orders");
+  const people = await import("@/lib/platform/people");
+  const lookup = await import("@/lib/platform/order-lookup");
+  const search = await import("@/lib/platform/search");
+  const notes = await import("@/lib/platform/notes");
+  const create = await import("@/lib/platform/store-create");
+  const messages = await import("@/lib/platform/messages");
+  const backups = await import("@/lib/platform/backups");
+  const system = await import("@/lib/platform/system");
+  const A = fx.stores.A;
+  const root = await staffCtx(fx, "super_admin");
+  const support = await staffCtx(fx, "support");
+  const analyst = await staffCtx(fx, "analyst");
+  await fx.conn.query("INSERT INTO customers (id, store_id, phone, name, city, orders_count, last_order_at) VALUES (?, ?, ?, ?, 'Casablanca', 1, NOW(3))", [fx.newId(), A.id, CANARY.phone, CANARY.name]);
+  await fx.conn.query("INSERT INTO blocklist (id, store_id, kind, value) VALUES (?, ?, 'phone', ?)", [fx.newId(), A.id, CANARY.phone]);
+  const leaks = (v: unknown) => {
+    const s = JSON.stringify(v);
+    return [CANARY.phone, CANARY.name, CANARY.address, CANARY.note, CANARY.sellerEmail].filter((c) => s.includes(c));
+  };
+
+  // the overview (PLA-§5): every block answers on its own; an analyst sees the order tiles hidden below k stores
+  const tiles = await overview.overviewKpis(root);
+  ok("overview tiles: active stores counted, the orders tile reads real rows (the seed's order is placed now)", tiles.activeStores.state === "ok" && tiles.activeStores.data.active >= 1 && tiles.orders.state === "ok" && tiles.orders.data.kind === "ok" && tiles.orders.data.count >= 1, tiles);
+  ok("overview tiles: sales per currency, never summed across", tiles.sales.state === "ok" && tiles.sales.data.kind === "ok" && tiles.sales.data.byCurrency.every((c) => c.currency.length === 3 && Number.isInteger(c.cents)), tiles.sales);
+  const hidden = await overview.overviewKpis(analyst);
+  ok("PD15: with fewer than 5 contributing stores an analyst sees both order tiles hidden", hidden.orders.state === "ok" && hidden.orders.data.kind === "hidden" && hidden.sales.state === "ok" && hidden.sales.data.kind === "hidden", hidden.orders);
+  ok("the database and error tiles answer (an empty error table says so, never 0 with an arrow)", tiles.errors.state === "ok" && tiles.errors.data.kind === "empty" && tiles.database.state !== "error", { errors: tiles.errors, db: tiles.database.state });
+  const attention = await overview.needsAttention(root);
+  ok("Needs attention: at most 20 rows, each with a level, a code and a link", attention.rows.length <= 20 && attention.rows.every((r) => r.code && r.href.startsWith("/admin")), attention.rows.slice(0, 3));
+  const feed = await overview.activityFeed(analyst);
+  ok("activity feed: FEED_ACTIONS only, no staff name for an analyst", feed.rows.every((r) => (overview.FEED_ACTIONS as readonly string[]).includes(r.action) && (r.actor.kind !== "staff" || r.actor.name === null)) && feed.head > 0, feed.rows.slice(0, 3));
+  const snap = await overview.queueSnapshotBlock(root);
+  ok("queue snapshot: the counts and at most five oldest reviews", snap.oldest.length <= 5 && Number.isInteger(snap.snapshot.counts.review) && Number.isInteger(snap.snapshot.answered));
+  const sys = await overview.systemSummary(root);
+  ok("system: P8's machinery is unavailable on this branch, the health engine answers", sys.machine.state === "unavailable" && sys.health.state === "ok", sys);
+
+  // the stores list (PLA-§6.1)
+  const created = await list.listStores(root, {});
+  ok("stores list: newest first, owners attached, store #1 rule and Internal plan read", created.rows.length >= 4 && created.rows.some((r) => r.id === A.id && r.owner?.firstName === "Salma"), created.rows.length);
+  const bySupport = await list.listStores(support, { q: "atlas" });
+  ok("stores list: a name prefix finds the store; support sees the owner e-mail masked (PD35)", bySupport.rows.length === 1 && bySupport.rows[0]!.owner?.email !== CANARY.sellerEmail, bySupport.rows[0]?.owner);
+  ok("stores list: an exact owner e-mail finds the store", (await list.listStores(root, { q: CANARY.sellerEmail })).rows.some((r) => r.id === A.id));
+  for (const sort of list.STORE_SORTS) {
+    const page1 = await list.listStores(root, { sort }, null, { pageSize: 2 });
+    const page2 = page1.next ? await list.listStores(root, { sort }, page1.next, { pageSize: 2 }) : null;
+    ok(`stores list sorted by ${sort}: keyset pages never repeat a row`, !!page1.next && !!page2 && page2.rows.every((r) => !page1.rows.some((p) => p.id === r.id)), { p1: page1.rows.map((r) => r.id), p2: page2?.rows.map((r) => r.id) });
+  }
+  ok("stores list filters: status, attention, flag and band combine", (await list.listStores(root, { status: ["suspended"] })).rows.every((r) => r.status === "suspended") && Array.isArray((await list.listStores(root, { attention: true, flag: ["quota_high"], band: ["hold"] })).rows));
+  ok("stores list: a tampered cursor answers page 1", (await list.listStores(root, {}, "eyJrIjpbMV19.0000000000000000")).rows[0]?.id === created.rows[0]?.id);
+  ok("stores CSV: analysts and support are refused (admin+)", (await codeOf(list.storesCsv(support, {}))) === "forbidden" && (await codeOf(list.storesCsv(analyst, {}))) === "forbidden");
+  const csv = await list.storesCsv(root, {});
+  ok("stores CSV: the ten columns, no @ outside the header, audited platform.stores.exported", csv.csv.split("\r\n")[0] === list.STORES_CSV_COLUMNS.join(",") && !csv.csv.split("\r\n").slice(1).join("\n").includes("@") && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.stores.exported'")) === 1, csv.csv.slice(0, 200));
+
+  // the profile (PLA-§7): header, strips, tabs; masking per role
+  const h = await header.getStoreHeader(support, A.id);
+  ok("profile header: fresh row, owners masked for support, live URL for an active store", h?.store.handle === A.handle && h.owners.length === 1 && h.owners[0]!.email !== CANARY.sellerEmail && "url" in h.live, h);
+  ok("profile header: an unknown id answers null", (await header.getStoreHeader(root, fx.newId())) === null);
+  const all = await strips.loadStrips(support, A.id);
+  const states = Object.fromEntries(Object.entries(all).map(([k, v]) => [k, v.state]));
+  ok("the ten strips: each answers ok or unavailable (a later track's stub), none errors", Object.values(all).every((p) => p.state === "ok" || p.state === "unavailable") && all.identity.state === "ok" && all.risk.state === "ok" && all.usage.state === "ok" && all.team.state === "ok" && all.timeline.state === "ok", states);
+  ok("the strips carry no customer canary and no full seller e-mail for support", leaks(all).length === 0, leaks(all));
+  const kpis = await strips.getStoreOverview(support, A.id, 30);
+  ok("the KPI row: stats_daily answers, P4's orders are unavailable here, delivery waits for R2", kpis.stats.state === "ok" && kpis.orders.state === "unavailable" && kpis.deliveryR2 === true && kpis.from < kpis.to, kpis);
+  const u = await usage.getStoreUsage(root, A.id);
+  ok("usage tab: one line per entitlement key, effective values from T1, the meters", !!u && u.entitlements.length >= 30 && u.meters.length === usage.METERS.length && u.entitlements.some((l) => l.key === "media_bytes" && l.effective !== undefined), u?.meters);
+  const t = await team.getStoreTeam(analyst, A.id);
+  ok("team tab: the members, 2FA coverage, every e-mail masked for an analyst", (t?.members.length ?? 0) >= 5 && t!.twoFactor.of >= 5 && t!.members.every((m) => m.email.includes("•")), t?.members.map((m) => m.email));
+  const tl = await timeline.listStoreTimeline(root, A.id, { limit: 50 });
+  ok("timeline: newest first, merged from the four sources", tl.events.every((e, i, a) => i === 0 || a[i - 1]!.at >= e.at), tl.events.slice(0, 3));
+  ok("activity tab: audit.platform rows of the store (analysts refused)", (await codeOf(activity.listStoreActivity(analyst, A.id))) === "forbidden" && Array.isArray((await activity.listStoreActivity(root, A.id)).rows));
+  ok("orders tab: P4's console read is unavailable here (its stub), never a guess", (await codeOf(orders.listStoreOrders(root, A.id))).startsWith("threw:not implemented"));
+  ok("reveal: an analyst is refused; staff without a fresh step-up answer step_up", (await codeOf(orders.revealOrderPii(analyst, { storeId: A.id, orderId: fx.order, reason: "ticket" }))) === "forbidden" && (await codeOf(orders.revealOrderPii(root, { storeId: A.id, orderId: fx.order, reason: "ticket" }))) === "step_up");
+
+  // people (PLA-§11)
+  const byEmail = await people.listPeople(analyst, { q: CANARY.sellerEmail });
+  ok("people: an exact e-mail finds the person for every role, masked for an analyst", byEmail.search === "email" && byEmail.rows.length === 1 && byEmail.rows[0]!.email !== CANARY.sellerEmail && byEmail.rows[0]!.stores.owner === 1, byEmail.rows);
+  ok("people: a name prefix is admin+ only", (await people.listPeople(support, { q: "Salma" })).search === "ignored" && (await people.listPeople(root, { q: "Salma" })).rows.some((r) => r.id === fx.a.owner));
+  ok("people: the no-store filter lists the outsider", (await people.listPeople(root, { noStore: true })).rows.some((r) => r.id === fx.outsider));
+  const profile = await people.getUserProfile(support, fx.a.owner);
+  ok("user profile: the Stores tab, the e-mail masked for support", profile?.stores.some((s) => s.storeId === A.id && s.role === "owner") === true && profile.email !== CANARY.sellerEmail, profile);
+  ok("user profile tabs answer", Array.isArray(await people.userSessions(root, fx.a.owner)) && Array.isArray(await people.userSignups(root, fx.a.owner)) && Array.isArray(await people.userLinked(root, fx.a.owner)) && Array.isArray((await people.userActivity(root, fx.a.owner)).rows));
+
+  // the order lookup (PLA-§11.3)
+  const card = await lookup.lookupOrderById(analyst, fx.order);
+  ok("lookup by id: every role, one card, the customer masked, no address or note", card?.store.id === A.id && leaks(card).length === 0 && card.customer === "Canaryname Z." && card.phone.includes("•"), card);
+  ok("lookup by id: an unknown id answers null", (await lookup.lookupOrderById(root, "CMD-ZZZZZZ")) === null);
+  ok("lookup by phone: an analyst is refused (orders.lookup)", (await codeOf(lookup.lookupOrdersByPhone(analyst, "0600000777"))) === "forbidden");
+  const auditsBefore = await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.order.lookup'");
+  const byPhone = await lookup.lookupOrdersByPhone(root, "0600000777");
+  const lookupRows = await rows<{ meta: string }>(fx.conn, "SELECT meta FROM audit_log WHERE action = 'platform.order.lookup' ORDER BY id DESC LIMIT 1");
+  ok("lookup by phone: the store with its count and blocklist state, the phone masked", byPhone.stores.length === 1 && byPhone.stores[0]!.store.id === A.id && byPhone.stores[0]!.blocked && byPhone.phone !== CANARY.phone && leaks(byPhone).length === 0, byPhone);
+  ok("lookup by phone: one audit row, without the phone", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.order.lookup'")) === auditsBefore + 1 && !(lookupRows[0]?.meta ?? "").includes("600000777") && (lookupRows[0]?.meta ?? "").includes("phoneHash"), lookupRows);
+
+  // the console search (PLA-§4.4)
+  const s1 = await search.consoleSearch(analyst, "atl");
+  ok("search: a name prefix finds the store; an analyst never gets a full e-mail or a person by name", s1.stores.some((s) => s.id === A.id) && s1.people.length === 0 && leaks(s1).length === 0, s1);
+  ok("search: an exact e-mail finds the person, masked for an analyst", (await search.consoleSearch(analyst, CANARY.sellerEmail)).people.every((p) => p.email !== CANARY.sellerEmail));
+  ok("search: an order id answers the masked card", (await search.consoleSearch(support, fx.order)).order?.id === fx.order);
+
+  // notes (PLA-§7.12)
+  ok("notes: an analyst is refused", (await codeOf(notes.listNotes(analyst, { storeId: A.id }))) === "forbidden");
+  const n1 = await notes.addNote(root, { storeId: A.id, body: "Checked the **brand** with @Platform", kind: "decision", mentions: [fx.staff.admin] });
+  const listed = await notes.listNotes(support, { storeId: A.id });
+  ok("notes: added with its mention, listed for staff, editable only by the author", listed.some((n) => n.id === n1.id && n.kind === "decision" && n.mentions.length === 1 && !n.canEdit), listed);
+  ok("notes: the mention sent staff.mention", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'staff.mention' AND user_id = ?", [fx.staff.admin])) === 1);
+  ok("notes: only the author edits", (await codeOf(notes.editNote(support, { id: n1.id, body: "x" }))) === "forbidden");
+  await notes.editNote(root, { id: n1.id, body: "Checked the brand again" });
+  await notes.pinNote(support, { id: n1.id, pinned: true });
+  await notes.deleteNote(root, { id: n1.id });
+  ok("notes: edit, pin and soft delete audited, the deleted note gone from the list", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action LIKE 'platform.note.%'")) >= 4 && !(await notes.listNotes(root, { storeId: A.id })).some((n) => n.id === n1.id));
+  const n2 = await notes.addNote(support, { userId: fx.a.owner, body: "Called about the payout" });
+  ok("notes on a person (store-less)", (await notes.listNotes(root, { userId: fx.a.owner })).some((n) => n.id === n2.id && n.storeId === null));
+
+  // store creation (PLA-§6.2), messages (PLA-§19.1), backups and system glue
+  ok("createStore: stores.create (super_admin) only", (await codeOf(create.createStore(support, { name: "Nope", handle: "nope-store" }))) === "forbidden");
+  const made = await create.createStore(root, { name: "Internal Lab", handle: "internal-lab", mode: "both" });
+  const [madeRow] = await rows<{ status: string; plan_id: string; approved_by: string }>(fx.conn, "SELECT status, plan_id, approved_by FROM stores WHERE id = ?", [made.storeId]);
+  ok("createStore: active, internal plan, approved by the staff member, owner membership and the approved review row, audited via console", madeRow?.status === "active" && madeRow.plan_id === "internal" && madeRow.approved_by === fx.staff.super_admin && (await count(fx.conn, "SELECT COUNT(*) AS n FROM store_members WHERE store_id = ? AND role = 'owner'", [made.storeId])) === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM signup_reviews WHERE store_id = ? AND status = 'approved' AND reason_code = 'console_created'", [made.storeId])) === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'store.created' AND store_id = ? AND meta LIKE '%console%'", [made.storeId])) === 1, madeRow);
+  ok("createStore: a taken handle is refused on the field", (await codeOf(create.createStore(root, { name: "Again", handle: "internal-lab" }))) === "fields:handle");
+  const sent = await messages.messageStores(await staffCtx(fx, "admin"), { storeIds: [A.id, fx.stores.D.id], text: "Maintenance tonight at 23:00.", severity: "warn" });
+  ok("messageStores: the live store gets staff.message, the purged one is skipped, one audit row per store", sent.sent.length === 1 && sent.skipped.includes(fx.stores.D.id) && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.store.messaged' AND store_id = ?", [A.id])) === 1, sent);
+  ok("messageStores: support may message one store at a time", (await codeOf(messages.messageStores(support, { storeIds: [A.id, fx.stores.C.id], text: "Hi" }))) === "forbidden");
+  const bv = await backups.backupsView(root);
+  ok("backups: P8's runs unavailable here, the retention and the reminder read", bv.runs.state === "unavailable" && bv.retention.daily >= 3 && bv.remind === false, bv);
+  const sh = await system.systemHealthView(root);
+  ok("system health glue: the machine unavailable, the engine and the ceilings answer", sh.machine.state === "unavailable" && sh.engine.state === "ok" && sh.sandboxes.state === "ok" && sh.pendingMedia.state === "ok", { m: sh.machine.state, e: sh.engine.state });
+}
+
+/* ------------------------------------------------------------------ */
+/* case 16, the staff half: account deletion (PD81; PLA-§11.2)         */
+/* ------------------------------------------------------------------ */
+
+async function case16(fx: Fixtures): Promise<void> {
+  const people = await import("@/lib/platform/people");
+  const root = await staffCtx(fx, "super_admin", { stepUp: true });
+  const owner = await extraStore(fx, "case16-owned", "active");
+  const before = await count(fx.conn, "SELECT COUNT(*) AS n FROM users WHERE id = ? AND disabled = 0", [owner.owner]);
+  const owns = await people.deletePerson(root, { userId: owner.owner, reason: "owner asked by e-mail" });
+  ok("deleteUser on the owner of an active store → owns_store with the store listed, nothing changed", !owns.deleted && owns.refusal === "owns_store" && owns.stores.some((s) => s.id === owner.id) && before === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM users WHERE id = ? AND disabled = 0", [owner.owner])) === 1, owns);
+  const staff = await people.deletePerson(root, { userId: fx.staff.analyst, reason: "left the team" });
+  ok("deleteUser on a staff member → is_staff", !staff.deleted && staff.refusal === "is_staff", staff);
+  ok("deleteUser without a fresh step-up → step_up", (await codeOf(people.deletePerson(await staffCtx(fx, "super_admin"), { userId: fx.a.viewer, reason: "test" }))) === "step_up");
+  ok("deleteUser on oneself → forbidden", (await codeOf(people.deletePerson(root, { userId: fx.staff.super_admin, reason: "test" }))) === "forbidden");
+
+  // a plain member (a viewer of store A): anonymised, links and sessions gone, the audit kept
+  const target = fx.a.viewer;
+  await fx.conn.query("INSERT INTO identity_links (user_id, kind, value_hash) VALUES (?, 'email_norm', ?)", [target, "c".repeat(64)]);
+  await fx.conn.query("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, NOW(3) + INTERVAL 1 DAY)", ["d".repeat(64), target]);
+  const done = await people.deletePerson(root, { userId: target, reason: "asked to be forgotten" });
+  const [u] = await rows<{ email: string; phone: string | null; locale: string | null; disabled: number }>(fx.conn, "SELECT email, phone, locale, disabled FROM users WHERE id = ?", [target]);
+  ok("a plain member is deleted: deleted+<ulid>@invalid, phone and locale null, disabled", done.deleted && /^deleted\+[0-9a-z]{26}@invalid$/.test(u?.email ?? "") && u?.phone === null && u?.locale === null && u?.disabled === 1, u);
+  ok("no identity link or session of the user is left", (await count(fx.conn, "SELECT COUNT(*) AS n FROM identity_links WHERE user_id = ?", [target])) === 0 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?", [target])) === 0);
+  const audits = await rows<{ meta: string | null }>(fx.conn, "SELECT meta FROM audit_log WHERE action = 'platform.user.deleted' AND target = ?", [target]);
+  ok("one platform.user.deleted row, without the e-mail", audits.length === 1 && !(audits[0]?.meta ?? "").includes("@"), audits);
+  const profile = await people.getUserProfile(root, target);
+  ok("the profile reads the account as deleted, and no action is offered", profile?.deleted === true && profile.canManage === false && profile.banned === null, profile);
+}
+
+/* ------------------------------------------------------------------ */
 /* case 20, the staff half: invite consumption (core §B.5 rev 3)       */
 /* ------------------------------------------------------------------ */
 
@@ -1623,14 +1838,14 @@ const CASES: Record<number, { run?: CaseFn; pending?: string }> = {
   6: { run: case6 },
   7: { run: case7 },
   8: { run: case8 },
-  9: { pending: "step 7 (impersonation from the console)" },
-  10: { pending: "step 6 (query plans; --perf)" },
+  9: { run: case9 },
+  10: { run: case10, pending: "the EXPLAIN plans on tables over 10,000 rows and the --perf timings need the 2,000-store fixture (qa:platform-perf, manual; not built in speed mode)" },
   11: { run: case11 },
-  12: { pending: "step 6 (console pulse)" },
+  12: { run: case12, pending: "the addImpersonationNoteAction half (a tenant session → forbidden, row counts) runs with the attack cases of step 7" },
   13: { run: case13, pending: "the signup half (the cap → waitlist, the two-tier upload cap, the Turnstile gate) is T2 / P8 code, run at the R1 integration" },
   14: { pending: "step 7 (masking at the repository)" },
   15: { run: case15 },
-  16: { pending: "step 7 (account deletion)" },
+  16: { run: case16, pending: "the tenant half (deleteMyAccountAction and its step-up) is T2 / P2 code, run at the R1 integration" },
   17: { pending: "step 7 (tenant step-up ladder)" },
   18: { pending: "the R1 integration (T2 signup refund paths, P7 pending AI slice)" },
   19: { run: case19, pending: "the machinery half (the Cron panel and its alarm, render_stuck, data_dir_85, the backup download, the break-glass links) is step 12" },
@@ -1655,7 +1870,7 @@ async function main(): Promise<number> {
   // order) or read the seeded states (B pending, C suspended); the step-5 cases (plans, staff, legal, domains, staff
   // invites) add stores, signups, super_admins and published documents, so they run after those
   const RUNS_LATER = new Set([1, 2, 3, 11, 13]);
-  const RUNS_LAST = new Set([4, 7, 8, 19, 20]);
+  const RUNS_LAST = new Set([4, 7, 8, 9, 10, 12, 16, 19, 20]);
   const rank = (n: number) => (RUNS_LAST.has(n) ? 2 : RUNS_LATER.has(n) ? 1 : 0);
   const wanted = (picked?.length ? picked : Object.keys(CASES).map(Number)).sort((x, y) => rank(x) - rank(y) || x - y);
   const unknown = wanted.filter((n) => !CASES[n]);

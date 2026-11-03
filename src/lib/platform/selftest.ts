@@ -1699,6 +1699,56 @@ async function main(): Promise<void> {
   for (const k of ["unknown_key", "release_locked", "value_type"]) checkD(`console.plans.${k}` in enConsole, `console.plans.${k} exists (a refused patch)`);
   for (const k of ["placeholders_not_allowed", "unknown_placeholder"]) checkD(`console.legal.${k}` in enConsole, `console.legal.${k} exists (a refused body)`);
 
+  // step 6: the console read models (PLA-§4.6 ConsolePulse ETag, §5.2 PD15, §6.1 CSV)
+  const pul = await import("./pulse-rules");
+  const crl = await import("./console-rules");
+  const pulse: import("./pulse-rules").ConsolePulse = {
+    v: 1,
+    at: "2026-11-03T10:00:00.000Z",
+    queue: { review: 3, hold: 1, requests: 2, needsInfoAnswered: 0, oldestMinutes: 192, overSla: 1 },
+    unread: 4,
+    alarms: { red: 0, yellow: 1 },
+    kill: ["capi_enabled"],
+    pendingPlatformRequests: 1,
+    auditHead: 12_345,
+    impersonation: null,
+    health: { staleSnapshots: 0, dirtyRows: 2, lastRunAt: "2026-11-03T09:55:00.000Z" },
+    renders: null,
+    build: "a1b2c3d4",
+  };
+  const tag = pul.pulseEtag(pulse);
+  checkD(/^"[a-f0-9]{64}"$/.test(tag) && tag === pul.pulseEtag({ ...pulse }), "ConsolePulse ETag: a quoted sha256, stable for the same body");
+  checkD(tag === pul.pulseEtag({ ...pulse, at: "2026-11-03T10:00:15.000Z" }), "ConsolePulse ETag: identical bodies polled at another time keep the tag (at is not hashed)");
+  const reordered = { ...(Object.fromEntries(Object.entries(pulse).reverse()) as typeof pulse), queue: Object.fromEntries(Object.entries(pulse.queue).reverse()) as typeof pulse.queue };
+  checkD(tag === pul.pulseEtag(reordered), "ConsolePulse ETag: key order never changes the tag");
+  const variants: [string, typeof pulse][] = [
+    ["queue.review", { ...pulse, queue: { ...pulse.queue, review: 4 } }],
+    ["queue.oldestMinutes", { ...pulse, queue: { ...pulse.queue, oldestMinutes: null } }],
+    ["unread", { ...pulse, unread: 5 }],
+    ["alarms.red", { ...pulse, alarms: { red: 1, yellow: 1 } }],
+    ["kill", { ...pulse, kill: [] }],
+    ["pendingPlatformRequests", { ...pulse, pendingPlatformRequests: 0 }],
+    ["auditHead", { ...pulse, auditHead: 12_346 }],
+    ["impersonation", { ...pulse, impersonation: { storeId: "01JD0000000000000000000000", handle: "atlas", endsAt: "2026-11-03T10:30:00.000Z" } }],
+    ["health.dirtyRows", { ...pulse, health: { ...pulse.health, dirtyRows: 3 } }],
+    ["renders", { ...pulse, renders: { pending: 0, failed: 0, oldestMin: null } }],
+    ["build", { ...pulse, build: "a1b2c3d5" }],
+  ];
+  const unchanged = variants.filter(([, p]) => pul.pulseEtag(p) === tag).map(([k]) => k);
+  checkD(unchanged.length === 0, "ConsolePulse ETag: any changed field gives a new tag", unchanged);
+  checkD(pul.etagMatches(tag, tag) && pul.etagMatches(`W/${tag}, "x"`, tag) && pul.etagMatches("*", tag) && !pul.etagMatches(null, tag) && !pul.etagMatches('"other"', tag), "If-None-Match: exact, weak, list and * match; another tag does not");
+  checkD(eq(pul.alarmCounts(["danger", "warn", "warn", "info"]), { red: 1, yellow: 2 }), "pulse alarms: danger is red, warn yellow, info never counts");
+  checkD(crl.suppressedFor("analyst", 3, 5) && !crl.suppressedFor("analyst", 5, 5) && crl.suppressedFor("analyst", 6, 8) && !crl.suppressedFor("admin", 1, 5) && crl.suppressedFor("analyst", 4, 2), "PD15: an analyst's order tiles hide below k stores (k never under 5); other roles always see them");
+  checkD(crl.csvCell("=HYPERLINK(1)") === "'=HYPERLINK(1)" && crl.csvCell("a,b") === '"a,b"' && crl.csvCell('say "x"') === '"say ""x"""' && crl.csvCell(null) === "" && crl.csvCell(42) === "42" && crl.csvCell("@x") === "'@x" && crl.csvCell("-1,2") === `"'-1,2"`, "stores CSV: cells quoted, formulas neutralised");
+  const step6Files = ["overview.ts", "stores-list.ts", "store-create.ts", "people.ts", "order-lookup.ts", "notes.ts", "search.ts", "exports.ts", "backups.ts", "messages.ts", "profile/orders.ts"];
+  const used6 = new Set<string>();
+  for (const f of step6Files) for (const m of source(`src/lib/platform/${f}`).matchAll(/"(console\.[a-z_]+\.[a-z_.]+)"/g)) used6.add(m[1]!);
+  const missing6 = [...used6].filter((k) => !(k in enConsole));
+  checkD(used6.size >= 15 && missing6.length === 0, `every console.* key the step-6 read models answer with is in en/console.ts (${used6.size})`, missing6);
+  const ov = await import("./overview-keys");
+  const missingAttention = ov.ATTENTION_KEYS.filter((k) => !(k in enConsole));
+  checkD(missingAttention.length === 0, "every Needs-attention code and feed action has its console.attention.* / console.feed.* sentence", missingAttention);
+
   const ms = Math.round(performance.now() - t0);
   for (const s of skips) console.log(`  SKIP ${s}`);
   if (failures > 0) {

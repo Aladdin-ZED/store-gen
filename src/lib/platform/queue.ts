@@ -82,6 +82,7 @@ import {
   slaTile,
   snoozeUntil,
   tabCounts,
+  tabsOf,
   waitingFrom,
   type GrantSpec,
   type QueueFilter,
@@ -372,7 +373,8 @@ export { invalidateQueueSnapshot } from "./queue-cache";
 export async function queueSnapshot(now: Date = new Date()): Promise<QueueSnapshot> {
   return queuePulseCache.getOrLoad(QUEUE_PULSE.scope, QUEUE_PULSE.key, async () => {
     const [{ rows }, setting] = await Promise.all([readIndex(now), getPlatformSetting("platform")]);
-    return { counts: tabCounts(rows, now), sla: slaTile(rows, now, setting.signup.slaHours) };
+    const answered = rows.filter((r) => r.answeredAt !== null && tabsOf(r, now).includes("review")).length;
+    return { counts: tabCounts(rows, now), sla: slaTile(rows, now, setting.signup.slaHours), answered };
   });
 }
 
