@@ -44,6 +44,17 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **MUTEX FIX 2026-11-03 ~22:05** (58/106 steps, ≈ 44.3%; both runs healthy). No step had finished for ~1 h: the old
+  C:/Users/SICO/sg-wt/heavy.mjs stole any lock older than 20 min even from a live holder, so a slow P1 ui-shots run (next dev
+  3.75 GB) kept running beside the next holders; free RAM fell to 0.09 GB, one shot took 40 min and P7 waited 45 min.
+  The lead killed that P1 ui-shots tree (port 3461 only) and installed a new heavy.mjs (backup heavy.mjs.bak-20261103):
+  FIFO tickets in sg-wt/.heavy-queue, the holder refreshes the lock every 20 s and is never robbed while alive and
+  refreshing (dead owner or 5 min without refresh only), a hard cap per command (HEAVY_MAX_MIN, default 45 → kill the tree,
+  exit 124), 3 h wait limit, one line per command in sg-wt/heavy.log. Tested in a scratch root first (FIFO, exit codes,
+  timeout, dead-owner takeover, old-style live lock kept). Also: track and merge prompts now say "never end your turn while a
+  command runs in the background" (one P8 attempt had ended "waiting for the storage suite notification"); relaunch-args.mjs
+  retries its git read. Memory note: Docker Desktop's WSL VM (vmmemWSL ≈ 1.6 GB) also runs on this 7.7 GB PC.
+
 - **TRACKS RELAUNCHED 2026-11-03 ~17:45** (speed mode) after a 4th outage (~12:00-17:30) exhausted 12 tries per track. 48/106 steps
   at relaunch. Group A task `w4jeih92q` run `wf_62a06748-635` (P8 from 9, P2 7, P1 8, P5 7); group B task `wdsuy1hhj` run
   `wf_524f3596-eb4` (P4 7, P3 5, P7 7, P6 6). Relaunch recipe now: `node qa/lead/relaunch-args.mjs && node qa/lead/speedify.cjs`,
