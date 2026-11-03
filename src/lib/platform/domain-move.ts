@@ -37,6 +37,7 @@ import { enqueueRenders, renderSummary } from "@/lib/jobs/renders";
 import type { JobCtx, JobResult } from "@/lib/jobs/runner";
 import { systemCtx, systemScope } from "@/lib/jobs/scope";
 import { trustedProxyHops } from "@/lib/security/ip";
+import { getStoreById } from "@/lib/tenancy/public";
 import { getPlatformSetting, setPlatformSetting } from "@/lib/settings";
 import type { PlatformSetting } from "@/lib/settings/keys/platform";
 import type { PlatformCtx, StoreStatus } from "@/lib/tenancy/types";
@@ -543,3 +544,24 @@ export async function runRerenderJob(ctx: Pick<JobCtx, "deadline">): Promise<Job
 
 /** For the DB test: the state row's key (a restart reads the same row). */
 export const RERENDER_STATE_KEY = RERENDER_KEY;
+
+/**
+ * `domains.manage` (PLA-§M.1 `retryRendersAction`, the store profile's renders strip): every live page of one store
+ * enqueued again (one pending job per page, so nothing doubles). `unavailable` while P8's queue is the stub. Audit
+ * `platform.domains.rerender { scope: "store" }` on the store.
+ */
+export async function retryStoreRenders(ctx: PlatformCtx, storeId: string): Promise<{ enqueued: number } | { unavailable: true }> {
+  requireManage(ctx);
+  if (typeof storeId !== "string" || !/^[0-9A-Z]{26}$/.test(storeId)) throw new AuthRefusal("not_found");
+  const store = await getStoreById(storeId);
+  if (!store || store.status === "purged") throw new AuthRefusal("not_found");
+  let enqueued: number;
+  try {
+    enqueued = (await enqueueRenders(systemScope(systemCtx("platform.rerender"), store.id), "all-live", "address", 5)).enqueued;
+  } catch (err) {
+    recordPlatformError("store retry enqueueRenders", err, { storeId: store.id });
+    return { unavailable: true };
+  }
+  await auditFrom(ctx, "platform.domains.rerender", { storeId: store.id, target: store.id, meta: { scope: "store", enqueued } });
+  return { enqueued };
+}

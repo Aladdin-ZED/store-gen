@@ -13,12 +13,17 @@ import "server-only";
  * alarm `backup_not_downloaded`, src/lib/platform/alarms.ts). Every write here is `backups.manage` with a fresh
  * step-up (super_admin).
  */
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { z } from "zod";
 import { auditFrom } from "@/lib/audit";
 import { AuthRefusal, FieldsError } from "@/lib/auth/errors";
 import { backupFiles, listBackupRuns, type BackupRunSummary } from "@/lib/backup";
+import { zipStream, type ZipEntry } from "@/lib/export/zip";
 import { getPlatformSetting, setPlatformSetting } from "@/lib/settings";
 import type { PlatformCtx } from "@/lib/tenancy/types";
+import { recordPlatformError } from "./log";
 import { panel, type Panel } from "./panel";
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -92,4 +97,75 @@ export async function recordBackupDownload(ctx: PlatformCtx, day: string, now: D
   const platform = await getPlatformSetting("platform");
   await setPlatformSetting("platform", { ...platform, backup: { ...platform.backup, lastDownloadAt: now.toISOString() } }, { id: ctx.user.id, ip: ctx.actor.ip, kind: "platform" });
   await auditFrom(ctx, "platform.backup.downloaded", { target: day, meta: { day } });
+}
+
+/* ------------------------------------------------------------------ */
+/* The download archive (PLA-§17, OS-10; GET /api/admin/backups/<day>) */
+/* ------------------------------------------------------------------ */
+
+const README = [
+  "Store Gen backup",
+  "",
+  "This archive holds one day of the platform's logical backup, as the server wrote it:",
+  "- the part files (NDJSON per table slice, gzip, then sealed with the platform key: envelope backup:v1);",
+  "- manifest.json: the day, each part's name, size in bytes and SHA-256, and the backup run's table counts.",
+  "",
+  "The parts are encrypted. They can only be opened by a Store Gen server holding the same APP_SECRET.",
+  "Keep this file somewhere other than the hosting account (an off-site copy).",
+  "Check a part with: sha256sum <part> and compare it with manifest.json.",
+  "",
+].join("\n");
+
+/**
+ * `backups.manage` ↑ (the route's guard checks it, and `backupDayFiles` again): one stored (level 0) ZIP of the day's
+ * sealed parts, then `manifest.json` (each part's size and SHA-256, computed while it streams) and `README.txt`. A
+ * part outside `DATA_DIR/backups/` or missing on disk ends the answer as the neutral 404 (null). When the archive has
+ * been fully produced, the download is recorded (`recordBackupDownload`: audit and `lastDownloadAt`).
+ */
+export async function backupArchive(ctx: PlatformCtx, day: string, now: Date = new Date()): Promise<{ stream: ReadableStream<Uint8Array>; filename: string } | null> {
+  const files = await backupDayFiles(ctx, day);
+  const root = process.env.DATA_DIR?.trim();
+  if (!files || !root) return null;
+  const base = path.resolve(root, "backups");
+  const parts: { name: string; file: string; bytes: number }[] = [];
+  for (const f of files) {
+    const file = path.resolve(root, f.path);
+    if (!file.startsWith(base + path.sep) || !/^[A-Za-z0-9._-]{1,120}$/.test(f.name)) return null;
+    parts.push({ name: f.name, file, bytes: f.bytes });
+  }
+  const runs = await listBackupRuns().catch(() => []);
+  const run = runs.find((r) => r.day === day && r.state === "done") ?? null;
+  const sums = new Map<string, { bytes: number; sha256: string }>();
+  const entries: ZipEntry[] = parts.map((p) => ({
+    path: `${day}/${p.name}`,
+    compress: false,
+    async load() {
+      const data = await readFile(p.file).catch(() => null);
+      if (!data) return null;
+      sums.set(p.name, { bytes: data.length, sha256: createHash("sha256").update(data).digest("hex") });
+      return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    },
+  }));
+  entries.push({
+    path: `${day}/manifest.json`,
+    compress: false,
+    async load() {
+      const manifest = {
+        v: 1,
+        day,
+        createdAt: now.toISOString(),
+        run: run ? { id: run.id, kind: run.kind, doneAt: run.doneAt, tables: run.tables } : null,
+        parts: parts.map((p) => ({ name: p.name, bytes: sums.get(p.name)?.bytes ?? null, sha256: sums.get(p.name)?.sha256 ?? null, missing: !sums.has(p.name) })),
+      };
+      return new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`);
+    },
+  });
+  entries.push({ path: `${day}/README.txt`, compress: false, load: async () => new TextEncoder().encode(README) });
+  const stream = zipStream(entries, {
+    mtime: now,
+    onDone: () => {
+      void recordBackupDownload(ctx, day).catch((err: unknown) => recordPlatformError("backup download record", err));
+    },
+  });
+  return { stream, filename: `store-gen-backup-${day}.zip` };
 }

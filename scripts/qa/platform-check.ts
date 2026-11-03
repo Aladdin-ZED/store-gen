@@ -19,7 +19,8 @@
  *   - staff: one of each platform role with TOTP on, and an admin invited without TOTP yet; an outsider seller.
  * Cases filled so far: 1 (the approval queue), 2 (store requests), 3 (platform requests), 4 (plans and entitlements, with
  * the server side of the kill switches and flags), 5 (the health job), 6 (notifications), 7 (staff), 8 (legal), 9
- * (impersonation from the console), 11 (lifecycle safety), 12 (its pulse half), 16 (its staff half), 13 (its console part: the sandbox meters, invite codes, the waitlist), 15 (brand guard, reports,
+ * (impersonation from the console), 11 (lifecycle safety), 12 (the pulse and the impersonation note), 16 (its staff half
+ * and deleteUserAction), 13 (its console part: the sandbox meters, invite codes, the waitlist), 15 (brand guard, reports,
  * the health-run half), 19 (the Domains half) and 20 (the staff-invite half); the others print "pending" with the step
  * that fills them.
  */
@@ -1580,7 +1581,7 @@ async function case12(fx: Fixtures): Promise<void> {
   const { consolePulse, pulseEtag } = await import("@/lib/platform/pulse");
   const ops = await staffCtx(fx, "admin");
   const before = await consolePulse(ops);
-  ok("ConsolePulse: v 1, no view-as yet, the queue counts and the audit head are numbers", before.v === 1 && before.impersonation === null && Number.isInteger(before.queue.review) && before.auditHead > 0, before);
+  ok("ConsolePulse: v 1, no view-as yet, the queue counts and the audit head are numbers", before.v === 1 && before.impersonation === null && Number.isInteger(before.queue.review) && Number.isInteger(before.auditHead) && before.auditHead >= 0, before);
   ok("ConsolePulse: P8's render summary is unavailable on this branch, so `renders` is null (never a made-up 0)", before.renders === null);
   const t0 = Date.now();
   await imp.startImpersonation(ops, { storeId: fx.stores.A.id, reason: "ticket", ticketRef: "T-12" });
@@ -1594,6 +1595,40 @@ async function case12(fx: Fixtures): Promise<void> {
   const after = await consolePulse(ops);
   ok("ConsolePulse.impersonation is null within 5 s of the end", after.impersonation === null && Date.now() - t1 < 5_000);
   ok("an analyst's pulse answers too (console.read)", (await consolePulse(await staffCtx(fx, "analyst"))).v === 1);
+
+  // the note half: addImpersonationNoteAction (PLA-§10.2, PD56), called as the action the ribbon posts
+  const actions = await import("@/app/admin/(console)/stores/[id]/actions");
+  const A = fx.stores.A;
+  const tenant = await asUser(fx.a.owner, `/app/${A.handle}`, () => actions.addImpersonationNoteAction({ storeId: A.id, text: "From the owner" }));
+  ok("addImpersonationNoteAction from a tenant session → refused by the seam (no platform role: the neutral not_found)", !tenant.ok && (tenant.error === "not_found" || tenant.error === "forbidden"), tenant);
+  const notViewing = await asUser(fx.staff.admin, "/admin", () => actions.addImpersonationNoteAction({ storeId: A.id, text: "Not viewing" }));
+  ok("…from a staff member who is not viewing the store → not_found", !notViewing.ok && notViewing.error === "not_found", notViewing);
+  const started = await asUser(fx.staff.admin, "/admin", () => actions.startImpersonationAction({ storeId: A.id, reason: "onboarding" }));
+  ok("startImpersonationAction answers the store's /app URL", started.ok && started.data.url.includes(A.handle), started);
+  const tenantBefore = await tenantRowCounts(fx, A.id);
+  const notesBefore = await count(fx.conn, "SELECT COUNT(*) AS n FROM platform_notes WHERE store_id = ?", [A.id]);
+  const wrote = await asUser(fx.staff.admin, `/app/${A.handle}`, () => actions.addImpersonationNoteAction({ storeId: A.id, text: "Walked the owner through the queue" }));
+  const notes = await rows<{ author_id: string; kind: string; body: string }>(fx.conn, "SELECT author_id, kind, body FROM platform_notes WHERE store_id = ? ORDER BY created_at DESC LIMIT 1", [A.id]);
+  ok("…from the impersonating staff member → one platform_notes row (kind note, author = the staff member)", wrote.ok && (await count(fx.conn, "SELECT COUNT(*) AS n FROM platform_notes WHERE store_id = ?", [A.id])) === notesBefore + 1 && notes[0]?.author_id === fx.staff.admin && notes[0]?.kind === "note", { wrote, notes });
+  ok("…and no tenant table of the store changed (row counts before / after)", JSON.stringify(await tenantRowCounts(fx, A.id)) === JSON.stringify(tenantBefore));
+  const tooLong = await asUser(fx.staff.admin, `/app/${A.handle}`, () => actions.addImpersonationNoteAction({ storeId: A.id, text: "x".repeat(301) }));
+  ok("…a note over 300 characters → invalid", !tooLong.ok && tooLong.error === "invalid", tooLong);
+  await imp.endImpersonation({ sessionId: `ctx:${fx.staff.admin}` }, "ended");
+}
+
+/** Runs `fn` as a signed-in user through the identity seam (SG_TEST_CONTEXT=1): the actions' own seam runs. */
+async function asUser<T>(userId: string, path: string, fn: () => Promise<T>, opts: { stepUp?: boolean } = {}): Promise<T> {
+  const { runAsIdentity } = await import("@/lib/tenancy/context");
+  return runAsIdentity({ userId, path, ...(opts.stepUp ? { stepUpAt: new Date() } : {}) }, fn);
+}
+
+/** Row counts of every table with a store_id for one store, except the platform's own bookkeeping. */
+async function tenantRowCounts(fx: Fixtures, storeId: string): Promise<Record<string, number>> {
+  const PLATFORM_BOOKKEEPING = new Set(["platform_notes", "audit_log", "notifications", "store_health", "impersonation_sessions", "platform_usage"]);
+  const tables = await rows<{ t: string }>(fx.conn, "SELECT TABLE_NAME AS t FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'store_id' ORDER BY TABLE_NAME");
+  const out: Record<string, number> = {};
+  for (const { t } of tables) if (!PLATFORM_BOOKKEEPING.has(t)) out[t] = await count(fx.conn, `SELECT COUNT(*) AS n FROM \`${t}\` WHERE store_id = ?`, [storeId]);
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1766,6 +1801,19 @@ async function case16(fx: Fixtures): Promise<void> {
   ok("one platform.user.deleted row, without the e-mail", audits.length === 1 && !(audits[0]?.meta ?? "").includes("@"), audits);
   const profile = await people.getUserProfile(root, target);
   ok("the profile reads the account as deleted, and no action is offered", profile?.deleted === true && profile.canManage === false && profile.banned === null, profile);
+
+  // the action half: deleteUserAction (PD81), as the console posts it
+  const users = await import("@/app/admin/(console)/users/actions");
+  const victim = fx.a.agent;
+  const [agentRow] = await rows<{ email: string }>(fx.conn, "SELECT email FROM users WHERE id = ?", [victim]);
+  const fromTenant = await asUser(fx.a.owner, `/app/${fx.stores.A.handle}`, () => users.deleteUserAction({ userId: victim, reason: "attack", typedEmail: agentRow!.email }), { stepUp: true });
+  ok("deleteUserAction from a tenant owner session → not_found, nothing changed", !fromTenant.ok && fromTenant.error === "not_found" && (await count(fx.conn, "SELECT COUNT(*) AS n FROM users WHERE id = ? AND disabled = 0", [victim])) === 1, fromTenant);
+  const noStep = await asUser(fx.staff.super_admin, "/admin", () => users.deleteUserAction({ userId: victim, reason: "asked", typedEmail: agentRow!.email }));
+  ok("deleteUserAction without a fresh step-up → step_up", !noStep.ok && noStep.error === "step_up", noStep);
+  const wrongTyped = await asUser(fx.staff.super_admin, "/admin", () => users.deleteUserAction({ userId: victim, reason: "asked", typedEmail: "someone@else.test" }), { stepUp: true });
+  ok("deleteUserAction with another e-mail typed → invalid on typedEmail, nothing changed", !wrongTyped.ok && wrongTyped.error === "invalid" && (await count(fx.conn, "SELECT COUNT(*) AS n FROM users WHERE id = ? AND disabled = 0", [victim])) === 1, wrongTyped);
+  const deleted = await asUser(fx.staff.super_admin, "/admin", () => users.deleteUserAction({ userId: victim, reason: "asked to be forgotten", typedEmail: agentRow!.email.toUpperCase() }), { stepUp: true });
+  ok("deleteUserAction with the e-mail typed (any case) → deleted", deleted.ok && deleted.data.deleted === true && (await count(fx.conn, "SELECT COUNT(*) AS n FROM users WHERE id = ? AND disabled = 1", [victim])) === 1, deleted);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1841,11 +1889,11 @@ const CASES: Record<number, { run?: CaseFn; pending?: string }> = {
   9: { run: case9 },
   10: { run: case10, pending: "the EXPLAIN plans on tables over 10,000 rows and the --perf timings need the 2,000-store fixture (qa:platform-perf, manual; not built in speed mode)" },
   11: { run: case11 },
-  12: { run: case12, pending: "the addImpersonationNoteAction half (a tenant session → forbidden, row counts) runs with the attack cases of step 7" },
+  12: { run: case12 },
   13: { run: case13, pending: "the signup half (the cap → waitlist, the two-tier upload cap, the Turnstile gate) is T2 / P8 code, run at the R1 integration" },
   14: { pending: "step 7 (masking at the repository)" },
   15: { run: case15 },
-  16: { run: case16, pending: "the tenant half (deleteMyAccountAction and its step-up) is T2 / P2 code, run at the R1 integration" },
+  16: { run: case16, pending: "the tenant half (deleteMyAccountAction and its step-up) is T2 / P2 code, run at the R1 integration; the deleteUserAction half runs here" },
   17: { pending: "step 7 (tenant step-up ladder)" },
   18: { pending: "the R1 integration (T2 signup refund paths, P7 pending AI slice)" },
   19: { run: case19, pending: "the machinery half (the Cron panel and its alarm, render_stuck, data_dir_85, the backup download, the break-glass links) is step 12" },

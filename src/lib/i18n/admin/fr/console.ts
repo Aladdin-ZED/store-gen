@@ -69,4 +69,20 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "console.staff.invite_invalid": "Cette invitation n'est plus valable. Demandez-en une nouvelle.",
   "console.staff.invite_sign_in_first": "Un compte utilise déjà cette adresse e-mail. Connectez-vous avec, puis rouvrez le lien.",
   "console.staff.invite_wrong_account": "Cette invitation est destinée à une autre adresse e-mail.",
+
+  /* ---- R1: the public report page (PLA-§24.2, PD70) ---- */
+  "report.title": "Signaler {store}",
+  "report.reason": "Quel est le problème avec cette boutique ?",
+  "report.reason.phishing": "Elle demande des mots de passe, une carte ou des coordonnées bancaires",
+  "report.reason.scam": "Elle prend des commandes qu'elle ne livre pas",
+  "report.reason.counterfeit": "Elle vend des contrefaçons de marques",
+  "report.reason.prohibited": "Elle vend des produits interdits",
+  "report.reason.impersonation": "Elle se fait passer pour une autre marque ou société",
+  "report.reason.other": "Autre chose",
+  "report.details": "Détails",
+  "report.details_hint": "Facultatif. Qu'avez-vous constaté ? 2 000 caractères maximum.",
+  "report.contact": "Votre e-mail ou téléphone",
+  "report.contact_hint": "Facultatif. Seul Store Gen le voit, uniquement pour vous poser des questions sur ce signalement.",
+  "report.submit": "Envoyer le signalement",
+  "report.thanks": "Merci. Store Gen va examiner cette boutique.",
 };

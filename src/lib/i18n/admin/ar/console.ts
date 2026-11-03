@@ -70,4 +70,20 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "console.staff.invite_invalid": "هاد الدعوة ما بقاتش صالحة. طلب دعوة جديدة.",
   "console.staff.invite_sign_in_first": "كاين حساب كيستعمل هاد البريد الإلكتروني. دخل بيه، ومن بعد حلّ الرابط مرة أخرى.",
   "console.staff.invite_wrong_account": "هاد الدعوة ديال عنوان بريد إلكتروني آخر.",
+
+  /* ---- R1: the public report page (PLA-§24.2, PD70) ---- */
+  "report.title": "الإبلاغ عن {store}",
+  "report.reason": "شنو المشكل فهاد المتجر؟",
+  "report.reason.phishing": "كيطلب كلمات السر ولا معلومات البطاقة ولا الحساب البنكي",
+  "report.reason.scam": "كياخد الطلبات وما كيوصلهاش",
+  "report.reason.counterfeit": "كيبيع منتجات مقلّدة ديال ماركات",
+  "report.reason.prohibited": "كيبيع منتجات ممنوعة",
+  "report.reason.impersonation": "كيدّعي أنه ماركة ولا شركة أخرى",
+  "report.reason.other": "حاجة أخرى",
+  "report.details": "التفاصيل",
+  "report.details_hint": "اختياري. شنو اللي شفتي؟ حتى 2000 حرف.",
+  "report.contact": "البريد الإلكتروني ولا رقم الهاتف ديالك",
+  "report.contact_hint": "اختياري. غير Store Gen اللي كيشوفو، باش يسولك على هاد البلاغ.",
+  "report.submit": "صيفط البلاغ",
+  "report.thanks": "شكرًا لك. سيراجع Store Gen هذا المتجر.",
 };

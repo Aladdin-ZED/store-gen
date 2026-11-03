@@ -20,11 +20,13 @@ import "server-only";
  */
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { auditFrom } from "@/lib/audit";
 import { AuthRefusal, FieldsError } from "@/lib/auth/errors";
 import { db } from "@/lib/db/client";
 import { signupReviews, stores } from "@/lib/db/schema";
 import { systemCtx, systemScope } from "@/lib/jobs/scope";
 import { getPlatformSetting } from "@/lib/settings";
+import { invalidateStore } from "@/lib/tenancy/cache";
 import { transitionStore } from "@/lib/tenancy/lifecycle";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { PlatformCtx, StoreStatus, WriteScope } from "@/lib/tenancy/types";
@@ -122,4 +124,30 @@ export async function runLifecycleAction(ctx: PlatformCtx, storeId: string, to: 
   invalidateLifecyclePreview(storeId);
   invalidateQueueSnapshot();
   return { storeId, action, from: store.status, to, withdrawn };
+}
+
+const SuspendNoticeInput = z.object({ storeId: z.string().regex(/^[0-9A-Z]{26}$/), suspendNotice: z.boolean() });
+
+/**
+ * `stores.lifecycle` (PLA-§8.1 `setSuspendNoticeAction`, D32): a suspended store's public answer, the neutral 503
+ * notice (`true`) or the 404 (`false`), changed without a new transition. Only while the store is `suspended` (the
+ * flag is inert in every other state; the suspension sheet sets it with the transition). One conditional UPDATE, the
+ * store's caches dropped, audit `platform.store.suspend_notice { notice }`.
+ */
+export async function setSuspendNotice(ctx: PlatformCtx, input: unknown): Promise<{ changed: boolean }> {
+  if (!ctx.can("stores.lifecycle")) throw new AuthRefusal("forbidden");
+  const parsed = SuspendNoticeInput.safeParse(input);
+  if (!parsed.success) throw new FieldsError({ suspendNotice: "console.lifecycle.not_an_edge" });
+  const { storeId, suspendNotice } = parsed.data;
+  platformScope(ctx, storeId);
+  const store = await lifecycleStoreRow(storeId);
+  if (!store || store.status === "purged") throw new AuthRefusal("not_found");
+  if (store.status !== "suspended") throw new AuthRefusal("status_changed", "console.lifecycle.status_changed");
+  if (store.suspendNotice === suspendNotice) return { changed: false };
+  const [res] = await db.update(stores).set({ suspendNotice }).where(and(eq(stores.id, storeId), eq(stores.status, "suspended")));
+  if (res.affectedRows !== 1) throw new AuthRefusal("status_changed", "console.lifecycle.status_changed");
+  invalidateStore(storeId);
+  invalidateLifecyclePreview(storeId);
+  await auditFrom(ctx, "platform.store.suspend_notice", { storeId, target: storeId, meta: { notice: suspendNotice } });
+  return { changed: true };
 }
