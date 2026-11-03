@@ -44,6 +44,15 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **APP RESTART 2026-11-03 23:02 → TRACKS RELAUNCHED ~23:10** (owner: "continue"). Every claude process restarted at
+  23:02 (desktop app restart), so both runs (wf_62a06748-635, wf_524f3596-eb4) died; their waiting heavy.mjs wrappers then
+  failed to spawn (0xC0000142, console gone) and drained the queue. 59/106 validated (≈ 44.5%). Relaunched with the speed
+  recipe: group A task `w51i2s6b8` run `wf_324eaca6-af0` (P8 from 10, P2 8, P1 9, P5 9), group B task `w4n0gckbt` run
+  `wf_14d710c6-2a6` (P4 8, P3 7, P7 9, P6 7). P3 step 7 (79ff749) and P6 step 7 (56d7792) were committed but unreported:
+  their agents got a one-time lead note to verify and report instead of redoing (qa/lead/track-notes.json is back to {}).
+  heavy.mjs now also has priorities (sg-wt/heavy-priority.json: p6 0 = critical path, store-gen 1 = merges, others 2) and a
+  45 s RAM wait. The heartbeat cron e8c3b404 survived the restart.
+
 - **MUTEX FIX 2026-11-03 ~22:05** (58/106 steps, ≈ 44.3%; both runs healthy). No step had finished for ~1 h: the old
   C:/Users/SICO/sg-wt/heavy.mjs stole any lock older than 20 min even from a live holder, so a slow P1 ui-shots run (next dev
   3.75 GB) kept running beside the next holders; free RAM fell to 0.09 GB, one shot took 40 min and P7 waited 45 min.
