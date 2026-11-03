@@ -16,7 +16,7 @@
  * page is `fr-FR` (Latin digits, src/lib/markets/money.ts), so formatting with it as LAN-§7.2 literally says would
  * print French month names on Arabic pages. Every date carries the marker "(estimation)" (step 5).
  */
-import { DZ, fill, type ShopperLocale } from "@/lib/landing/copy";
+import { DZ, fill, type DzCopy, type ShopperLocale } from "@/lib/landing/copy";
 import { ETA_DATE_HORIZON_DAYS } from "@/lib/landing/limits";
 import type { EtaWindow, StoreCalendar } from "./types";
 
@@ -24,18 +24,16 @@ const DAY_MS = 86_400_000;
 /** a calendar with no working day for ten years is a broken calendar, not a window */
 const MAX_SCAN_DAYS = 3_660;
 
-const pad = (n: number) => String(n).padStart(2, "0");
-
-function addDays(ymd: string, n: number): string {
+/** The instant `hour`:00 UTC of the calendar day `ymd` (one parser for every date helper below: the chunk stays small). */
+const utcOf = (ymd: string, hour = 0) => {
   const [y, m, d] = ymd.split("-").map(Number) as [number, number, number];
-  const t = new Date(Date.UTC(y, m - 1, d) + n * DAY_MS);
-  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
-}
+  return Date.UTC(y, m - 1, d, hour);
+};
 
-function isoWeekdayOf(ymd: string): number {
-  const [y, m, d] = ymd.split("-").map(Number) as [number, number, number];
-  return ((new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7) + 1;
-}
+/** `ymd` plus `n` calendar days (the ISO string of the UTC date: "2026-11-03T…" cut to the day). */
+export const addDays = (ymd: string, n: number): string => new Date(utcOf(ymd) + n * DAY_MS).toISOString().slice(0, 10);
+
+const isoWeekdayOf = (ymd: string): number => ((new Date(utcOf(ymd)).getUTCDay() + 6) % 7) + 1;
 
 const isWorkingDay = (ymd: string, cal: StoreCalendar) => cal.workdays.includes(isoWeekdayOf(ymd)) && !cal.holidays.includes(ymd);
 
@@ -47,8 +45,9 @@ export function localParts(now: Date, tz: string): { ymd: string; hour: number; 
   } catch {
     return null;
   }
-  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value;
-  const [y, m, d, h] = [get("year"), get("month"), get("day"), get("hour")];
+  const v: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
+  for (const p of parts) v[p.type] = p.value;
+  const { year: y, month: m, day: d, hour: h } = v;
   if (!y || !m || !d || !h) return null;
   const ymd = `${y}-${m}-${d}`;
   return { ymd, hour: Number(h) % 24, isoWeekday: isoWeekdayOf(ymd) };
@@ -58,7 +57,7 @@ export function localParts(now: Date, tz: string): { ymd: string; hour: number; 
 export function addWorkingDays(ymd: string, n: number, cal: StoreCalendar): string {
   let day = ymd;
   for (let left = n, scanned = 0; left > 0; scanned++) {
-    if (scanned > MAX_SCAN_DAYS) throw new RangeError("delivery calendar: no working day");
+    if (scanned > MAX_SCAN_DAYS) throw new RangeError("no working day");
     day = addDays(day, 1);
     if (isWorkingDay(day, cal)) left--;
   }
@@ -89,10 +88,7 @@ export function etaWindow(cal: StoreCalendar, zone: { etaMinDays: number; etaMax
 /* ------------------------------------------------------------------ */
 
 /** `ymd` at 12:00 UTC: the instant whose UTC calendar day is `ymd` whatever the formatter's offset. */
-const noonOf = (ymd: string) => {
-  const [y, m, d] = ymd.split("-").map(Number) as [number, number, number];
-  return Date.UTC(y, m - 1, d, 12);
-};
+const noonOf = (ymd: string) => utcOf(ymd, 12);
 
 /** The digits a page uses, from its money locale ("fr-FR" → latn, "ar-EG" → arab); Latin when unknown. */
 function digitsOf(dateLocale: string): string {
@@ -112,13 +108,24 @@ function dayLabel(ymd: string, locale: ShopperLocale, digits: string, month: boo
     timeZone: "UTC",
     numberingSystem: digits,
   }).formatToParts(noonOf(ymd));
-  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
-  return [get("weekday"), get("day"), month ? get("month") : ""].filter(Boolean).join(" ");
+  const v: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
+  for (const p of parts) v[p.type] = p.value;
+  return [v.weekday, v.day, month && v.month].filter(Boolean).join(" ");
 }
+
+/** The words a day range and a window need: one locale's `DzCopy`, or the `lp-assist` block's copy in the browser. */
+export type EtaCopy = Pick<DzCopy, "range" | "within" | "exact" | "sameDay" | "between" | "on">;
 
 /** The working-day phrase of a range: "en 1 à 3 jours ouvrés", "sous 2 jours ouvrés", "en 2 jours ouvrés", "le jour même". */
 export function dayRangeText(min: number, max: number, locale: ShopperLocale): string {
-  const c = DZ[locale];
+  return dayRangeWords(DZ[locale], min, max);
+}
+
+/**
+ * `dayRangeText` over a given copy: the `assist` add-on passes the page's words from its data block, so the chunk
+ * never bundles the three languages (the `…Words` / `…With` variants below reference no `DZ`).
+ */
+export function dayRangeWords(c: EtaCopy, min: number, max: number): string {
   const lo = Math.max(0, Math.min(min, max));
   const hi = Math.max(0, min, max);
   const form = (forms: readonly [string, string, string], n: number) => fill(forms[n === 1 ? 0 : n === 2 ? 1 : 2], { n });
@@ -140,11 +147,22 @@ export function etaParts(
   dateLocale: string,
   now: Date,
 ): { text: string; dated: boolean } {
+  return etaPartsWith(DZ[locale], w, zone, locale, dateLocale, now);
+}
+
+/** `etaParts` over a given copy (`locale` still names the month and weekday language). */
+export function etaPartsWith(
+  c: EtaCopy,
+  w: EtaWindow | null,
+  zone: { etaMinDays: number; etaMaxDays: number },
+  locale: ShopperLocale,
+  dateLocale: string,
+  now: Date,
+): { text: string; dated: boolean } {
   if (!w || (noonOf(w.to) - now.getTime()) / DAY_MS > ETA_DATE_HORIZON_DAYS) {
-    const lead = w?.leadDays ?? 0;
-    return { text: dayRangeText(zone.etaMinDays + lead, zone.etaMaxDays + lead, locale), dated: false };
+    const lead = w ? w.leadDays : 0;
+    return { text: dayRangeWords(c, zone.etaMinDays + lead, zone.etaMaxDays + lead), dated: false };
   }
-  const c = DZ[locale];
   const digits = digitsOf(dateLocale);
   if (w.from === w.to) return { text: fill(c.on, { date: dayLabel(w.to, locale, digits, true) }), dated: true };
   const sameMonth = w.from.slice(0, 7) === w.to.slice(0, 7);

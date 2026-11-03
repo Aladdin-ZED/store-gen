@@ -328,3 +328,118 @@ export function trkDays(n: number, locale: ShopperLocale): string {
 
 /** The shopper locale of a page locale: ar and fr as they are, every other locale reads the English copy. */
 export const shopperLocaleOf = (locale: string | null | undefined): ShopperLocale => (locale === "ar" || locale === "fr" ? locale : "en");
+
+/* ------------------------------------------------------------------ */
+/* The thank-you blocks (LAN-§8.1, §8.3, §24.2 `ty.*`)                 */
+/* ------------------------------------------------------------------ */
+
+/** Plural forms of one phrase: `Intl.PluralRules` picks the form, `other` is the fallback (and the form the spec shows). */
+export type PluralForms = Partial<Record<Intl.LDMLPluralRule, string>> & { other: string };
+
+export interface TyCopy {
+  /** the pill beside the order number */
+  confirm: string;
+  /** the call step with a time: "Nous vous appelons du {phone} pour confirmer, {when}." */
+  expect: string;
+  /** the same sentence without `{when}` (no saved window, no time to promise) */
+  expectPlain: string;
+  expectSave: string;
+  /** `{when}` inside a calling range with `withinHours`: "dans les {n} heures" */
+  whenWithin: PluralForms;
+  /** `{when}` inside a calling range without `withinHours` */
+  whenNow: string;
+  whenToday: string;
+  whenTomorrow: string;
+  /** `{day}`: the weekday name in the page language */
+  whenDay: string;
+  track: string;
+}
+
+export const TY: Readonly<Record<ShopperLocale, TyCopy>> = {
+  ar: {
+    confirm: "أكّد الطلب فواتساب",
+    expect: "غادي نعيطو ليك من {phone} باش نأكدو الطلب، {when}.",
+    expectPlain: "غادي نعيطو ليك من {phone} باش نأكدو الطلب.",
+    expectSave: "سجّل هاد الرقم باش تعرف بلي حنا اللي كنعيطو.",
+    whenWithin: { one: "فساعة الجاية", two: "فساعتين الجايين", few: "فـ{n} ساعات الجايين", many: "فـ{n} ساعة الجاية", other: "فـ{n} ساعة الجاية" },
+    whenNow: "اليوم",
+    whenToday: "اليوم من {time}",
+    whenTomorrow: "غدا من {time}",
+    whenDay: "نهار {day} من {time}",
+    track: "تتبّع الطلب ديالي",
+  },
+  fr: {
+    confirm: "Confirmer sur WhatsApp",
+    expect: "Nous vous appelons du {phone} pour confirmer, {when}.",
+    expectPlain: "Nous vous appelons du {phone} pour confirmer.",
+    expectSave: "Enregistrez ce numéro pour reconnaître notre appel.",
+    whenWithin: { one: "dans l'heure", other: "dans les {n} heures" },
+    whenNow: "aujourd'hui",
+    whenToday: "aujourd'hui à partir de {time}",
+    whenTomorrow: "demain à partir de {time}",
+    whenDay: "{day} à partir de {time}",
+    track: "Suivre ma commande",
+  },
+  en: {
+    confirm: "Confirm on WhatsApp",
+    expect: "We'll call you from {phone} to confirm, {when}.",
+    expectPlain: "We'll call you from {phone} to confirm.",
+    expectSave: "Save this number so you recognise our call.",
+    whenWithin: { one: "within the hour", other: "within {n} hours" },
+    whenNow: "today",
+    whenToday: "today from {time}",
+    whenTomorrow: "tomorrow from {time}",
+    whenDay: "{day} from {time}",
+    track: "Track my order",
+  },
+};
+
+/** The form of `n` in `locale` (`Intl.PluralRules`), `{n}` filled; `other` when the runtime has no plural data. */
+export function plural(forms: PluralForms, n: number, locale: ShopperLocale): string {
+  let rule: Intl.LDMLPluralRule = "other";
+  try {
+    rule = new Intl.PluralRules(locale).select(n);
+  } catch {
+    /* no plural data: the `other` form */
+  }
+  return fill(forms[rule] ?? forms.other, { n });
+}
+
+/* ------------------------------------------------------------------ */
+/* Order on WhatsApp (LP-11, wave 2; LAN-§11, §24.2 `wa.*`)            */
+/* ------------------------------------------------------------------ */
+
+export interface WaCopy {
+  button: string;
+  ready: string;
+  toConfirm: string;
+  /** the builder preview's note under the button (LAN-§5.3) */
+  liveOnly: string;
+}
+
+export const WA: Readonly<Record<ShopperLocale, WaCopy>> = {
+  ar: { button: "دير الطلب فواتساب", ready: "الرسالة واجدة فواتساب · المرجع {ref}", toConfirm: "باقي خاصنا نعرفو: {list}", liveOnly: "كيخدم غير فالصفحة المنشورة" },
+  fr: { button: "Commander sur WhatsApp", ready: "Votre message est prêt dans WhatsApp · Réf. {ref}", toConfirm: "À préciser : {list}", liveOnly: "Fonctionne sur la page en ligne" },
+  en: { button: "Order on WhatsApp", ready: "Your message is ready in WhatsApp · Ref. {ref}", toConfirm: "To confirm: {list}", liveOnly: "Works on the live page" },
+};
+
+/* ------------------------------------------------------------------ */
+/* Page-wide lines (LAN-§14.3, §3.9, §17.4; §24.2)                     */
+/* ------------------------------------------------------------------ */
+
+export interface LpCopy {
+  /** `test.banner`: the chip of a test order */
+  testBanner: string;
+  /** `link.inactive`: a short link or a test link that no longer works */
+  linkInactive: string;
+  /** `lp.report`: the same words as the storefront's `footer.report` */
+  report: string;
+  /** `lp.reload` (R2) */
+  reload: string;
+}
+
+export const LP: Readonly<Record<ShopperLocale, LpCopy>> = {
+  ar: { testBanner: "طلب تجريبي: ما كيتحسبش", linkInactive: "هاد الرابط ما بقاش خدام.", report: "بلّغ على هاد المتجر", reload: "عاود حمّل الصفحة" },
+  fr: { testBanner: "Commande test : non comptée", linkInactive: "Ce lien n'est plus actif.", report: "Signaler cette boutique", reload: "Recharger la page" },
+  en: { testBanner: "Test order: not counted", linkInactive: "This link is no longer active.", report: "Report this store", reload: "Reload the page" },
+};

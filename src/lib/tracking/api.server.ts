@@ -21,6 +21,7 @@ import "server-only";
  */
 import { IS_PROD, isInternalHost } from "@/lib/auth/config";
 import { db } from "@/lib/db/client";
+import { storeLock, withNamedLock } from "@/lib/db/locks";
 import { orderEvents } from "@/lib/db/schema";
 import { effectiveHost, type EffectiveHost } from "@/lib/edge/host";
 import { shopperLocaleOf } from "@/lib/landing/copy";
@@ -118,25 +119,17 @@ async function request(scope: WriteScope, store: StoreRow, order: TrackOrderRow,
   return viewAnswer(scope, store, (await loadTrackOrder(scope, order.id)) ?? order, false);
 }
 
-/** Intents in flight per order (this process): clicks that arrive together are written one after the other. */
-const intentsInFlight = new Map<string, Promise<void>>();
-
+/**
+ * One intent writer per order at a time, across processes: the clicks that arrive together wait on the order's named
+ * lock (`storeLock`, 3 s), and each finds the first one's row (LAN-§9.3, the dedupe on the event type). A click that
+ * cannot take the lock in time is answered like the others: the writer holding it records the intent.
+ */
 async function intent(scope: WriteScope, order: TrackOrderRow): Promise<Answer> {
-  const key = `${scope.storeId}:${order.id}`;
-  const prev = intentsInFlight.get(key) ?? Promise.resolve();
-  const run = prev.then(async () => {
-    // dedupe on the event type (LAN-§9.3): the second click finds the first one's row
+  await withNamedLock(storeLock(scope.storeId, `ci.${order.id.toLowerCase()}`), 3, async () => {
     if (!(await hasConfirmIntent(scope, order.id))) {
       await appendTrackEvent(scope, order.id, { actorKind: "customer", type: "customer_confirm_intent", meta: { kind: "confirm_whatsapp" } });
     }
   });
-  const settled = run.catch(() => undefined);
-  intentsInFlight.set(key, settled);
-  try {
-    await run;
-  } finally {
-    if (intentsInFlight.get(key) === settled) intentsInFlight.delete(key);
-  }
   return { status: 200, body: { ok: true } };
 }
 

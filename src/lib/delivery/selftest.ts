@@ -222,7 +222,7 @@ function lineCases(check: Check): void {
     ["dated", { city: { value: "Fès", label: "Fès" }, confirmationCall: false }, "Livraison à Fès : entre jeu. 29 et sam. 31 oct. (estimation) · 35 DH", "no confirmation call: no dz.afterCall"],
     ["undated", { city: { value: "Agadir", label: "Agadir" } }, "Livraison à Agadir · 35 DH", "a zone without days"],
     ["not_served", { city: { value: "Dakhla", label: "Dakhla" } }, "Nous ne livrons pas encore à Dakhla.", "a not-served zone"],
-    ["dated", { city: { value: "Autre", label: "Autre ville" } }, "Livraison entre ven. 30 oct. et lun. 2 nov., après confirmation par téléphone (estimation) · 35 DH", "'Autre' → the '*' zone, no city name"],
+    ["dated", { city: { value: "Autre", label: "Autre ville", other: true } }, "Livraison entre ven. 30 oct. et lun. 2 nov., après confirmation par téléphone (estimation) · 35 DH", "'Autre' → the '*' zone, no city name"],
     ["dated", { city: { value: "Tanger", label: "Tanger" } }, "Livraison à Tanger : entre ven. 30 oct. et lun. 2 nov., après confirmation par téléphone (estimation) · 35 DH", "a city outside every zone → the '*' zone"],
     ["general", { city: { value: "Fès", label: "Fès" }, textMode: true }, "Livraison en 1 à 4 jours ouvrés selon la ville · 35 DH", "a text-mode city field: the general line only"],
     ["general", { fee: null }, "Livraison en 1 à 4 jours ouvrés selon la ville", "no fee known: no fee part"],
@@ -240,7 +240,7 @@ function lineCases(check: Check): void {
   // no '*' zone: a city outside every zone has no line
   const noStar = buildZoneTable(zones.slice(0, 4), CAL, MA_CITIES);
   check(line({ table: noStar, city: { value: "Tanger", label: "Tanger" } }).state === "none", "line: outside every zone and no '*' zone → no line");
-  check(line({ table: noStar, city: { value: "Autre", label: "Autre ville" } }).state === "none", "line: 'Autre' without a '*' zone → no line");
+  check(line({ table: noStar, city: { value: "Autre", label: "Autre ville", other: true } }).state === "none", "line: 'Autre' without a '*' zone → no line");
   // nothing to say
   const silent = buildZoneTable([zone("Sans délai", ["agadir"])], CAL, MA_CITIES);
   check(line({ table: silent }).state === "none", "line: no zone has days → no general line (the fallback is hidden)");

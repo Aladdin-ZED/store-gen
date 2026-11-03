@@ -16,9 +16,8 @@
  * | `not_served` | the city's zone is not served                     | "Nous ne livrons pas encore à Fès." + WhatsApp           |
  * | `none`       | no zone and no "*" zone, or nothing to say        | no line (no promise)                                     |
  */
-import { DZ, fill, fillCity, type ShopperLocale } from "@/lib/landing/copy";
-import { OTHER_CITY } from "@/lib/markets/cities-ma";
-import { dayRangeText, etaParts, etaWindow } from "./eta";
+import { DZ, fill, fillCity, type DzCopy, type ShopperLocale } from "@/lib/landing/copy";
+import { dayRangeText, dayRangeWords, etaPartsWith, etaWindow } from "./eta";
 import type { DeliveryZoneRow, ZoneTable } from "./types";
 
 /** The page's fee for the checked offer: free (a free offer or `shippingFee` 0), or its formatted amount. */
@@ -26,8 +25,12 @@ export type PageFee = { free: true } | { free: false; text: string };
 
 export interface LineInput {
   table: Pick<ZoneTable, "zones" | "city" | "star" | "cal">;
-  /** the city picked in the `<select>`: its posted `City.value` and its option text; null before a pick */
-  city: { value: string; label: string } | null;
+  /**
+   * the city picked in the `<select>`: its posted `City.value` and its option text; null before a pick. `other`: the
+   * pick is "Autre" (`OTHER_CITY.value`; the caller says so: the `assist` chunk compares with its data block's value,
+   * so this module never imports the city list, whose 147 entries would weigh down the chunk)
+   */
+  city: { value: string; label: string; other?: boolean } | null;
   /** a text-mode city field: the general line only (LAN-§7.4) */
   textMode?: boolean;
   locale: ShopperLocale;
@@ -54,7 +57,7 @@ export type DeliveryLine =
     }
   | { state: "not_served"; lead: string; cta: { label: string; href: string } | null };
 
-const feeText = (fee: PageFee | null, locale: ShopperLocale) => (fee === null ? null : fee.free ? DZ[locale].free : fee.text);
+const feeText = (fee: PageFee | null, c: Pick<DzCopy, "free">) => (fee === null ? null : fee.free ? c.free : fee.text);
 
 /** The served zones' working-day bounds with the confirmation lead added, or null when no served zone has days. */
 export function generalRange(zones: readonly { d: readonly [number, number] | null; ns: boolean }[], leadDays: number): [number, number] | null {
@@ -70,17 +73,22 @@ export function generalRange(zones: readonly { d: readonly [number, number] | nu
 
 /** The line of LAN-§7.4's state table for the current pick. */
 export function composeLine(i: LineInput): DeliveryLine {
-  const c = DZ[i.locale];
-  const tail = feeText(i.fee, i.locale);
+  return composeLineWith(i, DZ[i.locale]);
+}
+
+/** `composeLine` over a given copy: the `assist` add-on's entry (its data block carries the page's words, so the chunk never bundles the three languages). */
+export function composeLineWith(i: LineInput, c: DzCopy): DeliveryLine {
+  const tail = feeText(i.fee, c);
   if (!i.city || i.textMode) {
     const range = generalRange(i.table.zones, i.table.cal.leadDays);
     if (!range) return { state: "none" };
-    return { state: "general", lead: fill(c.general, { days: dayRangeText(range[0], range[1], i.locale) }), marker: null, tail };
+    return { state: "general", lead: fill(c.general, { days: dayRangeWords(c, range[0], range[1]) }), marker: null, tail };
   }
-  const idx = i.table.city[i.city.value] ?? i.table.star;
-  const zone = idx === null || idx === undefined ? undefined : i.table.zones[idx];
+  const own = i.table.city[i.city.value];
+  const idx = own === undefined ? i.table.star : own;
+  const zone = idx === null ? undefined : i.table.zones[idx];
   if (!zone) return { state: "none" };
-  const other = i.city.value === OTHER_CITY.value || !i.city.label.trim();
+  const other = !!i.city.other || !i.city.label.trim();
   const city = i.city.label.trim();
   if (zone.ns) {
     const text = other ? c.notServedTextOther : fillCity(c.notServedText, { city });
@@ -95,7 +103,7 @@ export function composeLine(i: LineInput): DeliveryLine {
     return { state: "undated", lead: other ? c.deliveryOnly : fillCity(c.cityOnly, { city }), marker: null, tail };
   }
   const days = { etaMinDays: zone.d[0], etaMaxDays: zone.d[1] };
-  const p = etaParts(etaWindow(i.table.cal, days, i.now), days, i.locale, i.dateLocale, i.now);
+  const p = etaPartsWith(c, etaWindow(i.table.cal, days, i.now), days, i.locale, i.dateLocale, i.now);
   const dates = i.confirmationCall ? `${p.text}${c.comma}${c.afterCall}` : p.text;
   return { state: "dated", lead: other ? fill(c.cityless, { dates }) : fillCity(c.city, { city, dates }), marker: p.dated ? c.estimated : null, tail };
 }
@@ -120,5 +128,5 @@ export function deliverySummary(
     zones.map((z) => ({ d: z.etaMinDays !== null && z.etaMaxDays !== null ? ([z.etaMinDays, z.etaMaxDays] as const) : null, ns: z.notServed })),
     opts.leadDays ?? 0,
   );
-  return { etaText: range ? dayRangeText(range[0], range[1], locale) : null, feeText: feeText(opts.fee ?? null, locale) };
+  return { etaText: range ? dayRangeText(range[0], range[1], locale) : null, feeText: feeText(opts.fee ?? null, DZ[locale]) };
 }

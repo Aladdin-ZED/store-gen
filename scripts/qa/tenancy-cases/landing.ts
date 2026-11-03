@@ -1,4 +1,4 @@
-// proves: LP-03, LP-02, SF-03, LP-06, LP-20, LP-22, SF-06, LP-05
+// proves: LP-03, LP-02, SF-03, LP-06, LP-20, LP-22, SF-06, LP-05, LP-04
 /**
  * Two-store attack cases of the landing track (P3 LANDING, landing.md LAN-§7.5, §25.2).
  * Extension file (docs/STORE-SAAS.md §F.1, §J.2, §K.3; DES-R13), created empty at P0 and loaded by
@@ -25,6 +25,10 @@
  * Order tracking (p3-w1-tracking): store B's host reads A's order by no proof (lookup, proof, signed link, request,
  * intent: the uniform not_found, nothing written on A's order); A's signed link under B's handle answers 404 with
  * nothing of A; B's scope loads nothing of A's order. Each case checks its positive control on A's own host.
+ *
+ * Runtime add-ons (p3-w1-addons): A's `customer_confirm` row is never B's `templateFor` text; B's `loadRenderAddons`
+ * blocks (live, preview, test, connected export, and with A's page id) carry none of A's template, zones or caller
+ * phone, while A's own blocks carry all three (the control).
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -64,6 +68,63 @@ const zoneInput = (name: string, cities: string[], o: { fee?: number; days?: [nu
   notServed: false,
   note: o.note ?? null,
 });
+
+async function addonCases(kit: TenancyKit): Promise<void> {
+  const { fx, check } = kit;
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const T = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const S = load<Settings>("@/lib/settings");
+  const Z = load<Zones>("@/lib/delivery/zones.server");
+  const Tpl = load<typeof import("@/lib/landing/templates.server")>("@/lib/landing/templates.server");
+  const Ad = load<typeof import("@/landing/addons/load.server")>("@/landing/addons/load.server");
+  const A = kit.scope("A");
+  const B = kit.scope("B");
+  const tag = Date.now().toString(36);
+  const marker = `Confirme A ${tag}`;
+  const zoneMarker = `Zone A ${tag}`;
+  const phoneA = "+212600009871";
+  const leaked = (v: unknown) => ["Confirme A", zoneMarker, "06 00 00 98 71"].filter((m) => JSON.stringify(v).includes(m));
+
+  const storeA = await S.getStoreSetting(A, "store");
+  const storeB = await S.getStoreSetting(B, "store");
+  const tplId = newId();
+  await db.insert(T.messageTemplates).values({ id: tplId, storeId: fx.A.id, channel: "whatsapp", kind: "customer_confirm", locale: "fr", pageId: null, name: "A confirm", body: `${marker} {order_id}` });
+  await S.updateStoreSetting(A as WriteScope, "store", { confirmation: { callerPhone: phoneA, whatsapp: "212600009871" } }, { id: fx.A.members.owner });
+  await S.updateStoreSetting(B as WriteScope, "store", { confirmation: { whatsapp: "212600009872" } }, { id: fx.B.members.owner });
+  await S.updateStoreSetting(A as WriteScope, "checkout", { zonesEnabled: true }, { id: fx.A.members.owner });
+  await S.updateStoreSetting(B as WriteScope, "checkout", { zonesEnabled: true }, { id: fx.B.members.owner });
+  await Z.saveZones(ownerCtx(kit, "A"), [zoneInput(zoneMarker, ["fes"], { days: [1, 2] }), zoneInput(`${zoneMarker} rest`, ["*"], { days: [2, 4] })]);
+  try {
+    check("templates: templateFor(A, customer_confirm, fr) is A's own text (control)", (await Tpl.templateFor(A, "customer_confirm", "fr")) === `${marker} {order_id}`);
+    const tb = await Tpl.templateFor(B, "customer_confirm", "fr");
+    check("templates: templateFor(B, customer_confirm, fr) is the default, never A's text", !tb.includes(marker) && tb.startsWith("Bonjour"), tb);
+    check("templates: templateFor(B, platform scope) never reads A's row either", !(await Tpl.templateFor(kit.scope("B", "platform"), "customer_confirm", "fr")).includes(marker));
+
+    const docOf = async (versionId: string) => (await db.select({ doc: T.pageVersions.doc }).from(T.pageVersions).where(eq(T.pageVersions.id, versionId)))[0]!.doc;
+    const [docA, docB] = await Promise.all([docOf(fx.A.version.live), docOf(fx.B.version.live)]);
+    const frA = { ...docA, locale: "fr" as const };
+    const frB = { ...docB, locale: "fr" as const };
+    const setA = await Ad.loadRenderAddons(A, fx.rows.A, { pageId: fx.A.page.live, doc: frA, mode: "live" });
+    const hasA = JSON.stringify(setA);
+    check("add-ons: A's blocks carry A's template, zones and caller phone (control)", hasA.includes(marker) && hasA.includes(zoneMarker) && hasA.includes("06 00 00 98 71"), { landing: setA.landing.body, thanks: setA.thanks.body });
+    for (const mode of ["live", "preview", "test", "export-connected"] as const) {
+      const setB = await Ad.loadRenderAddons(B, fx.rows.B, { pageId: fx.B.page.live, doc: frB, mode });
+      check(`add-ons: B's blocks (${mode}) hold nothing of A`, leaked(setB).length === 0 && kit.leaks(setB).length === 0, { leaked: leaked(setB), canaries: kit.leaks(setB) });
+    }
+    // B naming A's page id still reads B's own settings, zones and templates (the doc is the caller's)
+    const cross = await Ad.loadRenderAddons(B, fx.rows.B, { pageId: fx.A.page.live, doc: frB, mode: "live" });
+    check("add-ons: B's loader with A's page id holds nothing of A", leaked(cross).length === 0, leaked(cross));
+  } finally {
+    await db.delete(T.messageTemplates).where(eq(T.messageTemplates.id, tplId));
+    await Z.saveZones(ownerCtx(kit, "A"), []);
+    await S.updateStoreSetting(A as WriteScope, "store", { confirmation: storeA.confirmation }, { id: fx.A.members.owner });
+    await S.updateStoreSetting(B as WriteScope, "store", { confirmation: storeB.confirmation }, { id: fx.B.members.owner });
+    await S.updateStoreSetting(A as WriteScope, "checkout", { zonesEnabled: false }, { id: fx.A.members.owner });
+    await S.updateStoreSetting(B as WriteScope, "checkout", { zonesEnabled: false }, { id: fx.B.members.owner });
+  }
+}
 
 async function zoneCases(kit: TenancyKit): Promise<void> {
   const { fx, check } = kit;
@@ -519,4 +580,5 @@ export const cases: TenancyCase[] = [
   { name: "landing: A's leads, their attribution, vitals and mode plan never reach B; impersonation reads them masked", run: leadCases },
   { name: "landing: slug history 308s with the raw query, a reused slug serves the new page, B never redirects into A", run: slugCases },
   { name: "landing: B's host reads A's order by no tracking proof; A's signed link under B's handle answers 404", run: trackCases },
+  { name: "landing: A's confirm template, zones and caller phone never reach B's add-on blocks (loadRenderAddons, templateFor)", run: addonCases },
 ];

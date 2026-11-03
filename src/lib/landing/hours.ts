@@ -8,19 +8,13 @@
  * owner never saved it (`configured: false`, the starting hours are never a promise); every shopper-facing reader
  * then renders nothing, never a default sentence.
  */
-import { localParts } from "@/lib/delivery/eta";
+import { addDays, localParts } from "@/lib/delivery/eta";
+import { fill } from "@/lib/landing/copy";
 import { isCallable, nextCallableAt, rangesForDay, shopperPromiseAllowed, type EffectiveWindow, type IsoWeekday, type Range } from "@/lib/callcenter/window";
 
 const DAY_MS = 86_400_000;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ISO_DAYS: readonly IsoWeekday[] = [1, 2, 3, 4, 5, 6, 7];
-
-const pad = (n: number) => String(n).padStart(2, "0");
-function addDays(ymd: string, n: number): string {
-  const [y, m, d] = ymd.split("-").map(Number) as [number, number, number];
-  const t = new Date(Date.UTC(y, m - 1, d) + n * DAY_MS);
-  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
-}
 const weekdayOf = (ymd: string) => {
   const [y, m, d] = ymd.split("-").map(Number) as [number, number, number];
   return (((new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7) + 1) as IsoWeekday;
@@ -140,37 +134,76 @@ export function shopperHoursText(w: EffectiveWindow, locale: "ar" | "fr" | "en",
 /* the window baked into a thank-you page (LAN-§8.2)                   */
 /* ------------------------------------------------------------------ */
 
-const isRanges = (v: unknown): v is Range[] =>
-  Array.isArray(v) && v.length <= 6 && v.every((r) => !!r && typeof r === "object" && typeof (r as Range).from === "string" && typeof (r as Range).to === "string");
-/** operations' `days` container, checked without reading it as a week: an object whose every value is a list of ranges */
-const isDays = (v: unknown): v is Record<IsoWeekday, Range[]> =>
-  !!v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length <= 7 && Object.values(v).every(isRanges);
+/** operations' `days` container, checked without reading it as a week: an object (not a list) of at most 7 entries */
+const isDays = (v: unknown): v is Record<IsoWeekday, Range[]> => !!v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length <= 7;
 const isYmd = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 /**
  * The `lp-assist-ty.expect.win` JSON back into an `EffectiveWindow` for `nextCallableAt`, or null when anything is
  * off (at most 4 overrides and 60 closed dates; `openOverrideUntil` is always null in a static page; an unsaved window
- * is never baked, so `configured` must be true). The `days` containers pass through as operations wrote them (a
- * missing day is closed for `rangesForDay`). A null window means no `{when}` is rendered.
+ * is never baked, so `configured` must be true). The `days` containers pass through as operations wrote them: a
+ * missing day is closed for `rangesForDay`, and operations' scan skips a range that is not two HH:MM times (a day
+ * that is not a list makes `nextCallableAt` throw, which `callWhen` answers with no `{when}`). Kept small: it ships
+ * in the `assist-ty` chunk. A null window means no `{when}` is rendered.
  */
 export function reviveWindow(json: unknown): EffectiveWindow | null {
-  if (!json || typeof json !== "object") return null;
-  const o = json as Record<string, unknown>;
+  const o = (json || {}) as Partial<Record<keyof EffectiveWindow, unknown>>;
+  const closed = o.closedDates || [];
+  const overrides = (o.overrides || []) as EffectiveWindow["overrides"][number][];
   if (typeof o.tz !== "string" || !o.tz || o.configured !== true || !isDays(o.days)) return null;
-  const closed = o.closedDates ?? [];
-  const overrides = o.overrides ?? [];
-  if (!Array.isArray(closed) || closed.length > 60 || !closed.every(isYmd)) return null;
-  if (!Array.isArray(overrides) || overrides.length > 4) return null;
-  for (const v of overrides) {
-    const ov = v as Record<string, unknown> | null;
-    if (!ov || typeof ov.label !== "string" || !isYmd(ov.from) || !isYmd(ov.to) || !isDays(ov.days)) return null;
-  }
+  if (!Array.isArray(closed) || closed.length > 60 || !closed.every(isYmd) || !Array.isArray(overrides) || overrides.length > 4) return null;
+  if (!overrides.every((ov) => ov && isYmd(ov.from) && isYmd(ov.to) && isDays(ov.days))) return null;
   return {
     tz: o.tz,
     days: o.days,
-    closedDates: [...closed],
-    overrides: (overrides as EffectiveWindow["overrides"][number][]).map((ov) => ({ label: ov.label, from: ov.from, to: ov.to, days: ov.days })),
+    closedDates: closed,
+    overrides: overrides.map((ov) => ({ label: String(ov.label || ""), from: ov.from, to: ov.to, days: ov.days })),
     openOverrideUntil: null,
     configured: true,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* the thank-you `{when}` (LAN-§8.3 step 3)                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The `{when}` words of the page language (`lp-assist-ty.expect.s`): `within` is already resolved on the server
+ * ("dans les 2 heures" with `withinHours`, else "aujourd'hui"); the others carry `{time}` (and `{day}`).
+ */
+export interface WhenWords {
+  within: string;
+  laterToday: string;
+  tomorrow: string;
+  nextDay: string;
+}
+
+/** "09:30": the store-local wall time of `at`, 24 h with Latin digits on every page (the money rule). */
+export function wallTime(at: Date, tz: string): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: tz, hourCycle: "h23", hour: "2-digit", minute: "2-digit" }).format(at);
+}
+
+/**
+ * When the store calls, in words, from the window the queue uses (`nextCallableAt`, operations' function, so the page
+ * and the ladder agree by construction): open now → `within`; later today, tomorrow, another day of the next 7 → the
+ * opening time ("demain à partir de 09:30", "jeudi à partir de 14:30"); no window, no opening, or an opening more than
+ * 7 days away → null (the sentence is said without `{when}`). `locale` names the weekday ("ar", "fr", "en").
+ */
+export function callWhen(now: Date, w: EffectiveWindow | null, s: WhenWords, locale: string): string | null {
+  if (!w) return null;
+  let at: Date;
+  try {
+    at = nextCallableAt(now, w);
+  } catch {
+    return null; // no range within operations' search horizon
+  }
+  const ahead = at.getTime() - now.getTime();
+  if (ahead <= 0) return s.within;
+  const today = localParts(now, w.tz);
+  const day = localParts(at, w.tz);
+  if (ahead > 7 * DAY_MS || !today || !day) return null;
+  const time = wallTime(at, w.tz);
+  if (day.ymd === today.ymd) return fill(s.laterToday, { time });
+  if (day.ymd === addDays(today.ymd, 1)) return fill(s.tomorrow, { time });
+  return fill(s.nextDay, { day: new Intl.DateTimeFormat(`${locale}-MA`, { weekday: "long", timeZone: w.tz }).format(at), time });
 }
