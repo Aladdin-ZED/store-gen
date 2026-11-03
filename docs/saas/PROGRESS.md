@@ -44,6 +44,12 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **USAGE STOP RULE 2026-11-03 23:25** (owner: "if the weekly limit reach 75% stop here until i tell you to continue").
+  Weekly usage (all models) was 40% at 23:24 UTC; the window resets 2026-11-09 16:00 UTC. The heartbeat cron is now
+  `3ac3f9ed` (13,33,53), whose prompt checks get_usage first: at >= 75% stop both track runs and any merge run (TaskStop),
+  start nothing, log the pause here, delete the cron, and wait for the owner's "continue"; from 70% it checks every ~5 min.
+  To resume after such a pause: relaunch recipe below + a new heartbeat cron with the same prompt (memory usage-limit-stop.md).
+
 - **APP RESTART 2026-11-03 23:02 → TRACKS RELAUNCHED ~23:10** (owner: "continue"). Every claude process restarted at
   23:02 (desktop app restart), so both runs (wf_62a06748-635, wf_524f3596-eb4) died; their waiting heavy.mjs wrappers then
   failed to spawn (0xC0000142, console gone) and drained the queue. 59/106 validated (≈ 44.5%). Relaunched with the speed
