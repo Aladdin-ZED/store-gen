@@ -92,6 +92,9 @@ const MEDICAL = [
   /(يعالج|يشفي|شفاء|مرض|السكري|سرطان|التهاب|دواء|مثبت طبيا|مثبت سريريا|إنقاص الوزن|تخسيس|حرق الدهون)/u,
 ];
 
+/** The guard's word lists, for the eval scorers (src/lib/ai/eval/scorers.ts), which count hits on raw output too. */
+export const GUARD_LISTS = { banned: BANNED, medical: MEDICAL } as const;
+
 /** Rule 4: links and e-mail addresses (phone numbers fail the number rule unless the owner typed them). */
 const LINK = /https?:\/\/|www\.|\b[\w.-]+\.(?:com|ma|fr|net|shop|store|org|io|co)\b/i;
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
@@ -147,7 +150,7 @@ export function allowedNumbersFor(ctx: GuardContext): AllowedNumbers {
 }
 
 /** The merchant's own words, where a claim noun (rule 7) must already appear. */
-const claimSources = (ctx: GuardContext) => [ctx.productName, ...ctx.facts, ...(ctx.storeFacts ?? []), ctx.deliveryText ?? ""].join(" \n ");
+export const claimSources = (ctx: GuardContext) => [ctx.productName, ...ctx.facts, ...(ctx.storeFacts ?? []), ctx.deliveryText ?? ""].join(" \n ");
 
 function avoidPattern(word: string): RegExp | null {
   const w = foldWithMap(word.trim()).f;
@@ -246,18 +249,24 @@ export function guardText(input: unknown, ctx: GuardContext, allowed: AllowedNum
     for (const h of claimsIn(s)) if (!claimAllowed(h, sources)) return { ok: false, reason: "claim" };
   }
   if (v2) for (const c of policyClaimsIn(s, ctx.locale)) if (!policyAllows(c, ctx)) return { ok: false, reason: "policy" };
-  // language check on texts long enough to judge
+  if (languageOf(s, ctx.locale, ctx.productName) === false) return { ok: false, reason: "language" };
+  if (v2 && s.length > max) return { ok: false, reason: "too_long" };
+  return { ok: true, text: fitText(s, max) };
+}
+
+/**
+ * The language rule on a text long enough to judge (≥ 12 letters; else null): an ar text is mostly Arabic letters (the
+ * product name's Latin letters forgiven), any other locale has at most a quarter of Arabic letters beyond the name's.
+ */
+export function languageOf(s: string, locale: Locale, productName: string): boolean | null {
   const arabic = s.match(ARABIC_LETTER)?.length ?? 0;
   const latin = s.match(LATIN_LETTER)?.length ?? 0;
   const letters = arabic + latin;
-  if (letters >= 12) {
-    const nameLatin = ctx.productName.match(LATIN_LETTER)?.length ?? 0;
-    const nameArabic = ctx.productName.match(ARABIC_LETTER)?.length ?? 0;
-    if (ctx.locale === "ar" && arabic < (letters - Math.min(latin, nameLatin)) * 0.6) return { ok: false, reason: "language" };
-    if (ctx.locale !== "ar" && arabic - nameArabic > letters * 0.25) return { ok: false, reason: "language" };
-  }
-  if (v2 && s.length > max) return { ok: false, reason: "too_long" };
-  return { ok: true, text: fitText(s, max) };
+  if (letters < 12) return null;
+  const nameLatin = productName.match(LATIN_LETTER)?.length ?? 0;
+  const nameArabic = productName.match(ARABIC_LETTER)?.length ?? 0;
+  if (locale === "ar") return arabic >= (letters - Math.min(latin, nameLatin)) * 0.6;
+  return arabic - nameArabic <= letters * 0.25;
 }
 
 /** Clean one model string; null when it breaks a rule (caller falls back to the library). */

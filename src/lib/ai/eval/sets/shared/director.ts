@@ -109,3 +109,17 @@ export function candidatesOf(c: EvalCase): Candidate[] {
 
 /** The candidates that must never be picked (AI-§F.3 planted hard fails). */
 export const PLANTED_NEVER_PICKED = ["c4", "c6"] as const;
+
+/**
+ * The JPEG-artefact case (AI-19 (6), QUAL-29): candidate c2 (eligible, tokens clean) carries a raster orange hit,
+ * as compression artefacts around a warm photo would give; `orangeAdvisory` is the digest's soft flag. No V03, so
+ * no hard fail: the hit must exclude nothing.
+ */
+export const JPEG_ARTEFACT_ID = "c2";
+export function jpegArtefactOf(cands: Candidate[]): Candidate[] {
+  return cands.map((c) =>
+    c.card.id === JPEG_ARTEFACT_ID
+      ? { ...c, digest: { ...c.digest, colour: { ...c.digest.colour, orangeAdvisory: true }, raster: { fidelity: "partial", orangeRegions: { count: 2, px: 380 }, overflow: [] } } }
+      : c,
+  );
+}

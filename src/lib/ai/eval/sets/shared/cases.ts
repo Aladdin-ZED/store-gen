@@ -35,7 +35,8 @@ export interface EvalCase {
 
 /** Every guarded output: no em or en dash (rubric §9.G, guard rule 9). */
 export const NO_DASH = /[–—]/u;
-const MEDICAL = /gu[ée]ri|soign|traitement|traite\b|maigri|minceur|perte\s+de\s+poids|\bcures?\b|\bheal|weight\s+loss|slimming|علاج|يعالج|شفاء|تنحيف|يشفي/iu;
+/** The verbs, never their homonyms: "soigné(e)" (neat), "healthier" and "traité" (handled) are not medical claims. */
+const MEDICAL = /gu[ée]ri|soign(?:e|es|ent|er|ez|ons)(?![\p{L}])|traitement|traite(?![\p{L}])|maigri|minceur|perte\s+de\s+poids|(?<![\p{L}])cures?(?![\p{L}])|(?<![\p{L}])heal(?:s|ed|ing)?(?![\p{L}])|weight\s+loss|slimming|علاج|يعالج|شفاء|تنحيف|يشفي/iu;
 const BEFORE_AFTER = /avant\s*(?:et|\/)\s*apr[eè]s|before\s*(?:and|\/|&)\s*after|قبل\s*(?:و|\/)\s*بعد/iu;
 const WHATSAPP = /whats\s?app|واتس|واتساب|ouatsap/iu;
 const INSPECT_BEFORE_PAY = /(?:v[ée]rifi|ouvr|check|open|معاين|تفتح|تشوف).{0,60}(?:avant\s+de\s+payer|before\s+pay|قبل\s+(?:ما\s+)?(?:الدفع|تخلص))/iu;

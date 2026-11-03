@@ -128,7 +128,8 @@ const words = (re: RegExp) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${re.source})(?!
 /** before / after, body-shaming, guaranteed results: refused in any locale's words */
 export const AD_BANNED: readonly RegExp[] = [
   words(/avant\s*[/,-]?\s*(?:et\s+)?apr[eè]s|before\s*(?:[/&,-]|and)\s*after|قبل\s*(?:و|\/)\s*بعد/),
-  words(/gros(?:se)?|ob[eè]se|moche|laide?|kilos?\s+en\s+trop|bourrelets?|fat|obese|ugly|flabby|muffin\s+top|belly\s+fat|سمين(?:ة)?|بدين(?:ة)?|خايب(?:ة)?\s+الشكل|كرش/),
+  // "en gros plan" is the close-up of a shot list, and the English "laid" is a verb: neither is about a body
+  words(/gros(?:se)?(?!\s+plans?(?![\p{L}]))|ob[eè]se|moche|laide|kilos?\s+en\s+trop|bourrelets?|fat|obese|ugly|flabby|muffin\s+top|belly\s+fat|سمين(?:ة)?|بدين(?:ة)?|خايب(?:ة)?\s+الشكل|كرش/u),
   words(/r[ée]sultats?\s+garantis?|garanti\s+(?:à\s+)?100|efficacit[ée]\s+garantie|guaranteed\s+(?:results?|to\s+work)|100\s*%\s*guaranteed|results?\s+guaranteed|نتائج\s+مضمونة|نتيجة\s+مضمونة|مضمون\s+100|ضمان\s+النتيجة/),
 ];
 /** a question that asks the reader about their body or health (Meta's personal-attributes rule) */

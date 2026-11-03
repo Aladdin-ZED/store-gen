@@ -28,6 +28,8 @@
  * Sections (step 4, the prompt registry, the assembly and the eval set; ./selftest-prompts.ts): prompts-sha,
  * prompts-registry, prompts-text, prompts-blocks, prompts-voice, prompts-policies, prompts-canary, prompts-isolation,
  * prompts-pii, prompts-fixtures, prompts-library (and prompts-strict).
+ * Sections (step 5, the eval harness v1; ./selftest-eval.ts): eval-pairwise, eval-gate, eval-canary, eval-jury,
+ * eval-scorers, eval-scorecard, eval-recorded, novelty-pass (and, with --slow, eval-niche-corpus).
  * Exits 1 on any failure.
  */
 import { isDeepStrictEqual } from "node:util";
@@ -64,6 +66,7 @@ import { StoreAi } from "@/lib/settings/keys/store_ai";
 import { registerDirectorSections } from "./selftest-director";
 import { registerGuardSections } from "./selftest-guard";
 import { registerPromptSections } from "./selftest-prompts";
+import { registerEvalSections } from "./selftest-eval";
 
 /* ------------------------------------------------------------------ */
 /* The runner                                                          */
@@ -100,12 +103,13 @@ function throws(fn: () => unknown, msg: string): void {
 
 interface Section {
   name: string;
-  run: () => void;
+  /** a section may be async (the novelty pass awaits its injected check); the runner awaits it */
+  run: () => void | Promise<void>;
   slow?: boolean;
   strict?: boolean;
 }
 const SECTIONS: Section[] = [];
-function section(name: string, run: () => void, opts: { slow?: boolean; strict?: boolean } = {}): void {
+function section(name: string, run: () => void | Promise<void>, opts: { slow?: boolean; strict?: boolean } = {}): void {
   SECTIONS.push({ name, run, ...opts });
 }
 
@@ -1112,36 +1116,41 @@ section("protocol", () => {
 registerGuardSections({ section, check, eq, strict: STRICT });
 registerDirectorSections({ section, check, eq, strict: STRICT });
 registerPromptSections({ section, check, eq, strict: STRICT });
+registerEvalSections({ section, check, eq, strict: STRICT });
 
 /* ------------------------------------------------------------------ */
 /* run                                                                 */
 /* ------------------------------------------------------------------ */
 
-const started = performance.now();
-const timings: string[] = [];
-for (const sec of SECTIONS) {
-  if ((sec.slow && !SLOW) || (sec.strict && !STRICT)) continue;
-  current = sec.name;
-  const t0 = performance.now();
-  const before = failures;
-  try {
-    sec.run();
-  } catch (err) {
-    failures++;
-    console.error(`  ✗ [${sec.name}] threw: ${err instanceof Error ? err.stack : String(err)}`);
+async function runAll(): Promise<void> {
+  const started = performance.now();
+  const timings: string[] = [];
+  for (const sec of SECTIONS) {
+    if ((sec.slow && !SLOW) || (sec.strict && !STRICT)) continue;
+    current = sec.name;
+    const t0 = performance.now();
+    const before = failures;
+    try {
+      await sec.run();
+    } catch (err) {
+      failures++;
+      console.error(`  ✗ [${sec.name}] threw: ${err instanceof Error ? err.stack : String(err)}`);
+    }
+    const ms = performance.now() - t0;
+    timings.push(`${sec.name} ${ms.toFixed(0)} ms${failures > before ? " ✗" : ""}`);
   }
-  const ms = performance.now() - t0;
-  timings.push(`${sec.name} ${ms.toFixed(0)} ms${failures > before ? " ✗" : ""}`);
+  const total = performance.now() - started;
+  console.log(`  sections: ${timings.join(" · ")}`);
+  console.log(`  total ${(total / 1000).toFixed(2)} s of the ${BUDGET_MS / 1000} s test:ai budget${SLOW ? " (--slow)" : ""}${STRICT ? " (--strict)" : ""}`);
+  if (total > BUDGET_MS && !SLOW) {
+    failures++;
+    console.error(`  ✗ test:ai took ${(total / 1000).toFixed(2)} s, over its ${BUDGET_MS / 1000} s budget`);
+  }
+  if (failures > 0) {
+    console.error(`✗ ai selftest: ${failures} of ${checks} checks failed`);
+    process.exit(1);
+  }
+  console.log(`✓ ai selftest: all ${checks} checks passed`);
 }
-const total = performance.now() - started;
-console.log(`  sections: ${timings.join(" · ")}`);
-console.log(`  total ${(total / 1000).toFixed(2)} s of the ${BUDGET_MS / 1000} s test:ai budget${SLOW ? " (--slow)" : ""}${STRICT ? " (--strict)" : ""}`);
-if (total > BUDGET_MS && !SLOW) {
-  failures++;
-  console.error(`  ✗ test:ai took ${(total / 1000).toFixed(2)} s, over its ${BUDGET_MS / 1000} s budget`);
-}
-if (failures > 0) {
-  console.error(`✗ ai selftest: ${failures} of ${checks} checks failed`);
-  process.exit(1);
-}
-console.log(`✓ ai selftest: all ${checks} checks passed`);
+
+void runAll();
