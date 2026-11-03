@@ -1,4 +1,4 @@
-// proves: IN-01, IN-03, SF-03, SF-05, SF-06
+// proves: IN-01, IN-03, IN-09, OP-16, SF-03, SF-05, SF-06
 /**
  * Integration health against a real MariaDB (P5 INTEGRATIONS; operations.md OPE-§28.2, §28.3 (3)-(5), §27.2, §27.3,
  * §21.4, OPE-§L; OPE-§O.2 `test:integrations-db`, OPE-§O.4 IN-03, SF-03, SF-06). Two stores, A and B, and one question
@@ -24,7 +24,17 @@
  *    the after() path; the bucket stops a run and keeps its work; a 429 opens the 90 s breaker for every store; oldest
  *    waiting order first across 20 stores, and a slow sheet never starves the others; a test order is never appended,
  *    "Send again" included; rev-guarded marks; the deleted-row case; the run history; the integration_status
- *    transitions; the preconditions; B's run never touches A; the `sheets.push` job; the transport seam.
+ *    transitions; the preconditions; B's run never touches A; the `sheets.push` job; the transport seam;
+ *  - the bindings and the pull (IN-01, IN-09 R1, OP-16 R1; OPE-§19.2, §19.3, §19.6): the ownership proof (code found,
+ *    not found, a code planted in a cell, a spreadsheet another store holds → the one generic refusal with no Google
+ *    call, a reconnect without a proof, the duplicate-key race of two verifies, disconnect, moving to another sheet,
+ *    the feature gate); the `sheets.bind_legacy` pass (idempotent, the earliest connectedAt keeps a shared
+ *    spreadsheet, a code proof is never moved, a later legacy holder gives it up, ≤ 50 ms ticks, a no-op once done)
+ *    and the push binding a free legacy sheet in the same run; the pull on the push's read with a spy on P4's
+ *    applyExternalStatus / appendOrderEvent stubs (calls, refs, agentLabel, the sheet_label / sheet_dirty
+ *    bookkeeping, OD5 write-backs), the Agent / Note agent / Tracking / Transporteur writes and their dedupe, the
+ *    R1.0 path while the stubs throw, a test order and another store's ids never touched, the window, the history,
+ *    the `sheets.pull` job and the `pullStatuses` facade.
  */
 import Module from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -400,8 +410,12 @@ async function main() {
   for (let i = 0; i < 25; i++) await insertOrder(A, flagged(i < 10 ? ["captcha_missing"] : []));
   for (let i = 0; i < 30; i++) await insertOrder(A, flagged(["honeypot", "captcha_missing"]));
   for (let i = 0; i < 5; i++) await insertOrder(A, { ...flagged(["captcha_unverified"]), isTest: true });
-  for (let i = 0; i < 19; i++) await insertOrder(B, flagged(["captcha_unverified"]));
   const yEnd = dayStart(dayKey(new Date(now), tz), tz).getTime();
+  // B ends one order below minN yesterday, counting the orders seeded minutes ago (a run just after midnight dates them yesterday)
+  const [{ n: bYesterday }] = (await db.execute(
+    sql`SELECT COUNT(*) AS n FROM orders WHERE store_id = ${ids.B} AND is_test = 0 AND created_at >= ${new Date(yStart)} AND created_at < ${new Date(yEnd)}`,
+  ))[0] as unknown as { n: number }[];
+  for (let i = 0; i < 19 - Number(bYesterday); i++) await insertOrder(B, flagged(["captcha_unverified"]));
   const [{ n: realYesterday }] = (await db.execute(
     sql`SELECT COUNT(*) AS n FROM orders WHERE store_id = ${ids.A} AND is_test = 0 AND created_at >= ${new Date(yStart)} AND created_at < ${new Date(yEnd)} AND NOT JSON_CONTAINS(COALESCE(flags, '[]'), '"honeypot"')`,
   ))[0] as unknown as { n: number }[];
@@ -469,11 +483,16 @@ async function main() {
 /* ================================================================== */
 
 /** One Sheets API call as the fake Google saw it. */
-type CallKind = "read" | "append" | "update" | "other";
+type CallKind = "read" | "append" | "update" | "meta" | "other";
 interface FakeSheet {
   /** the rows from A2 down: [id, date, label, …] */
   rows: unknown[][];
-  calls: { kind: CallKind; at: number; body: string | null }[];
+  /** the header cells from N1 (the optional columns); none by default */
+  header?: string[];
+  /** the spreadsheet's title and tabs (the metadata read of the proof and of connectSheet) */
+  title?: string;
+  tabs?: { sheetId: number; title: string }[];
+  calls: { kind: CallKind; at: number; body: string | null; query: string }[];
   /** HTTP error statuses answered to the next calls, in order (429, 403) */
   script: number[];
   /** every answer waits this long (a slow sheet) */
@@ -523,24 +542,30 @@ async function sheetsPushSuite(): Promise<void> {
     429: { status: "RESOURCE_EXHAUSTED", message: "Quota exceeded for quota metric 'Write requests'" },
     403: { status: "PERMISSION_DENIED", message: "The caller does not have permission" },
   };
-  client.setGapiDoubleForTests(async (call) => {
+  const gapiFake = async (call: { method: string; path: string; body: string | null }) => {
     const [path = "", query = ""] = call.path.split("?");
-    const m = /^\/([^/]+)\/values(.*)$/.exec(path);
+    const m = /^\/([^/:]+)(.*)$/.exec(path);
     const id = m ? decodeURIComponent(m[1]!) : "";
     const f = fakes.get(id);
     if (!f) return json({ error: { code: 404, status: "NOT_FOUND", message: "Requested entity was not found." } }, 404);
     const rest = m![2]!;
-    const kind: CallKind = rest === ":batchGet" ? "read" : rest.endsWith(":append") ? "append" : rest === ":batchUpdate" ? "update" : "other";
-    f.calls.push({ kind, at: Date.now(), body: call.body });
+    const kind: CallKind =
+      rest === "/values:batchGet" ? "read" : /^\/values\/.+:append$/.test(rest) ? "append" : rest === "/values:batchUpdate" ? "update" : rest === "" && call.method === "GET" ? "meta" : "other";
+    f.calls.push({ kind, at: Date.now(), body: call.body, query: decodeURIComponent(query) });
     if (!served.includes(id)) served.push(id);
     const scripted = f.script.shift();
     if (scripted) return json({ error: { code: scripted, ...GOOGLE_ERRORS[scripted] } }, scripted);
     if (f.delayMs) await new Promise((r) => setTimeout(r, f.delayMs));
     if (f.before) await f.before(kind);
     if (kind === "read") {
-      // the header range first (no optional columns in these sheets), then A2:C
+      // the header range first (N1:AZ1), then A2:<the read width>
       const ranges = new URLSearchParams(query).getAll("ranges");
-      return json({ valueRanges: ranges.map((_, i) => (i === 0 ? {} : { values: f.rows.map((r) => r.slice(0, 3)) })) });
+      const width = (r: string) => colIndex(/!A2:([A-Z]+)$/.exec(r)?.[1] ?? "C") + 1;
+      return json({ valueRanges: ranges.map((r, i) => (i === 0 ? (f.header?.length ? { values: [f.header] } : {}) : { values: f.rows.map((row) => row.slice(0, width(r))) })) });
+    }
+    if (kind === "meta") {
+      const tabs = f.tabs ?? [{ sheetId: 0, title: "Commandes" }];
+      return json({ properties: { title: f.title ?? "Ventes" }, sheets: tabs.map((t) => ({ properties: t })) });
     }
     if (kind === "append") {
       const body = JSON.parse(call.body ?? "{}") as { values: unknown[][] };
@@ -558,7 +583,8 @@ async function sheetsPushSuite(): Promise<void> {
       return json({ totalUpdatedCells: body.data.length });
     }
     return json({});
-  });
+  };
+  client.setGapiDoubleForTests(gapiFake);
 
   /* ---------------- stores, orders, helpers ---------------- */
   const ctx = systemCtx("sheets.push");
@@ -572,13 +598,16 @@ async function sheetsPushSuite(): Promise<void> {
     await db.delete(cronCursors).where(eq(cronCursors.job, "sheets.push"));
     push.forgetSheetsBreaker();
   };
+  /** the next tick comes 5 minutes later: every store's 290 s pull window (s:<sid>:sheets:pull) has closed by then */
+  const nextTick = () => db.execute(sql`DELETE FROM rate_limits WHERE bucket LIKE 's:%:sheets:pull'`);
   const fresh = async () => {
     await resetBucket();
     await closeBreaker();
+    await nextTick();
     served.length = 0;
   };
   let seq = 0;
-  async function sheetStore(handle: string, opts: { status?: "active" | "pending" } = {}) {
+  async function sheetStore(handle: string, opts: { status?: "active" | "pending"; pull?: boolean } = {}) {
     const id = newId();
     await db.insert(stores).values({ id, handle, name: `Store ${handle}`, status: opts.status ?? "active", brandSeed: "0123456789abcdef" });
     const scope = systemScope(ctx, id);
@@ -586,7 +615,7 @@ async function sheetsPushSuite(): Promise<void> {
     const fake: FakeSheet = { rows: [], calls: [], script: [], delayMs: 0 };
     fakes.set(spreadsheetId, fake);
     // saveSheetsConfig claims the binding (the ownership proof is step 5's; here the store owns its sheet)
-    await config.saveSheetsConfig(scope, { spreadsheetId, sheetId: 0, sheetTitle: "Commandes", enabled: true }, actor);
+    await config.saveSheetsConfig(scope, { spreadsheetId, sheetId: 0, sheetTitle: "Commandes", enabled: true, pull: opts.pull ?? true }, actor);
     return { id, scope, spreadsheetId, fake };
   }
   type SheetStore = Awaited<ReturnType<typeof sheetStore>>;
@@ -651,17 +680,26 @@ async function sheetsPushSuite(): Promise<void> {
     .where(and(inArray(orders.storeId, waiting.map((s) => s.id)), eq(orders.sheetStatus, "pending")));
   eq2("fairness: the 3 last stores made no call and kept their work untouched", [waiting.map((s) => s.fake.calls.length), waitingRows.length, waitingRows.every((r) => r.attempts === 0 && r.error === null)], [[0, 0, 0], 3, true]);
 
+  // the next tick, 95 s later: the 17 stores read in tick 1 are inside their 290 s pull window
   await resetBucket();
   served.length = 0;
   const calls1 = F.map((s) => s.fake.calls.length);
-  const tick2 = await push.runSheetsPushTick(ctx, { budgetMs: 18_000 });
-  eq2("fairness: the next tick serves the stores that waited, oldest first, then the 17th's last write", served, [...waiting, s17].map((s) => s.spreadsheetId));
+  await push.runSheetsPushTick(ctx, { budgetMs: 18_000 });
+  ok(
+    "fairness: the next tick serves the stores that waited, oldest first (the 17th's last write at once when pending_sheets matches sheet_dirty > 0, CCR r1-p5-6; else when its window reopens)",
+    JSON.stringify(served.slice(0, 3)) === JSON.stringify(waiting.map((s) => s.spreadsheetId)) && served.slice(3).every((id) => id === s17.spreadsheetId),
+    served,
+  );
   ok("fairness: ≤ 3 calls per store in the second tick too", F.every((s, i) => s.fake.calls.length - calls1[i]! <= 3));
+  // five minutes later every window is open again: each store pulls on one read, the 17th writes its last row
+  await resetBucket();
+  await nextTick();
+  const tick2 = await push.runSheetsPushTick(ctx, { budgetMs: 18_000 });
   const leftF = await db
     .select({ n: sql<number>`COUNT(*)` })
     .from(orders)
     .where(and(inArray(orders.storeId, F.map((s) => s.id)), sql`(${orders.sheetStatus} <> 'synced' OR ${orders.sheetDirty} > 0)`));
-  eq2("fairness: after two ticks every order of the 20 stores is in its sheet", [Number(leftF[0]?.n), tick2.stoppedBy, F.every((s) => s.fake.rows.length === 2)], [0, null, true]);
+  eq2("fairness: after the next ticks every order of the 20 stores is in its sheet", [Number(leftF[0]?.n), tick2.stoppedBy, F.every((s) => s.fake.rows.length === 2)], [0, null, true]);
   await pause(...F);
 
   /* ---------------- 7.2 a slow sheet never starves the stores behind it ---------------- */
@@ -864,7 +902,7 @@ async function sheetsPushSuite(): Promise<void> {
 
   /* ---------------- 7.10 integration_status (sheets): ok, warn, failing, ok, off ---------------- */
   await fresh();
-  const S = await sheetStore("sp-s1");
+  const S = await sheetStore("sp-s1", { pull: false });
   await push.pushStore(S.scope, { maxCalls: 3, trigger: "tick" });
   eq2("status: a run with no error → ok", (await statusRow(S))?.state, "ok");
   await order(S, { sheetStatus: "pending", createdAt: new Date(Date.now() - 10 * MIN) });
@@ -890,9 +928,13 @@ async function sheetsPushSuite(): Promise<void> {
   delete env.GOOGLE_SA_JSON_B64;
   const noSa = await push.pushStore(K.scope, { maxCalls: 3, trigger: "tick" });
   env.GOOGLE_SA_JSON_B64 = saKey;
-  await db.delete(sheetBindings).where(eq(sheetBindings.spreadsheetId, K.spreadsheetId));
+  // K's spreadsheet held by another store: unbound for K (a free one would be bound on the spot as legacy, 8.2)
+  const holder = await sheetStore("sp-k0");
+  await db.update(sheetBindings).set({ storeId: holder.id }).where(eq(sheetBindings.spreadsheetId, K.spreadsheetId));
   const unbound = await push.pushStore(K.scope, { maxCalls: 3, trigger: "tick" });
-  await config.claimSheetBinding(K.scope, K.spreadsheetId, actor);
+  await db.update(sheetBindings).set({ storeId: K.id }).where(eq(sheetBindings.spreadsheetId, K.spreadsheetId));
+  push.forgetLegacyAttempts();
+  await pause(holder);
   // the kill switch (§H.8): its seeded row tripped, then restored as it was
   const [killRow] = await db.select().from(flags).where(eq(flags.key, "sheets_sync_enabled")).limit(1);
   await db.insert(flags).values({ key: "sheets_sync_enabled", kind: "kill", defaultValue: false }).onDuplicateKeyUpdate({ set: { defaultValue: false } });
@@ -973,6 +1015,8 @@ async function sheetsPushSuite(): Promise<void> {
   ok("job: the summary carries no customer field", !JSON.stringify(jr).includes(PHONE) && !JSON.stringify(jr).includes(NAME));
   await pause(J);
 
+  await bindPullSuite({ fakes, kinds, sheetStore, order, rowOf, fresh, nextTick, pause, ctx, actor });
+
   /* ---------------- 7.14 the transport seam (integrationFetch) and the client's test double ---------------- */
   eq2("transport: seam off → the URL as it is", transport.routeIntegrationUrl("https://sheets.googleapis.com/v4/spreadsheets/x/values:batchGet?ranges=A1", null), { url: "https://sheets.googleapis.com/v4/spreadsheets/x/values:batchGet?ranges=A1", host: null });
   eq2("transport: seam on → the mock origin, path and query kept", transport.routeIntegrationUrl("https://graph.facebook.com/v21.0/123/events?x=1", "http://127.0.0.1:4010"), { url: "http://127.0.0.1:4010/v21.0/123/events?x=1", host: "graph.facebook.com" });
@@ -1028,6 +1072,522 @@ async function sheetsPushSuite(): Promise<void> {
   ok("client: the gapi test double is refused under NODE_ENV=production", refused);
   client.setGapiDoubleForTests(null);
   delete env.GOOGLE_SA_JSON_B64;
+}
+
+/* ================================================================== */
+/* 8. bindings, the legacy pass and the pull (IN-01, IN-09, OP-16)     */
+/* ================================================================== */
+
+type OrderRow = typeof import("@/lib/db/schema").orders.$inferSelect;
+type OrderInsert = typeof import("@/lib/db/schema").orders.$inferInsert;
+type OStatus = import("@/lib/orders/contract").OrderStatus;
+/** A store of the Sheets suites (src/lib/jobs/scope.ts `systemScope`, its fake sheet). */
+interface KitStore {
+  id: string;
+  scope: ReturnType<typeof import("@/lib/jobs/scope").systemScope>;
+  spreadsheetId: string;
+  fake: FakeSheet;
+}
+/** What the push suite hands the bindings and pull suite (its fake Google, stores and orders). */
+interface BindPullKit {
+  fakes: Map<string, FakeSheet>;
+  kinds: (s: KitStore, from?: number) => CallKind[];
+  sheetStore: (handle: string, opts?: { status?: "active" | "pending"; pull?: boolean }) => Promise<KitStore>;
+  order: (s: KitStore, over?: Partial<OrderInsert>, label?: OStatus) => Promise<string>;
+  rowOf: (s: KitStore, id: string) => Promise<OrderRow>;
+  fresh: () => Promise<void>;
+  nextTick: () => Promise<unknown>;
+  pause: (...list: KitStore[]) => Promise<void>;
+  ctx: import("@/lib/tenancy/types").SystemCtx;
+  actor: { id: string; kind: "system" };
+}
+
+/** the optional columns of these sheets: N "Agent", O "Note agent", P "Tracking", Q "Transporteur" */
+const OPT = { agent: 13, note: 14, tracking: 15, carrier: 16 } as const;
+const GENERIC_REFUSAL = "This sheet can't be connected. Create a new Google Sheet for this store.";
+
+async function bindPullSuite(k: BindPullKit): Promise<void> {
+  const { fakes, kinds, sheetStore, order, rowOf, fresh, nextTick, pause, ctx, actor } = k;
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { auditLog, integrationStatus, orderEvents, orders, sheetBindings, stores } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  const push = load<typeof import("@/lib/sheets/push")>("@/lib/sheets/push");
+  const sync = load<typeof import("@/lib/sheets/sync")>("@/lib/sheets/sync");
+  const config = load<typeof import("@/lib/sheets/config")>("@/lib/sheets/config");
+  const connect = load<typeof import("@/lib/sheets/connect")>("@/lib/sheets/connect");
+  const legacy = load<typeof import("@/lib/sheets/bind-legacy")>("@/lib/sheets/bind-legacy");
+  const pull = load<typeof import("@/lib/sheets/pull")>("@/lib/sheets/pull");
+  const history = load<typeof import("@/lib/sheets/history")>("@/lib/sheets/history");
+  const { proofHash } = load<typeof import("@/lib/sheets/proof")>("@/lib/sheets/proof");
+  const { SheetsError } = load<typeof import("@/lib/sheets/client")>("@/lib/sheets/client");
+  const { statusLabel } = load<typeof import("@/lib/sheets/row")>("@/lib/sheets/row");
+  const { getStoreSetting, setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const { storeValues } = load<typeof import("@/lib/tenancy/sql")>("@/lib/tenancy/sql");
+  const { EntitlementError } = load<typeof import("@/lib/tenancy/entitlements")>("@/lib/tenancy/entitlements");
+  const { messageOf } = load<typeof import("@/lib/i18n/admin")>("@/lib/i18n/admin");
+  const { JOBS } = load<typeof import("@/lib/jobs/registry")>("@/lib/jobs/registry");
+
+  const member = ctx.actor; // the audit actor of connect, verify and disconnect (the routes pass the member's)
+  const how = { currency: "MAD", stepUp: "totp" as const };
+  const url = (id: string) => `https://docs.google.com/spreadsheets/d/${id}/edit#gid=0`;
+  const sheet = (over: Partial<FakeSheet> = {}) => {
+    const id = `1QaBind${randomBytes(12).toString("hex")}`;
+    const f: FakeSheet = { rows: [], calls: [], script: [], delayMs: 0, ...over };
+    fakes.set(id, f);
+    return { id, f };
+  };
+  const bindingOf = async (spreadsheetId: string) => (await db.select().from(sheetBindings).where(eq(sheetBindings.spreadsheetId, spreadsheetId)).limit(1))[0] ?? null;
+  const settingOf = (s: { scope: KitStore["scope"] }) => getStoreSetting(s.scope, "sheets", { fresh: true });
+  const audits = (s: { id: string }, action: string) => db.select().from(auditLog).where(and(eq(auditLog.storeId, s.id), eq(auditLog.action, action)));
+  const statusOf = async (s: { id: string }) => {
+    const [r] = await db.select().from(integrationStatus).where(and(eq(integrationStatus.storeId, s.id), eq(integrationStatus.kind, "sheets"))).limit(1);
+    return r ? [r.state, r.lastErrorCode] : null;
+  };
+  /** what a call threw, as the route maps it */
+  const errOf = (p: Promise<unknown>) =>
+    p.then(
+      () => "resolved",
+      (e: unknown) =>
+        e instanceof config.SheetBindingConflict
+          ? `conflict:${e.message}`
+          : e instanceof connect.SheetsProofError
+            ? e.code
+            : e instanceof EntitlementError
+              ? "feature_off"
+              : e instanceof SheetsError
+                ? `google:${e.status}`
+                : `other:${e instanceof Error ? e.message : String(e)}`,
+    );
+  const start = async (s: KitStore, spreadsheetId: string) => {
+    const r = await connect.startSheetConnect(s.scope, url(spreadsheetId), member, how);
+    return r.kind === "proof" ? r.code : "";
+  };
+
+  /* ---------------- 8.1 the ownership proof (OPE-§19.3, TENANCY-MAP §7.7, SHT-09) ---------------- */
+  await fresh();
+  const P1 = await sheetStore("bp-p1");
+  const P2 = await sheetStore("bp-p2");
+  const p1Order = await order(P1, { sheetStatus: "synced", sheetLabel: "new" }, "new");
+  const X = sheet({ title: "Ventes" });
+  const s1 = await connect.startSheetConnect(P1.scope, url(X.id), member, how);
+  const code1 = s1.kind === "proof" ? s1.code : "";
+  const pending1 = (await settingOf(P1)).pending;
+  ok(
+    "proof: a spreadsheet nobody holds answers a one-time code (SG- + 10 Crockford), kept as its hash for 24 h, before any Google call",
+    s1.kind === "proof" && /^SG-[0-9A-HJKMNP-TV-Z]{10}$/.test(code1) && pending1?.codeHash === proofHash(code1) && pending1.spreadsheetId === X.id && !JSON.stringify(pending1).includes(code1) && X.f.calls.length === 0,
+    { s1, pending1 },
+  );
+  eq2("proof: no code anywhere → code_missing, after one metadata read of the titles (no cell)", [await errOf(connect.verifySheetConnect(P1.scope, member, how)), X.f.calls.map((c) => c.kind), X.f.calls[0]?.query], ["code_missing", ["meta"], "fields=properties(title),sheets(properties(title))"]);
+  X.f.rows.push(["CMD-AAAA0001", "", "Nouvelle", `Rue 4, ${code1}`]);
+  eq2("proof: the code planted in a cell (a shopper's address) is never found", await errOf(connect.verifySheetConnect(P1.scope, member, how)), "code_missing");
+  X.f.tabs = [
+    { sheetId: 0, title: "Commandes" },
+    { sheetId: 7, title: `  ${code1.toLowerCase()} ` },
+  ];
+  const v1 = await connect.verifySheetConnect(P1.scope, member, how);
+  const b1 = await bindingOf(X.id);
+  const set1 = await settingOf(P1);
+  eq2(
+    "proof: the code in a tab title (any case, padded) → the binding (code), the orders tab set up, enabled with the pull on, the proof cleared",
+    [b1?.storeId === P1.id, b1?.method, v1.sheet.spreadsheetId, set1.enabled, set1.pull, set1.pending, X.f.calls.map((c) => c.kind).filter((x) => x === "meta").length >= 2],
+    [true, "code", X.id, true, true, null, true],
+  );
+  eq2("proof: moving to the new spreadsheet releases the previous one", await bindingOf(P1.spreadsheetId), null);
+  const connected1 = (await audits(P1, "integrations.sheets.connected")).map((r) => r.meta);
+  eq2("proof: audit integrations.sheets.connected with meta.stepUp (§F.5)", connected1, [{ created: v1.result.created, proof: true, stepUp: "totp" }]);
+  ok("proof: the Sheets screen's 'connected' means a setting and its binding", await connect.sheetConnected(P1.scope));
+  // the tab the verify created, as Google lists it from now on
+  if (!X.f.tabs.some((t) => t.sheetId === v1.result.sheetId)) X.f.tabs.push({ sheetId: v1.result.sheetId, title: v1.result.sheetTitle });
+
+  const xCalls = X.f.calls.length;
+  const refusedStart = await errOf(connect.startSheetConnect(P2.scope, url(X.id), member, how));
+  const refusedGid = await errOf(connect.startSheetConnect(P2.scope, `https://docs.google.com/spreadsheets/d/${X.id}/edit#gid=7`, member, how));
+  eq2(
+    "proof: a spreadsheet another store holds → the one generic refusal (any tab of it), no Google call, nothing saved, the holder untouched",
+    [refusedStart, refusedGid, X.f.calls.length - xCalls, (await settingOf(P2)).pending, (await bindingOf(X.id))?.storeId === P1.id, (await settingOf(P2)).spreadsheetId === P2.spreadsheetId],
+    [`conflict:${GENERIC_REFUSAL}`, `conflict:${GENERIC_REFUSAL}`, 0, null, true, true],
+  );
+  eq2("proof: the refusal's screen text (en) is the brief's sentence; ar and fr exist", [messageOf("int.sheets.refused", "en"), !!messageOf("int.sheets.refused", "ar"), !!messageOf("int.sheets.refused", "fr")], [GENERIC_REFUSAL, true, true]);
+
+  const re = await connect.startSheetConnect(P1.scope, url(X.id), member, how);
+  eq2(
+    "proof: the store's own spreadsheet reconnects without a proof (its tab reused, the binding kept)",
+    [re.kind, re.kind === "connected" ? re.result.created : null, (await settingOf(P1)).pending, (await bindingOf(X.id))?.method, (await audits(P1, "integrations.sheets.connected")).at(-1)?.meta],
+    ["connected", false, null, "code", { created: false, proof: false, stepUp: "totp" }],
+  );
+
+  // two stores proving the same spreadsheet at the same moment: the primary key decides
+  const P3 = await sheetStore("bp-p3");
+  const P4 = await sheetStore("bp-p4");
+  const Y = sheet();
+  const c3 = await start(P3, Y.id);
+  const c4 = await start(P4, Y.id);
+  Y.f.title = `Ventes ${c3} ${c4}`;
+  const race = await Promise.allSettled([connect.verifySheetConnect(P3.scope, member, how), connect.verifySheetConnect(P4.scope, member, how)]);
+  const won = race.map((r) => r.status === "fulfilled");
+  const lost = race.map((r) => r.status === "rejected" && r.reason instanceof config.SheetBindingConflict);
+  const winner = won[0] ? P3 : P4;
+  const loser = won[0] ? P4 : P3;
+  eq2(
+    "proof: a duplicate-key race of two verifies → one binding, the other the generic refusal with its proof dropped and its own sheet kept",
+    [won.filter(Boolean).length, lost.filter(Boolean).length, (await bindingOf(Y.id))?.storeId === winner.id, (await settingOf(loser)).pending, (await settingOf(loser)).spreadsheetId === loser.spreadsheetId, await config.sheetBound(loser.scope, loser.spreadsheetId)],
+    [1, 1, true, null, true, true],
+  );
+
+  // Google refusing the setup (not shared as Editor): the binding this verify created is given back
+  const P5 = await sheetStore("bp-p5");
+  const Z = sheet();
+  const c5 = await start(P5, Z.id);
+  Z.f.title = `Boutique ${c5}`;
+  Z.f.script = [0, 403];
+  eq2(
+    "proof: a 403 while setting the tab up → no binding left, the proof still pending, the store's sheet unchanged",
+    [await errOf(connect.verifySheetConnect(P5.scope, member, how)), await bindingOf(Z.id), !!(await config.pendingProof(P5.scope)), (await settingOf(P5)).spreadsheetId === P5.spreadsheetId],
+    ["google:403", null, true, true],
+  );
+  const v5 = await connect.verifySheetConnect(P5.scope, member, how);
+  eq2("proof: the retry once shared connects", [v5.sheet.spreadsheetId, (await bindingOf(Z.id))?.storeId === P5.id], [Z.id, true]);
+  await config.savePendingProof(P5.scope, { spreadsheetId: Y.id, sheetId: null, codeHash: proofHash("SG-0000000000"), expiresAt: new Date(Date.now() - MIN).toISOString() }, actor);
+  eq2("proof: an expired proof → no_proof", await errOf(connect.verifySheetConnect(P5.scope, member, how)), "no_proof");
+
+  // the feature gate: a pending store (and the kill switch) starts nothing
+  const PP = await sheetStore("bp-p6", { status: "pending" });
+  eq2("proof: feature sheets off (a pending store) → start and verify refused", [await errOf(connect.startSheetConnect(PP.scope, url(sheet().id), member, how)), await errOf(connect.verifySheetConnect(PP.scope, member, how))], ["feature_off", "feature_off"]);
+
+  // disconnect: the binding goes, the orders keep their sheet status, another store may prove the spreadsheet next
+  const dc = await connect.disconnectSheet(P1.scope, member, { stepUp: "totp" });
+  const set1b = await settingOf(P1);
+  eq2(
+    "disconnect: the binding deleted, sheets = { enabled: false }, the status row off, audited; the orders keep sheet_status",
+    [dc, await bindingOf(X.id), set1b.enabled, set1b.spreadsheetId ?? null, (await rowOf(P1, p1Order)).sheetStatus, await statusOf(P1), (await audits(P1, "integrations.sheets.disconnected")).map((r) => r.meta)],
+    [true, null, false, null, "synced", ["off", null], [{ stepUp: "totp" }]],
+  );
+  eq2("disconnect: nothing connected → false, no second audit row", [await connect.disconnectSheet(P1.scope, member), (await audits(P1, "integrations.sheets.disconnected")).length, await connect.sheetConnected(P1.scope)], [false, 1, false]);
+  eq2("disconnect: the freed spreadsheet answers another store a code", (await connect.startSheetConnect(P2.scope, url(X.id), member, how)).kind, "proof");
+  await config.savePendingProof(P2.scope, null, actor);
+  await pause(P2, P3, P4, P5);
+
+  /* ---------------- 8.2 the legacy bindings (OPE-§19.2, OPE-§J sheets.bind_legacy) ---------------- */
+  await fresh();
+  await legacy.resetLegacyPass();
+  push.forgetLegacyAttempts();
+  /** a store connected before 0005: its setting names a spreadsheet, no binding row */
+  const legacyStore = async (handle: string, spreadsheetId: string, connectedAt: number | null): Promise<KitStore> => {
+    const id = newId();
+    await db.insert(stores).values({ id, handle, name: `Store ${handle}`, status: "active", brandSeed: "0123456789abcdef" });
+    const scope = systemScope(ctx, id);
+    await setStoreSetting(
+      scope,
+      "sheets",
+      { url: url(spreadsheetId), spreadsheetId, sheetId: 0, sheetTitle: "Commandes", enabled: true, pull: false, pending: null, ...(connectedAt === null ? {} : { connectedAt: new Date(connectedAt).toISOString() }) },
+      actor,
+    );
+    return { id, scope, spreadsheetId, fake: fakes.get(spreadsheetId)! };
+  };
+  const T0 = Date.now() - 600 * MIN;
+  const SL = sheet();
+  const L1 = await legacyStore("bp-l1", SL.id, T0);
+  const l1o = await order(L1, { sheetStatus: "pending" });
+  const rl1 = await push.pushStore(L1.scope, { maxCalls: 3, trigger: "tick" });
+  eq2(
+    "legacy: the push binds a free pre-0005 sheet on the spot (legacy) and syncs in the same run",
+    [rl1.skipped, rl1.appended, (await bindingOf(SL.id))?.storeId === L1.id, (await bindingOf(SL.id))?.method, (await rowOf(L1, l1o)).sheetStatus],
+    [null, 1, true, "legacy", "synced"],
+  );
+  eq2("legacy: ensureLegacyBinding is idempotent (already), a store without a sheet → none", [await legacy.ensureLegacyBinding(L1.scope), await legacy.ensureLegacyBinding(P1.scope)], ["already", "none"]);
+
+  // Z: two stores on one spreadsheet; the later one's push binds it first (provisional until the pass)
+  const SZ = sheet();
+  const L2 = await legacyStore("bp-l2", SZ.id, T0 + 20 * MIN);
+  const L3 = await legacyStore("bp-l3", SZ.id, T0 + 10 * MIN);
+  const l2o = await order(L2, { sheetStatus: "pending" });
+  const l3o = await order(L3, { sheetStatus: "pending" });
+  const rl2 = await push.pushStore(L2.scope, { maxCalls: 3, trigger: "tick" });
+  const zCalls = SZ.f.calls.length;
+  const rl3 = await push.pushStore(L3.scope, { maxCalls: 3, trigger: "tick" });
+  eq2(
+    "legacy: before the pass, a shared spreadsheet goes to the first push; the other store is not connected and calls nothing",
+    [rl2.appended, (await bindingOf(SZ.id))?.storeId === L2.id, rl3.skipped, SZ.f.calls.length - zCalls, await legacy.ensureLegacyBinding(L3.scope)],
+    [1, true, "unbound", 0, "taken"],
+  );
+  // W: a code proof another store's earlier setting also names; V: the single-tenant sheet and a later legacy holder
+  const L4 = await sheetStore("bp-l4");
+  const L5 = await legacyStore("bp-l5", L4.spreadsheetId, null);
+  const SV = sheet();
+  const L6 = await legacyStore("bp-l6", SV.id, null);
+  const L7 = await legacyStore("bp-l7", SV.id, T0 + 30 * MIN);
+  await db.insert(sheetBindings).values({ spreadsheetId: SV.id, storeId: L7.id, method: "legacy", verifiedAt: new Date() });
+
+  const first = await legacy.runBindLegacyTick(ctx, { budgetMs: 1, pageSize: 3 });
+  ok("legacy: a tick whose budget is spent still reads one store (the pass never stalls)", first.visited >= 1 && !first.done, first);
+  const ticks = [first];
+  for (let i = 0; i < 400 && !ticks.at(-1)!.done; i++) ticks.push(await legacy.runBindLegacyTick(ctx, { budgetMs: 50 }));
+  const end = ticks.at(-1)!;
+  const slowest = Math.max(...ticks.slice(1).map((t) => t.ms));
+  ok("legacy: the pass ends, in ticks of ≤ 50 ms (+ one store's reads of slack on a shared machine)", end.done && slowest <= 150, { ticks: ticks.length, slowest });
+  ok("legacy: the pass's counts (counts only)", end.bound >= 2 && end.moved >= 1 && end.conflicts >= 3 && Object.keys(end).every((key) => ["done", "visited", "bound", "moved", "conflicts", "ms"].includes(key)), end);
+  const pausedOf = async (s: KitStore) => [(await settingOf(s)).enabled, (await settingOf(s)).spreadsheetId === s.spreadsheetId, await statusOf(s)];
+  const PAUSED = [false, true, ["off", "binding_conflict"]];
+  eq2(
+    "legacy: the earliest connectedAt keeps a shared spreadsheet; the later store's provisional binding moves, its sheet paused with binding_conflict (coordinates kept)",
+    [(await bindingOf(SZ.id))?.storeId === L3.id, (await bindingOf(SZ.id))?.method, await pausedOf(L2)],
+    [true, "legacy", PAUSED],
+  );
+  eq2("legacy: a code proof is never moved, even by an earlier setting", [(await bindingOf(L4.spreadsheetId))?.storeId === L4.id, (await bindingOf(L4.spreadsheetId))?.method, await pausedOf(L5), (await settingOf(L4)).enabled], [true, "code", PAUSED, true]);
+  eq2("legacy: a setting with no connectedAt (the single-tenant sheet) reads as the earliest; the later legacy holder gives it up", [(await bindingOf(SV.id))?.storeId === L6.id, await pausedOf(L7)], [true, PAUSED]);
+  eq2("legacy: a lone pre-0005 sheet keeps its binding", (await bindingOf(SL.id))?.storeId === L1.id, true);
+  const tick2 = await legacy.runBindLegacyTick(ctx, { budgetMs: 50 });
+  eq2("legacy: once done, a tick is a no-op", [tick2.done, tick2.visited, (await legacy.legacyPassState()).done], [true, 0, true]);
+
+  const bindingsSnap = async () => JSON.stringify(await db.select({ id: sheetBindings.spreadsheetId, s: sheetBindings.storeId, m: sheetBindings.method }).from(sheetBindings).orderBy(sheetBindings.spreadsheetId));
+  const beforeAgain = await bindingsSnap();
+  await legacy.resetLegacyPass();
+  let again = await legacy.runBindLegacyTick(ctx, { budgetMs: 5_000 });
+  for (let i = 0; i < 50 && !again.done; i++) again = await legacy.runBindLegacyTick(ctx, { budgetMs: 5_000 });
+  eq2("legacy: a second pass changes no binding (idempotent: the marker is the rows)", [again.done, again.bound, again.moved, (await bindingsSnap()) === beforeAgain], [true, 0, 0, true]);
+
+  push.forgetLegacyAttempts();
+  await nextTick();
+  const rl3b = await push.pushStore(L3.scope, { maxCalls: 3, trigger: "tick" });
+  const rl2b = await push.pushStore(L2.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("legacy: after the pass the keeper syncs; the paused store makes no call", [rl3b.appended, (await rowOf(L3, l3o)).sheetStatus, rl2b.skipped, (await rowOf(L2, l2o)).sheetStatus], [1, "synced", "disabled", "synced"]);
+  const L9 = await legacyStore("bp-l9", L4.spreadsheetId, T0);
+  eq2("legacy: once the pass is done, a store naming a held spreadsheet is a conflict at once", [await legacy.ensureLegacyBinding(L9.scope), await pausedOf(L9)], ["conflict", PAUSED]);
+  ok("legacy: a paused store is 'not connected' on the Sheets screen", !(await connect.sheetConnected(L2.scope)) && (await connect.sheetConnected(L3.scope)));
+  const pj = JOBS.find((j) => j.name === "sheets.pull");
+  const bj = JOBS.find((j) => j.name === "sheets.bind_legacy");
+  eq2("jobs: sheets.pull every tick, 12 s, active stores; sheets.bind_legacy every tick, 50 ms", [pj?.every, pj?.budgetMs, pj?.perStore?.states, bj?.every, bj?.budgetMs], ["tick", 12_000, ["active", "restricted"], "tick", 50]);
+  await pause(L1, L3, L4);
+
+  /* ---------------- 8.3 the pull (OPE-§19.6, OD2, OD5, OD54, OD55) ---------------- */
+  await fresh();
+  type ApplyFn = import("@/lib/sheets/pull").PullDeps["applyExternalStatus"];
+  type EventFn = import("@/lib/sheets/pull").PullDeps["appendOrderEvent"];
+  const applyCalls: { store: string; id: string; ext: unknown; src: unknown }[] = [];
+  const eventCalls: { store: string; id: string; e: unknown }[] = [];
+  /** orderId → the answer P4 would give (an implied path, a noop, a refusal); else the move below */
+  const scripted = new Map<string, unknown>();
+  const own = (scope: { storeId: string }, id: string) => and(eq(orders.storeId, scope.storeId), eq(orders.id, id));
+  // P4's two calls reduced to what the pull reads back (the real moves are P4's test:ops-db, proven at the R1 integration)
+  const spyApply = (async (scope, id, ext, src) => {
+    applyCalls.push({ store: scope.storeId, id, ext: { ...ext }, src: { ...src } });
+    const answer = scripted.get(id);
+    if (answer) return answer as never;
+    const [o] = await db.select({ rev: orders.rev, confirm: orders.confirmState, ship: orders.shipState, status: orders.status }).from(orders).where(own(scope, id)).limit(1);
+    if (!o) return { ok: false, error: "not_found" } as never;
+    const confirm = ext.legacy === "confirmed" || ext.ship ? "confirmed" : o.confirm;
+    const ship = ext.ship ?? o.ship;
+    const status = ext.legacy ?? (ext.ship ? "confirmed" : (o.status as OStatus));
+    await db.update(orders).set({ confirmState: confirm, shipState: ship, status, rev: o.rev + 1, sheetDirty: sql`${orders.sheetDirty} | 1` }).where(own(scope, id));
+    return { ok: true, changed: true, rev: o.rev + 1, status, states: { confirm, ship, money: "none" }, eventIds: [] } as never;
+  }) as ApplyFn;
+  const spyEvent = (async (scope, id, e) => {
+    eventCalls.push({ store: scope.storeId, id, e: JSON.parse(JSON.stringify(e)) });
+    const [o] = await db.select({ id: orders.id }).from(orders).where(own(scope, id)).limit(1);
+    if (!o) return { ok: false, error: "not_found" };
+    const [res] = await db.insert(orderEvents).values(storeValues(scope, { orderId: id, actorKind: e.actorKind, type: e.type, note: e.note ?? null, meta: e.meta ?? null }));
+    return { ok: true, id: Number(res.insertId) };
+  }) as EventFn;
+  pull.setPullDoubleForTests({ applyExternalStatus: spyApply, appendOrderEvent: spyEvent });
+
+  const L = (s: OStatus) => statusLabel(s);
+  const KARIM = newId();
+  const QUEUE_MEMBER = newId();
+  const Q = await sheetStore("bp-q1");
+  Q.fake.header = ["Agent", "Note agent", "Tracking", "Transporteur"];
+  await setStoreSetting(Q.scope, "ops", { ...(await getStoreSetting(Q.scope, "ops")), agentLabels: { Karim: KARIM } }, actor);
+  /** a synced order of `s` whose row shows `label` (its `sheet_label` recorded unless `over` says otherwise) */
+  const synced = (s: KitStore, over: Partial<OrderInsert> = {}, label: OStatus = (over.status as OStatus | undefined) ?? "new") => order(s, { sheetStatus: "synced", sheetLabel: label, ...over }, label);
+  const rowNo = (s: KitStore, id: string) => s.fake.rows.findIndex((r) => r?.[0] === id) + 2;
+  const cells = (s: KitStore, id: string, c: { label?: string; agent?: string; note?: string; tracking?: string; carrier?: string }) => {
+    const row = s.fake.rows.find((r) => r?.[0] === id)!;
+    for (let i = row.length; i <= OPT.carrier; i++) row[i] = "";
+    if (c.label !== undefined) row[2] = c.label;
+    for (const key of ["agent", "note", "tracking", "carrier"] as const) if (c[key] !== undefined) row[OPT[key]] = c[key];
+  };
+  const confirmed = { status: "confirmed", confirmState: "confirmed" } as const;
+  const q1 = await synced(Q);
+  const q2 = await synced(Q);
+  const q3 = await synced(Q);
+  const q4 = await synced(Q);
+  const q5 = await synced(Q, { isTest: true });
+  const q7a = await synced(Q);
+  const q7b = await synced(Q);
+  const q8 = await synced(Q, { ...confirmed, sheetLabel: null });
+  const q9 = await synced(Q, { ...confirmed });
+  const q10 = await synced(Q, { ...confirmed, confirmedBy: QUEUE_MEMBER });
+  const q11 = await synced(Q);
+  const q12 = await synced(Q, { ...confirmed });
+  const q13 = await synced(Q);
+  const R = await sheetStore("bp-r1");
+  const rA = await synced(R);
+
+  // run 0: no work, the pull is due → one read (the header is learnt); a row synced before sheet_label gets its label
+  const r0 = await push.pushStore(Q.scope, { maxCalls: 3, trigger: "tick" });
+  eq2(
+    "pull: a store with no push work but a due pull → one read; the cell showing the app's status records sheet_label (no move)",
+    [kinds(Q), r0.pulled, r0.seen, (await rowOf(Q, q8)).sheetLabel, applyCalls.length],
+    [["read"], 1, Q.fake.rows.length, "confirmed", 0],
+  );
+
+  cells(Q, q1, { label: L("confirmed"), agent: "Samira" });
+  cells(Q, q2, { label: L("delivered") });
+  scripted.set(q2, { ok: true, changed: true, rev: 1, status: "confirmed", states: { confirm: "confirmed", ship: "none", money: "none" }, eventIds: [] });
+  cells(Q, q3, { label: L("cancelled") });
+  scripted.set(q3, { ok: true, changed: false, noop: true });
+  cells(Q, q4, { label: L("returned") });
+  scripted.set(q4, { ok: false, error: "illegal" });
+  cells(Q, q5, { label: L("confirmed") });
+  Q.fake.rows.push([rA, "", L("cancelled"), "", "", "", "", "", "", "", "", "", "", "Samira", "R-CANARY note", "R-TRK", "R-Carrier"]);
+  cells(Q, q7a, { label: "" });
+  cells(Q, q7b, { label: "Bof" });
+  cells(Q, q9, { agent: " karim " });
+  cells(Q, q10, { agent: "Samira" });
+  cells(Q, q11, { note: "Livrer samedi matin", agent: "Samira" });
+  cells(Q, q12, { tracking: "TRK-123" });
+  cells(Q, q13, { carrier: "Amana" });
+  const q14 = await synced(Q, { sheetDirty: 2, trackingRef: "APP-1" });
+  cells(Q, q14, { tracking: "OLD" });
+  const rA0 = JSON.stringify(await rowOf(R, rA));
+  const calls0 = Q.fake.calls.length;
+  await nextTick();
+  const r1 = await push.pushStore(Q.scope, { maxCalls: 3, trigger: "tick" });
+  const ref = (id: string) => `row:${rowNo(Q, id)}`;
+  eq2(
+    "pull: the status cells first, then the tracking: applyExternalStatus(scope, id, { legacy }, { kind: sheet, ref: row:<n>, agentLabel }) per changed cell",
+    applyCalls.map((c) => [c.store === Q.id, c.id, c.ext, c.src]),
+    [
+      [true, q1, { legacy: "confirmed" }, { kind: "sheet", ref: ref(q1), agentLabel: "Samira" }],
+      [true, q2, { legacy: "delivered" }, { kind: "sheet", ref: ref(q2) }],
+      [true, q3, { legacy: "cancelled" }, { kind: "sheet", ref: ref(q3) }],
+      [true, q4, { legacy: "returned" }, { kind: "sheet", ref: ref(q4) }],
+      [true, q12, { ship: "packed" }, { kind: "sheet", ref: ref(q12) }],
+    ],
+  );
+  eq2("pull: one read (A2:Q with the optional columns) and the batchUpdate of the run's own dirty row", [kinds(Q, calls0), Q.fake.calls[calls0]?.query.includes("!A2:Q")], [["read", "update"], true]);
+  const o = async (id: string) => {
+    const r = await rowOf(Q, id);
+    return { label: r.sheetLabel, dirty: r.sheetDirty, status: r.status, by: r.confirmedBy, byLabel: r.confirmedByLabel, tracking: r.trackingRef, carrier: r.carrierLabel, ship: r.shipState };
+  };
+  const q1r = await o(q1);
+  eq2("pull: a confirmation applied as the cell said → sheet_label = label, the status bit cleared (same rev), the unmapped Agent → confirmed_by_label", [q1r.label, q1r.dirty, q1r.status, q1r.by, q1r.byLabel], ["confirmed", 0, "confirmed", null, "Samira"]);
+  eq2(
+    "pull: an implied path, a noop and a refusal → sheet_label = label and sheet_dirty |= 1 (the app's label goes back, OD5)",
+    [await o(q2), await o(q3), await o(q4)].map((r) => [r.label, r.dirty & 1, r.status]),
+    [
+      ["delivered", 1, "new"],
+      ["cancelled", 1, "new"],
+      ["returned", 1, "new"],
+    ],
+  );
+  eq2("pull: a test order is never moved; blank and unknown labels are skipped", [(await o(q5)).label, (await o(q5)).status, (await o(q7a)).label, (await o(q7b)).label], ["new", "new", "new", "new"]);
+  eq2("pull: another store's order typed into this sheet is ignored (SHT-05): no call, no write", [applyCalls.some((c) => c.id === rA) || eventCalls.some((c) => c.id === rA), JSON.stringify(await rowOf(R, rA)) === rA0], [false, true]);
+  const q9r = await o(q9);
+  const q10r = await o(q10);
+  eq2("pull: Agent on a confirmed order nobody credited → the mapped member (folded label) and the label; a queue confirmation is never re-attributed", [q9r.by === KARIM, q9r.byLabel, q10r.by === QUEUE_MEMBER, q10r.byLabel], [true, "karim", true, null]);
+  const noteCall = eventCalls.find((c) => c.id === q11)?.e as { actorKind: string; type: string; note: string; meta: { cellHash: string; agentLabel: string } } | undefined;
+  eq2(
+    "pull: Note agent → a note event (actor sheet, the cell text, meta.agentLabel and the 16-hex cellHash)",
+    [noteCall?.actorKind, noteCall?.type, noteCall?.note, noteCall?.meta.agentLabel, /^[0-9a-f]{16}$/.test(noteCall?.meta.cellHash ?? "")],
+    ["sheet", "note", "Livrer samedi matin", "Samira", true],
+  );
+  const trackCall = eventCalls.find((c) => c.id === q12)?.e;
+  const q12r = await o(q12);
+  eq2("pull: Tracking pre-ship → the packed move, a tracking_set event, tracking_ref", [q12r.ship, q12r.tracking, trackCall], ["packed", "TRK-123", { actorKind: "sheet", type: "tracking_set", meta: { trackingRef: "TRK-123" } }]);
+  eq2("pull: Transporteur → carrier_label", (await o(q13)).carrier, "Amana");
+  eq2("pull: a text cell of an order whose own value is still on its way (bit 2) is not pulled; the push writes the app's value", [(await o(q14)).tracking, Q.fake.rows[rowNo(Q, q14) - 2]?.[OPT.tracking]], ["APP-1", "APP-1"]);
+  eq2("pull: the run's counts (orders changed: q1, q2, q9, q11, q12, q13)", [r1.pulled, r1.pullDeferred, r1.seen, r1.ok], [6, 0, Q.fake.rows.length, true]);
+
+  // run 2: nothing new in the sheet → no call to P4, the note deduped by its cellHash, the write-backs land
+  await nextTick();
+  const before2 = [applyCalls.length, eventCalls.length];
+  const r2 = await push.pushStore(Q.scope, { maxCalls: 3, trigger: "tick" });
+  eq2(
+    "pull: the same sheet again → no move, no second note (cellHash), and the app's label written back to the refused cells",
+    [applyCalls.length - before2[0]!, eventCalls.length - before2[1]!, r2.pulled, [q2, q3, q4].map((id) => Q.fake.rows[rowNo(Q, id) - 2]?.[2]), (await o(q2)).dirty],
+    [0, 0, 0, [L("new"), L("new"), L("new")], 0],
+  );
+
+  // run 3: a cleared Tracking never clears tracking_ref; an Agent edited later on an attributed order updates the label
+  cells(Q, q12, { tracking: "" });
+  cells(Q, q1, { agent: "Nadia" });
+  await nextTick();
+  await push.pushStore(Q.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("pull: a cleared Tracking keeps tracking_ref; a later Agent cell relabels while nobody is credited", [(await o(q12)).tracking, (await o(q1)).byLabel, (await o(q1)).by], ["TRK-123", "Nadia", null]);
+
+  // run 4: P4's P0 stubs throw "not implemented" → the status cell takes the R1.0 path, the rest waits in the sheet
+  pull.setPullDoubleForTests(null);
+  const q15 = await synced(Q);
+  const q16 = await synced(Q);
+  const q17 = await synced(Q, { ...confirmed });
+  cells(Q, q15, { label: L("confirmed") });
+  cells(Q, q16, { note: "Appeler après 18h" });
+  cells(Q, q17, { tracking: "TRK-9" });
+  await nextTick();
+  const r4 = await push.pushStore(Q.scope, { maxCalls: 3, trigger: "tick" });
+  const ev16 = await db.select().from(orderEvents).where(and(eq(orderEvents.storeId, Q.id), eq(orderEvents.orderId, q16)));
+  eq2(
+    "pull: P4's stubs not merged yet → the status cell applied as R1.0 did (status and sheet_label); the note and the tracking deferred, nothing logged as an error",
+    [(await o(q15)).status, (await o(q15)).label, ev16.length, (await o(q17)).tracking, r4.pullDeferred, r4.ok],
+    ["confirmed", "confirmed", 0, null, 2, true],
+  );
+  pull.setPullDoubleForTests({ applyExternalStatus: spyApply, appendOrderEvent: spyEvent });
+
+  // the window: one full pull per store per 290 s; "Bring status changes back" off reads nothing
+  const q18 = await order(Q, { sheetStatus: "pending" });
+  const callsW = Q.fake.calls.length;
+  const rW = await push.pushStore(Q.scope, { maxCalls: 3, trigger: "tick" });
+  eq2("pull: inside the 290 s window a push with appends only makes no read (the header is known)", [kinds(Q, callsW), rW.seen, rW.pulled, (await rowOf(Q, q18)).sheetStatus], [["append"], 0, 0, "synced"]);
+  const throttled = await sync.pullStatuses(Q.scope);
+  const forced = await sync.pullStatuses(Q.scope, { force: true });
+  eq2("pullStatuses (R1.0 facade): throttled inside the window, a forced pull reads once", [throttled.status, forced.status, forced.seen, kinds(Q, callsW + 1)], ["throttled", "ok", Q.fake.rows.length, ["read"]]);
+  const Qoff = await sheetStore("bp-q2", { pull: false });
+  const qo = await synced(Qoff);
+  cells(Qoff, qo, { label: L("cancelled") });
+  await order(Qoff, { sheetStatus: "pending" });
+  const offPull = await sync.pullStatuses(Qoff.scope, { force: true });
+  const applyOff = applyCalls.length;
+  const offRun = await push.pushStore(Qoff.scope, { maxCalls: 3, trigger: "tick" });
+  eq2(
+    "pull: 'Bring status changes back' off → pullStatuses reads nothing; the push appends and never moves a status",
+    [offPull, offRun.appended, applyCalls.length - applyOff, (await rowOf(Qoff, qo)).sheetLabel, Qoff.fake.calls.some((c) => c.kind === "read" && c.query.includes("!A2:"))],
+    [{ status: "ok", seen: 0, updated: 0 }, 1, 0, "new", false],
+  );
+
+  // the sheets.pull job: the store whose window is open and had no push work; every other store was pulled a moment ago
+  await fresh();
+  const Q3 = await sheetStore("bp-q3");
+  const q3o = await synced(Q3);
+  cells(Q3, q3o, { label: L("confirmed") });
+  await db.execute(sql`INSERT INTO rate_limits (bucket, count, reset_at)
+    SELECT CONCAT('s:', id, ':sheets:pull'), 1, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 290 SECOND) FROM stores WHERE id <> ${Q3.id}
+    ON DUPLICATE KEY UPDATE count = 1, reset_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 290 SECOND)`);
+  const callsBefore = new Map([...fakes].map(([id, f]) => [id, f.calls.length]));
+  const jobCtx = {
+    ...systemCtx("sheets.pull"),
+    deadline: Date.now() + 12_000,
+    tickId: "qa-tick",
+    cursor: "",
+    setCursor: async () => undefined,
+    yield: async () => new Promise<void>((r) => setImmediate(r)),
+    lagMs: () => 0,
+  };
+  const jr = await pj!.run(jobCtx);
+  const others = [...fakes].filter(([id, f]) => id !== Q3.spreadsheetId && f.calls.length !== callsBefore.get(id)).length;
+  eq2(
+    "job: sheets.pull reads the one store whose window is open (1 call) and applies its cell; no other store is called",
+    [jr.done, jr.summary?.read, jr.summary?.pulled, kinds(Q3), others, (await rowOf(Q3, q3o)).sheetLabel, applyCalls.at(-1)?.id === q3o],
+    [true, 1, 1, ["read"], 0, "confirmed", true],
+  );
+  ok("job: the pull summary carries counts and codes only", !JSON.stringify(jr).includes(PHONE) && !JSON.stringify(jr).includes(NAME) && !JSON.stringify(jr).includes(q3o), jr);
+  const runsQ3 = await history.sheetsRunHistory(Q3.scope);
+  const runsQ = await history.sheetsRunHistory(Q.scope);
+  eq2("history: the pull run is recorded (trigger pull, its counts); a store keeps its last 20 runs at most", [runsQ3.some((r) => r.trigger === "pull" && r.pulled === 1 && r.calls === 1), runsQ.length <= history.RUN_HISTORY_MAX, runsQ.some((r) => r.pulled === 6)], [true, true, true]);
+
+  await nextTick();
+  pull.setPullDoubleForTests(null);
+  await pause(Q, R, Qoff, Q3);
 }
 
 main()

@@ -2,8 +2,8 @@ import "server-only";
 /**
  * Google Sheets integration public API (server only). Every function that touches a store's sheet or orders
  * takes the store's scope (docs/STORE-SAAS.md §E.3; SHT-01 … SHT-11). R1 (P5): the push runner (./push.ts:
- * `pushStore`, `scheduleSheetPush`, the `sheets.push` slot) and the bindings (./config.ts); the R1.0 names of
- * ./sync.ts stay as a facade over them.
+ * `pushStore`, `scheduleSheetPush`, the `sheets.push` and `sheets.pull` slots), the pull (./pull.ts), the bindings
+ * (./config.ts, ./connect.ts, ./bind-legacy.ts); the R1.0 names of ./sync.ts stay as a facade over them.
  */
 export {
   SheetsError,
@@ -40,7 +40,7 @@ export {
   saveSheetsConfig,
   savePendingProof,
   setSheetsEnabled,
-  disconnectSheet,
+  clearSheetsConfig,
   sheetBound,
   claimSheetBinding,
   releaseSheetBinding,
@@ -52,6 +52,7 @@ export {
   pushStore,
   scheduleSheetPush,
   runSheetsPushTick,
+  runSheetsPullTick,
   sheetsBreakerUntil,
   type PushOptions,
   type PushSkip,
@@ -59,8 +60,21 @@ export {
   type PushTrigger,
   type SheetsPushResult,
   type SheetsTickReport,
+  type SheetsPullTickReport,
 } from "./push";
-export { startSheetConnect, verifySheetConnect, SheetsProofError, type StartConnect, type VerifiedConnect } from "./connect";
+export { applyPullDecisions, pullDue, selectPullOrders, PULL_BUCKET, type PullApplied } from "./pull";
+export { ensureLegacyBinding, markBindingConflict, runBindLegacyTick, legacyPassDone, type LegacyOutcome, type BindLegacyReport } from "./bind-legacy";
+export {
+  startSheetConnect,
+  verifySheetConnect,
+  disconnectSheet,
+  sheetConnected,
+  SheetsProofError,
+  CONNECT_BUCKET,
+  type StartConnect,
+  type VerifiedConnect,
+  type ConnectStepUp,
+} from "./connect";
 export { PROOF_TTL_MS, newProofCode, proofFound, proofHash } from "./proof";
 export {
   syncPendingOrders,

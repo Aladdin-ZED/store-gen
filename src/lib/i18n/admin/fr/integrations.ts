@@ -70,6 +70,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "int.hint.sheet_not_found": "Vérifiez que la feuille existe toujours dans votre Drive, ou reliez-en une autre.",
   "int.hint.sheet_tab_missing": "Réparez la feuille pour recréer l'onglet des commandes.",
   "int.hint.binding_conflict": "Reliez une feuille qui n'appartient qu'à cette boutique.",
+  "int.sheets.refused": "Cette feuille ne peut pas être reliée. Créez une nouvelle feuille Google pour cette boutique.",
   "int.hint.sheet_is_xlsx": "Ouvrez le fichier, enregistrez-le au format Google Sheets, puis reliez le nouveau lien.",
   "int.hint.token_revoked": "Créez un nouveau jeton d'accès dans le Gestionnaire d'événements et collez-le dans Pixels.",
   "int.hint.token_invalid": "Recopiez le jeton d'accès depuis le Gestionnaire d'événements et collez-le dans Pixels.",

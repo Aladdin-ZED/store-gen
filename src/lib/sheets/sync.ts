@@ -7,25 +7,24 @@ import "server-only";
  *
  *   syncPendingOrders(scope, opts)   → one pushStore run ("Sync now" / "Send again": 3 calls, backoff skipped; else 2)
  *   pushOrderStatus(scope, id, s)    → mark the status cell dirty + scheduleSheetPush (a status write never waits for Google)
- *   syncStores(ctx, { budgetMs })    → the sheets.push slot (runSheetsPushTick), then each served store's due pull
- *   pullStatuses(scope, opts)        → the R1.0 pull of column C (step 5 replaces it with the pull on the push's read)
+ *   syncStores(ctx, { budgetMs })    → the sheets.push slot (each run pulls on its read when due), then the sheets.pull slot
+ *   pullStatuses(scope, opts)        → one read-only run: the R1 pull (./pull.ts) on one read, 1 call
  *   selectSyncBatch(scope, opts)     → the push's append work (test:public-api, SHT-02)
  *
  * R1 limits apply to every path: ≤ 100 appends and ≤ 200 updates per run, the `p:sheets:sa` bucket before every Google
  * call, the 90 s breaker after a 429, the binding check (an unbound sheet is "not connected"), never a test order.
  */
-import { asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { affected } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { orders } from "@/lib/db/schema";
 import type { OrderStatus } from "@/lib/orders/contract";
-import { platformBucket, rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, SystemCtx, WriteScope } from "@/lib/tenancy/types";
-import { isSheetsConfigured, serviceAccountEmail } from "./client";
-import { activeSheet, getSheetsConfig, sheetBound } from "./config";
-import { explain, readStatuses, statusLabel, type Cell } from "./orders-sheet";
-import { appendPredicate, pushStore, runSheetsPushTick, SA_BUCKET, scheduleSheetPush, sheetsBreakerUntil, type SheetsPushResult } from "./push";
+import { isSheetsConfigured } from "./client";
+import { getSheetsConfig } from "./config";
+import { statusLabel, type Cell } from "./orders-sheet";
+import { appendPredicate, pushStore, runSheetsPullTick, runSheetsPushTick, scheduleSheetPush, type SheetsPushResult } from "./push";
 import { orderToRow as rowOf, productText, sourceText, variantCell, type SheetOrder } from "./row";
 
 export { affected };
@@ -83,6 +82,9 @@ export function syncResultOf(r: SheetsPushResult): SyncResult {
       return { status: "not_configured", ...counts };
     case "locked":
       return { status: "locked", ...counts };
+    case "pull_off":
+    case "not_due":
+      return { status: "ok", ...counts };
     case "breaker":
     case "quota":
       return { status: "error", ...counts, error: r.message ?? undefined };
@@ -118,62 +120,42 @@ export async function syncPendingOrders(scope: WriteScope, opts: SyncOptions = {
 }
 
 /* ------------------------------------------------------------------ */
-/* pull (R1.0; step 5 moves it onto the push's read)                   */
+/* pull (one read-only run of the R1 pull, ./pull.ts)                  */
 /* ------------------------------------------------------------------ */
 
 export interface PullResult {
   status: "ok" | "not_configured" | "throttled" | "error";
   /** rows read from the sheet */
   seen: number;
-  /** the store's orders whose status changed */
+  /** the store's orders the pull changed */
   updated: number;
   error?: string;
 }
 
-const ORDER_ID_RE = /^[A-Z0-9]{2,8}-[A-Z0-9]{4,12}$/;
-
 /**
- * Apply statuses chosen by agents in the store's sheet (at most every 5 min per store unless forced). The R1 guards
- * apply: the sheet must be bound to the store, the breaker closed, and the read takes a `p:sheets:sa` token.
+ * Apply what the store's agents changed in its sheet (at most every 290 s unless forced): one read-only run of the R1
+ * pull (OPE-§19.6), with every R1 guard (the binding, the breaker, a `p:sheets:sa` token, never another store's order
+ * or a test order). "Bring status changes back" off → nothing read, `ok`.
  */
 export async function pullStatuses(scope: WriteScope, opts: { force?: boolean } = {}): Promise<PullResult> {
-  if (!isSheetsConfigured()) return { status: "not_configured", seen: 0, updated: 0 };
-  const sheet = await activeSheet(scope);
-  if (!sheet || !(await sheetBound(scope, sheet.spreadsheetId))) return { status: "not_configured", seen: 0, updated: 0 };
-  // "Bring status changes back from the sheet" is off: the sheet is write-only for this store
-  if (!sheet.pull) return { status: "ok", seen: 0, updated: 0 };
-  if (!opts.force) {
-    const gate = await rateLimit(storeBucket(scope, "sheets:pull"), 1, 290);
-    if (!gate.ok) return { status: "throttled", seen: 0, updated: 0 };
+  const r = await pushStore(scope, { maxCalls: 1, pullOnly: true, forcePull: !!opts.force, trigger: opts.force ? "manual" : "pull" });
+  switch (r.skipped) {
+    case "not_configured":
+    case "unbound":
+    case "disabled":
+    case "feature_off":
+      return { status: "not_configured", seen: 0, updated: 0 };
+    case "pull_off":
+      return { status: "ok", seen: 0, updated: 0 };
+    case "not_due":
+    case "breaker":
+    case "quota":
+    case "locked":
+      return { status: "throttled", seen: 0, updated: 0 };
   }
-  if ((await sheetsBreakerUntil()) > Date.now()) return { status: "throttled", seen: 0, updated: 0 };
-  if (!(await rateLimit(platformBucket(SA_BUCKET.name), SA_BUCKET.limit, SA_BUCKET.windowSec)).ok) return { status: "throttled", seen: 0, updated: 0 };
-  let statuses: Map<string, OrderStatus>;
-  try {
-    statuses = await readStatuses(sheet.spreadsheetId, sheet.sheetTitle, { maxRetries: 0 });
-  } catch (err) {
-    return { status: "error", seen: 0, updated: 0, error: explain(err, serviceAccountEmail()) };
-  }
-  const byStatus = new Map<OrderStatus, string[]>();
-  for (const [id, st] of statuses) {
-    if (!ORDER_ID_RE.test(id)) continue;
-    const list = byStatus.get(st) ?? [];
-    list.push(id);
-    byStatus.set(st, list);
-  }
-  let updated = 0;
-  const now = new Date();
-  for (const [status, ids] of byStatus) {
-    for (let i = 0; i < ids.length; i += 500) {
-      // only this store's orders: ids are customer-visible, so the sheet may name another store's order (SHT-05)
-      const res = await db
-        .update(orders)
-        .set({ status, sheetLabel: status, updatedAt: now })
-        .where(whereStore(orders, scope, inArray(orders.id, ids.slice(i, i + 500)), eq(orders.sheetStatus, "synced"), ne(orders.status, status), eq(orders.isTest, false)));
-      updated += affected(res);
-    }
-  }
-  return { status: "ok", seen: statuses.size, updated };
+  if (!r.ok) return { status: "error", seen: r.seen, updated: r.pulled, ...(r.message ? { error: r.message } : {}) };
+  if (r.stopped === "breaker" || r.stopped === "quota") return { status: "throttled", seen: 0, updated: 0 };
+  return { status: "ok", seen: r.seen, updated: r.pulled };
 }
 
 /* ------------------------------------------------------------------ */
@@ -228,20 +210,20 @@ export interface StoresSyncReport {
 }
 
 /**
- * The R1.0 cron step, until P8's runTick runs the `sheets.push` job (src/lib/jobs/tracks/integrations.ts): the slot's
- * stores, oldest waiting order first, each with its push and then its due pull (step 5 moves the pull onto the read).
+ * The R1.0 cron step, until P8's runTick runs the jobs (src/lib/jobs/tracks/integrations.ts): the `sheets.push` slot
+ * (oldest waiting order first; each run pulls on its own read when the store's window is open), then the `sheets.pull`
+ * slot for the stores slot 1 did not read, both inside `budgetMs`.
  */
 export async function syncStores(ctx: SystemCtx, opts: { budgetMs: number }): Promise<StoresSyncReport> {
-  let pulled = 0;
-  let pullFailed = 0;
-  const tick = await runSheetsPushTick(ctx, {
-    budgetMs: opts.budgetMs,
-    afterStore: async (scope, r) => {
-      if (r.skipped === "not_configured" || r.skipped === "unbound" || r.skipped === "disabled" || r.skipped === "feature_off") return;
-      const pull = await pullStatuses(scope);
-      pulled += pull.updated;
-      if (pull.status === "error") pullFailed++;
-    },
-  });
-  return { visited: tick.visited, done: tick.done, appended: tick.appended, pulled, failedStores: tick.failedStores + pullFailed };
+  const deadline = Date.now() + opts.budgetMs;
+  const push = await runSheetsPushTick(ctx, { budgetMs: opts.budgetMs, deadline });
+  const left = deadline - Date.now();
+  const pull = left > 0 && push.stoppedBy !== "breaker" && push.stoppedBy !== "quota" ? await runSheetsPullTick(ctx, { budgetMs: left, deadline }) : null;
+  return {
+    visited: push.visited + (pull?.visited ?? 0),
+    done: push.done && (pull?.done ?? false),
+    appended: push.appended,
+    pulled: push.pulled + (pull?.pulled ?? 0),
+    failedStores: push.failedStores + (pull?.failedStores ?? 0),
+  };
 }

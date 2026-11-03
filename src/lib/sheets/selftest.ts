@@ -14,7 +14,10 @@
  * - the optional pulled cells: "Note agent" cellHash dedupe, "Tracking" → packed only pre-ship and never cleared,
  *   "Agent" mapped → confirmed_by, unmapped → confirmed_by_label, never re-attributing a queue confirmation;
  * - "Statut livraison" in the sheet's locale, "Livrer à partir du" in the store's zone; every legacy label, the five
- *   appended ones included.
+ *   appended ones included;
+ * - the legacy binding rule (./legacy-rule.ts, OPE-§19.2): a code proof is never moved, the earliest `connectedAt`
+ *   keeps a shared spreadsheet (a missing date first, ties by store id), a later legacy holder gives it up, a lone
+ *   unbound store claims, a lone holder needs nothing; the same members give the same plans in any order.
  */
 import { ORDER_STATUSES } from "@/lib/orders/contract";
 import type { ConfirmState, ShipState } from "@/lib/orders/state";
@@ -36,6 +39,7 @@ import {
   type SheetRunInput,
   type SheetRunPlan,
 } from "./plan";
+import { legacyPlans, type LegacyMember } from "./legacy-rule";
 import { extraColumnsOf, r1Values, sheetColumnsOf, shipAfterCell, shipStateLabel, statusFromLabel, statusLabel, type SheetColumns } from "./row";
 
 export interface SectionResult {
@@ -341,6 +345,24 @@ export function sheetsSelftest(): SectionResult {
   eq("Transporteur: non-empty and different → carrier_label; equal or blank → nothing", [decide(synced(), "Nouvelle", { carrier: "Amana" }).map((x) => x.kind), decide(synced({ carrierLabel: "Amana" }), "Nouvelle", { carrier: "Amana" }), decide(synced({ carrierLabel: "Amana" }), "Nouvelle", { carrier: "" })], [["carrier"], [], []]);
   const tRun = runPlan(base({ orders: [synced({ sheetDirty: 2, trackingRef: null })], pull: "due" }), fakeSheet(FULL_HEADER, []));
   ok("pull cells are read only within the read width (a pulled header the cache did not know is skipped)", sheetRowsOf(fakeSheet(FULL_HEADER, [{ id: "CMD-X00001", label: "Nouvelle", cells: { tracking: "A1" } }]), FULL_COLS, 3)[0]!.cells.tracking === undefined && tRun.plan.calls >= 1);
+
+  const unknownLabel = synced({ status: "confirmed", sheetLabel: null, sheetDirty: 1 });
+  eq(
+    "no sheet_label recorded and the app's own status change on its way (bit 1): the app's label wins, no move; without the bit the cell is a person's",
+    [decide(unknownLabel, "Nouvelle").map((x) => x.kind), decide(synced({ status: "confirmed", sheetLabel: null }), "Livrée").map((x) => x.kind)],
+    [[], ["status"]],
+  );
+
+  /* ---------------- the legacy binding rule (OPE-§19.2) ---------------- */
+  const lm = (storeId: string, spreadsheetId: string, connectedAt: number | null, holds: LegacyMember["holds"] = null): LegacyMember => ({ storeId, spreadsheetId, connectedAt, holds });
+  eq("legacy: a lone unbound store claims its spreadsheet; a lone holder needs nothing", legacyPlans([lm("S1", "X", T0), lm("S2", "Y", T0, "legacy")]), [{ spreadsheetId: "X", winner: "S1", claim: true, release: null, losers: [] }]);
+  eq("legacy: two stores on one spreadsheet → the earliest connectedAt keeps it, the other is paused", legacyPlans([lm("S2", "X", T0 + MIN), lm("S1", "X", T0)]), [{ spreadsheetId: "X", winner: "S1", claim: true, release: null, losers: ["S2"] }]);
+  eq("legacy: a later store's legacy binding moves to the earlier one", legacyPlans([lm("S2", "X", T0 + MIN, "legacy"), lm("S1", "X", T0)]), [{ spreadsheetId: "X", winner: "S1", claim: true, release: "S2", losers: ["S2"] }]);
+  eq("legacy: the earlier store already holding it keeps it", legacyPlans([lm("S1", "X", T0, "legacy"), lm("S2", "X", T0 + MIN)]), [{ spreadsheetId: "X", winner: "S1", claim: false, release: null, losers: ["S2"] }]);
+  eq("legacy: a code proof is never moved, however late", legacyPlans([lm("S9", "X", T0 + 9 * MIN, "code"), lm("S1", "X", T0)]), [{ spreadsheetId: "X", winner: "S9", claim: false, release: null, losers: ["S1"] }]);
+  eq("legacy: no connectedAt (the single-tenant sheet) reads as the earliest; equal dates → the smaller store id", [legacyPlans([lm("S2", "X", T0), lm("S3", "X", null)])[0]!.winner, legacyPlans([lm("S5", "X", T0), lm("S4", "X", T0)])[0]!.winner], ["S3", "S4"]);
+  const lmix = [lm("S3", "Z", T0 + 2 * MIN), lm("S1", "X", T0), lm("S2", "X", T0 + MIN, "legacy"), lm("S4", "Z", T0 + MIN)];
+  eq("legacy: the same members in any order give the same plans", JSON.stringify(legacyPlans(lmix)), JSON.stringify(legacyPlans([...lmix].reverse())));
 
   /* ---------------- determinism ---------------- */
   const input = base({ orders: mixes.all!(), pull: "due" });

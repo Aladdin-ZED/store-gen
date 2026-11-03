@@ -41,4 +41,6 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "health.integrations.fix.deliveries": "افتح الإرسالات",
   "health.integrations.fix.antispam": "افتح الحماية من الرسائل المزعجة",
   "health.integrations.fix.trigger": "راجع توقيت حدث Purchase",
+  // OPE-§19.3: the one refusal of a spreadsheet another store holds (tenant-facing: ar in R1)
+  "int.sheets.refused": "لا يمكن ربط هذه الورقة. أنشئ ورقة Google جديدة لهذا المتجر.",
 };

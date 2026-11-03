@@ -158,9 +158,13 @@ export async function setSheetsEnabled(scope: WriteScope, enabled: boolean, acto
   return configOf(value as Stored);
 }
 
-/** Forget the store's sheet (and any pending proof) and release its binding (OPE-§19.3 step 6). */
-export async function disconnectSheet(scope: WriteScope, actor: SettingsActor): Promise<void> {
+/**
+ * Forget the store's sheet (and any pending proof) and release its binding (OPE-§19.3 step 6): `sheets = { enabled:
+ * false }`. Answers the sheet that was connected (null: none). ./connect.ts `disconnectSheet` audits around it.
+ */
+export async function clearSheetsConfig(scope: WriteScope, actor: SettingsActor): Promise<SheetsConfig | null> {
   const prev = await stored(scope);
   await setStoreSetting(scope, "sheets", { enabled: false, pending: null }, actor);
   if (prev.spreadsheetId) await releaseSheetBinding(scope, prev.spreadsheetId);
+  return configOf(prev);
 }

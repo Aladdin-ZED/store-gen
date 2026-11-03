@@ -17,9 +17,15 @@
  * R1 P5 step 4, the Sheets push (src/lib/sheets/push.ts `pushStore`): B's run never reads, appends, marks or calls A's
  * orders or A's sheet, even when B's sheet names A's order; B's config pointing at A's spreadsheet is unbound for B and
  * makes no call (SHT-02, SHT-05, OPE-§19.2).
+ *
+ * R1 P5 step 5, the bindings and the pull (src/lib/sheets/{connect,pull}.ts): B pasting A's spreadsheet, or verifying a
+ * proof for it, gets the one generic refusal before any Google call and never holds A's binding; B's sheet naming A's
+ * order ids (every pulled cell filled) moves, notes or relabels none of A's orders, and the pull's reads and writes under
+ * B's scope never reach A's rows (OPE-§19.3, §19.6, SHT-05).
  */
 import { createRequire } from "node:module";
 import type { TenancyCase, TenancyKit } from "../tenancy-check";
+import type { PullDecision } from "@/lib/sheets/plan";
 import type { WriteScope } from "@/lib/tenancy/types";
 
 const nodeRequire = createRequire(__filename);
@@ -31,6 +37,9 @@ type Repo = typeof import("@/lib/integrations/whatsapp/templates.server");
 const A_BODY = "Bonjour {customer_first_name}, A-ONLY-TEMPLATE-CANARY {order_id}.";
 const A_PAGE_BODY = "Salam {customer_first_name}, A-PAGE-TEMPLATE-CANARY {order_id}.";
 const A_DRAFT_BODY = "A-DRAFT-TEMPLATE-CANARY {order_id}";
+/** OPE-§19.3: the one answer to a spreadsheet another store holds (no hint of which store) */
+const GENERIC_REFUSAL = "This sheet can't be connected. Create a new Google Sheet for this store.";
+const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
 
 /** The member scopes of the harness are write scopes at run time (kind "member", D71). */
 const write = (kit: TenancyKit, store: "A" | "B") => kit.scope(store) as WriteScope;
@@ -302,6 +311,136 @@ export const cases: TenancyCase[] = [
         await setStoreSetting(b, "sheets", prevSettingB, { id: kit.fx.B.members.owner });
         if (prevA) await db.update(orders).set({ sheetStatus: prevA.s, sheetAttempts: prevA.a, sheetDirty: prevA.d, sheetError: prevA.e }).where(byId(orders, a, kit.fx.A.order.main));
         if (prevB) await db.update(orders).set({ sheetStatus: prevB.s, sheetAttempts: prevB.a, sheetDirty: prevB.d, sheetError: prevB.e }).where(byId(orders, b, kit.fx.B.order.main));
+      }
+    },
+  },
+  {
+    name: "sheets bindings: B can never connect A's spreadsheet (IN-01, OPE-§19.3, TENANCY-MAP §7.7)",
+    async run(kit) {
+      const connect = load<typeof import("@/lib/sheets/connect")>("@/lib/sheets/connect");
+      const config = load<typeof import("@/lib/sheets/config")>("@/lib/sheets/config");
+      const client = load<typeof import("@/lib/sheets/client")>("@/lib/sheets/client");
+      const { proofHash } = load<typeof import("@/lib/sheets/proof")>("@/lib/sheets/proof");
+      const { getStoreSetting, setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+      const a = write(kit, "A");
+      const b = write(kit, "B");
+      const sheetA = await config.getSheetsConfig(a);
+      if (!sheetA) {
+        kit.check("sheets bindings: A has a connected sheet", false);
+        return;
+      }
+      const ownerB = { kind: "user" as const, userId: kit.fx.B.members.owner, impersonatorId: null, ip: null };
+      const how = { currency: "MAD", stepUp: "totp" as const };
+      const code = "SG-7K2QX9M4TB";
+      const called: string[] = [];
+      // the worst case: A's spreadsheet title even carries the code B made up
+      client.setGapiDoubleForTests(async (call) => {
+        called.push(call.path.split("?")[0] ?? "");
+        return json({ properties: { title: `Orders ${code}` }, sheets: [{ properties: { sheetId: 0, title: "Commandes" } }] });
+      });
+      const prevB = await getStoreSetting(b, "sheets", { fresh: true });
+      const answers: unknown[] = [];
+      const said = (e: unknown) => (e instanceof config.SheetBindingConflict ? e.message : `other: ${e instanceof Error ? e.message : String(e)}`);
+      try {
+        const started = await connect.startSheetConnect(b, `https://docs.google.com/spreadsheets/d/${sheetA.spreadsheetId}/edit#gid=0`, ownerB, how).then((r) => `resolved ${r.kind}`, said);
+        answers.push(started);
+        kit.check("sheets bindings: B pasting A's spreadsheet → the one generic refusal, before any Google call", started === GENERIC_REFUSAL && called.length === 0, { started, called });
+        kit.check("sheets bindings: the refusal saves no proof for B", (await getStoreSetting(b, "sheets", { fresh: true })).pending === null);
+        // a proof for A's spreadsheet written into B's setting past startSheetConnect: the verify's INSERT finds A's key
+        const pending = { spreadsheetId: sheetA.spreadsheetId, sheetId: null, codeHash: proofHash(code), expiresAt: new Date(Date.now() + 3_600_000).toISOString() };
+        await setStoreSetting(b, "sheets", { ...prevB, pending }, { id: kit.fx.B.members.owner });
+        const verified = await connect.verifySheetConnect(b, ownerB, how).then(() => "resolved", said);
+        answers.push(verified);
+        kit.check(
+          "sheets bindings: B's verify of A's spreadsheet (the duplicate key) → the same generic refusal, the proof dropped",
+          verified === GENERIC_REFUSAL && (await getStoreSetting(b, "sheets", { fresh: true })).pending === null,
+          verified,
+        );
+        kit.check("sheets bindings: B's verify read the titles only (no tab set up, no cell written)", called.every((p) => !p.includes(":batchUpdate") && !p.includes("/values")), called);
+        kit.check(
+          "sheets bindings: A's spreadsheet stays A's alone; B keeps its own sheet",
+          (await config.sheetBound(a, sheetA.spreadsheetId)) && !(await config.sheetBound(b, sheetA.spreadsheetId)) && (await config.getSheetsConfig(b))?.spreadsheetId === prevB.spreadsheetId,
+        );
+        const text = JSON.stringify(answers);
+        kit.check("sheets bindings: the refusal names nothing of A", kit.leaks(answers).length === 0 && !text.includes(kit.fx.A.handle) && !text.includes(kit.fx.A.name), kit.leaks(answers));
+      } finally {
+        client.setGapiDoubleForTests(null);
+        await setStoreSetting(b, "sheets", prevB, { id: kit.fx.B.members.owner });
+      }
+    },
+  },
+  {
+    name: "sheets pull: B's sheet naming A's orders moves none of them (IN-01, SHT-05, OPE-§19.6)",
+    async run(kit) {
+      const push = load<typeof import("@/lib/sheets/push")>("@/lib/sheets/push");
+      const pull = load<typeof import("@/lib/sheets/pull")>("@/lib/sheets/pull");
+      const client = load<typeof import("@/lib/sheets/client")>("@/lib/sheets/client");
+      const config = load<typeof import("@/lib/sheets/config")>("@/lib/sheets/config");
+      const { statusLabel } = load<typeof import("@/lib/sheets/row")>("@/lib/sheets/row");
+      const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+      const { orders } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+      const { byId } = load<typeof import("@/lib/tenancy/sql")>("@/lib/tenancy/sql");
+      const b = write(kit, "B");
+      const idA = kit.fx.A.order.main;
+      const idB = kit.fx.B.order.main;
+      const sheetB = await config.getSheetsConfig(b);
+      if (!sheetB) {
+        kit.check("sheets pull: B has a connected sheet", false);
+        return;
+      }
+      const keep = async (id: string) => (await db.select({ s: orders.sheetStatus, l: orders.sheetLabel, d: orders.sheetDirty }).from(orders).where(byId(orders, b, id)).limit(1))[0];
+      const prevB = await keep(idB);
+      await db.update(orders).set({ sheetStatus: "synced", sheetLabel: "new", sheetDirty: 0 }).where(byId(orders, b, idB));
+      // P4's calls as spies (their real bodies scope by store too; the point here is that P5 never makes the call)
+      const applied: string[] = [];
+      const evented: string[] = [];
+      pull.setPullDoubleForTests({
+        applyExternalStatus: async (_scope, id) => {
+          applied.push(id);
+          return { ok: true, changed: false, noop: true };
+        },
+        appendOrderEvent: async (_scope, id) => {
+          evented.push(id);
+          return { ok: false, error: "not_found" };
+        },
+      });
+      // B's sheet: a row naming A's order (ids are customer-visible) with every pulled cell filled, then B's own row
+      const header = ["Agent", "Note agent", "Tracking", "Transporteur"];
+      const rows = [
+        [idA, "", statusLabel("cancelled"), ...Array<string>(10).fill(""), "Samira", "A-NOTE-CANARY", "A-TRK-CANARY", "A-CARRIER-CANARY"],
+        [idB, "", statusLabel("confirmed")],
+      ];
+      const called: string[] = [];
+      client.setGapiDoubleForTests(async (call) => {
+        called.push(call.path.split("?")[0] ?? "");
+        return call.path.includes(":batchGet") ? json({ valueRanges: [{ values: [header] }, { values: rows }] }) : json({});
+      });
+      try {
+        const before = await kit.snapshotA();
+        // twice: the first read learns the header, the second also reads the optional cells
+        const r1 = await push.pushStore(b, { maxCalls: 1, pullOnly: true, forcePull: true, trigger: "manual" });
+        await push.pushStore(b, { maxCalls: 1, pullOnly: true, forcePull: true, trigger: "manual" });
+        kit.check("sheets pull: B's pull read B's sheet and handled B's own order", r1.seen === 2 && applied.includes(idB), { r1, applied });
+        kit.check("sheets pull: A's order named in B's sheet reaches no call and no write", !applied.includes(idA) && !evented.includes(idA) && (await kit.snapshotA()) === before, { applied, evented });
+        kit.check("sheets pull: B's pull calls B's sheet only", called.length > 0 && called.every((p) => p.startsWith(`/${encodeURIComponent(sheetB.spreadsheetId)}/`)), called);
+        const selected = await pull.selectPullOrders(b, [idA], new Set([idA]));
+        kit.check("sheets pull: selectPullOrders under B's scope never returns A's order", selected.length === 0, selected);
+        // decisions naming A's order, applied under B's scope: every write is whereStore, so none lands
+        const src = { kind: "sheet" as const, ref: "row:2" };
+        const forged: PullDecision[] = [
+          { kind: "status", orderId: idA, row: 2, label: "cancelled", ext: { legacy: "cancelled" }, src },
+          { kind: "label", orderId: idA, row: 2, sheetLabel: "cancelled" },
+          { kind: "agent", orderId: idA, row: 2, label: "Samira", confirmedBy: null },
+          { kind: "note", orderId: idA, row: 2, text: "A-NOTE-CANARY", cellHash: "0123456789abcdef" },
+          { kind: "tracking", orderId: idA, row: 2, trackingRef: "A-TRK-CANARY", src },
+          { kind: "carrier", orderId: idA, row: 2, carrierLabel: "A-CARRIER-CANARY" },
+        ];
+        const res = await pull.applyPullDecisions(b, forged, { agentLabels: {} });
+        kit.check("sheets pull: decisions naming A's order under B's scope change nothing of A", res.pulled === 0 && (await kit.snapshotA()) === before, res);
+      } finally {
+        pull.setPullDoubleForTests(null);
+        client.setGapiDoubleForTests(null);
+        if (prevB) await db.update(orders).set({ sheetStatus: prevB.s, sheetLabel: prevB.l, sheetDirty: prevB.d }).where(byId(orders, b, idB));
       }
     },
   },

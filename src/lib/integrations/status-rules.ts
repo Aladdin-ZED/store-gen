@@ -21,7 +21,8 @@ export type IntegrationState = "ok" | "warn" | "failing" | "off";
 
 /**
  * What one run or one send answered: `ok`; `retry` (a retryable failure: 429, 5xx, a timeout); `failed` (a refusal
- * or a failed Sheets run); `breaker` (this store's Sheets run opened the platform breaker); `off` (disabled).
+ * or a failed Sheets run); `breaker` (this store's Sheets run opened the platform breaker); `off` (disabled; with a
+ * cause code when the platform paused it, e.g. `binding_conflict`: another store keeps the spreadsheet).
  */
 export type StatusOutcome = "ok" | "retry" | "failed" | "breaker" | "off";
 
@@ -87,7 +88,11 @@ export function nextStatus(prev: StatusRow | null, input: StatusInput, now: numb
     streakAt: prev?.streakAt ?? null,
   };
 
-  if (input.outcome === "off") return { ...base, state: "off", failures: 0, streakAt: null };
+  if (input.outcome === "off") {
+    // a pause with a reason names it (the Sheets screen says why); a plain pause keeps the last cause as it was
+    const why = isCauseCode(input.code) ? { lastErrorCode: input.code, lastErrorAt: now } : {};
+    return { ...base, state: "off", failures: 0, streakAt: null, ...why };
+  }
 
   if (input.outcome === "ok") {
     const late = input.kind === "sheets" && oldestPendingAt !== null && now - oldestPendingAt > SHEETS_WARN_AFTER_MS;

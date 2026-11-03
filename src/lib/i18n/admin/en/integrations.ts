@@ -79,6 +79,8 @@ export const messages = {
   "int.hint.sheet_not_found": "Check that the sheet still exists in your Drive, or connect another one.",
   "int.hint.sheet_tab_missing": "Repair the sheet to create the orders tab again.",
   "int.hint.binding_conflict": "Connect a sheet that belongs to this store only.",
+  // OPE-§19.3: the one refusal of a spreadsheet another store holds (no hint of which store; tenant-facing: ar, fr, en)
+  "int.sheets.refused": "This sheet can't be connected. Create a new Google Sheet for this store.",
   "int.hint.sheet_is_xlsx": "Open the file, save it as a Google Sheet, then connect the new link.",
   "int.hint.token_revoked": "Create a new access token in Events Manager and paste it in Pixels.",
   "int.hint.token_invalid": "Copy the access token again from Events Manager and paste it in Pixels.",

@@ -371,13 +371,20 @@ function labelMap(agentLabels: Readonly<Record<string, string>> | undefined): Ma
   return m;
 }
 
+/** The member `ops.agentLabels` maps the sheet's "Agent" label to (folded match), or null. */
+export function agentMember(agentLabels: Readonly<Record<string, string>> | undefined, label: string): string | null {
+  return labelMap(agentLabels).get(foldLabel(label)) ?? null;
+}
+
 /**
  * What the pull does with the rows read (OPE-§19.6, rev 3 optional cells). Only the store's own synced, non-test
  * orders are touched: an id absent from `orders` (another store's order typed into the sheet, SHT-05) is ignored.
  *
  * - Column C: blank or unknown → nothing; = `sheet_label` → nothing; `sheet_label` never recorded and the cell shows
- *   the app's status → record it (`label`); otherwise a person changed it → `status` (the runner calls
- *   `applyExternalStatus` with the row's "Agent" cell as `agentLabel`, so the confirmation it applies is attributed).
+ *   the app's status → record it (`label`); `sheet_label` never recorded and the app's own status change still on its
+ *   way (bit 1) → nothing: with no record of what the sheet held, the app's pending label wins (OD2) and its write
+ *   records it; otherwise a person changed it → `status` (the runner calls `applyExternalStatus` with the row's
+ *   "Agent" cell as `agentLabel`, so the confirmation it applies is attributed).
  * - "Agent" on an already confirmed order nobody attributed (`confirmed_by` NULL), when the cell differs from
  *   `confirmed_by_label` → `agent` (a mapped label also writes `confirmed_by`; a queue confirmation is never re-attributed).
  * - "Note agent" whose `cellHash` differs from the last sheet note → `note`.
@@ -400,7 +407,9 @@ export function pullDecisions(rows: readonly SheetRow[], orders: ReadonlyMap<str
     let moved: OrderStatus | null = null;
     if (label && label !== o.sheetLabel) {
       if (o.sheetLabel === null && label === o.status) out.push({ kind: "label", orderId: o.id, row: r.row, sheetLabel: label });
-      else {
+      else if (o.sheetLabel === null && o.sheetDirty & 1) {
+        // a row synced before sheet_label existed, whose status the app just changed: the app's write goes out (OD2)
+      } else {
         moved = label;
         out.push({ kind: "status", orderId: o.id, row: r.row, label, ext: { legacy: label }, src: { kind: "sheet", ref, ...(agent ? { agentLabel: agent } : {}) } });
       }

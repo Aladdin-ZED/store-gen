@@ -32,8 +32,16 @@ import "server-only";
  *     this store's run opened the breaker) / off (paused), with the backlog and the oldest waiting order; the run is
  *     appended to the store's history (./history.ts, ≤ 20 runs, ≤ 4 KB). Codes and counts only, never a cell.
  *
- * The pull (step 5) rides on the same read when it is due: `opts.pull` and the planner's `pull` input are its hook
- * points; until then every run plans with `pull: "off"`, and the R1.0 `pullStatuses` (./sync.ts) keeps pulling.
+ * The pull (OPE-§19.6, ./pull.ts) rides on the same read. With "Bring status changes back" on, a run whose store's
+ * window is open (`s:<sid>:sheets:pull`, 1 per 290 s, taken only when the run really reads the rows) plans with
+ * `pull: "due"`: the read widens to the pulled optional columns, every row is matched against the store's own synced
+ * orders, and the decisions are applied before the writes; otherwise `pull: "on"` still checks the rows of the run's
+ * own dirty orders, so a person's edit is never overwritten unseen. `pullOnly` runs (the `sheets.pull` slot,
+ * `runSheetsPullTick`, and the R1.0 `pullStatuses`) make that one read and nothing else.
+ *
+ * A connected setting whose spreadsheet has no binding is "not connected" (OPE-§19.2); before giving up, the run calls
+ * `ensureLegacyBinding` once per store and process (./bind-legacy.ts), so a store that connected before 0005 keeps
+ * syncing without waiting for the `sheets.bind_legacy` job.
  */
 import { after } from "next/server";
 import { and, asc, count, eq, gt, inArray, min, or, sql, type SQL } from "drizzle-orm";
@@ -45,18 +53,36 @@ import { recordIntegrationStatus, type StatusOutcome } from "@/lib/integrations/
 import { forEachStore, systemScope } from "@/lib/jobs/scope";
 import { errorSummary } from "@/lib/orders/log";
 import { platformBucket, rateLimit, rateLimitReached } from "@/lib/security/rate-limit";
+import { getStoreSetting } from "@/lib/settings";
 import { scopedCache } from "@/lib/tenancy/cache";
 import { assertFeature, EntitlementError } from "@/lib/tenancy/entitlements";
 import { getStoreById } from "@/lib/tenancy/public";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, SystemCtx, WriteScope } from "@/lib/tenancy/types";
+import { ensureLegacyBinding } from "./bind-legacy";
 import { gapi, isSheetsConfigured, serviceAccountEmail, SheetsError, type GapiOptions } from "./client";
 import { getSheetsConfig, sheetBound, type SheetsConfig } from "./config";
 import { a1 } from "./format";
 import { recordSheetsRun, type SheetsRunReport } from "./history";
 import { explain } from "./orders-sheet";
-import { APPEND_MAX, BACKOFF_CAP_MIN, UPDATE_MAX, appendDue, planSheetRun, type PlanOrder, type SheetMark, type SheetRead, type SheetReadSpec, type SheetRunCtx, type SheetRunInput, type SheetRunPlan } from "./plan";
-import type { Cell, SheetColumns } from "./row";
+import {
+  APPEND_MAX,
+  BACKOFF_CAP_MIN,
+  UPDATE_MAX,
+  appendDue,
+  planSheetRun,
+  sheetRowsOf,
+  type PlanOrder,
+  type PullOrder,
+  type SheetMark,
+  type SheetRead,
+  type SheetReadSpec,
+  type SheetRunCtx,
+  type SheetRunInput,
+  type SheetRunPlan,
+} from "./plan";
+import { applyPullDecisions, pullDue, selectPullOrders, sheetNoteHashes, takePullToken } from "./pull";
+import { sheetColumnsOf, type Cell, type SheetColumns } from "./row";
 
 /* ------------------------------------------------------------------ */
 /* limits                                                              */
@@ -81,18 +107,24 @@ const HEADER_TTL_MS = 10 * 60_000;
 const SHEET_LOCALE = "fr" as const;
 const DEFAULT_TZ = "Africa/Casablanca";
 const JOB = "sheets.push";
+/** the round-robin cursor of the `sheets.pull` slot (core §H.2 slot 2) */
+const PULL_JOB = "sheets.pull";
 const MESSAGE_MAX = 500;
 
 /* ------------------------------------------------------------------ */
 /* results                                                             */
 /* ------------------------------------------------------------------ */
 
-export type PushTrigger = "tick" | "after" | "manual";
+export type PushTrigger = "tick" | "after" | "manual" | "pull";
 
 export interface PushOptions {
   maxCalls: 1 | 2 | 3;
-  /** step 5: pull on this run's read when the store's pull is due (the hook point; ignored until then) */
+  /** false: no pull on this run's read (default: pull when "Bring status changes back" is on and the window is open) */
   pull?: boolean;
+  /** pull whatever the 290 s window says ("Sync now"; the window restarts) */
+  forcePull?: boolean;
+  /** the read and the pull only, never an append or a cell write (the `sheets.pull` slot, `pullStatuses`) */
+  pullOnly?: boolean;
   /** "Sync now", "Send again": failed orders skip their backoff */
   force?: boolean;
   trigger?: PushTrigger;
@@ -100,8 +132,11 @@ export interface PushOptions {
   deadline?: number;
 }
 
-/** Why a run made no call at all: a precondition, or another run of the store holding its lock. */
-export type PushSkip = "not_configured" | "unbound" | "disabled" | "feature_off" | "breaker" | "quota" | "locked";
+/**
+ * Why a run made no call at all: a precondition, or another run of the store holding its lock; a `pullOnly` run also
+ * when "Bring status changes back" is off (`pull_off`) or the store was pulled less than 290 s ago (`not_due`).
+ */
+export type PushSkip = "not_configured" | "unbound" | "disabled" | "feature_off" | "breaker" | "quota" | "locked" | "pull_off" | "not_due";
 /** Why a run stopped before its plan was done (the rest waits for the next run). */
 export type PushStop = "quota" | "breaker" | "deadline" | "budget";
 
@@ -117,6 +152,10 @@ export interface SheetsPushResult extends SheetsRunReport {
   missing: number;
   /** orders this run marked `failed` */
   failed: number;
+  /** rows the run read (the pull's rows: the ids found in column A) */
+  seen: number;
+  /** pull decisions left in the sheet for the next pull (P4's calls not available yet, or a failure) */
+  pullDeferred: number;
   /** this run opened the platform breaker (Google answered 429) */
   breaker: boolean;
   deferred: { appends: number; updates: number };
@@ -141,6 +180,8 @@ function emptyResult(at: Date, trigger: PushTrigger, skipped: PushSkip | null = 
     present: 0,
     missing: 0,
     failed: 0,
+    seen: 0,
+    pullDeferred: 0,
     breaker: false,
     deferred: { appends: 0, updates: 0 },
     message: null,
@@ -278,6 +319,15 @@ async function memberNamesOf(scope: StoreScope, work: readonly PlanOrder[]): Pro
     .innerJoin(users, eq(users.id, storeMembers.userId))
     .where(whereStore(storeMembers, scope, inArray(storeMembers.userId, ids)));
   return Object.fromEntries(rows.filter((r) => r.name).map((r) => [r.id, r.name]));
+}
+
+/** `ops.agentLabels` (P4's key, read only: the sheet's "Agent" labels → members, OD54); none when it cannot be read. */
+async function agentLabelsOf(scope: StoreScope): Promise<Record<string, string>> {
+  try {
+    return { ...(await getStoreSetting(scope, "ops")).agentLabels };
+  } catch {
+    return {};
+  }
 }
 
 /** Pending and failed appends of the store and the oldest of them (`integration_status.backlog`, OPE-§28.2). */
@@ -439,20 +489,48 @@ interface RunState {
   outcome: StatusOutcome | null;
 }
 
-/** The run inside the store's lock (see the header): plan, read, plan again, write, mark. */
+type PullMode = SheetRunInput["pull"];
+
+/** The run's pull: off (the switch, or the caller), due (the store's 290 s window is open, or forced), else on. */
+async function pullModeOf(scope: StoreScope, cfg: SheetsConfig, opts: PushOptions): Promise<PullMode> {
+  if (!cfg.pull || opts.pull === false) return "off";
+  if (opts.forcePull) return "due";
+  return (await pullDue(scope)) ? "due" : "on";
+}
+
+/**
+ * The orders of a due pull's rows: the store's own synced orders among the ids read (`pullOrders`), and the run's own
+ * orders with the "Note agent" dedupe key the planner compares (it prefers them to `pullOrders`).
+ */
+async function pullInputOf(scope: StoreScope, work: readonly PlanOrder[], read: SheetRead, spec: SheetReadSpec): Promise<{ orders: PlanOrder[]; pullOrders: PullOrder[]; seen: number }> {
+  const rows = sheetRowsOf(read, sheetColumnsOf(read.header), spec.width);
+  const noteIds = new Set(rows.filter((x) => (x.cells.agentNote ?? "").trim() !== "").map((x) => x.id));
+  const workIds = new Set(work.map((o) => o.id));
+  const [pullOrders, workNotes] = await Promise.all([
+    selectPullOrders(scope, rows.map((x) => x.id).filter((id) => !workIds.has(id)), noteIds),
+    sheetNoteHashes(scope, work.filter((o) => noteIds.has(o.id)).map((o) => o.id)),
+  ]);
+  const orders = work.map((o) => (noteIds.has(o.id) ? { ...o, lastSheetNoteHash: workNotes.get(o.id) ?? null } : o));
+  return { orders, pullOrders, seen: rows.length };
+}
+
+/** The run inside the store's lock (see the header): plan, read, plan again, pull, write, mark. */
 async function runLocked(scope: WriteScope, cfg: SheetsConfig, opts: PushOptions, st: RunState): Promise<void> {
   const r = st.result;
   const now = new Date();
   const force = !!opts.force;
-  const [appends, updates] = await Promise.all([selectAppendWork(scope, { now, force, limit: APPEND_MAX + 1 }), selectUpdateWork(scope, UPDATE_MAX + 1)]);
+  let pull = await pullModeOf(scope, cfg, opts);
+  const [appends, updates] = opts.pullOnly
+    ? [[], []]
+    : await Promise.all([selectAppendWork(scope, { now, force, limit: APPEND_MAX + 1 }), selectUpdateWork(scope, UPDATE_MAX + 1)]);
   const work = [...appends, ...updates];
-  if (!work.length) {
+  if (!work.length && pull !== "due") {
     st.outcome = "ok";
     return;
   }
   const tab: Tab = { spreadsheetId: cfg.spreadsheetId, sheetTitle: cfg.sheetTitle };
-  const [store, memberNames] = await Promise.all([getStoreById(scope.storeId), memberNamesOf(scope, work)]);
-  const ctx: SheetRunCtx = { timeZone: store?.timezone || DEFAULT_TZ, locale: SHEET_LOCALE, memberNames };
+  const [store, memberNames, agentLabels] = await Promise.all([getStoreById(scope.storeId), memberNamesOf(scope, work), pull === "off" ? undefined : agentLabelsOf(scope)]);
+  const ctx: SheetRunCtx = { timeZone: store?.timezone || DEFAULT_TZ, locale: SHEET_LOCALE, memberNames, ...(agentLabels ? { agentLabels } : {}) };
   const readAt: ReadAt = new Map(work.map((o) => [o.id, o.updatedAt]));
 
   const deadline = opts.deadline ?? Infinity;
@@ -469,7 +547,7 @@ async function runLocked(scope: WriteScope, cfg: SheetsConfig, opts: PushOptions
     },
   };
 
-  const base: SheetRunInput = { now, maxCalls: opts.maxCalls, orders: work, headers: headerCache.get(scope.storeId, headerKey(tab)) ?? null, pull: "off", force, ctx };
+  let base: SheetRunInput = { now, maxCalls: opts.maxCalls, orders: work, headers: headerCache.get(scope.storeId, headerKey(tab)) ?? null, pull, force, ctx };
   // the ids the read-and-append would send: failed with the run when the read itself fails
   const dueIds = work.filter((o) => appendDue(o, now, force)).slice(0, APPEND_MAX).map((o) => o.id);
   let claimed: string[] = [];
@@ -477,9 +555,29 @@ async function runLocked(scope: WriteScope, cfg: SheetsConfig, opts: PushOptions
 
   try {
     let plan: SheetRunPlan = planSheetRun(base);
+    if (pull === "due" && plan.read?.rows) {
+      // the window is taken only by a run that really reads the rows; another run that took it first leaves this one "on"
+      const took = await takePullToken(scope);
+      if (!took && !opts.forcePull) {
+        pull = "on";
+        base = { ...base, pull };
+        plan = planSheetRun(base);
+        if (opts.pullOnly) {
+          r.skipped = "not_due";
+          return;
+        }
+      }
+    }
     if (plan.read) {
-      const read = await readSheet(tab, plan.read, gopts);
-      plan = planSheetRun({ ...base, read });
+      const spec = plan.read;
+      const read = await readSheet(tab, spec, gopts);
+      let input: SheetRunInput = { ...base, read };
+      if (pull === "due" && spec.rows) {
+        const p = await pullInputOf(scope, work, read, spec);
+        input = { ...input, orders: p.orders, pullOrders: p.pullOrders };
+        r.seen = p.seen;
+      } else if (spec.rows) r.seen = read.rows.length;
+      plan = planSheetRun(input);
       headerCache.set(scope.storeId, headerKey(tab), plan.columns);
     }
     reading = false;
@@ -488,6 +586,12 @@ async function runLocked(scope: WriteScope, cfg: SheetsConfig, opts: PushOptions
     await applyMarks(scope, plan.marks.filter((m) => m.outcome === "present" || m.outcome === "missing"), readAt);
     r.present = plan.marks.filter((m) => m.outcome === "present").length;
     r.missing = plan.missing.length;
+    // the pull before the writes (OPE-§19.6): the cells a person changed were left out of the batchUpdate
+    if (plan.pull.length) {
+      const applied = await applyPullDecisions(scope, plan.pull, { agentLabels: ctx.agentLabels });
+      r.pulled = applied.pulled;
+      r.pullDeferred = applied.deferred;
+    }
 
     if (plan.append) {
       claimed = plan.append.ids;
@@ -536,6 +640,32 @@ async function runLocked(scope: WriteScope, cfg: SheetsConfig, opts: PushOptions
   }
 }
 
+/** The stores whose unbound setting already had its legacy binding attempt in this process (once per store). */
+const legacyTried = scopedCache<true>({ name: "sheets-legacy-tried", maxEntries: 10_000, ttlMs: 60 * 60_000 });
+
+/**
+ * Is the setting's spreadsheet the store's? An unbound one gets one `ensureLegacyBinding` per store and process: a
+ * free spreadsheet is bound at once (a store connected before 0005 never pauses for the job), one held by another
+ * store stays "not connected" (the legacy pass decides who keeps it).
+ */
+async function boundOrLegacy(scope: WriteScope, cfg: SheetsConfig): Promise<boolean> {
+  if (await sheetBound(scope, cfg.spreadsheetId)) return true;
+  if (legacyTried.get(scope.storeId, cfg.spreadsheetId)) return false;
+  legacyTried.set(scope.storeId, cfg.spreadsheetId, true);
+  try {
+    const outcome = await ensureLegacyBinding(scope);
+    return outcome === "bound" || outcome === "already";
+  } catch (err) {
+    console.error(`[sheets.push] store ${scope.storeId} legacy binding:`, errorSummary(err));
+    return false;
+  }
+}
+
+/** Forget this process's legacy binding attempts (tests). */
+export function forgetLegacyAttempts(): void {
+  legacyTried.clear();
+}
+
 /** Preconditions, the lock, the run, then its status row and its history entry. */
 async function pushOnce(scope: WriteScope, opts: PushOptions): Promise<SheetsPushResult> {
   const started = new Date();
@@ -558,7 +688,9 @@ async function pushOnce(scope: WriteScope, opts: PushOptions): Promise<SheetsPus
     r.offReason = err.reason;
     return skip("feature_off");
   }
-  if (!(await sheetBound(scope, cfg.spreadsheetId))) return skip("unbound");
+  if (!(await boundOrLegacy(scope, cfg))) return skip("unbound");
+  if (opts.pullOnly && (!cfg.pull || opts.pull === false)) return skip("pull_off");
+  if (opts.pullOnly && !opts.forcePull && !(await pullDue(scope))) return skip("not_due");
   if ((await sheetsBreakerUntil()) > Date.now()) {
     r.message = limitedMessage();
     return skip("breaker");
@@ -571,6 +703,7 @@ async function pushOnce(scope: WriteScope, opts: PushOptions): Promise<SheetsPus
   const st: RunState = { result: r, outcome: null };
   const locked = await withNamedLock(storeLock(scope.storeId, "sheets"), 1, () => runLocked(scope, cfg, opts, st));
   if (!locked.ran) return skip("locked");
+  if (r.skipped) return r;
   r.ms = Date.now() - started.getTime();
 
   if (st.outcome) {
@@ -621,6 +754,8 @@ export interface SheetsTickReport {
   done: boolean;
   appended: number;
   updated: number;
+  /** orders the pull changed on the slot's reads */
+  pulled: number;
   calls: number;
   /** stores whose run failed (a Google error, or a step that threw) */
   failedStores: number;
@@ -634,7 +769,7 @@ export interface SheetsTickOptions {
   deadline?: number;
   /** the runner's `ctx.yield()`, awaited between stores */
   yieldLoop?: () => Promise<void>;
-  /** after each store's push (the R1.0 cron route's pull rides here until step 5's `sheets.pull`) */
+  /** after each store's run (tests) */
   afterStore?: (scope: WriteScope, result: SheetsPushResult) => Promise<void>;
   /** one store's run at most (default `STORE_SLICE_MS`; test:integrations-db shortens it) */
   storeSliceMs?: number;
@@ -648,7 +783,7 @@ export interface SheetsTickOptions {
  * (their work waits).
  */
 export async function runSheetsPushTick(ctx: SystemCtx, opts: SheetsTickOptions): Promise<SheetsTickReport> {
-  const report: SheetsTickReport = { visited: 0, done: false, appended: 0, updated: 0, calls: 0, failedStores: 0, stoppedBy: null };
+  const report: SheetsTickReport = { visited: 0, done: false, appended: 0, updated: 0, pulled: 0, calls: 0, failedStores: 0, stoppedBy: null };
   if (!isSheetsConfigured()) return { ...report, done: true };
   const deadline = opts.deadline ?? Date.now() + opts.budgetMs;
   let served = 0;
@@ -665,6 +800,66 @@ export async function runSheetsPushTick(ctx: SystemCtx, opts: SheetsTickOptions)
       const r = await pushStore(scope, { maxCalls: 3, trigger: "tick", deadline: Math.min(deadline, Date.now() + (opts.storeSliceMs ?? STORE_SLICE_MS)) });
       report.appended += r.appended;
       report.updated += r.updated;
+      report.pulled += r.pulled;
+      report.calls += r.calls;
+      if (!r.ok) report.failedStores++;
+      if (r.breaker || r.skipped === "breaker" || r.stopped === "breaker") report.stoppedBy = "breaker";
+      else if (r.skipped === "quota" || r.stopped === "quota") report.stoppedBy = "quota";
+      if (opts.afterStore) await opts.afterStore(scope, r);
+    } catch (err) {
+      report.failedStores++;
+      throw err; // forEachStore logs the code and skips the store for the rest of the call
+    } finally {
+      if (opts.yieldLoop) await opts.yieldLoop();
+    }
+  });
+  report.visited = run.visited;
+  report.done = run.done && report.stoppedBy === null;
+  return report;
+}
+
+/* ------------------------------------------------------------------ */
+/* the sheets.pull slot (core §H.2 slot 2, OPE-§J)                     */
+/* ------------------------------------------------------------------ */
+
+/** What one `sheets.pull` slot did (counts and codes only). */
+export interface SheetsPullTickReport {
+  visited: number;
+  /** stores whose rows were read */
+  read: number;
+  pulled: number;
+  calls: number;
+  /** every store was visited */
+  done: boolean;
+  failedStores: number;
+  stoppedBy: "breaker" | "quota" | "stores" | null;
+}
+
+/**
+ * The `sheets.pull` slot (12 s): the active stores round-robin (cursor `sheets.pull`), each with a connected, enabled,
+ * bound sheet, "Bring status changes back" on and its 290 s window open gets one read-only run (1 call: the read and
+ * the pull, ./pull.ts). A store slot 1 already pulled this tick has its window closed and costs one cached settings
+ * read and one bucket read. Stops on the breaker or an empty platform bucket like the push slot.
+ */
+export async function runSheetsPullTick(ctx: SystemCtx, opts: SheetsTickOptions): Promise<SheetsPullTickReport> {
+  const report: SheetsPullTickReport = { visited: 0, read: 0, pulled: 0, calls: 0, done: false, failedStores: 0, stoppedBy: null };
+  if (!isSheetsConfigured()) return { ...report, done: true };
+  const deadline = opts.deadline ?? Date.now() + opts.budgetMs;
+  const run = await forEachStore(ctx, { job: PULL_JOB, states: ["active", "restricted"], budgetMs: Math.max(1, deadline - Date.now()) }, async (_scope, store) => {
+    if (report.stoppedBy) return;
+    if (report.read >= MAX_STORES_PER_TICK) {
+      report.stoppedBy = "stores";
+      return;
+    }
+    const scope = systemScope(ctx, store.id);
+    try {
+      // the cheap checks first: most stores have no sheet, or slot 1's read pulled them a moment ago
+      const s = await getStoreSetting(scope, "sheets");
+      if (!s.enabled || !s.spreadsheetId || s.pull === false) return;
+      if (!(await pullDue(scope))) return;
+      const r = await pushStore(scope, { maxCalls: 1, pullOnly: true, trigger: "pull", deadline: Math.min(deadline, Date.now() + (opts.storeSliceMs ?? STORE_SLICE_MS)) });
+      if (r.calls > 0) report.read++;
+      report.pulled += r.pulled;
       report.calls += r.calls;
       if (!r.ok) report.failedStores++;
       if (r.breaker || r.skipped === "breaker" || r.stopped === "breaker") report.stoppedBy = "breaker";

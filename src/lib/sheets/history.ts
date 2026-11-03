@@ -32,7 +32,8 @@ export interface SheetsRunReport {
   ok: boolean;
   /** a cause code (src/lib/integrations/causes.ts) when the run failed; never the raw error */
   error: string | null;
-  trigger?: "tick" | "after" | "manual";
+  /** "pull": a read-only run of the `sheets.pull` slot (OPE-§19.6) */
+  trigger?: "tick" | "after" | "manual" | "pull";
 }
 
 export const RUN_HISTORY_MAX = 20;
@@ -43,7 +44,7 @@ export const ACTIVE_WINDOW_MS = 60 * 60_000;
 const JOB = "sheets.push";
 const jobKey = (storeId: string) => `${JOB}:${storeId}`;
 const CODE_RE = /^[a-z][a-z0-9_]{0,47}$/;
-const TRIGGERS: ReadonlySet<string> = new Set(["tick", "after", "manual"]);
+const TRIGGERS: ReadonlySet<string> = new Set(["tick", "after", "manual", "pull"]);
 
 const count0 = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.min(1_000_000, Math.trunc(n))) : 0);
 

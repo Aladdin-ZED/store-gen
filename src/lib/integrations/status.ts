@@ -20,7 +20,7 @@ import "server-only";
  * Never throws for a notification or a listener: a delivery path must not fail because a notice could not be stored.
  */
 import { createHash } from "node:crypto";
-import { eq, lte, ne, or } from "drizzle-orm";
+import { eq, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { integrationStatus } from "@/lib/db/schema";
 import { notificationKind } from "@/lib/notify/registry";
@@ -74,7 +74,7 @@ async function loadRow(scope: StoreScope, kind: IntegrationKind, targetId: strin
  * The guarded write: an UPDATE that only lands when the state changes or the row is a minute old, else an INSERT
  * IGNORE for a target seen for the first time. True when a row was written.
  */
-async function writeRow(scope: WriteScope, kind: IntegrationKind, targetId: string, next: StatusRow, now: number): Promise<boolean> {
+async function writeRow(scope: WriteScope, kind: IntegrationKind, targetId: string, next: StatusRow, now: number, codeChanged = false): Promise<boolean> {
   const date = (ms: number | null) => (ms === null ? null : new Date(ms));
   const values = {
     state: next.state,
@@ -95,7 +95,12 @@ async function writeRow(scope: WriteScope, kind: IntegrationKind, targetId: stri
         scope,
         eq(integrationStatus.kind, kind),
         eq(integrationStatus.targetId, targetId),
-        or(ne(integrationStatus.state, next.state), lte(integrationStatus.updatedAt, new Date(now - STATUS_WRITE_EVERY_MS))),
+        or(
+          ne(integrationStatus.state, next.state),
+          lte(integrationStatus.updatedAt, new Date(now - STATUS_WRITE_EVERY_MS)),
+          // a pause that names its reason is written at once (the same state, a new cause)
+          codeChanged && next.lastErrorCode !== null ? sql`NOT (${integrationStatus.lastErrorCode} <=> ${next.lastErrorCode})` : undefined,
+        ),
       ),
     );
   if (upd.affectedRows > 0) return true;
@@ -203,13 +208,15 @@ async function apply(scope: WriteScope, input: StatusInput & { targetId: string 
   if (prev === undefined) prev = await rows.getOrLoad(scope.storeId, slot, () => loadRow(scope, input.kind, input.targetId));
   const next = nextStatus(prev, input, now);
   const changed = !prev || prev.state !== next.state;
+  // a pause with a new reason (`off` + a code) is written at once, like a state change; it notifies nobody
+  const codeChanged = input.outcome === "off" && !!input.code && !!prev && prev.lastErrorCode !== next.lastErrorCode;
 
-  if (!changed && prev && now - prev.writtenAt < STATUS_WRITE_EVERY_MS) {
+  if (!changed && !codeChanged && prev && now - prev.writtenAt < STATUS_WRITE_EVERY_MS) {
     rows.set(scope.storeId, slot, { ...next, writtenAt: prev.writtenAt });
     return { state: next.state, changed: false, wrote: false };
   }
   // a write the SQL guard refused means another writer stored this state less than a minute ago: wait a minute too
-  const wrote = await writeRow(scope, input.kind, input.targetId, next, now);
+  const wrote = await writeRow(scope, input.kind, input.targetId, next, now, codeChanged);
   rows.set(scope.storeId, slot, { ...next, writtenAt: now });
 
   if (changed && (next.state === "failing" || prev?.state === "failing")) {

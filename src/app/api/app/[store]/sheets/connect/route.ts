@@ -3,28 +3,36 @@
  *   POST   { url }        → the store's current spreadsheet: reconnect at once (find/create & format the "Commandes"
  *                           tab, prove Editor access, save) · any other: start the ownership proof (SHT-09) and
  *                           answer { ok: true, proof: { code, expiresAt, serviceAccountEmail } }; POST ./verify ends it.
- *                           A fresh step-up first (403 { error: "step_up" }: the panel opens the step-up sheet, §B.7)
+ *                           A spreadsheet another store holds: 409 { error: "binding_conflict" } with the one generic
+ *                           message (OPE-§19.3: no hint of which store). A fresh step-up first (403 { error: "step_up" }:
+ *                           the panel opens the step-up sheet, §B.7)
  *   PATCH  { enabled }    → pause / resume appending orders & pulling statuses (orders keep queuing while paused;
  *                           status edits made in the admin still reach rows already in the sheet)
- *   DELETE                → forget the connected sheet
+ *   DELETE                → forget the connected sheet (the binding goes, the orders keep their sheet status)
+ * POST and DELETE share `s:<sid>:sheets:connect:<uid>` (10 per hour, core §E.8) with ./verify; the feature `sheets` off
+ * (a pending store, the kill switch) answers 403 { error: "feature_off" }.
  * Errors carry a French `message` for the admin (incl. the service-account e-mail to share with).
  */
 import { after, type NextRequest } from "next/server";
 import { z } from "zod";
 import { settingsActor } from "@/lib/admin-data/store-audit";
+import { messageOf } from "@/lib/i18n/admin";
 import { json, logError, readJson } from "@/lib/orders/http";
 import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import {
+  CONNECT_BUCKET,
   disconnectSheet,
   explain,
   serviceAccountEmail,
   setSheetsEnabled,
+  SheetBindingConflict,
   sheetsConfigProblem,
   startSheetConnect,
   SheetLinkInvalid,
   SheetsConfigError,
   syncPendingOrders,
 } from "@/lib/sheets";
+import { EntitlementError } from "@/lib/tenancy/entitlements";
 import { stepUpGuard, storeGuard } from "@/lib/tenancy/seam";
 import type { WriteScope } from "@/lib/tenancy/types";
 
@@ -51,7 +59,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
   const up = stepUpGuard(g.ctx);
   if (!up.ok) return up.response;
   const { scope, actor, store, user } = g.ctx;
-  const gate = await rateLimit(storeBucket(scope, "sheets:connect", user.id), 20, 600);
+  const gate = await rateLimit(storeBucket(scope, CONNECT_BUCKET.name, user.id), CONNECT_BUCKET.limit, CONNECT_BUCKET.windowSec);
   if (!gate.ok) return json({ ok: false, error: "rate_limited" }, 429, { "Retry-After": String(gate.retryAfter) });
 
   const body = await readJson(req, 4096);
@@ -68,6 +76,8 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
     return json({ ok: true, created: r.result.created, spreadsheetTitle: r.result.spreadsheetTitle, sheet: r.sheet });
   } catch (err) {
     if (err instanceof SheetLinkInvalid) return json({ ok: false, error: "invalid_link", code: err.code, message: explain(err, email) }, 400);
+    if (err instanceof SheetBindingConflict) return json({ ok: false, error: "binding_conflict", message: messageOf("int.sheets.refused", "fr") }, 409);
+    if (err instanceof EntitlementError) return json({ ok: false, error: "feature_off" }, 403);
     const message = explain(err, email);
     if (!(err instanceof SheetsConfigError)) logError("api/app/sheets:connect", err);
     return json({ ok: false, error: "google", message, serviceAccountEmail: email }, 502);
@@ -95,8 +105,11 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<Respo
 export async function DELETE(req: NextRequest, { params }: Params): Promise<Response> {
   const g = await storeGuard(req, (await params).store, "integrations.manage");
   if (!g.ok) return g.response;
+  const { scope, actor, user } = g.ctx;
+  const gate = await rateLimit(storeBucket(scope, CONNECT_BUCKET.name, user.id), CONNECT_BUCKET.limit, CONNECT_BUCKET.windowSec);
+  if (!gate.ok) return json({ ok: false, error: "rate_limited" }, 429, { "Retry-After": String(gate.retryAfter) });
   try {
-    await disconnectSheet(g.ctx.scope, settingsActor(g.ctx.actor));
+    await disconnectSheet(scope, actor);
     return json({ ok: true });
   } catch (err) {
     logError("api/app/sheets:delete", err);
