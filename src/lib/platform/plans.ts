@@ -1,20 +1,26 @@
 import "server-only";
 /**
- * Plans, overrides and boosts from the console (platform.md PLA-§9, PL-11; core §A.4). Step 4 holds the grant
- * functions the queue's `resolveRequest` and the profile's Usage & plan tab call; the plan editor (`previewPlanChange`,
- * `savePlan`, PLA-§9.2) and the `platform.entitlements` job come with step 5.
+ * Plans, overrides and boosts from the console (platform.md PLA-§9, PL-11; core §A.4; PD8, PD58). Step 4 added the
+ * grant functions the queue's `resolveRequest` and the profile's Usage & plan tab call; step 5 the plan list and
+ * editor, the impact preview, the save, plan creation and status, and the `platform.entitlements` job.
  *
  *   await assignPlan(ctx, { storeId, planId: "growth", note });                       // entitlements.override
  *   await setEntitlement(ctx, { storeId, key: "media_bytes", source: "boost", value: 2 * GiB, expiresAt, reason });
  *   await clearEntitlement(ctx, { storeId, key: "media_bytes", source: "boost" });
+ *   const editor = await getPlanEditor(ctx, "beta");                                    // rows by group, sentences
+ *   const impact = await previewPlanChange(ctx, "beta", { media_bytes: 500 * MiB });  // plans.manage; cached 60 s
+ *   await savePlan(ctx, "beta", { media_bytes: 500 * MiB }, opId);                     // audit platform.plan.updated { diff }
  *
  * Writes: `stores.plan_id` (the store row, not a tenant table), the store's `store_subscriptions` and
  * `store_entitlements` rows through the system seam (a staff decision about the store, never a member's write), the
  * audit row, one store notification (`plan.changed`, `plan.boost_granted`; a caller that answers the store itself,
  * the queue's `request.answered`, passes `{ notify: false }`), `invalidateEntitlements`, `markHealthDirty`.
- * `take_orders` can never be overridden to false (PD8: orders are never blocked by a plan): `take_orders_locked`.
+ * `take_orders` can never be switched off (PD8: orders are never blocked by a plan): `take_orders_locked` in a plan
+ * save and in an override. A plan save invalidates the entitlements of every store on the plan (≤ 2,000 in-process
+ * deletes; another process sees the change within T1's 30 s TTL). The pure rules are ./plan-rules.ts; the
+ * cross-store usage reads are ./usage-markers.ts.
  */
-import { and, eq } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, isNull, lte, lt, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { auditFrom } from "@/lib/audit";
 import { AuthRefusal, FieldsError } from "@/lib/auth/errors";
@@ -22,15 +28,43 @@ import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
 import { plans, storeEntitlements, stores, storeSubscriptions } from "@/lib/db/schema";
 import { systemCtx, systemScope } from "@/lib/jobs/scope";
-import { invalidateStore } from "@/lib/tenancy/cache";
-import { ENTITLEMENTS, isEntitlementKey, type EntitlementKey } from "@/lib/tenancy/entitlement-keys";
+import { getPlatformSetting } from "@/lib/settings";
+import { invalidateStore, scopedCache } from "@/lib/tenancy/cache";
+import { ENTITLEMENTS, isEntitlementKey, type EntitlementKey, type FeatureKey, type LimitKey } from "@/lib/tenancy/entitlement-keys";
 import { invalidateEntitlements } from "@/lib/tenancy/entitlements";
 import { storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { PlatformCtx, WriteScope } from "@/lib/tenancy/types";
 import { markHealthDirty } from "./health-snapshot";
 import { recordPlatformError } from "./log";
 import { notify } from "./notify";
+import { firstRun } from "./op-once";
+import {
+  DEFAULT_PLAN_ID,
+  PLAN_ID_RE,
+  PLAN_NAME_MAX,
+  PLAN_STATUSES,
+  BOOST_ENDING_DAYS,
+  boostEndingDue,
+  boostEndingKey,
+  checkPlanPatch,
+  computeImpact,
+  effectiveOf,
+  gaugeOf,
+  lowers,
+  patchHash,
+  planDiff,
+  planEditorRows,
+  purgeBefore,
+  type PendingCapValues,
+  type PlanBags,
+  type PlanEditorRow,
+  type PlanImpact,
+  type PlanPatch,
+  type PlanStatus,
+  type ImpactStore,
+} from "./plan-rules";
 import { cleanText } from "./queue-rules";
+import { storesUsing, usageOf } from "./usage-markers";
 
 const DAY = 86_400_000;
 /** PLA-§9.4, §L: a boost needs an expiry, at most 90 days ahead */
@@ -38,7 +72,6 @@ export const BOOST_MAX_DAYS = 90;
 /** PLA-§L: entitlement reasons */
 export const ENTITLEMENT_REASON_MAX = 200;
 const ID_RE = /^[0-9A-Z]{26}$/;
-const PLAN_ID_RE = /^[a-z][a-z0-9_]{1,31}$/;
 
 /** A staff decision about one store's plan rows: the system seam of that store (the console's own scope is read-only, D71). */
 const grantScope = (storeId: string): WriteScope => systemScope(systemCtx("platform.plans"), storeId);
@@ -203,4 +236,299 @@ export async function clearEntitlement(ctx: PlatformCtx, input: { storeId: strin
     await auditFrom(ctx, "platform.entitlement.set", { storeId: store.id, target: store.id, meta: { key: input.key, source: input.source, cleared: true, ...(reason ? { reason } : {}) } });
   }
   return { cleared };
+}
+
+/* ------------------------------------------------------------------ */
+/* The plans list and the editor (PLA-§9.1, §9.2)                      */
+/* ------------------------------------------------------------------ */
+
+export interface PlanListRow {
+  id: string;
+  name: string;
+  status: PlanStatus;
+  sort: number;
+  /** stores on the plan (purged ones aside) */
+  stores: number;
+  updatedAt: string | null;
+  /** `beta`: the column default of new stores (PLA-§9.1) */
+  isDefault: boolean;
+}
+
+function requirePlans(ctx: PlatformCtx, permission: "console.read" | "plans.manage"): void {
+  if (!ctx.can(permission)) throw new AuthRefusal("forbidden");
+}
+
+type PlanRow = typeof plans.$inferSelect;
+
+async function planRow(planId: string): Promise<PlanRow> {
+  if (typeof planId !== "string" || !PLAN_ID_RE.test(planId)) throw new AuthRefusal("not_found");
+  const [row] = await db.select().from(plans).where(eq(plans.id, planId)).limit(1);
+  if (!row) throw new AuthRefusal("not_found");
+  return row;
+}
+
+const bagsOf = (row: Pick<PlanRow, "limits" | "features">): PlanBags => ({
+  limits: row.limits && typeof row.limits === "object" ? { ...row.limits } : {},
+  features: row.features && typeof row.features === "object" ? { ...row.features } : {},
+});
+
+/** `console.read`: every plan with its store count, in sort order. */
+export async function listPlans(ctx: PlatformCtx): Promise<PlanListRow[]> {
+  requirePlans(ctx, "console.read");
+  const [rows, counts] = await Promise.all([
+    db.select({ id: plans.id, name: plans.name, status: plans.status, sort: plans.sort, updatedAt: plans.updatedAt }).from(plans).orderBy(asc(plans.sort), asc(plans.id)),
+    db.select({ planId: stores.planId, n: count() }).from(stores).where(ne(stores.status, "purged")).groupBy(stores.planId),
+  ]);
+  const byPlan = new Map(counts.map((c) => [c.planId, Number(c.n)]));
+  return rows.map((r) => ({ ...r, stores: byPlan.get(r.id) ?? 0, updatedAt: r.updatedAt?.toISOString() ?? null, isDefault: r.id === DEFAULT_PLAN_ID }));
+}
+
+export interface PlanEditor {
+  plan: PlanListRow;
+  rows: PlanEditorRow[];
+}
+
+/** The pending caps the sentences quote (`platform.signup.*`, PLA-§2.4). */
+async function pendingCaps(): Promise<PendingCapValues> {
+  const { signup } = await getPlatformSetting("platform");
+  return { mediaMiB: signup.pendingMediaMiB, mediaMiBBeforeSubmit: signup.pendingMediaMiBBeforeSubmit, membersMax: signup.pendingMembersMax };
+}
+
+/** `console.read`: the plan and its rows grouped Limits / Features / Later releases, each with its three explanations. */
+export async function getPlanEditor(ctx: PlatformCtx, planId: string): Promise<PlanEditor> {
+  requirePlans(ctx, "console.read");
+  const row = await planRow(planId);
+  const [[n], caps] = await Promise.all([db.select({ n: count() }).from(stores).where(and(eq(stores.planId, row.id), ne(stores.status, "purged"))), pendingCaps()]);
+  return {
+    plan: { id: row.id, name: row.name, status: row.status, sort: row.sort, stores: Number(n?.n ?? 0), updatedAt: row.updatedAt?.toISOString() ?? null, isDefault: row.id === DEFAULT_PLAN_ID },
+    rows: planEditorRows(bagsOf(row), caps),
+  };
+}
+
+/** A refused patch as the editor shows it: the row's field, or the take_orders refusal. */
+function patchRefusal(check: Extract<ReturnType<typeof checkPlanPatch>, { ok: false }>): Error {
+  if (check.code === "take_orders_locked") return new AuthRefusal("take_orders_locked", "console.plans.take_orders_locked");
+  if (check.code === "empty") return new FieldsError({ patch: "console.plans.no_change" });
+  return new FieldsError({ [check.key || "patch"]: `console.plans.${check.code}` });
+}
+
+/* ------------------------------------------------------------------ */
+/* The impact preview (PLA-§9.2, PD58)                                 */
+/* ------------------------------------------------------------------ */
+
+/** `plan-impact` (PLA-§M.5): `"p"` : `<planId>:<patchHash>`, 60 s, cleared by every plan save */
+const impactCache = scopedCache<PlanImpact>({ name: "plan-impact", maxEntries: 50, ttlMs: 60_000 });
+const PLATFORM = "p";
+
+/** The live override and boost keys of the stores among `changed` (one annotated read per 500 stores). */
+async function shieldedKeys(storeIds: readonly string[], changed: readonly EntitlementKey[], now: Date): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>();
+  for (let i = 0; i < storeIds.length; i += 500) {
+    const ids = storeIds.slice(i, i + 500);
+    // tenancy: platform plan impact (PLA-§9.2): which of ≤ 500 stores override or boost the changed keys (store_entitlements PK prefix), keys only
+    const rows = await db
+      .select({ storeId: storeEntitlements.storeId, key: storeEntitlements.key })
+      .from(storeEntitlements)
+      .where(and(inArray(storeEntitlements.storeId, ids), inArray(storeEntitlements.key, [...changed]), or(isNull(storeEntitlements.expiresAt), gt(storeEntitlements.expiresAt, now))));
+    for (const r of rows) {
+      const set = out.get(r.storeId) ?? new Set<string>();
+      set.add(r.key);
+      out.set(r.storeId, set);
+    }
+  }
+  return out;
+}
+
+/**
+ * `plans.manage` (PLA-§9.2): what saving `patch` would do to the plan's stores. Validated like the save (refusals
+ * answer the same); reads the plan's stores, their overrides and boosts of the changed keys, then one counter or
+ * marker read per lowered limit and per feature switched off (`IN (…)` chunked by 500). Cached 60 s per patch.
+ */
+export async function previewPlanChange(ctx: PlatformCtx, planId: string, patch: PlanPatch): Promise<PlanImpact> {
+  requirePlans(ctx, "plans.manage");
+  const row = await planRow(planId);
+  const check = checkPlanPatch(bagsOf(row), patch);
+  if (!check.ok) throw patchRefusal(check);
+  return impactCache.getOrLoad(PLATFORM, `${row.id}:${patchHash(patch)}`, async () => {
+    const now = new Date();
+    const onPlan = await db
+      .select({ id: stores.id, handle: stores.handle, timezone: stores.timezone })
+      .from(stores)
+      .where(and(eq(stores.planId, row.id), ne(stores.status, "purged")))
+      .orderBy(asc(stores.id));
+    const ids = onPlan.map((s) => s.id);
+    const changes = check.changes.map((c) => ({ key: c.key, from: effectiveOf(c.key, c.from), to: effectiveOf(c.key, c.to) }));
+    const zones = new Map(onPlan.map((s) => [s.id, s.timezone]));
+    const shield = ids.length ? await shieldedKeys(ids, changes.map((c) => c.key), now) : new Map<string, Set<string>>();
+    const usage = new Map<LimitKey, Map<string, number> | null>();
+    const users = new Map<FeatureKey, Set<string> | null>();
+    for (const c of changes) {
+      if (ENTITLEMENTS[c.key].kind === "limit") {
+        if (!lowers(c.from as number | null, c.to as number | null)) continue;
+        const gauge = gaugeOf(c.key as LimitKey);
+        usage.set(c.key as LimitKey, gauge ? (ids.length ? await usageOf(gauge, ids, zones, now) : new Map()) : null);
+      } else if (c.from === true && c.to === false) {
+        users.set(c.key as FeatureKey, ids.length ? await storesUsing(c.key as FeatureKey, ids) : new Set());
+      }
+    }
+    const impactStores: ImpactStore[] = onPlan.map((s) => ({ id: s.id, handle: s.handle, shielded: shield.get(s.id) ?? new Set() }));
+    return computeImpact({ stores: impactStores, changes, usage: (k) => usage.get(k) ?? null, users: (k) => users.get(k) ?? null });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Save, create, status (PLA-§9.1, §9.2)                               */
+/* ------------------------------------------------------------------ */
+
+const PlanMetaInput = z.object({
+  name: z.string().transform(cleanText).pipe(z.string().min(1).max(PLAN_NAME_MAX)).optional(),
+  sort: z.number().int().min(0).max(10_000).optional(),
+});
+
+/** Every cache a plan change reaches: each store's entitlements, then the previews. Answers how many stores. */
+async function invalidatePlanStores(planId: string): Promise<number> {
+  const onPlan = await db.select({ id: stores.id }).from(stores).where(and(eq(stores.planId, planId), ne(stores.status, "purged")));
+  for (const s of onPlan) invalidateEntitlements(s.id);
+  impactCache.clear();
+  return onPlan.length;
+}
+
+/**
+ * `plans.manage` (PLA-§9.2): the patch (and optionally the plan's name and sort order) saved in one locked
+ * read-modify-write; audit `platform.plan.updated { planId, diff }`; then `invalidateEntitlements` for every store on
+ * the plan. `opId` makes a repeat of the same confirmed sheet a no-op (`{ saved: false }`). Refusals as the preview's.
+ */
+export async function savePlan(ctx: PlatformCtx, planId: string, patch: PlanPatch, opId: string, meta: { name?: string; sort?: number } = {}): Promise<{ saved: boolean; stores: number }> {
+  requirePlans(ctx, "plans.manage");
+  const m = PlanMetaInput.safeParse(meta);
+  if (!m.success) throw new FieldsError({ [String(m.error.issues[0]?.path[0] ?? "name")]: "console.plans.name_invalid" });
+  await planRow(planId);
+  if (!(await firstRun(ctx, opId))) return { saved: false, stores: 0 };
+  const result = await db.transaction(async (tx) => {
+    const [row] = await tx.select().from(plans).where(eq(plans.id, planId)).for("update");
+    if (!row) throw new AuthRefusal("not_found");
+    const renamed = m.data.name !== undefined && m.data.name !== row.name ? { from: row.name, to: m.data.name } : null;
+    const resorted = m.data.sort !== undefined && m.data.sort !== row.sort ? { from: row.sort, to: m.data.sort } : null;
+    const check = Object.keys(patch ?? {}).length ? checkPlanPatch(bagsOf(row), patch) : null;
+    if (check && !check.ok && !(check.code === "empty" && (renamed || resorted))) throw patchRefusal(check);
+    const values = check?.ok ? check : null;
+    if (!values && !renamed && !resorted) throw new FieldsError({ patch: "console.plans.no_change" });
+    await tx
+      .update(plans)
+      .set({
+        ...(values ? { limits: values.next.limits, features: values.next.features } : {}),
+        ...(renamed ? { name: renamed.to } : {}),
+        ...(resorted ? { sort: resorted.to } : {}),
+      })
+      .where(eq(plans.id, row.id));
+    return { diff: values ? planDiff(values.changes) : {}, renamed, resorted };
+  });
+  const invalidated = await invalidatePlanStores(planId);
+  await auditFrom(ctx, "platform.plan.updated", {
+    target: planId,
+    meta: { planId, diff: result.diff, ...(result.renamed ? { name: result.renamed } : {}), ...(result.resorted ? { sort: result.resorted } : {}), stores: invalidated },
+  });
+  return { saved: true, stores: invalidated };
+}
+
+const CreatePlanInput = z.object({
+  id: z.string().regex(PLAN_ID_RE),
+  name: z.string().transform(cleanText).pipe(z.string().min(1).max(PLAN_NAME_MAX)),
+  copyFrom: z.string().regex(PLAN_ID_RE).nullish(),
+  status: z.enum(["active", "hidden"]).default("active"),
+});
+
+const isDuplicate = (err: unknown): boolean => {
+  const e = err as { errno?: number; cause?: { errno?: number } } | null;
+  return e?.errno === 1062 || e?.cause?.errno === 1062;
+};
+
+/**
+ * `plans.manage` (PLA-§9.1): a new plan with an id of `^[a-z][a-z0-9_]{1,31}$`, its name, and the limits and features
+ * copied from an existing plan (else empty: the registry defaults). Sorted last. Audit `platform.plan.created`.
+ */
+export async function createPlan(ctx: PlatformCtx, input: unknown): Promise<{ id: string }> {
+  requirePlans(ctx, "plans.manage");
+  const parsed = CreatePlanInput.safeParse(input);
+  if (!parsed.success) {
+    const path = String(parsed.error.issues[0]?.path[0] ?? "id");
+    throw new FieldsError({ [path]: path === "name" ? "console.plans.name_invalid" : path === "copyFrom" ? "console.plans.unknown" : "console.plans.id_invalid" });
+  }
+  const v = parsed.data;
+  const source = v.copyFrom ? await planRow(v.copyFrom).catch(() => null) : null;
+  if (v.copyFrom && !source) throw new FieldsError({ copyFrom: "console.plans.unknown" });
+  const [last] = await db.select({ sort: sql<number>`COALESCE(MAX(${plans.sort}), 0)` }).from(plans);
+  const bags = source ? bagsOf(source) : { limits: {}, features: {} };
+  try {
+    await db.insert(plans).values({ id: v.id, name: v.name, status: v.status, sort: Number(last?.sort ?? 0) + 10, limits: bags.limits, features: bags.features });
+  } catch (err) {
+    if (isDuplicate(err)) throw new FieldsError({ id: "console.plans.id_taken" });
+    throw err;
+  }
+  await auditFrom(ctx, "platform.plan.created", { target: v.id, meta: { planId: v.id, name: v.name, status: v.status, copyFrom: source?.id ?? null } });
+  return { id: v.id };
+}
+
+/**
+ * `plans.manage` (PLA-§9.1): active (offered), hidden (assignable by staff only), retired (stores keep it, nobody
+ * moves onto it). `beta` stays active: it is the column default of every new store (`default_plan_locked`).
+ */
+export async function setPlanStatus(ctx: PlatformCtx, input: { planId: string; status: PlanStatus }): Promise<{ changed: boolean }> {
+  requirePlans(ctx, "plans.manage");
+  if (!PLAN_STATUSES.includes(input.status)) throw new FieldsError({ status: "console.plans.status_invalid" });
+  const row = await planRow(input.planId);
+  if (row.id === DEFAULT_PLAN_ID && input.status !== "active") throw new AuthRefusal("invalid", "console.plans.default_plan_locked");
+  if (row.status === input.status) return { changed: false };
+  await db.update(plans).set({ status: input.status }).where(eq(plans.id, row.id));
+  impactCache.clear();
+  await auditFrom(ctx, "platform.plan.updated", { target: row.id, meta: { planId: row.id, status: { from: row.status, to: input.status } } });
+  return { changed: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* The platform.entitlements job (PLA-§9.4, hourly)                    */
+/* ------------------------------------------------------------------ */
+
+export interface EntitlementsJobSummary {
+  /** boosts expiring within 3 days, and the notices sent for them (a repeat is deduplicated per row and expiry) */
+  boostsEnding: number;
+  notified: number;
+  /** override and boost rows expired for more than 30 days, deleted */
+  deleted: number;
+  done: boolean;
+}
+
+/** at most this many ending boosts per run (the next hour takes the rest) */
+const ENDING_BATCH = 200;
+
+/**
+ * The hourly job (PLA-§9.4): `plan.boost_ending` to the store's owners and admins once per boost row and expiry, 3
+ * days before it ends; override and boost rows expired for more than 30 days are deleted (an expired row is already
+ * ignored by `entitlement()`). Stops starting notices at `deadline`.
+ */
+export async function runEntitlementsJob(now: Date = new Date(), opts: { deadline?: number } = {}): Promise<EntitlementsJobSummary> {
+  const deadline = opts.deadline ?? Number.POSITIVE_INFINITY;
+  const out: EntitlementsJobSummary = { boostsEnding: 0, notified: 0, deleted: 0, done: true };
+  const horizon = new Date(now.getTime() + BOOST_ENDING_DAYS * 86_400_000);
+  // tenancy: platform the hourly entitlements job (PLA-§9.4): boosts ending within 3 days across stores, ids, keys and expiries only
+  const ending = await db
+    .select({ storeId: storeEntitlements.storeId, key: storeEntitlements.key, source: storeEntitlements.source, expiresAt: storeEntitlements.expiresAt })
+    .from(storeEntitlements)
+    .where(and(eq(storeEntitlements.source, "boost"), gt(storeEntitlements.expiresAt, now), lte(storeEntitlements.expiresAt, horizon)))
+    .limit(ENDING_BATCH + 1);
+  for (const row of ending.slice(0, ENDING_BATCH)) {
+    if (!row.expiresAt || !boostEndingDue(row, now)) continue;
+    if (Date.now() >= deadline) {
+      out.done = false;
+      break;
+    }
+    out.boostsEnding++;
+    const sent = await notify({ audience: "store_role", storeId: row.storeId, roles: ["owner", "admin"] }, "plan.boost_ending", { key: row.key, until: row.expiresAt.toISOString() }, { dedupeKey: boostEndingKey(row.storeId, row.key, row.expiresAt) });
+    if ("id" in sent) out.notified++;
+  }
+  if (ending.length > ENDING_BATCH) out.done = false;
+  // tenancy: platform the hourly entitlements job (PLA-§9.4): delete override / boost rows expired for 30 days, every store
+  const [res] = await db.delete(storeEntitlements).where(lt(storeEntitlements.expiresAt, purgeBefore(now)));
+  out.deleted = res.affectedRows;
+  return out;
 }

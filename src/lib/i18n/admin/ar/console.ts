@@ -65,4 +65,9 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "console.risk.field.store_name": "اسم المتجر",
   "console.risk.field.handle": "المعرّف",
   "console.risk.field.email": "عنوان البريد الإلكتروني",
+
+  /* ---- R1: the public staff-invite page (PLA-§14.1) ---- */
+  "console.staff.invite_invalid": "هاد الدعوة ما بقاتش صالحة. طلب دعوة جديدة.",
+  "console.staff.invite_sign_in_first": "كاين حساب كيستعمل هاد البريد الإلكتروني. دخل بيه، ومن بعد حلّ الرابط مرة أخرى.",
+  "console.staff.invite_wrong_account": "هاد الدعوة ديال عنوان بريد إلكتروني آخر.",
 };

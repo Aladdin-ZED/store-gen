@@ -86,4 +86,36 @@ export const cases: TenancyCase[] = [
       k.check("requests: A's rows are unchanged by every call of B and of the view", (await k.snapshotA()) === before);
     },
   },
+  {
+    name: "legal re-acceptance: a person records only their own acceptance of a document they are asked for (PLA-§13.4, §22.15, step 5)",
+    async run(k) {
+      const legal = await import("@/lib/platform/legal");
+      const { db } = await import("@/lib/db/client");
+      const { legalAcceptances, legalDocuments } = await import("@/lib/db/schema");
+      const { newId } = await import("@/lib/db/ids");
+      const { and, eq, inArray } = await import("drizzle-orm");
+      const ownerA = await memberCtx(k, "A");
+      const ownerB = await memberCtx(k, "B");
+      // a published AUP asking everyone to accept again, in every locale the fixtures read (retired at the end)
+      const docs = (["ar", "fr", "en"] as const).map((locale) => ({ id: newId(), locale }));
+      await db.insert(legalDocuments).values(docs.map((d) => ({ id: d.id, kind: "aup" as const, locale: d.locale, version: 9_000, title: "AUP", body: "Rules.", summary: "Changed.", status: "published" as const, needsLegalReview: false, requiresReacceptance: true, effectiveAt: new Date(Date.now() - 60_000), publishedAt: new Date() })));
+      const ids = docs.map((d) => d.id);
+      try {
+        const before = await k.snapshotA();
+        const askedB = await legal.pendingReacceptance(ownerB.user.id);
+        const askedId = askedB?.docs[0]?.id ?? "";
+        k.check("legal: B's owner is asked for the published AUP", ids.includes(askedId), askedB);
+        k.check("legal: a document B's owner isn't asked for → conflict", (await codeOf(legal.recordReacceptance(ownerB, [newId()], { ipHash: null, uaLabel: "Chrome" }))) === "conflict");
+        k.check("legal: a malformed id → invalid", (await codeOf(legal.recordReacceptance(ownerB, ["../" + askedId], { ipHash: null, uaLabel: "Chrome" }))) === "invalid");
+        await legal.recordReacceptance(ownerB, [askedId], { ipHash: "f".repeat(64), uaLabel: "Chrome on Android" });
+        const rowsB = await db.select().from(legalAcceptances).where(inArray(legalAcceptances.documentId, ids));
+        k.check("legal: one row, B's owner's, outside any store (never A's)", rowsB.length === 1 && rowsB[0]!.userId === ownerB.user.id && rowsB[0]!.storeId === null, rowsB);
+        k.check("legal: B's owner isn't asked again; A's owner still is (per person)", (await legal.pendingReacceptance(ownerB.user.id)) === null && ids.includes((await legal.pendingReacceptance(ownerA.user.id))?.docs[0]?.id ?? ""));
+        k.check("legal: recording it twice → conflict (no longer asked)", (await codeOf(legal.recordReacceptance(ownerB, [askedId], { ipHash: null, uaLabel: "Chrome" }))) === "conflict");
+        k.check("legal: A's rows are unchanged by B's acceptance", (await k.snapshotA()) === before);
+      } finally {
+        await db.update(legalDocuments).set({ status: "retired" }).where(and(inArray(legalDocuments.id, ids), eq(legalDocuments.status, "published")));
+      }
+    },
+  },
 ];

@@ -64,4 +64,9 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "console.risk.field.store_name": "le nom de la boutique",
   "console.risk.field.handle": "l'identifiant",
   "console.risk.field.email": "l'adresse e-mail",
+
+  /* ---- R1 : la page publique d'invitation du staff (PLA-§14.1) ---- */
+  "console.staff.invite_invalid": "Cette invitation n'est plus valable. Demandez-en une nouvelle.",
+  "console.staff.invite_sign_in_first": "Un compte utilise déjà cette adresse e-mail. Connectez-vous avec, puis rouvrez le lien.",
+  "console.staff.invite_wrong_account": "Cette invitation est destinée à une autre adresse e-mail.",
 };

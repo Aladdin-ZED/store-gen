@@ -17,9 +17,11 @@
  *   - B "Baraka Home" (`pending`): an owner; C "Corail Deco" (`suspended`): an owner; D (`purged`, its handle still on
  *     the row): no member;
  *   - staff: one of each platform role with TOTP on, and an admin invited without TOTP yet; an outsider seller.
- * Cases filled so far: 1 (the approval queue), 2 (store requests), 3 (platform requests), 5 (the health job), 6
- * (notifications), 11 (lifecycle safety), 13 (its console part: the sandbox meters, invite codes, the waitlist) and 15
- * (brand guard, reports, the health-run half); the others print "pending" with the step that fills them.
+ * Cases filled so far: 1 (the approval queue), 2 (store requests), 3 (platform requests), 4 (plans and entitlements, with
+ * the server side of the kill switches and flags), 5 (the health job), 6 (notifications), 7 (staff), 8 (legal), 11
+ * (lifecycle safety), 13 (its console part: the sandbox meters, invite codes, the waitlist), 15 (brand guard, reports,
+ * the health-run half), 19 (the Domains half) and 20 (the staff-invite half); the others print "pending" with the step
+ * that fills them.
  */
 import Module from "node:module";
 import mysql from "mysql2/promise";
@@ -1078,6 +1080,535 @@ async function case13(fx: Fixtures): Promise<void> {
   ok("audit: platform.waitlist.invited and .dropped", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.waitlist.invited'")) === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.waitlist.dropped'")) === 1);
 }
 
+/** The refusal a call throws as "code:messageKey" (the key says which of several `invalid` refusals it was), or "ok". */
+async function refusalOf(p: Promise<unknown>): Promise<string> {
+  try {
+    await p;
+    return "ok";
+  } catch (err) {
+    const e = err as { code?: unknown; messageKey?: unknown; fields?: Record<string, string> };
+    if (e?.fields) return `fields:${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(",")}`;
+    return `${typeof e?.code === "string" ? e.code : "threw"}:${typeof e?.messageKey === "string" ? e.messageKey : ""}`;
+  }
+}
+
+/** A fresh account (no store, no platform role unless given), for the staff and legal cases. */
+async function account(fx: Fixtures, email: string, opts: { platformRole?: StaffRole | "none"; totp?: boolean; locale?: string } = {}): Promise<string> {
+  const id = fx.newId();
+  await fx.conn.query("INSERT INTO users (id, email, name, password_hash, platform_role, totp_enabled, locale) VALUES (?, ?, ?, 'platform-check:no-password', ?, ?, ?)", [
+    id,
+    email,
+    `Person ${email.split("@")[0]}`,
+    opts.platformRole ?? "none",
+    opts.totp ? 1 : 0,
+    opts.locale ?? null,
+  ]);
+  staffNames[id] = `Person ${email.split("@")[0]}`;
+  return id;
+}
+
+/* ------------------------------------------------------------------ */
+/* case 4: plans and entitlements (PL-11), kill switches and flags      */
+/* (PL-12, the server side)                                            */
+/* ------------------------------------------------------------------ */
+
+async function case4(fx: Fixtures): Promise<void> {
+  const plans = await import("@/lib/platform/plans");
+  const flags = await import("@/lib/platform/flags");
+  const { entitlement, invalidateEntitlements, activeKillSwitches } = await import("@/lib/tenancy/entitlements");
+  const { systemCtx, systemScope } = await import("@/lib/jobs/scope");
+  const { MiB, GiB, ENTITLEMENT_KEYS } = await import("@/lib/tenancy/entitlement-keys");
+  const { seedFlags } = await import("@/lib/db/boot-tasks");
+  const root = await staffCtx(fx, "super_admin");
+  const rootUp = await staffCtx(fx, "super_admin", { stepUp: true });
+  const ops = await staffCtx(fx, "admin");
+  const analyst = await staffCtx(fx, "analyst");
+  const sys = systemCtx("platform-check");
+  const media = (storeId: string) => entitlement(systemScope(sys, storeId), "media_bytes");
+
+  // the list and the editor (PLA-§9.1, §9.2)
+  const list = await plans.listPlans(analyst);
+  ok("listPlans: Beta is listed as the default for new stores", list.some((p) => p.id === "beta" && p.isDefault && p.status === "active"), list);
+  const editor = await plans.getPlanEditor(analyst, "beta");
+  ok("getPlanEditor: every registry key, take_orders locked, a sentence each", editor.rows.length === ENTITLEMENT_KEYS.length && editor.rows.find((r) => r.key === "take_orders")?.locked === "take_orders" && editor.rows.every((r) => r.sentence.length > 10));
+  ok("plans.manage is super_admin only: an admin's preview is refused", (await codeOf(plans.previewPlanChange(ops, "beta", { media_bytes: 500 * MiB }))) === "forbidden");
+  ok("createPlan: the id rule (^[a-z][a-z0-9_]{1,31}$)", (await codeOf(plans.createPlan(root, { id: "Case4", name: "Case four" }))) === "fields:id");
+  const created = await plans.createPlan(root, { id: "case4_plan", name: "Case four", copyFrom: "beta" });
+  ok("createPlan: copied from Beta, audited", created.id === "case4_plan" && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.plan.created' AND target = 'case4_plan'")) === 1);
+  ok("createPlan: an id that exists is refused", (await codeOf(plans.createPlan(root, { id: "case4_plan", name: "Again" }))) === "fields:id");
+  ok("setPlanStatus: Beta can't be hidden (the default of new stores)", (await refusalOf(plans.setPlanStatus(root, { planId: "beta", status: "hidden" }))) === "invalid:console.plans.default_plan_locked");
+
+  // six stores on the plan: three above 500 MiB, two below, one shielded by an override of media_bytes
+  const used = [Math.round(1.9 * GiB), 812 * MiB, 640 * MiB, 100 * MiB, 0, 2 * GiB];
+  const onPlan: (StoreFx & { owner: string })[] = [];
+  for (let i = 0; i < used.length; i++) {
+    const s = await extraStore(fx, `plan-four-${i}`, "active");
+    await fx.conn.query("UPDATE stores SET plan_id = 'case4_plan' WHERE id = ?", [s.id]);
+    if (used[i]) await fx.conn.query("INSERT INTO store_usage (store_id, metric, period, value) VALUES (?, 'media_bytes', 'total', ?)", [s.id, used[i]]);
+    onPlan.push(s);
+  }
+  const shielded = onPlan[5]!;
+  await fx.conn.query("INSERT INTO store_entitlements (store_id, `key`, source, value, expires_at, set_by, reason) VALUES (?, 'media_bytes', 'override', ?, NULL, ?, 'case 4 override')", [shielded.id, JSON.stringify(3 * GiB), fx.staff.super_admin]);
+  await fx.conn.query("INSERT IGNORE INTO sheet_bindings (spreadsheet_id, store_id, method, verified_at) VALUES (?, ?, 'code', NOW(3))", [`case4-sheet-${onPlan[0]!.id}`, onPlan[0]!.id]);
+
+  const impact = await plans.previewPlanChange(root, "case4_plan", { media_bytes: 500 * MiB, sheets: false });
+  const lowered = impact.lowered.find((l) => l.key === "media_bytes");
+  ok("previewPlanChange: the stores on the plan, the shielded one out of the count", impact.stores === 6 && lowered?.stores === 5, impact);
+  ok("previewPlanChange: exactly the 3 stores seeded above 500 MiB", lowered?.storesAbove === 3 && lowered.measured, lowered);
+  ok(
+    "previewPlanChange: examples by usage, highest first, handles and bytes",
+    JSON.stringify(lowered?.examples) === JSON.stringify([0, 1, 2].map((i) => ({ handle: onPlan[i]!.handle, used: used[i] }))),
+    lowered?.examples,
+  );
+  const sheetsOff = impact.featuresOff.find((f) => f.key === "sheets");
+  ok("previewPlanChange: Sheets switched off counts the one store with a binding", sheetsOff?.stores === 1 && sheetsOff.measured && sheetsOff.examples[0]?.handle === onPlan[0]!.handle, sheetsOff);
+  ok("previewPlanChange: unaffected = the stores whose effective values do not change", impact.unaffected === 3, impact.unaffected);
+  const cached = await countQueries(() => plans.previewPlanChange(root, "case4_plan", { sheets: false, media_bytes: 500 * MiB }));
+  ok("previewPlanChange: the same patch (keys in any order) comes from the plan-impact cache", cached.queries <= 1 && JSON.stringify(cached.value) === JSON.stringify(impact), cached.queries);
+
+  // take_orders stays on (PD8), in a plan and in an override
+  ok("take_orders false: refused in a plan's preview", (await codeOf(plans.previewPlanChange(root, "case4_plan", { take_orders: false }))) === "take_orders_locked");
+  ok("take_orders false: refused in a plan save", (await codeOf(plans.savePlan(root, "case4_plan", { take_orders: false }, fx.newId()))) === "take_orders_locked");
+  ok("take_orders false: refused in an override", (await codeOf(plans.setEntitlement(root, { storeId: onPlan[0]!.id, key: "take_orders", source: "override", value: false, reason: "test" }))) === "take_orders_locked");
+  ok("savePlan: an unknown key and a later-release key are refused", (await codeOf(plans.savePlan(root, "case4_plan", { nope: 1 } as never, fx.newId()))) === "fields:nope" && (await codeOf(plans.savePlan(root, "case4_plan", { products_max: 10 }, fx.newId()))) === "fields:products_max");
+  ok("savePlan: a negative or fractional limit is refused", (await codeOf(plans.savePlan(root, "case4_plan", { pages_max: -1 }, fx.newId()))) === "fields:pages_max" && (await codeOf(plans.savePlan(root, "case4_plan", { pages_max: 2.5 }, fx.newId()))) === "fields:pages_max");
+
+  // saving invalidates the entitlements of every store on the plan (warm T1's 30 s cache first)
+  const before = await Promise.all(onPlan.map((s) => media(s.id)));
+  ok("before the save: Beta's 1 GiB, the override's 3 GiB", before.slice(0, 5).every((v) => v === 1 * GiB) && before[5] === 3 * GiB, before);
+  const opId = fx.newId();
+  const saved = await plans.savePlan(root, "case4_plan", { media_bytes: 500 * MiB }, opId);
+  ok("savePlan: saved, every store on the plan invalidated", saved.saved && saved.stores === 6, saved);
+  const after = await Promise.all(onPlan.map((s) => media(s.id)));
+  ok("after the save: every store reads 500 MiB at once (no stale cache), the override still wins", after.slice(0, 5).every((v) => v === 500 * MiB) && after[5] === 3 * GiB, after);
+  const [planAudit] = await rows<{ meta: string }>(fx.conn, "SELECT meta FROM audit_log WHERE action = 'platform.plan.updated' AND target = 'case4_plan' ORDER BY id DESC LIMIT 1");
+  ok("audit platform.plan.updated { diff } with from / to", JSON.stringify(JSON.parse(planAudit?.meta ?? "{}").diff?.media_bytes) === JSON.stringify({ from: "default", to: 500 * MiB }), planAudit);
+  ok("savePlan: the same operation id again saves nothing", (await plans.savePlan(root, "case4_plan", { media_bytes: 400 * MiB }, opId)).saved === false && (await media(onPlan[0]!.id)) === 500 * MiB);
+  ok("savePlan: a changed plan clears the impact cache", (await plans.previewPlanChange(root, "case4_plan", { media_bytes: 500 * MiB, sheets: false })).lowered.length === 0);
+
+  // overrides and boosts (PLA-§9.4): expiry rules
+  const day = 86_400_000;
+  ok("a boost needs an expiry", (await codeOf(plans.setEntitlement(root, { storeId: onPlan[1]!.id, key: "media_bytes", source: "boost", value: 2 * GiB, reason: "launch" }))) === "fields:expiresAt");
+  ok("a boost lasts 90 days at most", (await codeOf(plans.setEntitlement(root, { storeId: onPlan[1]!.id, key: "media_bytes", source: "boost", value: 2 * GiB, expiresAt: new Date(Date.now() + 91 * day), reason: "launch" }))) === "fields:expiresAt");
+  ok("entitlements.override: an analyst can't set one", (await codeOf(plans.setEntitlement(analyst, { storeId: onPlan[1]!.id, key: "media_bytes", source: "boost", value: 2 * GiB, expiresAt: new Date(Date.now() + day), reason: "x" }))) === "forbidden");
+
+  // a boost past its expiry is ignored by entitlement() and deleted by the job after 30 days
+  const [recent, old, ending] = [onPlan[2]!, onPlan[3]!, onPlan[4]!];
+  const boost = (storeId: string, expires: Date) =>
+    fx.conn.query("INSERT INTO store_entitlements (store_id, `key`, source, value, expires_at, set_by, reason) VALUES (?, 'media_bytes', 'boost', ?, ?, ?, 'case 4 boost')", [storeId, JSON.stringify(5 * GiB), expires, fx.staff.super_admin]);
+  await boost(recent.id, new Date(Date.now() - day));
+  await boost(old.id, new Date(Date.now() - 31 * day));
+  await boost(ending.id, new Date(Date.now() + 2 * day));
+  for (const s of [recent, old, ending]) invalidateEntitlements(s.id);
+  ok("an expired boost is ignored by entitlement() (T1)", (await media(recent.id)) === 500 * MiB && (await media(old.id)) === 500 * MiB);
+  ok("a live boost applies", (await media(ending.id)) === 5 * GiB);
+  const job1 = await plans.runEntitlementsJob(new Date());
+  const left = await rows<{ store_id: string }>(fx.conn, "SELECT store_id FROM store_entitlements WHERE source = 'boost' AND store_id IN (?, ?, ?)", [recent.id, old.id, ending.id]);
+  ok("the job deletes the row expired for more than 30 days, keeps the recent one", job1.deleted >= 1 && left.length === 2 && !left.some((r) => r.store_id === old.id), { job1, left });
+  ok("the job sends plan.boost_ending to the store ending within 3 days", job1.boostsEnding >= 1 && job1.notified >= 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'plan.boost_ending' AND store_id = ?", [ending.id])) === 1, job1);
+  const job2 = await plans.runEntitlementsJob(new Date());
+  ok("a second run sends nothing again (deduplicated per row and expiry)", job2.notified === 0 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'plan.boost_ending' AND store_id = ?", [ending.id])) === 1, job2);
+
+  // a retired plan takes nobody new; stores keep it
+  await plans.setPlanStatus(root, { planId: "case4_plan", status: "retired" });
+  ok("assignPlan: nobody moves onto a retired plan", (await refusalOf(plans.assignPlan(ops, { storeId: fx.stores.A.id, planId: "case4_plan" }))) === "invalid:console.plans.retired");
+  ok("…the stores on it keep it", (await count(fx.conn, "SELECT COUNT(*) AS n FROM stores WHERE plan_id = 'case4_plan'")) === 6);
+  await plans.setPlanStatus(root, { planId: "case4_plan", status: "active" });
+
+  /* PL-12, the server side: kill switches and flags (PLA-§12.1, §12.2) */
+  const seeded = await seedFlags();
+  ok("the boot seeds the declared flags", seeded.inserted >= 2, seeded);
+  ok("setKillSwitch: kill.manage is super_admin only", (await codeOf(flags.setKillSwitch(await staffCtx(fx, "admin", { stepUp: true }), { key: "uploads_enabled", value: false, reason: "test", opId: fx.newId() }))) === "forbidden");
+  ok("setKillSwitch: a fresh step-up first", (await codeOf(flags.setKillSwitch(root, { key: "uploads_enabled", value: false, reason: "test", opId: fx.newId() }))) === "step_up");
+  ok("setKillSwitch: a reason is required", (await codeOf(flags.setKillSwitch(rootUp, { key: "uploads_enabled", value: false, reason: "  ", opId: fx.newId() }))) === "fields:reason");
+  ok("setKillSwitch: read-only needs its typed word", (await codeOf(flags.setKillSwitch(rootUp, { key: "platform_read_only", value: true, reason: "maintenance", opId: fx.newId() }))) === "fields:typed");
+  const preview = await flags.killSwitchPreview(rootUp, "platform_read_only");
+  const live = await count(fx.conn, "SELECT COUNT(*) AS n FROM stores WHERE status IN ('pending', 'active', 'restricted')");
+  ok("killSwitchPreview: tripping read-only, the live stores counted, the banner in ar / fr / en", preview.tripping && preview.affectedStores === live && preview.typed === "read-only" && ["ar", "fr", "en"].every((l) => (preview.banner as Record<string, string>)[l]!.length > 10), preview);
+  ok("killSwitchPreview: sign-ups affect no store; Sheets counts the stores with a binding", (await flags.killSwitchPreview(rootUp, "signups_enabled")).affectedStores === null && (await flags.killSwitchPreview(rootUp, "sheets_sync_enabled")).affectedStores === (await count(fx.conn, "SELECT COUNT(DISTINCT store_id) AS n FROM sheet_bindings")));
+  const killOp = fx.newId();
+  await activeKillSwitches();
+  const tripped = await flags.setKillSwitch(rootUp, { key: "platform_read_only", value: true, reason: "maintenance window", typed: "Read-Only", opId: killOp });
+  ok("setKillSwitch: read-only on, applied in this process at once (invalidateFlags)", tripped.changed && (await activeKillSwitches()).includes("platform_read_only"), tripped);
+  const [killAudit] = await rows<{ meta: string }>(fx.conn, "SELECT meta FROM audit_log WHERE action = 'platform.kill.changed' ORDER BY id DESC LIMIT 1");
+  const killMeta = JSON.parse(killAudit?.meta ?? "{}") as Record<string, unknown>;
+  ok("audit platform.kill.changed { key, from, to, reason }", killMeta.key === "platform_read_only" && killMeta.from === false && killMeta.to === true && killMeta.reason === "maintenance window", killAudit);
+  const killNotes = await rows<{ audience: string; vars: string; platform_min_role: string | null }>(fx.conn, "SELECT audience, vars, platform_min_role FROM notifications WHERE kind = 'staff.kill_changed' AND vars LIKE '%platform_read_only%'"); // case 6 leaves one of its own
+  ok("every staff member hears staff.kill_changed", killNotes.length === 1 && killNotes[0]?.audience === "platform_staff", killNotes);
+  ok("setKillSwitch: the same operation id again changes nothing", (await flags.setKillSwitch(rootUp, { key: "platform_read_only", value: false, reason: "done", opId: killOp })).changed === false);
+  const back = await flags.setKillSwitch(rootUp, { key: "platform_read_only", value: false, reason: "done", opId: fx.newId() });
+  ok("read-only switches off without a typed word, at once", back.changed && !(await activeKillSwitches()).includes("platform_read_only"));
+  const cards = await flags.listKillSwitches(analyst);
+  const roCard = cards.find((c) => c.key === "platform_read_only");
+  ok("listKillSwitches: seven cards; read-only Off with its last change and history, newest first", cards.length === 7 && roCard?.state === "off" && roCard.history.length === 2 && roCard.history[0]?.to === false && roCard.last?.reason === "done", roCard);
+
+  await fx.conn.query("INSERT IGNORE INTO flags (`key`, kind, description, default_value, type, owner_track) VALUES ('case4_retired_flag', 'release', 'Gone from code', 'true', 'boolean', 'platform')");
+  await fx.conn.query("UPDATE flags SET archived = 1 WHERE `key` = 'case4_retired_flag'");
+  const tabs = await flags.listFlags(analyst);
+  const all = [...tabs.release, ...tabs.ops, ...tabs.experiment];
+  ok("listFlags: no kill-switch row in the tabs; a flag gone from code reads archived", !all.some((f) => f.key === "platform_read_only") && all.find((f) => f.key === "case4_retired_flag")?.archived === true && all.find((f) => f.key === "console_perf_panel")?.ownerTrack === "platform", all.map((f) => f.key));
+  ok("saveFlag: an archived flag is read-only", (await refusalOf(flags.saveFlag(ops, { key: "case4_retired_flag", default: false, rules: [], opId: fx.newId() }))) === "invalid:console.flag.archived");
+  ok("saveFlag: a kill switch isn't a flag", (await codeOf(flags.saveFlag(ops, { key: "platform_read_only", default: true, rules: [], opId: fx.newId() }))) === "not_found");
+  ok("saveFlag: the value's type is checked", (await codeOf(flags.saveFlag(ops, { key: "console_perf_panel", default: "yes", rules: [], opId: fx.newId() }))) === "fields:default");
+  const ctxA = { storeId: fx.stores.A.id, planId: "beta", storeStatus: "active" as const };
+  ok("flagValue: the declaration's default before any edit", (await flags.flagValue<boolean>("console_perf_panel", ctxA)) === false);
+  await flags.saveFlag(ops, { key: "console_perf_panel", default: false, rules: [{ when: { plans: ["beta"] }, value: true }], opId: fx.newId() });
+  ok("saveFlag: a rule applies at once in this process", (await flags.flagValue<boolean>("console_perf_panel", ctxA)) === true && (await flags.flagValue<boolean>("console_perf_panel", { ...ctxA, planId: "case4_plan" })) === false);
+  ok("setFlagOverride: an expiry in the past is refused", (await codeOf(flags.setFlagOverride(ops, { key: "console_perf_panel", scope: "store", scopeId: fx.stores.A.id, value: false, expiresAt: new Date(Date.now() - 60_000) }))) === "fields:expiresAt");
+  ok("setFlagOverride: a store that doesn't exist is refused", (await codeOf(flags.setFlagOverride(ops, { key: "console_perf_panel", scope: "store", scopeId: fx.newId(), value: false }))) === "fields:scopeId");
+  await flags.setFlagOverride(ops, { key: "console_perf_panel", scope: "store", scopeId: fx.stores.A.id, value: false, note: "case 4" });
+  ok("a store override wins over the rule", (await flags.flagValue<boolean>("console_perf_panel", ctxA)) === false);
+  await fx.conn.query("UPDATE flag_overrides SET expires_at = NOW(3) - INTERVAL 1 MINUTE WHERE flag_key = 'console_perf_panel' AND scope = 'store'");
+  flags.invalidateFlags();
+  ok("an expired override is ignored (PL-12 acceptance)", (await flags.flagValue<boolean>("console_perf_panel", ctxA)) === true);
+  ok("clearFlagOverride removes it, audited", (await flags.clearFlagOverride(ops, { key: "console_perf_panel", scope: "store", scopeId: fx.stores.A.id })).cleared && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.flag.changed'")) === 3);
+  await flags.saveFlag(ops, { key: "console_perf_panel", default: false, rules: [], opId: fx.newId() });
+}
+
+/* ------------------------------------------------------------------ */
+/* case 7: staff (SE-01; PLA-§14.1, PD7, PD13)                         */
+/* ------------------------------------------------------------------ */
+
+async function case7(fx: Fixtures): Promise<void> {
+  const staff = await import("@/lib/platform/staff");
+  const preq = await import("@/lib/platform/platform-requests");
+  const { requirePlatform } = await import("@/lib/platform/seam");
+  const { runAsIdentity } = await import("@/lib/tenancy/context");
+  const { createSession } = await import("@/lib/auth/session");
+  const { CONSOLE_2FA_ENROL_PATH } = await import("@/lib/auth/paths");
+  const root = await staffCtx(fx, "super_admin");
+  const rootUp = await staffCtx(fx, "super_admin", { stepUp: true });
+  const gate = (userId: string) => refusalOf(runAsIdentity({ userId, path: "/admin" }, () => requirePlatform({ throwOnFail: true })));
+  const roleOf = async (id: string) => (await rows<{ platform_role: string }>(fx.conn, "SELECT platform_role FROM users WHERE id = ?", [id]))[0]?.platform_role;
+  const meta = { ipHash: null, uaLabel: "Edge on Windows" };
+
+  // the console gate (core §B.7): a staff role is inert until TOTP
+  ok("requirePlatform: a staff member with TOTP passes", (await gate(fx.staff.admin)) === "ok");
+  ok("requirePlatform: an invited admin without TOTP is refused (enrol first)", (await gate(fx.staff.adminNoTotp)) === "forbidden:error.platform_2fa_required");
+  ok("requirePlatform: a seller is not_found", (await gate(fx.outsider)).startsWith("not_found"));
+
+  // invites (PLA-§14.1)
+  ok("inviteStaff: a fresh step-up first", (await codeOf(staff.inviteStaff(root, { email: "new.help@gmail.com", role: "support" }))) === "step_up");
+  ok("inviteStaff: staff.manage is super_admin only", (await codeOf(staff.inviteStaff(await staffCtx(fx, "admin", { stepUp: true }), { email: "new.help@gmail.com", role: "support" }))) === "forbidden");
+  ok("inviteStaff: never super_admin directly (PD7)", (await codeOf(staff.inviteStaff(rootUp, { email: "new.help@gmail.com", role: "super_admin" }))) === "fields:role");
+  ok("inviteStaff: someone already on the staff", (await refusalOf(staff.inviteStaff(rootUp, { email: "ops@store-gen.test", role: "support" }))) === "invalid:console.staff.already_staff");
+  const invite = await staff.inviteStaff(rootUp, { email: "  New.Help@Gmail.com ", role: "support", note: "night shift" });
+  const token = invite.url.split("/invite/staff/")[1] ?? "";
+  ok("inviteStaff: a link on the platform origin with a 32-byte token, 72 h", invite.url.startsWith("http://localhost:3461/invite/staff/") && /^[A-Za-z0-9_-]{43}$/.test(token) && Math.abs(new Date(invite.expiresAt).getTime() - Date.now() - 72 * 3_600_000) < 60_000, invite);
+  const [stored] = await rows<{ email_norm: string; token_hash: string }>(fx.conn, "SELECT email_norm, token_hash FROM staff_invites WHERE id = ?", [invite.inviteId]);
+  ok("only the token's sha256 is stored, the e-mail normalised", stored?.token_hash === staff.hashStaffToken(token) && !JSON.stringify(stored).includes(token) && stored?.email_norm === "new.help@gmail.com", stored);
+  ok("inviteStaff: the same e-mail twice (revoke first)", (await refusalOf(staff.inviteStaff(rootUp, { email: "new.help@gmail.com", role: "analyst" }))) === "invalid:console.staff.already_invited");
+  const [invAudit] = await rows<{ meta: string }>(fx.conn, "SELECT meta FROM audit_log WHERE action = 'platform.staff.invited' ORDER BY id DESC LIMIT 1");
+  ok("audit platform.staff.invited carries the masked e-mail only", !!invAudit && !invAudit.meta.includes("new.help@") && JSON.parse(invAudit.meta).role === "support", invAudit);
+  const view = await staff.getStaffInviteState(token);
+  ok("the public page: valid, the e-mail masked, a new account signs up", view.state === "valid" && "way" in view && view.way === "sign_up" && !JSON.stringify(view).includes("new.help@"), view);
+  ok("the public page: an unknown token reads invalid", (await staff.getStaffInviteState("x".repeat(43))).state === "invalid");
+
+  // accepting with a new account: no store, the role inert until TOTP
+  const accepted = await staff.acceptStaffInvite(token, { name: "New Help", password: "Platform-Check-Staff-9q!", locale: "en" }, meta);
+  ok("acceptStaffInvite: a new account with the role, sent to the 2FA enrolment", accepted.createdAccount && accepted.role === "support" && accepted.next === CONSOLE_2FA_ENROL_PATH && (await roleOf(accepted.userId)) === "support", accepted);
+  ok("…no store and no membership is created (PD13)", (await count(fx.conn, "SELECT COUNT(*) AS n FROM store_members WHERE user_id = ?", [accepted.userId])) === 0 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM stores WHERE created_by = ?", [accepted.userId])) === 0);
+  ok("…and the console stays closed until TOTP", (await gate(accepted.userId)) === "forbidden:error.platform_2fa_required");
+  const listed = await staff.listStaff(root);
+  const row = listed.staff.find((s) => s.userId === accepted.userId);
+  ok("listStaff: Waiting for 2FA, added by the inviter", row?.state === "waiting_2fa" && row.addedBy?.id === fx.staff.super_admin && listed.invites.some((i) => i.id === invite.inviteId && i.state === "used"), row);
+  ok("the used link reads used, and refuses a second accept", (await staff.getStaffInviteState(token)).state === "used" && (await refusalOf(staff.acceptStaffInvite(token, { userId: accepted.userId }, meta))) === "invalid:console.staff.invite_invalid");
+
+  // the pending cap: 10 at most
+  const pending: string[] = [];
+  for (let i = 0; (await staff.pendingStaffInvites(root)) < 10 && i < 12; i++) pending.push((await staff.inviteStaff(rootUp, { email: `pending.${i}@gmail.com`, role: "analyst" })).inviteId);
+  ok("inviteStaff: the 11th pending invite is refused", (await codeOf(staff.inviteStaff(rootUp, { email: "eleventh@gmail.com", role: "analyst" }))) === "quota");
+  for (const id of pending) await staff.revokeStaffInvite(rootUp, { inviteId: id });
+  ok("revokeStaffInvite: revoked ones no longer count", (await staff.pendingStaffInvites(root)) === 0 && (await staff.revokeStaffInvite(rootUp, { inviteId: pending[0] })).revoked === false);
+
+  // a role change revokes the person's sessions
+  const s1 = await createSession(fx.staff.support, { mfaPassed: true, ip: "203.0.113.9", ua: "Edge" });
+  const changed = await staff.setStaffRole(rootUp, { userId: fx.staff.support, role: "analyst", reason: "moves to reporting" });
+  ok("setStaffRole: support → analyst, the session revoked", "changed" in changed && changed.changed && (await roleOf(fx.staff.support)) === "analyst" && (await count(fx.conn, "SELECT COUNT(*) AS n FROM sessions WHERE id = ?", [s1.id])) === 0, changed);
+  const [roleAudit] = await rows<{ meta: string }>(fx.conn, "SELECT meta FROM audit_log WHERE action = 'platform.staff.changed' AND target = ? ORDER BY id DESC LIMIT 1", [fx.staff.support]);
+  ok("audit platform.staff.changed { userId, from, to, reason }", (() => {
+    const m = JSON.parse(roleAudit?.meta ?? "{}");
+    return m.userId === fx.staff.support && m.from === "support" && m.to === "analyst" && m.reason === "moves to reporting";
+  })(), roleAudit);
+  ok("setStaffRole: a reason is required", (await codeOf(staff.setStaffRole(rootUp, { userId: fx.staff.support, role: "support", reason: "" }))).startsWith("fields"));
+  ok("setStaffRole: nobody changes their own role", (await refusalOf(staff.setStaffRole(rootUp, { userId: fx.staff.super_admin, role: "admin", reason: "testing" }))) === "forbidden:auth.staff.not_yourself");
+  await fx.conn.query("UPDATE users SET platform_role = 'support' WHERE id = ?", [fx.staff.support]);
+
+  // the invariant: at least one active super_admin with TOTP (other cases' extra super_admins step aside meanwhile)
+  const extraSupers = (await rows<{ id: string }>(fx.conn, "SELECT id FROM users WHERE platform_role = 'super_admin' AND id <> ?", [fx.staff.super_admin])).map((r) => r.id);
+  if (extraSupers.length) await fx.conn.query("UPDATE users SET platform_role = 'admin' WHERE id IN (?)", [extraSupers]);
+  const second = await account(fx, "root.two@store-gen.test", { platformRole: "super_admin", totp: true });
+  const secondUp = await staffCtx(fx, "super_admin", { userId: second, stepUp: true });
+  const both = await Promise.allSettled([
+    staff.setStaffRole(rootUp, { userId: second, role: "admin", reason: "rotation one" }),
+    staff.setStaffRole(secondUp, { userId: fx.staff.super_admin, role: "admin", reason: "rotation two" }),
+  ]);
+  const refusedLast = both.filter((r) => r.status === "rejected" && (r.reason as { code?: string }).code === "last_super_admin").length;
+  const supersLeft = await count(fx.conn, "SELECT COUNT(*) AS n FROM users WHERE platform_role = 'super_admin' AND totp_enabled = 1 AND disabled = 0");
+  ok("two super_admins demoting each other at once: one change, one last_super_admin", both.filter((r) => r.status === "fulfilled").length === 1 && refusedLast === 1 && supersLeft === 1, both.map((r) => r.status));
+  await fx.conn.query("UPDATE users SET platform_role = 'super_admin' WHERE id IN (?, ?)", [fx.staff.super_admin, second]);
+  await fx.conn.query("UPDATE users SET totp_enabled = 0 WHERE id = ?", [second]);
+  ok("the last super_admin with TOTP can't be demoted (one without TOTP doesn't count)", (await codeOf(staff.setStaffRole(secondUp, { userId: fx.staff.super_admin, role: "admin", reason: "testing" }))) === "last_super_admin" && (await roleOf(fx.staff.super_admin)) === "super_admin");
+  ok("…nor removed", (await codeOf(staff.removeStaff(secondUp, { userId: fx.staff.super_admin, reason: "testing" }))) === "last_super_admin");
+  await fx.conn.query("UPDATE users SET totp_enabled = 1 WHERE id = ?", [second]);
+
+  // a promotion with two super_admins needs the other one's confirmation (PD7)
+  const promo = await staff.setStaffRole(rootUp, { userId: fx.staff.admin, role: "super_admin", reason: "second on-call" });
+  const reqId = "requested" in promo ? promo.requested.id : "";
+  ok("setStaffRole → super_admin: a four-eyes platform request, the role unchanged", "requested" in promo && promo.requested.mode === "four_eyes" && (await roleOf(fx.staff.admin)) === "admin", promo);
+  ok("…the other super_admin is told", (await count(fx.conn, "SELECT COUNT(*) AS n FROM notifications WHERE kind = 'staff.super_admin_requested' AND user_id = ?", [second])) === 1);
+  ok("…the requester can't confirm it", (await refusalOf(preq.confirmPlatformRequest(rootUp, { requestId: reqId }))) === "forbidden:console.request.self_confirm");
+  ok("…the job doesn't execute an unconfirmed request", (await preq.runDueRequests(new Date())).executed === 0 && (await roleOf(fx.staff.admin)) === "admin");
+  await preq.confirmPlatformRequest(secondUp, { requestId: reqId });
+  const ran = await preq.runDueRequests(new Date());
+  ok("…confirmed by the other super_admin, executed by the job", ran.executed === 1 && (await roleOf(fx.staff.admin)) === "super_admin", ran);
+  await fx.conn.query("UPDATE users SET platform_role = 'admin' WHERE id = ?", [fx.staff.admin]);
+  // with one super_admin left, a promotion waits 24 h (cancelled here)
+  await fx.conn.query("UPDATE users SET platform_role = 'none' WHERE id = ?", [second]);
+  const delayed = await staff.setStaffRole(rootUp, { userId: fx.staff.analyst, role: "super_admin", reason: "only one root" });
+  ok("one super_admin: the promotion is delayed 24 h", "requested" in delayed && delayed.requested.mode === "delayed" && !!delayed.requested.executeAfter, delayed);
+  if ("requested" in delayed) await preq.cancelPlatformRequest(rootUp, { requestId: delayed.requested.id });
+
+  // remove and sign out everyone
+  const removed = await staff.removeStaff(rootUp, { userId: accepted.userId, reason: "left the team" });
+  ok("removeStaff: role none", removed.removed && (await roleOf(accepted.userId)) === "none");
+  const mine = await createSession(fx.staff.super_admin, { mfaPassed: true, ip: "203.0.113.7", ua: "Edge" });
+  const mineOther = await createSession(fx.staff.super_admin, { mfaPassed: true, ip: "203.0.113.8", ua: "Edge" });
+  const theirs = await createSession(fx.staff.analyst, { mfaPassed: true, ip: "203.0.113.10", ua: "Edge" });
+  const me = { ...rootUp, user: { ...rootUp.user, sessionId: mine.id } };
+  const out = await staff.signOutAllStaffExcept(me);
+  const alive = await rows<{ id: string }>(fx.conn, "SELECT id FROM sessions WHERE id IN (?, ?, ?)", [mine.id, mineOther.id, theirs.id]);
+  ok("signOutAllStaffExcept: every staff session ends but the caller's current one", out.sessions >= 2 && alive.length === 1 && alive[0]?.id === mine.id, { out, alive });
+  ok("audit platform.staff.signed_out_all", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.staff.signed_out_all'")) === 1);
+  if (extraSupers.length) await fx.conn.query("UPDATE users SET platform_role = 'super_admin' WHERE id IN (?)", [extraSupers]);
+}
+
+/* ------------------------------------------------------------------ */
+/* case 8: legal documents (PL-14; PLA-§13.4, PD17, PD49)              */
+/* ------------------------------------------------------------------ */
+
+async function case8(fx: Fixtures): Promise<void> {
+  const legal = await import("@/lib/platform/legal");
+  const { seedLegalTemplates } = await import("@/lib/db/boot-tasks");
+  const { signupAccount } = await import("@/lib/auth/signup");
+  const root = await staffCtx(fx, "super_admin");
+  const docOf = async (kind: string, locale: string, version: number) =>
+    (await rows<{ id: string; status: string; needs_legal_review: number; ack_unreviewed_by: string | null; ack_unreviewed_at: Date | null; requires_reacceptance: number }>(fx.conn, "SELECT * FROM legal_documents WHERE kind = ? AND locale = ? AND version = ?", [kind, locale, version]))[0];
+
+  // the seed (PD49): every R1 kind × locale as a draft needing legal review, no DPA
+  const seeded = await seedLegalTemplates();
+  ok("the boot seeds 24 drafts once (8 kinds × 3 locales)", seeded.inserted === 24 && (await seedLegalTemplates()).skipped, seeded);
+  ok("…every one a draft flagged Needs legal review, no DPA", (await count(fx.conn, "SELECT COUNT(*) AS n FROM legal_documents WHERE status = 'draft' AND needs_legal_review = 1")) === 24 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM legal_documents WHERE kind = 'dpa'")) === 0);
+  const list0 = await legal.listLegal(root);
+  ok("listLegal: kind × locale, and the red lines: sign-up runs without ToS, Privacy, AUP", list0.groups.length === 24 && JSON.stringify(list0.missing) === JSON.stringify(["tos", "privacy", "aup"]), list0.missing);
+  ok("legal.manage is super_admin only", (await codeOf(legal.listLegal(await staffCtx(fx, "admin")))) === "forbidden");
+
+  // the editor's refusals
+  ok("saveLegalDraft: DPA arrives in R2", (await refusalOf(legal.saveLegalDraft(root, { kind: "dpa", locale: "en", title: "DPA", body: "Text" }))) === "invalid:console.legal.dpa_later");
+  ok("saveLegalDraft: a platform document holds no placeholder", (await codeOf(legal.saveLegalDraft(root, { kind: "tos", locale: "en", title: "Terms", body: "Hello {{contact.phone}}" }))) === "fields:body");
+  ok("saveLegalDraft: a store template refuses a field P3 doesn't export", (await refusalOf(legal.saveLegalDraft(root, { kind: "store_returns", locale: "en", title: "Returns", body: "Within {{returns.days}} days" }))) === "fields:body=console.legal.unknown_placeholder");
+  ok("saveLegalDraft: a stale editor answers conflict", (await refusalOf(legal.saveLegalDraft(root, { kind: "privacy", locale: "fr", title: "Confidentialité", body: "Texte", baseVersion: 0 }))) === "conflict:console.legal.changed");
+  const edited = await legal.saveLegalDraft(root, { kind: "privacy", locale: "fr", title: "Politique de confidentialité", body: "# Politique\n\nNous traitons vos données pour faire fonctionner le service.", baseVersion: 1 });
+  ok("saveLegalDraft: the seeded draft is edited in place (version 1)", !edited.created && edited.version === 1, edited);
+
+  // an unreviewed publish needs both confirmations, recorded (PD17)
+  const privacyFr = (await docOf("privacy", "fr", 1))!;
+  ok("publishLegal: unreviewed without the acknowledgement", (await codeOf(legal.publishLegal(root, { id: privacyFr.id }))) === "fields:acknowledge");
+  ok("publishLegal: unreviewed with a wrong typed text", (await codeOf(legal.publishLegal(root, { id: privacyFr.id, acknowledge: true, typed: "publish" }))) === "fields:typed");
+  ok("…nothing published", (await docOf("privacy", "fr", 1))?.status === "draft");
+  const pub = await legal.publishLegal(root, { id: privacyFr.id, acknowledge: true, typed: "Publish Unreviewed" });
+  const pubRow = await docOf("privacy", "fr", 1);
+  ok("publishLegal: published with ack_unreviewed_by / _at", pub.unreviewed && pubRow?.status === "published" && pubRow.ack_unreviewed_by === fx.staff.super_admin && !!pubRow.ack_unreviewed_at, pubRow);
+  const published1 = await rows<{ meta: string }>(fx.conn, "SELECT meta FROM audit_log WHERE action = 'platform.legal.published'");
+  ok("audit platform.legal.published { unreviewed: true }", published1.length === 1 && JSON.parse(published1[0]!.meta).unreviewed === true, published1);
+  ok("listLegal: Privacy no longer missing", JSON.stringify((await legal.listLegal(root)).missing) === JSON.stringify(["tos", "aup"]));
+
+  // a signup while no ToS is published records acceptances for the published kinds only (T2's signup)
+  const approval = { killed: false, mode: { mode: "approval" as const, stored: "approval" as const, unguarded: false, turnstile: null }, chargeSlot: async () => false, refundSlot: async () => undefined } as never;
+  const signupCtx = (n: number) => ({ ip: `198.51.100.${80 + n}`, ua: "Mozilla/5.0 (platform-check)", deviceId: null, turnstile: async () => "ok" as const }) as never;
+  const form = (n: string) => ({ name: `Legal Seller ${n}`, email: `legal.seller.${n}@gmail.com`, password: `Platform-Check-${n}-Legal-9q!`, phone: "+212612345678", storeName: `Legal ${n}`, handle: `legal-case-${n}`, market: "MA", acceptLegal: true, formMs: 42_000, locale: "fr" as const });
+  const u1 = (await signupAccount(form("one"), signupCtx(1), approval)) as { kind: string; userId: string; storeId: string };
+  const acc1 = await rows<{ document_id: string; context: string; store_id: string | null }>(fx.conn, "SELECT document_id, context, store_id FROM legal_acceptances WHERE user_id = ?", [u1.userId]);
+  ok("signup without a published ToS succeeds and accepts only the published Privacy", u1.kind === "created" && acc1.length === 1 && acc1[0]?.document_id === privacyFr.id && acc1[0].context === "signup" && acc1[0].store_id === u1.storeId, { u1: u1.kind, acc1 });
+
+  // re-acceptance, per user: a new Privacy version that asks people to accept again
+  const v2 = await legal.saveLegalDraft(root, { kind: "privacy", locale: "fr", title: "Politique de confidentialité", body: "# Politique\n\nVersion deux : nous traitons vos données pour faire fonctionner le service.", summary: "Une section réécrite.", requiresReacceptance: true, baseVersion: 1 });
+  ok("saveLegalDraft on a published version starts version 2", v2.created && v2.version === 2, v2);
+  ok("markLegalReviewed needs the typed word", (await codeOf(legal.markLegalReviewed(root, { id: v2.id, typed: "ok" }))) === "fields:typed");
+  ok("markLegalReviewed clears Needs legal review", (await legal.markLegalReviewed(root, { id: v2.id, typed: "reviewed" })).changed && (await docOf("privacy", "fr", 2))?.needs_legal_review === 0);
+  const detail = await legal.getLegalVersion(root, v2.id);
+  ok("getLegalVersion: the line diff against version 1", detail.previous?.version === 1 && detail.diffStats.added >= 1 && detail.diffStats.removed >= 1, detail.diffStats);
+  const u2 = await account(fx, "legal.reader@gmail.com", { locale: "en" });
+  ok("before the publish: nobody is asked again", (await legal.pendingReacceptance(u1.userId)) === null && (await legal.pendingReacceptance(u2)) === null);
+  const pub2 = await legal.publishLegal(root, { id: v2.id });
+  ok("a reviewed version publishes without the acknowledgement; version 1 retires", !pub2.unreviewed && pub2.retired === 1 && (await docOf("privacy", "fr", 1))?.status === "retired");
+  ok("retireLegal: the only published version can't retire", (await refusalOf(legal.retireLegal(root, { id: v2.id }))) === "invalid:console.legal.retire_last_published");
+  const p1 = await legal.pendingReacceptance(u1.userId);
+  ok("the earlier signup is asked to accept version 2 (title and What changed)", p1?.docs.length === 1 && p1.docs[0]?.id === v2.id && p1.docs[0].summary === "Une section réécrite.", p1);
+  ok("a person in en is asked for the fr version (locale → fr → en → ar)", (await legal.pendingReacceptance(u2))?.docs[0]?.id === v2.id);
+  const u3 = (await signupAccount(form("three"), signupCtx(3), approval)) as { kind: string; userId: string };
+  ok("a signup after the publish accepted version 2: not asked", u3.kind === "created" && (await legal.pendingReacceptance(u3.userId)) === null);
+  const userCtx = (id: string) => ({ user: { id, email: "", name: "", totpEnabled: false, sessionId: `sess-${id}`, platformRole: "none", locale: null, lastStoreId: null }, actor: { kind: "user", userId: id, impersonatorId: null, ip: null } }) as never;
+  ok("recordReacceptance: a document the person isn't asked for → conflict", (await codeOf(legal.recordReacceptance(userCtx(u1.userId), [privacyFr.id], { ipHash: null, uaLabel: "Chrome" }))) === "conflict");
+  await legal.recordReacceptance(userCtx(u1.userId), [v2.id], { ipHash: null, uaLabel: "Chrome on Android" });
+  ok("recordReacceptance: one reaccept row, outside any store; this person is no longer asked", (await count(fx.conn, "SELECT COUNT(*) AS n FROM legal_acceptances WHERE user_id = ? AND document_id = ? AND context = 'reaccept' AND store_id IS NULL", [u1.userId, v2.id])) === 1 && (await legal.pendingReacceptance(u1.userId)) === null);
+  ok("…the other person still is (per user)", (await legal.pendingReacceptance(u2))?.docs[0]?.id === v2.id);
+  ok("listLegal: acceptance counts per platform version", (await legal.listLegal(root)).groups.find((g) => g.kind === "privacy" && g.locale === "fr")?.published?.acceptances === 2);
+
+  // PL-14 acceptance (PLA-§13.6): a new brand name is the TOTP issuer of new enrolments only; existing codes keep
+  // verifying (the HKDF salt and the purpose totp:<userId> never change). The console save is step 7's action; this is
+  // the setting it writes and T2's enrolment that reads it.
+  const mfa = await import("@/lib/auth/mfa");
+  const { totpCode, totpStep } = await import("@/lib/auth/totp");
+  const { prepareAccount, insertAccount } = await import("@/lib/auth/users");
+  const { getPlatformSetting, setPlatformSetting } = await import("@/lib/settings");
+  const password = "Platform-Check-Issuer-9q!";
+  const person = async (email: string) => {
+    const a = await prepareAccount({ email, name: "Issuer Person", password, locale: "en" });
+    await insertAccount(a);
+    return a.id!;
+  };
+  const issuerOf = (uri: string) => new URL(uri).searchParams.get("issuer");
+  const before = await person("issuer.before@gmail.com");
+  const enrolBefore = await mfa.beginTotpEnrollment(before);
+  const secret = new URL(enrolBefore.otpauthUri).searchParams.get("secret") ?? "";
+  await mfa.confirmTotpEnrollment(before, { code: totpCode(secret), password });
+  const platform = await getPlatformSetting("platform", { fresh: true });
+  const brandBefore = platform.brand.name;
+  await setPlatformSetting("platform", { ...platform, brand: { ...platform.brand, name: "Souk Studio" } }, { id: fx.staff.super_admin, ip: "203.0.113.7", kind: "platform" });
+  try {
+    const after = await person("issuer.after@gmail.com");
+    const enrolAfter = await mfa.beginTotpEnrollment(after);
+    ok("the brand name is the TOTP issuer of a new enrolment", issuerOf(enrolBefore.otpauthUri) === brandBefore && issuerOf(enrolAfter.otpauthUri) === "Souk Studio", { before: issuerOf(enrolBefore.otpauthUri), after: issuerOf(enrolAfter.otpauthUri) });
+    ok("a code of the authenticator enrolled before the rename still verifies", (await mfa.verifySecondFactor(before, { method: "totp", code: totpCode(secret, totpStep() + 1) })).ok);
+  } finally {
+    await setPlatformSetting("platform", { ...(await getPlatformSetting("platform", { fresh: true })), brand: { ...platform.brand, name: brandBefore } }, { id: fx.staff.super_admin, kind: "platform" });
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* case 19, the Domains half (OS-06; PLA-§16)                          */
+/* ------------------------------------------------------------------ */
+
+async function case19(fx: Fixtures): Promise<void> {
+  const dm = await import("@/lib/platform/domain-move");
+  const { SKIP_TEXT, DOMAIN_STEPS } = await import("@/lib/platform/domain-move-rules");
+  const { getPlatformSetting } = await import("@/lib/settings");
+  const root = await staffCtx(fx, "super_admin");
+  const rootUp = await staffCtx(fx, "super_admin", { stepUp: true });
+  let netCalls = 0;
+  const refuse = async (): Promise<never> => {
+    netCalls++;
+    throw new Error("network call");
+  };
+  const noNet = { head: refuse, get: refuse, certificate: refuse, turnstile: refuse };
+
+  // on the temporary domain (no STORE_ROOT_DOMAIN, no ADMIN_HOST): answers without any network call
+  const v3 = await dm.runDomainCheck(root, { id: "V3" }, { net: noNet });
+  ok("V3 on the temporary domain: 'S mode is off', no network call", v3.outcome === "skipped" && v3.message === SKIP_TEXT.sModeOff && v3.network === false && netCalls === 0, v3);
+  const v12 = await dm.runDomainCheck(root, { id: "V12", requestHost: { cls: "platform", host: "localhost:3461" } as never }, { net: noNet });
+  ok("V12: 'ADMIN_HOST not set (expected before the move)', no network call", v12.outcome === "skipped" && v12.message === SKIP_TEXT.adminHostUnset && v12.network === false && netCalls === 0, v12);
+  for (const id of ["V7", "V8", "V10", "V13"]) {
+    const r = await dm.runDomainCheck(root, { id, token: "x" }, { net: noNet });
+    ok(`${id} on the temporary domain: skipped without a network call`, r.outcome === "skipped" && netCalls === 0, r);
+  }
+  ok("a skipped check is not recorded as passed", (await dm.getDomainMove(root)).checks.every((c) => c.passed === null));
+  ok("a manual check has no Run", (await refusalOf(dm.runDomainCheck(root, { id: "V1" }, { net: noNet }))) === "invalid:console.domains.check_manual");
+  ok("a runnable check can't be marked passed by hand", (await refusalOf(dm.markDomainCheck(root, { id: "V3", passed: true }))) === "invalid:console.domains.check_run_it");
+  ok("domains.manage: an analyst can't mark a step", (await codeOf(dm.markDomainStep(await staffCtx(fx, "analyst"), { stepId: "buy_domain", done: true }))) === "forbidden");
+
+  // the checklist state lives in the platform setting row: what a restarted process reads
+  ok("markDomainStep: marked with date and staff", (await dm.markDomainStep(root, { stepId: "buy_domain", done: true })).changed && !(await dm.markDomainStep(root, { stepId: "buy_domain", done: true })).changed);
+  await dm.markDomainCheck(root, { id: "V1", passed: true, note: "npm run test:hosts: 626 checks" });
+  await Promise.all([dm.markDomainStep(root, { stepId: "cf_zone", done: true }), dm.markDomainStep(root, { stepId: "apex_a", done: true })]);
+  const [settingRow] = await rows<{ value: string }>(fx.conn, "SELECT value FROM settings WHERE `key` = 'platform'");
+  const persisted = JSON.parse(settingRow?.value ?? "{}").domainMove ?? {};
+  ok("the row holds every mark, two concurrent marks included (the domain-move lock)", ["buy_domain", "cf_zone", "apex_a"].every((s) => persisted.steps?.[s]?.by === fx.staff.super_admin) && persisted.checks?.V1?.note?.startsWith("npm run test:hosts"), persisted);
+  const fresh = (await getPlatformSetting("platform", { fresh: true })).domainMove;
+  const view = await dm.getDomainMove(root);
+  ok("a fresh read (the restart's) gives the same checklist", Object.keys(fresh.steps).sort().join() === "apex_a,buy_domain,cf_zone" && view.steps.filter((s) => s.done).length === 3 && view.checks.find((c) => c.id === "V1")?.passed?.note === "npm run test:hosts: 626 checks" && !view.allPassed);
+  await dm.markDomainStep(root, { stepId: "apex_a", done: false });
+  ok("a mark can be cleared", !(await dm.getDomainMove(root)).steps.find((s) => s.id === "apex_a")?.done);
+  ok("audit platform.domains.step per change", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.domains.step'")) === 5);
+  ok("the env step says restart, never rebuild", /restart/i.test(DOMAIN_STEPS.find((s) => s.id === "env_replace")?.detail ?? "") && !/rebuild/i.test(JSON.stringify(view)));
+
+  // the status card: non-secret values only
+  const secret = "case19-edge-key-0f3a9d1c7b5e2a8f4d6c0b9e1a3f5d7c";
+  process.env.EDGE_KEY = secret;
+  try {
+    const status = await dm.domainStatus(await staffCtx(fx, "analyst"));
+    ok("domainStatus: EDGE_KEY reads set, its value nowhere; S mode off without the root domain; ADMIN_HOST not yet", status.edgeKey === "set" && status.edgeKeyPrev === "not_set" && !JSON.stringify(status).includes(secret) && !status.sMode && status.adminHostLine === "not_yet" && status.signup.defaultMode === "invite", status);
+  } finally {
+    delete process.env.EDGE_KEY;
+  }
+
+  // re-render all live pages: the request returns at once, the job fans out
+  ok("requestRerenderAll: a fresh step-up first", (await codeOf(dm.requestRerenderAll(root, fx.newId()))) === "step_up");
+  const started = await dm.requestRerenderAll(rootUp, fx.newId());
+  ok("requestRerenderAll: recorded, nothing enqueued in the request", started.started && started.state.stores === 0 && !started.state.done);
+  ok("…a second request while it runs starts nothing", (await dm.requestRerenderAll(rootUp, fx.newId())).started === false);
+  const job = await dm.runRerenderJob({ deadline: Date.now() + 2_000 });
+  const progress = await dm.rerenderProgress(root);
+  ok("the platform.rerender job runs the fan-out (P8's queue, or 'unavailable' while it is the stub: never a made-up count)", job.done && !!progress?.done && (progress.unavailable === true ? progress.enqueued === 0 : progress.stores >= 1), { job, progress });
+  ok("audit platform.domains.rerender", (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.domains.rerender'")) === 1);
+}
+
+/* ------------------------------------------------------------------ */
+/* case 20, the staff half: invite consumption (core §B.5 rev 3)       */
+/* ------------------------------------------------------------------ */
+
+async function case20(fx: Fixtures): Promise<void> {
+  const staff = await import("@/lib/platform/staff");
+  const rootUp = await staffCtx(fx, "super_admin", { stepUp: true });
+  const meta = { ipHash: null, uaLabel: "Edge on Windows" };
+  const tokenOf = (url: string) => url.split("/invite/staff/")[1] ?? "";
+
+  // 5 parallel accepts of one staff invite by the bound account → one platform_role set
+  const person = await account(fx, "five.tabs@gmail.com", { locale: "fr" });
+  const inv = await staff.inviteStaff(rootUp, { email: "five.tabs@gmail.com", role: "analyst" });
+  const view = await staff.getStaffInviteState(tokenOf(inv.url), { id: person, email: "five.tabs@gmail.com" });
+  ok("the page: the bound account accepts; another account reads wrong_account", "way" in view && view.way === "accept" && (await staff.getStaffInviteState(tokenOf(inv.url), { id: fx.outsider, email: "visitor@example.test" }).then((v) => "way" in v && v.way === "wrong_account")));
+  ok("acceptStaffInvite as another account: refused", (await refusalOf(staff.acceptStaffInvite(tokenOf(inv.url), { userId: fx.outsider }, meta))) === "forbidden:console.staff.invite_wrong_account");
+  const five = await Promise.allSettled(Array.from({ length: 5 }, () => staff.acceptStaffInvite(tokenOf(inv.url), { userId: person }, meta)));
+  const [row] = await rows<{ accepted_by: string | null; accepted_at: Date | null }>(fx.conn, "SELECT accepted_by, accepted_at FROM staff_invites WHERE id = ?", [inv.inviteId]);
+  ok("5 parallel accepts: one succeeds, four are refused", five.filter((r) => r.status === "fulfilled").length === 1 && five.filter((r) => r.status === "rejected").length === 4, five.map((r) => (r.status === "rejected" ? (r.reason as { messageKey?: string }).messageKey : "ok")));
+  ok("…one platform_role set, the invite consumed once", (await rows<{ platform_role: string }>(fx.conn, "SELECT platform_role FROM users WHERE id = ?", [person]))[0]?.platform_role === "analyst" && row?.accepted_by === person && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.staff.changed' AND target = ? AND JSON_VALUE(meta, '$.via') = 'invite'", [person])) === 1);
+  const published = await count(fx.conn, "SELECT COUNT(DISTINCT kind) AS n FROM legal_documents WHERE status = 'published' AND kind IN ('tos', 'privacy', 'aup')");
+  ok("…the published platform documents accepted once, context staff", (await count(fx.conn, "SELECT COUNT(*) AS n FROM legal_acceptances WHERE user_id = ? AND context = 'staff' AND store_id IS NULL", [person])) === published);
+
+  // 5 parallel accepts with a new account: one account, one role
+  const inv2 = await staff.inviteStaff(rootUp, { email: "new.five@gmail.com", role: "support" });
+  const fresh = await Promise.allSettled(Array.from({ length: 5 }, (_, i) => staff.acceptStaffInvite(tokenOf(inv2.url), { name: `Racer ${i}`, password: `Platform-Check-Racer-${i}-9q!`, locale: "en" }, meta)));
+  ok("5 parallel sign-ups on one invite: one account with the role", fresh.filter((r) => r.status === "fulfilled").length === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM users WHERE email = 'new.five@gmail.com' AND platform_role = 'support'")) === 1 && (await count(fx.conn, "SELECT COUNT(*) AS n FROM users WHERE email = 'new.five@gmail.com'")) === 1, fresh.map((r) => r.status));
+
+  // a revocation and an accept in the same instant: never both
+  let both = 0;
+  let neither = 0;
+  for (let i = 0; i < 5; i++) {
+    const email = `same.instant.${i}@gmail.com`;
+    const who = await account(fx, email);
+    const x = await staff.inviteStaff(rootUp, { email, role: "analyst" });
+    const now = new Date();
+    const [rev, acc] = await Promise.allSettled([staff.revokeStaffInvite(rootUp, { inviteId: x.inviteId }, now), staff.acceptStaffInvite(tokenOf(x.url), { userId: who }, meta, now)]);
+    const revoked = rev.status === "fulfilled" && rev.value.revoked;
+    const joined = acc.status === "fulfilled";
+    const role = (await rows<{ platform_role: string }>(fx.conn, "SELECT platform_role FROM users WHERE id = ?", [who]))[0]?.platform_role;
+    if (revoked && joined) both++;
+    if (!revoked && !joined) neither++;
+    if (revoked && role !== "none") both++;
+  }
+  ok("revoke and accept at the same instant (5 runs): exactly one wins each time, a revoked invite sets no role", both === 0 && neither === 0, { both, neither });
+
+  // expired at the instant of the accept
+  const late = await account(fx, "too.late@gmail.com");
+  const y = await staff.inviteStaff(rootUp, { email: "too.late@gmail.com", role: "analyst" });
+  const expiresAt = new Date((await rows<{ expires_at: Date }>(fx.conn, "SELECT expires_at FROM staff_invites WHERE id = ?", [y.inviteId]))[0]!.expires_at);
+  ok("an invite accepted at its expiry instant is refused, nothing written", (await refusalOf(staff.acceptStaffInvite(tokenOf(y.url), { userId: late }, meta, expiresAt))) === "invalid:console.staff.invite_invalid" && (await rows<{ platform_role: string }>(fx.conn, "SELECT platform_role FROM users WHERE id = ?", [late]))[0]?.platform_role === "none");
+  ok("…and reads expired on the page", (await staff.getStaffInviteState(tokenOf(y.url), null, expiresAt)).state === "expired");
+  await staff.revokeStaffInvite(rootUp, { inviteId: y.inviteId });
+  ok("a revoked invite reads revoked and refuses", (await staff.getStaffInviteState(tokenOf(y.url))).state === "revoked" && (await refusalOf(staff.acceptStaffInvite(tokenOf(y.url), { userId: late }, meta))) === "invalid:console.staff.invite_invalid");
+}
+
 /* ------------------------------------------------------------------ */
 /* the registry (PLA-§O.2)                                             */
 /* ------------------------------------------------------------------ */
@@ -1087,11 +1618,11 @@ const CASES: Record<number, { run?: CaseFn; pending?: string }> = {
   1: { run: case1 },
   2: { run: case2 },
   3: { run: case3 },
-  4: { pending: "step 5 (plans)" },
+  4: { run: case4 },
   5: { run: case5 },
   6: { run: case6 },
-  7: { pending: "step 5 (staff)" },
-  8: { pending: "step 5 (legal)" },
+  7: { run: case7 },
+  8: { run: case8 },
   9: { pending: "step 7 (impersonation from the console)" },
   10: { pending: "step 6 (query plans; --perf)" },
   11: { run: case11 },
@@ -1102,8 +1633,8 @@ const CASES: Record<number, { run?: CaseFn; pending?: string }> = {
   16: { pending: "step 7 (account deletion)" },
   17: { pending: "step 7 (tenant step-up ladder)" },
   18: { pending: "the R1 integration (T2 signup refund paths, P7 pending AI slice)" },
-  19: { pending: "step 12 (machinery screens)" },
-  20: { pending: "step 5 (invite consumption)" },
+  19: { run: case19, pending: "the machinery half (the Cron panel and its alarm, render_stuck, data_dir_85, the backup download, the break-glass links) is step 12" },
+  20: { run: case20, pending: "the store-invite half (10 parallel accepts, SEC-24) is T2's: test:tenancy and test:migrate (f)" },
 };
 
 async function main(): Promise<number> {
@@ -1121,9 +1652,12 @@ async function main(): Promise<number> {
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n));
   // the step-4 cases add stores and move store states, so they run after the cases that count stores (5's dirty-first
-  // order) or read the seeded states (B pending, C suspended)
-  const RUNS_LAST = new Set([1, 2, 3, 11, 13]);
-  const wanted = (picked?.length ? picked : Object.keys(CASES).map(Number)).sort((x, y) => Number(RUNS_LAST.has(x)) - Number(RUNS_LAST.has(y)) || x - y);
+  // order) or read the seeded states (B pending, C suspended); the step-5 cases (plans, staff, legal, domains, staff
+  // invites) add stores, signups, super_admins and published documents, so they run after those
+  const RUNS_LATER = new Set([1, 2, 3, 11, 13]);
+  const RUNS_LAST = new Set([4, 7, 8, 19, 20]);
+  const rank = (n: number) => (RUNS_LAST.has(n) ? 2 : RUNS_LATER.has(n) ? 1 : 0);
+  const wanted = (picked?.length ? picked : Object.keys(CASES).map(Number)).sort((x, y) => rank(x) - rank(y) || x - y);
   const unknown = wanted.filter((n) => !CASES[n]);
   if (unknown.length) {
     console.error(`platform-check: no case ${unknown.join(", ")} (PLA-§O.2 has 1-20)`);

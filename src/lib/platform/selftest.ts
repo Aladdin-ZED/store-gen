@@ -34,7 +34,14 @@
  *     zone, a DST change), the decisions' inputs, the grant check (`take_orders_locked`, a boost ≤ 90 days), every
  *     console edge of lifecycle-rules.ts against T1's ALLOWED_TRANSITIONS (permission, ↑, audit, notification, dates),
  *     the cooldown on a fake clock, `storeSees` per edge and locale, the console keys every refusal names, and the
- *     sign-up admin chips.
+ *     sign-up admin chips;
+ *   - plans, flags, staff, legal and the domain move (step 5): `PlanImpact.examples` (≤ 20, highest usage first), the
+ *     shielded stores, the impact and effective sentences (PD58, the pending caps), the editor's groups and the patch
+ *     refusals (`take_orders_locked`, later releases), the entitlements job's clocks; the kill switches' typed words,
+ *     states, copy and banners, the flag editor's validation and the rules summary; the staff invite states and the
+ *     last-super_admin invariant; the legal placeholders, the line diff, the acceptance locale order, the red lines and
+ *     the seeded drafts (every kind × locale, no DPA, nothing invented); the domain checklist (the env step says
+ *     restart) and the checks that answer without a network call.
  * Exits 1 on any failure.
  */
 import { readFileSync } from "node:fs";
@@ -1505,6 +1512,192 @@ async function main(): Promise<void> {
   checkD(inv({}) === "active" && inv({ uses: 1 }) === "used_up" && inv({ expiresAt: QNOW }) === "expired" && inv({ revokedAt: QNOW, uses: 1, expiresAt: QNOW }) === "revoked" && inv({ uses: 3, usesMax: 10 }) === "active", "invite code state chips: revoked > expired > used up > active");
   checkD(eq(signupAdmin.waitlistSourceOf("cap:2026-10-29"), { kind: "daily_cap", day: "2026-10-29" }) && eq(signupAdmin.waitlistSourceOf("utm:facebook"), { kind: "label", label: "utm:facebook" }) && signupAdmin.waitlistSourceOf(null) === null, "waitlist source: the daily-cap chip for cap:<day>");
   checkD(signupAdmin.waitlistLabel(new Date("2026-10-29T23:30:00.000Z")) === "Waitlist 2026-10-30", "waitlist codes are labelled with the platform day (Casablanca)");
+
+  /* ---------------------------------------------------------------- */
+  /* step 5: plans, flags, staff, legal, the domain move              */
+  /* ---------------------------------------------------------------- */
+  const pr = await import("./plan-rules");
+  const fr5 = await import("./flag-rules");
+  const sr = await import("./staff-rules");
+  const lg = await import("./legal-rules");
+  const dm = await import("./domain-move-rules");
+  const { LEGAL_SEED, LEGAL_SEED_VERSION } = await import("./data/legal");
+  const { POLICY_TEMPLATE_FIELDS } = await import("@/lib/policies/fields");
+  const { ENTITLEMENT_KEYS, GiB, MiB } = await import("@/lib/tenancy/entitlement-keys");
+  const killKeys = (await import("@/lib/flags/registry")).KILL_SWITCHES;
+  const { ADMIN_LOCALES: ADMIN_LOCALE_LIST } = await import("@/lib/i18n/admin");
+
+  // PlanImpact (PLA-§9.2, PD58): ≤ 20 examples, highest usage first, handle order on a tie; shielded stores never counted
+  const onPlan = Array.from({ length: 30 }, (_, i) => ({ id: `S${String(i).padStart(2, "0")}`, handle: `shop-${String(i).padStart(2, "0")}`, shielded: new Set<string>(i === 29 ? ["media_bytes", "sheets"] : []) }));
+  const usageMap = new Map(onPlan.map((s, i) => [s.id, (i < 25 ? 600 + (i % 7) * 50 : 100) * MiB]));
+  const impact = pr.computeImpact({
+    stores: onPlan,
+    changes: [
+      { key: "media_bytes", from: 1 * GiB, to: 500 * MiB },
+      { key: "sheets", from: true, to: false },
+      { key: "versions_kept_per_page", from: 30, to: 10 },
+    ],
+    usage: (k) => (k === "media_bytes" ? usageMap : null),
+    users: (k) => (k === "sheets" ? new Set(["S01", "S02", "S29"]) : null),
+  });
+  const media = impact.lowered.find((l) => l.key === "media_bytes")!;
+  const usedOrder = media.examples.map((e) => e.used);
+  const sortedDesc = usedOrder.every((u, i) => i === 0 || usedOrder[i - 1]! >= u);
+  const tieOrder = media.examples.every((e, i, all) => i === 0 || all[i - 1]!.used !== e.used || all[i - 1]!.handle < e.handle);
+  checkD(media.examples.length === pr.IMPACT_EXAMPLES_MAX && sortedDesc && tieOrder, "PlanImpact.examples: 20 at most, highest usage first, handle order on a tie", media.examples.slice(0, 4));
+  checkD(media.stores === 29 && media.storesAbove === 25 && media.measured, "PlanImpact: the shielded store (an override of the keys) is out of the count; 25 stores above 500 MiB", media);
+  const versions = impact.lowered.find((l) => l.key === "versions_kept_per_page")!;
+  checkD(versions && !versions.measured && versions.storesAbove === 0 && versions.examples.length === 0, "PlanImpact: a limit without a counter is unmeasured, nobody counted above", versions);
+  const sheetsOff = impact.featuresOff.find((f) => f.key === "sheets")!;
+  checkD(sheetsOff.stores === 2 && sheetsOff.measured && eq(sheetsOff.examples.map((e) => e.handle), ["shop-01", "shop-02"]), "PlanImpact.featuresOff: the stores using the feature (its marker), the shielded one left out", sheetsOff);
+  checkD(impact.stores === 30 && impact.unaffected === 30 - 25, "PlanImpact.unaffected: the stores whose effective values do not change", { stores: impact.stores, unaffected: impact.unaffected });
+  checkD(eq(pr.topExamples([{ handle: "b", used: 5 }, { handle: "a", used: 5 }, { handle: null, used: 99 }, { handle: "c", used: 7 }]), [{ handle: "c", used: 7 }, { handle: "a", used: 5 }, { handle: "b", used: 5 }]), "topExamples: no handle → never an example; ties by handle");
+  const sentences = pr.impactSentences({
+    stores: 12,
+    lowered: [{ key: "media_bytes", from: 1 * GiB, to: 500 * MiB, stores: 12, storesAbove: 4, measured: true, examples: [{ handle: "argan-souk", used: Math.round(1.9 * GiB) }, { handle: "maison-nour", used: 812 * MiB }, { handle: "dar-zitoun", used: 640 * MiB }, { handle: "riad-bloom", used: 520 * MiB }] }],
+    featuresOff: [{ key: "sheets", stores: 4, measured: true, examples: [] }],
+    unaffected: 8,
+  });
+  checkD(
+    sentences[0] === "Lowers media storage for 12 stores; 4 are already above 500 MiB (@argan-souk 1.9 GiB, @maison-nour 812 MiB, @dar-zitoun 640 MiB, @…): they keep their files, new uploads are refused until they are below the limit.",
+    "the impact sentence (PLA-§9.2's form): three examples named, then @…",
+    sentences[0],
+  );
+  checkD(sentences[1] === "Sheets sync pauses for 4 stores that are connected.", "the feature-off sentence names what stops", sentences[1]);
+
+  // the effective sentence (PD58)
+  const caps = { mediaMiB: 100, mediaMiBBeforeSubmit: 20, membersMax: 2 };
+  checkD(pr.effectiveSentence("media_bytes", 1 * GiB) === "Stores on this plan get 1 GiB of media storage.", "effective sentence: 1 GiB of media storage", pr.effectiveSentence("media_bytes", 1 * GiB));
+  checkD(pr.effectiveSentence("media_bytes", "default") === "Stores on this plan get 1 GiB of media storage.", "effective sentence: the registry default when the plan leaves the key");
+  checkD(pr.effectiveSentence("pages_max", null) === "Stores on this plan get unlimited pages." && pr.effectiveSentence("pages_max", 1) === "Stores on this plan get 1 page.", "effective sentence: unlimited, and the singular");
+  checkD(pr.effectiveSentence("ai_credits_month", 1500) === "Stores on this plan get 1,500 AI credits a month.", "effective sentence: grouped thousands", pr.effectiveSentence("ai_credits_month", 1500));
+  checkD(pr.effectiveSentence("orders_month_soft", null) === "Stores on this plan have no monthly order threshold." && pr.effectiveSentence("orders_month_soft", 2000) === "Stores on this plan see a banner past 2,000 orders a month. Orders are never refused.", "effective sentence: the soft order threshold never refuses");
+  checkD(pr.effectiveSentence("sheets", false) === "Google Sheets sync: off for stores on this plan." && pr.effectiveSentence("take_orders", true) === "Orders can't be switched off by a plan or an override.", "effective sentence: a feature, and take_orders' locked note");
+  checkD(pr.pendingSentence("media_bytes", 1 * GiB, caps) === "Pending stores get 20 MiB, then 100 MiB once they submit for review, until approval.", "pending sentence: the two media tiers (D69)", pr.pendingSentence("media_bytes", 1 * GiB, caps));
+  checkD(pr.pendingSentence("members_max", 10, caps) === "Pending stores get 2 members until approval." && pr.pendingSentence("pages_max", 50, caps) === null, "pending sentence: a capped limit says the cap wins while pending; an uncapped one says nothing");
+  checkD(pr.pendingSentence("media_bytes", 10 * MiB, caps) === "Pending stores get 10 MiB of media storage until approval.", "pending sentence: a plan value under the cap is what pending stores get", pr.pendingSentence("media_bytes", 10 * MiB, caps));
+  checkD(pr.formatBytes(Math.round(1.9 * GiB)) === "1.9 GiB" && pr.formatBytes(812 * MiB) === "812 MiB" && pr.formatBytes(2 * GiB) === "2 GiB" && pr.formatBytes(64 * 1024) === "64 KiB", "formatBytes: binary units");
+
+  // the editor rows (PLA-§9.2): the Later releases list of R1, campaigns and short links under Limits
+  const rows5 = pr.planEditorRows({ limits: { media_bytes: 500 * MiB }, features: { sheets: false } }, caps);
+  const later = rows5.filter((r) => r.group === "later").map((r) => r.key).sort();
+  checkD(eq(later, ["accounting", "api_keys", "commissions", "coupons", "custom_domain", "custom_domains_max", "experiments", "products_max", "reviews", "webhooks", "webhooks_max"]), "editor rows: Later releases are exactly PLA-§9.2's R1 list", later);
+  checkD(rows5.find((r) => r.key === "campaigns_max")?.group === "limits" && rows5.find((r) => r.key === "short_links_max")?.group === "limits", "editor rows: campaigns_max and short_links_max under Limits");
+  checkD(rows5.length === ENTITLEMENT_KEYS.length && rows5.find((r) => r.key === "take_orders")?.locked === "take_orders" && rows5.find((r) => r.key === "products_max")?.locked === "release", "editor rows: every registry key, take_orders and Later releases locked");
+  const mediaRow = rows5.find((r) => r.key === "media_bytes")!;
+  checkD(mediaRow.planValue === 500 * MiB && mediaRow.registryDefault === 1 * GiB && mediaRow.effective === 500 * MiB && mediaRow.unit === "bytes" && mediaRow.sentence === "Stores on this plan get 500 MiB of media storage.", "editor row: registry default, plan value, effective sentence (three explanations)", mediaRow);
+  checkD(rows5.find((r) => r.key === "pages_max")?.planValue === "default", "editor row: a key the plan leaves reads Use default");
+  const missingEnt = ENTITLEMENT_KEYS.filter((k) => !(`console.entitlement.${k}` in enConsole) || !(`console.entitlement.${k}.desc` in enConsole));
+  checkD(missingEnt.length === 0, "every entitlement key has console.entitlement.<key> and .desc", missingEnt);
+
+  // the patch (validation of PLA-§9.2)
+  const bags = { limits: { media_bytes: 1 * GiB }, features: {} };
+  const code = (patch: Record<string, unknown>) => {
+    const c = pr.checkPlanPatch(bags, patch as never);
+    return c.ok ? "ok" : `${c.code}:${c.key}`;
+  };
+  checkD(code({ take_orders: false }) === "take_orders_locked:take_orders", "a plan can't switch take_orders off (PD8)");
+  checkD(code({ nope: 1 }) === "unknown_key:nope" && code({ products_max: 10 }) === "release_locked:products_max", "unknown keys and later-release keys refused");
+  checkD(code({ pages_max: -1 }) === "value_type:pages_max" && code({ pages_max: 1.5 }) === "value_type:pages_max" && code({ sheets: "yes" }) === "value_type:sheets" && code({ pages_max: true }) === "value_type:pages_max", "limits: integers ≥ 0 or null; features: booleans");
+  checkD(code({ media_bytes: 1 * GiB }) === "empty:" && code({}) === "empty:", "a patch that changes nothing answers empty");
+  const patched = pr.checkPlanPatch(bags, { media_bytes: "default", pages_max: null, sheets: false });
+  checkD(patched.ok && !("media_bytes" in patched.next.limits) && patched.next.limits.pages_max === null && patched.next.features.sheets === false && eq(patched.changes.map((c) => c.key), ["media_bytes", "pages_max", "sheets"]), "a patch: default drops the key, null is unlimited, changes in registry order", patched);
+  checkD(patched.ok && eq(pr.planDiff(patched.changes).media_bytes, { from: 1 * GiB, to: "default" }), "the audit diff keeps from / to per changed key");
+  checkD(pr.patchHash({ b: 1, a: 2 }) === pr.patchHash({ a: 2, b: 1 }), "the impact cache key ignores key order");
+
+  // the entitlements job's clocks (PLA-§9.4)
+  const NOW5 = new Date("2026-10-29T12:00:00.000Z");
+  const H = 3_600_000;
+  checkD(pr.boostEndingDue({ source: "boost", expiresAt: new Date(NOW5.getTime() + 71 * H) }, NOW5) && !pr.boostEndingDue({ source: "boost", expiresAt: new Date(NOW5.getTime() + 73 * H) }, NOW5) && !pr.boostEndingDue({ source: "boost", expiresAt: new Date(NOW5.getTime() - H) }, NOW5) && !pr.boostEndingDue({ source: "override", expiresAt: new Date(NOW5.getTime() + H) }, NOW5), "boost_ending is due within 3 days of a boost's expiry, never for an override or an expired row");
+  checkD(pr.purgeBefore(NOW5).toISOString() === "2026-09-29T12:00:00.000Z", "rows expired for more than 30 days are deleted");
+  checkD(pr.boostEndingKey("S1", "media_bytes", new Date(1)) !== pr.boostEndingKey("S1", "media_bytes", new Date(2)), "a renewed boost (new expiry) gets its own ending notice");
+  const grant = (p: Partial<Parameters<typeof plansMod.checkEntitlementGrant>[0]>) => plansMod.checkEntitlementGrant({ key: "media_bytes", source: "boost", value: 2 * GiB, expiresAt: new Date(NOW5.getTime() + 7 * 24 * H), reason: "Ramadan", ...p }, NOW5);
+  checkD(!grant({ key: "take_orders", source: "override", value: false, expiresAt: null }).ok && grant({}).ok && !grant({ expiresAt: new Date(NOW5.getTime() + 91 * 24 * H) }).ok, "overrides refuse take_orders false; a boost lasts 90 days at most");
+
+  // kill switches and flags (PLA-§12)
+  checkD(fr5.killTypedFor("platform_read_only", true) === "read-only" && fr5.killTypedFor("signups_enabled", false) === "stop sign-ups" && fr5.killTypedFor("platform_read_only", false) === null && fr5.killTypedFor("signups_enabled", true) === null && fr5.killTypedFor("uploads_enabled", false) === null, "typed confirmation only to trip read-only and sign-ups (switching back needs none)");
+  checkD(fr5.killState("platform_read_only", true) === "read_only_on" && fr5.killState("platform_read_only", false) === "off" && fr5.killState("publishing_enabled", false) === "stopped" && fr5.killState("publishing_enabled", true) === "normal", "kill states: Normal / Stopped, and Off / Read-only on");
+  const killMissing = killKeys.flatMap((k) => (["name", "effect", "stops", "keeps"] as const).map((part) => `console.kill.${k}.${part}`)).filter((key) => !(key in enConsole));
+  checkD(killMissing.length === 0 && eq([...fr5.KILL_ORDER], [...killKeys]), "every kill switch has its name, effect, stops and keeps in en", killMissing);
+  checkD(killKeys.every((k) => ADMIN_LOCALE_LIST.every((l) => fr5.killBanner(k, l).text.length > 10)), "every kill switch has a tenant banner in ar / fr / en (P2's shell.kill.<key>, else the reference text)");
+  checkD(fr5.KILL_AFFECTS.signups_enabled === "none" && fr5.KILL_AFFECTS.sheets_sync_enabled === "sheets" && fr5.KILL_AFFECTS.capi_enabled === "pixels" && fr5.KILL_AFFECTS.platform_read_only === "live_states", "affected stores per switch (PLA-§12.1)");
+  const fe = (type: "boolean" | "number" | "string" | "json", input: { default: unknown; rules: unknown }) => {
+    const c = fr5.checkFlagEdit(type, input);
+    return c.ok ? "ok" : `${c.field}:${c.code}`;
+  };
+  checkD(fe("boolean", { default: true, rules: [{ when: { plans: ["pro"] }, value: true }, { when: {}, value: true, rollout: 20 }] }) === "ok", "flag editor: a default and ordered rules of the type");
+  checkD(fe("boolean", { default: "x", rules: [] }) === "default:value_type" && fe("json", { default: "{bad", rules: [] }) === "default:json_invalid" && fe("json", { default: '{"a":1}', rules: [] }) === "ok", "flag editor: the default's type, JSON validated");
+  checkD(fe("boolean", { default: true, rules: [{ when: { country: ["MA"] }, value: true }] }) === "rules.0.when:condition_unknown" && fe("boolean", { default: true, rules: [{ when: { markets: ["ma"] }, value: true }] }) === "rules.0.when.markets:condition_invalid" && fe("boolean", { default: true, rules: [{ when: {}, value: true, rollout: 101 }] }) === "rules.0.rollout:rollout_invalid", "flag editor: unknown conditions, bad values, rollout 0-100 refused");
+  checkD(fe("boolean", { default: true, rules: Array.from({ length: 21 }, () => ({ when: {}, value: true })) }) === "rules:rules_too_many", "flag editor: 20 rules at most");
+  checkD(fr5.rulesSummary([{ when: { plans: ["pro"] }, value: true }, { when: {}, value: true, rollout: 20 }], "boolean") === "pro plan → on · 20 % of stores → on", "the rules column: Pro plan → on · 20 % of stores → on", fr5.rulesSummary([{ when: { plans: ["pro"] }, value: true }, { when: {}, value: true, rollout: 20 }], "boolean"));
+  checkD(fr5.scopeIdOk("store", "01JTOS00000000000000000001") && !fr5.scopeIdOk("store", "pro") && fr5.scopeIdOk("plan", "pro") && fr5.scopeIdOk("market", "MA") && !fr5.scopeIdOk("market", "Morocco"), "override targets fit their scope");
+  for (const k of ["value_type", "json_invalid", "rules_invalid", "rules_too_many", "condition_unknown", "condition_invalid", "rollout_invalid"]) checkD(`console.flag.${k}` in enConsole, `console.flag.${k} exists`);
+
+  // staff (PLA-§14.1)
+  const inv5 = (p: Partial<{ acceptedAt: Date | null; revokedAt: Date | null; expiresAt: Date }>) => sr.staffInviteState({ acceptedAt: null, revokedAt: null, expiresAt: new Date(NOW5.getTime() + H), ...p }, NOW5);
+  checkD(inv5({}) === "valid" && inv5({ expiresAt: NOW5 }) === "expired" && inv5({ revokedAt: NOW5, expiresAt: NOW5 }) === "revoked" && inv5({ acceptedAt: NOW5, revokedAt: NOW5 }) === "used", "staff invite state: used > revoked > expired > valid; expiry at the instant is expired");
+  checkD(sr.STAFF_INVITE_TTL_MS === 72 * H && sr.STAFF_INVITES_PENDING_MAX === 10 && !sr.isInvitableStaffRole("super_admin") && sr.isInvitableStaffRole("analyst"), "staff invites: 72 h, 10 pending, never super_admin directly (PD7)");
+  const supers = (list: [string, boolean, boolean][]) => list.map(([id, totpEnabled, disabled]) => ({ id, totpEnabled, disabled }));
+  checkD(sr.leavesNoSuperAdmin(supers([["A", true, false]]), "A") && !sr.leavesNoSuperAdmin(supers([["A", true, false], ["B", true, false]]), "A") && sr.leavesNoSuperAdmin(supers([["A", true, false], ["B", false, false], ["C", true, true]]), "A") && !sr.leavesNoSuperAdmin(supers([["A", true, false]]), "Z"), "the last active super_admin with TOTP can't go; one without TOTP or disabled doesn't count");
+  checkD(sr.staffStateOf({ totpEnabled: false }) === "waiting_2fa" && sr.staffStateOf({ totpEnabled: true }) === "active", "staff state: Waiting for 2FA until TOTP");
+
+  // legal (PLA-§13.4, §13.6)
+  checkD(eq(lg.placeholderProblem("tos", "Hello {{inspection}}"), { code: "placeholders_not_allowed", names: ["inspection"] }), "legal: a platform document refuses placeholders");
+  checkD(eq(lg.placeholderProblem("store_returns", "Window: {{returns.windowDays}} {{returns.days}} {{ hack }}"), { code: "unknown_placeholder", names: ["returns.days", "hack"] }), "legal: a store template refuses fields P3 does not export", lg.placeholderProblem("store_returns", "Window: {{returns.windowDays}} {{returns.days}} {{ hack }}"));
+  checkD(lg.placeholderProblem("store_returns", "Window: {{returns.windowDays}}, \\{{literal}}") === null && lg.placeholderProblem("tos", "No placeholder here") === null, "legal: known fields pass, an escaped \\{{ is text");
+  checkD(eq(lg.lineDiff("a\nb\nc", "a\nB\nc\nd"), [{ op: "same", text: "a" }, { op: "del", text: "b" }, { op: "add", text: "B" }, { op: "same", text: "c" }, { op: "add", text: "d" }]), "legal: the line diff", lg.lineDiff("a\nb\nc", "a\nB\nc\nd"));
+  const bigA = Array.from({ length: 3_000 }, (_, i) => `a${i}`).join("\n");
+  const bigB = Array.from({ length: 3_000 }, (_, i) => `b${i}`).join("\n");
+  const tBig = performance.now();
+  const bigDiff = lg.lineDiff(bigA, bigB);
+  checkD(eq(lg.diffStats(bigDiff), { added: 3_000, removed: 3_000 }) && performance.now() - tBig < 1_500, "legal: a full rewrite falls back to the replacement in bounded time");
+  const pub = [
+    { id: "1", kind: "tos", locale: "fr", version: 2 },
+    { id: "2", kind: "tos", locale: "fr", version: 3 },
+    { id: "3", kind: "tos", locale: "en", version: 1 },
+    { id: "4", kind: "privacy", locale: "ar", version: 1 },
+  ];
+  checkD(eq(lg.pickAccepted(pub, "ar").map((d) => d.id), ["2", "4"]) && eq(lg.pickAccepted(pub, "en").map((d) => d.id), ["3", "4"]) && eq(lg.pickAccepted(pub, null).map((d) => d.id), ["2", "4"]), "legal: the published version per kind in locale → fr → en → ar; a kind with none is not asked");
+  checkD(eq(lg.kindsWithoutPublished(pub), ["aup"]) && eq(lg.kindsWithoutPublished([]), ["tos", "privacy", "aup"]), "legal: the red lines name the platform kinds without a published version");
+  checkD(lg.typedMatches(" Publish Unreviewed ", lg.PUBLISH_UNREVIEWED_WORD) && !lg.typedMatches("publish", lg.PUBLISH_UNREVIEWED_WORD) && lg.typedMatches("reviewed", lg.REVIEWED_WORD), "legal: the typed confirmations");
+  // the seed (PD49): every R1 kind × locale, no DPA, no invented number, address or link, valid placeholders
+  const seedKeys = LEGAL_SEED.map((d) => `${d.kind}/${d.locale}`).sort();
+  const wantKeys = lg.R1_LEGAL_KINDS.flatMap((k) => lg.LEGAL_LOCALES.map((l) => `${k}/${l}`)).sort();
+  checkD(LEGAL_SEED_VERSION >= 1 && eq(seedKeys, wantKeys) && !LEGAL_SEED.some((d) => d.kind === "dpa"), `legal seed: ${wantKeys.length} drafts, every R1 kind in ar / fr / en, no DPA`, seedKeys);
+  const seedProblems = LEGAL_SEED.flatMap((d) => {
+    const out: string[] = [];
+    if (d.title.length < 1 || d.title.length > lg.LEGAL_TITLE_MAX) out.push(`${d.kind}/${d.locale}: title`);
+    if (d.body.length > lg.LEGAL_BODY_MAX) out.push(`${d.kind}/${d.locale}: body`);
+    if (lg.placeholderProblem(d.kind, d.body, POLICY_TEMPLATE_FIELDS)) out.push(`${d.kind}/${d.locale}: placeholders`);
+    if (/\d{5,}|@|https?:|www\./i.test(d.body)) out.push(`${d.kind}/${d.locale}: a number, e-mail or link`);
+    if (/<[a-z/!]/i.test(d.body)) out.push(`${d.kind}/${d.locale}: raw HTML`);
+    if (md.toPlainText(d.body, lg.isStoreKind(d.kind) ? { placeholders: { fields: POLICY_TEMPLATE_FIELDS } } : {}).length < 80) out.push(`${d.kind}/${d.locale}: renders empty`);
+    return out;
+  });
+  checkD(seedProblems.length === 0, "legal seed: titles and bodies fit, placeholders known (store templates only), no number, e-mail, link or HTML", seedProblems);
+  const fieldsPerLocale = (kind: string) => lg.LEGAL_LOCALES.map((l) => lg.templateFields(LEGAL_SEED.find((d) => d.kind === kind && d.locale === l)!.body).sort().join(","));
+  checkD(lg.STORE_KINDS.every((k) => new Set(fieldsPerLocale(k)).size === 1), "legal seed: each store template names the same fields in ar, fr and en");
+
+  // the domain move (PLA-§16.3, §16.5)
+  const envStep = dm.DOMAIN_STEPS.find((s) => s.id === "env_replace")!;
+  checkD(/\brestart\b/i.test(`${envStep.title} ${envStep.detail}`) && !/rebuild/i.test(JSON.stringify(dm.DOMAIN_STEPS)) && !/rebuild/i.test(JSON.stringify(dm.DOMAIN_CHECKS)), "domain checklist: the env step says restart, and no text says rebuild (ENGC-26)");
+  checkD(/ADMIN_HOST=console\.<domain>/.test(envStep.detail) && ["PLATFORM_URL", "PUBLIC_URL", "STORE_ROOT_DOMAIN", "EDGE_KEY", "BEHIND_CLOUDFLARE=1", "LEGACY_PLATFORM_HOSTS", "TRUSTED_PROXY_HOPS"].every((k) => envStep.detail.includes(k)), "domain checklist: the env step names every key the move adds (core §C.10 step 1)");
+  const order = dm.DOMAIN_STEPS.map((s) => s.id);
+  checkD(new Set(order).size === order.length && order.indexOf("allowlist_check") < order.indexOf("nameservers") && order.indexOf("worker") < order.indexOf("env_replace") && order.indexOf("env_replace") < order.indexOf("rerender"), "domain checklist: unique steps, the allowlist check before the nameservers, env before the re-render", order);
+  checkD(eq([...dm.RUNNABLE_CHECKS], ["V3", "V7", "V8", "V10", "V12", "V13"]) && dm.DOMAIN_CHECKS.length === 13, "domain checks: V1 … V13, the server runs V3, V7, V8, V10, V12, V13");
+  checkD(dm.SKIP_TEXT.sModeOff === "S mode is off" && dm.SKIP_TEXT.adminHostUnset === "ADMIN_HOST not set (expected before the move)", "domain checks: the answers on the temporary domain (PLA-§16.5)");
+  checkD(dm.adminHostLine({ sMode: true, adminHost: null }) === "shared_origin" && dm.adminHostLine({ sMode: false, adminHost: null }) === "not_yet" && dm.adminHostLine({ sMode: true, adminHost: "console.x.ma" }) === "own_host", "status card: the ADMIN_HOST line (red while S mode runs without it)");
+  checkD(dm.signupDefaultFor({ sMode: true, v13Passed: false, turnstile: true }) === "invite" && dm.signupDefaultFor({ sMode: true, v13Passed: true, turnstile: true }) === "approval" && dm.signupDefaultFor({ sMode: false, v13Passed: true, turnstile: true }) === "invite", "status card: the D9 default flips only with S mode and V13");
+  checkD(dm.noteOf({ message: "m", answers: ["x".repeat(400)] }).length === dm.CHECK_NOTE_MAX, "a check's note is cut to 200 characters");
+
+  // the keys this step's modules answer with exist (a refusal never shows a raw key)
+  const step5Files = ["plans.ts", "plan-rules.ts", "flags.ts", "flag-rules.ts", "staff.ts", "legal.ts", "legal-rules.ts", "domain-move.ts", "op-once.ts"];
+  const used5 = new Set<string>();
+  for (const f of step5Files) for (const m of source(`src/lib/platform/${f}`).matchAll(/"(console\.[a-z_]+\.[a-z_.]+)"/g)) used5.add(m[1]!);
+  const missing5 = [...used5].filter((k) => !(k in enConsole));
+  checkD(used5.size >= 60 && missing5.length === 0, `every console.* key the plans, flags, staff, legal and domain modules answer with is in en/console.ts (${used5.size})`, missing5);
+  for (const k of ["unknown_key", "release_locked", "value_type"]) checkD(`console.plans.${k}` in enConsole, `console.plans.${k} exists (a refused patch)`);
+  for (const k of ["placeholders_not_allowed", "unknown_placeholder"]) checkD(`console.legal.${k}` in enConsole, `console.legal.${k} exists (a refused body)`);
 
   const ms = Math.round(performance.now() - t0);
   for (const s of skips) console.log(`  SKIP ${s}`);
