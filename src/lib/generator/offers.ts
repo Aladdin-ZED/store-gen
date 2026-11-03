@@ -4,7 +4,9 @@
  *
  *   offerTextsFor(locale, packs?)          offer names in the page language (copy library)
  *   directionCatalog(input, copy)          items + offers: the wizard's verbatim (validated), else suggestOffers
- *   pickOfferDisplay(archetype, offers, seed)   picker / selection / density per archetype (§E.5)
+ *   pickOfferDisplay(archetype, offers, seed)   picker / selection / density per archetype (§E.5; pages without a genome)
+ *   drawOfferDisplay(archetype, offers, seed, genes)   the per-page draw over (picker, selection, density) with
+ *                                          OFFER_LOOK as its prior, conditioned on G2 and G12 (design.md DES-§8.12 #8)
  *   safeSelection(display, formVariant)    never "solid" on the bold order form (accent on accent)
  *
  * Pure & deterministic per seed.
@@ -14,7 +16,11 @@ import { libraryFor } from "@/lib/ai/copy-library";
 import type { PageCopy } from "@/lib/ai/copy-schema";
 import { feature } from "@/lib/page/features";
 import { NO_OFFER_TEXTS, suggestOffers, type OfferText, type OfferTexts } from "@/lib/page/offer-presets";
+import type { Grammar, Ladder } from "@/lib/page/schema";
 import {
+  OFFER_DENSITIES,
+  OFFER_PICKERS,
+  OFFER_SELECTIONS,
   isChoicePick,
   isFixedPick,
   Item,
@@ -171,6 +177,49 @@ export function pickOfferDisplay(archetype: Archetype, offers: readonly Pick<Off
   }
   if (picker === "pills" && n > 4) picker = "stack";
   return { picker, fill: "auto", selection: look.selection, media: "auto", density };
+}
+
+/** The picker a grammar leans to (× the OFFER_LOOK prior): quiet grammars toward rows, the loud ones toward cards. */
+const GRAMMAR_PICKER: Readonly<Record<Grammar, Partial<Record<OfferPicker, number>>>> = {
+  "editorial-column": { pills: 1.4, tiers: 1.3, stack: 1.1 },
+  "quiet-luxe": { stack: 1.4, pills: 1.3, tiers: 1.1 },
+  catalogue: { tiers: 1.4, stack: 1.3 },
+  specimen: { tiers: 1.4, pills: 1.2 },
+  poster: { ticket: 1.4, visual: 1.3 },
+  stage: { visual: 1.3, tiers: 1.2 },
+  "gallery-led": { visual: 1.5 },
+  cinematic: { visual: 1.3, stack: 1.2 },
+  "split-tension": { tiers: 1.3, ticket: 1.2 },
+};
+
+/**
+ * The offer layout of a planned page (design.md DES-§8.12 root cause 8, DES-§5.1 R2): OFFER_LOOK is the prior of a
+ * seeded draw over (picker, selection, density), conditioned on the grammar (G2) and the radius ladder (G12: crisp →
+ * outline, soft / round → soft); then §E.5's structural rules (one offer → stack, 5+ → stack compact or visual cards,
+ * segments ≤ 4). The picker renders once, inside the order form (an offer block shows the packs without one). The
+ * offers themselves are never touched: no per-piece option is invented (F2).
+ */
+export function drawOfferDisplay(archetype: Archetype, offers: readonly Pick<Offer, "lines" | "visual">[], seed: number, genes: { grammar: Grammar; ladder: Ladder }): OfferDisplay {
+  const look = OFFER_LOOK[archetype];
+  const n = offers.length;
+  const led = isImageLed(offers);
+  const prior = (p: OfferPicker) => (led ? (p === look.imageLed ? 0.6 : p === "visual" || p === "stack" ? 0.2 : 0.05) : p === look.single[0] ? 0.5 : p === look.single[1] ? 0.25 : 0.06);
+  let picker = weighted(rngFor(seed, "offer:picker"), OFFER_PICKERS.map((p) => ({ value: p, weight: prior(p) * (GRAMMAR_PICKER[genes.grammar][p] ?? 1) })));
+  const ladderSel: Partial<Record<OfferSelection, number>> = genes.ladder === "crisp" ? { outline: 1.6 } : genes.ladder === "soft" || genes.ladder === "round" ? { soft: 1.6 } : {};
+  const selection = weighted(rngFor(seed, "offer:selection"), OFFER_SELECTIONS.map((v) => ({ value: v, weight: (v === look.selection ? 0.55 : 0.225) * (ladderSel[v] ?? 1) })));
+  const dense = genes.grammar === "catalogue" || genes.grammar === "specimen";
+  const airy = genes.grammar === "quiet-luxe" || genes.grammar === "editorial-column";
+  let density = weighted(rngFor(seed, "offer:density"), OFFER_DENSITIES.map((v) => ({ value: v, weight: (v === look.density ? 0.65 : 0.35) * (v === "compact" && dense ? 1.5 : v === "comfortable" && airy ? 1.5 : 1) })));
+  if (n <= 1) picker = "stack";
+  else if (n >= 5) {
+    if (led && n <= 6) picker = "visual";
+    else {
+      picker = "stack";
+      density = "compact";
+    }
+  }
+  if (picker === "pills" && n > 4) picker = "stack";
+  return { picker, fill: "auto", selection, media: "auto", density };
 }
 
 /** The wizard's "Look" (a combo or the owner's axes) when valid, else null (each design chooses). */

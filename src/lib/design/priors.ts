@@ -235,6 +235,11 @@ export const CONCENTRATION_CAPS = {
   arDisplay: 0.3,
   arDisplayClass: 0.4,
   motion: 0.25,
+  /**
+   * G1 vibe per niche (N5: the top archetype ≤ 45 % of chosen pages). The shares come from the niche's live stores
+   * (`vibeShares`, CCR r1-p6-7 asks for `NicheShares.vibe`); the step factor applies to the best-fit slot too.
+   */
+  vibe: 0.35,
 } as const;
 
 /** The H33 step factor of one share against its cap: × 0.25 at or above the cap, × 0.5 from 0.8 × the cap, else 1. */

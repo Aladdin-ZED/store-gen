@@ -74,6 +74,8 @@ import { CALM_LIMITS, colorDistance, isOrange, orangeBlend, orangeMixes, orangeT
 import { PageDocObject, ThemeSpec, type AssetRef } from "@/lib/page/schema";
 import { themeTones } from "./tones";
 import { glueDeep, glueEmphasis } from "./glue";
+import { estimateHeights } from "@/lib/design/heights";
+import { variantFeatures } from "@/lib/design/features";
 
 let failures = 0;
 const fail = (msg: string) => {
@@ -149,6 +151,19 @@ const SETUPS: Setup[] = [
 
 const STRONG = new Set(["accent", "dark", "pop"]);
 
+/**
+ * The top half of the page's flow: by the estimated mobile height on a planned page (I4 "starts in the top half of
+ * the estimated page height", DES-§5.2), by the section count on a page without a look.
+ */
+function topHalfOf(doc: PageDoc, flow: readonly PageDoc["sections"][number][]): PageDoc["sections"][number][] {
+  if (!doc.theme.look) return flow.slice(0, Math.ceil(flow.length / 2));
+  const h = estimateHeights(doc, { look: doc.theme.look, locale: doc.locale, features: (t, v, d) => variantFeatures(t, v, d) });
+  return flow.filter((s) => {
+    const r = h.sections.find((x) => x.id === s.id);
+    return !!r && r.top < h.total / 2;
+  });
+}
+
 function checkRhythm(doc: PageDoc, where: string) {
   const flow = doc.sections.filter((s) => {
     const cat = getSection(s.type)?.category;
@@ -160,11 +175,14 @@ function checkRhythm(doc: PageDoc, where: string) {
     if (getSection(b.type)?.category === "floating" || a.type === "header" || b.type === "header") continue;
     check(a.bg !== b.bg, `${where}: neighbors ${a.id} and ${b.id} share bg "${a.bg}"`);
   }
-  const half = flow.slice(0, Math.ceil(flow.length / 2));
+  const half = topHalfOf(doc, flow);
   check(half.some((s) => STRONG.has(s.bg)), `${where}: no color moment in the top half (${half.map((s) => `${s.type}:${s.bg}`).join(" ")})`);
   const formAt = flow.findIndex((s) => s.type === "orderForm");
   check(formAt >= 0 && formAt <= Math.ceil(flow.length * 0.55), `${where}: order form not near the top (index ${formAt} of ${flow.length})`);
-  check(flow.at(-2)?.type === "cta" || flow.some((s) => s.type === "cta"), `${where}: no final CTA`);
+  // the close may be the Act2 block that already asks (offer:showcase, guarantee:split; DES-§5.1 Close → ε)
+  const lastBlock = flow.filter((s) => s.type !== "footer").at(-1);
+  const closing = !!lastBlock && ["offer:showcase", "guarantee:split"].includes(`${lastBlock.type}:${lastBlock.variant}`);
+  check(flow.some((s) => s.type === "cta") || closing, `${where}: no final CTA`);
   check(doc.sections.some((s) => s.type === "stickyCta"), `${where}: no sticky CTA`);
   for (const s of doc.sections) {
     if (s.divider !== "none" && s.divider !== "auto") {
@@ -199,7 +217,7 @@ function checkTones(doc: PageDoc, where: string) {
   check(pops <= 1, `${where}: ${pops} pop-colored content blocks`);
   const anyStrong = (["accent", "dark", "pop"] as const).some((b) => tones.strong(b));
   if (anyStrong) {
-    const half = flow.slice(0, Math.ceil(flow.length / 2));
+    const half = topHalfOf(doc, flow);
     check(half.some((s) => tones.strong(s.bg) && !STRIP_TYPES.has(s.type)), `${where}: no real color moment in the top half (${half.map((s) => `${s.type}:${s.bg}`).join(" ")})`);
   }
 }
@@ -270,6 +288,15 @@ function checkOfferDisplay(doc: PageDoc, where: string) {
   const n = doc.offers.bundles.length;
   const led = imageLedSet(doc.offers.bundles);
   check(d.fill === "auto" && d.media === "auto", `${where}: offer fill/media ${d.fill}/${d.media} (generator leaves both "auto")`);
+  if (doc.theme.look) {
+    // a planned page draws (picker, selection, density) with the archetype's layout as the prior (design.md DES-§8.12
+    // #8): only §E.5's structural rules are fixed
+    if (n <= 1) check(d.picker === "stack", `${where}: one offer shown as ${d.picker}`);
+    else if (n >= 5) check(led && n <= 6 ? d.picker === "visual" : d.picker === "stack" && d.density === "compact", `${where}: ${n} offers shown as ${d.picker}/${d.density}`);
+    check(d.picker !== "pills" || n <= 4, `${where}: segments with ${n} offers`);
+    checkNoBoldSolid(doc, where);
+    return;
+  }
   if (n <= 1) check(d.picker === "stack", `${where}: one offer shown as ${d.picker}`);
   else if (n >= 5) check(led && n <= 6 ? d.picker === "visual" : d.picker === "stack" && d.density === "compact", `${where}: ${n} offers shown as ${d.picker}/${d.density}`);
   else check(led ? d.picker === look.led : look.single.includes(d.picker), `${where}: picker ${d.picker} for a ${led ? "image-led" : "single-item"} set (want ${led ? look.led : look.single.join(" / ")})`);
@@ -279,6 +306,10 @@ function checkOfferDisplay(doc: PageDoc, where: string) {
   check(d.selection === (form?.variant === "bold" && look.selection === "solid" ? "soft" : look.selection), `${where}: selection ${d.selection}, want ${look.selection}${form?.variant === "bold" ? " (bold form)" : ""}`);
   checkNoBoldSolid(doc, where);
 }
+
+/** The hero's data without its composition fields (arrangements and devices, DES-§5.13). */
+const HERO_COMPOSITION = ["ratio", "mediaSide", "band", "frame", "numbering", "facts", "coverLines", "stagePreset", "titleCell", "structure", "thumb"];
+const withoutComposition = (data: Record<string, unknown>) => Object.fromEntries(Object.entries(data).filter(([k]) => !HERO_COMPOSITION.includes(k)));
 
 const signature = (doc: PageDoc) =>
   [doc.theme.archetype, doc.theme.fonts.display, ...doc.sections.map((s) => `${s.type}:${s.variant}:${s.bg}`)].join("|");
@@ -331,7 +362,14 @@ for (const [n, s] of SETUPS.entries()) {
     check(!!doc, `${where}: validateDoc returned null`);
     check(issues.length === 0, `${where}: ${issues.length} issue(s): ${issues.slice(0, 3).map((i) => `${i.path} ${i.message}`).join(" | ")}`);
     check(d.doc.locale === s.locale && d.doc.market === s.market, `${where}: locale/market changed`);
-    check(d.doc.sections.length >= 12, `${where}: only ${d.doc.sections.length} sections`);
+    // a planned page holds 8-14 sections in flow (DES-§5.2 I8) plus the sticky bar; today's plans 12 or more
+    check(d.doc.sections.length >= (d.doc.theme.look ? 9 : 12), `${where}: only ${d.doc.sections.length} sections`);
+    if (d.doc.theme.look) {
+      // I2 and I8 on the document's own estimate (DES-§5.2): the form within 3 screens, 8-14 sections, ≤ 12,000 px
+      const h = estimateHeights(d.doc, { look: d.doc.theme.look, locale: d.doc.locale, features: (t, v, x) => variantFeatures(t, v, x) });
+      check(h.formTop !== null && h.formTop <= 2532, `${where}: the form starts at ${h.formTop} px (I2 ≤ 2,532)`);
+      check(h.inFlow >= 8 && h.inFlow <= 14 && h.total <= 12_000, `${where}: ${h.inFlow} sections, ${h.total} px (I8 8-14, ≤ 12,000)`);
+    }
     checkRhythm(d.doc, where);
     checkDirection(d.doc, where);
     checkNoOrange(d.doc, where);
@@ -344,7 +382,7 @@ for (const [n, s] of SETUPS.entries()) {
       check(b[1]!.badge === "popular" && b[2]!.badge === "best", `${where}: badges wrong`);
     }
     // remix scopes
-    for (const scope of ["design", "layout", "copy", "all"] as const) {
+    for (const scope of ["design", "layout", "copy", "all", "more", "bolder", "calmer", "upgrade"] as const) {
       const r = remixDoc(d.doc, { seed: 7 + n, scope });
       const v = validateDoc(r);
       check(v.issues.length === 0, `${where}: remix ${scope} → ${v.issues.length} issue(s): ${v.issues.slice(0, 2).map((i) => i.message).join(" | ")}`);
@@ -353,12 +391,15 @@ for (const [n, s] of SETUPS.entries()) {
       check(ids(r) === ids(d.doc), `${where}: remix ${scope} added/removed sections`);
       if (scope === "design") {
         check(r.theme.archetype === d.doc.theme.archetype, `${where}: design remix changed the archetype`);
-        check(r.theme.palette.accent === d.doc.theme.palette.accent, `${where}: design remix changed the product color`);
+        // a page with a look resamples G9, G4 or G18 (design.md DES-§14.7): the palette may follow the new strategy
+        if (!d.doc.theme.look) check(r.theme.palette.accent === d.doc.theme.palette.accent, `${where}: design remix changed the product color`);
         check(r.theme.seed !== d.doc.theme.seed, `${where}: design remix kept the seed`);
         check(JSON.stringify(r.sections.map((x) => x.data)) === JSON.stringify(d.doc.sections.map((x) => x.data)), `${where}: design remix changed content`);
       }
       if (scope === "layout") {
-        check(JSON.stringify([...r.sections].sort((a, c) => a.id.localeCompare(c.id)).map((x) => x.data)) === JSON.stringify([...d.doc.sections].sort((a, c) => a.id.localeCompare(c.id)).map((x) => x.data)), `${where}: layout remix changed content`);
+        // the hero's composition fields follow its re-drawn family (DES-§5.13); every text stays
+        const content = (x: PageDoc) => JSON.stringify([...x.sections].sort((a, c) => a.id.localeCompare(c.id)).map((sec) => (sec.type === "hero" ? withoutComposition(sec.data) : sec.data)));
+        check(content(r) === content(d.doc), `${where}: layout remix changed content`);
         check(r.sections[0]?.type === d.doc.sections[0]?.type && r.sections.at(-1)?.type === d.doc.sections.at(-1)?.type, `${where}: layout remix moved the page ends`);
       }
       if (scope !== "copy") checkRhythm(r, `${where}/remix-${scope}`);
@@ -429,7 +470,9 @@ function checkCalm(doc: PageDoc, where: string) {
   const t = doc.theme;
   check((CALM_ARCHETYPES as readonly string[]).includes(t.archetype), `${where}: loud archetype ${t.archetype}`);
   check(t.motion === "calm", `${where}: motion ${t.motion}`);
-  check(t.palette.base !== "dark", `${where}: dark page`);
+  // a planned page may be dark when its strategy is dark-luxe or mono+signal (H11, H27; calm forbids only poster and
+  // colour-field, H01)
+  if (!t.look || (t.look.cs !== "dark-luxe" && t.look.cs !== "mono+signal")) check(t.palette.base !== "dark", `${where}: dark page`);
   check(chroma(t.palette.accent) <= CALM_LIMITS.accentChroma + 0.005, `${where}: loud accent ${t.palette.accent} (C ${chroma(t.palette.accent).toFixed(3)})`);
   const popC = chroma(t.palette.pop);
   check(popC <= CALM_LIMITS.popChroma + 0.005 && (lightness(t.palette.pop) >= CALM_LIMITS.popMinL - 0.01 || popC <= 0.03), `${where}: loud pop ${t.palette.pop}`);

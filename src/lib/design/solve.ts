@@ -47,7 +47,7 @@ import type {
 import { applyHints, type GeneHints } from "./hints";
 import { italicFace, loadCatalogue, NEVER_DISPLAY_AR, pairingsFor, type Pairing } from "./pairings";
 import type { NicheShares } from "./novelty.server";
-import { BASE_PRIORS, concentration, learned, normalise, pinsAllow, PRIOR_FLOOR, priorFor } from "./priors";
+import { BASE_PRIORS, concentration, CONCENTRATION_CAPS, learned, normalise, pinsAllow, PRIOR_FLOOR, priorFor, stepFactor } from "./priors";
 import {
   ALIGN_BIASES,
   BOLD_ORDER,
@@ -808,7 +808,10 @@ function pick(rng: () => number, weights: Record<string, number>, order: readonl
  * highest weighted score); `pool` is the set the direction chose from, so the caller can tell which hints applied.
  */
 export function directionArchetype(
-  input: Pick<SampleInput, "ranked" | "brandSeed" | "inputHash" | "directionIndex">,
+  input: Pick<SampleInput, "ranked" | "brandSeed" | "inputHash" | "directionIndex"> & {
+    /** the niche's archetype shares of live stores (k ≥ 10, rounded to 10 %); absent or `n` < 10 = neutral */
+    vibeShares?: { n: number; shares: Readonly<Record<string, number>> } | null;
+  },
   hints?: readonly { value: string; weight: 1 | 2 | 3 }[],
   maxHint: 1 | 2 | 3 = 3,
 ): { archetype: Archetype; pool: Archetype[] } {
@@ -816,8 +819,11 @@ export function directionArchetype(
   const base = hash32(`${input.brandSeed}|${input.inputHash}`);
   const i = input.directionIndex;
   const factor = (a: string, k: number) => (k === i ? Math.min(maxHint, hints?.find((h) => h.value === a)?.weight ?? 1) : 1);
-  const weight = (r: { archetype: Archetype; score: number }, k: number) => (Math.max(0, r.score) + PRIOR_FLOOR) * factor(r.archetype, k);
-  const first = i === 0 ? [...ranked].sort((x, y) => weight(y, 0) - weight(x, 0))[0]!.archetype : ranked[0]!.archetype;
+  // H33 on G1 (DS49, N5): the best-fit slot is the best fit among the de-concentrated set, the draws are flattened too
+  const vibe = input.vibeShares && input.vibeShares.n >= 10 ? input.vibeShares.shares : null;
+  const spread = (a: string) => (vibe ? stepFactor(vibe[a], CONCENTRATION_CAPS.vibe) : 1);
+  const weight = (r: { archetype: Archetype; score: number }, k: number) => (Math.max(0, r.score) + PRIOR_FLOOR) * factor(r.archetype, k) * spread(r.archetype);
+  const first = i === 0 || vibe ? [...ranked].sort((x, y) => weight(y, 0) - weight(x, 0))[0]!.archetype : ranked[0]!.archetype;
   if (i === 0) return { archetype: first, pool: ranked.map((r) => r.archetype) };
   const taken: Archetype[] = [first];
   let out: Archetype = first;

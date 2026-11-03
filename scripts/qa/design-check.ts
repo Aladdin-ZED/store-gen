@@ -12,6 +12,8 @@ import { DESIGN_GROUPS, type GroupCtx } from "@/lib/design/selftest";
 import "@/lib/design/selftest-genome";
 // step 3 (measurement core): the height model against the calibration, the fold contract, the form, the features
 import "@/lib/design/selftest-heights";
+// step 6 (choreography and generator integration): expansions, rhythm planners, the 140-plan sweep, N5 / N6, DG-12 R1
+import "@/lib/design/selftest-choreography";
 import { registerDesignGroup } from "@/lib/design/selftest";
 
 // step 4 (section kit redraws): the 41 baseline documents against their goldens (--full; test:render runs the 14

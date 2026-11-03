@@ -167,8 +167,12 @@ const visibleChars = (s: unknown) => (typeof s === "string" ? [...s.replace(/\*+
 
 /** Line metrics of the fold from typeTokens and the display face's measured advance (DES-§10.5 "Measure and line count"). */
 export function foldType(doc: PageDoc, p: HeightParams, locale: Locale): FoldType {
+  return foldTypeFor(doc.theme.fonts, p, locale);
+}
+
+/** foldType from the faces alone (the planner's fold check runs before any document exists, DES-§5.5 step 3). */
+export function foldTypeFor(fonts: Pick<PageDoc["theme"]["fonts"], "display" | "body" | "displayAr" | "bodyAr">, p: HeightParams, locale: Locale): FoldType {
   const ar = locale === "ar";
-  const fonts = doc.theme.fonts;
   const tt = typeTokens({ display: fonts.display, body: fonts.body, displayAr: fonts.displayAr, bodyAr: fonts.bodyAr }, { type: p.type }, locale);
   const lat = fontData(fonts.display)?.metrics;
   const arm = arabicMetrics(fonts.displayAr)?.metrics;
@@ -190,17 +194,41 @@ export function foldType(doc: PageDoc, p: HeightParams, locale: Locale): FoldTyp
   };
 }
 
+/** The order form's additive terms (LAN-§3.5 OF2): offer rows beyond 2, per-piece option groups, the bump row. */
+export interface FormCounts {
+  offers: number;
+  groups: number;
+  bump: boolean;
+}
+
+/** The form counts of a document. */
+function formCounts(doc: PageDoc): FormCounts {
+  return {
+    offers: doc.offers.bundles.length,
+    // the per-piece option groups the form shows for the lead item (a field group or an order-level choice is not one)
+    groups: (doc.items[0]?.groups ?? []).filter((g) => g.kind !== "field" && (g as { perUnit?: boolean }).perUnit !== false).length,
+    bump: !!doc.offers.orderBump,
+  };
+}
+
 /** A section's height at 390 in px. */
-function sectionPx(f: VariantFeaturesResolved, type: string, variant: string, spacing: string, doc: PageDoc, p: HeightParams, look: boolean): number {
+function sectionPx(f: VariantFeaturesResolved, type: string, variant: string, spacing: string, doc: PageDoc, p: Pick<HeightParams, "dens" | "space">, look: boolean): number {
+  return sectionPxOf(f, type, variant, spacing, p, formCounts(doc), look);
+}
+
+/**
+ * A section's height at 390 in px from its features and the page's density genes, without a document: the
+ * choreography's I2 / I8 checks run on planned sections before any copy exists (DES-§5.5 step 2). Same numbers as
+ * estimateHeights for the same inputs.
+ */
+export function sectionPxOf(f: VariantFeaturesResolved, type: string, variant: string, spacing: string, p: Pick<HeightParams, "dens" | "space">, form: FormCounts, look: boolean): number {
   const pre = look ? undefined : PRE_SHEET[`${type}:${variant}`];
   const h = pre ? pre.h : f.h;
   if (h !== undefined && typeof h === "object") {
     const per = h.per ?? {};
-    const offers = Math.max(0, doc.offers.bundles.length - 2);
-    // the per-piece option groups the form shows for the lead item (a field group or an order-level choice is not one)
-    const groups = (doc.items[0]?.groups ?? []).filter((g) => g.kind !== "field" && (g as { perUnit?: boolean }).perUnit !== false).length;
-    const bump = doc.offers.orderBump ? 1 : 0;
-    return Math.round((h.base + offers * (per.offerRow ?? 0) + groups * (per.optionGroup ?? 0) + bump * (per.bump ?? 0)) * SCREEN);
+    const offers = Math.max(0, form.offers - 2);
+    const bump = form.bump ? 1 : 0;
+    return Math.round((h.base + offers * (per.offerRow ?? 0) + form.groups * (per.optionGroup ?? 0) + bump * (per.bump ?? 0)) * SCREEN);
   }
   if (h === undefined && FIXED_ROWS[type] !== undefined) return FIXED_ROWS[type]!;
   const base = typeof h === "number" ? h : (TYPE_SCREENS[type] ?? UNKNOWN_SCREENS);
