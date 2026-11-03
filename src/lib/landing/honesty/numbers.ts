@@ -308,11 +308,11 @@ function leaves(value: unknown, path: string, out: { path: string; text: string 
   else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) leaves(v, `${path}.${k}`, out, depth + 1);
 }
 
-function visibleFields(doc: PageDoc): { texts: TextField[]; numbers: NumericField[] } {
+function visibleFields(doc: PageDoc, every = false): { texts: TextField[]; numbers: NumericField[] } {
   const texts: TextField[] = [];
   const numbers: NumericField[] = [];
   const text = (path: string, value: string | undefined | null, section: string | null = null, sectionId: string | null = null) => {
-    if (typeof value === "string" && /\d|[٠-٩۰-۹]/.test(value)) texts.push({ path, text: value, section, sectionId });
+    if (typeof value === "string" && (every ? value.trim() !== "" : /\d|[٠-٩۰-۹]/.test(value))) texts.push({ path, text: value, section, sectionId });
   };
   for (const s of doc.sections) {
     if (s.hidden) continue;
@@ -363,6 +363,14 @@ function visibleFields(doc: PageDoc): { texts: TextField[]; numbers: NumericFiel
   return { texts, numbers };
 }
 
+/**
+ * Every visible text field of the page that is not empty, in document order, with the section it belongs to: the
+ * fields rule 1 reads, digits or not. The promise scan of the honesty gate (`honesty:promise`, LAN-§6.3) reads them.
+ */
+export function visibleTexts(doc: PageDoc): { path: string; text: string; section: string | null; sectionId: string | null }[] {
+  return visibleFields(doc, true).texts;
+}
+
 /* ------------------------------------------------------------------ */
 /* reading numerals                                                    */
 /* ------------------------------------------------------------------ */
@@ -374,7 +382,15 @@ interface Numeral {
   value: string;
   /** the parts of a grouped number ("2 199" → ["2", "199"]): read separately when the whole is not allowed */
   parts: string[] | null;
+  /**
+   * A range ("24–48h", "2 à 4 jours", "1-3"): its start and end offsets. The head reads the unit after the tail and
+   * both members are labelled with the whole range, which the audit reports once.
+   */
+  range?: { start: number; end: number };
 }
+
+/** What may stand between the two members of a range ("24–48h", "2 à 4 jours", "3 أو 4 أيام"); never "et" / "و", a list. */
+const RANGE_GAP = /^\s*(?:[-–—]|à|a|to|ou|or|حتى|ل|الى|إلى|او|أو)\s*$/iu;
 
 const CURRENCY = /^\s*(?:dh|dhs|mad|dirhams?|درهم|دراهم|د\.م|€|eur|euros?|\$|usd)(?![\p{L}])/iu;
 const CURRENCY_BEFORE = /(?:€|\$|mad|dh)\s*$/iu;
@@ -418,6 +434,14 @@ function numeralsOf(text: string, locale: Locale): Numeral[] {
     const grouped = /[ \u00A0\u202F]/.test(raw) || (!en && /^\d{1,3}(?:\.\d{3})+$/.test(raw)) || (en && raw.includes(","));
     const value = en ? String(Number(raw.replace(/,/g, ""))) : String(Number(raw.replace(/[ \u00A0\u202F]/g, "").replace(/\.(?=\d{3}(?:\D|$))/g, "").replace(",", ".")));
     out.push({ start, end, raw, value, parts: grouped ? raw.split(/[ \u00A0\u202F.,]/).map((x) => String(Number(x))) : null });
+  }
+  // two neighbours read as a range when only a range word separates them and the second is the larger, within 10\u00D7
+  // ("24\u201348h", "1-3 jours"; never "Pack 2 - 199 DH")
+  for (let i = 0; i + 1 < out.length; i++) {
+    const [a, b] = [out[i]!, out[i + 1]!];
+    const [x, y] = [Number(a.value), Number(b.value)];
+    if (a.range || !RANGE_GAP.test(latin.slice(a.end, b.start)) || !(x > 0 && y > x && y <= x * 10)) continue;
+    a.range = b.range = { start: a.start, end: b.end };
   }
   return out;
 }
@@ -478,14 +502,17 @@ const UNIT_CANON: Record<string, string> = { second: "s", minute: "min", hour: "
  * the same text as the page has it (same offsets: `latinDigits` keeps lengths), for the finding's words.
  */
 function classify(text: string, written: string, n: Numeral, section: string | null): Read {
-  const a = after(text, n.end);
-  const b = before(text, n.start);
+  // a range member reads the words around the whole range: the head takes the tail's unit ("24–48h" → hours)
+  const from = n.range?.start ?? n.start;
+  const to = n.range?.end ?? n.end;
+  const a = after(text, to);
+  const b = before(text, from);
   const value = Number(n.value);
   const label = (len: number) => {
-    const end = Math.min(written.length, n.end + len);
+    const end = Math.min(written.length, to + len);
     // a bare numeral reads with the word before it ("XL 2024", "Modèle 3"), the words a seller recognises
-    const lead = len === 0 ? /([\p{L}][\p{L}\p{N}'-]{0,11})\s+$/u.exec(written.slice(Math.max(0, n.start - 14), n.start))?.[1] : undefined;
-    return `${lead ? `${lead} ` : ""}${written.slice(n.start, end).trim()}`.slice(0, 40);
+    const lead = len === 0 && !n.range ? /([\p{L}][\p{L}\p{N}'-]{0,11})\s+$/u.exec(written.slice(Math.max(0, from - 14), from))?.[1] : undefined;
+    return `${lead ? `${lead} ` : ""}${written.slice(from, end).trim()}`.slice(0, 40);
   };
   const prefix = b.endsWith("+") ? "+" : "";
   const write = (len: number) => (prefix ? `+${label(len)}` : label(len));
@@ -578,6 +605,8 @@ export function auditNumbers(
 ): NumberFinding[] {
   const out: NumberFinding[] = [];
   const seen = new Set<string>();
+  /** ranges already reported, by field and start ("24–48h" is one finding, not "24" and "48h") */
+  const ranges = new Set<string>();
   const facts = new Map<string, { value: string; label: string }>();
   const { texts, numbers } = visibleFields(doc);
 
@@ -616,6 +645,11 @@ export function auditNumbers(
           }
         }
         if (ok) continue;
+        if (m.range) {
+          const key = `${f.path}\u0000${m.range.start}`;
+          if (ranges.has(key)) continue;
+          ranges.add(key);
+        }
         const known = read.cls && SINGLE_VALUED.has(read.cls) ? allowed.byClass[read.cls] : undefined;
         if (known?.length) push(f.path, f.section, m.value, read, "conflict", known.length === 2 ? `${known[0]}-${known[1]}` : known.join(", "));
         else push(f.path, f.section, m.value, read, "unknown");

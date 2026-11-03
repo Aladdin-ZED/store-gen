@@ -21,7 +21,8 @@ import { DZ, type ShopperLocale } from "@/lib/landing/copy";
 import { MARKET_SPECS } from "@/lib/markets/specs";
 import { moneySpec } from "@/lib/markets/money";
 import type { City, MarketSpec } from "@/lib/markets/types";
-import type { CityKey } from "@/lib/orders/address";
+import { opsAggregates } from "@/lib/callcenter/aggregates";
+import { CITY_KEYS, type CityKey } from "@/lib/orders/address";
 import { errorSummary } from "@/lib/orders/log";
 import { getStoreSetting } from "@/lib/settings";
 import { scopedCache } from "@/lib/tenancy/cache";
@@ -128,6 +129,38 @@ export async function zonesForCheckout(scope: StoreScope): Promise<ZoneTable> {
   const today = localParts(new Date(), cal.tz)?.ymd;
   const holidays = today ? cal.holidays.filter((d) => d >= today) : [...cal.holidays];
   return buildZoneTable(zones, { ...cal, holidays }, citiesOfMarket(store?.market ?? "") ?? []);
+}
+
+/** The five main cities of LAN-§3.2 `delivery:fee_mismatch` (Morocco), until the store has 20 orders in 28 days. */
+export const MAIN_CITY_KEYS: readonly CityKey[] = ["casablanca", "rabat", "fes", "marrakech", "tanger"].map((k) => k as CityKey);
+/** Orders in the window from which the store's own five most-ordered cities replace the main five (LAN-§3.2, §23.7). */
+export const TOP_CITIES_MIN_ORDERS = 20;
+const TOP_CITIES_DAYS = 28;
+
+/**
+ * The city keys a flat page fee is compared with (`delivery:fee_mismatch`, `landing:fee_mismatch`): the store's five
+ * most-ordered `CityKey`s of the last 28 store days (P4's `opsAggregates`, dims city; "*" never counts) once it has 20
+ * orders there, else the five main cities of a Moroccan store, else none. `orders` is the window's order count.
+ */
+export async function topCityKeysFor(scope: StoreScope, now: Date = new Date()): Promise<{ keys: CityKey[]; orders: number }> {
+  const store = await getStoreById(scope.storeId);
+  const tz = store?.timezone || DEFAULT_TZ;
+  const to = localParts(now, tz)?.ymd;
+  if (!to) return { keys: [], orders: 0 };
+  const [y, m, d] = to.split("-").map(Number) as [number, number, number];
+  const from = new Date(Date.UTC(y, m - 1, d) - (TOP_CITIES_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
+  const { cells } = await opsAggregates(scope, { from, to, dims: ["city"] });
+  const cities = cells.city ?? [];
+  const orders = cities.reduce((n, c) => n + c.placed, 0);
+  if (orders >= TOP_CITIES_MIN_ORDERS) {
+    const keys = cities
+      .filter((c) => c.key !== "*" && (CITY_KEYS as readonly string[]).includes(c.key))
+      .sort((a, b) => b.placed - a.placed || a.key.localeCompare(b.key))
+      .slice(0, 5)
+      .map((c) => c.key as CityKey);
+    return { keys, orders };
+  }
+  return { keys: store?.market === "MA" ? [...MAIN_CITY_KEYS] : [], orders };
 }
 
 /** Slug-keyed fees for server joins (P1's `zones.feeMismatchTop5`, the checklist); never the browser table. */

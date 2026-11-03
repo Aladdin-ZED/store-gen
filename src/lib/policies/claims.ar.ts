@@ -121,6 +121,9 @@ export const AR_LEXICON: ClaimLexicon = {
   },
   rangeSeparators: ["-", "/", "حتى ل", "حتى", "ل", "الى", "و", "او", "ولا"],
   currency: "درهم|دراهم|دره|د\\.م|dh|dhs|mad",
+  // one stem of every rule below: delivery, parcel arriving, shipping, returns, exchanges, paying, the parcel, warranty,
+  // money back, the call (written folded, as `normaliseClaimText` reads the text)
+  hint: "وصل|صلك|توصيل|تسليم|ليفريزون|شحن|رجع|رجاع|رجيع|ترد|تراجع|اعادة|استرداد|بدل|بديل|بدال|خلص|دفع|خلاص|كولي|طرد|كارطونة|باكية|ضمان|كارانتي|گارانتي|نردو|فلوس|اموال|عيط|تصل|تاصل|كلمو|اتصال|تواصل",
   rules: ({ B, E, R, U, D, S, W, T1, T2, C }) => {
     const AMOUNT = `(?:${R}${U}|${D}|${S})`;
     // prepositions before a duration; "ف" may be attached to the number ("ف24 ساعة")

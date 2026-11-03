@@ -1,4 +1,4 @@
-// proves: LP-02, LAN-§6.4
+// proves: LP-01, LP-02, LP-21, SF-03, LAN-§6.4, LAN-§3.2.1, LAN-§6.5, LAN-§23.7
 /**
  * test:honesty (P3 LANDING; landing.md LAN-§6.4 acceptance, LAN-§25.1 row `test:honesty`, LAN-§1.4 LP-02):
  *
@@ -14,13 +14,26 @@
  *    `withinHours`, `stockLeft`, the countdown's date parts, an attested rating; the guard adapter (rule 5).
  * 3. `sensitiveFields` / `SENSITIVE_FIELD_RE`: the four labels are flagged, the fixture pages (7 × ar / fr / en) and
  *    the near misses ("Code postal", "Code promo", "Message sur la carte cadeau") are not.
+ * 4. The honesty gate (`landingGateItems`, src/lib/render/prepublish/landing.ts) on every LAN-§3.2.1 fixture of
+ *    src/lib/render/prepublish/landing.fixtures.ts (the core's `test:prepublish` imports them at the P3 merge; until
+ *    then they run here): exactly the expected items, refused or published as expected, ≤ 40 ms a page once warm;
+ *    the form sweep (every variant × airy / balanced / dense × ar / fr) answers no `form:F1` and no `form:F3`; `warn`
+ *    mode changes no item; the check and the listener are registered; the listener never throws.
+ * 5. The catalogs (LAN-§6.5, D67): every `landing.gate.*` and `health.landing.*` key in en / fr / ar with the same
+ *    placeholders, no em or en dash, no "Step n"; every key an item names exists.
+ * 6. Store Health (LAN-§23.7, until P1's `test:health` runs the fixtures): the 17 rules with their groups, severities,
+ *    points and `minN`; each fixture fires and is silent as declared; no two rules share a metric in a group; the
+ *    two-store fixture (A's facts never answer for B).
  * Exits 1 on any failure.
  */
+import Module from "node:module";
 import { cleanAiText } from "@/lib/ai/guard";
+import type { HealthInputs } from "@/lib/health/types";
+import type { Actor, StoreRow } from "@/lib/tenancy/types";
 import { FIXTURE_LOCALES, FIXTURE_NAMES } from "@/lib/page/fixtures";
 import { numeralsIn } from "@/lib/editor/check-facts";
 import { PoliciesSetting } from "@/lib/settings/keys/policies";
-import { arabicDigits, basePage, fixtureSource, generated, honestyFixtures, SENSITIVE_LABELS, setText, singleOffer, storeFacts, zoneRow, type HonestyFixture } from "./fixtures";
+import { arabicDigits, basePage, fixtureSource, generated, honestyFixtures, HONESTY_NOW, SENSITIVE_LABELS, setText, singleOffer, storeFacts, zoneRow, type HonestyFixture } from "./fixtures";
 import { guardAllowedNumbers, guardNumbersIn } from "./guard-numbers";
 import { allowedNumbersFor, auditNumbers, factNumerals, PROOF_CLASSES, SENSITIVE_FIELD_RE, sensitiveFields, type NumberFinding } from "./numbers";
 
@@ -175,5 +188,262 @@ for (const label of NEAR) check(!Object.values(SENSITIVE_FIELD_RE).some((re) => 
 const BAD = ["Mot de passe", "Code SMS", "Code de vérification", "Numéro de carte", "Carte bancaire", "CVV", "RIB", "IBAN", "Password", "One-time code", "Card number", "Security code", "كلمة السر", "كلمة المرور", "رمز التحقق", "رقم البطاقة", "الكود اللي وصلك"];
 for (const label of BAD) check(Object.values(SENSITIVE_FIELD_RE).some((re) => re.test(label)), `"${label}" is a sensitive field`);
 
-console.log(`test:honesty: ${checks} checks, ${failures} failed (${all.length} fixtures)`);
-if (failures) process.exit(1);
+/* ------------------------------------------------------------------ */
+/* 4 to 6: the gate, the catalogs, Store Health                         */
+/* ------------------------------------------------------------------ */
+
+// outside Next: `server-only` resolves to its empty build (the gate's loader and the health rules import the db client,
+// which never connects at import)
+{
+  const M = Module as unknown as { _resolveFilename: (request: string, ...rest: unknown[]) => string };
+  const resolveFilename = M._resolveFilename;
+  M._resolveFilename = function (request: string, ...rest: unknown[]) {
+    if (request === "server-only") return require.resolve("next/dist/compiled/server-only/empty.js");
+    return resolveFilename.call(this, request, ...rest);
+  };
+}
+
+async function gateChecks(): Promise<void> {
+  const L = await import("@/lib/render/prepublish/landing");
+  const F = await import("@/lib/render/prepublish/landing.fixtures");
+  const { heightModelIsStub } = await import("@/lib/render/prepublish/budget-limits");
+  const { orderFormBand } = await import("@/landing/sections/orderForm/height");
+  // scopes come from the seam's minting sites only (lint L6): a system scope, as the jobs and the media selftest use
+  const { systemCtx, systemScope } = await import("@/lib/jobs/scope");
+  const scopeOf = (storeId: string) => systemScope(systemCtx("qa.honesty"), storeId);
+  const gsrc = fixtureSource();
+  const fixtures = F.landingGateFixtures(gsrc);
+  // the publisher the core's registry hands the check (a fake store: no database is read by the pure gate)
+  const publisher = {
+    scope: scopeOf("STOREFIXTUREAAAAAAAAAAAAAA"),
+    store: { id: "STOREFIXTUREAAAAAAAAAAAAAA", handle: "fixture", market: "MA", timezone: "Africa/Casablanca", status: "active" } as unknown as StoreRow,
+    actor: { kind: "user", userId: "USERFIXTUREAAAAAAAAAAAAAAA", impersonatorId: null, ip: null } as Actor,
+    pageId: "PAGEFIXTUREAAAAAAAAAAAAAAA",
+  };
+  const full = (ctx: (typeof fixtures)[number]["ctx"]) => ({ ...publisher, ...ctx });
+  const stub = heightModelIsStub();
+  const want = ["honesty:sample", "honesty:I4", "honesty:I5", "honesty:D1", "honesty:D2", "honesty:countdown_reset", "honesty:countdown_twice", "honesty:promise", "honesty:stock_untyped", "honesty:password_field", "form:F3"];
+  const seen = new Set<string>();
+  for (const fx of fixtures) {
+    if (fx.integrationOnly && stub) continue;
+    const items = L.landingGateItems(full(fx.ctx), fx.inputs);
+    items.filter((i) => i.level === "hard").forEach((i) => seen.add(i.id));
+    const problems = F.landingFixtureProblems(fx, items);
+    check(problems.length === 0, `gate: ${fx.name} (${fx.about})`, problems);
+  }
+  check(want.every((id) => seen.has(id)), "gate: every refusing row of LAN-§3.2.1 refuses on a fixture", want.filter((id) => !seen.has(id)));
+  check(fixtures.some((f) => f.integrationOnly), "gate: the 2,840 px baseline form is listed (asserted once the height model is real)");
+  // named acceptance rows (LP-02, LP-21)
+  const at = (name: string) => {
+    const fx = fixtures.find((f) => f.name === name)!;
+    return L.landingGateItems(full(fx.ctx), fx.inputs);
+  };
+  const conflict = at("blender-conflict").find((i) => i.id === "honesty:D1");
+  check(!!conflict && conflict.vars?.a === "40 s" && conflict.vars?.b === "30 secondes", "gate: the blender's conflict names both values", conflict?.vars);
+  const sample = at("sample-reviews")[0];
+  check(sample?.fix?.actionId === "landing:attest-proof" && sample.title === "landing.gate.honesty.sample.title", "gate: example proof leads to the attestation sheet", sample);
+  const promiseSoft = at("owner-return-unset").find((i) => i.id === "honesty:promise");
+  check(promiseSoft?.vars?.card === "returns" && promiseSoft.vars?.value === 7, "gate: an unset policy claim prefills its Policies card and value", promiseSoft?.vars);
+
+  // ≤ 40 ms a page once warm (the second pass: the first compiles the claim patterns and fills their memo)
+  for (const fx of fixtures) L.landingGateItems(full(fx.ctx), fx.inputs);
+  let worst = 0;
+  let worstName = "";
+  for (const fx of fixtures) {
+    const t0 = performance.now();
+    L.landingGateItems(full(fx.ctx), fx.inputs);
+    const ms = performance.now() - t0;
+    if (ms > worst) [worst, worstName] = [ms, fx.name];
+  }
+  check(worst <= 40, `gate: every fixture page in ≤ 40 ms warm (worst ${worst.toFixed(1)} ms, ${worstName})`);
+
+  // warn mode changes no item (honesty has no warn mode, core §M.1 rule 3)
+  for (const name of ["sample-reviews", "countdown-moved-back", "owner-facts"]) {
+    const fx = fixtures.find((f) => f.name === name)!;
+    const block = L.landingGateItems(full(fx.ctx), fx.inputs);
+    const warn = L.landingGateItems({ ...full(fx.ctx), mode: "warn" }, fx.inputs);
+    check(JSON.stringify(block) === JSON.stringify(warn), `gate: warn mode answers the same items (${name})`);
+  }
+
+  // the form sweep
+  const sweep = F.formSweepFixtures(gsrc);
+  const bad = sweep.filter((fx) => F.landingFixtureProblems(fx, L.landingGateItems(full(fx.ctx), fx.inputs)).length > 0).map((fx) => fx.name);
+  check(sweep.length >= 7 * 2 * 4 * 3 && bad.length === 0, `gate: ${sweep.length} default-state forms (variant × density × ar / fr): no form:F1, no form:F3`, bad.slice(0, 5));
+  check(orderFormBand(1_100) === null && orderFormBand(1_101) === "soft" && orderFormBand(1_750) === "soft" && orderFormBand(1_751) === "hard", "gate: form:F1 bands (soft > 1,100 px, hard when × 0.8 > 1,400)");
+
+  // the registry and the listener
+  await import("@/lib/render/prepublish");
+  check(globalThis.__sgPrePublish?.checks.get("landing") === L.landingCheck && globalThis.__sgPrePublish?.listeners.get("landing") === L.landingPublishListener, "gate: the check and the listener are registered as \"landing\"");
+  const fx = fixtures.find((f) => f.name === "countdown-extended")!;
+  let threw = false;
+  const logged = console.error;
+  console.error = () => {};
+  try {
+    // no database here: the health mark is the P1 stub, the audit write fails and is logged
+    await L.landingPublishListener({ ...full(fx.ctx), versionId: "VERSIONFIXTUREAAAAAAAAAAAA", event: "published" });
+    await L.landingPublishListener({ ...full(fx.ctx), versionId: "VERSIONFIXTUREAAAAAAAAAAAA", event: "unpublished" });
+  } catch {
+    threw = true;
+  } finally {
+    console.error = logged;
+  }
+  check(!threw, "gate: the publish listener never throws");
+  check((await L.markKitsStaleFor(publisher.scope, publisher.pageId, fx.ctx.doc)) === undefined, "gate: markKitsStaleFor is the wave 1 no-op");
+
+  // 5. the catalogs: every key an item names, and every landing key in the three locales
+  const { messageOf } = await import("@/lib/i18n/admin");
+  const { messages: en } = await import("@/lib/i18n/admin/en/landing");
+  const { messages: fr } = await import("@/lib/i18n/admin/fr/landing");
+  const { messages: ar } = await import("@/lib/i18n/admin/ar/landing");
+  const named = new Set<string>();
+  for (const f of [...fixtures, ...sweep.slice(0, 4)]) for (const i of L.landingGateItems(full(f.ctx), f.inputs)) [i.title, i.detail].forEach((k) => k && named.add(k));
+  check([...named].every((k) => messageOf(k, "en") !== undefined && (en as Record<string, string>)[k] !== undefined), "catalogs: every key an item names is in the landing catalog", [...named].filter((k) => !(k in en)));
+  const vars = (tpl: string) => [...tpl.matchAll(/\{(\w+)(?:,\s*plural)?/g)].map((m) => m[1]!).filter((v, i, a) => a.indexOf(v) === i).sort().join(",");
+  const keys = Object.keys(en).filter((k) => k.startsWith("landing.gate.") || k.startsWith("health.landing."));
+  const missing: string[] = [];
+  const placeholder: string[] = [];
+  const dashes: string[] = [];
+  for (const k of keys) {
+    for (const [lang, cat] of [["en", en], ["fr", fr], ["ar", ar]] as const) {
+      const tpl = (cat as Record<string, string | undefined>)[k];
+      if (tpl === undefined) {
+        missing.push(`${lang} ${k}`);
+        continue;
+      }
+      if (vars(tpl) !== vars((en as Record<string, string>)[k]!)) placeholder.push(`${lang} ${k}`);
+      if (/[\u2013\u2014]|\bStep \d|\bÉtape \d/.test(tpl)) dashes.push(`${lang} ${k}`);
+    }
+  }
+  check(keys.length >= 90 && missing.length === 0, `catalogs: ${keys.length} gate and health keys in en, fr and ar`, missing);
+  check(placeholder.length === 0, "catalogs: the same placeholders in every locale", placeholder);
+  check(dashes.length === 0, "catalogs: no em or en dash, no step number", dashes);
+
+  // 6. Store Health
+  const H = await import("@/lib/health/rules/landing");
+  const T = await import("@/lib/health/types");
+  const TABLE: Record<string, [string, 1 | 2 | 3, number?]> = {
+    "landing:no_live_page": ["setup", 3],
+    "landing:zones_empty": ["setup", 2],
+    "landing:holidays_unreviewed": ["setup", 1],
+    "landing:policies_unreviewed": ["setup", 1],
+    "landing:no_caller": ["setup", 1],
+    "landing:countdown_ended": ["trust", 3],
+    "landing:compare_not_higher": ["trust", 2],
+    "landing:stock_zero": ["trust", 2],
+    "landing:stock_stale": ["trust", 1],
+    "landing:proof_unattested": ["trust", 2],
+    "landing:no_seo": ["conversion", 1],
+    "landing:no_alt": ["conversion", 1],
+    "landing:no_pixel": ["conversion", 2],
+    "landing:form_hidden": ["conversion", 3],
+    "landing:leads_slow": ["conversion", 1, 20],
+    "landing:wa_intents_waiting": ["conversion", 1, 3],
+    "landing:fee_mismatch": ["conversion", 1, 20],
+  };
+  const table = new Map(H.LANDING_HEALTH_TABLE.map((r) => [r.id, r]));
+  check(H.rules.length === 17 && Object.keys(TABLE).every((id) => H.rules.some((r) => r.id === id)), "health: the 17 rules of LAN-§23.7", H.rules.map((r) => r.id));
+  for (const [id, [group, severity, minN]] of Object.entries(TABLE)) {
+    const r = table.get(id);
+    const rule = H.rules.find((x) => x.id === id);
+    check(r?.group === group && r.severity === severity && r.points === ({ 1: 3, 2: 6, 3: 10 } as const)[severity] && r.minN === minN && rule?.minN === minN && rule?.release === "R1", `health: ${id} is ${group} ${severity} / ${({ 1: 3, 2: 6, 3: 10 } as const)[severity]}${minN ? `, minN ${minN}` : ""}`, r);
+  }
+  check(H.rules.every((r) => T.HEALTH_RULE_PREFIXES.landing.some((p) => r.id.startsWith(`${p}:`))), "health: every id carries the file's prefix (PD79)");
+  const base = (over: Partial<HealthInputs>): HealthInputs => ({ ...(EMPTY_INPUTS as HealthInputs), ...over });
+  const metrics = new Map<string, string>();
+  let healthWorst = 0;
+  for (const fx of H.fixtures) {
+    const rule = H.rules.find((r) => r.id === fx.rule);
+    if (!rule) {
+      check(false, `health: ${fx.rule} has a rule`);
+      continue;
+    }
+    const fires = base(fx.fires);
+    const t0 = performance.now();
+    const issue = await rule.collect(scopeOf(fires.store.id), fires);
+    healthWorst = Math.max(healthWorst, performance.now() - t0);
+    const silent = base(fx.silent);
+    const quiet = await rule.collect(scopeOf(silent.store.id), silent);
+    check(!!issue && issue.id === fx.rule && (!fx.expect?.severity || issue.severity === fx.expect.severity) && (!fx.expect?.metric || issue.evidence.metric === fx.expect.metric), `health: ${fx.rule} fires on its fixture`, issue);
+    check(quiet === null, `health: ${fx.rule} is silent on its other fixture${table.get(fx.rule)?.minN ? " (below minN)" : ""}`, quiet);
+    if (issue) {
+      const key = `${issue.group} ${issue.evidence.metric}`;
+      check(!metrics.has(key), `health: ${fx.rule} has its own metric in its group`, metrics.get(key));
+      metrics.set(key, fx.rule);
+      check(issue.text === `health.landing.${fx.rule.slice(8)}.text` && issue.fix.label === `health.landing.${fx.rule.slice(8)}.fix` && (en as Record<string, string>)[issue.text] !== undefined, `health: ${fx.rule} speaks through its catalog keys`);
+      if (issue.fix.kind === "link") check(issue.fix.href("argan").startsWith("/app/argan/"), `health: ${fx.rule}'s fix is a store link`, issue.fix.href("argan"));
+    }
+  }
+  check(H.fixtures.length === 17, "health: one fixture per rule");
+  // the fix column of LAN-§23.7: a store link, or the builder of the named page on its tab or section (CCR r1-p3-5)
+  const FIX: Record<string, string> = {
+    "landing:no_live_page": "/pages",
+    "landing:zones_empty": "/settings/delivery",
+    "landing:holidays_unreviewed": "/settings/delivery",
+    "landing:policies_unreviewed": "/settings/policies",
+    "landing:no_caller": "/settings/checkout",
+    "landing:countdown_ended": "/pages/PAGEHEALTHAAAAAAAAAAAAAAAA/edit?tab=offers",
+    "landing:compare_not_higher": "/pages/PAGEHEALTHAAAAAAAAAAAAAAAA/edit?tab=product",
+    "landing:stock_zero": "/pages/PAGEHEALTHAAAAAAAAAAAAAAAA/edit?tab=offers",
+    "landing:stock_stale": "/pages/PAGEHEALTHAAAAAAAAAAAAAAAA/edit?tab=offers",
+    "landing:proof_unattested": "/pages/PAGEHEALTHAAAAAAAAAAAAAAAA/edit?section=reviews",
+    "landing:no_seo": "/pages/PAGEHEALTHAAAAAAAAAAAAAAAA/edit?tab=seo",
+    "landing:no_alt": "/pages/PAGEHEALTHAAAAAAAAAAAAAAAA/edit?tab=product",
+    "landing:no_pixel": "/pages/PAGEHEALTHAAAAAAAAAAAAAAAA/edit?tab=seo",
+    "landing:form_hidden": "/pages/PAGEHEALTHAAAAAAAAAAAAAAAA/edit?tab=form",
+    "landing:leads_slow": "/leads",
+    "landing:wa_intents_waiting": "/leads?kind=whatsapp",
+    "landing:fee_mismatch": "/pages/PAGEHEALTHAAAAAAAAAAAAAAAA/edit?tab=offers",
+  };
+  for (const fx of H.fixtures) {
+    const fires = base(fx.fires);
+    const issue = await H.rules.find((r) => r.id === fx.rule)?.collect(scopeOf(fires.store.id), fires);
+    const href = issue?.fix.kind === "link" ? issue.fix.href("argan") : null;
+    check(href === `/app/argan${FIX[fx.rule]}`, `health: ${fx.rule}'s fix opens ${FIX[fx.rule]}`, href);
+  }
+  check(healthWorst <= 40, `health: every rule in ≤ 40 ms over its facts (worst ${healthWorst.toFixed(1)} ms)`);
+  // the two-store fixture: B's scope never takes A's facts, and B's own are quiet
+  const two = H.twoStoreFixture();
+  const inputsB = base(two.inputsB);
+  let refused = 0;
+  for (const rule of H.rules) {
+    try {
+      await rule.collect(scopeOf(two.b.storeId), { ...inputsB, landing: two.a } as HealthInputs);
+    } catch {
+      refused++;
+    }
+  }
+  check(refused === H.rules.length, "health: A's facts never answer for B's scope (two stores)", refused);
+  const issuesA = H.landingIssues(two.a, base(H.quietInputs()));
+  const issuesB = H.landingIssues(two.b, inputsB);
+  check(issuesA.length >= 6 && issuesB.length === 0, "health: A trips its page rules, B (quiet) none", { a: issuesA.map((i) => i.id), b: issuesB.map((i) => i.id) });
+}
+
+/** P1's empty base inputs, as `test:health` merges fixtures over them (every source failed: null). */
+const EMPTY_INPUTS: Omit<HealthInputs, "store" | "now"> & { now: Date } = {
+  now: new Date(HONESTY_NOW),
+  slaHours: null,
+  pages: null,
+  brand: null,
+  abuseReports: null,
+  orders: null,
+  integrations: null,
+  sheets: null,
+  ai: null,
+  design: null,
+  usage: null,
+  settings: null,
+  members: null,
+  review: null,
+  zones: null,
+};
+
+gateChecks().then(
+  () => {
+    console.log(`test:honesty: ${checks} checks, ${failures} failed (${all.length} fixtures)`);
+    if (failures) process.exit(1);
+  },
+  (err: unknown) => {
+    console.error("test:honesty crashed:", err);
+    process.exit(1);
+  },
+);

@@ -102,6 +102,11 @@ export interface ClaimLexicon {
   rangeSeparators: readonly string[];
   /** currency words after a threshold amount */
   currency: string;
+  /**
+   * Optional fast path: a regex source (normalised text: bare alef, no harakat) of stems one of which every rule of
+   * the lexicon contains. A text without any is skipped; the claim fixtures of `test:policies` prove nothing is lost.
+   */
+  hint?: string;
   rules: (p: ClaimParts) => readonly ClaimRule[];
 }
 
@@ -179,9 +184,17 @@ function folded(lexicon: ClaimLexicon): ClaimLexicon {
 interface Compiled {
   lexicon: ClaimLexicon;
   rules: { rule: ClaimRule; re: RegExp }[];
+  /** the script every keyword of the lexicon is written in: a text without it cannot match (the gate's fast path) */
+  script: RegExp;
+  /** the lexicon's `hint`: a text with none of these stems cannot match either */
+  hint: RegExp | null;
 }
 
-function compile(authored: ClaimLexicon): Compiled {
+/** Arabic letters; Latin letters (with the French accents). */
+const ARABIC_SCRIPT = /[\u0620-\u064A\u0671-\u06D3]/;
+const LATIN_SCRIPT = /[A-Za-z\u00C0-\u00FF]/;
+
+function compile(authored: ClaimLexicon, script: RegExp): Compiled {
   const lexicon = folded(authored);
   const B = "(?<![\\p{L}\\p{N}])";
   const E = "(?![\\p{L}\\p{N}])";
@@ -204,13 +217,13 @@ function compile(authored: ClaimLexicon): Compiled {
   // a threshold needs its currency ("dès 300 DH"): "dès 2 pièces" is not an amount
   const C = `(?<c>\\d{1,6}(?:[ .,]\\d{3})*(?:[.,]\\d{1,2})?)\\s*(?:${lexicon.currency})${E}`;
   const parts: ClaimParts = { B, E, N, M, NUM, R, U, D, S, W, T1: time("t1"), T2: time("t2"), C };
-  return { lexicon, rules: lexicon.rules(parts).map((rule) => ({ rule, re: new RegExp(rule.re, "giu") })) };
+  return { lexicon, rules: lexicon.rules(parts).map((rule) => ({ rule, re: new RegExp(rule.re, "giu") })), script, hint: authored.hint ? new RegExp(authored.hint, "u") : null };
 }
 
 const LEXICONS: Record<"ar" | "fr" | "en", Compiled> = {
-  ar: compile(AR_LEXICON),
-  fr: compile(FR_LEXICON),
-  en: compile(EN_LEXICON),
+  ar: compile(AR_LEXICON, ARABIC_SCRIPT),
+  fr: compile(FR_LEXICON, LATIN_SCRIPT),
+  en: compile(EN_LEXICON, LATIN_SCRIPT),
 };
 
 /** Which lexicons read a text of this page locale: Moroccan pages mix French and Arabic. */
@@ -319,7 +332,10 @@ export function policyClaims(text: string, locale: Locale | "ar" | "fr" | "en"):
   if (!text || !/[\p{L}]/u.test(text)) return [];
   const norm = normaliseClaimText(text);
   const found: PolicyClaim[] = [];
-  for (const { lexicon, rules } of lexiconsFor(locale)) {
+  for (const { lexicon, rules, script, hint } of lexiconsFor(locale)) {
+    // every rule of a lexicon needs one of its words: a text without its script, or without one of its stems, has
+    // no claim of it (the 400-field pages stay inside the gate's 40 ms)
+    if (!script.test(norm.text) || (hint && !hint.test(norm.text))) continue;
     for (const { rule, re } of rules) {
       re.lastIndex = 0;
       for (let m = re.exec(norm.text); m; m = re.exec(norm.text)) {

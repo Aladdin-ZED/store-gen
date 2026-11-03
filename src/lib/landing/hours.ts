@@ -9,7 +9,7 @@
  * then renders nothing, never a default sentence.
  */
 import { localParts } from "@/lib/delivery/eta";
-import { nextCallableAt, rangesForDay, shopperPromiseAllowed, type EffectiveWindow, type IsoWeekday, type Range } from "@/lib/callcenter/window";
+import { isCallable, nextCallableAt, rangesForDay, shopperPromiseAllowed, type EffectiveWindow, type IsoWeekday, type Range } from "@/lib/callcenter/window";
 
 const DAY_MS = 86_400_000;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -87,6 +87,47 @@ export function weekHoursText(w: EffectiveWindow, locale: "ar" | "fr" | "en", da
     out.push(`${days} ${text}`);
   }
   return out.join(" · ");
+}
+
+/**
+ * The window as a call-time promise may rest on it (`PromiseFacts.callWindow` of src/lib/policies, LAN-§6.3 rev 5):
+ * `configured` = the owner saved the hours, `empty` = no callable range in the next 14 store days, `ranges` = the
+ * distinct usable ranges of the next seven store days ("we call between 9 and 19" must fall inside one of them).
+ */
+export function promiseWindowOf(w: EffectiveWindow, now: Date): { configured: boolean; empty: boolean; ranges: Range[] } {
+  const today = localParts(now, w.tz)?.ymd;
+  const seen = new Map<string, Range>();
+  if (today) {
+    for (let i = 0; i < 7; i++) for (const r of rangesForDay(addDays(today, i), w)) if (usable(r)) seen.set(`${r.from}-${r.to}`, { from: r.from, to: r.to });
+  }
+  return { configured: shopperPromiseAllowed(w), empty: windowIsEmpty(w, now), ranges: [...seen.values()].sort((a, b) => a.from.localeCompare(b.from)) };
+}
+
+/** Steps of the callable-minutes count (`callableMinutesSince`). */
+const CALLABLE_STEP_MIN = 10;
+
+/**
+ * The callable minutes of the window between `from` and `now`, counted up to `cap` (Store Health's
+ * `landing:wa_intents_waiting`: "for over 2 calling hours", LAN-§23.7). Closed stretches are skipped in one jump
+ * (`isCallable`'s next opening), so a long weekend costs one step; open time is counted in 10-minute steps.
+ */
+export function callableMinutesSince(from: Date, now: Date, w: EffectiveWindow, cap: number): number {
+  let t = from.getTime();
+  const end = now.getTime();
+  let minutes = 0;
+  for (let guard = 0; t < end && minutes < cap && guard < 2_000; guard++) {
+    const c = isCallable(new Date(t), w);
+    if (c.open) {
+      const step = Math.min(CALLABLE_STEP_MIN * 60_000, end - t);
+      minutes += step / 60_000;
+      t += step;
+    } else if (c.opensAt) {
+      t = c.opensAt.getTime();
+    } else {
+      break;
+    }
+  }
+  return Math.min(cap, Math.floor(minutes));
 }
 
 /** The hours line a shopper may read, or null (no hours: nothing is said, LAN-§2.3). */

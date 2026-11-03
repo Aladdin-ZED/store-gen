@@ -1,4 +1,4 @@
-// proves: LP-03
+// proves: LP-03, LP-02, SF-03
 /**
  * Two-store attack cases of the landing track (P3 LANDING, landing.md LAN-§7.5, §25.2).
  * Extension file (docs/STORE-SAAS.md §F.1, §J.2, §K.3; DES-R13), created empty at P0 and loaded by
@@ -9,6 +9,11 @@
  * `zonesForCheckout`, `zoneFeesFor` or the lead suggestion, warm caches included; a `saveZones` run by B (with A's
  * zone ids, or an empty list) never changes A's rows; the holiday reminder's 30-day dedupe is per store. Every case
  * also checks its positive control on A, so a broken read cannot pass as "isolated".
+ *
+ * The honesty gate and Store Health (p3-w1-gate-checklist-health): store A's attested facts and proof, zones and
+ * policies are never read for store B's gate (`loadLandingGateInputs`), not even when B names A's page id; B's
+ * attestation on A's page writes nothing; the health facts of B (`loadLandingHealthFacts`) hold none of A's live
+ * pages, attestations or leads; the publish listener's `page.countdown_extended` row lands in the publishing store.
  */
 import { createRequire } from "node:module";
 import type { TenancyCase, TenancyKit } from "../tenancy-check";
@@ -18,6 +23,9 @@ const load = <T>(id: string): T => createRequire(__filename)(id) as T;
 
 type Zones = typeof import("@/lib/delivery/zones.server");
 type Settings = typeof import("@/lib/settings");
+type Gate = typeof import("@/lib/render/prepublish/landing");
+type Facts = typeof import("@/lib/landing/honesty/facts.server");
+type Health = typeof import("@/lib/health/rules/landing");
 
 /** A WriteCtx of the store's owner (what `storeAction("checkout.write", …)` hands the repository). */
 function ownerCtx(kit: TenancyKit, key: "A" | "B"): WriteCtx {
@@ -138,4 +146,100 @@ async function holidaysCase(kit: TenancyKit): Promise<void> {
   await db.delete(T.notifications).where(eq(T.notifications.kind, H.HOLIDAYS_REVIEW_KIND));
 }
 
-export const cases: TenancyCase[] = [{ name: "landing: delivery zones, lead suggestion and holiday reminder of A never reach B", run: zoneCases }];
+async function gateCases(kit: TenancyKit): Promise<void> {
+  const { fx, check } = kit;
+  const S = load<Settings>("@/lib/settings");
+  const Z = load<Zones>("@/lib/delivery/zones.server");
+  const G = load<Gate>("@/lib/render/prepublish/landing");
+  const F = load<Facts>("@/lib/landing/honesty/facts.server");
+  const H = load<Health>("@/lib/health/rules/landing");
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const T = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { and, eq, inArray } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const A = kit.scope("A") as WriteScope;
+  const B = kit.scope("B") as WriteScope;
+  const ctxA = ownerCtx(kit, "A");
+  const ctxB = ownerCtx(kit, "B");
+  const pageA = await kit.fresh.page(fx.A, "published");
+  const pageB = await kit.fresh.page(fx.B, "published");
+  const docOf = async (id: string) => (await db.select({ d: T.pages.draft }).from(T.pages).where(eq(T.pages.id, id)).limit(1))[0]!.d;
+  const docA = await docOf(pageA);
+  const docB = await docOf(pageB);
+  const reviewedAt = new Date().toISOString();
+
+  // A: reviewed policies (7-day returns), zones on with one zone, an attested fact and an attested proof section
+  await S.updateStoreSetting(A, "policies", { returns: { accepted: true, windowDays: 7 }, reviewedAt }, { id: fx.A.members.owner });
+  await S.updateStoreSetting(A, "checkout", { zonesEnabled: true }, { id: fx.A.members.owner });
+  await Z.saveZones(ctxA, [zoneInput("Zone gate A", ["fes"], { fee: 2_500, days: [1, 2] })]);
+  const factOk = await F.attestFact(A, ctxA.actor, pageA, { path: "product.description", value: "37", text: "Flacon de 37 ml" });
+  const proofOk = await F.attestProof(A, ctxA.actor, pageA, { sectionId: "reviewsgate", type: "reviews" });
+  check("gate: A attests a fact and a proof section on its page (control)", factOk && proofOk, { factOk, proofOk });
+
+  const inA = await G.loadLandingGateInputs(A, pageA, docA);
+  check(
+    "gate: loadLandingGateInputs(A) reads A's policies, zones, attested fact and proof (control)",
+    inA.policies.returns.accepted === true && inA.zones.length === 1 && inA.attestedFacts.has("37") && inA.attested.has("reviewsgate") && inA.live !== null,
+    { returns: inA.policies.returns, zones: inA.zones.length, facts: [...inA.attestedFacts], attested: [...inA.attested] },
+  );
+  const leakedA = (v: LandingInputs) => v.policies.returns.accepted === true || v.zones.some((z) => z.name === "Zone gate A") || v.attestedFacts.has("37") || v.attested.has("reviewsgate");
+  const inB = await G.loadLandingGateInputs(B, pageB, docB);
+  check("gate: loadLandingGateInputs(B) reads none of A's facts, zones or policies", !leakedA(inB) && inB.zones.length === 0 && !inB.policies.reviewedAt, { zones: inB.zones.length, reviewedAt: inB.policies.reviewedAt });
+  const cross = await G.loadLandingGateInputs(B, pageA, docA);
+  check("gate: B naming A's page id gets nothing of A (no attestation, no live version)", !leakedA(cross) && cross.attested.size === 0 && cross.attestedFacts.size === 0 && cross.live === null && cross.gen === null, {
+    attested: [...cross.attested],
+    facts: [...cross.attestedFacts],
+    live: cross.live,
+  });
+  // the gate's verdict follows: A's "retour sous 7 jours" is backed in A, not when B judges the same document
+  const claim = { ...docB, product: { ...docB.product, description: "Retour sous 7 jours si la taille ne va pas." } };
+  const ctxGate = (scope: WriteScope, store: typeof fx.rows.A, pageId: string) => ({ scope, store, pageId, doc: claim, prev: null, theme: undefined as never, assets: new Map(), actor: ctxA.actor, now: new Date(), mode: "block" as const });
+  const itemsA = G.landingGateItems(ctxGate(A, fx.rows.A, pageA), await G.loadLandingGateInputs(A, pageA, claim));
+  const itemsB = G.landingGateItems(ctxGate(B, fx.rows.B, pageB), await G.loadLandingGateInputs(B, pageB, claim));
+  const onClaim = (items: typeof itemsA) => items.filter((i) => i.id === "honesty:promise" && i.field === "product.description");
+  check("gate: A's return policy backs the claim in A only", onClaim(itemsA).length === 0 && onClaim(itemsB).length === 1, { a: onClaim(itemsA), b: onClaim(itemsB) });
+
+  // the library's fixture page (sample proof, library figures) is refused; the harness helper of CCR r1-p3-4 publishes
+  // it with the gate passed through, then the gate is back
+  const PUB = load<typeof import("@/lib/render/publish.server")>("@/lib/render/publish.server");
+  const LF = load<typeof import("@/lib/render/prepublish/landing.fixtures")>("@/lib/render/prepublish/landing.fixtures");
+  const library = await kit.fresh.page(fx.A);
+  const codeOf = (p: Promise<unknown>) => p.then(() => "published", (e: unknown) => (e as { code?: string })?.code ?? String(e));
+  const first = await codeOf(PUB.publishPage(A, library, { actor: ctxA.actor }));
+  const through = await codeOf(LF.withoutLandingGate(() => PUB.publishPage(A, library, { actor: ctxA.actor })));
+  const after = await codeOf(PUB.publishPage(A, library, { actor: ctxA.actor }));
+  check("gate: the library's fixture page is refused, published through withoutLandingGate, refused again after", first === "honesty_blocked" && through === "published" && after === "honesty_blocked", { first, through, after });
+
+  // writes by B on A's page: nothing
+  const before = await kit.snapshotA();
+  const bProof = await F.attestProof(B, ctxB.actor, pageA, { sectionId: "reviewsgate", type: "reviews" });
+  const bFact = await F.attestFact(B, ctxB.actor, pageA, { path: "product.description", value: "37", text: "Flacon de 37 ml" });
+  check("gate: B's attestations on A's page are refused and change nothing of A", !bProof && !bFact && (await kit.snapshotA()) === before, { bProof, bFact });
+
+  // the publish listener audits a countdown moved later in the publishing store only
+  const running = new Date(Date.now() + 86_400_000).toISOString();
+  const later = new Date(Date.now() + 3 * 86_400_000).toISOString();
+  const withEnd = (iso: string) => ({ ...docA, offers: { ...docA.offers, urgency: { ...docA.offers.urgency, countdownEnd: iso } } });
+  await G.landingPublishListener({ ...ctxGate(A, fx.rows.A, pageA), doc: withEnd(later), prev: withEnd(running), versionId: "VERSIONGATEAAAAAAAAAAAAAAA", event: "published" });
+  const extended = await db.select({ storeId: T.auditLog.storeId }).from(T.auditLog).where(and(eq(T.auditLog.action, "page.countdown_extended"), eq(T.auditLog.target, pageA)));
+  check("gate: page.countdown_extended is written once, in A", extended.length === 1 && extended[0]!.storeId === fx.A.id, extended);
+
+  // Store Health: B's facts hold none of A's pages, attestations or leads
+  const hA = await H.loadLandingHealthFacts(kit.scope("A"), { store: fx.rows.A, now: new Date() });
+  const hB = await H.loadLandingHealthFacts(kit.scope("B"), { store: fx.rows.B, now: new Date() });
+  check("health: A's facts list A's live page with its attestation (control)", hA.storeId === fx.A.id && hA.live.some((p) => p.id === pageA && p.attested.includes("reviewsgate")), hA.live.map((p) => p.id));
+  check("health: B's facts hold none of A's live pages or attestations", hB.storeId === fx.B.id && !hB.live.some((p) => p.id === pageA || p.attested.includes("reviewsgate")) && hB.live.some((p) => p.id === pageB), hB.live.map((p) => p.id));
+  check("health: B's zones and settings are B's", hB.zones.count === 0 && !hB.zones.enabled);
+
+  // leave both stores as the harness seeded them
+  await db.delete(T.auditLog).where(and(inArray(T.auditLog.action, ["page.fact_attested", "page.proof_attested", "page.countdown_extended"]), inArray(T.auditLog.target, [pageA, pageB])));
+  await Z.saveZones(ctxA, []);
+  await S.updateStoreSetting(A, "checkout", { zonesEnabled: false }, { id: fx.A.members.owner });
+  await S.updateStoreSetting(A, "policies", { returns: { accepted: null, windowDays: null }, reviewedAt: null }, { id: fx.A.members.owner });
+}
+
+type LandingInputs = Awaited<ReturnType<Gate["loadLandingGateInputs"]>>;
+
+export const cases: TenancyCase[] = [
+  { name: "landing: delivery zones, lead suggestion and holiday reminder of A never reach B", run: zoneCases },
+  { name: "landing: A's attested facts, proof, zones and policies never reach B's gate or Store Health", run: gateCases },
+];

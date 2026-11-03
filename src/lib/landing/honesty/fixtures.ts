@@ -9,6 +9,8 @@
  * sentence, no countdown, no stock, so the numbers on it are exactly the ones a patch puts there.
  */
 import { getFixture, type FixtureName } from "@/lib/page/fixtures";
+import { buildTheme } from "@/lib/theme";
+import type { BuiltTheme } from "@/lib/theme/types";
 import type { AssetRef, PageDoc } from "@/lib/page/schema";
 import type { DeliveryZoneRow } from "@/lib/delivery/types";
 import { PoliciesSetting, type StorePolicyFacts } from "@/lib/settings/keys/policies";
@@ -24,12 +26,15 @@ const NEUTRAL: Record<Lang, string> = {
   en: "A simple thing, made for you.",
 };
 
+/** Asset ids and phone numbers carry digits that are no copy: they stay as they are. */
+const KEEP_KEYS: ReadonlySet<string> = new Set(["id", "number", "phone"]);
+
 /** Every string with a digit becomes a plain sentence (bounded fields keep their length). */
 function scrub<T>(value: T, lang: Lang): T {
-  const walk = (v: unknown): unknown => {
-    if (typeof v === "string") return /\d|[٠-٩]/.test(v) ? NEUTRAL[lang].slice(0, Math.max(1, v.length)) : v;
-    if (Array.isArray(v)) return v.map(walk);
-    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+  const walk = (v: unknown, key = ""): unknown => {
+    if (typeof v === "string") return !KEEP_KEYS.has(key) && /\d|[٠-٩]/.test(v) ? NEUTRAL[lang].slice(0, Math.max(1, v.length)) : v;
+    if (Array.isArray(v)) return v.map((x) => walk(x));
+    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, k)]));
     return v;
   };
   return walk(value) as T;
@@ -44,9 +49,12 @@ export const BASE_SECTIONS = ["header", "hero", "benefits", "offer", "orderForm"
  */
 export interface FixtureSource {
   doc(name: FixtureName, lang: Lang): PageDoc;
+  /** the built theme of a fixture page (the gate's `form:F3` reads its tokens), built once per theme and language */
+  theme(doc: PageDoc): BuiltTheme;
 }
 export function fixtureSource(): FixtureSource {
   const built = new Map<string, PageDoc>();
+  const themes = new Map<string, BuiltTheme>();
   return {
     doc(name, lang) {
       const key = `${name}/${lang}`;
@@ -54,14 +62,22 @@ export function fixtureSource(): FixtureSource {
       if (!doc) built.set(key, (doc = getFixture(name, { locale: lang, now: HONESTY_NOW }).doc));
       return structuredClone(doc);
     },
+    theme(doc) {
+      const key = JSON.stringify([doc.theme, doc.locale]);
+      let t = themes.get(key);
+      if (!t) themes.set(key, (t = buildTheme(doc.theme, doc.locale)));
+      return t;
+    },
   };
 }
 
 /** A fixture page with only `keep` sections and no number but the pricing (LAN-§6.4 fixtures start from zero). */
 export function basePage(src: FixtureSource, name: FixtureName, lang: Lang, keep: readonly string[] = BASE_SECTIONS): PageDoc {
   const doc = src.doc(name, lang);
-  doc.sections = doc.sections.filter((s) => keep.includes(s.type)).map((s) => ({ ...s, data: scrub(s.data, lang) }));
-  doc.product = { ...doc.product, tagline: NEUTRAL[lang], description: NEUTRAL[lang] };
+  // the library's `sample` flags and rating are what a page carries before the owner checks it: a fixture that is
+  // about them sets them again itself
+  doc.sections = doc.sections.filter((s) => keep.includes(s.type)).map((s) => ({ ...s, data: { ...scrub(s.data, lang), sample: false } }));
+  doc.product = { ...doc.product, tagline: NEUTRAL[lang], description: NEUTRAL[lang], rating: undefined };
   doc.offers = scrub(doc.offers, lang);
   doc.offers.urgency = {};
   doc.form = scrub(doc.form, lang);
@@ -219,7 +235,7 @@ function libraryStats(src: FixtureSource): HonestyFixture {
     store: storeFacts(),
     origin: new Map(),
     numbers: [{ path: "stats.items.0.value", value: "94", level: "hard", why: "unknown" }],
-    gate: ["honesty:sample", "honesty:D2", "honesty:D1"],
+    gate: ["honesty:sample", "honesty:D2"],
   };
 }
 

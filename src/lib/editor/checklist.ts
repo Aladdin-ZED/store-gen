@@ -7,14 +7,26 @@
  * the group photo — a publish error, §B.4); options nobody could order (every combination out, a
  * required field with a price); the page's option photos within the publish cap (page_too_large);
  * a product sold in no offer; delivery fee > 0 with every offer free (warning, via offerWarnings).
+ *
+ * The honesty and store-fact rows (landing.md LAN-§3.2: LP-02, LP-21, the delivery / policies / thank-you / WhatsApp
+ * rows and the order form's F1-F3) are the publish gate's own evaluator (src/lib/landing/honesty/gate.ts), run over
+ * this context: the same ids and levels as the dialog's server items (an `error` is a gate `hard`, core §M.5), the
+ * titles from the gate's message catalog. With the preload's gate facts (`ctx.gate`, CCR docs/saas/ccr/r1-p3-3.md)
+ * every row runs as on the server; without them the rows that need a fact the frozen context does not carry stay
+ * silent (nothing is guessed, so the panel never shows an error the server would not).
  */
 import { getSection } from "@/landing/registry";
+import { t, type MessageKey, type MessageVars } from "@/lib/i18n/admin";
+import { foldOrigin, formHeightOf, honestyContextOf, honestyItems, settingsPathOf, type GateFacts, type HonestyContext } from "@/lib/landing/honesty/gate";
+import { PROOF_SECTIONS } from "@/lib/landing/honesty/numbers";
 import { isLegacyOffer, itemShort, itemVisual, offerName, offerUnits } from "@/lib/page/catalog";
 import { bundleMath, offerWarnings } from "@/lib/page/pricing";
 import { isChoicePick, isFixedPick, LIMITS, optionPhotoCount, type PageDoc } from "@/lib/page/schema";
 import { variantIssues } from "@/lib/page/variant-presets";
 import { pixelChecks, type PixelCheckContext } from "@/lib/pixels/checklist";
 import { validateDoc } from "@/lib/page/validate";
+import { buildTheme } from "@/lib/theme";
+import type { GateItem } from "@/lib/tenancy/types";
 import type { LandingCheckContext } from "./check-context";
 import { assetRefsIn, fieldLabel, sectionIssues, valuesOfKind } from "./fields";
 import type { LeftTab } from "./store";
@@ -24,6 +36,8 @@ export interface CheckFix {
   sectionId?: string;
   /** an admin screen outside the builder (opened in a new tab so the editor stays as it is) */
   href?: string;
+  /** a builder sheet the fix opens (`landing:attest-proof`, `landing:attest-fact`, `landing:attest-rating`, LAN-§6.1, §6.4) */
+  actionId?: string;
 }
 
 /** Store-relative fix link, made absolute under /app/<handle> by `ctx.appHref`. */
@@ -38,12 +52,19 @@ export interface CheckItem {
   title: string;
   detail?: string;
   fix?: CheckFix;
+  /** a gate row's message keys and values: the panel renders them in the admin's locale (`title` is the English) */
+  message?: { title: MessageKey; detail?: MessageKey; vars?: MessageVars };
+  field?: string;
 }
 
 export interface Checklist {
   errors: CheckItem[];
   warnings: CheckItem[];
-  /** visible sections still flagged as sample content (needs the merchant's confirmation) */
+  /**
+   * visible sections other than proof still flagged as sample content (product words: the dialog's "these are
+   * right" confirmation clears them); a proof section flagged sample is the error `honesty:sample`, cleared only by
+   * the attestation sheet (LAN-§6.1)
+   */
   sampleSectionIds: string[];
 }
 
@@ -51,10 +72,89 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 const NO_PIXEL_CONTEXT: PixelCheckContext = { library: null, health: {}, live: false };
 
-/** Live countdowns further away than this read as invented (LAN-§3.2 `urgency:far`). */
-const FAR_COUNTDOWN_MS = 30 * 86_400_000;
-/** A live stock figure untouched for longer than this reads as stale (LAN-§3.2 `urgency:stock-stale`, LD36). */
-const STALE_STOCK_MS = 14 * 86_400_000;
+const LEFT_TABS: readonly string[] = ["sections", "theme", "product", "offers", "form", "seo"] satisfies readonly LeftTab[];
+
+/** The CCR r1-p3-3 field of the preload: the gate's own facts, when the server shipped them. */
+type WithGate = LandingCheckContext & { gate?: GateFacts };
+
+/** The built theme's tokens of the last theme the panel judged (`form:F3`): one build per theme change. */
+let lastTheme: { key: string; tokens: Readonly<Record<string, string>> | null } | null = null;
+function themeTokens(doc: PageDoc): Readonly<Record<string, string>> | null {
+  const key = JSON.stringify([doc.theme, doc.locale]);
+  if (lastTheme?.key !== key) {
+    let tokens: Readonly<Record<string, string>> | null = null;
+    try {
+      tokens = buildTheme(doc.theme, doc.locale).tokens;
+    } catch {
+      // a theme the builder cannot build yet (mid-edit): F3 waits for the next one
+    }
+    lastTheme = { key, tokens };
+  }
+  return lastTheme.tokens;
+}
+
+/**
+ * The gate's context from the checklist's: the preload's gate facts when present, else the frozen T4 fields. In the
+ * second form `policies`, the confirmation-call switch, the thank-you expectation, the attested proof, the generated
+ * snapshot and `leadDays` (T4 folds "never answered" into 0) are unknown, so their rows stay silent, and so is the
+ * numbers audit while the context lists no number at all (`emptyCheckData`: no preload); T4's preload
+ * reports `zones.count: 0` whatever the table holds, so a zone count is only trusted while zones are off.
+ */
+function gateContextOf(doc: PageDoc, ctx: WithGate, now: number): HonestyContext {
+  const tokens = themeTokens(doc);
+  if (ctx.gate) return honestyContextOf(doc, ctx.gate, { now, tokens, formHeightPx: formHeightOf(doc, ctx.gate.addressMode) });
+  const c = ctx.confirmation;
+  // T4's preload always lists the prices: an empty list is a context without facts (fixtures, a failed preload)
+  const known = ctx.facts.allowed.length > 0 || Object.keys(ctx.facts.byClass).length > 0;
+  return {
+    now,
+    store: {
+      zones: null,
+      zonesEnabled: ctx.zones.enabled,
+      zoneCount: ctx.zones.enabled ? Math.max(1, ctx.zones.count) : 0,
+      hasMarketList: ctx.zones.hasMarketList,
+      feesByTopCity: ctx.zones.feesByTopCity,
+      cityNames: {},
+      policies: null,
+      policiesReviewed: ctx.policiesReviewed,
+      confirmationCall: null,
+      withinHours: null,
+      callerPhone: c.callerPhone,
+      whatsapp: c.whatsapp,
+      callWindow: { configured: c.callingWindowSaved, empty: c.callingWindowSaved && !c.callingWindow, ranges: [] },
+      expectation: null,
+      waOrder: ctx.waOrder,
+      leadDays: undefined,
+    },
+    allowed: known ? { byClass: ctx.facts.byClass, all: new Set([...ctx.facts.allowed, ...ctx.attestedFacts]) } : null,
+    origin: foldOrigin(new Map(Object.entries(ctx.origin))),
+    attested: null,
+    generated: undefined,
+    live: ctx.published,
+    formHeightPx: formHeightOf(doc, ctx.addressMode),
+    tokens,
+  };
+}
+
+/** A gate item as a checklist row: hard → error, soft → warning, the English message, the fix in the builder. */
+function rowOf(item: GateItem, appHref: LandingCheckContext["appHref"]): CheckItem {
+  const fix: CheckFix = {};
+  const sectionId = item.fix?.sectionId ?? item.sectionId;
+  if (sectionId) fix.sectionId = sectionId;
+  else if (item.fix?.tab && LEFT_TABS.includes(item.fix.tab)) fix.tab = item.fix.tab as LeftTab;
+  const path = settingsPathOf(item);
+  if (path) fix.href = appHref(path);
+  if (item.fix?.actionId?.startsWith("landing:attest-")) fix.actionId = item.fix.actionId;
+  return {
+    id: item.id,
+    level: item.level === "hard" ? "error" : "warning",
+    title: t(item.title, item.vars, "en"),
+    ...(item.detail ? { detail: t(item.detail, item.vars, "en") } : {}),
+    ...(Object.keys(fix).length ? { fix } : {}),
+    message: { title: item.title, ...(item.detail ? { detail: item.detail } : {}), ...(item.vars ? { vars: item.vars } : {}) },
+    ...(item.field ? { field: item.field } : {}),
+  };
+}
 
 /**
  * The checklist of `doc` in its store (LAN Q15): the page's own checks over `ctx.store`, `ctx.now` and `ctx.pixels`,
@@ -76,7 +176,7 @@ export function buildChecklist(doc: PageDoc, ctx: LandingCheckContext): Checklis
   const { doc: valid, issues } = validateDoc(doc);
   if (!valid) {
     for (const i of issues.filter((x) => x.level === "error").slice(0, 4)) {
-      add({ id: `doc:${i.path}`, level: "error", title: "Page settings are invalid", detail: `${i.path || "page"} — ${i.message}` });
+      add({ id: `doc:${i.path}`, level: "error", title: "Page settings are invalid", detail: `${i.path || "page"}: ${i.message}` });
     }
   }
 
@@ -144,7 +244,7 @@ export function buildChecklist(doc: PageDoc, ctx: LandingCheckContext): Checklis
       add({
         id: `section:${s.id}`,
         level: "error",
-        title: `${label(s.type)}: ${first.path ? fieldLabel(def.fields, first.path) : "content"} — ${first.message}`,
+        title: `${label(s.type)}: ${first.path ? fieldLabel(def.fields, first.path) : "content"}: ${first.message}`,
         detail: list.length > 1 ? `${plural(list.length - 1, "more problem")} in this section.` : undefined,
         fix: { sectionId: s.id },
       });
@@ -154,18 +254,10 @@ export function buildChecklist(doc: PageDoc, ctx: LandingCheckContext): Checklis
     }
   }
 
-  /* ---- honesty: sample content ---- */
-  const sampleSectionIds = visible.filter((s) => (s.data as Record<string, unknown>)?.sample === true).map((s) => s.id);
-  for (const id of sampleSectionIds) {
-    const s = doc.sections.find((x) => x.id === id)!;
-    add({
-      id: `sample:${id}`,
-      level: "warning",
-      title: `The ${label(s.type)} section still shows example content`,
-      detail: "Replace the examples with real customer reviews, chats or numbers.",
-      fix: { sectionId: id },
-    });
-  }
+  /* ---- honesty and the store's facts: the publish gate's rows (LAN-§3.2, §3.2.1) ---- */
+  // sample content of any section is `honesty:sample` there; only the product-word sections can be confirmed here
+  const sampleSectionIds = visible.filter((s) => (s.data as Record<string, unknown>)?.sample === true && !PROOF_SECTIONS.has(s.type)).map((s) => s.id);
+  for (const item of honestyItems(doc, gateContextOf(doc, ctx as WithGate, now))) add(rowOf(item, ctx.appHref));
 
   /* ---- prices ---- */
   const lead = doc.items[0]!;
@@ -200,7 +292,7 @@ export function buildChecklist(doc: PageDoc, ctx: LandingCheckContext): Checklis
   /* ---- time ---- */
   const end = doc.offers.urgency.countdownEnd;
   if (end && Date.parse(end) <= now) {
-    add({ id: "urgency:past", level: "warning", title: "The countdown has already ended", detail: "It hides itself — set a new real end date or remove it.", fix: { tab: "offers" } });
+    add({ id: "urgency:past", level: "warning", title: "The countdown has already ended", detail: "It hides itself. Set a new real end date or remove it.", fix: { tab: "offers" } });
   }
   for (const s of visible) {
     const def = getSection(s.type);
@@ -212,38 +304,6 @@ export function buildChecklist(doc: PageDoc, ctx: LandingCheckContext): Checklis
     }
   }
   if (doc.offers.urgency.stockLeft === 0) add({ id: "urgency:stock", level: "warning", title: "Stock left is set to 0", fix: { tab: "offers" } });
-
-  /* ---- honest time and stock against the live page (LP-21, LD18, LD36) ---- */
-  const live = ctx.published;
-  const liveEnd = live?.countdownEnd ? Date.parse(live.countdownEnd) : NaN;
-  const draftEnd = end ? Date.parse(end) : NaN;
-  if (Number.isFinite(liveEnd) && Number.isFinite(draftEnd) && draftEnd > liveEnd) {
-    if (liveEnd <= now) {
-      add({
-        id: "honesty:countdown_reset",
-        level: "error",
-        title: "The countdown already ended on the live page",
-        detail: "Starting it again would tell shoppers the offer ends when it already did. Remove the countdown, or keep the ended date.",
-        fix: { tab: "offers" },
-      });
-    } else {
-      add({ id: "urgency:extended", level: "warning", title: "The countdown ends later than on the live page", detail: "Shoppers who saw the earlier end will see it move. Publishing records the change.", fix: { tab: "offers" } });
-    }
-  }
-  if (Number.isFinite(draftEnd) && draftEnd - now > FAR_COUNTDOWN_MS) {
-    add({ id: "urgency:far", level: "warning", title: "The countdown ends more than 30 days from now", detail: "A countdown this long rarely reads as real. Use the real end date of the offer.", fix: { tab: "offers" } });
-  }
-  const liveStock = live?.stockLeft;
-  const stockSince = live?.stockChangedAt ? Date.parse(live.stockChangedAt) : NaN;
-  if (liveStock !== undefined && liveStock > 0 && doc.offers.urgency.stockLeft === liveStock && Number.isFinite(stockSince) && now - stockSince > STALE_STOCK_MS) {
-    add({
-      id: "urgency:stock-stale",
-      level: "warning",
-      title: `“${liveStock} left” hasn't changed in over 14 days`,
-      detail: "Update the stock to what you really have, or remove it.",
-      fix: { tab: "offers" },
-    });
-  }
 
   /* ---- store identity (legal & contact pages) ---- */
   if (!store.hasPhone && !store.hasEmail) {

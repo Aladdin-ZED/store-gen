@@ -12,9 +12,9 @@ import "server-only";
  * This module adds what the gate needs on top: `factsFor` cached 60 s per store (`scopedCache("page-facts")`, keyed
  * by page), dropped by every write here, and the owner's attestation writer. The frozen signatures of P0 hold.
  */
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { pages } from "@/lib/db/schema";
+import { auditLog, pages } from "@/lib/db/schema";
 import { factsFor as readFacts, recordFacts as recordWizardFacts, type AttestedFact, type CopyFacts } from "@/lib/editor/facts.server";
 import { auditIn } from "@/lib/admin-data/store-audit";
 import { whereStore } from "@/lib/tenancy/sql";
@@ -74,6 +74,57 @@ export async function attestFact(scope: WriteScope, actor: Actor, pageId: string
   } finally {
     factsCache.delete(scope.storeId, pageId);
   }
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* proof attestations (LAN-§6.1)                                       */
+/* ------------------------------------------------------------------ */
+
+const PROOF_ACTION = "page.proof_attested";
+/** Newest proof rows read per page (one per section and per rating change). */
+const PROOF_READ_LIMIT = 100;
+const SECTION_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+
+/** What the owner confirmed in `ProofAttestSheet`: a proof section is real, or the product's rating is. */
+export type ProofAttestation = { sectionId: string; type: string } | { field: "rating"; value: number; count: number };
+
+/**
+ * The proof the owner attested on a page (audit `page.proof_attested`, meta `{ pageId, sectionId, type }` or
+ * `{ pageId, field: "rating", value, count }`): its section ids, and "rating" while the attested rating is the one the
+ * page shows (`rating`, when given: a rating typed again after its attestation is attested again). Another store's
+ * page has none.
+ */
+export async function attestedProofFor(scope: StoreScope, pageId: string, rating?: { value: number; count: number } | null): Promise<Set<string>> {
+  const rows = await db
+    .select({ meta: auditLog.meta })
+    .from(auditLog)
+    .where(and(whereStore(auditLog, scope, eq(auditLog.action, PROOF_ACTION)), eq(auditLog.target, pageId)))
+    .orderBy(desc(auditLog.id))
+    .limit(PROOF_READ_LIMIT);
+  const out = new Set<string>();
+  let ratingSeen = false;
+  for (const { meta } of rows) {
+    if (!meta || meta.pageId !== pageId) continue;
+    if (typeof meta.sectionId === "string" && SECTION_ID_RE.test(meta.sectionId)) out.add(meta.sectionId);
+    else if (meta.field === "rating" && !ratingSeen) {
+      // the newest rating row decides
+      ratingSeen = true;
+      if (!rating || (meta.value === rating.value && meta.count === rating.count)) out.add("rating");
+    }
+  }
+  return out;
+}
+
+/**
+ * Records the owner's "these are real" for a proof section or the rating (`ProofAttestSheet`, LAN-§6.1): an audit row
+ * `page.proof_attested`. False (nothing written) for a page of another store or a malformed section id.
+ */
+export async function attestProof(scope: WriteScope, actor: Actor, pageId: string, proof: ProofAttestation): Promise<boolean> {
+  if ("sectionId" in proof && !SECTION_ID_RE.test(proof.sectionId)) return false;
+  const [page] = await db.select({ id: pages.id }).from(pages).where(whereStore(pages, scope, eq(pages.id, pageId))).limit(1);
+  if (!page) return false;
+  await auditIn(scope, actor, PROOF_ACTION, { target: pageId, meta: { pageId, ...proof } });
   return true;
 }
 

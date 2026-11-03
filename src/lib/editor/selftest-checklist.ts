@@ -1,3 +1,4 @@
+// proves: LP-01, LP-02, LP-21, LAN-§3.2
 /**
  * The builder checklist in its store context (docs/STORE-SAAS.md §K.1 T4, LAN Q15; landing.md LAN-§3.2, LP-21 and
  * the store facts LP-02 reads). Pure, no database:
@@ -13,6 +14,11 @@
  *  - origin: generator text vs the owner's edits; no generation, no record
  *  - calling window: never saved, saved, every day closed, closed dates over the horizon, a dated override
  *  - stock history, builder tabs per page kind, the preview's per-type stylesheet
+ *  - the gate's rows (LAN-§3.2 = LAN-§3.2.1, core §M.5): on every fixture of
+ *    src/lib/render/prepublish/landing.fixtures.ts the panel shows exactly the gate's items, with the same ids, an
+ *    error for each hard item and a warning for each soft one; every row fires on a fixture and is absent from the
+ *    quiet ones; fixes go through `ctx.appHref`; the titles are the gate catalog's; the rev 1 ids are gone; the
+ *    frozen T4 context alone (no gate facts yet, CCR r1-p3-3) shows no row the gate would not
  */
 import { getFixture } from "@/lib/page/fixtures";
 import type { PageDoc } from "@/lib/page/schema";
@@ -21,6 +27,9 @@ import { checkContextOf, emptyCheckData, type CheckContextData } from "./check-c
 import { callingWindowFacts, factsOf, numeralsIn, originOf, stockChangedAtOf, type CallingWindowValue } from "./check-facts";
 import { buildChecklist } from "./checklist";
 import { tabsFor } from "./store";
+import { gateFactsOf, gateItemsOf, HONESTY_GATE_IDS, LANDING_NOTE_IDS, type GateFacts } from "@/lib/landing/honesty/gate";
+import { t } from "@/lib/i18n/admin";
+import { landingGateFixtures, type LandingGateFixture } from "@/lib/render/prepublish/landing.fixtures";
 
 let pass = 0;
 const failures: string[] = [];
@@ -152,6 +161,86 @@ const LP21 = ["honesty:countdown_reset", "urgency:extended", "urgency:far", "urg
   const css = previewCss(types);
   ok("preview css: only the document's section types", css.length < all.length && css.length > 0, { css: css.length, all: all.length });
   ok("preview css: stable for the same types in any order", previewCss([...types].reverse()) === css);
+}
+
+/* ---------------- the gate's rows (LAN-§3.2, §3.2.1, §M.5) ---------------- */
+{
+  const GATE_IDS = new Set<string>([...HONESTY_GATE_IDS, ...LANDING_NOTE_IDS]);
+  const appHref = (p: `/${string}`) => `/app/shop${p}`;
+  /** The panel's context of a fixture: the preload's gate facts (CCR r1-p3-3), the live version from `prev`. */
+  const panel = (fx: LandingGateFixture, over: Partial<GateFacts> = {}) => {
+    const gate = gateFactsOf(fx.inputs, fx.ctx.now);
+    const u = fx.ctx.prev?.offers.urgency;
+    gate.live = fx.ctx.prev
+      ? { ...(u?.countdownEnd ? { countdownEnd: u.countdownEnd } : {}), ...(u?.stockLeft !== undefined ? { stockLeft: u.stockLeft } : {}), ...(fx.inputs.live?.stockChangedAt ? { stockChangedAt: fx.inputs.live.stockChangedAt } : {}) }
+      : null;
+    const data = { ...emptyCheckData(), gate: { ...gate, ...over } } as CheckContextData;
+    return buildChecklist(fx.ctx.doc, checkContextOf(data, { store: health, now: fx.ctx.now.getTime(), appHref }));
+  };
+  const rowsOf = (c: ReturnType<typeof buildChecklist>) => [...c.errors, ...c.warnings].filter((i) => GATE_IDS.has(i.id));
+  const key = (id: string, level: string, where?: string) => `${id} ${level}${where ? ` @${where}` : ""}`;
+  const fixtures = landingGateFixtures();
+  const fired = new Set<string>();
+  // the panel has no rendered document (`field: "html"`) and builds the theme from the doc (the faint-token fixture)
+  const panelBlind = (i: { field?: string; id: string }, fx: LandingGateFixture) => i.field === "html" || (fx.name === "faint-fields" && i.id === "form:F3");
+  for (const fx of fixtures) {
+    if (fx.integrationOnly) continue;
+    const gate = gateItemsOf(fx.ctx, fx.inputs).filter((i) => !panelBlind(i, fx));
+    const rows = rowsOf(panel(fx));
+    rows.forEach((r) => fired.add(r.id));
+    const want = gate.map((i) => key(i.id, i.level === "hard" ? "error" : "warning", i.field ?? i.sectionId)).sort();
+    const have = rows.map((r) => key(r.id, r.level, r.field ?? r.fix?.sectionId)).sort();
+    ok(`panel = gate: ${fx.name}`, JSON.stringify(want) === JSON.stringify(have), { want, have });
+    for (const r of rows) {
+      const g = gate.find((i) => i.id === r.id && i.field === r.field && (i.fix?.sectionId ?? i.sectionId) === r.fix?.sectionId && t(i.title, i.vars, "en") === r.title);
+      if (g) ok(`panel: ${fx.name} ${r.id} speaks the gate catalog`, r.message?.title === g.title && r.title === t(g.title, g.vars, "en") && !r.title.startsWith("landing.gate."), r);
+    }
+  }
+  const expectFired = [...GATE_IDS].filter((id) => id !== "form:F3");
+  ok("panel: every LAN-§3.2 row fires on a fixture", expectFired.every((id) => fired.has(id)), expectFired.filter((id) => !fired.has(id)));
+  const quiet = fixtures.find((f) => f.name === "keep-list-fr")!;
+  ok("panel: the keep-list page shows no gate row (cleared)", rowsOf(panel(quiet)).length === 0, rowsOf(panel(quiet)).map((r) => r.id));
+  // clears: each pair's fixed side drops the row
+  for (const [a, b, id] of [
+    ["stock-untyped", "stock-typed", "honesty:stock_untyped"],
+    ["hotspots-generated", "hotspots-placed", "honesty:I5"],
+    ["library-product-rating", "attested-product-rating", "honesty:D2"],
+    ["owner-facts", "owner-facts-attested", "honesty:D1"],
+    ["owner-return-unset", "owner-return-backed", "honesty:promise"],
+  ] as const) {
+    const on = rowsOf(panel(fixtures.find((f) => f.name === a)!)).some((r) => r.id === id);
+    const off = rowsOf(panel(fixtures.find((f) => f.name === b)!)).some((r) => r.id === id);
+    ok(`panel: ${id} fires on ${a} and clears on ${b}`, on && !off);
+  }
+  // levels: the table's error rows are errors, its warning rows warnings
+  const levelOf = (name: string, id: string) => rowsOf(panel(fixtures.find((f) => f.name === name)!)).find((r) => r.id === id)?.level;
+  ok("levels: honesty:sample on proof is an error", levelOf("sample-reviews", "honesty:sample") === "error");
+  ok("levels: owner-typed facts are warnings, generated ones errors", levelOf("owner-facts", "honesty:D1") === "warning" && levelOf("generated-fact", "honesty:D1") === "error");
+  ok("levels: an unset policy is a warning, a contradicted one an error", levelOf("owner-return-unset", "honesty:promise") === "warning" && levelOf("owner-return-refused", "honesty:promise") === "error");
+  ok("levels: countdown_reset error, urgency:* warnings", levelOf("countdown-moved-back", "honesty:countdown_reset") === "error" && levelOf("countdown-extended", "urgency:extended") === "warning" && levelOf("countdown-far", "urgency:far") === "warning" && levelOf("stock-stale", "urgency:stock-stale") === "warning");
+  ok("levels: wa:no-number is an error, delivery and thank-you rows warnings", levelOf("wa-no-number", "wa:no-number") === "error" && levelOf("store-notes", "thanks:no-caller") === "warning" && levelOf("fee-mismatch", "delivery:fee_mismatch") === "warning");
+  ok("levels: form:F1 is a warning above 1,100 px", levelOf("form-long", "form:F1") === "warning");
+  // fixes through ctx.appHref
+  const fixOf = (name: string, id: string) => rowsOf(panel(fixtures.find((f) => f.name === name)!)).find((r) => r.id === id)?.fix;
+  ok("fix: an unset policy claim opens its Policies card with the value", fixOf("owner-return-unset", "honesty:promise")?.href === "/app/shop/settings/policies?card=returns&value=7", fixOf("owner-return-unset", "honesty:promise"));
+  ok("fix: zones-empty opens Delivery, no-window the calling hours", fixOf("store-notes", "delivery:zones-empty")?.href === "/app/shop/settings/delivery" && fixOf("store-notes", "thanks:no-window")?.href === "/app/shop/settings/checkout#calling-window");
+  ok("fix: example proof opens the attestation sheet on its section", fixOf("sample-reviews", "honesty:sample")?.actionId === "landing:attest-proof" && !!fixOf("sample-reviews", "honesty:sample")?.sectionId);
+  ok("fix: a countdown row opens the Offers tab", fixOf("countdown-moved-back", "honesty:countdown_reset")?.tab === "offers");
+  // the rev 1 ids are gone
+  const everyId = fixtures.filter((f) => !f.integrationOnly).flatMap((f) => [...panel(f).errors, ...panel(f).warnings].map((i) => i.id));
+  ok("ids: no rev 1 id (sample:<id>, rating:unattested, urgency:reset)", !everyId.some((id) => /^sample:|^rating:unattested$|^urgency:reset$/.test(id)));
+  // proof sections flagged sample are errors, never the dialog's "confirm they are real" list
+  ok("sample: proof sections are not in sampleSectionIds", panel(fixtures.find((f) => f.name === "sample-reviews")!).sampleSectionIds.length === 0);
+
+  // the frozen T4 context alone (no gate facts): its own fields drive their rows, the rest stays silent
+  const t4 = (fx: LandingGateFixture, data: Partial<CheckContextData>) => rowsOf(buildChecklist(fx.ctx.doc, checkContextOf({ ...emptyCheckData(), ...data }, { store: health, now: fx.ctx.now.getTime(), appHref })));
+  const idsT4 = (name: string, data: Partial<CheckContextData>) => new Set(t4(fixtures.find((f) => f.name === name)!, data).map((r) => r.id));
+  ok("T4 context: zones off in a market with a list → zones-empty", idsT4("keep-list-fr", { zones: { enabled: false, count: 0, hasMarketList: true, feesByTopCity: {} } }).has("delivery:zones-empty"));
+  ok("T4 context: zones on are trusted to exist (its preload reports count 0)", !idsT4("keep-list-fr", { zones: { enabled: true, count: 0, hasMarketList: true, feesByTopCity: {} } }).has("delivery:zones-empty"));
+  ok("T4 context: policies unreviewed → note; WhatsApp order with no number → error", idsT4("keep-list-fr", { policiesReviewed: false }).has("policies:unreviewed") && idsT4("wa-no-number", { waOrder: true, confirmation: { callerPhone: true, whatsapp: false, callingWindow: true, callingWindowSaved: true } }).has("wa:no-number"));
+  ok("T4 context: no numbers audit without any listed number (emptyCheckData)", !idsT4("tshirt-counters", {}).has("honesty:D1"));
+  ok("T4 context: the listed numbers drive the audit", idsT4("tshirt-counters", { facts: { allowed: ["149"], byClass: { price: ["149"] } } }).has("honesty:D1"));
+  ok("T4 context: no promise, thank-you or I5 row without the facts they need", ["owner-return-refused", "store-notes", "hotspots-generated"].every((n) => !["honesty:promise", "thanks:no-caller", "thanks:no-window", "honesty:I5"].some((id) => idsT4(n, {}).has(id))));
 }
 
 console.log(`editor checklist selftest: ${pass} passed, ${failures.length} failed`);
