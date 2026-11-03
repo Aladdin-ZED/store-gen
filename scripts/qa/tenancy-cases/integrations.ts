@@ -28,6 +28,10 @@
  * sealed context; B's purge never touches A's rows; B's conversions change never lists A's pages; a `capi` item of
  * store B naming A's pixel id signs with B's token only (A's token never leaves A); B replaying A's outbox id is
  * not_found (P8's `replay`: not applicable while it is the P0 stub).
+ *
+ * R1 P5 step 7, Telegram (src/lib/integrations/telegram/*, src/lib/jobs/handlers/telegram.ts): B never reads A's bot,
+ * chat or switch (view, setting), B's Find and test message never call A's bot, B's outbox item naming A's order sends
+ * nothing and reads none of A's customer fields, and B's queue never targets A's chat.
  */
 import { createRequire } from "node:module";
 import type { TenancyCase, TenancyKit } from "../tenancy-check";
@@ -597,5 +601,55 @@ export const cases: TenancyCase[] = [
       kit.notApplicable("capi replay: B replaying A's outbox id → not_found", "P8's replay is the P0 stub until the P8 merge; step 8's replay action carries this case");
     },
   },
+  {
+    name: "telegram: A's bot, chat and messages are unreadable and unusable from B (IN-04, OPE-§21.1)",
+    async run(kit) {
+      const { getStoreSetting, setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+      const setup = load<typeof import("@/lib/integrations/telegram/setup.server")>("@/lib/integrations/telegram/setup.server");
+      const handler = load<typeof import("@/lib/jobs/handlers/telegram")>("@/lib/jobs/handlers/telegram");
+      const queue = load<typeof import("@/lib/integrations/telegram/queue")>("@/lib/integrations/telegram/queue");
+      const a = write(kit, "A");
+      const b = write(kit, "B");
+      const TOKEN_A = "123456789:AAH-A-ONLY-TELEGRAM-TOKEN-CANARY";
+      const CHAT_A = "-1004444444444";
+      const SYS = { id: "system", ip: null, kind: "system" as const };
+      await setStoreSetting(a, "telegram", { enabled: true, botToken: TOKEN_A, chatId: CHAT_A, pii: "full", chatTitle: "A-ONLY-CHAT-CANARY", chatType: "supergroup" } as never, SYS);
+      const realFetch = globalThis.fetch;
+      const urls: string[] = [];
+      const bodies: string[] = [];
+      globalThis.fetch = (async (u: string | URL, init?: RequestInit) => {
+        urls.push(String(u));
+        bodies.push(String(init?.body ?? ""));
+        return json({ ok: true, result: [] });
+      }) as typeof fetch;
+      const actor = { kind: "system" as const, userId: null, impersonatorId: null, ip: null };
+      try {
+        const viewB = await setup.telegramView(b);
+        kit.check("telegram view: B never sees A's bot, chat or switch", !viewB.tokenSet && viewB.chat === null && !JSON.stringify(viewB).includes("A-ONLY"), viewB);
+        const bSetting = await getStoreSetting(b, "telegram");
+        kit.check("telegram setting: B's read is B's own (no token, no chat of A)", bSetting.botToken === null && bSetting.chatId === null, { chat: bSetting.chatId });
+        const find = await setup.findChats(b, actor);
+        kit.check("telegram find: B without a token gets token_missing, A's bot is never called", !find.ok && find.error === "token_missing" && urls.length === 0, { find, calls: urls.length });
+        const test = await setup.sendTestMessage(b, actor);
+        kit.check("telegram test message: B cannot send through A's bot or to A's chat", !test.ok && urls.length === 0, test);
+        const item = {
+          id: "01JQBBBBBBBBBBBBBBBBBBBBBB",
+          storeId: kit.fx.B.id,
+          kind: "telegram" as const,
+          topic: "new_order",
+          targetId: "chat:4444",
+          dedupeKey: `tg:new:${kit.fx.A.order.main}`,
+          payload: { m: "new_order", orderId: kit.fx.A.order.main, test: false },
+          attempts: 0,
+          createdAt: new Date(),
+        };
+        const r = await handler.sendTelegramItems([item], { sleep: async () => undefined });
+        kit.check("telegram handler: B's item naming A's order sends nothing, through no bot", !r.ok && urls.length === 0 && !bodies.some((x) => x.includes(kit.fx.A.customer.phone)), { r, calls: urls.length });
+        const queued = await queue.queueTelegram(b, { kind: "new_order", orderId: kit.fx.A.order.main, test: false });
+        kit.check("telegram queue: B's Telegram (not set up) queues nothing, A's chat is never its target", !queued.queued, queued);
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    },
+  },
 ];
-

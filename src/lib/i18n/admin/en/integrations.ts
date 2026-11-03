@@ -81,6 +81,33 @@ export const messages = {
   "int.hint.binding_conflict": "Connect a sheet that belongs to this store only.",
   // OPE-§19.3: the one refusal of a spreadsheet another store holds (no hint of which store; tenant-facing: ar, fr, en)
   "int.sheets.refused": "This sheet can't be connected. Create a new Google Sheet for this store.",
+  // OPE-§21.2 Telegram messages to the store's own chat (ar, fr and en in R1; src/lib/integrations/telegram/messages.ts).
+  // Plain text, no emoji, no em dash. Each figure is its own key, so no string names two of placed / confirmed /
+  // delivered (OD38); a rate always carries its n (OD17).
+  "int.tg.test": "[TEST]",
+  "int.tg.resent": "(resent)",
+  "int.tg.newOrder": "New order {orderId}",
+  "int.tg.batch": "{count} new orders ({from}-{to})",
+  "int.tg.more": "{count, plural, one {and # more order} other {and # more orders}}",
+  "int.tg.summary.head": "Summary for {date}:",
+  "int.tg.summary.placed": "{count, plural, one {# order} other {# orders}}",
+  "int.tg.summary.confirmed": "{count} confirmed",
+  "int.tg.summary.confirmedRate": "{count} confirmed ({rate}%, n = {n})",
+  "int.tg.summary.delivered": "{count} delivered",
+  "int.tg.summary.callbacks": "{count, plural, one {# callback waiting} other {# callbacks waiting}}",
+  "int.tg.summary.deliveryProblems": "{count, plural, one {# parcel} other {# parcels}} with a failed delivery attempt",
+  "int.tg.summary.sheets.ok": "Google Sheets: OK",
+  "int.tg.summary.sheets.warn": "Google Sheets: running late",
+  "int.tg.summary.sheets.failing": "Google Sheets: not syncing",
+  "int.tg.summary.cashHeld": "{carrier} has held {amount} for more than {days} days ({parcels, plural, one {# parcel} other {# parcels}}).",
+  "int.tg.incident.sheets": "Google Sheets: orders have not reached your sheet for {minutes} min. Open Store Gen to see why.",
+  "int.tg.incident.capi": "Server events: {platform} refused the access token of pixel ending {pixel}. Open Store Gen to see why.",
+  "int.tg.incident.dead": "Some deliveries failed for good. Open Store Gen to replay them once the cause is fixed.",
+  "int.tg.alert.cpa": "Cost per order above your threshold for {days} days: {cost} against a threshold of {threshold}.",
+  "int.tg.alert.refusals": "Refusals are up: {rate7}% over 7 days against {rate28}% over 28 days (n = {n}).",
+  "int.tg.alert.city":
+    "{city}: {rate}% refused over 28 days against {storeRate}% for the store (n = {n}). Consider marking the city as not served or raising its fee.",
+  "int.tg.testMessage": "Store Gen is connected to this chat. New orders of {store} will arrive here.",
   "int.hint.sheet_is_xlsx": "Open the file, save it as a Google Sheet, then connect the new link.",
   "int.hint.token_revoked": "Create a new access token in Events Manager and paste it in Pixels.",
   "int.hint.token_invalid": "Copy the access token again from Events Manager and paste it in Pixels.",

@@ -1,4 +1,4 @@
-// proves: IN-05, OP-05, LP-04, AI-15, IN-03, SF-03, SF-06, IN-01, IN-09, OP-16, IN-02, SF-05
+// proves: IN-05, OP-05, LP-04, AI-15, IN-03, SF-03, SF-06, IN-01, IN-09, OP-16, IN-02, SF-05, IN-04
 /**
  * Ad pixels — server side, offline (fetch is mocked; no network, no database), docs/OFFERS.md §A:
  *  - Tracking schema: legacy single ids → lists, dedupe, limits, empty → unset; `none` / `copiedFrom`;
@@ -33,6 +33,10 @@
  *    `order` only (OD19), test / honeypot / typed orders never sent, the 7 d − 1 h guard on both sides, the outbox
  *    items, the capi_ctx JSON round trip and cap, the rebuild and the contents collapse
  *    (src/lib/integrations/capi.selftest.ts; the sealed envelope and the hook are scripts/qa/integrations-db-check.ts).
+ *  - telegram (R1 P5, operations.md OPE-§O.1 "telegram", OPE-§21; IN-04, SF-05 Telegram half): the batch of ≤ 10 orders,
+ *    "[TEST]" only with the switch, "(renvoi)", the honest triad over every int.tg.* string of the three catalogs, the
+ *    minimum n, the cash-held line skipped for at_delivery accounts, ≤ 3,500 characters, no emoji or em dash, the masked
+ *    level, the Bot API answers and the items (src/lib/integrations/telegram.selftest.ts).
  *
  *   npx tsx scripts/qa/conversions-check.ts      (exit code 1 on failure)
  */
@@ -66,6 +70,7 @@ import { integrationsHealthSelftest } from "@/lib/integrations/selftest";
 import { templatesSelftest } from "@/lib/integrations/templates.selftest";
 import { sheetsSelftest } from "@/lib/sheets/selftest";
 import { capiSelftest } from "@/lib/integrations/capi.selftest";
+import { telegramSelftest } from "@/lib/integrations/telegram.selftest";
 
 let pass = 0;
 const failures: string[] = [];
@@ -478,6 +483,12 @@ async function main() {
   pass += capi.pass;
   failures.push(...capi.failures);
   for (const n of capi.notes) console.log(`· ${n}`);
+
+  /* ---------------- Telegram (OPE-§21, §26; IN-04, SF-05) ---------------- */
+  const telegram = telegramSelftest();
+  pass += telegram.pass;
+  failures.push(...telegram.failures);
+  for (const n of telegram.notes) console.log(`· ${n}`);
 
   for (const f of failures) console.log(`✗ ${f}`);
   console.log(failures.length ? `✗ ${failures.length} failure(s), ${pass} passed` : `✓ conversions check passed (${pass} assertions)`);

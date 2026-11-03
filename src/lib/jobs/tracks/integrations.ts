@@ -1,5 +1,5 @@
 /**
- * Jobs of the integrations track (P5): sheets.push, sheets.pull, sheets.bind_legacy, int.telegram_daily, ops.capi_ctx_purge.
+ * Jobs of the integrations track (P5): sheets.push, sheets.pull, sheets.bind_legacy, ops.capi_ctx_purge, int.telegram_daily.
  * Extension file (docs/STORE-SAAS.md §H.2, §K.3) imported by src/lib/jobs/registry.ts.
  *
  * - `sheets.push` (slot 1, every tick, 18 s; OPE-§19.5, §19.7, OPE-§J): the stores matching `pending_sheets`, the
@@ -16,8 +16,11 @@
  *   `orders.capi_ctx` of orders 8 to 30 days old is nulled (src/lib/orders/conversions.ts `purgeCapiContexts`, 500 rows
  *   per statement over `orders_store_created_idx`), the deadline checked between statements and stores, `ctx.yield()`
  *   awaited between stores; a store left unfinished is caught up on the next run (the 30-day look-back).
- * Telegram's job arrives with step 7.
+ * - `int.telegram_daily` (slot 7, hourly, ≤ 2 s; OPE-§21.2, OPE-§J): the stores whose store-local hour is their
+ *   `dailySummaryHour`, with Telegram on and the summary on, get today's summary queued once per day (dedupe key
+ *   `tg:daily:<storeId>:<day>`; src/lib/integrations/telegram/daily.ts), `ctx.yield()` awaited between stores.
  */
+import { runTelegramDailyTick } from "@/lib/integrations/telegram/daily";
 import { purgeCapiContexts } from "@/lib/orders/conversions";
 import { errorSummary } from "@/lib/orders/log";
 import { runBindLegacyTick } from "@/lib/sheets/bind-legacy";
@@ -98,4 +101,14 @@ export const capiCtxPurgeJob: Job = {
   },
 };
 
-export const jobs: Job[] = [sheetsPushJob, sheetsPullJob, sheetsBindLegacyJob, capiCtxPurgeJob];
+export const telegramDailyJob: Job = {
+  name: "int.telegram_daily",
+  every: "hourly",
+  budgetMs: 2_000,
+  async run(ctx) {
+    const report = await runTelegramDailyTick(ctx, { budgetMs: Math.max(1, Math.min(2_000, ctx.deadline - Date.now())) });
+    return { done: report.done, summary: { visited: report.visited, due: report.due, queued: report.queued } };
+  },
+};
+
+export const jobs: Job[] = [sheetsPushJob, sheetsPullJob, sheetsBindLegacyJob, capiCtxPurgeJob, telegramDailyJob];

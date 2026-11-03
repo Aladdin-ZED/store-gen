@@ -18,5 +18,9 @@ export const TelegramSetting = z.object({
     .default(null),
   /** customer fields in messages */
   pii: z.enum(["masked", "full"]).default("masked"),
+  /** R1 P5 step 7 (display only, never needed to send): the bot's @username from getMe, the chosen chat's title and type */
+  botUsername: z.string().max(64).nullable().optional(),
+  chatTitle: z.string().max(128).nullable().optional(),
+  chatType: z.enum(["private", "group", "supergroup", "channel"]).nullable().optional(),
 });
 export type TelegramSetting = z.output<typeof TelegramSetting>;

@@ -1,4 +1,4 @@
-// proves: IN-01, IN-02, IN-03, IN-09, OP-16, SF-03, SF-05, SF-06
+// proves: IN-01, IN-02, IN-03, IN-04, IN-09, OP-16, SF-03, SF-05, SF-06
 /**
  * Integration health against a real MariaDB (P5 INTEGRATIONS; operations.md OPE-§28.2, §28.3 (3)-(5), §27.2, §27.3,
  * §21.4, OPE-§L; OPE-§O.2 `test:integrations-db`, OPE-§O.4 IN-03, SF-03, SF-06). Two stores, A and B, and one question
@@ -46,6 +46,14 @@
  *    event, the 7-day guard → cancelled + capi_stale, a removed token, the kill switch, health, int.delivery_dead), the
  *    `ops.capi_ctx_purge` job, `applyConversionsChange` re-rendering the pages whose trigger changed, and the render's
  *    `purchaseInBrowserFor` parity with `triggerFor`.
+ *  - Telegram (IN-04, SF-05 Telegram half; OPE-§21, §26, §28.1-§28.3) with P8's enqueue / drain and P4's maskPhone /
+ *    orderKpis / queueCounts as doubles and a fake Bot API: the int.telegram hook on the order's transaction (the
+ *    batch window, dedupe, rollback, honeypot, test orders only with the switch), the handler merging one store's new
+ *    orders into one message, >= 1 s between two messages of a chat, a 429's retry_after honoured, a revoked token
+ *    failing within one send and notified once, "[TEST]" only with the switch, Send again on done rows as one
+ *    "(renvoi)" message, B's item never reading A's order, a migrated group, the Sheets incident at its 15th minute,
+ *    the daily job (one per day, figures left out when unread), the setup functions, and the token canary over every
+ *    outbox row, audit row and log line.
  */
 import Module from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -488,6 +496,7 @@ async function main() {
   void orderIds;
   await sheetsPushSuite();
   await capiSuite();
+  await telegramSuite();
 }
 
 /* ================================================================== */
@@ -1996,6 +2005,393 @@ async function capiSuite(): Promise<void> {
   eq2("render parity: purchaseInBrowserFor = (triggerFor = order) over the whole matrix", parity, total);
 
   conversions.setCapiDoubleForTests(null);
+}
+
+/* ================================================================== */
+/* 9. Telegram (IN-04, SF-05 Telegram half; OPE-§21, §26, §28.1-§28.3) */
+/* ================================================================== */
+
+async function telegramSuite(): Promise<void> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { auditLog, integrationStatus, notifications, orders, outbox, stores } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId, newOrderId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  const queue = load<typeof import("@/lib/integrations/telegram/queue")>("@/lib/integrations/telegram/queue");
+  const handler = load<typeof import("@/lib/jobs/handlers/telegram")>("@/lib/jobs/handlers/telegram");
+  const setup = load<typeof import("@/lib/integrations/telegram/setup.server")>("@/lib/integrations/telegram/setup.server");
+  const daily = load<typeof import("@/lib/integrations/telegram/daily")>("@/lib/integrations/telegram/daily");
+  const { outboxHandler } = load<typeof import("@/lib/jobs/outbox")>("@/lib/jobs/outbox");
+  const { runOrderHooks } = load<typeof import("@/lib/orders/hooks")>("@/lib/orders/hooks");
+  const { getStoreSetting, setStoreSetting, updateStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const status = load<typeof import("@/lib/integrations/status")>("@/lib/integrations/status");
+  const { JOBS } = load<typeof import("@/lib/jobs/registry")>("@/lib/jobs/registry");
+  type Tx = import("@/lib/orders/hooks").Tx;
+  type OutboxItem = import("@/lib/jobs/outbox").OutboxItem;
+  type ClaimedItem = import("@/lib/jobs/outbox").ClaimedItem;
+  type OrderRow = import("@/lib/orders/hooks").OrderRow;
+  status.clearStatusCache();
+  handler.clearTelegramPacing();
+
+  const TOKEN_A = "123456789:AAH-telegram-A-token-canary-0001";
+  const TOKEN_B = "987654321:AAH-telegram-B-token-canary-0002";
+  const NEW_TOKEN = "555555555:AAH-telegram-new-token-canary-03";
+  const CHAT_A = "-1001111111111";
+  const CHAT_B = "2222222";
+  const ctx = systemCtx("qa.integrations_db");
+  const SYS = { id: "system", ip: null, kind: "system" as const };
+  const actor = { kind: "system" as const, userId: null, impersonatorId: null, ip: null };
+
+  // every log line of the suite, searched for the tokens at the end (canary)
+  const logs: string[] = [];
+  const real = { log: console.log, error: console.error, warn: console.warn };
+  for (const k of ["log", "error", "warn"] as const) {
+    console[k] = (...args: unknown[]) => {
+      logs.push(args.map((a) => (a instanceof Error ? `${a.message} ${a.stack ?? ""}` : typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+      real[k](...args);
+    };
+  }
+
+  /* ---------------- two stores with their bots and chats ---------------- */
+  async function tgStore(handle: string, token: string, chatId: string) {
+    const id = newId();
+    await db.insert(stores).values({ id, handle, name: `Boutique ${handle}`, status: "active", brandSeed: "0123456789abcdef", defaultLocale: "fr" });
+    const scope = systemScope(ctx, id);
+    await setStoreSetting(scope, "telegram", { enabled: true, botToken: token, chatId, pii: "masked" } as never, SYS);
+    return { id, scope };
+  }
+  const SA = await tgStore("tg-a", TOKEN_A, CHAT_A);
+  const SB = await tgStore("tg-b", TOKEN_B, CHAT_B);
+  const setNotifications = (s: typeof SA, v: object) => setStoreSetting(s.scope, "notifications", v as never, SYS);
+
+  async function tgOrder(s: typeof SA, over: Partial<typeof orders.$inferInsert> = {}): Promise<OrderRow> {
+    const id = newOrderId();
+    await db.insert(orders).values({
+      id,
+      storeId: s.id,
+      pageId: newId(),
+      name: NAME,
+      phone: PHONE,
+      city: "Casablanca",
+      address: "12 rue des Canaris",
+      productName: "Argan oil",
+      items: { bundleId: "b1", bundleLabel: "Pack Duo", qty: 1, unitPrice: 349, variants: [] } as never,
+      qty: 1,
+      subtotal: 349,
+      shipping: 0,
+      total: 349,
+      currency: "MAD",
+      idem: randomUUID(),
+      ...over,
+    });
+    return (await db.select().from(orders).where(eq(orders.id, id)))[0]!;
+  }
+
+  /* ---------------- P8's enqueue / drain and P4's masking and reads as doubles ---------------- */
+  const drains: unknown[] = [];
+  const enqueue = async (scope: { storeId: string } | "platform", items: readonly OutboxItem[], opts?: { tx?: Tx }) => {
+    const storeId = scope === "platform" ? null : scope.storeId;
+    const runner = opts?.tx ?? db;
+    let inserted = 0;
+    for (const it of items) {
+      const nextAt = it.notBefore ?? new Date();
+      const [res] = (await runner.execute(
+        sql`INSERT IGNORE INTO outbox (id, store_id, kind, topic, target_id, dedupe_key, payload, encrypted, state, attempts, next_at, created_at)
+            VALUES (${newId()}, ${storeId}, ${it.kind}, ${it.topic}, ${it.targetId ?? null}, ${it.dedupeKey}, ${JSON.stringify(it.payload)}, ${it.pii ? 1 : 0}, 'pending', 0, ${nextAt}, UTC_TIMESTAMP(3))`,
+      )) as unknown as [{ affectedRows: number }];
+      inserted += res.affectedRows;
+    }
+    return { inserted, duplicates: items.length - inserted };
+  };
+  let kpis: unknown = null;
+  queue.setTelegramDoubleForTests({
+    enqueue: enqueue as never,
+    drainOutbox: async (o) => (drains.push(o), { ms: 0, claimed: 0, done: 0, retried: 0, dead: 0, more: false }),
+    maskPhone: () => "06 •• •• 00 01",
+    orderKpis: async () => {
+      if (!kpis) throw new Error("not implemented: P4 orderKpis");
+      return kpis as never;
+    },
+    queueCounts: async () => ({ callbacksDue: 6, deliveryRescue: 2 }) as never,
+  });
+
+  const rowsOf = (s: typeof SA, topic?: string) =>
+    db.select().from(outbox).where(and(eq(outbox.storeId, s.id), eq(outbox.kind, "telegram"), topic ? eq(outbox.topic, topic) : undefined));
+  const claimed = (row: typeof outbox.$inferSelect, attempts = 0): ClaimedItem => ({
+    id: row.id,
+    storeId: row.storeId,
+    kind: "telegram",
+    topic: row.topic,
+    targetId: row.targetId,
+    dedupeKey: row.dedupeKey,
+    payload: JSON.parse(row.payload) as unknown,
+    attempts,
+    createdAt: row.createdAt,
+  });
+  const createdEvent = (row: OrderRow) => ({ on: "created" as const, order: row, conversion: null, target: { pageId: row.pageId, versionId: null, source: row.source } });
+  const created = async (s: typeof SA, row: OrderRow) => db.transaction(async (tx) => runOrderHooks("created", "inTx", s.scope, createdEvent(row), tx));
+
+  /* ---------------- 9.1 the hook: new orders on the order's transaction ---------------- */
+  const o1 = await tgOrder(SA);
+  const before = Date.now();
+  await created(SA, o1);
+  const [r1] = await rowsOf(SA, "new_order");
+  eq2("telegram hook: a new order queues one new_order item, keyed tg:new:<id>, on chat …1111, not sealed", [r1?.dedupeKey, r1?.targetId, r1?.encrypted], [`tg:new:${o1.id}`, "chat:1111", false]);
+  ok("telegram hook: due at the end of the 45 s batch window", !!r1 && r1.nextAt.getTime() >= before + 44_000 && r1.nextAt.getTime() <= Date.now() + 46_000, r1?.nextAt);
+  ok("telegram hook: the payload holds the order id only (no phone, name or token)", !!r1 && !r1.payload.includes(PHONE) && !r1.payload.includes(NAME) && !r1.payload.includes(TOKEN_A));
+  await created(SA, o1);
+  eq2("telegram hook: a retried creation never duplicates the item (dedupe)", (await rowsOf(SA, "new_order")).length, 1);
+  await db
+    .transaction(async (tx) => {
+      const o = await tgOrder(SA);
+      await runOrderHooks("created", "inTx", SA.scope, createdEvent(o), tx);
+      tx.rollback();
+    })
+    .catch(() => undefined);
+  eq2("telegram hook: a rolled-back order leaves no item (OD6)", (await rowsOf(SA, "new_order")).length, 1);
+  const hp = await tgOrder(SA, { flags: ["honeypot"] as never });
+  await created(SA, hp);
+  const tOff = await tgOrder(SA, { isTest: true });
+  await created(SA, tOff);
+  eq2("telegram hook: a honeypot row and a test order without the switch queue nothing", (await rowsOf(SA, "new_order")).length, 1);
+  await setNotifications(SA, { testOrders: true });
+  const tOn = await tgOrder(SA, { isTest: true });
+  await created(SA, tOn);
+  const testRow = (await rowsOf(SA, "new_order")).find((r) => r.dedupeKey === `tg:new:${tOn.id}`);
+  eq2("telegram hook: a test order with the switch queues one item marked test", testRow ? JSON.parse(testRow.payload).test : null, true);
+  await setNotifications(SA, { telegram: { newOrders: false } });
+  const off = await tgOrder(SA);
+  await created(SA, off);
+  eq2("telegram hook: new orders switched off queue nothing", (await rowsOf(SA, "new_order")).some((r) => r.dedupeKey === `tg:new:${off.id}`), false);
+  await setNotifications(SA, {});
+
+  /* ---------------- 9.2 the handler: merge, pacing, answers ---------------- */
+  const realFetch = globalThis.fetch;
+  const calls: { url: string; body: Record<string, unknown> }[] = [];
+  let answer: () => Response = () => new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
+    return answer();
+  }) as typeof fetch;
+  let clock = Date.now();
+  const opts = { now: () => clock, sleep: async (ms: number) => void (clock += ms) };
+  const sendNow = (items: ClaimedItem[]) => handler.sendTelegramItems(items, opts);
+  const notesOf = async (s: typeof SA, kind: string) => (await db.select({ id: notifications.id }).from(notifications).where(and(eq(notifications.storeId, s.id), eq(notifications.kind, kind)))).length;
+  const statusOf = async (s: typeof SA) => (await db.select().from(integrationStatus).where(and(eq(integrationStatus.storeId, s.id), eq(integrationStatus.kind, "telegram"))))[0];
+  try {
+    ok("telegram handler: registered for kind telegram (perStorePerTick 10, timeoutMs 6000, batch ≤ 10)", (() => {
+      const h = outboxHandler("telegram");
+      return !!h && h.perStorePerTick === 10 && h.timeoutMs === 6000 && h.batch?.max === 10;
+    })());
+
+    // three new orders of one window, claimed together → one message
+    for (const o of [await tgOrder(SA), await tgOrder(SA)]) await created(SA, o);
+    const batchRows = (await rowsOf(SA, "new_order")).filter((r) => !JSON.parse(r.payload).test);
+    eq2("telegram handler: the drainer's key merges the real new orders, test orders apart", [...new Set(batchRows.map((r) => queue.telegramBatchKey(claimed(r))))], ["new_order"]);
+    calls.length = 0;
+    const merged = await sendNow(batchRows.map((r) => claimed(r)));
+    const text = String(calls[0]?.body.text ?? "");
+    eq2(
+      "telegram handler: three orders → one sendMessage to A's chat with A's token",
+      [merged.ok, calls.length, calls[0]?.url.includes(`/bot${TOKEN_A}/sendMessage`), calls[0]?.body.chat_id, calls[0]?.body.disable_web_page_preview],
+      [true, 1, true, CHAT_A, true],
+    );
+    ok(
+      "telegram handler: the message names the three orders under one header, masked phone, no full phone or address",
+      text.startsWith("3 nouvelles commandes") && batchRows.every((r) => text.includes(r.dedupeKey.slice(7))) && text.includes("06 •• •• 00 01") && !text.includes(PHONE) && !text.includes("12 rue"),
+      text,
+    );
+    eq2("telegram handler: integration_status telegram is ok", (await statusOf(SA))?.state, "ok");
+
+    // ≤ 1 message per second per chat: the second send waits for the gap
+    const t0 = clock;
+    await sendNow([claimed(batchRows[0]!)]);
+    ok("telegram handler: a second message to the chat waits ≥ 1 s", clock - t0 >= 1_000, clock - t0);
+
+    // 429 retry_after honoured
+    handler.clearTelegramPacing();
+    answer = () => new Response(JSON.stringify({ ok: false, error_code: 429, description: "Too Many Requests: retry after 7", parameters: { retry_after: 7 } }), { status: 429 });
+    calls.length = 0;
+    const r429 = await sendNow([claimed(batchRows[0]!)]);
+    eq2("telegram handler: a 429 → retry with retryAfterMs = retry_after", [r429.ok, !r429.ok && r429.retry, r429.retryAfterMs], [false, true, 7_000]);
+    const again = await sendNow([claimed(batchRows[0]!)]);
+    ok("telegram handler: nothing is sent to the chat before retry_after", calls.length === 1 && !again.ok && again.retry && (again.retryAfterMs ?? 0) > 0 && (again.retryAfterMs ?? 0) <= 7_000, { calls: calls.length, again });
+    eq2("telegram handler: a 429 turns the row warn", (await statusOf(SA))?.state, "warn");
+    clock += 7_001;
+    answer = () => new Response(JSON.stringify({ ok: true, result: { message_id: 2 } }), { status: 200 });
+    eq2("telegram handler: after retry_after the message goes", (await sendNow([claimed(batchRows[0]!)])).ok, true);
+
+    // a revoked token: final, failing within one send, notified once
+    clock += 2_000;
+    status.clearStatusCache();
+    const failingBefore = await notesOf(SA, "int.telegram_failing");
+    const deadBefore = await notesOf(SA, "int.delivery_dead");
+    answer = () => new Response(JSON.stringify({ ok: false, error_code: 401, description: "Unauthorized" }), { status: 401 });
+    const r401 = await sendNow([claimed(batchRows[1]!)]);
+    eq2("telegram handler: a revoked token → final (dead), cause bot_token_revoked", [r401.ok, !r401.ok && r401.retry, !r401.ok && r401.error], [false, false, "bot_token_revoked"]);
+    const failingRow = await statusOf(SA);
+    eq2("telegram handler: the telegram row is failing at once, its cause named", [failingRow?.state, failingRow?.lastErrorCode], ["failing", "bot_token_revoked"]);
+    clock += 2_000;
+    await sendNow([claimed(batchRows[2]!)]);
+    eq2("telegram handler: int.telegram_failing reaches the owners once for the incident", (await notesOf(SA, "int.telegram_failing")) - failingBefore, 1);
+    ok("telegram handler: int.delivery_dead at the dead transition", (await notesOf(SA, "int.delivery_dead")) > deadBefore);
+    eq2("telegram handler: Telegram's own failure is never sent to Telegram", (await rowsOf(SA, "incident")).length, 0);
+    answer = () => new Response(JSON.stringify({ ok: true, result: { message_id: 3 } }), { status: 200 });
+    clock += 2_000;
+    await sendNow([claimed(batchRows[0]!)]);
+    eq2("telegram handler: a success brings the row back to ok", (await statusOf(SA))?.state, "ok");
+
+    // a test order: [TEST] with the switch, nothing without it
+    await setNotifications(SA, { testOrders: true });
+    clock += 2_000;
+    calls.length = 0;
+    const testSent = await sendNow([claimed(testRow!)]);
+    ok("telegram handler: a test order with the switch → one message prefixed [TEST]", testSent.ok && calls.length === 1 && String(calls[0]!.body.text).startsWith("[TEST] Nouvelle commande"), calls[0]?.body.text);
+    await setNotifications(SA, { testOrders: false });
+    clock += 2_000;
+    calls.length = 0;
+    const testOff = await sendNow([claimed(testRow!)]);
+    eq2("telegram handler: the switch turned off meanwhile → cancelled, nothing sent", [!testOff.ok && testOff.error, calls.length], ["cancelled:test_off", 0]);
+    await setNotifications(SA, {});
+
+    // Send again on done rows: one message marked (renvoi)
+    await db.update(outbox).set({ state: "done", doneAt: new Date(), attempts: 1 }).where(inArray(outbox.id, batchRows.map((r) => r.id)));
+    clock += 2_000;
+    calls.length = 0;
+    const resend = await sendNow(batchRows.map((r) => claimed(r, 1)));
+    const resentText = String(calls[0]?.body.text ?? "");
+    ok("telegram handler: Send again on done rows → one message marked (renvoi)", resend.ok && calls.length === 1 && (resentText.match(/\(renvoi\)/g) ?? []).length === 1, resentText.split("\n")[0]);
+
+    // B's item naming A's order: nothing of A is read or sent
+    clock += 2_000;
+    calls.length = 0;
+    const cross = await sendNow([{ ...claimed(batchRows[0]!), id: newId(), storeId: SB.id }]);
+    eq2("telegram handler: B's item naming A's order reads nothing of A and sends nothing", [!cross.ok && cross.error, calls.length], ["cancelled:order_gone", 0]);
+    await updateStoreSetting(SB.scope, "telegram", { enabled: false }, SYS);
+    const offB = await sendNow([{ ...claimed(batchRows[0]!), storeId: SB.id }]);
+    eq2("telegram handler: Telegram turned off meanwhile → cancelled", !offB.ok && offB.error, "cancelled:not_configured");
+    await updateStoreSetting(SB.scope, "telegram", { enabled: true }, SYS);
+    eq2("telegram handler: a tampered payload is refused", (await sendNow([{ ...claimed(batchRows[0]!), payload: { m: "new_order", orderId: "x" } }])).ok, false);
+
+    // a group upgraded to a supergroup: saved and sent there once
+    clock += 2_000;
+    let first = true;
+    answer = () => {
+      if (first) {
+        first = false;
+        return new Response(JSON.stringify({ ok: false, error_code: 400, description: "Bad Request: group chat was upgraded to a supergroup chat", parameters: { migrate_to_chat_id: -1009999999999 } }), { status: 400 });
+      }
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 4 } }), { status: 200 });
+    };
+    calls.length = 0;
+    const migrated = await sendNow([claimed(batchRows[0]!)]);
+    eq2("telegram handler: a migrated group → the new chat id saved and the message sent there", [migrated.ok, calls[1]?.body.chat_id, (await getStoreSetting(SA.scope, "telegram")).chatId], [true, "-1009999999999", "-1009999999999"]);
+    await updateStoreSetting(SA.scope, "telegram", { chatId: CHAT_A }, SYS);
+    answer = () => new Response(JSON.stringify({ ok: true, result: { message_id: 5 } }), { status: 200 });
+
+    /* ---------------- 9.3 incidents, the daily summary ---------------- */
+    status.clearStatusCache();
+    const T = Date.now();
+    for (let i = 0; i < 3; i++) await status.recordIntegrationStatus(SA.scope, { kind: "sheets", outcome: "failed", code: "sheet_not_shared" }, { now: T + i * 60_000 });
+    const [inc] = await rowsOf(SA, "incident");
+    ok("telegram incident: Sheets failing queues one message due 15 min after the first failure", !!inc && Math.abs(inc.nextAt.getTime() - (T + 15 * 60_000)) < 2 * 60_000, inc?.nextAt);
+    clock = T + 16 * 60_000;
+    calls.length = 0;
+    const incSent = await sendNow([claimed(inc!)]);
+    ok("telegram incident: still failing at its time → sent, with the minutes", incSent.ok && /Google Sheets : les commandes n'arrivent plus dans votre feuille depuis 1[5-9] min/.test(String(calls[0]?.body.text)), calls[0]?.body.text);
+    await status.recordIntegrationStatus(SA.scope, { kind: "sheets", outcome: "ok" }, { now: T + 17 * 60_000 });
+    eq2("telegram incident: Sheets recovered meanwhile → cancelled", (await sendNow([claimed(inc!)])).ok ? "sent" : "cancelled", "cancelled");
+
+    const dailyJob = JOBS.find((j) => j.name === "int.telegram_daily");
+    eq2("telegram daily: the job is registered hourly with 2 s", [dailyJob?.every, dailyJob?.budgetMs], ["hourly", 2_000]);
+    const at21 = new Date("2026-10-24T20:05:00Z"); // 21:05 in Casablanca (UTC+1)
+    const jobCtx = () => ({ ...systemCtx("int.telegram_daily"), deadline: Date.now() + 2_000, tickId: "qa", cursor: "", setCursor: async () => undefined, yield: async () => new Promise<void>((r) => setImmediate(r)), lagMs: () => 0 });
+    const noKpis = await daily.runTelegramDailyTick(jobCtx(), { budgetMs: 2_000, now: at21 });
+    const dailyRows0 = await rowsOf(SA, "daily_summary");
+    ok(
+      "telegram daily: with P4's orderKpis still a stub, only the figures read are queued (no estimate)",
+      noKpis.due >= 2 && dailyRows0.length === 1 && JSON.parse(dailyRows0[0]!.payload).figures.placed === undefined && JSON.parse(dailyRows0[0]!.payload).figures.callbacksDue === 6,
+      { noKpis, payload: dailyRows0[0]?.payload },
+    );
+    await db.delete(outbox).where(and(eq(outbox.storeId, SA.id), eq(outbox.topic, "daily_summary")));
+    kpis = {
+      window: "today",
+      placed: 42,
+      confirmed: 31,
+      delivered: 18,
+      decided: 40,
+      confirmationRate: { value: 0.775, n: 40, min: 30 },
+      deliveryRate: { n: 0, min: 30, insufficient: true },
+      firstTouchP50Min: { n: 0, min: 20, insufficient: true },
+      unreachableRate: { n: 0, min: 30, insufficient: true },
+      riskyShare: { n: 0, min: 30, insufficient: true },
+      lastOrderAt: null,
+      computedAt: new Date().toISOString(),
+    };
+    await daily.runTelegramDailyTick(jobCtx(), { budgetMs: 2_000, now: at21 });
+    await daily.runTelegramDailyTick(jobCtx(), { budgetMs: 2_000, now: new Date(at21.getTime() + 20 * 60_000) });
+    const dailyRows = await rowsOf(SA, "daily_summary");
+    eq2("telegram daily: one summary per store and day (dedupe), keyed tg:daily:<store>:<day>", dailyRows.map((r) => r.dedupeKey), [`tg:daily:${SA.id}:2026-10-24`]);
+    eq2("telegram daily: not at another hour", (await daily.runTelegramDailyTick(jobCtx(), { budgetMs: 2_000, now: new Date("2026-10-25T10:00:00Z") })).due, 0);
+    clock += 2_000;
+    calls.length = 0;
+    await sendNow([claimed(dailyRows[0]!)]);
+    ok(
+      "telegram daily: the summary text, each figure on its own, the rate with its n",
+      String(calls[0]?.body.text).replace(/[\u00a0\u202f]/g, " ").startsWith("Résumé du 24 oct. : 42 commandes · 31 confirmées (78 %, n = 40) · 18 livrées · 6 rappels en attente · 2 colis"),
+      calls[0]?.body.text,
+    );
+
+    /* ---------------- 9.4 setup ---------------- */
+    let api: (method: string) => Response = () => new Response("{}", { status: 500 });
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
+      return api(String(url).split("/").pop()!);
+    }) as typeof fetch;
+    api = (m) =>
+      m === "getMe"
+        ? new Response(JSON.stringify({ ok: true, result: { id: 555555555, username: "boutique_a_bot", first_name: "Boutique A" } }))
+        : m === "getUpdates"
+          ? new Response(JSON.stringify({ ok: true, result: [{ update_id: 1, message: { chat: { id: -100777, type: "supergroup", title: "Équipe" }, text: "hello" } }] }))
+          : m === "getChat"
+            ? new Response(JSON.stringify({ ok: true, result: { id: -100777, type: "supergroup", title: "Équipe" } }))
+            : new Response(JSON.stringify({ ok: true, result: { message_id: 9 } }));
+    eq2("telegram setup: a malformed token is refused before any call", await setup.saveBotToken(SA.scope, actor, "not-a-token", { stepUp: "totp" }), { ok: false, error: "token_format" });
+    const saved = await setup.saveBotToken(SA.scope, actor, NEW_TOKEN, { stepUp: "totp" });
+    const afterSave = await getStoreSetting(SA.scope, "telegram");
+    eq2("telegram setup: a token getMe accepts is saved; the chat is reset and Telegram is off", [saved, afterSave.botToken === NEW_TOKEN, afterSave.chatId, afterSave.enabled], [{ ok: true, botUsername: "boutique_a_bot" }, true, null, false]);
+    const view = await setup.telegramView(SA.scope);
+    eq2("telegram setup: the view says set / not set, never the token", [view.tokenSet, view.botUsername, JSON.stringify(view).includes(NEW_TOKEN)], [true, "boutique_a_bot", false]);
+    eq2("telegram setup: Find my chat lists titles and types", await setup.findChats(SA.scope, actor), { ok: true, chats: [{ id: "-100777", title: "Équipe", type: "supergroup" }] });
+    eq2("telegram setup: selecting a chat checks it and keeps Telegram off", [await setup.selectChat(SA.scope, actor, "-100777"), (await getStoreSetting(SA.scope, "telegram")).enabled], [{ ok: true, chat: { title: "Équipe", type: "supergroup" } }, false]);
+    eq2("telegram setup: the test message turns Telegram on", [await setup.sendTestMessage(SA.scope, actor), (await getStoreSetting(SA.scope, "telegram")).enabled], [{ ok: true, enabled: true }, true]);
+    eq2("telegram setup: full details need the explicit confirmation", [await setup.setPii(SA.scope, actor, "full"), await setup.setPii(SA.scope, actor, "full", { confirmed: true })], [{ ok: false, error: "confirm_required" }, { ok: true, pii: "full" }]);
+    let limited = 0;
+    for (let i = 0; i < 10; i++) if (!(await setup.findChats(SA.scope, actor)).ok) limited++;
+    ok("telegram setup: Find my chat is limited to 10 per hour per store", limited >= 1, limited);
+    const bFind = await setup.findChats(SB.scope, actor);
+    eq2("telegram setup: B's Find uses B's own token, never A's", [bFind.ok, calls.at(-1)?.url.includes(TOKEN_B), calls.at(-1)?.url.includes(NEW_TOKEN)], [true, true, false]);
+    api = (m) => (m === "getMe" ? new Response(JSON.stringify({ ok: false, error_code: 401, description: "Unauthorized" }), { status: 401 }) : new Response("{}", { status: 500 }));
+    eq2("telegram setup: a token getMe refuses is not saved", [await setup.saveBotToken(SA.scope, actor, TOKEN_B, { stepUp: "password" }), (await getStoreSetting(SA.scope, "telegram")).botToken === NEW_TOKEN], [{ ok: false, error: "token_invalid" }, true]);
+    eq2(
+      "telegram setup: disable turns it off and keeps the token; forget removes it",
+      [await setup.disableTelegram(SA.scope, actor), (await getStoreSetting(SA.scope, "telegram")).botToken === NEW_TOKEN, await setup.disableTelegram(SA.scope, actor, { forget: true }), (await getStoreSetting(SA.scope, "telegram")).botToken],
+      [{ ok: true, enabled: false }, true, { ok: true, enabled: false }, null],
+    );
+    const audits = await db.select().from(auditLog).where(and(eq(auditLog.storeId, SA.id), eq(auditLog.action, "integrations.telegram.changed")));
+    ok("telegram setup: every change audited integrations.telegram.changed", audits.length >= 5, audits.length);
+
+    /* ---------------- 9.5 the token canary ---------------- */
+    const allOutbox = await db.select().from(outbox);
+    const allAudit = await db.select().from(auditLog);
+    const leaks = [TOKEN_A, TOKEN_B, NEW_TOKEN].filter(
+      (tk) => allOutbox.some((r) => [r.payload, r.dedupeKey, r.targetId, r.lastError].some((v) => (v ?? "").includes(tk))) || allAudit.some((r) => JSON.stringify(r).includes(tk)) || logs.some((l) => l.includes(tk)),
+    );
+    eq2("telegram canary: no token in any outbox row, audit row or log line", leaks, []);
+  } finally {
+    globalThis.fetch = realFetch;
+    queue.setTelegramDoubleForTests(null);
+    Object.assign(console, real);
+  }
 }
 
 main()

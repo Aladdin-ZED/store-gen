@@ -13,8 +13,13 @@
  *   `sheet_dirty` bits in the same UPDATE), so the store's push is scheduled (src/lib/sheets/push.ts, debounced 2 s per
  *   store, then after()). Never for a test order (D54: its `sheet_status` is `disabled` and the push's queries say
  *   `is_test = 0` as well). The creation path keeps its own after() push (src/lib/orders/http.ts).
- * `int.telegram` (inTx) arrives with step 7.
+ * - `int.telegram` (inTx; created, transition; OPE-§21.3): a new order's `new_order` item on the order's transaction,
+ *   due at the end of the batch window, when the store's Telegram is on and `notifications.telegram.newOrders`; a test
+ *   order only with `notifications.testOrders` (prefixed "[TEST]" at send, D54), a honeypot row never
+ *   (src/lib/integrations/telegram/queue.ts `queueNewOrderTelegram`). A transition sends no message in R1; the event
+ *   stays registered as OPE-§3.6 lists it.
  */
+import { queueNewOrderTelegram } from "@/lib/integrations/telegram/queue";
 import { enqueueCreatedConversions, enqueueTransitionConversions } from "@/lib/orders/conversions";
 import { scheduleSheetPush } from "@/lib/sheets/push";
 import type { OrderHook } from "../hooks";
@@ -43,4 +48,15 @@ export const sheetsHook: OrderHook = {
   },
 };
 
-export const hooks: OrderHook[] = [capiHook, sheetsHook];
+export const telegramHook: OrderHook = {
+  name: "int.telegram",
+  phase: "inTx",
+  on: ["created", "transition"],
+  async run(scope, e, tx) {
+    if (!tx) throw new Error("int.telegram: an inTx hook needs the order's transaction");
+    if (e.on !== "created") return;
+    await queueNewOrderTelegram(scope, e.order, tx);
+  },
+};
+
+export const hooks: OrderHook[] = [capiHook, telegramHook, sheetsHook];

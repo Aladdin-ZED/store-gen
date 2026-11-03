@@ -81,7 +81,8 @@ export function targetLabel(kind: string, targetId: string | null): string | nul
     const m = /^([a-z]{2,12}):([0-9A-Za-z_-]{4,64})$/.exec(targetId);
     return m ? `${m[1]}:${m[2]!.slice(-4)}` : null;
   }
-  // telegram: the chat label arrives with the Telegram setup (step 7); webhook / carrier labels with R2
+  // telegram: "chat:<last 4>" (src/lib/integrations/telegram/queue.ts `chatTarget`); webhook / carrier labels with R2
+  if (kind === "telegram") return /^chat:[0-9A-Za-z_]{1,4}$/.test(targetId) ? targetId : null;
   return null;
 }
 

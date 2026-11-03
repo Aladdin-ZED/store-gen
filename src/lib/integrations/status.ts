@@ -13,8 +13,8 @@ import "server-only";
  *   OR updated_at <= now - 60 s`), so a second process or a lost cache entry cannot write more often either.
  * - A transition into `failing` (an incident): `int.<kind>_failing` to the store's owners and admins once per
  *   incident per hour (dedupe key), `markHealthDirty` (the `int:*` rules), and the registered incident listeners
- *   (the Telegram "integration problem" message registers from its handler; a list here, so this module imports
- *   no handler). Leaving `failing` marks health dirty too, so the issue clears on the next pass.
+ *   (the Telegram "integration problem" message registers from src/lib/integrations/telegram/queue.ts; a list here,
+ *   so this module imports no handler). Leaving `failing` marks health dirty too, so the issue clears on the next pass.
  * - `notifyDeliveryDead` is the `int.delivery_dead` notice a handler fires once, at an item's dead transition
  *   (`isFinalFailure`, core §H.1): batched per kind over 60 minutes.
  * Never throws for a notification or a listener: a delivery path must not fail because a notice could not be stored.
@@ -120,10 +120,12 @@ export interface IntegrationIncident {
   sinceMinutes: number;
   backlog: number;
   at: string;
+  /** an outbox item of this kind went `dead` (`notifyDeliveryDead`), not a target turning `failing` */
+  dead?: boolean;
 }
 export type IncidentListener = (scope: WriteScope, incident: IntegrationIncident) => Promise<void>;
 
-/** Registered at import by the modules that react to incidents (step 7: the Telegram "integration problem" message). */
+/** Registered at import by the modules that react to incidents (src/lib/integrations/telegram/queue.ts: the Telegram "integration problem" message). */
 const incidentListeners: IncidentListener[] = [];
 
 /** Adds a listener; answers its removal (tests). */
@@ -145,6 +147,17 @@ const short = (s: string) => (s ? createHash("sha256").update(s, "utf8").digest(
 async function linkFor(storeId: string, kind: string, vars: Record<string, unknown>): Promise<string | undefined> {
   const store = await getStoreById(storeId);
   return notificationKind(kind)?.link?.(vars, { handle: store?.handle ?? null }) || undefined;
+}
+
+/** Every registered listener, in order; a failing listener is logged and the next still runs. */
+async function tellListeners(scope: WriteScope, incident: IntegrationIncident): Promise<void> {
+  for (const listener of [...incidentListeners]) {
+    try {
+      await listener(scope, incident);
+    } catch (err) {
+      console.error(`[integrations] incident listener failed (${incident.kind}):`, errorSummary(err));
+    }
+  }
 }
 
 async function onFailing(scope: WriteScope, kind: IntegrationKind, targetId: string, row: StatusRow, now: number): Promise<void> {
@@ -169,13 +182,7 @@ async function onFailing(scope: WriteScope, kind: IntegrationKind, targetId: str
       console.error(`[integrations] ${notice} not stored:`, errorSummary(err));
     }
   }
-  for (const listener of [...incidentListeners]) {
-    try {
-      await listener(scope, incident);
-    } catch (err) {
-      console.error(`[integrations] incident listener failed (${kind}):`, errorSummary(err));
-    }
-  }
+  await tellListeners(scope, incident);
 }
 
 /* ------------------------------------------------------------------ */
@@ -242,6 +249,8 @@ export async function notifyDeliveryDead(scope: WriteScope, outboxKind: "capi" |
     console.error("[integrations] int.delivery_dead not stored:", errorSummary(err));
   }
   await markHealthDirty(scope.storeId).catch((err: unknown) => console.error("[integrations] markHealthDirty:", errorSummary(err)));
+  // the listeners hear it too (the Telegram "integration problem" message, once per kind per hour by its own key)
+  await tellListeners(scope, { kind: outboxKind, targetId: "", code: "delivery_dead", sinceMinutes: 0, backlog: 0, at: new Date().toISOString(), dead: true });
 }
 
 /** Forget this process's rows (tests; a store's rows also go with `invalidateStore`). */
