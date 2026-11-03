@@ -16,8 +16,23 @@
  *     A's impersonation scope the latest orders are masked (D70);
  *   - the review card, the preview links and the shell's invite count read B's own rows only;
  *   - a rename of B to A's handle is refused, and A's handle and rows are unchanged.
+ *
+ * Step p2-05 (server actions, PLA-§M.1). `actions` holds one attack case per P2 store action (the harness derives the
+ * actions from the tree and fails on one without a case): B's members on B's path with A's records answer like
+ * missing ones, A's path answers like an unknown handle, the role matrix, the impersonation refusal. The arguments
+ * leave every store as the rest of the run reads it: the close names no store's handle, the rename the store's own,
+ * the 2FA switch is turned off (already off), the notification ids are nobody's. Three writes under a read key are
+ * `write: false`: a preview link and the health recompute are what A's viewer (the member of both stores) may do in
+ * A, which the harness's "A's viewer: forbidden" step would run for real; their impersonation refusal is proven by
+ * the special case below instead. Two special cases cover what the generic suite cannot:
+ *   - the user actions of `src/app/app/actions.ts` (no store: the picker hint, the legal re-acceptance) and the
+ *     account deletion: another store's id answers like an unknown one, nothing pending is accepted, a store id in
+ *     the input is refused, and a staff session viewing A is refused without touching A;
+ *   - every write P2 makes under a read key, called by staff viewing A: `impersonation_read_only`, one
+ *     `platform.impersonation.write_refused` row each, A otherwise unchanged; and the 10-link cap of private previews.
  * App modules are loaded inside each case (the harness loads this file once its environment is in place).
  */
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { createRequire } from "node:module";
 import type * as Compose from "@/app/api/app/[store]/pulse/compose";
 import type * as Dashboard from "@/lib/admin-data/dashboard";
@@ -26,7 +41,7 @@ import type * as Handles from "@/lib/tenancy/handles";
 import type * as Seam from "@/lib/tenancy/seam";
 import type * as ShellPulse from "@/lib/pulse/contributors/shell";
 import type { StorePulse } from "@/lib/pulse/types";
-import type { RouteFile, TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
+import type { Fixtures, Outcome, RouteFile, StoreFx, TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
 
 const nodeRequire = createRequire(__filename);
 const load = <T>(id: string): T => nodeRequire(id) as T;
@@ -193,11 +208,292 @@ async function renameCase(kit: TenancyKit): Promise<void> {
   check("renameHandle by B's agent is forbidden", !agent.ok && (agent.error as { code?: string } | undefined)?.code === "forbidden", agent.ok ? "renamed" : (agent.error as { code?: string }).code);
 }
 
+/* ------------------------------------------------------------------ */
+/* step p2-05: the server actions                                      */
+/* ------------------------------------------------------------------ */
+
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const newId = (): string => load<typeof import("@/lib/db/ids")>("@/lib/db/ids").newId();
+/** A record made for the attack: one of A's is a canary with a same-format ghost (what `fresh` does for its own). */
+function register(fx: Fixtures, store: StoreFx, id: string): string {
+  if (store.key !== "A") return id;
+  fx.canaries.ids.push(id);
+  fx.ghosts.set(id, `01${Array.from({ length: 24 }, () => CROCKFORD[randomInt(CROCKFORD.length)]).join("")}`);
+  return id;
+}
+
+/** A seller's private preview link of the store's draft (the row T3's mintPreviewToken writes). */
+async function previewTokenOf(fx: Fixtures, store: StoreFx): Promise<string> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const id = newId();
+  await db.insert(S.previewTokens).values({ id, storeId: store.id, pageId: store.page.draft, audience: "seller", createdBy: store.members.owner, expiresAt: new Date(Date.now() + 72 * 3_600_000) });
+  return register(fx, store, id);
+}
+
+/** An open request of the store to staff (kind go_live, the row P1's createStoreRequest writes). */
+async function requestOf(fx: Fixtures, store: StoreFx): Promise<string> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const id = newId();
+  const signals = { v: 1, flags: [], band: "review", inputs: {}, cluster: { users: 0, banned: 0, kinds: [] }, partial: false, ms: 0 };
+  await db.insert(S.signupReviews).values({ id, storeId: store.id, userId: store.members.owner, kind: "go_live", score: 0, signals: signals as never, band: "review", request: { kind: "go_live", message: null } });
+  return register(fx, store, id);
+}
+
+/** The details step: the argan fixture's own prices (149.00, before 199.00), so the directions below carry them. */
+const details = (store: StoreFx) => ({ category: "skincare", productName: "Huile d'argan", priceMinor: 14_900, compareAtMinor: 19_900, fact: "Flacon de 100 ml", assetIds: [store.asset.photo] });
+/** "Use this design" with the store's fixture document (its photo, the typed prices). */
+async function direction(store: StoreFx, fresh: Parameters<TrackActionCase["own"]>[1]) {
+  const doc = (await fresh.doc(store)) as { theme: { archetype: string } };
+  return [{ directionKey: doc.theme.archetype, directions: [{ id: doc.theme.archetype, label: "Direction 1", doc }] }];
+}
+/** An operation id of a step-up action (a new one per call: the replays never spend the owner's). */
+const opId = () => `op-${randomBytes(9).toString("base64url")}`;
+/** No notification has this id: marking it reads nothing and writes nothing (the role matrix runs as A's members too). */
+const NO_NOTIFICATION = [Number.MAX_SAFE_INTEGER - 7];
+
+const REVIEW = "src/app/app/[store]/review-actions.ts";
+const HEALTH = "src/app/app/[store]/health-actions.ts";
+const NOTIFY = "src/app/app/[store]/notifications/actions.ts";
+const WELCOME = "src/app/app/[store]/welcome/actions.ts";
+const GENERAL = "src/app/app/[store]/settings/general/actions.ts";
+const ADDRESS = "src/app/app/[store]/settings/address/actions.ts";
+const SECURITY = "src/app/app/[store]/settings/security/actions.ts";
+const PLAN = "src/app/app/[store]/settings/plan/actions.ts";
+const DANGER = "src/app/app/[store]/settings/danger/actions.ts";
+
+export const actions: TrackActionCase[] = [
+  // the In-review card (store.read + owner): both fixture stores are active, so the body answers review_closed
+  { file: REVIEW, name: "submitForReviewAction", area: "settings", path: "", permission: ["store.read"], write: true, victim: () => [{ sells: "Huile d'argan", link: "instagram.com/atlas", whatsapp: "+212612345678" }], own: () => [{ sells: "Linge de maison", link: null, whatsapp: null }] },
+  { file: REVIEW, name: "answerReviewQuestionAction", area: "settings", path: "", permission: ["store.read"], write: true, victim: () => [{ answer: "Nous vendons de l'huile d'argan." }], own: () => [{ answer: "Du linge de maison." }] },
+  { file: REVIEW, name: "submitAppealAction", area: "settings", path: "", permission: ["store.read"], write: true, victim: () => [{ message: "Merci de revoir la décision." }], own: () => [{ message: "Merci de revoir." }] },
+  // private preview links (pages.read): A's draft is a missing page in B; A's viewer may mint in A, hence write: false
+  { file: REVIEW, name: "mintPreviewLinkAction", area: "pages", path: "/pages", permission: ["pages.read"], write: false, victim: (fx) => [{ pageId: fx.A.page.draft }], own: (fx) => [{ pageId: fx.B.page.draft }] },
+  { file: REVIEW, name: "revokePreviewLinkAction", area: "pages", path: "/pages", permission: ["pages.read"], write: false, victim: async (fx) => [{ tokenId: await previewTokenOf(fx, fx.A) }], own: async (fx) => [{ tokenId: await previewTokenOf(fx, fx.B) }] },
+  // Store Health (P1's snooze stubs answer unavailable until P1 merges)
+  { file: HEALTH, name: "snoozeHealthIssueAction", area: "settings", path: "", permission: ["health.snooze"], write: true, victim: () => [{ issueId: "landing:no_live_page" }], own: () => [{ issueId: "shell:setup_whatsapp" }] },
+  { file: HEALTH, name: "unsnoozeHealthIssueAction", area: "settings", path: "", permission: ["health.snooze"], write: true, victim: () => [{ issueId: "landing:no_live_page" }], own: () => [{ issueId: "shell:setup_whatsapp" }] },
+  // a read key that marks the store dirty: A's viewer may recompute A, hence write: false (the special case covers it)
+  { file: HEALTH, name: "recomputeHealthAction", area: "settings", path: "", permission: ["store.read"], write: false, victim: () => [], own: () => [] },
+  { file: NOTIFY, name: "markNotificationsReadAction", area: "settings", path: "/notifications", permission: ["store.read"], write: true, victim: () => [NO_NOTIFICATION], own: () => [NO_NOTIFICATION] },
+  // onboarding: A's photo and A's document are missing ones in B
+  { file: WELCOME, name: "saveOnboardingDetailsAction", area: "generate", path: "/welcome", permission: ["pages.write"], write: true, victim: (fx) => [details(fx.A)], own: (fx) => [details(fx.B)] },
+  { file: WELCOME, name: "useDirectionAction", area: "generate", path: "/welcome", permission: ["pages.write", "ai.use"], write: true, victim: (fx, fresh) => direction(fx.A, fresh), own: (fx, fresh) => direction(fx.B, fresh) },
+  { file: WELCOME, name: "reportRevealAction", area: "generate", path: "/welcome", permission: ["store.read"], write: true, victim: () => [{ paintedAt: new Date().toISOString() }], own: () => [{ paintedAt: new Date().toISOString() }] },
+  { file: WELCOME, name: "saveOnboardingContactAction", area: "settings", path: "/welcome", permission: ["settings.write"], write: true, victim: () => [{ whatsapp: "+212 6 12 34 56 78" }], own: () => [{ whatsapp: "+212698765432" }] },
+  { file: WELCOME, name: "skipOnboardingAction", area: "generate", path: "/welcome", permission: ["store.read"], write: true, victim: () => [], own: () => [] },
+  // settings: every argument leaves the store as it was (its own locale, mode and handle; 2FA off)
+  { file: GENERAL, name: "saveGeneralAction", area: "settings", path: "/settings/general", permission: ["settings.write"], write: true, victim: (fx) => [{ defaultLocale: fx.rows.A.defaultLocale }], own: (fx) => [{ defaultLocale: fx.rows.B.defaultLocale }] },
+  { file: GENERAL, name: "modeSwitchPlanAction", area: "settings", path: "/settings/general", permission: ["store.mode"], write: false, victim: () => [], own: () => [] },
+  { file: GENERAL, name: "setStoreModeAction", area: "settings", path: "/settings/general", permission: ["store.mode"], write: true, victim: () => [{ mode: "landing" }], own: () => [{ mode: "landing" }] },
+  { file: ADDRESS, name: "renameHandleAction", area: "settings", path: "/settings/address", permission: ["domains.manage"], write: true, victim: (fx) => [{ handle: fx.A.handle }], own: (fx) => [{ handle: fx.B.handle }] },
+  { file: SECURITY, name: "setRequireMember2faAction", area: "settings", path: "/settings/security", permission: ["security.write"], write: true, victim: () => [{ on: false }], own: () => [{ on: false }] },
+  // requests to staff (P1's stubs answer unavailable until P1 merges); A's open request is a missing one in B
+  { file: PLAN, name: "createStoreRequestAction", area: "settings", path: "/settings/plan", permission: ["billing.manage"], write: true, victim: () => [{ kind: "go_live", message: "Prêt à vendre." }], own: () => [{ kind: "go_live", message: null }] },
+  { file: PLAN, name: "withdrawStoreRequestAction", area: "settings", path: "/settings/plan", permission: ["billing.manage"], write: true, victim: async (fx) => [{ requestId: await requestOf(fx, fx.A) }], own: async (fx) => [{ requestId: await requestOf(fx, fx.B) }] },
+  // the danger zone: the close names no store's handle (a typed-handle refusal is the body's answer), the reopen of an
+  // active store is refused by T1's rule, the leave acts on the caller's own membership
+  { file: DANGER, name: "requestStoreExportAction", area: "exports", path: "/settings/danger", permission: ["store.export"], write: true, victim: () => [{ opId: opId() }], own: () => [{ opId: opId() }] },
+  { file: DANGER, name: "closeOwnStoreAction", area: "settings", path: "/settings/danger", permission: ["store.close"], write: true, victim: () => [{ confirm: "not-this-store", opId: opId() }], own: () => [{ confirm: "not-this-store", opId: opId() }] },
+  { file: DANGER, name: "reopenOwnStoreAction", area: "settings", path: "/settings/danger", permission: ["store.read", "store.close"], write: true, victim: () => [], own: () => [] },
+  { file: DANGER, name: "leaveStoreAction", area: "team", path: "/settings/danger", permission: ["store.read"], write: true, victim: () => [], own: () => [], self: true },
+];
+
+/** An action's refusal code (`{ ok: false, error }`), "threw", or null when it answered `ok: true`. */
+function codeOf(o: Outcome): string | null {
+  if (!o.ok) return "threw";
+  const v = o.value as { ok?: boolean; error?: unknown } | null;
+  return v && typeof v === "object" && v.ok === false ? String(v.error) : null;
+}
+
+/** A staff session viewing `store` (T2's seam, a real session row), as the harness's impersonation suite starts one. */
+async function viewAs(kit: TenancyKit, store: StoreFx): Promise<string | null> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const token = randomBytes(32).toString("base64url");
+  await db.insert(S.sessions).values({ id: createHash("sha256").update(token, "utf8").digest("hex"), userId: kit.fx.staff.id, mfaPassed: true, expiresAt: new Date(Date.now() + 3_600_000), stepUpAt: new Date() });
+  const r = await kit.call({ sessionToken: token }, "/admin", async () => {
+    const { requirePlatform } = load<typeof import("@/lib/platform/seam")>("@/lib/platform/seam");
+    const { startImpersonation } = load<typeof import("@/lib/platform/impersonation")>("@/lib/platform/impersonation");
+    const ctx = await requirePlatform({ permission: "stores.impersonate", throwOnFail: true });
+    return startImpersonation(ctx, { storeId: store.id, reason: "ticket", ticketRef: "TENANCY-SHELL", minutes: 15 });
+  });
+  if (!kit.ranReal(`staff starts a view of ${store.key} (shell cases)`, r)) return null;
+  kit.check(`staff starts a view of ${store.key} (shell cases)`, r.ok, r.error);
+  return r.ok ? token : null;
+}
+
+/** The store's audit rows after `afterId` (id, action, user). */
+async function auditAfter(storeId: string, afterId: number): Promise<{ id: number; action: string; user_id: string | null }[]> {
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const [rows] = (await pool().query("SELECT id, action, user_id FROM audit_log WHERE store_id = ? AND id > ? ORDER BY id", [storeId, afterId])) as unknown as [{ id: number; action: string; user_id: string | null }[]];
+  return rows;
+}
+/**
+ * A fingerprint of the store's rows without its audit log (the harness's `snapshot`, minus `audit_log`): what a
+ * refused write may add is its audit row only, which the caller counts separately.
+ */
+async function rowsSansAudit(storeId: string): Promise<string> {
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const p = pool();
+  const [tables] = (await p.query("SELECT TABLE_NAME AS t FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'store_id' AND TABLE_NAME <> 'audit_log' ORDER BY TABLE_NAME")) as unknown as [{ t: string }[]];
+  const h = createHash("sha256");
+  for (const { t } of tables) {
+    const [rows] = (await p.query("SELECT * FROM ?? WHERE store_id = ?", [t, storeId])) as unknown as [unknown[]];
+    h.update(`${t}:${rows.map((r) => JSON.stringify(r)).sort().join("\n")}\n`);
+  }
+  const [store] = (await p.query("SELECT * FROM stores WHERE id = ?", [storeId])) as unknown as [unknown[]];
+  const [buckets] = (await p.query("SELECT bucket FROM rate_limits WHERE bucket LIKE ? ORDER BY bucket", [`%${storeId}%`])) as unknown as [unknown[]];
+  return h.update(JSON.stringify(store)).update(JSON.stringify(buckets)).digest("hex");
+}
+
+async function auditTop(storeId: string | null): Promise<number> {
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const [rows] = (await pool().query(storeId ? "SELECT COALESCE(MAX(id), 0) AS top FROM audit_log WHERE store_id = ?" : "SELECT COALESCE(MAX(id), 0) AS top FROM audit_log", storeId ? [storeId] : [])) as unknown as [{ top: number }[]];
+  return Number(rows[0]!.top);
+}
+
+/** `src/app/app/actions.ts` (userAction, no store) and the account deletion: nothing of A, nothing under a support view. */
+async function userActionsCase(kit: TenancyKit): Promise<void> {
+  const { fx, check, call, ranReal } = kit;
+  const APP = load<typeof import("@/app/app/actions")>("@/app/app/actions");
+  const ACC = load<typeof import("@/app/app/account/actions")>("@/app/app/account/actions");
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const sessionId = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
+  const lastStore = async (token: string) => {
+    const [rows] = (await pool().query("SELECT last_store_id FROM sessions WHERE id = ?", [sessionId(token)])) as unknown as [{ last_store_id: string | null }[]];
+    return rows[0]?.last_store_id ?? null;
+  };
+  const before = await kit.snapshotA();
+  const asB = { sessionToken: fx.B.ownerToken };
+  const ghostStore = `01${Array.from({ length: 24 }, () => CROCKFORD[randomInt(CROCKFORD.length)]).join("")}`;
+
+  // the picker hint: A is not B's owner's store (the answer of an unknown id, nothing remembered); B is
+  const onA = await call(asB, "/app", () => APP.setLastStoreAction(fx.A.id));
+  const onGhost = await call(asB, "/app", () => APP.setLastStoreAction(ghostStore));
+  if (ranReal("setLastStoreAction(A) as B's owner", onA, onGhost)) {
+    check("setLastStoreAction(A's id) as B's owner: not_found, as an unknown id", codeOf(onA) === "not_found" && codeOf(onGhost) === "not_found", { onA: onA.value, onGhost: onGhost.value });
+    check("…nothing remembered for B's owner", (await lastStore(fx.B.ownerToken)) !== fx.A.id);
+  }
+  const own = await call(asB, "/app", () => APP.setLastStoreAction(fx.B.id));
+  if (ranReal("setLastStoreAction(B) as B's owner", own)) check("setLastStoreAction(B's id) as B's owner: remembered", codeOf(own) === null && (await lastStore(fx.B.ownerToken)) === fx.B.id, own.value);
+  const junk = await call(asB, "/app", () => APP.setLastStoreAction({ storeId: fx.A.id }));
+  check("setLastStoreAction with a non-id: invalid", codeOf(junk) === "invalid", junk.value);
+
+  // the re-acceptance: only documents pending for this user (none before P1's publisher exists)
+  const topAll = await auditTop(null);
+  const legal = await call(asB, "/app", () => APP.acceptLegalAction({ documentIds: [newId()] }));
+  if (ranReal("acceptLegalAction as B's owner", legal)) check("acceptLegalAction of a document not pending: not_found, nothing recorded", codeOf(legal) === "not_found", legal.value);
+  const extra = await call(asB, "/app", () => APP.acceptLegalAction({ documentIds: [newId()], storeId: fx.A.id }));
+  check("acceptLegalAction with a store id in its input: invalid (strict schema)", codeOf(extra) === "invalid", extra.value);
+  const [accepted] = (await pool().query("SELECT COUNT(*) AS n FROM audit_log WHERE id > ? AND action = 'auth.legal.accepted'", [topAll])) as unknown as [{ n: number }[]];
+  check("…no auth.legal.accepted row", Number(accepted[0]!.n) === 0);
+
+  // the profile's language: the enum only
+  const zz = await call(asB, "/app/account", () => ACC.updateProfileAction({ name: "Owner B", locale: "zz" }));
+  check("updateProfileAction with locale 'zz': invalid", codeOf(zz) === "invalid", zz.value);
+
+  check("A's rows unchanged by B's owner's user actions", (await kit.snapshotA()) === before);
+
+  // a staff session viewing A: every user action refused (audited without a store), A unchanged
+  const token = await viewAs(kit, fx.A);
+  if (token) {
+    const view = { sessionToken: token };
+    const viewed = await kit.snapshotA();
+    const topA = await auditTop(fx.A.id);
+    for (const [name, run] of [
+      ["setLastStoreAction", () => APP.setLastStoreAction(fx.A.id)],
+      ["acceptLegalAction", () => APP.acceptLegalAction({ documentIds: [newId()] })],
+      ["deleteMyAccountAction", () => ACC.deleteMyAccountAction({ confirm: "delete", expected: "delete" })],
+    ] as const) {
+      const r = await call(view, `/app/${fx.A.handle}`, run as () => Promise<unknown>);
+      if (ranReal(`${name} · staff viewing A`, r)) check(`${name} · staff viewing A: impersonation_read_only`, codeOf(r) === "impersonation_read_only", r.value);
+    }
+    check("…no audit row in A from the account refusals (they name no store)", (await auditAfter(fx.A.id, topA)).length === 0);
+    const [staff] = (await pool().query("SELECT disabled FROM users WHERE id = ?", [fx.staff.id])) as unknown as [{ disabled: number }[]];
+    check("…the staff account still exists", Number(staff[0]?.disabled ?? 1) === 0);
+    check("…A's rows unchanged by the refused account actions", (await kit.snapshotA()) === viewed);
+  }
+}
+
+/** Every write P2 makes under a read key: staff viewing A is refused, audited once per call, A otherwise unchanged. */
+async function readKeyWritesCase(kit: TenancyKit): Promise<void> {
+  const { fx, check, call, ranReal } = kit;
+  const R = load<typeof import("@/app/app/[store]/review-actions")>("@/app/app/[store]/review-actions");
+  const H = load<typeof import("@/app/app/[store]/health-actions")>("@/app/app/[store]/health-actions");
+  const N = load<typeof import("@/app/app/[store]/notifications/actions")>("@/app/app/[store]/notifications/actions");
+  const W = load<typeof import("@/app/app/[store]/welcome/actions")>("@/app/app/[store]/welcome/actions");
+  const D = load<typeof import("@/app/app/[store]/settings/danger/actions")>("@/app/app/[store]/settings/danger/actions");
+  const T = load<typeof import("@/app/app/[store]/team/actions")>("@/app/app/[store]/team/actions");
+  const tokenA = await previewTokenOf(fx, fx.A);
+  const token = await viewAs(kit, fx.A);
+  if (!token) return;
+  const view = { sessionToken: token };
+  const before = await rowsSansAudit(fx.A.id);
+  const top = await auditTop(fx.A.id);
+  const calls = [
+    ["submitForReviewAction", () => R.submitForReviewAction({ sells: "x", link: null, whatsapp: null })],
+    ["answerReviewQuestionAction", () => R.answerReviewQuestionAction({ answer: "x" })],
+    ["submitAppealAction", () => R.submitAppealAction({ message: "x" })],
+    ["mintPreviewLinkAction", () => R.mintPreviewLinkAction({ pageId: fx.A.page.draft })],
+    ["revokePreviewLinkAction", () => R.revokePreviewLinkAction({ tokenId: tokenA })],
+    ["recomputeHealthAction", () => H.recomputeHealthAction()],
+    ["markNotificationsReadAction", () => N.markNotificationsReadAction("all")],
+    ["reportRevealAction", () => W.reportRevealAction({ paintedAt: new Date().toISOString() })],
+    ["skipOnboardingAction", () => W.skipOnboardingAction()],
+    ["reopenOwnStoreAction", () => D.reopenOwnStoreAction()],
+    ["leaveStoreAction (danger)", () => D.leaveStoreAction()],
+    ["leaveStoreAction (team)", () => T.leaveStoreAction()],
+  ] as const;
+  let refused = 0;
+  for (const [name, run] of calls) {
+    const r = await call(view, `/app/${fx.A.handle}`, run as () => Promise<unknown>);
+    if (!ranReal(`${name} · staff viewing A`, r)) continue;
+    const ok = codeOf(r) === "impersonation_read_only";
+    if (ok) refused++;
+    check(`${name} · staff viewing A: impersonation_read_only (a write under a read key)`, ok, r.value);
+  }
+  const rows = await auditAfter(fx.A.id, top);
+  check(
+    `…A's audit gained one write_refused row of the staff member per call (${refused})`,
+    rows.length === refused && rows.every((r) => r.action === "platform.impersonation.write_refused" && r.user_id === fx.staff.id),
+    rows.slice(0, 6),
+  );
+  check("…A's rows otherwise unchanged (the preview link still open, no recompute bucket, no read mark)", (await rowsSansAudit(fx.A.id)) === before);
+
+  // the 10-link cap of private previews (PLA-§L): B's owner mints until refused, revokes one, mints again
+  const B = { userId: fx.B.members.owner };
+  const path = `/app/${fx.B.handle}/pages`;
+  const { activePreviewLinks } = load<typeof Dashboard>("@/lib/admin-data/dashboard");
+  const active = await call({ anonymous: true }, "/", () => activePreviewLinks(kit.scope("B")));
+  const start = active.ok ? (active.value as unknown[]).length : 0;
+  let minted: string[] = [];
+  let capped: Outcome | null = null;
+  for (let i = start; i <= 10; i++) {
+    const r = await call(B, path, () => R.mintPreviewLinkAction({ pageId: fx.B.page.draft }));
+    if (codeOf(r) === null) minted = [...minted, ((r.value as { data: { tokenId: string } }).data.tokenId)];
+    else {
+      capped = r;
+      break;
+    }
+  }
+  check("the 11th active preview link of a store is refused (preview_links_max)", capped !== null && codeOf(capped) === "preview_links_max", { start, minted: minted.length, capped: capped?.value });
+  const victim = minted[0];
+  if (victim) {
+    const revoked = await call(B, path, () => R.revokePreviewLinkAction({ tokenId: victim }));
+    const again = await call(B, path, () => R.mintPreviewLinkAction({ pageId: fx.B.page.draft }));
+    check("…after a revoke, one more link is minted", codeOf(revoked) === null && codeOf(again) === null, { revoked: revoked.value, again: again.value });
+    const twice = await call(B, path, () => R.revokePreviewLinkAction({ tokenId: victim }));
+    check("…a revoked link revoked again answers not_found", codeOf(twice) === "not_found", twice.value);
+  }
+}
 export const cases: TenancyCase[] = [
   { name: "shell: the pulse (SF-06)", run: pulseCase },
   { name: "shell: the ⌘K search (UX-02)", run: searchCase },
   { name: "shell: the dashboard reads", run: dashboardCase },
   { name: "shell: the handle rename", run: renameCase },
+  { name: "shell: the user actions (no store)", run: userActionsCase },
+  { name: "shell: writes under a read key, and the preview-link cap", run: readKeyWritesCase },
 ];
 
-export const actions: TrackActionCase[] = [];

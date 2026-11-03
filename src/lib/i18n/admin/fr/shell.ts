@@ -181,6 +181,13 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "error.already_requested": "Vous avez déjà une demande de ce type en cours. Attendez la réponse ou retirez-la d'abord.",
   "error.too_soon": "Vous venez de le faire. Réessayez un peu plus tard.",
   "error.cooldown_handle_required": "Saisissez l'identifiant de la boutique pour confirmer ce changement.",
+  "error.unavailable": "Ce n'est pas encore disponible. Cela arrive avec une prochaine mise à jour de Store Gen.",
+  "error.owner_only": "Seul le propriétaire de la boutique peut faire cela.",
+  "error.review_closed": "Cette étape de la validation est close. Rechargez pour voir où en est votre validation.",
+  "error.preview_links_max": "Vous avez 10 liens d'aperçu actifs. Révoquez-en un pour en partager un nouveau.",
+  "error.already_done": "C'est déjà envoyé, il y a un instant.",
+  "shell.field.e164": "Saisissez le numéro avec l'indicatif du pays, par exemple +212 6 12 34 56 78.",
+  "shell.danger.close_typed_wrong": "Saisissez l'identifiant de la boutique exactement comme affiché.",
 
   /* ---- chrome : barre latérale, barre du haut, menu du compte ---- */
   "shell.chrome.generate": "Générer une page",

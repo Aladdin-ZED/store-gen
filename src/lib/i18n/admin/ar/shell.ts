@@ -181,6 +181,13 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "error.already_requested": "لديك طلب مفتوح من هذا النوع. انتظر الرد أو اسحبه أولًا.",
   "error.too_soon": "قمت بهذا قبل لحظات. أعد المحاولة بعد قليل.",
   "error.cooldown_handle_required": "اكتب معرّف المتجر لتأكيد هذا التغيير.",
+  "error.unavailable": "هذا غير متاح بعد. سيصل مع تحديث قادم لـ Store Gen.",
+  "error.owner_only": "مالك المتجر وحده يمكنه القيام بهذا.",
+  "error.review_closed": "هذه المرحلة من المراجعة مغلقة. أعد تحميل الصفحة لترى أين وصلت مراجعتك.",
+  "error.preview_links_max": "لديك 10 روابط معاينة نشطة. ألغِ واحدًا لتشارك رابطًا جديدًا.",
+  "error.already_done": "تم إرسال هذا قبل لحظات.",
+  "shell.field.e164": "أدخل الرقم مع رمز البلد، مثل ‎+212 6 12 34 56 78‎.",
+  "shell.danger.close_typed_wrong": "اكتب معرّف المتجر كما يظهر تمامًا.",
 
   /* ---- إطار لوحة التحكم: الشريط الجانبي والشريط العلوي وقائمة الحساب ---- */
   "shell.chrome.generate": "أنشئ صفحة",

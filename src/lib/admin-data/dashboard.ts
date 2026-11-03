@@ -407,6 +407,18 @@ export async function storeStatusOf(scope: StoreScope): Promise<{ status: StoreS
   return { status: row.status, statusReason: row.statusReason ?? null };
 }
 
+/**
+ * The two store-row facts the cached `StoreRow` does not carry: the platform category (null until set) and when the
+ * store was created (the onboarding's `revealMs`). Read-only; `stores.category` is written by the core's store-row
+ * writer (CCR r1-p2-4 §1).
+ */
+export async function storeRowFacts(scope: StoreScope): Promise<{ category: string | null; createdAt: Date }> {
+  // the scope's own row: `stores` is the tenancy root, its id is the scope's store id
+  const [row] = await db.select({ category: stores.category, createdAt: stores.createdAt }).from(stores).where(eq(stores.id, scope.storeId)).limit(1);
+  if (!row) throw new Error("dashboard: the scope's store row is missing");
+  return { category: row.category ?? null, createdAt: row.createdAt };
+}
+
 /** The shell's store-level pulse counter (src/lib/pulse/contributors/shell.ts): open invites, not accepted, revoked or expired. */
 export async function pendingInviteCount(scope: StoreScope): Promise<number> {
   const [row] = await db

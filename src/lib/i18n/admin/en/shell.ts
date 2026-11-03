@@ -179,6 +179,13 @@ export const messages = {
   "error.already_requested": "You already have an open request of this kind. Wait for the answer or withdraw it first.",
   "error.too_soon": "You did this a moment ago. Try again a little later.",
   "error.cooldown_handle_required": "Type the store's handle to confirm this change.",
+  "error.unavailable": "This isn't available yet. It arrives with an upcoming Store Gen update.",
+  "error.owner_only": "Only the store owner can do this.",
+  "error.review_closed": "This review step is closed. Reload to see where your review stands.",
+  "error.preview_links_max": "You have 10 active preview links. Revoke one to share a new one.",
+  "error.already_done": "This was already sent a moment ago.",
+  "shell.field.e164": "Enter the number with its country code, like +212 6 12 34 56 78.",
+  "shell.danger.close_typed_wrong": "Type the store handle exactly as shown.",
 
   /* ---- chrome: sidebar, top bar, user menu ---- */
   "shell.chrome.generate": "Generate a page",

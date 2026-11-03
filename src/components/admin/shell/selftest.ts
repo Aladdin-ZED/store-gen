@@ -15,6 +15,12 @@
  * Step p2-04 (reads and routes): the ⌘K orchestration (the budget, `slow`, a throwing provider, malformed and
  * off-store hits dropped, groups capped and de-duplicated, `?q=` bounds, the shell provider's matching), and the
  * installable dashboard (the manifest's fields and token colours, the icons' geometry, safe zone and colours).
+ *
+ * Step p2-05 (server actions, PLA-§M.1, §L): the Zod inputs of P2's actions. No store input takes a store id (core §E.3
+ * rule 4: a `storeId` beside valid fields is refused, every schema strict); money is integer minor units and the price
+ * before exists only above the price (PD23); phones are E.164 after the separators people type; every free text is
+ * capped and cleaned; a refusal names catalog keys only (never a zod sentence); and every message key and refusal code
+ * the action files name exists in ar, fr and en (D65).
  * Exits 1 on any failure.
  */
 import {
@@ -61,6 +67,26 @@ import type { ActionErrorCode, StoreRow, StoreScope } from "@/lib/tenancy/types"
 import { dismissalActive, pickBanners, statePage, type BannerState } from "./banner-priority";
 import { createChordParser, GO_CHORDS, isEditable, orderIdOf, overlayOpen, type ChordKey } from "./chords";
 import { clearStoreClientState, onStoreClientClear, storeKeyMatches } from "./client-state";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import type { ZodType } from "zod";
+import { FieldsError } from "@/lib/auth/errors";
+import { Archetype } from "@/lib/page/schema";
+import {
+  cleanLine,
+  cleanText,
+  E164,
+  handleTyped,
+  MARK_READ_MAX,
+  MarkReadInput,
+  OnboardingDetailsInput,
+  parseInput,
+  REVIEW_FIELD_MAX,
+  REVIEW_TEXT_MAX,
+  STORE_ACTION_INPUTS,
+  typedPrices,
+  USER_ACTION_INPUTS,
+} from "./action-inputs";
 import { CORE_ERROR_CODES, errorUi, PLATFORM_ERROR_CODES, resultErrorUi, type CoreErrorCode } from "./error-map";
 import { screenLocale, screenLocalesFor, settingsText, SETTINGS_NAV, storeRelativePath, TRILINGUAL_SCREENS } from "./store-nav";
 
@@ -758,9 +784,146 @@ function manifestChecks(): void {
   }
 }
 
+/* ---- the inputs of P2's server actions (PLA-§M.1, §L; core §E.3 rule 4, D65; step p2-05) ---- */
+function actionInputChecks(): void {
+  const ID = "01J9ZK3M4N5P6Q7R8S9T0V1W2X";
+  const ARCH = Archetype.options[0];
+  const details = { category: "skincare", productName: "Huile d'argan", priceMinor: 14_900, compareAtMinor: 19_900, fact: null, assetIds: [] as string[] };
+  // one valid input per action: a schema added without a sample is a type error here
+  const samples: { [K in keyof typeof STORE_ACTION_INPUTS]: unknown } = {
+    "review-actions#submitForReviewAction": { sells: "Huile d'argan", link: null, whatsapp: "+212612345678" },
+    "review-actions#answerReviewQuestionAction": { answer: "Nous vendons de l'huile d'argan." },
+    "review-actions#submitAppealAction": { message: "Merci de revoir la décision." },
+    "review-actions#mintPreviewLinkAction": { pageId: ID },
+    "review-actions#revokePreviewLinkAction": { tokenId: ID },
+    "health-actions#snoozeHealthIssueAction": { issueId: "landing:no_live_page" },
+    "health-actions#unsnoozeHealthIssueAction": { issueId: "shell:setup_whatsapp" },
+    "notifications#markNotificationsReadAction": "all",
+    "welcome#saveOnboardingDetailsAction": details,
+    "welcome#useDirectionAction": { directionKey: ARCH, directions: [{ id: ARCH, label: "Direction 1", doc: {} }] },
+    "welcome#reportRevealAction": { paintedAt: new Date().toISOString() },
+    "welcome#saveOnboardingContactAction": { whatsapp: "+212612345678" },
+    "settings/general#saveGeneralAction": { name: "Atlas Argan", defaultLocale: "fr" },
+    "settings/general#setStoreModeAction": { mode: "landing" },
+    "settings/address#renameHandleAction": { handle: "atlas-argan" },
+    "settings/security#setRequireMember2faAction": { on: true },
+    "settings/plan#createStoreRequestAction": { kind: "go_live", message: null },
+    "settings/plan#withdrawStoreRequestAction": { requestId: ID },
+    "settings/danger#requestStoreExportAction": { opId: "op-12345678" },
+    "settings/danger#closeOwnStoreAction": { confirm: "atlas-argan", opId: "op-12345678" },
+  };
+  const withStore = (v: unknown) => (typeof v === "object" && v !== null && !Array.isArray(v) ? { ...v, storeId: ID } : { storeId: ID });
+  for (const [key, schema] of Object.entries(STORE_ACTION_INPUTS) as [keyof typeof STORE_ACTION_INPUTS, ZodType][]) {
+    const ok = schema.safeParse(samples[key]);
+    check(`${key}: its sample parses`, ok.success, ok.error?.issues);
+    check(`${key}: a storeId beside valid fields is refused (core §E.3 rule 4)`, !schema.safeParse(withStore(samples[key])).success);
+  }
+  check("setLastStoreAction takes one store id, checked against the caller's memberships", USER_ACTION_INPUTS["app#setLastStoreAction"].safeParse(ID).success && !USER_ACTION_INPUTS["app#setLastStoreAction"].safeParse({ storeId: ID }).success);
+  check("acceptLegalAction: 1-10 documents, nothing else", USER_ACTION_INPUTS["app#acceptLegalAction"].safeParse({ documentIds: [ID] }).success && !USER_ACTION_INPUTS["app#acceptLegalAction"].safeParse({ documentIds: [ID], storeId: ID }).success && !USER_ACTION_INPUTS["app#acceptLegalAction"].safeParse({ documentIds: [] }).success);
+
+  // PD23: integer minor units; the price before only above the price
+  const D = (over: Record<string, unknown>) => OnboardingDetailsInput.safeParse({ ...details, ...over });
+  const fieldsOf = (input: unknown): Record<string, string> | null => {
+    try {
+      parseInput(OnboardingDetailsInput, input);
+      return null;
+    } catch (e) {
+      return e instanceof FieldsError ? (e.fields as Record<string, string>) : null;
+    }
+  };
+  check("price: integer minor units are taken", D({}).success && D({}).data?.priceMinor === 14_900);
+  check("price: a float, zero, a negative or a string is refused", [149.5, 0, -100, "14900", Number.NaN].every((v) => !D({ priceMinor: v }).success));
+  check("price before: equal to or below the price is refused", !D({ compareAtMinor: 14_900 }).success && !D({ compareAtMinor: 9_900 }).success && !D({ compareAtMinor: 19_900.5 }).success);
+  check("price before: absent or null means none", D({ compareAtMinor: undefined }).data?.compareAtMinor === null && D({ compareAtMinor: null }).data?.compareAtMinor === null);
+  check("price before: the refusal names its field with onboarding.compare_invalid", fieldsOf({ ...details, compareAtMinor: 100 })?.compareAtMinor === "onboarding.compare_invalid", fieldsOf({ ...details, compareAtMinor: 100 }));
+  check("a name of spaces is required (onboarding.name_required)", fieldsOf({ ...details, productName: "   " })?.productName === "onboarding.name_required");
+  check("the category tap is required, from the platform list", !D({ category: undefined }).success && !D({ category: "weapons" }).success);
+  check("at most 5 photos", !D({ assetIds: ["a1b2c3d4e5f6", "a1b2c3d4e5f7", "a1b2c3d4e5f8", "a1b2c3d4e5f9", "a1b2c3d4e5fa", "a1b2c3d4e5fb"] }).success);
+  check("typedPrices: the price before only when typed and higher", JSON.stringify(typedPrices({ priceMinor: 14_900, compareAtMinor: 14_900 })) === '{"price":14900,"compareAt":null}' && typedPrices({ priceMinor: 14_900, compareAtMinor: 19_900 })?.compareAt === 19_900);
+  check("typedPrices: no typed price, no page", typedPrices({ priceMinor: null, compareAtMinor: 19_900 }) === null && typedPrices({ priceMinor: 149.5, compareAtMinor: null }) === null && typedPrices({ priceMinor: 0, compareAtMinor: null }) === null);
+
+  // E.164 after the separators people type
+  check("E.164: spaces, dashes, dots and brackets are dropped", E164.safeParse("+212 6 12-34.56 (78)").data === "+212612345678");
+  check("E.164: a national number, a leading 0 after +, letters or 16 digits are refused", ["0612345678", "+0612345678", "212612345678", "+2126123x5678", "+2126123456789012", "+1234567"].every((v) => !E164.safeParse(v).success));
+  check("E.164: the refusal sentence is shell.field.e164", (() => {
+    try {
+      parseInput(STORE_ACTION_INPUTS["welcome#saveOnboardingContactAction"], { whatsapp: "0612" });
+      return false;
+    } catch (e) {
+      return e instanceof FieldsError && Object.values(e.fields).every((k) => k === "shell.field.e164" || k === "error.invalid");
+    }
+  })());
+
+  // the caps of PLA-§L, after cleaning
+  const sub = STORE_ACTION_INPUTS["review-actions#submitForReviewAction"];
+  check(`business context: ${REVIEW_FIELD_MAX} characters each`, sub.safeParse({ sells: "a".repeat(REVIEW_FIELD_MAX), link: "b".repeat(REVIEW_FIELD_MAX) }).success && !sub.safeParse({ sells: "a".repeat(REVIEW_FIELD_MAX + 1) }).success && !sub.safeParse({ link: "b".repeat(REVIEW_FIELD_MAX + 1) }).success);
+  check("business context: blank fields are none, an empty WhatsApp is none", JSON.stringify(sub.safeParse({ sells: "  ", link: null, whatsapp: "" }).data) === '{"sells":null,"link":null,"whatsapp":null}');
+  check("business context: a link stays plain text (no scheme added, nothing parsed)", sub.safeParse({ link: "javascript:alert(1)" }).data?.link === "javascript:alert(1)");
+  for (const key of ["review-actions#answerReviewQuestionAction", "review-actions#submitAppealAction"] as const) {
+    const field = key.endsWith("answerReviewQuestionAction") ? "answer" : "message";
+    const sc = STORE_ACTION_INPUTS[key];
+    check(`${key}: ${REVIEW_TEXT_MAX} characters, not blank`, sc.safeParse({ [field]: "a".repeat(REVIEW_TEXT_MAX) }).success && !sc.safeParse({ [field]: "a".repeat(REVIEW_TEXT_MAX + 1) }).success && !sc.safeParse({ [field]: " \n\t " }).success);
+  }
+  check("cleanLine drops control characters and folds spaces", cleanLine("a\u0000b\nc   d\t") === "ab c d");
+  check("cleanText keeps at most one blank line", cleanText("a\r\n\n\n\nb\u0007") === "a\n\nb");
+  check(`mark read: "all", or 1-${MARK_READ_MAX} positive ids`, MarkReadInput.safeParse("all").success && MarkReadInput.safeParse(Array.from({ length: MARK_READ_MAX }, (_, i) => i + 1)).success && ![[], [0], [1.5], Array.from({ length: MARK_READ_MAX + 1 }, (_, i) => i + 1), "some", null].some((v) => MarkReadInput.safeParse(v).success));
+  check("issue ids: <track>:<rule>", STORE_ACTION_INPUTS["health-actions#snoozeHealthIssueAction"].safeParse({ issueId: "landing:no_live_page" }).success && !STORE_ACTION_INPUTS["health-actions#snoozeHealthIssueAction"].safeParse({ issueId: "Landing:x" }).success && !STORE_ACTION_INPUTS["health-actions#snoozeHealthIssueAction"].safeParse({ issueId: "x" }).success);
+  check("R1 requests: R3's domain kind is refused", !STORE_ACTION_INPUTS["settings/plan#createStoreRequestAction"].safeParse({ kind: "domain", host: "shop.example" }).success);
+  check("store modes: only the three", !STORE_ACTION_INPUTS["settings/general#setStoreModeAction"].safeParse({ mode: "catalog" }).success);
+  check("the typed handle: case and surrounding spaces ignored", handleTyped(" Atlas-Argan ", "atlas-argan") && !handleTyped("atlas", "atlas-argan") && !handleTyped("", "atlas-argan"));
+
+  // a refusal names catalog keys only, never a zod sentence (D65)
+  const refusals = [
+    [STORE_ACTION_INPUTS["welcome#saveOnboardingDetailsAction"], { ...details, priceMinor: 1.5, productName: "", compareAtMinor: 1 }],
+    [STORE_ACTION_INPUTS["review-actions#submitForReviewAction"], { sells: 7, whatsapp: "06" }],
+    [STORE_ACTION_INPUTS["settings/general#saveGeneralAction"], { name: "", timezone: "Mars/Olympus", extra: 1 }],
+    [STORE_ACTION_INPUTS["settings/plan#createStoreRequestAction"], { kind: "limit_raise", key: "nope", used: -1 }],
+    [MarkReadInput, null],
+  ] as const;
+  for (const [schema, input] of refusals) {
+    try {
+      parseInput(schema as ZodType, input);
+      check("a bad input is refused", false, input);
+    } catch (e) {
+      const keys = e instanceof FieldsError ? Object.values(e.fields) : [];
+      check("a refused input answers catalog keys only", keys.length > 0 && keys.every((k) => inCatalogs(k)), keys);
+    }
+  }
+
+  // every message key and refusal code the P2 action files name exists in ar, fr and en (D65)
+  const files = [
+    "src/app/app/actions.ts",
+    "src/app/app/account/actions.ts",
+    "src/app/app/[store]/review-actions.ts",
+    "src/app/app/[store]/health-actions.ts",
+    "src/app/app/[store]/notifications/actions.ts",
+    "src/app/app/[store]/welcome/actions.ts",
+    "src/app/app/[store]/team/actions.ts",
+    "src/app/app/[store]/settings/general/actions.ts",
+    "src/app/app/[store]/settings/address/actions.ts",
+    "src/app/app/[store]/settings/security/actions.ts",
+    "src/app/app/[store]/settings/plan/actions.ts",
+    "src/app/app/[store]/settings/danger/actions.ts",
+    "src/components/admin/shell/action-inputs.ts",
+    "src/components/admin/shell/action-guards.ts",
+  ];
+  const keys = new Set<string>();
+  const codes = new Set<string>();
+  for (const file of files) {
+    const src = readFileSync(path.join(process.cwd(), file), "utf8");
+    for (const m of src.matchAll(/"((?:error|shell|onboarding|account)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)"/g)) keys.add(m[1]!);
+    for (const m of src.matchAll(/new (?:AuthRefusal|SeamError)\("([a-z_]+)"/g)) codes.add(m[1]!);
+  }
+  const missing = [...keys].filter((k) => !inCatalogs(k));
+  check(`the ${keys.size} message keys of P2's action files exist in ar, fr and en`, keys.size > 20 && missing.length === 0, missing);
+  const noSentence = [...codes].filter((c) => !inCatalogs(`error.${c}`));
+  check(`every refusal code P2's actions throw (${codes.size}) has its error.<code> sentence`, codes.size >= 10 && noSentence.length === 0, noSentence);
+}
+
 ruleChecks()
   .then(searchChecks)
   .then(manifestChecks)
+  .then(actionInputChecks)
   .catch((err: unknown) => check("the rule and search checks ran", false, String(err)))
   .finally(() => {
     console.log(`test:shell: ${passed} passed, ${failures} failed`);
