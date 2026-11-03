@@ -290,3 +290,47 @@ CCR list). Until then this file records the decisions the steps took, so none is
 10. **Tenancy.** Three new cross-store statements on store data (the migrator's probe, the sweeper's store list, the
     pending media budget), each annotated and listed in CCR r1-p8-4's step 7 addendum (pin 16 → 19). `isInside` takes
     the platform's own `path` flavour (`win32` or `posix`), so its rules hold on any host.
+
+### Step 8: the store export ZIP (`src/lib/exports-store/**`, `src/lib/jobs/exports.ts`, the download route)
+
+1. **Not charged to `exports_month`.** A data-portability export is not a PHP export; the only limits are one active
+   job per store (an active one answers its `jobId`) and the bucket `s:<sid>:export:zip` (3 a day). The request runs
+   under a per-store named lock (`storeLock(sid, "export")`), so two clicks never make two jobs.
+2. **The insert uses a system WriteScope minted in `src/lib/jobs/exports.ts`** (`exportWriteScope`), so a suspended or
+   closed store's read-only member scope (§A.5.3) and P1's `platformScope` (D71) both queue the store's own export,
+   and that insert is the only write made with it.
+3. **The ZIP is written straight into its parts, not staged as a tree.** Text sections are staged one file at a time
+   (`stage/<id>.tmp`, its saved length truncated back on resume) and deflated into the archive when complete; media
+   and pages go straight in. The part's offset and its central-directory records travel in the cursor; reopening a part
+   cuts it back to the saved offset, so a dead tick costs one slice and never leaves garbage in the archive. Each part
+   is a complete ZIP (its own directory); one entry larger than 500 MB stands alone in its part (ZIP32 still holds it).
+   The local headers are patched with CRC and sizes after the data (no data descriptor), so every reader takes them.
+4. **Columns come from the Drizzle tables**, minus the §F.9 deny list (`orders.capi_ctx`, `upsell_token_hash`,
+   `claim_token`; `campaigns.share_token_hash`; `store_health.flags`) and any column whose name looks like a secret
+   (`COLUMN_SECRET_RE`, whatever the table), so a credential column added later is withheld until someone decides
+   otherwise. A table or column the database lacks is skipped and named in README.txt. `orders.claim_token` is a
+   queue claim, not a secret, but it is a token by name and has no meaning outside the platform.
+5. **audit.csv applies the store's own listing rule** (`tenantAuditEntry`): staff rows without user id, impersonator
+   id or IP hash, and without a staff note the store was not shown. **settings.json** omits every secret key whole,
+   passes the others through `redactStoreSetting`, then drops any key naming a secret at any depth. **campaigns.json**
+   drops any token-named key inside the kit JSON. **ai_memory.json** keeps active and inactive items and drops run ids
+   from `evidence`. **health.json** strips `flags` from whatever `getStoreHealth` answers (null today: omitted).
+6. **CSV dialect**: BOM, CRLF, RFC 4180 quoting, the formula guard on text only (a negative amount stays a number; an
+   E.164 phone reads `'+212…`, which README.txt explains), decimals with their stored scale (`199.00`), integer cents,
+   booleans 1 / 0, ISO UTC dates.
+7. **media/<assetId>.<ext>** is the asset's largest `media_files` row of this store, read through `storageFor(row)` (fs
+   or db). A missing or mismatched stored file is noted in README.txt and skipped, never a failed export.
+8. **Failure codes**: `no_data_dir` (DATA_DIR unset or refused by the boot check: an export never lands in an
+   unchecked folder), `no_space` (the estimate, the media's largest variants plus documents plus typical row sizes,
+   against what the last complete walk left of `DATA_DIR_BUDGET_BYTES`; no snapshot, no check), `store_gone`,
+   `cursor_lost`, `part_lost`, `write_failed` (three failed slices in a row; a single failure retries next tick). ENOSPC
+   fails at once as `no_space`. A failed job's folder is removed.
+9. **Expiry**: each tick first expires ≤ 20 ready jobs past `expires_at` (files deleted, the row kept as `expired` with
+   its part list and bytes). Download links are minted fresh by `listExportJobs`, 24 h, never past `expires_at`.
+10. **The export_ready mail** goes once (the `running → ready` compare-and-set, plus the mailer's dedupe key) to the
+    member who asked, linking to `/app/<h>/settings/danger`. A platform request sends no mail from P8 (P1 notifies the
+    store at request time).
+11. **`ExportJobSummary` gained `parts[].n`, `parts[].href`, `progress`** and `parts[].name` is the download name
+    (CCR r1-p8-21). The frozen function types are unchanged.
+12. **Tenancy.** Two cross-store statements, both in `src/lib/jobs/exports.ts` and annotated: the queue's next job
+    and the expired jobs (ids only). Pin 19 → 21 (CCR r1-p8-4, step 8 addendum). Every other statement is scoped.

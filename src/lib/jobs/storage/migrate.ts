@@ -68,10 +68,10 @@ async function anyDbFile(bad: readonly string[]): Promise<boolean> {
 
 /** The store's next db files (bad keys excluded), in key order. */
 async function dbFilesOf(scope: WriteScope, limit: number, bad: readonly string[]): Promise<DbFileRow[]> {
-  const notBad = bad.length ? " AND `key` NOT IN (?)" : "";
+  // one static statement (no fragment beside the store predicate): "" is never a key, so it stands for "no bad key"
   const [rows] = await pool().query<RowDataPacket[]>(
-    `SELECT \`key\`, asset_id, mime, bytes, chunks, sha256 FROM media_files WHERE store_id = ? AND storage = 'db'${notBad} ORDER BY \`key\` LIMIT ?`,
-    bad.length ? [scope.storeId, bad, limit] : [scope.storeId, limit],
+    "SELECT `key`, asset_id, mime, bytes, chunks, sha256 FROM media_files WHERE store_id = ? AND storage = 'db' AND `key` NOT IN (?) ORDER BY `key` LIMIT ?",
+    [scope.storeId, bad.length ? bad : [""], limit],
   );
   return rows.map((r) => ({ key: String(r.key), assetId: String(r.asset_id), mime: String(r.mime), bytes: Number(r.bytes), chunks: Number(r.chunks), sha256: String(r.sha256) }));
 }

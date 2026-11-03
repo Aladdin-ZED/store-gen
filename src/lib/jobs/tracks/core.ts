@@ -4,8 +4,8 @@
  * Extension file (docs/STORE-SAAS.md §H.2, §K.3) imported by src/lib/jobs/registry.ts. Each job's body is loaded when
  * it runs, so importing the registry (test:jobs, the console) never loads the database code behind it.
  *
- * Slots (src/lib/jobs/slots.ts): outbox 3, renders 4, media.migrate / usage.reconcile / media.sweep / storage.walk /
- * refs.reconcile 6, renders.fanout 7, housekeeping 8. P8's later steps add exports / backup / purge (5) and
+ * Slots (src/lib/jobs/slots.ts): outbox 3, renders 4, exports 5, media.migrate / usage.reconcile / media.sweep /
+ * storage.walk / refs.reconcile 6, renders.fanout 7, housekeeping 8. P8's later steps add backup / purge (5) and
  * lifecycle (7).
  *
  * The storage jobs' daily times (src/lib/jobs/storage/rules.ts STORAGE_JOB_TIMES) take the free 02:05-02:25 windows,
@@ -30,6 +30,14 @@ export const jobs: Job[] = [
     every: "tick",
     budgetMs: 12_000,
     run: async (ctx) => (await import("../renders")).rendersJob(ctx),
+  },
+  {
+    // §H.2 slot 5 (11 s shared) / §F.9: the store export ZIP, one export_jobs row at a time (the oldest running, else
+    // pending), sliced and resumable; the 72 h cleanup first. CPU-bound: the runner halves it while the loop lags
+    name: "exports",
+    every: "tick",
+    budgetMs: 11_000,
+    run: async (ctx) => (await import("../exports")).exportsJob(ctx),
   },
   {
     // §H.2 slot 6 / §G.3: files still kept in the database moved to DATA_DIR, ≤ 50 a tick, store by store; returns at

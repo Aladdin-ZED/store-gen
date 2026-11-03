@@ -34,6 +34,12 @@
  *                in-memory queue: dedupe cleared on claim (a second render after an enqueue mid-render, ENGC-4), two
  *                enqueues while pending → one, priority order, ≤ 10 per store, the 4 s CPU cap, 3 retries then failed,
  *                runtime_v 1 skipped; the fan-out across pages of stores, and forEachStore's `stop`.
+ *  9. storage    (./selftest-storage.ts, P8 step 7) the storage jobs' registration, daily pass and rules;
+ * 10. exports    (./selftest-exports.ts, P8 step 8) the CSV dialect, the resumable ZIP writer across simulated ticks
+ *                (fflate opens it), part splitting under a small limit, the download signature, the deny list, README.
+ *
+ * `--only <prefix>[,<prefix>]` runs the sections whose name starts with one of the prefixes (a quick loop while
+ * working on one area; `npm run test:jobs` runs them all).
  */
 import Module from "node:module";
 import { EventEmitter } from "node:events";
@@ -678,6 +684,19 @@ async function main(): Promise<void> {
   /* ---------------------------------------------------------------- */
   const { storageJobSections } = await import("./selftest-storage");
   storageJobSections(h, { RU: await import("./storage/rules"), S: await import("./slots"), SC, W, JOBS });
+
+  /* ---------------------------------------------------------------- */
+  const { exportSections } = await import("./selftest-exports");
+  exportSections(h, {
+    Z: await import("@/lib/exports-store/zip"),
+    CSV: await import("@/lib/exports-store/csv"),
+    SIG: await import("@/lib/exports-store/sign"),
+    COL: await import("@/lib/exports-store/columns"),
+    RM: await import("@/lib/exports-store/readme"),
+    S: await import("./slots"),
+    R: await import("./runner"),
+    JOBS,
+  });
 
   await h.run();
 }

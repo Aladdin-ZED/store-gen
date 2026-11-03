@@ -76,6 +76,16 @@
  *                              save rebuilt, live flags, archived pages dropped, the brand logo, never another store's
  *                              asset, a healed index untouched); usage.reconcile (a drifted gauge and the D69 pending
  *                              budget corrected, the drift in the summary, a second run finds none)
+ *  - export (P8 step 8)        §F.9 against the real tables and DATA_DIR: two stores E and F with canaries; the request
+ *                              (a read-only platform scope queues it, an active job answers its id, F lists nothing);
+ *                              the job across many forced one-slice ticks with a 24 KB part limit, two dead ticks
+ *                              leaving garbage after the saved cursor; every listed file in the parts, nothing of F, no
+ *                              capi_ctx / token / claim / share / bot token / run id, E's full phones, the CSV dialect,
+ *                              the tenant audit view, settings without secret keys, the largest media variant, README;
+ *                              parts' bytes and sha256; the signature (F, expired); exportPartStream; 'no_space' from
+ *                              the walk snapshot; 71 h kept, 73 h expired with its files gone (fake clock)
+ *
+ * `-- --only <prefix>[,…]` runs only the sections whose name starts with a prefix.
  */
 import Module from "node:module";
 import { randomBytes, createHash } from "node:crypto";
@@ -1942,6 +1952,247 @@ async function main(): Promise<number> {
     const u2 = await untilDone("usage.reconcile", usageReconcileJob);
     t.eq("a second run finds no drift", [u2[u2.length - 1]!.summary?.driftStores, u2[u2.length - 1]!.processed], [0, 0]);
     t.eq("…and the pass leaves no state behind", (await ST.readJobState("usage.reconcile")).pass, undefined);
+  });
+
+  /* ================================================================ */
+  h.section("export", async (t) => {
+    const { unzipSync } = await import("fflate");
+    const EX = await import("@/lib/exports-store");
+    const JOBX = await import("@/lib/exports-store/job");
+    const SIG = await import("@/lib/exports-store/sign");
+    const { exportsJob } = await import("@/lib/jobs/exports");
+    const ST = await import("@/lib/jobs/storage/state");
+    const W = await import("@/lib/storage/walk");
+    const { mintScope } = await import("@/lib/tenancy/seam");
+    const { newId } = await import("@/lib/db/ids");
+    type JobCtx = import("@/lib/jobs/runner").JobCtx;
+    t.eq("the fs backend is on (DATA_DIR passed its check)", (await S.runMediaStorageCheck({ force: true })).ok, true);
+    const STORE_E = "01JB8ZK3Q4R5S6T7V8W9XYZ0EE"; // the exported store (A's role)
+    const STORE_F = "01JB8ZK3Q4R5S6T7V8W9XYZ0FF"; // the other store, whose canaries must never appear (B's role)
+    for (const [id, handle] of [
+      [STORE_E, "export-e"],
+      [STORE_F, "export-f"],
+    ] as const) {
+      await db.insert(stores).values({ id, handle, name: `Store ${id.slice(-2)}`, status: "active", brandSeed: "0123456789abcdef" });
+    }
+    const scopeE = systemScope(ctx, STORE_E);
+    const scopeF = systemScope(ctx, STORE_F);
+    const q = (text: string, v: unknown[]) => pool().query(text, v);
+    const uE = newId();
+    const uF = newId();
+    await q("INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, 'x'), (?, ?, ?, 'x')", [uE, `owner-e-${hex(3)}@example.test`, "Owner E", uF, `f-canary-mail-${hex(3)}@example.test`, "F-CANARY-MEMBER"]);
+    await q("INSERT INTO store_members (store_id, user_id, role) VALUES (?, ?, 'owner'), (?, ?, 'owner')", [STORE_E, uE, STORE_F, uF]);
+    // pages: E published + a draft; F published with its canary
+    const page = async (storeId: string, slug: string, html: string | null) => {
+      const id = newId();
+      const vid = html ? newId() : null;
+      const doc = JSON.stringify({ v: 2, title: `${slug} doc` });
+      await q("INSERT INTO pages (id, store_id, slug, name, status, locale, public_key, draft, published_version_id) VALUES (?, ?, ?, ?, ?, 'fr', ?, ?, ?)", [id, storeId, slug, slug, html ? "published" : "draft", `pk_${hex(12)}`, doc, vid]);
+      if (vid) {
+        await q("INSERT INTO page_versions (id, store_id, page_id, kind, doc, html, thank_you_html, checksum, runtime_v) VALUES (?, ?, ?, 'publish', ?, ?, ?, ?, 2)", [vid, storeId, id, doc, html, `${html}-MERCI`, hex(32)]);
+      }
+      return id;
+    };
+    const pageE = await page(STORE_E, "argan-e", "<!doctype html><p>E-PAGE-HTML</p>");
+    await page(STORE_E, "brouillon-e", null);
+    const pageF = await page(STORE_F, "argan-f", "<!doctype html><p>F-CANARY-PAGE</p>");
+    // orders: E's full phones, a test order, the never-exported columns filled with canaries; F's canary order
+    const order = (storeId: string, phone: string, name: string, extra: { isTest?: boolean; capi?: string; upsell?: string; claim?: string; note?: string } = {}) =>
+      q(
+        "INSERT INTO orders (id, store_id, page_id, name, phone, product_name, items, qty, subtotal, shipping, total, currency, idem, is_test, capi_ctx, upsell_token_hash, claim_token, note, adjust_cents) VALUES (?, ?, ?, ?, ?, 'Argan', '[]', 1, 199.00, 0, 199.00, 'MAD', ?, ?, ?, ?, ?, ?, -150)",
+        [`CMD-${hex(4).toUpperCase()}`, storeId, storeId === STORE_E ? pageE : pageF, name, phone, `${hex(16)}-${hex(9)}`.slice(0, 36), extra.isTest ? 1 : 0, extra.capi ?? null, extra.upsell ?? null, extra.claim ?? null, extra.note ?? null],
+      );
+    const CAPI = "CAPI-CANARY-E";
+    const UPSELL = `ab${"c".repeat(60)}de`;
+    const CLAIM = "CLAIMCANARYE00000000000000";
+    await order(STORE_E, "+212600000101", "Amina الدار البيضاء", { capi: CAPI, upsell: UPSELL, claim: CLAIM, note: '=HYPERLINK("http://evil",1)' });
+    await order(STORE_E, "+212600000102", "Youssef", { isTest: true });
+    await order(STORE_E, "+212600000103", 'Salma, "Lwarda"');
+    await order(STORE_F, "+212699999901", "F-CANARY-NAME");
+    for (const [sid, tag] of [
+      [STORE_E, "E"],
+      [STORE_F, "F-CANARY"],
+    ] as const) {
+      await q("INSERT INTO leads (id, store_id, page_id, idem, phone, name) VALUES (?, ?, ?, ?, ?, ?)", [newId(), sid, sid === STORE_E ? pageE : pageF, `${hex(16)}-${hex(9)}`.slice(0, 36), sid === STORE_E ? "+212600000201" : "+212699999902", `${tag}-LEAD`]);
+      await q("INSERT INTO customers (id, store_id, phone, name) VALUES (?, ?, ?, ?)", [newId(), sid, sid === STORE_E ? "+212600000101" : "+212699999901", `${tag}-CUSTOMER`]);
+      await q("INSERT INTO order_events (store_id, order_id, actor_kind, type, note) VALUES (?, 'CMD-X', 'user', 'created', ?)", [sid, `${tag}-EVENT`]);
+      await q("INSERT INTO message_templates (id, store_id, channel, kind, locale, name, body) VALUES (?, ?, 'whatsapp', 'confirm', 'ar', ?, 'سلام')", [newId(), sid, `${tag}-TEMPLATE`]);
+      await q("INSERT INTO short_links (id, store_id, code, target_kind, page_id) VALUES (?, ?, ?, 'page', ?)", [newId(), sid, `c${hex(3)}`, sid === STORE_E ? pageE : pageF]);
+      await q("INSERT INTO delivery_zones (id, store_id, name, cities) VALUES (?, ?, ?, ?)", [newId(), sid, `${tag}-ZONE`, JSON.stringify(["*"])]);
+      await q("INSERT INTO agent_stats_daily (store_id, user_id, day, worked) VALUES (?, ?, '2026-11-01', 3)", [sid, sid === STORE_E ? uE : uF]);
+    }
+    await q("INSERT INTO audit_log (action, user_id, target, meta, ip, store_id, actor_kind, impersonator_id) VALUES ('store.page.published', ?, 'argan-e', ?, 'IPHASHCANARYSTAFF', ?, 'platform', ?)", [uF, JSON.stringify({ note: "STAFF-NOTE-HIDDEN" }), STORE_E, uF]);
+    await q("INSERT INTO audit_log (action, user_id, target, store_id, actor_kind) VALUES ('store.page.published', ?, 'E-OWN-ROW', ?, 'user')", [uE, STORE_E]);
+    await q("INSERT INTO audit_log (action, user_id, target, store_id, actor_kind) VALUES ('store.page.published', ?, 'F-CANARY-AUDIT', ?, 'user')", [uF, STORE_F]);
+    const SHARE = `fe${"d".repeat(62)}`;
+    await q(
+      "INSERT INTO campaigns (id, store_id, name, slug, page_id, product_ref, channels, kit, offers_hash, share_token_hash) VALUES (?, ?, 'Promo E', 'promo-e', ?, ?, '[]', ?, 'abcdef0123456789', ?)",
+      [newId(), STORE_E, pageE, JSON.stringify({ kind: "landing_items", id: "x" }), JSON.stringify({ headline: "Promo E", share: { token: "KIT-TOKEN-CANARY", url: "/k/x" } }), SHARE],
+    );
+    await q("INSERT INTO ai_memory (id, store_id, kind, text, evidence, active) VALUES (?, ?, 'fact', 'E-MEMORY', ?, 0)", [newId(), STORE_E, JSON.stringify({ edits: 2, runIds: ["RUNID-CANARY"] })]);
+    // settings: a secret key (never read, never written) and a plain one
+    await q("INSERT INTO store_settings (store_id, `key`, value, encrypted) VALUES (?, 'telegram', ?, 1), (?, 'defaults', '{}', 0)", [STORE_E, JSON.stringify("BOT-TOKEN-CANARY"), STORE_E]);
+    // media: E's asset with two stored variants (the larger is exported), F's asset with a canary
+    const asset = async (storeId: string, list: { variant: string; data: Buffer }[]) => {
+      const assetId = hex(16);
+      await q("INSERT INTO assets (id, store_id, mime, width, height, bytes, variants, stored_bytes) VALUES (?, ?, 'image/webp', 10, 10, ?, '[]', ?)", [assetId, storeId, list[0]!.data.length, list.reduce((n, f) => n + f.data.length, 0)]);
+      for (const f of list) {
+        const file = { storeId, key: `${assetId}-${f.variant}`, assetId, mime: "image/webp", bytes: f.data.length, sha256: sha(f.data) };
+        await fsStorage.put(file, f.data);
+        await insertRow(file, "fs");
+      }
+      return assetId;
+    };
+    const bigE = randomBytes(30_000);
+    const assetE = await asset(STORE_E, [
+      { variant: "640.webp", data: randomBytes(9_000) },
+      { variant: "1600.webp", data: bigE },
+    ]);
+    await asset(STORE_F, [{ variant: "640.webp", data: Buffer.concat([Buffer.from("F-CANARY-MEDIA"), randomBytes(2_000)]) }]);
+
+    // the request: a read-only platform scope still queues the store's own export (D71, §A.5.3); a second ask gets it
+    const { jobId } = await EX.requestStoreExport(mintScope("platform", STORE_E), { requestedAs: "member", requestedBy: uE });
+    t.eq("a request answers a jobId at once", /^[0-9A-HJKMNP-TV-Z]{26}$/.test(jobId), true);
+    t.eq("an active job answers its jobId (one per store)", (await EX.requestStoreExport(scopeE, { requestedAs: "member", requestedBy: uE })).jobId, jobId);
+    await t.rejects("a bad requester is refused", () => EX.requestStoreExport(scopeE, { requestedAs: "member", requestedBy: "nope" }));
+    const pending = (await EX.listExportJobs(scopeE))[0]!;
+    t.eq("listed pending: no bytes, no parts, no error yet", [pending.state, pending.bytes, pending.parts, pending.error, pending.progress], ["pending", null, [], null, null]);
+    t.eq("F's list shows nothing of E", (await EX.listExportJobs(scopeF)).length, 0);
+
+    const jobCtx = (budgetMs = 60_000): JobCtx => ({
+      ...systemCtx("exports"),
+      deadline: Date.now() + budgetMs,
+      tickId: newId(),
+      cursor: "",
+      setCursor: async () => undefined,
+      yield: () => new Promise<void>((r) => setImmediate(r)),
+      lagMs: () => 0,
+    });
+    const LIMIT = 24 * 1024;
+    const forced = { maxSlices: 1, rowsPerSlice: 2, partLimitBytes: LIMIT };
+    const dirE = JOBX.exportDir(STORE_E, jobId);
+    let ticks = 0;
+    let state = "";
+    let sawRunning = false;
+    while (ticks < 200 && state !== "ready") {
+      const r = await exportsJob(jobCtx(), forced);
+      ticks++;
+      state = String(r.summary?.state ?? "");
+      if (state === "running" && !sawRunning) {
+        sawRunning = true;
+        const listed = (await EX.listExportJobs(scopeE))[0]!;
+        t.check("running: progress has the part and the entries, bytes still null", listed.state === "running" && listed.progress !== null && listed.bytes === null);
+      }
+      if (ticks === 3 || ticks === 14) {
+        // a tick that died after writing past its saved cursor: garbage at the end of the part and the stage files
+        const [[row]] = (await pool().query("SELECT `cursor` FROM export_jobs WHERE id = ?", [jobId])) as unknown as [{ cursor: string }[]];
+        const cur = JSON.parse(row!.cursor) as { s: number; zip: { n: number } | null };
+        const part = join(dirE, `part-${cur.zip?.n ?? 1}.zip`);
+        if (existsSync(part)) writeFileSync(part, Buffer.concat([readFileSync(part), randomBytes(3_000)]));
+        const stageDir = join(dirE, "stage");
+        for (const f of existsSync(stageDir) ? readdirSync(stageDir) : []) writeFileSync(join(stageDir, f), Buffer.concat([readFileSync(join(stageDir, f)), Buffer.from("GARBAGE-ROW\r\n")]));
+      }
+    }
+    t.eq("the job ends ready", state, "ready");
+    t.check("…across at least 3 forced slices (ticks)", ticks >= 3, `${ticks} ticks`);
+    const [ready] = await EX.listExportJobs(scopeE);
+    t.check("ready: expires 72 h after done", !!ready?.expiresAt && !!ready.doneAt && Date.parse(ready.expiresAt) - Date.parse(ready.doneAt) === 72 * 3_600_000);
+    t.check("ready: bytes = Σ parts, several parts under the small limit", !!ready && ready.bytes === ready.parts.reduce((n, p) => n + p.bytes, 0) && ready.parts.length >= 2, `${ready?.parts.length} parts`);
+    t.check("ready: every part has a signed href and the download name", !!ready && ready.parts.every((p) => !!p.href?.startsWith(`/api/app/export-e/exports/${jobId}/${p.n}?t=`) && /^export-e-export-\d{4}-\d{2}-\d{2}-\d+\.zip$/.test(p.name)));
+    t.check("the stage folder is gone", !existsSync(join(dirE, "stage")));
+    const [[jr]] = (await pool().query("SELECT parts, `cursor` FROM export_jobs WHERE id = ?", [jobId])) as unknown as [{ parts: string; cursor: string | null }[]];
+    const stored = JSON.parse(jr!.parts) as { name: string; bytes: number; sha256: string }[];
+    t.check("export_jobs.parts holds name, bytes and sha256 of each part file", stored.every((p) => statSync(join(dirE, p.name)).size === p.bytes && sha(readFileSync(join(dirE, p.name))) === p.sha256));
+    t.eq("…and the cursor is cleared", jr!.cursor, null);
+
+    // the archive: every listed file, nothing of F, no secret
+    const files = new Map<string, Buffer>();
+    let partsOk = true;
+    for (const p of stored) {
+      try {
+        for (const [name, data] of Object.entries(unzipSync(new Uint8Array(readFileSync(join(dirE, p.name)))))) files.set(name, Buffer.from(data));
+      } catch {
+        partsOk = false;
+      }
+    }
+    t.check("every part opens as a ZIP of its own", partsOk);
+    const want = [
+      "orders.csv",
+      "leads.csv",
+      "customers.csv",
+      "order_events.csv",
+      "members.csv",
+      "audit.csv",
+      "agent_stats_daily.csv",
+      "message_templates.csv",
+      "short_links.csv",
+      "campaigns.json",
+      "delivery_zones.json",
+      "ai_memory.json",
+      "settings.json",
+      "README.txt",
+      "pages/argan-e/doc.json",
+      "pages/argan-e/index.html",
+      "pages/argan-e/merci.html",
+      "drafts/argan-e.json",
+      "drafts/brouillon-e.json",
+      `media/${assetE}.webp`,
+    ];
+    t.eq("every listed file is in the archive", want.filter((f) => !files.has(f)), []);
+    t.eq("…and nothing else (health.json omitted: no snapshot yet)", [...files.keys()].filter((f) => !want.includes(f)), []);
+    t.check("README.txt is in the last part", Object.keys(unzipSync(new Uint8Array(readFileSync(join(dirE, stored[stored.length - 1]!.name))))).includes("README.txt"));
+    const all = Buffer.concat([...files.values()]).toString("utf8");
+    t.eq("no F canary anywhere", ["F-CANARY", "f-canary", "+212699999901", "+212699999902"].filter((c) => all.includes(c)), []);
+    t.eq("no secret: capi_ctx, the token hashes, the claim token, the bot token, the kit's share token, run ids", [CAPI, UPSELL, CLAIM, SHARE, "BOT-TOKEN-CANARY", "KIT-TOKEN-CANARY", "RUNID-CANARY"].filter((c) => all.includes(c)), []);
+    const orders = files.get("orders.csv")!.toString("utf8");
+    const header = orders.slice(1).split("\r\n")[0]!.split(",");
+    t.check("orders.csv starts with the BOM", orders.startsWith("﻿"));
+    t.eq("…no capi_ctx, upsell_token_hash or claim_token column", ["capi_ctx", "upsell_token_hash", "claim_token"].filter((c) => header.includes(c)), []);
+    t.check("…every other column (currency, is_test, adjust_cents, phone_raw)", ["id", "phone", "currency", "is_test", "adjust_cents", "phone_raw", "subtotal", "items"].every((c) => header.includes(c)));
+    t.eq("…E's full phones (as guarded text)", ["+212600000101", "+212600000102", "+212600000103"].filter((p) => !orders.includes(`'${p}`)), []);
+    t.check("…the formula neutralised and quoted, names with quotes and commas kept", orders.includes(`"'=HYPERLINK(""http://evil"",1)"`) && orders.includes('"Salma, ""Lwarda"""') && orders.includes("الدار البيضاء"));
+    t.check("…amounts exactly as stored, cents as integers", orders.includes(",199.00,") && orders.includes(",-150,") && orders.includes(",MAD,"));
+    t.eq("…three rows (the test order kept), no garbage row from the dead ticks", [orders.split("\r\n").filter((l) => l.startsWith("CMD-")).length, orders.includes("GARBAGE-ROW"), all.includes("GARBAGE-ROW")], [3, false, false]);
+    t.eq("members.csv: name, e-mail, role, status", files.get("members.csv")!.toString("utf8").replace("﻿", "").split("\r\n")[0], "name,email,role,status");
+    const audit = files.get("audit.csv")!.toString("utf8");
+    t.check("audit.csv: the store's own rows, staff rows without ids, IP hash or hidden note", audit.includes("E-OWN-ROW") && !audit.includes("IPHASHCANARYSTAFF") && !audit.includes("STAFF-NOTE-HIDDEN") && !audit.includes(uF));
+    const settings = JSON.parse(files.get("settings.json")!.toString("utf8")) as Record<string, unknown>;
+    t.check("settings.json: no secret key at all", !("telegram" in settings) && !("tracking_secrets" in settings) && !("turnstile" in settings) && !("export_key" in settings) && "defaults" in settings);
+    const memory = JSON.parse(files.get("ai_memory.json")!.toString("utf8")) as { text: string; active: boolean; evidence: Record<string, unknown> }[];
+    t.eq("ai_memory.json: inactive items too, evidence without run ids", [memory.length, memory[0]?.active, memory[0]?.evidence], [1, false, { edits: 2 }]);
+    const campaignsJson = JSON.parse(files.get("campaigns.json")!.toString("utf8")) as Record<string, unknown>[];
+    t.check("campaigns.json: no share token column", campaignsJson.length === 1 && !("share_token_hash" in campaignsJson[0]!));
+    t.check("pages: the published html and merci, the draft", files.get("pages/argan-e/index.html")!.toString().includes("E-PAGE-HTML") && files.get("pages/argan-e/merci.html")!.toString().includes("-MERCI"));
+    t.check("media: the largest stored variant, byte for byte", files.get(`media/${assetE}.webp`)!.equals(bigE));
+    const readme = files.get("README.txt")!.toString("utf8");
+    t.check("README.txt: ar, fr, en; the part count", readme.includes("تصدير") && readme.includes("Export des données") && readme.includes(`${stored.length} ZIP parts`));
+
+    // download: the part stream is the file; another store, a foreign or expired signature: nothing
+    const tok = new URL(ready!.parts[0]!.href!, "http://x").searchParams.get("t")!;
+    t.check("the listed token verifies for E's job and part 1", SIG.verifyExportToken(STORE_E, jobId, "1", tok));
+    t.check("…never for F (E's signature on F)", !SIG.verifyExportToken(STORE_F, jobId, "1", tok));
+    t.check("…never once expired", !SIG.verifyExportToken(STORE_E, jobId, "1", tok, Date.now() + 25 * 3_600_000));
+    const streamed = await streamBytes((await EX.exportPartStream(scopeE, jobId, "1"))!);
+    t.check("exportPartStream(E) streams part 1 byte for byte", streamed.equals(readFileSync(join(dirE, stored[0]!.name))));
+    t.eq("F's scope on E's job, a missing part, a bad id: null", [await EX.exportPartStream(scopeF, jobId, "1"), await EX.exportPartStream(scopeE, jobId, "99"), await EX.exportPartStream(scopeE, "nope", "1"), await EX.exportPartStream(scopeE, jobId, "../1")], [null, null, null, null]);
+
+    // no space: the last walk leaves less than the estimate → failed 'no_space' before any file
+    const savedState = await ST.readJobState(W.WALK_JOB);
+    await ST.patchJobState(W.WALK_JOB, { snapshot: { bytes: 999_000, files: 1, dirs: 1, budgetBytes: 1_000_000, complete: true, at: new Date().toISOString() } });
+    const { jobId: jobF } = await EX.requestStoreExport(scopeF, { requestedAs: "platform", requestedBy: uF });
+    const rf = await exportsJob(jobCtx(), forced);
+    const [lf] = await EX.listExportJobs(scopeF);
+    t.eq("a job over the DATA_DIR budget fails 'no_space' at once, no files", [rf.summary?.state, lf?.id, lf?.state, lf?.error, existsSync(JOBX.exportDir(STORE_F, jobF))], ["failed", jobF, "failed", "no_space", false]);
+    await ST.patchJobState(W.WALK_JOB, { snapshot: (savedState.snapshot as Record<string, unknown> | undefined) ?? null });
+
+    // 72 h later (fake clock): the cleanup branch expires the job and deletes its files
+    const idle = await exportsJob(jobCtx(), { now: () => Date.now() + 71 * 3_600_000 });
+    t.eq("71 h: nothing expires", [idle.summary?.expired, existsSync(dirE)], [0, true]);
+    const later = await exportsJob(jobCtx(), { now: () => Date.now() + 73 * 3_600_000 });
+    const [gone] = await EX.listExportJobs(scopeE);
+    t.eq("73 h: expired, the files gone, no href, the part list kept", [later.summary?.expired, gone?.state, existsSync(dirE), gone?.parts.every((p) => p.href === null), gone?.parts.length], [1, "expired", false, true, stored.length]);
+    t.eq("…and no stream", await EX.exportPartStream(scopeE, jobId, "1"), null);
+    t.check("a new request after expiry makes a new job (the bucket has room)", (await EX.requestStoreExport(scopeE, { requestedAs: "member", requestedBy: uE })).jobId !== jobId);
   });
 
   await h.run();

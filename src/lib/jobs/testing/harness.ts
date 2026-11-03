@@ -96,7 +96,10 @@ export class Harness {
       console.error(`\n  ✗ ${this.title}: the process ended inside section "${current}" before every section ran`);
       process.exitCode = 1;
     });
+    const i = process.argv.indexOf("--only");
+    const only = i >= 0 ? (process.argv[i + 1] ?? "").split(",").filter(Boolean) : [];
     for (const { name, fn } of this.sections) {
+      if (only.length && !only.some((p) => name.startsWith(p))) continue;
       current = name;
       const t0 = performance.now();
       const before = this.passes + this.failures.length;
