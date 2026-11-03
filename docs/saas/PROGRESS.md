@@ -44,6 +44,17 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **SPEED MODE 2026-11-03 ~08:45** (owner: "continue and speedup to deploy as fast as possible, so ignore any extra verification
+  and just make sure everything working and deployed live"). Tracks relaunched with args.speed (no e2e/demo steps: P1/P2/P4/P5
+  step 13 dropped; last steps = full npm test + short report; per step only tsc + touched suites; one ui-shots pass):
+  group A task `w937pcklq` run `wf_6da33bec-3dd` (args qa/lead/tracks-A-speed.json), group B task `wrdkprg8p` run
+  `wf_452e7a6d-23d` (qa/lead/tracks-B-speed.json). Heartbeat job `e8c3b404`. 31/106 steps done at relaunch.
+  PLAN TO LIVE: merge each finished track in order with `qa/lead/r1-merge-fast.js` (no reviews; core gate tsc + npm test +
+  migrate/tenancy/action-replay + build), P6 may be merged at its latest green step if it is the last one blocking; then one
+  integration-lite pass (full npm run gate) and the archive deploy (HANDOFF §4). **BLOCKER FOR THE DEPLOY: the Hostinger connector
+  is disconnected (needs the owner to re-authorize it: /mcp in a terminal, or the connector settings).** P3 wave 2 (Campaign Kit,
+  test links, WhatsApp order, short links) and the domain move (V1-V11) follow after the first R1 deploy.
+
 - **PAUSED BY THE OWNER 2026-10-30 ~23:24** ("stop everything for now until i tell you to continue"). The heartbeat cron
   4d541dce is deleted (no scheduled jobs); both track runs stopped at 23:23 (wf_6bdfcf07-867, wf_a7a5cb60-348, already in
   qa/lead/track-runs.json); no worktree processes or servers left. State: 31/106 steps validated (P8 6, P1 4, P2 4, P4 4, P5 4,
