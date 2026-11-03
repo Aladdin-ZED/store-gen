@@ -126,3 +126,205 @@ export function fillCity(template: string, vars: Readonly<Record<string, string 
   const t = city.startsWith("ال") ? template.split("لـ{city}").join(`ل${city.slice(1)}`) : template;
   return fill(t, vars);
 }
+
+/* ------------------------------------------------------------------ */
+/* The tracking page (LAN-§9.4, §24.2 `trk.*`)                         */
+/* ------------------------------------------------------------------ */
+
+/** Step verbs of the timeline (LAN-§9.2): verbs, never numbers. */
+export type TrkStepCopy = Record<"placed" | "confirmed" | "shipped" | "out_for_delivery" | "delivered" | "cancelled" | "returned", string>;
+
+export interface TrkCopy {
+  title: string;
+  lead: string;
+  hello: string;
+  orderNo: string;
+  last4: string;
+  find: string;
+  another: string;
+  placedOn: string;
+  phone: string;
+  total: string;
+  step: TrkStepCopy;
+  timeline: string;
+  shippedWith: string;
+  carrierRef: string;
+  confirmedOn: string;
+  needChange: string;
+  changeAddress: string;
+  cancel: string;
+  other: string;
+  requested: string;
+  sheetNote: string;
+  sheetText: string;
+  send: string;
+  close: string;
+  sent: string;
+  notFound: string;
+  rateLimited: string;
+  closed: string;
+  error: string;
+  whatsapp: string;
+  /** the prefilled WhatsApp text: "Bonjour, ma commande {order_id} : " */
+  waText: string;
+  call: string;
+  hours: string;
+  noscript: string;
+  returnsIn: string;
+  returns: string;
+  storeLinks: string;
+}
+
+export const TRK: Readonly<Record<ShopperLocale, TrkCopy>> = {
+  ar: {
+    title: "تتبّع الطلب",
+    lead: "دخّل رقم الطلب و آخر 4 أرقام ديال التيليفون ديالك.",
+    hello: "مرحبا {name}",
+    orderNo: "رقم الطلب",
+    last4: "آخر 4 أرقام ديال التيليفون ديالك",
+    find: "شوف الطلب ديالي",
+    another: "تتبّع طلب آخر",
+    placedOn: "تدار نهار {date}",
+    phone: "التيليفون",
+    total: "المجموع",
+    step: {
+      placed: "توصلنا بالطلب",
+      confirmed: "تأكد الطلب",
+      shipped: "خرج مع شركة التوصيل",
+      out_for_delivery: "الموزع فالطريق ليك",
+      delivered: "توصلتي بالطلب",
+      cancelled: "تلغى الطلب",
+      returned: "رجع للمتجر",
+    },
+    timeline: "فين وصل الطلب",
+    shippedWith: "خرج مع {carrier}",
+    carrierRef: "المرجع {ref}",
+    confirmedOn: "تأكد الطلب نهار {date}",
+    needChange: "بغيتي تبدّل شي حاجة؟",
+    changeAddress: "بدّل العنوان ديالي",
+    cancel: "لغي الطلب ديالي",
+    other: "طلب آخر",
+    requested: "الطلب تصيفط",
+    sheetNote: "المتجر غادي يتواصل معاك.",
+    sheetText: "زيد شي تفاصيل إلا بغيتي (اختياري)",
+    send: "صيفط الطلب",
+    close: "سدّ",
+    sent: "الطلب ديالك وصل. المتجر غادي يتواصل معاك.",
+    notFound: "ما لقيناش هاد الطلب. تأكد من الرقم ومن الأرقام الأربعة.",
+    rateLimited: "بزاف ديال المحاولات. عاود من بعد شي دقايق.",
+    closed: "هاد الطلب خرج ديجا: كتب للمتجر إلا بغيتي شي حاجة.",
+    error: "وقع مشكل. عاود من بعد شوية.",
+    whatsapp: "كتب للمتجر فواتساب",
+    waText: "السلام عليكم، الطلب ديالي {order_id}: ",
+    call: "عيّط للمتجر",
+    hours: "الأوقات: {hours}",
+    noscript: "شغّل JavaScript باش تقلب على الطلب ديالك، ولا كتب للمتجر فواتساب.",
+    returnsIn: "الإرجاع مقبول خلال {n} {days}.",
+    returns: "الإرجاع مقبول.",
+    storeLinks: "معلومات المتجر",
+  },
+  fr: {
+    title: "Suivi de commande",
+    lead: "Entrez votre numéro de commande et les 4 derniers chiffres de votre téléphone.",
+    hello: "Bonjour {name}",
+    orderNo: "Numéro de commande",
+    last4: "4 derniers chiffres de votre téléphone",
+    find: "Voir ma commande",
+    another: "Suivre une autre commande",
+    placedOn: "Passée le {date}",
+    phone: "Téléphone",
+    total: "Total",
+    step: {
+      placed: "Commande reçue",
+      confirmed: "Confirmée",
+      shipped: "Expédiée",
+      out_for_delivery: "En cours de livraison",
+      delivered: "Livrée",
+      cancelled: "Annulée",
+      returned: "Retournée à la boutique",
+    },
+    timeline: "Où en est votre commande",
+    shippedWith: "Expédiée avec {carrier}",
+    carrierRef: "Réf. {ref}",
+    confirmedOn: "Confirmée le {date}",
+    needChange: "Besoin d'un changement ?",
+    changeAddress: "Changer mon adresse",
+    cancel: "Annuler ma commande",
+    other: "Autre demande",
+    requested: "Demande envoyée",
+    sheetNote: "La boutique vous contactera.",
+    sheetText: "Précisez si besoin (facultatif)",
+    send: "Envoyer la demande",
+    close: "Fermer",
+    sent: "Demande envoyée. La boutique vous contacte.",
+    notFound: "Nous ne trouvons pas cette commande. Vérifiez le numéro et les 4 chiffres.",
+    rateLimited: "Trop d'essais. Réessayez dans quelques minutes.",
+    closed: "Cette commande est déjà expédiée : écrivez à la boutique pour toute demande.",
+    error: "Une erreur est survenue. Réessayez dans un instant.",
+    whatsapp: "Écrire à la boutique sur WhatsApp",
+    waText: "Bonjour, ma commande {order_id} : ",
+    call: "Appeler la boutique",
+    hours: "Horaires : {hours}",
+    noscript: "Activez JavaScript pour retrouver votre commande, ou écrivez à la boutique sur WhatsApp.",
+    returnsIn: "Retours acceptés sous {n} {days}.",
+    returns: "Retours acceptés.",
+    storeLinks: "Informations de la boutique",
+  },
+  en: {
+    title: "Order tracking",
+    lead: "Enter your order number and the last 4 digits of your phone.",
+    hello: "Hello {name}",
+    orderNo: "Order number",
+    last4: "Last 4 digits of your phone",
+    find: "Show my order",
+    another: "Track another order",
+    placedOn: "Placed on {date}",
+    phone: "Phone",
+    total: "Total",
+    step: {
+      placed: "Order received",
+      confirmed: "Confirmed",
+      shipped: "Shipped",
+      out_for_delivery: "Out for delivery",
+      delivered: "Delivered",
+      cancelled: "Cancelled",
+      returned: "Returned to the store",
+    },
+    timeline: "Where your order is",
+    shippedWith: "Shipped with {carrier}",
+    carrierRef: "Ref. {ref}",
+    confirmedOn: "Confirmed on {date}",
+    needChange: "Need a change?",
+    changeAddress: "Change my address",
+    cancel: "Cancel my order",
+    other: "Other request",
+    requested: "Request sent",
+    sheetNote: "The store will contact you.",
+    sheetText: "Add details if you like (optional)",
+    send: "Send request",
+    close: "Close",
+    sent: "Request sent. The store will contact you.",
+    notFound: "We can't find this order. Check the number and the 4 digits.",
+    rateLimited: "Too many tries. Try again in a few minutes.",
+    closed: "This order has already shipped: message the store for any request.",
+    error: "Something went wrong. Try again in a moment.",
+    whatsapp: "Message the store on WhatsApp",
+    waText: "Hello, my order {order_id}: ",
+    call: "Call the store",
+    hours: "Hours: {hours}",
+    noscript: "Turn on JavaScript to look up your order, or message the store on WhatsApp.",
+    returnsIn: "Returns accepted within {n} {days}.",
+    returns: "Returns accepted.",
+    storeLinks: "Store information",
+  },
+};
+
+/** The day word after a count in the returns line: Arabic 2 to 10 take the plural, French and English 1 the singular. */
+export function trkDays(n: number, locale: ShopperLocale): string {
+  if (locale === "ar") return n >= 2 && n <= 10 ? "أيام" : "يوم";
+  if (locale === "fr") return n === 1 ? "jour" : "jours";
+  return n === 1 ? "day" : "days";
+}
+
+/** The shopper locale of a page locale: ar and fr as they are, every other locale reads the English copy. */
+export const shopperLocaleOf = (locale: string | null | undefined): ShopperLocale => (locale === "ar" || locale === "fr" ? locale : "en");

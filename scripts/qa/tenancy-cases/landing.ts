@@ -1,4 +1,4 @@
-// proves: LP-03, LP-02, SF-03, LP-06, LP-20, LP-22, SF-06
+// proves: LP-03, LP-02, SF-03, LP-06, LP-20, LP-22, SF-06, LP-05
 /**
  * Two-store attack cases of the landing track (P3 LANDING, landing.md LAN-§7.5, §25.2).
  * Extension file (docs/STORE-SAAS.md §F.1, §J.2, §K.3; DES-R13), created empty at P0 and loaded by
@@ -21,7 +21,12 @@
  * order with A's lead's phone and idem never credits A's lead (the `landing.created` hook); `getPageVitals(B, A's
  * pages)` reads zeros; an old slug 308s with a byte-identical query, a reused slug serves the new page, and store B's
  * identical old slug never redirects to A.
+ *
+ * Order tracking (p3-w1-tracking): store B's host reads A's order by no proof (lookup, proof, signed link, request,
+ * intent: the uniform not_found, nothing written on A's order); A's signed link under B's handle answers 404 with
+ * nothing of A; B's scope loads nothing of A's order. Each case checks its positive control on A's own host.
  */
+import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import type { TenancyCase, TenancyKit } from "../tenancy-check";
 import type { WriteCtx, WriteScope } from "@/lib/tenancy/types";
@@ -436,9 +441,82 @@ async function slugCases(kit: TenancyKit): Promise<void> {
   RC.invalidateStoreRender(fx.B.id);
 }
 
+async function trackCases(kit: TenancyKit): Promise<void> {
+  const { fx, check } = kit;
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const T = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { and, eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const { newOrderId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const API = load<typeof import("@/lib/tracking/api.server")>("@/lib/tracking/api.server");
+  const V = load<typeof import("@/lib/tracking/view.server")>("@/lib/tracking/view.server");
+  const P = load<typeof import("@/lib/tenancy/public")>("@/lib/tenancy/public");
+  const env = process.env as Record<string, string | undefined>;
+  const saved = { root: env.STORE_ROOT_DOMAIN, key: env.EDGE_KEY };
+  const edgeKey = randomBytes(32).toString("hex");
+  const ip = () => `203.0.113.${Math.floor(Math.random() * 250) + 1}`;
+
+  // A's order (a fixture id of its own: the tracking ids are "<2-8 capitals>-<base 36>")
+  const id = newOrderId("TRK");
+  const phone = `+2126${String(Math.floor(10_000_000 + Math.random() * 89_999_999))}`;
+  const idem = randomUUID();
+  await db.insert(T.orders).values({
+    id, storeId: fx.A.id, pageId: fx.A.page.live, versionId: fx.A.version.live, status: "new", name: "Track A", phone, city: "Rabat", address: "A street 1",
+    productName: "Argan A", items: { v: 2, bundleId: "b1", bundleLabel: "1 x Argan", qty: 1, unitPrice: 199, variants: [] } as never, qty: 1, subtotal: 199, shipping: 0, total: 199, currency: "MAD", idem,
+  } as never);
+  const s = P.signTrackLink(fx.A.id, id);
+  const post = async (body: unknown, h: string) => {
+    const res = await API.handleTrackApi(
+      new Request(`https://${h}/api/public/track`, {
+        method: "POST",
+        headers: { "x-sg-host": h, "x-sg-edge": edgeKey, "x-sg-ip": ip(), "x-sg-proto": "https", "x-sg-worker": "w-tenancy", "x-sg-ts": String(Date.now()), origin: `https://${h}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
+    return { status: res.status, text: await res.text() };
+  };
+  const hostA = `${fx.A.handle}.shops.test`;
+  const hostB = `${fx.B.handle}.shops.test`;
+  const proofs = [
+    { op: "lookup", o: id, last4: phone.slice(-4) },
+    { op: "proof", o: id, k: idem },
+    { op: "signed", o: id, s },
+    { op: "request", o: id, auth: { s }, kind: "cancel" },
+    { op: "intent", o: id, k: idem, kind: "confirm_whatsapp" },
+  ];
+  env.STORE_ROOT_DOMAIN = "shops.test";
+  env.EDGE_KEY = edgeKey;
+  try {
+    const own = await post(proofs[0], hostA);
+    check("tracking: A's own host opens A's order (control)", own.status === 200, own);
+    for (const body of proofs) {
+      const r = await post(body, hostB);
+      check(`tracking: B's host, ${body.op} with A's proof: the uniform not_found`, r.status === 404 && r.text === '{"ok":false,"error":"not_found"}', r);
+    }
+  } finally {
+    if (saved.root === undefined) delete env.STORE_ROOT_DOMAIN;
+    else env.STORE_ROOT_DOMAIN = saved.root;
+    if (saved.key === undefined) delete env.EDGE_KEY;
+    else env.EDGE_KEY = saved.key;
+  }
+  const written = await db.select().from(T.orderEvents).where(and(eq(T.orderEvents.storeId, fx.A.id), eq(T.orderEvents.orderId, id)));
+  check("tracking: nothing written on A's order from B's host", written.length === 0, written);
+
+  const route = { file: "src/app/s/[store]/track/route.ts", template: "/s/[store]/track", methods: ["GET"] };
+  const onA = await kit.callRoute({ anonymous: true }, route, "GET", { store: fx.A.handle }, { query: { o: id, s } });
+  check("tracking: A's signed link under A's handle renders the status (control)", onA.ok && onA.value!.status === 200 && onA.value!.body.includes(id), onA.ok ? onA.value!.status : onA);
+  const onB = await kit.callRoute({ anonymous: true }, route, "GET", { store: fx.B.handle }, { query: { o: id, s } });
+  check(
+    "tracking: A's signed link under B's handle answers 404 with nothing of A",
+    onB.ok && onB.value!.status === 404 && !onB.value!.body.includes("Argan A") && !onB.value!.body.includes(fx.A.handle),
+    onB.ok ? onB.value!.status : onB,
+  );
+  check("tracking: B's scope loads nothing of A's order", (await V.loadTrackOrder(kit.scope("B"), id)) === null);
+}
+
 export const cases: TenancyCase[] = [
   { name: "landing: delivery zones, lead suggestion and holiday reminder of A never reach B", run: zoneCases },
   { name: "landing: A's attested facts, proof, zones and policies never reach B's gate or Store Health", run: gateCases },
   { name: "landing: A's leads, their attribution, vitals and mode plan never reach B; impersonation reads them masked", run: leadCases },
   { name: "landing: slug history 308s with the raw query, a reused slug serves the new page, B never redirects into A", run: slugCases },
+  { name: "landing: B's host reads A's order by no tracking proof; A's signed link under B's handle answers 404", run: trackCases },
 ];
