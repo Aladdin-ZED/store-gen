@@ -44,6 +44,11 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **TRACKS RELAUNCHED 2026-11-03 ~17:45** (speed mode) after a 4th outage (~12:00-17:30) exhausted 12 tries per track. 48/106 steps
+  at relaunch. Group A task `w4jeih92q` run `wf_62a06748-635` (P8 from 9, P2 7, P1 8, P5 7); group B task `wdsuy1hhj` run
+  `wf_524f3596-eb4` (P4 7, P3 5, P7 7, P6 6). Relaunch recipe now: `node qa/lead/relaunch-args.mjs && node qa/lead/speedify.cjs`,
+  then launch with the JSON of qa/lead/tracks-A-speed.json / tracks-B-speed.json.
+
 - **SPEED MODE 2026-11-03 ~08:45** (owner: "continue and speedup to deploy as fast as possible, so ignore any extra verification
   and just make sure everything working and deployed live"). Tracks relaunched with args.speed (no e2e/demo steps: P1/P2/P4/P5
   step 13 dropped; last steps = full npm test + short report; per step only tsc + touched suites; one ui-shots pass):
