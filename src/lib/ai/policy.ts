@@ -154,6 +154,65 @@ export function deepPassFor(i: { cloudAvailable: boolean; storeDeepPass: boolean
 }
 
 /* ------------------------------------------------------------------ */
+/* The whole policy from its inputs (aiPolicyFor's pure half)          */
+/* ------------------------------------------------------------------ */
+
+/** rev 4 note of AI-§A.8.6: the button and the reservation keep the conservative 53 credits until `ai_runs` shows the real p90 */
+export const DIRECTOR_PASS_CREDITS_P90 = 53;
+
+/** Everything `aiPolicyFor` reads, already loaded (src/lib/ai/router/server.ts); pure values only. */
+export interface PolicyInputs {
+  cloud: CloudInputs;
+  director: Omit<DirectorInputs, "cloudAvailable">;
+  deep: { storeDeepPass: boolean; classDown: boolean; passesLeft: number | null; jobRunning: boolean; batchAlways: boolean };
+  directorPassCredits: number;
+  local: AiPolicy["local"];
+  /** the tasks released and flagged on (before impersonation) */
+  live: AiTaskId[];
+  autoPrefersCloud: AiPolicy["autoPrefersCloud"];
+  transport: AiPolicy["transport"];
+  promptVersions: AiPolicy["promptVersions"];
+  voiceLocal: string;
+  workerName: string;
+}
+
+/**
+ * The policy (AI-§A.4): the first cloud block in order, the Director and deep lines, and the impersonation rule (D70):
+ * a "View as store" session gets `live: []`, `cloud.available = false` with `state` and the local rung off, so no AI
+ * action renders and nothing is spent. `creditsLeft` / `dayLeft` are reported whatever the block (the chips show them).
+ */
+export function buildPolicy(i: PolicyInputs): AiPolicy {
+  const block = cloudBlockFor(i.cloud);
+  const available = block === null;
+  const imp = i.cloud.impersonation;
+  const { director, directorBlock } = directorFor({ ...i.director, cloudAvailable: available });
+  const deepPass = deepPassFor({ cloudAvailable: available, storeDeepPass: i.deep.storeDeepPass, classDown: i.deep.classDown, passesLeft: i.deep.passesLeft, jobRunning: i.deep.jobRunning });
+  return {
+    mode: i.cloud.mode,
+    cloud: {
+      available,
+      block,
+      creditsLeft: imp ? null : i.cloud.creditsLeft,
+      dayLeft: imp ? null : i.cloud.dayLeft,
+      director,
+      directorBlock,
+      directorPassCredits: i.directorPassCredits,
+      directorPassesLeft: imp ? null : i.director.passesLeft,
+      deepPass,
+      deepPassesLeft: imp ? null : i.deep.passesLeft,
+      deepTransport: i.deep.batchAlways ? "batch" : "job",
+    },
+    local: imp ? { ...i.local, enabled: false } : i.local,
+    autoPrefersCloud: imp ? {} : i.autoPrefersCloud,
+    live: imp ? [] : i.live,
+    transport: i.transport,
+    promptVersions: imp ? {} : i.promptVersions,
+    voiceLocal: imp ? "" : i.voiceLocal,
+    workerName: i.workerName,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* ladderFor (the AI-§A.4 decision table)                              */
 /* ------------------------------------------------------------------ */
 

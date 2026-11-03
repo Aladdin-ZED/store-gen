@@ -16,6 +16,13 @@
  *    banned word and none of A's (nor any harness canary of A), and block 2 is byte-identical for A and B. A memory
  *    repository that hands A's rows to B's scope (a planted bug) makes the assembly throw `cross_store_context`
  *    with no row text in the error, and the refusal is reported with B's store id only.
+ *
+ * Repositories (step 6):
+ *  - `ai_runs`, `ai_cache`, `ai_memory`, `ai_jobs` through their scoped repositories (src/lib/ai/store/**): A writes a
+ *    run, a cache entry, a memory item and a job; B's scope reads none of them by id or by list (`getRunMeta`,
+ *    `recentRuns`, `cacheLookup` with the identical key, `listMemory`, `activeMemory`, `getAiJob`, `activeJobsFor`),
+ *    cannot finish, link, pin or delete them (`finishRun`, `linkAiRuns`, `setMemoryPinned`, `deleteMemory`), and B's
+ *    `aiUsageForStore` holds none of A's cost; A's rows are left as they were.
  */
 import { randomBytes } from "node:crypto";
 import { assembleFor, storeBlockCtxFor } from "@/lib/ai/prompts/assemble.server";
@@ -24,6 +31,17 @@ import type { PromptMemoryRow } from "@/lib/ai/prompts/store-block";
 import { PROMPTS } from "@/lib/ai/prompts/registry";
 import type { AiTaskInput } from "@/lib/ai/provider/types";
 import { finalizeCtxFor } from "@/lib/ai/schema/tasks/ctx.server";
+import { linkAiRuns } from "@/lib/ai/feedback.server";
+import { sha256Hex } from "@/lib/ai/prompts/sha256";
+import { cacheExpiry, cacheLookup, cacheWrite } from "@/lib/ai/store/cache";
+import { activeJobsFor, getAiJob } from "@/lib/ai/store/jobs";
+import { activeMemory, addMemory, deleteMemory, listMemory, setMemoryPinned } from "@/lib/ai/store/memory";
+import { finishRun, getRunMeta, insertRun, recentRuns } from "@/lib/ai/store/runs";
+import { aiUsageForStore } from "@/lib/ai/summary.server";
+import { db } from "@/lib/db/client";
+import { newId } from "@/lib/db/ids";
+import { aiJobs } from "@/lib/db/schema";
+import { storeValues } from "@/lib/tenancy/sql";
 import { setStoreSetting } from "@/lib/settings";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 import type { TenancyCase } from "../tenancy-check";
@@ -104,6 +122,40 @@ export const cases: TenancyCase[] = [
       kit.check("ai/assembleFor: the refusal carries no row text", !(refused instanceof Error && refused.message.includes(avoid.A)));
       kit.check("ai/assembleFor: the refusal is reported with B's store id only", reported.length === 1 && reported[0] === kit.scope("B").storeId, reported);
       kit.check("ai/assembleFor: the reads leave A's rows as they were", (await kit.snapshotA()) === before);
+    },
+  },
+  {
+    name: "ai: B's scope reads and changes none of A's runs, cache, memory or jobs",
+    async run(kit) {
+      const a = kit.scope("A");
+      const b = kit.scope("B");
+      if (!writable(a) || !writable(b)) throw new Error("ai: the harness scopes are not member scopes");
+      const tag = randomBytes(4).toString("hex");
+      const owner = kit.fx.A.members.owner;
+      const hash = sha256Hex(`ai-repo-${tag}`);
+      const runId = await insertRun(a, { userId: owner, task: "copy.page", provider: "server", via: "stream", inputHash: hash, finished: { status: "ok", ms: 10, costMicros: 777, credits: 1, output: { headline: `ai-run-${tag}` } } });
+      const key = { task: "copy.page" as const, inputHash: hash, promptVersion: "copy.page@s1", model: "claude-sonnet-5-5" };
+      await cacheWrite(a, key, { headline: `ai-cache-${tag}` }, cacheExpiry(7));
+      const memId = await addMemory(a, { kind: "prefer", text: `ai-mem-${tag} parler du terroir` }, owner);
+      const jobId = newId();
+      await db.insert(aiJobs).values(storeValues(a, { id: jobId, kind: "director_deep" as const, task: "design.critique", status: "running" as const, active: "1", inputHash: hash, createdBy: owner }));
+      const before = await kit.snapshotA();
+
+      kit.check("ai/getRunMeta(B, A's run): null", (await getRunMeta(b, runId)) === null);
+      kit.check("ai/recentRuns(B): none of A's", !(await recentRuns(b)).some((r) => r.id === runId));
+      kit.check("ai/cacheLookup(B, A's identical key): miss", (await cacheLookup(b, key)) === null);
+      kit.check("ai/listMemory(B) and activeMemory(B): none of A's", ![...(await listMemory(b)), ...(await activeMemory(b))].some((m) => m.id === memId || m.text.includes(tag)));
+      kit.check("ai/getAiJob(B, A's job): null", (await getAiJob(b, jobId)) === null);
+      kit.check("ai/activeJobsFor(B, A's owner): none", (await activeJobsFor(b, { userId: owner })).length === 0);
+      kit.check("ai/finishRun(B, A's run): no row changed", !(await finishRun(b, runId, { status: "error", ms: 1 })));
+      await linkAiRuns(b, [runId], { kind: "page", id: `forged-${tag}` });
+      const pin = await setMemoryPinned(b, memId, true).then(() => "pinned", (e: unknown) => (e as { code?: string }).code ?? "error");
+      const del = await deleteMemory(b, memId).then(() => "deleted", (e: unknown) => (e as { code?: string }).code ?? "error");
+      kit.check("ai/setMemoryPinned and deleteMemory(B, A's item): not_found", pin === "not_found" && del === "not_found", { pin, del });
+      const month = new Date().toISOString().slice(0, 7);
+      kit.check("ai/aiUsageForStore(B): none of A's cost", (await aiUsageForStore(b, month)).costMicros === 0);
+      kit.check("ai: B's calls left A's rows as they were (no link, pin or tombstone)", (await kit.snapshotA()) === before);
+      kit.check("ai/getRunMeta(A): A's own run (the check is not blind)", (await getRunMeta(a, runId))?.id === runId && (await getAiJob(a, jobId))?.id === jobId);
     },
   },
 ];

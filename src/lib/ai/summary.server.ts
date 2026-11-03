@@ -6,12 +6,14 @@ import "server-only";
  *     Health inputs); `creditsLimit` is the pending cap while the store is `pending`;
  *   - `aiStoreSummary(ctx, storeId)`: the console store profile's AI tab (P1 mounts P7's component);
  *   - `aiHealth()`: the "AI" section of P8's `getHealth` and its alarms.
- * Frozen at P0 (src/lib/contracts/r1-p0.ts). P0 stubs: `aiUsageForStore` answers what is true before P7 writes any
- * `ai_runs` row (nothing used, no cost) and no limit it would have to invent (`creditsLimit: null`); `aiStoreSummary` and
- * `aiHealth` throw, because their answers (modes, key source, class states) are P7's to read; P8's `getHealth` keeps
- * its `ai` section `null` until then.
+ * Frozen at P0 (src/lib/contracts/r1-p0.ts). `aiUsageForStore` is real from P7 step 6; `aiStoreSummary` and
+ * `aiHealth` still throw until the console step (13), and P8's `getHealth` keeps its `ai` section `null` until then.
  */
+import { entitlement, usageValue } from "@/lib/tenancy/entitlements";
+import { getStoreById } from "@/lib/tenancy/public";
 import type { PlatformCtx, StoreScope } from "@/lib/tenancy/types";
+import { isMonthPeriod } from "./quota/periods";
+import { monthCostMicros } from "./store/runs";
 import type { AiProviderId, AiTaskId, TaskClass } from "./tasks";
 
 /** One month of a store's AI use (PLA Q.11, Q4.11). */
@@ -62,9 +64,21 @@ export interface AiHealth {
   detachedJobs: { flag: boolean; probedAt: string | null };
 }
 
+/**
+ * The store's AI month (store time, "YYYY-MM"): credits from the `ai_credits` counter, the limit from the entitlement
+ * after the state cap (100 while `pending`, 0 while suspended or closed; null = unlimited), the cost from its run
+ * rows. Metadata only; a month in a bad shape throws a RangeError.
+ */
 export async function aiUsageForStore(scope: StoreScope, month: string): Promise<AiUsageSummary> {
-  void scope;
-  return { month, creditsUsed: 0, creditsLimit: null, costMicros: 0 };
+  if (!isMonthPeriod(month)) throw new RangeError(`ai: bad month "${String(month).slice(0, 20)}"`);
+  const store = await getStoreById(scope.storeId);
+  const timezone = store?.timezone ?? "Africa/Casablanca";
+  const [creditsUsed, creditsLimit, costMicros] = await Promise.all([
+    usageValue(scope, { metric: "ai_credits", period: month }),
+    entitlement(scope, "ai_credits_month"),
+    monthCostMicros(scope, month, timezone),
+  ]);
+  return { month, creditsUsed, creditsLimit, costMicros };
 }
 
 export async function aiStoreSummary(ctx: PlatformCtx, storeId: string): Promise<AiStoreSummary> {

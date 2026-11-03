@@ -6,21 +6,21 @@ import "server-only";
  * `registerBatchResultHandler`; `aiPolicyFor(ctx)` is the policy every AI page receives (cached 15 s per store and
  * user). Frozen at P0 (src/lib/contracts/r1-p0.ts): P2 (onboarding), P1, P8 and P6 call these before P7 merges.
  *
- * P0 stubs, the documented "Cloud AI off" state of a platform without P7 (AI-§A.4: `platform_ai.enabled` false):
- *   - `aiPolicyFor`: cloud unavailable (`platform_off`; `state` under a read-only impersonation, D70) and no live task
- *     through the router, so a caller shows its library path, never a model promise; `mode` and the local rung are the
- *     store's own `store_ai` choices (the R1.0 on-device AI and background removal keep working), off only under
- *     impersonation (AI-§A.4) or when the setting cannot be read (P0 review G3);
+ * `aiPolicyFor` is real from step 6 (the AI-§A.4 block order over the store's settings, entitlements and counters, the
+ * platform cap and the release flags; ./policy.server.ts loads, ../policy.ts `buildPolicy` decides). P0 stubs left
+ * until step 7 / 8, the documented "Cloud AI off" state:
  *   - `runAi`: the typed failure `disabled` (not retryable), so the caller takes its library rung;
  *   - `queueAi`: throws (nothing may be queued without the Batches queue);
  *   - `registerBatchResultHandler`: works for real (a registry, like the outbox handlers), so P7's handler files and the
  *     tracks' handlers register from day one.
  */
-import { getStoreSetting } from "@/lib/settings";
+import { scopedCache } from "@/lib/tenancy/cache";
+import { activeKillSwitches } from "@/lib/tenancy/entitlements";
 import type { Actor, StoreCtx, StoreScope } from "@/lib/tenancy/types";
-import type { AiPolicy } from "../policy";
+import { DIRECTOR_PASS_CREDITS_P90, buildPolicy, type AiPolicy, type PolicyInputs } from "../policy";
 import type { AiOutcome, AiRunOpts, AiTaskInput, AiTaskOutput } from "../provider/types";
 import type { AiTaskId } from "../tasks";
+import { impersonationInputs, loadPolicyInputs } from "./policy.server";
 
 export interface RunAiServerOpts extends AiRunOpts {
   actor: Actor;
@@ -66,37 +66,38 @@ export function batchResultHandler<T extends AiTaskId>(task: T): BatchResultHand
   return batchHandlers().get(task) as BatchResultHandler<T> | undefined;
 }
 
-/** The store's own `store_ai` choices for `mode` and the local rung; local off under impersonation (AI-§A.4) or on a read failure. */
-async function localPolicy(ctx: StoreCtx): Promise<Pick<AiPolicy, "mode" | "local">> {
-  const off: Pick<AiPolicy, "mode" | "local"> = { mode: "auto", local: { enabled: false, tierMax: "lite", bgRemoval: false } };
-  try {
-    const ai = await getStoreSetting(ctx.scope, "store_ai");
-    if (ctx.scope.kind === "impersonation") return { ...off, mode: ai.mode };
-    return { mode: ai.mode, local: { enabled: ai.localEnabled, tierMax: ai.localTierCeiling, bgRemoval: ai.bgRemoval } };
-  } catch {
-    return off;
-  }
+
+/* ------------------------------------------------------------------ */
+/* aiPolicyFor (AI-§A.4)                                               */
+/* ------------------------------------------------------------------ */
+
+/** The loaded inputs per (store, user), 15 s (AI-§A.4); dropped with the store by `invalidateStore()` (§E.6). */
+const policyInputs = scopedCache<PolicyInputs>({ name: "ai-policy", maxEntries: 4_000, ttlMs: 15_000 });
+
+/** Drops a store's cached policy inputs (Settings → AI writes, a boost, a plan change). */
+export function invalidateAiPolicy(storeId: string): void {
+  policyInputs.delete(storeId);
 }
 
-/** Server-only; cached 15 s per (store, user) once P7 computes it. */
-export async function aiPolicyFor(ctx: StoreCtx): Promise<AiPolicy> {
-  const { mode, local } = await localPolicy(ctx);
+/** The documented "Cloud AI off" answer when the inputs cannot be read: no promise of a model, the library path stays. */
+function offPolicy(ctx: StoreCtx): AiPolicy {
+  const imp = ctx.scope.kind === "impersonation";
   return {
-    mode,
+    mode: "auto",
     cloud: {
       available: false,
-      block: ctx.scope.kind === "impersonation" ? "state" : "platform_off",
+      block: imp ? "state" : "platform_off",
       creditsLeft: null,
       dayLeft: null,
       director: "unavailable",
       directorBlock: null,
-      directorPassCredits: 0,
+      directorPassCredits: DIRECTOR_PASS_CREDITS_P90,
       directorPassesLeft: null,
       deepPass: false,
       deepPassesLeft: null,
       deepTransport: "job",
     },
-    local,
+    local: { enabled: false, tierMax: "lite", bgRemoval: false },
     autoPrefersCloud: {},
     live: [],
     transport: "stream",
@@ -104,4 +105,20 @@ export async function aiPolicyFor(ctx: StoreCtx): Promise<AiPolicy> {
     voiceLocal: "",
     workerName: "",
   };
+}
+
+/**
+ * The policy every AI page receives (server-only). The inputs are cached 15 s per (store, user); the kill switch is
+ * read on every call through the core's flags cache (30 s), so switching `ai_generation_enabled` off reaches every
+ * store within 30 s. A "View as store" session gets `live: []`, `state` and the local rung off, and reads no counter.
+ */
+export async function aiPolicyFor(ctx: StoreCtx): Promise<AiPolicy> {
+  try {
+    if (ctx.scope.kind === "impersonation" || ctx.impersonation) return buildPolicy(await impersonationInputs(ctx));
+    const [inputs, kills] = await Promise.all([policyInputs.getOrLoad(ctx.scope.storeId, `${ctx.user.id}:${ctx.scope.kind}`, () => loadPolicyInputs(ctx)), activeKillSwitches()]);
+    return buildPolicy({ ...inputs, cloud: { ...inputs.cloud, generationOn: !kills.includes("ai_generation_enabled") } });
+  } catch (err) {
+    console.error(`[ai] policy unavailable: ${err instanceof Error ? err.name : "error"}`);
+    return offPolicy(ctx);
+  }
 }

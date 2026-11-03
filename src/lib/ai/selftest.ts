@@ -30,6 +30,8 @@
  * prompts-pii, prompts-fixtures, prompts-library (and prompts-strict).
  * Sections (step 5, the eval harness v1; ./selftest-eval.ts): eval-pairwise, eval-gate, eval-canary, eval-jury,
  * eval-scorers, eval-scorecard, eval-recorded, novelty-pass (and, with --slow, eval-niche-corpus).
+ * Sections (step 6, the policy; ./selftest-policy.ts): policy-order. The metering, the repositories and aiPolicyFor
+ * against a database are test:ai-db (scripts/qa/ai-db-check.ts).
  * Exits 1 on any failure.
  */
 import { isDeepStrictEqual } from "node:util";
@@ -67,6 +69,7 @@ import { registerDirectorSections } from "./selftest-director";
 import { registerGuardSections } from "./selftest-guard";
 import { registerPromptSections } from "./selftest-prompts";
 import { registerEvalSections } from "./selftest-eval";
+import { registerPolicySections } from "./selftest-policy";
 
 /* ------------------------------------------------------------------ */
 /* The runner                                                          */
@@ -1117,6 +1120,7 @@ registerGuardSections({ section, check, eq, strict: STRICT });
 registerDirectorSections({ section, check, eq, strict: STRICT });
 registerPromptSections({ section, check, eq, strict: STRICT });
 registerEvalSections({ section, check, eq, strict: STRICT });
+registerPolicySections({ section, check, eq, strict: STRICT });
 
 /* ------------------------------------------------------------------ */
 /* run                                                                 */
