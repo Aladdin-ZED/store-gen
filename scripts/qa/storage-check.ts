@@ -84,8 +84,25 @@
  *                              the tenant audit view, settings without secret keys, the largest media variant, README;
  *                              parts' bytes and sha256; the signature (F, expired); exportPartStream; 'no_space' from
  *                              the walk snapshot; 71 h kept, 73 h expired with its files gone (fake clock)
+ *  - backup (P8 step 9)        §H.6, PLA-§17 against the real tables and DATA_DIR: two stores G and H (H in
+ *                              purgeRequests) with canaries; the daily run across many forced one-slice ticks with
+ *                              1.5 KB parts; backupFiles and the manifest's checksums match the files (PLA-§17), only
+ *                              parts and manifest.json on disk, sealed (SGB2), counts and hashes only in the manifest;
+ *                              H in no slice, the live page version only, 90 days of order_events / audit_log,
+ *                              store_settings as stored; a restore into a second throwaway database (the migrator, then
+ *                              the parts) with equal counts and an equal checksum per table; a tampered part refused
+ *                              before any write; a failed run listed with its code; pruning by the calendar (rows
+ *                              marked, folders deleted); purgeRequests kept, then dropped; appendPurgeRequest
  *
  * `-- --only <prefix>[,…]` runs only the sections whose name starts with a prefix.
+ *
+ * The restore drill (manual, never part of the run; §H.6, R1 exit criterion 6, HANDOFF through CCR r1-p8-16):
+ *
+ *   npx tsx scripts/qa/storage-check.ts --restore-drill <YYYY-MM-DD> --db cod_test_restore_<x> [--manual]
+ *
+ * reads the app's own environment (.env.local, else the process's), verifies the day's parts against manifest.json,
+ * creates and migrates the target (cod_test_* only unless --manual, which needs a database that does not exist yet;
+ * the app's own database is always refused), restores it and prints the row count per table (never a value).
  */
 import Module from "node:module";
 import { randomBytes, createHash } from "node:crypto";
@@ -110,14 +127,16 @@ const flag = (name: string) => {
 };
 const dbName = flag("db") ?? "cod_test_p8_storage";
 const KEEP = process.argv.includes("--keep");
-if (!/^cod_test_[a-z0-9_]{1,48}$/.test(dbName) || dbName === "cod_studio" || dbName === "cod_storegen") {
+/** the restore drill's day (`--restore-drill <day>`), or null for the test run */
+const DRILL_DAY = process.argv.includes("--restore-drill") ? (flag("restore-drill") ?? "") : null;
+if (DRILL_DAY === null && (!/^cod_test_[a-z0-9_]{1,48}$/.test(dbName) || dbName === "cod_studio" || dbName === "cod_storegen")) {
   console.error(`✗ refusing to run on database "${dbName}": use a throwaway cod_test_* name`);
   process.exit(1);
 }
 const DB_SERVER = "mysql://root@127.0.0.1:3306";
-const ROOT = mkdtempSync(join(tmpdir(), "sg-storage-"));
+const ROOT = DRILL_DAY === null ? mkdtempSync(join(tmpdir(), "sg-storage-")) : "";
 const DATA = join(ROOT, "data");
-{
+if (DRILL_DAY === null) {
   // this process's platform: a temp DATA_DIR and the throwaway database, never the owner's environment
   const env = process.env as Record<string, string | undefined>;
   for (const k of ["MEDIA_DIR", "MEDIA_CACHE_DIR", "DATA_DIR_BUDGET_BYTES", "PUBLIC_URL", "STORE_ROOT_DOMAIN", "EDGE_KEY"]) delete env[k];
@@ -2195,6 +2214,215 @@ async function main(): Promise<number> {
     t.check("a new request after expiry makes a new job (the bucket has room)", (await EX.requestStoreExport(scopeE, { requestedAs: "member", requestedBy: uE })).jobId !== jobId);
   });
 
+  h.section("backup", async (t) => {
+    const BJ = await import("@/lib/jobs/backup");
+    const BK = await import("@/lib/backup");
+    const RS = await import("@/lib/backup/restore");
+    const F = await import("@/lib/backup/format");
+    const SE = await import("@/lib/backup/seal");
+    const RT = await import("@/lib/backup/retention");
+    const { backupRuns } = await import("@/lib/db/schema");
+    const { getPlatformSetting, setPlatformSetting } = await import("@/lib/settings");
+    const { localClock, platformTimeZone } = await import("@/lib/jobs/due");
+    const { newId } = await import("@/lib/db/ids");
+    const { eq, inArray } = await import("drizzle-orm");
+    type JobCtx = import("@/lib/jobs/runner").JobCtx;
+    t.eq("the fs backend is on (DATA_DIR passed its check)", (await S.runMediaStorageCheck({ force: true })).ok, true);
+    const q = (text: string, v: unknown[] = []) => pool().query(text, v);
+    const jobCtx = (budgetMs = 60_000): JobCtx => ({ ...systemCtx("backup"), deadline: Date.now() + budgetMs, tickId: newId(), cursor: "", setCursor: async () => undefined, yield: () => new Promise<void>((r) => setImmediate(r)), lagMs: () => 0 });
+    const SYS = { id: "system:qa", kind: "system" as const };
+    const DAY_MS = 86_400_000;
+    const tz = platformTimeZone();
+    const dayOf = (ms: number) => localClock(ms, tz).day;
+    const today = dayOf(Date.now());
+
+    // two stores: G kept, H being purged (its id in purgeRequests); canaries in every table that matters
+    const STORE_G = "01JB8ZK3Q4R5S6T7V8W9XYZ0GG";
+    const STORE_H = "01JB8ZK3Q4R5S6T7V8W9XYZ0HH";
+    for (const [id, handle] of [
+      [STORE_G, "backup-g"],
+      [STORE_H, "backup-h"],
+    ] as const) {
+      await db.insert(stores).values({ id, handle, name: id === STORE_H ? "H-CANARY-STORE" : "Store G", status: "active", brandSeed: "0123456789abcdef" });
+    }
+    const uG = newId();
+    const uH = newId();
+    await q("INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, 'Owner G', 'x'), (?, ?, 'Owner H', 'x')", [uG, `owner-g-${hex(3)}@example.test`, uH, `owner-h-${hex(3)}@example.test`]);
+    await q("INSERT INTO store_members (store_id, user_id, role) VALUES (?, ?, 'owner'), (?, ?, 'owner')", [STORE_G, uG, STORE_H, uH]);
+    const vLive = newId();
+    const vOld = newId();
+    const pageG = newId();
+    const pageH = newId();
+    const doc = JSON.stringify({ v: 2, title: "G doc" });
+    await q("INSERT INTO pages (id, store_id, slug, name, status, locale, public_key, draft, published_version_id) VALUES (?, ?, 'argan-g', 'Argan G', 'published', 'ar', ?, ?, ?), (?, ?, 'argan-h', 'H-CANARY-PAGE', 'published', 'ar', ?, ?, NULL)", [pageG, STORE_G, `pk_${hex(12)}`, doc, vLive, pageH, STORE_H, `pk_${hex(12)}`, doc]);
+    await q("INSERT INTO page_versions (id, store_id, page_id, kind, doc, html, checksum, runtime_v) VALUES (?, ?, ?, 'publish', ?, 'G-LIVE-HTML', ?, 2), (?, ?, ?, 'publish', ?, 'G-OLD-HTML', ?, 2)", [vLive, STORE_G, pageG, doc, hex(32), vOld, STORE_G, pageG, doc, hex(32)]);
+    const order = (storeId: string, name: string) =>
+      q("INSERT INTO orders (id, store_id, page_id, name, phone, product_name, items, qty, subtotal, shipping, total, currency, idem) VALUES (?, ?, ?, ?, '+212600000301', 'Argan', '[]', 1, 199.00, 0, 199.00, 'MAD', ?)", [`CMD-${hex(4).toUpperCase()}`, storeId, storeId === STORE_G ? pageG : pageH, name, `${hex(16)}-${hex(9)}`.slice(0, 36)]);
+    for (let i = 0; i < 7; i++) await order(STORE_G, `G-ORDER-${i} الدار البيضاء`);
+    await order(STORE_H, "H-CANARY-ORDER");
+    const old = new Date(Date.now() - 100 * DAY_MS);
+    await q("INSERT INTO order_events (store_id, order_id, actor_kind, type, note) VALUES (?, 'CMD-G', 'user', 'created', 'G-NEW-EVENT'), (?, 'CMD-H', 'user', 'created', 'H-CANARY-EVENT')", [STORE_G, STORE_H]);
+    await q("INSERT INTO order_events (store_id, order_id, at, actor_kind, type, note) VALUES (?, 'CMD-G', ?, 'user', 'created', 'G-OLD-EVENT')", [STORE_G, old]);
+    await q("INSERT INTO audit_log (action, target, store_id, actor_kind) VALUES ('store.page.published', 'G-NEW-AUDIT', ?, 'user'), ('store.page.published', 'H-CANARY-AUDIT', ?, 'user'), ('platform.settings.updated', 'PLATFORM-AUDIT', NULL, 'platform')", [STORE_G, STORE_H]);
+    await q("INSERT INTO audit_log (action, target, store_id, actor_kind, created_at) VALUES ('store.page.published', 'G-OLD-AUDIT', ?, 'user', ?)", [STORE_G, old]);
+    await q("INSERT INTO store_settings (store_id, `key`, value, encrypted) VALUES (?, 'telegram', ?, 1), (?, 'defaults', '{}', 0), (?, 'telegram', ?, 1)", [STORE_G, JSON.stringify("v2:SEALED-AS-STORED"), STORE_G, STORE_H, JSON.stringify("H-CANARY-SETTING")]);
+    for (const m of ["orders_month", "media_bytes", "ai_credits"]) await q("INSERT INTO store_usage (store_id, metric, period, value) VALUES (?, ?, 'total', 5), (?, ?, '2026-11', 2)", [STORE_G, m, STORE_G, m]);
+
+    // H's purge was requested a minute ago; an older snapshot (45 days, no folder) is still retained, so H stays listed
+    const cur = await getPlatformSetting("platform_backup", { fresh: true });
+    const purgeAt = new Date(Date.now() - 60_000).toISOString();
+    await setPlatformSetting("platform_backup", { ...cur, retention: { daily: 7, weekly: 4 }, purgeRequests: [{ storeId: STORE_H, at: purgeAt }] }, SYS);
+    const oldDay = dayOf(Date.now() - 45 * DAY_MS);
+    await db.insert(backupRuns).values({ id: newId(), kind: RT.kindOfDay(oldDay), day: oldDay, state: "done", startedAt: new Date(Date.now() - 45 * DAY_MS), doneAt: new Date(Date.now() - 45 * DAY_MS), manifest: { v: 1, tables: [] }, bytes: 0 });
+
+    // the run: one slice of 4 rows a tick, 1.5 KB parts, tick after tick until done
+    const forced = { maxSlices: 1, rowsPerSlice: 4, partLimitBytes: 1536 };
+    let ticks = 0;
+    let last: Awaited<ReturnType<typeof BJ.backupJob>> | null = null;
+    while (ticks < 3_000) {
+      ticks++;
+      last = await BJ.backupJob(jobCtx(), forced);
+      if (last.done) break;
+    }
+    const [run] = await db.select().from(backupRuns).where(eq(backupRuns.day, today));
+    t.eq("today's run: done, its kind from the weekday, no error", [last?.done, run?.state, run?.kind, run?.error, run?.cursor], [true, "done", RT.kindOfDay(today), null, null]);
+    t.check(`resumed across ≥ 3 ticks (${ticks})`, ticks >= 3);
+    const dir = BJ.backupDir(today);
+    const files = await BK.backupFiles(today);
+    t.eq("backupFiles: manifest.json first, paths under backups/<day>", [files[0]?.name, files.every((f) => f.path === `backups/${today}/${f.name}`)], ["manifest.json", true]);
+    const manifestText = readFileSync(join(dir, "manifest.json"), "utf8");
+    const manifest = JSON.parse(manifestText) as { v: number; day: string; kind: string; tables: { name: string; rows: number; parts: { name: string; bytes: number; sha256: string }[] }[] };
+    const parts = manifest.tables.flatMap((x) => x.parts);
+    // PLA-§17 acceptance (data side): the day's files match the manifest's checksums
+    t.check(
+      "every manifest part is a listed file with its bytes and sha256",
+      parts.every((p) => {
+        const f = files.find((x) => x.name === p.name);
+        const b = readFileSync(join(dir, p.name));
+        return !!f && f.bytes === p.bytes && b.length === p.bytes && sha(b) === p.sha256;
+      }),
+    );
+    t.eq("the folder holds the parts and manifest.json, nothing else", readdirSync(dir).sort(), files.map((f) => f.name).sort());
+    t.eq("the manifest file: { v, day, kind, createdAt, build, tables }, the row's column its subset", [Object.keys(manifest), manifest.day, manifest.kind, JSON.stringify(run?.manifest?.tables)], [["v", "day", "kind", "createdAt", "build", "tables"], today, run?.kind, JSON.stringify(manifest.tables)]);
+    t.check("the manifest holds counts and hashes only (no canary, no store id of H)", !/G-ORDER|G-LIVE|CANARY|SEALED|PLATFORM-AUDIT/.test(manifestText) && !manifestText.includes(STORE_H));
+    t.check("the R1 tables are listed (those present), each once", ["stores", "store_members", "store_settings", "store_usage", "users", "pages", "page_versions", "orders", "order_events", "audit_log", "settings"].every((n) => manifest.tables.filter((x) => x.name === n).length === 1));
+    t.check("the money tables present in this schema are listed too", manifest.tables.some((x) => x.name === "product_costs") && manifest.tables.some((x) => x.name === "ad_spend_daily"));
+    t.check("small parts: a table split in several (1.5 KB limit), every part sealed (SGB2)", manifest.tables.some((x) => x.parts.length > 2) && parts.every((p) => readFileSync(join(dir, p.name)).subarray(0, 4).toString() === "SGB2"));
+    t.eq("the row's bytes: the parts and the manifest", run?.bytes, parts.reduce((n, p) => n + p.bytes, 0) + Buffer.byteLength(manifestText));
+    const plain = (await Promise.all(parts.map(async (p) => (await F.gunzip(SE.openPart(readFileSync(join(dir, p.name))))).toString("utf8")))).join("");
+    t.check("no plaintext on disk: an order name only appears once opened", plain.includes("G-ORDER-3") && !parts.some((p) => readFileSync(join(dir, p.name)).includes("G-ORDER")));
+    // H's id may appear in one line only: the platform_backup setting's own purgeRequests (the request is platform
+    // metadata, kept so a restored copy goes on filtering the store); none of H's rows, no canary anywhere
+    const hLines: string[] = [];
+    for (const x of manifest.tables) {
+      for (const p of x.parts) {
+        const text = (await F.gunzip(SE.openPart(readFileSync(join(dir, p.name))))).toString("utf8");
+        for (const l of text.split("\n")) if (l.includes(STORE_H)) hLines.push(x.name === "settings" && l.startsWith('{"key":"platform_backup"') ? "request" : x.name);
+      }
+    }
+    t.eq("purgeRequests: H's id in no slice but the request itself, no canary (stores by id, every store_id table)", [hLines, plain.includes("H-CANARY")], [["request"], false]);
+    t.check("page_versions: the live version only", plain.includes(vLive) && plain.includes("G-LIVE-HTML") && !plain.includes(vOld) && !plain.includes("G-OLD-HTML"));
+    t.check("order_events and audit_log: the last 90 days only (a platform audit row kept)", plain.includes("G-NEW-EVENT") && !plain.includes("G-OLD-EVENT") && plain.includes("G-NEW-AUDIT") && !plain.includes("G-OLD-AUDIT") && plain.includes("PLATFORM-AUDIT"));
+    t.check("store_settings as stored (the sealed value untouched)", plain.includes("v2:SEALED-AS-STORED"));
+    t.eq("listBackupRuns: today's run first, then the older one", (await BK.listBackupRuns()).map((r) => [r.day, r.state]).slice(0, 2), [[today, "done"], [oldDay, "done"]]);
+    t.eq("…the summary's tables are the manifest's", (await BK.listBackupRuns())[0]?.tables, manifest.tables.map((x) => ({ name: x.name, rows: x.rows })));
+    t.eq("H is still in purgeRequests (the 45-day snapshot predates its request)", (await getPlatformSetting("platform_backup", { fresh: true })).purgeRequests.map((r) => r.storeId), [STORE_H]);
+    t.eq("a second call the same day: idle and done, no new row", [(await BJ.backupJob(jobCtx(), forced)).summary?.idle, (await db.select().from(backupRuns).where(eq(backupRuns.day, today))).length], [true, 1]);
+
+    // restore into a second throwaway database (the app's migrator, then the parts): equal counts and equal digests
+    const RDB = `${dbName}_r`;
+    await rootQuery(`DROP DATABASE IF EXISTS \`${RDB}\``);
+    await rootQuery(`CREATE DATABASE \`${RDB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    try {
+      const { runMigrations } = await import("@/lib/db/migrate");
+      await runMigrations({ databaseUrl: `${DB_SERVER}/${RDB}` });
+      await t.rejects("the restore refuses the app's own database", () => BJ.openRestoreConnection(dbName));
+      await t.rejects("…and cod_storegen even as a manual import", () => BJ.openRestoreConnection("cod_storegen", { manual: true }));
+      const conn = await BJ.openRestoreConnection(RDB);
+      try {
+        const res = await RS.restoreBackupDir(dir, BJ.sqlRestoreTarget(conn));
+        t.eq("restored row counts = the manifest's", res.tables, manifest.tables.map((x) => ({ name: x.name, rows: x.rows })));
+        const filter = { purge: [STORE_H], cutoff: new Date(run!.startedAt.getTime() - 90 * DAY_MS).toISOString().replace("T", " ").slice(0, 23) };
+        const diffs: string[] = [];
+        for (const x of manifest.tables) {
+          const src = await BJ.tableDigest(BJ.poolSliceQuery, x.name, filter);
+          const dst = await BJ.tableDigest(BJ.connSliceQuery(conn), x.name, null);
+          const [[{ n }]] = (await conn.query(`SELECT COUNT(*) AS n FROM \`${x.name}\``)) as unknown as [[{ n: number }]];
+          if (!src || !dst || src.rows !== x.rows || dst.rows !== x.rows || Number(n) !== x.rows || src.sha256 !== dst.sha256) diffs.push(x.name);
+        }
+        t.eq("every table: the source (as filtered) and the copy have equal counts and an equal checksum", diffs, []);
+        t.check("…with real rows (orders, store_usage's 3-column key, store_settings)", ["orders", "store_usage", "store_settings"].every((n) => (manifest.tables.find((x) => x.name === n)?.rows ?? 0) >= 2));
+      } finally {
+        await conn.end();
+      }
+    } finally {
+      await rootQuery(`DROP DATABASE IF EXISTS \`${RDB}\``);
+    }
+
+    // a tampered part: the restore refuses before writing anything
+    const copy = join(ROOT, "backup-copy");
+    mkdirSync(copy, { recursive: true });
+    for (const f of readdirSync(dir)) writeFileSync(join(copy, f), readFileSync(join(dir, f)));
+    const victim = join(copy, parts[Math.floor(parts.length / 2)]!.name);
+    const bytes = readFileSync(victim);
+    bytes[bytes.length - 1] = bytes[bytes.length - 1]! ^ 0x01;
+    writeFileSync(victim, bytes);
+    const calls: string[] = [];
+    const recorder = { reset: async (x: string) => void calls.push(x), insert: async (x: string) => void calls.push(x) };
+    let code = "restored";
+    try {
+      await RS.restoreBackupDir(copy, recorder);
+    } catch (err) {
+      code = err instanceof RS.RestoreError ? err.code : "other";
+    }
+    t.eq("a tampered part: refused 'checksum', no table touched", [code, calls.length], ["checksum", 0]);
+    rmSync(copy, { recursive: true, force: true });
+
+    // a failed run: the day's folder cannot be made → 'write_failed', listed with its code, its folder gone, no files
+    const failDayMs = Date.now() + 2 * DAY_MS;
+    const failDay = dayOf(failDayMs);
+    writeFileSync(BJ.backupDir(failDay), "not a folder");
+    const failed = await BJ.backupJob(jobCtx(), { ...forced, now: () => failDayMs });
+    const listed = (await BK.listBackupRuns()).find((r) => r.day === failDay);
+    t.eq("a failed run: done for its day, error code kept, listed with its code (PLA-§17)", [failed.done, failed.errorCode, listed?.state, listed?.error, existsSync(BJ.backupDir(failDay))], [true, "backup_write_failed", "failed", "write_failed", false]);
+    t.eq("backupFiles: [] for a failed day, a bad day, a day with no run", [await BK.backupFiles(failDay), await BK.backupFiles("../x"), await BK.backupFiles("2026-02-30"), await BK.backupFiles("2001-01-01")], [[], [], [], []]);
+    await db.delete(backupRuns).where(eq(backupRuns.day, failDay));
+
+    // pruning: 20 older done days with folders and an old failed day, retention 3 + 1
+    const seeded: { id: string; day: string }[] = [];
+    for (let i = 1; i <= 20; i++) {
+      const ms = Date.now() - i * DAY_MS;
+      const d = dayOf(ms);
+      const id = newId();
+      await db.insert(backupRuns).values({ id, kind: RT.kindOfDay(d), day: d, state: "done", startedAt: new Date(ms - 3_600_000), doneAt: new Date(ms), manifest: { v: 1, tables: [] }, bytes: 1 });
+      mkdirSync(BJ.backupDir(d), { recursive: true });
+      writeFileSync(join(BJ.backupDir(d), "manifest.json"), "{}");
+      seeded.push({ id, day: d });
+    }
+    const failedOld = dayOf(Date.now() - 21 * DAY_MS);
+    await db.insert(backupRuns).values({ id: newId(), kind: RT.kindOfDay(failedOld), day: failedOld, state: "failed", startedAt: new Date(Date.now() - 21 * DAY_MS), error: "no_space" });
+    const s2 = await getPlatformSetting("platform_backup", { fresh: true });
+    await setPlatformSetting("platform_backup", { ...s2, retention: { daily: 3, weekly: 1 } }, SYS);
+    const before = await db.select({ id: backupRuns.id, day: backupRuns.day, kind: backupRuns.kind, state: backupRuns.state }).from(backupRuns).where(inArray(backupRuns.state, ["done", "failed"]));
+    const expected = RT.retentionPlan(before, { daily: 3, weekly: 1 });
+    const pruned = await BJ.pruneBackups();
+    t.eq("pruneBackups follows the calendar (3 dailies + the newest Sunday)", [...pruned].sort(), [...expected.prune].sort());
+    const after = await db.select({ id: backupRuns.id, day: backupRuns.day, state: backupRuns.state }).from(backupRuns);
+    t.check("…pruned rows marked 'pruned', their folders deleted", expected.prune.length >= 17 && after.filter((r) => expected.prune.includes(r.id)).every((r) => r.state === "pruned" && !existsSync(BJ.backupDir(r.day))));
+    t.check("…kept rows and folders untouched (today's included)", after.filter((r) => expected.keep.includes(r.id)).every((r) => r.state !== "pruned" && existsSync(BJ.backupDir(r.day))) && expected.keep.includes(run!.id));
+    t.check("…the 45-day snapshot and the old failed run pruned", after.filter((r) => r.day === oldDay || r.day === failedOld).every((r) => r.state === "pruned"));
+    t.eq("listBackupRuns shows pruned rows as pruned", (await BK.listBackupRuns()).find((r) => r.day === oldDay)?.state, "pruned");
+
+    // purgeRequests: kept while a retained snapshot predates the request, dropped once none does
+    t.eq("H kept while the seeded snapshots (older than its request) are retained", await BJ.dropPurgedStores(), []);
+    await db.update(backupRuns).set({ state: "pruned" }).where(inArray(backupRuns.id, seeded.map((x) => x.id)));
+    t.eq("every retained snapshot started after the request: H dropped", await BJ.dropPurgedStores(), [STORE_H]);
+    t.eq("…the setting no longer lists it", (await getPlatformSetting("platform_backup", { fresh: true })).purgeRequests, []);
+    t.check("appendPurgeRequest (the purge's side) lists an id again, once", (await BJ.appendPurgeRequest(STORE_H)) && (await BJ.appendPurgeRequest(STORE_H)) && (await getPlatformSetting("platform_backup", { fresh: true })).purgeRequests.filter((r) => r.storeId === STORE_H).length === 1);
+    const s3 = await getPlatformSetting("platform_backup", { fresh: true });
+    await setPlatformSetting("platform_backup", { ...s3, retention: { daily: 7, weekly: 4 }, purgeRequests: [] }, SYS);
+  });
+
   await h.run();
   const failed = process.exitCode === 1;
   await pool().end().catch(() => undefined);
@@ -2202,15 +2430,95 @@ async function main(): Promise<number> {
   return failed ? 1 : 0;
 }
 
+/* ---------------- the restore drill (manual; never part of the test run) ---------------- */
+
+/** A RestoreError's code, table and file, or a database / file error's code: never a message that may hold a value. */
+function drillErrorText(err: unknown): string {
+  if (err instanceof Error && err.name === "RestoreError") return err.message;
+  const code = (err as { code?: unknown } | null)?.code;
+  return `restore failed${typeof code === "string" && /^[A-Z0-9_]{2,64}$/.test(code) ? `: ${code}` : ""}`;
+}
+
+/**
+ * `npx tsx scripts/qa/storage-check.ts --restore-drill <YYYY-MM-DD> --db cod_test_restore_<x> [--manual]`
+ * (docs/STORE-SAAS.md §H.6, R1 exit criterion 6; HANDOFF through CCR r1-p8-16). Reads the app's own environment
+ * (.env.local when present, else the process's: DATABASE_URL for the server, DATA_DIR, APP_SECRET), then:
+ *   1. refuses a target that is not cod_test_* (unless --manual, the owner's own import into a database that does not
+ *      exist yet) and the app's own database always;
+ *   2. creates the target and migrates it with the app's migrator;
+ *   3. verifies every part's sha256 against manifest.json, then restores (src/lib/backup/restore.ts);
+ *   4. prints the row count per table (counts only, never a value) and keeps the database for inspection.
+ */
+async function restoreDrill(day: string): Promise<number> {
+  const { loadEnvConfig } = await import("@next/env");
+  loadEnvConfig(process.cwd(), false, { info: () => undefined, error: () => undefined });
+  const target = flag("db");
+  const MANUAL = process.argv.includes("--manual");
+  const M = await import("@/lib/backup/manifest");
+  const P = await import("@/lib/storage/paths");
+  const RS = await import("@/lib/backup/restore");
+  const { databaseUrl } = await import("@/lib/db/url");
+  if (!M.isBackupDay(day)) return (console.error("✗ --restore-drill needs a day YYYY-MM-DD"), 1);
+  if (!target) return (console.error("✗ --db <cod_test_restore_x> is required"), 1);
+  if (!P.dataDir()) return (console.error("✗ DATA_DIR is not set"), 1);
+  const url = databaseUrl();
+  if (!url) return (console.error("✗ DATABASE_URL is not set"), 1);
+  const own = decodeURIComponent(new URL(url).pathname.replace(/^\//, ""));
+  RS.assertRestoreTarget(target, { manual: MANUAL, deny: [own, "cod_studio", "cod_storegen"] });
+  const dir = P.dataPath("backups", null, day);
+  const manifest = await RS.verifyBackupDir(dir);
+  console.log(`✓ ${day}: manifest.json and ${manifest.tables.reduce((n, t) => n + t.parts.length, 0)} parts match their sha256`);
+
+  const mysql = (await import("mysql2/promise")).default;
+  const server = new URL(url);
+  server.pathname = "/";
+  const admin = await mysql.createConnection({ uri: server.toString() });
+  try {
+    const [exists] = (await admin.query("SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?", [target])) as unknown as [unknown[]];
+    if (exists.length && MANUAL) return (console.error(`✗ ${target} exists: a manual import only goes into a new database`), 1);
+    if (!MANUAL) await admin.query(`DROP DATABASE IF EXISTS \`${target}\``);
+    await admin.query(`CREATE DATABASE \`${target}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+  } finally {
+    await admin.end();
+  }
+  const targetUrl = new URL(url);
+  targetUrl.pathname = `/${target}`;
+  const { runMigrations } = await import("@/lib/db/migrate");
+  await runMigrations({ databaseUrl: targetUrl.toString() });
+
+  const { openRestoreConnection, sqlRestoreTarget } = await import("@/lib/jobs/backup");
+  const conn = await openRestoreConnection(target, { manual: MANUAL });
+  try {
+    let total = 0;
+    const r = await RS.restoreBackupDir(dir, sqlRestoreTarget(conn), {
+      onTable: (name, rows) => {
+        total += rows;
+        console.log(`  ${name.padEnd(24)} ${String(rows).padStart(9)} rows`);
+      },
+    });
+    for (const t of r.tables) {
+      const [[{ n }]] = (await conn.query(`SELECT COUNT(*) AS n FROM \`${t.name}\``)) as unknown as [[{ n: number }]];
+      if (Number(n) !== t.rows) return (console.error(`✗ ${t.name}: ${n} rows in the database, ${t.rows} in the backup`), 1);
+    }
+    console.log(`✓ restored ${day} into ${target}: ${r.tables.length} tables, ${total} rows (counts checked in the database).`);
+    console.log(`  Inspect it, then drop it: DROP DATABASE \`${target}\`;`);
+    return 0;
+  } finally {
+    await conn.end();
+  }
+}
+
 let exit = 1;
-main()
+(DRILL_DAY !== null ? restoreDrill(DRILL_DAY) : main())
   .then((code) => {
     exit = code;
   })
   .catch((err: unknown) => {
-    console.error(err);
+    if (DRILL_DAY === null) console.error(err);
+    else console.error(`✗ ${drillErrorText(err)}`);
   })
   .finally(async () => {
+    if (DRILL_DAY !== null) process.exit(exit); // the restored database is the drill's result: kept
     if (KEEP) console.log(`kept: database ${dbName}, DATA_DIR ${DATA}`);
     else {
       await rootQuery(`DROP DATABASE IF EXISTS \`${dbName}\``).catch((err: unknown) => console.error("could not drop", dbName, err instanceof Error ? err.message : err));

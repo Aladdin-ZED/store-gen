@@ -4,9 +4,8 @@
  * Extension file (docs/STORE-SAAS.md §H.2, §K.3) imported by src/lib/jobs/registry.ts. Each job's body is loaded when
  * it runs, so importing the registry (test:jobs, the console) never loads the database code behind it.
  *
- * Slots (src/lib/jobs/slots.ts): outbox 3, renders 4, exports 5, media.migrate / usage.reconcile / media.sweep /
- * storage.walk / refs.reconcile 6, renders.fanout 7, housekeeping 8. P8's later steps add backup / purge (5) and
- * lifecycle (7).
+ * Slots (src/lib/jobs/slots.ts): outbox 3, renders 4, backup / exports 5, media.migrate / usage.reconcile / media.sweep /
+ * storage.walk / refs.reconcile 6, renders.fanout 7, housekeeping 8. P8's later steps add purge (5) and lifecycle (7).
  *
  * The storage jobs' daily times (src/lib/jobs/storage/rules.ts STORAGE_JOB_TIMES) take the free 02:05-02:25 windows,
  * one job each, clear of every time §H.2 and OPE-§J name (§H.2 slot 6: no tick carries more than two daily jobs).
@@ -30,6 +29,15 @@ export const jobs: Job[] = [
     every: "tick",
     budgetMs: 12_000,
     run: async (ctx) => (await import("../renders")).rendersJob(ctx),
+  },
+  {
+    // §H.2 slot 5 / §H.6: the daily logical backup at 03:30 (platform zone), sliced and resumable over the following
+    // ticks until done; CPU-bound (halved while the loop lags). It runs before the exports and takes ≤ 8 s of the slot's
+    // 11 s, so a running export still gets ≥ 3 s a tick while the backup lasts
+    name: "backup",
+    every: { dailyAt: "03:30" },
+    budgetMs: 8_000,
+    run: async (ctx) => (await import("../backup")).backupJob(ctx),
   },
   {
     // §H.2 slot 5 (11 s shared) / §F.9: the store export ZIP, one export_jobs row at a time (the oldest running, else

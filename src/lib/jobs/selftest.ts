@@ -37,6 +37,9 @@
  *  9. storage    (./selftest-storage.ts, P8 step 7) the storage jobs' registration, daily pass and rules;
  * 10. exports    (./selftest-exports.ts, P8 step 8) the CSV dialect, the resumable ZIP writer across simulated ticks
  *                (fflate opens it), part splitting under a small limit, the download signature, the deny list, README.
+ * 11. backup     (./selftest-backup.ts, P8 step 9) the registration, the retention calendar, the manifest's shape, the
+ *                NDJSON encoding and the 8 MB part rule, sealed parts verified and restored (tampered ones refused),
+ *                the purgeRequests drop rule, the restore target's name check.
  *
  * `--only <prefix>[,<prefix>]` runs the sections whose name starts with one of the prefixes (a quick loop while
  * working on one area; `npm run test:jobs` runs them all).
@@ -693,6 +696,19 @@ async function main(): Promise<void> {
     SIG: await import("@/lib/exports-store/sign"),
     COL: await import("@/lib/exports-store/columns"),
     RM: await import("@/lib/exports-store/readme"),
+    S: await import("./slots"),
+    R: await import("./runner"),
+    JOBS,
+  });
+
+  /* ---------------------------------------------------------------- */
+  const { backupSections } = await import("./selftest-backup");
+  backupSections(h, {
+    F: await import("@/lib/backup/format"),
+    M: await import("@/lib/backup/manifest"),
+    RT: await import("@/lib/backup/retention"),
+    RS: await import("@/lib/backup/restore"),
+    SE: await import("@/lib/backup/seal"),
     S: await import("./slots"),
     R: await import("./runner"),
     JOBS,
