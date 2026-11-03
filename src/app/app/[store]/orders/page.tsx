@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/admin/common/page-header";
 import { Screen } from "@/components/admin/common/screen";
 import { OrdersView, type OrdersTab } from "@/components/admin/orders/orders-view";
-import { parseOrderQuery, rangeBounds, statusCounts, tabCounts, toBlockRow, toLeadRow, toOrderFilters, toOrderRow } from "@/lib/admin-data/orders";
+import { parseOrderQuery, rangeBounds, statusCounts, tabCounts, toBlockRow, toLeadRow, toOrderFilters } from "@/lib/admin-data/orders";
 import { pageOptions } from "@/lib/admin-data/pages";
 import { redirectPastLastPage } from "@/lib/admin-data/paging";
 import { listBlocklist, listLeads, listOrders } from "@/lib/orders";
+import { listViewerOf } from "@/lib/orders/admin";
 import { getSheetsConfig } from "@/lib/sheets";
 import { requireStoreMember } from "@/lib/tenancy/seam";
 import { appHref } from "@/lib/urls";
@@ -43,7 +44,7 @@ export default async function OrdersPage({ params, searchParams }: { params: Par
     tab === "orders" ? statusCounts(scope, query, tz) : Promise.resolve({ all: 0 }),
     pageOptions(scope, { includeArchived: true }),
     getSheetsConfig(scope),
-    tab === "orders" ? listOrders(scope, toOrderFilters(query, tz), { page: query.page, pageSize: PAGE_SIZE }) : Promise.resolve(null),
+    tab === "orders" ? listOrders(scope, toOrderFilters(query, tz, listViewerOf(ctx)), { page: query.page, pageSize: PAGE_SIZE }) : Promise.resolve(null),
     tab === "leads"
       ? listLeads(scope, { q: query.q || undefined, pageId: query.pageId ?? undefined, ...rangeBounds(query, tz) }, { page: query.page, pageSize: PAGE_SIZE })
       : Promise.resolve(null),
@@ -63,7 +64,7 @@ export default async function OrdersPage({ params, searchParams }: { params: Par
         query={query}
         tabCounts={counts}
         statusCounts={byStatus}
-        orders={orders && { ...orders, items: orders.items.map(toOrderRow) }}
+        orders={orders && { ...orders, items: orders.items.map((r) => ({ ...r, phone: r.phoneMasked })) }}
         leads={leads && { ...leads, items: leads.items.map(toLeadRow) }}
         blocked={blocked && { ...blocked, items: blocked.items.map(toBlockRow) }}
         pages={pages.map((p) => ({ id: p.id, name: p.name }))}

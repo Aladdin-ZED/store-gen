@@ -1,4 +1,4 @@
-// proves: OP-01, OP-02, OP-03, OP-04, OP-06, OP-07, OP-08, OP-12, OP-14, SF-05
+// proves: OP-01, OP-02, OP-03, OP-04, OP-06, OP-07, OP-08, OP-09, OP-12, OP-14, OP-16, PL-09, SF-05
 /**
  * `test:ops-db` (P4 CALL CENTER; operations.md OPE-§O.2, §O.4; docs/STORE-SAAS.md §J.2): the call centre against a
  * real MariaDB. Creates a throwaway `cod_test_p4_opsdb_*` database on XAMPP's MariaDB (root, no password,
@@ -31,6 +31,11 @@
  *                (inTransit); recall and the carrier tick; the hold bounds (bad_hold); tracking implies packed;
  *                block-and-cancel moves open orders to fake / cancelled(blocked), lists shipped ones, never another
  *                store's; convertLeadToOrder pre-fills, answers already_converted the second time, not_found across stores
+ *   list         (OP-09, OP-16, SF-05, PL-09, OD12, OD49, OD55) the agent predicate on listOrders, masked list rows,
+ *                keyset paging; a held order out of To pack and the Carrier CSV and in On hold; the Carrier CSV moves
+ *                exported orders to packed once and refuses B's ids; slips; bulk on 200 ids with per-order results and
+ *                201 refused, idem replays; undo only while rev is unchanged and within the window; saved views and
+ *                their limits; the export-ZIP writers (full phones, no capi_ctx / Telegram canary); delete test orders
  *   masking      (OD61) every read function of this step masks under an impersonation scope and is the identity
  *                under a member scope (canaries)
  */
@@ -1141,6 +1146,178 @@ async function main(): Promise<number> {
       const again = await M.convertLeadToOrder(owner, leadId, { ...conv, idem: randomUUID() });
       ok("a second conversion: already_converted with the order id", !again.ok && again.error === "already_converted" && (again as { orderId?: string }).orderId === cid, again);
     }
+  }
+
+  /* ================================================================ */
+  section = "list";
+  {
+    const V = load<typeof import("@/lib/callcenter/views")>("@/lib/callcenter/views");
+    const Q = load<typeof import("@/lib/orders/queue")>("@/lib/orders/queue");
+    const viewerOfCtx = AD.listViewerOf;
+    // the agent predicate (OD12): the agent's list is their own orders, whatever the query says
+    const mineA = await order(A, { name: "Agent Owned" });
+    const notMine = await order(A, { name: "Pool Order" });
+    ok("assign one order to the agent", (await Q.assignOrders(manager, [mineA], U.agentA.id)).ok);
+    const agentList = await AD.listOrders(A, { viewer: viewerOfCtx(agent) }, { pageSize: 200 });
+    ok("listOrders with an agent viewer: only the agent's orders", agentList.items.some((r) => r.id === mineA) && !agentList.items.some((r) => r.id === notMine), agentList.items.map((r) => r.id));
+    const agentAsks = await AD.listOrders(A, { viewer: viewerOfCtx(agent), assignee: "none" }, { pageSize: 200 });
+    ok(
+      "an agent asking for the pool gets only pool orders they confirmed (the predicate is server-side)",
+      agentAsks.items.every((r) => r.assigneeId === null && r.confirmedBy === U.agentA.id) && !agentAsks.items.some((r) => r.id === notMine),
+      agentAsks.items.map((r) => [r.id, r.assigneeId, r.confirmedBy]),
+    );
+    const mgrList = await AD.listOrders(A, { viewer: viewerOfCtx(manager) }, { pageSize: 200 });
+    ok("a manager sees every order", mgrList.items.some((r) => r.id === notMine) && mgrList.items.some((r) => r.id === mineA));
+    const row = mgrList.items.find((r) => r.id === mineA)!;
+    const full = (await rowOf(mineA)).phone;
+    ok("list rows: the phone masked, no address / note / e-mail key", !row.phoneMasked.includes(full.slice(-6)) && !("address" in row) && !("note" in row) && !("email" in row) && !("phone" in row), row);
+    // keyset paging: two pages of 2, no overlap, the cursor of the last page is null
+    const p1 = await AD.listOrders(A, {}, { pageSize: 2 });
+    const p2 = await AD.listOrders(A, {}, { pageSize: 2, after: p1.next ?? undefined });
+    ok("keyset: page 2 follows page 1 without overlap, total only on the first page", !!p1.next && p2.items.length === 2 && p2.items.every((r) => !p1.items.some((x) => x.id === r.id)) && p1.total > 4 && p2.total === 0, { p1: p1.items.map((r) => r.id), p2: p2.items.map((r) => r.id), t: [p1.total, p2.total] });
+    const byPrio = await AD.listOrders(A, { sort: "priority_desc" }, { pageSize: 3 });
+    const byPrio2 = await AD.listOrders(A, { sort: "priority_desc" }, { pageSize: 3, after: byPrio.next ?? undefined });
+    ok("keyset on priority: descending across pages", [...byPrio.items, ...byPrio2.items].every((r, i, a) => i === 0 || a[i - 1]!.priority >= r.priority), [...byPrio.items, ...byPrio2.items].map((r) => r.priority));
+
+    // holds (OD49): a held order is out of To pack and of the Carrier CSV, and in On hold
+    const shipNow = await order(A, { name: "Ready Ship" });
+    const shipPhone = (await rowOf(shipNow)).phone;
+    const heldO = await order(A, { name: "Held Ship" });
+    ok("confirm the ready order", (await T.transitionOrder(T.actorFrom(manager), A, { orderId: shipNow, want: { confirm: "confirmed" }, source: "ui" })).ok);
+    const hold = await T.transitionOrder(T.actorFrom(manager), A, { orderId: heldO, want: { confirm: "confirmed" }, source: "ui", shipAfter: new Date(Date.now() + 3 * 86_400_000) });
+    ok("confirm the held order with a hold", hold.ok && (await rowOf(heldO)).shipState === "to_pack" && !!(await rowOf(heldO)).shipAfter, hold);
+    const toPack = (await AD.listOrders(A, { view: "to_pack" }, { pageSize: 200 })).items.map((r) => r.id);
+    const onHold = (await AD.listOrders(A, { view: "on_hold" }, { pageSize: 200 })).items.map((r) => r.id);
+    ok("To pack lists the ready order, not the held one", toPack.includes(shipNow) && !toPack.includes(heldO), toPack);
+    ok("On hold lists the held order only", onHold.includes(heldO) && !onHold.includes(shipNow), onHold);
+    eq("the On hold row carries its Ship from", (await AD.listOrders(A, { view: "on_hold" }, { pageSize: 200 })).items.find((r) => r.id === heldO)?.shipAfter, (await rowOf(heldO)).shipAfter!.toISOString());
+
+    // the Carrier CSV (OP-16, OD55)
+    eq("no column list yet: not_configured", ((r) => (r.ok ? "ok" : r.error))(await AD.carrierExport(manager, [shipNow])), "not_configured");
+    const saved = await AD.saveCarrierCsvColumns(manager, { columns: [{ header: "Tel", source: "phone" }, { header: "Montant", source: "cod_amount" }, { header: "Ref", source: "order_id" }], delimiter: ";" });
+    ok("saveCarrierCsvColumns stores ops.carrierCsv (markPacked on by default)", saved.ok && (await getStoreSetting(A, "ops")).carrierCsv?.markPacked === true, saved);
+    eq("an agent may not save the columns", ((r) => (r.ok ? "ok" : r.error))(await AD.saveCarrierCsvColumns(agent, { columns: [{ header: "X", source: "qty" }] })), "forbidden");
+    const refused = await AD.carrierExport(manager, [shipNow, heldO]);
+    ok("a held order in the selection: refused with its id, nothing written", !refused.ok && refused.error === "refused" && JSON.stringify(refused.held) === JSON.stringify([heldO]) && (await eventsOf(shipNow, "manifest_exported")).length === 0, refused);
+    const part = await AD.carrierExport(manager, [shipNow, heldO], { partial: true });
+    ok("partial: the ready order exported, the held one listed as refused", part.ok && JSON.stringify(part.exported) === JSON.stringify([shipNow]) && JSON.stringify(part.refused.held) === JSON.stringify([heldO]), part);
+    if (part.ok) {
+      ok("the file: the BOM, the headers, national digits and the decimal comma", part.csv.startsWith("\uFEFFTel;Montant;Ref\r\n") && part.csv.includes(`0${shipPhone.slice(4)};249,90;${shipNow}`), part.csv);
+    }
+    eq("the exported order moved to packed, once, with manifest_exported", [(await rowOf(shipNow)).shipState, (await eventsOf(shipNow, "manifest_exported")).map((e) => e.meta)], ["packed", [{ why: "manifest" }]]);
+    const again = await AD.carrierExport(manager, [shipNow]);
+    ok("a second export: no second move on the axis, one more manifest_exported", again.ok && again.packed.length === 0 && (await rowOf(shipNow)).shipState === "packed" && (await eventsOf(shipNow, "manifest_exported")).length === 2, again);
+    ok("the held order: still to_pack, no event", (await rowOf(heldO)).shipState === "to_pack" && (await eventsOf(heldO, "manifest_exported")).length === 0);
+    await AD.saveCarrierCsvColumns(ownerBCtx, { columns: [{ header: "Ref", source: "order_id" }] });
+    const fromB = await AD.carrierExport(ownerBCtx, [shipNow], { partial: true });
+    ok("B exporting A's ids: refused as not found, never exported", !fromB.ok && fromB.error === "refused" && JSON.stringify(fromB.notFound) === JSON.stringify([shipNow]) && (await eventsOf(shipNow, "manifest_exported")).length === 2, fromB);
+    const slips = await AD.slipsFor(manager, [heldO, shipNow]);
+    ok("slips: held orders last, masked phones, the warehouse text", slips.map((s) => s.id).join() === `${shipNow},${heldO}` && slips[1]!.held && slips.every((s) => !s.phoneMasked.includes(shipPhone.slice(-6))) && slips[0]!.items.length > 0, slips);
+
+    // bulk (OPE-§12.4): 200 ids, per-order results; 201 refused
+    const many: string[] = [];
+    for (let i = 0; i < 198; i++) many.push(await order(A, { name: `Bulk ${i}` }));
+    const bOrder = await order(B);
+    const ids200 = [...many, bOrder, "CMD-NOPE0000"];
+    const idem = randomUUID();
+    const bm = await AD.bulkMove(manager, ids200, { want: { confirm: "attempting" } }, { idem });
+    ok("bulkMove on 200 ids: 198 moved, B's id and a missing one not_found", bm.ok && bm.data.ok.length === 198 && bm.data.failed.length === 2 && bm.data.failed.every((f) => f.error === "not_found") && !!bm.data.undo, bm.ok ? { ok: bm.data.ok.length, failed: bm.data.failed } : bm);
+    eq("B's order untouched", (await rowOf(bOrder)).confirmState, "new");
+    const replay = await AD.bulkMove(manager, ids200, { want: { confirm: "attempting" } }, { idem });
+    ok("an idem replay returns the stored result and writes nothing", replay.ok && replay.data.replayed === true && replay.data.ok.length === 198 && (await eventsOf(many[0]!, "state_changed")).length === 1, replay.ok ? replay.data.ok.length : replay);
+    eq("201 ids refused", ((r) => (r.ok ? "ok" : r.error))(await AD.bulkMove(manager, [...ids200, "CMD-NOPE0001"], { legacy: "confirmed" })), "invalid");
+    eq("an agent may not bulk assign", ((r) => (r.ok ? "ok" : r.error))(await AD.bulkAssign(agent, [many[0]!], null)), "forbidden");
+    const pin = await AD.bulkPin(manager, [many[0]!, many[1]!, bOrder], true);
+    ok("bulkPin: ≥ 1000, B's id not_found", pin.ok && (await rowOf(many[0]!)).priority >= 1000 && pin.data.failed.length === 1 && pin.data.failed[0]!.id === bOrder, pin);
+    const asg = await AD.bulkAssign(manager, [many[2]!, bOrder], U.agentA.id);
+    ok("bulkAssign: per-order results", asg.ok && JSON.stringify(asg.data.ok) === JSON.stringify([many[2]]) && asg.data.failed[0]?.id === bOrder, asg);
+
+    // undo (OPE-§12.5): only while rev is unchanged, within the window
+    const u1 = await order(A);
+    const mv = await AD.bulkMove(manager, [u1], { legacy: "confirmed" });
+    const tok = mv.ok ? mv.data.undo : null;
+    ok("a move answers an undo token", !!tok && (await rowOf(u1)).confirmState === "confirmed" && (await rowOf(u1)).confirmedBy === U.managerA.id);
+    eq("another member's token: expired", ((r) => (r.ok ? "ok" : r.error))(await AD.undoMove(owner, tok!)), "expired");
+    const und = await AD.undoMove(manager, tok!);
+    const ur = await rowOf(u1);
+    ok("undo within the window: the exact previous state, rev bumped", und.ok && JSON.stringify(und.data.ok) === JSON.stringify([u1]) && ur.confirmState === "new" && ur.shipState === "none" && ur.confirmedBy === null && ur.confirmedAt === null && ur.status === "new", { und, ur: [ur.confirmState, ur.shipState, ur.confirmedBy, ur.status] });
+    const sc = await eventsOf(u1, "state_changed");
+    ok("compensating state_changed events with meta.undo, and one undo event", sc.filter((e) => (e.meta as { undo?: boolean }).undo).length >= 1 && (await eventsOf(u1, "undo")).length === 1, sc.map((e) => [e.fromState, e.toState, e.meta]));
+    eq("a token is single-use", ((r) => (r.ok ? "ok" : r.error))(await AD.undoMove(manager, tok!)), "expired");
+    const u2 = await order(A);
+    const mv2 = await AD.bulkMove(manager, [u2], { legacy: "confirmed" });
+    await T.transitionOrder(T.actorFrom(owner), A, { orderId: u2, want: { ship: "packed" }, source: "ui" });
+    const und2 = await AD.undoMove(manager, mv2.ok ? mv2.data.undo! : "");
+    ok("undo after someone else changed the order: conflict, nothing restored", und2.ok && und2.data.failed[0]?.error === "conflict" && (await rowOf(u2)).shipState === "packed", und2);
+    const u3 = await order(A);
+    const mv3 = await AD.bulkMove(manager, [u3], { legacy: "confirmed" });
+    const realNow = Date.now;
+    Date.now = () => realNow() + 10_000;
+    const und3 = await AD.undoMove(manager, mv3.ok ? mv3.data.undo! : "");
+    Date.now = realNow;
+    ok("undo 10 s later: still restored", und3.ok && und3.data.ok[0] === u3 && (await rowOf(u3)).confirmState === "new", und3);
+    const u4 = await order(A);
+    const mv4 = await AD.bulkMove(manager, [u4], { legacy: "confirmed" });
+    Date.now = () => realNow() + 16_000;
+    const und4 = await AD.undoMove(manager, mv4.ok ? mv4.data.undo! : "");
+    Date.now = realNow;
+    ok("undo after the window: expired, the move stays", !und4.ok && und4.error === "expired" && (await rowOf(u4)).confirmState === "confirmed", und4);
+    const single = await AD.moveWithUndo(manager, u4, "cancelled", undefined, { reason: "other" });
+    ok("a single Move to… answers its own undo token", single.ok && !!single.undo, single);
+
+    // saved views (OPE-§12.2, §L)
+    const sv = await AD.saveView(agent, { name: "  Mes rappels  ", query: { view: "callbacks" } });
+    ok("a personal view (any member), the name trimmed", sv.ok && (await AD.listSavedViews(agent)).some((v) => v.name === "Mes rappels" && !v.shared && v.mine), sv);
+    eq("an agent may not share a view", ((r) => (r.ok ? "ok" : r.error))(await AD.saveView(agent, { name: "Team", query: {}, shared: true })), "forbidden");
+    eq("an invalid query refused", ((r) => (r.ok ? "ok" : r.error))(await AD.saveView(manager, { name: "Bad", query: { confirm: ["sold" as never] } })), "invalid");
+    const shared = await AD.saveView(manager, { name: "Fès to pack", query: { view: "to_pack", cityKey: "fes" }, shared: true });
+    ok("a shared view by a manager is listed for the agent", shared.ok && (await AD.listSavedViews(agent)).some((v) => v.name === "Fès to pack" && v.shared && !v.mine), shared);
+    eq("the agent cannot delete the shared view", ((r) => (r.ok ? "ok" : r.error))(await AD.deleteView(agent, shared.ok ? shared.data.id : "")), "not_found");
+    for (let i = 0; i < 29; i++) await AD.saveView(owner, { name: `V${i}`, query: {} });
+    eq("the 30th personal view saves", ((r) => (r.ok ? "ok" : r.error))(await AD.saveView(owner, { name: "V29", query: {} })), "ok");
+    eq("the 31st refused", ((r) => (r.ok ? "ok" : r.error))(await AD.saveView(owner, { name: "V30", query: {} })), "limit");
+    eq("B never sees A's views", (await AD.listSavedViews(ownerBCtx)).length, 0);
+    void V;
+
+    // the store export ZIP writers (PL-09, OPE-§27.4)
+    const Z = load<typeof import("@/lib/orders/export-zip")>("@/lib/orders/export-zip");
+    const zipOrder = await order(A, { name: "Zip Canary" });
+    const CANARY_CAPI = "CANARY-CAPI-CTX-9Z";
+    await db.update(S.orders).set({ capiCtx: CANARY_CAPI }).where(deq(S.orders.id, zipOrder));
+    const CANARY_TG = "123456789:CANARYtelegramTOKENxxxxxxxxxxxxx";
+    await setStoreSetting(A, "telegram", { enabled: true, botToken: CANARY_TG, chatId: "-1001234567", pii: "masked" }, { id: U.ownerA.id, ip: null });
+    const files: Record<string, string> = {};
+    for (const w of Z.EXPORT_ZIP_WRITERS) files[w.file] = await Z.writeZipCsv(A, w.file);
+    const zipPhone = (await rowOf(zipOrder)).phone;
+    ok("orders.csv: the full phone and the appended columns", files["orders.csv"]!.includes(zipPhone) && files["orders.csv"]!.split("\r\n")[0]!.endsWith("Delivery attempts"), files["orders.csv"]!.slice(0, 400));
+    ok("the five files exist with their headers", Object.keys(files).length === 5 && Object.values(files).every((f) => f.startsWith("\uFEFF")), Object.keys(files));
+    ok("customers.csv lists the store's customers, order_events.csv the meta as JSON", files["customers.csv"]!.includes(zipPhone) && files["order_events.csv"]!.includes('"{""axis"":'), files["order_events.csv"]!.slice(0, 300));
+    const leaked = Object.entries(files).filter(([, f]) => f.includes(CANARY_CAPI) || f.includes(CANARY_TG) || f.includes("CANARYtelegram"));
+    eq("no capi_ctx, Telegram token, carrier credential or webhook secret canary in any file", leaked.map(([k]) => k), []);
+    const bPhone = (await rowOf(bOrder)).phone;
+    ok("A's export carries nothing of B", Object.values(files).every((f) => !f.includes(bOrder) && !f.includes(bPhone)));
+
+    // delete test orders (SF-05, OPE-§26)
+    const tp = freshPhone();
+    const oldTest = await order(A, { phone: tp, test: true });
+    const newTest = await order(A, { phone: tp, test: true });
+    const oldReal = await order(A, { phone: tp });
+    const past = new Date(Date.now() - 2 * 3_600_000);
+    await db.update(S.orders).set({ createdAt: past }).where(deq(S.orders.id, oldTest));
+    await db.update(S.orders).set({ createdAt: past }).where(deq(S.orders.id, oldReal));
+    const bTest = await order(B, { test: true });
+    await db.update(S.orders).set({ createdAt: past }).where(deq(S.orders.id, bTest));
+    eq("an agent may not delete test orders", ((r) => (r.ok ? "ok" : r.error))(await AD.deleteTestOrdersNow(agent)), "forbidden");
+    const del = await AD.deleteTestOrdersNow(owner);
+    ok("delete test orders: only the store's is_test rows older than 1 h", del.ok && del.data.deleted === 1, del);
+    const left = await db.select({ id: S.orders.id }).from(S.orders).where(sql`${S.orders.id} IN (${oldTest}, ${newTest}, ${oldReal}, ${bTest})`);
+    eq("the old test order is gone; the fresh test order, the real one and B's stay", left.map((r) => r.id).sort(), [newTest, oldReal, bTest].sort());
+    eq("its events are gone", (await eventsOf(oldTest)).length, 0);
+    eq("test_count recomputed", (await customerOf(tp))?.testCount, 1);
+    const audits = await db.select().from(S.auditLog).where(and(deq(S.auditLog.storeId, STORE_A), deq(S.auditLog.action, "orders.test_deleted")));
+    eq("audit orders.test_deleted { count }", audits.map((a) => (a.meta as { count?: number } | null)?.count), [1]);
+    eq("housekeeping's signature: deleteTestOrders(scope, { olderThan, limit })", await AD.deleteTestOrders(A, { olderThan: new Date(Date.now() - 3_600_000), limit: 10 }), { deleted: 0 });
+
   }
 
   /* ================================================================ */

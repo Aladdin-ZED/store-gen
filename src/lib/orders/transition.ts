@@ -56,6 +56,7 @@ import {
   projectStatus,
   type CancelReason,
   type MoneyState,
+  type Move,
   type MoveClass,
   type MovePerms,
   type OrderActor,
@@ -568,6 +569,8 @@ export interface LegacyMoveOpts {
   reason?: string;
   note?: string;
   inbound?: boolean;
+  /** P4 step 6: "bulk" for the list's bulk "Move to…" (OPE-§12.4); default "ui" */
+  source?: "ui" | "bulk";
 }
 
 /**
@@ -592,7 +595,7 @@ export async function moveToLegacyAs(actor: OrderActor, scope: WriteScope, id: s
     input: {
       orderId: id,
       want: {},
-      source: "ui",
+      source: opts.source ?? "ui",
       ...(expectRev !== undefined ? { expectRev } : {}),
       ...(opts.force ? { force: true } : {}),
       ...(opts.reason ? { reason: opts.reason } : {}),
@@ -606,4 +609,144 @@ export async function moveToLegacyAs(actor: OrderActor, scope: WriteScope, id: s
       return opts.reason ? { ...shaped, reason: opts.reason } : shaped;
     },
   })) as TransitionResult;
+}
+
+/* ------------------------------------------------------------------ */
+/* undo (OPE-§12.5; P4 step 6)                                          */
+/* ------------------------------------------------------------------ */
+
+/** The columns a move may set besides the axes, as they were before it (ISO strings: the undo token is JSON). */
+export interface UndoCols {
+  confirmedBy: string | null;
+  confirmedAt: string | null;
+  cancelReason: string | null;
+  dueAt: string | null;
+  shipAfter: string | null;
+  returnReason: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+  finalAt: string | null;
+  mergedInto: string | null;
+  priority: number;
+  attempts: number;
+}
+
+/** One order of an undo token: the rev the move left and the exact state before it. */
+export interface UndoEntry {
+  orderId: string;
+  revAfter: number;
+  before: OrderStates;
+  cols: UndoCols;
+  /** the move's own events (the `undo` event names them, ≤ 20) */
+  eventIds: number[];
+}
+
+/** The before-image of a move, read with the row (bulk and single "Move to…" read it before they write). */
+export const UNDO_COLS = {
+  confirmedBy: orders.confirmedBy,
+  confirmedAt: orders.confirmedAt,
+  cancelReason: orders.cancelReason,
+  dueAt: orders.dueAt,
+  shipAfter: orders.shipAfter,
+  returnReason: orders.returnReason,
+  shippedAt: orders.shippedAt,
+  deliveredAt: orders.deliveredAt,
+  finalAt: orders.finalAt,
+  mergedInto: orders.mergedInto,
+  priority: orders.priority,
+  attempts: orders.attempts,
+};
+type UndoColRow = {
+  confirmedBy: string | null;
+  confirmedAt: Date | null;
+  cancelReason: string | null;
+  dueAt: Date | null;
+  shipAfter: Date | null;
+  returnReason: string | null;
+  shippedAt: Date | null;
+  deliveredAt: Date | null;
+  finalAt: Date | null;
+  mergedInto: string | null;
+  priority: number;
+  attempts: number;
+};
+
+export function undoColsOf(r: UndoColRow): UndoCols {
+  const iso = (d: Date | null) => (d ? d.toISOString() : null);
+  return {
+    confirmedBy: r.confirmedBy,
+    confirmedAt: iso(r.confirmedAt),
+    cancelReason: r.cancelReason,
+    dueAt: iso(r.dueAt),
+    shipAfter: iso(r.shipAfter),
+    returnReason: r.returnReason,
+    shippedAt: iso(r.shippedAt),
+    deliveredAt: iso(r.deliveredAt),
+    finalAt: iso(r.finalAt),
+    mergedInto: r.mergedInto,
+    priority: r.priority,
+    attempts: r.attempts,
+  };
+}
+
+/**
+ * Reverses one move inside the undo window (OPE-§12.5): only when the order's rev still equals `revAfter` (nothing
+ * happened since), restoring the exact states and columns of before, as a compensating write of the same actor:
+ * `state_changed` per axis with `meta.undo`, then one `undo` event naming the move's events; the order hooks run so
+ * the customer counters follow. It never needs `orders.force_status`: it only restores what the actor just changed.
+ */
+export async function undoTransition(actor: OrderActor, scope: WriteScope, u: UndoEntry): Promise<{ ok: true; rev: number } | { ok: false; error: "not_found" | "conflict" }> {
+  if (!validId(u.orderId)) return { ok: false, error: "not_found" };
+  const out = await db.transaction(async (tx: Tx) => {
+    const [row] = await readRow(tx, scope, u.orderId);
+    if (!row || !viewerSeesOrder(scope, actor, row, false)) return { ok: false as const, error: "not_found" as const };
+    if (row.rev !== u.revAfter) return { ok: false as const, error: "conflict" as const };
+    const cur = statesOf(row);
+    const moves: Move[] = [];
+    if (cur.confirm !== u.before.confirm) moves.push({ axis: "confirm", from: cur.confirm, to: u.before.confirm });
+    if (cur.ship !== u.before.ship) moves.push({ axis: "ship", from: cur.ship, to: u.before.ship });
+    if (cur.money !== u.before.money) moves.push({ axis: "money", from: cur.money, to: u.before.money });
+    const date = (s: string | null) => (s ? new Date(s) : null);
+    const status = projectStatus(u.before);
+    const now = new Date(Date.now());
+    const c = u.cols;
+    const res = await tx
+      .update(orders)
+      .set({
+        confirmState: u.before.confirm,
+        shipState: u.before.ship,
+        // R1's column has no `refunded` (0006): a move never left it, so the before-image never names it
+        moneyState: u.before.money as Exclude<MoneyState, "refunded">,
+        status,
+        confirmedBy: c.confirmedBy,
+        confirmedAt: date(c.confirmedAt),
+        cancelReason: c.cancelReason,
+        dueAt: date(c.dueAt),
+        shipAfter: date(c.shipAfter),
+        returnReason: c.returnReason,
+        shippedAt: date(c.shippedAt),
+        deliveredAt: date(c.deliveredAt),
+        finalAt: date(c.finalAt),
+        mergedInto: c.mergedInto,
+        priority: c.priority,
+        attempts: c.attempts,
+        rev: sql`${orders.rev} + 1`,
+        ...(status !== row.status ? { sheetDirty: sql`${orders.sheetDirty} | 1` } : {}),
+        updatedAt: now,
+      })
+      .where(and(byId(orders, scope, row.id), eq(orders.rev, row.rev)));
+    if (affectedRows(res) !== 1) return { ok: false as const, error: "conflict" as const };
+    const rev = row.rev + 1;
+    const base = { orderId: row.id, rev, at: now, actorKind: actor.kind, actorId: actor.userId };
+    const events: NewOrderEvent[] = moves.map((m) => ({ ...base, type: "state_changed" as const, fromState: m.from, toState: m.to, meta: { axis: m.axis, source: "ui", undo: true } }));
+    const of = u.eventIds.filter((n) => Number.isInteger(n) && n > 0).slice(0, 20);
+    if (of.length) events.push({ ...base, type: "undo", meta: { of } });
+    await appendEvents(tx, scope, events);
+    const hook: OrderHookEvent = { on: "transition", before: snapshotOf(row), after: snapshotOf(row, { rev, states: u.before }), moves, actor, source: "ui" };
+    await runOrderHooks("transition", "inTx", scope, hook, tx);
+    return { ok: true as const, rev, hook };
+  });
+  if (!out.ok) return out;
+  await runAfterCommit("orders:hooks", () => runOrderHooks("transition", "afterCommit", scope, out.hook));
+  return { ok: true, rev: out.rev };
 }

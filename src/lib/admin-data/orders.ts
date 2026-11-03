@@ -12,6 +12,9 @@ import { blocklist, leads, orderEvents, orders, pageVersions } from "@/lib/db/sc
 import { orderView, type OrderView, type SwatchOf } from "@/components/admin/orders/parts";
 import type { OrderItems, OrderSource } from "@/lib/db/schema";
 import { getOrder, isOrderStatus, type OrderFilters, type OrderRecord } from "@/lib/orders";
+import type { ListViewer, OrderList } from "@/lib/orders/admin";
+import { builtinView, ORDER_SORTS, ORDER_SOURCES, OrderQuery as SavedOrderQuery, type BuiltinViewId, type OrderSort } from "@/lib/callcenter/views";
+import { CONFIRM_STATES, MONEY_STATES, RETURN_REASONS, SHIP_STATES, type ConfirmState, type MoneyState, type ReturnReason, type ShipState } from "@/lib/orders/state";
 import type { OrderStatus } from "@/lib/orders/contract";
 import { optionText, sanitizeLabel } from "@/lib/orders/text";
 import { orderDocOf } from "@/lib/orders/versions";
@@ -38,14 +41,52 @@ export interface OrderQuery {
   range: RangeKey;
   from: string | null;
   to: string | null;
-  sheet: "failed" | "pending" | null;
+  sheet: "failed" | "pending" | "synced" | null;
   risky: boolean;
   page: number;
+  // P4 step 6 (OPE-§12.2): the axes, the views and the rev 3 keys; null / [] = not filtered
+  view: BuiltinViewId | null;
+  confirm: ConfirmState[];
+  ship: ShipState[];
+  money: MoneyState[];
+  /** a member id, "none" or "me" */
+  assignee: string | null;
+  confirmedBy: string | null;
+  cityKey: string | null;
+  source: OrderSource[];
+  minRisk: number | null;
+  /** an ISO instant */
+  dueBefore: string | null;
+  test: boolean | null;
+  hold: "active" | "none" | null;
+  returnReason: ReturnReason[];
+  tracking: string | null;
+  carrierLabel: string | null;
+  agentLabel: string | null;
+  sort: OrderSort | null;
+  /** the keyset cursor (`next` of the previous page) */
+  after: string | null;
 }
 
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 type Params = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
+/** a comma list of whitelisted values ("confirm=new,attempting"); unknown values are dropped */
+const list = <T extends string>(v: string | string[] | undefined, allowed: readonly T[]): T[] =>
+  [...new Set(one(v).split(","))].filter((x): x is T => (allowed as readonly string[]).includes(x)).slice(0, allowed.length);
+const CONTROL = /[\u0000-\u001f\u007f]/g;
+const text = (v: string | string[] | undefined, max: number) => one(v).replace(CONTROL, "").trim().slice(0, max) || null;
+const CITY_KEY = /^(?:[a-z0-9]+(?:-[a-z0-9]+)*|\*)$/;
+
+/**
+ * The URL keys of the orders list (`useQueryState`; a view is a shareable link): q, status, page_id, range, from, to,
+ * sheet, risky, page (R1.0's), and view, confirm, ship, money, assignee, confirmed_by, city, source, min_risk,
+ * due_before, test, hold, return_reason, tracking, carrier, agent_label, sort, after (OPE-§12.2).
+ */
+export const ORDER_URL_KEYS = [
+  "q", "status", "page_id", "range", "from", "to", "sheet", "risky", "page", "view", "confirm", "ship", "money", "assignee", "confirmed_by",
+  "city", "source", "min_risk", "due_before", "test", "hold", "return_reason", "tracking", "carrier", "agent_label", "sort", "after",
+] as const;
 
 /** Read and sanitize the orders URL (every value is whitelisted or pattern-checked). */
 export function parseOrderQuery(sp: Params): OrderQuery {
@@ -54,6 +95,14 @@ export function parseOrderQuery(sp: Params): OrderQuery {
   const sheet = one(sp.sheet);
   const from = one(sp.from);
   const to = one(sp.to);
+  const assignee = one(sp.assignee);
+  const minRisk = Number.parseInt(one(sp.min_risk), 10);
+  const due = one(sp.due_before);
+  const test = one(sp.test);
+  const hold = one(sp.hold);
+  const sort = one(sp.sort);
+  const after = one(sp.after);
+  const city = one(sp.city);
   return {
     q: one(sp.q).trim().slice(0, 80),
     status: isOrderStatus(status) ? status : null,
@@ -61,10 +110,124 @@ export function parseOrderQuery(sp: Params): OrderQuery {
     range: RANGE_KEYS.includes(range) ? range : "all",
     from: isDay(from) ? from : null,
     to: isDay(to) ? to : null,
-    sheet: sheet === "failed" || sheet === "pending" ? sheet : null,
+    sheet: sheet === "failed" || sheet === "pending" || sheet === "synced" ? sheet : null,
     risky: one(sp.risky) === "1",
     page: Math.max(1, Math.min(100_000, Number.parseInt(one(sp.page), 10) || 1)),
+    view: builtinView(one(sp.view))?.id ?? null,
+    confirm: list(sp.confirm, CONFIRM_STATES),
+    ship: list(sp.ship, SHIP_STATES),
+    money: list(sp.money, MONEY_STATES),
+    assignee: assignee === "me" || assignee === "none" || ULID.test(assignee) ? assignee : null,
+    confirmedBy: ULID.test(one(sp.confirmed_by)) ? one(sp.confirmed_by) : null,
+    cityKey: CITY_KEY.test(city) && city.length <= 40 ? city : null,
+    source: list(sp.source, ORDER_SOURCES),
+    minRisk: Number.isInteger(minRisk) && minRisk >= 0 && minRisk <= 100 ? minRisk : null,
+    dueBefore: /^\d{4}-\d{2}-\d{2}T/.test(due) && !Number.isNaN(Date.parse(due)) ? new Date(due).toISOString() : null,
+    test: test === "1" ? true : test === "0" ? false : null,
+    hold: hold === "active" || hold === "none" ? hold : null,
+    returnReason: list(sp.return_reason, RETURN_REASONS),
+    tracking: text(sp.tracking, 64),
+    carrierLabel: text(sp.carrier, 60),
+    agentLabel: text(sp.agent_label, 60),
+    sort: (ORDER_SORTS as readonly string[]).includes(sort) ? (sort as OrderSort) : null,
+    after: /^[A-Za-z0-9_-]{8,200}$/.test(after) ? after : null,
   };
+}
+
+/** The URL of a query (the keys `parseOrderQuery` reads; empty values left out), e.g. a saved view's link. */
+export function orderQueryParams(q: Partial<OrderQuery>): URLSearchParams {
+  const p = new URLSearchParams();
+  const put = (k: string, v: string | number | boolean | null | undefined | readonly string[]) => {
+    if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) return;
+    p.set(k, Array.isArray(v) ? v.join(",") : typeof v === "boolean" ? (v ? "1" : "0") : String(v));
+  };
+  put("view", q.view);
+  put("q", q.q);
+  put("status", q.status);
+  put("page_id", q.pageId);
+  if (q.range && q.range !== "all") put("range", q.range);
+  put("from", q.from);
+  put("to", q.to);
+  put("sheet", q.sheet);
+  if (q.risky) put("risky", "1");
+  put("confirm", q.confirm);
+  put("ship", q.ship);
+  put("money", q.money);
+  put("assignee", q.assignee);
+  put("confirmed_by", q.confirmedBy);
+  put("city", q.cityKey);
+  put("source", q.source);
+  put("min_risk", q.minRisk);
+  put("due_before", q.dueBefore);
+  put("test", q.test);
+  put("hold", q.hold);
+  put("return_reason", q.returnReason);
+  put("tracking", q.tracking);
+  put("carrier", q.carrierLabel);
+  put("agent_label", q.agentLabel);
+  put("sort", q.sort);
+  return p;
+}
+
+/** The URL query as a saved view stores it (OPE-§12.2's OrderQuery; dates stay store-local days). */
+export function toSavedQuery(q: OrderQuery): SavedOrderQuery {
+  const days = q.range === "custom" ? { ...(q.from ? { from: q.from } : {}), ...(q.to ? { to: q.to } : {}) } : {};
+  return SavedOrderQuery.parse({
+    ...(q.q ? { q: q.q } : {}),
+    ...(q.confirm.length ? { confirm: q.confirm } : {}),
+    ...(q.ship.length ? { ship: q.ship } : {}),
+    ...(q.money.length ? { money: q.money } : {}),
+    ...(q.status ? { status: [q.status] } : {}),
+    ...(q.assignee ? { assignee: q.assignee } : {}),
+    ...(q.confirmedBy ? { confirmedBy: q.confirmedBy } : {}),
+    ...(q.pageId ? { pageId: q.pageId } : {}),
+    ...(q.cityKey ? { cityKey: q.cityKey } : {}),
+    ...(q.source.length ? { source: q.source } : {}),
+    ...(q.minRisk !== null ? { minRisk: q.minRisk } : q.risky ? { minRisk: 30 } : {}),
+    ...days,
+    ...(q.dueBefore ? { dueBefore: q.dueBefore } : {}),
+    ...(q.sheet ? { sheet: q.sheet } : {}),
+    ...(q.test !== null ? { test: q.test } : {}),
+    ...(q.view ? { view: q.view } : {}),
+    ...(q.hold ? { hold: q.hold } : {}),
+    ...(q.returnReason.length ? { returnReason: q.returnReason } : {}),
+    ...(q.tracking ? { tracking: q.tracking } : {}),
+    ...(q.carrierLabel ? { carrierLabel: q.carrierLabel } : {}),
+    ...(q.agentLabel ? { agentLabel: q.agentLabel } : {}),
+    ...(q.sort ? { sort: q.sort } : {}),
+  });
+}
+
+/** A saved view's query back as the URL query (opening a saved view = navigating to its link). */
+export function fromSavedQuery(s: SavedOrderQuery): OrderQuery {
+  const status = s.status?.length === 1 ? s.status[0] : undefined;
+  const params = orderQueryParams({
+    q: s.q ?? "",
+    status: status && isOrderStatus(status) ? status : null,
+    pageId: s.pageId ?? null,
+    range: s.from || s.to ? "custom" : "all",
+    from: s.from ?? null,
+    to: s.to ?? null,
+    sheet: s.sheet ?? null,
+    view: builtinView(s.view)?.id ?? null,
+    confirm: s.confirm ?? [],
+    ship: s.ship ?? [],
+    money: s.money ?? [],
+    assignee: s.assignee ?? null,
+    confirmedBy: s.confirmedBy ?? null,
+    cityKey: s.cityKey ?? null,
+    source: s.source ?? [],
+    minRisk: s.minRisk ?? null,
+    dueBefore: s.dueBefore ?? null,
+    test: s.test ?? null,
+    hold: s.hold ?? null,
+    returnReason: s.returnReason ?? [],
+    tracking: s.tracking ?? null,
+    carrierLabel: s.carrierLabel ?? null,
+    agentLabel: s.agentLabel ?? null,
+    sort: s.sort,
+  });
+  return parseOrderQuery(Object.fromEntries(params));
 }
 
 /** [from, to) instants of a range in the store's time zone (`stores.timezone`, ADM-23). */
@@ -89,7 +252,8 @@ export function rangeBounds(q: Pick<OrderQuery, "range" | "from" | "to">, timeZo
   }
 }
 
-export function toOrderFilters(q: OrderQuery, timeZone: string): OrderFilters {
+/** The URL query → the list's filters (store-local day bounds; `viewer` adds the agent predicate, OD12). */
+export function toOrderFilters(q: OrderQuery, timeZone: string, viewer?: ListViewer): OrderFilters {
   const { from, to } = rangeBounds(q, timeZone);
   return {
     q: q.q || undefined,
@@ -98,9 +262,29 @@ export function toOrderFilters(q: OrderQuery, timeZone: string): OrderFilters {
     from,
     to,
     sheetStatus: q.sheet ?? undefined,
-    minRisk: q.risky ? 30 : undefined,
+    minRisk: q.minRisk ?? (q.risky ? 30 : undefined),
+    view: q.view ?? undefined,
+    confirm: q.confirm.length ? q.confirm : undefined,
+    ship: q.ship.length ? q.ship : undefined,
+    money: q.money.length ? q.money : undefined,
+    assignee: q.assignee ?? undefined,
+    confirmedBy: q.confirmedBy ?? undefined,
+    cityKey: q.cityKey ?? undefined,
+    source: q.source.length ? q.source : undefined,
+    dueBefore: q.dueBefore ? new Date(q.dueBefore) : undefined,
+    test: q.test ?? undefined,
+    hold: q.hold ?? undefined,
+    returnReason: q.returnReason.length ? q.returnReason : undefined,
+    tracking: q.tracking ?? undefined,
+    carrierLabel: q.carrierLabel ?? undefined,
+    agentLabel: q.agentLabel ?? undefined,
+    sort: q.sort ?? undefined,
+    viewer,
   };
 }
+
+/** The list's JSON (OPE-§12.2, §12.3): masked rows, the keyset cursor, the capped total. */
+export type OrderListJson = OrderList;
 
 /** The store's orders per status inside the current range / page filter (chips). */
 export async function statusCounts(scope: StoreScope, q: OrderQuery, timeZone: string): Promise<Record<string, number> & { all: number }> {

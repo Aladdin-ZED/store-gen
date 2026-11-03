@@ -120,6 +120,8 @@ export const ORDER_EVENT_META = {
     ref: label(80).optional(),
     deliveryLane: z.literal(true).optional(),
     rescueExhausted: z.literal(true).optional(),
+    /** a compensating move of the undo window (OPE-§12.5) */
+    undo: z.literal(true).optional(),
   }),
   call_attempt: z.strictObject({
     channel: z.enum(["call", "whatsapp"]),

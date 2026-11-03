@@ -20,6 +20,12 @@
  *   requestRecallAction         orders.write        recall_requested (OPS-21)
  *   markCarrierNotifiedAction   shipments.write     the warehouse's tick on that recall
  *   assignOrderAction           orders.assign
+ *   bulkAssignAction, bulkPinAction                orders.assign   ≤ 200 ids, `bulk` 30 / 10 min, idem replays (OPE-§12.4)
+ *   bulkMoveAction, undoMoveAction                 orders.write    each id through the writer (source bulk); undo 15 s
+ *   saveCarrierCsvColumnsAction                    shipments.write ops.carrierCsv (OD55)
+ *   deleteTestOrdersAction                         settings.write  test orders older than 1 hour (OPE-§26)
+ *   listSavedViewsAction (orders.read), saveViewAction, renameViewAction, deleteViewAction, reorderViewsAction
+ *                                                  orders.write    personal views; shared ones also orders.assign
  *   resendToSheetAction, retryFailedSyncAction (orders.write) call P5's sheet functions; the R1.0 status menu and the
  *   blocklist actions stay for today's screen until the drawer redesign (P4 step 10) moves to the ones above.
  */
@@ -28,7 +34,24 @@ import { fail } from "@/lib/admin-data/action";
 import { orderDrawerJson, type OrderDrawerJson } from "@/lib/admin-data/orders";
 import { revalidateStore } from "@/lib/admin-data/shell";
 import { blockFromOrder, blockPhone, isOrderStatus, requeueOrderSync, retryFailedSync, unblock } from "@/lib/orders";
-import { MOVE_ERROR_TEXT } from "@/lib/orders/admin";
+import {
+  BULK_MAX,
+  bulkAssign,
+  bulkMove,
+  bulkPin,
+  deleteTestOrdersNow,
+  deleteView,
+  listSavedViews,
+  MOVE_ERROR_TEXT,
+  moveWithUndo,
+  renameView,
+  reorderViews,
+  saveCarrierCsvColumns,
+  saveView,
+  undoMove,
+} from "@/lib/orders/admin";
+import { OrderQuery, SavedViewInput } from "@/lib/callcenter/views";
+import { CONFIRM_STATES, MONEY_STATES, SHIP_STATES } from "@/lib/orders/state";
 import type { OrderStatus } from "@/lib/orders/contract";
 import { UnitIn } from "@/lib/orders/contract";
 import { dismissDuplicate } from "@/lib/orders/duplicates";
@@ -90,7 +113,8 @@ export async function getOrderAction(id: string): Promise<ActionResult<OrderDraw
 export async function moveOrderAction(id: string, status: string, expectRev?: number, opts: { reason?: string; note?: string } = {}) {
   return storeAction("orders.write", async (ctx) => {
     const o = z.strictObject({ reason: z.string().max(200).optional(), note: z.string().max(500).optional() }).parse(opts);
-    const res = await moveToLegacy(ctx, OrderId.parse(id), Status.parse(status), expectRev === undefined ? undefined : Rev.parse(expectRev), o);
+    // the undo token rides along when the order moved (OPE-§12.5: "Undo" for 10 s)
+    const res = await moveWithUndo(ctx, OrderId.parse(id), Status.parse(status), expectRev === undefined ? undefined : Rev.parse(expectRev), o);
     if (res.ok && res.changed) refresh(ctx.store.handle);
     return res;
   });
@@ -257,4 +281,97 @@ export async function unblockAction(id: string): Promise<ActionResult<null>> {
     refresh(store.handle);
     return null;
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* the list: bulk, undo, saved views, carrier file, test orders (step 6) */
+/* ------------------------------------------------------------------ */
+
+const Ids = z.array(z.string().max(24)).min(1).max(BULK_MAX, { error: "Select up to 200 orders." });
+/** the client's Idempotency key: a UUID is cached 10 min (OD36); any other short value runs without the cache */
+const Idem = z.string().max(64).optional();
+const ViewId = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, { error: "Unknown view." });
+const BulkTargetZ = z.union([
+  z.strictObject({ legacy: Status }),
+  z.strictObject({
+    want: z
+      .strictObject({ confirm: z.enum(CONFIRM_STATES).optional(), ship: z.enum(SHIP_STATES).optional(), money: z.enum(MONEY_STATES).optional() })
+      .refine((w) => Object.keys(w).length > 0, { error: "Pick where to move the orders." }),
+    reason: z.string().max(200).optional(),
+  }),
+]);
+
+/** orders.assign: "Assign to…" on the selection (null = back to the pool); `bulk` 30 / 10 min. */
+export async function bulkAssignAction(ids: string[], userId: string | null, idem?: string) {
+  return storeAction("orders.assign", async (ctx) => {
+    const res = await bulkAssign(ctx, Ids.parse(ids), userId === null ? null : UserId.parse(userId), { idem: Idem.parse(idem) });
+    if (res.ok && res.data.ok.length) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+/** orders.assign: "Pin to top" / unpin on the selection. */
+export async function bulkPinAction(ids: string[], pinned: boolean, idem?: string) {
+  return storeAction("orders.assign", async (ctx) => {
+    const res = await bulkPin(ctx, Ids.parse(ids), z.boolean().parse(pinned), { idem: Idem.parse(idem) });
+    if (res.ok && res.data.ok.length) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+/** orders.write: "Move to…" on the selection (each id through the writer, source bulk); answers the undo token. */
+export async function bulkMoveAction(ids: string[], target: unknown, idem?: string) {
+  return storeAction("orders.write", async (ctx) => {
+    const res = await bulkMove(ctx, Ids.parse(ids), BulkTargetZ.parse(target), { idem: Idem.parse(idem) });
+    if (res.ok && res.data.ok.length) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+/** orders.write: the toast's "Undo" (10 s on screen, the token lives 15 s). */
+export async function undoMoveAction(token: string) {
+  return storeAction("orders.write", async (ctx) => {
+    const res = await undoMove(ctx, z.string().max(40).parse(token));
+    if (res.ok && res.data.ok.length) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+/** shipments.write: the Carrier file's columns, delimiter and "Mark exported orders as packed" (ops.carrierCsv, OD55). */
+export async function saveCarrierCsvColumnsAction(input: unknown) {
+  return storeAction("shipments.write", (ctx) => saveCarrierCsvColumns(ctx, input));
+}
+
+/** settings.write (owner, admin): "Delete test orders" older than 1 hour (OPE-§26). */
+export async function deleteTestOrdersAction() {
+  return storeAction("settings.write", async (ctx) => {
+    const res = await deleteTestOrdersNow(ctx);
+    if (res.ok && res.data.deleted) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+/** The member's saved views and the team's (shown as tabs after the built-ins). */
+export async function listSavedViewsAction() {
+  return storeAction("orders.read", (ctx) => listSavedViews(ctx));
+}
+
+/**
+ * Save the current filters as a view. Personal views need orders.write (a write key: an impersonation scope never
+ * writes, D71); shared ones orders.assign as well, checked by `saveView`.
+ */
+export async function saveViewAction(input: unknown) {
+  return storeAction("orders.write", (ctx) => saveView(ctx, SavedViewInput.parse(input)));
+}
+
+export async function renameViewAction(id: string, name: string, query?: unknown) {
+  return storeAction("orders.write", (ctx) => renameView(ctx, ViewId.parse(id), z.string().max(200).parse(name), query === undefined ? undefined : OrderQuery.parse(query)));
+}
+
+export async function deleteViewAction(id: string) {
+  return storeAction("orders.write", (ctx) => deleteView(ctx, ViewId.parse(id)));
+}
+
+export async function reorderViewsAction(ids: string[]) {
+  return storeAction("orders.write", (ctx) => reorderViews(ctx, z.array(ViewId).max(60).parse(ids)));
 }

@@ -1,4 +1,4 @@
-// proves: OP-01, OP-03, OP-04, OP-05, OP-07, OP-13, OP-14
+// proves: OP-01, OP-03, OP-04, OP-05, OP-07, OP-09, OP-13, OP-14, OP-16
 /**
  * `test:ops` (P4 CALL CENTER; operations.md OPE-§O.1, §O.4; docs/STORE-SAAS.md §J.1): the call centre's offline
  * checks, in named sections. Static lints over P4's own files, then the pure suite src/lib/callcenter/selftest.ts.
@@ -25,6 +25,10 @@
  *   pure · idempotency    the Idempotency-Key cache (src/lib/callcenter/idem.ts, OD36): nextOrder / recordOutcome
  *                         results replayed per store and user, a double tap runs once, a throw is not kept, the
  *                         10-minute expiry on a fake clock, the 2,000-entry store bound
+ *   pure · carrier csv    (OP-16, OD55) the Carrier CSV writer: the saved column order, ';' / ',', the BOM, national
+ *                         digits, the locale's decimal separator, held orders refused with their ids, ≤ 20 columns;
+ *                         ManifestSource equal to the §18.3 list and to the setting's enum
+ *   pure · views          (OP-09, OD49) the 16 built-in views of OPE-§12.1, holds out of To pack, the role defaults
  *   pure · card           the ScriptDoc caps (OP-05), the built-in script and WhatsApp texts, the compile rules (upsell
  *                         gating, empty steps and missing facts dropped, no ETA sentence without an ETA), the wa.me
  *                         limits, and the 40 queue-card fixtures (8 delivery-lane) each ≤ 6 KB gzipped (OPE-§5.3)
@@ -376,14 +380,10 @@ section = "static · queue card";
     ["src/lib/orders/profile.ts", "ConsoleOrderRow"],
     ["src/lib/callcenter/aggregates.ts", "AggCell"],
     ["src/lib/callcenter/inbound.ts", "InboundResult"],
-    ["src/lib/orders/profile.ts", "OrderListRow"],
+    // P4 step 6: the list row lives with the list query; its phone is `phoneMasked` (OPE-§12.3), never a raw field
+    ["src/lib/orders/admin.ts", "OrderListRow"],
   ] as const) {
     const f = typeFields(readFileSync(join(ROOT, file), "utf8"), name);
-    // OrderListRow arrives with the orders list (P4 step 6): until then it is listed, not judged
-    if (f.includes("<missing type>") && name === "OrderListRow") {
-      console.log(`  ${name}: not declared yet (P4 step 6)`);
-      continue;
-    }
     check(`${name} (${file}) carries no phone, e-mail, address, landmark or note field`, !f.includes("<missing type>") && f.filter((n) => CONTACT_FIELD.test(n) || ADDRESS_FIELD.test(n)).length === 0, f);
   }
   // the lint itself, on planted shapes
@@ -870,6 +870,85 @@ async function card(): Promise<void> {
   check("fitCard: an oversized card is trimmed to ≤ 5.5 KB gz, its first step kept", C.cardGzBytes(fitted) <= C.CARD_GZ_MAX && fitted.script.steps[0]!.id === "x0" && fitted.script.objections.length === 0, C.cardGzBytes(fitted));
 }
 
+async function carrier(): Promise<void> {
+  section = "pure · carrier csv";
+  const CC = await import("@/lib/callcenter/carrier-csv");
+  const { MANIFEST_SOURCES: SETTING } = await import("@/lib/settings/keys/ops");
+  const V = await import("@/lib/callcenter/views");
+  // OPE-§18.3: the `manifest` kind's source list, in the spec's order
+  const SPEC = ["order_id", "name", "phone", "city", "address", "landmark", "cod_amount", "content", "qty", "note", "constant"];
+  check("ManifestSource is the §18.3 manifest source list", JSON.stringify(CC.MANIFEST_SOURCES) === JSON.stringify(SPEC), CC.MANIFEST_SOURCES);
+  check("ManifestSource equals the ops.carrierCsv setting's enum", JSON.stringify(CC.MANIFEST_SOURCES) === JSON.stringify(SETTING), SETTING);
+  const now = new Date("2026-11-03T10:00:00Z");
+  const row = (o: Partial<import("@/lib/callcenter/carrier-csv").ManifestRow> = {}): import("@/lib/callcenter/carrier-csv").ManifestRow => ({
+    orderId: "CMD-AAAA1111",
+    name: "Salma Bennani",
+    phone: "+212612345678",
+    city: "Fès",
+    address: "Hay Salam 12; bloc 3",
+    landmark: "près de la mosquée",
+    totalCents: 24_990,
+    content: "1 × Argan 50ml [ARG-50]",
+    qty: 1,
+    note: "=SUM(A1)",
+    shipAfter: null,
+    ...o,
+  });
+  const spec = {
+    delimiter: ";" as const,
+    columns: [
+      { header: "Téléphone", source: "phone" as const },
+      { header: "Destinataire", source: "name" as const },
+      { header: "Montant", source: "cod_amount" as const },
+      { header: "Ville", source: "city" as const },
+      { header: "Adresse", source: "address" as const },
+      { header: "Réf", source: "order_id" as const },
+      { header: "Produit", source: "content" as const },
+      { header: "Qté", source: "qty" as const },
+      { header: "Remarque", source: "note" as const },
+      { header: "Ouvrir", source: "constant" as const, value: "Non" },
+    ],
+  };
+  const held = row({ orderId: "CMD-HELD0001", shipAfter: new Date("2026-11-05T00:00:00Z") });
+  const past = row({ orderId: "CMD-PAST0001", shipAfter: new Date("2026-11-01T00:00:00Z"), totalCents: 25_000, phone: "+212 6 12 34 56 79" });
+  const csv = CC.writeCarrierCsv([row(), held, past], spec, { locale: "fr", now });
+  const lines = csv.split("\r\n");
+  check("UTF-8 BOM first", csv.charCodeAt(0) === 0xfeff);
+  check("the owner's headers in the saved order, ';' delimited", lines[0] === "﻿Téléphone;Destinataire;Montant;Ville;Adresse;Réf;Produit;Qté;Remarque;Ouvrir", lines[0]);
+  check("a row: national digits, the fr decimal comma, quoted ';', formula-safe note, the constant", lines[1] === `0612345678;Salma Bennani;249,90;Fès;"Hay Salam 12; bloc 3";CMD-AAAA1111;1 × Argan 50ml [ARG-50];1;'=SUM(A1);Non`, lines[1]);
+  check("a past hold ships; a whole amount has no decimals; a spaced E.164 still gives national digits", lines[2]?.startsWith("0612345679;Salma Bennani;250;") === true, lines[2]);
+  check("the held order is never written", !csv.includes("CMD-HELD0001") && lines.length === 4 && lines[3] === "", lines.length);
+  const plan = CC.planCarrierCsv([row(), held, past], now);
+  check("planCarrierCsv: held orders refused with their ids, the rest in order", JSON.stringify(plan.held) === JSON.stringify(["CMD-HELD0001"]) && plan.ok.map((r) => r.orderId).join() === "CMD-AAAA1111,CMD-PAST0001", plan);
+  const comma = CC.writeCarrierCsv([row()], { delimiter: ",", columns: [{ header: "Amount", source: "cod_amount" }, { header: "Addr", source: "address" }] }, { locale: "en", now });
+  check("',' delimiter and the en decimal point", comma.split("\r\n")[1] === `249.90,Hay Salam 12; bloc 3`, comma);
+  const frComma = CC.writeCarrierCsv([row()], { delimiter: ",", columns: [{ header: "Montant", source: "cod_amount" }] }, { locale: "fr", now });
+  check("',' delimiter with a decimal comma quotes the amount", frComma.split("\r\n")[1] === `"249,90"`, frComma);
+  let threw = false;
+  try {
+    CC.writeCarrierCsv([row()], { delimiter: ";", columns: Array.from({ length: 21 }, (_, i) => ({ header: `C${i}`, source: "qty" as const })) }, { locale: "fr", now });
+  } catch {
+    threw = true;
+  }
+  check("more than 20 columns refused", threw);
+  check("amountText: negative and sub-unit amounts", CC.amountText(-1_005, "fr") === "-10,05" && CC.amountText(5, "en") === "0.05", [CC.amountText(-1_005, "fr"), CC.amountText(5, "en")]);
+
+  section = "pure · views";
+  const SPEC_VIEWS = ["to_call", "callbacks", "new", "no_answer", "to_pack", "on_hold", "on_the_way", "delivery_problems", "delivered", "refused_returned", "cancelled_fake", "high_risk", "duplicates", "sheet_failed", "test", "mine"];
+  check("the 16 built-in views of OPE-§12.1, in order", JSON.stringify(V.BUILTIN_VIEWS.map((v) => v.id)) === JSON.stringify(SPEC_VIEWS));
+  const toPack = V.builtinView("to_pack")!;
+  const onHold = V.builtinView("on_hold")!;
+  check("To pack: confirmed, to_pack / packed, holds excluded (OD49)", JSON.stringify(toPack.query) === JSON.stringify({ confirm: ["confirmed"], ship: ["to_pack", "packed"], hold: "none" }), toPack.query);
+  check("On hold: the same set with an active hold and the Ship from column", onHold.query.hold === "active" && onHold.columns.includes("ship_from"), onHold);
+  check("Delivery problems: attempt_failed / postponed with the rescue column", JSON.stringify(V.builtinView("delivery_problems")!.query.ship) === JSON.stringify(["attempt_failed", "postponed"]) && V.builtinView("delivery_problems")!.columns.includes("rescue"));
+  check("Refused & returned: the reason column", V.builtinView("refused_returned")!.columns.includes("return_reason"));
+  check("defaults: agents → My orders, managers → To call now, owners → To pack", V.defaultViewFor("agent") === "mine" && V.defaultViewFor("manager") === "to_call" && V.defaultViewFor("owner") === "to_pack");
+  const merged = V.withView(toPack, { ship: ["packed", "shipped"] });
+  check("withView: the view and the person's filters both apply", JSON.stringify(merged.ship) === JSON.stringify(["packed"]) && merged.hold === "none", merged);
+  check("OrderQuery refuses an unknown axis value and a long name", !V.OrderQuery.safeParse({ confirm: ["sold"] }).success && !V.SavedViewInput.safeParse({ name: "x".repeat(61), query: {} }).success);
+  check("OrderQuery defaults the sort", V.OrderQuery.parse({}).sort === "created_desc");
+}
+
 cityKeySize()
   .catch((e: unknown) => failures.push(`[static · cityKey size] esbuild failed: ${e instanceof Error ? e.message : String(e)}`))
   .then(pure)
@@ -878,6 +957,8 @@ cityKeySize()
   .catch((e: unknown) => failures.push(`[pure · idempotency] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .then(card)
   .catch((e: unknown) => failures.push(`[pure · card] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
+  .then(carrier)
+  .catch((e: unknown) => failures.push(`[pure · carrier csv] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .finally(() => {
     const ms = performance.now() - started;
     const clock = recordSuiteTime("ops", ms);

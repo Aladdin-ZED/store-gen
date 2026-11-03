@@ -29,6 +29,12 @@
  *     owner with A's ids: the answers of missing ids; A's customer's number typed in B blocks it in B only and never
  *     moves or marks an order of A
  *   - `actions`: the new actions of src/app/app/[store]/orders/actions.ts and src/app/app/[store]/customers/actions.ts
+ * Step 6 (the list, saved views, bulk and undo, the Carrier CSV, slips, the export-ZIP writers, test orders) adds:
+ *   - a saved view with A's page id lists no rows; B lists, renames and deletes none of A's views; bulkMove,
+ *     bulkAssign and bulkPin with A's ids answer not_found per id; a forged undo token answers expired; the Carrier
+ *     CSV with A's ids lists them as refused and never exports them; no slip of A; B's export files and test-order
+ *     delete carry and touch nothing of A; GET /orders/print and /orders/carrier-csv with A's ids leak nothing
+ *   - `actions`: the eleven new actions of src/app/app/[store]/orders/actions.ts
  * Modules are loaded inside the cases (the harness has set the environment by then): this file imports types only.
  */
 import Module from "node:module";
@@ -383,6 +389,74 @@ export const cases: TenancyCase[] = [
       kit.check("ops edits: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
     },
   },
+  {
+    name: "ops list: B's saved views, bulk actions, Carrier CSV, slips, undo and export writers never reach A",
+    async run(kit) {
+      await seedOnce(kit);
+      const AD = load<typeof import("@/lib/orders/admin")>("@/lib/orders/admin");
+      const Z = load<typeof import("@/lib/orders/export-zip")>("@/lib/orders/export-zip");
+      const aView = await viewOf(kit.fx.A.id);
+      const before = await kit.snapshotA();
+      const aIds = [kit.fx.A.order.main, kit.fx.A.order.failed];
+      // a saved view naming A's page: it saves in B and lists nothing of A
+      const view = await asBOwner(kit, async (_c, w) => {
+        const saved = await AD.saveView(w, { name: "A's page", query: { pageId: kit.fx.A.page.live } });
+        return { saved: saved.ok ? "saved" : saved.error, rows: (await AD.listOrders(w.scope, { pageId: kit.fx.A.page.live })).items };
+      });
+      if (kit.ranReal("a saved view with A's page id", view)) {
+        const v = view.ok ? (view.value as { saved: string; rows: unknown[] }) : null;
+        kit.check("a saved view with A's page id is refused as not_found and its query lists no rows", !!v && v.saved === "not_found" && v.rows.length === 0, answer(view));
+      }
+      const views = await asBOwner(kit, async (c, w) => ({ list: await AD.listSavedViews(c), del: await AD.deleteView(w, aView), ren: await AD.renameView(w, aView, "pwned") }));
+      if (kit.ranReal("B's saved-view calls with A's view id", views)) {
+        const v = views.ok ? (views.value as { list: { id: string }[]; del: { ok: boolean; error?: string }; ren: { ok: boolean; error?: string } }) : null;
+        kit.check("B lists none of A's views; renaming or deleting A's view answers not_found", !!v && !v.list.some((x) => x.id === aView) && v.del.error === "not_found" && v.ren.error === "not_found", answer(views));
+      }
+      // bulk with A's ids: not_found per id, nothing of A in the answer
+      const bulk = await asBOwner(kit, async (_c, w) => ({
+        move: await AD.bulkMove(w, aIds, { want: { confirm: "fake" } }),
+        assign: await AD.bulkAssign(w, aIds, null),
+        pin: await AD.bulkPin(w, aIds, true),
+        undo: await AD.undoMove(w, ghostId26()),
+      }));
+      if (kit.ranReal("bulk with A's ids", bulk)) {
+        type R = { ok: boolean; data?: { ok: string[]; failed: { id: string; error: string }[] }; error?: string };
+        const v = bulk.ok ? (bulk.value as { move: R; assign: R; pin: R; undo: R }) : null;
+        const perId = (r: R | undefined) => !!r?.ok && r.data!.ok.length === 0 && r.data!.failed.length === aIds.length && r.data!.failed.every((f) => f.error === "not_found");
+        kit.check("bulkMove / bulkAssign / bulkPin with A's ids: not_found per id", !!v && perId(v.move) && perId(v.assign) && perId(v.pin), answer(bulk));
+        kit.check("undoMove with a forged token: expired", v?.undo.error === "expired", answer(bulk));
+        kit.check("bulk with A's ids: no canary of A", kit.leaks(answer(bulk), { sent: aIds }).length === 0, kit.leaks(answer(bulk), { sent: aIds }));
+      }
+      // the Carrier CSV with A's ids: listed as refused, never exported; the slips: nothing
+      const carrier = await asBOwner(kit, async (c, w) => {
+        await AD.saveCarrierCsvColumns(w, { columns: [{ header: "Ref", source: "order_id" }, { header: "Tel", source: "phone" }, { header: "Nom", source: "name" }] });
+        return { csv: await AD.carrierExport(w, aIds, { partial: true }), slips: await AD.slipsFor(c, aIds) };
+      });
+      if (kit.ranReal("the Carrier CSV and the slips with A's ids", carrier)) {
+        const v = carrier.ok ? (carrier.value as { csv: { ok: boolean; error?: string; notFound?: string[] }; slips: unknown[] }) : null;
+        kit.check("carrierExport(B, A's ids): refused as not found, never exported", !!v && !v.csv.ok && v.csv.error === "refused" && JSON.stringify(v.csv.notFound) === JSON.stringify(aIds), answer(carrier));
+        kit.check("slipsFor(B, A's ids): no slip", v?.slips.length === 0, answer(carrier));
+        kit.check("the Carrier CSV and the slips: no canary of A", kit.leaks(answer(carrier), { sent: aIds }).length === 0, kit.leaks(answer(carrier), { sent: aIds }));
+      }
+      // the export ZIP writers of B carry nothing of A; B's test-order delete leaves A alone
+      const zip = await asBOwner(kit, async (_c, w) => {
+        const files: string[] = [];
+        for (const f of Z.EXPORT_ZIP_WRITERS) files.push(await Z.writeZipCsv(w.scope, f.file));
+        await AD.deleteTestOrders(w.scope, { olderThan: new Date(Date.now() + 86_400_000), limit: 1000 });
+        return files.join("\n");
+      });
+      if (kit.ranReal("B's export writers", zip)) kit.check("B's export ZIP files: no canary of A", kit.leaks(answer(zip)).length === 0 && !String(zip.ok ? zip.value : "").includes(kit.fx.A.order.main), kit.leaks(answer(zip)));
+      // the routes: print with A's ids answers the empty page; the Carrier CSV needs the step-up first
+      const route = (name: string) => ({ file: `src/app/api/app/[store]/orders/${name}/route.ts`, template: `/api/app/[store]/orders/${name}`, methods: ["GET"] });
+      const print = await kit.callRoute({ userId: kit.fx.B.members.owner }, route("print"), "GET", { store: kit.fx.B.handle }, { query: { ids: aIds.join(",") } }, {});
+      const csv = await kit.callRoute({ userId: kit.fx.B.members.owner }, route("carrier-csv"), "GET", { store: kit.fx.B.handle }, { query: { ids: aIds.join(",") } }, {});
+      if (kit.ranReal("the print and carrier-csv routes with A's ids", print, csv)) {
+        kit.check("GET /orders/print with A's ids: no canary of A", kit.leaks(answer(print), { sent: aIds }).length === 0, kit.leaks(answer(print), { sent: aIds }));
+        kit.check("GET /orders/carrier-csv with A's ids: no canary of A (step-up or refusal first)", kit.leaks(answer(csv), { sent: aIds }).length === 0, answer(csv));
+      }
+      kit.check("ops list: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -406,6 +480,25 @@ async function noteOf(orderId: string): Promise<number> {
     .where(and(eq(S.orderEvents.orderId, orderId), eq(S.orderEvents.type, "note")))
     .limit(1);
   return row?.id ?? GHOST_EVENT;
+}
+
+/** A shared orders view of `storeId` (made on first use; `fresh` makes another), for the saved-view action cases. */
+async function viewOf(storeId: string, fresh = false): Promise<string> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { and, eq, isNull } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  if (!fresh) {
+    const [row] = await db
+      .select({ id: S.savedViews.id })
+      .from(S.savedViews)
+      .where(and(eq(S.savedViews.storeId, storeId), eq(S.savedViews.surface, "orders"), isNull(S.savedViews.userId)))
+      .limit(1);
+    if (row) return row.id;
+  }
+  const id = newId();
+  await db.insert(S.savedViews).values({ id, storeId, userId: null, surface: "orders", name: "To pack · Fès", query: { view: "to_pack", cityKey: "fes" }, position: 0 });
+  return id;
 }
 
 export const actions: TrackActionCase[] = [
@@ -463,4 +556,16 @@ export const actions: TrackActionCase[] = [
   { file: CUSTOMERS, name: "blockPhoneAndCancelAction", area: "blocklist", path: "/customers", permission: ["blocklist.write"], write: true, victim: (fx) => [{ orderId: fx.A.order.main, openOrders: "fake" }], own: () => [{ phone: `+2126${String(Math.floor(Math.random() * 9e7) + 1e7)}`, openOrders: "keep" }] },
   { file: CUSTOMERS, name: "unblockAction", area: "blocklist", path: "/customers", permission: ["blocklist.write"], write: true, victim: (fx) => [fx.A.block.phone], own: (fx, fresh) => fresh.block(fx.B).then((id) => [id]) },
   { file: CUSTOMERS, name: "saveCustomerNoteAction", area: "orders", path: "/customers", permission: ["orders.write"], write: true, victim: async (fx) => [await customerOf(fx.A.order.main), "pwned"], own: async (fx) => [await customerOf(fx.B.order.main), "Client fidèle"] },
+  // P4 step 6: the list's bulk, undo, saved views, Carrier file columns and test-order delete
+  { file: ORDERS, name: "bulkAssignAction", area: "orders", path: "/orders", permission: ["orders.assign"], write: true, victim: (fx) => [[fx.A.order.main], null, NO_CACHE], own: async (fx, fresh) => [[await fresh.order(fx.B)], null, NO_CACHE] },
+  { file: ORDERS, name: "bulkPinAction", area: "orders", path: "/orders", permission: ["orders.assign"], write: true, victim: (fx) => [[fx.A.order.main], true, NO_CACHE], own: async (fx, fresh) => [[await fresh.order(fx.B)], true, NO_CACHE] },
+  { file: ORDERS, name: "bulkMoveAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: (fx) => [[fx.A.order.main], { legacy: "fake" }, NO_CACHE], own: async (fx, fresh) => [[await fresh.order(fx.B)], { legacy: "no_answer" }, NO_CACHE] },
+  { file: ORDERS, name: "undoMoveAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: () => [ghostId26()], own: () => [ghostId26()] },
+  { file: ORDERS, name: "saveCarrierCsvColumnsAction", area: "orders", path: "/orders", permission: ["shipments.write"], write: true, victim: () => [{ columns: [{ header: "Ref", source: "order_id" }] }], own: () => [{ columns: [{ header: "Ref", source: "order_id" }, { header: "Tel", source: "phone" }], delimiter: ";" }] },
+  { file: ORDERS, name: "deleteTestOrdersAction", area: "orders", path: "/orders", permission: ["settings.write"], write: true, victim: () => [], own: () => [] },
+  { file: ORDERS, name: "listSavedViewsAction", area: "orders", path: "/orders", permission: ["orders.read"], write: false, victim: () => [], own: () => [] },
+  { file: ORDERS, name: "saveViewAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: (fx) => [{ name: "A's page", query: { pageId: fx.A.page.live } }], own: (fx) => [{ name: "Mes commandes", query: { pageId: fx.B.page.live } }] },
+  { file: ORDERS, name: "renameViewAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: async (fx) => [await viewOf(fx.A.id), "pwned"], own: async (fx) => [await viewOf(fx.B.id), "Renamed"] },
+  { file: ORDERS, name: "deleteViewAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: async (fx) => [await viewOf(fx.A.id)], own: async (fx) => [await viewOf(fx.B.id, true)] },
+  { file: ORDERS, name: "reorderViewsAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: async (fx) => [[await viewOf(fx.A.id)]], own: async (fx) => [[await viewOf(fx.B.id)]] },
 ];
