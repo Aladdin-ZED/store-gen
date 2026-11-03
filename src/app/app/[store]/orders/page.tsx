@@ -18,6 +18,7 @@ import {
   unblockAction,
   updateOrderStatusAction,
 } from "./actions";
+import { revealPhoneAction } from "../queue/actions";
 
 export const metadata: Metadata = { title: "Orders" };
 
@@ -78,6 +79,7 @@ export default async function OrdersPage({ params, searchParams }: { params: Par
           blockPhone: blockPhoneAction,
           unblock: unblockAction,
           retryFailed: retryFailedSyncAction,
+          ...(ctx.can("orders.reveal_phone") ? { reveal: revealPhoneAction } : {}),
         }}
       />
     </Screen>

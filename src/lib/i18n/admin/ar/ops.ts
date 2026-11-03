@@ -90,6 +90,19 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "ops.inbound.paused": "بحثتي بزاف هاد الساعة. سول المسؤول ديالك.",
   "ops.state.conflict": "{name} بدّلها دابا",
   "ops.state.conflictAnon": "تبدّلات من بلاصة أخرى دابا",
+  /* ---- رفض خاص بالطلب (OPE-§11, §9.5, OD49) ---- */
+  "ops.error.blocked": "هاد النمرة مبلوكية ف الحانوت ديالك",
+  "ops.error.duplicate": "هاد الكليان عندو ديجا طلب مفتوح. شوفو، ولا زيد هادا على كل حال.",
+  "ops.error.locked": "هاد الطلب عند شركة التوصيل. دابا غير العنوان والعلامة والملاحظة اللي يقدرو يتبدلو.",
+  "ops.error.bad_hold": "ختار تاريخ ف 60 يوم الجايين، على طلب مأكد باقي ما خرجش.",
+  "ops.error.bad_adjust": "التخفيض ما يقدرش يفوت المجموع ديال الطلب.",
+  "ops.error.reason_required": "قول السبب، ف 3 حروف على الأقل.",
+  "ops.error.already_converted": "هاد الزبون المحتمل ولى طلب ديجا.",
+  "ops.error.illegal": "هاد التبديل ما ممكنش من الحالة اللي فيها الطلب دابا.",
+  "ops.manual.pricedWithCurrent": "الأثمنة محسوبة بالصفحة كيف منشورة دابا",
+  "ops.manual.pricesChanged": "الأثمنة تبدلات، راجع الملخص",
+  "ops.manual.recallRequested": "طلبنا نرجعو الكولي",
+  "ops.manual.carrierNotified": "شركة التوصيل تخبرات",
 
   /* ---- تاريخ الطلب (OPE-§4.1) ---- */
   "ops.tl.created": "الطلب تدار",

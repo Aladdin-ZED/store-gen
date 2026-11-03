@@ -23,10 +23,15 @@ import { normalizePhone, toAsciiDigits } from "@/lib/markets/phone";
 import { cleanText, syncPendingOrders, type SyncResult } from "@/lib/sheets";
 import { skuCell, variantCell } from "@/lib/sheets/row";
 import { byId, inStore, storeValues, whereStore } from "@/lib/tenancy/sql";
-import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
+import type { ActionResult, StoreCtx, StoreScope, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 import type { OrderItems } from "@/lib/db/schema";
+import { viewerSeesOrder } from "@/lib/callcenter/visibility";
 import { ORDER_STATUSES, type OrderStatus } from "./contract";
-import { moveToLegacyAs, type TransitionError } from "./transition";
+import { phoneCountryOf } from "./edit";
+import { appendEvents, viewerOf } from "./events";
+import { maskPhone } from "./masking";
+import { PRE_SHIP, type ConfirmState, type ShipState } from "./state";
+import { actorFrom, moveToLegacyAs, transitionOrder, type TransitionError } from "./transition";
 
 export type OrderRecord = typeof orders.$inferSelect;
 export type LeadRecord = typeof leads.$inferSelect;
@@ -353,7 +358,8 @@ async function addBlock(scope: WriteScope, kind: "phone" | "ip", value: string, 
     .insert(blocklist)
     .values(storeValues(scope, { id: newId(), kind, value, reason: why, createdBy: actor.userId, createdAt: new Date() }))
     .onDuplicateKeyUpdate({ set: { reason: why } });
-  await auditIn(scope, actor, "blocklist.added", { target: kind === "phone" ? value : `ip:${value.slice(0, 12)}…` });
+  // the audit names the number masked (OD11): the blocklist row itself holds the full value
+  await auditIn(scope, actor, "blocklist.added", { target: kind === "phone" ? maskPhone(value) : `ip:${value.slice(0, 12)}…` });
 }
 
 /** Block a phone number in the store (any common format; validated for `country`). */
@@ -385,6 +391,113 @@ export async function unblock(scope: WriteScope, id: string, actor: Actor): Prom
   const ok = affected(res) === 1;
   if (ok) await auditIn(scope, actor, "blocklist.removed", { target: id });
   return ok;
+}
+
+/* ------------------------------------------------------------------ */
+/* block and cancel (OP-12, OPE-§9.5)                                  */
+/* ------------------------------------------------------------------ */
+
+/** confirm states an order is still open in (OPE-§9.5: these move to fake / cancelled) */
+const OPEN_CONFIRM: ReadonlySet<ConfirmState> = new Set(["new", "attempting", "callback", "confirmed"]);
+/** with the carrier: listed, never touched */
+const OUT_SHIP: ReadonlySet<ShipState> = new Set(["shipped", "in_transit", "out_for_delivery", "attempt_failed", "postponed"]);
+/** a phone's orders read at most (one customer; a busy number has a handful) */
+const BLOCK_SCAN = 100;
+const ORDER_ID_FORMAT = /^[A-Z0-9]{2,8}-[A-Z0-9]{4,12}$/;
+
+export interface BlockTarget {
+  e164: string;
+  open: { id: string; rev: number }[];
+  /** already with the carrier */
+  shipped: string[];
+}
+
+type BlockInput = { phone?: string; orderId?: string };
+
+/** The number to block (typed, normalised with the store market's country, ORD-16; or an order's) and its orders. */
+async function blockTarget(ctx: StoreCtx, input: BlockInput): Promise<BlockTarget | null> {
+  const { scope } = ctx;
+  let e164: string | null = null;
+  if (input.orderId) {
+    if (!ORDER_ID_FORMAT.test(input.orderId)) return null;
+    const [o] = await db
+      .select({ phone: orders.phone, id: orders.id, assigneeId: orders.assigneeId, confirmedBy: orders.confirmedBy })
+      .from(orders)
+      .where(byId(orders, scope, input.orderId))
+      .limit(1);
+    if (!o || !viewerSeesOrder(scope, viewerOf(ctx), o, true)) return null;
+    e164 = o.phone;
+  } else if (input.phone) {
+    const raw = input.phone.trim();
+    e164 = normalizePhone(raw, phoneCountryOf(ctx.store))?.e164 ?? (/^\+[1-9][0-9]{6,14}$/.test(raw) ? raw : null);
+  }
+  if (!e164) return null;
+  const rows = await db
+    .select({ id: orders.id, rev: orders.rev, confirmState: orders.confirmState, shipState: orders.shipState })
+    .from(orders)
+    .where(whereStore(orders, scope, eq(orders.phone, e164)))
+    .orderBy(desc(orders.createdAt))
+    .limit(BLOCK_SCAN);
+  return {
+    e164,
+    open: rows.filter((r) => OPEN_CONFIRM.has(r.confirmState) && PRE_SHIP.has(r.shipState)).map((r) => ({ id: r.id, rev: r.rev })),
+    shipped: rows.filter((r) => OUT_SHIP.has(r.shipState)).map((r) => r.id),
+  };
+}
+
+export interface BlockPreview {
+  phoneMasked: string;
+  /** "This number has 2 open orders and 1 shipped order" */
+  open: number;
+  shipped: number;
+  alreadyBlocked: boolean;
+}
+
+/** The dialog's preview before confirming (blocklist.write): the masked number and its open and shipped orders. */
+export async function blockPreview(ctx: StoreCtx, input: BlockInput): Promise<ActionResult<BlockPreview>> {
+  if (!ctx.can("blocklist.write")) return { ok: false, error: "forbidden" };
+  const t = await blockTarget(ctx, input);
+  if (!t) return { ok: false, error: input.orderId ? "not_found" : "invalid" };
+  const [hit] = await db
+    .select({ id: blocklist.id })
+    .from(blocklist)
+    .where(whereStore(blocklist, ctx.scope, eq(blocklist.kind, "phone"), eq(blocklist.value, t.e164)))
+    .limit(1);
+  return { ok: true, data: { phoneMasked: maskPhone(t.e164), open: t.open.length, shipped: t.shipped.length, alreadyBlocked: !!hit } };
+}
+
+export type BlockAndCancelResult = { blocked: true; moved: { id: string; ok: boolean; error?: TransitionError }[]; untouched: string[] };
+
+/**
+ * OP-12: block the number in the store and settle its open orders. blocklist.write; moving the orders also needs
+ * orders.write. Open pre-ship orders → `fake` (default) or `cancelled` with reason `blocked`, through the writer;
+ * orders already with the carrier are listed and never touched; `keep` moves nothing. Events `blocked` on every order
+ * of the number read, plus the transitions; `audit("blocklist.added")` with the store id.
+ */
+export async function blockPhoneAndCancel(
+  ctx: WriteCtx,
+  input: { phone?: string; orderId?: string; reason?: string; openOrders: "fake" | "cancel" | "keep" },
+): Promise<ActionResult<BlockAndCancelResult>> {
+  const { scope } = ctx;
+  if (!ctx.can("blocklist.write")) return { ok: false, error: "forbidden" };
+  const mode = input.openOrders ?? "fake";
+  if (mode !== "keep" && !ctx.can("orders.write")) return { ok: false, error: "forbidden" };
+  const t = await blockTarget(ctx, input);
+  if (!t) return { ok: false, error: input.orderId ? "not_found" : "invalid" };
+  await addBlock(scope, "phone", t.e164, input.reason ?? (input.orderId ? `Commande ${input.orderId}` : null), ctx.actor);
+  const marked = [...t.open.map((o) => o.id), ...t.shipped];
+  if (marked.length) {
+    await db.transaction((tx) => appendEvents(tx, scope, marked.map((id) => ({ orderId: id, actorKind: "user" as const, actorId: ctx.user.id, type: "blocked" as const, meta: { kind: "phone" } }))));
+  }
+  const moved: BlockAndCancelResult["moved"] = [];
+  if (mode !== "keep") {
+    const actor = actorFrom(ctx);
+    for (const o of t.open) {
+      const r = await transitionOrder(actor, scope, { orderId: o.id, want: { confirm: mode === "fake" ? "fake" : "cancelled" }, source: "ui", reason: "blocked" });
+      moved.push(r.ok ? { id: o.id, ok: true } : { id: o.id, ok: false, error: r.error });
+    }
+  }
+  return { ok: true, data: { blocked: true, moved, untouched: t.shipped } };
 }
 
 /* ------------------------------------------------------------------ */

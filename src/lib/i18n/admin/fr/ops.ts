@@ -89,6 +89,19 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "ops.inbound.paused": "Trop de recherches cette heure. Demandez à votre responsable.",
   "ops.state.conflict": "Modifiée par {name} à l'instant",
   "ops.state.conflictAnon": "Modifiée ailleurs à l'instant",
+  /* ---- refus propres à la commande (OPE-§11, §9.5, OD49) ---- */
+  "ops.error.blocked": "Ce numéro est bloqué dans votre boutique",
+  "ops.error.duplicate": "Ce client a déjà une commande ouverte. Vérifiez-la, ou créez quand même celle-ci.",
+  "ops.error.locked": "Cette commande est chez le transporteur. Seuls l'adresse, le repère et la note peuvent encore changer.",
+  "ops.error.bad_hold": "Choisissez une date dans les 60 prochains jours, sur une commande confirmée pas encore partie.",
+  "ops.error.bad_adjust": "Une remise ne peut pas dépasser le sous-total de la commande.",
+  "ops.error.reason_required": "Indiquez la raison, en 3 caractères au moins.",
+  "ops.error.already_converted": "Ce prospect est déjà une commande.",
+  "ops.error.illegal": "Ce changement n'est pas possible depuis l'état actuel de la commande.",
+  "ops.manual.pricedWithCurrent": "Prix calculés avec la page telle qu'elle est publiée maintenant",
+  "ops.manual.pricesChanged": "Les prix ont changé, vérifiez le récapitulatif",
+  "ops.manual.recallRequested": "Rappel du colis demandé",
+  "ops.manual.carrierNotified": "Transporteur prévenu",
 
   /* ---- l'historique de la commande (OPE-§4.1) ---- */
   "ops.tl.created": "Commande passée",

@@ -1,4 +1,4 @@
-// proves: OP-01, OP-02, OP-03, OP-04, OP-06, OP-07, OP-14, SF-05
+// proves: OP-01, OP-02, OP-03, OP-04, OP-06, OP-07, OP-08, OP-12, OP-14, SF-05
 /**
  * `test:ops-db` (P4 CALL CENTER; operations.md OPE-§O.2, §O.4; docs/STORE-SAAS.md §J.2): the call centre against a
  * real MariaDB. Creates a throwaway `cod_test_p4_opsdb_*` database on XAMPP's MariaDB (root, no password,
@@ -25,6 +25,12 @@
  *                (who may, exactly one phone_revealed per reveal and none on a replay, WhatsApp's whatsapp_sent, the
  *                lease renewal, another store's template); riskBandOutcomes null below 30 decided and exact above;
  *                attemptStats in store-local cells; the queue card from its reads; a stale card's fresh copy
+ *   manual       (OP-08, OP-12, OD49, OD55, OPS-21) the manual total equals the public path's total for the test:offers
+ *                fixtures (duo, tshirt, colors); a replayed idem returns the first order; blocked, duplicate and the
+ *                adjustment rules; editOrder re-prices, locks a shipped order but its address / landmark / note
+ *                (inTransit); recall and the carrier tick; the hold bounds (bad_hold); tracking implies packed;
+ *                block-and-cancel moves open orders to fake / cancelled(blocked), lists shipped ones, never another
+ *                store's; convertLeadToOrder pre-fills, answers already_converted the second time, not_found across stores
  *   masking      (OD61) every read function of this step masks under an impersonation scope and is the identity
  *                under a member scope (canaries)
  */
@@ -919,6 +925,225 @@ async function main(): Promise<number> {
   }
 
   /* ================================================================ */
+  section = "manual";
+  {
+    const M = load<typeof import("@/lib/orders/manual")>("@/lib/orders/manual");
+    const ED = load<typeof import("@/lib/orders/edit")>("@/lib/orders/edit");
+    const { createOrder } = load<typeof import("@/lib/orders/create")>("@/lib/orders/create");
+    const { resolvePublicTarget } = load<typeof import("@/lib/tenancy/public")>("@/lib/tenancy/public");
+    const { getFixture } = load<typeof import("@/lib/page/fixtures")>("@/lib/page/fixtures");
+    const { toCents } = load<typeof import("@/lib/finance/lite/cents")>("@/lib/finance/lite/cents");
+    type Sel = import("@/lib/orders/manual").ManualOrderInput["selection"];
+    type FixtureName = import("@/lib/page/fixtures").FixtureName;
+
+    /** a published page of `store` with the fixture as its published version */
+    async function livePageOf(storeId: string, name: FixtureName): Promise<{ pageId: string; key: string; versionId: string }> {
+      const doc = getFixture(name, { locale: "fr" }).doc;
+      const pageId = newId();
+      const versionId = newId();
+      const key = `pk${randomBytes(10).toString("hex")}`;
+      await db.insert(S.pages).values({ id: pageId, storeId, slug: `${name}-${pageId.slice(-6).toLowerCase()}`, name, status: "published", locale: "fr", publicKey: key, draft: doc, publishedVersionId: versionId });
+      await db.insert(S.pageVersions).values({ id: versionId, storeId, pageId, kind: "publish", doc, checksum: "0".repeat(64), runtimeV: 2 });
+      return { pageId, key, versionId };
+    }
+    const customer = (phone: string) => ({ name: "Salma Bennani", phone, city: "Casablanca", address: "Rue 12 Maarif" });
+    const input = (pageId: string, sel: Sel, phone: string, more: Partial<import("@/lib/orders/manual").ManualOrderInput> = {}) => ({
+      pageId,
+      selection: sel,
+      customer: customer(phone),
+      confirmed: false,
+      idem: randomUUID(),
+      ...more,
+    });
+    const selOf = (offerId: string, units: Sel["units"] = []): Sel => ({ offerId, units, extras: {}, bump: false });
+    const dataOf = <T>(r: { ok: boolean; data?: T }) => (r.ok ? (r as { data: T }).data : null);
+
+    // OP-08 parity: the manual total equals the public path's total for the test:offers fixtures (duo, tshirt, colors)
+    const vectors: [FixtureName, Sel][] = [
+      ["duo", selOf("duo")],
+      ["duo", selOf("trio")],
+      ["tshirt", selOf("x1", [{ o: { "g-fit": "d-col=o-noir|d-size=o-m" }, f: {} }])],
+      ["tshirt", selOf("x2", [{ o: { "g-fit": "d-col=o-noir|d-size=o-m" }, f: {} }, { o: { "g-fit": "d-col=o-noir|d-size=o-m" }, f: {} }])],
+      ["colors", selOf("colors", [{ o: { "g-fit": "d-size=o-m" }, f: {} }, { o: { "g-fit": "d-size=o-l" }, f: {} }, { o: { "g-fit": "d-size=o-s" }, f: {} }])],
+    ];
+    const pagesOf = new Map<FixtureName, Awaited<ReturnType<typeof livePageOf>>>();
+    const parityOk = new Set<FixtureName>();
+    for (const [name, sel] of vectors) {
+      if (!pagesOf.has(name)) pagesOf.set(name, await livePageOf(STORE_A, name));
+      const page = pagesOf.get(name)!;
+      const m = await M.createManualOrder(owner, input(page.pageId, sel, freshPhone()));
+      const shown = dataOf(m) ? toCents((await rowOf(dataOf(m)!.orderId)).total) : 0;
+      const target = await resolvePublicTarget(page.key);
+      const pub = target
+        ? await createOrder(
+            { v: 2, pageKey: page.key, idem: randomUUID(), eventId: `evt_${randomBytes(6).toString("hex")}`, bundleId: sel.offerId, bump: sel.bump, name: "Salma Bennani", phone: freshPhone(), city: "Casablanca", address: "Rue 12 Maarif", t: 9000, utm: {}, ver: page.versionId, st: shown, units: sel.units, extras: sel.extras },
+            { ip: `10.9.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`, ua: "Mozilla/5.0 (parity)", target },
+          )
+        : null;
+      const pubId = pub?.response.ok ? (pub.response as { orderId: string }).orderId : null;
+      const mid = dataOf(m)?.orderId;
+      if (!mid || !pubId) {
+        ok(`parity ${name}/${sel.offerId}: both paths accept the selection (or both refuse it)`, !mid && !pubId, { manual: m, public: pub?.response });
+        continue;
+      }
+      const [mr, pr] = [await rowOf(mid), await rowOf(pubId)];
+      eq(`parity ${name}/${sel.offerId}: manual total = public total (cents), same items`, [toCents(mr.total), JSON.stringify(mr.items)], [toCents(pr.total), JSON.stringify(pr.items)]);
+      parityOk.add(name);
+      if (name === "duo" && sel.offerId === "duo") {
+        eq("manual row: source, risk 0, flag manual, creator, store currency and locale, sheet pending, not a test", [mr.source, mr.riskScore, mr.flags, mr.createdBy, mr.currency, mr.locale, mr.sheetStatus, mr.isTest], ["manual", 0, ["manual"], U.ownerA.id, rowA.currency, rowA.defaultLocale, "pending", false]);
+        eq("manual row: one created event, by the creator, source manual", (await eventsOf(mid, "created")).map((e) => [e.actorKind, e.actorId, (e.meta as { source?: string }).source]), [["user", U.ownerA.id, "manual"]]);
+      }
+    }
+    eq("parity: every fixture has at least one accepted vector", [...parityOk].sort(), ["colors", "duo", "tshirt"]);
+
+    const duo = pagesOf.get("duo")!;
+    // idempotency (OD36): a replayed idem answers the first order, nothing new
+    {
+      const i = input(duo.pageId, selOf("duo"), freshPhone(), { confirmed: true });
+      const first = dataOf(await M.createManualOrder(owner, i));
+      const again = dataOf(await M.createManualOrder(owner, i));
+      ok("a replayed idem answers the first order with replayed: true", !!first && !!again && again.orderId === first.orderId && again.replayed === true, { first, again });
+      const fr = await rowOf(first!.orderId);
+      eq("confirmed: the creator is confirmed_by, to_pack", [fr.confirmState, fr.shipState, fr.confirmedBy], ["confirmed", "to_pack", U.ownerA.id]);
+    }
+    // a page of another store, a draft page, an unknown offer
+    {
+      const bPage = await livePageOf(STORE_B, "duo");
+      const other = await M.createManualOrder(owner, input(bPage.pageId, selOf("duo"), freshPhone()));
+      eq("another store's page: not_found", other.ok ? "ok" : other.error, "not_found");
+      const bad = await M.createManualOrder(owner, input(duo.pageId, selOf("nope"), freshPhone()));
+      ok("an unknown offer: invalid with the field error (bundleId)", !bad.ok && bad.error === "invalid" && (bad as { fields?: Record<string, string> }).fields?.bundleId === "invalid", bad);
+      const q = await M.quoteManualOrder(owner, input(duo.pageId, selOf("trio"), ""));
+      const qd = dataOf(q);
+      ok("quote without a phone: the server's lines and total, the phone field error", !!qd && qd.totalCents === 34900 && qd.lines.length >= 1 && qd.fields?.phone === "required", q);
+    }
+    // blocked, duplicate, adjustment
+    {
+      const p = freshPhone();
+      const first = dataOf(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), p)));
+      const dup = await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), p));
+      ok("same phone, open order: duplicate with the ids", !dup.ok && dup.error === "duplicate" && JSON.stringify((dup as { duplicates?: { id: string }[] }).duplicates?.map((d) => d.id)) === JSON.stringify([first?.orderId]), dup);
+      ok("allowDuplicate: created", (await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), p, { allowDuplicate: true }))).ok);
+      const pb = freshPhone();
+      await AD.blockPhone(A, pb, "MA", "test", owner.actor);
+      const blocked = await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), pb));
+      ok("a blocked number: blocked, with the staff sentence", !blocked.ok && blocked.error === "blocked" && (blocked as { text?: string }).text === "This number is blocked in your store", blocked);
+      const agentAdj = await M.createManualOrder(agent, input(duo.pageId, selOf("duo"), freshPhone(), { adjustCents: -1000, adjustReason: "remise fidèle" }));
+      eq("an agent's adjustment: forbidden", agentAdj.ok ? "ok" : agentAdj.error, "forbidden");
+      eq("an adjustment without a reason: reason_required", ((r) => (r.ok ? "ok" : r.error))(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), freshPhone(), { adjustCents: -1000 }))), "reason_required");
+      eq("an adjustment below −subtotal: bad_adjust", ((r) => (r.ok ? "ok" : r.error))(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), freshPhone(), { adjustCents: -30000, adjustReason: "trop" }))), "bad_adjust");
+      const adj = dataOf(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), freshPhone(), { adjustCents: -1000, adjustReason: "remise fidèle" })));
+      const ar = adj ? await rowOf(adj.orderId) : null;
+      eq("a manager's adjustment: total = subtotal + shipping − 10.00", ar && [toCents(ar.total), ar.adjustCents], [23900, -1000]);
+      const agentOwn = dataOf(await M.createManualOrder(agent, input(duo.pageId, selOf("duo"), freshPhone(), { confirmed: true })));
+      const ao = agentOwn ? await rowOf(agentOwn.orderId) : null;
+      eq("an agent's order stays theirs and is confirmed by them", ao && [ao.assigneeId, ao.confirmState, ao.confirmedBy], [U.agentA.id, "confirmed", U.agentA.id]);
+    }
+    // editOrder (OPE-§11.3): re-price, locks, in-transit contact edits
+    {
+      const created = dataOf(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), freshPhone())))!;
+      const r0 = await rowOf(created.orderId);
+      await db.update(S.orders).set({ sheetDirty: 0 }).where(deq(S.orders.id, created.orderId));
+      const e1 = await ED.editOrder(owner, created.orderId, { selection: { ...selOf("trio") } }, r0.rev);
+      const d1 = dataOf(e1);
+      ok("edit lines: re-priced by the engine (trio 349.00), rev + 1, priced with the order's version", !!d1 && d1.totalCents === 34900 && d1.rev === r0.rev + 1 && d1.pricedWith === "order_version", e1);
+      const r1 = await rowOf(created.orderId);
+      eq("edit lines: the row's money, qty and sheet bit 4", [toCents(r1.total), r1.qty, r1.sheetDirty & 4, r1.rev], [34900, 3, 4, r0.rev + 1]);
+      const fe = await eventsOf(created.orderId, "field_edited");
+      eq("edit lines: one field_edited with items and total before / after", fe.map((e) => (e.meta as { fields: { f: string }[] }).fields.map((f) => f.f)), [["items", "total"]]);
+      eq("a stale rev: conflict", ((r) => (r.ok ? "ok" : r.error))(await ED.editOrder(owner, created.orderId, { note: "x" }, r0.rev)), "conflict");
+      // phone change: E.164 stored in the event, the customer link moved
+      const np = freshPhone();
+      const e2 = dataOf(await ED.editOrder(owner, created.orderId, { phone: `0${np.slice(4)}` }, r1.rev));
+      const r2 = await rowOf(created.orderId);
+      ok("phone edit: normalised with the store market, the customer moved", !!e2 && r2.phone === np && r2.customerId !== r1.customerId && !!r2.customerId, { e2, phone: r2.phone });
+      const tl = await E.orderTimeline(A, owner, created.orderId);
+      ok("the timeline renders the edited phone masked", !JSON.stringify(tl).includes(np.slice(4)), tl.items[0]);
+      // shipped: only address / landmark / note, with inTransit
+      await T.applyExternalStatus(A, created.orderId, { legacy: "shipped" }, { kind: "sheet", ref: "row:99" });
+      const r3 = await rowOf(created.orderId);
+      eq("shipped: lines locked", ((r) => (r.ok ? "ok" : r.error))(await ED.editOrder(owner, created.orderId, { selection: selOf("duo") }, r3.rev)), "locked");
+      eq("shipped: the phone locked", ((r) => (r.ok ? "ok" : r.error))(await ED.editOrder(owner, created.orderId, { phone: freshPhone() }, r3.rev)), "locked");
+      const t1 = await ED.editOrder(owner, created.orderId, { address: "Rue 40 Gauthier", landmark: "près de la pharmacie" }, r3.rev);
+      ok("shipped: address and landmark accepted, inTransit", t1.ok && t1.data.inTransit === true, t1);
+      const last = (await eventsOf(created.orderId, "field_edited")).at(-1)!;
+      eq("the in-transit event carries inTransit: true", (last.meta as { inTransit?: boolean }).inTransit, true);
+      // recall (OPS-21) and the warehouse tick
+      eq("recall on a shipped order", await ED.requestRecall(owner, created.orderId, "changed_mind"), { ok: true, changed: true });
+      eq("recall again: no second event", await ED.requestRecall(owner, created.orderId, "changed_mind"), { ok: true, changed: false });
+      eq("carrier notified", await ED.markCarrierNotified(owner, created.orderId), { ok: true, changed: true });
+      eq("recall events", (await eventsOf(created.orderId, "recall_requested")).map((e) => e.meta), [{ reason: "changed_mind", carrierNotified: false }, { reason: "changed_mind", carrierNotified: true }]);
+      const fresh = dataOf(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), freshPhone())))!;
+      eq("recall on a pre-ship order: illegal", await ED.requestRecall(owner, fresh.orderId, "changed_mind"), { ok: false, error: "illegal" });
+      // another store
+      eq("editOrder from B with A's id: not_found", ((r) => (r.ok ? "ok" : r.error))(await ED.editOrder(ownerBCtx, created.orderId, { note: "x" }, r3.rev)), "not_found");
+    }
+    // the hold (OD49) and tracking (OD55)
+    {
+      const c = dataOf(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), freshPhone(), { confirmed: true })))!;
+      eq("a hold beyond 60 days: bad_hold", await ED.setOrderHold(owner, c.orderId, new Date(Date.now() + 61 * 86_400_000)), { ok: false, error: "bad_hold" });
+      eq("a hold in the past: bad_hold", await ED.setOrderHold(owner, c.orderId, new Date(Date.now() - 60_000)), { ok: false, error: "bad_hold" });
+      const at = new Date(Date.now() + 5 * 86_400_000);
+      const h = await ED.setOrderHold(owner, c.orderId, at);
+      ok("a hold in 5 days: set, with hold_set", h.ok && h.changed && (await rowOf(c.orderId)).shipAfter?.getTime() === at.getTime() && (await eventsOf(c.orderId, "hold_set")).length === 1, h);
+      const rm = await ED.setOrderHold(owner, c.orderId, null);
+      ok("null removes the hold", rm.ok && (await rowOf(c.orderId)).shipAfter === null, rm);
+      const u = dataOf(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), freshPhone())))!;
+      eq("a hold on an unconfirmed order: bad_hold", await ED.setOrderHold(owner, u.orderId, at), { ok: false, error: "bad_hold" });
+      const viaCreate = await M.createManualOrderWith(owner, input(duo.pageId, selOf("duo"), freshPhone(), { confirmed: true }), { shipAfter: new Date(Date.now() + 90 * 86_400_000) });
+      eq("create with a hold beyond 60 days: bad_hold", viaCreate.ok ? "ok" : viaCreate.error, "bad_hold");
+      eq("tracking: forbidden for an agent", ((r) => (r.ok ? "ok" : r.error))(await ED.setOrderTracking(agent, c.orderId, { trackingRef: "AM123" })), "forbidden");
+      const tr = dataOf(await ED.setOrderTracking(owner, c.orderId, { trackingRef: "AM123456MA", carrierLabel: "Amana" }));
+      const tc = await rowOf(c.orderId);
+      ok("tracking: stored, tracking_set, implies packed", !!tr && tr.packed && tc.trackingRef === "AM123456MA" && tc.carrierLabel === "Amana" && tc.shipState === "packed" && (await eventsOf(c.orderId, "tracking_set")).length === 1, { tr, ship: tc.shipState });
+    }
+    // block and cancel (OP-12, OPE-§9.5)
+    {
+      const p = freshPhone();
+      const o1 = dataOf(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), p)))!.orderId;
+      const o2 = dataOf(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), p, { confirmed: true, allowDuplicate: true })))!.orderId;
+      const o3 = dataOf(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), p, { allowDuplicate: true })))!.orderId;
+      await T.applyExternalStatus(A, o3, { legacy: "shipped" }, { kind: "sheet", ref: "row:100" });
+      const ob = await order(B, { phone: p });
+      const preview = dataOf(await AD.blockPreview(owner, { orderId: o1 }));
+      eq("preview: 2 open orders and 1 shipped, the number masked", preview && [preview.open, preview.shipped, preview.alreadyBlocked, preview.phoneMasked.includes(p.slice(-6))], [2, 1, false, false]);
+      eq("an agent may not block", ((r) => (r.ok ? "ok" : r.error))(await AD.blockPhoneAndCancel(agent, { orderId: o1, openOrders: "fake" })), "forbidden");
+      const bc = dataOf(await AD.blockPhoneAndCancel(manager, { phone: `0${p.slice(4)}`, openOrders: "fake" }));
+      ok("block and cancel: both open orders moved to fake, the shipped one listed untouched", !!bc && bc.moved.every((m) => m.ok) && bc.moved.length === 2 && JSON.stringify(bc.untouched) === JSON.stringify([o3]), bc);
+      eq("the open orders are fake, the shipped one stays shipped", [(await rowOf(o1)).confirmState, (await rowOf(o2)).confirmState, (await rowOf(o3)).shipState], ["fake", "fake", "shipped"]);
+      ok("events: blocked on each order of the number", (await eventsOf(o1, "blocked")).length === 1 && (await eventsOf(o3, "blocked")).length === 1);
+      const bob = await rowOf(ob);
+      eq("store B's order of the same number: untouched", [bob.confirmState, (await eventsOf(ob, "blocked")).length], ["new", 0]);
+      eq("the number is blocked in A only", (await db.select().from(S.blocklist).where(and(deq(S.blocklist.kind, "phone"), deq(S.blocklist.value, p)))).map((b) => b.storeId), [STORE_A]);
+      const p2 = freshPhone();
+      const c1 = dataOf(await M.createManualOrder(owner, input(duo.pageId, selOf("duo"), p2)))!.orderId;
+      const bc2 = dataOf(await AD.blockPhoneAndCancel(manager, { orderId: c1, openOrders: "cancel" }));
+      const c1r = await rowOf(c1);
+      ok("openOrders cancel: cancelled with reason blocked", !!bc2 && c1r.confirmState === "cancelled" && c1r.cancelReason === "blocked", { bc2, state: c1r.confirmState, reason: c1r.cancelReason });
+    }
+    // lead conversion (OPE-§11.4)
+    {
+      const leadId = newId();
+      const lp = freshPhone();
+      await db.insert(S.leads).values({ id: leadId, storeId: STORE_A, pageId: duo.pageId, idem: randomUUID(), phone: lp, name: "Nadia Lead", city: "Casablanca", bundleId: "duo", kind: "whatsapp", sel: { v: 2, bundleId: "duo", units: [], extras: {}, bump: false } });
+      const conv = { selection: selOf(""), customer: { name: "", phone: "", city: "", address: "Rue 3 Hay Hassani" }, confirmed: false, idem: randomUUID() };
+      eq("B converting A's lead: not_found", ((r) => (r.ok ? "ok" : r.error))(await M.convertLeadToOrder(ownerBCtx, leadId, conv)), "not_found");
+      const c1 = await M.convertLeadToOrder(owner, leadId, conv);
+      const cid = dataOf(c1)?.orderId;
+      ok("a WhatsApp lead converts to a whatsapp order pre-filled from the lead", !!cid, c1);
+      if (cid) {
+        const cr = await rowOf(cid);
+        eq("the converted order: source, phone, name, total of the duo", [cr.source, cr.phone, cr.name, toCents(cr.total)], ["whatsapp", lp, "Nadia Lead", 24900]);
+        eq("the created event carries the lead id", (await eventsOf(cid, "created")).map((e) => (e.meta as { leadId?: string }).leadId), [leadId]);
+        const lead = (await db.select().from(S.leads).where(deq(S.leads.id, leadId)))[0]!;
+        eq("the lead: converted by an agent", [lead.convertedOrderId, lead.convertedVia, lead.status], [cid, "agent", "converted"]);
+      }
+      const again = await M.convertLeadToOrder(owner, leadId, { ...conv, idem: randomUUID() });
+      ok("a second conversion: already_converted with the order id", !again.ok && again.error === "already_converted" && (again as { orderId?: string }).orderId === cid, again);
+    }
+  }
+
+  /* ================================================================ */
   section = "masking";
   {
     // canaries: a customer name and an internal note that must never reach an impersonating session (OD61)
@@ -930,6 +1155,10 @@ async function main(): Promise<number> {
     await E.appendEvents(db, A, [{ orderId: o, actorKind: "user", actorId: U.ownerA.id, type: "field_edited", meta: { fields: [{ f: "address", before: "Hay Salam 12", after: `${NOTE} rue 5` }] } }]);
     const cust = (await customerOf(p))!;
     await db.update(S.customers).set({ note: `${NOTE} bon client` }).where(deq(S.customers.id, cust.id));
+    const DR = load<typeof import("@/lib/admin-data/orders")>("@/lib/admin-data/orders");
+    const drawer = await DR.orderDrawerJson(owner, o);
+    ok("the drawer: the phone masked, the timeline, the risk and the script for a manager", !!drawer && !drawer.phone.includes(p.slice(-6)) && drawer.ops.timeline.items.length > 0 && !!drawer.ops.risk && drawer.ops.script !== null, drawer && { phone: drawer.phone, script: !!drawer.ops.script });
+    eq("the drawer: an agent who does not hold the order gets null", await DR.orderDrawerJson(agent, o), null);
     const reads: [string, () => Promise<unknown>, () => Promise<unknown>][] = [
       ["orderTimeline", () => E.orderTimeline(A, owner, o), () => E.orderTimeline(impA, viewAs, o)],
       ["listCustomers", () => C.listCustomers(A, owner, {}), () => C.listCustomers(impA, viewAs, {})],
@@ -937,6 +1166,7 @@ async function main(): Promise<number> {
       ["duplicatesFor", () => D.duplicatesFor(A, { id: o, phone: p, isTest: false }), () => D.duplicatesFor(impA, { id: o, phone: p, isTest: false })],
       ["getOrder (admin.ts)", () => AD.getOrder(A, o), () => AD.getOrder(impA, o)],
       ["listOrders (admin.ts)", () => AD.listOrders(A, {}), () => AD.listOrders(impA, {})],
+      ["orderDrawerJson (the drawer)", () => DR.orderDrawerJson(owner, o), () => DR.orderDrawerJson(viewAs, o)],
     ];
     const carries = (v: unknown) => [NAME, NOTE].filter((c) => JSON.stringify(v).includes(c));
     for (const [name, asMember, asStaff] of reads) {

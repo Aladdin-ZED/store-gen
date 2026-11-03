@@ -6,9 +6,9 @@ import "server-only";
  * Multi-tenant (docs/STORE-SAAS.md §E.3, ADM-22, ADM-23): counts and details are the scope's store only (another
  * store's order id answers like a missing one) and day ranges use the store's time zone, never the platform's.
  */
-import { count, eq, gte, isNull, lt, type SQL } from "drizzle-orm";
+import { count, desc, eq, gte, isNull, lt, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { blocklist, leads, orders, pageVersions } from "@/lib/db/schema";
+import { blocklist, leads, orderEvents, orders, pageVersions } from "@/lib/db/schema";
 import { orderView, type OrderView, type SwatchOf } from "@/components/admin/orders/parts";
 import type { OrderItems, OrderSource } from "@/lib/db/schema";
 import { getOrder, isOrderStatus, type OrderFilters, type OrderRecord } from "@/lib/orders";
@@ -16,7 +16,14 @@ import type { OrderStatus } from "@/lib/orders/contract";
 import { optionText, sanitizeLabel } from "@/lib/orders/text";
 import { orderDocOf } from "@/lib/orders/versions";
 import { byId, inStore, whereStore } from "@/lib/tenancy/sql";
-import type { StoreScope } from "@/lib/tenancy/types";
+import type { StoreCtx, StoreScope } from "@/lib/tenancy/types";
+import { buildQueueOrder, cardRow, type QueueOrder } from "@/lib/callcenter/card";
+import type { CompiledScript } from "@/lib/callcenter/script";
+import { viewerSeesOrder } from "@/lib/callcenter/visibility";
+import { orderTimeline, viewerOf, type TimelineItem } from "@/lib/orders/events";
+import { maskPhone } from "@/lib/orders/masking";
+import type { OrderStates } from "@/lib/orders/state";
+import { getStoreSetting } from "@/lib/settings";
 import { isChoiceGroup, isMatrixGroup, type PageDoc } from "@/lib/page/schema";
 import { orderTextOf } from "@/lib/sheets/row";
 import { addDays, dayKey, dayStart, isDay } from "./time";
@@ -347,5 +354,86 @@ export function toBlockRow(b: { id: string; kind: "phone" | "ip"; value: string;
     value: b.kind === "phone" ? b.value : `Network #${b.value.slice(0, 8)}`,
     reason: b.reason,
     createdAt: b.createdAt.toISOString(),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* the drawer (OPE-§12.7; P4 step 5)                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the order drawer opens with (`getOrderAction`): the order (customer fields masked under impersonation, the
+ * phone always masked: the full number only through `revealPhone`, OD11), its axes and carrier loop, and the ops parts
+ * of the queue card (risk with the store's calibration, duplicates, the customer's history), the first timeline page,
+ * the recall state, and the compiled call script for the claim holder and the managers (null for anyone else).
+ */
+export interface OrderDrawerJson extends OrderDetailJson {
+  rev: number;
+  states: OrderStates;
+  landmark: string | null;
+  adjustCents: number;
+  shipAfter: string | null;
+  trackingRef: string | null;
+  carrierLabel: string | null;
+  deliveryAttempts: number;
+  customerId: string | null;
+  ops: {
+    risk: QueueOrder["risk"];
+    duplicates: QueueOrder["duplicates"];
+    history: QueueOrder["customer"]["history"];
+    script: CompiledScript | null;
+    timeline: { items: TimelineItem[]; more: boolean };
+    recall: { reason: string; carrierNotified: boolean } | null;
+    /** the viewer holds the claim */
+    mine: boolean;
+    lane: QueueOrder["lane"];
+  };
+}
+
+/** The drawer of one order the member may see (OD12, inbound lookups included); null = missing, hidden or another store's. */
+export async function orderDrawerJson(ctx: StoreCtx, id: string): Promise<OrderDrawerJson | null> {
+  const { scope } = ctx;
+  const row = await cardRow(scope, id);
+  if (!row || !viewerSeesOrder(scope, viewerOf(ctx), row, true)) return null;
+  const detail = await orderDetailJson(scope, id);
+  if (!detail) return null;
+  const now = Date.now();
+  const mine = row.assigneeId === ctx.user.id && !!row.claimToken && !!row.leaseUntil && row.leaseUntil.getTime() > now;
+  const ops = await getStoreSetting(scope, "ops");
+  const [card, timeline, [recall]] = await Promise.all([
+    buildQueueOrder(scope, row, ctx, { leaseUntil: mine ? row.leaseUntil : null, mine, maxCalls: ops.rescue.maxCalls }),
+    orderTimeline(scope, ctx, id),
+    db
+      .select({ meta: orderEvents.meta })
+      .from(orderEvents)
+      .where(whereStore(orderEvents, scope, eq(orderEvents.orderId, id), eq(orderEvents.type, "recall_requested")))
+      .orderBy(desc(orderEvents.id))
+      .limit(1),
+  ]);
+  const rm = (recall?.meta ?? null) as { reason?: unknown; carrierNotified?: unknown } | null;
+  return {
+    ...detail,
+    // the full number never reaches the browser here (OD11); reveal is its own audited action
+    phone: maskPhone(row.phone),
+    history: detail.history,
+    rev: row.rev,
+    states: card.states,
+    landmark: card.customer.landmark,
+    adjustCents: row.adjustCents,
+    shipAfter: row.shipAfter ? row.shipAfter.toISOString() : null,
+    trackingRef: row.trackingRef,
+    carrierLabel: row.carrierLabel,
+    deliveryAttempts: row.deliveryAttempts,
+    customerId: row.customerId,
+    ops: {
+      risk: card.risk,
+      duplicates: card.duplicates,
+      history: card.customer.history,
+      script: mine || ctx.can("orders.assign") ? card.script : null,
+      timeline,
+      recall: rm ? { reason: typeof rm.reason === "string" ? rm.reason : "other", carrierNotified: rm.carrierNotified === true } : null,
+      mine,
+      lane: card.lane,
+    },
   };
 }

@@ -23,6 +23,12 @@
  *     `idem_required`) and a body over 2 KB is refused (413)
  *   - `actions`: the attack cases of the nine queue actions (src/app/app/[store]/queue/actions.ts), which join the
  *     harness's action × role suite
+ * Step 5 (manual orders, editing, lead conversion, block-and-cancel, holds, tracking, recall) adds:
+ *   - editOrder, convertLeadToOrder, createManualOrder / quoteManualOrder on A's page, setOrderHold, setOrderTracking,
+ *     requestRecall, markCarrierNotified, saveCustomerNote, blockPreview and blockPhoneAndCancel (by A's order) as B's
+ *     owner with A's ids: the answers of missing ids; A's customer's number typed in B blocks it in B only and never
+ *     moves or marks an order of A
+ *   - `actions`: the new actions of src/app/app/[store]/orders/actions.ts and src/app/app/[store]/customers/actions.ts
  * Modules are loaded inside the cases (the harness has set the environment by then): this file imports types only.
  */
 import Module from "node:module";
@@ -79,6 +85,24 @@ async function same(kit: TenancyKit, label: string, real: Awaited<ReturnType<typ
   kit.check(`${label}: same answer as a missing id`, JSON.stringify(answer(real)) === JSON.stringify(answer(ghost)), { real: answer(real), ghost: answer(ghost) });
   const leaked = kit.leaks(answer(real), { sent });
   kit.check(`${label}: no canary of A`, leaked.length === 0, leaked);
+}
+
+/** A manual order's input on `pageId` (an offer no fixture has: the function answers its field error, never a write). */
+const manualInput = (pageId: string) => ({
+  pageId,
+  selection: { offerId: "solo", units: [] as never[], extras: {}, bump: false },
+  customer: { name: "Salma Test", phone: "0612345678", city: "Casablanca", address: "Rue 1 numero 2" },
+  confirmed: false,
+  idem: randomUUID(),
+});
+
+/** The customer row of `orderId`, or an id no customer has. */
+async function customerOf(orderId: string): Promise<string> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const [row] = await db.select({ id: S.orders.customerId }).from(S.orders).where(eq(S.orders.id, orderId)).limit(1);
+  return row?.id ?? ghostId26();
 }
 
 let seeded: Promise<{ customerId: string; noteId: number; phone: string }> | null = null;
@@ -322,6 +346,43 @@ export const cases: TenancyCase[] = [
       kit.check("ops hot path: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
     },
   },
+  {
+    name: "ops edits: B's owner edits, converts, blocks, holds, tracks and recalls with A's ids, never touching A",
+    async run(kit) {
+      const a = await seedOnce(kit);
+      const ED = load<typeof import("@/lib/orders/edit")>("@/lib/orders/edit");
+      const M = load<typeof import("@/lib/orders/manual")>("@/lib/orders/manual");
+      const AD = load<typeof import("@/lib/orders/admin")>("@/lib/orders/admin");
+      const C = load<typeof import("@/lib/orders/customers")>("@/lib/orders/customers");
+      const before = await kit.snapshotA();
+      const real = { order: kit.fx.A.order.main, lead: kit.fx.A.lead, page: kit.fx.A.page.live, customer: a.customerId };
+      const ghost = { order: kit.ghostify(kit.fx.A.order.main), lead: kit.ghostify(kit.fx.A.lead), page: kit.ghostify(kit.fx.A.page.live), customer: ghostId26() };
+      const FIXED_IDEM = "00000000-0000-4000-8000-000000000001";
+      const attacks: [string, (x: typeof real) => ReturnType<typeof asBOwner>][] = [
+        ["editOrder(B, A's order)", (x) => asBOwner(kit, (_c, w) => ED.editOrder(w, x.order, { note: "pwned", name: "Pwned Name" }, 0))],
+        ["convertLeadToOrder(B, A's lead)", (x) => asBOwner(kit, (_c, w) => M.convertLeadToOrder(w, x.lead, { ...manualInput(""), idem: FIXED_IDEM, selection: { offerId: "", units: [], extras: {}, bump: false } }))],
+        ["createManualOrder(B, A's page)", (x) => asBOwner(kit, (_c, w) => M.createManualOrder(w, { ...manualInput(x.page), idem: FIXED_IDEM }))],
+        ["quoteManualOrder(B, A's page)", (x) => asBOwner(kit, (_c, w) => M.quoteManualOrder(w, { ...manualInput(x.page), idem: FIXED_IDEM }))],
+        ["setOrderHold(B, A's order)", (x) => asBOwner(kit, (_c, w) => ED.setOrderHold(w, x.order, new Date(Date.now() + 3 * 86_400_000)))],
+        ["setOrderTracking(B, A's order)", (x) => asBOwner(kit, (_c, w) => ED.setOrderTracking(w, x.order, { trackingRef: "TRK123", carrierLabel: "Amana" }))],
+        ["requestRecall(B, A's order)", (x) => asBOwner(kit, (_c, w) => ED.requestRecall(w, x.order, "changed_mind"))],
+        ["markCarrierNotified(B, A's order)", (x) => asBOwner(kit, (_c, w) => ED.markCarrierNotified(w, x.order))],
+        ["saveCustomerNote(B, A's customer)", (x) => asBOwner(kit, (_c, w) => C.saveCustomerNote(w, x.customer, "pwned"))],
+        ["blockPreview(B, A's order)", (x) => asBOwner(kit, (c) => AD.blockPreview(c, { orderId: x.order }))],
+        ["blockPhoneAndCancel(B, A's order)", (x) => asBOwner(kit, (_c, w) => AD.blockPhoneAndCancel(w, { orderId: x.order, openOrders: "fake" }))],
+      ];
+      for (const [label, fn] of attacks) await same(kit, label, await fn(real), await fn(ghost));
+      // A's customer's number typed in B: B's own blocklist entry; no order of A is moved or listed
+      const typed = await asBOwner(kit, (_c, w) => AD.blockPhoneAndCancel(w, { phone: a.phone, openOrders: "fake" }));
+      const v = (typed.ok ? typed.value : null) as { ok?: boolean; data?: { moved: unknown[]; untouched: unknown[] } } | null;
+      kit.check(
+        "blockPhoneAndCancel(B, A's customer's number): B's own entry, no order of A moved or listed",
+        !!v?.ok && !JSON.stringify(v.data ?? {}).includes(kit.fx.A.order.main) && kit.leaks(answer(typed), { sent: a.phone }).length === 0,
+        answer(typed),
+      );
+      kit.check("ops edits: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -329,6 +390,8 @@ export const cases: TenancyCase[] = [
 /* ------------------------------------------------------------------ */
 
 const QUEUE = "src/app/app/[store]/queue/actions.ts";
+const ORDERS = "src/app/app/[store]/orders/actions.ts";
+const CUSTOMERS = "src/app/app/[store]/customers/actions.ts";
 /** an Idempotency-Key the cache refuses (not a UUID): the real and the ghost call each run, never a replay of the other */
 const NO_CACHE = "tenancy-no-cache";
 
@@ -373,4 +436,31 @@ export const actions: TrackActionCase[] = [
   },
   { file: QUEUE, name: "takeOrderAction", area: "orders", path: "/queue", permission: ["agents.self"], write: true, victim: (fx) => [fx.A.order.main, { inbound: true }], own: (fx) => [fx.B.order.main, {}] },
   { file: QUEUE, name: "inboundLookupAction", area: "orders", path: "/queue", permission: ["agents.self"], write: true, victim: (fx) => [fx.A.customer.phone], own: (fx) => [fx.B.customer.phone] },
+  // the orders screen (P4 step 5); the R1.0 actions of the same file stay in the harness's own catalogue
+  { file: ORDERS, name: "moveOrderAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: (fx) => [fx.A.order.main, "no_answer"], own: async (fx, fresh) => [await fresh.order(fx.B), "no_answer"] },
+  { file: ORDERS, name: "forceMoveAction", area: "orders", path: "/orders", permission: ["orders.force_status"], write: true, victim: (fx) => [fx.A.order.main, "fake", "attack"], own: async (fx, fresh) => [await fresh.order(fx.B), "fake", "test reason"] },
+  { file: ORDERS, name: "editOrderAction", area: "orders", path: "/orders", permission: ["orders.edit"], write: true, victim: (fx) => [fx.A.order.main, { note: "pwned" }, 0], own: async (fx, fresh) => [await fresh.order(fx.B), { note: "Porte bleue" }, 0] },
+  { file: ORDERS, name: "quoteManualOrderAction", area: "orders", path: "/orders", permission: ["orders.create"], write: true, victim: (fx) => [manualInput(fx.A.page.live)], own: (fx) => [manualInput(fx.B.page.live)] },
+  { file: ORDERS, name: "createManualOrderAction", area: "orders", path: "/orders", permission: ["orders.create"], write: true, victim: (fx) => [manualInput(fx.A.page.live)], own: (fx) => [manualInput(fx.B.page.live)] },
+  {
+    file: ORDERS,
+    name: "convertLeadAction",
+    area: "orders",
+    path: "/orders",
+    permission: ["orders.create", "leads.write"],
+    write: true,
+    victim: (fx) => [fx.A.lead, { ...manualInput(""), pageId: undefined }],
+    own: (fx) => [fx.B.lead, { ...manualInput(""), pageId: undefined }],
+  },
+  { file: ORDERS, name: "dismissDuplicateAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: (fx) => [fx.A.order.main, fx.A.order.failed], own: (fx) => [fx.B.order.main, fx.B.order.failed] },
+  { file: ORDERS, name: "setShipAfterAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: (fx) => [fx.A.order.main, null], own: async (fx, fresh) => [await fresh.order(fx.B), null] },
+  { file: ORDERS, name: "setTrackingAction", area: "orders", path: "/orders", permission: ["shipments.write"], write: true, victim: (fx) => [fx.A.order.main, { trackingRef: "TRK1" }], own: async (fx, fresh) => [await fresh.order(fx.B), { trackingRef: "TRK2", carrierLabel: "Amana" }] },
+  { file: ORDERS, name: "requestRecallAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: (fx) => [fx.A.order.main, "changed_mind"], own: async (fx, fresh) => [await fresh.order(fx.B), "changed_mind"] },
+  { file: ORDERS, name: "markCarrierNotifiedAction", area: "orders", path: "/orders", permission: ["shipments.write"], write: true, victim: (fx) => [fx.A.order.main], own: async (fx, fresh) => [await fresh.order(fx.B)] },
+  { file: ORDERS, name: "assignOrderAction", area: "orders", path: "/orders", permission: ["orders.assign"], write: true, victim: (fx) => [fx.A.order.main, null], own: async (fx, fresh) => [await fresh.order(fx.B), null] },
+  // the customers screen (P4 step 5)
+  { file: CUSTOMERS, name: "blockPreviewAction", area: "blocklist", path: "/customers", permission: ["blocklist.write"], write: true, victim: (fx) => [{ orderId: fx.A.order.main }], own: (fx) => [{ orderId: fx.B.order.main }] },
+  { file: CUSTOMERS, name: "blockPhoneAndCancelAction", area: "blocklist", path: "/customers", permission: ["blocklist.write"], write: true, victim: (fx) => [{ orderId: fx.A.order.main, openOrders: "fake" }], own: () => [{ phone: `+2126${String(Math.floor(Math.random() * 9e7) + 1e7)}`, openOrders: "keep" }] },
+  { file: CUSTOMERS, name: "unblockAction", area: "blocklist", path: "/customers", permission: ["blocklist.write"], write: true, victim: (fx) => [fx.A.block.phone], own: (fx, fresh) => fresh.block(fx.B).then((id) => [id]) },
+  { file: CUSTOMERS, name: "saveCustomerNoteAction", area: "orders", path: "/customers", permission: ["orders.write"], write: true, victim: async (fx) => [await customerOf(fx.A.order.main), "pwned"], own: async (fx) => [await customerOf(fx.B.order.main), "Client fidèle"] },
 ];

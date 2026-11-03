@@ -1,19 +1,41 @@
 "use server";
 /**
- * Orders screen of the store on screen: order details, status changes (the one writer; the sheet mirrors them), sheet
- * re-send, blocklist management. Every action goes through the store's seam (the signed request path): `orders.read`
- * / `orders.write` for orders, `blocklist.write` (owner, admin, manager) for the blocklist. Another store's order or
- * entry id answers like a missing one.
+ * The orders screen's server actions (P4 CALL CENTER; operations.md §M.3 orders rows, OPE-§9.5, §11, §12.6, §12.7,
+ * OD49, OD55, OPS-21). Every body is `return storeAction(…)` through the store's seam; the domain functions answer
+ * their own result inside `data` (an order the member may not see answers `not_found` there, exactly like another
+ * store's id), the way the queue's actions do.
+ *
+ *   getOrderAction              orders.read         the drawer: order (phone masked), risk + calibration, duplicates,
+ *                                                   first timeline page, the script for the claim holder and managers
+ *   moveOrderAction             orders.write        "Move to…" (moveToLegacy); ship moves need shipments.write and money
+ *                                                   moves finance.write, checked per move by the writer
+ *   forceMoveAction             orders.force_status any move on one axis, with a reason
+ *   editOrderAction             orders.edit         contact fields, lines (re-priced), the adjustment (manager+)
+ *   quoteManualOrderAction      orders.create       the new-order sheet's summary; no write
+ *   createManualOrderAction     orders.create       `manual` 60 / h per member (charged by createManualOrder)
+ *   convertLeadAction           orders.create + leads.write
+ *   dismissDuplicateAction      orders.write        "Keep both"
+ *   setShipAfterAction          orders.write        the hold (OD49); null removes it
+ *   setTrackingAction           shipments.write     tracking_ref / carrier_label (OD55)
+ *   requestRecallAction         orders.write        recall_requested (OPS-21)
+ *   markCarrierNotifiedAction   shipments.write     the warehouse's tick on that recall
+ *   assignOrderAction           orders.assign
+ *   resendToSheetAction, retryFailedSyncAction (orders.write) call P5's sheet functions; the R1.0 status menu and the
+ *   blocklist actions stay for today's screen until the drawer redesign (P4 step 10) moves to the ones above.
  */
 import { z } from "zod";
 import { fail } from "@/lib/admin-data/action";
-import { orderDetailJson, type OrderDetailJson } from "@/lib/admin-data/orders";
+import { orderDrawerJson, type OrderDrawerJson } from "@/lib/admin-data/orders";
 import { revalidateStore } from "@/lib/admin-data/shell";
 import { blockFromOrder, blockPhone, isOrderStatus, requeueOrderSync, retryFailedSync, unblock } from "@/lib/orders";
 import { MOVE_ERROR_TEXT } from "@/lib/orders/admin";
-import { moveToLegacy } from "@/lib/orders/transition";
 import type { OrderStatus } from "@/lib/orders/contract";
-import { getStoreSetting } from "@/lib/settings";
+import { UnitIn } from "@/lib/orders/contract";
+import { dismissDuplicate } from "@/lib/orders/duplicates";
+import { editOrder, holdInstant, markCarrierNotified, phoneCountryOf, requestRecall, setOrderHold, setOrderTracking, type OrderPatch } from "@/lib/orders/edit";
+import { ConvertLeadSchema, convertLeadToOrder, createManualOrderWith, ManualOrderSchema, quoteManualOrder } from "@/lib/orders/manual";
+import { assignOrders } from "@/lib/orders/queue";
+import { moveToLegacy } from "@/lib/orders/transition";
 import { syncPendingOrders } from "@/lib/sheets";
 import { storeAction } from "@/lib/tenancy/seam";
 import type { ActionResult } from "@/lib/tenancy/types";
@@ -21,23 +43,72 @@ import type { ActionResult } from "@/lib/tenancy/types";
 const OrderId = z.string().trim().toUpperCase().regex(/^[A-Z0-9]{2,8}-[A-Z0-9]{4,12}$/, { error: "Unknown order." });
 const Status = z.custom<OrderStatus>((v) => isOrderStatus(v), { error: "Unknown status." });
 const BlockId = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, { error: "Unknown entry." });
+const UserId = z.string().regex(/^[0-9A-Z]{26}$/, { error: "Unknown member." });
+const LeadId = z.string().regex(/^[0-9A-Z]{26}$/, { error: "Unknown lead." });
+const Rev = z.number().int().min(0);
 const Reason = z
   .string()
   .max(200, { error: "Keep the reason under 200 characters." })
   .transform((v) => v.replace(/[\u0000-\u001f\u007f]/g, " ").trim() || null);
+const Hold = z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.iso.datetime({ offset: true })]);
+const Patch = z.strictObject({
+  name: z.string().max(120).optional(),
+  phone: z.string().max(40).optional(),
+  city: z.string().max(120).optional(),
+  address: z.string().max(300).nullable().optional(),
+  landmark: z.string().max(160).nullable().optional(),
+  note: z.string().max(300).nullable().optional(),
+  selection: z
+    .strictObject({
+      offerId: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/),
+      units: z.array(UnitIn).max(20).default([]),
+      extras: z.record(z.string().regex(/^[A-Za-z0-9_-]{2,40}$/), z.string().max(240)).default({}),
+      bump: z.boolean().default(false),
+      upsell: z.boolean().optional(),
+    })
+    .optional(),
+  adjust: z.strictObject({ cents: z.number().int().max(0), reason: z.string().max(200) }).optional(),
+});
 
 const refresh = (handle: string) => revalidateStore(handle, "/orders", "");
 
-export async function getOrderAction(id: string): Promise<ActionResult<OrderDetailJson>> {
-  return storeAction("orders.read", async ({ scope }) => {
-    return (await orderDetailJson(scope, OrderId.parse(id))) ?? fail("This order doesn't exist.");
+/* ------------------------------------------------------------------ */
+/* the drawer                                                          */
+/* ------------------------------------------------------------------ */
+
+export async function getOrderAction(id: string): Promise<ActionResult<OrderDrawerJson>> {
+  return storeAction("orders.read", async (ctx) => {
+    return (await orderDrawerJson(ctx, OrderId.parse(id))) ?? fail("This order doesn't exist.");
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* moves                                                               */
+/* ------------------------------------------------------------------ */
+
+/** "Move to…" (OPE-§12.6): a legacy label through the one writer; the rev the drawer rendered guards it (OD4). */
+export async function moveOrderAction(id: string, status: string, expectRev?: number, opts: { reason?: string; note?: string } = {}) {
+  return storeAction("orders.write", async (ctx) => {
+    const o = z.strictObject({ reason: z.string().max(200).optional(), note: z.string().max(500).optional() }).parse(opts);
+    const res = await moveToLegacy(ctx, OrderId.parse(id), Status.parse(status), expectRev === undefined ? undefined : Rev.parse(expectRev), o);
+    if (res.ok && res.changed) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+/** orders.force_status: any from → to on one axis, with a reason (audited by the writer). */
+export async function forceMoveAction(id: string, status: string, reason: string, expectRev?: number) {
+  return storeAction("orders.force_status", async (ctx) => {
+    const why = z.string().trim().min(3, { error: "Say why (at least 3 characters)." }).max(200).parse(reason);
+    const res = await moveToLegacy(ctx, OrderId.parse(id), Status.parse(status), expectRev === undefined ? undefined : Rev.parse(expectRev), { force: true, reason: why });
+    if (res.ok && res.changed) refresh(ctx.store.handle);
+    return res;
   });
 }
 
 /**
- * The status menu: a legacy label through the one writer (`moveToLegacy`, OPE-§3.7, §12.6). The sheet is a mirror
- * pushed after the commit (OD2), so a saved move answers "queued". R1.0's menu has no reason picker yet (the drawer
- * redesign, P4 step 10, adds it): a cancellation from it carries the code `other`.
+ * The R1.0 status menu (today's screen until the drawer redesign): a legacy label through the one writer. The sheet
+ * is a mirror pushed after the commit (OD2). A cancellation from it carries the code `other`.
  */
 export async function updateOrderStatusAction(id: string, status: string): Promise<ActionResult<{ sheet: "updated" | "not_found" | "skipped" | "queued" }>> {
   return storeAction("orders.write", async (ctx) => {
@@ -48,6 +119,90 @@ export async function updateOrderStatusAction(id: string, status: string): Promi
     return { sheet: res.changed ? "queued" : "skipped" };
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* editing and manual orders (OPE-§11)                                 */
+/* ------------------------------------------------------------------ */
+
+export async function editOrderAction(id: string, patch: OrderPatch, expectRev: number) {
+  return storeAction("orders.edit", async (ctx) => {
+    const res = await editOrder(ctx, OrderId.parse(id), Patch.parse(patch), Rev.parse(expectRev));
+    if (res.ok && res.data.changed) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+export async function quoteManualOrderAction(input: unknown) {
+  return storeAction("orders.create", (ctx) => quoteManualOrder(ctx, ManualOrderSchema.parse(input)));
+}
+
+/** `shipAfter`: "Deliver from…" with "The customer already confirmed" (OD49; a store-local day or an instant). */
+export async function createManualOrderAction(input: unknown, opts: { shipAfter?: string | null } = {}) {
+  return storeAction("orders.create", async (ctx) => {
+    const raw = z.strictObject({ shipAfter: Hold.nullable().optional() }).parse(opts).shipAfter;
+    const shipAfter = raw ? holdInstant(raw, ctx.store.timezone) : null;
+    if (raw && !shipAfter) return { ok: false as const, error: "bad_hold" };
+    const res = await createManualOrderWith(ctx, ManualOrderSchema.parse(input), { shipAfter });
+    if (res.ok && !res.data.replayed) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+export async function convertLeadAction(leadId: string, input: unknown) {
+  return storeAction(["orders.create", "leads.write"], async (ctx) => {
+    const res = await convertLeadToOrder(ctx, LeadId.parse(leadId), ConvertLeadSchema.parse(input));
+    if (res.ok) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+export async function dismissDuplicateAction(id: string, otherId: string) {
+  return storeAction("orders.write", (ctx) => dismissDuplicate(ctx, OrderId.parse(id), OrderId.parse(otherId)));
+}
+
+/* ------------------------------------------------------------------ */
+/* the carrier loop on one order (OD49, OD55, OPS-21)                   */
+/* ------------------------------------------------------------------ */
+
+export async function setShipAfterAction(id: string, shipAfter: string | null, expectRev?: number) {
+  return storeAction("orders.write", async (ctx) => {
+    const raw = Hold.nullable().parse(shipAfter);
+    const at = raw === null ? null : holdInstant(raw, ctx.store.timezone);
+    if (raw !== null && !at) return { ok: false as const, error: "bad_hold" as const };
+    const res = await setOrderHold(ctx, OrderId.parse(id), at, expectRev === undefined ? undefined : Rev.parse(expectRev));
+    if (res.ok && res.changed) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+export async function setTrackingAction(id: string, input: { trackingRef: string | null; carrierLabel?: string | null }) {
+  return storeAction("shipments.write", async (ctx) => {
+    const t = z.strictObject({ trackingRef: z.string().max(64).nullable(), carrierLabel: z.string().max(60).nullable().optional() }).parse(input);
+    const res = await setOrderTracking(ctx, OrderId.parse(id), t);
+    if (res.ok && (res.data.changed || res.data.packed)) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+export async function requestRecallAction(id: string, reason: string) {
+  return storeAction("orders.write", (ctx) => requestRecall(ctx, OrderId.parse(id), z.string().max(32).parse(reason)));
+}
+
+export async function markCarrierNotifiedAction(id: string) {
+  return storeAction("shipments.write", (ctx) => markCarrierNotified(ctx, OrderId.parse(id)));
+}
+
+export async function assignOrderAction(id: string, userId: string | null) {
+  return storeAction("orders.assign", async (ctx) => {
+    const res = await assignOrders(ctx, [OrderId.parse(id)], userId === null ? null : UserId.parse(userId));
+    if (res.ok) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* the sheet (P5's functions)                                          */
+/* ------------------------------------------------------------------ */
 
 export async function resendToSheetAction(id: string): Promise<ActionResult<{ synced: boolean }>> {
   return storeAction("orders.write", async ({ scope, actor, store }) => {
@@ -71,6 +226,10 @@ export async function retryFailedSyncAction(): Promise<ActionResult<{ sent: numb
   });
 }
 
+/* ------------------------------------------------------------------ */
+/* blocklist (today's screen; block-and-cancel lives in customers/actions.ts)                                   */
+/* ------------------------------------------------------------------ */
+
 export async function blockFromOrderAction(id: string, what: { phone: boolean; ip: boolean }, reason: string): Promise<ActionResult<null>> {
   return storeAction("blocklist.write", async ({ scope, actor, store }) => {
     const parsed = z.object({ phone: z.boolean(), ip: z.boolean() }).parse(what);
@@ -85,8 +244,7 @@ export async function blockPhoneAction(phone: string, reason: string): Promise<A
   return storeAction("blocklist.write", async ({ scope, actor, store }) => {
     const raw = z.string().trim().min(6, { error: "Enter a phone number." }).max(32).parse(phone);
     // the store's own market (ORD-16), not a platform-wide default
-    const { phoneCountry } = await getStoreSetting(scope, "defaults");
-    const res = await blockPhone(scope, raw, phoneCountry, Reason.parse(reason), actor);
+    const res = await blockPhone(scope, raw, phoneCountryOf(store), Reason.parse(reason), actor);
     if (!res.ok) return fail("That phone number isn't valid for your market. Use the international format (+212…) for other countries.");
     refresh(store.handle);
     return { e164: res.e164 };

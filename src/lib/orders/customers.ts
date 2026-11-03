@@ -29,7 +29,7 @@ import { toAsciiDigits } from "@/lib/markets/phone";
 import { maskIfImpersonation } from "@/lib/platform/mask";
 import { getStoreSetting } from "@/lib/settings";
 import { byId, storeValues, whereStore } from "@/lib/tenancy/sql";
-import type { StoreCtx, StoreScope, WriteScope } from "@/lib/tenancy/types";
+import type { StoreCtx, StoreScope, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 import type { OrderStatus } from "./contract";
 import type { EventDb } from "./events";
 import { maskPhone } from "./masking";
@@ -446,4 +446,23 @@ export async function getCustomer(scope: StoreScope, viewer: StoreCtx, id: strin
         isTest: o.isTest,
       })) ?? null,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* the customer note (OPE-§9.2)                                        */
+/* ------------------------------------------------------------------ */
+
+export const CUSTOMER_NOTE_MAX = 300;
+
+/**
+ * The store's internal note on a customer (customers.read + orders.write): shown on the customer page and in the
+ * drawer. The one visibility rule applies (OD12: an agent writes only on the customers of the orders they hold); a
+ * customer of another store or out of sight answers `not_found`. Empty text clears it.
+ */
+export async function saveCustomerNote(ctx: WriteCtx, customerId: string, note: string): Promise<{ ok: true } | { ok: false; error: "not_found" | "forbidden" }> {
+  if (!ctx.can("customers.read") || !ctx.can("orders.write")) return { ok: false, error: "forbidden" };
+  if (!(await getCustomer(ctx.scope, ctx, customerId))) return { ok: false, error: "not_found" };
+  const text = Array.from(String(note ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").trim()).slice(0, CUSTOMER_NOTE_MAX).join("") || null;
+  const res = await db.update(customers).set({ note: text, updatedAt: new Date() }).where(byId(customers, ctx.scope, customerId));
+  return affectedRows(res) >= 1 ? { ok: true } : { ok: false, error: "not_found" };
 }

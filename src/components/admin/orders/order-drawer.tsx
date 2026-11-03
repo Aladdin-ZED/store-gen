@@ -41,6 +41,8 @@ export interface OrderDrawerActions {
   setStatus: (id: string, status: string) => Promise<ActionResult<{ sheet: "updated" | "not_found" | "skipped" | "queued" }>>;
   resend: (id: string) => Promise<ActionResult<{ synced: boolean }>>;
   block: (id: string, what: { phone: boolean; ip: boolean }, reason: string) => Promise<ActionResult<null>>;
+  /** the queue's revealPhoneAction: the full number for one call or message, audited (OD11) */
+  reveal?: (id: string, why: "call" | "whatsapp") => Promise<ActionResult<ActionResult<{ tel: string; wa: string }>>>;
 }
 
 const SHEET_NOTE: Record<"updated" | "not_found" | "skipped" | "queued", string> = {
@@ -106,6 +108,19 @@ export function OrderDrawer({
     } finally {
       setStatusPending(false);
     }
+  };
+
+  /** the drawer holds the masked number only (OD11): a tap reveals it (audited), then dials or opens WhatsApp */
+  const dial = async (why: "call" | "whatsapp") => {
+    if (!order || !actions.reveal) return;
+    const res = await runAction(actions.reveal(order.id, why));
+    if (!res) return;
+    if (!res.ok) {
+      toast.error(actionMessage(res));
+      return;
+    }
+    if (why === "call") window.location.href = res.data.tel;
+    else window.open(res.data.wa, "_blank", "noopener,noreferrer");
   };
 
   const resend = async () => {
@@ -179,18 +194,16 @@ export function OrderDrawer({
                       <span className="text-[0.95rem] font-semibold [overflow-wrap:anywhere]">{order.name}</span>
                       <span className="font-mono text-sm tabular-nums">{fmtPhone(order.phone)}</span>
                     </div>
-                    <div className="flex shrink-0 gap-1.5">
-                      <Button asChild size="icon-sm" variant="outline" className="rounded-full" aria-label="Call">
-                        <a href={`tel:${order.phone}`}>
+                    {actions.reveal && (
+                      <div className="flex shrink-0 gap-1.5">
+                        <Button size="icon-sm" variant="outline" className="rounded-full" aria-label="Call" onClick={() => void dial("call")}>
                           <PhoneIcon />
-                        </a>
-                      </Button>
-                      <Button asChild size="icon-sm" variant="outline" className="rounded-full text-emerald-700 dark:text-emerald-400" aria-label="WhatsApp">
-                        <a href={`https://wa.me/${order.phone.replace(/^\+/, "")}`} target="_blank" rel="noopener noreferrer">
+                        </Button>
+                        <Button size="icon-sm" variant="outline" className="rounded-full text-emerald-700 dark:text-emerald-400" aria-label="WhatsApp" onClick={() => void dial("whatsapp")}>
                           <MessageCircleIcon />
-                        </a>
-                      </Button>
-                    </div>
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   {(order.city || order.address) && (
                     <p className="flex gap-2 text-sm text-foreground/85">

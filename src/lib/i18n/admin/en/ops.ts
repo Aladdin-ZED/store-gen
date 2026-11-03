@@ -88,6 +88,19 @@ export const messages = {
   "ops.inbound.paused": "Too many lookups this hour. Ask your manager.",
   "ops.state.conflict": "Updated by {name} just now",
   "ops.state.conflictAnon": "Updated somewhere else just now",
+  /* ---- the order's own refusals (OPE-§11, §9.5, OD49; the shell maps `error.<code>` to these, CCR r1-p4-6) ---- */
+  "ops.error.blocked": "This number is blocked in your store",
+  "ops.error.duplicate": "This customer already has an open order. Check it, or create this one anyway.",
+  "ops.error.locked": "This order is with the carrier. Only the address, landmark and note can change now.",
+  "ops.error.bad_hold": "Pick a date within the next 60 days, on a confirmed order that has not left yet.",
+  "ops.error.bad_adjust": "A discount can't be more than the order's subtotal.",
+  "ops.error.reason_required": "Say why, in at least 3 characters.",
+  "ops.error.already_converted": "This lead is already an order.",
+  "ops.error.illegal": "This change isn't possible from the order's current state.",
+  "ops.manual.pricedWithCurrent": "Priced with the page as it is published now",
+  "ops.manual.pricesChanged": "Prices changed, check the summary",
+  "ops.manual.recallRequested": "Recall requested",
+  "ops.manual.carrierNotified": "Carrier notified",
 
   /* ---- the order timeline (OPE-§4.1, `ops.tl.<type>`; ar / fr / en: agents read it in the drawer) ---- */
   "ops.tl.created": "Order placed",

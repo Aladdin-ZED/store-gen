@@ -101,6 +101,8 @@ export const ORDER_EVENT_META = {
     risk: z.number().int().min(0).max(100),
     flags: z.array(CODE).max(24),
     test: z.literal(true).optional(),
+    /** a lead an agent converted (OPE-§11.4) */
+    leadId: ID26.optional(),
   }),
   state_changed: z.strictObject({
     axis: z.enum(AXES),

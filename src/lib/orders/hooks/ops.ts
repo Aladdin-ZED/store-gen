@@ -36,6 +36,8 @@ import { assignOnCreate } from "../queue";
 import { transitionOrder } from "../transition";
 
 const FLAG_CODE = /^[a-z0-9_.:-]{1,32}$/;
+/** a manual order converted from a lead carries `ref = "lead:<id>"` (src/lib/orders/manual.ts) */
+const LEAD_REF = /^lead:([0-9A-Z]{26})$/;
 
 /**
  * The `created` event, `city_key`, `priority` and the customer, in one transaction (OPE-§9.1: same transaction).
@@ -71,6 +73,7 @@ async function createdBookkeeping(scope: WriteScope, o: OrderRow, ctx: { market:
           risk: Math.max(0, Math.min(100, o.riskScore)),
           flags: (o.flags ?? []).filter((f) => FLAG_CODE.test(f)).slice(0, 24),
           ...(o.isTest ? { test: true } : {}),
+          ...(o.createdBy && LEAD_REF.test(o.ref ?? "") ? { leadId: LEAD_REF.exec(o.ref!)![1] } : {}),
         },
       },
     ]);
