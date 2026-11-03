@@ -334,3 +334,51 @@ CCR list). Until then this file records the decisions the steps took, so none is
     (CCR r1-p8-21). The frozen function types are unchanged.
 12. **Tenancy.** Two cross-store statements, both in `src/lib/jobs/exports.ts` and annotated: the queue's next job
     and the expired jobs (ids only). Pin 19 → 21 (CCR r1-p8-4, step 8 addendum). Every other statement is scoped.
+
+### Step 10: the purge, the lifecycle cron edges, §H.11 retention (`src/lib/jobs/{purge,lifecycle,retention,housekeeping}.ts`, `purge/{plan,redact}.ts`)
+
+1. **The purge's budget is 11 s a tick, not §F.9's "≤ 15 s per tick" (spec drift).** Slot 5 guarantees 11 s and is
+   shared, in registry order, by `backup` (≤ 8 s while a backup runs), `exports` and `purge`. The purge declares 11 s and
+   takes what the slot has left; on a quiet night that is the whole 11 s. 15 s would not fit the slot table (Σ 95 s).
+2. **The plan is enumerated from schema.ts** (`purgePlan()` in `src/lib/jobs/purge/plan.ts`, pure). Every table with a
+   `store_id` column that is not in `PURGE_KEEP` is deleted; a table §F.9 does not name joins group 3, after
+   `ad_spend_daily` and before `pages`, and a new `ai_*` or `agent_*` table joins its family's group. 55 tenant tables
+   at this tree: 47 deleted, 8 kept. `headline_shingles` goes by `owner_tag` (D35, `hmac(storeId, "shingle-owner")[:16]`)
+   and `media_chunks` by the keys of the store's `media_files` rows, **just before** `media_files` (the brief lists
+   "media_files, media_chunks": the rows hold the keys, so the chunks go first). The legacy `exports` table sits after
+   `pages` as §F.9 orders it. The `exports/<id>/` folder goes right after `export_jobs` ("and their files"); the other
+   per-store areas (media, imports, receipts, ai) after `asset_refs`, before the media rows.
+3. **Status before every slice; a cancelled purge restarts from step 1.** A status other than a due `scheduled_deletion`
+   (or `rejected` for 30 days) drops the store's `purge:<id>` cursor, so a later purge runs every step again (each one is
+   idempotent). Area deletes wait (`purge_data_dir_refused`) while DATA_DIR or MEDIA_DIR fails its boot check: a refused
+   directory may belong to another deployment of the same store ids.
+4. **`signup_reviews.signals` is NOT NULL** in schema.ts while §F.9 says "nulled": the purge writes
+   `{"v":1,"flags":[],"purged":true}` (no flags, no inputs) and nulls `business_context`.
+5. **redactMetaForPurge**: the explicit SEC-20 keys at any depth and in any case, `*_norm` and the camelCase `…Norm`,
+   plus `AUDIT_SECRET_KEY_RE` itself; a value under such a key becomes `"[purged]"` (null stays null). Only `meta` is
+   rewritten; the row's other columns stay (§A.5.1).
+6. **The purge's error-ring rows carry no store id**: a ring row with the store's id would be a new `error_events` row
+   of the store being purged.
+7. **Lifecycle (slot 7, 2 s)**: closed → scheduled_deletion ≤ 20 a tick through `transitionStore` (reason
+   `reopen_window_ended`), expired view-as sessions ≤ 50 a tick through `endImpersonation(…, "expired")`. **Invites need
+   no write**: `store_invites` / `staff_invites` have no expiry marker column; `inviteState` derives Expired from
+   `expires_at` and accept refuses it. Their rows go 30 days after expiry in housekeeping.
+8. **§H.11 core rows run at most once an hour** (`housekeeping.state.retentionAt`, stamped only when a pass ran every
+   rule to its end): the cutoffs are days and several tables have no index on the compared column (notifications,
+   error_events, store_usage), so a scan every minute buys nothing. A pass cut by the deadline carries on next tick.
+   `outbox` `cancelled` rows go with `dead` (30 days after `COALESCE(done_at, created_at)`); `platform_requests` only
+   once settled (executed, cancelled, expired); `impersonation_sessions` 400 days after `started_at`.
+9. **Test orders**: housekeeping calls P4's `deleteTestOrders(systemScope, { olderThan: now − 30 d, limit: 2000 })` store
+   by store (cursor `housekeeping.test_orders`); a stub answering `{ deleted: 0 }` until P4 fills it (CCR r1-p8-13). The
+   leads sweep now gets half of what is left of the 4 s and the test orders the rest.
+10. **Retention rows owned by other tracks' jobs** (not in housekeeping): `ai.retention` (P7: ai_runs output / rows,
+    ai_cache, ai_batch_items, ai_feedback texts, ai_eval_runs.report, ai_jobs and `DATA_DIR/ai/<id>/` blobs),
+    `design.retention` (P6: design_genomes per DES-§2.1), `ops.capi_ctx_purge` (P5: orders.capi_ctx 8-9 days),
+    campaign share tokens (P3: revoked at campaign end + 90 days). Export parts (72 h) are the exports job's, backups
+    (§H.6) the backup job's.
+11. **For P1**: `markHealthDirty(storeId)` runs inside `transitionStore` after the tombstone. When P1 fills it, it must not
+    insert a `store_health` row for a `purged` store (the purge deleted it last).
+12. **Two step 9 fixes found by the full `test:storage` run**: the restore cut its INSERT batches at 4 MB of line text,
+    above XAMPP's 1 MiB `max_allowed_packet`; it now cuts at 512 KB (`RESTORE_BATCH_BYTES`, a single larger row goes
+    alone). The `backup` section starts from an empty `backup_runs` and `DATA_DIR/backups`, because the runner section's
+    `runTick()` runs the registered daily backup whenever the suite runs after 03:30 (platform zone).

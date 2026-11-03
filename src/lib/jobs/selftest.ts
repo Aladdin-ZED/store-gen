@@ -40,6 +40,9 @@
  * 11. backup     (./selftest-backup.ts, P8 step 9) the registration, the retention calendar, the manifest's shape, the
  *                NDJSON encoding and the 8 MB part rule, sealed parts verified and restored (tampered ones refused),
  *                the purgeRequests drop rule, the restore target's name check.
+ * 12. purge      (./selftest-purge.ts, P8 step 10) the purge and lifecycle registration, purgePlan()'s invariants (every
+ *                tenant table once, the KEEP list, the §F.9 order, the areas before the media rows, store_health last,
+ *                a new table before pages), redactMetaForPurge on fixtures, purgeReasonOf, the §H.11 cutoff table.
  *
  * `--only <prefix>[,<prefix>]` runs the sections whose name starts with one of the prefixes (a quick loop while
  * working on one area; `npm run test:jobs` runs them all).
@@ -711,6 +714,17 @@ async function main(): Promise<void> {
     SE: await import("@/lib/backup/seal"),
     S: await import("./slots"),
     R: await import("./runner"),
+    JOBS,
+  });
+
+  /* ---------------------------------------------------------------- */
+  const { purgeSections } = await import("./selftest-purge");
+  purgeSections(h, {
+    PL: await import("./purge/plan"),
+    RD: await import("./purge/redact"),
+    RT: await import("./retention"),
+    S: await import("./slots"),
+    PJ: await import("./purge"),
     JOBS,
   });
 

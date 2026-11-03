@@ -9,7 +9,7 @@
  * DATA_DIR at a fresh folder under os.tmpdir(). Both are removed at the end (unless --keep). Nothing is read from
  * the .env files.
  *
- * Sections (P8 step 2; later steps add theirs under their own names: storage-jobs, export, backups, purge):
+ * Sections (P8 step 2; later steps add theirs under their own names: storage-jobs, export, backup, purge):
  *  - boot check: refusals      unset, relative, inside the app (or a parent of it), public_html, a symlink (and a
  *                              planted link inside), missing parent, a file, not writable, no database, POSIX owner
  *  - boot check: owner marker  written once (O_EXCL), a db X marker refuses db Y, another app's marker, a garbage
@@ -93,6 +93,16 @@
  *                              the parts) with equal counts and an equal checksum per table; a tampered part refused
  *                              before any write; a failed run listed with its code; pruning by the calendar (rows
  *                              marked, folders deleted); purgeRequests kept, then dropped; appendPurgeRequest
+ *  - purge (P8 step 10)        §F.9, §H.9, §H.11, §A.5.1 against the real tables and DATA_DIR: stores P, Q, R seeded
+ *                              in every tenant table (a generic seeder over information_schema), chunks, shingles and
+ *                              a file in each per-store area; R refused before its next slice once cancelled (its
+ *                              cursor dropped, nothing more deleted); P purged across many forced slices: no row in a
+ *                              deleted table, no chunk or shingle, no path under DATA_DIR/<area>/<P> or
+ *                              media/v1/<xx>/<P>, Q byte-identical (checksums), the tombstone and the quarantined
+ *                              handle, audit meta redacted, ua NULL, signals emptied, notes soft-deleted, P in
+ *                              purgeRequests; an active store refused; lifecycle (closed past purge_after →
+ *                              scheduled_deletion, an expired view-as session ended); retention on both sides of every
+ *                              §H.11 core cutoff, and housekeeping's hourly pass
  *
  * `-- --only <prefix>[,…]` runs only the sections whose name starts with a prefix.
  *
@@ -2229,6 +2239,9 @@ async function main(): Promise<number> {
     type JobCtx = import("@/lib/jobs/runner").JobCtx;
     t.eq("the fs backend is on (DATA_DIR passed its check)", (await S.runMediaStorageCheck({ force: true })).ok, true);
     const q = (text: string, v: unknown[] = []) => pool().query(text, v);
+    // an earlier section's runTick may already have run the registered daily backup (due after 03:30): start clean
+    await q("DELETE FROM backup_runs");
+    rmSync(join(DATA, "backups"), { recursive: true, force: true });
     const jobCtx = (budgetMs = 60_000): JobCtx => ({ ...systemCtx("backup"), deadline: Date.now() + budgetMs, tickId: newId(), cursor: "", setCursor: async () => undefined, yield: () => new Promise<void>((r) => setImmediate(r)), lagMs: () => 0 });
     const SYS = { id: "system:qa", kind: "system" as const };
     const DAY_MS = 86_400_000;
@@ -2421,6 +2434,299 @@ async function main(): Promise<number> {
     t.check("appendPurgeRequest (the purge's side) lists an id again, once", (await BJ.appendPurgeRequest(STORE_H)) && (await BJ.appendPurgeRequest(STORE_H)) && (await getPlatformSetting("platform_backup", { fresh: true })).purgeRequests.filter((r) => r.storeId === STORE_H).length === 1);
     const s3 = await getPlatformSetting("platform_backup", { fresh: true });
     await setPlatformSetting("platform_backup", { ...s3, retention: { daily: 7, weekly: 4 }, purgeRequests: [] }, SYS);
+  });
+
+  /* ================================================================ */
+  h.section("purge", async (t) => {
+    const PJ = await import("@/lib/jobs/purge");
+    const PL = await import("@/lib/jobs/purge/plan");
+    const RD = await import("@/lib/jobs/purge/redact");
+    const LJ = await import("@/lib/jobs/lifecycle");
+    const HK = await import("@/lib/jobs/housekeeping");
+    const ST = await import("@/lib/jobs/storage/state");
+    const { getPlatformSetting } = await import("@/lib/settings");
+    const { newId } = await import("@/lib/db/ids");
+    type JobCtx = import("@/lib/jobs/runner").JobCtx;
+    t.eq("the fs backend is on (DATA_DIR passed its check)", (await S.runMediaStorageCheck({ force: true })).ok, true);
+    const q = async <T = Record<string, unknown>>(text: string, v: unknown[] = []): Promise<T[]> => ((await pool().query(text, v)) as unknown as [T[]])[0];
+    const jobCtx = (job: string, budgetMs = 60_000): JobCtx => ({ ...systemCtx(job), deadline: Date.now() + budgetMs, tickId: newId(), cursor: "", setCursor: async () => undefined, yield: () => new Promise<void>((r) => setImmediate(r)), lagMs: () => 0 });
+    const DAY_MS = 86_400_000;
+    const plan = PL.purgePlan();
+    const tenant = [...plan.tables, ...plan.keep];
+
+    // P is purged, Q must come out byte-identical, R is cancelled mid-purge
+    const STORE_P = "01JB8ZK3Q4R5S6T7V8W9PRG0PP";
+    const STORE_Q = "01JB8ZK3Q4R5S6T7V8W9PRG0QQ";
+    const STORE_R = "01JB8ZK3Q4R5S6T7V8W9PRG0RR";
+    const ago = (ms: number) => new Date(Date.now() - ms);
+    await q("INSERT INTO stores (id, handle, name, status, brand_seed, purge_after, status_changed_at) VALUES (?, 'purge-p', 'P-CANARY-STORE', 'scheduled_deletion', ?, ?, ?), (?, 'purge-q', 'Store Q', 'active', ?, NULL, NULL), (?, 'purge-r', 'Store R', 'scheduled_deletion', ?, ?, ?)", [
+      STORE_P, "0123456789abcdef", ago(60_000), ago(DAY_MS), STORE_Q, "0123456789abcdef", STORE_R, "0123456789abcdef", ago(120_000), ago(DAY_MS),
+    ]);
+
+    // a generic seeder over information_schema: every NOT NULL column without a default gets a plain value of its type
+    type Col = { t: string; c: string; dt: string; ct: string; nul: string; def: string | null; extra: string; gen: string; len: number | null };
+    const cols = await q<Col>(
+      "SELECT TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS dt, COLUMN_TYPE AS ct, IS_NULLABLE AS nul, COLUMN_DEFAULT AS def, EXTRA AS extra, IS_GENERATED AS gen, CHARACTER_MAXIMUM_LENGTH AS len FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION",
+      [dbName],
+    );
+    const colsOf = new Map<string, Col[]>();
+    for (const c of cols) colsOf.set(c.t, [...(colsOf.get(c.t) ?? []), c]);
+    // a foreign key other than the store's (plans, …) takes an existing row's value
+    const fks = await q<{ t: string; c: string; rt: string; rc: string }>(
+      "SELECT TABLE_NAME AS t, COLUMN_NAME AS c, REFERENCED_TABLE_NAME AS rt, REFERENCED_COLUMN_NAME AS rc FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IS NOT NULL AND COLUMN_NAME <> 'store_id'",
+      [dbName],
+    );
+    const fkValue = new Map<string, unknown>();
+    const ALNUM = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    const chars = (n: number) => Array.from(randomBytes(n), (b) => ALNUM[b % ALNUM.length]).join("");
+    const valueFor = (c: Col, i: number): unknown => {
+      const dt = c.dt.toLowerCase();
+      if (dt === "char") return chars(Number(c.len));
+      if (dt === "varchar") return chars(Math.min(Number(c.len), 24));
+      if (dt.endsWith("text") || dt === "json") return "{}";
+      if (dt.endsWith("int")) return i + 1;
+      if (dt === "decimal" || dt === "float" || dt === "double") return 1;
+      if (dt === "datetime" || dt === "timestamp") return new Date();
+      if (dt === "date") return new Date().toISOString().slice(0, 10);
+      if (dt === "enum") return /^enum\('([^']*)'/.exec(c.ct)![1];
+      if (dt.endsWith("blob") || dt.endsWith("binary")) return Buffer.from(`blob-${i}`);
+      if (dt === "time") return "00:00:00";
+      throw new Error(`seed: no value for ${c.t}.${c.c} (${dt})`);
+    };
+    /** One row of `table` (store_id = storeId when it has one); false when a unique key already holds it. */
+    const seedRow = async (table: string, storeId: string | null, i: number, over: Record<string, unknown> = {}): Promise<boolean> => {
+      const row: Record<string, unknown> = {};
+      for (const c of colsOf.get(table) ?? []) {
+        if (c.gen === "ALWAYS" || /auto_increment/i.test(c.extra)) continue;
+        if (c.c === "store_id") row[c.c] = storeId;
+        else if (fkValue.has(`${table}.${c.c}`)) row[c.c] = fkValue.get(`${table}.${c.c}`);
+        else if (c.nul === "NO" && c.def === null) row[c.c] = valueFor(c, i);
+      }
+      Object.assign(row, over);
+      const names = Object.keys(row);
+      try {
+        await pool().query(`INSERT INTO \`${table}\` (${names.map((n) => `\`${n}\``).join(", ")}) VALUES (?)`, [names.map((n) => row[n])]);
+        return true;
+      } catch (err) {
+        if ((err as { errno?: number }).errno === 1062) return false;
+        throw new Error(`seed ${table}: ${(err as Error).message}`);
+      }
+    };
+    // the referenced rows (a user, a plan, a legal document…): an existing one, else one seeded row of that table
+    for (const fk of fks) {
+      let [row] = await q<Record<string, unknown>>(`SELECT \`${fk.rc}\` AS v FROM \`${fk.rt}\` LIMIT 1`);
+      if (!row) {
+        await seedRow(fk.rt, null, 0);
+        [row] = await q<Record<string, unknown>>(`SELECT \`${fk.rc}\` AS v FROM \`${fk.rt}\` LIMIT 1`);
+      }
+      if (row) fkValue.set(`${fk.t}.${fk.c}`, row.v);
+    }
+    const countOf = async (table: string, storeId: string) => Number((await q<{ n: number }>(`SELECT COUNT(*) AS n FROM \`${table}\` WHERE store_id = ?`, [storeId]))[0]!.n);
+    const rowsSha = async (text: string, v: unknown[]) => {
+      const rows = await q(text, v);
+      const lines = rows.map((r) => JSON.stringify(r, (_k, x: unknown) => (Buffer.isBuffer(x) ? `hex:${x.toString("hex")}` : x))).sort();
+      return createHash("sha256").update(lines.join("\n")).digest("hex");
+    };
+
+    // every tenant table (deleted or kept): 3 rows of P, 2 of Q, 2 of R
+    for (const table of tenant) {
+      for (let i = 0; i < 3; i++) await seedRow(table, STORE_P, i);
+      for (let i = 0; i < 2; i++) await seedRow(table, STORE_Q, i);
+      for (let i = 0; i < 2; i++) await seedRow(table, STORE_R, i);
+    }
+    const missing: string[] = [];
+    for (const table of tenant) if ((await countOf(table, STORE_P)) < 1 || (await countOf(table, STORE_Q)) < 1) missing.push(table);
+    t.eq(`every tenant table holds rows of P and Q before the purge (${tenant.length} tables)`, missing, []);
+    // the two tables without a store column: chunks of each store's media rows, shingles by owner tag
+    for (const sid of [STORE_P, STORE_Q]) {
+      for (const r of await q<{ key: string }>("SELECT `key` FROM media_files WHERE store_id = ?", [sid])) {
+        await q("INSERT INTO media_chunks (`key`, idx, data) VALUES (?, 0, ?), (?, 1, ?)", [r.key, Buffer.from(`${sid}-0`), r.key, Buffer.from(`${sid}-1`)]);
+      }
+      for (let i = 0; i < 3; i++) await q("INSERT INTO headline_shingles (niche_key, hash, owner_tag) VALUES ('qa-niche', ?, ?)", [hex(8), PJ.shingleOwnerTag(sid)]);
+    }
+    await q("INSERT INTO headline_shingles (niche_key, hash, owner_tag) VALUES ('qa-niche', ?, 'ffffffffffffffff')", [hex(8)]);
+    // the kept rows' PII canaries
+    await q("INSERT INTO audit_log (action, target, meta, store_id, actor_kind) VALUES ('store.closed', 'P-AUDIT', ?, ?, 'user')", [
+      JSON.stringify({ from: "active", to: "closed", reason: "owner", note: "P-CANARY-NOTE call 0612", name: "P-CANARY-NAME", phone: "+212600000999", detail: { email_norm: "p@x.test", city: "Rabat" } }),
+      STORE_P,
+    ]);
+    await q("UPDATE legal_acceptances SET ua = 'P-CANARY-UA' WHERE store_id IN (?, ?)", [STORE_P, STORE_Q]);
+    await q("UPDATE signup_reviews SET signals = ?, business_context = ? WHERE store_id IN (?, ?)", [JSON.stringify({ v: 1, flags: [{ code: "dup_phone", points: 5 }], inputs: { emailDomain: "x.test" } }), JSON.stringify({ about: "P-CANARY-BIZ" }), STORE_P, STORE_Q]);
+    await q("UPDATE platform_notes SET body = 'P-CANARY-NOTE Fatima 0612', deleted_at = NULL WHERE store_id IN (?, ?)", [STORE_P, STORE_Q]);
+    // files in every per-store area of P and Q
+    const area = (sid: string) => P.perStoreDirs(sid);
+    for (const sid of [STORE_P, STORE_Q]) {
+      for (const d of area(sid)) {
+        mkdirSync(join(d.dir, "sub"), { recursive: true });
+        writeFileSync(join(d.dir, "sub", "canary.bin"), `${sid}:${d.area}`);
+      }
+    }
+    t.check("…and a file in each of their per-store areas", area(STORE_P).length === 5 && area(STORE_P).every((d) => existsSync(join(d.dir, "sub", "canary.bin"))));
+
+    // Q's fingerprint: every tenant table, its chunks, its shingles, its files
+    const fingerprint = async () => {
+      const out: Record<string, string> = {};
+      for (const table of tenant) out[table] = await rowsSha(`SELECT * FROM \`${table}\` WHERE store_id = ?`, [STORE_Q]);
+      out.media_chunks = await rowsSha("SELECT * FROM media_chunks WHERE `key` IN (SELECT `key` FROM media_files WHERE store_id = ?)", [STORE_Q]);
+      out.headline_shingles = await rowsSha("SELECT * FROM headline_shingles WHERE owner_tag = ?", [PJ.shingleOwnerTag(STORE_Q)]);
+      out.stores = await rowsSha("SELECT * FROM stores WHERE id = ?", [STORE_Q]);
+      for (const d of area(STORE_Q)) out[`file:${d.area}`] = existsSync(join(d.dir, "sub", "canary.bin")) ? sha(readFileSync(join(d.dir, "sub", "canary.bin"))) : "missing";
+      return out;
+    };
+    const qBefore = await fingerprint();
+
+    // R (due first: the older purge_after): one run of 3 slices, then the deletion is cancelled; the next run refuses
+    // it before its next slice and drops its cursor
+    const r1 = await PJ.purgeJob(jobCtx("purge"), { sliceRows: 2, maxSlices: 3 });
+    t.check("the oldest due store first, one store at a time, its cursor saved", r1.done === false && r1.summary?.store === STORE_R && (await ST.readJobState(`purge:${STORE_R}`)).purge !== undefined, JSON.stringify(r1.summary));
+    const rCounts = async () => Promise.all(plan.tables.map((x) => countOf(x, STORE_R)));
+    await q("UPDATE stores SET status = 'closed', purge_after = ? WHERE id = ?", [new Date(Date.now() + 30 * DAY_MS), STORE_R]);
+    const rLeft = await rCounts();
+    const r2 = await PJ.purgeJob(jobCtx("purge"), { sliceRows: 2, maxSlices: 1 });
+    t.check("the status read before the next slice refuses a cancelled store (closed again)", r2.summary?.refused === 1 && r2.summary?.refusedStatus === "closed", JSON.stringify(r2.summary));
+    t.check("…its cursor is dropped and nothing more of it is deleted", (await ST.readJobState(`purge:${STORE_R}`)).purge === undefined && JSON.stringify(await rCounts()) === JSON.stringify(rLeft) && (await countOf("orders", STORE_R)) === 2);
+
+    // P: tick after tick of forced slices until the tombstone
+    let runs = 0;
+    let last: Awaited<ReturnType<typeof PJ.purgeJob>> | null = null;
+    while (runs < 1_000) {
+      runs++;
+      last = await PJ.purgeJob(jobCtx("purge"), { sliceRows: 2, maxSlices: 7 });
+      const [row] = await q<{ status: string }>("SELECT status FROM stores WHERE id = ?", [STORE_P]);
+      if (row?.status === "purged") break;
+    }
+    t.check(`P purged across many forced slices (${runs} runs)`, runs >= 10 && runs < 1_000 && Number(last?.summary?.purged) === 1, JSON.stringify(last?.summary));
+    const [tomb] = await q<{ status: string; handle: string | null; name: string; status_reason: string; purge_after: Date | null }>("SELECT status, handle, name, status_reason, purge_after FROM stores WHERE id = ?", [STORE_P]);
+    t.eq("the tombstone: purged, handle NULL, name '(purged)', its reason", tomb, { status: "purged", handle: null, name: "(purged)", status_reason: "purge_scheduled", purge_after: null });
+    const [quarantine] = await q<{ store_id: string; reason: string; reserved_until: Date }>("SELECT store_id, reason, reserved_until FROM store_handle_history WHERE handle = 'purge-p'");
+    t.check("…the handle quarantined 180 days (§C.7)", quarantine?.store_id === STORE_P && quarantine.reason === "deleted" && Math.abs(quarantine.reserved_until.getTime() - (Date.now() + 180 * DAY_MS)) < 10 * 60_000);
+    const left: string[] = [];
+    for (const table of plan.tables) if ((await countOf(table, STORE_P)) !== 0) left.push(table);
+    t.eq(`no row of P in any of the ${plan.tables.length} deleted tables`, left, []);
+    t.eq("…nor its chunks or shingles", [Number((await q<{ n: number }>("SELECT COUNT(*) AS n FROM headline_shingles WHERE owner_tag = ?", [PJ.shingleOwnerTag(STORE_P)]))[0]!.n), Number((await q<{ n: number }>("SELECT COUNT(*) AS n FROM media_chunks WHERE data LIKE ?", [`${STORE_P}-%`]))[0]!.n)], [0, 0]);
+    t.check("…and a foreign owner tag's shingle stays", Number((await q<{ n: number }>("SELECT COUNT(*) AS n FROM headline_shingles WHERE owner_tag = 'ffffffffffffffff'"))[0]!.n) === 1);
+    t.check("no path under DATA_DIR/<area>/<P> or DATA_DIR/media/v1/<xx>/<P> survives (SEC-21)", area(STORE_P).every((d) => !existsSync(d.dir)) && !existsSync(join(DATA, "media", "v1", STORE_P.slice(0, 2), STORE_P)) && ["exports", "imports", "receipts", "ai"].every((a) => !existsSync(join(DATA, a, STORE_P))));
+    t.eq("Q's rows, chunks, shingles, store row and files are byte-identical (checksums)", await fingerprint(), qBefore);
+    t.eq("the kept tables keep P's rows", (await Promise.all(plan.keep.map((k) => countOf(k, STORE_P)))).every((n) => n >= 1), true);
+    const audit = await q<{ meta: string }>("SELECT meta FROM audit_log WHERE store_id = ? AND target = 'P-AUDIT'", [STORE_P]);
+    t.eq("audit meta redacted (name, phone, note, *_norm, city), the codes kept", JSON.parse(audit[0]!.meta), { from: "active", to: "closed", reason: "owner", note: RD.PURGED, name: RD.PURGED, phone: RD.PURGED, detail: { email_norm: RD.PURGED, city: RD.PURGED } });
+    t.check("…no P canary left in any audit row of P", (await q<{ meta: string | null }>("SELECT meta FROM audit_log WHERE store_id = ?", [STORE_P])).every((r) => !String(r.meta ?? "").includes("P-CANARY") && !String(r.meta ?? "").includes("+212600000999")));
+    const [purgedRow] = await q<{ meta: string }>("SELECT meta FROM audit_log WHERE store_id = ? AND action = 'store.purged'", [STORE_P]);
+    t.eq("…and the store.purged row written after it", JSON.parse(purgedRow?.meta ?? "null"), { from: "scheduled_deletion", to: "purged", reason: "purge_scheduled" });
+    t.check("legal_acceptances: ua NULL for P, Q's untouched", (await q<{ ua: string | null }>("SELECT ua FROM legal_acceptances WHERE store_id = ?", [STORE_P])).every((r) => r.ua === null) && (await q<{ ua: string | null }>("SELECT ua FROM legal_acceptances WHERE store_id = ?", [STORE_Q])).every((r) => r.ua === "P-CANARY-UA"));
+    t.check("signup_reviews: signals emptied, business_context NULL", (await q<{ signals: string; business_context: string | null }>("SELECT signals, business_context FROM signup_reviews WHERE store_id = ?", [STORE_P])).every((r) => r.signals === JSON.stringify(RD.PURGED_SIGNALS) && r.business_context === null));
+    t.check("platform_notes soft-deleted: deleted_at set, body '[purged]'", (await q<{ body: string; deleted_at: Date | null }>("SELECT body, deleted_at FROM platform_notes WHERE store_id = ?", [STORE_P])).every((r) => r.body === "[purged]" && r.deleted_at !== null));
+    t.check("P is in platform_backup.purgeRequests", (await getPlatformSetting("platform_backup", { fresh: true })).purgeRequests.some((r) => r.storeId === STORE_P));
+    t.eq("…and its cursor row is gone", (await q("SELECT job FROM cron_cursors WHERE job = ?", [`purge:${STORE_P}`])).length, 0);
+
+    // an active store is never purged: the queue ignores it, and a cursor naming it is refused and dropped
+    const idle = await PJ.purgeJob(jobCtx("purge"), { sliceRows: 2 });
+    t.check("nothing due: the job is idle (Q active, R closed, P purged)", idle.done === true && idle.summary?.purged === 0 && idle.summary?.refused === 0, JSON.stringify(idle.summary));
+    await ST.patchJobState(`purge:${STORE_Q}`, { purge: { v: 1, storeId: STORE_Q, reason: "purge_scheduled", step: 0, auditAfter: 0, dry: {}, startedAt: new Date().toISOString(), plan: PJ.planSignature(plan) } });
+    const forced = await PJ.purgeJob(jobCtx("purge"), { sliceRows: 2 });
+    t.check("purging an active store is refused (its forged cursor dropped)", forced.summary?.refused === 1 && forced.summary?.refusedStatus === "active" && (await q("SELECT job FROM cron_cursors WHERE job = ?", [`purge:${STORE_Q}`])).length === 0, JSON.stringify(forced.summary));
+    t.eq("…and Q is still byte-identical", await fingerprint(), qBefore);
+
+    // lifecycle: closed past purge_after → scheduled_deletion (purge in 24 h); closed within the window stays; an expired
+    // view-as session is ended, a live one is not
+    const STORE_L = "01JB8ZK3Q4R5S6T7V8W9PRG0NA";
+    const STORE_M = "01JB8ZK3Q4R5S6T7V8W9PRG0MA";
+    await q("INSERT INTO stores (id, handle, name, status, brand_seed, closed_at, purge_after) VALUES (?, 'life-l', 'Store L', 'closed', ?, ?, ?), (?, 'life-m', 'Store M', 'closed', ?, ?, ?)", [
+      STORE_L, "0123456789abcdef", ago(31 * DAY_MS), ago(60_000), STORE_M, "0123456789abcdef", ago(DAY_MS), new Date(Date.now() + 29 * DAY_MS),
+    ]);
+    const impOld = newId();
+    const impLive = newId();
+    await q("INSERT INTO impersonation_sessions (id, store_id, staff_user_id, session_id, reason, started_at, expires_at) VALUES (?, ?, ?, ?, 'ticket', ?, ?), (?, ?, ?, ?, 'ticket', ?, ?)", [
+      impOld, STORE_M, newId(), hex(32), ago(40 * 60_000), ago(10 * 60_000), impLive, STORE_M, newId(), hex(32), ago(5 * 60_000), new Date(Date.now() + 25 * 60_000),
+    ]);
+    const life = await LJ.lifecycleJob(jobCtx("lifecycle", 2_000));
+    const [l] = await q<{ status: string; purge_after: Date; status_reason: string }>("SELECT status, purge_after, status_reason FROM stores WHERE id = ?", [STORE_L]);
+    t.check("lifecycle moves a closed store past purge_after to scheduled_deletion, purge in 24 h", l?.status === "scheduled_deletion" && l.status_reason === LJ.SCHEDULE_REASON && Math.abs(l.purge_after.getTime() - (Date.now() + DAY_MS)) < 10 * 60_000, JSON.stringify(l));
+    t.check("…with its store.deletion_scheduled audit row", (await q("SELECT id FROM audit_log WHERE store_id = ? AND action = 'store.deletion_scheduled'", [STORE_L])).length === 1);
+    t.eq("…a closed store inside its window stays closed", (await q<{ status: string }>("SELECT status FROM stores WHERE id = ?", [STORE_M]))[0]?.status, "closed");
+    const imps = await q<{ id: string; ended_reason: string | null }>("SELECT id, ended_reason FROM impersonation_sessions WHERE id IN (?, ?) ORDER BY started_at", [impOld, impLive]);
+    t.eq("…the expired view-as session ended 'expired', the live one open", imps.map((r) => [r.id, r.ended_reason]), [[impOld, "expired"], [impLive, null]]);
+    t.check("…counts in the run summary", Number(life.summary?.scheduled) >= 1 && Number(life.summary?.impersonationsEnded) >= 1 && life.done === true, JSON.stringify(life.summary));
+    const purgedLater = await PJ.purgeJob(jobCtx("purge"), { sliceRows: 2 });
+    t.check("…and the purge leaves L alone until its 24 h have passed", purgedLater.summary?.purged === 0 && (await q<{ status: string }>("SELECT status FROM stores WHERE id = ?", [STORE_L]))[0]?.status === "scheduled_deletion");
+
+    // retention: rows on both sides of every core cutoff (store K), only the old ones go
+    const STORE_K = "01JB8ZK3Q4R5S6T7V8W9PRG0KA";
+    await q("INSERT INTO stores (id, handle, name, status, brand_seed) VALUES (?, 'ret-k', 'Store K', 'active', ?)", [STORE_K, "0123456789abcdef"]);
+    const ids = { outboxOld: newId(), outboxNew: newId(), deadOld: newId(), deadNew: newId(), ptOld: newId(), ptNew: newId(), invOld: newId(), invNew: newId(), prOld: newId(), prNew: newId(), impOld: newId(), impNew: newId(), reqOld: newId(), reqNew: newId(), reqPending: newId() };
+    const day = (ms: number) => new Date(Date.now() - ms).toISOString().slice(0, 10);
+    await seedRow("outbox", STORE_K, 0, { id: ids.outboxOld, state: "done", done_at: ago(15 * DAY_MS) });
+    await seedRow("outbox", STORE_K, 0, { id: ids.outboxNew, state: "done", done_at: ago(13 * DAY_MS) });
+    await seedRow("outbox", STORE_K, 0, { id: ids.deadOld, state: "dead", done_at: ago(31 * DAY_MS) });
+    await seedRow("outbox", STORE_K, 0, { id: ids.deadNew, state: "dead", done_at: ago(29 * DAY_MS) });
+    await seedRow("job_runs", STORE_K, 0, { job: "qa.ret.old", started_at: ago(15 * DAY_MS) });
+    await seedRow("job_runs", STORE_K, 0, { job: "qa.ret.new", started_at: ago(13 * DAY_MS) });
+    await seedRow("error_events", STORE_K, 0, { code: "qa_ret_old", last_at: ago(31 * DAY_MS) });
+    await seedRow("error_events", STORE_K, 0, { code: "qa_ret_new", last_at: ago(29 * DAY_MS) });
+    await seedRow("notifications", STORE_K, 0, { kind: "qa.ret.old", created_at: ago(91 * DAY_MS) });
+    await seedRow("notifications", STORE_K, 0, { kind: "qa.ret.new", created_at: ago(89 * DAY_MS) });
+    await seedRow("audit_log", STORE_K, 0, { action: "qa.ret.old", created_at: ago(401 * DAY_MS) });
+    await seedRow("audit_log", STORE_K, 0, { action: "qa.ret.new", created_at: ago(399 * DAY_MS) });
+    await seedRow("impersonation_sessions", STORE_K, 0, { id: ids.impOld, started_at: ago(401 * DAY_MS), expires_at: ago(401 * DAY_MS - 60_000), ended_at: ago(401 * DAY_MS - 60_000) });
+    await seedRow("impersonation_sessions", STORE_K, 0, { id: ids.impNew, started_at: ago(399 * DAY_MS), expires_at: ago(399 * DAY_MS - 60_000), ended_at: ago(399 * DAY_MS - 60_000) });
+    await seedRow("platform_requests", STORE_K, 0, { id: ids.reqOld, status: "executed", requested_at: ago(401 * DAY_MS), payload: "{}" });
+    await seedRow("platform_requests", STORE_K, 0, { id: ids.reqNew, status: "executed", requested_at: ago(399 * DAY_MS), payload: "{}" });
+    await seedRow("platform_requests", STORE_K, 0, { id: ids.reqPending, status: "pending", requested_at: ago(401 * DAY_MS), payload: "{}" });
+    await seedRow("password_resets", null, 0, { id: ids.prOld, expires_at: ago(31 * DAY_MS) });
+    await seedRow("password_resets", null, 0, { id: ids.prNew, expires_at: ago(29 * DAY_MS) });
+    await seedRow("store_invites", STORE_K, 0, { id: ids.invOld, expires_at: ago(31 * DAY_MS) });
+    await seedRow("store_invites", STORE_K, 0, { id: ids.invNew, expires_at: ago(29 * DAY_MS) });
+    await seedRow("staff_invites", null, 0, { id: ids.invOld.replace(/.$/, "S"), expires_at: ago(31 * DAY_MS) });
+    await seedRow("staff_invites", null, 0, { id: ids.invNew.replace(/.$/, "S"), expires_at: ago(29 * DAY_MS) });
+    await seedRow("page_slug_history", STORE_K, 0, { slug: "ret-old", until: ago(3_600_000) });
+    await seedRow("page_slug_history", STORE_K, 0, { slug: "ret-new", until: new Date(Date.now() + DAY_MS) });
+    await seedRow("preview_tokens", STORE_K, 0, { id: ids.ptOld, expires_at: ago(31 * DAY_MS) });
+    await seedRow("preview_tokens", STORE_K, 0, { id: ids.ptNew, expires_at: ago(29 * DAY_MS) });
+    await seedRow("store_usage", STORE_K, 0, { metric: "ai_credits_day", period: day(8 * DAY_MS), value: 3 });
+    await seedRow("store_usage", STORE_K, 0, { metric: "ai_deep_passes", period: day(9 * DAY_MS), value: 1 });
+    await seedRow("store_usage", STORE_K, 0, { metric: "ai_credits_day", period: day(6 * DAY_MS), value: 3 });
+    await seedRow("store_usage", STORE_K, 0, { metric: "orders", period: "2020-01", value: 9 });
+    await seedRow("store_usage", STORE_K, 0, { metric: "media_bytes", period: "total", value: 9 });
+    const pass = await HK.runRetention(jobCtx("housekeeping"), Date.now());
+    t.check("one pass ran every rule to its end", pass.finished && pass.failed.length === 0, JSON.stringify(pass));
+    const has = async (text: string, v: unknown[]) => (await q(text, v)).length > 0;
+    const kept = {
+      outbox: [await has("SELECT id FROM outbox WHERE id = ?", [ids.outboxOld]), await has("SELECT id FROM outbox WHERE id = ?", [ids.outboxNew]), await has("SELECT id FROM outbox WHERE id = ?", [ids.deadOld]), await has("SELECT id FROM outbox WHERE id = ?", [ids.deadNew])],
+      job_runs: [await has("SELECT id FROM job_runs WHERE job = 'qa.ret.old'", []), await has("SELECT id FROM job_runs WHERE job = 'qa.ret.new'", [])],
+      error_events: [await has("SELECT id FROM error_events WHERE code = 'qa_ret_old'", []), await has("SELECT id FROM error_events WHERE code = 'qa_ret_new'", [])],
+      notifications: [await has("SELECT id FROM notifications WHERE kind = 'qa.ret.old'", []), await has("SELECT id FROM notifications WHERE kind = 'qa.ret.new'", [])],
+      audit_log: [await has("SELECT id FROM audit_log WHERE action = 'qa.ret.old'", []), await has("SELECT id FROM audit_log WHERE action = 'qa.ret.new'", [])],
+      impersonation_sessions: [await has("SELECT id FROM impersonation_sessions WHERE id = ?", [ids.impOld]), await has("SELECT id FROM impersonation_sessions WHERE id = ?", [ids.impNew])],
+      platform_requests: [await has("SELECT id FROM platform_requests WHERE id = ?", [ids.reqOld]), await has("SELECT id FROM platform_requests WHERE id = ?", [ids.reqNew]), await has("SELECT id FROM platform_requests WHERE id = ?", [ids.reqPending])],
+      password_resets: [await has("SELECT id FROM password_resets WHERE id = ?", [ids.prOld]), await has("SELECT id FROM password_resets WHERE id = ?", [ids.prNew])],
+      store_invites: [await has("SELECT id FROM store_invites WHERE id = ?", [ids.invOld]), await has("SELECT id FROM store_invites WHERE id = ?", [ids.invNew])],
+      staff_invites: [await has("SELECT id FROM staff_invites WHERE id = ?", [ids.invOld.replace(/.$/, "S")]), await has("SELECT id FROM staff_invites WHERE id = ?", [ids.invNew.replace(/.$/, "S")])],
+      page_slug_history: [await has("SELECT slug FROM page_slug_history WHERE store_id = ? AND slug = 'ret-old'", [STORE_K]), await has("SELECT slug FROM page_slug_history WHERE store_id = ? AND slug = 'ret-new'", [STORE_K])],
+      preview_tokens: [await has("SELECT id FROM preview_tokens WHERE id = ?", [ids.ptOld]), await has("SELECT id FROM preview_tokens WHERE id = ?", [ids.ptNew])],
+      store_usage: (await q<{ metric: string; period: string }>("SELECT metric, period FROM store_usage WHERE store_id = ? ORDER BY metric, period", [STORE_K])).map((r) => `${r.metric}:${r.period}`),
+    };
+    t.eq("retention deletes only the rows past their cutoff (outbox done 14 d / dead 30 d, job_runs 14 d, error_events 30 d, notifications 90 d, audit 400 d, view-as and settled requests 400 d, resets / invites / tokens 30 d after expiry, slugs at until, daily usage 7 d)", kept, {
+      outbox: [false, true, false, true],
+      job_runs: [false, true],
+      error_events: [false, true],
+      notifications: [false, true],
+      audit_log: [false, true],
+      impersonation_sessions: [false, true],
+      platform_requests: [false, true, true],
+      password_resets: [false, true],
+      store_invites: [false, true],
+      staff_invites: [false, true],
+      page_slug_history: [false, true],
+      preview_tokens: [false, true],
+      store_usage: [`ai_credits_day:${day(6 * DAY_MS)}`, "media_bytes:total", "orders:2020-01"],
+    });
+    t.check("…each rule's count in the pass", Number(pass.rows.outboxDone) >= 1 && Number(pass.rows.dailyUsage) >= 2 && Number(pass.rows.slugHistory) >= 1, JSON.stringify(pass.rows));
+    // housekeeping runs the pass at most once an hour
+    await ST.patchJobState("housekeeping", { retentionAt: null });
+    const hk1 = await HK.housekeeping(jobCtx("housekeeping", 4_000));
+    const hk2 = await HK.housekeeping(jobCtx("housekeeping", 4_000));
+    t.check("housekeeping: the pass runs (and is stamped), the next tick within the hour skips it", typeof hk1.summary?.retention === "number" && "retention.outboxDone" in (hk1.summary ?? {}) && hk2.summary?.retention === true && typeof (await ST.readJobState("housekeeping")).retentionAt === "string", JSON.stringify([hk1.summary, hk2.summary]));
+    t.check("…and the test orders sweep visits the stores through P4's deleteTestOrders (a stub until P4: 0 deleted)", hk1.summary?.testOrders === 0 && Number(hk1.summary?.testOrderStores) >= 1, JSON.stringify(hk1.summary));
   });
 
   await h.run();

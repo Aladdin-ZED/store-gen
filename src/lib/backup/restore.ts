@@ -82,11 +82,18 @@ export async function verifyBackupDir(dir: string, manifest?: BackupManifestFile
 export interface RestoreOpts {
   /** only these tables (default: every table of the manifest) */
   tables?: readonly string[];
-  /** rows per INSERT (default 200; also cut at 4 MB of line text) */
+  /** rows per INSERT (default 200; also cut at RESTORE_BATCH_BYTES of line text) */
   batchRows?: number;
   /** after each table, with its restored row count */
   onTable?(name: string, rows: number): void;
 }
+
+/**
+ * Line text per INSERT: half of MariaDB's smallest common `max_allowed_packet` (1 MiB, XAMPP's default), so a batch's
+ * statement (strings escaped, binary as hex: at most ~1.5× the line) still fits in one packet. A single larger row
+ * goes alone.
+ */
+export const RESTORE_BATCH_BYTES = 512 * 1024;
 
 /** Verifies, then restores. Returns each table's restored row count (equal to the manifest's, or it threw). */
 export async function restoreBackupDir(dir: string, target: RestoreTarget, opts: RestoreOpts = {}): Promise<{ day: string; tables: { name: string; rows: number }[] }> {
@@ -123,7 +130,7 @@ export async function restoreBackupDir(dir: string, target: RestoreTarget, opts:
           throw new RestoreError("bad_line", t.name, p.name);
         }
         const key = row.columns.join("\u0000");
-        if (key !== colsKey || batch.length >= batchRows || batchBytes + line.length > 4 * 1024 * 1024) {
+        if (key !== colsKey || batch.length >= batchRows || batchBytes + line.length > RESTORE_BATCH_BYTES) {
           await flush();
           cols = row.columns;
           colsKey = key;

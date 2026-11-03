@@ -1,11 +1,11 @@
 /**
  * Jobs of the core track (P8, platform ops): the outbox drain, renders, exports, backup, purge, usage.reconcile,
- * media.migrate, lifecycle, housekeeping.
+ * media.migrate, media.sweep, storage.walk, refs.reconcile, lifecycle, renders.fanout, housekeeping.
  * Extension file (docs/STORE-SAAS.md §H.2, §K.3) imported by src/lib/jobs/registry.ts. Each job's body is loaded when
  * it runs, so importing the registry (test:jobs, the console) never loads the database code behind it.
  *
- * Slots (src/lib/jobs/slots.ts): outbox 3, renders 4, backup / exports 5, media.migrate / usage.reconcile / media.sweep /
- * storage.walk / refs.reconcile 6, renders.fanout 7, housekeeping 8. P8's later steps add purge (5) and lifecycle (7).
+ * Slots (src/lib/jobs/slots.ts): outbox 3, renders 4, backup / exports / purge 5, media.migrate / usage.reconcile /
+ * media.sweep / storage.walk / refs.reconcile 6, lifecycle / renders.fanout 7, housekeeping 8.
  *
  * The storage jobs' daily times (src/lib/jobs/storage/rules.ts STORAGE_JOB_TIMES) take the free 02:05-02:25 windows,
  * one job each, clear of every time §H.2 and OPE-§J name (§H.2 slot 6: no tick carries more than two daily jobs).
@@ -48,6 +48,15 @@ export const jobs: Job[] = [
     run: async (ctx) => (await import("../exports")).exportsJob(ctx),
   },
   {
+    // §H.2 slot 5 / §H.9 / §F.9: one store's purge at a time, in slices of ≤ 2,000 rows across ticks (the status read
+    // before every slice), then the kept rows redacted, purgeRequests, the caches and the tombstone. It runs after the
+    // backup and the exports and takes what is left of the slot's 11 s (§F.9 says ≤ 15 s; slot 5 guarantees 11 s)
+    name: "purge",
+    every: "tick",
+    budgetMs: 11_000,
+    run: async (ctx) => (await import("../purge")).purgeJob(ctx),
+  },
+  {
     // §H.2 slot 6 / §G.3: files still kept in the database moved to DATA_DIR, ≤ 50 a tick, store by store; returns at
     // once on the db backend and for an hour after a probe found nothing to move
     name: "media.migrate",
@@ -86,6 +95,14 @@ export const jobs: Job[] = [
     run: async (ctx) => (await import("../storage/refs")).refsReconcileJob(ctx),
   },
   {
+    // §H.2 slot 7 (≤ 2 s of the 5 s shared) / §A.5.1: closed → scheduled_deletion once purge_after has passed, expired
+    // impersonation sessions ended (invites need no write: their expiry is read from expires_at)
+    name: "lifecycle",
+    every: "tick",
+    budgetMs: 2_000,
+    run: async (ctx) => (await import("../lifecycle")).lifecycleJob(ctx),
+  },
+  {
     // §H.2 slot 7 (≈ 1 s of the 5 s shared): a platform-wide re-render request (PLA-§16.2), enqueued store by store
     // from its own cursor; one read and nothing else while none is in progress
     name: "renders.fanout",
@@ -94,7 +111,8 @@ export const jobs: Job[] = [
     run: async (ctx) => (await import("../renders")).rendersFanoutJob(ctx),
   },
   {
-    // §H.2 slot 8 (4 s): rate-limit buckets, visitor markers > 2 days, sessions, abandoned leads > 30 days per store
+    // §H.2 slot 8 (4 s): rate-limit buckets, visitor markers > 2 days, sessions, the §H.11 core retention rows (hourly),
+    // abandoned leads > 30 days and test orders > 30 days per store
     name: "housekeeping",
     every: "tick",
     budgetMs: 4_000,
