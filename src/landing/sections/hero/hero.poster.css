@@ -50,7 +50,10 @@
 }
 
 /* ==========================================================================
-   poster — color field, the giant word edge to edge, the product in front
+   poster — a flat colour field, type first (DES-§5.13 H3): the headline big,
+   the product in front of it as one masked print, the price cluster on a
+   contrasting block, the action and the COD line. The giant word behind the
+   print only when the section asks for it ([data-ghost]); no badge.
    ========================================================================== */
 .lp-hero--poster .lp-hero__grid {
   container-type: inline-size;
@@ -82,43 +85,43 @@
 }
 
 .lp-hero__art {
-  /* the print's width: its edges place the badge and the price tag that hang off its corners */
-  --print-w: min(74%, 27rem);
+  /* the print's width: its edges place the price tag that hangs off its lower corner */
+  --print-w: min(80%, 27rem);
   position: relative;
   z-index: 1;
   display: grid;
   justify-items: center;
-  margin-block-start: calc(var(--mega-fs) * -0.3 - var(--hero-gap));
+  margin-block-end: 1.4rem;
 }
 
 /* a product lying on its side: a landscape print, wider */
 .lp-hero__art[data-wide] {
-  --print-w: min(92%, 34rem);
+  --print-w: min(100%, 34rem);
 }
 
-[data-script="ar"] > .lp-hero__art {
+/* the giant word asked for: the print rises over its lower third */
+[data-ghost] > .lp-hero__art {
+  margin-block-start: calc(var(--mega-fs) * -0.3 - var(--hero-gap));
+}
+
+[data-ghost][data-script="ar"] > .lp-hero__art {
   margin-block-start: calc(var(--mega-fs) * -0.2 - var(--hero-gap));
-}
-
-.lp-hero__art--solo {
-  margin-block-start: 0;
 }
 
 .lp-hero__print {
   position: relative;
   inline-size: var(--print-w);
-  rotate: var(--rot, 0deg);
 }
 
-/* a print with a continuous corner, lit from above (1px rim on its top edge, a device hairline
-   around it) and lifted off the field by a long soft shadow falling straight down */
+/* a print with a continuous corner (or the page's arch), lit from above (1px rim on its top edge, a
+   device hairline around it) and lifted off the field by a long soft shadow falling straight down */
 .lp-hero__print[data-kind="photo"] .lp-hero__pic {
   border-radius: var(--lp-sq-media);
   corner-shape: var(--lp-corner);
   box-shadow: var(--lp-shadow-l), 0 30px 60px -30px var(--mx-contact);
 }
 
-.lp-hero__print[data-kind="photo"]::after {
+.lp-hero__print[data-kind="photo"]:not([data-shape="arch"])::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -132,35 +135,21 @@
   filter: var(--lp-shadow-product-filter, none);
 }
 
-/* the badge hangs off the print's top end corner, the price tag off its bottom start corner — both
-   measured from the print's own edge (--print-w), so they sit the same way on every print size */
-.lp-hero__badge {
-  position: absolute;
-  z-index: 2;
-  inset-block-start: -1.25rem;
-  inset-inline-end: max(-0.25rem, calc((100% - var(--print-w)) / 2 - 3rem));
-  --badge-size: clamp(5.75rem, 4.5rem + 6vw, 9rem);
-}
-
+/* the price tag hangs off the print's lower start corner, measured from the print's own edge (--print-w) */
 .lp-hero__tag {
   position: absolute;
   z-index: 2;
   inset-block-end: -1.4rem;
-  inset-inline-start: max(0rem, calc((100% - var(--print-w)) / 2 - 2.25rem));
+  inset-inline-start: max(0rem, calc((100% - var(--print-w)) / 2 - 1.75rem));
   padding: 0.85rem 1.15rem 0.8rem;
   border-radius: var(--lp-sq-l);
   corner-shape: var(--lp-corner);
   box-shadow: var(--lp-highlight, 0 0 #0000), var(--lp-shadow-l);
-  rotate: calc(var(--rot, 0deg) * -1);
 }
 
-/* mirrored when the usual corners would cover a face, a hand or the product (framing.ts) */
-.lp-hero__art[data-flip] .lp-hero__badge {
-  inset-inline: max(-0.25rem, calc((100% - var(--print-w)) / 2 - 3rem)) auto;
-}
-
+/* mirrored when the usual corner would cover a face, a hand or the product (framing.ts) */
 .lp-hero__art[data-flip] .lp-hero__tag {
-  inset-inline: auto max(0rem, calc((100% - var(--print-w)) / 2 - 2.25rem));
+  inset-inline: auto max(0rem, calc((100% - var(--print-w)) / 2 - 1.75rem));
 }
 
 .lp-hero__tag .lp-price {
@@ -170,20 +159,49 @@
   gap: 0.3rem;
 }
 
-.lp-hero--poster .lp-hero__head {
-  padding-block-start: 0.75rem;
+/* priceBlock "band": the price cluster on a full-width contrasting band over the action */
+.lp-hero__band {
+  display: flex;
+  align-items: center;
+  inline-size: 100%;
+  padding: 1rem 1.25rem;
+  border-radius: var(--lp-sq-l);
+  corner-shape: var(--lp-corner);
 }
 
+.lp-hero__band .lp-price {
+  --price-fs: clamp(1.75rem, 1.35rem + 1.8vw, 2.75rem);
+}
+
+.lp-hero--poster .lp-hero__head {
+  padding-block-start: 0.25rem;
+}
+
+/* type first: the headline is the poster (≈ 56 px at 390, never uppercase in Arabic) */
 .lp-hero--poster .lp-hero__title {
-  font-size: min(calc(var(--lp-step-4) * 0.92 * var(--lp-script-scale-display)), 10.5vw, 4.4rem);
+  font-size: min(calc(var(--lp-step-5) * var(--lp-script-scale-display)), 14vw, 5.75rem);
+  line-height: 1.02;
+  max-inline-size: 14ch;
+}
+
+:lang(ar) .lp-hero--poster .lp-hero__title {
+  line-height: 1.25;
+}
+
+.lp-hero--poster .lp-hero__title--long {
+  font-size: min(calc(var(--lp-step-4) * var(--lp-script-scale-display)), 11vw, 4.5rem);
   max-inline-size: 16ch;
 }
 
-@media (min-width: 48rem) {
-  .lp-hero--poster .lp-hero__title--xlong {
-    max-inline-size: 20ch;
-    font-size: min(calc(var(--lp-step-4) * 0.7 * var(--lp-script-scale-display)), 3.25rem);
-  }
+.lp-hero--poster .lp-hero__title--xlong {
+  font-size: min(calc(var(--lp-step-4) * 0.8 * var(--lp-script-scale-display)), 9vw, 3.5rem);
+  max-inline-size: 20ch;
+}
+
+/* the giant word asked for: the headline steps back to the size it had beside it */
+[data-ghost] > .lp-hero__head .lp-hero__title {
+  font-size: min(calc(var(--lp-step-4) * 0.92 * var(--lp-script-scale-display)), 10.5vw, 4.4rem);
+  max-inline-size: 16ch;
 }
 
 .lp-hero--poster .lp-hero__lead {
@@ -191,12 +209,8 @@
   opacity: 0.86;
 }
 
-.lp-hero__beams {
-  opacity: 0.85;
-}
-
 @media (min-width: 64rem) {
-  .lp-hero--poster .lp-hero__grid {
+  .lp-hero--poster .lp-hero__grid[data-ghost] {
     grid-template-areas: "mega mega" "head art" "buy art";
     row-gap: 2rem;
   }
@@ -206,12 +220,21 @@
   }
 
   .lp-hero__art {
+    align-self: center;
+    margin-block-end: 0;
+  }
+
+  [data-ghost] > .lp-hero__art {
     align-self: start;
     margin-block-start: calc(var(--mega-fs) * -0.45 - 2rem);
   }
 
-  [data-script="ar"] > .lp-hero__art {
+  [data-ghost][data-script="ar"] > .lp-hero__art {
     margin-block-start: calc(var(--mega-fs) * -0.38 - 2rem);
+  }
+
+  .lp-hero__art[data-wide] {
+    --print-w: min(100%, 36rem);
   }
 }
 @media (prefers-reduced-motion: no-preference) {

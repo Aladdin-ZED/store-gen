@@ -7,6 +7,9 @@
  *  - `decor` paths: a decoration whose path holds `false`, `""`, `0` or an empty list is off (`ghost` → ghostWord,
  *    `ring` → ring, `chips` → overlayChips, a list at `chips` caps the count, `dots` → dots, `aurora` → aurora,
  *    `ticker` → the "marquee" text run);
+ *  - `optIn` paths (the redraws' off-by-default devices, DES-§4.5.4, DS56): `ghost` → the ghost word and its text run
+ *    only when the path holds `true`; `chips` → the number at the path, capped by `overlayChipsMax` and by the list
+ *    at the `decor` chips path;
  *  - `data.cta`: `false` → 0 primary CTAs, `true` → at least 1 (the sections' optional closing button);
  *  - `data.opener`: narrows `openers` to that one opener when the variant supports it.
  * The signature is frozen (src/lib/contracts/r1-p0.ts) and the shape is the maintainer's (./types.frozen.ts).
@@ -107,6 +110,16 @@ export function variantFeatures(type: string, variant: string, data: unknown): V
         if (off && out.textRuns) out.textRuns = out.textRuns.filter((r) => r !== "marquee");
         break;
     }
+  }
+  if (f.optIn?.ghost && at(data, f.optIn.ghost) === true && !(f.decor?.ghost && isOff(at(data, f.decor.ghost)))) {
+    out.ghostWord = true;
+    out.textRuns = [...new Set([...(out.textRuns ?? []), "ghost" as const])];
+  }
+  if (f.optIn?.chips) {
+    const n = at(data, f.optIn.chips);
+    const list = f.decor?.chips ? at(data, f.decor.chips) : undefined;
+    const want = typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+    out.overlayChips = Math.min(want, f.overlayChipsMax ?? want, Array.isArray(list) ? list.length : want);
   }
   const d = data as Record<string, unknown>;
   if (d.cta === false) out.ctas = 0;

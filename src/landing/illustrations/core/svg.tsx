@@ -32,7 +32,7 @@ export type Tone =
   | "paper"
   /** soft hue-true accent tint (--mx-tint-2) — a highlight block that keeps the section ink legible */
   | "highlight"
-  /** section-aware product light (aurora hue 1): the default of every light effect */
+  /** section-aware product light (the one product-tinted glow, ≤ 10 % alpha): the default of every light effect */
   | "glow";
 
 /** Tertiary color (fills behind/inside shapes). */

@@ -8,9 +8,10 @@
  *              cards beside it. Photos stand as a stack of sheets ×qty (iOS-style depth: the copies
  *              peek out above the front sheet and breathe apart on hover / selection); cutouts stand
  *              in depth on a lit floor.
- *  - tickets — wallet passes: full-colour portrait passes (tone per badge), brand + badge header, a
- *              strip image that melts into the pass colour with the quantity as primary field,
- *              labelled fields (total · per piece · saving) and an inverse pill action.
+ *  - tickets — (id kept) showcase cards on the page's card tier with one cut corner as the only device: no
+ *              perforations, no full-colour pass, no sheen (design.md DES-§5.13 S8): brand + badge header,
+ *              the quantity as primary field beside a thumbnail, labelled fields (total · per piece · saving)
+ *              and the pill action.
  *  - shelf   — a lit display window: each pack stands on a cylinder podium whose height follows the
  *              quantity (a skyline: the bigger the pack, the higher it stands, "×3" set on its face),
  *              a spotlight that follows the selection, caption cards hanging off the window.
@@ -48,6 +49,7 @@ import { Plain } from "../orderForm/text";
 import { allFree, featuredOf, packsOf, type Pack } from "./packs";
 import { Lineup, Stack, copiesOf, lineupSpan, type ProductVisual } from "./visuals";
 import { OfferVisual } from "../../offers/visual";
+import { withRevealScope } from "../reveal-scope";
 
 const VARIANT_IDS = ["stacked", "tickets", "shelf"] as const;
 type Variant = (typeof VARIANT_IDS)[number];
@@ -357,23 +359,10 @@ function Stacked({ id, ctx, packs, visual, cta, featured, paper }: Common) {
 }
 
 /* ------------------------------------------------------------------ */
-/* tickets → wallet passes                                             */
+/* tickets → showcase cards with one cut corner                        */
 /* ------------------------------------------------------------------ */
 
-/** A pass on a block of its own colour would dissolve into it: it takes the theme's other loud tone. */
-const PASS_SWAP: Partial<Record<SectionBg, SectionBg>> = { accent: "pop", dark: "pop", pop: "accent" };
-
-/**
- * Pass colour: popular → accent, best → dark, custom → pop; plain passes take the card surface (the
- * favourite: accent). Never the block's own colour.
- */
-function passTone(p: Pack, featured: boolean, bg: SectionBg, paper: SectionBg): SectionBg {
-  const kind = p.badge?.kind;
-  const want: SectionBg = kind === "popular" ? "accent" : kind === "best" ? "dark" : kind === "custom" ? "pop" : featured ? "accent" : paper;
-  return want === bg ? (PASS_SWAP[want] ?? paper) : want;
-}
-
-function Passes({ id, ctx, packs, visual, cta, featured, bg, paper }: Common) {
+function Passes({ id, ctx, packs, visual, cta, featured, paper }: Common) {
   const shared = allFree(packs);
   const L = passLabels(ctx.locale);
   const brand = ctx.store.name.trim() || ctx.product.name;
@@ -387,8 +376,7 @@ function Passes({ id, ctx, packs, visual, cta, featured, bg, paper }: Common) {
         const plan = art === "photo" ? photoPlan(asset) : null;
         return (
           <li key={p.id} className="lp-ofr__li" data-feat={isFeat ? "" : undefined} data-reveal="tilt-in">
-            <PackLink id={id} p={p} className="lp-ofr__card lp-pass" featured={isFeat} paper={passTone(p, isFeat, bg, paper)}>
-              <span className="lp-pass__sheen" aria-hidden="true" />
+            <PackLink id={id} p={p} className="lp-ofr__card lp-pass" featured={isFeat} paper={paper}>
               <span className="lp-pass__head">
                 <bdi className="lp-pass__brand">{brand}</bdi>
                 {p.badge ? <bdi className="lp-pass__badge">{p.badge.text}</bdi> : null}
@@ -647,7 +635,7 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
   );
 }
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "offer",
   label: "Offer showcase",
   labelFr: "Vitrine des offres",
@@ -709,4 +697,4 @@ export default defineSection({
     },
   ],
   render,
-});
+}));

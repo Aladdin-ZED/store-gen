@@ -75,8 +75,8 @@
   overflow: hidden;
   border-radius: var(--lp-sq-xl);
   corner-shape: var(--lp-corner);
-  /* lit from above, where the product stands */
-  background: radial-gradient(120% 12rem at 50% 0, var(--lp-aurora-1, var(--mx-tint)), transparent) var(--sec-card);
+  /* lit from above, where the product stands (the product tint: no aurora light, core D60, V40) */
+  background: radial-gradient(120% 12rem at 50% 0, var(--mx-tint), transparent) var(--sec-card);
   box-shadow: var(--lp-highlight, 0 0 #0000), var(--lp-shadow-glow, 0 0 #0000), var(--lp-shadow-l);
   transform-origin: 50% 0;
 }

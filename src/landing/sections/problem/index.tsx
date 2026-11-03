@@ -2,8 +2,8 @@
  * Problem — the everyday pains the product ends, then the turn to the product. Four modern views:
  *  crossed  redline ledger: each pain struck by one clean accent line, its fix written in under it;
  *           it ends on the one line left standing, the product inset in the type as an image pill
- *  chat     the pains as the shopper's messages in a glass conversation card; the shop answers with
- *           a product card (photo, glass price tag, solution, order button)
+ *  chat     (id kept) a two-column ledger on hairlines: each pain beside the product's answer, the turn
+ *           under it; no chat mock (design.md DES-§5.13 S5)
  *  split    recessed "Sans" vs raised, vivid "Avec" panels bridged by a half-desaturated product photo
  *  quote    one huge statement with a highlight block on the key words; pains as a quiet index and a
  *           raised answer card with the product
@@ -19,6 +19,7 @@ import { Crossed } from "./crossed";
 import { schema, type ProblemData, type ViewProps } from "./model";
 import { Quote } from "./quote";
 import { Split } from "./split";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   crossed: Crossed,
@@ -27,7 +28,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   quote: Quote,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "problem",
   label: "Problem",
   labelFr: "Problème",
@@ -42,8 +43,8 @@ export default defineSection({
     },
     {
       id: "chat",
-      label: "Chat",
-      description: "The pains as the shopper's messages in a glass chat card; the shop answers with a product card and an order button.",
+      label: "Ledger",
+      description: "A two-column ledger on hairlines: each pain beside the product's answer, then the one line that names the product.",
       archetypes: ["playground", "hearth", "bloom", "souk"],
     },
     {
@@ -143,4 +144,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

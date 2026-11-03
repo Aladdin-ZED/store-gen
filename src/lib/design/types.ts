@@ -46,6 +46,14 @@ export interface VariantFeatures {
   slots?: VariantFeaturesResolved["slots"];
   /** data path that turns the decoration off (`false`, `""`, `0` or an empty list at that path) */
   decor?: Partial<Record<DecorKey, string>>;
+  /**
+   * data path that turns an off-by-default decoration on (the section kit redraws, DES-§4.5.4, DS56): `ghost` → on
+   * when the path holds `true` (the ghost word and its text run), `chips` → the number at the path (capped by `decor`'s
+   * list and by `overlayChipsMax`)
+   */
+  optIn?: Partial<Record<"ghost" | "chips", string>>;
+  /** the most chips an opted-in variant draws (S13: ≤ 2 per photo) */
+  overlayChipsMax?: number;
   /** height in screens at 390 (DES-§5.3); `{ base, fixed: true, per? }` skips density, spacingFor and G21 */
   h?: VariantFeaturesResolved["h"];
   /** required on every variant (test:registry) */

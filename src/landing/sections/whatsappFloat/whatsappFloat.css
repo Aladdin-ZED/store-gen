@@ -490,7 +490,6 @@
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  writing-mode: vertical-rl;
   font-family: var(--lp-font-label, var(--lp-font-body));
   font-size: calc(var(--lp-step--1) * 0.88 * var(--lp-script-scale));
   font-weight: var(--lp-strong-weight);
@@ -501,10 +500,38 @@
   text-wrap: balance;
 }
 
-/* Arabic sits on a taller line so marks never touch across the two columns */
-:lang(ar) .lp-wa__tab .lp-wa__text {
-  max-block-size: calc(2 * 1.5em);
+/* Latin lines run down the pill; Arabic is never set vertically or rotated (RTL3): the ar tab is horizontal below */
+.lp-wa__tab .lp-wa__text:not(:lang(ar)) {
+  writing-mode: vertical-rl;
+}
+
+/* RTL3: on an Arabic page the tab is a horizontal pill hugging the edge: the disc at the inline start, the line beside
+   it on one line, the glass growing across from the disc */
+:lang(ar) .lp-wa__tab {
+  flex-direction: row;
+  gap: 0.55rem;
+  padding-block: var(--wa-p);
+  padding-inline: var(--wa-p) 1.05rem;
+}
+
+:lang(ar) .lp-wa__tab .lp-wa__skin {
+  inset-block: 0;
+  inset-inline: 0 calc((1 - var(--wa-k)) * (100% - var(--wa-d)));
+}
+
+:lang(ar) .lp-wa__col {
+  clip-path: none;
+}
+
+:lang(ar) .lp-wa--tab[data-side] .lp-wa__tab .lp-wa__text {
+  display: block;
+  max-inline-size: min(11rem, 58vw);
+  max-block-size: none;
+  overflow: hidden;
+  transform: none;
   line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* the letters' tops face the page: on the right edge the line turns to read bottom → top */

@@ -43,8 +43,8 @@
      declarations in style attributes.
    - --lp-x is +1 in LTR and −1 in RTL: multiply physical offsets by it.
    - RTL mirroring (.lp-flip-rtl) uses the individual `scale` property.
-   - The kit owns `.lp-section::before` (grain finish); decorate sections with
-     their own inner elements.
+   - Decorate sections with their own inner elements (no section finish: no
+     grain, no mesh of lights; core D60, V40).
    - Reveals: data-reveal="<kind>" (+ data-delay). For "draw", give strokes
      class="lp-draw" and pathLength="1". Never hide the LCP element.
    - Public knobs: --btn-bg --btn-ink --btn-line --btn-h --btn-px --btn-fs
@@ -931,26 +931,6 @@
 /* container queries for section internals (opt-in: never on fixed-position roots) */
 :where(.lp-cq) {
   container-type: inline-size;
-}
-
-/* no aurora mesh and no page grain on generated pages (core D60 rev 3, V40): the theme emits neither --lp-aurora nor
-   --lp-grain, and data-texture is always "none". The explicit .lp-grain layer of the light kit stays inert until the
-   light kit drops it with the sections that mount it. */
-:where(.lp-grain)::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  corner-shape: inherit;
-  background-image: var(--lp-grain, none);
-  opacity: var(--lp-grain-opacity, 0.02);
-  pointer-events: none;
-}
-
-:where(.lp-grain) {
-  position: relative;
-  isolation: isolate;
 }
 
 /* frosted glass surface: opaque fallback first, translucent + blur where supported */
@@ -2384,6 +2364,13 @@
   }
 }
 
+/* a look's depth recipe (DES-§4.10.1, G15, html[data-depth]): the one shadow stack and hairline the theme compiled
+   for the page; hover never lifts a card off its grid (the modifiers below still win) */
+:where([data-look] .lp-card) {
+  --card-shadow: var(--lp-highlight, 0 0 #0000), var(--lp-shadow-card, 0 0 #0000);
+  border-color: var(--lp-line, transparent);
+}
+
 /* solid modifiers: a matte card, whatever the page's language (glass reset included) */
 :where(.lp-card:is(.lp-card--flat, .lp-card--soft, .lp-card--outlined, .lp-card--raised)) {
   border-width: 1px;
@@ -2415,6 +2402,13 @@
   :where(.lp-card--lift:hover) {
     translate: 0 -4px;
     box-shadow: var(--lp-highlight, 0 0 #0000), var(--lp-shadow-l, 0 20px 44px -18px rgb(0 0 0 / 0.3));
+  }
+}
+
+@media (hover: hover) {
+  :where([data-look] .lp-card--lift:hover) {
+    translate: none;
+    box-shadow: var(--card-shadow);
   }
 }
 
@@ -2562,6 +2556,20 @@
 :where(:root[data-mask="blob"] .lp-mask) {
   border-radius: var(--blob, 58% 42% 52% 48% / 46% 56% 44% 54%);
   corner-shape: round;
+}
+
+/* look masks (DES-§4.11.1): `rect` keeps the ladder's media radius, `cut` takes one 45° corner at the inline-end top
+   (mirrored in Arabic), `blob` is the seeded closed curve the theme emits */
+:where([data-look][data-mask="cut"] .lp-mask) {
+  clip-path: polygon(0 0, calc(100% - var(--lp-mask-cut)) 0, 100% var(--lp-mask-cut), 100% 100%, 0 100%);
+}
+
+:where([data-look][data-mask="cut"][dir="rtl"] .lp-mask) {
+  clip-path: polygon(var(--lp-mask-cut) 0, 100% 0, 100% 100%, 0 100%, 0 var(--lp-mask-cut));
+}
+
+:where([data-look][data-mask="blob"] .lp-mask) {
+  clip-path: var(--lp-mask-blob, none);
 }
 
 /* the media edge: one quiet hairline just inside a masked photo, following its shape (a pale photo on
@@ -4521,6 +4529,78 @@ main[tabindex="-1"]:focus {
 
 :where([data-look] .lp-marquee__content) {
   padding-inline: 0.5em;
+}
+
+/* labels and captions (G7.lb, G25.cap): small capitals instead of capitals in Latin; Arabic is never uppercase, tracked
+   or italic */
+:where([data-look][data-labels="smallcaps"]:not(:lang(ar)) :is(.lp-kicker__text, .lp-sh__caption, .lp-sh__index)) {
+  font-variant-caps: all-small-caps;
+  text-transform: none;
+}
+
+:where([data-look][data-caption="italic-serif"]:not(:lang(ar)) :is(figcaption, .lp-sh__caption)) {
+  font-family: var(--lp-font-display);
+  font-style: italic;
+}
+
+:where([data-look][data-caption="mono"] :is(figcaption, .lp-sh__caption)) {
+  font-family: var(--lp-font-label, var(--lp-font-body));
+}
+
+:where([data-look][data-caption="smallcaps"]:not(:lang(ar)) figcaption) {
+  font-variant-caps: all-small-caps;
+}
+
+/* the CTA plan (DES-§5.9, G34, V27; <html data-cta-plan>): markup and CSS only. The header's button shows exactly
+   when the sticky bar shows; under 64rem the WhatsApp float docks onto the shown bar */
+html.lp-js[data-cta-plan~="hide-header"]:has([data-sticky-cta]:not([data-visible])) .lp-header__cta {
+  visibility: hidden;
+}
+
+@media (max-width: 63.99rem) {
+  html.lp-js[data-cta-plan~="collapse-float"]:has([data-sticky-cta][data-visible]) .lp-wa {
+    --wa-lift: 0px;
+    inset-block-end: calc(var(--lp-sticky-h, 4.6rem) + 8px);
+    scale: 0.8;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* the page's reveal kinds (G23.r, DES-§4.12): what still reveals (the hero, the section heads) moves one way, in the
+     page's one easing family; titles take the mask wipe or the blur when the page has it, media the scale-in */
+  html.lp-js[data-look]:not([data-motion="off"]) [data-reveal][data-in] {
+    --rv-ease: var(--lp-ease-out);
+  }
+
+  html.lp-js[data-look]:not([data-motion="off"]) [data-reveal][data-in]:not(.lp-split, [data-reveal="draw"], [data-reveal="count"]) {
+    animation-name: lp-rv-rise;
+  }
+
+  html.lp-js[data-look][data-reveal-kinds~="mask-wipe"]:not([data-motion="off"]) :is(h1, h2)[data-reveal][data-in]:not(.lp-split) {
+    animation-name: lp-rv-wipe-up;
+  }
+
+  html.lp-js[data-look][data-reveal-kinds~="blur-in"]:not([data-motion="off"]) :is(h1, h2)[data-reveal][data-in]:not(.lp-split) {
+    animation-name: lp-rv-blur-in;
+  }
+
+  html.lp-js[data-look][data-reveal-kinds~="scale-in"]:not([data-motion="off"]) :is(.lp-pic, figure, picture)[data-reveal][data-in] {
+    animation-name: lp-rv-scale-in;
+  }
+
+  /* the reveal scope (G35, DES-§5.11; html[data-reveal-scope]): outside it nothing waits to appear. The sections drop
+     their own reveals there (src/landing/sections/reveal-scope.ts); this holds any other one to its end state */
+  html.lp-js[data-reveal-scope="heads"]:not([data-motion="off"]) [data-section]:not([data-section="hero"]) [data-reveal]:not(:is(.lp-sh__title, .lp-sh__lead, .lp-sh__pull)),
+  html.lp-js[data-reveal-scope="hero"]:not([data-motion="off"]) [data-section]:not([data-section="hero"]) [data-reveal],
+  html.lp-js[data-reveal-scope="none"]:not([data-motion="off"]) [data-section] [data-reveal] {
+    opacity: 1;
+    animation: none;
+  }
+
+  /* failsafe of a look page: its dropped reveals carry data-in from the server, so only the runtime's own mark counts */
+  html.lp-js[data-look]:not([data-motion="off"], [data-rv]) [data-reveal]:not([data-in], [data-reveal="draw"]) {
+    animation: lp-rv-failsafe var(--lp-dur-m) var(--lp-smooth) 2.5s forwards;
+  }
 }
 
 /* reduced motion: no transitions anywhere, marquees and loops still */

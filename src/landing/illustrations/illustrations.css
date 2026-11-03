@@ -21,8 +21,8 @@ svg.lp-ill.lp-layer {
   --ill-c2: var(--sec-accent, var(--lp-accent));
   --ill-c3: var(--sec-bg, var(--lp-bg));
   --ill-on: var(--sec-ink, var(--lp-ink));
-  /* product light: the block's accent, the pop and a soft tint. The theme no longer emits the aurora lights (core D60
-     rev 3, V40), so the light carries its own alpha below: ≤ 10 % (the glow ceiling, DES-§3.2 S06); engines without
+  /* product light: the block's accent, the pop and a soft tint. The theme emits no mesh of lights (core D60 rev 3,
+     V40), so the light carries its own alpha below: ≤ 10 % (the glow ceiling, DES-§3.2 S06); engines without
      color-mix() get the palest accent tint instead of a solid accent */
   --ill-glow: var(--lp-a-100, var(--lp-accent-soft));
   --ill-glow-2: var(--lp-accent-soft);
@@ -426,13 +426,9 @@ g.lp-idle {
   html[data-motion="lively"] .lp-ping {
     animation: lp-ill-ping 2.8s var(--lp-ease-out, ease-out) infinite;
   }
-  html:not([data-motion="off"]) .lp-aurora--drift > .lp-aurora__f {
-    animation: lp-ill-drift calc(var(--ill-dur, 26s) * var(--ill-tempo, 1)) ease-in-out var(--ill-del, 0s) infinite;
-    will-change: transform;
-  }
 }
 
-/* ---------- light: orb, aurora, halo ----------------------------------- */
+/* ---------- light: orb, halo -------------------------------------------- */
 .lp-light {
   --ill-c1: var(--ill-glow);
   display: block;
@@ -465,42 +461,6 @@ g.lp-idle {
   mask-image: var(--ill-gauss);
 }
 
-.lp-aurora {
-  overflow: hidden;
-}
-.lp-aurora:not(.lp-layer) {
-  position: relative;
-}
-.lp-aurora__f {
-  position: absolute;
-  left: calc(var(--x) - var(--w) / 2);
-  top: calc(var(--y) - var(--h) / 2);
-  width: var(--w);
-  height: var(--h);
-  border-radius: 50%;
-  background-color: var(--ill-glow);
-  opacity: calc(var(--a, 1) * var(--ill-o, 0.45) * var(--ill-k, 1));
-  mask-image: var(--ill-gauss);
-}
-/* one light per aurora hue (accent, pop, analogous), each on its own slow drift cycle */
-.lp-aurora__f[data-n="2"] { background-color: var(--ill-glow-2); --ill-dur: 31s; --ill-del: -9s; }
-.lp-aurora__f[data-n="3"] { background-color: var(--ill-glow-3); --ill-dur: 37s; --ill-del: -17s; }
-/* solved: the theme's own field, the exact one its contrast solver keeps text-safe */
-.lp-aurora__field {
-  position: absolute;
-  inset: 0;
-  background-image: var(--lp-aurora, none);
-  opacity: var(--ill-o, 1);
-}
-.lp-aurora > .lp-grain {
-  position: absolute;
-  inset: 0;
-}
-/* "auto" grain follows the theme's texture choice */
-html:not([data-texture="grain"]) .lp-grain[data-auto] {
-  display: none;
-}
-
 .lp-halo {
   width: var(--ill-size, 80%);
   aspect-ratio: 1;
@@ -514,8 +474,8 @@ html:not([data-texture="grain"]) .lp-grain[data-auto] {
   opacity: calc(var(--ill-o, 0.45) * var(--ill-k, 1));
   mask-image: var(--ill-gauss);
 }
-/* a halo is a product stage: by default it is lit by the theme's --lp-stage-glow (light 1 of the
-   block's aurora, contrast-solved on the plain section, already soft-edged) */
+/* a halo is a product stage: by default it is lit by the theme's --lp-stage-glow (the one product-tinted radial,
+   contrast-solved on the plain section, already soft-edged) */
 .lp-halo:not([data-tone]) > .lp-halo__glow {
   background: var(--lp-stage-glow, radial-gradient(closest-side, var(--ill-c1), transparent));
   mask-image: none;
@@ -534,7 +494,7 @@ html:not([data-texture="grain"]) .lp-grain[data-auto] {
 
 /* ---------- light: beam, spotlight ------------------------------------- */
 /* Beams: a pale tint of the product hue, ~30% below the glows (a long shape reads stronger than a
-   round glow of the same alpha). Spotlight: the block's own aurora light 1 (contrast-solved per
+   round glow of the same alpha). Spotlight: the block's own product light (contrast-solved per
    [data-bg], alpha included) for the cone, and the theme's stage glow for the pool on the floor —
    so text that crosses the cone keeps the contrast the theme guarantees. */
 .lp-beam,
@@ -617,19 +577,6 @@ html:not([data-texture="grain"]) .lp-grain[data-auto] {
   background: var(--lp-stage-glow, radial-gradient(closest-side, var(--ill-c1), transparent));
   mask-image: none;
 }
-
-/* ---------- grain ------------------------------------------------------- */
-/* static, tiled film grain (feTurbulence rendered once as an image) — felt, never seen */
-.lp-grain {
-  display: block;
-  pointer-events: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 1'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 180px 180px;
-  opacity: var(--ill-grain, 0.025);
-  mix-blend-mode: soft-light;
-}
-.lp-grain[data-blend="overlay"] { mix-blend-mode: overlay; }
-.lp-grain[data-blend="normal"] { mix-blend-mode: normal; }
 
 /* ---------- grids & zellige -------------------------------------------- */
 .lp-gridlines,

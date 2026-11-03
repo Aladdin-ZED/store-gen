@@ -32,12 +32,6 @@
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 14px 28px -16px rgb(0 0 0 / 0.35), var(--sp-tint, 0 40px 80px -36px rgb(0 0 0 / 0.4));
   color: var(--sec-ink);
   container-type: inline-size;
-  --badge-size: clamp(6.5rem, 4.8rem + 6vw, 9.5rem);
-}
-
-/* the turning badge owns the top end corner: the label beside it keeps clear of it */
-.lp-sp__tally[data-seal] .lp-sp__since {
-  padding-inline-end: calc(var(--badge-size) * 0.7 + 0.75rem);
 }
 
 @supports (color: color-mix(in oklab, red 50%, blue)) {
@@ -126,14 +120,7 @@
   box-shadow: 0 0 0 0.25em var(--mx-tint-2);
 }
 
-.lp-sp__badge {
-  position: absolute;
-  inset-block-start: calc(var(--badge-size) * -0.3);
-  inset-inline-end: 1rem;
-  z-index: 1;
-}
-
-/* COD promises as glass chips riding the card's top edge (scripts the ring badge can't set legibly) */
+/* COD promises as glass chips riding the card's top edge (never a ring of text: S17, RTL3) */
 .lp-sp__cod {
   position: absolute;
   inset-block-start: 0;
@@ -262,10 +249,6 @@
     align-self: end;
   }
 
-  /* the badge crosses the card's top edge only: its side stays inside the column, never near the screen edge */
-  .lp-sp__badge {
-    inset-inline-end: clamp(1rem, 3.5cqi, 2.25rem);
-  }
 }
 @media (prefers-reduced-motion: no-preference) {
 

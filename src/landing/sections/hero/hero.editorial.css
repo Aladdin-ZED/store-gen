@@ -167,10 +167,11 @@
   white-space: nowrap;
 }
 
+/* cover lines are unnumbered (DES-§5.13 H2, S15): a hairline, the line, its detail */
 .lp-hero__line {
   display: grid;
-  grid-template-columns: 2.25rem minmax(0, 1fr);
-  column-gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0.3rem;
   padding-block: 0.95rem;
   border-block-start: 1px solid var(--mx-line);
 }
@@ -253,11 +254,6 @@
     align-content: start;
     row-gap: 0.35rem;
     padding-block: 1rem 0;
-  }
-
-  .lp-hero--editorial .lp-hero__line-n {
-    grid-row: auto;
-    padding-block-start: 0;
   }
 
   .lp-hero--editorial .lp-hero__line-t {

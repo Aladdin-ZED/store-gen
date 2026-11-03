@@ -31,7 +31,7 @@
 }
 
 /* ==========================================================================
-   poster — giant headline with the product inline, on an aurora field
+   poster — giant headline with the product inline, on the block's flat colour field
    ========================================================================== */
 .lp-cta--poster .lp-cta__wrap {
   display: grid;

@@ -93,9 +93,10 @@ const sheet = (key: string, f: Omit<VariantFeatures, "fold" | "slots" | "h" | "f
 
 /** No opener: the variant draws no SectionHeader (bars, strips, the hero's own head, the form, the footer). */
 const NO_OPENER: VariantFeatures["openers"] = [];
-const HERO = { ctas: 1, openers: NO_OPENER } as const;
-/** `[data-reveal]` nodes of a SectionHeader with a kicker, a title and a lead (measured on the fixtures). */
-const HEAD = 4;
+/** A hero: one primary CTA, its own head, at most six reveal nodes under a look (DES-§5.11, src/landing/sections/reveal-scope.ts). */
+const HERO = { ctas: 1, openers: NO_OPENER, revealNodes: 6 } as const;
+/** `[data-reveal]` nodes of a SectionHeader inside the reveal scope "heads": its title and its lead (DES-§5.11). */
+const HEAD = 2;
 /** The order form (P3's type): 1.1 screens in its default state, fixed (LAN R12, DES-§5.3). */
 const FORM_H: VariantFeatures["h"] = { base: 1.1, fixed: true, per: { offerRow: 0.15, optionGroup: 0.25, bump: 0.07 } };
 
@@ -112,36 +113,46 @@ export const VARIANT_FEATURES: Readonly<Record<string, Readonly<Record<string, V
     none: { family: "list", h: 0, openers: NO_OPENER },
   },
   hero: {
-    stage: sheet("hero:stage", { ...HERO, glass: 1, ghostWord: true, overlayChips: 3, revealNodes: 12, decor: { ghost: "bigWord", chips: "notes" }, textRuns: ["display", "ghost"] }),
-    editorial: sheet("hero:editorial", { ...HERO, revealNodes: 13, textRuns: ["display"] }),
-    poster: sheet("hero:poster", { ...HERO, ring: true, ghostWord: true, revealNodes: 10, decor: { ghost: "bigWord" }, textRuns: ["display", "ghost", "badge"] }),
+    // the redraws (DES-§4.5.4, sheets H1-H4, H9): ghost word and callout chips off unless the section asks (DS56), no
+    // turning badge, one signature each (the sheet's), no aurora
+    stage: sheet("hero:stage", {
+      ...HERO,
+      signature: 1,
+      overlayChipsMax: 2,
+      decor: { ghost: "bigWord", chips: "notes" },
+      optIn: { ghost: "ghost", chips: "chips" },
+      textRuns: ["display"],
+    }),
+    editorial: sheet("hero:editorial", { ...HERO, signature: 1, textRuns: ["display"] }),
+    poster: sheet("hero:poster", { ...HERO, signature: 1, decor: { ghost: "bigWord" }, optIn: { ghost: "ghost" }, textRuns: ["display"] }),
+    // kept for saved pages only (out of every pool): the quiet contact grid of H9, no chips, no glass
     scrapbook: {
       ...HERO,
       family: "grid",
-      glass: 1,
-      overlayChips: 2,
-      revealNodes: 11,
-      decor: { chips: "notes" },
+      signature: 1,
       textRuns: ["display"],
       fold: { rows: [{ el: "grid", vh: 58 }, { el: "title", lines: 2 }, { el: "price" }, { el: "cta" }, { el: "cod" }] },
     },
-    spec: sheet("hero:spec", { ...HERO, glass: 1, overlayChips: 3, revealNodes: 16, decor: { chips: "notes" }, textRuns: ["display"] }),
-    split: sheet("hero:split", { ...HERO, revealNodes: 12, textRuns: ["display"] }),
+    spec: sheet("hero:spec", { ...HERO, glass: 1, signature: 1, details: 1, overlayChips: 3, decor: { chips: "notes" }, textRuns: ["display"] }),
+    split: sheet("hero:split", { ...HERO, textRuns: ["display"] }),
   },
   trustBar: {
     chips: { family: "list", h: 0.4, glass: 1, openers: NO_OPENER },
-    stamps: sheet("trustBar:stamps", { ring: true, openers: NO_OPENER, textRuns: ["badge"] }),
+    // redrawn as the chips row (S8): no medal, no ring text
+    stamps: sheet("trustBar:stamps", { glass: 1, openers: NO_OPENER }),
     ledger: { family: "ledger", h: 0.45, iconHeads: true, openers: NO_OPENER },
     ribbon: { family: "list", h: 0.1, scroller: true, openers: NO_OPENER, textRuns: ["marquee"] },
   },
   marquee: {
-    tape: sheet("marquee:tape", { scroller: true, openers: NO_OPENER, textRuns: ["marquee"] }),
+    // redrawn as the outline strip (S8, I7): whole items, no tape, no rotation
+    tape: sheet("marquee:tape", { glass: 1, scroller: true, openers: NO_OPENER, textRuns: ["marquee"] }),
     outline: { family: "statement", h: 0.15, glass: 1, scroller: true, openers: NO_OPENER, textRuns: ["marquee"] },
     double: { family: "statement", h: 0.25, scroller: true, openers: NO_OPENER, textRuns: ["marquee"] },
   },
   problem: {
     crossed: { family: "ledger", h: 1.45, ctas: 1, revealNodes: HEAD, textRuns: ["display"] },
-    chat: sheet("problem:chat", { glass: 1, ctas: 1, revealNodes: HEAD }),
+    // the two-column ledger (S5): no bubbles, no button
+    chat: sheet("problem:chat", { revealNodes: HEAD }),
     split: { family: "split", h: 2.15, ctas: 1, revealNodes: HEAD },
     quote: { family: "statement", h: 1.4, ctas: 1, centered: true, textRuns: ["display"] },
   },
@@ -203,18 +214,21 @@ export const VARIANT_FEATURES: Readonly<Record<string, Readonly<Record<string, V
     notes: { family: "grid", h: 1.35, scroller: true, revealNodes: 6 },
   },
   socialProof: {
-    whatsapp: sheet("socialProof:whatsapp", { glass: 1, overlayChips: 1, equalCards: 3, cardGrid: true, revealNodes: HEAD }),
+    // plain quote cards (S6): no phone mock, no chip over a photo, no button
+    whatsapp: sheet("socialProof:whatsapp", { equalCards: 3, cardGrid: true, revealNodes: HEAD }),
     ugc: { family: "media", h: 1.25, revealNodes: HEAD },
-    counter: { family: "statement", h: 1.15, centered: true, ring: true, revealNodes: HEAD, textRuns: ["badge", "marquee"] },
+    counter: { family: "statement", h: 1.15, centered: true, revealNodes: HEAD, textRuns: ["marquee"] },
   },
   stats: {
-    "big-numbers": sheet("stats:big-numbers", { revealNodes: HEAD }),
+    // merchant figures only (S7, DS42); the ticking number is the page's one detail
+    "big-numbers": sheet("stats:big-numbers", { details: 1, revealNodes: HEAD }),
     rings: { family: "media", h: 1.05, revealNodes: HEAD },
     ticker: { family: "statement", scroller: true, revealNodes: HEAD, textRuns: ["marquee"] },
   },
   offer: {
-    stacked: { family: "grid", h: 1.6, bento: true, picker: true, revealNodes: 7 },
-    tickets: sheet("offer:tickets", { picker: true, equalCards: 3, cardGrid: true, revealNodes: 7 }),
+    stacked: { family: "grid", h: 1.6, bento: true, picker: true, revealNodes: HEAD },
+    // showcase cards with one cut corner (S8): no perforations, no pass colours
+    tickets: sheet("offer:tickets", { picker: true, equalCards: 3, cardGrid: true, revealNodes: HEAD }),
     shelf: { family: "grid", h: 1.35, picker: true, equalCards: 3, cardGrid: true, revealNodes: HEAD },
   },
   urgency: {
@@ -223,7 +237,8 @@ export const VARIANT_FEATURES: Readonly<Record<string, Readonly<Record<string, V
     banner: { family: "list", h: 0.35, ctas: 1, openers: NO_OPENER },
   },
   guarantee: {
-    seal: sheet("guarantee:seal", { ctas: 1, ring: true, revealNodes: HEAD, textRuns: ["badge"] }),
+    // a hairline card (S8): no seal shape, no circular text
+    seal: sheet("guarantee:seal", { ctas: 1, revealNodes: HEAD }),
     split: { family: "split", h: 1.6, ctas: 1, iconHeads: true, overlayChips: 1, revealNodes: HEAD },
     letter: { family: "statement", ctas: 1 },
   },
@@ -235,7 +250,8 @@ export const VARIANT_FEATURES: Readonly<Record<string, Readonly<Record<string, V
   },
   cta: {
     banner: { family: "split", h: 1.0, ctas: 1, revealNodes: HEAD },
-    stamp: sheet("cta:stamp", { ctas: 1, centered: true, ring: true, revealNodes: HEAD, textRuns: ["badge"] }),
+    // the quiet close (S8): start-aligned, one button, no ring of text
+    stamp: sheet("cta:stamp", { ctas: 1, revealNodes: HEAD }),
     poster: { family: "statement", h: 0.8, ctas: 1, centered: true, textRuns: ["display"] },
   },
   faq: {

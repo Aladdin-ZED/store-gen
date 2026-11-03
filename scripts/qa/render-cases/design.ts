@@ -18,7 +18,18 @@
  *    stylesheet, and the price cluster one unbroken inline-flex unit (RTL4);
  *  - TC-1 RTL1 (ranges as LTR isolates), RTL2 (countdown plural forms, never "02 يومين"), RTL4 (the price cluster),
  *    T2 (no word boxes, no particle before a breakable space in an Arabic heading) and T7 (Latin runs isolated in
- *    Arabic headings and leads) on the ar fixtures rendered with a look, and RTL2 / RTL4 on a fr one.
+ *    Arabic headings and leads) on the ar fixtures rendered with a look, and RTL2 / RTL4 on a fr one; on the same look
+ *    documents the reveal scope (≤ 60 `data-reveal` nodes, DES-§5.11 G35, budget R5);
+ *  - the section kit redraws (step 4; DES-§4.5.4, sheets H1-H4, H9, S5-S8): the 14 fixture-default baseline documents
+ *    against their goldens (scripts/qa/design-baseline.ts: published checksums unchanged, markup and stylesheet chunks
+ *    changed only in the reviewed redraws, base-stylesheet rules added only under a look-only scope; the 41 run in
+ *    test:design --full), the kit pages of scripts/qa/design-kit.ts in ar and fr (every redrawn variant and the four
+ *    former aurora variants), and every fixture in ar: V40 (no `.lp-aurora` element, no `--lp-aurora*` / `--lp-grain`
+ *    custom property, no `data-texture="grain"`), RTL3 (no `writing-mode` or `textPath` reaching Arabic), RTL5 (the
+ *    footer's addresses and e-mails), no removed shape (owner rule 2), the cta's `data-hero-cta` (DES-§5.9) and DS42;
+ *  - CRIT15 (core D76, §C.6): a live render, a test render and a preview each carry exactly one absolute
+ *    `/report/<handle>?p=<path>` link, drawn by the footer (`footer:big` and `footer:simple`) with `rel="nofollow"`, and
+ *    an export carries none.
  */
 import type { RenderCase } from "../render-check";
 
@@ -89,6 +100,7 @@ export const cases: RenderCase[] = [
       const { validateDoc } = await import("@/lib/page/validate");
       const { renderLandingHtml } = await import("@/lib/render/core");
       const { lookDocProblems, withLook } = await import("../design-primitives");
+      const { kitMarkupProblems } = await import("../design-kit");
       for (const [name, locale] of LOOK_DOCS) {
         const fx = kit.getFixture(name, { now: kit.now, locale });
         const { doc } = validateDoc(fx.doc);
@@ -100,6 +112,102 @@ export const cases: RenderCase[] = [
         if (r.issues.length) kit.fail(`${name}/${locale} with look: sections failed ${r.issues.map((i) => i.sectionId).join(", ")}`);
         if (!/<html[^>]*\sdata-look="1"/.test(r.html)) kit.fail(`${name}/${locale}: the look document has no data-look`);
         for (const p of lookDocProblems(r.html, locale)) kit.fail(`${name}/${locale} with look: ${p}`);
+        // the reveal scope (G35, R5): the hero and the section heads only
+        const body = r.html.slice(r.html.indexOf("<body")).replace(/<script\b[\s\S]*?<\/script>/g, "");
+        const reveals = (body.match(/\sdata-reveal(?=[\s=>])/g) ?? []).length;
+        if (reveals > 60) kit.fail(`${name}/${locale} with look: ${reveals} data-reveal nodes (≤ 60)`);
+        for (const p of kitMarkupProblems(r.html, locale)) kit.fail(`${name}/${locale} with look: ${p}`);
+      }
+    },
+  },
+  {
+    name: "baseline: the 14 fixture-default documents keep their checksums, and change only in the reviewed redraws",
+    async run(kit) {
+      const { BASELINE_DEFAULTS, compareBaseline } = await import("../design-baseline");
+      for (const p of await compareBaseline(BASELINE_DEFAULTS)) kit.fail(p);
+    },
+  },
+  {
+    name: "section kit: the redrawn variants in ar and fr (V40, RTL3, RTL5, owner rule 2, data-hero-cta, DS42)",
+    async run(kit) {
+      const { renderLandingHtml } = await import("@/lib/render/core");
+      const { KIT, kitDoc, kitMarkupProblems } = await import("../design-kit");
+      for (const spec of KIT) {
+        for (const locale of ["ar", "fr"] as const) {
+          const { doc, fx } = kitDoc(spec, locale, kit.now);
+          const r = await renderLandingHtml(doc, kit.liveOptions(spec.fixture, fx));
+          const tag = `${spec.name}/${locale}`;
+          if (r.issues.length) kit.fail(`${tag}: sections failed ${r.issues.map((i) => i.sectionId).join(", ")}`);
+          for (const p of kitMarkupProblems(r.html, locale, { cta: true, stats: spec.data?.stats ? "shown" : "none" })) kit.fail(`${tag}: ${p}`);
+        }
+      }
+    },
+  },
+  {
+    name: "every fixture in ar: V40, RTL3, RTL5, no removed shape, DS42 (library figures stay off the page)",
+    async run(kit) {
+      const { validateDoc } = await import("@/lib/page/validate");
+      const { renderLandingHtml } = await import("@/lib/render/core");
+      const { kitMarkupProblems } = await import("../design-kit");
+      for (const name of kit.fixtures) {
+        const fx = kit.getFixture(name, { now: kit.now, locale: "ar" });
+        const { doc } = validateDoc(fx.doc);
+        if (!doc) continue;
+        const r = await renderLandingHtml(doc, kit.liveOptions(name, fx));
+        const examples = !doc.product.rating && doc.sections.some((s) => s.type === "stats" && !s.hidden && (s.data as { sample?: unknown }).sample === true);
+        for (const p of kitMarkupProblems(r.html, "ar", examples ? { stats: "none" } : {})) kit.fail(`${name}/ar: ${p}`);
+      }
+    },
+  },
+  {
+    name: "CRIT15: one absolute report link in a live render, a test render and a preview (footer big, simple), none in an export",
+    async run(kit) {
+      const { validateDoc } = await import("@/lib/page/validate");
+      const { renderLandingHtml } = await import("@/lib/render/core");
+      const { exportLinks } = await import("@/landing/context");
+      const { fixtureAssets } = await import("@/lib/page/fixtures");
+      // argan draws footer:big, blender footer:simple
+      for (const [name, locale] of [["argan", "ar"], ["blender", "fr"]] as const) {
+        const fx = kit.getFixture(name, { now: kit.now, locale });
+        const { doc } = validateDoc(fx.doc);
+        if (!doc) {
+          kit.fail(`${name}/${locale}: invalid fixture`);
+          continue;
+        }
+        const live = kit.liveOptions(name, fx);
+        const href = live.links.report ?? "";
+        const t = (u: string) => `${u}?sg-test=t`;
+        const e = live.urls.endpoints;
+        const test = { ...live, urls: { ...live.urls, thankYou: t(live.urls.thankYou), endpoints: { order: t(e.order), lead: t(e.lead), upsell: t(e.upsell) } }, pixels: false };
+        const preview = { ...live, runtimeMode: "preview" as const, pageKey: "pk_preview_page", upgradeInsecureRequests: false };
+        for (const [mode, opts] of [["live", live], ["test", test], ["preview", preview]] as const) {
+          const r = await renderLandingHtml(doc, opts);
+          const tag = `${name}/${locale}/${mode}`;
+          const links = [...r.html.matchAll(/<a href="(https?:\/\/[^"]*\/report\/[^"]*)"[^>]*>/g)];
+          if (links.length !== 1) {
+            kit.fail(`${tag}: ${links.length} report links (exactly 1)`);
+            continue;
+          }
+          const a = links[0]![0];
+          const url = links[0]![1]!;
+          if (url !== href || !/^https:\/\/[^/]+\/report\/qa-store\?p=%2F/.test(url)) kit.fail(`${tag}: the report link is not the absolute reportUrl given (${url})`);
+          if (!/\srel="nofollow"/.test(a)) kit.fail(`${tag}: the report link has no rel="nofollow"`);
+          const at = r.html.indexOf(a);
+          const footer = r.html.search(/<footer\b[^>]*\sdata-section="footer"/);
+          if (footer < 0 || at < footer || at > r.html.indexOf("</footer>", footer)) kit.fail(`${tag}: the report link is not in the footer's legal row`);
+          if (r.html.includes('<p class="lp-report">')) kit.fail(`${tag}: the shell's fallback row is drawn beside the footer's link`);
+        }
+        const exported = await renderLandingHtml(doc, {
+          mode: "export",
+          assets: fixtureAssets("./"),
+          pageKey: fx.pageKey,
+          store: fx.store,
+          urls: { landing: "./", thankYou: "merci/index.html", endpoints: { order: e.order } },
+          links: exportLinks(0),
+          now: kit.now,
+        });
+        const markup = exported.html.replace(/<style>[\s\S]*?<\/style>/g, "");
+        if (/\/report\/|lp-report|lp-footer__legal-report/.test(markup)) kit.fail(`${name}/${locale}/export: an exported document carries the report link`);
       }
     },
   },

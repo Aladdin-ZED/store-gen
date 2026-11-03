@@ -20,6 +20,7 @@ import { ImageText } from "./imageText";
 import { Letter } from "./letter";
 import { Manifesto } from "./manifesto";
 import { schema, type StoryData, type ViewProps } from "./model";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   letter: Letter,
@@ -27,7 +28,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   manifesto: Manifesto,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "story",
   label: "Story",
   labelFr: "Histoire",
@@ -229,4 +230,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

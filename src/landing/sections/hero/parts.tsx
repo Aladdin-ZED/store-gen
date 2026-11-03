@@ -380,8 +380,14 @@ export function withQty(text: string): ReactNode {
 }
 
 /**
- * Frosted glass callout with a precise leader line (hairline + ringed end dot) that reaches
- * toward the product from the chip's `side` (the side of the product the chip sits on).
+ * The page may use glass (G16, DES-§4.10): a document without look keeps today's glass callouts; a look with
+ * `glass: 0` draws them as hairline cards instead (DES-§4.5.4 hero:spec, V06).
+ */
+export const glassAllowed = (ctx: RenderContext): boolean => (ctx.doc.theme.look?.glass ?? 1) > 0;
+
+/**
+ * Frosted glass callout (a hairline card where the page has no glass) with a precise leader line (hairline + ringed
+ * end dot) that reaches toward the product from the chip's `side` (the side of the product the chip sits on).
  */
 export function Callout({
   ctx,
@@ -406,7 +412,7 @@ export function Callout({
 }): ReactElement {
   return (
     <li
-      className="lp-hero__callout lp-glass"
+      className={glassAllowed(ctx) ? "lp-hero__callout lp-glass" : "lp-hero__callout lp-hero__callout--line"}
       data-slot={slot}
       data-side={side}
       style={top === undefined ? undefined : cssVars({ "--c-top": `${top}%` })}

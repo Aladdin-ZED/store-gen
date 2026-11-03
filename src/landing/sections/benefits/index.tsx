@@ -18,6 +18,7 @@ import { schema, type Data, type ViewProps } from "./model";
 import { Numbered } from "./numbered";
 import { Stack } from "./stack";
 import { Zigzag } from "./zigzag";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   numbered: Numbered,
@@ -27,7 +28,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   stack: Stack,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "benefits",
   label: "Benefits",
   labelFr: "Bénéfices",
@@ -133,4 +134,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

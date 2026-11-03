@@ -254,6 +254,9 @@ export function ChannelLink({
   );
 }
 
+/** An Arabic-script address keeps its own right-to-left run; any other address is an LTR block (RTL5). */
+const ARABIC_SCRIPT = /\p{Script=Arabic}/u;
+
 /**
  * The value in a box that keeps the page direction, with the text isolated inside it: numbers and
  * e-mails read left-to-right, an address takes its own direction — and wrapped lines still align
@@ -288,11 +291,14 @@ export function ChannelValue({
     );
   }
   if (ch.key === "address") {
+    // RTL5 (design.md DES-§4.5.4): no space before a comma ("Casablanca , Maroc"), and the address is one isolated
+    // block in its own script's direction: a Latin address reads left to right on an Arabic page, never mirrored
+    const clean = ch.value.replace(/\s+([,،.;:])/g, "$1");
     // short segments ("4e étage", the city) stay whole: the address breaks after a comma
-    const parts = ch.value.split(/(,\s*|،\s*)/);
+    const parts = clean.split(/(,\s*|،\s*)/);
     return (
       <span className={className} style={style}>
-        <bdi>
+        <bdi dir={ARABIC_SCRIPT.test(clean) ? "rtl" : "ltr"}>
           {parts.map((p, i) =>
             i % 2 === 0 && p.length <= 24 ? (
               <span key={i} className="lp-footer__nobr">
@@ -369,15 +375,23 @@ export function Brand({
   );
 }
 
-/** The four legal documents (labels from the built-in microcopy, URLs from the delivery mode). */
+/**
+ * The four legal documents (labels from the built-in microcopy, URLs from the delivery mode), then "Report this store"
+ * when the platform serves the page (docs/STORE-SAAS.md D76, §C.6; design.md DES-§4.5.4; CRIT15): `ctx.links.report`
+ * is the absolute `reportUrl(store, path)` the server computed, used exactly as given (never built or trimmed here),
+ * `rel="nofollow"`, same tab, the same quiet link as the legal ones. Exports never set it, so they render nothing.
+ */
 export function legalLinks(
   ctx: RenderContext,
-): { key: string; label: string; href: string }[] {
-  return (["privacy", "terms", "shipping", "contact"] as const).map((k) => ({
+): { key: string; label: string; href: string; rel?: string }[] {
+  const links: { key: string; label: string; href: string; rel?: string }[] = (["privacy", "terms", "shipping", "contact"] as const).map((k) => ({
     key: k,
     label: ctx.t(`footer.${k}`),
     href: ctx.links[k],
   }));
+  const report = ctx.links.report;
+  if (report) links.push({ key: "report", label: ctx.t("footer.report"), href: report, rel: "nofollow" });
+  return links;
 }
 
 export function LegalNav({
@@ -406,10 +420,17 @@ export function LegalNav({
         data-stagger={stagger ? String(stagger) : undefined}
       >
         {legalLinks(ctx).map((l) => (
-          <li key={l.key} {...reveal(stagger ? "fade" : false)}>
-            <a className="lp-footer__legal-link" href={l.href}>
-              {l.label}
-            </a>
+          <li key={l.key} className={l.key === "report" ? "lp-footer__legal-report" : undefined} {...reveal(stagger ? "fade" : false)}>
+            {l.rel ? (
+              // the report link leads with its href (`<a href="…/report/…"`), the form the platform's link checks read
+              <a href={l.href} className="lp-footer__legal-link" rel={l.rel}>
+                {l.label}
+              </a>
+            ) : (
+              <a className="lp-footer__legal-link" href={l.href}>
+                {l.label}
+              </a>
+            )}
           </li>
         ))}
       </ul>

@@ -1,414 +1,103 @@
 /* problem · chat — rules only this variant renders (inlined after problem.css on pages whose markup
    carries .lp-problem--chat; the admin preview loads every variant). Shared rules live in problem.css. */
 
-/* light stays behind its host's content (the kit places lights at z-index 0) */
-.lp-problem .lp-ill.lp-problem__glow {
-  z-index: -1;
-}
-
 /* ==========================================================================
-   chat — a frosted conversation card
+   chat → ledger (design.md DES-§5.13 S5): the pains as a two-column ledger
+   on hairlines, the product's answer beside each one, the turn under it.
+   No bubbles, no timestamps, no avatars (S20). Logical properties: the
+   columns mirror in Arabic (the pain at the inline start, so right).
    ========================================================================== */
-.lp-problem__chatgrid {
+.lp-problem__ledgergrid {
   display: grid;
-  gap: clamp(2.5rem, 2rem + 3vw, 4rem);
+  gap: clamp(2rem, 1.5rem + 2.4vw, 3.25rem);
 }
 
-.lp-problem__chatgrid .lp-problem__head {
+.lp-problem__ledgergrid .lp-problem__head {
   margin-block-end: 0;
 }
 
-@media (min-width: 56rem) {
-  .lp-problem__chatgrid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    align-items: center;
-    column-gap: clamp(3rem, 7vw, 7rem);
-  }
-}
-
-.lp-problem__stage {
-  position: relative;
-  isolation: isolate;
-  justify-self: center;
-  inline-size: min(100%, 27rem);
-}
-
-/* tablets: header on the start edge, the conversation answers from the end edge */
-@media (min-width: 40rem) and (max-width: 55.99rem) {
-  .lp-problem__stage {
-    justify-self: end;
-  }
-}
-
-.lp-problem__chat {
-  --bubble: clamp(1.1rem, 0.95rem + 0.6vw, 1.35rem);
-  overflow: hidden;
-  /* the device window: a continuous corner (squircle where supported) */
-  border-radius: calc(clamp(1.6rem, 1.1rem + 1.5vw, 2.25rem) * var(--lp-corner-k));
-  corner-shape: var(--lp-corner);
-  box-shadow: var(--lp-highlight, 0 0 #0000), var(--lp-shadow-l);
-}
-
-.lp-problem__bar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.95rem 1.15rem;
-  border-block-end: 1px solid var(--mx-hair);
-}
-
-.lp-problem__avatar {
+.lp-problem__ledger {
   display: grid;
-  flex: none;
-  place-items: center;
-  overflow: hidden;
-  inline-size: 2.75rem;
-  block-size: 2.75rem;
-  border-radius: 50%;
-  background: var(--sec-accent);
-  color: var(--sec-accent-ink);
+  margin: 0;
+  border-block-end: var(--lp-hairline) solid var(--mx-line);
+}
+
+.lp-problem__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0.4rem;
+  padding-block: clamp(1rem, 0.85rem + 0.6vw, 1.4rem);
+  border-block-start: var(--lp-hairline) solid var(--mx-line);
+}
+
+.lp-problem__pain {
+  margin: 0;
+  font-weight: var(--lp-strong-weight, 600);
+  font-size: var(--lp-step-0);
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+/* the answer: indented by one column on phones, in the section's softer ink */
+.lp-problem__fix {
+  margin: 0;
+  padding-inline-start: clamp(1.25rem, 6vw, 2.5rem);
+  color: var(--sec-ink-soft);
+  font-size: var(--lp-step-0);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.lp-problem__row:not([data-fix]) .lp-problem__fix {
+  display: none;
+}
+
+/* the turn: one line that names the product, set a step larger in the accent's ink */
+.lp-problem__close {
+  margin: 0;
+  max-inline-size: 38ch;
   font-family: var(--lp-font-display);
   font-weight: var(--lp-display-weight);
-  font-size: 1.15rem;
-  line-height: 1;
-  box-shadow: inset 0 0 0 1px var(--mx-hair);
-}
-
-.lp-problem__avatar .lp-pic {
-  inline-size: 100%;
-  background: var(--sec-card);
-}
-
-.lp-problem__who {
-  display: grid;
-  min-inline-size: 0;
+  font-size: calc(var(--lp-step-2) * var(--lp-script-scale-display));
   line-height: 1.3;
+  text-wrap: balance;
 }
 
-.lp-problem__store {
-  overflow: hidden;
-  font-weight: var(--lp-strong-weight);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+:lang(ar) .lp-problem__close {
+  line-height: 1.6;
 }
 
-.lp-problem__status {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45em;
-  font-size: calc(0.8rem * var(--lp-script-scale));
-  opacity: 0.85;
-}
-
-/* the green "online" dot belongs to a store's "online" line only (the cash-on-delivery line has none) */
-.lp-problem__status:not([data-online])::before {
-  content: none;
-}
-
-.lp-problem__status::before {
-  content: "";
-  inline-size: 0.5em;
-  block-size: 0.5em;
-  border-radius: 50%;
-  background: var(--sec-success);
-  box-shadow: 0 0 0 0.22em color-mix(in oklab, var(--sec-success) 24%, transparent);
-}
-
-.lp-problem__thread {
-  display: grid;
-  gap: 0.25rem;
-  margin: 0;
-  padding: 1rem 0.9rem 0.75rem;
-  list-style: none;
-}
-
-.lp-problem__day {
-  justify-self: center;
-  margin-block-end: 0.6rem;
-  padding: 0.3em 0.85em;
-  border-radius: 999px;
-  background: var(--mx-hair);
-  font-size: calc(0.72rem * var(--lp-script-scale));
-  font-weight: 600;
-  line-height: 1.3;
-}
-
-.lp-problem__msg {
-  position: relative;
-  display: grid;
-  gap: 0.2rem;
-  max-inline-size: 84%;
-  margin: 0;
-  padding: 0.55rem 0.9rem 0.4rem;
-  border-radius: var(--bubble);
-  font-size: calc(var(--lp-step-0) * 0.97 * var(--lp-script-scale));
-  line-height: 1.4;
-}
-
-/* the shopper's run: accent bubbles with a crisp top highlight and a tinted drop */
-.lp-problem__msg--me {
-  justify-self: end;
-  transform-origin: 100% 100%;
-  background: var(--sec-accent);
-  color: var(--sec-accent-ink);
-  box-shadow: inset 0 1px 0 var(--mx-on-accent), 0 8px 18px -12px var(--mx-btn-2);
-}
-
-[dir="rtl"] .lp-problem__msg--me {
-  transform-origin: 0 100%;
-}
-
-/* grouped runs: the corners facing the neighbours tighten, like a modern messenger */
-.lp-problem__msg--me[data-pos="first"],
-.lp-problem__msg--me[data-pos="mid"] {
-  border-end-end-radius: 0.35rem;
-}
-
-.lp-problem__msg--me[data-pos="mid"],
-.lp-problem__msg--me[data-pos="last"] {
-  border-start-end-radius: 0.35rem;
-}
-
-.lp-problem__answer {
-  position: relative;
-  display: grid;
-  gap: 0.25rem;
-  margin-block-start: 0.65rem;
-}
-
-.lp-problem__typing {
-  justify-self: start;
-  background: var(--mx-field);
-  color: var(--sec-card-ink);
-  box-shadow: inset 0 0 0 1px var(--mx-hair), 0 8px 20px -16px var(--mx-contact);
-}
-
-.lp-problem__mnote {
-  font-weight: var(--lp-strong-weight);
-}
-
-/* the product card: photo + glass price tag, the solution, a real order button */
-.lp-problem__msg--card {
-  inline-size: min(90%, 19.5rem);
-  max-inline-size: none;
-  gap: 0.45rem;
-}
-
-.lp-problem__msg--media {
-  padding: 0.3rem 0.3rem 0.4rem;
-}
-
-.lp-problem__msg--media > .lp-problem__msol,
-.lp-problem__msg--media > .lp-problem__meta {
-  padding-inline: 0.6rem;
-}
-
-.lp-problem__msg--media > .lp-problem__msol {
-  padding-block-start: 0.2rem;
-}
-
-.lp-problem__attach {
-  position: relative;
-  overflow: hidden;
-  /* concentric with its bubble (messaging bubbles keep circular corners) */
-  border-radius: calc(var(--bubble) - 0.3rem);
-}
-
-.lp-problem__attach--cutout {
-  background: radial-gradient(80% 90% at 50% 30%, var(--mx-stage-hi), var(--mx-stage));
-}
-
-.lp-problem__attach--cutout .lp-pic__img {
-  padding: 6% 12% 4%;
-  filter: var(--lp-shadow-product-filter, none);
-}
-
-.lp-problem__tag {
-  position: absolute;
-  inset-block-start: 0.55rem;
-  inset-inline-end: 0.55rem;
-}
-
-/* the tag takes the photo's quiet corner (data-corner: block · inline, solved from the subject) */
-.lp-problem__tag[data-corner^="e"] {
-  inset-block: auto 0.55rem;
-}
-
-.lp-problem__tag[data-corner$="s"] {
-  inset-inline: 0.55rem auto;
-}
-
-.lp-problem__tag {
-  padding: 0.28em 0.75em;
-  border-radius: 999px;
-  font-size: calc(0.86rem * var(--lp-script-scale));
-  font-weight: 700;
-  line-height: 1.3;
-  font-variant-numeric: tabular-nums;
-}
-
-.lp-problem__mcta {
-  padding-block-start: 0.25rem;
-}
-
-.lp-problem__msg--card:not(.lp-problem__msg--media) .lp-problem__mcta {
-  margin-inline: -0.55rem;
-}
-
-.lp-problem__mcta .lp-btn {
-  inline-size: 100%;
-}
-
-.lp-problem__mtext {
-  margin: 0;
-}
-
-.lp-problem__meta {
-  display: inline-flex;
-  align-items: center;
-  justify-self: end;
-  gap: 0.25rem;
-  font-size: 0.7rem;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.78;
-  direction: ltr;
-}
-
-.lp-problem__ticks {
-  inline-size: 1rem;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-/* the typing dots only exist while the thread plays (always hidden at rest) */
-.lp-problem__typing {
-  position: absolute;
-  inset-block-start: 0;
-  inset-inline-start: 0;
-  display: inline-flex;
-  gap: 0.3rem;
-  padding: 0.85rem 1rem;
-  border-radius: var(--bubble);
-  opacity: 0;
-  pointer-events: none;
-}
-
-.lp-problem__typing i {
-  inline-size: 0.45rem;
-  block-size: 0.45rem;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.45;
-}
-
-.lp-problem__composer {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.5rem 0.9rem 0.95rem;
-}
-
-.lp-problem__field {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  min-inline-size: 0;
-  block-size: 2.6rem;
-  padding-inline: 1.1rem;
-  border-radius: 999px;
-  box-shadow: inset 0 0 0 1px var(--mx-line);
-  font-size: calc(0.9rem * var(--lp-script-scale));
-  white-space: nowrap;
-  opacity: 0.6;
-}
-
-.lp-problem__send {
-  display: grid;
-  flex: none;
-  place-items: center;
-  inline-size: 2.6rem;
-  block-size: 2.6rem;
-  border-radius: 50%;
-  background: var(--sec-accent);
-  color: var(--sec-accent-ink);
-  box-shadow: inset 0 1px 0 var(--mx-on-accent), 0 8px 18px -10px var(--mx-btn-2);
-}
-
-.lp-problem__send svg {
-  inline-size: 1.15rem;
-  block-size: 1.15rem;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-@media (prefers-reduced-motion: no-preference) {
-
-  /* chat: bubbles pop from their corner on the spring; dots type, then give way to the answer */
-  html.lp-js:not([data-motion="off"]) .lp-problem__msg[data-reveal][data-in] {
-    animation: lp-problem-pop calc(var(--lp-dur-m) * 1.25) var(--lp-spring) var(--d, 0ms) backwards;
+/* 768: pain (4 col) | answer (4 col) on one row; 1440: one empty column, pain (4), answer (6) */
+@media (min-width: 48rem) {
+  .lp-problem__row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: clamp(1.5rem, 3vw, 3rem);
+    align-items: baseline;
   }
 
-  html.lp-js:not([data-motion="off"]) .lp-problem__msg--card[data-in] .lp-pic__img {
-    animation: lp-rv-zoom calc(var(--lp-dur-l) * 1.5) var(--lp-smooth) var(--d, 0ms) backwards;
+  .lp-problem__fix {
+    padding-inline-start: 0;
   }
 
-  html.lp-js:not([data-motion="off"]) .lp-problem__msg--card[data-in] .lp-problem__tag {
-    animation: lp-rv-stamp calc(var(--lp-dur-m) * 1.3) var(--lp-spring-pop) calc(var(--d, 0ms) + var(--lp-dur-m)) backwards;
-  }
-
-  html.lp-js:not([data-motion="off"]) .lp-problem__typing[data-reveal][data-in] {
-    animation: lp-problem-typing 1000ms var(--lp-smooth) var(--d, 0ms) both;
-  }
-
-  html.lp-js:not([data-motion="off"]) .lp-problem__typing[data-in] i {
-    animation: lp-problem-dot 0.6s var(--lp-sway) calc(var(--d, 0ms) + var(--k, 0ms)) 3 alternate;
-  }
-
-  .lp-problem__typing i:nth-child(2) {
-    --k: 150ms;
-  }
-
-  .lp-problem__typing i:nth-child(3) {
-    --k: 300ms;
+  .lp-problem__row:not([data-fix]) .lp-problem__fix {
+    display: block;
   }
 }
 
-@keyframes lp-problem-pop {
-  from {
-    opacity: 0;
-    scale: 0.55;
-    translate: 0 0.6rem;
+@media (min-width: 80rem) {
+  .lp-problem__row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 4fr) minmax(0, 6fr);
   }
-  45% {
-    opacity: 1;
-  }
-}
 
-@keyframes lp-problem-typing {
-  from {
-    opacity: 0;
-    scale: 0.7;
+  .lp-problem__pain {
+    grid-column: 2;
   }
-  20%,
-  80% {
-    opacity: 1;
-    scale: 1;
-  }
-  to {
-    opacity: 0;
-    scale: 0.9;
-  }
-}
 
-@keyframes lp-problem-dot {
-  to {
-    translate: 0 -0.3rem;
-    opacity: 1;
+  .lp-problem__fix {
+    grid-column: 3;
+  }
+
+  .lp-problem__close {
+    margin-inline-start: calc(100% / 11);
   }
 }

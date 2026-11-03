@@ -19,6 +19,7 @@ import { COMMON, FAMILY, GARMENT_GALLERY } from "./copy";
 import { Filmstrip } from "./filmstrip";
 import { Lookbook } from "./lookbook";
 import { MAX_SHOTS, resolveShots, schema, type Data, type ViewProps } from "./model";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   carousel: Carousel,
@@ -27,7 +28,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   lookbook: Lookbook,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "gallery",
   label: "Gallery",
   labelFr: "Galerie",
@@ -149,4 +150,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

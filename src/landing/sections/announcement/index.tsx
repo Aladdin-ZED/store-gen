@@ -34,6 +34,7 @@ import {
 } from "../../primitives";
 import { defineSection, type FieldSpec, type RenderContext } from "../../types";
 import { line, PLEDGE_ICON, type Pledge } from "./copy";
+import { withRevealScope } from "../reveal-scope";
 
 const IconId = z.enum(ICON_NAMES as [IconName, ...IconName[]]);
 
@@ -321,7 +322,7 @@ function Split({ ctx, data, list, end }: VariantProps): ReactElement {
 /* Definition                                                          */
 /* ------------------------------------------------------------------ */
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "announcement",
   label: "Announcement bar",
   labelFr: "Barre d’annonce",
@@ -369,4 +370,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

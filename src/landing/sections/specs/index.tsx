@@ -17,6 +17,7 @@ import type { ViewProps } from "./parts";
 import { schema, type Data } from "./schema";
 import { Sheet } from "./sheet";
 import { Tabs } from "./tabs";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   sheet: Sheet,
@@ -27,7 +28,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
 
 const ICON_HELP = "Shown in the tab or beside the group title.";
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "specs",
   label: "Specs & details",
   labelFr: "Caractéristiques",
@@ -165,4 +166,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

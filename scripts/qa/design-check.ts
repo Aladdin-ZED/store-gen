@@ -12,6 +12,24 @@ import { DESIGN_GROUPS, type GroupCtx } from "@/lib/design/selftest";
 import "@/lib/design/selftest-genome";
 // step 3 (measurement core): the height model against the calibration, the fold contract, the form, the features
 import "@/lib/design/selftest-heights";
+import { registerDesignGroup } from "@/lib/design/selftest";
+
+// step 4 (section kit redraws): the 41 baseline documents against their goldens (--full; test:render runs the 14
+// fixture defaults on every run)
+registerDesignGroup({
+  id: "baseline",
+  title: "the 41 baseline documents: checksums unchanged, markup changed only in the reviewed redraws (--full)",
+  ids: ["DS4", "V40", "CRIT15"],
+  async run({ full, check, note }) {
+    if (!full) {
+      note("the 41 run with --full (test:render compares the 14 fixture defaults)");
+      return;
+    }
+    const { BASELINE, compareBaseline } = await import("./design-baseline");
+    const problems = await compareBaseline(BASELINE);
+    check(problems.length === 0, problems.slice(0, 20).join("\n    "));
+  },
+});
 
 async function main() {
   const full = process.argv.includes("--full");

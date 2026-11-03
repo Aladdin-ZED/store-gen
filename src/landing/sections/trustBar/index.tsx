@@ -8,14 +8,20 @@ import { plainText, SectionShell } from "@/landing/primitives";
 import { defineSection, type FieldSpec, type SectionProps } from "../../types";
 import { defaultCopy } from "./copy";
 import { claimsOf, schema, type Data, type ViewProps } from "./model";
-import { Badges, Chips, Ledger, ownsBand, Ribbon } from "./views";
+import { Chips, Ledger, ownsBand, Ribbon } from "./views";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   chips: Chips,
-  stamps: Badges,
   ledger: Ledger,
   ribbon: Ribbon,
 };
+
+/**
+ * Saved variants redrawn as another (design.md DES-§5.13 S8; owner rule 2): `stamps` (medals with ring text) left every
+ * pool and renders as the `chips` row, so the page ships the chips stylesheet and no stamp shape.
+ */
+const REDRAWN: Readonly<Record<string, string>> = { stamps: "chips" };
 
 const fields: FieldSpec[] = [
   {
@@ -87,7 +93,7 @@ const fields: FieldSpec[] = [
   },
 ];
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "trustBar",
   label: "Trust bar",
   labelFr: "Bandeau confiance",
@@ -102,8 +108,8 @@ export default defineSection({
     },
     {
       id: "stamps",
-      label: "Badges",
-      description: "Medals with rotating ring text (arched upright in Arabic) on a hairline with a travelling pulse of light; the lead in solid accent.",
+      label: "Badges (shown as the capsule row)",
+      description: "Kept for saved pages: it now shows as the frosted capsule row, without medals or ring text.",
       archetypes: ["souk", "playground", "hearth", "field", "bloom"],
     },
     {
@@ -128,7 +134,8 @@ export default defineSection({
   render: ({ id, variant, bg, data, ctx }: SectionProps<Data>): ReactElement | null => {
     const claims = claimsOf(data);
     if (!claims.length) return null;
-    const kind = VIEWS[variant] ? variant : "chips";
+    const saved = REDRAWN[variant] ?? variant;
+    const kind = VIEWS[saved] ? saved : "chips";
     const View = VIEWS[kind]!;
     const titleId = data.title.trim() ? `${id}-title` : undefined;
     return (
@@ -147,4 +154,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

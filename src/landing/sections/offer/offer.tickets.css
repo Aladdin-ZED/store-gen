@@ -46,10 +46,13 @@
 }
 
 /* ==========================================================================
-   tickets → wallet passes: full-colour portrait passes. A brand / badge header,
-   the quantity as the primary field beside a thumbnail, labelled fields, an
-   inverse pill action. Phones: one column. From 44rem: a row of passes, the
-   favourite raised. A lone pass sits beside a sticky heading.
+   tickets → showcase cards with one cut corner (design.md DES-§5.13 S8): the
+   page's card tier, a hairline edge and the one allowed device, a 45° cut at
+   the inline-end top (mirrored in Arabic). No full-colour pass, no sheen, no
+   perforations. A brand / badge header, the quantity as the primary field
+   beside a thumbnail, labelled fields, the pill action. Phones: one column.
+   From 44rem: a row of cards, the favourite raised. A lone card sits beside
+   a sticky heading.
    ========================================================================== */
 .lp-pass-list {
   max-inline-size: 28rem;
@@ -62,54 +65,19 @@
 }
 
 .lp-pass {
-  --pass-shadow: 0 22px 44px -24px rgb(0 0 0 / 0.42);
+  --cut: clamp(1.25rem, 1rem + 1.2vw, 1.75rem);
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto 1fr;
   isolation: isolate;
-  border-radius: var(--lp-sq-xl);
+  border-radius: var(--lp-radius-card, var(--lp-sq-l));
   corner-shape: var(--lp-corner);
   background-color: var(--sec-bg);
-  /* the pass material: a soft wash of light from the top-start corner */
-  background-image:
-    linear-gradient(160deg, rgb(255 255 255 / 0.13), rgb(255 255 255 / 0) 42%),
-    radial-gradient(90% 55% at 100% 100%, var(--mx-tint), transparent);
-  box-shadow:
-    var(--card-ring, 0 0 #0000),
-    inset 0 1px 0 rgb(255 255 255 / 0.16),
-    inset 0 0 0 1px rgb(255 255 255 / 0.06),
-    0 1px 2px rgb(0 0 0 / 0.1),
-    var(--pass-shadow);
+  box-shadow: var(--card-ring, 0 0 #0000), inset 0 0 0 var(--lp-hairline) var(--lp-line, var(--mx-line));
+  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, 0 100%);
 }
 
-@supports (color: color-mix(in oklab, red 50%, blue)) {
-  /* the drop shadow takes the pass's own colour, deepened */
-  .lp-pass {
-    --pass-shadow: 0 24px 48px -24px color-mix(in oklab, var(--sec-bg) 55%, #000 45%);
-  }
-
-  .lp-pass[data-featured] {
-    --pass-shadow: 0 30px 60px -26px color-mix(in oklab, var(--sec-bg) 70%, #000 30%), 0 10px 24px -14px color-mix(in oklab, var(--sec-bg) 60%, #000 40%);
-  }
-}
-
-/* a sheen sweeps across the pass on hover (its own clip, so the check disc can overhang) */
-.lp-pass__sheen {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  overflow: hidden;
-  border-radius: inherit;
-  pointer-events: none;
-}
-
-.lp-pass__sheen::before {
-  content: "";
-  position: absolute;
-  inset-block: -10%;
-  inset-inline-start: 0;
-  inline-size: 45%;
-  background: linear-gradient(100deg, transparent, rgb(255 255 255 / 0.2) 50%, transparent);
-  transform: translateX(calc(var(--lp-x) * -160%)) skewX(calc(var(--lp-x) * -12deg));
+[dir="rtl"] .lp-pass {
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% 100%, 0 100%, 0 var(--cut));
 }
 
 .lp-pass__head {

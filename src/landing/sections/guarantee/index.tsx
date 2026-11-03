@@ -17,6 +17,7 @@ import { Letter } from "./letter";
 import { schema, type GuaranteeData, type ViewProps } from "./model";
 import { Seal } from "./seal";
 import { Split } from "./split";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   seal: Seal,
@@ -26,7 +27,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
 
 const pick = <T,>(rng: () => number, list: readonly T[]): T => list[Math.min(list.length - 1, Math.floor(rng() * list.length))]!;
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "guarantee",
   label: "Guarantee",
   labelFr: "Garantie",
@@ -35,8 +36,8 @@ export default defineSection({
   variants: [
     {
       id: "seal",
-      label: "Badge",
-      description: "A big rotating badge on a pool of light, crossing into a raised card that spells the promises out.",
+      label: "Promise card",
+      description: "A quiet hairline card that spells the promises out, with the cash-on-delivery fact as a small text chip at its top.",
       archetypes: ["souk", "maison", "playground", "bloom", "kinetic", "garage", "field"],
     },
     {
@@ -153,4 +154,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

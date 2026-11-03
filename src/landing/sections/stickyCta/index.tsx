@@ -33,6 +33,7 @@ import { defineSection, type RenderContext } from "../../types";
 import { badgeSpot } from "../orderForm/parts";
 import { Plain } from "../orderForm/text";
 import { stickyCopy } from "./copy";
+import { withRevealScope } from "../reveal-scope";
 
 const VARIANT_IDS = ["bar", "pill"] as const;
 type VariantId = (typeof VARIANT_IDS)[number];
@@ -312,7 +313,7 @@ function render({
   );
 }
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "stickyCta",
   label: "Sticky order button",
   labelFr: "Bouton de commande flottant",
@@ -424,4 +425,4 @@ export default defineSection({
     },
   ],
   render,
-});
+}));

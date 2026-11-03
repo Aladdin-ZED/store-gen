@@ -18,6 +18,7 @@ import { Hotspots } from "./hotspots";
 import { Ingredients } from "./ingredients";
 import { schema, type Data } from "./schema";
 import type { ViewProps } from "./shared";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   hotspots: Hotspots,
@@ -35,7 +36,7 @@ function pinAt(v: number, focal: number | undefined): number {
   return Math.round(Math.min(94, Math.max(6, v + (focal * 100 - 50))));
 }
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "showcase",
   label: "Product showcase",
   labelFr: "Produit en détail",
@@ -188,4 +189,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

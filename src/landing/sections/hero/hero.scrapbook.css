@@ -1,281 +1,129 @@
 /* hero · scrapbook — rules only this variant renders (inlined after hero.css on pages whose markup
    carries .lp-hero--scrapbook; the admin preview loads every variant). Shared rules live in hero.css. */
 
+/* ==========================================================================
+   scrapbook → a quiet contact grid (design.md DES-§5.13 H9): square photo
+   cells on a 2 px gap of the section's own ground, one cell holding the
+   title, the price cluster, the action and the COD line. No tilt, no tape,
+   no frames, no stickers. Logical placement: the grid mirrors in Arabic.
+   ========================================================================== */
 .lp-hero__head {
   display: grid;
-  gap: clamp(0.9rem, 0.65rem + 0.9vw, 1.4rem);
+  gap: clamp(0.75rem, 0.6rem + 0.6vw, 1.1rem);
   justify-items: start;
   min-inline-size: 0;
 }
-.lp-hero__chips {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+
+.lp-hero__deal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.1rem;
 }
 
-.lp-hero__chips {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-}
-
-@media (min-width: 64rem) {
-  :is(.lp-hero--stage, .lp-hero--scrapbook, .lp-hero--poster) .lp-hero__grid {
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    grid-template-areas: "head art" "buy art";
-    column-gap: clamp(2.5rem, 5vw, 5.5rem);
-    row-gap: 2.5rem;
-  }
-
-  :is(.lp-hero--stage, .lp-hero--scrapbook, .lp-hero--poster) .lp-hero__head {
-    grid-area: head;
-    align-self: end;
-  }
-
-  :is(.lp-hero--stage, .lp-hero--scrapbook, .lp-hero--poster) .lp-hero__buy {
-    grid-area: buy;
-    align-self: start;
-  }
-
-  :is(.lp-hero__visual, .lp-hero__collage, .lp-hero__art) {
-    grid-area: art;
-  }
-}
-:is(.lp-hero__media[data-kind="cutout"], .lp-hero__card--cutout, .lp-hero__pic--cutout) {
-  background-image: radial-gradient(70% 60% at 50% 32%, var(--mx-stage-hi), transparent), linear-gradient(180deg, var(--mx-stage), var(--mx-stage-lo));
-}
-
-:is(.lp-hero__media[data-kind="cutout"], .lp-hero__card--cutout, .lp-hero__pic--cutout) .lp-pic__img {
-  padding: 10%;
-  filter: var(--lp-shadow-product-filter, none);
-}
-
-/* ==========================================================================
-   collage — layered rounded cards, glass chips, one crisp savings sticker
-   Slot boxes mirror SLOTS in scrapbook.tsx (the crops and the chip placement are computed for them).
-   ========================================================================== */
-.lp-hero__collage {
-  position: relative;
-  inline-size: 100%;
-  max-inline-size: 36rem;
+.lp-hero__sheet {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
   margin-inline: auto;
-  aspect-ratio: 1 / 1.04;
-}
-
-.lp-hero__slot,
-.lp-hero__ghost {
-  position: absolute;
-}
-
-/* stack: a 4:5 lead card, a square companion over its lower start corner, a 3:4 one behind its end edge */
-.lp-hero__slot[data-i="0"] {
-  z-index: 2;
-  inset-block-start: 3%;
-  inset-inline-start: 17%;
-  inline-size: 60%;
-  aspect-ratio: 4 / 5;
-}
-
-.lp-hero__slot[data-i="1"] {
-  z-index: 3;
-  inset-block-end: 1%;
-  inset-inline-start: 1%;
-  inline-size: 41%;
-  aspect-ratio: 1;
-}
-
-.lp-hero__slot[data-i="2"] {
-  z-index: 1;
-  inset-block-start: 12%;
-  inset-inline-end: 0;
-  inline-size: 35%;
-  aspect-ratio: 3 / 4;
-}
-
-.lp-hero__collage[data-n="1"] .lp-hero__slot[data-i="0"] {
-  inset-block-start: 6%;
-  inset-inline-start: 19%;
-  inline-size: 64%;
-}
-
-/* wide: a product lying on its side leads on a 5:4 card across the top; the square companion
-   overlaps only its lower end corner, the third card peeks from behind its foot */
-.lp-hero__collage[data-geo="wide"] .lp-hero__slot[data-i="0"] {
-  inset-block-start: 4%;
-  inset-inline-start: 0;
-  inline-size: 82%;
-  aspect-ratio: 5 / 4;
-}
-
-.lp-hero__collage[data-geo="wide"] .lp-hero__slot[data-i="1"] {
-  inset-block-end: 0;
-  inset-inline: auto 2%;
-  inline-size: 42%;
-  aspect-ratio: 1;
-}
-
-.lp-hero__collage[data-geo="wide"] .lp-hero__slot[data-i="2"] {
-  inset-block-start: 55%;
-  inset-inline: 8% auto;
-  inline-size: 34%;
-  aspect-ratio: 1;
-}
-
-.lp-hero__collage[data-geo="wide"][data-n="1"] .lp-hero__slot[data-i="0"] {
-  inset-block-start: 14%;
-  inset-inline-start: 4%;
-  inline-size: 92%;
-}
-
-.lp-hero__ghost {
-  inset-block: 10% 8%;
-  inset-inline: 13% 11%;
-  border-radius: var(--lp-sq-media);
-  corner-shape: var(--lp-corner);
-  background: var(--mx-tint-2);
-  box-shadow: var(--lp-shadow-m), inset 0 1px 0 var(--mx-rim);
-  rotate: var(--rot, 2deg);
-}
-
-.lp-hero__ghost[data-i="2"] {
-  inset-block: 16% 3%;
-  inset-inline: 23% 5%;
-  background: var(--mx-tint);
-}
-
-.lp-hero__collage[data-geo="wide"] .lp-hero__ghost {
-  inset-block: 8% 18%;
-  inset-inline: 0 2%;
-}
-
-.lp-hero__collage[data-geo="wide"] .lp-hero__ghost[data-i="2"] {
-  inset-block: 20% 6%;
-  inset-inline: 8% 0;
-}
-
-/* a card: continuous corners, lit from above (1px rim on its top edge, a device hairline around it) */
-.lp-hero__card {
-  position: absolute;
-  inset: 0;
-  margin: 0;
   overflow: hidden;
-  border-radius: var(--lp-sq-media);
+  border-radius: var(--lp-radius-media, var(--lp-sq-media));
   corner-shape: var(--lp-corner);
-  background: var(--mx-tint);
-  box-shadow: var(--lp-shadow-l);
-  rotate: var(--rot, 0deg);
-  transition: rotate var(--lp-dur-l) var(--lp-spring), scale var(--lp-dur-l) var(--lp-spring), box-shadow var(--lp-dur-m) var(--lp-ease);
+  background-color: var(--sec-bg);
 }
 
-/* the small companion cards round a little less, so all three corners read alike at their size */
-.lp-hero__slot:not([data-i="0"]) .lp-hero__card {
-  border-radius: calc(var(--lp-sq-media) * 0.78);
+.lp-hero__cell {
+  position: relative;
+  min-inline-size: 0;
+  margin: 0;
+  background-color: var(--mx-stage, var(--sec-card));
 }
 
-.lp-hero__card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  corner-shape: inherit;
-  box-shadow: inset 0 0 0 var(--lp-hairline) var(--mx-edge), inset 0 1px 0 var(--mx-rim);
-  pointer-events: none;
+.lp-hero__cell:not(.lp-hero__cell--title) {
+  aspect-ratio: 1;
 }
 
-.lp-hero__card .lp-hero__pic {
+.lp-hero__cell-pic {
+  inline-size: 100%;
   block-size: 100%;
 }
 
-@media (hover: hover) {
-  .lp-hero__card:hover {
-    z-index: 4;
-    rotate: 0deg;
-    scale: 1.03;
-    box-shadow: var(--lp-shadow-l), 0 40px 80px -40px var(--mx-contact);
-  }
+/* the cells are the device: square corners inside the sheet, only its outer edge is rounded */
+.lp-hero__cell-pic,
+.lp-hero__cell-pic .lp-pic__img {
+  border-radius: 0;
 }
 
-/* the 3D form is tucked behind the main card's lower corner, so it reads as depth in the stack —
-   never a ball floating on its own in the empty quadrant */
-.lp-hero__collage .lp-hero__orb {
-  position: absolute;
-  z-index: 0;
-  inset-block-end: 13%;
-  inset-inline-end: 11%;
-  inline-size: clamp(3.75rem, 14vw, 6rem);
-}
-
-.lp-hero__chips {
-  z-index: 5;
-}
-
-.lp-hero__chip {
-  max-inline-size: min(14rem, 52%);
-  padding: 0.6rem 0.9rem;
-  font-size: calc(0.76rem * var(--lp-script-scale));
-}
-
-/* default spots (scrapbook.tsx CHIP_DEFAULTS); over photos of people --c-top and data-side move a
-   chip off faces and hands */
-.lp-hero__chip[data-side="end"] {
-  inset-inline: auto 4%;
-}
-
-.lp-hero__chip[data-side="start"] {
-  inset-inline: 0 auto;
-}
-
-.lp-hero__chip[data-k="0"] {
-  inset-block-start: var(--c-top, 58%);
-}
-
-.lp-hero__chip[data-k="1"] {
-  inset-block-start: var(--c-top, 6%);
-}
-
-.lp-hero__sticker {
-  position: absolute;
-  z-index: 6;
-  inset-block-start: -1%;
-  inset-inline-end: 14%;
-  --sticker-size: clamp(4.75rem, 3.8rem + 4vw, 6.5rem);
-  color: inherit;
-  text-decoration: none;
-  transition: scale var(--lp-dur-m) var(--lp-spring);
-}
-
-.lp-hero__sticker .lp-sticker__content {
+.lp-hero__cell--title {
+  grid-column: 1 / -1;
+  grid-row: 2;
   display: grid;
-  justify-items: center;
-  gap: 0.15em;
-  line-height: 1;
+  align-content: space-between;
+  gap: clamp(1.5rem, 1.1rem + 1.6vw, 2.5rem);
+  padding: clamp(1.25rem, 0.9rem + 1.6vw, 2.25rem);
+  background-color: var(--sec-card);
+  color: var(--sec-card-ink, var(--sec-ink));
 }
 
-.lp-hero__sticker-pct {
-  font-family: var(--lp-font-display);
-  font-weight: var(--lp-display-weight);
-  font-size: calc(var(--sticker-size) * 0.26);
-  font-variant-numeric: tabular-nums;
+/* one photo: it takes the whole first row; none: the title cell is the sheet */
+.lp-hero__sheet[data-n="1"] > .lp-hero__cell[data-i="0"] {
+  grid-column: 1 / -1;
 }
 
-@media (hover: hover) {
-  .lp-hero__sticker:hover {
-    scale: 1.06;
+.lp-hero__sheet[data-n="0"] > .lp-hero__cell--title {
+  grid-row: 1;
+}
+
+/* three photos on a phone: the two first frames over the title cell (a lone third frame would leave a hole) */
+.lp-hero__sheet[data-n="3"] > .lp-hero__cell[data-i="2"] {
+  display: none;
+}
+
+/* the photos lead: the title is set at section size, not display (H9) */
+.lp-hero--scrapbook .lp-hero__title {
+  font-size: min(calc(var(--lp-step-4) * var(--lp-script-scale-display)), 9vw, 3.25rem);
+  max-inline-size: 18ch;
+}
+
+.lp-hero--scrapbook .lp-hero__buy {
+  inline-size: 100%;
+}
+
+@media (min-width: 48rem) {
+  .lp-hero__sheet {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    max-inline-size: 68rem;
   }
-}
 
-.lp-hero__sticker:active {
-  scale: 0.96;
-}
-@media (prefers-reduced-motion: no-preference) {
-  html.lp-js:not([data-motion="off"]) :is(.lp-hero__media, .lp-hero__print, .lp-hero__slot[data-i="0"] .lp-hero__card, .lp-hero__slide:first-child) .lp-pic__img {
-    animation: lp-hero-settle calc(var(--lp-dur-l) * 2) var(--lp-smooth) backwards;
+  .lp-hero__cell--title {
+    grid-column: 3;
+    grid-row: 1 / span 2;
   }
-}
 
-@keyframes lp-hero-settle {
-  from {
-    scale: calc(var(--pic-zoom, 1) * 1.07);
+  .lp-hero__sheet:is([data-n="0"], [data-n="2"]) > .lp-hero__cell--title {
+    grid-row: 1;
+  }
+
+  .lp-hero__sheet[data-n="0"] > .lp-hero__cell--title {
+    grid-column: 1 / -1;
+  }
+
+  .lp-hero__sheet[data-n="1"] > .lp-hero__cell[data-i="0"] {
+    grid-column: 1 / 3;
+    grid-row: 1 / span 2;
+  }
+
+  /* three photos: a strip of three frames over the title band (head at the inline start, the buy box at the end), so
+     the sheet has no empty cell */
+  .lp-hero__sheet[data-n="3"] > .lp-hero__cell[data-i="2"] {
+    display: block;
+  }
+
+  .lp-hero__sheet[data-n="3"] > .lp-hero__cell--title {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: end;
+    column-gap: clamp(1.5rem, 1rem + 2vw, 3rem);
   }
 }

@@ -284,15 +284,11 @@
   flex: none;
 }
 
-/* no photo: a type-only story on a color block lit by the product's aurora */
+/* no photo: a type-only story on the flat colour of its block (no mesh of lights: core D60, V40) */
 .lp-sp__story[data-text] {
   --st-ink: var(--sec-ink);
   --st-dim: var(--mx-line);
   background: var(--sec-bg);
-}
-
-.lp-sp__story[data-text] .lp-sp__aura {
-  z-index: -2;
 }
 
 .lp-sp__story[data-text] .lp-sp__scrim {

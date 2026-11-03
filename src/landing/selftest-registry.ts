@@ -124,7 +124,15 @@ function main() {
 
   // the data toggles (DES-§8.4)
   check(variantFeatures("hero", "stage", { bigWord: "" }).ghostWord === false, "hero:stage with an empty bigWord keeps its ghost word");
-  check(variantFeatures("hero", "stage", { notes: [{ title: "a" }] }).overlayChips === 1, "hero:stage chips are not capped by its notes");
+  check(variantFeatures("hero", "stage", { notes: [{ title: "a" }] }).overlayChips === 0, "hero:stage draws callout chips the section did not ask for (DS56)");
+  check(variantFeatures("hero", "stage", { chips: 2, notes: [{ title: "a" }] }).overlayChips === 1, "hero:stage chips are not capped by its notes");
+  check(variantFeatures("hero", "stage", { chips: 2, notes: [{ title: "a" }, { title: "b" }, { title: "c" }] }).overlayChips === 2, "hero:stage draws more than 2 chips (S13)");
+  check(variantFeatures("hero", "stage", {}).ghostWord === false && variantFeatures("hero", "stage", { ghost: true, bigWord: "Argan" }).ghostWord === true, "hero:stage ghost word is not opt-in (DS56)");
+  check(variantFeatures("hero", "poster", { ghost: true, bigWord: "" }).ghostWord === false, "hero:poster asked-for ghost word with no word");
+  // the redraws (DES-§4.5.4, S8, S17): no ring and no badge text run on any variant but the P3 order form's own
+  for (const [type, variants] of Object.entries(VARIANT_FEATURES))
+    for (const [v, f] of Object.entries(variants))
+      if (type !== "orderForm") check(!f.ring && !(f.textRuns ?? []).includes("badge"), `${type}:${v} still declares a text ring (S17, RTL3)`);
   check(variantFeatures("steps", "timeline", { cta: false }).ctas === 0, "data.cta = false keeps a CTA");
   check(variantFeatures("benefits", "numbered", { cta: true }).ctas === 1, "data.cta = true adds no CTA");
   check(canon(variantFeatures("benefits", "numbered", { opener: "number" }).openers) === canon(["number"]), "data.opener does not narrow openers");

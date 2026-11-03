@@ -244,7 +244,6 @@ export function Big({
           {...editAttr(ctx, "wordmark")}
           {...reveal("fade", 120)}
         >
-          <span className="lp-footer__glow" aria-hidden="true" />
           <GiantWord ctx={ctx} word={word} uid={id} />
         </div>
       ) : null}

@@ -30,6 +30,7 @@ import { ARCHETYPE_DEFS } from "@/lib/theme/archetypes";
 import { createT } from "../../i18n";
 import { Cta, cx, Icon, Money, Ornament, Picture, reveal, RichText, SectionShell } from "../../primitives";
 import { defineSection, type DefaultsInput, type FieldSpec, type Locale, type RenderContext } from "../../types";
+import { withRevealScope } from "../reveal-scope";
 
 const Schema = z.object({
   /** short trust line: eyebrow above the centered wordmark; a small note in the minimal bar on wide screens */
@@ -311,7 +312,7 @@ function Centered({ ctx, data }: { ctx: RenderContext; data: Data }): ReactEleme
   );
 }
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "header",
   label: "Header",
   labelFr: "En-tête",
@@ -356,4 +357,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

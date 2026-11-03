@@ -1,31 +1,28 @@
 /**
  * counter — one real number, told big: a poster-like color block lit by the product's light — a live
  * "since" label at the top, the delivered-orders count ticking up on its base, hairline rings drawing
- * out from the corner crossed by a slowly turning COD badge (Latin) or riding glass COD chips
- * (Arabic), and a band of light sweeping it once the count lands; the product's real rating (only when
+ * out from the corner and the COD promises riding its edge as glass chips (no turning badge, no text on a
+ * circle: S17, RTL3), and a band of light sweeping it once the count lands; the product's real rating (only when
  * the admin set one) and the CTA beside it; then the delivery cities drifting by as glass chips in
  * two opposite bands.
  * Nothing here is invented: no count → no number, no rating → no stars.
  */
 import type { ReactElement } from "react";
-import { Badge, GlowOrb, Rings } from "../../illustrations";
+import { GlowOrb, Rings } from "../../illustrations";
 import { Chip, Container, Counter, MarqueeTrack, RichText, SectionShell, Stars, cssVars, editAttr, reveal } from "../../primitives";
 import { countLabel, say } from "../reviews/parts";
 import { UI } from "./copy";
 import { CtaRow, Header, splitList, titleId } from "./parts";
 import type { Props } from "./schema";
 
-/** Arabic script (ring text in it is set too small to read at badge size) */
-const ARABIC = /\p{Script=Arabic}/u;
-
 export function CounterView({ id, ctx, data, bg }: Props): ReactElement {
   const rating = ctx.product.rating;
   const cities = splitList(data.cities);
   const label = data.countLabel.trim();
   const since = data.since.trim();
-  const hasCard = data.count > 0;
+  // a real number only: the sample count of the defaults never reaches the page (D2)
+  const hasCard = data.count > 0 && !data.sample;
   const cod = [ctx.t("trust.cod"), ctx.t("trust.check")];
-  const seal = ctx.ornament > 0 && !ARABIC.test(cod.join(""));
   // the numeral scales with its length so 1 200 and 1 250 000 both fill the card without overflowing
   const len = Math.max(3, ctx.num(data.count).length);
   const chips = (list: string[]) => list.map((c, k) => <Chip key={k} ctx={ctx} text={c} icon="map-pin" tone="glass" className="lp-sp__city" />);
@@ -39,7 +36,7 @@ export function CounterView({ id, ctx, data, bg }: Props): ReactElement {
           {/* beside the card the heading shares the row: a size down keeps it to two or three lines */}
           <Header ctx={ctx} data={data} id={id} size={hasCard ? "m" : undefined} className="lp-sp__head" />
           {hasCard ? (
-            <div className="lp-sp__tally" data-seal={seal ? "" : undefined} data-bg={bg === "accent" ? "dark" : "accent"} {...reveal("scale-in", 120)}>
+            <div className="lp-sp__tally" data-bg={bg === "accent" ? "dark" : "accent"} {...reveal("scale-in", 120)}>
               <span className="lp-sp__light" aria-hidden="true">
                 <GlowOrb place="top-end" size="95%" intensity="medium" idle="drift" />
                 <GlowOrb place="bottom-start" size="70%" intensity="subtle" />
@@ -61,18 +58,14 @@ export function CounterView({ id, ctx, data, bg }: Props): ReactElement {
                   <RichText className="lp-sp__lab" text={label} ctx={ctx} decorate={false} editPath="countLabel" reveal="blur-in" delay={420} />
                 ) : null}
               </p>
-              {seal ? (
-                <Badge uid={`${id}-badge`} text={cod} glyph="check" variant="solid" tone="ink" spin reveal delay={520} className="lp-sp__badge" />
-              ) : (
-                // Arabic ring text would be too small to read at badge size: the promises sit on the card edge as glass chips
-                <ul className="lp-sp__cod" role="list" data-stagger="90">
-                  {cod.map((text, k) => (
-                    <li key={k} {...reveal("stamp", 480)}>
-                      <Chip ctx={ctx} text={text} icon={k ? "eye" : "cash-hand"} tone="glass" size="s" />
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {/* the promises sit on the card edge as glass chips (never a ring of text) */}
+              <ul className="lp-sp__cod" role="list" data-stagger="90">
+                {cod.map((text, k) => (
+                  <li key={k} {...reveal("fade", 480)}>
+                    <Chip ctx={ctx} text={text} icon={k ? "eye" : "cash-hand"} tone="glass" size="s" />
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
           {rating || data.cta.trim() ? (

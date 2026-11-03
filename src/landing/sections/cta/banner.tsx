@@ -6,13 +6,13 @@
  *  photo   (upright) a tall card in the archetype's mask, slightly tilted, crossing the top edge
  *  wide    (landscape) a wide card that slides out of the panel's end edge — a tall crop would cut
  *          the product out of its own picture
- * Real-data glass chips (rating, saving) ride on the product, which drifts on scroll. The panel
- * carries a soft aurora of the product hues and the archetype's ambient piece. Without any product
+ * Real-data glass chips (rating, saving) ride on the product, which drifts on scroll. The panel is
+ * a flat slab of its own colour with the archetype's ambient piece (no mesh of lights: core D60, V40). Without any product
  * visual the panel becomes a split statement (title | lead, button, points).
  */
 import type { ReactElement } from "react";
 import type { Archetype, SectionBg } from "@/lib/page/schema";
-import { Aurora, GlowOrb } from "@/landing/illustrations";
+import { GlowOrb } from "@/landing/illustrations";
 import { SectionHeader, cssVars, cx, reveal, seededRotation } from "@/landing/primitives";
 import type { RenderContext } from "../../types";
 import { CARD_RATIO_LG, cardFrame, cardMask, cardShape, wideFrame } from "./fit";
@@ -60,7 +60,6 @@ export function Banner({ ctx, data, id, bg, titleId }: ViewProps): ReactElement 
     <div className="lp-container lp-cta__wrap lp-cq">
       <div className="lp-cta__panel" data-bg={panelTone(data, bg, ctx)} data-media={kind} {...reveal("scale-in")}>
         <div className="lp-cta__panel-bg" aria-hidden="true">
-          <Aurora seed={`${ctx.seed}:${id}:panel`} intensity="medium" drift />
           <Ambient ctx={ctx} uid={`${id}-panel`} scope="panel" />
         </div>
         {kind !== "none" ? (

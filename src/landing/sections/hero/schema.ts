@@ -39,6 +39,21 @@ export const HeroSchema = z.object({
   image: AssetRef.optional(),
   /** extra photos for the collage and the split gallery (default: product photos) */
   images: z.array(AssetRef).max(4).default([]),
+  /*
+   * Section kit fields (P6 DESIGN, design.md DES-§4.5.4, sheets H1-H4 of DES-§5.13). Every one is optional with no
+   * default (DES-§4.5.1 rule): a saved document validates and checksums byte-identically, and an absent field draws
+   * the sheet's default.
+   */
+  /** stage, poster: the giant product word behind the product; off unless true (DS56, ≤ 15 % of a niche's pages) */
+  ghost: z.boolean().optional(),
+  /** stage: product notes laid over the photo as callouts, 0-2; absent = 0 (S13: ≤ 2 chips on ≤ 1 photo) */
+  chips: z.union([z.literal(0), z.literal(1), z.literal(2)]).optional(),
+  /** stage: the product's stage preset (DES-§4.11.1); absent = the archetype's set */
+  stagePreset: z.enum(["glow", "contact", "plinth"]).optional(),
+  /** editorial: unnumbered cover lines under the buy box, 2 or 3; absent = up to 3 */
+  coverLines: z.union([z.literal(2), z.literal(3)]).optional(),
+  /** poster: the price cluster as a tag on the print ("static", the default) or a band over the action */
+  priceBlock: z.enum(["static", "band"]).optional(),
 });
 
 export type HeroData = z.infer<typeof HeroSchema>;

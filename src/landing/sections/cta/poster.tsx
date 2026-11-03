@@ -1,5 +1,5 @@
 /**
- * poster — a typographic finale on a soft aurora of the product's own hues. The headline is set
+ * poster — a typographic finale on the flat colour field of its block (no mesh of lights: core D60, V40). The headline is set
  * huge (scaled to its length so it never overflows) with the product photo set inline in it as a
  * rounded pill that opens as the words land; a calm base row carries the lead, the reassurance
  * points and the big order button with the live price. Centered for the soft languages, flush to
@@ -7,7 +7,6 @@
  */
 import type { ReactElement } from "react";
 import type { Archetype } from "@/lib/page/schema";
-import { Aurora } from "@/landing/illustrations";
 import { Kicker, RichText, TITLE_REVEAL, cssVars, cx, editAttr, reveal } from "@/landing/primitives";
 import { POSTER_PILL } from "./fit";
 import { pickVisual, splitTitle, titleScale, wordCount, type ViewProps } from "./model";
@@ -32,7 +31,6 @@ export function Poster({ ctx, data, id, titleId }: ViewProps): ReactElement {
   const rating = ctx.product.rating ? <RatingChip ctx={ctx} className="lp-cta__meta-rating" delay={160} /> : null;
   return (
     <>
-      <Aurora seed={`${ctx.seed}:${id}:poster`} intensity="strong" drift className="lp-cta__aurora" />
       <Ambient ctx={ctx} uid={`${id}-field`} scope="field" />
       <div
         className="lp-container lp-container--wide lp-cta__wrap lp-cq lp-above-decor"
