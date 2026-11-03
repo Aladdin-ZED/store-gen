@@ -32,6 +32,9 @@
  * eval-scorers, eval-scorecard, eval-recorded, novelty-pass (and, with --slow, eval-niche-corpus).
  * Sections (step 6, the policy; ./selftest-policy.ts): policy-order. The metering, the repositories and aiPolicyFor
  * against a database are test:ai-db (scripts/qa/ai-db-check.ts).
+ * Sections (step 7, the server provider; ./selftest-server.ts): server-errors, server-breaker, server-semaphore,
+ * server-request, server-call, server-inputs, library-provider. runAi against a database and the fake provider is
+ * test:ai-db.
  * Exits 1 on any failure.
  */
 import { isDeepStrictEqual } from "node:util";
@@ -70,6 +73,7 @@ import { registerGuardSections } from "./selftest-guard";
 import { registerPromptSections } from "./selftest-prompts";
 import { registerEvalSections } from "./selftest-eval";
 import { registerPolicySections } from "./selftest-policy";
+import { registerServerSections } from "./selftest-server";
 
 /* ------------------------------------------------------------------ */
 /* The runner                                                          */
@@ -1121,6 +1125,7 @@ registerDirectorSections({ section, check, eq, strict: STRICT });
 registerPromptSections({ section, check, eq, strict: STRICT });
 registerEvalSections({ section, check, eq, strict: STRICT });
 registerPolicySections({ section, check, eq, strict: STRICT });
+registerServerSections({ section, check, eq });
 
 /* ------------------------------------------------------------------ */
 /* run                                                                 */

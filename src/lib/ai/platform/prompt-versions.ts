@@ -10,7 +10,7 @@ import "server-only";
  *     CCR P7-6) and `ensurePromptVersions()` runs it lazily once per process before the first read.
  *   - `promptVersionRows()`: the rows, for the console's Prompts & evals tab and the canary rules.
  */
-import { asc } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { promptVersions } from "@/lib/db/schema";
 import { scopedCache } from "@/lib/tenancy/cache";
@@ -59,4 +59,33 @@ export async function promptVersionRows(): Promise<PromptVersionRow[]> {
   await ensurePromptVersions();
   // tenancy: platform prompt_versions is a P table (D64): read by the console and the canary rules
   return db.select().from(promptVersions).orderBy(asc(promptVersions.task), asc(promptVersions.version));
+}
+
+/** The server canaries per family (status `canary`, `canary_bp` > 0), cached 30 s per process (AI-§F.8). */
+const canaries = scopedCache<Record<string, { version: string; bp: number }>>({ name: "ai-prompt-canary", maxEntries: 1, ttlMs: 30_000 });
+
+/** The family's server canary and its slice, or null (the router picks it by `inCanary`). Never throws. */
+export async function canaryVersionFor(family: string): Promise<{ version: string; bp: number } | null> {
+  try {
+    const map = await canaries.getOrLoad("p", "canary", async () => {
+      await ensurePromptVersions();
+      // tenancy: platform prompt_versions is a P table (D64): the canary rows, no store data
+      const rows = await db
+        .select({ task: promptVersions.task, version: promptVersions.version, bp: promptVersions.canaryBp })
+        .from(promptVersions)
+        .where(and(eq(promptVersions.status, "canary"), eq(promptVersions.provider, "server")));
+      const out: Record<string, { version: string; bp: number }> = {};
+      for (const r of rows) if (r.bp > 0 && PROMPTS[r.version]) out[r.task] = { version: r.version, bp: r.bp };
+      return out;
+    });
+    return map[family] ?? null;
+  } catch (err) {
+    console.error(`[ai] canary versions unavailable: ${err instanceof Error ? err.name : "error"}`);
+    return null;
+  }
+}
+
+/** Drops the cached canary rows (a console activation, tests). */
+export function invalidateCanaries(): void {
+  canaries.clear();
 }

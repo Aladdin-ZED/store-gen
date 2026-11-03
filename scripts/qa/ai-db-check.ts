@@ -24,6 +24,13 @@
  *   runs         linkAiRuns links only the store's own, unlinked runs; recent runs are metadata; aiUsageForStore
  *   jobs, key, prompt-versions, sf-05 (no AI path reads orders or leads; the R1 writers carry no customer column;
  *                the 0006/0007 rows are skipped until those tables exist)
+ *   run-ai       (step 7) runAi against the localhost fake provider (src/lib/ai/testing/fake-anthropic.ts, reached only
+ *                through the ai-base-url seam): AI-01 (1) disabled / no key / no cap → 0 requests and the library
+ *                answers; AI-01 (2) one copy.page run → one ai_runs row (server, model, prompt version, tokens, cost,
+ *                credits = ⌈cost / 10,000⌉) and ai_credits charged by exactly those credits; AI-01 (3) quota_store → no
+ *                call, 0 credits; AI-01 (9) the same input again → no call, via 'cache', 0 credits; a refusal and a
+ *                malformed answer with its one retry; AI-01 (15) 12 stubbed 2 s calls on a pool of 4 → no pool wait
+ *                above 100 ms while they are in flight
  * Exit code 1 when a check fails.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -65,6 +72,9 @@ const FAKE_KEY = `sk-ant-aidbcheck-${randomBytes(16).toString("hex")}`;
   env.SG_TEST_CONTEXT = "1";
   env.APP_SECRET = randomBytes(32).toString("hex");
   env.PLATFORM_URL = "http://localhost:3452";
+  // AI-01 (15): the pool of 4 the no-connection-across-a-call case is measured on (the whole check runs on it)
+  env.DB_POOL_SIZE = "4";
+  for (const k of ["SG_E2E", "SG_AI_BASE_URL"]) delete env[k];
   if (!env.NODE_ENV || env.NODE_ENV === "production") env.NODE_ENV = "test";
   (globalThis as { AsyncLocalStorage?: unknown }).AsyncLocalStorage = AsyncLocalStorage;
 }
@@ -655,6 +665,130 @@ async function sf05Suite(): Promise<void> {
   skipped("gene_stats_* rows", "skipped until 0006/0007");
 }
 
+/** AI-01 (1)(2)(3)(9)(15) through runAi and the fake provider (step 7). */
+async function runAiSuite(fx: Fx): Promise<void> {
+  suite("run-ai");
+  const { startFakeAnthropic } = load<typeof import("@/lib/ai/testing/fake-anthropic")>("@/lib/ai/testing/fake-anthropic");
+  const { runAi } = load<typeof import("@/lib/ai/router/server")>("@/lib/ai/router/server");
+  const { resetAnthropic } = load<typeof import("@/lib/ai/server/client")>("@/lib/ai/server/client");
+  const { breaker } = load<typeof import("@/lib/ai/server/breaker")>("@/lib/ai/server/breaker");
+  const { ALL_FIXTURES } = load<typeof import("@/lib/ai/eval/fixtures")>("@/lib/ai/eval/fixtures");
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { A } = fx;
+  const env = process.env as Record<string, string | undefined>;
+  const fake = await startFakeAnthropic();
+  env.SG_E2E = "1";
+  env.SG_AI_BASE_URL = fake.origin;
+  env.ANTHROPIC_API_KEY = FAKE_KEY;
+  resetAnthropic();
+  breaker().reset();
+  const actor = { kind: "user" as const, userId: A.owner, impersonatorId: null, ip: null };
+  const opts = { actor, surface: "wizard" as const };
+  const fixture = ALL_FIXTURES.find((f) => f.id === "copy.page/core-blender-ar")!;
+  const recorded = JSON.parse(readFileSync(path.join(ROOT, "src/lib/ai/eval/sets/copy.page/recorded/copy.page@s1.json"), "utf8")) as { runs: Record<string, { output: unknown }[]> };
+  const copyOut = recorded.runs[fixture.id]![0]!.output;
+  const screen = (i: number) => ({ text: `Savon artisanal au lait de chèvre, lot ${i}`, source: "note" as const });
+  type RunRow = { id: string; provider: string; via: string; model: string | null; prompt_version: string | null; in_tok: number | null; out_tok: number | null; cost_micros: number | null; credits: number | null; status: string; task: string };
+  const runRows = async () => q<RunRow>("SELECT * FROM ai_runs WHERE store_id = ? ORDER BY created_at, id", [A.id]);
+  try {
+    await resetStore(A.id);
+    await setPlatform("ai_cost_micros", 0);
+    await setAi({ enabled: true, caps: { monthlyUsd: 100, storeDailyCapPct: 25 } }, fx.staff);
+    await q("DELETE FROM ai_runs WHERE store_id = ?", [A.id]);
+    await q("DELETE FROM ai_cache WHERE store_id = ?", [A.id]);
+
+    // AI-01 (1): enabled false / no key / no cap → no request reaches the provider; the library still answers
+    await setAi({ enabled: false }, fx.staff);
+    const off = await runAi(A.scope, "copy.page", fixture.input as never, { ...opts, ladder: "server-only" });
+    const offLib = await runAi(A.scope, "copy.page", fixture.input as never, opts);
+    await setAi({ enabled: true }, fx.staff);
+    delete env.ANTHROPIC_API_KEY;
+    const noKey = await runAi(A.scope, "injection.screen", screen(0), { ...opts, ladder: "server-only" });
+    env.ANTHROPIC_API_KEY = FAKE_KEY;
+    await setAi({ caps: { monthlyUsd: null } }, fx.staff);
+    const noCap = await runAi(A.scope, "injection.screen", screen(0), { ...opts, ladder: "server-only" });
+    await setAi({ caps: { monthlyUsd: 100 } }, fx.staff);
+    check("AI-01 (1): disabled / no key / no cap answer their codes", !off.ok && off.code === "disabled" && !noKey.ok && noKey.code === "no_key" && !noCap.ok && noCap.code === "no_cap", [off, noKey, noCap].map((o) => (o.ok ? "ok" : o.code)));
+    check("AI-01 (1): no request reached the provider", fake.total() === 0, fake.calls);
+    check("AI-01 (1): the ladder answers from the library with a note", offLib.ok && offLib.provider === "library" && offLib.notes[0]?.code === "disabled", offLib.ok ? offLib.provider : offLib.code);
+    check("AI-01 (1): no counter moved, no run row", (await usage(A.id, "ai_credits")) === 0 && (await runRows()).length === 0);
+
+    // AI-01 (2): one copy.page run → one ai_runs row; ai_credits charged by exactly ⌈cost / 10,000⌉
+    fake.enqueue({ kind: "ok", json: copyOut, usage: { input_tokens: 1_700, output_tokens: 2_900, cache_read_input_tokens: 3_400, cache_creation_input_tokens: 0 } });
+    const fields: string[] = [];
+    const first = await runAi(A.scope, "copy.page", fixture.input as never, { ...opts, onField: (p) => void fields.push(p) });
+    const rows = await runRows();
+    const row = rows[0];
+    const credits = await usage(A.id, "ai_credits");
+    check("AI-01 (2): served by the server on the Worker class", first.ok && first.provider === "server" && first.class === "worker" && first.model === "claude-sonnet-5-5" && first.promptVersion === "copy.page@s1", first.ok ? [first.provider, first.class, first.model, first.promptVersion] : first.code);
+    check("AI-01 (2): one ai_runs row: provider server, model, prompt version, tokens, cost", rows.length === 1 && row?.provider === "server" && row.status === "ok" && row.model === "claude-sonnet-5-5" && row.prompt_version === "copy.page@s1" && Number(row.in_tok) === 1_700 && Number(row.out_tok) === 2_900 && Number(row.cost_micros) > 0, row);
+    const cost = Number(row?.cost_micros ?? 0);
+    check("AI-01 (2): credits = ⌈cost / 10,000⌉ on the row and in store_usage after reconcile", Number(row?.credits) === Math.ceil(cost / 10_000) && credits === Math.ceil(cost / 10_000), { cost, row: row?.credits, credits });
+    check("AI-01 (2): the request was streamed and its fields guarded before they were shown", fake.requests.some((r) => r.body?.stream === true) && fields.includes("headline") && fields.indexOf("kicker") <= fields.indexOf("headline"), fields.slice(0, 6));
+    const req = fake.requests.find((r) => r.path === "/v1/messages");
+    const body = req?.body ?? {};
+    check("the request: effort low, fallbacks default with its beta, no thinking or sampling", (body.output_config as { effort?: string } | undefined)?.effort === "low" && body.fallbacks === "default" && (req?.beta ?? "").includes("server-side-fallback-2026-07-01") && !("thinking" in body) && !("temperature" in body), { beta: req?.beta, fallbacks: body.fallbacks });
+    check("the key travels as x-api-key only, never a Bearer token", !!req?.headerNames.includes("x-api-key") && !req.headerNames.includes("authorization"), req?.headerNames);
+
+    // AI-01 (9): the same input again → no call, via 'cache', 0 credits
+    const callsBefore = fake.total("/v1/messages");
+    const again = await runAi(A.scope, "copy.page", fixture.input as never, opts);
+    const rows2 = await runRows();
+    check("AI-01 (9): a cache hit makes no provider call", fake.total("/v1/messages") === callsBefore);
+    check("AI-01 (9): via 'cache', 0 credits, flagged cache_hit", again.ok && again.flags.includes("cache_hit") && again.usage?.credits === 0 && rows2.length === 2 && rows2[1]!.via === "cache" && Number(rows2[1]!.credits) === 0 && (await usage(A.id, "ai_credits")) === credits, rows2[1]);
+    fake.enqueue({ kind: "ok", json: copyOut });
+    const nonce = await runAi(A.scope, "copy.page", fixture.input as never, { ...opts, nonce: "again-1" });
+    check("'Write again' (a nonce) bypasses the cache", nonce.ok && !nonce.flags.includes("cache_hit") && fake.total("/v1/messages") === callsBefore + 1);
+
+    // a refusal: stop_reason first; a malformed answer gets one retry; a 529 is retried
+    fake.enqueue({ kind: "refusal", category: "general_harms", partial: '{"suspicious": tr' });
+    const refused = await runAi(A.scope, "injection.screen", screen(1), { ...opts, ladder: "server-only" });
+    check("a refusal → refused (no parse of the partial text)", !refused.ok && refused.code === "refused", refused.ok ? "ok" : refused.code);
+    fake.enqueue({ kind: "malformed" }, { kind: "ok", json: { suspicious: false, reason: "plain product data" } });
+    const before3 = fake.total("/v1/messages");
+    const retried = await runAi(A.scope, "injection.screen", screen(2), opts);
+    const retryReq = fake.requests.filter((r) => r.path === "/v1/messages").slice(-1)[0];
+    const lastMsg = (retryReq?.body?.messages as { role: string }[] | undefined)?.slice(-1)[0];
+    check("a malformed answer: one retry carrying the parse error as a system message, then ok", retried.ok && retried.provider === "server" && fake.total("/v1/messages") === before3 + 2 && lastMsg?.role === "system", retried.ok ? retried.provider : retried.code);
+    fake.enqueue({ kind: "malformed" }, { kind: "malformed" });
+    const invalid = await runAi(A.scope, "injection.screen", screen(3), opts);
+    check("two malformed answers → invalid_output, then the library rung (keyword heuristic)", invalid.ok && invalid.provider === "library" && invalid.notes[0]?.code === "invalid_output", invalid.ok ? invalid.notes : invalid.code);
+    fake.enqueue({ kind: "status", status: 529 }, { kind: "ok", json: { suspicious: false, reason: "plain" } });
+    const overloaded = await runAi(A.scope, "injection.screen", screen(4), opts);
+    check("a 529 is retried once after 1 s on the same reservation", overloaded.ok && overloaded.provider === "server", overloaded.ok ? overloaded.provider : overloaded.code);
+
+    // AI-01 (3): quota_store → no call, 0 credits
+    await setUsage(A.id, "ai_credits", 300);
+    const n3 = fake.total();
+    const quotaOut = await runAi(A.scope, "copy.field", { locale: "fr", field: "hero.headline", text: "Un savon doux", max: 84, intent: "shorter", targetLocale: null, product: { name: "Savon", facts: [] }, mustAvoid: [] }, { ...opts, ladder: "server-only" });
+    check("AI-01 (3): quota_store, no provider call, no credit charged", !quotaOut.ok && quotaOut.code === "quota_store" && fake.total() === n3 && (await usage(A.id, "ai_credits")) === 300, quotaOut.ok ? "ok" : quotaOut.code);
+
+    // AI-01 (15): 12 stubbed 2 s calls on a pool of 4 → no pool wait above 100 ms while they are in flight
+    await resetStore(A.id);
+    fake.reset();
+    fake.delayMs = 2_000;
+    const runs = Array.from({ length: 12 }, (_, i) => runAi(A.scope, "injection.screen", screen(100 + i), { ...opts, nonce: `pool-${i}` }));
+    const t0 = Date.now();
+    while (fake.inFlight < 12 && Date.now() - t0 < 8_000) await new Promise((r) => setTimeout(r, 20));
+    const waits: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      const s = performance.now();
+      await pool().query("SELECT 1");
+      waits.push(Math.round(performance.now() - s));
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    const done = await Promise.all(runs);
+    check("AI-01 (15): 12 calls in flight at once on the fast class", fake.maxInFlight === 12, fake.maxInFlight);
+    check("AI-01 (15): no pool wait above 100 ms while the 12 calls are in flight (pool of 4)", Math.max(...waits) <= 100, waits);
+    check("AI-01 (15): all 12 completed on the server", done.every((o) => o.ok && o.provider === "server"), done.map((o) => (o.ok ? o.provider : o.code)));
+  } finally {
+    await fake.close();
+    delete env.SG_E2E;
+    delete env.SG_AI_BASE_URL;
+    resetAnthropic();
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* main                                                                */
 /* ------------------------------------------------------------------ */
@@ -682,6 +816,7 @@ async function main(): Promise<void> {
     await runsSuite(fx);
     await jobsSuite(fx);
     await keySuite();
+    await runAiSuite(fx);
     await promptVersionsSuite();
     await sf05Suite();
     done = true;

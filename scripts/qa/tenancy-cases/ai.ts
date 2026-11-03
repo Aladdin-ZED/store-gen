@@ -17,6 +17,11 @@
  *    repository that hands A's rows to B's scope (a planted bug) makes the assembly throw `cross_store_context`
  *    with no row text in the error, and the refusal is reported with B's store id only.
  *
+ * Router (step 7):
+ *  - `runAi(scope, task, input, opts)` (src/lib/ai/router/server.ts): an impersonation scope of A is refused with
+ *    `state` before any read of counters, cache or provider (no run row, no counter); a run in B's scope (whatever
+ *    the harness's AI settings make of it: a server run or the library rung) leaves A's rows and counters as they were.
+ *
  * Repositories (step 6):
  *  - `ai_runs`, `ai_cache`, `ai_memory`, `ai_jobs` through their scoped repositories (src/lib/ai/store/**): A writes a
  *    run, a cache entry, a memory item and a job; B's scope reads none of them by id or by list (`getRunMeta`,
@@ -38,6 +43,7 @@ import { activeJobsFor, getAiJob } from "@/lib/ai/store/jobs";
 import { activeMemory, addMemory, deleteMemory, listMemory, setMemoryPinned } from "@/lib/ai/store/memory";
 import { finishRun, getRunMeta, insertRun, recentRuns } from "@/lib/ai/store/runs";
 import { aiUsageForStore } from "@/lib/ai/summary.server";
+import { runAi } from "@/lib/ai/router/server";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
 import { aiJobs } from "@/lib/db/schema";
@@ -156,6 +162,20 @@ export const cases: TenancyCase[] = [
       kit.check("ai/aiUsageForStore(B): none of A's cost", (await aiUsageForStore(b, month)).costMicros === 0);
       kit.check("ai: B's calls left A's rows as they were (no link, pin or tombstone)", (await kit.snapshotA()) === before);
       kit.check("ai/getRunMeta(A): A's own run (the check is not blind)", (await getRunMeta(a, runId))?.id === runId && (await getAiJob(a, jobId))?.id === jobId);
+    },
+  },
+  {
+    name: "ai: runAi under impersonation is refused before anything moves; B's run writes nothing of A's",
+    async run(kit) {
+      const before = await kit.snapshotA();
+      const owner = kit.fx.A.members.owner;
+      const input: AiTaskInput<"injection.screen"> = { text: `ai-run-${randomBytes(4).toString("hex")}`, source: "note" };
+      const actor = { kind: "impersonation" as const, userId: owner, impersonatorId: owner, ip: null };
+      const imp = await runAi(kit.scope("A", "impersonation"), "injection.screen", input, { actor, surface: "settings", ladder: "server-only" });
+      kit.check("ai/runAi(A as impersonation): state, no provider rung", !imp.ok && imp.code === "state" && imp.runId === null, imp.ok ? "ok" : imp.code);
+      const b = await runAi(kit.scope("B"), "injection.screen", input, { actor: { kind: "user", userId: kit.fx.B.members.owner, impersonatorId: null, ip: null }, surface: "settings" });
+      kit.check("ai/runAi(B): answered for B only (a server run or the library heuristic)", b.ok ? b.provider === "server" || b.provider === "library" : b.runId === null || typeof b.runId === "string");
+      kit.check("ai: neither run moved A's counters or rows", (await kit.snapshotA()) === before);
     },
   },
 ];

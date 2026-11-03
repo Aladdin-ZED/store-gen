@@ -7,9 +7,9 @@ import "server-only";
  * user). Frozen at P0 (src/lib/contracts/r1-p0.ts): P2 (onboarding), P1, P8 and P6 call these before P7 merges.
  *
  * `aiPolicyFor` is real from step 6 (the AI-§A.4 block order over the store's settings, entitlements and counters, the
- * platform cap and the release flags; ./policy.server.ts loads, ../policy.ts `buildPolicy` decides). P0 stubs left
- * until step 7 / 8, the documented "Cloud AI off" state:
- *   - `runAi`: the typed failure `disabled` (not retryable), so the caller takes its library rung;
+ * platform cap and the release flags; ./policy.server.ts loads, ../policy.ts `buildPolicy` decides), with the
+ * provider's live state from step 7 (the breaker's `paused`, the class marks). `runAi` is real from step 7: the
+ * AI-§A.4 steps 1-10 of ./run.server.ts (`runServerTask`), server then library. Left until step 8:
  *   - `queueAi`: throws (nothing may be queued without the Batches queue);
  *   - `registerBatchResultHandler`: works for real (a registry, like the outbox handlers), so P7's handler files and the
  *     tracks' handlers register from day one.
@@ -20,7 +20,9 @@ import type { Actor, StoreCtx, StoreScope } from "@/lib/tenancy/types";
 import { DIRECTOR_PASS_CREDITS_P90, buildPolicy, type AiPolicy, type PolicyInputs } from "../policy";
 import type { AiOutcome, AiRunOpts, AiTaskInput, AiTaskOutput } from "../provider/types";
 import type { AiTaskId } from "../tasks";
+import { aiProbes } from "../server/models";
 import { impersonationInputs, loadPolicyInputs } from "./policy.server";
+import { runServerTask } from "./run.server";
 
 export interface RunAiServerOpts extends AiRunOpts {
   actor: Actor;
@@ -40,11 +42,7 @@ function batchHandlers(): Map<AiTaskId, BatchResultHandler<AiTaskId>> {
 
 /** The pattern-A server run of one task (AI-§A.4 steps 1-10); never throws for a policy or provider failure. */
 export async function runAi<T extends AiTaskId>(scope: StoreScope, task: T, input: AiTaskInput<T>, opts: RunAiServerOpts): Promise<AiOutcome<AiTaskOutput<T>>> {
-  void scope;
-  void task;
-  void input;
-  void opts;
-  return { ok: false, code: "disabled", retryable: false, provider: "server", runId: null };
+  return runServerTask(scope, task, input, opts);
 }
 
 /** Non-urgent work: adds an item to the Batches queue (AI-§B.8); the result arrives through the registered handler. */
@@ -115,7 +113,7 @@ function offPolicy(ctx: StoreCtx): AiPolicy {
 export async function aiPolicyFor(ctx: StoreCtx): Promise<AiPolicy> {
   try {
     if (ctx.scope.kind === "impersonation" || ctx.impersonation) return buildPolicy(await impersonationInputs(ctx));
-    const [inputs, kills] = await Promise.all([policyInputs.getOrLoad(ctx.scope.storeId, `${ctx.user.id}:${ctx.scope.kind}`, () => loadPolicyInputs(ctx)), activeKillSwitches()]);
+    const [inputs, kills] = await Promise.all([policyInputs.getOrLoad(ctx.scope.storeId, `${ctx.user.id}:${ctx.scope.kind}`, () => loadPolicyInputs(ctx, aiProbes())), activeKillSwitches()]);
     return buildPolicy({ ...inputs, cloud: { ...inputs.cloud, generationOn: !kills.includes("ai_generation_enabled") } });
   } catch (err) {
     console.error(`[ai] policy unavailable: ${err instanceof Error ? err.name : "error"}`);
