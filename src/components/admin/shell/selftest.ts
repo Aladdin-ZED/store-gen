@@ -21,6 +21,12 @@
  * before exists only above the price (PD23); phones are E.164 after the separators people type; every free text is
  * capped and cleaned; a refusal names catalog keys only (never a zod sentence); and every message key and refusal code
  * the action files name exists in ar, fr and en (D65).
+ *
+ * Step p2-06 (the shared primitives, PLA-§22.12): the runtime prop guards of ../common/primitive-logic.ts (the lock
+ * reasons and the surface each opens, the usage meter's share and tones without a platform figure, byte formatting,
+ * the wa.me link, middle truncation, the issue list's order and snooze split, the pager keeping filters, freshness,
+ * whole-pixel QR modules of at least 4 px, the ring geometry, the skeleton's timing); the type-level refusal of a 0 for
+ * a funnel step R1 cannot measure; and every message key the primitives name exists in ar, fr and en.
  * Exits 1 on any failure.
  */
 import {
@@ -88,6 +94,25 @@ import {
   USER_ACTION_INPUTS,
 } from "./action-inputs";
 import { CORE_ERROR_CODES, errorUi, PLATFORM_ERROR_CODES, resultErrorUi, type CoreErrorCode } from "./error-map";
+import { r1Funnel } from "@/components/admin/common/honest";
+import type { LockReason } from "@/components/admin/common/locked-control";
+import {
+  deltaTone,
+  formatDay,
+  formatUsage,
+  freshness,
+  issueBuckets,
+  lockView,
+  middleTruncate,
+  monogramInitials,
+  pagerHref,
+  qrPixels,
+  ringGeometry,
+  SKELETON_DELAY_MS,
+  SKELETON_MIN_MS,
+  usageView,
+  waHref,
+} from "@/components/admin/common/primitive-logic";
 import { screenLocale, screenLocalesFor, settingsText, SETTINGS_NAV, storeRelativePath, TRILINGUAL_SCREENS } from "./store-nav";
 
 let failures = 0;
@@ -920,10 +945,180 @@ function actionInputChecks(): void {
   check(`every refusal code P2's actions throw (${codes.size}) has its error.<code> sentence`, codes.size >= 10 && noSentence.length === 0, noSentence);
 }
 
+/* ---- step p2-06: the shared primitives' runtime prop guards (PLA-§22.12) ---- */
+async function primitiveChecks(): Promise<void> {
+  // the lock reasons: every kind has a sentence in ar/fr/en and the surface PLA-§22.8 names
+  const reasons: LockReason[] = [
+    { kind: "pending" },
+    { kind: "state", status: "pending" },
+    { kind: "state", status: "restricted" },
+    { kind: "state", status: "suspended" },
+    { kind: "state", status: "closed" },
+    { kind: "state", status: "scheduled_deletion" },
+    { kind: "state", status: "rejected" },
+    { kind: "plan", key: "sheets" },
+    { kind: "kill", key: "publishing_enabled" },
+    { kind: "role" },
+    { kind: "release", release: "R2" },
+    { kind: "release", release: "R3" },
+    { kind: "impersonation" },
+  ];
+  const views = reasons.map(lockView);
+  check(
+    "every lock reason explains itself in ar/fr/en",
+    views.every((v) => inCatalogs(v.key)),
+    views.filter((v) => !inCatalogs(v.key)),
+  );
+  check(
+    "pending opens the review card, a plan the limit sheet, the rest a sheet",
+    lockView({ kind: "pending" }).opens === "review" &&
+      lockView({ kind: "state", status: "pending" }).opens === "review" &&
+      lockView({ kind: "plan", key: "sheets" }).opens === "limit" &&
+      lockView({ kind: "kill", key: "publishing_enabled" }).opens === "sheet" &&
+      lockView({ kind: "impersonation" }).opens === "sheet",
+  );
+
+  // the usage meter: the store's own share only (MED-13), warn from 0.8, full at the limit
+  const u = (used: number, limit: number | null, warn?: number) => usageView(used, limit, warn);
+  check("usage below warnAt is ok", u(7, 10).tone === "ok" && u(7, 10).pct === 70);
+  check("usage at warnAt warns", u(8, 10).tone === "warn" && u(84, 100).pct === 84);
+  check("usage at or over the limit is full, the bar never past 100 %", u(10, 10).tone === "full" && u(12, 10).share === 1 && u(12, 10).pct === 100);
+  check("unlimited has no share and no bar", u(5, null).unlimited && u(5, null).share === null);
+  check("a 0 limit with nothing used is not full", u(0, 0).tone === "ok" && u(3, 0).tone === "full");
+  check("warnAt is honoured and a bad warnAt falls back to 0.8", u(6, 10, 0.5).tone === "warn" && u(7, 10, 7).tone === "ok" && u(8, 10, Number.NaN).tone === "warn");
+  check("negative or NaN use reads as 0", u(-4, 10).pct === 0 && u(Number.NaN, 10).pct === 0);
+  const mb = formatUsage(20 * 1024 * 1024, "bytes", "en").replace(/ /g, " ");
+  check("bytes format in binary steps", mb === "20 MB", mb);
+  check("bytes under a KB stay bytes; credits are integers", /^512/.test(formatUsage(512, "bytes", "en")) && formatUsage(1234.6, "credits", "en") === "1,235");
+  check("Arabic amounts keep Western digits", /^[0-9]/.test(formatUsage(42, "count", "ar")));
+
+  // sharing and truncation
+  check("wa.me link: digits only, the text encoded", waHref("Atlas: https://x.test/s/a?b=1&c", "+212 6-12") === "https://wa.me/212612?text=Atlas%3A%20https%3A%2F%2Fx.test%2Fs%2Fa%3Fb%3D1%26c");
+  check("wa.me link without a phone opens the picker", waHref("hi") === "https://wa.me/?text=hi" && waHref("hi", null) === "https://wa.me/?text=hi");
+  const long = "store-gen.example/s/atlas-argan-cosmetiques-naturelles-du-souss/huile";
+  const cut = middleTruncate(long, 30);
+  check("middle truncation keeps both ends within max", [...cut].length === 30 && cut.startsWith("store-gen.example") && cut.endsWith("huile") && cut.includes("…"), cut);
+  check("a short value is not truncated", middleTruncate("a.test/s/x", 30) === "a.test/s/x");
+
+  // the issue list: points first, at most max, snoozed apart
+  const issue = (id: string, points: 3 | 6 | 10, severity: 1 | 2 | 3): HealthIssue => ({
+    id,
+    group: "setup",
+    severity,
+    points,
+    evidence: { metric: "m", value: 1, window: "7d", n: 1 },
+    fix: { kind: "action", actionId: "x", label: "health.recompute" },
+    text: "health.title",
+  });
+  const many = [issue("a", 3, 1), issue("b", 10, 3), issue("c", 6, 2), issue("d", 6, 3), issue("e", 3, 2), issue("f", 10, 2), issue("g", 3, 1)];
+  const b = issueBuckets(many, { f: "2026-11-10T00:00:00Z" }, 5);
+  check("issues sort by points, then severity, snoozed left out", b.shown.map((i) => i.id).join() === "b,d,c,e,a", b.shown.map((i) => i.id));
+  check("at most max issues, the rest counted", b.shown.length === 5 && b.hidden === 1 && b.snoozed.length === 1 && b.snoozed[0]!.issue.id === "f");
+  check("an inherited key is not a snooze", issueBuckets([issue("toString", 3, 1)], {}, 5).shown.length === 1);
+
+  // the pager keeps the page's filters
+  check("the cursor joins the query, filters kept", pagerHref("status=new&q=argan&cursor=old", "cursor", "abc") === "?status=new&q=argan&cursor=abc");
+  check("a custom param", pagerHref("", "after", "z9") === "?after=z9");
+
+  // freshness: the dot carries real state only
+  const now = Date.parse("2026-11-03T12:00:00Z");
+  check("never updated: no time, not fresh", freshness(null, 60_000, now, "en").key === "shell.fresh.never" && !freshness(null, 60_000, now, "en").fresh);
+  check("just now within 45 s", freshness("2026-11-03T11:59:30Z", 60_000, now, "en").key === "shell.fresh.now");
+  const f2 = freshness("2026-11-03T11:58:00Z", 5 * 60_000, now, "en");
+  check("2 minutes ago, fresh within staleAfterMs", f2.key === "shell.fresh.ago" && f2.fresh && /2 minutes ago/.test(String(f2.vars.time)), f2);
+  const f3 = freshness("2026-11-03T08:00:00Z", 60 * 60_000, now, "fr");
+  check("hours ago, stale past staleAfterMs, in the viewer's locale", !f3.fresh && /il y a 4 heures/.test(String(f3.vars.time)), f3);
+  check("a time in the future counts as now (clock skew)", freshness("2026-11-03T12:05:00Z", 60_000, now, "en").key === "shell.fresh.now");
+  check("an unparsable time is never", freshness("soon", 60_000, now, "en").key === "shell.fresh.never");
+  check("formatDay refuses a value that is not a date", formatDay("nope", "en") === "" && formatDay(null, "ar") === "" && formatDay("2026-11-03T12:00:00Z", "en").length > 0);
+
+  // the QR: whole pixels per module, never under 4 (DES-§16.12, UX-30)
+  const v3 = qrModules("https://store-gen.example/go/abc123")!;
+  const v5 = qrModules("https://lightgreen-hippopotamus-140853.hostingersite.com/s/atlas-argan-cosmetiques")!;
+  check("QR pixels per module ≥ 4 at every length", qrPixels(v3, 160) >= 4 && qrPixels(v5, 160) >= 4 && qrPixels(v5, 20) === 4);
+  check("QR uses whole pixels per module", Number.isInteger(qrPixels(v3, 160)) && Number.isInteger(qrPixels(v5, 160)));
+
+  // ring, delta, monogram, skeleton
+  check(
+    "ring stroke grows with size and stays inside",
+    ([40, 56, 96] as const).every((s) => {
+      const g = ringGeometry(s);
+      return g.r + g.stroke / 2 <= s / 2 + 1e-9 && g.circumference > 0;
+    }) && ringGeometry(96).stroke > ringGeometry(40).stroke,
+  );
+  check("delta tones", deltaTone(3) === "up" && deltaTone(-0.5) === "down" && deltaTone(0) === "flat" && deltaTone(Number.NaN) === "flat");
+  check("monogram initials: two words, one word, one Arabic letter (a joining script)", monogramInitials("atlas argan") === "AA" && monogramInitials("Baraka") === "B" && monogramInitials("متجر النور") === "م", monogramInitials("متجر النور"));
+  check("monogram initials keep an astral character whole", monogramInitials("🌿 Shop") === "🌿S" && monogramInitials("   ") === "");
+  check("skeleton appears after 150-300 ms and stays ≥ 300 ms", SKELETON_DELAY_MS >= 150 && SKELETON_DELAY_MS <= 300 && SKELETON_MIN_MS >= 300);
+
+  // the type-level funnel refusal: R1 cannot measure shipped / delivered / collected
+  r1Funnel([
+    { id: "orders", label: "Placed", value: 12 },
+    { id: "confirmed", label: "Confirmed", value: 8 },
+    // @ts-expect-error a 0 for a step R1 cannot measure does not type-check (null, never 0)
+    { id: "shipped", label: "Shipped", value: 0 },
+    { id: "delivered", label: "Delivered", value: null },
+    { id: "collected", label: "Collected", value: null },
+  ]);
+
+  // every message key the primitives name exists in ar, fr and en (D65)
+  const files = [
+    "address-card.tsx",
+    "copy-button.tsx",
+    "empty-state.tsx",
+    "freshness-dot.tsx",
+    "funnel-chart.tsx",
+    "health-groups.tsx",
+    "health-ring.tsx",
+    "issue-list.tsx",
+    "job-chip.tsx",
+    "keyset-pager.tsx",
+    "kpi-tile.tsx",
+    "locked-control.tsx",
+    "masked-value.tsx",
+    "mode-explainer.tsx",
+    "panel-boundary.tsx",
+    "primitive-logic.ts",
+    "qr-code.tsx",
+    "reason-picker.tsx",
+    "review-card.tsx",
+    "role-explainer.tsx",
+    "sheet-close.tsx",
+    "skeleton.tsx",
+    "status-pill.tsx",
+    "step-up-sheet.tsx",
+    "today-brief.tsx",
+    "typed-confirm-dialog.tsx",
+    "usage-meter.tsx",
+    "whatsapp-share-button.tsx",
+  ].map((f) => path.join(process.cwd(), "src/components/admin/common", f));
+  files.push(path.join(process.cwd(), "src/components/admin/shell/limit-sheet.tsx"));
+  const keys = new Set<string>();
+  for (const file of files) {
+    const src = readFileSync(file, "utf8");
+    for (const m of src.matchAll(/"((?:shell|health|auth|team|brief|error)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)"/g)) keys.add(m[1]!);
+  }
+  const missing = [...keys].filter((k) => !inCatalogs(k));
+  check(`the ${keys.size} message keys the primitives name exist in ar, fr and en`, keys.size > 80 && missing.length === 0, missing);
+  // the template keys the primitives build from a value: every status, mode, severity, group and role
+  const built = [
+    ...(["pending", "active", "restricted", "suspended", "closed", "scheduled_deletion", "purged", "rejected"] as const).map((s) => `shell.status.${s}`),
+    ...STORE_MODES.map((m) => `shell.mode.${m}`),
+    ...[1, 2, 3].map((n) => `health.severity.${n}`),
+    ...["setup", "trust", "design", "conversion", "operations", "integrations", "quota"].map((g) => `health.group.${g}`),
+    ...STORE_ROLES.map((r) => `team.role.${r}`),
+  ];
+  check("every status, mode, severity, group and role label exists in ar/fr/en", built.every(inCatalogs), built.filter((k) => !inCatalogs(k)));
+  // no em dash or en dash separator in anything the primitives say (rubric §9.G, core §I.8 rule 8)
+  const dashed = [...keys].flatMap((k) => ADMIN_LOCALES.map((l) => [k, messageOf(k, l) ?? ""] as const)).filter(([, v]) => /[–—]/.test(v));
+  check("no em or en dash in the primitives' strings", dashed.length === 0, dashed);
+}
+
 ruleChecks()
   .then(searchChecks)
   .then(manifestChecks)
   .then(actionInputChecks)
+  .then(primitiveChecks)
   .catch((err: unknown) => check("the rule and search checks ran", false, String(err)))
   .finally(() => {
     console.log(`test:shell: ${passed} passed, ${failures} failed`);

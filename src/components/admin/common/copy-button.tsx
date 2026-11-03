@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/lib/i18n/admin/client";
 import { cn } from "@/lib/utils";
 
 async function writeClipboard(text: string): Promise<boolean> {
@@ -26,11 +27,11 @@ async function writeClipboard(text: string): Promise<boolean> {
   }
 }
 
-/** Icon (or labelled) copy button with a morphing check and a toast. */
+/** Icon (or labelled) copy button with a morphing check and a toast (default texts in the viewer's admin locale). */
 export function CopyButton({
   value,
   label,
-  toastMessage = "Copied to clipboard",
+  toastMessage,
   className,
   size = "icon-sm",
   variant = "ghost",
@@ -45,6 +46,7 @@ export function CopyButton({
   variant?: "ghost" | "outline" | "secondary";
   children?: ReactNode;
 }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
@@ -64,11 +66,11 @@ export function CopyButton({
         e.stopPropagation();
         if (await writeClipboard(value)) {
           setCopied(true);
-          toast.success(toastMessage);
+          toast.success(toastMessage ?? t("shell.address.copied"));
           if (timer.current) clearTimeout(timer.current);
           timer.current = setTimeout(() => setCopied(false), 1600);
         } else {
-          toast.error("Couldn't copy — select the text and copy it manually.");
+          toast.error(t("shell.err.copy_failed"));
         }
       }}
     >
@@ -82,7 +84,7 @@ export function CopyButton({
             transition={{ type: "tween", duration: 0.16, ease: [0.2, 0.8, 0.2, 1] }}
             className="absolute inline-flex"
           >
-            {copied ? <CheckIcon className="size-4 text-emerald-600 dark:text-emerald-400" /> : <CopyIcon className="size-4" />}
+            {copied ? <CheckIcon className="size-4 text-success-ink" /> : <CopyIcon className="size-4" />}
           </motion.span>
         </AnimatePresence>
       </span>

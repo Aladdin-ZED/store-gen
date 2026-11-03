@@ -39,4 +39,7 @@ export const messages: { [K in keyof typeof en]: string } = {
   "health.unsnooze": "إلغاء التأجيل",
   "health.evidence.n": "n = {n}",
   "health.evidence.window": "{days, plural, zero {اليوم} one {آخر يوم} two {آخر يومين} few {آخر # أيام} many {آخر # يومًا} other {آخر # يوم}}",
+  "health.snoozed_by": "أجّله {role}",
+  "health.snoozed_title": "النقاط المؤجّلة",
+  "health.hide_snoozed": "إخفاء المؤجّلة",
 };

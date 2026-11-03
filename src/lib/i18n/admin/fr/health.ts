@@ -39,4 +39,7 @@ export const messages: { [K in keyof typeof en]: string } = {
   "health.unsnooze": "Réactiver",
   "health.evidence.n": "n = {n}",
   "health.evidence.window": "{days, plural, one {dernier jour} other {# derniers jours}}",
+  "health.snoozed_by": "Reporté par {role}",
+  "health.snoozed_title": "Points reportés",
+  "health.hide_snoozed": "Masquer les reportés",
 };

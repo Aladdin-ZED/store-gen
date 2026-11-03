@@ -38,4 +38,7 @@ export const messages = {
   "health.unsnooze": "Unsnooze",
   "health.evidence.n": "n = {n}",
   "health.evidence.window": "{days, plural, one {last # day} other {last # days}}",
+  "health.snoozed_by": "Snoozed by {role}",
+  "health.snoozed_title": "Snoozed issues",
+  "health.hide_snoozed": "Hide snoozed",
 } as const satisfies Record<string, string>;

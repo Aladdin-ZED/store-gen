@@ -102,6 +102,24 @@ export function funnelStep(id: FunnelStepId, label: string, count: number | null
   return { id, label, value: validN(count) ? count : null };
 }
 
+/**
+ * The R1 funnel (step p2-06, PLA-§22.12 "a funnel step with 0 where the data does not exist"): R1 measures orders and
+ * confirmed only, so shipped, delivered and collected are the literal `null`; a 0 for one of them is a type error at
+ * the call site (`r1Funnel([...])`), not just a runtime refusal.
+ */
+export type R1FunnelSteps = [
+  { id: "orders"; label: string; value: number | null; rate?: number },
+  { id: "confirmed"; label: string; value: number | null; rate?: number },
+  { id: "shipped"; label: string; value: null },
+  { id: "delivered"; label: string; value: null },
+  { id: "collected"; label: string; value: null },
+];
+
+/** The identity at runtime; its job is the type check at the call site. */
+export function r1Funnel(steps: R1FunnelSteps): FunnelChartProps["steps"] {
+  return steps;
+}
+
 export interface FunnelRowView {
   id: FunnelStepId;
   label: string;

@@ -8,14 +8,16 @@
  *   const res = await stepUp.action(() => saveExportKeyAction(raw));   // an ActionResult; retried once after the proof
  *   if (await stepUp.request()) …                                       // true once proven, false when dismissed
  *
- * The `[store]` layout renders the provider once (with the member's `totpEnabled`); the sheet itself loads on first
- * use. Outside a provider (a shared component on another surface) `request()` answers false at once.
+ * The `[store]` layout renders the provider once (with the member's `totpEnabled`); the sheet itself (the shared
+ * `StepUpSheet` of ../common/step-up-sheet.tsx) loads on first use. Outside a provider (a shared component on another
+ * surface) `request()` answers false at once.
  */
 import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ActionResult } from "../lib/action-result";
 
-const StepUpDialog = dynamic(() => import("../settings/security-panel").then((m) => m.StepUpDialog), { ssr: false });
+// the shared sheet (PLA-§22.12), loaded on first use: TOTP when the member enrolled it, else the password (PD80)
+const StepUpSheet = dynamic(() => import("../common/step-up-sheet").then((m) => m.StepUpSheet), { ssr: false });
 
 interface StepUpApi {
   request(): Promise<boolean>;
@@ -45,7 +47,7 @@ export function StepUpProvider({ totp, children }: { totp: boolean; children: Re
   return (
     <StepUpContext.Provider value={api}>
       {children}
-      {mounted && <StepUpDialog open={open} totp={totp} onOpenChange={(o) => !o && settle(false)} onVerified={() => settle(true)} />}
+      {mounted && <StepUpSheet open={open} surface="tenant" method={totp ? "totp" : "password"} onClose={() => settle(false)} onVerified={() => settle(true)} />}
     </StepUpContext.Provider>
   );
 }
