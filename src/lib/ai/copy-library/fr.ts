@@ -1,5 +1,5 @@
 /**
- * Bibliothèque de copy — français (Maroc d'abord, Europe ensuite).
+ * Bibliothèque de copy : français (Maroc d'abord, Europe ensuite).
  * Ton : chaleureux, précis, rassurant sur le paiement à la livraison. Phrases courtes, verbes
  * concrets, zéro superlatif creux, aucun chiffre inventé, aucune promesse médicale.
  */
@@ -8,16 +8,18 @@ import type { FamilyCopy, LocaleLibrary } from "./types";
 const skincare: FamilyCopy = {
   kicker: ["{product}", "{product} · Soin quotidien"],
   headline: [
-    "Une peau *nourrie* qui se voit, et qui se sent.",
-    "Le geste soin qui rend la peau *douce* au toucher.",
-    "Moins de produits, une peau plus *confortable*.",
+    { t: "Une peau *nourrie* qui se voit, et qui se sent.", s: "noun-phrase" },
+    { t: "Le geste soin qui rend la peau *douce* au toucher.", s: "noun-phrase" },
+    { t: "Moins de produits, une peau plus *confortable*.", s: "contrast-pair" },
+    { t: "Gardez le geste simple, la peau *confortable*.", s: "imperative" },
+    { t: "*Douceur.* Un soin qui tient sa place matin et soir.", s: "word-subline" },
   ],
   sub: [
     "Une texture qui pénètre vite, sans film gras. {product} se glisse dans votre routine du matin comme du soir.",
     "Pensé pour les peaux qui tiraillent et manquent d'éclat. Un geste simple, un fini net, un confort qui dure.",
   ],
   bigWord: ["Éclat", "Soin"],
-  tagline: ["Le soin qui simplifie votre routine", "Douceur, confort, éclat — au quotidien"],
+  tagline: ["Le soin qui simplifie votre routine", "Douceur et confort au quotidien"],
   benefitsTitle: ["Ce que votre peau va *remarquer*", "Pensé pour votre *routine*"],
   benefits: [
     { icon: "drop", title: "Une texture qui pénètre vite", text: "Elle s'étale facilement et laisse la peau nette, sans effet collant. Vous pouvez enchaîner avec le maquillage." },
@@ -47,7 +49,7 @@ const skincare: FamilyCopy = {
     { q: "Matin, soir, ou les deux ?", a: "Les deux sont possibles. Le soir, la peau profite de la nuit ; le matin, appliquez avant votre protection solaire." },
   ],
   story: [
-    { title: "Pourquoi on l'a *choisi*", text: "On cherchait un soin simple, agréable, qui ne promet pas l'impossible mais qui tient parole au quotidien. {product}, c'est ce geste qu'on reprend chaque jour avec plaisir — et qu'on a voulu rendre accessible partout, avec le paiement à la livraison." },
+    { title: "Pourquoi on l'a *choisi*", text: "On cherchait un soin simple, agréable, qui ne promet pas l'impossible mais qui tient parole au quotidien. {product}, c'est ce geste qu'on reprend chaque jour avec plaisir, et qu'on a voulu rendre accessible partout, avec le paiement à la livraison." },
   ],
   comparison: [
     { label: "Texture", us: "Légère, pénètre vite", them: "Souvent grasse ou collante" },
@@ -61,9 +63,11 @@ const skincare: FamilyCopy = {
 const haircare: FamilyCopy = {
   kicker: ["{product}", "{product} · Soin cheveux"],
   headline: [
-    "Des cheveux *souples* que vous avez envie de toucher.",
-    "Moins de frisottis, plus de *brillance*.",
-    "Le soin qui rend vos longueurs *légères*.",
+    { t: "Des cheveux *souples* que vous avez envie de toucher.", s: "noun-phrase" },
+    { t: "Moins de frisottis, plus de *brillance*.", s: "contrast-pair" },
+    { t: "Le soin qui rend vos longueurs *légères*.", s: "noun-phrase" },
+    { t: "Brossez sans tirer, coiffez *sans lutter*.", s: "imperative" },
+    { t: "*Souplesse.* Des longueurs qui se laissent coiffer.", s: "word-subline" },
   ],
   sub: [
     "{product} nourrit les longueurs sans les alourdir. Des cheveux plus faciles à coiffer, du brushing au chignon.",
@@ -114,9 +118,11 @@ const haircare: FamilyCopy = {
 const fragrance: FamilyCopy = {
   kicker: ["{product}", "{product} · Parfum"],
   headline: [
-    "Un sillage qu'on *remarque*, sans jamais déranger.",
-    "Le parfum qu'on vous demandera *le nom*.",
-    "Une signature *qui vous ressemble*.",
+    { t: "Un sillage qu'on *remarque*, sans jamais déranger.", s: "noun-phrase" },
+    { t: "Le parfum qu'on vous demandera *le nom*.", s: "noun-phrase" },
+    { t: "Une signature *qui vous ressemble*.", s: "noun-phrase" },
+    { t: "Portez-le le jour, *gardez-le* pour le soir.", s: "imperative" },
+    { t: "*Sillage.* Discret de près, présent quand on s'approche.", s: "word-subline" },
   ],
   sub: [
     "{product} s'ouvre en douceur puis s'installe sur la peau. Un parfum à porter le jour comme le soir.",
@@ -167,9 +173,11 @@ const fragrance: FamilyCopy = {
 const jewelry: FamilyCopy = {
   kicker: ["{product}", "{product} · Bijou"],
   headline: [
-    "Le détail qui *illumine* toute la tenue.",
-    "Une pièce qu'on porte, et qu'on *remarque*.",
-    "Le bijou qu'on garde *pour longtemps*.",
+    { t: "Le détail qui *illumine* toute la tenue.", s: "noun-phrase" },
+    { t: "Une pièce qu'on porte, et qu'on *remarque*.", s: "noun-phrase" },
+    { t: "Le bijou qu'on garde *pour longtemps*.", s: "noun-phrase" },
+    { t: "Portez-le tous les jours, *pas seulement* le week-end.", s: "imperative" },
+    { t: "*Éclat.* Une finition qui accroche la lumière.", s: "word-subline" },
   ],
   sub: [
     "{product} : une finition soignée, un éclat discret, à porter tous les jours ou pour les grandes occasions.",
@@ -220,9 +228,11 @@ const jewelry: FamilyCopy = {
 const fashion: FamilyCopy = {
   kicker: ["{product}", "{product} · Collection"],
   headline: [
-    "La pièce qui *simplifie* vos tenues.",
-    "Un style net, un confort *de chaque instant*.",
-    "Celle qu'on porte *encore et encore*.",
+    { t: "La pièce qui *simplifie* vos tenues.", s: "noun-phrase" },
+    { t: "Un style net, un confort *de chaque instant*.", s: "noun-phrase" },
+    { t: "Celle qu'on porte *encore et encore*.", s: "noun-phrase" },
+    { t: "Enfilez, ajustez, *c'est parti* pour la journée.", s: "imperative" },
+    { t: "*Coupe.* Une pièce qui tombe juste.", s: "word-subline" },
   ],
   sub: [
     "{product} : une coupe qui tombe bien, une matière agréable, et un style qui s'accorde à tout votre dressing.",
@@ -273,9 +283,11 @@ const fashion: FamilyCopy = {
 const wellness: FamilyCopy = {
   kicker: ["{product}", "{product} · Bien-être"],
   headline: [
-    "Prendre soin de soi, *chaque jour*, simplement.",
-    "Une habitude simple pour se sentir *bien*.",
-    "Le bien-être, *sans compliquer* vos journées.",
+    { t: "Prendre soin de soi, *chaque jour*, simplement.", s: "noun-phrase" },
+    { t: "Une habitude simple pour se sentir *bien*.", s: "noun-phrase" },
+    { t: "Le bien-être, *sans compliquer* vos journées.", s: "noun-phrase" },
+    { t: "Faites une pause, *chaque jour*.", s: "imperative" },
+    { t: "*Calme.* Un rituel simple, à votre rythme.", s: "word-subline" },
   ],
   sub: [
     "{product} s'intègre facilement à votre quotidien. Un geste simple, régulier, pour prendre soin de vous.",
@@ -326,9 +338,11 @@ const wellness: FamilyCopy = {
 const fitness: FamilyCopy = {
   kicker: ["{product}", "{product} · Sport à la maison"],
   headline: [
-    "Votre séance, *n'importe où*, quand vous voulez.",
-    "Bougez plus, *sans abonnement*.",
-    "L'équipement qui vous fait *passer à l'action*.",
+    { t: "Votre séance, *n'importe où*, quand vous voulez.", s: "noun-phrase" },
+    { t: "Bougez plus, *sans abonnement*.", s: "imperative" },
+    { t: "L'équipement qui vous fait *passer à l'action*.", s: "noun-phrase" },
+    { t: "Entraînez-vous *chez vous*, à votre heure.", s: "imperative" },
+    { t: "*Rythme.* Une séance là où vous êtes.", s: "word-subline" },
   ],
   sub: [
     "{product} vous accompagne à la maison, au parc ou en voyage. Compact, solide, prêt quand vous l'êtes.",
@@ -365,7 +379,7 @@ const fitness: FamilyCopy = {
     { q: "Faut-il beaucoup de place ?", a: "Non, un petit espace au sol suffit. Après la séance, il se range dans un placard." },
   ],
   story: [
-    { title: "Le sport, *à votre façon*", text: "On a choisi {product} pour une raison simple : le meilleur entraînement est celui qu'on fait vraiment. Chez vous, à votre heure, sans abonnement — et payé seulement à la livraison." },
+    { title: "Le sport, *à votre façon*", text: "On a choisi {product} pour une raison simple : le meilleur entraînement est celui qu'on fait vraiment. Chez vous, à votre heure, sans abonnement, et payé seulement à la livraison." },
   ],
   comparison: [
     { label: "Où", us: "Chez vous, partout", them: "Uniquement en salle" },
@@ -379,9 +393,11 @@ const fitness: FamilyCopy = {
 const kitchen: FamilyCopy = {
   kicker: ["{product}", "{product} · Cuisine"],
   headline: [
-    "La cuisine du quotidien, *en moins de temps*.",
-    "Le geste qui vous fait *gagner du temps* en cuisine.",
-    "Cuisiner devient *un plaisir*, pas une corvée.",
+    { t: "La cuisine du quotidien, *en moins de temps*.", s: "noun-phrase" },
+    { t: "Le geste qui vous fait *gagner du temps* en cuisine.", s: "noun-phrase" },
+    { t: "Cuisiner devient *un plaisir*, pas une corvée.", s: "contrast-pair" },
+    { t: "Préparez plus vite, *rangez moins*.", s: "imperative" },
+    { t: "*Geste.* La cuisine du quotidien, en plus simple.", s: "word-subline" },
   ],
   sub: [
     "{product} vous simplifie la préparation des repas : moins d'efforts, moins de vaisselle, plus de temps à table.",
@@ -432,9 +448,11 @@ const kitchen: FamilyCopy = {
 const home: FamilyCopy = {
   kicker: ["{product}", "{product} · Maison"],
   headline: [
-    "Une maison plus *agréable*, sans effort.",
-    "Le petit changement qui rend la maison *plus belle*.",
-    "Moins de corvées, plus de *temps pour vous*.",
+    { t: "Une maison plus *agréable*, sans effort.", s: "noun-phrase" },
+    { t: "Le petit changement qui rend la maison *plus belle*.", s: "noun-phrase" },
+    { t: "Moins de corvées, plus de *temps pour vous*.", s: "contrast-pair" },
+    { t: "Installez-le une fois, *profitez-en* tous les jours.", s: "imperative" },
+    { t: "*Confort.* Le détail qui change la pièce.", s: "word-subline" },
   ],
   sub: [
     "{product} s'occupe du quotidien pour que vous profitiez de votre intérieur. Pratique, solide, facile à utiliser.",
@@ -471,7 +489,7 @@ const home: FamilyCopy = {
     { q: "Comment l'entretenir ?", a: "Un chiffon doux et légèrement humide suffit. Évitez les produits abrasifs." },
   ],
   story: [
-    { title: "La maison, *en plus simple*", text: "On passe beaucoup de temps chez soi : autant que ce soit agréable. {product} a été choisi pour rendre le quotidien plus simple et l'intérieur plus accueillant — livré chez vous, payé à la réception." },
+    { title: "La maison, *en plus simple*", text: "On passe beaucoup de temps chez soi : autant que ce soit agréable. {product} a été choisi pour rendre le quotidien plus simple et l'intérieur plus accueillant. Livré chez vous, payé à la réception." },
   ],
   comparison: [
     { label: "Utilisation", us: "Simple, immédiate", them: "Compliquée" },
@@ -485,9 +503,11 @@ const home: FamilyCopy = {
 const kids: FamilyCopy = {
   kicker: ["{product}", "{product} · Jeu & éveil"],
   headline: [
-    "Des yeux qui *brillent* dès l'ouverture du colis.",
-    "Le jeu qui les occupe *et les fait grandir*.",
-    "Des heures de *jeu*, des parents tranquilles.",
+    { t: "Des yeux qui *brillent* dès l'ouverture du colis.", s: "noun-phrase" },
+    { t: "Le jeu qui les occupe *et les fait grandir*.", s: "noun-phrase" },
+    { t: "Des heures de *jeu*, des parents tranquilles.", s: "noun-phrase" },
+    { t: "Ouvrez le colis, *laissez-les jouer*.", s: "imperative" },
+    { t: "*Jeu.* Des heures d'éveil à la maison.", s: "word-subline" },
   ],
   sub: [
     "{product} éveille la curiosité et l'imagination. Des matériaux pensés pour les petites mains, des heures de jeu.",
@@ -538,9 +558,11 @@ const kids: FamilyCopy = {
 const pets: FamilyCopy = {
   kicker: ["{product}", "{product} · Animaux"],
   headline: [
-    "Un compagnon *heureux*, une maison tranquille.",
-    "Ce qu'il préfère, *ce qui vous simplifie la vie*.",
-    "Prendre soin de lui, *sans compliquer* vos journées.",
+    { t: "Un compagnon *heureux*, une maison tranquille.", s: "noun-phrase" },
+    { t: "Ce qu'il préfère, *ce qui vous simplifie la vie*.", s: "noun-phrase" },
+    { t: "Prendre soin de lui, *sans compliquer* vos journées.", s: "noun-phrase" },
+    { t: "Offrez-lui son coin, *gardez* la maison tranquille.", s: "imperative" },
+    { t: "*Confort.* Son coin à lui, votre calme à vous.", s: "word-subline" },
   ],
   sub: [
     "{product} est pensé pour le confort de votre animal et pour votre tranquillité. Pratique, solide, facile à entretenir.",
@@ -577,7 +599,7 @@ const pets: FamilyCopy = {
     { q: "Comment le nettoyer ?", a: "Suivez les indications d'entretien : la plupart des saletés partent à l'eau savonneuse." },
   ],
   story: [
-    { title: "Parce qu'il fait *partie de la famille*", text: "Un animal heureux, c'est toute la maison qui va mieux. {product} a été choisi pour son confort et pour votre tranquillité — livré chez vous, payé seulement à la réception." },
+    { title: "Parce qu'il fait *partie de la famille*", text: "Un animal heureux, c'est toute la maison qui va mieux. {product} a été choisi pour son confort et pour votre tranquillité. Livré chez vous, payé seulement à la réception." },
   ],
   comparison: [
     { label: "Solidité", us: "Résiste aux jeux", them: "Abîmé en quelques jours" },
@@ -591,9 +613,11 @@ const pets: FamilyCopy = {
 const tech: FamilyCopy = {
   kicker: ["{product}", "{product} · Tech"],
   headline: [
-    "La technologie qui vous *simplifie* la journée.",
-    "Branchez, c'est prêt. *Vraiment*.",
-    "Petit format, *grand confort* au quotidien.",
+    { t: "La technologie qui vous *simplifie* la journée.", s: "noun-phrase" },
+    { t: "Branchez, c'est prêt. *Vraiment*.", s: "imperative" },
+    { t: "Petit format, *grand confort* au quotidien.", s: "contrast-pair" },
+    { t: "Sortez-le de la boîte, *c'est prêt*.", s: "imperative" },
+    { t: "*Format.* Il tient dans la poche, il sert tous les jours.", s: "word-subline" },
   ],
   sub: [
     "{product} se prend en main en quelques secondes. Compact, pratique, pensé pour vous suivre partout.",
@@ -644,9 +668,11 @@ const tech: FamilyCopy = {
 const auto: FamilyCopy = {
   kicker: ["{product}", "{product} · Auto & outils"],
   headline: [
-    "Le bon outil, *le travail bien fait*.",
-    "Fait pour les mains *qui bossent*.",
-    "Robuste, précis, *prêt à servir*.",
+    { t: "Le bon outil, *le travail bien fait*.", s: "noun-phrase" },
+    { t: "Fait pour les mains *qui bossent*.", s: "noun-phrase" },
+    { t: "Robuste, précis, *prêt à servir*.", s: "noun-phrase" },
+    { t: "Prenez l'outil, *faites le travail*.", s: "imperative" },
+    { t: "*Prise.* Solide en main, précis au travail.", s: "word-subline" },
   ],
   sub: [
     "{product} : une prise en main solide et un résultat net, que ce soit au garage, à la maison ou sur la route.",
@@ -683,7 +709,7 @@ const auto: FamilyCopy = {
     { q: "Est-il compatible avec mon véhicule ?", a: "{wa:Envoyez-nous la marque et le modèle sur WhatsApp : on vous confirme avant l'envoi.|Notez la marque et le modèle dans la remarque de commande : on vous confirme lors de l'appel, avant l'envoi.}" },
   ],
   story: [
-    { title: "Un outil *sérieux*", text: "Un bon outil, c'est celui qui est encore là dans des années. {product} a été choisi pour sa robustesse et sa précision — livré chez vous, et vous ne payez qu'après avoir vérifié le colis." },
+    { title: "Un outil *sérieux*", text: "Un bon outil, c'est celui qui est encore là dans des années. {product} a été choisi pour sa robustesse et sa précision. Livré chez vous, et vous ne payez qu'après avoir vérifié le colis." },
   ],
   comparison: [
     { label: "Robustesse", us: "Pensé pour un usage intensif", them: "Casse vite" },
@@ -697,9 +723,11 @@ const auto: FamilyCopy = {
 const terroir: FamilyCopy = {
   kicker: ["{product}", "{product} · Terroir"],
   headline: [
-    "Le goût *vrai* du terroir, livré chez vous.",
-    "Comme *chez nos grands-mères*, en toute simplicité.",
-    "Un produit *authentique*, choisi avec soin.",
+    { t: "Le goût *vrai* du terroir, livré chez vous.", s: "noun-phrase" },
+    { t: "Comme *chez nos grands-mères*, en toute simplicité.", s: "noun-phrase" },
+    { t: "Un produit *authentique*, choisi avec soin.", s: "noun-phrase" },
+    { t: "Servez-le comme *à la maison*.", s: "imperative" },
+    { t: "*Goût.* Le terroir, conditionné avec soin.", s: "word-subline" },
   ],
   sub: [
     "{product} : un produit sélectionné avec soin, au goût authentique, conditionné pour garder toute sa fraîcheur.",
@@ -750,12 +778,14 @@ const terroir: FamilyCopy = {
 const general: FamilyCopy = {
   kicker: ["{product}", "{product} · Essentiel"],
   headline: [
-    "Le petit objet qui *change* le quotidien.",
-    "Simple, pratique, *bien pensé*.",
-    "Celui qu'on finit par *recommander* à tout le monde.",
+    { t: "Le petit objet qui *change* le quotidien.", s: "noun-phrase" },
+    { t: "Simple, pratique, *bien pensé*.", s: "noun-phrase" },
+    { t: "Celui qu'on finit par *recommander* à tout le monde.", s: "noun-phrase" },
+    { t: "Gardez-le à portée de main, *servez-vous-en* chaque jour.", s: "imperative" },
+    { t: "*Utile.* Le petit objet qui rend service.", s: "word-subline" },
   ],
   sub: [
-    "{product} rend service tous les jours. Pratique, solide et facile à utiliser — livré chez vous, payé à la réception.",
+    "{product} rend service tous les jours. Pratique, solide et facile à utiliser. Livré chez vous, payé à la réception.",
     "Pensé pour vous simplifier la vie, sans complication. Vous vérifiez le colis avant de payer.",
   ],
   bigWord: ["Pratique", "Essentiel"],
@@ -801,16 +831,18 @@ const general: FamilyCopy = {
 };
 
 /**
- * Mode pudique : abaya, robe ou ensemble de prière, hijab, khimar, djellaba, caftan — femmes et
+ * Mode pudique : abaya, robe ou ensemble de prière, hijab, khimar, djellaba, caftan, femmes et
  * filles. Ton calme, doux et précis : le tissu, la coupe, le confort, la taille, l'entretien. Rien
  * au-delà du confort et de la pudeur (aucune promesse spirituelle), aucune exagération.
  */
 const modest: FamilyCopy = {
   kicker: ["{product}", "{product} · Mode pudique"],
   headline: [
-    "Fluide, couvrante, *élégante* sans effort.",
-    "Une tombée *fluide*, une allure apaisée.",
-    "La pudeur, portée *avec douceur*.",
+    { t: "Fluide, couvrante, *élégante* sans effort.", s: "noun-phrase" },
+    { t: "Une tombée *fluide*, une allure apaisée.", s: "noun-phrase" },
+    { t: "La pudeur, portée *avec douceur*.", s: "noun-phrase" },
+    { t: "Couvrez-vous avec *douceur*, du matin au soir.", s: "imperative" },
+    { t: "*Tombé.* Une coupe ample qui suit vos gestes.", s: "word-subline" },
   ],
   sub: [
     "Un tissu doux qui tombe avec fluidité, une coupe ample qui couvre sans serrer : une pièce sereine, du matin au soir.",
@@ -1010,7 +1042,7 @@ const modest: FamilyCopy = {
 
 export const FR: LocaleLibrary = {
   common: {
-    heroCta: ["Je commande maintenant", "Commander", "Commander — paiement à la livraison"],
+    heroCta: ["Je commande maintenant", "Commander", "Commander, paiement à la livraison"],
     announcement: [
       "Paiement à la livraison",
       "{delivery}",
@@ -1067,7 +1099,7 @@ export const FR: LocaleLibrary = {
         "Remplissez le formulaire : un conseiller vous appelle pour confirmer. Vous ne payez qu'en recevant le colis.",
         "Quelques champs, et c'est fait. Paiement en espèces à la livraison.",
       ],
-      submit: ["Confirmer ma commande", "Je commande — paiement à la livraison"],
+      submit: ["Confirmer ma commande", "Je commande, paiement à la livraison"],
       reassurance: ["Vous ne payez qu'à la réception, après avoir vu votre colis.", "Aucun paiement en ligne. Vous vérifiez avant de payer."],
     },
     cta: {
@@ -1114,7 +1146,7 @@ export const FR: LocaleLibrary = {
       colors: { title: "Pack {n} couleurs", subtitle: "Une pièce de chaque couleur", short: "{n} couleurs" },
     },
     seo: {
-      title: ["{product} — Paiement à la livraison", "{product} | Livraison rapide, paiement à la réception"],
+      title: ["{product} | Paiement à la livraison", "{product} | Livraison rapide, paiement à la réception"],
       description: [
         "Commandez {product} en ligne et payez à la livraison. {delivery}. Vérifiez votre colis avant de payer.",
         "{product} : livré chez vous, payé en espèces à la réception. Commande en quelques clics.",

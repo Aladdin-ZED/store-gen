@@ -14,6 +14,8 @@ import "@/lib/design/selftest-genome";
 import "@/lib/design/selftest-heights";
 // step 6 (choreography and generator integration): expansions, rhythm planners, the 140-plan sweep, N5 / N6, DG-12 R1
 import "@/lib/design/selftest-choreography";
+// step 7 (copy engine): normalisers, the cliché fixture, the register sets, the copy rules, the compositional sweep, bottom-k
+import "@/lib/design/selftest-copy";
 import { registerDesignGroup } from "@/lib/design/selftest";
 
 // step 4 (section kit redraws): the 41 baseline documents against their goldens (--full; test:render runs the 14

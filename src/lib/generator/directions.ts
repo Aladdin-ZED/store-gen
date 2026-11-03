@@ -2,7 +2,7 @@
  * generateDirections — product + photos (+ optional AI analysis and copy) → three complete,
  * art-directed PageDocs in three different archetypes, ready to preview and publish.
  */
-import { libraryCopy } from "@/lib/ai/copy-library";
+import { copyFamily, libraryCopy, productRef } from "@/lib/ai/copy-library";
 import type { PageCopy } from "@/lib/ai/copy-schema";
 import { getMarket } from "@/lib/markets/info";
 import {
@@ -29,7 +29,7 @@ import type { PhotoFacts } from "@/lib/design/photo-facts";
 import { PRIORS_VERSION } from "@/lib/design/priors";
 import { directionArchetype, sampleGenome } from "@/lib/design/solve";
 import type { BrandSetting } from "@/lib/settings/keys/brand";
-import type { CopyExtras } from "./copy-map";
+import { composeCopy, type CopyExtras } from "./copy-map";
 import { calmBands, chooseOrder, chooseVariant, finishPlan, fullOrder, planDesign, type DesignPlan, type PlanContext } from "./plan";
 import { CatalogInputError, directionCatalog, displayInput, drawOfferDisplay, pickOfferDisplay, safeSelection } from "./offers";
 import { deriveSeed, hash32 } from "./rng";
@@ -137,6 +137,8 @@ export interface GenerateInput {
   proof?: { reviews?: boolean; figures?: number };
   /** Director hints (GH-1, flag `ai_director_brief`), validated by the caller (validateHints) */
   hints?: GeneHints;
+  /** the hero-title skeleton ids of the store's last 5 pages (DES-§9.12 rotation); absent = none known */
+  ownSkeletons?: readonly string[];
 }
 
 export interface Direction {
@@ -152,6 +154,8 @@ export interface Direction {
   doc: PageDoc;
   /** the planned genome (sections, rhythm genes, G24); null when the direction fell back to the archetype plan */
   genome?: DesignGenome | null;
+  /** the engine-composed copy fields and their skeleton ids ("hero.headline" → "fr.t.np-fact"); absent = library or AI copy */
+  skeletons?: Record<string, string>;
 }
 
 export interface DirectionMatch {
@@ -211,6 +215,8 @@ const SPREAD_TYPES = new Set(["hero", "benefits", "problem", "steps", "showcase"
 export interface DirectionDesign {
   genome: DesignGenome;
   compiled: Compiled;
+  /** hero-title skeletons the sibling directions already use (DES-§9.5 rotation) */
+  copyAvoid?: ReadonlySet<string>;
 }
 
 /** A built direction: its document and, on the design path, the planned genome (sections, rhythm genes, G24). */
@@ -218,6 +224,8 @@ export interface BuiltDirection {
   doc: PageDoc;
   genome: DesignGenome | null;
   plan: DesignPlan | null;
+  /** the engine-composed copy paths and their skeleton ids (DES-§9.12); null = library or AI copy */
+  skeletons?: Record<string, string> | null;
 }
 
 /** The section schema accepts a top-level field (an unknown key would be stripped by the section's zod object). */
@@ -255,7 +263,7 @@ export function buildDirectionWithGenome(input: GenerateInput, archetype: Archet
   // a garment filed under kids / traditional gets garment copy (cut, fabric, size), not toy or terroir copy
   const copyCat = copyCategory(parsedProduct.data.category, keywords);
   const hasWhatsapp = /^\+?[0-9]{8,15}$/.test(input.whatsapp?.replace(/[\s().-]/g, "") ?? "");
-  const copy: PageCopy =
+  let copy: PageCopy =
     input.copy?.[input.locale] ??
     libraryCopy({
       // the library reads the family from the catalog category and the product's words: a girl's
@@ -320,6 +328,7 @@ export function buildDirectionWithGenome(input: GenerateInput, archetype: Archet
 
   // the engine's plan (DES-§5.5): order, variants, rhythm genes and fold, from the compiled genome
   let plan: DesignPlan | null = null;
+  let skeletons: Record<string, string> | null = null;
   const formCounts = { offers: bundles.length, groups: (items[0]?.groups ?? []).filter((g) => g.kind !== "field").length, bump: false };
   if (design) {
     const photoFacts = photoFactsOf(input, product);
@@ -351,6 +360,21 @@ export function buildDirectionWithGenome(input: GenerateInput, archetype: Archet
     });
     // the look after the planners: the reveal scope (G35) and the fold's dmax (H28) are part of it
     theme = { ...theme, look: compileLook(plan.genome, { photos: photoFacts }) };
+    // engine-only copy (DES-§9.12): composed from the merchant's facts over the library, never over AI copy
+    if (!input.copy?.[input.locale]) {
+      const engine = composeCopy(copy, {
+        locale: input.locale,
+        family: copyFamily({ category: parsedProduct.data.category, productName: parsedProduct.data.name, keywords }).family,
+        ref: productRef(parsedProduct.data.name, input.locale),
+        facts: { facts, productName: parsedProduct.data.name, price: (parsedProduct.data as { price?: number }).price ?? null, deliveryText: input.deliveryText ?? null },
+        directives: design.compiled.copy,
+        seed,
+        ...(plan.fold.titleLines ? { titleLines: plan.fold.titleLines } : {}),
+        avoid: new Set([...(design.copyAvoid ?? []), ...(input.ownSkeletons ?? [])]),
+      });
+      copy = engine.copy;
+      skeletons = engine.skeletons;
+    }
   }
 
   // sections: build data first, then lay out backgrounds/dividers over the ones that exist
@@ -447,7 +471,7 @@ export function buildDirectionWithGenome(input: GenerateInput, archetype: Archet
 
   const { doc, issues } = validateDoc(draft);
   if (!doc) throw new GeneratorError(issues[0]?.message ?? "The generated page is invalid.");
-  if (!plan) return { doc, genome: null, plan: null };
+  if (!plan) return { doc, genome: null, plan: null, skeletons: null };
   // the genome's sections, now that the ids exist (the hero's arrangement for the distance view and H33)
   const flowSeq = doc.sections.filter((s) => !s.hidden && !["announcement", "header", "footer", "stickyCta", "whatsappFloat"].includes(s.type)).map((s) => `${s.type}:${s.variant}`);
   const genome: DesignGenome = {
@@ -455,7 +479,7 @@ export function buildDirectionWithGenome(input: GenerateInput, archetype: Archet
     page: { ...plan.genome.page, G24: { ...plan.genome.page.G24, seq: flowSeq.slice(0, 40) } },
     sections: doc.sections.slice(0, 40).map((s) => ({ id: s.id, type: s.type, variant: s.variant, ...(s.type === "hero" && plan!.heroArrange ? { arrange: plan!.heroArrange } : {}) })),
   };
-  return { doc, genome, plan };
+  return { doc, genome, plan, skeletons };
 }
 
 /**
@@ -647,6 +671,8 @@ export function generateDirections(input: GenerateInput): Direction[] {
   const avoid = new Map<string, Set<string>>();
   const views: DistanceView[] = [];
   const accents: string[] = [];
+  // the hero-title skeletons of the directions already built: two directions of one run never share it (DES-§9.5)
+  const copyAvoid = new Set<string>();
   const ranked = rankDirections(input);
   const { reading, keywords } = moodOf(input);
   const parsed = Product.safeParse(input.product);
@@ -662,7 +688,7 @@ export function generateDirections(input: GenerateInput): Direction[] {
         seed = genome.seed;
         const theme = productTheme({ category, palette: input.palette, aiVibe: input.aiVibe, keywords, mood: reading.mood, archetype, seed, locale: input.locale });
         const compiled = compileGenome(genome, { theme, locale: input.locale, mood: reading.mood, brand: input.brand ?? null, photos: sin.photos, numbers: (input.proof?.figures ?? 0) >= 2 });
-        built = buildDirectionWithGenome(input, archetype, seed, avoid, { genome, compiled });
+        built = buildDirectionWithGenome(input, archetype, seed, avoid, { genome, compiled, copyAvoid });
       } catch (e) {
         // a locked brand colour the no-orange repair would move fails the candidate (H24): the next attempt
         if (e instanceof GenomeError) continue;
@@ -681,6 +707,8 @@ export function generateDirections(input: GenerateInput): Direction[] {
       best = { built: { doc: buildDirection(input, archetype, seed, avoid), genome: null, plan: null }, seed, d: 0, view: null, voice: 0 };
     }
     if (best.view) views.push(best.view);
+    const heroSkeleton = best.built.skeletons?.["hero.headline"];
+    if (heroSkeleton) copyAvoid.add(heroSkeleton);
     const doc = best.built.doc;
     accents.push(doc.theme.palette.accent);
     for (const s of doc.sections) {
@@ -690,6 +718,6 @@ export function generateDirections(input: GenerateInput): Direction[] {
       avoid.set(s.type, used);
     }
     const def = ARCHETYPE_DEFS[archetype];
-    return { archetype, label: def.label, description: def.description, reason, match, seed: best.seed, doc, genome: best.built.genome };
+    return { archetype, label: def.label, description: def.description, reason, match, seed: best.seed, doc, genome: best.built.genome, ...(best.built.skeletons ? { skeletons: best.built.skeletons } : {}) };
   });
 }

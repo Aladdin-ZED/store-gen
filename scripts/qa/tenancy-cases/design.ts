@@ -7,8 +7,39 @@
  * from P0 on.
  */
 import type { TenancyCase, TrackActionCase } from "../tenancy-check";
+import type { WriteScope } from "@/lib/tenancy/types";
 
-export const cases: TenancyCase[] = [];
+export const cases: TenancyCase[] = [
+  {
+    // DES-§2.2, §22 (step 7): headline_shingles has no store id; a store's sync writes only its own owner tag from its
+    // own live pages; the cross-store check answers { verdict, band } and never an owner tag, a count or a number
+    name: "design: headline shingles are written by owner tag only, and the check never names another store",
+    async run({ check, scope }) {
+      const H = await import("@/lib/design/headlines.server");
+      const { db } = await import("@/lib/db/client");
+      const { headlineShingles } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+      const A = scope("A", "system") as WriteScope;
+      const B = scope("B", "system") as WriteScope;
+      const niche = "MA:general";
+      const tagA = H.ownerTagFor(A.storeId);
+      const tagB = H.ownerTagFor(B.storeId);
+      await db.insert(headlineShingles).values([{ nicheKey: niche, hash: H.shingleHash(niche, "§p pressee a"), ownerTag: tagA, kind: "title" }]).catch(() => undefined);
+      const before = (await db.select().from(headlineShingles).where(eq(headlineShingles.ownerTag, tagA))).length;
+      await H.syncShingles(B, niche);
+      const after = (await db.select().from(headlineShingles).where(eq(headlineShingles.ownerTag, tagA))).length;
+      check("B's sync never touches A's rows", before === after && before > 0, { before, after });
+      const rows = await db.select().from(headlineShingles).where(eq(headlineShingles.nicheKey, niche));
+      check("every row is A's or B's tag, never a store id", rows.every((r) => (r.ownerTag === tagA || r.ownerTag === tagB) && r.ownerTag !== A.storeId && r.ownerTag !== B.storeId));
+      const verdicts = await H.checkHeadlineNovelty(B, niche, ["{product}, pressée à froid.", HEADLINES[1]!]);
+      const json = JSON.stringify(verdicts);
+      check("B's check answers { verdict, band } only", verdicts.every((v) => Object.keys(v).sort().join() === "band,verdict") && !json.includes(tagA) && !/\d/.test(json), verdicts);
+      await H.purgeHeadlineShingles(B);
+      check("B's purge leaves A's rows", (await db.select().from(headlineShingles).where(eq(headlineShingles.ownerTag, tagA))).length === before);
+      await db.delete(headlineShingles).where(eq(headlineShingles.ownerTag, tagA));
+    },
+  },
+];
 
 const HEADLINES = ["Huile d'argan pure, pressée à froid", "زيت الأركان الأصلي"];
 

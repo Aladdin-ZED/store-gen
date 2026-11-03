@@ -11,13 +11,22 @@
  *   - no "your copy awaits" / "I want it" calls to action, and modest pages use the calm voice;
  *   - French typography: no-break space before ? ! : ; and typographic apostrophes;
  *   - icons: no jewel icon on a lace / embroidery benefit; the announcement and guarantee lines get
- *     distinct icons from the generator (copy-map iconsForLines).
+ *     distinct icons from the generator (copy-map iconsForLines);
+ *   - DG-07 (design.md DES-§9.5, §9.12, §23.3): 0 em / en dashes in the library files; every hero title tagged, ≥ 3
+ *     structures per family × locale; ≥ 24 skeletons per family × locale; every French template with the product
+ *     slot rendered against the four ProductRef shapes with 0 article faults; no ar FAQ pair breaking its register;
+ *     no stats renderer reading the figure tables (DS42).
  * Exits 1 on any failure.
  */
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { articleFaults, registerOf } from "@/lib/design/cliche";
+import { skeletonCount } from "@/lib/design/copy-gen";
 import { iconsForLines, TEXTILE_ORNAMENT } from "@/lib/generator/copy-map";
 import { PRODUCT_CATEGORIES, type Locale, type ProductCategory } from "@/lib/page/schema";
 import { PageCopy } from "../copy-schema";
-import { copyFamily, fill, libraryCopy, libraryFor, typeset, FACETS, FAMILIES, WORD_FAMILIES, type Facet, type Family } from "./index";
+import { copyFamily, fill, frTemplate, libraryCopy, libraryFor, lineTag, lineText, typeset, FACETS, FAMILIES, WORD_FAMILIES, type Facet, type Family, type Line } from "./index";
+import { GENDER_LEXICON_SIZE, productRef, REF_SHAPES } from "./product-ref";
 import type { FamilyCopy } from "./types";
 
 let failures = 0;
@@ -30,7 +39,7 @@ const check = (ok: boolean, msg: string) => {
 
 const LOCALES = ["ar", "fr", "en"] as const;
 
-/* 1 — family choice */
+/* 1. family choice */
 const CASES: [name: string, category: ProductCategory, keywords: string, family: Family, facets: Facet[]][] = [
   ["Abaya de prière avec Dentelle", "kids", "", "modest", ["prayer", "girls", "lace"]],
   ["Abaya de prière avec Dentelle", "fashion", "", "modest", ["prayer", "lace"]],
@@ -72,7 +81,7 @@ for (const [name, category, keywords, family, facets] of CASES) {
   check(got.family === family && got.facets.join(",") === facets.join(","), `copyFamily("${name}", ${category}) = ${got.family} [${got.facets}], want ${family} [${facets}]`);
 }
 
-/* 2 — every family / facet / locale / WhatsApp state */
+/* 2. every family / facet / locale / WhatsApp state */
 const PRODUCTS: Record<string, [ProductCategory, string]> = {
   modest: ["fashion", "Abaya"],
   "modest+prayer": ["fashion", "Robe de prière"],
@@ -151,7 +160,7 @@ for (const locale of LOCALES) {
   }
 }
 
-/* 3 — every family exists in every locale, facets too, and every alternative is used somewhere */
+/* 3. every family exists in every locale, facets too, and every alternative is used somewhere */
 const ALL_FAMILIES = [...FAMILIES, ...WORD_FAMILIES];
 for (const locale of LOCALES) {
   const lib = libraryFor(locale);
@@ -159,7 +168,7 @@ for (const locale of LOCALES) {
     const fam: FamilyCopy | undefined = lib.families[f];
     check(!!fam, `${locale}: family ${f} missing`);
     if (!fam) continue;
-    check(fam.headline.every((h) => (h.match(/\*/g) ?? []).length === 2), `${locale}/${f}: a headline without exactly one *emphasis*`);
+    check(fam.headline.every((h) => (lineText(h).match(/\*/g) ?? []).length === 2), `${locale}/${f}: a headline without exactly one *emphasis*`);
     if (locale === "ar") check(fam.solution.every((s) => !/\*\{product\}\*/.test(s)), `${locale}/${f}: emphasis around {product} (reverses Latin names on RTL pages)`);
   }
   for (const facet of FACETS) check(!!lib.families.modest.facets?.[facet], `${locale}: modest facet ${facet} missing`);
@@ -180,7 +189,7 @@ for (const locale of LOCALES) {
   };
   for (const locale of LOCALES) {
     for (const wa of [false, true]) {
-      const slots = { product: "Abaya de prière", delivery: "Livraison 24–48h partout au Maroc", where: "partout au Maroc", whatsapp: wa };
+      const slots = { product: "Abaya de prière", delivery: "Livraison 24-48h partout au Maroc", where: "partout au Maroc", whatsapp: wa };
       const size = (s: string) => fill(typeset(locale, s), slots).length;
       for (const f of [...FAMILIES, ...WORD_FAMILIES]) {
         const fam = libraryFor(locale).families[f];
@@ -189,7 +198,7 @@ for (const locale of LOCALES) {
         for (const [label, block] of blocks) {
           for (const [key, value] of Object.entries(block)) {
             if (!Array.isArray(value)) continue;
-            if (LIMITS[key]) for (const s of value as string[]) check(size(s) <= LIMITS[key]!, `${locale}/${label}.${key} (${wa ? "wa" : "no-wa"}) over ${LIMITS[key]}: "${s}"`);
+            if (LIMITS[key]) for (const s of (value as Line[]).map(lineText)) check(size(s) <= LIMITS[key]!, `${locale}/${label}.${key} (${wa ? "wa" : "no-wa"}) over ${LIMITS[key]}: "${s}"`);
             const lim = ITEM_LIMITS[key];
             if (lim) for (const item of value as Record<string, string>[]) for (const [field, max] of Object.entries(lim)) check(size(item[field] ?? "") <= max, `${locale}/${label}.${key}.${field} (${wa ? "wa" : "no-wa"}) over ${max}: "${item[field]}"`);
           }
@@ -205,6 +214,70 @@ const topics = (l: Locale) =>
   );
 check(topics("ar") === topics("fr") && topics("fr") === topics("en"), "modest facets differ between locales");
 
-console.log(`copy library: ${CASES.length} family cases, ${combos} copies`);
+/* 4. DG-07 (design.md DES-§9.5, §9.12, §23.3): dashes, tags, structures, skeletons, French articles, stats, registers */
+const LIBRARY_FILES = ["ar.ts", "fr.ts", "en.ts", "index.ts", "types.ts", "product-ref.ts"];
+for (const f of LIBRARY_FILES) {
+  const n = (readFileSync(path.join(__dirname, f), "utf8").match(/[—–]/g) ?? []).length;
+  check(n === 0, `${f}: ${n} em / en dashes`);
+}
+let articleRenders = 0;
+for (const locale of LOCALES) {
+  const lib = libraryFor(locale);
+  for (const f of ALL_FAMILIES) {
+    const fam = lib.families[f];
+    // every hero title carries its structure tag; ≥ 3 structures per family × locale
+    check(fam.headline.every((h) => typeof h !== "string" && !!h.s), `${locale}/${f}: an untagged hero title`);
+    const structures = new Set(fam.headline.map((h) => lineTag(h, locale).s));
+    check(structures.size >= 3, `${locale}/${f}: ${structures.size} hero title structures (${[...structures]})`);
+    // section titles read their tags through the heuristic taggers
+    for (const t of [...fam.benefitsTitle, ...fam.problemTitle, ...fam.showcaseTitle, ...fam.stepsTitle]) check(!!lineTag(t, locale).s, `${locale}/${f}: untagged title "${t}"`);
+    check(skeletonCount(locale, f) >= 24, `${locale}/${f}: ${skeletonCount(locale, f)} skeletons (≥ 24)`);
+  }
+  // a register-tagged library: no ar FAQ pair with an MSA question and a Darija answer (or the inverse)
+  if (locale === "ar") {
+    const pairs = [...Object.values(lib.common.faq).flat(), ...ALL_FAMILIES.flatMap((f) => lib.families[f].faq)];
+    for (const qa of pairs) {
+      const rq = registerOf(qa.q);
+      const ra = registerOf(qa.a);
+      check(!((rq === "msa" && ra === "darija") || (rq === "darija" && ra === "msa")), `ar FAQ register break: "${qa.q}" (${rq}) / "${qa.a}" (${ra})`);
+    }
+  }
+}
+// every French template with the product slot, rendered against the four ProductRef shapes: 0 article faults
+{
+  const fr = libraryFor("fr");
+  const templates = new Set<string>();
+  const walk = (v: unknown) => {
+    if (typeof v === "string") {
+      if (v.includes("{product")) templates.add(v);
+    } else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  walk(fr);
+  const typed = ["Sérum éclat", "Crème de nuit", "L'huile d'argan", "Zénith Pro"];
+  REF_SHAPES.forEach((shape, i) => {
+    const name = typed[i]!;
+    const ref = productRef(name, "fr");
+    check(ref.gender === shape.gender && ref.article === shape.article, `productRef("${name}") = ${JSON.stringify(ref)}`);
+    for (const tpl of templates) {
+      const t = typeset("fr", tpl);
+      const out = fill(frTemplate(t, ref) ?? t, { product: name, delivery: "Livraison 24-48h", where: "partout au Maroc", whatsapp: true });
+      articleRenders++;
+      const faults = articleFaults(out);
+      check(faults.length === 0, `article fault in "${out}" (${faults.join(", ")}) from "${tpl}"`);
+    }
+  });
+  check(GENDER_LEXICON_SIZE >= 280, `the gender lexicon has ${GENDER_LEXICON_SIZE} nouns`);
+}
+// DS42: no stats renderer reads the figure tables (they are editor placeholders behind `sample`)
+{
+  const dir = path.join(__dirname, "..", "..", "..", "landing", "sections", "stats");
+  for (const f of readdirSync(dir).filter((x) => /\.(tsx?|ts)$/.test(x) && x !== "copy.ts" && x !== "index.tsx")) {
+    const src = readFileSync(path.join(dir, f), "utf8");
+    check(!/\bSTATS\b|from "\.\/copy"/.test(src), `stats renderer ${f} references the figure tables`);
+  }
+}
+
+console.log(`copy library: ${CASES.length} family cases, ${combos} copies, ${articleRenders} French article renders`);
 console.log(failures ? `✗ ${failures} failure(s)` : "✓ all copy library checks passed");
 process.exit(failures ? 1 : 0);

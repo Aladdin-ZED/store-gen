@@ -13,7 +13,7 @@
  *  - features: `VariantFeaturesResolved` carries `h` and `family`; fixed layers never count in flow.
  */
 import { SECTIONS } from "@/landing/registry";
-import { libraryFor } from "@/lib/ai/copy-library";
+import { libraryFor, lineText } from "@/lib/ai/copy-library";
 import { FAMILIES } from "@/lib/ai/copy-library/types";
 import { getFixture } from "@/lib/page/fixtures";
 import type { PageDoc, ThemeLook } from "@/lib/page/schema";
@@ -109,7 +109,7 @@ function longestTitle(locale: "ar" | "fr"): string {
   let best = "";
   for (const f of FAMILIES) {
     for (const h of lib.families[f]?.headline ?? []) {
-      const t = h.replace(/\{product\}/g, product).replace(/\{[a-z]+\}/g, "").replace(/\*+/g, "");
+      const t = lineText(h).replace(/\{product\}/g, product).replace(/\{[a-z]+\}/g, "").replace(/\*+/g, "");
       if ([...t].length > [...best].length) best = t;
     }
   }

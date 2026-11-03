@@ -16,6 +16,16 @@
  * before ? ! : ;) is applied when the copy is built.
  */
 import type { IconName } from "@/landing/primitives/icons";
+import type { HeadlineStructure } from "@/lib/design/genome";
+
+/** A rhetorical device a line leans on (DES-§9.5). */
+export type Device = "contrast" | "number" | "sensory" | "question" | "quote";
+
+/**
+ * A hero, section-title or lead line with its tags (DES-§9.5): the G29 structure, the device, the ar register. A
+ * plain string is read as `{ t, s: structureOf(t), r: registerOf(t) }` (the heuristic taggers of src/lib/design/cliche.ts).
+ */
+export type Line = string | { t: string; s: HeadlineStructure; d?: Device; r?: "msa" | "darija" };
 
 /** Copy families reached from a product category (see FAMILY_OF in index.ts). */
 export const FAMILIES = [
@@ -46,7 +56,7 @@ export type Family = (typeof FAMILIES)[number] | (typeof WORD_FAMILIES)[number];
 
 /**
  * Facets refine a family from the product's words: prayer wear, a piece for girls (or children),
- * lace, a veil (hijab, khimar — no long garment). A facet's lines are each true for any product
+ * lace, a veil (hijab, khimar; no long garment). A facet's lines are each true for any product
  * carrying it, so several facets combine.
  */
 export const FACETS = ["prayer", "girls", "kids", "lace", "veil"] as const;
@@ -100,14 +110,14 @@ export interface FamilyVoice {
 /** Copy specific to a product family (one locale). */
 export interface FamilyCopy {
   kicker: string[];
-  /** hero h1, ≤ 110 chars after slot filling, one *emphasis* */
-  headline: string[];
+  /** hero h1, ≤ 110 chars after slot filling, one *emphasis*; tagged, ≥ 3 structures per family (DES-§9.5) */
+  headline: Line[];
   sub: string[];
   /** giant background word of the stage/poster heroes, ≤ 16 chars */
   bigWord: string[];
   tagline: string[];
   benefitsTitle: string[];
-  /** 5–6 benefits; the generator shows 4–5, the first one always */
+  /** 5-6 benefits; the generator shows 4-5, the first one always */
   benefits: Benefit[];
   problemTitle: string[];
   pains: Pain[];
@@ -134,7 +144,7 @@ export interface FamilyCopy {
  */
 export interface FacetCopy {
   kicker?: string[];
-  headline?: string[];
+  headline?: Line[];
   sub?: string[];
   bigWord?: string[];
   tagline?: string[];
@@ -184,7 +194,7 @@ export interface CommonCopy {
   form: { title: string[]; lead: string[]; submit: string[]; reassurance: string[] };
   cta: { title: string[]; text: string[]; button: string[] };
   faqTitle: string[];
-  /** cash on delivery, delivery, inspection, exchange — 2 phrasings each */
+  /** cash on delivery, delivery, inspection, exchange: 2 phrasings each */
   faq: { cod: Qa[]; delivery: Qa[]; inspect: Qa[]; exchange: Qa[] };
   sticky: { label: string[]; note: string[] };
   whatsapp: { label: string[]; message: string[] };
