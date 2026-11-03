@@ -22,6 +22,12 @@
  * proof for it, gets the one generic refusal before any Google call and never holds A's binding; B's sheet naming A's
  * order ids (every pulled cell filled) moves, notes or relabels none of A's orders, and the pull's reads and writes under
  * B's scope never reach A's rows (OPE-§19.3, §19.6, SHT-05).
+ *
+ * R1 P5 step 6, server ad events (src/lib/orders/conversions.ts, src/lib/jobs/handlers/capi.ts): B's creation path and
+ * B's int.capi hook named with A's order enqueue nothing and never read, seal or clear A's capi_ctx; B never opens A's
+ * sealed context; B's purge never touches A's rows; B's conversions change never lists A's pages; a `capi` item of
+ * store B naming A's pixel id signs with B's token only (A's token never leaves A); B replaying A's outbox id is
+ * not_found (P8's `replay`: not applicable while it is the P0 stub).
  */
 import { createRequire } from "node:module";
 import type { TenancyCase, TenancyKit } from "../tenancy-check";
@@ -444,4 +450,152 @@ export const cases: TenancyCase[] = [
       }
     },
   },
+  {
+    name: "capi: B's creation path, hook, purge and conversions change never read or change A's orders or pages",
+    async run(kit) {
+      const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+      const { orders } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+      const { byId } = load<typeof import("@/lib/tenancy/sql")>("@/lib/tenancy/sql");
+      const { setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+      const conversions = load<typeof import("@/lib/orders/conversions")>("@/lib/orders/conversions");
+      const a = write(kit, "A");
+      const b = write(kit, "B");
+      const idA = kit.fx.A.order.main;
+      const [rowA] = await db.select({ ctx: orders.capiCtx }).from(orders).where(byId(orders, a, idA));
+      const prevCtx = rowA?.ctx ?? null;
+      const enqueued: { storeId: string; keys: string[] }[] = [];
+      conversions.setCapiDoubleForTests({
+        enqueue: async (scope, items) => (enqueued.push({ storeId: scope === "platform" ? "platform" : scope.storeId, keys: items.map((i) => i.dedupeKey) }), { inserted: items.length, duplicates: 0 }),
+        drainOutbox: async () => ({ ms: 0, claimed: 0, done: 0, retried: 0, dead: 0, more: false }),
+        enqueueRenders: async (_s, ids) => ({ enqueued: ids === "all-live" ? 0 : ids.length }),
+        appendOrderEvent: async () => ({ ok: true, id: 1 }),
+      });
+      try {
+        // A's order carries a sealed context of A's
+        const conv = { purchaseTrigger: "confirmed", pageOverrides: {}, customEvents: true, manualOrders: false } as const;
+        await setStoreSetting(a, "conversions", conv as never, { kind: "system" } as never);
+        await setStoreSetting(b, "conversions", conv as never, { kind: "system" } as never);
+        const ctxA = conversions.sealCapiContext(a, {
+          v: 1,
+          pageId: kit.fx.A.page.live,
+          source: "live",
+          currency: "MAD",
+          qty: 1,
+          contentId: "A-CONTENT-CANARY",
+          contentName: "A",
+          country: "MA",
+          client: { ip: "105.66.1.2", ua: null },
+          sourceUrl: null,
+          pixels: { meta: ["555555555555555"], tiktok: [] },
+          itemsHash: "x",
+        });
+        await db.update(orders).set({ capiCtx: ctxA }).where(byId(orders, a, idA));
+        const before = await kit.snapshotA();
+        kit.check("capi: B never opens A's sealed context", conversions.openCapiContext(b, ctxA) === null);
+
+        // B's creation path with A's order id: the order is not B's, so nothing is read, enqueued or sealed
+        const conversion = {
+          orderId: idA,
+          eventId: idA,
+          pageId: kit.fx.A.page.live,
+          source: "live" as const,
+          time: new Date(),
+          value: 1,
+          currency: "MAD",
+          qty: 1,
+          contentId: "x",
+          contentName: "x",
+          customer: { phone: "+212600000099", email: null, name: "B", city: null, country: "MA" },
+          client: { ip: null, ua: null },
+          sourceUrl: null,
+          pixels: { meta: ["555555555555555"], tiktok: [] },
+          risk: 0,
+        };
+        const created = await conversions.conversionsAtCreation(b, conversion);
+        kit.check("capi: B's creation path with A's order id enqueues and seals nothing", created.enqueued === 0 && !created.sealed && enqueued.length === 0, { created, enqueued });
+
+        // B's int.capi hook with A's order id: the read is B's, so A's order is absent; its context stays
+        const snap = { id: idA, rev: 1, status: "confirmed", states: { confirm: "confirmed", ship: "delivered", money: "unpaid" }, isTest: false, customerId: null, assigneeId: null, cityKey: null, totalCents: 100 };
+        const e = {
+          on: "transition" as const,
+          before: { ...snap, states: { confirm: "new", ship: "none", money: "unpaid" } },
+          after: snap,
+          moves: [
+            { axis: "confirm" as const, from: "new" as const, to: "confirmed" as const },
+            { axis: "ship" as const, from: "in_transit" as const, to: "delivered" as const },
+          ],
+          actor: { kind: "user" as const, userId: kit.fx.B.members.owner },
+          source: "ui" as const,
+        };
+        const hooked = await db.transaction((tx) => conversions.enqueueTransitionConversions(b, e as never, tx));
+        kit.check("capi: B's hook with A's order id enqueues nothing and clears nothing", hooked.enqueued === 0 && !hooked.cleared && enqueued.length === 0, hooked);
+
+        // B's purge and B's conversions change
+        const purged = await conversions.purgeCapiContexts(b, { now: Date.now() + 365 * 86_400_000 });
+        const change = await conversions.applyConversionsChange(b, conv as never, { ...conv, purchaseTrigger: "order" } as never, { kind: "system" } as never);
+        kit.check("capi: B's purge never clears A's contexts", (await db.select({ c: orders.capiCtx }).from(orders).where(byId(orders, a, idA)))[0]?.c === ctxA, purged);
+        kit.check("capi: B's conversions change never lists A's pages", !change.pages.includes(kit.fx.A.page.live), change);
+        kit.check("capi: A's rows are unchanged by every B call above", (await kit.snapshotA()) === before);
+      } finally {
+        conversions.setCapiDoubleForTests(null);
+        await db.update(orders).set({ capiCtx: prevCtx }).where(byId(orders, a, idA));
+      }
+    },
+  },
+  {
+    name: "capi: a capi item of B naming A's pixel id signs with B's token only; B replaying A's outbox id",
+    async run(kit) {
+      const { setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+      const handler = load<typeof import("@/lib/jobs/handlers/capi")>("@/lib/jobs/handlers/capi");
+      const conversions = load<typeof import("@/lib/orders/conversions")>("@/lib/orders/conversions");
+      const a = write(kit, "A");
+      const b = write(kit, "B");
+      const PIXEL = "666666666666666";
+      const TOKEN_A = "EAAG-A-ONLY-TOKEN-CANARY";
+      await setStoreSetting(a, "tracking_secrets", { metaTokens: { [PIXEL]: TOKEN_A } } as never, { kind: "system" } as never);
+      await setStoreSetting(b, "tracking_secrets", { metaTokens: {} } as never, { kind: "system" } as never);
+      conversions.setCapiDoubleForTests({ appendOrderEvent: async () => ({ ok: true, id: 1 }) });
+      const realFetch = globalThis.fetch;
+      const bodies: string[] = [];
+      globalThis.fetch = (async (_u: string | URL, init?: RequestInit) => (bodies.push(String(init?.body ?? "")), json({ events_received: 1 }))) as typeof fetch;
+      try {
+        const time = new Date().toISOString();
+        const conversion = {
+          orderId: kit.fx.A.order.main,
+          eventId: kit.fx.A.order.main,
+          pageId: kit.fx.A.page.live,
+          source: "live",
+          time,
+          value: 1,
+          currency: "MAD",
+          qty: 1,
+          contentId: "x",
+          contentName: "x",
+          customer: { phone: "+212600000099", email: null, name: "B", city: null, country: "MA" },
+          client: { ip: null, ua: null },
+          sourceUrl: "https://b.example/",
+          pixels: { meta: [PIXEL], tiktok: [] },
+        };
+        const item = {
+          id: "01JQAAAAAAAAAAAAAAAAAAAAAA",
+          storeId: kit.fx.B.id,
+          kind: "capi" as const,
+          topic: "Purchase",
+          targetId: `meta:${PIXEL}`,
+          dedupeKey: `capi:meta:${PIXEL}:${kit.fx.A.order.main}:Purchase`,
+          payload: { platform: "meta", pixelId: PIXEL, event: "Purchase", eventId: kit.fx.A.order.main, eventTime: time, ctx: "created", conversion },
+          attempts: 0,
+          createdAt: new Date(),
+        };
+        const r = await handler.sendCapiItem(item);
+        kit.check("capi handler: B's item naming A's pixel finds no token of B's: done, nothing sent, A's token never used", r.ok && bodies.length === 0, { r, n: bodies.length });
+      } finally {
+        globalThis.fetch = realFetch;
+        conversions.setCapiDoubleForTests(null);
+      }
+      // OPE-§28.1: B replaying A's outbox id answers not_found; replay is P8's (the P0 stub until the P8 merge)
+      kit.notApplicable("capi replay: B replaying A's outbox id → not_found", "P8's replay is the P0 stub until the P8 merge; step 8's replay action carries this case");
+    },
+  },
 ];
+

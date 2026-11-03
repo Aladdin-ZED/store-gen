@@ -12,11 +12,18 @@
  *   (`runSheetsPullTick`).
  * - `sheets.bind_legacy` (slot 7, every tick, ≤ 50 ms): the legacy binding pass (src/lib/sheets/bind-legacy.ts), a
  *   no-op once done.
- * The other jobs arrive with their steps (6: the capi_ctx purge; 7: Telegram).
+ * - `ops.capi_ctx_purge` (slot 8 housekeeping, daily at 03:20, ≤ 800 ms; OPE-§20.4 (5), OPE-§J): every store's
+ *   `orders.capi_ctx` of orders 8 to 30 days old is nulled (src/lib/orders/conversions.ts `purgeCapiContexts`, 500 rows
+ *   per statement over `orders_store_created_idx`), the deadline checked between statements and stores, `ctx.yield()`
+ *   awaited between stores; a store left unfinished is caught up on the next run (the 30-day look-back).
+ * Telegram's job arrives with step 7.
  */
+import { purgeCapiContexts } from "@/lib/orders/conversions";
+import { errorSummary } from "@/lib/orders/log";
 import { runBindLegacyTick } from "@/lib/sheets/bind-legacy";
 import { runSheetsPullTick, runSheetsPushTick } from "@/lib/sheets/push";
 import type { Job } from "../runner";
+import { forEachStore, systemScope } from "../scope";
 
 export const sheetsPushJob: Job = {
   name: "sheets.push",
@@ -64,4 +71,31 @@ export const sheetsBindLegacyJob: Job = {
   },
 };
 
-export const jobs: Job[] = [sheetsPushJob, sheetsPullJob, sheetsBindLegacyJob];
+export const capiCtxPurgeJob: Job = {
+  name: "ops.capi_ctx_purge",
+  every: { dailyAt: "03:20" },
+  budgetMs: 800,
+  async run(ctx) {
+    let cleared = 0;
+    let unfinished = 0;
+    const run = await forEachStore(
+      ctx,
+      { job: ctx.job, states: ["active", "restricted", "pending", "suspended", "closed"], budgetMs: Math.max(1, ctx.deadline - Date.now()) },
+      async (_scope, store) => {
+        if (Date.now() >= ctx.deadline) return;
+        try {
+          const r = await purgeCapiContexts(systemScope(ctx, store.id), { deadline: ctx.deadline });
+          cleared += r.cleared;
+          if (!r.done) unfinished++;
+        } catch (err) {
+          unfinished++;
+          console.error(`[ops.capi_ctx_purge] store ${store.id}:`, errorSummary(err));
+        }
+        await ctx.yield();
+      },
+    );
+    return { done: run.done && unfinished === 0, summary: { visited: run.visited, cleared, unfinished } };
+  },
+};
+
+export const jobs: Job[] = [sheetsPushJob, sheetsPullJob, sheetsBindLegacyJob, capiCtxPurgeJob];

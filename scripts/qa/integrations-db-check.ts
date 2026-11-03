@@ -1,4 +1,4 @@
-// proves: IN-01, IN-03, IN-09, OP-16, SF-03, SF-05, SF-06
+// proves: IN-01, IN-02, IN-03, IN-09, OP-16, SF-03, SF-05, SF-06
 /**
  * Integration health against a real MariaDB (P5 INTEGRATIONS; operations.md OPE-§28.2, §28.3 (3)-(5), §27.2, §27.3,
  * §21.4, OPE-§L; OPE-§O.2 `test:integrations-db`, OPE-§O.4 IN-03, SF-03, SF-06). Two stores, A and B, and one question
@@ -35,6 +35,17 @@
  *    bookkeeping, OD5 write-backs), the Agent / Note agent / Tracking / Transporteur writes and their dedupe, the
  *    R1.0 path while the stubs throw, a test order and another store's ids never touched, the window, the history,
  *    the `sheets.pull` job and the `pullStatuses` facade.
+ *  - server ad events (IN-02, IN-03, SF-05 CAPI half; OPE-§20.4, §20.9 (2)-(6), §28.3 (1)) with spies standing in for
+ *    P8's enqueue / drain / enqueueRenders and P4's appendOrderEvent (the enqueue double is a real INSERT IGNORE on the
+ *    caller's handle): the creation path (one Purchase per pixel with a token, drained; the risk gate; test and
+ *    honeypot orders send nothing), the capi_ctx seal / open round trip (B never opens A's), the int.capi hook on a
+ *    confirmation and a delivery inside the order's transaction (exactly one Purchase per pixel with event_id = order
+ *    id, the current total, the dedupe of a retried transition, an inTx failure rolled back with no outbox row, the
+ *    context nulled when nothing is left, a test order untouched, server fields only without a context, typed orders
+ *    only with manualOrders), the `capi` handler against a fake fetch (done / retry / final, A's token never signs B's
+ *    event, the 7-day guard → cancelled + capi_stale, a removed token, the kill switch, health, int.delivery_dead), the
+ *    `ops.capi_ctx_purge` job, `applyConversionsChange` re-rendering the pages whose trigger changed, and the render's
+ *    `purchaseInBrowserFor` parity with `triggerFor`.
  */
 import Module from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -476,6 +487,7 @@ async function main() {
 
   void orderIds;
   await sheetsPushSuite();
+  await capiSuite();
 }
 
 /* ================================================================== */
@@ -1588,6 +1600,402 @@ async function bindPullSuite(k: BindPullKit): Promise<void> {
   await nextTick();
   pull.setPullDoubleForTests(null);
   await pause(Q, R, Qoff, Q3);
+}
+
+/* ================================================================== */
+/* 8. server ad events (IN-02, IN-03, SF-05; OPE-§20.4, §20.9, §28.2)  */
+/* ================================================================== */
+
+async function capiSuite(): Promise<void> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { auditLog, flags, integrationStatus, notifications, orders, outbox, pages, pageVersions, stores } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId, newOrderId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  const conversions = load<typeof import("@/lib/orders/conversions")>("@/lib/orders/conversions");
+  const core = load<typeof import("@/lib/orders/conversions-core")>("@/lib/orders/conversions-core");
+  const handler = load<typeof import("@/lib/jobs/handlers/capi")>("@/lib/jobs/handlers/capi");
+  const { outboxHandler } = load<typeof import("@/lib/jobs/outbox")>("@/lib/jobs/outbox");
+  const { runOrderHooks } = load<typeof import("@/lib/orders/hooks")>("@/lib/orders/hooks");
+  const { setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const status = load<typeof import("@/lib/integrations/status")>("@/lib/integrations/status");
+  const { invalidateFlags } = load<typeof import("@/lib/tenancy/entitlements")>("@/lib/tenancy/entitlements");
+  const { purchaseInBrowserFor } = load<typeof import("@/lib/render/store-context.server")>("@/lib/render/store-context.server");
+  const { getFixture } = load<typeof import("@/lib/page/fixtures")>("@/lib/page/fixtures");
+  const { JOBS } = load<typeof import("@/lib/jobs/registry")>("@/lib/jobs/registry");
+  type Tx = import("@/lib/orders/hooks").Tx;
+  type OutboxItem = import("@/lib/jobs/outbox").OutboxItem;
+  type ClaimedItem = import("@/lib/jobs/outbox").ClaimedItem;
+  type Conversions = import("@/lib/settings/keys/conversions").ConversionsSetting;
+  status.clearStatusCache();
+
+  const META = "333333333333333";
+  const META_NOTOKEN = "444444444444444";
+  const TT = "CCAPIPIXEL0000000001";
+  const TOKEN_A = "EAAG-token-of-store-A-canary";
+  const TOKEN_B = "EAAG-token-of-store-B-canary";
+  const ctx = systemCtx("qa.integrations_db");
+
+  /* ---------------- two stores, their pages, tokens and settings ---------------- */
+  const doc = getFixture("massage").doc;
+  async function capiStore(handle: string, token: string) {
+    const id = newId();
+    await db.insert(stores).values({ id, handle, name: handle, status: "active", brandSeed: "0123456789abcdef" });
+    const scope = systemScope(ctx, id);
+    const pageId = newId();
+    const versionId = newId();
+    const pageDoc = { ...doc, tracking: { metaPixelId: [META, META_NOTOKEN], tiktokPixelId: [TT] } };
+    await db.insert(pages).values({ id: pageId, storeId: id, slug: `${handle}-p`, name: "P", status: "published", publicKey: `pk-${newId()}`, draft: pageDoc as never, publishedVersionId: versionId });
+    await db.insert(pageVersions).values({ id: versionId, storeId: id, pageId, kind: "publish", doc: pageDoc as never, checksum: "0".repeat(64) });
+    await setStoreSetting(scope, "tracking_secrets", { metaTokens: { [META]: token }, tiktokTokens: { [TT]: `${token}-tt` } } as never, { kind: "system" } as never);
+    return { id, scope, pageId, versionId };
+  }
+  const SA = await capiStore("capi-a", TOKEN_A);
+  const SB = await capiStore("capi-b", TOKEN_B);
+  const setConv = (s: typeof SA, v: Partial<Conversions>) => setStoreSetting(s.scope, "conversions", { purchaseTrigger: "order", pageOverrides: {}, customEvents: true, manualOrders: false, ...v } as never, { kind: "system" } as never);
+
+  const ITEMS = { bundleId: "b1", bundleLabel: "1", qty: 1, unitPrice: 349, variants: [] };
+  async function capiOrder(s: typeof SA, over: Partial<typeof orders.$inferInsert> = {}): Promise<string> {
+    const id = newOrderId();
+    await db.insert(orders).values({
+      id,
+      storeId: s.id,
+      pageId: s.pageId,
+      versionId: s.versionId,
+      name: NAME,
+      phone: PHONE,
+      productName: "Argan oil",
+      items: ITEMS as never,
+      qty: 1,
+      subtotal: 349,
+      shipping: 0,
+      total: 349,
+      currency: "MAD",
+      idem: randomUUID(),
+      ...over,
+    });
+    return id;
+  }
+  const conversionOf = (s: typeof SA, orderId: string, risk = 10) => ({
+    orderId,
+    eventId: orderId,
+    pageId: s.pageId,
+    source: "live" as const,
+    time: new Date(),
+    value: 349,
+    currency: "MAD",
+    qty: 1,
+    contentId: "SKU-1",
+    contentName: "Argan oil",
+    customer: { phone: PHONE, email: null, name: NAME, city: "Casablanca", country: "MA" },
+    client: { ip: "105.66.1.2", ua: "Mozilla/5.0 qa", fbp: "fb.1.1700000000000.123456789" },
+    sourceUrl: "https://shop.example/argan",
+    pixels: { meta: [META, META_NOTOKEN], tiktok: [TT] },
+    risk,
+  });
+
+  /* ---------------- P8's enqueue / drain and P4's timeline as faithful doubles ---------------- */
+  const drains: unknown[] = [];
+  const renders: { pageIds: readonly string[] | "all-live"; reason: string; priority?: number }[] = [];
+  const events: { storeId: string; orderId: string; type: string; meta?: Record<string, unknown> }[] = [];
+  let enqueueFails = false;
+  const enqueue = async (scope: { storeId: string } | "platform", items: readonly OutboxItem[], opts?: { tx?: Tx }) => {
+    if (enqueueFails) throw new Error("qa: the outbox is down");
+    const storeId = scope === "platform" ? null : scope.storeId;
+    const runner = opts?.tx ?? db;
+    let inserted = 0;
+    for (const it of items) {
+      const [res] = (await runner.execute(
+        sql`INSERT IGNORE INTO outbox (id, store_id, kind, topic, target_id, dedupe_key, payload, encrypted, state, attempts, next_at, created_at)
+            VALUES (${newId()}, ${storeId}, ${it.kind}, ${it.topic}, ${it.targetId ?? null}, ${it.dedupeKey}, ${JSON.stringify(it.payload)}, ${it.pii ? 1 : 0}, 'pending', 0, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))`,
+      )) as unknown as [{ affectedRows: number }];
+      inserted += res.affectedRows;
+    }
+    return { inserted, duplicates: items.length - inserted };
+  };
+  conversions.setCapiDoubleForTests({
+    enqueue: enqueue as never,
+    drainOutbox: async (o) => (drains.push(o), { ms: 0, claimed: 0, done: 0, retried: 0, dead: 0, more: false }),
+    enqueueRenders: async (_scope, pageIds, reason, priority) => (renders.push({ pageIds, reason, priority }), { enqueued: pageIds === "all-live" ? 0 : pageIds.length }),
+    appendOrderEvent: async (scope, orderId, e) => (events.push({ storeId: scope.storeId, orderId, type: e.type, meta: e.meta }), { ok: true, id: events.length }),
+  });
+  const rowsOf = async (orderId: string) =>
+    db.select({ id: outbox.id, storeId: outbox.storeId, topic: outbox.topic, targetId: outbox.targetId, dedupeKey: outbox.dedupeKey, payload: outbox.payload, state: outbox.state, encrypted: outbox.encrypted }).from(outbox).where(sql`${outbox.dedupeKey} LIKE ${`capi:%:${orderId}:%`}`);
+  const ctxOf = async (orderId: string) => (await db.select({ c: orders.capiCtx }).from(orders).where(eq(orders.id, orderId)).limit(1))[0]?.c ?? null;
+
+  /* ---------------- 8.1 creation: trigger order → the Purchase per pixel with a token, drained ---------------- */
+  await setConv(SA, { purchaseTrigger: "order", customEvents: false });
+  const o1 = await capiOrder(SA);
+  const r1 = await conversions.conversionsAtCreation(SA.scope, conversionOf(SA, o1));
+  const rows1 = await rowsOf(o1);
+  eq2(
+    "creation (order): one Purchase per pixel with its own token (the token-less pixel stays browser-only), pii, drained once for the store",
+    [r1.enqueued, r1.sealed, rows1.map((r) => [r.topic, r.targetId, r.encrypted]).sort(), drains.length, JSON.stringify(drains[0])],
+    [2, false, [["Purchase", `meta:${META}`, true], ["Purchase", `tiktok:${TT}`, true]], 1, JSON.stringify({ storeId: SA.id, kinds: ["capi"], budgetMs: 8000 })],
+  );
+  ok("creation: the dedupe keys are capi:<platform>:<pixel>:<order>:<event>", rows1.every((r) => r.dedupeKey === `capi:${r.targetId}:${o1}:Purchase`), rows1);
+  const again = await conversions.conversionsAtCreation(SA.scope, conversionOf(SA, o1));
+  eq2("creation: a repeat (a retried after()) adds no row", [again.enqueued, (await rowsOf(o1)).length], [2, 2]);
+  const risky = await capiOrder(SA, { riskScore: 80 });
+  eq2("creation: trigger order, risk 80 → no Purchase (OD19)", [(await conversions.conversionsAtCreation(SA.scope, conversionOf(SA, risky, 80))).enqueued, (await rowsOf(risky)).length], [0, 0]);
+  const testO = await capiOrder(SA, { isTest: true });
+  const rt = await conversions.conversionsAtCreation(SA.scope, conversionOf(SA, testO));
+  eq2("creation: a test order sends nothing and seals nothing (OPE-§20.9 (5))", [rt, (await rowsOf(testO)).length, await ctxOf(testO)], [{ enqueued: 0, sealed: false, direct: false }, 0, null]);
+  const honey = await capiOrder(SA, { flags: ["honeypot"] });
+  eq2("creation: a honeypot row sends nothing", (await conversions.conversionsAtCreation(SA.scope, conversionOf(SA, honey))).enqueued, 0);
+
+  /* ---------------- 8.2 creation: trigger confirmed → sealed, nothing sent; the envelope is the store's ---------------- */
+  await setConv(SA, { purchaseTrigger: "confirmed", customEvents: true });
+  const o2 = await capiOrder(SA, { riskScore: 85 });
+  const r2 = await conversions.conversionsAtCreation(SA.scope, conversionOf(SA, o2, 85));
+  const sealed2 = await ctxOf(o2);
+  const opened = conversions.openCapiContext(SA.scope, sealed2);
+  eq2("creation (confirmed): nothing enqueued, the context sealed", [r2.enqueued, r2.sealed, (await rowsOf(o2)).length, typeof sealed2 === "string" && sealed2.startsWith("v2.")], [0, true, 0, true]);
+  eq2("capi_ctx: seal / open round trip (client data, source URL, items hash)", [opened?.client.ip, opened?.client.fbp, opened?.sourceUrl, opened?.itemsHash], ["105.66.1.2", "fb.1.1700000000000.123456789", "https://shop.example/argan", core.itemsHashOf(ITEMS)]);
+  ok("capi_ctx: ≤ 8 KB, no phone or name inside the envelope", !!sealed2 && sealed2.length <= 8192 && !sealed2.includes(PHONE));
+  eq2("capi_ctx: B's scope never opens A's context", conversions.openCapiContext(SB.scope, sealed2), null);
+  const [revRow] = await db.select({ rev: orders.rev }).from(orders).where(eq(orders.id, o2));
+  eq2("capi_ctx: sealing does not bump rev", revRow?.rev, 0);
+
+  /* ---------------- 8.3 the int.capi hook on a confirmation, inside the order's transaction ---------------- */
+  const snap = (id: string, confirm: string, ship = "none", isTest = false) =>
+    ({ id, rev: 1, status: "confirmed", states: { confirm, ship, money: "unpaid" }, isTest, customerId: null, assigneeId: null, cityKey: null, totalCents: 31_900 }) as never;
+  const transition = (id: string, moves: { axis: "confirm" | "ship"; from: string; to: string }[], isTest = false) =>
+    ({ on: "transition", before: snap(id, "new", "none", isTest), after: snap(id, moves.find((m) => m.axis === "confirm")?.to ?? "confirmed", moves.find((m) => m.axis === "ship")?.to ?? "none", isTest), moves, actor: { kind: "user", userId: null }, source: "ui" }) as never;
+  async function confirmInTx(scope: typeof SA.scope, id: string, set: Partial<typeof orders.$inferInsert>, moves: { axis: "confirm" | "ship"; from: string; to: string }[], isTest = false): Promise<string | null> {
+    try {
+      await db.transaction(async (tx) => {
+        await tx.update(orders).set(set).where(and(eq(orders.id, id), eq(orders.storeId, scope.storeId)));
+        await runOrderHooks("transition", "inTx", scope, transition(id, moves, isTest), tx);
+      });
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  }
+  const confirmedAt = new Date(Date.now() - 2 * 3_600_000);
+  // an agent corrected the total meanwhile: the event carries the current one
+  const err3 = await confirmInTx(SA.scope, o2, { confirmState: "confirmed", confirmedAt, total: 319, status: "confirmed" }, [{ axis: "confirm", from: "new", to: "confirmed" }]);
+  const rows3 = await rowsOf(o2);
+  const pay3 = rows3.map((r) => JSON.parse(r.payload) as import("@/lib/orders/conversions-core").CapiPayload);
+  eq2(
+    "hook (confirmed): exactly one Purchase per pixel with event_id = order id, risk 85 included (OPE-§20.9 (2), (4))",
+    [err3, rows3.map((r) => [r.topic, r.targetId]).sort(), pay3.map((p) => p.eventId), pay3.every((p) => p.eventTime === confirmedAt.toISOString())],
+    [null, [["Purchase", `meta:${META}`], ["Purchase", `tiktok:${TT}`]], [o2, o2], true],
+  );
+  eq2("hook (confirmed): rebuilt from the sealed context with the current total", [pay3[0]?.ctx, pay3[0]?.conversion.value, pay3[0]?.conversion.client.ip], ["sealed", 319, "105.66.1.2"]);
+  ok("hook (confirmed): the context is kept while the delivery can still send", (await ctxOf(o2)) !== null);
+  const err3b = await confirmInTx(SA.scope, o2, { confirmState: "confirmed" }, [{ axis: "confirm", from: "callback", to: "confirmed" }]);
+  eq2("hook: a retried transition adds no row (INSERT IGNORE on the dedupe key)", [err3b, (await rowsOf(o2)).length], [null, 2]);
+
+  /* ---------------- 8.4 delivery: DeliveredOrder (Meta only) and the context nulled in the same transaction ---------------- */
+  const deliveredAt = new Date(Date.now() - 3_600_000);
+  const err4 = await confirmInTx(SA.scope, o2, { shipState: "delivered", deliveredAt, status: "delivered" }, [{ axis: "ship", from: "in_transit", to: "delivered" }]);
+  const rows4 = (await rowsOf(o2)).filter((r) => r.topic === "DeliveredOrder");
+  eq2(
+    "hook (delivered): the custom event to Meta only, id <order>.d, and capi_ctx nulled",
+    [err4, rows4.map((r) => r.targetId), rows4.map((r) => (JSON.parse(r.payload) as { eventId: string }).eventId), await ctxOf(o2)],
+    [null, [`meta:${META}`], [`${o2}.d`], null],
+  );
+
+  /* ---------------- 8.5 an inTx failure rolls back with no outbox row ---------------- */
+  await setConv(SA, { purchaseTrigger: "confirmed", customEvents: false });
+  const o5 = await capiOrder(SA);
+  await conversions.conversionsAtCreation(SA.scope, conversionOf(SA, o5));
+  enqueueFails = true;
+  const err5 = await confirmInTx(SA.scope, o5, { confirmState: "confirmed", confirmedAt: new Date(), status: "confirmed" }, [{ axis: "confirm", from: "new", to: "confirmed" }]);
+  enqueueFails = false;
+  const [st5] = await db.select({ c: orders.confirmState, ctx: orders.capiCtx }).from(orders).where(eq(orders.id, o5));
+  eq2("hook: an enqueue failure rolls the confirmation back, with no outbox row and the context kept", [!!err5, st5?.c, (await rowsOf(o5)).length, st5?.ctx !== null], [true, "new", 0, true]);
+  // the same confirmation once the outbox is back: trigger confirmed, custom events off → nothing after, so the context goes
+  await confirmInTx(SA.scope, o5, { confirmState: "confirmed", confirmedAt: new Date(), status: "confirmed" }, [{ axis: "confirm", from: "new", to: "confirmed" }]);
+  eq2("hook: nothing left to send after the confirmation → capi_ctx nulled at once", [(await rowsOf(o5)).length, await ctxOf(o5)], [2, null]);
+
+  /* ---------------- 8.6 a test order returns at once; a refused ship ends the events; a missing context ---------------- */
+  const o6 = await capiOrder(SA, { isTest: true, capiCtx: sealed2 });
+  await confirmInTx(SA.scope, o6, { confirmState: "confirmed", confirmedAt: new Date() }, [{ axis: "confirm", from: "new", to: "confirmed" }], true);
+  eq2("hook: a test order enqueues nothing and keeps its row as it was", [(await rowsOf(o6)).length, await ctxOf(o6)], [0, sealed2]);
+  await setConv(SA, { purchaseTrigger: "delivered", customEvents: true });
+  const o7 = await capiOrder(SA);
+  await conversions.conversionsAtCreation(SA.scope, conversionOf(SA, o7));
+  await confirmInTx(SA.scope, o7, { shipState: "refused", status: "refused" }, [{ axis: "ship", from: "in_transit", to: "refused" }]);
+  eq2("hook: a refused ship sends nothing and nulls the context (no later moment)", [(await rowsOf(o7)).length, await ctxOf(o7)], [0, null]);
+  const o8 = await capiOrder(SA);
+  await confirmInTx(SA.scope, o8, { confirmState: "confirmed", confirmedAt: new Date() }, [{ axis: "confirm", from: "new", to: "confirmed" }]);
+  const pay8 = (await rowsOf(o8)).map((r) => JSON.parse(r.payload) as import("@/lib/orders/conversions-core").CapiPayload);
+  eq2(
+    "hook: no context → the server fields only from the order's version, and the payload says so",
+    [pay8.map((p) => [p.event, p.ctx, p.conversion.client.ip]), pay8[0]?.conversion.pixels],
+    [[["ConfirmedOrder", "missing", null]], { meta: [META, META_NOTOKEN], tiktok: [TT] }],
+  );
+
+  /* ---------------- 8.7 typed orders: only with manualOrders ---------------- */
+  await setConv(SA, { purchaseTrigger: "order", manualOrders: false });
+  const created = async (o: string) => {
+    const [row] = await db.select().from(orders).where(eq(orders.id, o));
+    await db.transaction(async (tx) => runOrderHooks("created", "inTx", SA.scope, { on: "created", order: row!, conversion: null, target: { pageId: row!.pageId, versionId: row!.versionId, source: row!.source } }, tx));
+    return (await rowsOf(o)).length;
+  };
+  const m1 = await capiOrder(SA, { source: "manual" });
+  const pub = await capiOrder(SA);
+  eq2("created hook: a manual order without manualOrders sends nothing; a public order is the route's", [await created(m1), await created(pub)], [0, 0]);
+  await setConv(SA, { purchaseTrigger: "order", manualOrders: true });
+  const m2 = await capiOrder(SA, { source: "whatsapp" });
+  eq2("created hook: a WhatsApp order with manualOrders → the Purchase per pixel with a token", await created(m2), 2);
+
+  /* ---------------- 8.8 the handler: done / retry / final, the token, health, the timeline ---------------- */
+  const realFetch = globalThis.fetch;
+  const calls: { url: string; headers: Headers; body: string }[] = [];
+  let answer: () => Response = () => new Response(JSON.stringify({ events_received: 1 }), { status: 200 });
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    calls.push({ url: String(url), headers: new Headers(init?.headers), body: String(init?.body ?? "") });
+    return answer();
+  }) as typeof fetch;
+  const claimed = (row: { id: string; storeId: string | null; topic: string; targetId: string | null; dedupeKey: string; payload: string }, attempts = 0): ClaimedItem => ({
+    id: row.id,
+    storeId: row.storeId,
+    kind: "capi",
+    topic: row.topic,
+    targetId: row.targetId,
+    dedupeKey: row.dedupeKey,
+    payload: JSON.parse(row.payload) as unknown,
+    attempts,
+    createdAt: new Date(),
+  });
+  try {
+    ok("handler: registered for kind capi (maxPerTick 60, perStorePerTick 20, timeoutMs 8000, paused)", (() => {
+      const h = outboxHandler("capi");
+      return !!h && h.maxPerTick === 60 && h.perStorePerTick === 20 && h.timeoutMs === 8000 && typeof h.paused === "function";
+    })());
+    const metaRow = rows1.find((r) => r.targetId === `meta:${META}`)!;
+    const ttRow = rows1.find((r) => r.targetId === `tiktok:${TT}`)!;
+    events.length = 0;
+    const sent = await handler.sendCapiItem(claimed(metaRow));
+    const c0 = calls[0]!;
+    eq2(
+      "handler: a 2xx with events_received → done; the Meta endpoint, the token in the body only, capi_sent with the pixel's last 4",
+      [sent.ok, c0.url.includes(`/${META}/events`), c0.url.includes(TOKEN_A), JSON.parse(c0.body).access_token === TOKEN_A, events.map((e) => [e.type, e.meta?.pixel, e.meta?.event])],
+      [true, true, false, true, [["capi_sent", META.slice(-4), "Purchase"]]],
+    );
+    ok("handler: the body carries the hashed phone, never the clear one", !c0.body.includes(PHONE) && !c0.body.includes(NAME));
+    const [statusRow] = await db.select().from(integrationStatus).where(and(eq(integrationStatus.storeId, SA.id), eq(integrationStatus.kind, "capi"), eq(integrationStatus.targetId, `meta:${META}`)));
+    eq2("handler: integration_status capi / meta:<pixel> is ok", statusRow?.state, "ok");
+    calls.length = 0;
+    answer = () => new Response(JSON.stringify({ code: 0, message: "OK" }), { status: 200 });
+    const ttSent = await handler.sendCapiItem(claimed(ttRow));
+    eq2("handler: TikTok: the Events API with the Access-Token header, never in the URL", [ttSent.ok, calls[0]?.url, calls[0]?.headers.get("access-token") === `${TOKEN_A}-tt`], [true, core.TIKTOK_EVENTS_URL, true]);
+
+    // B's item for the same pixel id signs with B's token; A's token never signs B's event
+    await setConv(SB, { purchaseTrigger: "order", customEvents: false });
+    const ob = await capiOrder(SB);
+    await conversions.conversionsAtCreation(SB.scope, conversionOf(SB, ob));
+    const bRow = (await rowsOf(ob)).find((r) => r.targetId === `meta:${META}`)!;
+    calls.length = 0;
+    answer = () => new Response(JSON.stringify({ events_received: 1 }), { status: 200 });
+    await handler.sendCapiItem(claimed(bRow));
+    eq2("handler: B's event for the same pixel id carries B's token, never A's", [JSON.parse(calls[0]!.body).access_token === TOKEN_B, calls[0]!.body.includes(TOKEN_A)], [true, false]);
+
+    // retry and final
+    answer = () => new Response("{}", { status: 503 });
+    const r503 = await handler.sendCapiItem(claimed(metaRow, 0));
+    eq2("handler: a 503 → retry (not final)", [r503.ok, !r503.ok && r503.retry], [false, true]);
+    answer = () => new Response(JSON.stringify({ error: { code: 100, message: "Invalid parameter" } }), { status: 400 });
+    events.length = 0;
+    const before400 = (await db.select({ id: notifications.id }).from(notifications).where(and(eq(notifications.storeId, SA.id), eq(notifications.kind, "int.delivery_dead")))).length;
+    const r400 = await handler.sendCapiItem(claimed(metaRow, 1));
+    const after400 = (await db.select({ id: notifications.id, vars: notifications.vars }).from(notifications).where(and(eq(notifications.storeId, SA.id), eq(notifications.kind, "int.delivery_dead"))));
+    eq2(
+      "handler: a 400 refusal → final (retry false), capi_failed once, int.delivery_dead for the owners",
+      [r400.ok, !r400.ok && r400.retry, events.map((e) => [e.type, e.meta?.code]), after400.length > before400],
+      [false, false, [["capi_failed", "event_rejected"]], true],
+    );
+    ok("handler: the stored error is a cause code and the platform's words, never a customer field", !r400.ok && r400.error.startsWith("event_rejected") && !r400.error.includes(PHONE), r400);
+    answer = () => new Response("{}", { status: 429 });
+    const r429last = await handler.sendCapiItem(claimed(metaRow, 6));
+    eq2("handler: a retryable failure once the ladder is used up is final", [!r429last.ok && r429last.retry, (load<typeof import("@/lib/jobs/outbox")>("@/lib/jobs/outbox")).isFinalFailure({ attempts: 6 }, r429last)], [true, true]);
+    answer = () => {
+      throw new TypeError("fetch failed");
+    };
+    const rNet = await handler.sendCapiItem(claimed(metaRow, 0));
+    eq2("handler: no answer → retry, cause network", [!rNet.ok && rNet.retry, !rNet.ok && rNet.error.startsWith("network")], [true, true]);
+
+    // the 7-day guard (OPE-§20.9 (3))
+    const stale = claimed(metaRow);
+    const p = stale.payload as { eventTime: string; conversion: { time: string } };
+    p.eventTime = new Date(Date.now() - core.CAPI_MAX_AGE_MS - 60_000).toISOString();
+    calls.length = 0;
+    events.length = 0;
+    const rStale = await handler.sendCapiItem(stale);
+    eq2("handler: an event older than 7 d − 1 h is never sent; cancelled, and the timeline says why (capi_stale)", [rStale.ok, !rStale.ok && rStale.error, calls.length, events.map((e) => e.type)], [false, "cancelled:stale_event", 0, ["capi_stale"]]);
+    const fresh = claimed(metaRow);
+    (fresh.payload as { eventTime: string }).eventTime = new Date(Date.now() - core.CAPI_MAX_AGE_MS + 60_000).toISOString();
+    answer = () => new Response(JSON.stringify({ events_received: 1 }), { status: 200 });
+    eq2("handler: one minute inside the window is sent", (await handler.sendCapiItem(fresh)).ok, true);
+
+    // a token removed meanwhile → done, nothing sent
+    await setStoreSetting(SA.scope, "tracking_secrets", { metaTokens: {}, tiktokTokens: { [TT]: `${TOKEN_A}-tt` } } as never, { kind: "system" } as never);
+    calls.length = 0;
+    eq2("handler: a token removed meanwhile → done with nothing sent", [(await handler.sendCapiItem(claimed(metaRow))).ok, calls.length], [true, 0]);
+    // a bad payload or a platform item is refused
+    eq2("handler: a tampered payload and a storeless item are refused (final)", [(await handler.sendCapiItem({ ...claimed(metaRow), payload: { platform: "meta" } })).ok, (await handler.sendCapiItem({ ...claimed(metaRow), storeId: null })).ok], [false, false]);
+
+    // the kill switch (§H.8): paused while capi_enabled is off
+    const [killRow] = await db.select().from(flags).where(eq(flags.key, "capi_enabled")).limit(1);
+    await db.insert(flags).values({ key: "capi_enabled", kind: "kill", defaultValue: false }).onDuplicateKeyUpdate({ set: { defaultValue: false } });
+    invalidateFlags();
+    const pausedOn = await handler.capiPaused();
+    if (killRow) await db.update(flags).set({ defaultValue: killRow.defaultValue }).where(eq(flags.key, "capi_enabled"));
+    else await db.delete(flags).where(eq(flags.key, "capi_enabled"));
+    invalidateFlags();
+    eq2("handler: paused while the capi_enabled kill switch is tripped, running again once restored", [pausedOn, await handler.capiPaused()], [true, false]);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  /* ---------------- 8.9 the purge (ops.capi_ctx_purge) ---------------- */
+  const day = 86_400_000;
+  const oldA = await capiOrder(SA, { capiCtx: sealed2, createdAt: new Date(Date.now() - 9 * day) });
+  const youngA = await capiOrder(SA, { capiCtx: sealed2, createdAt: new Date(Date.now() - 2 * day) });
+  const oldB = await capiOrder(SB, { capiCtx: "v2.k1.x.y.z", createdAt: new Date(Date.now() - 9 * day) });
+  const purged = await conversions.purgeCapiContexts(SA.scope);
+  eq2("purge: A's 9-day-old context nulled, the 2-day-old kept, B's untouched by A's purge", [purged.done, purged.cleared >= 1, await ctxOf(oldA), (await ctxOf(youngA)) !== null, (await ctxOf(oldB)) !== null], [true, true, null, true, true]);
+  const job = JOBS.find((j) => j.name === "ops.capi_ctx_purge");
+  const jr = job
+    ? await job.run({ ...systemCtx("ops.capi_ctx_purge"), deadline: Date.now() + 800, tickId: "qa", cursor: "", setCursor: async () => undefined, yield: async () => new Promise<void>((r) => setImmediate(r)), lagMs: () => 0 })
+    : null;
+  eq2("purge job: daily at 03:20, nulls B's old context too, summary counts only", [JSON.stringify(job?.every), await ctxOf(oldB), jr?.summary && !JSON.stringify(jr.summary).includes(PHONE)], [JSON.stringify({ dailyAt: "03:20" }), null, true]);
+
+  /* ---------------- 8.10 the setting changed: re-render the pages whose trigger changed (OPE-§20.9 (6)) ---------------- */
+  const page2 = newId();
+  await db.insert(pages).values({ id: page2, storeId: SA.id, slug: "capi-a-p2", name: "P2", status: "published", publicKey: `pk-${newId()}`, draft: doc as never, publishedVersionId: newId() });
+  const draftPage = newId();
+  await db.insert(pages).values({ id: draftPage, storeId: SA.id, slug: "capi-a-p3", name: "P3", status: "draft", publicKey: `pk-${newId()}`, draft: doc as never });
+  const conv = (v: Partial<Conversions>): Conversions => ({ purchaseTrigger: "order", pageOverrides: {}, customEvents: true, manualOrders: false, ...v });
+  renders.length = 0;
+  const change = await conversions.applyConversionsChange(SA.scope, conv({}), conv({ purchaseTrigger: "confirmed", pageOverrides: { [page2]: "order" } }), { kind: "system" } as never);
+  eq2("change: only the live pages whose trigger changed, reason conversions, priority 4", [change.pages, renders.map((r) => [r.pageIds, r.reason, r.priority])], [[SA.pageId], [[[SA.pageId], "conversions", 4]]]);
+  const all = await conversions.applyConversionsChange(SA.scope, conv({}), conv({ purchaseTrigger: "delivered" }), { kind: "system" } as never);
+  eq2("change: switching the store's trigger re-renders every live page (never a draft)", [...all.pages].sort(), [SA.pageId, page2].sort());
+  const audits = await db.select({ action: auditLog.action }).from(auditLog).where(and(eq(auditLog.storeId, SA.id), eq(auditLog.action, "integrations.conversions.changed")));
+  ok("change: audited as integrations.conversions.changed", audits.length >= 2, audits.length);
+  const none = await conversions.applyConversionsChange(SB.scope, conv({}), conv({ customEvents: false }), { kind: "system" } as never);
+  eq2("change: a change that moves no trigger re-renders nothing; B's change never lists A's pages", none.pages, []);
+
+  /* ---------------- 8.11 the render's parity with the one rule (OPE-§20.3, core §J.1) ---------------- */
+  const pageIds = [SA.pageId, page2, null];
+  let parity = 0;
+  let total = 0;
+  for (const purchaseTrigger of ["order", "confirmed", "delivered"] as const) {
+    for (const override of [undefined, "order", "confirmed", "delivered"] as const) {
+      const c = conv({ purchaseTrigger, pageOverrides: override ? { [page2]: override } : {} });
+      for (const pid of pageIds) {
+        total++;
+        if (purchaseInBrowserFor(c, pid) === (core.triggerFor(c, pid) === "order")) parity++;
+      }
+    }
+  }
+  eq2("render parity: purchaseInBrowserFor = (triggerFor = order) over the whole matrix", parity, total);
+
+  conversions.setCapiDoubleForTests(null);
 }
 
 main()

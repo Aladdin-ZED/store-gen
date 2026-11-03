@@ -1,4 +1,4 @@
-// proves: IN-05, OP-05, LP-04, AI-15, IN-03, SF-03, SF-06, IN-01, IN-09, OP-16
+// proves: IN-05, OP-05, LP-04, AI-15, IN-03, SF-03, SF-06, IN-01, IN-09, OP-16, IN-02, SF-05
 /**
  * Ad pixels — server side, offline (fetch is mocked; no network, no database), docs/OFFERS.md §A:
  *  - Tracking schema: legacy single ids → lists, dedupe, limits, empty → unset; `none` / `copiedFrom`;
@@ -28,6 +28,11 @@
  *    (≤ 1 read + 1 append + 1 batchUpdate per store per run, bits → cells with the optional headers, the widened read,
  *    is_test = 0 in every work predicate, the conflict table, the row-deleted case, Note / Tracking / Agent pulls,
  *    "Statut livraison" in the sheet's locale; src/lib/sheets/selftest.ts).
+ *  - conversions (R1 P5, operations.md OPE-§20.2, §20.4, §20.9 (2)-(5); IN-02, IN-03, SF-05 CAPI half): the trigger with
+ *    the per-page overrides, OPE-§20.2's matrix with the event ids, Meta-only custom events, the risk gate of trigger
+ *    `order` only (OD19), test / honeypot / typed orders never sent, the 7 d − 1 h guard on both sides, the outbox
+ *    items, the capi_ctx JSON round trip and cap, the rebuild and the contents collapse
+ *    (src/lib/integrations/capi.selftest.ts; the sealed envelope and the hook are scripts/qa/integrations-db-check.ts).
  *
  *   npx tsx scripts/qa/conversions-check.ts      (exit code 1 on failure)
  */
@@ -60,6 +65,7 @@ import { PixelLibrarySettings, TrackingSecretsSettings, redactSetting } from "@/
 import { integrationsHealthSelftest } from "@/lib/integrations/selftest";
 import { templatesSelftest } from "@/lib/integrations/templates.selftest";
 import { sheetsSelftest } from "@/lib/sheets/selftest";
+import { capiSelftest } from "@/lib/integrations/capi.selftest";
 
 let pass = 0;
 const failures: string[] = [];
@@ -297,7 +303,8 @@ async function main() {
   const at = new Date("2026-10-15T10:00:00Z");
   const base = { orderId: "CMD-PX0001", createdAt: at, payload, order, target, ip: "105.66.1.2", ua: "Mozilla/5.0 test" };
 
-  ok("risky orders are not sent", purchaseConversion({ ...base, riskScore: CONVERSION_MAX_RISK }) === null);
+  ok("risky orders get no creation event (their confirmation sends the server fields only, OD19)", purchaseConversion({ ...base, riskScore: CONVERSION_MAX_RISK }) === null);
+  eq("the event carries the order's risk score", purchaseConversion({ ...base, riskScore: 10 })?.risk, 10);
   ok("no Meta/TikTok pixel → no event", purchaseConversion({ ...base, riskScore: 0, target: { ...target, doc: { ...doc, tracking: { snapPixelId: [SNAP] } } } }) === null);
   const c = purchaseConversion({ ...base, riskScore: 10 })!;
   eq("event id = order id (not the browser uuid)", c.eventId, "CMD-PX0001");
@@ -465,6 +472,12 @@ async function main() {
   pass += sheets.pass;
   failures.push(...sheets.failures);
   for (const n of sheets.notes) console.log(`· ${n}`);
+
+  /* ---------------- server ad events (OPE-§20; IN-02, IN-03, SF-05) ---------------- */
+  const capi = capiSelftest();
+  pass += capi.pass;
+  failures.push(...capi.failures);
+  for (const n of capi.notes) console.log(`· ${n}`);
 
   for (const f of failures) console.log(`✗ ${f}`);
   console.log(failures.length ? `✗ ${failures.length} failure(s), ${pass} passed` : `✓ conversions check passed (${pass} assertions)`);
