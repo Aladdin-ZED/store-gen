@@ -93,12 +93,12 @@
   padding-block: clamp(2rem, 6vw, 4.5rem) calc(var(--lp-space-section) * 1.1);
 }
 
-.lp-legal__aurora {
+/* the hero's colour moment (LAN-§3.6, core D60): one radial of the accent at 10 %, no mesh, no grain */
+.lp-legal__tint {
   position: absolute;
-  inset: -15% -5% 0;
+  inset: 0;
   z-index: -1;
-  background: var(--lp-aurora);
-  opacity: 0.8;
+  background: radial-gradient(70% 90% at 50% 0%, color-mix(in oklab, var(--lp-accent) 10%, transparent), transparent 70%);
   pointer-events: none;
 }
 
@@ -796,6 +796,15 @@ a.lp-legal__tile:active {
   color: var(--sec-ink-soft);
 }
 
+/* "Report this store": a muted link of the footer row, never the accent (LAN-§3.9) */
+.lp-legal__report {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  white-space: nowrap;
+}
+
 /* --- print: the document only, ink on paper --------------------------------- */
 
 @media print {
@@ -803,7 +812,7 @@ a.lp-legal__tile:active {
   .lp-legal__docs,
   .lp-legal__toc,
   .lp-legal__ask,
-  .lp-legal__aurora,
+  .lp-legal__tint,
   .lp-legal__foot-links {
     display: none !important;
   }

@@ -138,6 +138,12 @@ export function uiLabels(locale: Locale) {
     options: inLocale(locale, { ar: "اختياراتك", fr: "Vos préférences", en: "Your choices" }),
     details: inLocale(locale, { ar: "فين نوصلو ليك؟", fr: "Où vous livrer ?", en: "Where do we deliver?" }),
     email: inLocale(locale, { ar: "name@example.com", fr: "nom@exemple.com", en: "name@example.com" }),
+    /** the disclosure of an optional address (LAN-§3.5 OF2), the email and the note inside it */
+    addAddress: inLocale(locale, { ar: "زيد العنوان", fr: "Ajouter une adresse", en: "Add an address" }),
+    /** the same disclosure when it holds only the note or an optional email */
+    addNote: inLocale(locale, { ar: "زيد شي ملاحظة", fr: "Ajouter une précision", en: "Add a note" }),
+    /** the urgency chip with the owner's end date only ({date} in the page language) */
+    endsOn: inLocale(locale, { ar: "العرض صالح حتى {date}", fr: "Offre valable jusqu'au {date}", en: "Offer ends {date}" }),
   };
 }
 

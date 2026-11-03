@@ -2,17 +2,22 @@
  * Order form — the conversion core (singleton, required, anchored at #order).
  *
  * Variants (docs/SECTIONS.md):
- *  - card    — an elevated two-tone checkout card on a soft product-hue glow: a "cash on delivery"
- *              glass chip across its top edge, the steps joined by a rail that fills as each step
+ *  - card    — an elevated two-tone checkout card on a soft product-hue glow: the urgency chip (typed
+ *              stock or end date only) across its top edge, the steps joined by a rail that fills as each step
  *              is completed, and a receipt (thumb with live ×qty, chosen pack, live summary,
  *              submit) — a sticky tinted column beside the steps on desktop;
  *  - split   — desktop: sticky product panel whose pack visual follows the chosen bundle (×1 → ×3
- *              stack in depth) under a glass chip with the pack total | form; phones: a compact
+ *              stack in depth) under an opaque chip with the pack total | form; phones: a compact
  *              product strip on top;
- *  - minimal — no card: editorial rows (big "01" numeral + step name | hairline fields with
- *              floating labels), a progress hairline that draws across each completed step;
+ *  - minimal — no card: editorial rows (big "01" numeral + step name | bordered fields, labels
+ *              above), a progress hairline that draws across each completed step;
  *  - bold    — an accent slab with soft colored depth: giant headline (beside the form on desktop),
- *              big inputs, light cards, the best saving as a turning seal on the slab's corner.
+ *              big inputs, light cards, the best saving as a still disc on the slab's corner.
+ *
+ * The quality contract (landing.md LAN-§3.5 OF1-OF13, LD34): the title alone (no kicker), `data-reveal` only on the
+ * panel and the submit row, no glass, no trust 3-up (the `trustBar` strip is the page's one trust surface), the
+ * delivery slots `[data-lp-dz]` under the offers and the city (LAN-§7.4), the one urgency chip from typed data, the
+ * COD line once under the submit (`codLineFor`, also the hero price block's), labels above 52-56 px controls.
  *
  * Runtime markup contract (docs/OFFERS.md §F.6) is followed exactly: see picker.tsx (offer radios,
  * the five offer layouts), units.tsx (personalization: units, item choosers, option groups, shared
@@ -28,17 +33,22 @@ import { AssetRef, type SectionBg } from "@/lib/page/schema";
 import { Badge as RingBadge } from "../../illustrations";
 import { Honeypot, Icon, Picture, SectionShell, cx } from "../../primitives";
 import { defineSection, type RenderContext } from "../../types";
+import { codLineFor } from "./cod";
 import { formCopy, uiLabels } from "./copy";
+import { deliveryFallback } from "./delivery";
 import { LETTERBOX, fitsCover } from "./fit";
-import { Bump, CodChip, Fields, Head, OrderLine, Privacy, StepTitle, Submit, Summary, Trust, WhatsAppAlt } from "./parts";
+import { Bump, CodChip, DeliverySlot, Fields, Head, OrderLine, Privacy, StepTitle, Submit, Summary, WhatsAppAlt } from "./parts";
 import { PackPicker, PackVisual, allFree, bestSaving, displayOf, packsOf, type Pack } from "./picker";
 import { Plain } from "./text";
 import { Extras, OptionsSummary, Units, pageHasUnits } from "./units";
+
+export { codLineFor } from "./cod";
 
 const VARIANT_IDS = ["card", "split", "minimal", "bold"] as const;
 type Variant = (typeof VARIANT_IDS)[number];
 
 const schema = z.object({
+  /** kept for stored docs; never rendered (LD34: the form heading is the title alone) */
   kicker: z.string().max(60).default(""),
   /** empty → page form title → built-in "Commandez maintenant" */
   title: z.string().max(140).default(""),
@@ -49,6 +59,7 @@ const schema = z.object({
   submitLabel: z.string().max(60).default(""),
   reassurance: z.string().max(160).default(""),
   showSummary: z.boolean().default(true),
+  /** kept for stored docs; the trust 3-up is gone (R3: the `trustBar` strip is the page's one trust surface) */
   showTrust: z.boolean().default(true),
   /** card: the product line at the top of the card */
   showOrderLine: z.boolean().default(true),
@@ -67,13 +78,13 @@ function slabBg(bg: SectionBg): SectionBg {
 /**
  * Split panel visual: one product ×qty composition per pack, stacked in one cell — the runtime marks
  * the chosen one ([data-selected]) and CSS cross-fades to it, a glass chip naming the pack and its
- * total riding on top. A merchant panel image replaces the compositions.
+ * total riding on top (an opaque chip: the form has no glass). A merchant panel image replaces the compositions.
  */
 function Showcase({ ctx, packs, image }: { ctx: RenderContext; packs: Pack[]; image: Data["image"] }): ReactElement {
   const own = image ? ctx.asset(image) : null;
   if (own) {
     return (
-      <div className="lp-of__show" data-reveal="scale-in">
+      <div className="lp-of__show">
         {/* the panel is square on phones, 5:4 beside the form: the photo is fitted to each */}
         {own.alpha || !fitsCover(own, 1) ? (
           <Picture asset={own} sizes="(min-width: 64rem) 28rem, 6rem" alt="" fit="contain" className={cx("lp-of__show-own", !own.alpha && LETTERBOX)} />
@@ -91,11 +102,11 @@ function Showcase({ ctx, packs, image }: { ctx: RenderContext; packs: Pack[]; im
     );
   }
   return (
-    <div className="lp-of__show" aria-hidden="true" data-reveal="scale-in">
+    <div className="lp-of__show" aria-hidden="true">
       {packs.map((p) => (
         <span key={p.id} className="lp-of__show-i" data-bundle-card={p.id} data-selected={p.selected ? "" : undefined}>
           <PackVisual ctx={ctx} pack={p} sizes="(min-width: 64rem) 22rem, 6rem" className="lp-of__show-pv" />
-          <span className="lp-of__show-cap lp-glass">
+          <span className="lp-of__show-cap">
             <bdi className="lp-of__show-name">
               <Plain ctx={ctx} text={p.titled && p.legacy ? `${p.name} · ${p.qtyLabel}` : p.name} />
             </bdi>
@@ -122,7 +133,9 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
   const titleId = `${id}-title`;
   const title = data.title.trim() || ctx.form.title?.trim() || ctx.t("form.title");
   const submitLabel = data.submitLabel.trim() || ctx.form.submitLabel?.trim() || ctx.t("form.submit");
-  const reassurance = data.reassurance.trim() || ctx.form.reassurance?.trim() || ctx.t("form.reassurance");
+  const reassurance = codLineFor(ctx.doc);
+  // the delivery line's server fallback (LAN-§7.4): the default offer's real fee, free when it ships for 0
+  const dz = deliveryFallback(ctx, (t ? t.shipping : 0) <= 0);
   const fill = display.fill;
   const hasUnits = pageHasUnits(fill);
   const personalize = hasUnits && fill !== "inline";
@@ -143,7 +156,7 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
   const form = (
     <form
       id="order-form"
-      className={cx("lp-of__form", v === "minimal" && "lp-form--line")}
+      className="lp-of__form"
       data-lp-form=""
       data-state="idle"
       method="post"
@@ -151,27 +164,28 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
       aria-labelledby={titleId}
     >
       <div className="lp-of__steps">
-        <fieldset className="lp-of__step lp-of__step--packs" data-lp-bundles="" data-reveal="draw">
+        <fieldset className="lp-of__step lp-of__step--packs" data-lp-bundles="">
           <StepTitle ctx={ctx} n={++step} text={packsLabel} path="packsLabel" />
           <PackPicker ctx={ctx} sid={id} packs={packs} display={display} surface={surface} inline={fill === "inline" ? units : undefined} />
           {fill === "inline" ? extras : null}
-          {allFree(packs) ? (
+          {allFree(packs) && !dz ? (
             <p className="lp-of__ship">
               <Icon name="truck" size="1.2em" />
               <span>{ctx.t("bundle.freeShipping")}</span>
             </p>
           ) : null}
+          <DeliverySlot k="offer" text={dz} />
         </fieldset>
         {personalize ? (
-          <fieldset className="lp-of__step lp-of__step--options" data-reveal="draw" data-fill={fill}>
+          <fieldset className="lp-of__step lp-of__step--options" data-fill={fill}>
             <StepTitle ctx={ctx} n={++step} text={optionsLabel} path="optionsLabel" />
             {units}
             {extras}
           </fieldset>
         ) : null}
-        <fieldset className="lp-of__step lp-of__step--details" data-reveal="draw">
+        <fieldset className="lp-of__step lp-of__step--details">
           <StepTitle ctx={ctx} n={++step} text={detailsLabel} path="detailsLabel" />
-          <Fields ctx={ctx} float={v === "minimal"} />
+          <Fields ctx={ctx} />
         </fieldset>
       </div>
       <div className="lp-of__checkout">
@@ -182,15 +196,16 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
             <span>{L.yourOrder}</span>
           </p>
         ) : null}
+        {v !== "card" ? <CodChip ctx={ctx} /> : null}
         {!hasUnits && extras ? <div className="lp-of__extras">{extras}</div> : null}
-        <Bump ctx={ctx} surface={surface} offerId={pack.id} />
         {data.showSummary ? (
           <Summary ctx={ctx} bundleId={pack.id} surface={surface} subtotal={!orderLine} className={v === "split" ? "lp-sum--inline" : undefined} />
         ) : hasUnits || ctx.items.length > 1 ? (
           <OptionsSummary ctx={ctx} as="line" />
         ) : null}
+        {/* OF6: the bump is one row between the summary and the submit */}
+        <Bump ctx={ctx} surface={surface} offerId={pack.id} />
         <Submit ctx={ctx} label={submitLabel} reassurance={reassurance} total={total} />
-        {data.showTrust ? <Trust ctx={ctx} /> : null}
         <WhatsAppAlt ctx={ctx} />
         <Privacy ctx={ctx} />
       </div>
@@ -236,9 +251,8 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
   }
 
   if (v === "bold") {
+    // the best saving as a still disc on the slab corner: the figure alone (no turning micro-type, no reveal)
     const best = data.highlight ? bestSaving(packs) : null;
-    // Arabic micro-type on a ring is illegible at seal size: Arabic seals keep the figure alone
-    const ringText = ctx.locale === "ar" ? [] : [ctx.t("trust.cod")];
     return shell(
       <div className="lp-container lp-of__wrap">
         <div className="lp-of__panel lp-decor-host" data-bg={slabBg(bg)} data-reveal="rise">
@@ -246,23 +260,17 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
           {best ? (
             <RingBadge
               uid={`${id}-disc`}
-              text={ringText}
+              text={[]}
               label={best.label}
-              sublabel={ringText.length ? (best.pack.titled || !best.pack.legacy ? best.pack.short : best.pack.qtyLabel) : undefined}
               glyph="none"
               sep="dot"
               // the seal straddles the slab corner, half on the section: never in the section's own colour
               tone={bg === "pop" ? "accent" : "pop"}
-              spin={ringText.length > 0}
-              reveal
-              delay={420}
+              spin={false}
               className="lp-of__disc"
             />
           ) : null}
-          <div className="lp-of__side">
-            {head}
-            {data.showTrust ? <Trust ctx={ctx} className="lp-of__trust--side" /> : null}
-          </div>
+          <div className="lp-of__side">{head}</div>
           {form}
         </div>
       </div>,
@@ -283,7 +291,7 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
     <div className="lp-container lp-of__wrap">
       {head}
       <div className="lp-of__panel" data-reveal="rise">
-        {data.highlight ? <CodChip ctx={ctx} /> : null}
+        <CodChip ctx={ctx} />
         {form}
       </div>
     </div>,
@@ -302,7 +310,7 @@ export default defineSection({
     {
       id: "card",
       label: "Checkout card",
-      description: "Two-tone checkout card: COD chip on its edge, steps that tick off along a rail, a sticky receipt with the live total.",
+      description: "Two-tone checkout card: steps that tick off along a rail, a sticky receipt with the live total, the urgency chip on its edge when Offers holds one.",
     },
     {
       id: "split",
@@ -313,13 +321,13 @@ export default defineSection({
     {
       id: "minimal",
       label: "Minimal",
-      description: "No card — editorial rows: big step numerals beside hairline fields with floating labels, lots of air.",
+      description: "No card: editorial rows, big step numerals beside bordered fields with their labels above, lots of air.",
       archetypes: ["maison", "editorial", "apothecary", "bloom"],
     },
     {
       id: "bold",
       label: "Bold slab",
-      description: "An accent slab with a giant headline, big inputs, light pack cards and the best saving as a turning seal.",
+      description: "An accent slab with a giant headline, big inputs, light pack cards and the best saving as a disc on its corner.",
       archetypes: ["playground", "kinetic", "garage", "hearth"],
     },
   ],
@@ -346,7 +354,6 @@ export default defineSection({
       kind: "group",
       label: "Heading",
       fields: [
-        { kind: "text", path: "kicker", label: "Kicker", max: 60, help: "Small line above the title, e.g. “Order in 30 seconds”." },
         { kind: "text", path: "title", label: "Title", max: 140, help: "Wrap a word in *stars* to emphasize it. Empty = the page's form title." },
         { kind: "textarea", path: "lead", label: "Intro", max: 260, rows: 3, help: "One or two lines: what happens after ordering." },
       ],
@@ -373,9 +380,8 @@ export default defineSection({
       label: "Display",
       fields: [
         { kind: "toggle", path: "showSummary", label: "Order summary", help: "Subtotal, delivery and total — updates live with the chosen pack." },
-        { kind: "toggle", path: "showTrust", label: "Trust line", help: "Cash on delivery · delivery time · check before paying." },
         { kind: "toggle", path: "showOrderLine", label: "Product line on the card", help: "Checkout card only: photo, product, chosen pack and live total at the head of the receipt." },
-        { kind: "toggle", path: "highlight", label: "Signature detail", help: "Checkout card: “cash on delivery” chip on the card edge. Bold: the best saving as a turning seal." },
+        { kind: "toggle", path: "highlight", label: "Signature detail", help: "Bold: the best saving as a disc on the slab corner." },
         { kind: "image", path: "image", label: "Panel image (split)", help: "Empty = the product shown ×qty of the chosen pack." },
       ],
     },

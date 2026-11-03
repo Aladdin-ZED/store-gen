@@ -3,10 +3,14 @@
  * (docs/ARCHITECTURE.md "Order form markup"): [data-field] wrappers with an always-present
  * [data-error], [data-lp-sum=subtotal|bump|shipping|total] (plain text — the runtime rewrites it),
  * button[type=submit][data-lp-submit] + [data-lp-submit-label], [data-lp-status][aria-live].
+ * The quality contract (landing.md LAN-§3.5 OF1-OF13): one submit, the WhatsApp alternative a text link, no kicker,
+ * no trust 3-up (the page's `trustBar` is its one trust surface), the delivery slots `[data-lp-dz]` (LAN-§7.4), the
+ * one urgency chip from typed data, the COD line once under the submit.
  */
 import type { ReactElement } from "react";
 import { itemById } from "@/lib/page/catalog";
 import { bumpOffered, emptySelection, everyOfferFree, fromCents, orderTotals } from "@/lib/page/pricing";
+import { shopperOf } from "../../addons/facts";
 import { defaultOfferView } from "../../offers/model";
 import { unitVisual } from "../../offers/visual";
 import {
@@ -14,12 +18,9 @@ import {
   FieldShell,
   Icon,
   Input,
-  Kicker,
-  PhoneInput,
   Picture,
   RichText,
   Select,
-  TITLE_REVEAL,
   Textarea,
   cx,
   editAttr,
@@ -52,29 +53,18 @@ function ThumbSlot({ base, item }: { base: string; item: string }) {
 }
 
 export interface HeadData {
-  kicker: string;
   lead: string;
 }
 
-/** Kicker, the section's only h2, and the lead. */
+/**
+ * The section's only h2 and the lead (LAN-§3.5 OF8, LD34): no kicker (the doc's `kicker` is ignored), no reveal and
+ * no per-word split, so the form's reveals stay on the panel and the submit row.
+ */
 export function Head({ ctx, data, title, titleId, className }: { ctx: RenderContext; data: HeadData; title: string; titleId: string; className?: string }) {
   return (
     <header className={cx("lp-of__head", className)}>
-      <Kicker ctx={ctx} text={data.kicker} className="lp-of__kicker" editPath="kicker" reveal="fade" />
-      <RichText
-        as="h2"
-        id={titleId}
-        className="lp-of__title lp-h2"
-        text={title}
-        ctx={ctx}
-        editPath="title"
-        reveal={TITLE_REVEAL[ctx.archetype]}
-        split
-        delay={80}
-      />
-      {data.lead.trim() ? (
-        <RichText as="p" className="lp-of__lead lp-lead" text={data.lead} ctx={ctx} editPath="lead" reveal="blur-in" delay={240} />
-      ) : null}
+      <RichText as="h2" id={titleId} className="lp-of__title lp-h2" text={title} ctx={ctx} editPath="title" />
+      {data.lead.trim() ? <RichText as="p" className="lp-of__lead lp-lead" text={data.lead} ctx={ctx} editPath="lead" /> : null}
     </header>
   );
 }
@@ -168,110 +158,150 @@ export function badgeSpot(ctx: RenderContext, asset: ResolvedAsset | null | unde
   return spot === "se" ? undefined : spot;
 }
 
-/** Delivery details (name, phone, city, address, email, note) per doc.form. */
-export function Fields({ ctx, float }: { ctx: RenderContext; float?: boolean }) {
-  const f = ctx.form;
-  const opt = (label: string) => `${label} (${optionalLabel(ctx.locale)})`;
-  const cities = ctx.market.cities;
-  const cityMode = f.city === "select" && cities.length === 0 ? "text" : f.city;
-  // floating labels need a placeholder to detect "filled"; the hint text then shows on focus
+/** The phone control (keep-list 4, OF11): LTR, the market's dial prefix, the tel keypad, `autocomplete="tel"`. */
+function PhoneField({ ctx, enterKeyHint }: { ctx: RenderContext; enterKeyHint: "next" | "send" }) {
   return (
-    <div className="lp-of__fields">
-      <FieldShell ctx={ctx} field="name" label={ctx.t("form.name")} float={float} className="lp-of__f">
-        <Input name="name" autoComplete="name" required minLength={2} maxLength={80} placeholder={ctx.t("form.namePh")} />
-      </FieldShell>
-      <FieldShell ctx={ctx} field="phone" label={ctx.t("form.phone")} float={float} className="lp-of__f">
-        <PhoneInput ctx={ctx} />
-      </FieldShell>
-      {cityMode === "select" ? (
-        <FieldShell ctx={ctx} field="city" label={ctx.t("form.city")} float={float} className="lp-of__f">
-          <Select name="city" options={cities} placeholder={ctx.t("form.cityPh")} required autoComplete="address-level2" />
-        </FieldShell>
-      ) : cityMode === "text" ? (
-        <FieldShell ctx={ctx} field="city" label={ctx.t("form.city")} float={float} className="lp-of__f">
-          <Input name="city" autoComplete="address-level2" required maxLength={80} placeholder={ctx.t("form.cityPh")} />
-        </FieldShell>
-      ) : null}
-      {f.address !== "hidden" ? (
-        <FieldShell
-          ctx={ctx}
-          field="address"
-          label={f.address === "optional" ? opt(ctx.t("form.address")) : ctx.t("form.address")}
-          optional={f.address === "optional"}
-          float={float}
-          className={cx("lp-of__f", cityMode === "hidden" && "lp-of__f--wide")}
-        >
-          <Input
-            name="address"
-            autoComplete="street-address"
-            required={f.address === "required"}
-            maxLength={240}
-            placeholder={ctx.t("form.addressPh")}
-          />
-        </FieldShell>
-      ) : null}
-      {f.email !== "hidden" ? (
-        <FieldShell
-          ctx={ctx}
-          field="email"
-          label={f.email === "optional" ? opt(ctx.t("form.email")) : ctx.t("form.email")}
-          optional={f.email === "optional"}
-          float={float}
-          className="lp-of__f lp-of__f--wide"
-        >
-          <Input
-            name="email"
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            dir="ltr"
-            required={f.email === "required"}
-            maxLength={120}
-            placeholder={uiLabels(ctx.locale).email}
-          />
-        </FieldShell>
-      ) : null}
-      {f.note !== "hidden" ? (
-        <FieldShell ctx={ctx} field="note" label={ctx.t("form.note")} optional float={float} className="lp-of__f lp-of__f--wide">
-          <Textarea name="note" rows={2} maxLength={300} placeholder={ctx.t("form.notePh")} />
-        </FieldShell>
-      ) : null}
+    <div className="lp-input-group" dir="ltr">
+      <span className="lp-input-group__prefix">
+        <span className="lp-input-group__cc" aria-hidden="true">
+          {ctx.market.phoneCountry}
+        </span>
+        <span className="lp-input-group__dial">{ctx.market.phonePrefix}</span>
+      </span>
+      <Input
+        name="phone"
+        type="tel"
+        inputMode="tel"
+        autoComplete="tel"
+        enterKeyHint={enterKeyHint}
+        dir="ltr"
+        required
+        minLength={6}
+        maxLength={20}
+        placeholder={ctx.market.phonePlaceholder}
+        className="lp-input--grouped"
+      />
     </div>
   );
 }
 
+/** A delivery line slot (LAN-§7.4): the server fallback, or empty and hidden; the `assist` add-on rewrites it. */
+export function DeliverySlot({ k, text }: { k: "offer" | "city"; text?: string | null }) {
+  return (
+    <p className="lp-dz" data-lp-dz={k} aria-live="polite" hidden={!text || undefined}>
+      {text || null}
+    </p>
+  );
+}
+
 /**
- * Order bump: a soft add-on card with a real checkbox; it lights up with the accent once ticked. A bump
- * that is a catalog item (orderBump.item) reveals that item's options under the card once ticked
- * ([data-lp-bump-body], names b.<gid>, disabled until then); a bump limited to some offers
- * (orderBump.offers) carries their ids in data-offers and starts hidden when the default offer is not
- * one of them (the runtime follows the selected offer).
+ * Delivery details (LAN-§3.5 OF2, OF11, OF13): name, phone, city, [address] in the default state, labels above the
+ * controls, the last text control sending (`enterkeyhint`). The address follows the store's `checkout.addressMode`
+ * when the render context carries it (`required`: one line after the city; `optional`: behind the disclosure; the
+ * doc's `form.address` is superseded, `hidden` included), else the doc's `form.address`. An optional email and the note
+ * sit behind one `<details>` ("Ajouter une adresse" when the address is in it), so the form stays near one screen.
+ */
+export function Fields({ ctx }: { ctx: RenderContext }) {
+  const f = ctx.form;
+  const L = uiLabels(ctx.locale);
+  const opt = (label: string) => `${label} (${optionalLabel(ctx.locale)})`;
+  const cities = ctx.market.cities;
+  const cityMode = f.city === "select" && cities.length === 0 ? "text" : f.city;
+  const facts = shopperOf(ctx);
+  const address = facts ? facts.addressMode : f.address;
+  const last = f.email === "required" ? "email" : address === "required" ? "address" : cityMode === "text" ? "city" : "phone";
+  const hint = (k: typeof last) => (k === last ? "send" : "next");
+  const addressField = (optional: boolean) => (
+    <FieldShell ctx={ctx} field="address" label={optional ? opt(ctx.t("form.address")) : ctx.t("form.address")} optional={optional} className="lp-of__f lp-of__f--wide">
+      <Input
+        name="address"
+        autoComplete="street-address"
+        enterKeyHint={optional ? "next" : hint("address")}
+        required={!optional}
+        maxLength={240}
+        placeholder={ctx.t("form.addressPh")}
+      />
+    </FieldShell>
+  );
+  const emailField = (optional: boolean) => (
+    <FieldShell ctx={ctx} field="email" label={optional ? opt(ctx.t("form.email")) : ctx.t("form.email")} optional={optional} className="lp-of__f lp-of__f--wide">
+      <Input
+        name="email"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        enterKeyHint={optional ? "next" : hint("email")}
+        dir="ltr"
+        required={!optional}
+        maxLength={120}
+        placeholder={L.email}
+      />
+    </FieldShell>
+  );
+  const more = address === "optional" || f.email === "optional" || f.note !== "hidden";
+  return (
+    <div className="lp-of__fields">
+      <FieldShell ctx={ctx} field="name" label={ctx.t("form.name")} className="lp-of__f">
+        <Input name="name" autoComplete="name" enterKeyHint="next" required minLength={2} maxLength={80} placeholder={ctx.t("form.namePh")} />
+      </FieldShell>
+      <FieldShell ctx={ctx} field="phone" label={ctx.t("form.phone")} className="lp-of__f">
+        <PhoneField ctx={ctx} enterKeyHint={hint("phone")} />
+      </FieldShell>
+      {cityMode === "select" ? (
+        <FieldShell ctx={ctx} field="city" label={ctx.t("form.city")} className="lp-of__f">
+          <Select name="city" options={cities} placeholder={ctx.t("form.cityPh")} required autoComplete="address-level2" />
+        </FieldShell>
+      ) : cityMode === "text" ? (
+        <FieldShell ctx={ctx} field="city" label={ctx.t("form.city")} className="lp-of__f">
+          <Input name="city" autoComplete="address-level2" enterKeyHint={hint("city")} required maxLength={80} placeholder={ctx.t("form.cityPh")} />
+        </FieldShell>
+      ) : null}
+      {cityMode !== "hidden" ? <DeliverySlot k="city" /> : null}
+      {address === "required" ? addressField(false) : null}
+      {f.email === "required" ? emailField(false) : null}
+      {more ? (
+        <details className="lp-of__more">
+          <summary className="lp-of__more-sum">
+            <Icon name="plus" size="1em" strokeWidth={2} />
+            <span>{address === "optional" ? L.addAddress : L.addNote}</span>
+          </summary>
+          <div className="lp-of__more-body">
+            {address === "optional" ? addressField(true) : null}
+            {f.email === "optional" ? emailField(true) : null}
+            {f.note !== "hidden" ? (
+              <FieldShell ctx={ctx} field="note" label={ctx.t("form.note")} optional className="lp-of__f lp-of__f--wide">
+                <Textarea name="note" rows={2} maxLength={300} placeholder={ctx.t("form.notePh")} />
+              </FieldShell>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+/**
+ * Order bump (LAN-§3.5 OF6): one compact row of at most 56 px between the summary and the submit, a real checkbox,
+ * the title (its one-line description under it) and the price; never a card with a picture, never a reveal. A bump
+ * that is a catalog item (orderBump.item) reveals that item's options under the row once ticked ([data-lp-bump-body],
+ * names b.<gid>, disabled until then); a bump limited to some offers (orderBump.offers) carries their ids in
+ * data-offers and starts hidden when the default offer is not one of them (the runtime follows the selected offer).
  */
 export function Bump({ ctx, surface, offerId }: { ctx: RenderContext; surface?: SectionBg; offerId?: string }) {
   const bump = ctx.offers.orderBump;
   if (!bump?.enabled) return null;
   const item = bump.item ? itemById(ctx.doc, bump.item) : undefined;
-  const own = ctx.asset(bump.image);
-  const iv = !own && item ? unitVisual(ctx, item) : null;
-  const img = own ?? iv?.asset ?? null;
   const title = bump.title.trim() || (item ? item.name.trim() || ctx.product.name : "");
   const card = (
-    <label className={cx("lp-bump", img && "lp-bump--pic")} data-bg={surface} data-reveal="rise">
+    <label className="lp-bump" data-bg={surface}>
       <Checkbox name="bump" value="1" className="lp-bump__check" />
-      {img ? (
-        iv?.box ? (
-          <Picture asset={img} box={iv.box} ratio={1} sizes="4.5rem" alt="" className="lp-bump__pic" />
-        ) : (
-          <Picture asset={img} sizes="4.5rem" alt="" ratio={1} fit={img.alpha ? "contain" : "cover"} className="lp-bump__pic" />
-        )
-      ) : null}
       <span className="lp-bump__body">
-        <span className="lp-bump__add">{ctx.t("form.bumpAdd")}</span>
-        <Plain ctx={ctx} className="lp-bump__title" text={title} />
+        <span className="lp-bump__line">
+          <span className="lp-bump__add">{ctx.t("form.bumpAdd")}</span> <Plain ctx={ctx} className="lp-bump__title" text={title} />
+        </span>
         {bump.description ? <Plain ctx={ctx} className="lp-bump__desc" text={bump.description} /> : null}
       </span>
       <span className="lp-bump__price">
-        <bdi>+{ctx.money(bump.price)}</bdi>
+        <bdi dir="ltr">+{ctx.money(bump.price)}</bdi>
       </span>
     </label>
   );
@@ -284,7 +314,6 @@ export function Bump({ ctx, surface, offerId }: { ctx: RenderContext; surface?: 
     </div>
   );
 }
-
 /**
  * Live order summary (server-rendered values from orderTotals(); the runtime keeps them current).
  * `subtotal={false}` when a receipt line above already carries the pack total. Products with
@@ -310,7 +339,7 @@ export function Summary({
   const free = totals.shipping <= 0;
   const allFree = everyOfferFree(ctx.doc);
   return (
-    <dl className={cx("lp-sum", className)} data-bg={surface} data-reveal="fade">
+    <dl className={cx("lp-sum", className)} data-bg={surface}>
       <div className="lp-sum__row lp-sum__row--stale" hidden>
         <dt className="lp-visually-hidden">{unitWord(ctx.locale, "stale")}</dt>
         <dd className="lp-of__stale" data-lp-stale="" data-msg={unitWord(ctx.locale, "stale")} role="status" aria-live="polite" />
@@ -354,54 +383,32 @@ export function Summary({
   );
 }
 
-/** Submit with the live total, the status line (aria-live) and the COD reassurance. */
+/**
+ * The submit row (LAN-§3.5 OF5, OF7): the one `button[type=submit][data-lp-submit]` with the live total, the status
+ * line (aria-live) and the COD line once under it (the reassurance string, `codLineFor(doc)`). The row carries the
+ * form's second and last reveal.
+ */
 export function Submit({ ctx, label, reassurance, total }: { ctx: RenderContext; label: string; reassurance: string; total: number }) {
   return (
-    <div className="lp-of__go">
-      <button
-        type="submit"
-        className={cx("lp-btn lp-btn--primary lp-btn--xl lp-btn--has-price lp-of__submit", Array.from(label).length > 24 && "lp-of__submit--long")}
-        data-lp-submit=""
-        data-reveal="scale-in"
-      >
+    <div className="lp-of__go" data-reveal="fade">
+      <button type="submit" className={cx("lp-btn lp-btn--primary lp-btn--xl lp-btn--has-price lp-of__submit", Array.from(label).length > 24 && "lp-of__submit--long")} data-lp-submit="">
         <span className="lp-btn__label" data-lp-submit-label="" {...editAttr(ctx, "submitLabel")}>
           {label}
         </span>
         <span className="lp-btn__price">
-          <bdi data-lp-sum="total">{ctx.money(total)}</bdi>
+          <bdi dir="ltr" data-lp-sum="total">
+            {ctx.money(total)}
+          </bdi>
         </span>
       </button>
       <p className="lp-of__status" data-lp-status="" role="status" aria-live="polite" />
-      <p className="lp-of__assure">
+      <p className="lp-of__assure" data-lp-cod="">
         <Icon name="shield-check" size="1.2em" />
         <Plain ctx={ctx} text={reassurance} editPath="reassurance" />
       </p>
     </div>
   );
 }
-
-/** COD reassurances: icon discs + short lines. */
-export function Trust({ ctx, className }: { ctx: RenderContext; className?: string }) {
-  const items = [
-    { icon: "cash-hand", text: ctx.t("trust.cod") },
-    { icon: "truck", text: ctx.t("trust.delivery") },
-    { icon: "eye", text: ctx.t("trust.check") },
-  ] as const;
-  return (
-    <ul className={cx("lp-of__trust", className)} role="list" data-stagger="80">
-      {items.map((it) => (
-        <li key={it.icon} className="lp-of__trust-item" data-reveal="rise">
-          <span className="lp-of__trust-ico">
-            <Icon name={it.icon} size="1.2em" />
-          </span>
-          {/* "24–48" held as one run in both directions (a bare span let it wrap as "24–" / "48") */}
-          <Plain ctx={ctx} text={it.text} />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 /** WhatsApp ordering link: when the form enables it, or (no form setting) the store has a number. */
 export function WhatsAppAlt({ ctx }: { ctx: RenderContext }) {
   const wa = ctx.doc.form.whatsapp;
@@ -428,12 +435,35 @@ export function Privacy({ ctx }: { ctx: RenderContext }) {
   );
 }
 
-/** "Paiement à la livraison" glass chip that sits across the card's top edge. */
+/**
+ * The form's one urgency chip (LAN-§3.5 OF10, LD36, LP-21): only from what the owner typed in Offers, the stock left
+ * (`urgency.stockLeft` above 0) or a future end date (`urgency.countdownEnd`), never a timer of its own (the page keeps
+ * one `[data-countdown]`) and never when an urgency section already says it. Nothing typed: no chip.
+ */
 export function CodChip({ ctx }: { ctx: RenderContext }) {
+  const u = ctx.offers.urgency;
+  if (ctx.doc.sections.some((x) => x.type === "urgency" && !x.hidden)) return null;
+  const stock = typeof u?.stockLeft === "number" && u.stockLeft > 0 ? u.stockLeft : null;
+  const end = u?.countdownEnd && Date.parse(u.countdownEnd) > Date.parse(ctx.now) ? u.countdownEnd : null;
+  const text = stock !== null ? ctx.t("urgency.stockLeft", { n: ctx.num(stock) }) : end ? endsOn(ctx, end) : null;
+  if (!text) return null;
   return (
-    <span className="lp-of__cod lp-glass" data-reveal="stamp" data-delay="380">
-      <Icon name="cash-hand" size="1.2em" />
-      <span>{ctx.t("trust.cod")}</span>
+    <span className="lp-of__cod" data-lp-urgency="">
+      <Icon name={stock !== null ? "box" : "clock"} size="1.1em" />
+      <span>{text}</span>
     </span>
   );
+}
+
+/** "Offre valable jusqu'au 30 octobre" in the page language (the market's time zone; Latin digits, like every price). */
+function endsOn(ctx: RenderContext, iso: string): string {
+  const tz = ctx.market.code === "MA" ? "Africa/Casablanca" : "UTC";
+  const tag = ctx.locale === "ar" ? "ar-MA-u-nu-latn" : ctx.locale === "fr" ? "fr-MA" : "en-GB";
+  let date: string;
+  try {
+    date = new Intl.DateTimeFormat(tag, { day: "numeric", month: "long", timeZone: tz }).format(new Date(iso));
+  } catch {
+    date = iso.slice(0, 10);
+  }
+  return uiLabels(ctx.locale).endsOn.replace("{date}", date);
 }

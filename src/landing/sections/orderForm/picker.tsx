@@ -386,7 +386,6 @@ export function PackPicker({ ctx, sid, packs, display, surface, inline }: PackPi
             data-featured={picker === "tiers" && featured === p.id ? "" : undefined}
             data-cm={media}
             data-bg={surface}
-            data-reveal="rise"
           >
             <Radio pack={p} uid={uid} />
             {picker === "ticket" ? <span className="lp-pack__band" aria-hidden="true" /> : null}
@@ -497,7 +496,7 @@ function Segmented({
   const shortOnly = packs.some((p) => !p.legacy || !p.sameItem);
   return (
     <div className="lp-packs lp-packs--pills" {...rootAttrs}>
-      <div className="lp-seg" data-bg={surface} style={cssVars({ "--n": packs.length })} data-reveal="rise">
+      <div className="lp-seg" data-bg={surface} style={cssVars({ "--n": packs.length })}>
         <span className="lp-seg__thumb" aria-hidden="true" />
         {packs.map((p) => {
           const uid = `${sid}-pk-${p.index}`;
@@ -552,7 +551,7 @@ function Segmented({
           );
         })}
       </div>
-      <div className="lp-seg__panel" data-bg={surface} aria-hidden="true" data-reveal="fade" data-delay="120">
+      <div className="lp-seg__panel" data-bg={surface} aria-hidden="true">
         {packs.map((p) => (
           <div
             key={p.id}

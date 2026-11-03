@@ -292,6 +292,15 @@ function Footer({ ctx, store, chrome, year }: { ctx: RenderContext; store: Store
       <div className="lp-container">
         <p className="lp-legal__foot-copy">
           © {year} {brand}. {ctx.t("footer.rights")}
+          {ctx.links.report ? (
+            // "Report this store" (LAN-§3.9): the server's absolute reportUrl as given; never in an export
+            <>
+              {" "}
+              <a className="lp-legal__report" href={ctx.links.report} rel="nofollow">
+                {ctx.t("footer.report")}
+              </a>
+            </>
+          ) : null}
         </p>
       </div>
     </footer>
@@ -363,7 +372,7 @@ export function LegalBody({ ctx, kind, updatedAt, policy = null }: LegalBodyProp
 
       <main id="main" className="lp-legal" tabIndex={-1}>
         <section className="lp-section lp-legal__hero" data-bg="soft" data-space="normal" aria-labelledby="lp-legal-title">
-          <span className="lp-legal__aurora" aria-hidden="true" />
+          <span className="lp-legal__tint" aria-hidden="true" />
           <div className="lp-container lp-legal__hero-inner">
             <DocSwitcher ctx={ctx} current={kind} chrome={chrome} />
             <p className="lp-legal__kicker">

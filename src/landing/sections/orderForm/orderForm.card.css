@@ -24,13 +24,13 @@
 
   .lp-orderForm--card .lp-of__step:not(:last-child)::before {
     background: var(--mx-hair);
-    transition: scale calc(var(--lp-dur-l) * 1.4) var(--lp-smooth) 0.25s;
+    transition: scale var(--lp-dur-l) var(--lp-smooth);
   }
 
   .lp-orderForm--card .lp-of__step:not(:last-child)::after {
     background: linear-gradient(var(--sec-accent), color-mix(in oklab, var(--sec-accent) 25%, transparent));
     scale: 1 calc(var(--of-done, 0));
-    transition: scale calc(var(--lp-dur-l) * 1.2) var(--lp-smooth);
+    transition: scale var(--lp-dur-l) var(--lp-smooth);
   }
 }
 
@@ -181,10 +181,6 @@
     border-radius: 0;
     background: none;
     box-shadow: none;
-  }
-
-  .lp-orderForm--card .lp-of__trust {
-    font-size: calc(var(--lp-step--1) * 0.82 * var(--lp-script-scale));
   }
 
   /* the receipt column is narrow: the button keeps its label on one line */

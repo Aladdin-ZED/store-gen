@@ -334,8 +334,11 @@ function ChoiceField({ ctx, item, group, scope, rules, priced, disabled }: Group
   const start = startOf(group.kind, options, rule);
   const pg = item ? photoGroupOf(item) : null;
   const swaps = pg && pg.gid === group.id && !pg.dim;
+  // F2 (LAN-§3.5 OF3): a group with one value to pick is never shown; its one radio stays checked, so the value is
+  // posted as the only choice (CSS hides `[data-one]`; the control stays enabled for the runtime and the payload)
+  const one = options.length === 1 && start === options[0] ? { "data-one": "" } : undefined;
   return (
-    <GroupShell field={key} look={look} name={group.name} value={start?.label} msgs={groupMessages(ctx, group)}>
+    <GroupShell field={key} look={look} name={group.name} value={start?.label} msgs={groupMessages(ctx, group)} extra={one}>
       <OptionSet
         ctx={ctx}
         name={key}
