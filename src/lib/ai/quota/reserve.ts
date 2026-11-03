@@ -70,6 +70,10 @@ export interface ReserveOpts {
   task: AiTaskId;
   /** a later stage of a pass whose first stage already charged the pass counter */
   passCharged?: boolean;
+  /** the pass counter a job charges (overrides the task's; null = none) */
+  pass?: "director" | "deep" | null;
+  /** a platform-paid call on a store task (an eval candidate): only the platform month */
+  payer?: "store" | "platform";
   /** the clock of the periods (tests); default now */
   now?: Date;
 }
@@ -165,7 +169,7 @@ export async function reserve(scope: WriteScope | "platform", est: { micros: num
   const now = opts.now ?? new Date();
   if (scope !== "platform" && scope.kind !== "member" && scope.kind !== "system" && scope.kind !== "public") throw new AiQuotaError("state", null);
   const [q, ai] = await Promise.all([scope === "platform" ? Promise.resolve(null) : quotaCtx(scope), getPlatformSetting("platform_ai")]);
-  const plan = planReservation({ task: opts.task, payer: scope === "platform" ? "platform" : undefined, pending: q?.status === "pending", passCharged: opts.passCharged === true });
+  const plan = planReservation({ task: opts.task, payer: scope === "platform" ? "platform" : opts.payer, pending: q?.status === "pending", passCharged: opts.passCharged === true, ...(opts.pass !== undefined ? { pass: opts.pass } : {}) });
   const rows = rowsFor(plan, est, q, ai.caps.monthlyUsd, ai.caps.pendingSharePct, now);
   const done: ChargedRow[] = [];
   for (const row of rows) {
@@ -203,4 +207,29 @@ export async function release(r: Reservation): Promise<void> {
   if (r.state !== "open") return;
   r.state = "released";
   await refundAll(r.scope, r.rows);
+}
+
+/* ------------------------------------------------------------------ */
+/* A reservation that outlives its request (pattern B, Batches)        */
+/* ------------------------------------------------------------------ */
+
+/** The JSON a job row or a batch item keeps of its reservation (no scope: the row's store is the scope). */
+export interface ReservationJson {
+  credits: number;
+  micros: number;
+  runId: string;
+  keys: Record<ReservationKey, boolean>;
+  rows: ChargedRow[];
+  state: Reservation["state"];
+  platform: boolean;
+}
+
+export function reservationJson(r: Reservation): ReservationJson {
+  return { credits: r.credits, micros: r.micros, runId: r.runId, keys: { ...r.keys }, rows: r.rows.map((x) => ({ ...x })), state: r.state, platform: r.scope === "platform" };
+}
+
+/** The reservation again, on the scope of the row that kept it (a platform-paid one needs none). */
+export function reservationFrom(j: ReservationJson, scope: WriteScope | null): Reservation {
+  if (!j.platform && !scope) throw new Error("ai quota: a store reservation without its store's scope");
+  return { credits: j.credits, micros: j.micros, runId: j.runId, keys: { ...j.keys }, rows: j.rows.map((x) => ({ ...x })), state: j.state, scope: j.platform ? "platform" : scope! };
 }

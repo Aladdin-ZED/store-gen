@@ -31,6 +31,22 @@
  *                call, 0 credits; AI-01 (9) the same input again → no call, via 'cache', 0 credits; a refusal and a
  *                malformed answer with its one retry; AI-01 (15) 12 stubbed 2 s calls on a pool of 4 → no pool wait
  *                above 100 ms while they are in flight
+ *   jobs-b       (step 8) pattern B with the fake provider: creation (row, reservation, pass, no after() with the flag
+ *                off, after() once with it on, none under the ai-no-after seam), aj_active_uq dedupe and busy, a job
+ *                done through polls alone (SG_AI_NO_AFTER=1), the same input run twice to done, a stage killed
+ *                mid-call re-claimed by the next poll (stage_resumed) and finished, a second kill → failed with the
+ *                instant result kept and the ledger reconciled, a driverless job handed to a one-item batch and
+ *                finished by ai.batches, the sweep making no provider / advanceJob / after() call (spies), two
+ *                concurrent polls running one stage once, the pool free during a stage's call, aiJobsForPulse
+ *                isolation, the 31st Director pass and the 6th deep pass refused, a concurrent twin deduped or busy
+ *   batches      queueAi dedupe and the 0.5x reservation, one submitted batch of 120 without betas, an ingest cut by
+ *                the budget resumed next tick with nothing twice, the yields every 50 items, a replayed result skipped,
+ *                the reservations reconciled at ingest
+ *   rollups      the automatic rollback of a canary on 20 synthetic generations within one ai.rollups run (audit row,
+ *                notification), a healthy canary's slice recomputed, ai_runs → ai_usage_daily idempotent, ai.reconcile
+ *                of an abandoned run
+ *   eval-live    the estimate, a live run (2 cases × 2 reps) through Batches with its judge items (judge ≠ candidate on
+ *                every item) to a done row with the judge's cost apart, a smoke run scored at once
  * Exit code 1 when a check fails.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -790,6 +806,403 @@ async function runAiSuite(fx: Fx): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/* step 8: detached jobs, Batches, rollups, live eval                  */
+/* ------------------------------------------------------------------ */
+
+type JobCtxT = import("@/lib/jobs/runner").JobCtx & { yields: number };
+
+/** A cron context of the job runner's shape (P8's runner is not in R1 yet): a deadline, yields counted. */
+function jobCtx(job: string, budgetMs = 60_000, onYield?: (ctx: JobCtxT) => void): JobCtxT {
+  const { systemCtx } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  const ctx: JobCtxT = {
+    ...systemCtx(job),
+    deadline: Date.now() + budgetMs,
+    tickId: `t-${randomBytes(3).toString("hex")}`,
+    cursor: "",
+    setCursor: async () => undefined,
+    yields: 0,
+    yield: async () => {
+      ctx.yields++;
+      onYield?.(ctx);
+      await new Promise<void>((r) => setImmediate(r));
+    },
+    lagMs: () => 0,
+  };
+  return ctx;
+}
+
+async function flagOverride(key: string, storeId: string, on: boolean | null): Promise<void> {
+  if (on === null) await q("DELETE FROM flag_overrides WHERE flag_key = ? AND scope = 'store' AND scope_id = ?", [key, storeId]);
+  else await q("INSERT INTO flag_overrides (flag_key, scope, scope_id, value, updated_at) VALUES (?, 'store', ?, ?, UTC_TIMESTAMP(3)) ON DUPLICATE KEY UPDATE value = VALUES(value)", [key, storeId, JSON.stringify(on)]);
+  load<typeof import("@/lib/ai/server/flags")>("@/lib/ai/server/flags").invalidateAiFlags();
+}
+
+const clearBuckets = (storeId: string) => q("DELETE FROM rate_limits WHERE bucket LIKE ?", [`s:${storeId}:%`]);
+
+type JobRowT = { id: string; status: string; active: string | null; stage: string | null; stage_attempts: number; driver: string | null; transport: string; class: string; error: string | null; result: string | null; progress: string | null; input_hash: string };
+const jobRow = async (id: string) => (await q<JobRowT>("SELECT * FROM ai_jobs WHERE id = ?", [id]))[0];
+const jobDoc = async (id: string) => JSON.parse((await jobRow(id))?.result ?? "{}") as { reservation?: { state: string } | null; instant?: unknown; outputs?: Record<string, unknown>; input?: unknown };
+
+async function jobsSuiteB(fx: Fx): Promise<void> {
+  suite("jobs-b");
+  const { startFakeAnthropic } = load<typeof import("@/lib/ai/testing/fake-anthropic")>("@/lib/ai/testing/fake-anthropic");
+  const { resetAnthropic } = load<typeof import("@/lib/ai/server/client")>("@/lib/ai/server/client");
+  const { breaker } = load<typeof import("@/lib/ai/server/breaker")>("@/lib/ai/server/breaker");
+  const { ALL_FIXTURES } = load<typeof import("@/lib/ai/eval/fixtures")>("@/lib/ai/eval/fixtures");
+  const E = load<typeof import("@/lib/ai/jobs/enqueue")>("@/lib/ai/jobs/enqueue");
+  const R = load<typeof import("@/lib/ai/jobs/run")>("@/lib/ai/jobs/run");
+  const C = load<typeof import("@/lib/ai/jobs/claim")>("@/lib/ai/jobs/claim");
+  const { recoverOrphans } = load<typeof import("@/lib/ai/jobs/recover")>("@/lib/ai/jobs/recover");
+  const { aiJobsForPulse } = load<typeof import("@/lib/ai/jobs/pulse")>("@/lib/ai/jobs/pulse");
+  const { aiPolicyFor, invalidateAiPolicy } = load<typeof import("@/lib/ai/router/server")>("@/lib/ai/router/server");
+  const { jobs: aiTrackJobs } = load<typeof import("@/lib/jobs/tracks/ai")>("@/lib/jobs/tracks/ai");
+  const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { A, B } = fx;
+  const env = process.env as Record<string, string | undefined>;
+  const fake = await startFakeAnthropic();
+  env.SG_E2E = "1";
+  env.SG_AI_BASE_URL = fake.origin;
+  env.SG_AI_NO_AFTER = "1";
+  env.ANTHROPIC_API_KEY = FAKE_KEY;
+  resetAnthropic();
+  breaker().reset();
+  const spy = { after: 0, trace: [] as string[] };
+  R.jobDeps.after = () => void spy.after++;
+  R.jobDeps.trace = (e, _id, d) => void spy.trace.push(`${e}:${d ?? ""}`);
+  const ctxA = ctxOf(A, A.owner);
+  const crit = ALL_FIXTURES.find((f) => f.task === "design.critique")!;
+  const plan = ALL_FIXTURES.find((f) => f.task === "design.plan")!;
+  const recorded = JSON.parse(readFileSync(path.join(ROOT, "src/lib/ai/eval/sets/director.critique/recorded/director.critique@s1.json"), "utf8")) as { runs: Record<string, { output: unknown }[]> };
+  const critOut = recorded.runs[crit.id]![0]!.output;
+  const input = (n: number) => ({ critique: crit.input, run: n });
+  const job = (n: number, instant?: unknown) => E.enqueueAiJob(ctxA, { kind: "director_deep", task: "design.critique", input: input(n), ...(instant !== undefined ? { instant } : {}) });
+  const msgs = () => fake.total("/v1/messages");
+  const stale = (id: string) => q("UPDATE ai_jobs SET heartbeat_at = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 61 SECOND) WHERE id = ?", [id]);
+  const sweep = async () => {
+    const before = { msgs: fake.total(), after: spy.after, trace: spy.trace.length };
+    const r = await recoverOrphans(jobCtx("ai.jobs", 5_000));
+    const newTrace = spy.trace.slice(before.trace);
+    return { r, providerCalls: fake.total() - before.msgs, afterCalls: spy.after - before.after, drivers: newTrace.filter((t) => t.startsWith("advance") || t.startsWith("after") || t.startsWith("stage")) };
+  };
+  try {
+    await resetStore(A.id);
+    await clearBuckets(A.id);
+    await setPlatform("ai_cost_micros", 0);
+    await setAi({ enabled: true, caps: { monthlyUsd: 100, storeDailyCapPct: 100 } }, fx.staff);
+    await flagOverride("ai_director_brief", A.id, true);
+    await flagOverride("ai_detached_jobs", A.id, false);
+
+    // creation: the row, the reservation, the pass, no after() while the flag is off (seam off too)
+    delete env.SG_AI_NO_AFTER;
+    const j1 = await job(1, { picks: ["c1", "c2", "c3"] });
+    env.SG_AI_NO_AFTER = "1";
+    const r1 = j1.ok ? await jobRow(j1.jobId) : undefined;
+    check("enqueueAiJob: the critique-as-job is queued, active, its plan one critique stage on the interactive class", j1.ok && !j1.deduped && r1?.status === "queued" && r1.active === "1" && JSON.parse(r1.progress ?? "{}").plan?.join() === "critique" && r1.class === "director_interactive", j1.ok ? r1 : j1.code);
+    check("enqueueAiJob: one reservation for every stage, the Director pass counted once", (await jobDoc(j1.ok ? j1.jobId : "")).reservation?.state === "open" && (await usage(A.id, "ai_director_passes")) === 1 && (await usage(A.id, "ai_credits")) > 0);
+    check("flag ai_detached_jobs off: the creating request schedules no after() (spy)", spy.after === 0);
+    check("no model call at creation", msgs() === 0);
+    const [d1, d2] = await Promise.all([job(1), job(1)]);
+    check("aj_active_uq: an identical active job answers the first's id, deduped", d1.ok && d2.ok && d1.jobId === (j1.ok ? j1.jobId : "") && d2.jobId === d1.jobId && d1.deduped && d2.deduped, [d1, d2]);
+    const other = await job(2);
+    check("one deep job per store at a time: a second, different one answers busy", !other.ok && other.code === "busy", other);
+    check("dedupe and busy charged nothing more", (await usage(A.id, "ai_director_passes")) === 1);
+
+    // polls alone (SG_AI_NO_AFTER=1) drive the job to done
+    const id1 = j1.ok ? j1.jobId : "";
+    fake.enqueue({ kind: "ok", json: critOut, usage: { input_tokens: 15_000, output_tokens: 4_000, cache_read_input_tokens: 9_000, cache_creation_input_tokens: 0 } });
+    const v1 = await R.advanceJob(A.scope, id1, "poll", 90_000);
+    const runs1 = await q<{ id: string; via: string; job_id: string; flags: string | null; credits: number; status: string }>("SELECT * FROM ai_runs WHERE job_id = ?", [id1]);
+    check("SG_AI_NO_AFTER=1: one poll ran the stage and the job is done", v1?.status === "done" && v1.progress.done === 1 && v1.outputs?.critique !== undefined && msgs() === 1, v1);
+    check("the stage's run row: via job, its job id, flagged stage_resumed (a poll drove it)", runs1.length === 1 && runs1[0]!.via === "job" && runs1[0]!.status === "ok" && (runs1[0]!.flags ?? "").includes("stage_resumed"), runs1);
+    const doc1 = await jobDoc(id1);
+    check("done: active NULL, the input dropped, the reservation reconciled at the run's credits", (await jobRow(id1))?.active === null && doc1.input === undefined && doc1.reservation?.state === "reconciled" && (await usage(A.id, "ai_credits")) === Number(runs1[0]!.credits), { doc: doc1.reservation, credits: await usage(A.id, "ai_credits"), run: runs1[0]?.credits });
+    check("ai.job_done notified to the requester", (await q("SELECT id FROM notifications WHERE kind = 'ai.job_done' AND user_id = ?", [A.owner])).length === 1);
+    const again = await job(1);
+    fake.enqueue({ kind: "ok", json: critOut });
+    const v1b = again.ok && !again.deduped ? await R.advanceJob(A.scope, again.jobId, "poll", 90_000) : null;
+    const twins = await q<{ active: string | null; status: string }>("SELECT active, status FROM ai_jobs WHERE input_hash = ?", [r1?.input_hash ?? ""]);
+    check("the same input run twice to done: two rows, both active NULL, no unique-key error", again.ok && !again.deduped && v1b?.status === "done" && twins.length === 2 && twins.every((t) => t.status === "done" && t.active === null), twins);
+
+    // a process killed mid-stage: the sweep clears the lease, the next poll re-claims (stage_resumed) and finishes
+    await clearBuckets(A.id);
+    const j3 = await job(3, { picks: ["k"] });
+    const id3 = j3.ok ? j3.jobId : "";
+    const c3 = await C.claimStage(A.scope, id3, "after");
+    await stale(id3);
+    const s3 = await sweep();
+    const r3 = await jobRow(id3);
+    check("killed mid-stage: the sweep clears the stale lease, the stage kept for a re-claim", "stage" in c3 && s3.r.cleared === 1 && r3?.status === "running" && r3.stage === "critique" && r3.stage_attempts === 0, { c3, s3: s3.r, r3 });
+    check("the sweep made no provider call, no advanceJob, no after() (spies)", s3.providerCalls === 0 && s3.afterCalls === 0 && s3.drivers.length === 0, s3);
+    fake.enqueue({ kind: "ok", json: critOut });
+    const v3 = await R.advanceJob(A.scope, id3, "poll", 90_000);
+    const run3 = await q<{ flags: string | null }>("SELECT flags FROM ai_runs WHERE job_id = ?", [id3]);
+    check("the next poll re-claims the same stage and finishes the job (stage_resumed)", v3?.status === "done" && run3.length === 1 && (run3[0]!.flags ?? "").includes("stage_resumed") && spy.trace.includes("stage:poll:critique"), { v3: v3?.status, run3 });
+
+    // a second kill of the same stage: failed, the instant result kept, the ledger reconciled
+    await clearBuckets(A.id);
+    const j4 = await job(4, { picks: ["kept"] });
+    const id4 = j4.ok ? j4.jobId : "";
+    await C.claimStage(A.scope, id4, "after");
+    await stale(id4);
+    await sweep();
+    const re = await C.claimStage(A.scope, id4, "poll");
+    const attempts = (await jobRow(id4))?.stage_attempts;
+    check("the re-claim of an orphaned stage counts stage_attempts 1 (resumed)", "stage" in re && re.resumed && attempts === 1, { re, attempts });
+    await stale(id4);
+    const s4 = await sweep();
+    const r4 = await jobRow(id4);
+    const doc4 = await jobDoc(id4);
+    check("a second orphaning fails the job: orphaned:critique, active NULL", s4.r.failed === 1 && r4?.status === "failed" && r4.error === "orphaned:critique" && r4.active === null, { s4: s4.r, r4: r4 && { status: r4.status, error: r4.error } });
+    check("the instant result is kept and the ledger reconciled (the orphaned stage at its share)", JSON.stringify(doc4.instant) === JSON.stringify({ picks: ["kept"] }) && doc4.reservation?.state === "reconciled", doc4);
+    check("the requester is told (ai.job_failed); the recovery path never called after() or a provider", (await q("SELECT id FROM notifications WHERE kind = 'ai.job_failed'")).length >= 1 && s4.afterCalls === 0 && s4.providerCalls === 0);
+
+    // a driverless job: the sweep hands its stage to a one-item batch; ai.batches collects it
+    await clearBuckets(A.id);
+    const j5 = await job(5);
+    const id5 = j5.ok ? j5.jobId : "";
+    await q("UPDATE ai_jobs SET created_at = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 MINUTE), updated_at = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 61 SECOND) WHERE id = ?", [id5]);
+    const s5 = await sweep();
+    const r5 = await jobRow(id5);
+    const items5 = await q<{ id: string; ref_kind: string; ref_id: string; reserved_credits: number; state: string }>("SELECT * FROM ai_batch_items WHERE ref_kind = 'job' AND ref_id = ?", [`${id5}:critique`]);
+    check("a driverless job (60 s without poll or after()): its stage goes to a one-item batch", s5.r.resubmitted === 1 && r5?.stage === "batch:critique" && r5.transport === "batch" && r5.driver === "cron" && items5.length === 1 && items5[0]!.state === "queued" && Number(items5[0]!.reserved_credits) === 0, { s5: s5.r, r5: r5 && { stage: r5.stage, transport: r5.transport, driver: r5.driver }, items5 });
+    check("the hand-off made no provider call, no advanceJob, no after()", s5.providerCalls === 0 && s5.afterCalls === 0 && s5.drivers.length === 0, s5);
+    const m5 = msgs();
+    const polled = await R.advanceJob(A.scope, id5, "poll", 90_000);
+    check("a poll while the batch owns the stage runs nothing", polled?.status === "running" && polled.stage === "batch:critique" && msgs() === m5, polled);
+    const batches = aiTrackJobs.find((j) => j.name === "ai.batches")!;
+    fake.enqueue({ kind: "ok", json: critOut });
+    const b1 = await batches.run(jobCtx("ai.batches", 8_000));
+    const b2 = await batches.run(jobCtx("ai.batches", 8_000));
+    const r5b = await jobRow(id5);
+    const run5 = await q<{ via: string; flags: string | null }>("SELECT via, flags FROM ai_runs WHERE job_id = ?", [id5]);
+    check("ai.batches submits the job stage, ingests it and the job is done by the batch", r5b?.status === "done" && r5b.driver === "batch" && r5b.active === null && run5.length === 1 && run5[0]!.via === "batch" && (run5[0]!.flags ?? "").includes("job_degraded_to_batch"), { b1: b1.summary, b2: b2.summary, r5b: r5b && { status: r5b.status, driver: r5b.driver }, run5 });
+
+    // two concurrent polls run one stage once (the lease race)
+    await clearBuckets(A.id);
+    const j6 = await job(6);
+    const id6 = j6.ok ? j6.jobId : "";
+    fake.delayMs = 800;
+    fake.enqueue({ kind: "ok", json: critOut });
+    const before6 = msgs();
+    const [p1, p2] = await Promise.all([R.advanceJob(A.scope, id6, "poll", 90_000), R.advanceJob(A.scope, id6, "poll", 90_000)]);
+    fake.delayMs = 0;
+    const statuses = [p1?.status, p2?.status].sort().join();
+    check("two concurrent polls: one stage, one model call; the other answered at once", msgs() === before6 + 1 && (await q("SELECT id FROM ai_runs WHERE job_id = ?", [id6])).length === 1 && (statuses === "done,running" || statuses === "done,done"), { calls: msgs() - before6, statuses });
+
+    // each stage releases its pool connection before the model call (pool of 4)
+    await clearBuckets(A.id);
+    const j7 = await job(7);
+    const id7 = j7.ok ? j7.jobId : "";
+    fake.delayMs = 1_500;
+    fake.enqueue({ kind: "ok", json: critOut });
+    const inflight = R.advanceJob(A.scope, id7, "poll", 90_000);
+    const t0 = Date.now();
+    while (fake.inFlight < 1 && Date.now() - t0 < 5_000) await new Promise((r) => setTimeout(r, 10));
+    const s0 = performance.now();
+    await Promise.all(Array.from({ length: 4 }, () => pool().query("SELECT SLEEP(0.2)")));
+    const parallelMs = Math.round(performance.now() - s0);
+    const v7 = await inflight;
+    fake.delayMs = 0;
+    check("while a stage's model call is in flight, all 4 pool connections are free (4 × SLEEP(0.2) in parallel < 390 ms)", parallelMs < 390 && v7?.status === "done", { parallelMs, status: v7?.status });
+
+    // the flag on: after() is the free first driver (spy); the seam ai-no-after turns it off
+    await clearBuckets(A.id);
+    await flagOverride("ai_detached_jobs", A.id, true);
+    delete env.SG_AI_NO_AFTER;
+    const afterBefore = spy.after;
+    const j8 = await job(8);
+    check("flag ai_detached_jobs on: the creating request schedules after() once", j8.ok && spy.after === afterBefore + 1, spy.after - afterBefore);
+    if (j8.ok) await E.cancelAiJob(ctxA, j8.jobId);
+    const r8 = j8.ok ? await jobRow(j8.jobId) : undefined;
+    check("cancelAiJob: cancelled, active NULL, the untouched reservation released", r8?.status === "cancelled" && r8.active === null && (await jobDoc(j8.ok ? j8.jobId : "")).reservation?.state === "released");
+    env.SG_AI_NO_AFTER = "1";
+    const j9 = await job(9);
+    check("the ai-no-after seam: no after() even with the flag on", j9.ok && spy.after === afterBefore + 1);
+    if (j9.ok) await E.cancelAiJob(ctxA, j9.jobId);
+    await flagOverride("ai_detached_jobs", A.id, false);
+
+    // the pulse: the viewer's own jobs of the scope's store only
+    const pulseA = await aiJobsForPulse(A.scope, { userId: A.owner }, new Date(Date.now() - 5 * 60_000));
+    const pulseB = await aiJobsForPulse(B.scope, { userId: A.owner }, new Date(Date.now() - 5 * 60_000));
+    const pulseStaff = await aiJobsForPulse(A.scope, { userId: fx.staff }, new Date(Date.now() - 5 * 60_000));
+    check("aiJobsForPulse: A's owner sees A's finished jobs", pulseA.done.includes(id1) && pulseA.done.includes(id5), pulseA);
+    check("aiJobsForPulse: never another store's ids nor another viewer's", pulseB.running === 0 && pulseB.done.length === 0 && pulseStaff.running === 0 && pulseStaff.done.length === 0, { pulseB, pulseStaff });
+
+    // the caps: the 31st Director pass of the day, the 6th deep pass, a second concurrent deep job
+    await clearBuckets(A.id);
+    await setUsage(A.id, "ai_director_passes", 30);
+    const p31 = await job(10);
+    check("the 31st Director pass of the day is skipped (quota_day), nothing charged", !p31.ok && p31.code === "quota_day" && (await usage(A.id, "ai_director_passes")) === 30, p31);
+    await setUsage(A.id, "ai_deep_passes", 5);
+    const deep = await E.enqueueAiJob(ctxA, { kind: "director_deep", task: "design.plan", input: { brief: plan.input, critique: crit.input } });
+    invalidateAiPolicy(A.id);
+    const pol = await aiPolicyFor(ctxA);
+    check("the 6th deep pass is refused (quota_day) and the policy shows 0 left with the reset", !deep.ok && deep.code === "quota_day" && pol.cloud.deepPassesLeft === 0, { deep, left: pol.cloud.deepPassesLeft });
+    await setUsage(A.id, "ai_deep_passes", 0);
+    await setUsage(A.id, "ai_director_passes", 0);
+    await clearBuckets(A.id);
+    const [x1, x2] = await Promise.all([job(11), job(11)]);
+    const x3 = await job(12);
+    check("a second concurrent deep job is deduped or busy", x1.ok && x2.ok && x1.jobId === x2.jobId && (x1.deduped || x2.deduped) && !x3.ok && x3.code === "busy", { x1, x2, x3 });
+    if (x1.ok) await E.cancelAiJob(ctxA, x1.jobId);
+  } finally {
+    R.jobDeps.trace = null;
+    await fake.close();
+    delete env.SG_E2E;
+    delete env.SG_AI_BASE_URL;
+    delete env.SG_AI_NO_AFTER;
+    resetAnthropic();
+  }
+}
+
+async function batchesSuite(fx: Fx): Promise<void> {
+  suite("batches");
+  const { startFakeAnthropic } = load<typeof import("@/lib/ai/testing/fake-anthropic")>("@/lib/ai/testing/fake-anthropic");
+  const { resetAnthropic } = load<typeof import("@/lib/ai/server/client")>("@/lib/ai/server/client");
+  const { queueAi } = load<typeof import("@/lib/ai/router/server")>("@/lib/ai/router/server");
+  const { submitQueued } = load<typeof import("@/lib/ai/batch/submit")>("@/lib/ai/batch/submit");
+  const { pollAndIngest, ingestResult } = load<typeof import("@/lib/ai/batch/ingest")>("@/lib/ai/batch/ingest");
+  const { itemById } = load<typeof import("@/lib/ai/platform/batches")>("@/lib/ai/platform/batches");
+  const { getPlatformSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const { A } = fx;
+  const env = process.env as Record<string, string | undefined>;
+  const fake = await startFakeAnthropic();
+  env.SG_E2E = "1";
+  env.SG_AI_BASE_URL = fake.origin;
+  env.ANTHROPIC_API_KEY = FAKE_KEY;
+  resetAnthropic();
+  try {
+    await resetStore(A.id);
+    await q("DELETE FROM ai_runs WHERE store_id = ?", [A.id]);
+    await setAi({ enabled: true, caps: { monthlyUsd: 100, storeDailyCapPct: 100 } }, fx.staff);
+    const tag = randomBytes(3).toString("hex");
+    const ids: string[] = [];
+    for (let i = 0; i < 120; i++) ids.push((await queueAi(A.scope, "injection.screen", { text: `Savon ${tag} ${i}`, source: "note" }, { kind: "test", id: `${tag}-${i}` })).itemId);
+    const dup = await queueAi(A.scope, "injection.screen", { text: `Savon ${tag} 0`, source: "note" }, { kind: "test", id: `${tag}-0` });
+    const reserved = await usage(A.id, "ai_credits");
+    check("queueAi: 120 items, the same work queued twice is one item (dedupe)", new Set(ids).size === 120 && dup.deduped && dup.itemId === ids[0], dup);
+    check("queueAi: credits reserved at queue time (the batch price)", reserved > 0, reserved);
+    const sub = await submitQueued(jobCtx("ai.batches", 8_000));
+    const batchRows = await q<{ id: string; items: number; provider_batch_id: string; model: string }>("SELECT * FROM ai_batches ORDER BY created_at DESC LIMIT 1");
+    const batchReq = fake.requests.filter((r) => r.path === "/v1/messages/batches").slice(-1)[0];
+    const reqs = (batchReq?.body?.requests ?? []) as { custom_id: string; params: Record<string, unknown> }[];
+    check("submit: one batch of 120 (≥ 20 queued), one model, custom_id i_<id>", sub.batches === 1 && sub.items === 120 && reqs.length === 120 && reqs.every((r) => /^i_[0-9A-Z]{26}$/.test(r.custom_id) && r.params.model === batchRows[0]?.model), { sub, n: reqs.length });
+    check("a batch request carries no betas, fallbacks or speed", reqs.every((r) => !("fallbacks" in r.params) && !("speed" in r.params) && !("betas" in r.params)) && (batchReq?.beta ?? null) === null);
+    // a budget cut at the first yield (item 50): resumable, nothing ingested twice afterwards
+    const cut = jobCtx("ai.batches", 60_000, (c) => void (c.deadline = 0));
+    const i1 = await pollAndIngest(cut);
+    const after1 = (await q("SELECT id FROM ai_runs WHERE store_id = ? AND via = 'batch'", [A.id])).length;
+    check("ingest cut by the budget at its first yield: resumable, 49 ingested", i1.resumable && i1.ingested === 49 && after1 === 49 && cut.yields >= 1, { i1, after1 });
+    const full = jobCtx("ai.batches", 60_000);
+    const i2 = await pollAndIngest(full);
+    const after2 = await q<{ credits: number }>("SELECT credits FROM ai_runs WHERE store_id = ? AND via = 'batch'", [A.id]);
+    check("the next tick streams the batch again and ingests the 71 left, none twice", i2.ingested === 71 && after2.length === 120, { i2, n: after2.length });
+    check("the ingest loop yields every 50 items (core §H.2)", full.yields >= 2, full.yields);
+    const i3 = await pollAndIngest(jobCtx("ai.batches", 60_000));
+    check("a third tick ingests nothing (idempotent)", i3.ingested === 0 && (await q("SELECT id FROM ai_runs WHERE store_id = ? AND via = 'batch'", [A.id])).length === 120, i3);
+    const item0 = await itemById(ids[0]!);
+    const settings = await getPlatformSetting("platform_ai");
+    const replay = item0 ? await ingestResult(jobCtx("ai.batches"), item0, { type: "succeeded", message: { id: "m", type: "message", role: "assistant", model: item0.model, content: [{ type: "text", text: '{"suspicious":false,"reason":"x"}', citations: null }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null } } as never }, settings) : null;
+    check("an item already ingested is skipped by a replayed result", item0?.state === "ingested" && item0.dedupe === null && replay === "skipped", { state: item0?.state, replay });
+    const billed = after2.reduce((n, r) => n + Number(r.credits ?? 0), 0);
+    check("each item's reservation reconciled at ingest: ai_credits = the runs' credits", (await usage(A.id, "ai_credits")) === billed, { usage: await usage(A.id, "ai_credits"), billed });
+  } finally {
+    await fake.close();
+    delete env.SG_E2E;
+    delete env.SG_AI_BASE_URL;
+    resetAnthropic();
+  }
+}
+
+async function rollupsSuite(fx: Fx): Promise<void> {
+  suite("rollups");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const { syncPromptVersions } = load<typeof import("@/lib/ai/platform/prompt-versions")>("@/lib/ai/platform/prompt-versions");
+  const { jobs: aiTrackJobs } = load<typeof import("@/lib/jobs/tracks/ai")>("@/lib/jobs/tracks/ai");
+  const { A } = fx;
+  await syncPromptVersions();
+  await q("DELETE FROM ai_runs WHERE store_id = ?", [A.id]);
+  const canary = async (task: string, version: string) =>
+    q("INSERT INTO prompt_versions (task, version, provider, template_hash, status, canary_bp, canary_started_at, created_at) VALUES (?, ?, 'server', ?, 'canary', 5000, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY), UTC_TIMESTAMP(3))", [task, version, "0".repeat(64)]);
+  const runs = async (task: string, version: string, n: number, status: (i: number) => string) => {
+    for (let i = 0; i < n; i++) {
+      await q("INSERT INTO ai_runs (id, store_id, task, surface, provider, via, class, prompt_version, input_hash, status, ms, credits, cost_micros, created_at) VALUES (?, ?, ?, 'wizard', 'server', 'stream', 'worker', ?, ?, ?, 1200, 1, 9000, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 HOUR))", [newId(), A.id, task, version, randomBytes(32).toString("hex"), status(i)]);
+    }
+  };
+  await canary("copy.hero", "copy.hero@s9");
+  await runs("copy.hero", "copy.hero@s9", 20, (i) => (i < 8 ? "invalid_output" : "ok"));
+  await runs("copy.hero", "copy.hero@s1", 40, () => "ok");
+  await canary("copy.field", "copy.field@s9");
+  await runs("copy.field", "copy.field@s9", 25, () => "ok");
+  await runs("copy.field", "copy.field@s1", 25, () => "ok");
+  const rollups = aiTrackJobs.find((j) => j.name === "ai.rollups")!;
+  const res = await rollups.run(jobCtx("ai.rollups", 5_000));
+  const hero = (await q<{ status: string; notes: string | null; rolled_back_at: unknown; rollback_reason: string | null }>("SELECT * FROM prompt_versions WHERE version = 'copy.hero@s9'"))[0];
+  const field = (await q<{ status: string; canary_bp: number; canary_runs: number }>("SELECT * FROM prompt_versions WHERE version = 'copy.field@s9'"))[0];
+  check("20 synthetic generations with 40 % invalid outputs: retired within one ai.rollups run", hero?.status === "retired" && hero.notes === "auto-rollback: invalid_refusal_timeout" && hero.rolled_back_at !== null, { hero, summary: res.summary });
+  check("the rollback's audit row and staff notification", (await q("SELECT id FROM audit_log WHERE action = 'platform.ai.prompt_rolled_back' AND target = 'copy.hero@s9'")).length === 1 && (await q("SELECT id FROM notifications WHERE kind = 'ai.canary_rolled_back'")).length === 1);
+  check("a healthy canary keeps running; its slice recomputed from the 7-day volume (< 400 runs → 5,000 bp)", field?.status === "canary" && Number(field.canary_bp) === 5_000 && Number(field.canary_runs) === 25, field);
+  const usage1 = await q<{ runs: number; ok: number; invalid: number; cost_micros: number }>("SELECT runs, ok, invalid, cost_micros FROM ai_usage_daily WHERE store_id = ? AND task = 'copy.hero' ORDER BY day", [A.id]);
+  check("ai_runs → ai_usage_daily for the store (copy.hero: 60 runs, 52 ok, 8 invalid)", usage1.reduce((n, r) => n + Number(r.runs), 0) === 60 && usage1.reduce((n, r) => n + Number(r.invalid), 0) === 8, usage1);
+  await rollups.run(jobCtx("ai.rollups", 5_000));
+  const usage2 = await q<{ runs: number }>("SELECT runs FROM ai_usage_daily WHERE store_id = ? AND task = 'copy.hero'", [A.id]);
+  check("a second rollup writes the same numbers (idempotent 2-day upsert)", usage2.reduce((n, r) => n + Number(r.runs), 0) === 60);
+  // the reconcile job: an abandoned running run
+  const stale = newId();
+  await q("INSERT INTO ai_runs (id, store_id, task, surface, provider, via, input_hash, status, ms, reserved_credits, created_at) VALUES (?, ?, 'copy.page', 'wizard', 'server', 'stream', ?, 'running', 0, 7, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 11 MINUTE))", [stale, A.id, "a".repeat(64)]);
+  await aiTrackJobs.find((j) => j.name === "ai.reconcile")!.run(jobCtx("ai.reconcile", 2_000));
+  const ab = (await q<{ status: string; error_code: string; credits: number; reconciled_at: unknown }>("SELECT * FROM ai_runs WHERE id = ?", [stale]))[0];
+  check("ai.reconcile: a run running for 10 min → error/abandoned, reconciled at its reservation", ab?.status === "error" && ab.error_code === "abandoned" && Number(ab.credits) === 7 && ab.reconciled_at !== null, ab);
+}
+
+async function evalLiveSuite(fx: Fx): Promise<void> {
+  suite("eval-live");
+  const { startFakeAnthropic } = load<typeof import("@/lib/ai/testing/fake-anthropic")>("@/lib/ai/testing/fake-anthropic");
+  const { resetAnthropic } = load<typeof import("@/lib/ai/server/client")>("@/lib/ai/server/client");
+  const { startEvalRun, estimateEvalRun } = load<typeof import("@/lib/ai/eval/live")>("@/lib/ai/eval/live");
+  const { getPlatformSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const { jobs: aiTrackJobs } = load<typeof import("@/lib/jobs/tracks/ai")>("@/lib/jobs/tracks/ai");
+  const env = process.env as Record<string, string | undefined>;
+  const fake = await startFakeAnthropic();
+  env.SG_E2E = "1";
+  env.SG_AI_BASE_URL = fake.origin;
+  env.ANTHROPIC_API_KEY = FAKE_KEY;
+  resetAnthropic();
+  try {
+    await setPlatform("ai_cost_micros", 0);
+    await setAi({ enabled: true, caps: { monthlyUsd: 100 } }, fx.staff);
+    const settings = await getPlatformSetting("platform_ai", { fresh: true });
+    const est = estimateEvalRun({ family: "copy.hero", kind: "live", version: "copy.hero@s1" }, settings);
+    check("the estimate first: cases × reps, judge items and a cost line", !!est && est.reps === 2 && est.candidateItems === est.cases * 2 && est.judgeItems > 0 && /items × 2 reps · about \$/.test(est.line), est);
+    const started = await startEvalRun({ userId: fx.staff }, { family: "copy.hero", kind: "live", version: "copy.hero@s1", limit: 2 });
+    check("startEvalRun(live): the oracle and the null passed the harness check, the row is running", started.ok && started.status === "running", started);
+    const runId = started.ok ? started.runId : "";
+    const batches = aiTrackJobs.find((j) => j.name === "ai.batches")!;
+    for (let i = 0; i < 6; i++) {
+      await batches.run(jobCtx("ai.batches", 8_000));
+      const st = (await q<{ status: string }>("SELECT status FROM ai_eval_runs WHERE id = ?", [runId]))[0]?.status;
+      if (st === "done" || st === "failed") break;
+    }
+    const row = (await q<{ status: string; model: string; passed: number | null; scores: string | null; gate: string | null; cost_micros: number; judge_cost_micros: number; fixtures_hash: string }>("SELECT * FROM ai_eval_runs WHERE id = ?", [runId]))[0];
+    const items = await q<{ ref_kind: string; model: string; state: string }>("SELECT ref_kind, model, state FROM ai_batch_items WHERE eval_run_id = ?", [runId]);
+    const cands = items.filter((i) => i.ref_kind === "eval");
+    const judges = items.filter((i) => i.ref_kind === "eval_judge");
+    check("live: 2 cases × 2 reps through Batches, then the judge items, then the row done with its gate", row?.status === "done" && cands.length === 4 && judges.length > 0 && row.gate !== null && row.scores !== null && /^[0-9a-f]{64}$/.test(row.fixtures_hash), { status: row?.status, cands: cands.length, judges: judges.length });
+    check("judge ≠ candidate on every batch item (AI-07 (4))", judges.every((j) => j.model !== row?.model) && cands.every((c) => c.model === row?.model), { model: row?.model, judges: [...new Set(judges.map((j) => j.model))] });
+    check("the judge's cost is recorded apart from the candidate's", Number(row?.cost_micros) > 0 && Number(row?.judge_cost_micros) > 0, { cost: row?.cost_micros, judge: row?.judge_cost_micros });
+    check("the eval's cost counted against the platform month", (await platformUsage("ai_cost_micros")) > 0);
+    const smoke = await startEvalRun({ userId: fx.staff }, { family: "copy.hero", kind: "smoke", version: "copy.hero@s1", limit: 1 });
+    const srow = smoke.ok ? (await q<{ status: string; kind: string }>("SELECT status, kind FROM ai_eval_runs WHERE id = ?", [smoke.runId]))[0] : undefined;
+    check("startEvalRun(smoke): interactive calls, scored at once", smoke.ok && smoke.status === "done" && srow?.status === "done" && srow.kind === "smoke", smoke);
+  } finally {
+    await fake.close();
+    delete env.SG_E2E;
+    delete env.SG_AI_BASE_URL;
+    resetAnthropic();
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* main                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -819,6 +1232,10 @@ async function main(): Promise<void> {
     await runAiSuite(fx);
     await promptVersionsSuite();
     await sf05Suite();
+    await jobsSuiteB(fx);
+    await batchesSuite(fx);
+    await rollupsSuite(fx);
+    await evalLiveSuite(fx);
     done = true;
   } catch (err) {
     check("the suite ran to the end", false, err instanceof Error ? err.stack : String(err));

@@ -1,8 +1,61 @@
 /**
- * Admin messages (fr) of the ai file (P7 AI, ai.md; D67).
+ * Admin messages (fr) of the ai file (P7 AI, ai.md AI-§L; D67).
  * Extension file (docs/STORE-SAAS.md §I.5, §K.3), created empty at P0 and spread by src/lib/i18n/admin/fr.ts;
  * a partial of ../en/ai.ts (a missing key falls back to English).
  */
 import type { messages as en } from "../en/ai";
 
-export const messages: Partial<Record<keyof typeof en, string>> = {};
+export const messages: Partial<Record<keyof typeof en, string>> = {
+  /* ---- notifications de la boutique ---- */
+  "notify.ai.credits_80.title": "80 % des crédits IA du mois sont utilisés",
+  "notify.ai.credits_80.body": "{pct} % des crédits IA de {month} sont utilisés. Une fois épuisés, l'IA cloud est en pause jusqu'au mois prochain ; l'IA de l'appareil et les textes intégrés continuent de fonctionner.",
+  "notify.ai.credits_out.title": "Les crédits IA du mois sont épuisés",
+  "notify.ai.credits_out.body": "L'IA cloud est en pause jusqu'au mois prochain. L'IA de l'appareil et les textes intégrés continuent de fonctionner. Vous pouvez demander plus de crédits dans Réglages → IA.",
+  "notify.ai.batch_done.title": "Le travail IA en arrière-plan est prêt",
+  "notify.ai.batch_done.body": "{count} résultats sont arrivés. Ouvrez-les là où vous avez lancé le travail.",
+  "notify.ai.job_done.title": "La passe approfondie est terminée",
+  "notify.ai.job_done.body": "Le résultat est prêt à être relu.",
+  "notify.ai.job_failed.title": "La passe approfondie s'est arrêtée",
+  "notify.ai.job_failed.body": "Votre résultat instantané est conservé.",
+  "notify.ai.insights_ready.title": "Vos analyses de la semaine sont prêtes",
+  "notify.ai.insights_ready.body": "Le résumé de la semaine du {week} est dans votre tableau de bord.",
+  "notify.ai.health_report_ready.title": "Le rapport mensuel de votre boutique est prêt",
+  "notify.ai.health_report_ready.body": "Le rapport de {month} est dans votre tableau de bord.",
+  /* ---- notifications de l'équipe plateforme ---- */
+  "notify.ai.cap_80.title": "Dépenses IA à {pct} % du plafond mensuel",
+  "notify.ai.cap_80.body": "Vérifiez la prévision dans Console → IA avant que le plafond n'arrête l'IA cloud de toutes les boutiques.",
+  "notify.ai.cap_reached.title": "Les dépenses IA ont atteint le plafond mensuel",
+  "notify.ai.cap_reached.body": "L'IA cloud est en pause pour toutes les boutiques jusqu'à la hausse du plafond ou la fin du mois.",
+  "notify.ai.pending_share_reached.title": "Les boutiques en examen ont utilisé {pct} % de leur part d'IA",
+  "notify.ai.pending_share_reached.body": "À 100 %, l'IA cloud est en pause pour les boutiques en examen jusqu'à leur approbation. Les boutiques approuvées ne sont pas concernées.",
+  "notify.ai.auth_failed.title": "La clé de l'API Claude a été refusée",
+  "notify.ai.auth_failed.body": "L'IA cloud est en pause jusqu'au remplacement de la clé dans Console → IA.",
+  "notify.ai.director_unavailable.title": "Une classe du Directeur est indisponible",
+  "notify.ai.director_unavailable.body": "La classe {class} est arrêtée pour 24 heures ; ses passes utilisent la classe de repli en attendant.",
+  "notify.ai.batch_failed.title": "Un lot de messages a échoué ou expiré",
+  "notify.ai.batch_failed.body": "{errored} éléments en erreur et {expired} expirés. Ils sont relancés une fois, puis les textes intégrés répondent.",
+  "notify.ai.refusal_spike.title": "Refus au-dessus de 5 % sur {task}",
+  "notify.ai.refusal_spike.body": "{pct} % des {runs} exécutions de la dernière heure ont été refusées.",
+  "notify.ai.invalid_output_spike.title": "Sorties invalides au-dessus de 10 % sur {task}",
+  "notify.ai.invalid_output_spike.body": "{pct} % des {runs} exécutions de la dernière heure n'ont pas respecté le schéma.",
+  "notify.ai.critic_contradiction.title": "Le critique contredit le résumé",
+  "notify.ai.critic_contradiction.body": "{pct} % des {runs} critiques de la dernière heure citent un fait absent du résumé.",
+  "notify.ai.canary_leak.title": "Jetons canari divulgués {count} fois aujourd'hui",
+  "notify.ai.canary_leak.body": "Un texte non fiable oriente peut-être un prompt. Les exécutions ont échoué et rien n'a été affiché ; vérifiez-les dans Console → IA.",
+  "notify.ai.canary_rolled_back.title": "Un canari de prompt a été annulé",
+  "notify.ai.canary_rolled_back.body": "{version} a été retirée automatiquement sur {metric}. La version active sert de nouveau toutes les boutiques.",
+  "notify.ai.job_orphaned.title": "Une tâche IA détachée a perdu son moteur",
+  "notify.ai.job_orphaned.body": "Étape {stage} : {outcome}. Le résultat instantané est conservé dans tous les cas.",
+  "notify.ai.after_driver_missing.title": "after() ne survit pas sur cet hébergement",
+  "notify.ai.after_driver_missing.body": "Les requêtes de suivi ont repris {reclaims} étapes cette heure. Les tâches se terminent toujours par le suivi et les lots.",
+  "notify.ai.probe_failed.title": "La sonde des tâches détachées a échoué",
+  "notify.ai.probe_failed.body": "after() a survécu {survivedMs} ms. Le drapeau ai_detached_jobs reste éteint ; les tâches passent par le suivi et les lots.",
+  "notify.ai.throughput_low.title": "Débit du Directeur sous 150 tok/s",
+  "notify.ai.throughput_low.body": "La classe {class} a mesuré {tokPerSec} tok/s. Les budgets des étapes en sont dérivés.",
+  "notify.ai.cache_cold.title": "Le cache des prompts ne sert pas une tâche active",
+  "notify.ai.cache_cold.body": "{task} n'a eu aucun accès au cache dans la dernière heure. Vérifiez le point d'arrêt du bloc plateforme.",
+  "notify.ai.orange_regions.title": "Zones orange dans les aperçus rendus",
+  "notify.ai.orange_regions.body": "{count} aperçus montrent des zones orange absentes des jetons du thème. Vérifiez le moteur de thèmes.",
+  "notify.ai.pick_drift.title": "Les choix de familles de caractères du critique ont dérivé",
+  "notify.ai.pick_drift.body": "La part des choix a bougé de {points} points sur l'évaluation en direct.",
+};

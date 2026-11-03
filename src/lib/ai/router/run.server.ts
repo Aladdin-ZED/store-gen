@@ -26,6 +26,7 @@ import "server-only";
  * call (each statement takes and returns a pool connection), and the reconcile and the run-row update run after it.
  */
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
+import { writeScopeOf } from "./write-scope";
 import { CURRENT_RELEASE } from "@/lib/auth/permissions";
 import { newId } from "@/lib/db/ids";
 import { notify } from "@/lib/platform/notify";
@@ -80,6 +81,13 @@ export interface ServerTaskOpts extends RunAiServerOpts {
   /** a later stage of a Director pass whose first stage charged the pass counter */
   passCharged?: boolean;
   parentRunId?: string | null;
+  /**
+   * a job stage whose job reserved every stage up front (AI-§B.13 step 1): no reservation of its own, the run row
+   * carries the cost, and the job reconciles its one reservation at the end
+   */
+  prepaid?: boolean;
+  /** flags the caller adds to the run row (a job stage driven by a poll or a batch: `stage_resumed`) */
+  flags?: readonly AiFlag[];
 }
 
 /** Backoff of the retries (AI-§A.4 step 10). */
@@ -109,14 +117,8 @@ const UNBILLED: ReadonlySet<AiFailCode> = new Set<AiFailCode>(["busy", "rate_lim
 /** Failures after which the library is not asked (an invisible task, a bad input, a caller's abort, impersonation). */
 const NO_LIBRARY: ReadonlySet<AiFailCode> = new Set<AiFailCode>(["flag_off", "input_invalid", "cancelled", "state"]);
 
-/**
- * The write scope of a run: the seam's writable kinds (member, public, system); an impersonation or a platform scope is
- * read-only and answers `state` before anything is read. CCR r1-p7-7 moves this narrowing into src/lib/tenancy/seam.ts
- * (`writeScopeOf`, the one file lint L6 lets narrow a scope) at the merge; until then it is this track's one L6 report.
- */
-function writeScopeOf(scope: StoreScope): WriteScope | null {
-  return scope.kind === "member" || scope.kind === "public" || scope.kind === "system" ? (scope as WriteScope) : null;
-}
+/** The write scope of a run (./write-scope.ts; CCR r1-p7-7). */
+export { writeScopeOf } from "./write-scope";
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -148,6 +150,17 @@ class RunFailure extends Error {
 interface Gated {
   settings: PlatformAiSetting;
   store: NonNullable<Awaited<ReturnType<typeof getStoreById>>>;
+}
+
+/** Step 1 alone (the job creation and the batch queue run it before their own steps 2-5); throws `RunFailure`. */
+export async function serverGate(scope: WriteScope, task: AiTaskId, opts: Pick<ServerTaskOpts, "actor">): Promise<{ ok: true; settings: PlatformAiSetting } | { ok: false; code: AiFailCode; retryAfterSec?: number }> {
+  try {
+    const g = await gate(scope, task, opts as ServerTaskOpts);
+    return { ok: true, settings: g.settings };
+  } catch (err) {
+    if (err instanceof RunFailure) return { ok: false, code: err.code, ...(err.retryAfterSec !== undefined ? { retryAfterSec: err.retryAfterSec } : {}) };
+    throw err;
+  }
 }
 
 async function gate(scope: WriteScope, task: AiTaskId, opts: ServerTaskOpts): Promise<Gated> {
@@ -260,7 +273,7 @@ async function serverRung<T extends AiTaskId>(scope: WriteScope, task: T, rawInp
   let reservation: Reservation | null = null;
   let runId: string | null = null;
   let releaseSlot: (() => void) | null = null;
-  const flags: AiFlag[] = [];
+  const flags: AiFlag[] = [...(opts.flags ?? [])];
   const iterations: IterationUsage[] = [];
   let plan: RoutePlan | null = null;
   let settings: PlatformAiSetting | null = null;
@@ -352,12 +365,14 @@ async function serverRung<T extends AiTaskId>(scope: WriteScope, task: T, rawInp
     const prices = effectivePrices(settings.prices).rows;
     const est = estimate(task, input, { batch: false, fast: plan.fast, model: plan.model, prices });
     runId = newId();
-    try {
-      reservation = await reserve(ws, est, runId, { task, passCharged: opts.passCharged === true });
-    } catch (err) {
-      runId = null;
-      if (err instanceof AiQuotaError) throw new RunFailure(err.code === "state" ? "state" : err.code);
-      throw err;
+    if (!opts.prepaid) {
+      try {
+        reservation = await reserve(ws, est, runId, { task, passCharged: opts.passCharged === true });
+      } catch (err) {
+        runId = null;
+        if (err instanceof AiQuotaError) throw new RunFailure(err.code === "state" ? "state" : err.code);
+        throw err;
+      }
     }
     // 5. run row
     await insertRun(ws, {
@@ -377,7 +392,7 @@ async function serverRung<T extends AiTaskId>(scope: WriteScope, task: T, rawInp
       rubricVersion: p.rubricVersion,
       inputHash,
       locale: fctx.locale,
-      reservedCredits: reservation.credits,
+      reservedCredits: reservation?.credits ?? 0,
       parentRunId: opts.parentRunId ?? null,
     });
     // 6. slot (no connection is held from here to the end of the call)
@@ -484,7 +499,7 @@ async function serverRung<T extends AiTaskId>(scope: WriteScope, task: T, rawInp
     // 9. reconcile, the run row, the cache
     const micros = costMicros(iterations, prices, { batch: false, fast: plan.fast && !res.fastDropped, writeTtl: settings.cacheTtl.platform }).micros;
     const usage = usageOf(iterations, micros);
-    await reconcile(reservation, { micros, credits: usage.credits });
+    if (reservation) await reconcile(reservation, { micros, credits: usage.credits });
     const ms = Date.now() - ctx.started;
     const allFlags = [...new Set(flags)];
     await finishRun(ws, runId, {
@@ -499,7 +514,7 @@ async function serverRung<T extends AiTaskId>(scope: WriteScope, task: T, rawInp
       ms,
       ttftMs: res.ttftMs,
       output: fin.value,
-      reconciled: true,
+      reconciled: reservation !== null,
     });
     if (cacheable && !opts.nonce) await cacheWrite(ws, cacheKey, raw, cacheExpiry(def.cacheTtlDays));
     const notes: AiFallbackNote[] = res.fellBack ? [{ from: plan.model, to: res.servedModel, code: "model_refusal" }] : [];

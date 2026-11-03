@@ -9,10 +9,10 @@ import "server-only";
  * `aiPolicyFor` is real from step 6 (the AI-§A.4 block order over the store's settings, entitlements and counters, the
  * platform cap and the release flags; ./policy.server.ts loads, ../policy.ts `buildPolicy` decides), with the
  * provider's live state from step 7 (the breaker's `paused`, the class marks). `runAi` is real from step 7: the
- * AI-§A.4 steps 1-10 of ./run.server.ts (`runServerTask`), server then library. Left until step 8:
- *   - `queueAi`: throws (nothing may be queued without the Batches queue);
- *   - `registerBatchResultHandler`: works for real (a registry, like the outbox handlers), so P7's handler files and the
- *     tracks' handlers register from day one.
+ * AI-§A.4 steps 1-10 of ./run.server.ts (`runServerTask`), server then library. `queueAi` is real from step 8: one
+ * `ai_batch_items` row through ../batch/queue.ts (dedupe, the 0.5× reservation; `ai.batches` submits and ingests);
+ * `registerBatchResultHandler` is a registry (like the outbox handlers), so the tracks' handlers register at import
+ * and ../batch/handlers.ts hands each ingested store item to its task's handler.
  */
 import { scopedCache } from "@/lib/tenancy/cache";
 import { activeKillSwitches } from "@/lib/tenancy/entitlements";
@@ -23,6 +23,8 @@ import type { AiTaskId } from "../tasks";
 import { aiProbes } from "../server/models";
 import { impersonationInputs, loadPolicyInputs } from "./policy.server";
 import { runServerTask } from "./run.server";
+import { writeScopeOf } from "./write-scope";
+import { AiQueueError, queueStoreOrPlatform } from "../batch/queue";
 
 export interface RunAiServerOpts extends AiRunOpts {
   actor: Actor;
@@ -45,13 +47,15 @@ export async function runAi<T extends AiTaskId>(scope: StoreScope, task: T, inpu
   return runServerTask(scope, task, input, opts);
 }
 
-/** Non-urgent work: adds an item to the Batches queue (AI-§B.8); the result arrives through the registered handler. */
+/**
+ * Non-urgent work: adds an item to the Batches queue (AI-§B.8); the result arrives through the registered handler.
+ * Throws `AiQueueError` (cloud off, a bad input, PII, a quota code, a read-only scope).
+ */
 export async function queueAi<T extends AiTaskId>(scope: StoreScope | "platform", task: T, input: AiTaskInput<T>, ref: { kind: string; id: string }): Promise<{ itemId: string; deduped: boolean }> {
-  void scope;
-  void task;
-  void input;
-  void ref;
-  throw new Error("not implemented: P7 queueAi");
+  if (scope === "platform") return queueStoreOrPlatform("platform", task, input, ref);
+  const ws = writeScopeOf(scope);
+  if (!ws) throw new AiQueueError("state");
+  return queueStoreOrPlatform(ws, task, input, ref);
 }
 
 /** One handler per task; a second registration replaces the first (a dev reload). */

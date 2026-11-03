@@ -35,6 +35,9 @@
  * Sections (step 7, the server provider; ./selftest-server.ts): server-errors, server-breaker, server-semaphore,
  * server-request, server-call, server-inputs, library-provider. runAi against a database and the fake provider is
  * test:ai-db.
+ * Sections (step 8, jobs, Batches, cron, eval plan, kinds and flags; ./selftest-jobs.ts): jobs-critique-plan,
+ * jobs-probe-plan, jobs-pulse-since, batch-rules, eval-judge-items, recover-graph, jobs-track, notify-kinds, ai-flags,
+ * usage-rows. The drivers, the sweep, the ingest and the rollups against a database are test:ai-db.
  * Exits 1 on any failure.
  */
 import { isDeepStrictEqual } from "node:util";
@@ -74,6 +77,7 @@ import { registerPromptSections } from "./selftest-prompts";
 import { registerEvalSections } from "./selftest-eval";
 import { registerPolicySections } from "./selftest-policy";
 import { registerServerSections } from "./selftest-server";
+import { registerJobsSections } from "./selftest-jobs";
 
 /* ------------------------------------------------------------------ */
 /* The runner                                                          */
@@ -1126,6 +1130,7 @@ registerPromptSections({ section, check, eq, strict: STRICT });
 registerEvalSections({ section, check, eq, strict: STRICT });
 registerPolicySections({ section, check, eq, strict: STRICT });
 registerServerSections({ section, check, eq });
+registerJobsSections({ section, check, eq });
 
 /* ------------------------------------------------------------------ */
 /* run                                                                 */

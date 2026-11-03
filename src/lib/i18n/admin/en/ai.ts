@@ -1,6 +1,60 @@
 /**
- * Admin messages (en) of the ai file (P7 AI, ai.md; D67).
+ * Admin messages (en) of the ai file (P7 AI, ai.md AI-§L; D67).
  * Extension file (docs/STORE-SAAS.md §I.5, §K.3), created empty at P0 and spread by src/lib/i18n/admin/en.ts;
  * English is the reference: the fr and ar files type their keys against this one.
+ * Step 8: the texts of the notification kinds of src/lib/notify/kinds/ai.ts (`notify.<kind>.title` / `.body`).
  */
-export const messages = {} as const satisfies Record<string, string>;
+export const messages = {
+  /* ---- tenant notifications ---- */
+  "notify.ai.credits_80.title": "80 % of this month's AI credits are used",
+  "notify.ai.credits_80.body": "{pct} % of the AI credits for {month} are used. When they run out, Cloud AI pauses until next month; on-device AI and the built-in copy keep working.",
+  "notify.ai.credits_out.title": "This month's AI credits are used up",
+  "notify.ai.credits_out.body": "Cloud AI is paused until next month. On-device AI and the built-in copy keep working. You can ask for more credits in Settings → AI.",
+  "notify.ai.batch_done.title": "Background AI work is ready",
+  "notify.ai.batch_done.body": "{count} results are in. Open them where you started the work.",
+  "notify.ai.job_done.title": "The deep pass is done",
+  "notify.ai.job_done.body": "The result is ready to review.",
+  "notify.ai.job_failed.title": "The deep pass stopped",
+  "notify.ai.job_failed.body": "Your instant result is kept.",
+  "notify.ai.insights_ready.title": "Your weekly insights are ready",
+  "notify.ai.insights_ready.body": "The digest for the week of {week} is in your dashboard.",
+  "notify.ai.health_report_ready.title": "Your monthly store report is ready",
+  "notify.ai.health_report_ready.body": "The report for {month} is in your dashboard.",
+  /* ---- staff notifications (the console feed) ---- */
+  "notify.ai.cap_80.title": "AI spend at {pct} % of the monthly cap",
+  "notify.ai.cap_80.body": "Check the forecast in Console → AI before the cap stops every store's Cloud AI.",
+  "notify.ai.cap_reached.title": "AI spend reached the monthly cap",
+  "notify.ai.cap_reached.body": "Cloud AI is paused for every store until the cap is raised or the month ends.",
+  "notify.ai.pending_share_reached.title": "Stores in review used {pct} % of their AI share",
+  "notify.ai.pending_share_reached.body": "At 100 %, Cloud AI pauses for stores in review until they are approved. Approved stores are not affected.",
+  "notify.ai.auth_failed.title": "The Claude API key was refused",
+  "notify.ai.auth_failed.body": "Cloud AI is paused until the key is replaced in Console → AI.",
+  "notify.ai.director_unavailable.title": "A Director class is unavailable",
+  "notify.ai.director_unavailable.body": "The {class} class is down for 24 hours; its passes use the fallback class meanwhile.",
+  "notify.ai.batch_failed.title": "A Message Batch failed or expired",
+  "notify.ai.batch_failed.body": "{errored} items errored and {expired} expired. They are retried once, then the built-in copy answers.",
+  "notify.ai.refusal_spike.title": "Refusals above 5 % on {task}",
+  "notify.ai.refusal_spike.body": "{pct} % of {runs} runs in the last hour were refused.",
+  "notify.ai.invalid_output_spike.title": "Invalid outputs above 10 % on {task}",
+  "notify.ai.invalid_output_spike.body": "{pct} % of {runs} runs in the last hour failed the output schema.",
+  "notify.ai.critic_contradiction.title": "The critic contradicts the digest",
+  "notify.ai.critic_contradiction.body": "{pct} % of {runs} critiques in the last hour named a fact the digest does not show.",
+  "notify.ai.canary_leak.title": "Canary tokens leaked {count} times today",
+  "notify.ai.canary_leak.body": "Untrusted text may be steering a prompt. The runs failed and nothing was shown; review them in Console → AI.",
+  "notify.ai.canary_rolled_back.title": "A prompt canary was rolled back",
+  "notify.ai.canary_rolled_back.body": "{version} was retired automatically on {metric}. The active version serves every store again.",
+  "notify.ai.job_orphaned.title": "A detached AI job lost its driver",
+  "notify.ai.job_orphaned.body": "Stage {stage}: {outcome}. The instant result is kept either way.",
+  "notify.ai.after_driver_missing.title": "after() does not survive on this host",
+  "notify.ai.after_driver_missing.body": "Polls re-claimed {reclaims} stages this hour. Jobs still finish through polls and batches.",
+  "notify.ai.probe_failed.title": "The detached-job probe failed",
+  "notify.ai.probe_failed.body": "after() survived {survivedMs} ms. The flag ai_detached_jobs stays off; jobs run on polls and batches.",
+  "notify.ai.throughput_low.title": "Director throughput below 150 tok/s",
+  "notify.ai.throughput_low.body": "The {class} class measured {tokPerSec} tok/s. Stage budgets are derived from it.",
+  "notify.ai.cache_cold.title": "Prompt cache misses on a busy task",
+  "notify.ai.cache_cold.body": "{task} had no cache hit in the last hour. Check the platform block's breakpoint.",
+  "notify.ai.orange_regions.title": "Orange regions in rendered previews",
+  "notify.ai.orange_regions.body": "{count} previews showed orange areas the theme tokens do not contain. Check the theme engine.",
+  "notify.ai.pick_drift.title": "The critic's type-class picks drifted",
+  "notify.ai.pick_drift.body": "The pick share moved {points} points on the live eval.",
+} as const satisfies Record<string, string>;

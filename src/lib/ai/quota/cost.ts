@@ -197,7 +197,7 @@ export interface CounterCharge {
  * Director share (a Director-pass task) → the pass counter (only the first stage of a pass) → platform month → the
  * pending share (a pending store). A platform-paid call (eval) charges only the platform month.
  */
-export function planReservation(i: { task: AiTaskId; payer?: "store" | "platform"; pending: boolean; passCharged: boolean }): CounterCharge[] {
+export function planReservation(i: { task: AiTaskId; payer?: "store" | "platform"; pending: boolean; passCharged: boolean; pass?: "director" | "deep" | null }): CounterCharge[] {
   const def = TASKS[i.task];
   const payer = i.payer ?? def.payer;
   const platform: CounterCharge = { key: "platform", scope: "platform", metric: "ai_cost_micros", unit: "micros", reconciled: true, refusal: "quota_platform" };
@@ -206,7 +206,8 @@ export function planReservation(i: { task: AiTaskId; payer?: "store" | "platform
     { key: "store", scope: "store", metric: "ai_credits", unit: "credits", reconciled: true, refusal: "quota_store" },
     { key: "day", scope: "store", metric: "ai_credits_day", unit: "credits", reconciled: true, refusal: "quota_day" },
   ];
-  const pass = def.caps?.passCounter;
+  // a job names its pass itself (a deep Director pass charges `ai_deep_passes` whatever its first task is)
+  const pass = i.pass !== undefined ? i.pass : def.caps?.passCounter;
   if (pass) {
     plan.push({ key: "director", scope: "store", metric: "ai_credits_director", unit: "credits", reconciled: true, refusal: "quota_director" });
     if (!i.passCharged) {

@@ -17,6 +17,11 @@
  *    repository that hands A's rows to B's scope (a planted bug) makes the assembly throw `cross_store_context`
  *    with no row text in the error, and the refusal is reported with B's store id only.
  *
+ * Jobs (step 8):
+ *  - `advanceJob`, `claimStage`, `aiJobsForPulse` and the job API's `getAiJob` (src/lib/ai/jobs/**): A's queued
+ *    job is invisible to B's scope (null view, no stage claimed, nothing in B's pulse for A's owner) and B's calls
+ *    leave it as it was; A's own pulse shows it (the check is not blind).
+ *
  * Router (step 7):
  *  - `runAi(scope, task, input, opts)` (src/lib/ai/router/server.ts): an impersonation scope of A is refused with
  *    `state` before any read of counters, cache or provider (no run row, no counter); a run in B's scope (whatever
@@ -40,6 +45,10 @@ import { linkAiRuns } from "@/lib/ai/feedback.server";
 import { sha256Hex } from "@/lib/ai/prompts/sha256";
 import { cacheExpiry, cacheLookup, cacheWrite } from "@/lib/ai/store/cache";
 import { activeJobsFor, getAiJob } from "@/lib/ai/store/jobs";
+import { getAiJob as getAiJobApi } from "@/lib/ai/jobs/enqueue";
+import { claimStage } from "@/lib/ai/jobs/claim";
+import { aiJobsForPulse } from "@/lib/ai/jobs/pulse";
+import { advanceJob } from "@/lib/ai/jobs/run";
 import { activeMemory, addMemory, deleteMemory, listMemory, setMemoryPinned } from "@/lib/ai/store/memory";
 import { finishRun, getRunMeta, insertRun, recentRuns } from "@/lib/ai/store/runs";
 import { aiUsageForStore } from "@/lib/ai/summary.server";
@@ -162,6 +171,30 @@ export const cases: TenancyCase[] = [
       kit.check("ai/aiUsageForStore(B): none of A's cost", (await aiUsageForStore(b, month)).costMicros === 0);
       kit.check("ai: B's calls left A's rows as they were (no link, pin or tombstone)", (await kit.snapshotA()) === before);
       kit.check("ai/getRunMeta(A): A's own run (the check is not blind)", (await getRunMeta(a, runId))?.id === runId && (await getAiJob(a, jobId))?.id === jobId);
+    },
+  },
+  {
+    name: "ai: B's scope cannot read, drive, claim or cancel A's detached job, nor see it in its pulse",
+    async run(kit) {
+      const a = kit.scope("A");
+      const b = kit.scope("B");
+      if (!writable(a) || !writable(b)) throw new Error("ai: the harness scopes are not member scopes");
+      const owner = kit.fx.A.members.owner;
+      const jobId = newId();
+      const hash = sha256Hex(`ai-job-${randomBytes(4).toString("hex")}`);
+      const now = new Date();
+      await db.insert(aiJobs).values(
+        storeValues(a, { id: jobId, kind: "director_deep" as const, task: "design.critique", status: "queued" as const, active: "1", inputHash: hash, progress: { done: 0, total: 1, stages: {}, plan: ["critique"] }, result: { runIds: [] }, createdBy: owner, createdAt: now, updatedAt: now }),
+      );
+      const before = await kit.snapshotA();
+      kit.check("ai/advanceJob(B, A's job): null, nothing run", (await advanceJob(b, jobId, "poll", 90_000)) === null);
+      const claim = await claimStage(b, jobId, "poll");
+      kit.check("ai/claimStage(B, A's job): no stage (terminal: not B's)", "none" in claim && claim.none === "terminal", claim);
+      const pulse = await aiJobsForPulse(b, { userId: owner }, new Date(Date.now() - 60_000));
+      kit.check("ai/aiJobsForPulse(B, A's owner): nothing of A's", pulse.running === 0 && pulse.done.length === 0, pulse);
+      kit.check("ai/getAiJob(B, A's job) through the job API: null", (await getAiJobApi(b, jobId)) === null);
+      kit.check("ai: B's calls left A's job as it was", (await kit.snapshotA()) === before && (await getAiJob(a, jobId))?.status === "queued");
+      kit.check("ai/aiJobsForPulse(A): A's owner sees A's job (the check is not blind)", (await aiJobsForPulse(a, { userId: owner }, new Date(Date.now() - 60_000))).running >= 1);
     },
   },
   {

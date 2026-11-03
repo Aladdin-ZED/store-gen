@@ -12,10 +12,19 @@
  *   - `jobTransition(job, event)`: queued → running → done; a stale heartbeat clears the lease, the next driver
  *     re-claims the same stage once, a second orphaning fails the job (the instant result kept); cancel; `active` is
  *     NULL in the same write as every terminal status.
+ *   - step 8: the critique-as-job (`director_deep` with only a `critique` input, run on the interactive class, used
+ *     when probe line 11 measured the interactive Director below 80 tok/s, AI-§A.8.6), the probe's dummy plan (sleep
+ *     stages that heartbeat, no model, no credit; staff only, AI-§B.13 step 5) and `stageInputOf` (a job input keyed by
+ *     stage base hands each stage its own task input).
  */
 import type { ProbeResult } from "@/lib/settings/keys/platform_ai";
-import type { AiTaskId } from "../tasks";
+import type { AiTaskId, TaskClass } from "../tasks";
 import type { AiJobKind } from "./enqueue";
+
+/** what a stage runs: a task, or the probe's model-free sleep */
+export type StageTask = AiTaskId | "probe.sleep";
+/** every `ai_jobs.kind`, the staff-only probe included */
+export type JobRowKind = AiJobKind | "probe";
 
 /** every stage is a pattern-A-sized call (core §H.12) */
 export const STAGE_DEADLINE_MS = 90_000;
@@ -38,9 +47,9 @@ export const DEEP_CLASS_CEILING = 32_000;
 export const MAX_BLUEPRINT_STAGES = 6;
 
 export interface PlannedStage {
-  /** ≤ 18 chars: "brief", "critique", "blueprint:1", "logo:2", "report" */
+  /** ≤ 18 chars: "brief", "critique", "blueprint:1", "logo:2", "report", "sleep:1" */
   id: string;
-  task: AiTaskId;
+  task: StageTask;
   /** ⌊deadline_s × tok/s × 0.6⌋, capped by the class ceiling */
   maxTokens: number;
   /** ≤ 90,000 */
@@ -69,6 +78,36 @@ interface Part {
   maxSplit: number;
 }
 
+/** below this measured interactive-Director throughput the critique runs as a job stage (AI-§A.8.6, probe line 11) */
+export const CRITIQUE_JOB_BELOW_TOK_PER_SEC = 80;
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** True when probe line 11 measured the interactive Director below 80 tok/s: the critique becomes a job stage. */
+export function critiqueRunsAsJob(probe: ProbeResult | null): boolean {
+  const t = probe?.tokPerSec.director_interactive;
+  return t !== undefined && t < CRITIQUE_JOB_BELOW_TOK_PER_SEC;
+}
+
+/** A `director_deep` job holding only the critique of an interactive pass (the critique-as-job). */
+export function isCritiqueJob(kind: JobRowKind, input: unknown): boolean {
+  return kind === "director_deep" && isRecord(input) && "critique" in input && !("brief" in input);
+}
+
+/** The class a job's stages run on: the interactive Director for the critique-as-job, else the deep class. */
+export function jobClassFor(kind: JobRowKind, input: unknown): Extract<TaskClass, "director_deep" | "director_interactive"> {
+  return isCritiqueJob(kind, input) ? "director_interactive" : "director_deep";
+}
+
+/**
+ * The task input of one stage: a job input keyed by stage base (`{ brief: …, critique: … }`) hands each stage its own
+ * entry; any other input is the stage's input as a whole.
+ */
+export function stageInputOf(stageId: string, jobInput: unknown): unknown {
+  const base = stageId.split(":")[0]!;
+  return isRecord(jobInput) && base in jobInput ? jobInput[base] : jobInput;
+}
+
 /** The logical parts of each kind (AI-§A.2 estimates, [estimate ±2×]). */
 function partsFor(kind: AiJobKind, input: unknown): Part[] {
   switch (kind) {
@@ -86,6 +125,8 @@ function partsFor(kind: AiJobKind, input: unknown): Part[] {
       return Array.from({ length: n }, () => ({ base: "logo", task: "logo.system" as const, need: Math.ceil(8_000 / n), maxSplit: 1 }));
     }
     case "director_deep":
+      // the critique-as-job: the one critique stage of an interactive pass (slim output ≤ 5,000)
+      if (isCritiqueJob(kind, input)) return [{ base: "critique", task: "design.critique", need: 5_000, maxSplit: 1 }];
       // the deep Director pass: the plan, then the critique (R2 adds verify)
       return [
         { base: "brief", task: "design.plan", need: 4_300, maxSplit: 1 },
@@ -103,7 +144,7 @@ function partsFor(kind: AiJobKind, input: unknown): Part[] {
  */
 export function stagePlanFor(kind: AiJobKind, input: unknown, probe: ProbeResult | null, opts: { ceiling?: number; deadlineMs?: number } = {}): StagePlan {
   const deadlineMs = Math.min(opts.deadlineMs ?? STAGE_DEADLINE_MS, STAGE_DEADLINE_MS);
-  const tps = probe?.tokPerSec.director_deep ?? DEFAULT_TOK_PER_SEC;
+  const tps = probe?.tokPerSec[jobClassFor(kind, input)] ?? DEFAULT_TOK_PER_SEC;
   const budget = stageTokenBudget(deadlineMs, tps, opts.ceiling ?? DEEP_CLASS_CEILING);
   const stages: PlannedStage[] = [];
   const counters = new Map<string, number>();
@@ -118,6 +159,36 @@ export function stagePlanFor(kind: AiJobKind, input: unknown, probe: ProbeResult
     }
   }
   return { stages };
+}
+
+/** The probe's dummy job: about 5 minutes of sleep stages that heartbeat; no model, no credit (AI-§B.13 step 5). */
+export const PROBE_TOTAL_MS = 300_000;
+export const PROBE_STAGE_MS = 60_000;
+
+/** The probe plan: ⌈total / stage⌉ sleep stages of ≤ 60 s each (the lease and the heartbeat as a real stage). */
+export function probePlan(totalMs: number = PROBE_TOTAL_MS, stageMs: number = PROBE_STAGE_MS): StagePlan {
+  const per = Math.max(1_000, Math.min(stageMs, STAGE_DEADLINE_MS));
+  const n = Math.max(1, Math.min(10, Math.ceil(Math.max(1_000, totalMs) / per)));
+  return { stages: Array.from({ length: n }, (_, i) => ({ id: `sleep:${i + 1}`, task: "probe.sleep" as const, maxTokens: 0, deadlineMs: per, batchOnly: false })) };
+}
+
+/** Every kind's plan: the probe's sleeps, else `stagePlanFor`. */
+export function planForJob(kind: JobRowKind, input: unknown, probe: ProbeResult | null): StagePlan {
+  if (kind === "probe") {
+    const i = isRecord(input) ? input : {};
+    return probePlan(typeof i.totalMs === "number" ? i.totalMs : PROBE_TOTAL_MS, typeof i.stageMs === "number" ? i.stageMs : PROBE_STAGE_MS);
+  }
+  return stagePlanFor(kind, input, probe);
+}
+
+/** The pulse's window (core §I.4): a `since` older than 10 min is clamped to it; absent or invalid → now − 30 s. */
+export const PULSE_SINCE_MAX_MS = 10 * 60_000;
+export const PULSE_SINCE_DEFAULT_MS = 30_000;
+
+export function clampSince(since: Date | null | undefined, now: Date = new Date()): Date {
+  const t = since instanceof Date ? since.getTime() : NaN;
+  if (!Number.isFinite(t)) return new Date(now.getTime() - PULSE_SINCE_DEFAULT_MS);
+  return new Date(Math.min(now.getTime(), Math.max(now.getTime() - PULSE_SINCE_MAX_MS, t)));
 }
 
 /* ------------------------------------------------------------------ */

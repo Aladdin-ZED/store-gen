@@ -1,8 +1,61 @@
 /**
- * Admin messages (ar) of the ai file (P7 AI, ai.md; D67).
+ * Admin messages (ar) of the ai file (P7 AI, ai.md AI-§L; D67).
  * Extension file (docs/STORE-SAAS.md §I.5, §K.3), created empty at P0 and spread by src/lib/i18n/admin/ar.ts;
  * a partial of ../en/ai.ts (a missing key falls back to English).
  */
 import type { messages as en } from "../en/ai";
 
-export const messages: Partial<Record<keyof typeof en, string>> = {};
+export const messages: Partial<Record<keyof typeof en, string>> = {
+  /* ---- إشعارات المتجر ---- */
+  "notify.ai.credits_80.title": "استعملت 80٪ من أرصدة الذكاء الاصطناعي لهذا الشهر",
+  "notify.ai.credits_80.body": "استعملت {pct}٪ من أرصدة {month}. ملي يساليو، كيتوقف الذكاء السحابي حتى الشهر الجاي، وذكاء الجهاز والنصوص الجاهزة كيبقاو خدامين.",
+  "notify.ai.credits_out.title": "سالات أرصدة الذكاء الاصطناعي لهذا الشهر",
+  "notify.ai.credits_out.body": "الذكاء السحابي متوقف حتى الشهر الجاي. ذكاء الجهاز والنصوص الجاهزة كيبقاو خدامين. تقدر تطلب أرصدة إضافية من الإعدادات ← الذكاء الاصطناعي.",
+  "notify.ai.batch_done.title": "خدمة الذكاء الاصطناعي في الخلفية واجدة",
+  "notify.ai.batch_done.body": "وصلو {count} نتائج. حلّهم فين بديتي الخدمة.",
+  "notify.ai.job_done.title": "تسالات المراجعة المعمقة",
+  "notify.ai.job_done.body": "النتيجة واجدة للمراجعة.",
+  "notify.ai.job_failed.title": "توقفت المراجعة المعمقة",
+  "notify.ai.job_failed.body": "النتيجة الفورية ديالك محفوظة.",
+  "notify.ai.insights_ready.title": "ملخص الأسبوع ديالك واجد",
+  "notify.ai.insights_ready.body": "ملخص أسبوع {week} كاين في لوحة التحكم.",
+  "notify.ai.health_report_ready.title": "التقرير الشهري ديال المتجر واجد",
+  "notify.ai.health_report_ready.body": "تقرير {month} كاين في لوحة التحكم.",
+  /* ---- إشعارات فريق المنصة ---- */
+  "notify.ai.cap_80.title": "مصاريف الذكاء الاصطناعي وصلات {pct}٪ من السقف الشهري",
+  "notify.ai.cap_80.body": "راجع التوقع في لوحة الإدارة ← الذكاء الاصطناعي قبل ما يوقف السقف الذكاء السحابي لجميع المتاجر.",
+  "notify.ai.cap_reached.title": "مصاريف الذكاء الاصطناعي وصلات السقف الشهري",
+  "notify.ai.cap_reached.body": "الذكاء السحابي متوقف لجميع المتاجر حتى يترفع السقف أو يسالي الشهر.",
+  "notify.ai.pending_share_reached.title": "المتاجر قيد المراجعة استعملات {pct}٪ من حصتها",
+  "notify.ai.pending_share_reached.body": "في 100٪ كيتوقف الذكاء السحابي للمتاجر قيد المراجعة حتى تتقبل. المتاجر المقبولة ما كتأثرش.",
+  "notify.ai.auth_failed.title": "مفتاح Claude API ترفض",
+  "notify.ai.auth_failed.body": "الذكاء السحابي متوقف حتى يتبدل المفتاح في لوحة الإدارة ← الذكاء الاصطناعي.",
+  "notify.ai.director_unavailable.title": "فئة من فئات المخرج غير متاحة",
+  "notify.ai.director_unavailable.body": "الفئة {class} متوقفة لمدة 24 ساعة، والمراجعات كتخدم بالفئة البديلة في هاد الوقت.",
+  "notify.ai.batch_failed.title": "دفعة رسائل فشلات أو سالات مدتها",
+  "notify.ai.batch_failed.body": "{errored} عناصر فيها خطأ و{expired} سالات مدتها. كتعاود مرة وحدة، ومن بعد كتجاوب النصوص الجاهزة.",
+  "notify.ai.refusal_spike.title": "الرفض فوق 5٪ في {task}",
+  "notify.ai.refusal_spike.body": "{pct}٪ من {runs} عملية في الساعة اللي فاتت ترفضات.",
+  "notify.ai.invalid_output_spike.title": "المخرجات غير الصالحة فوق 10٪ في {task}",
+  "notify.ai.invalid_output_spike.body": "{pct}٪ من {runs} عملية في الساعة اللي فاتت ما احترماتش المخطط.",
+  "notify.ai.critic_contradiction.title": "الناقد كيناقض الملخص",
+  "notify.ai.critic_contradiction.body": "{pct}٪ من {runs} مراجعة في الساعة اللي فاتت ذكرات معلومة ما كايناش في الملخص.",
+  "notify.ai.canary_leak.title": "تسربات رموز الكناري {count} مرات اليوم",
+  "notify.ai.canary_leak.body": "يمكن نص غير موثوق كيوجه شي برومبت. العمليات فشلات وما تعرض والو، راجعها في لوحة الإدارة ← الذكاء الاصطناعي.",
+  "notify.ai.canary_rolled_back.title": "ترجعات نسخة تجريبية ديال برومبت",
+  "notify.ai.canary_rolled_back.body": "{version} تسحبات أوتوماتيكيا بسبب {metric}. النسخة النشيطة رجعات كتخدم جميع المتاجر.",
+  "notify.ai.job_orphaned.title": "مهمة ذكاء اصطناعي في الخلفية تلفات اللي كيسوقها",
+  "notify.ai.job_orphaned.body": "المرحلة {stage}: {outcome}. النتيجة الفورية محفوظة في جميع الحالات.",
+  "notify.ai.after_driver_missing.title": "after() ما كيعيشش على هاد الاستضافة",
+  "notify.ai.after_driver_missing.body": "طلبات المتابعة رجعات {reclaims} مراحل هاد الساعة. المهام كتسالى ديما بالمتابعة والدفعات.",
+  "notify.ai.probe_failed.title": "فشل اختبار المهام في الخلفية",
+  "notify.ai.probe_failed.body": "after() عاش {survivedMs} ms. العلم ai_detached_jobs كيبقى مطفي، والمهام كتخدم بالمتابعة والدفعات.",
+  "notify.ai.throughput_low.title": "سرعة المخرج تحت 150 tok/s",
+  "notify.ai.throughput_low.body": "الفئة {class} قاسات {tokPerSec} tok/s. ميزانيات المراحل كتتحسب منها.",
+  "notify.ai.cache_cold.title": "ذاكرة البرومبت ما كتخدمش مهمة نشيطة",
+  "notify.ai.cache_cold.body": "{task} ما كان عندها حتى استعمال للذاكرة في الساعة اللي فاتت. راجع نقطة التوقف ديال كتلة المنصة.",
+  "notify.ai.orange_regions.title": "مناطق برتقالية في المعاينات",
+  "notify.ai.orange_regions.body": "{count} معاينات فيها مناطق برتقالية ما كايناش في ألوان الثيم. راجع محرك الثيمات.",
+  "notify.ai.pick_drift.title": "اختيارات الناقد لفئات الخطوط تبدلات",
+  "notify.ai.pick_drift.body": "حصة الاختيارات تحركات {points} نقطة في التقييم المباشر.",
+};

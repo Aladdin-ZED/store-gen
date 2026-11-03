@@ -14,8 +14,18 @@
  *                                                      invented number in 1 of 60 fixtures) and passes s1 on the same 60
  *   npx tsx scripts/qa/ai-eval.ts --write-synthetic    (re)writes the hand-authored R1 recordings (./synthetic.ts); it
  *                                                      never overwrites a real recording (`synthetic: false`)
- *   --live [--smoke], --local, --record, --cut-baseline   parsed now, wired in step 8 (they need the key, the
- *                                                      Batches client and a throwaway DB); they exit 2 until then
+ *   --live --family <f> [--version <v>] [--limit <n>] [--yes] [--wait-min <m>]
+ *                                                      a full live run (≤ 200 cases × 2 reps) through Message Batches
+ *                                                      with the judge items (src/lib/ai/eval/live.ts): the estimate is
+ *                                                      printed first and nothing is spent without --yes; the script then
+ *                                                      drives the ai.batches tick itself until the row is done
+ *   --smoke --live --family <f> [--version <v>] [--yes]  the 20-case interactive smoke run (≤ 1 h, enough to canary)
+ *   --record --family <f> [--version <v>] [--yes]       the smoke cases × 1 rep, live, written as a real recording
+ *                                                      sets/<family>/recorded/<version>.json (`synthetic: false`)
+ *   --cut-baseline --family <f> --version <v>           the frozen baseline baseline/<version>.json from that real
+ *                                                      recording, written once and never regenerated (AI-§F.5)
+ *   The live modes need ANTHROPIC_API_KEY and DATABASE_URL (a throwaway or the platform DB with Cloud AI enabled and a
+ *   cap); the cost counts against the platform cap. --local (qa:ai-eval-local, WebGPU) is not wired here.
  *
  * Infra failures (an `error` run, a served model other than the requested one, a case over the wall-clock ceiling)
  * go to qa/ai-eval/errors.jsonl and are never scored as 0. Node only; never imported by the app.
@@ -26,6 +36,7 @@ import { PlatformAi } from "../../src/lib/settings/keys/platform_ai";
 import { R1_FAMILIES, SEED_VERSIONS, type R1Family } from "../../src/lib/ai/prompts/registry";
 import { TASKS } from "../../src/lib/ai/tasks";
 import { baselineName, type BaselineFile } from "../../src/lib/ai/eval/baseline";
+import { baselinePath, writeBaselineOnce } from "../../src/lib/ai/eval/freeze";
 import { EVAL_SETS, SMOKE_FIXTURES, fixturesHash } from "../../src/lib/ai/eval/fixtures";
 import { juryFor } from "../../src/lib/ai/eval/jury";
 import { NICHE_STORES, runNicheCorpus } from "../../src/lib/ai/eval/niche";
@@ -215,13 +226,114 @@ async function offline(): Promise<void> {
 /* main                                                                */
 /* ------------------------------------------------------------------ */
 
-async function main(): Promise<void> {
-  if (flag("--write-synthetic")) return writeSynthetic();
-  const live = ["--live", "--local", "--record", "--cut-baseline"].filter(flag);
-  if (live.length) {
-    console.error(`${live.join(" ")}: wired in P7 step 8 (needs ANTHROPIC_API_KEY, the Batches client and a throwaway DB); nothing was run`);
+/* ------------------------------------------------------------------ */
+/* --live, --smoke --live, --record, --cut-baseline (manual)           */
+/* ------------------------------------------------------------------ */
+
+/** The app's server modules carry `import "server-only"`; this Node script loads them the way the server does. */
+function serverOnlyShim(): void {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Module = require("node:module") as { _resolveFilename: (request: string, ...rest: unknown[]) => string };
+  const empty = require.resolve("drizzle-orm");
+  const orig = Module._resolveFilename;
+  Module._resolveFilename = function (request: string, ...rest: unknown[]) {
+    return request === "server-only" ? empty : (orig as (...a: unknown[]) => string).call(this, request, ...rest);
+  };
+}
+
+function familyArg(): { family: R1Family; version: string } {
+  const family = value("--family") as R1Family | undefined;
+  if (!family || !(R1_FAMILIES as readonly string[]).includes(family)) {
+    console.error(`--family is required; one of ${R1_FAMILIES.join(", ")}`);
     process.exit(2);
   }
+  return { family, version: value("--version") ?? SEED_VERSIONS[family].server };
+}
+
+function cutBaseline(): void {
+  const { family, version } = familyArg();
+  const rec = readJson<RecordedFile>(recordedPath(family, version));
+  if (!rec || rec.synthetic) {
+    console.error(`${family}: no real recording of ${version} (record one with --record first; a synthetic file is never a baseline)`);
+    process.exit(1);
+  }
+  const outputs: Record<string, unknown> = {};
+  for (const [id, runs] of Object.entries(rec.runs)) outputs[id] = runs.find((r) => r.output !== null && !r.error)?.output ?? null;
+  const b: BaselineFile = { family, version, source: { rung: "server", model: rec.source.model }, fixturesHash: rec.fixturesHash, outputs };
+  const out = writeBaselineOnce(baselinePath(family, version), b);
+  console.log(`${family}: baseline ${version} ${out === "written" ? "written" : "already exists (never regenerated)"}`);
+}
+
+async function liveMain(): Promise<void> {
+  if (flag("--cut-baseline")) return cutBaseline();
+  if (!process.env.ANTHROPIC_API_KEY || !process.env.DATABASE_URL) {
+    console.error("the live modes need ANTHROPIC_API_KEY and DATABASE_URL; nothing was run");
+    process.exit(2);
+  }
+  serverOnlyShim();
+  const { family, version } = familyArg();
+  const limit = value("--limit") ? Number(value("--limit")) : undefined;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const live = require("../../src/lib/ai/eval/live") as typeof import("../../src/lib/ai/eval/live");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getPlatformSetting } = require("../../src/lib/settings") as typeof import("../../src/lib/settings");
+  const settings = await getPlatformSetting("platform_ai");
+  const kind = flag("--smoke") || flag("--record") ? "smoke" : "live";
+  const est = live.estimateEvalRun({ family, kind, version, ...(limit ? { limit } : {}) }, settings);
+  if (!est) {
+    console.error(`${version} is not a server prompt of ${family}`);
+    process.exit(2);
+  }
+  console.log(`${family} ${version} ${flag("--record") ? "record" : kind}: ${est.line} (${est.judgeItems} judgements)`);
+  if (!flag("--yes")) {
+    console.log("nothing spent: run again with --yes to start it");
+    return;
+  }
+  if (flag("--record")) {
+    const file = await live.recordFamily({ family, version, ...(limit ? { limit } : {}) });
+    if (!file) process.exit(1);
+    const path = recordedPath(family, version);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, serializeRecorded(file));
+    console.log(`${family}: wrote ${recordedName(version)} (${Object.keys(file.runs).length} fixtures)`);
+    return;
+  }
+  const started = await live.startEvalRun({ userId: null }, { family, kind, version, ...(limit ? { limit } : {}) });
+  if (!started.ok) {
+    console.error(`not started: ${started.code}${started.why ? ` (${started.why})` : ""}`);
+    process.exit(1);
+  }
+  console.log(`eval run ${started.runId}: ${started.status}`);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getEvalRun } = require("../../src/lib/ai/platform/eval-runs") as typeof import("../../src/lib/ai/platform/eval-runs");
+  if (started.status === "running") {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { jobs } = require("../../src/lib/jobs/tracks/ai") as typeof import("../../src/lib/jobs/tracks/ai");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { systemCtx } = require("../../src/lib/jobs/scope") as typeof import("../../src/lib/jobs/scope");
+    const batches = jobs.find((j) => j.name === "ai.batches")!;
+    const until = Date.now() + Number(value("--wait-min") ?? 180) * 60_000;
+    while (Date.now() < until) {
+      const ctx = { ...systemCtx("ai.batches"), deadline: Date.now() + 8_000, tickId: "ai-eval", cursor: "", setCursor: async () => undefined, yield: () => new Promise<void>((r) => setImmediate(r)), lagMs: () => 0 };
+      const r = await batches.run(ctx);
+      const row = await getEvalRun(started.runId);
+      console.log(`  ${new Date().toISOString().slice(11, 19)} ${row?.status} ${JSON.stringify(r.summary)}`);
+      if (row?.status === "done" || row?.status === "failed") break;
+      await new Promise((res) => setTimeout(res, 60_000));
+    }
+  }
+  const row = await getEvalRun(started.runId);
+  console.log(`${family} ${version}: ${row?.status}, gate ${row?.gate ? JSON.stringify(row.gate) : "none"}, cost $${((row?.costMicros ?? 0) / 1e6).toFixed(2)} + judge $${((row?.judgeCostMicros ?? 0) / 1e6).toFixed(2)}`);
+  process.exit(row?.passed ? 0 : 1);
+}
+
+async function main(): Promise<void> {
+  if (flag("--write-synthetic")) return writeSynthetic();
+  if (flag("--local")) {
+    console.error("--local is qa:ai-eval-local (Playwright msedge with WebGPU on the owner's PC); nothing was run");
+    process.exit(2);
+  }
+  if (flag("--live") || flag("--record") || flag("--cut-baseline")) return liveMain();
   if (flag("--broken")) {
     const ok = brokenCheck();
     process.exit(ok && !failures ? 0 : 1);

@@ -314,3 +314,12 @@ export async function runIdsOfJob(scope: StoreScope, jobId: string): Promise<str
   const rows = await db.select({ id: aiRuns.id }).from(aiRuns).where(whereStore(aiRuns, scope, eq(aiRuns.jobId, jobId))).orderBy(aiRuns.createdAt);
   return rows.map((r) => r.id);
 }
+
+/** What one of the store's jobs cost so far: the sum over its run rows (the job's reconcile, AI-§B.13). */
+export async function jobCost(scope: StoreScope, jobId: string): Promise<{ micros: number; credits: number; runs: number }> {
+  const [row] = await db
+    .select({ micros: sql<number>`COALESCE(SUM(${aiRuns.costMicros}), 0)`, credits: sql<number>`COALESCE(SUM(${aiRuns.credits}), 0)`, runs: sql<number>`COUNT(*)` })
+    .from(aiRuns)
+    .where(whereStore(aiRuns, scope, eq(aiRuns.jobId, jobId)));
+  return { micros: Number(row?.micros ?? 0), credits: Number(row?.credits ?? 0), runs: Number(row?.runs ?? 0) };
+}
