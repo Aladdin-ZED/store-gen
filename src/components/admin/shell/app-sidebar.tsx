@@ -1,6 +1,19 @@
 "use client";
 
-import { ChevronsUpDownIcon, LogOutIcon, MonitorIcon, MoonIcon, ShieldAlertIcon, ShieldCheckIcon, SparklesIcon, SunIcon, UserRoundCogIcon } from "lucide-react";
+import {
+  ChevronsUpDownIcon,
+  DownloadIcon,
+  LifeBuoyIcon,
+  LogOutIcon,
+  MonitorIcon,
+  MoonIcon,
+  Rows3Icon,
+  ShieldAlertIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
+  SunIcon,
+  UserRoundCogIcon,
+} from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -36,16 +49,19 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
-import type { MembershipSummary } from "@/lib/auth/landing";
 import { ACCOUNT_PATH } from "@/lib/auth/paths";
 import { logout } from "@/lib/auth/actions";
-import { clearDashboardDrafts } from "../lib/drafts";
 import { useAdminLocale, useT } from "@/lib/i18n/admin/client";
 import { cn } from "@/lib/utils";
 import { initials } from "../lib/format";
+import { signOutCleanup } from "./client-state";
+import { DENSITIES, useDensity } from "./density";
+import { useHelpSheet } from "./help-sheet";
+import { IosInstallSheet, useInstallHint } from "./install-hint";
 import { useStore } from "./store-context";
 import { activeNav, storeNav, type ShellNavGroup, type ShellNavItem } from "./store-nav";
-import { StoreSwitcher } from "./store-switcher";
+import { StoreSwitcher, type SwitcherProps } from "./store-switcher";
+import { usePulse } from "./use-pulse";
 
 export interface ShellUser {
   name: string;
@@ -54,27 +70,19 @@ export interface ShellUser {
 }
 
 /**
- * The pulse's counts (`StorePulse.counts`, core §I.4, D57): every track's contributed keys (P4 `newOrders`,
- * `syncFailed`; the shell's `membersPendingInvites` …). A key that is absent shows no badge, never a 0 made up for it.
+ * The sidebar (P2 SHELL; platform.md PLA-§22.3, §22.6, §23.1; docs/STORE-SAAS.md §I.4; design.md DES-§16.6): the store
+ * switcher in the header, the registry's nav with the active pill sliding on `--ease-out` (a tween, never a spring),
+ * the badges from the pulse's counts (a key that is absent shows no badge, never a 0 made up for it), settings at the
+ * bottom and the account menu. Below 768 px it is a sheet (ui/sidebar.tsx). In Arabic it sits on the inline start,
+ * the physical right.
  */
-export type NavCounts = Readonly<Record<string, number>>;
-
-export function AppSidebar({
-  user,
-  counts,
-  memberships,
-  consoleHref,
-}: {
-  user: ShellUser;
-  counts: NavCounts | null;
-  memberships: readonly MembershipSummary[] | null;
-  consoleHref: string | null;
-}) {
+export function AppSidebar({ user, switcher, className }: { user: ShellUser; switcher: SwitcherProps; className?: string }) {
   const pathname = usePathname();
   const store = useStore();
   const { setOpenMobile, isMobile } = useSidebar();
   const t = useT();
   const locale = useAdminLocale();
+  const counts = usePulse().body?.counts ?? null;
   const groups = useMemo(() => storeNav({ handle: store.handle, mode: store.mode, can: store.can }, locale), [store, locale]);
   const active = activeNav(pathname, groups, store.handle);
   const generate = groups.flatMap((g) => g.items).find((i) => i.id === "generate");
@@ -108,7 +116,7 @@ export function AppSidebar({
                   aria-hidden="true"
                   className="absolute inset-0 rounded-[10px] bg-background shadow-[0_1px_2px_rgb(0_0_0/0.05),0_6px_16px_-10px_rgb(0_0_0/0.25)] ring-1 ring-sidebar-border dark:bg-sidebar-accent"
                   // a settle, never a bounce (D60, §I.6): the shell's ease-out curve
-                  transition={{ type: "tween", duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+                  transition={{ type: "tween", duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
                 />
               )}
               <Icon className={cn("relative z-10 transition-colors", isActive ? "text-brand" : "text-sidebar-foreground/55")} />
@@ -133,10 +141,10 @@ export function AppSidebar({
 
   return (
     // the inline-start side: the physical right in Arabic (ui/sidebar.tsx positions with physical sides)
-    <Sidebar variant="inset" collapsible="icon" side={locale === "ar" ? "right" : "left"} className="border-none">
+    <Sidebar variant="inset" collapsible="icon" side={locale === "ar" ? "right" : "left"} className={cn("border-none", className)}>
       <SidebarHeader className="gap-3 px-2 pt-3">
         {/* the store switcher slot (§I.4): the store on screen and the member's other stores */}
-        <StoreSwitcher memberships={memberships} consoleHref={consoleHref} />
+        <StoreSwitcher {...switcher} />
         {generate && (
           <SidebarMenu>
             <SidebarMenuItem>
@@ -191,25 +199,31 @@ export function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter className="px-2 pb-3">
-        <UserMenu user={user} roleLabel={t(`team.role.${store.role}`)} />
+        <UserMenu user={user} roleLabel={t(`team.role.${store.role}`)} onNavigate={closeMobile} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   );
 }
 
-function UserMenu({ user, roleLabel }: { user: ShellUser; roleLabel: string }) {
+function UserMenu({ user, roleLabel, onNavigate }: { user: ShellUser; roleLabel: string; onNavigate(): void }) {
   const { theme, setTheme } = useTheme();
   const { isMobile } = useSidebar();
   const t = useT();
+  const store = useStore();
+  const help = useHelpSheet();
+  const { density, setDensity } = useDensity();
+  const install = useInstallHint();
   const rtl = useAdminLocale() === "ar";
   // the sign-out form lives outside the menu: the menu unmounts as soon as an item is chosen
   const signOut = useRef<HTMLFormElement>(null);
+  const shield = user.totpEnabled ? "text-success-ink" : "text-warn-ink";
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        {/* signing out also forgets this browser's dashboard drafts (§E.6) */}
-        <form ref={signOut} action={logout} onSubmit={clearDashboardDrafts} className="hidden" />
+        {/* signing out also forgets this browser's state of the store and its dashboard drafts (§B.4, §E.6) */}
+        <form ref={signOut} action={logout} onSubmit={() => signOutCleanup(store.id, store.viewerId)} className="hidden" />
+        <IosInstallSheet open={install.iosOpen} onOpenChange={install.setIosOpen} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
@@ -221,11 +235,7 @@ function UserMenu({ user, roleLabel }: { user: ShellUser; roleLabel: string }) {
               <span className="grid min-w-0 flex-1 text-start leading-tight">
                 <span className="truncate text-[0.84rem] font-medium">{user.name}</span>
                 <span className="flex items-center gap-1 truncate text-[0.72rem] text-sidebar-foreground/65">
-                  {user.totpEnabled ? (
-                    <ShieldCheckIcon className="size-3 text-emerald-600 dark:text-emerald-400" />
-                  ) : (
-                    <ShieldAlertIcon className="size-3 text-warn-ink" />
-                  )}
+                  {user.totpEnabled ? <ShieldCheckIcon className={cn("size-3", shield)} /> : <ShieldAlertIcon className={cn("size-3", shield)} />}
                   {roleLabel}
                 </span>
               </span>
@@ -243,16 +253,14 @@ function UserMenu({ user, roleLabel }: { user: ShellUser; roleLabel: string }) {
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                <Link href={ACCOUNT_PATH}>
-                  {user.totpEnabled ? <ShieldCheckIcon className="text-emerald-600 dark:text-emerald-400" /> : <ShieldAlertIcon className="text-warn-ink" />}
+                <Link href={ACCOUNT_PATH} onClick={onNavigate}>
+                  {user.totpEnabled ? <ShieldCheckIcon className={shield} /> : <ShieldAlertIcon className={shield} />}
                   <span className="flex-1">{t("shell.chrome.two_factor")}</span>
-                  <span className={cn("text-xs", user.totpEnabled ? "text-emerald-600 dark:text-emerald-400" : "text-warn-ink")}>
-                    {t(user.totpEnabled ? "shell.chrome.on" : "shell.chrome.off")}
-                  </span>
+                  <span className={cn("text-xs", shield)}>{t(user.totpEnabled ? "shell.chrome.on" : "shell.chrome.off")}</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link href={ACCOUNT_PATH}>
+                <Link href={ACCOUNT_PATH} onClick={onNavigate}>
                   <UserRoundCogIcon />
                   {t("shell.chrome.account")}
                 </Link>
@@ -277,6 +285,36 @@ function UserMenu({ user, roleLabel }: { user: ShellUser; roleLabel: string }) {
                   </DropdownMenuRadioGroup>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <Rows3Icon />
+                  {t("shell.density.label")}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="rounded-xl">
+                  <DropdownMenuRadioGroup value={density} onValueChange={(v) => setDensity(v === "compact" ? "compact" : "comfortable")}>
+                    {DENSITIES.map((d) => (
+                      <DropdownMenuRadioItem key={d} value={d}>
+                        {t(`shell.density.${d}`)}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuItem
+                onSelect={() => {
+                  onNavigate();
+                  help.open();
+                }}
+              >
+                <LifeBuoyIcon />
+                {t("shell.chrome.help")}
+              </DropdownMenuItem>
+              {install.offer && (
+                <DropdownMenuItem onSelect={install.install}>
+                  <DownloadIcon />
+                  {t("shell.install.cta")}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => signOut.current?.requestSubmit()}>

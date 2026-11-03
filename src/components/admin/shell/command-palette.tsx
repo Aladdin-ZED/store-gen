@@ -1,11 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import type { StoreSearchResult } from "@/app/api/app/[store]/search/run";
 import type { SearchHit } from "@/lib/admin-data/search";
 import type { ActionResult } from "../lib/action-result";
 import { usePrefetchOnIdle } from "../lib/lazy";
+import { useStore } from "./store-context";
 
 export { Kbd } from "./kbd";
 
@@ -17,18 +19,41 @@ const Palette = dynamic(() => import("./command-palette-body").then((m) => m.Pal
   loading: () => <div className="h-[3.25rem] border-b border-border/70" aria-hidden="true" />,
 });
 
-const PaletteContext = createContext<{ open: () => void } | null>(null);
+const PaletteContext = createContext<{ open: () => void; index: Promise<PaletteIndex | null> | null } | null>(null);
 
-export function useCommandPalette() {
+/**
+ * The palette's local index (PLA-§22.13): the store's 20 most recently edited pages and, for members who may read
+ * them, the members' names, streamed by the `[store]` layout after the first paint (the rework of p2-08 reads it).
+ */
+export interface PaletteIndex {
+  pages: { id: string; name: string; slug: string; status: string }[];
+  members: { userId: string; name: string; role: string }[];
+}
+
+export function useCommandPalette(): { open: () => void; index: Promise<PaletteIndex | null> | null } {
   const ctx = useContext(PaletteContext);
   if (!ctx) throw new Error("useCommandPalette must be used inside <CommandPaletteProvider>");
   return ctx;
 }
 
-/** ⌘K / Ctrl+K anywhere in the store's dashboard; "/" too when not typing. Search answers for the store on screen only. */
-export function CommandPaletteProvider({ search, children }: { search: (q: string) => Promise<ActionResult<SearchHit[]>>; children: ReactNode }) {
+/**
+ * ⌘K / Ctrl+K anywhere in the store's dashboard; "/" too when not typing. Search answers for the store on screen only:
+ * `GET /api/app/<h>/search` (the store's guard, its rate bucket, masked hits), flattened in group order.
+ */
+export function CommandPaletteProvider({ index = null, children }: { index?: Promise<PaletteIndex | null> | null; children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const value = useMemo(() => ({ open: () => setOpen(true) }), []);
+  const store = useStore();
+  const value = useMemo(() => ({ open: () => setOpen(true), index }), [index]);
+  const searchUrl = store.api("/search");
+  const search = useCallback(
+    async (q: string): Promise<ActionResult<SearchHit[]>> => {
+      const res = await fetch(`${searchUrl}?q=${encodeURIComponent(q)}`, { cache: "no-store", credentials: "same-origin" });
+      if (!res.ok) return { ok: false, error: res.status === 429 ? "rate_limited" : res.status === 404 ? "not_found" : "server" };
+      const body = (await res.json()) as StoreSearchResult;
+      return { ok: true, data: Array.isArray(body?.groups) ? body.groups.flatMap((g) => g.hits) : [] };
+    },
+    [searchUrl],
+  );
   usePrefetchOnIdle(PREFETCH);
 
   useEffect(() => {

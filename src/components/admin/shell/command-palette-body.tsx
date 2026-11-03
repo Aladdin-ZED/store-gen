@@ -7,6 +7,7 @@
 import {
   ArrowRightIcon,
   FileDownIcon,
+  LifeBuoyIcon,
   Loader2Icon,
   LogOutIcon,
   MonitorIcon,
@@ -31,10 +32,11 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { logout } from "@/lib/auth/actions";
-import { clearDashboardDrafts } from "../lib/drafts";
 import type { SearchHit } from "@/lib/admin-data/search";
 import type { ActionResult } from "../lib/action-result";
 import { downloadFile } from "../lib/download";
+import { signOutCleanup } from "./client-state";
+import { useHelpSheet } from "./help-sheet";
 import { Kbd } from "./kbd";
 import { useStoreStepUp } from "./step-up";
 import { useStore } from "./store-context";
@@ -44,6 +46,7 @@ export function Palette({ search, close }: { search: (q: string) => Promise<Acti
   const router = useRouter();
   const store = useStore();
   const stepUp = useStoreStepUp();
+  const help = useHelpSheet();
   const can = store.can;
   const { setTheme } = useTheme();
   const [query, setQuery] = useState("");
@@ -168,6 +171,18 @@ export function Palette({ search, close }: { search: (q: string) => Promise<Acti
               Export all orders (CSV)
             </CommandItem>
           )}
+          <CommandItem
+            value="action help support whatsapp"
+            keywords={["help", "support", "aide", "مساعدة"]}
+            onSelect={() => {
+              close();
+              help.open();
+            }}
+            className="gap-3 rounded-lg"
+          >
+            <LifeBuoyIcon className="text-muted-foreground" />
+            Help
+          </CommandItem>
           {can("integrations.manage") && (
             <CommandItem value="action google sheets" keywords={["connect", "sync"]} onSelect={() => go(store.href("/integrations/sheets"))} className="gap-3 rounded-lg">
               <SheetIcon className="text-muted-foreground" />
@@ -201,7 +216,7 @@ export function Palette({ search, close }: { search: (q: string) => Promise<Acti
           <Kbd>Esc</Kbd> to close
         </span>
       </div>
-      <form ref={formRef} action={logout} onSubmit={clearDashboardDrafts} className="hidden" />
+      <form ref={formRef} action={logout} onSubmit={() => signOutCleanup(store.id, store.viewerId)} className="hidden" />
     </Command>
   );
 }

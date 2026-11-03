@@ -20,7 +20,7 @@
  */
 import { ClipboardCopyIcon, GaugeIcon, LockIcon, SendIcon } from "lucide-react";
 import Link from "next/link";
-import { useState, type ReactElement } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -160,4 +160,41 @@ export function LimitSheet({ limit: p, ...chrome }: { limit: LimitSheetProps } &
       </SheetContent>
     </Sheet>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* one sheet for the whole shell (use-action-error.ts, LockedControl)  */
+/* ------------------------------------------------------------------ */
+
+interface LimitSheetApi {
+  /** opens the sheet for `limit` (an action's `quota` / `feature_off` answer, a locked control, a banner) */
+  open(limit: LimitSheetProps, chrome?: Pick<LimitSheetChrome, "note" | "requestSentAt">): void;
+}
+
+const LimitSheetContext = createContext<LimitSheetApi | null>(null);
+
+/** The `[store]` frame mounts one; `useLimitSheet().open(…)` shows it from any screen. */
+export function LimitSheetProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<{ limit: LimitSheetProps; note: LimitSheetChrome["note"]; requestSentAt: string | null; open: boolean } | null>(null);
+  const open = useCallback<LimitSheetApi["open"]>((limit, chrome) => setState({ limit, note: chrome?.note ?? null, requestSentAt: chrome?.requestSentAt ?? null, open: true }), []);
+  const api = useMemo(() => ({ open }), [open]);
+  return (
+    <LimitSheetContext.Provider value={api}>
+      {children}
+      {state && (
+        <LimitSheet
+          limit={state.limit}
+          note={state.note}
+          requestSentAt={state.requestSentAt}
+          open={state.open}
+          onOpenChange={(o) => setState((s) => (s ? { ...s, open: o } : s))}
+        />
+      )}
+    </LimitSheetContext.Provider>
+  );
+}
+
+/** The shell's limit sheet; outside a provider `open` does nothing (the caller's toast still explains). */
+export function useLimitSheet(): LimitSheetApi | null {
+  return useContext(LimitSheetContext);
 }

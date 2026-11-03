@@ -279,6 +279,8 @@ export const actions: TrackActionCase[] = [
   // a read key that marks the store dirty: A's viewer may recompute A, hence write: false (the special case covers it)
   { file: HEALTH, name: "recomputeHealthAction", area: "settings", path: "", permission: ["store.read"], write: false, victim: () => [], own: () => [] },
   { file: NOTIFY, name: "markNotificationsReadAction", area: "settings", path: "/notifications", permission: ["store.read"], write: false, victim: () => [NO_NOTIFICATION], own: () => [NO_NOTIFICATION] },
+  // step p2-07: the bell's read (no argument; the reader is the seam's member of the path's store, so A's rows never answer on B's path)
+  { file: NOTIFY, name: "bellNotificationsAction", area: "settings", path: "", permission: ["store.read"], write: false, victim: () => [], own: () => [] },
   // onboarding: A's photo and A's document are missing ones in B
   { file: WELCOME, name: "saveOnboardingDetailsAction", area: "generate", path: "/welcome", permission: ["pages.write"], write: true, victim: (fx) => [details(fx.A)], own: (fx) => [details(fx.B)] },
   { file: WELCOME, name: "useDirectionAction", area: "generate", path: "/welcome", permission: ["pages.write", "ai.use"], write: true, victim: (fx, fresh) => direction(fx.A, fresh), own: (fx, fresh) => direction(fx.B, fresh) },

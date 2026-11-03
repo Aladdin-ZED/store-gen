@@ -37,7 +37,10 @@ import { getReviewCard, type ReviewCard } from "@/lib/platform/requests";
 import { getStoreSetting, type StoreSettingValue } from "@/lib/settings";
 import { getSheetsConfig, isSheetsConfigured } from "@/lib/sheets";
 import { getPageStats } from "@/lib/stats";
+import { entitlements } from "@/lib/tenancy/entitlements";
+import { USAGE_METRICS, usageMetric } from "@/lib/tenancy/entitlement-keys";
 import { listMembersByScope, type MemberSummary } from "@/lib/tenancy/invites";
+import { usageValue } from "@/lib/tenancy/usage";
 import { inStore, whereStore } from "@/lib/tenancy/sql";
 import type { StoreCtx, StoreRow, StoreScope, StoreStatus } from "@/lib/tenancy/types";
 import { storeUrl } from "@/lib/urls";
@@ -417,6 +420,60 @@ export async function storeRowFacts(scope: StoreScope): Promise<{ category: stri
   const [row] = await db.select({ category: stores.category, createdAt: stores.createdAt }).from(stores).where(eq(stores.id, scope.storeId)).limit(1);
   if (!row) throw new Error("dashboard: the scope's store row is missing");
   return { category: row.category ?? null, createdAt: row.createdAt };
+}
+
+/* ------------------------------------------------------------------ */
+/* the shell chrome's facts (step p2-07: banners, state pages, ⌘K)     */
+/* ------------------------------------------------------------------ */
+
+/** The closed banner's and the deletion page's dates (`stores.closed_at`, `stores.purge_after`), ISO or null. */
+export async function storeLifecycleDates(scope: StoreScope): Promise<{ closedAt: string | null; purgeAfter: string | null }> {
+  const [row] = await db.select({ closedAt: stores.closedAt, purgeAfter: stores.purgeAfter }).from(stores).where(eq(stores.id, scope.storeId)).limit(1);
+  return { closedAt: row?.closedAt?.toISOString() ?? null, purgeAfter: row?.purgeAfter?.toISOString() ?? null };
+}
+
+/** Active members without two-step verification (the owners' require-2FA banner, PLA-§22.8). */
+export async function membersWithout2faCount(scope: StoreScope): Promise<number> {
+  return (await listMembersByScope(scope)).filter((m) => m.status === "active" && !m.totpEnabled).length;
+}
+
+/** The gauges the quota banner watches (period "total"; the monthly counters show in Plan & usage). */
+const BANNER_GAUGES = ["media_bytes", "pages", "members", "agents"] as const;
+
+/** The store's gauges with a limit (`null` = unlimited, never a banner): `{ metric, used, limit }` (PLA-§22.8 "quota ≥ 80 %"). */
+export async function quotaGauges(scope: StoreScope, timeZone: string): Promise<{ metric: string; used: number; limit: number | null }[]> {
+  const values = await entitlements(scope);
+  const now = new Date();
+  return Promise.all(
+    BANNER_GAUGES.map(async (metric) => {
+      const limitKey = USAGE_METRICS[metric].limit;
+      const limit = limitKey ? (values[limitKey] as number | null) : null;
+      const used = await usageValue(scope, usageMetric(metric, now, timeZone));
+      return { metric, used, limit };
+    }),
+  );
+}
+
+/** ⌘K's local index (PLA-§22.13): the 20 most recently edited pages and, with `members.read`, the active members. */
+export async function paletteIndex(scope: StoreScope, opts: { pages: boolean; members: boolean }): Promise<{ pages: { id: string; name: string; slug: string; status: string }[]; members: { userId: string; name: string; role: string }[] }> {
+  const [pageRows, memberRows] = await Promise.all([opts.pages ? pageOptions(scope) : Promise.resolve([]), opts.members ? listMembersByScope(scope) : Promise.resolve([])]);
+  return {
+    pages: pageRows.slice(0, 20).map((p) => ({ id: p.id, name: p.name, slug: p.slug, status: p.status })),
+    members: memberRows.filter((m) => m.status === "active").map((m) => ({ userId: m.userId, name: m.name, role: m.role })),
+  };
+}
+
+/**
+ * Does `/app/<h>` send the owner to `/welcome` (PLA-§22.2)? While `onboarding.step` is not `done` or `skipped`, for a
+ * store that started the flow (`startedAt`) or has no page yet: a store from before the flow existed, with its pages,
+ * is never sent back to a welcome it never had.
+ */
+export async function welcomePending(scope: StoreScope): Promise<boolean> {
+  const onboarding = await getStoreSetting(scope, "onboarding");
+  if (onboarding.step === "done" || onboarding.step === "skipped") return false;
+  if (onboarding.startedAt) return true;
+  const counts = await pageCounts(scope);
+  return counts.draft + counts.published + counts.archived === 0;
 }
 
 /** The shell's store-level pulse counter (src/lib/pulse/contributors/shell.ts): open invites, not accepted, revoked or expired. */

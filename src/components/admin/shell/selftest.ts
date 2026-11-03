@@ -27,6 +27,13 @@
  * the wa.me link, middle truncation, the issue list's order and snooze split, the pager keeping filters, freshness,
  * whole-pixel QR modules of at least 4 px, the ring geometry, the skeleton's timing); the type-level refusal of a 0 for
  * a funnel step R1 cannot measure; and every message key the primitives name exists in ar, fr and en.
+ *
+ * Step p2-07 (the shell chrome): `usePulse`'s reducer (a status, review, kill-switch or re-acceptance change refreshes,
+ * a new build shows the update once, a new health snapshot ticks the ring, finished jobs wait as "Ready · Open" once
+ * each), the banners from the pulse within one body (PL-12), the ribbon's countdown on the corrected clock (two tabs
+ * under a second apart), the bell's count and day groups and its dashboard-only links, the Help sheet's error ring and
+ * its diagnostic block without a query string, the density default, the visit counter and the install offer, and every
+ * key the chrome names in ar, fr and en.
  * Exits 1 on any failure.
  */
 import {
@@ -114,6 +121,25 @@ import {
   waHref,
 } from "@/components/admin/common/primitive-logic";
 import { screenLocale, screenLocalesFor, settingsText, SETTINGS_NAV, storeRelativePath, TRILINGUAL_SCREENS } from "./store-nav";
+import type { StorePulse } from "@/lib/pulse/types";
+import { countVisit, defaultDensity, HELP_SECTIONS, helpSection, helpTipKeys, installOffer } from "./chrome-logic";
+import { clearClientErrors, CLIENT_ERROR_RING, diagnosticText, recentClientErrors, recordClientError } from "./client-errors";
+import {
+  bellCount,
+  clockOffset,
+  formatCountdown,
+  groupByDay,
+  initialPulseState,
+  needsRefresh,
+  notificationHref,
+  pulseAge,
+  pulseBanners,
+  READY_MAX,
+  reducePulse,
+  remainingMs,
+  ribbonEndsAt,
+  statusReasonKey,
+} from "./pulse-state";
 
 let failures = 0;
 let passed = 0;
@@ -1114,11 +1140,168 @@ async function primitiveChecks(): Promise<void> {
   check("no em or en dash in the primitives' strings", dashed.length === 0, dashed);
 }
 
+/* ---- step p2-07: the shell chrome (usePulse's reducer, banners from the pulse, the ribbon's countdown, the bell) ---- */
+function pulseOf(over: Partial<StorePulse> & { status?: StorePulse["store"]["status"]; review?: StorePulse["store"]["review"] } = {}): StorePulse {
+  const { status = "active", review = "approved", ...rest } = over;
+  return {
+    v: 1,
+    at: "2026-11-03T10:00:00.000Z",
+    build: "b1",
+    unread: 0,
+    store: { status, statusReason: null, review },
+    kill: [],
+    impersonation: null,
+    reaccept: false,
+    health: { score: 80, attention: 1, computedAt: "2026-11-03T09:00:00.000Z" },
+    jobs: { running: 0, done: [] },
+    counts: {},
+    ...rest,
+  };
+}
+
+async function chromeChecks(): Promise<void> {
+  // usePulse's reducer: what each body change asks of the page
+  let s = initialPulseState(pulseOf(), 1_000);
+  check("the first paint's body is the state, its build the boot build", s.body?.build === "b1" && s.bootBuild === "b1" && s.receivedAt === 1_000 && s.refreshTick === 0);
+  s = reducePulse(s, { t: "body", body: pulseOf({ unread: 3, counts: { newOrders: 2 } }), now: 16_000 });
+  check("unread and counts alone refresh nothing", s.refreshTick === 0 && s.healthTick === 0 && !s.updateAvailable && s.body?.unread === 3 && pulseAge(s, 20_000) === 4_000);
+  s = reducePulse(s, { t: "body", body: pulseOf({ status: "restricted" }), now: 31_000 });
+  check("a status change asks for router.refresh() (PL-02)", s.refreshTick === 1);
+  s = reducePulse(s, { t: "body", body: pulseOf({ status: "restricted", review: "rejected" }), now: 46_000 });
+  check("a review change asks for router.refresh()", s.refreshTick === 2);
+  s = reducePulse(s, { t: "body", body: pulseOf({ status: "restricted", review: "rejected", kill: ["publishing_enabled"] }), now: 61_000 });
+  check("a kill switch change asks for router.refresh()", s.refreshTick === 3);
+  s = reducePulse(s, { t: "body", body: pulseOf({ status: "restricted", review: "rejected", kill: ["publishing_enabled"], reaccept: true }), now: 76_000 });
+  check("a re-acceptance asks for router.refresh() (the legal sheet)", s.refreshTick === 4);
+  s = reducePulse(s, { t: "body", body: pulseOf({ status: "restricted", review: "rejected", kill: ["publishing_enabled"], reaccept: true, build: "b2" }), now: 91_000 });
+  check("another build shows the update once and stays", s.updateAvailable && s.bootBuild === "b1" && s.refreshTick === 4);
+  const health = pulseOf({ health: { score: 70, attention: 2, computedAt: "2026-11-03T10:05:00.000Z" } });
+  const h = reducePulse(initialPulseState(pulseOf(), 0), { t: "body", body: health, now: 1 });
+  check("a new health snapshot bumps the ring's tick, not the refresh", h.healthTick === 1 && h.refreshTick === 0);
+  let j = reducePulse(initialPulseState(pulseOf(), 0), { t: "body", body: pulseOf({ jobs: { running: 1, done: ["job-1", "job-2"] } }), now: 5 });
+  check("finished jobs become 'Ready · Open' once each", j.ready.map((r) => r.id).join() === "job-1,job-2");
+  j = reducePulse(j, { t: "body", body: pulseOf({ jobs: { running: 0, done: ["job-2"] } }), now: 6 });
+  check("a job named again is not added twice", j.ready.length === 2);
+  j = reducePulse(j, { t: "dismiss_job", id: "job-1" });
+  j = reducePulse(j, { t: "body", body: pulseOf({ jobs: { running: 0, done: ["job-2"] } }), now: 7 });
+  check("a dismissed job leaves, the others stay", j.ready.map((r) => r.id).join() === "job-2");
+  let many = initialPulseState(null, 0);
+  many = reducePulse(many, { t: "body", body: pulseOf({ jobs: { running: 0, done: ["a", "b", "c", "d", "e", "f", "g"] } }), now: 1 });
+  check(`at most ${READY_MAX} jobs wait, the newest kept`, many.ready.length === READY_MAX && many.ready[READY_MAX - 1]!.id === "g");
+  check("no first body: the first poll is the boot build, nothing refreshes", many.bootBuild === "b1" && many.refreshTick === 0);
+  check("needsRefresh ignores an order of kill switches", !needsRefresh(pulseOf({ kill: ["a" as never, "b" as never] }), pulseOf({ kill: ["b" as never, "a" as never] })));
+
+  // banners from the pulse (PL-12: a state change shows within one body, no reload)
+  const base = { role: "owner", reason: "some recent orders look fake", closedOn: null, reopenUntil: null };
+  const ids = (b: ReturnType<typeof pulseBanners>) => b.map((x) => x.id).join();
+  check("before a body, the first paint's state decides", ids(pulseBanners(base, { status: "pending", kill: [] }, null)) === "pending");
+  check("a restricted body shows the restricted banner at once", ids(pulseBanners(base, { status: "active", kill: [] }, pulseOf({ status: "restricted" }))) === "restricted");
+  check(
+    "a suspended store with a kill switch: suspended first, the switch behind '1 more'",
+    ids(pulseBanners(base, { status: "active", kill: [] }, pulseOf({ status: "suspended", kill: ["publishing_enabled"] }))) === "suspended,kill:publishing_enabled",
+  );
+  check("back to active: no banner", ids(pulseBanners(base, { status: "restricted", kill: [] }, pulseOf({ status: "active" }))) === "");
+  check(
+    "a closed store: the owner's banner, a manager's page",
+    ids(pulseBanners(base, { status: "active", kill: [] }, pulseOf({ status: "closed" }))) === "closed" &&
+      ids(pulseBanners({ ...base, role: "manager" }, { status: "active", kill: [] }, pulseOf({ status: "closed" }))) === "" &&
+      statePage("closed", "manager") === "closed",
+  );
+  check("a status reason code becomes its catalog key; junk becomes nothing", statusReasonKey("fake_orders") === "shell.status_reason.fake_orders" && statusReasonKey("<b>") === null && statusReasonKey(null) === null);
+
+  // the ribbon's countdown (PLA-§10.2): the offset once, the pulse's end first
+  const offset = clockOffset("2026-11-03T10:00:00.000Z", Date.parse("2026-11-03T10:00:05.000Z"));
+  check("the server offset: server minus client", offset === -5_000 && clockOffset("junk", 1) === 0);
+  const ends = "2026-11-03T10:24:13.000Z";
+  check("24:13 left on a corrected clock", formatCountdown(remainingMs(ends, Date.parse("2026-11-03T10:00:05.000Z"), offset)) === "24:13");
+  check("never below 00:00, and 00:00 only when it is over", formatCountdown(remainingMs(ends, Date.parse("2026-11-03T11:00:00.000Z"), 0)) === "00:00" && formatCountdown(400) === "00:01");
+  check("an hour reads 1:00:00", formatCountdown(3_600_000) === "1:00:00" && formatCountdown(Number.NaN) === "00:00");
+  check("an unreadable end counts as over", remainingMs("nope", 0, 0) === 0 && remainingMs(null, 0, 0) === 0);
+  check(
+    "the pulse's endsAt wins over the first paint's",
+    ribbonEndsAt(pulseOf({ impersonation: { endsAt: "2026-11-03T10:30:00.000Z" } }), ends) === "2026-11-03T10:30:00.000Z" && ribbonEndsAt(pulseOf(), ends) === ends && ribbonEndsAt(null, null) === null,
+  );
+  // two tabs: one navigated (a fresh first paint), the other on the pulse; both read the same end on the same clock
+  const tabA = remainingMs(ribbonEndsAt(pulseOf({ impersonation: { endsAt: ends } }), "2026-11-03T10:20:00.000Z"), Date.parse("2026-11-03T10:10:00.400Z"), 0);
+  const tabB = remainingMs(ribbonEndsAt(pulseOf({ impersonation: { endsAt: ends } }), ends), Date.parse("2026-11-03T10:10:00.000Z"), 0);
+  check("two tabs differ by under a second", Math.abs(tabA - tabB) < 1_000);
+
+  // the bell
+  check("the bell: nothing at 0, the count to nine, 9+ above", bellCount(0) === null && bellCount(3) === "3" && bellCount(9) === "9" && bellCount(10) === "9+" && bellCount(Number.NaN) === null);
+  const now = Date.parse("2026-11-03T12:00:00.000Z");
+  const rows = [
+    { createdAt: "2026-11-03T11:00:00.000Z" },
+    { createdAt: "2026-11-03T08:00:00.000Z" },
+    { createdAt: "2026-11-02T20:00:00.000Z" },
+    { createdAt: "2026-10-30T10:00:00.000Z" },
+    { createdAt: "junk" },
+  ];
+  check(
+    "rows group by day in the store's zone: today, yesterday, then dates",
+    groupByDay(rows, now, "Africa/Casablanca").map((g) => `${g.day}:${g.items.length}`).join() === "today:2,yesterday:1,2026-10-30:1,today:1",
+    groupByDay(rows, now, "Africa/Casablanca").map((g) => `${g.day}:${g.items.length}`),
+  );
+  check(
+    "a notification opens only a dashboard link",
+    notificationHref("/app/atlas/orders") === "/app/atlas/orders" && notificationHref("/app/account") === "/app/account" && notificationHref("https://evil.example") === null && notificationHref("//evil") === null && notificationHref(null) === null,
+  );
+
+  // the Help sheet's ring and diagnostic block (PLA-§20.1)
+  clearClientErrors();
+  for (const c of ["forbidden", "quota", "Bad Code", "rate_limited", "server", "busy", "invalid", "conflict"]) recordClientError(c);
+  check("the ring keeps the last five well-formed codes", recentClientErrors().join() === "rate_limited,server,busy,invalid,conflict" && CLIENT_ERROR_RING === 5);
+  const diag = diagnosticText({ handle: "atlas-argan", path: "/app/atlas-argan/orders?q=0612345678#x", build: "abc123", ua: "Chrome · Android", errors: recentClientErrors(), locale: "ar" });
+  check("the diagnostic block carries no query string (a phone typed in a search)", !diag.includes("0612345678") && diag.includes("screen: /app/atlas-argan/orders") && diag.includes("recent errors: rate_limited"));
+  check("the diagnostic block has no token-looking field", !/token|cookie|session|password/i.test(diag));
+  clearClientErrors();
+  check("sign-out empties the ring", recentClientErrors().length === 0);
+
+  // the chrome's small rules
+  check("agents and managers start compact, the others comfortable", defaultDensity("agent") === "compact" && defaultDensity("manager") === "compact" && defaultDensity("owner") === "comfortable" && defaultDensity("viewer") === "comfortable");
+  const lsV = new FakeStorage([]);
+  const ssV = new FakeStorage([]);
+  lsV.removeItem("x");
+  const v1 = countVisit(() => lsV, () => ssV);
+  const v1b = countVisit(() => lsV, () => ssV);
+  const v2 = countVisit(() => lsV, () => new FakeStorage([]));
+  check("a visit counts once per browser session", v1 === 1 && v1b === 1 && v2 === 2);
+  check("a blocked storage counts nothing", countVisit(blocked, blocked) === 0);
+  check(
+    "the install hint: from the 3rd visit, never installed, native prompt first, iOS sheet, else nothing",
+    installOffer({ visits: 2, standalone: false, native: true, ios: false }) === null &&
+      installOffer({ visits: 3, standalone: false, native: true, ios: false }) === "native" &&
+      installOffer({ visits: 3, standalone: false, native: false, ios: true }) === "ios" &&
+      installOffer({ visits: 9, standalone: true, native: true, ios: true }) === null &&
+      installOffer({ visits: 9, standalone: false, native: false, ios: false }) === null,
+  );
+  check("help tips: a known screen its own, the others the general ones", helpSection("orders") === "orders" && helpSection("history") === "general" && helpSection(null) === "general");
+  const tipKeys = [...HELP_SECTIONS, "general"].flatMap(helpTipKeys);
+  check("every help tip exists in ar, fr and en", tipKeys.length === (HELP_SECTIONS.length + 1) * 2 && tipKeys.every(inCatalogs), tipKeys.filter((k) => !inCatalogs(k)));
+
+  // every message key the chrome names exists in ar/fr/en, with no em or en dash
+  const dir = path.join(process.cwd(), "src/components/admin/shell");
+  const files = ["notification-bell.tsx", "store-banner.tsx", "state-page.tsx", "impersonation-ribbon.tsx", "legal-sheet.tsx", "help-sheet.tsx", "install-hint.tsx", "store-switcher.tsx", "app-sidebar.tsx", "topbar.tsx", "use-action-error.ts", "use-pulse.ts", "limit-sheet.tsx"].map((f) => path.join(dir, f));
+  const keys = new Set<string>();
+  for (const file of files) {
+    for (const m of readFileSync(file, "utf8").matchAll(/"((?:shell|team|error)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)"/g)) keys.add(m[1]!);
+  }
+  const built = [
+    ...(["ticket", "onboarding", "abuse_review", "bug", "other"] as const).map((r) => `shell.impersonation.reasons.${r}`),
+    ...(["comfortable", "compact"] as const).map((d) => `shell.density.${d}`),
+    ...KILL_SWITCHES.filter((k) => k !== "signups_enabled").map((k) => `shell.kill.${k}`),
+  ];
+  const missing = [...keys, ...built].filter((k) => !inCatalogs(k));
+  check(`the ${keys.size} keys the chrome names (and the built ones) exist in ar, fr and en`, keys.size > 60 && missing.length === 0, missing);
+  const dashed = [...keys, ...built].flatMap((k) => ADMIN_LOCALES.map((l) => [k, messageOf(k, l) ?? ""] as const)).filter(([, v]) => /[–—]/.test(v));
+  check("no em or en dash in the chrome's strings", dashed.length === 0, dashed);
+}
+
 ruleChecks()
   .then(searchChecks)
   .then(manifestChecks)
   .then(actionInputChecks)
   .then(primitiveChecks)
+  .then(chromeChecks)
   .catch((err: unknown) => check("the rule and search checks ran", false, String(err)))
   .finally(() => {
     console.log(`test:shell: ${passed} passed, ${failures} failed`);

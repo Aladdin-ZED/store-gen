@@ -66,6 +66,8 @@ export interface PulseElectionOptions {
   poll: PulsePoll;
   onBody(body: StorePulse, etag: string): void;
   clock?: PulseClock;
+  /** the body the server painted with (the layout's first pulse): the first poll sends its ETag, and gets `304` */
+  initial?: { body: StorePulse; etag: string } | null;
   id?: string;
   visible?: boolean;
   intervalMs?: number;
@@ -113,7 +115,7 @@ export function createPulseElection(opts: PulseElectionOptions): PulseElection {
 
   let role: ElectionRole = "idle";
   let visible = opts.visible ?? true;
-  let last: { body: StorePulse; etag: string; receivedAt: number } | null = null;
+  let last: { body: StorePulse; etag: string; receivedAt: number } | null = opts.initial ? { ...opts.initial, receivedAt: clock.now() } : null;
   let pollTimer: unknown = null;
   let silenceTimer: unknown = null;
   let probeTimer: unknown = null;

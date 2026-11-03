@@ -14,6 +14,8 @@
  * - the store's pulse pollers (`stopPulsePollers`) and its running browser AI jobs (P7's `cancelStoreAiJobs`).
  */
 import { cancelStoreAiJobs } from "@/lib/ai/router/client";
+import { clearDashboardDrafts } from "../lib/drafts";
+import { clearClientErrors } from "./client-errors";
 import { stopPulsePollers } from "./pulse-election";
 
 type Cleaner = (storeId: string, userId: string) => void;
@@ -93,4 +95,22 @@ export function clearStoreClientState(
     // P7's hook: a failure leaves the job to its own timeout
   }
   return { storageKeys, pollers, cleaners };
+}
+
+/**
+ * Sign-out from any surface of a store (the account menu, the legal sheet): the store's client state, the dashboard's
+ * drafts of this browser (§E.6) and the Help sheet's error ring. Never throws: the sign-out form submits either way.
+ */
+export function signOutCleanup(storeId: string, userId: string): void {
+  try {
+    clearStoreClientState(storeId, userId);
+  } catch {
+    // nothing kept that the next session could read
+  }
+  try {
+    clearDashboardDrafts();
+  } catch {
+    // storage blocked
+  }
+  clearClientErrors();
 }
