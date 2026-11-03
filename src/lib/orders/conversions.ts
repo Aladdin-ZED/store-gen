@@ -27,7 +27,7 @@ import "server-only";
  * transition events wait for the outbox, and the timeline events are skipped. That fallback goes at the R1 integration.
  */
 import { after } from "next/server";
-import { and, eq, gte, isNotNull, lt } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, lt } from "drizzle-orm";
 import { auditIn } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { orders, pages } from "@/lib/db/schema";
@@ -502,11 +502,27 @@ export async function purgeCapiContexts(scope: WriteScope, opts: { now?: number;
 /* ------------------------------------------------------------------ */
 
 /**
+ * The page ids of `ids` that are this store's (any status): a per-page trigger override may name only those, so another
+ * store's page id reads as a missing one (core §E.3). Read by `saveConversionsAction` (≤ 200 overrides).
+ */
+export async function ownConversionPages(scope: StoreScope, ids: readonly string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const rows = await db.select({ id: pages.id }).from(pages).where(whereStore(pages, scope, inArray(pages.id, [...ids])));
+  return new Set(rows.map((r) => r.id));
+}
+
+/**
  * After `conversions` was saved (step 8's `saveConversionsAction`): the live pages whose effective trigger changed are
  * re-rendered (`enqueueRenders(scope, ids, "conversions", 4)`: the thank-you page drops or regains the browser
  * Purchase), the store's health is marked dirty, and the change is audited (`integrations.conversions.changed`).
  */
-export async function applyConversionsChange(scope: WriteScope, before: Conversions, next: Conversions, actor: Actor): Promise<{ pages: string[]; enqueued: number }> {
+export async function applyConversionsChange(
+  scope: WriteScope,
+  before: Conversions,
+  next: Conversions,
+  actor: Actor,
+  opts: { stepUp?: "totp" | "password" } = {},
+): Promise<{ pages: string[]; enqueued: number }> {
   const live = await db
     .select({ id: pages.id })
     .from(pages)
@@ -528,6 +544,8 @@ export async function applyConversionsChange(scope: WriteScope, before: Conversi
       customEvents: next.customEvents,
       manualOrders: next.manualOrders,
       pages: changed.length,
+      // the save is a step-up-gated write under integrations.manage (§F.5 rev 4 meta.stepUp)
+      ...(opts.stepUp ? { stepUp: opts.stepUp } : {}),
     },
   });
   return { pages: changed, enqueued };

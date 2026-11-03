@@ -159,6 +159,18 @@ export async function setSheetsEnabled(scope: WriteScope, enabled: boolean, acto
 }
 
 /**
+ * "Bring status changes back from the sheet" (OPE-§19.8): the pull on or off. Off, the push still appends and rewrites
+ * its cells; the statuses, agents, notes and tracking typed in the sheet stay there. Only the switch changes.
+ */
+export async function setSheetsPull(scope: WriteScope, pull: boolean, actor: SettingsActor): Promise<SheetsConfig | null> {
+  const prev = await stored(scope);
+  if (!configOf(prev)) return null;
+  const value = { ...prev, pull };
+  await setStoreSetting(scope, "sheets", value, actor);
+  return configOf(value as Stored);
+}
+
+/**
  * Forget the store's sheet (and any pending proof) and release its binding (OPE-§19.3 step 6): `sheets = { enabled:
  * false }`. Answers the sheet that was connected (null: none). ./connect.ts `disconnectSheet` audits around it.
  */

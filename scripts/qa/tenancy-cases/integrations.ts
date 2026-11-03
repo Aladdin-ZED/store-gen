@@ -27,14 +27,19 @@
  * B's int.capi hook named with A's order enqueue nothing and never read, seal or clear A's capi_ctx; B never opens A's
  * sealed context; B's purge never touches A's rows; B's conversions change never lists A's pages; a `capi` item of
  * store B naming A's pixel id signs with B's token only (A's token never leaves A); B replaying A's outbox id is
- * not_found (P8's `replay`: not applicable while it is the P0 stub).
+ * not_found before P8's `replay` is reached (the step 8 replay case).
  *
  * R1 P5 step 7, Telegram (src/lib/integrations/telegram/*, src/lib/jobs/handlers/telegram.ts): B never reads A's bot,
  * chat or switch (view, setting), B's Find and test message never call A's bot, B's outbox item naming A's order sends
  * nothing and reads none of A's customer fields, and B's queue never targets A's chat.
+ *
+ * R1 P5 step 8, the actions (src/app/app/[store]/integrations/**, src/app/app/[store]/settings/anti-spam/actions.ts):
+ * `actions` below gives every new server action its attack case (A's ids from B answer what missing ids answer, A's
+ * path is not_found, the role matrix, impersonation refused for the sensitive writes), and the replay case proves B's
+ * Replay, Send again and Replay all never reach A's outbox rows (P8's `replay` behind the double).
  */
 import { createRequire } from "node:module";
-import type { TenancyCase, TenancyKit } from "../tenancy-check";
+import type { Fixtures, TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
 import type { PullDecision } from "@/lib/sheets/plan";
 import type { WriteScope } from "@/lib/tenancy/types";
 
@@ -597,8 +602,7 @@ export const cases: TenancyCase[] = [
         globalThis.fetch = realFetch;
         conversions.setCapiDoubleForTests(null);
       }
-      // OPE-§28.1: B replaying A's outbox id answers not_found; replay is P8's (the P0 stub until the P8 merge)
-      kit.notApplicable("capi replay: B replaying A's outbox id → not_found", "P8's replay is the P0 stub until the P8 merge; step 8's replay action carries this case");
+      // OPE-§28.1: B replaying A's outbox id answers not_found before P8's replay is reached (the replay case below)
     },
   },
   {
@@ -651,5 +655,202 @@ export const cases: TenancyCase[] = [
         globalThis.fetch = realFetch;
       }
     },
+  },
+];
+
+/* ------------------------------------------------------------------ */
+/* step 8: the replay and the action cases                              */
+/* ------------------------------------------------------------------ */
+
+/** An outbox row of the store (a throwaway target, no customer field). */
+async function outboxRow(fx: Fixtures, store: "A" | "B", state: "pending" | "done" | "dead" | "cancelled", kind: "capi" | "telegram" = "capi"): Promise<string> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { outbox } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const { storeValues } = load<typeof import("@/lib/tenancy/sql")>("@/lib/tenancy/sql");
+  const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  const id = newId();
+  const scope = systemScope(systemCtx("qa.tenancy"), fx[store].id);
+  await db.insert(outbox).values(
+    storeValues(scope, {
+      id,
+      kind,
+      topic: kind === "capi" ? "Purchase" : "new_order",
+      targetId: kind === "capi" ? "meta:1234567890" : "chat:4444",
+      dedupeKey: `qa:replay:${store}:${id}`,
+      payload: "{}",
+      state,
+      attempts: state === "dead" ? 7 : 1,
+      ...(state === "done" ? { doneAt: new Date() } : {}),
+    }),
+  );
+  return id;
+}
+
+cases.push({
+  name: "replay: B's Replay, Send again and Replay all never reach A's outbox rows (OPE-§28.1, §28.3 (3))",
+  async run(kit) {
+    const replay = load<typeof import("@/lib/integrations/replay")>("@/lib/integrations/replay");
+    const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+    const { outbox } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+    const { inArray } = load<typeof import("drizzle-orm")>("drizzle-orm");
+    const calls: string[] = [];
+    replay.setReplayDoubleForTests({ replay: async (_ctx, id) => void calls.push(id) });
+    try {
+      const deadA = await outboxRow(kit.fx, "A", "dead");
+      const doneA = await outboxRow(kit.fx, "A", "done", "telegram");
+      const ctxB = { scope: write(kit, "B"), actor: { kind: "user", userId: kit.fx.B.members.owner, impersonatorId: null, ip: null }, user: { id: kit.fx.B.members.owner } } as never;
+      for (const [label, id] of [["dead", deadA], ["done telegram", doneA]] as const) {
+        const r = await replay.replayDelivery(ctxB, id).then(
+          (v) => v,
+          (err: unknown) => (err as { code?: string }).code ?? "threw",
+        );
+        kit.check(`replay: B replaying A's ${label} row → not_found`, r === "not_found", r);
+      }
+      const all = await replay.replayDeadOfKind(ctxB, "capi");
+      kit.check("replay: B's Replay all never names A's rows", !calls.includes(deadA) && !calls.includes(doneA), { all, calls });
+      const rows = await db.select({ id: outbox.id, state: outbox.state }).from(outbox).where(inArray(outbox.id, [deadA, doneA]));
+      kit.check("replay: A's rows keep their state", rows.map((r) => r.state).sort().join() === "dead,done", rows);
+    } finally {
+      replay.setReplayDoubleForTests(null);
+    }
+  },
+});
+
+/**
+ * The Sheets action cases connect, pause and disconnect the stores' own sheets (B's in test:tenancy, A's too in
+ * qa:action-replay, where A's owner makes the call) and spend the members' `sheets:connect` and `sheets:sync` buckets
+ * (10 / h, 12 / 10 min), which the later cases need too. The first Sheets case keeps both sheets as the fixtures made
+ * them; the case after Disconnect and the first case after the Sheets ones put them back and empty those buckets (test
+ * state only: the limits themselves are what the cases prove).
+ */
+type SheetSnapshot = { settings: unknown[]; bindings: unknown[] };
+let sheetsKept: Record<"A" | "B", SheetSnapshot> | null = null;
+async function keepSheets(fx: Fixtures): Promise<void> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { sheetBindings, storeSettings } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { and, eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const one = async (id: string): Promise<SheetSnapshot> => ({
+    settings: await db.select().from(storeSettings).where(and(eq(storeSettings.storeId, id), eq(storeSettings.key, "sheets"))),
+    bindings: await db.select().from(sheetBindings).where(eq(sheetBindings.storeId, id)),
+  });
+  sheetsKept = { A: await one(fx.A.id), B: await one(fx.B.id) };
+}
+async function restoreSheets(fx: Fixtures, opts: { last?: boolean } = {}): Promise<void> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { rateLimits, sheetBindings, storeSettings } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { and, eq, like } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const { invalidateStoreSettings } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  for (const store of ["A", "B"] as const) {
+    const id = fx[store].id;
+    const kept = sheetsKept?.[store];
+    if (kept) {
+      await db.delete(storeSettings).where(and(eq(storeSettings.storeId, id), eq(storeSettings.key, "sheets")));
+      if (kept.settings.length) await db.insert(storeSettings).values(kept.settings as never);
+      await db.delete(sheetBindings).where(eq(sheetBindings.storeId, id));
+      if (kept.bindings.length) await db.insert(sheetBindings).values(kept.bindings as never);
+      invalidateStoreSettings(id, "sheets");
+    }
+    await db.delete(rateLimits).where(like(rateLimits.bucket, `s:${id}:sheets:%`));
+  }
+  if (opts.last) sheetsKept = null;
+}
+
+const SHEETS = "src/app/app/[store]/integrations/sheets/actions.ts";
+const PIXELS = "src/app/app/[store]/integrations/pixels/actions.ts";
+const TELEGRAM = "src/app/app/[store]/integrations/telegram/actions.ts";
+const WHATSAPP = "src/app/app/[store]/integrations/whatsapp/actions.ts";
+const HUB = "src/app/app/[store]/integrations/actions.ts";
+const ANTISPAM = "src/app/app/[store]/settings/anti-spam/actions.ts";
+const sheetLink = (fx: Fixtures, store: "A" | "B") => `https://docs.google.com/spreadsheets/d/${fx[store].spreadsheetId}/edit#gid=0`;
+const IM = ["integrations.manage"] as TrackActionCase["permission"];
+const none = () => [];
+
+export const actions: TrackActionCase[] = [
+  // Google Sheets (OPE-§19.3, §19.5, §19.8)
+  { file: SHEETS, name: "startSheetConnectAction", area: "sheets", path: "/integrations/sheets", permission: IM, write: true, victim: (fx) => keepSheets(fx).then(() => [sheetLink(fx, "A")]), own: (fx) => [sheetLink(fx, "B")] },
+  { file: SHEETS, name: "verifySheetConnectAction", area: "sheets", path: "/integrations/sheets", permission: IM, write: true, victim: none, own: none },
+  { file: SHEETS, name: "disconnectSheetAction", area: "sheets", path: "/integrations/sheets", permission: IM, write: true, victim: none, own: none },
+  { file: SHEETS, name: "setSheetsEnabledAction", area: "sheets", path: "/integrations/sheets", permission: IM, write: true, victim: (fx) => restoreSheets(fx).then(() => [false]), own: () => [true] },
+  { file: SHEETS, name: "setSheetsPullAction", area: "sheets", path: "/integrations/sheets", permission: IM, write: true, victim: () => [false], own: () => [true] },
+  { file: SHEETS, name: "syncSheetNowAction", area: "sheets", path: "/integrations/sheets", permission: IM, write: true, victim: none, own: none },
+  { file: SHEETS, name: "repairSheetAction", area: "sheets", path: "/integrations/sheets", permission: IM, write: true, victim: () => [{ add: ["agent", "tracking"] }], own: () => [{ add: ["agent"] }] },
+  {
+    file: SHEETS,
+    name: "requeueSheetRowAction",
+    area: "sheets",
+    path: "/integrations/sheets",
+    permission: IM,
+    write: true,
+    victim: (fx) => [fx.A.order.failed],
+    own: (fx, fresh) => fresh.order(fx.B, "failed").then((id) => [id]),
+  },
+  // Pixels → Server events (OPE-§20.2, §20.7)
+  {
+    file: PIXELS,
+    name: "saveConversionsAction",
+    area: "pixels",
+    path: "/integrations/pixels",
+    permission: IM,
+    write: true,
+    victim: (fx) => restoreSheets(fx, { last: true }).then(() => [{ purchaseTrigger: "confirmed", pageOverrides: { [fx.A.page.live]: "order" } }]),
+    own: (fx) => [{ purchaseTrigger: "order", pageOverrides: { [fx.B.page.live]: "confirmed" } }],
+  },
+  {
+    file: PIXELS,
+    name: "sendTestEventAction",
+    area: "pixels",
+    path: "/integrations/pixels",
+    permission: IM,
+    write: false,
+    victim: (fx) => [{ platform: "meta", id: fx.A.pixel.shared, token: "", testCode: "TEST4242" }],
+    own: (fx) => [{ platform: "meta", id: fx.B.pixel.own, token: "", testCode: "" }],
+  },
+  // Telegram (OPE-§21.1, §21.4)
+  { file: TELEGRAM, name: "saveTelegramTokenAction", area: "settings", path: "/integrations/telegram", permission: IM, write: true, victim: () => ["123:not-a-token"], own: () => ["123:not-a-token"] },
+  { file: TELEGRAM, name: "findTelegramChatsAction", area: "settings", path: "/integrations/telegram", permission: IM, write: true, victim: none, own: none },
+  { file: TELEGRAM, name: "selectTelegramChatAction", area: "settings", path: "/integrations/telegram", permission: IM, write: true, victim: () => ["-1001111111111"], own: () => ["2222222"] },
+  { file: TELEGRAM, name: "sendTelegramTestAction", area: "settings", path: "/integrations/telegram", permission: IM, write: true, victim: none, own: none },
+  { file: TELEGRAM, name: "setTelegramPiiAction", area: "settings", path: "/integrations/telegram", permission: IM, write: true, victim: () => ["full", true], own: () => ["masked"] },
+  { file: TELEGRAM, name: "disableTelegramAction", area: "settings", path: "/integrations/telegram", permission: IM, write: true, victim: () => [true], own: () => [false] },
+  { file: TELEGRAM, name: "saveNotificationsAction", area: "settings", path: "/integrations/telegram", permission: IM, write: true, victim: () => [{ testOrders: true }], own: () => [{ testOrders: false }] },
+  // WhatsApp templates (OPE-§22.2): callcenter.configure
+  {
+    file: WHATSAPP,
+    name: "saveTemplateAction",
+    area: "settings",
+    path: "/integrations/whatsapp",
+    permission: ["callcenter.configure"],
+    write: true,
+    victim: (fx) => [{ channel: "whatsapp", kind: "confirm", locale: "fr", pageId: fx.A.page.live, name: "attack", body: "B {order_id}" }],
+    own: (fx) => [{ channel: "whatsapp", kind: "confirm", locale: "fr", pageId: fx.B.page.live, name: "own", body: "B-OWN {order_id}" }],
+  },
+  {
+    file: WHATSAPP,
+    name: "resetTemplateAction",
+    area: "settings",
+    path: "/integrations/whatsapp",
+    permission: ["callcenter.configure"],
+    write: true,
+    victim: (fx) => [{ channel: "whatsapp", kind: "confirm", locale: "fr", pageId: fx.A.page.live }],
+    own: (fx) => [{ channel: "whatsapp", kind: "confirm", locale: "fr", pageId: fx.B.page.live }],
+  },
+  // the deliveries log and its replays (OPE-§28.1)
+  // A's pending row: A's own call (qa:action-replay) is the no-op, so P8's replay (the P0 stub here) is never reached;
+  // B's attack answers not_found before any state is read. After the P8 merge the victim may be a dead row.
+  { file: HUB, name: "replayDeliveryAction", area: "settings", path: "/integrations", permission: IM, write: true, victim: (fx) => outboxRow(fx, "A", "pending").then((id) => [id]), own: (fx) => outboxRow(fx, "B", "pending").then((id) => [id]) },
+  // kinds with no row in the fixtures: P8's replay (the P0 stub in this worktree) is never reached
+  { file: HUB, name: "replayDeadOfKindAction", area: "settings", path: "/integrations", permission: IM, write: true, victim: () => ["carrier"], own: () => ["whatsapp"] },
+  { file: HUB, name: "listDeliveriesAction", area: "settings", path: "/integrations", permission: ["callcenter.configure"], write: false, victim: () => [{ kind: "capi" }], own: () => [{}] },
+  // Settings → Anti-spam (OPE-§24)
+  {
+    file: ANTISPAM,
+    name: "saveTurnstileOverrideAction",
+    area: "settings",
+    path: "/settings/anti-spam",
+    permission: ["settings.write", "integrations.manage"],
+    write: true,
+    victim: () => [{ clear: true }],
+    own: () => [{ siteKey: "0x4BBBBBBBBBBsite", secretKey: "0x4BBBBBBBBBBsecret" }],
   },
 ];

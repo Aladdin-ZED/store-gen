@@ -54,6 +54,10 @@
  *    "(renvoi)" message, B's item never reading A's order, a migrated group, the Sheets incident at its 15th minute,
  *    the daily job (one per day, figures left out when unread), the setup functions, and the token canary over every
  *    outbox row, audit row and log line.
+ *  - the store-side replay (OPE-§28.1, OPE-§L "Replay", §Q.26; P8's `replay` behind a double): Replay of a dead row,
+ *    Send again of a done Telegram row, refused for a done or cancelled CAPI row, a pending row a no-op, one
+ *    `integrations.outbox.replayed` row per replayed row, the 31st call of the hour refused, Replay all capped at 50 as
+ *    one call, and B never replaying A's row.
  */
 import Module from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -497,6 +501,7 @@ async function main() {
   await sheetsPushSuite();
   await capiSuite();
   await telegramSuite();
+  await replaySuite();
 }
 
 /* ================================================================== */
@@ -2391,6 +2396,108 @@ async function telegramSuite(): Promise<void> {
     globalThis.fetch = realFetch;
     queue.setTelegramDoubleForTests(null);
     Object.assign(console, real);
+  }
+}
+
+/* ================================================================== */
+/* 10. the store-side replay (OPE-§28.1, OPE-§L, §Q.26)                */
+/* ================================================================== */
+
+async function replaySuite(): Promise<void> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { auditLog, outbox, stores } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  const replay = load<typeof import("@/lib/integrations/replay")>("@/lib/integrations/replay");
+  const ctx = systemCtx("qa.integrations_db");
+
+  async function rpStore(handle: string) {
+    const id = newId();
+    await db.insert(stores).values({ id, handle, name: `Boutique ${handle}`, status: "active", brandSeed: "0123456789abcdef", defaultLocale: "fr" });
+    return { id, scope: systemScope(ctx, id) };
+  }
+  const SA = await rpStore("rp-a");
+  const SB = await rpStore("rp-b");
+  type Kind = "capi" | "telegram";
+  type State = "pending" | "running" | "done" | "dead" | "cancelled";
+  async function row(s: typeof SA, kind: Kind, state: State): Promise<string> {
+    const id = newId();
+    await db.insert(outbox).values({
+      id,
+      storeId: s.id,
+      kind,
+      topic: kind === "capi" ? "Purchase" : "new_order",
+      targetId: kind === "capi" ? "meta:1234567890" : "chat:4444",
+      dedupeKey: `qa:rp:${id}`,
+      payload: "{}",
+      state,
+      attempts: state === "dead" ? 7 : 1,
+      ...(state === "done" ? { doneAt: new Date() } : {}),
+    });
+    return id;
+  }
+  // P8's replay as a faithful double: dead → pending, done → pending (the re-send), nothing else
+  const calledWith: string[] = [];
+  replay.setReplayDoubleForTests({
+    replay: async (c, id) => {
+      calledWith.push(id);
+      await db.update(outbox).set({ state: "pending", nextAt: new Date() }).where(and(eq(outbox.id, id), eq(outbox.storeId, c.scope.storeId), inArray(outbox.state, ["dead", "done"])));
+    },
+  });
+  const member = (s: typeof SA, userId = newId()) => ({ scope: s.scope, actor: { kind: "system" as const, userId: null, impersonatorId: null, ip: null }, user: { id: userId } }) as never;
+  const audits = async (s: typeof SA) =>
+    (await db.select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.storeId, s.id), eq(auditLog.action, "integrations.outbox.replayed")))).length;
+  const attempt = <T>(p: Promise<T>) => p.then((v) => v, (err: unknown) => `${(err as { name?: string }).name}:${(err as { code?: string }).code ?? "?"}`);
+  const stateOf = async (id: string) => (await db.select({ state: outbox.state }).from(outbox).where(eq(outbox.id, id)))[0]?.state;
+
+  try {
+    const m = member(SA);
+    /* ---------------- one row ---------------- */
+    const dead = await row(SA, "capi", "dead");
+    const r1 = await replay.replayDelivery(m, dead);
+    eq2("replay: a dead capi row → replayed, pending, one audit row", [r1, await stateOf(dead), await audits(SA)], [{ outcome: "replayed", kind: "capi", topic: "Purchase" }, "pending", 1]);
+    const again = await replay.replayDelivery(m, dead);
+    eq2("replay: a second click while pending → no-op, the same audit count, nothing called", [again.outcome, await audits(SA), calledWith.filter((x) => x === dead).length], ["noop", 1, 1]);
+    const doneTg = await row(SA, "telegram", "done");
+    const r2 = await replay.replayDelivery(m, doneTg);
+    eq2("replay: Send again on a done telegram row → resent", [r2.outcome, await stateOf(doneTg), await audits(SA)], ["resent", "pending", 2]);
+    const doneCapi = await row(SA, "capi", "done");
+    eq2("replay: Send again refused for a done capi row (counted twice by the ad platform)", [await attempt(replay.replayDelivery(m, doneCapi)), await stateOf(doneCapi)], ["ReplayRefused:not_resendable", "done"]);
+    const cancelled = await row(SA, "capi", "cancelled");
+    eq2("replay: a cancelled capi row is refused", [await attempt(replay.replayDelivery(m, cancelled)), await stateOf(cancelled)], ["ReplayRefused:cancelled", "cancelled"]);
+    const meta = (await db.select({ meta: auditLog.meta }).from(auditLog).where(and(eq(auditLog.storeId, SA.id), eq(auditLog.action, "integrations.outbox.replayed"))))[0]?.meta;
+    ok("replay: the audit row names { kind, topic, outboxId }", JSON.stringify(meta ?? "").includes(dead) && JSON.stringify(meta ?? "").includes("Purchase"), meta);
+
+    /* ---------------- B never replays A's row ---------------- */
+    const deadA = await row(SA, "capi", "dead");
+    const before = calledWith.length;
+    eq2("replay: B replaying A's dead row → not_found, nothing called, A's row stays dead", [await attempt(replay.replayDelivery(member(SB), deadA)), calledWith.length - before, await stateOf(deadA)], ["SeamError:not_found", 0, "dead"]);
+    eq2("replay: B's Replay all never touches A's rows", [(await replay.replayDeadOfKind(member(SB), "capi")).replayed, await stateOf(deadA)], [0, "dead"]);
+    eq2("replay: an unknown id → not_found", await attempt(replay.replayDelivery(m, newId())), "SeamError:not_found");
+
+    /* ---------------- the bucket: 30 per member per hour ---------------- */
+    const busy = member(SA);
+    const pend = await row(SA, "capi", "pending");
+    const answers: unknown[] = [];
+    for (let i = 0; i < 31; i++) answers.push(await attempt(replay.replayDelivery(busy, pend).then((r) => r.outcome)));
+    eq2("replay: 30 calls in an hour pass, the 31st is refused", [answers.slice(0, 30).every((a) => a === "noop"), answers[30]], [true, "SeamError:rate_limited"]);
+    ok("replay: another member's bucket is their own", (await replay.replayDelivery(member(SA), pend)).outcome === "noop");
+
+    /* ---------------- Replay all: ≤ 50 rows, one call ---------------- */
+    for (let i = 0; i < 55; i++) await row(SA, "telegram", "dead");
+    const all = member(SA);
+    const auditsBefore = await audits(SA);
+    const first = await replay.replayDeadOfKind(all, "telegram");
+    eq2("replay all: 50 rows per call, more left", first, { replayed: 50, more: true });
+    eq2("replay all: one audit row per replayed row", (await audits(SA)) - auditsBefore, 50);
+    const second = await replay.replayDeadOfKind(all, "telegram");
+    eq2("replay all: the next call takes the rest", second, { replayed: 5, more: false });
+    // each Replay all counted one call of the bucket: 28 more single calls pass, the next is refused
+    const tail: unknown[] = [];
+    for (let i = 0; i < 29; i++) tail.push(await attempt(replay.replayDelivery(all, pend).then((r) => r.outcome)));
+    eq2("replay all: counts as one call of the bucket", [tail.slice(0, 28).every((a) => a === "noop"), tail[28]], [true, "SeamError:rate_limited"]);
+  } finally {
+    replay.setReplayDoubleForTests(null);
   }
 }
 

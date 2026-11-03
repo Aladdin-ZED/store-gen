@@ -40,6 +40,7 @@ export {
   saveSheetsConfig,
   savePendingProof,
   setSheetsEnabled,
+  setSheetsPull,
   clearSheetsConfig,
   sheetBound,
   claimSheetBinding,
@@ -75,6 +76,7 @@ export {
   type VerifiedConnect,
   type ConnectStepUp,
 } from "./connect";
+export { repairSheet, requeueSheetRow, syncSheetNow, SYNC_BUCKET, RepairError, REPAIR_HEADERS, type RepairHeader, type RepairResult } from "./repair";
 export { PROOF_TTL_MS, newProofCode, proofFound, proofHash } from "./proof";
 export {
   syncPendingOrders,

@@ -10,18 +10,14 @@
  * tokens and test codes, PIX-03) and page ids are the store's own (another store's id = not found, PIX-04).
  */
 import { and, eq } from "drizzle-orm";
-import { headers } from "next/headers";
 import { z } from "zod";
 import { fail } from "@/lib/admin-data/action";
-import { platformBrandName } from "@/lib/admin-data/brand";
 import { revalidateStore } from "@/lib/admin-data/shell";
 import { affected } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { pages } from "@/lib/db/schema";
-import { ownToken, savedTestCode, sendTestEvent, type TestEventResult } from "@/lib/orders/conversions-core";
+import type { TestEventResult } from "@/lib/orders/conversions-core";
 import type { Tracking } from "@/lib/page/schema";
-import { TEST_CODE_RE, TOKEN_RE, isMask } from "@/lib/pixels/form";
-import { recordPixelHealth } from "@/lib/pixels/health.server";
 import { PIXEL_ID_RE, PIXEL_LIMIT, PIXEL_PLATFORMS, SERVER_PLATFORMS, normalizePixelId, type PixelPlatform } from "@/lib/pixels/ids";
 import { TEST_MINUTES, findEntry, idsOnly, trackingRefs, type PixelLibraryView, type TestMinutes } from "@/lib/pixels/library";
 import {
@@ -36,6 +32,7 @@ import {
   startPixelTest,
   stopPixelTest,
 } from "@/lib/pixels/library.server";
+import { runPixelTest, type SendTestInput } from "@/lib/pixels/test-event.server";
 import { emptySummary, type StorePixelSummary } from "@/lib/pixels/summary";
 import { trackingIds, withTrackingIds } from "@/lib/pixels/tracking";
 import { invalidatePixelUsage, livePagePixels, pixelUsageOf, recentPagesWithPixels, type LivePagePixels, type PixelPageUse, type RecentPagePixels } from "@/lib/pixels/usage.server";
@@ -44,7 +41,6 @@ import { getStoreSetting, getStoreSettings } from "@/lib/settings";
 import { requireStepUp, storeAction } from "@/lib/tenancy/seam";
 import { byId } from "@/lib/tenancy/sql";
 import type { ActionResult, StoreCtx, WritePermission } from "@/lib/tenancy/types";
-import { storeUrl } from "@/lib/urls";
 
 const Platform = z.enum(PIXEL_PLATFORMS);
 const ServerPlatformSchema = z.enum(SERVER_PLATFORMS);
@@ -313,57 +309,13 @@ export async function wizardPixelsAction(): Promise<ActionResult<{ library: Pixe
 /* Send test event                                                     */
 /* ------------------------------------------------------------------ */
 
-const SendTestInput = z.object({
-  platform: ServerPlatformSchema,
-  id: RawId,
-  /** typed token, or "" / mask = the stored one */
-  token: z.string().max(600).default(""),
-  /** typed code, or "" = the stored one */
-  testCode: z.string().max(40).default(""),
-});
-
-/** An absolute page URL for Meta's website events: the store's address, else the host serving the admin. */
-async function testEventUrl(storePageUrl: string): Promise<string | null> {
-  if (/^https?:\/\//.test(storePageUrl)) return storePageUrl;
-  const host = (await headers()).get("host") ?? "";
-  return /^[a-z0-9.-]+(:[0-9]{1,5})?$/i.test(host) ? `https://${host}${storePageUrl.startsWith("/") ? storePageUrl : "/"}` : null;
-}
-
 /**
  * Send a synthetic Purchase with the platform's test event code (it shows in Events Manager → Test
- * events and never counts in reports). Also writes the pixel's health.
+ * events and never counts in reports). Also writes the pixel's health (src/lib/pixels/test-event.server.ts, shared
+ * with the Server-events card's sendTestEventAction).
  */
-export async function sendPixelTestAction(input: z.input<typeof SendTestInput>): Promise<ActionResult<TestEventResult>> {
-  return storeAction("integrations.manage", async ({ scope, store }) => {
-    const v = SendTestInput.parse(input);
-    const pixelId = normalizePixelId(v.platform, v.id);
-    if (!PIXEL_ID_RE[v.platform].test(pixelId)) fail("Enter a valid pixel ID first.");
-    const { tracking_secrets: secrets, defaults } = await getStoreSettings(scope, ["tracking_secrets", "defaults"]);
-    const typedCode = v.testCode.replace(/\s+/g, "").toUpperCase();
-    const code = typedCode || savedTestCode(secrets, v.platform, pixelId);
-    if (!TEST_CODE_RE.test(code)) fail("Add the test event code from Events Manager → Test events first.");
-    const typed = v.token.trim();
-    const token = !typed || isMask(typed) ? ownToken(secrets, v.platform, pixelId) : typed;
-    if (!token) fail(v.platform === "meta" ? "Add the Conversions API token first." : "Add the Events API access token first.");
-    if (!TOKEN_RE.test(token)) fail("This doesn't look like a valid token. Paste it again.");
-    const res = await sendTestEvent({
-      platform: v.platform,
-      pixelId,
-      token,
-      testCode: code,
-      // the store's address, not the platform's (PIX-08)
-      siteUrl: await testEventUrl(storeUrl(store)),
-      currency: store.currency,
-      country: defaults.phoneCountry,
-      brand: await platformBrandName(),
-    });
-    // health describes the STORED token: only when the stored one was used
-    if (token === ownToken(secrets, v.platform, pixelId)) {
-      await recordPixelHealth(scope, [{ platform: v.platform, id: pixelId, state: res.ok ? "ok" : "refused", code: res.code, testMode: true }]);
-      revalidateStore(store.handle, "/integrations/pixels");
-    }
-    return res;
-  });
+export async function sendPixelTestAction(input: SendTestInput): Promise<ActionResult<TestEventResult>> {
+  return storeAction("integrations.manage", (ctx) => runPixelTest(ctx, input));
 }
 
 /* ------------------------------------------------------------------ */

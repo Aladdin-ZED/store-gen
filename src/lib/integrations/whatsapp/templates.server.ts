@@ -196,9 +196,16 @@ export async function saveTemplate(scope: WriteScope, raw: unknown, actor: { use
   return r.ran ? r.value : { ok: false, error: "busy" };
 }
 
-/** "Reset to built-in": deletes the slot's active override (drafts stay). Answers how many rows went. */
-export async function resetTemplate(scope: WriteScope, slot: TemplateSlot): Promise<{ deleted: number }> {
+/**
+ * "Reset to built-in": deletes the slot's active override (drafts stay). Answers how many rows went; `notFound` when
+ * `pageId` is not a page of this store (the action answers `not_found`, like any foreign id).
+ */
+export async function resetTemplate(scope: WriteScope, slot: TemplateSlot): Promise<{ deleted: number; notFound?: true }> {
   if (!isChannel(slot.channel)) return { deleted: 0 };
+  if (slot.pageId) {
+    const [page] = await db.select({ id: pages.id }).from(pages).where(byId(pages, scope, slot.pageId)).limit(1);
+    if (!page) return { deleted: 0, notFound: true };
+  }
   const res = await db.delete(messageTemplates).where(whereStore(messageTemplates, scope, ...slotWhere(slot, "exact"), eq(messageTemplates.status, "active")));
   return { deleted: affected(res) };
 }

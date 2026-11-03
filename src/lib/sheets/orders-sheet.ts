@@ -225,6 +225,43 @@ export function setupRequests(sheetId: number, currency = "MAD", title: string =
   ];
 }
 
+/**
+ * "Repair sheet" (OPE-§19.8): the header row's look over `width` columns and the strict status dropdown again, as ONE
+ * batchUpdate. Both requests replace what they target (a format, a validation rule), so a repeated repair adds
+ * nothing; the conditional-format rules are never re-added (they would be duplicated).
+ */
+export function repairRequests(sheetId: number, width: number): object[] {
+  const n = Math.max(width, COLUMNS.length);
+  const ink = rgb("#1F2328");
+  return [
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: n },
+        cell: {
+          userEnteredFormat: {
+            backgroundColorStyle: { rgbColor: ink },
+            horizontalAlignment: "LEFT",
+            verticalAlignment: "MIDDLE",
+            padding: { left: 8, right: 8, top: 4, bottom: 4 },
+            textFormat: { foregroundColorStyle: { rgbColor: rgb("#FFFFFF") }, fontSize: 10, bold: true },
+          },
+        },
+        fields: "userEnteredFormat(backgroundColorStyle,horizontalAlignment,verticalAlignment,padding,textFormat)",
+      },
+    },
+    {
+      setDataValidation: {
+        range: colRange(sheetId, COL.status),
+        rule: {
+          condition: { type: "ONE_OF_LIST", values: ORDER_STATUSES.map((s) => ({ userEnteredValue: s.fr })) },
+          strict: true,
+          showCustomUi: true,
+        },
+      },
+    },
+  ];
+}
+
 const sid = (spreadsheetId: string) => `/${encodeURIComponent(spreadsheetId)}`;
 const rng = (title: string, range: string) => encodeURIComponent(a1(title, range));
 
