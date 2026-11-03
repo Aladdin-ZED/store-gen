@@ -70,6 +70,9 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "console.staff.invite_sign_in_first": "Un compte utilise déjà cette adresse e-mail. Connectez-vous avec, puis rouvrez le lien.",
   "console.staff.invite_wrong_account": "Cette invitation est destinée à une autre adresse e-mail.",
 
+  /* ---- R1 : l'entrée du staff dans le sélecteur de boutique (PD36) ---- */
+  "console.nav.platform_console": "Console de la plateforme",
+
   /* ---- R1: the public report page (PLA-§24.2, PD70) ---- */
   "report.title": "Signaler {store}",
   "report.reason": "Quel est le problème avec cette boutique ?",

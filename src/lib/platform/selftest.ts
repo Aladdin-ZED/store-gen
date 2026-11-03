@@ -223,6 +223,7 @@ const check = (ok: boolean, msg: string) => {
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const ROOT = join(__dirname, "..", "..", "..");
 const source = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
+const CONSOLE_NAV_KEYS = (nav: readonly { label: string; items: readonly { label: string }[] }[]) => nav.flatMap((g) => [g.label, ...g.items.map((i) => i.label)]);
 
 async function main(): Promise<void> {
   // the modules under test are marked `import "server-only"`; outside Next that import throws (as in selftest-identity)
@@ -1748,6 +1749,58 @@ async function main(): Promise<void> {
   const ov = await import("./overview-keys");
   const missingAttention = ov.ATTENTION_KEYS.filter((k) => !(k in enConsole));
   checkD(missingAttention.length === 0, "every Needs-attention code and feed action has its console.attention.* / console.feed.* sentence", missingAttention);
+
+  /* ---- step 8: the console shell, its navigation and its catalog (PLA-§4.2-§4.7) ---- */
+  {
+  const navm = await import("../../components/console/nav");
+  const perms = await import("@/lib/auth/permissions");
+  const ctxFor = (role: (typeof perms.PLATFORM_ROLES)[number]) => ({ can: (p: Parameters<typeof perms.canPlatform>[1]) => perms.canPlatform(role, p) });
+  const idsOf = (groups: readonly { items: readonly { id: string }[] }[]) => groups.flatMap((g) => g.items.map((i) => i.id));
+  const r1All = ["overview", "approvals", "notifications", "stores", "people", "orders", "plans", "flags", "domains", "ai", "health", "backups", "general", "signup", "legal", "brands", "staff", "audit", "breakglass"];
+  const later = ["inbox", "abuse", "broadcasts", "analytics", "mail"];
+  const superNav = idsOf(navm.consoleNavFor(ctxFor("super_admin"), "R1"));
+  checkD(eq(superNav, r1All), "consoleNavFor(super_admin, R1): every R1 item of PLA-§4.3 in order, the AI item included, no R2/R3 item", superNav);
+  for (const role of perms.PLATFORM_ROLES) {
+    const groups = navm.consoleNavFor(ctxFor(role), "R1");
+    const ids = idsOf(groups);
+    const items = groups.flatMap((g) => g.items);
+    checkD(items.every((i) => perms.canPlatform(role, i.permission)) && ids.every((id) => !later.includes(id)), `consoleNavFor(${role}, R1): only items the role holds, none of a later release`, ids);
+    checkD(groups.every((g) => g.items.length > 0), `consoleNavFor(${role}): an empty group is dropped`);
+    checkD(["overview", "approvals", "notifications", "stores", "people", "orders", "plans", "flags"].every((id) => ids.includes(id)), `consoleNavFor(${role}): the console.read pages are listed`, ids);
+  }
+  const analystIds = idsOf(navm.consoleNavFor(ctxFor("analyst"), "R1"));
+  checkD(!analystIds.includes("staff") && !analystIds.includes("ai") && !analystIds.includes("domains"), "analyst: no Staff, AI or Domains item", analystIds);
+  const supportIds = idsOf(navm.consoleNavFor(ctxFor("support"), "R1"));
+  checkD(!supportIds.includes("staff") && !supportIds.includes("general"), "support: no Staff or platform settings item", supportIds);
+  const r3 = idsOf(navm.consoleNavFor(ctxFor("super_admin"), "R3"));
+  checkD(later.every((id) => r3.includes(id) || id === "inbox" || id === "abuse"), "a release raise shows the later items without a code change", r3);
+  const chordKeys = navm.consoleChords(navm.consoleNavFor(ctxFor("super_admin"), "R1")).map((c) => c.key).sort();
+  checkD(eq(chordKeys, ["a", "d", "f", "h", "n", "o", "p", "r", "s", "u"]), "the G chords of PLA-§4.3: O A S U R P F H D N", chordKeys);
+  const full = navm.consoleNavFor(ctxFor("super_admin"), "R1");
+  const act = (path: string) => navm.activeConsoleItem(full, path)?.item.id ?? null;
+  checkD(act("/admin") === "overview" && act("/admin/") === "overview" && act("/admin/stores/01J0000000000000000000000A") === "stores" && act("/admin/settings/backups") === "backups" && act("/admin/settings/general") === "general" && act("/admin/storesx") === null && act("/admin/ai/models") === "ai", "activeConsoleItem: the longest href prefix, the overview only for /admin itself");
+  const pulse = { queue: { review: 3, hold: 2, requests: 1, needsInfoAnswered: 0, oldestMinutes: 5, overSla: 0 }, unread: 7, alarms: { red: 1, yellow: 4 }, kill: ["platform_read_only"], pendingPlatformRequests: 2 };
+  checkD(navm.consoleBadgeCount("queue", pulse) === 5 && navm.consoleBadgeCount("unread", pulse) === 7 && navm.consoleBadgeCount("alarms", pulse) === 1 && navm.consoleBadgeCount("kill", pulse) === 1 && navm.consoleBadgeCount("requests", pulse) === 2 && navm.consoleBadgeCount("queue", null) === 0, "the nav badges: Review + Hold, unread, red alarms, active kill switches, waiting platform requests");
+
+  // the second net of PLA-§4.7 rule 4 and the console copy rules of rule 8
+  const { readdirSync, statSync } = await import("node:fs");
+  const walk = (dir: string): string[] => readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? walk(join(dir, f)) : [join(dir, f)]));
+  const consoleFiles = [...walk(join(ROOT, "src", "components", "console")), ...walk(join(ROOT, "src", "app", "admin", "(console)")).filter((f) => !/[\\/]ai[\\/]/.test(f))];
+  const slop = consoleFiles.filter((f) => {
+    const text = readFileSync(f, "utf8");
+    return /adm-aurora|adm-grain/.test(text) || (text.match(/radial-gradient\(/g) ?? []).length >= 3;
+  });
+  checkD(slop.length === 0, "src/components/console/** and the console pages: no adm-aurora, no adm-grain, no radial-gradient stack", slop.map((f) => f.slice(ROOT.length)));
+  const consoleCopy = Object.entries(enConsole as Record<string, string>).filter(([k]) => k.startsWith("console."));
+  const dashed = consoleCopy.filter(([, v]) => /[\u2013\u2014]/.test(v) || /\bStep \d/.test(v)).map(([k]) => k);
+  checkD(consoleCopy.length > 300 && dashed.length === 0, `the console catalog: no em or en dash, no "Step n" (${consoleCopy.length} strings)`, dashed);
+  const shellKeys = new Set<string>();
+  for (const f of consoleFiles) for (const m of readFileSync(f, "utf8").matchAll(/["'`](console\.[a-z_]+(?:\.[a-z_]+)+)["'`]/g)) shellKeys.add(m[1]!);
+  const missingShell = [...shellKeys].filter((k) => !(k in enConsole));
+  checkD(shellKeys.size >= 100 && missingShell.length === 0, `every literal console.* key of the shell, the overview and the staff feed is in en/console.ts (${shellKeys.size})`, missingShell);
+  const navKeys = CONSOLE_NAV_KEYS(navm.CONSOLE_NAV);
+  checkD(navKeys.every((k) => k in enConsole), "every nav group and item label is in en/console.ts", navKeys.filter((k) => !(k in enConsole)));
+  }
 
   const ms = Math.round(performance.now() - t0);
   for (const s of skips) console.log(`  SKIP ${s}`);

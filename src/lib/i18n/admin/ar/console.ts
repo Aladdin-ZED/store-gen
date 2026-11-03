@@ -71,6 +71,9 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "console.staff.invite_sign_in_first": "كاين حساب كيستعمل هاد البريد الإلكتروني. دخل بيه، ومن بعد حلّ الرابط مرة أخرى.",
   "console.staff.invite_wrong_account": "هاد الدعوة ديال عنوان بريد إلكتروني آخر.",
 
+  /* ---- R1: مدخل فريق المنصة في مبدّل المتاجر (PD36) ---- */
+  "console.nav.platform_console": "لوحة إدارة المنصة",
+
   /* ---- R1: the public report page (PLA-§24.2, PD70) ---- */
   "report.title": "الإبلاغ عن {store}",
   "report.reason": "شنو المشكل فهاد المتجر؟",
