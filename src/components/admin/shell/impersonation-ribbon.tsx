@@ -16,23 +16,26 @@
  * time. At 0 the view ends itself. `HiddenWhileViewing` is the lock state of the sensitive surfaces (secrets, exports,
  * phone reveal) during the view.
  */
-import { EyeIcon, LockIcon, NotebookPenIcon, SquareArrowOutUpRightIcon, InfoIcon } from "lucide-react";
-import { useEffect, useId, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
-import { toast } from "sonner";
+import { EyeIcon, LockIcon, SquareArrowOutUpRightIcon, InfoIcon } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Textarea } from "@/components/ui/textarea";
-import { addImpersonationNoteAction } from "@/app/admin/(console)/stores/[id]/actions";
 import { endImpersonationAction } from "@/lib/auth/actions";
 import { useT } from "@/lib/i18n/admin/client";
 import type { ImpersonationReason } from "@/lib/tenancy/types";
 import { cn } from "@/lib/utils";
-import { NUM, TOUCH } from "../common/ui-classes";
+import { NUM } from "../common/ui-classes";
 import { useViewerFlags } from "../common/viewer-flags";
 import { clockOffset, formatCountdown, remainingMs, ribbonEndsAt } from "./pulse-state";
 import { usePulse } from "./use-pulse";
 
 export const RIBBON_HEIGHT_PX = 36;
-export const NOTE_MAX = 300;
+
+/**
+ * The note composer calls P1's console action (`src/app/admin/(console)/…`): loaded only when a ribbon shows, so the
+ * members' dashboard bundle never pulls the console's route chunk.
+ */
+const NoteComposer = dynamic(() => import("./impersonation-note").then((m) => m.NoteComposer), { ssr: false });
 
 export interface RibbonProps {
   storeId: string;
@@ -48,7 +51,12 @@ export interface RibbonProps {
 
 /** The ribbon's own focus ring: the ink on the violet (the shell's ring colour would vanish on it). */
 const RING = "outline-none focus-visible:ring-2 focus-visible:ring-imp-ink focus-visible:ring-offset-2 focus-visible:ring-offset-imp-bg";
-const GHOST = cn("inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--r-control)] px-2 text-xs font-medium text-imp-ink hover:bg-imp-ink/12", RING, TOUCH);
+export /**
+ * The ribbon is 36 px: below 768 px its controls keep a 44 px hit area through an invisible overlay instead of growing
+ * past the ribbon (TOUCH's min-height would).
+ */
+const HIT = "max-md:after:absolute max-md:after:-inset-x-1 max-md:after:top-1/2 max-md:after:h-11 max-md:after:-translate-y-1/2 max-md:after:content-['']";
+const GHOST = cn("relative inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--r-control)] px-2 text-xs font-medium text-imp-ink hover:bg-imp-ink/12", RING, HIT);
 
 /** The client clock to the second (null on the server and during hydration, so both render the same text). */
 function subscribeSeconds(onChange: () => void): () => void {
@@ -64,62 +72,6 @@ function useCountdown(endsAt: string | null, serverNow: string): number {
   const now = useSyncExternalStore(subscribeSeconds, secondNow, noClock);
   // the server render counts on its own clock; the client takes over at its first tick
   return now === null ? remainingMs(endsAt, Date.parse(serverNow), 0) : remainingMs(endsAt, now, offset);
-}
-
-function NoteComposer({ storeId }: { storeId: string }) {
-  const t = useT();
-  const id = useId();
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const value = text.trim();
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger className={GHOST}>
-        <NotebookPenIcon aria-hidden="true" className="size-3.5" />
-        <span className="max-sm:sr-only">{t("shell.impersonation.note")}</span>
-      </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-80 rounded-[var(--r-sheet)] p-4">
-        <form
-          className="grid gap-2.5"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!value || busy) return;
-            setBusy(true);
-            try {
-              const res = await addImpersonationNoteAction({ storeId, text: value });
-              if (res.ok) {
-                toast.success(t("shell.impersonation.note_saved"));
-                setText("");
-                setOpen(false);
-              } else {
-                toast.error(t("shell.err.generic", { ref: res.error }));
-              }
-            } catch {
-              toast.error(t("shell.err.offline"));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <label htmlFor={id} className="text-[13px] font-medium">
-            {t("shell.impersonation.note_label")}
-          </label>
-          <Textarea id={id} rows={3} maxLength={NOTE_MAX} value={text} onChange={(e) => setText(e.target.value)} aria-describedby={`${id}-hint`} />
-          <p id={`${id}-hint`} className="text-xs text-muted-foreground">
-            {t("shell.impersonation.note_hint")}
-          </p>
-          <button
-            type="submit"
-            disabled={!value || busy}
-            className="inline-flex h-8 items-center justify-center justify-self-end rounded-[var(--r-control)] bg-primary px-3 text-[13px] font-medium text-primary-foreground disabled:opacity-50"
-          >
-            {t("shell.impersonation.note_save")}
-          </button>
-        </form>
-      </PopoverContent>
-    </Popover>
-  );
 }
 
 export function ImpersonationRibbon(p: RibbonProps) {
@@ -175,7 +127,9 @@ export function ImpersonationRibbon(p: RibbonProps) {
           </p>
         </PopoverContent>
       </Popover>
-      <NoteComposer storeId={p.storeId} />
+      <div className="max-sm:hidden">
+        <NoteComposer storeId={p.storeId} />
+      </div>
       <a href={p.profileHref} target="_blank" rel="noopener noreferrer" className={cn(GHOST, "max-md:hidden")}>
         <SquareArrowOutUpRightIcon aria-hidden="true" className="size-3.5" />
         {t("shell.impersonation.open_profile")}
@@ -184,7 +138,7 @@ export function ImpersonationRibbon(p: RibbonProps) {
         <button
           type="submit"
           disabled={ending}
-          className={cn("inline-flex h-7 shrink-0 items-center rounded-[var(--r-control)] px-2.5 text-xs font-semibold text-imp-ink ring-1 ring-imp-ink/70 ring-inset hover:bg-imp-ink hover:text-imp-bg disabled:opacity-60", RING, TOUCH)}
+          className={cn("relative inline-flex h-7 shrink-0 items-center rounded-[var(--r-control)] px-2.5 text-xs font-semibold text-imp-ink ring-1 ring-imp-ink/70 ring-inset hover:bg-imp-ink hover:text-imp-bg disabled:opacity-60", RING, HIT)}
         >
           {t("shell.impersonation.end")}
         </button>
