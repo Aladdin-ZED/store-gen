@@ -395,7 +395,8 @@ export function runCallcenterSelftest(): SelftestResult {
       "ops.reason.return.none",
       ...SHIP_STATES.map((s) => `ops.ship.${s}`),
       // the timeline (OPE-§4.1, agents read it) and the notifications (OD45) are trilingual in R1
-      ...Object.keys(en).filter((k) => k.startsWith("ops.tl.") || k.startsWith("notify.ops.")),
+      // P4 step 7: the board tiles, the Store Health sentences and the ⌘K labels are tenant-facing in R1 too
+      ...Object.keys(en).filter((k) => k.startsWith("ops.tl.") || k.startsWith("notify.ops.") || k.startsWith("health.ops.") || k.startsWith("ops.tile.") || k.startsWith("ops.cmd.")),
       ...CONFIRM_STATES.map((s) => `ops.tl.state_changed.confirm.${s}`),
       ...SHIP_STATES.map((s) => `ops.tl.state_changed.ship.${s}`),
       ...MONEY_STATES.map((s) => `ops.tl.state_changed.money.${s}`),
@@ -407,7 +408,7 @@ export function runCallcenterSelftest(): SelftestResult {
       eq(`${l}: no key outside the English reference`, extra, []);
       const bad = Object.entries(all[l]).filter(([, v]) => !v || v.includes("—") || /\bStep \d/i.test(v) || /!/.test(v));
       eq(`${l}: no empty value, em dash, "Step n" or exclamation mark`, bad.map(([k]) => k), []);
-      eq(`${l}: every key under ops. (or notify.ops., D67)`, Object.keys(all[l]).filter((k) => !k.startsWith("ops.") && !k.startsWith("notify.ops.")), []);
+      eq(`${l}: every key under ops. (or notify.ops., health.ops., D67)`, Object.keys(all[l]).filter((k) => !k.startsWith("ops.") && !k.startsWith("notify.ops.") && !k.startsWith("health.ops.")), []);
     }
     eq("the §6.4 picker codes in English, verbatim", CANCEL_REASONS.filter((r) => r !== "blocked" && r !== "attempts_exhausted").map((r) => en[`ops.reason.${r}` as keyof typeof en]), [
       "Changed their mind",

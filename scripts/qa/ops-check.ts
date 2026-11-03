@@ -1,4 +1,4 @@
-// proves: OP-01, OP-03, OP-04, OP-05, OP-07, OP-09, OP-13, OP-14, OP-16
+// proves: OP-01, OP-03, OP-04, OP-05, OP-07, OP-09, OP-10, OP-11, OP-13, OP-14, OP-16, SF-03
 /**
  * `test:ops` (P4 CALL CENTER; operations.md OPE-§O.1, §O.4; docs/STORE-SAAS.md §J.1): the call centre's offline
  * checks, in named sections. Static lints over P4's own files, then the pure suite src/lib/callcenter/selftest.ts.
@@ -29,6 +29,14 @@
  *                         digits, the locale's decimal separator, held orders refused with their ids, ≤ 20 columns;
  *                         ManifestSource equal to the §18.3 list and to the setting's enum
  *   pure · views          (OP-09, OD49) the 16 built-in views of OPE-§12.1, holds out of To pack, the role defaults
+ *   static · kpi returns  (OPE-§14.3) every function exported by src/lib/callcenter/kpis.ts is declared to return `Kpi`
+ *                         (TypeScript compiler API), never a bare number
+ *   static · honest triad (OD38) no catalog string under ops.tile.*, fin.tile.*, int.tg.* holds two of placed /
+ *                         confirmed / delivered, in en, fr (passées / confirmées / livrées) and ar
+ *   pure · insights       the KPI formulas with the minimum-n rule (rescue rate and inbound share included), the
+ *                         aggregate cells (suppression under 5, no customer field), the reason mixes, the best-hours
+ *                         strip, and each ops Store Health rule on its fixtures: fires above its threshold, silent
+ *                         below its minimum n and on a quiet store, evidence with n, no customer field, ≤ 40 ms
  *   pure · card           the ScriptDoc caps (OP-05), the built-in script and WhatsApp texts, the compile rules (upsell
  *                         gating, empty steps and missing facts dropped, no ETA sentence without an ETA), the wa.me
  *                         limits, and the 40 queue-card fixtures (8 delivery-lane) each ≤ 6 KB gzipped (OPE-§5.3)
@@ -390,6 +398,70 @@ section = "static · queue card";
   const planted = "interface Q { customer: { address: string; note: string | null; landmark: string }; delivery: D }\ninterface D { note: string }";
   check("the card lint catches an address-like field outside `customer`", typeFieldsExcept(planted, "Q", "customer").filter((n) => ADDRESS_FIELD.test(n)).length === 1);
   check("the card lint catches a nested phone field", typeFields("interface Q { a: { b: { phone: string } } }", "Q").filter((n) => CONTACT_FIELD.test(n)).length === 1);
+}
+
+section = "static · kpi returns";
+{
+  // OPE-§14.3: every function exported by src/lib/callcenter/kpis.ts answers a `Kpi`, never a bare number (TypeScript
+  // compiler API over the declarations: an exported function without the `Kpi` return annotation fails)
+  const notKpi = (src: string): string[] => {
+    const sf = ts.createSourceFile("kpis.ts", src, ts.ScriptTarget.Latest, true);
+    const bad: string[] = [];
+    const exported = (n: ts.Node) => !!(ts.getCombinedModifierFlags(n as ts.Declaration) & ts.ModifierFlags.Export);
+    for (const st of sf.statements) {
+      if (ts.isFunctionDeclaration(st) && exported(st)) {
+        const t = st.type?.getText(sf);
+        if (t !== "Kpi" && t !== "Promise<Kpi>") bad.push(st.name?.text ?? "<anonymous>");
+      } else if (ts.isVariableStatement(st) && exported(st)) {
+        for (const d of st.declarationList.declarations) {
+          const init = d.initializer;
+          if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
+            const t = init.type?.getText(sf);
+            if (t !== "Kpi" && t !== "Promise<Kpi>") bad.push(d.name.getText(sf));
+          }
+        }
+      }
+    }
+    return bad;
+  };
+  check("the lint catches an exported function answering a number", notKpi("export function rate(a: number): number { return a; }\nexport const r2 = (a: number): Kpi => x;").join() === "rate");
+  check("the lint catches an exported arrow without the Kpi annotation", notKpi("export const r = (a: number) => a;").join() === "r");
+  const src = readFileSync(join(ROOT, "src", "lib", "callcenter", "kpis.ts"), "utf8");
+  check("every exported function of src/lib/callcenter/kpis.ts returns Kpi", notKpi(src).length === 0, notKpi(src));
+}
+
+section = "static · honest triad";
+{
+  // OD38: "placed", "confirmed" and "delivered" never share one catalog string under ops.tile.*, fin.tile.*, int.tg.*
+  const WORDS: Record<"en" | "fr" | "ar", RegExp[]> = {
+    en: [/\bplaced\b/i, /\bconfirmed\b/i, /\bdelivered\b/i],
+    fr: [/\bpass[ée]e?s?\b/i, /\bconfirm[ée]e?s?\b/i, /\blivr[ée]e?s?\b/i],
+    ar: [/الطلبات/, /المؤكدة/, /توصلو/],
+  };
+  const triad = (locale: "en" | "fr" | "ar", text: string) => WORDS[locale].filter((re) => re.test(text)).length >= 2;
+  check("the lint catches a tile with two of the three words (en)", triad("en", "12 placed, 8 confirmed"));
+  check("the lint catches a tile with two of the three words (fr, ar)", triad("fr", "12 passées, 8 livrées") && triad("ar", "الطلبات المؤكدة"));
+  check("the lint passes a one-word tile", !triad("en", "Confirmed today") && !triad("fr", "Confirmées aujourd'hui"));
+  const load = (rel: string): Record<string, string> => {
+    const file = join(ROOT, rel);
+    if (!existsSync(file)) return {};
+    const src = readFileSync(file, "utf8");
+    const out: Record<string, string> = {};
+    for (const m of src.matchAll(/^\s*"((?:ops\.tile|fin\.tile|int\.tg)\.[^"]+)":\s*("(?:[^"\\]|\\.)*")/gm)) out[m[1]!] = JSON.parse(m[2]!) as string;
+    return out;
+  };
+  let seen = 0;
+  const bad: string[] = [];
+  for (const locale of ["en", "fr", "ar"] as const) {
+    for (const file of ["ops", "finance", "integrations"]) {
+      for (const [k, v] of Object.entries(load(`src/lib/i18n/admin/${locale}/${file}.ts`))) {
+        seen++;
+        if (triad(locale, v)) bad.push(`${locale} ${k}: ${v}`);
+      }
+    }
+  }
+  check("ops.tile.* keys exist in en, fr and ar", seen >= 3 * 20, seen);
+  check("no ops.tile.* / fin.tile.* / int.tg.* string holds two of placed / confirmed / delivered (OD38)", bad.length === 0, bad);
 }
 
 section = "static · defaults";
@@ -949,6 +1021,106 @@ async function carrier(): Promise<void> {
   check("OrderQuery defaults the sort", V.OrderQuery.parse({}).sort === "created_desc");
 }
 
+/* ------------------------------------------------------------------ */
+/* pure · insights (P4 step 7: KPIs, aggregates, health rules, board)  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The KPI formulas with the minimum-n rule (OD17: 20 per agent, 30 per store, 30 attempts per hour cell), the
+ * aggregate cells (suppression under 5, no customer field), the reason mixes, the best-hours strip, and every ops
+ * Store Health rule on its in-memory fixtures: it fires above its threshold, stays silent below its minimum n, and no
+ * issue carries a customer field. Runs after `pure()`, which stubbed `server-only`.
+ */
+async function insights(): Promise<void> {
+  const t0 = performance.now();
+  section = "pure · kpis";
+  const K = await import("@/lib/callcenter/kpis");
+  const isKpi = (k: unknown): boolean => !!k && typeof k === "object" && typeof (k as { n?: unknown }).n === "number" && typeof (k as { min?: unknown }).min === "number" && ("insufficient" in (k as object) || typeof (k as { value?: unknown }).value === "number");
+  const v = (k: import("@/lib/callcenter/kpis").Kpi) => ("insufficient" in k ? null : k.value);
+  check("confirmation rate: confirmed ÷ (confirmed + cancelled + unreachable)", v(K.confirmationRate({ confirmed: 15, cancelled: 3, unreachable: 2 }, "agent")) === 0.75);
+  check("confirmation rate: 19 decisions of an agent are insufficient, 20 are not", "insufficient" in K.confirmationRate({ confirmed: 19, cancelled: 0, unreachable: 0 }, "agent") && !("insufficient" in K.confirmationRate({ confirmed: 20, cancelled: 0, unreachable: 0 }, "agent")));
+  check("confirmation rate: a store needs 30", "insufficient" in K.confirmationRate({ confirmed: 29, cancelled: 0, unreachable: 0 }, "store") && v(K.confirmationRate({ confirmed: 24, cancelled: 3, unreachable: 3 }, "store")) === 0.8);
+  check("below the minimum the count and the minimum still travel", JSON.stringify(K.confirmationRate({ confirmed: 4, cancelled: 1, unreachable: 0 }, "store")) === JSON.stringify({ n: 5, min: 30, insufficient: true }));
+  check("delivery rate: delivered ÷ (delivered + refused + returned + lost)", v(K.deliveryRate({ delivered: 30, refused: 6, returned: 3, lost: 1 }, "store")) === 0.75);
+  check("net delivered rate: delivered ÷ placed over the cohorts", v(K.netDeliveredRate([{ placed: 20, delivered: 10 }, { placed: 20, delivered: 14 }])) === 0.6 && "insufficient" in K.netDeliveredRate([{ placed: 29, delivered: 20 }]));
+  const ft = Array.from({ length: 21 }, (_, i) => i + 1);
+  check("first touch p50 / p90 (nearest rank) in window minutes, 20 per agent", v(K.firstTouchP50(ft, "agent")) === 11 && v(K.firstTouchP90(ft, "agent")) === 19 && "insufficient" in K.firstTouchP50(ft.slice(0, 19), "agent"));
+  check("attempts per confirmation: two decimals, n = confirmed", v(K.attemptsPerConfirmation({ attempts: 50, confirmed: 22 }, "agent")) === 2.27 && K.attemptsPerConfirmation({ attempts: 50, confirmed: 22 }, "agent").n === 22);
+  check("handling time: median seconds", v(K.handlingTimeP50(Array.from({ length: 20 }, (_, i) => (i + 1) * 1000), "agent")) === 10);
+  check("abandoned and skip rates over claims", v(K.abandonedRate({ abandoned: 5, claimed: 20 }, "agent")) === 0.25 && v(K.skipRate({ skipped: 2, claimed: 40 }, "agent")) === 0.05);
+  check("contact rate: 30 attempts per hour cell", "insufficient" in K.contactRate({ contacted: 20, attempts: 29 }) && v(K.contactRate({ contacted: 18, attempts: 30 })) === 0.6);
+  check("rescue rate: delivered ÷ final among rescued orders, 20", v(K.rescueRate({ delivered: 15, final: 20 }, "agent")) === 0.75 && "insufficient" in K.rescueRate({ delivered: 15, final: 19 }, "agent"));
+  check("inbound share: inbound decisions ÷ decisions, 20 / 30", v(K.inboundShare({ inbound: 6, decisions: 30 }, "store")) === 0.2 && "insufficient" in K.inboundShare({ inbound: 6, decisions: 29 }, "store"));
+  check("risky share: risk ≥ 50 ÷ placed, 30", v(K.riskyShare({ risky: 9, placed: 30 })) === 0.3);
+  const all = Object.entries(K).filter(([, f]) => typeof f === "function") as [string, (...a: unknown[]) => unknown][];
+  check("every exported KPI function answers a Kpi at runtime too", all.every(([name, f]) => name === "rateKpi" || name === "measuredKpi" || isKpi(f(...sampleArgs(name)))), all.map(([n]) => n));
+
+  section = "pure · aggregates";
+  const A = await import("@/lib/callcenter/aggregates");
+  const counts = (key: string, placed: number, o: Partial<Record<"confirmed" | "cancelled" | "unreachable" | "fake" | "delivered" | "refused" | "returned" | "lost", number>> = {}) => ({ key, placed, confirmed: 0, cancelled: 0, unreachable: 0, fake: 0, delivered: 0, refused: 0, returned: 0, lost: 0, ...o });
+  const sup = A.suppressCells([counts("casablanca", 40, { confirmed: 30, cancelled: 5, unreachable: 5, delivered: 20, refused: 4 }), counts("*", 4), counts("fes", 5, { confirmed: 3 })]);
+  check("cells under 5 orders are suppressed and counted", sup.suppressed === 1 && sup.cells.map((c) => c.key).join() === "casablanca,fes", sup);
+  check("a cell's rates are Kpis over decisions and finals", v(sup.cells[0]!.confirmationRate) === 0.75 && "insufficient" in sup.cells[0]!.deliveryRate && sup.cells[0]!.n === 40, sup.cells[0]);
+  check("an agent cell uses the agent minimum (20)", !("insufficient" in A.aggCellOf(counts("01HZ", 30, { delivered: 20 }), "agent").deliveryRate));
+  check("AggCell carries no customer field", Object.keys(sup.cells[0]!).every((k) => !CONTACT_FIELD.test(k) && !ADDRESS_FIELD.test(k) && k !== "name"), Object.keys(sup.cells[0]!));
+  check("AGG_DIMS is the §27.6 list, ≤ 6 per call", JSON.stringify(A.AGG_DIMS) === JSON.stringify(["page", "city", "source", "agent", "offer", "campaign", "angle", "carrier", "hour", "weekday"]) && A.AGG_MAX_DIMS === 6);
+  const mix = A.reasonShares<string | null>([{ reason: "customer_absent", count: 12 }, { reason: null, count: 18 }, { reason: "customer_absent", count: 3 }], "store");
+  check("reason mix: merged per reason, largest first, null = no reason given", mix.length === 2 && mix[0]!.reason === null && mix[0]!.count === 18 && mix[1]!.count === 15 && v(mix[0]!.share) === 0.5455 && mix[0]!.share.n === 33, mix);
+  check("reason mix below 30: the shares are withheld", A.reasonShares([{ reason: "price", count: 5 }], "store").every((l) => "insufficient" in l.share));
+
+  section = "pure · board";
+  const B = await import("@/lib/callcenter/board.server");
+  check("hoursOf: a range touches the hours it overlaps", B.hoursOf({ from: "09:30", to: "12:00" }).join() === "9,10,11" && B.hoursOf({ from: "14:30", to: "18:30" }).join() === "14,15,16,17,18", B.hoursOf({ from: "09:30", to: "12:00" }));
+  check("hoursOf: a range across midnight wraps", B.hoursOf({ from: "22:00", to: "02:00" }).join() === "22,23,0,1");
+  const strip = B.bestHoursOf([{ weekday: 1, hour: 18, attempts: 20, contacted: 12 }, { weekday: 2, hour: 18, attempts: 14, contacted: 9 }, { weekday: 1, hour: 10, attempts: 8, contacted: 2 }], new Set([10, 18]));
+  check("best hours: 24 cells, weekdays folded per hour, n ≥ 30 for a rate (OD44)", strip.length === 24 && strip[18]!.attempts === 34 && v(strip[18]!.contactRate) === 0.6176 && "insufficient" in strip[10]!.contactRate && strip[18]!.inWindow && !strip[3]!.inWindow, strip[18]);
+
+  section = "pure · health rules";
+  const H = await import("@/lib/health/rules/ops");
+  const { HEALTH_RULE_PREFIXES } = await import("@/lib/health/types");
+  const { mintScope } = await import("@/lib/tenancy/seam");
+  const scope = mintScope("system", "01HZTESTSTORE0000000000000");
+  const SPEC_RULES = ["first_touch", "untouched", "no_agent", "unreachable_rise", "abandoned", "callbacks_overdue", "to_pack_aging", "hold_passed", "delivery_rescue", "sheet_agents_unmapped"].map((r) => `ops:${r}`);
+  check("the R1 ops rules of OPE-§27.2, one fixture each", JSON.stringify(H.rules.map((r) => r.id)) === JSON.stringify(SPEC_RULES) && JSON.stringify(H.fixtures.map((f) => f.rule)) === JSON.stringify(SPEC_RULES), H.rules.map((r) => r.id));
+  check("every rule id carries a prefix of the ops file (PD79)", H.rules.every((r) => HEALTH_RULE_PREFIXES.ops.includes(r.id.split(":")[0]!)));
+  const base = { now: new Date("2026-11-03T10:00:00Z") } as import("@/lib/health/types").HealthInputs;
+  const PII_TEXT = /\+?\d[\d\s]{7,}|@[a-z]/i;
+  for (const fx of H.fixtures) {
+    const r = H.rules.find((x) => x.id === fx.rule)!;
+    const t0 = performance.now();
+    const fired = await r.collect(scope, { ...base, ...fx.fires });
+    const ms = performance.now() - t0;
+    const quiet = await r.collect(scope, { ...base, ...fx.silent });
+    const calm = await r.collect(scope, { ...base, ...H.withOps({}) });
+    check(`${fx.rule} fires on its fixture`, !!fired && fired.id === fx.rule && (!fx.expect?.severity || fired.severity === fx.expect.severity) && (!fx.expect?.metric || fired.evidence.metric === fx.expect.metric), fired);
+    check(`${fx.rule} stays silent below its threshold or minimum n`, quiet === null, quiet);
+    check(`${fx.rule} stays silent on a quiet store`, calm === null, calm);
+    check(`${fx.rule}: evidence with n, a fix link into P4's screens, a health.ops text`, !!fired && typeof fired.evidence.n === "number" && fired.fix.kind === "link" && fired.fix.href("demo").startsWith("/app/demo/") && fired.text === `${fx.rule.replace(":", ".").replace(/^ops\./, "health.ops.")}.text`, fired && { fix: fired.fix.kind === "link" ? fired.fix.href("demo") : fired.fix, text: fired.text });
+    check(`${fx.rule}: no customer field in the issue`, !!fired && !PII_TEXT.test(JSON.stringify(fired)) && !JSON.stringify(fired).match(/"(phone|name|address|email|note)"/), fired);
+    check(`${fx.rule}: collect ≤ 40 ms on the in-memory facts`, ms <= 40, ms);
+  }
+  check("a rule is silent when the ops facts are unavailable (null)", (await H.rules[0]!.collect(scope, { ...base, ...({ ops: null } as object) })) === null);
+  console.log(`  insights: ${((performance.now() - t0) / 1000).toFixed(2)} s`);
+}
+
+/** Arguments that make each KPI function compute (the runtime half of the Kpi return check). */
+function sampleArgs(name: string): unknown[] {
+  switch (name) {
+    case "netDeliveredRate":
+      return [[{ placed: 40, delivered: 30 }]];
+    case "firstTouchP50":
+    case "firstTouchP90":
+    case "handlingTimeP50":
+      return [[1, 2, 3], "agent"];
+    case "contactRate":
+      return [{ contacted: 3, attempts: 40 }];
+    case "riskyShare":
+      return [{ risky: 1, placed: 40 }];
+    default:
+      return [{ confirmed: 25, cancelled: 2, unreachable: 1, delivered: 20, refused: 1, returned: 1, lost: 0, attempts: 40, abandoned: 1, claimed: 30, skipped: 1, inbound: 3, decisions: 28, final: 22 }, "agent"];
+  }
+}
+
 cityKeySize()
   .catch((e: unknown) => failures.push(`[static · cityKey size] esbuild failed: ${e instanceof Error ? e.message : String(e)}`))
   .then(pure)
@@ -959,6 +1131,8 @@ cityKeySize()
   .catch((e: unknown) => failures.push(`[pure · card] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .then(carrier)
   .catch((e: unknown) => failures.push(`[pure · carrier csv] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
+  .then(insights)
+  .catch((e: unknown) => failures.push(`[pure · insights] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .finally(() => {
     const ms = performance.now() - started;
     const clock = recordSuiteTime("ops", ms);

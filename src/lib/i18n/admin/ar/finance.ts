@@ -5,4 +5,8 @@
  */
 import type { messages as en } from "../en/finance";
 
-export const messages: Partial<Record<keyof typeof en, string>> = {};
+export const messages: Partial<Record<keyof typeof en, string>> = {
+  /* ---- notifications (OPE-§21.4) ---- */
+  "notify.fin.profit_alert.title": "تنبيه الربح: {alertKind}",
+  "notify.fin.profit_alert.body": "شي رقم فات الحد ديالك: {value} مقابل {threshold} (n = {n}). حل الربح باش تشوف التفاصيل.",
+};

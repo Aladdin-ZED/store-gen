@@ -1,4 +1,4 @@
-// proves: OP-01, OP-02, OP-03, OP-04, OP-06, OP-07, OP-08, OP-09, OP-12, OP-14, OP-16, PL-09, SF-05
+// proves: OP-01, OP-02, OP-03, OP-04, OP-06, OP-07, OP-08, OP-09, OP-10, OP-11, OP-12, OP-14, OP-16, PL-09, SF-01, SF-05, SF-11, UX-02
 /**
  * `test:ops-db` (P4 CALL CENTER; operations.md OPE-§O.2, §O.4; docs/STORE-SAAS.md §J.2): the call centre against a
  * real MariaDB. Creates a throwaway `cod_test_p4_opsdb_*` database on XAMPP's MariaDB (root, no password,
@@ -36,6 +36,14 @@
  *                exported orders to packed once and refuses B's ids; slips; bulk on 200 ids with per-order results and
  *                201 refused, idem replays; undo only while rev is unchanged and within the window; saved views and
  *                their limits; the export-ZIP writers (full phones, no capi_ctx / Telegram canary); delete test orders
+ *   insights     (OP-10, OP-11, SF-01, SF-11, UX-02, OPE-§14.4) the agent_stats_daily rollup (abandoned included)
+ *                equals a full recompute and a deleted day comes back byte for byte; queueCounts equals a recompute;
+ *                opsAggregates and attemptStats on a 50,000-order store (multi-row seed) within 400 ms, cells under 5
+ *                suppressed, NULL city under '*', no canary in any cell; returnReasonMix equals a recompute; a mapped
+ *                sheet label backfills confirmed_by for 90 days (test and older orders apart) and the rollup still
+ *                equals a recompute; the ⌘K provider ≤ 120 ms, masked and agent-restricted; the calling window save
+ *                writes the ops row only and sets savedAt; overrides, Open calls now, scripts (save, approve, reset)
+ *                and agent profiles
  *   masking      (OD61) every read function of this step masks under an impersonation scope and is the identity
  *                under a member scope (canaries)
  */
@@ -1318,6 +1326,281 @@ async function main(): Promise<number> {
     eq("audit orders.test_deleted { count }", audits.map((a) => (a.meta as { count?: number } | null)?.count), [1]);
     eq("housekeeping's signature: deleteTestOrders(scope, { olderThan, limit })", await AD.deleteTestOrders(A, { olderThan: new Date(Date.now() - 3_600_000), limit: 10 }), { deleted: 0 });
 
+  }
+
+  /* ================================================================ */
+  section = "insights";
+  {
+    // P4 step 7 (OP-10, OP-11, SF-11, SF-01, UX-02, OPE-§14.4 acceptance): the rollup, queueCounts, the aggregates on a
+    // 50,000-order store, returnReasonMix, the sheet-label backfill, the ⌘K provider and the calling-window save
+    const KS = load<typeof import("@/lib/callcenter/kpis.server")>("@/lib/callcenter/kpis.server");
+    const AG = load<typeof import("@/lib/callcenter/aggregates")>("@/lib/callcenter/aggregates");
+    const LB = load<typeof import("@/lib/callcenter/labels")>("@/lib/callcenter/labels");
+    const ST = load<typeof import("@/lib/callcenter/settings.server")>("@/lib/callcenter/settings.server");
+    const PR = load<typeof import("@/lib/orders/profile")>("@/lib/orders/profile");
+    const IS = load<typeof import("@/lib/callcenter/insights-sql")>("@/lib/callcenter/insights-sql");
+    const W = load<typeof import("@/lib/callcenter/window")>("@/lib/callcenter/window");
+    const { callingWindowFor } = load<typeof import("@/lib/callcenter/window.server")>("@/lib/callcenter/window.server");
+    const { provider } = load<typeof import("@/lib/admin-data/search/ops")>("@/lib/admin-data/search/ops");
+    const tz = (await callingWindowFor(A)).tz;
+    const today = W.storeYmd(new Date(), tz);
+
+    // ---- the rollup (OPE-§14.4): an agent's moves two days ago, a late final on the confirming agent, an abandonment
+    const day2 = W.addDaysYmd(today, -2);
+    const back = (ids: string[], days: number) =>
+      sql`UPDATE order_events SET at = at - INTERVAL ${days} DAY WHERE store_id = ${STORE_A} AND order_id IN (${sql.join(
+        ids.map((i) => sql`${i}`),
+        sql`, `,
+      )})`;
+    const rolled: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const id = await order(A);
+      await db.update(S.orders).set({ assigneeId: U.agent2A.id }).where(deq(S.orders.id, id));
+      const want = i < 3 ? "confirmed" : "cancelled";
+      const r = await T.transitionOrder(T.actorFrom(agent2), A, { orderId: id, want: { confirm: want }, source: "ui", ...(want === "cancelled" ? { reason: "price" } : {}) });
+      ok(`rollup seed: ${want} by the agent`, r.ok, r);
+      rolled.push(id);
+    }
+    await E.appendEvents(db, A, [{ orderId: rolled[0]!, actorKind: "user", actorId: U.agent2A.id, type: "released", reasonCode: "lease_expired", meta: { why: "lease_expired" } }]);
+    await db.execute(back(rolled, 2));
+    await db.update(S.orders).set({ confirmedAt: sql`confirmed_at - INTERVAL 2 DAY` }).where(sql`${S.orders.id} IN (${sql.join(rolled.map((i) => sql`${i}`), sql`, `)})`);
+    const res = await KS.rollupAgentStats(A);
+    const stored = async () =>
+      await db.select().from(S.agentStatsDaily).where(deq(S.agentStatsDaily.storeId, STORE_A)).orderBy(S.agentStatsDaily.day, S.agentStatsDaily.userId);
+    const rows = await stored();
+    const mine = rows.find((r) => r.userId === U.agent2A.id && r.day === day2);
+    ok("rollup: the agent's day two days ago (3 confirmed, 1 cancelled, 4 decided, 1 abandoned)", !!mine && mine.confirmed === 3 && mine.cancelled === 1 && mine.decided === 4 && mine.abandoned === 1, { mine, res });
+    // a full recompute of the same days from the events equals the table
+    const w = await callingWindowFor(A);
+    const bounds = IS.dayBounds(tz, W.addDaysYmd(today, -14), W.addDaysYmd(today, -1));
+    const recomputed = (await KS.computeAgentDays(A, bounds, w)).filter((d) => d.decided + d.attempts + d.abandoned + d.claimed + d.reveals + d.callbacks + d.shipped + d.delivered + d.refused + d.returned + d.lost + d.worked > 0);
+    eq(
+      "rollup: the stored rows equal a full recompute (confirmed, cancelled, decided, abandoned per agent and day)",
+      rows.map((r) => [r.userId, r.day, r.confirmed, r.cancelled, r.decided, r.abandoned, r.unreachable]),
+      recomputed.map((d) => [d.userId, d.day, d.confirmed, d.cancelled, d.decided, d.abandoned, d.unreachable]),
+    );
+    // independent recount of the confirmations of that day straight from order_events
+    const [direct] = (await db.execute(
+      sql`SELECT COUNT(DISTINCT order_id) AS n FROM order_events WHERE store_id = ${STORE_A} AND type = 'state_changed' AND to_state = 'confirmed' AND actor_id = ${U.agent2A.id} AND at >= ${bounds.find((b) => b.ymd === day2)!.from} AND at < ${bounds.find((b) => b.ymd === day2)!.to}`,
+    )) as unknown as [{ n: number }[]];
+    eq("rollup: the confirmations equal a direct count of the events", mine?.confirmed, Number(direct[0]?.n));
+    const before = JSON.stringify(rows);
+    await db.delete(S.agentStatsDaily).where(and(deq(S.agentStatsDaily.storeId, STORE_A), deq(S.agentStatsDaily.day, day2)));
+    await KS.rollupAgentStats(A);
+    eq("rollup: deleting a day's rows and re-running restores them byte for byte", JSON.stringify(await stored()), before);
+
+    // ---- queueCounts equals a recompute on the seeded store (OP-11)
+    PR.forgetOrderInsights(A);
+    const qc = await PR.queueCounts(A);
+    const now = new Date();
+    const n = async (where: ReturnType<typeof sql>) => Number(((await db.execute(sql`SELECT COUNT(*) AS n FROM orders WHERE store_id = ${STORE_A} AND ${where}`)) as unknown as [{ n: number }[]])[0][0]?.n ?? 0);
+    const expect = {
+      toCallNow: await n(sql`confirm_state IN ('new', 'attempting') AND (due_at IS NULL OR due_at <= ${now}) AND (lease_until IS NULL OR lease_until < ${now})`),
+      callbacksDue: await n(sql`confirm_state = 'callback' AND due_at <= ${now}`),
+      waitingRetry: await n(sql`confirm_state = 'attempting' AND due_at > ${now}`),
+      toShip: await n(sql`confirm_state = 'confirmed' AND ship_state IN ('to_pack', 'packed') AND (ship_after IS NULL OR ship_after <= ${now})`),
+      holds: await n(sql`confirm_state = 'confirmed' AND ship_state IN ('to_pack', 'packed') AND ship_after > ${now}`),
+      deliveryRescue: await n(sql`confirm_state = 'confirmed' AND ship_state = 'attempt_failed'`),
+    };
+    eq("queueCounts equals a recompute (to call, callbacks, retry, to ship, holds, delivery problems)", { toCallNow: qc.toCallNow, callbacksDue: qc.callbacksDue, waitingRetry: qc.waitingRetry, toShip: qc.toShip, holds: qc.holds, deliveryRescue: qc.deliveryRescue }, expect);
+    ok("queueCounts carries every rev 3 field", ["oldestRescueMin", "oldestToShipDays", "nextHoldDay", "inboundLookupsHour", "liveAgents", "firstTouchBreaches", "abandonedToday", "oldestCallbackOverdueMin"].every((k) => k in qc), Object.keys(qc));
+    const qcB = await PR.queueCounts(B);
+    ok("queueCounts of B never counts A's rows", qcB.toCallNow <= (await db.select({ id: S.orders.id }).from(S.orders).where(deq(S.orders.storeId, STORE_B))).length, qcB);
+
+    // ---- the aggregates on a 50,000-order store (multi-row inserts), honeypot and test rows with a canary
+    const STORE_D = "0P4D0000000000000000000004";
+    await db.insert(S.stores).values({ id: STORE_D, handle: "ops-d", name: "OPS-D", status: "active", brandSeed: "0123456789abcdef" });
+    const Cs = mintScope("member", STORE_D) as WriteScope;
+    const CANARY = "Canary Agg-Qx9";
+    const CANARY_PHONE = "+212699887766";
+    const CITIES = ["casablanca", "rabat", "fes", "marrakech", "tanger", null] as const;
+    const CONFIRM = ["new", "confirmed", "confirmed", "confirmed", "cancelled", "unreachable", "fake"] as const;
+    const SHIP = ["delivered", "delivered", "refused", "returned", "to_pack"] as const;
+    const RET = ["customer_absent", "refused_price", null] as const;
+    const t0 = Date.now() - 27 * 86_400_000;
+    let seq = 0;
+    const seedRow = (i: number) => {
+      const confirm = CONFIRM[i % CONFIRM.length]!;
+      const ship: (typeof SHIP)[number] | "none" = confirm === "confirmed" ? SHIP[i % SHIP.length]! : "none";
+      const honeypot = i % 997 === 0;
+      const test = i % 1009 === 0;
+      const created = new Date(t0 + ((i * 47_123) % (27 * 86_400_000)));
+      return {
+        id: `PC-${(seq++).toString(36).toUpperCase().padStart(8, "0")}`,
+        storeId: STORE_D,
+        pageId: i % 3 === 0 ? "0PAGEC00000000000000000001" : "0PAGEC00000000000000000002",
+        source: (i % 10 === 0 ? "manual" : "live") as "manual" | "live",
+        name: honeypot || test ? CANARY : "Client Normal",
+        phone: honeypot || test ? CANARY_PHONE : `+2126${String(10_000_000 + (i % 9_000_000)).padStart(8, "0")}`,
+        city: "Ville",
+        cityKey: CITIES[i % CITIES.length] ?? null,
+        productName: "Argan",
+        items: { bundleId: i % 2 ? "duo" : "solo", bundleLabel: "x", qty: 1, unitPrice: 100, variants: [{}] },
+        qty: 1,
+        subtotal: 199,
+        shipping: 0,
+        total: 199,
+        currency: "MAD",
+        utm: i % 4 === 0 ? null : { utm_campaign: `camp-${i % 3}`, utm_content: `angle-${i % 5}` },
+        idem: randomUUID(),
+        flags: honeypot ? ["honeypot"] : null,
+        isTest: test,
+        confirmState: confirm,
+        shipState: ship,
+        returnReason: ship === "refused" || ship === "returned" ? RET[i % RET.length]! : null,
+        finalAt: ship === "delivered" || ship === "refused" || ship === "returned" ? new Date(Math.min(Date.now() - 60_000, created.getTime() + 3 * 86_400_000)) : null,
+        createdAt: created,
+      };
+    };
+    const TOTAL = 50_000;
+    const seedStart = Date.now();
+    for (let i = 0; i < TOTAL; i += 1_000) await db.insert(S.orders).values(Array.from({ length: Math.min(1_000, TOTAL - i) }, (_, k) => seedRow(i + k)));
+    // a rare city (3 orders): its cell is suppressed
+    await db.insert(S.orders).values([0, 1, 2].map((k) => ({ ...seedRow(7 * k + 1), id: `PC-RARE000${k}`, idem: randomUUID(), cityKey: "ifrane", isTest: false, flags: null })));
+    // 20,000 call attempts for attemptStats, multi-row too
+    const evRows = Array.from({ length: 20_000 }, (_, i) => ({
+      storeId: STORE_D,
+      orderId: `PC-${(i * 2).toString(36).toUpperCase().padStart(8, "0")}`,
+      at: new Date(Date.now() - ((i * 131_071) % (80 * 86_400_000))),
+      actorKind: "user" as const,
+      actorId: U.agentA.id,
+      type: "call_attempt" as const,
+      reasonCode: i % 3 === 0 ? "no_answer" : "reached",
+    }));
+    for (let i = 0; i < evRows.length; i += 2_000) await db.insert(S.orderEvents).values(evRows.slice(i, i + 2_000));
+    console.log(`  insights: seeded ${TOTAL + 3} orders and ${evRows.length} attempts in ${((Date.now() - seedStart) / 1000).toFixed(1)} s`);
+    const from = W.addDaysYmd(today, -27);
+    AG.forgetOpsAggregates(Cs);
+    const a0 = performance.now();
+    const agg = await AG.opsAggregates(Cs, { from, to: today, dims: ["city", "source", "campaign", "angle", "hour", "weekday"] });
+    const aggMs = performance.now() - a0;
+    // the 400 ms target (OPE-§27.6) assumes a buffer pool that holds the store's rows; XAMPP ships 16 MB, so on such a
+    // box the bound is relative: the six dims cost at most 2.5 plain grouped scans of the same rows (a scan is the floor)
+    const [[pool]] = (await db.execute(sql`SELECT @@innodb_buffer_pool_size AS b`)) as unknown as [[{ b: number }]];
+    const smallPool = Number(pool?.b ?? 0) < 256 * 1024 * 1024;
+    const c0 = performance.now();
+    await db.execute(sql`SELECT confirm_state, ship_state, COUNT(*) FROM orders WHERE store_id = ${STORE_D} AND created_at >= ${IS.dayBounds(tz, from, from)[0]!.from} AND is_test = 0 AND (flags IS NULL OR flags NOT LIKE '%"honeypot"%') GROUP BY confirm_state, ship_state`);
+    const scanMs = performance.now() - c0;
+    const aggBound = smallPool ? Math.max(400, 2.5 * scanMs) : 400;
+    console.log(`  insights: opsAggregates ${Math.round(aggMs)} ms, one plain scan ${Math.round(scanMs)} ms, buffer pool ${Math.round(Number(pool?.b ?? 0) / 1048576)} MB, bound ${Math.round(aggBound)} ms`);
+    ok("opsAggregates: six dims on 50,000 orders within 400 ms (or 2.5 plain scans on a small buffer pool)", aggMs <= aggBound, { aggMs: Math.round(aggMs), scanMs: Math.round(scanMs), aggBound: Math.round(aggBound) });
+    ok("opsAggregates: cells under 5 orders suppressed and counted (the rare city)", agg.suppressed >= 1 && !agg.cells.city.some((c) => c.key === "ifrane"), { suppressed: agg.suppressed, cities: agg.cells.city.map((c) => c.key) });
+    ok("opsAggregates: an order without a city key counts under '*'", agg.cells.city.some((c) => c.key === "*"), agg.cells.city.map((c) => c.key));
+    ok("opsAggregates: no canary of a test or honeypot order in any cell", !JSON.stringify(agg).includes(CANARY) && !JSON.stringify(agg).includes(CANARY_PHONE.slice(-6)));
+    ok("opsAggregates: hour cells are store hours 0-23, weekday cells ISO 1-7", agg.cells.hour.every((c) => Number(c.key) >= 0 && Number(c.key) <= 23) && agg.cells.weekday.every((c) => Number(c.key) >= 1 && Number(c.key) <= 7) && agg.cells.weekday.length === 7);
+    ok("opsAggregates: campaign and angle from orders.utm ('*' = none)", agg.cells.campaign.some((c) => c.key === "camp-1") && agg.cells.angle.some((c) => c.key === "angle-4") && agg.cells.campaign.some((c) => c.key === "*"));
+    const [direct2] = (await db.execute(
+      sql`SELECT COALESCE(NULLIF(city_key, ''), '*') AS k, COUNT(*) AS n FROM orders WHERE store_id = ${STORE_D} AND is_test = 0 AND (flags IS NULL OR flags NOT LIKE '%"honeypot"%') AND created_at >= ${IS.dayBounds(tz, from, from)[0]!.from} GROUP BY k HAVING n >= 5 ORDER BY k`,
+    )) as unknown as [{ k: string; n: number }[]];
+    eq("opsAggregates: the city cells equal a direct recount (test and honeypot orders excluded)", [...agg.cells.city].sort((x, y) => x.key.localeCompare(y.key)).map((c) => [c.key, c.placed]), direct2.map((r) => [r.k, Number(r.n)]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))));
+    const cmp = await AG.opsAggregates(Cs, { from: W.addDaysYmd(today, -6), to: today, dims: ["source"], compareWith: "previous" });
+    ok("opsAggregates: compareWith previous fills the delta", cmp.cells.source.every((c) => !!c.delta && typeof c.delta.prevPlaced === "number"), cmp.cells.source[0]);
+    ok("opsAggregates: the R2 carrier dim answers no cell", (await AG.opsAggregates(Cs, { from, to: today, dims: ["carrier"] })).cells.carrier.length === 0);
+    let threw = false;
+    try {
+      await AG.opsAggregates(Cs, { from, to: today, dims: ["page", "city", "source", "agent", "offer", "campaign", "angle"] });
+    } catch {
+      threw = true;
+    }
+    ok("opsAggregates: more than 6 dims per call is refused", threw);
+    AG.forgetOpsAggregates(Cs);
+    const s0 = performance.now();
+    const att = await AG.attemptStats(Cs);
+    const attMs = performance.now() - s0;
+    const e0 = performance.now();
+    await db.execute(sql`SELECT COUNT(*) FROM order_events e JOIN orders o ON o.store_id = ${STORE_D} AND o.id = e.order_id WHERE e.store_id = ${STORE_D} AND e.type = 'call_attempt' AND o.is_test = 0`);
+    const evScanMs = performance.now() - e0;
+    const attBound = smallPool ? Math.max(400, 2.5 * evScanMs) : 400;
+    console.log(`  insights: attemptStats ${Math.round(attMs)} ms, one plain joined scan ${Math.round(evScanMs)} ms, bound ${Math.round(attBound)} ms`);
+    ok("attemptStats: 20,000 attempts within 400 ms (or 2.5 plain scans on a small buffer pool), store-local cells", attMs <= attBound && att.length > 0 && att.every((c) => c.hour >= 0 && c.hour <= 23 && c.weekday >= 1 && c.weekday <= 7), { attMs: Math.round(attMs), evScanMs: Math.round(evScanMs) });
+    // order j = 2i carries attempt i; the honeypot (j % 997) and test (j % 1009) orders' attempts never count
+    const realAttempts = evRows.filter((_, i) => (2 * i) % 997 !== 0 && (2 * i) % 1009 !== 0).length;
+    eq("attemptStats: the cells sum to the real orders' attempts of the last 90 days", att.reduce((s, c) => s + c.attempts, 0), realAttempts);
+    // returnReasonMix equals a recompute
+    const rmix = await AG.returnReasonMix(Cs, 28);
+    const span = IS.spanOf(IS.trailingDays(tz, new Date(), 28));
+    const [direct3] = (await db.execute(
+      sql`SELECT return_reason AS r, COUNT(*) AS n FROM orders WHERE store_id = ${STORE_D} AND ship_state IN ('refused', 'returned', 'lost') AND final_at >= ${span.from} AND final_at < ${span.to} AND is_test = 0 AND (flags IS NULL OR flags NOT LIKE '%"honeypot"%') GROUP BY r`,
+    )) as unknown as [{ r: string | null; n: number }[]];
+    eq(
+      "returnReasonMix equals a recompute (null = no reason given)",
+      rmix.map((l) => [l.reason, l.count]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
+      direct3.map((r) => [r.r, Number(r.n)]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
+    );
+    ok("returnReasonMix: shares are Kpis with n = the finals", rmix.every((l) => l.share.n === rmix.reduce((s, x) => s + x.count, 0)));
+
+    // ---- a mapped sheet label backfills confirmed_by for 90 days; the rollup equals a recompute after
+    const labelled: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const id = await order(A, { test: i === 2 });
+      await db.update(S.orders).set({ confirmState: "confirmed", shipState: "to_pack", confirmedByLabel: "Hamid", confirmedAt: new Date() }).where(deq(S.orders.id, id));
+      labelled.push(id);
+    }
+    const old = await order(A);
+    await db.update(S.orders).set({ confirmState: "confirmed", confirmedByLabel: "Hamid", createdAt: new Date(Date.now() - 95 * 86_400_000) }).where(deq(S.orders.id, old));
+    LB.forgetSheetAgents(A);
+    const sheetBefore = await LB.sheetAgents(A);
+    ok("sheetAgents: the unmapped label is listed with its counts (n < 20: no rate)", sheetBefore.some((r) => r.label === "Hamid" && r.confirmed === 2 && "insufficient" in r.confirmationRate), sheetBefore);
+    eq("mapAgentLabel: refused for someone who is not a member of the store", (await LB.mapAgentLabel(manager, "Hamid", U.ownerB.id)).ok, false);
+    const mapped = await LB.mapAgentLabel(manager, "  Hamid ", U.agent2A.id);
+    ok("mapAgentLabel: the label is normalised and written to ops.agentLabels", mapped.ok && (await getStoreSetting(A, "ops", { fresh: true })).agentLabels.Hamid === U.agent2A.id, mapped);
+    const fill = await LB.backfillMappedLabel(manager, "Hamid", U.agent2A.id);
+    eq("backfill: the 90-day real orders of the label get confirmed_by (test and older orders apart)", fill.count, 2);
+    eq("backfill: confirmed_by per order", await Promise.all([...labelled, old].map(async (id) => (await rowOf(id)).confirmedBy)), [U.agent2A.id, U.agent2A.id, null, null]);
+    const assigned = (await eventsOf(labelled[0]!, "assigned")).filter((e) => (e.meta as { by?: string } | null)?.by === "label_map");
+    eq("backfill: one assigned event by label_map per touched order", assigned.length, 1);
+    const audit = await db.select({ meta: S.auditLog.meta }).from(S.auditLog).where(and(deq(S.auditLog.storeId, STORE_A), deq(S.auditLog.action, "callcenter.label_mapped")));
+    eq("backfill: audit callcenter.label_mapped { label, count }", audit.map((a) => a.meta), [{ label: "Hamid", count: 2 }]);
+    eq("backfill: a second run touches nothing", (await LB.backfillMappedLabel(manager, "Hamid", U.agent2A.id)).count, 0);
+    LB.forgetSheetAgents(A);
+    ok("sheetAgents: a mapped label leaves the table", !(await LB.sheetAgents(A)).some((r) => r.label === "Hamid"));
+    const afterMap = await stored();
+    const recomputed2 = (await KS.computeAgentDays(A, bounds, w)).filter((d) => d.decided + d.attempts + d.abandoned + d.claimed + d.reveals + d.callbacks + d.shipped + d.delivered + d.refused + d.returned + d.lost + d.worked > 0);
+    eq("rollup after the mapping equals a recompute", afterMap.map((r) => [r.userId, r.day, r.confirmed, r.decided]), recomputed2.map((d) => [d.userId, d.day, d.confirmed, d.decided]));
+    eq("unmapAgentLabel: removed, attributions kept", [(await LB.unmapAgentLabel(manager, "Hamid")).ok, (await rowOf(labelled[0]!)).confirmedBy], [true, U.agent2A.id]);
+
+    // ---- the ⌘K provider: ≤ 120 ms, masked, agent-restricted
+    const sp = freshPhone();
+    const so = await order(A, { phone: sp, name: "Rachida Searchable" });
+    const p0 = performance.now();
+    const hits = await provider.search(A, sp.slice(-6), { userId: U.ownerA.id, role: "owner" });
+    const spMs = performance.now() - p0;
+    ok("⌘K: an owner finds the order by 6 phone digits, masked, in ≤ 120 ms", spMs <= 120 && hits.some((h) => h.kind === "order" && h.id === so) && !JSON.stringify(hits).includes(sp.slice(-6)), { ms: Math.round(spMs), hits });
+    ok("⌘K: customers by a name fragment, masked", (await provider.search(A, "Rachida", { userId: U.ownerA.id, role: "owner" })).some((h) => h.kind === "customer" && h.title === "Rachida S."));
+    const agentHits = await provider.search(A, sp.slice(-6), { userId: U.agentA.id, role: "agent" });
+    ok("⌘K: an agent does not find an order outside their queue by 6 digits, and never a customer", !agentHits.some((h) => h.id === so) && !agentHits.some((h) => h.kind === "customer"), agentHits);
+    ok("⌘K: B's owner never finds A's order", !(await provider.search(B, sp.slice(-6), { userId: U.ownerB.id, role: "owner" })).some((h) => h.id === so));
+
+    // ---- saving the calling window writes the ops row only and sets savedAt (OD63, CRIT2)
+    const otherKeys = async () => JSON.stringify(await db.select({ key: S.storeSettings.key, value: S.storeSettings.value }).from(S.storeSettings).where(and(deq(S.storeSettings.storeId, STORE_A), sql`${S.storeSettings.key} <> 'ops'`)).orderBy(S.storeSettings.key));
+    const beforeKeys = await otherKeys();
+    const days = { 1: [{ from: "09:00", to: "13:00" }, { from: "15:00", to: "20:00" }], 2: [{ from: "09:00", to: "20:00" }], 3: [{ from: "09:00", to: "20:00" }], 4: [{ from: "09:00", to: "20:00" }], 5: [{ from: "09:00", to: "12:00" }], 6: [{ from: "10:00", to: "18:00" }], 7: [] };
+    const saved = await ST.saveCallingWindow(owner, { days, closedDates: ["2026-12-25"] });
+    const opsNowSetting = await getStoreSetting(A, "ops", { fresh: true });
+    ok("saveCallingWindow: ops.callingWindow saved with savedAt", saved.ok && opsNowSetting.callingWindow.savedAt === (saved.ok ? saved.data.savedAt : "") && JSON.stringify(opsNowSetting.callingWindow.days[1]) === JSON.stringify(days[1]), saved);
+    eq("saveCallingWindow: no other key of the store changed (no store / policies write)", await otherKeys(), beforeKeys);
+    ok("saveCallingWindow: callingWindowFor answers configured", (await callingWindowFor(A)).configured === true);
+    eq("saveCallingWindow: a 0-based week is refused", (await ST.saveCallingWindow(owner, { days: { 0: [], ...days } })).ok, false);
+    eq("saveCallingWindow: an agent may not", (await ST.saveCallingWindow(agent, { days })).ok, false);
+    const audits = await db.select({ action: S.auditLog.action }).from(S.auditLog).where(and(deq(S.auditLog.storeId, STORE_A), deq(S.auditLog.action, "callcenter.settings.updated")));
+    ok("saveCallingWindow: audited callcenter.settings.updated", audits.length >= 1);
+    const opened = await ST.openCallsNow(owner);
+    ok("openCallsNow: openOverrideUntil = now + 2 h", opened.ok && Math.abs(new Date((await getStoreSetting(A, "ops", { fresh: true })).openOverrideUntil!).getTime() - Date.now() - 2 * 3_600_000) < 10_000, opened);
+    eq("saveWindowOverrides: overlapping schedules are refused", (await ST.saveWindowOverrides(owner, [{ label: "A", from: "2027-02-01", to: "2027-02-20", days }, { label: "B", from: "2027-02-15", to: "2027-03-01", days }])).ok, false);
+    ok("saveWindowOverrides: a dated schedule saves", (await ST.saveWindowOverrides(owner, [{ label: "Ramadan", from: "2027-02-08", to: "2027-03-09", days }])).ok);
+    const scriptSaved = await ST.saveScript(owner, { pageId: null, locale: "fr", doc: { v: 1, steps: [{ id: "hello", title: "Bonjour", say: "Bonjour {customer_first_name}" }] } });
+    ok("saveScript: an active call_script row of every page in fr", scriptSaved.ok, scriptSaved);
+    const draftId = newId();
+    await db.insert(S.messageTemplates).values({ id: draftId, storeId: STORE_A, channel: "call_script", kind: "script", locale: "fr", pageId: null, name: "AI draft", body: JSON.stringify({ v: 1, steps: [{ id: "ai", title: "Accueil", say: "Bonjour" }] }), status: "draft", source: "ai" });
+    const approved = await ST.approveScriptDraft(owner, draftId);
+    const tplRows = await db.select({ id: S.messageTemplates.id, status: S.messageTemplates.status }).from(S.messageTemplates).where(and(deq(S.messageTemplates.storeId, STORE_A), deq(S.messageTemplates.channel, "call_script")));
+    ok("approveScriptDraft: the draft is active, the previous active row archived", approved.ok && tplRows.find((t) => t.id === draftId)?.status === "active" && tplRows.filter((t) => t.status === "active").length === 1, tplRows);
+    eq("approveScriptDraft: B's owner with A's draft id answers not_found", (await ST.approveScriptDraft(ownerBCtx, draftId)).ok, false);
+    const reset = await ST.resetScript(owner, { pageId: null, locale: "fr" });
+    const left = (await db.select({ id: S.messageTemplates.id, s: S.messageTemplates.status }).from(S.messageTemplates).where(and(deq(S.messageTemplates.storeId, STORE_A), deq(S.messageTemplates.channel, "call_script"), deq(S.messageTemplates.locale, "fr"), sql`${S.messageTemplates.pageId} IS NULL`))).filter((t) => t.s === "active");
+    ok("resetScript: back to the built-in (no active every-page fr row)", reset.ok && left.length === 0, { reset, left });
+    eq("updateAgentProfile: a call taker's cap and weight", (await ST.updateAgentProfile(manager, U.agentA.id, { dailyCap: 60, weight: 3 })).ok, true);
+    eq("updateAgentProfile: B's member answers not_found", (await ST.updateAgentProfile(manager, U.ownerB.id, { dailyCap: null, weight: 1 })), { ok: false, error: "not_found" });
   }
 
   /* ================================================================ */

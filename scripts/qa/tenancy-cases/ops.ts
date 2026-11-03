@@ -35,6 +35,11 @@
  *     CSV with A's ids lists them as refused and never exports them; no slip of A; B's export files and test-order
  *     delete carry and touch nothing of A; GET /orders/print and /orders/carrier-csv with A's ids leak nothing
  *   - `actions`: the eleven new actions of src/app/app/[store]/orders/actions.ts
+ * Step 7 (KPIs, aggregates, the board, the pulse, ⌘K, label mapping, the team actions) adds:
+ *   - orderKpis, queueCounts, opsAggregates, the board payload, the ops pulse contributor and the ⌘K provider as B's
+ *     owner count B's rows only and carry no canary of A; mapping in B a label A's orders carry touches no order of A;
+ *     GET /ops/state on B's address carries nothing of A and on A's address is refused
+ *   - `actions`: the team/agents and team/callcenter actions, saveCallingWindowAction and openTestOrderAction
  * Modules are loaded inside the cases (the harness has set the environment by then): this file imports types only.
  */
 import Module from "node:module";
@@ -457,6 +462,79 @@ export const cases: TenancyCase[] = [
       kit.check("ops list: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
     },
   },
+  {
+    name: "ops insights: B's KPIs, tiles, aggregates, board, pulse, search and label mapping never count or touch A",
+    async run(kit) {
+      await seedOnce(kit);
+      const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+      const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+      const { eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+      const PR = load<typeof import("@/lib/orders/profile")>("@/lib/orders/profile");
+      const AG = load<typeof import("@/lib/callcenter/aggregates")>("@/lib/callcenter/aggregates");
+      const BD = load<typeof import("@/lib/callcenter/board.server")>("@/lib/callcenter/board.server");
+      const LB = load<typeof import("@/lib/callcenter/labels")>("@/lib/callcenter/labels");
+      const { contributor } = load<typeof import("@/lib/pulse/contributors/ops")>("@/lib/pulse/contributors/ops");
+      const { provider } = load<typeof import("@/lib/admin-data/search/ops")>("@/lib/admin-data/search/ops");
+      const countOf = async (storeId: string) => (await db.select({ id: S.orders.id }).from(S.orders).where(eq(S.orders.storeId, storeId))).length;
+      const bTotal = await countOf(kit.fx.B.id);
+      // A's main order carries a sheet label nobody mapped: mapping that label in B must never touch it
+      await db.update(S.orders).set({ confirmedByLabel: "Tenancy Label" }).where(eq(S.orders.id, kit.fx.A.order.main));
+      const before = await kit.snapshotA();
+      const reads = await asBOwner(kit, async (c, w) => {
+        PR.forgetOrderInsights(w.scope);
+        const today = new Date().toISOString().slice(0, 10);
+        const from = new Date(Date.now() - 27 * 86_400_000).toISOString().slice(0, 10);
+        return {
+          kpis: await PR.orderKpis(w.scope, "28d"),
+          counts: await PR.queueCounts(w.scope),
+          agg: await AG.opsAggregates(w.scope, { from, to: today, dims: ["city", "page", "source", "agent"] }),
+          board: await BD.boardState(w.scope),
+          pulse: await contributor.contribute(w.scope, { userId: c.user.id, role: "owner" }),
+          search: await provider.search(w.scope, kit.fx.A.customer.phone.slice(-6), { userId: c.user.id, role: "owner" }),
+          searchName: await provider.search(w.scope, kit.fx.A.customer.name.slice(0, 5), { userId: c.user.id, role: "owner" }),
+          map: await LB.mapAgentLabel(w, "Tenancy Label", kit.fx.B.members.agent),
+          fill: await LB.backfillMappedLabel(w, "Tenancy Label", kit.fx.B.members.agent),
+        };
+      });
+      if (kit.ranReal("B's insight reads", reads)) {
+        type R = {
+          kpis: { placed: number };
+          counts: { toCallNow: number; toShip: number; callbacksDue: number };
+          agg: { cells: Record<string, { key: string; placed: number }[]> };
+          board: { agents: { userId: string }[] };
+          pulse: Record<string, number>;
+          search: { id: string }[];
+          searchName: { id: string }[];
+          map: { ok: boolean };
+          fill: { count: number };
+        };
+        const v = reads.ok ? (reads.value as R) : null;
+        const aggPlaced = v ? Object.values(v.agg.cells).map((cells) => cells.reduce((s, c) => s + c.placed, 0)) : [];
+        kit.check("orderKpis / queueCounts of B count B's orders only", !!v && v.kpis.placed <= bTotal && v.counts.toCallNow <= bTotal && v.counts.toShip <= bTotal, v && { kpis: v.kpis.placed, counts: v.counts, bTotal });
+        kit.check("opsAggregates of B never counts A's rows (every dim sums to at most B's orders)", aggPlaced.every((n) => n <= bTotal), { aggPlaced, bTotal });
+        kit.check("opsAggregates of B: no cell keyed by A's page", !!v && !v.agg.cells.page!.some((c) => c.key === kit.fx.A.page.live), v?.agg.cells.page);
+        kit.check("the board of B lists none of A's members", !!v && !v.board.agents.some((a) => Object.values(kit.fx.A.members).includes(a.userId) && !Object.values(kit.fx.B.members).includes(a.userId)), v?.board.agents);
+        kit.check("the ops pulse contributor of B counts B's rows only", !!v && (v.pulse.queueNow ?? 0) <= bTotal && (v.pulse.newOrders ?? 0) <= bTotal, v?.pulse);
+        kit.check("⌘K in B finds none of A's orders by A's phone digits or name", !!v && !v.search.some((h) => h.id === kit.fx.A.order.main || h.id === kit.fx.A.order.failed) && !v.searchName.some((h) => h.id === kit.fx.A.order.main), v && { search: v.search, name: v.searchName });
+        kit.check("mapping a label in B touches no order of A", !!v && v.fill.count === 0, v?.fill);
+        kit.check("B's insight reads: no canary of A", kit.leaks(answer(reads)).length === 0, kit.leaks(answer(reads)));
+      }
+      const [a] = await db.select({ by: S.orders.confirmedBy }).from(S.orders).where(eq(S.orders.id, kit.fx.A.order.main)).limit(1);
+      kit.check("A's order keeps confirmed_by NULL after B mapped the same label", a?.by === null, a);
+      // GET /ops/state on B's address: B's board only; on A's address: the guard's refusal
+      const route = { file: "src/app/api/app/[store]/ops/state/route.ts", template: "/api/app/[store]/ops/state", methods: ["GET"] };
+      const onB = await kit.callRoute({ userId: kit.fx.B.members.owner }, route, "GET", { store: kit.fx.B.handle }, { query: { view: "board" } }, {});
+      const onA = await kit.callRoute({ userId: kit.fx.B.members.owner }, route, "GET", { store: kit.fx.A.handle }, { query: { view: "board" } }, {});
+      const queue = await kit.callRoute({ userId: kit.fx.B.members.agent }, route, "GET", { store: kit.fx.B.handle }, { query: { view: "queue" } }, {});
+      if (kit.ranReal("GET /ops/state", onB, onA, queue)) {
+        kit.check("GET /ops/state?view=board on B: no canary of A", kit.leaks(answer(onB)).length === 0, kit.leaks(answer(onB)));
+        kit.check("GET /ops/state on A's address by B's owner: refused", onA.ok && (onA.value as { status: number }).status >= 400, answer(onA));
+        kit.check("GET /ops/state?view=queue by B's agent: no canary of A", kit.leaks(answer(queue)).length === 0, kit.leaks(answer(queue)));
+      }
+      kit.check("ops insights: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
+      await db.update(S.orders).set({ confirmedByLabel: null }).where(eq(S.orders.id, kit.fx.A.order.main));
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -466,6 +544,22 @@ export const cases: TenancyCase[] = [
 const QUEUE = "src/app/app/[store]/queue/actions.ts";
 const ORDERS = "src/app/app/[store]/orders/actions.ts";
 const CUSTOMERS = "src/app/app/[store]/customers/actions.ts";
+const AGENTS = "src/app/app/[store]/team/agents/actions.ts";
+const CALLCENTER = "src/app/app/[store]/team/callcenter/actions.ts";
+const WINDOW = "src/lib/callcenter/window-actions.ts";
+/** a calling week in the ISO shape (OD57) */
+const WEEK = { 1: [{ from: "09:00", to: "19:00" }], 2: [{ from: "09:00", to: "19:00" }], 3: [{ from: "09:00", to: "19:00" }], 4: [{ from: "09:00", to: "19:00" }], 5: [{ from: "09:00", to: "12:00" }], 6: [{ from: "10:00", to: "16:00" }], 7: [] };
+const SCRIPT = { v: 1, steps: [{ id: "hello", title: "Bonjour", say: "Bonjour {customer_first_name}" }] };
+
+/** A fresh AI draft script of `storeId` (an approve flips it, so every call gets its own). */
+async function draftOf(storeId: string): Promise<string> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const id = newId();
+  await db.insert(S.messageTemplates).values({ id, storeId, channel: "call_script", kind: "script", locale: "fr", pageId: null, name: "AI draft", body: JSON.stringify(SCRIPT), status: "draft", source: "ai" });
+  return id;
+}
 /** an Idempotency-Key the cache refuses (not a UUID): the real and the ghost call each run, never a replay of the other */
 const NO_CACHE = "tenancy-no-cache";
 
@@ -568,4 +662,16 @@ export const actions: TrackActionCase[] = [
   { file: ORDERS, name: "renameViewAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: async (fx) => [await viewOf(fx.A.id), "pwned"], own: async (fx) => [await viewOf(fx.B.id), "Renamed"] },
   { file: ORDERS, name: "deleteViewAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: async (fx) => [await viewOf(fx.A.id)], own: async (fx) => [await viewOf(fx.B.id, true)] },
   { file: ORDERS, name: "reorderViewsAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: async (fx) => [[await viewOf(fx.A.id)]], own: async (fx) => [[await viewOf(fx.B.id)]] },
+  // P4 step 7: the team screens' settings, label mapping, scripts and the calling window; ⌘K's test order
+  { file: AGENTS, name: "updateAgentProfileAction", area: "team", path: "/team/agents", permission: ["callcenter.configure"], write: true, victim: (fx) => [fx.A.members.agent, { dailyCap: 1, weight: 5 }], own: (fx) => [fx.B.members.agent, { dailyCap: 40, weight: 2 }] },
+  { file: AGENTS, name: "mapAgentLabelAction", area: "team", path: "/team/agents", permission: ["callcenter.configure"], write: true, victim: (fx) => ["Pwned", fx.A.members.agent], own: (fx) => ["Hamid", fx.B.members.agent] },
+  { file: AGENTS, name: "unmapAgentLabelAction", area: "team", path: "/team/agents", permission: ["callcenter.configure"], write: true, victim: () => ["Pwned"], own: () => ["Hamid"] },
+  { file: CALLCENTER, name: "saveOpsSettingsAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: () => [{ busyRetryMinutes: 5 }], own: () => [{ busyRetryMinutes: 20, firstTouchTargetMin: 15 }] },
+  { file: CALLCENTER, name: "openCallsNowAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: () => [], own: () => [] },
+  { file: CALLCENTER, name: "saveWindowOverridesAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: () => [[]], own: () => [[{ label: "Ramadan", from: "2027-02-08", to: "2027-03-09", days: WEEK }]] },
+  { file: CALLCENTER, name: "saveScriptAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: (fx) => [{ pageId: fx.A.page.live, locale: "fr", doc: SCRIPT }], own: (fx) => [{ pageId: fx.B.page.live, locale: "fr", doc: SCRIPT }], mixed: (fx) => [{ pageId: fx.A.page.live, locale: "fr", doc: SCRIPT }] },
+  { file: CALLCENTER, name: "resetScriptAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: (fx) => [{ pageId: fx.A.page.live, locale: "fr" }], own: (fx) => [{ pageId: fx.B.page.live, locale: "fr" }] },
+  { file: CALLCENTER, name: "approveScriptDraftAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: async (fx) => [await draftOf(fx.A.id)], own: async (fx) => [await draftOf(fx.B.id)] },
+  { file: WINDOW, name: "saveCallingWindowAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: () => [{ days: WEEK }], own: () => [{ days: WEEK, closedDates: ["2026-12-25"] }] },
+  { file: ORDERS, name: "openTestOrderAction", area: "pages", path: "/orders", permission: ["pages.publish"], write: true, victim: () => [], own: () => [] },
 ];

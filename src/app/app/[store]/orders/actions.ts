@@ -26,6 +26,8 @@
  *   deleteTestOrdersAction                         settings.write  test orders older than 1 hour (OPE-§26)
  *   listSavedViewsAction (orders.read), saveViewAction, renameViewAction, deleteViewAction, reorderViewsAction
  *                                                  orders.write    personal views; shared ones also orders.assign
+ *   openTestOrderAction                            pages.publish   ⌘K "Open a test order": P3's 2-hour test link of the
+ *                                                                  latest published landing (P4 step 7)
  *   resendToSheetAction, retryFailedSyncAction (orders.write) call P5's sheet functions; the R1.0 status menu and the
  *   blocklist actions stay for today's screen until the drawer redesign (P4 step 10) moves to the ones above.
  */
@@ -57,6 +59,7 @@ import { UnitIn } from "@/lib/orders/contract";
 import { dismissDuplicate } from "@/lib/orders/duplicates";
 import { editOrder, holdInstant, markCarrierNotified, phoneCountryOf, requestRecall, setOrderHold, setOrderTracking, type OrderPatch } from "@/lib/orders/edit";
 import { ConvertLeadSchema, convertLeadToOrder, createManualOrderWith, ManualOrderSchema, quoteManualOrder } from "@/lib/orders/manual";
+import { openTestOrder } from "@/lib/callcenter/commands.server";
 import { assignOrders } from "@/lib/orders/queue";
 import { moveToLegacy } from "@/lib/orders/transition";
 import { syncPendingOrders } from "@/lib/sheets";
@@ -374,4 +377,9 @@ export async function deleteViewAction(id: string) {
 
 export async function reorderViewsAction(ids: string[]) {
   return storeAction("orders.write", (ctx) => reorderViews(ctx, z.array(ViewId).max(60).parse(ids)));
+}
+
+/** pages.publish: ⌘K "Open a test order" (a TEST-chipped order through the real form, core D54). */
+export async function openTestOrderAction() {
+  return storeAction("pages.publish", (ctx) => openTestOrder(ctx));
 }
