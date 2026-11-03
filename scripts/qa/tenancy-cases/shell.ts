@@ -21,10 +21,12 @@
  * actions from the tree and fails on one without a case): B's members on B's path with A's records answer like
  * missing ones, A's path answers like an unknown handle, the role matrix, the impersonation refusal. The arguments
  * leave every store as the rest of the run reads it: the close names no store's handle, the rename the store's own,
- * the 2FA switch is turned off (already off), the notification ids are nobody's. Three writes under a read key are
- * `write: false`: a preview link and the health recompute are what A's viewer (the member of both stores) may do in
- * A, which the harness's "A's viewer: forbidden" step would run for real; their impersonation refusal is proven by
- * the special case below instead. Two special cases cover what the generic suite cannot:
+ * the 2FA switch is turned off (already off), the notification ids are nobody's. Every write under a read key
+ * (`store.read`, `pages.read`) is `write: false`: A's viewer (the member of both stores) holds the key, so the harness's
+ * "A's viewer" step would pass the seam for real (a preview link, the recompute; and the seam's daily
+ * `store_members.last_active_at` touch of that member, which the "A's rows unchanged" fingerprint counts), while it
+ * checks nothing for a key the viewer holds; their impersonation refusal is proven by the special case below instead
+ * (CCR r1-p2-4 §3c). Two special cases cover what the generic suite cannot:
  *   - the user actions of `src/app/app/actions.ts` (no store: the picker hint, the legal re-acceptance) and the
  *     account deletion: another store's id answers like an unknown one, nothing pending is accepted, a store id in
  *     the input is refused, and a staff session viewing A is refused without touching A;
@@ -265,9 +267,9 @@ const DANGER = "src/app/app/[store]/settings/danger/actions.ts";
 
 export const actions: TrackActionCase[] = [
   // the In-review card (store.read + owner): both fixture stores are active, so the body answers review_closed
-  { file: REVIEW, name: "submitForReviewAction", area: "settings", path: "", permission: ["store.read"], write: true, victim: () => [{ sells: "Huile d'argan", link: "instagram.com/atlas", whatsapp: "+212612345678" }], own: () => [{ sells: "Linge de maison", link: null, whatsapp: null }] },
-  { file: REVIEW, name: "answerReviewQuestionAction", area: "settings", path: "", permission: ["store.read"], write: true, victim: () => [{ answer: "Nous vendons de l'huile d'argan." }], own: () => [{ answer: "Du linge de maison." }] },
-  { file: REVIEW, name: "submitAppealAction", area: "settings", path: "", permission: ["store.read"], write: true, victim: () => [{ message: "Merci de revoir la décision." }], own: () => [{ message: "Merci de revoir." }] },
+  { file: REVIEW, name: "submitForReviewAction", area: "settings", path: "", permission: ["store.read"], write: false, victim: () => [{ sells: "Huile d'argan", link: "instagram.com/atlas", whatsapp: "+212612345678" }], own: () => [{ sells: "Linge de maison", link: null, whatsapp: null }] },
+  { file: REVIEW, name: "answerReviewQuestionAction", area: "settings", path: "", permission: ["store.read"], write: false, victim: () => [{ answer: "Nous vendons de l'huile d'argan." }], own: () => [{ answer: "Du linge de maison." }] },
+  { file: REVIEW, name: "submitAppealAction", area: "settings", path: "", permission: ["store.read"], write: false, victim: () => [{ message: "Merci de revoir la décision." }], own: () => [{ message: "Merci de revoir." }] },
   // private preview links (pages.read): A's draft is a missing page in B; A's viewer may mint in A, hence write: false
   { file: REVIEW, name: "mintPreviewLinkAction", area: "pages", path: "/pages", permission: ["pages.read"], write: false, victim: (fx) => [{ pageId: fx.A.page.draft }], own: (fx) => [{ pageId: fx.B.page.draft }] },
   { file: REVIEW, name: "revokePreviewLinkAction", area: "pages", path: "/pages", permission: ["pages.read"], write: false, victim: async (fx) => [{ tokenId: await previewTokenOf(fx, fx.A) }], own: async (fx) => [{ tokenId: await previewTokenOf(fx, fx.B) }] },
@@ -276,13 +278,13 @@ export const actions: TrackActionCase[] = [
   { file: HEALTH, name: "unsnoozeHealthIssueAction", area: "settings", path: "", permission: ["health.snooze"], write: true, victim: () => [{ issueId: "landing:no_live_page" }], own: () => [{ issueId: "shell:setup_whatsapp" }] },
   // a read key that marks the store dirty: A's viewer may recompute A, hence write: false (the special case covers it)
   { file: HEALTH, name: "recomputeHealthAction", area: "settings", path: "", permission: ["store.read"], write: false, victim: () => [], own: () => [] },
-  { file: NOTIFY, name: "markNotificationsReadAction", area: "settings", path: "/notifications", permission: ["store.read"], write: true, victim: () => [NO_NOTIFICATION], own: () => [NO_NOTIFICATION] },
+  { file: NOTIFY, name: "markNotificationsReadAction", area: "settings", path: "/notifications", permission: ["store.read"], write: false, victim: () => [NO_NOTIFICATION], own: () => [NO_NOTIFICATION] },
   // onboarding: A's photo and A's document are missing ones in B
   { file: WELCOME, name: "saveOnboardingDetailsAction", area: "generate", path: "/welcome", permission: ["pages.write"], write: true, victim: (fx) => [details(fx.A)], own: (fx) => [details(fx.B)] },
   { file: WELCOME, name: "useDirectionAction", area: "generate", path: "/welcome", permission: ["pages.write", "ai.use"], write: true, victim: (fx, fresh) => direction(fx.A, fresh), own: (fx, fresh) => direction(fx.B, fresh) },
-  { file: WELCOME, name: "reportRevealAction", area: "generate", path: "/welcome", permission: ["store.read"], write: true, victim: () => [{ paintedAt: new Date().toISOString() }], own: () => [{ paintedAt: new Date().toISOString() }] },
+  { file: WELCOME, name: "reportRevealAction", area: "generate", path: "/welcome", permission: ["store.read"], write: false, victim: () => [{ paintedAt: new Date().toISOString() }], own: () => [{ paintedAt: new Date().toISOString() }] },
   { file: WELCOME, name: "saveOnboardingContactAction", area: "settings", path: "/welcome", permission: ["settings.write"], write: true, victim: () => [{ whatsapp: "+212 6 12 34 56 78" }], own: () => [{ whatsapp: "+212698765432" }] },
-  { file: WELCOME, name: "skipOnboardingAction", area: "generate", path: "/welcome", permission: ["store.read"], write: true, victim: () => [], own: () => [] },
+  { file: WELCOME, name: "skipOnboardingAction", area: "generate", path: "/welcome", permission: ["store.read"], write: false, victim: () => [], own: () => [] },
   // settings: every argument leaves the store as it was (its own locale, mode and handle; 2FA off)
   { file: GENERAL, name: "saveGeneralAction", area: "settings", path: "/settings/general", permission: ["settings.write"], write: true, victim: (fx) => [{ defaultLocale: fx.rows.A.defaultLocale }], own: (fx) => [{ defaultLocale: fx.rows.B.defaultLocale }] },
   { file: GENERAL, name: "modeSwitchPlanAction", area: "settings", path: "/settings/general", permission: ["store.mode"], write: false, victim: () => [], own: () => [] },
@@ -296,7 +298,7 @@ export const actions: TrackActionCase[] = [
   // active store is refused by T1's rule, the leave acts on the caller's own membership
   { file: DANGER, name: "requestStoreExportAction", area: "exports", path: "/settings/danger", permission: ["store.export"], write: true, victim: () => [{ opId: opId() }], own: () => [{ opId: opId() }] },
   { file: DANGER, name: "closeOwnStoreAction", area: "settings", path: "/settings/danger", permission: ["store.close"], write: true, victim: () => [{ confirm: "not-this-store", opId: opId() }], own: () => [{ confirm: "not-this-store", opId: opId() }] },
-  { file: DANGER, name: "reopenOwnStoreAction", area: "settings", path: "/settings/danger", permission: ["store.read", "store.close"], write: true, victim: () => [], own: () => [] },
+  { file: DANGER, name: "reopenOwnStoreAction", area: "settings", path: "/settings/danger", permission: ["store.read", "store.close"], write: false, victim: () => [], own: () => [] },
   { file: DANGER, name: "leaveStoreAction", area: "team", path: "/settings/danger", permission: ["store.read"], write: true, victim: () => [], own: () => [], self: true },
 ];
 
