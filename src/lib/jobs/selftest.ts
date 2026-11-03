@@ -675,6 +675,10 @@ async function main(): Promise<void> {
     scope: (storeId) => SC.systemScope(SC.systemCtx("qa.renders"), storeId),
   });
 
+  /* ---------------------------------------------------------------- */
+  const { storageJobSections } = await import("./selftest-storage");
+  storageJobSections(h, { RU: await import("./storage/rules"), S: await import("./slots"), SC, W, JOBS });
+
   await h.run();
 }
 

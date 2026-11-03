@@ -56,7 +56,7 @@ export interface ForEachStoreOpts {
   job: string;
   states: readonly StoreStatus[];
   budgetMs: number;
-  where?: "pending_sheets" | "pending_outbox" | "pending_renders";
+  where?: "pending_sheets" | "pending_outbox" | "pending_renders" | "pending_media_db";
   /**
    * P8 step 5 (additive): asked before each store; true ends the call there (`done` false, the cursor on the last store
    * served), so a job whose own budget is spent (the renders' CPU cap) visits no further store and writes no row for it
@@ -145,6 +145,7 @@ const WHERE_TABLE: Record<NonNullable<ForEachStoreOpts["where"]>, string> = {
   pending_sheets: "orders",
   pending_outbox: "outbox",
   pending_renders: "render_jobs",
+  pending_media_db: "media_files",
 };
 
 /**
@@ -160,6 +161,8 @@ const WHERE_TABLE: Record<NonNullable<ForEachStoreOpts["where"]>, string> = {
  * - `pending_renders` (§H.3): a job of the store waiting and due (`pending`, `not_before` passed), or claimed by a
  *   render that died (`running` past its lease: the claim takes it over, P8 step 5). A running job with a live lease
  *   is another drain's claim, never a reason to visit.
+ * - `pending_media_db` (§G.3, P8 step 7): a file of the store still kept in the database (`media_files.storage =
+ *   'db'`), for the media.migrate job; the store's `mf_store_idx` range, never a scan of the table.
  */
 function wherePredicate(where: NonNullable<ForEachStoreOpts["where"]>): SQL {
   switch (where) {
@@ -173,6 +176,8 @@ function wherePredicate(where: NonNullable<ForEachStoreOpts["where"]>): SQL {
       return sql`EXISTS (SELECT 1 FROM outbox x WHERE x.store_id = ${stores.id} AND ((x.state = 'pending' AND x.next_at <= UTC_TIMESTAMP(3)) OR (x.state = 'running' AND x.lease_until < UTC_TIMESTAMP(3))))`;
     case "pending_renders":
       return sql`EXISTS (SELECT 1 FROM render_jobs r WHERE r.store_id = ${stores.id} AND ((r.state = 'pending' AND r.not_before <= UTC_TIMESTAMP(3)) OR (r.state = 'running' AND r.lease_until < UTC_TIMESTAMP(3))))`;
+    case "pending_media_db":
+      return sql`EXISTS (SELECT 1 FROM media_files mf WHERE mf.store_id = ${stores.id} AND mf.storage = 'db')`;
   }
 }
 

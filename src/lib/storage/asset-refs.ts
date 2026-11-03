@@ -21,9 +21,12 @@ import "server-only";
  *   `livePagesUsing` also read the documents themselves: an exact scan of the store's non-archived landing drafts,
  *   its live versions and its brand logo (`collectAssetIds` over the parsed JSON, at most `pages_max` documents of
  *   each, never a LIKE). P8 step 12 removes the scan once the CCR has landed.
+ * - `reconcileStoreRefs` (the nightly refs.reconcile job, P8 step 7) heals the index of one store: owners whose rows
+ *   are missing or older than their source are rebuilt, rows of owners that no longer exist (or stopped being live)
+ *   are removed, so the index is right even before CCR r1-p8-7's call sites land.
  * - Every statement binds the store from the scope. Another store's asset id answers `[]`, like a missing one.
  */
-import { and, asc, eq, gt, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { assetRefs, assets, pages, pageVersions } from "@/lib/db/schema";
 import { collectAssetIds } from "@/landing/context";
@@ -359,4 +362,130 @@ export async function livePagesUsing(scope: StoreScope, assetId: string): Promis
   const ids = new Set(scanned.map((p) => p.id));
   for (const u of indexed) if (u.ownerKind === "page_version" && u.live && u.pageId) ids.add(u.pageId);
   return [...ids];
+}
+
+/* ------------------------------------------------------------------ */
+/* The nightly reconcile                                               */
+/* ------------------------------------------------------------------ */
+
+/** pages read per statement by the reconcile */
+const RECONCILE_PAGE = 200;
+
+export interface RefsReconcileResult {
+  /** pages looked at */
+  pages: number;
+  /** owners whose rows were rebuilt from their source (an owner with no asset of the store, and no rows, is not counted) */
+  rebuilt: number;
+  /** owners whose rows were removed (gone, archived, no longer live) */
+  removed: number;
+}
+
+/**
+ * Heals the scope's store's index (the refs.reconcile job, §G.5): for every page, its draft (`page`, not live) and its
+ * live version (`page_version`, live), and for the brand setting (`brand`, live):
+ * - a draft is rebuilt when it has no rows or its page changed after them (`pages.updated_at` > the rows' newest
+ *   `updated_at`); a live version (an immutable document) when it has no rows or a row not marked live; the brand when
+ *   its rows are not exactly the setting's own logo assets;
+ * - the rows of a page that no longer exists or is archived, and of a version that is no longer its page's live one,
+ *   are removed.
+ * Other owner kinds (products, themes, R2) are left to their own call sites. `yieldFn` runs between batches.
+ */
+export async function reconcileStoreRefs(scope: WriteScope, opts: { yieldFn?: () => Promise<void> } = {}): Promise<RefsReconcileResult> {
+  const pause = opts.yieldFn ?? (() => Promise.resolve());
+  const groups = new Map<string, { at: Date | null; minLive: number }>();
+  const groupRows = await db
+    .select({
+      ownerKind: assetRefs.ownerKind,
+      ownerId: assetRefs.ownerId,
+      at: sql<Date | null>`MAX(${assetRefs.updatedAt})`.mapWith(assetRefs.updatedAt),
+      minLive: sql<number>`MIN(${assetRefs.live})`.mapWith(Number),
+    })
+    .from(assetRefs)
+    .where(whereStore(assetRefs, scope, inArray(assetRefs.ownerKind, ["page", "page_version", "brand"])))
+    .groupBy(assetRefs.ownerKind, assetRefs.ownerId);
+  for (const g of groupRows) groups.set(`${g.ownerKind}:${g.ownerId}`, { at: g.at, minLive: g.minLive });
+
+  const drafts: string[] = [];
+  const versions: string[] = [];
+  const keep = new Set<string>();
+  let pageCount = 0;
+  let after = "";
+  for (;;) {
+    const batch = await db
+      .select({ id: pages.id, status: pages.status, updatedAt: pages.updatedAt, versionId: pages.publishedVersionId })
+      .from(pages)
+      .where(whereStore(pages, scope, after ? gt(pages.id, after) : undefined))
+      .orderBy(asc(pages.id))
+      .limit(RECONCILE_PAGE);
+    for (const p of batch) {
+      pageCount++;
+      if (p.status !== "archived") {
+        const key = `page:${p.id}`;
+        keep.add(key);
+        const g = groups.get(key);
+        if (!g || !g.at || p.updatedAt.getTime() > g.at.getTime()) drafts.push(p.id);
+      }
+      if (p.status === "published" && p.versionId) {
+        const key = `page_version:${p.versionId}`;
+        keep.add(key);
+        const g = groups.get(key);
+        if (!g || g.minLive === 0) versions.push(p.versionId);
+      }
+    }
+    if (batch.length < RECONCILE_PAGE) break;
+    after = batch[batch.length - 1]!.id;
+    await pause();
+  }
+
+  let rebuilt = 0;
+  for (let i = 0; i < drafts.length; i += SCAN_BATCH) {
+    const rows = await db
+      .select({ id: pages.id, doc: pages.draft })
+      .from(pages)
+      .where(whereStore(pages, scope, inArray(pages.id, drafts.slice(i, i + SCAN_BATCH))));
+    for (const r of rows) {
+      const { refs } = await syncAssetRefs(scope, "page", r.id, docAssetIds(r.doc).slice(0, MAX_IDS), { live: false });
+      if (refs > 0 || groups.has(`page:${r.id}`)) rebuilt++; // a draft with no asset of the store has no rows to heal
+    }
+    await pause();
+  }
+  for (let i = 0; i < versions.length; i += SCAN_BATCH) {
+    const rows = await db
+      .select({ id: pageVersions.id, doc: pageVersions.doc })
+      .from(pageVersions)
+      .where(whereStore(pageVersions, scope, inArray(pageVersions.id, versions.slice(i, i + SCAN_BATCH))));
+    for (const r of rows) {
+      const { refs } = await syncAssetRefs(scope, "page_version", r.id, docAssetIds(r.doc).slice(0, MAX_IDS), { live: true });
+      if (refs > 0 || groups.has(`page_version:${r.id}`)) rebuilt++;
+    }
+    await pause();
+  }
+
+  // the brand logo: its rows must be exactly the setting's own assets, all live
+  const { getStoreSetting } = await import("@/lib/settings");
+  const logo = await ownAssetIds(scope, brandAssetIds(await getStoreSetting(scope, "brand", { fresh: true })));
+  const brandRows = await db
+    .select({ assetId: assetRefs.assetId, live: assetRefs.live })
+    .from(assetRefs)
+    .where(whereStore(assetRefs, scope, eq(assetRefs.ownerKind, "brand"), eq(assetRefs.ownerId, "brand")));
+  const sameLogo = brandRows.length === logo.length && brandRows.every((r) => r.live && logo.includes(r.assetId));
+  if (!sameLogo) {
+    await syncAssetRefs(scope, "brand", "brand", logo, { live: true });
+    if (logo.length) rebuilt++;
+  }
+
+  // rows of owners that are gone, archived or no longer live
+  const stale: Record<"page" | "page_version", string[]> = { page: [], page_version: [] };
+  for (const g of groupRows) {
+    if ((g.ownerKind === "page" || g.ownerKind === "page_version") && !keep.has(`${g.ownerKind}:${g.ownerId}`)) stale[g.ownerKind].push(g.ownerId);
+  }
+  let removed = !sameLogo && !logo.length && brandRows.length ? 1 : 0;
+  for (const kind of ["page", "page_version"] as const) {
+    for (let i = 0; i < stale[kind].length; i += CHUNK) {
+      const ids = stale[kind].slice(i, i + CHUNK);
+      await db.delete(assetRefs).where(whereStore(assetRefs, scope, eq(assetRefs.ownerKind, kind), inArray(assetRefs.ownerId, ids)));
+      removed += ids.length;
+    }
+  }
+  return { pages: pageCount, rebuilt, removed };
 }

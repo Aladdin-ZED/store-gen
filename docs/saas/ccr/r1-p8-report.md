@@ -236,3 +236,57 @@ CCR list). Until then this file records the decisions the steps took, so none is
 12. **Tenancy.** No new lint finding: `asset-refs.ts` binds the store with `whereStore` / `inStore` / `storeValues`;
     the raw statements in `assets.ts` and `store.ts` carry `store_id = ?`. The media routes were already in the derived
     route list of `test:tenancy`.
+
+### Step 7: the storage jobs (`src/lib/jobs/storage/*.ts`, `src/lib/storage/asset-refs.ts`, `tracks/core.ts`)
+
+1. **Five jobs in slot 6, one per window.** `media.migrate` every tick (3 s); `usage.reconcile` 02:05, `media.sweep`
+   02:10, `storage.walk` 02:15 and `refs.reconcile` 02:25 (3 / 3 / 2 / 3 s). §H.2 and OPE-§J name 02:20, 02:30, 02:40
+   (two jobs), 02:55 and later times, so each storage job is alone in its 5-minute window; `test:jobs` checks the
+   registry and the union with every time the spec names. The times and budgets live in
+   `src/lib/jobs/storage/rules.ts` (`STORAGE_JOB_TIMES`, `STORAGE_JOB_BUDGETS`), which `tracks/core.ts` imports (pure:
+   importing the registry still loads no database code).
+2. **A daily pass through forEachStore.** `usage.reconcile` and `refs.reconcile` visit every store once a day from the
+   job's round-robin cursor, across as many ticks as they need (a daily job stays due while it answers `done: false`).
+   `passVisitor` keeps the pass in `cron_cursors.state.pass` (`{ start, wrapped }`): the pass ends at the first store
+   after its start once the iterator has wrapped, or on a second wrap (it started on the last store, or that store is
+   gone). That store is not worked; the next pass starts after it and works it last. `test:jobs` drives it over the
+   real `roundRobin` with 1, 2 and 10 stores a tick, a store added and one deleted mid-pass, one store and none.
+3. **media.migrate flips and deletes in one transaction.** §G.3 lists the UPDATE and the chunk DELETE as two steps; they
+   commit together here, so a slice interrupted between them cannot leave chunks behind a flipped row. Before the flip
+   the row still says db and the next tick redoes the read and the idempotent `put`. A row deleted meanwhile flips
+   nothing and its new file is removed at once. Chunks that do not make their row's file (count, length, sha256) are
+   never moved: they are reported (`media` / `file_mismatch` or `missing_file`) and kept in `state.bad` (≤ 200 keys)
+   so they never take a tick's budget again. "Returns at once": on the db backend, and for an hour after a probe found
+   no db row (a module-level number; rows only appear while a process runs on the fallback). The stores with db rows
+   are found by a new forEachStore predicate `pending_media_db` (`src/lib/jobs/scope.ts`, P8's), on `mf_store_idx`.
+4. **media.sweep is driven by the disk, not by forEachStore** (a deviation from the brief's "every job works through
+   forEachStore"). A purged store has no store row, so forEachStore never visits it, yet its leftover files are exactly
+   what the sweeper is for. The sweep walks the store folders under `<media root>/v1` in id order (resumable in
+   `state.sweep`: `tmp` → `disk` → `rows`), compares each folder with that store's rows through `systemScope`, then
+   lists the stores whose fs rows have no folder at all. A file is deleted only with no row of its store and older than
+   one hour; the keys about to go are read again just before the unlink. A folder name that is no store id is never
+   touched. It runs only while the DATA_DIR boot check passes, so a refused directory (another app's marker) is never
+   swept. Missing files count one `missing_file` each (≤ 500 per store and run); rows are never deleted.
+5. **An idempotent `put` refreshes the file's time** (`src/lib/media/storage/fs.ts`). ENGC-20's short-circuit (the
+   same bytes already on disk) used to leave the old mtime, so a retry an hour after a crash could have its file swept
+   between the put and its row. `utimes` makes the sweeper's hour start again.
+6. **storage.walk** sums DATA_DIR and the media root when MEDIA_DIR lies outside DATA_DIR (case-insensitive on
+   win32). The walk in progress (`state.walk`: roots, index, cursor, finished roots' totals) carries over; a change of
+   roots starts over. The snapshot `{ bytes, files, dirs, budgetBytes, complete, at }` replaces the old one only when
+   every root is counted, so the health tile never shows a partial walk.
+7. **refs.reconcile heals by timestamps, not by re-reading every document.** A draft is rebuilt when it has no rows or
+   `pages.updated_at` is newer than its rows; a live version (immutable) when it has no rows or a row not marked live;
+   the brand when its rows are not exactly the setting's own logo assets. Rows of pages that are gone or archived, and
+   of versions that are no longer live, are removed. A draft with no asset of the store has no rows, so it is re-read
+   each night (cheap, bounded by `pages_max`); it is not counted as rebuilt. All page kinds are indexed (the scan of
+   step 6 reads landing pages only; the index is the safer superset for the delete 409).
+8. **usage.reconcile** recomputes every gauge through `recomputeStoreGauges` and, once the pass completes, sets
+   `pending_media_bytes` / `total` to the sum of the pending stores' `media_bytes` gauges in one `INSERT … SELECT … ON
+   DUPLICATE KEY UPDATE`. The summary carries `<gauge>_delta`, `<gauge>_stores`, `driftStores`, `stores` and the pending
+   budget before / after; a store whose gauges moved gets its own job_runs row.
+9. **No chunk sweep.** `media_chunks` rows are written and deleted in the same transaction as their `media_files` row
+   (the db upload, the delete of step 6, the migrator's flip), so no orphan chunk can arise and the sweeper reads only
+   the disk.
+10. **Tenancy.** Three new cross-store statements on store data (the migrator's probe, the sweeper's store list, the
+    pending media budget), each annotated and listed in CCR r1-p8-4's step 7 addendum (pin 16 → 19). `isInside` takes
+    the platform's own `path` flavour (`win32` or `posix`), so its rules hold on any host.

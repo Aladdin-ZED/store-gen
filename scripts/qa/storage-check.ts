@@ -65,10 +65,21 @@
  *                              force; one cutout render per live page that shows the source; the quota race (20
  *                              parallel storage halves at the limit, no orphan file, the 413 body); D69 (the shared
  *                              pending budget charged first, given back by the store's own cap and on pending → active)
+ *  - storage-jobs (P8 step 7)  §G.3, §G.2, §G.5, §D.7 against the real tables and DATA_DIR: media.migrate (rows flip,
+ *                              chunks deleted, identical bytes, an interrupted slice and a second run are no-ops, bad
+ *                              chunks left and reported, ≤ 50 a tick, the idle hour, nothing on the db backend);
+ *                              an idempotent re-put refreshes the file's time; media.sweep (orphans > 1 h deleted, fresh
+ *                              ones and temp files kept, a purged store's folder swept and pruned, a foreign folder
+ *                              untouched, missing files reported and never deleted, rows without a folder); storage.walk
+ *                              (the snapshot equals the real totals, resumed one folder a tick, MEDIA_DIR outside /
+ *                              inside, the runner's due keys kept); refs.reconcile (built, deleted refs restored, a later
+ *                              save rebuilt, live flags, archived pages dropped, the brand logo, never another store's
+ *                              asset, a healed index untouched); usage.reconcile (a drifted gauge and the D69 pending
+ *                              budget corrected, the drift in the summary, a second run finds none)
  */
 import Module from "node:module";
 import { randomBytes, createHash } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -403,7 +414,7 @@ async function main(): Promise<number> {
     await new Promise((r) => setTimeout(r, 20));
     await fsStorage.put(f, data);
     const st2 = statSync(path);
-    t.check("the same sha256 resolves at once: the file is not rewritten", st2.ino === st.ino && st2.mtimeMs === st.mtimeMs);
+    t.check("the same sha256 resolves at once: the file is not rewritten, only its time refreshed (the sweeper's hour)", st2.ino === st.ino && st2.size === st.size && st2.mtimeMs >= st.mtimeMs);
     t.eq("…and no temp file was left", tmpEntries(), []);
     const next = randomBytes(64 * 1024);
     await fsStorage.put({ ...f, sha256: sha(next) }, next);
@@ -430,7 +441,7 @@ async function main(): Promise<number> {
     await fsStorage.put(f, data).catch(() => (retried = false));
     const ms = performance.now() - t0;
     t.check("crash between files and DB row → an immediate retry succeeds (ENGC-20)", retried, `${ms.toFixed(1)} ms`);
-    t.check("…without rewriting the file", statSync(P.mediaFilePath(STORE_A, f.key)).mtimeMs === st.mtimeMs);
+    t.check("…without rewriting the file", statSync(P.mediaFilePath(STORE_A, f.key)).ino === st.ino);
     await insertRow(f, "fs");
     t.check("…and the retried upload's row serves the bytes", (await store.getMediaFile(f.key))?.data.equals(data) === true);
     for (const name of tmpEntries()) rmSync(join(P.mediaTmpDir()!, name));
@@ -1620,6 +1631,317 @@ async function main(): Promise<number> {
     t.eq("an upload in budget: both counters charged with stored_bytes", [(await pendingBudget()) - shared0, await gauge(STORE_P)], [pBytes, pBytes]);
     await transitionStore(staffCtx(), STORE_P, "active", { reason: "qa_approved" });
     t.eq("pending → active: the shared budget gets the store's bytes back, the store keeps its gauge", [await pendingBudget(), await gauge(STORE_P)], [shared0, pBytes]);
+  });
+
+  /* ================================================================ */
+  h.section("storage-jobs", async (t) => {
+    const sharp = (await import("sharp")).default;
+    const MP = await import("@/lib/media/process");
+    const MIG = await import("@/lib/jobs/storage/migrate");
+    const { mediaSweepJob } = await import("@/lib/jobs/storage/sweep");
+    const { storageWalkJob } = await import("@/lib/jobs/storage/walk");
+    const { usageReconcileJob } = await import("@/lib/jobs/storage/usage");
+    const { refsReconcileJob } = await import("@/lib/jobs/storage/refs");
+    const ST = await import("@/lib/jobs/storage/state");
+    const U = await import("@/lib/tenancy/usage");
+    const W = await import("@/lib/storage/walk");
+    const { newId } = await import("@/lib/db/ids");
+    const { updateStoreSetting } = await import("@/lib/settings");
+    type JobCtx = import("@/lib/jobs/runner").JobCtx;
+    type JobResult = import("@/lib/jobs/runner").JobResult;
+    const env = process.env as Record<string, string | undefined>;
+    const STORE_M = "01JB8ZK3Q4R5S6T7V8W9XYZ0MM"; // the storage jobs' active store
+    const STORE_N = "01JB8ZK3Q4R5S6T7V8W9XYZ0NN"; // a pending store (D69)
+    const STORE_R = "01JB8ZK3Q4R5S6T7V8W9XYZ0RR"; // fs rows, no folder at all
+    const STORE_X = "01JB8ZK3Q4R5S6T7V8W9XYZ0XX"; // a folder on disk, no store row (purged)
+    for (const [id, status] of [
+      [STORE_M, "active"],
+      [STORE_N, "pending"],
+      [STORE_R, "active"],
+    ] as const) {
+      await db.insert(stores).values({ id, handle: `jobs-${id.slice(-2).toLowerCase()}`, name: id.slice(-2), status, brandSeed: "0123456789abcdef" });
+    }
+    const scopeM = systemScope(ctx, STORE_M);
+    const scopeN = systemScope(ctx, STORE_N);
+    const jobCtx = (job: string, budgetMs = 60_000): JobCtx => ({
+      ...systemCtx(job),
+      deadline: Date.now() + budgetMs,
+      tickId: newId(),
+      cursor: "",
+      setCursor: async () => undefined,
+      yield: () => new Promise<void>((r) => setImmediate(r)),
+      lagMs: () => 0,
+    });
+    /** runs a job like the runner would, tick after tick, until it answers done (or `max` ticks) */
+    const untilDone = async (job: string, run: (c: JobCtx) => Promise<JobResult>, budgetMs = 60_000, max = 400) => {
+      const results: JobResult[] = [];
+      for (let i = 0; i < max; i++) {
+        const r = await run(jobCtx(job, budgetMs));
+        results.push(r);
+        if (r.done) break;
+      }
+      return results;
+    };
+    const putDb = async (scope: WriteScope, data: Buffer, key = newKey()) => {
+      const conn = await pool().getConnection();
+      try {
+        await conn.beginTransaction();
+        await files.insertStoreFiles(conn, scope, key.split("-")[0]!, [{ key, mime: "image/webp", data }]);
+        await conn.commit();
+      } finally {
+        conn.release();
+      }
+      files.forgetMisses([key]);
+      return key;
+    };
+    type WriteScope = import("@/lib/tenancy/types").WriteScope;
+    const storageOf = async (key: string) => ((await pool().query("SELECT storage FROM media_files WHERE `key` = ?", [key])) as unknown as [{ storage: string }[]])[0][0]?.storage ?? null;
+    /** the error ring's count for (media, code, store): the buffer plus what a 30 s flush already wrote */
+    const errorsOf = async (code: string, storeId: string) => {
+      const buffered = E.pendingErrors().filter((e) => e.area === "media" && e.code === code && e.storeId === storeId).reduce((n, e) => n + e.count, 0);
+      const [rows] = (await pool().query("SELECT COALESCE(SUM(count), 0) AS n FROM error_events WHERE area = 'media' AND code = ? AND store_id = ?", [code, storeId])) as unknown as [{ n: number }[]];
+      return buffered + Number(rows[0]?.n ?? 0);
+    };
+    const hoursAgo = (path: string, hours: number) => {
+      const at = new Date(Date.now() - hours * 3_600_000);
+      utimesSync(path, at, at);
+    };
+    t.eq("the fs backend is on (DATA_DIR passed its check)", (await S.runMediaStorageCheck({ force: true })).ok, true);
+
+    // ---- media.migrate (§G.3): db → fs, ≤ 50 a tick, idempotent, bad chunks left and reported
+    MIG.resetMigrateIdle();
+    await untilDone("media.migrate", MIG.mediaMigrateJob); // the earlier sections' db rows go first
+    const [left0] = (await pool().query("SELECT COUNT(*) AS n FROM media_files WHERE storage = 'db'")) as unknown as [{ n: number }[]];
+    t.eq("the migrator drains every db row of every store first", Number(left0[0]!.n), 0);
+    t.eq("…then a run finds no work and returns at once (idle for the hour)", (await MIG.mediaMigrateJob(jobCtx("media.migrate"))).summary, { idle: true, bad: 0 });
+    const big = randomBytes(store.CHUNK_SIZE * 2 + 777);
+    const smalls = [randomBytes(1_000), randomBytes(70_000)];
+    const kBig = await putDb(scopeM, big);
+    const kSmall = await Promise.all(smalls.map((d) => putDb(scopeM, d)));
+    t.eq("…a db row written meanwhile waits for the idle hour", (await MIG.mediaMigrateJob(jobCtx("media.migrate"))).summary, { idle: true });
+    // an interrupted slice: its put landed, the tick died before the flip
+    await fsStorage.put({ storeId: STORE_M, key: kBig, assetId: kBig.split("-")[0]!, mime: "image/webp", bytes: big.length, sha256: sha(big) }, big);
+    const kBad = await putDb(scopeM, randomBytes(2_000));
+    await pool().query("UPDATE media_chunks SET data = ? WHERE `key` = ? AND idx = 0", [randomBytes(2_000), kBad]);
+    const kGone = await putDb(scopeM, randomBytes(500));
+    await pool().query("DELETE FROM media_chunks WHERE `key` = ?", [kGone]);
+    const { forEachStore } = await import("@/lib/jobs/scope");
+    const withDb: string[] = [];
+    await forEachStore(ctx, { job: "qa.pending-media", states: ["pending", "active", "restricted", "suspended", "closed"], budgetMs: 10_000, where: "pending_media_db" }, async (_s, st) => void withDb.push(st.id));
+    t.eq("forEachStore pending_media_db: only the store with db rows", withDb, [STORE_M]);
+    MIG.resetMigrateIdle();
+    const errBefore = [await errorsOf("file_mismatch", STORE_M), await errorsOf("missing_file", STORE_M)];
+    const m1 = await MIG.mediaMigrateJob(jobCtx("media.migrate"));
+    t.eq("one run moves the good files", [m1.summary?.moved, m1.processed], [3, 3]);
+    const good = [kBig, ...kSmall];
+    t.eq("…their rows flip to fs", await Promise.all(good.map(storageOf)), ["fs", "fs", "fs"]);
+    t.eq("…their chunks are deleted", await Promise.all(good.map(chunkCount)), [0, 0, 0]);
+    t.check("…the bytes on disk are identical", [big, ...smalls].every((d, i) => readFileSync(P.mediaFilePath(STORE_M, good[i]!)).equals(d)));
+    t.check("…and the chunk store serves them from DATA_DIR", (await store.getMediaFile(kBig))?.data.equals(big) === true);
+    t.eq("a key whose chunks do not make its row stays db with its chunks", [await storageOf(kBad), await chunkCount(kBad)], ["db", 1]);
+    t.eq("…and one with no chunk at all stays db", await storageOf(kGone), "db");
+    t.eq("…both reported in the error ring", [(await errorsOf("file_mismatch", STORE_M)) - errBefore[0]!, (await errorsOf("missing_file", STORE_M)) - errBefore[1]!], [1, 1]);
+    t.eq("…and remembered, so they never take a tick's budget again", [...((await ST.readJobState("media.migrate")).bad as string[])].sort(), [kBad, kGone].sort());
+    MIG.resetMigrateIdle();
+    const m2 = await MIG.mediaMigrateJob(jobCtx("media.migrate"));
+    t.eq("a second run is a no-op (the bad keys aside, nothing is left)", [m2.summary, await Promise.all(good.map(storageOf))], [{ idle: true, bad: 2 }, ["fs", "fs", "fs"]]);
+    const many: string[] = [];
+    for (let i = 0; i < 55; i++) many.push(await putDb(scopeN, randomBytes(64 + i)));
+    MIG.resetMigrateIdle();
+    const c1 = await MIG.mediaMigrateJob(jobCtx("media.migrate"));
+    t.eq("≤ 50 files a tick: 50 moved, work left", [c1.summary?.moved, c1.done], [50, false]);
+    const c2 = await MIG.mediaMigrateJob(jobCtx("media.migrate"));
+    t.eq("…the next tick moves the other 5", [c2.summary?.moved, c2.done], [5, true]);
+    t.check("…every one of them on disk with its row flipped", (await Promise.all(many.map(storageOf))).every((s) => s === "fs") && many.every((k) => existsSync(P.mediaFilePath(STORE_N, k))));
+    delete env.DATA_DIR;
+    await S.runMediaStorageCheck({ force: true });
+    MIG.resetMigrateIdle();
+    t.eq("on the db backend the migrator does nothing", (await MIG.mediaMigrateJob(jobCtx("media.migrate"))).summary, { skipped: "backend_db" });
+    t.eq("…nor does the sweeper", (await mediaSweepJob(jobCtx("media.sweep"))).summary, { skipped: "backend_db" });
+    env.DATA_DIR = DATA;
+    t.eq("…restored: fs again", (await S.runMediaStorageCheck({ force: true })).ok, true);
+    await pool().query("DELETE FROM media_files WHERE `key` IN (?)", [[kBad, kGone]]);
+    await pool().query("DELETE FROM media_chunks WHERE `key` IN (?)", [[kBad, kGone]]);
+    await ST.patchJobState("media.migrate", { bad: null });
+
+    // ---- fs put: an idempotent re-put refreshes the file's time (the sweeper's hour starts again)
+    const rePut = randomBytes(300);
+    const rpFile = fileOf(STORE_M, rePut);
+    await fsStorage.put(rpFile, rePut);
+    hoursAgo(P.mediaFilePath(STORE_M, rpFile.key), 3);
+    await fsStorage.put(rpFile, rePut);
+    t.check("an idempotent put of the same bytes refreshes the file's time", Date.now() - statSync(P.mediaFilePath(STORE_M, rpFile.key)).mtimeMs < 60_000);
+
+    // ---- media.sweep (§G.3): orphans > 1 h deleted, fresh ones and temp files kept, missing files reported
+    const orphanOld = fileOf(STORE_M, randomBytes(400));
+    const orphanFresh = fileOf(STORE_M, randomBytes(401));
+    for (const f of [orphanOld, orphanFresh]) {
+      const p = P.mediaFilePath(STORE_M, f.key);
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, randomBytes(f.bytes));
+    }
+    hoursAgo(P.mediaFilePath(STORE_M, orphanOld.key), 2);
+    hoursAgo(P.mediaFilePath(STORE_M, kSmall[0]!), 5); // an old file WITH its row
+    const junk = join(DATA, "media", "v1", STORE_M.slice(0, 2), STORE_M, "stray.bin");
+    writeFileSync(junk, "x");
+    hoursAgo(junk, 2);
+    const tmpOld = join(P.mediaTmpDir()!, `old-${hex(4)}`);
+    const tmpFresh = join(P.mediaTmpDir()!, `fresh-${hex(4)}`);
+    writeFileSync(tmpOld, "t");
+    writeFileSync(tmpFresh, "t");
+    hoursAgo(tmpOld, 2);
+    const purgedFile = join(DATA, "media", "v1", STORE_X.slice(0, 2), STORE_X, "ab", `ab${hex(15)}-640.webp`);
+    mkdirSync(dirname(purgedFile), { recursive: true });
+    writeFileSync(purgedFile, "p");
+    hoursAgo(purgedFile, 2);
+    const foreignDir = join(DATA, "media", "v1", "zz", "not-a-store");
+    mkdirSync(foreignDir, { recursive: true });
+    writeFileSync(join(foreignDir, "keep.txt"), "f");
+    // a row whose file is missing (M), and a store whose fs rows have no folder at all (R)
+    const missM = fileOf(STORE_M, randomBytes(10));
+    await insertRow(missM, "fs");
+    const missR = [fileOf(STORE_R, randomBytes(11)), fileOf(STORE_R, randomBytes(12))];
+    for (const f of missR) await insertRow(f, "fs");
+    const missBefore = [await errorsOf("missing_file", STORE_M), await errorsOf("missing_file", STORE_R)];
+    const sw = await untilDone("media.sweep", mediaSweepJob);
+    t.check("the sweep completes", sw[sw.length - 1]!.done, JSON.stringify(sw.map((r) => r.summary)));
+    t.check("a file with no row, older than 1 h: deleted", !existsSync(P.mediaFilePath(STORE_M, orphanOld.key)));
+    t.check("a file with no row, fresh (an upload in flight): kept", existsSync(P.mediaFilePath(STORE_M, orphanFresh.key)));
+    t.check("an old file with its row: kept", existsSync(P.mediaFilePath(STORE_M, kSmall[0]!)) && good.every((k) => existsSync(P.mediaFilePath(STORE_M, k))));
+    t.check("a stray file in a store folder, old: deleted", !existsSync(junk));
+    t.eq("temp files: the old one deleted, the fresh one kept", [existsSync(tmpOld), existsSync(tmpFresh)], [false, true]);
+    t.check("a purged store's folder (no store row): its old files deleted and the folder pruned", !existsSync(purgedFile) && !existsSync(join(DATA, "media", "v1", STORE_X.slice(0, 2), STORE_X)));
+    t.check("a folder that is no store id is never touched", existsSync(join(foreignDir, "keep.txt")));
+    t.eq("a row whose file is missing: reported once, never deleted", [(await errorsOf("missing_file", STORE_M)) - missBefore[0]!, await storageOf(missM.key)], [1, "fs"]);
+    t.eq("a store with fs rows and no folder: each file reported, rows kept", [(await errorsOf("missing_file", STORE_R)) - missBefore[1]!, await storageOf(missR[0]!.key), await storageOf(missR[1]!.key)], [2, "fs", "fs"]);
+    const last = sw[sw.length - 1]!.summary!;
+    t.check("the run's summary counts what it did", Number(last.orphans) + sw.slice(0, -1).reduce((n, r) => n + Number(r.summary?.orphans ?? 0), 0) >= 3 && Number(last.tmpDeleted ?? 0) + sw.slice(0, -1).reduce((n, r) => n + Number(r.summary?.tmpDeleted ?? 0), 0) >= 1, JSON.stringify(last));
+    t.eq("…and leaves no sweep state behind", (await ST.readJobState("media.sweep")).sweep, undefined);
+    await pool().query("DELETE FROM media_files WHERE `key` IN (?)", [[missM.key, ...missR.map((f) => f.key)]]);
+    rmSync(join(DATA, "media", "v1", "zz"), { recursive: true, force: true });
+    unlinkSync(P.mediaFilePath(STORE_M, orphanFresh.key));
+
+    // ---- storage.walk (§G.2): the snapshot equals the real totals, resumable, MEDIA_DIR outside counted
+    const realTotals = (root: string) => {
+      const out = { bytes: 0, files: 0, dirs: 0 };
+      const visit = (dir: string) => {
+        out.dirs++;
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const p = join(dir, e.name);
+          if (e.isDirectory()) visit(p);
+          else {
+            out.files++;
+            if (e.isFile()) out.bytes += lstatSync(p).size;
+          }
+        }
+      };
+      visit(root);
+      return out;
+    };
+    await ST.patchJobState("storage.walk", { walk: null, snapshot: null });
+    const w1 = await untilDone("storage.walk", storageWalkJob);
+    const snap1 = W.readWalkSnapshot(await ST.readJobState("storage.walk"));
+    const real1 = realTotals(DATA);
+    t.eq("one walk: the snapshot equals the real totals of DATA_DIR", snap1 && { bytes: snap1.bytes, files: snap1.files, dirs: snap1.dirs }, real1);
+    t.check("…complete, with the budget and its time", !!snap1 && snap1.complete && snap1.budgetBytes === W.budgetBytes() && Date.now() - Date.parse(snap1.at) < 60_000 && w1.length === 1);
+    t.eq("…the fs backend's usage() reads it", await fsStorage.usage(), { bytes: real1.bytes, files: real1.files, freeBytes: W.budgetBytes() - real1.bytes });
+    writeFileSync(join(DATA, "exports", `walk-${hex(3)}.bin`), randomBytes(5_000));
+    const first = await storageWalkJob(jobCtx("storage.walk", 0));
+    const during = await ST.readJobState("storage.walk");
+    t.check("a walk with no time left: one folder, its cursor kept, the last snapshot still served", !first.done && !!during.walk && W.readWalkSnapshot(during)?.at === snap1!.at);
+    const w2 = await untilDone("storage.walk", storageWalkJob, 0, 2_000);
+    const snap2 = W.readWalkSnapshot(await ST.readJobState("storage.walk"));
+    t.check("…resumed tick after tick until done", w2.length > 5 && w2.slice(0, -1).every((r) => !r.done) && w2[w2.length - 1]!.done, `${w2.length} ticks`);
+    t.eq("…the same totals as one walk (the new file counted)", snap2 && { bytes: snap2.bytes, files: snap2.files, dirs: snap2.dirs }, realTotals(DATA));
+    t.check("…then the new snapshot replaced it", snap2 !== null && snap2.at > snap1!.at && !(await ST.readJobState("storage.walk")).walk);
+    const outside = join(ROOT, `media-outside-${hex(3)}`);
+    mkdirSync(join(outside, "v1"), { recursive: true });
+    writeFileSync(join(outside, "v1", "x.bin"), randomBytes(1234));
+    env.MEDIA_DIR = outside;
+    await untilDone("storage.walk", storageWalkJob);
+    const snap3 = W.readWalkSnapshot(await ST.readJobState("storage.walk"));
+    const ro = realTotals(outside);
+    const rd = realTotals(DATA);
+    t.eq("MEDIA_DIR outside DATA_DIR: both counted", snap3 && [snap3.bytes, snap3.files], [rd.bytes + ro.bytes, rd.files + ro.files]);
+    env.MEDIA_DIR = join(DATA, "media");
+    await untilDone("storage.walk", storageWalkJob);
+    t.eq("MEDIA_DIR inside DATA_DIR: counted once", W.readWalkSnapshot(await ST.readJobState("storage.walk"))?.bytes, realTotals(DATA).bytes);
+    delete env.MEDIA_DIR;
+    rmSync(outside, { recursive: true, force: true });
+    // no null values: JSON_MERGE_PATCH removes a key whose patch is null
+    const keepDue = { due: { lastHour: "2026-10-31T01", lastDay: "2026-10-31", fails: 1, failKey: "2026-10-31" } };
+    await pool().query("UPDATE cron_cursors SET state = JSON_MERGE_PATCH(state, ?) WHERE job = 'storage.walk'", [JSON.stringify(keepDue)]);
+    await untilDone("storage.walk", storageWalkJob);
+    const dueAfter = ((await ST.readJobState("storage.walk")).due ?? {}) as Record<string, unknown>;
+    t.check("the runner's due keys survive the walk's writes", Object.entries(keepDue.due).every(([k, v]) => dueAfter[k] === v), JSON.stringify(dueAfter));
+
+    // ---- refs.reconcile (§G.5): the index heals from the documents
+    const png = (w: number, hgt: number) => sharp(randomBytes(w * hgt * 3), { raw: { width: w, height: hgt, channels: 3 } }).png().toBuffer();
+    const activeM: import("@/lib/media/quota").MediaStore = { status: "active", timezone: "Africa/Casablanca" };
+    const x1 = (await MP.processUpload(scopeM, activeM, await png(40, 36), "a.png", {})).asset.id;
+    const x2 = (await MP.processUpload(scopeM, activeM, await png(41, 37), "b.png", {})).asset.id;
+    const aAsset = (await MP.processUpload(scopeA, activeM, await png(42, 38), "c.png", {})).asset.id;
+    const docWith = (ids: readonly string[]) => JSON.stringify({ v: 2, locale: "fr", product: { images: ids.map((id) => ({ id, alt: "" })) }, items: [], offers: [], seo: {}, sections: [] });
+    const seed = async (ids: readonly string[], live: boolean) => {
+      const id = newId();
+      await pool().query("INSERT INTO pages (id, store_id, slug, name, status, locale, public_key, draft) VALUES (?, ?, ?, ?, ?, 'fr', ?, ?)", [id, STORE_M, `r-${hex(3)}`, "refs", live ? "published" : "draft", `pk_${hex(12)}`, docWith(ids)]);
+      if (!live) return { id, versionId: null as string | null };
+      const versionId = newId();
+      await pool().query(
+        "INSERT INTO page_versions (id, store_id, page_id, kind, doc, html, thank_you_html, csp, thank_you_csp, etag, checksum, runtime_v) VALUES (?, ?, ?, 'publish', ?, 'h', 'h', 'c', 'c', 'e', ?, 2)",
+        [versionId, STORE_M, id, docWith(ids), sha(Buffer.from(docWith(ids)))],
+      );
+      await pool().query("UPDATE pages SET published_version_id = ? WHERE id = ?", [versionId, id]);
+      return { id, versionId };
+    };
+    type RefRow = { asset_id: string; owner_kind: string; owner_id: string; live: number };
+    const refsOf = async (ownerId: string) => ((await pool().query("SELECT asset_id, owner_kind, owner_id, live FROM asset_refs WHERE store_id = ? AND owner_id = ? ORDER BY owner_kind, asset_id", [STORE_M, ownerId])) as unknown as [RefRow[]])[0].map((r) => [r.owner_kind, r.asset_id, Number(r.live)]);
+    const liveP = await seed([x1, aAsset], true);
+    const draftP = await seed([x2], false);
+    const r1 = await untilDone("refs.reconcile", refsReconcileJob);
+    t.check("the pass completes", r1[r1.length - 1]!.done);
+    t.eq("a live page: its draft (not live) and its live version (live), own assets only", [await refsOf(liveP.id), await refsOf(liveP.versionId!)], [[["page", x1, 0]], [["page_version", x1, 1]]]);
+    t.eq("a draft page: its draft", await refsOf(draftP.id), [["page", x2, 0]]);
+    await pool().query("DELETE FROM asset_refs WHERE store_id = ? AND owner_id IN (?)", [STORE_M, [liveP.versionId, draftP.id]]);
+    await untilDone("refs.reconcile", refsReconcileJob);
+    t.eq("deleted refs are restored", [await refsOf(liveP.versionId!), await refsOf(draftP.id)], [[["page_version", x1, 1]], [["page", x2, 0]]]);
+    await new Promise((r) => setTimeout(r, 20)); // a save after the refs were written (DATETIME(3))
+    await pool().query("UPDATE pages SET draft = ?, updated_at = UTC_TIMESTAMP(3) WHERE id = ?", [docWith([x1, x2]), draftP.id]);
+    await pool().query("UPDATE asset_refs SET live = 0 WHERE store_id = ? AND owner_id = ?", [STORE_M, liveP.versionId]);
+    await untilDone("refs.reconcile", refsReconcileJob);
+    t.eq("a draft saved after its refs: rebuilt from the new document", await refsOf(draftP.id), [x1, x2].sort().map((id) => ["page", id, 0]));
+    t.eq("a live version's row not marked live: rebuilt live", await refsOf(liveP.versionId!), [["page_version", x1, 1]]);
+    await pool().query("UPDATE pages SET status = 'archived', published_version_id = NULL WHERE id = ?", [liveP.id]);
+    await updateStoreSetting(scopeM, "brand", (cur) => ({ logo: { ...cur.logo, primary: x2 } }), { id: "system", kind: "system" });
+    await untilDone("refs.reconcile", refsReconcileJob);
+    t.eq("an archived page: its draft and old version rows are removed", [await refsOf(liveP.id), await refsOf(liveP.versionId!)], [[], []]);
+    t.eq("the brand logo: indexed, live", await refsOf("brand"), [["brand", x2, 1]]);
+    const [[foreignRefs]] = (await pool().query("SELECT COUNT(*) AS n FROM asset_refs WHERE asset_id = ?", [aAsset])) as unknown as [{ n: number }[]];
+    t.eq("another store's asset named in M's document is never indexed", Number(foreignRefs!.n), 0);
+    const r4 = await refsReconcileJob(jobCtx("refs.reconcile"));
+    t.eq("a pass over a healed index changes nothing", [r4.summary?.rebuilt, r4.summary?.removed], [0, 0]);
+
+    // ---- usage.reconcile (§D.7, D69): a drifted gauge corrected, the pending budget recomputed
+    const source = async (storeId: string) => Number(((await pool().query("SELECT COALESCE(SUM(bytes), 0) AS n FROM media_files WHERE store_id = ?", [storeId])) as unknown as [{ n: number }[]])[0][0]!.n);
+    const gaugeOf = async (storeId: string) => Number(((await pool().query("SELECT value FROM store_usage WHERE store_id = ? AND metric = 'media_bytes' AND period = 'total'", [storeId])) as unknown as [{ value: number }[]])[0][0]?.value ?? -1);
+    await untilDone("usage.reconcile", usageReconcileJob); // the earlier sections' drift first
+    await pool().query(
+      "INSERT INTO store_usage (store_id, metric, period, value, updated_at) VALUES (?, 'media_bytes', 'total', 12345, UTC_TIMESTAMP(3)) ON DUPLICATE KEY UPDATE value = value + 12345",
+      [STORE_M],
+    );
+    await pool().query("UPDATE store_usage SET value = 1 WHERE store_id = ? AND metric = 'media_bytes' AND period = 'total'", [STORE_N]);
+    await U.chargePlatformUsage("pending_media_bytes", "total", 777_777, { allowOver: true });
+    const nBytes = await source(STORE_N);
+    const u1 = await untilDone("usage.reconcile", usageReconcileJob);
+    const s1 = u1[u1.length - 1]!.summary!;
+    t.eq("a drifted media gauge is set back to Σ media_files.bytes", [await gaugeOf(STORE_M), await gaugeOf(STORE_N)], [await source(STORE_M), nBytes]);
+    t.eq("…the drift is in job_runs.summary (net delta, stores)", [s1.media_bytes_delta, s1.media_bytes_stores, s1.driftStores], [-12345 + (nBytes - 1), 2, 2]);
+    const [[pend]] = (await pool().query("SELECT COALESCE(SUM(u.value), 0) AS n FROM store_usage u JOIN stores s ON s.id = u.store_id WHERE s.status = 'pending' AND u.metric = 'media_bytes' AND u.period = 'total'")) as unknown as [{ n: number }[]];
+    t.eq("pending_media_bytes = Σ the pending stores' media gauges (the drift of 777,777 gone)", await U.platformUsageValue("pending_media_bytes", "total"), Number(pend!.n));
+    t.eq("…before / after in the summary", Number(s1.pendingMediaBefore) - Number(s1.pendingMediaAfter), 777_777);
+    const u2 = await untilDone("usage.reconcile", usageReconcileJob);
+    t.eq("a second run finds no drift", [u2[u2.length - 1]!.summary?.driftStores, u2[u2.length - 1]!.processed], [0, 0]);
+    t.eq("…and the pass leaves no state behind", (await ST.readJobState("usage.reconcile")).pass, undefined);
   });
 
   await h.run();

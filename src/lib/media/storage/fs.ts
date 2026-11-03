@@ -6,7 +6,8 @@ import "server-only";
  *   DATA_DIR/media/tmp/<random>                                        temp files, same file system, so the rename is atomic
  *
  * - `put` is durable and idempotent: the bytes must be the row's (length, sha256); when the target already holds the
- *   same sha256 it resolves at once (a crash between the file and the DB row never blocks the retry); otherwise it
+ *   same sha256 it refreshes the file's time and resolves (a crash between the file and the DB row never blocks the
+ *   retry, and the sweeper's one-hour guard covers the row that follows); otherwise it
  *   writes a temp file (0600) and fsyncs it, creates the shard folders (0700), renames over the target and fsyncs the
  *   folders it changed. Windows cannot fsync a folder (./io.ts).
  * - `readAll` (≤ 8 MB) and `readFsFile` check the length and the sha256 against the row; `readRange` checks the
@@ -21,7 +22,7 @@ import "server-only";
  * file call.
  */
 import { randomBytes } from "node:crypto";
-import { mkdir, open, readFile, rename, rmdir, stat, unlink, type FileHandle } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rmdir, stat, unlink, utimes, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { budgetBytes, readWalkSnapshot, WALK_JOB } from "@/lib/storage/walk";
 import { mediaFilePath, mediaTmpDir } from "@/lib/storage/paths";
@@ -67,7 +68,13 @@ async function fsyncChain(dir: string, firstCreated: string | undefined): Promis
 async function put(file: Omit<StoredFile, "storage">, data: Buffer): Promise<void> {
   assertBytesMatch(file, data);
   const target = mediaFilePath(file.storeId, file.key);
-  if (await holds(target, file)) return; // ENGC-20: the same bytes are already there
+  if (await holds(target, file)) {
+    // ENGC-20: the same bytes are already there. Their time is refreshed: the row that claims them follows now, and the
+    // sweeper (§G.3) only deletes a file with no row once it is an hour old (best effort: a failure keeps the old time)
+    const now = new Date();
+    await utimes(/* turbopackIgnore: true */ target, now, now).catch(() => undefined);
+    return;
+  }
   const tmpDir = mediaTmpDir();
   if (!tmpDir) throw new Error("storage: no media root (DATA_DIR / MEDIA_DIR)");
   await mkdir(/* turbopackIgnore: true */ tmpDir, { recursive: true, mode: 0o700 });
