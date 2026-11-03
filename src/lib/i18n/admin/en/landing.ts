@@ -12,6 +12,19 @@ export const messages = {
   "notify.delivery.holidays_review.title": "Check your holidays for {year}",
   "notify.delivery.holidays_review.body": "Delivery dates skip the holidays in your calendar. Add this year's dates, then mark them reviewed.",
 
+  "notify.lead.recovered.title": "A lead you contacted just ordered",
+  "notify.lead.recovered.body": "Order {orderId} came from a lead you followed up. It counts as recovered.",
+  "notify.leads.followups_due.title": "{count, plural, one {# lead to follow up} other {# leads to follow up}}",
+  "notify.leads.followups_due.body": "Their follow-up time has come. Open the inbox to call or message them.",
+  "notify.order.customer_request.title": "A customer sent a request on order {orderId}",
+  "notify.order.customer_request.body": "The order did not change. Open it to see what they asked and answer them.",
+  "notify.order.confirm_intent.title": "A customer confirmed order {orderId} from the tracking page",
+  "notify.order.confirm_intent.body": "Call them to confirm the order as usual.",
+
+  /* ---- ⌘K search groups (LAN-§23.9) ---- */
+  "landing.search.group.leads": "Leads",
+  "landing.search.group.pages": "Pages",
+
   /* ---- the honesty gate and the builder checklist (LAN-§3.2, §3.2.1, §6.5) ---- */
   "landing.gate.more": "And {n} more like it on this page.",
   "landing.gate.honesty.sample.title": "The {section} section still shows example content.",

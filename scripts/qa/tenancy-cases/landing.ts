@@ -1,4 +1,4 @@
-// proves: LP-03, LP-02, SF-03
+// proves: LP-03, LP-02, SF-03, LP-06, LP-20, LP-22, SF-06
 /**
  * Two-store attack cases of the landing track (P3 LANDING, landing.md LAN-§7.5, §25.2).
  * Extension file (docs/STORE-SAAS.md §F.1, §J.2, §K.3; DES-R13), created empty at P0 and loaded by
@@ -14,6 +14,13 @@
  * policies are never read for store B's gate (`loadLandingGateInputs`), not even when B names A's page id; B's
  * attestation on A's page writes nothing; the health facts of B (`loadLandingHealthFacts`) hold none of A's live
  * pages, attestations or leads; the publish listener's `page.countdown_extended` row lands in the publishing store.
+ *
+ * Leads, attribution, vitals and slug history (p3-w1-leads-server): B's inbox reads (`listLeadRows`, `getLeadRow`,
+ * `leadCounts`, the ⌘K provider, the pulse) hold nothing of A; B's writes on A's lead ids (attempt, assign, lost,
+ * follow-up, take next, `markLeadConverted`) leave A byte-identical; an impersonation of A reads A's lead masked; B's
+ * order with A's lead's phone and idem never credits A's lead (the `landing.created` hook); `getPageVitals(B, A's
+ * pages)` reads zeros; an old slug 308s with a byte-identical query, a reused slug serves the new page, and store B's
+ * identical old slug never redirects to A.
  */
 import { createRequire } from "node:module";
 import type { TenancyCase, TenancyKit } from "../tenancy-check";
@@ -239,7 +246,199 @@ async function gateCases(kit: TenancyKit): Promise<void> {
 
 type LandingInputs = Awaited<ReturnType<Gate["loadLandingGateInputs"]>>;
 
+type LeadsRead = typeof import("@/lib/leads/read");
+type LeadsWrite = typeof import("@/lib/leads/write");
+
+async function leadCases(kit: TenancyKit): Promise<void> {
+  const { fx, check } = kit;
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const T = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const R = load<LeadsRead>("@/lib/leads/read");
+  const W = load<LeadsWrite>("@/lib/leads/write");
+  const L = load<typeof import("@/lib/orders/leads")>("@/lib/orders/leads");
+  const P = load<typeof import("@/lib/admin-data/search/landing")>("@/lib/admin-data/search/landing");
+  const PU = load<typeof import("@/lib/pulse/contributors/landing")>("@/lib/pulse/contributors/landing");
+  const HK = load<typeof import("@/lib/orders/hooks")>("@/lib/orders/hooks");
+  const V = load<typeof import("@/lib/landing/vitals")>("@/lib/landing/vitals");
+  const MP = load<typeof import("@/lib/landing/mode-plan")>("@/lib/landing/mode-plan");
+  const A = kit.scope("A") as WriteScope;
+  const B = kit.scope("B") as WriteScope;
+  const ownerA = { userId: fx.A.members.owner, role: "owner" as const };
+  const ownerB = { userId: fx.B.members.owner, role: "owner" as const };
+  const byB = { actor: { kind: "user" as const, userId: fx.B.members.owner, impersonatorId: null, ip: null }, role: "owner" };
+  const c = fx.A.customer;
+
+  // A's fresh lead (inside the 30-day window) carries A's customer canaries; B gets its own control lead
+  const leadA = newId();
+  const idemA = `${newId()}-lead-a`.slice(0, 36);
+  const ref = "WA-T3NMQ7";
+  await db.insert(T.leads).values({ id: leadA, storeId: fx.A.id, pageId: fx.A.page.live, idem: idemA, phone: c.phone, name: c.name, city: c.city, note: c.note, status: "contacted", attempts: 1, contactedAt: new Date(), nextAt: new Date(Date.now() - 60_000), assigneeId: fx.A.members.agent, createdAt: new Date(Date.now() - 3_600_000) });
+  const intentA = newId();
+  await db.insert(T.leads).values({ id: intentA, storeId: fx.A.id, pageId: fx.A.page.live, idem: `${newId()}-intent`.slice(0, 36), phone: null, kind: "whatsapp", ref, createdAt: new Date() });
+  const leadB = newId();
+  await db.insert(T.leads).values({ id: leadB, storeId: fx.B.id, pageId: fx.B.page.live, idem: `${newId()}-lead-b`.slice(0, 36), phone: fx.B.customer.phone, name: "Control B", city: "Rabat", createdAt: new Date() });
+
+  // reads
+  const aRows = await R.listLeadRows(A, { limit: 100 }, ownerA);
+  check("leads: listLeadRows(A) lists A's lead (control)", aRows.rows.some((r) => r.id === leadA && r.name === c.name));
+  const bRows = await R.listLeadRows(B, { limit: 100 }, ownerB);
+  check("leads: listLeadRows(B) holds none of A's leads", !bRows.rows.some((r) => r.id === leadA || r.id === intentA) && bRows.rows.some((r) => r.id === leadB) && kit.leaks(bRows).length === 0, kit.leaks(bRows));
+  check("leads: getLeadRow(B, A's lead) is null", (await R.getLeadRow(B, leadA, ownerB)) === null);
+  const bCounts = await R.leadCounts(B, ownerB);
+  const aCounts = await R.leadCounts(A, ownerA);
+  check("leads: B's 30-day header counts B's leads only", bCounts.leads >= 1 && bCounts.contacted === 0 && aCounts.contacted >= 1, { a: aCounts.contacted, b: bCounts.contacted });
+  for (const [label, q] of [["customer name", c.name], ["WA- ref", ref], ["phone digits", c.phone.slice(-8)]] as const) {
+    const hits = await P.provider.search(B, q, ownerB);
+    check(`leads: ⌘K of B for A's ${label} finds nothing of A`, !hits.some((h) => h.id === leadA || h.id === intentA) && kit.leaks(hits).length === 0, hits);
+  }
+  const pulseB = await PU.contributor.contribute(B, ownerB);
+  check("leads: B's pulse never counts A's due lead or intent", pulseB.leadsDue === 0 && pulseB.waIntentsNew === 0, pulseB);
+
+  // impersonation of A: A's lead, masked
+  const imp = kit.scope("A", "impersonation");
+  const impRows = await R.listLeadRows(imp, { limit: 100 }, ownerA);
+  const impOne = await R.getLeadRow(imp, leadA, ownerA);
+  const impHits = await P.provider.search(imp, c.name.split(" ")[0]!, ownerA);
+  check("leads: an impersonation of A reads A's lead (control)", impRows.rows.some((r) => r.id === leadA) && impOne?.id === leadA && impHits.some((h) => h.id === leadA));
+  const impLeaks = kit.leaks({ impRows, impOne, impHits }, { only: ["customer"] });
+  check("leads: under impersonation no customer canary in rows, the lead or ⌘K", impLeaks.length === 0, impLeaks);
+
+  // writes by B on A's ids
+  const before = await kit.snapshotA();
+  const tries = {
+    attempt: await W.logAttempt(B, byB, leadA, "whatsapp"),
+    assign: await W.assignLeads(B, byB, [leadA, intentA], fx.B.members.agent),
+    lost: await W.markLost(B, byB, leadA, "price"),
+    followUp: await W.setFollowUp(B, byB, leadA, null),
+    take: await W.takeNextLead(B, byB),
+    converted: await L.markLeadConverted(B, leadA, fx.A.order.main, "agent"),
+    convertedOwnOrder: await L.markLeadConverted(B, leadA, fx.B.order.main, "agent"),
+  };
+  check(
+    "leads: B's writes on A's lead ids answer not_found or touch nothing",
+    !tries.attempt.ok && (tries.assign.ok ? tries.assign.n === 0 : true) && !tries.lost.ok && !tries.followUp.ok && tries.take !== leadA && tries.take !== intentA && !tries.converted.ok && !tries.convertedOwnOrder.ok,
+    tries,
+  );
+  check("leads: A is byte-identical after B's writes", (await kit.snapshotA()) === before);
+
+  // attribution: B's order with A's lead's phone and idem never credits A's lead
+  const orderB = `B${newId().slice(0, 7)}-${newId().slice(0, 8)}`.slice(0, 20);
+  await db.insert(T.orders).values({
+    id: orderB,
+    storeId: fx.B.id,
+    pageId: fx.B.page.live,
+    versionId: fx.B.version.live,
+    status: "new",
+    name: "Client B",
+    phone: c.phone,
+    city: "Rabat",
+    productName: "Argan",
+    items: { v: 2, bundleId: "b1", bundleLabel: "1 x Argan", qty: 1, unitPrice: 199, variants: [] } as never,
+    qty: 1,
+    subtotal: 19900,
+    shipping: 0,
+    total: 19900,
+    currency: "MAD",
+    idem: idemA,
+  } as never);
+  const [rowB] = await db.select().from(T.orders).where(eq(T.orders.id, orderB)).limit(1);
+  await HK.runOrderHooks("created", "afterCommit", B, { on: "created", order: rowB!, conversion: null, target: { pageId: rowB!.pageId, versionId: rowB!.versionId, source: rowB!.source } });
+  const [after] = await db.select({ o: T.leads.convertedOrderId, s: T.leads.status }).from(T.leads).where(eq(T.leads.id, leadA)).limit(1);
+  check("attribution: B's order (A's phone, A's idem) never credits A's lead", after?.o === null && after.s === "contacted", after);
+
+  // vitals and the mode plan
+  const vB = await V.getPageVitals(B, [fx.A.page.live]);
+  const vA = await V.getPageVitals(A, [fx.A.page.live]);
+  check("vitals: getPageVitals(B, A's page) reads zeros", vB[fx.A.page.live]?.views === 0 && vB[fx.A.page.live]?.orders === 0, vB);
+  check("vitals: getPageVitals(A, A's page) counts A's orders (control)", (vA[fx.A.page.live]?.orders ?? 0) >= 1, vA);
+  const planA = await MP.landingModeSwitchPlan(A);
+  const planB = await MP.landingModeSwitchPlan(B);
+  check("mode plan: each store counts its own live landing pages", planA.livePages >= 1 && planB.livePages >= 1 && planB.views7d >= 0, { planA, planB });
+
+  // leave both stores as the harness seeded them
+  await db.delete(T.orders).where(eq(T.orders.id, orderB));
+  for (const id of [leadA, intentA, leadB]) await db.delete(T.leads).where(eq(T.leads.id, id));
+}
+
+async function slugCases(kit: TenancyKit): Promise<void> {
+  const { fx, check } = kit;
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const T = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { and, eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const SL = load<typeof import("@/lib/landing/slugs")>("@/lib/landing/slugs");
+  const RC = load<typeof import("@/lib/render/cache.server")>("@/lib/render/cache.server");
+  const A = kit.scope("A") as WriteScope;
+  const B = kit.scope("B") as WriteScope;
+  const route = { file: "src/app/s/[store]/[slug]/route.ts", template: "/s/[store]/[slug]", methods: ["GET"] };
+  const get = async (store: "A" | "B", slug: string, query: Record<string, string> = {}) => {
+    const o = await kit.callRoute({ anonymous: true }, route, "GET", { store: fx[store].handle, slug }, { query });
+    return o.ok ? o.value! : null;
+  };
+  const query = { utm_source: "meta ads", utm_campaign: "été-26", b: "1" };
+  const search = `?${new URLSearchParams(query).toString()}`;
+
+  // A's seeded old slug of its live page ("argan")
+  const [old] = await db
+    .select({ slug: T.pageSlugHistory.slug })
+    .from(T.pageSlugHistory)
+    .where(and(eq(T.pageSlugHistory.storeId, fx.A.id), eq(T.pageSlugHistory.pageId, fx.A.page.live)))
+    .limit(1);
+  check("slugs: A's live page has an old slug (control)", !!old);
+  if (!old) return;
+  const moved = await get("A", old.slug, query);
+  check("slugs: an old slug 308s to the page's slug with a byte-identical query", moved?.status === 308 && (moved.location ?? "").endsWith(`/argan${search}`) && (moved.location ?? "").includes(fx.A.handle), {
+    status: moved?.status,
+    location: moved?.location,
+    search,
+  });
+  const onB = await get("B", old.slug, query);
+  check("slugs: A's old slug on B's address is B's 404, never a redirect into A", onB?.status === 404 && !(onB.location ?? "").includes(fx.A.handle), { status: onB?.status, location: onB?.location });
+
+  // the same old slug in both stores: each store redirects to its own page
+  const pageA = await kit.fresh.page(fx.A, "published");
+  const pageB = await kit.fresh.page(fx.B, "published");
+  await SL.recordSlugMove(A, pageA, "dual-old-slug");
+  await SL.recordSlugMove(B, pageB, "dual-old-slug");
+  const slugOf = async (id: string) => (await db.select({ s: T.pages.slug }).from(T.pages).where(eq(T.pages.id, id)).limit(1))[0]!.s;
+  const dualA = await get("A", "dual-old-slug");
+  const dualB = await get("B", "dual-old-slug");
+  check("slugs: A's identical old slug redirects to A's page", dualA?.status === 308 && (dualA.location ?? "").endsWith(`/${await slugOf(pageA)}`) && (dualA.location ?? "").includes(fx.A.handle), dualA?.location);
+  check(
+    "slugs: B's identical old slug redirects to B's page, never to A",
+    dualB?.status === 308 && (dualB.location ?? "").endsWith(`/${await slugOf(pageB)}`) && (dualB.location ?? "").includes(fx.B.handle) && !(dualB.location ?? "").includes(fx.A.handle),
+    dualB?.location,
+  );
+
+  // a reused slug serves the new page: A's fresh page (given the stored documents a served version holds) takes A's old address
+  const [pub] = await db.select({ v: T.pages.publishedVersionId }).from(T.pages).where(eq(T.pages.id, pageA)).limit(1);
+  const marker = `reused ${pageA}`;
+  await db
+    .update(T.pageVersions)
+    .set({ html: `<!doctype html><title>${marker}</title><p>${marker}</p>`, csp: "default-src 'none'", etag: `"${pageA.toLowerCase()}"`, thankYouHtml: "<!doctype html><p>merci</p>", thankYouCsp: "default-src 'none'" })
+    .where(eq(T.pageVersions.id, pub!.v!));
+  await db.update(T.pages).set({ slug: old.slug }).where(eq(T.pages.id, pageA));
+  await SL.releaseOldSlug(A, old.slug);
+  // what the slug-move action does after its write: the store's render entries go (the 404 above was cached)
+  RC.invalidateStoreRender(fx.A.id);
+  const reused = await get("A", old.slug, query);
+  check("slugs: a reused old slug serves the new page (200, its HTML, no redirect)", reused?.status === 200 && !reused.location && reused.body.includes(marker), { status: reused?.status, location: reused?.location });
+  const stillB = await get("B", "dual-old-slug");
+  check("slugs: A's release never touched B's history", stillB?.status === 308);
+
+  // leave both stores as the harness seeded them
+  await db.update(T.pages).set({ slug: `p-${pageA.toLowerCase()}`, status: "archived" }).where(eq(T.pages.id, pageA));
+  await db.update(T.pages).set({ status: "archived" }).where(eq(T.pages.id, pageB));
+  await db.insert(T.pageSlugHistory).values({ storeId: fx.A.id, slug: old.slug, pageId: fx.A.page.live, until: new Date(Date.now() + 300 * 86_400_000), hits: 0, createdAt: new Date() });
+  await db.delete(T.pageSlugHistory).where(eq(T.pageSlugHistory.slug, "dual-old-slug"));
+  RC.invalidateStoreRender(fx.A.id);
+  RC.invalidateStoreRender(fx.B.id);
+}
+
 export const cases: TenancyCase[] = [
   { name: "landing: delivery zones, lead suggestion and holiday reminder of A never reach B", run: zoneCases },
   { name: "landing: A's attested facts, proof, zones and policies never reach B's gate or Store Health", run: gateCases },
+  { name: "landing: A's leads, their attribution, vitals and mode plan never reach B; impersonation reads them masked", run: leadCases },
+  { name: "landing: slug history 308s with the raw query, a reused slug serves the new page, B never redirects into A", run: slugCases },
 ];

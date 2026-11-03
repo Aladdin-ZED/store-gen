@@ -11,6 +11,19 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "notify.delivery.holidays_review.title": "راجع أيام العطل ديال {year}",
   "notify.delivery.holidays_review.body": "تواريخ التوصيل كتفوت أيام العطل اللي فالتقويم ديالك. زيد التواريخ ديال هاد العام، ومن بعد علّم بلي راجعتيهم.",
 
+  "notify.lead.recovered.title": "زبون تواصلتي معاه دابا طلب",
+  "notify.lead.recovered.body": "الطلب {orderId} جا من زبون عاودتي تواصلتي معاه. تحسب ليك كطلب مسترجع.",
+  "notify.leads.followups_due.title": "{count, plural, one {زبون واحد خاصك تعاود معاه} two {جوج زبناء خاصك تعاود معاهم} other {# ديال الزبناء خاصك تعاود معاهم}}",
+  "notify.leads.followups_due.body": "وصل الوقت باش تعاود تتواصل معاهم. حل صندوق الزبناء وعيط ليهم ولا صيفط ليهم.",
+  "notify.order.customer_request.title": "زبون صيفط طلب على الطلبية {orderId}",
+  "notify.order.customer_request.body": "الطلبية ما تبدلات. حلها باش تشوف شنو طلب وتجاوبو.",
+  "notify.order.confirm_intent.title": "زبون أكد الطلبية {orderId} من صفحة التتبع",
+  "notify.order.confirm_intent.body": "عيط ليه باش تأكد الطلبية بحال العادة.",
+
+  /* ---- ⌘K search groups (LAN-§23.9) ---- */
+  "landing.search.group.leads": "الزبناء المحتملين",
+  "landing.search.group.pages": "الصفحات",
+
   /* ---- the honesty gate and the builder checklist (LAN-§3.2, §3.2.1, §6.5) ---- */
   "landing.gate.more": "و{n} بحالها فهاد الصفحة.",
   "landing.gate.honesty.sample.title": "قسم {section} مازال فيه أمثلة ماشي حقيقية.",

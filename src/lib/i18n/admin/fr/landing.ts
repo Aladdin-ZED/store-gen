@@ -10,6 +10,19 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "notify.delivery.holidays_review.title": "Vérifiez vos jours fériés de {year}",
   "notify.delivery.holidays_review.body": "Les dates de livraison sautent les jours fériés de votre calendrier. Ajoutez ceux de cette année, puis marquez-les vérifiés.",
 
+  "notify.lead.recovered.title": "Un prospect que vous avez contacté vient de commander",
+  "notify.lead.recovered.body": "La commande {orderId} vient d'un prospect que vous avez relancé. Elle compte comme récupérée.",
+  "notify.leads.followups_due.title": "{count, plural, one {# prospect à relancer} other {# prospects à relancer}}",
+  "notify.leads.followups_due.body": "L'heure de leur relance est arrivée. Ouvrez la boîte des prospects pour les appeler ou leur écrire.",
+  "notify.order.customer_request.title": "Un client a envoyé une demande sur la commande {orderId}",
+  "notify.order.customer_request.body": "La commande n'a pas changé. Ouvrez-la pour voir sa demande et lui répondre.",
+  "notify.order.confirm_intent.title": "Un client a confirmé la commande {orderId} depuis la page de suivi",
+  "notify.order.confirm_intent.body": "Appelez-le pour confirmer la commande comme d'habitude.",
+
+  /* ---- ⌘K search groups (LAN-§23.9) ---- */
+  "landing.search.group.leads": "Prospects",
+  "landing.search.group.pages": "Pages",
+
   /* ---- the honesty gate and the builder checklist (LAN-§3.2, §3.2.1, §6.5) ---- */
   "landing.gate.more": "Et {n, plural, one {# autre} other {# autres}} du même genre sur cette page.",
   "landing.gate.honesty.sample.title": "La section {section} montre encore des exemples.",
