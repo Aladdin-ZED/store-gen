@@ -98,6 +98,24 @@ export const BASELINE_ALLOW: Readonly<Record<string, string>> = {
  */
 export const BASELINE_CHUNK_ALLOW: Readonly<Record<string, string>> = {
   "comparison.table": "V40: the column light falls back to the product tint directly (--lp-aurora-1 is no longer emitted)",
+  "hero.split": "H5: the ratio and media-side rules, under data attributes only a section with `ratio` / `mediaSide` carries",
+};
+
+/**
+ * Section kit II (step 5; DES-§4.5.4, sheets H6-H10, S1-S4): new variants, so new stylesheet chunks (and a new rule set
+ * in their type's merged sheet). No baseline document renders them: the legacy archetype draw never picks them
+ * (src/lib/generator/plan.ts `LOOK_ONLY`).
+ */
+export const BASELINE_NEW: Readonly<Record<string, string>> = {
+  "hero.cinema": "H6: the photo edge to edge, the commerce band on the ground",
+  "hero.quiet": "H7: a small object on a mat, one line of type",
+  "hero.index": "H8: the merchant's facts as numbered rows",
+  "hero.contact": "H9: the contact sheet with a logical title cell",
+  "hero.statement": "H10: type first, the product as a framed thumbnail",
+  "benefits.hanging": "S1: numbered rows with hanging thumbnails",
+  "showcase.figure": "S2: one large image and its caption column",
+  "gallery.contact": "S3: the contact-sheet gallery",
+  "offer.showcase": "S4: the packs without picker or button",
 };
 
 /**
@@ -261,6 +279,7 @@ export async function recordBaseline(): Promise<void> {
 }
 
 const allowed = (key: string) => Object.prototype.hasOwnProperty.call(BASELINE_ALLOW, key);
+const added = (key: string) => Object.prototype.hasOwnProperty.call(BASELINE_NEW, key);
 const vanishes = (key: string) => Object.prototype.hasOwnProperty.call(BASELINE_VANISH, key);
 
 /** Problems of the re-rendered entries against the goldens (empty when every difference is a reviewed one). */
@@ -303,10 +322,13 @@ export async function compareBaseline(entries: readonly BaselineEntry[] = BASELI
     if (now[k] === h) continue;
     const name = k.replace(/^(chunk|type):/, "");
     const chunkOk = (key: string) => allowed(key) || Object.prototype.hasOwnProperty.call(BASELINE_CHUNK_ALLOW, key);
-    const ok = name.includes(".") ? chunkOk(name) : [...Object.keys(BASELINE_ALLOW), ...Object.keys(BASELINE_CHUNK_ALLOW)].some((a) => a.startsWith(`${name}.`));
+    const ok = name.includes(".") ? chunkOk(name) : [...Object.keys(BASELINE_ALLOW), ...Object.keys(BASELINE_CHUNK_ALLOW), ...Object.keys(BASELINE_NEW)].some((a) => a.startsWith(`${name}.`));
     if (!ok) problems.push(`stylesheet ${k} ${now[k] ? "changed" : "is gone"} outside the reviewed redraws`);
   }
-  for (const k of Object.keys(now)) if (!golden.chunks[k] && !allowed(k.replace(/^(chunk|type):/, ""))) problems.push(`stylesheet ${k} is new outside the reviewed redraws`);
+  for (const k of Object.keys(now)) {
+    const name = k.replace(/^(chunk|type):/, "");
+    if (!golden.chunks[k] && !allowed(name) && !added(name)) problems.push(`stylesheet ${k} is new outside the reviewed redraws`);
+  }
   problems.push(...baseCssProblems(gunzipSync(Buffer.from(golden.baseGz, "base64")).toString("utf8"), baseCss));
   return problems;
 }

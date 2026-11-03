@@ -27,6 +27,10 @@
  *    former aurora variants), and every fixture in ar: V40 (no `.lp-aurora` element, no `--lp-aurora*` / `--lp-grain`
  *    custom property, no `data-texture="grain"`), RTL3 (no `writing-mode` or `textPath` reaching Arabic), RTL5 (the
  *    footer's addresses and e-mails), no removed shape (owner rule 2), the cta's `data-hero-cta` (DES-§5.9) and DS42;
+ *  - section kit II (step 5; DES-§4.5.4, sheets H5-H10, S1-S4): the kit pages of `KIT_NEW` in ar and fr (the five new
+ *    hero families, split's ratio and media side, the four new sections, the one-asset page with a single 1,200 px
+ *    phone photo without alpha) through the redraw checks and the static C2 rows; and the CSS accounting of the
+ *    per-variant chunks: each new hero family ≤ 1,400 B gz, one family plus the two heaviest new sections ≤ 2,700 B gz;
  *  - CRIT15 (core D76, §C.6): a live render, a test render and a preview each carry exactly one absolute
  *    `/report/<handle>?p=<path>` link, drawn by the footer (`footer:big` and `footer:simple`) with `rel="nofollow"`, and
  *    an export carries none.
@@ -157,6 +161,40 @@ export const cases: RenderCase[] = [
         const examples = !doc.product.rating && doc.sections.some((s) => s.type === "stats" && !s.hidden && (s.data as { sample?: unknown }).sample === true);
         for (const p of kitMarkupProblems(r.html, "ar", examples ? { stats: "none" } : {})) kit.fail(`${name}/ar: ${p}`);
       }
+    },
+  },
+  {
+    name: "section kit II: the new hero families, split's options, the four new sections and the one-asset page in ar and fr",
+    async run(kit) {
+      const { renderLandingHtml } = await import("@/lib/render/core");
+      const { KIT_NEW, kitAssets, kitDoc, kitMarkupProblems, newKitProblems } = await import("../design-kit");
+      for (const spec of KIT_NEW) {
+        for (const locale of ["ar", "fr"] as const) {
+          const { doc, fx } = kitDoc(spec, locale, kit.now);
+          const opts = kit.liveOptions(spec.fixture, fx);
+          const r = await renderLandingHtml(doc, { ...opts, assets: kitAssets(spec, doc, opts.assets) });
+          const tag = `${spec.name}/${locale}`;
+          if (r.issues.length) kit.fail(`${tag}: sections failed ${r.issues.map((i) => i.sectionId).join(", ")}`);
+          for (const p of [...kitMarkupProblems(r.html, locale), ...newKitProblems(r.html, spec)]) kit.fail(`${tag}: ${p}`);
+        }
+      }
+    },
+  },
+  {
+    name: "section kit II CSS: each new hero family's chunk ≤ 1,400 B gz; one family + the two heaviest new sections ≤ 2,700 B gz",
+    async run(kit) {
+      const { gzipSync } = await import("node:zlib");
+      const { sectionChunkCss } = await import("@/landing/generated/chunks");
+      const gz = (key: string) => {
+        const css = (sectionChunkCss as Readonly<Record<string, string>>)[key];
+        if (!css) kit.fail(`no stylesheet chunk ${key}`);
+        return css ? gzipSync(Buffer.from(css, "utf8"), { level: 9 }).length : 0;
+      };
+      const heroes = ["cinema", "quiet", "index", "contact", "statement"].map((v) => [v, gz(`hero.${v}`)] as const);
+      for (const [v, n] of heroes) if (n > 1400) kit.fail(`hero.${v}: ${n} B gz (≤ 1,400)`);
+      const sections = ["benefits.hanging", "showcase.figure", "gallery.contact", "offer.showcase"].map(gz).sort((a, b) => b - a);
+      const page = Math.max(...heroes.map(([, n]) => n)) + sections[0]! + sections[1]!;
+      if (page > 2700) kit.fail(`the heaviest family + two new sections: ${page} B gz (≤ 2,700)`);
     },
   },
   {

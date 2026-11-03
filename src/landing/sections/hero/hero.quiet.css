@@ -1,0 +1,133 @@
+/* hero · quiet — rules only this variant renders (design.md DES-§5.13 H7): the photo on a flat mat with a hairline,
+   inset on phones (or edge to edge with frame="bleed"), ≤ 52 vh; one line of small display type; the action line.
+   From 64rem: the photo in columns 4-7, the text at the inline end, level with its foot. */
+
+.lp-hero__quiet {
+  --q-w: min(100% - 2rem, 52svh * var(--q-r, 0.8) - 1.5rem);
+  display: grid;
+  justify-items: center;
+  gap: clamp(1.5rem, 1.1rem + 1.6vw, 2.75rem);
+}
+
+.lp-hero__quiet-media {
+  position: relative;
+  inline-size: var(--q-w);
+  margin: 0;
+  padding: clamp(0.6rem, 0.4rem + 1vw, 1.1rem);
+  border-radius: var(--lp-sq-media);
+  corner-shape: var(--lp-corner);
+  background-color: var(--sec-card);
+  box-shadow: inset 0 0 0 var(--lp-hairline) var(--mx-line);
+}
+
+.lp-hero__quiet-pic {
+  border-radius: max(0.25rem, calc(var(--lp-sq-media) * 0.55));
+  corner-shape: var(--lp-corner);
+}
+
+.lp-hero__quiet-media[data-kind="cutout"] .lp-hero__quiet-pic {
+  background-color: var(--mx-tint);
+}
+
+.lp-hero__quiet-text {
+  display: grid;
+  gap: 1.1rem;
+  justify-items: start;
+  inline-size: var(--q-w);
+}
+
+.lp-hero--quiet .lp-hero__title {
+  max-inline-size: none;
+  font-size: min(calc(var(--lp-step-5) * 0.6 * var(--lp-script-scale-display)), 9.6vw, 3.5rem);
+  text-wrap: balance;
+}
+
+.lp-hero__act {
+  display: grid;
+  gap: 0.8rem;
+  justify-items: start;
+  inline-size: 100%;
+}
+
+.lp-hero__act-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  inline-size: 100%;
+}
+
+/* the button beside the price when both fit at their natural width, else under it at full width */
+.lp-hero__act-row .lp-hero__cta {
+  flex: 1 1 auto;
+  inline-size: auto;
+  min-inline-size: 0;
+  max-inline-size: 26rem;
+}
+
+/* the cluster is price, reference and chip; the spelled-out saving stays with the form */
+.lp-hero__act .lp-price__save-amt {
+  display: none;
+}
+
+/* phones, frame="bleed": the photo runs edge to edge, no mat */
+@media (max-width: 47.99rem) {
+  .lp-hero--quiet {
+    padding-block-start: 0;
+  }
+
+  .lp-hero__quiet[data-frame="framed"] {
+    padding-block-start: clamp(1rem, 0.6rem + 2vw, 1.75rem);
+  }
+
+  .lp-hero__quiet[data-frame="bleed"] {
+    --q-w: 100%;
+  }
+
+  .lp-hero__quiet[data-frame="bleed"] .lp-hero__quiet-media {
+    inline-size: calc(100% + 2 * var(--lp-gutter));
+    margin-inline: calc(-1 * var(--lp-gutter));
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .lp-hero__quiet[data-frame="bleed"] .lp-hero__quiet-pic {
+    aspect-ratio: auto;
+    block-size: min(52svh, 125vw);
+    border-radius: 0;
+  }
+}
+
+@media (min-width: 48rem) {
+  .lp-hero__quiet {
+    --q-w: min(24rem, 60svh * var(--q-r, 0.8));
+  }
+}
+
+@media (min-width: 64rem) {
+  .lp-hero__quiet {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    align-items: end;
+    justify-items: stretch;
+    column-gap: 2rem;
+  }
+
+  .lp-hero__quiet-media {
+    grid-column: 4 / span 4;
+    inline-size: auto;
+  }
+
+  .lp-hero__quiet-text {
+    grid-column: 9 / span 4;
+    inline-size: auto;
+    padding-block-end: clamp(1rem, 2vw, 2rem);
+  }
+}
+
+/* stillness: the photo fades in slowly, nothing else moves */
+@media (prefers-reduced-motion: no-preference) {
+  html.lp-js:not([data-motion="off"]) .lp-hero__quiet-media[data-reveal] {
+    transition-duration: calc(var(--lp-dur-l) * 1.4);
+  }
+}

@@ -134,8 +134,8 @@ const BUDGET: Readonly<Record<string, readonly [number, number]>> = {
   contact: [632, 648],
   statement: [536, 584],
 };
-/** The families already in the registry (the five new ones are checked the same way: their sheets exist). */
-const EXISTING = ["stage", "editorial", "poster", "spec", "split"] as const;
+/** Every registered hero family (section kit II registered the five new ones: cinema, quiet, index, contact, statement). */
+const EXISTING = ["stage", "editorial", "poster", "spec", "split", "cinema", "quiet", "index", "contact", "statement"] as const;
 
 registerDesignGroup({
   id: "fold",

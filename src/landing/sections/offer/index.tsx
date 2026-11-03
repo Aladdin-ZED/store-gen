@@ -15,6 +15,8 @@
  *  - shelf   — a lit display window: each pack stands on a cylinder podium whose height follows the
  *              quantity (a skyline: the bigger the pack, the higher it stands, "×3" set on its face),
  *              a spotlight that follows the selection, caption cards hanging off the window.
+ *  - showcase — (sheet S4, R2; look pages) the packs as a quiet row of cards without picker or button: the order form
+ *              carries the picker, one link under the row leads to it.
  * All money comes from the shared offer model (src/landing/offers/model.ts, docs/OFFERS.md §E.7):
  * the card price is `from` ("Dès" when choices can cost more), savings only when real, labels per
  * offers.showSavings. Offers of one item ×n keep their art direction (stack, lineup, podium ×n);
@@ -42,7 +44,7 @@ import {
 } from "../../primitives";
 import { ARCHETYPE_DEFS } from "@/lib/theme/archetypes";
 import { defineSection, type RenderContext, type ResolvedAsset } from "../../types";
-import { chooseLabel, offerCopy, passLabels } from "./copy";
+import { chooseLabel, offerCopy, passLabels, showcaseLink } from "./copy";
 import { WIDE, fitsCover, photoPlan, type PhotoPlan } from "../orderForm/fit";
 import { PlannedPhoto } from "../orderForm/photo";
 import { Plain } from "../orderForm/text";
@@ -51,7 +53,7 @@ import { Lineup, Stack, copiesOf, lineupSpan, type ProductVisual } from "./visua
 import { OfferVisual } from "../../offers/visual";
 import { withRevealScope } from "../reveal-scope";
 
-const VARIANT_IDS = ["stacked", "tickets", "shelf"] as const;
+const VARIANT_IDS = ["stacked", "tickets", "shelf", "showcase"] as const;
 type Variant = (typeof VARIANT_IDS)[number];
 
 const schema = z.object({
@@ -63,6 +65,8 @@ const schema = z.object({
   showTrust: z.boolean().default(true),
   /** product picture shown ×qty (default: the cutout, else the first photo) */
   image: AssetRef.optional(),
+  /** showcase (sheet S4, R2): the form carries the picker, so the section shows none */
+  picker: z.literal(false).optional(),
 });
 type Data = z.infer<typeof schema>;
 
@@ -569,6 +573,44 @@ function Shelf({ id, ctx, packs, visual, cta, featured, paper }: Common) {
   );
 }
 
+/**
+ * showcase (sheet S4, R2): the packs as a quiet row of cards, the picker left to the order form: the quantity mark and
+ * the pack's name, its price cluster (the price, the genuine reference and the saving chip as one unit) and the
+ * per-piece line; the recommended pack on the accent's soft ground with a hairline, never a "best seller" badge the
+ * merchant did not write (a merchant badge shows as written). No picker, no button: one quiet link to the form under
+ * the row. Phones scroll the row with a peek of the next card.
+ */
+function Showcase({ id, ctx, packs, featured }: Common) {
+  return (
+    <>
+      <ul className="lp-ofr__sc" role="list" data-n={packs.length}>
+        {packs.map((p) => {
+          const k = idsOf(id, p);
+          return (
+            <li key={p.id} className="lp-ofr__sc-card" data-feat={p.id === featured ? "" : undefined}>
+              {p.badge ? <bdi className="lp-ofr__sc-badge">{p.badge.text}</bdi> : null}
+              <Mark ctx={ctx} p={p} className="lp-ofr__sc-x" />
+              <Name ctx={ctx} p={p} k={k} />
+              <span className="lp-ofr__sc-price">
+                <Price ctx={ctx} p={p} k={k} />
+                {p.savePct ? (
+                  <span className="lp-ofr__chip">
+                    <bdi dir="ltr">{p.savePct}</bdi>
+                  </span>
+                ) : null}
+              </span>
+              {p.perUnit ? <span className="lp-ofr__unit">{p.perUnit}</span> : null}
+            </li>
+          );
+        })}
+      </ul>
+      <a href="#order" className="lp-ofr__sc-link" data-action="order">
+        {showcaseLink(ctx.locale)}
+      </a>
+    </>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 
 function Foot({ ctx, packs, show, className }: { ctx: RenderContext; packs: Pack[]; show: boolean; className?: string }) {
@@ -601,8 +643,9 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
   // the window is symmetric: a centred heading, reassurance under it. Cards and passes take an
   // editorial split heading (title | lead + reassurance); a lone pass sits beside a sticky heading.
   const lone = packs.length === 1;
-  const head = v === "shelf" ? "center" : v === "tickets" && lone ? "start" : "split";
-  const foot = <Foot ctx={ctx} packs={packs} show={data.showTrust} />;
+  const head = v === "shelf" ? "center" : (v === "tickets" && lone) || v === "showcase" ? "start" : "split";
+  // the showcase is a quiet screen: the reassurance stays with the form
+  const foot = <Foot ctx={ctx} packs={packs} show={data.showTrust && v !== "showcase"} />;
   return (
     <SectionShell
       id={id}
@@ -613,7 +656,7 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
       labelledBy={hasTitle ? titleId : undefined}
       label={hasTitle ? undefined : ctx.t("cta.seeOffers")}
     >
-      <div className={cx("lp-container lp-ofr", head === "start" && "lp-ofr--aside")}>
+      <div className={cx("lp-container lp-ofr", head === "start" && v !== "showcase" && "lp-ofr--aside")}>
         <SectionHeader
           ctx={ctx}
           kicker={data.kicker}
@@ -627,7 +670,7 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
           {head === "center" ? null : foot}
         </SectionHeader>
         <div className="lp-ofr__stage">
-          {v === "tickets" ? <Passes {...common} /> : v === "shelf" ? <Shelf {...common} /> : <Stacked {...common} />}
+          {v === "tickets" ? <Passes {...common} /> : v === "shelf" ? <Shelf {...common} /> : v === "showcase" ? <Showcase {...common} /> : <Stacked {...common} />}
           {head === "center" ? foot : null}
         </div>
       </div>
@@ -658,6 +701,12 @@ export default withRevealScope(defineSection({
       label: "Display window",
       description: "A lit window: each pack on a podium that rises with the quantity, a spotlight on the selection.",
       archetypes: ["bloom", "maison", "apothecary", "kinetic", "hearth"],
+    },
+    {
+      id: "showcase",
+      label: "Pack showcase",
+      description: "Your packs side by side with their prices and savings, without buttons: the order form holds the choice.",
+      archetypes: [],
     },
   ],
   schema,

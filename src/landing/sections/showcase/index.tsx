@@ -14,6 +14,7 @@ import { garmentOf } from "../garment";
 import { COMMON, FAMILY_COPY, captionFor, garmentShowcase } from "./copy";
 import { Dimensions } from "./dimensions";
 import { Exploded } from "./exploded";
+import { Figure } from "./figure";
 import { Hotspots } from "./hotspots";
 import { Ingredients } from "./ingredients";
 import { schema, type Data } from "./schema";
@@ -25,6 +26,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   exploded: Exploded,
   ingredients: Ingredients,
   dimensions: Dimensions,
+  figure: Figure,
 };
 
 /**
@@ -47,6 +49,7 @@ export default withRevealScope(defineSection({
     { id: "exploded", label: "Exploded", description: "Product on its set; each detail hangs under a hairline that swings onto the exact point it describes.", archetypes: ["playground", "hearth", "bloom", "maison"] },
     { id: "ingredients", label: "Ingredients", description: "Bento of ingredient or material tiles with origin and share.", archetypes: ["apothecary", "field", "souk", "maison"] },
     { id: "dimensions", label: "Dimensions", description: "Clean technical drawing with real measurements and spec figures.", archetypes: ["circuit", "editorial", "garage"] },
+    { id: "figure", label: "Figure", description: "One large photo in a fine frame, its caption in a column beside it. No price, no button.", archetypes: [] },
   ],
   schema,
   defaults: ({ locale, product, rng }) => {
@@ -142,7 +145,8 @@ export default withRevealScope(defineSection({
       ],
       newItem: () => ({ name: "", origin: "", share: "", text: "", art: "sprig", icon: "leaf" }),
     },
-    { kind: "text", path: "caption", label: "Photo caption (Ingredients)", max: 60, help: "Frosted chip on the photo, e.g. “3 ingredients, nothing else”. Leave empty to hide." },
+    { kind: "text", path: "caption", label: "Photo caption (Ingredients, Figure)", max: 60, help: "Frosted chip on the photo, e.g. “3 ingredients, nothing else”; in Figure, the first line of the caption column. Leave empty to hide." },
+    { kind: "text", path: "figure", label: "Figure label (Figure)", max: 20, help: "Optional, e.g. “FIG. 01”. Shown above the caption." },
     {
       kind: "group",
       label: "Dimensions",

@@ -1,0 +1,150 @@
+/* hero · contact — rules only this variant renders (design.md DES-§5.13 H9): square photo cells on a 2 px gap of the
+   section's ground, one cell holding the title (section size), the action and the COD line. data-cell is logical
+   (l = inline start): the grid mirrors in Arabic. */
+
+.lp-hero__cs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  overflow: hidden;
+  border-radius: var(--lp-sq-media);
+  corner-shape: var(--lp-corner);
+  background-color: var(--sec-bg);
+}
+
+.lp-hero__cs-cell {
+  position: relative;
+  min-inline-size: 0;
+  margin: 0;
+  background-color: var(--mx-tint);
+}
+
+.lp-hero__cs-pic,
+.lp-hero__cs-pic .lp-pic__img {
+  border-radius: 0;
+}
+
+.lp-hero__cs-title {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  align-content: space-between;
+  gap: clamp(1.25rem, 1rem + 1.4vw, 2.25rem);
+  min-inline-size: 0;
+  padding: clamp(1.25rem, 0.9rem + 1.6vw, 2.25rem);
+  background-color: var(--sec-card);
+  color: var(--sec-card-ink, var(--sec-ink));
+}
+
+.lp-hero__cs[data-cell^="b"] > .lp-hero__cs-title {
+  grid-row: auto;
+  order: 9;
+  align-content: end;
+}
+
+.lp-hero__cs:is([data-n="0"], [data-n="1"]) > .lp-hero__cs-title {
+  grid-row: auto;
+}
+
+.lp-hero__cs[data-n="1"] > .lp-hero__cs-cell {
+  grid-column: 1 / -1;
+}
+
+/* three photos: one strip of three square frames at every width, the title band above (t) or under it (b) */
+.lp-hero__cs[data-n="3"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.lp-hero--contact .lp-hero__title {
+  max-inline-size: 18ch;
+  font-size: min(calc(var(--lp-step-4) * var(--lp-script-scale-display)), 9vw, 3.25rem);
+}
+
+.lp-hero__act {
+  display: grid;
+  gap: 0.8rem;
+  justify-items: start;
+  inline-size: 100%;
+}
+
+.lp-hero__act-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  inline-size: 100%;
+}
+
+/* the button beside the price when both fit at their natural width, else under it at full width */
+.lp-hero__act-row .lp-hero__cta {
+  flex: 1 1 auto;
+  inline-size: auto;
+  min-inline-size: 0;
+  max-inline-size: 26rem;
+}
+
+/* the cluster is price, reference and chip; the spelled-out saving stays with the form */
+.lp-hero__act .lp-price__save-amt {
+  display: none;
+}
+
+@media (min-width: 48rem) {
+  .lp-hero__cs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    max-inline-size: 72rem;
+    margin-inline: auto;
+  }
+
+  .lp-hero__cs > .lp-hero__cs-title {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    order: 0;
+  }
+
+  .lp-hero__cs[data-cell$="l"] > .lp-hero__cs-title {
+    grid-column: 1;
+  }
+
+  .lp-hero__cs[data-n="2"] > .lp-hero__cs-title {
+    grid-row: 1;
+  }
+
+  .lp-hero__cs[data-n="0"] > .lp-hero__cs-title {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .lp-hero__cs[data-n="1"] > .lp-hero__cs-cell {
+    grid-column: span 2;
+    grid-row: 1 / span 2;
+  }
+
+  /* three photos: the band's head at the cell's side */
+  .lp-hero__cs[data-n="3"] > .lp-hero__cs-title {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: end;
+    column-gap: clamp(1.5rem, 1rem + 2vw, 3rem);
+  }
+
+  .lp-hero__cs[data-n="3"][data-cell^="b"] > .lp-hero__cs-title {
+    grid-row: 2;
+  }
+
+  .lp-hero__cs[data-n="3"][data-cell$="r"] .lp-hero__title {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .lp-hero__cs[data-n="3"][data-cell$="r"] .lp-hero__act {
+    grid-column: 1;
+    grid-row: 1;
+  }
+}
+
+@media (min-width: 64rem) {
+  .lp-hero__cs[data-n="4"] .lp-hero__cs-pic {
+    aspect-ratio: 4 / 5;
+  }
+}

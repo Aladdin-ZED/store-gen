@@ -1,0 +1,99 @@
+/* showcase · figure — rules only this variant renders (design.md DES-§5.13 S2): one large true-colour image in a
+   hairline frame and its caption column (under it on phones, at the inline end from 48rem, hanging in the margin with
+   the photo offset one column from 64rem). */
+
+.lp-showcase__fg .lp-showcase__head {
+  margin-block-end: clamp(1.5rem, 1rem + 2vw, 2.75rem);
+}
+
+.lp-showcase__fg-fig {
+  display: grid;
+  gap: 1.1rem;
+  margin: 0;
+}
+
+.lp-showcase__fg-media {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--lp-sq-media);
+  corner-shape: var(--lp-corner);
+  background-color: var(--mx-tint);
+}
+
+.lp-showcase__fg-media::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 var(--lp-hairline) var(--mx-media-edge, var(--mx-line));
+  pointer-events: none;
+}
+
+.lp-showcase__fg-media[data-kind="cutout"] .lp-showcase__fg-pic .lp-pic__img {
+  padding: 8%;
+}
+
+.lp-showcase__fg-cap {
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+  max-inline-size: 34rem;
+}
+
+.lp-showcase__fg-n {
+  font-family: var(--lp-font-label, var(--lp-font-body));
+  font-size: calc(var(--lp-step--1) * var(--lp-script-scale));
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0.06em;
+  color: var(--sec-accent);
+}
+
+[lang="ar"] .lp-showcase__fg-n {
+  letter-spacing: 0;
+}
+
+.lp-showcase__fg-t {
+  font-weight: var(--lp-strong-weight);
+}
+
+.lp-showcase__fg-d {
+  font-size: calc(var(--lp-step-0) * 0.95 * var(--lp-script-scale));
+  line-height: var(--lp-body-lh);
+  color: var(--sec-ink-soft);
+}
+
+@media (min-width: 48rem) {
+  .lp-showcase__fg-fig {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+    align-items: end;
+    column-gap: clamp(1.5rem, 3vw, 2.5rem);
+  }
+
+  .lp-showcase__fg[data-wide] .lp-showcase__fg-pic {
+    aspect-ratio: 1.5;
+  }
+
+  .lp-showcase__fg-cap {
+    padding-block-end: 0.25rem;
+  }
+}
+
+@media (min-width: 64rem) {
+  .lp-showcase__fg {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 11fr);
+  }
+
+  .lp-showcase__fg > * {
+    grid-column: 2;
+  }
+
+  .lp-showcase__fg-fig {
+    grid-template-columns: minmax(0, 8fr) minmax(0, 3fr);
+  }
+
+  /* an upright photo keeps a reading size; its caption column hangs right beside it */
+  .lp-showcase__fg:not([data-wide]) .lp-showcase__fg-fig {
+    grid-template-columns: minmax(0, 32rem) minmax(0, 18rem);
+  }
+}

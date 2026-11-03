@@ -453,3 +453,39 @@
     scale: calc(var(--pic-zoom, 1) * 1.07);
   }
 }
+
+/* sheet H5: the media : text ratio and the logical media side from 64rem (split.tsx data-ratio / data-side) */
+@media (min-width: 64rem) {
+  .lp-hero--split .lp-hero__grid[data-ratio="5:7"] {
+    --sp-m: 7fr;
+    --sp-t: 5fr;
+  }
+
+  .lp-hero--split .lp-hero__grid[data-ratio="4:8"] {
+    --sp-m: 8fr;
+    --sp-t: 4fr;
+  }
+
+  .lp-hero--split .lp-hero__grid[data-ratio="1:1"] {
+    --sp-m: 1fr;
+    --sp-t: 1fr;
+  }
+
+  .lp-hero--split .lp-hero__grid[data-ratio] {
+    grid-template-columns: minmax(0, var(--sp-m)) minmax(0, var(--sp-t));
+  }
+
+  .lp-hero--split .lp-hero__grid[data-side="end"] {
+    grid-template-columns: minmax(0, var(--sp-t, 1fr)) minmax(0, var(--sp-m, 1.1fr));
+  }
+
+  .lp-hero--split .lp-hero__grid[data-side="end"] > .lp-hero__gallery {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .lp-hero--split .lp-hero__grid[data-side="end"] > .lp-hero__panel {
+    grid-column: 1;
+    grid-row: 1;
+  }
+}

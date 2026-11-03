@@ -257,6 +257,23 @@ function reservation(key: string, ctx: ReservationContext): number {
   return m;
 }
 
+/**
+ * The section kit II variants (design.md DES-§4.5.4, sheets H6-H10, S1-S4): composed for a genome's look, reached
+ * through the grammar pools (src/lib/design/compile.ts, release flag `design_new_heroes`). The archetype draw below
+ * never picks them, so pages generated without a look stay what they were.
+ */
+export const LOOK_ONLY: ReadonlySet<string> = new Set([
+  "hero:cinema",
+  "hero:quiet",
+  "hero:index",
+  "hero:contact",
+  "hero:statement",
+  "benefits:hanging",
+  "showcase:figure",
+  "gallery:contact",
+  "offer:showcase",
+]);
+
 type VariantContext = Pick<PlanContext, "archetype" | "seed" | "hasCutout" | "imageCount" | "avoid" | "mood" | "storeName" | "garment" | "hasFacts" | "hasWhatsapp">;
 
 export function chooseVariant(
@@ -266,7 +283,7 @@ export function chooseVariant(
   exclude?: ReadonlySet<string>,
 ): string {
   const def = getSection(type);
-  const every = def?.variants.map((v) => v.id).filter((id) => id !== "none") ?? [];
+  const every = def?.variants.map((v) => v.id).filter((id) => id !== "none" && !LOOK_ONLY.has(`${type}:${id}`)) ?? [];
   const allowed = exclude ? every.filter((id) => !exclude.has(id)) : every;
   const ids = allowed.length ? allowed : every;
   if (!def || ids.length === 0) return def?.variants[0]?.id ?? "default";

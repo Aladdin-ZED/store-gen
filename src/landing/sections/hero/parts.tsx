@@ -332,6 +332,25 @@ export function HeroTrust({
 }
 
 /**
+ * The action line of the sheets H6-H10 (DES-§5.13): the price cluster and the button on one line (wrapping under the
+ * price only when both cannot fit), then the COD line, the hero's lead promise. The cluster is one unit (Price).
+ */
+export function HeroAct({ ctx, data, id, className, delay, cod = true }: AtomProps & { id: string; delay?: number; cod?: boolean }): ReactElement {
+  return (
+    <div className={cx("lp-hero__act", className)} {...reveal("rise", delay)}>
+      <div className="lp-hero__act-row">
+        <HeroPrice ctx={ctx} size="m" />
+        <HeroCta ctx={ctx} data={data} size="l" />
+      </div>
+      {cod ? <HeroTrust ctx={ctx} data={data} id={id} max={1} /> : null}
+    </div>
+  );
+}
+
+/** The resolution rule of the slots (DES-§4.11 H13, I6): the asset covers `cssWidth` CSS px at DPR 2 with 1.5 × room. */
+export const covers = (asset: ResolvedAsset | null | undefined, cssWidth: number, k = 1.5): boolean => !!asset && asset.width >= cssWidth * 2 * k;
+
+/**
  * "×2 −10% · ×3 −20%": the genuine pack savings as a compact segmented glass pill. Every segment
  * is a real link — it scrolls to the form with that pack preselected. Nothing when no pack saves.
  */

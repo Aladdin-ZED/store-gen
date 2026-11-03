@@ -1,0 +1,161 @@
+/* hero · index — rules only this variant renders (design.md DES-§5.13 H8): the photo (36 vh on phones), the title, the
+   merchant's facts as numbered rows on hairlines, the action line. From 48rem the photo at the inline start (1:1), the
+   entry beside it. Row numbers are LTR isolates at the inline start of each row. */
+
+.lp-hero__index {
+  display: grid;
+  gap: clamp(1rem, 0.8rem + 1vw, 2rem);
+}
+
+.lp-hero__index-media {
+  position: relative;
+  margin: 0;
+  block-size: min(36svh, 84vw);
+  overflow: hidden;
+  border-radius: var(--lp-sq-media);
+  corner-shape: var(--lp-corner);
+  background-color: var(--mx-tint);
+}
+
+.lp-hero__index-pic {
+  position: absolute;
+  inset: 0;
+  aspect-ratio: auto;
+}
+
+.lp-hero__index-media[data-kind="cutout"] .lp-hero__index-pic {
+  inset: 8%;
+}
+
+.lp-hero__entry {
+  display: grid;
+  gap: clamp(1rem, 0.85rem + 0.6vw, 1.5rem);
+  justify-items: start;
+  min-inline-size: 0;
+}
+
+.lp-hero--index .lp-hero__title {
+  max-inline-size: 18ch;
+  font-size: min(calc(var(--lp-step-5) * 0.74 * var(--lp-script-scale-display)), 11vw, 4.25rem);
+}
+
+.lp-hero__facts {
+  display: grid;
+  inline-size: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-block-end: var(--lp-hairline) solid var(--mx-line);
+}
+
+.lp-hero__fact {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 0.5rem;
+  min-block-size: 2rem;
+  padding-block: 0.45rem;
+  font-size: calc(var(--lp-step-0) * 0.95 * var(--lp-script-scale));
+  line-height: 1.35;
+}
+
+/* the hairline above each row draws from the inline start (the signature) */
+.lp-hero__fact::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  block-size: var(--lp-hairline);
+  background-color: var(--mx-line);
+  transform-origin: calc(50% - 50% * var(--lp-x, 1)) 50%;
+  transition: scale var(--lp-dur-m) var(--lp-smooth) var(--d, 0ms);
+}
+
+html.lp-js .lp-hero__fact[data-reveal]:not([data-in])::before {
+  scale: 0 1;
+}
+
+.lp-hero__fact-n {
+  font-family: var(--lp-font-label, var(--lp-font-body));
+  font-size: 0.82em;
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--sec-accent);
+}
+
+.lp-hero__fact-t {
+  font-weight: var(--lp-strong-weight);
+}
+
+/* phones: one 32 px line per fact and three facts at most (the fold of DES-§5.12); the details from 48rem */
+.lp-hero__fact-d {
+  display: none;
+  color: var(--sec-ink-soft);
+  font-size: 0.92em;
+}
+
+.lp-hero__fact:nth-child(n + 4) {
+  display: none;
+}
+
+.lp-hero__act {
+  display: grid;
+  gap: 0.8rem;
+  justify-items: start;
+  inline-size: 100%;
+}
+
+.lp-hero__act-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  inline-size: 100%;
+}
+
+/* the button beside the price when both fit at their natural width, else under it at full width */
+.lp-hero__act-row .lp-hero__cta {
+  flex: 1 1 auto;
+  inline-size: auto;
+  min-inline-size: 0;
+  max-inline-size: 26rem;
+}
+
+/* the cluster is price, reference and chip; the spelled-out saving stays with the form */
+.lp-hero__act .lp-price__save-amt {
+  display: none;
+}
+
+@media (min-width: 48rem) {
+  .lp-hero__index {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    align-items: center;
+    column-gap: clamp(2rem, 5vw, 5rem);
+  }
+
+  .lp-hero__index-media {
+    block-size: auto;
+    aspect-ratio: 1;
+    max-block-size: 78vh;
+  }
+
+  .lp-hero__fact {
+    grid-template-columns: 2.75rem minmax(0, 1fr) auto;
+  }
+
+  .lp-hero__fact:nth-child(n + 4) {
+    display: grid;
+  }
+
+  .lp-hero__fact-d {
+    display: block;
+    grid-column: 3;
+    text-align: end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-hero__fact::before {
+    transition: none;
+  }
+}

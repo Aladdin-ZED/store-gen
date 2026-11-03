@@ -52,6 +52,8 @@ export const schema = z.object({
   ctaLabel: opt(60),
   /** the defaults are typical figures for the category: on until the merchant has checked them */
   sample: z.boolean().default(false),
+  /** figure (sheet S2): the label of its caption column ("FIG. 01"), a counted device; absent = no label */
+  figure: z.string().max(20).optional(),
 });
 
 export type Data = z.infer<typeof schema>;

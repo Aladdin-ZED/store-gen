@@ -1,20 +1,29 @@
 /**
  * Hero — the single most important composition of the page: it must stop the scroll on a phone in
- * one second and carry the archetype's personality. Six genuinely different modern compositions
+ * one second and carry the archetype's personality. Eleven genuinely different modern compositions
  * share one data shape, so switching variants never loses content. The page's only h1 lives here.
+ *
+ * The five families of section kit II (design.md DES-§4.5.4, sheets H6-H10: cinema, quiet, index, contact,
+ * statement) reach generated pages through the genome's grammar pools only (release flag `design_new_heroes`); the
+ * archetype draw of the legacy generator never picks them (src/lib/generator/plan.ts `LOOK_ONLY`).
  */
 import { createT } from "../../i18n";
 import { defineSection, type FieldSpec } from "../../types";
 import { garmentOf } from "../garment";
 import { bigWordOf, familyCopy, familyOf, garmentHero } from "./copy";
+import { CinemaHero } from "./cinema";
+import { ContactHero } from "./contact";
 import { EditorialHero } from "./editorial";
+import { IndexHero } from "./catalogue";
 import type { HeroProps } from "./parts";
 import { PosterHero } from "./poster";
+import { QuietHero } from "./quiet";
 import { HeroSchema, type HeroData } from "./schema";
 import { ScrapbookHero } from "./scrapbook";
 import { SpecHero } from "./spec";
 import { SplitHero } from "./split";
 import { StageHero } from "./stage";
+import { StatementHero } from "./statement";
 import { withRevealScope } from "../reveal-scope";
 
 const RENDER: Record<string, (p: HeroProps) => ReturnType<typeof StageHero>> = {
@@ -24,6 +33,11 @@ const RENDER: Record<string, (p: HeroProps) => ReturnType<typeof StageHero>> = {
   scrapbook: ScrapbookHero,
   spec: SpecHero,
   split: SplitHero,
+  cinema: CinemaHero,
+  quiet: QuietHero,
+  index: IndexHero,
+  contact: ContactHero,
+  statement: StatementHero,
 };
 
 const fields: FieldSpec[] = [
@@ -94,6 +108,8 @@ const fields: FieldSpec[] = [
       { kind: "text", path: "issue", label: "Masthead line", max: 60, help: "Editorial layout only, e.g. “Édition 01 · Soin”." },
       { kind: "image", path: "image", label: "Main image", help: "Defaults to the product cutout, then the first product photo." },
       { kind: "images", path: "images", label: "Extra photos", max: 4, help: "Used by the Contact sheet and the Split gallery." },
+      { kind: "images", path: "photos", label: "Contact sheet photos", max: 4, help: "Contact layout: 3 or 4 different photos. Empty: the main image, the extra photos, then the product's." },
+      { kind: "text", path: "caption", label: "Photo caption", max: 60, help: "Cinema layout only: one short line over the photo on wide screens, never on phones." },
     ],
   },
 ];
@@ -142,6 +158,36 @@ export default withRevealScope(defineSection({
       id: "split",
       label: "Product page",
       description: "Premium product page: swipeable gallery beside title, rating, price, pack chips, button and trust list.",
+    },
+    {
+      id: "cinema",
+      label: "Cinema",
+      description: "Your photo edge to edge across the first screen, the headline, price and button on the ground under it.",
+      archetypes: [],
+    },
+    {
+      id: "quiet",
+      label: "Quiet",
+      description: "A small product on a lot of space, one line of type, the price and the button on one line.",
+      archetypes: [],
+    },
+    {
+      id: "index",
+      label: "Index",
+      description: "A catalogue entry: the photo, the headline, your product notes as numbered rows, the price and the button.",
+      archetypes: [],
+    },
+    {
+      id: "contact",
+      label: "Contact sheet II",
+      description: "Three or four of your photos on a fine grid, one cell holding the headline, the price and the button.",
+      archetypes: [],
+    },
+    {
+      id: "statement",
+      label: "Statement",
+      description: "Type first: a big headline, the product as a small framed photo, the price, the button and one line.",
+      archetypes: [],
     },
   ],
   schema: HeroSchema,

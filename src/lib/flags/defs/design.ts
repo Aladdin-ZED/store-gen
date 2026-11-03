@@ -5,4 +5,13 @@
  */
 import type { FlagDef } from "../registry";
 
-export const flags: FlagDef[] = [];
+export const flags: FlagDef[] = [
+  {
+    key: "design_new_heroes",
+    kind: "release",
+    type: "boolean",
+    default: true,
+    description: "The new hero families (cinema, quiet, index, contact, statement) in the generation pools; off keeps today's six minus scrapbook",
+    ownerTrack: "design",
+  },
+];

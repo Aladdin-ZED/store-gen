@@ -117,3 +117,7 @@ export const passLabels = (locale: Locale) => ({
   save: say(locale, { ar: "التوفير", fr: "Économie", en: "You save" }),
   qty: say(locale, { ar: "الكمية", fr: "Quantité", en: "Quantity" }),
 });
+
+/** The quiet link under the showcase row (sheet S4): the picker lives in the order form. */
+export const showcaseLink = (locale: Locale): string =>
+  say(locale, { ar: "اختار العرض ديالك فاستمارة الطلب", fr: "Choisissez votre pack dans le formulaire", en: "Choose your pack in the order form" });

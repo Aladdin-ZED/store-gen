@@ -135,6 +135,12 @@ export const VARIANT_FEATURES: Readonly<Record<string, Readonly<Record<string, V
     },
     spec: sheet("hero:spec", { ...HERO, glass: 1, signature: 1, details: 1, overlayChips: 3, decor: { chips: "notes" }, textRuns: ["display"] }),
     split: sheet("hero:split", { ...HERO, textRuns: ["display"] }),
+    // section kit II (DES-§4.5.4, sheets H6-H10): one signature each (the sheet's), no chips, no glass, no ghost word
+    cinema: sheet("hero:cinema", { ...HERO, signature: 1, textRuns: ["display"] }),
+    quiet: sheet("hero:quiet", { ...HERO, signature: 1, textRuns: ["display"] }),
+    index: sheet("hero:index", { ...HERO, signature: 1, textRuns: ["display"] }),
+    contact: sheet("hero:contact", { ...HERO, signature: 1, textRuns: ["display"] }),
+    statement: sheet("hero:statement", { ...HERO, signature: 1, textRuns: ["display"] }),
   },
   trustBar: {
     chips: { family: "list", h: 0.4, glass: 1, openers: NO_OPENER },
@@ -162,12 +168,16 @@ export const VARIANT_FEATURES: Readonly<Record<string, Readonly<Record<string, V
     zigzag: { family: "split", h: 2.95, glass: 1, overlayChips: 1, revealNodes: HEAD },
     icons: { family: "grid", iconHeads: true, equalCards: 4, cardGrid: true, revealNodes: HEAD },
     stack: { family: "list", h: 5.15, animatesLayout: true, revealNodes: HEAD },
+    // numbered rows with hanging thumbnails (S1): no icons
+    hanging: sheet("benefits:hanging", { revealNodes: HEAD }),
   },
   showcase: {
     hotspots: { family: "media", h: 1.35, revealNodes: HEAD },
     exploded: { family: "media", h: 1.75, revealNodes: HEAD },
     ingredients: { family: "grid", h: 1.7, bento: true, revealNodes: HEAD },
     dimensions: { family: "media", h: 1.15, revealNodes: HEAD },
+    // one large image and its caption column (S2): no price, no button
+    figure: sheet("showcase:figure", { revealNodes: HEAD }),
   },
   steps: {
     timeline: { family: "list", h: 1.15, ctas: 1, animatesLayout: true, revealNodes: HEAD },
@@ -185,6 +195,8 @@ export const VARIANT_FEATURES: Readonly<Record<string, Readonly<Record<string, V
     masonry: { family: "grid", h: 1.4, ctas: 1, bento: true, revealNodes: HEAD },
     filmstrip: { family: "media", h: 1.25, ctas: 1, scroller: true, revealNodes: HEAD },
     lookbook: { family: "grid", h: 1.2, ctas: 1, revealNodes: HEAD },
+    // the contact sheet (S3): 3-6 photos on a 2 px gap, no captions, no button
+    contact: sheet("gallery:contact", { revealNodes: HEAD }),
   },
   video: {
     framed: { family: "media", h: 1.25, ctas: 1, glass: 1, revealNodes: HEAD },
@@ -230,6 +242,8 @@ export const VARIANT_FEATURES: Readonly<Record<string, Readonly<Record<string, V
     // showcase cards with one cut corner (S8): no perforations, no pass colours
     tickets: sheet("offer:tickets", { picker: true, equalCards: 3, cardGrid: true, revealNodes: HEAD }),
     shelf: { family: "grid", h: 1.35, picker: true, equalCards: 3, cardGrid: true, revealNodes: HEAD },
+    // the packs as a showcase (S4, R2): the form carries the picker, no button
+    showcase: sheet("offer:showcase", { picker: false, scroller: true, equalCards: 3, cardGrid: true, revealNodes: HEAD }),
   },
   urgency: {
     countdown: { family: "media", h: 0.9, glass: 1, openers: NO_OPENER },

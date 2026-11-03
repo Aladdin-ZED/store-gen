@@ -190,13 +190,23 @@ const POOLS: Readonly<Record<Grammar, Pools>> = {
   },
 };
 
-/** The grammar's pools as weighted variants (the choreography step filters them by the registry and the archetype). */
-export function grammarPools(g: Grammar): { hero: WeightedVariant[]; pools: Partial<Record<ThemeSectionType, WeightedVariant[]>> } {
+/** The hero families of section kit II (DES-§4.5.4, sheets H6-H10), behind the release flag `design_new_heroes`. */
+export const NEW_HERO_FAMILIES: ReadonlySet<string> = new Set(["cinema", "quiet", "index", "contact", "statement"]);
+
+/**
+ * The grammar's pools as weighted variants (the choreography step filters them by the registry and the archetype).
+ * `newHeroes: false` (the flag off) drops the five new hero families and renormalises the rest: today's six minus
+ * scrapbook, which no pool holds.
+ */
+export function grammarPools(g: Grammar, opts: { newHeroes?: boolean } = {}): { hero: WeightedVariant[]; pools: Partial<Record<ThemeSectionType, WeightedVariant[]>> } {
   const { hero, ...rest } = POOLS[g];
   const wv = (list: [string, number][]) => list.map(([variant, weight]) => ({ variant, weight }));
   const pools: Partial<Record<ThemeSectionType, WeightedVariant[]>> = {};
   for (const [type, list] of Object.entries(rest) as [ThemeSectionType, [string, number][]][]) pools[type] = wv(list);
-  return { hero: wv(hero), pools };
+  if (opts.newHeroes !== false) return { hero: wv(hero), pools };
+  const kept = hero.filter(([v]) => !NEW_HERO_FAMILIES.has(v));
+  const total = kept.reduce((s, [, w]) => s + w, 0);
+  return { hero: kept.length ? kept.map(([variant, w]) => ({ variant, weight: Math.round((w / total) * 1000) / 1000 })) : [{ variant: "split", weight: 1 }], pools };
 }
 
 /* ------------------------------------------------------------------ */

@@ -11,7 +11,14 @@
  *  - owner rule 2 (S8, S17, S20, S21): no tape, stamp, ticket perforation, seal ring, chat bubble or phone mock class;
  *  - DES-§5.9: the final call's primary button carries `data-hero-cta`;
  *  - DS42 (sheet S7): a stats section with library example figures renders nothing, one with merchant figures renders.
+ *
+ * Section kit II (step 5; DES-§4.5.4, sheets H5-H10, S1-S4): `KIT_NEW`, the five new hero families, split's ratio and
+ * media side, the four new sections and the one-asset page (a single 1,200 px phone photo without alpha: the cinema
+ * hero's mobile-only bleed with its framed desktop fallback), checked by `newKitProblems`: one h1, the fold items in
+ * the hero's markup (photo, price cluster, the order action, the COD line: the static C2 rows), no chip over a photo,
+ * numerals in LTR isolates, and no button, price or picker in the sections that never sell.
  */
+import type { AssetResolver } from "@/landing/context";
 import { getSection } from "@/landing/registry";
 import { allowedBgs } from "@/lib/editor/sections";
 import { getFixture, type FixtureName } from "@/lib/page/fixtures";
@@ -25,6 +32,49 @@ export interface KitSpec {
   fixture: FixtureName;
   variants: Readonly<Record<string, string>>;
   data?: Readonly<Record<string, Record<string, unknown>>>;
+  /** data per locale over `data` (copy written in the page's language) */
+  localized?: Readonly<Record<"ar" | "fr", Readonly<Record<string, Record<string, unknown>>>>>;
+  /** one product photo only, no cut-out, resolved at this width (a 3:4 phone photo without alpha) */
+  oneAsset?: number;
+}
+
+/**
+ * Section kit II (step 5): every new hero family in ar and fr, split's ratio and logical media side, the four new
+ * sections (hanging benefits, the figure showcase, the contact gallery, the pack showcase) and the one-asset page.
+ */
+export const KIT_NEW: readonly KitSpec[] = [
+  {
+    name: "kit-cinema",
+    fixture: "argan",
+    variants: { hero: "cinema", benefits: "hanging" },
+    localized: { fr: { hero: { caption: "Verre ambré, pipette en verre" } }, ar: { hero: { caption: "زجاج عنبري وقطّارة زجاجية" } } },
+  },
+  {
+    name: "kit-quiet",
+    fixture: "tshirt",
+    variants: { hero: "quiet", benefits: "hanging", showcase: "figure", gallery: "contact", offer: "showcase" },
+    localized: { fr: { showcase: { figure: "FIG. 01", caption: "La maille, de près" } }, ar: { showcase: { figure: "الشكل 01", caption: "النسيج عن قرب" } } },
+  },
+  { name: "kit-index", fixture: "argan", variants: { hero: "index", offer: "showcase" }, data: { hero: { numbering: "padded" } } },
+  { name: "kit-contact2", fixture: "tshirt", variants: { hero: "contact", gallery: "contact" }, data: { hero: { titleCell: "bl" }, gallery: { cols: 2 } } },
+  { name: "kit-statement", fixture: "parfum", variants: { hero: "statement", showcase: "figure" }, data: { hero: { structure: "word-subline" } } },
+  { name: "kit-pair", fixture: "argan", variants: { hero: "statement" }, data: { hero: { structure: "contrast-pair" } } },
+  { name: "kit-split", fixture: "tshirt", variants: { hero: "split" }, data: { hero: { ratio: "5:7", mediaSide: "end" } } },
+  { name: "kit-one-asset", fixture: "argan", variants: { hero: "cinema" }, oneAsset: 1200 },
+];
+
+/** The page's assets, with the one-asset page's single photo resolved as a `oneAsset`-px 3:4 phone photo without alpha. */
+export function kitAssets(spec: KitSpec, doc: PageDoc, base: AssetResolver): AssetResolver {
+  const id = spec.oneAsset ? doc.product.images[0]?.id : undefined;
+  if (!id || !spec.oneAsset) return base;
+  const w = spec.oneAsset;
+  return {
+    ...base,
+    resolve(ref) {
+      const a = base.resolve(ref);
+      return a && a.id === id ? { ...a, width: w, height: Math.round((w * 4) / 3), alpha: false } : a;
+    },
+  };
 }
 
 /**
@@ -49,13 +99,17 @@ export function kitDoc(spec: KitSpec, locale: "ar" | "fr", now: string): { doc: 
   const fx = getFixture(spec.fixture, { now, locale });
   const sections = (fx.doc as { sections: SectionInstance[] }).sections.map((s): SectionInstance => {
     const variant = spec.variants[s.type];
-    const data = spec.data?.[s.type];
-    if (!variant && !data) return s;
+    const data = { ...(spec.data?.[s.type] ?? {}), ...(spec.localized?.[locale]?.[s.type] ?? {}) };
+    if (!variant && !Object.keys(data).length) return s;
     const v = variant ?? s.variant;
     const bgs = allowedBgs(getSection(s.type), v);
-    return { ...s, variant: v, bg: bgs.includes(s.bg) ? s.bg : bgs[0]!, data: { ...s.data, ...(data ?? {}) } };
+    // the one-asset page: the hero shows the product's one photo, never an override
+    const own = spec.oneAsset && s.type === "hero" ? { image: undefined, images: [] } : {};
+    return { ...s, variant: v, bg: bgs.includes(s.bg) ? s.bg : bgs[0]!, data: { ...s.data, ...data, ...own } };
   });
-  const { doc } = validateDoc({ ...fx.doc, sections });
+  const raw = fx.doc as { product: { images: unknown[]; cutout?: unknown } };
+  const product = spec.oneAsset ? { ...raw.product, images: raw.product.images.slice(0, 1), cutout: undefined } : raw.product;
+  const { doc } = validateDoc({ ...fx.doc, product, sections });
   if (!doc) throw new Error(`${spec.name}/${locale}: invalid kit document`);
   return { doc, fx };
 }
@@ -119,6 +173,60 @@ export function kitMarkupProblems(html: string, locale: string, opts: { cta?: bo
     const shown = /\sdata-section="stats"/.test(body);
     if (opts.stats === "none" && shown) out.push("DS42: a stats section with library example figures rendered");
     if (opts.stats === "shown" && !shown) out.push("DS42: a stats section with merchant figures did not render");
+  }
+  return out;
+}
+
+/** The section's markup in a rendered body (its root with `data-section="<type>"`). */
+function sectionHtml(body: string, type: string): string {
+  return sectionsOf(body).find((s) => s.key.startsWith(`${type}.`))?.html ?? "";
+}
+
+/**
+ * Section kit II markup (step 5): the hero's fold items (C2, static), one h1, its numerals in LTR isolates, nothing over
+ * the photo but the cinema caption; and the sections that never sell (showcase:figure, gallery:contact) or leave the
+ * picker to the form (offer:showcase) draw no button, price or pack link.
+ */
+export function newKitProblems(html: string, spec: KitSpec): string[] {
+  const out: string[] = [];
+  const body = html.slice(html.indexOf("<body")).replace(/<script\b[\s\S]*?<\/script>/g, "");
+  const hero = sectionHtml(body, "hero");
+  const family = spec.variants.hero;
+  if (!hero) return ["the hero did not render"];
+  if (!hero.includes(`data-variant="${family}"`)) out.push(`the hero is not hero:${family}`);
+  if ((body.match(/<h1\b/g) ?? []).length !== 1) out.push("the page has no single h1");
+  // C2 (static): the photo, the price cluster, the order action and the COD line are in the hero's own markup
+  if (!/<img\b/.test(hero)) out.push(`hero:${family}: no product photo`);
+  if (!/class="[^"]*lp-price\b/.test(hero)) out.push(`hero:${family}: no price cluster`);
+  if (!/<a\b[^>]*data-action="order"/.test(hero)) out.push(`hero:${family}: no order action`);
+  if (!/class="[^"]*lp-trust\b/.test(hero)) out.push(`hero:${family}: no COD line`);
+  if (family !== "split" && /lp-hero__callout|lp-glass/.test(hero)) out.push(`hero:${family}: a chip or glass over the photo`);
+  if (family === "cinema") {
+    const fig = /<figure class="lp-hero__cine-media"[\s\S]*?<\/figure>/.exec(hero)?.[0] ?? "";
+    const text = fig.replace(/<figcaption[\s\S]*?<\/figcaption>/, "").replace(/<[^>]+>/g, "").trim();
+    if (text) out.push(`hero:cinema: text over the photo besides the caption ("${text.slice(0, 40)}")`);
+  }
+  if (family === "index") for (const m of hero.matchAll(/<bdi class="lp-hero__fact-n"[^>]*>/g)) if (!/dir="ltr"/.test(m[0])) out.push("hero:index: a row number outside an LTR isolate");
+  if (spec.oneAsset && family === "cinema" && !/data-layout="mobile"/.test(hero)) out.push("hero:cinema with one 1,200 px photo: not the mobile-only bleed with its framed desktop fallback");
+  // the sections that never sell, and the showcase that leaves the picker to the form
+  for (const [type, variant] of Object.entries(spec.variants)) {
+    const key = `${type}:${variant}`;
+    if (!["showcase:figure", "gallery:contact", "offer:showcase"].includes(key)) continue;
+    const sec = sectionHtml(body, type);
+    if (!sec) {
+      out.push(`${key} did not render`);
+      continue;
+    }
+    if (/class="[^"]*lp-btn\b/.test(sec)) out.push(`${key}: draws a button`);
+    if (/data-bundle=/.test(sec)) out.push(`${key}: draws a pack picker`);
+    if (key !== "offer:showcase" && /class="[^"]*lp-price\b|data-action="order"/.test(sec)) out.push(`${key}: draws a price or an order action`);
+    if (key === "offer:showcase" && !/href="#order"/.test(sec)) out.push("offer:showcase: no link to the form");
+  }
+  if (spec.variants.benefits === "hanging") {
+    const sec = sectionHtml(body, "benefits");
+    if (!/lp-benefits__hrow/.test(sec)) out.push("benefits:hanging: no rows");
+    const rows = /<ol class="lp-benefits__hrows"[\s\S]*?<\/ol>/.exec(sec)?.[0] ?? "";
+    if (/lp-icon|<svg\b/.test(rows)) out.push("benefits:hanging: an icon in the rows (S07)");
   }
   return out;
 }

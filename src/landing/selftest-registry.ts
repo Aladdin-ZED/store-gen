@@ -9,18 +9,19 @@
  *    exist;
  *  - a hero variant has no `fold`, or a fixed variant (`fixed` set) no `fixedPx`;
  *  - a sheeted, registered variant's `features.fold`, `features.slots` or `features.h` differs from what
- *    src/lib/design/sheets.ts generates (a hand-edited value); a sheet of a family not built yet is listed as
- *    pending and checked strictly once a later step registers its variant;
+ *    src/lib/design/sheets.ts generates (a hand-edited value), or a sheet has no registered variant (strict since
+ *    section kit II: every one of H1-H10 and S1-S8 is built);
  *  - a `decor` path is missing from the variant's data schema;
  *  - a variant has `aurora: true` (V40, CRIT2-4);
  *  - a resolved entry is not the frozen `VariantFeaturesResolved` shape (every key, no other key; DES-§8.4);
  *  - the order form does not declare the fixed 1.1-screen height (LAN R12);
- *  - a DES-§5.4 grammar pool names a variant that is neither registered nor sheeted, or puts `scrapbook`,
- *    `problem:chat`, `faq:chat`, `trustBar:stamps` or an `urgency` variant in a pool.
+ *  - a DES-§5.4 grammar pool names a variant that is not registered, or puts `scrapbook`, `problem:chat`, `faq:chat`,
+ *    `trustBar:stamps` or an `urgency` variant in a pool; the pools with the flag `design_new_heroes` off hold none of
+ *    the five new hero families and still sum to 1.
  * Exit code 1 on any failure.
  */
 import { GRAMMARS } from "@/lib/page/schema";
-import { grammarPools } from "@/lib/design/compile";
+import { grammarPools, NEW_HERO_FAMILIES } from "@/lib/design/compile";
 import { registeredFeatures, variantFeatures } from "@/lib/design/features";
 import { SHEETS, sheetFeatures } from "@/lib/design/sheets";
 import type { VariantFeaturesResolved } from "@/lib/design/types";
@@ -140,24 +141,25 @@ function main() {
   const unknown = variantFeatures("nope", "nope", {});
   check(unknown.family === "grid" && unknown.fixed === null && unknown.ctas === 0, "an unknown variant does not answer the documented defaults");
 
-  // DES-§5.4 pools: every pooled variant registered or sheeted; the banned ones in no pool
+  // every sheet is built (strict, DG-04)
+  const sheeted = Object.keys(SHEETS);
+  for (const key of sheeted) check(registered.has(key), `sheet ${SHEETS[key]!.id} (${key}) has no registered variant`);
+
+  // DES-§5.4 pools: every pooled variant registered; the banned ones in no pool; the flag off drops the new families
   const BANNED = new Set(["hero:scrapbook", "problem:chat", "faq:chat", "trustBar:stamps"]);
-  const pending = new Set<string>();
   for (const g of GRAMMARS) {
     const { hero, pools } = grammarPools(g);
     const all: [string, string][] = [...hero.map((w) => ["hero", w.variant] as [string, string]), ...Object.entries(pools).flatMap(([t, list]) => (list ?? []).map((w) => [t, w.variant] as [string, string]))];
     for (const [t, v] of all) {
       const key = `${t}:${v}`;
       check(!BANNED.has(key) && t !== "urgency", `pool ${g} names ${key}, which is in no pool (DES-§5.4)`);
-      if (!registered.has(key)) {
-        check(SHEETS[key], `pool ${g} names ${key}: neither registered nor sheeted`);
-        if (SHEETS[key]) pending.add(key);
-      }
+      check(registered.has(key), `pool ${g} names ${key}, which is not registered`);
     }
+    const off = grammarPools(g, { newHeroes: false }).hero;
+    check(off.length > 0 && off.every((w) => !NEW_HERO_FAMILIES.has(w.variant) && registered.has(`hero:${w.variant}`)), `pool ${g} with design_new_heroes off: ${off.map((w) => w.variant).join(", ")}`);
+    check(Math.abs(off.reduce((s, w) => s + w.weight, 0) - 1) < 0.01, `pool ${g} with design_new_heroes off does not sum to 1`);
   }
-  const sheeted = Object.keys(SHEETS);
-  console.log(`registry: ${registered.size} variants with features · ${sheeted.filter((k) => registered.has(k)).length} sheeted and registered · pending sheets (not built yet): ${sheeted.filter((k) => !registered.has(k)).join(", ")}`);
-  console.log(`pools: ${pending.size} pooled variants wait for their build (${[...pending].sort().join(", ")})`);
+  console.log(`registry: ${registered.size} variants with features · ${sheeted.filter((k) => registered.has(k)).length}/${sheeted.length} sheets registered`);
   console.log(`${checks} checks · ${failures ? `${failures} FAILURE(S)` : "ALL OK"}`);
   process.exit(failures ? 1 : 0);
 }

@@ -14,6 +14,7 @@ import { defineSection, type SectionProps } from "../../types";
 import { copyLang, familyOf, fill, pick, shortName } from "../benefits/kit";
 import { Bento } from "./bento";
 import { Carousel } from "./carousel";
+import { Contact } from "./contact";
 import { garmentOf } from "../garment";
 import { COMMON, FAMILY, GARMENT_GALLERY } from "./copy";
 import { Filmstrip } from "./filmstrip";
@@ -26,6 +27,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   masonry: Bento,
   filmstrip: Filmstrip,
   lookbook: Lookbook,
+  contact: Contact,
 };
 
 export default withRevealScope(defineSection({
@@ -58,6 +60,12 @@ export default withRevealScope(defineSection({
       label: "Lookbook",
       description: "Editorial spreads of one large and two small photos with captions.",
       archetypes: ["maison", "editorial", "souk", "bloom"],
+    },
+    {
+      id: "contact",
+      label: "Contact sheet",
+      description: "Three to six of your photos as an even grid on a fine gap. No captions, no button.",
+      archetypes: [],
     },
   ],
   schema,

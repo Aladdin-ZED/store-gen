@@ -1,0 +1,176 @@
+/* hero · cinema — rules only this variant renders (design.md DES-§5.13 H6): the photo edge to edge (50 vh on phones,
+   16:9 from 48rem, 21:9 from 64rem), the commerce band on the ground under it; a mobile-only bleed falls back to a
+   framed photo beside the band from 48rem (data-layout="mobile"), a photo too small for any bleed is framed everywhere
+   ("framed"). Text over the photo: the one caption, from 48rem. */
+
+.lp-hero--cinema {
+  padding-block-start: 0;
+}
+
+.lp-hero__cine {
+  display: grid;
+  gap: clamp(1.25rem, 0.9rem + 1.4vw, 2.25rem);
+}
+
+.lp-hero__cine[data-layout="framed"] {
+  padding-block-start: clamp(1.25rem, 0.4rem + 3.4vw, 3.75rem);
+}
+
+.lp-hero__cine-media {
+  position: relative;
+  margin: 0;
+  block-size: min(50svh, 125vw);
+  overflow: hidden;
+  background-color: var(--mx-tint);
+}
+
+.lp-hero__cine[data-layout="framed"] .lp-hero__cine-media {
+  margin-inline: var(--lp-gutter);
+  block-size: min(46svh, 110vw);
+  border-radius: var(--lp-sq-media);
+  corner-shape: var(--lp-corner);
+}
+
+.lp-hero__cine-pic {
+  position: absolute;
+  inset: 0;
+  aspect-ratio: auto;
+}
+
+.lp-hero__cine-cap {
+  display: none;
+}
+
+.lp-hero__cine-band {
+  display: grid;
+  gap: 1.1rem;
+  justify-items: start;
+}
+
+.lp-hero--cinema .lp-hero__title {
+  max-inline-size: 18ch;
+  font-size: min(calc(var(--lp-step-5) * 0.78 * var(--lp-script-scale-display)), 11vw, 4.75rem);
+}
+
+.lp-hero__act {
+  display: grid;
+  gap: 0.8rem;
+  justify-items: start;
+  inline-size: 100%;
+}
+
+.lp-hero__act-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  inline-size: 100%;
+}
+
+/* the button beside the price when both fit at their natural width, else under it at full width */
+.lp-hero__act-row .lp-hero__cta {
+  flex: 1 1 auto;
+  inline-size: auto;
+  min-inline-size: 0;
+  max-inline-size: 26rem;
+}
+
+/* the cluster is price, reference and chip; the spelled-out saving stays with the form */
+.lp-hero__act .lp-price__save-amt {
+  display: none;
+}
+
+@media (min-width: 48rem) {
+  .lp-hero__cine-media {
+    block-size: auto;
+    aspect-ratio: 16 / 9;
+    max-block-size: 60vh;
+  }
+
+  .lp-hero__cine-cap {
+    position: absolute;
+    inset-block-end: clamp(0.75rem, 1.5vw, 1.5rem);
+    inset-inline-end: clamp(0.75rem, 1.5vw, 1.5rem);
+    display: block;
+    max-inline-size: min(22rem, 60%);
+    padding: 0.45rem 0.75rem;
+    border-radius: var(--lp-sq-m);
+    corner-shape: var(--lp-corner);
+    background-color: var(--sec-bg);
+    color: var(--sec-ink);
+    font-size: calc(var(--lp-step--1) * var(--lp-script-scale));
+    line-height: 1.35;
+  }
+
+  /* the framed fallback: the band at the inline start, the photo framed beside it */
+  .lp-hero__cine:is([data-layout="framed"], [data-layout="mobile"]) {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    align-items: center;
+    inline-size: min(100% - 2 * var(--lp-gutter), var(--lp-container));
+    margin-inline: auto;
+    padding-block-start: clamp(1.25rem, 0.4rem + 3.4vw, 3.75rem);
+    column-gap: clamp(2rem, 5vw, 5rem);
+  }
+
+  .lp-hero__cine:is([data-layout="framed"], [data-layout="mobile"]) .lp-hero__cine-media {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+    aspect-ratio: 4 / 5;
+    max-block-size: 76vh;
+    border-radius: var(--lp-sq-media);
+    corner-shape: var(--lp-corner);
+  }
+
+  .lp-hero__cine:is([data-layout="framed"], [data-layout="mobile"]) .lp-hero__cine-band {
+    grid-column: 1;
+    grid-row: 1;
+    inline-size: auto;
+    margin: 0;
+  }
+}
+
+@media (min-width: 64rem) {
+  .lp-hero__cine[data-layout="below"] .lp-hero__cine-media {
+    aspect-ratio: 21 / 9;
+    max-block-size: 72vh;
+  }
+
+  .lp-hero__cine[data-layout="below"] .lp-hero__cine-band {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    align-items: end;
+    column-gap: clamp(2rem, 5vw, 5rem);
+  }
+
+  .lp-hero__cine[data-layout="beside"] {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    align-items: center;
+  }
+
+  .lp-hero__cine[data-layout="beside"] .lp-hero__cine-media {
+    grid-column: 2;
+    grid-row: 1;
+    aspect-ratio: 4 / 3;
+    max-block-size: 82vh;
+  }
+
+  .lp-hero__cine[data-layout="beside"] .lp-hero__cine-band {
+    grid-column: 1;
+    grid-row: 1;
+    inline-size: auto;
+    margin-inline: max(var(--lp-gutter), (100vw - var(--lp-container)) / 2) 0;
+  }
+}
+
+/* the slow settle: the photo eases from 1.08 to its place, once */
+@media (prefers-reduced-motion: no-preference) {
+  html.lp-js:not([data-motion="off"]) .lp-hero__cine-media[data-in] .lp-hero__cine-pic {
+    animation: lp-cine-settle calc(var(--lp-dur-l) * 1.5) var(--lp-smooth) backwards;
+  }
+}
+
+@keyframes lp-cine-settle {
+  from {
+    transform: scale(1.08);
+  }
+}
