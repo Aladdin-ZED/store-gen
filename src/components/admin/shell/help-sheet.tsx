@@ -26,6 +26,7 @@ import { FOCUS_RING, TOUCH } from "../common/ui-classes";
 import { helpSection, helpTipKeys } from "./chrome-logic";
 import { diagnosticPath, diagnosticText, recentClientErrors } from "./client-errors";
 import { useStore } from "./store-context";
+import { useShortcutSheet } from "./shortcut-sheet";
 import { activeNav, storeNav } from "./store-nav";
 import { usePulse } from "./use-pulse";
 
@@ -51,7 +52,9 @@ function HelpBody({ contact, onShortcuts }: { contact: HelpContact; onShortcuts?
   const pathname = usePathname();
   const pulse = usePulse();
   const nav = useMemo(() => storeNav({ handle: store.handle, mode: store.mode, can: store.can }, locale), [store, locale]);
-  const section = helpSection(activeNav(pathname, nav, store.handle)?.id);
+  const item = activeNav(pathname, nav, store.handle);
+  // every settings tab shares the settings tips
+  const section = helpSection(item?.group === "settings" ? "settings" : item?.id);
   const tips = helpTipKeys(section).filter((k) => messageOf(k) !== undefined);
   const build = pulse.body?.build ?? null;
   const path = diagnosticPath(pathname.replace(store.href(), "") || "/");
@@ -127,14 +130,19 @@ function HelpBody({ contact, onShortcuts }: { contact: HelpContact; onShortcuts?
 export function HelpSheetProvider({ contact, children }: { contact: HelpContact; children: ReactNode }) {
   const t = useT();
   const locale = useAdminLocale();
+  const shortcuts = useShortcutSheet();
   const [open, setOpen] = useState(false);
   const show = useCallback(() => setOpen(true), []);
+  const toShortcuts = useCallback(() => {
+    setOpen(false);
+    shortcuts.open();
+  }, [shortcuts]);
   const api = useMemo(() => ({ open: show }), [show]);
   return (
     <HelpContext.Provider value={api}>
       {children}
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side={dirOf(locale) === "rtl" ? "left" : "right"} showCloseButton={false} className="w-full gap-0 sm:max-w-[440px]">
+        <SheetContent side={dirOf(locale) === "rtl" ? "left" : "right"} dir={dirOf(locale)} lang={locale} showCloseButton={false} className="w-full gap-0 sm:max-w-[440px]">
           <SheetCloseX />
           <SheetHeader className="gap-3 border-b border-border p-6 pe-14">
             <span aria-hidden="true" className="grid size-10 place-items-center rounded-[var(--r-control)] bg-muted text-muted-foreground">
@@ -145,7 +153,7 @@ export function HelpSheetProvider({ contact, children }: { contact: HelpContact;
           </SheetHeader>
           {open && (
             <div className="adm-scroll min-h-0 flex-1 overflow-y-auto">
-              <HelpBody contact={contact} />
+              <HelpBody contact={contact} onShortcuts={toShortcuts} />
             </div>
           )}
         </SheetContent>

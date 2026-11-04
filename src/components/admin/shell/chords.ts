@@ -1,7 +1,8 @@
 /**
  * Keyboard chords of the tenant shell (P2 SHELL; platform.md PLA-§22.13, UX-02; docs/STORE-SAAS.md §I.3). The parser
- * is pure (a key stream and a clock in, a command out), so `test:shell` drives it without a DOM; `useChords` (step
- * p2-08) feeds it the window's keydown events with `isEditable(e.target)` and `overlayOpen()`.
+ * is pure (a key stream and a clock in, a command out), so `test:shell` drives it without a DOM; `attachChords` is the
+ * one global listener (the store frame's palette provider mounts it): it feeds the window's keydown events with
+ * `isEditable(e.target)` and `overlayOpen()` and hands each completed chord to the shell.
  *
  *   G then H/O/Q/L/C/P/M/T/S/N/W within 1 s   overview, orders, queue, leads, customers, pages, media, team,
  *                                             settings, notifications, switch store
@@ -138,4 +139,127 @@ export function isEditable(target: EventTarget | null): boolean {
 /** Does an open dialog, sheet, menu or popover own the keyboard? (the builder's rule) */
 export function overlayOpen(doc: Pick<Document, "querySelector"> | null = typeof document === "undefined" ? null : document): boolean {
   return !!doc?.querySelector(OPEN_OVERLAY);
+}
+
+/* ------------------------------------------------------------------ the global listener */
+
+/** What `attachChords` reads of a keydown (a `KeyboardEvent` in the browser, a plain object in the selftest). */
+export interface ChordEvent {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  isComposing?: boolean;
+  repeat?: boolean;
+  target: EventTarget | null;
+  defaultPrevented?: boolean;
+  preventDefault(): void;
+}
+
+export interface ChordTarget {
+  addEventListener(type: "keydown", fn: (e: ChordEvent) => void): void;
+  removeEventListener(type: "keydown", fn: (e: ChordEvent) => void): void;
+}
+
+/**
+ * Listens for chords on `target` (the window): a completed chord is prevented (its key never reaches the page) and
+ * handed to `onCommand`; every other key passes untouched. Answers the detach function.
+ */
+export function attachChords(
+  target: ChordTarget,
+  onCommand: (cmd: ChordCommand) => void,
+  opts: { parser?: ChordParser; overlay?: () => boolean; editable?: (t: EventTarget | null) => boolean } = {},
+): () => void {
+  const parser = opts.parser ?? createChordParser();
+  const overlay = opts.overlay ?? (() => overlayOpen());
+  const editable = opts.editable ?? isEditable;
+  const onKey = (e: ChordEvent) => {
+    if (e.defaultPrevented) return;
+    const cmd = parser.feed({
+      key: e.key,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+      altKey: e.altKey,
+      isComposing: e.isComposing,
+      repeat: e.repeat,
+      editable: editable(e.target),
+      overlay: overlay(),
+    });
+    if (!cmd) return;
+    e.preventDefault();
+    onCommand(cmd);
+  };
+  target.addEventListener("keydown", onKey);
+  return () => {
+    target.removeEventListener("keydown", onKey);
+    parser.reset();
+  };
+}
+
+/* ------------------------------------------------------------------ the shortcut sheet's content */
+
+/** One row of the sheet: its keys (each a `kbd` chip; "then" between the steps of a sequence) and its label. */
+export interface ShortcutRow {
+  id: string;
+  keys: readonly (readonly string[])[];
+  label: string;
+}
+
+export interface ShortcutSection {
+  id: "anywhere" | "go" | "lists" | "queue";
+  label: string;
+  rows: readonly ShortcutRow[];
+}
+
+/** The `G` targets in the sheet's order. */
+export const GO_ORDER: readonly GoTarget[] = ["overview", "orders", "queue", "leads", "customers", "pages", "media", "team", "settings", "notifications", "switch_store"];
+
+/** The second key of each `G` target. */
+export const GO_KEY_OF: Readonly<Record<GoTarget, string>> = Object.fromEntries(Object.entries(GO_CHORDS).map(([k, v]) => [v, k.toUpperCase()])) as Record<GoTarget, string>;
+
+/**
+ * The sheet's sections (§I.3's chord list): `mod` is "⌘" or "Ctrl"; `show(target)` says whether a `G` target exists
+ * for this member (a screen they cannot open is left out); the queue keys show only with `queue`.
+ */
+export function shortcutSections(p: { mod: string; show(target: GoTarget): boolean; queue: boolean; label(key: string): string }): ShortcutSection[] {
+  const l = p.label;
+  const sections: ShortcutSection[] = [
+    {
+      id: "anywhere",
+      label: l("shell.shortcuts.section.anywhere"),
+      rows: [
+        { id: "palette", keys: [[p.mod, "K"]], label: l("shell.shortcuts.palette") },
+        { id: "search", keys: [["/"]], label: l("shell.shortcuts.search") },
+        { id: "actions", keys: [[">"]], label: l("shell.shortcuts.actions") },
+        { id: "create", keys: [["C"]], label: l("shell.shortcuts.create") },
+        { id: "sheet", keys: [["?"]], label: l("shell.shortcuts.sheet") },
+      ],
+    },
+    {
+      id: "go",
+      label: l("shell.shortcuts.section.go"),
+      rows: GO_ORDER.filter(p.show).map((target) => ({ id: `go.${target}`, keys: [["G"], [GO_KEY_OF[target]]], label: l(`shell.shortcuts.go.${target}`) })),
+    },
+    {
+      id: "lists",
+      label: l("shell.shortcuts.section.lists"),
+      rows: [
+        { id: "move", keys: [["J", "K"]], label: l("shell.shortcuts.move") },
+        { id: "open", keys: [["Enter"]], label: l("shell.shortcuts.open") },
+        { id: "edit", keys: [["E"]], label: l("shell.shortcuts.edit") },
+        { id: "close", keys: [["Esc"]], label: l("shell.shortcuts.close") },
+      ],
+    },
+  ];
+  if (p.queue) {
+    sections.push({
+      id: "queue",
+      label: l("shell.shortcuts.section.queue"),
+      rows: [
+        { id: "next", keys: [["N"]], label: l("shell.shortcuts.next_order") },
+        { id: "outcome", keys: [["1-6"]], label: l("shell.shortcuts.outcome") },
+      ],
+    });
+  }
+  return sections.filter((s) => s.rows.length > 0);
 }

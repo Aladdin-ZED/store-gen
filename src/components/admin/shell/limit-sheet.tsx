@@ -116,7 +116,7 @@ export function LimitSheet({ limit: p, ...chrome }: { limit: LimitSheetProps } &
   const action = cn("w-full justify-center gap-2 sm:w-auto", FOCUS_RING, TOUCH);
   return (
     <Sheet open={chrome.open} onOpenChange={chrome.onOpenChange}>
-      <SheetContent side={dirOf(locale) === "rtl" ? "left" : "right"} showCloseButton={false} className="w-full gap-0 sm:max-w-[480px]">
+      <SheetContent side={dirOf(locale) === "rtl" ? "left" : "right"} dir={dirOf(locale)} lang={locale} showCloseButton={false} className="w-full gap-0 sm:max-w-[480px]">
         <SheetCloseX />
         <SheetHeader className="gap-3 border-b border-border p-6 pe-14">
           <span aria-hidden="true" className={cn("grid size-10 place-items-center rounded-[var(--r-control)]", quota ? "bg-warn-soft text-warn-ink" : "bg-muted text-muted-foreground")}>

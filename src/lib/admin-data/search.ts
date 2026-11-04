@@ -27,7 +27,7 @@ export type { SearchGroup, SearchViewer, SlowProvider, StoreSearchResult } from 
 
 /** A member's search identity: their membership's role and grants, their language. */
 export async function searchViewerOf(ctx: Pick<StoreCtx, "user" | "membership" | "store" | "can">): Promise<SearchViewer> {
-  return { userId: ctx.user.id, role: ctx.membership.role, locale: await viewerLocale(ctx.user), handle: ctx.store.handle, can: (p) => ctx.can(p) };
+  return { userId: ctx.user.id, role: ctx.membership.role, locale: await viewerLocale(ctx.user), handle: ctx.store.handle, mode: ctx.store.mode, can: (p) => ctx.can(p) };
 }
 
 /** The shell's provider for one viewer (it needs their grants and language, which the frozen provider viewer lacks). */

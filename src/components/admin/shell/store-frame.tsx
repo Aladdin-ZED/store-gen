@@ -4,7 +4,8 @@
  * §22.15, §20.1, §23.1): the impersonation ribbon on top (full width, `--ribbon-h`), the inset sidebar with the store
  * switcher, the frosted topbar with ⌘K, the job chip, Help and the bell, the lifecycle banner, then the screen (or the
  * state page that replaces it: closed, scheduled deletion, rejected). Around them: the store's pulse, the density,
- * the limit sheet, the Help sheet and, when a document asks for it, the blocking legal sheet.
+ * the limit sheet, the shortcut sheet, the Help sheet, the palette with its chords and, when a document asks for it,
+ * the blocking legal sheet.
  *
  * The full-screen builder, `(editor)`, gets the bare page, and so does the onboarding flow (`welcome`): one `[store]`
  * layout guards them all, so the frame picks by the active child segment, which names route groups too. The welcome
@@ -27,6 +28,7 @@ import { HelpSheetProvider, type HelpContact } from "./help-sheet";
 import { ImpersonationRibbon, RIBBON_HEIGHT_PX, type RibbonProps } from "./impersonation-ribbon";
 import { LegalSheet, type LegalSheetDoc } from "./legal-sheet";
 import { LimitSheetProvider } from "./limit-sheet";
+import { ShortcutSheetProvider } from "./shortcut-sheet";
 import { StatePage, type StatePageProps } from "./state-page";
 import { StoreBanner, type BannerFacts, type BannerFirstPaint } from "./store-banner";
 import { useStore } from "./store-context";
@@ -65,11 +67,13 @@ function Sheets({ p, children }: { p: StoreFrameProps; children: ReactNode }) {
         <DensityProvider role={store.role} viewerId={store.viewerId}>
           <div data-surface="tenant" className="contents" style={{ "--ribbon-h": p.ribbon ? `${RIBBON_HEIGHT_PX}px` : "0px" } as CSSProperties}>
             <LimitSheetProvider>
-              <HelpSheetProvider contact={p.help}>
-                {p.ribbon && <ImpersonationRibbon {...p.ribbon} />}
-                {children}
-                {!p.ribbon && <LegalSheet docs={p.legal} />}
-              </HelpSheetProvider>
+              <ShortcutSheetProvider>
+                <HelpSheetProvider contact={p.help}>
+                  {p.ribbon && <ImpersonationRibbon {...p.ribbon} />}
+                  {children}
+                  {!p.ribbon && <LegalSheet docs={p.legal} />}
+                </HelpSheetProvider>
+              </ShortcutSheetProvider>
             </LimitSheetProvider>
           </div>
         </DensityProvider>
@@ -89,7 +93,7 @@ export function StoreFrame(p: StoreFrameProps) {
   if (segments[0] === WELCOME_SEGMENT) return <Sheets p={p}>{screen}</Sheets>;
   return (
     <Sheets p={p}>
-      <CommandPaletteProvider index={p.paletteIndex}>
+      <CommandPaletteProvider index={p.paletteIndex} switcher={p.switcher}>
         <SidebarProvider defaultOpen={p.sidebarOpen} className={cn("bg-sidebar", p.ribbon && "min-h-[calc(100svh-var(--ribbon-h))]")}>
           <AppSidebar user={p.user} switcher={p.switcher} className={p.ribbon ? "top-(--ribbon-h) h-[calc(100svh-var(--ribbon-h))]" : undefined} />
           <SidebarInset

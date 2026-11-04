@@ -1,24 +1,57 @@
 /**
- * The store dashboard's navigation as the shell draws it (docs/STORE-SAAS.md §I.3, ADM-28): the tenant registry
- * (`navFor`, ./nav/index.ts) filtered with the member's grants and the store's mode, labels resolved, icons mapped.
- * Isomorphic config: the sidebar, the command palette and the top bar breadcrumbs all read it.
+ * The store dashboard's navigation as the shell draws it (docs/STORE-SAAS.md §I.3, §A.2, ADM-28): the tenant registry
+ * (`navFor`, ./nav/index.ts) filtered with the member's grants, the store's mode and the release, labels resolved from
+ * the catalogs, icons mapped. Isomorphic config: the sidebar, the settings sub-navigation, ⌘K, the topbar's breadcrumb,
+ * the Help sheet and the search provider all read it, so a mode switch hides an item everywhere at once and deletes
+ * nothing (its data stays; the item comes back when the mode allows it again).
  *
- * The R1.0 items (./nav/t4.ts) are merged in by id until the registry imports them (CCR r1.0-t4-8), so they show
- * exactly once either way.
+ * - `storeNav`: every visible item by group, the settings tabs included (⌘K's jump list, the breadcrumb).
+ * - `sidebarNav`: the same groups with the settings group folded into one "Settings" entry (the sidebar).
+ * - `settingsTabs`: the registry's `settings` group (the sub-navigation): P3's, P5's and P7's tabs appear with their
+ *   order, without a P2 edit.
+ *
+ * The R1.0 screens whose owners have not contributed their item yet (`INTERIM_NAV`, ./nav/t4.ts) are added while no
+ * registry item has the same id or link, so each shows exactly once before and after its owner's merge.
  */
 import {
+  BellIcon,
   CircleIcon,
+  ContactRoundIcon,
+  CpuIcon,
+  FileTextIcon,
+  GaugeIcon,
+  GlobeIcon,
+  HeadsetIcon,
   HistoryIcon,
   ImagesIcon,
+  InboxIcon,
   LayoutGridIcon,
+  Link2Icon,
+  LinkIcon,
+  ListChecksIcon,
+  MegaphoneIcon,
+  MessageCircleIcon,
+  PackageIcon,
   PackageOpenIcon,
+  PaletteIcon,
   PanelsTopLeftIcon,
+  PhoneCallIcon,
   RadarIcon,
   ReceiptTextIcon,
+  ScrollTextIcon,
+  SendIcon,
   Settings2Icon,
   SheetIcon,
+  ShieldBanIcon,
+  ShieldCheckIcon,
+  SlidersHorizontalIcon,
   SparklesIcon,
+  StoreIcon,
+  TriangleAlertIcon,
+  TruckIcon,
   UsersRoundIcon,
+  WalletIcon,
+  WebhookIcon,
   type LucideIcon,
 } from "lucide-react";
 import type { StorePermission } from "@/lib/auth/permissions";
@@ -26,31 +59,67 @@ import { ADMIN_LOCALES, messageOf, t, type AdminLocale } from "@/lib/i18n/admin"
 import type { StoreMode } from "@/lib/tenancy/mode";
 import { appHref } from "@/lib/urls";
 import { NAV_CONTRIBUTIONS, navFor, type NavContribution, type NavGroupId } from "./nav/index";
-import { NAV_FALLBACK_LABELS, NAV_KEYWORDS, nav as dashboardNav } from "./nav/t4";
+import { INTERIM_NAV, NAV_KEYWORDS } from "./nav/t4";
 
+/** The registry's icon names (lucide without the "Icon" suffix) the shell draws; an unknown name draws a circle. */
 const ICONS: Readonly<Record<string, LucideIcon>> = {
-  LayoutGrid: LayoutGridIcon,
-  ReceiptText: ReceiptTextIcon,
-  PanelsTopLeft: PanelsTopLeftIcon,
-  Sparkles: SparklesIcon,
-  Images: ImagesIcon,
+  Bell: BellIcon,
+  ContactRound: ContactRoundIcon,
+  Cpu: CpuIcon,
+  FileText: FileTextIcon,
+  Gauge: GaugeIcon,
+  Globe: GlobeIcon,
+  Headset: HeadsetIcon,
   History: HistoryIcon,
+  Images: ImagesIcon,
+  Inbox: InboxIcon,
+  LayoutGrid: LayoutGridIcon,
+  Link: LinkIcon,
+  Link2: Link2Icon,
+  ListChecks: ListChecksIcon,
+  Megaphone: MegaphoneIcon,
+  MessageCircle: MessageCircleIcon,
+  Package: PackageIcon,
   PackageOpen: PackageOpenIcon,
-  UsersRound: UsersRoundIcon,
-  Sheet: SheetIcon,
+  Palette: PaletteIcon,
+  PanelsTopLeft: PanelsTopLeftIcon,
+  PhoneCall: PhoneCallIcon,
   Radar: RadarIcon,
+  ReceiptText: ReceiptTextIcon,
+  ScrollText: ScrollTextIcon,
+  Send: SendIcon,
   Settings2: Settings2Icon,
+  Sheet: SheetIcon,
+  ShieldBan: ShieldBanIcon,
+  ShieldCheck: ShieldCheckIcon,
+  SlidersHorizontal: SlidersHorizontalIcon,
+  Sparkles: SparklesIcon,
+  Store: StoreIcon,
+  TriangleAlert: TriangleAlertIcon,
+  Truck: TruckIcon,
+  UsersRound: UsersRoundIcon,
+  Wallet: WalletIcon,
+  Webhook: WebhookIcon,
 };
 
-/** A message key of the shell in the viewer's locale; the R1.0 English label while no catalog has it. */
+/** The component of a registry icon name (a circle for a name the map lacks). */
+export function navIcon(name: string): LucideIcon {
+  return ICONS[name] ?? CircleIcon;
+}
+
+/** A message key of the shell in the viewer's locale (English when the locale lacks it, the key when no catalog has it). */
 export function shellLabel(key: string, locale: AdminLocale = "en"): string {
-  return messageOf(key, locale) !== undefined ? t(key, undefined, locale) : (NAV_FALLBACK_LABELS[key] ?? key);
+  return t(key, undefined, locale);
 }
 
 export interface ShellNavItem {
   id: string;
+  group: NavGroupId;
   label: string;
+  labelKey: string;
   href: string;
+  /** the path prefix that makes the item active, when it is not `href` (the folded Settings entry) */
+  match?: string;
   icon: LucideIcon;
   badgeKey?: string;
   keywords: string[];
@@ -69,18 +138,22 @@ export interface NavViewer {
   can(p: StorePermission): boolean;
 }
 
-/** The registry's contributions plus the R1.0 items it doesn't list yet (by id). */
-function contributions(): readonly NavContribution[] {
-  const ids = new Set(NAV_CONTRIBUTIONS.map((c) => c.item.id));
-  return [...NAV_CONTRIBUTIONS, ...dashboardNav.filter((c) => !ids.has(c.item.id))];
+const PROBE = "probe";
+
+/** The registry's contributions plus the interim R1.0 items no contribution covers yet (by id or by link). */
+export function shellContributions(registry: readonly NavContribution[] = NAV_CONTRIBUTIONS, interim: readonly NavContribution[] = INTERIM_NAV): NavContribution[] {
+  const ids = new Set(registry.map((c) => c.item.id));
+  const hrefs = new Set(registry.map((c) => c.item.href(PROBE)));
+  return [...registry, ...interim.filter((c) => !ids.has(c.item.id) && !hrefs.has(c.item.href(PROBE)))];
 }
 
 /** A call agent always lands on Orders (the overview redirects there, src/app/app/[store]/page.tsx): no Overview item. */
 const redirectedHome = (viewer: NavViewer) => !viewer.can("pages.read") && viewer.can("orders.read");
 
-export function storeNav(viewer: NavViewer, locale: AdminLocale = "en"): ShellNavGroup[] {
+/** Every item the member may open in this store, by group, the settings tabs included. */
+export function storeNav(viewer: NavViewer, locale: AdminLocale = "en", contributions: readonly NavContribution[] = shellContributions()): ShellNavGroup[] {
   const home = redirectedHome(viewer);
-  return navFor({ store: { mode: viewer.mode }, can: viewer.can }, contributions())
+  return navFor({ store: { mode: viewer.mode }, can: viewer.can }, contributions)
     .map((g) => ({ ...g, items: home ? g.items.filter((i) => i.id !== "overview") : g.items }))
     .filter((g) => g.items.length > 0)
     .map((g) => ({
@@ -88,97 +161,79 @@ export function storeNav(viewer: NavViewer, locale: AdminLocale = "en"): ShellNa
       label: shellLabel(g.label, locale),
       items: g.items.map((i) => ({
         id: i.id,
+        group: g.id,
         label: shellLabel(i.label, locale),
+        labelKey: i.label,
         href: i.href(viewer.handle),
-        icon: ICONS[i.icon] ?? CircleIcon,
+        icon: navIcon(i.icon),
         ...(i.badge ? { badgeKey: i.badge.countKey } : {}),
         keywords: [...(NAV_KEYWORDS[i.id] ?? [])],
       })),
     }));
 }
 
-/** The nav item a pathname belongs to (longest href prefix wins; the overview only matches exactly). */
+/** The id of the sidebar's one settings entry. */
+export const SETTINGS_ENTRY_ID = "settings";
+
+/**
+ * The sidebar's groups: `storeNav` with the settings group folded into one "Settings" entry that opens the member's
+ * first tab and stays active on every settings path.
+ */
+export function sidebarNav(groups: readonly ShellNavGroup[], handle: string, locale: AdminLocale = "en"): ShellNavGroup[] {
+  return groups.map((g) => {
+    if (g.id !== "settings") return g;
+    const first = g.items[0]!;
+    const entry: ShellNavItem = {
+      id: SETTINGS_ENTRY_ID,
+      group: "settings",
+      label: shellLabel("nav.settings", locale),
+      labelKey: "nav.settings",
+      href: first.href,
+      match: appHref(handle, "/settings"),
+      icon: Settings2Icon,
+      keywords: g.items.flatMap((i) => [i.label, ...i.keywords]),
+    };
+    return { ...g, items: [entry] };
+  });
+}
+
+/** The nav item a pathname belongs to (the longest link or match prefix wins; the overview only matches exactly). */
 export function activeNav(pathname: string, groups: readonly ShellNavGroup[], handle: string): ShellNavItem | undefined {
   const home = appHref(handle);
+  const at = (i: ShellNavItem) => i.match ?? i.href.replace(/[?#].*$/, "");
   return groups
     .flatMap((g) => g.items)
-    .sort((a, b) => b.href.length - a.href.length)
-    .find((i) => (i.href === home ? pathname === home : pathname === i.href || pathname.startsWith(`${i.href}/`)));
+    .sort((a, b) => at(b).length - at(a).length)
+    .find((i) => {
+      const p = at(i);
+      return p === home ? pathname === home : pathname === p || pathname.startsWith(`${p}/`);
+    });
 }
 
 /* ------------------------------------------------------------------ */
-/* Settings sub-navigation                                             */
+/* Settings sub-navigation (the registry's `settings` group)           */
 /* ------------------------------------------------------------------ */
 
-export interface SettingsNavItem {
+export interface SettingsTab {
   id: string;
-  /** the English label (the item's fallback while a catalog lacks `labelKey`) */
   label: string;
-  labelKey: string;
-  /** store-relative ("/settings/general") */
-  path: `/${string}`;
-  description: string;
-  descriptionKey: string;
-  permission: StorePermission;
+  /** the tab's one-line description (`<label key>_lead`), when a catalog has one */
+  description: string | null;
+  href: string;
+  icon: LucideIcon;
+  keywords: string[];
 }
 
-/** Today's settings tabs at their §I.1 homes (members, account security and the integrations have their own screens). */
-export const SETTINGS_NAV: readonly SettingsNavItem[] = [
-  {
-    id: "general",
-    label: "Store & legal",
-    labelKey: "shell.settings.general",
-    path: "/settings/general",
-    description: "Name, contacts and legal identity",
-    descriptionKey: "shell.settings.general_lead",
-    permission: "settings.read",
-  },
-  {
-    id: "market",
-    label: "Market defaults",
-    labelKey: "shell.settings.market",
-    path: "/settings/market",
-    description: "Currency, language, phone and shipping",
-    descriptionKey: "shell.settings.market_lead",
-    permission: "settings.read",
-  },
-  {
-    id: "ai",
-    label: "Local AI",
-    labelKey: "shell.settings.ai",
-    path: "/settings/ai",
-    description: "On-device models and background removal",
-    descriptionKey: "shell.settings.ai_lead",
-    permission: "settings.read",
-  },
-  {
-    id: "anti-spam",
-    label: "Anti-spam",
-    labelKey: "shell.settings.anti_spam",
-    path: "/settings/anti-spam",
-    description: "Cloudflare Turnstile keys",
-    descriptionKey: "shell.settings.anti_spam_lead",
-    permission: "settings.read",
-  },
-  {
-    id: "audit",
-    label: "Audit log",
-    labelKey: "shell.settings.audit",
-    path: "/settings/audit",
-    description: "Who changed what, and when",
-    descriptionKey: "shell.settings.audit_lead",
-    permission: "audit.read",
-  },
-];
+/** The description key of a settings tab: its label key with `_lead` (a track adds one to get the line). */
+export const tabLeadKey = (labelKey: string) => `${labelKey}_lead`;
 
-export function settingsNavFor(can: (p: StorePermission) => boolean): readonly SettingsNavItem[] {
-  return SETTINGS_NAV.filter((i) => can(i.permission));
-}
-
-/** A settings tab's label (or its one-line description) in `locale`; the English text while no catalog has the key. */
-export function settingsText(item: SettingsNavItem, part: "label" | "description", locale: AdminLocale = "en"): string {
-  const key = part === "label" ? item.labelKey : item.descriptionKey;
-  return messageOf(key, locale) !== undefined ? t(key, undefined, locale) : item[part];
+/** The settings tabs the member may open, in the registry's order. */
+export function settingsTabs(viewer: NavViewer, locale: AdminLocale = "en", contributions?: readonly NavContribution[]): SettingsTab[] {
+  const group = storeNav(viewer, locale, contributions).find((g) => g.id === "settings");
+  return (group?.items ?? []).map((i) => {
+    const lead = tabLeadKey(i.labelKey);
+    return { id: i.id, label: i.label, description: messageOf(lead, locale) !== undefined ? t(lead, undefined, locale) : null, href: i.href, icon: i.icon, keywords: i.keywords };
+  });
 }
 
 /* ------------------------------------------------------------------ */

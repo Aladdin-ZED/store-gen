@@ -105,6 +105,7 @@ export function StoreTeamPanel({
   invites,
   invitable,
   canInvite,
+  openInvite = false,
   readOnly,
   actions,
 }: {
@@ -114,6 +115,8 @@ export function StoreTeamPanel({
   invites: TeamInviteRow[];
   invitable: StoreRole[];
   canInvite: boolean;
+  /** open the invite form on arrival (`?invite=1`, from ⌘K or the Create menu) */
+  openInvite?: boolean;
   /** "view as store": controls stay visible, the server refuses them */
   readOnly: boolean;
   actions: StoreTeamActions;
@@ -122,7 +125,7 @@ export function StoreTeamPanel({
   const run = useRunAction();
   const router = useRouter();
   const stepUp = useStepUp(viewer.totp);
-  const [inviting, setInviting] = useState(false);
+  const [inviting, setInviting] = useState(openInvite);
   const [created, setCreated] = useState<{ url: string; expiresAt: string; emailMasked: string } | null>(null);
   const [removing, setRemoving] = useState<TeamMemberRow | null>(null);
   const [leaving, setLeaving] = useState(false);

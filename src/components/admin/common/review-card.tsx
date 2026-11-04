@@ -187,7 +187,7 @@ function SubmitRow(p: ReviewCardProps) {
         </Button>
       </div>
       <Sheet open={open} onOpenChange={(o) => !busy && setOpen(o)}>
-        <SheetContent side={dirOf(locale) === "rtl" ? "left" : "right"} showCloseButton={false} className="w-full gap-0 sm:max-w-[480px]">
+        <SheetContent side={dirOf(locale) === "rtl" ? "left" : "right"} dir={dirOf(locale)} lang={locale} showCloseButton={false} className="w-full gap-0 sm:max-w-[480px]">
           <SheetCloseX />
           <form onSubmit={submit} className="flex h-full flex-col">
             <SheetHeader className="gap-1.5 border-b border-border p-6 pe-14">

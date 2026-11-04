@@ -10,7 +10,7 @@
 import { ArrowUpRightIcon, ChevronRightIcon, LifeBuoyIcon, SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -22,19 +22,10 @@ import { useCommandPalette, Kbd } from "./command-palette";
 import { useHelpSheet } from "./help-sheet";
 import { NotificationBell } from "./notification-bell";
 import { useStore } from "./store-context";
-import { activeNav, SETTINGS_NAV, settingsText, storeNav } from "./store-nav";
+import { useModKey } from "./shortcut-sheet";
+import { activeNav, SETTINGS_ENTRY_ID, sidebarNav, storeNav } from "./store-nav";
 import { CompactStoreSwitcher, type SwitcherProps } from "./store-switcher";
 import { usePulse } from "./use-pulse";
-
-const noop = () => () => {};
-/** "⌘" on Apple platforms, "Ctrl" elsewhere (server snapshot: "Ctrl"). */
-function useModKey(): string {
-  return useSyncExternalStore(
-    noop,
-    () => (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl"),
-    () => "Ctrl",
-  );
-}
 
 function Jobs() {
   const t = useT();
@@ -57,8 +48,9 @@ export function Topbar({ switcher }: { switcher: SwitcherProps }) {
   const t = useT();
   const locale = useAdminLocale();
   const groups = useMemo(() => storeNav({ handle: store.handle, mode: store.mode, can: store.can }, locale), [store, locale]);
-  const section = activeNav(pathname, groups, store.handle);
-  const sub = section?.id === "settings" ? SETTINGS_NAV.find((s) => pathname.startsWith(store.href(s.path))) : undefined;
+  // the breadcrumb: the sidebar's entry, then the settings tab under "Settings"
+  const section = activeNav(pathname, sidebarNav(groups, store.handle, locale), store.handle);
+  const sub = section?.id === SETTINGS_ENTRY_ID ? activeNav(pathname, groups.filter((g) => g.id === "settings"), store.handle) : undefined;
   const storeUrl = store.can("pages.read") ? store.live("") : null;
 
   return (
@@ -88,7 +80,7 @@ export function Topbar({ switcher }: { switcher: SwitcherProps }) {
           <>
             <ChevronRightIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground/60 rtl:rotate-180" />
             <span aria-current="page" className="truncate font-medium text-foreground">
-              {settingsText(sub, "label", locale)}
+              {sub.label}
             </span>
           </>
         )}
@@ -96,7 +88,7 @@ export function Topbar({ switcher }: { switcher: SwitcherProps }) {
 
       <button
         type="button"
-        onClick={palette.open}
+        onClick={() => palette.open()}
         className={cn(
           "group ms-auto flex h-9 items-center gap-2 rounded-full text-start text-sm text-muted-foreground transition-colors duration-[var(--dur-2)] hover:text-foreground",
           "max-sm:w-9 max-sm:justify-center max-sm:hover:bg-accent",

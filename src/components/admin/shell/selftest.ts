@@ -4,7 +4,7 @@
  *
  * Step p2-02 (viewer-locale rendering, core §I.5, D36): which screens render in the viewer's language
  * (`screenLocalesFor`), the fallback to English (`screenLocale`), the store-relative path (`storeRelativePath`), and
- * the settings tabs' labels in every locale (`settingsText`). Later steps add their pure checks here (PLA-§O.1 row).
+ * the settings tabs' labels in every locale (`settingsTabs` since p2-08). Later steps add their pure checks here (PLA-§O.1 row).
  *
  * Step p2-03 (the shell's pure logic): `modeSummary` / `roleSummary` agree with `modeAllows` / `can()`; the zero-data
  * brief gives `brief.empty`; the honest-data guards refuse dishonest props (type level and runtime); the banner order;
@@ -34,6 +34,12 @@
  * under a second apart), the bell's count and day groups and its dashboard-only links, the Help sheet's error ring and
  * its diagnostic block without a query string, the density default, the visit counter and the install offer, and every
  * key the chrome names in ar, fr and en.
+ *
+ * Step p2-08 (the palette and the navigation, UX-02, §I.3, SF-01): `commandsFor` over permission, mode and release
+ * (the campaign entry hidden without `campaigns.write` and in store mode), the shell commands and their services, a
+ * health fix's command (PD66); the nav per mode (hide, never delete), interim items yielding to their owner's, the
+ * folded Settings entry and the registry-driven tabs; the chord listener's guards; the palette's query modes, typed
+ * order ids, timing, local index, recents and suggestions.
  * Exits 1 on any failure.
  */
 import {
@@ -53,7 +59,7 @@ import type { SearchHit, SearchProvider } from "@/lib/admin-data/search/types";
 import { APP_ICONS, appColors, appIconSvg, appManifest, GRID, markReach, MONOGRAM_BOX, MONOGRAM_S, SAFE_RADIUS, shortName } from "@/lib/admin-theme/app-icon";
 import { contrastRatio, inOrangeBand, oklchToHex } from "@/lib/admin-theme/contrast";
 import { generateColors, SURFACES } from "@/lib/admin-theme/generate";
-import { ACTIVE_STORE_ROLES, can, STORE_ROLES } from "@/lib/auth/permissions";
+import { ACTIVE_STORE_ROLES, can, STORE_ROLES, type StorePermission, type StoreRole } from "@/lib/auth/permissions";
 import { addressQr, qrModules, qrSize, qrTarget, QR_SCREEN_PX_PER_MODULE, whatsappText, WA_TEXT_MAX } from "@/components/admin/common/address-math";
 import {
   evidenceVars,
@@ -75,10 +81,37 @@ import type { HealthInputs, HealthIssue } from "@/lib/health/types";
 import { fixtures as shellFixtures, localSetupIssues, rules as shellRules, shellFactsOf } from "@/lib/health/rules/shell";
 import { ADMIN_LOCALES, messageOf, t } from "@/lib/i18n/admin";
 import { appHref } from "@/lib/urls";
-import { modeAllows, STORE_MODES } from "@/lib/tenancy/mode";
+import { modeAllows, STORE_MODES, type StoreMode } from "@/lib/tenancy/mode";
 import type { ActionErrorCode, StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { dismissalActive, pickBanners, statePage, type BannerState } from "./banner-priority";
-import { createChordParser, GO_CHORDS, isEditable, orderIdOf, overlayOpen, type ChordKey } from "./chords";
+import { attachChords, createChordParser, GO_CHORDS, GO_KEY_OF, GO_ORDER, isEditable, orderIdOf, overlayOpen, shortcutSections, type ChordCommand, type ChordEvent, type ChordKey } from "./chords";
+import { COMMANDS, commandsFor, type CommandCtx, type CommandDef } from "./commands";
+import { commands as shellCommands } from "./commands/shell";
+import type { NavContribution } from "./nav";
+import {
+  buildLocalIndex,
+  commandForFix,
+  goHrefs,
+  LOCAL_INDEX_MAX,
+  matchLocal,
+  orderDrawerHref,
+  paletteSuggestions,
+  parsePaletteQuery,
+  pushRecent,
+  readRecents,
+  RECENTS_KEPT,
+  recentsKey,
+  revealAt,
+  SEARCH_DEBOUNCE_MS,
+  SKELETON_AFTER_MS,
+  SKELETON_MIN_MS as PALETTE_SKELETON_MIN_MS,
+  skeletonVisible,
+  SUGGESTIONS,
+  SUGGESTIONS_MAX,
+  writeRecents,
+  type RecentEntry,
+} from "./palette-logic";
+import { provideShellServices } from "./shell-bridge";
 import { clearStoreClientState, onStoreClientClear, storeKeyMatches } from "./client-state";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -120,7 +153,8 @@ import {
   usageView,
   waHref,
 } from "@/components/admin/common/primitive-logic";
-import { screenLocale, screenLocalesFor, settingsText, SETTINGS_NAV, storeRelativePath, TRILINGUAL_SCREENS } from "./store-nav";
+import { activeNav, screenLocale, screenLocalesFor, settingsTabs, shellContributions, sidebarNav, storeNav, storeRelativePath, tabLeadKey, TRILINGUAL_SCREENS } from "./store-nav";
+import { INTERIM_NAV, nav as shellNav } from "./nav/t4";
 import type { StorePulse } from "@/lib/pulse/types";
 import { countVisit, defaultDensity, HELP_SECTIONS, helpSection, helpTipKeys, installOffer } from "./chrome-logic";
 import { clearClientErrors, CLIENT_ERROR_RING, diagnosticText, recentClientErrors, recordClientError } from "./client-errors";
@@ -192,21 +226,12 @@ check("a sub-path keeps its leading slash", storeRelativePath("/app/atlas-argan/
 check("another store is not this store", storeRelativePath("/app/atlas-argan-2/team", "/app/atlas-argan") === null);
 check("outside the dashboard is null", storeRelativePath("/app/account", "/app/atlas-argan") === null);
 
-/* ---- settingsText: every settings tab has its label and description in ar / fr / en ---- */
-for (const item of SETTINGS_NAV) {
-  for (const part of ["label", "description"] as const) {
-    const key = part === "label" ? item.labelKey : item.descriptionKey;
-    check(
-      `settings ${item.id} ${part} has a catalog key`,
-      ADMIN_LOCALES.every((l) => messageOf(key, l) !== undefined),
-      key,
-    );
-    check(`settings ${item.id} ${part} in en is the fallback text`, settingsText(item, part, "en") === item[part], {
-      en: settingsText(item, part, "en"),
-      fallback: item[part],
-    });
+/* ---- the settings tabs (the registry's `settings` group): label and one-line description in ar / fr / en ---- */
+for (const { item } of [...shellNav, ...INTERIM_NAV].filter((c) => c.group === "settings")) {
+  for (const key of [item.label, tabLeadKey(item.label)]) {
+    check(`settings ${item.id}: ${key} has a catalog key in ar, fr and en`, ADMIN_LOCALES.every((l) => messageOf(key, l) !== undefined), key);
   }
-  check(`settings ${item.id} is translated`, settingsText(item, "label", "ar") !== item.label);
+  check(`settings ${item.id} is translated`, messageOf(item.label, "ar") !== messageOf(item.label, "en"));
 }
 
 
@@ -790,7 +815,7 @@ async function searchChecks(): Promise<void> {
   // the shell provider's matching: settings by label in any language, members only by name or e-mail
   const owner = { can: (p: string) => p === "settings.read" || p === "audit.read", locale: "fr" as const, handle: "atlas" };
   const general = settingHits(owner, "general");
-  check("a settings section matches by its id for a French viewer, titled in French", general[0]?.id === "general" && general[0]?.title === settingsText(SETTINGS_NAV.find((i) => i.id === "general")!, "label", "fr") && general[0]?.href === "/app/atlas/settings/general", general);
+  check("a settings section matches by its id for a French viewer, titled in French", general[0]?.id === "general" && general[0]?.title === t("shell.settings.general", undefined, "fr") && general[0]?.href === "/app/atlas/settings/general", general);
   check("case does not matter", settingHits({ ...owner, locale: "en" }, "AUDIT").some((h) => h.id === "audit"));
   check("a section the viewer may not open is never found", settingHits({ ...owner, can: (p: string) => p === "settings.read" }, "audit").length === 0);
   const members = [
@@ -1296,12 +1321,231 @@ async function chromeChecks(): Promise<void> {
   check("no em or en dash in the chrome's strings", dashed.length === 0, dashed);
 }
 
+/* ================================================================ step p2-08: ⌘K, chords, commands, navigation */
+
+/**
+ * The palette's rules (PLA-§22.13, DES-§16.10, core §I.3, §A.2): `commandsFor` over the registry (permission, mode,
+ * release; the SF-01 campaign entry), the navigation per mode (hidden, never deleted), the interim R1.0 items, the
+ * settings tabs from the registry, the chord listener's guards, typed order ids, the skeleton timing, the local index,
+ * the recents, the suggestions, the shortcut sheet, the shell commands and their keys in ar, fr and en.
+ */
+async function paletteChecks(): Promise<void> {
+  const roleCan = (role: StoreRole) => (p: StorePermission) => can(role, p);
+  const ctxOf = (role: StoreRole, mode: StoreMode = "landing") => ({ store: { id: "s1", handle: "atlas", name: "Atlas", mode, status: "active" as const }, can: roleCan(role) });
+  const noop = () => undefined;
+
+  /* ---- commandsFor: permission, mode, release (SF-01: the campaign entry) ---- */
+  const campaign: CommandDef = { id: "landing.new_campaign", label: "shell.cmd.create_page", group: "create", permission: "campaigns.write", mode: "landing", run: noop };
+  const product: CommandDef = { id: "catalog.new_product", label: "shell.cmd.create_page", group: "create", permission: "catalog.write", mode: "catalog", release: "R2", run: noop };
+  const manual: CommandDef = { id: "ops.manual_order", label: "shell.cmd.create_page", group: "create", permission: "orders.create", run: noop };
+  const fixture = [...shellCommands, campaign, product, manual];
+  const ids = (role: StoreRole, mode: StoreMode = "landing") => commandsFor(ctxOf(role, mode), fixture).map((c) => c.id);
+  check("Create for an owner (landing): page, invite, campaign and manual order; product is R2 and stays hidden", ["shell.create_page", "shell.invite", "landing.new_campaign", "ops.manual_order"].every((id) => ids("owner").includes(id)) && !ids("owner").includes("catalog.new_product"), ids("owner"));
+  check("the campaign entry is hidden without campaigns.write (a manager, an agent)", !ids("manager").includes("landing.new_campaign") && !ids("agent").includes("landing.new_campaign"));
+  check(
+    "the campaign entry follows the landing feature in store mode (A.2: shown in R1, where store rows keep the landing set; hidden from R2 without 'also use landing pages')",
+    ids("owner", "store").includes("landing.new_campaign") === modeAllows("store", "landing") && ids("owner", "both").includes("landing.new_campaign"),
+  );
+  check("an agent gets no Create page, no invite, but the run actions", !ids("agent").includes("shell.create_page") && !ids("agent").includes("shell.invite") && ids("agent").includes("shell.recompute_health") && ids("agent").includes("shell.help"));
+  check("the registry holds the shell's commands once each, ids prefixed shell.", COMMANDS.filter((c) => c.id.startsWith("shell.")).length === shellCommands.length && new Set(COMMANDS.map((c) => c.id)).size === COMMANDS.length && shellCommands.every((c) => c.id.startsWith("shell.")));
+  check("every shell command's label exists in ar, fr and en", shellCommands.every((c) => inCatalogs(c.label)), shellCommands.filter((c) => !inCatalogs(c.label)).map((c) => c.label));
+  check("a health fix finds its command only when the member may run it (PD66)", commandForFix("shell.recompute_health", ctxOf("agent"), fixture)?.id === "shell.recompute_health" && commandForFix("shell.invite", ctxOf("agent"), fixture) === null && commandForFix("nope.missing", ctxOf("owner"), fixture) === null);
+
+  // the shell commands reach the shell through its services (never a DOM in this file)
+  const calls: string[] = [];
+  const off = provideShellServices({
+    openPalette: (page) => calls.push(`palette:${page ?? "root"}`),
+    openShortcuts: () => calls.push("shortcuts"),
+    openHelp: () => calls.push("help"),
+    toggleTheme: () => calls.push("theme"),
+    toggleDensity: () => calls.push("density"),
+    recomputeHealth: async () => {
+      calls.push("health");
+    },
+    installApp: () => calls.push("install"),
+    available: (id) => id !== "shell.install_app",
+  });
+  const nav: string[] = [];
+  const runCtx: CommandCtx = { ...ctxOf("owner"), navigate: (href) => nav.push(href) };
+  for (const c of shellCommands) await c.run(runCtx);
+  off();
+  check(
+    "the shell commands run through the services and the router",
+    ["palette:stores", "help", "shortcuts", "theme", "density", "palette:language", "health", "install"].every((c) => calls.includes(c)) && nav.includes("/app/atlas/generate") && nav.includes("/app/atlas/team?invite=1") && nav.includes("/app/atlas/notifications"),
+    { calls, nav },
+  );
+  const before = calls.length;
+  for (const c of shellCommands) await c.run(runCtx);
+  check("without a mounted shell the service commands do nothing (no throw)", calls.length === before);
+
+  /* ---- navigation per mode: hidden, never deleted (§A.2, §I.3) ---- */
+  const catalogItem: NavContribution = { group: "catalog", order: 10, item: { id: "products-fixture", label: "nav.pages", href: (h) => appHref(h, "/products"), icon: "Package", mode: "catalog" } };
+  const contributions = [...shellContributions(), catalogItem];
+  const frozen = contributions.length;
+  const navIds = (mode: StoreMode, role: StoreRole = "owner") => storeNav({ handle: "atlas", mode, can: roleCan(role) }, "en", contributions).flatMap((g) => g.items.map((i) => i.id));
+  const landing1 = navIds("landing");
+  const storeIds = navIds("store");
+  const landing2 = navIds("landing");
+  check("a catalog item is hidden in landing mode and shown in store and both modes", !landing1.includes("products-fixture") && storeIds.includes("products-fixture") && navIds("both").includes("products-fixture"));
+  check("switching back restores exactly the same items (hide, never delete)", JSON.stringify(landing1) === JSON.stringify(landing2) && contributions.length === frozen);
+  check("landing items follow modeAllows in store mode (R1 keeps them)", storeIds.includes("pages") === modeAllows("store", "landing") && storeIds.includes("exports") === modeAllows("store", "landing"));
+  check("the owner's nav: overview, notifications, media, history, exports, team and the P2 settings tabs", ["overview", "notifications", "media", "history", "exports", "team", "general", "market", "security", "address", "plan", "audit", "danger"].every((id) => landing1.includes(id)), landing1);
+  const agentIds = navIds("landing", "agent");
+  check("an agent: orders and notifications, no overview, library, team or settings", agentIds.includes("orders") && agentIds.includes("notifications") && !["overview", "media", "history", "team", "general", "audit"].some((id) => agentIds.includes(id)), agentIds);
+  check("Plan and Audit need billing.read and audit.read: an editor sees neither", !navIds("landing", "editor").includes("plan") && !navIds("landing", "editor").includes("audit") && navIds("landing", "editor").includes("general"));
+
+  // the interim R1.0 items leave once their owner contributes the item (by id or by link)
+  const p4Orders: NavContribution = { group: "sell", order: 10, item: { id: "orders-list", label: "nav.orders", href: (h) => appHref(h, "/orders"), icon: "ReceiptText", permission: "orders.read" } };
+  const p3Pages: NavContribution = { group: "landing", order: 10, item: { id: "pages", label: "nav.pages", href: (h) => appHref(h, "/landing-pages"), icon: "PanelsTopLeft", permission: "pages.read" } };
+  const merged = shellContributions([...shellNav, p4Orders, p3Pages]);
+  const mergedIds = merged.map((c) => c.item.id);
+  check("an interim item yields to the owner's item with the same link or the same id", !mergedIds.includes("orders") && mergedIds.includes("orders-list") && mergedIds.filter((id) => id === "pages").length === 1 && mergedIds.includes("generate"));
+  check("with no owner items yet every interim item shows exactly once", INTERIM_NAV.every((c) => shellContributions().filter((x) => x.item.id === c.item.id).length === 1));
+
+  // the sidebar folds the settings group; the tabs come from the registry in its order
+  const ownerNav = storeNav({ handle: "atlas", mode: "landing", can: roleCan("owner") });
+  const side = sidebarNav(ownerNav, "atlas");
+  const sideSettings = side.find((g) => g.id === "settings")?.items ?? [];
+  check("the sidebar shows one Settings entry opening the first tab", sideSettings.length === 1 && sideSettings[0]!.id === "settings" && sideSettings[0]!.href === "/app/atlas/settings/general");
+  check("the Settings entry is active on every settings path; the full nav names the tab", activeNav("/app/atlas/settings/plan", side, "atlas")?.id === "settings" && activeNav("/app/atlas/settings/plan", ownerNav, "atlas")?.id === "plan" && activeNav("/app/atlas", side, "atlas")?.id === "overview");
+  const checkout: NavContribution = { group: "settings", order: 30, item: { id: "checkout-fixture", label: "nav.orders", href: (h) => appHref(h, "/settings/checkout"), icon: "Truck", permission: "settings.read" } };
+  const tabs = settingsTabs({ handle: "atlas", mode: "landing", can: roleCan("owner") }, "fr", shellContributions([...shellNav, checkout]));
+  const tabIds = tabs.map((x) => x.id);
+  check("another track's tab appears in the settings sub-nav at its order, without a P2 edit", tabIds.indexOf("checkout-fixture") === tabIds.indexOf("market") + 1 && tabIds.indexOf("checkout-fixture") < tabIds.indexOf("security"), tabIds);
+  check("a tab's description is its `_lead` key, none when the catalog has no such key", tabs.find((x) => x.id === "general")?.description === t("shell.settings.general_lead", undefined, "fr") && tabs.find((x) => x.id === "checkout-fixture")?.description === null);
+  check("the settings tabs keep the sub-nav's order: General, Market, …, Danger zone last", tabIds[0] === "general" && tabIds[1] === "market" && tabIds.at(-1) === "danger", tabIds);
+
+  /* ---- the chord listener: guards and prevention ---- */
+  type Fn = (e: ChordEvent) => void;
+  let listener: Fn | null = null;
+  const target = { addEventListener: (_: "keydown", fn: Fn) => (listener = fn), removeEventListener: (_: "keydown", fn: Fn) => listener === fn && (listener = null) };
+  let clock = 0;
+  let overlay = false;
+  const got: ChordCommand[] = [];
+  const detach = attachChords(target, (c) => got.push(c), { parser: createChordParser(() => clock), overlay: () => overlay, editable: (el) => (el as unknown) === "field" });
+  const press = (key: string, extra: Partial<ChordEvent> = {}) => {
+    let prevented = false;
+    listener?.({ key, ctrlKey: false, metaKey: false, altKey: false, target: null, preventDefault: () => (prevented = true), ...extra });
+    clock += 100;
+    return prevented;
+  };
+  const p1 = press("g");
+  const p2 = press("o");
+  check("G then O goes to Orders; the completing key is prevented, the G is not", !p1 && p2 && JSON.stringify(got.at(-1)) === JSON.stringify({ kind: "go", target: "orders" }));
+  const n0 = got.length;
+  press("c", { target: "field" as unknown as EventTarget });
+  press("?", { target: "field" as unknown as EventTarget });
+  check("nothing fires inside an editable field", got.length === n0);
+  overlay = true;
+  press("c");
+  press("g");
+  press("t");
+  overlay = false;
+  check("nothing fires while an overlay owns the keyboard", got.length === n0);
+  const pc = press("k", { metaKey: true });
+  check("⌘K and Ctrl chords pass through untouched (the palette's own listener)", !pc && got.length === n0);
+  press("c");
+  press("?");
+  press("/");
+  press(">");
+  check("C, ?, / and > give Create, the sheet, search and actions", JSON.stringify(got.slice(n0).map((c) => c.kind)) === JSON.stringify(["create", "shortcuts", "search", "actions"]));
+  const pn = press("n");
+  const p6 = press("6");
+  const pj = press("j");
+  check("N, 1-6 and J/K are left to the screens (not prevented)", !pn && !p6 && !pj && got.length === n0 + 4);
+  const dk = press("x", { defaultPrevented: true } as Partial<ChordEvent>);
+  check("a key a screen already handled is ignored", !dk);
+  detach();
+  check("detaching removes the one listener", listener === null);
+
+  /* ---- typed order ids and the query's mode ---- */
+  const pq = parsePaletteQuery;
+  check("a typed order id opens its drawer (any case, trimmed)", pq(" ab12-cdef9 ").orderId === "AB12-CDEF9" && pq("/AB12-CDEF9").orderId === "AB12-CDEF9" && pq("AB-123").orderId === null && pq("+212600000000").orderId === null);
+  check("> filters actions (no order id), / searches, ? opens the sheet", pq(">ab12-cdef9").mode === "actions" && pq(">ab12-cdef9").orderId === null && pq("/argan").mode === "search" && pq("/argan").q === "argan" && pq("?").shortcuts && !pq("? help").shortcuts && pq("argan").mode === "all");
+  check("the drawer link only for orders.read, in the store on screen", orderDrawerHref("atlas", "AB12-CDEF9", true) === "/app/atlas/orders?order=AB12-CDEF9" && orderDrawerHref("atlas", "AB12-CDEF9", false) === null && orderDrawerHref("atlas", null, true) === null);
+
+  /* ---- the server answer's timing: 120 ms debounce, skeleton after 150 ms, held 300 ms ---- */
+  check("the timing constants of PLA-§22.13", SEARCH_DEBOUNCE_MS === 120 && SKELETON_AFTER_MS === 150 && PALETTE_SKELETON_MIN_MS === 300);
+  check("no skeleton before 150 ms; a fast answer never shows one", !skeletonVisible(0, null, 149) && skeletonVisible(0, null, 150) && !skeletonVisible(0, 120, 130) && revealAt(0, 120) === 120);
+  check("a slow answer keeps the skeleton 300 ms after it appeared", skeletonVisible(0, 200, 300) && skeletonVisible(0, 200, 449) && !skeletonVisible(0, 200, 450) && revealAt(0, 200) === 450 && revealAt(0, 900) === 900);
+
+  /* ---- the local index ---- */
+  const many = Array.from({ length: 400 }, (_, i) => ({ userId: `u${i}`, name: `Member ${i}`, role: "agent" }));
+  const base = { handle: "atlas", nav: ownerNav.flatMap((g) => g.items), tabs: settingsTabs({ handle: "atlas", mode: "landing", can: roleCan("owner") }), pages: Array.from({ length: 30 }, (_, i) => ({ id: `p${i}`, name: `Argan oil ${i}`, slug: `argan-${i}`, status: "published" })), roleLabel: (r: string) => r };
+  const big = buildLocalIndex({ ...base, members: many, canReadMembers: true });
+  check("the local index holds at most 300 entries, nav and tabs first", big.length === LOCAL_INDEX_MAX && big[0]!.kind === "nav" && big.some((e) => e.kind === "setting"));
+  const small = buildLocalIndex({ ...base, members: many.slice(0, 3), canReadMembers: false });
+  check("20 recent pages at most, no member without members.read, every link in the store", small.filter((e) => e.kind === "page").length === 20 && !small.some((e) => e.kind === "member") && small.every((e) => e.href.startsWith("/app/atlas")));
+  check("settings tabs are indexed as settings, not as nav items", !small.some((e) => e.kind === "nav" && e.id === "general") && small.some((e) => e.kind === "setting" && e.id === "general"));
+  const m = matchLocal(small, "argan oil 1");
+  check("matching: a title prefix ranks first, at most 6 per kind", m.page[0]?.title === "Argan oil 1" && m.page.length <= 6);
+  check("matching folds case and accents, and reads keywords", matchLocal(small, "ÉQUIPE").nav.some((e) => e.id === "team") && matchLocal(small, "2fa").setting.some((e) => e.id === "security"));
+
+  /* ---- recents: per store and member, swept with the store's client state ---- */
+  const key = recentsKey("s1", "u1");
+  check("the recents key is swept on a store switch and sign-out", storeKeyMatches(key, "s1", "u1") && !storeKeyMatches(key, "s2", "u1"));
+  const store = new Map<string, string>();
+  const fake = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+  let list: RecentEntry[] = [];
+  for (let i = 0; i < 15; i++) list = pushRecent(list, { kind: "page", id: `p${i}`, title: `Page ${i}`, href: `/app/atlas/pages/p${i}/edit` }, i);
+  list = pushRecent(list, { kind: "page", id: "p3", title: "Page 3", href: "/app/atlas/pages/p3/edit" }, 99);
+  check("a reopened entry moves first, without a copy; at most 12 kept", list[0]!.id === "p3" && list.filter((r) => r.id === "p3").length === 1 && list.length === RECENTS_KEPT);
+  check("a nav jump or an action is never a recent", pushRecent([], { kind: "nav", id: "orders", title: "Orders", href: "/app/atlas/orders" }, 1).length === 0);
+  writeRecents(() => fake as unknown as Storage, key, list);
+  store.set(key, JSON.stringify([...JSON.parse(store.get(key)!), { kind: "page", id: "x", title: "Elsewhere", href: "/app/baraka/pages/x/edit", at: 1000 }, { kind: "order", id: "y", title: "", href: "/app/atlas/orders", at: 1001 }, "junk"]));
+  const back = readRecents(() => fake as unknown as Storage, key, "atlas");
+  check("stored recents of another store, malformed ones and junk are dropped; newest first", back.length === RECENTS_KEPT && back.every((r) => r.href.startsWith("/app/atlas/")) && back[0]!.id === "p3");
+  const blocked = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+  check("a blocked storage reads nothing and writes nothing, without throwing", readRecents(() => blocked as unknown as Storage, key, "atlas").length === 0 && writeRecents(() => blocked as unknown as Storage, key, list) === false);
+
+  /* ---- suggestions by role and mode (DES-§16.10 first open) ---- */
+  const sug = (role: StoreRole, navIds: readonly string[] = ["orders", "pages"]) =>
+    paletteSuggestions({ role, mode: "landing", can: roleCan(role), nav: new Map(navIds.map((id) => [id, `/app/atlas/${id}`])), handle: "atlas" }).map((s) => s.def.id);
+  check("an owner starts with a new landing page, at most 4 suggestions", sug("owner")[0] === "new_page" && sug("owner").length === SUGGESTIONS_MAX, sug("owner"));
+  check("an agent starts with the call queue and never gets a page to build", sug("agent")[0] === "call_queue" && !sug("agent").includes("new_page"), sug("agent"));
+  check("Brand shows only once its screen is in the nav", !sug("owner").includes("brand") && sug("owner", ["orders", "brand"]).includes("brand"));
+  check("every suggestion label exists in ar, fr and en", Object.values(SUGGESTIONS).every((s) => inCatalogs(s.label)));
+
+  /* ---- the G targets and the shortcut sheet ---- */
+  const navMap = new Map(ownerNav.flatMap((g) => g.items.map((i) => [i.id, i.href] as const)));
+  const ownerGo = goHrefs({ handle: "atlas", nav: navMap, firstSettingsHref: "/app/atlas/settings/general", can: roleCan("owner") });
+  const agentGo = goHrefs({ handle: "atlas", nav: new Map([["orders", "/app/atlas/orders"]]), firstSettingsHref: null, can: roleCan("agent") });
+  const editorGo = goHrefs({ handle: "atlas", nav: navMap, firstSettingsHref: "/app/atlas/settings/general", can: roleCan("editor") });
+  check("G targets: the member's screens, Settings to the first tab, the queue only with agents.self", ownerGo.orders === "/app/atlas/orders" && ownerGo.settings === "/app/atlas/settings/general" && ownerGo.queue === "/app/atlas/queue" && editorGo.queue === undefined && ownerGo.overview === "/app/atlas");
+  check("an agent's G Q reaches the queue alias; no settings", agentGo.queue === "/app/atlas/queue" && agentGo.settings === undefined);
+  const sections = shortcutSections({ mod: "Ctrl", show: (x) => x === "switch_store" || editorGo[x as keyof typeof editorGo] !== undefined, queue: false, label: (k) => t(k) });
+  const goRows = sections.find((x) => x.id === "go")?.rows ?? [];
+  check("the sheet lists only the G targets the member can open, as G then the key", goRows.some((r) => r.id === "go.orders" && JSON.stringify(r.keys) === '[["G"],["O"]]') && !goRows.some((r) => r.id === "go.queue") && goRows.some((r) => r.id === "go.switch_store"));
+  check("the queue keys only for the call roles", !sections.some((x) => x.id === "queue") && shortcutSections({ mod: "⌘", show: () => true, queue: true, label: (k) => k }).some((x) => x.id === "queue"));
+  check("every G target has a second key and a label in ar, fr and en", GO_ORDER.length === Object.keys(GO_CHORDS).length && GO_ORDER.every((g) => GO_KEY_OF[g] && inCatalogs(`shell.shortcuts.go.${g}`)));
+
+  /* ---- every key the palette, the sheet, the commands and the settings frame name exists in ar, fr and en ---- */
+  const dir = path.join(process.cwd(), "src/components/admin");
+  const files = ["shell/command-palette.tsx", "shell/command-palette-body.tsx", "shell/shortcut-sheet.tsx", "shell/chords.ts", "shell/palette-logic.ts", "shell/commands/shell.ts", "shell/nav/t4.ts", "settings/settings-nav.tsx", "shell/topbar.tsx", "shell/app-sidebar.tsx"].map((f) => path.join(dir, f));
+  const keys = new Set<string>();
+  const commandIds = new Set(COMMANDS.map((c) => c.id));
+  // command ids ("shell.help") are names, not catalog keys
+  for (const file of files) for (const mm of readFileSync(file, "utf8").matchAll(/"((?:shell|team|nav)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)"/g)) if (!commandIds.has(mm[1]!)) keys.add(mm[1]!);
+  const built = [
+    ...ADMIN_LOCALES.map((l) => `shell.cmdk.lang.${l}`),
+    ...["draft", "published", "archived"].map((s) => `shell.cmdk.page.${s}`),
+    ...(["create", "run", "jump"] as const).map((g) => `shell.cmdk.group.${g}`),
+    ...[...shellNav, ...INTERIM_NAV].filter((c) => c.group === "settings").map((c) => tabLeadKey(c.item.label)),
+    ...ACTIVE_STORE_ROLES.map((r) => `team.role.${r}`),
+  ];
+  const missing = [...keys, ...built].filter((k) => !inCatalogs(k));
+  check(`the ${keys.size} keys the palette and the nav name (and the built ones) exist in ar, fr and en`, keys.size > 60 && missing.length === 0, missing);
+  const dashed = [...keys, ...built].flatMap((k) => ADMIN_LOCALES.map((l) => [k, messageOf(k, l) ?? ""] as const)).filter(([, v]) => /[–—]/.test(v));
+  check("no em or en dash in the palette's strings", dashed.length === 0, dashed);
+}
+
 ruleChecks()
   .then(searchChecks)
   .then(manifestChecks)
   .then(actionInputChecks)
   .then(primitiveChecks)
   .then(chromeChecks)
+  .then(paletteChecks)
   .catch((err: unknown) => check("the rule and search checks ran", false, String(err)))
   .finally(() => {
     console.log(`test:shell: ${passed} passed, ${failures} failed`);

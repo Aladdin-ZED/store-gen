@@ -59,7 +59,7 @@ import { DENSITIES, useDensity } from "./density";
 import { useHelpSheet } from "./help-sheet";
 import { IosInstallSheet, useInstallHint } from "./install-hint";
 import { useStore } from "./store-context";
-import { activeNav, storeNav, type ShellNavGroup, type ShellNavItem } from "./store-nav";
+import { activeNav, sidebarNav, storeNav, type ShellNavGroup, type ShellNavItem } from "./store-nav";
 import { StoreSwitcher, type SwitcherProps } from "./store-switcher";
 import { usePulse } from "./use-pulse";
 
@@ -83,7 +83,8 @@ export function AppSidebar({ user, switcher, className }: { user: ShellUser; swi
   const t = useT();
   const locale = useAdminLocale();
   const counts = usePulse().body?.counts ?? null;
-  const groups = useMemo(() => storeNav({ handle: store.handle, mode: store.mode, can: store.can }, locale), [store, locale]);
+  // the registry's groups, the settings tabs folded into one entry (the tabs are the settings frame's sub-navigation)
+  const groups = useMemo(() => sidebarNav(storeNav({ handle: store.handle, mode: store.mode, can: store.can }, locale), store.handle, locale), [store, locale]);
   const active = activeNav(pathname, groups, store.handle);
   const generate = groups.flatMap((g) => g.items).find((i) => i.id === "generate");
   const closeMobile = () => {

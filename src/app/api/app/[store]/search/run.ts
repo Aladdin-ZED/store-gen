@@ -14,11 +14,12 @@
  * member list and hands it over.
  */
 import { z } from "zod";
-import { SETTINGS_NAV, settingsText } from "@/components/admin/shell/store-nav";
+import { settingsTabs } from "@/components/admin/shell/store-nav";
 import type { SearchHit, SearchProvider } from "@/lib/admin-data/search/types";
 import type { StorePermission, StoreRole } from "@/lib/auth/permissions";
 import { t, type AdminLocale, type MessageKey } from "@/lib/i18n/admin";
 import type { MemberSummary } from "@/lib/tenancy/invites";
+import type { StoreMode } from "@/lib/tenancy/mode";
 import type { StoreScope } from "@/lib/tenancy/types";
 import { appHref } from "@/lib/urls";
 
@@ -169,6 +170,8 @@ export interface SearchViewer {
   locale: AdminLocale;
   /** the store on screen: every hit links under `/app/<handle>` */
   handle: string;
+  /** the store's mode: the settings tabs follow the registry's filter (a hidden tab is never found); "landing" when absent */
+  mode?: StoreMode;
   can(p: StorePermission): boolean;
 }
 
@@ -180,17 +183,20 @@ export function foldSearch(value: string): string {
 /** The shell provider's hits per kind. */
 export const SHELL_MAX = 6;
 
-/** The settings sections the viewer may open whose label or one-line description (in their language or English) match. */
-export function settingHits(viewer: Pick<SearchViewer, "can" | "locale" | "handle">, q: string): SearchHit[] {
+/**
+ * The settings tabs the viewer may open (the registry's `settings` group, any track's, `settingsTabs`) whose label,
+ * one-line description or keywords (in their language or English) match.
+ */
+export function settingHits(viewer: Pick<SearchViewer, "can" | "locale" | "handle" | "mode">, q: string): SearchHit[] {
   const needle = foldSearch(q);
+  const nav = { handle: viewer.handle, mode: viewer.mode ?? "landing", can: viewer.can };
+  const english = new Map(settingsTabs(nav, "en").map((tab) => [tab.id, tab]));
   const hits: SearchHit[] = [];
-  for (const item of SETTINGS_NAV) {
-    if (!viewer.can(item.permission)) continue;
-    const label = settingsText(item, "label", viewer.locale);
-    const description = settingsText(item, "description", viewer.locale);
-    const hay = [label, description, item.label, item.description, item.id].map(foldSearch);
+  for (const tab of settingsTabs(nav, viewer.locale)) {
+    const en = english.get(tab.id);
+    const hay = [tab.label, tab.description ?? "", en?.label ?? "", en?.description ?? "", tab.id, ...tab.keywords].map(foldSearch);
     if (!hay.some((h) => h.includes(needle))) continue;
-    hits.push({ id: item.id, kind: "setting", title: label, subtitle: description, href: appHref(viewer.handle, item.path), group: "shell.cmdk.group.settings" });
+    hits.push({ id: tab.id, kind: "setting", title: tab.label, ...(tab.description ? { subtitle: tab.description } : {}), href: tab.href, group: "shell.cmdk.group.settings" });
     if (hits.length >= SHELL_MAX) break;
   }
   return hits;

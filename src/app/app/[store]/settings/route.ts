@@ -1,5 +1,5 @@
 /**
- * /app/<handle>/settings → the first settings tab, Store & legal (its page checks `settings.read`; members without
+ * /app/<handle>/settings → the first settings tab, General (its page checks `settings.read`; members without
  * it get the neutral 404 there, and their own account lives at /app/account). A route handler, not a page, so the
  * answer is one 307.
  */

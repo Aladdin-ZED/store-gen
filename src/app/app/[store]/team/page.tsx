@@ -20,8 +20,10 @@ export async function generateMetadata(): Promise<Metadata> {
  * row (`canManageMember`, the rank rule on the new role, `invitableRoles`) so the page only offers what the server
  * will accept; every action re-checks them. Under "view as store" the controls stay visible and refuse read-only.
  */
-export default async function TeamPage({ params }: { params: Promise<{ store: string }> }) {
+export default async function TeamPage({ params, searchParams }: { params: Promise<{ store: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { store: handle } = await params;
+  // ⌘K "Invite a teammate" and the Create menu land here with ?invite=1: the invite form opens for a member who may invite
+  const openInvite = (await searchParams).invite === "1";
   const ctx = await requireStoreMember({ handle, permission: "members.read" });
   const [members, invites, locale] = await Promise.all([listMembersByScope(ctx.scope), listInvites(ctx), viewerLocale(ctx.user)]);
   const t = authTranslator(locale);
@@ -73,6 +75,7 @@ export default async function TeamPage({ params }: { params: Promise<{ store: st
             invites={inviteRows}
             invitable={impersonating ? [] : canInvite ? [...invitableRoles(role)] : []}
             canInvite={canInvite}
+            openInvite={openInvite && canInvite && !impersonating}
             readOnly={impersonating}
             actions={{
               createInvite: createInviteAction,

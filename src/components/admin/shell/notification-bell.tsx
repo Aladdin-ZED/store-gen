@@ -212,7 +212,7 @@ export function NotificationBell() {
     return (
       <Sheet open={open} onOpenChange={setOpen}>
         <BellButton count={count} label={label} onClick={() => setOpen(true)} />
-        <SheetContent side={dirOf(locale) === "rtl" ? "left" : "right"} showCloseButton={false} className="w-full gap-0 p-0 sm:max-w-full">
+        <SheetContent side={dirOf(locale) === "rtl" ? "left" : "right"} dir={dirOf(locale)} lang={locale} showCloseButton={false} className="w-full gap-0 p-0 sm:max-w-full">
           <SheetHeader className="sr-only">
             <SheetTitle>{t("shell.notifications.title")}</SheetTitle>
             <SheetDescription>{label}</SheetDescription>
