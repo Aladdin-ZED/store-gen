@@ -25,6 +25,7 @@ import type { Actor, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import type { AiFailCode } from "../provider/types";
 import { runServerTask } from "../router/run.server";
 import { aiFlagsFor } from "../server/flags";
+import { processState } from "../server/process";
 import { casJob, getAiJob, heartbeatJob, leaseCond, readJob, toView, touchJob, type AiJobView, type JobRow } from "../store/jobs";
 import type { RunStage } from "../store/runs";
 import type { AiTaskId } from "../tasks";
@@ -48,6 +49,17 @@ export const jobDeps: {
   after: (fn) => after(fn),
   trace: null,
 };
+
+/** The stage each job runs in this process: the owner's cancel aborts its in-flight call (`abortJobStage`). */
+const inflight = processState("ai-job-inflight", () => new Map<string, AbortController>());
+
+/** Aborts the stage `jobId` is running in this process, if any (`jobs/[id]/cancel`, AI-§A.7). */
+export function abortJobStage(jobId: string): boolean {
+  const ctl = inflight.get(jobId);
+  if (!ctl) return false;
+  ctl.abort();
+  return true;
+}
 
 /** Codes after which the stage simply waits for the next driver (nothing is wrong with the job). */
 const DEFER: ReadonlySet<AiFailCode> = new Set<AiFailCode>(["kill", "busy", "provider_overloaded", "rate_limited", "cancelled"]);
@@ -128,6 +140,7 @@ async function advanceOnce(scope: StoreScope, jobId: string, driver: "after" | "
   if (!row || !stage) return { view: row ? toView(row) : null, ran: false };
   jobDeps.trace?.("stage", jobId, `${driver}:${stage.id}`);
   const ctl = new AbortController();
+  inflight.set(jobId, ctl);
   const deadline = setTimeout(() => ctl.abort(), Math.min(stage.deadlineMs, budgetMs));
   const beat = setInterval(() => {
     void heartbeatJob(ws, jobId, stage.id, new Date()).catch(() => undefined);
@@ -141,6 +154,7 @@ async function advanceOnce(scope: StoreScope, jobId: string, driver: "after" | "
   } finally {
     clearTimeout(deadline);
     clearInterval(beat);
+    if (inflight.get(jobId) === ctl) inflight.delete(jobId);
   }
   // the row as the claim left it (the heartbeats never touch updated_at)
   const claimed = await readJob(ws, jobId);

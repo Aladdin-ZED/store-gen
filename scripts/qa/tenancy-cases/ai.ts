@@ -27,6 +27,20 @@
  *    `state` before any read of counters, cache or provider (no run row, no counter); a run in B's scope (whatever
  *    the harness's AI settings make of it: a server run or the library rung) leaves A's rows and counters as they were.
  *
+ * Routes (step 9), through the real handlers under src/app/api/app/[store]/ai/** (`callRoute`), with the localhost
+ * fake provider (src/lib/ai/testing/fake-anthropic.ts through the ai-base-url seam) and Cloud AI on for the case:
+ *  - B's owner on B's handle with A's ids: `runs/[id]` (A's finished run, A's live run buffer) and `jobs/[id]` (with and
+ *    without advance) answer the same neutral 404 as a missing id, `jobs/[id]/cancel` the same 204, and A's job, run
+ *    and buffer are left as they were; A's owner reads them (the check is not blind).
+ *  - `ai_cache` through the route: A's copy.hero run is cached for A (A's second call is a hit, no provider call); B's
+ *    identical input is a provider call of its own, never A's entry.
+ *  - a local-mode store gets `store_local_only` from every provider route ([task] JSON and stream, director/plan,
+ *    director/critique, jobs/[id]?advance=1) with 0 fake-provider calls; an auto-mode store reaches the provider.
+ *  - `jobs/[id]?advance=1` without `Sec-Fetch-Site: same-origin` (cross-site, none, same-site) answers the read-only
+ *    view and leaves the stage unchanged; the same-origin poll runs one stage (the probe's sleep stage, no model).
+ *  - an impersonating session gets `impersonation_read_only` from every AI POST and from `jobs/[id]?advance=1`, and
+ *    makes no provider call and moves no job stage of A.
+ *
  * Repositories (step 6):
  *  - `ai_runs`, `ai_cache`, `ai_memory`, `ai_jobs` through their scoped repositories (src/lib/ai/store/**): A writes a
  *    run, a cache entry, a memory item and a job; B's scope reads none of them by id or by list (`getRunMeta`,
@@ -59,10 +73,300 @@ import { aiJobs } from "@/lib/db/schema";
 import { storeValues } from "@/lib/tenancy/sql";
 import { setStoreSetting } from "@/lib/settings";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
-import type { TenancyCase } from "../tenancy-check";
+import { readFileSync } from "node:fs";
+import http from "node:http";
+import { Readable } from "node:stream";
+import path from "node:path";
+import { eq } from "drizzle-orm";
+import { ALL_FIXTURES } from "@/lib/ai/eval/fixtures";
+import { RunBufferSink } from "@/lib/ai/http/transport";
+import { probePlan } from "@/lib/ai/jobs/stages";
+import { breaker } from "@/lib/ai/server/breaker";
+import { resetAnthropic } from "@/lib/ai/server/client";
+import { invalidateAiFlags } from "@/lib/ai/server/flags";
+import { insertJob } from "@/lib/ai/store/jobs";
+import { startFakeAnthropic, type FakeAnthropic } from "@/lib/ai/testing/fake-anthropic";
+import { flagOverrides, sessions } from "@/lib/db/schema";
+import { getPlatformSetting, setPlatformSetting } from "@/lib/settings";
+import type { RouteAnswer, RouteFile, TenancyCase, TenancyKit } from "../tenancy-check";
 
 /** the harness hands out member scopes; the settings write takes the WriteScope it is */
 const writable = (s: StoreScope): s is WriteScope => s.kind === "member";
+
+/* ------------------------------------------------------------------ */
+/* step 9: the route handlers                                          */
+/* ------------------------------------------------------------------ */
+
+const ROOT = path.resolve(__dirname, "..", "..", "..");
+const AI = "/api/app/[store]/ai";
+const route = (rel: string, methods: string[]): RouteFile => ({ file: `src/app${AI}${rel}/route.ts`, template: `${AI}${rel}`, methods });
+const R = {
+  task: route("/[task]", ["POST"]),
+  plan: route("/director/plan", ["POST"]),
+  critique: route("/director/critique", ["POST"]),
+  verify: route("/director/verify", ["POST"]),
+  run: route("/runs/[id]", ["GET"]),
+  job: route("/jobs/[id]", ["GET"]),
+  cancel: route("/jobs/[id]/cancel", ["POST"]),
+  warm: route("/warm", ["POST"]),
+  report: route("/report", ["POST"]),
+};
+type Answer = { ok: boolean; value?: RouteAnswer; error?: unknown };
+type Caller = { userId: string; stepUpAt: Date } | { sessionToken: string };
+const GHOST = "01J0000000000000000000GH0S";
+const user = (userId: string): Caller => ({ userId, stepUpAt: new Date() });
+const answer = (o: Answer) => (o.ok ? { status: o.value!.status, body: o.value!.body.slice(0, 400) } : { status: 500, body: String(o.error) });
+const bodyOf = (o: Answer): Record<string, unknown> => {
+  try {
+    return o.ok ? (JSON.parse(o.value!.body) as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+};
+const copyHero = ALL_FIXTURES.find((f) => f.task === "copy.hero")!;
+const recordedHero = (): unknown =>
+  (JSON.parse(readFileSync(path.join(ROOT, "src/lib/ai/eval/sets/copy.hero/recorded/copy.hero@s1.json"), "utf8")) as { runs: Record<string, { output: unknown }[]> }).runs[copyHero.id]![0]!.output;
+const passIds = () => ({ session: `sess${randomBytes(6).toString("hex")}`, id: `pass${randomBytes(6).toString("hex")}` });
+
+/** A queued probe job of A (sleep stages of `stageMs`, no model, no credit): what the job routes drive. */
+async function probeJobOf(scope: WriteScope, owner: string, stageMs = 1_500): Promise<string> {
+  const plan = probePlan(stageMs * 2, stageMs);
+  const id = newId();
+  await insertJob(scope, {
+    id,
+    kind: "probe",
+    task: "probe.sleep",
+    inputHash: sha256Hex(`tenancy-probe|${id}`),
+    progress: { done: 0, total: plan.stages.length, stages: {}, plan: plan.stages.map((st) => st.id) },
+    class: "director_deep",
+    doc: { runIds: [], input: { totalMs: stageMs * 2, stageMs }, plan: [...plan.stages], reservation: null },
+    reservedCredits: 0,
+    createdBy: owner,
+    now: new Date(),
+  });
+  return id;
+}
+
+const jobState = async (id: string): Promise<string> => {
+  const [r] = await db.select({ status: aiJobs.status, stage: aiJobs.stage, leaseUntil: aiJobs.leaseUntil, progress: aiJobs.progress, updatedAt: aiJobs.updatedAt }).from(aiJobs).where(eq(aiJobs.id, id)).limit(1);
+  return JSON.stringify(r ?? null);
+};
+
+/**
+ * The harness answers every fetch itself (network disabled in test:tenancy, 503 for an unknown host): the provider
+ * client's requests to the localhost fake go over node:http instead, streamed, with the call's signal; every other
+ * request still reaches the harness's fetch.
+ */
+function loopbackFetch(origin: string, inner: typeof fetch): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const asReq = input instanceof Request ? input : null;
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (!url.startsWith(origin)) return inner(input, init);
+    const method = (init?.method ?? asReq?.method ?? "GET").toUpperCase();
+    const headers = new Headers(init?.headers ?? asReq?.headers);
+    const raw = init?.body ?? (asReq && method !== "GET" ? await asReq.arrayBuffer() : null);
+    const payload = raw === null || raw === undefined ? null : typeof raw === "string" ? Buffer.from(raw) : Buffer.from(await new Response(raw as BodyInit).arrayBuffer());
+    const signal = init?.signal ?? asReq?.signal ?? undefined;
+    return new Promise<Response>((resolve, reject) => {
+      const out = http.request(url, { method, headers: Object.fromEntries(headers.entries()), ...(signal ? { signal } : {}) }, (res) => {
+        const h = new Headers();
+        for (const [k, v] of Object.entries(res.headers)) if (v !== undefined) h.set(k, Array.isArray(v) ? v.join(", ") : v);
+        resolve(new Response(Readable.toWeb(res) as ReadableStream<Uint8Array>, { status: res.statusCode ?? 502, headers: h }));
+      });
+      out.on("error", reject);
+      if (payload) out.write(payload);
+      out.end();
+    });
+  }) as typeof fetch;
+}
+
+/**
+ * Cloud AI on against the localhost fake for one case (key, cap, the Director flag for A and B); the platform setting,
+ * the flags, the variables and the client are put back after.
+ */
+async function withFakeAi(kit: TenancyKit, fn: (fake: FakeAnthropic) => Promise<void>): Promise<void> {
+  const env = process.env as Record<string, string | undefined>;
+  const saved = { SG_E2E: env.SG_E2E, SG_AI_BASE_URL: env.SG_AI_BASE_URL, ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY };
+  const fake = await startFakeAnthropic();
+  const before = await getPlatformSetting("platform_ai", { fresh: true });
+  const staff = { id: kit.fx.staff.id, kind: "platform" as const };
+  const harnessFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = loopbackFetch(fake.origin, harnessFetch);
+    env.SG_E2E = "1";
+    env.SG_AI_BASE_URL = fake.origin;
+    env.ANTHROPIC_API_KEY = `sk-ant-tenancy-${randomBytes(16).toString("hex")}`;
+    resetAnthropic();
+    breaker().reset();
+    await setPlatformSetting("platform_ai", { ...before, enabled: true, streamTransport: "stream", caps: { ...before.caps, monthlyUsd: 100 } }, staff);
+    for (const k of ["A", "B"] as const) {
+      await db.insert(flagOverrides).values({ flagKey: "ai_director_brief", scope: "store", scopeId: kit.fx[k].id, value: true }).onDuplicateKeyUpdate({ set: { value: true } });
+    }
+    invalidateAiFlags();
+    await fn(fake);
+  } finally {
+    globalThis.fetch = harnessFetch;
+    await setPlatformSetting("platform_ai", before, staff);
+    for (const k of ["A", "B"] as const) await db.delete(flagOverrides).where(eq(flagOverrides.scopeId, kit.fx[k].id));
+    invalidateAiFlags();
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete env[k];
+      else env[k] = v;
+    }
+    resetAnthropic();
+    await fake.close();
+  }
+}
+
+/** A read-only "View as store" session of the platform staff on store A (the seam's own impersonation row). */
+async function impersonationOf(kit: TenancyKit): Promise<string | null> {
+  const { requirePlatform } = await import("@/lib/platform/seam");
+  const { startImpersonation } = await import("@/lib/platform/impersonation");
+  const token = randomBytes(32).toString("base64url");
+  await db.insert(sessions).values({ id: sha256Hex(token), userId: kit.fx.staff.id, mfaPassed: true, expiresAt: new Date(Date.now() + 3_600_000), stepUpAt: new Date() });
+  const r = await kit.call({ sessionToken: token }, "/admin", async () => {
+    const ctx = await requirePlatform({ permission: "stores.impersonate", throwOnFail: true });
+    return startImpersonation(ctx, { storeId: kit.fx.A.id, reason: "ticket", ticketRef: "TENANCY-AI", minutes: 15 });
+  });
+  kit.check("ai routes: staff starts a read-only view of A (the seam's own impersonation)", r.ok, r.ok ? "ok" : String(r.error));
+  return r.ok ? token : null;
+}
+
+const routeCases: TenancyCase[] = [
+  {
+    name: "ai routes: B cannot read A's run or run buffer, nor poll, drive or cancel A's job",
+    async run(kit) {
+      const a = kit.scope("A");
+      if (!writable(a)) throw new Error("ai: the harness scope of A is not a member scope");
+      const tag = randomBytes(4).toString("hex");
+      const ownerA = kit.fx.A.members.owner;
+      const ownerB = user(kit.fx.B.members.owner);
+      const runId = await insertRun(a, { userId: ownerA, task: "copy.hero", provider: "server", via: "interactive", inputHash: sha256Hex(`ai-route-${tag}`), finished: { status: "ok", ms: 12, credits: 1, costMicros: 900, output: { headline: `ai-route-run-${tag}` } } });
+      const liveId = newId();
+      const sink = new RunBufferSink(kit.fx.A.id);
+      sink.open(liveId);
+      sink.emit({ t: "start", runId: liveId, provider: "server", class: "worker", model: "claude-sonnet-5-5", effort: "low" });
+      sink.emit({ t: "field", path: "headline", value: `ai-route-buffer-${tag}` });
+      const jobId = await probeJobOf(a, ownerA);
+      const before = { snap: await kit.snapshotA(), job: await jobState(jobId) };
+      const onB = (r: RouteFile, method: string, id: string, plan: { query?: Record<string, string> } = {}) => kit.callRoute(ownerB, r, method, { store: kit.fx.B.handle, id }, plan);
+
+      for (const [label, id] of [
+        ["A's finished run", runId],
+        ["A's live run buffer", liveId],
+      ] as const) {
+        const real = await onB(R.run, "GET", id, { query: { after: "-1" } });
+        const ghost = await onB(R.run, "GET", GHOST, { query: { after: "-1" } });
+        kit.check(`ai routes: GET runs/[id] · B's owner · ${label}: the neutral 404 of a missing id`, real.ok && real.value!.status === 404 && real.value!.body === ghost.value?.body, { real: answer(real), ghost: answer(ghost) });
+        kit.check(`ai routes: GET runs/[id] · B's owner · ${label}: no text of A`, !(real.value?.body ?? "").includes(tag) && kit.leaks(answer(real)).length === 0);
+      }
+      for (const advance of ["1", "0"]) {
+        const real = await onB(R.job, "GET", jobId, { query: { advance } });
+        const ghost = await onB(R.job, "GET", GHOST, { query: { advance } });
+        kit.check(`ai routes: GET jobs/[id]?advance=${advance} · B's owner · A's job: the neutral 404 of a missing id`, real.ok && real.value!.status === 404 && real.value!.body === ghost.value?.body, { real: answer(real), ghost: answer(ghost) });
+      }
+      const cancel = await onB(R.cancel, "POST", jobId);
+      const cancelGhost = await onB(R.cancel, "POST", GHOST);
+      kit.check("ai routes: POST jobs/[id]/cancel · B's owner · A's job: the same 204 as a missing id", cancel.ok && cancel.value!.status === 204 && cancelGhost.value?.status === 204, { cancel: answer(cancel), ghost: answer(cancelGhost) });
+      kit.check("ai routes: B's calls left A's job (status, stage, lease, progress) and rows as they were", (await jobState(jobId)) === before.job && (await kit.snapshotA()) === before.snap, { job: await jobState(jobId) });
+
+      // the check is not blind: A's owner reads all three
+      const ownA = user(ownerA);
+      const run = await kit.callRoute(ownA, R.run, "GET", { store: kit.fx.A.handle, id: runId }, {});
+      const buf = await kit.callRoute(ownA, R.run, "GET", { store: kit.fx.A.handle, id: liveId }, { query: { after: "0" } });
+      const job = await kit.callRoute(ownA, R.job, "GET", { store: kit.fx.A.handle, id: jobId }, { query: { advance: "0" } });
+      kit.check("ai routes: A's owner reads A's finished run (its final event)", run.ok && run.value!.status === 200 && run.value!.body.includes(`ai-route-run-${tag}`), answer(run));
+      kit.check("ai routes: A's owner polls A's live buffer after seq 0 (the field, not done)", buf.ok && buf.value!.status === 200 && buf.value!.body.includes(`ai-route-buffer-${tag}`) && bodyOf(buf).done === false && !buf.value!.body.includes('"t":"start"'), answer(buf));
+      kit.check("ai routes: A's owner reads A's job (advance=0: queued, nothing run)", job.ok && job.value!.status === 200 && bodyOf(job).status === "queued" && (await jobState(jobId)) === before.job, answer(job));
+    },
+  },
+  {
+    name: "ai routes: the cache, local mode, the same-origin poll rule and impersonation through the handlers",
+    async run(kit) {
+      const a = kit.scope("A");
+      if (!writable(a)) throw new Error("ai: the harness scope of A is not a member scope");
+      const ownerA = kit.fx.A.members.owner;
+      const ownA = user(ownerA);
+      const ownB = user(kit.fx.B.members.owner);
+      await withFakeAi(kit, async (fake) => {
+        const msgs = () => fake.total("/v1/messages");
+        const post = (who: Caller, store: "A" | "B", r: RouteFile, body: unknown, params: Record<string, string> = {}) => kit.callRoute(who, r, "POST", { store: kit.fx[store].handle, ...params }, { body });
+        const getJob = (who: Caller, id: string, headers?: Record<string, string>) => kit.callRoute(who, R.job, "GET", { store: kit.fx.A.handle, id }, { query: { advance: "1" } }, headers ? { headers } : {});
+        const hero = { input: copyHero.input, surface: "wizard" };
+
+        // ai_cache through the route: A's entry serves A only
+        fake.enqueue({ kind: "ok", json: recordedHero() });
+        const a1 = await post(ownA, "A", R.task, hero, { task: "copy.hero" });
+        const calls1 = msgs();
+        const a2 = await post(ownA, "A", R.task, hero, { task: "copy.hero" });
+        kit.check(
+          "ai routes: A's copy.hero is a server run, then a cache hit for A (no second provider call)",
+          bodyOf(a1).ok === true && bodyOf(a1).provider === "server" && calls1 === 1 && msgs() === 1 && JSON.stringify(bodyOf(a2).flags ?? []).includes("cache_hit"),
+          { a1: answer(a1), a2: answer(a2), calls: msgs() },
+        );
+        fake.enqueue({ kind: "ok", json: recordedHero() });
+        const b1 = await post(ownB, "B", R.task, hero, { task: "copy.hero" });
+        kit.check("ai routes: B's identical input is B's own provider call, never A's cache entry", msgs() === 2 && !JSON.stringify(bodyOf(b1).flags ?? []).includes("cache_hit") && bodyOf(b1).runId !== bodyOf(a2).runId, { b1: answer(b1), calls: msgs() });
+
+        // local mode: store_local_only from every provider route, 0 provider calls; B in auto mode reaches it
+        await setStoreSetting(a, "store_ai", { mode: "local" }, { id: ownerA, ip: null });
+        const jobId = await probeJobOf(a, ownerA);
+        const start = msgs();
+        const p = passIds();
+        const local: [string, () => Promise<Answer>][] = [
+          ["POST [task] copy.hero", () => post(ownA, "A", R.task, { ...hero, nonce: "local1" }, { task: "copy.hero" })],
+          ["POST [task] copy.page (stream)", () => post(ownA, "A", R.task, { input: {}, surface: "wizard" }, { task: "copy.page" })],
+          ["POST director/plan", () => post(ownA, "A", R.plan, { input: {}, pass: p })],
+          ["POST director/critique", () => post(ownA, "A", R.critique, { input: {}, pass: p })],
+          ["GET jobs/[id]?advance=1", () => getJob(ownA, jobId)],
+        ];
+        for (const [label, go] of local) {
+          const r = await go();
+          kit.check(`ai routes: ${label} · A in local mode: store_local_only`, r.ok && r.value!.status === 403 && bodyOf(r).error === "store_local_only", answer(r));
+        }
+        kit.check("ai routes: local mode made 0 provider calls and moved no job stage", msgs() === start && (JSON.parse(await jobState(jobId)) as { status: string }).status === "queued", { calls: msgs() - start });
+        fake.enqueue({ kind: "ok", json: recordedHero() });
+        const auto = await post(ownB, "B", R.task, { ...hero, nonce: "auto1" }, { task: "copy.hero" });
+        kit.check("ai routes: B in auto mode reaches the provider (the check is not blind)", msgs() === start + 1 && bodyOf(auto).error !== "store_local_only", answer(auto));
+        await setStoreSetting(a, "store_ai", { mode: "auto" }, { id: ownerA, ip: null });
+
+        // advance without Sec-Fetch-Site: same-origin reads only; the same-origin poll runs one stage
+        const idle = await jobState(jobId);
+        for (const site of ["cross-site", "none", "same-site"]) {
+          const r = await getJob(ownA, jobId, { "sec-fetch-site": site });
+          kit.check(`ai routes: GET jobs/[id]?advance=1 with Sec-Fetch-Site ${site}: the read-only view, the stage unchanged`, r.ok && r.value!.status === 200 && bodyOf(r).status === "queued" && (await jobState(jobId)) === idle, { r: answer(r), job: await jobState(jobId) });
+        }
+        const driven = await getJob(ownA, jobId);
+        const progress = bodyOf(driven).progress as { done?: number } | undefined;
+        kit.check("ai routes: the same-origin poll ran one stage of A's job, without a model (positive control)", driven.ok && driven.value!.status === 200 && progress?.done === 1 && msgs() === start + 1, answer(driven));
+
+        // impersonation: every AI POST and advance=1 refused before anything runs
+        const token = await impersonationOf(kit);
+        if (!token) return;
+        const imp: Caller = { sessionToken: token };
+        const jobBefore = await jobState(jobId);
+        const callsBefore = msgs();
+        const posts: [string, RouteFile, Record<string, string>, unknown][] = [
+          ["POST [task] copy.hero", R.task, { task: "copy.hero" }, hero],
+          ["POST [task] copy.page", R.task, { task: "copy.page" }, { input: {}, surface: "wizard" }],
+          ["POST director/plan", R.plan, {}, { input: {}, pass: passIds() }],
+          ["POST director/critique", R.critique, {}, { input: {}, pass: passIds() }],
+          ["POST director/verify", R.verify, {}, { input: {}, pass: passIds() }],
+          ["POST jobs/[id]/cancel", R.cancel, { id: jobId }, {}],
+          ["POST warm", R.warm, {}, { task: "copy.page" }],
+          ["POST report", R.report, {}, { task: "copy.page", ms: 10, status: "ok" }],
+        ];
+        for (const [label, r, params, body] of posts) {
+          const out = await post(imp, "A", r, body, params);
+          kit.check(`ai routes: ${label} · staff viewing A: impersonation_read_only`, out.ok && out.value!.status === 403 && bodyOf(out).error === "impersonation_read_only", answer(out));
+        }
+        const adv = await getJob(imp, jobId);
+        kit.check("ai routes: GET jobs/[id]?advance=1 · staff viewing A: impersonation_read_only", adv.ok && adv.value!.status === 403 && bodyOf(adv).error === "impersonation_read_only", answer(adv));
+        kit.check("ai routes: under impersonation no provider call and no job stage moved", msgs() === callsBefore && (await jobState(jobId)) === jobBefore, { calls: msgs() - callsBefore });
+      });
+    },
+  },
+];
 
 export const cases: TenancyCase[] = [
   {
@@ -211,4 +515,5 @@ export const cases: TenancyCase[] = [
       kit.check("ai: neither run moved A's counters or rows", (await kit.snapshotA()) === before);
     },
   },
+  ...routeCases,
 ];

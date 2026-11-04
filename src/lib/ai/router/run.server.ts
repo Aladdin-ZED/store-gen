@@ -69,7 +69,7 @@ import { cacheExpiry, cacheLookup, cacheWrite } from "../store/cache";
 import { activeMemory } from "../store/memory";
 import { finishRun, insertRun, type RunFinish, type RunStage } from "../store/runs";
 import { PartialJson } from "../stream/partial-json";
-import { AiRouteError, TASKS, isDirectorTask, liveTasks, type AiTaskId, type RoutePlan, type RunPattern } from "../tasks";
+import { AiRouteError, TASKS, isDirectorTask, liveTasks, type AiTaskId, type Effort, type RoutePlan, type RunPattern, type TaskClass } from "../tasks";
 import type { RunAiServerOpts } from "./server";
 
 /** What a job stage or a route adds to the frozen options (never sent by a browser). */
@@ -88,6 +88,10 @@ export interface ServerTaskOpts extends RunAiServerOpts {
   prepaid?: boolean;
   /** flags the caller adds to the run row (a job stage driven by a poll or a batch: `stage_resumed`) */
   flags?: readonly AiFlag[];
+  /** the run row exists and the call is about to start (step 5): the stream's `start` event, the poll's `202 { runId }` */
+  onStart?(e: { runId: string; class: TaskClass; model: string; effort: Effort }): void;
+  /** a streamed top-level field the guard refused: the browser keeps the library text (`field_rejected`, AI-§A.7) */
+  onFieldRejected?(path: string): void;
 }
 
 /** Backoff of the retries (AI-§A.4 step 10). */
@@ -395,6 +399,7 @@ async function serverRung<T extends AiTaskId>(scope: WriteScope, task: T, rawInp
       reservedCredits: reservation?.credits ?? 0,
       parentRunId: opts.parentRunId ?? null,
     });
+    opts.onStart?.({ runId, class: plan.class, model: plan.model, effort: plan.effort });
     // 6. slot (no connection is held from here to the end of the call)
     const caps = settings.caps;
     try {
@@ -444,6 +449,7 @@ async function serverRung<T extends AiTaskId>(scope: WriteScope, task: T, rawInp
                 const one = finalize({ [f.path]: f.value }, fctx);
                 const v = one && (one.value as Record<string, unknown>)[f.path];
                 if (v !== undefined) onField(f.path, v);
+                else opts.onFieldRejected?.(f.path);
               }
             },
           }

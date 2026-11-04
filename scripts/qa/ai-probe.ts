@@ -14,7 +14,13 @@
  * without fallbacks and with a forced tool_choice; 7 a batch of 2 (submitted, polled once); 9 a `max_tokens: 1` call on
  * the real Director prefix, then the same prefix; 10 one interactive Director plan on three onboarding fixtures (p50 /
  * p95, the thinking share); 11 sustained output tok/s per class at its effort (median of `--reps`, default 3).
- * Lines 8 (stream transport) and 12 (poll-driven stages) need a running server and arrive with step 9.
+ * Lines 8 and 12 (step 9) need a running server: `--base <origin> --store <handle>` and QA_AI_PROBE_COOKIE (the Cookie
+ * header of an owner session of that store, never printed). 8: the NDJSON route on copy.page, the first line's arrival
+ * against the last's → `streamTransport` ("stream" when ≥ 2 s apart; `--write` also sets platform_ai.streamTransport).
+ * 12: a 3 × 20 s sleep job (no model) written into the server's database, polled through the real jobs route: a poll
+ * without Sec-Fetch-Site same-origin leaves it, each same-origin poll advances exactly one stage, a stage left with a
+ * stale lease and heartbeat is re-claimed by the next poll, and polls alone take it to done (run the server with
+ * SG_AI_NO_AFTER=1 or the flag ai_detached_jobs off). Without --base both are skipped.
  *
  * Refuses the databases cod_studio and cod_storegen (core §J.2). The key is never printed: only "settings" / "env".
  */
@@ -36,7 +42,7 @@ const arg = (f: string) => {
 const DRY = has("--dry-run");
 const WRITE = has("--write");
 const REPS = Math.max(1, Math.min(5, Number(arg("--reps") ?? 3) || 3));
-const ALL_LINES = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11];
+const ALL_LINES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const LINES = new Set((arg("--lines") ?? ALL_LINES.join(",")).split(",").map(Number).filter((n) => ALL_LINES.includes(n)));
 
 {
@@ -86,7 +92,7 @@ interface LineResult {
   note: string;
 }
 const results: Record<string, LineResult> = {};
-const out: { callShape: "parse" | "create" | null; tokPerSec: Partial<Record<string, number>> } = { callShape: null, tokPerSec: {} };
+const out: { callShape: "parse" | "create" | null; streamTransport: "stream" | "poll" | null; tokPerSec: Partial<Record<string, number>> } = { callShape: null, streamTransport: null, tokPerSec: {} };
 function report(line: number, pass: boolean, note: string): void {
   results[String(line)] = { pass, note: note.slice(0, 300) };
   console.log(`${pass ? "✓" : "✗"} line ${line}: ${note}`);
@@ -283,13 +289,126 @@ async function main(): Promise<void> {
     }
     report(11, Object.values(out.tokPerSec).every((v) => (v ?? 0) > 0), `tok/s (median of ${REPS}): ${notes.join(", ")}; < 80 on director_interactive moves the critique to a deep-job stage`);
   });
+  // lines 8 and 12 (step 9) run against a running server: --base <origin> --store <handle>, QA_AI_PROBE_COOKIE = the
+  // Cookie header of an owner session of that store (never printed); line 12 also writes the probe job into the
+  // server's database (DATABASE_URL), so it runs against a local server started with SG_AI_NO_AFTER=1 or the flag off
+  const base = (arg("--base") ?? "").replace(/\/+$/, "");
+  const handle = arg("--store") ?? "";
+  const cookie = env.QA_AI_PROBE_COOKIE ?? "";
+  const server = base && /^[a-z0-9-]{2,63}$/.test(handle) && cookie ? { base, handle, cookie } : null;
+  const aiUrl = (rel: string) => `${server!.base}/api/app/${encodeURIComponent(server!.handle)}/ai/${rel}`;
+  for (const line of [8, 12]) if (LINES.has(line) && !server) console.log(`- line ${line}: skipped (needs --base <origin> --store <handle> and QA_AI_PROBE_COOKIE)`);
+
+  await safe(8, async () => {
+    if (!server) return;
+    const fixture = ALL_FIXTURES.find((f) => f.id === "copy.page/core-blender-fr")!;
+    const t0 = Date.now();
+    const res = await fetch(aiUrl("copy.page"), {
+      method: "POST",
+      headers: { cookie: server.cookie, origin: server.base, "content-type": "application/json", accept: "application/x-ndjson" },
+      body: JSON.stringify({ input: fixture.input, surface: "wizard", nonce: `probe8${randomBytes(4).toString("hex")}` }),
+      signal: AbortSignal.timeout(130_000),
+    });
+    if (res.status === 202) {
+      report(8, true, "the server answers on the poll transport already (202 { runId }): streamTransport stays poll");
+      out.streamTransport = "poll";
+      return;
+    }
+    if (res.status !== 200 || !(res.headers.get("content-type") ?? "").startsWith("application/x-ndjson")) {
+      report(8, false, `the stream route answered ${res.status} ${res.headers.get("content-type") ?? ""}`);
+      return;
+    }
+    const reader = res.body!.getReader();
+    let first = 0;
+    let last = 0;
+    let lines = 0;
+    let tail = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const text = tail + new TextDecoder().decode(value);
+      const parts = text.split("\n");
+      tail = parts.pop() ?? "";
+      for (const p of parts) {
+        if (!p.trim()) continue;
+        const t = Date.now() - t0;
+        if (!lines) first = t;
+        last = t;
+        lines++;
+      }
+    }
+    const transport = last - first >= 2_000 ? "stream" : "poll";
+    out.streamTransport = transport;
+    report(8, lines > 1, `${lines} lines, the first at ${first} ms, the last at ${last} ms → streamTransport "${transport}"${transport === "poll" ? " (a proxy holds the stream back)" : ""}`);
+  });
+
+  await safe(12, async () => {
+    if (!server) return;
+    const { insertJob } = load<typeof import("@/lib/ai/store/jobs")>("@/lib/ai/store/jobs");
+    const { claimStage } = load<typeof import("@/lib/ai/jobs/claim")>("@/lib/ai/jobs/claim");
+    const { probePlan } = load<typeof import("@/lib/ai/jobs/stages")>("@/lib/ai/jobs/stages");
+    const { mintScope } = load<typeof import("@/lib/tenancy/seam")>("@/lib/tenancy/seam");
+    const { resolveStoreByHandle } = load<typeof import("@/lib/tenancy/public")>("@/lib/tenancy/public");
+    const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+    const { sha256Hex } = load<typeof import("@/lib/ai/prompts/sha256")>("@/lib/ai/prompts/sha256");
+    const { pool } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+    const store = await resolveStoreByHandle(server.handle);
+    if (!store) {
+      report(12, false, "the store handle is not in this database (line 12 needs the server's own database)");
+      return;
+    }
+    const scope = mintScope("member", store.id) as import("@/lib/tenancy/types").WriteScope;
+    const owner = (await pool().query("SELECT user_id FROM store_members WHERE store_id = ? AND role = 'owner' LIMIT 1", [store.id]))[0] as { user_id: string }[];
+    const plan = probePlan(60_000, 20_000);
+    const jobId = newId();
+    await insertJob(scope, {
+      id: jobId,
+      kind: "probe",
+      task: "probe.sleep",
+      inputHash: sha256Hex(`probe12|${jobId}`),
+      progress: { done: 0, total: plan.stages.length, stages: {}, plan: plan.stages.map((s) => s.id) },
+      class: "director_deep",
+      doc: { runIds: [], input: { totalMs: 60_000, stageMs: 20_000 }, plan: [...plan.stages], reservation: null },
+      reservedCredits: 0,
+      createdBy: owner[0]?.user_id ?? null,
+      now: new Date(),
+    });
+    const poll = async (sameOrigin: boolean) => {
+      const res = await fetch(aiUrl(`jobs/${jobId}?advance=1`), { headers: { cookie: server.cookie, accept: "application/json", ...(sameOrigin ? { "sec-fetch-site": "same-origin" } : {}) }, signal: AbortSignal.timeout(120_000) });
+      return (await res.json().catch(() => ({}))) as { status?: string; progress?: { done?: number } };
+    };
+    const attempts = async () => Number(((await pool().query("SELECT stage_attempts FROM ai_jobs WHERE id = ?", [jobId]))[0] as { stage_attempts: number }[])[0]?.stage_attempts ?? -1);
+    const notes: string[] = [];
+    const bare = await poll(false);
+    const unchanged = bare.status === "queued" && (bare.progress?.done ?? 0) === 0;
+    notes.push(`no header: ${unchanged ? "unchanged" : `moved (${bare.status})`}`);
+    const one = await poll(true);
+    const advancedOne = one.progress?.done === 1;
+    notes.push(`poll 1: ${one.progress?.done ?? "?"}/3`);
+    // a driver that died mid-stage: the stage claimed, its lease and heartbeat stale
+    await claimStage(scope, jobId, "after");
+    await pool().query("UPDATE ai_jobs SET lease_until = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 SECOND), heartbeat_at = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 61 SECOND) WHERE id = ?", [jobId]);
+    const two = await poll(true);
+    const resumed = two.progress?.done === 2 && (await attempts()) >= 1;
+    notes.push(`poll 2 (stale stage re-claimed): ${two.progress?.done ?? "?"}/3${resumed ? ", resumed" : ""}`);
+    const three = await poll(true);
+    notes.push(`poll 3: ${three.status}`);
+    report(12, unchanged && advancedOne && resumed && three.status === "done", `poll-driven stages: ${notes.join("; ")}`);
+  });
   void buildParams;
 
   if (WRITE) {
     const { getPlatformSetting, setPlatformSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
     const cur = await getPlatformSetting("platform_ai", { fresh: true });
-    const probe = { ...(cur.probe ?? {}), at: new Date().toISOString(), callShape: out.callShape ?? cur.probe?.callShape ?? null, tokPerSec: { ...(cur.probe?.tokPerSec ?? {}), ...out.tokPerSec }, lines: { ...(cur.probe?.lines ?? {}), ...results } };
-    await setPlatformSetting("platform_ai", { ...cur, ...(out.callShape ? { callShape: out.callShape } : {}), probe } as never, { id: "ai-probe", kind: "system" });
+    const probe = {
+      ...(cur.probe ?? {}),
+      at: new Date().toISOString(),
+      callShape: out.callShape ?? cur.probe?.callShape ?? null,
+      streamTransport: out.streamTransport ?? cur.probe?.streamTransport ?? null,
+      tokPerSec: { ...(cur.probe?.tokPerSec ?? {}), ...out.tokPerSec },
+      lines: { ...(cur.probe?.lines ?? {}), ...results },
+    };
+    await setPlatformSetting("platform_ai", { ...cur, ...(out.callShape ? { callShape: out.callShape } : {}), ...(out.streamTransport ? { streamTransport: out.streamTransport } : {}), probe } as never, { id: "ai-probe", kind: "system" });
     console.log("✓ written to platform_ai.probe");
   }
   await fake?.close();

@@ -500,7 +500,8 @@ export function registerPromptSections(t: SelftestApi): void {
         const b = body(r.prompt);
         const leaks = [name, `Clientzahra${i}`, address, `Canaryaddr${i}`, `Canaryhay${i}`, `Canarycity${i}`, phone, phone.slice(1), email].filter((s) => b.includes(s));
         if (leaks.length) check(false, `${p.version} × store ${i}: no customer name, phone, address or e-mail in the request body (${leaks.join(", ")})`);
-        const hits = scanPii(b).hits.filter((h) => h === "phone" || h === "email");
+        // the run's canary (16 random hex) is not PII: a run of its digits can look like a phone number
+        const hits = scanPii(r.prompt.canary ? b.split(r.prompt.canary).join("") : b).hits.filter((h) => h === "phone" || h === "email");
         if (hits.length) check(false, `${p.version} × store ${i}: no phone or e-mail pattern in the request body (${hits.join(", ")})`);
         swept++;
       }

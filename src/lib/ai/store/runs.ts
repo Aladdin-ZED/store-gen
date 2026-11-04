@@ -213,6 +213,19 @@ export async function getRunMeta(scope: StoreScope, id: string): Promise<RunMeta
   return row ? toMeta(row) : null;
 }
 
+/**
+ * The end of one run of the store (`runs/[id]` once its event buffer has expired, AI-§A.7): the guarded output it
+ * answered, its rejected fields and status; null for another store's id or a missing one. `output` is null above 64 KB.
+ */
+export async function getRunFinal(scope: StoreScope, id: string): Promise<(RunMeta & { output: unknown; rejected: string[] }) | null> {
+  const [row] = await db
+    .select({ ...META, output: aiRuns.output, rejectedFields: aiRuns.rejectedFields })
+    .from(aiRuns)
+    .where(byId(aiRuns, scope, id))
+    .limit(1);
+  return row ? { ...toMeta(row), output: row.output ?? null, rejected: row.rejectedFields ?? [] } : null;
+}
+
 /** The credits and cost of a store-time month ("YYYY-MM") per task. */
 export async function monthCreditsByTask(scope: StoreScope, month: string, timezone: string): Promise<{ task: AiTaskId; runs: number; credits: number; costMicros: number }[]> {
   const { start, end } = periodRangeUtc(month, timezone);

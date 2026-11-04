@@ -16,7 +16,8 @@ import "server-only";
  * sampled from the request's own `output_config.format.schema`. Scenarios: ok (JSON text, optional model and usage),
  * refusal (with `stop_details`), a fallback iteration (`usage.iterations` with a `fallback_message`), 429 with
  * retry-after, 529, 500, 400, 401, 403, 404, malformed JSON text, a `max_tokens` stop, and a delay before answering.
- * `calls` counts requests per path; `inFlight` / `maxInFlight` count /v1/messages requests being answered.
+ * `calls` counts requests per path; `inFlight` / `maxInFlight` count /v1/messages requests being answered; `aborted`
+ * counts streamed answers whose client hung up before the last event (ai-stream-check: a disconnect cancels upstream).
  */
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -52,6 +53,8 @@ export interface FakeAnthropic {
   requests: FakeRequest[];
   inFlight: number;
   maxInFlight: number;
+  /** streamed answers whose client went away before the last event (an upstream call aborted mid-stream) */
+  aborted: number;
   enqueue(...s: FakeScenario[]): void;
   /** the answer when the queue is empty; null = sample the request's schema */
   respond: ((body: Record<string, unknown>) => FakeScenario) | null;
@@ -217,7 +220,14 @@ function messageJson(m: NonNullable<Built["message"]>): Record<string, unknown> 
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-async function sendSse(res: ServerResponse, m: NonNullable<Built["message"]>, deltaMs: number): Promise<void> {
+async function sendSse(res: ServerResponse, m: NonNullable<Built["message"]>, deltaMs: number, onAbort: () => void): Promise<void> {
+  let gone = false;
+  res.on("close", () => {
+    if (!res.writableEnded && !gone) {
+      gone = true;
+      onAbort();
+    }
+  });
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
   const ev = (type: string, data: unknown) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...(data as object) })}\n\n`);
   const startUsage = { ...m.usage, output_tokens: 1 };
@@ -226,7 +236,7 @@ async function sendSse(res: ServerResponse, m: NonNullable<Built["message"]>, de
   if (m.text) {
     ev("content_block_start", { index: 0, content_block: { type: "text", text: "" } });
     // ~24-character deltas, split anywhere (inside strings and escapes too)
-    for (let i = 0; i < m.text.length; i += 24) {
+    for (let i = 0; i < m.text.length && !gone; i += 24) {
       ev("content_block_delta", { index: 0, delta: { type: "text_delta", text: m.text.slice(i, i + 24) } });
       if (deltaMs > 0) await wait(deltaMs);
     }
@@ -312,6 +322,7 @@ export async function startFakeAnthropic(opts: { port?: number } = {}): Promise<
     requests: [],
     inFlight: 0,
     maxInFlight: 0,
+    aborted: 0,
     respond: null,
     delayMs: 0,
     enqueue: (...s) => void queue.push(...s),
@@ -322,6 +333,7 @@ export async function startFakeAnthropic(opts: { port?: number } = {}): Promise<
       fake.requests = [];
       fake.inFlight = 0;
       fake.maxInFlight = 0;
+      fake.aborted = 0;
       fake.respond = null;
       fake.delayMs = 0;
     },
@@ -349,7 +361,7 @@ export async function startFakeAnthropic(opts: { port?: number } = {}): Promise<
           const b = build(s, body ?? {}, promptCache);
           if (fake.delayMs + b.delayMs > 0) await wait(fake.delayMs + b.delayMs);
           if (b.error) return json(res, b.status, { type: "error", error: b.error }, b.headers);
-          if (body?.stream === true) return await sendSse(res, b.message!, b.deltaMs);
+          if (body?.stream === true) return await sendSse(res, b.message!, b.deltaMs, () => void fake.aborted++);
           return json(res, 200, messageJson(b.message!));
         } finally {
           fake.inFlight--;

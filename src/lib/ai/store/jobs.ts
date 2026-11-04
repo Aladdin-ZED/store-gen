@@ -33,7 +33,7 @@ export interface AiJobView {
   status: AiJobStatus;
   /** the stage running or last run ("read", "critique", "blueprint:2", "batch:<stage>", …) */
   stage: string | null;
-  progress: { done: number; total: number; stages: Record<string, "done" | "running" | "failed"> };
+  progress: { done: number; total: number; stages: Record<string, "done" | "running" | "failed">; plan: string[] };
   transport: "job" | "batch";
   /** the class that served it (`director_interactive` after a fallback, and for the critique-as-job) */
   class: "director_deep" | "director_interactive";
@@ -44,6 +44,10 @@ export interface AiJobView {
   /** the driver that last advanced the job (the console's after() / poll / cron / batch shares) */
   driver: "after" | "poll" | "cron" | "batch" | null;
   error: string | null;
+  /** the last heartbeat of a running stage (10 s apart while a driver holds it) */
+  heartbeatAt: string | null;
+  /** what the job's finished stages cost so far (the run rows' sum once reconciled) */
+  costMicros: number;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -86,13 +90,15 @@ export function toView(r: JobRow): AiJobView {
     task: r.task as AiTaskId | StageTask,
     status: r.status,
     stage: r.stage,
-    progress: { done: p?.done ?? 0, total: p?.total ?? 0, stages: { ...(p?.stages ?? {}) } },
+    progress: { done: p?.done ?? 0, total: p?.total ?? 0, stages: { ...(p?.stages ?? {}) }, plan: [...(p?.plan ?? [])] },
     transport: r.transport,
     class: r.class,
     result: finished ? publicResult(d) : null,
     outputs: r.status === "done" ? (d.outputs ?? {}) : null,
     driver: r.driver,
     error: r.error,
+    heartbeatAt: r.heartbeatAt ? r.heartbeatAt.toISOString() : null,
+    costMicros: r.costMicros ?? 0,
     createdBy: r.createdBy,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),

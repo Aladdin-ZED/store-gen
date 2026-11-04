@@ -35,7 +35,7 @@ import { parseTaskInput } from "../schema/tasks/inputs";
 import { activeJobByInput, getAiJob as readJobView, hasActiveDeepJob, insertJob, readJob, type AiJobView } from "../store/jobs";
 import type { AiTaskId } from "../tasks";
 import { cancelJobRow } from "./claim";
-import { scheduleDetachedJob } from "./run";
+import { abortJobStage, scheduleDetachedJob } from "./run";
 import { isCritiqueJob, jobClassFor, planForJob, stageInputOf, stagePlanFor, PROBE_STAGE_MS, PROBE_TOTAL_MS } from "./stages";
 
 /** probe: the staff-only detached-job probe of AI-§B.13 / core §H.12 rule 1, never enqueued through enqueueAiJob */
@@ -139,13 +139,16 @@ export async function getAiJob(scope: StoreScope, id: string): Promise<AiJobView
   return readJobView(scope, id);
 }
 
-/** The owner's cancel (the creator, or a member with `ai.manage`); a stage already running is billed. */
+/**
+ * The owner's cancel (the creator, or a member with `ai.manage`): the job terminal `cancelled`, the reservation
+ * reconciled at the usage known so far, and the stage running in this process aborted (its run row says `cancelled`).
+ */
 export async function cancelAiJob(ctx: StoreCtx, id: string): Promise<void> {
   const ws = ctx.impersonation ? null : writeScopeOf(ctx.scope);
   if (!ws) return;
   const row = await readJob(ws, id);
   if (!row || (row.createdBy !== ctx.user.id && !ctx.can("ai.manage"))) return;
-  await cancelJobRow(ws, row);
+  if (await cancelJobRow(ws, row)) abortJobStage(id);
 }
 
 /**

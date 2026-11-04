@@ -47,6 +47,11 @@
  *                of an abandoned run
  *   eval-live    the estimate, a live run (2 cases × 2 reps) through Batches with its judge items (judge ≠ candidate on
  *                every item) to a done row with the judge's cost apart, a smoke run scored at once
+ *   routes       (step 9) AI-01 (11) poll-only completion through the real handler functions: the critique-as-job from
+ *                director/critique (202 within 500 ms), a poll without Sec-Fetch-Site same-origin leaves it queued, the
+ *                same-origin poll hands its batch-only stage to a batch; a fitting job finished by same-origin polls
+ *                alone (SG_AI_NO_AFTER=1, flag off), the job body without its input;
+ *                copy.page on the poll transport finished through runs/[id] alone; cancel's 204
  * Exit code 1 when a check fails.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -1206,6 +1211,147 @@ async function evalLiveSuite(fx: Fx): Promise<void> {
 /* main                                                                */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* step 9: the route handlers, poll-only                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * AI-01 (11) through the real handler functions (src/lib/ai/http/handlers.ts, what every ai route calls after its
+ * storeGuard), with `SG_AI_NO_AFTER=1` and the flag ai_detached_jobs off: the critique-as-job is created by
+ * `director/critique` (202 within 500 ms, no model call), a poll without `Sec-Fetch-Site: same-origin` leaves it queued
+ * and the same-origin poll hands its batch-only stage to a batch; a job whose stage fits is taken to done by same-origin
+ * polls alone, the job body never carrying the input; a stream task on the poll transport (202 { runId }) is completed
+ * through `runs/[id]` alone with the events in order; cancel is a 204 whatever the id.
+ */
+async function routesSuite(fx: Fx): Promise<void> {
+  suite("routes");
+  const { startFakeAnthropic } = load<typeof import("@/lib/ai/testing/fake-anthropic")>("@/lib/ai/testing/fake-anthropic");
+  const { resetAnthropic } = load<typeof import("@/lib/ai/server/client")>("@/lib/ai/server/client");
+  const { breaker } = load<typeof import("@/lib/ai/server/breaker")>("@/lib/ai/server/breaker");
+  const { ALL_FIXTURES } = load<typeof import("@/lib/ai/eval/fixtures")>("@/lib/ai/eval/fixtures");
+  const H = load<typeof import("@/lib/ai/http/handlers")>("@/lib/ai/http/handlers");
+  const R = load<typeof import("@/lib/ai/jobs/run")>("@/lib/ai/jobs/run");
+  const { B } = fx;
+  const env = process.env as Record<string, string | undefined>;
+  const fake = await startFakeAnthropic();
+  env.SG_E2E = "1";
+  env.SG_AI_BASE_URL = fake.origin;
+  env.SG_AI_NO_AFTER = "1";
+  env.ANTHROPIC_API_KEY = FAKE_KEY;
+  resetAnthropic();
+  breaker().reset();
+  const spy = { after: 0, httpAfter: 0 };
+  R.jobDeps.after = () => void spy.after++;
+  H.httpDeps.after = (fn) => {
+    spy.httpAfter++;
+    void fn();
+  };
+  const ctxB = ctxOf(B, B.owner);
+  const recordedOf = (family: string, id: string) =>
+    (JSON.parse(readFileSync(path.join(ROOT, `src/lib/ai/eval/sets/${family}/recorded/${family}@s1.json`), "utf8")) as { runs: Record<string, { output: unknown }[]> }).runs[id]![0]!.output;
+  const crit = ALL_FIXTURES.find((f) => f.task === "design.critique")!;
+  const critOut = recordedOf("director.critique", crit.id);
+  const page = ALL_FIXTURES.find((f) => f.id === "copy.page/core-blender-fr")!;
+  const pageOut = recordedOf("copy.page", page.id);
+  const msgs = () => fake.total("/v1/messages");
+  const req = (method: string, rel: string, body?: unknown, headers: Record<string, string> = {}) =>
+    new Request(`http://localhost:3452/api/app/${B.row.handle}/ai/${rel}`, { method, headers: { "content-type": "application/json", ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const sameOrigin = { "sec-fetch-site": "same-origin" };
+  const read = async (res: Response) => ({ status: res.status, body: (await res.json().catch(() => null)) as Record<string, unknown> | null });
+  const probe = { at: new Date().toISOString(), callShape: null, streamTransport: null, tokPerSec: { director_interactive: 60 }, detachedJob: null, prices: {}, lines: {} };
+  try {
+    await resetStore(B.id);
+    await clearBuckets(B.id);
+    await setPlatform("ai_cost_micros", 0);
+    await setAi({ enabled: true, streamTransport: "stream", probe, caps: { monthlyUsd: 100, storeDailyCapPct: 100 } }, fx.staff);
+    await flagOverride("ai_director_brief", B.id, true);
+    await flagOverride("ai_detached_jobs", B.id, false);
+
+    // the critique-as-job (probe line 11 below 80 tok/s): 202 { jobId } at once, nothing run
+    const t0 = Date.now();
+    const created = await read(await H.handleDirector(ctxB, req("POST", "director/critique", { input: crit.input, pass: { session: "sessaidb0001", id: "passaidb0001" } }), "critique"));
+    const ms = Date.now() - t0;
+    const jobId = String(created.body?.jobId ?? "");
+    check("director/critique below 80 tok/s: 202 { jobId } within 500 ms, no model call, no after() (flag off)", created.status === 202 && /^[0-9A-Z]{26}$/.test(jobId) && ms < 500 && msgs() === 0 && spy.after === 0, { created, ms });
+
+    // a poll without Sec-Fetch-Site: same-origin reads only
+    const before = await jobRow(jobId);
+    const ro = await read(await H.handleJobPoll(ctxB, req("GET", `jobs/${jobId}?advance=1`), jobId));
+    check("jobs/[id]?advance=1 without Sec-Fetch-Site: same-origin: the read-only view, the row unchanged", ro.status === 200 && ro.body?.status === "queued" && msgs() === 0 && JSON.stringify(await jobRow(jobId)) === JSON.stringify(before), ro);
+    const ro0 = await read(await H.handleJobPoll(ctxB, req("GET", `jobs/${jobId}?advance=0`, undefined, sameOrigin), jobId));
+    check("jobs/[id]?advance=0 (same-origin): metadata only, nothing run", ro0.status === 200 && ro0.body?.status === "queued" && msgs() === 0, ro0);
+
+    // below 80 tok/s the slim critique cannot fit a 90 s stage (step 8, AI-§B.8 case b): the same-origin poll hands it
+    // to a one-item batch, no model call inside the request
+    const handed = (await read(await H.handleJobPoll(ctxB, req("GET", `jobs/${jobId}`, undefined, sameOrigin), jobId))).body;
+    check("the same-origin poll of the critique-as-job hands its batch-only stage to a one-item batch, no inline model call", handed?.status === "running" && String(handed?.stage ?? "").startsWith("batch:") && msgs() === 0, handed);
+    const cancelled = await H.handleJobCancel(ctxB, jobId);
+    check("jobs/[id]/cancel of the store's own job: 204, the job cancelled", cancelled.status === 204 && (await jobRow(jobId))?.status === "cancelled", (await jobRow(jobId))?.status);
+
+    // a job whose stage fits (the measured throughput back at the default): same-origin polls alone take it to done
+    await setAi({ probe: null }, fx.staff);
+    const { enqueueAiJob } = load<typeof import("@/lib/ai/jobs/enqueue")>("@/lib/ai/jobs/enqueue");
+    const deep = await enqueueAiJob(ctxB, { kind: "director_deep", task: "design.critique", input: { critique: crit.input, run: 9 } });
+    const deepId = deep.ok ? deep.jobId : "";
+    fake.enqueue({ kind: "ok", json: critOut });
+    let view: Record<string, unknown> | null = null;
+    let polls = 0;
+    while (polls < 4 && view?.status !== "done") {
+      polls++;
+      view = (await read(await H.handleJobPoll(ctxB, req("GET", `jobs/${deepId}`, undefined, sameOrigin), deepId))).body;
+    }
+    const outputs = (view?.outputs ?? null) as Record<string, unknown> | null;
+    check("same-origin polls alone (SG_AI_NO_AFTER=1, flag off) take the job to done through handleJobPoll", deep.ok && view?.status === "done" && polls === 1 && !!outputs?.critique && msgs() === 1 && spy.after === 0, { view, polls });
+    check(
+      "the job body: progress with its plan, the driver poll, the cost in credits, never the input",
+      (view?.progress as { plan?: string[] } | undefined)?.plan?.join() === "critique" && view?.driver === "poll" && Number(view?.costCredits) > 0 && !("input" in (view ?? {})),
+      view,
+    );
+    const twice = await read(await H.handleJobPoll(ctxB, req("GET", `jobs/${deepId}`, undefined, sameOrigin), deepId));
+    check("a poll of a finished job runs nothing more", twice.body?.status === "done" && msgs() === 1);
+
+    // a stream task on the poll transport: 202 { runId }, finished through runs/[id] alone
+    await setAi({ streamTransport: "poll" }, fx.staff);
+    fake.enqueue({ kind: "ok", json: pageOut, deltaMs: 5 });
+    const started = await read(await H.handleTask(ctxB, req("POST", "copy.page", { input: page.input, surface: "wizard", nonce: "aidbpoll1" }), "copy.page"));
+    const runId = String(started.body?.runId ?? "");
+    check("copy.page on the poll transport: 202 { runId }, the call continuing in after()", started.status === 202 && /^[0-9A-Z]{26}$/.test(runId) && spy.httpAfter === 1, started);
+    type Ev = { s: number; t: string; value?: unknown };
+    const events: Ev[] = [];
+    let after = -1;
+    let done = false;
+    for (let i = 0; i < 150 && !done; i++) {
+      const r = await read(await H.handleRunPoll(ctxB, req("GET", `runs/${runId}?after=${after}`), runId));
+      const evs = (r.body?.events ?? []) as Ev[];
+      events.push(...evs);
+      if (evs.length) after = evs[evs.length - 1]!.s;
+      done = r.body?.done === true;
+      if (!done) await new Promise((res) => setTimeout(res, 100));
+    }
+    const types = events.map((e) => e.t);
+    const final = events.find((e) => e.t === "final");
+    check("runs/[id] alone completes the run: start first, fields, final last, seq strictly increasing", done && types[0] === "start" && types[types.length - 1] === "final" && types.includes("field") && events.every((e, i) => i === 0 || e.s > events[i - 1]!.s), types);
+    check("the final event carries the guarded page", !!final && typeof (final.value as { headline?: unknown } | undefined)?.headline === "string", final);
+    const again = await read(await H.handleRunPoll(ctxB, req("GET", `runs/${runId}?after=${after}`), runId));
+    check("a poll after the last seq: no events, done", again.status === 200 && ((again.body?.events ?? []) as unknown[]).length === 0 && again.body?.done === true, again);
+
+    // cancel answers 204 whatever the id
+    const c1 = await H.handleJobCancel(ctxB, deepId);
+    const c2 = await H.handleJobCancel(ctxB, "01J0000000000000000000GH0S");
+    const c3 = await H.handleJobCancel(ctxB, "not-an-id");
+    check("jobs/[id]/cancel: 204 for a finished job, a missing id and a malformed one; the done job stays done", c1.status === 204 && c2.status === 204 && c3.status === 204 && (await jobRow(deepId))?.status === "done");
+  } finally {
+    await setAi({ streamTransport: "stream", probe: null }, fx.staff).catch(() => undefined);
+    await flagOverride("ai_director_brief", B.id, null);
+    await flagOverride("ai_detached_jobs", B.id, null);
+    await fake.close();
+    delete env.SG_E2E;
+    delete env.SG_AI_BASE_URL;
+    delete env.SG_AI_NO_AFTER;
+    resetAnthropic();
+  }
+}
+
 async function main(): Promise<void> {
   const started = Date.now();
   let done = false;
@@ -1236,6 +1382,7 @@ async function main(): Promise<void> {
     await batchesSuite(fx);
     await rollupsSuite(fx);
     await evalLiveSuite(fx);
+    await routesSuite(fx);
     done = true;
   } catch (err) {
     check("the suite ran to the end", false, err instanceof Error ? err.stack : String(err));
