@@ -37,6 +37,9 @@
  * `actions` below gives every new server action its attack case (A's ids from B answer what missing ids answer, A's
  * path is not_found, the role matrix, impersonation refused for the sensitive writes), and the replay case proves B's
  * Replay, Send again and Replay all never reach A's outbox rows (P8's `replay` behind the double).
+ *
+ * R1 P5 step 9, the integrations page (src/lib/integrations/hub.server.ts `integrationsHub`, the one read of
+ * /app/<h>/integrations): B's page shows nothing of A (in the step 2 case), A's own page carries no customer field.
  */
 import { createRequire } from "node:module";
 import type { Fixtures, TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
@@ -186,6 +189,7 @@ export const cases: TenancyCase[] = [
       const { listDeliveries } = load<typeof import("@/lib/integrations/deliveries")>("@/lib/integrations/deliveries");
       const history = load<typeof import("@/lib/sheets/history")>("@/lib/sheets/history");
       const { contributor } = load<typeof import("@/lib/pulse/contributors/integrations")>("@/lib/pulse/contributors/integrations");
+      const { integrationsHub } = load<typeof import("@/lib/integrations/hub.server")>("@/lib/integrations/hub.server");
       const a = write(kit, "A");
       const b = kit.scope("B");
       const owner = { userId: kit.fx.B.members.owner, role: "owner" };
@@ -197,6 +201,7 @@ export const cases: TenancyCase[] = [
         failed: await health.syncFailedCount(b),
         dead: await health.deadDeliveryCount(b),
         list: await listDeliveries(b, {}),
+        hub: await integrationsHub(b),
       };
 
       // A's rows: a failing pixel and Telegram, dead deliveries carrying canaries, a failed sheet row, a run
@@ -261,6 +266,20 @@ export const cases: TenancyCase[] = [
         const runsB = await history.sheetsRunHistory(b);
         answers.push(runsB);
         kit.check("run history: B never reads A's runs", !runsB.some((r) => r.appended === 4 && r.error === "sheet_not_shared" && r.ms === 9), runsB);
+        // the integrations page (step 9): B's hub is what it was before A's rows existed (tiles, backlog, runs, log, checks)
+        const hubB = await integrationsHub(b);
+        answers.push(hubB);
+        kit.check(
+          "integrations hub: B's page shows none of A's targets, rows, runs or causes",
+          JSON.stringify(hubB) === JSON.stringify(before.hub) && !(hubB.deliveries?.rows ?? []).some((r) => deadIds.includes(r.id)) && !(hubB.tiles ?? []).some((t) => t.last4 === "5555"),
+          { before: before.hub, after: hubB },
+        );
+        const hubA = await integrationsHub(kit.scope("A"));
+        kit.check(
+          "integrations hub: A's page names its own failing kinds and carries no phone, name or sealed payload",
+          hubA.checks.some((x) => x.kind === "capi") && hubA.checks.some((x) => x.kind === "telegram") && kit.leaks(hubA, { only: ["customer"] }).length === 0 && !JSON.stringify(hubA).includes("A-SEALED-PAYLOAD-CANARY"),
+          hubA.checks,
+        );
         const text = JSON.stringify(answers);
         kit.check("integrations health: B's answers carry no canary of A", kit.leaks(answers).length === 0 && !text.includes("A-CANARY") && !text.includes(pixelA), kit.leaks(answers));
       } finally {
