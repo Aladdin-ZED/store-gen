@@ -44,6 +44,12 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **PC HIBERNATED ON CRITICAL BATTERY 2026-11-03 23:53 → 2026-11-04 09:12** (System log: Kernel-Power 524 "Critical
+  Battery Trigger Met", 42 "Sleep Reason: Battery"; the laptop was unplugged). Keep-awake cannot prevent that; the owner must
+  keep it on AC power (on AC again at 09:17, 7% charge). Both runs (wf_324eaca6-af0, wf_14d710c6-2a6) survived the sleep and
+  resumed; one P2 command was killed by the 45-min heavy cap on wake (the cap counts sleep time) and gets rerun. 61/106
+  validated at 09:17 (P8 step 10 and P6 step 7 done), ≈ 44.9%; weekly usage 41%.
+
 - **USAGE STOP RULE 2026-11-03 23:25** (owner: "if the weekly limit reach 75% stop here until i tell you to continue").
   Weekly usage (all models) was 40% at 23:24 UTC; the window resets 2026-11-09 16:00 UTC. The heartbeat cron is now
   `3ac3f9ed` (13,33,53), whose prompt checks get_usage first: at >= 75% stop both track runs and any merge run (TaskStop),
