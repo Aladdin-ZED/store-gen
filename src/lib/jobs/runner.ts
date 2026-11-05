@@ -141,7 +141,11 @@ export async function defaultRunnerDeps(): Promise<RunnerDeps> {
     timeZone: platformTimeZone(),
     newTickId: newId,
     recordError,
-    flushErrors: () => flushErrors(),
+    // P8 step 11: the proxy's edge tally since the last look goes into the ring first (./edge-tally.ts, CCR r1-p8-8)
+    flushErrors: async () => {
+      (await import("./edge-tally")).recordEdgeDeltas();
+      await flushErrors();
+    },
     ensureSamplers: () => void ensureOpsSamplers(),
   };
 }

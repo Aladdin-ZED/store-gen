@@ -103,6 +103,10 @@
  *                              purgeRequests; an active store refused; lifecycle (closed past purge_after →
  *                              scheduled_deletion, an expired view-as session ended); retention on both sides of every
  *                              §H.11 core cutoff, and housekeeping's hourly pass
+ *  - health (P8 step 11)       §H.5, PLA-§15 on the seeded two stores: health.read required; every section reads; no
+ *                              customer canary in the report; commerce excludes test orders; a render pending 61 min →
+ *                              oldestMin ≥ 61; skipped ticks counted; an error bucket aggregated; dataDir null before
+ *                              the first walk and filled after; sheetsTop with the capacity line; the cheap subset
  *
  * `-- --only <prefix>[,…]` runs only the sections whose name starts with a prefix.
  *
@@ -2727,6 +2731,96 @@ async function main(): Promise<number> {
     const hk2 = await HK.housekeeping(jobCtx("housekeeping", 4_000));
     t.check("housekeeping: the pass runs (and is stamped), the next tick within the hour skips it", typeof hk1.summary?.retention === "number" && "retention.outboxDone" in (hk1.summary ?? {}) && hk2.summary?.retention === true && typeof (await ST.readJobState("housekeeping")).retentionAt === "string", JSON.stringify([hk1.summary, hk2.summary]));
     t.check("…and the test orders sweep visits the stores through P4's deleteTestOrders (a stub until P4: 0 deleted)", hk1.summary?.testOrders === 0 && Number(hk1.summary?.testOrderStores) >= 1, JSON.stringify(hk1.summary));
+  });
+
+  /* ================================================================ */
+  h.section("health", async (t) => {
+    type PlatformCtx = import("@/lib/tenancy/types").PlatformCtx;
+    const H = await import("@/lib/platform/health");
+    const { newId } = await import("@/lib/db/ids");
+    const q = (text: string, values: unknown[] = []) => pool().query(text, values) as unknown as Promise<[Record<string, unknown>[]]>;
+    const staff = (can: boolean): PlatformCtx =>
+      ({ user: { id: "01JB8ZK3Q4R5S6T7V8W9STAFF1" }, role: "super_admin", actor: { kind: "platform", userId: "01JB8ZK3Q4R5S6T7V8W9STAFF1", impersonatorId: null, ip: null }, can: () => can, stepUpFresh: false, stepUpUntil: null }) as unknown as PlatformCtx;
+    await t.rejects("getHealth without health.read → forbidden", () => H.getHealth(staff(false)), /forbidden/);
+
+    // a page of A, Sheets on for A, a customer canary order waiting 30 min
+    const NAME = "HEALTH-CANARY-NAME";
+    const PHONE = "+212611223344";
+    const page = newId();
+    await q("INSERT INTO pages (id, store_id, slug, name, status, locale, public_key, draft) VALUES (?, ?, ?, 'h', 'draft', 'fr', ?, '{}')", [page, STORE_A, `health-${hex(3)}`, `pk_${hex(12)}`]);
+    await q("INSERT INTO store_settings (store_id, `key`, value, encrypted) VALUES (?, 'sheets', ?, 0) ON DUPLICATE KEY UPDATE value = VALUES(value), encrypted = 0", [STORE_A, JSON.stringify({ enabled: true })]);
+    const order = (name: string, phone: string, isTest: boolean, agoSec: number) =>
+      q("INSERT INTO orders (id, store_id, page_id, name, phone, product_name, items, qty, subtotal, shipping, total, currency, idem, is_test, created_at) VALUES (?, ?, ?, ?, ?, 'Argan', '[]', 1, 199.00, 0, 199.00, 'MAD', ?, ?, UTC_TIMESTAMP(3) - INTERVAL ? SECOND)", [
+        `CMD-${hex(4).toUpperCase()}`,
+        STORE_A,
+        page,
+        name,
+        phone,
+        `${hex(16)}-${hex(9)}`.slice(0, 36),
+        isTest ? 1 : 0,
+        agoSec,
+      ]);
+    await order(NAME, PHONE, false, 1_800);
+
+    // dataDir: no walk yet
+    await q("DELETE FROM cron_cursors WHERE job = 'storage.walk'");
+    const sum = (a: number[]) => a.reduce((n, x) => n + x, 0);
+    const before = await H.getHealthReport(staff(true));
+    t.check("dataDir before the first walk: walk null, the backend and the check still reported", before.dataDir !== null && before.dataDir.walk === null && !!before.dataDir.check, JSON.stringify(before.dataDir));
+    t.eq("…and the frozen shape names it no_snapshot", (await H.getHealth(staff(true))).sectionErrors.dataDir, "no_snapshot");
+    t.eq("every section reads on the seeded database (ai is P7's stub until it merges)", Object.keys(before.sectionErrors), ["ai"]);
+
+    // commerce: a real order, then two test orders after it
+    await order("Real Buyer", "+212600000777", false, 2);
+    await order("Test Buyer", "+212600000888", true, 1);
+    await order("Test Buyer", "+212600000889", true, 0);
+    // a render pending 61 min, two skipped ticks, one error bucket over two stores
+    await q("INSERT INTO render_jobs (id, store_id, page_id, reason, state, created_at) VALUES (?, ?, ?, 'address', 'pending', UTC_TIMESTAMP(3) - INTERVAL 61 MINUTE)", [newId(), STORE_A, page]);
+    const skipped = JSON.stringify({ skipped: true });
+    await q("INSERT INTO job_runs (job, store_id, tick_id, started_at, ms, ok, processed, summary) VALUES ('tick', NULL, NULL, UTC_TIMESTAMP(3), 3, 1, 0, ?), ('tick', NULL, NULL, UTC_TIMESTAMP(3), 2, 1, 0, ?)", [skipped, skipped]);
+    const bucket = E.errorBucket(Date.now());
+    for (const [storeId, count] of [
+      [STORE_A, 30],
+      [STORE_B, 25],
+    ] as const) {
+      await q("INSERT INTO error_events (dedupe, bucket, area, code, route, store_id, count, first_at, last_at) VALUES (?, ?, 'qa', 'qa_health', '/qa/health', ?, ?, UTC_TIMESTAMP(3) - INTERVAL 5 MINUTE, UTC_TIMESTAMP(3))", [hex(32), bucket, storeId, count]);
+    }
+    const snapshot = { bytes: 4_096, files: 3, dirs: 2, budgetBytes: 20 * 1024 ** 3, complete: true, at: new Date().toISOString() };
+    await q("INSERT INTO cron_cursors (job, `cursor`, state, updated_at) VALUES ('storage.walk', '', ?, UTC_TIMESTAMP(3))", [JSON.stringify({ snapshot, cursor: null })]);
+
+    const r = await H.getHealthReport(staff(true));
+    const p = await H.getHealth(staff(true));
+    const json = JSON.stringify(r) + JSON.stringify(p);
+    t.check("no customer canary anywhere in the report or the frozen shape (names, phones)", ![NAME, PHONE, "Real Buyer", "+212600000777", "Test Buyer", "+212600000888"].some((c) => json.includes(c)));
+    const [[max]] = await q("SELECT MAX(created_at) AS at FROM orders WHERE is_test = 0");
+    const [[maxAll]] = await q("SELECT MAX(created_at) AS at FROM orders");
+    t.check(
+      "commerce: the last order is the newest non-test one (the later test orders excluded)",
+      r.commerce?.lastOrderAt === (max!.at as Date).toISOString() && r.commerce.lastOrderAt !== (maxAll!.at as Date).toISOString(),
+      JSON.stringify([r.commerce?.lastOrderAt, max, maxAll]),
+    );
+    t.eq("…and the 24 hourly buckets grew by the one real order only", [r.commerce?.ordersPerHour24.length, sum(r.commerce?.ordersPerHour24 ?? []) - sum(before.commerce?.ordersPerHour24 ?? [])], [24, 1]);
+    t.check("renders: a job pending 61 min → oldestMin ≥ 61 (render_stuck)", (r.renders?.oldestMin ?? 0) >= 61 && H.renderStuck({ oldestMin: r.renders!.oldestMin, pending: r.renders!.totals.pending, recentProcessed: [] }), String(r.renders?.oldestMin));
+    t.eq("tick: skipped24h counts the two skipped ticks", (r.tick?.skipped24h ?? 0) - (before.tick?.skipped24h ?? 0), 2);
+    t.check("…the last tick row and the Cron strip of the tick job", r.tick?.lastTickAt !== null && (r.tick?.jobs.find((j) => j.job === "tick")?.runs.length ?? 0) >= 2);
+    const row = r.errors?.rows.find((e) => e.area === "qa" && e.code === "qa_health");
+    t.eq("errors: one bucket over two stores aggregated (count, stores, route)", row && [row.count, row.stores, row.route], [55, 2, "/qa/health"]);
+    t.check("…its peak hour drives error_spike (55 > 50)", H.errorSpike(r.errors?.peaks.find((e) => e.area === "qa" && e.code === "qa_health")?.peakHour ?? null));
+    t.eq("dataDir after the walk: the snapshot's totals", r.dataDir?.walk && [r.dataDir.walk.bytes, r.dataDir.walk.files, r.dataDir.walk.at], [4_096, 3, snapshot.at]);
+    t.check("…and the frozen dataDir is filled, no_snapshot gone", p.dataDir.bytes === 4_096 && p.dataDir.files === 3 && p.sectionErrors.dataDir === undefined);
+    const top = r.sheetsTop?.top.find((s) => s.storeId === STORE_A);
+    t.check(
+      "sheetsTop: store A by id and handle, its waiting non-test orders, oldest ≥ 30 min; the capacity line",
+      !!top && top.handle === "storage-a" && top.pending >= 2 && top.oldestMin >= 30 && r.sheetsTop!.capacity.storesPerTick === 16 && r.sheetsTop!.activeStores >= 1,
+      JSON.stringify(r.sheetsTop),
+    );
+    t.check("db: total vs quota, the top tables and stores", !!r.db && r.db.tables.length > 0 && r.db.tables.length <= 15 && r.db.stores.length <= 15 && (r.db.usage?.quotaBytes ?? 0) > 0);
+    t.check("edge on the test domain: S mode off, no network call, counts from the ring", r.edge?.sMode === false && typeof r.edge.badKey24h === "number" && r.edge.foreignHosts24h === null);
+    t.check("build: gateMismatch null unless both commits are known", r.build !== null && r.build.gateMismatch === (r.build.gateSha && r.build.commit ? r.build.gateSha !== r.build.commit : null));
+    t.check("runtime: Node version, memory, uptime; warnings as levels and texts", r.runtime?.node === process.version && r.runtime.memory.rss > 0 && r.runtime.bootWarnings.every((w) => w.level === "warn" || w.level === "error"));
+    t.check("design, health engine and jobs read", !!r.design && !!r.health && r.health.staleAfterMin >= 15 && !!r.jobs);
+    const cheap = await H.getHealthReport(staff(true), { sections: H.CHEAP_SECTIONS });
+    t.check("the cheap subset: errors, runtime, design, ai and jobs not read", cheap.errors === null && cheap.runtime === null && cheap.design === null && cheap.ai === null && cheap.jobs === null && cheap.tick !== null && cheap.edge !== null);
   });
 
   await h.run();

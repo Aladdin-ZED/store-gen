@@ -56,6 +56,15 @@ interface OpsMetrics {
   /** the listeners' clock (Date.now; a fake one in test:jobs) */
   clock: () => number;
   poll: ReturnType<typeof setInterval> | null;
+  /** P8 step 11: the edge tally already turned into error_events rows (./edge-tally.ts); counts only */
+  edgeSeen: EdgeSeen | null;
+}
+
+/** What ./edge-tally.ts has already recorded of the proxy's per-process edge tally. */
+export interface EdgeSeen {
+  badKey: number;
+  prevKeyAt: number | null;
+  foreignHosts: number;
 }
 
 declare global {
@@ -63,7 +72,7 @@ declare global {
 }
 
 function state(): OpsMetrics {
-  return (globalThis.__sgOpsMetrics ??= { lag: { hist: null, startedAt: 0, last: null }, poolWaits: [], lockWaits: [], queued: [], attached: null, clock: Date.now, poll: null });
+  return (globalThis.__sgOpsMetrics ??= { lag: { hist: null, startedAt: 0, last: null }, poolWaits: [], lockWaits: [], queued: [], attached: null, clock: Date.now, poll: null, edgeSeen: null });
 }
 
 /* ------------------------------------------------------------------ */
@@ -257,6 +266,16 @@ export function currentLagMs(): number {
 /** The lag of the last finished tick, or null (getHealth reads job_runs; this is the process's own copy). */
 export function lastTickLag(): { p95Ms: number | null; maxMs: number | null } | null {
   return state().lag.last;
+}
+
+/** The edge tally recorded so far (null before the first look), and its replacement after a look (./edge-tally.ts). */
+export function edgeSeen(): EdgeSeen | null {
+  const seen = state().edgeSeen;
+  return seen ? { ...seen } : null;
+}
+
+export function setEdgeSeen(seen: EdgeSeen): void {
+  state().edgeSeen = { ...seen };
 }
 
 /** Tests: forget every sample and the attached pool (its listeners stay registered but go quiet). */

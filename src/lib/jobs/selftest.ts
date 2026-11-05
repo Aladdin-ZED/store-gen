@@ -43,6 +43,9 @@
  * 12. purge      (./selftest-purge.ts, P8 step 10) the purge and lifecycle registration, purgePlan()'s invariants (every
  *                tenant table once, the KEEP list, the §F.9 order, the areas before the media rows, store_health last,
  *                a new table before pages), redactMetaForPurge on fixtures, purgeReasonOf, the §H.11 cutoff table.
+ * 13. health     (./selftest-health.ts, P8 step 11) every alarm helper at, under and over its threshold (the scaled
+ *                Sheets one included), section isolation (a throwing or hanging source → that section null), the
+ *                projection onto the frozen PlatformHealth, the edge tally deltas.
  *
  * `--only <prefix>[,<prefix>]` runs the sections whose name starts with one of the prefixes (a quick loop while
  * working on one area; `npm run test:jobs` runs them all).
@@ -726,6 +729,15 @@ async function main(): Promise<void> {
     S: await import("./slots"),
     PJ: await import("./purge"),
     JOBS,
+  });
+
+  /* ---------------------------------------------------------------- */
+  const { healthSections } = await import("./selftest-health");
+  healthSections(h, {
+    A: await import("./alarms"),
+    HS: await import("./health-sections"),
+    W: await import("@/lib/storage/walk"),
+    ET: await import("./edge-tally"),
   });
 
   await h.run();
