@@ -44,6 +44,15 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **PC OFF 2026-11-04 10:24 → 2026-11-05 21:19, TRACKS RELAUNCHED ~21:30** (owner: "continue"). System log: unexpected
+  shutdown at 10:24:50 while entering sleep (Kernel-Power 41: BugcheckCode 0, SleepInProgress 5, no long power-button
+  press), i.e. power was lost during sleep; not a crash of ours. The session process restarted, so both runs
+  (wf_324eaca6-af0, wf_14d710c6-2a6) died. 65/106 validated (≈ 45.7%); weekly usage 46% (resets 2026-11-09 16:00 UTC).
+  Relaunched with the speed recipe: group A task `whj5eiwtm` run `wf_8c657bfb-521` (P8 from 11, P2 9, P1 9, P5 10), group B
+  task `wcbjkaz7m` run `wf_c5c653e7-8a8` (P4 8, P3 8, P7 10, P6 8). heavy.mjs now also drops queue tickets older than
+  3.5 h (a pid reused after a reboot kept stale tickets "alive"); the stale pre-reboot lock/tickets are cleared by it.
+  Heartbeat cron 3ac3f9ed (with the 75% rule) survived.
+
 - **PC HIBERNATED ON CRITICAL BATTERY 2026-11-03 23:53 → 2026-11-04 09:12** (System log: Kernel-Power 524 "Critical
   Battery Trigger Met", 42 "Sleep Reason: Battery"; the laptop was unplugged). Keep-awake cannot prevent that; the owner must
   keep it on AC power (on AC again at 09:17, 7% charge). Both runs (wf_324eaca6-af0, wf_14d710c6-2a6) survived the sleep and
