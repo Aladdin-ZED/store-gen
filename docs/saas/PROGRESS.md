@@ -44,6 +44,10 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **USAGE STOP NOW AT 95% (owner 2026-11-05 ~21:40: "change the limit condition from 75 to 95").** Heartbeat cron is now
+  `41a5968f` (13,33,53): get_usage first; at >= 95% stop both runs and any merge run, start nothing, log, delete the cron,
+  wait for "continue"; from 90% check every ~5 min. Usage was 46% at 21:24 UTC.
+
 - **PC OFF 2026-11-04 10:24 → 2026-11-05 21:19, TRACKS RELAUNCHED ~21:30** (owner: "continue"). System log: unexpected
   shutdown at 10:24:50 while entering sleep (Kernel-Power 41: BugcheckCode 0, SleepInProgress 5, no long power-button
   press), i.e. power was lost during sleep; not a crash of ours. The session process restarted, so both runs
