@@ -19,9 +19,13 @@ export { clicheScore, type ClicheHit, type CopyReport } from "./cliche";
 export { bandOf, bounds, crowdView, distanceBand, distanceView, genomeDistance, nicheKey, packView, tauNiche, unpackView, type DistanceView } from "./distance";
 export { estimateHeights, HEIGHT_MODEL_VERSION } from "./heights";
 export { variantFeatures } from "./features";
-export { GenomeCardSchema, renderDigest, type CodDigestInputs, type GenomeCard, type RenderDigest } from "./digest";
-export { AI_REPAIR_OPS, type AiRepairOp, type RepairOp } from "./gates/repair";
-export type { CompositionKey, DesignGateItem, GateId, GateReport, OriginClass, Register } from "./gates/types";
+export { critiqueSummary, genomeCard, GenomeCardSchema, renderDigest, type CodDigestInputs, type CritiqueInput, type GenomeCard, type RenderDigest } from "./digest";
+export { AI_REPAIR_OPS, applyOps, repairDoc, type AiRepairOp, type ApplyCtx, type RepairOp } from "./gates/repair";
+export { qScore, runGates, summarize, toGateItem } from "./gates/run";
+export type { AssetMeta, BaselineTargetId, CompositionKey, DesignGateItem, GateId, GateInput, GateReport, HeadlineVerdict, OriginClass, Register, RepairLog, StorePageDoc, StorePageKind } from "./gates/types";
+export { gateInputFor, KIND_GATES, type GateInputCtx, type KindGates } from "./gate-input";
+export { chipText, colourWord, explainGenome, whyText, type ExplainFacts, type GenomeChip } from "./explain";
+export { DESIGNER_SEEDS, seedsFor, type DesignerSeed } from "./seeds";
 export type { PhotoFacts } from "./photo-facts";
 
 /** The Director task names (design.plan and design.critique in R1, design.verify in R2), the same ids as ai.md's task registry. */

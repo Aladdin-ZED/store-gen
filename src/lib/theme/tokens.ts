@@ -161,9 +161,11 @@ function typeScale(ratio: readonly [number, number]): Record<string, string> {
   return out;
 }
 
-const spaceOf = (density: ArchetypeDef["density"], k = 1) => {
+const spaceOf = (density: ArchetypeDef["density"], k = 1, grid = false) => {
   const [a, b, c, d] = SPACE_NUM[density];
-  return `clamp(${num(a * k, 3)}rem,${num(b * k, 3)}rem + ${num(c * k, 3)}vw,${num(d * k, 3)}rem)`;
+  // a look snaps the bounds to its 4 px grid (V04: every spacing token is a multiple of the grid unit)
+  const snap = (rem: number) => (grid ? Math.round(rem * 4) / 4 : rem);
+  return `clamp(${num(snap(a * k), 3)}rem,${num(b * k, 3)}rem + ${num(c * k, 3)}vw,${num(snap(d * k), 3)}rem)`;
 };
 
 interface ResolvedFonts {
@@ -456,7 +458,7 @@ export function buildThemeTokens(input: ThemeSpec, localeInput: Locale): BuiltTh
 
   const spaceVars: Record<string, string> = look
     ? {
-        "lp-space-section": spaceOf(look.dens, look.space),
+        "lp-space-section": spaceOf(look.dens, look.space, true),
         "lp-container": rem(look.grid.w),
         "lp-gutter": fluidPx(GUTTER[look.grid.m][0], GUTTER[look.grid.m][1]),
         "lp-unit": px(look.grid.u),

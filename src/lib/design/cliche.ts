@@ -19,6 +19,7 @@ import { elides, type ProductRef } from "@/lib/ai/copy-library/product-ref";
 import type { OriginClass } from "@/lib/db/schema";
 import type { Locale, PageDoc } from "@/lib/page/schema";
 import { textFieldsOf } from "@/lib/render/origin";
+import { scopedCache } from "@/lib/tenancy/cache";
 import type { DesignGateItem } from "./gates/types";
 import type { HeadlineStructure } from "./genome";
 import { AR, DARIJA_MARKERS, MSA_MARKERS } from "./lexicon/ar";
@@ -125,8 +126,23 @@ function matchAt(pat: readonly PatTok[], toks: readonly { keys: string[] }[], i:
   return matchAt(pat, toks, i + 1, p + 1);
 }
 
+/**
+ * The hits of recently seen texts (the gates re-read one page per edit and per repair round): a pure function of the
+ * text, held in the platform partition ("p") of a scoped cache, bounded and short-lived.
+ */
+const HIT_CACHE = scopedCache<ClicheHit[]>({ name: "design-cliche-hits", maxEntries: 4_000, ttlMs: 10 * 60_000 });
+
 /** Every lexicon hit of a text; overlapping hits keep the heaviest (then the longest). */
 export function clicheHits(text: string, locale: Locale | TextLocale): ClicheHit[] {
+  const key = `${textLocale(locale)}|${text}`;
+  const hit = HIT_CACHE.get("p", key);
+  if (hit) return hit.map((h) => ({ ...h }));
+  const out = clicheHitsOf(text, locale);
+  HIT_CACHE.set("p", key, out);
+  return out.map((h) => ({ ...h }));
+}
+
+function clicheHitsOf(text: string, locale: Locale | TextLocale): ClicheHit[] {
   const l = textLocale(locale);
   const toks = keyed(text, l);
   const found: { hit: ClicheHit; from: number; to: number }[] = [];
@@ -495,14 +511,25 @@ export function punctuate(text: string, locale: Locale | TextLocale): string {
 /* ------------------------------------------------------------------ */
 
 const TITLE_KEY = /(^|\.)(title|headline|heading)$/;
+const SECTION_TITLE = /^[^.]+\.(title|headline|heading)$/;
 
-/** Article faults in rendered French copy (D4): "à le", "de les", a doubled article, a missing elision ("de huile"). */
-export function articleFaults(text: string): string[] {
+/**
+ * Article faults in rendered French copy (D4): "à le", "de les", a doubled article, a missing elision ("de huile"),
+ * and with the product name the inverted subject without its article ("Ce que change Sérum", DES-§9.5 `ProductRef`).
+ */
+export function articleFaults(text: string, product?: string | null): string[] {
   const out: string[] = [];
   const t = text.replace(/\*+/g, "").replace(/’/g, "'");
   for (const re of [/(?<![\p{L}'])(à|de) (le|les) /giu, /(?<![\p{L}'])(le|la|ce|cet|cette|du|un|une|au|aux) (l'|le |la |les )/giu])
     for (const m of t.matchAll(re)) out.push(m[0].trim());
   for (const m of t.matchAll(/(?<![\p{L}'])(de|que|le|la) (\p{Ll}[\p{L}-]*)/gu)) if (elides(m[2]!)) out.push(m[0]);
+  const name = (product ?? "").replace(/\*+/g, "").replace(/’/g, "'").trim();
+  if (name) {
+    // the first word of the name stands bare after "ce que <verb>" (the article is missing)
+    const head = name.split(/\s+/)[0]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m = new RegExp(`(?<![\\p{L}'])ce qu(?:e |')\\p{L}+ ${head}(?![\\p{L}])`, "iu").exec(t);
+    if (m) out.push(m[0]);
+  }
   return out;
 }
 
@@ -553,8 +580,9 @@ export function copyReport(doc: PageDoc, facts: FactsArg, origin: ReadonlyMap<st
     if (EMOJI.test(text)) items.push({ id: "C09", level: "hard", section: sectionOf(path), field: path, penalty: 15, msg: "design.copy.C09" });
     if (NOT_JUST[l].test(text)) items.push({ id: "C03", level: "soft", section: sectionOf(path), field: path, penalty: 2, msg: "design.copy.C03", vars: { kind: "not-just" } });
     if (sentences(text).some((s) => isTriad(s, l))) triads++;
-    if (TITLE_KEY.test(path)) titles.push({ path, text });
-    if (l === "fr" && articleFaults(text).length) items.push({ id: "D4", level: "soft", section: sectionOf(path), field: path, penalty: 2, msg: "design.copy.D4" });
+    // the sameness rule reads the section headlines (`<section>.title`), not the titles of list items
+    if (SECTION_TITLE.test(path)) titles.push({ path, text });
+    if (l === "fr" && articleFaults(text, doc.product.name).length) items.push({ id: "D4", level: "soft", section: sectionOf(path), field: path, penalty: 2, msg: "design.copy.D4" });
   }
   if (triads > 1) items.push({ id: "C03", level: "soft", penalty: 2, msg: "design.copy.C03", vars: { kind: "triad", count: triads } });
   // sameness and questions over the in-flow titles (N8 structure rule)

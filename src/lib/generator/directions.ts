@@ -22,7 +22,7 @@ import { ARCHETYPE_DEFS, rankArchetypes, type ExtractedPalette } from "@/lib/the
 import { getSection } from "@/landing/registry";
 import { compileGenome, compileLook, type Compiled, type PlanDirectives } from "@/lib/design/compile";
 import { distanceView, genomeDistance, nicheKey, type DistanceView } from "@/lib/design/distance";
-import { GenomeError, type DesignGenome, type SampleInput } from "@/lib/design/genome";
+import { GenomeError, type DesignGenome, type SampleInput, type SampleOpts } from "@/lib/design/genome";
 import type { GeneHints } from "@/lib/design/hints";
 import type { NicheShares } from "@/lib/design/novelty.server";
 import type { PhotoFacts } from "@/lib/design/photo-facts";
@@ -618,6 +618,22 @@ function sampleInputOf(input: GenerateInput, archetype: Archetype, i: 0 | 1 | 2,
     shares: input.shares ?? null,
     priorsV: PRIORS_VERSION,
   };
+}
+
+/**
+ * One direction drawn with fixed genes (DES-§17.2 designer seeds, the studio's locks): the archetype's sample with
+ * `opts.locks` (and hints or a pin), compiled against the product theme and planned like a wizard direction. Pure;
+ * throws GeneratorError on an incomplete product and GenomeError when a locked colour cannot leave orange (H24).
+ */
+export function designDirection(input: GenerateInput, archetype: Archetype, opts: SampleOpts = {}, i: 0 | 1 | 2 = 0): BuiltDirection {
+  const { reading, keywords } = moodOf(input);
+  const parsed = Product.safeParse(input.product);
+  const category = parsed.success ? parsed.data.category : "other";
+  const sin = sampleInputOf(input, archetype, i, 0, rankDirections(input), reading);
+  const genome = sampleGenome(sin, opts);
+  const theme = productTheme({ category, palette: input.palette, aiVibe: input.aiVibe, keywords, mood: reading.mood, archetype, seed: genome.seed, locale: input.locale });
+  const compiled = compileGenome(genome, { theme, locale: input.locale, mood: reading.mood, brand: input.brand ?? null, photos: sin.photos, numbers: (input.proof?.figures ?? 0) >= 2 });
+  return buildDirectionWithGenome(input, archetype, genome.seed, undefined, { genome, compiled });
 }
 
 /**

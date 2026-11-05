@@ -16,6 +16,8 @@ import "@/lib/design/selftest-heights";
 import "@/lib/design/selftest-choreography";
 // step 7 (copy engine): normalisers, the cliché fixture, the register sets, the copy rules, the compositional sweep, bottom-k
 import "@/lib/design/selftest-copy";
+// step 8 (gates, repairs, digest): TC-1, the calibration fixtures, Q anchors, repairs, items, RD-1, GN-1, kinds, seeds
+import "@/lib/design/selftest-gates";
 import { registerDesignGroup } from "@/lib/design/selftest";
 
 // step 4 (section kit redraws): the 41 baseline documents against their goldens (--full; test:render runs the 14
