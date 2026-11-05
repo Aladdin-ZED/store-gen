@@ -15,7 +15,7 @@
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { PlatformPermission } from "@/lib/auth/permissions";
 import { useT } from "@/lib/i18n/admin/client";
 import type { ConsolePulse } from "@/lib/platform/pulse-rules";
@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { useChords, type Chord } from "../_compat/chords";
 import { ConsolePalette } from "../command/console-palette";
 import { consoleChords, type ConsoleNavGroup } from "../nav";
-import { ConsoleShellContext, type ConsoleDensity, type ConsoleShellApi } from "./context";
+import { ConsoleShellContext, type ConsoleDensity, type ConsoleShellApi, type ScreenKeys } from "./context";
 import { ConsolePulseProvider } from "./pulse-provider";
 import { ShortcutSheet } from "./shortcut-sheet";
 import { ConsoleSidebar, type SidebarFooter } from "./sidebar";
@@ -41,13 +41,30 @@ function readDensity(): ConsoleDensity | null {
   }
 }
 
+/** blocked storage (a private window): the choice lasts for this page only */
+let pageDensity: ConsoleDensity | null = null;
+const densityListeners = new Set<() => void>();
+
 function writeDensity(d: ConsoleDensity): void {
+  pageDensity = d;
   try {
     window.localStorage.setItem(DENSITY_KEY, d);
   } catch {
-    // a private window or blocked storage: the choice lasts for this page only
+    // kept in pageDensity
   }
+  for (const l of densityListeners) l();
 }
+
+function subscribeDensity(onChange: () => void): () => void {
+  densityListeners.add(onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    densityListeners.delete(onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+const densitySnapshot = (): ConsoleDensity => readDensity() ?? pageDensity ?? "compact";
+const serverDensity = (): ConsoleDensity => "compact";
 
 export interface ConsoleShellProps {
   nav: ConsoleNavGroup[];
@@ -66,16 +83,12 @@ export function ConsoleShell({ nav, grants, pulse, timeZone, lang, dir, footer, 
   const t = useT();
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
-  const [density, setDensityState] = useState<ConsoleDensity>("compact");
+  // the viewer's density, after hydration (the server renders the compact default)
+  const density = useSyncExternalStore(subscribeDensity, densitySnapshot, serverDensity);
   const [palette, setPalette] = useState<{ open: boolean; mode: "default" | "view_as" }>({ open: false, mode: "default" });
   const [shortcuts, setShortcuts] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
-
-  // the viewer's density, after hydration (the server renders the compact default)
-  useEffect(() => {
-    const saved = readDensity();
-    if (saved) setDensityState(saved);
-  }, []);
+  const [screenKeys, setScreenKeys] = useState<ScreenKeys | null>(null);
 
   // portalled layers mount under <body>: give it the console tokens while the shell is here
   useEffect(() => {
@@ -88,10 +101,7 @@ export function ConsoleShell({ nav, grants, pulse, timeZone, lang, dir, footer, 
     };
   }, []);
 
-  const setDensity = useCallback((d: ConsoleDensity) => {
-    setDensityState(d);
-    writeDensity(d);
-  }, []);
+  const setDensity = useCallback((d: ConsoleDensity) => writeDensity(d), []);
 
   const granted = useMemo(() => new Set(grants), [grants]);
   const api = useMemo<ConsoleShellApi>(
@@ -105,8 +115,10 @@ export function ConsoleShell({ nav, grants, pulse, timeZone, lang, dir, footer, 
       openPalette: (mode = "default") => setPalette({ open: true, mode }),
       openShortcuts: () => setShortcuts(true),
       can: (p) => granted.has(p),
+      screenKeys,
+      setScreenKeys,
     }),
-    [nav, timeZone, density, setDensity, setTheme, resolvedTheme, granted],
+    [nav, timeZone, density, setDensity, setTheme, resolvedTheme, granted, screenKeys],
   );
 
   // ⌘K / Ctrl+K opens the palette from anywhere, fields included (the chords below never fire inside a field)

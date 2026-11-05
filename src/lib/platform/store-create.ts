@@ -90,6 +90,23 @@ async function insertReviewTx(tx: Tx, scope: WriteScope, row: Omit<typeof signup
   await tx.insert(signupReviews).values(storeValues(scope, row));
 }
 
+/** The form's live answer for one handle (PLA-§6.2): `protected` is allowed with a note, the others block. */
+export type HandleCheck = "ok" | "format" | "reserved" | "taken" | "protected";
+
+/** `stores.create`: the live availability of a handle while the form is typed (format, reserved, free, protected term). */
+export async function checkConsoleHandle(ctx: PlatformCtx, value: unknown): Promise<{ handle: string; state: HandleCheck }> {
+  if (!ctx.can("stores.create")) throw new AuthRefusal("forbidden");
+  const handle = typeof value === "string" ? value.trim().toLowerCase().slice(0, 64) : "";
+  if (!isHandle(handle)) return { handle, state: "format" };
+  const lists = await loadHandleLists();
+  const problem = handleProblem(handle, { allowProtected: true }, lists);
+  if (problem === "format") return { handle, state: "format" };
+  if (problem) return { handle, state: "reserved" };
+  if (!(await handleIsFree(handle, null))) return { handle, state: "taken" };
+  if (handleProblem(handle, {}, lists) === "protected" || (await checkBrandTerms("handle", handle)) === "exact") return { handle, state: "protected" };
+  return { handle, state: "ok" };
+}
+
 /** `stores.create`: an active store with its owner, its approved review row, audited `store.created { via: "console" }`. */
 export async function createStore(ctx: PlatformCtx, input: unknown): Promise<{ storeId: string; handle: string }> {
   if (!ctx.can("stores.create")) throw new AuthRefusal("forbidden");

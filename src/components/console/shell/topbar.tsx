@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { countdownText, durationText } from "../format";
 import { activeConsoleItem } from "../nav";
 import { PrefetchLink } from "../prefetch-link";
-import { useConsoleShell, useNow } from "./context";
+import { useConsoleShell, useHydrated, useNow } from "./context";
 import { useConsolePulse } from "./pulse-provider";
 import styles from "./console.module.css";
 
@@ -57,8 +57,13 @@ function Chip({ tone, icon, children, title, className }: { tone: "neutral" | "s
 /** "Live" / "Updated 2 min ago" / "Not updating, last update 3 min ago": the dot only carries the live state. */
 function PulseFreshness() {
   const t = useT();
-  const { okAt, failed, stale } = useConsolePulse();
+  const pulse = useConsolePulse();
   const now = useNow(5_000);
+  // until hydrated, the server's view (a fresh pulse): a slow first load must not hydrate "Live" into "Updated 2 min ago"
+  const hydrated = useHydrated();
+  const { okAt } = pulse;
+  const failed = hydrated && pulse.failed;
+  const stale = hydrated && pulse.stale;
   const ago = okAt === null ? null : durationText(now - okAt);
   const agoText = ago ? t("console.time.ago", { d: ago }) : t("console.time.now");
   const live = okAt !== null && !failed && !stale;
@@ -74,8 +79,9 @@ function PulseFreshness() {
 function StepUpChip({ until }: { until: string }) {
   const t = useT();
   const now = useNow(1_000);
+  const hydrated = useHydrated();
   const left = Date.parse(until) - now;
-  if (!(left > 0)) return null;
+  if (!hydrated || !(left > 0)) return null;
   return (
     <Chip tone="success" title={t("console.stepup.hint")} icon={<ShieldCheckIcon aria-hidden="true" className="size-3.5" />} className="max-md:hidden">
       {t("console.stepup.chip", { left: countdownText(left) })}
@@ -87,8 +93,9 @@ function ViewAsChip() {
   const t = useT();
   const { pulse } = useConsolePulse();
   const now = useNow(1_000);
+  const hydrated = useHydrated();
   const imp = pulse?.impersonation ?? null;
-  if (!imp) return null;
+  if (!imp || !hydrated) return null;
   const left = Date.parse(imp.endsAt) - now;
   if (!(left > 0)) return null;
   return (

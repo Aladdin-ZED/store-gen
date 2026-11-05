@@ -306,3 +306,11 @@
   background: var(--secondary);
   color: var(--foreground);
 }
+.tokens :where([data-seed][data-size="32"][role="img"]:not([class])) {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: color-mix(in oklch, var(--brand) 12%, var(--secondary));
+  color: var(--c-brand-ink);
+}

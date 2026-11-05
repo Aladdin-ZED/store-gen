@@ -7,7 +7,8 @@
  * and request functions of src/lib/platform/requests.ts. Step 5: legal re-acceptance. Step 7: the console actions and
  * route handlers (cases 2, 3, 4, 7, 8, 11, 17, 20 run now), the public report action (17), and the cases that need
  * another track's code: those load their module through a computed dynamic import and are listed "requires P2 / P3 /
- * P4" while it is absent, so they compile now and run at the merge gate and the R1 integration.
+ * P4" while it is absent, so they compile now and run at the merge gate and the R1 integration. Step 9: the queue's
+ * pane read and the store form's live handle check (roles, hostile input, read only).
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -517,6 +518,34 @@ export const cases: TenancyCase[] = [
         k.check(`case 20: a notification with link ${link} is stored with link NULL`, row !== undefined && row.link === null, row);
       }
       k.notApplicable("case 20: deleteMyAccountAction under impersonation; stepUpWithPasswordAction across sessions", "requires P2's account danger page (T2's functions are reached through it at the R1 integration)");
+    },
+  },
+
+  {
+    name: "step 9: the queue pane read and the store form's handle check answer only the roles they name, and read only",
+    async run(k) {
+      const queue = (await import(specOf("src/app/admin/(console)/queue/actions.ts"))) as ActionModule;
+      const create = (await import(specOf("src/app/admin/(console)/stores/new/actions.ts"))) as ActionModule;
+      const A = k.fx.A;
+      const before = await k.snapshotA();
+      const admin = as(await staffUser(k, "admin"));
+      const analyst = as(await staffUser(k, "analyst"));
+      const superAdmin = as(k.fx.staff.id);
+      const handle = (who: Who, h: unknown) => k.call(who, "/admin", () => create.checkStoreHandleAction!({ handle: h }));
+      for (const [label, who] of [["admin", admin], ["analyst", analyst], ["A's owner", as(A.members.owner)]] as const) {
+        k.check(`step 9: checkStoreHandleAction by ${label} → refused (stores.create is the super admin's)`, refused(answer(await handle(who, A.handle))));
+      }
+      const taken = await handle(superAdmin, A.handle);
+      const state = taken.ok ? ((taken.value as Result).data as { state?: string } | undefined)?.state : undefined;
+      k.check("step 9: checkStoreHandleAction by the super admin names A's handle taken", answer(taken) === "ok" && state === "taken", { answer: answer(taken), state });
+      const odd = await handle(superAdmin, { $ne: 1 });
+      const oddState = odd.ok ? ((odd.value as Result).data as { state?: string } | undefined)?.state : undefined;
+      k.check("step 9: checkStoreHandleAction with a non-string → the format answer, nothing else", answer(odd) === "ok" && oddState === "format", { answer: answer(odd), oddState });
+      const pane = (who: Who, id: unknown) => k.call(who, "/admin", () => queue.loadReviewPaneAction!({ reviewId: id })).then(answer);
+      k.check("step 9: loadReviewPaneAction from A's owner → refused", refused(await pane(as(A.members.owner), A.id)));
+      k.check("step 9: loadReviewPaneAction with A's store id (not a review id) → not_found", (await pane(analyst, A.id)) === "not_found");
+      k.check("step 9: loadReviewPaneAction with a malformed id → not_found", (await pane(admin, "../../x")) === "not_found");
+      k.check("step 9: A's rows are unchanged by every read", (await k.snapshotA()) === before);
     },
   },
 

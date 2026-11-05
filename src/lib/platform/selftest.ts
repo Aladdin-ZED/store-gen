@@ -1802,6 +1802,67 @@ async function main(): Promise<void> {
   checkD(navKeys.every((k) => k in enConsole), "every nav group and item label is in en/console.ts", navKeys.filter((k) => !(k in enConsole)));
   }
 
+  /* ---- step 9: the approval queue's keymap, the ring tints and the queue / stores copy families (PLA-§3.5, §6.1) ---- */
+  {
+  const km = await import("../../components/console/queue/queue-keymap");
+  const tints = await import("../../components/console/tints");
+  const en = enConsole as Record<string, string>;
+  const rows = [
+    { id: "a", fast: true, decidable: true, request: false },
+    { id: "b", fast: false, decidable: true, request: false },
+    { id: "c", fast: true, decidable: true, request: false },
+    { id: "d", fast: false, decidable: true, request: true },
+  ];
+  type KState = Parameters<typeof km.queueKeyCommand>[0];
+  type KPress = Parameters<typeof km.queueKeyCommand>[1];
+  const st = (o: Partial<KState> = {}): KState => ({ rows, active: "a", selected: [], tab: "review", canDecide: true, ...o });
+  const press = (key: string, o: Partial<KPress> = {}): KPress => ({ key, shift: false, mod: false, editable: false, overlay: false, ...o });
+  const cmd = (s: KState, p: KPress) => km.queueKeyCommand(s, p);
+  checkD(eq(cmd(st(), press("j")), { kind: "focus", id: "b" }) && eq(cmd(st(), press("ArrowDown")), { kind: "focus", id: "b" }) && eq(cmd(st({ active: "b" }), press("k")), { kind: "focus", id: "a" }) && eq(cmd(st({ active: "b" }), press("ArrowUp")), { kind: "focus", id: "a" }), "queue keys: J / down move down, K / up move up");
+  checkD(cmd(st(), press("k")).kind === "none" && cmd(st({ active: "d" }), press("j")).kind === "none" && eq(cmd(st({ active: null }), press("j")), { kind: "focus", id: "a" }), "queue keys: no move past either end; the first J focuses the first row");
+  const everyKey = ["j", "k", "a", "i", "r", "s", "x", "e", "v", "Enter", "ArrowDown", "Escape"];
+  checkD(everyKey.every((k) => cmd(st({ selected: ["a"] }), press(k, { editable: true })).kind === "none" && cmd(st({ selected: ["a"] }), press(k, { overlay: true })).kind === "none" && cmd(st({ selected: ["a"] }), press(k, { mod: true })).kind === "none"), "queue keys: every key is ignored in a text field, under an open overlay and with a modifier");
+  checkD(eq(cmd(st(), press("A")), { kind: "approve", id: "a" }) && eq(cmd(st(), press("i")), { kind: "ask", id: "a" }) && eq(cmd(st(), press("r")), { kind: "reject", id: "a" }) && eq(cmd(st(), press("s")), { kind: "snooze", id: "a" }) && eq(cmd(st(), press("e")), { kind: "open", id: "a" }) && eq(cmd(st(), press("Enter")), { kind: "open", id: "a" }) && eq(cmd(st(), press("v")), { kind: "view_as", id: "a" }) && eq(cmd(st(), press("x")), { kind: "toggle", id: "a" }), "queue keys: A I R S E Enter V X act on the active row");
+  checkD(cmd(st({ canDecide: false }), press("a")).kind === "none" && cmd(st({ canDecide: false }), press("r")).kind === "none" && cmd(st({ canDecide: false }), press("e")).kind === "open", "queue keys: a role without signups.decide never decides, but still opens");
+  checkD(cmd(st({ active: "d" }), press("i")).kind === "none" && cmd(st({ active: "d" }), press("a")).kind === "approve", "queue keys: a store request has no Ask (granted or declined only)");
+  checkD(cmd(st({ rows: rows.map((r) => ({ ...r, decidable: false })) }), press("a")).kind === "none", "queue keys: a decided row (the Decided tab) takes no decision");
+  checkD(cmd(st({ selected: ["a", "b", "c"] }), press("a", { shift: true })).kind === "none", "queue keys: Shift+A does nothing outside the Fast lane tab");
+  checkD(eq(cmd(st({ tab: "fast", selected: ["a", "b", "c"] }), press("A", { shift: true })), { kind: "bulk_approve", ids: ["a", "c"] }), "queue keys: Shift+A approves only the selected fast-lane rows, in list order");
+  checkD(cmd(st({ tab: "fast", selected: ["b"] }), press("a", { shift: true })).kind === "none" && cmd(st({ tab: "fast" }), press("a", { shift: true })).kind === "none", "queue keys: Shift+A with no fast-lane row selected does nothing");
+  checkD(eq(cmd(st({ selected: ["a"] }), press("Escape")), { kind: "clear" }) && cmd(st(), press("Escape")).kind === "none", "queue keys: Escape clears a selection");
+  checkD(cmd(st(), press("/")).kind === "none" && cmd(st(), press("?")).kind === "none", "queue keys: / and ? stay with the shell (page search, shortcut sheet)");
+  const ids = ["a", "b", "c", "d"];
+  checkD(km.nextAfterDecision(ids, "b") === "c" && km.nextAfterDecision(ids, "d") === "c" && km.nextAfterDecision(["a"], "a") === null && km.nextAfterDecision(ids, "zz") === "a", "after a decision the next row gets the focus (else the one before, else none)");
+  checkD(km.nextAfterMany(ids, ["a", "c"]) === "b" && km.nextAfterMany(ids, ["c", "d"]) === "b" && km.nextAfterMany(ids, ids) === null, "after a bulk decision the first remaining row after the first decided one gets the focus");
+  checkD(tints.bandTint("fast") === "emerald" && tints.bandTint("review") === "neutral" && tints.bandTint("hold") === "yellow" && tints.bandTint("reject_candidate") === "crimson", "band to ring tint: fast emerald, review neutral, hold yellow, likely reject crimson");
+  checkD(tints.healthTint(100) === "emerald" && tints.healthTint(80) === "emerald" && tints.healthTint(79) === "neutral" && tints.healthTint(50) === "neutral" && tints.healthTint(49) === "yellow" && tints.healthTint(30) === "yellow" && tints.healthTint(29) === "crimson" && tints.healthTint(0) === "crimson", "health to ring tint: 80+ emerald, 50-79 neutral, 30-49 yellow, under 30 crimson");
+  const strokes = Object.values(tints.TINT_STROKE).join(" ");
+  const hues = [...strokes.matchAll(/oklch\(\s*[\d.]+\s+([\d.]+)\s+([\d.]+)/g)].map((m) => ({ c: Number(m[1]), h: Number(m[2]) }));
+  checkD(hues.length >= 3 && hues.every(({ c, h }) => !(h >= 25 && h <= 75 && c > 0.06)), "the ring tints carry no orange (OKLCH hue 25-75 with chroma > 0.06)", hues);
+  const sf = await import("./stores-filter");
+  const qr2 = await import("./queue-rules");
+  const sb = await import("./signup-band");
+  const families: [string, readonly string[]][] = [
+    ["console.sflag.", sb.SIGNUP_FLAG_CODES],
+    ["console.hflag.", sf.STORE_FLAG_CODES],
+    ["console.status.", sf.STORE_STATUSES],
+    ["console.mode.", sf.STORE_MODES],
+    ["console.queue.tab.", qr2.QUEUE_TABS],
+    ["console.queue.empty.", qr2.QUEUE_TABS],
+    ["console.queue.kind.", qr2.ALL_KINDS],
+    ["console.queue.snooze.", qr2.SNOOZE_CHOICES],
+    ["console.queue.reason_code.", [...qr2.REJECT_REASONS, "approved", "granted", "declined", "withdrawn", "console_created", "auto_invite", "auto_open", "auto_trusted"]],
+    ["console.request.grant.", qr2.REQUEST_KINDS],
+    ["console.stores.chip.", Object.keys(sf.SAVED_CHIPS)],
+    ["console.stores.sort.", sf.STORE_SORTS],
+    ["console.hgroup.", ["setup", "trust", "design", "conversion", "operations", "integrations", "quota"]],
+  ];
+  const missingFam = families.flatMap(([prefix, list]) => list.map((v) => `${prefix}${v}`).filter((k) => typeof en[k] !== "string"));
+  checkD(missingFam.length === 0, "every queue / stores copy family has a key per value (flags, statuses, modes, tabs, kinds, snoozes, reasons, chips, sorts, health groups)", missingFam);
+  const f = sf.parseStoresFilter({ status: "pending,active", attention: "1", sort: "health", bogus: "x", plan: "INVALID!" });
+  checkD(eq(f, { status: ["pending", "active"], attention: true, sort: "health" }) && sf.storesQuery(f) === "status=pending%2Cactive&attention=1&sort=health" && sf.chipOf(sf.parseStoresFilter({ status: "pending" })) === "in_review" && sf.chipOf(f) === null, "stores filter: the URL round-trips, unknown keys drop, a saved chip is recognised", { f, q: sf.storesQuery(f) });
+  }
+
   const ms = Math.round(performance.now() - t0);
   for (const s of skips) console.log(`  SKIP ${s}`);
   if (failures > 0) {

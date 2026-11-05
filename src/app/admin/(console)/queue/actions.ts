@@ -9,15 +9,22 @@
  *   await resolveRequestAction({ reviewId, outcome: "grant" });   // entitlements.override for plan / limit (queue.ts)
  *
  * A lost race answers `{ ok: true, data: { ok: false, error: "already_decided", by, at } }` (the sheet shows who won).
+ * One read: `loadReviewPaneAction` (console.read), the split view's detail of a row it has not loaded yet.
  */
 import type { z } from "zod";
 import { done, doneStore, opOf, withOp } from "@/lib/platform/op-dedupe";
 import { approveBulk, approveReview, askInfo, rejectReview, reopenReview, resolveRequest, snoozeReview, type DecisionResult } from "@/lib/platform/queue";
 import type { ApproveInput, AskInfoInput, BulkApproveInput, RejectInput, ReopenInput, ResolveInput, SnoozeInput } from "@/lib/platform/queue-rules";
+import { reviewPane, type ReviewPane } from "@/lib/platform/queue-pane";
 import { platformAction } from "@/lib/platform/seam";
 import type { ActionResult } from "@/lib/tenancy/types";
 
 type Op = { opId?: string };
+
+/** `console.read`: one row's detail pane (the review detail and the store's notes), masked per role (PD35). */
+export async function loadReviewPaneAction(input: { reviewId: string }): Promise<ActionResult<ReviewPane>> {
+  return platformAction("console.read", (ctx) => reviewPane(ctx, input && typeof input === "object" ? input.reviewId : undefined));
+}
 
 const storeOf = (r: DecisionResult): string | null => (r.ok ? r.storeId : null);
 

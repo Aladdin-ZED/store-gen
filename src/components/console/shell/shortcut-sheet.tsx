@@ -1,7 +1,8 @@
 "use client";
 /**
- * The `?` sheet (platform.md PLA-§4.3, §4.7 rule 2): every shortcut of the console, the `G <key>` chords of the pages
- * this staff member may open included, as key caps (no "·" strings, DES-§16.10).
+ * The `?` sheet (platform.md PLA-§4.3, §4.7 rule 2): every shortcut of the console, the current screen's own keys
+ * (`useScreenKeys`, e.g. the approval queue's J / K / A / R) and the `G <key>` chords of the pages this staff member
+ * may open, as key caps (no "·" strings, DES-§16.10).
  */
 import { Dialog as DialogPrimitive } from "radix-ui";
 import type { ReactNode } from "react";
@@ -58,6 +59,26 @@ export function ShortcutSheet({ open, onOpenChange }: { open: boolean; onOpenCha
               <Line label={t("console.keys.help")} keys={<Kbd>?</Kbd>} />
             </ul>
           </section>
+          {shell.screenKeys && shell.screenKeys.lines.length > 0 && (
+            <section className="grid gap-1">
+              <h3 className="text-[11px] font-medium text-muted-foreground">{shell.screenKeys.title}</h3>
+              <ul>
+                {shell.screenKeys.lines.map((l) => (
+                  <Line
+                    key={l.label}
+                    label={l.label}
+                    keys={
+                      <>
+                        {l.keys.map((k, i) => (
+                          <Kbd key={i}>{k}</Kbd>
+                        ))}
+                      </>
+                    }
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
           {chords.length > 0 && (
             <section className="grid gap-1">
               <h3 className="text-[11px] font-medium text-muted-foreground">{t("console.keys.group.go")}</h3>

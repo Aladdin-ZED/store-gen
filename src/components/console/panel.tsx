@@ -16,7 +16,7 @@ import { useT } from "@/lib/i18n/admin/client";
 import { cn } from "@/lib/utils";
 import { durationText } from "./format";
 import { PrefetchLink } from "./prefetch-link";
-import { useNow } from "./shell/context";
+import { useHydrated, useNow } from "./shell/context";
 import { PULSE_MS } from "./shell/pulse-provider";
 import styles from "./shell/console.module.css";
 
@@ -61,12 +61,16 @@ export function ConsolePanel({
   );
 }
 
-/** "Updated 2 min ago", only once the data is older than two pulses (neutral, never red). */
+/**
+ * "Updated 2 min ago", only once the data is older than two pulses (neutral, never red); drawn after hydration only,
+ * so a slow first load never hydrates a note the server did not draw.
+ */
 function StaleNote({ at }: { at: string }) {
   const t = useT();
   const now = useNow(15_000);
+  const hydrated = useHydrated();
   const age = now - Date.parse(at);
-  if (!(age > STALE_AFTER_MS)) return null;
+  if (!hydrated || !(age > STALE_AFTER_MS)) return null;
   const d = durationText(age);
   return <p className="border-t border-[var(--c-hairline)] px-4 py-2 text-[11px] text-muted-foreground">{t("console.panel.updated", { ago: d ? t("console.time.ago", { d }) : t("console.time.now") })}</p>;
 }

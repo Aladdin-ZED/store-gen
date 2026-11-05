@@ -31,3 +31,17 @@ export function Ago({ iso, template, className }: { iso: string; template?: Mess
     </time>
   );
 }
+
+/** A time ahead ("in 2 h 40 min", or a template like "Back {in}"), fresh every 30 s, absolute time on hover. */
+export function Until({ iso, template, className }: { iso: string; template?: MessageKey; className?: string }) {
+  const t = useT();
+  const { timeZone } = useConsoleShell();
+  const now = useNow(30_000);
+  const d = durationText(Date.parse(iso) - now);
+  const when = d ? t("console.time.in", { d }) : t("console.time.now");
+  return (
+    <time dateTime={iso} title={absoluteTime(iso, timeZone)} className={className} suppressHydrationWarning>
+      {template ? t(template, { in: when }) : when}
+    </time>
+  );
+}
