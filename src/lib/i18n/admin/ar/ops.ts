@@ -199,6 +199,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "ops.tl.detail.dueAt": "عاود عيّط {at}",
   "ops.tl.detail.shipAfter": "يتصيفط من {at}",
   "ops.tl.detail.atDelivery": "الفلوس تقبضات عند الباب",
+  "ops.tl.detail.cashMarked": "تسجّلات بلي الفلوس وصلات",
   "ops.tl.detail.duplicateOf": "مكرر مع {id}",
   "ops.tl.detail.inbound": "الكليان هو اللي عيّط",
   "ops.tl.detail.reason": "السبب: {text}",

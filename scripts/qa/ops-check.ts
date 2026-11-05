@@ -1080,8 +1080,8 @@ async function insights(): Promise<void> {
   const { HEALTH_RULE_PREFIXES } = await import("@/lib/health/types");
   const { mintScope } = await import("@/lib/tenancy/seam");
   const scope = mintScope("system", "01HZTESTSTORE0000000000000");
-  const SPEC_RULES = ["first_touch", "untouched", "no_agent", "unreachable_rise", "abandoned", "callbacks_overdue", "to_pack_aging", "hold_passed", "delivery_rescue", "sheet_agents_unmapped"].map((r) => `ops:${r}`);
-  check("the R1 ops rules of OPE-§27.2, one fixture each", JSON.stringify(H.rules.map((r) => r.id)) === JSON.stringify(SPEC_RULES) && JSON.stringify(H.fixtures.map((f) => f.rule)) === JSON.stringify(SPEC_RULES), H.rules.map((r) => r.id));
+  const SPEC_RULES = ["first_touch", "untouched", "no_agent", "unreachable_rise", "abandoned", "callbacks_overdue", "to_pack_aging", "hold_passed", "delivery_rescue", "sheet_agents_unmapped"].map((r) => `ops:${r}`).concat(["costs_missing", "settlement_check", "fee_gap", "ad_rate_missing"].map((r) => `fin:${r}`));
+  check("the R1 ops and fin rules of OPE-§27.2, one fixture each", JSON.stringify(H.rules.map((r) => r.id)) === JSON.stringify(SPEC_RULES) && JSON.stringify(H.fixtures.map((f) => f.rule)) === JSON.stringify(SPEC_RULES), H.rules.map((r) => r.id));
   check("every rule id carries a prefix of the ops file (PD79)", H.rules.every((r) => HEALTH_RULE_PREFIXES.ops.includes(r.id.split(":")[0]!)));
   const base = { now: new Date("2026-11-03T10:00:00Z") } as import("@/lib/health/types").HealthInputs;
   const PII_TEXT = /\+?\d[\d\s]{7,}|@[a-z]/i;
@@ -1095,7 +1095,7 @@ async function insights(): Promise<void> {
     check(`${fx.rule} fires on its fixture`, !!fired && fired.id === fx.rule && (!fx.expect?.severity || fired.severity === fx.expect.severity) && (!fx.expect?.metric || fired.evidence.metric === fx.expect.metric), fired);
     check(`${fx.rule} stays silent below its threshold or minimum n`, quiet === null, quiet);
     check(`${fx.rule} stays silent on a quiet store`, calm === null, calm);
-    check(`${fx.rule}: evidence with n, a fix link into P4's screens, a health.ops text`, !!fired && typeof fired.evidence.n === "number" && fired.fix.kind === "link" && fired.fix.href("demo").startsWith("/app/demo/") && fired.text === `${fx.rule.replace(":", ".").replace(/^ops\./, "health.ops.")}.text`, fired && { fix: fired.fix.kind === "link" ? fired.fix.href("demo") : fired.fix, text: fired.text });
+    check(`${fx.rule}: evidence with n, a fix link into P4's screens, a health.ops text`, !!fired && typeof fired.evidence.n === "number" && fired.fix.kind === "link" && fired.fix.href("demo").startsWith("/app/demo/") && fired.text === `health.ops.${fx.rule.replace(/^ops:/, "").replace(/^fin:/, "fin_")}.text`, fired && { fix: fired.fix.kind === "link" ? fired.fix.href("demo") : fired.fix, text: fired.text });
     check(`${fx.rule}: no customer field in the issue`, !!fired && !PII_TEXT.test(JSON.stringify(fired)) && !JSON.stringify(fired).match(/"(phone|name|address|email|note)"/), fired);
     check(`${fx.rule}: collect ≤ 40 ms on the in-memory facts`, ms <= 40, ms);
   }

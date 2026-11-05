@@ -1,4 +1,4 @@
-// proves: OP-01, OP-02, OP-03, OP-04, OP-06, OP-07, OP-08, OP-09, OP-10, OP-11, OP-12, OP-14, OP-16, PL-09, SF-01, SF-05, SF-11, UX-02
+// proves: OP-01, OP-02, OP-03, OP-04, OP-06, OP-07, OP-08, OP-09, OP-10, OP-11, OP-12, OP-14, OP-16, PL-09, SF-01, SF-04, SF-05, SF-11, UX-02
 /**
  * `test:ops-db` (P4 CALL CENTER; operations.md OPE-§O.2, §O.4; docs/STORE-SAAS.md §J.2): the call centre against a
  * real MariaDB. Creates a throwaway `cod_test_p4_opsdb_*` database on XAMPP's MariaDB (root, no password,
@@ -44,6 +44,13 @@
  *                equals a recompute; the ⌘K provider ≤ 120 ms, masked and agent-restricted; the calling window save
  *                writes the ops row only and sets savedAt; overrides, Open calls now, scripts (save, approve, reset)
  *                and agent profiles
+ *   finance      (SF-04, SF-05, OD52, OD56, OPS-24) an at_delivery store's delivered move writes collected and remitted
+ *                in one rev bump (never cash held), a statement store's stays collected; Mark cash received on 200
+ *                ids (201 refused, another store's id not_found, meta settlement manual); item and SKU costs on a
+ *                live page (B with A's page: not_found), history kept; carrier rates, packaging, settlement, ad
+ *                accounts, dated rates and spend cells (a day without a rate excluded and counted); the break-even
+ *                card with zero costs lists what to add, with costs a number; the KPIs and Profit lite read the
+ *                same before and after a test order; fin.alerts fires once and keeps; the fin:* health facts
  *   masking      (OD61) every read function of this step masks under an impersonation scope and is the identity
  *                under a member scope (canaries)
  */
@@ -111,7 +118,7 @@ async function main(): Promise<number> {
   const { runMigrations } = load<typeof import("@/lib/db/migrate")>("@/lib/db/migrate");
   await runMigrations();
 
-  const { and, eq: deq, sql } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const { and, eq: deq, inArray, sql } = load<typeof import("drizzle-orm")>("drizzle-orm");
   const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
   const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
   const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
@@ -1601,6 +1608,156 @@ async function main(): Promise<number> {
     ok("resetScript: back to the built-in (no active every-page fr row)", reset.ok && left.length === 0, { reset, left });
     eq("updateAgentProfile: a call taker's cap and weight", (await ST.updateAgentProfile(manager, U.agentA.id, { dailyCap: 60, weight: 3 })).ok, true);
     eq("updateAgentProfile: B's member answers not_found", (await ST.updateAgentProfile(manager, U.ownerB.id, { dailyCap: null, weight: 1 })), { ok: false, error: "not_found" });
+  }
+
+  /* ================================================================ */
+  section = "finance";
+  {
+    const FC = load<typeof import("@/lib/finance/lite/costs.server")>("@/lib/finance/lite/costs.server");
+    const FR = load<typeof import("@/lib/finance/lite/carrier.server")>("@/lib/finance/lite/carrier.server");
+    const FS = load<typeof import("@/lib/finance/lite/settings.server")>("@/lib/finance/lite/settings.server");
+    const FP = load<typeof import("@/lib/finance/lite/spend.server")>("@/lib/finance/lite/spend.server");
+    const FB = load<typeof import("@/lib/finance/lite/breakeven.server")>("@/lib/finance/lite/breakeven.server");
+    const FA = load<typeof import("@/lib/finance/lite/alerts.server")>("@/lib/finance/lite/alerts.server");
+    const FH = load<typeof import("@/lib/finance/lite/health.server")>("@/lib/finance/lite/health.server");
+    const { markCashReceived } = load<typeof import("@/lib/finance/lite/settlement.server")>("@/lib/finance/lite/settlement.server");
+    const { getFixture } = load<typeof import("@/lib/page/fixtures")>("@/lib/page/fixtures");
+    const { forgetOpsAggregates } = load<typeof import("@/lib/callcenter/aggregates")>("@/lib/callcenter/aggregates");
+    const { storeYmd, addDaysYmd } = load<typeof import("@/lib/callcenter/window")>("@/lib/callcenter/window");
+    const PR = load<typeof import("@/lib/orders/profile")>("@/lib/orders/profile");
+
+    // OD52: at_delivery (A, the default) vs statement (B, set in the writer section)
+    const door = await order(A);
+    await T.applyExternalStatus(A, door, { legacy: "shipped" }, { kind: "sheet" });
+    const doorRev = (await rowOf(door)).rev;
+    await T.applyExternalStatus(A, door, { legacy: "delivered" }, { kind: "carrier" });
+    const doorRow = await rowOf(door);
+    eq("at_delivery: delivered + collected + remitted in one rev bump", [doorRow.rev - doorRev, doorRow.shipState, doorRow.moneyState], [1, "delivered", "remitted"]);
+    const cashHeld = await db.select({ id: S.orders.id }).from(S.orders).where(and(deq(S.orders.storeId, STORE_A), deq(S.orders.shipState, "delivered"), deq(S.orders.moneyState, "collected")));
+    ok("at_delivery: never in cash held (delivered and collected)", !cashHeld.some((r) => r.id === door), cashHeld.length);
+
+    /** a sheet's Expédiée then the final label (the path the Sheets pull takes) */
+    const finish = async (scope: WriteScope, id: string, legacy: "delivered" | "refused" | "returned") => {
+      await T.applyExternalStatus(scope, id, { legacy: "shipped" }, { kind: "sheet" });
+      return T.applyExternalStatus(scope, id, { legacy }, { kind: "sheet" });
+    };
+    // Mark cash received on 200 ids of the statement store
+    const ids: string[] = [];
+    for (let i = 0; i < 200; i++) {
+      const id = await order(B);
+      await finish(B, id, "delivered");
+      ids.push(id);
+    }
+    const collectedB = async () => (await db.select({ id: S.orders.id }).from(S.orders).where(and(deq(S.orders.storeId, STORE_B), deq(S.orders.moneyState, "collected"), inArray(S.orders.id, ids)))).length;
+    eq("statement: 200 delivered orders stay collected", await collectedB(), 200);
+    eq("markCashReceived: 201 ids refused", (await markCashReceived(ownerBCtx, [...ids, "CMD-ZZZZZZ"])).ok, false);
+    eq("markCashReceived: an agent may not", (await markCashReceived(ctxOf("B", U.ownerB, "agent"), ids.slice(0, 1))).ok, false);
+    const cashT0 = Date.now();
+    const cash = await markCashReceived(ownerBCtx, ids);
+    ok("markCashReceived: 200 ids, each answered ok", cash.ok && cash.data.ok.length === 200 && cash.data.failed.length === 0, cash.ok ? cash.data.failed.slice(0, 3) : cash);
+    ok("markCashReceived: 200 ids within 30 s", Date.now() - cashT0 < 30_000, Date.now() - cashT0);
+    eq("markCashReceived: every order remitted", await collectedB(), 0);
+    const ev = (await eventsOf(ids[0]!, "state_changed")).at(-1)!;
+    eq("markCashReceived: the event (money remitted, meta settlement manual, source bulk)", [ev.toState, (ev.meta as Record<string, unknown>).settlement, (ev.meta as Record<string, unknown>).source], ["remitted", "manual", "bulk"]);
+    const across = await markCashReceived(ownerBCtx, [door]);
+    eq("markCashReceived: another store's id answers not_found", across.ok ? across.data.failed : across, [{ id: door, error: "not_found" }]);
+
+    // costs on a live page
+    const doc = getFixture("duo", { locale: "fr" }).doc;
+    const pageId = newId();
+    const versionId = newId();
+    await db.insert(S.pages).values({ id: pageId, storeId: STORE_A, slug: `fin-${pageId.slice(-6).toLowerCase()}`, name: "Argan duo", status: "published", locale: "fr", publicKey: `pk${randomBytes(10).toString("hex")}`, draft: doc, publishedVersionId: versionId });
+    await db.insert(S.pageVersions).values({ id: versionId, storeId: STORE_A, pageId, kind: "publish", doc, checksum: "0".repeat(64), runtimeV: 2 });
+    const item = doc.items[0]!;
+    eq("saveItemCost: B's owner with A's page answers not_found", await FC.saveItemCost(ownerBCtx, { pageId, itemId: item.id, costCents: 3_000 }), { ok: false, error: "not_found" });
+    eq("saveItemCost: an unknown item answers not_found", (await FC.saveItemCost(owner, { pageId, itemId: "nope-item", costCents: 3_000 })).ok, false);
+    eq("saveItemCost: a manager may not (finance.write)", await FC.saveItemCost(manager, { pageId, itemId: item.id, costCents: 3_000 }), { ok: false, error: "forbidden" });
+    eq("saveItemCost: a fractional amount refused", (await FC.saveItemCost(owner, { pageId, itemId: item.id, costCents: 30.5 })).ok, false);
+    const zero = await FB.breakEvenFor(A, { pageId });
+    ok("zero costs: the card lists what to add and carries no number", !zero.result.ok && zero.result.missing.includes("packaging") && zero.result.missing.includes("delivery_fee"), zero.result);
+    ok("saveSkuCost: a store-wide SKU cost", (await FC.saveSkuCost(owner, { sku: "arg-250", costCents: 3_800 })).ok);
+    ok("saveItemCost: the item's own cost", (await FC.saveItemCost(owner, { pageId, itemId: item.id, costCents: 4_000 })).ok);
+    ok("saveItemCost: a second change keeps the history", (await FC.saveItemCost(owner, { pageId, itemId: item.id, costCents: 4_200, note: "new supplier" })).ok);
+    eq("history kept, newest first", (await FC.costHistory(A, { pageId, itemId: item.id })).map((h) => h.costCents), [4_200, 4_000]);
+    const ov = await FC.costsOverview(A, "MAD");
+    eq("costsOverview: the item's current cost", ov.pages.find((p) => p.pageId === pageId)?.items.find((i) => i.itemId === item.id)?.costCents, 4_200);
+    eq("costsOverview in B: nothing of A", (await FC.costsOverview(B, "MAD")).pages.some((p) => p.pageId === pageId), false);
+
+    // carrier rates, packaging, settlement, ad accounts and rates
+    eq("saveCarrierRate: an unknown city refused", (await FR.saveCarrierRate(owner, { cityKey: "atlantis", deliveryFeeCents: 3_500, returnFeeCents: 2_000 })).ok, false);
+    ok("saveCarrierRate: the default row", (await FR.saveCarrierRate(owner, { cityKey: "*", deliveryFeeCents: 3_500, returnFeeCents: 2_000, codFeeBp: 100 })).ok);
+    ok("saveCarrierRate: a city row, then an update of it", (await FR.saveCarrierRate(owner, { cityKey: "fes", deliveryFeeCents: 4_000, returnFeeCents: 2_000 })).ok && (await FR.saveCarrierRate(owner, { cityKey: "fes", deliveryFeeCents: 4_500, returnFeeCents: 2_500 })).ok);
+    eq("myCarrierRates: '*' first, one row per city", (await FR.myCarrierRates(A)).map((r) => [r.cityKey, r.deliveryFeeCents]), [["*", 3_500], ["fes", 4_500]]);
+    eq("myCarrierRates in B: none of A's", (await FR.myCarrierRates(B)).length, 0);
+    ok("savePackaging", (await FS.savePackaging(owner, { packagingCents: 500 })).ok);
+    const settled = await FS.saveSettlement(owner, { settlement: "at_delivery" });
+    ok("saveSettlement: confirmedAt set now", settled.ok && !!(await getStoreSetting(A, "accounting", { fresh: true })).myCarrier.confirmedAt, settled);
+    ok("saveAdAccount: Meta billed in USD", (await FS.saveAdAccount(owner, { platform: "meta", currency: "usd" })).ok);
+    eq("saveAdRate: the store currency refused", (await FS.saveAdRate(owner, { currency: "MAD", fromDay: "2026-10-01", rateMilli: 1_000 })).ok, false);
+    const today = storeYmd(new Date(), "Africa/Casablanca");
+    ok("saveAdSpendCell: a USD cell without a rate yet", (await FP.saveAdSpendCell(owner, { platform: "meta", day: today, spendCents: 10_000 })).ok);
+    eq("saveAdSpendCell: a future day refused", (await FP.saveAdSpendCell(owner, { platform: "meta", day: addDaysYmd(today, 1), spendCents: 1 })).ok, false);
+    const noRate = await FP.spendBetween(A, addDaysYmd(today, -27), today);
+    eq("a day without a rate is excluded and counted", [noRate.cents, noRate.missingRates, noRate.missingDays], [0, 1, [today]]);
+    ok("saveAdRate: 1 USD = 9.85 MAD from 28 days ago", (await FS.saveAdRate(owner, { currency: "usd", fromDay: addDaysYmd(today, -28), rateMilli: 9_850 })).ok);
+    ok("saveAdSpendCell: a MAD cell on TikTok", (await FP.saveAdSpendCell(owner, { platform: "tiktok", day: today, spendCents: 20_000 })).ok);
+    const withRate = await FP.spendBetween(A, addDaysYmd(today, -27), today);
+    eq("converted at the owner's rate", [withRate.cents, withRate.missingRates], [98_500 + 20_000, 0]);
+    const grid = await FP.adSpendGrid(A, 14);
+    eq("the grid: 14 days, today first, Meta billed in USD, the converted total", [grid.days.length, grid.days[0]?.day, grid.accounts.meta, grid.days[0]?.totalStoreCents, grid.daysNotCounted], [14, today, "USD", 118_500, 0]);
+    eq("the grid in B: empty", (await FP.adSpendGrid(B, 14)).days.every((d) => d.cells.every((c) => c.spendCents === null)), true);
+    ok("saveAdSpendCell: 0 clears the cell", (await FP.saveAdSpendCell(owner, { platform: "tiktok", day: today, spendCents: 0 })).ok && (await FP.spendBetween(A, today, today)).cents === 98_500);
+    const finAudits = await db.select({ action: S.auditLog.action }).from(S.auditLog).where(and(deq(S.auditLog.storeId, STORE_A), deq(S.auditLog.action, "finance.settings.updated")));
+    ok("the accounting writes are audited finance.settings.updated", finAudits.length >= 4, finAudits.length);
+
+    // the break-even card with costs on 30 delivered and 4 returned orders of this page
+    async function orderOnPage(pid: string, itemId: string): Promise<string> {
+      const id = await order(A);
+      await db
+        .update(S.orders)
+        .set({ pageId: pid, items: { v: 2, bundleId: "duo", bundleLabel: "1", qty: 1, unitPrice: 249.9, variants: [{}], units: [{ item: itemId, label: "", options: [] }] } })
+        .where(deq(S.orders.id, id));
+      return id;
+    }
+    for (let i = 0; i < 36; i++) {
+      const id = await orderOnPage(pageId, item.id);
+      if (i < 34) await finish(A, id, i < 30 ? "delivered" : "returned");
+      else await T.applyExternalStatus(A, id, { legacy: "cancelled" }, { kind: "sheet" });
+    }
+    forgetOpsAggregates(A);
+    const card = await FB.breakEvenFor(A, { pageId });
+    ok("with costs and n ≥ 30: a number inside its interval", card.result.ok && card.result.interval.lowCents <= card.result.ePlacedCents && card.result.ePlacedCents <= card.result.interval.highCents, card.result);
+    eq("the CPA is store-level with the converted spend", [card.cpa.spendCents, card.cpa.placedCents !== null], [98_500, true]);
+
+    // SF-05: the KPIs and Profit lite read the same before and after a test order
+    const snap = async () => {
+      forgetOpsAggregates(A);
+      const be = await FB.breakEvenFor(A);
+      const k = await PR.orderKpis(A, "28d");
+      return JSON.stringify([be.counts, be.result, be.cpa, be.byAngle, be.outcomesAsOf, k]);
+    };
+    const snapBefore = await snap();
+    const testId = await order(A, { test: true });
+    await finish(A, testId, "delivered");
+    eq("SF-05: Profit lite and the KPIs read the same after a delivered test order", await snap(), snapBefore);
+
+    // fin.alerts: a refusal spike fires once, then is kept
+    const spikeIds: string[] = [];
+    for (let i = 0; i < 20; i++) spikeIds.push(await order(A, { city: "Tanger" }));
+    for (const [i, id] of spikeIds.entries()) await finish(A, id, i < 12 ? "refused" : "delivered");
+    const first = await FA.runFinAlerts(A, rowA);
+    const second = await FA.runFinAlerts(A, rowA);
+    const openRows = await db.select().from(S.profitAlerts).where(and(deq(S.profitAlerts.storeId, STORE_A), sql`${S.profitAlerts.clearedAt} IS NULL`));
+    ok("fin.alerts: fires once and keeps on the next run", first.fired >= 1 && second.fired === 0 && second.kept === first.fired, { first, second });
+    ok("fin.alerts: the open rows carry their evidence with n", openRows.length === first.fired && openRows.every((r) => typeof (r.evidence as Record<string, number>).n === "number"), openRows.map((r) => [r.kind, r.key]));
+    const notes = await db.select({ kind: S.notifications.kind }).from(S.notifications).where(and(deq(S.notifications.storeId, STORE_A), deq(S.notifications.kind, "fin.profit_alert")));
+    ok("fin.alerts: one notification per firing", notes.length === first.fired, notes.length);
+    eq("fin.alerts in B: nothing fires from A's orders", (await FA.runFinAlerts(B, rowB)).fired, 0);
+
+    // the fin:* health facts
+    FH.forgetFinHealthFacts(A);
+    const facts = await FH.finHealthFacts(A);
+    eq("finHealthFacts: on, settlement confirmed, no rate missing", [facts.on, facts.settlementConfirmed, facts.adRateMissingDays], [true, true, 0]);
   }
 
   /* ================================================================ */

@@ -40,6 +40,10 @@
  *     owner count B's rows only and carry no canary of A; mapping in B a label A's orders carry touches no order of A;
  *     GET /ops/state on B's address carries nothing of A and on A's address is refused
  *   - `actions`: the team/agents and team/callcenter actions, saveCallingWindowAction and openTestOrderAction
+ * Step 8 (Profit lite) adds:
+ *   - saveItemCost on A's page, markCashReceived with A's order, breakEvenFor and costHistory of A's page as B's
+ *     owner: the answers of missing ids; B's costs overview, carrier rates, ad-spend grid and card carry nothing of A
+ *   - `actions`: the nine actions of src/app/app/[store]/finance/actions.ts
  * Modules are loaded inside the cases (the harness has set the environment by then): this file imports types only.
  */
 import Module from "node:module";
@@ -535,6 +539,36 @@ export const cases: TenancyCase[] = [
       await db.update(S.orders).set({ confirmedByLabel: null }).where(eq(S.orders.id, kit.fx.A.order.main));
     },
   },
+  {
+    name: "ops finance: B's owner saves Profit lite costs on A's page, marks A's cash, and reads none of A's figures",
+    async run(kit) {
+      await seedOnce(kit);
+      const FC = load<typeof import("@/lib/finance/lite/costs.server")>("@/lib/finance/lite/costs.server");
+      const FB = load<typeof import("@/lib/finance/lite/breakeven.server")>("@/lib/finance/lite/breakeven.server");
+      const FR = load<typeof import("@/lib/finance/lite/carrier.server")>("@/lib/finance/lite/carrier.server");
+      const FP = load<typeof import("@/lib/finance/lite/spend.server")>("@/lib/finance/lite/spend.server");
+      const { markCashReceived } = load<typeof import("@/lib/finance/lite/settlement.server")>("@/lib/finance/lite/settlement.server");
+      const before = await kit.snapshotA();
+      const real = { page: kit.fx.A.page.live, order: kit.fx.A.order.main };
+      const ghost = { page: kit.ghostify(kit.fx.A.page.live), order: kit.ghostify(kit.fx.A.order.main) };
+      const attacks: [string, (x: typeof real) => ReturnType<typeof asBOwner>][] = [
+        ["saveItemCost(B, A's page)", (x) => asBOwner(kit, (_c, w) => FC.saveItemCost(w, { pageId: x.page, itemId: "main", costCents: 1_000 }))],
+        ["breakEvenFor(B, A's page)", (x) => asBOwner(kit, (c) => FB.breakEvenFor(c.scope, { pageId: x.page }))],
+        ["costHistory(B, A's page)", (x) => asBOwner(kit, (c) => FC.costHistory(c.scope, { pageId: x.page, itemId: "main" }))],
+      ];
+      for (const [label, fn] of attacks) await same(kit, label, await fn(real), await fn(ghost));
+      // Mark cash received with A's order: answered per id (the id sent comes back), not_found like a missing one
+      const cash = await asBOwner(kit, (_c, w) => markCashReceived(w, [real.order, ghost.order]));
+      if (kit.ranReal("markCashReceived(B, A's order)", cash)) {
+        const v = cash.ok ? (cash.value as { ok: boolean; data?: { ok: string[]; failed: { id: string; error: string }[] } }) : null;
+        kit.check("markCashReceived(B, A's order): not_found per id, like a missing one", !!v?.ok && v.data!.ok.length === 0 && v.data!.failed.length === 2 && v.data!.failed.every((f) => f.error === "not_found"), answer(cash));
+        kit.check("markCashReceived(B, A's order): no canary of A", kit.leaks(answer(cash), { sent: [real.order, ghost.order] }).length === 0, kit.leaks(answer(cash), { sent: [real.order, ghost.order] }));
+      }
+      const reads = await asBOwner(kit, async (c) => ({ costs: await FC.costsOverview(c.scope, "MAD"), rates: await FR.myCarrierRates(c.scope), grid: await FP.adSpendGrid(c.scope, 14), card: await FB.breakEvenFor(c.scope) }));
+      kit.check("Profit lite reads in B carry nothing of A (pages, rates, grid, card)", reads.ok && !JSON.stringify(answer(reads)).includes(kit.fx.A.page.live) && kit.leaks(answer(reads)).length === 0, answer(reads));
+      kit.check("ops finance: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -547,6 +581,7 @@ const CUSTOMERS = "src/app/app/[store]/customers/actions.ts";
 const AGENTS = "src/app/app/[store]/team/agents/actions.ts";
 const CALLCENTER = "src/app/app/[store]/team/callcenter/actions.ts";
 const WINDOW = "src/lib/callcenter/window-actions.ts";
+const FINANCE = "src/app/app/[store]/finance/actions.ts";
 /** a calling week in the ISO shape (OD57) */
 const WEEK = { 1: [{ from: "09:00", to: "19:00" }], 2: [{ from: "09:00", to: "19:00" }], 3: [{ from: "09:00", to: "19:00" }], 4: [{ from: "09:00", to: "19:00" }], 5: [{ from: "09:00", to: "12:00" }], 6: [{ from: "10:00", to: "16:00" }], 7: [] };
 const SCRIPT = { v: 1, steps: [{ id: "hello", title: "Bonjour", say: "Bonjour {customer_first_name}" }] };
@@ -674,4 +709,13 @@ export const actions: TrackActionCase[] = [
   { file: CALLCENTER, name: "approveScriptDraftAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: async (fx) => [await draftOf(fx.A.id)], own: async (fx) => [await draftOf(fx.B.id)] },
   { file: WINDOW, name: "saveCallingWindowAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: () => [{ days: WEEK }], own: () => [{ days: WEEK, closedDates: ["2026-12-25"] }] },
   { file: ORDERS, name: "openTestOrderAction", area: "pages", path: "/orders", permission: ["pages.publish"], write: true, victim: () => [], own: () => [] },
+  { file: FINANCE, name: "saveItemCostAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: (fx) => [{ pageId: fx.A.page.live, itemId: "main", costCents: 1_000 }], own: (fx) => [{ pageId: fx.B.page.live, itemId: "main", costCents: 3_800 }] },
+  { file: FINANCE, name: "saveSkuCostAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: () => [{ sku: "PWN-1", costCents: 1 }], own: () => [{ sku: "ARG-250", costCents: 3_800 }] },
+  { file: FINANCE, name: "saveCarrierRateAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: () => [{ cityKey: "*", deliveryFeeCents: 1, returnFeeCents: 1 }], own: () => [{ cityKey: "*", deliveryFeeCents: 3_500, returnFeeCents: 2_000 }] },
+  { file: FINANCE, name: "saveAdSpendCellAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: () => [{ platform: "meta", day: new Date().toISOString().slice(0, 10), spendCents: 1 }], own: () => [{ platform: "meta", day: new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10), spendCents: 10_000 }] },
+  { file: FINANCE, name: "savePackagingAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: () => [{ packagingCents: 1 }], own: () => [{ packagingCents: 500 }] },
+  { file: FINANCE, name: "saveSettlementAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: () => [{ settlement: "statement" }], own: () => [{ settlement: "at_delivery" }] },
+  { file: FINANCE, name: "saveAdAccountAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: () => [{ platform: "meta", currency: "EUR" }], own: () => [{ platform: "meta", currency: "USD" }] },
+  { file: FINANCE, name: "saveAdRateAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: () => [{ currency: "EUR", fromDay: "2026-10-01", rateMilli: 1 }], own: () => [{ currency: "USD", fromDay: "2026-10-01", rateMilli: 9_850 }] },
+  { file: FINANCE, name: "markCashReceivedAction", area: "orders", path: "/finance", permission: ["finance.write"], write: true, victim: (fx) => [[fx.A.order.main]], own: async (fx, fresh) => [[await fresh.order(fx.B)]] },
 ];

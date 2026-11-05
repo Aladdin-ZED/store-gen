@@ -198,6 +198,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "ops.tl.detail.dueAt": "Rappeler {at}",
   "ops.tl.detail.shipAfter": "Expédier à partir du {at}",
   "ops.tl.detail.atDelivery": "Argent reçu à la porte",
+  "ops.tl.detail.cashMarked": "Marqué comme argent reçu",
   "ops.tl.detail.duplicateOf": "Doublon de {id}",
   "ops.tl.detail.inbound": "Le client a appelé",
   "ops.tl.detail.reason": "Motif : {text}",

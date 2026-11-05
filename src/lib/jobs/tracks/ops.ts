@@ -4,8 +4,7 @@
  * `forEachStore` (round-robin cursor, a store's failure skips only that store), checks `ctx.deadline`, awaits
  * `ctx.yield()` between stores and never moves an order state (OD8: leases expire by comparison, ladders are computed
  * at the outcome, the queue on read). Budgets are slices of the core's slots: 1 s of slot 7 for the presence sweep,
- * 2 s and 1.5 s of slot 6 for the two nightly jobs (≤ 2 daily jobs per tick); `fin.alerts` joins with the finance
- * step.
+ * 2 s, 1.5 s and 1.5 s of slot 6 for the three nightly jobs (≤ 2 daily jobs per tick).
  *
  *   ops.presence             every tick (slot 7): per store, agents still "online" or on "break" whose heartbeat is
  *                            silent for 15 min go offline and their claim is released (`released`, why "break", actor
@@ -21,6 +20,9 @@
  *                            then the risk calibration cache (`ops-risk-cal`) of that store is dropped
  *   ops.customers_reconcile  daily 03:10 (slot 6): the customers' counters, ≤ 5,000 per store per night, the drift
  *                            summed into `job_runs.summary`
+ *   fin.alerts               daily 04:00 (slot 6): Profit lite's three alerts (src/lib/finance/lite/alerts.server.ts)
+ *                            for the stores with `finance_lite` on, the hysteresis over `profit_alerts`, one
+ *                            `fin.profit_alert` per firing and the Telegram item when the store wants it
  */
 import { eq, gt, isNotNull, isNull, lt, lte, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -31,6 +33,8 @@ import { rollupAgentStats } from "@/lib/callcenter/kpis.server";
 import { opsNow, releaseClaims, writePresence } from "@/lib/callcenter/presence";
 import { windowMinutesBetween } from "@/lib/callcenter/window";
 import { callingWindowFor } from "@/lib/callcenter/window.server";
+import { runFinAlerts } from "@/lib/finance/lite/alerts.server";
+import { financeLiteOn } from "@/lib/finance/lite/flag.server";
 import { reconcileCustomers } from "@/lib/orders/customers";
 import { logError } from "@/lib/orders/log";
 import { notify } from "@/lib/platform/notify";
@@ -172,4 +176,32 @@ const reconcileJob: Job = {
   },
 };
 
-export const jobs: Job[] = [presenceJob, rollupJob, reconcileJob];
+const finAlertsJob: Job = {
+  name: "fin.alerts",
+  every: { dailyAt: "04:00" },
+  budgetMs: 1_500,
+  async run(ctx) {
+    const sum = { stores: 0, fired: 0, kept: 0, cleared: 0, off: 0 };
+    const r = await forEachStore(ctx, { job: "fin.alerts", states: ["active", "restricted"], budgetMs: timeLeft(ctx, 1_500) }, async (_scope, store) => {
+      if (Date.now() >= ctx.deadline) return;
+      const scope = systemScope(ctx, store.id);
+      try {
+        if (!(await financeLiteOn(scope))) {
+          sum.off++;
+          return;
+        }
+        const res = await runFinAlerts(scope, store);
+        sum.stores++;
+        sum.fired += res.fired;
+        sum.kept += res.kept;
+        sum.cleared += res.cleared;
+      } catch (err) {
+        logError("fin:alerts", err);
+      }
+      await ctx.yield();
+    });
+    return { done: r.done, summary: sum };
+  },
+};
+
+export const jobs: Job[] = [presenceJob, rollupJob, reconcileJob, finAlertsJob];

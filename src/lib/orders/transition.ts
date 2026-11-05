@@ -401,6 +401,8 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
     }
     if (m.axis === "ship" && m.to === "postponed" && set.shipAfter !== undefined) meta.shipAfter = set.shipAfter instanceof Date ? set.shipAfter.toISOString() : null;
     if (m.axis === "money" && m.to === "remitted" && m.auto && plan.flags.settledAtDelivery) meta.settlement = "at_delivery";
+    // "Mark cash received" (OD52): a person's collected → remitted, from the drawer or the bulk bar
+    else if (m.axis === "money" && m.to === "remitted" && !m.auto && own && actor.kind === "user" && (input.source === "ui" || input.source === "bulk")) meta.settlement = "manual";
     if (own && input.inbound) meta.inbound = true;
     if (own && job.external?.ref) meta.ref = job.external.ref.slice(0, 80);
     const reasonCode = m.auto ? null : m.axis === "ship" && (m.to === "refused" || m.to === "returned" || m.to === "lost") ? (input.returnReason ?? null) : m.axis === "confirm" ? (coded ?? null) : null;

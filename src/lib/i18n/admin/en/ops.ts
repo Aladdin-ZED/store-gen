@@ -197,6 +197,7 @@ export const messages = {
   "ops.tl.detail.dueAt": "Call back {at}",
   "ops.tl.detail.shipAfter": "Ship from {at}",
   "ops.tl.detail.atDelivery": "Cash taken at the door",
+  "ops.tl.detail.cashMarked": "Marked as cash received",
   "ops.tl.detail.duplicateOf": "Duplicate of {id}",
   "ops.tl.detail.inbound": "The customer called",
   "ops.tl.detail.reason": "Reason: {text}",

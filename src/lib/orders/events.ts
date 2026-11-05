@@ -112,7 +112,8 @@ export const ORDER_EVENT_META = {
     auto: z.literal(true).optional(),
     dueAt: ISO.optional(),
     duplicateOf: ORDER_ID.optional(),
-    settlement: z.literal("at_delivery").optional(),
+    /** OD52: "at_delivery" = cash at the door (auto); "manual" = Mark cash received */
+    settlement: z.enum(["at_delivery", "manual"]).optional(),
     collectedCents: z.number().int().min(0).optional(),
     shipAfter: ISO.nullable().optional(),
     inbound: z.literal(true).optional(),
@@ -405,6 +406,7 @@ function describe(scope: StoreScope, e: EventRow, country: string, note: { text:
       if (typeof m.dueAt === "string") detail.push({ key: "ops.tl.detail.dueAt", vars: { at: m.dueAt } });
       if (typeof m.shipAfter === "string") detail.push({ key: "ops.tl.detail.shipAfter", vars: { at: m.shipAfter } });
       if (m.settlement === "at_delivery") detail.push({ key: "ops.tl.detail.atDelivery" });
+      else if (m.settlement === "manual") detail.push({ key: "ops.tl.detail.cashMarked" });
       if (typeof m.duplicateOf === "string") detail.push({ key: "ops.tl.detail.duplicateOf", vars: { id: m.duplicateOf } });
       if (m.inbound) detail.push({ key: "ops.tl.detail.inbound" });
       if (e.note) detail.push({ key: "ops.tl.detail.reason", vars: { text: shownText(scope, e.note, country) } });

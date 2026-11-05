@@ -6,8 +6,9 @@
  * Every rule is a pure function of `OpsHealthFacts` (src/lib/callcenter/health.server.ts: counts and `Kpi`s of the
  * store, never a customer field): `collect` reads `inputs.ops` when P1's inputs carry it (CCR r1-p4-7), else loads the
  * facts once per store (cached 60 s, the ten rules share the pass), ≤ 40 ms warm, read-only, scoped. A rule is silent
- * below its minimum n and when the facts are unavailable. The R2 rules (`ops:reveals`, `ops:cash_held`) and the
- * finance-lite `fin:*` rules come with their steps.
+ * below its minimum n and when the facts are unavailable. The R2 rules (`ops:reveals`, `ops:cash_held`) come with
+ * their steps. The Profit lite rules (`fin:*`, flag `finance_lite`, silent when it is off) read `FinHealthFacts`
+ * (src/lib/finance/lite/health.server.ts) the same way: `inputs.fin` when given, else one cached read.
  *
  *   ops:first_touch            2  first-touch p50 (28 d) above the store's target, n ≥ 30          /team/callcenter
  *   ops:untouched              3  ≥ 1 order older than 2 h of window time without an attempt        /queue/board
@@ -19,8 +20,13 @@
  *   ops:hold_passed            2  ≥ 1 hold whose date passed > 48 h ago, still to pack              /orders?view=to-pack
  *   ops:delivery_rescue        2  ≥ 3 in the delivery lane > 4 window hours without a rescue call   /queue/board
  *   ops:sheet_agents_unmapped  1  ≥ 1 sheet label with ≥ 20 confirmations (28 d), no member         /integrations/sheets#agents
+ *   fin:costs_missing          1  ≥ 1 SKU of a live page with orders (28 d) without a cost           /finance?tab=costs
+ *   fin:settlement_check       1  ≥ 20 delivered orders and "Who holds the cash?" never answered     /finance?tab=costs#carrier
+ *   fin:fee_gap                1  a top-5 city charges ≥ 10 units below the carrier rate (n ≥ 10)   /finance?tab=costs#carrier
+ *   fin:ad_rate_missing        1  ≥ 1 foreign-currency ad-spend day without a rate (14 d)           /finance?tab=ads
  */
 import type { OpsHealthFacts } from "@/lib/callcenter/health.server";
+import type { FinHealthFacts } from "@/lib/finance/lite/health.server";
 import type { Kpi } from "@/lib/orders/profile";
 import type { StoreScope } from "@/lib/tenancy/types";
 import { appHref } from "@/lib/urls";
@@ -29,8 +35,8 @@ import type { HealthEvidence, HealthInputs, HealthIssue, HealthRule, HealthRuleF
 type Severity = 1 | 2 | 3;
 const POINTS: Record<Severity, 3 | 6 | 10> = { 1: 3, 2: 6, 3: 10 };
 
-/** HealthInputs once CCR r1-p4-7 lands: the ops facts beside P1's fields */
-type WithOps = HealthInputs & { ops?: OpsHealthFacts | null };
+/** HealthInputs once CCR r1-p4-7 lands: the ops (and Profit lite) facts beside P1's fields */
+type WithOps = HealthInputs & { ops?: OpsHealthFacts | null; fin?: FinHealthFacts | null };
 
 /** The facts of this store: P1's inputs when they carry them, else one cached read; null = unavailable (silent). */
 async function factsOf(scope: StoreScope, inputs: HealthInputs): Promise<OpsHealthFacts | null> {
@@ -44,17 +50,29 @@ async function factsOf(scope: StoreScope, inputs: HealthInputs): Promise<OpsHeal
   }
 }
 
+/** The Profit lite facts: given, else one cached read; null = unavailable; `on: false` = the flag is off (silent). */
+async function finFactsOf(scope: StoreScope, inputs: HealthInputs): Promise<FinHealthFacts | null> {
+  const given = (inputs as WithOps).fin;
+  if (given !== undefined) return given;
+  try {
+    const { finHealthFacts } = await import("@/lib/finance/lite/health.server");
+    return await finHealthFacts(scope);
+  } catch {
+    return null;
+  }
+}
+
 const valueOf = (k: Kpi): number | null => ("insufficient" in k ? null : k.value);
 
-function issue(rule: string, severity: Severity, evidence: HealthEvidence, path: `/${string}`): HealthIssue {
+function issue(rule: string, severity: Severity, evidence: HealthEvidence, path: `/${string}`, prefix: "ops" | "fin" = "ops"): HealthIssue {
   return {
-    id: `ops:${rule}`,
+    id: `${prefix}:${rule}`,
     group: "operations",
     severity,
     points: POINTS[severity],
     evidence,
-    fix: { kind: "link", href: (handle) => appHref(handle, path), label: `health.ops.${rule}.fix` },
-    text: `health.ops.${rule}.text`,
+    fix: { kind: "link", href: (handle) => appHref(handle, path), label: prefix === "ops" ? `health.ops.${rule}.fix` : `health.ops.fin_${rule}.fix` },
+    text: prefix === "ops" ? `health.ops.${rule}.text` : `health.ops.fin_${rule}.text`,
   };
 }
 
@@ -68,6 +86,20 @@ function rule(id: string, minN: number | undefined, check: (f: OpsHealthFacts) =
     collect: async (scope, inputs) => {
       const f = await factsOf(scope, inputs);
       return f ? check(f) : null;
+    },
+  };
+}
+
+/** One Profit lite rule: silent when the flag is off or the facts are unavailable. */
+function finRule(id: string, minN: number | undefined, check: (f: FinHealthFacts) => HealthIssue | null): HealthRule {
+  return {
+    id: `fin:${id}`,
+    group: "operations",
+    ...(minN === undefined ? {} : { minN }),
+    release: "R1",
+    collect: async (scope, inputs) => {
+      const f = await finFactsOf(scope, inputs);
+      return f && f.on ? check(f) : null;
     },
   };
 }
@@ -113,6 +145,20 @@ export const rules: HealthRule[] = [
   rule("sheet_agents_unmapped", 20, (f) =>
     f.unmappedLabels20 >= 1 ? issue("sheet_agents_unmapped", 1, { metric: "sheet_labels_unmapped", value: f.unmappedLabels20, window: "28d", n: f.unmappedLabels20 }, "/integrations/sheets#agents") : null,
   ),
+  finRule("costs_missing", undefined, (f) =>
+    f.uncostedSkus >= 1 ? issue("costs_missing", 1, { metric: "skus_without_cost", value: f.uncostedSkus, window: "28d", n: f.uncostedSkus }, "/finance?tab=costs", "fin") : null,
+  ),
+  finRule("settlement_check", 20, (f) =>
+    f.delivered >= 20 && !f.settlementConfirmed
+      ? issue("settlement_check", 1, { metric: "delivered_unconfirmed_settlement", value: f.delivered, baseline: 20, window: "all", n: f.delivered }, "/finance?tab=costs#carrier", "fin")
+      : null,
+  ),
+  finRule("fee_gap", undefined, (f) =>
+    f.feeGaps >= 1 ? issue("fee_gap", 1, { metric: "fee_gap_cities", value: f.feeGaps, baseline: Math.round(f.worstGapCents) / 100, window: "28d", n: f.feeGaps }, "/finance?tab=costs#carrier", "fin") : null,
+  ),
+  finRule("ad_rate_missing", undefined, (f) =>
+    f.adRateMissingDays >= 1 ? issue("ad_rate_missing", 1, { metric: "ad_days_without_rate", value: f.adRateMissingDays, window: "14d", n: f.adRateMissingDays }, "/finance?tab=ads", "fin") : null,
+  ),
 ];
 
 /* ------------------------------------------------------------------ */
@@ -140,10 +186,20 @@ export const QUIET_FACTS: OpsHealthFacts = {
   unmappedLabels20: 0,
 };
 
+/** A quiet Profit lite: every fin rule silent. */
+export const QUIET_FIN: FinHealthFacts = { on: true, uncostedSkus: 0, delivered: 0, settlementConfirmed: true, feeGaps: 0, worstGapCents: 0, adRateMissingDays: 0 };
+
 /** P1's base inputs with the ops facts beside them (the CCR r1-p4-7 field). */
 export function withOps(patch: Partial<OpsHealthFacts>): Partial<HealthInputs> {
   const out: Partial<HealthInputs> = {};
-  Object.assign(out, { ops: { ...QUIET_FACTS, ...patch } });
+  Object.assign(out, { ops: { ...QUIET_FACTS, ...patch }, fin: QUIET_FIN });
+  return out;
+}
+
+/** The Profit lite facts beside P1's base inputs (quiet ops facts too). */
+export function withFin(patch: Partial<FinHealthFacts>): Partial<HealthInputs> {
+  const out: Partial<HealthInputs> = {};
+  Object.assign(out, { ops: QUIET_FACTS, fin: { ...QUIET_FIN, ...patch } });
   return out;
 }
 
@@ -163,4 +219,8 @@ export const fixtures: HealthRuleFixture[] = [
   { rule: "ops:hold_passed", fires: withOps({ holdPassed48h: 1 }), silent: withOps({ holdPassed48h: 0 }), expect: { severity: 2, metric: "hold_passed_48h" } },
   { rule: "ops:delivery_rescue", fires: withOps({ rescueWaiting4h: 3 }), silent: withOps({ rescueWaiting4h: 2 }), expect: { severity: 2, metric: "rescue_waiting_4h" } },
   { rule: "ops:sheet_agents_unmapped", fires: withOps({ unmappedLabels20: 2 }), silent: withOps({ unmappedLabels20: 0 }), expect: { severity: 1, metric: "sheet_labels_unmapped" } },
+  { rule: "fin:costs_missing", fires: withFin({ uncostedSkus: 2 }), silent: withFin({ uncostedSkus: 2, on: false }), expect: { severity: 1, metric: "skus_without_cost" } },
+  { rule: "fin:settlement_check", fires: withFin({ delivered: 20, settlementConfirmed: false }), silent: withFin({ delivered: 19, settlementConfirmed: false }), expect: { severity: 1, metric: "delivered_unconfirmed_settlement" } },
+  { rule: "fin:fee_gap", fires: withFin({ feeGaps: 1, worstGapCents: 1_500 }), silent: withFin({ feeGaps: 0 }), expect: { severity: 1, metric: "fee_gap_cities" } },
+  { rule: "fin:ad_rate_missing", fires: withFin({ adRateMissingDays: 3 }), silent: withFin({ adRateMissingDays: 0 }), expect: { severity: 1, metric: "ad_days_without_rate" } },
 ];
