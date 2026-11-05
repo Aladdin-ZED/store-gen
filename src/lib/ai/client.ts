@@ -10,6 +10,7 @@
  *   await ai.analyze(photos)           → Analysis                    (Qwen3.5, needs WebGPU)
  *   await ai.writeCopy(copyRequest)    → { locale, copy: AiCopy }    (validate + merge with mergeAiCopy)
  *   await ai.removeBackground(photo)   → trimmed WebP Blob with alpha
+ *   await ai.rewrite(fieldRewriteInput) → { variants }  (AI-05: 3 strings ≤ the field's max; run copy.field's finalize)
  *   ai.cancel()                        rejects every running job with AiError("CANCELLED")
  *   await getAi().cacheStats()         → { total, byRepo } bytes in this browser's model cache
  *   await getAi().clearCache()         cancel + release + delete the model cache
@@ -18,6 +19,11 @@
  * keep their place in the worker's queue).
  *
  * Errors are AiError with a stable `code` ("NO_WEBGPU", "OOM", "CANCELLED", "MODEL_LOAD"…).
+ *
+ * R1 (P7 AI; ai.md AI-§A.6, GEN-13): `configure({ workerName })` names the worker after the platform's brand
+ * (`policy.workerName`; "cod-studio-ai" when no policy is passed); `rewrite` is worker v2's field rewrite job; the
+ * router's local provider (src/lib/ai/provider/local.ts) adapts this manager to the ladder without changing it, and
+ * `cancelStoreAiJobs` (src/lib/ai/router/client.ts) calls `cancel()` + `release()` on a store switch and at sign-out.
  */
 import { useEffect, useSyncExternalStore } from "react";
 import type { Analysis, AiCopy } from "./copy-schema";
@@ -25,6 +31,7 @@ import { detectCapabilities, requestPersistentStorage, type AiCapabilities } fro
 import { AiError, type AiErrorCode, type AiStage, type AiTier, type ClassifyResult, type FromWorker, type ToWorker, type WorkerTask } from "./protocol";
 import { AI_CACHE_NAME, repoOfCacheUrl } from "./models";
 import type { CopyLocale } from "./prompts";
+import type { FieldRewriteInput, FieldRewriteOut } from "./schema/tasks/copy-field";
 
 export { AiError, type AiErrorCode, type AiStage, type AiTier, type ClassifyResult } from "./protocol";
 export { AI_CACHE_NAME, AI_MODELS, AI_MODEL_REPOS, AI_RUNTIME_BUCKET } from "./models";
@@ -48,7 +55,12 @@ export interface AiClientSettings {
   enabled: boolean;
   /** highest tier the admin allows (the device may still get "lite" or "off") */
   maxTier: Exclude<AiTier, "off">;
+  /** GEN-13: the worker's name (`policy.workerName`); today's name when absent */
+  workerName?: string;
 }
+
+/** The worker's name before GEN-13 (an old caller without a policy keeps it). */
+export const DEFAULT_WORKER_NAME = "cod-studio-ai";
 
 export interface AiState {
   status: AiStatus;
@@ -111,8 +123,18 @@ class AiManager {
 
   /* ---- setup ---- */
 
+  /** the name the next worker gets (GEN-13) */
+  get workerName(): string {
+    return this.settings.workerName?.trim() || DEFAULT_WORKER_NAME;
+  }
+
   configure(settings: Partial<AiClientSettings>) {
     const next = { ...this.settings, ...settings };
+    // a new name applies to the next worker; an idle one is replaced now (a running job keeps its worker)
+    if (next.workerName !== this.settings.workerName && this.worker && this.pending.size === 0) {
+      this.worker.terminate();
+      this.worker = null;
+    }
     const changed = next.enabled !== this.settings.enabled || next.maxTier !== this.settings.maxTier;
     this.settings = next;
     this.set({ enabled: next.enabled });
@@ -135,7 +157,7 @@ class AiManager {
 
   private ensureWorker(caps: AiCapabilities): Worker {
     if (this.worker) return this.worker;
-    const worker = new Worker(new URL("./worker/ai.worker.ts", import.meta.url), { type: "module", name: "cod-studio-ai" });
+    const worker = new Worker(new URL("./worker/ai.worker.ts", import.meta.url), { type: "module", name: this.settings.workerName?.trim() || DEFAULT_WORKER_NAME });
     worker.onmessage = (e: MessageEvent<FromWorker>) => this.onMessage(e.data);
     worker.onerror = (e) => {
       e.preventDefault();
@@ -189,7 +211,7 @@ class AiManager {
     if (typeof window === "undefined") throw new AiError("UNKNOWN", "The local AI runs in the browser only.");
     if (!this.settings.enabled) throw new AiError("DISABLED", "Local AI is switched off in Settings.");
     const caps = await this.capabilities();
-    if ((task.task === "analyze" || task.task === "copy") && caps.tier === "off") {
+    if ((task.task === "analyze" || task.task === "copy" || task.task === "rewrite") && caps.tier === "off") {
       throw new AiError("NO_WEBGPU", caps.note ?? "This device cannot run the local language model.");
     }
     const { signal } = opts;
@@ -230,6 +252,8 @@ class AiManager {
   /** `input` is a CopyRequest (validated in the worker); result must go through mergeAiCopy */
   writeCopy = (input: unknown, opts?: AiRunOptions) => this.run<AiCopyResult>({ task: "copy", input: input as never }, opts);
   removeBackground = (image: Blob, opts?: AiRunOptions) => this.run<Blob>({ task: "removeBackground", image }, opts);
+  /** AI-05: three rewrites of one field (validated in the worker; the caller runs copy.field's finalize on them) */
+  rewrite = (input: FieldRewriteInput, opts?: AiRunOptions) => this.run<FieldRewriteOut>({ task: "rewrite", input }, opts);
 
   cancel = () => {
     for (const id of this.pending.keys()) this.worker?.postMessage({ type: "cancel", id } satisfies ToWorker);
@@ -288,6 +312,11 @@ export function getAi(): AiManager {
   return manager;
 }
 
+/** The manager when one exists (a store switch must not create one just to cancel nothing). */
+export function peekAi(): AiManager | null {
+  return manager;
+}
+
 const SERVER_STATE: AiState = { status: "idle", capabilities: null, progress: null, error: null, enabled: true };
 
 export interface UseAi extends AiState {
@@ -296,6 +325,7 @@ export interface UseAi extends AiState {
   analyze: (images: Blob[], opts?: AiRunOptions) => Promise<Analysis>;
   writeCopy: (input: unknown, opts?: AiRunOptions) => Promise<AiCopyResult>;
   removeBackground: (image: Blob, opts?: AiRunOptions) => Promise<Blob>;
+  rewrite: (input: FieldRewriteInput, opts?: AiRunOptions) => Promise<FieldRewriteOut>;
   cancel: () => void;
 }
 
@@ -308,16 +338,18 @@ export function useAi(settings?: Partial<AiClientSettings>): UseAi {
   const state = useSyncExternalStore(ai.subscribe, ai.getState, () => SERVER_STATE);
   const enabled = settings?.enabled;
   const maxTier = settings?.maxTier;
+  const workerName = settings?.workerName;
   useEffect(() => {
-    ai.configure({ ...(enabled === undefined ? {} : { enabled }), ...(maxTier ? { maxTier } : {}) });
+    ai.configure({ ...(enabled === undefined ? {} : { enabled }), ...(maxTier ? { maxTier } : {}), ...(workerName ? { workerName } : {}) });
     void ai.capabilities();
-  }, [ai, enabled, maxTier]);
+  }, [ai, enabled, maxTier, workerName]);
   return {
     ...state,
     classify: ai.classify,
     analyze: ai.analyze,
     writeCopy: ai.writeCopy,
     removeBackground: ai.removeBackground,
+    rewrite: ai.rewrite,
     cancel: ai.cancel,
   };
 }

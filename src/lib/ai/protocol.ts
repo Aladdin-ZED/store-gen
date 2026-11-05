@@ -6,6 +6,7 @@ import type { ProductCategory } from "@/lib/page/schema";
 import type { Vibe } from "./copy-schema";
 import type { CopyRequest } from "./prompts";
 import type { AiFailCode } from "./provider/types";
+import type { FieldRewriteInput } from "./schema/tasks/copy-field";
 
 /** The device's local-AI tier (ai.md AI-§A.3): off = no local model, lite = Qwen 0.8B, full = Qwen 2B. */
 export type DeviceTier = "off" | "lite" | "full";
@@ -48,7 +49,9 @@ export type WorkerTask =
   | { task: "classify"; images: Blob[] }
   | { task: "analyze"; images: Blob[] }
   | { task: "copy"; input: CopyRequest }
-  | { task: "removeBackground"; image: Blob };
+  | { task: "removeBackground"; image: Blob }
+  /** AI-05 (worker v2): a `FieldRewriteInput`, validated in the worker; answers `{ variants: string[3] }` */
+  | { task: "rewrite"; input: FieldRewriteInput };
 
 export type ToWorker =
   | { type: "configure"; webgpu: boolean; f16: boolean; tier: AiTier }

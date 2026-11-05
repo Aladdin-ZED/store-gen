@@ -232,6 +232,18 @@ export type AiCopyLoose = z.infer<typeof AiCopyLoose>;
 /** JSON Schema of the loose AiCopy: no length, count or range keyword; properties in display order. */
 export const AI_COPY_LOOSE_JSON: Json = AI_COPY.looseJson;
 
+/** The rewrite job's count (= `MAX_VARIANTS` of copy.field, asserted by test:ai; not imported, the guard imports this file). */
+export const REWRITE_VARIANTS = 3;
+
+/**
+ * copy.field's local answer (AI-05; the worker's `rewrite` job, AI-§A.6): exactly three strings within the field's real
+ * maximum, as the zod contract the worker validates with and the JSON Schema it constrains decoding with.
+ */
+export function rewriteVariantsSpec(max: number): { zod: z.ZodObject<{ variants: z.ZodArray<z.ZodString> }>; json: Json } {
+  const spec = obj({ variants: arr(str(Math.max(1, Math.floor(max))), REWRITE_VARIANTS, REWRITE_VARIANTS) });
+  return { zod: spec.zod, json: spec.json };
+}
+
 /* ------------------------------------------------------------------ */
 /* Vision analysis                                                     */
 /* ------------------------------------------------------------------ */

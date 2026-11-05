@@ -78,6 +78,7 @@ import { registerEvalSections } from "./selftest-eval";
 import { registerPolicySections } from "./selftest-policy";
 import { registerServerSections } from "./selftest-server";
 import { registerJobsSections } from "./selftest-jobs";
+import { registerClientSections } from "./selftest-client";
 
 /* ------------------------------------------------------------------ */
 /* The runner                                                          */
@@ -1131,6 +1132,7 @@ registerEvalSections({ section, check, eq, strict: STRICT });
 registerPolicySections({ section, check, eq, strict: STRICT });
 registerServerSections({ section, check, eq });
 registerJobsSections({ section, check, eq });
+registerClientSections({ section, check, eq });
 
 /* ------------------------------------------------------------------ */
 /* run                                                                 */

@@ -6,6 +6,10 @@
  *   analyze           Qwen3.5 VLM (2B full / 0.8B lite, WebGPU), JSON-schema constrained
  *   copy              Qwen3.5, JSON-schema constrained, one call per locale, retried once greedily
  *   removeBackground  BiRefNet_lite (webgpu fp32), ISNet (wasm fp32) fallback; de-hazed, trimmed WebP
+ *   rewrite           (worker v2, AI-05) Qwen3.5, greedy, ≤ 160 new tokens, exactly 3 variants ≤ the field's max
+ *
+ * Every request is validated at this boundary (CopyRequest v2, FieldRewriteInput): an old cached bundle and an old
+ * caller keep working because every v2 field is optional (AI-§A.6).
  *
  * One job runs at a time (ONNX Runtime serializes sessions anyway). Models that are not needed for
  * the next job are released before a big one loads, so an 8 GB laptop does not run out of memory.
@@ -23,10 +27,12 @@ import {
   type Tensor,
 } from "@huggingface/transformers";
 import { StructuredOutputProcessor } from "@huggingface/transformers-structured-output";
-import { AI_COPY_JSON_SCHEMA, ANALYSIS_JSON_SCHEMA, AiCopy, AnalysisRaw, VIBES, toAnalysis } from "../copy-schema";
+import { AI_COPY_JSON_SCHEMA, ANALYSIS_JSON_SCHEMA, AiCopy, AnalysisRaw, VIBES, rewriteVariantsSpec, toAnalysis } from "../copy-schema";
 import { coverage, padBox, refineAlpha } from "../matte";
 import { AI_CACHE_NAME, AI_MODELS } from "../models";
 import { ANALYZE_PROMPT, CopyRequest, copyPrompt } from "../prompts";
+import { rewritePrompt } from "../prompts/copy.field/l1";
+import { FieldRewriteInputZ } from "../schema/tasks/inputs";
 import { AiError, errorCode, type AiStage, type AiTier, type ClassifyResult, type FromWorker, type ToWorker } from "../protocol";
 import { CATEGORY_PROMPTS, CATEGORY_TEMPLATE, VIBE_PROMPTS, VIBE_TEMPLATE } from "../taxonomy";
 import { PRODUCT_CATEGORIES, type ProductCategory } from "@/lib/page/schema";
@@ -280,6 +286,26 @@ async function writeCopy(id: number, input: unknown) {
   throw new AiError("INVALID_OUTPUT", "The model's copy was unusable.");
 }
 
+/** AI-05 (`copy.field@l1`): one greedy constrained call, ≤ 160 new tokens; the caller runs copy.field's finalize. */
+const REWRITE_MAX_NEW_TOKENS = 160;
+
+async function rewrite(id: number, input: unknown) {
+  const req = FieldRewriteInputZ.safeParse(input);
+  if (!req.success) throw new AiError("INVALID_OUTPUT", "Invalid rewrite request.");
+  const spec = rewriteVariantsSpec(req.data.max);
+  let raw: unknown;
+  try {
+    raw = await generateJson(id, "write", { prompt: rewritePrompt(req.data), schema: spec.json, images: [], maxNewTokens: REWRITE_MAX_NEW_TOKENS, creative: false });
+  } catch (err) {
+    if (errorCode(err) !== "UNKNOWN" || err instanceof AiError) throw err;
+    // cut off at the token cap (JSON.parse failed): greedy decoding would give the same answer again
+    throw new AiError("INVALID_OUTPUT", "The model's rewrite was cut off.");
+  }
+  const parsed = spec.zod.safeParse(raw);
+  if (!parsed.success) throw new AiError("INVALID_OUTPUT", "The model's rewrite was unusable.");
+  return { variants: parsed.data.variants };
+}
+
 /* ------------------------------------------------------------------ */
 /* Background removal                                                  */
 /* ------------------------------------------------------------------ */
@@ -390,6 +416,7 @@ self.onmessage = (event: MessageEvent<ToWorker>) => {
       if (msg.task === "classify") result = await classify(id, msg.images);
       else if (msg.task === "analyze") result = await analyze(id, msg.images);
       else if (msg.task === "copy") result = await writeCopy(id, msg.input);
+      else if (msg.task === "rewrite") result = await rewrite(id, msg.input);
       else result = await removeBackground(id, msg.image);
       post({ type: "result", id, result });
     } catch (err) {
