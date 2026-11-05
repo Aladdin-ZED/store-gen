@@ -157,9 +157,52 @@ export function groupByDay<T extends Pick<NotificationItem, "createdAt">>(items:
   return groups;
 }
 
-/** A notification's link, only when it stays in the dashboard (`/app/…`; `notify()` already refused anything else). */
+/**
+ * The PLA-§18.1 link rule (rev 4, SEC-6): a store link `/app/<handle>…` (3-30 characters of `[a-z0-9-]`, then `/`, `?`,
+ * `#` or the end) or a user-level `/app/account…` (which the same pattern covers). Anything else renders as plain text.
+ */
+export const NOTIFICATION_LINK = /^\/app\/[a-z0-9-]{3,30}(?:[/?#]|$)/;
+
+/** A notification's link, only when it matches the link rule (`notify()` already refused anything else at the insert). */
 export function notificationHref(link: string | null): string | null {
-  return typeof link === "string" && /^\/app(?:\/|$)/.test(link) && !link.startsWith("//") ? link : null;
+  return typeof link === "string" && NOTIFICATION_LINK.test(link) && !/[\\\s]/.test(link) ? link : null;
+}
+
+/* ------------------------------------------------------------------ */
+/* the notification centre (PLA-§22.6, `/app/<h>/notifications`)        */
+/* ------------------------------------------------------------------ */
+
+/** The centre's filters, in the spec's order (rows of other groups show under "All"). */
+export const CENTRE_GROUPS = ["orders", "team", "store", "plan", "integrations", "security", "platform"] as const;
+export type CentreGroup = (typeof CENTRE_GROUPS)[number];
+/** Rows per page (P1's `listNotifications` maximum); a phone shows the first 25 and "Show older" for the rest. */
+export const CENTRE_PAGE = 50;
+export const CENTRE_PAGE_PHONE = 25;
+/** How many pages back the cursor remembers (the URL stays short) */
+export const CENTRE_CURSOR_DEPTH = 40;
+
+/**
+ * The keyset cursor (`?before=`): the stack of the `beforeId`s that led to this page, base 36, "." between them; "-"
+ * is the first page. The current page reads before the last id; Previous drops it. Anything malformed is the first page.
+ */
+export function decodeCentreCursor(raw: unknown): number[] {
+  if (typeof raw !== "string" || raw === "" || raw === "-") return [];
+  const parts = raw.split(".");
+  if (parts.length > CENTRE_CURSOR_DEPTH) return [];
+  const ids = parts.map((p) => (/^[0-9a-z]{1,10}$/.test(p) ? parseInt(p, 36) : Number.NaN));
+  return ids.every((n) => Number.isSafeInteger(n) && n > 0) ? ids : [];
+}
+
+export function encodeCentreCursor(ids: readonly number[]): string {
+  return ids.length ? ids.map((n) => n.toString(36)).join(".") : "-";
+}
+
+/** Previous / Next for the page read before `stack`'s last id: Next only when an older row exists. */
+export function centrePager(stack: readonly number[], lastId: number | null, more: boolean): { next: string | null; prev: string | null } {
+  return {
+    next: more && lastId !== null && stack.length < CENTRE_CURSOR_DEPTH ? encodeCentreCursor([...stack, lastId]) : null,
+    prev: stack.length ? encodeCentreCursor(stack.slice(0, -1)) : null,
+  };
 }
 
 /* ------------------------------------------------------------------ */

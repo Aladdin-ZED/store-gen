@@ -42,4 +42,6 @@ export const messages: { [K in keyof typeof en]: string } = {
   "health.snoozed_by": "أجّله {role}",
   "health.snoozed_title": "النقاط المؤجّلة",
   "health.hide_snoozed": "إخفاء المؤجّلة",
+  "health.all_good_short": "حتى حاجة ما خاصها إصلاح دابا.",
+  "health.read_only": "آخر فحص، للقراءة فقط ما دام المتجر مسدود أو موقوف.",
 };

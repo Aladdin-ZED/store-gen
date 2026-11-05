@@ -184,6 +184,28 @@ async function dashboardCase(kit: TenancyKit): Promise<void> {
   }
   const links = await kit.call({ anonymous: true }, "/", () => D.activePreviewLinks(kit.scope("B")));
   check("activePreviewLinks(B): never a page of A", links.ok && (links.value as Dashboard.PreviewLink[]).every((l) => ![fx.A.page.live, fx.A.page.draft, fx.A.page.archived].includes(l.pageId)));
+
+  // p2-09: the streamed loaders, the store's real order count (zero-data brief, score policy) and the review card's facts
+  const loaders = await kit.call({ anonymous: true }, "/", async () => {
+    const { panels: l } = D.dashboardLoaders(ctxB, "7d");
+    const [ever, policy, address, health] = await Promise.all([l.ordersEver, l.healthPolicy, l.address, l.health]);
+    return { ever, policy, address, health };
+  });
+  check("dashboardLoaders(B): every streamed panel settled, nothing of A", loaders.ok && leaks(loaders.value).length === 0, loaders.ok ? leaks(loaders.value) : loaders.error);
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { and, count, eq, ne } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const realOf = async (storeId: string) =>
+    Number((await db.select({ n: count() }).from(S.orders).where(and(eq(S.orders.storeId, storeId), eq(S.orders.isTest, false), ne(S.orders.sheetStatus, "disabled"))))[0]?.n ?? 0);
+  const [mineB, mineA] = await Promise.all([realOf(fx.B.id), realOf(fx.A.id)]);
+  const ever = await kit.call({ anonymous: true }, "/", () => D.realOrderCount(kit.scope("B")));
+  check("realOrderCount(B): B's real orders, none of A's", ever.ok && ever.value === mineB && (mineA === 0 || ever.value !== mineA + mineB), { got: ever.ok ? ever.value : ever.error, mineB, mineA });
+  const facts = await kit.call({ anonymous: true }, "/", () => D.reviewFacts(kit.scope("B"), { submitted: false, pages: true }));
+  check(
+    "reviewFacts(B): B's pages only, the pending media cap",
+    facts.ok && leaks(facts.value).length === 0 && facts.value!.pages.every((pg) => ![fx.A.page.live, fx.A.page.draft, fx.A.page.archived].includes(pg.id)) && facts.value!.mediaMb > 0,
+    facts.ok ? facts.value : facts.error,
+  );
 }
 
 async function renameCase(kit: TenancyKit): Promise<void> {

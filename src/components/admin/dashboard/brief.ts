@@ -9,7 +9,7 @@
  *
  * Honesty (owner rule 4, build note item 14): a source that is unavailable (null: P4 not merged, a read failed)
  * leaves its line out and never becomes a made-up 0; `brief.empty` ("No orders yet") is said only when the order
- * sources were read and show no order at all; when nothing could be read, no line is returned and the brief hides.
+ * sources were read and show no order at all (P4's KPIs, or before them the store's own count of real orders); when nothing could be read, no line is returned and the brief hides.
  * The inputs already exclude test orders (D54): the caller reads them with the test filter.
  */
 import type { MessageKey } from "@/lib/i18n/admin";
@@ -37,6 +37,11 @@ export interface BriefInput {
   opportunity?: { a: string; b: string; rateA: number; rateB: number; n: number; href: string } | null;
   /** the store-relative link builder (`appHref` bound to the handle) */
   href: (path: `/${string}` | "") => string;
+  /**
+   * The store's real orders ever (test orders left out), read apart from P4's KPIs: before P4's sources exist it is
+   * what lets the zero-data line be said honestly. undefined / null = unavailable.
+   */
+  ordersEver?: number | null;
 }
 
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
@@ -47,8 +52,10 @@ export function todayBrief(input: BriefInput): BriefLine[] {
   const q = queue && isCount(queue.queueNow) && isCount(queue.dueCallbacks) ? queue : null;
   const lines: BriefLine[] = [];
 
-  // zero data: the order sources were read and there is no order at all (none today, none ever, nothing queued)
-  const noOrders = k !== null && k.placed === 0 && k.confirmed === 0 && k.lastOrderAt === null && (q === null || (q.queueNow === 0 && q.dueCallbacks === 0));
+  // zero data: the order sources were read and there is no order at all (none today, none ever, nothing queued); with
+  // P4's KPIs unavailable, the store's own order count alone says it (never a guess from a missing source)
+  const quiet = q === null || (q.queueNow === 0 && q.dueCallbacks === 0);
+  const noOrders = quiet && (k !== null ? k.placed === 0 && k.confirmed === 0 && k.lastOrderAt === null : input.ordersEver === 0);
 
   if (noOrders) lines.push({ key: "brief.empty", vars: {}, href: href("/pages") });
   else if (k && q) lines.push({ key: "brief.orders", vars: { confirmed: k.confirmed, callbacks: q.dueCallbacks }, href: href("/orders") });

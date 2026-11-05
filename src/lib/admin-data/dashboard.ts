@@ -6,6 +6,7 @@ import "server-only";
  *
  *   const panels = await dashboardPanels(ctx, "7d");
  *   panels.kpis      // { ok: true, data: { today, range } } | { ok: false, reason: "unavailable" | "hidden" | "error" }
+ *   const { panels: p } = dashboardLoaders(ctx, "7d");   // the same panels as promises: the page streams block by block
  *
  * The sources are the P0 read APIs: P4's `orderKpis`, `queueCounts`, `opsPulse`; P5's `integrationHealth`,
  * `sheetsBacklog`; P1's `getStoreHealth` and the review card; P7's `aiUsageForStore`; T3's stats; T4's page reads. A
@@ -34,11 +35,11 @@ import { opsPulse, type OpsPulse } from "@/lib/orders/queue";
 import { toCents } from "@/lib/page/money";
 import { getStoreHealth } from "@/lib/platform/health-snapshot";
 import { getReviewCard, type ReviewCard } from "@/lib/platform/requests";
-import { getStoreSetting, type StoreSettingValue } from "@/lib/settings";
+import { getPlatformSetting, getStoreSetting, type StoreSettingValue } from "@/lib/settings";
 import { getSheetsConfig, isSheetsConfigured } from "@/lib/sheets";
 import { getPageStats } from "@/lib/stats";
-import { entitlements } from "@/lib/tenancy/entitlements";
-import { USAGE_METRICS, usageMetric } from "@/lib/tenancy/entitlement-keys";
+import { applyStateCap, entitlements } from "@/lib/tenancy/entitlements";
+import { MiB, USAGE_METRICS, usageMetric } from "@/lib/tenancy/entitlement-keys";
 import { listMembersByScope, type MemberSummary } from "@/lib/tenancy/invites";
 import { usageValue } from "@/lib/tenancy/usage";
 import { inStore, whereStore } from "@/lib/tenancy/sql";
@@ -197,61 +198,96 @@ export type DashboardCtx = Pick<StoreCtx, "scope" | "store" | "can"> & Partial<P
 const LATEST_ORDERS = 5;
 const PREVIEW_LINKS_MAX = 10;
 
-/** Every block of the dashboard, each settled on its own; nothing here throws for one source. */
-export async function dashboardPanels(ctx: DashboardCtx, range: DashboardRange = "7d"): Promise<DashboardPanels> {
+/** What the Store Health block needs beyond the snapshot: `platform.health.showScoreToTenantsBelowN` and the store's real orders. */
+export interface HealthPolicy {
+  /** 0 = always show the score; n > 0 hides the number (not the issues) until the store has n orders */
+  hideScoreBelow: number;
+  /** the store's real orders ever (test and honeypot rows left out); null when the policy does not need it */
+  orders: number | null;
+}
+
+/** The panels as promises, started together: the page streams each block as its own panel settles (PLA-§22.17). */
+export type DashboardLoaders = { [K in Exclude<keyof DashboardPanels, "range" | "today" | "currency">]: Promise<DashboardPanels[K]> } & {
+  /** the store's real orders ever (the zero-data brief before P4's KPIs, and the health score policy) */
+  ordersEver: Promise<Panel<number>>;
+  healthPolicy: Promise<Panel<HealthPolicy>>;
+};
+
+export interface DashboardLoad {
+  range: DashboardRange;
+  today: string;
+  currency: string;
+  panels: DashboardLoaders;
+}
+
+/** Every block of the dashboard as a settled promise, all started at once; none of them rejects. */
+export function dashboardLoaders(ctx: DashboardCtx, range: DashboardRange = "7d"): DashboardLoad {
   const { scope, store } = ctx;
   const now = new Date();
   const today = dayKey(now, store.timezone);
   const viewer = ctx.user && ctx.membership ? { userId: ctx.user.id, role: ctx.membership.role } : null;
   const ordersAll = ctx.can("orders.read_all");
 
-  const [kpis, placed, ops, queue, integrations, sheet, health, setup, review, address, previews, latest, usage] = await Promise.all([
-    panel("kpis", true, async () => {
-      const [t, r] = await Promise.all([orderKpis(scope, "today"), orderKpis(scope, range)]);
-      return { today: t, range: r };
-    }),
-    panel("placed", true, () => placedTotals(scope, today, range)),
-    panel("ops", viewer !== null && ctx.can("orders.read"), () => opsPulse(scope, viewer!)),
-    panel("queue", ctx.can("orders.read"), () => queueCounts(scope)),
-    panel("integrations", true, async () => {
+  const kpis = panel("kpis", true, async () => {
+    const [t, r] = await Promise.all([orderKpis(scope, "today"), orderKpis(scope, range)]);
+    return { today: t, range: r };
+  });
+  const ordersEver = panel("orders_ever", true, () => realOrderCount(scope));
+  const panels: DashboardLoaders = {
+    kpis,
+    placed: panel("placed", true, () => placedTotals(scope, today, range)),
+    funnel: kpis.then((k) => derive(k, (data) => funnelOf(data.range, range))),
+    ops: panel("ops", viewer !== null && ctx.can("orders.read"), () => opsPulse(scope, viewer!)),
+    queue: panel("queue", ctx.can("orders.read"), () => queueCounts(scope)),
+    integrations: panel("integrations", true, async () => {
       const [rows, sheets] = await Promise.all([integrationHealth(scope), sheetsBacklog(scope).catch((err: unknown) => (isNotImplemented(err) ? null : Promise.reject(err)))]);
       return { rows, sheets };
     }),
-    panel("sheet", true, () => getSheetHealth(scope)),
-    panel("health", true, () => getStoreHealth(scope)),
-    panel("setup", true, async () => {
+    sheet: panel("sheet", true, () => getSheetHealth(scope)),
+    health: panel("health", true, () => getStoreHealth(scope)),
+    setup: panel("setup", true, async () => {
       const [settings, members] = await Promise.all([getStoreSetting(scope, "store"), ctx.can("members.read") ? memberFacts(scope) : Promise.resolve(null)]);
       return setupFacts(settings, members);
     }),
-    panel("review", true, () => reviewState(scope)),
-    panel("address", true, () => addressFacts(scope, store)),
-    panel("previews", ctx.can("pages.read"), () => activePreviewLinks(scope)),
-    panel("latest", ordersAll, () => latestOrders(scope)),
-    panel("usage", true, async () => {
+    review: panel("review", true, () => reviewState(scope)),
+    address: panel("address", true, () => addressFacts(scope, store)),
+    previews: panel("previews", ctx.can("pages.read"), () => activePreviewLinks(scope)),
+    latestOrders: panel("latest", ordersAll, () => latestOrders(scope)),
+    usage: panel("usage", true, async () => {
       const [storage, ai] = await Promise.all([storeStorage(scope).catch(() => null), aiUsageForStore(scope, today.slice(0, 7)).catch(() => null)]);
       return { storage, ai };
     }),
-  ]);
-
-  return {
-    range,
-    today,
-    currency: store.currency,
-    kpis,
-    placed,
-    funnel: derive(kpis, (k) => funnelOf(k.range, range)),
-    ops,
-    queue,
-    integrations,
-    sheet,
-    health,
-    setup,
-    review,
-    address,
-    previews,
-    latestOrders: latest,
-    usage,
+    ordersEver,
+    healthPolicy: panel("health_policy", true, async () => {
+      const n = (await getPlatformSetting("platform")).health.showScoreToTenantsBelowN;
+      if (n <= 0) return { hideScoreBelow: 0, orders: null };
+      const ever = await ordersEver;
+      return { hideScoreBelow: n, orders: ever.ok ? ever.data : null };
+    }),
   };
+  return { range, today, currency: store.currency, panels };
+}
+
+/** Every block of the dashboard, each settled on its own; nothing here throws for one source. */
+export async function dashboardPanels(ctx: DashboardCtx, range: DashboardRange = "7d"): Promise<DashboardPanels> {
+  const { today, currency, panels: p } = dashboardLoaders(ctx, range);
+  const [kpis, placed, funnel, ops, queue, integrations, sheet, health, setup, review, address, previews, latestOrders, usage] = await Promise.all([
+    p.kpis,
+    p.placed,
+    p.funnel,
+    p.ops,
+    p.queue,
+    p.integrations,
+    p.sheet,
+    p.health,
+    p.setup,
+    p.review,
+    p.address,
+    p.previews,
+    p.latestOrders,
+    p.usage,
+  ]);
+  return { range, today, currency, kpis, placed, funnel, ops, queue, integrations, sheet, health, setup, review, address, previews, latestOrders, usage };
 }
 
 /** The funnel of one range: placed and confirmed from P4's counts; shipped, delivered and collected arrive with R2. */
@@ -400,6 +436,27 @@ async function latestOrders(scope: StoreScope): Promise<LatestOrder[]> {
       sheetStatus: o.sheetStatus,
       riskScore: o.riskScore,
     }));
+}
+
+/**
+ * What the In-review card shows beside the review row (PLA-§22.7, PD68): the pending media cap in MB (20 before
+ * "Submit for review", 100 after, the platform's `signup.*` tunables through `applyStateCap`) and the pages a private
+ * preview can show (none for a viewer without `pages.read`).
+ */
+export async function reviewFacts(scope: StoreScope, opts: { submitted: boolean; pages: boolean }): Promise<{ mediaMb: number; pages: { id: string; name: string }[] }> {
+  const [platform, values, list] = await Promise.all([getPlatformSetting("platform"), entitlements(scope), opts.pages ? pageOptions(scope) : Promise.resolve([])]);
+  const caps = { mediaMiB: platform.signup.pendingMediaMiB, mediaMiBBeforeSubmit: platform.signup.pendingMediaMiBBeforeSubmit, membersMax: platform.signup.pendingMembersMax };
+  const bytes = applyStateCap("pending", "media_bytes", values.media_bytes, { submitted: opts.submitted, caps });
+  return { mediaMb: bytes === null ? caps.mediaMiB : Math.floor(bytes / MiB), pages: list.map((p) => ({ id: p.id, name: p.name })) };
+}
+
+/** The store's real orders ever: test and honeypot rows left out (D54), the same filter as the latest orders. */
+export async function realOrderCount(scope: StoreScope): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(orders)
+    .where(whereStore(orders, scope, eq(orders.isTest, false), ne(orders.sheetStatus, "disabled")));
+  return Number(row?.n ?? 0);
 }
 
 /** The store's status and its reason code, fresh from its row (the pulse's store part, 5 s; the store cache is 15 s). */

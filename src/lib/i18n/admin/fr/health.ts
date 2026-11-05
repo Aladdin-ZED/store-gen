@@ -42,4 +42,6 @@ export const messages: { [K in keyof typeof en]: string } = {
   "health.snoozed_by": "Reporté par {role}",
   "health.snoozed_title": "Points reportés",
   "health.hide_snoozed": "Masquer les reportés",
+  "health.all_good_short": "Rien à corriger pour l'instant.",
+  "health.read_only": "Le dernier bilan, en lecture seule tant que la boutique est fermée ou suspendue.",
 };

@@ -41,4 +41,6 @@ export const messages = {
   "health.snoozed_by": "Snoozed by {role}",
   "health.snoozed_title": "Snoozed issues",
   "health.hide_snoozed": "Hide snoozed",
+  "health.all_good_short": "Nothing to fix right now.",
+  "health.read_only": "The last check, read-only while the store is closed or suspended.",
 } as const satisfies Record<string, string>;

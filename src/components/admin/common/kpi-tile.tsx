@@ -98,7 +98,13 @@ export function KpiTile(p: KpiTileProps): ReactElement | null {
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-        <span className="min-w-0">{delta ? delta.period : p.hint}</span>
+        {/* the definition always shows (PLA-§22.17: "placed, not delivered"); the delta's period after it */}
+        {p.hint && <span className="min-w-0">{p.hint}</span>}
+        {delta && (
+          <span aria-hidden="true" className="min-w-0 text-muted-foreground/80">
+            {t("shell.kpi.vs_period", { period: delta.period })}
+          </span>
+        )}
         {p.n !== undefined && Number.isSafeInteger(p.n) && (
           <span className="tabular-nums">
             <bdi>{t("shell.kpi.n", { n: p.n })}</bdi>

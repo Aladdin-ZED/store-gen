@@ -8,7 +8,8 @@
  *   list what they refused (`refused`), so `KpiTile`, `FunnelChart` and `HealthRing` draw no dishonest number even when
  *   a caller bypasses the types (`test:shell`).
  *
- * The rules: no rate without its `n`, and below the sample floor the tile says "Needs 30 orders" instead of a number;
+ * The rules: no rate without its `n`, and below the sample floor the tile says "Needs 30 orders" instead of a number; a
+ * blank value is no number at all (the tile shows its hint, e.g. "Fills in with delivery tracking");
  * no sparkline under 7 points; a funnel step with no data is `null`, never 0, and renders as the R2 line; a ring with
  * a null (or impossible) score shows the computing state; below 5 funnel points the chart becomes a table (§I.6).
  */
@@ -60,7 +61,8 @@ const validN = (n: unknown): n is number => typeof n === "number" && Number.isSa
 
 export function kpiTileView(p: KpiTileProps, minN: number = RATE_MIN_N): KpiTileView {
   const refused: HonestRefusal[] = [];
-  let value: string | null = p.value;
+  // a blank value is "no number" (an R2 tile such as Delivered or Cash to collect): the hint says why, nothing is drawn
+  let value: string | null = typeof p.value === "string" && p.value.trim() !== "" ? p.value : null;
   let needs: KpiTileView["needs"] = null;
   if (p.n !== undefined && !validN(p.n)) refused.push("n_invalid");
   if (p.kind === "rate") {

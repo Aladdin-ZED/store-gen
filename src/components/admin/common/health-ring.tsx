@@ -7,16 +7,19 @@
  * state, never a number. The stroke draws once on load (240 ms, ease-out; reduced motion: a fade), never again.
  *
  * Props frozen at PLA-§22.12 (src/lib/contracts/r1-p0b-platform.ts). `onRecompute` (owner side, 6 per hour per store)
- * shows the button; `dirty` (a change since the last check) shows "Recomputing" instead of the time.
+ * shows the button; `dirty` (a change since the last check) shows "Recomputing" instead of the time. The freshness
+ * line reads "Checked at hh:mm" (the store's time zone when the store layout provides it) with a dot that turns
+ * neutral once the check is older than the snapshot's `staleAfterMin` (PD78), which the caller gives through
+ * `<HealthStaleAfter minutes>` since the frozen props carry no such field; without it, a day.
  */
 import { Loader2Icon, RefreshCwIcon } from "lucide-react";
-import { useState, type CSSProperties, type ReactElement } from "react";
+import { createContext, useContext, useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import "@/components/admin/styles/primitives.css";
 import { Button } from "@/components/ui/button";
-import { useT } from "@/lib/i18n/admin/client";
+import { useAdminLocale, useT } from "@/lib/i18n/admin/client";
 import { cn } from "@/lib/utils";
-import { FreshnessDot } from "./freshness-dot";
-import { healthRingView, type HealthBand } from "./honest";
+import { useOptionalStore } from "../shell/store-context";
+import { healthFresh, healthRingView, type HealthBand } from "./honest";
 import { ringGeometry } from "./primitive-logic";
 import { FOCUS_RING, TOUCH } from "./ui-classes";
 
@@ -32,8 +35,45 @@ export interface HealthRingProps {
 
 const BAND: Record<HealthBand, string> = { good: "text-success", fair: "text-muted-foreground", low: "text-warn", poor: "text-destructive" };
 const NUMBER: Record<40 | 56 | 96, string> = { 40: "text-[13px]", 56: "text-base", 96: "text-[28px] tracking-[-0.015em]" };
-/** a health check older than a day is out of date (the scheduler recomputes far more often) */
-const STALE_MS = 24 * 3_600_000;
+/** without the snapshot's `staleAfterMin`, a check older than a day is out of date (the job runs far more often) */
+const DEFAULT_STALE_MIN = 24 * 60;
+const StaleAfterContext = createContext<number>(DEFAULT_STALE_MIN);
+
+/** The snapshot's `staleAfterMin` (PD78: max(staleAlarmMinutes, 1.5 × the measured cycle)) for the rings inside. */
+export function HealthStaleAfter({ minutes, children }: { minutes: number; children: ReactNode }) {
+  return <StaleAfterContext.Provider value={Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_STALE_MIN}>{children}</StaleAfterContext.Provider>;
+}
+
+/** "Checked at 14:05" with the dot: success while fresh, neutral once older than `staleAfterMin` (never a fixed hour). */
+function CheckedAt({ at }: { at: string | null }) {
+  const t = useT();
+  const locale = useAdminLocale();
+  const store = useOptionalStore();
+  const staleAfterMin = useContext(StaleAfterContext);
+  // the server's clock for the first paint, then the viewer's, re-read every minute
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const first = setTimeout(() => setNow(Date.now()), 0);
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
+  }, []);
+  const ms = at === null ? Number.NaN : Date.parse(at);
+  if (!Number.isFinite(ms)) return <p className="text-xs text-muted-foreground">{t("shell.fresh.never")}</p>;
+  const fresh = healthFresh(at, staleAfterMin, new Date(now));
+  const time = new Intl.DateTimeFormat(locale === "ar" ? "ar-MA-u-nu-latn" : locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: store?.timeZone }).format(ms);
+  return (
+    <p data-fresh={fresh ? "" : undefined} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", fresh ? "bg-success" : "bg-muted-foreground/40")} />
+      <time dateTime={at ?? undefined} className="tabular-nums" suppressHydrationWarning>
+        {t("health.checked_at", { time })}
+      </time>
+      {!fresh && <span className="sr-only">. {t("health.stale")}</span>}
+    </p>
+  );
+}
 
 export function HealthRing(p: HealthRingProps): ReactElement | null {
   const t = useT();
@@ -94,7 +134,7 @@ export function HealthRing(p: HealthRingProps): ReactElement | null {
         ) : p.dirty || busy ? (
           <p className="text-xs text-muted-foreground">{t("health.recomputing")}</p>
         ) : (
-          <FreshnessDot at={p.computedAt} staleAfterMs={STALE_MS} label={t("health.title")} />
+          <CheckedAt at={p.computedAt} />
         )}
         {p.onRecompute && (
           <Button

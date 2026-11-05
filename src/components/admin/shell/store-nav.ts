@@ -248,9 +248,9 @@ export function settingsTabs(viewer: NavViewer, locale: AdminLocale = "en", cont
  * screen in with `<ScreenLocale>` around its root, never through this list.
  */
 export const TRILINGUAL_SCREENS: readonly { path: "" | `/${string}`; ready: boolean }[] = [
-  { path: "", ready: false }, // the overview: the dashboard redesign (p2-09)
+  { path: "", ready: true }, // the overview: the dashboard redesign (p2-09)
   { path: "/welcome", ready: false }, // onboarding (p2-12)
-  { path: "/notifications", ready: false }, // the notification centre (p2-09)
+  { path: "/notifications", ready: true }, // the notification centre (p2-09)
   { path: "/team", ready: true }, // T2's translated team page (members and invites)
   { path: "/settings/general", ready: false },
   { path: "/settings/market", ready: false },

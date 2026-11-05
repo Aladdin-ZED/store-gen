@@ -108,6 +108,8 @@ export function IssueRow(p: IssueRowProps): ReactElement | null {
                 try {
                   await p.onSnooze?.();
                   setSnoozed(true);
+                } catch {
+                  // the caller showed why (a toast); the row keeps its Snooze button
                 } finally {
                   setSnoozing(false);
                 }

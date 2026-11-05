@@ -76,6 +76,7 @@ import {
 import { bulletHolds, MODE_BULLETS, modeSelectable, modeSummary } from "@/components/admin/common/mode-summary";
 import { capabilityOf, ROLE_CAPABILITIES, ROLE_CAN_MAX, ROLE_CANNOT_MAX, roleSummary } from "@/components/admin/common/role-summary";
 import { todayBrief, type BriefInput } from "@/components/admin/dashboard/brief";
+import { celebrates, composeTiles, confirmationPct, funnelSteps, healthIssuesFor, pctChange, scoreHidden, unwireIssue, wireIssue, workLines } from "@/components/admin/dashboard/compose";
 import { KILL_SWITCHES } from "@/lib/flags/registry";
 import type { HealthInputs, HealthIssue } from "@/lib/health/types";
 import { fixtures as shellFixtures, localSetupIssues, rules as shellRules, shellFactsOf } from "@/lib/health/rules/shell";
@@ -160,7 +161,11 @@ import { countVisit, defaultDensity, HELP_SECTIONS, helpSection, helpTipKeys, in
 import { clearClientErrors, CLIENT_ERROR_RING, diagnosticText, recentClientErrors, recordClientError } from "./client-errors";
 import {
   bellCount,
+  CENTRE_CURSOR_DEPTH,
+  centrePager,
   clockOffset,
+  decodeCentreCursor,
+  encodeCentreCursor,
   formatCountdown,
   groupByDay,
   initialPulseState,
@@ -1539,6 +1544,148 @@ async function paletteChecks(): Promise<void> {
   check("no em or en dash in the palette's strings", dashed.length === 0, dashed);
 }
 
+/* ---- the dashboard composer (p2-09; PLA-§22.17, §22.16, §22.6; D54) ---- */
+async function dashboardChecks(): Promise<void> {
+  const DAY = (i: number) => `2026-10-${String(i + 1).padStart(2, "0")}`;
+  // two real orders (200 MAD each) and one test order (99 MAD) today: T3's stats never count the test order, P4's queue does
+  const series = Array.from({ length: 28 }, (_, i) => ({ day: DAY(i), count: i === 27 ? 2 : 0, cents: i === 27 ? 40_000 : 0, visitors: 10 }));
+  const placed = {
+    ok: true as const,
+    data: { from: DAY(21), to: DAY(27), count: 2, cents: 40_000, visitors: 70, previous: { count: 1, cents: 20_000, visitors: 60 }, today: { count: 2, cents: 40_000, visitors: 10 }, series },
+  };
+  const kpi = (value: number, n: number) => (n >= 30 ? { value, n } : { insufficient: true as const, n, min: 30 });
+  const k = {
+    window: "7d" as const,
+    placed: 2,
+    confirmed: 1,
+    delivered: 0,
+    decided: 2,
+    confirmationRate: kpi(50, 2),
+    deliveryRate: kpi(0, 0),
+    firstTouchP50Min: kpi(4, 2),
+    unreachableRate: kpi(0, 0),
+    riskyShare: kpi(0, 2),
+    lastOrderAt: "2026-10-28T09:00:00Z",
+    computedAt: "2026-10-28T10:00:00Z",
+  };
+  type KpisPanel = Parameters<typeof composeTiles>[0]["kpis"];
+  const kpis = { ok: true, data: { today: k, range: k } } as unknown as KpisPanel;
+  const tiles = composeTiles({ kpis, placed, range: "7d" });
+  const tile = (id: string) => tiles.find((x) => x.id === id);
+  check("the six COD tiles in the spec's order", tiles.map((x) => x.id).join() === "placed_count,confirmed,delivered,first_touch,placed_money,cash", tiles.map((x) => x.id));
+  check(
+    "the money tile is the real orders' value: the test order is left out",
+    tile("placed_money")?.value === 40_000 && tiles.filter((x) => x.kind === "money" && x.value !== null).every((x) => x.value === 40_000),
+  );
+  check(
+    "delivered and cash to collect are R2: the hint, never a number",
+    ["delivered", "cash"].every((id) => tile(id)?.value === null && tile(id)?.hint.key === "shell.honest.r2_delivery"),
+  );
+  check("the confirmation rate below 30 orders says what it needs, not a percent", tile("confirmed")?.hint.key === "shell.dash.tile.rate_needs" && tile("confirmed")?.n === 2);
+  check("first touch below the sample has no number", tile("first_touch")?.value === null);
+  check("placed, confirmed and delivered never share a tile", new Set(tiles.map((x) => x.label.key)).size === tiles.length);
+  check("a delta needs a period that had something (no +∞ %)", pctChange(5, 0) === null && pctChange(3, 2) === 50 && tiles[0]?.delta?.pct === 100);
+  check("the sparkline only from 7 daily points", tiles[0]?.spark?.length === 7);
+  const noP4 = composeTiles({ kpis: { ok: false, reason: "unavailable" }, placed, range: "7d" });
+  check("P4 unavailable: its tiles are left out, never a made-up 0", noP4.map((x) => x.id).join() === "placed_count,delivered,placed_money,cash");
+  const big = { ...k, confirmed: 30, decided: 40, confirmationRate: kpi(75, 40) };
+  const bigTiles = composeTiles({ kpis: { ok: true, data: { today: big, range: big } } as unknown as KpisPanel, placed, range: "7d" });
+  check("with n ≥ 30 the rate is confirmed ÷ decided", confirmationPct(big) === 75 && bigTiles.find((x) => x.id === "confirmed")?.hint.vars?.rate === 75);
+  type QueuePanel = Parameters<typeof workLines>[0]["queue"];
+  const queue = { ok: true, data: { toCallNow: 3, callbacksDue: 0, waitingRetry: 0, firstTouchBreaches: 0, abandonedToday: 0, liveAgents: 0, oldestCallbackOverdueMin: null, deliveryRescue: 0, oldestRescueMin: null, toShip: 0 } } as unknown as QueuePanel;
+  const all = () => true;
+  const work = workLines({ queue, pulse: null, sheet: null, can: all });
+  check("the test order is counted in the queue line (it is real work)", work.find((l) => l.id === "to_call")?.count === 3, work);
+  check(
+    "the queue line of the brief counts it too",
+    todayBrief({ kpisToday: k, queue: { queueNow: 3, dueCallbacks: 0 }, worstIssue: null, href: (x) => appHref("atlas", x) }).some((l) => l.key === "brief.queue" && l.vars.count === 3),
+  );
+  check("the live pulse wins over the server's read", workLines({ queue, pulse: { queueNow: 4 }, sheet: null, can: all }).find((l) => l.id === "to_call")?.count === 4);
+  check("a counter no source answers is left out", workLines({ queue: null, pulse: null, sheet: null, can: all }).length === 0);
+  check("no order work list without orders.read", workLines({ queue, pulse: { queueNow: 4 }, sheet: null, can: (perm) => perm !== "orders.read" }).every((l) => l.id === "leads"));
+  const steps = funnelSteps({
+    window: "7d",
+    steps: [
+      { id: "placed", n: 2 },
+      { id: "confirmed", n: 1 },
+      { id: "shipped", n: null },
+      { id: "delivered", n: null },
+      { id: "collected", n: null },
+    ],
+    confirmationRate: kpi(50, 2),
+  } as Parameters<typeof funnelSteps>[0]);
+  check("the funnel: R1's two steps, the rest null (the R2 line)", steps.map((st) => st.value).join() === "2,1,,," && steps.every((st) => inCatalogs(st.label)));
+  // Store Health: the local pass before the first run, the pending filter, the score policy, the celebration
+  const local = healthIssuesFor({ health: null, setup: { contact: { phone: null, whatsapp: null }, legalName: null, members: null }, status: "active" });
+  check("before the first run the local setup pass lists the setup issues", local?.source === "local" && local.issues.length > 0);
+  type Snapshot = NonNullable<Parameters<typeof healthIssuesFor>[0]["health"]>;
+  const first = local?.issues[0];
+  if (first) {
+    const snap = {
+      score: 70,
+      attention: 1,
+      components: { setup: 0, trust: 0, design: 0, conversion: 0, operations: 0, integrations: 0, quota: 0 },
+      issues: [{ ...first, id: "ops:x", group: "operations" }, first],
+      snoozed: {},
+      metrics: {},
+      milestones: {},
+      dormant: false,
+      computedAt: "2026-10-28T10:00:00Z",
+      dirty: false,
+      staleAfterMin: 45,
+    } as unknown as Snapshot;
+    check("a pending store keeps the setup and trust groups only", healthIssuesFor({ health: snap, setup: null, status: "pending" })?.issues.every((i) => i.group === "setup" || i.group === "trust") === true);
+    check("a restricted store keeps its operations issues", healthIssuesFor({ health: snap, setup: null, status: "restricted" })?.issues.some((i) => i.group === "operations") === true);
+    const wired = wireIssue(first, "atlas-argan");
+    const back = unwireIssue(JSON.parse(JSON.stringify(wired)) as typeof wired);
+    check(
+      "a link fix crosses to the browser as the store's path",
+      wired.fix.kind === "link" && wired.fix.path.startsWith("/app/atlas-argan/") && back.fix.kind === "link" && back.fix.href("other") === wired.fix.path,
+    );
+  }
+  check("nothing to list from: null, not an empty 'all good'", healthIssuesFor({ health: null, setup: null, status: "active" }) === null);
+  check(
+    "showScoreToTenantsBelowN hides the number below n orders",
+    scoreHidden({ hideScoreBelow: 10, orders: 3 }) && !scoreHidden({ hideScoreBelow: 10, orders: 10 }) && !scoreHidden({ hideScoreBelow: 0, orders: null }) && scoreHidden({ hideScoreBelow: 5, orders: null }),
+  );
+  check("the celebration: ≥ 90 and no severity-3 issue", celebrates(90, [{ severity: 2 }]) && !celebrates(89, []) && !celebrates(95, [{ severity: 3 }]) && !celebrates(null, []));
+  // the stale dot: neutral exactly past staleAfterMin, never a fixed hour
+  const at = "2026-10-28T09:15:00Z";
+  check(
+    "stale-dot math follows staleAfterMin to the minute",
+    healthFresh(at, 45, new Date("2026-10-28T10:00:00Z")) && !healthFresh(at, 45, new Date("2026-10-28T10:00:01Z")) && healthFresh(at, 24 * 60, new Date("2026-10-29T09:00:00Z")),
+  );
+  // "Revenue" appears nowhere in the dashboard's components (PLA-§22.17 acceptance)
+  const dashDir = path.join(process.cwd(), "src", "components", "admin", "dashboard");
+  const { readdirSync } = await import("node:fs");
+  const files = readdirSync(dashDir).filter((f) => /\.(tsx?|css)$/.test(f));
+  const hits = files.filter((f) => /revenue/i.test(readFileSync(path.join(dashDir, f), "utf8")));
+  check("'Revenue' appears nowhere in src/components/admin/dashboard/**", files.length >= 5 && hits.length === 0, hits);
+  // the notification centre: the keyset cursor and the link rule
+  check("the centre's cursor round-trips", decodeCentreCursor(encodeCentreCursor([900, 451])).join() === "900,451" && encodeCentreCursor([]) === "-" && decodeCentreCursor("-").length === 0);
+  check(
+    "a malformed cursor is the first page",
+    decodeCentreCursor("zz.!").length === 0 && decodeCentreCursor("0").length === 0 && decodeCentreCursor(Array(CENTRE_CURSOR_DEPTH + 1).fill("a").join(".")).length === 0 && decodeCentreCursor(42).length === 0,
+  );
+  const pg1 = centrePager([], 120, true);
+  const pg2 = centrePager([120], 70, false);
+  check("Next carries the stack, Previous drops its last id", pg1.prev === null && decodeCentreCursor(pg1.next).join() === "120" && pg2.next === null && pg2.prev === "-");
+  check(
+    "a notification link follows the PLA-§18.1 rule, else plain text",
+    notificationHref("/app/atlas-argan/") === "/app/atlas-argan/" &&
+      notificationHref("/app/atlas-argan#health") !== null &&
+      notificationHref("/app/account?doc=terms") !== null &&
+      notificationHref("/app/ab") === null &&
+      notificationHref("/app/Atlas/x") === null &&
+      notificationHref("/app/atlas/x y") === null &&
+      notificationHref("/app/atlas\\x") === null &&
+      notificationHref("/s/atlas-argan") === null,
+  );
+  const dashKeys = ["shell.dash.meta", "shell.dash.lead", "shell.dash.kpis", "shell.dash.work.title", "shell.dash.integrations.title", "shell.dash.funnel.title", "shell.kpi.vs_period", "shell.notifications.lead", "shell.notifications.empty_group", "health.all_good_short", "health.read_only"];
+  const missing = [...dashKeys, ...tiles.flatMap((x) => [x.label.key, x.hint.key]), ...work.map((l) => l.key)].filter((key) => !inCatalogs(key));
+  check("the dashboard's and the centre's keys exist in ar, fr and en", missing.length === 0, missing);
+}
+
 ruleChecks()
   .then(searchChecks)
   .then(manifestChecks)
@@ -1546,6 +1693,7 @@ ruleChecks()
   .then(primitiveChecks)
   .then(chromeChecks)
   .then(paletteChecks)
+  .then(dashboardChecks)
   .catch((err: unknown) => check("the rule and search checks ran", false, String(err)))
   .finally(() => {
     console.log(`test:shell: ${passed} passed, ${failures} failed`);
