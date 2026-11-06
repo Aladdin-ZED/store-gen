@@ -44,6 +44,16 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **ONE RUN, 4 TRACKS AT A TIME, 2026-11-06 ~02:30** (74/106, ≈ 47.5%; weekly usage 62%). The UI steps' check bundles held the
+  mutex 10-35 min each, so 8 agents mostly waited (5 of them with the old 10-min cache-missing waits) and no step finished for
+  80 min. Both runs stopped (wf_8c657bfb-521, wf_c5c653e7-8a8); the two orphaned queued heavy wrappers were stopped (P2's
+  holder finished on its own). r1-tracks.js now takes `args.maxParallel` (a finished track hands its slot to the next) and
+  carries the cost rules in common(). Relaunched as ONE run: task `wz26smq82` run `wf_d689abb7-8cf`, maxParallel 4, order
+  P8 (12) → P6 (10) → P4 (9) → P2 (10), then P1 (10) → P7 (11) → P5 (11) → P3 (9). P1 step 10 (faa387c) and P4 step 9
+  (1e385b8) were committed but unreported: one-time notes, verify and report. NEW RELAUNCH RECIPE:
+  `node qa/lead/relaunch-args.mjs && node qa/lead/speedify.cjs && node qa/lead/combine.cjs`, then one Workflow launch
+  (scriptPath qa/lead/r1-tracks.js, args = the JSON of qa/lead/tracks-all-speed.json); append the run id to track-runs.json.
+
 - **COST RULES 2026-11-06 ~00:25** (71/106, ≈ 46.9%; weekly usage 55%, ~3%/h). Agent transcripts showed the waste: subagents
   have a 5-min prompt cache, and their 10-min mutex waits made every next call rewrite the whole context (up to 540K tokens) as
   cache_creation; contexts of 300-580K are also re-read on every call. Fix without a relaunch: a LEAD NOTE (waits under 4 min
