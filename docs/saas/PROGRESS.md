@@ -44,6 +44,13 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **COST RULES 2026-11-06 ~00:25** (71/106, ≈ 46.9%; weekly usage 55%, ~3%/h). Agent transcripts showed the waste: subagents
+  have a 5-min prompt cache, and their 10-min mutex waits made every next call rewrite the whole context (up to 540K tokens) as
+  cache_creation; contexts of 300-580K are also re-read on every call. Fix without a relaunch: a LEAD NOTE (waits under 4 min
+  per tool call; lean context: grep + line ranges, tail -60 on outputs, only needed screenshots) appended to the 31 remaining
+  briefs (qa/lead/briefs, read by each new step agent), and the same rules in r1-tracks.js common() and r1-merge-fast.js for
+  future launches. The 8 in-flight step agents keep the old habits until their steps end.
+
 - **USAGE STOP NOW AT 95% (owner 2026-11-05 ~21:40: "change the limit condition from 75 to 95").** Heartbeat cron is now
   `41a5968f` (13,33,53): get_usage first; at >= 95% stop both runs and any merge run, start nothing, log, delete the cron,
   wait for "continue"; from 90% check every ~5 min. Usage was 46% at 21:24 UTC.
