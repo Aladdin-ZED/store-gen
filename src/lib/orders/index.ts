@@ -16,7 +16,6 @@ export { checkCaptcha, verifyTurnstile } from "./turnstile";
 export {
   listOrders,
   getOrder,
-  updateOrderStatus,
   requeueOrderSync,
   retryFailedSync,
   orderStatsByPage,
@@ -40,5 +39,4 @@ export {
   type Pagination,
   type Paged,
   type Actor,
-  type UpdateStatusResult,
 } from "./admin";

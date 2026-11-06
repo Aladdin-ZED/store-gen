@@ -1515,7 +1515,9 @@ async function paletteChecks(): Promise<void> {
   const navMap = new Map(ownerNav.flatMap((g) => g.items.map((i) => [i.id, i.href] as const)));
   const ownerGo = goHrefs({ handle: "atlas", nav: navMap, firstSettingsHref: "/app/atlas/settings/general", can: roleCan("owner") });
   const agentGo = goHrefs({ handle: "atlas", nav: new Map([["orders", "/app/atlas/orders"]]), firstSettingsHref: null, can: roleCan("agent") });
-  const editorGo = goHrefs({ handle: "atlas", nav: navMap, firstSettingsHref: "/app/atlas/settings/general", can: roleCan("editor") });
+  // since the P4 merge the owner's nav carries P4's Queue item (agents.self), which an editor's nav never has
+  const editorNavMap = new Map([...navMap].filter(([id]) => id !== "queue"));
+  const editorGo = goHrefs({ handle: "atlas", nav: editorNavMap, firstSettingsHref: "/app/atlas/settings/general", can: roleCan("editor") });
   check("G targets: the member's screens, Settings to the first tab, the queue only with agents.self", ownerGo.orders === "/app/atlas/orders" && ownerGo.settings === "/app/atlas/settings/general" && ownerGo.queue === "/app/atlas/queue" && editorGo.queue === undefined && ownerGo.overview === "/app/atlas");
   check("an agent's G Q reaches the queue alias; no settings", agentGo.queue === "/app/atlas/queue" && agentGo.settings === undefined);
   const sections = shortcutSections({ mod: "Ctrl", show: (x) => x === "switch_store" || editorGo[x as keyof typeof editorGo] !== undefined, queue: false, label: (k) => t(k) });

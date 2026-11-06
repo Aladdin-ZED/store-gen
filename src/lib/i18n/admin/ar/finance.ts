@@ -33,11 +33,11 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "fin.be.rateN": "{rate} % على {n} طلب",
   "fin.be.noSpend": "كتب مصاريف الإشهار باش تقارنها مع نقطة التعادل.",
   "fin.be.converted": "المصاريف تحولات بالسعر ديالك 1 {currency} = {rate} {storeCurrency} (من {day})",
-  "fin.be.daysNotCounted": "{n, plural, one {نهار واحد ما تحسبش: خاصو سعر} other {# أيام ما تحسبوش: خاصهم سعر}}",
+  "fin.be.daysNotCounted": "{n, plural, zero {# أيام ما تحسبوش: خاصهم سعر} one {نهار واحد ما تحسبش: خاصو سعر} two {# أيام ما تحسبوش: خاصهم سعر} few {# أيام ما تحسبوش: خاصهم سعر} many {# أيام ما تحسبوش: خاصهم سعر} other {# أيام ما تحسبوش: خاصهم سعر}}",
   "fin.be.outcomesAsOf": "نتائج التوصيل حسب آخر مزامنة، {time}",
   "fin.be.byAngle": "حسب الزاوية",
   "fin.be.byAngle.note": "المصاريف مازال ما مقسماش على الزوايا، داكشي علاش ما كاينش تكلفة الطلب هنا.",
-  "fin.be.suppressed": "{n, plural, one {مجموعة صغيرة مخبية (أقل من 5 طلبات)} other {# مجموعات صغيرة مخبية (أقل من 5 طلبات)}}",
+  "fin.be.suppressed": "{n, plural, zero {# مجموعات صغيرة مخبية (أقل من 5 طلبات)} one {مجموعة صغيرة مخبية (أقل من 5 طلبات)} two {# مجموعات صغيرة مخبية (أقل من 5 طلبات)} few {# مجموعات صغيرة مخبية (أقل من 5 طلبات)} many {# مجموعات صغيرة مخبية (أقل من 5 طلبات)} other {# مجموعات صغيرة مخبية (أقل من 5 طلبات)}}",
 
   /* ---- costs ---- */
   "fin.costs.bySku": "التكاليف حسب SKU",
@@ -52,7 +52,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "fin.settlement.question": "شكون كيبقاو عندو الفلوس من بعد التوصيل؟",
   "fin.settlement.at_delivery": "كنوصل براسي، ولا الليفرور كيعطيني الفلوس",
   "fin.settlement.statement": "شركة التوصيل كتخلصني من بعد بكشف",
-  "fin.cash.marked": "{n, plural, one {طلب واحد تسجل بلي الفلوس وصلات} other {# طلبات تسجلو بلي الفلوس وصلات}}",
+  "fin.cash.marked": "{n, plural, zero {# طلبات تسجلو بلي الفلوس وصلات} one {طلب واحد تسجل بلي الفلوس وصلات} two {# طلبات تسجلو بلي الفلوس وصلات} few {# طلبات تسجلو بلي الفلوس وصلات} many {# طلبات تسجلو بلي الفلوس وصلات} other {# طلبات تسجلو بلي الفلوس وصلات}}",
 
   /* ---- ad spend ---- */
   "fin.ads.billedIn": "الفاتورة ب {currency}",
@@ -66,13 +66,13 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "fin.error.not_found": "هاد الصفحة ولا هاد المنتوج ما بقاش منشور.",
 
   /* ---- Store Health ---- */
-  "health.ops.fin_costs_missing.text": "{n, plural, one {منتوج واحد كتبيعو ما عندوش تكلفة} other {# منتوجات كتبيعهم ما عندهمش تكلفة}}: الربح ديال الطلبات ديالهم ما يقدرش يبان.",
+  "health.ops.fin_costs_missing.text": "{n, plural, zero {# منتوجات كتبيعهم ما عندهمش تكلفة} one {منتوج واحد كتبيعو ما عندوش تكلفة} two {# منتوجات كتبيعهم ما عندهمش تكلفة} few {# منتوجات كتبيعهم ما عندهمش تكلفة} many {# منتوجات كتبيعهم ما عندهمش تكلفة} other {# منتوجات كتبيعهم ما عندهمش تكلفة}}: الربح ديال الطلبات ديالهم ما يقدرش يبان.",
   "health.ops.fin_costs_missing.fix": "زيد التكاليف",
   "health.ops.fin_settlement_check.text": "{n} طلب توصل وما قلتيش شكون كيبقاو عندو الفلوس من بعد التوصيل.",
   "health.ops.fin_settlement_check.fix": "جاوب ف شركة التوصيل ديالي",
-  "health.ops.fin_fee_gap.text": "{n, plural, one {مدينة وحدة من المدن الكبار كتخلص} other {# مدن من المدن الكبار كيخلصو}} أقل من اللي كتكلفك شركة التوصيل (حتى {baseline} على الطلب).",
+  "health.ops.fin_fee_gap.text": "{n, plural, zero {# مدن من المدن الكبار كيخلصو} one {مدينة وحدة من المدن الكبار كتخلص} two {# مدن من المدن الكبار كيخلصو} few {# مدن من المدن الكبار كيخلصو} many {# مدن من المدن الكبار كيخلصو} other {# مدن من المدن الكبار كيخلصو}} أقل من اللي كتكلفك شركة التوصيل (حتى {baseline} على الطلب).",
   "health.ops.fin_fee_gap.fix": "قارن الأثمنة",
-  "health.ops.fin_ad_rate_missing.text": "{n, plural, one {نهار واحد ديال مصاريف الإشهار بعملة أخرى ما عندوش سعر} other {# أيام ديال مصاريف الإشهار بعملة أخرى ما عندهمش سعر}} وما داخلينش ف تكلفة الطلب.",
+  "health.ops.fin_ad_rate_missing.text": "{n, plural, zero {# أيام ديال مصاريف الإشهار بعملة أخرى ما عندهمش سعر} one {نهار واحد ديال مصاريف الإشهار بعملة أخرى ما عندوش سعر} two {# أيام ديال مصاريف الإشهار بعملة أخرى ما عندهمش سعر} few {# أيام ديال مصاريف الإشهار بعملة أخرى ما عندهمش سعر} many {# أيام ديال مصاريف الإشهار بعملة أخرى ما عندهمش سعر} other {# أيام ديال مصاريف الإشهار بعملة أخرى ما عندهمش سعر}} وما داخلينش ف تكلفة الطلب.",
   "health.ops.fin_ad_rate_missing.fix": "زيد سعر",
 
   /* ---- شاشة الربح (OPE-§16.2؛ /finance) ---- */
@@ -94,8 +94,8 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "fin.be.loss": "تكلفة توصيل فاشل",
   "fin.be.addSpend": "دخل مصاريف الإعلانات",
   "fin.be.addCosts": "زيد",
-  "fin.be.uncosted": "{n, plural, one {طلب موصل واحد فيه منتوج بلا تكلفة.} other {# طلبات موصلة فيهم منتوج بلا تكلفة.}}",
-  "fin.be.placed": "{n, plural, one {طلب واحد مسجل} other {# طلبات مسجلة}} فهاد المدة",
+  "fin.be.uncosted": "{n, plural, zero {# طلبات موصلة فيهم منتوج بلا تكلفة.} one {طلب موصل واحد فيه منتوج بلا تكلفة.} two {# طلبات موصلة فيهم منتوج بلا تكلفة.} few {# طلبات موصلة فيهم منتوج بلا تكلفة.} many {# طلبات موصلة فيهم منتوج بلا تكلفة.} other {# طلبات موصلة فيهم منتوج بلا تكلفة.}}",
+  "fin.be.placed": "{n, plural, zero {# طلبات مسجلة} one {طلب واحد مسجل} two {# طلبات مسجلة} few {# طلبات مسجلة} many {# طلبات مسجلة} other {# طلبات مسجلة}} فهاد المدة",
   "fin.be.capped": "محسوب غير على أحدث الطلبات ديال المدة.",
   "fin.be.needs": "خاص {min}",
   "fin.be.angle.col.angle": "الزاوية",
@@ -107,7 +107,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "fin.alerts.title": "تنبيهات مفتوحة",
   "fin.costs.bySku.hint": "دخل التكلفة ديال المنتوج مرة وحدة، بالـSKU ديالو: كل صفحة كتبيعو كتستعمل هاد التكلفة.",
   "fin.costs.noSku": "ما كاين حتى SKU دابا. عطي كود للمنتوج فالعروض ديال الصفحة باش تحسب التكلفة مرة وحدة لكاع الصفحات.",
-  "fin.costs.items": "{n, plural, one {منتوج واحد} other {# منتوجات}}",
+  "fin.costs.items": "{n, plural, zero {# منتوجات} one {منتوج واحد} two {# منتوجات} few {# منتوجات} many {# منتوجات} other {# منتوجات}}",
   "fin.costs.skuCost": "تكلفة الوحدة ديال {sku}",
   "fin.costs.pages": "المنتوجات حسب الصفحة",
   "fin.costs.pages.hint": "التكلفة اللي كتدخل هنا كتغلب على تكلفة الـSKU فهاد الصفحة.",
@@ -148,7 +148,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "fin.ads.col.total": "المجموع ({currency})",
   "fin.ads.today": "اليوم",
   "fin.ads.cellLabel": "مصاريف {platform} نهار {day}",
-  "fin.ads.needsRateN": "{n, plural, one {وحدة بلا سعر صرف} other {# بلا سعر صرف}}",
+  "fin.ads.needsRateN": "{n, plural, zero {# بلا سعر صرف} one {وحدة بلا سعر صرف} two {# بلا سعر صرف} few {# بلا سعر صرف} many {# بلا سعر صرف} other {# بلا سعر صرف}}",
   "fin.ads.changeCurrency": "بدل عملة الفوترة",
   "fin.ads.currency": "العملة",
   "fin.ads.currencyHint": "3 حروف، بحال USD. {currency} هي العملة ديال المتجر ديالك.",

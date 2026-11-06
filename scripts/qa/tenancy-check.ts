@@ -3331,8 +3331,15 @@ export async function reviewSuite(kit: Kit): Promise<void> {
       "agent: none of orders.read_all, orders.export, blocklist.write, pages, settings, integrations, pixels, exports",
       !(["orders.read_all", "orders.export", "blocklist.write", "pages.read", "settings.read", "integrations.manage", "pixels.manage", "export.create"] as StorePermission[]).some((p) => can("agent", p)),
     );
+    // since the P4 merge the agent reads its own queue only (OD12: the orders it holds or confirmed): B's main order is
+    // refused while someone else's, and read once it is the agent's (the assignee is restored after)
+    const outside = await call({ userId: agent }, appPath(fx.B.handle, "/orders"), () => actionFn({ file: ORDERS.file, name: "getOrderAction" })(fx.B.order.main));
+    check("agent (OD12): an order of its store outside its own queue answers as a missing one", refusal(outside) !== null && leaks(fx, answerOf(outside), { sent: fx.B.order.main }).length === 0, answerOf(outside));
+    const [[prev]] = (await pool().query("SELECT assignee_id AS a FROM orders WHERE id = ? AND store_id = ?", [fx.B.order.main, fx.B.id])) as unknown as [{ a: string | null }[]];
+    await pool().query("UPDATE orders SET assignee_id = ? WHERE id = ? AND store_id = ?", [agent, fx.B.order.main, fx.B.id]);
     const got = await call({ userId: agent }, appPath(fx.B.handle, "/orders"), () => actionFn({ file: ORDERS.file, name: "getOrderAction" })(fx.B.order.main));
-    check("agent (R1.0 interim): reads an order of its store's queue", refusal(got) === null, answerOf(got));
+    await pool().query("UPDATE orders SET assignee_id = ? WHERE id = ? AND store_id = ?", [prev?.a ?? null, fx.B.order.main, fx.B.id]);
+    check("agent (OD12): reads an order of its own queue", refusal(got) === null, answerOf(got));
     const gotA = await call({ userId: agent }, appPath(fx.B.handle, "/orders"), () => actionFn({ file: ORDERS.file, name: "getOrderAction" })(fx.A.order.main));
     const gotGhost = await call({ userId: agent }, appPath(fx.B.handle, "/orders"), () => actionFn({ file: ORDERS.file, name: "getOrderAction" })(fx.ghosts.get(fx.A.order.main)!));
     check("…never another store's (A's order answers as a missing one, no canary)", refusal(gotA) !== null && text(answerOf(gotA)) === text(unghost(fx, answerOf(gotGhost))) && leaks(fx, answerOf(gotA), { sent: fx.A.order.main }).length === 0, answerOf(gotA));

@@ -215,7 +215,7 @@ const STATE_WRITERS: ReadonlySet<string> = new Set(["src/lib/orders/transition.t
  * writes a state column fails the check, so the exemption cannot outlive its reason.
  */
 const STATE_WRITER_EXEMPT: Readonly<Record<string, string>> = {
-  "src/lib/sheets/sync.ts": "P5's legacy Sheets pull writes `status` on main until P5 merges (OPE-§19.6 moves it onto applyExternalStatus); the P4 verify step removes this line after rebasing on P5",
+  // (empty since the P4 merge: P5's Sheets pull moved onto applyExternalStatus and src/lib/sheets/sync.ts was split)
 };
 
 /** Property names declared anywhere inside `typeName` (type literals, and the interfaces / aliases of the same file it names). */

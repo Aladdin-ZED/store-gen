@@ -26,8 +26,10 @@ import { bumpOrderStats } from "@/lib/stats";
 import { byId } from "@/lib/tenancy/sql";
 import type { WriteScope } from "@/lib/tenancy/types";
 import { upsellTokenHash } from "./create";
+import { appendEvents } from "./events";
 import { logError } from "./log";
 import { versionDoc } from "./resolve";
+import { orderText } from "./text";
 
 export type UpsellResponse =
   | { ok: true; orderId: string; total: number; currency: string }
@@ -66,19 +68,37 @@ export async function acceptUpsell(scope: WriteScope, input: { orderId: string; 
 
   const price = round2(offer.price);
   const items: OrderItems = { ...order.items, upsell: upsellRecord(doc, offer, price) };
-  const res = await db
-    .update(orders)
-    .set({
-      items,
-      subtotal: sql`${orders.subtotal} + ${price}`,
-      total: sql`${orders.total} + ${price}`,
-      upsellTokenHash: null,
-      sheetStatus: sql`IF(${orders.sheetStatus} = 'disabled', 'disabled', 'pending')`,
-      updatedAt: new Date(),
-    })
-    .where(and(byId(orders, scope, order.id), eq(orders.upsellTokenHash, hash), notInArray(orders.status, [...CLOSED])));
-  const head = (Array.isArray(res) ? res[0] : res) as { affectedRows?: number };
-  if (head?.affectedRows !== 1) return { response: { ok: false, error: "invalid" }, sync: false }; // lost a race
+  // P0b P4-9 (applied at the P4 merge): the line change bumps `rev`, marks the sheet's line cells (`sheet_dirty |= 4`)
+  // and writes one `field_edited` event (actor customer) in the same transaction (OPE-§11.3).
+  const cut = (v: string) => (v ? Array.from(v).slice(0, 300).join("") : null);
+  const won = await db.transaction(async (tx) => {
+    const res = await tx
+      .update(orders)
+      .set({
+        items,
+        subtotal: sql`${orders.subtotal} + ${price}`,
+        total: sql`${orders.total} + ${price}`,
+        upsellTokenHash: null,
+        sheetStatus: sql`IF(${orders.sheetStatus} = 'disabled', 'disabled', 'pending')`,
+        rev: sql`${orders.rev} + 1`,
+        sheetDirty: sql`${orders.sheetDirty} | 4`,
+        updatedAt: new Date(),
+      })
+      .where(and(byId(orders, scope, order.id), eq(orders.upsellTokenHash, hash), notInArray(orders.status, [...CLOSED])));
+    const head = (Array.isArray(res) ? res[0] : res) as { affectedRows?: number };
+    if (head?.affectedRows !== 1) return false; // lost a race
+    await appendEvents(tx, scope, [
+      {
+        orderId: order.id,
+        actorKind: "customer",
+        type: "field_edited",
+        rev: order.rev + 1,
+        meta: { fields: [{ f: "items", before: cut(orderText(order.items, { mode: "customer" })), after: cut(orderText(items, { mode: "customer" })) }] },
+      },
+    ]);
+    return true;
+  });
+  if (!won) return { response: { ok: false, error: "invalid" }, sync: false };
 
   // honeypot rows (sheet disabled) and test orders (D54) stay out of the stats and the sheet
   const quiet = order.sheetStatus === "disabled" || order.isTest;

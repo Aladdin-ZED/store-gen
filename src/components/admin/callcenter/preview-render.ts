@@ -7,7 +7,7 @@
  *   "{var}" inserts a variable; "[[ … ]]" is an optional block dropped when a variable inside it is empty;
  *   "{{" and "}}" are literal braces.
  */
-import { renderTemplate, type TemplateVar } from "@/lib/integrations/templates";
+import { renderTemplate, type TemplateVar } from "@/lib/integrations/template-lang"; // the pure language (templates.ts is server-only since P5)
 
 type Values = Partial<Record<TemplateVar, string>>;
 

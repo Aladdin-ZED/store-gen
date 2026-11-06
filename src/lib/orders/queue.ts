@@ -155,6 +155,11 @@ async function decidedToday(scope: StoreScope, userId: string, tz: string, now: 
 }
 
 /** After an outcome that decided an order: the agent's cap counts it at once. */
+/** Drop a store's cached pulse parts (5 s): a test that just moved orders reads fresh numbers (P4 merge). */
+export function forgetOpsPulse(scope: StoreScope): void {
+  pulseCache.delete(scope.storeId);
+}
+
 export function forgetDecidedToday(scope: StoreScope, userId: string, tz: string): void {
   decidedCache.delete(scope.storeId, `${userId}:${storeYmd(opsNow(), tz)}`);
 }

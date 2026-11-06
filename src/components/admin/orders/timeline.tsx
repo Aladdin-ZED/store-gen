@@ -83,7 +83,7 @@ function iconOf(it: TimelineItem): ReactNode {
     case "created":
       return <PackageIcon />;
     case "state_changed":
-      return toneOf(it) === "success" ? <CheckIcon /> : <ArrowRightIcon />;
+      return toneOf(it) === "success" ? <CheckIcon /> : <ArrowRightIcon className="rtl:rotate-180" />;
     default:
       return <CircleDotIcon />;
   }

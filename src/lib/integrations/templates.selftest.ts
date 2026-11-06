@@ -372,7 +372,8 @@ export function templatesSelftest(): SectionResult {
       called++;
       return "09:30-13:00";
     };
-    const unconfigured = WINDOW_FIXTURES.map((c) => confirmHoursFor(c.window, "fr", new Date(c.at), never));
+    // P4's fixtures carry saved windows too (since the P4 merge): the unsaved case is each fixture with `configured: false`
+    const unconfigured = WINDOW_FIXTURES.map((c) => confirmHoursFor({ ...c.window, configured: false }, "fr", new Date(c.at), never));
     ok("confirm_hours: empty on every window the owner never saved (window.fixtures.ts)", WINDOW_FIXTURES.length > 0 && unconfigured.every((h) => h === "") && called === 0, unconfigured);
     // P4's hoursText wording: the fixture's `expect.hoursText` once P4 fills it; until then a stand-in that lists today's ranges
     const standIn = (w: EffectiveWindow, _l: unknown, _d: string, now: Date) => {
@@ -386,11 +387,13 @@ export function templatesSelftest(): SectionResult {
       const saved: EffectiveWindow = { ...c.window, configured: true };
       const at = new Date(c.at);
       const filled = confirmHoursFor(saved, "fr", at, standIn);
-      ok(`confirm_hours: filled once saved · ${c.name}`, filled !== "" && filled === standIn(saved, "fr", "fr-MA", at), filled);
+      // a day without a range (closed date, closed period, a night line's next day) stays empty even once saved
+      const want = standIn(saved, "fr", "fr-MA", at);
+      ok(`confirm_hours: filled once saved, empty on a day without a range · ${c.name}`, filled === want && (filled !== "" || want === ""), { filled, want });
       const real = confirmHoursFor(saved, "fr", at, hoursText);
-      const want = c.expect.hoursText?.fr;
-      if (want !== undefined) eq(`confirm_hours: P4's hoursText · ${c.name}`, real, want);
-      else if (real === "") realAvailable = false;
+      const wantReal = c.expect.hoursText?.fr;
+      if (wantReal !== undefined) eq(`confirm_hours: P4's hoursText · ${c.name}`, real, wantReal);
+      else if (real === "" && want !== "") realAvailable = false;
     }
     if (!realAvailable) notes.push("templates: P4's hoursText is still the P0 stub: a saved window answers \"\" (never a made-up line) until P4 merges");
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Casablanca", year: "numeric", month: "2-digit", day: "2-digit" }).format(FIXTURE_NOW);

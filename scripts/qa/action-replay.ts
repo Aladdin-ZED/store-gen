@@ -151,6 +151,9 @@ async function originSuite(kit: Kit): Promise<void> {
   const samples = ACTION_CASES.filter((c) => ["setAssetAltAction", "updateOrderStatusAction", "saveDraft", "starVersionAction"].includes(c.name));
   for (const c of samples) {
     const args = await c.victim(fx, fresh);
+    // since the P4 merge a status move goes through the state machine: the replay suite already confirmed A's main
+    // order (confirmed → confirmed is refused as illegal), so the origin checks move a fresh order of A's
+    if (c.name === "updateOrderStatusAction") args[0] = await fresh.order(fx.A);
     const cases: [string, Record<string, string>, boolean][] = [
       ["same origin", { host: new URL(PLATFORM).host, origin: PLATFORM, "sec-fetch-site": "same-origin" }, true],
       ["Origin: null", { host: new URL(PLATFORM).host, origin: "null" }, false],

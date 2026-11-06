@@ -16,8 +16,6 @@
  * beside the chords; `test:ops` proves it disjoint from the shell chords (`G O`, `G Q` …). The console itself matches it
  * by `event.code` (src/components/admin/queue/keys.ts).
  */
-import { openTestOrderAction } from "@/app/app/[store]/orders/actions";
-import { openCallsNowAction } from "@/app/app/[store]/team/callcenter/actions";
 import { QUEUE_KEYS, type QueueKey } from "@/components/admin/queue/keys";
 import { appHref } from "@/lib/urls";
 import type { CommandDef } from "./types";
@@ -44,6 +42,8 @@ export const commands: CommandDef[] = [
     permission: "pages.publish",
     release: "R1",
     run: async (ctx) => {
+      // loaded on run: the registry is imported outside the server bundle too (P2's test:shell; P4 merge)
+      const { openTestOrderAction } = await import("@/app/app/[store]/orders/actions");
       const res = await openTestOrderAction();
       if (res.ok && res.data.ok && typeof window !== "undefined") window.open(res.data.data.url, "_blank", "noopener");
       else ctx.navigate(base(ctx.store.handle, "/orders?view=test"));
@@ -72,6 +72,7 @@ export const commands: CommandDef[] = [
     permission: "callcenter.configure",
     release: "R1",
     run: async (ctx) => {
+      const { openCallsNowAction } = await import("@/app/app/[store]/team/callcenter/actions");
       await openCallsNowAction();
       ctx.navigate(base(ctx.store.handle, "/queue/board"));
     },

@@ -85,7 +85,7 @@ type StoreAreaAction =
   | `orders.${"status_forced" | "exported" | "test_deleted" | "carrier_exported" | "refunded"}`
   | `integrations.${"sheets.connected" | "sheets.disconnected" | "telegram.changed" | "conversions.changed" | "outbox.replayed"}`
   | `callcenter.${"settings.updated" | "calls_opened" | "label_mapped"}`
-  | `finance.${"costs.updated" | "ad_spend.updated" | "settings.updated" | "period_closed" | "period_reopened"}`
+  | `finance.${"costs.updated" | "ad_spend.updated" | "settings.updated" | "period_closed" | "period_reopened" | "cost.saved" | "carrier_rate.saved" | "ad_spend.saved"}`
   | "commissions.rule_changed"
   | `payouts.${"approved" | "paid"}`
   | "webhooks.endpoint_changed"

@@ -169,8 +169,8 @@ const createdEvent = (order: OrderRow, conversion: PurchaseConversion | null): O
  *  - the same idempotency key already stored in this store → that order, `replayed`, nothing inserted; in another
  *    store → OrderIdemTaken (the caller answers "invalid": the key is global, the order is not);
  *  - after the commit, `runOrderHooks("created", "afterCommit", …)` inside after() with the built Purchase event.
- * With 0005 (P0, through the maintainer: this file is maintainer-owned from P0) the same transaction gains the
- * `order_events` "created" row and the `INSERT IGNORE` outbox items.
+ * The `order_events` "created" row is written by the `ops.created` hook (src/lib/orders/hooks/ops.ts), once, after
+ * the commit; the `INSERT IGNORE` outbox items by P5's inTx hooks (CCR r1-p4-3).
  */
 export function createOrderRow(draft: OrderDraft, ctx: CreateOrderRowCtx): Promise<CreatedOrderRow> {
   return insertOrderRow(ctx.scope, draft, ctx);
@@ -423,7 +423,7 @@ async function placeOrder(scope: WriteScope, payload: OrderPayload, ctx: CreateO
     db
       .select({ status: orders.status, n: sql<number>`COUNT(*)` })
       .from(orders)
-      .where(whereStore(orders, scope, eq(orders.phone, o.phone.e164), inArray(orders.status, ["fake", "returned", "cancelled", "delivered"]), real))
+      .where(whereStore(orders, scope, eq(orders.phone, o.phone.e164), inArray(orders.status, ["fake", "returned", "cancelled", "delivered"]), real, notHoneypot))
       .groupBy(orders.status),
   ]);
   const count = (s: string) => Number(history.find((h) => h.status === s)?.n ?? 0);

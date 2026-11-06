@@ -110,6 +110,12 @@ const manualInput = (pageId: string) => ({
   confirmed: false,
   idem: randomUUID(),
 });
+/** A lead conversion's input: the manual order's fields without `pageId` (the lead names its page). */
+const leadInput = () => {
+  const { pageId: _pageId, ...rest } = manualInput("");
+  void _pageId;
+  return rest;
+};
 
 /** The customer row of `orderId`, or an id no customer has. */
 async function customerOf(orderId: string): Promise<string> {
@@ -289,6 +295,7 @@ export const cases: TenancyCase[] = [
         }
 
         // the pulse counts B's rows only: the same numbers as a count over B's orders
+        Q.forgetOpsPulse(B); // an earlier suite may have cached B's 5 s pulse before these cases moved B's orders
         const pulse = await kit.call({ anonymous: true }, "/", () => Q.opsPulse(B, { userId: kit.fx.B.members.owner, role: "owner" }));
         const [[counts]] = (await db.execute(sql`
           SELECT SUM((confirm_state IN ('new', 'attempting', 'callback') AND (due_at IS NULL OR due_at <= UTC_TIMESTAMP(3)) OR confirm_state = 'confirmed' AND due_at IS NOT NULL AND due_at <= UTC_TIMESTAMP(3)) AND (lease_until IS NULL OR lease_until < UTC_TIMESTAMP(3))) AS queueNow,
@@ -689,8 +696,9 @@ export const actions: TrackActionCase[] = [
     path: "/orders",
     permission: ["orders.create", "leads.write"],
     write: true,
-    victim: (fx) => [fx.A.lead, { ...manualInput(""), pageId: undefined }],
-    own: (fx) => [fx.B.lead, { ...manualInput(""), pageId: undefined }],
+    // no `pageId` key at all (ConvertLeadSchema is strict; a replayed body keeps an undefined key, P4 merge)
+    victim: (fx) => [fx.A.lead, leadInput()],
+    own: (fx) => [fx.B.lead, leadInput()],
   },
   { file: ORDERS, name: "dismissDuplicateAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: (fx) => [fx.A.order.main, fx.A.order.failed], own: (fx) => [fx.B.order.main, fx.B.order.failed] },
   { file: ORDERS, name: "setShipAfterAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: (fx) => [fx.A.order.main, null], own: async (fx, fresh) => [await fresh.order(fx.B), null] },

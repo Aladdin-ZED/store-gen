@@ -148,12 +148,14 @@ async function main() {
   check("the first contributor keeps a repeated key", run.counts.newOrders === 2 && run.counts.dupOnly === 1);
   check("failures name only the failed contributors", run.failures.map((f) => f.id).sort().join() === "slow,sync,throws");
   check("the registered contributors have unique ids and a contribute function", new Set(PULSE_CONTRIBUTORS.map((c) => c.id)).size === PULSE_CONTRIBUTORS.length && PULSE_CONTRIBUTORS.every((c) => typeof c.contribute === "function"));
-  // the shell's own reads the database (its readers are wired by the server loader, not here); the others are P0 stubs
-  const stubs = PULSE_CONTRIBUTORS.filter((c) => c.id !== "shell");
+  // the shell's own reads the database (its readers are wired by the server loader, not here), and so does P4's `ops`
+  // since the P4 merge (opsPulse, loaded lazily); the others answer no key offline
+  const DB_BACKED = new Set(["shell", "ops"]);
+  const stubs = PULSE_CONTRIBUTORS.filter((c) => !DB_BACKED.has(c.id));
   const registered = await runContributors(stubs, SCOPE, OWNER);
   check("the stub contributors answer within budget and give no key", registered.failures.length === 0 && Object.keys(registered.counts).length === 0, registered);
   const offline = await runContributors(PULSE_CONTRIBUTORS, SCOPE, OWNER);
-  check("offline, the shell contributor's failure is its own (no other key lost, no throw)", offline.failures.every((f) => f.id === "shell") && !("membersPendingInvites" in offline.counts), offline.failures);
+  check("offline, the database-backed contributors' failures are their own (no other key lost, no throw)", offline.failures.every((f) => DB_BACKED.has(f.id)) && !("membersPendingInvites" in offline.counts) && !("queueNow" in offline.counts), offline.failures);
 
   /* ---- per-user parts are never cached across users ---- */
   const cacheStore = new Map<string, PulseStorePart>();

@@ -5,13 +5,14 @@
  * per browser, OD33); `syncFailed` is P5's key (`./integrations.ts`), so it is not repeated here. The numbers are
  * `opsPulse` (src/lib/orders/queue.ts): the store parts cached 5 s per store, an agent's own callbacks read fresh.
  * A failure throws and the route omits these keys (core §I.4), never a made-up 0.
+ * The registry is imported outside the server bundle too (P2's `test:pulse`), so the server read loads lazily (P4 merge).
  */
-import { opsPulse } from "@/lib/orders/queue";
 import type { PulseContributor } from "../types";
 
 export const contributor: PulseContributor = {
   id: "ops",
   contribute: async (scope, viewer) => {
+    const { opsPulse } = await import("@/lib/orders/queue");
     const p = await opsPulse(scope, viewer);
     return { newOrders: p.newOrders, dueCallbacks: p.dueCallbacks, queueNow: p.queueNow };
   },

@@ -443,7 +443,7 @@ async function applyMarks(scope: WriteScope, marks: readonly SheetMark[], readAt
     await db
       .update(orders)
       .set({
-        ...("sheetLabel" in g[0]!.set ? { sheetLabel: g[0]!.set.sheetLabel ?? null } : {}),
+        sheetLabel: "sheetLabel" in g[0]!.set ? (g[0]!.set.sheetLabel ?? null) : sql`${orders.sheetLabel}`,
         sheetDirty: sql`IF(${same}, ${orders.sheetDirty} & ${ALL_BITS & ~g[0]!.clearDirty}, ${orders.sheetDirty})`,
       })
       .where(whereStore(orders, scope, ids(g)));
@@ -472,7 +472,7 @@ async function failAppends(scope: WriteScope, ids: readonly string[], message: s
     .set({
       sheetStatus: "failed",
       sheetError: message.slice(0, MESSAGE_MAX),
-      ...(claimed ? {} : { sheetAttempts: sql`${orders.sheetAttempts} + 1` }),
+      sheetAttempts: claimed ? sql`${orders.sheetAttempts}` : sql`${orders.sheetAttempts} + 1`,
       updatedAt: new Date(),
     })
     .where(whereStore(orders, scope, inArray(orders.id, [...ids]), inArray(orders.sheetStatus, ["pending", "failed"])));

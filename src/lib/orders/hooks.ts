@@ -20,8 +20,7 @@ import type { orders } from "@/lib/db/schema";
 import { logError } from "@/lib/orders/log";
 import type { WriteScope } from "@/lib/tenancy/types";
 import type { PurchaseConversion } from "./conversions-core";
-import type { Move, OrderSnapshot, TransitionSource } from "./state";
-import type { OrderActor } from "./transition";
+import type { Move, OrderActor, OrderSnapshot, TransitionSource } from "./state";
 import { hooks as integrationsHooks } from "./hooks/integrations";
 import { hooks as landingHooks } from "./hooks/landing";
 import { hooks as opsHooks } from "./hooks/ops";
@@ -30,8 +29,7 @@ export type OrderRow = typeof orders.$inferSelect;
 /** The handle of the order's transaction (inTx hooks write with it). */
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export type { Move, OrderSnapshot, TransitionSource } from "./state";
-export type { OrderActor } from "./transition";
+export type { Move, OrderActor, OrderSnapshot, TransitionSource } from "./state";
 
 export type OrderHookEvent =
   | { on: "created"; order: OrderRow; conversion: PurchaseConversion | null; target: { pageId: string; versionId: string | null; source: OrderRow["source"] } }

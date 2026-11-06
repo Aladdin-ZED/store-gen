@@ -175,21 +175,12 @@ const own = (scope: StoreScope, id: string) => whereStore(orders, scope, eq(orde
 async function attribute(scope: WriteScope, id: string, label: string, member: string | null): Promise<number> {
   const res = await db
     .update(orders)
-    .set({ confirmedByLabel: label, ...(member ? { confirmedBy: member } : {}) })
+    .set({ confirmedByLabel: label, confirmedBy: member }) // the row matches only while confirmed_by IS NULL: null keeps it
     .where(whereStore(orders, scope, eq(orders.id, id), eq(orders.isTest, false), isNull(orders.confirmedBy), eq(orders.confirmState, "confirmed")));
   return affected(res);
 }
 
 type Status = Extract<PullDecision, { kind: "status" }>;
-
-/** R1.0's pull of one status cell (while P4's applyExternalStatus is the stub): the status and the label it read. */
-async function legacyStatus(scope: WriteScope, d: Status): Promise<number> {
-  const res = await db
-    .update(orders)
-    .set({ status: d.label, sheetLabel: d.label, updatedAt: new Date() })
-    .where(whereStore(orders, scope, eq(orders.id, d.orderId), eq(orders.isTest, false), eq(orders.sheetStatus, "synced")));
-  return affected(res);
-}
 
 /** `sheet_label` / `sheet_dirty` after an applied status cell (OPE-§19.6; the guard is the rev the move answered). */
 async function bookkeeping(scope: WriteScope, d: Status, answer: ExternalAnswer): Promise<{ applied: boolean; writeBack: boolean }> {
@@ -230,18 +221,9 @@ export async function applyPullDecisions(scope: WriteScope, decisions: readonly 
     try {
       switch (d.kind) {
         case "status": {
-          let answer: ExternalAnswer;
-          try {
-            answer = (await p4.applyExternalStatus(scope, d.orderId, d.ext, d.src)) as ExternalAnswer;
-          } catch (err) {
-            if (!notImplemented(err)) throw err;
-            // P4's stub: the R1.0 pull (status and label), so a store's status pull never stops before P4 merges
-            if ((await legacyStatus(scope, d)) > 0) {
-              r.legacyMoves++;
-              changed.add(d.orderId);
-            }
-            break;
-          }
+          // since the P4 merge every status cell goes through P4's applyExternalStatus (OPE-§19.6); the R1.0 direct
+          // status write is gone (test:ops state-writer lint), so `legacyMoves` stays 0 and a failure is deferred
+          const answer = (await p4.applyExternalStatus(scope, d.orderId, d.ext, d.src)) as ExternalAnswer;
           const done = await bookkeeping(scope, d, answer);
           if (done.applied) changed.add(d.orderId);
           if (done.writeBack) r.writeBack++;

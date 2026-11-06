@@ -14,9 +14,11 @@
  * registry item has the same id or link, so each shows exactly once before and after its owner's merge.
  */
 import {
+  ActivityIcon,
   BellIcon,
   CableIcon,
   CircleIcon,
+  ContactIcon,
   ContactRoundIcon,
   CpuIcon,
   FileTextIcon,
@@ -50,6 +52,7 @@ import {
   StoreIcon,
   TriangleAlertIcon,
   TruckIcon,
+  UserCogIcon,
   UsersRoundIcon,
   WalletIcon,
   WebhookIcon,
@@ -64,8 +67,10 @@ import { INTERIM_NAV, NAV_KEYWORDS } from "./nav/t4";
 
 /** The registry's icon names (lucide without the "Icon" suffix) the shell draws; an unknown name draws a circle. */
 const ICONS: Readonly<Record<string, LucideIcon>> = {
+  Activity: ActivityIcon,
   Bell: BellIcon,
   Cable: CableIcon,
+  Contact: ContactIcon,
   ContactRound: ContactRoundIcon,
   Cpu: CpuIcon,
   FileText: FileTextIcon,
@@ -99,6 +104,7 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
   Store: StoreIcon,
   TriangleAlert: TriangleAlertIcon,
   Truck: TruckIcon,
+  UserCog: UserCogIcon,
   UsersRound: UsersRoundIcon,
   Wallet: WalletIcon,
   Webhook: WebhookIcon,

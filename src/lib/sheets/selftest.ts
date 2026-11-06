@@ -168,9 +168,9 @@ export function sheetsSelftest(): SectionResult {
 
   /* ---------------- R1 cells ---------------- */
   eq(
-    "Statut livraison: the legacy label while P4's ops.ship keys are missing, empty before shipping",
+    "Statut livraison: P4's ops.ship labels (fr, since the P4 merge), empty before shipping",
     (["none", "to_pack", "packed", "shipped", "in_transit", "out_for_delivery", "attempt_failed", "postponed", "delivered", "refused", "returned", "lost"] as ShipState[]).map((s) => shipStateLabel(s, "fr")),
-    ["", "Confirmée", "Confirmée", "Expédiée", "En livraison", "En livraison", "En livraison", "En livraison", "Livrée", "Refusée", "Retournée", "Perdue"],
+    ["", "À préparer", "Emballée", "Expédiée", "En transit", "En cours de livraison", "Tentative échouée", "Reportée", "Livrée", "Refusée", "Retournée", "Perdue"],
   );
   const fr = r1Values(order({ shipState: "attempt_failed" }), { ...ctx, shipLabel: (s) => (s === "attempt_failed" ? "Tentative échouée" : s) });
   const ar = r1Values(order({ shipState: "attempt_failed" }), { ...ctx, locale: "ar", shipLabel: (s) => (s === "attempt_failed" ? "محاولة فاشلة" : s) });
@@ -265,7 +265,7 @@ export function sheetsSelftest(): SectionResult {
   /* ---------------- bits → cells ---------------- */
   const ranges = (o: PlanOrder, header = FULL_HEADER) => runPlan(base({ orders: [o] }), fakeSheet(header, [{ id: "CMD-OTHER1", label: "Nouvelle" }, { id: o.id, label: statusLabel(o.sheetLabel ?? "new") }])).plan.batchUpdate?.map((d) => `${d.range}=${d.values[0]!.join("|")}`);
   const conf = synced({ sheetDirty: 1, status: "confirmed", confirmState: "confirmed", shipState: "to_pack", confirmedByLabel: "Ahmed" });
-  eq("bit 1 → C + Agent + Statut livraison", ranges(conf), ["C3=Confirmée", "S3=Ahmed", "W3=Confirmée"]);
+  eq("bit 1 → C + Agent + Statut livraison", ranges(conf), ["C3=Confirmée", "S3=Ahmed", "W3=À préparer"]);
   const contact = synced({ sheetDirty: 2, name: "Salma B", landmark: "Derb", trackingRef: "AMN1", carrierLabel: "Amana", shipAfter: new Date("2026-11-04T12:00:00Z") });
   eq("bit 2 → D-G + Repère + Tracking + Transporteur + Livrer à partir du", ranges(contact), ["D3:G3=Salma B|0612345678|Casablanca|Rue 1", "R3=Derb", "U3:V3=AMN1|Amana", "X3=04/11/2026"]);
   const lines = synced({ sheetDirty: 4, total: 398 });

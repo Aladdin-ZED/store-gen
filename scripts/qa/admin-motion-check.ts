@@ -142,6 +142,8 @@ const PENDING: PendingEntry[] = [
   { path: "src/components/admin/variants/options-field.tsx", rule: "duration", owner: UNOWNED, ccr: "r1-p2-1 §1" },
   { path: "src/components/admin/pages/page-card.tsx", rule: "duration", owner: "P3", ccr: "r1-p2-1 §3" },
   { path: "src/components/admin/orders/order-drawer.tsx", rule: "duration", owner: "P4", ccr: "r1-p2-1 §5" },
+  // P4 merge: the queue's two loop indicators (the pending cell's 900 ms sweep, the skeleton's 1.4 s shimmer), not transitions
+  { path: "src/components/admin/queue/queue.css", rule: "duration", owner: "P4", ccr: "P4 merge report (integration)" },
   { path: "src/components/generate/**", rule: "duration", owner: "P6", ccr: "r1-p2-1 §6" },
 ];
 

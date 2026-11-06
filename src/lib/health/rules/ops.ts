@@ -142,7 +142,8 @@ export const rules: HealthRule[] = [
   rule("delivery_rescue", undefined, (f) =>
     f.rescueWaiting4h >= 3 ? issue("delivery_rescue", 2, { metric: "rescue_waiting_4h", value: f.rescueWaiting4h, baseline: 3, window: "now", n: f.rescueWaiting4h }, "/queue/board") : null,
   ),
-  rule("sheet_agents_unmapped", 20, (f) =>
+  // the 20 confirmations are per label, inside the fact (unmappedLabels20); `n` counts labels, so no engine minN (P4 merge)
+  rule("sheet_agents_unmapped", undefined, (f) =>
     f.unmappedLabels20 >= 1 ? issue("sheet_agents_unmapped", 1, { metric: "sheet_labels_unmapped", value: f.unmappedLabels20, window: "28d", n: f.unmappedLabels20 }, "/integrations/sheets#agents") : null,
   ),
   finRule("costs_missing", undefined, (f) =>
