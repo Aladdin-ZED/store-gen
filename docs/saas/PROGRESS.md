@@ -44,6 +44,12 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **SCREENSHOT RULE 2026-11-06 ~03:20** (76/106, ≈ 47.9%; weekly usage 64%, and only +1% in the 40 min since the 4-track
+  relaunch). P2's 10-path ui-shots run (40 shots) took ~1 min per shot with 0.2 GB free RAM and hit the 45-min mutex cap. A
+  LEAD NOTE b was appended to the 25 remaining UI briefs and the SPEED block: one viewport per run in both locales
+  (390x844 phone-first, 1440x900 desktop-first), at most 8 paths per run, re-shoot only changed paths, and after a cap kill
+  shoot only the paths without a PNG.
+
 - **ONE RUN, 4 TRACKS AT A TIME, 2026-11-06 ~02:30** (74/106, ≈ 47.5%; weekly usage 62%). The UI steps' check bundles held the
   mutex 10-35 min each, so 8 agents mostly waited (5 of them with the old 10-min cache-missing waits) and no step finished for
   80 min. Both runs stopped (wf_8c657bfb-521, wf_c5c653e7-8a8); the two orphaned queued heavy wrappers were stopped (P2's
