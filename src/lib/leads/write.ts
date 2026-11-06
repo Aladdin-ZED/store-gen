@@ -14,7 +14,7 @@ import "server-only";
  *   setFollowUp    the next follow-up, or none
  * No message is ever sent to a shopper by the platform (LD10): the inbox opens wa.me or tel: on the agent's device.
  */
-import { and, asc, eq, gte, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { affected, auditIn } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { leads, storeMembers } from "@/lib/db/schema";
@@ -159,5 +159,21 @@ export async function setFollowUp(scope: WriteScope, by: LeadWriter, leadId: str
     .update(leads)
     .set({ nextAt: at, updatedAt: now })
     .where(whereStore(leads, scope, eq(leads.id, leadId), inArray(leads.status, [...OPEN]), writableBy(by)));
+  return affected(res) === 1 ? { ok: true } : NOT_FOUND;
+}
+
+/**
+ * The Undo of "Mark lost": a `lost` lead goes back to `contacted` (it had attempts) or `new`, without its reason, with
+ * the follow-up it had (`nextAt`, null for none). Only a lead lost through the inbox (a reason set).
+ */
+export async function reopenLead(scope: WriteScope, by: LeadWriter, leadId: string, nextAt: Date | null, now: Date = new Date()): Promise<{ ok: true } | NotFound> {
+  if (!ID_RE.test(leadId)) return NOT_FOUND;
+  if (nextAt !== null && (!(nextAt instanceof Date) || Number.isNaN(nextAt.getTime()))) return NOT_FOUND;
+  // an agent reopens what they could mark lost: their own leads and the unassigned ones
+  const guard = by.role === "agent" ? or(eq(leads.assigneeId, by.actor.userId ?? ""), isNull(leads.assigneeId)) : undefined;
+  const res = await db
+    .update(leads)
+    .set({ status: sql`IF(${leads.attempts} > 0, 'contacted', 'new')`, lostReason: null, nextAt, updatedAt: now })
+    .where(whereStore(leads, scope, eq(leads.id, leadId), eq(leads.status, "lost"), gte(leads.createdAt, new Date(now.getTime() - LEAD_WINDOW_DAYS * DAY_MS)), guard));
   return affected(res) === 1 ? { ok: true } : NOT_FOUND;
 }

@@ -23,7 +23,12 @@
  *     ≤ 50 ms warm, a failure omits the keys); the follow-up digest per assignee;
  *  7. the 30-day purge of the housekeeping step (per store);
  *  8. page vitals (LP-22): the SQL fixture (7 store days, test orders excluded, rates hidden below n = 20, the sparkline
- *     points, another store's page reads zeros) and the mode-switch plan numbers (LAN-§4).
+ *     points, another store's page reads zeros) and the mode-switch plan numbers (LAN-§4);
+ *  9. the inbox actions (p3-w1-pages-leads-screens): the reveal (one audited attempt, the wa.me recovery text with the
+ *     first name and the store, tel:), agent isolation of every write and of the conversion, convert idempotency (a
+ *     double submit and two parallel submits of one sheet give one order), the Undo of "Mark lost", the CSV (masked
+ *     phones, BOM, formula-safe, selection, agent and store scoped), the lead cities, Set as home's published-page rule
+ *     and the LAN-§4 `inStoreMode` fallback (once, audited, store mode only).
  * Exits 1 on any failure.
  */
 import { randomBytes, randomUUID } from "node:crypto";
@@ -535,6 +540,131 @@ async function main(): Promise<number> {
     check("mode plan: live landing pages and their 7-day views", plan.livePages === Number(live!.n) && plan.views7d === Number(views!.n) && plan.views7d >= 21 + 210 && plan.suggestInStoreMode, { plan, live: live!.n, views: views!.n });
     const empty = await MP.landingModeSwitchPlan(T.scopeOf(fx.A.id) as StoreScope);
     check("mode plan: stable on a second read", JSON.stringify(empty) === JSON.stringify(plan));
+  }
+
+  /* ------------------------------------------------------------ 9. inbox actions (p3-w1-pages-leads-screens) */
+  suite("inbox actions");
+  {
+    const W = load<typeof import("@/lib/leads/write")>("@/lib/leads/write");
+    const R = load<typeof import("@/lib/leads/read")>("@/lib/leads/read");
+    const CT = load<typeof import("@/lib/leads/contact.server")>("@/lib/leads/contact.server");
+    const CV = load<typeof import("@/lib/leads/convert.server")>("@/lib/leads/convert.server");
+    const CSV = load<typeof import("@/lib/leads/csv")>("@/lib/leads/csv");
+    const H = load<typeof import("@/lib/landing/home.server")>("@/lib/landing/home.server");
+    const IM = load<typeof import("@/lib/landing/in-store-mode.server")>("@/lib/landing/in-store-mode.server");
+    const agent = { actor: T.userActor(agentA), role: "agent" };
+    const manager = { actor: T.userActor(managerA), role: "manager" };
+    const ctxA = ownerCtx(kit, "A");
+    const agentCtx = { ...ctxA, user: { ...ctxA.user, id: agentA }, membership: { role: "agent", status: "active" }, actor: T.userActor(agentA) } as WriteCtx;
+    const ctxB = ownerCtx(kit, "B");
+
+    // the reveal: the attempt answers the phone once, audited, and the link carries the store's recovery text
+    const phone = "+212612345678";
+    const r1 = await lead("A", { phone, name: "Salma Bennani", selection: "2 x Serum 30 ml", totalCents: 24_900 });
+    const at = await W.logAttempt(A, agent, r1, "whatsapp");
+    const row = await R.getLeadRow(A, r1, { userId: agentA, role: "agent" });
+    const href = row && at.ok ? await CT.contactHref(A, kit.fx.rows.A.name, row, at.phone, "whatsapp") : null;
+    const text = href ? decodeURIComponent(href.split("?text=")[1] ?? "") : "";
+    check("reveal: wa.me link to the lead's digits", !!href && href.startsWith("https://wa.me/212612345678?text="), href);
+    check("reveal: the recovery text names the first name, the store and the selection", text.includes("Salma") && !text.includes("Bennani") && text.includes(kit.fx.rows.A.name) && text.includes("Serum"), text);
+    check("reveal: the row stays masked after the reveal", !!row?.phone && row.phone.includes("•") && !row.phone.replace(/\D/g, "").includes("612345678"), row?.phone);
+    const call = row && at.ok ? await CT.contactHref(A, kit.fx.rows.A.name, row, at.phone, "call") : null;
+    check("reveal: Call is a tel: link", call === "tel:+212612345678", call);
+    const audits = await db.select().from(S.auditLog).where(and(eq(S.auditLog.action, "lead.phone_revealed"), eq(S.auditLog.target, r1)));
+    check("reveal: audited lead.phone_revealed in A with the channel", audits.length === 1 && audits[0]!.storeId === fx.A.id && (audits[0]!.meta as { channel?: string } | null)?.channel === "whatsapp", audits.map((a) => a.meta));
+    check("reveal: no phone, no link", (await CT.contactHref(A, "x", row!, null, "whatsapp")) === null);
+
+    // agent isolation: another member's lead is out of reach for every inbox write and for the conversion
+    const theirs = await lead("A", { assigneeId: managerA, status: "contacted", attempts: 1 });
+    let converted = 0;
+    const fake = (async (_c: WriteCtx, leadId: string, input: { idem: string }) => {
+      converted++;
+      const o = await order("A", { idem: input.idem, phone });
+      void leadId;
+      return { ok: true as const, data: { orderId: o.id } };
+    }) as unknown as Parameters<typeof CV.convertLeadFor>[3];
+    const input = { name: "Salma", city: "Casablanca", confirmed: true, idem: randomUUID() };
+    const denied = await CV.convertLeadFor(agentCtx, theirs, input, fake);
+    check("agent: converting another member's lead → not_found, nothing created", !denied.ok && denied.error === "not_found" && converted === 0, denied);
+    check("agent: an attempt on another member's lead → not_found", !(await W.logAttempt(A, agent, theirs, "call")).ok);
+    check("agent: follow-up on another member's lead → not_found", !(await W.setFollowUp(A, agent, theirs, null)).ok);
+    check("agent: the inbox never lists another member's lead", !(await R.listLeadRows(A, { view: "all" }, { userId: agentA, role: "agent" })).rows.some((l) => l.id === theirs));
+    check("B: converting A's lead → not_found", !(await CV.convertLeadFor(ctxB, theirs, input, fake)).ok && converted === 0);
+
+    // conversion: the order is created once, the lead is recovered by the agent, a second submit answers the same order
+    const c1 = await CV.convertLeadFor(ctxA, theirs, input, fake);
+    const after = await leadRow(theirs);
+    check("convert: the order is created and recorded on the lead", c1.ok && !c1.already && after?.convertedOrderId === c1.orderId && after?.status === "recovered" && after.convertedVia === "agent" && converted === 1, { c1, after });
+    const c2 = await CV.convertLeadFor(ctxA, theirs, input, fake);
+    check("convert: a double submit answers the first order, nothing created", c2.ok && c2.already && c2.ok && c1.ok && c2.orderId === c1.orderId && converted === 1, c2);
+    const twin = await lead("A", { phone: phoneOf() });
+    const idem = randomUUID();
+    const once = (async (_c: WriteCtx, _l: string, inp: { idem: string }) => {
+      // P4's createManualOrder answers the first order of an idem: the parallel twin gets the same id
+      const [hit] = await db.select({ id: S.orders.id }).from(S.orders).where(and(eq(S.orders.storeId, fx.A.id), eq(S.orders.idem, inp.idem))).limit(1);
+      if (hit) return { ok: true as const, data: { orderId: hit.id } };
+      try {
+        const o = await order("A", { idem: inp.idem });
+        converted++;
+        return { ok: true as const, data: { orderId: o.id } };
+      } catch {
+        // the twin won the unique idem: answer its order, as P4's insert does
+        const [won] = await db.select({ id: S.orders.id }).from(S.orders).where(and(eq(S.orders.storeId, fx.A.id), eq(S.orders.idem, inp.idem))).limit(1);
+        return { ok: true as const, data: { orderId: won!.id } };
+      }
+    }) as unknown as Parameters<typeof CV.convertLeadFor>[3];
+    const [p1, p2] = await Promise.all([CV.convertLeadFor(ctxA, twin, { ...input, idem }, once), CV.convertLeadFor(ctxA, twin, { ...input, idem }, once)]);
+    check("convert: two parallel submits of one sheet give one order", p1.ok && p2.ok && p1.orderId === p2.orderId && (await leadRow(twin))?.convertedOrderId === p1.orderId, { p1, p2 });
+    check("convert: a malformed sheet is invalid before anything runs", !(await CV.convertLeadFor(ctxA, twin, { ...input, idem: "nope" }, fake)).ok);
+    const intent = await lead("A", { phone: null, kind: "whatsapp", ref: `WA-${tag()}` });
+    const noPhone = await CV.convertLeadFor(ctxA, intent, { ...input, idem: randomUUID() }, fake);
+    check("convert: an intent without a phone is refused", !noPhone.ok && noPhone.message === "landing.leads.convert.noPhone", noPhone);
+
+    // Undo of "Mark lost": the lead is open again with its follow-up
+    const reopen = await lead("A", { status: "contacted", attempts: 2, assigneeId: agentA, nextAt: new Date(Date.now() + 5 * HOUR) });
+    const before = (await leadRow(reopen))!.nextAt;
+    await W.markLost(A, agent, reopen, "no_answer");
+    const back = await W.reopenLead(A, agent, reopen, before);
+    const reopened = await leadRow(reopen);
+    check("undo lost: contacted again, reason cleared, follow-up back", back.ok && reopened?.status === "contacted" && reopened.lostReason === null && reopened.nextAt?.getTime() === before?.getTime(), reopened);
+    check("undo lost: an open lead is not reopened", !(await W.reopenLead(A, agent, reopen, null)).ok);
+    await W.markLost(A, manager, reopen, "price");
+    check("undo lost: B cannot reopen A's lead", !(await W.reopenLead(B, { actor: T.userActor(fx.B.members.owner), role: "owner" }, reopen, null)).ok && (await leadRow(reopen))?.status === "lost");
+
+    // the CSV: the inbox rows (masked phones), a BOM, formula-safe cells, a selection, nothing of another store
+    await lead("A", { name: "=HYPERLINK(1)", phone });
+    const rows = await R.exportLeadRows(A, { view: "all" }, { userId: managerA, role: "manager" });
+    const csv = CSV.leadCsv(rows);
+    check("csv: BOM and header", csv.startsWith("﻿id,created_at,status"), csv.slice(0, 40));
+    check("csv: phones stay masked", !csv.includes("612345678") && !csv.includes(phone), null);
+    check("csv: a formula cell is neutralised", csv.includes("'=HYPERLINK(1)") && !/(^|,)=HYPERLINK/m.test(csv));
+    check("csv: money from cents", csv.includes(",249.00,"), null);
+    const picked = await R.exportLeadRows(A, { view: "all" }, { userId: managerA, role: "manager" }, [r1, twin]);
+    check("csv: ids narrow the export", picked.length === 2 && picked.every((l) => l.id === r1 || l.id === twin), picked.map((l) => l.id));
+    check("csv: B exporting A's ids gets nothing", (await R.exportLeadRows(B, { view: "all" }, { userId: fx.B.members.owner, role: "owner" }, [r1, twin])).length === 0);
+    check("csv: an agent exports only what they see", (await R.exportLeadRows(A, { view: "all" }, { userId: agentA, role: "agent" })).every((l) => l.assigneeId === agentA || (l.assigneeId === null && l.status === "new")));
+    await lead("A", { city: "Tinghir" });
+    const cities = await R.leadCities(A, { userId: managerA, role: "manager" });
+    check("cities: the window's cities of the store", cities.includes("Tinghir") && cities.includes("Casablanca"), cities);
+    check("cities: B never lists A's cities", !(await R.leadCities(B, { userId: fx.B.members.owner, role: "owner" })).includes("Tinghir"));
+
+    // Set as home: only a published landing page of the store
+    check("home: A's live page can be home", await H.canBeHome(A, fx.A.page.live));
+    check("home: B's page is never A's home", !(await H.canBeHome(A, fx.B.page.live)));
+    const [draft] = await db.select({ id: S.pages.id }).from(S.pages).where(and(eq(S.pages.storeId, fx.A.id), eq(S.pages.status, "draft"))).limit(1);
+    if (draft) check("home: a draft cannot be home", !(await H.canBeHome(A, draft.id)));
+
+    // the LAN-§4 fallback: a page created in a `store`-mode shop turns landing.inStoreMode on, once, audited
+    const storeMode = { ...ctxA, store: { ...ctxA.store, mode: "store" } } as WriteCtx;
+    check("in-store mode: landing mode writes nothing", !(await IM.ensureLandingInStoreMode(ctxA, "page_created")));
+    const first = await IM.ensureLandingInStoreMode(storeMode, "page_created");
+    const second = await IM.ensureLandingInStoreMode(storeMode, "page_duplicated");
+    const SET = load<typeof import("@/lib/settings")>("@/lib/settings");
+    const landing = await SET.getStoreSetting(A, "landing", { fresh: true });
+    const audit = await db.select().from(S.auditLog).where(and(eq(S.auditLog.storeId, fx.A.id), eq(S.auditLog.action, "store.landing_settings.updated")));
+    check("in-store mode: set once in store mode, audited with the reason", first && !second && landing.inStoreMode && audit.some((a) => (a.meta as { reason?: string } | null)?.reason === "page_created"), { first, second, audit: audit.map((a) => a.meta) });
+    check("in-store mode: B's setting is untouched", !(await SET.getStoreSetting(B, "landing", { fresh: true })).inStoreMode);
+    await SET.updateStoreSetting(A, "landing", { inStoreMode: false }, { id: "system", ip: null });
   }
   return 0;
 }

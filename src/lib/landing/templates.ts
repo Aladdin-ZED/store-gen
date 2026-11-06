@@ -6,7 +6,7 @@
  *
  *   customer_confirm   the thank-you prefill        {order_id} {offer} {total} {name}
  *   wa_order           the WhatsApp order (LP-11)   {offer} {total} {delivery} {ref}
- *   lead_recovery      agent → lead                 {name} {store} {offer}
+ *   lead_recovery      agent → lead                 {name} {store} {offer} {total} {eta_text} (LAN-§10.3)
  *   track_link         agent → customer             {name} {order_id} {track_url}
  *
  * The defaults carry no dash (DG-07); the Arabic is Moroccan-friendly. Every kind is filled by `fillTemplate`
@@ -36,7 +36,7 @@ export type LandingTemplateKind = (typeof LANDING_TEMPLATE_KINDS)[number];
 export const TEMPLATE_KIND_VARS: Readonly<Record<LandingTemplateKind, readonly string[]>> = {
   customer_confirm: ["order_id", "offer", "total", "name"],
   wa_order: ["offer", "total", "delivery", "ref"],
-  lead_recovery: ["name", "store", "offer"],
+  lead_recovery: ["name", "store", "offer", "total", "eta_text"],
   track_link: ["name", "order_id", "track_url"],
 };
 
@@ -52,9 +52,9 @@ export const DEFAULT_TEMPLATES: Readonly<Record<LandingTemplateKind, Readonly<Re
     en: "Hello, I'd like to order {offer} for {total} ({delivery}). Ref. {ref}",
   },
   lead_recovery: {
-    ar: "السلام عليكم {name}، معاك {store}. بديتي طلب ديال {offer} فالصفحة ديالنا. بغيتي نكملوه مع بعض؟",
-    fr: "Bonjour {name}, ici {store}. Vous avez commencé une commande de {offer} sur notre page. Voulez-vous qu'on la termine ensemble ?",
-    en: "Hello {name}, this is {store}. You started an order for {offer} on our page. Shall we finish it together?",
+    ar: "السلام عليكم[[ {name}]]، معاك {store}. بديتي طلب ديال {offer}[[ بـ{total}]] فالصفحة ديالنا.[[ {eta_text}.]] بغيتي نكملوه مع بعض؟",
+    fr: "Bonjour[[ {name}]], ici {store}. Vous avez commencé une commande de {offer}[[ à {total}]] sur notre page.[[ {eta_text}.]] Voulez-vous qu'on la termine ensemble ?",
+    en: "Hello[[ {name}]], this is {store}. You started an order for {offer}[[ at {total}]] on our page.[[ {eta_text}.]] Shall we finish it together?",
   },
   track_link: {
     ar: "السلام عليكم {name}، تقدر تتبّع الطلب ديالك {order_id} من هنا: {track_url}",

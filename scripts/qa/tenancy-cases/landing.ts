@@ -34,6 +34,11 @@
  * Runtime add-ons (p3-w1-addons): A's `customer_confirm` row is never B's `templateFor` text; B's `loadRenderAddons`
  * blocks (live, preview, test, connected export, and with A's page id) carry none of A's template, zones or caller
  * phone, while A's own blocks carry all three (the control).
+ *
+ * Pages list and lead inbox (p3-w1-pages-leads-screens): the two attestation actions and every inbox action (list,
+ * get, attempt, assign, take next, lost, reopen, follow-up, convert) join `ACTION_CASES`, each on a fresh lead inside
+ * the 30-day window, so `qa:action-replay` proves B's members, outsiders and staff reach none of A's leads and that
+ * every write answers `impersonation_read_only` under "View as store".
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -343,6 +348,8 @@ async function leadCases(kit: TenancyKit): Promise<void> {
   const byB = { actor: { kind: "user" as const, userId: fx.B.members.owner, impersonatorId: null, ip: null }, role: "owner" };
   const c = fx.A.customer;
 
+  // B's header before A's leads arrive (the inbox action cases may have left contacted leads in B)
+  const bBase = await R.leadCounts(B, ownerB);
   // A's fresh lead (inside the 30-day window) carries A's customer canaries; B gets its own control lead
   const leadA = newId();
   const idemA = `${newId()}-lead-a`.slice(0, 36);
@@ -361,7 +368,7 @@ async function leadCases(kit: TenancyKit): Promise<void> {
   check("leads: getLeadRow(B, A's lead) is null", (await R.getLeadRow(B, leadA, ownerB)) === null);
   const bCounts = await R.leadCounts(B, ownerB);
   const aCounts = await R.leadCounts(A, ownerA);
-  check("leads: B's 30-day header counts B's leads only", bCounts.leads >= 1 && bCounts.contacted === 0 && aCounts.contacted >= 1, { a: aCounts.contacted, b: bCounts.contacted });
+  check("leads: B's 30-day header counts B's leads only", bCounts.leads === bBase.leads + 1 && bCounts.contacted === bBase.contacted && aCounts.contacted >= 1, { a: aCounts.contacted, b: bCounts, base: bBase });
   for (const [label, q] of [["customer name", c.name], ["WA- ref", ref], ["phone digits", c.phone.slice(-8)]] as const) {
     const hits = await P.provider.search(B, q, ownerB);
     check(`leads: ⌘K of B for A's ${label} finds nothing of A`, !hits.some((h) => h.id === leadA || h.id === intentA) && kit.leaks(hits).length === 0, hits);
@@ -645,3 +652,80 @@ export const actions: TrackActionCase[] = [
   settingsCase(CHECKOUT, "saveLandingOptionsAction", "/settings/checkout", ["settings.write"], () => [{ trackingRequests: false }]),
   settingsCase(POLICIES, "savePoliciesAction", "/settings/policies", ["settings.write"], () => [policiesBody(`Replay ${Date.now().toString(36)}`)], () => [{ ...policiesBody("own"), inspection: "sometimes" }]),
 ];
+
+/* ------------------------------------------------------------------ */
+/* the pages list and the lead inbox (p3-w1-pages-leads-screens)      */
+/* ------------------------------------------------------------------ */
+
+const PAGES = "src/app/app/[store]/pages/actions.ts";
+const LEADS = "src/app/app/[store]/leads/actions.ts";
+type StoreFx = Parameters<TrackActionCase["victim"]>[0]["A"];
+
+/**
+ * A fresh lead of the store inside the 30-day window (A's carries A's customer; each case gets its own row). Two days
+ * old, so the many replay rows sort after the lead cases' own newer rows on the inbox's first page.
+ */
+async function freshLead(store: StoreFx, o: Record<string, unknown> = {}): Promise<string> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const T = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const id = newId();
+  await db.insert(T.leads).values({
+    id,
+    storeId: store.id,
+    pageId: store.page.live,
+    idem: `${newId()}-replay`.slice(0, 36),
+    phone: store.customer.phone,
+    name: store.customer.name,
+    city: store.customer.city,
+    note: store.customer.note,
+    createdAt: new Date(Date.now() - 2 * 86_400_000),
+    ...o,
+  });
+  return id;
+}
+
+const inboxCase = (name: string, permission: TrackActionCase["permission"], write: boolean, args: (s: StoreFx) => Promise<unknown[]> | unknown[]): TrackActionCase => ({
+  file: LEADS,
+  name,
+  area: "leads",
+  path: "/leads",
+  permission,
+  write,
+  victim: (fx) => args(fx.A),
+  own: (fx) => args(fx.B),
+});
+
+actions.push(
+  // the builder's attestation sheets: B's attestation on A's page writes nothing in A (attestProof checks the page's store)
+  {
+    file: PAGES,
+    name: "attestProofAction",
+    area: "pages",
+    path: "/pages",
+    permission: ["pages.write"],
+    write: true,
+    victim: (fx) => [fx.A.page.live, { sectionId: "replay-reviews", type: "reviews" }],
+    own: (fx) => [fx.B.page.live, { sectionId: "replay-reviews", type: "reviews" }],
+  },
+  {
+    file: PAGES,
+    name: "attestFactAction",
+    area: "pages",
+    path: "/pages",
+    permission: ["pages.write"],
+    write: true,
+    victim: (fx) => [fx.A.page.live, { path: "hero.title", value: "50 ml", text: "Flacon de 50 ml" }],
+    own: (fx) => [fx.B.page.live, { path: "hero.title", value: "50 ml", text: "Flacon de 50 ml" }],
+  },
+  // the lead inbox: reads masked by scope, every write on the store's own leads only
+  inboxCase("listLeads", ["leads.read"], false, () => [{ view: "all" }]),
+  inboxCase("getLead", ["leads.read"], false, (s) => freshLead(s).then((id) => [id])),
+  inboxCase("logLeadAttempt", ["leads.write", "orders.reveal_phone"], true, (s) => freshLead(s).then((id) => [id, "call", op()])),
+  inboxCase("assignLeads", ["orders.assign"], true, (s) => freshLead(s).then((id) => [[id], null, op()])),
+  inboxCase("takeNextLead", ["leads.write"], true, (s) => freshLead(s).then(() => [])),
+  inboxCase("markLeadLost", ["leads.write"], true, (s) => freshLead(s).then((id) => [id, "price", op()])),
+  inboxCase("reopenLeadAction", ["leads.write"], true, (s) => freshLead(s, { status: "lost", lostReason: "price" }).then((id) => [id, null, op()])),
+  inboxCase("setLeadFollowUp", ["leads.write"], true, (s) => freshLead(s).then((id) => [id, new Date(Date.now() + 3_600_000).toISOString(), op()])),
+  inboxCase("convertLead", ["orders.create"], true, (s) => freshLead(s).then((id) => [id, { name: "Replay", city: "Casablanca", confirmed: true, idem: randomUUID() }, op()])),
+);

@@ -30,6 +30,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { StoreInfo } from "@/landing/context";
 import type { PageListItem } from "@/lib/admin-data/pages";
+import { useT } from "@/lib/i18n/admin/client";
 import { cn } from "@/lib/utils";
 import { CopyButton } from "../common/copy-button";
 import { StatusChip } from "../common/status-chip";
@@ -79,8 +80,11 @@ export function PageCard({
   onAction,
   style,
   livePixels,
+  homeAllowed = true,
 }: {
   page: PageListItem;
+  /** Set as home is offered (LAN-§4: `landing` mode only) */
+  homeAllowed?: boolean;
   /** what the live version fires (live pages; undefined while loading) */
   livePixels?: { live: LivePagePixels | undefined; labels: Record<string, string> };
   assets: PreviewAssets;
@@ -181,7 +185,7 @@ export function PageCard({
             </div>
             {live && livePixels ? <LivePixelChips live={livePixels.live} labels={livePixels.labels} className="mt-1" /> : null}
           </div>
-          <PageMenu page={page} can={can} onAction={onAction} liveUrl={liveUrl} />
+          <PageMenu page={page} can={can} onAction={onAction} liveUrl={liveUrl} homeAllowed={homeAllowed} />
         </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2.5 text-xs text-muted-foreground">
@@ -214,39 +218,56 @@ export function PageCard({
   );
 }
 
-function PageMenu({ page, can, onAction, liveUrl }: { page: PageListItem; can: PagePermissions; onAction: (a: PageAction, p: PageListItem) => void; liveUrl: string }) {
+/** Every action of one page (the list rows and the thumbnails), in the viewer's language. */
+export function PageMenu({
+  page,
+  can,
+  onAction,
+  liveUrl,
+  homeAllowed = true,
+  className,
+}: {
+  page: PageListItem;
+  can: PagePermissions;
+  onAction: (a: PageAction, p: PageListItem) => void;
+  liveUrl: string;
+  /** Set as home is offered (LAN-§4: `landing` mode only) */
+  homeAllowed?: boolean;
+  className?: string;
+}) {
+  const t = useT();
   const storeView = useStore();
   const live = page.status === "published";
   const archived = page.status === "archived";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" className="-me-1 shrink-0 rounded-full text-muted-foreground data-open:bg-muted" aria-label={`Actions for ${page.name}`}>
+        <Button variant="ghost" size="icon-sm" className={cn("-me-1 shrink-0 rounded-full text-muted-foreground data-open:bg-muted", className)} aria-label={t("landing.pages.menu.label", { name: page.name })}>
           <MoreHorizontalIcon />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56 rounded-xl p-1.5">
+      <DropdownMenuContent align="end" className="w-60 rounded-xl p-1.5">
         {can.write && !archived && (
           <DropdownMenuItem asChild>
             <Link href={editHref(storeView, page.id)}>
-              <PencilIcon /> Edit in builder
+              <PencilIcon /> {t("landing.pages.menu.edit")}
             </Link>
           </DropdownMenuItem>
         )}
         {page.doc && (
           <DropdownMenuItem onSelect={() => onAction("preview", page)}>
-            <EyeIcon /> Preview draft
+            <EyeIcon /> {t("landing.pages.menu.preview")}
           </DropdownMenuItem>
         )}
         {live && (
           <DropdownMenuItem asChild>
             <a href={liveUrl} target="_blank" rel="noopener noreferrer">
-              <ArrowUpRightIcon /> Open live page
+              <ArrowUpRightIcon className="rtl:-scale-x-100" /> {t("landing.pages.menu.openLive")}
             </a>
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onSelect={() => onAction("copy-link", page)}>
-          <LinkIcon /> Copy link
+          <LinkIcon /> {t("landing.pages.menu.copyLink")}
         </DropdownMenuItem>
 
         {can.publish && !archived && (
@@ -254,22 +275,22 @@ function PageMenu({ page, can, onAction, liveUrl }: { page: PageListItem; can: P
             <DropdownMenuSeparator />
             {(!live || page.unpublishedChanges) && (
               <DropdownMenuItem onSelect={() => onAction("publish", page)}>
-                {live ? <UploadCloudIcon /> : <GlobeIcon />} {live ? "Publish changes" : "Publish"}
+                {live ? <UploadCloudIcon /> : <GlobeIcon />} {t(live ? "landing.pages.menu.publishChanges" : "landing.pages.menu.publish")}
               </DropdownMenuItem>
             )}
-            {live && !page.isHome && (
+            {homeAllowed && live && !page.isHome && (
               <DropdownMenuItem onSelect={() => onAction("home", page)}>
-                <HomeIcon /> Set as home page
+                <HomeIcon /> {t("landing.pages.menu.setHome")}
               </DropdownMenuItem>
             )}
-            {page.isHome && (
+            {homeAllowed && page.isHome && (
               <DropdownMenuItem onSelect={() => onAction("home-auto", page)}>
-                <HomeIcon /> Stop using as home page
+                <HomeIcon /> {t("landing.pages.menu.stopHome")}
               </DropdownMenuItem>
             )}
             {live && (
               <DropdownMenuItem onSelect={() => onAction("unpublish", page)}>
-                <CloudOffIcon /> Unpublish
+                <CloudOffIcon /> {t("landing.pages.menu.unpublish")}
               </DropdownMenuItem>
             )}
           </>
@@ -278,12 +299,12 @@ function PageMenu({ page, can, onAction, liveUrl }: { page: PageListItem; can: P
         {(can.write || can.export) && <DropdownMenuSeparator />}
         {can.write && (
           <DropdownMenuItem onSelect={() => onAction("duplicate", page)}>
-            <CopyPlusIcon /> Duplicate
+            <CopyPlusIcon /> {t("landing.pages.menu.duplicate")}
           </DropdownMenuItem>
         )}
         {can.export && !archived && (
           <DropdownMenuItem onSelect={() => onAction("export", page)}>
-            <PackageOpenIcon /> Export as site…
+            <PackageOpenIcon /> {t("landing.pages.menu.export")}
           </DropdownMenuItem>
         )}
         {can.write && (
@@ -291,15 +312,15 @@ function PageMenu({ page, can, onAction, liveUrl }: { page: PageListItem; can: P
             <DropdownMenuSeparator />
             {archived ? (
               <DropdownMenuItem onSelect={() => onAction("restore", page)}>
-                <ArchiveRestoreIcon /> Restore from archive
+                <ArchiveRestoreIcon /> {t("landing.pages.menu.restore")}
               </DropdownMenuItem>
             ) : (
               <DropdownMenuItem onSelect={() => onAction("archive", page)}>
-                <ArchiveIcon /> Archive
+                <ArchiveIcon /> {t("landing.pages.menu.archive")}
               </DropdownMenuItem>
             )}
             <DropdownMenuItem variant="destructive" onSelect={() => onAction("delete", page)}>
-              <Trash2Icon /> Delete…
+              <Trash2Icon /> {t("landing.pages.menu.delete")}
             </DropdownMenuItem>
           </>
         )}

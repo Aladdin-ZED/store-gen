@@ -28,6 +28,7 @@ import {
   LEAD_WINDOW_DAYS,
   LeadQuery,
   type LeadCounts,
+  type LeadQueryParsed,
   type LeadKind,
   type LeadRisk,
   type LeadRow,
@@ -200,12 +201,8 @@ function viewCond(view: LeadQuery["view"], now: Date): SQL | undefined {
 const CURSOR_RE = /^(\d{10,16})_([0-9A-HJKMNP-TV-Z]{26})$/;
 const cursorOf = (r: RawLead) => `${r.createdAt.getTime()}_${r.id}`;
 
-/**
- * One page of the inbox, newest first, in the 30-day window. `next` is the cursor of the following page. Every row is
- * the store's own (scope), visible to the viewer (agents) and masked for the scope.
- */
-export async function listLeadRows(scope: StoreScope, input: LeadQuery, viewer: LeadViewer, now: Date = new Date()): Promise<{ rows: LeadRow[]; next?: string }> {
-  const q = LeadQuery.parse(input);
+/** The inbox query's predicates (window, agent visibility, view, filters), shared by the list and the CSV export. */
+async function queryConds(scope: StoreScope, q: LeadQueryParsed, viewer: LeadViewer, now: Date): Promise<(SQL | undefined)[]> {
   const conds: (SQL | undefined)[] = [gte(leads.createdAt, windowStart(now)), visibleTo(viewer), viewCond(q.view, now)];
   if (q.pageId) conds.push(eq(leads.pageId, q.pageId));
   if (q.city) conds.push(eq(leads.city, q.city));
@@ -216,6 +213,16 @@ export async function listLeadRows(scope: StoreScope, input: LeadQuery, viewer: 
     if (q.from) conds.push(gte(leads.createdAt, dayStart(q.from, tz)));
     if (q.to) conds.push(lt(leads.createdAt, new Date(dayStart(q.to, tz).getTime() + DAY_MS)));
   }
+  return conds;
+}
+
+/**
+ * One page of the inbox, newest first, in the 30-day window. `next` is the cursor of the following page. Every row is
+ * the store's own (scope), visible to the viewer (agents) and masked for the scope.
+ */
+export async function listLeadRows(scope: StoreScope, input: LeadQuery, viewer: LeadViewer, now: Date = new Date()): Promise<{ rows: LeadRow[]; next?: string }> {
+  const q = LeadQuery.parse(input);
+  const conds = await queryConds(scope, q, viewer, now);
   const cur = q.cursor ? CURSOR_RE.exec(q.cursor) : null;
   if (cur) {
     const at = new Date(Number(cur[1]));
@@ -237,6 +244,40 @@ export async function getLeadRow(scope: StoreScope, id: string, viewer: LeadView
     .limit(1)) as RawLead[];
   const [row] = await toRows(scope, raw);
   return row ?? null;
+}
+
+/** The CSV export's ceiling (one file, newest first). */
+export const LEAD_EXPORT_MAX = 5_000;
+
+/**
+ * Every lead of the inbox query for the CSV export (`orders.export`, LAN-§10.3 bulk), newest first, at most
+ * `LEAD_EXPORT_MAX`: the inbox rows themselves, so phones stay masked and names and notes follow the scope's mask.
+ * `ids` narrows the export to a bulk selection.
+ */
+export async function exportLeadRows(scope: StoreScope, input: LeadQuery, viewer: LeadViewer, ids: readonly string[] | null = null, now: Date = new Date()): Promise<LeadRow[]> {
+  const q = LeadQuery.parse(input);
+  const conds = await queryConds(scope, q, viewer, now);
+  if (ids) {
+    const wanted = [...new Set(ids.filter((id) => typeof id === "string" && /^[0-9A-HJKMNP-TV-Z]{26}$/.test(id)))].slice(0, 500);
+    if (!wanted.length) return [];
+    conds.push(inArray(leads.id, wanted));
+  }
+  const raw = (await selectLeads(scope, ...conds)
+    .orderBy(desc(leads.createdAt), desc(leads.id))
+    .limit(LEAD_EXPORT_MAX)) as RawLead[];
+  return toRows(scope, raw);
+}
+
+/** The cities of the viewer's leads in the 30-day window (the inbox's city filter), most frequent first, at most 40. */
+export async function leadCities(scope: StoreScope, viewer: LeadViewer, now: Date = new Date()): Promise<string[]> {
+  const rows = await db
+    .select({ city: leads.city, n: sql<number>`COUNT(*)` })
+    .from(leads)
+    .where(whereStore(leads, scope, gte(leads.createdAt, windowStart(now)), visibleTo(viewer), isNotNull(leads.city)))
+    .groupBy(leads.city)
+    .orderBy(desc(sql`COUNT(*)`))
+    .limit(40);
+  return rows.flatMap((r) => (r.city ? [r.city] : []));
 }
 
 /** The middle value (minutes, rounded) of a sorted list. */

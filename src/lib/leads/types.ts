@@ -110,3 +110,19 @@ export interface LeadCounts {
   firstContactP50Min: number | null;
   firstContactN: number;
 }
+
+/** What the convert sheet sends (the rest comes from the lead row). */
+export const ConvertLeadInput = z.object({
+  name: z.string().trim().min(1).max(120),
+  city: z.string().trim().min(1).max(80),
+  address: z.string().trim().max(240).optional(),
+  note: z.string().trim().max(500).optional(),
+  /** "The customer already confirmed" */
+  confirmed: z.boolean(),
+  /** the sheet's draft id, the order's `idem` */
+  idem: z.string().uuid(),
+});
+export type ConvertLeadInput = z.input<typeof ConvertLeadInput>;
+
+/** The conversion's answer: the order, or why not (`message` a message key or the order sheet's text). */
+export type ConvertOutcome = { ok: true; orderId: string; already: boolean } | { ok: false; error: string; message?: string };
