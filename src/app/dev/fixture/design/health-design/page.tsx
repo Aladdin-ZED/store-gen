@@ -9,17 +9,15 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import "@/components/admin/styles/admin.css";
-import { fixtures, rules } from "@/lib/health/rules/design";
+import { fixtures, previewIssue } from "@/lib/health/rules/design";
 import type { HealthInputs, HealthIssue } from "@/lib/health/types";
 import { dirOf, translator, type AdminLocale } from "@/lib/i18n/admin";
-import type { StoreScope } from "@/lib/tenancy/types";
 
 export const metadata: Metadata = { title: "Design health fixture", robots: { index: false } };
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
-const SCOPE = { kind: "system", storeId: "00000000000000000000000001" } as unknown as StoreScope;
 const SEVERITY = ["", "info", "warn", "danger"] as const;
 
 export default async function HealthDesignFixture({ searchParams }: { searchParams: Search }) {
@@ -30,9 +28,8 @@ export default async function HealthDesignFixture({ searchParams }: { searchPara
   const t = translator(lang);
   const rows: { rule: string; fired: HealthIssue | null; silent: boolean }[] = [];
   for (const fx of fixtures) {
-    const rule = rules.find((r) => r.id === fx.rule)!;
-    const fired = await rule.collect(SCOPE, fx.fires as HealthInputs).catch(() => null);
-    const quiet = await rule.collect(SCOPE, fx.silent as HealthInputs).catch(() => null);
+    const fired = await previewIssue(fx.rule, fx.fires as HealthInputs).catch(() => null);
+    const quiet = await previewIssue(fx.rule, fx.silent as HealthInputs).catch(() => null);
     rows.push({ rule: fx.rule, fired, silent: quiet === null });
   }
   return (

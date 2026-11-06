@@ -8,6 +8,7 @@
  */
 import { appHref } from "@/lib/urls";
 import type { DesignHealth } from "@/lib/design/health.server";
+import type { StoreScope } from "@/lib/tenancy/types";
 import type { HealthInputs, HealthIssue, HealthRule, HealthRuleFixture } from "../types";
 
 const Q_LINE = 70;
@@ -16,9 +17,10 @@ const edit = (pageId: string) => (handle: string) => appHref(handle, `/pages/${p
 const design = (inputs: HealthInputs): DesignHealth | null => inputs.design;
 
 /** The brand's logo and colour locks: the inputs' when the job passes them (CCR r1-p6-11), else the store's setting. */
-async function brandFacts(scope: Parameters<HealthRule["collect"]>[0], inputs: HealthInputs): Promise<{ logo: boolean; colorLocked: boolean } | null> {
+async function brandFacts(scope: StoreScope | null, inputs: HealthInputs): Promise<{ logo: boolean; colorLocked: boolean } | null> {
   const given = inputs.brand as (HealthInputs["brand"] & { logo?: boolean; colorLocked?: boolean }) | null;
   if (given && typeof given.logo === "boolean" && typeof given.colorLocked === "boolean") return { logo: given.logo, colorLocked: given.colorLocked };
+  if (!scope) return null;
   try {
     const { getStoreSetting } = await import("@/lib/settings");
     const brand = await getStoreSetting(scope, "brand");
@@ -28,12 +30,15 @@ async function brandFacts(scope: Parameters<HealthRule["collect"]>[0], inputs: H
   }
 }
 
-export const rules: HealthRule[] = [
+/** A rule whose body also runs without a store (`previewIssue`): only `brand_empty` reads the scope, and then only when the inputs carry no brand facts. */
+type DesignRule = Omit<HealthRule, "collect"> & { check(scope: StoreScope | null, inputs: HealthInputs): Promise<HealthIssue | null> };
+
+const RULES: DesignRule[] = [
   {
     id: "design:q_low",
     group: "design",
     release: "R1",
-    async collect(_scope, inputs): Promise<HealthIssue | null> {
+    async check(_scope, inputs): Promise<HealthIssue | null> {
       const d = design(inputs);
       if (!d?.pages.length) return null;
       const low = d.pages.filter((p) => p.q !== null && p.q < Q_LINE).sort((a, b) => (a.q ?? 0) - (b.q ?? 0));
@@ -53,7 +58,7 @@ export const rules: HealthRule[] = [
     id: "design:slop",
     group: "design",
     release: "R1",
-    async collect(_scope, inputs): Promise<HealthIssue | null> {
+    async check(_scope, inputs): Promise<HealthIssue | null> {
       const d = design(inputs);
       if (!d?.pages.length) return null;
       const sloppy = d.pages.filter((p) => p.slop !== null && p.slop >= SLOP_LINE);
@@ -73,7 +78,7 @@ export const rules: HealthRule[] = [
     id: "design:pages_close",
     group: "design",
     release: "R1",
-    async collect(_scope, inputs): Promise<HealthIssue | null> {
+    async check(_scope, inputs): Promise<HealthIssue | null> {
       const d = design(inputs);
       if (!d?.closePairs.length) return null;
       const newer = d.closePairs[0]![1];
@@ -92,7 +97,7 @@ export const rules: HealthRule[] = [
     id: "design:no_dna",
     group: "design",
     release: "R1",
-    async collect(_scope, inputs): Promise<HealthIssue | null> {
+    async check(_scope, inputs): Promise<HealthIssue | null> {
       const d = design(inputs);
       if (!d?.pages.length) return null;
       const bare = d.pages.filter((p) => !p.hasLook);
@@ -113,7 +118,7 @@ export const rules: HealthRule[] = [
     group: "design",
     release: "R1",
     mode: "landing",
-    async collect(scope, inputs): Promise<HealthIssue | null> {
+    async check(scope, inputs): Promise<HealthIssue | null> {
       const d = design(inputs);
       const live = d?.pages.length ?? 0;
       if (live < 2) return null;
@@ -131,6 +136,14 @@ export const rules: HealthRule[] = [
     },
   },
 ];
+
+export const rules: HealthRule[] = RULES.map(({ check, ...rule }) => ({ ...rule, collect: (scope: StoreScope, inputs: HealthInputs) => check(scope, inputs) }));
+
+/** The issue a rule raises on the given inputs without a store (the dev fixture page; brand facts come from the inputs only). */
+export function previewIssue(ruleId: string, inputs: HealthInputs): Promise<HealthIssue | null> {
+  const rule = RULES.find((r) => r.id === ruleId);
+  return rule ? rule.check(null, inputs) : Promise.resolve(null);
+}
 
 const page = (pageId: string, q: number | null, slop: number | null, hasLook = true) => ({ pageId, q, slop, hasLook, genomeId: `g-${pageId}` });
 const health = (pages: DesignHealth["pages"], closePairs: [string, string][] = []): DesignHealth => ({ pages, closePairs });

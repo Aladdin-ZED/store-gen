@@ -192,6 +192,11 @@ export function sectionsOf(body: string): { sid: string; key: string; html: stri
 /** The report row the Shell draws until the footer draws the link (CRIT15): out of the shell hash, so it may move. */
 const REPORT_ROW = /<p class="lp-report">[\s\S]*?<\/p>/;
 /**
+ * The page icon of a logo-less store: the R1 grid monogram since step 13 (DES-§12.5, src/lib/logo/favicon.ts), a
+ * reviewed change of every document's head. Out of the shell hash; `test:design`'s favicon group pins the icon.
+ */
+const ICON_LINK = /<link rel="icon" href="data:image\/svg\+xml,[^"]*"[^>]*\/>/;
+/**
  * The dividers between sections (src/landing/illustrations/dividers.tsx): hashed apart from the shell, because they
  * follow their neighbours' grounds and so move when a section stops rendering (BASELINE_VANISH).
  */
@@ -220,7 +225,7 @@ export async function renderEntry(e: BaselineEntry): Promise<Rendered> {
   const sections = e.page === "landing" ? sectionsOf(html) : [];
   let shell = html;
   for (const s of sections) shell = shell.replace(s.html, `<§${s.sid}/>`);
-  shell = shell.replace(REPORT_ROW, "");
+  shell = shell.replace(REPORT_ROW, "").replace(ICON_LINK, "");
   const dividers = sha((shell.match(DIVIDER) ?? []).join("\n"));
   shell = shell.replace(DIVIDER, "");
   return { sum, shell: sha(shell), dividers, shellText: shell, sections: sections.map((s) => [s.sid, s.key, sha(s.html)]) };
