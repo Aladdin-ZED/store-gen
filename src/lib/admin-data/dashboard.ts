@@ -21,7 +21,7 @@ import "server-only";
  * tenancy harness still names them (CCR r1-p2-3).
  */
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
-import { can as roleCan, type StorePermission } from "@/lib/auth/permissions";
+import { can as roleCan } from "@/lib/auth/permissions";
 import type { AiUsageSummary } from "@/lib/ai/summary.server";
 import { aiUsageForStore } from "@/lib/ai/summary.server";
 import { db } from "@/lib/db/client";
@@ -592,32 +592,6 @@ export async function getSheetHealth(scope: StoreScope): Promise<SheetHealth> {
     oldestPendingMinutes: oldest ? Math.max(0, Math.round((Date.now() - oldest.at.getTime()) / 60_000)) : null,
     lastError: lastFailed?.error ?? null,
   };
-}
-
-/* ------------------------------------------------------------------ */
-/* deprecated shims (scripts/qa/tenancy-check.ts names them; CCR r1-p2-3) */
-/* ------------------------------------------------------------------ */
-
-/**
- * @deprecated R1.0's sidebar badges; the pulse's counts replace them (D57). Kept only because the maintainer's tenancy
- * harness calls it (CCR r1-p2-3 drops the call, then this goes).
- */
-export async function navCounts(scope: StoreScope): Promise<{ newOrders: number; syncFailed: number }> {
-  const [[n], [f]] = await Promise.all([
-    db.select({ n: count() }).from(orders).where(whereStore(orders, scope, eq(orders.status, "new"), ne(orders.sheetStatus, "disabled"), eq(orders.isTest, false))),
-    db.select({ n: count() }).from(orders).where(whereStore(orders, scope, eq(orders.sheetStatus, "failed"))),
-  ]);
-  return { newOrders: Number(n?.n ?? 0), syncFailed: Number(f?.n ?? 0) };
-}
-
-/**
- * @deprecated R1.0's entry point, now `dashboardPanels` without a viewer (the per-viewer panels hidden). Kept only
- * because the maintainer's tenancy harness calls it (CCR r1-p2-3 moves the harness to `dashboardPanels`).
- */
-export async function getDashboard(scope: StoreScope, store: StoreRow, user: { totpEnabled: boolean }, opts: { orders: boolean } = { orders: true }): Promise<DashboardPanels> {
-  void user;
-  const grants = new Set<StorePermission>(["store.read", ...(opts.orders ? (["orders.read", "orders.read_all"] as const) : [])]);
-  return dashboardPanels({ scope, store, can: (p) => grants.has(p) }, "7d");
 }
 
 /* ---- The settings pages' reads (p2-10; PLA-§22.10.2, §22.10.4, §22.10.6). `src/app` may not import the db client

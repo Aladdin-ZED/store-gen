@@ -894,13 +894,16 @@ async function main(): Promise<number> {
       const sp = await second.newPage();
       await sp.goto("/signup");
       must("/signup in invite mode asks for the code", (await sp.locator('input[name="inviteCode"]').count()) === 1);
+      // P2 (CCR r1-p2-8 §4): two steps on one page, the invite code first; the handle field opens with Change
+      await sp.locator('input[name="inviteCode"]').fill(code);
       await sp.locator('input[name="name"]').fill("Karim Bennani");
       await sp.locator('input[name="phone"]').fill("0661234567");
       await sp.locator('input[name="email"]').fill("seller2@r1-exit.test");
       await sp.locator('input[name="password"]').fill(`Zellige-${randomBytes(9).toString("hex")}-m4`);
+      await sp.getByRole("button", { name: "Continue" }).click();
       await sp.locator('input[name="storeName"]').fill("Baraka Home");
+      await sp.getByRole("button", { name: "Change" }).click();
       await sp.locator('input[name="handle-visible"]').fill("baraka-home");
-      await sp.locator('input[name="inviteCode"]').fill(code);
       const legal = sp.locator("#signup-legal");
       if (await legal.count()) await legal.click();
       await sp.getByRole("button", { name: "Create my store" }).click();

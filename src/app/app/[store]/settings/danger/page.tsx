@@ -53,7 +53,7 @@ export default async function DangerSettingsPage({ params }: Props) {
       canExport={canExport}
       canClose={ctx.can("store.close") || (ctx.store.status === "closed" && ctx.membership.role === "owner")}
       jobs={jobs}
-      partBase={apiHref(ctx.store.handle, "/store-export")}
+      partBase={apiHref(ctx.store.handle, "/exports")}
       reopenUntil={reopenUntil}
       lastOwner={lastOwner}
       support={ctx.scope.kind !== "member"}

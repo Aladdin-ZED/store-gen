@@ -264,6 +264,8 @@ export function ranReal(label: string, ...outcomes: ({ stub: string | null } | n
   if (stub) check(`${label}: runs real code`, false, `reached the typed stub ${stub}`);
   return stub === null;
 }
+/** A redirect that stays inside the store: its home (`/app/<h>`) or one of its screens (P2 merge: the welcome flow's home redirect). */
+export const insideStore = (handle: string, to: string): boolean => to === `/app/${handle}` || to.startsWith(`/app/${handle}/`) || to.startsWith(`/app/${handle}?`);
 /** A case of the spec that has no code in R1.0 (named with its reason): listed, never a pass, never pending. */
 export function notApplicable(name: string, reason: string): void {
   tally().na.push(`${name} · ${reason}`);
@@ -941,6 +943,13 @@ export interface ActionCase {
    * role matrix runs as a fresh member of B per role.
    */
   self?: true;
+  /**
+   * (P2 merge, CCR r1-p2-4 §3b) A's owner's own call in qa:action-replay cannot answer ok by design: the action is bound
+   * to a store state the fixture's A is not in (an active store has no review card to answer, is not closed, the case
+   * never closes A), or it reaches another track's P0 stub until that track merges. The replay then checks this exact
+   * refusal instead (a stub pin fails as soon as the track's code answers ok: drop the pin at that merge).
+   */
+  live?: { expect: string; why: string };
 }
 
 /** Records made on demand (destructive cases get their own target). */
@@ -962,7 +971,6 @@ export interface Fresh {
 }
 
 const F = (file: string) => ({ file, at: (name: string) => `${file}#${name}` });
-const DASH = F("src/app/app/[store]/actions.ts");
 const EXPORTS = F("src/app/app/[store]/exports/actions.ts");
 const GENERATE = F("src/app/app/[store]/generate/actions.ts");
 const HISTORY = F("src/app/app/[store]/history/actions.ts");
@@ -998,7 +1006,6 @@ const storeForm = (store: StoreFx, logo?: string) => ({ storeName: store.name, l
 /** Every exported server action of the store dashboard, with A's and B's arguments. */
 export const ACTION_CASES: ActionCase[] = [
   // shell
-  act(DASH, "searchAction", "search", "", "store.read", false, (fx) => [fx.canaries.customer[0]!], () => ["Baraka"]),
   // exports
   act(EXPORTS, "revokeExportAction", "exports", "/exports", "export.create", true, (fx, f) => f.exportOf(fx.A).then((id) => [id]), (fx, f) => f.exportOf(fx.B).then((id) => [id])),
   // generate
@@ -1122,6 +1129,7 @@ export const NOT_STORE_ACTIONS: Record<string, string> = {
   "src/app/admin/(auth)/setup/store/actions.ts": "the super_admin's first store (T2): before any membership",
   "src/app/app/account/actions.ts": "the account's own profile, password, sessions and deletion (T2): no store",
   "src/app/app/account/two-factor/actions.ts": "the account's own two-step setup (T2): no store",
+  "src/app/app/actions.ts": "the signed-in user's own picker hint and legal re-acceptance (P2, userAction): no store; attacked in tenancy-cases/shell.ts (the user actions)",
   "src/app/app/new/actions.ts": "a new store (T2): the caller is a member of nothing there yet",
   "src/lib/auth/actions.ts": "account session actions (T2): no store",
   // every "use server" file of P1's console, derived from the tree (P0b, CCR X-1)
@@ -1928,7 +1936,7 @@ export async function pageSuite(kit: Kit): Promise<void> {
         else if (r.kind === "render") check(`${label}: no canary of A`, leaks(fx, r.payload, { sent: [sp, ids] }).length === 0, leaks(fx, r.payload, { sent: [sp, ids] }));
         else if (!ranReal(label, r.kind === "error" ? r : null)) continue;
         // A's page id in B's builder: the neutral 404; an agent's dashboard: its own order queue
-        else check(`${label}: 404 or a redirect inside B`, (r.kind === "notFound" && page.template.includes("[id]")) || (r.kind === "redirect" && r.to.startsWith(`/app/${fx.B.handle}/`)), r);
+        else check(`${label}: 404 or a redirect inside B`, (r.kind === "notFound" && page.template.includes("[id]")) || (r.kind === "redirect" && insideStore(fx.B.handle, r.to)), r);
       }
     }
   }
@@ -2075,12 +2083,13 @@ export async function repositorySuite(kit: Kit): Promise<void> {
   await same(fx, "getSheetsConfig(B)", () => SC.getSheetsConfig(B));
   await same(fx, "syncHealth(B)", () => SC.syncHealth(B));
   // search, audit, dashboard
-  for (const q of [fx.A.customer.name, fx.canaries.data[0]!, fx.A.order.main, "%%", "__", "%a%"]) await same(fx, `searchAdmin(B, "${q.slice(0, 12)}…")`, () => SE.searchAdmin(B, fx.rows.B, q, { pages: true, orders: true }), { sent: q });
+  const viewerB = { userId: fx.B.members.owner, role: "owner" as const, locale: "en" as const, handle: fx.B.handle, can: () => true };
+  for (const q of [fx.A.customer.name, fx.canaries.data[0]!, fx.A.order.main, "%%", "__", "%a%"]) await same(fx, `searchStore(B, "${q.slice(0, 12)}…")`, () => SE.searchStore(B, q, viewerB), { sent: q });
   // the tenant reader takes the store ctx (listStoreAudit: audit.read, the ctx's store)
   await same(fx, "auditPage(B)", () => SEC.auditPage({ scope: B, store: fx.rows.B, can: () => true } as never, { limit: 100 }));
-  await same(fx, "navCounts(B)", () => D.navCounts(B));
   await same(fx, "getSheetHealth(B)", () => D.getSheetHealth(B));
-  await same(fx, "getDashboard(B)", () => D.getDashboard(B, fx.rows.B, { totpEnabled: false }));
+  const ctxB = { scope: B, store: fx.rows.B, can: () => true, user: { id: fx.B.members.owner } as never, membership: { role: "owner" as const, status: "active" as const } };
+  await same(fx, "dashboardPanels(B)", () => D.dashboardPanels(ctxB as never, "28d"));
   // team (T2's repositories)
   await same(fx, "listMembersByScope(B)", () => INV.listMembersByScope(B));
   await same(fx, "listInvitesByScope(B)", () => INV.listInvitesByScope(B));
@@ -2208,10 +2217,10 @@ export async function repositorySuite(kit: Kit): Promise<void> {
   await masked("orderDetailJson(A, impersonation)", () => AO.orderDetailJson(imp, fx.A.order.main));
   await masked("listLeads(A, impersonation)", () => O.listLeads(imp, { abandonedOnly: false }));
   await masked("listBlocklist(A, impersonation)", () => O.listBlocklist(imp));
-  await masked("searchAdmin(A, impersonation)", () => SE.searchAdmin(imp, fx.rows.A, "Salma", { pages: true, orders: true }));
+  await masked("searchStore(A, impersonation)", () => SE.searchStore(imp, "Salma", { userId: fx.staff.id, role: "viewer", locale: "en", handle: fx.rows.A.handle, can: () => true }));
   await masked("ordersCsv(A, impersonation)", () => new Response(O.ordersCsv(imp, {})).text());
   await masked("leadsCsv(A, impersonation)", () => new Response(O.leadsCsv(imp, { abandonedOnly: false })).text());
-  await masked("getDashboard(A, impersonation)", () => D.getDashboard(imp, fx.rows.A, { totpEnabled: false }));
+  await masked("dashboardPanels(A, impersonation)", () => D.dashboardPanels({ scope: imp, store: fx.rows.A, can: () => true } as never, "7d"));
   const masks = await call({ anonymous: true }, "/", () => O.listOrders(imp, { q: fx.A.customer.name }));
   check("listOrders(A, impersonation, q = the customer's name) finds nothing (masked fields are not searchable)", masks.ok && (masks.value as { total: number }).total === 0, answerOf(masks));
   // the console's page rows (SEC-18): name and seoTitle of the store's own pages only
@@ -2950,7 +2959,8 @@ export async function impersonationSuite(kit: Kit): Promise<void> {
       const label = `${page.template} · staff viewing A`;
       // the search box echoes what the staff member typed (`?q=` a customer's name): their own string, not a leak
       if (r.kind === "render") check(`${label}: no customer canary in the payload`, leaks(fx, r.payload, { only: ["customer", "secret"], sent: sp }).length === 0, leaks(fx, r.payload, { only: ["customer", "secret"], sent: sp }));
-      else if (ranReal(label, r.kind === "error" ? r : null)) check(`${label}: renders or 404`, r.kind === "notFound", r);
+      // P2 merge: an owner-only screen (the welcome flow) sends a staff viewer to A's own home, a screen of A they may view
+      else if (ranReal(label, r.kind === "error" ? r : null)) check(`${label}: renders, 404 or a redirect inside A`, r.kind === "notFound" || (r.kind === "redirect" && insideStore(fx.A.handle, r.to)), r);
     }
   }
   const tenantRoutes = deriveRoutes().filter((r) => r.template.includes("[store]"));
@@ -3021,7 +3031,7 @@ export async function impersonationSuite(kit: Kit): Promise<void> {
       const r = await renderPage(viewB, page, { store: fx.B.handle, ...ids }, sp);
       const lb = `${page.template}${Object.keys(sp).length ? `?${new URLSearchParams(sp)}` : ""} · staff viewing B · B's handle, A's ids`;
       if (r.kind === "render") check(`${lb}: no canary of A`, leaks(fx, r.payload, { sent: [sp, ids] }).length === 0, leaks(fx, r.payload, { sent: [sp, ids] }));
-      else if (ranReal(lb, r.kind === "error" ? r : null)) check(`${lb}: 404 or a redirect inside B`, r.kind === "notFound" || (r.kind === "redirect" && r.to.startsWith(`/app/${fx.B.handle}/`)), r);
+      else if (ranReal(lb, r.kind === "error" ? r : null)) check(`${lb}: 404 or a redirect inside B`, r.kind === "notFound" || (r.kind === "redirect" && insideStore(fx.B.handle, r.to)), r);
     }
   }
   for (const route of tenantRoutes) {
@@ -3283,7 +3293,11 @@ export async function reviewSuite(kit: Kit): Promise<void> {
       // by file: the builder's (editor) group layout has the same template
       const shell = pages.find((p) => p.file === "src/app/app/[store]/layout.tsx")!;
       const inner = await renderPage({ userId: ownerB }, shell, { store: fx.B.handle });
-      check("ar owner: the store shell is English, left to right (no mirrored English sidebar)", inner.kind === "render" && /"lang":"en","dir":"ltr"/.test(inner.payload) && !/"dir":"rtl"/.test(inner.payload), inner.kind);
+      // P2 (p2-02, D36; CCR r1-p2-3 §1b): the chrome follows the viewer; an untranslated screen inside stays English, left to right
+      // LocaleRoot is a client component: the payload carries its `locale` prop (it sets lang/dir on the client)
+      check("ar owner: the store chrome is Arabic, right to left", inner.kind === "render" && /"locale":"ar"/.test(inner.payload), inner.kind);
+      const { screenLocalesFor } = load<typeof import("@/components/admin/shell/store-nav")>("@/components/admin/shell/store-nav");
+      check("ar owner: an untranslated screen inside the chrome renders English (no mirrored English screen)", screenLocalesFor("/orders").join() === "en" && screenLocalesFor("/team/agents").join() === "en", { orders: screenLocalesFor("/orders"), overview: screenLocalesFor("") });
       const team = await renderPage({ userId: ownerB }, pageOf("/app/[store]/team"), { store: fx.B.handle });
       check("ar owner: the team page (translated) is Arabic, right to left inside the shell", team.kind === "render" && /"lang":"ar","dir":"rtl"/.test(team.payload), team.kind);
     } finally {
@@ -3298,9 +3312,9 @@ export async function reviewSuite(kit: Kit): Promise<void> {
     const r = await renderPage({ userId: ownerB }, danger, {});
     const hrefs = r.kind === "render" ? [...r.payload.matchAll(/"href":"(\/app\/[^"]+)"/g)].map((m) => m[1]!) : [];
     const known = [...pages.map((p) => p.template), ...deriveOtherPages().map((p) => p.template)].map((t) => new RegExp(`^${t.replace(/\[[^\]]+\]/g, "[^/]+")}$`));
-    check("the account danger page names B's team for B's owner", hrefs.includes(`/app/${fx.B.handle}/team`), hrefs);
+    check("the account danger page sends B's owner to B's danger zone", hrefs.includes(`/app/${fx.B.handle}/settings/danger`), hrefs);
     check("…and every /app link of it is a screen of the tree", hrefs.length > 0 && hrefs.every((h) => known.some((re) => re.test(h.split(/[?#]/)[0]!))), hrefs);
-    const sources = ["src/components/admin/orders/orders-view.tsx", "src/components/admin/shell/command-palette-body.tsx"].map((f) => readFileSync(path.join(ROOT, f), "utf8"));
+    const sources = ["src/components/admin/orders/orders-view.tsx"].map((f) => readFileSync(path.join(ROOT, f), "utf8"));
     check(
       "the Orders CSV buttons fetch the route (downloadFile: a step_up answer opens the sheet), never a bare download link",
       sources.every((src) => src.includes("downloadFile(") && !/href=\{[^}]*\/orders\/export/.test(src) && !/\.href = store\.api\("\/orders\/export"\)/.test(src)),

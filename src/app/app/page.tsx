@@ -31,7 +31,8 @@ export default async function AppHomePage() {
 
   const [locale, brand, created] = await Promise.all([viewerLocale(user), brandName(), peekBucket(buckets.storeCreate(user.id))]);
   const t = authTranslator(locale);
-  const stores = [...data.stores].sort((a, b) => Number(b.storeId === user.lastStoreId) - Number(a.storeId === user.lastStoreId) || Number(b.usable) - Number(a.usable));
+  // the last store first, then the most recently active membership (CCR r1-p2-7 §2), then usable ones; name order stays
+  const stores = [...data.stores].sort((a, b) => Number(b.storeId === user.lastStoreId) - Number(a.storeId === user.lastStoreId) || (b.lastActiveAt ?? "").localeCompare(a.lastActiveAt ?? "") || Number(b.usable) - Number(a.usable));
   return (
     <>
       <AppBar user={user} brand={brand} locale={locale} />

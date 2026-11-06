@@ -29,6 +29,8 @@ export interface MembershipSummary {
   storeStatus: StoreStatus;
   mode: StoreMode;
   logoKey?: string;
+  /** store_members.last_active_at, ISO; the picker's second sort key (PLA-§22.3, CCR r1-p2-7 §2) */
+  lastActiveAt?: string | null;
 }
 
 const OPEN_TO_MEMBERS: ReadonlySet<StoreStatus> = new Set(["pending", "active", "restricted", "suspended"]);
@@ -66,6 +68,7 @@ export async function listMemberships(userId: string): Promise<MembershipSummary
       status: storeMembers.status,
       storeStatus: stores.status,
       mode: stores.mode,
+      lastActiveAt: storeMembers.lastActiveAt,
     })
     .from(storeMembers) // tenancy: platform a user's memberships (§B.4 switcher, §E.3 rule 6)
     .innerJoin(stores, eq(stores.id, storeMembers.storeId))
@@ -73,7 +76,7 @@ export async function listMemberships(userId: string): Promise<MembershipSummary
     .orderBy(asc(stores.name), asc(stores.id))
     .limit(200);
   // a purged tombstone has no handle; it is excluded above, the guard only narrows the type
-  return rows.flatMap((r) => (r.handle ? [{ ...r, handle: r.handle }] : []));
+  return rows.flatMap((r) => (r.handle ? [{ ...r, handle: r.handle, lastActiveAt: r.lastActiveAt ? new Date(r.lastActiveAt).toISOString() : null }] : []));
 }
 
 /** What the store switcher shows (§B.4): every listed membership with whether it opens, and the two extra entries. */

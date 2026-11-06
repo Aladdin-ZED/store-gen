@@ -13,14 +13,13 @@ import "server-only";
  * (`runSearchProviders`, the pure part beside the route, with the shell's matching). R1.0's cross-table LIKE search is
  * gone.
  */
-import { flatHits, memberHits, runSearchProviders, settingHits, type SearchViewer, type StoreSearchResult } from "@/app/api/app/[store]/search/run";
-import type { StorePermission } from "@/lib/auth/permissions";
+import { memberHits, runSearchProviders, settingHits, type SearchViewer, type StoreSearchResult } from "@/app/api/app/[store]/search/run";
 import { viewerLocale } from "@/lib/auth/locale";
 import { logError } from "@/lib/orders/log";
 import { listMembersByScope } from "@/lib/tenancy/invites";
-import type { StoreCtx, StoreRow, StoreScope } from "@/lib/tenancy/types";
+import type { StoreCtx, StoreScope } from "@/lib/tenancy/types";
 import { appHref } from "@/lib/urls";
-import { SEARCH_BUDGET_MS, SEARCH_PROVIDERS, type SearchHit, type SearchProvider } from "./search/registry";
+import { SEARCH_BUDGET_MS, SEARCH_PROVIDERS, type SearchProvider } from "./search/registry";
 
 export type { SearchHit } from "./search/types";
 export type { SearchGroup, SearchViewer, SlowProvider, StoreSearchResult } from "@/app/api/app/[store]/search/run";
@@ -51,12 +50,3 @@ export async function searchStore(scope: StoreScope, q: string, viewer: SearchVi
   return result;
 }
 
-/**
- * @deprecated R1.0's flat search, now `searchStore` with the least viewer (role "viewer", no member search). Kept only
- * because the maintainer's tenancy harness calls it (CCR r1-p2-3 moves the harness to `searchStore`).
- */
-export async function searchAdmin(scope: StoreScope, store: Pick<StoreRow, "handle">, q: string, opts: { pages: boolean; orders: boolean }): Promise<SearchHit[]> {
-  const grants = new Set<StorePermission>([...(opts.pages ? (["pages.read"] as const) : []), ...(opts.orders ? (["orders.read"] as const) : [])]);
-  const viewer: SearchViewer = { userId: "", role: "viewer", locale: "en", handle: store.handle, can: (p) => grants.has(p) };
-  return flatHits(await searchStore(scope, q, viewer));
-}

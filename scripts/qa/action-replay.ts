@@ -124,7 +124,8 @@ async function replaySuite(kit: Kit): Promise<void> {
     // A's member has just stepped up (the secret writes ask for it, §B.7)
     const live = await call(armed(caller), appPath(fx.A.handle, c.path), () => actionFn(c)(...structuredClone(args)));
     const liveLabel = `${c.id}: A's owner's own call works (the replayed body was live)`;
-    if (ranReal(liveLabel, live)) check(liveLabel, refusal(live) === null, answerOf(live));
+    if (c.live) check(`${c.id}: A's owner's own call answers ${c.live.expect} (${c.live.why})`, refusal(live) === c.live.expect, answerOf(live));
+    else if (ranReal(liveLabel, live)) check(liveLabel, refusal(live) === null, answerOf(live));
     // the replays never reached the network with A's secrets (a CAPI test event of B must use B's token, PIX-01)
     const tokens = fx.canaries.secret.filter((s) => s.startsWith("EAAT"));
 

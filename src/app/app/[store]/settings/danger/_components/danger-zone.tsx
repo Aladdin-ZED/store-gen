@@ -50,7 +50,7 @@ export function DangerZone({
   canExport: boolean;
   canClose: boolean;
   jobs: ExportJobSummary[] | null;
-  /** the download route's base ("/api/app/<h>/store-export"); a part is `<base>/<jobId>/<name>` */
+  /** the download route's base ("/api/app/<h>/exports", P8's route); a part's own signed `href` wins */
   partBase: string;
   reopenUntil: string | null;
   lastOwner: boolean;
@@ -103,19 +103,23 @@ export function DangerZone({
     }
   };
 
-  const partLink = (job: ExportJobSummary, part: { name: string; bytes: number }) => (
+  // P2 merge (CCR r1-p2-7 §1): P8's summary carries a fresh signed link per part (GET /api/app/<h>/exports/<jobId>/<n>?t=…);
+  // no link while the job is not ready
+  const partLink = (job: ExportJobSummary, part: { n?: number; name: string; bytes: number; href?: string | null }) => (
     <li key={part.name} className="flex min-h-11 items-center gap-3 py-1.5">
       <ArchiveIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
       <bdi dir="ltr" className="min-w-0 flex-1 truncate font-mono text-[13px]">
         {part.name}
       </bdi>
       <span className="text-xs text-muted-foreground tabular-nums">{formatUsage(part.bytes, "bytes", locale)}</span>
-      <Button asChild variant="ghost" size="sm" className="max-md:h-11">
-        <a href={`${partBase}/${job.id}/${encodeURIComponent(part.name)}`} download>
-          <DownloadIcon aria-hidden="true" />
-          {t("shell.danger.download")}
-        </a>
-      </Button>
+      {part.href !== null ? (
+        <Button asChild variant="ghost" size="sm" className="max-md:h-11">
+          <a href={part.href ?? `${partBase}/${job.id}/${part.n ?? encodeURIComponent(part.name)}`} download>
+            <DownloadIcon aria-hidden="true" />
+            {t("shell.danger.download")}
+          </a>
+        </Button>
+      ) : null}
     </li>
   );
 
