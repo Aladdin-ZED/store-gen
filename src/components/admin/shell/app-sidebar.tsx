@@ -1,6 +1,19 @@
 "use client";
 
-import { ChevronsUpDownIcon, LogOutIcon, MonitorIcon, MoonIcon, ShieldAlertIcon, ShieldCheckIcon, SparklesIcon, SunIcon, UserRoundCogIcon } from "lucide-react";
+import {
+  ChevronsUpDownIcon,
+  DownloadIcon,
+  LifeBuoyIcon,
+  LogOutIcon,
+  MonitorIcon,
+  MoonIcon,
+  Rows3Icon,
+  ShieldAlertIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
+  SunIcon,
+  UserRoundCogIcon,
+} from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -36,16 +49,19 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
-import type { MembershipSummary } from "@/lib/auth/landing";
 import { ACCOUNT_PATH } from "@/lib/auth/paths";
 import { logout } from "@/lib/auth/actions";
-import { clearDashboardDrafts } from "../lib/drafts";
+import { useAdminLocale, useT } from "@/lib/i18n/admin/client";
 import { cn } from "@/lib/utils";
 import { initials } from "../lib/format";
-import { STORE_ROLE_LABELS } from "../lib/store-labels";
+import { signOutCleanup } from "./client-state";
+import { DENSITIES, useDensity } from "./density";
+import { useHelpSheet } from "./help-sheet";
+import { IosInstallSheet, useInstallHint } from "./install-hint";
 import { useStore } from "./store-context";
-import { activeNav, storeNav, type ShellNavGroup, type ShellNavItem } from "./store-nav";
-import { StoreSwitcher } from "./store-switcher";
+import { activeNav, sidebarNav, storeNav, type ShellNavGroup, type ShellNavItem } from "./store-nav";
+import { StoreSwitcher, type SwitcherProps } from "./store-switcher";
+import { usePulse } from "./use-pulse";
 
 export interface ShellUser {
   name: string;
@@ -53,33 +69,30 @@ export interface ShellUser {
   totpEnabled: boolean;
 }
 
-export interface NavCounts {
-  newOrders: number;
-  syncFailed: number;
-}
-
-export function AppSidebar({
-  user,
-  counts,
-  memberships,
-  consoleHref,
-}: {
-  user: ShellUser;
-  counts: NavCounts | null;
-  memberships: readonly MembershipSummary[] | null;
-  consoleHref: string | null;
-}) {
+/**
+ * The sidebar (P2 SHELL; platform.md PLA-§22.3, §22.6, §23.1; docs/STORE-SAAS.md §I.4; design.md DES-§16.6): the store
+ * switcher in the header, the registry's nav with the active pill sliding on `--ease-out` (a tween, never a spring),
+ * the badges from the pulse's counts (a key that is absent shows no badge, never a 0 made up for it), settings at the
+ * bottom and the account menu. Below 768 px it is a sheet (ui/sidebar.tsx). In Arabic it sits on the inline start,
+ * the physical right.
+ */
+export function AppSidebar({ user, switcher, className }: { user: ShellUser; switcher: SwitcherProps; className?: string }) {
   const pathname = usePathname();
   const store = useStore();
   const { setOpenMobile, isMobile } = useSidebar();
-  const groups = useMemo(() => storeNav({ handle: store.handle, mode: store.mode, can: store.can }), [store]);
+  const t = useT();
+  const locale = useAdminLocale();
+  const counts = usePulse().body?.counts ?? null;
+  // the registry's groups, the settings tabs folded into one entry (the tabs are the settings frame's sub-navigation)
+  const groups = useMemo(() => sidebarNav(storeNav({ handle: store.handle, mode: store.mode, can: store.can }, locale), store.handle, locale), [store, locale]);
   const active = activeNav(pathname, groups, store.handle);
   const generate = groups.flatMap((g) => g.items).find((i) => i.id === "generate");
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false);
   };
 
-  const badgeFor = (item: ShellNavItem) => (item.badgeKey && counts ? (counts[item.badgeKey as keyof NavCounts] ?? 0) : 0);
+  const badgeFor = (item: ShellNavItem) => (item.badgeKey && counts ? (counts[item.badgeKey] ?? 0) : 0);
+  const syncFailed = counts?.syncFailed ?? 0;
 
   const renderItems = (list: ShellNavItem[]) =>
     list.map((item) => {
@@ -104,7 +117,7 @@ export function AppSidebar({
                   aria-hidden="true"
                   className="absolute inset-0 rounded-[10px] bg-background shadow-[0_1px_2px_rgb(0_0_0/0.05),0_6px_16px_-10px_rgb(0_0_0/0.25)] ring-1 ring-sidebar-border dark:bg-sidebar-accent"
                   // a settle, never a bounce (D60, §I.6): the shell's ease-out curve
-                  transition={{ type: "tween", duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+                  transition={{ type: "tween", duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
                 />
               )}
               <Icon className={cn("relative z-10 transition-colors", isActive ? "text-brand" : "text-sidebar-foreground/55")} />
@@ -112,7 +125,7 @@ export function AppSidebar({
             </Link>
           </SidebarMenuButton>
           {badge > 0 && (
-            <SidebarMenuBadge className="top-2 rounded-full bg-brand/12 px-1.5 text-[0.68rem] font-semibold text-brand tabular-nums peer-hover/menu-button:text-brand">
+            <SidebarMenuBadge className="top-2 rounded-full rtl:right-auto rtl:left-1 bg-brand/12 px-1.5 text-[0.68rem] font-semibold text-brand tabular-nums peer-hover/menu-button:text-brand">
               {badge > 99 ? "99+" : badge}
             </SidebarMenuBadge>
           )}
@@ -128,17 +141,18 @@ export function AppSidebar({
   const settings = groups.find((g) => g.id === "settings")?.items ?? [];
 
   return (
-    <Sidebar variant="inset" collapsible="icon" className="border-none">
+    // the inline-start side: the physical right in Arabic (ui/sidebar.tsx positions with physical sides)
+    <Sidebar variant="inset" collapsible="icon" side={locale === "ar" ? "right" : "left"} className={cn("border-none", className)}>
       <SidebarHeader className="gap-3 px-2 pt-3">
         {/* the store switcher slot (§I.4): the store on screen and the member's other stores */}
-        <StoreSwitcher memberships={memberships} consoleHref={consoleHref} />
+        <StoreSwitcher {...switcher} />
         {generate && (
           <SidebarMenu>
             <SidebarMenuItem>
               {/* quiet on purpose: the jade accent belongs to each screen's own primary action */}
               <SidebarMenuButton
                 asChild
-                tooltip="Generate a page"
+                tooltip={t("shell.chrome.generate")}
                 isActive={active?.id === "generate"}
                 className={cn(
                   "group/gen h-10 justify-start gap-2.5 rounded-xl bg-background px-2.5 text-[0.86rem] font-medium text-sidebar-foreground shadow-[0_1px_2px_rgb(20_22_34/0.05)] ring-1 ring-sidebar-border transition-[box-shadow,transform] duration-300",
@@ -151,7 +165,7 @@ export function AppSidebar({
                   <span className="grid size-6 shrink-0 place-items-center rounded-md bg-brand text-brand-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.25)] transition-transform duration-200 ease-[cubic-bezier(.2,.8,.2,1)] group-hover/gen:scale-[1.06] group-data-[collapsible=icon]:size-5 [&_svg]:size-3.5!">
                     <SparklesIcon />
                   </span>
-                  <span className="flex-1 truncate">Generate a page</span>
+                  <span className="flex-1 truncate">{t("shell.chrome.generate")}</span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -170,16 +184,14 @@ export function AppSidebar({
         ))}
         <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
-            {counts && counts.syncFailed > 0 && (
+            {syncFailed > 0 && (
               <Link
                 href={store.href("/orders?sheet=failed")}
                 onClick={closeMobile}
                 className="mx-1 mb-2 flex items-center gap-2 rounded-xl bg-destructive/8 px-3 py-2.5 text-[0.78rem] leading-snug text-destructive ring-1 ring-destructive/15 transition-colors ring-inset hover:bg-destructive/12 group-data-[collapsible=icon]:hidden"
               >
                 <ShieldAlertIcon className="size-4 shrink-0" />
-                <span>
-                  {counts.syncFailed} order{counts.syncFailed === 1 ? "" : "s"} didn&apos;t reach Google Sheets
-                </span>
+                <span>{t("shell.chrome.sync_failed", { count: syncFailed })}</span>
               </Link>
             )}
             <SidebarMenu className="gap-0.5">{renderItems(settings)}</SidebarMenu>
@@ -188,46 +200,50 @@ export function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter className="px-2 pb-3">
-        <UserMenu user={user} roleLabel={STORE_ROLE_LABELS[store.role]} />
+        <UserMenu user={user} roleLabel={t(`team.role.${store.role}`)} onNavigate={closeMobile} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   );
 }
 
-function UserMenu({ user, roleLabel }: { user: ShellUser; roleLabel: string }) {
+function UserMenu({ user, roleLabel, onNavigate }: { user: ShellUser; roleLabel: string; onNavigate(): void }) {
   const { theme, setTheme } = useTheme();
   const { isMobile } = useSidebar();
+  const t = useT();
+  const store = useStore();
+  const help = useHelpSheet();
+  const { density, setDensity } = useDensity();
+  const install = useInstallHint();
+  const rtl = useAdminLocale() === "ar";
   // the sign-out form lives outside the menu: the menu unmounts as soon as an item is chosen
   const signOut = useRef<HTMLFormElement>(null);
+  const shield = user.totpEnabled ? "text-success-ink" : "text-warn-ink";
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        {/* signing out also forgets this browser's dashboard drafts (§E.6) */}
-        <form ref={signOut} action={logout} onSubmit={clearDashboardDrafts} className="hidden" />
+        {/* signing out also forgets this browser's state of the store and its dashboard drafts (§B.4, §E.6) */}
+        <form ref={signOut} action={logout} onSubmit={() => signOutCleanup(store.id, store.viewerId)} className="hidden" />
+        <IosInstallSheet open={install.iosOpen} onOpenChange={install.setIosOpen} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
               className="h-12 rounded-xl px-2 data-open:bg-sidebar-accent hover:bg-sidebar-accent/60"
-              aria-label="Account menu"
+              aria-label={t("shell.chrome.account_menu")}
             >
               <UserAvatar name={user.name} />
               <span className="grid min-w-0 flex-1 text-start leading-tight">
                 <span className="truncate text-[0.84rem] font-medium">{user.name}</span>
                 <span className="flex items-center gap-1 truncate text-[0.72rem] text-sidebar-foreground/65">
-                  {user.totpEnabled ? (
-                    <ShieldCheckIcon className="size-3 text-emerald-600 dark:text-emerald-400" />
-                  ) : (
-                    <ShieldAlertIcon className="size-3 text-warn-ink" />
-                  )}
+                  {user.totpEnabled ? <ShieldCheckIcon className={cn("size-3", shield)} /> : <ShieldAlertIcon className={cn("size-3", shield)} />}
                   {roleLabel}
                 </span>
               </span>
               <ChevronsUpDownIcon className="ms-auto size-4 text-sidebar-foreground/45" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent side={isMobile ? "top" : "right"} align="end" sideOffset={10} className="w-64 rounded-xl p-1.5">
+          <DropdownMenuContent side={isMobile ? "top" : rtl ? "left" : "right"} align="end" sideOffset={10} className="w-64 rounded-xl p-1.5">
             <DropdownMenuLabel className="flex items-center gap-2.5 px-2 py-2 font-normal">
               <UserAvatar name={user.name} />
               <span className="grid min-w-0 leading-tight">
@@ -238,45 +254,73 @@ function UserMenu({ user, roleLabel }: { user: ShellUser; roleLabel: string }) {
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                <Link href={ACCOUNT_PATH}>
-                  {user.totpEnabled ? <ShieldCheckIcon className="text-emerald-600 dark:text-emerald-400" /> : <ShieldAlertIcon className="text-warn-ink" />}
-                  <span className="flex-1">Two-step verification</span>
-                  <span className={cn("text-xs", user.totpEnabled ? "text-emerald-600 dark:text-emerald-400" : "text-warn-ink")}>
-                    {user.totpEnabled ? "On" : "Off"}
-                  </span>
+                <Link href={ACCOUNT_PATH} onClick={onNavigate}>
+                  {user.totpEnabled ? <ShieldCheckIcon className={shield} /> : <ShieldAlertIcon className={shield} />}
+                  <span className="flex-1">{t("shell.chrome.two_factor")}</span>
+                  <span className={cn("text-xs", shield)}>{t(user.totpEnabled ? "shell.chrome.on" : "shell.chrome.off")}</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link href={ACCOUNT_PATH}>
+                <Link href={ACCOUNT_PATH} onClick={onNavigate}>
                   <UserRoundCogIcon />
-                  Account & devices
+                  {t("shell.chrome.account")}
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <SunIcon className="dark:hidden" />
                   <MoonIcon className="hidden dark:block" />
-                  Appearance
+                  {t("shell.chrome.appearance")}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="rounded-xl">
                   <DropdownMenuRadioGroup value={theme ?? "system"} onValueChange={setTheme}>
                     <DropdownMenuRadioItem value="light">
-                      <SunIcon /> Light
+                      <SunIcon /> {t("shell.chrome.light")}
                     </DropdownMenuRadioItem>
                     <DropdownMenuRadioItem value="dark">
-                      <MoonIcon /> Dark
+                      <MoonIcon /> {t("shell.chrome.dark")}
                     </DropdownMenuRadioItem>
                     <DropdownMenuRadioItem value="system">
-                      <MonitorIcon /> System
+                      <MonitorIcon /> {t("shell.chrome.system")}
                     </DropdownMenuRadioItem>
                   </DropdownMenuRadioGroup>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <Rows3Icon />
+                  {t("shell.density.label")}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="rounded-xl">
+                  <DropdownMenuRadioGroup value={density} onValueChange={(v) => setDensity(v === "compact" ? "compact" : "comfortable")}>
+                    {DENSITIES.map((d) => (
+                      <DropdownMenuRadioItem key={d} value={d}>
+                        {t(`shell.density.${d}`)}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuItem
+                onSelect={() => {
+                  onNavigate();
+                  help.open();
+                }}
+              >
+                <LifeBuoyIcon />
+                {t("shell.chrome.help")}
+              </DropdownMenuItem>
+              {install.offer && (
+                <DropdownMenuItem onSelect={install.install}>
+                  <DownloadIcon />
+                  {t("shell.install.cta")}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => signOut.current?.requestSubmit()}>
               <LogOutIcon />
-              Sign out
+              {t("shell.chrome.sign_out")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

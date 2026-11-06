@@ -17,10 +17,19 @@ export async function createStoreAction(data: FormData): Promise<ActionResult<Ne
   return userAction(async (ctx): Promise<NewStoreState> => {
     const formMs = Number(field(data, "formMs", 12));
     const market = field(data, "market", 8);
+    // PD30: "Tell me when it's ready" on a Coming-soon type card; the store itself starts with sales pages
+    const interest = field(data, "modeInterest", 8);
     const { ua } = await getRequestContext();
     const r = await createAdditionalStore(
       ctx,
-      { storeName: field(data, "storeName", 200), handle: field(data, "handle", 64), mode: "landing", market: market || undefined, formMs: Number.isFinite(formMs) ? formMs : null },
+      {
+        storeName: field(data, "storeName", 200),
+        handle: field(data, "handle", 64),
+        mode: "landing",
+        modeInterest: interest === "store" || interest === "both" ? interest : null,
+        market: market || undefined,
+        formMs: Number.isFinite(formMs) ? formMs : null,
+      },
       { ua, deviceId: await getDeviceMarker() },
     );
     if (r.kind === "closed") return { status: "closed" };

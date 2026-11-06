@@ -19,6 +19,8 @@ export async function generateMetadata(): Promise<Metadata> {
     title: { template: `%s · ${brand}`, default: brand },
     robots: { index: false, follow: false, nocache: true },
     referrer: "same-origin",
+    // the installable dashboard (PLA-§23.1): its own route handler, public, outside this layout's session
+    manifest: "/app/manifest.webmanifest",
   };
 }
 

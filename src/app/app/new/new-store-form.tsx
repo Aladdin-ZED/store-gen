@@ -5,6 +5,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { useAuthT } from "@/lib/auth/i18n/client";
 import { useAdminLocale } from "@/lib/i18n/admin/client";
+import { ModeCards } from "@/components/admin/common/mode-explainer";
 import { FormAlert, SubmitButton } from "@/app/(public)/_components/form-ui";
 import { StoreNameAndHandle } from "@/app/(public)/_components/handle-field";
 import { Section } from "@/app/(public)/_components/kit";
@@ -23,7 +24,7 @@ function regionLabel(locale: string, code: string): string {
   }
 }
 
-export function NewStoreForm({ markets }: { markets: string[] }) {
+export function NewStoreForm({ markets, addressTemplate }: { markets: string[]; addressTemplate: string }) {
   const t = useAuthT();
   const locale = useAdminLocale();
   const [state, action, pending] = useActionState<NewStoreState, FormData>(
@@ -33,6 +34,8 @@ export function NewStoreForm({ markets }: { markets: string[] }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [startedAt] = useState(() => Date.now());
   const error = state.status === "error" ? state : null;
+  // PD30: sales pages in R1; "Tell me when it's ready" on the full-store cards is kept as the store's interest
+  const [interest, setInterest] = useState(false);
 
   useEffect(() => {
     if (state.status !== "error") return;
@@ -61,7 +64,17 @@ export function NewStoreForm({ markets }: { markets: string[] }) {
     >
       <Section title={t("app.new.section")} description={t("app.new.section_lead")}>
         <FormAlert message={error?.message ? t(error.message) : undefined} />
-        <StoreNameAndHandle initialName={error?.values?.storeName ?? ""} initialHandle={error?.values?.handle ?? ""} errors={{ storeName: error?.fieldErrors?.storeName, handle: error?.fieldErrors?.handle }} />
+        <StoreNameAndHandle
+          initialName={error?.values?.storeName ?? ""}
+          initialHandle={error?.values?.handle ?? ""}
+          errors={{ storeName: error?.fieldErrors?.storeName, handle: error?.fieldErrors?.handle }}
+          addressTemplate={addressTemplate}
+        />
+        <div className="grid gap-2">
+          <p className="text-sm font-medium">{t("app.new.mode_title")}</p>
+          <ModeCards value="landing" onChange={() => undefined} name="mode" notify={{ checked: interest, onChange: setInterest }} />
+          {interest && <input type="hidden" name="modeInterest" value="store" />}
+        </div>
         {markets.length > 1 ? (
           <div className="grid gap-2">
             <Label htmlFor="new-market">{t("auth.field.market")}</Label>

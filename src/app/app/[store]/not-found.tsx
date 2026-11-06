@@ -26,7 +26,7 @@ export default function StoreNotFound() {
         actions={
           <Button asChild className="rounded-full">
             <Link href={home.href}>
-              <ArrowLeftIcon />
+              <ArrowLeftIcon className="rtl:rotate-180" />
               {home.label}
             </Link>
           </Button>

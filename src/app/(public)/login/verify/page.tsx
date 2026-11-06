@@ -34,12 +34,12 @@ export default async function VerifyPage({ searchParams }: { searchParams: Searc
         </bdi>
       </AuthHeading>
       <VerifyForm next={next} />
-      <form action={logout} className="mt-8 border-t pt-6 text-center">
+      <form action={logout} className="mt-6 text-center">
         <button
           type="submit"
-          className="rounded-sm text-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="inline-flex min-h-11 items-center rounded-sm text-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
         >
-          {t("auth.verify.cancel")}
+          {t("auth.verify.back")}
         </button>
       </form>
     </>

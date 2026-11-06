@@ -76,7 +76,7 @@ export function Segmented<V extends string>({
                 <motion.span
                   layoutId="seg-pill"
                   className="absolute inset-0 rounded-full bg-background shadow-[0_1px_2px_rgb(0_0_0/0.06),0_4px_12px_-6px_rgb(0_0_0/0.18)] ring-1 ring-foreground/[0.07] dark:bg-foreground/10"
-                  transition={{ type: "spring", stiffness: 420, damping: 34, mass: 0.8 }}
+                  transition={{ type: "tween", duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
                 />
               )}
               <span className="relative z-10 inline-flex items-center gap-1.5 [&_svg]:size-3.5">

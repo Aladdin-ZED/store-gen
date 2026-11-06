@@ -1,167 +1,193 @@
-import { CalendarDaysIcon, MousePointerClickIcon, ReceiptTextIcon, ShoppingBagIcon, SparklesIcon, WalletIcon } from "lucide-react";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import type { DashboardData } from "@/lib/admin-data/dashboard";
-import { appHref } from "@/lib/urls";
-import { EmptyState } from "../common/empty-state";
-import { PageHeader } from "../common/page-header";
-import { Screen } from "../common/screen";
-import { StorageNotice } from "../common/storage-notice";
-import { KpiCard } from "./kpi-card";
-import { Pipeline, RecentOrders, TopPages } from "./lists";
-import { OrdersChart } from "./orders-chart";
-import { SetupChecklist } from "./setup-checklist";
-import { SheetHealthCard } from "./sheet-health";
-
 /**
- * The dashboard screen of one store (server-renderable; data comes from getDashboard()). A first-run variant
- * replaces the KPI grid with a welcome card and the setup checklist until there are pages or orders. Every link is
- * the store's (`appHref(handle, …)`).
+ * The dashboard of one store (P2 SHELL; platform.md PLA-§22.17, §22.16, §22.7, §22.10.2; docs/STORE-SAAS.md §I.4, §I.6,
+ * §I.8, D54, D60). A server component: the header paints from the layout's data, then each block streams in its own
+ * `PanelBoundary` (Suspense + error boundary) as its panel of `dashboardLoaders()` settles, so a slow or failing source
+ * never holds or blanks the page. Order (one column at 360 px, a 12-column grid from 1024 px with the ring's rail):
+ *
+ *   1. the Today brief (template lines from real counts; never a model text, PD62)
+ *   2. the In-review card while the store is pending (the state banners sit above, in the chrome)
+ *   3. Store Health in the 4-column rail; on a phone right after the brief
+ *   4. the six COD KPI tiles (7 / 28 days in the store's time zone, test orders out of every money tile)
+ *   5. the COD funnel
+ *   6. the work lists (counters with "See all"; P4's and P3's list components mount at their merges)
+ *   7. the address card after the first publish, until the viewer hides it
+ *   8. the integration tiles (P5's rows; R1.0's Sheets tile before them)
+ *
+ * The phone order is the DOM order of each column's blocks interleaved with CSS `order` (the columns are `contents`
+ * below 1024 px). The money tile is "Placed", the value of orders placed, not delivered (never a sales total).
  */
-export function DashboardView({
-  handle,
-  data,
-  greeting,
-  firstName,
-  todayLabel,
-  can,
-}: {
-  handle: string;
-  data: DashboardData;
-  /** "Good morning" etc., computed in the store time zone */
-  greeting: string;
+import type { ReactNode } from "react";
+import { PanelBoundary } from "@/components/admin/common/panel-boundary";
+import { ReviewCard } from "@/components/admin/common/review-card";
+import { TodayBrief } from "@/components/admin/common/today-brief";
+import { evidenceVars } from "@/components/admin/common/honest";
+import { reviewFacts, type DashboardLoad, type DashboardRange } from "@/lib/admin-data/dashboard";
+import { translator, type AdminLocale, type MessageKey } from "@/lib/i18n/admin";
+import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
+import { appHref } from "@/lib/urls";
+import { cn } from "@/lib/utils";
+import { Block, DashboardAddress, DashboardHeader, Funnel, IntegrationTiles, KpiTiles, WorkLists } from "./blocks";
+import { todayBrief } from "./brief";
+import { composeTiles, funnelSteps, healthIssuesFor, scoreHidden, wireIssue } from "./compose";
+import { HealthPanel } from "./health-panel";
+
+export interface DashboardViewProps {
+  load: DashboardLoad;
+  scope: StoreScope;
+  store: Pick<StoreRow, "id" | "handle" | "name" | "status">;
+  locale: AdminLocale;
+  greeting: MessageKey;
   firstName: string;
+  /** "Tuesday 4 November" in the viewer's language and the store's time zone */
   todayLabel: string;
-  can: { orders: boolean; write: boolean; sync: boolean };
-}) {
-  const { kpis, currency } = data;
-  const checklistDone = data.checklist.every((i) => i.done);
-  const last14 = data.series.slice(-14);
-  const firstRun = !data.hasPages && kpis.orders7d.value === 0;
+  viewer: { isOwner: boolean; pagesRead: boolean; pagesWrite: boolean; ordersWrite: boolean };
+}
+
+const RANGE_DAYS: Record<DashboardRange, number> = { "7d": 7, "28d": 28 };
+
+export function DashboardView(p: DashboardViewProps) {
+  const tr = translator(p.locale);
+  const href = (path: `/${string}` | "") => appHref(p.store.handle, path);
+  const slot = (order: string, title: string, children: ReactNode) => (
+    // a block with nothing to show (an unavailable source) leaves no gap in the column
+    <div className={cn("min-w-0 [&:has(>section:empty)]:hidden", order)}>
+      <PanelBoundary title={title}>{children}</PanelBoundary>
+    </div>
+  );
 
   return (
-    <Screen wide>
-      <PageHeader
-        eyebrow={todayLabel}
-        title={
-          <>
-            <span className="text-muted-foreground">{greeting},</span> {firstName}
-          </>
-        }
-        description={firstRun ? "Let's get your first landing page live." : "Here's how your pages are selling."}
-        actions={
-          <>
-            {can.orders && (
-              <Button asChild variant="outline" className="h-9 rounded-full px-4">
-                <Link href={appHref(handle, "/orders")}>
-                  <ReceiptTextIcon />
-                  Orders
-                </Link>
-              </Button>
-            )}
-            {can.write && (
-              <Button asChild variant="brand" className="h-9 rounded-full px-4">
-                <Link href={appHref(handle, "/generate")}>
-                  <SparklesIcon />
-                  Generate a page
-                </Link>
-              </Button>
-            )}
-          </>
-        }
-      >
-        {/* from 80 % of the plan's storage on (the §I.4 quota banner): past it uploads stop */}
-        {data.storage && data.storage.level !== "ok" ? <StorageNotice usage={data.storage} mediaHref={appHref(handle, "/media")} /> : undefined}
-      </PageHeader>
+    <div className="mx-auto w-full max-w-[1480px] px-4 pt-8 pb-16 sm:px-8 sm:pt-10">
+      <DashboardHeader greeting={p.greeting} name={p.firstName} today={p.todayLabel} range={p.load.range} />
 
-      {firstRun ? (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-          <EmptyState
-            className="lg:col-span-7"
-            illustration="sparkles"
-            title="Your store is ready"
-            description="Drop a few product photos, pick a direction, and the generator art-directs a complete cash-on-delivery page: copy, offers and order form included."
-            actions={
-              can.write ? (
-                <Button asChild variant="brand" className="h-10 rounded-full px-5">
-                  <Link href={appHref(handle, "/generate")}>
-                    <SparklesIcon />
-                    Generate your first page
-                  </Link>
-                </Button>
-              ) : undefined
-            }
-          />
-          <SetupChecklist items={data.checklist} className="lg:col-span-5" />
+      <div className="flex flex-col gap-5 lg:grid lg:grid-cols-12 lg:items-start">
+        {/* the main column (8 of 12) */}
+        <div className="contents lg:col-span-8 lg:flex lg:flex-col lg:gap-5">
+          {slot("order-1", tr("brief.title"), <BriefBlock v={p} href={href} />)}
+          {p.store.status === "pending" && slot("order-3", tr("shell.review.title"), <ReviewBlock v={p} href={href} />)}
+          {slot("order-4", tr("shell.dash.kpis"), <KpiBlock v={p} href={href} />)}
+          {slot("order-5", tr("shell.dash.funnel.title"), <FunnelBlock v={p} href={href} title={tr("shell.dash.funnel.title")} />)}
+          {slot("order-7", tr("shell.address.title"), <AddressBlock v={p} href={href} />)}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-5">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <KpiCard
-              emphasis
-              className="sm:col-span-2"
-              label="Revenue · 7 days"
-              icon={<WalletIcon />}
-              kind="money"
-              currency={currency}
-              value={kpis.revenue7d.value}
-              previous={kpis.revenue7d.previous}
-              hint="Placed orders, before cancellations"
-              spark={last14.map((d) => d.revenue)}
-              style={{ ["--i" as string]: 1 }}
-            />
-            <KpiCard
-              label="Orders today"
-              icon={<CalendarDaysIcon />}
-              kind="int"
-              value={kpis.ordersToday.value}
-              previous={kpis.ordersToday.previous}
-              comparedTo="vs yesterday"
-              style={{ ["--i" as string]: 2 }}
-            />
-            <KpiCard
-              label="Orders · 7 days"
-              icon={<ShoppingBagIcon />}
-              kind="int"
-              value={kpis.orders7d.value}
-              previous={kpis.orders7d.previous}
-              spark={last14.map((d) => d.orders)}
-              style={{ ["--i" as string]: 3 }}
-            />
-            <KpiCard
-              label="Conversion · 7 days"
-              icon={<MousePointerClickIcon />}
-              kind="percent"
-              value={kpis.conversion7d.value}
-              previous={kpis.conversion7d.previous}
-              hint={`${kpis.uniques7d.value.toLocaleString("en-US")} unique visitors`}
-              style={{ ["--i" as string]: 3 }}
-            />
-            <KpiCard
-              label="Average order · 7 days"
-              icon={<WalletIcon />}
-              kind="money"
-              currency={currency}
-              value={kpis.aov7d.value}
-              previous={kpis.aov7d.previous}
-              style={{ ["--i" as string]: 4 }}
-            />
-            <SheetHealthCard health={data.sheet} canSync={can.sync} className="sm:col-span-2" />
-          </div>
-
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-            <div className="lg:col-span-8">
-              <OrdersChart series={data.series} currency={currency} />
-            </div>
-            {checklistDone ? <Pipeline pipeline={data.pipeline} className="lg:col-span-4" /> : <SetupChecklist items={data.checklist} className="lg:col-span-4" />}
-          </div>
-
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-            <TopPages handle={handle} pages={data.topPages} currency={currency} className="lg:col-span-7" />
-            {can.orders && <RecentOrders handle={handle} orders={data.recentOrders} className="lg:col-span-5" />}
-          </div>
+        {/* the rail (4 of 12): health first, so a phone reads it right after the brief */}
+        <div className="contents lg:col-span-4 lg:flex lg:flex-col lg:gap-5">
+          {slot("order-2", tr("health.title"), <HealthBlock v={p} href={href} />)}
+          {slot("order-6", tr("shell.dash.work.title"), <WorkBlock v={p} href={href} title={tr("shell.dash.work.title")} />)}
+          {slot("order-8", tr("shell.dash.integrations.title"), <IntegrationsBlock v={p} href={href} title={tr("shell.dash.integrations.title")} />)}
         </div>
-      )}
-    </Screen>
+      </div>
+    </div>
   );
+}
+
+/**
+ * Each block gets the view's props as they are (the scope is never spread into a new object, §E.1) and the link builder.
+ * The onboarding done step (welcome/_components/done-step.tsx) mounts the review and health blocks with the same props.
+ */
+export type BlockView = Pick<DashboardViewProps, "load" | "scope" | "store" | "locale" | "viewer">;
+export type BlockProps = { v: BlockView; href: (path: `/${string}` | "") => string; title?: string };
+
+/** 1. Today: P4's counts (or, before them, the store's own order count for the zero-data line) and the worst issue. */
+async function BriefBlock({ v: p, href }: BlockProps) {
+  const tr = translator(p.locale);
+  const { kpis, ops, ordersEver, health, setup } = p.load.panels;
+  const [k, o, ever, h, s] = await Promise.all([kpis, ops, ordersEver, health, setup]);
+  const set = healthIssuesFor({ health: h.ok ? h.data : null, setup: s.ok ? s.data : null, status: p.store.status });
+  const worst = set ? set.issues.filter((i) => !set.snoozed[i.id]).sort((a, b) => b.points - a.points || b.severity - a.severity)[0] : undefined;
+  const lines = todayBrief({
+    kpisToday: k.ok ? k.data.today : null,
+    queue: o.ok ? o.data : null,
+    worstIssue: worst ? { text: tr(worst.text, evidenceVars(worst.evidence)), href: worst.fix.kind === "link" ? worst.fix.href(p.store.handle) : `${href("")}#health` } : null,
+    href,
+    ordersEver: ever.ok ? ever.data : null,
+  });
+  if (!lines.length) return null;
+  return (
+    <Block>
+      <TodayBrief lines={lines} />
+    </Block>
+  );
+}
+
+/** 2. The In-review card (PLA-§22.7), with the preview links and the pending media cap. */
+export async function ReviewBlock({ v: p, href }: BlockProps) {
+  const { review, previews, setup } = p.load.panels;
+  const [r, links, s] = await Promise.all([review, previews, setup]);
+  if (!r.ok) {
+    if (r.reason === "error") throw new Error("dashboard: the review card could not be read");
+    return null;
+  }
+  const facts = await reviewFacts(p.scope, { submitted: r.data.submittedAt !== null, pages: p.viewer.pagesRead });
+  return (
+    <ReviewCard
+      card={r.data}
+      store={{ name: p.store.name }}
+      isOwner={p.viewer.isOwner}
+      mediaMb={facts.mediaMb}
+      previewLinks={links.ok ? links.data : undefined}
+      pages={p.viewer.pagesRead ? facts.pages : undefined}
+      whatsapp={s.ok ? (s.data.contact?.whatsapp ?? null) : null}
+      publishHref={href("/pages")}
+    />
+  );
+}
+
+/** 3. Store Health: the snapshot, or before the first run the local setup pass; the score policy. */
+export async function HealthBlock({ v: p }: BlockProps) {
+  const { health, setup, healthPolicy } = p.load.panels;
+  const [h, s, policy] = await Promise.all([health, setup, healthPolicy]);
+  const snapshot = h.ok ? h.data : null;
+  const set = healthIssuesFor({ health: snapshot, setup: s.ok ? s.data : null, status: p.store.status });
+  const pol = policy.ok ? policy.data : null;
+  const hideBelow = snapshot !== null && pol !== null && scoreHidden(pol) ? pol.hideScoreBelow : null;
+  return (
+    <HealthPanel
+      state={!h.ok && h.reason === "error" ? "error" : "ok"}
+      snapshot={snapshot ? { score: snapshot.score, attention: snapshot.attention, computedAt: snapshot.computedAt, dirty: snapshot.dirty, staleAfterMin: snapshot.staleAfterMin, components: snapshot.components } : null}
+      issues={(set?.issues ?? []).map((i) => wireIssue(i, p.store.handle))}
+      snoozed={set?.snoozed ?? {}}
+      hideScoreBelow={hideBelow}
+      status={p.store.status}
+    />
+  );
+}
+
+/** 4. The COD KPI tiles: placed and its value from the store's stats, P4's counts for the rest. */
+async function KpiBlock({ v: p }: BlockProps) {
+  const [kpis, placed] = await Promise.all([p.load.panels.kpis, p.load.panels.placed]);
+  // both sources failed (not merely unavailable): the panel's error state with Retry, not two empty R2 tiles
+  if (!kpis.ok && !placed.ok && (kpis.reason === "error" || placed.reason === "error")) throw new Error("dashboard: the KPI sources could not be read");
+  return <KpiTiles tiles={composeTiles({ kpis, placed, range: p.load.range })} currency={p.load.currency} />;
+}
+
+/** 5. The funnel of the range; left out while P4's counts are unavailable (no made-up step). */
+async function FunnelBlock({ v: p, title }: BlockProps) {
+  const funnel = await p.load.panels.funnel;
+  if (!funnel.ok) {
+    if (funnel.reason === "error") throw new Error("dashboard: the funnel could not be read");
+    return null;
+  }
+  return (
+    <Block title={title}>
+      <Funnel steps={funnelSteps(funnel.data)} days={RANGE_DAYS[p.load.range]} />
+    </Block>
+  );
+}
+
+/** 6. The work lists' counters: the pulse's live counts first (client), then P4's queue and the Sheets queue. */
+async function WorkBlock({ v: p, title }: BlockProps) {
+  const [queue, sheet] = await Promise.all([p.load.panels.queue, p.load.panels.sheet]);
+  return <WorkLists queue={queue} sheet={sheet} title={title ?? ""} />;
+}
+
+/** 7. The address card once a page is live (PD61). */
+async function AddressBlock({ v: p }: BlockProps) {
+  const address = await p.load.panels.address;
+  if (!address.ok || address.data.livePages === 0) return null;
+  return <DashboardAddress store={p.store} live={address.data.livePages > 0 && p.store.status !== "pending"} pageId={address.data.page?.id ?? null} />;
+}
+
+/** 8. The integration tiles. */
+async function IntegrationsBlock({ v: p, title }: BlockProps) {
+  const [integrations, sheet] = await Promise.all([p.load.panels.integrations, p.load.panels.sheet]);
+  return <IntegrationTiles integrations={integrations} sheet={sheet} canSync={p.viewer.ordersWrite} title={title ?? ""} />;
 }

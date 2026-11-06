@@ -1,0 +1,64 @@
+/*
+ * The shared primitives' few non-utility rules (P2 SHELL; platform.md PLA-§22.12; design.md DES-§16.6, §16.8,
+ * §16.12). Imported by the primitives that use them, so the tenant shell and the console get them alike. Tokens only;
+ * ease-out within 400 ms (test:admin-motion); reduced motion keeps opacity only.
+ */
+
+/* skeleton: a static tint of the final layout, never a shimmer (DES-§16.8) */
+.adm-skeleton {
+  background: color-mix(in oklab, var(--muted) 88%, var(--foreground) 4%);
+}
+/* invisible until the inline animation-delay (SKELETON_DELAY_MS) has passed, then a short fade */
+.adm-skeleton-delayed {
+  animation: adm-skel-in var(--dur-1) var(--ease-out) both;
+}
+@keyframes adm-skel-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* the health ring's one draw on load (240 ms), the celebration hairline (240 ms) */
+.adm-ring-draw {
+  animation: adm-ring-draw var(--dur-3) var(--ease-out) backwards;
+}
+@keyframes adm-ring-draw {
+  from {
+    stroke-dashoffset: var(--ring-len);
+  }
+}
+.adm-hairline-draw {
+  transform-origin: var(--hairline-from, left) center;
+  animation: adm-hairline var(--dur-3) var(--ease-out) backwards;
+}
+[dir="rtl"] .adm-hairline-draw {
+  --hairline-from: right;
+}
+@keyframes adm-hairline {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+/* the QR tile: ink on the lightest ground in both modes (≥ 7:1, DES-§16.12); dark mode swaps the two tokens */
+.adm-qr {
+  background: var(--background);
+  color: var(--foreground);
+}
+.dark .adm-qr {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adm-ring-draw,
+  .adm-hairline-draw {
+    animation: adm-skel-in var(--dur-1) linear backwards;
+  }
+  .adm-skeleton-delayed {
+    animation-duration: 1ms;
+  }
+}

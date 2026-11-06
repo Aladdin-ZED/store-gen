@@ -1,7 +1,9 @@
 /*
- * COD Studio admin — material layer on top of the shadcn tokens (src/app/globals.css).
- * Plain CSS on purpose (no Tailwind directives): surfaces, light, grain and entrance motion that
- * would be unreadable as utility soup. Everything reads the theme tokens, so dark mode follows.
+ * COD Studio admin — material layer on top of the generated tokens (src/lib/admin-theme/generate.ts,
+ * injected by scripts/build-admin-css.mjs). Plain CSS on purpose (no Tailwind directives): surfaces,
+ * the preview stage and entrance motion that would be unreadable as utility soup. Everything reads
+ * the theme tokens, so dark mode follows. Motion stays on the shell's ease-out and within 400 ms
+ * (D60, DES-§16.6: test:admin-motion); no texture or gradient field (test:admin-tokens).
  */
 
 :root {
@@ -11,7 +13,6 @@
   --adm-radius: 1.25rem;
   --adm-shadow-tint: 20 22 34;
   --adm-highlight: rgb(255 255 255 / 0.7);
-  --adm-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 .dark {
@@ -79,29 +80,8 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* light & texture                                                     */
+/* stage                                                               */
 /* ------------------------------------------------------------------ */
-
-/* one soft jade key light from the top corner, a faint cool pistachio bounce opposite (empty
-   states, hero tiles). Static on purpose: calm surfaces, no drifting blobs. Never warm/orange. */
-.adm-aurora {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-}
-.adm-aurora::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(60% 70% at 12% -10%, color-mix(in oklab, var(--brand) 9%, transparent), transparent 70%),
-    radial-gradient(45% 55% at 105% 110%, color-mix(in oklab, var(--chart-3) 12%, transparent), transparent 72%);
-}
-.dark .adm-aurora::before {
-  opacity: 0.85;
-}
 
 /* neutral stage behind live page previews (generator direction cards): one soft white key light
    from the top over the muted surface, like a photo table. Color-neutral on purpose: the page's own
@@ -115,19 +95,6 @@
   background:
     radial-gradient(70% 50% at 50% 0%, oklch(1 0 0 / 0.05), transparent 75%),
     color-mix(in oklab, var(--muted) 90%, var(--foreground) 4%);
-}
-
-/* ultra-subtle film grain (only over gradient fields) */
-.adm-grain::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  background-image: var(--adm-grain);
-  opacity: 0.05;
-  mix-blend-mode: overlay;
 }
 
 /* faint dot grid that fades out from the center */
@@ -144,27 +111,26 @@
 /* entrance motion (server-rendered content, no JS)                    */
 /* ------------------------------------------------------------------ */
 
-/* "backwards", not "both": a forwards fill would pin transform/filter after the entrance and
-   silently cancel hover transforms such as .adm-lift */
+/* "backwards", not "both": a forwards fill would pin transform after the entrance and silently
+   cancel hover transforms such as .adm-lift. Rows rise 6 px and fade, staggered 20 ms over at most
+   12 rows (DES-§16.6). */
 .adm-rise {
-  animation: adm-rise 640ms var(--adm-ease) backwards;
-  animation-delay: calc(var(--i, 0) * 45ms);
+  animation: adm-rise var(--dur-3) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 12) * 20ms);
 }
 .adm-fade {
-  animation: adm-fade 480ms var(--adm-ease) backwards;
-  animation-delay: calc(var(--i, 0) * 45ms);
+  animation: adm-fade var(--dur-2) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 12) * 20ms);
 }
 
 @keyframes adm-rise {
   from {
     opacity: 0;
-    transform: translateY(10px);
-    filter: blur(6px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
     transform: none;
-    filter: none;
   }
 }
 @keyframes adm-fade {
@@ -173,33 +139,17 @@
   }
 }
 
-/* skeleton shimmer (smoother than a pulse) */
+/* skeleton ground: a static tint, shimmer-free (DES-§16.8: skeletons mirror the final layout) */
 .adm-shimmer {
-  background: linear-gradient(
-      100deg,
-      transparent 20%,
-      color-mix(in oklab, var(--background) 60%, transparent) 50%,
-      transparent 80%
-    )
-    color-mix(in oklab, var(--muted) 85%, transparent);
-  background-size: 220% 100%;
-  animation: adm-shimmer 1.6s linear infinite;
-}
-@keyframes adm-shimmer {
-  from {
-    background-position: 120% 0;
-  }
-  to {
-    background-position: -120% 0;
-  }
+  background: color-mix(in oklab, var(--muted) 85%, transparent);
 }
 
 /* line draw for checklist / sparkline marks */
 .adm-draw {
   stroke-dasharray: var(--len, 120);
   stroke-dashoffset: var(--len, 120);
-  animation: adm-draw 900ms var(--adm-ease) forwards;
-  animation-delay: calc(var(--i, 0) * 60ms + 120ms);
+  animation: adm-draw 400ms var(--ease-out) forwards;
+  animation-delay: calc(min(var(--i, 0), 12) * 20ms + 120ms);
 }
 @keyframes adm-draw {
   to {

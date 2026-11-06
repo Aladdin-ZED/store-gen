@@ -7,6 +7,9 @@ import { authTranslator } from "@/lib/auth/i18n";
 import { viewerLocale } from "@/lib/auth/locale";
 import { dirOf } from "@/lib/i18n/admin";
 import { AdminI18nProvider } from "@/lib/i18n/admin/client";
+import { storeNav } from "@/components/admin/shell/store-nav";
+import { entitlement, usageValue } from "@/lib/tenancy/entitlements";
+import { usageMetric } from "@/lib/tenancy/entitlement-keys";
 import { listInvites, listMembersByScope } from "@/lib/tenancy/invites";
 import { requireStoreMember } from "@/lib/tenancy/seam";
 import { changeMemberRoleAction, createInviteAction, leaveStoreAction, removeMemberAction, revokeInviteAction, setMemberStatusAction } from "./actions";
@@ -20,10 +23,18 @@ export async function generateMetadata(): Promise<Metadata> {
  * row (`canManageMember`, the rank rule on the new role, `invitableRoles`) so the page only offers what the server
  * will accept; every action re-checks them. Under "view as store" the controls stay visible and refuse read-only.
  */
-export default async function TeamPage({ params }: { params: Promise<{ store: string }> }) {
+export default async function TeamPage({ params, searchParams }: { params: Promise<{ store: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { store: handle } = await params;
+  // ⌘K "Invite a teammate" and the Create menu land here with ?invite=1: the invite form opens for a member who may invite
+  const openInvite = (await searchParams).invite === "1";
   const ctx = await requireStoreMember({ handle, permission: "members.read" });
-  const [members, invites, locale] = await Promise.all([listMembersByScope(ctx.scope), listInvites(ctx), viewerLocale(ctx.user)]);
+  const [members, invites, locale, seatsLimit, seatsUsed] = await Promise.all([
+    listMembersByScope(ctx.scope),
+    listInvites(ctx),
+    viewerLocale(ctx.user),
+    entitlement(ctx.scope, "members_max"),
+    usageValue(ctx.scope, usageMetric("members", new Date(), ctx.store.timezone)),
+  ]);
   const t = authTranslator(locale);
   const role = ctx.membership.role;
   const impersonating = ctx.scope.kind === "impersonation";
@@ -59,6 +70,10 @@ export default async function TeamPage({ params }: { params: Promise<{ store: st
     revocable: i.state === "pending" && (impersonating || (ctx.can("members.invite") && invitableRoles(role).includes(i.role))),
   }));
   const canInvite = ctx.can("members.invite") || impersonating;
+  // the registry's other team entries (P4's Agents and Call center), each where the member may open it
+  const links = (storeNav({ handle, mode: ctx.store.mode, can: (p) => ctx.can(p) }, locale).find((g) => g.id === "team")?.items ?? [])
+    .filter((i) => i.id !== "team")
+    .map((i) => ({ id: i.id, label: i.label, href: i.href }));
 
   return (
     // translated (ar / fr / en): the viewer's language and direction inside the English shell (§I.5)
@@ -73,7 +88,10 @@ export default async function TeamPage({ params }: { params: Promise<{ store: st
             invites={inviteRows}
             invitable={impersonating ? [] : canInvite ? [...invitableRoles(role)] : []}
             canInvite={canInvite}
+            openInvite={openInvite && canInvite && !impersonating}
             readOnly={impersonating}
+            seats={{ used: seatsUsed, limit: seatsLimit }}
+            links={links}
             actions={{
               createInvite: createInviteAction,
               revokeInvite: revokeInviteAction,

@@ -51,7 +51,7 @@ export default async function AccountStoresPage() {
                 {s.usable && (
                   <div className="flex items-center gap-1">
                     <Button asChild variant="ghost" size="sm">
-                      <Link href={`/app/${s.handle}/team#leave`}>{t("account.stores.leave")}</Link>
+                      <Link href={`/app/${s.handle}/settings/danger#leave`}>{t("account.stores.leave")}</Link>
                     </Button>
                     <Button asChild variant="outline" size="sm">
                       <Link href={s.href}>{t("app.picker.open")}</Link>
