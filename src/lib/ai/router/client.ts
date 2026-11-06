@@ -600,6 +600,18 @@ function track(own: AbortController): () => void {
   return () => CANCEL_BUS.removeEventListener("cancel", on);
 }
 
+/**
+ * Ties a controller of a browser AI call made outside `useAiTask` (the Director stage calls of
+ * src/lib/ai/router/director-client.ts) to the tab's cancel bus, so `cancelStoreAiJobs` aborts it too; the returned
+ * function unties it.
+ */
+export function trackStoreRun(own: AbortController): () => void {
+  return track(own);
+}
+
+/** The visible-tab test and the fetch the browser's AI calls use (the Director stage calls share them). */
+export const browserIo = { fetch: browserFetch, visible: isVisible, sleep } as const;
+
 /** The one reporter of the tab: the browser works for the store on screen, so another handle flushes and replaces it. */
 let reporter: AiReporter | null = null;
 function reporterFor(handle: string): AiReporter {

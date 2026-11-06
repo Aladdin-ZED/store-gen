@@ -38,6 +38,8 @@
  * Sections (step 8, jobs, Batches, cron, eval plan, kinds and flags; ./selftest-jobs.ts): jobs-critique-plan,
  * jobs-probe-plan, jobs-pulse-since, batch-rules, eval-judge-items, recover-graph, jobs-track, notify-kinds, ai-flags,
  * usage-rows. The drivers, the sweep, the ingest and the rollups against a database are test:ai-db.
+ * Sections (step 11, the in-flow layer; ./selftest-pass.ts): director-slot, director-reducer, director-run, director-why,
+ * director-client, rewrite-menu, ai-catalog.
  * Exits 1 on any failure.
  */
 import { isDeepStrictEqual } from "node:util";
@@ -79,6 +81,7 @@ import { registerPolicySections } from "./selftest-policy";
 import { registerServerSections } from "./selftest-server";
 import { registerJobsSections } from "./selftest-jobs";
 import { registerClientSections } from "./selftest-client";
+import { registerPassSections } from "./selftest-pass";
 
 /* ------------------------------------------------------------------ */
 /* The runner                                                          */
@@ -1133,6 +1136,7 @@ registerPolicySections({ section, check, eq, strict: STRICT });
 registerServerSections({ section, check, eq });
 registerJobsSections({ section, check, eq });
 registerClientSections({ section, check, eq });
+registerPassSections({ section, check, eq });
 
 /* ------------------------------------------------------------------ */
 /* run                                                                 */
