@@ -1,3 +1,4 @@
+// proves: IN-05, OP-05, LP-04, AI-15, IN-03, SF-03, SF-06, IN-01, IN-09, OP-16, IN-02, SF-05, IN-04
 /**
  * Ad pixels — server side, offline (fetch is mocked; no network, no database), docs/OFFERS.md §A:
  *  - Tracking schema: legacy single ids → lists, dedupe, limits, empty → unset; `none` / `copiedFrom`;
@@ -16,6 +17,26 @@
  *  - per store (docs/STORE-SAAS.md §E.6, SET-11, SHT-09): the health throttle is keyed by store (one store's write
  *    never suppresses another's for the same pixel id); the Sheets ownership proof (code format, only the hash
  *    compared, found alone or inside other text, case-insensitive, never a near miss).
+ *  - templates (R1 P5, operations.md OPE-§O.1): the template language, the WhatsApp built-ins over 40 orders in ar,
+ *    fr and en with zero invented numbers, `confirm_number` / `confirm_hours`, the WhatsApp link caps and the
+ *    repository's draft rule (src/lib/integrations/templates.selftest.ts, offline like the rest of this file).
+ *  - integrations health (R1 P5, operations.md OPE-§28.2, §27.2, §21.4): the integration_status state rules, the
+ *    scaled Sheets backlog threshold, the causes and What to check, the int:* / conv:* rules on their fixtures, the
+ *    notification kinds, the pulse role gate and the copy (src/lib/integrations/selftest.ts; the DB half is
+ *    scripts/qa/integrations-db-check.ts).
+ *  - sheets (R1 P5, operations.md OPE-§O.1 "sheets"; IN-01 planner half, IN-09 R1, OP-16 R1): the pure run planner
+ *    (≤ 1 read + 1 append + 1 batchUpdate per store per run, bits → cells with the optional headers, the widened read,
+ *    is_test = 0 in every work predicate, the conflict table, the row-deleted case, Note / Tracking / Agent pulls,
+ *    "Statut livraison" in the sheet's locale; src/lib/sheets/selftest.ts).
+ *  - conversions (R1 P5, operations.md OPE-§20.2, §20.4, §20.9 (2)-(5); IN-02, IN-03, SF-05 CAPI half): the trigger with
+ *    the per-page overrides, OPE-§20.2's matrix with the event ids, Meta-only custom events, the risk gate of trigger
+ *    `order` only (OD19), test / honeypot / typed orders never sent, the 7 d − 1 h guard on both sides, the outbox
+ *    items, the capi_ctx JSON round trip and cap, the rebuild and the contents collapse
+ *    (src/lib/integrations/capi.selftest.ts; the sealed envelope and the hook are scripts/qa/integrations-db-check.ts).
+ *  - telegram (R1 P5, operations.md OPE-§O.1 "telegram", OPE-§21; IN-04, SF-05 Telegram half): the batch of ≤ 10 orders,
+ *    "[TEST]" only with the switch, "(renvoi)", the honest triad over every int.tg.* string of the three catalogs, the
+ *    minimum n, the cash-held line skipped for at_delivery accounts, ≤ 3,500 characters, no emoji or em dash, the masked
+ *    level, the Bot API answers and the items (src/lib/integrations/telegram.selftest.ts).
  *
  *   npx tsx scripts/qa/conversions-check.ts      (exit code 1 on failure)
  */
@@ -45,6 +66,11 @@ import { dueHealthUpdates, forgetHealthWrites, noteHealthWrite } from "@/lib/pix
 import { newProofCode, proofFound, proofHash } from "@/lib/sheets/proof";
 import { runtimePixels, trackingFlags } from "@/lib/pixels/tracking";
 import { PixelLibrarySettings, TrackingSecretsSettings, redactSetting } from "@/lib/settings/schemas";
+import { integrationsHealthSelftest } from "@/lib/integrations/selftest";
+import { templatesSelftest } from "@/lib/integrations/templates.selftest";
+import { sheetsSelftest } from "@/lib/sheets/selftest";
+import { capiSelftest } from "@/lib/integrations/capi.selftest";
+import { telegramSelftest } from "@/lib/integrations/telegram.selftest";
 
 let pass = 0;
 const failures: string[] = [];
@@ -282,7 +308,8 @@ async function main() {
   const at = new Date("2026-10-15T10:00:00Z");
   const base = { orderId: "CMD-PX0001", createdAt: at, payload, order, target, ip: "105.66.1.2", ua: "Mozilla/5.0 test" };
 
-  ok("risky orders are not sent", purchaseConversion({ ...base, riskScore: CONVERSION_MAX_RISK }) === null);
+  ok("risky orders get no creation event (their confirmation sends the server fields only, OD19)", purchaseConversion({ ...base, riskScore: CONVERSION_MAX_RISK }) === null);
+  eq("the event carries the order's risk score", purchaseConversion({ ...base, riskScore: 10 })?.risk, 10);
   ok("no Meta/TikTok pixel → no event", purchaseConversion({ ...base, riskScore: 0, target: { ...target, doc: { ...doc, tracking: { snapPixelId: [SNAP] } } } }) === null);
   const c = purchaseConversion({ ...base, riskScore: 10 })!;
   eq("event id = order id (not the browser uuid)", c.eventId, "CMD-PX0001");
@@ -432,6 +459,37 @@ async function main() {
   ok("test event brand: no legacy name", !JSON.stringify(calls[0]!.body).includes("COD"));
 
   globalThis.fetch = realFetch;
+
+  /* ---------------- templates (OPE-§O.1; IN-05, OP-05, LP-04, AI-15) ---------------- */
+  const templates = templatesSelftest();
+  pass += templates.pass;
+  failures.push(...templates.failures);
+  for (const n of templates.notes) console.log(`· ${n}`);
+
+  /* ---------------- integrations health (OPE-§28.2, §27.2, §21.4; IN-03, SF-03, SF-06) ---------------- */
+  const health = await integrationsHealthSelftest();
+  pass += health.pass;
+  failures.push(...health.failures);
+  for (const n of health.notes) console.log(`· ${n}`);
+
+  /* ---------------- sheets run planner (OPE-§19.5-§19.7; IN-01, IN-09, OP-16) ---------------- */
+  const sheets = sheetsSelftest();
+  pass += sheets.pass;
+  failures.push(...sheets.failures);
+  for (const n of sheets.notes) console.log(`· ${n}`);
+
+  /* ---------------- server ad events (OPE-§20; IN-02, IN-03, SF-05) ---------------- */
+  const capi = capiSelftest();
+  pass += capi.pass;
+  failures.push(...capi.failures);
+  for (const n of capi.notes) console.log(`· ${n}`);
+
+  /* ---------------- Telegram (OPE-§21, §26; IN-04, SF-05) ---------------- */
+  const telegram = telegramSelftest();
+  pass += telegram.pass;
+  failures.push(...telegram.failures);
+  for (const n of telegram.notes) console.log(`· ${n}`);
+
   for (const f of failures) console.log(`✗ ${f}`);
   console.log(failures.length ? `✗ ${failures.length} failure(s), ${pass} passed` : `✓ conversions check passed (${pass} assertions)`);
   process.exit(failures.length ? 1 : 0);

@@ -14,11 +14,18 @@
  *   "Prix pack"  the offer price (before options, bump, upsell and delivery)
  *
  * order.php mirrors every value here (`cod_sheet_extras`), checked by scripts/qa/php-parity.ts.
+ *
+ * R1 (P5, operations.md OPE-§19.4): the column C labels (`statusLabel`, `statusFromLabel`) and seven more optional
+ * headers the app alone writes and reads ("Repère", "Agent", "Note agent", "Tracking", "Transporteur", "Statut
+ * livraison", "Livrer à partir du"; `sheetColumnsOf`, `r1Values`, `placeCells`). The export's four stay as they are.
  */
 import type { OrderItems, OrderSource, OrderUnit } from "@/lib/db/schema";
+import { messageOf, type AdminLocale } from "@/lib/i18n/admin";
 import { phoneToNational } from "@/lib/markets/phone";
+import { ORDER_STATUSES, type OrderStatus } from "@/lib/orders/contract";
+import { projectStatus, type ConfirmState, type ShipState } from "@/lib/orders/state";
 import { ORDER_TEXT_MAX, orderText, orderUnits, unitsText, type TextMode } from "@/lib/orders/text";
-import { cleanText, toSheetsSerial } from "./format";
+import { cleanText, toSheetsSerial, wallParts } from "./format";
 
 /** The 13-column contract (header, index). Same order as orders-sheet.ts COLUMNS / gsheets.php GS_COLUMNS. */
 export const COL = {
@@ -245,5 +252,172 @@ export function wideRow(base: readonly Cell[], extras: ExtraColumns, values: Rec
   const width = Math.max(CONTRACT_WIDTH, ...cols.map((c) => c + 1));
   const row: (Cell | null)[] = [...base, ...new Array<null>(width - base.length).fill(null)];
   for (const [k, c] of Object.entries(extras) as [ExtraColumn, number][]) row[c] = values[k];
+  return row;
+}
+
+/* ------------------------------------------------------------------ */
+/* status labels (column C)                                            */
+/* ------------------------------------------------------------------ */
+
+/** A label folded for matching: accents dropped, trimmed, inner spaces collapsed, lower case. */
+export function foldLabel(s: string): string {
+  return s
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036F]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+const LABEL_TO_STATUS = new Map<string, OrderStatus>(
+  ORDER_STATUSES.flatMap((s) => [
+    [foldLabel(s.fr), s.id],
+    [foldLabel(s.id), s.id],
+  ]),
+);
+
+/** Column C's French label of a status id (the first row, "Nouvelle", for an unknown id). */
+export const statusLabel = (id: string): string => ORDER_STATUSES.find((s) => s.id === id)?.fr ?? ORDER_STATUSES[0].fr;
+/**
+ * The status id of a column C label, or null for a blank or unknown one. Every `ORDER_STATUSES` row is accepted, the
+ * five R1 projections appended at P0 included ("Refusée", "Doublon", "Injoignable clôturée", "En livraison",
+ * "Perdue"), by its French label or its id, in any case and with or without accents.
+ */
+export const statusFromLabel = (label: string): OrderStatus | null => LABEL_TO_STATUS.get(foldLabel(label)) ?? null;
+
+/* ------------------------------------------------------------------ */
+/* R1 optional columns (operations.md OPE-§19.4 rev 3: OD49, OD54, OD55) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The seven R1 optional headers, detected like "SKU" (row 1 after column M, trimmed, any case; accents optional).
+ * They live beside `extraColumnsOf`, not inside it: the four columns there are the PHP export's (`cod_sheet_extras`;
+ * test:php asserts that "Agent" is not one of them), and the export never writes these seven.
+ *
+ *   "Repère"              orders.landmark                      push bit 2
+ *   "Agent"               the confirming member or label       push bit 1, pulled (OD54)
+ *   "Note agent"          the last sheet note                  never pushed, pulled as a note event (OD54)
+ *   "Tracking"            orders.tracking_ref                  push bit 2, pulled (OD55)
+ *   "Transporteur"        orders.carrier_label                 push bit 2, pulled (OD55)
+ *   "Statut livraison"    the ship state label (sheet locale)  push bit 1, read-only mirror
+ *   "Livrer à partir du"  orders.ship_after (store zone)       push bit 2, read-only mirror (OD49)
+ */
+export type R1Column = "landmark" | "agent" | "agentNote" | "tracking" | "carrier" | "shipStatus" | "shipAfter";
+export type SheetColumn = ExtraColumn | R1Column;
+/** 0-based column index of every optional column the tab has (first occurrence wins). */
+export type SheetColumns = Partial<Record<SheetColumn, number>>;
+
+export const R1_HEADERS: Readonly<Record<R1Column, string>> = {
+  landmark: "Repère",
+  agent: "Agent",
+  agentNote: "Note agent",
+  tracking: "Tracking",
+  carrier: "Transporteur",
+  shipStatus: "Statut livraison",
+  shipAfter: "Livrer à partir du",
+};
+const R1_BY_FOLDED = new Map<string, R1Column>(Object.entries(R1_HEADERS).map(([k, h]) => [foldLabel(h), k as R1Column]));
+
+/** The optional columns the pull reads back (OPE-§19.6 rev 3); "Statut livraison" and "Livrer à partir du" are mirrors. */
+export const PULLED_COLUMNS: readonly R1Column[] = ["agent", "agentNote", "tracking", "carrier"];
+
+export type DirtyBit = 1 | 2 | 4;
+/** The contract cells each `sheet_dirty` bit rewrites (OPE-§19.5 step 5): 1 → C; 2 → D, E, F, G; 4 → H, I, J, K. */
+export const BIT_CELLS: Readonly<Record<DirtyBit, readonly number[]>> = {
+  1: [COL.status],
+  2: [COL.name, COL.phone, COL.city, COL.address],
+  4: [COL.product, COL.variant, COL.qty, COL.total],
+};
+/** The optional cells each bit rewrites when the tab has them. */
+export const BIT_COLUMNS: Readonly<Record<DirtyBit, readonly SheetColumn[]>> = {
+  1: ["agent", "shipStatus"],
+  2: ["landmark", "tracking", "carrier", "shipAfter"],
+  4: ["sku", "articles", "packPrice", "delivery"],
+};
+
+/** Every optional column in the header cells read after column M (`cells[0]` = column N): the export's four and R1's seven. */
+export function sheetColumnsOf(cells: readonly unknown[]): SheetColumns {
+  const out: SheetColumns = { ...extraColumnsOf(cells) };
+  cells.forEach((v, i) => {
+    const col = R1_BY_FOLDED.get(foldLabel(String(v ?? "")));
+    if (col && out[col] === undefined) out[col] = CONTRACT_WIDTH + i;
+  });
+  return out;
+}
+
+/** The ship state's label in the sheet's locale. */
+export type ShipLabel = (state: ShipState) => string;
+
+/**
+ * "Statut livraison": `ops.ship.<state>` in `locale` (P4's catalog, OPE-§19.4). While P4's key is missing, the legacy
+ * French label of the same status (src/lib/orders/contract.ts) for the ship states that are one ("Expédiée", "En
+ * livraison", "Livrée", "Refusée", "Retournée", "Perdue"), else the label of the projection column C shows. `none`
+ * (nothing shipped yet) is an empty cell.
+ */
+export function shipStateLabel(state: ShipState, locale: AdminLocale, confirm: ConfirmState = "confirmed"): string {
+  if (state === "none") return "";
+  const own = messageOf(`ops.ship.${state}`, locale);
+  if (own !== undefined) return own;
+  const legacy = ORDER_STATUSES.find((s) => s.id === state);
+  return legacy ? legacy.fr : statusLabel(projectStatus({ confirm, ship: state }));
+}
+
+/** "Livrer à partir du": the hold's day in the store's time zone ("05/11/2026"); empty when there is no hold. */
+export function shipAfterCell(at: Date | null | undefined, timeZone: string): string {
+  if (!at || !Number.isFinite(at.getTime())) return "";
+  const p = wallParts(at, timeZone);
+  return `${p.day}/${p.month}/${p.year}`;
+}
+
+/** The order columns the R1 cells are built from. */
+export interface R1Fields {
+  landmark: string | null;
+  confirmState: ConfirmState;
+  shipState: ShipState;
+  confirmedBy: string | null;
+  confirmedByLabel: string | null;
+  trackingRef: string | null;
+  carrierLabel: string | null;
+  shipAfter: Date | null;
+}
+
+/** How the R1 cells render: the store's zone, the sheet's locale, the members' display names. */
+export interface R1RowCtx {
+  timeZone: string;
+  locale: AdminLocale;
+  /** user id → display name, for the "Agent" cell of an order a member confirmed */
+  memberNames?: Readonly<Record<string, string>>;
+  /** replaces `shipStateLabel` (a caller with its own catalog, or a test) */
+  shipLabel?: ShipLabel;
+}
+
+/**
+ * The R1 pushed cells of one order. `null` leaves the cell as it is: with no confirmer, tracking or carrier known the
+ * app never blanks what a person typed before the pull brought it in. "Note agent" is never written by the app.
+ */
+export function r1Values(o: R1Fields, ctx: R1RowCtx): Record<Exclude<R1Column, "agentNote">, Cell | null> {
+  const member = o.confirmedBy ? ctx.memberNames?.[o.confirmedBy] : undefined;
+  const agent = member || o.confirmedByLabel;
+  return {
+    landmark: o.landmark == null ? null : cleanText(o.landmark, 160),
+    agent: agent ? cleanText(agent, 60) : null,
+    tracking: o.trackingRef ? cleanText(o.trackingRef, 64) : null,
+    carrier: o.carrierLabel ? cleanText(o.carrierLabel, 60) : null,
+    shipStatus: cleanText(ctx.shipLabel ? ctx.shipLabel(o.shipState) : shipStateLabel(o.shipState, ctx.locale, o.confirmState), 80),
+    shipAfter: shipAfterCell(o.shipAfter, ctx.timeZone),
+  };
+}
+
+/**
+ * A full append row with every optional column the tab has a value for: the 13 contract cells, then `null` in every
+ * other cell after M (the API skips nulls, so the call center's own columns are never touched). `wideRow` stays the
+ * export's four-column twin (test:php).
+ */
+export function placeCells(base: readonly Cell[], cols: SheetColumns, values: Partial<Record<SheetColumn, Cell | null>>): (Cell | null)[] {
+  const placed = (Object.entries(cols) as [SheetColumn, number][]).filter(([k]) => values[k] != null);
+  if (!placed.length) return [...base];
+  const width = Math.max(CONTRACT_WIDTH, ...placed.map(([, c]) => c + 1));
+  const row: (Cell | null)[] = [...base, ...new Array<null>(width - base.length).fill(null)];
+  for (const [k, c] of placed) row[c] = values[k]!;
   return row;
 }

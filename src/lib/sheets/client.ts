@@ -4,9 +4,15 @@ import "server-only";
  * base64-encoded on one line) → RS256 JWT signed with node:crypto → OAuth access token (cached, refreshed
  * 5 min early, concurrent callers share one in-flight request) → JSON API calls with timeout, 401 refresh,
  * and truncated exponential backoff (+ Retry-After) on 429/5xx/network errors.
+ *
+ * R1 P5 (OPE-§19.5, §19.7): every call goes through `integrationFetch` (src/lib/integrations/transport.ts, the e2e
+ * mock seam); `GapiOptions.beforeCall` runs before each HTTP call to the Sheets API (the push takes a `p:sheets:sa`
+ * token there, and a throw stops the call); `setGapiDoubleForTests` swaps Google for an in-process fake
+ * (test:integrations-db: a call counter, a scripted 429), refused and ignored under NODE_ENV=production.
  */
 import { createSign } from "node:crypto";
 import { z } from "zod";
+import { integrationFetch } from "@/lib/integrations/transport";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SCOPE = "https://www.googleapis.com/auth/spreadsheets";
@@ -119,12 +125,11 @@ export async function getAccessToken(force = false): Promise<string> {
   st.inflight = (async () => {
     let res: Response;
     try {
-      res = await fetch(TOKEN_URL, {
+      res = await integrationFetch(TOKEN_URL, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: signJwt(sa) }),
         signal: AbortSignal.timeout(10_000),
-        cache: "no-store",
       });
     } catch (err) {
       throw new SheetsError(0, "network", err instanceof Error ? err.message : "token request failed");
@@ -151,27 +156,67 @@ const RETRYABLE = new Set([408, 429, 500, 502, 503, 504]);
 export interface GapiOptions {
   /** retries for 429/5xx/network (default 4) */
   maxRetries?: number;
-  /** per-attempt timeout (default 15 s) */
+  /** per-attempt timeout (default 15 s), read after `beforeCall` */
   timeoutMs?: number;
+  /** awaited before every HTTP call to the Sheets API, retries included; a throw stops the call (the push's token) */
+  beforeCall?: () => Promise<void>;
+}
+
+/* ------------------------------------------------------------------ */
+/* test double (test:integrations-db)                                  */
+/* ------------------------------------------------------------------ */
+
+/** One Sheets API call as the fake sees it: `path` after /v4/spreadsheets, the JSON body or null. */
+export interface GapiCall {
+  method: string;
+  path: string;
+  body: string | null;
+}
+/** An in-process stand-in for Google: answers each call (status, JSON body, headers) in place of the network. */
+export type GapiDouble = (call: GapiCall) => Promise<Response> | Response;
+
+// one test double per module instance (scripts load this module once); never set in a server
+let gapiDouble: GapiDouble | null = null;
+
+/**
+ * Replace Google with `double` (null restores the network). The access token is not fetched while a double is set.
+ * Refused under NODE_ENV=production, and a double set before is ignored there (`gapi` re-checks on every call).
+ */
+export function setGapiDoubleForTests(double: GapiDouble | null): void {
+  if (process.env.NODE_ENV === "production") throw new Error("sheets: the gapi test double is refused in production");
+  gapiDouble = double;
+}
+
+const activeDouble = (): GapiDouble | null => (process.env.NODE_ENV === "production" ? null : gapiDouble);
+
+/** The double answers within `ms` like the network would (a slow fake times out as a slow Google does). */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("The operation was aborted due to timeout")), ms)));
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
 /** Call the Sheets API (`path` is appended to /v4/spreadsheets). Returns parsed JSON. */
 export async function gapi<T = Record<string, unknown>>(path: string, init: RequestInit = {}, opts: GapiOptions = {}): Promise<T> {
   const maxRetries = opts.maxRetries ?? 4;
-  const timeoutMs = opts.timeoutMs ?? 15_000;
   let authRetried = false;
   let forceToken = false;
+  const double = activeDouble();
   for (let attempt = 0; ; attempt++) {
-    const token = await getAccessToken(forceToken);
+    const token = double ? "" : await getAccessToken(forceToken);
     forceToken = false;
+    if (opts.beforeCall) await opts.beforeCall();
+    // read per attempt: `beforeCall` may shorten it (the push keeps every call inside its deadline)
+    const timeoutMs = opts.timeoutMs ?? 15_000;
     let res: Response;
     try {
-      res = await fetch(`${API}${path}`, {
-        ...init,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(init.headers ?? {}) },
-        signal: AbortSignal.timeout(timeoutMs),
-        cache: "no-store",
-      });
+      res = double
+        ? await withTimeout(Promise.resolve(double({ method: (init.method ?? "GET").toUpperCase(), path, body: typeof init.body === "string" ? init.body : null })), timeoutMs)
+        : await integrationFetch(`${API}${path}`, {
+            ...init,
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(init.headers ?? {}) },
+            signal: AbortSignal.timeout(timeoutMs),
+          });
     } catch (err) {
       if (attempt < maxRetries) {
         await sleep(backoff(attempt));

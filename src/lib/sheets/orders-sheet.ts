@@ -6,6 +6,7 @@ import "server-only";
 import { ORDER_STATUSES, type OrderStatus } from "@/lib/orders/contract";
 import { gapi, SheetsConfigError, SheetsError, type GapiOptions } from "./client";
 import { a1, colLetter, parseSheetUrl, sheetUrl, type SheetLinkError } from "./format";
+import { statusFromLabel, statusLabel } from "./row";
 
 export const TAB = "Commandes";
 
@@ -63,23 +64,8 @@ const STATUS_TEXT: Record<OrderStatus, { fg: string; bold?: boolean; strikethrou
   lost: { fg: "#3C4043" },
 };
 
-const LABEL_TO_STATUS = new Map<string, OrderStatus>(
-  ORDER_STATUSES.flatMap((s) => [
-    [foldLabel(s.fr), s.id],
-    [foldLabel(s.id), s.id],
-  ]),
-);
-
-function foldLabel(s: string): string {
-  return s
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036F]/g, "")
-    .trim()
-    .toLowerCase();
-}
-
-export const statusLabel = (id: string): string => ORDER_STATUSES.find((s) => s.id === id)?.fr ?? ORDER_STATUSES[0].fr;
-export const statusFromLabel = (label: string): OrderStatus | null => LABEL_TO_STATUS.get(foldLabel(label)) ?? null;
+// column C labels live in ./row.ts (pure: the run planner parses them offline); re-exported for the existing callers
+export { statusFromLabel, statusLabel };
 
 const rgb = (hex: string) => {
   const h = hex.replace("#", "");
@@ -233,6 +219,43 @@ export function setupRequests(sheetId: number, currency = "MAD", title: string =
           range: colRange(sheetId, COL.id),
           description: "N° de commande utilisés par la synchronisation",
           warningOnly: true,
+        },
+      },
+    },
+  ];
+}
+
+/**
+ * "Repair sheet" (OPE-§19.8): the header row's look over `width` columns and the strict status dropdown again, as ONE
+ * batchUpdate. Both requests replace what they target (a format, a validation rule), so a repeated repair adds
+ * nothing; the conditional-format rules are never re-added (they would be duplicated).
+ */
+export function repairRequests(sheetId: number, width: number): object[] {
+  const n = Math.max(width, COLUMNS.length);
+  const ink = rgb("#1F2328");
+  return [
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: n },
+        cell: {
+          userEnteredFormat: {
+            backgroundColorStyle: { rgbColor: ink },
+            horizontalAlignment: "LEFT",
+            verticalAlignment: "MIDDLE",
+            padding: { left: 8, right: 8, top: 4, bottom: 4 },
+            textFormat: { foregroundColorStyle: { rgbColor: rgb("#FFFFFF") }, fontSize: 10, bold: true },
+          },
+        },
+        fields: "userEnteredFormat(backgroundColorStyle,horizontalAlignment,verticalAlignment,padding,textFormat)",
+      },
+    },
+    {
+      setDataValidation: {
+        range: colRange(sheetId, COL.status),
+        rule: {
+          condition: { type: "ONE_OF_LIST", values: ORDER_STATUSES.map((s) => ({ userEnteredValue: s.fr })) },
+          strict: true,
+          showCustomUi: true,
         },
       },
     },
