@@ -603,11 +603,18 @@ async function publishChecks() {
   const listOf = (r: Check) => (r.result.ok ? (r.result.notes ?? []) : r.result.items);
   const idsOf = (r: Check) => listOf(r).map((x) => `${x.level}:${x.id}`);
   const has = (r: Check, id: string, level?: "hard" | "soft") => listOf(r).some((x) => x.id === id && (!level || x.level === level));
-  const setDesign = async (value: Record<string, unknown> | null) => {
+  // the cases prove the refusals, so they run with the console switch on "block" unless they say otherwise; the launch
+  // default (no row: warn, R1 integration) has its own case below
+  const clearDesign = async () => {
     await db.execute(sql.raw("DELETE FROM `settings` WHERE `key` = 'platform_design'"));
-    if (value) await db.insert(settings).values({ key: "platform_design", value: value as never, encrypted: false });
     invalidatePlatformSettings("platform_design");
   };
+  const setDesign = async (value: Record<string, unknown> | null) => {
+    await clearDesign();
+    await db.insert(settings).values({ key: "platform_design", value: { gatesAtPublish: "block", ...(value ?? {}) } as never, encrypted: false });
+    invalidatePlatformSettings("platform_design");
+  };
+  await setDesign(null);
   const fresh = () => Nv.resetNoveltyPool();
   const clean = cleanDoc("parfum", "fr", 0, 3);
   const NICHE = "MA:skincare";
@@ -753,6 +760,15 @@ async function publishChecks() {
   await setDesign({ gatesAtPublish: "warn", thresholds: { niche: 0.8 } });
   const warned = await P.designCheck(ctxOf(8, pE));
   ok("warn mode: the publish goes through, the hard N1 stays a hard note (audited by the core)", warned.mode === "warn" && warned.result.ok && listOf(warned).some((x) => x.id === "design:N1" && x.level === "hard"));
+  // the launch default (R1 integration): no platform_design row and the flag's declared "block" → warn
+  await clearDesign();
+  const byDefault = await P.designCheck(ctxOf(8, pE));
+  ok("default (no platform_design row): warn, the publish goes through with the hard N1 as a note", byDefault.mode === "warn" && byDefault.result.ok && listOf(byDefault).some((x) => x.id === "design:N1"), { mode: byDefault.mode, ids: idsOf(byDefault) });
+  ok("default: the core's gate mode for publishPage is warn too (budget items included)", (await P.designGateMode(scopeOf(8), "block")) === "warn");
+  // the console switch back on "block" refuses again
+  await setDesign({ gatesAtPublish: "block", thresholds: { niche: 0.8 } });
+  const blocked = await P.designCheck(ctxOf(8, pE));
+  ok("the console switch on block: refused again", blocked.mode === "block" && !blocked.result.ok && has(blocked, "design:N1", "hard"), idsOf(blocked));
   await setDesign(null);
   await db.delete(designGenomes);
   fresh();

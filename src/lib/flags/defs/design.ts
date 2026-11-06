@@ -12,8 +12,10 @@ export const flags: FlagDef[] = [
     key: "design_publish_gates",
     kind: "ops",
     type: "string",
+    // "block" here adds no exemption: the effective mode is the weaker of this flag and platform_design.gatesAtPublish
+    // (General settings, "Design gates at publish", warn by default), so the console switch can still turn blocking on
     default: "block",
-    description: "Design items at publish: block (refuse) or warn (publish, audit page.publish.design_override)",
+    description: "Design and budget items at publish: warn exempts (publish, audit page.publish.design_override / budget_override); block follows General settings › Design gates at publish",
     ownerTrack: "design",
   },
   {

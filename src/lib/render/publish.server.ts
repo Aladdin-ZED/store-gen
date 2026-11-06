@@ -43,6 +43,7 @@ import { buildTheme } from "@/lib/theme";
 import { invalidateStoreRender } from "./cache.server";
 import { renderLandingHtml, renderThankYouHtml, type RenderIssue } from "./core";
 import { runPrePublishChecks, runPublishListeners, type AssetMeta, type PrePublishCode, type PrePublishCtx } from "./prepublish";
+import { designGateMode } from "./prepublish/design";
 import { loadStoreRenderContext, storeAssetResolver, storeRenderOptions } from "./store-context.server";
 
 export { invalidateStoreRender } from "./cache.server";
@@ -141,7 +142,7 @@ export interface PublishResult {
   issues: DocIssue[];
   /** sections left out because they failed to render */
   renderIssues: RenderIssue[];
-  /** soft gate items of the publish (§M.1 notes; empty when no gate is registered) */
+  /** gate items of the publish that did not refuse it (§M.1 notes; in warn mode the hard ones too, audited) */
   notes?: GateItem[];
 }
 
@@ -424,7 +425,8 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
     assets: assetMeta(rows),
     actor,
     now: new Date(),
-    mode: "block",
+    // §M.1 rule 3: the design switch (flag design_publish_gates, platform_design.gatesAtPublish) covers budget items too
+    mode: await designGateMode(scope, "block"),
     html: landing.html,
   };
   const gate = await runPrePublishChecks(gateCtx);

@@ -258,7 +258,7 @@ expectDefaults("platform_ai", {
   probe: null,
 });
 expectDefaults("platform_ai_secret", { apiKey: undefined });
-expectDefaults("platform_design", { gatesAtPublish: "block", novelty: "on" });
+expectDefaults("platform_design", { gatesAtPublish: "warn", novelty: "on" });
 expectDefaults("platform_backup", { "retention.daily": 7, "retention.weekly": 4, lastDownloadAt: null, purgeRequests: [] });
 
 // platform_ai classes: exactly the §D.10 model ids and efforts (D55), fast mode off

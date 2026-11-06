@@ -93,7 +93,8 @@ export function registerPublishListener(name: string, fn: PublishListener): void
 }
 
 /**
- * Runs every registered check. `warn` mode turns refusals into notes, except honesty refusals (no warn mode). A
+ * Runs every registered check. `warn` mode turns refusals into notes (hard items stay hard, for the override audit),
+ * except honesty refusals (no warn mode). A
  * check that throws is a server fault, not a refusal: it propagates and the publish answers `server`.
  */
 export async function runPrePublishChecks(ctx: PrePublishCtx): Promise<{ ok: true; notes: GateItem[] } | { ok: false; code: PrePublishCode; items: GateItem[] }> {
@@ -104,7 +105,8 @@ export async function runPrePublishChecks(ctx: PrePublishCtx): Promise<{ ok: tru
     if (r.ok) {
       notes.push(...(r.notes ?? []));
     } else if (ctx.mode === "warn" && r.code !== "honesty_blocked") {
-      notes.push(...r.items.map((i) => ({ ...i, level: "soft" as const })));
+      // the refused items keep their level, so publishPage audits the hard ones (page.publish.budget_override, CCR r1-p6-11)
+      notes.push(...r.items);
     } else {
       refusals.set(r.code, [...(refusals.get(r.code) ?? []), ...r.items]);
     }
