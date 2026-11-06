@@ -21,7 +21,8 @@ import { garmentOf } from "@/landing/sections/garment";
 import { ARCHETYPE_DEFS, rankArchetypes, type ExtractedPalette } from "@/lib/theme";
 import { getSection } from "@/landing/registry";
 import { compileGenome, compileLook, type Compiled, type PlanDirectives } from "@/lib/design/compile";
-import { distanceView, genomeDistance, nicheKey, type DistanceView } from "@/lib/design/distance";
+import { budgetBreach, type BudgetBreach } from "@/lib/design/budget-estimate";
+import { distanceView, genomeDistance, nicheKey, packView, type DistanceView } from "@/lib/design/distance";
 import { GenomeError, type DesignGenome, type SampleInput, type SampleOpts } from "@/lib/design/genome";
 import type { GeneHints } from "@/lib/design/hints";
 import type { NicheShares } from "@/lib/design/novelty.server";
@@ -29,7 +30,7 @@ import type { PhotoFacts } from "@/lib/design/photo-facts";
 import { PRIORS_VERSION } from "@/lib/design/priors";
 import { directionArchetype, sampleGenome } from "@/lib/design/solve";
 import type { BrandSetting } from "@/lib/settings/keys/brand";
-import { composeCopy, type CopyExtras } from "./copy-map";
+import { composeCopy, type ComposeCopyCtx, type CopyExtras, type EngineCopy } from "./copy-map";
 import { calmBands, chooseOrder, chooseVariant, finishPlan, fullOrder, planDesign, type DesignPlan, type PlanContext } from "./plan";
 import { CatalogInputError, directionCatalog, displayInput, drawOfferDisplay, pickOfferDisplay, safeSelection } from "./offers";
 import { deriveSeed, hash32 } from "./rng";
@@ -156,6 +157,8 @@ export interface Direction {
   genome?: DesignGenome | null;
   /** the engine-composed copy fields and their skeleton ids ("hero.headline" → "fr.t.np-fact"); absent = library or AI copy */
   skeletons?: Record<string, string>;
+  /** the composed lines (text, G29 structure, angle) by PageCopy path; absent = library or AI copy */
+  lines?: EngineCopy["lines"];
 }
 
 export interface DirectionMatch {
@@ -215,8 +218,10 @@ const SPREAD_TYPES = new Set(["hero", "benefits", "problem", "steps", "showcase"
 export interface DirectionDesign {
   genome: DesignGenome;
   compiled: Compiled;
-  /** hero-title skeletons the sibling directions already use (DES-§9.5 rotation) */
+  /** hero-title skeletons the sibling directions already use (DES-§9.5 rotation), plus the `close` lines' own ids */
   copyAvoid?: ReadonlySet<string>;
+  /** DES-§14.2 step 7: the lines still `close` after three recompositions (neutral skeleton, then the library line) */
+  fallback?: ComposeCopyCtx["fallback"];
 }
 
 /** A built direction: its document and, on the design path, the planned genome (sections, rhythm genes, G24). */
@@ -226,6 +231,8 @@ export interface BuiltDirection {
   plan: DesignPlan | null;
   /** the engine-composed copy paths and their skeleton ids (DES-§9.12); null = library or AI copy */
   skeletons?: Record<string, string> | null;
+  /** the composed lines by path (text, structure, angle); null = library or AI copy */
+  lines?: EngineCopy["lines"] | null;
 }
 
 /** The section schema accepts a top-level field (an unknown key would be stripped by the section's zod object). */
@@ -329,6 +336,7 @@ export function buildDirectionWithGenome(input: GenerateInput, archetype: Archet
   // the engine's plan (DES-§5.5): order, variants, rhythm genes and fold, from the compiled genome
   let plan: DesignPlan | null = null;
   let skeletons: Record<string, string> | null = null;
+  let lines: EngineCopy["lines"] | null = null;
   const formCounts = { offers: bundles.length, groups: (items[0]?.groups ?? []).filter((g) => g.kind !== "field").length, bump: false };
   if (design) {
     const photoFacts = photoFactsOf(input, product);
@@ -371,9 +379,11 @@ export function buildDirectionWithGenome(input: GenerateInput, archetype: Archet
         seed,
         ...(plan.fold.titleLines ? { titleLines: plan.fold.titleLines } : {}),
         avoid: new Set([...(design.copyAvoid ?? []), ...(input.ownSkeletons ?? [])]),
+        ...(design.fallback ? { fallback: design.fallback } : {}),
       });
       copy = engine.copy;
       skeletons = engine.skeletons;
+      lines = engine.lines;
     }
   }
 
@@ -471,7 +481,7 @@ export function buildDirectionWithGenome(input: GenerateInput, archetype: Archet
 
   const { doc, issues } = validateDoc(draft);
   if (!doc) throw new GeneratorError(issues[0]?.message ?? "The generated page is invalid.");
-  if (!plan) return { doc, genome: null, plan: null, skeletons: null };
+  if (!plan) return { doc, genome: null, plan: null, skeletons: null, lines: null };
   // the genome's sections, now that the ids exist (the hero's arrangement for the distance view and H33)
   const flowSeq = doc.sections.filter((s) => !s.hidden && !["announcement", "header", "footer", "stickyCta", "whatsappFloat"].includes(s.type)).map((s) => `${s.type}:${s.variant}`);
   const genome: DesignGenome = {
@@ -479,7 +489,7 @@ export function buildDirectionWithGenome(input: GenerateInput, archetype: Archet
     page: { ...plan.genome.page, G24: { ...plan.genome.page.G24, seq: flowSeq.slice(0, 40) } },
     sections: doc.sections.slice(0, 40).map((s) => ({ id: s.id, type: s.type, variant: s.variant, ...(s.type === "hero" && plan!.heroArrange ? { arrange: plan!.heroArrange } : {}) })),
   };
-  return { doc, genome, plan, skeletons };
+  return { doc, genome, plan, skeletons, lines };
 }
 
 /**
@@ -677,13 +687,63 @@ export const DIRECTION_MIN_D = 0.25;
 /** Attempts per direction (DES-§14.2 step 3: attempts 0-3). */
 const ATTEMPTS = 4;
 
+/** One sampled, planned and built attempt of a direction (DES-§14.2 step 3): what the novelty check and the keep rule read. */
+export interface DirectionCandidate {
+  /** "<direction>:<attempt>:<view hash>": stable for the same inputs, new when an earlier direction's pick changed */
+  key: string;
+  i: 0 | 1 | 2;
+  attempt: number;
+  archetype: Archetype;
+  seed: number;
+  built: BuiltDirection;
+  /** null on the archetype fallback (no genome) */
+  view: DistanceView | null;
+  /** the distance to the earlier directions' picks (1 for the first direction) */
+  d: number;
+  /** 0 when a calm product's accent repeats an earlier direction's */
+  voice: number;
+  /** the first hard budget row the estimate breaches (opts.budget), else null */
+  breach: BudgetBreach | null;
+  /** what built this document: the copy recomposition of step 7 rebuilds it with another `copyAvoid` / `fallback` */
+  design: DirectionDesign | null;
+  avoid: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+export interface DirectionEntry {
+  archetype: Archetype;
+  reason: string;
+  match: DirectionMatch;
+  /** every attempt built, in order */
+  candidates: DirectionCandidate[];
+  /** the kept attempt (the first at d ≥ 0.25 with its own accent and within the budgets, else the most distant) */
+  pick: DirectionCandidate;
+}
+
+export interface CandidateOpts {
+  /** keys the novelty check refused (`too_close`, DS6): never kept, their direction keeps sampling */
+  refused?: ReadonlySet<string>;
+  /** the explore re-sample (DES-§14.2 step 5): 4 more attempts for a direction whose attempts were all refused */
+  explore?: boolean;
+  /** skip attempts whose estimates breach a hard budget row (budget-limits.ts), DES-§14.2 step 3 */
+  budget?: boolean;
+  /** GH-1 (DES-§14.6): the Director's hints and pin for some directions (1 and 2); the others sample as usual */
+  hinted?: { hints: GeneHints; pins?: SampleOpts["pins"]; directions: readonly number[] };
+  /** the photo-led pin of one direction (the wizard's explore slot when the photos have a cutout, DES-§14.8) */
+  photoPin?: { pins: NonNullable<SampleOpts["pins"]>; direction: number };
+}
+
+/** The view's key part: a short hash of the packed vector. */
+const viewKey = (v: DistanceView | null) => (v ? hash32(packView(v).join(",")).toString(36) : "x");
+
 /**
- * Three art-directed directions (distinct archetypes), deterministic per (brand seed, input hash, inputs). Each
- * direction samples its genome (DES-§4.4), compiles it, plans the page (choreography, rhythm planners, fold) and builds
- * the document; an attempt whose distance to an earlier direction is < 0.25 is skipped for the next (≤ 4), the most
- * distant kept otherwise. Built in order: each one also steers away from the hero and section compositions before it.
+ * Every direction's attempts (DES-§14.2 step 3), deterministic per (brand seed, input hash, inputs): forced archetypes
+ * lead, each direction samples its genome (DES-§4.4), compiles it, plans the page (choreography, rhythm planners, fold)
+ * and builds the document; an attempt whose distance to an earlier direction's pick is < 0.25 (or whose accent repeats
+ * one, for a calm product, or that breaches a budget, or that the novelty check refused) is not kept and the next is
+ * tried (≤ 4, ≤ 8 with `explore`), the most distant kept otherwise. Built in order: each one steers away from the hero
+ * and section compositions of the picks before it.
  */
-export function generateDirections(input: GenerateInput): Direction[] {
+export function directionCandidates(input: GenerateInput, opts: CandidateOpts = {}): DirectionEntry[] {
   const avoid = new Map<string, Set<string>>();
   const views: DistanceView[] = [];
   const accents: string[] = [];
@@ -693,18 +753,26 @@ export function generateDirections(input: GenerateInput): Direction[] {
   const { reading, keywords } = moodOf(input);
   const parsed = Product.safeParse(input.product);
   const category = parsed.success ? parsed.data.category : "other";
+  const refused = opts.refused ?? new Set<string>();
   return pickArchetypes(input).map(({ archetype, reason, match }, i) => {
-    let best: { built: BuiltDirection; seed: number; d: number; view: DistanceView | null; voice: number } | null = null;
-    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    const candidates: DirectionCandidate[] = [];
+    let best: { c: DirectionCandidate; rank: number } | null = null;
+    const turnAvoid: ReadonlyMap<string, ReadonlySet<string>> = new Map([...avoid].map(([k, v]) => [k, new Set(v)] as const));
+    const attempts = opts.explore ? ATTEMPTS * 2 : ATTEMPTS;
+    for (let attempt = 0; attempt < attempts; attempt++) {
       const sin = sampleInputOf(input, archetype, i as 0 | 1 | 2, attempt, ranked, reading);
       let built: BuiltDirection;
       let seed: number;
+      let design: DirectionDesign;
       try {
-        const genome = sampleGenome(sin, input.hints ? { hints: input.hints } : {});
+        const hinted = opts.hinted?.directions.includes(i) ? opts.hinted : null;
+        const pin = opts.photoPin?.direction === i ? opts.photoPin.pins : null;
+        const genome = sampleGenome(sin, hinted ? { hints: hinted.hints, ...(hinted.pins ? { pins: hinted.pins } : {}) } : { ...(input.hints ? { hints: input.hints } : {}), ...(pin ? { pins: pin } : {}) });
         seed = genome.seed;
         const theme = productTheme({ category, palette: input.palette, aiVibe: input.aiVibe, keywords, mood: reading.mood, archetype, seed, locale: input.locale });
         const compiled = compileGenome(genome, { theme, locale: input.locale, mood: reading.mood, brand: input.brand ?? null, photos: sin.photos, numbers: (input.proof?.figures ?? 0) >= 2 });
-        built = buildDirectionWithGenome(input, archetype, seed, avoid, { genome, compiled, copyAvoid });
+        design = { genome, compiled, copyAvoid: new Set(copyAvoid) };
+        built = buildDirectionWithGenome(input, archetype, seed, turnAvoid, design);
       } catch (e) {
         // a locked brand colour the no-orange repair would move fails the candidate (H24): the next attempt
         if (e instanceof GenomeError) continue;
@@ -714,18 +782,27 @@ export function generateDirections(input: GenerateInput): Direction[] {
       const d = views.length ? Math.min(...views.map((v) => genomeDistance(v, view))) : 1;
       // a calm product draws its accent from a few quiet partners: two directions in one accent read as one proposal
       const voice = reading.mood !== "calm" || accents.every((a) => colorDistance(a, built.doc.theme.palette.accent) >= DISTINCT_ACCENT) ? 1 : 0;
-      if (!best || voice > best.voice || (voice === best.voice && d > best.d)) best = { built, seed, d, view, voice };
-      if (d >= DIRECTION_MIN_D && voice) break;
+      const breach = opts.budget ? budgetBreach(built.doc) : null;
+      const c: DirectionCandidate = { key: `${i}:${attempt}:${viewKey(view)}`, i: i as 0 | 1 | 2, attempt, archetype, seed, built, view, d, voice, breach, design, avoid: turnAvoid };
+      candidates.push(c);
+      if (refused.has(c.key)) continue;
+      // within the budgets first, then the accent, then the distance
+      const rank = (breach ? 0 : 2) + voice;
+      if (!best || rank > best.rank || (rank === best.rank && d > best.c.d)) best = { c, rank };
+      if (d >= DIRECTION_MIN_D && voice && !breach) break;
     }
     if (!best) {
-      // every attempt refused (locked colours): the archetype's plan without a look
+      // every attempt refused (locked colours, or the novelty check): the archetype's plan without a look
       const seed = deriveSeed(hash32(`${runSeeds(input).brandSeed}|${runSeeds(input).inputHash}`), `direction:${i}:fallback`);
-      best = { built: { doc: buildDirection(input, archetype, seed, avoid), genome: null, plan: null }, seed, d: 0, view: null, voice: 0 };
+      const built: BuiltDirection = { doc: buildDirection(input, archetype, seed, turnAvoid), genome: null, plan: null };
+      best = { c: { key: `${i}:fallback:x`, i: i as 0 | 1 | 2, attempt: -1, archetype, seed, built, view: null, d: 0, voice: 0, breach: null, design: null, avoid: turnAvoid }, rank: 0 };
+      candidates.push(best.c);
     }
-    if (best.view) views.push(best.view);
-    const heroSkeleton = best.built.skeletons?.["hero.headline"];
+    const pick = best.c;
+    if (pick.view) views.push(pick.view);
+    const heroSkeleton = pick.built.skeletons?.["hero.headline"];
     if (heroSkeleton) copyAvoid.add(heroSkeleton);
-    const doc = best.built.doc;
+    const doc = pick.built.doc;
     accents.push(doc.theme.palette.accent);
     for (const s of doc.sections) {
       if (!SPREAD_TYPES.has(s.type)) continue;
@@ -733,7 +810,21 @@ export function generateDirections(input: GenerateInput): Direction[] {
       used.add(s.variant);
       avoid.set(s.type, used);
     }
-    const def = ARCHETYPE_DEFS[archetype];
-    return { archetype, label: def.label, description: def.description, reason, match, seed: best.seed, doc, genome: best.built.genome, ...(best.built.skeletons ? { skeletons: best.built.skeletons } : {}) };
+    return { archetype, reason, match, candidates, pick };
   });
+}
+
+/** A direction from its entry and the candidate shown (the pick unless the novelty keep rule chose another). */
+export function directionOf(entry: Pick<DirectionEntry, "archetype" | "reason" | "match">, c: DirectionCandidate): Direction {
+  const def = ARCHETYPE_DEFS[entry.archetype];
+  const b = c.built;
+  return { archetype: entry.archetype, label: def.label, description: def.description, reason: entry.reason, match: entry.match, seed: c.seed, doc: b.doc, genome: b.genome, ...(b.skeletons ? { skeletons: b.skeletons } : {}), ...(b.lines ? { lines: b.lines } : {}) };
+}
+
+/**
+ * Three art-directed directions (distinct archetypes), deterministic per (brand seed, input hash, inputs): the picks of
+ * `directionCandidates`. The wizard runs the whole DES-§14.2 path (novelty, repairs, headline check) on top of them.
+ */
+export function generateDirections(input: GenerateInput): Direction[] {
+  return directionCandidates(input).map((e) => directionOf(e, e.pick));
 }

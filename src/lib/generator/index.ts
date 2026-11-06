@@ -16,6 +16,11 @@
  */
 export {
   generateDirections,
+  directionCandidates,
+  directionOf,
+  type CandidateOpts,
+  type DirectionCandidate,
+  type DirectionEntry,
   buildDirection,
   buildDirectionWithGenome,
   pickArchetypes,

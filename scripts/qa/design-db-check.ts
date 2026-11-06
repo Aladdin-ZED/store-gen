@@ -495,6 +495,26 @@ async function noveltyChecks() {
   ok("a live or reserved row is never capped", (await db.select().from(designGenomes).where(eq(designGenomes.storeId, ids[0]!))).every((r) => r.live || (r.reservedUntil && r.reservedUntil.getTime() > Date.now())));
   await G.purgeGenomes(C);
   ok("purge: 0 rows left for the store, the others untouched", (await db.select().from(designGenomes).where(eq(designGenomes.storeId, ids[2]!))).length === 0 && (await db.select().from(designGenomes).where(eq(designGenomes.storeId, ids[1]!))).length > 0);
+
+  // --- step 11: the wizard's rows (DES-§14.2 steps 9 and 10) ---
+  const W = load<typeof import("@/lib/design/copy-genes")>("@/lib/design/copy-genes");
+  const { unpackGenome } = load<typeof import("@/lib/design/genome")>("@/lib/design/genome");
+  const tags = W.validCopyGenes({ angle: "free-delivery-forever", titles: { hero: "noun-phrase", faq: "<b>forged</b>" } });
+  const chosenGenome = W.applyCopyGenes(genomeOf(pE.doc), tags);
+  const composed = [...textFieldsOf(pE.doc).entries()].filter(([k]) => /\.(title|headline|lead|subtitle)$/.test(k)).map(([, v]) => v);
+  const wgen = G.generationRecord(pE.doc, W.originsOf(pE.doc, { engine: composed }));
+  const chosenId = await G.recordChosen(A, { pageId: pE.pageId, niche: E, genome: chosenGenome, view: vE, gen: wgen });
+  const [crow] = await db.select().from(designGenomes).where(and(eq(designGenomes.storeId, ids[0]!), eq(designGenomes.id, chosenId)));
+  const storedChosen = crow ? unpackGenome(crow.genome as never) : null;
+  const storedGen = (crow?.report as { gen?: Record<string, { o: string }> } | null)?.gen ?? {};
+  ok(
+    "the chosen row: forged copy-gene tags never stored, the valid G29 kept, report.gen ≤ 600 B with engine origins",
+    !!storedChosen && tags.dropped === 2 && storedChosen.page.angle !== ("free-delivery-forever" as never) && storedChosen.sections.some((x) => x.type === "hero" && x.G29 === "noun-phrase") && JSON.stringify(storedGen).length <= 600 && Object.values(storedGen).some((r) => r.o === "engine") && !crow!.live && !crow!.pool,
+    { dropped: tags.dropped, angle: storedChosen?.page.angle, gen: JSON.stringify(storedGen).length },
+  );
+  const genIds = await G.recordGenerated(A, [0, 1, 2].map((k) => ({ pageId: null, niche: E, genome: g0, view: shift(vA, 3 + k) })));
+  const genRows = await db.select().from(designGenomes).where(and(eq(designGenomes.storeId, ids[0]!), eq(designGenomes.source, "generated")));
+  ok("the generated rows of a wizard run: three, never live, never in the pool", genIds.length === 3 && genRows.length === 3 && genRows.every((r) => !r.live && !r.pool && r.pageId === null), genRows.length);
 }
 
 /* ------------------------------------------------------------------ */

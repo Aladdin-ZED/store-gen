@@ -12,7 +12,8 @@ import { flagOverrides, flags } from "@/lib/db/schema";
 import { flags as DESIGN_FLAGS } from "@/lib/flags/defs/design";
 import type { StoreScope } from "@/lib/tenancy/types";
 
-export type DesignFlagKey = "design_novelty_check" | "design_publish_gates" | "design_new_heroes";
+/** the design flags, and P7's `ai_director_brief` (GH-1: read by key, off while P7 has not declared it) */
+export type DesignFlagKey = "design_novelty_check" | "design_publish_gates" | "design_new_heroes" | "ai_director_brief";
 
 /** The flag's value for the scope's store: store override > console default > declared default. Never throws. */
 export async function designFlag(key: DesignFlagKey, scope: StoreScope): Promise<unknown> {

@@ -143,6 +143,16 @@ export const cases: TenancyCase[] = [
 
 const HEADLINES = ["Huile d'argan pure, pressée à froid", "زيت الأركان الأصلي"];
 
+/** A fixture direction's packed view and genome (the wizard's step 4 / step 9 payloads). */
+async function wizardDirection() {
+  const { directionsOf } = await import("@/lib/design/fixtures/prepublish");
+  const { distanceView, packView } = await import("@/lib/design/distance");
+  const d = directionsOf("argan", "fr", 3)[0]!;
+  return { genome: d.genome!, vec: packView(distanceView(d.genome!, { theme: d.doc.theme }, d.doc.locale)) };
+}
+const wizardCandidates = async () => [{ key: "0:0:x", vec: (await wizardDirection()).vec }];
+const wizardRows = async () => [await wizardDirection()];
+
 export const actions: TrackActionCase[] = [
   // reads the platform shingles only (no record of A to name): the role matrix and the effects count
   {
@@ -154,6 +164,39 @@ export const actions: TrackActionCase[] = [
     write: false,
     victim: () => ["argan", HEADLINES],
     own: () => ["argan", HEADLINES],
+  },
+  // step 11: the wizard's novelty batch (bands of the attacker's own candidates; A has no record to name)
+  {
+    file: "src/app/app/[store]/generate/actions.ts",
+    name: "checkNoveltyAction",
+    area: "generate",
+    path: "/generate",
+    permission: ["pages.write"],
+    write: false,
+    victim: async () => [{ niche: "MA:skincare", candidates: await wizardCandidates() }],
+    own: async () => [{ niche: "MA:skincare", candidates: await wizardCandidates() }],
+  },
+  // step 11: the generated rows of a wizard run (written for the caller's store only; nothing of A is named)
+  {
+    file: "src/app/app/[store]/generate/actions.ts",
+    name: "recordCandidatesAction",
+    area: "generate",
+    path: "/generate",
+    permission: ["pages.write"],
+    write: true,
+    victim: async () => [{ niche: "MA:skincare", rows: await wizardRows() }],
+    own: async () => [{ niche: "MA:skincare", rows: await wizardRows() }],
+  },
+  // step 11: the reveal's photo rows: A's asset ids answer like missing ones
+  {
+    file: "src/app/app/[store]/generate/actions.ts",
+    name: "revealAssetsAction",
+    area: "generate",
+    path: "/generate",
+    permission: ["pages.write"],
+    write: false,
+    victim: (fx) => [[fx.A.asset.photo, fx.A.asset.cutout]],
+    own: (fx) => [[fx.B.asset.photo]],
   },
   // step 9: the niche shares (platform pool, value → share bands over ≥ 10 stores; no record of A to name)
   {

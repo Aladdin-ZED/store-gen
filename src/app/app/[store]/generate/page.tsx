@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { Screen } from "@/components/admin/common/screen";
 import { GenerateWizard } from "@/components/generate/wizard";
 import { previewAssetsFor } from "@/lib/admin-data/assets";
+import { aiPolicyFor } from "@/lib/ai/router/server";
+import { designFlag } from "@/lib/design/flags.server";
+import { brandView } from "@/lib/settings/keys/brand";
 import { storeInfoOf } from "@/lib/admin-data/store-info";
 import { Market } from "@/lib/page/schema";
 import { getStoreSettings } from "@/lib/settings";
@@ -17,11 +20,17 @@ const WIZARD_LOCALES = new Set(["ar", "fr", "en"]);
  * The generator: drop product photos → on-device reading → product facts → three art-directed
  * directions → a draft page in the builder. Everything heavy runs in the member's browser; the store's
  * AI choices, market and page defaults come from the store (GEN-01), never from the platform. `pages.write` +
- * `ai.use` (§I.1).
+ * `ai.use` (§I.1). The design engine's store inputs (design.md DES-§14.2, DES-§14.6): the brand seed (DS5), the brand
+ * kit with the store's voice (`brandView`), the AI policy and P7's `ai_director_brief` flag (GH-1).
  */
 export default async function GeneratePage({ params }: { params: Params }) {
   const ctx = await requireStoreMember({ handle: (await params).store, permission: ["pages.write", "ai.use"] });
-  const [{ store_ai: ai, defaults }, store] = await Promise.all([getStoreSettings(ctx.scope, ["store_ai", "defaults"]), storeInfoOf(ctx.scope, ctx.store)]);
+  const [{ store_ai: ai, defaults, brand }, store, aiPolicy, director] = await Promise.all([
+    getStoreSettings(ctx.scope, ["store_ai", "defaults", "brand"]),
+    storeInfoOf(ctx.scope, ctx.store),
+    aiPolicyFor(ctx),
+    designFlag("ai_director_brief", ctx.scope),
+  ]);
   const storeAssets = await previewAssetsFor(ctx.scope, [], [store.logo]);
   // the first page locale the store offers, else its default locale (§D.10 `defaults.locales`)
   const preferred = defaults.locales[0] ?? ctx.store.defaultLocale;
@@ -44,6 +53,7 @@ export default async function GeneratePage({ params }: { params: Params }) {
         storeAssets={storeAssets}
         canUpload={ctx.can("media.write")}
         canCreatePixels={ctx.can("pixels.manage")}
+        design={{ brandSeed: ctx.store.brandSeed, brand: brandView(brand, ai), director: director === true, aiPolicy, handle: ctx.store.handle }}
       />
     </Screen>
   );

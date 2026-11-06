@@ -20,6 +20,8 @@ import "@/lib/design/selftest-copy";
 import "@/lib/design/selftest-gates";
 // step 9 (novelty service): the pool's bounds-first verdicts, the DS57 timing, the niche shares, the capacity (--full)
 import "@/lib/design/selftest-novelty";
+// step 11 (wizard and reveal): the alpha estimate, the DES-§14.2 pipeline on the fixtures, its degraded paths
+import "@/lib/design/selftest-wizard";
 import { registerDesignGroup } from "@/lib/design/selftest";
 
 // step 4 (section kit redraws): the 41 baseline documents against their goldens (--full; test:render runs the 14
