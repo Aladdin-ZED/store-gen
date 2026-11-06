@@ -432,6 +432,8 @@ export interface LpCopy {
   testBanner: string;
   /** `link.inactive`: a short link or a test link that no longer works */
   linkInactive: string;
+  /** `link.home`: the inactive link page's way back to the store home */
+  linkHome: string;
   /** `lp.report`: the same words as the storefront's `footer.report` */
   report: string;
   /** `lp.reload` (R2) */
@@ -439,7 +441,7 @@ export interface LpCopy {
 }
 
 export const LP: Readonly<Record<ShopperLocale, LpCopy>> = {
-  ar: { testBanner: "طلب تجريبي: ما كيتحسبش", linkInactive: "هاد الرابط ما بقاش خدام.", report: "بلّغ على هاد المتجر", reload: "عاود حمّل الصفحة" },
-  fr: { testBanner: "Commande test : non comptée", linkInactive: "Ce lien n'est plus actif.", report: "Signaler cette boutique", reload: "Recharger la page" },
-  en: { testBanner: "Test order: not counted", linkInactive: "This link is no longer active.", report: "Report this store", reload: "Reload the page" },
+  ar: { testBanner: "طلب تجريبي: ما كيتحسبش", linkInactive: "هاد الرابط ما بقاش خدام.", linkHome: "سير للصفحة الرئيسية ديال المتجر", report: "بلّغ على هاد المتجر", reload: "عاود حمّل الصفحة" },
+  fr: { testBanner: "Commande test : non comptée", linkInactive: "Ce lien n'est plus actif.", linkHome: "Aller à l'accueil de la boutique", report: "Signaler cette boutique", reload: "Recharger la page" },
+  en: { testBanner: "Test order: not counted", linkInactive: "This link is no longer active.", linkHome: "Go to the store home", report: "Report this store", reload: "Reload the page" },
 };

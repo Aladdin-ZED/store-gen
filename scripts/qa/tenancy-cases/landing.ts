@@ -39,6 +39,12 @@
  * get, attempt, assign, take next, lost, reopen, follow-up, convert) join `ACTION_CASES`, each on a fresh lead inside
  * the 30-day window, so `qa:action-replay` proves B's members, outsiders and staff reach none of A's leads and that
  * every write answers `impersonation_read_only` under "View as store".
+ *
+ * Short links and test orders (p3-w2-links-testlinks): A's `/go/<code>` under B's handle answers 404 (B's own link with
+ * the same code goes to B); `createShortLink` by B with A's page id answers `not_found` and writes nothing; B's pause,
+ * edit and delete of A's link id leave A's row byte-identical; A's test token on B is an ordinary visit (no test band,
+ * `resolveTestToken` false) and `mintTestLink` through B's scope refuses A's page; the `test-render` rate bucket is
+ * the store's own (`s:<sid>:test-render`). The five link actions and `mintTestLinkAction` join `ACTION_CASES`.
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -627,6 +633,73 @@ async function trackCases(kit: TenancyKit): Promise<void> {
   check("tracking: B's scope loads nothing of A's order", (await V.loadTrackOrder(kit.scope("B"), id)) === null);
 }
 
+/* ------------------------------------------------------------------ */
+/* short links and test orders (p3-w2-links-testlinks)                 */
+/* ------------------------------------------------------------------ */
+
+async function linkCases(kit: TenancyKit): Promise<void> {
+  const { fx, check } = kit;
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const T = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { and, eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const Sv = load<typeof import("@/lib/links/service.server")>("@/lib/links/service.server");
+  const Go = load<typeof import("@/lib/links/serve.server")>("@/lib/links/serve.server");
+  const L = load<typeof import("@/lib/testing/links")>("@/lib/testing/links");
+  const P = load<typeof import("@/lib/tenancy/public")>("@/lib/tenancy/public");
+  const RL = load<typeof import("@/lib/security/rate-limit")>("@/lib/security/rate-limit");
+  const platform = process.env.PLATFORM_URL ?? "http://localhost:3451";
+  const host = new URL(platform).host;
+  const ctxA = ownerCtx(kit, "A");
+  const ctxB = ownerCtx(kit, "B");
+  const attempt = async (fn: () => Promise<unknown>): Promise<string> => {
+    try {
+      await fn();
+      return "ok";
+    } catch (err) {
+      return (err as { code?: string }).code ?? (err as Error).name ?? "error";
+    }
+  };
+  const go = async (handle: string, code: string) => {
+    const res = await Go.serveGo(new Request(`${platform}/s/${handle}/go/${code}`, { headers: { host, "user-agent": "tenancy-landing" } }), handle, code, { defer: () => undefined });
+    return { status: res.status, location: res.headers.get("location"), body: await res.text() };
+  };
+  const rowOf = async (id: string) => JSON.stringify((await db.select().from(T.shortLinks).where(and(eq(T.shortLinks.storeId, fx.A.id), eq(T.shortLinks.id, id))))[0] ?? null);
+
+  const a = await Sv.createShortLink(ctxA, { target: { kind: "page", pageId: fx.A.page.live }, utm: { source: "a-secret-source" } });
+  const viaA = await go(fx.A.handle, a.code);
+  check("links: A's code on A's host redirects into A (the control)", viaA.status === 308 && !!viaA.location?.includes(`/s/${fx.A.handle}/`), viaA.location);
+  const viaB = await go(fx.B.handle, a.code);
+  check("links: A's code on B's host → 404, nothing of A in the answer", viaB.status === 404 && viaB.location === null && !viaB.body.includes("a-secret-source") && !viaB.body.includes(fx.A.slug), viaB.status);
+  const b = await Sv.createShortLink(ctxB, { target: { kind: "home" }, code: a.code });
+  const sameCode = await go(fx.B.handle, b.code);
+  check("links: B's own link with A's code goes to B only", sameCode.status === 308 && !!sameCode.location?.includes(`/s/${fx.B.handle}`) && !sameCode.location.includes(fx.A.handle), sameCode.location);
+
+  const before = await db.select({ id: T.shortLinks.id }).from(T.shortLinks).where(eq(T.shortLinks.storeId, fx.B.id));
+  check("links: createShortLink by B with A's page id → not_found", (await attempt(() => Sv.createShortLink(ctxB, { target: { kind: "page", pageId: fx.A.page.live } }))) === "not_found");
+  const after = await db.select({ id: T.shortLinks.id }).from(T.shortLinks).where(eq(T.shortLinks.storeId, fx.B.id));
+  check("links: …and B has no new row", after.length === before.length);
+
+  const rowA = await rowOf(a.id);
+  const tries = {
+    pause: await attempt(() => Sv.pauseShortLink(ctxB, a.id)),
+    resume: await attempt(() => Sv.resumeShortLink(ctxB, a.id)),
+    edit: await attempt(() => Sv.editTarget(ctxB, a.id, { kind: "home" })),
+    delete: await attempt(() => Sv.deleteShortLink(ctxB, a.id)),
+  };
+  check("links: B's pause, resume, edit and delete of A's link id → not_found", Object.values(tries).every((x) => x === "not_found"), tries);
+  check("links: A's row byte-identical after B's attempts", (await rowOf(a.id)) === rowA);
+
+  // test orders (D54): A's token on B is an ordinary visit; B's scope never mints for A's page
+  const link = await L.mintTestLink(ctxA.scope, fx.A.page.live);
+  const token = new URL(link.url).searchParams.get("sg-test");
+  const storeB = (await P.getStoreById(fx.B.id))!;
+  check("test orders: A's token on store B is an ordinary visit", P.resolveTestToken(storeB, token).test === false && P.resolveTestToken((await P.getStoreById(fx.A.id))!, token).test === true);
+  check("test orders: mintTestLink through B's scope refuses A's page (not_found)", (await attempt(() => L.mintTestLink(ctxB.scope, fx.A.page.live))) === "not_found");
+  const bucketA = RL.storeBucket(kit.scope("A"), "test-render");
+  const bucketB = RL.storeBucket(kit.scope("B"), "test-render");
+  check("test orders: the test-render bucket is the store's own (s:<sid>:test-render)", bucketA === `s:${fx.A.id}:test-render` && bucketB === `s:${fx.B.id}:test-render`, [bucketA, bucketB]);
+}
+
 export const cases: TenancyCase[] = [
   { name: "landing: delivery zones, lead suggestion and holiday reminder of A never reach B", run: zoneCases },
   { name: "landing: A's attested facts, proof, zones and policies never reach B's gate or Store Health", run: gateCases },
@@ -634,6 +707,7 @@ export const cases: TenancyCase[] = [
   { name: "landing: slug history 308s with the raw query, a reused slug serves the new page, B never redirects into A", run: slugCases },
   { name: "landing: B's host reads A's order by no tracking proof; A's signed link under B's handle answers 404", run: trackCases },
   { name: "landing: A's confirm template, zones and caller phone never reach B's add-on blocks (loadRenderAddons, templateFor)", run: addonCases },
+  { name: "landing: A's short links answer 404 on B's host and are never B's to create, pause, edit or delete; A's test token is an ordinary visit on B", run: linkCases },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -767,4 +841,49 @@ actions.push(
   inboxCase("reopenLeadAction", ["leads.write"], true, (s) => freshLead(s, { status: "lost", lostReason: "price" }).then((id) => [id, null, op()])),
   inboxCase("setLeadFollowUp", ["leads.write"], true, (s) => freshLead(s).then((id) => [id, new Date(Date.now() + 3_600_000).toISOString(), op()])),
   inboxCase("convertLead", ["orders.create"], true, (s) => freshLead(s).then((id) => [id, { name: "Replay", city: "Casablanca", confirmed: true, idem: randomUUID() }, op()])),
+);
+
+/* ------------------------------------------------------------------ */
+/* short links and test orders (p3-w2-links-testlinks)                 */
+/* ------------------------------------------------------------------ */
+
+const LINKS = "src/app/app/[store]/links/actions.ts";
+
+/** A fresh link of the store (a direct row: the replay must not spend the store's gauge on its fixtures). */
+async function freshLink(store: StoreFx): Promise<string> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const T = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const id = newId();
+  await db.insert(T.shortLinks).values({ id, storeId: store.id, code: `rp${randomBytes(4).toString("hex")}`, targetKind: "home", status: "active" });
+  return id;
+}
+
+const linkCase = (name: string, args: (s: StoreFx) => Promise<unknown[]> | unknown[]): TrackActionCase => ({
+  file: LINKS,
+  name,
+  area: "pages",
+  path: "/links",
+  permission: ["campaigns.write"],
+  write: true,
+  victim: (fx) => args(fx.A),
+  own: (fx) => args(fx.B),
+});
+
+actions.push(
+  linkCase("createLinkAction", (s) => [{ target: { kind: "page", pageId: s.page.live }, channel: "meta", utm: { source: "facebook" } }]),
+  linkCase("pauseLinkAction", (s) => freshLink(s).then((id) => [id])),
+  linkCase("resumeLinkAction", (s) => freshLink(s).then((id) => [id])),
+  linkCase("editLinkTargetAction", (s) => freshLink(s).then((id) => [id, { kind: "policy", policy: "terms" }])),
+  linkCase("deleteLinkAction", (s) => freshLink(s).then((id) => [id])),
+  {
+    file: PAGES,
+    name: "mintTestLinkAction",
+    area: "pages",
+    path: "/pages",
+    permission: ["pages.publish"],
+    write: true,
+    victim: (fx) => [fx.A.page.live],
+    own: (fx) => [fx.B.page.live],
+  },
 );

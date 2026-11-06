@@ -8,6 +8,10 @@
  * `landing` mode; unpublishing the home page hands the home to the page the owner picked or to the "no page yet"
  * page; a page created in a `store`-mode shop turns `landing.inStoreMode` on with it (the LAN-§4 fallback); the two
  * attestation sheets of the builder write their audit rows here (`page.proof_attested`, `page.fact_attested`).
+ *
+ * Test orders (LAN-§14.1, SF-05, wave 2): `mintTestLinkAction` mints the 2-hour `?sg-test=` link of a published page
+ * of this store (`pages.publish`; audit `page.test_link_created` with the member as actor); with no page id it takes
+ * the store's home page when it is live, else the latest published landing page.
  */
 import { z } from "zod";
 import { fail } from "@/lib/admin-data/action";
@@ -17,6 +21,7 @@ import { attestFact, attestProof } from "@/lib/landing/honesty/facts.server";
 import { canBeHome } from "@/lib/landing/home.server";
 import { ensureLandingInStoreMode } from "@/lib/landing/in-store-mode.server";
 import { publishPage, PublishError } from "@/lib/render/publish.server";
+import { mintTestLinkAs, testOrderPageId } from "@/lib/testing/links";
 import { storeAction } from "@/lib/tenancy/seam";
 import type { ActionResult } from "@/lib/tenancy/types";
 
@@ -132,5 +137,21 @@ export async function attestFactAction(pageId: string, fact: z.input<typeof Fact
   return storeAction("pages.write", async ({ scope, actor }) => {
     if (!(await attestFact(scope, actor, PageId.parse(pageId), Fact.parse(fact)))) fail("This number isn't in the text any more.");
     return null;
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* test orders (LAN-§14.1, SF-05)                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * "Open a test order": the page's 2-hour test link (`mintTestLink`, audit `page.test_link_created`). `pageId` null: the
+ * store's home page when it is published, else its latest published landing page; none answers `not_found`.
+ */
+export async function mintTestLinkAction(pageId: string | null): Promise<ActionResult<{ url: string; expiresAt: string }>> {
+  return storeAction("pages.publish", async ({ scope, actor, store }) => {
+    const id = pageId === null ? ((await testOrderPageId(scope, store)) ?? fail("landing.testOrder.noPage")) : PageId.parse(pageId);
+    const link = await mintTestLinkAs(scope, actor, id);
+    return { url: link.url, expiresAt: link.expiresAt.toISOString() };
   });
 }
