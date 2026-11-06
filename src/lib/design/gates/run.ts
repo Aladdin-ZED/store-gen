@@ -90,8 +90,8 @@ export function runGates(input: GateInput): GateReport {
   return gateRun(input).report;
 }
 
-/** runGates with its raw items (the repair loop plans its next round from them). */
-export function gateRun(input: GateInput): { report: GateReport; items: DesignGateItem[]; slop: { score: number; items: DesignGateItem[] } } {
+/** runGates with its raw items (the repair loop plans its next round from them) and the view (the panel's meters). */
+export function gateRun(input: GateInput): { report: GateReport; items: DesignGateItem[]; slop: { score: number; items: DesignGateItem[] }; view: PageView } {
   const t0 = performance.now();
   const { view, items, slop, copy, comp } = gateItemsOf(input);
   const hard = items.filter((it) => it.level === "hard");
@@ -99,7 +99,7 @@ export function gateRun(input: GateInput): { report: GateReport; items: DesignGa
   const info = items.filter((it) => it.level === "info");
   const q = qScore({ hard: hard.length, soft: soft.reduce((n, it) => n + it.penalty, 0), slop: slop.score, spec: copy.spec, nov: noveltyTerm(input.novelty), comp: comp.score });
   const report: GateReport = { v: 3, q, hard, soft, info, slop, copy, heights: view.heights, ms: Math.round((performance.now() - t0) * 100) / 100, composition: { score: comp.score, items: comp.items } };
-  return { report, items, slop };
+  return { report, items, slop, view };
 }
 
 /** `design_genomes.report` (DES-§2.1): ids and counts, never page text. */

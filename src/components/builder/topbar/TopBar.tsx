@@ -22,6 +22,7 @@ import { MOD, Segmented, TipButton } from "../ui";
 import { LiveStatus, PageNameField, SlugControl } from "./PageIdentity";
 import { RemixMenu } from "./RemixMenu";
 import { SaveStatus } from "./SaveStatus";
+import { DesignCheckButton } from "../design/CheckButton";
 import { useStore } from "@/components/admin/shell/store-context";
 
 const ZOOMS: { value: ZoomLevel; label: string }[] = [
@@ -164,6 +165,7 @@ export function TopBar() {
         <SaveStatus />
         <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
         <RemixMenu disabled={!user.canWrite} />
+        <DesignCheckButton />
         <TipButton label="History" onClick={() => setVersionsOpen(true)}>
           <History />
         </TipButton>

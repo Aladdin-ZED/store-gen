@@ -4,7 +4,7 @@
  * harmony, base mood, derive from the product photos), font pairings previewed in Latin and
  * Arabic, shape & depth, motion & decoration, and a seed shuffle.
  */
-import { Dices, LoaderCircle, WandSparkles } from "lucide-react";
+import { Dices, Dna, LoaderCircle, Minus, Plus, Stamp, WandSparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,10 @@ import { cn } from "@/lib/utils";
 import { useEditor, useEditorApi, useEditorStore } from "../context";
 import { assetUrl, useBuiltTheme } from "../env";
 import { loadRemix } from "../on-demand";
+import { ThemeDna } from "../design/DnaCard";
+import { useDesignCheck } from "../design/check-context";
+import { applyBrand } from "@/lib/design/brand-apply";
+import { useT } from "@/lib/i18n/admin/client";
 import { DIVIDER_LABELS, DividerGlyph } from "../section-meta";
 import { Choice, ColorInput, FieldRow, Hint, PanelHeader, PanelSection, Segmented } from "../ui";
 
@@ -41,6 +45,7 @@ export function ThemePanel() {
     <div className="flex h-full flex-col">
       <PanelHeader title="Theme" description="Switching style keeps all your content." />
       <div className="bld-scroll min-h-0 flex-1 overflow-y-auto pb-10">
+        <DesignDnaSection />
         <PanelSection title="Style" collapsible>
           <ArchetypeGallery current={theme.archetype} />
         </PanelSection>
@@ -90,20 +95,7 @@ export function ThemePanel() {
               ]}
             />
           </FieldRow>
-          <FieldRow label="Film grain" inline hint="Ultra-subtle, only on gradients and dark fields.">
-            <Segmented
-              value={theme.texture}
-              onChange={(v) => set((t) => void (t.texture = v))}
-              label="Film grain"
-              size="sm"
-              stretch={false}
-              options={[
-                { value: "archetype", label: "Auto" },
-                { value: "none", label: "Off" },
-                { value: "grain", label: "On" },
-              ]}
-            />
-          </FieldRow>
+          <GrainNotice />
         </PanelSection>
         <PanelSection title="Motion & decoration" collapsible>
           <FieldRow label="Motion">
@@ -472,4 +464,90 @@ function DividerFamily({ theme, set }: { theme: ThemeSpec; set: (recipe: (t: The
       </div>
     </FieldRow>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* design DNA (DES-§15.4, DES-§14.7, DES-§11.6)                        */
+/* ------------------------------------------------------------------ */
+
+const freshSeed = () => {
+  const b = new Uint32Array(1);
+  crypto.getRandomValues(b);
+  return b[0]! % 2_147_483_647;
+};
+
+/** The DNA card, the R1 boldness step (Bolder / Calmer), "Upgrade to design DNA" and "Apply my brand to this page". */
+function DesignDnaSection() {
+  const t = useT();
+  const store = useEditorStore();
+  const hasLook = useEditor((s) => !!s.doc.theme.look);
+  const check = useDesignCheck();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const remix = async (scope: "bolder" | "calmer" | "upgrade") => {
+    setBusy(scope);
+    try {
+      const remixDoc = await loadRemix();
+      const before = store.getState().doc;
+      const out = remixDoc(before, { seed: freshSeed(), scope });
+      const parsed = PageDoc.safeParse(out);
+      if (out === before || !parsed.success) throw new Error("no change");
+      store.getState().replaceDoc(parsed.data);
+      toast.success(t("design.diff.applied"), { action: { label: t("design.check.undo"), onClick: () => store.getState().undo() } });
+    } catch {
+      toast.error(t("design.theme.remixFailed"));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const brand = check?.context?.brand ?? null;
+  const brandSet = !!brand && !!(brand.accent || brand.pop || brand.pairing || Object.keys(brand.genes).length);
+  const applyMyBrand = () => {
+    if (!brand || !brandSet) {
+      toast(t("design.theme.brandEmpty"));
+      return;
+    }
+    const next = applyBrand(store.getState().doc, brand);
+    if (!next) {
+      toast(t("design.theme.brandSame"));
+      return;
+    }
+    store.getState().replaceDoc(next);
+    toast.success(t("design.theme.brandApplied"), { action: { label: t("design.check.undo"), onClick: () => store.getState().undo() } });
+  };
+
+  return (
+    <PanelSection title={t("design.dna.title")} collapsible>
+      <div className="grid gap-3">
+        <ThemeDna />
+        {hasLook ? (
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button variant="secondary" size="sm" className="h-8 gap-1.5" disabled={!!busy} onClick={() => void remix("calmer")}>
+              {busy === "calmer" ? <LoaderCircle className="animate-spin" /> : <Minus />}
+              {t("design.theme.calmer")}
+            </Button>
+            <Button variant="secondary" size="sm" className="h-8 gap-1.5" disabled={!!busy} onClick={() => void remix("bolder")}>
+              {busy === "bolder" ? <LoaderCircle className="animate-spin" /> : <Plus />}
+              {t("design.theme.bolder")}
+            </Button>
+          </div>
+        ) : (
+          <Button variant="secondary" size="sm" className="h-8 w-full gap-1.5" disabled={!!busy} onClick={() => void remix("upgrade")}>
+            {busy === "upgrade" ? <LoaderCircle className="animate-spin" /> : <Dna />}
+            {t("design.theme.upgrade")}
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" className="h-8 w-full justify-start gap-1.5 text-foreground/85" disabled={!check?.context} onClick={applyMyBrand}>
+          <Stamp />
+          {t("design.theme.applyBrand")}
+        </Button>
+      </div>
+    </PanelSection>
+  );
+}
+
+/** DS4: the texture control is retired; grain is no longer drawn (the value stays in old docs, ignored). */
+function GrainNotice() {
+  const t = useT();
+  return <p className="px-0.5 pt-1 text-[12px] leading-snug text-muted-foreground">{t("design.theme.grain")}</p>;
 }

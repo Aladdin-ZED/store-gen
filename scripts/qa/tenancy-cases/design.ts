@@ -209,4 +209,37 @@ export const actions: TrackActionCase[] = [
     victim: () => ["MA:skincare"],
     own: () => ["MA:skincare"],
   },
+  // step 12: the builder's design context (generation record, provenance, brand): A's page answers not_found
+  {
+    file: "src/lib/design/actions.ts",
+    name: "designContextAction",
+    area: "pages",
+    path: "/pages",
+    permission: ["pages.read"],
+    write: false,
+    victim: (fx) => [fx.A.page.live],
+    own: (fx) => [fx.B.page.live],
+  },
+  // step 12: the panel's novelty bands of a page and its Differentiate variants: A's page answers not_found
+  {
+    file: "src/lib/design/actions.ts",
+    name: "pageNoveltyAction",
+    area: "pages",
+    path: "/pages",
+    permission: ["pages.write"],
+    write: false,
+    victim: async (fx) => [{ pageId: fx.A.page.live, market: null, product: { category: null, name: "x", tagline: null }, candidates: await wizardCandidates() }],
+    own: async (fx) => [{ pageId: fx.B.page.live, market: null, product: { category: null, name: "x", tagline: null }, candidates: await wizardCandidates() }],
+  },
+  // step 12: the DNA card's brand lock (brand.write; the caller's own brand setting only, nothing of A is named)
+  {
+    file: "src/lib/design/actions.ts",
+    name: "setBrandLockAction",
+    area: "settings",
+    path: "/settings/brand",
+    permission: ["brand.write"],
+    write: true,
+    victim: () => [{ gene: "G9", on: true, value: "duotone" }],
+    own: () => [{ gene: "G9", on: false, value: null }],
+  },
 ];

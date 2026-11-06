@@ -22,6 +22,7 @@ import "@/lib/design/selftest-gates";
 import "@/lib/design/selftest-novelty";
 // step 11 (wizard and reveal): the alpha estimate, the DES-§14.2 pipeline on the fixtures, its degraded paths
 import "@/lib/design/selftest-wizard";
+import "@/lib/design/selftest-builder";
 import { registerDesignGroup } from "@/lib/design/selftest";
 
 // step 4 (section kit redraws): the 41 baseline documents against their goldens (--full; test:render runs the 14
