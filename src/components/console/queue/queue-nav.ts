@@ -5,6 +5,7 @@
  *   queueHref("fast", "argan", { r: reviewId })   // "/admin/queue?tab=fast&q=argan&r=…"
  */
 import type { QueueTab } from "@/lib/platform/queue-rules";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 export const TAB_ORDER: readonly QueueTab[] = ["review", "fast", "hold", "needs_info", "requests", "snoozed", "decided"];
 
@@ -14,5 +15,5 @@ export function queueHref(tab: QueueTab, q: string, extra: Record<string, string
   if (q) p.set("q", q);
   for (const [k, v] of Object.entries(extra)) if (v) p.set(k, v);
   const qs = p.toString();
-  return qs ? `/admin/queue?${qs}` : "/admin/queue";
+  return qs ? consoleUrl(`/queue?${qs}`) : consoleUrl("/queue");
 }

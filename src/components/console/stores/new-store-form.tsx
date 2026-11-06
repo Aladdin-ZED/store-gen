@@ -18,6 +18,7 @@ import type { MessageKey } from "@/lib/tenancy/types";
 import { cn } from "@/lib/utils";
 import { newOpId } from "../op";
 import { button, NoteField } from "../queue/decision-dialogs";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 type Mode = "landing" | "store" | "both";
 type HandleState = "idle" | "checking" | "ok" | "format" | "reserved" | "taken" | "protected" | "error";
@@ -141,7 +142,7 @@ export function NewStoreForm({
       });
       if (r.ok) {
         toast.success(t("console.store_new.created", { handle: r.data.handle }));
-        router.push(`/admin/stores/${r.data.storeId}`);
+        router.push(consoleUrl(`/stores/${r.data.storeId}`));
         return;
       }
       if (r.items?.length) {
@@ -300,7 +301,7 @@ export function NewStoreForm({
       />
 
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--c-hairline)] pt-4">
-        <button type="button" onClick={() => router.push("/admin/stores")} className={cn(button.base, button.ghost)}>
+        <button type="button" onClick={() => router.push(consoleUrl("/stores"))} className={cn(button.base, button.ghost)}>
           {t("console.dialog.cancel")}
         </button>
         <button type="submit" disabled={pending} className={cn(button.base, button.primary)}>

@@ -20,6 +20,7 @@ import { useGuarded } from "../guarded";
 import { PrefetchLink } from "../prefetch-link";
 import { ConsoleDialog } from "../queue/decision-dialogs";
 import { Banner, button, card, EmptyLine, Field, inputCls, ShownOnce, SwitchRow, td, th, type Tone, StatusText } from "../kit";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const STATE_TONE: Record<InviteCodeRow["state"], Tone> = { active: "ok", used_up: "neutral", expired: "neutral", revoked: "danger" };
 
@@ -91,7 +92,7 @@ export function InviteCodes({ rows, next, canDecide }: { rows: InviteCodeRow[]; 
       )}
       {next && (
         <div className="border-t border-[var(--c-hairline)] px-4 py-2.5 md:px-5">
-          <PrefetchLink href={`/admin/settings/signup?tab=codes&cursor=${encodeURIComponent(next)}`} className="text-[12.5px] font-medium text-[var(--c-brand-ink)] hover:underline">
+          <PrefetchLink href={consoleUrl(`/settings/signup?tab=codes&cursor=${encodeURIComponent(next)}`)} className="text-[12.5px] font-medium text-[var(--c-brand-ink)] hover:underline">
             {t("console.pager.older")}
           </PrefetchLink>
         </div>
@@ -201,7 +202,7 @@ export function Waitlist({ rows, next, canDecide, status }: { rows: WaitlistRow[
           {["waiting", "cap", "invited", "dropped", "all"].map((s) => (
             <PrefetchLink
               key={s}
-              href={`/admin/settings/signup?tab=waitlist&status=${s}`}
+              href={consoleUrl(`/settings/signup?tab=waitlist&status=${s}`)}
               aria-current={status === s ? "page" : undefined}
               className={cn("inline-flex h-8 items-center rounded-[var(--r-chip)] px-2.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] max-md:h-11", status === s ? "bg-[color-mix(in_oklch,var(--brand)_10%,var(--card))] font-medium shadow-[inset_0_0_0_1px_var(--brand)]" : "text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] hover:bg-accent")}
             >
@@ -272,7 +273,7 @@ export function Waitlist({ rows, next, canDecide, status }: { rows: WaitlistRow[
       )}
       {next && (
         <div className="border-t border-[var(--c-hairline)] px-4 py-2.5 md:px-5">
-          <PrefetchLink href={`/admin/settings/signup?tab=waitlist&status=${status}&cursor=${encodeURIComponent(next)}`} className="text-[12.5px] font-medium text-[var(--c-brand-ink)] hover:underline">
+          <PrefetchLink href={consoleUrl(`/settings/signup?tab=waitlist&status=${status}&cursor=${encodeURIComponent(next)}`)} className="text-[12.5px] font-medium text-[var(--c-brand-ink)] hover:underline">
             {t("console.pager.older")}
           </PrefetchLink>
         </div>

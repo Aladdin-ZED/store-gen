@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { Ago } from "../ago";
 import { ConsolePanel, QuietEmpty } from "../panel";
 import { PrefetchLink } from "../prefetch-link";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 type Severity = "info" | "success" | "warn" | "danger";
 
@@ -67,7 +68,7 @@ export function StaffFeed({ items, filter, older, newer, at }: { items: Notifica
     if ((q.filter ?? filter) === "unread") p.set("filter", "unread");
     if (q.before) p.set("before", String(q.before));
     const s = p.toString();
-    return s ? `/admin/notifications?${s}` : "/admin/notifications";
+    return s ? consoleUrl(`/notifications?${s}`) : consoleUrl("/notifications");
   };
 
   return (
@@ -121,7 +122,7 @@ export function StaffFeed({ items, filter, older, newer, at }: { items: Notifica
             const sev = severityOf(n.severity);
             const { icon: Icon, tone } = SEVERITY[sev];
             const unread = isUnread(n);
-            const relative = n.link?.startsWith("/admin") ?? false;
+            const relative = n.link?.startsWith(consoleUrl()) ?? false;
             return (
               <li key={n.id} className={cn("flex min-w-0 items-start gap-3 px-4 py-3 last:rounded-b-[var(--r-card)] max-sm:flex-wrap", unread && "bg-[color-mix(in_oklch,var(--brand)_4%,transparent)]")}>
                 <span className={cn("mt-0.5 inline-flex shrink-0 items-center gap-1 text-[11px] font-medium", tone)}>

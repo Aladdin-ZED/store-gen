@@ -50,6 +50,7 @@ import { queueHref } from "./queue-nav";
 import { nextAfterDecision, nextAfterMany, type QueueCommand, type QueueKeyRow } from "./queue-keymap";
 import { QueueRow } from "./queue-row";
 import { useQueueKeys } from "./use-queue-keys";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 type Layout = "split" | "sheet" | "phone";
 type PaneState = { state: "ok"; pane: ReviewPane } | { state: "loading" } | { state: "error"; ref: string };
@@ -327,8 +328,8 @@ export function QueueSplit({
     [decide, t],
   );
 
-  const openProfile = useCallback((row: QueueListRow) => router.push(`/admin/stores/${row.storeId}`), [router]);
-  const viewAs = useCallback((row: QueueListRow) => router.push(`/admin/stores/${row.storeId}?sheet=view-as`), [router]);
+  const openProfile = useCallback((row: QueueListRow) => router.push(consoleUrl(`/stores/${row.storeId}`)), [router]);
+  const viewAs = useCallback((row: QueueListRow) => router.push(consoleUrl(`/stores/${row.storeId}?sheet=view-as`)), [router]);
 
   /* ---------------- keyboard ---------------- */
 

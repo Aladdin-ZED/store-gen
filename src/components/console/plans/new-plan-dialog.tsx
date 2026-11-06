@@ -18,6 +18,7 @@ import { PLAN_ID_RE, PLAN_NAME_MAX, PLAN_STATUSES, type PlanStatus } from "@/lib
 import { cn } from "@/lib/utils";
 import { useGuarded } from "../guarded";
 import { button, ConsoleDialog } from "../queue/decision-dialogs";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const field =
   "h-[var(--ctl)] w-full rounded-[var(--r-control)] bg-background px-3 text-[13px] shadow-[inset_0_0_0_1px_var(--input)] outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--ring),0_0_0_3px_color-mix(in_oklch,var(--ring)_22%,transparent)] aria-[invalid=true]:shadow-[inset_0_0_0_1px_var(--c-danger-ink)] max-md:h-11";
@@ -58,7 +59,7 @@ function NewPlanDialog({ plans, onClose }: { plans: { id: string; name: string }
       (d) => {
         toast.success(t("console.plans.created", { name: name.trim() }));
         onClose();
-        router.push(`/admin/plans/${d.id}`);
+        router.push(consoleUrl(`/plans/${d.id}`));
       },
     );
   };

@@ -13,6 +13,7 @@ import type { PeoplePage, PersonRow } from "@/lib/platform/people";
 import { cn } from "@/lib/utils";
 import { Ago } from "../ago";
 import { TINT_INK } from "../tints";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const tr = translator(CONSOLE_LOCALE);
 const card = "rounded-[var(--r-card)] bg-card shadow-[inset_0_0_0_1px_var(--c-hairline)]";
@@ -54,7 +55,7 @@ function Who({ row }: { row: PersonRow }) {
   return (
     <span className="grid min-w-0 gap-px">
       <span className="flex min-w-0 items-center gap-1.5">
-        <PrefetchLink href={`/admin/users/${row.id}`} className="truncate rounded-[4px] font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+        <PrefetchLink href={consoleUrl(`/users/${row.id}`)} className="truncate rounded-[4px] font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
           {row.deleted ? tr("console.people.deleted") : row.name || tr("console.people.no_name")}
         </PrefetchLink>
         {row.banned && <BannedBadge reason={row.banned.reason} />}
@@ -74,8 +75,8 @@ const Th = ({ children, className }: { children?: React.ReactNode; className?: s
 
 export function PeopleList({ page, query, hasFilters }: { page: PeoplePage; query: string; hasFilters: boolean }) {
   const rows = page.rows;
-  const nextHref = page.next ? `/admin/users?${new URLSearchParams([...new URLSearchParams(query).entries()].filter(([k]) => k !== "cursor").concat([["cursor", page.next]])).toString()}` : null;
-  const firstHref = new URLSearchParams(query).has("cursor") ? `/admin/users?${new URLSearchParams([...new URLSearchParams(query).entries()].filter(([k]) => k !== "cursor")).toString()}` : null;
+  const nextHref = page.next ? consoleUrl(`/users?${new URLSearchParams([...new URLSearchParams(query).entries()].filter(([k]) => k !== "cursor").concat([["cursor", page.next]])).toString()}`) : null;
+  const firstHref = new URLSearchParams(query).has("cursor") ? consoleUrl(`/users?${new URLSearchParams([...new URLSearchParams(query).entries()].filter(([k]) => k !== "cursor")).toString()}`) : null;
 
   return (
     <div className="grid gap-3">
@@ -84,7 +85,7 @@ export function PeopleList({ page, query, hasFilters }: { page: PeoplePage; quer
         <div className={cn(card, "grid justify-items-start gap-1 px-5 py-10")}>
           <p className="text-[13px] font-medium">{tr(hasFilters ? "console.people.empty.filtered" : "console.people.empty.none")}</p>
           {hasFilters && (
-            <PrefetchLink href="/admin/users" className={cn(link, "mt-1 text-[12px]")}>
+            <PrefetchLink href={consoleUrl("/users")} className={cn(link, "mt-1 text-[12px]")}>
               {tr("console.people.clear")}
             </PrefetchLink>
           )}

@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { Ago } from "../ago";
 import { PrefetchLink } from "../prefetch-link";
 import { button } from "../queue/decision-dialogs";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 export function PhoneLookup() {
   const t = useT();
@@ -89,7 +90,7 @@ export function PhoneLookup() {
               {result.stores.map((s) => (
                 <li key={s.store.id} className="grid gap-1 px-3.5 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4">
                   <span className="flex min-w-0 items-baseline gap-1.5">
-                    <PrefetchLink href={`/admin/stores/${s.store.id}/orders`} className="truncate rounded-[4px] text-[13px] font-medium text-[var(--c-brand-ink)] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+                    <PrefetchLink href={consoleUrl(`/stores/${s.store.id}/orders`)} className="truncate rounded-[4px] text-[13px] font-medium text-[var(--c-brand-ink)] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
                       {s.store.name}
                     </PrefetchLink>
                     {s.store.handle && (

@@ -34,6 +34,7 @@ import { bandTint, TINT_INK, TINT_SOFT, TINT_STROKE } from "../tints";
 import { button, Kbd, NoteField, useRequestSummary } from "./decision-dialogs";
 import { Chip, MarkTerms } from "./queue-row";
 import styles from "../shell/console.module.css";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const LOWER: Record<SignupBand, SignupBand | null> = { fast: null, review: "fast", hold: "review", reject_candidate: "hold" };
 /** the evidence keys the risk score stores (src/lib/platform/signup-risk.ts); any other key shows as itself */
@@ -334,7 +335,7 @@ function Preview({ url, expiresAt, onReload }: { url: string; expiresAt: string;
 function Evidence({ d, onReload }: { d: ReviewDetail; onReload(): void }) {
   const t = useT();
   const e = d.evidence;
-  const to = `/admin/stores/${d.store.id}#pages`;
+  const to = consoleUrl(`/stores/${d.store.id}#pages`);
   const link = "outline-none rounded-[5px] focus-visible:ring-2 focus-visible:ring-[var(--ring)] hover:opacity-80";
   const design = e.design ? designLine(t, e.design) : null;
   return (
@@ -393,7 +394,7 @@ function Linked({ d }: { d: ReviewDetail }) {
         {d.linked.map((a) => (
           <li key={a.userId} className="grid gap-1.5 rounded-[var(--r-control)] p-2.5 shadow-[inset_0_0_0_1px_var(--c-hairline)]">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <PrefetchLink href={`/admin/users/${a.userId}`} className="min-w-0 truncate rounded-[4px] text-[13px] font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+              <PrefetchLink href={consoleUrl(`/users/${a.userId}`)} className="min-w-0 truncate rounded-[4px] text-[13px] font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
                 <bdi dir="ltr">{a.email}</bdi>
               </PrefetchLink>
               {a.banned && <Chip tint="crimson">{t("console.queue.banned")}</Chip>}
@@ -409,7 +410,7 @@ function Linked({ d }: { d: ReviewDetail }) {
               <ul className="flex flex-wrap gap-x-3 gap-y-1">
                 {a.stores.map((s) => (
                   <li key={s.id} className="flex min-w-0 items-center gap-1.5 text-[12px]">
-                    <PrefetchLink href={`/admin/stores/${s.id}`} className="min-w-0 truncate rounded-[4px] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+                    <PrefetchLink href={consoleUrl(`/stores/${s.id}`)} className="min-w-0 truncate rounded-[4px] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
                       {s.name} <bdi dir="ltr" className="font-mono text-muted-foreground">@{s.handle}</bdi>
                     </PrefetchLink>
                     <StatusPill status={s.status} size="sm" />

@@ -23,6 +23,7 @@ import { useGuarded } from "../guarded";
 import { PrefetchLink } from "../prefetch-link";
 import { ConsoleDialog } from "../queue/decision-dialogs";
 import { Banner, button, card, inputCls, Meter, SettingsCard, StatusText } from "../kit";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const mono = "font-mono text-[12px]";
 
@@ -204,7 +205,7 @@ export function Checks({ move, names, canManage, siteKey, nonce, root }: { move:
       {move.allPassed && (
         <Banner tone="ok" action={canManage ? <SwitchSignup /> : undefined}>
           {t("console.domains.all_passed")}{" "}
-          <PrefetchLink href="/admin/settings/signup?tab=mode#ceilings" className="font-medium text-[var(--c-brand-ink)] underline-offset-2 hover:underline">
+          <PrefetchLink href={consoleUrl("/settings/signup?tab=mode#ceilings")} className="font-medium text-[var(--c-brand-ink)] underline-offset-2 hover:underline">
             {t("console.domains.ceilings_link")}
           </PrefetchLink>
         </Banner>

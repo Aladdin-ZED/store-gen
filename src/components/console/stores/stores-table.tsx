@@ -30,6 +30,7 @@ import { useScreenKeys } from "../shell/context";
 import { healthTint } from "../tints";
 import { StoresBulkBar } from "./bulk-bar";
 import { hasFilters } from "./filters";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const GROUPS = Object.keys(HEALTH_CAPS) as HealthGroup[];
 
@@ -99,7 +100,7 @@ function StoreCell({ row }: { row: StoreListRow }) {
       <Monogram name={row.name} seed={row.id} size={32} />
       <span className="grid min-w-0 gap-px">
         <span className="flex min-w-0 items-center gap-1.5">
-          <PrefetchLink href={`/admin/stores/${row.id}`} className="min-w-0 truncate rounded-[3px] text-[13px] font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]" onClick={(e) => e.stopPropagation()}>
+          <PrefetchLink href={consoleUrl(`/stores/${row.id}`)} className="min-w-0 truncate rounded-[3px] text-[13px] font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]" onClick={(e) => e.stopPropagation()}>
             {row.name}
           </PrefetchLink>
           {row.internal && <Chip tint="neutral">{t("console.stores.internal")}</Chip>}
@@ -188,7 +189,7 @@ export function StoresTable({
     if (e.target !== e.currentTarget) return;
     if (e.key === "Enter") {
       e.preventDefault();
-      router.push(`/admin/stores/${row.id}`);
+      router.push(consoleUrl(`/stores/${row.id}`));
     } else if (e.key.toLowerCase() === "x" && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault();
       toggle(row.id);
@@ -211,7 +212,7 @@ export function StoresTable({
             </button>
           </div>
         ) : (
-          <QuietEmpty text={t("console.stores.empty.none")} action={canInvite ? { href: "/admin/settings/signup?tab=codes&new=1", label: t("console.stores.empty.invite") } : null} />
+          <QuietEmpty text={t("console.stores.empty.none")} action={canInvite ? { href: consoleUrl("/settings/signup?tab=codes&new=1"), label: t("console.stores.empty.invite") } : null} />
         )}
       </div>
     );
@@ -228,7 +229,7 @@ export function StoresTable({
           <li
             key={row.id}
             tabIndex={0}
-            onClick={() => router.push(`/admin/stores/${row.id}`)}
+            onClick={() => router.push(consoleUrl(`/stores/${row.id}`))}
             onKeyDown={(e) => onRowKey(e, row)}
             className={cn("grid gap-2 rounded-[var(--r-card)] bg-card p-3 shadow-[inset_0_0_0_1px_var(--c-hairline)] outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--ring)]", selected.has(row.id) && "bg-[color-mix(in_oklch,var(--brand)_6%,var(--card))]")}
           >
@@ -291,12 +292,12 @@ export function StoresTable({
                   aria-selected={on}
                   onClick={(e) => {
                     if ((e.target as HTMLElement).closest("[data-row-check],a")) return;
-                    router.push(`/admin/stores/${row.id}`);
+                    router.push(consoleUrl(`/stores/${row.id}`));
                   }}
                   onKeyDown={(e) => onRowKey(e, row)}
                   onMouseEnter={() => {
                     try {
-                      router.prefetch(`/admin/stores/${row.id}`);
+                      router.prefetch(consoleUrl(`/stores/${row.id}`));
                     } catch {
                       // prefetching is an optimisation only
                     }

@@ -19,6 +19,7 @@ import { ConsolePanel, QuietEmpty } from "../panel";
 import { PrefetchLink } from "../prefetch-link";
 import { useConsolePulse } from "../shell/pulse-provider";
 import styles from "../shell/console.module.css";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const ICON: Record<FeedAction, LucideIcon> = {
   "store.created": StoreIcon,
@@ -85,7 +86,7 @@ export function ActivityFeedPanel({ feed, at }: { feed: ActivityFeed; at: string
                     <p className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
                       {r.store && (
                         <>
-                          <PrefetchLink href={`/admin/stores/${r.store.id}`} className="min-w-0 truncate rounded-[var(--r-chip)] outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+                          <PrefetchLink href={consoleUrl(`/stores/${r.store.id}`)} className="min-w-0 truncate rounded-[var(--r-chip)] outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
                             {r.store.handle ? <bdi dir="ltr">@{r.store.handle}</bdi> : r.store.name || <bdi dir="ltr">{r.store.id}</bdi>}
                           </PrefetchLink>
                           <span aria-hidden="true">·</span>

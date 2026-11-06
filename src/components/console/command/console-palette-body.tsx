@@ -39,6 +39,7 @@ import { formatMoney } from "@/lib/markets/money";
 import { consoleIcon } from "../icons";
 import { useConsoleShell } from "../shell/context";
 import styles from "../shell/console.module.css";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const ORDER_ID = /^[A-Z0-9]{2,8}-[A-Z0-9]{4,12}$/;
 const ULID = /^[0-9A-Z]{26}$/;
@@ -150,22 +151,22 @@ export function ConsolePaletteBody({ mode, onMode, close }: { mode: "default" | 
     if (!pattern) return null;
     switch (pattern.kind) {
       case "handle":
-        return data?.stores.find((s) => s.handle === pattern.value)?.href ?? `/admin/stores?q=${encodeURIComponent(`@${pattern.value}`)}`;
+        return data?.stores.find((s) => s.handle === pattern.value)?.href ?? consoleUrl(`/stores?q=${encodeURIComponent(`@${pattern.value}`)}`);
       case "order":
-        return `/admin/orders?id=${encodeURIComponent(pattern.value)}`;
+        return consoleUrl(`/orders?id=${encodeURIComponent(pattern.value)}`);
       case "id":
-        return data?.stores[0]?.href ?? data?.people[0]?.href ?? `/admin/stores/${pattern.value}`;
+        return data?.stores[0]?.href ?? data?.people[0]?.href ?? consoleUrl(`/stores/${pattern.value}`);
       case "email":
-        return data?.people[0]?.href ?? `/admin/users?q=${encodeURIComponent(pattern.value)}`;
+        return data?.people[0]?.href ?? consoleUrl(`/users?q=${encodeURIComponent(pattern.value)}`);
     }
   })();
 
   const actions: { id: string; label: string; icon: LucideIcon; run(): void; show: boolean }[] = [
-    { id: "approve_next", label: t("console.cmdk.action.approve_next"), icon: ListChecksIcon, show: shell.can("signups.decide"), run: () => go("/admin/queue?tab=review&next=1") },
+    { id: "approve_next", label: t("console.cmdk.action.approve_next"), icon: ListChecksIcon, show: shell.can("signups.decide"), run: () => go(consoleUrl("/queue?tab=review&next=1")) },
     { id: "view_as", label: t("console.cmdk.action.view_as"), icon: EyeIcon, show: shell.can("stores.impersonate"), run: () => (setQuery(""), onMode("view_as")) },
-    { id: "invite_code", label: t("console.cmdk.action.invite_code"), icon: KeyRoundIcon, show: shell.can("signups.decide"), run: () => go("/admin/settings/signup?tab=codes&new=1") },
-    { id: "invite_staff", label: t("console.cmdk.action.invite_staff"), icon: UserPlusIcon, show: shell.can("staff.manage"), run: () => go("/admin/security/staff?invite=1") },
-    { id: "kill", label: t("console.cmdk.action.kill"), icon: OctagonPauseIcon, show: shell.can("console.read"), run: () => go("/admin/flags?tab=kill") },
+    { id: "invite_code", label: t("console.cmdk.action.invite_code"), icon: KeyRoundIcon, show: shell.can("signups.decide"), run: () => go(consoleUrl("/settings/signup?tab=codes&new=1")) },
+    { id: "invite_staff", label: t("console.cmdk.action.invite_staff"), icon: UserPlusIcon, show: shell.can("staff.manage"), run: () => go(consoleUrl("/security/staff?invite=1")) },
+    { id: "kill", label: t("console.cmdk.action.kill"), icon: OctagonPauseIcon, show: shell.can("console.read"), run: () => go(consoleUrl("/flags?tab=kill")) },
     { id: "density", label: t("console.cmdk.action.density"), icon: Rows3Icon, show: true, run: () => (close(), shell.toggleDensity()) },
     { id: "theme", label: t("console.cmdk.action.theme"), icon: SunMoonIcon, show: true, run: () => (close(), shell.toggleTheme()) },
     { id: "shortcuts", label: t("console.cmdk.action.shortcuts"), icon: KeyboardIcon, show: true, run: () => (close(), shell.openShortcuts()) },
@@ -250,7 +251,7 @@ export function ConsolePaletteBody({ mode, onMode, close }: { mode: "default" | 
 
         {order && (
           <Command.Group heading={t("console.cmdk.group.order")} className={groupClass}>
-            <Command.Item value={`order ${order.id}`} onSelect={() => go(`/admin/orders?id=${encodeURIComponent(order.id)}`)} className={itemClass}>
+            <Command.Item value={`order ${order.id}`} onSelect={() => go(consoleUrl(`/orders?id=${encodeURIComponent(order.id)}`))} className={itemClass}>
               <Row icon={ReceiptTextIcon} hint={t("console.cmdk.order", { store: order.store.handle ? `@${order.store.handle}` : order.store.name, total: formatMoney(order.totalCents / 100, order.currency, "en") })}>
                 <bdi dir="ltr" className="font-mono text-[12px]">
                   {order.id}

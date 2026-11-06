@@ -14,6 +14,7 @@ import { formatMoney } from "@/lib/markets/money";
 import type { OrderCard } from "@/lib/platform/order-lookup";
 import { cn } from "@/lib/utils";
 import { absoluteTime } from "../format";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const tr = translator(CONSOLE_LOCALE);
 const label = (key: MessageKey, raw: string) => {
@@ -43,7 +44,7 @@ export function LookupOrderCard({ order }: { order: OrderCard }) {
             {order.isTest && <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-secondary px-2 text-[11px] font-medium text-muted-foreground">{tr("console.lookup.test")}</span>}
           </span>
           <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-[12.5px] text-muted-foreground">
-            <PrefetchLink href={`/admin/stores/${order.store.id}`} className="truncate rounded-[4px] font-medium text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+            <PrefetchLink href={consoleUrl(`/stores/${order.store.id}`)} className="truncate rounded-[4px] font-medium text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
               {order.store.name}
             </PrefetchLink>
             {order.store.handle && (

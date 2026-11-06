@@ -23,6 +23,7 @@ import { PrefetchLink } from "../prefetch-link";
 import { useConsoleShell, useHydrated, useNow } from "./context";
 import { useConsolePulse } from "./pulse-provider";
 import styles from "./console.module.css";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 export interface TopbarFacts {
   /** how stores are addressed right now (core §C.1): path mode on the platform host, or subdomains of `root` */
@@ -117,7 +118,7 @@ function Bell() {
   const { pulse } = useConsolePulse();
   const unread = pulse?.unread ?? 0;
   return (
-    <PrefetchLink href="/admin/notifications" aria-label={unread > 0 ? t("console.bell.unread", { count: unread }) : t("console.bell.label")} className={iconButton}>
+    <PrefetchLink href={consoleUrl("/notifications")} aria-label={unread > 0 ? t("console.bell.unread", { count: unread }) : t("console.bell.label")} className={iconButton}>
       <BellIcon aria-hidden="true" className="size-4" />
       {unread > 0 && (
         <span aria-hidden="true" className="num absolute -top-0.5 -end-0.5 min-w-4 rounded-full bg-brand px-1 text-center text-[10px] leading-4 font-semibold text-brand-foreground ring-2 ring-background max-md:top-1.5 max-md:end-1.5">

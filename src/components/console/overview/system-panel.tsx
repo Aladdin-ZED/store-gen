@@ -16,6 +16,7 @@ import { durationText } from "../format";
 import { ConsolePanel, PanelError } from "../panel";
 import { useNow } from "../shell/context";
 import { useConsolePulse } from "../shell/pulse-provider";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 type State = "ok" | "warn" | "bad" | "none";
 
@@ -53,7 +54,7 @@ export function SystemPanel({ data, at, canOpen }: { data: SystemSummary; at: st
   const h = data.health;
 
   return (
-    <ConsolePanel title={t("console.system.title")} at={at} action={canOpen ? { href: "/admin/health", label: t("console.system.open") } : null}>
+    <ConsolePanel title={t("console.system.title")} at={at} action={canOpen ? { href: consoleUrl("/health"), label: t("console.system.open") } : null}>
       <ul className="py-1.5">
         {m.state === "ok" && (
           <>

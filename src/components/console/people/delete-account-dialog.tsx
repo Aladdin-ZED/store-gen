@@ -19,6 +19,7 @@ import { useGuarded } from "../guarded";
 import { PrefetchLink } from "../prefetch-link";
 import { button, ConsoleDialog, NoteField } from "../queue/decision-dialogs";
 import type { BlockingStore } from "./user-actions";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 export function DeleteAccountDialog({ user, blocking: initial, onClose }: { user: { id: string; name: string; email: string }; blocking: BlockingStore[]; onClose(): void }) {
   const t = useT();
@@ -42,7 +43,7 @@ export function DeleteAccountDialog({ user, blocking: initial, onClose }: { user
         if (d.deleted) {
           toast.success(t("console.users.delete.done"));
           onClose();
-          router.push("/admin/users");
+          router.push(consoleUrl("/users"));
           router.refresh();
         } else if (d.refusal === "owns_store") setBlocking(d.stores);
         else setStaff(true);
@@ -72,7 +73,7 @@ export function DeleteAccountDialog({ user, blocking: initial, onClose }: { user
             <ul className="grid gap-1">
               {blocking.map((s) => (
                 <li key={s.id} className="flex min-w-0 items-center gap-2 text-[12.5px]">
-                  <PrefetchLink href={`/admin/stores/${s.id}`} className="inline-flex min-w-0 items-center gap-1 rounded-[4px] font-medium text-[var(--c-brand-ink)] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)] max-md:min-h-11">
+                  <PrefetchLink href={consoleUrl(`/stores/${s.id}`)} className="inline-flex min-w-0 items-center gap-1 rounded-[4px] font-medium text-[var(--c-brand-ink)] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)] max-md:min-h-11">
                     <span className="truncate">{s.name}</span>
                     <ArrowUpRightIcon aria-hidden="true" className="size-3 shrink-0 rtl:-scale-x-100" />
                   </PrefetchLink>

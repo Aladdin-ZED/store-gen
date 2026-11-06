@@ -42,6 +42,7 @@ import { PrefetchLink } from "../prefetch-link";
 import { button, Kbd } from "../queue/decision-dialogs";
 import { useConsoleShell, useNow } from "../shell/context";
 import { ExportDialog } from "./export-panel";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 export interface ProfileGrants {
   viewAs: boolean;
@@ -151,7 +152,7 @@ export function ProfileHeader({
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <StatusMenu status={s.status} items={lifecycle} onPick={openSheet} reasonCode={s.statusReason} />
               <ModeBadge mode={s.mode} />
-              <PrefetchLink href={`/admin/plans/${s.plan.id}`} className={cn(chip, "bg-secondary text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-[var(--ring)]")} title={t("console.profile.plan_hint")}>
+              <PrefetchLink href={consoleUrl(`/plans/${s.plan.id}`)} className={cn(chip, "bg-secondary text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-[var(--ring)]")} title={t("console.profile.plan_hint")}>
                 {s.plan.name ?? s.plan.id}
               </PrefetchLink>
               {s.internal && <span className={cn(chip, "bg-[color-mix(in_oklch,var(--brand)_10%,transparent)] text-[var(--c-brand-ink)]")}>{t("console.profile.internal")}</span>}
@@ -167,7 +168,7 @@ export function ProfileHeader({
                 <>
                   <span className="min-w-0">
                     {t("console.profile.owner")}{" "}
-                    <PrefetchLink href={`/admin/users/${owner.userId}`} className="font-medium text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+                    <PrefetchLink href={consoleUrl(`/users/${owner.userId}`)} className="font-medium text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
                       {owner.firstName}
                     </PrefetchLink>{" "}
                     <bdi dir="ltr" className="break-all">
@@ -184,7 +185,7 @@ export function ProfileHeader({
         <div className="flex flex-wrap items-center gap-2 lg:justify-end">
           <HealthHover health={header.health} />
           {header.openRequests > 0 && (
-            <PrefetchLink href={`/admin/queue?tab=requests&q=${encodeURIComponent(s.handle ?? s.id)}`} className={cn(chip, "h-[var(--ctl)] bg-[var(--c-warn-soft)] px-2.5 text-[12px] text-foreground outline-none hover:bg-[color-mix(in_oklch,var(--c-warn-soft)_80%,var(--foreground)_6%)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] max-md:h-11")}>
+            <PrefetchLink href={consoleUrl(`/queue?tab=requests&q=${encodeURIComponent(s.handle ?? s.id)}`)} className={cn(chip, "h-[var(--ctl)] bg-[var(--c-warn-soft)] px-2.5 text-[12px] text-foreground outline-none hover:bg-[color-mix(in_oklch,var(--c-warn-soft)_80%,var(--foreground)_6%)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] max-md:h-11")}>
               <InboxIcon aria-hidden="true" className="size-3.5" />
               {t("console.profile.requests", { count: header.openRequests })}
             </PrefetchLink>

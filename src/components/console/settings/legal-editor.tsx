@@ -20,6 +20,7 @@ import { useGuarded } from "../guarded";
 import { PrefetchLink } from "../prefetch-link";
 import { ConsoleDialog } from "../queue/decision-dialogs";
 import { Banner, button, card, Field, inputCls, StatusText, SwitchRow, TypedConfirm, typedOk } from "../kit";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 export interface LegalEditorDoc {
   id: string | null;
@@ -56,7 +57,7 @@ export function LegalEditor({ doc }: { doc: LegalEditorDoc }) {
   const dirty = JSON.stringify(v) !== JSON.stringify(init);
   const store = !doc.platform;
   const preview = useMemo(() => renderMarkdownLite(v.body, store ? { placeholders: { fields: POLICY_TEMPLATE_FIELDS } } : {}), [v.body, store]);
-  const back = "/admin/settings/legal";
+  const back = consoleUrl("/settings/legal");
 
   const insert = (field: string) => {
     const el = area.current;
@@ -82,7 +83,7 @@ export function LegalEditor({ doc }: { doc: LegalEditorDoc }) {
       (d) => {
         g.reset();
         toast.success(t("console.legal.saved", { version: d.version }));
-        router.push(`/admin/settings/legal?doc=${d.id}`);
+        router.push(consoleUrl(`/settings/legal?doc=${d.id}`));
         router.refresh();
       },
     );

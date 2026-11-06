@@ -10,8 +10,9 @@
  *   resolveProfileTab(["risk"])           // { kind: "deferred", tab: "risk", strip: "risk", release: "R2" }
  *   profileHref(id, "activity", "view=timeline")   // "/admin/stores/<id>/activity?view=timeline"
  */
+import { consoleUrl } from "@/lib/platform/console-url";
 
-export const PROFILE_TABS = ["overview", "orders", "team", "activity", "usage", "notes"] as const;
+export const PROFILE_TABS =["overview", "orders", "team", "activity", "usage", "notes"] as const;
 export type ProfileTab = (typeof PROFILE_TABS)[number];
 
 /** The ten Overview strips (src/lib/platform/profile/overview-strips.ts `STRIPS`, in the same order). */
@@ -60,7 +61,7 @@ export function visibleTabs(canNotes: boolean): ProfileTab[] {
 
 /** A tab's path; the overview is the profile's own path. */
 export function profileHref(storeId: string, tab: ProfileTab = "overview", search = ""): string {
-  const base = `/admin/stores/${storeId}${tab === "overview" ? "" : `/${tab}`}`;
+  const base = tab === "overview" ? consoleUrl(`/stores/${storeId}`) : consoleUrl(`/stores/${storeId}/${tab}`);
   return search ? `${base}?${search.replace(/^\?/, "")}` : base;
 }
 
@@ -69,7 +70,7 @@ export const stripAnchor = (strip: ProfileStrip): string => `strip-${strip}`;
 
 /** The tab a pathname shows (`/admin/stores/<id>/team` → "team"), the overview for the bare profile path. */
 export function tabOfPath(pathname: string, storeId: string): ProfileTab | DeferredTab | null {
-  const rest = pathname.split(`/admin/stores/${storeId}`)[1];
+  const rest = pathname.split(consoleUrl(`/stores/${storeId}`))[1];
   if (rest === undefined) return null;
   const seg = rest.replace(/^\/+/, "").split(/[/?#]/)[0] ?? "";
   if (!seg) return "overview";

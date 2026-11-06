@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { PanelError, PanelUnavailable } from "../panel";
 import { PrefetchLink } from "../prefetch-link";
 import { Banner, button, card, Field, inputCls, Meter, SaveBar, Segmented, SettingsCard, StatusText, SwitchRow, td, th, TypedConfirm, typedOk, useSave } from "../kit";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 type Mode = "closed" | "invite" | "approval" | "waitlist" | "open";
 const MODES: readonly Mode[] = ["closed", "invite", "approval", "waitlist", "open"];
@@ -197,7 +198,7 @@ function CeilingsCard({ view }: { view: SignupSettingsView }) {
           <ul className="mt-2 grid gap-1">
             {media.data.largest.map((x) => (
               <li key={x.storeId} className="flex justify-between gap-3">
-                <PrefetchLink href={`/admin/stores/${x.storeId}`} className="min-w-0 truncate text-[var(--c-brand-ink)] hover:underline">
+                <PrefetchLink href={consoleUrl(`/stores/${x.storeId}`)} className="min-w-0 truncate text-[var(--c-brand-ink)] hover:underline">
                   {x.name} {x.handle && <bdi dir="ltr">@{x.handle}</bdi>}
                 </PrefetchLink>
                 <span className="num shrink-0 text-muted-foreground">{Math.max(1, Math.round(x.bytes / MIB)).toLocaleString("en-US")} MiB</span>

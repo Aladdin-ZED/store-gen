@@ -16,6 +16,7 @@ import type { PlatformPermission, Release } from "@/lib/auth/permissions";
 import type { MessageKey } from "@/lib/i18n/admin";
 import type { ConsolePulse } from "@/lib/platform/pulse-rules";
 import type { PlatformCtx } from "@/lib/tenancy/types";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 /** A lucide-react icon name without the "Icon" suffix; the sidebar maps it to the component. */
 export type ConsoleIconName =
@@ -73,54 +74,54 @@ export const CONSOLE_NAV: readonly ConsoleNavGroup[] = [
     id: "pulse",
     label: "console.nav.group.pulse",
     items: [
-      { id: "overview", label: "console.nav.overview", href: "/admin", icon: "Activity", permission: "console.read", release: "R1", chord: "o" },
-      { id: "approvals", label: "console.nav.approvals", href: "/admin/queue", icon: "ListChecks", permission: "console.read", release: "R1", badge: "queue", chord: "a" },
-      { id: "notifications", label: "console.nav.notifications", href: "/admin/notifications", icon: "Bell", permission: "console.read", release: "R1", badge: "unread", chord: "n" },
-      { id: "inbox", label: "console.nav.inbox", href: "/admin/inbox", icon: "Inbox", permission: "tickets.handle", release: "R3" },
+      { id: "overview", label: "console.nav.overview", href: consoleUrl(), icon: "Activity", permission: "console.read", release: "R1", chord: "o" },
+      { id: "approvals", label: "console.nav.approvals", href: consoleUrl("/queue"), icon: "ListChecks", permission: "console.read", release: "R1", badge: "queue", chord: "a" },
+      { id: "notifications", label: "console.nav.notifications", href: consoleUrl("/notifications"), icon: "Bell", permission: "console.read", release: "R1", badge: "unread", chord: "n" },
+      { id: "inbox", label: "console.nav.inbox", href: consoleUrl("/inbox"), icon: "Inbox", permission: "tickets.handle", release: "R3" },
     ],
   },
   {
     id: "stores",
     label: "console.nav.group.stores",
     items: [
-      { id: "stores", label: "console.nav.stores", href: "/admin/stores", icon: "Store", permission: "console.read", release: "R1", chord: "s" },
-      { id: "people", label: "console.nav.people", href: "/admin/users", icon: "Users", permission: "console.read", release: "R1", chord: "u" },
-      { id: "orders", label: "console.nav.orders", href: "/admin/orders", icon: "ScanSearch", permission: "console.read", release: "R1", chord: "r" },
-      { id: "abuse", label: "console.nav.abuse", href: "/admin/abuse", icon: "ShieldAlert", permission: "abuse.handle", release: "R3" },
+      { id: "stores", label: "console.nav.stores", href: consoleUrl("/stores"), icon: "Store", permission: "console.read", release: "R1", chord: "s" },
+      { id: "people", label: "console.nav.people", href: consoleUrl("/users"), icon: "Users", permission: "console.read", release: "R1", chord: "u" },
+      { id: "orders", label: "console.nav.orders", href: consoleUrl("/orders"), icon: "ScanSearch", permission: "console.read", release: "R1", chord: "r" },
+      { id: "abuse", label: "console.nav.abuse", href: consoleUrl("/abuse"), icon: "ShieldAlert", permission: "abuse.handle", release: "R3" },
     ],
   },
   {
     id: "platform",
     label: "console.nav.group.platform",
     items: [
-      { id: "plans", label: "console.nav.plans", href: "/admin/plans", icon: "Layers", permission: "console.read", release: "R1", chord: "p" },
-      { id: "flags", label: "console.nav.flags", href: "/admin/flags", icon: "ToggleRight", permission: "console.read", release: "R1", badge: "kill", chord: "f" },
-      { id: "domains", label: "console.nav.domains", href: "/admin/domains", icon: "Globe", permission: "domains.manage", release: "R1", chord: "d" },
-      { id: "ai", label: "console.nav.ai", href: "/admin/ai", icon: "Sparkles", permission: "ai.platform", release: "R1" },
-      { id: "health", label: "console.nav.health", href: "/admin/health", icon: "HeartPulse", permission: "health.read", release: "R1", badge: "alarms", chord: "h" },
-      { id: "backups", label: "console.nav.backups", href: "/admin/settings/backups", icon: "DatabaseBackup", permission: "backups.manage", release: "R1" },
-      { id: "broadcasts", label: "console.nav.broadcasts", href: "/admin/broadcasts", icon: "Megaphone", permission: "notify.stores", release: "R3" },
-      { id: "analytics", label: "console.nav.analytics", href: "/admin/analytics", icon: "ChartNoAxesCombined", permission: "analytics.read", release: "R3" },
+      { id: "plans", label: "console.nav.plans", href: consoleUrl("/plans"), icon: "Layers", permission: "console.read", release: "R1", chord: "p" },
+      { id: "flags", label: "console.nav.flags", href: consoleUrl("/flags"), icon: "ToggleRight", permission: "console.read", release: "R1", badge: "kill", chord: "f" },
+      { id: "domains", label: "console.nav.domains", href: consoleUrl("/domains"), icon: "Globe", permission: "domains.manage", release: "R1", chord: "d" },
+      { id: "ai", label: "console.nav.ai", href: consoleUrl("/ai"), icon: "Sparkles", permission: "ai.platform", release: "R1" },
+      { id: "health", label: "console.nav.health", href: consoleUrl("/health"), icon: "HeartPulse", permission: "health.read", release: "R1", badge: "alarms", chord: "h" },
+      { id: "backups", label: "console.nav.backups", href: consoleUrl("/settings/backups"), icon: "DatabaseBackup", permission: "backups.manage", release: "R1" },
+      { id: "broadcasts", label: "console.nav.broadcasts", href: consoleUrl("/broadcasts"), icon: "Megaphone", permission: "notify.stores", release: "R3" },
+      { id: "analytics", label: "console.nav.analytics", href: consoleUrl("/analytics"), icon: "ChartNoAxesCombined", permission: "analytics.read", release: "R3" },
     ],
   },
   {
     id: "settings",
     label: "console.nav.group.settings",
     items: [
-      { id: "general", label: "console.nav.general", href: "/admin/settings/general", icon: "Settings2", permission: "platform.settings", release: "R1" },
-      { id: "signup", label: "console.nav.signup", href: "/admin/settings/signup", icon: "UserPlus", permission: "platform.settings", release: "R1" },
-      { id: "legal", label: "console.nav.legal", href: "/admin/settings/legal", icon: "Scale", permission: "legal.manage", release: "R1" },
-      { id: "brands", label: "console.nav.brands", href: "/admin/settings/brands", icon: "BadgeCheck", permission: "platform.settings", release: "R1" },
-      { id: "mail", label: "console.nav.mail", href: "/admin/settings/mail", icon: "Mail", permission: "platform.settings", release: "R2" },
+      { id: "general", label: "console.nav.general", href: consoleUrl("/settings/general"), icon: "Settings2", permission: "platform.settings", release: "R1" },
+      { id: "signup", label: "console.nav.signup", href: consoleUrl("/settings/signup"), icon: "UserPlus", permission: "platform.settings", release: "R1" },
+      { id: "legal", label: "console.nav.legal", href: consoleUrl("/settings/legal"), icon: "Scale", permission: "legal.manage", release: "R1" },
+      { id: "brands", label: "console.nav.brands", href: consoleUrl("/settings/brands"), icon: "BadgeCheck", permission: "platform.settings", release: "R1" },
+      { id: "mail", label: "console.nav.mail", href: consoleUrl("/settings/mail"), icon: "Mail", permission: "platform.settings", release: "R2" },
     ],
   },
   {
     id: "security",
     label: "console.nav.group.security",
     items: [
-      { id: "staff", label: "console.nav.staff", href: "/admin/security/staff", icon: "UsersRound", permission: "staff.manage", release: "R1" },
-      { id: "audit", label: "console.nav.audit", href: "/admin/security/audit", icon: "ScrollText", permission: "audit.platform", release: "R1" },
-      { id: "breakglass", label: "console.nav.breakglass", href: "/admin/security/break-glass", icon: "Siren", permission: "audit.platform", release: "R1", badge: "requests" },
+      { id: "staff", label: "console.nav.staff", href: consoleUrl("/security/staff"), icon: "UsersRound", permission: "staff.manage", release: "R1" },
+      { id: "audit", label: "console.nav.audit", href: consoleUrl("/security/audit"), icon: "ScrollText", permission: "audit.platform", release: "R1" },
+      { id: "breakglass", label: "console.nav.breakglass", href: consoleUrl("/security/break-glass"), icon: "Siren", permission: "audit.platform", release: "R1", badge: "requests" },
     ],
   },
 ];
@@ -138,7 +139,7 @@ export function activeConsoleItem(groups: readonly ConsoleNavGroup[], pathname: 
   let best: { group: ConsoleNavGroup; item: ConsoleNavItem } | null = null;
   for (const group of groups) {
     for (const item of group.items) {
-      const hit = item.href === "/admin" ? path === "/admin" : path === item.href || path.startsWith(`${item.href}/`);
+      const hit = item.href === consoleUrl() ? path === consoleUrl() : path === item.href || path.startsWith(`${item.href}/`);
       if (hit && (!best || item.href.length > best.item.href.length)) best = { group, item };
     }
   }

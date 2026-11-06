@@ -14,10 +14,11 @@ import { valueLabel } from "@/lib/platform/flag-rules";
 import type { FlagRowView, FlagTab } from "@/lib/platform/flags";
 import { cn } from "@/lib/utils";
 import { Ago } from "../ago";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const tr = translator(CONSOLE_LOCALE);
 
-const editHref = (tab: FlagTab, key: string) => `/admin/flags?tab=${tab}&edit=${encodeURIComponent(key)}`;
+const editHref = (tab: FlagTab, key: string) => consoleUrl(`/flags?tab=${tab}&edit=${encodeURIComponent(key)}`);
 
 function Value({ row }: { row: FlagRowView }) {
   return <span className="inline-flex h-5 max-w-full items-center truncate rounded-[4px] bg-secondary px-1.5 font-mono text-[11.5px]">{valueLabel(row.type, row.value)}</span>;

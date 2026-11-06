@@ -13,6 +13,7 @@ import { Ago } from "../ago";
 import { compactCount, minutesText } from "../format";
 import { ConsolePanel, QuietEmpty } from "../panel";
 import { PrefetchLink } from "../prefetch-link";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const TABS = ["review", "fast", "hold", "needs_info", "requests", "snoozed"] as const;
 
@@ -32,13 +33,13 @@ export function QueueSnapshotPanel({ data, at }: { data: QueueSnapshotBlock; at:
   const median = minutesText(sla.medianDecisionMin);
   const oldest = minutesText(sla.oldestWaitingMin);
   return (
-    <ConsolePanel title={t("console.snapshot.title")} at={at} action={{ href: "/admin/queue", label: t("console.snapshot.open") }}>
+    <ConsolePanel title={t("console.snapshot.title")} at={at} action={{ href: consoleUrl("/queue"), label: t("console.snapshot.open") }}>
       <div className="grid grid-cols-3 gap-px border-b border-[var(--c-hairline)] bg-[var(--c-hairline)] sm:grid-cols-6">
         {TABS.map((tab) => {
           const n = counts[tab] ?? 0;
           const shown = compactCount(n);
           return (
-            <PrefetchLink key={tab} href={`/admin/queue?tab=${tab}`} className="grid gap-0.5 bg-card px-3 py-2.5 outline-none transition-colors duration-[var(--dur-1)] hover:bg-accent focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-inset">
+            <PrefetchLink key={tab} href={consoleUrl(`/queue?tab=${tab}`)} className="grid gap-0.5 bg-card px-3 py-2.5 outline-none transition-colors duration-[var(--dur-1)] hover:bg-accent focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-inset">
               <span className="truncate text-[11px] text-muted-foreground">{t(`console.snapshot.tab.${tab}`)}</span>
               <span title={shown.exact} className={cn("num text-[18px] leading-tight font-semibold tracking-[-0.01em]", n === 0 && "text-muted-foreground")}>
                 {shown.text}
@@ -64,7 +65,7 @@ export function QueueSnapshotPanel({ data, at }: { data: QueueSnapshotBlock; at:
           <ul className="pb-1.5">
             {data.oldest.map((r) => (
               <li key={r.id}>
-                <PrefetchLink href={`/admin/queue?tab=review&r=${r.id}`} className="flex min-h-[calc(var(--row)+8px)] min-w-0 items-center gap-3 px-4 py-1 outline-none transition-colors duration-[var(--dur-1)] hover:bg-accent focus-visible:bg-accent max-md:min-h-11">
+                <PrefetchLink href={consoleUrl(`/queue?tab=review&r=${r.id}`)} className="flex min-h-[calc(var(--row)+8px)] min-w-0 items-center gap-3 px-4 py-1 outline-none transition-colors duration-[var(--dur-1)] hover:bg-accent focus-visible:bg-accent max-md:min-h-11">
                   <ScoreRing score={r.score} band={r.band} />
                   <span className="grid min-w-0 flex-1">
                     <span className="truncate text-[13px] font-medium">{r.store.name}</span>

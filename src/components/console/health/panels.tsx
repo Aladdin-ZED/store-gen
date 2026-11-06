@@ -24,6 +24,7 @@ import { useGuarded } from "../guarded";
 import { PanelError, PanelUnavailable } from "../panel";
 import { PrefetchLink } from "../prefetch-link";
 import { button, card, Meter, StatusText, td, th, type Tone } from "../kit";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const REFRESH_MS = 30_000;
 
@@ -88,7 +89,7 @@ export function HealthPanels({ view }: { view: SystemHealthView }) {
                 <StatusText tone={a.level === "danger" ? "danger" : a.level === "warn" ? "warn" : "info"}>{t(`console.attention.${a.code}`, a.vars)}</StatusText>
                 {a.since && <span className="text-muted-foreground">· {t("console.health.since", { time: hhmm(a.since) })}</span>}
                 {a.storeId && (
-                  <PrefetchLink href={`/admin/stores/${a.storeId}`} className="text-[var(--c-brand-ink)] hover:underline">
+                  <PrefetchLink href={consoleUrl(`/stores/${a.storeId}`)} className="text-[var(--c-brand-ink)] hover:underline">
                     {t("console.health.open_store")}
                   </PrefetchLink>
                 )}
@@ -277,7 +278,7 @@ function Renders({ h }: { h: PlatformHealth }) {
         <ul className="grid gap-1.5">
           {r.failed24h.slice(0, 10).map((f) => (
             <li key={f.storeId} className="flex flex-wrap items-center gap-2 text-[12.5px]">
-              <PrefetchLink href={`/admin/stores/${f.storeId}`} className="text-[var(--c-brand-ink)] hover:underline">
+              <PrefetchLink href={consoleUrl(`/stores/${f.storeId}`)} className="text-[var(--c-brand-ink)] hover:underline">
                 {f.storeId.slice(-8)}
               </PrefetchLink>
               <span className="num text-[var(--c-danger-ink)]">{t("console.health.failed_n", { count: f.count })}</span>
@@ -325,7 +326,7 @@ function Storage({ machine, m, view }: { machine: PlatformHealth | null; m: Syst
           <Kv rows={machine.storage.tables.slice(0, 15).map((x) => [x.name, bytesText(x.bytes)])} />
         </details>
       )}
-      <PrefetchLink href="/admin/settings/signup?tab=mode#ceilings" className="text-[12.5px] font-medium text-[var(--c-brand-ink)] hover:underline">
+      <PrefetchLink href={consoleUrl("/settings/signup?tab=mode#ceilings")} className="text-[12.5px] font-medium text-[var(--c-brand-ink)] hover:underline">
         {t("console.health.ceilings_link")}
       </PrefetchLink>
     </>

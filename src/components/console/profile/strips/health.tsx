@@ -12,6 +12,7 @@ import type { PlatformCtx } from "@/lib/tenancy/types";
 import { Ago, Until } from "../../ago";
 import { MarkDirtyButton, StripFrame } from "./frame";
 import { StripChip, StripEmpty, StripNotOk, tr } from "./shared";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const GROUPS = Object.keys(HEALTH_CAPS) as HealthGroup[];
 const SEV_TONE = { 1: "neutral", 2: "warn", 3: "danger" } as const;
@@ -19,7 +20,7 @@ const SEV_TONE = { 1: "neutral", 2: "warn", 3: "danger" } as const;
 export async function HealthStrip({ ctx, storeId }: { ctx: PlatformCtx; storeId: string }) {
   const title = tr("console.strip.health");
   const p = await loadStrip(ctx, storeId, "health");
-  const fallbackEnd = { href: "/admin/stores?sort=health", label: tr("console.strip.health.end") };
+  const fallbackEnd = { href: consoleUrl("/stores?sort=health"), label: tr("console.strip.health.end") };
   if (p.state !== "ok") return <StripNotOk strip="health" title={title} p={p} end={fallbackEnd} />;
   const d = p.data;
   if (!d) {
@@ -29,7 +30,7 @@ export async function HealthStrip({ ctx, storeId }: { ctx: PlatformCtx; storeId:
       </StripFrame>
     );
   }
-  const end = d.flags[0] ? { href: `/admin/stores?flag=${d.flags[0].code}`, label: tr("console.strip.health.end_flag", { flag: tr(`console.hflag.${d.flags[0].code}`) }) } : fallbackEnd;
+  const end = d.flags[0] ? { href: consoleUrl(`/stores?flag=${d.flags[0].code}`), label: tr("console.strip.health.end_flag", { flag: tr(`console.hflag.${d.flags[0].code}`) }) } : fallbackEnd;
   const penalty = GROUPS.reduce((n, g) => n + (d.components[g] ?? 0), 0);
   return (
     <StripFrame strip="health" title={title} at={p.at} end={end} summary={tr("console.strip.health.summary", { score: d.score, issues: d.issues.length })} aside={<MarkDirtyButton storeId={storeId} dirty={d.dirty} />}>

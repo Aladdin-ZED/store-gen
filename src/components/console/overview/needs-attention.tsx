@@ -18,6 +18,7 @@ import { ConsolePanel, QuietEmpty } from "../panel";
 import { PrefetchLink } from "../prefetch-link";
 import { useRichT } from "../rich";
 import { useConsoleShell } from "../shell/context";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const LEVEL: Record<AttentionLevel, { icon: typeof InfoIcon; tone: string }> = {
   danger: { icon: OctagonAlertIcon, tone: "text-[var(--c-danger-ink)] bg-[var(--c-danger-soft)]" },
@@ -41,7 +42,7 @@ export function NeedsAttentionPanel({ data, at }: { data: NeedsAttention; at: st
   const rich = useRichT();
   const { timeZone } = useConsoleShell();
   return (
-    <ConsolePanel title={t("console.attention.title")} at={at} action={data.more ? { href: "/admin/stores?attention=1", label: t("console.attention.see_all") } : null}>
+    <ConsolePanel title={t("console.attention.title")} at={at} action={data.more ? { href: consoleUrl("/stores?attention=1"), label: t("console.attention.see_all") } : null}>
       {data.rows.length === 0 ? (
         <QuietEmpty text={t("console.attention.empty")} note={t("console.attention.checked", { time: absoluteTime(data.checkedAt, timeZone) })} />
       ) : (
@@ -56,7 +57,7 @@ export function NeedsAttentionPanel({ data, at }: { data: NeedsAttention; at: st
                   <p className="min-w-0 text-[13px] leading-snug text-pretty">{rich(`console.attention.${r.code}`, r.vars)}</p>
                   <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
                     {r.store && (
-                      <PrefetchLink href={`/admin/stores/${r.store.id}`} className="inline-flex min-w-0 items-center gap-1.5 rounded-[var(--r-chip)] outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+                      <PrefetchLink href={consoleUrl(`/stores/${r.store.id}`)} className="inline-flex min-w-0 items-center gap-1.5 rounded-[var(--r-chip)] outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
                         <Monogram name={r.store.name || r.store.handle || r.store.id} seed={r.store.id} size={24} />
                         {r.store.handle ? (
                           <bdi dir="ltr" className="truncate">

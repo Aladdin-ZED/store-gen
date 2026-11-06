@@ -20,6 +20,7 @@ import { useGuarded } from "../guarded";
 import { PrefetchLink } from "../prefetch-link";
 import { ConsoleDialog } from "../queue/decision-dialogs";
 import { Banner, button, card, EmptyLine, Field, inputCls, SettingsCard, StatusText, TypedConfirm } from "../kit";
+import { consoleUrl } from "@/lib/platform/console-url";
 
 const ACTOR_KINDS = ["platform", "user", "impersonation", "system", "api"] as const;
 const AREAS = ["platform", "store", "auth"] as const;
@@ -32,7 +33,7 @@ export function AuditFilters({ filter, staff, csv }: { filter: AuditViewFilter; 
   const apply = (next = v) => {
     const q = new URLSearchParams();
     for (const [k, x] of Object.entries(next)) if (x.trim()) q.set(k, x.trim());
-    router.push(`/admin/security/audit${q.size ? `?${q}` : ""}`);
+    router.push(consoleUrl(`/security/audit${q.size ? `?${q}` : ""}`));
   };
   return (
     <form
@@ -141,7 +142,7 @@ function Row({ r }: { r: AuditViewRow }) {
       </span>
       <span className="grid min-w-0 content-start gap-0.5">
         {r.actor.id && r.actorKind !== "system" ? (
-          <PrefetchLink href={`/admin/users/${r.actor.id}`} className={cn(link, "truncate text-[12.5px] font-medium")}>
+          <PrefetchLink href={consoleUrl(`/users/${r.actor.id}`)} className={cn(link, "truncate text-[12.5px] font-medium")}>
             {actor}
           </PrefetchLink>
         ) : (
@@ -164,12 +165,12 @@ function Row({ r }: { r: AuditViewRow }) {
         )}
         <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-[12px]">
           {r.store && (
-            <PrefetchLink href={`/admin/stores/${r.store.id}`} className={link}>
+            <PrefetchLink href={consoleUrl(`/stores/${r.store.id}`)} className={link}>
               <bdi dir="ltr">{r.store.handle ? `@${r.store.handle}` : r.store.id.slice(-8)}</bdi>
             </PrefetchLink>
           )}
           {r.userTarget && (
-            <PrefetchLink href={`/admin/users/${r.userTarget}`} className={link}>
+            <PrefetchLink href={consoleUrl(`/users/${r.userTarget}`)} className={link}>
               {t("console.audit_view.person")}
             </PrefetchLink>
           )}
@@ -256,16 +257,16 @@ export function PendingRequests({ rows }: { rows: OpenRequestView[] }) {
                 </span>
                 <span className="flex flex-wrap gap-x-3 text-[12px]">
                   {r.store && (
-                    <PrefetchLink href={`/admin/stores/${r.store.id}`} className={link}>
+                    <PrefetchLink href={consoleUrl(`/stores/${r.store.id}`)} className={link}>
                       {t("console.breakglass.open_store")}
                     </PrefetchLink>
                   )}
                   {r.target && (
-                    <PrefetchLink href={`/admin/users/${r.target.id}`} className={link}>
+                    <PrefetchLink href={consoleUrl(`/users/${r.target.id}`)} className={link}>
                       {t("console.breakglass.open_person")}
                     </PrefetchLink>
                   )}
-                  <PrefetchLink href={`/admin/users/${r.requestedBy.id}`} className={link}>
+                  <PrefetchLink href={consoleUrl(`/users/${r.requestedBy.id}`)} className={link}>
                     {t("console.breakglass.open_requester")}
                   </PrefetchLink>
                 </span>
