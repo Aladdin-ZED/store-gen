@@ -38,6 +38,9 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { createRequire } from "node:module";
 import type * as Compose from "@/app/api/app/[store]/pulse/compose";
 import type * as Dashboard from "@/lib/admin-data/dashboard";
+import type * as AddressData from "@/app/app/[store]/settings/address/data";
+import type * as AuditData from "@/app/app/[store]/settings/audit/data";
+import type * as PlanData from "@/app/app/[store]/settings/plan/data";
 import type * as Search from "@/lib/admin-data/search";
 import type * as Handles from "@/lib/tenancy/handles";
 import type * as Seam from "@/lib/tenancy/seam";
@@ -514,10 +517,34 @@ async function readKeyWritesCase(kit: TenancyKit): Promise<void> {
     check("…a revoked link revoked again answers not_found", codeOf(twice) === "not_found", twice.value);
   }
 }
+/** p2-10: the settings pages' reads (plan, address, audit) answer the scope's own store only. */
+async function settingsReadsCase(kit: TenancyKit): Promise<void> {
+  const { fx, check, leaks } = kit;
+  const Plan = load<typeof PlanData>("@/app/app/[store]/settings/plan/data");
+  const Address = load<typeof AddressData>("@/app/app/[store]/settings/address/data");
+  const Audit = load<typeof AuditData>("@/app/app/[store]/settings/audit/data");
+  const D = load<typeof Dashboard>("@/lib/admin-data/dashboard");
+  const scopeB = kit.scope("B");
+  const plan = await kit.call({ anonymous: true }, "/settings/plan", () => Plan.planFacts(scopeB, fx.rows.B));
+  check("planFacts(B): nothing of A", plan.ok && leaks(plan.value).length === 0, plan.ok ? leaks(plan.value) : plan.error);
+  const rename = await kit.call({ anonymous: true }, "/settings/address", () => Address.renameFacts(scopeB, new Date()));
+  check("renameFacts(B): answers for B (store #1's grant only for store #1)", rename.ok && rename.value!.freeRename === false, rename.ok ? rename.value : rename.error);
+  const renders = await kit.call({ anonymous: true }, "/settings/address", () => Address.addressRenders(scopeB));
+  check("addressRenders(B): a count, 0 while P8's queue is a stub", renders.ok && typeof renders.value === "number", renders.ok ? renders.value : renders.error);
+  const address = await kit.call({ anonymous: true }, "/settings/address", () => D.addressFacts(scopeB, fx.rows.B));
+  check("addressFacts(B): B's address, never A's", address.ok && address.value!.storeUrl.includes(fx.B.handle) && !address.value!.storeUrl.includes(fx.A.handle), address.ok ? address.value : address.error);
+  const ctxB = { scope: scopeB, store: fx.rows.B, can: () => true, user: { id: fx.B.members.owner } as never, membership: { role: "owner" as const, status: "active" as const } };
+  const audit = await kit.call({ anonymous: true }, "/settings/audit", () => Audit.auditViewPage(ctxB as never, {}));
+  check("auditViewPage(B): B's rows only, nothing of A", audit.ok && leaks(audit.value).length === 0, audit.ok ? leaks(audit.value) : audit.error);
+  const filtered = await kit.call({ anonymous: true }, "/settings/audit", () => Audit.auditViewPage(ctxB as never, { actorKind: "platform", area: "platform", from: new Date(Date.now() - 86_400_000) }));
+  check("auditViewPage(B) with filters: nothing of A", filtered.ok && leaks(filtered.value).length === 0, filtered.ok ? leaks(filtered.value) : filtered.error);
+}
+
 export const cases: TenancyCase[] = [
   { name: "shell: the pulse (SF-06)", run: pulseCase },
   { name: "shell: the ⌘K search (UX-02)", run: searchCase },
   { name: "shell: the dashboard reads", run: dashboardCase },
+  { name: "shell: the settings pages' reads (p2-10)", run: settingsReadsCase },
   { name: "shell: the handle rename", run: renameCase },
   { name: "shell: the user actions (no store)", run: userActionsCase },
   { name: "shell: writes under a read key, and the preview-link cap", run: readKeyWritesCase },

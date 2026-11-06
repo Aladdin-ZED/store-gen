@@ -126,7 +126,7 @@ export const messages = {
   "notify.member.suspended.body": "An owner or admin paused your access. Ask them if you think it's a mistake.",
   /* ======== R1 team (PLA-§N.2, §22.4; P2 step 2) ======== */
   "team.tab.agents": "Call agents",
-  "team.seats": "{used} of {limit} seats used",
+  "team.seats": "Seats",
   "team.invite.link_once": "This link is shown once. Copy it now.",
   "team.invite.bound_to": "Only {email} can use this link.",
   "team.invite.expires": "Expires on {date}",

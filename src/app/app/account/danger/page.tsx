@@ -20,7 +20,8 @@ export default async function AccountDangerPage() {
   const { user } = await requireUserCtx();
   const [locale, memberships] = await Promise.all([viewerLocale(user), listMemberships(user.id)]);
   const t = authTranslator(locale);
-  const owned = memberships.filter((m) => m.role === "owner");
+  // PD81: a store that is not purged still needs closing first (a purged one has no handle left to open)
+  const owned = memberships.filter((m) => m.role === "owner" && m.storeStatus !== "purged" && m.handle);
 
   return (
     <>
@@ -33,9 +34,9 @@ export default async function AccountDangerPage() {
             {owned.map((m) => (
               <li key={m.storeId} className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] border px-3.5 py-2.5">
                 <span className="text-sm font-medium">{m.name}</span>
-                {/* closing a store arrives with P2's /settings/danger: in R1.0 the way out is handing it over (§B.5) */}
+                {/* the store's own Danger zone closes it (PLA-§22.11); deletion waits until no store is owned */}
                 <Button asChild variant="outline" size="sm">
-                  <Link href={`/app/${m.handle}/team`}>{t("account.danger.close_first")}</Link>
+                  <Link href={`/app/${m.handle}/settings/danger`}>{t("account.danger.close_first")}</Link>
                 </Button>
               </li>
             ))}

@@ -20,12 +20,12 @@ import "server-only";
  * the pulse the other (D57). `getDashboard` and `navCounts` stay as deprecated shims only while the maintainer's
  * tenancy harness still names them (CCR r1-p2-3).
  */
-import { and, asc, count, desc, eq, gt, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { can as roleCan, type StorePermission } from "@/lib/auth/permissions";
 import type { AiUsageSummary } from "@/lib/ai/summary.server";
 import { aiUsageForStore } from "@/lib/ai/summary.server";
 import { db } from "@/lib/db/client";
-import { orders, pages, previewTokens, storeInvites, stores } from "@/lib/db/schema";
+import { orders, pages, plans, previewTokens, storeEntitlements, storeHandleHistory, storeInvites, storeMembers, stores, storeSubscriptions, users } from "@/lib/db/schema";
 import type { ShellFacts } from "@/lib/health/rules/shell";
 import type { StoreHealthView } from "@/lib/health/types";
 import { integrationHealth, sheetsBacklog, type IntegrationHealthRow, type SheetsBacklog } from "@/lib/integrations/health";
@@ -388,7 +388,7 @@ export function memberFactsOf(list: readonly Pick<MemberSummary, "role" | "statu
 }
 
 /** The address card's facts: the canonical address and the live page it leads to (T4's page reads). */
-async function addressFacts(scope: StoreScope, store: StoreRow): Promise<AddressFacts> {
+export async function addressFacts(scope: StoreScope, store: StoreRow): Promise<AddressFacts> {
   const [counts, options] = await Promise.all([pageCounts(scope), pageOptions(scope)]);
   const live = options.filter((p) => p.status === "published");
   const home = store.homePageId ? live.find((p) => p.id === store.homePageId) : undefined;
@@ -618,4 +618,68 @@ export async function getDashboard(scope: StoreScope, store: StoreRow, user: { t
   void user;
   const grants = new Set<StorePermission>(["store.read", ...(opts.orders ? (["orders.read", "orders.read_all"] as const) : [])]);
   return dashboardPanels({ scope, store, can: (p) => grants.has(p) }, "7d");
+}
+
+/* ---- The settings pages' reads (p2-10; PLA-§22.10.2, §22.10.4, §22.10.6). `src/app` may not import the db client
+ * (tenancy lint L7) and P2's lib row names only this file and search.ts, so they live here until CCR r1-p2-7 §5 gives
+ * them `src/lib/admin-data/settings.ts`. Each one reads the scope's own store only. ---- */
+
+/** When the handle was last renamed (`store_handle_history` reason `renamed`); null when it never was. */
+export async function lastHandleRenameAt(scope: StoreScope): Promise<Date | null> {
+  const [last] = await db
+    .select({ at: storeHandleHistory.createdAt })
+    .from(storeHandleHistory)
+    .where(whereStore(storeHandleHistory, scope, eq(storeHandleHistory.reason, "renamed")))
+    .orderBy(desc(storeHandleHistory.createdAt))
+    .limit(1);
+  return last?.at ?? null;
+}
+
+/** The labels the audit rows link to: this store's pages and members among the given ids. */
+export async function auditTargetNames(scope: StoreScope, pageIds: string[], userIds: string[]): Promise<{ pages: Map<string, string>; members: Map<string, string> }> {
+  const [pageRows, memberRows] = await Promise.all([
+    pageIds.length
+      ? db
+          .select({ id: pages.id, name: pages.name })
+          .from(pages)
+          .where(whereStore(pages, scope, inArray(pages.id, pageIds)))
+      : Promise.resolve([]),
+    userIds.length
+      ? db
+          .select({ id: users.id, name: users.name })
+          .from(users)
+          .innerJoin(storeMembers, eq(storeMembers.userId, users.id))
+          .where(and(inStore(storeMembers, scope), inArray(users.id, userIds)))
+      : Promise.resolve([]),
+  ]);
+  return { pages: new Map(pageRows.map((r) => [r.id, r.name])), members: new Map(memberRows.map((r) => [r.id, r.name])) };
+}
+
+/** The plan catalogue (platform-wide, no store_id): ids, names and status only, never a price. */
+export async function planCatalogue(): Promise<{ id: string; name: string; status: string }[]> {
+  return db.select({ id: plans.id, name: plans.name, status: plans.status }).from(plans).orderBy(asc(plans.sort));
+}
+
+/** The store's boosts still running (`store_entitlements` of source `boost`, not expired at `now`). */
+export async function activeBoosts(scope: StoreScope, now: Date) {
+  return db
+    .select({ key: storeEntitlements.key, value: storeEntitlements.value, expiresAt: storeEntitlements.expiresAt })
+    .from(storeEntitlements)
+    .where(whereStore(storeEntitlements, scope, eq(storeEntitlements.source, "boost"), or(isNull(storeEntitlements.expiresAt), gt(storeEntitlements.expiresAt, now))));
+}
+
+/** The store's subscription history, newest first (24 at most). */
+export async function subscriptionHistory(scope: StoreScope) {
+  return db
+    .select({
+      id: storeSubscriptions.id,
+      planId: storeSubscriptions.planId,
+      status: storeSubscriptions.status,
+      periodStart: storeSubscriptions.periodStart,
+      periodEnd: storeSubscriptions.periodEnd,
+    })
+    .from(storeSubscriptions)
+    .where(whereStore(storeSubscriptions, scope))
+    .orderBy(desc(storeSubscriptions.periodStart))
+    .limit(24);
 }

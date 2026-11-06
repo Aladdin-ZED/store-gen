@@ -55,7 +55,18 @@ function useHandleCheck(handle: string): HandleState {
 }
 
 /** Both fields; the handle posts as `handle`, the name as `storeName`. */
-export function StoreNameAndHandle({ initialName, initialHandle, errors }: { initialName: string; initialHandle: string; errors: { storeName?: string; handle?: string } }) {
+export function StoreNameAndHandle({
+  initialName,
+  initialHandle,
+  errors,
+  addressTemplate,
+}: {
+  initialName: string;
+  initialHandle: string;
+  errors: { storeName?: string; handle?: string };
+  /** the store's future address with `__HANDLE__` in place of the handle (`/app/new`): previewed under the field */
+  addressTemplate?: string;
+}) {
   const t = useAuthT();
   const [storeName, setStoreName] = useState(initialName);
   const [handle, setHandle] = useState(initialHandle);
@@ -98,6 +109,14 @@ export function StoreNameAndHandle({ initialName, initialHandle, errors }: { ini
           )
         }
       />
+      {addressTemplate && (
+        <p className="-mt-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="shrink-0">{t("app.new.address_preview")}</span>
+          <bdi dir="ltr" className="min-w-0 truncate font-mono text-foreground">
+            {addressTemplate.replace("__HANDLE__", shown || "…").replace(/^https?:\/\//, "").replace(/\/$/, "")}
+          </bdi>
+        </p>
+      )}
     </>
   );
 }

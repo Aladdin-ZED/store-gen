@@ -252,13 +252,13 @@ export const TRILINGUAL_SCREENS: readonly { path: "" | `/${string}`; ready: bool
   { path: "/welcome", ready: false }, // onboarding (p2-12)
   { path: "/notifications", ready: true }, // the notification centre (p2-09)
   { path: "/team", ready: true }, // T2's translated team page (members and invites)
-  { path: "/settings/general", ready: false },
-  { path: "/settings/market", ready: false },
-  { path: "/settings/plan", ready: false },
-  { path: "/settings/address", ready: false },
-  { path: "/settings/security", ready: false },
-  { path: "/settings/danger", ready: false },
-  { path: "/settings/audit", ready: false }, // the settings pages (p2-10)
+  { path: "/settings/general", ready: true },
+  { path: "/settings/market", ready: true },
+  { path: "/settings/plan", ready: true },
+  { path: "/settings/address", ready: true },
+  { path: "/settings/security", ready: true },
+  { path: "/settings/danger", ready: true },
+  { path: "/settings/audit", ready: true }, // the settings pages (p2-10)
 ];
 
 /** Inside a trilingual subtree but another track's screen (P4's agents and call center: fr R1, ar R3). */

@@ -13,7 +13,7 @@
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useAdminLocale, useT } from "@/lib/i18n/admin/client";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "../common/page-header";
@@ -41,6 +41,15 @@ export function SettingsNav() {
     const groups = [{ id: "settings" as const, label: "", items: tabs.map((tab) => ({ ...tab, group: "settings" as const, labelKey: tab.id })) }];
     return activeNav(pathname, groups, store.handle)?.id ?? null;
   }, [pathname, tabs, store.handle]);
+  // the phone row scrolls sideways: the current tab is brought to its middle (Danger zone sits past the fold); only
+  // the row moves, never the page, and only when the tab is cut off
+  const revealActive = useCallback((el: HTMLAnchorElement | null) => {
+    const row = el?.closest("ul");
+    if (!el || !row) return;
+    const tab = el.getBoundingClientRect();
+    const box = row.getBoundingClientRect();
+    if (tab.left < box.left || tab.right > box.right) row.scrollLeft += tab.left + tab.width / 2 - (box.left + box.width / 2);
+  }, []);
 
   return (
     <nav aria-label={t("shell.settings.nav_label")} className="min-w-0">
@@ -53,6 +62,7 @@ export function SettingsNav() {
               <Link
                 href={tab.href}
                 aria-current={active ? "page" : undefined}
+                ref={active ? revealActive : undefined}
                 className={cn(
                   "relative flex h-11 items-center px-2.5 text-[13.5px] whitespace-nowrap transition-colors duration-[var(--dur-2)]",
                   active ? "font-medium text-foreground" : "text-muted-foreground hover:text-foreground",

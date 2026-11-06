@@ -129,7 +129,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
 
   /* ======== الفريق R1 (PLA-§N.2، §22.4؛ P2 المرحلة 2) ======== */
   "team.tab.agents": "وكلاء الاتصال",
-  "team.seats": "{used} من أصل {limit} مقاعد مستعملة",
+  "team.seats": "المقاعد",
   "team.invite.link_once": "يظهر هذا الرابط مرة واحدة فقط. انسخه الآن.",
   "team.invite.bound_to": "هذا الرابط صالح فقط لـ {email}.",
   "team.invite.expires": "ينتهي في {date}",
