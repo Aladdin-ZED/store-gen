@@ -191,7 +191,8 @@ export function PagesView({
           </div>
           <Select value={sort} onValueChange={(v) => query.set({ sort: v === "updated" ? null : v })}>
             <SelectTrigger className="h-9 w-[10.5rem] shrink-0 rounded-full" aria-label={t("landing.pages.sort.label")}>
-              <SelectValue />
+              {/* Explicit label: Radix fills an empty SelectValue only after hydration. */}
+              <SelectValue>{t(`landing.pages.sort.${sort}`)}</SelectValue>
             </SelectTrigger>
             <SelectContent className="rounded-xl" align="end">
               <SelectItem value="updated">{t("landing.pages.sort.updated")}</SelectItem>

@@ -11,8 +11,7 @@
  * 2. The shared city-key fixture of operations (scripts/qa/fixtures/city-key.json, P4's; D68): every slug, the
  *    key-shape case (`zoneTableKey: "value"`: `buildZoneTable(…).city` is keyed by the posted `City.value`, every
  *    value of `MA_CITIES` but "Autre"), and the browser/server parity of "Fès", "Ksar El Kébir", "Autre" and an
- *    unknown value. While P4 has not merged and the file is absent, the same cases run from an inline table and the
- *    run prints "city-key.json pending (P4)".
+ *    unknown value. The file is mandatory: a missing fixture fails the run.
  * 3. The shared calling-window fixture (src/lib/callcenter/window.fixtures.ts, P4's; D73): on every case the "no
  *    hours" test agrees with the fixture's `shopperPromise`, and a `configured: false` window renders no hours text.
  *
@@ -48,27 +47,17 @@ interface CityKeyFixture {
   zoneTable: { name: string; zones: string[][]; expect: { city: Record<string, number>; absent: string[]; star: number | null } }[];
 }
 const FIXTURE = path.resolve(__dirname, "fixtures", "city-key.json");
-const pending = !existsSync(FIXTURE);
-const fixture: CityKeyFixture = pending
-  ? {
-      v: 1,
-      zoneTableKey: "value",
-      slugs: [
-        { value: "Fès", key: "fes" },
-        { value: "Ksar El Kébir", key: "ksar-el-kebir" },
-        { value: "Casablanca", key: "casablanca" },
-        { value: "Autre", key: null },
-      ],
-      zoneTable: [{ name: "a Fès zone and a catch-all zone", zones: [["fes"], ["*"]], expect: { city: { "Fès": 0 }, absent: ["Autre"], star: 1 } }],
-    }
-  : (JSON.parse(readFileSync(FIXTURE, "utf8")) as CityKeyFixture);
+// Mandatory since the wave-1 verify (p3-10): P4's fixture is on main, so the inline fallback table is gone.
+if (!existsSync(FIXTURE)) {
+  console.error("✗ test:delivery: scripts/qa/fixtures/city-key.json is missing (P4's shared fixture, D68)");
+  process.exit(1);
+}
+const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as CityKeyFixture;
 
 check(fixture.zoneTableKey === "value", "city-key.json: the browser table is keyed by the posted City.value (zoneTableKey)", fixture.zoneTableKey);
 for (const s of fixture.slugs) check(cityKey(s.value) === s.key, `city-key: cityKey("${s.value}") = ${s.key}`, cityKey(s.value));
-if (!pending) {
-  const listed = new Set(fixture.slugs.map((s) => s.value));
-  check(MA_CITIES.every((c) => listed.has(c.value)), "city-key.json lists every City.value of MA_CITIES");
-}
+const listed = new Set(fixture.slugs.map((s) => s.value));
+check(MA_CITIES.every((c) => listed.has(c.value)), "city-key.json lists every City.value of MA_CITIES");
 const values = MA_CITIES.filter((c) => c.value !== OTHER_CITY.value).map((c) => c.value);
 for (const t of fixture.zoneTable) {
   const zones = t.zones.map((cities, i) => zone(`zone ${i}`, cities, { position: i }));
@@ -112,4 +101,4 @@ if (failures.length) {
   for (const f of failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
-console.log(`${pending ? "  city-key.json pending (P4): the parity cases ran from the inline table\n" : ""}✓ test:delivery (LP-03, SF-08): ${checks} checks passed in ${ms} ms`);
+console.log(`✓ test:delivery (LP-03, SF-08): ${checks} checks passed in ${ms} ms`);

@@ -297,7 +297,7 @@ export function LeadsInbox(p: LeadsInboxProps) {
   return (
     <InboxContext.Provider value={ctx}>
       <OpsContext.Provider value={ops}>
-        <div className="grid gap-5 pb-24">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 pb-24">
           <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div className="grid gap-1.5">
               <h1 className="text-[1.6rem] leading-tight font-semibold tracking-[-0.02em]">{t("landing.leads.title")}</h1>
@@ -559,7 +559,7 @@ function Stats({ counts }: { counts: LeadCounts }) {
     return hint ? (
       <Tooltip>
         <TooltipTrigger asChild>
-          <div tabIndex={0} className="cursor-default rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+          <div tabIndex={0} className="cursor-default outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset">
             {body}
           </div>
         </TooltipTrigger>
@@ -571,7 +571,7 @@ function Stats({ counts }: { counts: LeadCounts }) {
   };
   const r = counts.recovered;
   return (
-    <section aria-label={t("landing.leads.window", { days: counts.days })} className="adm-surface grid grid-cols-2 divide-border/60 sm:grid-cols-3 lg:grid-cols-5 lg:divide-x rtl:lg:divide-x-reverse [&>*]:border-border/60 max-lg:[&>*]:border-b">
+    <section aria-label={t("landing.leads.window", { days: counts.days })} className="adm-surface grid grid-cols-2 divide-border/60 sm:grid-cols-3 lg:grid-cols-5 lg:divide-x rtl:lg:divide-x-reverse [&>*]:border-border/60 max-sm:[&>*:last-child]:col-span-2 max-sm:[&>*:nth-child(-n+4)]:border-b sm:max-lg:[&>*:nth-child(-n+3)]:border-b">
       {tile(t("landing.leads.stat.leads"), num.format(counts.leads), t("landing.leads.window", { days: counts.days }))}
       {tile(t("landing.leads.stat.contacted"), num.format(counts.contacted), t("landing.leads.stat.n", { n: num.format(counts.leads) }))}
       {tile(
@@ -597,11 +597,25 @@ function Filters({ pages, cities, members, me, agent, active }: { pages: { id: s
   const ALL = "__all";
   const pick = (key: string) => (v: string) => query.set({ [key]: v === ALL ? null : v, cursor: null });
   const trigger = "h-10 w-auto min-w-[8.5rem] max-w-[14rem] shrink-0 gap-1.5 rounded-full px-3.5 text-sm lg:h-9";
+  // Explicit labels: Radix fills <SelectValue /> only after the closed content mounts, so the server HTML showed blank pills.
+  const page = query.get("page");
+  const city = query.get("city");
+  const assignee = query.get("assignee");
+  const kind = query.get("kind");
+  const period = query.get("period");
+  const member = assignee && assignee !== "none" ? members.find((m) => m.id === assignee) : undefined;
+  const label = {
+    page: (page && pages.find((x) => x.id === page)?.name) || t("landing.leads.filter.allPages"),
+    city: city || t("landing.leads.filter.allCities"),
+    assignee: assignee === "none" ? t("landing.leads.unassigned") : member ? (member.id === me ? `${member.name} (${t("landing.leads.you")})` : member.name) : t("landing.leads.filter.anyone"),
+    kind: kind === "form" || kind === "whatsapp" ? t(`landing.leads.kind.${kind}`) : t("landing.leads.filter.allKinds"),
+    period: period === "7d" || period === "today" ? t(`landing.leads.period.${period}`) : t("landing.leads.period.30d"),
+  };
   return (
     <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-0.5 sm:mx-0 sm:flex-wrap sm:px-0">
       <Select value={query.get("page") || ALL} onValueChange={pick("page")}>
         <SelectTrigger className={trigger} aria-label={t("landing.leads.filter.page")}>
-          <SelectValue />
+          <SelectValue>{label.page}</SelectValue>
         </SelectTrigger>
         <SelectContent className="rounded-xl">
           <SelectItem value={ALL}>{t("landing.leads.filter.allPages")}</SelectItem>
@@ -614,7 +628,7 @@ function Filters({ pages, cities, members, me, agent, active }: { pages: { id: s
       </Select>
       <Select value={query.get("city") || ALL} onValueChange={pick("city")}>
         <SelectTrigger className={trigger} aria-label={t("landing.leads.filter.city")}>
-          <SelectValue />
+          <SelectValue><bdi>{label.city}</bdi></SelectValue>
         </SelectTrigger>
         <SelectContent className="rounded-xl">
           <SelectItem value={ALL}>{t("landing.leads.filter.allCities")}</SelectItem>
@@ -628,7 +642,7 @@ function Filters({ pages, cities, members, me, agent, active }: { pages: { id: s
       {!agent && (
         <Select value={query.get("assignee") || ALL} onValueChange={pick("assignee")}>
           <SelectTrigger className={trigger} aria-label={t("landing.leads.filter.assignee")}>
-            <SelectValue />
+            <SelectValue>{label.assignee}</SelectValue>
           </SelectTrigger>
           <SelectContent className="rounded-xl">
             <SelectItem value={ALL}>{t("landing.leads.filter.anyone")}</SelectItem>
@@ -643,7 +657,7 @@ function Filters({ pages, cities, members, me, agent, active }: { pages: { id: s
       )}
       <Select value={query.get("kind") || ALL} onValueChange={pick("kind")}>
         <SelectTrigger className={trigger} aria-label={t("landing.leads.filter.kind")}>
-          <SelectValue />
+          <SelectValue>{label.kind}</SelectValue>
         </SelectTrigger>
         <SelectContent className="rounded-xl">
           <SelectItem value={ALL}>{t("landing.leads.filter.allKinds")}</SelectItem>
@@ -653,7 +667,7 @@ function Filters({ pages, cities, members, me, agent, active }: { pages: { id: s
       </Select>
       <Select value={query.get("period") || ALL} onValueChange={pick("period")}>
         <SelectTrigger className={trigger} aria-label={t("landing.leads.filter.period")}>
-          <SelectValue />
+          <SelectValue>{label.period}</SelectValue>
         </SelectTrigger>
         <SelectContent className="rounded-xl">
           <SelectItem value={ALL}>{t("landing.leads.period.30d")}</SelectItem>

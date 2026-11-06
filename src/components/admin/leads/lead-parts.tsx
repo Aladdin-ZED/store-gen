@@ -100,7 +100,7 @@ export function MaskedPhone({ phone, className }: { phone: string | null; classN
   const t = useT();
   if (!phone) return <span className={cn("text-muted-foreground", className)}>{t("landing.leads.noPhone")}</span>;
   return (
-    <bdi dir="ltr" className={cn("font-mono tabular-nums tracking-tight", className)}>
+    <bdi dir="ltr" className={cn("shrink-0 font-mono whitespace-nowrap tabular-nums tracking-tight", className)}>
       {phone}
     </bdi>
   );
