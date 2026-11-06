@@ -28,7 +28,13 @@ export default async function ReportPage({ params, searchParams }: Props) {
   const [{ handle: raw }, sp, viewer] = await Promise.all([params, searchParams, getSignedInUser()]);
   const locale = await viewerLocale(viewer);
   const t = translator(locale);
-  const handle = decodeURIComponent(raw).toLowerCase().slice(0, 63);
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    // a malformed escape: kept as typed (the post stores nothing for an unknown handle)
+  }
+  const handle = decoded.trim().toLowerCase().slice(0, 63);
   const valid = HANDLE_RE.test(handle);
   const store = valid ? await resolveStoreByHandle(handle).catch(() => null) : null;
   const name = store && store.status !== "purged" ? store.name : null;
@@ -38,13 +44,13 @@ export default async function ReportPage({ params, searchParams }: Props) {
     <>
       <AuthHeading title={t("report.title", { store: name ?? `@${valid ? handle : "…"}` })}>
         {name && (
-          <bdi dir="ltr" className="me-1 font-medium text-foreground">
+          <bdi dir="ltr" className="mb-1 block font-medium text-foreground">
             @{handle}
           </bdi>
         )}
         {t("report.lead")}
       </AuthHeading>
-      <ReportForm handle={valid ? handle : ""} reasons={ABUSE_REASONS} path={sameHostPath(p)} locale={locale} siteKey={widget?.siteKey ?? null} nonce={nonce} />
+      <ReportForm handle={handle} reasons={ABUSE_REASONS} path={sameHostPath(p)} locale={locale} siteKey={widget?.siteKey ?? null} nonce={nonce} />
     </>
   );
 }

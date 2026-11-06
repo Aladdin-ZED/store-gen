@@ -70,8 +70,8 @@ export function HealthPanels({ view }: { view: SystemHealthView }) {
   };
   const m = view.machine;
   const machine = m.state === "ok" ? m.data : null;
-  const frame = (id: string, title: string, body: ReactNode, opts: { at?: string; okText?: string; wide?: boolean } = {}) => (
-    <Frame key={id} title={title} at={opts.at ?? view.checkedAt} alarms={raised(id)} recoveredAt={recovered(id)} okText={opts.okText} codes={PANEL_ALARMS[id] ?? []} wide={opts.wide}>
+  const frame = (id: string, title: string, body: ReactNode, opts: { at?: string; okText?: string; wide?: boolean; data?: boolean } = {}) => (
+    <Frame key={id} title={title} at={opts.at ?? view.checkedAt} alarms={raised(id)} recoveredAt={recovered(id)} okText={opts.okText} codes={PANEL_ALARMS[id] ?? []} wide={opts.wide} data={opts.data ?? machine !== null}>
       {body}
     </Frame>
   );
@@ -101,8 +101,8 @@ export function HealthPanels({ view }: { view: SystemHealthView }) {
         {frame("cron", t("console.health.cron"), needMachine((h) => <Cron h={h} />), { at: machine?.at })}
         {frame("queues", t("console.health.queues"), needMachine((h) => <Queues h={h} />), { at: machine?.at })}
         {frame("renders", t("console.health.renders"), needMachine((h) => <Renders h={h} />), { at: machine?.at })}
-        {frame("storage", t("console.health.storage"), <Storage machine={machine} m={m} view={view} />, { at: machine?.at })}
-        {frame("engine", t("console.health.engine"), view.engine.state === "ok" ? <Engine e={view.engine.data} /> : view.engine.state === "error" ? <PanelError compact reference={view.engine.ref} /> : <PanelUnavailable />)}
+        {frame("storage", t("console.health.storage"), <Storage machine={machine} m={m} view={view} />, { at: machine?.at, data: machine !== null || view.pendingMedia.state === "ok" })}
+        {frame("engine", t("console.health.engine"), view.engine.state === "ok" ? <Engine e={view.engine.data} /> : view.engine.state === "error" ? <PanelError compact reference={view.engine.ref} /> : <PanelUnavailable />, { data: view.engine.state === "ok" })}
         {frame("edge", t("console.health.edge"), needMachine((h) => <Edge h={h} />), { at: machine?.at })}
         {frame("sheets", t("console.health.sheets"), needMachine((h) => <Sheets h={h} />), { at: machine?.at })}
         {frame("errors", t("console.health.errors"), needMachine((h) => <Errors h={h} />), { at: machine?.at })}
@@ -115,16 +115,17 @@ export function HealthPanels({ view }: { view: SystemHealthView }) {
   );
 }
 
-function Frame({ title, at, alarms, recoveredAt, codes, okText, children, wide }: { title: string; at: string; alarms: Alarm[]; recoveredAt: string | null; codes: readonly string[]; okText?: string; children: ReactNode; wide?: boolean }) {
+function Frame({ title, at, alarms, recoveredAt, codes, okText, children, wide, data }: { title: string; at: string; alarms: Alarm[]; recoveredAt: string | null; codes: readonly string[]; okText?: string; children: ReactNode; wide?: boolean; data: boolean }) {
   const t = useT();
-  const worst: Tone = alarms.some((a) => a.level === "danger") ? "danger" : alarms.some((a) => a.level === "warn") ? "warn" : alarms.length ? "info" : "ok";
+  // no data and nothing raised: say so, never "Normal"
+  const worst: Tone = alarms.some((a) => a.level === "danger") ? "danger" : alarms.some((a) => a.level === "warn") ? "warn" : alarms.length ? "info" : data ? "ok" : "neutral";
   const tip = codes.length ? t("console.health.drives", { alarms: codes.join(", ") }) : undefined;
   return (
     <section aria-label={title} className={cn(card, "flex min-w-0 flex-col", wide && "md:col-span-2")}>
       <div className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--c-hairline)] px-4 py-2">
         <h2 className="me-auto text-[13px] font-semibold tracking-[-0.006em]">{title}</h2>
         <StatusText tone={worst} title={tip}>
-          {alarms.length ? t(worst === "danger" ? "console.health.state.red" : "console.health.state.yellow") : recoveredAt ? t("console.health.recovered", { time: hhmm(recoveredAt) }) : (okText ?? t("console.health.state.ok"))}
+          {alarms.length ? t(worst === "danger" ? "console.health.state.red" : "console.health.state.yellow") : !data ? t("console.health.state.no_data") : recoveredAt ? t("console.health.recovered", { time: hhmm(recoveredAt) }) : (okText ?? t("console.health.state.ok"))}
         </StatusText>
         <span className="num text-[11px] text-muted-foreground">{t("console.health.updated", { time: hhmm(at) })}</span>
       </div>

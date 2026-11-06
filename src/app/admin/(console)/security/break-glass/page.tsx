@@ -32,7 +32,7 @@ export default async function BreakGlassPage({ searchParams }: Props) {
       <PageHeader title={tr("console.breakglass.title")} lead={tr("console.breakglass.lead")} />
       <PanelBoundary title={tr("console.breakglass.requests")}>{requests.state === "ok" ? <PendingRequests rows={requests.data} /> : requests.state === "error" ? <PanelError reference={requests.ref} /> : <PanelUnavailable />}</PanelBoundary>
       <PanelBoundary title={tr("console.breakglass.review")}>{review.state === "ok" ? <BreakGlassReview {...review.data} /> : review.state === "error" ? <PanelError reference={review.ref} /> : <PanelUnavailable />}</PanelBoundary>
-      <PanelBoundary title={tr("console.breakglass.log")}>{page.state === "ok" ? <AuditTable page={page.data} olderHref={older} label={tr("console.breakglass.log")} /> : page.state === "error" ? <PanelError reference={page.ref} /> : <PanelUnavailable />}</PanelBoundary>
+      <PanelBoundary title={tr("console.breakglass.log")}>{page.state === "ok" ? <AuditTable page={page.data} olderHref={older} label={tr("console.breakglass.log")} empty={tr("console.breakglass.log_empty")} /> : page.state === "error" ? <PanelError reference={page.ref} /> : <PanelUnavailable />}</PanelBoundary>
     </div>
   );
 }

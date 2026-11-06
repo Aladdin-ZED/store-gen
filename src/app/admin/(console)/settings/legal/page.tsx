@@ -32,11 +32,13 @@ function List({ list }: { list: LegalList }) {
   for (const g of list.groups) byKind.set(g.kind, [...(byKind.get(g.kind) ?? []), g]);
   return (
     <div className="grid gap-4">
-      {list.missing.map((k) => (
-        <Banner key={k} tone="danger">
-          {tr("console.legal.missing", { kind: tr(`console.legal.kind.${k}`) })}
+      {list.missing.length > 0 && (
+        <Banner tone="danger">
+          {list.missing.map((k) => (
+            <p key={k}>{tr("console.legal.missing", { kind: tr(`console.legal.kind.${k}`) })}</p>
+          ))}
         </Banner>
-      ))}
+      )}
       <p className="text-[12.5px] text-muted-foreground">{tr("console.legal.dpa_later")}</p>
       {R1_LEGAL_KINDS.map((kind) => (
         <section key={kind} aria-label={tr(`console.legal.kind.${kind}`)} className={card}>
@@ -154,7 +156,7 @@ export default async function LegalSettingsPage({ searchParams }: Props) {
     body = list.state === "ok" ? <List list={list.data} /> : list.state === "error" ? <PanelError reference={list.ref} /> : <PanelUnavailable />;
   }
   return (
-    <div className="mx-auto grid w-full max-w-[1200px] grid-cols-[minmax(0,1fr)] gap-4 md:gap-5">
+    <div className="mx-auto grid w-full max-w-[1100px] grid-cols-[minmax(0,1fr)] gap-4 md:gap-5">
       <PageHeader title={tr("console.legal.title")} lead={tr("console.legal.lead")} />
       <PanelBoundary title={tr("console.legal.title")}>{body}</PanelBoundary>
     </div>

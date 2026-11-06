@@ -102,9 +102,9 @@ function sentence(t: (k: string, v?: Record<string, string | number>) => string,
   return s === key ? null : s;
 }
 
-export function AuditTable({ page, olderHref, label }: { page: AuditViewPage; olderHref: string | null; label: string }) {
+export function AuditTable({ page, olderHref, label, empty }: { page: AuditViewPage; olderHref: string | null; label: string; empty?: string }) {
   const t = useT();
-  if (page.rows.length === 0 && !olderHref) return <section aria-label={label} className={card}>{<EmptyLine>{t("console.audit_view.empty")}</EmptyLine>}</section>;
+  if (page.rows.length === 0 && !olderHref) return <section aria-label={label} className={card}>{<EmptyLine>{empty ?? t("console.audit_view.empty")}</EmptyLine>}</section>;
   return (
     <section aria-label={label} className={cn(card, "overflow-hidden")}>
       {page.rows.length === 0 ? (
@@ -134,7 +134,7 @@ function Row({ r }: { r: AuditViewRow }) {
   const actor =
     r.actorKind === "system" ? t("console.feed.actor.system") : r.actorKind === "impersonation" ? t("console.activity_tab.during_view", { name: r.impersonator ?? r.actor.name ?? t("console.feed.actor.staff") }) : (r.actor.name ?? t("console.feed.actor.member"));
   return (
-    <li className="grid gap-1.5 px-4 py-3 md:grid-cols-[140px_minmax(0,220px)_minmax(0,1fr)_auto] md:gap-4 md:px-5">
+    <li className="grid gap-1.5 px-4 py-3 md:grid-cols-[132px_minmax(0,200px)_minmax(0,1fr)_auto] md:gap-4 md:px-5">
       <span className="text-[12px] text-muted-foreground">
         <Ago iso={r.at} />
         <span className="num block text-[11px]">{r.at.slice(0, 16).replace("T", " ")}</span>
@@ -147,13 +147,21 @@ function Row({ r }: { r: AuditViewRow }) {
         ) : (
           <span className="truncate text-[12.5px] font-medium">{actor}</span>
         )}
-        <span className="text-[11.5px] text-muted-foreground">{r.actor.role && r.actor.role !== "none" ? t(`console.role.${r.actor.role}`) : t(`console.audit_view.kind.${r.actorKind}`)}</span>
+        {r.actorKind !== "system" && <span className="text-[11.5px] text-muted-foreground">{r.actor.role && r.actor.role !== "none" ? t(`console.role.${r.actor.role}`) : t(`console.audit_view.kind.${r.actorKind}`)}</span>}
       </span>
       <span className="grid min-w-0 content-start gap-1">
-        <span className="text-[13px]">{s ?? r.action}</span>
-        <bdi dir="ltr" className="font-mono text-[11px] text-muted-foreground">
-          {r.action}
-        </bdi>
+        {s ? (
+          <>
+            <span className="text-[13px]">{s}</span>
+            <bdi dir="ltr" className="font-mono text-[11px] text-muted-foreground">
+              {r.action}
+            </bdi>
+          </>
+        ) : (
+          <bdi dir="ltr" className="font-mono text-[12.5px]">
+            {r.action}
+          </bdi>
+        )}
         <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-[12px]">
           {r.store && (
             <PrefetchLink href={`/admin/stores/${r.store.id}`} className={link}>
