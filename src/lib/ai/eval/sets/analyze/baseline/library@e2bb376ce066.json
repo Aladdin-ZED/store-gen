@@ -1,0 +1,9 @@
+{"family":"analyze","version":"library","source":{"rung":"library","model":null},"fixturesHash":"e2bb376ce066350f891aee0980d359df6c5818664770a4ce788b62c75964367e",
+  "outputs": {
+    "analyze/analyze-blurry": null,
+    "analyze/analyze-cluttered": null,
+    "analyze/analyze-orange-product": null,
+    "analyze/analyze-plain": null,
+    "analyze/misread-glass-bottle": null
+  }
+}

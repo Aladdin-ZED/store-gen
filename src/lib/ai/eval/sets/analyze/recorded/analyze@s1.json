@@ -1,0 +1,19 @@
+{"family":"analyze","version":"analyze@s1","synthetic":true,"why":"hand-authored for R1 (no API key): clean passes plus planted failures the guard must catch; --record replaces it","source":{"rung":"server","model":"claude-sonnet-5-5"},"fixturesHash":"e2bb376ce066350f891aee0980d359df6c5818664770a4ce788b62c75964367e",
+  "runs": {
+    "analyze/analyze-blurry": [
+      {"output":{"category":"kitchen","vibe":"sport","secondary_vibe":"none","colors":["أخضر","أبيض"],"summary":"خلاط محمول فاليد فالخارج، الصورة ماشي واضحة.","audience":"ناس كيحبو يوجدو العصير فين ما كانو.","materials":[],"suggested_facts":[],"photo_quality":{"sharp":false,"clutter":"some","full_bleed_ok":false,"cutout_viable":false,"advice":"صور المنتج مرة أخرى فالضو، والتلفون ثابت."}},"why":"clean: an out-of-focus photo read as sharp = false with one plain advice line","usage":{"model":"claude-sonnet-5-5","inTok":4784,"outTok":1248,"cacheReadTok":3000},"ms":3528,"stop":"end_turn"}
+    ],
+    "analyze/analyze-cluttered": [
+      {"output":{"category":"fragrance","vibe":"luxury","secondary_vibe":"beauty","colors":["rose","blanc"],"summary":"A perfume bottle on a mirror tray among pearls and flowers, with a printed label.","audience":"Shoppers looking for a gift.","materials":["crystal"],"suggested_facts":["Crystal bottle"],"photo_quality":{"sharp":true,"clutter":"heavy","full_bleed_ok":false,"cutout_viable":false,"advice":"Shoot the bottle alone on a plain background."}},"why":"planted misread: 'crystal' as a material and a suggested fact; finalize keeps it as an unticked chip, never in copy","usage":{"model":"claude-sonnet-5-5","inTok":3864,"outTok":1008,"cacheReadTok":3000},"ms":4452,"stop":"end_turn"}
+    ],
+    "analyze/analyze-orange-product": [
+      {"output":{"category":"skincare","vibe":"natural","secondary_vibe":"beauty","colors":["ambre","brun"],"summary":"Un flacon compte-gouttes en verre ambré posé sur un support en bois, avec des ombres de palmes.","audience":"Des femmes qui soignent leur peau au quotidien.","materials":[],"suggested_facts":["Flacon compte-gouttes"],"photo_quality":{"sharp":true,"clutter":"some","full_bleed_ok":true,"cutout_viable":false,"advice":"Photographiez aussi le flacon seul, sur un fond clair."}},"why":"clean: the orange-family product read as it is; the accent is the theme engine's, never this read","usage":{"model":"claude-sonnet-5-5","inTok":4370,"outTok":1140,"cacheReadTok":3000},"ms":3654,"stop":"end_turn"}
+    ],
+    "analyze/analyze-plain": [
+      {"output":{"category":"kitchen","vibe":"sport","secondary_vibe":"home","colors":["vert","blanc"],"summary":"Un blender portable tenu en main, en extérieur, net et bien éclairé.","audience":"Des personnes actives qui préparent leurs boissons dehors.","materials":[],"suggested_facts":["Se tient dans une main"],"photo_quality":{"sharp":true,"clutter":"none","full_bleed_ok":true,"cutout_viable":true,"advice":""}},"why":"clean: a plain sharp photo","usage":{"model":"claude-sonnet-5-5","inTok":4048,"outTok":1056,"cacheReadTok":3000},"ms":4284,"stop":"end_turn"}
+    ],
+    "analyze/misread-glass-bottle": [
+      {"output":{"category":"fragrance","vibe":"luxury","secondary_vibe":"minimal","colors":["noir","blanc"],"summary":"A crystal perfume bottle with a black cap on white fur.","audience":"Shoppers looking for an elegant perfume.","materials":["crystal"],"suggested_facts":["Crystal bottle"],"photo_quality":{"sharp":true,"clutter":"none","full_bleed_ok":true,"cutout_viable":true,"advice":""}},"why":"planted misread material: 'crystal' in the summary and the materials; finalize moves it into an unticked chip","usage":{"model":"claude-sonnet-5-5","inTok":4646,"outTok":1212,"cacheReadTok":3000},"ms":4662,"stop":"end_turn"}
+    ]
+  }
+}

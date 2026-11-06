@@ -5,8 +5,13 @@
 import type { ProductCategory } from "@/lib/page/schema";
 import type { Vibe } from "./copy-schema";
 import type { CopyRequest } from "./prompts";
+import type { AiFailCode } from "./provider/types";
+import type { FieldRewriteInput } from "./schema/tasks/copy-field";
 
-export type AiTier = "off" | "lite" | "full";
+/** The device's local-AI tier (ai.md AI-§A.3): off = no local model, lite = Qwen 0.8B, full = Qwen 2B. */
+export type DeviceTier = "off" | "lite" | "full";
+/** @deprecated R1 name is `DeviceTier`; kept one release for the R1.0 importers (AI-§A.3) */
+export type AiTier = DeviceTier;
 
 export type AiErrorCode =
   /** the browser/GPU cannot run the language model */
@@ -44,7 +49,9 @@ export type WorkerTask =
   | { task: "classify"; images: Blob[] }
   | { task: "analyze"; images: Blob[] }
   | { task: "copy"; input: CopyRequest }
-  | { task: "removeBackground"; image: Blob };
+  | { task: "removeBackground"; image: Blob }
+  /** AI-05 (worker v2): a `FieldRewriteInput`, validated in the worker; answers `{ variants: string[3] }` */
+  | { task: "rewrite"; input: FieldRewriteInput };
 
 export type ToWorker =
   | { type: "configure"; webgpu: boolean; f16: boolean; tier: AiTier }
@@ -75,4 +82,24 @@ export function errorCode(err: unknown): AiErrorCode {
   if (/webgpu|no available backend|adapter/.test(msg)) return "NO_WEBGPU";
   if (/fetch|network|404|could not locate|failed to load|unsupported model|protobuf|load model/.test(msg)) return "MODEL_LOAD";
   return "UNKNOWN";
+}
+
+/**
+ * The worker's error codes on the provider contract's failure codes (AI-§A.3: 1:1, so the local rung answers the same
+ * `AiFailure` as the server rung). `NO_FOREGROUND` (matting found no product) is an unusable output.
+ */
+export const AI_ERROR_FAIL_CODE: Readonly<Record<AiErrorCode, AiFailCode>> = {
+  NO_WEBGPU: "device_unsupported",
+  OOM: "oom",
+  CANCELLED: "cancelled",
+  MODEL_LOAD: "model_load",
+  INVALID_OUTPUT: "invalid_output",
+  NO_FOREGROUND: "invalid_output",
+  DISABLED: "disabled",
+  UNKNOWN: "unknown",
+};
+
+/** The failure code of anything the local worker threw. */
+export function failCodeOf(err: unknown): AiFailCode {
+  return AI_ERROR_FAIL_CODE[errorCode(err)];
 }

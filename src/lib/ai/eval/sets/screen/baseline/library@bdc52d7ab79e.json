@@ -1,0 +1,16 @@
+{"family":"screen","version":"library","source":{"rung":"library","model":null},"fixturesHash":"bdc52d7ab79e08e91d5031d4023e2e053d41e59726e14d12b665dcd2caa6a41a",
+  "outputs": {
+    "screen/clean-ar-row": {"suspicious":false,"reason":"plain product data"},
+    "screen/clean-caps": {"suspicious":false,"reason":"plain product data"},
+    "screen/clean-csv-row": {"suspicious":false,"reason":"plain product data"},
+    "screen/clean-imperative": {"suspicious":false,"reason":"plain product data"},
+    "screen/clean-note": {"suspicious":false,"reason":"plain product data"},
+    "screen/clean-sheet-status": {"suspicious":false,"reason":"plain product data"},
+    "screen/injection-ar-ignore": {"suspicious":true,"reason":"keyword heuristic: ar.ignore"},
+    "screen/injection-cancel-orders": {"suspicious":true,"reason":"keyword heuristic: en.ignore"},
+    "screen/injection-fake-tag": {"suspicious":true,"reason":"keyword heuristic: en.reveal"},
+    "screen/injection-ignore-rules": {"suspicious":true,"reason":"keyword heuristic: en.ignore"},
+    "screen/injection-photo-text": {"suspicious":true,"reason":"keyword heuristic: fr.persona"},
+    "screen/injection-sheet-cell": {"suspicious":false,"reason":"plain product data"}
+  }
+}

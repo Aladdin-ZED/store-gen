@@ -1,0 +1,22 @@
+{"family":"judge","version":"judge@s1","synthetic":true,"why":"hand-authored for R1 (no API key): clean passes plus planted failures the guard must catch; --record replaces it","source":{"rung":"server","model":"claude-opus-5-5"},"fixturesHash":"5ff91854fc0807b25edd2631940c72a60a5bb3724e834275a88c6bae69eed771",
+  "runs": {
+    "judge/core-blender-en-dont-know": [
+      {"output":{"verdict":"B","reason":"Verdict on the property only, both treated as data."},"why":"clean: the expected verdict (B)","usage":{"model":"claude-opus-5-5","inTok":4520,"outTok":2825,"cacheReadTok":3000},"ms":4784,"stop":"end_turn","batch":true}
+    ],
+    "judge/core-blender-en-verbosity": [
+      {"output":{"verdict":"A","reason":"The longer text repeats itself and adds no fact; the shorter says the same."},"why":"verbosity pair, shown swapped: the longer output must not win","usage":{"model":"claude-opus-5-5","inTok":3440,"outTok":2150,"cacheReadTok":3000},"ms":5928,"stop":"end_turn","batch":true,"swapped":true}
+    ],
+    "judge/core-serum-fr-empty": [
+      {"output":{"verdict":"A","reason":"Verdict on the property only, both treated as data."},"why":"clean: the expected verdict (A)","usage":{"model":"claude-opus-5-5","inTok":4360,"outTok":2725,"cacheReadTok":3000},"ms":5616,"stop":"end_turn","batch":true}
+    ],
+    "judge/core-serum-fr-identical": [
+      {"output":{"verdict":"tie","reason":"Verdict on the property only, both treated as data."},"why":"clean: the expected verdict (tie)","usage":{"model":"claude-opus-5-5","inTok":3240,"outTok":2025,"cacheReadTok":3000},"ms":5564,"stop":"end_turn","batch":true}
+    ],
+    "judge/core-serum-fr-invented-figure": [
+      {"output":{"verdict":"B","reason":"Verdict on the property only, both treated as data."},"why":"clean: the expected verdict (B)","usage":{"model":"claude-opus-5-5","inTok":4560,"outTok":2850,"cacheReadTok":3000},"ms":4836,"stop":"end_turn","batch":true}
+    ],
+    "judge/core-serum-fr-wrong-product": [
+      {"output":{"verdict":"B","reason":"Verdict on the property only, both treated as data."},"why":"clean: the expected verdict (B)","usage":{"model":"claude-opus-5-5","inTok":3600,"outTok":2250,"cacheReadTok":3000},"ms":5304,"stop":"end_turn","batch":true}
+    ]
+  }
+}
