@@ -904,6 +904,13 @@ async function schemaMatchesSnapshot(dbName: string): Promise<void> {
 async function tenantSetMatchesDocument(): Promise<void> {
   const { TABLE_LEVELS, tenantSetProblems } = await import("@/lib/db/upgrade-check");
   same("(e) schema.ts tenant set = TABLE_LEVELS", tenantSetProblems(), []);
+  // ENGC-31 (CCR r1-p8-10): the purge deletes or keeps every §D.3 row with a store_id, each exactly once
+  const { purgePlan } = await import("@/lib/jobs/purge/plan");
+  const plan = purgePlan();
+  const withStore = Object.entries(TABLE_LEVELS).filter(([, l]) => l === "T" || l === "P*" || l === "P-opt").map(([t]) => t).sort();
+  const covered = [...plan.tables, ...plan.keep];
+  same("(e) purgePlan(): tables ∪ keep = the §D.3 rows with store_id", [...covered].sort(), withStore);
+  same("(e) purgePlan(): no table deleted twice or both deleted and kept", covered.length, new Set(covered).size);
   const doc = readFileSync(join(ROOT, "docs", "STORE-SAAS.md"), "utf8");
   const section = (from: string, to: string) => doc.slice(doc.indexOf(from), doc.indexOf(to, doc.indexOf(from)));
   const levelOf = (cell: string) => {

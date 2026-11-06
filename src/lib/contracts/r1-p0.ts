@@ -589,6 +589,8 @@ export type P8Outbox = [
 
 export type P8HealthAndExports = [
   Assert<Equals<typeof platformHealth.getHealth, (ctx: PlatformCtx) => Promise<PlatformHealth>>>,
+  // CCR r1-p8-23 (P8 merge): the honest report, every section T | null with sectionErrors; P1 reads it for "unavailable"
+  Assert<Equals<typeof platformHealth.getHealthReport, (ctx: PlatformCtx, opts?: { sections?: readonly platformHealth.HealthSection[] }) => Promise<platformHealth.HealthReport>>>,
   Assert<Equals<PlatformHealth["edge"], { sMode: boolean; workerVersion: string | null; lastEdgeAt: string | null; prevKeyRequests24h: number; badKey24h: number; foreignHosts24h: number }>>,
   Assert<Equals<PlatformHealth["commerce"], { lastOrderAt: string | null; ordersPerHour24: number[] }>>,
   Assert<Equals<PlatformHealth["sheetsTop"], { storeId: string; oldestMin: number }[]>>,

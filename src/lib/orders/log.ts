@@ -43,4 +43,7 @@ export function errorSummary(err: unknown): string {
 /** Log an unexpected failure without request data (no PII in logs). */
 export function logError(scope: string, err: unknown): void {
   console.error(`[${scope}]`, errorSummary(err));
+  // the error ring (§H.5, CCR r1-p8-8): area = the scope before ':' ("orders:create" → "orders"); never throws, never
+  // waits; a lazy import keeps this file free of server-only and the module graph acyclic (errors.ts imports this file)
+  void import("@/lib/jobs/errors").then((m) => m.recordError(scope.split(":")[0] ?? scope, err), () => undefined);
 }

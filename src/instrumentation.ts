@@ -8,8 +8,9 @@
  *     cleared by (§H.10)
  *  2. pending database migrations (serialised across processes with a DB lock); a process that times out on the lock
  *     skips steps 5 and 6, which the process holding it runs
- *  3. the media storage check: arrives with the filesystem backend (§G.2, src/lib/media/storage/check.ts); while
- *     media lives in the database there is nothing to check
+ *  3. the media storage check (§G.2, src/lib/media/storage/check.ts): DATA_DIR's owner marker and probe; a failure
+ *     logs `[boot] ERROR media storage …` and keeps media in the database (mediaBackend() = db); the query pool's
+ *     wait sampler (src/lib/jobs/metrics.ts, ENGC-12) is attached just before it
  *  4. expired sessions purged
  *  5. in ONE process (withBootLock), in the background so they never delay serving: published checksums, the store #1
  *     conversion (tenancy_v1, with the pixel library migration inside it), the protected brands and flags seeds
@@ -74,7 +75,22 @@ export async function register(): Promise<void> {
       return;
     }
 
-    // 3. media storage check: none while media lives in the database (§G.2)
+    // §H.5 / ENGC-12: the query pool's wait sampler starts with the process (idempotent, never throws)
+    try {
+      const { ensureOpsSamplers } = await import("./lib/jobs/metrics");
+      ensureOpsSamplers();
+    } catch (err) {
+      console.error("[boot] ops samplers failed:", err instanceof Error ? err.message : err);
+    }
+
+    // 3. media storage check (§G.2, ENGC-14): DATA_DIR absolute, outside the app and public_html, owner marker,
+    // probe write; a failure keeps media in the database and turns the health tile red, it never stops the app
+    try {
+      const { runMediaStorageCheck } = await import("./lib/media/storage/check");
+      await runMediaStorageCheck();
+    } catch (err) {
+      console.error("[boot] ERROR media storage:", err instanceof Error ? err.message : err);
+    }
 
     // 4. sessions
     try {

@@ -106,15 +106,62 @@ STORE-SAAS §H.7). Never set `NODE_ENV` (the build needs the devDependencies), `
 
 - **Decision:** `DATA_DIR=/home/u641677794/storegen-data`: outside every `domains/*/public_html` (the web server never
   serves it), outside the build folder an archive deploy replaces, and its own folder on the hosting user COD Studio
-  shares (STORE-SAAS §G.2). Create nothing else by hand: from P8 the boot check writes the `.sg-owner` marker and its
-  subfolders when the parent is writable. In R1.0 media still live in the database; the boot log only checks the path
-  (`[boot]` warnings for a relative path, a path inside the app folder or under `public_html`).
+  shares (STORE-SAAS §G.2). Create nothing else by hand. At every start the app checks the folder before serving (`src/lib/media/storage/check.ts`):
+  the path is absolute, outside the app folder (and not a parent of it), with no `public_html` segment, not a symbolic
+  link, owned by the app's user, and a probe file can be written, fsynced, renamed and deleted. It creates the missing
+  folder (only the last path segment) and its subfolders (`media/v1`, `media/tmp`, `cache/media`, `exports`, `imports`,
+  `receipts`, `ai`, `backups`, all 0700). On the first good start it writes the owner marker
+  `storegen-data/.sg-owner` = `{"app":"store-gen","db":"<database name>"}` (0600) and never rewrites it.
+
+  - **The marker binds the folder to one database.** COD Studio runs on the same hosting account: if a copied env file
+    ever points both apps (or a second Store Gen database) at one folder, the marker refuses it instead of letting one
+    app's sweeper delete the other's files. Never edit or copy the marker. Moving to another database on purpose:
+    stop the app, check that the folder holds this app's files, delete `.sg-owner`, start the app (it writes a new one).
+  - **When the check fails, the app keeps running.** The log shows one `[boot] ERROR media storage <code>: …` line
+    (`inside_app`, `public_html`, `symlink`, `owner`, `not_writable`, `probe`, `owner_mismatch`, `marker_unreadable`,
+    `missing`, `not_dir`, `relative`, `unset`, `no_database`, `error`), new uploads go to the database (the R1.0
+    behaviour), and the console health tile is red with the same code. Files already on disk are still served from
+    it. Fix the cause and restart: the check runs once per start. Uploads that went to the database meanwhile move to
+    the folder by themselves (the `media.migrate` job, P8 step 7).
+  - **Disk budget.** Hostinger's quota is per account and the volume's free space says nothing about it, so the app
+    never asks the disk: a nightly bounded walk counts the folder against `DATA_DIR_BUDGET_BYTES` (default 20 GiB; set
+    it to the account's real share in `.env.hostinger`). Alarms at 70 % and 85 % (`data_dir_70`, `data_dir_85`), and
+    a warning above 300,000 files (Hostinger Business allows 600,000 inodes for every site of the account).
 - **Persistence probe (§H.10, ENGC-14):** the path stays **[unverified]** until a probe file survives **two** archive
   deploys. Before the first R1.0 deploy, create `/home/u641677794/storegen-data/.sg-probe` holding the commit being
   deployed (hPanel File Manager, or a one-off hPanel cron command
   `mkdir -p /home/u641677794/storegen-data && echo <sha7> > /home/u641677794/storegen-data/.sg-probe`). After that
   deploy and after the next one, open the file: it must still be there with the same content. Record the date and the
   two build ids in §6; only then drop `[unverified]`.
+
+### Backups and the restore drill (§H.6, R1 exit criterion 6)
+
+Every night at 03:30 (the platform timezone) the `backup` job writes one folder
+`storegen-data/backups/<YYYY-MM-DD>/`: per table, parts `<table>.<nnnn>.ndjson.gz.sg` (NDJSON, gzip, one AES-GCM
+envelope per part of at most 8 MB, key purpose `backup:v1`, derived from `APP_SECRET`) and `manifest.json` (row
+counts, part sizes and sha256 only, never a value). The run is sliced over the following ticks and resumes where it
+stopped; the console lists every run with its state (`running`, `done`, `failed` with an error code, `pruned`) and a
+super_admin downloads a done day as a ZIP. Kept: the 7 newest days plus the 4 newest Sundays (`platform_backup`
+retention, 3-30 and 1-12); older folders are deleted. A purged store's id sits in `platform_backup.purgeRequests`:
+every backup started after the request leaves its rows out, and the id is dropped once every kept backup was written
+without them.
+
+- **Keep `APP_SECRET` offline, apart from the backups.** Without it no part opens; with it, anyone holding the
+  folder reads every store. Never put the two in the same place.
+- **The drill (no production data touched).** On a machine with the app's `.env.local` (`DATABASE_URL` for the server,
+  `DATA_DIR`, `APP_SECRET`) and the day's folder under `DATA_DIR/backups/`:
+
+  `npx tsx scripts/qa/storage-check.ts --restore-drill <YYYY-MM-DD> --db cod_test_restore_<x>`
+
+  It checks every part against `manifest.json` (one changed byte and nothing is restored), creates and migrates
+  `cod_test_restore_<x>` (dropped first if it exists), restores the rows and prints the row count per table, checked
+  again in the database. The target is kept for inspection: drop it afterwards. Only `cod_test_*` names are
+  accepted; the app's own database, `cod_studio` and `cod_storegen` are always refused.
+- **A production import is the owner's alone.** Add `--manual` to restore into a database that does not exist yet
+  (it is never overwritten), check it, then point the app at it. Never restore over the live database.
+- **A failed run** keeps its code for the console's `backup_failed` alarm: `no_data_dir` (fix `DATA_DIR`, see above),
+  `no_space` (free space or raise the account's quota), `read_failed` (the database failed three times in a row),
+  `seal_failed`, `write_failed`, `cursor_lost`. The next day's run starts fresh; a failed day's folder is removed.
 
 ### Cron (header form)
 

@@ -593,7 +593,7 @@ async function diskCopy(meta: MediaFileMeta): Promise<string | null> {
   const now = Date.now();
   if ((d.backoff.get("*") ?? 0) > now || (d.backoff.get(name) ?? 0) > now) return null;
   if (!(await (d.ready ??= prepareDisk())) || !d.dir) return null;
-  const path = join(d.dir, name);
+  const path = join(/* turbopackIgnore: true */ d.dir, name); // DATA_DIR/cache/media: never traced into the build
   const entry = d.index.get(name);
   if (entry?.verified && entry.bytes === meta.bytes) {
     d.index.delete(name); // most recently used

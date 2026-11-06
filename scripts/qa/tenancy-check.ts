@@ -61,7 +61,8 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, generateKeyPairSync, randomBytes, randomInt, randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import Module, { createRequire } from "node:module";
 import path from "node:path";
 import type { RequestIdentity } from "@/lib/tenancy/context";
@@ -124,8 +125,12 @@ const TEST_SA = (() => {
     "TURNSTILE_SECRET_KEY",
     "TRUSTED_PROXY_HOPS",
     "SETUP_TOKEN",
+    "MEDIA_DIR",
   ])
     delete env[k];
+  // R1 P8 merge (CCR r1-p8-22): a fresh DATA_DIR outside the app, as on the host (media on the filesystem backend,
+  // the store export ZIP parts under DATA_DIR/exports); removed with the database at the end (unless --keep)
+  env.DATA_DIR = mkdtempSync(path.join(tmpdir(), "sg-tenancy-"));
   env.DATABASE_URL = `${DB_SERVER}/${DB_NAME}`;
   env.SG_TEST_CONTEXT = "1";
   env.APP_SECRET = randomBytes(32).toString("hex");
@@ -399,6 +404,9 @@ export interface StoreFx {
   /** the photo's bytes (the identical-upload case) */
   photoBytes: Buffer;
   export: string;
+  /** a ready store export ZIP (P8 step 8, CCR r1-p8-22): its job id and the signed token of part 1 */
+  exportJob: string;
+  exportToken: string;
   invite: string;
   pixel: { own: string; shared: string };
   spreadsheetId: string;
@@ -498,6 +506,7 @@ export async function dropDatabase(): Promise<string[]> {
     // never opened
   }
   if (!KEEP) await rootQuery(`DROP DATABASE IF EXISTS \`${DB_NAME}\``);
+  if (!KEEP && process.env.DATA_DIR?.includes("sg-tenancy-")) rmSync(process.env.DATA_DIR, { recursive: true, force: true });
   const left = (await rootQuery("SHOW DATABASES LIKE 'cod\\_test\\_%'")) as Record<string, string>[];
   return left.map((r) => Object.values(r)[0]!);
 }
@@ -668,6 +677,8 @@ async function seed(): Promise<Fixtures> {
       asset: { photo, cutout },
       photoBytes,
       export: exportId,
+      exportJob: "",
+      exportToken: "",
       invite,
       pixel,
       spreadsheetId,
@@ -687,6 +698,26 @@ async function seed(): Promise<Fixtures> {
   const staff = { id: staffId, token: await session(staffId) };
 
   const canaries = await canariesOf(A);
+  // CCR r1-p8-22: a ready store export of each store (P8 step 8), built to the end in this process on the temp DATA_DIR
+  {
+    const EX = load<typeof import("@/lib/exports-store")>("@/lib/exports-store");
+    const { exportsJob } = load<typeof import("@/lib/jobs/exports")>("@/lib/jobs/exports");
+    const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+    for (const s of [A, B]) {
+      const scope = systemScope(systemCtx("qa.tenancy"), s.id);
+      const { jobId } = await EX.requestStoreExport(scope, { requestedAs: "member", requestedBy: s.members.owner });
+      for (let i = 0; i < 50; i++) {
+        const r = await exportsJob({ ...systemCtx("exports"), deadline: Date.now() + 30_000, tickId: "qa", cursor: "", setCursor: async () => {}, yield: () => new Promise<void>((res) => setImmediate(res)), lagMs: () => 0 });
+        if (r.summary?.state === "ready" || r.summary?.state === "failed" || r.summary?.idle) break;
+      }
+      const job = (await EX.listExportJobs(scope)).find((j) => j.id === jobId);
+      const href = job?.parts?.[0]?.href;
+      if (!href) throw new Error(`the store export of ${s.key} is not ready: ${JSON.stringify(job ?? null)}`);
+      s.exportJob = jobId;
+      s.exportToken = new URL(href, PLATFORM).searchParams.get("t") ?? "";
+    }
+    canaries.ids.push(A.exportJob); // so a B answer naming A's job id is a leak
+  }
   const ghosts = new Map<string, string>();
   for (const v of canaries.ids) ghosts.set(v, ghostOf(v));
   return { A, B, dual, outsider, staff, canaries, ghosts, ghostHandle: "zz-ghost-store", rows: { A: (await getStoreById(A.id))!, B: (await getStoreById(B.id))! } };
@@ -1496,6 +1527,8 @@ function routePlan(fx: Fixtures, method: string, template: string): RoutePlan {
     "POST /api/app/[store]/sheets/connect": { body: { url: `https://docs.google.com/spreadsheets/d/${A.spreadsheetId}/edit#gid=0` } },
     "PATCH /api/app/[store]/sheets/connect": { body: { enabled: true } },
     "GET /app/[store]/preview/[id]": { query: { v: A.version.live } },
+    // CCR r1-p8-22: A's valid signed link, presented by every attacker (B's roles, the dual member, staff viewing B)
+    "GET /api/app/[store]/exports/[jobId]/[part]": { query: { t: A.exportToken } },
   };
   return plans[`${method} ${template}`] ?? {};
 }
@@ -1652,7 +1685,7 @@ export async function routeSuite(kit: Kit): Promise<void> {
         continue;
       }
       for (const who of attackers(fx)) {
-        const ids: Record<string, string> = route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
+        const ids: Record<string, string> = route.template.includes("[jobId]") ? { jobId: fx.A.exportJob, part: "1" } : route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
         // 1. A's handle: the neutral 404 of an unknown handle
         if (who.userId !== fx.dual) {
           const onA = await callRoute(armed(who.userId), route, method, { store: fx.A.handle, ...ids }, plan, { photo: fx.A.photoBytes });
@@ -1678,7 +1711,7 @@ export async function routeSuite(kit: Kit): Promise<void> {
       // the member of both stores on A's handle is A's viewer: a key the viewer lacks is refused (403, not 404)
       const key = guardKey(route, method);
       if (key && !can("viewer", key)) {
-        const ids: Record<string, string> = route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
+        const ids: Record<string, string> = route.template.includes("[jobId]") ? { jobId: fx.A.exportJob, part: "1" } : route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
         const r = await callRoute({ userId: fx.dual }, route, method, { store: fx.A.handle, ...ids }, plan, { photo: fx.A.photoBytes });
         check(`${method} ${route.template} · member of A and B · A's handle (A's viewer): 403 without ${key}`, r.ok && r.value!.status === 403, routeAnswer(r));
       }
@@ -1709,6 +1742,7 @@ async function ownRoutePlan(fx: Fixtures, fresh: Fresh, method: string, template
   const key = `${method} ${template}`;
   if (key === "DELETE /api/app/[store]/media") return { ids: {}, plan: { query: { id: await fresh.asset(B), force: "1" } } };
   if (key === "DELETE /api/app/[store]/export/[id]") return { ids: { id: await fresh.exportOf(B) }, plan: {} };
+  if (key === "GET /api/app/[store]/exports/[jobId]/[part]") return { ids: { jobId: B.exportJob, part: "1" }, plan: { query: { t: B.exportToken } } };
   const plans: Record<string, RoutePlan> = {
     "GET /api/app/[store]/media": { query: { sourceAssetId: B.asset.photo } },
     "POST /api/app/[store]/media": { multipart: true },
@@ -2309,6 +2343,10 @@ export async function specialSuite(kit: Kit): Promise<void> {
       const filesA = new Map<string, Buffer[]>();
       for (const c of chunks) filesA.set(c.k, [...(filesA.get(c.k) ?? []), c.d]);
       const hashesA = new Set([...filesA.values()].map((parts) => createHash("sha256").update(Buffer.concat(parts)).digest("hex")));
+      // R1 P8 merge: A's files on the filesystem backend (the harness runs with a DATA_DIR) have no chunk rows: their
+      // media_files.sha256 is the same content hash
+      const [fsRows] = (await pool().query("SELECT sha256 AS h FROM media_files WHERE store_id = ? AND storage = 'fs'", [fx.A.id])) as unknown as [{ h: string }[]];
+      for (const r of fsRows) hashesA.add(r.h);
       const names = Object.keys(entries);
       const textual = names.filter((n) => /\.(html?|php|js|mjs|css|json|txt|md|htaccess|xml|webmanifest)$|(^|\/)\.[a-z]+$/i.test(n));
       const leakedText = textual.flatMap((n) => leaks(fx, strFromU8(entries[n]!), { sent: docWithA }).map((l) => `${n}: ${l}`));
@@ -2918,7 +2956,7 @@ export async function impersonationSuite(kit: Kit): Promise<void> {
   const tenantRoutes = deriveRoutes().filter((r) => r.template.includes("[store]"));
   for (const route of tenantRoutes) {
     for (const method of route.methods) {
-      const ids: Record<string, string> = route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
+      const ids: Record<string, string> = route.template.includes("[jobId]") ? { jobId: fx.A.exportJob, part: "1" } : route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
       const r = await callRoute(who, route, method, { store: fx.A.handle, ...ids }, routePlan(fx, method, route.template), { photo: fx.A.photoBytes });
       const label = `${method} ${route.template} · staff viewing A`;
       if (!ranReal(label, r)) continue;
@@ -2989,7 +3027,7 @@ export async function impersonationSuite(kit: Kit): Promise<void> {
   for (const route of tenantRoutes) {
     for (const method of route.methods) {
       const plan = routePlan(fx, method, route.template);
-      const ids: Record<string, string> = route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
+      const ids: Record<string, string> = route.template.includes("[jobId]") ? { jobId: fx.A.exportJob, part: "1" } : route.template.includes("[id]") ? { id: idFor(fx, route.template, fx.A) } : {};
       if (route.template.startsWith("/s/")) {
         // A's public store routes: the staff member viewing B is one more visitor there (the signed-out answer)
         const params: Record<string, string> = { store: fx.A.handle, ...(route.template.includes("[slug]") ? { slug: fx.A.slug } : {}), ...(route.template.includes("[kind]") ? { kind: "privacy" } : {}) };

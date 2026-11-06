@@ -50,6 +50,7 @@ import { db } from "@/lib/db/client";
 import { impersonationSessions, storeMembers } from "@/lib/db/schema";
 import { appPathHandle } from "@/lib/edge/areas";
 import { effectiveHost } from "@/lib/edge/host";
+import { recordError } from "@/lib/jobs/errors";
 import { verifiedRequestPath } from "@/lib/edge/path-sig";
 import { isAdminLocale } from "@/lib/i18n/admin";
 import { errorSummary } from "@/lib/orders/log";
@@ -159,7 +160,7 @@ export const PLATFORM_READ_ONLY: MessageKey = "error.platform_read_only";
  * → `busy`, anything else → `server` (logged without request data; never a raw DB message). Next control-flow errors
  * must be rethrown by the caller first (`unstable_rethrow`).
  */
-export function actionFailure(err: unknown, area: string): Extract<ActionResult<never>, { ok: false }> {
+export function actionFailure(err: unknown, area: string, where: { storeId?: string | null } = {}): Extract<ActionResult<never>, { ok: false }> {
   if (err instanceof SeamError) return err.messageKey ? { ok: false, error: err.code, message: err.messageKey } : { ok: false, error: err.code };
   if (err instanceof AuthRefusal) return err.messageKey ? { ok: false, error: err.code, message: err.messageKey } : { ok: false, error: err.code };
   if (err instanceof FieldsError) {
@@ -184,6 +185,8 @@ export function actionFailure(err: unknown, area: string): Extract<ActionResult<
   if (err instanceof ActionError || err instanceof AuthInputError) return { ok: false, error: "invalid", message: err.message };
   if (err instanceof ZodError) return { ok: false, error: "invalid", message: err.issues[0]?.message ?? "Some fields are invalid." };
   console.error(`[${area}]`, errorSummary(err));
+  // the error ring (§H.5, CCR r1-p8-8); never throws, never waits
+  recordError("action", err, { storeId: where.storeId, route: area });
   return { ok: false, error: "server" };
 }
 
@@ -264,6 +267,7 @@ let unsignedCount = 0;
 let unsignedLoggedAt = 0;
 function recordPathUnsigned(): void {
   unsignedCount++;
+  recordError("edge", null, { code: "path_unsigned" });
   const now = Date.now();
   if (now - unsignedLoggedAt < 60_000) return;
   unsignedLoggedAt = now;
@@ -624,10 +628,12 @@ export async function storeAction<T>(
   fn: (ctx: WriteCtx) => Promise<T>,
   opts: ActionOpts = {},
 ): Promise<ActionResult<T>> {
+  let storeId: string | null = null;
   try {
     await assertActionOrigin();
     const required = asList(permission);
     const r = await resolveMember({}, "action");
+    storeId = r.ctx.scope.storeId;
     await authorizeAudited(r.ctx, required, opts.feature, "action");
     const ctx = await finish(r);
     await guardWrites(ctx, required, { killSwitch: true });
@@ -637,7 +643,7 @@ export async function storeAction<T>(
     return { ok: true, data: await fn(ctx as WriteCtx) };
   } catch (err) {
     unstable_rethrow(err);
-    return actionFailure(err, "store-action");
+    return actionFailure(err, "store-action", { storeId });
   }
 }
 
