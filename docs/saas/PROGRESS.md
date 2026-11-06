@@ -44,6 +44,17 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **P6 DONE 2026-11-06 ~07:10; MERGE ORDER BY READINESS** (90/106 + 1 merge, ≈ 51.3%; weekly usage 68%). P6 finished step 14
+  (report docs/saas/ccr/r1-p6-report.md on r1/p6); P2 and P1 are on their last step (verify). P5 and P3 had not started their
+  last steps, so the planned order (… P5, P4, P3w1, P7, P6) would leave P6 idle for hours. P6's merge section depends only on
+  P2 (P6-14 i18n prefixes, F-8 RevealFolds) and P1 (P6-17 stub mount), so the lead's order is now: **P2 → P1 → P6 → then P4,
+  P5, P7, P3w1 as they finish** (P3w1's merge still checks P6-12). From the P6 merge on, `HEIGHT_MODEL_VERSION` > 0: later
+  merges run with stubBuild: false. **P6-10 done by the lead:** the seven DES-R21 faces (CCR r1-p6-1: cairo, kufam,
+  vazirmatn, syne, manrope variable; cormorant-garamond, dm-serif-display; all 5.3.0, OFL-1.1) added to devDependencies
+  with exact versions via `npm install --package-lock-only` (package.json +7, lock +7 entries, nothing else) and their
+  folders copied into node_modules from a scratch install (no full reify while the worktrees share node_modules). The P6
+  merge integrator lands woff2-sfnt.mjs, the Arabic metrics step and the regenerated fonts.generated.ts.
+
 - **P8 MERGED 2026-11-06 04:26** (merge run `wf_c58616e3-16c`, 45 min, ~200K tokens): merge commit 9a99c1c + 808c74c, pushed
   (origin/main 808c74c, pushing does not deploy). Gate green: tsc; npm test (test:jobs 780/0, tenancy-lint PIN 0); test:migrate
   219/219; test:tenancy 6625/0; qa:action-replay 4129/0; test:storage 559/0; SG_STUB_BUILD_OK=1 build green. Fixed in the merge:
