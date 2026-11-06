@@ -1,11 +1,13 @@
 /**
  * GET /api/cron/tick — hPanel cron (every 5 min), key in the `X-Cron-Key` header (kept out of URL
- * access logs) or as `?key=<CRON_KEY>` (handy for a first test in a browser):
- * push queued orders to each store's Google Sheet and pull its agents' statuses (≤ every 5 min per store; the
- * stores with Sheets work one by one within a time budget, one store's failure never stopping the others, SHT-11),
- * housekeeping
- * (rate-limit buckets, visitor markers > 2 days, abandoned leads > 30 days per store, expired sessions).
- * Also keeps the Node process warm.
+ * access logs) or as `?key=<CRON_KEY>` (still accepted in R1 for a first test in a browser; removed in R2, D33).
+ *
+ * The body is the job runner (src/lib/jobs/runner.ts, docs/STORE-SAAS.md §H.2): the tick lease, then every
+ * registered job in its slot inside a 100 s budget — each store's Google Sheet (push and the due pull, SHT-11),
+ * housekeeping (rate-limit buckets, visitor markers > 2 days, sessions, abandoned leads > 30 days per store) and
+ * the tracks' jobs — with one job_runs row per run. A tick that finds another one running answers
+ * `{ ok: true, skipped: true }` (200), so the HANDOFF smoke `{"ok":true` holds either way. Also keeps the Node
+ * process warm.
  *
  * Invisible unless the key is right: a wrong or missing key, too many guesses from one network
  * (in memory first, then in the database), a guard that cannot run (database down) and every other
@@ -13,44 +15,21 @@
  */
 import { createHash } from "node:crypto";
 import type { NextRequest } from "next/server";
-import { purgeExpiredSessions } from "@/lib/auth";
 import { cronKeySecret } from "@/lib/auth/config";
 import { unknownPageResponse } from "@/lib/auth/unknown-page";
-import { forEachStore, systemCtx, systemScope } from "@/lib/jobs/scope";
-import { purgeAbandonedLeads } from "@/lib/orders/admin";
-import { clientContext, errorSummary, json, logError } from "@/lib/orders/http";
+import { errorCode } from "@/lib/jobs/errors";
+import { runTick } from "@/lib/jobs/runner";
+import { clientContext, json, logError } from "@/lib/orders/http";
 import { burstLimit } from "@/lib/security/burst-limit";
 import { hashIp, safeEqual } from "@/lib/security/crypto";
-import { platformBucket, purgeRateLimits, rateLimit } from "@/lib/security/rate-limit";
-import { syncStores } from "@/lib/sheets/sync";
-import { purgeVisitorMarkers } from "@/lib/stats";
+import { platformBucket, rateLimit } from "@/lib/security/rate-limit";
 
+/** Hostinger ends a request after about 120 s; the tick's budget is 100 s of it (§H.2, §H.12) */
 export const maxDuration = 120;
 
 const hidden = (req: NextRequest) => unknownPageResponse(req.method);
 
 const digest = (v: string) => createHash("sha256").update(v, "utf8").digest("hex");
-
-/** Abandoned leads older than 30 days, store by store (ORD-13; every store that still keeps data). */
-async function purgeLeadsPerStore(): Promise<number> {
-  const ctx = systemCtx("orders.leads_purge");
-  let removed = 0;
-  await forEachStore(ctx, { job: ctx.job, states: ["pending", "active", "restricted", "suspended", "closed"], budgetMs: 10_000 }, async (_scope, store) => {
-    // the frozen callback types its scope as a StoreScope; the delete needs the job's own WriteScope
-    removed += await purgeAbandonedLeads(systemScope(ctx, store.id), 30);
-  });
-  return removed;
-}
-
-async function step<T>(name: string, fn: () => Promise<T>): Promise<T | { error: string }> {
-  try {
-    return await fn();
-  } catch (err) {
-    logError(`cron:${name}`, err);
-    // the error's name and driver code only: a message can quote bound values (customer data)
-    return { error: errorSummary(err).slice(0, 200) };
-  }
-}
 
 export async function GET(req: NextRequest): Promise<Response> {
   const expected = cronKeySecret(); // null when unset, shorter than 8 or a template value
@@ -68,19 +47,14 @@ export async function GET(req: NextRequest): Promise<Response> {
     return hidden(req);
   }
 
-  const started = Date.now();
-  // ~18 s of the tick for Sheets (core §H.2 slot 1), push + due pull per store
-  const sheets = await step("sheets", () => syncStores(systemCtx("sheets.push"), { budgetMs: 18_000 }));
-  const purged = {
-    rateLimits: await step("rate_limits", async () => {
-      await purgeRateLimits();
-      return true;
-    }),
-    visitorMarkers: await step("visitors", () => purgeVisitorMarkers(2)),
-    abandonedLeads: await step("leads", purgeLeadsPerStore),
-    sessions: await step("sessions", () => purgeExpiredSessions()),
-  };
-  return json({ ok: true, ms: Date.now() - started, sheets, purged });
+  try {
+    const report = await runTick();
+    return json({ ok: true, ...report });
+  } catch (err) {
+    // the lease or the job state could not be read (database down): the cron's curl -f sees the failure
+    logError("cron:tick", err);
+    return json({ ok: false, error: errorCode(err) }, 500);
+  }
 }
 
 /*

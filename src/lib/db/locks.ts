@@ -17,10 +17,14 @@ import "server-only";
  * `cron_cursors` lease row `job = 'tick'` (§H.2), so one lock-pool connection always stays free for the
  * request-path locks (`saveZones` "zones", the round-robin "rr", `ensureTemplateSet` "templates").
  * Migrations and boot keep their own locks (./migrate.ts, ./boot-lock.ts).
+ *
+ * Every wait for a lock-pool connection (a timeout included, at the full wait) is a sample of the lock pool's 5-minute
+ * window (src/lib/jobs/metrics.ts, `getHealth().db.lockPoolWaitP95Ms`, the `pool_wait` alarm; ENGC-12, R1 P8).
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import mysql from "mysql2/promise";
+import { recordLockPoolWait } from "@/lib/jobs/metrics";
 import { databaseUrl } from "./url";
 
 declare const LOCK: unique symbol;
@@ -96,9 +100,25 @@ function lockPool(): mysql.Pool {
  */
 const held = new AsyncLocalStorage<{ lock: LockName; active: boolean }>();
 
-/** A pool connection within `ms`, or null; a connection that arrives after the deadline goes straight back. */
-async function connectionWithin(pool: mysql.Pool, ms: number): Promise<mysql.PoolConnection | null> {
+/** The slice of a lock-pool connection the lock path uses. */
+export interface LockConnection {
+  query(sql: string, values: unknown[]): Promise<unknown>;
+  release(): void;
+  destroy(): void;
+}
+
+/** The slice of the lock pool the lock path uses (the mysql2 pool; a fake 2-connection pool in test:jobs). */
+export interface LockPool {
+  getConnection(): Promise<LockConnection>;
+}
+
+/**
+ * A pool connection within `ms`, or null; a connection that arrives after the deadline goes straight back. The wait is
+ * one lock-pool sample (a timeout counts the full `ms`).
+ */
+async function connectionWithin(pool: LockPool, ms: number): Promise<LockConnection | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const started = Date.now();
   const pending = pool.getConnection();
   const timeout = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), Math.max(0, ms));
@@ -106,10 +126,16 @@ async function connectionWithin(pool: mysql.Pool, ms: number): Promise<mysql.Poo
   try {
     const conn = await Promise.race([pending, timeout]);
     if (conn === null) pending.then((c) => c.release(), () => undefined);
+    recordLockPoolWait(conn === null ? Math.max(0, ms) : Date.now() - started);
     return conn;
   } finally {
     clearTimeout(timer);
   }
+}
+
+function assertNoLockHeld(lock: LockName): void {
+  const outer = held.getStore();
+  if (outer?.active) throw new Error(`withNamedLock: "${lock}" requested while "${outer.lock}" is held (one named lock at a time, §E.7)`);
 }
 
 /**
@@ -117,11 +143,24 @@ async function connectionWithin(pool: mysql.Pool, ms: number): Promise<mysql.Poo
  * left of it, the GET_LOCK wait (1 s on request paths). Not acquired in time → `{ ran: false }`.
  */
 export async function withNamedLock<T>(lock: LockName, timeoutSec: number, fn: () => Promise<T>): Promise<{ ran: true; value: T } | { ran: false }> {
-  const outer = held.getStore();
-  if (outer?.active) throw new Error(`withNamedLock: "${lock}" requested while "${outer.lock}" is held (one named lock at a time, §E.7)`);
+  assertNoLockHeld(lock);
+  return withNamedLockOnPool(lockPool(), lock, timeoutSec, fn);
+}
+
+/**
+ * `withNamedLock` on a given pool: the narrow test seam (test:jobs drives a fake 2-connection pool through it). App
+ * code calls `withNamedLock`, which passes the process's lock pool; nothing else may hand a lock a different pool.
+ */
+export async function withNamedLockOnPool<T>(
+  pool: LockPool,
+  lock: LockName,
+  timeoutSec: number,
+  fn: () => Promise<T>,
+): Promise<{ ran: true; value: T } | { ran: false }> {
+  assertNoLockHeld(lock);
   const started = Date.now();
   const budgetMs = Math.max(0, timeoutSec) * 1000;
-  const conn = await connectionWithin(lockPool(), budgetMs);
+  const conn = await connectionWithin(pool, budgetMs);
   if (!conn) return { ran: false };
   // a named lock lives as long as its session: a connection that may still hold it never goes back to the pool
   let reusable = false;

@@ -4,21 +4,30 @@ import "server-only";
  * Assets are immutable (id = keyed content hash); deleting one leaves pages referencing it rendering
  * gracefully (RenderContext.asset() returns null for missing ids).
  *
- * Multi-tenant (docs/STORE-SAAS.md §E.3, §G.4; TENANCY-MAP MED-05, MED-06, MED-15): every function takes the scope
- * and reads or writes the scope's store only. Ids are per store (D21), so another store's id answers exactly like a
- * missing one; the delete is the store's own row, resets only the store's derived cutouts and gives the bytes back
- * to the store's quota.
+ * Multi-tenant (docs/STORE-SAAS.md §E.3, §G.4; TENANCY-MAP MED-05, MED-06, MED-12, MED-15): every function takes the
+ * scope and reads or writes the scope's store only. Ids are per store (D21), so another store's id answers exactly
+ * like a missing one. The delete (§G.4, MED-12):
+ *  - is refused (`AssetInUseError`, the route's 409) while the file is live in this store: a live version shows it, or
+ *    it is the brand logo (`assetUsage`, src/lib/storage/asset-refs.ts). The refusal lists this store's pages only;
+ *    `force` is the member's confirmation after the dialog showed that usage (the dashboard's "Delete anyway");
+ *  - deletes the rows in one transaction (the asset, its `media_files` rows and the chunks of its `db` files, its
+ *    `asset_refs` rows), resets only the store's derived cutouts, then removes its `fs` files after the commit through
+ *    `storageFor` (never a file whose key has a row again: a re-upload of the same bytes), and gives the bytes back to
+ *    the store's quota.
  */
 import { and, count, desc, eq, inArray, isNotNull, like, or, type SQL } from "drizzle-orm";
 import { db, pool } from "@/lib/db/client";
 import { assets } from "@/lib/db/schema";
+import { recordError } from "@/lib/jobs/errors";
 import { logError } from "@/lib/orders/log";
+import { assetUsage, usageByPage, type AssetUse } from "@/lib/storage/asset-refs";
 import { byId, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { parseFocus } from "./focus";
 import { liveMediaUrl } from "./keys";
 import { refundMediaBytes, type MediaStore } from "./quota";
-import { deleteFilesOfAsset, evictKeys } from "./store";
+import { storageFor } from "./storage";
+import { deleteAssetFiles, evictKeys, keysWithRows, type AssetFileRef } from "./store";
 
 export type AssetRecord = typeof assets.$inferSelect;
 
@@ -120,15 +129,60 @@ export async function setAssetTags(scope: WriteScope, id: string, tags: string[]
   return (res?.affectedRows ?? 0) > 0;
 }
 
+/** The delete was refused: the file is live in its store (a live version shows it, or it is the brand logo). */
+export class AssetInUseError extends Error {
+  constructor(readonly usage: readonly AssetUse[]) {
+    super("media: the file is in use");
+    this.name = "AssetInUseError";
+  }
+}
+
 /**
- * Delete one of the store's assets and all its stored files atomically, then give its stored bytes back to the
- * store's quota. Returns false when the store has no such asset (another store's id included).
+ * The delete route's 409 body for a refusal (MED-12): the live pages of THIS store that show the file (`assetUsage`
+ * reads the scope's store only) and whether it is the store logo; the wording the dashboard's dialog shows.
  */
-export async function deleteAsset(scope: WriteScope, store: MediaStore, id: string): Promise<boolean> {
+export function inUseAnswer(usage: readonly AssetUse[]): { message: string; pages: { id: string; name: string; slug: string }[]; storeLogo: boolean } {
+  const view = usageByPage(usage);
+  const live = view.pages.filter((p) => p.live).map((p) => ({ id: p.id, name: p.name, slug: p.slug }));
+  const where = live.length ? (live.length === 1 ? "a live page" : `${live.length} live pages`) : "your store logo";
+  return { message: `This file is shown on ${where}. Confirm to delete it anyway.`, pages: live.slice(0, 50), storeLogo: view.storeLogo };
+}
+
+/**
+ * Remove the `fs` files of a deleted asset after its commit, skipping a key that has a row again (the same bytes
+ * re-uploaded meanwhile). Never throws: a file left behind is an orphan `media.sweep` deletes (§G.3).
+ */
+async function removeFilesAfterCommit(scope: WriteScope, files: readonly AssetFileRef[]): Promise<void> {
+  const onDisk = files.filter((f) => f.storage === "fs");
+  if (!onDisk.length) return; // a db file's chunks went with its row, inside the transaction
+  try {
+    const again = await keysWithRows(scope, onDisk.map((f) => f.key));
+    for (const f of onDisk) {
+      if (again.has(f.key)) continue;
+      await storageFor(f)
+        .remove({ storeId: scope.storeId, key: f.key, storage: f.storage })
+        .catch((err: unknown) => recordError("media", err, { code: "orphan_left", storeId: scope.storeId }));
+    }
+  } catch (err) {
+    recordError("media", err, { code: "orphan_left", storeId: scope.storeId });
+  }
+}
+
+/**
+ * Delete one of the store's assets: refused with `AssetInUseError` while the file is live in this store, unless
+ * `force` (the member confirmed the usage the dialog showed). Then its rows go in one transaction, its files after
+ * the commit, and its stored bytes back to the store's quota. Returns false when the store has no such asset
+ * (another store's id included, with no refusal: nothing about another store's usage is ever answered).
+ */
+export async function deleteAsset(scope: WriteScope, store: MediaStore, id: string, opts: { force?: boolean } = {}): Promise<boolean> {
   if (!ASSET_ID_RE.test(id)) return false;
+  if (!opts.force) {
+    const usage = await assetUsage(scope, id);
+    if (usage.some((u) => u.live)) throw new AssetInUseError(usage);
+  }
   const storeId = scope.storeId;
   const conn = await pool().getConnection();
-  let keys: string[] = [];
+  let files: AssetFileRef[] = [];
   let freed = 0;
   try {
     await conn.beginTransaction();
@@ -139,9 +193,11 @@ export async function deleteAsset(scope: WriteScope, store: MediaStore, id: stri
     }
     freed = Number(rows[0]!.stored_bytes) || 0;
     await conn.query("DELETE FROM assets WHERE id = ? AND store_id = ?", [id, storeId]);
-    keys = await deleteFilesOfAsset(conn, scope, id);
+    files = await deleteAssetFiles(conn, scope, id);
     // the store's derived cutouts keep living on their own
     await conn.query("UPDATE assets SET source_asset_id = NULL WHERE store_id = ? AND source_asset_id = ?", [storeId, id]);
+    // the index forgets the asset; its owners' documents keep the id and render it as missing
+    await conn.query("DELETE FROM asset_refs WHERE store_id = ? AND asset_id = ?", [storeId, id]);
     await conn.commit();
   } catch (err) {
     await conn.rollback().catch(() => undefined);
@@ -149,7 +205,8 @@ export async function deleteAsset(scope: WriteScope, store: MediaStore, id: stri
   } finally {
     conn.release();
   }
-  evictKeys(keys);
+  evictKeys(files.map((f) => f.key));
+  await removeFilesAfterCommit(scope, files);
   await refundMediaBytes(scope, store, freed).catch((e: unknown) => logError("media:delete:refund", e));
   return true;
 }
