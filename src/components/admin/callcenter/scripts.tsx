@@ -202,7 +202,7 @@ export function ScriptsEditor({ view, canEdit }: { view: CallCenterView; canEdit
           </label>
           <Select value={pageId ?? ALL} onValueChange={(v) => setPageId(v === ALL ? null : v)}>
             <SelectTrigger id={`${uid}-scope`} className="w-full sm:w-72">
-              <SelectValue />
+              <SelectValue>{pageId === null ? t("ops.cc.script.everyPage") : (view.pages.find((p) => p.id === pageId)?.name ?? t("ops.cc.script.everyPage"))}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL}>{t("ops.cc.script.everyPage")}</SelectItem>
@@ -406,7 +406,7 @@ export function ScriptsEditor({ view, canEdit }: { view: CallCenterView; canEdit
                   <span className="ms-auto flex flex-wrap gap-1.5">
                     <Select value={s.when} disabled={!canEdit} onValueChange={(v) => setStep(i, { when: v as Step["when"] })}>
                       <SelectTrigger size="sm" className="q-xs h-7" aria-label={t("ops.cc.script.when")}>
-                        <SelectValue />
+                        <SelectValue>{t(`ops.cc.script.when.${s.when}`)}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="always">{t("ops.cc.script.when.always")}</SelectItem>
@@ -415,7 +415,7 @@ export function ScriptsEditor({ view, canEdit }: { view: CallCenterView; canEdit
                     </Select>
                     <Select value={s.action} disabled={!canEdit} onValueChange={(v) => setStep(i, { action: v as Step["action"] })}>
                       <SelectTrigger size="sm" className="q-xs h-7" aria-label={t("ops.cc.script.action")}>
-                        <SelectValue />
+                        <SelectValue>{t(`ops.cc.script.action.${s.action}`)}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {(["none", "add_upsell", "edit_address"] as const).map((a) => (

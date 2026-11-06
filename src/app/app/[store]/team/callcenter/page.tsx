@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { CallCenterView, CC_TABS, type CcTab } from "@/components/admin/callcenter/callcenter-view";
+import { CallCenterView } from "@/components/admin/callcenter/callcenter-view";
+import { CC_TABS, type CcTab } from "@/components/admin/callcenter/tabs";
 import { PageHeader } from "@/components/admin/common/page-header";
 import { Screen } from "@/components/admin/common/screen";
 import { viewerLocale } from "@/lib/auth/locale";

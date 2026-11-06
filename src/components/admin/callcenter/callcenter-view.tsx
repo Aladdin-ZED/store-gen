@@ -35,9 +35,7 @@ import { clock } from "../queue/time";
 import { CallingWindowEditor, cloneWeek, WEEKDAYS, WeekTable, weekValid, type WeekDays } from "./calling-window";
 import { CityPicker, errorKey, NumField, numOk, SaveBar, Section, type NumValue } from "./parts";
 import { ScriptsEditor } from "./scripts";
-
-export const CC_TABS = ["hours", "retries", "scripts", "cities"] as const;
-export type CcTab = (typeof CC_TABS)[number];
+import { CC_TABS, type CcTab } from "./tabs";
 
 export function CallCenterView({ view, tab: initialTab, canEdit }: { view: View; tab: CcTab; canEdit: boolean }) {
   const t = useT();
@@ -363,7 +361,7 @@ function RetriesTab({ view, canEdit }: { view: View; canEdit: boolean }) {
   const d = !canEdit;
   return (
     <>
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] xl:items-start">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] xl:items-start">
         <Section id="cc-ladder" title={t("ops.cc.ladder.title")} hint={t("ops.cc.ladder.hint")}>
           <LadderEditor steps={form.ladder} onChange={(l) => f("ladder", l)} disabled={d} />
           <div className="grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
@@ -450,8 +448,8 @@ function LadderEditor({ steps, onChange, disabled }: { steps: LadderStep[]; onCh
             <li key={i} className={cn("flex flex-wrap items-center gap-2 rounded-[12px] border bg-background p-2 ps-3", bad ? "border-destructive/60" : "border-border")}>
               <span className="q-xs q-num w-full font-medium text-muted-foreground sm:w-28">{t("ops.cc.ladder.step", { n: i + 1 })}</span>
               <Select value={s.kind} disabled={disabled} onValueChange={(k) => set(i, kindOf(k as LadderStep["kind"], s))}>
-                <SelectTrigger size="sm" className="w-44" aria-label={t("ops.cc.ladder.kind")}>
-                  <SelectValue />
+                <SelectTrigger size="sm" className="w-40" aria-label={t("ops.cc.ladder.kind")}>
+                  <SelectValue>{t(`ops.cc.ladder.kind.${s.kind}`)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {(["after", "at", "next_day_at"] as const).map((k) => (
@@ -479,7 +477,7 @@ function LadderEditor({ steps, onChange, disabled }: { steps: LadderStep[]; onCh
                 </span>
               ) : (
                 <span className="flex flex-wrap items-center gap-1.5">
-                  <Input type="time" step={60} value={s.time} disabled={disabled} aria-label={t("ops.cc.ladder.time")} onChange={(e) => set(i, { ...s, time: e.target.value })} className="q-num h-8 w-[6.5rem]" dir="ltr" />
+                  <Input type="time" step={60} value={s.time} disabled={disabled} aria-label={t("ops.cc.ladder.time")} onChange={(e) => set(i, { ...s, time: e.target.value })} className="q-num h-8 w-[7.5rem]" dir="ltr" />
                   {s.kind === "at" && (
                     <>
                       <label htmlFor={`${uid}-gap${i}`} className="q-xs text-muted-foreground">

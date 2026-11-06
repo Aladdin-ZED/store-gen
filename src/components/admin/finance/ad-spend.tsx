@@ -91,13 +91,13 @@ export function AdSpendTab({ grid: initial, canWrite }: { grid: SpendGrid; canWr
             <tbody>
               {grid.days.map((d, i) => (
                 <tr key={d.day} className="[&>td]:border-b [&>td]:border-border/60 [&>td]:px-2 [&>td]:py-1.5 [&>td]:align-top">
-                  <td className="q-xs sticky start-0 z-[1] bg-card pt-3.5 font-medium whitespace-nowrap text-foreground">{i === 0 ? t("fin.ads.today") : ymdLabel(d.day, locale)}</td>
+                  <td className="q-xs sticky start-0 z-[1] bg-card pt-6 font-medium whitespace-nowrap text-foreground">{i === 0 ? t("fin.ads.today") : ymdLabel(d.day, locale)}</td>
                   {d.cells.map((c) => (
                     <td key={c.platform}>
                       <Cell cell={c} day={d.day} storeCurrency={sc} canWrite={canWrite} onSave={saveCell} platformLabel={t(`fin.ads.platform.${c.platform}`)} dayLabel={ymdLabel(d.day, locale)} />
                     </td>
                   ))}
-                  <td className="q-num pt-3.5 text-end">
+                  <td className="q-num pt-5 text-end">
                     <span className="font-medium text-foreground">{d.totalStoreCents > 0 ? money(d.totalStoreCents, sc, locale) : "–"}</span>
                     {d.needsRate > 0 && <span className="q-2xs block text-destructive">{t("fin.ads.needsRateN", { n: d.needsRate })}</span>}
                   </td>

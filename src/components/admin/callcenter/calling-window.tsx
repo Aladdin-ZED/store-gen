@@ -16,7 +16,7 @@
 import "../queue/queue.css";
 import { CheckIcon, CopyIcon, Loader2Icon, MoonIcon, PlusIcon, XIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,7 +77,7 @@ export function WeekTable({ days, onChange, disabled, compact, idPrefix }: { day
                       value={r.from}
                       disabled={disabled}
                       onChange={(e) => set(d, list.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)))}
-                      className="q-num h-8 w-[6.5rem] border-0 bg-transparent px-1.5 shadow-none focus-visible:ring-0"
+                      className="q-num h-8 w-[7.5rem] border-0 bg-transparent px-1.5 shadow-none focus-visible:ring-0"
                       dir="ltr"
                     />
                     <span className="text-muted-foreground" aria-hidden="true">
@@ -94,7 +94,7 @@ export function WeekTable({ days, onChange, disabled, compact, idPrefix }: { day
                       disabled={disabled}
                       aria-invalid={bad || undefined}
                       onChange={(e) => set(d, list.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)))}
-                      className="q-num h-8 w-[6.5rem] border-0 bg-transparent px-1.5 shadow-none focus-visible:ring-0"
+                      className="q-num h-8 w-[7.5rem] border-0 bg-transparent px-1.5 shadow-none focus-visible:ring-0"
                       dir="ltr"
                     />
                     {crosses && (
@@ -148,6 +148,8 @@ export function WeekTable({ days, onChange, disabled, compact, idPrefix }: { day
   );
 }
 
+const noSubscribe = () => () => {};
+
 /** The calling-window editor (see the header). */
 export function CallingWindowEditor({ window: w, canEdit, compact, onSaved }: { window: EffectiveWindow; canEdit: boolean; compact?: boolean; onSaved?(w: EffectiveWindow): void }) {
   const t = useT();
@@ -164,14 +166,17 @@ export function CallingWindowEditor({ window: w, canEdit, compact, onSaved }: { 
   const dirty = !sameWeek(days, base.days) || closed.join() !== base.closed.join();
   const valid = weekValid(days);
   const draft: EffectiveWindow = { ...w, days, closedDates: closed, configured };
+  // The Today line reads the clock, so it renders after mount only (a server render a minute earlier would not hydrate).
+  const mounted = useSyncExternalStore(noSubscribe, () => true, () => false);
   const today = useMemo(() => {
+    if (!mounted) return null;
     try {
       return hoursText(draft, locale, locale, new Date());
     } catch {
       return "";
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days, closed, locale]);
+  }, [days, closed, locale, mounted]);
 
   async function save() {
     if (!valid || busy) return;
@@ -216,7 +221,7 @@ export function CallingWindowEditor({ window: w, canEdit, compact, onSaved }: { 
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <p className="q-xs text-muted-foreground">{t("ops.cc.window.tz", { tz: w.tz })}</p>
         <p className="q-xs q-num text-muted-foreground" aria-live="polite">
-          {today ? t("ops.cc.window.today", { hours: today }) : t("ops.cc.window.todayClosed")}
+          {today === null ? "\u00a0" : today ? t("ops.cc.window.today", { hours: today }) : t("ops.cc.window.todayClosed")}
         </p>
       </div>
       <WeekTable days={days} onChange={setDays} disabled={!canEdit} compact={compact} idPrefix={`${uid}-w`} />

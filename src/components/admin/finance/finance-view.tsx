@@ -7,9 +7,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { useT } from "@/lib/i18n/admin/client";
 import { cn } from "@/lib/utils";
-
-export const FIN_TABS = ["breakeven", "costs", "ads"] as const;
-export type FinTab = (typeof FIN_TABS)[number];
+import { FIN_TABS, type FinTab } from "./tabs";
 
 export function FinanceTabs({ tab, hrefs, readOnly, children }: { tab: FinTab; hrefs: Record<FinTab, string>; readOnly: boolean; children: ReactNode }) {
   const t = useT();
