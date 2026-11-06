@@ -17,6 +17,7 @@ import { AUDIT_AREAS, auditPage, type AuditRow } from "@/lib/admin-data/security
 import { revalidateStore } from "@/lib/admin-data/shell";
 import { settingsActor } from "@/lib/admin-data/store-audit";
 import { updateStoreProfile } from "@/lib/admin-data/store-profile";
+import { rerenderLive } from "@/lib/landing/rerender.server";
 import { invalidateStoreRender } from "@/lib/render/cache.server";
 import { getStoreSettings, updateStoreSetting } from "@/lib/settings";
 import { AiSettings, DefaultsSettings, StoreSettings, type SettingInput } from "@/lib/settings/schemas";
@@ -60,6 +61,8 @@ export async function saveStoreAction(input: SettingInput<"store">): Promise<Act
     );
     // legal pages and footers read the store identity at request time
     invalidateStoreRender(ctx.store.id);
+    // the thank-you and legal facts bake the contacts: queue the live pages for a store_info re-render (LAN-§8.5, CCR r1-p3-11)
+    await rerenderLive(ctx.scope, "store contacts");
     refreshSettings(ctx.store.handle);
     return null;
   });

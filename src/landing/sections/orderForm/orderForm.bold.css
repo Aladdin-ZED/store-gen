@@ -47,46 +47,17 @@
   --pk-ring: var(--slab-ink);
 }
 
-.lp-orderForm--bold .lp-of__trust--side {
-  display: none;
-}
-
 .lp-orderForm--bold .lp-of__lead,
 .lp-orderForm--bold .lp-of__legend,
 .lp-orderForm--bold .lp-field__label {
   color: var(--sec-ink);
 }
 
-.lp-orderForm--bold .lp-of__trust--side .lp-of__trust-ico {
-  inline-size: 2.4rem;
-  block-size: 2.4rem;
-  border-radius: 50%;
-  background: color-mix(in oklab, var(--sec-ink) 12%, transparent);
-  color: var(--sec-ink);
-  font-size: 1em;
-}
-
-.lp-orderForm--bold .lp-of__trust-item {
-  color: var(--sec-ink);
-}
-
-.lp-orderForm--bold .lp-of__trust-ico {
-  color: inherit;
-}
-
-.lp-orderForm--bold .lp-of__trust-item + .lp-of__trust-item {
-  box-shadow: inset calc(1px * var(--lp-x)) 0 0 color-mix(in oklab, var(--sec-ink) 18%, transparent);
-}
-
-.lp-orderForm--bold .lp-of__trust--side .lp-of__trust-item {
-  box-shadow: none;
-}
-
 .lp-orderForm--bold {
   --disc: clamp(7rem, 5.5rem + 5vw, 9.5rem);
 }
 
-/* phones: the seal's lower half needs its own room above the kicker */
+/* phones: the disc's lower half needs its own room above the title */
 .lp-orderForm--bold .lp-of__panel:has(> .lp-of__disc) {
   padding-block-start: calc(var(--disc) * 0.5 + 1.25rem);
 }
@@ -168,13 +139,5 @@
   .lp-orderForm--bold .lp-of__title {
     max-inline-size: none;
     font-size: min(calc(var(--lp-step-5) * 0.85 * var(--lp-script-scale-display)), 5vw);
-  }
-
-  .lp-orderForm--bold .lp-of__trust--side {
-    display: grid;
-  }
-
-  .lp-orderForm--bold .lp-of__form .lp-of__trust {
-    display: none;
   }
 }

@@ -43,7 +43,7 @@ export function PagePreviewDialog({
         <div className="flex flex-wrap items-center gap-3 border-b border-border/70 px-4 py-3 pe-14">
           <div className="grid min-w-0 flex-1">
             <DialogTitle className="truncate text-[0.95rem] font-semibold">{title}</DialogTitle>
-            <DialogDescription className="truncate text-xs">Draft preview — orders are never sent from here.</DialogDescription>
+            <DialogDescription className="truncate text-xs">Draft preview: orders are never sent from here.</DialogDescription>
           </div>
           <Segmented
             label="Device"

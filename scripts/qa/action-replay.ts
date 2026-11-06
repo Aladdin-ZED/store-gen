@@ -60,6 +60,13 @@ import {
   type Who,
 } from "./tenancy-check";
 
+// CCR r1-p3-4: the three actions whose live call publishes the library's argan page
+const PUBLISHES = new Set([
+  "src/app/app/[store]/pages/actions.ts#publishPageAction",
+  "src/lib/editor/actions.ts#publish",
+  "src/lib/pixels/actions.ts#applyLiveTrackingAction",
+]);
+
 const appPath = (handle: string, p: string) => `/app/${handle}${p}`;
 
 
@@ -123,7 +130,12 @@ async function replaySuite(kit: Kit): Promise<void> {
     // a self action (leaving the store) is A's own member's call: a fresh member of A, never A's only owner
     const caller = c.self ? await fresh.member(fx.A, "viewer") : fx.A.members.owner;
     // A's member has just stepped up (the secret writes ask for it, §B.7)
-    const live = await call(armed(caller), appPath(fx.A.handle, c.path), () => actionFn(c)(...structuredClone(args)));
+    // the publishing actions publish the library's argan page, which the honesty gate refuses by design (CCR r1-p3-4):
+    // only A's own live call passes the landing gate through; the replays before and after it stay as they are
+    const own = () => actionFn(c)(...structuredClone(args));
+    const live = await call(armed(caller), appPath(fx.A.handle, c.path), () =>
+      PUBLISHES.has(c.id) ? load<typeof import("@/lib/render/prepublish/landing.fixtures")>("@/lib/render/prepublish/landing.fixtures").withoutLandingGate(own) : own(),
+    );
     const liveLabel = `${c.id}: A's owner's own call works (the replayed body was live)`;
     if (c.live) check(`${c.id}: A's owner's own call answers ${c.live.expect} (${c.live.why})`, refusal(live) === c.live.expect, answerOf(live));
     else if (ranReal(liveLabel, live)) check(liveLabel, refusal(live) === null, answerOf(live));

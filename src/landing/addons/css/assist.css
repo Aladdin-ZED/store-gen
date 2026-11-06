@@ -1,0 +1,116 @@
+/* ==========================================================================
+   assist: the delivery line of the order form (P3 LANDING; landing.md LAN-§7.4)
+   --------------------------------------------------------------------------
+   Two slots the order form renders and the `assist` chunk fills:
+   [data-lp-dz="offer"] (the line under the offers: dates, the page's fee) and
+   [data-lp-dz="city"] (a city the store does not serve, with the WhatsApp
+   button). Calm transactional register: no glass, no kicker, no aurora.
+   Logical properties only (RTL), the fee is an LTR isolate with tabular
+   figures. A slot that appears grows and fades in over 180 ms
+   (`@starting-style`, transition-behavior allow-discrete), never under
+   reduced motion.
+   ========================================================================== */
+
+.lp-dz {
+  margin-block: 0.625rem 0;
+  margin-inline: 0;
+  max-block-size: 14em;
+  overflow: hidden;
+  font-size: var(--lp-step--1, 0.875rem);
+  line-height: 1.5;
+  color: var(--lp-ink-soft, #4b5058);
+  text-wrap: pretty;
+  transition:
+    opacity 180ms var(--lp-ease, ease),
+    max-block-size 180ms var(--lp-ease, ease),
+    display 180ms allow-discrete;
+}
+
+.lp-dz[hidden] {
+  display: none;
+}
+
+/* a slot that appears (hidden → shown) grows and fades in from its collapsed state */
+@starting-style {
+  .lp-dz {
+    opacity: 0;
+    max-block-size: 0;
+  }
+}
+
+.lp-dz__est {
+  color: var(--lp-ink-mute, #6b7078);
+}
+
+.lp-dz__fee {
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-weight: var(--lp-strong-weight, 600);
+  color: var(--lp-ink, #16181b);
+  white-space: nowrap;
+}
+
+/* a city the store does not serve: the message and the way to ask */
+.lp-dz[data-lp-dz="city"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem 0.875rem;
+  padding-block: 0.75rem;
+  padding-inline: 0.875rem;
+  border: 1px solid var(--lp-line, rgba(22, 24, 27, 0.12));
+  border-radius: var(--lp-radius-m, 0.75rem);
+  background: var(--lp-soft, #f2f3f5);
+  color: var(--lp-ink, #16181b);
+}
+
+.lp-dz[data-lp-dz="city"][hidden] {
+  display: none;
+}
+
+.lp-dz__wa {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-block-size: 2.75rem;
+  padding-inline: 0.875rem 1rem;
+  border: 1px solid var(--lp-line-strong, rgba(22, 24, 27, 0.22));
+  border-radius: var(--lp-radius-pill, 999px);
+  background: var(--lp-surface, #fff);
+  color: var(--lp-ink, #16181b);
+  font-weight: var(--lp-strong-weight, 600);
+  text-decoration: none;
+  transition:
+    border-color 180ms var(--lp-ease, ease),
+    background-color 180ms var(--lp-ease, ease);
+}
+
+.lp-dz__wa::before {
+  content: "";
+  flex: none;
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border-radius: 50%;
+  background: #25d366;
+}
+
+.lp-dz__wa:hover {
+  border-color: var(--lp-ink-soft, #4b5058);
+}
+
+.lp-dz__wa:focus-visible {
+  outline: 2px solid var(--lp-accent, currentColor);
+  outline-offset: 2px;
+}
+
+/* not served, with a way to ask: the form offers the button, never a submit */
+form[data-lp-dz-state="ns"] .lp-of__go {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-dz,
+  .lp-dz__wa {
+    transition: none;
+  }
+}

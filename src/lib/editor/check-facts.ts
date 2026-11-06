@@ -8,6 +8,7 @@
  * and P4's `noShopperHours(w, now)` (LAN-§2.3) replace these at R1; until then the builder and the publish dialog
  * read these, with the same item ids, so nothing moves for the owner when they land.
  */
+import { addDaysYmd, effectiveWindow, hasRanges, storeYmd, type EffectiveWindow } from "@/lib/callcenter/window";
 import { offerUnits } from "@/lib/page/catalog";
 import type { PageDoc } from "@/lib/page/schema";
 import type { CheckContextData, NumberClass } from "./check-context";
@@ -149,15 +150,6 @@ export interface WindowOverride {
 /** How far ahead a shopper may be promised a call (LAN-§2.3: the next 14 days). */
 export const WINDOW_HORIZON_DAYS = 14;
 
-const hasRange = (ranges: DayRanges | undefined) => !!ranges?.some((r) => r.from < r.to);
-
-/** The store-local date ("2026-10-24") and ISO weekday (1 = Monday) of an instant. */
-function localDay(at: Date, timeZone: string): { date: string; weekday: number } {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(at);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  const weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(get("weekday")) + 1;
-  return { date: `${get("year")}-${get("month")}-${get("day")}`, weekday };
-}
 
 /**
  * The checklist's two calling-window facts (rev 5, CRIT2-1): `saved` = the owner confirmed the hours once
@@ -171,14 +163,18 @@ export function callingWindowFacts(
   now: number,
   timeZone: string,
 ): { callable: boolean; saved: boolean } {
-  const closed = new Set(window.closedDates);
+  // P0-4: operations' own evaluator (rangesForDay through hasRanges), so a range crossing midnight counts on its start day
+  const w = effectiveWindow(
+    {
+      callingWindow: { days: window.days as unknown as EffectiveWindow["days"], closedDates: window.closedDates, savedAt: window.savedAt },
+      windowOverrides: overrides.map((o) => ({ label: "", from: o.from, to: o.to, days: o.days as unknown as EffectiveWindow["days"] })),
+      openOverrideUntil: null,
+    },
+    timeZone,
+  );
+  const today = storeYmd(new Date(now), timeZone);
   let callable = false;
-  for (let i = 0; i < WINDOW_HORIZON_DAYS && !callable; i++) {
-    const { date, weekday } = localDay(new Date(now + i * 86_400_000), timeZone);
-    if (closed.has(date) || weekday < 1) continue;
-    const override = overrides.find((o) => o.from <= date && date <= o.to);
-    callable = hasRange((override ?? window).days[String(weekday)]);
-  }
+  for (let i = 0; i < WINDOW_HORIZON_DAYS && !callable; i++) callable = hasRanges(addDaysYmd(today, i), w);
   const saved = window.savedAt !== null;
   return { callable: callable && saved, saved };
 }

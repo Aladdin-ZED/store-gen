@@ -1,12 +1,15 @@
 /**
  * Thank-you page body — the confirmation moment, in the page's own theme (v2 · modern):
  *
- *   glass top bar (wordmark · COD chip)
- *   hero: a color-block panel lit by a soft aurora; an animated check drawing inside a glowing ring
- *         (two soft pulses, then still), the order number on a glass chip, a big display title with
- *         the shopper's name, the call-back message
- *   cards that float over the hero's lower edge: the glass order summary + a clean "what happens
- *         next" timeline (progress line filled up to the confirmation call)
+ *   top bar (wordmark · COD chip)
+ *   hero: a color-block panel under one flat tint (`.lp-ty__tint`: one accent radial at 10 %, no mesh, no
+ *         grain); an animated check drawing inside a ring (two soft pulses, then still), the order number
+ *         on an opaque chip (the "Confirm on WhatsApp" pill beside it when the add-on is on), a big display
+ *         title with the shopper's name, the call-back message
+ *   cards that float over the hero's lower edge: the order summary (a <dl>; "Track my order" in its
+ *         footer when the add-on is on) + a "what happens next" timeline of verbs, never numbers, from the
+ *         store's answers (landing.md LAN-§6.3: the call step only with `checkout.confirmationCall`, "check,
+ *         then pay" only when `policies.inspection` is allowed; the call step holds the expectation)
  *   optional one-click upsell card (product on a lit stage, price, countdown tiles, CTA)
  *   WhatsApp help · back to the product · legal links
  *
@@ -15,8 +18,17 @@
  * [data-ty-upsell] (+ accept/decline/status, [data-countdown]) is the upsell block.
  * Without JS the page still reads correctly (name & order rows stay hidden, upsell stays hidden).
  * Pure markup; every animation is CSS (collapsed by prefers-reduced-motion and data-motion="off").
+ *
+ * The add-on blocks (landing.md LAN-§8.1, `assist-ty`): [data-lp-ty="confirm|expect|expect-save|track"] are rendered
+ * only when the document's `lp-assist-ty` block carries them (`ctx.addons`, CCR r1-p3-10), so with every block off the
+ * page differs from before only by its tint, its verb timeline and the "Report this store" link of the legal row
+ * (LAN-§3.6, §3.9). Design budgets (LAN-§3.6): 0 glass, at most 8 reveals, one primary action (the upsell's "add"),
+ * order id, total and phone in LTR isolates with tabular figures.
  */
 import type { ReactElement, ReactNode } from "react";
+import { TY, shopperLocaleOf } from "@/lib/landing/copy";
+import { addonBlock, shopperOf } from "../addons/facts";
+import type { AssistTyData } from "../addons/plan";
 import { legalChrome, legalLang, legalNav } from "../legal";
 import { brandName, cx, Icon, pad2, Picture, Price, RichText, SkipLink, type IconName } from "../primitives";
 import type { RenderContext } from "../types";
@@ -34,6 +46,12 @@ export interface ThankYouProps {
   landingUrl: string;
 }
 
+/** One step of the "what happens next" timeline: a verb phrase and its line (LAN-§6.3, §3.6). */
+interface StepCopy {
+  label: string;
+  hint: string;
+}
+
 /** Copy specific to this page that the shared microcopy (i18n.ts) does not carry. */
 interface TyCopy {
   next: string;
@@ -41,7 +59,8 @@ interface TyCopy {
   /** the offer row's label: a noun (the form's "Choisissez votre offre" reads as an instruction here) */
   offer: string;
   options: string;
-  hints: [string, string, string, string];
+  /** the timeline: received, the confirmation call, shipping, paying (after a check when inspection is allowed) */
+  steps: { placed: StepCopy; call: StepCopy; ship: StepCopy; payCheck: StepCopy; pay: StepCopy };
 }
 
 const COPY: Record<"ar" | "fr" | "en", TyCopy> = {
@@ -50,21 +69,39 @@ const COPY: Record<"ar" | "fr" | "en", TyCopy> = {
     yourOrder: "Votre commande",
     offer: "Votre offre",
     options: "Vos choix",
-    hints: ["C'est enregistré.", "Nous vous appelons pour confirmer l'adresse.", "Votre colis part avec le livreur.", "Vérifiez, puis payez en espèces."],
+    steps: {
+      placed: { label: "Nous avons reçu votre commande", hint: "Elle est bien enregistrée." },
+      call: { label: "Nous vous appelons", hint: "Nous vous appelons pour confirmer l'adresse." },
+      ship: { label: "Nous expédions le colis", hint: "Votre colis part avec le livreur." },
+      payCheck: { label: "Vous vérifiez, puis vous payez", hint: "Ouvrez le colis, vérifiez, puis payez en espèces." },
+      pay: { label: "Vous payez à la livraison", hint: "En espèces, à la remise du colis." },
+    },
   },
   ar: {
     next: "شنو غادي يوقع دابا؟",
     yourOrder: "الطلب ديالك",
     offer: "العرض ديالك",
     options: "اختياراتك",
-    hints: ["الطلب تسجل.", "كنعيطو ليك باش نأكدو العنوان.", "الكولي كيخرج مع شركة التوصيل.", "عاين المنتوج، من بعد خلص كاش."],
+    steps: {
+      placed: { label: "توصلنا بالطلب ديالك", hint: "الطلب تسجل عندنا." },
+      call: { label: "غادي نعيطو ليك", hint: "كنعيطو ليك باش نأكدو العنوان." },
+      ship: { label: "كنصيفطو الكولي", hint: "الكولي كيخرج مع شركة التوصيل." },
+      payCheck: { label: "كتشوف السلعة، من بعد كتخلص", hint: "حل الكولي، شوف السلعة، من بعد خلص كاش." },
+      pay: { label: "كتخلص ملي توصلك", hint: "كاش، ملي يوصلك الكولي." },
+    },
   },
   en: {
     next: "What happens next",
     yourOrder: "Your order",
     offer: "Your offer",
     options: "Your choices",
-    hints: ["It's registered.", "We call you to confirm the address.", "Your parcel leaves with the courier.", "Check it, then pay in cash."],
+    steps: {
+      placed: { label: "We have your order", hint: "It's registered." },
+      call: { label: "We call you", hint: "We call you to confirm the address." },
+      ship: { label: "We ship your parcel", hint: "Your parcel leaves with the courier." },
+      payCheck: { label: "You check, then pay", hint: "Open the parcel, check it, then pay in cash." },
+      pay: { label: "You pay on delivery", hint: "In cash, when the parcel is handed over." },
+    },
   },
 };
 
@@ -77,6 +114,12 @@ function splitTitle(template: string): { before: string; gap: string; comma: str
   const m = NAME_SLOT.exec(template);
   if (!m) return null;
   return { before: m[1] ?? "", gap: m[2] ?? "", comma: m[3] ?? "", after: m[4] ?? "" };
+}
+
+/** The timeline's answers: the store's facts when the render passes them, else a call (the setting's default) and no inspection promise. */
+function timelineFacts(ctx: RenderContext): { call: boolean; inspect: boolean } {
+  const f = shopperOf(ctx);
+  return { call: f ? f.confirmationCall : true, inspect: f?.inspection === "allowed" };
 }
 
 /** Hero color block: the archetype's first characteristic color moment. */
@@ -101,36 +144,65 @@ function SuccessMark(): ReactElement {
   );
 }
 
-const STEPS: { key: "thanks.step1" | "thanks.step2" | "thanks.step3" | "thanks.step4"; icon: IconName; state: "done" | "now" | "next" }[] = [
-  { key: "thanks.step1", icon: "check", state: "done" },
-  { key: "thanks.step2", icon: "phone", state: "now" },
-  { key: "thanks.step3", icon: "truck", state: "next" },
-  { key: "thanks.step4", icon: "cash-hand", state: "next" },
-];
+type StepKey = "placed" | "call" | "ship" | "pay";
+
+/** The steps of LAN-§6.3: received (done), the call when the store confirms by phone (now), shipping, paying. */
+function stepsFor(call: boolean): { key: StepKey; icon: IconName; state: "done" | "now" | "next" }[] {
+  return [
+    { key: "placed", icon: "check", state: "done" },
+    ...(call ? [{ key: "call" as const, icon: "phone" as const, state: "now" as const }] : []),
+    { key: "ship", icon: "truck", state: call ? "next" : "now" },
+    { key: "pay", icon: "cash-hand", state: "next" },
+  ];
+}
+
+/**
+ * The call step's line: the expectation (LAN-§8.1) when the `assist-ty` block carries it, the sentence without
+ * `{when}` with the caller phone in an LTR isolate (the chunk adds `{when}` in the shopper's browser), and the
+ * "save this number" line; else the step's own words.
+ */
+function CallHint({ ctx, copy }: { ctx: RenderContext; copy: StepCopy }): ReactElement {
+  const e = addonBlock<AssistTyData>(ctx, "lp-assist-ty")?.expect;
+  if (!e) return <span className="lp-ty__step-hint">{copy.hint}</span>;
+  const [before, after] = e.s.plain.split("{phone}");
+  return (
+    <>
+      <span className="lp-ty__step-hint" data-lp-ty="expect">
+        {before}
+        <bdi dir="ltr" className="lp-ty-phone">
+          {e.phone}
+        </bdi>
+        {after}
+      </span>
+      <span className="lp-ty__step-hint" data-lp-ty="expect-save">
+        {e.s.save}
+      </span>
+    </>
+  );
+}
 
 function Timeline({ ctx, copy }: { ctx: RenderContext; copy: TyCopy }): ReactElement {
+  const facts = timelineFacts(ctx);
   return (
     <section className="lp-ty__card lp-ty__next" aria-labelledby="lp-ty-next" data-reveal="rise" data-delay="160">
       <h2 id="lp-ty-next" className="lp-ty__card-title">
         {copy.next}
       </h2>
-      <ol className="lp-ty__steps" role="list" data-stagger="90">
-        {STEPS.map((s, i) => (
-          <li key={s.key} className="lp-ty__step" data-state={s.state} data-reveal="rise" aria-current={s.state === "now" ? "step" : undefined}>
-            <span className="lp-ty__step-node" aria-hidden="true">
-              <Icon name={s.icon} size={18} strokeWidth={2} />
-            </span>
-            <span className="lp-ty__step-text">
-              <span className="lp-ty__step-label">
-                <span className="lp-ty__step-num" aria-hidden="true">
-                  {pad2(i + 1)}
-                </span>
-                {ctx.t(s.key)}
+      <ol className="lp-ty__steps" role="list">
+        {stepsFor(facts.call).map((s) => {
+          const c = s.key === "pay" ? (facts.inspect ? copy.steps.payCheck : copy.steps.pay) : copy.steps[s.key];
+          return (
+            <li key={s.key} className="lp-ty__step" data-state={s.state} data-step={s.key} aria-current={s.state === "now" ? "step" : undefined}>
+              <span className="lp-ty__step-node" aria-hidden="true">
+                <Icon name={s.icon} size={18} strokeWidth={2} />
               </span>
-              <span className="lp-ty__step-hint">{copy.hints[i]}</span>
-            </span>
-          </li>
-        ))}
+              <span className="lp-ty__step-text">
+                <span className="lp-ty__step-label">{c.label}</span>
+                {s.key === "call" ? <CallHint ctx={ctx} copy={c} /> : <span className="lp-ty__step-hint">{c.hint}</span>}
+              </span>
+            </li>
+          );
+        })}
       </ol>
     </section>
   );
@@ -138,6 +210,7 @@ function Timeline({ ctx, copy }: { ctx: RenderContext; copy: TyCopy }): ReactEle
 
 function Summary({ doc, ctx, copy }: { doc: PageDoc; ctx: RenderContext; copy: TyCopy }): ReactElement {
   const { product, offers } = doc;
+  const track = addonBlock<AssistTyData>(ctx, "lp-assist-ty")?.track;
   const id = defaultBundleId(offers, doc.items);
   const bundle = offers.bundles.find((b) => b.id === id) ?? offers.bundles[0]!;
   const cents = orderTotals(doc, emptySelection(bundle.id));
@@ -177,13 +250,24 @@ function Summary({ doc, ctx, copy }: { doc: PageDoc; ctx: RenderContext; copy: T
         ) : null}
         <div className="lp-ty__row lp-ty__row--total" data-need-order="">
           <dt>{ctx.t("form.total")}</dt>
-          <dd data-ty="total">{totals ? ctx.money(totals.total) : ctx.money(bundle.price)}</dd>
+          <dd>
+            <bdi dir="ltr" data-ty="total">
+              {totals ? ctx.money(totals.total) : ctx.money(bundle.price)}
+            </bdi>
+          </dd>
         </div>
       </dl>
       <p className="lp-ty__pay">
         <Icon name="cash-hand" size={18} />
         <span>{ctx.t("trust.cod")}</span>
       </p>
+      {track ? (
+        // "Track my order" (LAN-§8.1): the chunk writes `?o=<id>` (and the proof) and shows it
+        <a className="lp-ty__track" data-lp-ty="track" href={track.base} hidden>
+          <Icon name="map-pin" size={18} />
+          <span>{TY[shopperLocaleOf(ctx.locale)].track}</span>
+        </a>
+      ) : null}
     </aside>
   );
 }
@@ -287,8 +371,12 @@ function Help({ ctx, whatsapp, landingUrl, productName }: { ctx: RenderContext; 
   );
 }
 
-/** Privacy · terms · shipping & returns · contact, in the delivery mode's URLs. */
+/**
+ * Privacy · terms · shipping & returns · contact, in the delivery mode's URLs, then "Report this store" (LAN-§3.9:
+ * `ctx.links.report` as given, set on live, test and preview documents, never in an export).
+ */
 function LegalLinks({ ctx }: { ctx: RenderContext }): ReactElement {
+  const report = ctx.links.report;
   return (
     <nav className="lp-ty__legal" aria-label={legalChrome(legalLang(ctx.locale)).documents}>
       <ul className="lp-ty__legal-list" role="list">
@@ -297,8 +385,25 @@ function LegalLinks({ ctx }: { ctx: RenderContext }): ReactElement {
             <a href={l.href}>{l.label}</a>
           </li>
         ))}
+        {report ? (
+          <li>
+            <a href={report} rel="nofollow">
+              {ctx.t("footer.report")}
+            </a>
+          </li>
+        ) : null}
       </ul>
     </nav>
+  );
+}
+
+/** "Confirm on WhatsApp" (LAN-§8.1): a compact pill beside the order number, filled and shown by `assist-ty`. */
+function ConfirmPill({ ctx, wa }: { ctx: RenderContext; wa: string }): ReactElement {
+  return (
+    <a className="lp-ty__confirm" data-lp-ty="confirm" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" hidden>
+      <Icon name="whatsapp" size={16} strokeWidth={2} />
+      <span>{TY[shopperLocaleOf(ctx.locale)].confirm}</span>
+    </a>
   );
 }
 
@@ -310,6 +415,12 @@ export function ThankYouBody({ doc, ctx, landingUrl }: ThankYouProps): ReactElem
   const message = doc.thankYou.message?.trim() || ctx.t("thanks.message");
   const logo = ctx.store.logo;
   const brand = brandName(ctx);
+  const confirm = addonBlock<AssistTyData>(ctx, "lp-assist-ty")?.confirm;
+  const order = (
+    <p className="lp-ty__order">
+      <span>{ctx.t("thanks.orderNo")}</span> <bdi dir="ltr" className="lp-ty__order-id" data-ty="orderId" />
+    </p>
+  );
   const title: ReactNode = parts ? (
     <>
       <RichText text={parts.before} ctx={ctx} />
@@ -344,12 +455,17 @@ export function ThankYouBody({ doc, ctx, landingUrl }: ThankYouProps): ReactElem
 
       <main id="main" className="lp-ty" tabIndex={-1}>
         <section className="lp-section lp-ty__hero" data-bg={heroBg(doc)} data-space="normal" aria-labelledby="lp-ty-title">
-          <span className="lp-ty__aurora" aria-hidden="true" />
+          <span className="lp-ty__tint" aria-hidden="true" />
           <div className="lp-container lp-ty__hero-inner">
             <SuccessMark />
-            <p className="lp-ty__order">
-              <span>{ctx.t("thanks.orderNo")}</span> <strong className="lp-ty__order-id" data-ty="orderId" />
-            </p>
+            {confirm ? (
+              <div className="lp-ty__ids">
+                {order}
+                <ConfirmPill ctx={ctx} wa={confirm.wa} />
+              </div>
+            ) : (
+              order
+            )}
             <h1 id="lp-ty-title" className="lp-ty__title" data-reveal="blur-in" data-delay="120">
               {title}
             </h1>

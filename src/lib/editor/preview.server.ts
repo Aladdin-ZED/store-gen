@@ -54,6 +54,8 @@ export async function renderDraftPreview(
     upgradeInsecureRequests: false,
     // the render hook: only a set that changes something (a hook-free preview keeps today's bytes)
     ...(addons && hasAddons(addons) ? { addons } : {}),
+    // the store's shopper facts (CCR r1-p3-10): the preview follows the store's address mode and timeline
+    ...(opts.rc.shopper ? { shopper: opts.rc.shopper } : {}),
   });
 
   let html = rendered.html;

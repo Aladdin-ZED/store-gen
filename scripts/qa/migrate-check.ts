@@ -593,6 +593,9 @@ async function childMain(task: string): Promise<unknown> {
     // (g) CRIT2-5, second half (CCR r1.0-t1-3 item 5, added at the T3 merge): the scoped publish sets
     // first_published_at once; an unpublish keeps it and a republish never moves it
     const { publishPage, unpublishPage, PublishError } = await import("@/lib/render/publish.server");
+    // the library's fixture pages answer honesty_blocked by design (LAN-§3.2.1); this case proves first_published_at, so its
+    // publishes pass the landing gate through (CCR r1-p3-4)
+    const { withoutLandingGate } = await import("@/lib/render/prepublish/landing.fixtures");
     const actor = { kind: "user", userId: U_OWNER, impersonatorId: null, ip: null } as const;
     const conn = await readConn();
     const firstOf = async (pageId: string) => {
@@ -632,7 +635,7 @@ async function childMain(task: string): Promise<unknown> {
       }
       for (const pageId of [P1, P2]) {
         const before = await firstOf(pageId);
-        const first = await step(() => publishPage(scope(), pageId, { actor }));
+        const first = await step(() => withoutLandingGate(() => publishPage(scope(), pageId, { actor })));
         const afterPublish = await firstOf(pageId);
         await new Promise((r) => setTimeout(r, 20)); // a later instant, so a moved stamp would show
         const off = await step(async () => {
@@ -640,7 +643,7 @@ async function childMain(task: string): Promise<unknown> {
         });
         const afterUnpublish = await firstOf(pageId);
         await new Promise((r) => setTimeout(r, 20));
-        const again = await step(() => publishPage(scope(), pageId, { actor }));
+        const again = await step(() => withoutLandingGate(() => publishPage(scope(), pageId, { actor })));
         const afterRepublish = await firstOf(pageId);
         out[pageId] = { before, steps: [first, off, again], afterPublish, afterUnpublish, afterRepublish };
       }

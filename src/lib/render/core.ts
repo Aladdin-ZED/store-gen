@@ -18,9 +18,11 @@
  */
 import { createHash } from "node:crypto";
 import { createElement, type ReactElement } from "react";
+import { applyShopperFacts, type ShopperFacts } from "@/landing/addons/facts";
 import type { RenderHookFields } from "@/landing/addons/types";
 import { createRenderContext, type AssetResolver, type LandingRenderContext, type LegalKind, type StoreInfo } from "@/landing/context";
 import { LandingDocument, LegalDocument, ThankYouDocument, variantChunksIn, type DocumentProps, type DocumentUrls, type RenderedCss } from "@/landing/document";
+import type { LegalPolicyInput } from "@/landing/legal";
 import { renderPageBody } from "@/landing/page";
 import type { PageLinks, RenderMode } from "@/landing/types";
 import type { PageDoc } from "@/lib/page/schema";
@@ -61,6 +63,8 @@ export interface RenderHtmlOptions extends RenderHookFields {
   ver?: string;
   /** false: no pixel on the page nor in its CSP (test renders, D54) */
   pixels?: boolean;
+  /** the store's shopper facts (P3's `ShopperFacts`, CCR r1-p3-10); absent: QA renders and exports keep the honest defaults */
+  shopper?: ShopperFacts;
   /** origins media is loaded from besides 'self' (S / C modes: the platform host, docs/STORE-SAAS.md §C.9) */
   mediaOrigins?: readonly string[];
 }
@@ -77,6 +81,8 @@ export interface LegalHtmlOptions {
   now?: string;
   /** "updated on" date (ISO) — the published version's date; defaults to `now` */
   updatedAt?: string;
+  /** the store's policy answers (P3's `legalPolicyFor`, read at serve or export time); absent = every answer unset (CCR r1-p3-2) */
+  policy?: LegalPolicyInput | null;
   qa?: boolean;
   /** add upgrade-insecure-requests (live only); default: production */
   upgradeInsecureRequests?: boolean;
@@ -163,7 +169,7 @@ function withDoctype(markup: string): string {
 }
 
 function contextFor(doc: PageDoc, opts: RenderHtmlOptions): LandingRenderContext {
-  return createRenderContext(doc, {
+  const ctx = createRenderContext(doc, {
     mode: opts.mode,
     assets: opts.assets,
     base: opts.base ?? (opts.mode === "export" ? "./" : "/"),
@@ -172,6 +178,8 @@ function contextFor(doc: PageDoc, opts: RenderHtmlOptions): LandingRenderContext
     store: opts.store,
     links: opts.links,
   });
+  // CCR r1-p3-10: the document's add-ons and the store's shopper facts reach the sections that render them
+  return { ...ctx, ...(opts.addons ? { addons: opts.addons } : {}), ...(opts.shopper ? { shopper: opts.shopper } : {}) };
 }
 
 /** Style attributes may only carry CSS custom properties ("--rot:-2deg;--pos:40%"). */
@@ -326,7 +334,9 @@ function documentProps(doc: PageDoc, ctx: LandingRenderContext, opts: RenderHtml
 }
 
 /** The product landing page. `doc` should come from validateDoc(). */
-export async function renderLandingHtml(doc: PageDoc, opts: RenderHtmlOptions): Promise<RenderedHtml> {
+export async function renderLandingHtml(page: PageDoc, opts: RenderHtmlOptions): Promise<RenderedHtml> {
+  // the store's address mode (LAN-§3.5 OF2, CCR r1-p3-10): the form's fields and the runtime config's agree
+  const doc = applyShopperFacts(page, opts.shopper ?? null);
   const markup = await markupRenderer();
   const ctx = contextFor(doc, opts);
   const { issues, rendered } = probeSections(doc, ctx, markup);
@@ -336,7 +346,8 @@ export async function renderLandingHtml(doc: PageDoc, opts: RenderHtmlOptions): 
 }
 
 /** The thank-you page (noindex). */
-export async function renderThankYouHtml(doc: PageDoc, opts: RenderHtmlOptions): Promise<RenderedHtml> {
+export async function renderThankYouHtml(page: PageDoc, opts: RenderHtmlOptions): Promise<RenderedHtml> {
+  const doc = applyShopperFacts(page, opts.shopper ?? null);
   const markup = await markupRenderer();
   const ctx = contextFor(doc, opts);
   const html = withDoctype(markup(createElement(ThankYouDocument, documentProps(doc, ctx, opts))));
@@ -359,7 +370,7 @@ export async function renderLegalHtml(doc: PageDoc, kind: LegalKind, opts: Legal
     links: opts.links,
   });
   const updatedAt = opts.updatedAt && Number.isFinite(Date.parse(opts.updatedAt)) ? new Date(opts.updatedAt).toISOString() : ctx.now;
-  const html = withDoctype(markup(createElement(LegalDocument, { doc, ctx, kind, updatedAt, qa: opts.qa })));
+  const html = withDoctype(markup(createElement(LegalDocument, { doc, ctx, kind, updatedAt, policy: opts.policy ?? null, qa: opts.qa })));
   return finish(
     html,
     { mode: opts.mode, page: "legal", online: false, pixels: false, doc, endpoints: {}, upgradeInsecureRequests: opts.upgradeInsecureRequests, mediaOrigins: opts.mediaOrigins },

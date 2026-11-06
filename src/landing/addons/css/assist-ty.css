@@ -1,0 +1,89 @@
+/* ==========================================================================
+   assist-ty: the thank-you blocks (P3 LANDING; landing.md LAN-§8.1, §3.6)
+   --------------------------------------------------------------------------
+   [data-lp-ty="confirm"]       the compact "Confirm on WhatsApp" pill beside
+                                the order number (it never competes with the
+                                one-click upsell)
+   [data-lp-ty="expect"]        the call step: "We'll call you from <phone>"
+   [data-lp-ty="expect-save"]   "Save this number…", muted
+   [data-lp-ty="track"]         "Track my order" in the summary card footer
+   Hidden until the `assist-ty` chunk fills them. No glass, no kicker; logical
+   properties only (RTL); phones are LTR isolates with tabular figures.
+   ========================================================================== */
+
+[data-lp-ty][hidden] {
+  display: none;
+}
+
+[data-lp-ty="confirm"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-block-size: 2.5rem;
+  padding-inline: 0.875rem 1rem;
+  border: 1px solid var(--lp-line-strong, rgba(22, 24, 27, 0.22));
+  border-radius: var(--lp-radius-pill, 999px);
+  background: var(--lp-surface, #fff);
+  color: var(--lp-ink, #16181b);
+  font-size: var(--lp-step--1, 0.875rem);
+  font-weight: var(--lp-strong-weight, 600);
+  line-height: 1.2;
+  text-decoration: none;
+  transition:
+    border-color 180ms var(--lp-ease, ease),
+    background-color 180ms var(--lp-ease, ease);
+}
+
+[data-lp-ty="confirm"]::before {
+  content: "";
+  flex: none;
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border-radius: 50%;
+  background: #25d366;
+}
+
+[data-lp-ty="confirm"]:hover {
+  border-color: var(--lp-ink-soft, #4b5058);
+}
+
+[data-lp-ty="confirm"]:focus-visible,
+[data-lp-ty="track"]:focus-visible {
+  outline: 2px solid var(--lp-accent, currentColor);
+  outline-offset: 2px;
+}
+
+.lp-ty-phone {
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-weight: var(--lp-strong-weight, 600);
+  color: var(--lp-ink, #16181b);
+  white-space: nowrap;
+}
+
+[data-lp-ty="expect-save"] {
+  margin-block: 0.25rem 0;
+  font-size: var(--lp-step--1, 0.875rem);
+  color: var(--lp-ink-mute, #6b7078);
+}
+
+[data-lp-ty="track"] {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+  color: var(--lp-ink, #16181b);
+  font-weight: var(--lp-strong-weight, 600);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.25em;
+}
+
+[data-lp-ty="track"]:hover {
+  text-decoration-thickness: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-lp-ty="confirm"] {
+    transition: none;
+  }
+}

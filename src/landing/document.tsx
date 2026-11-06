@@ -29,7 +29,7 @@ import type { LandingRenderContext } from "./context";
 import * as generatedAssets from "./generated/assets";
 import { baseCss, legalCss, runtimeJs, sectionCss, thankYouCss } from "./generated/assets";
 import { sectionChunkCss, sectionVariants } from "./generated/chunks";
-import { LegalBody, legalLang, legalTitle, type LegalKind } from "./legal";
+import { LegalBody, legalLang, legalTitle, type LegalKind, type LegalPolicyInput } from "./legal";
 import { renderPageBody, usedSectionTypes, type PageBodyOptions } from "./page";
 import { brandName, isPlaceholderStoreName, plainText } from "./primitives";
 import { FOOTER_RENDERS_REPORT } from "./sections/footer/report";
@@ -580,6 +580,8 @@ export interface LegalDocumentProps {
   kind: LegalKind;
   /** ISO date shown as "updated on" */
   updatedAt: string;
+  /** the store's answers read at serve or export time (P3's `legalPolicyFor`); absent = every answer unset (CCR r1-p3-2) */
+  policy?: LegalPolicyInput | null;
   qa?: boolean;
 }
 
@@ -587,7 +589,7 @@ export interface LegalDocumentProps {
  * A legal document of the page (privacy / terms / shipping / contact): the page's theme, fonts and
  * tokens around a long-form reading layout. Static: no runtime config, no script.
  */
-export function LegalDocument({ doc, ctx, kind, updatedAt, qa = false }: LegalDocumentProps): ReactElement {
+export function LegalDocument({ doc, ctx, kind, updatedAt, policy = null, qa = false }: LegalDocumentProps): ReactElement {
   const theme = buildTheme(doc.theme, doc.locale);
   const icon = brandIcon(ctx, theme);
   const css = documentCss(ctx, theme, legalCss ? [legalCss] : [], qa);
@@ -602,7 +604,7 @@ export function LegalDocument({ doc, ctx, kind, updatedAt, qa = false }: LegalDo
   );
   return (
     <Shell ctx={ctx} theme={theme} page="legal" lang={lang} qa={qa} head={head} css={css}>
-      <LegalBody ctx={ctx} kind={kind} updatedAt={updatedAt} />
+      <LegalBody ctx={ctx} kind={kind} updatedAt={updatedAt} policy={policy} />
     </Shell>
   );
 }

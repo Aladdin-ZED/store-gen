@@ -49,6 +49,7 @@ import { exportFileName, isExportMode, normalizeAllowedOrigins, WHATSAPP_HINT, t
 import { storeExportKey, type ExportKey } from "./service-account";
 import type { ExportContextResponse, ExportEstimateResponse, ExportRecordJson, ExportVersionJson } from "./types";
 import { zipStream } from "./zip";
+import { legalPolicyFor } from "@/landing/legal/policy.server";
 
 export class ExportError extends Error {
   constructor(
@@ -307,7 +308,7 @@ async function prepare(scope: StoreScope, req: ExportRequest): Promise<Prepared>
     }
   }
   const ids = collectAssetIds(doc, [store.logo, store.mark]);
-  const [assets, addons] = await Promise.all([storeAssets(scope, ids), exportAddons(scope, version.pageId, doc, req.mode)]);
+  const [assets, addons, legalPolicy] = await Promise.all([storeAssets(scope, ids), exportAddons(scope, version.pageId, doc, req.mode), legalPolicyFor(scope)]);
   const found = new Set(assets.map((a) => a.id));
   const lost = ids.filter((id) => !found.has(id)).length;
   return {
@@ -333,6 +334,7 @@ async function prepare(scope: StoreScope, req: ExportRequest): Promise<Prepared>
         ? [`${lost} image${lost > 1 ? "s" : ""} used by this version ${lost > 1 ? "were" : "was"} deleted from the media library and ${lost > 1 ? "are" : "is"} left out — replace ${lost > 1 ? "them" : "it"} in the builder.`]
         : [],
       addons,
+      legalPolicy,
     },
   };
 }

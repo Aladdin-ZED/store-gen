@@ -17,7 +17,8 @@ import { DEFAULT_WINDOW } from "@/lib/settings/keys/ops";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
 import type { getStoreSettings } from "@/lib/settings";
-import type { CheckContextData } from "./check-context";
+import { landingGateFactsFor } from "@/lib/render/prepublish/landing";
+import type { CheckContextData, CityKey } from "./check-context";
 import { callingWindowFacts, factsOf, numeralsIn, originOf, stockChangedAtOf } from "./check-facts";
 import { factsFor } from "./facts.server";
 
@@ -87,10 +88,12 @@ export async function loadCheckContext(
   now = Date.now(),
 ): Promise<CheckContextData> {
   const { store: identity, policies, checkout, landing, ops } = settings;
-  const [published, generated, attested] = await Promise.all([
+  const [published, generated, attested, gate] = await Promise.all([
     publishedFacts(scope, page.id, page.publishedVersionId),
     generatedDoc(scope, page.id),
     factsFor(scope, page.id),
+    // the honesty gate's own facts (CCR r1-p3-3): the panel runs the gate's rows on them; a failed read leaves them silent
+    landingGateFactsFor(scope, page.id, doc, new Date(now)).catch(() => undefined),
   ]);
   const market = Market.safeParse(store.market);
   const window = callingWindowFacts(ops.callingWindow ?? DEFAULT_WINDOW, ops.windowOverrides ?? [], now, store.timezone);
@@ -98,7 +101,12 @@ export async function loadCheckContext(
 
   return {
     saas: true,
-    zones: { enabled: checkout.zonesEnabled, count: 0, hasMarketList: market.success && !!MARKET_SPECS[market.data].cities, feesByTopCity: {} },
+    zones: {
+      enabled: checkout.zonesEnabled,
+      count: gate?.zones.length ?? 0,
+      hasMarketList: market.success && !!MARKET_SPECS[market.data].cities,
+      feesByTopCity: (gate?.feesByTopCity ?? {}) as Record<CityKey, number | null>,
+    },
     policiesReviewed: !!policies.reviewedAt,
     confirmation: {
       callerPhone: !!confirmation.callerPhone,
@@ -123,5 +131,6 @@ export async function loadCheckContext(
     }),
     origin: originOf(generated, doc),
     attestedFacts: [...new Set(attested.flatMap((f) => (f.value ? [f.value] : numeralsIn(f.text))))].sort(),
+    ...(gate ? { gate } : {}),
   };
 }

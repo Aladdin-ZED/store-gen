@@ -36,6 +36,7 @@ import { inStore } from "@/lib/tenancy/sql";
 import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { addressMode, mediaUrl, platformOrigin, reportUrl, storeBase, storeOrigin, storePath, type StoreAddress } from "@/lib/urls";
 import { loadRenderAddons, type AddonMode } from "@/landing/addons/load.server";
+import { shopperFactsFor, type ShopperFacts } from "@/landing/addons/facts";
 import { noAddons, type RenderAddons } from "@/landing/addons/types";
 import { collectAssetIds, rowAssetResolver, storePageLinks, type AssetResolver, type AssetRowLike, type StoreInfo } from "@/landing/context";
 import type { PageLinks } from "@/landing/types";
@@ -68,6 +69,8 @@ export interface StoreRenderContext {
   /** the thank-you document's add-ons */
   thanksAddons: RenderAddons;
   purchaseInBrowser: boolean;
+  /** the store's shopper facts (P3's `ShopperFacts`, CCR r1-p3-10): the call step, the inspection promise, the address mode */
+  shopper?: ShopperFacts;
 }
 
 /** Does an add-on set change the document? An empty one is never passed to the renderer (today's bytes, T3's rule). */
@@ -135,7 +138,7 @@ export async function loadStoreRenderContext(
   const address = addressOf(store);
   const pageId = opts.pageId ?? null;
   const [s, set] = await Promise.all([
-    getStoreSettings(scope, ["store", "brand", "turnstile", "conversions", "landing"] as const),
+    getStoreSettings(scope, ["store", "brand", "turnstile", "conversions", "landing", "checkout", "policies"] as const),
     opts.addons ? loadRenderAddons(scope, store, { pageId, doc: opts.addons.doc, mode: opts.addons.mode }) : null,
   ]);
   const own = s.turnstile.siteKey && s.turnstile.secretKey ? s.turnstile.siteKey : undefined;
@@ -158,6 +161,7 @@ export async function loadStoreRenderContext(
     addons: set?.landing ?? noAddons(),
     thanksAddons: set?.thanks ?? noAddons(),
     purchaseInBrowser: purchaseInBrowserFor(s.conversions, pageId),
+    shopper: shopperFactsFor(s.checkout, s.policies),
   };
 }
 
@@ -222,5 +226,6 @@ export function storeRenderOptions(rc: StoreRenderContext, input: { slug: string
     // the render hook: passed only when it changes something, so a hook-free document keeps today's bytes
     ...(hasAddons(addons) ? { addons } : {}),
     ...(rc.purchaseInBrowser ? {} : { purchaseInBrowser: false }),
+    ...(rc.shopper ? { shopper: rc.shopper } : {}),
   };
 }

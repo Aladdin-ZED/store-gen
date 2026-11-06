@@ -195,6 +195,8 @@ async function main() {
   const exp = load<typeof import("@/lib/export/server")>("@/lib/export/server");
   const { storeExportKey, NO_EXPORT_KEY } = load<typeof import("@/lib/export/service-account")>("@/lib/export/service-account");
   const { publishPage, publishTrackingOnly } = load<typeof import("@/lib/render/publish.server")>("@/lib/render/publish.server");
+  // the library's page answers honesty_blocked by design; this run proves pixels, so its own publish passes the gate through (CCR r1-p3-4)
+  const { withoutLandingGate } = load<typeof import("@/lib/render/prepublish/landing.fixtures")>("@/lib/render/prepublish/landing.fixtures");
 
   // empty the test tables (throwaway database only; children before their store)
   for (const t of ["audit_log", "exports", "orders", "page_versions", "pages", "store_settings", "store_members", "rate_limits", "settings"]) {
@@ -423,7 +425,7 @@ async function main() {
   const pB = await insertPage(STORE_A, "Duo", "duo-px", docWith({ metaPixelId: [META_Y] }));
   eq2("publish: an editor is refused an unknown id (the store's rule runs by default)", await code(() => publishPage(A, pB, { actor: actor(editorA) })), "pixel_not_in_library");
   eq2("publish: B can't publish A's page", await code(() => publishPage(B, pB, { actor: actor(ownerB) })), "not_found");
-  const pub = await publishPage(A, pB, { actor: actor(ownerA) });
+  const pub = await withoutLandingGate(() => publishPage(A, pB, { actor: actor(ownerA) }));
   ok("publish: owner publishes and the id joins A's library", !!pub.versionId && (await lib.getLibrary(A)).pixels.some((p) => p.id === META_Y));
   ok("publish: B's library unchanged", !(await lib.getLibrary(B)).pixels.some((p) => p.id === META_Y));
   const changed = await db.select().from(auditLog).where(and(eq(auditLog.action, "page.pixels_changed"), eq(auditLog.target, pB))).orderBy(desc(auditLog.id));

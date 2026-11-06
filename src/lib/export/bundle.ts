@@ -19,7 +19,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { RenderAddons } from "@/landing/addons/types";
 import { createRenderContext, exportAssetResolver, exportLinks, LEGAL_KINDS, type AssetRowLike, type StoreInfo } from "@/landing/context";
-import { legalGaps } from "@/landing/legal";
+import { legalGaps, type LegalPolicyInput } from "@/landing/legal";
 import type { PageLinks } from "@/landing/types";
 import { exportMediaPath } from "@/lib/media/keys";
 import { getMarket } from "@/lib/markets/info";
@@ -97,6 +97,8 @@ export interface BundleInput {
   now: Date;
   /** "updated on" date of the legal pages (the version's date) */
   updatedAt: Date;
+  /** the store's policy answers at the moment of export (P3's `legalPolicyFor`, CCR r1-p3-2); absent = every answer unset */
+  legalPolicy?: LegalPolicyInput | null;
   /** warnings known before rendering (e.g. images deleted from the media library) */
   warnings?: string[];
   paths?: Partial<BundlePaths>;
@@ -230,6 +232,7 @@ export async function buildBundle(input: BundleInput): Promise<ExportBundle> {
       base: "../",
       now: nowIso,
       updatedAt: input.updatedAt.toISOString(),
+      policy: input.legalPolicy ?? null,
     });
     legal.push({ kind, ...rendered });
   }

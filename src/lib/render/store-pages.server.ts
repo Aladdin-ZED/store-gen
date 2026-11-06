@@ -23,6 +23,7 @@ import type { StoreRow, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { storePageLinks, type LegalKind } from "@/landing/context";
 import { cacheGet, cacheSet } from "./cache.server";
 import { renderLegalHtml, type RenderedHtml } from "./core";
+import { legalPolicyFor } from "@/landing/legal/policy.server";
 import { isStoreSlug } from "./publish.server";
 import { loadStoreRenderContext, storeAssetRows, storeReportUrl, storeResolver } from "./store-context.server";
 
@@ -177,12 +178,12 @@ async function legalSource(scope: StoreScope, store: StoreRow, themeSlug: string
   );
 }
 
-/** When the store's facts the legal texts are built from last changed (the `store` and `policies` settings). */
+/** When the store's facts the legal texts are built from last changed (the `store`, `policies` and `checkout` settings). */
 async function factsUpdatedAt(scope: StoreScope): Promise<Date | null> {
   const [row] = await db
     .select({ at: sql<Date | string | null>`MAX(${storeSettings.updatedAt})` })
     .from(storeSettings)
-    .where(and(inStore(storeSettings, scope), sql`${storeSettings.key} IN ('store', 'policies')`));
+    .where(and(inStore(storeSettings, scope), sql`${storeSettings.key} IN ('store', 'policies', 'checkout')`));
   const at = row?.at ? new Date(row.at) : null;
   return at && Number.isFinite(at.getTime()) ? at : null;
 }
@@ -202,7 +203,7 @@ export async function getStoreLegalDocument(scope: StoreScope, store: StoreRow, 
     async () => {
       const { doc } = validateDoc(page.doc);
       if (!doc) return null;
-      const [rc, changed] = await Promise.all([loadStoreRenderContext(scope, store, { pageId: page.pageId }), factsUpdatedAt(scope)]);
+      const [rc, changed, policy] = await Promise.all([loadStoreRenderContext(scope, store, { pageId: page.pageId }), factsUpdatedAt(scope), legalPolicyFor(scope)]);
       const rows = rc.info.logo ? await storeAssetRows(scope, [rc.info.logo.id]) : [];
       const updatedAt = new Date(Math.max(page.publishedAt.getTime(), changed?.getTime() ?? 0)).toISOString();
       return renderLegalHtml(doc, kind, {
@@ -211,6 +212,7 @@ export async function getStoreLegalDocument(scope: StoreScope, store: StoreRow, 
         store: rc.info,
         links: storePageLinks(rc.base, page.slug, storeReportUrl(rc, `/policies/${kind}`)),
         updatedAt,
+        policy,
         mediaOrigins: rc.mediaOrigins,
       });
     },

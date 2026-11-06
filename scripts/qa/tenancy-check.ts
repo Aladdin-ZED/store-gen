@@ -2496,6 +2496,9 @@ export async function moreSpecialCases(kit: Kit): Promise<void> {
   const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
   const { eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
   const PUB = load<typeof import("@/lib/render/publish.server")>("@/lib/render/publish.server");
+  // the seeded documents are the library's argan page, which the honesty gate refuses by design (its own two-store
+  // cases are in tenancy-cases/landing.ts); this part proves slugs and files, so it publishes with the gate passed through (CCR r1-p3-4)
+  const { withoutLandingGate } = load<typeof import("@/lib/render/prepublish/landing.fixtures")>("@/lib/render/prepublish/landing.fixtures");
   const SP = load<typeof import("@/lib/render/store-pages.server")>("@/lib/render/store-pages.server");
   const TP = load<typeof import("@/lib/tenancy/public")>("@/lib/tenancy/public");
   const A = writeScope(fx.A.id);
@@ -2532,16 +2535,16 @@ export async function moreSpecialCases(kit: Kit): Promise<void> {
   await designSwitch({ ...((designBefore?.value as object | undefined) ?? {}), gatesAtPublish: "warn" });
   await seededDraft(fx.A);
   await seededDraft(fx.B);
-  const pubA = await call(ownerA, appPath(fx.A.handle, "/pages"), () => PUB.publishPage(A, fx.A.page.live, { actor: userActor(fx.A.members.owner) }));
+  const pubA = await call(ownerA, appPath(fx.A.handle, "/pages"), () => withoutLandingGate(() => PUB.publishPage(A, fx.A.page.live, { actor: userActor(fx.A.members.owner) })));
   check("A publishes /argan (the real render)", pubA.ok, answerOf(pubA));
   if (pubA.ok) register(pubA.value!.versionId);
-  const pubB = await call(ownerB, appPath(fx.B.handle, "/pages"), () => PUB.publishPage(B, fx.B.page.live, { actor: userActor(fx.B.members.owner) }));
+  const pubB = await call(ownerB, appPath(fx.B.handle, "/pages"), () => withoutLandingGate(() => PUB.publishPage(B, fx.B.page.live, { actor: userActor(fx.B.members.owner) })));
   check("B publishes /argan (the same slug)", pubB.ok, answerOf(pubB));
   const naming = await fresh.page(fx.B);
   const docB = lean(await fresh.doc(fx.B)) as unknown as { product: { images: { id: string }[] } };
   docB.product.images = [{ id: fx.B.asset.photo }, { id: fx.A.asset.photo }, { id: fx.A.asset.cutout }];
   await db.update(S.pages).set({ draft: docB as never }).where(eq(S.pages.id, naming));
-  const pubN = await call(ownerB, appPath(fx.B.handle, "/pages"), () => PUB.publishPage(B, naming, { actor: userActor(fx.B.members.owner) }));
+  const pubN = await call(ownerB, appPath(fx.B.handle, "/pages"), () => withoutLandingGate(() => PUB.publishPage(B, naming, { actor: userActor(fx.B.members.owner) })));
   check("B publishes a page whose document names A's files", pubN.ok, answerOf(pubN));
   await designSwitch(designBefore?.value);
   if (pubN.ok) {

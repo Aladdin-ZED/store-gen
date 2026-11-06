@@ -306,6 +306,12 @@ them (build note item 2), the maintainer runs the timed `npm run test:budget`, a
 - **P0-4** Rewrite `check-facts.ts` with P4's real `rangesForDay` and `isCallable` (cross-midnight ranges).
 - **P6-12** Check V27's marker: the order-form submit renders through `Cta`'s `hero` prop.
 - Chain `test:tracking` and `test:leads` (wave 1 cases) into `test:db`.
+- **Done at the P3 wave 1 merge (2026-11-06, speed mode):** P3-5 and P0-4 applied (CCR r1-p3-3; `callingWindowFacts`
+  on operations' `hasRanges` / `rangesForDay`); P3-4 half applied (the legal pages read the store's answers, CCR r1-p3-2
+  part A), the `returns` kind deferred to the integration (it changes every footer and export bundle; the shipping page
+  keeps the returns sections); P6-12 checked, no change: the sticky runtime already steps aside while `#order-form` is
+  on screen, and a `data-hero-cta` on the submit would make the form the bar's gate; `test:tracking` and `test:leads`
+  chained into `test:db`, the five offline P3 suites into `npm test`.
 
 ### P7 merge
 

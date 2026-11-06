@@ -266,10 +266,13 @@ async function pure(): Promise<void> {
 
   await check("render context (P0b F): lead kept while capture is on; hasAddons; the thank-you options carry their own report path and add-ons", async () => {
     const { LandingSetting } = await import("@/lib/settings/keys/landing");
-    for (const capture of ["market_default", "on", "off"] as const) {
-      // P3's stub answers true (today's behaviour): every page keeps its lead endpoint until the EU rule lands
+    // P3's rule (LD11, CCR r1-p3-8): an MA store follows its setting, an EU store never captures (no override until the EU pack)
+    const { lead: _lead, ...withoutLead } = ctxMod.PUBLIC_ENDPOINTS;
+    for (const capture of ["market_default", "on"] as const) {
       assert.deepEqual(ctxMod.storeEndpoints(A, LandingSetting.parse({ leads: { capture } })), ctxMod.PUBLIC_ENDPOINTS, capture);
+      assert.deepEqual(ctxMod.storeEndpoints({ ...A, market: "FR" }, LandingSetting.parse({ leads: { capture } })), withoutLead, `FR ${capture}`);
     }
+    assert.deepEqual(ctxMod.storeEndpoints(A, LandingSetting.parse({ leads: { capture: "off" } })), withoutLead, "off");
     assert.equal(ctxMod.hasAddons(noAddons()), false);
     for (const set of [{ css: ["assist"] }, { body: ["assist" as const] }, { head: ["exp-head" as const] }, { data: { "lp-assist": {} } }, { banner: "test" as const }]) {
       assert.equal(ctxMod.hasAddons({ ...noAddons(), ...set }), true, JSON.stringify(set));
@@ -825,16 +828,19 @@ async function database(): Promise<void> {
 
   await check("publish in the store: version row in the store, page live, first_published_at set once (COALESCE)", async () => {
     const { publishPage } = await import("./publish.server");
+    // the library's fixture page answers honesty_blocked by design (LAN-§3.2.1): this case proves the version row, so it
+    // publishes with the landing gate passed through (CCR r1-p3-4)
+    const { withoutLandingGate } = await import("./prepublish/landing.fixtures");
     const actor = { kind: "user" as const, userId: null, impersonatorId: null, ip: null };
     let message: string | null = null;
     try {
-      const res = await publishPage(mintScope("member", s.A), s.pageADraft, { actor });
+      const res = await withoutLandingGate(() => publishPage(mintScope("member", s.A), s.pageADraft, { actor }));
       const row = await pageRow(mintScope("member", s.A), s.pageADraft);
       assert.equal(row?.status, "published");
       assert.equal(row?.publishedVersionId, res.versionId);
       assert.ok(row?.firstPublishedAt, "first_published_at set");
       const first = row!.firstPublishedAt!.getTime();
-      const again = await publishPage(mintScope("member", s.A), s.pageADraft, { actor });
+      const again = await withoutLandingGate(() => publishPage(mintScope("member", s.A), s.pageADraft, { actor }));
       const row2 = await pageRow(mintScope("member", s.A), s.pageADraft);
       assert.equal(row2?.publishedVersionId, again.versionId);
       assert.equal(row2?.firstPublishedAt?.getTime(), first, "COALESCE: the first publish instant is kept");
@@ -964,6 +970,7 @@ async function database(): Promise<void> {
 
   await check("rerenderInPlace: a publish between the load and the commit → live_changed, the new version left as published", async () => {
     const { publishPage, rerenderInPlace } = await import("./publish.server");
+    const { withoutLandingGate } = await import("./prepublish/landing.fixtures"); // CCR r1-p3-4: the library page's own publish
     const scopeA = mintScope("member", s.A);
     const actor = { kind: "user" as const, userId: null, impersonatorId: null, ip: null };
     const old = await versionFull(scopeA, s.versionGlow);
@@ -974,7 +981,7 @@ async function database(): Promise<void> {
     let published: string | null = null;
     real.transaction = async (...args: unknown[]) => {
       delete (real as { transaction?: unknown }).transaction;
-      published = (await publishPage(scopeA, s.pageAGlow, { actor })).versionId;
+      published = (await withoutLandingGate(() => publishPage(scopeA, s.pageAGlow, { actor }))).versionId;
       return original.apply(real, args);
     };
     try {

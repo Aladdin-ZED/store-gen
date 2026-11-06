@@ -338,7 +338,7 @@ export const actions: TrackActionCase[] = [
   { file: WELCOME, name: "skipOnboardingAction", area: "generate", path: "/welcome", permission: ["store.read"], write: false, victim: () => [], own: () => [] },
   // settings: every argument leaves the store as it was (its own locale, mode and handle; 2FA off)
   { file: GENERAL, name: "saveGeneralAction", area: "settings", path: "/settings/general", permission: ["settings.write"], write: true, victim: (fx) => [{ defaultLocale: fx.rows.A.defaultLocale }], own: (fx) => [{ defaultLocale: fx.rows.B.defaultLocale }] },
-  { file: GENERAL, name: "modeSwitchPlanAction", live: { expect: "unavailable", why: "P3's landingModeSwitchPlan stub until the P3 merge" }, area: "settings", path: "/settings/general", permission: ["store.mode"], write: false, victim: () => [], own: () => [] },
+  { file: GENERAL, name: "modeSwitchPlanAction", area: "settings", path: "/settings/general", permission: ["store.mode"], write: false, victim: () => [], own: () => [] },
   { file: GENERAL, name: "setStoreModeAction", area: "settings", path: "/settings/general", permission: ["store.mode"], write: true, victim: () => [{ mode: "landing" }], own: () => [{ mode: "landing" }] },
   { file: ADDRESS, name: "renameHandleAction", area: "settings", path: "/settings/address", permission: ["domains.manage"], write: true, victim: (fx) => [{ handle: fx.A.handle }], own: (fx) => [{ handle: fx.B.handle }] },
   { file: SECURITY, name: "setRequireMember2faAction", area: "settings", path: "/settings/security", permission: ["security.write"], write: true, victim: () => [{ on: false }], own: () => [{ on: false }] },

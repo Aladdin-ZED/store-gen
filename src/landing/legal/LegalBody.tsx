@@ -9,12 +9,18 @@
  *   complete) · a "questions?" card · dark footer with the seller identity and the other documents.
  *
  * Pure markup, zero JavaScript (works the same live, exported and printed). Styles: legal.css.
+ *
+ * The store's answers (`policy`, ./policy.ts) decide every promise of the texts (./promises.ts) and which contact
+ * channels show; without them the documents promise nothing and show their gaps (landing.md LAN-§3.3).
  */
 import type { ReactElement, ReactNode } from "react";
 import { brandName, cx, Icon, pad2, Picture, SkipLink, type IconName } from "../primitives";
 import type { PageLinks, RenderContext, StoreContext } from "../types";
 import { contactChannels, legalChrome, legalLang, legalTexts } from "./content";
 import type { Block, Inline, LegalChrome, LegalKind, LegalText } from "./model";
+import type { LegalPolicyInput } from "./policy";
+
+type ChannelKey = "whatsapp" | "phone" | "email";
 
 export const LEGAL_ORDER: readonly LegalKind[] = ["privacy", "terms", "shipping", "contact"];
 
@@ -44,6 +50,8 @@ function longDate(iso: string, locale: string): string {
 /* Inline & block content                                              */
 /* ------------------------------------------------------------------ */
 
+const ARABIC_LETTER = /[؀-ۿ]/;
+
 function InlineRun({ parts, chrome }: { parts: readonly Inline[]; chrome: LegalChrome }): ReactElement {
   return (
     <>
@@ -57,9 +65,10 @@ function InlineRun({ parts, chrome }: { parts: readonly Inline[]; chrome: LegalC
               {x.label}
             </span>
           );
-        // phone numbers, e-mails and URLs keep their own (LTR) order inside Arabic sentences
+        // phone numbers, e-mails and URLs keep their own (LTR) order inside Arabic sentences: digits and "+" carry no
+        // direction, so `dir="auto"` read "+212 6 12…" right to left; a link without Arabic letters is isolated LTR
         return (
-          <a key={i} href={x.href} className="lp-legal__a" dir="auto" {...(x.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
+          <a key={i} href={x.href} className="lp-legal__a" dir={ARABIC_LETTER.test(x.text) ? "auto" : "ltr"} {...(x.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
             {x.text}
           </a>
         );
@@ -162,8 +171,8 @@ function DocSwitcher({ ctx, current, chrome }: { ctx: RenderContext; current: Le
 const CHANNEL_ICON = { whatsapp: "whatsapp", phone: "phone", email: "chat" } as const satisfies Record<string, IconName>;
 
 /** Big tappable contact tiles (contact page) — WhatsApp first and emphasized. */
-function ContactTiles({ store, chrome, lang }: { store: StoreContext; chrome: LegalChrome; lang: string }): ReactElement | null {
-  const chans = contactChannels(store);
+function ContactTiles({ store, chrome, lang, only }: { store: StoreContext; chrome: LegalChrome; lang: string; only: readonly ChannelKey[] }): ReactElement | null {
+  const chans = contactChannels(store, only);
   const address = [store.address, store.city].filter(Boolean).join(", ");
   if (!chans.length && !address) return null;
   const label = { whatsapp: chrome.whatsapp, phone: chrome.call, email: chrome.email };
@@ -203,8 +212,8 @@ function ContactTiles({ store, chrome, lang }: { store: StoreContext; chrome: Le
 }
 
 /** "A question?" card closing every document but the contact page. */
-function Questions({ store, chrome, links }: { store: StoreContext; chrome: LegalChrome; links: PageLinks }): ReactElement {
-  const chans = contactChannels(store);
+function Questions({ store, chrome, links, only }: { store: StoreContext; chrome: LegalChrome; links: PageLinks; only: readonly ChannelKey[] }): ReactElement {
+  const chans = contactChannels(store, only);
   const wa = chans.find((c) => c.key === "whatsapp");
   const others = chans.filter((c) => c.key !== "whatsapp");
   return (
@@ -283,6 +292,15 @@ function Footer({ ctx, store, chrome, year }: { ctx: RenderContext; store: Store
       <div className="lp-container">
         <p className="lp-legal__foot-copy">
           © {year} {brand}. {ctx.t("footer.rights")}
+          {ctx.links.report ? (
+            // "Report this store" (LAN-§3.9): the server's absolute reportUrl as given; never in an export
+            <>
+              {" "}
+              <a className="lp-legal__report" href={ctx.links.report} rel="nofollow">
+                {ctx.t("footer.report")}
+              </a>
+            </>
+          ) : null}
         </p>
       </div>
     </footer>
@@ -298,6 +316,11 @@ export interface LegalBodyProps {
   kind: LegalKind;
   /** ISO date shown as "updated on" (the published version's date) */
   updatedAt: string;
+  /**
+   * The store's answers read at serve time (`policies`, `checkout.confirmationCall`, the zones' dates, the calling
+   * window). Absent until the render paths pass it (CCR docs/saas/ccr/r1-p3-2.md): every answer then reads as unset.
+   */
+  policy?: LegalPolicyInput | null;
 }
 
 /** Title of a legal document in the page language (for <title>). */
@@ -305,11 +328,12 @@ export function legalTitle(ctx: RenderContext, kind: LegalKind): string {
   return legalTexts(ctx)[kind].title;
 }
 
-export function LegalBody({ ctx, kind, updatedAt }: LegalBodyProps): ReactElement {
+export function LegalBody({ ctx, kind, updatedAt, policy = null }: LegalBodyProps): ReactElement {
   const { store, links } = ctx;
   const lang = legalLang(ctx.locale);
   const chrome = legalChrome(lang);
-  const text: LegalText = legalTexts(ctx)[kind];
+  const text: LegalText = legalTexts(ctx, policy)[kind];
+  const only = policy?.policies.contact.channels ?? [];
   const n = pad2(LEGAL_ORDER.indexOf(kind) + 1);
   const date = longDate(updatedAt, ctx.locale);
   const sectionId = (id: string) => `lg-${id}`;
@@ -348,14 +372,14 @@ export function LegalBody({ ctx, kind, updatedAt }: LegalBodyProps): ReactElemen
 
       <main id="main" className="lp-legal" tabIndex={-1}>
         <section className="lp-section lp-legal__hero" data-bg="soft" data-space="normal" aria-labelledby="lp-legal-title">
-          <span className="lp-legal__aurora" aria-hidden="true" />
+          <span className="lp-legal__tint" aria-hidden="true" />
           <div className="lp-container lp-legal__hero-inner">
             <DocSwitcher ctx={ctx} current={kind} chrome={chrome} />
             <p className="lp-legal__kicker">
               <span>{chrome.kicker}</span>
               <span className="lp-legal__kicker-n" aria-hidden="true">
                 {/* isolated: "02 / 04" keeps its order inside Arabic text */}
-                <span dir="ltr">{n} / 04</span>
+                <span dir="ltr">{`${n} / ${pad2(LEGAL_ORDER.length)}`}</span>
               </span>
             </p>
             <h1 id="lp-legal-title" className="lp-legal__title">
@@ -392,7 +416,7 @@ export function LegalBody({ ctx, kind, updatedAt }: LegalBodyProps): ReactElemen
             </div>
 
             <article className="lp-legal__article" aria-labelledby="lp-legal-title">
-              {kind === "contact" ? <ContactTiles store={store} chrome={chrome} lang={lang} /> : null}
+              {kind === "contact" ? <ContactTiles store={store} chrome={chrome} lang={lang} only={only} /> : null}
               {text.sections.map((s, i) => (
                 <section key={s.id} id={sectionId(s.id)} className="lp-legal__sec" aria-labelledby={`${sectionId(s.id)}-h`}>
                   <h2 id={`${sectionId(s.id)}-h`} className="lp-legal__h">
@@ -406,7 +430,7 @@ export function LegalBody({ ctx, kind, updatedAt }: LegalBodyProps): ReactElemen
                   ))}
                 </section>
               ))}
-              {kind !== "contact" ? <Questions store={store} chrome={chrome} links={links} /> : null}
+              {kind !== "contact" ? <Questions store={store} chrome={chrome} links={links} only={only} /> : null}
             </article>
           </div>
         </div>

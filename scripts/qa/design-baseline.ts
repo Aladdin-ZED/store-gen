@@ -90,6 +90,11 @@ export const BASELINE_ALLOW: Readonly<Record<string, string>> = {
   "whatsappFloat.tab": "RTL3: a horizontal pill in ar (never rotated Arabic), data.tabLabel",
   "footer.big": "S24 / RTL5: the wordmark sized by --sh-word and never clipped, addresses in LTR blocks; CRIT15 report link",
   "footer.simple": "RTL5: addresses and e-mails in LTR inline blocks; CRIT15 report link in the legal row",
+  // P3 wave 1 merge (2026-11-06): the order form is P3's (LAN-§26.1); its LAN-§3.5 quality contract redraws every variant
+  "orderForm.card": "P3 LAN-§3.5 OF1-OF7: two blocks (steps, checkout), labels above 52-56 px controls, one submit row with the live total and the COD line once, delivery slots (LAN-§7.4)",
+  "orderForm.bold": "P3 LAN-§3.5 OF1-OF7: two blocks (steps, checkout), labels above 52-56 px controls, one submit row with the live total and the COD line once, delivery slots (LAN-§7.4)",
+  "orderForm.split": "P3 LAN-§3.5 OF1-OF7: two blocks (steps, checkout), labels above 52-56 px controls, one submit row with the live total and the COD line once, delivery slots (LAN-§7.4)",
+  "orderForm.minimal": "P3 LAN-§3.5 OF1-OF7: two blocks (steps, checkout), labels above 52-56 px controls, one submit row with the live total and the COD line once, delivery slots (LAN-§7.4)",
 };
 
 /**

@@ -162,7 +162,7 @@
   padding-inline: 0;
 }
 
-.lp-orderForm--minimal .lp-bump + .lp-sum {
+.lp-orderForm--minimal .lp-sum + .lp-bump {
   border-block-start: 0;
 }
 
@@ -188,35 +188,10 @@
   border: 0;
 }
 
-.lp-orderForm--minimal .lp-field--float .lp-field__label {
-  inset-inline-start: 0.1em;
-}
-
-/* a select always shows a choice or its prompt: its floating label stays up */
-.lp-orderForm--minimal .lp-field--float:has(.lp-select) .lp-field__label {
-  transform: translateY(-0.95rem) scale(0.74);
-}
-
 .lp-orderForm--minimal .lp-input-group .lp-input {
   border: 0;
 }
 
-/* hairline fields have no sheet of their own: their text sits on the block itself, so it takes the
-   block's inks (the kit's colour-block field inks assume a light sheet: muddy on an accent block) */
-.lp-orderForm--minimal :is(.lp-input, .lp-select, .lp-select__el, .lp-input-group) {
-  --f-ink: var(--sec-ink);
-  --f-ph: var(--sec-ink-soft);
-}
-
-/* one baseline per row: the phone group grows with its neighbour (the floated inputs are a few px
-   taller than the group's 3.5rem), so both hairlines line up */
-.lp-orderForm--minimal .lp-field--float {
-  grid-template-rows: minmax(0, 1fr) auto;
-}
-
-.lp-orderForm--minimal .lp-field--float .lp-field__control {
-  display: grid;
-}
 
 @media (min-width: 64rem) {
   .lp-orderForm--minimal .lp-of__wrap {

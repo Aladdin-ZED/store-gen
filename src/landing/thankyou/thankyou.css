@@ -65,12 +65,12 @@
   padding-block: clamp(2.5rem, 7vw, 5rem) calc(clamp(2.5rem, 7vw, 5rem) + var(--ty-overlap));
 }
 
-.lp-ty__aurora {
+/* the hero's colour moment (LAN-§3.6): one radial of the accent at 10 %, no mesh, no grain */
+.lp-ty__tint {
   position: absolute;
-  inset: -10% -5%;
+  inset: 0;
   z-index: -1;
-  background: var(--lp-aurora);
-  opacity: 0.85;
+  background: radial-gradient(70% 90% at 50% 0%, color-mix(in oklab, var(--lp-accent) 10%, transparent), transparent 70%);
   pointer-events: none;
 }
 
@@ -214,7 +214,7 @@
   }
 }
 
-/* order number on a glass chip (only once the runtime knows it) */
+/* order number on an opaque chip (only once the runtime knows it) */
 .lp-ty__order {
   display: none;
   align-items: baseline;
@@ -230,21 +230,22 @@
   box-shadow: var(--lp-highlight);
 }
 
-@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .lp-ty__order {
-    background: var(--sec-glass);
-    -webkit-backdrop-filter: var(--lp-glass-filter);
-    backdrop-filter: var(--lp-glass-filter);
-  }
-}
-
 html:is([data-ty-state="filled"], [data-ty-state="partial"]) .lp-ty__order {
   display: inline-flex;
 }
 
+/* the order chip and the "Confirm on WhatsApp" pill side by side (the pill only when assist-ty fills it) */
+.lp-ty__ids {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
 .lp-ty__order-id {
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: lining-nums tabular-nums;
   letter-spacing: 0.04em;
   direction: ltr;
   unicode-bidi: isolate;
@@ -349,20 +350,11 @@ html[data-ty-state="filled"] .lp-ty__who {
   opacity: 0.72;
 }
 
-/* glass order summary (opaque fallback first) */
+/* the order summary: an opaque sheet (0 glass, LAN-§3.6) */
 .lp-ty__summary {
   border-color: var(--sec-glass-border);
   background: var(--sec-glass-solid);
   color: var(--sec-glass-ink);
-}
-
-@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .lp-ty__summary {
-    /* two layers of the glass tint (~88% opaque): frosted, yet calm where a dark block shows through */
-    background: linear-gradient(var(--sec-glass), var(--sec-glass)) var(--sec-glass);
-    -webkit-backdrop-filter: var(--lp-glass-filter);
-    backdrop-filter: var(--lp-glass-filter);
-  }
 }
 
 .lp-ty__summary-head {
@@ -545,10 +537,6 @@ html[data-ty-state="filled"] .lp-ty__row--opts:has(> dd:empty) {
   background: linear-gradient(var(--sec-accent), var(--sec-line));
 }
 
-html.lp-js .lp-ty__step[data-reveal]:not([data-in])::before {
-  transform: scaleY(0);
-}
-
 .lp-ty__step::before {
   transition: transform var(--lp-dur-l) var(--lp-ease-out) 200ms;
 }
@@ -620,13 +608,6 @@ html.lp-js .lp-ty__step[data-reveal]:not([data-in])::before {
   line-height: 1.3;
 }
 
-.lp-ty__step-num {
-  font-size: var(--lp-step--1);
-  font-variant-numeric: tabular-nums;
-  color: var(--sec-ink-soft);
-  font-weight: 500;
-}
-
 .lp-ty__step-hint {
   font-size: var(--lp-step--1);
   color: var(--sec-ink-soft);
@@ -635,6 +616,36 @@ html.lp-js .lp-ty__step[data-reveal]:not([data-in])::before {
 
 .lp-ty__step[data-state="next"] .lp-ty__step-label {
   color: var(--sec-ink-soft);
+}
+
+/* totals and phones read as figures (T1): tabular lining digits in their LTR isolates */
+.lp-ty__rows bdi,
+.lp-ty-phone {
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* "Track my order" in the summary card's footer (assist-ty shows it) */
+.lp-ty__track {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  min-block-size: 2.75rem;
+  margin-block-start: 0.5rem;
+  color: var(--sec-ink);
+  font-size: var(--lp-step--1);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.25em;
+}
+
+.lp-ty__track[hidden],
+.lp-ty__confirm[hidden] {
+  display: none;
+}
+
+.lp-ty__track svg {
+  color: var(--sec-accent);
 }
 
 /* --- upsell ----------------------------------------------------------------- */

@@ -370,7 +370,7 @@ async function writeStoreRow<K extends StoreSettingKey>(exec: Executor, scope: W
 const fieldNames = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : []);
 
 /** The store keys the public documents read (legal pages, the "no page yet" home, the render context): CCR r1.0-t3-6. */
-const RENDER_KEYS: ReadonlySet<StoreSettingKey> = new Set<StoreSettingKey>(["store", "brand", "policies", "turnstile", "conversions"]);
+const RENDER_KEYS: ReadonlySet<StoreSettingKey> = new Set<StoreSettingKey>(["store", "brand", "policies", "checkout", "turnstile", "conversions"]);
 
 async function afterStoreWrite(scope: WriteScope, key: StoreSettingKey, value: unknown, actor: SettingsActor): Promise<void> {
   invalidateStoreSettings(scope.storeId, key);
