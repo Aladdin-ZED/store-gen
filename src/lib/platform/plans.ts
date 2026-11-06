@@ -286,6 +286,8 @@ export async function listPlans(ctx: PlatformCtx): Promise<PlanListRow[]> {
 export interface PlanEditor {
   plan: PlanListRow;
   rows: PlanEditorRow[];
+  /** the pending caps the rows' sentences quote, so the editor can say them again for an edited value */
+  caps: PendingCapValues;
 }
 
 /** The pending caps the sentences quote (`platform.signup.*`, PLA-§2.4). */
@@ -302,6 +304,7 @@ export async function getPlanEditor(ctx: PlatformCtx, planId: string): Promise<P
   return {
     plan: { id: row.id, name: row.name, status: row.status, sort: row.sort, stores: Number(n?.n ?? 0), updatedAt: row.updatedAt?.toISOString() ?? null, isDefault: row.id === DEFAULT_PLAN_ID },
     rows: planEditorRows(bagsOf(row), caps),
+    caps,
   };
 }
 

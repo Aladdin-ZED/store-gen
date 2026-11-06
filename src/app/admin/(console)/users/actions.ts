@@ -11,6 +11,7 @@ import { FieldsError } from "@/lib/auth/errors";
 import { getUserById } from "@/lib/auth/users";
 import { done, opOf, withOp } from "@/lib/platform/op-dedupe";
 import { banPerson, createPersonResetLink, deletePerson, resetPersonTwoFactor, signOutPerson, unbanPerson, type DeleteResult } from "@/lib/platform/people";
+import { addNote } from "@/lib/platform/notes";
 import { platformAction } from "@/lib/platform/seam";
 import type { ActionResult } from "@/lib/tenancy/types";
 
@@ -74,4 +75,9 @@ export async function deleteUserAction(input: Target & { reason: string; note?: 
       }),
     { stepUp: true },
   );
+}
+
+/** `stores.notes` (PLA-§11.2 Notes tab, §7.12): a note on the person (≤ 4,000 characters, ≤ 20 mentions); edit, pin and delete are the store notes' actions (by note id). */
+export async function addUserNoteAction(input: Target & { body: string; kind?: "note" | "decision" | "warning"; pinned?: boolean; mentions?: string[] } & Op): Promise<ActionResult<{ id: string }>> {
+  return platformAction("stores.notes", (ctx) => withOp(ctx, opOf(input), async () => done(await addNote(ctx, { ...input, userId: typeof input?.userId === "string" ? input.userId : "", storeId: undefined }))));
 }

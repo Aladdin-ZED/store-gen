@@ -1981,6 +1981,68 @@ async function main(): Promise<void> {
   checkD(en["console.profile.arrives_r2"] === "Full view arrives with R2" && en["console.lifecycle.arm"]?.includes("{seconds}") && en["console.impersonation.masked"]?.startsWith("You will see customer names"), "the PLA-§N.4 reference texts of the profile hold (arrives_r2, arm, masked)");
   }
 
+  /* ---- step 11: people, order lookup, plans editor, flags and kill switches (PLA-§9.2, §11, §12) ---- */
+  {
+    const dt = await import("../../components/console/plans/diff-text");
+    const { MiB } = await import("@/lib/tenancy/entitlement-keys");
+    const pr11 = await import("./plan-rules");
+    const fr11 = await import("./flag-rules");
+    const { KILL_SWITCHES } = await import("@/lib/flags/registry");
+    const en = enConsole as Record<string, string>;
+    const caps11 = { mediaMiB: 100, mediaMiBBeforeSubmit: 20, membersMax: 2 };
+    const rows11 = pr11.planEditorRows({ limits: { pages_max: 5 }, features: {} }, caps11);
+    const row = (k: string) => rows11.find((r) => r.key === k)!;
+    // the value words and the diff (old → new per changed key, registry order)
+    checkD(dt.planValueText(row("media_bytes"), "default") === "Default (1 GiB)" && dt.planValueText(row("media_bytes"), 500 * MiB) === "500 MiB" && dt.planValueText(row("pages_max"), null) === "Unlimited", "plan value words: default with its registry value, bytes, unlimited", [dt.planValueText(row("media_bytes"), "default"), dt.planValueText(row("pages_max"), null)]);
+    checkD(dt.planValueText(row("sheets"), false) === "Off" && dt.planValueText(row("ai_credits_month"), 1500) === "1,500", "plan value words: a feature off, a grouped count");
+    const lines = dt.diffLines(rows11, { sheets: false, media_bytes: 500 * MiB, pages_max: 5, members_max: "default" });
+    checkD(
+      lines.length === 2 && lines[0]!.key === "media_bytes" && lines[0]!.from === "Default (1 GiB)" && lines[0]!.to === "500 MiB" && lines[1]!.key === "sheets" && lines[1]!.from.startsWith("Default (") && lines[1]!.to === "Off",
+      "diff lines: changed keys only (a value equal to the saved one, or default kept as default, is no change), in registry order",
+      lines,
+    );
+    checkD(lines[0]!.label === en["console.entitlement.media_bytes"], "diff lines carry the entitlement's label");
+    // the effective sentence follows the edited value (the editor recomputes it per keystroke)
+    checkD(pr11.effectiveSentence("pages_max", 5) === "Stores on this plan get 5 pages." && pr11.effectiveSentence("pages_max", 1) === "Stores on this plan get 1 page.", "effective sentence of an edited limit, singular and plural");
+    checkD(pr11.pendingSentence("media_bytes", 50 * MiB, caps11) === "Pending stores get 20 MiB, then 50 MiB once they submit for review, until approval.", "the pending line where the cap wins for an edited value", pr11.pendingSentence("media_bytes", 50 * MiB, caps11));
+    // impact sentence pluralisation (one store, one above)
+    const one = pr11.impactSentences({ stores: 1, lowered: [{ key: "pages_max", from: 10, to: 5, stores: 1, storesAbove: 1, measured: true, examples: [{ handle: "souk-one", used: 7 }] }], featuresOff: [{ key: "sheets", stores: 1, measured: true, examples: [] }], unaffected: 0 });
+    checkD(one[0] === "Lowers pages for 1 store; 1 is already above 5 (@souk-one 7): they keep what they have, new ones are refused until they are below the limit.", "impact sentence: one store, one above (singular forms)", one[0]);
+    checkD(one[1] === "Sheets sync pauses for 1 store that is connected.", "feature-off sentence: singular", one[1]);
+    const none = pr11.impactSentences({ stores: 3, lowered: [{ key: "pages_max", from: null, to: 5, stores: 3, storesAbove: 0, measured: true, examples: [] }], featuresOff: [], unaffected: 3 });
+    checkD(none[0] === "Lowers pages for 3 stores; none is above 5 today.", "impact sentence: nobody above the new limit", none[0]);
+    checkD(!rows11.find((r) => r.key === "take_orders") || row("take_orders").locked === "take_orders", "take_orders is locked in the editor rows (PD8)");
+    // the kill sheet's typed phrase per key: only tripping read-only and sign-ups
+    const trip = (k: (typeof KILL_SWITCHES)[number]) => k === "platform_read_only";
+    const typed = Object.fromEntries(KILL_SWITCHES.map((k) => [k, fr11.killTypedFor(k, trip(k))]));
+    checkD(
+      typed.platform_read_only === "read-only" && typed.signups_enabled === "stop sign-ups" && KILL_SWITCHES.filter((k) => k !== "platform_read_only" && k !== "signups_enabled").every((k) => typed[k] === null),
+      "kill sheet typed phrase per key: read-only and stop sign-ups, none for the others",
+      typed,
+    );
+    checkD(KILL_SWITCHES.every((k) => fr11.killTypedFor(k, !trip(k)) === null), "switching a kill switch back never needs a typed phrase (platform_read_only can always be switched off)");
+    // every step-11 copy family has a key per value
+    const families11: [string, readonly string[]][] = [
+      ["console.user.tab.", ["stores", "sessions", "signup", "linked", "activity", "notes"]],
+      ["console.user.link.", ["email_norm", "phone", "net", "device"]],
+      ["console.user.membership.", ["active", "suspended"]],
+      ["console.plans.status.", ["active", "hidden", "retired", "active.hint", "hidden.hint", "retired.hint"]],
+      ["console.plans.col.", ["plan", "status", "stores", "sort", "changed"]],
+      ["console.flags.tab.", ["kill", "release", "ops"]],
+      ["console.flags.lead.", ["kill", "release", "ops"]],
+      ["console.flags.type.", ["boolean", "number", "string", "json"]],
+      ["console.flags.cond.", ["plans", "modes", "markets", "storeStatus", "platformRoles"]],
+      ["console.flags.scope.", fr11.OVERRIDE_SCOPES],
+      ["console.flags.scope_id.", fr11.OVERRIDE_SCOPES],
+      ["console.kill.toggle.", ["trip.switch", "restore.switch", "trip.read_only", "restore.read_only"]],
+      ["console.kill.sheet.", ["title_trip", "title_restore", "lead_trip", "lead_restore", "confirm_trip", "confirm_restore", "done_trip", "done_restore", "affected_trip", "affected_restore", "banner_trip", "banner_restore"]],
+      ...(["ban", "unban", "reset_2fa", "reset_link", "sign_out"] as const).map((k): [string, readonly string[]] => [`console.users.${k}.`, ["button", "title", "lead", "confirm"]]),
+    ];
+    const missing11 = families11.flatMap(([prefix, list]) => list.map((v) => `${prefix}${v}`).filter((k) => typeof en[k] !== "string"));
+    checkD(missing11.length === 0, "every people, lookup, plans and flags copy family has a key per value", missing11);
+    checkD(en["console.lookup.not_found"] === "No order with this id" && en["console.user.not_found"] === "No person with this id" && en["console.reset.wa_text"]?.includes("{url}"), "the lookup and profile miss lines, and the WhatsApp text carries the link");
+  }
+
   const ms = Math.round(performance.now() - t0);
   for (const s of skips) console.log(`  SKIP ${s}`);
   if (failures > 0) {

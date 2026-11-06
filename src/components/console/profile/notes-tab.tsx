@@ -8,12 +8,14 @@
  * for 10 s.
  *
  *   <NotesTab storeId={id} notes={await listNotes(ctx, { storeId: id })} staff={[…]} />
+ *   <NotesTab userId={id} notes={await listNotes(ctx, { userId: id })} staff={[…]} />   // the user profile's Notes tab
  */
 import { PinIcon, PinOffIcon, Trash2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useMemo, useRef, useState, useTransition, type KeyboardEvent } from "react";
 import { toast } from "sonner";
 import { addNoteAction, deleteNoteAction, editNoteAction, pinNoteAction } from "@/app/admin/(console)/stores/[id]/actions";
+import { addUserNoteAction } from "@/app/admin/(console)/users/actions";
 import { useT } from "@/lib/i18n/admin/client";
 import { renderMarkdownLite } from "@/lib/platform/markdown-lite";
 import type { NoteKind, NoteView } from "@/lib/platform/notes";
@@ -39,7 +41,7 @@ function mentionAt(text: string, caret: number): { start: number; query: string 
   return m ? { start: caret - m[2]!.length - 1, query: m[2]!.toLowerCase() } : null;
 }
 
-export function NotesTab({ storeId, notes, staff }: { storeId: string; notes: NoteView[]; staff: { id: string; name: string }[] }) {
+export function NotesTab({ storeId, userId, notes, staff }: { storeId?: string; userId?: string; notes: NoteView[]; staff: { id: string; name: string }[] }) {
   const t = useT();
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
@@ -52,12 +54,12 @@ export function NotesTab({ storeId, notes, staff }: { storeId: string; notes: No
           notes.map((n) => <NoteItem key={n.id} note={n} />)
         )}
       </section>
-      <Composer storeId={storeId} staff={staff} />
+      <Composer storeId={storeId} userId={userId} staff={staff} />
     </div>
   );
 }
 
-function Composer({ storeId, staff }: { storeId: string; staff: { id: string; name: string }[] }) {
+function Composer({ storeId, userId, staff }: { storeId?: string; userId?: string; staff: { id: string; name: string }[] }) {
   const t = useT();
   const router = useRouter();
   const ids = useId();
@@ -121,7 +123,8 @@ function Composer({ storeId, staff }: { storeId: string; staff: { id: string; na
     if (!body.trim() || over) return;
     const named = mentions.filter((m) => body.toLowerCase().includes(`@${m.name.toLowerCase()}`)).map((m) => m.id);
     start(async () => {
-      const r = await addNoteAction({ storeId, body: body.trim(), kind, pinned, mentions: named, opId });
+      const fields = { body: body.trim(), kind, pinned, mentions: named, opId };
+      const r = userId ? await addUserNoteAction({ userId, ...fields }) : await addNoteAction({ storeId: storeId ?? "", ...fields });
       if (r.ok) {
         setBody("");
         setMentions([]);

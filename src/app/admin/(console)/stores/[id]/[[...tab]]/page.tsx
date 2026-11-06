@@ -159,7 +159,7 @@ async function Orders({ ctx, storeId, sp }: { ctx: PlatformCtx; storeId: string;
   const parsed = StoreOrdersFilter.safeParse(raw);
   const filter: StoreOrdersFilter = parsed.success ? (Object.fromEntries(Object.entries(parsed.data).filter(([, v]) => v !== undefined)) as StoreOrdersFilter) : {};
   const cursor = one(sp.cursor) || null;
-  const orderId = one(sp.order) || null;
+  const orderId = one(sp.order) || one(sp.o) || null; // `?o=` is the order lookup's link (PLA-§11.3)
   const [summary, page, pages, detail, facts] = await Promise.all([
     storeOrdersSummary(ctx, storeId),
     panel("profile.orders", () => listStoreOrders(ctx, storeId, filter, cursor), { storeId }),

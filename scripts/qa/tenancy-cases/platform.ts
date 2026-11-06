@@ -292,6 +292,10 @@ export const cases: TenancyCase[] = [
       k.check("case 2: analyst · addNoteAction → forbidden", (await run(analyst, "addNoteAction", { storeId: A.id, body: "a note" })) === "forbidden");
       k.check("case 2: analyst · revealOrderPiiAction → forbidden", (await run(analyst, "revealOrderPiiAction", { storeId: A.id, orderId: A.order.main, reason: "ticket" })) === "forbidden");
       k.check("case 2: analyst · lookupPhoneAction → forbidden", (await run(analyst, "lookupPhoneAction", { phone: A.customer.phone }, orderActions)) === "forbidden");
+      // step 11: a note on a person is a notes write too (stores.notes; never an analyst)
+      const userActions = (await import(specOf("src/app/admin/(console)/users/actions.ts"))) as ActionModule;
+      k.check("case 2: analyst · addUserNoteAction → forbidden", (await run(analyst, "addUserNoteAction", { userId: A.members.owner, body: "a note" }, userActions)) === "forbidden");
+      k.check("case 2: analyst · banUserAction → forbidden", (await run(analyst, "banUserAction", { userId: A.members.owner, reason: "spam reports" }, userActions)) === "forbidden");
       // case 3: support
       const noTicket = await run(support, "startImpersonationAction", { storeId: A.id, reason: "ticket" });
       k.check("case 3: support · startImpersonationAction without ticketRef → refused (invalid)", noTicket === "invalid", noTicket);
