@@ -55,9 +55,21 @@ export function WeekTable({ days, onChange, disabled, compact, idPrefix }: { day
       {WEEKDAYS.map((d) => {
         const list = days[d];
         return (
-          <li key={d} className={cn("grid gap-2 sm:grid-cols-[9.5rem_1fr] sm:items-start", compact ? "py-2" : "py-2.5")}>
-            <div className="flex min-h-9 items-center justify-between gap-2 sm:justify-start">
+          <li key={d} className={cn("grid gap-2 sm:items-start", compact ? "py-2 sm:grid-cols-[9.5rem_1fr]" : "py-2.5 sm:grid-cols-[11rem_1fr]")}>
+            <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-2 sm:flex-col sm:items-start sm:justify-center sm:gap-0.5">
               <span className="q-sm font-medium text-foreground">{names[d]}</span>
+              {!disabled && d === 1 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="q-xs h-auto min-h-7 gap-1 px-1.5 py-1 text-start whitespace-normal text-muted-foreground sm:-ms-1.5"
+                  onClick={() => onChange(Object.fromEntries(WEEKDAYS.map((x) => [x, list.map((r) => ({ ...r }))])) as WeekDays)}
+                >
+                  <CopyIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                  {t("ops.cc.window.copyAll", { day: names[1] })}
+                </Button>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {list.length === 0 && <span className="q-sm inline-flex h-9 items-center text-muted-foreground">{t("ops.cc.window.closed")}</span>}
@@ -121,18 +133,6 @@ export function WeekTable({ days, onChange, disabled, compact, idPrefix }: { day
                 >
                   <PlusIcon className="size-3.5" aria-hidden="true" />
                   {t("ops.cc.window.addRange")}
-                </Button>
-              )}
-              {!disabled && d === 1 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 gap-1 text-muted-foreground"
-                  onClick={() => onChange(Object.fromEntries(WEEKDAYS.map((x) => [x, list.map((r) => ({ ...r }))])) as WeekDays)}
-                >
-                  <CopyIcon className="size-3.5" aria-hidden="true" />
-                  {t("ops.cc.window.copyAll", { day: names[1] })}
                 </Button>
               )}
               {list.some(rangeError) && (

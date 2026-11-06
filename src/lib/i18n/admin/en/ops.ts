@@ -1145,6 +1145,7 @@ export const messages = {
   "ops.cc.script.var.product": "Product",
   "ops.cc.script.var.offer_label": "Offer",
   "ops.cc.script.var.qty": "Quantity",
+  "ops.cc.script.var.units_text": "Items ordered",
   "ops.cc.script.var.total": "Total",
   "ops.cc.script.var.shipping_text": "Delivery fee",
   "ops.cc.script.var.city": "City",

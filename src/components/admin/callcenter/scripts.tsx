@@ -547,12 +547,16 @@ function Preview({ doc, pageId, locale }: { doc: ScriptDoc; pageId: string | nul
 
   const compiled = useMemo((): CompiledScript | null => {
     if (!entry || entry === "error") return null;
+    // a variable the order or sample has no value for shows its name in brackets, never an invented value; the upsell
+    // pair stays empty so upsell-only steps appear exactly when an upsell is offered
+    const values: Record<string, string> = { ...entry.values };
+    for (const v of [...VAR_CHIPS, "units_text"] as const) if (v !== "upsell_title" && v !== "upsell_price" && !values[v]?.trim()) values[v] = `[${t(`ops.cc.script.var.${v}`)}]`;
     try {
-      return compileScriptDoc(doc, entry.values, previewRender, { locale, source: "store", templateId: "preview" });
+      return compileScriptDoc(doc, values as typeof entry.values, previewRender, { locale, source: "store", templateId: "preview" });
     } catch {
       return null;
     }
-  }, [doc, entry, locale]);
+  }, [doc, entry, locale, t]);
 
   return (
     <section aria-labelledby="cc-preview" className="grid gap-3 rounded-[18px] border border-border bg-card p-4">

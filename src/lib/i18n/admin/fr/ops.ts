@@ -1146,6 +1146,7 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "ops.cc.script.var.product": "Produit",
   "ops.cc.script.var.offer_label": "Offre",
   "ops.cc.script.var.qty": "Quantité",
+  "ops.cc.script.var.units_text": "Articles commandés",
   "ops.cc.script.var.total": "Total",
   "ops.cc.script.var.shipping_text": "Frais de livraison",
   "ops.cc.script.var.city": "Ville",

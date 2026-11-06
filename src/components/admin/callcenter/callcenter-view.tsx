@@ -125,7 +125,8 @@ function OpenCalls({ until: initial, tz, canEdit }: { until: string | null; tz: 
   }
   if (open)
     return (
-      <p role="status" className="cc-info q-sm q-num inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-foreground">
+      // suppressHydrationWarning: the server's and the browser's time-zone data can disagree by an hour (Africa/Casablanca)
+      <p role="status" suppressHydrationWarning className="cc-info q-sm q-num inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-foreground">
         <PhoneOutgoingIcon className="size-4" aria-hidden="true" />
         {t("ops.cc.open.until", { time: clock(until!, tz, locale) })}
       </p>
