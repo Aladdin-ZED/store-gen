@@ -71,7 +71,9 @@ connect flow to the actions), `r1-p5-15.md` (the pulse broadcast's message shape
 
 ## 7. Checks run in this step
 
-`npm run typecheck` and the full `npm test` through the mutex. Results are in the commit message of this step.
+`npm run typecheck` and the full `npm test` through the mutex, in one run (exit 0, 180 s). It includes theme:check,
+runtime (208 checks plus parity), generator, render, money, conversions (1,761 assertions), offers (1,219), orders (138),
+settings (512), tenancy-unit (583), prepublish (12), checklist (36), ownership, and the tenancy lint.
 `test:tenancy` is not part of `npm test`. Without CCR r1-p5-8 it fails the 5 known R1.0 Sheets cases.
 
 ## 8. Known gaps
