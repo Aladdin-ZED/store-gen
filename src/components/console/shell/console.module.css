@@ -1,0 +1,350 @@
+/*
+ * The console surface (platform.md PLA-§4.2, design.md DES-§16.2, §16.5-§16.7, §16.11; UX-03): the `console` input of
+ * the token table (base hue 230 at chroma 0.008, teal accent hue 205 at 0.09), scoped to <ConsoleShell>'s root so the
+ * tenant shell keeps its jade. Every hue sits outside 25-75° (owner rule: no orange). The deep-ink sidebar is the same
+ * in both themes; the content follows the viewer's light / dark theme (`.dark` on <html>, next-themes).
+ * P2's generator (scripts/build-admin-css.mjs, `SURFACES.console`) emits the same values once it lands; this block is
+ * the console's own copy until then and stays byte-compatible with the DES-§16.2 table.
+ */
+
+.tokens {
+  /* the compact density's sizes, also for the portalled layers (dialogs, sheets) outside `.root` (DES-§16.7) */
+  --row: 32px;
+  --ctl: 30px;
+  --cell-x: 8px;
+  /* neutral roles, light (L from DES-§16.2; chroma = 0.008 × factor) */
+  --background: oklch(0.99 0.002 230);
+  --foreground: oklch(0.2 0.0112 230);
+  --card: oklch(0.998 0.0012 230);
+  --card-foreground: oklch(0.2 0.0112 230);
+  --popover: oklch(0.998 0.0012 230);
+  --popover-foreground: oklch(0.2 0.0112 230);
+  --primary: oklch(0.2 0.0112 230);
+  --primary-foreground: oklch(0.985 0.002 230);
+  --secondary: oklch(0.962 0.004 230);
+  --secondary-foreground: oklch(0.2 0.0112 230);
+  --muted: oklch(0.962 0.004 230);
+  --muted-foreground: oklch(0.5 0.016 230);
+  --accent: oklch(0.955 0.0052 230);
+  --accent-foreground: oklch(0.2 0.0112 230);
+  --border: oklch(0.915 0.0052 230);
+  --input: oklch(0.885 0.0064 230);
+  --ring: oklch(0.6 0.09 205);
+  /* the console accent: teal 205 */
+  --brand: oklch(0.53 0.09 205);
+  --brand-foreground: oklch(0.99 0.006 205);
+  --brand-soft: oklch(0.955 0.0234 205);
+  --c-brand-ink: oklch(0.44 0.08 205);
+  /* info (blue 250) and impersonation (violet 295, its one meaning) */
+  --c-info: oklch(0.58 0.12 250);
+  --c-info-ink: oklch(0.4 0.1 250);
+  --c-info-soft: oklch(0.955 0.025 250);
+  --c-imp: oklch(0.42 0.15 295);
+  --c-imp-soft: oklch(0.95 0.03 295);
+  --c-imp-ink: oklch(0.4 0.14 295);
+  --c-danger-soft: oklch(0.955 0.03 17);
+  --c-danger-ink: oklch(0.47 0.17 17);
+  --c-warn-soft: oklch(0.965 0.05 95);
+  --c-success-soft: oklch(0.955 0.035 150);
+  --c-hairline: color-mix(in oklch, var(--foreground) 9%, transparent);
+  --c-skeleton: color-mix(in oklch, var(--foreground) 6%, transparent);
+
+  /* the deep-ink sidebar, both themes (DES-§16.11: L 0.18 C 0.012 h 230, foreground L 0.93) */
+  --c-ink: oklch(0.18 0.012 230);
+  --c-ink-2: oklch(0.215 0.013 230);
+  --c-ink-hover: oklch(0.24 0.014 230);
+  --c-ink-active: oklch(0.27 0.03 205);
+  --c-ink-fg: oklch(0.93 0.008 230);
+  --c-ink-muted: oklch(0.68 0.014 230);
+  --c-ink-faint: oklch(0.55 0.014 230);
+  --c-ink-line: oklch(1 0 0 / 0.07);
+  --c-ink-accent: oklch(0.76 0.1 205);
+
+  /* radius ladder and motion (DES-§16.5, §16.6) */
+  --r-chip: 6px;
+  --r-control: 8px;
+  --r-card: 12px;
+  --r-sheet: 16px;
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 240ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/*
+ * The shell root carries `.tokens` and `.root`; while the console is mounted, <body> carries `.tokens` too, so the
+ * portalled layers (the palette, menus, sheets, toasts) read the console palette rather than the tenant's jade.
+ */
+.root {
+  /* density (DES-§16.7): compact by default in the console */
+  --row: 32px;
+  --ctl: 30px;
+  --cell-x: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.root[data-density="comfortable"] {
+  --row: 40px;
+  --ctl: 36px;
+  --cell-x: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+:global(.dark) .tokens,
+:global(.dark).tokens {
+  --background: oklch(0.165 0.002 230);
+  --foreground: oklch(0.955 0.0112 230);
+  --card: oklch(0.19 0.0012 230);
+  --card-foreground: oklch(0.955 0.0112 230);
+  --popover: oklch(0.205 0.002 230);
+  --popover-foreground: oklch(0.955 0.0112 230);
+  --primary: oklch(0.955 0.0112 230);
+  --primary-foreground: oklch(0.2 0.0112 230);
+  --secondary: oklch(0.24 0.004 230);
+  --secondary-foreground: oklch(0.955 0.0112 230);
+  --muted: oklch(0.24 0.004 230);
+  --muted-foreground: oklch(0.7 0.016 230);
+  --accent: oklch(0.26 0.0052 230);
+  --accent-foreground: oklch(0.955 0.0112 230);
+  --border: oklch(0.3 0.0052 230);
+  --input: oklch(0.33 0.0064 230);
+  --ring: oklch(0.6 0.09 205);
+  --brand: oklch(0.7 0.09 205);
+  --brand-foreground: oklch(0.18 0.03 205);
+  --brand-soft: oklch(0.3 0.045 205);
+  --c-brand-ink: oklch(0.8 0.08 205);
+  --c-info-ink: oklch(0.78 0.09 250);
+  --c-info-soft: oklch(0.29 0.05 250);
+  --c-imp-soft: oklch(0.3 0.06 295);
+  --c-imp-ink: oklch(0.82 0.09 295);
+  --c-danger-soft: oklch(0.29 0.06 17);
+  --c-danger-ink: oklch(0.78 0.13 17);
+  --c-warn-soft: oklch(0.3 0.05 95);
+  --c-success-soft: oklch(0.29 0.05 150);
+  --c-ink: oklch(0.145 0.01 230);
+  --c-ink-2: oklch(0.18 0.012 230);
+  --c-ink-hover: oklch(0.21 0.013 230);
+  --c-ink-active: oklch(0.25 0.03 205);
+  --c-ink-line: oklch(1 0 0 / 0.06);
+}
+
+/* numbers: tabular in every count, money and timer (PLA-§4.7 rule 5) */
+.root :global(.num) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* the one frosted surface (DES-§16.5): blur 12 px, saturate 1.2, fill alpha 0.78, opaque fallback */
+.glass {
+  background: var(--background);
+}
+@supports (backdrop-filter: blur(12px)) {
+  .glass {
+    background: color-mix(in oklch, var(--background) 78%, transparent);
+    backdrop-filter: blur(12px) saturate(1.2);
+  }
+}
+
+/* rows that arrive with a new pulse: a 6 px rise and fade, 180 ms; reduced motion: opacity only (DES-§16.6) */
+.rise {
+  animation: rise var(--dur-2) var(--ease-out) both;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* skeletons: shown after 150 ms (a fast panel never flashes one), a static tint, no shimmer */
+.skeleton {
+  animation: appear 1ms linear 150ms both;
+}
+.bone {
+  background: var(--c-skeleton);
+  border-radius: var(--r-chip);
+}
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* the palette's entry (DES-§16.10): opacity and scale 0.98 → 1 over 120 ms */
+.palette {
+  animation: palette-in var(--dur-1) var(--ease-out) both;
+}
+@keyframes palette-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .palette {
+    animation: appear var(--dur-1) linear both;
+  }
+}
+
+/* the sidebar's thin scrollbar on deep ink */
+.inkScroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-ink-line) transparent;
+}
+
+/* the navigation drawer below 1024 px: slides in from the inline start, 240 ms (DES-§16.6) */
+.drawer {
+  animation: drawer-in var(--dur-3) var(--ease-out) both;
+}
+:global([dir="rtl"]) .drawer,
+.drawer:dir(rtl) {
+  animation-name: drawer-in-rtl;
+}
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes drawer-in-rtl {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer {
+    animation: appear var(--dur-1) linear both;
+  }
+}
+
+/*
+ * Bridge for P2's primitive stubs (P0b P1-4): the stubs render unstyled elements without a class attribute; until
+ * P2's bodies land these zero-specificity rules lay them out inside console panels. P2's bodies carry classes, so
+ * `:not([class])` stops matching them on the merge and nothing here needs removing to stay correct.
+ */
+.kpis > :where([data-kind]:not([class])) {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-height: 104px;
+  padding: 14px 16px;
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--c-hairline);
+}
+.kpis > :where([data-kind]:not([class])) > :where(span:nth-child(1)) {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.kpis > :where([data-kind]:not([class])) > :where(span:nth-child(2)) {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.kpis > :where([data-kind]:not([class])) > :where(span:nth-child(n + 3)) {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.kpis > :where([data-kind][data-emphasis]:not([class])) {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--brand) 45%, transparent);
+}
+.tokens :where([data-status]:not([class])) {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding-inline: 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--secondary);
+  color: var(--muted-foreground);
+}
+.tokens :where([data-attention][data-surface="console"]:not([class])) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 0 0 2px var(--c-hairline);
+}
+.tokens :where([data-seed][role="img"]:not([class])) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--secondary);
+  color: var(--foreground);
+}
+.tokens :where([data-seed][data-size="32"][role="img"]:not([class])) {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: color-mix(in oklch, var(--brand) 12%, var(--secondary));
+  color: var(--c-brand-ink);
+}
+/* step 10 (store profile): the header's 48 px Monogram, the 40 px health ring, the mode badge and the md status pill */
+.tokens :where([data-seed][data-size="48"][role="img"]:not([class])) {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  font-size: 19px;
+  background: color-mix(in oklch, var(--brand) 12%, var(--secondary));
+  color: var(--c-brand-ink);
+}
+.tokens :where([data-attention][data-surface="console"][data-size="40"]:not([class])) {
+  width: 40px;
+  height: 40px;
+  font-size: 13px;
+  box-shadow: inset 0 0 0 3px var(--c-hairline);
+}
+.tokens :where([data-mode]:not([class])) {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding-inline: 8px;
+  border-radius: var(--r-chip);
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--secondary);
+  color: var(--muted-foreground);
+}
+.tokens :where([data-status][data-size="md"]:not([class])) {
+  height: 24px;
+  font-size: 12px;
+}

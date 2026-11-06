@@ -736,7 +736,8 @@ function dryRunCli(dbName: string): Promise<{ code: number | null; out: string }
 
 const ISO_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z/g;
 /** columns that are random by design: compared only within one database */
-const RANDOM_COLUMNS: Record<string, string[]> = { stores: ["brand_seed"], protected_brands: ["id"] };
+// R1 P1 merge: the boot seed of P1's legal templates (seedLegalTemplates) gives each draft a fresh ULID
+const RANDOM_COLUMNS: Record<string, string[]> = { stores: ["brand_seed"], protected_brands: ["id"], legal_documents: ["id"] };
 
 interface Snapshot {
   tables: Record<string, string[]>;
@@ -1005,7 +1006,7 @@ async function legacyAssertions(dbName: string, fixture: Fixture): Promise<void>
   same(
     `${L} legacy settings rows gone, platform markers kept`,
     (await query(dbName, "SELECT `key` FROM settings ORDER BY `key`")).map((r) => r.key),
-    ["doc_schema", "tenancy_v1"],
+    ["doc_schema", "legal_seed", "tenancy_v1"],
   );
   const [marker] = await query(dbName, "SELECT value FROM settings WHERE `key` = 'tenancy_v1'");
   const m = JSON.parse(String(marker?.value ?? "null")) as Row | null;
@@ -1536,7 +1537,7 @@ async function main(): Promise<void> {
       );
       same("(c) setup: owner membership and super_admin", await query(name, "SELECT m.role, m.status, u.platform_role FROM store_members m JOIN users u ON u.id = m.user_id"), [{ role: "owner", status: "active", platform_role: "super_admin" }]);
       same("(c) setup: the library was copied by S4, not rebuilt", (await query(name, "SELECT value FROM store_settings WHERE `key` = 'pixel_library'")).map((r) => JSON.parse(String(r.value))), [{ v: 1, pixels: [] }]);
-      same("(c) setup: settings left", (await query(name, "SELECT `key` FROM settings ORDER BY `key`")).map((r) => r.key), ["doc_schema", "tenancy_v1"]);
+      same("(c) setup: settings left", (await query(name, "SELECT `key` FROM settings ORDER BY `key`")).map((r) => r.key), ["doc_schema", "legal_seed", "tenancy_v1"]);
       const s1 = await snapshot(name, false, since);
       const c2 = await child<BootResult>("boot", name, tz, []);
       bootOk("(c) setup: boot 2", c2, 0);
@@ -1567,7 +1568,7 @@ async function main(): Promise<void> {
       const [iMarker] = await query(name, "SELECT value FROM settings WHERE `key` = 'tenancy_v1'");
       const im = JSON.parse(String(iMarker?.value ?? "null")) as Row | null;
       check("(i) marker { store1: false, freeRename: false }", im?.store1 === false && im.freeRename === false, im);
-      same("(i) settings left", (await query(name, "SELECT `key` FROM settings ORDER BY `key`")).map((r) => r.key), ["doc_schema", "tenancy_v1"]);
+      same("(i) settings left", (await query(name, "SELECT `key` FROM settings ORDER BY `key`")).map((r) => r.key), ["doc_schema", "legal_seed", "tenancy_v1"]);
       same(
         "(i) the boot's two system audit rows stay platform rows (store_id NULL)",
         (await query(name, "SELECT action, store_id FROM audit_log WHERE action IN ('settings.updated', 'pixels.library_migrated') ORDER BY id")).map((r) => [r.action, r.store_id]),

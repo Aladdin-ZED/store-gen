@@ -102,7 +102,7 @@ type StoreAreaAction =
 /** Platform (staff) events; a row about one store also carries its `store_id`. */
 type PlatformAction =
   | `platform.signup.${"approved" | "rejected" | "info_requested" | "reopened" | "snoozed" | "bulk_approved"}`
-  | `platform.store.${"restricted" | "suspended" | "restored" | "closed" | "deletion_cancelled" | "purge_requested" | "purge_confirmed" | "messaged"}`
+  | `platform.store.${"restricted" | "suspended" | "restored" | "closed" | "deletion_cancelled" | "purge_requested" | "purge_confirmed" | "messaged" | "suspend_notice"}`
   | `platform.impersonation.${"started" | "ended" | "write_refused"}`
   | "platform.pii.revealed"
   | `platform.user.${"banned" | "unbanned" | "2fa_reset" | "reset_link" | "signed_out" | "deleted"}`

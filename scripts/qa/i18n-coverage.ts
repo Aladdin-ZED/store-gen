@@ -104,14 +104,8 @@ interface PendingItem {
   /** still open? */
   open: (m: Model) => boolean;
 }
-const PENDING: PendingItem[] = [
-  {
-    id: "kind health.issue_new",
-    owner: "P1",
-    why: "PLA-§18.2: P1 registers the tenant kind in src/lib/notify/kinds/platform.ts with its ar / fr / en texts",
-    open: (m) => !m.tenantKinds.includes("health.issue_new"),
-  },
-];
+// R1 P1 merge: "kind health.issue_new" (P1) is done (registered in src/lib/notify/kinds/platform.ts with its texts)
+const PENDING: PendingItem[] = [];
 
 /* ------------------------------------------------------------------ */
 /* The model the rules judge                                           */

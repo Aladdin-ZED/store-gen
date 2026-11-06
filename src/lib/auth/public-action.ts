@@ -6,7 +6,8 @@ import "server-only";
  *   1. same-origin (SEC-11; the forms post Server Actions under `Referrer-Policy: same-origin`, so the browser sends
  *      the page's real Origin; a missing or `null` one is refused)
  *   2. the in-memory burst floor (`burstLimit`, before any DB work)
- *   3. the form's DB bucket `p:<name>:ip:<ipHash>` (signup 5/h, invite:accept 10/15 min, reset 10/15 min, report 5/h)
+ *   3. the form's DB bucket `p:<name>:ip:<ipHash>` (signup 5/h, invite:accept 10/15 min, reset 10/15 min;
+ *      the report buckets are `recordAbuseReport`'s, PLA-§24.2)
  *   4. Turnstile: `required` (a verified token, nothing else), `when-configured` (a verified token when the platform
  *      widget exists; a Cloudflare outage lets the form through) or `challenge` (`fn` decides, through the lazy
  *      `ctx.turnstile()`: signup gates in approval / open and scores in invite mode, sign-in asks only past 3 failures)

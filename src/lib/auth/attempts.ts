@@ -83,7 +83,6 @@ export const PUBLIC_FORM_LIMITS: Readonly<Record<string, { limit: number; window
   signup: { limit: 5, windowSec: HOUR },
   "invite:accept": { limit: 10, windowSec: 15 * 60 },
   reset: { limit: 10, windowSec: 15 * 60 },
-  report: { limit: 5, windowSec: HOUR },
 };
 
 export function publicFormBucket(name: string, ip: string): Bucket {

@@ -718,7 +718,7 @@ export interface SignupSignals {
     uaLabel: string;
     turnstile: "ok" | "missing" | "unverified" | "off";
     formMs: number | null;
-    via: "signup" | "app_new" | "invite_code" | "waitlist_invite";
+    via: "signup" | "app_new" | "invite_code" | "waitlist_invite" | "console";
   };
   cluster: { users: number; banned: number; kinds: ("email_norm" | "phone" | "net" | "device")[] };
   /** a lookup (MX) timed out */

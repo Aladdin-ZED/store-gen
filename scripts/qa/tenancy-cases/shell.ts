@@ -290,6 +290,27 @@ const SECURITY = "src/app/app/[store]/settings/security/actions.ts";
 const PLAN = "src/app/app/[store]/settings/plan/actions.ts";
 const DANGER = "src/app/app/[store]/settings/danger/actions.ts";
 
+/**
+ * R1 P1 merge: P1's snooze bodies refuse an issue the store's health row does not hold (not_found), so B's own calls
+ * name an issue of B's real snapshot, computed once by P1's engine (a fixed id when B has no issue at all).
+ */
+let ownIssueOnce: Promise<string> | null = null;
+function ownHealthIssue(fx: { B: { id: string } }): Promise<string> {
+  ownIssueOnce ??= (async () => {
+    const { getStoreById } = load<typeof import("@/lib/tenancy/public")>("@/lib/tenancy/public");
+    const { computeStoreHealth } = load<typeof import("@/lib/health/run")>("@/lib/health/run");
+    const { readHealthRow } = load<typeof import("@/lib/health/rows")>("@/lib/health/rows");
+    const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+    const store = await getStoreById(fx.B.id);
+    if (!store) return "shell:setup_whatsapp";
+    const ctx = systemCtx("tenancy-check");
+    await computeStoreHealth(ctx, store);
+    const row = await readHealthRow(systemScope(ctx, fx.B.id));
+    return row?.issues[0]?.id ?? "shell:setup_whatsapp";
+  })();
+  return ownIssueOnce;
+}
+
 export const actions: TrackActionCase[] = [
   // the In-review card (store.read + owner): both fixture stores are active, so the body answers review_closed
   { file: REVIEW, name: "submitForReviewAction", live: { expect: "review_closed", why: "the fixture's A is active: the card belongs to pending / needs_info / rejected" }, area: "settings", path: "", permission: ["store.read"], write: false, victim: () => [{ sells: "Huile d'argan", link: "instagram.com/atlas", whatsapp: "+212612345678" }], own: () => [{ sells: "Linge de maison", link: null, whatsapp: null }] },
@@ -298,9 +319,9 @@ export const actions: TrackActionCase[] = [
   // private preview links (pages.read): A's draft is a missing page in B; A's viewer may mint in A, hence write: false
   { file: REVIEW, name: "mintPreviewLinkAction", area: "pages", path: "/pages", permission: ["pages.read"], write: false, victim: (fx) => [{ pageId: fx.A.page.draft }], own: (fx) => [{ pageId: fx.B.page.draft }] },
   { file: REVIEW, name: "revokePreviewLinkAction", area: "pages", path: "/pages", permission: ["pages.read"], write: false, victim: async (fx) => [{ tokenId: await previewTokenOf(fx, fx.A) }], own: async (fx) => [{ tokenId: await previewTokenOf(fx, fx.B) }] },
-  // Store Health (P1's snooze stubs answer unavailable until P1 merges)
-  { file: HEALTH, name: "snoozeHealthIssueAction", live: { expect: "unavailable", why: "P1's snooze stub until the P1 merge" }, area: "settings", path: "", permission: ["health.snooze"], write: true, victim: () => [{ issueId: "landing:no_live_page" }], own: () => [{ issueId: "shell:setup_whatsapp" }] },
-  { file: HEALTH, name: "unsnoozeHealthIssueAction", live: { expect: "unavailable", why: "P1's unsnooze stub until the P1 merge" }, area: "settings", path: "", permission: ["health.snooze"], write: true, victim: () => [{ issueId: "landing:no_live_page" }], own: () => [{ issueId: "shell:setup_whatsapp" }] },
+  // Store Health: B's own calls name an issue of B's computed snapshot (ownHealthIssue)
+  { file: HEALTH, name: "snoozeHealthIssueAction", live: { expect: "not_found", why: "P1's snoozeHealthIssue (merged): the replay fixture computes no health snapshot for A, so A's row holds no such issue" }, area: "settings", path: "", permission: ["health.snooze"], write: true, victim: () => [{ issueId: "landing:no_live_page" }], own: async (fx) => [{ issueId: await ownHealthIssue(fx) }] },
+  { file: HEALTH, name: "unsnoozeHealthIssueAction", live: { expect: "not_found", why: "P1's unsnoozeHealthIssue (merged): the replay fixture computes no health snapshot for A, so A's row holds no such issue" }, area: "settings", path: "", permission: ["health.snooze"], write: true, victim: () => [{ issueId: "landing:no_live_page" }], own: async (fx) => [{ issueId: await ownHealthIssue(fx) }] },
   // a read key that marks the store dirty: A's viewer may recompute A, hence write: false (the special case covers it)
   { file: HEALTH, name: "recomputeHealthAction", area: "settings", path: "", permission: ["store.read"], write: false, victim: () => [], own: () => [] },
   { file: NOTIFY, name: "markNotificationsReadAction", area: "settings", path: "/notifications", permission: ["store.read"], write: false, victim: () => [NO_NOTIFICATION], own: () => [NO_NOTIFICATION] },
@@ -318,9 +339,9 @@ export const actions: TrackActionCase[] = [
   { file: GENERAL, name: "setStoreModeAction", area: "settings", path: "/settings/general", permission: ["store.mode"], write: true, victim: () => [{ mode: "landing" }], own: () => [{ mode: "landing" }] },
   { file: ADDRESS, name: "renameHandleAction", area: "settings", path: "/settings/address", permission: ["domains.manage"], write: true, victim: (fx) => [{ handle: fx.A.handle }], own: (fx) => [{ handle: fx.B.handle }] },
   { file: SECURITY, name: "setRequireMember2faAction", area: "settings", path: "/settings/security", permission: ["security.write"], write: true, victim: () => [{ on: false }], own: () => [{ on: false }] },
-  // requests to staff (P1's stubs answer unavailable until P1 merges); A's open request is a missing one in B
-  { file: PLAN, name: "createStoreRequestAction", live: { expect: "unavailable", why: "P1's store request stub until the P1 merge" }, area: "settings", path: "/settings/plan", permission: ["billing.manage"], write: true, victim: () => [{ kind: "go_live", message: "Prêt à vendre." }], own: () => [{ kind: "go_live", message: null }] },
-  { file: PLAN, name: "withdrawStoreRequestAction", live: { expect: "unavailable", why: "P1's store request stub until the P1 merge" }, area: "settings", path: "/settings/plan", permission: ["billing.manage"], write: true, victim: async (fx) => [{ requestId: await requestOf(fx, fx.A) }], own: async (fx) => [{ requestId: await requestOf(fx, fx.B) }] },
+  // requests to staff (P1's bodies, merged); A's open request is a missing one in B
+  { file: PLAN, name: "createStoreRequestAction", area: "settings", path: "/settings/plan", permission: ["billing.manage"], write: true, victim: () => [{ kind: "go_live", message: "Prêt à vendre." }], own: () => [{ kind: "go_live", message: null }] },
+  { file: PLAN, name: "withdrawStoreRequestAction", area: "settings", path: "/settings/plan", permission: ["billing.manage"], write: true, victim: async (fx) => [{ requestId: await requestOf(fx, fx.A) }], own: async (fx) => [{ requestId: await requestOf(fx, fx.B) }] },
   // the danger zone: the close names no store's handle (a typed-handle refusal is the body's answer), the reopen of an
   // active store is refused by T1's rule, the leave acts on the caller's own membership
   { file: DANGER, name: "requestStoreExportAction", area: "exports", path: "/settings/danger", permission: ["store.export"], write: true, victim: () => [{ opId: opId() }], own: () => [{ opId: opId() }] },

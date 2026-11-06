@@ -1119,6 +1119,8 @@ export function consoleActionFiles(): string[] {
 
 /** "use server" files that are not store actions (each with the reason); any other must have a case for every export. */
 export const NOT_STORE_ACTIONS: Record<string, string> = {
+  "src/app/(public)/invite/staff/[token]/actions.ts": "staff invite acceptance (P1): no store; the hashed one-time token binds the e-mail (PLA-§14.1)",
+  "src/app/(public)/report/[handle]/actions.ts": "the public abuse report (P1): no session; the handle is resolved inside recordAbuseReport, an unknown one writes nothing (PLA-§24.2, case 17)",
   "src/app/(public)/actions.ts": "the language menu (T2): signed out or in, no store",
   "src/app/(public)/invite/[token]/actions.ts": "invite acceptance (T2): the store comes from the hashed one-time token, never a path (selftest-team)",
   "src/app/(public)/login/actions.ts": "sign-in (T2): no store, no session yet",
@@ -2693,7 +2695,15 @@ async function notificationCases(kit: Kit): Promise<void> {
   check("notifications: keyset paging (beforeId) answers the older rows only", sameIds(page2, ids.aStore, ids.aOwners), idsOf(page2));
   const stores = await seen(ownerA, { group: "store" });
   const orders = await seen(ownerA, { group: "orders" });
-  check("notifications: kinds no track registered yet read as group 'store'", stores.length === 3 && stores.every((i) => i.group === "store") && orders.length === 0, { store: idsOf(stores), orders: idsOf(orders) });
+  // the owner's three rows, each in its kind's registered group (an unregistered kind reads as "store"; CCR r1-p1-3 item 4)
+  const { notificationKind } = load<typeof import("@/lib/notify/registry")>("@/lib/notify/registry");
+  const ownerRows: [number, string][] = [[ids.aStore, "health.issue_new"], [ids.aOwners, "ops.new_orders"], [ids.aOwnerPlatform, "user.password_reset"]];
+  const inGroup = (g: string) => ownerRows.filter(([, kind]) => (notificationKind(kind)?.group ?? "store") === g).map(([id]) => id);
+  check(
+    "notifications: the group filter follows the kind registry, an unregistered kind reads as 'store'",
+    sameIds(stores, ...inGroup("store")) && sameIds(orders, ...inGroup("orders")) && stores.every((i) => i.group === "store"),
+    { store: idsOf(stores), orders: idsOf(orders) },
+  );
   const before = await N.unreadCount(ownerA);
   check("notifications: unreadCount counts what the owner may read (at least this case's 3 rows, at most the cap)", before >= 3 && before <= N.UNREAD_CAP, before);
   await N.markRead(ownerA, [ids.aStore, ids.bStore, ids.aAgentOwn]);
@@ -2854,7 +2864,10 @@ export async function accountSuite(kit: Kit): Promise<void> {
       const r = await renderPage({ userId: who.userId }, page, params);
       const label = `${page.template}${page.kind === "layout" ? " (layout)" : ""} · ${who.label}`;
       if (!ranReal(label, r.kind === "error" ? r : null)) continue;
-      if (r.kind === "render") check(`${label}: nothing of A`, leaks(fx, r.payload).length === 0, leaks(fx, r.payload));
+      // the console is staff's cross-store view (PLA-§11.1, §6.1; CCR r1-p1-12): account and row ids may show on
+      // /admin/** for staff; customer, data and secret canaries never do
+      const only = who.userId === fx.staff.id && page.template.startsWith("/admin") ? (["customer", "data", "secret"] as const) : undefined;
+      if (r.kind === "render") check(`${label}: nothing of A`, leaks(fx, r.payload, { only }).length === 0, leaks(fx, r.payload, { only }));
       // a redirect never lands in A's dashboard (only the member of both may be sent there)
       else if (r.kind === "redirect") check(`${label}: a redirect outside A`, who.userId === fx.dual || !r.to.includes(`/app/${fx.A.handle}`), r.to);
       else check(`${label}: renders, redirects or 404s`, r.kind === "notFound", r);

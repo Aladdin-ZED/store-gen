@@ -23,16 +23,17 @@ import "server-only";
  * Auto-approval: an invite code with `auto_approve`, or `autoApprove()` of PLA-§3.4.1 (P1 owns the function with the
  * score; the R1.0 score is the fixed `review` band, so only codes auto-approve until P1 merges).
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
-import { identityLinks, legalAcceptances, legalDocuments, signupReviews, storeMembers, waitlist } from "@/lib/db/schema";
+import { identityLinks, legalAcceptances, signupReviews, storeMembers, waitlist } from "@/lib/db/schema";
 import { mailer } from "@/lib/mail";
 import { errorSummary } from "@/lib/orders/log";
 import { notify } from "@/lib/platform/notify";
-import { scoreSignup, type SignupRiskInput, type SignupScore } from "@/lib/platform/signup-risk";
+import { acceptanceDocsFor } from "@/lib/platform/legal";
+import { autoApprove, scoreSignup, type SignupRiskInput, type SignupScore } from "@/lib/platform/signup-risk";
 import { hashIp } from "@/lib/security/crypto";
 import type { PlatformSetting } from "@/lib/settings/keys/platform";
 import { periodOf } from "@/lib/tenancy/entitlement-keys";
@@ -173,29 +174,14 @@ async function checkStoreFields(form: { storeName: string; handle: string; mode:
   return storeName && !handleProblem && market && selectableStoreModes().includes(form.mode) ? { storeName, handle, mode: form.mode, market } : null;
 }
 
-/** The published ToS, Privacy and AUP in `locale` (else English, else any), newest version of each. */
-async function currentLegalDocuments(locale: AccountLocale): Promise<{ id: string; kind: string }[]> {
-  const rows = await db
-    .select({ id: legalDocuments.id, kind: legalDocuments.kind, locale: legalDocuments.locale, version: legalDocuments.version })
-    .from(legalDocuments)
-    .where(and(eq(legalDocuments.status, "published"), inArray(legalDocuments.kind, ["tos", "privacy", "aup"])));
-  const best = new Map<string, { id: string; rank: number; version: number }>();
-  for (const r of rows) {
-    const rank = r.locale === locale ? 2 : r.locale === "en" ? 1 : 0;
-    const current = best.get(r.kind);
-    if (!current || rank > current.rank || (rank === current.rank && r.version > current.version)) best.set(r.kind, { id: r.id, rank, version: r.version });
-  }
-  return [...best].map(([kind, v]) => ({ id: v.id, kind }));
-}
+/** The published ToS, Privacy and AUP the person accepts (PLA-§13.4: locale → fr → en → ar; a kind with none is not asked; CCR r1-p1-6 item 2). */
+const currentLegalDocuments = (locale: AccountLocale): Promise<{ id: string; kind: string }[]> => acceptanceDocsFor(locale);
 
 /* ------------------------------------------------------------------ */
 /* Score and approval                                                  */
 /* ------------------------------------------------------------------ */
 
 const SCORE_BUDGET_MS = 2_500;
-
-/** Hold-class flags (PLA-§3.4.1): each keeps a signup out of auto-approval in every mode. */
-const HOLD_CLASS: ReadonlySet<string> = new Set(["linked_banned", "brand_exact", "offensive_term", "bot_ua", "market_not_allowed", "dup_device"]);
 
 /** The safe signals of an unfinished score: the review band, `partial` (a lookup ran past the budget). */
 function fallbackScore(input: SignupRiskInput): SignupScore {
@@ -246,11 +232,9 @@ async function scoreWithin(input: SignupRiskInput): Promise<SignupScore> {
 
 /** PLA-§3.4.1 `autoApprove(mode, s, ctx)`: the reason code of an auto-approval, or null (the store starts pending). */
 function autoApproval(mode: SignupMode, s: SignupScore, ctx: { trustedCreator: boolean; setting: PlatformSetting["signup"] }): "auto_open" | "auto_trusted" | null {
-  if (s.band !== "fast" || s.flags.some((f) => HOLD_CLASS.has(f.code))) return null;
-  const human = s.signals.inputs.turnstile;
-  if (mode === "open") return human === "ok" ? "auto_open" : null;
-  if (mode === "approval" && ctx.trustedCreator && ctx.setting.trustedCreatorAutoApprove) return human === "ok" || human === "off" ? "auto_trusted" : null;
-  return null;
+  // P1's rule, proven against its truth table in test:platform (CCR r1-p1-1 item 1)
+  if (!autoApprove(mode, s, ctx)) return null;
+  return mode === "open" ? "auto_open" : "auto_trusted";
 }
 
 /* ------------------------------------------------------------------ */
@@ -533,8 +517,9 @@ export async function createAdditionalStore(ctx: UserCtx, rawForm: NewStoreForm,
     via: "app_new",
     existingUserId: ctx.user.id,
   });
-  // P1's trustedCreator() signal (PD31) is not in R1.0: no creator is trusted yet
-  const approved = autoApproval(effective.mode, score, { trustedCreator: false, setting: setting.signup });
+  // PD31: the scorer answers the trusted-creator check as its `trusted_creator` flag (CCR r1-p1-1 item 1)
+  const trustedCreator = score.flags.some((f) => f.code === "trusted_creator");
+  const approved = autoApproval(effective.mode, score, { trustedCreator, setting: setting.signup });
   const status = approved ? ("active" as const) : ("pending" as const);
 
   const day = platformDay();
