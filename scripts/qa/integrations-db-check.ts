@@ -502,6 +502,7 @@ async function main() {
   await capiSuite();
   await telegramSuite();
   await replaySuite();
+  await serverEventsSuite();
 }
 
 /* ================================================================== */
@@ -2499,6 +2500,107 @@ async function replaySuite(): Promise<void> {
   } finally {
     replay.setReplayDoubleForTests(null);
   }
+}
+
+/* ================================================================== */
+/* 10. Server events card and Anti-spam reads (OPE-§20.7, §24, IN-06)  */
+/* ================================================================== */
+
+async function serverEventsSuite(): Promise<void> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { exportsTable, orders, outbox, pages, storeSettings, stores } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId, newOrderId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  const ts = load<typeof import("@/lib/integrations/turnstile-stats")>("@/lib/integrations/turnstile-stats");
+  const se = load<typeof import("@/lib/pixels/server-events")>("@/lib/pixels/server-events");
+  const ctx = systemCtx("qa.integrations_db");
+
+  async function seStore(handle: string) {
+    const id = newId();
+    await db.insert(stores).values({ id, handle, name: `Boutique ${handle}`, status: "active", brandSeed: "0123456789abcdef", defaultLocale: "fr" });
+    return { id, scope: systemScope(ctx, id) };
+  }
+  const SA = await seStore("se-a");
+  const SB = await seStore("se-b");
+  const now = Date.now();
+  async function order(s: typeof SA, flags: string[], over: Partial<typeof orders.$inferInsert> = {}) {
+    await db.insert(orders).values({
+      id: newOrderId(),
+      storeId: s.id,
+      pageId: newId(),
+      name: NAME,
+      phone: PHONE,
+      productName: "Argan oil",
+      items: { bundleId: "b1", bundleLabel: "1", qty: 1, unitPrice: 349, variants: [] } as never,
+      qty: 1,
+      subtotal: 349,
+      shipping: 0,
+      total: 349,
+      currency: "MAD",
+      idem: randomUUID(),
+      flags,
+      createdAt: new Date(now - 60 * 60_000),
+      ...over,
+    });
+  }
+
+  // the Turnstile share (IN-06): 19 real orders withhold it; the 20th shows it; test, honeypot and older orders never count
+  for (let i = 0; i < 14; i++) await order(SA, []);
+  for (let i = 0; i < 5; i++) await order(SA, ["captcha_missing"]);
+  await order(SA, [], { isTest: true });
+  await order(SA, ["honeypot"]);
+  await order(SA, [], { createdAt: new Date(now - 30 * 60 * 60_000) });
+  for (let i = 0; i < 25; i++) await order(SB, ["captcha_unverified"]);
+  const at19 = await ts.turnstileStats(SA.scope, new Date(now));
+  eq2("turnstile share: 19 orders withhold the share", [at19.n, at19.share, at19.failing], [19, null, false]);
+  await order(SA, ["captcha_unverified"]);
+  const at20 = await ts.turnstileStats(SA.scope, new Date(now));
+  eq2("turnstile share: 20 orders show it (14 of 20) and the failure share is above 20 %", [at20.n, at20.verified, at20.share, at20.failing], [20, 14, 0.7, true]);
+  eq2("turnstile share: 4 of 20 failed is not above 20 %", ts.turnstileShareOf(20, 4).failing, false);
+  eq2("turnstile share: B never counts A's orders", (await ts.turnstileStats(SB.scope, new Date(now))).n, 25);
+
+  // this week's outbox counts per pixel: sent (2xx), refused (with the platform's code), stale; A's rows only
+  const pixel = "1234567890123";
+  const target = `meta:${pixel}`;
+  async function ob(s: typeof SA, state: "done" | "dead" | "cancelled" | "pending", over: Partial<typeof outbox.$inferInsert> = {}) {
+    const id = newId();
+    await db.insert(outbox).values({ id, storeId: s.id, kind: "capi", topic: "Purchase", targetId: target, dedupeKey: `qa:se:${id}`, payload: "{}", state, ...over });
+  }
+  await ob(SA, "done", { lastStatus: 200 });
+  await ob(SA, "done", { lastStatus: 200 });
+  await ob(SA, "done"); // a token removed meanwhile: done with nothing sent
+  await ob(SA, "dead", { lastStatus: 400, lastError: "token_invalid: HTTP 400 code 190/463: Error validating access token" });
+  await ob(SA, "dead", { lastStatus: 400, lastError: "token_invalid: HTTP 400 code 190/463: Error validating access token" });
+  await ob(SA, "cancelled", { lastError: "cancelled:stale_event" });
+  await ob(SA, "done", { lastStatus: 200, createdAt: new Date(now - 8 * 86_400_000) });
+  for (let i = 0; i < 4; i++) await ob(SB, "done", { lastStatus: 200 });
+  const lib = [{ platform: "meta", id: pixel, label: "Main", addedAt: new Date(now).toISOString(), server: true, testCode: false, activeTests: [], health: null, usage: { pages: 0, live: 0, exports: 0, drafts: 0 } }] as never;
+  const viewA = await se.serverEventsView(SA.scope, lib, now);
+  const wk = viewA.pixels[0]?.week;
+  ok(
+    "server events: sent 2, refused 2 with code 190/463 and HTTP 400, stale 1 (A's rows of the week only)",
+    !!wk && wk !== "error" && wk.sent === 2 && wk.refused === 2 && wk.stale === 1 && wk.reasons[0]?.platformCode === "190/463" && wk.reasons[0]?.status === 400,
+    wk,
+  );
+  const wkB = (await se.serverEventsView(SB.scope, lib, now)).pixels[0]?.week;
+  ok("server events: B counts its own 4 sends", !!wkB && wkB !== "error" && wkB.sent === 4 && wkB.refused === 0, wkB);
+  eq2("server events: a library without a server token lists no pixel", (await se.serverEventsView(SA.scope, [{ ...(lib as unknown as object[])[0], server: false }] as never, now)).pixels.length, 0);
+
+  // Re-export to apply: A's exports built before the trigger change, for pages off `order`; B's never listed
+  const pg = newId();
+  await db.insert(pages).values({ id: pg, storeId: SA.id, slug: "argan", name: "Argan", publicKey: `pk_${newId()}`, draft: {} as never });
+  const changedAt = new Date(now - 2 * 86_400_000);
+  await db.insert(storeSettings).values({ storeId: SA.id, key: "conversions", value: { purchaseTrigger: "confirmed", pageOverrides: {}, customEvents: true, manualOrders: false } as never, updatedAt: changedAt });
+  const exp = async (s: typeof SA, mode: "connected" | "php", at: number, revoked = false) =>
+    db.insert(exportsTable).values({ id: newId(), storeId: s.id, pageId: pg, versionId: newId(), mode, publicKey: `pk_${newId()}`, allowedOrigins: [], createdAt: new Date(at), ...(revoked ? { revokedAt: new Date(now) } : {}) });
+  await exp(SA, "connected", now - 5 * 86_400_000);
+  await exp(SA, "php", now - 4 * 86_400_000);
+  await exp(SA, "connected", now - 4 * 86_400_000, true);
+  await exp(SA, "connected", now - 60_000);
+  await exp(SB, "php", now - 5 * 86_400_000);
+  const rx = (await se.serverEventsView(SA.scope, lib, now)).reexport;
+  ok("re-export: the two live exports built before the change, with the page's name", rx !== "error" && rx.length === 2 && rx.every((r) => r.pageName === "Argan"), rx);
+  eq2("re-export: none for B (no trigger change)", (await se.serverEventsView(SB.scope, lib, now)).reexport, []);
 }
 
 main()

@@ -136,8 +136,8 @@ export interface CaptchaDay {
 }
 
 /** Orders that are not a bot caught by the honeypot (the rule judges real orders only). */
-const NOT_HONEYPOT = sql`NOT JSON_CONTAINS(COALESCE(${orders.flags}, '[]'), '"honeypot"')`;
-const CAPTCHA_FLAGGED = sql`(JSON_CONTAINS(COALESCE(${orders.flags}, '[]'), '"captcha_missing"') OR JSON_CONTAINS(COALESCE(${orders.flags}, '[]'), '"captcha_unverified"'))`;
+export const NOT_HONEYPOT = sql`NOT JSON_CONTAINS(COALESCE(${orders.flags}, '[]'), '"honeypot"')`;
+export const CAPTCHA_FLAGGED = sql`(JSON_CONTAINS(COALESCE(${orders.flags}, '[]'), '"captcha_missing"') OR JSON_CONTAINS(COALESCE(${orders.flags}, '[]'), '"captcha_unverified"'))`;
 
 /**
  * Today so far and yesterday in the store's time zone (`orders_store_created_idx`, two days of the store's own

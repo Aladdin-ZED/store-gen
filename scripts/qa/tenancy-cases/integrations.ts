@@ -43,6 +43,9 @@
  *
  * R1 P5 step 10, the Google Sheets screen (src/lib/integrations/sheets-screen.server.ts `sheetsScreen`): B's screen
  * never carries A's sheet link, A's pending proof, A's sheet agent labels or A's export key.
+ *
+ * R1 P5 step 11, Pixels → Server events and Settings → Anti-spam (src/lib/pixels/server-events.ts `serverEventsView`,
+ * src/lib/integrations/turnstile-stats.ts `turnstileStats`): B's reads never count A's outbox rows or A's orders.
  */
 import { createRequire } from "node:module";
 import type { Fixtures, TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
@@ -331,6 +334,36 @@ export const cases: TenancyCase[] = [
       } finally {
         await setStoreSetting(a, "sheets", prevSetting, { id: kit.fx.A.members.owner });
         if (prevOrder) await db.update(orders).set({ confirmedByLabel: prevOrder.l, confirmedBy: prevOrder.c }).where(byId(orders, a, kit.fx.A.order.main));
+      }
+    },
+  },
+  {
+    name: "server events and anti-spam: B's reads never count A's outbox rows, exports or orders (OPE-§20.7, §24)",
+    async run(kit) {
+      const se = load<typeof import("@/lib/pixels/server-events")>("@/lib/pixels/server-events");
+      const ts = load<typeof import("@/lib/integrations/turnstile-stats")>("@/lib/integrations/turnstile-stats");
+      const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+      const { outbox } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+      const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+      const { byId } = load<typeof import("@/lib/tenancy/sql")>("@/lib/tenancy/sql");
+      const a = write(kit, "A");
+      const b = kit.scope("B");
+      const pixel = "9988776655443";
+      const lib = [{ platform: "meta", id: pixel, label: "Canary", addedAt: new Date().toISOString(), server: true, testCode: false, activeTests: [], health: null, usage: { pages: 0, live: 0, exports: 0, drafts: 0 } }] as never;
+      const beforeB = await se.serverEventsView(b, lib);
+      const shareB = await ts.turnstileStats(b);
+      const id = newId();
+      await db.insert(outbox).values({ id, storeId: kit.fx.A.id, kind: "capi", topic: "Purchase", targetId: `meta:${pixel}`, dedupeKey: `qa:tenancy:se:${id}`, payload: "{}", state: "dead", lastStatus: 400, lastError: "token_invalid: HTTP 400 code 190: A-CANARY" });
+      try {
+        const own = await se.serverEventsView(kit.scope("A"), lib);
+        const wkA = own.pixels[0]?.week;
+        kit.check("server events: A counts its own refused row", !!wkA && wkA !== "error" && wkA.refused >= 1, wkA);
+        const afterB = await se.serverEventsView(b, lib);
+        kit.check("server events: B's view is what it was before A's row existed", JSON.stringify(afterB) === JSON.stringify(beforeB) && !JSON.stringify(afterB).includes("A-CANARY"), { beforeB, afterB });
+        kit.check("server events: A's view carries no customer field", kit.leaks(own, { only: ["customer"] }).length === 0, kit.leaks(own));
+        kit.check("anti-spam: B's verified share never moves with A's orders", JSON.stringify(await ts.turnstileStats(b)) === JSON.stringify(shareB));
+      } finally {
+        await db.delete(outbox).where(byId(outbox, a, id));
       }
     },
   },
