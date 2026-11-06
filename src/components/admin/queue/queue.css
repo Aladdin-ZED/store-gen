@@ -1,0 +1,183 @@
+/*
+ * The agent console's own layer (P4 CALL CENTER; operations.md OPE-§13.1, §13.5, §13.6; core §I.6). Tokens only:
+ * success for Confirmed, destructive outline for Cancel and Fake, info for Call back (the core's `--info` pair, hue 250,
+ * with a fallback until the shell's generator ships it), neutral for the rest; no orange (hue 25-75 with chroma > 0.06
+ * never appears; `test:ops` scans this file). Motion 120 / 180 / 240 ms ease-out, opacity only under reduced motion.
+ *
+ * Type scale in em on `.q-root` (14 px, Arabic 15 px: OPE-§13.5, Arabic UI text 6-10 % larger at the same slot), so a
+ * portal (sheet) that carries `.q-root` and its own `lang` / `dir` gets the same scale.
+ */
+.q-root {
+  --q-ease: var(--ease-out, cubic-bezier(0.2, 0.8, 0.2, 1));
+  --q-dur-1: var(--dur-1, 120ms);
+  --q-dur-2: var(--dur-2, 180ms);
+  --q-dur-3: var(--dur-3, 240ms);
+  --q-info: var(--info, oklch(0.55 0.13 250));
+  --q-info-ink: var(--info-ink, oklch(0.45 0.12 250));
+  --q-ok: var(--success-ink);
+  --q-ok-fg: oklch(0.99 0.004 150);
+  --q-dx: 28px;
+  font-size: 14px;
+}
+.dark .q-root,
+.q-root:where(.dark *) {
+  --q-info: var(--info, oklch(0.74 0.1 250));
+  --q-info-ink: var(--info-ink, oklch(0.82 0.08 250));
+  --q-ok: var(--success);
+  --q-ok-fg: oklch(0.2 0.03 150);
+}
+.q-root[lang="ar"] {
+  font-size: 15px;
+}
+.q-root[dir="rtl"] {
+  --q-dx: -28px;
+}
+
+/* the em scale */
+.q-2xs { font-size: 0.75em; line-height: 1.35; }
+.q-xs { font-size: 0.8125em; line-height: 1.4; }
+.q-sm { font-size: 0.9286em; line-height: 1.45; }
+.q-md { font-size: 1.1429em; line-height: 1.35; }
+.q-lg { font-size: 1.2857em; line-height: 1.3; }
+.q-xl { font-size: 1.7143em; line-height: 1.15; }
+.q-num { font-variant-numeric: tabular-nums lining-nums; }
+.q-root :where(bdi) { unicode-bidi: isolate; }
+
+/* the outcome cells (OPE-§13.6) */
+.q-cell {
+  position: relative;
+  display: flex;
+  min-height: 56px;
+  min-width: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  padding: 0.5em 0.75em;
+  font-weight: 560;
+  text-align: center;
+  transition:
+    background-color var(--q-dur-1) var(--q-ease),
+    border-color var(--q-dur-1) var(--q-ease),
+    transform var(--q-dur-1) var(--q-ease),
+    opacity var(--q-dur-2) var(--q-ease);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.02);
+  -webkit-tap-highlight-color: transparent;
+}
+.q-cell:hover:not(:disabled) { background: var(--muted); }
+.q-cell:active:not(:disabled) { transform: translateY(1px); }
+.q-cell:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.q-cell:disabled { cursor: default; opacity: 0.55; }
+.q-cell[data-pending="true"] { opacity: 1; }
+.q-cell[data-tone="ok"] {
+  background: var(--q-ok);
+  border-color: transparent;
+  color: var(--q-ok-fg);
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--q-ok) 30%, transparent), inset 0 1px 0 rgb(255 255 255 / 0.14);
+}
+.q-cell[data-tone="ok"]:hover:not(:disabled) { background: color-mix(in oklab, var(--q-ok) 90%, var(--foreground)); }
+.q-cell[data-tone="info"] {
+  background: color-mix(in oklab, var(--q-info) 9%, var(--card));
+  border-color: color-mix(in oklab, var(--q-info) 34%, transparent);
+  color: var(--q-info-ink);
+}
+.q-cell[data-tone="info"]:hover:not(:disabled) { background: color-mix(in oklab, var(--q-info) 15%, var(--card)); }
+.q-cell[data-tone="danger"] {
+  background: transparent;
+  border-color: color-mix(in oklab, var(--destructive) 45%, transparent);
+  color: var(--destructive);
+}
+.q-cell[data-tone="danger"]:hover:not(:disabled) { background: color-mix(in oklab, var(--destructive) 7%, transparent); }
+
+/* the pressed cell while saving: a hairline sweep, never a spinner */
+.q-cell[data-pending="true"]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 14px;
+  bottom: 7px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.55;
+  transform-origin: left;
+  animation: q-sweep 900ms var(--q-ease) infinite;
+}
+.q-root[dir="rtl"] .q-cell[data-pending="true"]::after { transform-origin: right; }
+
+.q-kbd {
+  display: inline-flex;
+  min-width: 1.45em;
+  height: 1.45em;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid color-mix(in oklab, currentColor 22%, transparent);
+  padding-inline: 0.3em;
+  font-size: 0.75em;
+  font-weight: 560;
+  line-height: 1;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+/* the info chip (callbacks, scheduled) */
+.q-info-chip {
+  background: color-mix(in oklab, var(--q-info) 10%, transparent);
+  color: var(--q-info-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--q-info) 24%, transparent);
+}
+
+/* motion */
+.q-in { animation: q-in var(--q-dur-3) var(--q-ease) both; }
+.q-rise { animation: q-rise var(--q-dur-3) var(--q-ease) both; }
+.q-fade { animation: q-fade var(--q-dur-2) var(--q-ease) both; }
+.q-sheet { animation: q-sheet var(--q-dur-3) var(--q-ease) both; }
+.q-shimmer {
+  background: linear-gradient(90deg, var(--muted) 0%, color-mix(in oklab, var(--muted) 55%, var(--card)) 50%, var(--muted) 100%);
+  background-size: 200% 100%;
+  animation: q-shimmer 1400ms linear infinite;
+}
+
+@keyframes q-in {
+  from { opacity: 0; transform: translate3d(var(--q-dx), 0, 0); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes q-rise {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes q-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes q-sheet {
+  from { opacity: 0; transform: translate3d(0, 16px, 0); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes q-sweep {
+  0% { transform: scaleX(0); opacity: 0.2; }
+  60% { transform: scaleX(1); opacity: 0.6; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+@keyframes q-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .q-in,
+  .q-rise,
+  .q-sheet { animation-name: q-fade; }
+  .q-cell[data-pending="true"]::after { animation: none; transform: none; }
+  .q-shimmer { animation: none; }
+  .q-cell:active:not(:disabled) { transform: none; }
+}
+
+/* the call-centre settings' information panel (OPE-§5.5 "starting hours", the open-calls banner): the info pair */
+.cc-info {
+  border-color: color-mix(in oklab, var(--q-info) 35%, transparent);
+  background: color-mix(in oklab, var(--q-info) 7%, transparent);
+}

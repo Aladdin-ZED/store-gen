@@ -2,20 +2,22 @@
  * Store setting `ops` (docs/STORE-SAAS.md §D.10, operations.md OPE-§2.9; owner: operations, P4): the call centre.
  * `callingWindow` is the ONE source of the store's calling hours (D73), read through `callingWindowFor(scope)`;
  * weekdays are ISO numbers, 1 = Monday … 7 = Sunday, the same numbers as `checkout.calendar.workdays` (CRIT3).
- * The R1.0 first schema: P4 widens it (R2 assignment rules, R3 routing and the WhatsApp bot) and moves the other
- * defaults to src/lib/callcenter/defaults.ts, where DEFAULT_WINDOW lives since P0; every default is a reasoned
- * starting value, not researched (OD9, OD10).
+ * R2 widens it (assignment rules), R3 too (routing and the WhatsApp bot). Every default comes from
+ * src/lib/callcenter/defaults.ts, each a reasoned starting value, not researched (OD9, OD10); this file never invents
+ * an hour. The window types are the one definition of src/lib/callcenter/window.ts (OPE-§5.5): the type-level checks
+ * at the end of the file fail `tsc` when the schema's days drift from `Record<IsoWeekday, Range[]>`.
  */
 import { z } from "zod";
-import { DEFAULT_WINDOW } from "@/lib/callcenter/defaults";
+import { DEFAULT_LADDER, DEFAULT_WINDOW, OPS_DEFAULTS, type LadderStep as LadderStepT } from "@/lib/callcenter/defaults";
+import type { EffectiveWindow, IsoWeekday, Range } from "@/lib/callcenter/window";
 import { hhmm, id26, isoDate, isoDateTime } from "../fields";
 
-export { DEFAULT_WINDOW };
+export { DEFAULT_LADDER, DEFAULT_WINDOW };
 
 export const OpsRange = z.object({ from: hhmm, to: hhmm });
 const DayRanges = z.array(OpsRange).max(3);
-/** keyed "1".."7" (ISO weekday); the TS type is Record<1 … 7, Range[]> */
-export const WeekRanges = z.object({ 1: DayRanges, 2: DayRanges, 3: DayRanges, 4: DayRanges, 5: DayRanges, 6: DayRanges, 7: DayRanges });
+/** keyed "1".."7" (ISO weekday), exactly those seven keys (a 0-based key is refused); the TS type is Record<IsoWeekday, Range[]> */
+export const WeekRanges = z.strictObject({ 1: DayRanges, 2: DayRanges, 3: DayRanges, 4: DayRanges, 5: DayRanges, 6: DayRanges, 7: DayRanges });
 export type WeekRanges = z.output<typeof WeekRanges>;
 
 /** A city slug ("casablanca", "ksar-el-kebir"): the one city key of the platform (D68, OD47). */
@@ -31,15 +33,6 @@ export const LadderStep = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("next_day_at"), time: hhmm }),
 ]);
 export type LadderStep = z.output<typeof LadderStep>;
-
-/** delays after attempts 1…5; attempt 6 is the last (OD10) */
-export const DEFAULT_LADDER: LadderStep[] = [
-  { kind: "after", minutes: 60 },
-  { kind: "after", minutes: 180 },
-  { kind: "next_day_at", time: "11:00" },
-  { kind: "at", time: "18:30" },
-  { kind: "next_day_at", time: "11:00" },
-];
 
 export const OpsSetting = z.object({
   callingWindow: z
@@ -66,14 +59,17 @@ export const OpsSetting = z.object({
   /** "Open calls now" (≤ 2 h) */
   openOverrideUntil: isoDateTime.nullable().default(null),
   ladder: z.array(LadderStep).min(1).max(10).default(DEFAULT_LADDER),
-  busyRetryMinutes: z.number().int().min(5).max(120).default(20),
-  unreachable: z.enum(["close", "keep_open"]).default("close"),
-  keepOpenDays: z.number().int().min(1).max(14).default(7),
+  busyRetryMinutes: z.number().int().min(5).max(120).default(OPS_DEFAULTS.busyRetryMinutes),
+  unreachable: z.enum(["close", "keep_open"]).default(OPS_DEFAULTS.unreachable),
+  keepOpenDays: z.number().int().min(1).max(14).default(OPS_DEFAULTS.keepOpenDays),
   /** renewed by the heartbeat (OD60) */
-  leaseMinutes: z.number().int().min(5).max(30).default(15),
+  leaseMinutes: z.number().int().min(5).max(30).default(OPS_DEFAULTS.leaseMinutes),
   /** the delivery lane (OD48): rescue calls per order, and the one retry after a no-answer */
   rescue: z
-    .object({ maxCalls: z.number().int().min(0).max(5).default(3), retryMinutes: z.number().int().min(15).max(240).default(60) })
+    .object({
+      maxCalls: z.number().int().min(0).max(5).default(OPS_DEFAULTS.rescueMaxCalls),
+      retryMinutes: z.number().int().min(15).max(240).default(OPS_DEFAULTS.rescueRetryMinutes),
+    })
     .prefault({}),
   /** the Sheet's "Agent" labels → member user ids (≤ 50, OD54) */
   agentLabels: z
@@ -92,22 +88,34 @@ export const OpsSetting = z.object({
     })
     .nullable()
     .default(null),
-  callbackGraceMinutes: z.number().int().min(0).max(60).default(15),
+  callbackGraceMinutes: z.number().int().min(0).max(60).default(OPS_DEFAULTS.callbackGraceMinutes),
   assignment: z.enum(["pull", "round_robin", "manual"]).default("pull"),
-  rebalanceMinutes: z.number().int().min(5).max(240).default(20),
+  rebalanceMinutes: z.number().int().min(5).max(240).default(OPS_DEFAULTS.rebalanceMinutes),
   /** days within which a second order of the same phone is flagged as a duplicate */
-  duplicateWindowDays: z.number().int().min(0).max(14).default(3),
-  firstTouchTargetMin: z.number().int().min(5).max(240).default(15),
+  duplicateWindowDays: z.number().int().min(0).max(14).default(OPS_DEFAULTS.duplicateWindowDays),
+  firstTouchTargetMin: z.number().int().min(5).max(240).default(OPS_DEFAULTS.firstTouchTargetMin),
   /** OD12 */
-  agentHistoryDays: z.number().int().min(1).max(30).default(30),
+  agentHistoryDays: z.number().int().min(1).max(30).default(OPS_DEFAULTS.agentHistoryDays),
   /** typed city → city key (≤ 200) */
   cityAliases: z
     .record(z.string().max(40), CityKeyZ)
     .refine((o) => Object.keys(o).length <= 200, { error: "Too many aliases." })
     .default({}),
   /** R2 (OP-19) */
-  revealAlarmPerHour: z.number().int().min(10).max(500).default(60),
+  revealAlarmPerHour: z.number().int().min(10).max(500).default(OPS_DEFAULTS.revealAlarmPerHour),
   /** R3 (OP-25) */
   leaderboard: z.enum(["off", "managers", "everyone"]).default("off"),
 });
 export type OpsSetting = z.output<typeof OpsSetting>;
+
+/* ---- type-level checks (CRIT3): one window shape, ISO keys 1-7 everywhere; a drift fails `tsc` ---- */
+type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+type Assert<T extends true> = T;
+export type OpsShapeChecks = [
+  Assert<Equals<keyof OpsSetting["callingWindow"]["days"], IsoWeekday>>,
+  Assert<Equals<keyof OpsSetting["windowOverrides"][number]["days"], IsoWeekday>>,
+  Assert<Equals<keyof EffectiveWindow["days"], IsoWeekday>>,
+  Assert<Equals<OpsSetting["callingWindow"]["days"][IsoWeekday][number], Range>>,
+  Assert<Equals<keyof EffectiveWindow["overrides"][number]["days"], IsoWeekday>>,
+  Assert<Equals<LadderStep, LadderStepT>>,
+];
