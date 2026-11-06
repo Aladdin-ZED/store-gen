@@ -41,7 +41,7 @@ export function QSheet({
           onKeyDown={onKeyDown}
           className={cn(
             "q-root q-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[88dvh] flex-col overflow-hidden rounded-t-[22px] border border-border bg-popover text-popover-foreground shadow-[0_-12px_40px_-16px_rgb(0_0_0/0.25)] outline-none",
-            "sm:inset-x-auto sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:w-[min(30rem,calc(100vw-2rem))] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[22px]",
+            "sm:top-1/2 sm:bottom-auto sm:mx-auto sm:w-[min(30rem,calc(100vw-2rem))] sm:-translate-y-1/2 sm:rounded-[22px]",
             className,
           )}
         >
