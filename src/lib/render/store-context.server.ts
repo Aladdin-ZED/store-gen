@@ -92,6 +92,7 @@ export function storeInfoOf(store: StoreRow, s: Pick<StoreSettings, "store" | "b
   const v = s.store;
   const socials = Object.fromEntries(Object.entries(v.socials ?? {}).filter((e): e is [string, string] => typeof e[1] === "string" && !!e[1]));
   const logo = s.brand.logo.primary;
+  const mark = s.brand.logo.mark;
   return {
     name: store.name,
     country: v.country,
@@ -104,6 +105,7 @@ export function storeInfoOf(store: StoreRow, s: Pick<StoreSettings, "store" | "b
     ...(v.ice ? { ice: v.ice } : {}),
     ...(v.rc ? { rc: v.rc } : {}),
     ...(logo ? { logo: { id: logo, alt: "" } } : {}),
+    ...(mark ? { mark: { id: mark, alt: store.name } } : {}),
     ...(Object.keys(socials).length ? { socials } : {}),
   };
 }
@@ -176,7 +178,7 @@ export function storeResolver(address: StoreAddress, rows: Iterable<AssetRowLike
 
 /** The resolver for every asset the document and the store logo reference, from the store's own rows. */
 export async function storeAssetResolver(scope: StoreScope, rc: StoreRenderContext, doc: PageDoc): Promise<{ resolver: AssetResolver; rows: (typeof assets.$inferSelect)[] }> {
-  const rows = await storeAssetRows(scope, collectAssetIds(doc, [rc.info.logo]));
+  const rows = await storeAssetRows(scope, collectAssetIds(doc, [rc.info.logo, rc.info.mark]));
   return { resolver: storeResolver(rc.address, rows), rows };
 }
 

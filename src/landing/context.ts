@@ -318,6 +318,8 @@ export interface StoreInfo {
   ice?: string;
   rc?: string;
   logo?: AssetRef;
+  /** the brand's square mark (favicon, DES-§12.5) */
+  mark?: AssetRef;
   socials?: Partial<Record<"instagram" | "facebook" | "tiktok" | "youtube" | "snapchat", string>>;
 }
 
@@ -371,6 +373,7 @@ export function storeContext(info: StoreInfo, assets: AssetResolver, fallbackNam
     ...opt("ice", ice && ICE.test(ice) ? ice : undefined),
     ...opt("rc", rc && RC.test(rc) ? rc : undefined),
     logo: info.logo ? assets.resolve(info.logo) : null,
+    ...(info.mark ? { mark: assets.resolve(info.mark) } : {}),
     ...(Object.keys(socials).length ? { socials } : {}),
   };
 }

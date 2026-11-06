@@ -7,6 +7,8 @@
  *
  * Exit code 1 on any failure; each group prints its ids, its checks and its time.
  */
+// first: the admin components' stylesheet imports load as empty modules offline (P2's primitives, the P6 merge)
+import "./design-css-noop";
 import { DESIGN_GROUPS, type GroupCtx } from "@/lib/design/selftest";
 // step 2 (genome core): determinism, H-rules, compile, genomeOf, gene spread, hints, distance, tokens, Director vocabulary
 import "@/lib/design/selftest-genome";

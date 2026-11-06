@@ -429,6 +429,12 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
   };
   const gate = await runPrePublishChecks(gateCtx);
   if (!gate.ok) throw new PublishError(gate.code, GATE_MESSAGES[gate.code], [], undefined, gate.items);
+  // CCR r1-p6-11: a warn-mode gate that let hard design or budget items through leaves an audit line
+  const overridden = gate.notes.filter((n) => n.level === "hard");
+  for (const kind of ["design", "budget"] as const) {
+    const items = overridden.filter((n) => n.id.startsWith(`${kind}:`)).map((n) => n.id).slice(0, 20);
+    if (items.length) await audit(`page.publish.${kind}_override`, { userId: actor.userId, ip: actor.ip, target: page.id, scope: auditScope(scope, actor), meta: { items } });
+  }
 
   // refused here with a clear message rather than as a reset connection mid-transaction
   const heaviest = heaviestStatement(doc, landing, thanks);

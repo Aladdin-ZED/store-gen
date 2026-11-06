@@ -43,6 +43,7 @@ import {
   ghostify,
   impersonate,
   leaks,
+  load,
   network,
   ranReal,
   refusal,
@@ -167,11 +168,25 @@ async function originSuite(kit: Kit): Promise<void> {
   }
 }
 
+/**
+ * The replays prove store isolation, not design: the publish-type cases run under the console's incident switch
+ * (platform_design.gatesAtPublish = warn, DES-§2.7), so the fixture's hard design items come back as audited notes
+ * (the P6 merge; the design gate has its own suites). The budget gate stays hard: those cases publish a lean copy.
+ */
+async function designIncidentSwitch(): Promise<void> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const value = { gatesAtPublish: "warn" };
+  await db.insert(S.settings).values({ key: "platform_design", value, encrypted: false, updatedAt: new Date() }).onDuplicateKeyUpdate({ set: { value, updatedAt: new Date() } });
+  load<typeof import("@/lib/settings")>("@/lib/settings").invalidatePlatformSettings("platform_design");
+}
+
 async function main(): Promise<void> {
   const started = Date.now();
   let failed = 1;
   try {
     const kit = await setup();
+    await designIncidentSwitch();
     await replaySuite(kit);
     await originSuite(kit);
     failed = 0;

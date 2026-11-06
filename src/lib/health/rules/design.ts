@@ -69,7 +69,7 @@ const RULES: DesignRule[] = [
         severity: 2,
         points: 6,
         evidence: { metric: "slop", value: Math.max(...sloppy.map((p) => p.slop ?? 0)), baseline: SLOP_LINE, window: "live", n: d.pages.length },
-        fix: { kind: "action", actionId: "design:repair:all", label: "design.health.slop.fix" },
+        fix: { kind: "action", actionId: "design.repair_all", label: "design.health.slop.fix" },
         text: "design.health.slop",
       };
     },

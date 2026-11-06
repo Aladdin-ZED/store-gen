@@ -97,6 +97,8 @@ export interface StoreContext {
   ice?: string;
   rc?: string;
   logo?: ResolvedAsset | null;
+  /** the brand's square mark, preferred by the favicon (DES-§12.5) */
+  mark?: ResolvedAsset | null;
   socials?: { instagram?: string; facebook?: string; tiktok?: string; youtube?: string; snapchat?: string };
 }
 

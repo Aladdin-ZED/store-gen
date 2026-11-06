@@ -436,6 +436,34 @@ export interface Fixtures {
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
+/**
+ * A lean copy of the argan fixture (CCR r1-p6-9, the P6 merge): the publish gate refuses the full 27-section baseline
+ * once design's height model is real (C2 / C3 / F1 / R4 / K2 / F5 hard, §M.2), so the cases that prove the scoping of
+ * a publish publish this copy (the form after the hero, neutral bands, a split hero); test:prepublish owns the budget.
+ */
+export function leanDoc<T>(doc: T): T {
+  const d = structuredClone(typeof doc === "string" ? JSON.parse(doc) : doc) as { sections: { type: string; bg?: string; variant?: string }[] };
+  const KEEP = new Set(["header", "hero", "benefits", "reviews", "orderForm", "faq", "footer"]);
+  const kept = d.sections.filter((s) => KEEP.has(s.type)).map((s) => ({ ...s, bg: "base", ...(s.type === "hero" ? { variant: "split" } : {}) }));
+  const form = kept.findIndex((s) => s.type === "orderForm");
+  const [orderForm] = form >= 0 ? kept.splice(form, 1) : [];
+  if (orderForm) kept.splice(kept.findIndex((s) => s.type === "hero") + 1, 0, orderForm);
+  d.sections = kept;
+  return d as unknown as T;
+}
+
+/** Replaces a page's draft (and a version's document) with its lean copy, for the replay cases that publish. */
+export async function leanStored(pageId: string, versionId?: string): Promise<void> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const S = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { eq } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const [p] = await db.select({ draft: S.pages.draft }).from(S.pages).where(eq(S.pages.id, pageId));
+  if (p?.draft) await db.update(S.pages).set({ draft: leanDoc(p.draft) as never }).where(eq(S.pages.id, pageId));
+  if (!versionId) return;
+  const [v] = await db.select({ doc: S.pageVersions.doc }).from(S.pageVersions).where(eq(S.pageVersions.id, versionId));
+  if (v?.doc) await db.update(S.pageVersions).set({ doc: leanDoc(v.doc) as never }).where(eq(S.pageVersions.id, versionId));
+}
+
 let baseDoc: unknown = null;
 /** A copy of the argan fixture as a validated PageDoc (built once: its theme generation is slow). */
 function fixtureDoc(assetId?: string): Record<string, unknown> {
@@ -1028,7 +1056,7 @@ export const ACTION_CASES: ActionCase[] = [
   act(ORDERS, "unblockAction", "blocklist", "/orders", "blocklist.write", true, (fx) => [fx.A.block.phone], (fx, f) => f.block(fx.B).then((id) => [id])),
   // pages
   act(PAGES, "duplicatePageAction", "pages", "/pages", "pages.write", true, (fx) => [fx.A.page.live], (fx) => [fx.B.page.live]),
-  act(PAGES, "publishPageAction", "pages", "/pages", "pages.publish", true, (fx, f) => f.page(fx.A).then((id) => [id]), (fx, f) => f.page(fx.B).then((id) => [id])),
+  act(PAGES, "publishPageAction", "pages", "/pages", "pages.publish", true, (fx, f) => f.page(fx.A).then(async (id) => (await leanStored(id), [id])), (fx, f) => f.page(fx.B).then((id) => [id])),
   act(PAGES, "unpublishPageAction", "pages", "/pages", "pages.publish", true, (fx, f) => f.page(fx.A, "published").then((id) => [id]), (fx, f) => f.page(fx.B, "published").then((id) => [id])),
   act(PAGES, "setHomePageAction", "pages", "/pages", "pages.publish", true, (fx) => [fx.A.page.live], (fx) => [fx.B.page.live]),
   act(PAGES, "archivePageAction", "pages", "/pages", "pages.write", true, (fx, f) => f.page(fx.A).then((id) => [id]), (fx, f) => f.page(fx.B).then((id) => [id])),
@@ -1078,7 +1106,7 @@ export const ACTION_CASES: ActionCase[] = [
     mixed: (fx) => [{ pageId: fx.B.page.live, versionId: fx.A.version.saved }],
   }),
   act(EDITOR, "updatePageMeta", "pages", "/pages", "pages.write", true, (fx, f) => f.page(fx.A).then((id) => [{ pageId: id, name: "Renamed", slug: `moved-${randomInt(1e6)}` }]), (fx, f) => f.page(fx.B).then((id) => [{ pageId: id, name: "Renamed", slug: `moved-${randomInt(1e6)}` }])),
-  act(EDITOR, "publish", "pages", "/pages", "pages.publish", true, (fx, f) => f.page(fx.A).then((id) => [{ pageId: id }]), (fx, f) => f.page(fx.B).then((id) => [{ pageId: id }])),
+  act(EDITOR, "publish", "pages", "/pages", "pages.publish", true, (fx, f) => f.page(fx.A).then(async (id) => (await leanStored(id), [{ pageId: id }])), (fx, f) => f.page(fx.B).then((id) => [{ pageId: id }])),
   act(EDITOR, "unpublish", "pages", "/pages", "pages.publish", true, (fx, f) => f.page(fx.A, "published").then((id) => [{ pageId: id }]), (fx, f) => f.page(fx.B, "published").then((id) => [{ pageId: id }])),
   // pixels
   act(PIXELS, "pixelLibraryAction", "pixels", "/integrations/pixels", "pages.read", false, () => [], () => []),
@@ -1090,7 +1118,7 @@ export const ACTION_CASES: ActionCase[] = [
     mixed: async (fx, f) => [{ platform: "meta", from: fx.B.pixel.shared, to: null, pageIds: [await f.page(fx.B), fx.A.page.draft], live: false }],
   }),
   act(PIXELS, "pagePixelsAction", "pixels", "/pages", "pages.read", false, (fx) => [fx.A.page.live], (fx) => [fx.B.page.live]),
-  act(PIXELS, "applyLiveTrackingAction", "pixels", "/pages", "pages.publish", true, (fx) => [{ pageId: fx.A.page.live, baseVersionId: fx.A.version.live }], (fx) => [{ pageId: fx.B.page.live, baseVersionId: fx.B.version.live }], {
+  act(PIXELS, "applyLiveTrackingAction", "pixels", "/pages", "pages.publish", true, async (fx) => (await leanStored(fx.A.page.live, fx.A.version.live), [{ pageId: fx.A.page.live, baseVersionId: fx.A.version.live }]), (fx) => [{ pageId: fx.B.page.live, baseVersionId: fx.B.version.live }], {
     mixed: (fx) => [{ pageId: fx.B.page.live, baseVersionId: fx.A.version.live }],
   }),
   act(PIXELS, "startPixelTestAction", "pixels", "/integrations/pixels", "pages.publish", true, (fx) => [{ pageId: fx.A.page.live, platform: "meta", id: fx.A.pixel.own, minutes: 30 }], (fx) => [{ pageId: fx.B.page.live, platform: "meta", id: fx.B.pixel.own, minutes: 30 }]),
@@ -2477,10 +2505,24 @@ export async function moreSpecialCases(kit: Kit): Promise<void> {
 
   // 1. publish: A's /argan and B's /argan (each its own seeded document), then a page of B whose document names A's
   // two files beside B's own photo (a pasted id): the publish resolves B's own files only
+  // the publish gate refuses the full argan baseline (27 sections: C2 / C3 / F1 / R4 / K2 are hard once design's height
+  // model is real, §M.2): these cases publish a lean copy of it (the form after the hero, neutral bands, a hero whose
+  // fold fits), so they prove the scoping of a publish, not the budget (test:prepublish owns that)
+  const lean = leanDoc;
   const seededDraft = async (store: StoreFx) => {
     const [v] = await db.select({ doc: S.pageVersions.doc }).from(S.pageVersions).where(eq(S.pageVersions.id, store.version.live));
-    await db.update(S.pages).set({ draft: v!.doc as never }).where(eq(S.pages.id, store.page.live));
+    await db.update(S.pages).set({ draft: lean(v!.doc) as never }).where(eq(S.pages.id, store.page.live));
   };
+  // and the design gate has its own suites (test:design, test:design-db, the design tenancy cases): these three publishes
+  // run under the console's incident switch (platform_design.gatesAtPublish = warn, DES-§2.7), restored after them
+  const SET = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const [designBefore] = await db.select({ value: S.settings.value }).from(S.settings).where(eq(S.settings.key, "platform_design"));
+  const designSwitch = async (value: unknown) => {
+    if (value === undefined) await db.delete(S.settings).where(eq(S.settings.key, "platform_design"));
+    else await db.insert(S.settings).values({ key: "platform_design", value, encrypted: false, updatedAt: new Date() }).onDuplicateKeyUpdate({ set: { value, updatedAt: new Date() } });
+    SET.invalidatePlatformSettings("platform_design");
+  };
+  await designSwitch({ ...((designBefore?.value as object | undefined) ?? {}), gatesAtPublish: "warn" });
   await seededDraft(fx.A);
   await seededDraft(fx.B);
   const pubA = await call(ownerA, appPath(fx.A.handle, "/pages"), () => PUB.publishPage(A, fx.A.page.live, { actor: userActor(fx.A.members.owner) }));
@@ -2489,11 +2531,12 @@ export async function moreSpecialCases(kit: Kit): Promise<void> {
   const pubB = await call(ownerB, appPath(fx.B.handle, "/pages"), () => PUB.publishPage(B, fx.B.page.live, { actor: userActor(fx.B.members.owner) }));
   check("B publishes /argan (the same slug)", pubB.ok, answerOf(pubB));
   const naming = await fresh.page(fx.B);
-  const docB = (await fresh.doc(fx.B)) as unknown as { product: { images: { id: string }[] } };
+  const docB = lean(await fresh.doc(fx.B)) as unknown as { product: { images: { id: string }[] } };
   docB.product.images = [{ id: fx.B.asset.photo }, { id: fx.A.asset.photo }, { id: fx.A.asset.cutout }];
   await db.update(S.pages).set({ draft: docB as never }).where(eq(S.pages.id, naming));
   const pubN = await call(ownerB, appPath(fx.B.handle, "/pages"), () => PUB.publishPage(B, naming, { actor: userActor(fx.B.members.owner) }));
   check("B publishes a page whose document names A's files", pubN.ok, answerOf(pubN));
+  await designSwitch(designBefore?.value);
   if (pubN.ok) {
     const [ver] = await db.select({ html: S.pageVersions.html, ty: S.pageVersions.thankYouHtml }).from(S.pageVersions).where(eq(S.pageVersions.id, pubN.value!.versionId));
     const leaked = leaks(fx, [ver?.html, ver?.ty]);

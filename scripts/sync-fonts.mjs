@@ -60,6 +60,15 @@ const MANIFEST = [
   { id: "baloo-bhaijaan-2", variable: true },
   { id: "ibm-plex-sans-arabic", weights: [400, 500, 700] },
   { id: "tajawal", weights: [400, 500, 700] },
+  // DES-R21 (CCR r1-p6-1, P6 merge): the modern Arabic roster of F11
+  { id: "cairo", variable: true },
+  { id: "kufam", variable: true },
+  { id: "vazirmatn", variable: true },
+  // Latin, DES-R21 (CCR r1-p6-1, P6 merge): two display serifs, a display grotesk and a text grotesk
+  { id: "cormorant-garamond", weights: [400, 500, 600], italic: true },
+  { id: "dm-serif-display", weights: [400], italic: true },
+  { id: "syne", variable: true },
+  { id: "manrope", variable: true },
 ];
 
 const SUBSETS = ["latin", "latin-ext", "arabic"];

@@ -605,11 +605,31 @@ async function childMain(task: string): Promise<unknown> {
         await fn();
         return "ok";
       } catch (err) {
-        return err instanceof PublishError ? `PublishError:${err.code}:${err.message}` : String(err);
+        return err instanceof PublishError ? `PublishError:${err.code}:${err.message}${err.items.length ? ` [${err.items.filter((i) => i.level === "hard").map((i) => i.id).join(", ")}]` : ""}` : String(err);
       }
+    };
+    // the publish gate refuses the full argan / massage fixtures once design's height model is real (C2 / C3 / F1 / R4 /
+    // K2 hard, §M.2; P6 merge, as CCR r1-p6-9 for test:tenancy): this case publishes a lean copy of each draft (the form
+    // after the hero, neutral bands, a split hero), so it proves first_published_at, not the budget (test:prepublish owns that)
+    const KEEP = new Set(["header", "hero", "benefits", "reviews", "orderForm", "faq", "footer"]);
+    const lean = (raw: unknown) => {
+      const d = (typeof raw === "string" ? JSON.parse(raw) : raw) as { sections: { type: string; bg?: string; variant?: string }[] };
+      const kept = d.sections.filter((x) => KEEP.has(x.type)).map((x) => ({ ...x, bg: "base", ...(x.type === "hero" ? { variant: "split" } : {}) }));
+      const form = kept.findIndex((x) => x.type === "orderForm");
+      const [orderForm] = form >= 0 ? kept.splice(form, 1) : [];
+      if (orderForm) kept.splice(kept.findIndex((x) => x.type === "hero") + 1, 0, orderForm);
+      return JSON.stringify({ ...d, sections: kept });
     };
     try {
       const out: Record<string, unknown> = {};
+      // the design gate has its own suites (test:design, test:design-db, test:prepublish): this case proves
+      // first_published_at, so it publishes under the console's incident switch (platform_design.gatesAtPublish =
+      // warn, DES-§2.7; the hard design items come back as notes and the override is audited)
+      await conn.query("INSERT INTO settings (`key`, value, encrypted, updated_at) VALUES ('platform_design', ?, 0, UTC_TIMESTAMP(3)) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)", [JSON.stringify({ gatesAtPublish: "warn" })]);
+      for (const pageId of [P1, P2]) {
+        const [drafts] = await conn.query<mysql.RowDataPacket[]>("SELECT draft FROM pages WHERE store_id = ? AND id = ?", [STORE1, pageId]);
+        if (drafts[0]?.draft) await conn.query("UPDATE pages SET draft = ? WHERE store_id = ? AND id = ?", [lean(drafts[0].draft), STORE1, pageId]);
+      }
       for (const pageId of [P1, P2]) {
         const before = await firstOf(pageId);
         const first = await step(() => publishPage(scope(), pageId, { actor }));

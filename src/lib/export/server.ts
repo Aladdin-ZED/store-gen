@@ -306,7 +306,7 @@ async function prepare(scope: StoreScope, req: ExportRequest): Promise<Prepared>
       throw new ExportError("invalid", message, { whatsappNumber: message });
     }
   }
-  const ids = collectAssetIds(doc, [store.logo]);
+  const ids = collectAssetIds(doc, [store.logo, store.mark]);
   const [assets, addons] = await Promise.all([storeAssets(scope, ids), exportAddons(scope, version.pageId, doc, req.mode)]);
   const found = new Set(assets.map((a) => a.id));
   const lost = ids.filter((id) => !found.has(id)).length;

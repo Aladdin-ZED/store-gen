@@ -1209,7 +1209,7 @@ export const PAIRING_ADDITIONS: Readonly<Record<Archetype, readonly CataloguePai
     row({ id: "arena", note: "Hanken Grotesk extra-bold with Figtree and JetBrains Mono stats; Changa bold over Readex Pro in Arabic.", display: "hanken-grotesk", displayWeight: 800, body: "figtree", accent: "jetbrains-mono", displayAr: "changa", displayWeightAr: 700, bodyAr: "readex-pro" }),
   ],
   circuit: [
-    row({ id: "kernel", note: "DM Sans semibold with JetBrains Mono readouts; Cairo bold gives the Arabic a humanist, technical voice.", display: "dm-sans", displayWeight: 600, body: "dm-sans", accent: "jetbrains-mono", displayAr: "cairo", displayWeightAr: 700, bodyAr: "ibm-plex-sans-arabic", alsoFits: ["apothecary"] }),
+    row({ id: "kernel", note: "DM Sans semibold with JetBrains Mono readouts; Cairo semibold gives the Arabic a humanist, technical voice.", display: "dm-sans", displayWeight: 600, body: "dm-sans", accent: "jetbrains-mono", displayAr: "cairo", displayWeightAr: 600, bodyAr: "ibm-plex-sans-arabic", alsoFits: ["apothecary"] }),
     row({ id: "lumen", note: "Instrument Serif headlines over Instrument Sans with mono specs, a calm tech note; a light Alexandria in Arabic.", display: "instrument-serif", displayWeight: 400, body: "instrument-sans", accent: "jetbrains-mono", displayAr: "alexandria", displayWeightAr: 300, bodyAr: "ibm-plex-sans-arabic", alsoFits: ["maison"] }),
     row({ id: "array", note: "Archivo bold over Instrument Sans with Plex Mono part numbers; Noto Kufi Arabic bold in Arabic.", display: "archivo", displayWeight: 700, body: "instrument-sans", accent: "ibm-plex-mono", displayAr: "noto-kufi-arabic", displayWeightAr: 700, bodyAr: "readex-pro", alsoFits: ["garage"] }),
     row({ id: "orbit", note: "Bricolage Grotesque semibold with Hanken and JetBrains Mono; Readex Pro semibold over Tajawal in Arabic.", display: "bricolage-grotesque", displayWeight: 600, body: "hanken-grotesk", accent: "jetbrains-mono", displayAr: "readex-pro", displayWeightAr: 600, bodyAr: "tajawal" }),
@@ -1234,7 +1234,7 @@ export const PAIRING_ADDITIONS: Readonly<Record<Archetype, readonly CataloguePai
     row({ id: "meadow", note: "Instrument Serif over DM Sans, open and airy; a light Alexandria over Readex Pro in Arabic.", display: "instrument-serif", displayWeight: 400, body: "dm-sans", displayAr: "alexandria", displayWeightAr: 300, bodyAr: "readex-pro" }),
     row({ id: "terroir", note: "Gloock over Instrument Sans with Plex Mono origin labels; El Messiri semibold over Noto Naskh in Arabic.", display: "gloock", displayWeight: 400, body: "instrument-sans", accent: "ibm-plex-mono", displayAr: "el-messiri", displayWeightAr: 600, bodyAr: "noto-naskh-arabic", alsoFits: ["souk"] }),
     row({ id: "ridge", note: "Archivo bold over Figtree, sturdy and outdoor; Changa bold over Tajawal in Arabic.", display: "archivo", displayWeight: 700, body: "figtree", displayAr: "changa", displayWeightAr: 700, bodyAr: "tajawal", alsoFits: ["garage"] }),
-    row({ id: "orchard", note: "Bricolage Grotesque semibold over Hanken; Cairo semibold gives the Arabic a warm, humanist sans.", display: "bricolage-grotesque", displayWeight: 600, body: "hanken-grotesk", displayAr: "cairo", displayWeightAr: 600, bodyAr: "ibm-plex-sans-arabic", alsoFits: ["hearth"] }),
+    row({ id: "orchard", note: "Bricolage Grotesque semibold over Hanken; Cairo extra-bold gives the Arabic a warm, humanist sans.", display: "bricolage-grotesque", displayWeight: 600, body: "hanken-grotesk", displayAr: "cairo", displayWeightAr: 800, bodyAr: "ibm-plex-sans-arabic", alsoFits: ["hearth"] }),
     row({ id: "cedar", note: "Fraunces semibold over Schibsted Grotesk; Noto Kufi Arabic over Readex Pro in Arabic.", display: "fraunces", displayWeight: 600, body: "schibsted-grotesk", displayAr: "noto-kufi-arabic", displayWeightAr: 480, bodyAr: "readex-pro" }),
     row({ id: "market", note: "Young Serif over DM Sans, a friendly grocer's sign; Tajawal bold keeps the Arabic headline simple and sturdy.", display: "young-serif", displayWeight: 400, body: "dm-sans", displayAr: "tajawal", displayWeightAr: 700, bodyAr: "readex-pro", alsoFits: ["hearth"] }),
   ],
@@ -1261,7 +1261,7 @@ export const PAIRING_ADDITIONS: Readonly<Record<Archetype, readonly CataloguePai
  */
 export const R21_PAIRINGS: Readonly<Record<Archetype, readonly CataloguePairing[]>> = {
   maison: [
-    row({ id: "velours", note: "Cormorant Garamond medium, an old-style serif that is neither Didone nor a 2025 default, over Hanken; a light Alexandria in Arabic.", display: "cormorant-garamond", displayWeight: 500, body: "hanken-grotesk", displayAr: "alexandria", displayWeightAr: 300, bodyAr: "ibm-plex-sans-arabic", alsoFits: ["bloom"] }),
+    row({ id: "velours", note: "Cormorant Garamond medium, an old-style serif that is neither Didone nor a 2025 default, over Hanken; an extra-light Alexandria in Arabic.", display: "cormorant-garamond", displayWeight: 500, body: "hanken-grotesk", displayAr: "alexandria", displayWeightAr: 230, bodyAr: "ibm-plex-sans-arabic", alsoFits: ["bloom"] }),
     row({ id: "noir", note: "DM Serif Display's high contrast over Instrument Sans; Cairo medium keeps the Arabic calm and legible beside it.", display: "dm-serif-display", displayWeight: 400, body: "instrument-sans", displayAr: "cairo", displayWeightAr: 500, bodyAr: "ibm-plex-sans-arabic", alsoFits: ["editorial"] }),
   ],
   apothecary: [
@@ -1282,20 +1282,20 @@ export const R21_PAIRINGS: Readonly<Record<Archetype, readonly CataloguePairing[
     row({ id: "lattice", note: "Manrope bold with JetBrains Mono readouts; Kufam semibold sets a precise, gridded Arabic.", display: "manrope", displayWeight: 700, body: "manrope", accent: "jetbrains-mono", displayAr: "kufam", displayWeightAr: 600, bodyAr: "ibm-plex-sans-arabic" }),
   ],
   hearth: [
-    row({ id: "supper", note: "DM Serif Display over Figtree, a warm menu headline; Cairo bold over Tajawal in Arabic.", display: "dm-serif-display", displayWeight: 400, body: "figtree", displayAr: "cairo", displayWeightAr: 700, bodyAr: "tajawal" }),
+    row({ id: "supper", note: "DM Serif Display over Figtree, a warm menu headline; Cairo semibold over Tajawal in Arabic.", display: "dm-serif-display", displayWeight: 400, body: "figtree", displayAr: "cairo", displayWeightAr: 600, bodyAr: "tajawal" }),
   ],
   bloom: [
-    row({ id: "rosa", note: "Cormorant Garamond regular over Figtree, delicate and literary; a light Readex Pro over Tajawal in Arabic.", display: "cormorant-garamond", displayWeight: 400, body: "figtree", displayAr: "readex-pro", displayWeightAr: 300, bodyAr: "tajawal" }),
+    row({ id: "rosa", note: "Cormorant Garamond regular over Figtree, delicate and literary; an extra-light Readex Pro over Tajawal in Arabic.", display: "cormorant-garamond", displayWeight: 400, body: "figtree", displayAr: "readex-pro", displayWeightAr: 180, bodyAr: "tajawal" }),
     row({ id: "pollen", note: "Manrope medium, quiet and modern, over Figtree; Cairo medium over Tajawal in Arabic.", display: "manrope", displayWeight: 500, body: "figtree", displayAr: "cairo", displayWeightAr: 500, bodyAr: "tajawal" }),
   ],
   field: [
-    row({ id: "grove", note: "Cormorant Garamond semibold over DM Sans with Plex Mono origins; Alexandria over Tajawal in Arabic.", display: "cormorant-garamond", displayWeight: 600, body: "dm-sans", accent: "ibm-plex-mono", displayAr: "alexandria", displayWeightAr: 380, bodyAr: "tajawal" }),
+    row({ id: "grove", note: "Cormorant Garamond semibold over DM Sans with Plex Mono origins; a light Alexandria over Tajawal in Arabic.", display: "cormorant-garamond", displayWeight: 600, body: "dm-sans", accent: "ibm-plex-mono", displayAr: "alexandria", displayWeightAr: 250, bodyAr: "tajawal" }),
     row({ id: "acre", note: "Manrope bold over DM Sans, plain and outdoors; Readex Pro semibold over Tajawal in Arabic.", display: "manrope", displayWeight: 700, body: "dm-sans", displayAr: "readex-pro", displayWeightAr: 600, bodyAr: "tajawal" }),
   ],
   editorial: [
-    row({ id: "gazette", note: "Cormorant Garamond medium over Instrument Sans, a literary page; a light Noto Kufi Arabic over Noto Naskh in Arabic.", display: "cormorant-garamond", displayWeight: 500, body: "instrument-sans", displayAr: "noto-kufi-arabic", displayWeightAr: 300, bodyAr: "noto-naskh-arabic" }),
+    row({ id: "gazette", note: "Cormorant Garamond medium over Instrument Sans, a literary page; an extra-light Noto Kufi Arabic over Noto Naskh in Arabic.", display: "cormorant-garamond", displayWeight: 500, body: "instrument-sans", displayAr: "noto-kufi-arabic", displayWeightAr: 220, bodyAr: "noto-naskh-arabic" }),
     row({ id: "dispatch", note: "DM Serif Display over Schibsted Grotesk with Plex Mono datelines; Vazirmatn bold for a firm Arabic headline.", display: "dm-serif-display", displayWeight: 400, body: "schibsted-grotesk", accent: "ibm-plex-mono", displayAr: "vazirmatn", displayWeightAr: 700, bodyAr: "ibm-plex-sans-arabic" }),
-    row({ id: "broadside", note: "Cormorant Garamond semibold over Schibsted Grotesk with JetBrains Mono notes; Kufam in Arabic.", display: "cormorant-garamond", displayWeight: 600, body: "schibsted-grotesk", accent: "jetbrains-mono", displayAr: "kufam", displayWeightAr: 420, bodyAr: "ibm-plex-sans-arabic" }),
+    row({ id: "broadside", note: "Cormorant Garamond semibold over Schibsted Grotesk with JetBrains Mono notes; a light Noto Kufi Arabic in Arabic (Kufam has no weight light enough for F15).", display: "cormorant-garamond", displayWeight: 600, body: "schibsted-grotesk", accent: "jetbrains-mono", displayAr: "noto-kufi-arabic", displayWeightAr: 260, bodyAr: "ibm-plex-sans-arabic" }),
   ],
   garage: [
     row({ id: "forge", note: "Syne bold over DM Sans with Plex Mono part numbers; Vazirmatn extra-bold, heavy without Changa's condensation.", display: "syne", displayWeight: 700, body: "dm-sans", accent: "ibm-plex-mono", displayAr: "vazirmatn", displayWeightAr: 800, bodyAr: "tajawal", alsoFits: ["kinetic"] }),

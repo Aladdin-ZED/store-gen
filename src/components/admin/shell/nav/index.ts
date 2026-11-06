@@ -55,10 +55,11 @@ export interface NavCtx {
 export function navItemVisible(ctx: NavCtx, item: NavItem): boolean {
   if (item.release && !releaseOn(item.release)) return false;
   if (item.mode && !modeAllows(ctx.store.mode, item.mode)) return false;
-  if (item.permission) {
-    const def = permissionDef(item.permission);
+  const perms: readonly StorePermission[] = item.permission === undefined ? [] : typeof item.permission === "string" ? [item.permission] : item.permission;
+  for (const permission of perms) {
+    const def = permissionDef(permission);
     if (!releaseOn(def.release) || (def.mode && !modeAllows(ctx.store.mode, def.mode))) return false;
-    if (!ctx.can(item.permission)) return false;
+    if (!ctx.can(permission)) return false;
   }
   return true;
 }

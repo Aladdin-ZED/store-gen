@@ -47,7 +47,7 @@ export interface FontData {
   files: readonly FontFileData[];
 }
 
-export const FONT_IDS = ["bodoni-moda","fraunces","gloock","young-serif","instrument-serif","bricolage-grotesque","big-shoulders-display","archivo","schibsted-grotesk","hanken-grotesk","instrument-sans","figtree","dm-sans","jetbrains-mono","ibm-plex-mono","el-messiri","reem-kufi","lemonada","marhey","changa","alexandria","noto-kufi-arabic","noto-naskh-arabic","readex-pro","baloo-bhaijaan-2","ibm-plex-sans-arabic","tajawal"] as const;
+export const FONT_IDS = ["bodoni-moda","fraunces","gloock","young-serif","instrument-serif","bricolage-grotesque","big-shoulders-display","archivo","schibsted-grotesk","hanken-grotesk","instrument-sans","figtree","dm-sans","jetbrains-mono","ibm-plex-mono","el-messiri","reem-kufi","lemonada","marhey","changa","alexandria","noto-kufi-arabic","noto-naskh-arabic","readex-pro","baloo-bhaijaan-2","ibm-plex-sans-arabic","tajawal","cairo","kufam","vazirmatn","cormorant-garamond","dm-serif-display","syne","manrope"] as const;
 export type KnownFontId = (typeof FONT_IDS)[number];
 
 export const FONT_DATA: Readonly<Record<KnownFontId, FontData>> = {
@@ -1497,6 +1497,443 @@ export const FONT_DATA: Readonly<Record<KnownFontId, FontData>> = {
         "weight": "700",
         "unicodeRange": "U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EE03,U+1EE05-1EE1F,U+1EE21-1EE22,U+1EE24,U+1EE27,U+1EE29-1EE32,U+1EE34-1EE37,U+1EE39,U+1EE3B,U+1EE42,U+1EE47,U+1EE49,U+1EE4B,U+1EE4D-1EE4F,U+1EE51-1EE52,U+1EE54,U+1EE57,U+1EE59,U+1EE5B,U+1EE5D,U+1EE5F,U+1EE61-1EE62,U+1EE64,U+1EE67-1EE6A,U+1EE6C-1EE72,U+1EE74-1EE77,U+1EE79-1EE7C,U+1EE7E,U+1EE80-1EE89,U+1EE8B-1EE9B,U+1EEA1-1EEA3,U+1EEA5-1EEA9,U+1EEAB-1EEBB,U+1EEF0-1EEF1",
         "bytes": 9024
+      }
+    ]
+  },
+  "cairo": {
+    "id": "cairo",
+    "family": "Cairo",
+    "category": "sans-serif",
+    "scripts": [
+      "arabic",
+      "latin"
+    ],
+    "variable": true,
+    "axes": "wght",
+    "weights": [],
+    "weightRange": [
+      200,
+      1000
+    ],
+    "italic": false,
+    "license": "OFL-1.1",
+    "metrics": {
+      "unitsPerEm": 1000,
+      "ascent": 1303,
+      "descent": -571,
+      "lineGap": 0,
+      "xWidthAvg": 422,
+      "capHeight": 700,
+      "xHeight": 500
+    },
+    "files": [
+      {
+        "file": "cairo-latin-wght-normal.woff2",
+        "subset": "latin",
+        "style": "normal",
+        "weight": "200 1000",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 33820
+      },
+      {
+        "file": "cairo-latin-ext-wght-normal.woff2",
+        "subset": "latin-ext",
+        "style": "normal",
+        "weight": "200 1000",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 16648
+      },
+      {
+        "file": "cairo-arabic-wght-normal.woff2",
+        "subset": "arabic",
+        "style": "normal",
+        "weight": "200 1000",
+        "unicodeRange": "U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EE03,U+1EE05-1EE1F,U+1EE21-1EE22,U+1EE24,U+1EE27,U+1EE29-1EE32,U+1EE34-1EE37,U+1EE39,U+1EE3B,U+1EE42,U+1EE47,U+1EE49,U+1EE4B,U+1EE4D-1EE4F,U+1EE51-1EE52,U+1EE54,U+1EE57,U+1EE59,U+1EE5B,U+1EE5D,U+1EE5F,U+1EE61-1EE62,U+1EE64,U+1EE67-1EE6A,U+1EE6C-1EE72,U+1EE74-1EE77,U+1EE79-1EE7C,U+1EE7E,U+1EE80-1EE89,U+1EE8B-1EE9B,U+1EEA1-1EEA3,U+1EEA5-1EEA9,U+1EEAB-1EEBB,U+1EEF0-1EEF1",
+        "bytes": 30896
+      }
+    ]
+  },
+  "kufam": {
+    "id": "kufam",
+    "family": "Kufam",
+    "category": "sans-serif",
+    "scripts": [
+      "arabic",
+      "latin"
+    ],
+    "variable": true,
+    "axes": "wght",
+    "weights": [],
+    "weightRange": [
+      400,
+      900
+    ],
+    "italic": false,
+    "license": "OFL-1.1",
+    "metrics": {
+      "unitsPerEm": 1000,
+      "ascent": 900,
+      "descent": -400,
+      "lineGap": 0,
+      "xWidthAvg": 489,
+      "capHeight": 720,
+      "xHeight": 544
+    },
+    "files": [
+      {
+        "file": "kufam-latin-wght-normal.woff2",
+        "subset": "latin",
+        "style": "normal",
+        "weight": "400 900",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 36348
+      },
+      {
+        "file": "kufam-latin-ext-wght-normal.woff2",
+        "subset": "latin-ext",
+        "style": "normal",
+        "weight": "400 900",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 25744
+      },
+      {
+        "file": "kufam-arabic-wght-normal.woff2",
+        "subset": "arabic",
+        "style": "normal",
+        "weight": "400 900",
+        "unicodeRange": "U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EE03,U+1EE05-1EE1F,U+1EE21-1EE22,U+1EE24,U+1EE27,U+1EE29-1EE32,U+1EE34-1EE37,U+1EE39,U+1EE3B,U+1EE42,U+1EE47,U+1EE49,U+1EE4B,U+1EE4D-1EE4F,U+1EE51-1EE52,U+1EE54,U+1EE57,U+1EE59,U+1EE5B,U+1EE5D,U+1EE5F,U+1EE61-1EE62,U+1EE64,U+1EE67-1EE6A,U+1EE6C-1EE72,U+1EE74-1EE77,U+1EE79-1EE7C,U+1EE7E,U+1EE80-1EE89,U+1EE8B-1EE9B,U+1EEA1-1EEA3,U+1EEA5-1EEA9,U+1EEAB-1EEBB,U+1EEF0-1EEF1",
+        "bytes": 55800
+      }
+    ]
+  },
+  "vazirmatn": {
+    "id": "vazirmatn",
+    "family": "Vazirmatn",
+    "category": "sans-serif",
+    "scripts": [
+      "arabic",
+      "latin"
+    ],
+    "variable": true,
+    "axes": "wght",
+    "weights": [],
+    "weightRange": [
+      100,
+      900
+    ],
+    "italic": false,
+    "license": "OFL-1.1",
+    "metrics": {
+      "unitsPerEm": 2048,
+      "ascent": 2100,
+      "descent": -1100,
+      "lineGap": 0,
+      "xWidthAvg": 919,
+      "capHeight": 1638,
+      "xHeight": 1082
+    },
+    "files": [
+      {
+        "file": "vazirmatn-latin-wght-normal.woff2",
+        "subset": "latin",
+        "style": "normal",
+        "weight": "100 900",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 34524
+      },
+      {
+        "file": "vazirmatn-latin-ext-wght-normal.woff2",
+        "subset": "latin-ext",
+        "style": "normal",
+        "weight": "100 900",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 21860
+      },
+      {
+        "file": "vazirmatn-arabic-wght-normal.woff2",
+        "subset": "arabic",
+        "style": "normal",
+        "weight": "100 900",
+        "unicodeRange": "U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EE03,U+1EE05-1EE1F,U+1EE21-1EE22,U+1EE24,U+1EE27,U+1EE29-1EE32,U+1EE34-1EE37,U+1EE39,U+1EE3B,U+1EE42,U+1EE47,U+1EE49,U+1EE4B,U+1EE4D-1EE4F,U+1EE51-1EE52,U+1EE54,U+1EE57,U+1EE59,U+1EE5B,U+1EE5D,U+1EE5F,U+1EE61-1EE62,U+1EE64,U+1EE67-1EE6A,U+1EE6C-1EE72,U+1EE74-1EE77,U+1EE79-1EE7C,U+1EE7E,U+1EE80-1EE89,U+1EE8B-1EE9B,U+1EEA1-1EEA3,U+1EEA5-1EEA9,U+1EEAB-1EEBB,U+1EEF0-1EEF1",
+        "bytes": 46308
+      }
+    ]
+  },
+  "cormorant-garamond": {
+    "id": "cormorant-garamond",
+    "family": "Cormorant Garamond",
+    "category": "serif",
+    "scripts": [
+      "latin"
+    ],
+    "variable": false,
+    "axes": "",
+    "weights": [
+      400,
+      500,
+      600
+    ],
+    "weightRange": [
+      400,
+      600
+    ],
+    "italic": true,
+    "license": "OFL-1.1",
+    "metrics": {
+      "unitsPerEm": 1000,
+      "ascent": 924,
+      "descent": -287,
+      "lineGap": 0,
+      "xWidthAvg": 390,
+      "capHeight": 625,
+      "xHeight": 386
+    },
+    "files": [
+      {
+        "file": "cormorant-garamond-latin-400-normal.woff2",
+        "subset": "latin",
+        "style": "normal",
+        "weight": "400",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 22876
+      },
+      {
+        "file": "cormorant-garamond-latin-500-normal.woff2",
+        "subset": "latin",
+        "style": "normal",
+        "weight": "500",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 23312
+      },
+      {
+        "file": "cormorant-garamond-latin-600-normal.woff2",
+        "subset": "latin",
+        "style": "normal",
+        "weight": "600",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 23396
+      },
+      {
+        "file": "cormorant-garamond-latin-400-italic.woff2",
+        "subset": "latin",
+        "style": "italic",
+        "weight": "400",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 23660
+      },
+      {
+        "file": "cormorant-garamond-latin-500-italic.woff2",
+        "subset": "latin",
+        "style": "italic",
+        "weight": "500",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 23924
+      },
+      {
+        "file": "cormorant-garamond-latin-600-italic.woff2",
+        "subset": "latin",
+        "style": "italic",
+        "weight": "600",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 23784
+      },
+      {
+        "file": "cormorant-garamond-latin-ext-400-normal.woff2",
+        "subset": "latin-ext",
+        "style": "normal",
+        "weight": "400",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 19888
+      },
+      {
+        "file": "cormorant-garamond-latin-ext-500-normal.woff2",
+        "subset": "latin-ext",
+        "style": "normal",
+        "weight": "500",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 20200
+      },
+      {
+        "file": "cormorant-garamond-latin-ext-600-normal.woff2",
+        "subset": "latin-ext",
+        "style": "normal",
+        "weight": "600",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 20304
+      },
+      {
+        "file": "cormorant-garamond-latin-ext-400-italic.woff2",
+        "subset": "latin-ext",
+        "style": "italic",
+        "weight": "400",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 20284
+      },
+      {
+        "file": "cormorant-garamond-latin-ext-500-italic.woff2",
+        "subset": "latin-ext",
+        "style": "italic",
+        "weight": "500",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 20388
+      },
+      {
+        "file": "cormorant-garamond-latin-ext-600-italic.woff2",
+        "subset": "latin-ext",
+        "style": "italic",
+        "weight": "600",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 20392
+      }
+    ]
+  },
+  "dm-serif-display": {
+    "id": "dm-serif-display",
+    "family": "DM Serif Display",
+    "category": "serif",
+    "scripts": [
+      "latin"
+    ],
+    "variable": false,
+    "axes": "",
+    "weights": [
+      400
+    ],
+    "weightRange": [
+      400,
+      400
+    ],
+    "italic": true,
+    "license": "OFL-1.1",
+    "metrics": {
+      "unitsPerEm": 1000,
+      "ascent": 1036,
+      "descent": -335,
+      "lineGap": 0,
+      "xWidthAvg": 447,
+      "capHeight": 660,
+      "xHeight": 481
+    },
+    "files": [
+      {
+        "file": "dm-serif-display-latin-400-normal.woff2",
+        "subset": "latin",
+        "style": "normal",
+        "weight": "400",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 24744
+      },
+      {
+        "file": "dm-serif-display-latin-400-italic.woff2",
+        "subset": "latin",
+        "style": "italic",
+        "weight": "400",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 24572
+      },
+      {
+        "file": "dm-serif-display-latin-ext-400-normal.woff2",
+        "subset": "latin-ext",
+        "style": "normal",
+        "weight": "400",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 10804
+      },
+      {
+        "file": "dm-serif-display-latin-ext-400-italic.woff2",
+        "subset": "latin-ext",
+        "style": "italic",
+        "weight": "400",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 11124
+      }
+    ]
+  },
+  "syne": {
+    "id": "syne",
+    "family": "Syne",
+    "category": "sans-serif",
+    "scripts": [
+      "latin"
+    ],
+    "variable": true,
+    "axes": "wght",
+    "weights": [],
+    "weightRange": [
+      400,
+      800
+    ],
+    "italic": false,
+    "license": "OFL-1.1",
+    "metrics": {
+      "unitsPerEm": 1000,
+      "ascent": 925,
+      "descent": -275,
+      "lineGap": 0,
+      "xWidthAvg": 440,
+      "capHeight": 650,
+      "xHeight": 500
+    },
+    "files": [
+      {
+        "file": "syne-latin-wght-normal.woff2",
+        "subset": "latin",
+        "style": "normal",
+        "weight": "400 800",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 34608
+      },
+      {
+        "file": "syne-latin-ext-wght-normal.woff2",
+        "subset": "latin-ext",
+        "style": "normal",
+        "weight": "400 800",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 14724
+      }
+    ]
+  },
+  "manrope": {
+    "id": "manrope",
+    "family": "Manrope",
+    "category": "sans-serif",
+    "scripts": [
+      "latin"
+    ],
+    "variable": true,
+    "axes": "wght",
+    "weights": [],
+    "weightRange": [
+      200,
+      800
+    ],
+    "italic": false,
+    "license": "OFL-1.1",
+    "metrics": {
+      "unitsPerEm": 2000,
+      "ascent": 2132,
+      "descent": -600,
+      "lineGap": 0,
+      "xWidthAvg": 890,
+      "capHeight": 1440,
+      "xHeight": 1080
+    },
+    "files": [
+      {
+        "file": "manrope-latin-wght-normal.woff2",
+        "subset": "latin",
+        "style": "normal",
+        "weight": "200 800",
+        "unicodeRange": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+        "bytes": 24836
+      },
+      {
+        "file": "manrope-latin-ext-wght-normal.woff2",
+        "subset": "latin-ext",
+        "style": "normal",
+        "weight": "200 800",
+        "unicodeRange": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+        "bytes": 15120
       }
     ]
   }

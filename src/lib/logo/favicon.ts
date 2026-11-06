@@ -32,8 +32,7 @@ export function iconSource(mark: IconAsset | null | undefined, logo: IconAsset |
 }
 
 export function brandIcon(ctx: LandingRenderContext, theme: BuiltTheme): { href: string; type: string } {
-  // the mark joins the store context through CCR r1-p6-14; until then it is absent and the logo or the monogram answers
-  const mark = (ctx.store as { mark?: IconAsset | null }).mark ?? null;
+  const mark = ctx.store.mark ?? null;
   const logo = ctx.store.logo;
   const source = iconSource(mark, logo);
   const asset = source === "mark" ? mark : source === "logo" ? logo : null;

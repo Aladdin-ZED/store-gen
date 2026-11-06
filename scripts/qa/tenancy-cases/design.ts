@@ -275,6 +275,7 @@ export const actions: TrackActionCase[] = [
     write: true,
     victim: (fx) => [{ slot: "primary", assetId: fx.A.asset.photo }],
     own: () => [{ slot: "mark", assetId: null }],
+    live: { expect: "invalid", why: "A's own photo is found and read: the fixture's image is under the 256 px logo minimum (LOGO_MIN_SIDE)" },
   },
   {
     file: "src/app/app/[store]/brand/actions.ts",

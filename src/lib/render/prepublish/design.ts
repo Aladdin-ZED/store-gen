@@ -41,6 +41,7 @@ import { checkHeadlineNovelty, docNiche, storeNicheOf, syncShingles } from "@/li
 import { checkNovelty, exhaustionTest, type NoveltyVerdict } from "@/lib/design/novelty.server";
 import { factsFor } from "@/lib/landing/honesty/facts.server";
 import { errorSummary } from "@/lib/orders/log";
+import { recordError } from "@/lib/jobs/errors";
 import type { PageDoc } from "@/lib/page/schema";
 import { markHealthDirty } from "@/lib/platform/health-snapshot";
 import { getPlatformSetting } from "@/lib/settings";
@@ -259,6 +260,7 @@ export const designListener: PublishListener = async (ctx) => {
   } catch (err) {
     // DES-§8.8 rule 3: the publish already committed; design.backfill writes the missing row later
     console.error(`[design] publish listener (${ctx.event}) failed:`, errorSummary(err));
+    recordError("design", err, { code: `listener_${ctx.event}`, storeId: ctx.scope.storeId });
   }
 };
 

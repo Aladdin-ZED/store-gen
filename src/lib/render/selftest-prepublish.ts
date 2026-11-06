@@ -14,8 +14,8 @@
  *  - the one origin builder (§M.1 rule 2, P0b CCR P3-11; src/lib/render/origin.ts, re-exported here): an edited field
  *    → owner, an unedited recorded field → its class, no record → library, a path absent from a present record →
  *    owner; `hash16` deterministic (the FNV-1a 64 test vectors), NFC- and trim-insensitive.
- * After P6 merges the real model, the stub-only checks flip to the C2 / C3 / F1 hard fixtures of
- * src/lib/design/calibration/heights.json (enabled at the P6 merge, §K.2).
+ * Since the P6 merge (HEIGHT_MODEL_VERSION > 0) the stub-only checks are skipped and the height rows check C2 / C3 / F1
+ * hard on the argan baseline and none on its lean copy (P6-9; the DES-§25.1 DB cases live in test:design-db).
  *
  * `npm test` runs the in-process checks over the fr fixtures; `--slow` (the second script of `npm run test:slow`, so
  * every `npm run gate`) adds the ar fixtures and the four child processes of the lock proof (P0 review G7: the
@@ -197,10 +197,27 @@ async function main() {
     assert.ok(f1 && f1.level === "soft" && f1.vars?.stub === 1 && f1.title === "budget.F1.missing", JSON.stringify(f1));
   });
 
+  await check("height rows (real model, P6-9): the argan baseline trips C2 / C3 / F1 hard; a lean copy (form after the hero, seven sections) trips none of them", () => {
+    if (stub) return;
+    const hard = (d: typeof doc) => new Set(budget.budgetReport({ doc: d }).items.filter((i) => i.level === "hard").map((i) => i.id));
+    const full = hard(doc);
+    for (const id of ["budget:C2", "budget:C3", "budget:F1"]) assert.ok(full.has(id), `${id} hard on the baseline: ${JSON.stringify([...full])}`);
+    const KEEP = new Set(["header", "hero", "benefits", "reviews", "orderForm", "faq", "footer"]);
+    const kept = doc.sections.filter((s) => KEEP.has(s.type)).map((s) => ({ ...s, bg: "base" as const, ...(s.type === "hero" ? { variant: "split" } : {}) }));
+    const form = kept.findIndex((s) => s.type === "orderForm");
+    const [orderForm] = form >= 0 ? kept.splice(form, 1) : [];
+    if (orderForm) kept.splice(kept.findIndex((s) => s.type === "hero") + 1, 0, orderForm);
+    const lean = hard({ ...doc, sections: kept } as typeof doc);
+    for (const id of ["budget:C2", "budget:C3", "budget:F1"]) assert.ok(!lean.has(id), `${id} not hard on the lean copy: ${JSON.stringify([...lean])}`);
+  });
+
   await check("rows without heights: F5 weight, R1 order buttons, R5 reveals, K2 colour bands, I1 photo reuse classify hard past the limit, soft past the note line", async () => {
     // a document whose own sections trip no row: every background neutral
     const clean = { ...doc, sections: doc.sections.map((s) => ({ ...s, bg: "base" as const })) };
-    const hardIds = (r: ReturnType<typeof budget.budgetReport>) => r.items.filter((i) => i.level === "hard").map((i) => i.id);
+    // the rows under test; the baseline fixture trips C2 / C3 / F1 (heights) and R4 (variant glass) once design's
+    // model is real (27 sections, ~30,000 px), and those rows have their own fixtures (P6-9)
+    const ROWS = new Set(["budget:F5", "budget:R1", "budget:R5", "budget:K2", "budget:I1"]);
+    const hardIds = (r: ReturnType<typeof budget.budgetReport>) => r.items.filter((i) => i.level === "hard" && ROWS.has(i.id)).map((i) => i.id);
     assert.deepEqual(hardIds(budget.budgetReport({ doc: clean })), []);
     // F5: an incompressible document over 140 KB gz
     const noise = randomBytes(200_000).toString("base64");

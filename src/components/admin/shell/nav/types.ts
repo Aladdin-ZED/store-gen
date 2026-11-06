@@ -22,7 +22,8 @@ export interface NavItem {
   label: MessageKey;
   href: (handle: string) => string; // appHref(handle, "/orders")
   icon: IconName;
-  permission?: StorePermission;
+  /** every listed permission is required (Generate: `pages.write` and `ai.use`, CCR r1-p6-14) */
+  permission?: StorePermission | readonly StorePermission[];
   mode?: ModeFeature;
   release?: Release;
   badge?: NavBadge;
