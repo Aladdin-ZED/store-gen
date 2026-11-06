@@ -44,6 +44,18 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **P8 MERGED 2026-11-06 04:26** (merge run `wf_c58616e3-16c`, 45 min, ~200K tokens): merge commit 9a99c1c + 808c74c, pushed
+  (origin/main 808c74c, pushing does not deploy). Gate green: tsc; npm test (test:jobs 780/0, tenancy-lint PIN 0); test:migrate
+  219/219; test:tenancy 6625/0; qa:action-replay 4129/0; test:storage 559/0; SG_STUB_BUILD_OK=1 build green. Fixed in the merge:
+  the media disk-cache path made the build trace the whole project (incl. .env.hostinger, .env.local, .git) into the media
+  route bundle (6,015 → 610 files). Deferred to the integration: r1-p8-7 (asset index on save/publish), r1-p8-18/19 tenancy
+  placeholders, r1-p8-23 part 2 (proxy.ts edge fields), F-12 timed test:budget.
+  **BEFORE GO-LIVE (from the P8 merge):** set DATA_DIR and DATA_DIR_BUDGET_BYTES in the Hostinger env; run the persistence probe
+  across two deploys; check max_user_connections against the extra 2-connection lock pool; one live export download and one
+  restore drill. Merge-run lesson: set SG_STUB_BUILD_OK=1 before `node heavy.mjs`, not inside the quoted command (now in
+  r1-merge-fast.js). The lead does NOT commit in main while a merge runs. Next merges in order as tracks finish: P2 → P1 → P5 →
+  P4 → P3 → P7 → P6 (stubBuild false for P6), args merged: ["P8", ...]. Overall % now adds ≈ 0.66 per track merge.
+
 - **SCREENSHOT RULE 2026-11-06 ~03:20** (76/106, ≈ 47.9%; weekly usage 64%, and only +1% in the 40 min since the 4-track
   relaunch). P2's 10-path ui-shots run (40 shots) took ~1 min per shot with 0.2 GB free RAM and hit the 45-min mutex cap. A
   LEAD NOTE b was appended to the 25 remaining UI briefs and the SPEED block: one viewport per run in both locales
