@@ -53,7 +53,7 @@ const CHUNK = 500;
 /** documents read per statement by the scan, and the ceiling when the plan's `pages_max` is unlimited */
 const SCAN_BATCH = 20;
 const SCAN_CEILING = 2_000;
-const SYNC_TRIES = 3;
+const SYNC_TRIES = 6; // ten parallel syncs of one owner deadlock on the gap lock more than twice under load
 
 /** What `extractAssetIds` reads: a landing document, a store theme (R2), or a store setting's value. */
 export type AssetSource =
@@ -189,7 +189,7 @@ export async function syncAssetRefs(scope: WriteScope, ownerKind: AssetOwnerKind
       return { refs: own.length };
     } catch (err) {
       if (attempt >= SYNC_TRIES || !isDeadlock(err)) throw err;
-      await new Promise((r) => setTimeout(r, 5 + Math.floor(Math.random() * 20 * attempt)));
+      await new Promise((r) => setTimeout(r, 5 + Math.floor(Math.random() * 25 * attempt)));
     }
   }
 }
@@ -306,7 +306,7 @@ async function indexedUses(scope: StoreScope, assetId: string): Promise<AssetUse
   return out;
 }
 
-const useKey = (u: Pick<AssetUse, "ownerKind" | "ownerId">) => `${u.ownerKind}:${u.ownerId}`;
+const usageKey = (u: Pick<AssetUse, "ownerKind" | "ownerId">) => `${u.ownerKind}:${u.ownerId}`;
 
 /**
  * Where one of the store's assets is used: the index rows, united (until CCR r1-p8-7) with the exact scan of the
@@ -318,17 +318,17 @@ export async function assetUsage(scope: StoreScope, assetId: string): Promise<As
   const limit = await scanLimit(scope);
   const [indexed, live, drafts, logo] = await Promise.all([indexedUses(scope, assetId), scanLive(scope, assetId, limit), scanDrafts(scope, assetId, limit), isBrandLogo(scope, assetId)]);
   const uses = new Map<string, AssetUse>();
-  for (const u of indexed) uses.set(useKey(u), u);
+  for (const u of indexed) uses.set(usageKey(u), u);
   for (const p of live) {
     const u: AssetUse = { ownerKind: "page_version", ownerId: p.versionId!, live: true, pageId: p.id, pageName: p.name, pageSlug: p.slug };
-    uses.set(useKey(u), u);
+    uses.set(usageKey(u), u);
   }
   for (const p of drafts) {
     const u: AssetUse = { ownerKind: "page", ownerId: p.id, live: false, pageId: p.id, pageName: p.name, pageSlug: p.slug };
-    if (!uses.has(useKey(u))) uses.set(useKey(u), u);
+    if (!uses.has(usageKey(u))) uses.set(usageKey(u), u);
   }
   if (logo) uses.set("brand:brand", { ownerKind: "brand", ownerId: "brand", live: true });
-  return [...uses.values()].sort((a, b) => Number(b.live) - Number(a.live) || (a.pageName ?? "").localeCompare(b.pageName ?? "") || useKey(a).localeCompare(useKey(b)));
+  return [...uses.values()].sort((a, b) => Number(b.live) - Number(a.live) || (a.pageName ?? "").localeCompare(b.pageName ?? "") || usageKey(a).localeCompare(usageKey(b)));
 }
 
 /** The same answer per page (draft and live merged) plus the logo flag: the dashboard's "Used in" and the delete dialog. */

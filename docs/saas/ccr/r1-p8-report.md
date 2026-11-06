@@ -1,7 +1,110 @@
-# R1 P8 PLATFORM OPS report (draft)
+# R1 P8 PLATFORM OPS report
 
-Draft: P8 step 12 writes the full report (deliverables, tests, the security / tenancy / UX / spec-drift review, the
-CCR list). Until then this file records the decisions the steps took, so none is lost.
+Track P8 (branch `r1/p8`, 12 steps, 2026-10-28 to 2026-11-06). Contract: `docs/STORE-SAAS.md` core rev 6, §G, §H, §F.9,
+§H.12, PLA Q.25. P8 ships no screen: P1 (console) and P2 (store admin) render its data. Step 12 ran in speed mode (owner,
+2026-11-03): the full `npm test` and the touched suites, no e2e, no manual XAMPP run, no self-review pass.
+
+## Features delivered
+
+| Feature | What shipped | Files | Proven by |
+|---|---|---|---|
+| SEC-21 | `DATA_AREAS` registry, `dataPath` (refuses traversal), per-store dirs | `src/lib/storage/paths.ts` | `test:jobs` paths: registry / roots / layouts / refusals / perStoreDirs |
+| ENGC-14 | `DATA_DIR` boot check with the `.sg-owner` marker, bounded budget walk | `src/lib/media/storage/**`, `src/lib/storage/walk.ts` | `test:storage` boot check: refusals / owner marker / verdict; `test:jobs` walk: accounting, budget and levels |
+| ENGC-20 | idempotent durable `put` (FS + DB backends), disk cache, usage | `src/lib/media/{store.ts,storage/**}` | `test:storage` fs: durable put / idempotent put / crash before the row / remove, db backend, disk cache, usage |
+| ENGC-12 | lock pool (2 connections), pool-wait windows, ops metrics, error ring | `src/lib/db/locks.ts`, `src/lib/jobs/{errors,metrics}.ts` | `test:jobs` locks, metrics and errors sections |
+| ENGC-11 | job runner and cron tick: lease, slot table, due logic, `yield()`, lag and CPU caps, `job_runs`, legacy Sheets shim | `src/lib/jobs/{runner,slots,due,lease,runs}.ts`, `src/app/api/cron/tick/route.ts` | `test:storage` runner, forEachStore; `test:jobs` registry |
+| ENGC-29 | outbox core: enqueue, lease claim, drain with caps and backoff, dead rules, replay and the re-send rule, `outboxSummary` | `src/lib/jobs/outbox.ts`, `outbox/**` | `test:storage` outbox |
+| ENGC-4 | render queue: `enqueueRenders` and fan-out, claim-clears-dedupe, 4 s CPU cap, in-place re-render through the real `rerenderInPlace`, `renderSummary` | `src/lib/jobs/renders.ts`, `renders/**` | `test:storage` renders |
+| OS-07, OS-08 | upload and serve on the FS backend, per-store quotas, `asset_refs` library, delete 409, cutout re-render | `src/lib/media/{process,assets,upload-slots}.ts`, `src/lib/storage/asset-refs.ts`, `src/app/media/[key]/route.ts`, `src/app/api/app/[store]/media/**` | `test:storage` media; `test:jobs` asset refs |
+| OS-09 | `media.migrate`, `media.sweep`, walk snapshot, `refs.reconcile`, `usage.reconcile` | `src/lib/jobs/storage/**` | `test:storage` storage-jobs |
+| PL-09 | store export ZIP: job, resumable ZIP parts, APIs, signed download route (constant-time hmac, neutral 404), 72 h expiry | `src/lib/exports-store/**`, `src/lib/jobs/exports.ts`, `src/app/api/app/[store]/exports/**` | `test:storage` export; `test:jobs` exports |
+| OS-10 | logical backups: sealed NDJSON parts, manifest, resumable daily job, retention, `purgeRequests`, restore library and drill | `src/lib/backup/**`, `src/lib/jobs/backup.ts` | `test:storage` backup; `storage-check --restore-drill` |
+| OS-11 | purge (§F.9 order from schema.ts), lifecycle cron edges, §H.11 retention in housekeeping | `src/lib/jobs/{purge,lifecycle,retention,housekeeping}.ts`, `purge/**` | `test:storage` purge; `test:jobs` purge and retention |
+| PLA Q.25 | `getHealth` / `getHealthReport` sections (tick, outbox, renders, sheets, db, dataDir, errors, runtime, build gate, edge, commerce, ai, design, jobs) and alarm helpers | `src/lib/platform/health.ts`, `src/lib/jobs/alarms.ts` | `test:storage` health; `test:jobs` health |
+
+## P0 stubs replaced (frozen signatures kept, `src/lib/contracts/r1-p0.ts`)
+
+`getHealth(ctx): Promise<PlatformHealth>` (plus the additive `getHealthReport(ctx, { sections? })`), the cron tick,
+the outbox enqueue and replay, `enqueueRenders`, `renderSummary`, `outboxSummary`, `requestStoreExport`,
+`listExportJobs`, `listBackupRuns`, `appendPurgeRequest`, `syncAssetRefs` / `assetUsage`, `recordError`, and the media
+`put` / `get` / `remove` driver. The exact signatures are the frozen ones in `src/lib/contracts/r1-p0.ts`; P8 added
+fields only additively (listed per step below).
+
+## CCRs
+
+| CCR | Subject | Status |
+|---|---|---|
+| r1-p8-1 | boot steps for the `DATA_DIR` check and the pool-wait sampler (`src/instrumentation.ts`) | open, P8 merge (the lazy boot check stays as the fallback) |
+| r1-p8-2 | `rerenderInPlace` | applied at P0b; `RerenderPort` is wired to it |
+| r1-p8-3 | `sealBytes` / `openBytes` | applied at P0b |
+| r1-p8-4 | tenancy allow file: L4 and the pins | L4 applied at P0b; pins open (final: `src/lib/jobs/**` 42, `src/lib/platform/**` 20) |
+| r1-p8-5 | chain `test:jobs` / `test:storage` into `npm test` / `test:db` | open, P8 merge |
+| r1-p8-6 | `platform_backup.purgeRequests`, retention bounds | applied at P0b |
+| r1-p8-7 | call `syncAssetRefs` / `assetUsage` from save, publish, restore and the brand setting | open (the doc scan in `assetUsage` stays until it lands) |
+| r1-p8-8 | feed the error ring from `logError`, the action wrappers and the seam | open, P8 merge |
+| r1-p8-9 | export `AUDIT_SECRET_KEY_RE` | applied at P0b |
+| r1-p8-10 | `test:migrate` case (e): the purge's table set | open, P8 merge |
+| r1-p8-11 | the archive ships `qa/.build-sha` | applied at P0b |
+| r1-p8-12 | header cases for the export download route | applied at P0b |
+| r1-p8-13 | `deleteTestOrders` stub (P4) | applied at P0b (P4 fills it) |
+| r1-p8-14 | P5's outbox handler files | done at P0 |
+| r1-p8-15 | `DB_POOL_SIZE` | applied at P0b |
+| r1-p8-16 | HANDOFF text: restore drill, owner marker, media fallback | open, P8 merge |
+| r1-p8-17 | runner budgets for the tracks that register jobs | open, informational (P1, P3 to P7) |
+| r1-p8-18, r1-p8-19 | `test:tenancy` outbox replay and render queue cases | open, P8 merge |
+| r1-p8-20, r1-p8-21 | render queue and store export APIs for P1 / P2 | open, informational |
+| r1-p8-22 | `test:tenancy` cases for the export download route (2 role-matrix rows fail until it lands) | open, P8 merge |
+| r1-p8-23 | honest health sections (nullable frozen fields, `sections`, edge tally) | open, P8 merge |
+
+## Cross-track notes
+
+- P1 (console) reads `getHealth` / `getHealthReport`, `outboxSummary`, `renderSummary`, `listBackupRuns`, the export
+  list and the outbox replay; P2 (store admin) calls `requestStoreExport`, `listExportJobs`, the media routes and
+  `assetUsage`.
+- P3 to P7 register jobs per r1-p8-17 and enqueue renders and outbox rows through P8's APIs; P4 fills
+  `deleteTestOrders`; P5 fills the CAPI / Telegram outbox handlers; P6 and P7 own `design.retention` / `ai.retention`.
+- Only at the R1 integration: the instrumentation boot step (r1-p8-1), the error-ring feeds (r1-p8-8), the `npm test`
+  chaining (r1-p8-5), the tenancy cases (r1-p8-18, 19, 22) and the pins (r1-p8-4).
+
+## Spec drift (for the maintainer)
+
+Slot budget = guarantee, a job's `budgetMs` = its cap; the legacy Sheets shim in the runner; the purge at 11 s a tick vs
+§F.9's 15 s; `media.migrate` at 3 s vs §G.3's 10 s; the asset-refs file at `src/lib/storage/asset-refs.ts` vs §G.5's
+`src/lib/media/refs.ts`; the cutout re-render changes the checksum (DES-§4.11) vs §H.3's "checksum never changes"; the
+export is not charged to `exports_month`; the `platform_backup` retention bounds vs PLA-§17. Details per step below.
+
+## Step 12 fixes
+
+- `src/lib/jobs/backup.ts`: the restore target splits a batch whose text INSERT would pass XAMPP's 1 MiB
+  `max_allowed_packet` into one-row binary INSERTs, and a row larger than one packet into an INSERT plus one UPDATE per
+  large column by primary key. `openRestoreConnection`, dropped by the interrupted session's edit, is back unchanged.
+- `src/lib/storage/asset-refs.ts`: deadlock retries 3 to 6 (ten parallel syncs of one owner); the `useKey` helper is
+  renamed `usageKey` (the React hooks lint read it as a hook).
+
+## Checks (step 12)
+
+- `npm run typecheck`: green.
+- `npm test` (full chain): every suite green up to `test:tenancy-lint`, which reports only the two PIN findings
+  (`src/lib/jobs/**` 42/0, `src/lib/platform/**` 20/5; r1-p8-4). Its first run also showed 2 L10 findings on the new
+  restore statements; annotated, L10 is 0.
+- `npx eslint` over `src/lib/{jobs,storage,media,backup,exports-store}`, `src/lib/platform/health.ts`,
+  `scripts/qa/storage-check.ts`: 0 problems.
+- `npm run test:jobs`: 780 passed, 0 failed, 1.68 s (budget 3 s).
+- `npm run test:storage`: 559 passed, 0 failed, 34.29 s (runner 3.2 s, media 4.9 s, backup 11.0 s, purge 3.8 s).
+
+## Known gaps and integration steps
+
+- Not run in this step (speed mode): `test:slow`, `test:db` beyond `test:storage`, `npm run build`, `test:e2e`,
+  `qa:secrets`, the gate, and the manual XAMPP run (boot verdict, cron calls, upload and migrate, export ZIP, backup and
+  restore drill, purge of a throwaway store, the getHealth print). They run at the merge in main.
+- The `DATA_DIR` persistence probe across two Hostinger deploys, `max_user_connections` on Hostinger with the
+  2-connection lock pool, and a live export download and backup restore on the deployed site.
+- `test:tenancy-lint` reports only the two PIN findings until r1-p8-4's pins land; `test:tenancy` has 2 failing
+  role-matrix rows until r1-p8-22 lands.
+
+## Progress
+
+P8 PLATFORM OPS: 12 of 12 steps committed; the track is fully built and goes live with the R1 merge and deploy.
 
 ## Decisions recorded during the steps
 

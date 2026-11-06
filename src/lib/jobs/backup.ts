@@ -535,8 +535,41 @@ export async function backupJob(ctx: JobCtx, opts: BackupRunOpts = {}): Promise<
 /* the restore target (the drill and test:storage)                      */
 /* ------------------------------------------------------------------ */
 
+/** The largest text INSERT the restore sends: under XAMPP's 1 MiB `max_allowed_packet`, with room for the column list. */
+const RESTORE_TEXT_PACKET = 900 * 1024;
+
+/** A text INSERT's VALUES bytes: Buffers as X'hex', strings as UTF-8 plus one byte per character mysql2 escapes. */
+function statementBytes(rows: readonly unknown[][]): number {
+  let n = 0;
+  for (const row of rows) {
+    n += 4;
+    for (const v of row) {
+      if (Buffer.isBuffer(v)) n += v.length * 2 + 4;
+      else if (typeof v === "string") n += Buffer.byteLength(v, "utf8") + (v.match(/[\0\b\t\n\r\x1a"'\\]/g)?.length ?? 0) + 4;
+      else n += 24;
+    }
+  }
+  return n;
+}
+
+/** A column at least this large is written by its own UPDATE when its row is larger than one packet. */
+const RESTORE_COLUMN_SPLIT = 64 * 1024;
+
+const valueBytes = (v: unknown): number => (Buffer.isBuffer(v) ? v.length : typeof v === "string" ? Buffer.byteLength(v, "utf8") : 24);
+const rawBytes = (row: readonly unknown[]): number => row.reduce<number>((n, v) => n + valueBytes(v) + 8, 64);
+
 /** RestoreTarget over a connection to the target database (FOREIGN_KEY_CHECKS off on it). */
 export function sqlRestoreTarget(conn: mysql.Connection): RestoreTarget {
+  const keys = new Map<string, string[]>();
+  const primaryKey = async (table: string): Promise<string[]> => {
+    let k = keys.get(table);
+    if (!k) {
+      const [rows] = (await conn.query(`SHOW KEYS FROM ${ident(table)} WHERE Key_name = 'PRIMARY'`)) as unknown as [{ Column_name: string; Seq_in_index: number }[]];
+      k = [...rows].sort((a, b) => a.Seq_in_index - b.Seq_in_index).map((r) => r.Column_name);
+      keys.set(table, k);
+    }
+    return k;
+  };
   return {
     async reset(table) {
       // tenancy: platform a restore into its own throwaway database empties the whole table before its rows (§H.6)
@@ -544,7 +577,38 @@ export function sqlRestoreTarget(conn: mysql.Connection): RestoreTarget {
     },
     async insert(table, columns, rows) {
       // tenancy: platform a restore writes back every store's rows of the backup into its own database (§H.6)
-      await conn.query(`INSERT INTO ${ident(table)} (${columns.map(ident).join(", ")}) VALUES ?`, [rows]);
+      const head = `INSERT INTO ${ident(table)} (${columns.map(ident).join(", ")})`;
+      if (statementBytes(rows) <= RESTORE_TEXT_PACKET) {
+        // tenancy: platform a restore writes back every store's rows of the backup into its own database (§H.6)
+        await conn.query(`${head} VALUES ?`, [rows]);
+        return;
+      }
+      // A batch whose text statement would pass max_allowed_packet (a 512 KiB media chunk is 1 MiB as hex): one row
+      // at a time through the binary protocol, which sends a Buffer as raw bytes. A row larger than one packet (a page
+      // version whose html and thank-you html add up past 1 MiB) goes in with its large columns empty, then one
+      // UPDATE per large column by primary key: each column alone fits, as it did when the source wrote it.
+      // tenancy: platform the same restore INSERT, one row per statement (§H.6)
+      const one = `${head} VALUES (${columns.map(() => "?").join(", ")})`;
+      for (const row of rows) {
+        const big = rawBytes(row) > RESTORE_TEXT_PACKET ? row.map((v, i) => (valueBytes(v) > RESTORE_COLUMN_SPLIT ? i : -1)).filter((i) => i >= 0) : [];
+        const pk = big.length ? await primaryKey(table) : [];
+        const pkAt = pk.map((c) => columns.indexOf(c));
+        if (!big.length || !pk.length || pkAt.some((i) => i < 0 || big.includes(i))) {
+          // tenancy: platform a restore writes back every store's rows of the backup into its own database (§H.6)
+          await conn.execute(one, row as never[]);
+          continue;
+        }
+        const first = row.map((v, i) => (big.includes(i) ? (Buffer.isBuffer(v) ? Buffer.alloc(0) : "") : v));
+        // tenancy: platform a restore writes back every store's rows of the backup into its own database (§H.6)
+        await conn.execute(one, first as never[]);
+        const where = pk.map((c) => `${ident(c)} = ?`).join(" AND ");
+        // every other column assigned to itself, so an ON UPDATE timestamp keeps the restored value
+        const keep = columns.filter((_, j) => !big.includes(j) && !pkAt.includes(j)).map((c) => `, ${ident(c)} = ${ident(c)}`).join("");
+        for (const i of big) {
+          // tenancy: platform a restore fills one large column of the row it just wrote, by primary key (§H.6)
+          await conn.execute(`UPDATE ${ident(table)} SET ${ident(columns[i]!)} = ?${keep} WHERE ${where}`, [row[i], ...pkAt.map((j) => row[j])] as never[]);
+        }
+      }
     },
   };
 }
