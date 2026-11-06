@@ -516,7 +516,7 @@ function SheetAgents({ rows, members, canMap, onChanged }: { rows: BoardState["s
 /** jade: hue 165, lighter → deeper with the rate (never orange) */
 const jade = (rate: number) => `oklch(${(0.93 - rate * 0.38).toFixed(3)} ${(0.05 + rate * 0.09).toFixed(3)} 165)`;
 
-function BestHours({ cells }: { cells: BestHourCell[] }) {
+export function BestHours({ cells }: { cells: BestHourCell[] }) {
   const t = useT();
   const locale = useAdminLocale();
   const byHour = new Map(cells.map((c) => [c.hour, c]));

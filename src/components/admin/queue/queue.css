@@ -175,3 +175,9 @@
   .q-shimmer { animation: none; }
   .q-cell:active:not(:disabled) { transform: none; }
 }
+
+/* the call-centre settings' information panel (OPE-§5.5 "starting hours", the open-calls banner): the info pair */
+.cc-info {
+  border-color: color-mix(in oklab, var(--q-info) 35%, transparent);
+  background: color-mix(in oklab, var(--q-info) 7%, transparent);
+}

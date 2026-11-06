@@ -12,10 +12,15 @@
  *   saveScriptAction            the active script of (page or every page, language), validated as a ScriptDoc
  *   resetScriptAction           back to the built-in script of that language
  *   approveScriptDraftAction    an AI draft → active, the previous active row → archived
+ *   discardScriptDraftAction    an AI draft → archived
+ *   scriptPreviewAction         the variables of the editor's live preview (read; the latest order of the page, masked,
+ *                               or a "Preview sample" from its lead item and price)
  */
 import { z } from "zod";
 import { revalidateStore } from "@/lib/admin-data/shell";
-import { approveScriptDraft, openCallsNow, resetScript, saveOpsSettings, saveScript, saveWindowOverrides } from "@/lib/callcenter/settings.server";
+import { isScriptLocale } from "@/lib/callcenter/script";
+import { approveScriptDraft, discardScriptDraft, openCallsNow, resetScript, saveOpsSettings, saveScript, saveWindowOverrides } from "@/lib/callcenter/settings.server";
+import { scriptPreviewValues } from "@/lib/callcenter/settings-view.server";
 import { storeAction } from "@/lib/tenancy/seam";
 
 const TemplateId = z.string().regex(/^[0-9A-Z]{26}$/, { error: "Unknown script." });
@@ -73,5 +78,25 @@ export async function approveScriptDraftAction(id: string) {
     const res = await approveScriptDraft(ctx, TemplateId.parse(id));
     if (res.ok) refresh(ctx.store.handle);
     return res;
+  });
+}
+
+/** callcenter.configure: discard a suggested script (it never reaches an agent). */
+export async function discardScriptDraftAction(id: string) {
+  return storeAction("callcenter.configure", async (ctx) => {
+    const res = await discardScriptDraft(ctx, TemplateId.parse(id));
+    if (res.ok) refresh(ctx.store.handle);
+    return res;
+  });
+}
+
+const PreviewInput = z.strictObject({ pageId: z.string().regex(/^[0-9A-Z]{26}$/).nullable(), locale: z.string() });
+
+/** callcenter.configure: the live preview's variables (a read; another store's page answers source "none"). */
+export async function scriptPreviewAction(input: unknown) {
+  return storeAction("callcenter.configure", async (ctx) => {
+    const parsed = PreviewInput.safeParse(input);
+    if (!parsed.success || !isScriptLocale(parsed.data.locale)) return { ok: false as const, error: "invalid" };
+    return { ok: true as const, data: await scriptPreviewValues(ctx, parsed.data.pageId, parsed.data.locale) };
   });
 }

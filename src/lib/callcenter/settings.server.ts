@@ -13,7 +13,7 @@ import "server-only";
  *   saveWindowOverrides   `ops.windowOverrides`: ≤ 4 dated schedules, non-overlapping, ISO weekday keys (OD57)
  *   updateAgentProfile    a member's daily cap (empty = none) and round-robin weight 1-5 (`agent_profiles`)
  *
- * Templates (`call_script` rows of `message_templates`, OPE-§7.4): saveScript, resetScript, approveScriptDraft; agents
+ * Templates (`call_script` rows of `message_templates`, OPE-§7.4): saveScript, resetScript, approveScriptDraft, discardScriptDraft; agents
  * only ever see `active` rows, a draft becomes active only through a manager's Approve (the previous active row of the
  * same page and language is archived), and at most 100 template rows exist per store (OPE-§L).
  */
@@ -245,5 +245,18 @@ export async function approveScriptDraft(ctx: WriteCtx, id: string): Promise<Act
   if (done === null) return { ok: false, error: "not_found" };
   if (done === "invalid") return { ok: false, error: "invalid" };
   await auditFrom(ctx, "callcenter.script.approved", { target: id, meta: done });
+  return { ok: true, data: { id } };
+}
+
+/** callcenter.configure: Discard a draft (AI-15): draft → archived; an active or foreign row answers not_found. */
+export async function discardScriptDraft(ctx: WriteCtx, id: string): Promise<ActionResult<{ id: string }>> {
+  if (!ctx.can("callcenter.configure")) return { ok: false, error: "forbidden" };
+  if (typeof id !== "string" || !ID26_RE.test(id)) return { ok: false, error: "not_found" };
+  const res = await db
+    .update(messageTemplates)
+    .set({ status: "archived", updatedBy: ctx.user.id })
+    .where(and(byId(messageTemplates, ctx.scope, id), eq(messageTemplates.channel, "call_script"), eq(messageTemplates.status, "draft")));
+  if (affectedRows(res) === 0) return { ok: false, error: "not_found" };
+  await auditFrom(ctx, "callcenter.script.discarded", { target: id });
   return { ok: true, data: { id } };
 }

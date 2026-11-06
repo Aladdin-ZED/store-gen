@@ -556,6 +556,8 @@ export const cases: TenancyCase[] = [
       const FR = load<typeof import("@/lib/finance/lite/carrier.server")>("@/lib/finance/lite/carrier.server");
       const FP = load<typeof import("@/lib/finance/lite/spend.server")>("@/lib/finance/lite/spend.server");
       const { markCashReceived } = load<typeof import("@/lib/finance/lite/settlement.server")>("@/lib/finance/lite/settlement.server");
+      const FV = load<typeof import("@/lib/finance/lite/view.server")>("@/lib/finance/lite/view.server");
+      const CV = load<typeof import("@/lib/callcenter/settings-view.server")>("@/lib/callcenter/settings-view.server");
       const before = await kit.snapshotA();
       const real = { page: kit.fx.A.page.live, order: kit.fx.A.order.main };
       const ghost = { page: kit.ghostify(kit.fx.A.page.live), order: kit.ghostify(kit.fx.A.order.main) };
@@ -563,6 +565,8 @@ export const cases: TenancyCase[] = [
         ["saveItemCost(B, A's page)", (x) => asBOwner(kit, (_c, w) => FC.saveItemCost(w, { pageId: x.page, itemId: "main", costCents: 1_000 }))],
         ["breakEvenFor(B, A's page)", (x) => asBOwner(kit, (c) => FB.breakEvenFor(c.scope, { pageId: x.page }))],
         ["costHistory(B, A's page)", (x) => asBOwner(kit, (c) => FC.costHistory(c.scope, { pageId: x.page, itemId: "main" }))],
+        // P4 step 12: the call-centre script preview with A's page answers like a missing page
+        ["scriptPreviewValues(B, A's page)", (x) => asBOwner(kit, (c) => CV.scriptPreviewValues(c, x.page, "fr"))],
       ];
       for (const [label, fn] of attacks) await same(kit, label, await fn(real), await fn(ghost));
       // Mark cash received with A's order: answered per id (the id sent comes back), not_found like a missing one
@@ -574,6 +578,9 @@ export const cases: TenancyCase[] = [
       }
       const reads = await asBOwner(kit, async (c) => ({ costs: await FC.costsOverview(c.scope, "MAD"), rates: await FR.myCarrierRates(c.scope), grid: await FP.adSpendGrid(c.scope, 14), card: await FB.breakEvenFor(c.scope) }));
       kit.check("Profit lite reads in B carry nothing of A (pages, rates, grid, card)", reads.ok && !JSON.stringify(answer(reads)).includes(kit.fx.A.page.live) && kit.leaks(answer(reads)).length === 0, answer(reads));
+      // P4 step 12: the screens' own reads (open alerts, My carrier, the call-centre view with its pages and scripts)
+      const views = await asBOwner(kit, async (c) => ({ alerts: await FV.openProfitAlerts(c.scope), carrier: await FV.carrierView(c.scope), cc: await CV.callCenterView(c.scope, "Africa/Casablanca") }));
+      kit.check("Profit and call-centre screen reads in B carry nothing of A", views.ok && !JSON.stringify(answer(views)).includes(kit.fx.A.page.live) && kit.leaks(answer(views)).length === 0, answer(views));
       kit.check("ops finance: A's rows unchanged by every attempt", (await kit.snapshotA()) === before);
     },
   },
@@ -719,6 +726,9 @@ export const actions: TrackActionCase[] = [
   { file: CALLCENTER, name: "saveScriptAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: (fx) => [{ pageId: fx.A.page.live, locale: "fr", doc: SCRIPT }], own: (fx) => [{ pageId: fx.B.page.live, locale: "fr", doc: SCRIPT }], mixed: (fx) => [{ pageId: fx.A.page.live, locale: "fr", doc: SCRIPT }] },
   { file: CALLCENTER, name: "resetScriptAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: (fx) => [{ pageId: fx.A.page.live, locale: "fr" }], own: (fx) => [{ pageId: fx.B.page.live, locale: "fr" }] },
   { file: CALLCENTER, name: "approveScriptDraftAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: async (fx) => [await draftOf(fx.A.id)], own: async (fx) => [await draftOf(fx.B.id)] },
+  // P4 step 12: the Scripts tab's Discard and live preview
+  { file: CALLCENTER, name: "discardScriptDraftAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: async (fx) => [await draftOf(fx.A.id)], own: async (fx) => [await draftOf(fx.B.id)] },
+  { file: CALLCENTER, name: "scriptPreviewAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: false, victim: (fx) => [{ pageId: fx.A.page.live, locale: "fr" }], own: (fx) => [{ pageId: fx.B.page.live, locale: "fr" }] },
   { file: WINDOW, name: "saveCallingWindowAction", area: "settings", path: "/team/callcenter", permission: ["callcenter.configure"], write: true, victim: () => [{ days: WEEK }], own: () => [{ days: WEEK, closedDates: ["2026-12-25"] }] },
   { file: ORDERS, name: "openTestOrderAction", area: "pages", path: "/orders", permission: ["pages.publish"], write: true, victim: () => [], own: () => [] },
   { file: FINANCE, name: "saveItemCostAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: (fx) => [{ pageId: fx.A.page.live, itemId: "main", costCents: 1_000 }], own: (fx) => [{ pageId: fx.B.page.live, itemId: "main", costCents: 3_800 }] },
