@@ -44,6 +44,12 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **DEPLOY 2 LIVE 2026-11-06 ~20:33: the design gate WARN default** (15c4671; deployed HEAD 6a8037d: gate-ok → archive
+  16.6 MiB sha256 dc4bbdc2… → `_sgdeploy/.htaccess` re-uploaded (the previous sync removed it; 403 verified) →
+  `_sgdeploy/sg-9f4b053869d9.zip` (403) → build 01a1b28c-3d02-73fc-a5bc-409077ea8da1 → live build id `-C-xyiPD`; health ok,
+  / /login /signup 200, /admin 404, archive removed). Every deploy must re-upload `_sgdeploy/.htaccess` first: the sync
+  removes the folder. design-db has one hour-dependent "differencing" case that fails with or without the change.
+
 - **NEXT PHASE STARTED 2026-11-06 ~20:30 (owner: "continue")**: heartbeat cron `556b156e` (95% rule, disk and AC checks).
   (1) P3 WAVE 2 in C:/Users/SICO/sg-wt/p3 on branch **r1/p3w2** (fresh from main be96fe3): task `w8dtcvf8q` run
   `wf_57d1f61c-71b`, args qa/lead/tracks-p3w2.json (steps 11-14: short links + test links, WhatsApp order, Campaign Kit,
