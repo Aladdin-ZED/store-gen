@@ -12,12 +12,6 @@ import { memberCtx } from "./member-ctx";
 type Props = { params: Promise<{ store: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
 
 /**
- * The owner's redirect to `/welcome` waits for the flow's page (p2-12 flips it): until `/welcome/page.tsx` exists the
- * redirect would land a new owner on a 404 instead of the dashboard.
- */
-const WELCOME_FLOW_LIVE = false;
-
-/**
  * "Overview · <store>" like every other screen, in the viewer's language: Next applies the `[store]` layout's
  * `%s · <name>` template to its child segments only, never to the page of the segment that defines it
  * (generate-metadata.md, `title.template`).
@@ -50,7 +44,7 @@ export default async function StoreHomePage({ params, searchParams }: Props) {
   // call-center agents work the order queue (their own orders), not the store's numbers
   if (!ctx.can("pages.read") && ctx.can("orders.read")) redirect(appHref(store.handle, "/orders"));
   // an owner who hasn't finished (or skipped) the welcome flow resumes it (PLA-§22.2); staff viewing the store never
-  if (WELCOME_FLOW_LIVE && ctx.membership.role === "owner" && !ctx.impersonation && (await welcomePending(ctx.scope))) redirect(appHref(store.handle, "/welcome"));
+  if (ctx.membership.role === "owner" && !ctx.impersonation && (await welcomePending(ctx.scope))) redirect(appHref(store.handle, "/welcome"));
 
   const asked = (await searchParams).range;
   const range: DashboardRange = DASHBOARD_RANGES.find((r) => r === asked) ?? "7d";

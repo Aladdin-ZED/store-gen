@@ -1686,6 +1686,123 @@ async function dashboardChecks(): Promise<void> {
   check("the dashboard's and the centre's keys exist in ar, fr and en", missing.length === 0, missing);
 }
 
+/* ------------------------------------------------------------------ */
+/* the welcome flow (p2-12; PLA-§22.2, UX-01, PD23, core D59)          */
+/* ------------------------------------------------------------------ */
+
+/** Files a module graph reaches from `entries`: relative and `@/` specifiers resolved, bare ones kept by name. */
+function importGraph(entries: readonly string[]): { files: Set<string>; bare: Set<string> } {
+  const root = process.cwd();
+  const files = new Set<string>();
+  const bare = new Set<string>();
+  const resolve = (from: string, spec: string): string | null => {
+    const base = spec.startsWith("@/") ? path.join(root, "src", spec.slice(2)) : spec.startsWith(".") ? path.resolve(path.dirname(path.join(root, from)), spec) : null;
+    if (base === null) return null;
+    for (const ext of ["", ".ts", ".tsx", "/index.ts", "/index.tsx"]) {
+      try {
+        readFileSync(base + ext, "utf8");
+        return path.relative(root, base + ext).split(path.sep).join("/");
+      } catch {
+        // the next extension
+      }
+    }
+    return "";
+  };
+  const stack = [...entries];
+  while (stack.length) {
+    const file = stack.pop()!;
+    if (files.has(file)) continue;
+    files.add(file);
+    const src = readFileSync(path.join(root, file), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    // a server action module is a reference in the client graph, not code the browser loads
+    if (/^\s*["']use server["']/.test(src)) continue;
+    for (const m of src.matchAll(/(import|export)(\s+type)?\s[^'"`;]*?from\s*["']([^"']+)["']|import\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)|new URL\(\s*["']([^"']+)["']/g)) {
+      if (m[2]) continue; // type-only: erased
+      const spec = m[3] ?? m[4] ?? m[5] ?? m[6]!;
+      const target = resolve(file, spec);
+      if (target === null) bare.add(spec);
+      else if (target) stack.push(target);
+    }
+  }
+  return { files, bare };
+}
+
+/** What the welcome client graph must never load before the reveal (core D59): the local models and their runtimes. */
+const MODEL_FILE = /^src\/lib\/ai\/(local|worker)\/|siglip|vlm|transformers/i;
+const MODEL_PACKAGE = /transformers|onnxruntime|siglip|@mlc-ai|web-llm/i;
+const modelImports = (g: { files: Set<string>; bare: Set<string> }) => [...[...g.files].filter((f) => MODEL_FILE.test(f)), ...[...g.bare].filter((b) => MODEL_PACKAGE.test(b))];
+
+async function welcomeChecks(): Promise<void> {
+  const W = await import("@/app/app/[store]/welcome/_components/flow-logic");
+  const A = await import("@/app/app/[store]/welcome/_components/directions-adapter");
+
+  // the step machine: resume, the views still open, transitions, skip
+  check("a new flow opens on photos", W.initialView("photos", undefined, false) === "photos");
+  check("a reload resumes on the saved step", W.initialView("reveal", undefined, false) === "reveal" && W.initialView("contact", undefined, true) === "contact");
+  check("?step= opens an earlier step that is still open", W.initialView("reveal", "details", false) === "details" && W.initialView("reveal", "photos", false) === "photos");
+  check("?step= never jumps ahead of the saved step", W.initialView("details", "reveal", false) === "details" && W.initialView("reveal", "contact", false) === "reveal");
+  check("once the page exists the steps before contact are closed", W.initialView("contact", "reveal", true) === "contact" && W.initialView("done", "details", true) === "done");
+  check("done shows only once the flow is done", W.initialView("contact", "done", true) === "contact" && W.initialView("done", "done", true) === "done" && W.initialView("done", "contact", true) === "contact");
+  check("a skipped flow has no view (the dashboard)", W.initialView("skipped", "photos", false) === null);
+  check("an unknown ?step= is ignored", W.initialView("details", "admin", false) === "details");
+  check("the steps run photos → details → reveal → contact → done", W.FLOW_STEPS.slice(0, -1).map((s) => W.nextView(s)).join() === "details,reveal,contact,done" && W.nextView("done") === "done");
+  check("details reached in the browser (not saved) keeps Back to photos", W.previousView("details", W.reachedStep("photos", "details"), false) === "photos");
+  check("Back from the reveal edits the details", W.previousView("reveal", "reveal", false) === "details");
+  check("no Back once the page exists, none on the first step", W.previousView("contact", "contact", true) === null && W.previousView("photos", "reveal", false) === null);
+  check("skip is offered until the page exists", W.canSkip("photos", false) && W.canSkip("reveal", false) && !W.canSkip("contact", true) && !W.canSkip("reveal", true));
+  check("the progress fills one segment per step, done fills all", W.progressOf("photos") === 1 && W.progressOf("contact") === 4 && W.progressOf("done") === W.PROGRESS_SEGMENTS);
+
+  // the typed price (PD23): integer minor units, never rounded, never invented
+  const prices: [string, number | null][] = [["199", 19_900], ["199.5", 19_950], ["199,50", 19_950], ["1 299", 129_900], ["١٩٩", 19_900], [" 45 ", 4_500], ["19.999", null], ["0", null], ["", null], ["abc", null], ["-5", null], ["1.299,00", null], ["1000000", 100_000_000], ["1000000.01", null]];
+  const wrong = prices.filter(([text, minor]) => W.parsePrice(text) !== minor);
+  check("prices parse to integer minor units (Latin and Arabic digits, comma or dot)", wrong.length === 0, wrong);
+  check("the field shows minor units back as typed", W.priceText(19_900) === "199" && W.priceText(19_950) === "199.50" && W.priceText(5) === "0.05" && W.priceText(null) === "");
+  check("the price before is kept only when higher", W.keptCompareAt(19_900, 25_000) === 25_000 && W.keptCompareAt(19_900, 19_900) === null && W.keptCompareAt(19_900, 10_000) === null && W.keptCompareAt(19_900, null) === null);
+  const ok = { category: "beauty", productName: "Argan oil", price: "199", compareAt: "", fact: "" };
+  check("complete details have no error", Object.keys(W.detailsErrors(ok)).length === 0);
+  check("the category tap is required", W.detailsErrors({ ...ok, category: null }).category === "onboarding.category_required");
+  check("the price is required and must be a price", W.detailsErrors({ ...ok, price: "" }).priceMinor === "onboarding.price_required" && W.detailsErrors({ ...ok, price: "12.345" }).priceMinor === "onboarding.price_invalid");
+  check("a price before not above the price is refused", W.detailsErrors({ ...ok, compareAt: "150" }).compareAtMinor === "onboarding.compare_invalid" && W.detailsErrors({ ...ok, compareAt: "199" }).compareAtMinor === "onboarding.compare_invalid" && !W.detailsErrors({ ...ok, compareAt: "249" }).compareAtMinor);
+  check("the name is required", W.detailsErrors({ ...ok, productName: "  " }).productName === "onboarding.name_required");
+
+  // the reveal input: only what the owner typed (no rating, no stock), the store's own photos, the seed
+  const draft = { category: "beauty" as const, productName: "Argan oil", priceMinor: 19_950, compareAtMinor: 15_000, fact: "100 ml", assetIds: ["a1b2c3d4e5f6a7b8"] };
+  const ctxOf = { palette: null, photos: [], locale: "ar" as const, market: "MA" as const, seedBase: 7 };
+  const input = A.revealInputOf(draft, ctxOf);
+  const product = input.product as Record<string, unknown>;
+  check("the reveal carries the typed price in major units", product.price === 199.5);
+  check("a price before below the price never reaches the reveal", !("compareAt" in product));
+  check("a higher price before does", (A.revealInputOf({ ...draft, compareAtMinor: 25_000 }, ctxOf).product as Record<string, unknown>).compareAt === 250);
+  check("no rating, stock or review is put on the product", !["rating", "stock", "reviews", "sold"].some((k) => k in product));
+  check("the typed fact is the only fact", input.facts.join() === "100 ml" && A.revealInputOf({ ...draft, fact: null }, ctxOf).facts.length === 0);
+  check("the photos are the draft's", JSON.stringify(product.images) === JSON.stringify([{ id: "a1b2c3d4e5f6a7b8", alt: "" }]) && input.seedBase === 7 && input.category === "beauty");
+  const base = W.revealSeed("brand-seed-1");
+  check("the seed is stable per store and differs per round", base === W.revealSeed("brand-seed-1") && base !== W.revealSeed("brand-seed-2") && new Set([0, 1, 2].map((r) => W.roundSeed(base, r))).size === 3 && W.roundSeed(base, 5) < 2_147_483_647);
+
+  // contact: the masked phone of the toggle and the typed number
+  check("the signup phone is masked to its first and last digits", W.maskSignupPhone("+212612345634") === "+212 6•• ••• •34", W.maskSignupPhone("+212612345634"));
+  check("a number that is not E.164 has no mask", W.maskSignupPhone("0612") === null);
+  check(
+    "a Moroccan number typed nationally becomes E.164",
+    W.typedWhatsapp("06 12 34 56 78", "MA") === "+212612345678" && W.typedWhatsapp("00212612345678", "MA") === "+212612345678" && W.typedWhatsapp("+33 6 12 34 56 78", "MA") === "+33612345678" && W.typedWhatsapp("212712345678", "MA") === "+212712345678",
+  );
+
+  // the critical path has no model on it (core D59): the client graph of /welcome never reaches the local AI
+  const dir = "src/app/app/[store]/welcome/_components";
+  const graph = importGraph([`${dir}/welcome-flow.tsx`, `${dir}/welcome-header.tsx`]);
+  check("the welcome client graph reaches the reveal and the generator", ["src/components/generate/reveal/RevealFolds.tsx", "src/components/generate/reveal/directions.ts", "src/components/generate/kit.ts"].every((f) => graph.files.has(f)), [...graph.files].filter((f) => f.includes("generate")));
+  check("the welcome client graph imports no local model, worker, transformers, SigLIP or VLM code", modelImports(graph).length === 0, modelImports(graph));
+  check("the import-graph check catches a model worker (control)", modelImports(importGraph(["src/lib/ai/client.ts"])).length > 0);
+
+  // the onboarding copy exists in ar, fr and en
+  const keys = new Set<string>();
+  for (const f of ["welcome-flow.tsx", "step-photos.tsx", "step-reveal.tsx", "welcome-header.tsx", "done-step.tsx", "flow-logic.ts"]) for (const m of readFileSync(path.join(dir, f), "utf8").matchAll(/"((?:onboarding|shell\.field|shell\.review|shell\.address|health)\.[a-z0-9_.]+)"/g)) keys.add(m[1]!);
+  const missingKeys = [...keys].filter((k) => !inCatalogs(k));
+  check("the welcome flow's keys exist in ar, fr and en", keys.size > 20 && missingKeys.length === 0, missingKeys);
+}
+
 ruleChecks()
   .then(searchChecks)
   .then(manifestChecks)
@@ -1694,6 +1811,7 @@ ruleChecks()
   .then(chromeChecks)
   .then(paletteChecks)
   .then(dashboardChecks)
+  .then(welcomeChecks)
   .catch((err: unknown) => check("the rule and search checks ran", false, String(err)))
   .finally(() => {
     console.log(`test:shell: ${passed} passed, ${failures} failed`);

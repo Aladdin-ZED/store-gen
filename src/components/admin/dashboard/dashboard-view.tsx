@@ -79,8 +79,12 @@ export function DashboardView(p: DashboardViewProps) {
   );
 }
 
-/** Each block gets the view's props as they are (the scope is never spread into a new object, §E.1) and the link builder. */
-type BlockProps = { v: DashboardViewProps; href: (path: `/${string}` | "") => string; title?: string };
+/**
+ * Each block gets the view's props as they are (the scope is never spread into a new object, §E.1) and the link builder.
+ * The onboarding done step (welcome/_components/done-step.tsx) mounts the review and health blocks with the same props.
+ */
+export type BlockView = Pick<DashboardViewProps, "load" | "scope" | "store" | "locale" | "viewer">;
+export type BlockProps = { v: BlockView; href: (path: `/${string}` | "") => string; title?: string };
 
 /** 1. Today: P4's counts (or, before them, the store's own order count for the zero-data line) and the worst issue. */
 async function BriefBlock({ v: p, href }: BlockProps) {
@@ -105,7 +109,7 @@ async function BriefBlock({ v: p, href }: BlockProps) {
 }
 
 /** 2. The In-review card (PLA-§22.7), with the preview links and the pending media cap. */
-async function ReviewBlock({ v: p, href }: BlockProps) {
+export async function ReviewBlock({ v: p, href }: BlockProps) {
   const { review, previews, setup } = p.load.panels;
   const [r, links, s] = await Promise.all([review, previews, setup]);
   if (!r.ok) {
@@ -128,7 +132,7 @@ async function ReviewBlock({ v: p, href }: BlockProps) {
 }
 
 /** 3. Store Health: the snapshot, or before the first run the local setup pass; the score policy. */
-async function HealthBlock({ v: p }: BlockProps) {
+export async function HealthBlock({ v: p }: BlockProps) {
   const { health, setup, healthPolicy } = p.load.panels;
   const [h, s, policy] = await Promise.all([health, setup, healthPolicy]);
   const snapshot = h.ok ? h.data : null;

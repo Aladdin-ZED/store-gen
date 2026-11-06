@@ -73,4 +73,25 @@ export const messages: { [K in keyof typeof en]: string } = {
   /* ---- النهاية ---- */
   "onboarding.done_title": "متجرك جاهز للبناء",
   "onboarding.done_lead": "هذا ما تم إعداده وما بقي.",
+
+  /* ---- p2-12 ---- */
+  "onboarding.photos.drop_here": "أفلت الصور هنا",
+  "onboarding.photos.count": "{count} من 5",
+  "onboarding.photos.add": "أضف صورة",
+  "onboarding.photos.retry": "أعد المحاولة",
+  "onboarding.photos.not_image": "هذا الملف ليس صورة يمكن قراءتها. استعمل JPG أو PNG أو WebP.",
+  "onboarding.photos.too_large": "هذه الصورة كبيرة جدًا. استعمل صورة أقل من 40 ميغابايت.",
+  "onboarding.photos.quota": "مساحة الرفع في متجرك ممتلئة حاليًا.",
+  "onboarding.details.title": "عرّفنا على المنتج",
+  "onboarding.details.lead": "ما تكتبه أنت فقط هو ما يظهر في الصفحة.",
+  "onboarding.category.more": "فئات أخرى",
+  "onboarding.category.fewer": "فئات أقل",
+  "onboarding.category_required": "اختر ما تبيعه للمتابعة.",
+  "onboarding.price_invalid": "أدخل ثمنًا مثل 199 أو 199.50.",
+  "onboarding.reveal.lead": "ثلاثة تصاميم مصنوعة من صورك وثمنك. يمكنك تعديل كل شيء لاحقًا في المحرّر.",
+  "onboarding.reveal.creating": "جارٍ حفظ صفحتك…",
+  "onboarding.reveal.edit": "عدّل التفاصيل",
+  "onboarding.contact.finish": "إنهاء",
+  "onboarding.contact.placeholder": "+212 6 12 34 56 78",
+  "onboarding.done_badge": "اكتمل الإعداد",
 };

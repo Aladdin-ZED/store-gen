@@ -73,4 +73,25 @@ export const messages = {
   /* ---- done ---- */
   "onboarding.done_title": "Your store is ready to build",
   "onboarding.done_lead": "Here is what is set and what is left.",
+
+  /* ---- p2-12 ---- */
+  "onboarding.photos.drop_here": "Drop the photos here",
+  "onboarding.photos.count": "{count} of 5",
+  "onboarding.photos.add": "Add a photo",
+  "onboarding.photos.retry": "Try again",
+  "onboarding.photos.not_image": "This file isn't a photo we can read. Use JPG, PNG or WebP.",
+  "onboarding.photos.too_large": "This photo is too large. Use one under 40 MB.",
+  "onboarding.photos.quota": "Your store's upload space is full for now.",
+  "onboarding.details.title": "Tell us about the product",
+  "onboarding.details.lead": "Only what you type goes on the page.",
+  "onboarding.category.more": "More categories",
+  "onboarding.category.fewer": "Fewer categories",
+  "onboarding.category_required": "Pick what you sell to continue.",
+  "onboarding.price_invalid": "Enter a price like 199 or 199.50.",
+  "onboarding.reveal.lead": "Three designs made from your photos and your price. You can change everything later in the builder.",
+  "onboarding.reveal.creating": "Saving your page…",
+  "onboarding.reveal.edit": "Edit details",
+  "onboarding.contact.finish": "Finish",
+  "onboarding.contact.placeholder": "+212 6 12 34 56 78",
+  "onboarding.done_badge": "Setup complete",
 } as const satisfies Record<string, string>;

@@ -73,4 +73,25 @@ export const messages: { [K in keyof typeof en]: string } = {
   /* ---- terminé ---- */
   "onboarding.done_title": "Votre boutique est prête à être construite",
   "onboarding.done_lead": "Voici ce qui est prêt et ce qu'il reste à faire.",
+
+  /* ---- p2-12 ---- */
+  "onboarding.photos.drop_here": "Déposez les photos ici",
+  "onboarding.photos.count": "{count} sur 5",
+  "onboarding.photos.add": "Ajouter une photo",
+  "onboarding.photos.retry": "Réessayer",
+  "onboarding.photos.not_image": "Ce fichier n'est pas une photo lisible. Utilisez JPG, PNG ou WebP.",
+  "onboarding.photos.too_large": "Cette photo est trop lourde. Utilisez-en une de moins de 40 Mo.",
+  "onboarding.photos.quota": "L'espace d'envoi de votre boutique est plein pour le moment.",
+  "onboarding.details.title": "Parlez-nous du produit",
+  "onboarding.details.lead": "Seul ce que vous saisissez apparaît sur la page.",
+  "onboarding.category.more": "Plus de catégories",
+  "onboarding.category.fewer": "Moins de catégories",
+  "onboarding.category_required": "Choisissez ce que vous vendez pour continuer.",
+  "onboarding.price_invalid": "Saisissez un prix comme 199 ou 199,50.",
+  "onboarding.reveal.lead": "Trois designs faits à partir de vos photos et de votre prix. Vous pourrez tout modifier ensuite dans l'éditeur.",
+  "onboarding.reveal.creating": "Enregistrement de votre page…",
+  "onboarding.reveal.edit": "Modifier les détails",
+  "onboarding.contact.finish": "Terminer",
+  "onboarding.contact.placeholder": "+212 6 12 34 56 78",
+  "onboarding.done_badge": "Configuration terminée",
 };
