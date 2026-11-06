@@ -120,7 +120,8 @@ export function KpiTiles({ tiles, currency }: { tiles: TileSpec[]; currency: str
     return formatNumber(tile.value, locale, 0);
   };
   return (
-    <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 xl:grid-cols-3">
+    // six tiles read as 3 × 2 on a wide main column; fewer (a source not merged yet) as pairs, never one orphan in a row of three
+    <div className={cn("grid grid-cols-1 gap-3 min-[480px]:grid-cols-2", tiles.length % 3 === 0 && "2xl:grid-cols-3")}>
       {tiles.map((tile, i) => (
         <div key={tile.id} data-tile={tile.id} className="adm-rise grid" style={{ ["--i" as string]: i }}>
           <KpiTile

@@ -74,54 +74,57 @@ export function IssueRow(p: IssueRowProps): ReactElement | null {
     </Button>
   );
   return (
-    <div data-issue={p.issue.id} data-group={p.issue.group} data-severity={p.issue.severity} className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-start">
-      <div className="grid min-w-0 flex-1 gap-1.5">
-        <span className={cn("inline-flex h-5 w-fit items-center gap-1 rounded-[var(--r-chip)] px-1.5 text-[11px] font-medium", sev.cls)}>
-          <sev.Icon aria-hidden="true" className="size-3" strokeWidth={2.25} />
-          {t(`health.severity.${p.issue.severity}`)}
-        </span>
-        <p className="text-sm leading-relaxed text-pretty text-foreground">{t(p.issue.text, vars)}</p>
-        <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground tabular-nums">
-          <bdi>{t("health.evidence.n", { n: p.issue.evidence.n })}</bdi>
-          {days !== null && <bdi>{t("health.evidence.window", { days })}</bdi>}
-        </p>
-        {p.staffView && (p.staffView.snoozedBy || p.issue.snoozedUntil) && (
-          <p className="text-xs text-muted-foreground">
-            {p.staffView.snoozedBy && t("health.snoozed_by", { role: t(`team.role.${p.staffView.snoozedBy}`) })}
-            {p.staffView.snoozedBy && p.issue.snoozedUntil && " · "}
-            {p.issue.snoozedUntil && t("health.snoozed_until", { date: formatDay(p.issue.snoozedUntil, p.locale) })}
+    // a container query, not the viewport: the row sits in the dashboard's 4-column rail as well as in full-width lists
+    <div data-issue={p.issue.id} data-group={p.issue.group} data-severity={p.issue.severity} className="@container py-3.5">
+      <div className="flex flex-col gap-3 @lg:flex-row @lg:items-start">
+        <div className="grid min-w-0 flex-1 gap-1.5">
+          <span className={cn("inline-flex h-5 w-fit items-center gap-1 rounded-[var(--r-chip)] px-1.5 text-[11px] font-medium whitespace-nowrap", sev.cls)}>
+            <sev.Icon aria-hidden="true" className="size-3" strokeWidth={2.25} />
+            {t(`health.severity.${p.issue.severity}`)}
+          </span>
+          <p className="text-sm leading-relaxed text-pretty text-foreground">{t(p.issue.text, vars)}</p>
+          <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground tabular-nums">
+            <bdi>{t("health.evidence.n", { n: p.issue.evidence.n })}</bdi>
+            {days !== null && <bdi>{t("health.evidence.window", { days })}</bdi>}
           </p>
+          {p.staffView && (p.staffView.snoozedBy || p.issue.snoozedUntil) && (
+            <p className="text-xs text-muted-foreground">
+              {p.staffView.snoozedBy && t("health.snoozed_by", { role: t(`team.role.${p.staffView.snoozedBy}`) })}
+              {p.staffView.snoozedBy && p.issue.snoozedUntil && " · "}
+              {p.issue.snoozedUntil && t("health.snoozed_until", { date: formatDay(p.issue.snoozedUntil, p.locale) })}
+            </p>
+          )}
+        </div>
+        {(p.onFix || p.onSnooze) && (
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+            {p.onSnooze && !lock && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="lg"
+                disabled={snoozing || snoozed}
+                aria-busy={snoozing || undefined}
+                className={cn("text-muted-foreground", FOCUS_RING, TOUCH)}
+                onClick={async () => {
+                  setSnoozing(true);
+                  try {
+                    await p.onSnooze?.();
+                    setSnoozed(true);
+                  } catch {
+                    // the caller showed why (a toast); the row keeps its Snooze button
+                  } finally {
+                    setSnoozing(false);
+                  }
+                }}
+              >
+                {snoozing && <Loader2Icon aria-hidden="true" className="animate-spin motion-reduce:animate-none" />}
+                {snoozed ? t("health.snoozed") : t("health.snooze")}
+              </Button>
+            )}
+            {p.onFix && (lock ? <LockedControl reason={lock}>{fixButton}</LockedControl> : fixButton)}
+          </div>
         )}
       </div>
-      {(p.onFix || p.onSnooze) && (
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          {p.onSnooze && !lock && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="lg"
-              disabled={snoozing || snoozed}
-              aria-busy={snoozing || undefined}
-              className={cn("text-muted-foreground", FOCUS_RING, TOUCH)}
-              onClick={async () => {
-                setSnoozing(true);
-                try {
-                  await p.onSnooze?.();
-                  setSnoozed(true);
-                } catch {
-                  // the caller showed why (a toast); the row keeps its Snooze button
-                } finally {
-                  setSnoozing(false);
-                }
-              }}
-            >
-              {snoozing && <Loader2Icon aria-hidden="true" className="animate-spin motion-reduce:animate-none" />}
-              {snoozed ? t("health.snoozed") : t("health.snooze")}
-            </Button>
-          )}
-          {p.onFix && (lock ? <LockedControl reason={lock}>{fixButton}</LockedControl> : fixButton)}
-        </div>
-      )}
     </div>
   );
 }

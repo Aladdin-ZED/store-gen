@@ -51,7 +51,9 @@ export function KpiTile(p: KpiTileProps): ReactElement | null {
   const t = useT();
   const locale = useAdminLocale();
   const view = kpiTileView(p);
-  const fmt = new Intl.NumberFormat(locale === "ar" ? "ar-MA-u-nu-latn" : locale, { signDisplay: "exceptZero", maximumFractionDigits: 1 });
+  // the delta is a percent change ("+9.5 %", "+9,5 %" in French)
+  const fmt = new Intl.NumberFormat(locale === "ar" ? "ar-MA-u-nu-latn" : locale, { style: "percent", signDisplay: "exceptZero", maximumFractionDigits: 1 });
+  const pct = (v: number) => fmt.format(v / 100);
   const delta = p.delta && view.value !== null && Number.isFinite(p.delta.value) ? p.delta : null;
   const tone = TONE[deltaTone(delta?.value ?? 0)];
   const spark = view.spark ? sparkPath(view.spark) : null;
@@ -73,8 +75,8 @@ export function KpiTile(p: KpiTileProps): ReactElement | null {
         {delta && (
           <span className={cn("inline-flex h-5 shrink-0 items-center gap-0.5 rounded-[var(--r-chip)] px-1.5 text-[11px] font-medium tabular-nums", tone.cls)}>
             <tone.Icon aria-hidden="true" className="size-3" />
-            <bdi>{fmt.format(delta.value)}</bdi>
-            <span className="sr-only"> {t("shell.kpi.delta", { value: fmt.format(delta.value), period: delta.period })}</span>
+            <bdi>{pct(delta.value)}</bdi>
+            <span className="sr-only"> {t("shell.kpi.delta", { value: pct(delta.value), period: delta.period })}</span>
           </span>
         )}
       </div>
@@ -91,7 +93,7 @@ export function KpiTile(p: KpiTileProps): ReactElement | null {
           </p>
         )}
         {spark && (
-          <svg role="img" aria-label={t("shell.kpi.trend", { count: view.spark!.length })} viewBox={`0 0 ${W} ${H}`} className="h-8 w-28 shrink-0 overflow-visible text-brand">
+          <svg role="img" aria-label={t("shell.kpi.trend", { count: view.spark!.length })} viewBox={`0 0 ${W} ${H}`} className="h-8 w-28 max-w-[40%] min-w-12 shrink overflow-visible text-brand">
             <path d={spark.d} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             <circle cx={spark.last[0]} cy={spark.last[1]} r={2.25} fill="currentColor" />
           </svg>
