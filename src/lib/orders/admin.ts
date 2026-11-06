@@ -131,6 +131,8 @@ export interface OrderFilters {
   sort?: OrderSort;
   /** the member looking: adds the agent predicate (OD12) and resolves assignee "me" */
   viewer?: ListViewer;
+  /** P4 step 10: "Export selection" (≤ 200 ids of the list's selection; ANDed with the rest) */
+  ids?: readonly string[];
 }
 
 /** Masked customer fields (impersonation) can't be searched for either: a hit would confirm them. */
@@ -180,6 +182,7 @@ async function orderConds(scope: StoreScope, input: OrderFilters, now = new Date
     // an agent sees their own queue; any other member without orders.read_all sees nothing (OD12)
     w.push(ownQueueOnly(viewer.role, "orders.write") && ops ? mineCond(viewer.userId, ops.agentHistoryDays, now) : none);
   }
+  if (f.ids) w.push(f.ids.length ? inArray(orders.id, [...f.ids]) : none);
   const q = f.q?.trim().slice(0, 80);
   if (q) {
     const digits = toAsciiDigits(q).replace(/[^0-9]/g, "");

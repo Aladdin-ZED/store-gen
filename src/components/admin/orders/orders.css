@@ -1,0 +1,12 @@
+/*
+ * The orders screen's motion (P4 CALL CENTER; OPE-§12.4): the selection bar slides in from the bottom in 180 ms
+ * (core §I.6 motion: transform and opacity only, reduced motion respected).
+ */
+@keyframes adm-bulk-in {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.adm-bulk-in { animation: adm-bulk-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .adm-bulk-in { animation: none; }
+}

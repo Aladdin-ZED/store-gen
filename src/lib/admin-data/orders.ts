@@ -6,13 +6,14 @@ import "server-only";
  * Multi-tenant (docs/STORE-SAAS.md §E.3, ADM-22, ADM-23): counts and details are the scope's store only (another
  * store's order id answers like a missing one) and day ranges use the store's time zone, never the platform's.
  */
-import { count, desc, eq, gte, isNull, lt, type SQL } from "drizzle-orm";
+import { count, desc, eq, gte, inArray, isNull, lt, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { blocklist, leads, orderEvents, orders, pageVersions } from "@/lib/db/schema";
+import { blocklist, leads, orderEvents, orders, pageVersions, storeMembers, users } from "@/lib/db/schema";
 import { orderView, type OrderView, type SwatchOf } from "@/components/admin/orders/parts";
 import type { OrderItems, OrderSource } from "@/lib/db/schema";
 import { getOrder, isOrderStatus, type OrderFilters, type OrderRecord } from "@/lib/orders";
-import type { ListViewer, OrderList } from "@/lib/orders/admin";
+import { listSavedViews, memberNames, type ListViewer, type OrderList, type SavedViewRow } from "@/lib/orders/admin";
+import { normalizeCity } from "@/lib/orders/address";
 import { builtinView, ORDER_SORTS, ORDER_SOURCES, OrderQuery as SavedOrderQuery, type BuiltinViewId, type OrderSort } from "@/lib/callcenter/views";
 import { CONFIRM_STATES, MONEY_STATES, RETURN_REASONS, SHIP_STATES, type ConfirmState, type MoneyState, type ReturnReason, type ShipState } from "@/lib/orders/state";
 import type { OrderStatus } from "@/lib/orders/contract";
@@ -22,6 +23,7 @@ import { byId, inStore, whereStore } from "@/lib/tenancy/sql";
 import type { StoreCtx, StoreScope } from "@/lib/tenancy/types";
 import { buildQueueOrder, cardRow, type QueueOrder } from "@/lib/callcenter/card";
 import type { CompiledScript } from "@/lib/callcenter/script";
+import { isPinned } from "@/lib/callcenter/priority";
 import { viewerSeesOrder } from "@/lib/callcenter/visibility";
 import { orderTimeline, viewerOf, type TimelineItem } from "@/lib/orders/events";
 import { maskPhone } from "@/lib/orders/masking";
@@ -561,6 +563,14 @@ export interface OrderDrawerJson extends OrderDetailJson {
   carrierLabel: string | null;
   deliveryAttempts: number;
   customerId: string | null;
+  /** P4 step 10: pinned to the top of the queue (orders.assign), the city's key ("Did you mean…" is shown when null) */
+  pinned: boolean;
+  cityKey: string | null;
+  /** the member the order is assigned to (display name only, never an e-mail) */
+  assignee: { id: string; name: string | null } | null;
+  confirmedByName: string | null;
+  /** the Sheet's Agent label when no member is mapped (OD54) */
+  confirmedByLabel: string | null;
   ops: {
     risk: QueueOrder["risk"];
     duplicates: QueueOrder["duplicates"];
@@ -571,7 +581,20 @@ export interface OrderDrawerJson extends OrderDetailJson {
     /** the viewer holds the claim */
     mine: boolean;
     lane: QueueOrder["lane"];
+    /** P4 step 10 (OPE-§12.7): the zone line (P3; null text = no promise), the WhatsApp menu, "Take this order" */
+    eta: QueueOrder["eta"];
+    templates: QueueOrder["templates"];
+    /** a pre-decision order nobody else holds right now (the drawer's "Take this order") */
+    takeable: boolean;
+    /** another member holds the claim (their display name; null when the viewer holds it or nobody does) */
+    heldBy: string | null;
+    /** "Did you mean…" (OPE-§10.1): fuzzy matches of a city the store's list does not know; never applied without a person */
+    cityFix: { key: string; label: string }[];
   };
+  /** OD52: who holds the cash after delivery, and since when */
+  money: { settlement: "at_delivery" | "statement"; deliveredAt: string | null };
+  /** owner and admin (OPE-§12.7 "Ad events"): the order's Conversions API events, newest first */
+  adEvents: { id: number; at: string; type: "capi_sent" | "capi_stale" | "capi_failed"; platform: string | null; event: string | null; reason: string | null }[];
 }
 
 /** The drawer of one order the member may see (OD12, inbound lookups included); null = missing, hidden or another store's. */
@@ -595,6 +618,22 @@ export async function orderDrawerJson(ctx: StoreCtx, id: string): Promise<OrderD
       .limit(1),
   ]);
   const rm = (recall?.meta ?? null) as { reason?: unknown; carrierNotified?: unknown } | null;
+  const owner = ctx.can("settings.write");
+  const [names, accounting, capi] = await Promise.all([
+    row.assigneeId || row.confirmedBy ? memberNames(scope) : Promise.resolve(new Map<string, string>()),
+    getStoreSetting(scope, "accounting"),
+    owner
+      ? db
+          .select({ id: orderEvents.id, at: orderEvents.at, type: orderEvents.type, meta: orderEvents.meta })
+          .from(orderEvents)
+          .where(whereStore(orderEvents, scope, eq(orderEvents.orderId, id), inArray(orderEvents.type, ["capi_sent", "capi_stale", "capi_failed"])))
+          .orderBy(desc(orderEvents.id))
+          .limit(12)
+      : Promise.resolve([]),
+  ]);
+  const heldByOther = !!row.claimToken && !!row.leaseUntil && row.leaseUntil.getTime() > now && row.assigneeId !== ctx.user.id;
+  const fix = !row.cityKey && row.city ? normalizeCity(row.city, ctx.store.market) : null;
+  const str = (v: unknown) => (typeof v === "string" && v ? v.slice(0, 80) : null);
   return {
     ...detail,
     // the full number never reaches the browser here (OD11); reveal is its own audited action
@@ -618,6 +657,79 @@ export async function orderDrawerJson(ctx: StoreCtx, id: string): Promise<OrderD
       recall: rm ? { reason: typeof rm.reason === "string" ? rm.reason : "other", carrierNotified: rm.carrierNotified === true } : null,
       mine,
       lane: card.lane,
+      eta: card.eta,
+      templates: card.templates,
+      takeable: !heldByOther && !mine && (["new", "attempting", "callback"] as ConfirmState[]).includes(row.confirmState),
+      heldBy: heldByOther && row.assigneeId ? (names.get(row.assigneeId) ?? null) : null,
+      cityFix: fix && fix.confidence === "fuzzy" ? fix.suggestions.map((s) => ({ key: s.key, label: s.label })) : [],
     },
+    pinned: isPinned(row.priority),
+    cityKey: row.cityKey,
+    assignee: row.assigneeId ? { id: row.assigneeId, name: names.get(row.assigneeId) ?? null } : null,
+    confirmedByName: row.confirmedBy ? (names.get(row.confirmedBy) ?? null) : null,
+    confirmedByLabel: row.confirmedByLabel,
+    money: { settlement: accounting.myCarrier.settlement, deliveredAt: row.deliveredAt ? row.deliveredAt.toISOString() : null },
+    adEvents: capi.map((e) => {
+      const m = (e.meta ?? {}) as Record<string, unknown>;
+      return {
+        id: e.id,
+        at: e.at.toISOString(),
+        type: e.type as OrderDrawerJson["adEvents"][number]["type"],
+        platform: str(m.platform),
+        event: str(m.event ?? m.eventName),
+        reason: str(m.reason ?? m.error),
+      };
+    }),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* the orders screen's boot (P4 step 10, OPE-§12)                       */
+/* ------------------------------------------------------------------ */
+
+export interface OrdersMember {
+  id: string;
+  name: string;
+  role: string;
+}
+
+export interface OrdersBoot {
+  /** active members who take calls (Assign to…, the Agent column); display names only */
+  members: OrdersMember[];
+  savedViews: SavedViewRow[];
+  /** ops.carrierCsv (null = the first Carrier file opens the column picker, OD55) */
+  carrierCsv: { columns: { header: string; source: string; value?: string }[]; delimiter: "," | ";"; markPacked: boolean } | null;
+  /** the "shown only when it has rows" views (OPE-§12.1) */
+  nonEmpty: { delivery_problems: boolean; sheet_failed: boolean };
+}
+
+/** What the list needs beside its rows: members, saved views, the carrier columns, the conditional view tabs. */
+export async function ordersBoot(ctx: StoreCtx): Promise<OrdersBoot> {
+  const { scope } = ctx;
+  const viewer = { userId: ctx.user.id, role: ctx.membership.role, seeAll: ctx.can("orders.read_all") };
+  const probe = (view: BuiltinViewId) =>
+    db
+      .select({ id: orders.id })
+      .from(orders)
+      .where(whereStore(orders, scope, ...(view === "sheet_failed" ? [eq(orders.sheetStatus, "failed")] : [inArray(orders.shipState, ["attempt_failed", "postponed"])])))
+      .limit(1)
+      .then((r) => r.length > 0);
+  const [members, savedViews, ops, problems, failed] = await Promise.all([
+    db
+      .select({ id: users.id, name: users.name, role: storeMembers.role })
+      .from(storeMembers)
+      .innerJoin(users, eq(users.id, storeMembers.userId))
+      .where(whereStore(storeMembers, scope, eq(storeMembers.status, "active"), inArray(storeMembers.role, ["owner", "admin", "manager", "agent"]))),
+    listSavedViews(ctx),
+    getStoreSetting(scope, "ops"),
+    viewer.seeAll ? probe("delivery_problems") : Promise.resolve(false),
+    viewer.seeAll ? probe("sheet_failed") : Promise.resolve(false),
+  ]);
+  const csv = ops.carrierCsv as { columns: { header: string; source: string; value?: string }[]; delimiter?: "," | ";"; markPacked?: boolean } | null;
+  return {
+    members: members.map((m) => ({ id: m.id, name: m.name, role: m.role })).sort((a, b) => a.name.localeCompare(b.name)),
+    savedViews,
+    carrierCsv: csv ? { columns: csv.columns, delimiter: csv.delimiter ?? ";", markPacked: csv.markPacked !== false } : null,
+    nonEmpty: { delivery_problems: problems, sheet_failed: failed },
   };
 }

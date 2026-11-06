@@ -1196,6 +1196,37 @@ section = "static · console";
   check("every literal key the console renders exists in en", missing.length === 0, missing);
 }
 
+/** P4 step 10 (OPE-§12.4-§12.6): "Move to…" from the one state machine, the bulk menu, the seam's answers flattened. */
+async function ordersClient(): Promise<void> {
+  section = "pure · orders list";
+  const U = await import("@/components/admin/orders/ops-ui");
+  const can = (keys: string[]) => (p: string) => keys.includes(p);
+  const agent = U.viewerMovePerms(can(["orders.write"]) as never);
+  const manager = U.viewerMovePerms(can(["orders.write", "orders.assign", "orders.force_status", "shipments.write"]) as never);
+  const fresh = { confirm: "new", ship: "none", money: "unpaid" } as const;
+  const labels = (e: { label: string; mode: string }[], mode: string) => e.filter((x) => x.mode === mode).map((x) => x.label);
+  const a = U.moveEntries(fresh, agent);
+  check("an agent moves a new order to confirmed, cancelled (with a reason), never to shipped", labels(a, "legal").includes("confirmed") && a.find((x) => x.label === "cancelled")?.reason === "cancel" && !labels(a, "legal").includes("shipped"), a);
+  check("without orders.force_status nothing is offered under Force…", labels(a, "force").length === 0, a);
+  check("Move to… never lists `new` or `duplicate` (the duplicates block names the sibling)", !a.concat(U.moveEntries(fresh, manager)).some((x) => x.label === "new" || x.label === "duplicate"));
+  const m = U.moveEntries({ confirm: "confirmed", ship: "shipped", money: "unpaid" }, manager);
+  check("a shipped order cannot be cancelled except by force", !labels(m, "legal").includes("cancelled") && labels(m, "force").includes("cancelled"), m);
+  check("a refusal at the door is a legal shipments.write move, no reason asked (the L cell has none)", m.find((x) => x.label === "refused")?.mode === "legal" && m.find((x) => x.label === "refused")?.reason === null, m);
+  check("an agent without shipments.write gets no ship target", !U.moveEntries({ confirm: "confirmed", ship: "shipped", money: "unpaid" }, agent).some((x) => x.mode === "legal" && ["delivered", "refused", "returned"].includes(x.label)));
+  const bulk = U.bulkEntries([fresh, { confirm: "confirmed", ship: "to_pack", money: "unpaid" }], manager);
+  check("the bulk menu offers the union of legal labels, never Force…", bulk.length > 0 && bulk.every((x) => x.mode === "legal"), bulk);
+
+  const ok = await U.settle(Promise.resolve({ ok: true, data: { ok: true, data: { n: 1 } } }));
+  const flat = await U.settle(Promise.resolve({ ok: true, data: { ok: true, rev: 3, changed: true } }));
+  const inner = await U.settle(Promise.resolve({ ok: true, data: { ok: false, error: "conflict" } }));
+  const outer = await U.settle(Promise.resolve({ ok: false, error: "forbidden" }));
+  const net = await U.settle(Promise.reject(new Error("offline")));
+  check("settle: ActionResult in ActionResult → its data", ok.ok && (ok.data as { n: number }).n === 1, ok);
+  check("settle: a TransitionResult stays whole", flat.ok && (flat.data as { rev: number }).rev === 3, flat);
+  check("settle: inner and outer refusals and a network error answer { ok: false, error }", !inner.ok && inner.error === "conflict" && !outer.ok && outer.error === "forbidden" && !net.ok && net.error === "network");
+  check("the bulk idem is a UUID (OD36's cache key)", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(U.newIdem()));
+}
+
 async function consoleClient(): Promise<void> {
   section = "pure · console";
   const O = await import("@/components/admin/queue/outbox");
@@ -1326,6 +1357,8 @@ cityKeySize()
   .catch((e: unknown) => failures.push(`[pure · insights] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .then(consoleClient)
   .catch((e: unknown) => failures.push(`[pure · console] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
+  .then(ordersClient)
+  .catch((e: unknown) => failures.push(`[pure · orders list] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .finally(() => {
     const ms = performance.now() - started;
     const clock = recordSuiteTime("ops", ms);

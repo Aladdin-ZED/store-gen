@@ -573,6 +573,8 @@ export interface LegacyMoveOpts {
   inbound?: boolean;
   /** P4 step 6: "bulk" for the list's bulk "Move to…" (OPE-§12.4); default "ui" */
   source?: "ui" | "bulk";
+  /** P4 step 10: the drawer's "Mark as duplicate" names the open sibling it duplicates (OPE-§9.3) */
+  duplicateOf?: string;
 }
 
 /**
@@ -603,6 +605,7 @@ export async function moveToLegacyAs(actor: OrderActor, scope: WriteScope, id: s
       ...(opts.reason ? { reason: opts.reason } : {}),
       ...(opts.note ? { note: opts.note } : {}),
       ...(opts.inbound ? { inbound: true } : {}),
+      ...(opts.duplicateOf ? { duplicateOf: opts.duplicateOf } : {}),
     },
     wantOf: (cur) => legacyToWanted(label, cur),
     // a person's own reason wins over the label's default code

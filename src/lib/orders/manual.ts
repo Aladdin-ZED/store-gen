@@ -20,7 +20,7 @@ import "server-only";
  * carry risk 0, the flag "manual", no ad event (OD16: P5's `conversions.manualOrders` decides on its side) and never
  * `is_test` (D54: only the public path sets it).
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { auditIn } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
@@ -505,4 +505,48 @@ export async function convertLeadToOrder(ctx: WriteCtx, leadId: string, input: O
   if (!r.ok) return r;
   await markConverted(scope, leadId, r.data.orderId);
   return { ok: true, data: { orderId: r.data.orderId } };
+}
+
+/* ------------------------------------------------------------------ */
+/* the sheet's reads (OPE-§11.2, P4 step 10)                            */
+/* ------------------------------------------------------------------ */
+
+/** One live page as a compact row of the sheet's Product block. */
+export interface ManualPageRow {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+/** The published landing pages of the store, newest first (≤ 60): the only pages a manual order can be priced on. */
+export async function manualPages(scope: StoreScope): Promise<ManualPageRow[]> {
+  const rows = await db
+    .select({ id: pages.id, name: pages.name, slug: pages.slug, versionId: pages.publishedVersionId })
+    .from(pages)
+    .where(whereStore(pages, scope, eq(pages.status, "published"), eq(pages.kind, "landing")))
+    .orderBy(desc(pages.updatedAt))
+    .limit(60);
+  return rows.filter((r) => !!r.versionId).map(({ id, name, slug }) => ({ id, name, slug }));
+}
+
+/**
+ * The published document's selling part for the sheet's pickers: the items (option groups with their sold-out and
+ * not-made states), the offers, the bump. The client prices nothing on its own: `quoteManualOrder` answers the
+ * payable lines (OD15); the doc only drives which choices exist, with the page's own labels.
+ */
+export interface ManualPageModel {
+  pageId: string;
+  versionId: string;
+  currency: string;
+  doc: Pick<PageDoc, "items" | "offers" | "product" | "locale">;
+}
+
+export async function manualPageModel(scope: StoreScope, pageId: string): Promise<ManualPageModel | null> {
+  const live = await livePage(scope, pageId);
+  if (!live) return null;
+  const { items, offers, product, locale, currency } = live.doc;
+  // the upsell is a post-purchase offer of the public page: never part of a phone order
+  const sellable: PageDoc["offers"] = { ...offers };
+  delete sellable.upsell;
+  return { pageId: live.id, versionId: live.versionId, currency, doc: { items, offers: sellable, product, locale } };
 }

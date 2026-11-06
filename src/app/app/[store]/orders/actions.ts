@@ -33,7 +33,10 @@
  */
 import { z } from "zod";
 import { fail } from "@/lib/admin-data/action";
-import { orderDrawerJson, type OrderDrawerJson } from "@/lib/admin-data/orders";
+import { orderDrawerJson, parseOrderQuery, toOrderFilters, type OrderDrawerJson } from "@/lib/admin-data/orders";
+import { CITY_KEYS, cityLabel } from "@/lib/orders/address";
+import { hideNote, orderTimeline } from "@/lib/orders/events";
+import { getStoreSetting } from "@/lib/settings";
 import { revalidateStore } from "@/lib/admin-data/shell";
 import { blockFromOrder, blockPhone, isOrderStatus, requeueOrderSync, retryFailedSync, unblock } from "@/lib/orders";
 import {
@@ -43,6 +46,8 @@ import {
   bulkPin,
   deleteTestOrdersNow,
   deleteView,
+  listOrders,
+  listViewerOf,
   listSavedViews,
   MOVE_ERROR_TEXT,
   moveWithUndo,
@@ -58,7 +63,7 @@ import type { OrderStatus } from "@/lib/orders/contract";
 import { UnitIn } from "@/lib/orders/contract";
 import { dismissDuplicate } from "@/lib/orders/duplicates";
 import { editOrder, holdInstant, markCarrierNotified, phoneCountryOf, requestRecall, setOrderHold, setOrderTracking, type OrderPatch } from "@/lib/orders/edit";
-import { ConvertLeadSchema, convertLeadToOrder, createManualOrderWith, ManualOrderSchema, quoteManualOrder } from "@/lib/orders/manual";
+import { ConvertLeadSchema, convertLeadToOrder, createManualOrderWith, ManualOrderSchema, manualPageModel, manualPages, quoteManualOrder } from "@/lib/orders/manual";
 import { openTestOrder } from "@/lib/callcenter/commands.server";
 import { assignOrders } from "@/lib/orders/queue";
 import { moveToLegacy } from "@/lib/orders/transition";
@@ -97,6 +102,8 @@ const Patch = z.strictObject({
 });
 
 const refresh = (handle: string) => revalidateStore(handle, "/orders", "");
+/** the list's page size (the first page is server-rendered with the same) */
+const LIST_PAGE_SIZE = 40;
 
 /* ------------------------------------------------------------------ */
 /* the drawer                                                          */
@@ -113,9 +120,9 @@ export async function getOrderAction(id: string): Promise<ActionResult<OrderDraw
 /* ------------------------------------------------------------------ */
 
 /** "Move to…" (OPE-§12.6): a legacy label through the one writer; the rev the drawer rendered guards it (OD4). */
-export async function moveOrderAction(id: string, status: string, expectRev?: number, opts: { reason?: string; note?: string } = {}) {
+export async function moveOrderAction(id: string, status: string, expectRev?: number, opts: { reason?: string; note?: string; duplicateOf?: string } = {}) {
   return storeAction("orders.write", async (ctx) => {
-    const o = z.strictObject({ reason: z.string().max(200).optional(), note: z.string().max(500).optional() }).parse(opts);
+    const o = z.strictObject({ reason: z.string().max(200).optional(), note: z.string().max(500).optional(), duplicateOf: OrderId.optional() }).parse(opts);
     // the undo token rides along when the order moved (OPE-§12.5: "Undo" for 10 s)
     const res = await moveWithUndo(ctx, OrderId.parse(id), Status.parse(status), expectRev === undefined ? undefined : Rev.parse(expectRev), o);
     if (res.ok && res.changed) refresh(ctx.store.handle);
@@ -382,4 +389,56 @@ export async function reorderViewsAction(ids: string[]) {
 /** pages.publish: ⌘K "Open a test order" (a TEST-chipped order through the real form, core D54). */
 export async function openTestOrderAction() {
   return storeAction("pages.publish", (ctx) => openTestOrder(ctx));
+}
+
+/* ------------------------------------------------------------------ */
+/* the list, the drawer timeline and the manual-order sheet (step 10)  */
+/* ------------------------------------------------------------------ */
+
+/** "Show more" (OPE-§12.2): the next keyset page of the URL's query; the agent predicate is added server-side (OD12). */
+export async function listOrdersAction(params: Record<string, string>, after: string) {
+  return storeAction("orders.read", async (ctx) => {
+    const sp = z.record(z.string().max(40), z.string().max(400)).parse(params);
+    const query = parseOrderQuery({ ...sp, after: z.string().max(200).parse(after) });
+    if (!query.after) return fail("Unknown page.");
+    const filters = toOrderFilters(query, ctx.store.timezone, listViewerOf(ctx));
+    return listOrders(ctx.scope, filters, { after: query.after, pageSize: LIST_PAGE_SIZE });
+  });
+}
+
+/** The drawer's timeline (OPE-§4.2): a filter chip and "Show more" (keyset on the event id). */
+export async function orderTimelineAction(id: string, opts: { filter?: string; beforeId?: number } = {}) {
+  return storeAction("orders.read", (ctx) => {
+    const o = z.strictObject({ filter: z.enum(["all", "calls", "changes", "notes"]).optional(), beforeId: z.number().int().positive().optional() }).parse(opts);
+    return orderTimeline(ctx.scope, ctx, OrderId.parse(id), { filter: o.filter, beforeId: o.beforeId, limit: 30 });
+  });
+}
+
+/** Managers hide a note (the text stays stored for the audit, `note_hidden`). */
+export async function hideNoteAction(id: string, eventId: number) {
+  return storeAction("orders.assign", (ctx) => hideNote(ctx, OrderId.parse(id), z.number().int().positive().parse(eventId)));
+}
+
+/** The manual-order sheet's boot: live pages, the market's city list, the address rule, the adjustment right. */
+export async function manualSheetBootAction() {
+  return storeAction("orders.create", async (ctx) => {
+    const [livePages, checkout] = await Promise.all([manualPages(ctx.scope), getStoreSetting(ctx.scope, "checkout")]);
+    const market = ctx.store.market.toUpperCase();
+    return {
+      pages: livePages,
+      market,
+      country: phoneCountryOf(ctx.store),
+      addressMode: (checkout.addressMode ?? "required") as "required" | "optional",
+      cities: market === "MA" ? CITY_KEYS.map((k) => ({ key: k as string, value: cityLabel(k, "fr"), ar: cityLabel(k, "ar"), en: cityLabel(k, "en") })) : [],
+      canAdjust: ctx.can("orders.assign"),
+      currency: ctx.store.currency,
+    };
+  });
+}
+
+/** One live page's selling part for the sheet's pickers (null text answer: not live, or another store's id). */
+export async function manualPageAction(pageId: string) {
+  return storeAction("orders.create", async (ctx) => {
+    return (await manualPageModel(ctx.scope, z.string().regex(/^[0-9A-Z]{26}$/).parse(pageId))) ?? fail("This page isn't live anymore.");
+  });
 }

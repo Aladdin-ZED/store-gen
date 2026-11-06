@@ -11,7 +11,7 @@ import { parseOrderQuery, rangeBounds, toOrderFilters } from "@/lib/admin-data/o
 import { auditIn } from "@/lib/admin-data/store-audit";
 import { dayKey } from "@/lib/admin-data/time";
 import { leadsCsv, ordersCsv } from "@/lib/orders";
-import { listViewerOf } from "@/lib/orders/admin";
+import { idsParam, listViewerOf } from "@/lib/orders/admin";
 import { apiHeaders } from "@/lib/orders/http";
 import { assertOwned } from "@/lib/tenancy/owned";
 import { requireStepUp, storeGuard } from "@/lib/tenancy/seam";
@@ -27,15 +27,18 @@ export async function GET(req: NextRequest, route: Params): Promise<Response> {
   const params = Object.fromEntries(req.nextUrl.searchParams);
   const leads = params.tab === "leads";
   const query = parseOrderQuery(params);
+  // "Export selection" (OPE-§12.4): the list's selected ids, still under the viewer's predicate and the filters
+  const selection = params.ids ? idsParam(params.ids) : null;
+  if (params.ids && !selection) return Response.json({ error: "invalid" }, { status: 400 });
   // the page filter is recorded only when it names one of the store's pages (another store's id is nobody's here)
   const page = query.pageId ? await assertOwned(scope, "page", [query.pageId]).then(() => query.pageId, () => null) : null;
   await auditIn(scope, actor, "orders.exported", {
-    meta: { ...(leads ? { leads: true } : { status: query.status, view: query.view }), range: query.range, page, q: !!query.q, stepUp },
+    meta: { ...(leads ? { leads: true } : { status: query.status, view: query.view }), range: query.range, page, q: !!query.q, ...(selection ? { selected: selection.length } : {}), stepUp },
   });
 
   const stream = leads
     ? leadsCsv(scope, { q: query.q || undefined, pageId: query.pageId ?? undefined, ...rangeBounds(query, store.timezone) })
-    : ordersCsv(scope, toOrderFilters(query, store.timezone, listViewerOf(g.ctx)));
+    : ordersCsv(scope, { ...toOrderFilters(query, store.timezone, listViewerOf(g.ctx)), ...(selection ? { ids: selection } : {}) });
   const headers = apiHeaders({
     "Content-Type": "text/csv; charset=utf-8",
     "Content-Disposition": `attachment; filename="${leads ? "abandoned-leads" : "orders"}-${dayKey(new Date(), store.timezone)}.csv"`,

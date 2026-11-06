@@ -721,4 +721,10 @@ export const actions: TrackActionCase[] = [
   { file: FINANCE, name: "saveAdAccountAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: () => [{ platform: "meta", currency: "EUR" }], own: () => [{ platform: "meta", currency: "USD" }] },
   { file: FINANCE, name: "saveAdRateAction", area: "settings", path: "/finance", permission: ["finance.write"], write: true, victim: () => [{ currency: "EUR", fromDay: "2026-10-01", rateMilli: 1 }], own: () => [{ currency: "USD", fromDay: "2026-10-01", rateMilli: 9_850 }] },
   { file: FINANCE, name: "markCashReceivedAction", area: "orders", path: "/finance", permission: ["finance.write"], write: true, victim: (fx) => [[fx.A.order.main]], own: async (fx, fresh) => [[await fresh.order(fx.B)]] },
+  // P4 step 10: the list's "Show more", the drawer's timeline and note hiding, the manual-order sheet's reads
+  { file: ORDERS, name: "listOrdersAction", area: "orders", path: "/orders", permission: ["orders.read"], write: false, victim: (fx) => [{ page_id: fx.A.page.live }, "MjAyNi0xMS0wNlQwMDowMDowMC4wMDBaLiIx"], own: (fx) => [{ page_id: fx.B.page.live }, "MjAyNi0xMS0wNlQwMDowMDowMC4wMDBaLiIx"] },
+  { file: ORDERS, name: "orderTimelineAction", area: "orders", path: "/orders", permission: ["orders.read"], write: false, victim: (fx) => [fx.A.order.main, { filter: "notes" }], own: (fx) => [fx.B.order.main, { filter: "all" }] },
+  { file: ORDERS, name: "hideNoteAction", area: "orders", path: "/orders", permission: ["orders.assign"], write: true, victim: (fx) => [fx.A.order.main, 1], own: (fx) => [fx.B.order.main, 1] },
+  { file: ORDERS, name: "manualSheetBootAction", area: "orders", path: "/orders", permission: ["orders.create"], write: true, victim: () => [], own: () => [] },
+  { file: ORDERS, name: "manualPageAction", area: "orders", path: "/orders", permission: ["orders.create"], write: true, victim: (fx) => [fx.A.page.live], own: (fx) => [fx.B.page.live] },
 ];
