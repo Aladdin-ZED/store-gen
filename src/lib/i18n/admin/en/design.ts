@@ -188,4 +188,16 @@ export const messages = {
   "design.colour.indigo": "indigo",
   "design.colour.plum": "plum",
   "design.colour.violet": "violet",
+  // Store Health and ⌘K search (DES-§8.11, SP-1)
+  "design.health.q_low": "A live page scores under 70 on design quality. Open the Design check to see what pulls it down.",
+  "design.health.q_low.fix": "Open the Design check",
+  "design.health.slop": "A live page has generic design patterns. One click fixes them all.",
+  "design.health.slop.fix": "Fix all",
+  "design.health.pages_close": "Two of your live pages look almost the same. Differentiate the newer one so each product stands on its own.",
+  "design.health.pages_close.fix": "Differentiate",
+  "design.health.no_dna": "A live page was made before design DNA. Remix its design to get a look of its own.",
+  "design.health.no_dna.fix": "Remix design",
+  "design.health.brand_empty": "Your pages share no logo and no locked colours yet. Add your brand so every page looks like your store.",
+  "design.health.brand_empty.fix": "Set up your brand",
+  "design.search.group": "Pages by design",
 } as const satisfies Record<string, string>;

@@ -24,6 +24,17 @@
  *  - the repository: the publish flip (previous live row reserved 30 days, first_published_at from the page), release,
  *    the 600-row cap (oldest non-live first), the generation record ≤ 600 B, own reads scoped to the store.
  *
+ * Step 10 adds the publish lifecycle (DG-05 / DG-07 rows; DES-§7.5, §7.8, §7.9 step 4, §8.7, §8.8):
+ *  - the listener writes the published row and flips the previous one; first come keeps its design by
+ *    pages.first_published_at, also after the incumbent's old versions and genome rows were pruned;
+ *  - N2 by product (15 distinct pages: 0 refusals; a near-copy: design:N2; another product: a note only);
+ *  - N8 by origin (30 engine-only owners: 0 N8; a 40 % line: owner and library N05, engine design:N8);
+ *  - the exhaustion path (saturated: soft N1 with fallback = 1, published, the row records fallback; a clearing
+ *    variant: hard N1 naming it; d < 0.12: hard whatever the niche) and warn mode;
+ *  - the save path stores the recomputed q / slop over a forged q = 95; a legacy page gets one draft derived row;
+ *  - reservation transitions (suspend, restore, close, purge, expiry), retention and the cap, the backfill;
+ *  - two stores' identical cart templates: no pool row and no N1; designHealth and the design search.
+ *
  *   npm run test:design-db [-- --db cod_test_p6_design] [--keep]
  *
  * Creates a throwaway database on the local MariaDB (root, no password, 127.0.0.1:3306; the name must be cod_test_*),
@@ -197,6 +208,7 @@ async function main() {
   ok("purge leaves 0 rows for the owner tag", (await db.select().from(headlineShingles).where(eq(headlineShingles.ownerTag, H.ownerTagFor(STORE_B)))).length === 0);
 
   await noveltyChecks();
+  await publishChecks();
 
   console.log(`design-db: ${pass} passed, ${failures.length} failed`);
   for (const f of failures) console.log(`  ✗ ${f}`);
@@ -411,11 +423,23 @@ async function noveltyChecks() {
   ok("polls within one hour are identical", before.every((x) => JSON.stringify(x) === JSON.stringify(before[0])) && after.every((x) => JSON.stringify(x) === JSON.stringify(after[0])));
   ok("the refresh sees the newcomer", before[0]!.n === 10 && after[0]!.n === 10 && JSON.stringify(before[0]) !== JSON.stringify(after[0]));
   const reach = (share: number, stores: number, c: number) => [-1, 0, 1].some((e) => Math.round(Math.min(1, Math.max(0, (c + e) / stores)) * 10) / 10 === share);
+  // the attacker's candidates are the gene's whole vocabulary (public), not only the values the two polls show: a value
+  // under the noise floor in both polls stays a candidate (the noise keys on the hour, so the visible set varies)
+  const { COLOR_STRATEGIES, EASE_FAMILIES, GRAMMARS } = load<typeof import("@/lib/design/genome")>("@/lib/design/genome");
+  const { FONT_TOKENS, HERO_TOKENS } = load<typeof import("@/lib/design/tokens-table")>("@/lib/design/tokens-table");
+  const vocab: Record<string, readonly string[]> = {
+    grammar: GRAMMARS,
+    strategy: COLOR_STRATEGIES,
+    motion: EASE_FAMILIES,
+    displayFamily: FONT_TOKENS,
+    arDisplay: FONT_TOKENS,
+    heroFamily: [...new Set(HERO_TOKENS.map((t) => t.split("/")[0]!))],
+  };
   let weakest = Infinity;
   for (const field of ["grammar", "strategy", "motion", "displayFamily", "arDisplay", "heroFamily"] as const) {
     const b = before[0]![field];
     const a = after[0]![field];
-    const values = [...new Set([...Object.keys(b), ...Object.keys(a)])];
+    const values = [...new Set([...vocab[field]!, ...Object.keys(b), ...Object.keys(a)])];
     let consistent = 0;
     for (const v of values) {
       // per value u, the counts c ∈ [0, 10] of the 10 earlier stores that explain both polls if the newcomer has v
@@ -433,7 +457,7 @@ async function noveltyChecks() {
   const pE = await pageOf(ids[0]!, "Lampe", new Date(Date.now() - 3 * 86_400_000));
   const vE = stored(D.distanceView(genomeOf(pE.doc), { theme: pE.doc.theme }, pE.doc.locale));
   // another store 13 cheap units away: niche too_close (τ 0.40), platform ok; a variant moves past it
-  const away: View = stored({ ...shift(vE, 10), num: { ...vE.num, rd: vE.num.rd > 0.5 ? 0 : 1, space: vE.num.space > 0.5 ? 0 : 1, area: vE.num.area > 0.5 ? 0 : 1 } });
+  const away: View = stored({ ...shift(vE, 10), num: { ...vE.num, rd: vE.num.rd > 0.5 ? 0 : 1, w: vE.num.w > 0.5 ? 0 : 1, space: vE.num.space > 0.5 ? 0 : 1, area: vE.num.area > 0.5 ? 0 : 1, ctas: vE.num.ctas > 0.5 ? 0 : 1 } });
   await putRow(ids[20]!, E, away, { fpa: new Date(Date.now() - 10 * 86_400_000) });
   fresh();
   const first = await Nv.exhaustionTest(A, { pageId: pE.pageId, doc: pE.doc }, E);
@@ -471,6 +495,321 @@ async function noveltyChecks() {
   ok("a live or reserved row is never capped", (await db.select().from(designGenomes).where(eq(designGenomes.storeId, ids[0]!))).every((r) => r.live || (r.reservedUntil && r.reservedUntil.getTime() > Date.now())));
   await G.purgeGenomes(C);
   ok("purge: 0 rows left for the store, the others untouched", (await db.select().from(designGenomes).where(eq(designGenomes.storeId, ids[2]!))).length === 0 && (await db.select().from(designGenomes).where(eq(designGenomes.storeId, ids[1]!))).length > 0);
+}
+
+/* ------------------------------------------------------------------ */
+/* step 10: the publish lifecycle                                      */
+/* ------------------------------------------------------------------ */
+
+async function publishChecks() {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { sql, eq, and } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const { designGenomes, pages, pageVersions, stores, settings, headlineShingles } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId, newPublicKey } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  const Nv = load<typeof import("@/lib/design/novelty.server")>("@/lib/design/novelty.server");
+  const G = load<typeof import("@/lib/design/genomes.server")>("@/lib/design/genomes.server");
+  const H = load<typeof import("@/lib/design/headlines.server")>("@/lib/design/headlines.server");
+  const D = load<typeof import("@/lib/design/distance")>("@/lib/design/distance");
+  const Pl = load<typeof import("@/lib/design/pool")>("@/lib/design/pool");
+  const P = load<typeof import("@/lib/render/prepublish/design")>("@/lib/render/prepublish/design");
+  const S = load<typeof import("@/lib/design/save.server")>("@/lib/design/save.server");
+  const J = load<typeof import("@/lib/jobs/tracks/design")>("@/lib/jobs/tracks/design");
+  const { designHealth } = load<typeof import("@/lib/design/health.server")>("@/lib/design/health.server");
+  const { searchDesign } = load<typeof import("@/lib/admin-data/search/design")>("@/lib/admin-data/search/design");
+  const { rules } = load<typeof import("@/lib/health/rules/design")>("@/lib/health/rules/design");
+  const { cleanDoc, directionsOf, storeTemplate } = load<typeof import("@/lib/design/fixtures/prepublish")>("@/lib/design/fixtures/prepublish");
+  const { genomeOf } = load<typeof import("@/lib/design/derive")>("@/lib/design/derive");
+  const { gateInputFor } = load<typeof import("@/lib/design/gate-input")>("@/lib/design/gate-input");
+  const { runGates } = load<typeof import("@/lib/design/gates")>("@/lib/design/gates");
+  const { textFieldsOf, originFrom } = load<typeof import("@/lib/render/origin")>("@/lib/render/origin");
+  const { buildTheme } = load<typeof import("@/lib/theme")>("@/lib/theme");
+  const { shingles } = load<typeof import("@/lib/design/text/shingles")>("@/lib/design/text/shingles");
+  const { guessLocale } = load<typeof import("@/lib/design/text/normalize")>("@/lib/design/text/normalize");
+  const { invalidatePlatformSettings } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  type PageDoc = import("@/lib/page/schema").PageDoc;
+  type View = import("@/lib/design/distance").DistanceView;
+  type Ctx = import("@/lib/render/prepublish").PrePublishCtx;
+  type Check = Awaited<ReturnType<typeof P.designCheck>>;
+
+  for (const t of ["design_genomes", "page_versions", "pages", "rate_limits", "headline_shingles"]) await db.execute(sql.raw(`DELETE FROM \`${t}\``));
+  await db.execute(sql.raw("DELETE FROM `settings` WHERE `key` = 'platform_design'"));
+  invalidatePlatformSettings("platform_design");
+  await db.execute(sql.raw("DELETE FROM `stores`"));
+  const ids = Array.from({ length: 40 }, (_, i) => `9${String(i + 1).padStart(25, "0")}`);
+  await db.insert(stores).values(ids.map((id, k) => ({ id, handle: `pl-${k}`, name: `pl ${k}`, status: "active" as const, brandSeed: "0123456789abcdef", category: "skincare" })));
+  const sys = systemCtx("qa.design_publish");
+  const scopeOf = (i: number) => systemScope(sys, ids[i]!) as import("@/lib/tenancy/types").WriteScope;
+  const stored = (v: View) => D.unpackView(D.packView(v));
+  const CHEAP = ["base", "ladder", "mask", "depth", "button", "emphasis", "glyph", "motion", "density", "align"] as const;
+  const shift = (v: View, n: number): View => {
+    const out = { ...v, cat: { ...v.cat } } as View & { cat: Record<string, number> };
+    for (let i = 0; i < n; i++) out.cat[CHEAP[i]!] = (out.cat[CHEAP[i]!] ?? 0) + 1;
+    return stored(out);
+  };
+  const viewOf = (doc: PageDoc) => D.distanceView(genomeOf(doc), { theme: doc.theme }, doc.locale);
+  /** a page (and its published version) of a store; `name` sets the product */
+  const pageOf = async (i: number, doc0: PageDoc, o: { name?: string; fpa?: Date | null; status?: "published" | "draft" } = {}) => {
+    const doc = structuredClone(doc0);
+    if (o.name) doc.product = { ...doc.product, name: o.name };
+    const pageId = newId();
+    const versionId = newId();
+    await db.insert(pages).values({ storeId: ids[i]!, id: pageId, slug: `p-${pageId.slice(-8).toLowerCase()}`, name: doc.product.name, status: o.status ?? "published", locale: doc.locale, publicKey: newPublicKey(), draft: doc as never, publishedVersionId: versionId, firstPublishedAt: o.fpa === undefined ? new Date() : o.fpa });
+    await db.insert(pageVersions).values({ storeId: ids[i]!, id: versionId, pageId, kind: "publish", label: null, doc: doc as never, checksum: "0".repeat(64) });
+    return { pageId, versionId, doc };
+  };
+  const ctxOf = (i: number, p: { pageId: string; doc: PageDoc }, mode: "block" | "warn" = "block"): Ctx => ({
+    scope: scopeOf(i),
+    store: { id: ids[i]! } as never,
+    pageId: p.pageId,
+    doc: p.doc,
+    prev: null,
+    theme: buildTheme(p.doc.theme, p.doc.locale),
+    assets: new Map(),
+    actor: { kind: "system", userId: null, impersonatorId: null, ip: null },
+    now: new Date(),
+    mode,
+  });
+  const publishRow = async (i: number, p: { pageId: string; versionId: string; doc: PageDoc }) => P.designListener({ ...ctxOf(i, p), versionId: p.versionId, event: "published" });
+  const listOf = (r: Check) => (r.result.ok ? (r.result.notes ?? []) : r.result.items);
+  const idsOf = (r: Check) => listOf(r).map((x) => `${x.level}:${x.id}`);
+  const has = (r: Check, id: string, level?: "hard" | "soft") => listOf(r).some((x) => x.id === id && (!level || x.level === level));
+  const setDesign = async (value: Record<string, unknown> | null) => {
+    await db.execute(sql.raw("DELETE FROM `settings` WHERE `key` = 'platform_design'"));
+    if (value) await db.insert(settings).values({ key: "platform_design", value: value as never, encrypted: false });
+    invalidatePlatformSettings("platform_design");
+  };
+  const fresh = () => Nv.resetNoveltyPool();
+  const clean = cleanDoc("parfum", "fr", 0, 3);
+  const NICHE = "MA:skincare";
+
+  // --- the listener: the published row, the flip ---
+  const a1 = await pageOf(0, clean, { fpa: new Date(Date.now() - 5 * 86_400_000) });
+  await publishRow(0, a1);
+  const r1 = await G.pageGenomes(scopeOf(0), a1.pageId);
+  ok("the listener writes one live published row with q / slop", r1.length === 1 && r1[0]!.live && r1[0]!.pool && r1[0]!.source === "published" && typeof r1[0]!.q === "number", r1);
+  await P.designCheck(ctxOf(0, a1));
+  await publishRow(0, a1);
+  const r2 = await G.pageGenomes(scopeOf(0), a1.pageId);
+  ok("a republish flips the previous row to the reservation", r2.length === 2 && r2.filter((r) => r.live).length === 1 && r2.every((r) => r.pool), r2);
+  ok("the republished row carries the check's bands", !!r2.find((r) => r.live)?.novelty?.platform, r2.find((r) => r.live)?.novelty);
+  await P.designListener({ ...ctxOf(0, a1), versionId: a1.versionId, event: "unpublished" });
+  ok("unpublish: no live row left", (await G.pageGenomes(scopeOf(0), a1.pageId)).every((r) => !r.live));
+  ok("the listener never throws (a broken doc is logged)", await P.designListener({ ...ctxOf(0, a1), doc: {} as PageDoc, versionId: "x", event: "published" }).then(() => true, () => false));
+  await publishRow(0, a1);
+
+  // --- first come keeps its design (pages.first_published_at) ---
+  const b1 = await pageOf(1, clean, { fpa: new Date() });
+  fresh();
+  const bFirst = await P.designCheck(ctxOf(1, b1));
+  ok("B's copy of A's live design is refused (design:N1)", !bFirst.result.ok && has(bFirst, "design:N1", "hard"), idsOf(bFirst));
+  await publishRow(1, b1); // B went live anyway (warn mode at the time): its row is the newcomer's
+  fresh();
+  const aAgain = await P.designCheck(ctxOf(0, a1));
+  ok("A republishes and is not refused for its own design", !has(aAgain, "design:N1"), idsOf(aAgain));
+  ok("B is still refused", has(await P.designCheck(ctxOf(1, b1)), "design:N1", "hard"));
+  // prune A's old versions and non-live genome rows: the page's first_published_at still decides
+  await db.delete(designGenomes).where(and(eq(designGenomes.storeId, ids[0]!), eq(designGenomes.live, false)));
+  fresh();
+  ok("after pruning A's old rows A is still the incumbent", !has(await P.designCheck(ctxOf(0, a1)), "design:N1"));
+  ok("…and B is still refused", has(await P.designCheck(ctxOf(1, b1)), "design:N1", "hard"));
+  // timing (Node unit timing): ≤ 60 ms median, warm
+  const times: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    const t0 = performance.now();
+    await P.designCheck(ctxOf(0, a1));
+    times.push(performance.now() - t0);
+  }
+  times.sort((x, y) => x - y);
+  ok("the publish check ≤ 60 ms (median of 7, warm)", times[3]! <= 60, { ms: times.map((t) => Math.round(t)) });
+  await db.delete(designGenomes);
+  fresh();
+
+  // --- N2 by product ---
+  // 15 distinct pages: engine directions kept pairwise apart (d_page ≥ τ_own), as the wizard's repulsion keeps them
+  const docs15: PageDoc[] = [];
+  for (let seed = 1; seed <= 14 && docs15.length < 15; seed++)
+    for (const { doc } of directionsOf("argan", "fr", seed))
+      if (docs15.length < 15 && docs15.every((d) => D.genomeDistance(viewOf(d), viewOf(doc), "page") >= Nv.thresholds().ownPage + 0.02)) docs15.push(doc);
+  let n2 = 0;
+  const own: { pageId: string; versionId: string; doc: PageDoc }[] = [];
+  for (const d of docs15) {
+    const p = await pageOf(2, d, { name: "Huile d'argan" });
+    if (has(await P.designCheck(ctxOf(2, p)), "design:N2")) n2++;
+    await publishRow(2, p);
+    own.push(p);
+  }
+  ok("15 distinct pages of one product: 0 design:N2", docs15.length === 15 && n2 === 0, { n2, pages: docs15.length });
+  const copy6 = await pageOf(2, own.at(-1)!.doc, { name: "Huile d'argan" });
+  const c6 = await P.designCheck(ctxOf(2, copy6));
+  ok("a near-copy of a recent page of the product: design:N2", has(c6, "design:N2", "hard") && !c6.result.ok, idsOf(c6));
+  const other = await pageOf(2, own.at(-1)!.doc, { name: "Savon noir" });
+  const cOther = await P.designCheck(ctxOf(2, other));
+  ok("the same design for another product: a note only (own close), never N2", !has(cOther, "design:N2") && cOther.novelty?.own === "close", { ids: idsOf(cOther), own: cOther.novelty?.own });
+  await publishRow(2, other);
+  const health = await designHealth(scopeOf(2));
+  ok("designHealth: the store's live pages and the close pair (newer last)", health.pages.length === 16 && health.closePairs.some(([, b]) => b === other.pageId), { n: health.pages.length, pairs: health.closePairs.length });
+  const issue = await rules.find((r) => r.id === "design:pages_close")!.collect(scopeOf(2), { design: health } as never);
+  ok("the pages_close rule fires on the store's own pair", issue?.id === "design:pages_close" && issue.severity === 1);
+  ok("designHealth of another store is empty", (await designHealth(scopeOf(3))).pages.length === 0);
+  const hits = await searchDesign(scopeOf(2), "argan", { userId: "nobody", role: "owner" });
+  ok("⌘K design search: ≤ 8 page hits of the store, chip labels in the hint, edit hrefs", hits.length > 0 && hits.length <= 8 && hits.every((h) => h.kind === "page" && h.href.endsWith("/edit") && !!h.subtitle), hits.slice(0, 2));
+  ok("⌘K design search finds nothing in another store", (await searchDesign(scopeOf(3), "argan", { userId: "nobody", role: "owner" })).length === 0);
+  await db.delete(designGenomes);
+  fresh();
+
+  // --- N8 by origin ---
+  const heroId = clean.sections.find((s) => s.type === "hero")!.id;
+  const heroTitle = [...textFieldsOf(clean)].find(([path]) => path.startsWith(`${heroId}.`) && /\.(title|headline)$/.test(path))!;
+  const masked = P.linesOf(clean).find((l) => l.path === heroTitle[0])!.text;
+  const lineHashes = shingles(masked, guessLocale(masked)).map((sh) => H.shingleHash(NICHE, sh));
+  const seedOwners = async (n: number, holding: number) => {
+    await db.delete(headlineShingles);
+    for (let i = 0; i < n; i++) {
+      const tag = H.ownerTagFor(`engine-owner-${i}`);
+      const mine = shingles(`ligne ${i} unique pour la boutique ${i} avec des mots ${i * 7}`, "fr").map((sh) => H.shingleHash(NICHE, sh));
+      await db.insert(headlineShingles).values([...new Set([...(i < holding ? lineHashes : []), ...mine])].map((hash) => ({ nicheKey: NICHE, hash, ownerTag: tag, kind: "title" as const })));
+    }
+  };
+  const engineMap = new Map([[heroTitle[0], "engine" as const]]);
+  const asOrigin = async (i: number, origin: "engine" | "owner" | "library") => {
+    const p = await pageOf(i, clean);
+    if (origin !== "library") await G.recordChosen(scopeOf(i), { pageId: p.pageId, niche: NICHE, genome: genomeOf(clean), view: viewOf(clean), gen: origin === "engine" ? G.generationRecord(clean, engineMap) : {} });
+    return P.designCheck(ctxOf(i, p));
+  };
+  const n8 = (r: Check) => idsOf(r).filter((x) => /N8|N05/.test(x));
+  await seedOwners(30, 0);
+  const e30 = await asOrigin(4, "engine");
+  ok("30 engine-only owners in the niche: 0 design:N8", !has(e30, "design:N8") && !has(e30, "design:N05"), n8(e30));
+  await seedOwners(10, 4);
+  const eHigh = await asOrigin(5, "engine");
+  const oHigh = await asOrigin(6, "owner");
+  const lHigh = await asOrigin(7, "library");
+  ok("an engine line at 40 %: design:N8 (hard)", has(eHigh, "design:N8", "hard"), n8(eHigh));
+  ok("an owner line at 40 %: N05 only", !has(oHigh, "design:N8") && has(oHigh, "design:N05", "soft"), n8(oHigh));
+  ok("a library line at 40 %: N05 only", !has(lHigh, "design:N8") && has(lHigh, "design:N05", "soft"), n8(lHigh));
+  ok("the hard N8 names the line's field", listOf(eHigh).some((x) => x.id === "design:N8" && x.field === heroTitle[0]));
+  await db.delete(headlineShingles);
+  await db.delete(designGenomes);
+  fresh();
+
+  // --- the exhaustion path (DES-§7.9 step 4) ---
+  const pE = await pageOf(8, clean);
+  const vE = stored(viewOf(clean));
+  const putOther = async (i: number, view: View) =>
+    db.insert(designGenomes).values({ id: newId(), storeId: ids[i]!, pageId: newId(), versionId: null, kind: "page", source: "published", niche: NICHE, bucket: Pl.bucketKey(NICHE, view), genomeV: 1, vec: D.packView(view), genome: { v: 1, s: 1, b: {}, p: {}, x: [] }, seed: 1, priorsV: "p1", firstPublishedAt: new Date(Date.now() - 30 * 86_400_000), live: true, pool: true, createdAt: new Date(), updatedAt: new Date() });
+  const exLabel = (r: Check) => (r.exhausted === "exhausted" ? "exhausted" : (r.exhausted?.gene ?? null));
+  await putOther(9, shift(vE, 10));
+  await setDesign({ thresholds: { niche: 0.8 } });
+  fresh();
+  const sat = await P.designCheck(ctxOf(8, pE));
+  ok("a saturated niche: soft N1 with fallback = 1, the page publishes", sat.result.ok && sat.exhausted === "exhausted" && listOf(sat).some((x) => x.id === "design:N1" && x.level === "soft" && x.vars?.fallback === 1), { ok: sat.result.ok, ex: exLabel(sat), ids: idsOf(sat), nov: sat.novelty });
+  await publishRow(8, pE);
+  const satRow = (await G.pageGenomes(scopeOf(8), pE.pageId)).find((r) => r.live);
+  ok("the published row records fallback", satRow?.novelty?.fallback === true, satRow?.novelty);
+  await db.delete(designGenomes);
+  await setDesign(null);
+  const away: View = stored({ ...shift(vE, 10), num: { ...vE.num, rd: vE.num.rd > 0.5 ? 0 : 1, w: vE.num.w > 0.5 ? 0 : 1, space: vE.num.space > 0.5 ? 0 : 1, area: vE.num.area > 0.5 ? 0 : 1, ctas: vE.num.ctas > 0.5 ? 0 : 1 } });
+  await putOther(10, away);
+  fresh();
+  const clear = await P.designCheck(ctxOf(8, pE));
+  ok("one clearing variant: hard N1 naming it", !clear.result.ok && clear.exhausted !== null && clear.exhausted !== "exhausted" && listOf(clear).some((x) => x.id === "design:N1" && x.level === "hard" && typeof x.vars?.gene === "string"), { ex: exLabel(clear), nov: clear.novelty, ids: idsOf(clear) });
+  await db.delete(designGenomes);
+  await putOther(11, vE);
+  await setDesign({ thresholds: { niche: 0.8 } });
+  fresh();
+  const clone = await P.designCheck(ctxOf(8, pE));
+  ok("d < 0.12 to another store: hard N1 whatever the niche (no fallback)", !clone.result.ok && clone.exhausted === null && listOf(clone).some((x) => x.id === "design:N1" && x.level === "hard" && x.vars?.clone === 1), idsOf(clone));
+  // warn mode (the platform switch): the publish goes through, the hard items stay hard notes
+  await setDesign({ gatesAtPublish: "warn", thresholds: { niche: 0.8 } });
+  const warned = await P.designCheck(ctxOf(8, pE));
+  ok("warn mode: the publish goes through, the hard N1 stays a hard note (audited by the core)", warned.mode === "warn" && warned.result.ok && listOf(warned).some((x) => x.id === "design:N1" && x.level === "hard"));
+  await setDesign(null);
+  await db.delete(designGenomes);
+  fresh();
+
+  // --- identical cart templates of two stores: no pool row, no N1 ---
+  const cart = storeTemplate("cart");
+  const cartCheck = async (i: number) => {
+    const ctx = { ...ctxOf(i, { pageId: newId(), doc: clean }), doc: cart as unknown as PageDoc };
+    const r = await P.designCheck(ctx);
+    await P.designListener({ ...ctx, versionId: newId(), event: "published" });
+    return r;
+  };
+  const c1 = await cartCheck(12);
+  const c2 = await cartCheck(13);
+  ok("two stores' identical cart templates: no N1, no novelty", !has(c1, "design:N1") && !has(c2, "design:N1") && c2.novelty === null);
+  ok("…and no genome row", (await db.select({ id: designGenomes.id }).from(designGenomes)).length === 0);
+
+  // --- the save path: the server's q / slop, whatever the client sent ---
+  const sv = await pageOf(14, clean, { status: "draft", fpa: null });
+  await G.recordChosen(scopeOf(14), { pageId: sv.pageId, niche: NICHE, genome: genomeOf(clean), view: viewOf(clean), q: 95, slop: 0 });
+  await S.recordDraftDesign(scopeOf(14), sv.pageId, clean);
+  const expected = runGates(gateInputFor(clean, { kind: "landing", theme: buildTheme(clean.theme, clean.locale), look: clean.theme.look ?? null, assets: new Map(), locale: clean.locale, context: "save", origin: originFrom(null, clean, null), facts: { facts: [], productName: clean.product.name ?? null, price: clean.items[0]?.price ?? null }, ownerProof: false }));
+  const saved = await S.draftRows(scopeOf(14), sv.pageId);
+  ok("save stores the recomputed q / slop despite a forged q = 95", saved.length === 1 && saved[0]!.q === Math.round(expected.q) && saved[0]!.q !== 95 && saved[0]!.slop === expected.slop.score, { saved, q: expected.q });
+  const legacy = await pageOf(14, clean, { status: "draft", fpa: null });
+  await S.recordDraftDesign(scopeOf(14), legacy.pageId, clean);
+  await S.recordDraftDesign(scopeOf(14), legacy.pageId, clean);
+  const lrows = await S.draftRows(scopeOf(14), legacy.pageId);
+  ok("a legacy page: one draft derived row, never live or pooled, updated in place", lrows.length === 1 && lrows[0]!.source === "derived" && !lrows[0]!.live && !lrows[0]!.pool, lrows);
+  ok("the Q 70 / slop 3 crossing rule", S.crossed({ q: 80, slop: 1 }, { q: 60, slop: 1 }) && S.crossed({ q: 60, slop: 1 }, { q: 80, slop: 1 }) && S.crossed({ q: 80, slop: 1 }, { q: 80, slop: 3 }) && !S.crossed({ q: 80, slop: 1 }, { q: 75, slop: 2 }));
+
+  // --- reservation transitions (suspend, restore, close, purge) and expiry ---
+  const rs = await pageOf(15, clean);
+  await publishRow(15, rs);
+  const setStatus = (status: "active" | "suspended" | "closed", at: Date) => db.update(stores).set({ status, statusChangedAt: at }).where(eq(stores.id, ids[15]!));
+  const row15 = async () => (await db.select({ r: designGenomes.reservedUntil, live: designGenomes.live, pool: designGenomes.pool }).from(designGenomes).where(eq(designGenomes.pageId, rs.pageId)))[0]!;
+  const changed = new Date(Date.now() - 2 * 86_400_000);
+  await setStatus("suspended", changed);
+  await J.reserveTick();
+  const sus = await row15();
+  ok("suspend: live 0, pool 1, reserved 90 days from the status change", !sus.live && sus.pool && !!sus.r && Math.abs(sus.r.getTime() - changed.getTime() - 90 * 86_400_000) < 5_000, sus);
+  await setStatus("active", new Date());
+  await J.reserveTick();
+  const back = await row15();
+  ok("restore: the row of the published version is live again", back.live && !back.r, back);
+  await setStatus("closed", new Date());
+  await J.reserveTick();
+  ok("close: live 0 again", !(await row15()).live);
+  await db.update(designGenomes).set({ reservedUntil: new Date(Date.now() - 60_000) }).where(eq(designGenomes.pageId, rs.pageId));
+  const exp = await J.reserveTick();
+  ok("expiry: a reservation that ran out leaves the pool", exp.expired >= 1 && !(await row15()).pool, exp);
+  await G.purgeGenomes(scopeOf(15));
+  ok("purge: 0 rows for the store", (await db.select({ id: designGenomes.id }).from(designGenomes).where(eq(designGenomes.storeId, ids[15]!))).length === 0);
+  await setStatus("active", new Date());
+
+  // --- retention and the cap ---
+  const rt = scopeOf(16);
+  const day = 86_400_000;
+  const putOwn = async (source: "generated" | "chosen" | "published", ageDays: number, o: { pageId?: string; live?: boolean; reserved?: Date | null } = {}) => {
+    const view = shift(vE, 1);
+    const id = newId();
+    await db.insert(designGenomes).values({ id, storeId: ids[16]!, pageId: o.pageId ?? newId(), versionId: null, kind: "page", source, niche: NICHE, bucket: Pl.bucketKey(NICHE, view), genomeV: 1, vec: D.packView(view), genome: { v: 1, s: 1, b: {}, p: {}, x: [] }, seed: 1, priorsV: "p1", live: o.live ?? false, pool: !!o.live || !!o.reserved, reservedUntil: o.reserved ?? null, createdAt: new Date(Date.now() - ageDays * day), updatedAt: new Date() });
+    return id;
+  };
+  const pubPage = await pageOf(16, clean, { fpa: new Date(Date.now() - 200 * day) });
+  const keep = [await putOwn("generated", 3), await putOwn("chosen", 120, { pageId: pubPage.pageId }), await putOwn("published", 200, { live: true }), await putOwn("published", 200, { reserved: new Date(Date.now() + 10 * day) }), await putOwn("published", 100)];
+  const drop = [await putOwn("generated", 20), await putOwn("chosen", 120), await putOwn("published", 200)];
+  const removed = await G.retainGenomes(rt);
+  const leftIds = new Set((await db.select({ id: designGenomes.id }).from(designGenomes).where(eq(designGenomes.storeId, ids[16]!))).map((r) => r.id));
+  ok("retention: generated > 14 d, chosen > 90 d of a never-published page, non-live unreserved > 180 d go", removed === 3 && drop.every((id) => !leftIds.has(id)) && keep.every((id) => leftIds.has(id)), { removed, kept: keep.filter((id) => leftIds.has(id)).length });
+  for (let i = 0; i < 8; i++) await putOwn("generated", 1);
+  const capped = await G.enforceCap(rt, 6);
+  const afterCap = new Set((await db.select({ id: designGenomes.id }).from(designGenomes).where(eq(designGenomes.storeId, ids[16]!))).map((r) => r.id));
+  ok("the row cap: the oldest non-live rows go, live and reserved rows stay", capped > 0 && afterCap.size === 6 && afterCap.has(keep[2]!) && afterCap.has(keep[3]!), { capped, left: afterCap.size });
+
+  // --- the backfill: published pages without a live row ---
+  const bf = scopeOf(17);
+  const bp = [await pageOf(17, clean), await pageOf(17, own[0]!.doc)];
+  const first = await J.backfillStore(bf, 50);
+  const bfRows = await db.select({ source: designGenomes.source, live: designGenomes.live, q: designGenomes.q }).from(designGenomes).where(eq(designGenomes.storeId, ids[17]!));
+  ok("backfill: a derived live row per published page without one", first.done === 2 && !first.more && bfRows.length === 2 && bfRows.every((r) => r.source === "derived" && r.live && typeof r.q === "number"), { first, bfRows });
+  ok("backfill is idempotent", (await J.backfillStore(bf, 50)).done === 0 && (await db.select({ id: designGenomes.id }).from(designGenomes).where(eq(designGenomes.storeId, ids[17]!))).length === 2);
+  await db.update(designGenomes).set({ live: false }).where(eq(designGenomes.pageId, bp[0]!.pageId));
+  const revived = await J.backfillStore(bf, 50);
+  ok("backfill revives the current version's row instead of deriving a new one", revived.done === 1 && (await db.select({ id: designGenomes.id }).from(designGenomes).where(eq(designGenomes.storeId, ids[17]!))).length === 2 && (await G.pageGenomes(bf, bp[0]!.pageId))[0]!.live);
+  ok("the shingles verify job finds nothing to rewrite right after the backfill", (await H.verifyShingles(bf)) === 0);
 }
 
 main()

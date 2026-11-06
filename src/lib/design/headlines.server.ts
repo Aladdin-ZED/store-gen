@@ -135,6 +135,12 @@ export function docNiche(doc: PageDoc, store: { market: string; category: string
   return nicheKey(doc.market ?? store.market, store.category, family);
 }
 
+/** The store's niche inputs (its market and category), read from its own stores row. */
+export async function storeNicheOf(scope: StoreScope): Promise<{ market: string; category: string | null }> {
+  const [row] = await db.select({ market: stores.market, category: stores.category }).from(stores).where(eq(stores.id, scope.storeId)).limit(1);
+  return { market: row?.market ?? "MA", category: row?.category ?? null };
+}
+
 /** The bottom-256 rows of a set of documents (titles win the kind when a hash is in both). */
 export function sketchRows(niche: string, docs: readonly PageDoc[]): { hash: string; kind: "title" | "lead" }[] {
   const kind = new Map<string, "title" | "lead">();
@@ -168,6 +174,39 @@ export async function syncShingles(scope: WriteScope, niche: string): Promise<nu
     if (rows.length) await tx.insert(headlineShingles).values(rows.map((r) => ({ nicheKey: niche, hash: r.hash, ownerTag: owner, kind: r.kind })));
   });
   return rows.length;
+}
+
+/**
+ * `design.shingles` (DES-§24.1): the store's stored sketches against its live pages, niche by niche (the niches of its
+ * live pages and of its stored rows); a niche whose rows differ from the expected bottom-256 is rewritten through
+ * `syncShingles` (a niche without live pages empties). Returns the niches rewritten.
+ */
+export async function verifyShingles(scope: WriteScope): Promise<number> {
+  const [store] = await db.select({ market: stores.market, category: stores.category }).from(stores).where(eq(stores.id, scope.storeId)).limit(1);
+  if (!store) return 0;
+  const live = await db
+    .select({ doc: pageVersions.doc })
+    .from(pages)
+    .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
+    .where(whereStore(pages, scope, eq(pages.status, "published")));
+  const docs = new Map<string, PageDoc[]>();
+  for (const { doc } of live) {
+    const niche = docNiche(doc, store);
+    docs.set(niche, [...(docs.get(niche) ?? []), doc]);
+  }
+  const stored = new Map<string, Set<string>>();
+  for (const r of await db.select({ niche: headlineShingles.nicheKey, hash: headlineShingles.hash }).from(headlineShingles).where(eq(headlineShingles.ownerTag, ownerTagFor(scope.storeId))))
+    stored.set(r.niche, (stored.get(r.niche) ?? new Set()).add(r.hash));
+  let rewritten = 0;
+  for (const niche of new Set([...docs.keys(), ...stored.keys()])) {
+    const want = sketchRows(niche, docs.get(niche) ?? []).map((r) => r.hash);
+    const have = stored.get(niche) ?? new Set<string>();
+    if (want.length === have.size && want.every((h) => have.has(h))) continue;
+    if (NICHE.test(niche)) await syncShingles(scope, niche);
+    else await db.delete(headlineShingles).where(and(eq(headlineShingles.nicheKey, niche), eq(headlineShingles.ownerTag, ownerTagFor(scope.storeId))));
+    rewritten++;
+  }
+  return rewritten;
 }
 
 /** The purge job's delete (core §F.9): every row of the store's owner tag, every niche. */

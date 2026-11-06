@@ -18,10 +18,10 @@ import "server-only";
  *  - The 600-row cap: above it the oldest rows that are not live and not reserved go first.
  *  - Test renders and previews never call this module (D54, SF-05): only the wizard, publish and the backfill do.
  */
-import { and, asc, count, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
-import { designGenomes, pages, pageVersions, type GateSummary, type NoveltyBands, type OriginClass } from "@/lib/db/schema";
+import { designGenomes, pages, pageVersions, stores, type GateSummary, type NoveltyBands, type OriginClass } from "@/lib/db/schema";
 import type { PageDoc } from "@/lib/page/schema";
 import { hash16, textFieldsOf } from "@/lib/render/origin";
 import { byId, storeValues, whereStore } from "@/lib/tenancy/sql";
@@ -281,6 +281,92 @@ export async function pageGenomes(scope: StoreScope, pageId: string, limit = 20)
     .where(whereStore(designGenomes, scope, eq(designGenomes.pageId, pageId)))
     .orderBy(desc(designGenomes.createdAt), desc(designGenomes.id))
     .limit(Math.max(1, Math.min(100, limit)));
+}
+
+/* ------------------------------------------------------------------ */
+/* retention (DES-§2.1, design.retention) and the store-status safety net */
+/* ------------------------------------------------------------------ */
+
+/** DES-§2.1 ages: generated 14 days, chosen of a never-published page 90 days, non-live published / derived 180 days. */
+export const RETAIN_DAYS = { generated: 14, chosen: 90, published: 180 } as const;
+
+/**
+ * The nightly retention of one store (DES-§2.1): `generated` rows older than 14 days, `chosen` rows older than 90 days
+ * whose page was never published (or no longer exists), `published` / `derived` rows that are neither live nor
+ * reserved and older than 180 days; then the 600-row cap. Returns the rows deleted.
+ */
+export async function retainGenomes(scope: WriteScope, now = new Date()): Promise<number> {
+  const ago = (days: number) => new Date(now.getTime() - days * 86_400_000);
+  const notReserved = or(isNull(designGenomes.reservedUntil), lt(designGenomes.reservedUntil, now));
+  const old = await db
+    .select({ id: designGenomes.id, source: designGenomes.source, fpa: pages.firstPublishedAt, page: pages.id })
+    .from(designGenomes)
+    .leftJoin(pages, and(eq(pages.id, designGenomes.pageId), eq(pages.storeId, designGenomes.storeId)))
+    .where(
+      whereStore(
+        designGenomes,
+        scope,
+        eq(designGenomes.live, false),
+        or(
+          and(eq(designGenomes.source, "generated"), lt(designGenomes.createdAt, ago(RETAIN_DAYS.generated))),
+          and(eq(designGenomes.source, "chosen"), lt(designGenomes.createdAt, ago(RETAIN_DAYS.chosen))),
+          and(inArray(designGenomes.source, ["published", "derived"]), lt(designGenomes.createdAt, ago(RETAIN_DAYS.published)), notReserved),
+        ),
+      ),
+    )
+    .limit(GENOME_ROWS_MAX * 2);
+  const ids = old.filter((r) => r.source !== "chosen" || !r.page || !r.fpa).map((r) => r.id);
+  let deleted = 0;
+  for (let i = 0; i < ids.length; i += 200) deleted += affected(await db.delete(designGenomes).where(whereStore(designGenomes, scope, inArray(designGenomes.id, ids.slice(i, i + 200)))));
+  return deleted + (await enforceCap(scope));
+}
+
+/**
+ * A store that left `active` / `restricted` (DS8, DS29): its live rows leave live for the 90-day reservation from its
+ * status change. The `design.reserve` job does this for every store in one statement; retention re-asserts it per
+ * store through the scope (a safety net when the job was down). Returns the rows changed.
+ */
+export async function reserveStoreRows(scope: WriteScope, now = new Date()): Promise<number> {
+  const [store] = await db.select({ changed: stores.statusChangedAt }).from(stores).where(eq(stores.id, scope.storeId)).limit(1);
+  const until = new Date((store?.changed ?? now).getTime() + 90 * 86_400_000);
+  const res = await db.update(designGenomes).set({ live: false, pool: true, reservedUntil: until, updatedAt: now }).where(whereStore(designGenomes, scope, eq(designGenomes.live, true)));
+  return affected(res);
+}
+
+/**
+ * The live row of a published page when it is missing (the listener failed, or the store came back): the row of the
+ * page's current version flips back live; false when there is none (the backfill then derives one).
+ */
+export async function reviveVersionRow(scope: WriteScope, pageId: string, versionId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: designGenomes.id })
+    .from(designGenomes)
+    .where(whereStore(designGenomes, scope, eq(designGenomes.pageId, pageId), eq(designGenomes.versionId, versionId), inArray(designGenomes.source, ["published", "derived"])))
+    .orderBy(desc(designGenomes.createdAt))
+    .limit(1);
+  if (!row) return false;
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx.update(designGenomes).set({ live: false, pool: true, reservedUntil: reserveUntil(now), updatedAt: now }).where(whereStore(designGenomes, scope, eq(designGenomes.pageId, pageId), eq(designGenomes.live, true)));
+    await tx.update(designGenomes).set({ live: true, pool: true, reservedUntil: null, updatedAt: now }).where(byId(designGenomes, scope, row.id));
+  });
+  return true;
+}
+
+/** The published pages of the store that have no live genome row (the backfill's work list), oldest first. */
+export async function pagesWithoutLiveRow(scope: StoreScope, limit: number): Promise<{ pageId: string; versionId: string; doc: PageDoc }[]> {
+  const live = db
+    .select({ pageId: designGenomes.pageId })
+    .from(designGenomes)
+    .where(whereStore(designGenomes, scope, eq(designGenomes.live, true), sql`${designGenomes.pageId} IS NOT NULL`));
+  const rows = await db
+    .select({ pageId: pages.id, versionId: pages.publishedVersionId, doc: pageVersions.doc })
+    .from(pages)
+    .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
+    .where(whereStore(pages, scope, eq(pages.status, "published"), sql`${pages.id} NOT IN (${live})`))
+    .orderBy(asc(pages.id))
+    .limit(Math.max(1, Math.min(200, limit)));
+  return rows.filter((r): r is { pageId: string; versionId: string; doc: PageDoc } => !!r.versionId && !!r.doc);
 }
 
 /** The purge (core §F.9): every row of the store. */

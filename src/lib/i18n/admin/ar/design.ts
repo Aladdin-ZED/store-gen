@@ -183,4 +183,16 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "design.colour.indigo": "نيلي",
   "design.colour.plum": "برقوقي",
   "design.colour.violet": "بنفسجي",
+  // Store Health and ⌘K search (DES-§8.11, SP-1)
+  "design.health.q_low": "صفحة منشورة جودة تصميمها أقل من 70. افتح فحص التصميم باش تشوف شنو كينقص منها.",
+  "design.health.q_low.fix": "افتح فحص التصميم",
+  "design.health.slop": "صفحة منشورة فيها أنماط تصميم عامة. نقرة وحدة كتصلحهم كاملين.",
+  "design.health.slop.fix": "صلّح الكل",
+  "design.health.pages_close": "جوج من صفحاتك المنشورة كيتشابهو بزاف. ميّز الصفحة الأحدث باش كل منتج يبان بشكله.",
+  "design.health.pages_close.fix": "ميّز التصميم",
+  "design.health.no_dna": "صفحة منشورة تصاوبت قبل الحمض النووي للتصميم. أعد مزج تصميمها باش يكون عندها شكل خاص.",
+  "design.health.no_dna.fix": "أعد مزج التصميم",
+  "design.health.brand_empty": "صفحاتك مازال ما فيهاش شعار ولا ألوان مثبتة. زيد علامتك باش كل صفحة تبان بحال متجرك.",
+  "design.health.brand_empty.fix": "جهّز علامتك",
+  "design.search.group": "الصفحات حسب التصميم",
 };

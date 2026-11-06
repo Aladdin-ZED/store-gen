@@ -183,4 +183,16 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "design.colour.indigo": "indigo",
   "design.colour.plum": "prune",
   "design.colour.violet": "violet",
+  // Store Health and ⌘K search (DES-§8.11, SP-1)
+  "design.health.q_low": "Une page en ligne obtient moins de 70 en qualité de design. Ouvrez le contrôle du design pour voir ce qui la fait baisser.",
+  "design.health.q_low.fix": "Ouvrir le contrôle du design",
+  "design.health.slop": "Une page en ligne contient des motifs de design génériques. Un clic suffit pour tous les corriger.",
+  "design.health.slop.fix": "Tout corriger",
+  "design.health.pages_close": "Deux de vos pages en ligne se ressemblent presque. Différenciez la plus récente pour que chaque produit ait son propre style.",
+  "design.health.pages_close.fix": "Différencier",
+  "design.health.no_dna": "Une page en ligne date d’avant l’ADN de design. Remixez son design pour lui donner un style propre.",
+  "design.health.no_dna.fix": "Remixer le design",
+  "design.health.brand_empty": "Vos pages n’ont encore ni logo ni couleurs verrouillées. Ajoutez votre marque pour que chaque page ressemble à votre boutique.",
+  "design.health.brand_empty.fix": "Configurer la marque",
+  "design.search.group": "Pages par design",
 };

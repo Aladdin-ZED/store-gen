@@ -4,7 +4,8 @@
  * scripts/qa/tenancy-check.ts (`test:tenancy`), which lists an empty `cases` as not applicable until the track merges.
  * `actions` holds the attack cases of the track's server actions (they join the harness's `ACTION_CASES`): P0 put
  * `checkHeadlinesAction` here, the frozen stub of src/lib/design/actions.ts (DES-§9.8), so the coverage rule holds
- * from P0 on; step 9 adds `nicheSharesAction` and the genome-row / novelty-verdict case.
+ * from P0 on; step 9 adds `nicheSharesAction` and the genome-row / novelty-verdict case; step 10 the publish listener,
+ * health read, ⌘K search and purge case.
  */
 import type { TenancyCase, TrackActionCase } from "../tenancy-check";
 import type { WriteScope } from "@/lib/tenancy/types";
@@ -74,6 +75,67 @@ export const cases: TenancyCase[] = [
       const left = await db.select({ id: designGenomes.id }).from(designGenomes).where(eq(designGenomes.storeId, fx.A.id));
       check("B's purge leaves A's genome rows", left.some((r) => r.id === rowA));
       await G.purgeGenomes(A);
+      N.resetNoveltyPool();
+    },
+  },
+  {
+    // DES-§8.8, §8.11, §15.5, §22 (step 10): the publish listener writes A's row in A only; B's health read, B's ⌘K
+    // design search and B's publish check never reach A's rows; the check's answer carries bands and gate ids only
+    // (no store id, no owner tag, no customer data); no tenant genome is reachable through the designer seeds; the
+    // purge leaves 0 rows for the store and its owner tag
+    name: "design: publish listener, health read, search and purge stay in their store",
+    async run({ check, scope, fx, leaks }) {
+      const P = await import("@/lib/render/prepublish/design");
+      const G = await import("@/lib/design/genomes.server");
+      const H = await import("@/lib/design/headlines.server");
+      const N = await import("@/lib/design/novelty.server");
+      const { designHealth } = await import("@/lib/design/health.server");
+      const { searchDesign } = await import("@/lib/admin-data/search/design");
+      const { DESIGNER_SEEDS } = await import("@/lib/design/seeds");
+      const { buildTheme } = await import("@/lib/theme");
+      const { getFixture } = await import("@/lib/page/fixtures");
+      const { db } = await import("@/lib/db/client");
+      const { designGenomes, headlineShingles } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+      const A = scope("A", "system") as WriteScope;
+      const B = scope("B", "system") as WriteScope;
+      const doc = getFixture("argan").doc;
+      const ctxOf = (s: WriteScope, pageId: string) => ({
+        scope: s,
+        store: { id: s.storeId } as never,
+        pageId,
+        doc,
+        prev: null,
+        theme: buildTheme(doc.theme, doc.locale),
+        assets: new Map(),
+        actor: { kind: "system", userId: null, impersonatorId: null, ip: null } as never,
+        now: new Date(),
+        mode: "block" as const,
+      });
+      N.resetNoveltyPool();
+      await P.designListener({ ...ctxOf(A, fx.A.page.live), versionId: fx.A.version.live, event: "published" });
+      const rowsA = await db.select({ id: designGenomes.id, storeId: designGenomes.storeId }).from(designGenomes).where(eq(designGenomes.pageId, fx.A.page.live));
+      check("A's publish writes one live row, in A", rowsA.length >= 1 && rowsA.every((r) => r.storeId === fx.A.id), rowsA);
+      const healthB = await designHealth(B);
+      check("B's health read never lists A's pages", healthB.pages.every((p) => p.pageId !== fx.A.page.live) && !JSON.stringify(healthB).includes(fx.A.page.live));
+      const healthA = await designHealth(A);
+      check("A's health read: ids, q, slop, hasLook only", healthA.pages.every((p) => Object.keys(p).sort().join() === "genomeId,hasLook,pageId,q,slop") && leaks(healthA, { only: ["customer", "secret"] }).length === 0, healthA);
+      const hitsB = await searchDesign(B, "argan", { userId: fx.B.members.owner, role: "owner" });
+      check("B's design search never finds A's page", hitsB.every((h) => h.id !== fx.A.page.live && !h.href.includes(fx.A.handle)), hitsB);
+      N.resetNoveltyPool();
+      const res = await P.designCheck(ctxOf(B, fx.B.page.live) as never);
+      const json = JSON.stringify(res.result);
+      const items = res.result.ok ? (res.result.notes ?? []) : res.result.items;
+      check("B's check answers design items only (gate ids, message keys, bands)", items.every((i) => i.id.startsWith("design:") && i.title.startsWith("design.")), items.slice(0, 3));
+      check("the check's answer names no store, page, row or owner tag of A", !json.includes(fx.A.id) && !json.includes(fx.A.page.live) && rowsA.every((r) => !json.includes(r.id)) && !json.includes(H.ownerTagFor(fx.A.id)) && leaks(res.result).length === 0);
+      const seeds = JSON.stringify(DESIGNER_SEEDS);
+      check("no tenant genome is reachable through the designer seeds", !seeds.includes(fx.A.id) && rowsA.every((r) => !seeds.includes(r.id)));
+      await G.purgeGenomes(B);
+      await H.purgeHeadlineShingles(B);
+      check("B's purge leaves A's rows", (await db.select({ id: designGenomes.id }).from(designGenomes).where(eq(designGenomes.storeId, fx.A.id))).length >= 1);
+      await G.purgeGenomes(A);
+      await H.purgeHeadlineShingles(A);
+      check("A's purge: 0 genome rows for A, 0 shingles for A's owner tag", (await db.select({ id: designGenomes.id }).from(designGenomes).where(eq(designGenomes.storeId, fx.A.id))).length === 0 && (await db.select().from(headlineShingles).where(eq(headlineShingles.ownerTag, H.ownerTagFor(fx.A.id)))).length === 0);
       N.resetNoveltyPool();
     },
   },
