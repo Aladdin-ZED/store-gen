@@ -11,11 +11,19 @@
  *   ops.open_calls_now             callcenter.configure   `openCallsNowAction` (2 hours), then the board
  *
  * Store Health fixes name these ids as their `actionId` (PD66).
+ *
+ * `shortcuts`: the agent console's single-key map (OPE-§13.3, OP-17), registered here so the shell's `?` sheet lists it
+ * beside the chords; `test:ops` proves it disjoint from the shell chords (`G O`, `G Q` …). The console itself matches it
+ * by `event.code` (src/components/admin/queue/keys.ts).
  */
 import { openTestOrderAction } from "@/app/app/[store]/orders/actions";
 import { openCallsNowAction } from "@/app/app/[store]/team/callcenter/actions";
+import { QUEUE_KEYS, type QueueKey } from "@/components/admin/queue/keys";
 import { appHref } from "@/lib/urls";
 import type { CommandDef } from "./types";
+
+/** The queue's key map, for the shell's `?` sheet (path, keys, labels of both lanes). */
+export const shortcuts: { scope: "queue"; path: "/queue"; keys: readonly QueueKey[] } = { scope: "queue", path: "/queue", keys: QUEUE_KEYS };
 
 const base = (handle: string, path: `/${string}`) => appHref(handle, path);
 

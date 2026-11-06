@@ -169,6 +169,11 @@ async function activeClaimOf(scope: StoreScope, userId: string, now: Date): Prom
   return row ?? null;
 }
 
+/** Whether `userId` holds an active claim now (the console opens on "Back to my order", OPE-§13.2a). */
+export async function holdsClaim(scope: StoreScope, userId: string): Promise<boolean> {
+  return (await activeClaimOf(scope, userId, opsNow())) !== null;
+}
+
 /* ------------------------------------------------------------------ */
 /* the claim statement (OPE-§5.2 step 5)                               */
 /* ------------------------------------------------------------------ */

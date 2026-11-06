@@ -658,6 +658,9 @@ export const actions: TrackActionCase[] = [
   },
   { file: QUEUE, name: "takeOrderAction", area: "orders", path: "/queue", permission: ["agents.self"], write: true, victim: (fx) => [fx.A.order.main, { inbound: true }], own: (fx) => [fx.B.order.main, {}] },
   { file: QUEUE, name: "inboundLookupAction", area: "orders", path: "/queue", permission: ["agents.self"], write: true, victim: (fx) => [fx.A.customer.phone], own: (fx) => [fx.B.customer.phone] },
+  // the console's reads (P4 step 9): the script tab and the timeline column of an order the member sees
+  { file: QUEUE, name: "queueScriptAction", area: "orders", path: "/queue", permission: ["orders.read"], write: false, victim: (fx) => [fx.A.order.main, "ar"], own: (fx) => [fx.B.order.main, "ar"] },
+  { file: QUEUE, name: "queueTimelineAction", area: "orders", path: "/queue", permission: ["orders.read"], write: false, victim: (fx) => [fx.A.order.main], own: (fx) => [fx.B.order.main] },
   // the orders screen (P4 step 5); the R1.0 actions of the same file stay in the harness's own catalogue
   { file: ORDERS, name: "moveOrderAction", area: "orders", path: "/orders", permission: ["orders.write"], write: true, victim: (fx) => [fx.A.order.main, "no_answer"], own: async (fx, fresh) => [await fresh.order(fx.B), "no_answer"] },
   { file: ORDERS, name: "forceMoveAction", area: "orders", path: "/orders", permission: ["orders.force_status"], write: true, victim: (fx) => [fx.A.order.main, "fake", "attack"], own: async (fx, fresh) => [await fresh.order(fx.B), "fake", "test reason"] },

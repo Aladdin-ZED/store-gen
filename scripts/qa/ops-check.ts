@@ -37,6 +37,14 @@
  *                         aggregate cells (suppression under 5, no customer field), the reason mixes, the best-hours
  *                         strip, and each ops Store Health rule on its fixtures: fires above its threshold, silent
  *                         below its minimum n and on a quiet store, evidence with n, no customer field, ≤ 40 ms
+ *   static · console      (OP-17, OPE-§13) the queue's key map against the shell chords (disjoint, by event.code, no
+ *                         key twice) and its registration in commands/ops.ts; no orange OKLCH literal and no orange
+ *                         class in src/components/admin/queue/**; its motion; no uppercase / tracking / italic; logical
+ *                         properties only; the console set complete in ar, fr and en
+ *   pure · console        (OD36, OD37) the outbox (five fields ≤ 512 B, stale entries dropped, a store switch clears
+ *                         the others, the 0.5 … 15 s schedule on network errors only, the same key on every retry, a
+ *                         4xx never retried), the keys on Arabic / AZERTY layouts, the callback and hold chips in the
+ *                         store's time zone, money and times with Latin digits
  *   pure · card           the ScriptDoc caps (OP-05), the built-in script and WhatsApp texts, the compile rules (upsell
  *                         gating, empty steps and missing facts dropped, no ETA sentence without an ETA), the wa.me
  *                         limits, and the 40 queue-card fixtures (8 delivery-lane) each ≤ 6 KB gzipped (OPE-§5.3)
@@ -1121,6 +1129,189 @@ function sampleArgs(name: string): unknown[] {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* the agent console (P4 step 9: OPE-§13, OD36, OD37, OP-17)           */
+/* ------------------------------------------------------------------ */
+
+section = "static · console";
+{
+  // OP-17: the queue's single-key map against the shell chords of core §I.3 (no G, no two-key sequence, no duplicate)
+  const CHORDS = ["G O", "G Q", "G L", "G C", "G P", "G M", "G T", "G S", "G H", "G N", "G W"];
+  const keysSrc = readFileSync(join(ROOT, "src", "components", "admin", "queue", "keys.ts"), "utf8");
+  const caps = [...keysSrc.matchAll(/\{ id: "([a-zA-Z0-9]+)", key: "([^"]+)", codes: \[([^\]]*)\]/g)].map((m) => ({ id: m[1]!, key: m[2]!, codes: [...m[3]!.matchAll(/"([A-Za-z0-9]+)"/g)].map((c) => c[1]!) }));
+  check("the key map lists N C W 1-6 E S T X I D ? Esc", caps.map((c) => c.key).join(" ") === "N C W 1 2 3 4 5 6 E S T X I D ? Esc", caps.map((c) => c.key));
+  // a chord is a two-key sequence: the queue's single keys may equal a chord's second key (N next, G N notifications,
+  // core §I.3 lists both), never its prefix, and no queue key is a sequence
+  const prefixes = new Set(CHORDS.map((c) => c.split(" ")[0]!));
+  const queueOwned = caps.filter((c) => c.key !== "?" && c.key !== "Esc").map((c) => c.key);
+  check("the queue map ∩ the shell chords = ∅ (no chord prefix, no sequence, no chord)", queueOwned.every((k) => !prefixes.has(k) && k.length === 1) && CHORDS.every((c) => !queueOwned.includes(c)), queueOwned.filter((k) => prefixes.has(k) || k.length !== 1));
+  const codes = caps.flatMap((c) => c.codes);
+  check("no physical key bound twice", new Set(codes).size === codes.length, codes);
+  check("keys are matched by event.code (KeyN, Digit1 …), letters and digits only", codes.every((c) => /^(Key[A-Z]|Digit[0-9]|Numpad[0-9]|Escape)$/.test(c)), codes);
+  const cmdSrc = readFileSync(join(ROOT, "src", "components", "admin", "shell", "commands", "ops.ts"), "utf8");
+  check("commands/ops.ts registers the map for the `?` sheet", /export const shortcuts[^=]*=\s*\{[^}]*keys: QUEUE_KEYS/.test(cmdSrc));
+
+  // no orange in the console (owner rule 1): every OKLCH literal of its files outside hue 25-75 or chroma ≤ 0.06
+  const dir = join(ROOT, "src", "components", "admin", "queue");
+  const orange: string[] = [];
+  let oklch = 0;
+  for (const f of readdirSync(dir)) {
+    const src = readFileSync(join(dir, f), "utf8");
+    for (const m of src.matchAll(/oklch\(\s*([\d.]+%?)\s+([\d.]+)\s+([\d.]+)/g)) {
+      oklch++;
+      const c = Number(m[2]);
+      const h = Number(m[3]);
+      if (h >= 25 && h <= 75 && c > 0.06) orange.push(`${f}: ${m[0]}`);
+    }
+    if (/\b(?:orange|amber)-\d{2,3}\b/.test(src)) orange.push(`${f}: a Tailwind orange / amber class`);
+  }
+  check("the console's colours are read (the scan is not blind)", oklch >= 4, oklch);
+  check("no orange in src/components/admin/queue/** (hue 25-75 with chroma > 0.06)", orange.length === 0, orange);
+  const css = readFileSync(join(dir, "queue.css"), "utf8");
+  const durations = [...css.matchAll(/(\d+)ms/g)].map((m) => Number(m[1]));
+  check("console motion: no overshoot curve, reduced motion handled, transitions ≤ 400 ms (the shimmer and sweep loops aside)", !/cubic-bezier\([^)]*(?:-|1\.[1-9])/.test(css) && /prefers-reduced-motion/.test(css) && durations.every((d) => d <= 400 || d === 900 || d === 1400), durations);
+  const tsx = readdirSync(dir)
+    .filter((f) => f.endsWith(".tsx"))
+    .map((f) => readFileSync(join(dir, f), "utf8"))
+    .join("\n");
+  check("no uppercase, letter-spacing or italic class in the console (RTL7)", !/\b(?:uppercase|italic|tracking-(?:wide|wider|widest|tight|tighter))\b/.test(tsx));
+  const physical = [...tsx.matchAll(/(?<![\w-])(?:ml|mr|pl|pr|left|right|border-l|border-r|text-left|text-right|rounded-l|rounded-r)-[\w[][^\s"]*/g)].map((m) => m[0]).filter((x) => x !== "left-1/2");
+  check("no physical left / right utilities in the console (logical properties only, core §I.5)", physical.length === 0, physical);
+  check("the revealed number never reaches web storage or an app URL", !/(?:localStorage|sessionStorage)[^;]*(?:national|e164|tel\b)/.test(tsx) && !/router\.push\([^)]*(?:national|e164)/.test(tsx));
+
+  // the console set complete in ar, fr and en (OD34), and every literal key it renders present
+  const cat = (l: string) => {
+    const src = readFileSync(join(ROOT, "src", "lib", "i18n", "admin", l, "ops.ts"), "utf8");
+    return new Set([...src.matchAll(/^\s*"([^"]+)":/gm)].map((m) => m[1]!));
+  };
+  const [en, fr, ar] = [cat("en"), cat("fr"), cat("ar")];
+  const PREFIXES = ["ops.queue.", "ops.outcome.", "ops.rescue.", "ops.presence.", "ops.state.", "ops.callback.", "ops.cancel.", "ops.recall.", "ops.hold.", "ops.lane.", "ops.script.", "ops.wa.", "ops.inbound.", "ops.callbacks.", "ops.counter.", "ops.me.", "ops.note.", "ops.timeline.", "ops.key.", "ops.error.", "ops.history.", "ops.dup.", "ops.test.", "ops.reason."];
+  const SINGLE = ["ops.saving", "ops.saved", "ops.couldNotSave", "ops.callStarted", "ops.waStarted", "ops.skip", "ops.skipped", "ops.saveAndNext", "ops.edit", "ops.close"];
+  const consoleKeys = [...en].filter((k) => PREFIXES.some((p) => k.startsWith(p)) || SINGLE.includes(k));
+  check("the console set holds the OPE-§N keys", ["ops.queue.next", "ops.queue.resume", "ops.queue.howDidItGo", "ops.outcome.busy", "ops.state.cap", "ops.state.leaseLost", "ops.callback.outsideHours", "ops.me.endOfDay", "ops.couldNotSave", "ops.rescue.callsLeft", "ops.inbound.paused"].every((k) => en.has(k)));
+  check("the console set complete in fr", consoleKeys.filter((k) => !fr.has(k)).length === 0, consoleKeys.filter((k) => !fr.has(k)));
+  check("the console set complete in ar", consoleKeys.filter((k) => !ar.has(k)).length === 0, consoleKeys.filter((k) => !ar.has(k)));
+  const used = new Set([...[...tsx.matchAll(/["'`](ops\.[a-zA-Z0-9_.]+)["'`]/g)].map((m) => m[1]!), ...[...keysSrc.matchAll(/"(ops\.[a-zA-Z0-9_.]+)"/g)].map((m) => m[1]!)]);
+  const missing = [...used].filter((k) => !en.has(k) && !k.endsWith("."));
+  check("every literal key the console renders exists in en", missing.length === 0, missing);
+}
+
+async function consoleClient(): Promise<void> {
+  section = "pure · console";
+  const O = await import("@/components/admin/queue/outbox");
+  const T = await import("@/components/admin/queue/time");
+  const K = await import("@/components/admin/queue/keys");
+
+  // OD37: the pending entry holds the five fields only, ≤ 512 B, never a phone, a name or a note
+  const entry = { orderId: "WA-ABCD1234", rev: 7, outcome: "callback", idem: O.newIdem(), at: 1_700_000_000_000 };
+  const raw = O.serializePending({ ...entry, phone: "+212612345678", name: "Karim", note: "x" } as never);
+  check("the pending entry keeps { orderId, rev, outcome, idem, at } only", JSON.stringify(Object.keys(JSON.parse(raw) as object)) === JSON.stringify(["orderId", "rev", "outcome", "idem", "at"]) && !/\+212|Karim/.test(raw), raw);
+  check("the pending entry fits 512 B", Buffer.byteLength(raw) <= O.PENDING_MAX_BYTES, Buffer.byteLength(raw));
+  check("a fresh entry resumes, a stale one (> 10 min) is dropped", O.parsePending(raw, entry.at + 5_000)?.idem === entry.idem && O.parsePending(raw, entry.at + 11 * 60_000) === null);
+  check("a malformed entry is dropped", O.parsePending("{oops", entry.at) === null && O.parsePending(JSON.stringify({ orderId: 1 }), entry.at) === null);
+  const store = new Map<string, string>();
+  const kv = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+    key: (i: number) => [...store.keys()][i] ?? null,
+    get length() {
+      return store.size;
+    },
+  };
+  O.savePending("S1", "U1", entry, kv);
+  O.savePending("S2", "U1", entry, kv);
+  store.set("unrelated", "1");
+  O.clearOtherPending("S1", "U1", kv);
+  check("a store switch clears the other stores' entries only", store.has(O.pendingKey("S1", "U1")) && !store.has(O.pendingKey("S2", "U1")) && store.has("unrelated"), [...store.keys()]);
+  check("the storage key is sg:ops:pending:<storeId>:<userId>", O.pendingKey("S1", "U1") === "sg:ops:pending:S1:U1");
+  check("a minted key is a v4 UUID", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(O.newIdem()));
+
+  // the retry schedule: network errors only, 0.5 / 1 / 2 / 4 / 8 / 15 s (≤ 30.5 s), then null; an answer is never retried
+  check("the schedule is 0.5 / 1 / 2 / 4 / 8 / 15 s", JSON.stringify(O.RETRY_DELAYS_MS) === "[500,1000,2000,4000,8000,15000]" && O.RETRY_DELAYS_MS.reduce((a, b) => a + b, 0) <= 30_500);
+  const slept: number[] = [];
+  let calls = 0;
+  const gaveUp = await O.withRetry(
+    async () => {
+      calls++;
+      throw new O.NetworkError();
+    },
+    O.RETRY_DELAYS_MS,
+    async (ms) => void slept.push(ms),
+  );
+  check("offline: 7 tries on the schedule, then the grid's retry", gaveUp === null && calls === 7 && slept.join() === "500,1000,2000,4000,8000,15000", { calls, slept });
+  calls = 0;
+  const back = await O.withRetry(
+    async () => {
+      calls++;
+      if (calls < 3) throw new O.NetworkError();
+      return "saved";
+    },
+    O.RETRY_DELAYS_MS,
+    async () => undefined,
+  );
+  check("back in coverage on the 3rd try: the answer", back === "saved" && calls === 3);
+  let sent = 0;
+  const keysSeen = new Set<string>();
+  const answeredFetch = async (_u: string, init?: RequestInit) => {
+    sent++;
+    keysSeen.add(new Headers(init?.headers).get("Idempotency-Key") ?? "");
+    return new Response(JSON.stringify({ ok: false, error: "illegal" }), { status: 422 });
+  };
+  const idemKey = O.newIdem();
+  const answered = await O.withRetry(() => O.hot<{ ok: boolean; error: string }>("atlas", "outcome", {}, idemKey, answeredFetch), O.RETRY_DELAYS_MS, async () => undefined);
+  check("a 4xx is an answer: never retried, the body kept", sent === 1 && answered?.status === 422 && answered.body.error === "illegal");
+  const flaky = async (_u: string, init?: RequestInit) => {
+    sent++;
+    keysSeen.add(new Headers(init?.headers).get("Idempotency-Key") ?? "");
+    if (sent < 4) throw new TypeError("Failed to fetch");
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  sent = 0;
+  keysSeen.clear();
+  await O.withRetry(() => O.hot("atlas", "outcome", {}, idemKey, flaky), O.RETRY_DELAYS_MS, async () => undefined);
+  check("every retry carries the same Idempotency-Key", keysSeen.size === 1 && keysSeen.has(idemKey), [...keysSeen]);
+  check("the hot path's URL", O.opsPath("atlas-argan", "next") === "/api/app/atlas-argan/ops/next");
+
+  // the keys by event.code (an Arabic layout presses the same physical key)
+  const ev = (code: string, key: string, mods: Partial<Record<"ctrlKey" | "metaKey" | "altKey" | "shiftKey", boolean>> = {}) => ({ code, key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
+  check("N on an Arabic layout (key 'ى') is Next", K.queueKeyOf(ev("KeyN", "ى")) === "next");
+  check("Digit1 on AZERTY (key '&') is outcome 1", K.queueKeyOf(ev("Digit1", "&")) === "o1");
+  check("? on any layout opens the sheet", K.queueKeyOf(ev("Slash", "?", { shiftKey: true })) === "help" && K.queueKeyOf(ev("KeyM", "?", { shiftKey: true })) === "help" && K.queueKeyOf(ev("Slash", "؟", { shiftKey: true })) === "help");
+  check("a modifier held never fires (Ctrl+C copies)", K.queueKeyOf(ev("KeyC", "c", { ctrlKey: true })) === null && K.queueKeyOf(ev("KeyN", "n", { metaKey: true })) === null);
+  check("G (the chords' prefix) is not a queue key", K.queueKeyOf(ev("KeyG", "g")) === null);
+
+  // the pickers in the store's time zone (OPE-§6.5, OD49)
+  const TZ = "Africa/Casablanca";
+  const day = (r: { from: string; to: string }[]) => r;
+  const w = {
+    tz: TZ,
+    days: { 1: day([{ from: "09:30", to: "13:00" }, { from: "14:30", to: "20:00" }]), 2: day([{ from: "09:30", to: "20:00" }]), 3: day([{ from: "09:30", to: "20:00" }]), 4: day([{ from: "09:30", to: "20:00" }]), 5: day([{ from: "09:30", to: "20:00" }]), 6: day([{ from: "10:00", to: "18:00" }]), 7: day([]) },
+    closedDates: [],
+    overrides: [],
+    openOverrideUntil: null,
+    configured: true,
+  };
+  const monNoon = new Date("2026-11-09T11:00:00Z"); // Monday 12:00 in Casablanca (UTC+1)
+  const chips = T.callbackChips(monNoon, w);
+  check("the four callback chips on a Monday noon", chips.map((c) => c.id).join() === "inOneHour,thisEvening,tomorrow11,tomorrow1830", chips.map((c) => c.id));
+  check("This evening is 18:30 store time", T.clock(chips.find((c) => c.id === "thisEvening")!.at, TZ, "en") === "18:30");
+  check("In 1 hour at 13:00 falls in the lunch gap: marked outside calling hours", chips.find((c) => c.id === "inOneHour")!.outside === true && chips.find((c) => c.id === "tomorrow11")!.outside === false);
+  const lateSat = new Date("2026-11-14T18:50:00Z"); // Saturday 19:50: This evening has passed, Sunday has no hours
+  const sat = T.callbackChips(lateSat, w);
+  check("after 18:30 This evening is gone; Sunday chips say outside calling hours", !sat.some((c) => c.id === "thisEvening") && sat.filter((c) => c.id.startsWith("tomorrow")).every((c) => c.outside));
+  check("a custom callback reads the store's wall clock", T.customInstant("2026-11-10T18:30", TZ, monNoon)?.toISOString() === "2026-11-10T17:30:00.000Z");
+  check("a custom callback under 5 minutes or past 30 days is refused", T.customInstant("2026-11-09T12:02", TZ, monNoon) === null && T.customInstant("2026-12-20T12:00", TZ, monNoon) === null);
+  const holds = T.holdChips(new Date("2026-11-11T10:00:00Z"), TZ); // a Wednesday
+  check("hold chips: tomorrow, next Monday, the 1st of next month", holds.map((h) => `${h.id}:${h.ymd}`).join() === "tomorrow:2026-11-12,nextMonday:2026-11-16,firstOfNextMonth:2026-12-01", holds);
+  const lastDay = T.holdChips(new Date("2026-11-30T10:00:00Z"), TZ); // Monday 30 Nov: the 1st is tomorrow
+  check("a 1st that is tomorrow is offered once", lastDay.length === 2 && lastDay[0]!.ymd === "2026-12-01", lastDay);
+  check("a typed hold within 60 days only", T.holdYmdOk("2026-12-01", monNoon, TZ) && !T.holdYmdOk("2026-11-09", monNoon, TZ) && !T.holdYmdOk("2027-02-01", monNoon, TZ));
+  const arMoney = T.money(24_990, "MAD", "ar");
+  check("money from integer cents, Latin digits in ar", /^249,90/.test(arMoney.replace(/\s/g, " ")) && /درهم/.test(arMoney), arMoney);
+  check("times keep Latin digits in ar", T.clock("2026-11-09T17:30:00Z", TZ, "ar") === "18:30", T.clock("2026-11-09T17:30:00Z", TZ, "ar"));
+}
+
 cityKeySize()
   .catch((e: unknown) => failures.push(`[static · cityKey size] esbuild failed: ${e instanceof Error ? e.message : String(e)}`))
   .then(pure)
@@ -1133,6 +1324,8 @@ cityKeySize()
   .catch((e: unknown) => failures.push(`[pure · carrier csv] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .then(insights)
   .catch((e: unknown) => failures.push(`[pure · insights] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
+  .then(consoleClient)
+  .catch((e: unknown) => failures.push(`[pure · console] threw: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`))
   .finally(() => {
     const ms = performance.now() - started;
     const clock = recordSuiteTime("ops", ms);

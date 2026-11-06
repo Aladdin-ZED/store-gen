@@ -15,13 +15,19 @@
  *   editNoteAction        orders.write (the author, within 5 minutes)
  *   takeOrderAction       agents.self, `claim` 120 / min; `inbound` for the ids of the agent's lookups
  *   inboundLookupAction   agents.self, `inbound` 60 / h (charged by inboundLookup)
+ *   queueScriptAction     orders.read: the script panel's ar / fr / en tab (the order's visibility rule)
+ *   queueTimelineAction   orders.read: the desktop console's timeline column (the drawer's visibility rule)
  */
 import { z } from "zod";
+import { cardRow } from "@/lib/callcenter/card";
 import { inboundLookup } from "@/lib/callcenter/inbound";
 import { OutcomeInput, recordOutcome } from "@/lib/callcenter/outcomes";
 import { setPresence } from "@/lib/callcenter/presence";
 import { revealPhone, type RevealWhy } from "@/lib/callcenter/reveal";
-import { addNote, editNote } from "@/lib/orders/events";
+import { SCRIPT_LOCALES } from "@/lib/callcenter/script";
+import { compileScript } from "@/lib/callcenter/script.server";
+import { viewerSeesOrder } from "@/lib/callcenter/visibility";
+import { addNote, editNote, orderTimeline, viewerOf } from "@/lib/orders/events";
 import { nextOrder, releaseOrder, renewLease, takeOrder } from "@/lib/orders/queue";
 import { storeAction } from "@/lib/tenancy/seam";
 
@@ -75,4 +81,20 @@ export async function takeOrderAction(orderId: string, opts: { inbound?: boolean
 
 export async function inboundLookupAction(phone: string) {
   return storeAction("agents.self", (ctx) => inboundLookup(ctx, z.string().max(64).parse(phone)));
+}
+
+/** The script panel's language tab (OPE-§7.2: ar / fr / en): the order's script compiled in `locale`. */
+export async function queueScriptAction(orderId: string, locale: string) {
+  return storeAction("orders.read", async (ctx) => {
+    const id = OrderId.parse(orderId);
+    const loc = z.enum(SCRIPT_LOCALES).parse(locale);
+    const row = await cardRow(ctx.scope, id);
+    if (!row || !viewerSeesOrder(ctx.scope, viewerOf(ctx), row, true)) return { ok: false as const, error: "not_found" as const };
+    return { ok: true as const, script: await compileScript(ctx.scope, row, ctx, { locale: loc }) };
+  });
+}
+
+/** The desktop console's right column: the held order's timeline (OPE-§4.1, §13.1), the visibility rule of the drawer. */
+export async function queueTimelineAction(orderId: string) {
+  return storeAction("orders.read", (ctx) => orderTimeline(ctx.scope, ctx, OrderId.parse(orderId), { limit: 20 }));
 }
