@@ -44,6 +44,15 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **NEXT PHASE STARTED 2026-11-06 ~20:30 (owner: "continue")**: heartbeat cron `556b156e` (95% rule, disk and AC checks).
+  (1) P3 WAVE 2 in C:/Users/SICO/sg-wt/p3 on branch **r1/p3w2** (fresh from main be96fe3): task `w8dtcvf8q` run
+  `wf_57d1f61c-71b`, args qa/lead/tracks-p3w2.json (steps 11-14: short links + test links, WhatsApp order, Campaign Kit,
+  verify + r1-p3w2-report; wow-demo skipped; cost/screenshot notes appended to briefs p3-11..14). To relaunch: same scriptPath
+  r1-tracks.js with that JSON (fix the note's path to forward slashes) and startAt = the first unreported step.
+  (2) DESIGN GATE WARN DEFAULT in main from stash@{0}: task `w28voig9f` run `wf_c7fa5465-57b` (inline script, one agent;
+  commits + pushes). THEN: merge r1/p3w2 (r1-merge-fast.js, mergeId "P3 wave 2", stubBuild false), gate-ok, deploy (same
+  steps as the R1 deploy below).
+
 - **R1 LIVE 2026-11-06 ~19:45** (owner: "deploy as fast as possible and ignore any not important steps"). The integration run
   (wf_63bcf01f-08a) was stopped; its unfinished design-gate default change (warn) is in `git stash@{0}` ("integration WIP
   2026-11-06 … not deployed"). Deployed 18518f1 (the P7 merge: tsc, npm test, migrate, tenancy, action-replay and build all
