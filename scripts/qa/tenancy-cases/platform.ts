@@ -306,6 +306,10 @@ export const cases: TenancyCase[] = [
         if (fn !== "lifecyclePreviewAction") k.check(`case 11: analyst · ${fn} → forbidden`, (await run(analyst, fn, input)) === "forbidden");
       }
       k.check("case 11: analyst · lifecyclePreviewAction is a read (console.read): answers, writes nothing", (await run(analyst, "lifecyclePreviewAction", { storeId: A.id, to: "suspended" })) === "ok");
+      // step 10: the pages strip's Preview mints a staff link only for a page of the store it names
+      k.check("step 10: A's owner · pagePreviewAction → refused", refused(await run(ownerA, "pagePreviewAction", { storeId: A.id, pageId: A.page.live })));
+      k.check("step 10: staff · pagePreviewAction with B's id and A's page → not_found", (await run(analyst, "pagePreviewAction", { storeId: k.fx.B.id, pageId: A.page.live })) === "not_found");
+      k.check("step 10: staff · pagePreviewAction with a malformed page id → not_found", (await run(analyst, "pagePreviewAction", { storeId: A.id, pageId: "../x" })) === "not_found");
       k.check("cases 2, 3, 11: A's rows are unchanged", (await k.snapshotA()) === before);
     },
   },

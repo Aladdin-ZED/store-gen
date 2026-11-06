@@ -18,7 +18,7 @@ import "server-only";
  * (D71: a platform scope never writes); a person's note has no store and is one annotated statement.
  */
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { auditFrom } from "@/lib/audit";
 import { AuthRefusal, FieldsError } from "@/lib/auth/errors";
 import { db } from "@/lib/db/client";
@@ -288,4 +288,22 @@ export async function pinNote(ctx: PlatformCtx, input: unknown): Promise<{ chang
   await updateNote(row, { pinned: v.pinned });
   await auditFrom(ctx, "platform.note.pinned", { storeId: row.storeId, target: row.id, meta: { pinned: v.pinned } });
   return { changed: true };
+}
+
+/** the composer's "@" list: staff accounts are few (R1), the list is capped all the same */
+const MENTIONABLE_MAX = 200;
+
+/**
+ * PLA-§7.12 (`stores.notes`): the staff the composer offers after "@", names only (never an e-mail), the author left
+ * out, disabled accounts left out. The composer adds the picked id to `mentions` and the name to the body.
+ */
+export async function listMentionableStaff(ctx: PlatformCtx): Promise<{ id: string; name: string }[]> {
+  requireNotes(ctx);
+  const rows = await db
+    .select({ id: users.id, name: users.name, disabled: users.disabled })
+    .from(users)
+    .where(sql`${users.platformRole} <> 'none'`)
+    .orderBy(asc(users.name))
+    .limit(MENTIONABLE_MAX);
+  return rows.filter((r) => !r.disabled && r.id !== ctx.user.id).map((r) => ({ id: r.id, name: r.name }));
 }

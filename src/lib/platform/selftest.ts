@@ -1863,6 +1863,124 @@ async function main(): Promise<void> {
   checkD(eq(f, { status: ["pending", "active"], attention: true, sort: "health" }) && sf.storesQuery(f) === "status=pending%2Cactive&attention=1&sort=health" && sf.chipOf(sf.parseStoresFilter({ status: "pending" })) === "in_review" && sf.chipOf(f) === null, "stores filter: the URL round-trips, unknown keys drop, a saved chip is recognised", { f, q: sf.storesQuery(f) });
   }
 
+  /* ---- step 10: the store profile (PLA-§7, §8.0, §8.2, §10.1): the arm window, the tab router, the menu, the copy ---- */
+  {
+  const arm = await import("../../components/console/lifecycle/arm");
+  const tabs = await import("../../components/console/profile/tabs");
+  const pmenu = await import("./profile/menu");
+  const notice = await import("./profile/notice");
+  const lrules = await import("./lifecycle-rules");
+  const en = enConsole as Record<string, string>;
+  type Ev = Parameters<typeof arm.armReducer>[1];
+  const run = (events: readonly Ev[]) => events.reduce(arm.armReducer, arm.ARM_IDLE);
+  const tick = (open = true, focused = true): Ev => ({ type: "tick", open, focused });
+  const ticks = (n: number, open = true, focused = true): Ev[] => Array.from({ length: n }, () => tick(open, focused));
+  const A5: Ev = { type: "arm", seconds: 5 };
+
+  const four = run([A5, ...ticks(4)]);
+  checkD(four.phase === "armed" && four.remaining === 1 && four.fired === 0, "arm window: 4 of 5 ticks leave it armed with 1 s left and nothing sent", four);
+  const fired = run([A5, ...ticks(5)]);
+  checkD(fired.phase === "sending" && fired.fired === 1 && run([A5, ...ticks(9)]).fired === 1, "arm window: the write fires once at 0 when open and focused, and never twice", fired);
+  const cancels = [0, 1, 2, 3, 4].map((k) => run([A5, ...ticks(k), { type: "cancel", by: "user" }, ...ticks(6)]));
+  checkD(cancels.every((s) => s.phase === "cancelled" && s.fired === 0), "arm window: Cancel at any second sends nothing, and later ticks stay silent", cancels.map((s) => s.phase));
+  const esc = run([A5, ...ticks(2), { type: "cancel", by: "escape" }, ...ticks(5)]);
+  checkD(esc.phase === "cancelled" && esc.cancelledBy === "escape" && esc.fired === 0, "arm window: Esc cancels and sends nothing", esc);
+  const blurred = run([A5, ...ticks(4), tick(true, false)]);
+  checkD(blurred.phase === "cancelled" && blurred.cancelledBy === "unfocused" && blurred.fired === 0, "arm window: a sheet without focus at 0 cancels instead of writing", blurred);
+  const closed = run([A5, ...ticks(2), tick(false), ...ticks(5)]);
+  checkD(closed.phase === "cancelled" && closed.cancelledBy === "closed" && closed.fired === 0, "arm window: a sheet closed during the countdown sends nothing", closed);
+  const late = run([A5, ...ticks(5), { type: "cancel", by: "user" }]);
+  checkD(late.phase === "sending" && late.fired === 1, "arm window: Cancel after the write left changes nothing (the write is not doubled or undone)", late);
+  const failedThenAgain = run([A5, ...ticks(5), { type: "settled", ok: false }, A5, ...ticks(5), { type: "settled", ok: true }]);
+  checkD(failedThenAgain.phase === "sent" && failedThenAgain.fired === 2, "arm window: a failed write re-arms, and the second countdown fires exactly once more", failedThenAgain);
+  checkD(run([A5, ...ticks(2), { type: "arm", seconds: 9 }]).remaining === 3 && run([{ type: "arm", seconds: 0 }]).remaining === 1 && run([{ type: "arm", seconds: 99 }]).remaining === 15, "arm window: arming again while armed keeps the countdown; seconds clamp to 1-15");
+  checkD(run([...ticks(3)]).phase === "idle" && run([{ type: "settled", ok: true }]).phase === "idle", "arm window: ticks and results without an armed sheet do nothing");
+
+  const rulesC = { handle: "atlas-argan", typedHandle: true, typedWord: null } as const;
+  const form = (o: Partial<{ reason: string | null; note: string; typed: string; word: string }> = {}) => ({ reason: "fake_orders", note: "", typed: "", word: "", ...o });
+  checkD(eq(arm.armBlockers(rulesC, form()), ["handle"]) && eq(arm.armBlockers(rulesC, form({ typed: "@Atlas-Argan " })), []), "cooldown: the typed handle is required (case and @ folded, as the server compares it)");
+  checkD(eq(arm.armBlockers({ ...rulesC, typedHandle: false }, form()), []) && eq(arm.armBlockers({ ...rulesC, typedHandle: false }, form({ reason: null })), ["reason"]), "outside the cooldown a light edge needs only its reason");
+  checkD(eq(arm.armBlockers({ ...rulesC, typedHandle: false }, form({ reason: "other" })), ["note"]) && eq(arm.armBlockers({ ...rulesC, typedHandle: false }, form({ reason: "other", note: "seen on TikTok" })), []), "the reason Other needs a note");
+  checkD(eq(arm.armBlockers({ handle: "atlas-argan", typedHandle: true, typedWord: "purge" }, form({ typed: "atlas-argan", word: "Purge " })), []) && eq(arm.armBlockers({ handle: "atlas-argan", typedHandle: true, typedWord: "purge" }, form({ typed: "atlas-argan", word: "purg" })), ["word"]), "a purge also needs the word purge");
+  const samples: [string, string | null][] = [["atlas-argan", "atlas-argan"], ["@ATLAS-argan", "atlas-argan"], [" atlas-argan ", "atlas-argan"], ["atlas", "atlas-argan"], ["", "atlas-argan"], ["@", "x"], ["x", null]];
+  checkD(samples.every(([typed, handle]) => arm.handleMatches(typed, handle) === lrules.typedHandleMatches(typed, handle)), "the sheet's typed-handle check equals the server's typedHandleMatches");
+  for (const action of lrules.LIFECYCLE_ACTIONS) {
+    const r = lrules.requirementsOf(action);
+    const cooldown = arm.armBlockers({ handle: "h", typedHandle: lrules.typedHandleRequired(action, { inside: true }), typedWord: r.typedWord }, form({ reason: r.reasons[0] }));
+    checkD(cooldown.includes("handle"), `cooldown: ${action} asks for the typed handle inside the cooldown`, cooldown);
+  }
+
+  const R = tabs.resolveProfileTab;
+  checkD(eq(R(undefined), { kind: "tab", tab: "overview" }) && eq(R([]), { kind: "tab", tab: "overview" }) && tabs.PROFILE_TABS.every((t) => eq(R([t]), { kind: "tab", tab: t })), "tab router: the bare path is the overview; the six R1 tabs resolve to themselves");
+  const deferred = Object.keys(tabs.DEFERRED_TABS) as (keyof typeof tabs.DEFERRED_TABS)[];
+  const STRIP_IDS = ["identity", "health", "pages", "orders", "team", "integrations", "ai", "usage", "risk", "timeline"];
+  checkD(eq(deferred.sort(), ["domains", "integrations", "media", "ops", "pages", "risk", "support"]) && deferred.every((d) => { const x = R([d]); return x.kind === "deferred" && STRIP_IDS.includes(x.strip); }), "tab router: every R2 / R3 path maps to the 'Arrives' page with an existing strip, never a 404", deferred.map((d) => R([d])));
+  checkD(R(["support"]).kind === "deferred" && (R(["support"]) as { release: string }).release === "R3" && (R(["risk"]) as { release: string }).release === "R2", "tab router: support arrives with R3, the others with R2");
+  checkD(R(["bogus"]).kind === "unknown" && R(["orders", "x"]).kind === "unknown" && R(["Overview"]).kind === "unknown", "tab router: anything else is unknown (the 404)");
+  checkD(["1", "2", "3", "4", "5", "6"].map(tabs.tabOfKey).join() === tabs.PROFILE_TABS.join() && tabs.tabOfKey("7") === null && tabs.tabOfKey("v") === null, "keys 1-6 map to the six tabs in order");
+  checkD(!tabs.visibleTabs(false).includes("notes") && tabs.visibleTabs(true).length === 6, "analysts never get the Notes tab");
+  const SID = "01J00000000000000000000000";
+  checkD(tabs.profileHref(SID, "overview") === `/admin/stores/${SID}` && tabs.profileHref(SID, "activity", "view=timeline") === `/admin/stores/${SID}/activity?view=timeline` && tabs.tabOfPath(`/admin/stores/${SID}`, SID) === "overview" && tabs.tabOfPath(`/admin/stores/${SID}/usage`, SID) === "usage" && tabs.tabOfPath(`/admin/stores/${SID}/risk`, SID) === "risk" && tabs.tabOfPath(`/admin/stores/${SID}/zz`, SID) === null, "profile paths round-trip (href and active tab)");
+
+  const all = () => true;
+  const items = (status: Parameters<typeof pmenu.lifecycleMenu>[0], can: (p: string) => boolean = all, o: Partial<{ closedFrom: Parameters<typeof pmenu.lifecycleMenu>[0] | null; pendingPurge: boolean }> = {}) =>
+    Object.fromEntries(pmenu.lifecycleMenu(status, can as never, { closedFrom: null, pendingPurge: false, ...o }).map((i) => [i.action, i.disabledKey]));
+  const act = items("active");
+  checkD(act.restrict === null && act.suspend === null && act.close === null && act.restore === "console.lifecycle.from.restore" && act.purge === "console.lifecycle.from.purge" && act.reopen === "console.lifecycle.from.reopen", "lifecycle menu (active): restrict, suspend, close enabled; the others disabled with their reason", act);
+  const lifeOnly = items("active", (p) => p === "stores.lifecycle");
+  checkD(!("close" in lifeOnly) && !("purge" in lifeOnly) && "restrict" in lifeOnly, "lifecycle menu: an item is hidden without its permission", Object.keys(lifeOnly));
+  const closedM = items("closed", all, { closedFrom: "restricted", pendingPurge: true });
+  checkD(closedM.purge === "console.lifecycle.purge_pending" && closedM.reopen === "console.lifecycle.purge_pending" && closedM.schedule_deletion === null && pmenu.lifecycleMenu("closed", all as never, { closedFrom: "restricted", pendingPurge: false }).find((i) => i.action === "reopen")?.to === "restricted", "lifecycle menu (closed): a waiting purge blocks purge and reopen; reopen targets the state it was closed from", closedM);
+  checkD(Object.values(items("purged")).every((k) => k === "console.lifecycle.purged"), "lifecycle menu (purged): every action disabled");
+  checkD(pmenu.lifecycleMenu("restricted", all as never, { closedFrom: null, pendingPurge: false }).every((i) => i.disabledKey !== null || lrules.lifecycleActionOf("restricted", i.to) === i.action), "lifecycle menu: an enabled item is always a real edge of the current status");
+
+  const filled = notice.fillNoticeWindow(`Reason. From ${notice.NOTICE_FROM} to ${notice.NOTICE_TO}.`, new Date("2026-11-05T13:02:00Z"), 30, "en", "Africa/Casablanca");
+  checkD(!filled.includes("%%") && filled.includes("14:02") && filled.includes("14:32"), "view-as notice: the window is filled in the store's time zone (14:02 to 14:32 in Casablanca)", filled);
+  const filledAr = notice.fillNoticeWindow(notice.NOTICE_FROM, new Date("2026-11-05T13:02:00Z"), 15, "ar", "Africa/Casablanca");
+  checkD(/[0-9]/.test(filledAr) && !/[٠-٩]/.test(filledAr), "view-as notice: Arabic keeps Latin digits", filledAr);
+
+  const prof = await import("./profile/orders");
+  const exps = await import("./exports");
+  const imp = await import("./impersonation");
+  const notesM = await import("./notes");
+  const listIn = (file: string, name: string) => {
+    const m = new RegExp(`${name}[^=]*=\\s*\\[([^\\]]+)\\]`).exec(readFileSync(join(ROOT, file), "utf8"));
+    return m ? [...m[1]!.matchAll(/"([a-z_]+)"/g)].map((x) => x[1]!) : null;
+  };
+  checkD(eq(listIn("src/components/console/profile/orders-tab.tsx", "REVEAL_REASON_LIST"), [...prof.REVEAL_REASONS]) && eq(listIn("src/components/console/profile/export-panel.tsx", "EXPORT_REASON_LIST"), [...exps.EXPORT_REASONS]) && eq(listIn("src/components/console/impersonation/start-sheet.tsx", "VIEW_REASONS"), [...imp.IMPERSONATION_REASONS]), "the reveal, export and view-as dialogs offer exactly the server's reason lists");
+  const families10: [string, readonly string[]][] = [
+    ["console.lifecycle.title.", lrules.LIFECYCLE_ACTIONS],
+    ["console.lifecycle.submit.", lrules.LIFECYCLE_ACTIONS],
+    ["console.lifecycle.menu.", lrules.LIFECYCLE_ACTIONS],
+    ["console.lifecycle.from.", lrules.LIFECYCLE_ACTIONS],
+    ["console.lifecycle.pages.", ["live", "neutral_404", "neutral_503", "unchanged"]],
+    ["console.lifecycle.orders.", ["open", "unavailable", "refused"]],
+    ["console.lifecycle.locale.", ["ar", "fr", "en"]],
+    ["console.lifecycle.integration.", ["sheets", "capi", "telegram", "webhooks"]],
+    ["console.profile.tab.", tabs.PROFILE_TABS],
+    ["console.profile.deferred.", deferred],
+    ["console.strip.", STRIP_IDS],
+    ["console.strip.identity.address.", ["P", "S", "C"]],
+    ["console.order_state.", ["new", "attempting", "callback", "confirmed", "cancelled", "fake", "duplicate", "unreachable", "none", "to_pack", "packed", "shipped", "in_transit", "out_for_delivery", "attempt_failed", "postponed", "delivered", "refused", "returned", "lost"]],
+    ["console.usage.metric.", ["media_bytes", "pages", "members", "agents", "campaigns", "short_links", "exports", "ai_credits", "orders"]],
+    ["console.milestone.", ["first_draft", "first_publish", "first_order", "tenth_order", "first_member", "first_delivered"]],
+    ["console.export.state.", ["pending", "running", "ready", "failed", "expired"]],
+    ["console.export.reason.", exps.EXPORT_REASONS],
+    ["console.orders_tab.reveal_reason.", prof.REVEAL_REASONS],
+    ["console.impersonation.reason.", imp.IMPERSONATION_REASONS],
+    ["console.notes_tab.kind.", notesM.NOTE_KINDS],
+    ["console.risk.field.", ["store_name", "legal_name", "whatsapp_name", "brand_name", "handle", "page_name", "seo_title", "policy_text"]],
+    ["console.strip.risk.report_reason.", ["phishing", "scam", "counterfeit", "prohibited", "impersonation", "other"]],
+    ["console.activity_tab.actor.", ["user", "platform", "impersonation", "system", "api"]],
+    ["console.activity_tab.area.", ["auth", "pages", "orders", "team", "settings", "integrations", "platform"]],
+    ["console.timeline.review_status.", ["pending", "needs_info", "approved", "rejected", "snoozed", "withdrawn"]],
+    ["console.timeline.", ["store.created", "platform.store.restricted", "platform.store.suspended", "platform.store.restored", "platform.store.closed", "store.closed", "store.reopened", "platform.plan.changed", "store.milestone.reached", "view.started", "view.ended", "note.decision", "note.warning"]],
+  ];
+  const missing10 = families10.flatMap(([prefix, list]) => list.map((v) => `${prefix}${v}`).filter((k) => typeof en[k] !== "string"));
+  checkD(missing10.length === 0, "every store-profile copy family has a key per value (lifecycle actions, tabs, strips, order states, meters, milestones, reasons, kinds)", missing10);
+  checkD(en["console.profile.arrives_r2"] === "Full view arrives with R2" && en["console.lifecycle.arm"]?.includes("{seconds}") && en["console.impersonation.masked"]?.startsWith("You will see customer names"), "the PLA-§N.4 reference texts of the profile hold (arrives_r2, arm, masked)");
+  }
+
   const ms = Math.round(performance.now() - t0);
   for (const s of skips) console.log(`  SKIP ${s}`);
   if (failures > 0) {

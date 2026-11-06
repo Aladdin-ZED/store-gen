@@ -29,6 +29,7 @@ import { integrationHealth, type IntegrationHealthRow } from "@/lib/integrations
 import { outboxSummary, type OutboxSummary } from "@/lib/jobs/outbox";
 import { renderSummary } from "@/lib/jobs/renders";
 import { listOrdersForConsole, orderKpis, orderRiskMix, type OrderKpis } from "@/lib/orders/profile";
+import { mintPreviewToken } from "@/lib/render/preview-token";
 import { dayKey, getPageStats, validTimeZone } from "@/lib/stats/index";
 import { scopedCache } from "@/lib/tenancy/cache";
 import { whereStore } from "@/lib/tenancy/sql";
@@ -148,12 +149,20 @@ export interface StripData {
 /* ------------------------------------------------------------------ */
 
 async function storeAddress(storeId: string) {
-  const [row] = await db.select({ id: stores.id, handle: stores.handle, mode: stores.mode, status: stores.status, timezone: stores.timezone }).from(stores).where(eq(stores.id, storeId)).limit(1);
+  const [row] = await db.select({ id: stores.id, handle: stores.handle, mode: stores.mode, status: stores.status, timezone: stores.timezone, currency: stores.currency }).from(stores).where(eq(stores.id, storeId)).limit(1);
   if (!row) throw new AuthRefusal("not_found");
   return row;
 }
 
 const LIVE: ReadonlySet<StoreStatus> = new Set(["active", "restricted"]);
+
+/** The tabs' store facts (`console.read`): the time zone per-store figures use and the currency; null for an unknown id. */
+export async function profileStoreFacts(ctx: PlatformCtx, storeId: string): Promise<{ timezone: string; currency: string } | null> {
+  if (!ctx.can("console.read")) throw new AuthRefusal("forbidden");
+  if (!/^[0-9A-Z]{26}$/.test(storeId)) return null;
+  const [row] = await db.select({ timezone: stores.timezone, currency: stores.currency }).from(stores).where(eq(stores.id, storeId)).limit(1);
+  return row ? { timezone: validTimeZone(row.timezone), currency: row.currency } : null;
+}
 
 async function handleHistoryCount(scope: StoreScope): Promise<number> {
   const [row] = await db.select({ n: count() }).from(storeHandleHistory).where(whereStore(storeHandleHistory, scope));
@@ -288,6 +297,20 @@ const LOADERS: { [K in StripId]: (ctx: PlatformCtx, storeId: string) => Promise<
   },
 };
 
+/** PLA-§L / core §E.2: the console's preview links live 10 minutes */
+const PREVIEW_TTL_SEC = 600;
+
+/**
+ * PD16 (`console.read`): the pages strip's Preview, a 10-minute staff link to one page of the store, opened in an
+ * iframe sandboxed `allow-scripts` only. Minted on demand (a row per opening), never while the strip renders.
+ */
+export async function stripPreview(ctx: PlatformCtx, storeId: string, pageId: unknown): Promise<{ url: string; expiresAt: string }> {
+  if (!ctx.can("console.read")) throw new AuthRefusal("forbidden");
+  if (typeof pageId !== "string" || !/^[0-9A-Z]{26}$/.test(pageId)) throw new AuthRefusal("not_found");
+  const link = await mintPreviewToken(platformScope(ctx, storeId), { pageId, ttlSec: PREVIEW_TTL_SEC, audience: "staff", staffUserId: ctx.user.id, actor: ctx.actor });
+  return { url: link.url, expiresAt: link.expiresAt.toISOString() };
+}
+
 /** One strip (`console.read`): its data, "unavailable" (a later track's stub) or its error state. */
 export async function loadStrip<K extends StripId>(ctx: PlatformCtx, storeId: string, strip: K): Promise<Panel<StripData[K]>> {
   if (!ctx.can("console.read")) throw new AuthRefusal("forbidden");
@@ -312,6 +335,8 @@ export interface StoreOverviewKpis {
   from: string;
   to: string;
   timezone: string;
+  /** the store's currency (money is never summed across currencies, PD21) */
+  currency: string;
   /** unique visitors, orders and placed sales per day (`stats_daily`, test orders never counted, D54) */
   stats: Panel<{ uniques: number; orders: number; placedCents: number; days: { day: string; uniques: number; orders: number }[] }>;
   /**
@@ -358,5 +383,5 @@ export async function getStoreOverview(ctx: PlatformCtx, storeId: string, range:
       { storeId },
     ),
   ]);
-  return { range: r, from, to, timezone: tz, stats, orders, deliveryR2: true };
+  return { range: r, from, to, timezone: tz, currency: store.currency, stats, orders, deliveryR2: true };
 }

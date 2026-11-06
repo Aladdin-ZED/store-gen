@@ -20,9 +20,14 @@ import { listMembersByScope } from "@/lib/tenancy/invites";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { PlatformCtx, StoreScope, StoreStatus } from "@/lib/tenancy/types";
 import { storeUrl } from "@/lib/urls";
+import { notificationKind } from "@/lib/notify/registry";
 import { getStoreHealth } from "../health-snapshot";
-import { openPurgeRequest } from "../lifecycle-preview";
+import { IMPERSONATION_REASONS, type ImpersonationReason } from "../impersonation";
+import { closedFromOf, openPurgeRequest } from "../lifecycle-preview";
+import { storeLocaleOf } from "../lifecycle-rules";
 import { sellerContact, type Masked } from "../mask";
+import { kindText, labelsOf } from "../notify-kinds";
+import { NOTICE_FROM, NOTICE_TO } from "./notice";
 import { optional } from "../panel";
 import { listStoreRequests } from "../requests";
 import { platformScope } from "../seam";
@@ -62,6 +67,8 @@ export interface StoreHeader {
   reopenDeadline: string | null;
   /** "Open live store": the URL, or why it is disabled */
   live: { url: string } | { disabled: "not_live" | "no_handle" };
+  /** a closed store reopens to the state it was closed from (the lifecycle menu's Reopen target) */
+  closedFrom: StoreStatus | null;
 }
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? "";
@@ -113,12 +120,13 @@ export async function getStoreHeader(ctx: PlatformCtx, storeId: string, now: Dat
   const row = await freshStore(storeId);
   if (!row) return null;
   const scope = platformScope(ctx, storeId);
-  const [members, health, requests, views, purge] = await Promise.all([
+  const [members, health, requests, views, purge, closedFrom] = await Promise.all([
     listMembersByScope(scope),
     optional("header.health", () => getStoreHealth(scope), { storeId }),
     optional("header.requests", () => listStoreRequests(scope), { storeId }),
     activeViews(scope, now),
     optional("header.purge", () => openPurgeRequest(scope), { storeId }),
+    row.status === "closed" ? optional("header.closed_from", () => closedFromOf(scope), { storeId }) : Promise.resolve(null),
   ]);
   const owners = members
     .filter((m) => m.role === "owner" && m.status === "active")
@@ -149,5 +157,19 @@ export async function getStoreHeader(ctx: PlatformCtx, storeId: string, now: Dat
     pendingPurge: purge ?? null,
     reopenDeadline: row.status === "closed" || row.status === "scheduled_deletion" ? (row.purgeAfter?.toISOString() ?? null) : null,
     live,
+    closedFrom: closedFrom ?? null,
   };
+}
+
+/**
+ * PLA-§10.1: the exact notification the store's owners will read when a view starts (`store.impersonation_started`,
+ * in the store's default locale), one per reason. The window's times are the `NOTICE_FROM` / `NOTICE_TO` stand-ins:
+ * the sheet replaces them with the chosen duration from "now", formatted like `displayVar` in the store's time zone.
+ */
+export function viewAsNotice(store: { defaultLocale: string; timezone: string }): { locale: "ar" | "fr" | "en"; byReason: Record<ImpersonationReason, { title: string; body: string | null }> } {
+  const locale = storeLocaleOf(store.defaultLocale);
+  const kind = "store.impersonation_started";
+  const labels = labelsOf(notificationKind(kind));
+  const byReason = Object.fromEntries(IMPERSONATION_REASONS.map((reason) => [reason, kindText(kind, labels, { reason, from: NOTICE_FROM, to: NOTICE_TO }, locale, store.timezone, null)])) as Record<ImpersonationReason, { title: string; body: string | null }>;
+  return { locale, byReason };
 }

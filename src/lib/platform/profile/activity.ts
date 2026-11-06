@@ -11,7 +11,7 @@ import "server-only";
  * hash is shown short and to super_admins only. View-as sessions come from `imp_store_idx` through
  * `platformScope(ctx, storeId)` between the page's oldest and newest rows.
  */
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { listPlatformAudit, type AuditEntry } from "@/lib/audit";
 import { AuthRefusal } from "@/lib/auth/errors";
 import { db } from "@/lib/db/client";
@@ -134,4 +134,15 @@ export async function listStoreActivity(ctx: PlatformCtx, storeId: string, filte
   }
   const rows = [...audit, ...views].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   return { rows, next: entries.length === ACTIVITY_PAGE ? (entries[entries.length - 1]?.id ?? null) : null };
+}
+
+/**
+ * The Activity tab's staff filter (`audit.platform`): the staff accounts by name, ids for the URL. Analysts read no
+ * staff names (the rows hide them too), so their list is empty.
+ */
+export async function listStaffFilter(ctx: PlatformCtx): Promise<{ id: string; name: string }[]> {
+  if (!ctx.can("console.read") || !ctx.can("audit.platform")) throw new AuthRefusal("forbidden");
+  if (ctx.role === "analyst") return [];
+  const rows = await db.select({ id: users.id, name: users.name }).from(users).where(sql`${users.platformRole} <> 'none'`).orderBy(asc(users.name)).limit(200);
+  return rows;
 }

@@ -31,6 +31,7 @@ import { isNotImplemented } from "@/lib/platform/panel";
 import { requestPurge } from "@/lib/platform/platform-requests";
 import { assignPlan, clearEntitlement, setEntitlement, type SetEntitlementInput } from "@/lib/platform/plans";
 import { revealOrderPii, type RevealedPii } from "@/lib/platform/profile/orders";
+import { stripPreview } from "@/lib/platform/profile/overview-strips";
 import { platformAction, platformScope } from "@/lib/platform/seam";
 import { SeamError } from "@/lib/tenancy/seam";
 import type { ActionResult, StoreStatus } from "@/lib/tenancy/types";
@@ -118,6 +119,11 @@ export async function markHealthDirtyAction(input: StoreRef): Promise<ActionResu
     await markHealthDirty(storeId);
     return done({ marked: true as const });
   });
+}
+
+/** `console.read` (PD16): the pages strip's Preview, a 10-minute staff link to one page (a sandboxed iframe only). */
+export async function pagePreviewAction(input: StoreRef & { pageId: string }): Promise<ActionResult<{ url: string; expiresAt: string }>> {
+  return platformAction("console.read", (ctx) => stripPreview(ctx, storeIdOf(input), input?.pageId));
 }
 
 /* ------------------------------------------------------------------ */

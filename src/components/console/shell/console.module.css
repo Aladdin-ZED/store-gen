@@ -8,6 +8,10 @@
  */
 
 .tokens {
+  /* the compact density's sizes, also for the portalled layers (dialogs, sheets) outside `.root` (DES-§16.7) */
+  --row: 32px;
+  --ctl: 30px;
+  --cell-x: 8px;
   /* neutral roles, light (L from DES-§16.2; chroma = 0.008 × factor) */
   --background: oklch(0.99 0.002 230);
   --foreground: oklch(0.2 0.0112 230);
@@ -313,4 +317,34 @@
   font-size: 13px;
   background: color-mix(in oklch, var(--brand) 12%, var(--secondary));
   color: var(--c-brand-ink);
+}
+/* step 10 (store profile): the header's 48 px Monogram, the 40 px health ring, the mode badge and the md status pill */
+.tokens :where([data-seed][data-size="48"][role="img"]:not([class])) {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  font-size: 19px;
+  background: color-mix(in oklch, var(--brand) 12%, var(--secondary));
+  color: var(--c-brand-ink);
+}
+.tokens :where([data-attention][data-surface="console"][data-size="40"]:not([class])) {
+  width: 40px;
+  height: 40px;
+  font-size: 13px;
+  box-shadow: inset 0 0 0 3px var(--c-hairline);
+}
+.tokens :where([data-mode]:not([class])) {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding-inline: 8px;
+  border-radius: var(--r-chip);
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--secondary);
+  color: var(--muted-foreground);
+}
+.tokens :where([data-status][data-size="md"]:not([class])) {
+  height: 24px;
+  font-size: 12px;
 }
