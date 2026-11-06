@@ -1,4 +1,4 @@
-// proves: IN-01, IN-02, IN-03, IN-04, IN-09, OP-16, SF-03, SF-05, SF-06
+// proves: IN-01, IN-02, IN-03, IN-04, IN-06, IN-09, OP-16, SF-03, SF-05, SF-06
 /**
  * Integration health against a real MariaDB (P5 INTEGRATIONS; operations.md OPE-§28.2, §28.3 (3)-(5), §27.2, §27.3,
  * §21.4, OPE-§L; OPE-§O.2 `test:integrations-db`, OPE-§O.4 IN-03, SF-03, SF-06). Two stores, A and B, and one question
