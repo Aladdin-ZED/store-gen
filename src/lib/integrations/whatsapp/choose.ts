@@ -59,6 +59,11 @@ export const TemplateInput = z
       .default(null),
     name: z.string().trim().min(1).max(TEMPLATE_NAME_MAX),
     body: z.string().max(TEMPLATE_BODY_MAX * 2),
+    /** a quick reply (`custom`) to update in place; absent = a new quick reply (the other kinds are one slot each) */
+    id: z
+      .string()
+      .regex(/^[0-9A-Za-z]{26}$/)
+      .optional(),
   })
   .refine((t) => t.channel !== "whatsapp" || isWaKind(t.kind), { path: ["kind"], error: "Unknown WhatsApp template kind." });
 export type TemplateInput = z.output<typeof TemplateInput>;

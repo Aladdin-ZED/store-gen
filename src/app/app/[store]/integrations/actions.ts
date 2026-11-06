@@ -8,10 +8,14 @@
  *   replayDeliveryAction(id)          integrations.manage (s)   Replay a dead row, or Send again a done one
  *   replayDeadOfKindAction(kind)      integrations.manage (s)   Replay all dead of this kind (≤ 50 rows, one call)
  *   listDeliveriesAction(q)           integrations.manage or callcenter.configure (read-only: the log without Replay)
+ *   orderIntegrationAction(orderId)   orders.read_all: the order drawer's blocks (OPE-§12.7): the Google Sheets block
+ *                                     for owner, admin and manager, the Ad events for owner and admin; another store's
+ *                                     order answers not_found
  */
 import { z } from "zod";
 import { fail } from "@/lib/admin-data/action";
 import { revalidateStore } from "@/lib/admin-data/shell";
+import { orderIntegrationState, type OrderIntegrationState } from "@/lib/integrations/order-state";
 import { DELIVERIES_PAGE_MAX, listDeliveries, TENANT_OUTBOX_KINDS, type DeliveryRow } from "@/lib/integrations/deliveries";
 import { replayDeadOfKind, replayDelivery, ReplayRefused, type ReplayResult } from "@/lib/integrations/replay";
 import { SeamError, storeAction } from "@/lib/tenancy/seam";
@@ -57,5 +61,24 @@ export async function listDeliveriesAction(q: z.input<typeof DeliveriesInput>): 
     // integrations.manage, or callcenter.configure read-only (OPE-§28.1): either key opens the log
     if (!ctx.can("integrations.manage") && !ctx.can("callcenter.configure")) throw new SeamError("forbidden");
     return listDeliveries(ctx.scope, DeliveriesInput.parse(q ?? {}));
+  });
+}
+
+const OrderId = z.string().trim().min(1).max(20);
+
+/** What the drawer may show of the order's integrations; a block the viewer's role does not see is null. */
+export interface OrderIntegrationView {
+  sheet: OrderIntegrationState["sheet"] | null;
+  adEvents: OrderIntegrationState["adEvents"] | null;
+}
+
+export async function orderIntegrationAction(orderId: string): Promise<ActionResult<OrderIntegrationView>> {
+  return storeAction("orders.read_all", async (ctx) => {
+    const s = await orderIntegrationState(ctx.scope, OrderId.parse(orderId));
+    if (!s) throw new SeamError("not_found");
+    return {
+      sheet: ctx.can("callcenter.configure") || ctx.can("integrations.manage") ? s.sheet : null,
+      adEvents: ctx.can("integrations.manage") ? s.adEvents : null,
+    };
   });
 }

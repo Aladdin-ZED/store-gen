@@ -852,6 +852,51 @@ async function restoreSheets(fx: Fixtures, opts: { last?: boolean } = {}): Promi
   if (opts.last) sheetsKept = null;
 }
 
+cases.push({
+  name: "templates screen and drawer blocks: B never previews A's order, lists or edits A's quick replies, or reads A's order state (OPE-§22.2, §12.7)",
+  async run(kit) {
+    const screen = load<typeof import("@/lib/integrations/whatsapp/screen.server")>("@/lib/integrations/whatsapp/screen.server");
+    const repo = load<Repo>("@/lib/integrations/whatsapp/templates.server");
+    const state = load<typeof import("@/lib/integrations/order-state")>("@/lib/integrations/order-state");
+    const a = write(kit, "A");
+    const b = write(kit, "B");
+    const quick = await repo.saveTemplate(a, { channel: "whatsapp", kind: "custom", locale: "fr", name: "A quick", body: "A-QUICK-REPLY-CANARY {order_id}" }, { userId: kit.fx.A.members.owner });
+    kit.check("quick reply: A adds its own", quick.ok && quick.created, quick);
+    if (!quick.ok) return;
+    try {
+      const preview = await screen.templatePreview(b, kit.fx.A.order.main, { firstName: "Karim" });
+      kit.check("preview: A's order from B is null (the action's not_found)", preview === null, preview);
+      const own = await screen.templatePreview(a, kit.fx.A.order.main, { firstName: "Samira" });
+      kit.check("preview: A's own order previews, the phone masked", !!own && own.orderId === kit.fx.A.order.main && !/\d{6,}/.test(own.phone), own?.phone);
+      const viewB = await screen.whatsappScreen(b, { firstName: "Karim", locale: "fr" });
+      const textB = JSON.stringify(viewB);
+      kit.check("screen: B's templates never list A's quick reply or preview A's order", !textB.includes("A-QUICK-REPLY-CANARY") && !textB.includes(kit.fx.A.order.main), viewB.rows?.length);
+      const edit = await repo.saveTemplate(b, { channel: "whatsapp", kind: "custom", locale: "fr", name: "B", body: "B {order_id}", id: quick.id }, { userId: kit.fx.B.members.owner });
+      kit.check("quick reply: B editing A's id answers not_found", !edit.ok && edit.error === "not_found", edit);
+      const del = await repo.deleteQuickReply(b, quick.id);
+      kit.check("quick reply: B deleting A's id deletes nothing", del === false);
+      const still = await repo.listTemplates(kit.scope("A"), { kind: "custom" });
+      kit.check("quick reply: A's row is intact", still.some((r) => r.id === quick.id && r.body.includes("A-QUICK-REPLY-CANARY")));
+      const crossed = await state.orderIntegrationState(b, kit.fx.A.order.main);
+      kit.check("order state: A's order from B is null", crossed === null, crossed);
+      const mine = await state.orderIntegrationState(a, kit.fx.A.order.main);
+      kit.check("order state: A's own order reads, with no phone and no payload", !!mine && !/\+?\d{9,}/.test(JSON.stringify(mine)), mine);
+    } finally {
+      await repo.deleteQuickReply(a, quick.id);
+    }
+  },
+});
+
+/** A quick reply of one store (a fresh row: the delete case consumes it). */
+async function quickReply(fx: Fixtures, store: "A" | "B"): Promise<string> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { messageTemplates } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const id = newId();
+  await db.insert(messageTemplates).values({ id, storeId: fx[store].id, channel: "whatsapp", kind: "custom", locale: "fr", pageId: null, name: `${store} quick`, body: `${store}-QUICK {order_id}`, status: "active", source: "user", position: 0 } as never);
+  return id;
+}
+
 const SHEETS = "src/app/app/[store]/integrations/sheets/actions.ts";
 const PIXELS = "src/app/app/[store]/integrations/pixels/actions.ts";
 const TELEGRAM = "src/app/app/[store]/integrations/telegram/actions.ts";
@@ -876,7 +921,7 @@ export const actions: TrackActionCase[] = [
     name: "requeueSheetRowAction",
     area: "sheets",
     path: "/integrations/sheets",
-    permission: IM,
+    permission: ["callcenter.configure"],
     write: true,
     victim: (fx) => [fx.A.order.failed],
     own: (fx, fresh) => fresh.order(fx.B, "failed").then((id) => [id]),
@@ -931,6 +976,20 @@ export const actions: TrackActionCase[] = [
     victim: (fx) => [{ channel: "whatsapp", kind: "confirm", locale: "fr", pageId: fx.A.page.live }],
     own: (fx) => [{ channel: "whatsapp", kind: "confirm", locale: "fr", pageId: fx.B.page.live }],
   },
+  // quick replies and the live preview (OPE-§22.2): callcenter.configure
+  {
+    file: WHATSAPP,
+    name: "deleteQuickReplyAction",
+    area: "settings",
+    path: "/integrations/whatsapp",
+    permission: ["callcenter.configure"],
+    write: true,
+    victim: (fx) => quickReply(fx, "A").then((id) => [id]),
+    own: (fx) => quickReply(fx, "B").then((id) => [id]),
+  },
+  { file: WHATSAPP, name: "previewTemplateAction", area: "settings", path: "/integrations/whatsapp", permission: ["callcenter.configure"], write: true, victim: (fx) => [fx.A.order.main], own: (fx) => [fx.B.order.main] },
+  // the order drawer's Google Sheets and Ad events blocks (OPE-§12.7)
+  { file: HUB, name: "orderIntegrationAction", area: "orders", path: "/orders", permission: ["orders.read_all"], write: false, victim: (fx) => [fx.A.order.main], own: (fx) => [fx.B.order.main] },
   // the deliveries log and its replays (OPE-§28.1)
   // A's pending row: A's own call (qa:action-replay) is the no-op, so P8's replay (the P0 stub here) is never reached;
   // B's attack answers not_found before any state is read. After the P8 merge the victim may be a dead row.

@@ -26,7 +26,7 @@ import { messageTemplates, pages } from "@/lib/db/schema";
 import { byId, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { builtinTemplate, isWaKind, type TemplateLocale } from "./builtins";
-import { checkTemplateInput, chooseTemplate, TEMPLATE_CHANNELS, TEMPLATES_PER_STORE, type TemplateChannel, type TemplateInputError } from "./choose";
+import { checkTemplateInput, chooseTemplate, TEMPLATE_CHANNELS, TEMPLATES_PER_STORE, type TemplateChannel, type TemplateInput, type TemplateInputError } from "./choose";
 
 export { TEMPLATE_BODY_MAX, TEMPLATE_CHANNELS, TEMPLATE_NAME_MAX, TEMPLATES_PER_STORE, type TemplateChannel } from "./choose";
 
@@ -174,26 +174,52 @@ export async function saveTemplate(scope: WriteScope, raw: unknown, actor: { use
     if (!page) return { ok: false, error: "not_found", field: "pageId" };
   }
   const r = await withNamedLock(storeLock(scope.storeId, "msg-templates"), 1, async (): Promise<SaveTemplateResult> => {
+    const values = { name: input.name, body: input.body, source: "user" as const, promptVersion: null, updatedBy: actor.userId };
+    // a quick reply (`custom`) is one row per reply: its id updates it, no id adds one (OPE-§22.2 "quick replies")
+    if (input.kind === QUICK_REPLY) {
+      if (input.id) {
+        const res = await db.update(messageTemplates).set(values).where(whereStore(messageTemplates, scope, eq(messageTemplates.id, input.id), eq(messageTemplates.channel, input.channel), eq(messageTemplates.kind, QUICK_REPLY)));
+        return affected(res) > 0 ? { ok: true, id: input.id, created: false } : { ok: false, error: "not_found", field: "kind" };
+      }
+      return insertRow(scope, input, values);
+    }
     const [current] = await db
       .select({ id: messageTemplates.id })
       .from(messageTemplates)
       .where(whereStore(messageTemplates, scope, ...slotWhere(input, "exact"), eq(messageTemplates.status, "active")))
       .orderBy(messageTemplates.position, messageTemplates.updatedAt)
       .limit(1);
-    const values = { name: input.name, body: input.body, source: "user" as const, promptVersion: null, updatedBy: actor.userId };
     if (current) {
       await db.update(messageTemplates).set(values).where(byId(messageTemplates, scope, current.id));
       return { ok: true, id: current.id, created: false };
     }
-    const [{ n } = { n: 0 }] = await db.select({ n: count() }).from(messageTemplates).where(whereStore(messageTemplates, scope));
-    if (n >= TEMPLATES_PER_STORE) return { ok: false, error: "limit" };
-    const id = newId();
-    await db.insert(messageTemplates).values(
-      storeValues(scope, { id, channel: input.channel, kind: input.kind, locale: input.locale, pageId: input.pageId, status: "active" as const, position: 0, ...values }),
-    );
-    return { ok: true, id, created: true };
+    return insertRow(scope, input, values);
   });
   return r.ran ? r.value : { ok: false, error: "busy" };
+}
+
+/** The kind of the quick replies: many rows, each its own (the other kinds are one active row per slot). */
+export const QUICK_REPLY = "custom";
+
+/** A new active row, when the store has fewer than 100 (called under the `msg-templates` lock). */
+async function insertRow(
+  scope: WriteScope,
+  input: TemplateInput,
+  values: { name: string; body: string; source: "user"; promptVersion: null; updatedBy: string | null },
+): Promise<SaveTemplateResult> {
+  const [{ n } = { n: 0 }] = await db.select({ n: count() }).from(messageTemplates).where(whereStore(messageTemplates, scope));
+  if (n >= TEMPLATES_PER_STORE) return { ok: false, error: "limit" };
+  const id = newId();
+  await db.insert(messageTemplates).values(
+    storeValues(scope, { id, channel: input.channel, kind: input.kind, locale: input.locale, pageId: input.pageId, status: "active" as const, position: 0, ...values }),
+  );
+  return { ok: true, id, created: true };
+}
+
+/** Deletes one quick reply of this store; false when the id is not one (another store's id included). */
+export async function deleteQuickReply(scope: WriteScope, id: string): Promise<boolean> {
+  const res = await db.delete(messageTemplates).where(whereStore(messageTemplates, scope, eq(messageTemplates.id, id), eq(messageTemplates.kind, QUICK_REPLY)));
+  return affected(res) > 0;
 }
 
 /**

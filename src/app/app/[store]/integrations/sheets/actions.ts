@@ -11,7 +11,7 @@
  *   setSheetsPullAction(on)         integrations.manage · sheets           "Bring status changes back from the sheet"
  *   syncSheetNowAction()            integrations.manage · sheets · `sheets:sync` 12/10 min   Sync now
  *   repairSheetAction({ add })      integrations.manage · sheets · `sheets:sync`   header formats, dropdown, headers
- *   requeueSheetRowAction(orderId)  integrations.manage · sheets           the drawer's Send again
+ *   requeueSheetRowAction(orderId)  callcenter.configure · sheets          the drawer's Send again (owner, admin, manager)
  *   saveExportKeyAction(json)       integrations.manage · php_export · fresh step-up (write-only)
  *   deleteExportKeyAction()         integrations.manage · php_export
  *
@@ -229,7 +229,8 @@ export async function repairSheetAction(input: z.input<typeof RepairInput>): Pro
 /** The order drawer's "Send again" (OPE-§19.5 step 7): the store's own order goes back to the sheet's queue. */
 export async function requeueSheetRowAction(orderId: string): Promise<ActionResult<{ queued: true }>> {
   return storeAction(
-    "integrations.manage",
+    // OPE-§12.7: the manager sees the drawer's Google Sheets block and its Send again (one row back in the queue)
+    "callcenter.configure",
     async (ctx) => {
       if (!(await requeueSheetRow(ctx.scope, OrderId.parse(orderId), ctx.actor))) throw new SeamError("not_found");
       refresh(ctx.store.handle);
