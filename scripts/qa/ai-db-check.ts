@@ -59,7 +59,7 @@ import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import Module, { createRequire } from "node:module";
 import path from "node:path";
-import type { StoreCtx, StoreRow, StoreScope, WriteScope } from "@/lib/tenancy/types";
+import type { StoreCtx, StoreRow, StoreScope, WriteCtx as WriteCtxT, WriteScope } from "@/lib/tenancy/types";
 
 /* ------------------------------------------------------------------ */
 /* process                                                             */
@@ -1352,6 +1352,72 @@ async function routesSuite(fx: Fx): Promise<void> {
   }
 }
 
+async function settingsSuite(fx: Fx): Promise<void> {
+  suite("settings");
+  const W = load<typeof import("@/lib/ai/settings/write.server")>("@/lib/ai/settings/write.server");
+  const { loadAiSettings } = load<typeof import("@/lib/ai/settings/load.server")>("@/lib/ai/settings/load.server");
+  const { storeBlockCtxFor } = load<typeof import("@/lib/ai/prompts/assemble.server")>("@/lib/ai/prompts/assemble.server");
+  const { renderStoreBlock } = load<typeof import("@/lib/ai/prompts/store-block")>("@/lib/ai/prompts/store-block");
+  const { getStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const { A, B } = fx;
+  const owner = ctxOf(A, A.owner) as WriteCtxT;
+  const noManage = { ...ctxOf(A, A.owner), can: () => false } as WriteCtxT;
+  const viewing = ctxOf(A, fx.staff, "impersonation") as WriteCtxT;
+  const key = () => randomBytes(9).toString("base64url");
+  const facts = { market: "MA" as const, currency: "MAD", primaryLocale: "fr" as const };
+  const version = async () => renderStoreBlock(await storeBlockCtxFor(A.scope, facts)).voiceVersion;
+  const voice = { formality: "tu" as const, darija: "light" as const, ctaByLocale: { fr: "Je réserve", ar: "" }, wordsUse: ["récolte", "Récolte", "x"], wordsAvoid: ["miracle"] };
+
+  // AI-06 (1): voice and memory writes require ai.manage; "View as store" is refused before anything is read
+  const before = JSON.stringify(await getStoreSetting(A.scope, "store_ai", { fresh: true }));
+  const v0 = await version();
+  check("saveVoice without ai.manage: forbidden", codeOf(await rejects(() => W.saveVoice(noManage, { key: key(), voice }))) === "forbidden");
+  check("saveVoice as View as store: impersonation_read_only", codeOf(await rejects(() => W.saveVoice(viewing, { key: key(), voice }))) === "impersonation_read_only");
+  check("addMemoryItem without ai.manage: forbidden", codeOf(await rejects(() => W.addMemoryItem(noManage, { key: key(), item: { kind: "fact", text: "refused item" } }))) === "forbidden");
+  check("saveMode / saveDirector without ai.manage: forbidden", codeOf(await rejects(() => W.saveMode(noManage, { key: key(), mode: "local" }))) === "forbidden" && codeOf(await rejects(() => W.saveDirector(noManage, { key: key(), director: "off" }))) === "forbidden");
+  check("the refused writes left store_ai as it was", JSON.stringify(await getStoreSetting(A.scope, "store_ai", { fresh: true })) === before);
+
+  // AI-06 (4): a voice change changes voiceVersion
+  const saved = await W.saveVoice(owner, { key: key(), voice });
+  check("saveVoice keeps the cleaned fields (empty button text dropped, words deduplicated)", saved.formality === "tu" && saved.ctaByLocale.fr === "Je réserve" && !("ar" in saved.ctaByLocale) && saved.wordsUse.length === 1, saved);
+  const v1 = await version();
+  check("a voice change changes voiceVersion", v0 !== v1, { v0, v1 });
+  const k = key();
+  await W.saveVoice(owner, { key: k, voice: { ...voice, formality: "vous" } });
+  const v2 = await version();
+  await W.saveVoice(owner, { key: k, voice: { ...voice, formality: "tu" } });
+  check("a replayed idempotency key writes nothing again", (await version()) === v2 && (await getStoreSetting(A.scope, "store_ai", { fresh: true })).voice.formality === "vous");
+
+  // memory through the actions' bodies: idempotent add, pin, delete; B's id space
+  const mk = key();
+  const a1 = await W.addMemoryItem(owner, { key: mk, item: { kind: "prefer", text: "Toujours parler de la récolte" } });
+  const a2 = await W.addMemoryItem(owner, { key: mk, item: { kind: "prefer", text: "Toujours parler de la récolte" } });
+  const [{ n }] = await q<{ n: number }>("SELECT COUNT(*) AS n FROM ai_memory WHERE store_id = ? AND text = ?", [A.id, "Toujours parler de la récolte"]);
+  check("a double submit adds one item (same key, same id)", a1.id === a2.id && Number(n) === 1, { a1, a2, n });
+  await W.pinMemoryItem(owner, { key: key(), id: a1.id, pinned: true });
+  check("pin through the action", Number((await q<{ pinned: number }>("SELECT pinned FROM ai_memory WHERE id = ?", [a1.id]))[0]?.pinned) === 1);
+  check("B's owner cannot pin or delete A's item (not found)", (await rejects(() => W.pinMemoryItem(ctxOf(B, B.owner) as WriteCtxT, { key: key(), id: a1.id, pinned: false }))) !== null && (await rejects(() => W.deleteMemoryItem(ctxOf(B, B.owner) as WriteCtxT, { key: key(), id: a1.id }))) !== null);
+  await W.deleteMemoryItem(owner, { key: key(), id: a1.id });
+  check("delete through the action leaves a tombstone", Number((await q<{ active: number }>("SELECT active FROM ai_memory WHERE id = ?", [a1.id]))[0]?.active) === 0);
+  const audits = await q<{ action: string; meta: string | null }>("SELECT action, meta FROM audit_log WHERE store_id = ? AND action LIKE 'store.ai.%'", [A.id]).catch(() => [] as { action: string; meta: string | null }[]);
+  const acts = new Set(audits.map((r) => r.action));
+  check("audited: settings, voice, memory added, pinned and deleted", ["store.ai.voice_updated", "store.ai.memory_added", "store.ai.memory_pinned", "store.ai.memory_deleted"].every((a) => acts.has(a)), [...acts]);
+  check("the audit rows carry no memory text", !audits.some((r) => String(r.meta ?? "").includes("récolte")));
+
+  // the probe (D56): staff only
+  const notStaff = await rejects(() => W.startProbe(ctxOf(A, A.owner), { key: key() }));
+  check("startProbe by a store owner who is not staff: the staff-only answer, no job", notStaff instanceof Error && notStaff.message === "ai.settings.probe.staff_only" && (await q("SELECT id FROM ai_jobs WHERE store_id = ? AND kind = 'probe'", [A.id])).length === 0);
+  check("startProbe under View as store: impersonation_read_only", codeOf(await rejects(() => W.startProbe(viewing, { key: key() }))) === "impersonation_read_only");
+
+  // the page's read: metadata and store data only, read-only under View as store
+  await W.saveMode(owner, { key: key(), mode: "auto" });
+  const view = await loadAiSettings(ctxOf(A, A.owner));
+  check("the view reads the store's own settings and credits", view.handle === A.row.handle && view.settings.voice.formality === "vous" && view.readOnly === null && typeof view.credits.used === "number");
+  const asStaff = await loadAiSettings(ctxOf(A, fx.staff, "impersonation"));
+  check("View as store: read-only, no probe card, memory still listed", asStaff.readOnly === "impersonation" && !asStaff.staffProbe);
+  check("B's view holds none of A's memory or voice", !JSON.stringify(await loadAiSettings(ctxOf(B, B.owner))).includes("Je réserve"));
+}
+
 async function main(): Promise<void> {
   const started = Date.now();
   let done = false;
@@ -1383,6 +1449,7 @@ async function main(): Promise<void> {
     await rollupsSuite(fx);
     await evalLiveSuite(fx);
     await routesSuite(fx);
+    await settingsSuite(fx);
     done = true;
   } catch (err) {
     check("the suite ran to the end", false, err instanceof Error ? err.stack : String(err));

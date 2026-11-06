@@ -82,6 +82,7 @@ import { registerServerSections } from "./selftest-server";
 import { registerJobsSections } from "./selftest-jobs";
 import { registerClientSections } from "./selftest-client";
 import { registerPassSections } from "./selftest-pass";
+import { registerSettingsSections } from "./selftest-settings";
 
 /* ------------------------------------------------------------------ */
 /* The runner                                                          */
@@ -1137,6 +1138,7 @@ registerServerSections({ section, check, eq });
 registerJobsSections({ section, check, eq });
 registerClientSections({ section, check, eq });
 registerPassSections({ section, check, eq });
+registerSettingsSections({ section, check, eq });
 
 /* ------------------------------------------------------------------ */
 /* run                                                                 */

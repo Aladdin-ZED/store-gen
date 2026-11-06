@@ -29,7 +29,7 @@ import Link from "next/link";
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { Hairline } from "@/components/admin/ai/hairline";
 import { Button } from "@/components/ui/button";
-import type { CriticPicks } from "@/lib/db/schema";
+import type { criticPicksOf } from "@/lib/ai/director/brief";
 import {
   PASS_CAP_MS,
   PASS_IDLE,
@@ -53,6 +53,9 @@ import type { MessageKey } from "@/lib/i18n/admin";
 import { useAdminLocale, useT } from "@/lib/i18n/admin/client";
 import type { Locale } from "@/lib/page/schema";
 import { cn } from "@/lib/utils";
+
+/** the `CriticPicks` row of AI-§M.1, through the pure layer (no schema import in components, L7) */
+type CriticPicks = ReturnType<typeof criticPicksOf>;
 
 export type { DirectorEngineAdapter, DirectorSet } from "@/lib/ai/director/pass";
 

@@ -69,7 +69,7 @@ import { aiUsageForStore } from "@/lib/ai/summary.server";
 import { runAi } from "@/lib/ai/router/server";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
-import { aiJobs } from "@/lib/db/schema";
+import { aiJobs, aiMemory } from "@/lib/db/schema";
 import { storeValues } from "@/lib/tenancy/sql";
 import { setStoreSetting } from "@/lib/settings";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
@@ -88,7 +88,7 @@ import { insertJob } from "@/lib/ai/store/jobs";
 import { startFakeAnthropic, type FakeAnthropic } from "@/lib/ai/testing/fake-anthropic";
 import { flagOverrides, sessions } from "@/lib/db/schema";
 import { getPlatformSetting, setPlatformSetting } from "@/lib/settings";
-import type { RouteAnswer, RouteFile, TenancyCase, TenancyKit } from "../tenancy-check";
+import type { RouteAnswer, RouteFile, TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
 
 /** the harness hands out member scopes; the settings write takes the WriteScope it is */
 const writable = (s: StoreScope): s is WriteScope => s.kind === "member";
@@ -515,5 +515,92 @@ export const cases: TenancyCase[] = [
       kit.check("ai: neither run moved A's counters or rows", (await kit.snapshotA()) === before);
     },
   },
+  {
+    name: "ai settings page: View as store renders read-only, store data only, none of the customer canaries",
+    async run(kit) {
+      const { addMemory } = await import("@/lib/ai/store/memory");
+      const a = kit.scope("A");
+      if (!writable(a)) throw new Error("ai: the harness scope of A is not a member scope");
+      const tag = `ai-settings-memory-${randomBytes(4).toString("hex")}`;
+      await addMemory(a, { kind: "fact", text: `${tag} livraison rapide` }, kit.fx.A.members.owner);
+      const page = { file: "src/app/app/[store]/settings/ai/page.tsx", template: "/app/[store]/settings/ai", kind: "page" as const };
+      const own = await kit.renderPage(user(kit.fx.A.members.owner), page, { store: kit.fx.A.handle });
+      const ownText = own.kind === "render" ? own.payload : "";
+      kit.check("ai settings: A's owner sees A's memory item (the scan is not blind)", own.kind === "render" && ownText.includes(tag), own.kind);
+      kit.check("ai settings: A's owner gets a writable view", ownText.includes('"readOnly":null'));
+      const token = await impersonationOf(kit);
+      if (!token) return;
+      const imp = await kit.renderPage({ sessionToken: token }, page, { store: kit.fx.A.handle });
+      const impText = imp.kind === "render" ? imp.payload : "";
+      kit.check("ai settings: staff viewing A get the page", imp.kind === "render", imp.kind === "error" ? imp.message : imp.kind);
+      // (the render keeps strings and drops booleans: the probe card's rule is test:ai-db's)
+      kit.check("ai settings: View as store renders read-only", impText.includes('"readOnly":"impersonation"') && !impText.includes('"readOnly":null'));
+      kit.check("ai settings: the memory text is visible as store data", impText.includes(tag));
+      const found = kit.leaks(imp.kind === "render" ? imp.payload : "", { only: ["customer", "secret"] });
+      kit.check("ai settings: no customer or secret canary in the HTML or RSC props under View as store", found.length === 0, found);
+      const bView = await kit.renderPage(user(kit.fx.B.members.owner), page, { store: kit.fx.B.handle });
+      kit.check("ai settings: B's page holds none of A's memory", bView.kind !== "render" || !bView.payload.includes(tag));
+    },
+  },
   ...routeCases,
+];
+
+/* ------------------------------------------------------------------ */
+/* Settings → AI actions (step 12)                                     */
+/* ------------------------------------------------------------------ */
+
+const SETTINGS_AI = "src/app/app/[store]/settings/ai/actions.ts";
+const idem = () => randomBytes(9).toString("base64url");
+
+/** A memory row of the store (A's is the victim's record, B's the attacker's own). */
+async function memoryRow(storeId: string, ownerId: string): Promise<string> {
+  const id = newId();
+  // tenancy: a fixture row of the attack harness, written for its own store id
+  await db.insert(aiMemory).values({ id, storeId, kind: "fact", text: `memory-${id.slice(-6)}`, locale: null, source: "explicit", active: true, pinned: false, evidence: null, createdBy: ownerId });
+  return id;
+}
+
+const settingsAct = (name: string, args: () => Record<string, unknown>): TrackActionCase => ({
+  file: SETTINGS_AI,
+  name,
+  area: "settings",
+  path: "/settings/ai",
+  permission: ["ai.manage"],
+  write: true,
+  victim: () => [{ key: idem(), ...args() }],
+  own: () => [{ key: idem(), ...args() }],
+});
+
+export const actions: TrackActionCase[] = [
+  settingsAct("saveModeAction", () => ({ mode: "auto" })),
+  settingsAct("saveDirectorAction", () => ({ director: "ask" })),
+  settingsAct("saveDeepPassAction", () => ({ deepPass: true })),
+  settingsAct("saveLocalAction", () => ({ bgRemoval: true })),
+  settingsAct("toggleLearningAction", () => ({ learning: true })),
+  settingsAct("toggleShareAction", () => ({ sharePatterns: false })),
+  settingsAct("saveVoiceAction", () => ({ voice: { formality: "vous", darija: "cta", ctaByLocale: {}, wordsUse: [], wordsAvoid: [] } })),
+  settingsAct("addMemoryAction", () => ({ item: { kind: "fact", text: "Livraison partout au Maroc" } })),
+  // A's memory id from B's path: the same answer as a missing id; B's own id runs
+  {
+    file: SETTINGS_AI,
+    name: "deleteMemoryAction",
+    area: "settings",
+    path: "/settings/ai",
+    permission: ["ai.manage"],
+    write: true,
+    victim: async (fx) => [{ key: idem(), id: await memoryRow(fx.A.id, fx.A.members.owner) }],
+    own: async (fx) => [{ key: idem(), id: await memoryRow(fx.B.id, fx.B.members.owner) }],
+  },
+  {
+    file: SETTINGS_AI,
+    name: "pinMemoryAction",
+    area: "settings",
+    path: "/settings/ai",
+    permission: ["ai.manage"],
+    write: true,
+    victim: async (fx) => [{ key: idem(), id: await memoryRow(fx.A.id, fx.A.members.owner), pinned: true }],
+    own: async (fx) => [{ key: idem(), id: await memoryRow(fx.B.id, fx.B.members.owner), pinned: true }],
+  },
+  // staff only inside the body (a seller gets the staff-only answer, never a job); membership through the seam
+  { file: SETTINGS_AI, name: "runProbeAction", area: "settings", path: "/settings/ai", permission: ["settings.read"], write: true, victim: () => [{ key: idem() }], own: () => [{ key: idem() }] },
 ];
