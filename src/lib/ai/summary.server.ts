@@ -7,11 +7,13 @@ import "server-only";
  *   - `aiStoreSummary(ctx, storeId)`: the console store profile's AI tab (P1 mounts P7's component);
  *   - `aiHealth()`: the "AI" section of P8's `getHealth` and its alarms.
  * Frozen at P0 (src/lib/contracts/r1-p0.ts). `aiUsageForStore` is real from P7 step 6; `aiStoreSummary` and
- * `aiHealth` still throw until the console step (13), and P8's `getHealth` keeps its `ai` section `null` until then.
+ * `aiHealth` from the console step (13), their bodies in ./platform/summary.ts (the store's data through
+ * `platformScope`, the platform's counts under `tenancy: platform` annotations).
  */
 import { entitlement, usageValue } from "@/lib/tenancy/entitlements";
 import { getStoreById } from "@/lib/tenancy/public";
 import type { PlatformCtx, StoreScope } from "@/lib/tenancy/types";
+import { platformHealth, storeSummary } from "./platform/summary";
 import { isMonthPeriod } from "./quota/periods";
 import { monthCostMicros } from "./store/runs";
 import type { AiProviderId, AiTaskId, TaskClass } from "./tasks";
@@ -81,12 +83,12 @@ export async function aiUsageForStore(scope: StoreScope, month: string): Promise
   return { month, creditsUsed, creditsLimit, costMicros };
 }
 
+/** The console store profile's AI tab (AI-§K.4); `console.read` through `platformScope`, metadata only. */
 export async function aiStoreSummary(ctx: PlatformCtx, storeId: string): Promise<AiStoreSummary> {
-  void ctx;
-  void storeId;
-  throw new Error("not implemented: P7 aiStoreSummary");
+  return storeSummary(ctx, storeId);
 }
 
+/** The "AI" section of the platform health (AI-§O). */
 export async function aiHealth(): Promise<AiHealth> {
-  throw new Error("not implemented: P7 aiHealth");
+  return platformHealth();
 }

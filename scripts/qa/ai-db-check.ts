@@ -1418,6 +1418,201 @@ async function settingsSuite(fx: Fx): Promise<void> {
   check("B's view holds none of A's memory or voice", !JSON.stringify(await loadAiSettings(ctxOf(B, B.owner))).includes("Je réserve"));
 }
 
+/* ------------------------------------------------------------------ */
+/* step 13: Console → AI (platform actions, aiStoreSummary, aiHealth)  */
+/* ------------------------------------------------------------------ */
+
+/** A staff context as `requirePlatform` hands it (super_admin), with or without a fresh step-up. */
+function platformCtxOf(staff: string, fresh: boolean): import("@/lib/tenancy/types").PlatformCtx {
+  return {
+    user: { id: staff, email: "staff@ai-db.test", name: "Staff", totpEnabled: true, sessionId: "s", platformRole: "super_admin", locale: null, lastStoreId: null },
+    role: "super_admin",
+    actor: { kind: "platform", userId: staff, impersonatorId: null, ip: null },
+    can: () => true,
+    stepUpFresh: fresh,
+    stepUpUntil: fresh ? new Date(Date.now() + 300_000) : null,
+  } as unknown as import("@/lib/tenancy/types").PlatformCtx;
+}
+
+/**
+ * AI-01 console scope, AI-07 (3)(4 UI)(5), AI-19 (9)(10), AI-§K.2, AI-§K.4 through the action bodies
+ * (src/lib/ai/platform/console-write.ts, what each `platformAction("ai.platform", …)` of the console calls): the jury
+ * rule at save, the class gate and the emergency path (step-up, not_found only, audited), Canary and Activate gates,
+ * Auto by default behind the preference test, the key's step-up and that it never leaves (answers, audit rows, logs);
+ * then aiStoreSummary (metadata only) and the aiHealth shape.
+ */
+async function consoleSuite(fx: Fx): Promise<void> {
+  suite("console");
+  const W = load<typeof import("@/lib/ai/platform/console-write")>("@/lib/ai/platform/console-write");
+  const { storeSummary, platformHealth } = load<typeof import("@/lib/ai/platform/summary")>("@/lib/ai/platform/summary");
+  const { aiStoreSummary, aiHealth } = load<typeof import("@/lib/ai/summary.server")>("@/lib/ai/summary.server");
+  const { fixturesHash } = load<typeof import("@/lib/ai/eval/fixtures")>("@/lib/ai/eval/fixtures");
+  const { syncPromptVersions } = load<typeof import("@/lib/ai/platform/prompt-versions")>("@/lib/ai/platform/prompt-versions");
+  const { getPlatformSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const { startFakeAnthropic } = load<typeof import("@/lib/ai/testing/fake-anthropic")>("@/lib/ai/testing/fake-anthropic");
+  const { resetAnthropic } = load<typeof import("@/lib/ai/server/client")>("@/lib/ai/server/client");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const fresh = platformCtxOf(fx.staff, true);
+  const stale = platformCtxOf(fx.staff, false);
+  const codeOfOutcome = (o: { ok: boolean; code?: string }) => (o.ok ? "ok" : (o.code ?? "?"));
+  const evalRun = async (o: { kind: string; task: string; version: string; model?: string | null; rubric?: string | null; hash: string; passed: boolean; daysAgo?: number }) => {
+    const id = newId();
+    await q(
+      "INSERT INTO ai_eval_runs (id, kind, task, model, prompt_version, rubric_version, fixtures_hash, status, passed, created_at, done_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL ? DAY), UTC_TIMESTAMP(3))",
+      [id, o.kind, o.task, o.model ?? null, o.version, o.rubric ?? null, o.hash, o.passed ? 1 : 0, o.daysAgo ?? 0],
+    );
+    return id;
+  };
+  const audits = async (action: string) => q<{ meta: string | null; target: string | null }>("SELECT meta, target FROM audit_log WHERE action = ? ORDER BY created_at DESC", [action]);
+
+  const env = process.env as Record<string, string | undefined>;
+  const fake = await startFakeAnthropic();
+  env.SG_E2E = "1";
+  env.SG_AI_BASE_URL = fake.origin;
+  env.ANTHROPIC_API_KEY = FAKE_KEY;
+  resetAnthropic();
+  try {
+    await setAi({ enabled: true, caps: { monthlyUsd: 100 } }, fx.staff);
+    const base = await getPlatformSetting("platform_ai", { fresh: true });
+
+    // AI-07 (4): a jury containing the candidate class's model is refused at save
+    const juryBad = await W.saveJury(fresh, { class: "director_interactive", models: [base.classes.director_interactive.model, "claude-sonnet-5-5"] });
+    check("a jury containing the candidate's model is refused at save (jury)", codeOfOutcome(juryBad) === "jury", juryBad);
+    const judgeBad = await W.saveJury(fresh, { class: "worker", models: [base.classes.worker.model] });
+    check("the Worker's judge cannot be the Worker model (jury)", codeOfOutcome(judgeBad) === "jury", judgeBad);
+    check("the refused juries left the setting as it was", JSON.stringify((await getPlatformSetting("platform_ai", { fresh: true })).evalGate) === JSON.stringify(base.evalGate));
+
+    // AI-§F.6: a class model change needs step-up, a checked model and a passing full live run ≤ 14 days
+    const worker = base.classes.worker;
+    const next = { class: "worker", model: "claude-opus-5", effort: worker.effort, maxTokens: worker.maxTokens, timeoutMs: worker.timeoutMs, fallbacks: worker.fallbacks, batch: worker.batch };
+    check("a model change without a fresh step-up: step_up", codeOf(await rejects(() => W.saveClass(stale, next))) === "step_up");
+    const unchecked = await W.saveClass(fresh, next);
+    check("an unchecked model id cannot be saved (not_checked)", codeOfOutcome(unchecked) === "not_checked", unchecked);
+    const checked = await W.checkModelInfo(fresh, { id: "claude-opus-5" });
+    check("Check model stores the model's facts", checked.ok && checked.value.id === "claude-opus-5" && !!(await getPlatformSetting("platform_ai", { fresh: true })).modelInfo["claude-opus-5"], checked);
+    const missing = await W.checkModelInfo(fresh, { id: "claude-missing-model" });
+    check("Check model on an id the API does not know: model_not_found", codeOfOutcome(missing) === "model_not_found", missing);
+    const noRun = await W.saveClass(fresh, next);
+    check("a class model change without a passing full live run is refused (needs_live_run)", codeOfOutcome(noRun) === "needs_live_run", noRun);
+    await evalRun({ kind: "smoke", task: "copy.page", version: "copy.page@s1", model: "claude-opus-5", hash: fixturesHash("copy.page"), passed: true });
+    check("…a smoke run is not enough for a class change", codeOfOutcome(await W.saveClass(fresh, next)) === "needs_live_run");
+    await evalRun({ kind: "live", task: "copy.page", version: "copy.page@s1", model: "claude-opus-5", hash: "0".repeat(64), passed: true });
+    check("…nor a live run on another fixtures hash", codeOfOutcome(await W.saveClass(fresh, next)) === "needs_live_run");
+    await evalRun({ kind: "live", task: "copy.page", version: "copy.page@s1", model: "claude-opus-5", hash: fixturesHash("copy.page"), passed: true, daysAgo: 15 });
+    check("…nor one older than 14 days", codeOfOutcome(await W.saveClass(fresh, next)) === "needs_live_run");
+    await evalRun({ kind: "live", task: "copy.page", version: "copy.page@s1", model: "claude-opus-5", hash: fixturesHash("copy.page"), passed: true });
+    const allowed = await W.saveClass(fresh, next);
+    check("with a passing live run ≤ 14 days on the current hash the change saves", allowed.ok && (await getPlatformSetting("platform_ai", { fresh: true })).classes.worker.model === "claude-opus-5", allowed);
+    check("…audited platform.ai.model_changed with from and to", (await audits("platform.ai.model_changed")).some((r) => String(r.meta).includes("claude-opus-5") && String(r.meta).includes(worker.model)));
+
+    // AI-D15: the emergency switch, only on not_found, with step-up and a typed reason
+    const reachable = await W.emergencySwitch(fresh, { class: "worker", model: "claude-sonnet-5-5", reason: "the provider retired the model" });
+    check("emergency switch while the active model answers: refused (not_not_found)", codeOfOutcome(reachable) === "not_not_found", reachable);
+    await setAi({ classes: { ...(await getPlatformSetting("platform_ai", { fresh: true })).classes, worker: { ...worker, model: "claude-missing-worker" } } }, fx.staff);
+    check("emergency switch without a fresh step-up: step_up", codeOf(await rejects(() => W.emergencySwitch(stale, { class: "worker", model: "claude-sonnet-5-5", reason: "the provider retired the model" }))) === "step_up");
+    check("emergency switch without a typed reason: refused before anything", (await rejects(() => W.emergencySwitch(fresh, { class: "worker", model: "claude-sonnet-5-5", reason: "gone" }))) !== null);
+    const switched = await W.emergencySwitch(fresh, { class: "worker", model: "claude-sonnet-5-5", reason: "the provider retired the model" });
+    const sw = await audits("platform.ai.model_emergency_switch");
+    check("the active model answers not_found: the switch saves without a passing run", switched.ok && (await getPlatformSetting("platform_ai", { fresh: true })).classes.worker.model === "claude-sonnet-5-5", switched);
+    check("…with the audit row platform.ai.model_emergency_switch (class, from, to, reason)", sw.length === 1 && String(sw[0]?.meta).includes("claude-missing-worker") && String(sw[0]?.meta).includes("the provider retired the model"), sw[0]);
+    await setAi({ classes: { ...(await getPlatformSetting("platform_ai", { fresh: true })).classes, worker } }, fx.staff);
+
+    // AI-07 (5): Canary only with a passing smoke or full run on the current hash; Activate only at the threshold
+    await syncPromptVersions();
+    await q("INSERT INTO prompt_versions (task, version, provider, template_hash, status, created_at) VALUES ('copy.page', 'copy.page@s8', 'server', ?, 'draft', UTC_TIMESTAMP(3))", ["a".repeat(64)]);
+    const canaryNone = await W.startCanary(fresh, { family: "copy.page", version: "copy.page@s8" });
+    check("Canary without a passing smoke or full run: refused (no_canary_run)", codeOfOutcome(canaryNone) === "no_canary_run", canaryNone);
+    await evalRun({ kind: "smoke", task: "copy.page", version: "copy.page@s8", hash: "f".repeat(64), passed: true });
+    check("…a passing smoke run on another fixtures hash does not count", codeOfOutcome(await W.startCanary(fresh, { family: "copy.page", version: "copy.page@s8" })) === "no_canary_run");
+    await evalRun({ kind: "smoke", task: "copy.page", version: "copy.page@s8", hash: fixturesHash("copy.page"), passed: true });
+    const canaried = await W.startCanary(fresh, { family: "copy.page", version: "copy.page@s8" });
+    const row = (await q<{ status: string; canary_bp: number }>("SELECT status, canary_bp FROM prompt_versions WHERE version = 'copy.page@s8'"))[0];
+    check("with a passing smoke run on the current hash: canary at the computed slice (< 400 runs a week → 50 %)", canaried.ok && row?.status === "canary" && Number(row.canary_bp) === 5_000, { canaried, row });
+    check("…audited platform.ai.prompt_canaried", (await audits("platform.ai.prompt_canaried")).some((r) => r.target === "copy.page"));
+    check("Activate without a fresh step-up: step_up", codeOf(await rejects(() => W.activateVersion(stale, { family: "copy.page", version: "copy.page@s8" }))) === "step_up");
+    const early = await W.activateVersion(fresh, { family: "copy.page", version: "copy.page@s8" });
+    check("Activate before the promotion threshold: refused (not_ready)", codeOfOutcome(early) === "not_ready", early);
+    check("…and the low-volume path before day 28 too (not_low_volume)", codeOfOutcome(await W.activateLowVolume(fresh, { family: "copy.page", version: "copy.page@s8" })) === "not_low_volume");
+    check("the family's active version is unchanged", ((await getPlatformSetting("platform_ai", { fresh: true })).promptVersions["copy.page"] ?? "copy.page@s1") === "copy.page@s1");
+    const rolled = await W.rollbackVersion(fresh, { family: "copy.page", version: "copy.page@s8", reason: "test cleanup" });
+    check("Roll back retires the canary, audited", rolled.ok && (await q<{ status: string }>("SELECT status FROM prompt_versions WHERE version = 'copy.page@s8'"))[0]?.status === "retired" && (await audits("platform.ai.prompt_rolled_back")).some((r) => String(r.meta).includes("test cleanup")));
+
+    // AI-19 (10): Auto by default only with the recorded passing preference test
+    const autoNo = await W.setDirectorDefault(fresh, { auto: true });
+    check("Auto by default without a preference run: refused (needs_preference)", codeOfOutcome(autoNo) === "needs_preference" && !(await getPlatformSetting("platform_ai", { fresh: true })).directorAutoDefault, autoNo);
+    const weak = await W.recordPreference(fresh, { lowerBound: 0.51, pairs: 60 });
+    check("a preference test below 0.55 is recorded as failing and unlocks nothing", weak.ok && !weak.value.pass && codeOfOutcome(await W.setDirectorDefault(fresh, { auto: true })) === "needs_preference");
+    const strong = await W.recordPreference(fresh, { lowerBound: 0.61, pairs: 64 });
+    const autoYes = await W.setDirectorDefault(fresh, { auto: true });
+    check("a passing preference run (≥ 0.55 over ≥ 60 pairs) unlocks Auto by default", strong.ok && strong.value.pass && autoYes.ok && (await getPlatformSetting("platform_ai", { fresh: true })).directorAutoDefault === true, { strong, autoYes });
+    check("…audited preference_recorded and director_default_changed", (await audits("platform.ai.preference_recorded")).length === 2 && (await audits("platform.ai.director_default_changed")).length === 1);
+    await W.setDirectorDefault(fresh, { auto: false });
+    const cal = await W.recordCalibration(fresh, { labels: [{ caseId: "not-a-case", score: 5 }] });
+    check("naturalness labels for unknown cases are refused (state)", codeOfOutcome(cal) === "state", cal);
+
+    // the cap and the key: step-up, and the key never leaves (answers, audit rows, logs)
+    check("the monthly cap without a fresh step-up: step_up", codeOf(await rejects(() => W.saveCap(stale, { monthlyUsd: 50 }))) === "step_up");
+    const cap = await W.saveCap(fresh, { monthlyUsd: 120 });
+    check("the cap saves with step-up, audited cap_changed from → to", cap.ok && (await audits("platform.ai.cap_changed")).some((r) => String(r.meta).includes("120")));
+    const secret = `sk-ant-console${randomBytes(18).toString("hex")}`;
+    const logged: string[] = [];
+    const orig = { log: console.log, error: console.error, warn: console.warn, info: console.info };
+    for (const k of ["log", "error", "warn", "info"] as const) console[k] = (...a: unknown[]) => void logged.push(a.map(String).join(" "));
+    let answer: unknown;
+    let staleKey: unknown;
+    let badKey: unknown;
+    try {
+      staleKey = await rejects(() => W.setKey(stale, { apiKey: secret }));
+      badKey = await W.setKey(fresh, { apiKey: "not-a-key" });
+      answer = await W.setKey(fresh, { apiKey: secret });
+    } finally {
+      Object.assign(console, orig);
+    }
+    check("Set key without a fresh step-up: step_up", codeOf(staleKey) === "step_up");
+    check("a malformed key is refused without echoing it (invalid_key)", JSON.stringify(badKey).includes("invalid_key") && !JSON.stringify(badKey).includes("not-a-key"));
+    check("Set key answers the key source, never the key", JSON.stringify(answer).includes("settings") && !JSON.stringify(answer).includes(secret), answer);
+    const keyAudits = await q<{ action: string; meta: string | null }>("SELECT action, meta FROM audit_log WHERE action LIKE 'platform.%' ORDER BY created_at DESC LIMIT 100");
+    check("…audited key_set, and no audit row carries the key", keyAudits.some((r) => r.action === "platform.ai.key_set") && !keyAudits.some((r) => String(r.meta).includes(secret.slice(7, 30))));
+    check("…and nothing logged carries it", !logged.some((l) => l.includes(secret.slice(7, 30))), logged.slice(0, 5));
+    const raw = (await q<{ value: string }>("SELECT value FROM settings WHERE `key` = 'platform_ai_secret'"))[0];
+    check("…the stored value is sealed (the key is not in the row)", !!raw && !String(raw.value).includes(secret.slice(7, 30)));
+    const removed = await W.removeKey(fresh);
+    check("Remove key (step-up): the source falls back to the environment, audited key_removed", removed.ok && removed.value.keySource === "env" && (await audits("platform.ai.key_removed")).length === 1, removed);
+  } finally {
+    await fake.close();
+    delete env.SG_E2E;
+    delete env.SG_AI_BASE_URL;
+    resetAnthropic();
+  }
+
+  // AI-§K.4: aiStoreSummary is metadata only, through the console scope
+  const { A } = fx;
+  const tag = `console-canary-${randomBytes(4).toString("hex")}`;
+  await q(
+    "INSERT INTO ai_runs (id, store_id, task, surface, provider, via, class, model, prompt_version, input_hash, status, output, rejected_fields, flags, ms, credits, cost_micros, created_at) VALUES (?, ?, 'copy.hero', 'wizard', 'server', 'stream', 'worker', 'claude-sonnet-5-5', 'copy.hero@s1', ?, 'ok', ?, ?, ?, 1200, 3, 900, UTC_TIMESTAMP(3))",
+    [newId(), A.id, "e".repeat(64), JSON.stringify({ headline: `${tag} headline text` }), JSON.stringify(["faq"]), JSON.stringify(["fallback_model"])],
+  );
+  const summary = await storeSummary(fresh, A.id);
+  const viaStub = await aiStoreSummary(fresh, A.id);
+  const text = JSON.stringify(summary);
+  check("aiStoreSummary: the store's runs grouped by task, class and provider, with latency", summary.runs.some((r) => r.by === "task" && r.key === "copy.hero" && r.p50Ms !== null) && summary.runs.some((r) => r.by === "class") && summary.runs.some((r) => r.by === "provider" && r.key === "server" && r.fallbacks >= 1));
+  check("…the guard-rejection heat-map by field names", summary.rejections.some((r) => r.task === "copy.hero" && r.field === "faq"));
+  check("…the last runs as metadata, credits and cost, through the frozen export", summary.recent.length > 0 && typeof summary.credits.month.used === "number" && typeof summary.costMicrosMonth === "number" && JSON.stringify(viaStub) === text);
+  check("aiStoreSummary returns no text field (no output, prompt or memory text)", !text.includes(tag) && !text.includes("headline text") && !/"(output|prompt|text|input)"\s*:/.test(text));
+  check("aiStoreSummary needs console.read (the platform scope)", (await rejects(() => storeSummary({ ...fresh, can: () => false }, A.id))) !== null);
+  check("aiStoreSummary of an unknown store: not_found", codeOf(await rejects(() => storeSummary(fresh, newId()))) === "not_found");
+
+  // AI-§O: the aiHealth shape
+  const h = await platformHealth();
+  const viaHealth = await aiHealth();
+  const keys = ["keySource", "enabled", "classes", "breaker", "transport", "deepTransport", "lastOkAt", "batches", "jobs", "spend", "refusalRate24h", "errorsLastHour", "directorShareRefusals24h", "canary", "detachedJobs"];
+  check("aiHealth carries every AI-§O field", keys.every((k) => k in h) && Object.keys(viaHealth).sort().join() === Object.keys(h).sort().join(), Object.keys(h));
+  check("…four classes with the served model and fallback use in 24 h", h.classes.length === 4 && h.classes.every((k) => typeof k.model === "string" && typeof k.fallbacks24h === "number" && ["ok", "paused", "unavailable"].includes(k.state)));
+  check("…jobs with the driver shares, batches with the oldest age, spend with the pending slice", typeof h.jobs.running === "number" && typeof h.jobs.drivers === "object" && "oldestAgeMin" in h.batches && "pendingSliceUsedPct" in h.spend && typeof h.detachedJobs.flag === "boolean");
+  check("…the last successful call, refusals and fallbacks read from the runs", h.lastOkAt !== null && h.classes.find((k) => k.class === "worker")!.fallbacks24h >= 1);
+  check("aiHealth never carries a key", !JSON.stringify(h).includes("sk-ant"));
+}
+
 async function main(): Promise<void> {
   const started = Date.now();
   let done = false;
@@ -1450,6 +1645,7 @@ async function main(): Promise<void> {
     await evalLiveSuite(fx);
     await routesSuite(fx);
     await settingsSuite(fx);
+    await consoleSuite(fx);
     done = true;
   } catch (err) {
     check("the suite ran to the end", false, err instanceof Error ? err.stack : String(err));

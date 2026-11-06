@@ -542,6 +542,59 @@ export const cases: TenancyCase[] = [
       kit.check("ai settings: B's page holds none of A's memory", bView.kind !== "render" || !bView.payload.includes(tag));
     },
   },
+  {
+    name: "ai console: a store owner reaches no Console → AI action or page; staff read A's AI tab as metadata only",
+    async run(kit) {
+      const actions = await import("@/app/admin/(console)/ai/actions");
+      const ownerB = user(kit.fx.B.members.owner);
+      const before = await kit.snapshotA();
+      const runId = newId();
+      const calls: [string, () => Promise<{ ok: boolean }>][] = [
+        ["saveAiSettingsAction", () => actions.saveAiSettingsAction({ enabled: false })],
+        ["saveAiCapAction", () => actions.saveAiCapAction({ monthlyUsd: 1 })],
+        ["setAiKeyAction", () => actions.setAiKeyAction({ apiKey: `sk-ant-${"x".repeat(30)}` })],
+        ["removeAiKeyAction", () => actions.removeAiKeyAction()],
+        ["testAiConnectionAction", () => actions.testAiConnectionAction()],
+        ["checkAiModelAction", () => actions.checkAiModelAction({ id: "claude-sonnet-5-5" })],
+        ["saveAiClassAction", () => actions.saveAiClassAction({ class: "fast", model: "claude-haiku-5-5", effort: "low", maxTokens: 2000, timeoutMs: 30000, fallbacks: "none", batch: "allowed" })],
+        ["aiEmergencySwitchAction", () => actions.aiEmergencySwitchAction({ class: "fast", model: "claude-haiku-5-5", reason: "tenancy attack case" })],
+        ["saveAiJuryAction", () => actions.saveAiJuryAction({ class: "fast", models: ["claude-sonnet-5-5"] })],
+        ["saveAiRouteAction", () => actions.saveAiRouteAction({ task: "copy.page", enabled: false })],
+        ["saveAiPriceAction", () => actions.saveAiPriceAction({ model: "claude-haiku-5-5", row: null })],
+        ["saveAiRubricAction", () => actions.saveAiRubricAction({ version: "v9" })],
+        ["startAiEvalAction", () => actions.startAiEvalAction({ family: "copy.page", version: "copy.page@s1", kind: "smoke", confirm: true })],
+        ["canaryAiPromptAction", () => actions.canaryAiPromptAction({ family: "copy.page", version: "copy.page@s1" })],
+        ["activateAiPromptAction", () => actions.activateAiPromptAction({ family: "copy.page", version: "copy.page@s1" })],
+        ["activateAiPromptLowVolumeAction", () => actions.activateAiPromptLowVolumeAction({ family: "copy.page", version: "copy.page@s1" })],
+        ["rollbackAiPromptAction", () => actions.rollbackAiPromptAction({ family: "copy.page", version: "copy.page@s1", reason: "attack" })],
+        ["recordAiCalibrationAction", () => actions.recordAiCalibrationAction({ labels: [{ caseId: "x", score: 5 }] })],
+        ["recordAiPreferenceAction", () => actions.recordAiPreferenceAction({ lowerBound: 0.9, pairs: 100 })],
+        ["setAiDirectorDefaultAction", () => actions.setAiDirectorDefaultAction({ auto: true })],
+        ["cancelAiBatchAction", () => actions.cancelAiBatchAction({ id: runId })],
+        ["retryAiBatchItemsAction", () => actions.retryAiBatchItemsAction({ batchId: runId })],
+        ["clearAiScreenedAction", () => actions.clearAiScreenedAction({ runId })],
+      ];
+      for (const [name, fn] of calls) {
+        const r = await kit.call(ownerB, "/admin/ai", fn);
+        const answer = r.value as { ok: boolean; error?: string } | undefined;
+        kit.check(`ai console: ${name} refused for a store owner (the seam's answer, no body ran)`, !r.ok || (answer !== undefined && !answer.ok), r.ok ? answer : String(r.error));
+      }
+      kit.check("ai console: the refused calls changed nothing of A", (await kit.snapshotA()) === before);
+      const overview = { file: "src/app/admin/(console)/ai/page.tsx", template: "/admin/ai", kind: "page" as const };
+      const storePage = { file: "src/app/admin/(console)/ai/stores/[id]/page.tsx", template: "/admin/ai/stores/[id]", kind: "page" as const };
+      const o = await kit.renderPage(ownerB, overview, {});
+      kit.check("ai console overview: a store owner gets no render", o.kind !== "render", o.kind);
+      const s = await kit.renderPage(ownerB, storePage, { id: kit.fx.A.id });
+      kit.check("ai console store page: a store owner gets none of A's AI metadata", s.kind !== "render" || !s.payload.includes(kit.fx.A.handle), s.kind);
+      // staff: A's AI tab renders, metadata only (no customer or secret canary in the HTML or RSC props)
+      const token = randomBytes(32).toString("base64url");
+      await db.insert(sessions).values({ id: sha256Hex(token), userId: kit.fx.staff.id, mfaPassed: true, expiresAt: new Date(Date.now() + 3_600_000), stepUpAt: new Date() });
+      const staffView = await kit.renderPage({ sessionToken: token }, storePage, { id: kit.fx.A.id });
+      kit.check("ai console store page: staff get A's AI tab", staffView.kind === "render", staffView.kind === "error" ? staffView.message : staffView.kind);
+      const found = kit.leaks(staffView.kind === "render" ? staffView.payload : "", { only: ["customer", "secret"] });
+      kit.check("ai console store page: no customer or secret canary of A in the staff render", found.length === 0, found);
+    },
+  },
   ...routeCases,
 ];
 
