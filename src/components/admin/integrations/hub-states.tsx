@@ -17,9 +17,12 @@ import { useStore } from "../shell/store-context";
 export function useNow(initial: number): number {
   const [now, setNow] = useState(initial);
   useEffect(() => {
-    setNow(Date.now());
+    const first = setTimeout(() => setNow(Date.now()), 0);
     const id = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(id);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
   }, []);
   return now;
 }

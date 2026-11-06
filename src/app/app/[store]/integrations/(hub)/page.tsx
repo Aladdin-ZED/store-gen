@@ -43,6 +43,9 @@ export async function generateMetadata(): Promise<Metadata> {
  *
  * The route group keeps this screen's loading skeleton off the nested Sheets, Pixels and Telegram screens.
  */
+/** The request's instant, for the relative times the client then keeps fresh (a module function: render stays pure). */
+const requestTime = () => Date.now();
+
 export default async function IntegrationsPage({
   params,
   searchParams,
@@ -58,7 +61,7 @@ export default async function IntegrationsPage({
   const locked = ctx.store.status === "pending";
   const filters = hubFilters(await searchParams);
   const hub = locked ? null : await integrationsHub(ctx.scope, filters);
-  const now = Date.now();
+  const now = requestTime();
   const canReplay = manage && !impersonating;
 
   const nothing = !!hub && hub.tiles?.length === 0 && hub.sheets === null && hub.deliveries?.rows.length === 0 && hub.checks.length === 0 && !filters.kind && !filters.state;

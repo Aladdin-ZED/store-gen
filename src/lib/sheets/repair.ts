@@ -28,8 +28,8 @@ import { foldLabel, R1_HEADERS, type R1Column } from "./row";
 /** `s:<sid>:sheets:sync:<uid>` (core §E.8, unchanged from R1.0): Sync now and Repair, 12 per 10 minutes per member. */
 export const SYNC_BUCKET = { name: "sheets:sync", limit: 12, windowSec: 600 } as const;
 
-/** The six optional headers the repair offers, one tick each (OPE-§19.4 rev 3; "Repère" is the R1.0 one). */
-export const REPAIR_HEADERS = ["agent", "agentNote", "tracking", "carrier", "shipStatus", "shipAfter"] as const satisfies readonly R1Column[];
+/** The optional headers the repair offers, one tick each: "Repère" (R1.0) and the six of OPE-§19.4 rev 3. */
+export const REPAIR_HEADERS = ["landmark", "agent", "agentNote", "tracking", "carrier", "shipStatus", "shipAfter"] as const satisfies readonly R1Column[];
 export type RepairHeader = (typeof REPAIR_HEADERS)[number];
 
 /** A grid this wide is the most a repair grows the tab to (13 contract columns, the R1.0 extras, the six). */

@@ -40,6 +40,9 @@
  *
  * R1 P5 step 9, the integrations page (src/lib/integrations/hub.server.ts `integrationsHub`, the one read of
  * /app/<h>/integrations): B's page shows nothing of A (in the step 2 case), A's own page carries no customer field.
+ *
+ * R1 P5 step 10, the Google Sheets screen (src/lib/integrations/sheets-screen.server.ts `sheetsScreen`): B's screen
+ * never carries A's sheet link, A's pending proof, A's sheet agent labels or A's export key.
  */
 import { createRequire } from "node:module";
 import type { Fixtures, TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
@@ -287,6 +290,47 @@ export const cases: TenancyCase[] = [
         await db.delete(integrationStatus).where(inStore(integrationStatus, a));
         if (mainBefore) await db.update(orders).set({ sheetStatus: mainBefore.sheetStatus }).where(byId(orders, a, kit.fx.A.order.main));
         await db.delete(cronCursors).where(eq(cronCursors.job, `sheets.push:${kit.fx.A.id}`));
+      }
+    },
+  },
+  {
+    name: "sheets screen: B never reads A's sheet link, proof state, agent labels or export key (OPE-§19.8, OD54)",
+    async run(kit) {
+      const { sheetsScreen, sheetLabelsSeen } = load<typeof import("@/lib/integrations/sheets-screen.server")>("@/lib/integrations/sheets-screen.server");
+      const config = load<typeof import("@/lib/sheets/config")>("@/lib/sheets/config");
+      const { getStoreSetting, setStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+      const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+      const { orders } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+      const { byId } = load<typeof import("@/lib/tenancy/sql")>("@/lib/tenancy/sql");
+      const a = write(kit, "A");
+      const b = kit.scope("B");
+      const sheetA = await config.getSheetsConfig(a);
+      const before = await sheetsScreen(b);
+      const label = "A-LABEL-CANARY";
+      const prevSetting = await getStoreSetting(a, "sheets", { fresh: true });
+      const [prevOrder] = await db.select({ l: orders.confirmedByLabel, c: orders.confirmedBy }).from(orders).where(byId(orders, a, kit.fx.A.order.main)).limit(1);
+      const expiresAt = new Date(Date.now() + 3_600_000).toISOString();
+      await db.update(orders).set({ confirmedByLabel: label, confirmedBy: null }).where(byId(orders, a, kit.fx.A.order.main));
+      await setStoreSetting(a, "sheets", { ...prevSetting, pending: { spreadsheetId: "A-PROOF-SHEET-CANARY", sheetId: null, codeHash: "0".repeat(64), expiresAt } }, { id: kit.fx.A.members.owner });
+      try {
+        const ownLabels = await sheetLabelsSeen(kit.scope("A"));
+        kit.check("sheets screen: A sees its own unmapped sheet label", ownLabels.some((l) => l.label === label), ownLabels);
+        const after = await sheetsScreen(b);
+        const text = JSON.stringify(after);
+        kit.check(
+          "sheets screen: B's screen is what it was before A's label and proof existed, and names nothing of A",
+          JSON.stringify({ ...after, serviceAccountEmail: null }) === JSON.stringify({ ...before, serviceAccountEmail: null }) &&
+            !text.includes(label) &&
+            !text.includes("A-PROOF-SHEET-CANARY") &&
+            !text.includes(expiresAt) &&
+            (!sheetA || !text.includes(sheetA.spreadsheetId)),
+          { before, after },
+        );
+        const ownA = await sheetsScreen(kit.scope("A"));
+        kit.check("sheets screen: A's own screen carries no customer field", kit.leaks(ownA, { only: ["customer"] }).length === 0, kit.leaks(ownA));
+      } finally {
+        await setStoreSetting(a, "sheets", prevSetting, { id: kit.fx.A.members.owner });
+        if (prevOrder) await db.update(orders).set({ confirmedByLabel: prevOrder.l, confirmedBy: prevOrder.c }).where(byId(orders, a, kit.fx.A.order.main));
       }
     },
   },

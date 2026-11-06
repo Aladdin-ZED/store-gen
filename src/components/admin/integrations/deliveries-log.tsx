@@ -72,7 +72,9 @@ export function DeliveriesLog({
   const [queued, setQueued] = useState<ReadonlySet<string>>(new Set());
   const [, startRefresh] = useTransition();
   const filters = useRef({ kind, state });
-  filters.current = { kind, state };
+  useEffect(() => {
+    filters.current = { kind, state };
+  }, [kind, state]);
   const seq = useRef(0);
 
   const load = useCallback(
