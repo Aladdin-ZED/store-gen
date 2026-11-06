@@ -95,8 +95,8 @@ export function AiProviderChip({ state, policy, className }: AiProviderChipProps
   const running = state.status === "running";
   const text = note ? t(note) : t(LABEL[provider]);
   return (
-    <span className={cn("inline-grid max-w-full gap-[3px] align-middle", className)} data-provider={provider} data-state={state.status}>
-      <span className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full bg-foreground/[0.045] ps-2 pe-2.5 text-[0.75rem] leading-none font-medium text-foreground/80 ring-1 ring-foreground/[0.07] ring-inset">
+    <span className={cn("inline-flex w-fit max-w-full min-w-0 flex-col gap-[3px] align-middle", className)} data-provider={provider} data-state={state.status}>
+      <span title={text} className="flex h-6 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-foreground/[0.045] ps-2 pe-2.5 text-[0.75rem] leading-none font-medium text-foreground/80 ring-1 ring-foreground/[0.07] ring-inset">
         <Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 truncate">{text}</span>
       </span>

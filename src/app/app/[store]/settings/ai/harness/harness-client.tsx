@@ -185,13 +185,15 @@ function StreamedHero({ f }: { f: HarnessFixtures }) {
     const timers = HERO_FIELDS.map((_, i) => setTimeout(() => setArrived((n) => Math.max(n, i + 1)), 600 + i * 500));
     return () => timers.forEach(clearTimeout);
   }, []);
-  const text = (k: (typeof HERO_FIELDS)[number], i: number) => (arrived > i ? f.hero[k] : (f.library[k] ?? ""));
+  // the library's *emphasis* markup is the page renderer's; the harness shows the plain words
+  const text = (k: (typeof HERO_FIELDS)[number], i: number) => (arrived > i ? f.hero[k] : (f.library[k] ?? "")).replace(/\*/g, "");
   const origin = (i: number) => (arrived > i ? "cloud" : "library");
   const state: Pick<AiTaskState, "status" | "provider" | "notes"> = { status: arrived < HERO_FIELDS.length ? "running" : "done", provider: "server", notes: [] };
   return (
     <div className="grid gap-4">
       <AiProviderChip state={state} />
-      <div className="grid gap-2 rounded-xl bg-background p-4 ring-1 ring-foreground/[0.07]">
+      {/* the page's copy is French here: its own language and direction, whatever the admin's */}
+      <div lang="fr" dir="ltr" className="grid gap-2 rounded-xl bg-background p-4 ring-1 ring-foreground/[0.07]">
         <CopyReveal as="h3" field="hero.headline" text={text("headline", 0)} origin={origin(0)} className="text-[1.25rem] leading-tight font-semibold text-balance" />
         <CopyReveal as="p" field="hero.sub" text={text("sub", 1)} origin={origin(1)} className="text-[0.875rem] text-pretty text-muted-foreground" />
         <CopyReveal as="span" field="hero.cta" text={text("cta", 2)} origin={origin(2)} className="mt-1 inline-flex h-9 w-fit items-center rounded-full bg-primary px-4 text-[0.8125rem] font-medium text-primary-foreground" />

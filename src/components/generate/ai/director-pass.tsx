@@ -183,8 +183,11 @@ export function useDirectorPass(adapter: DirectorEngineAdapter, opts: UseDirecto
   const autoReady = slot.k === "ready" && slot.mode === "auto" && opts.revealed && state.k === "idle";
   useEffect(() => {
     if (!autoReady || autoTried.current) return;
-    autoTried.current = true;
-    const timer = setTimeout(start, 0);
+    // marked inside the timer: React's dev double-run clears the first timer, and the second run must still start
+    const timer = setTimeout(() => {
+      autoTried.current = true;
+      start();
+    }, 0);
     return () => clearTimeout(timer);
   }, [autoReady, start]);
 
@@ -270,7 +273,7 @@ export function DirectorPassControl({ pass: explicit, className }: { pass?: Dire
             </Button>
           </>
         ) : (
-          <Button variant="ghost" className="h-9 rounded-full px-3 pointer-coarse:h-11" onClick={pass.redo}>
+          <Button variant="ghost" className="-ms-3 h-9 rounded-full px-3 pointer-coarse:h-11" onClick={pass.redo}>
             {t("ai.director.redo")}
           </Button>
         )}
@@ -314,7 +317,7 @@ export function DirectorPassControl({ pass: explicit, className }: { pass?: Dire
       <div className={cn("flex w-full max-w-md min-w-0 items-center gap-2 sm:w-auto sm:min-w-80", className)}>
         <div className="grid min-w-0 flex-1 gap-1.5">
           <div className="flex min-w-0 items-baseline justify-between gap-3">
-            <p className="min-w-0 truncate text-[0.875rem] font-medium" aria-live="polite">
+            <p className="min-w-0 text-[0.875rem] leading-snug font-medium text-pretty" aria-live="polite">
               {t(STAGE_TEXT[state.stage])}
             </p>
             <p className="shrink-0 text-[0.75rem] text-muted-foreground tabular-nums">{t("ai.director.cost", { credits: slot.credits })}</p>
