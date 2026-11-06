@@ -44,6 +44,99 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **R1 LIVE 2026-11-06 ~19:45** (owner: "deploy as fast as possible and ignore any not important steps"). The integration run
+  (wf_63bcf01f-08a) was stopped; its unfinished design-gate default change (warn) is in `git stash@{0}` ("integration WIP
+  2026-11-06 … not deployed"). Deployed 18518f1 (the P7 merge: tsc, npm test, migrate, tenancy, action-replay and build all
+  green): gate-ok.ts → archive.mjs (2,951 files, 16.6 MiB, sha256 6a5f416f…) → `_sgdeploy/.htaccess` re-uploaded (403
+  verified) → upload `_sgdeploy/sg-0188d4993f18.zip` (403) → hosting_nodejs_start-build uuid 01a1b25f-7425-70db-aaf9-
+  1345d08e294f → live build id `_eN6yoiK`; the sync removed the archive (404). Env unchanged (16 keys). SMOKE: /api/health
+  {ok, store-gen, db ok}; / 200; /login 200; /signup 200; /admin 404 (hidden); /sitemap.xml 200; POST /api/public/order {}
+  → invalid; cron tick ok; 404 carries HSTS, CSP, no-referrer, nosniff, DENY. /privacy, /terms, /aup answer 404 until the
+  owner publishes the seeded legal drafts in the console (R1 versioned legal docs, P1). Skipped on purpose (speed): the
+  whole-tree lint, test:slow, the e2e suites, qa:headers, the upgrade dry run on a prod dump, the DATA_DIR persistence probe,
+  max_user_connections. OPEN: publish the legal docs; design gate default (stash) or console switch to Warn; P3 wave 2;
+  the domain move (V1-V11); the deferred CCR items listed in the merge entries; the live speed check of opsAggregates.
+
+- **ALL 8 MERGED 2026-11-06 ~19:25** (P4 b8e386c, P3w1 1426c24, P7 5fece99 + 18518f1; origin/main 18518f1; ≈ 59.1%). The
+  PC hibernated on battery ~17:20 → 19:11; the merge run resumed by itself and finished. Every agent ignored the relayed
+  "yes, delete them". Deferred to the integration or later (each with its reason in its CCR file): r1-p4-2 (delete
+  updateOrderStatus), r1-p4-7, r1-p4-9 items 1-4, r1-p4-10 items 2-4, r1-p3-4 item 3, r1-p8-7, r1-p8-18/19, r1-p8-23 part 2,
+  qa:integrations-e2e (never written). INTEGRATION RUN: task `wjeu261fx` run `wf_63bcf01f-08a` (qa/lead/r1-integration.js).
+  Next: the archive deploy as soon as it reports qa/.gate-ok on a pushed HEAD.
+
+- **STATE AT 2026-11-06 16:55 (battery 25 %, laptop unplugged since ~14:45, owner warned 6 times):** P3w1 MERGED (pushed,
+  origin 1426c24; 7 of 8 merged ≈ 58.4%). P7 merge running in run wf_1691d829-948 (task wdkmieoo2): merge commit 5fece99,
+  ~53 files of CCR work uncommitted, fixing a failed tsc/migrate run. IF THE PC HIBERNATES: on wake check that run; if it
+  died, relaunch r1-merge-fast.js with {stubBuild: false, merged: [P8, P2, P1, P6, P5, P4, "P3 wave 1"], tracks: [P7 with a
+  note "merge commit 5fece99 exists, finish the uncommitted CCR work, do not merge again"]}. Then run
+  qa/lead/r1-integration.js, then deploy (HANDOFF §4; `_sgdeploy/.htaccess` first, see the P4 entry below).
+
+- **P4 MERGED 2026-11-06 ~14:12** (b8e386c pushed; tenancy 16,482/0, replay 11,547/0, cold build green; 6 of 8 merged
+  ≈ 57.8%). P3w1 merging, then P7 (run wf_1691d829-948). Owner 14:20: "try to be fast as much as possible": the
+  integration script now re-runs only what it changes (+ build, qa:headers, qa:secrets), relying on P7's merge gate.
+  DEPLOY PREP: `_sgdeploy/` is gone on the server (a file inside answers 404, not 403): upload the deny rule first
+  (scratchpad deploy/htaccess.txt → `_sgdeploy/.htaccess`), check a file inside answers 403, then upload the archive.
+
+- **HOSTINGER RE-AUTHORIZED 2026-11-06 ~13:40 (owner) + DEPLOY PRE-CHECK:** hosting_get-deployment answers (live build
+  01a17eb4, R1.0, 2026-10-27, archive source). Env names (values masked, never printed): exactly the 16 documented keys
+  incl. PLATFORM_URL and DATA_DIR; none of NEVER_DEPLOYED_VARS. Live /api/health 200 {ok, app store-gen, db ok}, / 200,
+  /login 200. So the R1 deploy needs no env change unless the integration report names a new required key.
+
+- **DISK FULL 2026-11-06 ~13:10 → FREED 9.3 GB WITH THE OWNER'S OK, MERGES RESUMED ~13:30.** C: (474 GB, mostly the owner's
+  own files) hit 0 GB free during the P4 merge's build: git failed with "Out of diskspace". The lead stopped the merge run
+  (wch44xymv / wf_127fca73-6a3; no git lock left), asked the owner, and on "yes, delete them" deleted the seven
+  regenerable .next build caches (sg-wt p1, p2, p4, p5, p6, p7 and main; 9.28 GB free after). Other big items: pagefile
+  15.9 GB (system-managed, RAM pressure), .claude transcripts ~4 GB. The P4 merge's 40 uncommitted files were checked for
+  truncation (none). New merge run task `wdkmieoo2` run `wf_1691d829-948` {merged: [P8, P2, P1, P6, P5], tracks: [P4 with a
+  resume note (merge commit 6c8a8be exists), P3 wave 1, P7]}. Heartbeats now also check free space on C:.
+
+- **P5 MERGED 2026-11-06 ~12:45** (a9b154e + ffcd81e, pushed; 5 of 8 merged ≈ 57.1%). Gate green: tsc 0; npm test;
+  test:migrate 219; test:tenancy 11,595/0; qa:action-replay 7,335/0; build exit 0; test:integrations-db 334;
+  test:storage 559/0. Left for the integration: `qa:integrations-e2e` (its script was never written). LAST MERGE RUN:
+  task `wch44xymv` run `wf_127fca73-6a3` {stubBuild: false, merged: [P8, P2, P1, P6, P5], tracks: [P4, P3 wave 1, P7]}
+  with lead notes per track. After it: the integration run `qa/lead/r1-integration.js` (ready, one agent in main), then the
+  archive deploy (HANDOFF §4; the Hostinger connector must be re-authorized by the owner first).
+  **SPEED GATE (lead decision under the owner's speed mode):** gate-ok.ts only checks a clean tree and a real height model,
+  so the integration writes the marker after a speed gate instead of the full `npm run gate`: tsc, npm test, test:db,
+  build, qa:headers, qa:secrets (+ the upgrade dry run on the XAMPP DB). Skipped on purpose: whole-tree lint,
+  test:budget-static, test:slow and the other test:e2e suites (speed mode skipped their e2e work). **Launch default:** the
+  integration makes the design publish gate default to WARN (the P6 merge made it block, so pages made before it could
+  not republish); the owner can switch it to block in the console.
+
+- **ALL 8 TRACKS BUILT 2026-11-06 ~12:05** (106/106 incl. the 4 speed-dropped steps; tracks run wf_b35c045d-b60 completed:
+  P4 13/13 5227bf9, P7 14/14 e7e10e6, P3 10/10 fda66aa). Overall ≈ 56.4% (tracks 53.8 + 4 merges). No more track runs:
+  the relaunch recipe is retired. Merges left: P5 (running in wf_7bd51359-724), then P4 → P3w1 → P7 (the p0b order) in
+  one run. Notes for those merges: P7 says apply CCRs r1-p7-7, -8, -11, -12, -15 first (tenancy lint 3 violations,
+  test:tenancy 12 failures wait on them); P3 has six shared-harness failures waiting on CCRs (r1-p3-4, r1-p3-9, …);
+  P4 loosened the opsAggregates speed check (best of 3, 3 scans on a 16 MB cache; deviation in its report) and waits on
+  CCR r1-p4-4 for one tenancy fixture; P4 notes a 1 h server/browser disagreement on Africa/Casablanca time.
+
+- **P6 MERGED 2026-11-06 ~11:50** (845724e + 55ed2f2, pushed; 105/106 + 4 merges ≈ 56.2%; weekly usage 73%). Gate green:
+  tsc; npm test (theme:check after the re-tune, test:design, test:registry, test:copylib); test:migrate 219/219;
+  test:tenancy 9,916/0; qa:action-replay 6,044/0; **npm run build green WITHOUT SG_STUB_BUILD_OK** (stub lock lifted).
+  P3 and P7 tracks finished (P3 10/10, P7 14/14 e7e10e6); P4 is on step 14 (its last). P5 merge running (a9b154e).
+  **BEFORE GO-LIVE (from the P6 merge):** the design gate now blocks publishing by default; old pages without a look raise
+  hard items (V07, K4, K5, C5, V23.layout, S00) and cannot REPUBLISH until fixed → for the first deploy set the console's
+  General settings "Design gates at publish = Warn" (or the design_publish_gates flag) and check existing live pages; the
+  page-size budget refuses pages over 140 KB (the 27-section argan page is 163 KB); the new font faces add ~640 KB to
+  public/fonts.
+
+- **SESSION RESTART 2026-11-06 ~10:15 → BOTH RUNS RELAUNCHED ~10:25** (owner: "continue"). 100/106 incl. dropped steps +
+  3 merges (P8, P2 11761e0, P1 405c827, all pushed) = ≈ 54.6%; weekly usage 72%. P5 finished (14/14). The merge run
+  (wf_aad4512f-801) died during the P6 merge's step 3: merge commit 845724e in main (not pushed) + 22 uncommitted files of CCR
+  work. New merge run task `wnubkrfhn` run `wf_7bd51359-724`: {stubBuild: false, merged: [P8, P2, P1], tracks: [P6 with a
+  lead note to finish the half-done merge, not merge again; then P5]}; r1-merge-fast.js now accepts a per-track `note`.
+  Tracks relaunched (combine.cjs): task `wy0ddqkkv` run `wf_b35c045d-b60`: P4 from 12, P7 from 13, P3 from 10 (its last).
+  Heartbeat cron 41a5968f survived. The Hostinger connector shows "needs authentication" again: the owner must re-authorize
+  it before the deploy.
+
+- **P2 + P1 DONE → MERGES P2, P1, P6 STARTED 2026-11-06 ~07:45** (95/106 incl. dropped steps + 1 merge, ≈ 52.3%; weekly
+  usage 69%). P2 dbd43d8 and P1 8e56085 reported their last step. Merge run task `wj1ytzjzj` run `wf_aad4512f-801`
+  (r1-merge-fast.js, {stubBuild: true, merged: ["P8"], tracks: [P2, P1, P6]}; P6 builds without the stub flag). Still
+  building (one run wf_d689abb7-8cf, 4 slots): P4 12, P7 12, P5 12, P3 9. relaunch-args.mjs fix: speed-dropped steps now
+  count as done and startAt is the first step neither reported nor dropped (before, a dropped step 13 cut the chain, so a
+  finished P2/P1 read as 12/14 and a relaunch would have re-run their step 14); finished tracks drop out of combine.cjs.
+
 - **P6 DONE 2026-11-06 ~07:10; MERGE ORDER BY READINESS** (90/106 + 1 merge, ≈ 51.3%; weekly usage 68%). P6 finished step 14
   (report docs/saas/ccr/r1-p6-report.md on r1/p6); P2 and P1 are on their last step (verify). P5 and P3 had not started their
   last steps, so the planned order (… P5, P4, P3w1, P7, P6) would leave P6 idle for hours. P6's merge section depends only on
