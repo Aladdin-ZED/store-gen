@@ -29,7 +29,9 @@ export default async function StaffInvitePage({ params }: { params: Promise<{ to
   const viewer = await getSignedInUser();
   const locale = await viewerLocale(viewer);
   const t = translator(locale);
-  const [brand, view] = await Promise.all([brandName(), TOKEN_RE.test(token) ? getStaffInviteState(token, viewer ? { id: viewer.id, email: viewer.email } : null) : Promise.resolve({ state: "invalid" as const })]);
+  const [brandRaw, view] = await Promise.all([brandName(), TOKEN_RE.test(token) ? getStaffInviteState(token, viewer ? { id: viewer.id, email: viewer.email } : null) : Promise.resolve({ state: "invalid" as const })]);
+  // the platform name never breaks across lines (an Arabic title wraps around it otherwise)
+  const brand = brandRaw.replace(/ /g, String.fromCharCode(0xa0));
   const signIn = `${LOGIN_PATH}?next=${encodeURIComponent(`/invite/staff/${token}`)}`;
 
   if (view.state === "invalid") {
