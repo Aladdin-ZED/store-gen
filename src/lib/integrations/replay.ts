@@ -14,13 +14,12 @@ import "server-only";
  *   - `cancelled` rows (a CAPI item past the 7-day guard): refused (`"cancelled"`), a replay would be cancelled again;
  *   - the bucket `s:<sid>:replay:<uid>` 30 per hour, charged once per call: "Replay all dead" is one call and touches at
  *     most 50 rows, oldest first;
- *   - one `integrations.outbox.replayed` audit row per replayed row, meta `{ kind, topic, outboxId, resend }`.
+ *   - one `integrations.outbox.replayed` audit row per replayed row, written by the core's `replay` (meta `{ kind, topic, outboxId, from }`, CCR r1-p5-12).
  *
  * Test orders never reach this: none of their items was enqueued (core D54). A replayed `capi` row still passes the
  * 7-day guard at send time (the handler's, OPE-§20.4).
  */
 import { and, asc, eq } from "drizzle-orm";
-import { auditIn } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { outbox } from "@/lib/db/schema";
 import { replay as coreReplay, type OutboxKind, type OutboxState } from "@/lib/jobs/outbox";
@@ -90,8 +89,9 @@ async function charge(ctx: ReplayCtx): Promise<void> {
 }
 
 async function replayed(ctx: ReplayCtx, row: { id: string; kind: TenantKind; topic: string }, resend: boolean): Promise<void> {
+  // the core's replay writes the one `integrations.outbox.replayed` row (kind, topic, outboxId, from) (CCR r1-p5-12)
+  void resend;
   await deps().replay(ctx, row.id);
-  await auditIn(ctx.scope, ctx.actor, "integrations.outbox.replayed", { target: row.id, meta: { kind: row.kind, topic: row.topic, outboxId: row.id, resend } });
 }
 
 /** What the rules say of one row's state (null: a no-op). */

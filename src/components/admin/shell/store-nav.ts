@@ -15,6 +15,7 @@
  */
 import {
   BellIcon,
+  CableIcon,
   CircleIcon,
   ContactRoundIcon,
   CpuIcon,
@@ -64,6 +65,7 @@ import { INTERIM_NAV, NAV_KEYWORDS } from "./nav/t4";
 /** The registry's icon names (lucide without the "Icon" suffix) the shell draws; an unknown name draws a circle. */
 const ICONS: Readonly<Record<string, LucideIcon>> = {
   Bell: BellIcon,
+  Cable: CableIcon,
   ContactRound: ContactRoundIcon,
   Cpu: CpuIcon,
   FileText: FileTextIcon,

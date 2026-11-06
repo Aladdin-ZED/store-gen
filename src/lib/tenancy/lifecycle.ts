@@ -368,7 +368,8 @@ async function afterCommit(ctx: Ctx, storeId: string, store: StoreFacts, to: Sto
       }),
     );
   }
-  await step("markHealthDirty", () => markHealthDirty(storeId));
+  // a purged store keeps no store_health row (the purge deleted it last): no dirty stub is planted back
+  if (to !== "purged") await step("markHealthDirty", () => markHealthDirty(storeId));
   if (from === "pending" || to === "pending") {
     // D69: the store's bytes leave the shared sandbox budget when it leaves pending, and join it again when it
     // re-enters pending (an appeal, a staff reopen), so the next exit never refunds bytes it no longer holds there

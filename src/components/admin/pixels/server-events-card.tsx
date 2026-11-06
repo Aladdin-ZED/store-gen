@@ -182,7 +182,7 @@ function ConversionsEditor({ view, conversions, canWrite }: { view: ServerEvents
 
       {updating !== null && updating > 0 && (
         <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-          <RefreshCwIcon className="size-3.5 animate-spin [animation-duration:2.4s] motion-reduce:animate-none" aria-hidden="true" />
+          <RefreshCwIcon className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
           {t("int.px.updating", { n: updating })}
         </p>
       )}

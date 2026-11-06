@@ -204,6 +204,11 @@ export const fakeSheetMeta = new Map<string, { title: string; tabs: string[] }>(
       if (method === "GET" && rest.startsWith("/values/")) {
         return json({ values: u.searchParams.get("majorDimension") === "COLUMNS" ? [rows.map((r) => r[0])] : rows });
       }
+      if (method === "GET" && rest === "/values:batchGet") {
+        // R1 (P5 push / pull): one read, the header range (N1:AZ1: no optional column in these sheets), then A2:<width>
+        const width = (r: string) => [...(/!A2:([A-Z]+)$/.exec(r)?.[1] ?? "C")].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+        return json({ valueRanges: u.searchParams.getAll("ranges").map((r) => (/!A2:/.test(r) ? { range: r, values: rows.map((row) => row.slice(0, width(r))) } : { range: r })) });
+      }
       if (method === "GET") {
         const meta = fakeSheetMeta.get(id) ?? { title: "Orders", tabs: ["Commandes"] };
         return json({ spreadsheetId: id, properties: { title: meta.title }, sheets: meta.tabs.map((title, sheetId) => ({ properties: { sheetId, title } })) });
@@ -1066,7 +1071,6 @@ export const ACTION_CASES: ActionCase[] = [
   act(SETTINGS, "saveStoreAction", "settings", "/settings/general", "settings.write", true, (fx) => [storeForm(fx.A, fx.A.asset.photo)], (fx) => [storeForm(fx.B)]),
   act(SETTINGS, "saveDefaultsAction", "settings", "/settings/market", "settings.write", true, () => [{ market: "MA", locale: "fr", currency: "MAD", phoneCountry: "MA", shippingFee: 0, deliveryText: "Livraison 48h" }], () => [{ market: "MA", locale: "ar", currency: "MAD", phoneCountry: "MA", shippingFee: 0, deliveryText: "" }]),
   act(SETTINGS, "saveAiAction", "settings", "/settings/ai", "settings.write", true, () => [{ enabled: false, tier: "lite", bgRemoval: false }], () => [{ enabled: true, tier: "lite", bgRemoval: true }]),
-  act(SETTINGS, "saveTurnstileAction", "settings", "/settings/anti-spam", "settings.write", true, (fx) => [{ siteKey: fx.canaries.data.find((c) => c.startsWith("0x4AAAAAAA"))!, secretKey: "••••cret" }], () => [{ siteKey: "0x4BBBBBBBBBBsite", secretKey: "0x4BBBBBBBBBBsecret" }]),
   act(SETTINGS, "loadAuditAction", "audit", "/settings/audit", "audit.read", false, (fx) => [{ beforeId: fx.A.auditId + 1 }], () => [{}]),
   // the store's export key
   act(SHEETS, "saveExportKeyAction", "sheets", "/integrations/sheets", "integrations.manage", true, () => [serviceAccountJson("attack@other.iam.gserviceaccount.com")], () => [serviceAccountJson("own@b.iam.gserviceaccount.com")]),
@@ -2329,9 +2333,12 @@ export async function specialSuite(kit: Kit): Promise<void> {
     check("cron tick: no write to any other spreadsheet", writes.every((n) => n.url.includes(fx.A.spreadsheetId) || n.url.includes(fx.B.spreadsheetId)), writes.map((n) => n.url));
   }
 
-  // B connecting A's spreadsheet: a proof code, nothing about the sheet, A untouched
+  // B connecting A's spreadsheet: A holds its binding (R1, OPE-§19.3), so the one generic refusal, nothing about the
+  // sheet, A untouched. Start, verify and disconnect share s:<sid>:sheets:connect:<uid> (10 per hour, core §E.8),
+  // which the routes suite spent: a fresh window first
+  await load<typeof import("@/lib/db/client")>("@/lib/db/client").pool().query("DELETE FROM rate_limits WHERE bucket LIKE ?", [`s:${fx.B.id}:sheets:connect:%`]);
   const connect = await callRoute(armed(fx.B.members.owner), route("/api/app/[store]/sheets/connect"), "POST", { store: fx.B.handle }, { body: { url: `https://docs.google.com/spreadsheets/d/${fx.A.spreadsheetId}/edit` } });
-  check("B pasting A's sheet link gets a proof code, not a connection", connect.ok && connect.value!.status === 200 && /"proof"/.test(connect.value!.body), routeAnswer(connect));
+  check("B pasting A's sheet link: the one generic refusal (409 binding_conflict), no proof code, no connection", connect.ok && connect.value!.status === 409 && /"binding_conflict"/.test(connect.value!.body) && !/"proof"/.test(connect.value!.body), routeAnswer(connect));
   const verify = await callRoute(armed(fx.B.members.owner), route("/api/app/[store]/sheets/verify"), "POST", { store: fx.B.handle }, {});
   check("B verifying without the code in the sheet: refused", verify.ok && verify.value!.status === 409, routeAnswer(verify));
   const sheetsB = await SC.getSheetsConfig(B);
@@ -3205,21 +3212,32 @@ export async function reviewSuite(kit: Kit): Promise<void> {
       const v = await callRoute(who, verifyRoute, "POST", { store: fx.B.handle }, {});
       check(`POST sheets/verify with ${label}: 403 step_up`, status(v) === 403 && /"step_up"/.test(bodyOf(v)), routeAnswer(v));
     }
-    const start = await callRoute(armed(ownerB), connectRoute, "POST", { store: fx.B.handle }, { body: { url: linkA } });
+    // start, verify and disconnect share s:<sid>:sheets:connect:<uid> (10 per hour, core §E.8): a fresh window first
+    await pool().query("DELETE FROM rate_limits WHERE bucket LIKE ?", [`s:${fx.B.id}:sheets:connect:%`]);
+    const netA = network.length;
+    const refused = await callRoute(armed(ownerB), connectRoute, "POST", { store: fx.B.handle }, { body: { url: linkA } });
+    check(
+      "B pasting A's link with a fresh step-up: the one generic refusal (A's spreadsheet is bound to A, OPE-§19.3), no Google call",
+      status(refused) === 409 && /"binding_conflict"/.test(bodyOf(refused)) && !/"proof"/.test(bodyOf(refused)) && !network.slice(netA).some((n) => n.url.includes(fx.A.spreadsheetId)),
+      routeAnswer(refused),
+    );
+    // a spreadsheet no store holds yet, whose orders tab carries what shoppers typed
+    const freeSheet = `1x${rand("abcdefghijkmnopqrstuvwxyz0123456789", 38)}`;
+    fakeSheets.set(freeSheet, []);
+    const start = await callRoute(armed(ownerB), connectRoute, "POST", { store: fx.B.handle }, { body: { url: `https://docs.google.com/spreadsheets/d/${freeSheet}/edit#gid=0` } });
     const code = start.ok ? (JSON.parse(start.value!.body) as { proof?: { code?: string } }).proof?.code : undefined;
-    check("B pasting A's link with a fresh step-up: a proof code", typeof code === "string" && /^SG-/.test(code), routeAnswer(start));
+    check("B pasting a spreadsheet no store holds, with a fresh step-up: a proof code", typeof code === "string" && /^SG-/.test(code), routeAnswer(start));
     if (code) {
-      const rowsA = fakeSheets.get(fx.A.spreadsheetId) ?? [];
-      // the code reached A's orders tab through an order on A's public page (lower-cased in the address, as typed in the note)
-      fakeSheets.set(fx.A.spreadsheetId, [[fx.A.order.main, "27/10/2026", "Nouvelle", "Shopper", "0612345678", "Casablanca", `derb ${code.toLowerCase()} rue 4`, "Argan", "", 1, 199, `merci ${code}`, "Live"]]);
+      // the code reached the orders tab through an order on a public page (lower-cased in the address, as typed in the note)
+      fakeSheets.set(freeSheet, [[fx.A.order.main, "27/10/2026", "Nouvelle", "Shopper", "0612345678", "Casablanca", `derb ${code.toLowerCase()} rue 4`, "Argan", "", 1, 199, `merci ${code}`, "Live"]]);
       const netBefore = network.length;
       const v = await callRoute(armed(ownerB), verifyRoute, "POST", { store: fx.B.handle }, {});
-      check("the proof code in A's order rows (address, note): verify refused (code_missing)", status(v) === 409 && /code_missing/.test(bodyOf(v)), routeAnswer(v));
-      const touched = network.slice(netBefore).filter((n) => n.url.includes(fx.A.spreadsheetId));
-      check("…no cell of A's sheet read, nothing written to it (one metadata read of its titles)", touched.every((n) => n.method === "GET" && !n.url.includes("/values/")), touched.map((n) => `${n.method} ${n.url.slice(0, 120)}`));
+      check("the proof code in the order rows (address, note): verify refused (code_missing)", status(v) === 409 && /code_missing/.test(bodyOf(v)), routeAnswer(v));
+      const touched = network.slice(netBefore).filter((n) => n.url.includes(freeSheet));
+      check("…no cell of the sheet read, nothing written to it (one metadata read of its titles)", touched.every((n) => n.method === "GET" && !n.url.includes("/values")), touched.map((n) => `${n.method} ${n.url.slice(0, 120)}`));
       check("…B's connected sheet is still B's own", (await SC.getSheetsConfig(B))?.spreadsheetId === fx.B.spreadsheetId);
-      fakeSheets.set(fx.A.spreadsheetId, rowsA);
     }
+    fakeSheets.delete(freeSheet);
     // the positive control: B's own new spreadsheet; the code as a tab's name connects it, the row names the step-up
     const ownSheet = `1x${rand("abcdefghijkmnopqrstuvwxyz0123456789", 38)}`;
     fakeSheets.set(ownSheet, []);

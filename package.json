@@ -89,7 +89,7 @@
     "test:integrations-db": "node --conditions=react-server --import tsx scripts/qa/integrations-db-check.ts",
     "test:design-db": "tsx scripts/qa/design-db-check.ts",
     "test:ai-db": "tsx scripts/qa/ai-db-check.ts",
-    "test:db": "npm run test:migrate && npm run test:tenancy && npm run qa:action-replay && npm run test:storage && npm run test:store && npm run test:pixels-publish && npm run test:public-api && npm run test:php && npm run test:platform-db && npm run test:health-db && npm run test:design-db",
+    "test:db": "npm run test:migrate && npm run test:tenancy && npm run qa:action-replay && npm run test:storage && npm run test:store && npm run test:pixels-publish && npm run test:public-api && npm run test:php && npm run test:platform-db && npm run test:health-db && npm run test:design-db && npm run test:integrations-db",
     "qa:headers": "tsx scripts/qa/headers-check.ts",
     "qa:edge-sim": "tsx scripts/qa/edge-sim.ts",
     "qa:action-replay": "tsx scripts/qa/action-replay.ts",

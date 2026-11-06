@@ -363,6 +363,7 @@ async function purgeStore(ctx: JobCtx, storeId: string, saved: PurgeCursor | nul
           throw err;
         }
         await dropCursor(cursorJob(sid));
+        await dropCursor(`sheets.push:${sid}`); // the store's Sheets run history (CCR r1-p5-2): no store column, no FK removes it
         console.info(`[purge] ${sid}: purged (${cursor.reason}), tombstone written`);
         return { state: "purged" };
       }

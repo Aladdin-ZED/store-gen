@@ -101,7 +101,8 @@ function finishValues(outcome: Outcome, ms: number, now: number): unknown[] {
   const lastMs = Math.min(2_147_483_647, Math.max(0, Math.round(ms)));
   if (outcome.state === "done") return ["done", null, null, new Date(now), outcome.status, null, lastMs];
   if (outcome.state === "pending") return ["pending", outcome.attempts, new Date(outcome.nextAt), null, outcome.status, outcome.error, lastMs];
-  // done_at is the time a row reached its final state, done or dead (retention: done 14 days, dead 30 days, §H.11)
+  // done_at is the time a row reached its final state, done, dead or cancelled (retention: done 14 days, dead and cancelled 30 days, §H.11)
+  if (outcome.state === "cancelled") return ["cancelled", outcome.attempts, null, new Date(now), outcome.status, outcome.error, lastMs];
   return ["dead", outcome.attempts, null, new Date(now), outcome.status, outcome.error, lastMs];
 }
 

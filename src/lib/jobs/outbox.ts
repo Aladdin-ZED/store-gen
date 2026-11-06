@@ -41,7 +41,7 @@ import type { JobCtx, JobResult } from "./runner";
 import type { DrainDeps, DrainState, RawItem } from "./outbox/drain";
 import { DRAIN_ORDER, OUTBOX_SEAL_PURPOSE, PAYLOAD_MAX_BYTES, checkItems, replayRule } from "./outbox/rules";
 
-export { OUTBOX_BACKOFF_MS, isFinalFailure } from "./outbox/rules";
+export { OUTBOX_BACKOFF_MS, OUTBOX_CANCELLED_PREFIX, isFinalFailure } from "./outbox/rules";
 export { httpRetryable, resendKey } from "./outbox/rules";
 
 export type OutboxKind = "webhook" | "capi" | "telegram" | "whatsapp" | "mail" | "carrier" | "push" /* 0007, PLA Q.21 */;
@@ -414,8 +414,12 @@ export async function replay(ctx: StoreCtx | PlatformCtx, id: string): Promise<v
   return replayAnyRow(ctx, id);
 }
 
-/** the columns a replay resets: pending now, attempts 0, no claim or lease, not finished */
-const replayed = () => ({ state: "pending" as const, attempts: 0, nextAt: sql`UTC_TIMESTAMP(3)`, claim: null, leaseUntil: null, doneAt: null });
+/**
+ * the columns a replay resets: pending now, attempts 0, no claim or lease. A dead row is no longer finished; a done
+ * row (the deliberate re-send of telegram / webhook) keeps its `done_at`, so the handler knows the claim is a re-send
+ * and marks it "(renvoi)" (CCR r1-p5-11); the next outcome overwrites it.
+ */
+const replayed = (from: OutboxState) => ({ state: "pending" as const, attempts: 0, nextAt: sql`UTC_TIMESTAMP(3)`, claim: null, leaseUntil: null, ...(from === "done" ? {} : { doneAt: null }) });
 
 /** What a row's replay answers: throws the refusal, true to replay, false for nothing to do. */
 async function replayable(row: { state: OutboxState; kind: OutboxKind } | undefined): Promise<boolean> {
@@ -436,7 +440,7 @@ async function replayStoreRow(ctx: StoreCtx, scope: WriteScope, id: string): Pro
   if (!(await replayable(row))) return;
   const [res] = await db
     .update(outbox)
-    .set(replayed())
+    .set(replayed(row!.state))
     .where(whereStore(outbox, scope, eq(outbox.id, id), eq(outbox.state, row!.state)));
   if (res.affectedRows !== 1) return; // changed meanwhile (another click, a drain): nothing replayed, nothing audited
   await auditFrom(ctx, "integrations.outbox.replayed", { target: id, meta: { kind: row!.kind, topic: row!.topic, outboxId: id, from: row!.state } });
@@ -453,7 +457,7 @@ async function replayAnyRow(ctx: PlatformCtx, id: string): Promise<void> {
   if (!(await replayable(row))) return;
   const [res] = await db
     .update(outbox) // tenancy: platform the console's replay of the row it just read (any store, stores.lifecycle)
-    .set(replayed())
+    .set(replayed(row!.state))
     .where(and(eq(outbox.id, id), eq(outbox.state, row!.state)));
   if (res.affectedRows !== 1) return;
   await auditFrom(ctx, "platform.outbox.replayed", { storeId: row!.storeId, target: id, meta: { kind: row!.kind, topic: row!.topic, outboxId: id, from: row!.state } });

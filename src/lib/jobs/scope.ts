@@ -169,7 +169,10 @@ function wherePredicate(where: NonNullable<ForEachStoreOpts["where"]>): SQL {
     case "pending_sheets":
       return sql`EXISTS (SELECT 1 FROM store_settings ss WHERE ss.store_id = ${stores.id} AND ss.\`key\` = 'sheets' AND ss.encrypted = 0 AND JSON_VALID(ss.value)
           AND JSON_UNQUOTE(JSON_EXTRACT(ss.value, '$.enabled')) = 'true'
-          AND (EXISTS (SELECT 1 FROM orders o WHERE o.store_id = ${stores.id} AND o.is_test = 0 AND o.sheet_status IN ('pending', 'failed'))
+          AND EXISTS (SELECT 1 FROM sheet_bindings sb WHERE sb.store_id = ${stores.id} AND sb.spreadsheet_id = JSON_UNQUOTE(JSON_EXTRACT(ss.value, '$.spreadsheetId')))
+          AND (EXISTS (SELECT 1 FROM orders o WHERE o.store_id = ${stores.id} AND o.is_test = 0 AND (o.sheet_status = 'pending'
+                OR (o.sheet_status = 'failed' AND o.updated_at <= DATE_SUB(UTC_TIMESTAMP(3), INTERVAL LEAST(POW(2, o.sheet_attempts), 360) MINUTE))))
+            OR EXISTS (SELECT 1 FROM orders o WHERE o.store_id = ${stores.id} AND o.is_test = 0 AND o.sheet_status = 'synced' AND o.sheet_dirty > 0)
             OR (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ss.value, '$.pull')), 'true') <> 'false'
               AND NOT EXISTS (SELECT 1 FROM rate_limits rl WHERE rl.bucket = CONCAT('s:', ${stores.id}, ':sheets:pull') AND rl.reset_at > UTC_TIMESTAMP(3)))))`;
     case "pending_outbox":

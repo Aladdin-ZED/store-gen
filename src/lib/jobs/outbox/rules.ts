@@ -100,7 +100,16 @@ export function httpRetryable(status: number): boolean {
 export type Outcome =
   | { state: "done"; status: number | null }
   | { state: "pending"; attempts: number; nextAt: number; status: number | null; error: string }
-  | { state: "dead"; attempts: number; status: number | null; error: string };
+  | { state: "dead"; attempts: number; status: number | null; error: string }
+  | { state: "cancelled"; attempts: number; status: number | null; error: string };
+
+/** A handler drops an item on purpose (the CAPI 7-day guard): a final failure with this error prefix → `cancelled`, never `dead` (CCR r1-p5-9). */
+export const OUTBOX_CANCELLED_PREFIX = "cancelled:";
+/** The longest wait a handler's `retryAfterMs` may ask for (CCR r1-p5-11). */
+const RETRY_AFTER_CAP_MS = 24 * 3_600_000;
+
+/** A handler's answer as the drainer reads it: the frozen SendResult, plus an optional `retryAfterMs` (Telegram's 429 `retry_after`, CCR r1-p5-11). */
+export type DrainResult = SendResult & { retryAfterMs?: number };
 
 /** The delay before the next try after `attempts` failed sends (1-based): 1 min, 5 min, 30 min, 2 h, 6 h, 24 h. */
 export function backoffMs(attempts: number): number {
@@ -112,22 +121,27 @@ export function backoffMs(attempts: number): number {
  * ok → done; a refusal (`retry: false`) or the 7th failing send → dead; any other failure → pending again with
  * attempts + 1 and `next_at` one step further up the ladder (§H.1; `isFinalFailure`, P0b CCR P5-1).
  */
-export function outcomeOf(attempts: number, result: SendResult, now: number): Outcome {
+export function outcomeOf(attempts: number, result: DrainResult, now: number): Outcome {
   const status = typeof result.status === "number" && Number.isInteger(result.status) ? result.status : null;
   if (result.ok) return { state: "done", status };
-  const error = cleanLastError(result.error) || "failed";
   const next = attempts + 1;
+  if (!result.retry && typeof result.error === "string" && result.error.startsWith(OUTBOX_CANCELLED_PREFIX)) {
+    return { state: "cancelled", attempts: next, status, error: cleanLastError(result.error.slice(OUTBOX_CANCELLED_PREFIX.length)) || "cancelled" };
+  }
+  const error = cleanLastError(result.error) || "failed";
   if (isFinalFailure({ attempts }, result)) return { state: "dead", attempts: next, status, error };
-  return { state: "pending", attempts: next, nextAt: now + backoffMs(next), status, error };
+  const after = typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? Math.min(RETRY_AFTER_CAP_MS, Math.max(0, result.retryAfterMs)) : 0;
+  return { state: "pending", attempts: next, nextAt: now + Math.max(backoffMs(next), after), status, error };
 }
 
 /** A handler's answer as the drainer trusts it: anything that is not a SendResult is a retryable `bad_result`. */
-export function normalizeResult(r: unknown): SendResult {
+export function normalizeResult(r: unknown): DrainResult {
   if (r && typeof r === "object" && "ok" in r) {
-    const x = r as { ok: unknown; retry?: unknown; status?: unknown; error?: unknown };
+    const x = r as { ok: unknown; retry?: unknown; status?: unknown; error?: unknown; retryAfterMs?: unknown };
     const status = typeof x.status === "number" && Number.isInteger(x.status) ? { status: x.status } : {};
+    const after = typeof x.retryAfterMs === "number" && Number.isFinite(x.retryAfterMs) && x.retryAfterMs > 0 ? { retryAfterMs: x.retryAfterMs } : {};
     if (x.ok === true) return { ok: true, ...status };
-    if (x.ok === false) return { ok: false, retry: x.retry !== false, error: typeof x.error === "string" ? x.error : "failed", ...status };
+    if (x.ok === false) return { ok: false, retry: x.retry !== false, error: typeof x.error === "string" ? x.error : "failed", ...status, ...after };
   }
   return { ok: false, retry: true, error: "bad_result" };
 }

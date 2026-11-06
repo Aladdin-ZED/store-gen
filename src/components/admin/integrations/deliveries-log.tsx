@@ -17,10 +17,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { DeliveryRow } from "@/lib/integrations/deliveries";
 import type { HubKind } from "@/lib/integrations/hub.server";
 import { useAdminLocale, useT } from "@/lib/i18n/admin/client";
-import type { StorePulse } from "@/lib/pulse/types";
 import { cn } from "@/lib/utils";
 import { listDeliveriesAction } from "@/app/app/[store]/integrations/actions";
 import { useStore } from "../shell/store-context";
+import { usePulse } from "../shell/use-pulse";
 import { clock, DELIVERY_TONE, money, num, platformName, relTime } from "./hub-format";
 import { InlineError, useNow } from "./hub-states";
 import { refusalText, ReplayAllButton, ReplayButton } from "./replay-button";
@@ -59,7 +59,6 @@ export function DeliveriesLog({
   now: number;
 }) {
   const t = useT();
-  const store = useStore();
   const router = useRouter();
   const now = useNow(serverNow);
   const [kind, setKind] = useState<HubKind | typeof ALL>(opening.kind ?? ALL);
@@ -116,20 +115,14 @@ export function DeliveriesLog({
     startRefresh(() => router.refresh());
   }, [load, router]);
 
-  // the pulse's syncFailed changed: refresh the first page (the shared poller's broadcast; no poller here)
+  // the pulse's syncFailed changed: refresh the first page (P2's one poller per browser, core D57; no poll here, CCR r1-p5-15)
+  const syncFailed = usePulse().body?.counts?.syncFailed;
+  const lastSyncFailed = useRef<number | null>(null);
   useEffect(() => {
-    if (typeof BroadcastChannel === "undefined") return;
-    const ch = new BroadcastChannel(`sg-pulse:${store.id}`);
-    let last: number | null = null;
-    ch.onmessage = (e: MessageEvent) => {
-      const data = e.data as { pulse?: Partial<StorePulse> } & Partial<StorePulse>;
-      const n = (data?.pulse ?? data)?.counts?.syncFailed;
-      if (typeof n !== "number") return;
-      if (last !== null && n !== last) refresh();
-      last = n;
-    };
-    return () => ch.close();
-  }, [store.id, refresh]);
+    if (typeof syncFailed !== "number") return;
+    if (lastSyncFailed.current !== null && syncFailed !== lastSyncFailed.current) refresh();
+    lastSyncFailed.current = syncFailed;
+  }, [syncFailed, refresh]);
 
   const filtered = kind !== ALL || state !== ALL;
   const replayKinds = canReplay ? (kind === ALL ? kinds : [kind]).filter((k) => (deadByKind?.[k] ?? 0) > 0) : [];

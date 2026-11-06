@@ -13,8 +13,6 @@
  *
  * Results show as toasts (sonner, loaded on run: this file is also read by node checks).
  */
-import { sendTestEventAction } from "@/app/app/[store]/integrations/pixels/actions";
-import { syncSheetNowAction } from "@/app/app/[store]/integrations/sheets/actions";
 import { isAdminLocale, messageOf, t, type AdminLocale } from "@/lib/i18n/admin";
 import { appHref } from "@/lib/urls";
 import type { CommandDef } from "./types";
@@ -40,6 +38,8 @@ export const commands: CommandDef[] = [
     permission: "integrations.manage",
     release: "R1",
     run: async (ctx) => {
+      // the server actions load on use: the shell's registry (and test:shell under plain tsx) never pulls server-only code
+      const { syncSheetNowAction } = await import("@/app/app/[store]/integrations/sheets/actions");
       const res = await syncSheetNowAction();
       if (res.ok && !res.data.skipped && !res.data.message) {
         const { appended, updated, pulled } = res.data;
@@ -58,6 +58,7 @@ export const commands: CommandDef[] = [
     permission: "integrations.manage",
     release: "R1",
     run: async (ctx) => {
+      const { sendTestEventAction } = await import("@/app/app/[store]/integrations/pixels/actions");
       const res = await sendTestEventAction(null);
       if (res.ok && res.data.ok) return void (await toast("success", "int.cmd.send_test_event.done"));
       // no pixel ready (the action's words), or the ad platform refused the event

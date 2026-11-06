@@ -161,7 +161,9 @@ async function dashboardCase(kit: TenancyKit): Promise<void> {
     const ids = memberIds(kit, "A");
     check("dashboardPanels(B): no id of A's members", ![...ids].some((id) => JSON.stringify(p).includes(id)));
     // build note item 14: a P0 stub is "unavailable", never a made-up 0
-    check("dashboardPanels(B): P4's and P5's stubs answer unavailable", !p.kpis.ok && p.kpis.reason === "unavailable" && !p.funnel.ok && !p.integrations.ok && p.integrations.reason === "unavailable", { kpis: p.kpis, integrations: p.integrations });
+    check("dashboardPanels(B): P4's stubs answer unavailable", !p.kpis.ok && p.kpis.reason === "unavailable" && !p.funnel.ok, { kpis: p.kpis, funnel: p.funnel });
+    // P5 merged: integrationHealth is real; B's panel settles (or is unavailable), and names nothing of A (the leak check above)
+    check("dashboardPanels(B): P5's integrations panel is B's own or unavailable", p.integrations.ok ? !JSON.stringify(p.integrations.data).includes(fx.A.spreadsheetId) : p.integrations.reason === "unavailable", p.integrations);
     check("dashboardPanels(B): the latest orders are B's own", p.latestOrders.ok && !p.latestOrders.data.some((o) => o.id === fx.A.order.main || o.id === fx.A.order.failed), p.latestOrders);
     check("dashboardPanels(B): the address is B's", p.address.ok && p.address.data.storeUrl.includes(fx.B.handle) && !p.address.data.storeUrl.includes(fx.A.handle), p.address);
   }

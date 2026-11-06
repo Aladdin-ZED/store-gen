@@ -761,7 +761,7 @@ async function main(): Promise<number> {
     const leadsLeft = ((await pool().query("SELECT id FROM leads WHERE id LIKE '01JB8ZK3Q4R5S6T7V8W9LEAD%' ORDER BY id")) as unknown as [{ id: string }[]])[0].map((r) => r.id);
     t.eq("…and kept the fresh one", leadsLeft, ["01JB8ZK3Q4R5S6T7V8W9LEAD02"]);
     t.eq("…a per-store row for the store whose lead went", realRows.filter((r) => r.job === "housekeeping" && r.store_id).map((r) => [r.store_id, r.processed]), [[STORE_A, 1]]);
-    t.check("runTick(): the legacy Sheets step ran as sheets.push (not configured here: nothing to push)", realRows.some((r) => r.job === "sheets.push" && r.summary?.legacy === true && r.ok === 1), JSON.stringify(realRows.map((r) => r.job)));
+    t.check("runTick(): the Sheets step ran as sheets.push (P5's runner; not configured here: nothing to push)", realRows.some((r) => r.job === "sheets.push" && r.ok === 1), JSON.stringify(realRows.map((r) => r.job)));
     t.eq("…and the lease is free again", await lease(), "");
   });
 

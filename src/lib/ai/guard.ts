@@ -44,12 +44,12 @@ const LATIN_LETTER = /[A-Za-zÀ-ÿ]/gu;
 const ASCII_DIGITS = (s: string) =>
   s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
 
-function numbersIn(s: string): string[] {
+export function numbersIn(s: string): string[] {
   return ASCII_DIGITS(s).match(/\d+(?:[.,]\d+)?/g)?.map((n) => n.replace(",", ".")) ?? [];
 }
 
 /** Numbers the copy may mention: those the merchant gave us (facts, name, price, delivery line). */
-function allowedNumbers(ctx: GuardContext): Set<string> {
+export function allowedNumbers(ctx: GuardContext): Set<string> {
   const out = new Set<string>();
   const add = (s: string | number | null | undefined) => {
     if (s === null || s === undefined) return;

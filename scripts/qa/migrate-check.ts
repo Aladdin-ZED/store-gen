@@ -1446,6 +1446,11 @@ async function main(): Promise<void> {
         await conn.query("INSERT INTO store_settings (store_id, `key`, value, encrypted, purpose_v) VALUES (?, 'sheets', ?, 0, 2)", [sid(2), JSON.stringify({ enabled: true, spreadsheetId: "1TESTSHEET1111111111111111111111" })]);
         const order = full.tables.orders![0]!;
         await conn.query("INSERT INTO orders SET ?", [{ ...order, id: "CMD-TESTQA", store_id: sid(2), page_id: id26("PG", 9), version_id: null, idem: "00000000-0000-4000-8000-0000000000aa", created_at: at(3) }]);
+        // R1 (P5, CCR r1-p5-6): pending_sheets visits a store whose spreadsheet is bound to it (sheet_bindings)
+        await conn.query(
+          "INSERT IGNORE INTO sheet_bindings (spreadsheet_id, store_id, method, verified_at) SELECT JSON_UNQUOTE(JSON_EXTRACT(value, '$.spreadsheetId')), store_id, 'legacy', UTC_TIMESTAMP(3) FROM store_settings WHERE `key` = 'sheets' AND encrypted = 0 AND JSON_VALID(value) AND store_id IN (?, ?)",
+          [STORE1, sid(2)],
+        );
       } finally {
         await conn.end();
       }

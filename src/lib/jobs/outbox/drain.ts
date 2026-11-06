@@ -165,7 +165,7 @@ async function finishOne(deps: DrainDeps, owner: WriteScope | null, raw: RawItem
     st.lost++;
     return;
   }
-  if (outcome.state === "done") st.done++;
+  if (outcome.state === "done" || outcome.state === "cancelled") st.done++; // a cancelled item ended on purpose: never dead (CCR r1-p5-9)
   else if (outcome.state === "pending") st.retried++;
   else {
     st.dead++;

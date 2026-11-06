@@ -65,4 +65,8 @@ export const NAV_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   danger: ["close", "delete", "export", "leave", "fermer", "إغلاق"],
   "anti-spam": ["turnstile", "cloudflare", "captcha", "spam"],
   ai: ["model", "background", "on-device", "local", "ذكاء"],
+  // P5 Connect items (CCR r1-p5-13)
+  integrations: ["health", "deliveries", "replay", "webhooks", "outbox"],
+  telegram: ["bot", "notifications", "chat", "alerts"],
+  whatsapp: ["templates", "messages", "click to chat", "quick replies"],
 };

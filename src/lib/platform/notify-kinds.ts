@@ -142,7 +142,8 @@ export function notifyLinkOk(link: string | null | undefined): string | null {
 /** The placeholder names of an ICU-lite template (`{var}` and the variable of `{n, plural, …}`), sorted, unique. */
 export function placeholdersOf(template: string): string[] {
   const out = new Set<string>();
-  for (const m of template.matchAll(/\{(\w+)(?:\s*,\s*plural\s*,)?/g)) out.add(m[1]!);
+  // a plural form's text (`zero {less than a minute}`) is not a placeholder: only `{var}` and `{var, plural,` count
+  for (const m of template.matchAll(/\{(\w+)(?:\s*\}|\s*,\s*plural\s*,)/g)) out.add(m[1]!);
   return [...out].sort();
 }
 

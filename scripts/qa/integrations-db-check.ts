@@ -1020,7 +1020,9 @@ async function sheetsPushSuite(): Promise<void> {
   await fresh();
   const job = JOBS.find((j) => j.name === "sheets.push");
   eq2("job: sheets.push every tick, 18 s, ≤ 50 stores over pending_sheets", [job?.every, job?.budgetMs, job?.perStore?.where, job?.perStore?.maxStoresPerTick], ["tick", 18_000, "pending_sheets", 50]);
-  ok("job: the registered budgets fit the 95 s tick; names are unique", JOBS.reduce((n, j) => n + j.budgetMs, 0) <= TICK_GUARANTEED_MS && new Set(JOBS.map((j) => j.name)).size === JOBS.length, JOBS.map((j) => [j.name, j.budgetMs]));
+  // P8's slot model (core §H.2): each job within its slot's cap, the slots' guaranteed time ≤ 95 s, names unique
+  const SL = load<typeof import("@/lib/jobs/slots")>("@/lib/jobs/slots");
+  ok("job: the registered budgets fit their slots and the 95 s tick; names are unique", SL.jobBudgetProblems(JOBS).length === 0 && SL.guaranteedMs(JOBS) <= TICK_GUARANTEED_MS, SL.jobBudgetProblems(JOBS));
   const J = await sheetStore("sp-j1");
   const j1 = await order(J, { sheetStatus: "pending" });
   let yields = 0;
@@ -2437,12 +2439,16 @@ async function replaySuite(): Promise<void> {
     });
     return id;
   }
-  // P8's replay as a faithful double: dead → pending, done → pending (the re-send), nothing else
+  // P8's replay as a faithful double: dead → pending, done → pending (the re-send), and the core's one
+  // `integrations.outbox.replayed` audit row per replayed row (CCR r1-p5-12: the core writes it, P5 does not)
   const calledWith: string[] = [];
+  const { auditIn } = load<typeof import("@/lib/admin-data/store-audit")>("@/lib/admin-data/store-audit");
   replay.setReplayDoubleForTests({
     replay: async (c, id) => {
       calledWith.push(id);
-      await db.update(outbox).set({ state: "pending", nextAt: new Date() }).where(and(eq(outbox.id, id), eq(outbox.storeId, c.scope.storeId), inArray(outbox.state, ["dead", "done"])));
+      const [r] = await db.select({ kind: outbox.kind, topic: outbox.topic, state: outbox.state }).from(outbox).where(and(eq(outbox.id, id), eq(outbox.storeId, c.scope.storeId)));
+      const [res] = await db.update(outbox).set({ state: "pending", nextAt: new Date() }).where(and(eq(outbox.id, id), eq(outbox.storeId, c.scope.storeId), inArray(outbox.state, ["dead", "done"])));
+      if (r && res.affectedRows === 1) await auditIn(c.scope as never, c.actor, "integrations.outbox.replayed", { target: id, meta: { kind: r.kind, topic: r.topic, outboxId: id, from: r.state } });
     },
   });
   const member = (s: typeof SA, userId = newId()) => ({ scope: s.scope, actor: { kind: "system" as const, userId: null, impersonatorId: null, ip: null }, user: { id: userId } }) as never;
