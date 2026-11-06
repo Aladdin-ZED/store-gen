@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "date": "2026-11-04",
+  "preFit": {
+    "qBase": 70,
+    "qFloor": 82,
+    "slopFail": 6,
+    "slopRepair": 3,
+    "compositionMedian": 10,
+    "spec": 0.5,
+    "approvedAt": null
+  },
+  "thresholds": {
+    "clone": 0.12,
+    "platform": 0.25,
+    "nicheBase": 0.4,
+    "nicheFloor": 0.3,
+    "nicheRamp": [20, 100],
+    "ownPage": 0.3,
+    "brandRadius": 0.35,
+    "bandMargin": 0.05,
+    "shingleSoft": 0.1,
+    "shingleHard": 0.25,
+    "headlineJaccard": 0.5,
+    "headlineContainment": 0.35,
+    "foldTarget": 760,
+    "foldHard": 938
+  },
+  "composition": {
+    "fullBleedMoment": 2,
+    "boundaryCross": 2,
+    "quietScreen": 2,
+    "heroTypeRatio": 2,
+    "asymmetricGrid": 2,
+    "distinctCrops": 2,
+    "heroSignature": 3
+  },
+  "heightScale": 1,
+  "counts": {},
+  "approved": "pending"
+}

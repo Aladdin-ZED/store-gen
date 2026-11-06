@@ -302,6 +302,13 @@
   transition: translate var(--lp-dur-m) var(--lp-spring), box-shadow var(--lp-dur-m) var(--lp-ease);
 }
 
+/* a page without glass (G16 = 0): the callout is a hairline card on the section's card tier */
+.lp-hero__callout--line {
+  border: var(--lp-hairline) solid var(--lp-line, var(--mx-line));
+  background-color: var(--sec-card);
+  color: var(--sec-card-ink, var(--sec-ink));
+}
+
 .lp-hero__callout-n {
   font-family: var(--lp-font-label, var(--lp-font-body));
   font-size: 0.85em;

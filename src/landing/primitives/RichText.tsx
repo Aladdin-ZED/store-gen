@@ -27,6 +27,15 @@
  * Typography (Latin pages): a straight apostrophe between letters becomes the typographic ’; on
  * French pages the space before ! ? ; : » (and after «) becomes a narrow no-break space, so the mark
  * can never be stranded alone at the start of a line ("c'est noté !" → "c’est noté !").
+ *
+ * Under a look (`doc.theme.look`, design.md DES-§4.5.4, DES-§10.5; T2, T7), and only then, so a document without one
+ * keeps its markup byte for byte:
+ *  - Arabic: a particle typed as its own word (من في على إلى عن مع و) and a ب / ل / ك clitic typed with a space are
+ *    bound to the next word with U+00A0, so no line ends on a particle;
+ *  - Arabic: a Latin run inside the text ("Argan Oil Pure 30 ml") is isolated in <bdi dir="ltr"> in plain text too,
+ *    its closing sentence punctuation left outside;
+ *  - reveals are whole lines: `split` never cuts Arabic into .lp-word boxes, and a look whose reveal scope is "none"
+ *    splits nothing (callers keep the word split for Latin display ≥ 48 px inside the heads scope).
  */
 import { Fragment, type ReactNode } from "react";
 import type { RenderContext } from "../types";
@@ -113,12 +122,19 @@ interface RenderState {
   wi: number;
   /** page locale (typographic rules) */
   locale: string;
+  /** the document has a look (DES-§4.5.4): particle binding and Latin isolation in Arabic text */
+  look: boolean;
 }
+
+/** Whether the document is rendered under a look (`doc.theme.look`): the new primitive defaults apply only then. */
+export const lookOf = (ctx: Pick<RenderContext, "doc">): boolean => !!ctx.doc.theme.look;
 
 export function RichText(props: RichTextProps): ReactNode {
   const { text, ctx, as, block = false, className, editPath, id, decorate = true } = props;
   if (!text || !text.trim()) return null;
-  const split = !!props.split && !block;
+  const look = lookOf(ctx);
+  // under a look, reveals are whole lines: never a word split in Arabic, none at all without a reveal scope
+  const split = !!props.split && !block && (!look || (ctx.locale !== "ar" && ctx.doc.theme.look?.mo.scope !== "none"));
   const state: RenderState = {
     ctx,
     decorate,
@@ -127,6 +143,7 @@ export function RichText(props: RichTextProps): ReactNode {
     split,
     wi: 0,
     locale: ctx.locale,
+    look,
   };
   const attrs = { id, ...editAttr(ctx, editPath), ...reveal(props.reveal, props.delay) };
 
@@ -403,11 +420,63 @@ function typeset(s: string, locale: string): string {
   return out;
 }
 
+/**
+ * Arabic particles typed as their own word, and the ب / ل / ك clitics typed with a space: the space after one becomes
+ * U+00A0 so the particle travels with the next word (DES-§4.5.4 RichText, T2). "و" counts as a particle only alone.
+ * A run of particles binds as a chain ("و في الدار"), and a particle that ends a text run binds to the inline node after
+ * it (the emphasis of "سهل من *أول* مرة").
+ */
+const NBSP_CH = String.fromCharCode(0xa0);
+const AR_PARTICLE = /(?<=^|[\s («"“])(من|في|على|إلى|عن|مع|و|ب|ل|ك) (?=\S|$)/gu;
+const bindParticles = (s: string) => (s.includes(" ") ? s.replace(AR_PARTICLE, `$1${NBSP_CH}`) : s);
+
+/**
+ * A plain Arabic text run under a look: each Latin run in its own <bdi dir="ltr"> (T7), the numbers outside the runs
+ * isolated as before; sentence punctuation closing a run stays outside it, in the page's sentence.
+ */
+function isolateRuns(s: string, key: string): ReactNode {
+  // every space separates words here, the no-break ones included: a bound particle ("مع Argan") stays outside the
+  // Latin run it is glued to, so the run is still found and isolated
+  const parts: { ws: boolean; v: string }[] = [];
+  for (const ch of s) {
+    const ws = /\s/.test(ch);
+    const last = parts[parts.length - 1];
+    if (last && last.ws === ws) last.v += ch;
+    else parts.push({ ws, v: ch });
+  }
+  const runs = counterRuns(
+    parts.map((p) => (p.ws ? "S" : wordClass(p.v))),
+    "rtl",
+  );
+  if (!runs.length) return isolateNumbers(s, key);
+  const text = (from: number, to: number) => parts.slice(from, to).map((p) => p.v).join("");
+  const out: ReactNode[] = [];
+  let i = 0;
+  for (const [from, to] of runs) {
+    const before = text(i, from);
+    if (before) out.push(<Fragment key={`${key}.t${from}`}>{isolateNumbers(before, `${key}.n${from}`)}</Fragment>);
+    const run = text(from, to);
+    const punct = RUN_PUNCT.exec(run)?.[0] ?? "";
+    const peel = punct && punct.length < run.length ? punct : "";
+    out.push(
+      <bdi key={`${key}.b${from}`} dir="ltr">
+        {peel ? run.slice(0, -peel.length) : run}
+      </bdi>,
+    );
+    if (peel) out.push(peel);
+    i = to;
+  }
+  const rest = text(i, parts.length);
+  if (rest) out.push(<Fragment key={`${key}.t${i}`}>{isolateNumbers(rest, `${key}.n${i}`)}</Fragment>);
+  return out;
+}
+
 /** A plain text run: typography, glued numbers, then (RTL) isolates, then (split) one .lp-word per word. */
 function renderText(raw: string, state: RenderState, key: string): ReactNode {
-  const s = glueNumbers(typeset(raw, state.locale));
+  const arLook = state.look && state.locale === "ar";
+  const s = glueNumbers(typeset(arLook ? bindParticles(raw) : raw, state.locale));
   const piece = (v: string, k: string) => (state.rtl ? isolateNumbers(v, k) : protectRanges(v, k));
-  if (!state.split) return piece(s, key);
+  if (!state.split) return arLook ? isolateRuns(s, key) : piece(s, key);
   const parts = splitWords(s);
   const box = (v: string, k: string) => (
     <span key={k} className="lp-word" style={cssVars({ "--wi": state.wi++ })}>
@@ -531,7 +600,7 @@ function counterRuns(classes: readonly WordClass[], page: Dir): [number, number]
 type Unit = { nodes: InlineNode[]; text: string };
 
 /** Split emphasis content into word units (text split on breakable whitespace; nested nodes stay whole). */
-function toUnits(nodes: readonly InlineNode[], locale: string): (Unit | "br")[] {
+function toUnits(nodes: readonly InlineNode[], locale: string, bind = false): (Unit | "br")[] {
   const out: (Unit | "br")[] = [];
   let cur: Unit | null = null;
   const close = () => {
@@ -540,7 +609,7 @@ function toUnits(nodes: readonly InlineNode[], locale: string): (Unit | "br")[] 
   };
   for (const n of nodes) {
     if (typeof n === "string") {
-      for (const { ws, v: part } of splitWords(glueNumbers(typeset(n, locale)))) {
+      for (const { ws, v: part } of splitWords(glueNumbers(typeset(bind ? bindParticles(n) : n, locale)))) {
         if (ws) close();
         else {
           cur ??= { nodes: [], text: "" };
@@ -573,7 +642,7 @@ const breakableSpace = (k: string, v = " ") => (
 
 function renderEmphasis(nodes: InlineNode[], state: RenderState, k: string, glued = false): ReactNode {
   const full = inlineText(nodes).trim();
-  const units = toUnits(nodes, state.locale);
+  const units = toUnits(nodes, state.locale, state.look && state.locale === "ar");
   const words = units.filter((u): u is Unit => u !== "br");
 
   if (!state.decorate || words.length === 0 || words.length > DECO_MAX_WORDS || full.length > DECO_MAX_CHARS) {

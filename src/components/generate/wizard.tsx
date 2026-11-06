@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button";
 import { AiCopy, vibeHint, type Analysis } from "@/lib/ai/copy-schema";
 import { AiError, getAi, useAi, type ClassifyResult } from "@/lib/ai/client";
 import type { CopyRequest } from "@/lib/ai/prompts";
-import type { GenerateInput } from "@/lib/generator";
+import type { Direction, GenerateInput } from "@/lib/generator";
 import { getMarket } from "@/lib/markets/info";
 import { parseFocus } from "@/lib/media/focus";
 import { comboDisplay, suggestOffers } from "@/components/admin/offers";
@@ -43,7 +43,7 @@ import { loadGeneratorKit, useGeneratorKit } from "./kit-loader";
 import { PAGE_LOCALES, type PageLocale } from "./labels";
 import { AiChip, StepFooter, StepRail, stepMotion } from "./parts";
 import { bestCutoutCandidate, fetchImage, MAX_INPUT_MB, paletteOfBlob, preparePhoto } from "./photos";
-import { focalPoint, initialState, loadState, newSeed, photoAssetFrom, photosKey, reducer, saveState, clearState, toAssetRef, toAssetRow, toPhotoInfo, type Photo, type Step } from "./state";
+import { focalPoint, initialState, loadState, photoAssetFrom, photosKey, reducer, saveState, clearState, toAssetRef, toAssetRow, toPhotoInfo, type Photo, type Step } from "./state";
 import { StepAnalysis, type JobState } from "./step-analysis";
 import { MAX_FACTS, parsePrice, StepDetails } from "./step-details";
 import { StepDirections, type CopyState } from "./step-directions";
@@ -52,6 +52,9 @@ import { StepPhotos } from "./step-photos";
 import { pixelTracking, type PixelStore } from "./tracking";
 import { WIZARD_LEAD, WIZARD_TITLE, WizardSkeleton } from "./skeleton";
 import { purgeForeignDrafts } from "@/components/admin/lib/drafts";
+import type { AiPolicy } from "@/lib/ai/policy";
+import { useAdminLocale } from "@/lib/i18n/admin/client";
+import { useDesignRun } from "./use-design-run";
 import { useStore } from "@/components/admin/shell/store-context";
 
 export interface GenerateWizardProps {
@@ -66,6 +69,11 @@ export interface GenerateWizardProps {
   canUpload: boolean;
   /** the user may add new pixel ids (owners: settings.write) in "Ad tracking for this page" */
   canCreatePixels?: boolean;
+  /**
+   * The design engine's store inputs (DES-§14.2): `stores.brand_seed` (DS5), the brand kit with the store's voice
+   * (`brandView`), the AI policy and `ai_director_brief` (GH-1), the store handle for the AI router.
+   */
+  design: { brandSeed: string; brand: (import("@/lib/settings/keys/brand").BrandView) | null; director: boolean; aiPolicy: AiPolicy; handle: string };
 }
 
 const MAX_PHOTOS = 12;
@@ -186,7 +194,20 @@ function classifyVibe(c: ClassifyResult | null): string | null {
   return second && second[1] >= first[1] * 0.7 ? `${a} ${second[0].slice(5)}` : a;
 }
 
-function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCreatePixels = false, afterSkeleton }: GenerateWizardProps & { afterSkeleton: boolean }) {
+/** The niche key of DES-§7.3 (`nicheKey(market, category)` of src/lib/design/distance.ts, kept out of the first chunk). */
+const nicheOf = (market: string, category: string) => `${market}:${/^[a-z][a-z0-9-]{0,39}$/.test(category) ? category : "general"}`;
+
+/** Every string of the on-device model's copy (the "local" origin of the page's generation record). */
+function linesOf(value: unknown, out: string[] = []): string[] {
+  if (out.length >= 60) return out;
+  if (typeof value === "string") {
+    if (value.trim()) out.push(value);
+  } else if (Array.isArray(value)) for (const v of value) linesOf(v, out);
+  else if (value && typeof value === "object") for (const v of Object.values(value)) linesOf(v, out);
+  return out;
+}
+
+function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCreatePixels = false, design, afterSkeleton }: GenerateWizardProps & { afterSkeleton: boolean }) {
   const router = useRouter();
   const storeView = useStore();
   // the drafts of this tab are the member's own in this store (GEN-03, §E.6): another member's go first
@@ -781,29 +802,47 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
     } as GenerateInput;
   }, [state.step, state.seedBase, ordered.length, detailsValid, product, details.locale, details.market, palette, aiVibe, pageCopy, facts, sameMarket, defaults.shippingFee, deliveryText, currency, storeWhatsapp, store.name, photoInfos, tracking, styles, ownOffers, pageItems, chosenOffers, details.look]);
 
-  const built = useMemo(() => {
-    if (!input) return { directions: null, error: null };
-    // the generator is code-split: the directions show their loading state until it is in
-    if (!kit) return { directions: null, error: generator.error };
-    try {
-      const directions = kit.generateDirections(input).map((d) => {
-        // the wizard's products, offers and look, used verbatim (validated) whatever the generator did with them
-        if (!ownOffers && details.look === "auto") return d;
-        const doc = { ...d.doc, items: ownOffers ? pageItems : d.doc.items, offers: { ...d.doc.offers, bundles: ownOffers ? chosenOffers : d.doc.offers.bundles } };
-        const display = lookDisplay(doc.theme.archetype, doc.offers.bundles);
-        if (display) doc.offers = { ...doc.offers, display };
-        const checked = PageDocObject.safeParse(doc);
-        if (!checked.success) {
-          console.warn("[generate] the wizard's offers don't fit this direction", checked.error.issues.slice(0, 3));
-          return d;
-        }
-        return { ...d, doc: checked.data };
-      });
-      return { directions, error: null };
-    } catch (err) {
-      return { directions: null, error: err instanceof Error ? err.message : "Unknown error." };
-    }
-  }, [input, kit, generator.error, ownOffers, pageItems, chosenOffers, details.look, lookDisplay]);
+  /** the wizard's products, offers and look, used verbatim (validated) whatever the generator did with them */
+  const finishDirection = useCallback(
+    (d: Direction): Direction => {
+      if (!ownOffers && details.look === "auto") return d;
+      const doc = { ...d.doc, items: ownOffers ? pageItems : d.doc.items, offers: { ...d.doc.offers, bundles: ownOffers ? chosenOffers : d.doc.offers.bundles } };
+      const display = lookDisplay(doc.theme.archetype, doc.offers.bundles);
+      if (display) doc.offers = { ...doc.offers, display };
+      const checked = PageDocObject.safeParse(doc);
+      if (!checked.success) {
+        console.warn("[generate] the wizard's offers don't fit this direction", checked.error.issues.slice(0, 3));
+        return d;
+      }
+      return { ...d, doc: checked.data };
+    },
+    [ownOffers, pageItems, chosenOffers, details.look, lookDisplay],
+  );
+  const uiLocale = useAdminLocale();
+  const aiLines = useMemo(() => (pageCopy && copyJob?.copy ? linesOf(copyJob.copy) : []), [pageCopy, copyJob]);
+  const factPhotos = useMemo(
+    () =>
+      ordered.flatMap((p) => {
+        const url = p.asset.thumbUrl ?? p.asset.url ?? p.preview;
+        return url ? [{ id: p.asset.id, url, width: p.asset.width, alpha: !!p.asset.alpha }] : [];
+      }),
+    [ordered],
+  );
+  // DES-§14.2: the whole path (seeds, photo facts, candidates, novelty, keep rule, headlines, repairs) in the browser
+  const designRun = useDesignRun({
+    kit,
+    input,
+    owner,
+    brandSeed: design.brandSeed,
+    regen: state.seedBase,
+    niche: nicheOf(details.market, details.category),
+    photos: factPhotos,
+    finish: finishDirection,
+    aiLines,
+    uiLocale: uiLocale === "fr" || uiLocale === "ar" ? uiLocale : "en",
+    director: { on: design.director, policy: design.aiPolicy, handle: design.handle },
+  });
+  const built = { directions: designRun.directions, error: designRun.error ?? (input && !kit ? generator.error : null) };
 
   const previewAssets = useMemo(() => {
     const out: Record<string, AssetRowLike> = { ...storeAssets };
@@ -826,6 +865,9 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
           name,
           chosen: index,
           directions: directions.map((d) => ({ archetype: d.archetype, label: d.label, doc: d.doc })),
+          // the chosen direction's design record: copy-gene tags (kept against GENE_VOCAB on the server) and the
+          // lines the engine composed / the on-device model wrote (the page's generation record)
+          design: { copyGenes: directions[index]!.copyGenes, engine: directions[index]!.engineLines.slice(0, 40), ai: aiLines.slice(0, 60), niche: nicheOf(details.market, details.category) },
           // the merchant's facts become the page's attested facts: the checklist and the publish gate read them (ENGP-8)
           facts,
           // the page's tracking answer (or the Details step's store-pixel ticks) is final
@@ -842,7 +884,7 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
       setCopyJob(null);
       router.push(storeView.href(`/pages/${res.id}/edit`));
     },
-    [built.directions, copyState.state, stopCopy, name, facts, router, storeView, owner, pixelStore.summary, pagePixels, details.tracking],
+    [built.directions, copyState.state, stopCopy, name, facts, router, storeView, owner, pixelStore.summary, pagePixels, details.tracking, aiLines, details.market, details.category],
   );
 
   /* ---- navigation ---- */
@@ -1068,7 +1110,9 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
               seedBase={state.seedBase}
               creating={creating}
               onUse={(i) => void chooseDirection(i)}
-              onRegenerate={() => dispatch({ type: "reseed", seed: newSeed() })}
+              onRegenerate={() => dispatch({ type: "reseed", seed: (state.seedBase + 1) % 2_147_483_647 })}
+              run={{ status: designRun.status, step: designRun.step, novelty: designRun.novelty, refined: designRun.refined }}
+              onDifferentiate={(i, kind) => (kind === "photo" ? goto(0) : designRun.differentiate(i, kind))}
               onOtherStyles={() => setStyleOffset((o) => (o + 1) % Math.max(1, Math.ceil(ranked.length / 3)))}
               canOtherStyles={ranked.length >= 4}
               ai={ai}

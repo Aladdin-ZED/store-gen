@@ -6,100 +6,50 @@
   margin-block-end: var(--g-gap);
 }
 
-/* ---------- raised surfaces (seal card, split panel, letter) ------------------ */
+/* ==========================================================================
+   seal → the promise card (design.md DES-§5.13 S8): a hairline card, the
+   COD fact as a text chip at its top, the promises, the closing row. No
+   seal, no ring of text, no rings of light (owner rule 2, S17, RTL3).
+   ========================================================================== */
 .lp-guarantee__card {
   position: relative;
-  border: 1px solid var(--mx-hair);
-  border-radius: var(--g-radius);
+  border-radius: var(--lp-radius-card, var(--g-radius));
   corner-shape: var(--lp-corner);
-  background-color: var(--sec-card);
-  background-image: linear-gradient(to bottom, var(--g-sheen), transparent 42%);
-  color: var(--sec-card-ink);
-  box-shadow: var(--lp-highlight, 0 0 #0000), var(--lp-shadow-l, 0 24px 48px -24px rgb(0 0 0 / 0.28));
+  color: var(--sec-card-ink, var(--sec-ink));
 }
 
-/* ==========================================================================
-   seal — the badge crosses the card's end edge (phones: its top edge)
-   ========================================================================== */
-.lp-guarantee--seal .lp-guarantee__grid {
-  --seal: min(17rem, 66vw);
-  --lap: calc(var(--seal) * 0.34);
+.lp-guarantee__card--line {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(1.25rem, 1rem + 1vw, 1.75rem);
+  justify-items: start;
+  padding: clamp(1.25rem, 0.9rem + 1.8vw, 2.5rem);
+  max-inline-size: 52rem;
+  border: var(--lp-hairline) solid var(--lp-line, var(--mx-line));
+  background-color: var(--sec-card);
 }
 
-/* the badge and its light share one cell */
-.lp-guarantee__halo,
-.lp-guarantee__seal {
-  grid-row: 1;
-  grid-column: 1;
-  justify-self: center;
-  inline-size: var(--seal);
-  aspect-ratio: 1;
+.lp-guarantee__card--line .lp-guarantee__list {
+  inline-size: 100%;
 }
 
-.lp-guarantee__halo {
-  position: relative;
-  z-index: 0;
+/* the real COD fact as a plain text chip: the amount in strong tabular figures, the words beside it */
+.lp-guarantee__zchip {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.5rem;
+  margin: 0;
+  padding: 0.45em 0.9em;
+  border-radius: 999px;
+  background-color: var(--g-tint, var(--mx-tint));
+  box-shadow: inset 0 0 0 var(--lp-hairline) var(--g-ring, var(--mx-hair));
+  font-size: var(--lp-step--1);
+  line-height: 1.25;
 }
 
-.lp-guarantee__seal {
-  position: relative;
-  z-index: 2;
-}
-
-.lp-guarantee--seal .lp-guarantee__card {
-  grid-row: 2;
-  grid-column: 1;
-  z-index: 1;
-  margin-block-start: calc(var(--lap) * -1);
-  padding-block: calc(var(--lap) + 1.75rem) var(--g-pad);
-  padding-inline: var(--g-pad);
-}
-
-.lp-guarantee__rings {
-  position: absolute;
-  inset-block-start: 50%;
-  inset-inline-start: 50%;
-  inline-size: 156%;
-  block-size: auto;
-  translate: -50% -50%;
-  color: var(--g-ring);
-}
-
-[dir="rtl"] .lp-guarantee__rings {
-  translate: 50% -50%;
-}
-
-/* souk: zellige line geometry fading out around the badge */
-.lp-guarantee__zellige {
-  position: absolute;
-  inset: -45%;
-  inline-size: 190%;
-  block-size: 190%;
-  -webkit-mask-image: radial-gradient(closest-side, #000 30%, transparent);
-  mask-image: radial-gradient(closest-side, #000 30%, transparent);
-}
-
-@container (min-width: 50rem) {
-  /* card | lap (the badge over the card's ragged end) | the badge's other half | open air for the rings */
-  .lp-guarantee--seal .lp-guarantee__grid {
-    --seal: clamp(15rem, 30cqi, 23rem);
-    --lap: calc(var(--seal) * 0.42);
-    grid-template-columns: minmax(0, 1fr) var(--lap) calc(var(--seal) - var(--lap)) minmax(0, 0.3fr);
-    align-items: center;
-  }
-
-  .lp-guarantee__halo,
-  .lp-guarantee__seal {
-    grid-column: 2 / 4;
-  }
-
-  .lp-guarantee--seal .lp-guarantee__card {
-    grid-row: 1;
-    grid-column: 1 / 3;
-    margin: 0;
-    padding-block: clamp(2rem, 4cqi, 3rem);
-    padding-inline: clamp(1.75rem, 4cqi, 3rem) calc(var(--lap) + clamp(1.5rem, 3.5cqi, 2.75rem));
-  }
+.lp-guarantee__zstrong {
+  font-weight: var(--lp-strong-weight, 650);
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--sec-accent);
+  white-space: nowrap;
 }

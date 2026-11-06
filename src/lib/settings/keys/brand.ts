@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { Hex } from "@/lib/page/schema";
 import { assetId, isoDateTime } from "../fields";
+import type { StoreAiSetting } from "./store_ai";
 
 export const ColorRole = z.enum(["accent", "pop", "neutral", "base"]);
 export const ColorMove = z.object({ role: z.enum(["accent", "pop"]), from: Hex, to: Hex, at: isoDateTime });
@@ -56,3 +57,19 @@ export const BrandSetting = z.object({
   storeThemeVersion: z.number().int().positive().nullable().default(null),
 });
 export type BrandSetting = z.output<typeof BrandSetting>;
+
+/** The registers of design gene G28 (design.md DES-§4.1; the same list as `store_ai.voice.register`). */
+type VoiceRegister = NonNullable<StoreAiSetting["voice"]["register"]>;
+
+/**
+ * Read-only view the brand page and the sampler use (DES-§2.6, DS45): the setting plus the voice derived from
+ * `store_ai` (G28 from `voice.register`, G31 from `voice.darija`, the one source of truth). The schema is unchanged.
+ */
+export interface BrandView extends BrandSetting {
+  voiceSummary: { register: VoiceRegister | null; darija: "none" | "cta" | "light" };
+}
+
+/** Pure: the brand setting with the store's voice (the sampler reads `voiceSummary` as the G28 / G31 locks). */
+export function brandView(setting: BrandSetting, storeAi: Pick<StoreAiSetting, "voice">): BrandView {
+  return { ...setting, voiceSummary: { register: storeAi.voice.register ?? null, darija: storeAi.voice.darija } };
+}

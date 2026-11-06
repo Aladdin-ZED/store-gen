@@ -1,6 +1,6 @@
 /* ==========================================================================
-   marquee — tape (bold strip) · outline (giant outline through a lens) ·
-   double (color band + outlined echo) — v2 · modern
+   marquee — outline (giant outline through a lens; the saved tape id renders
+   it too, DES-§5.13 S8) · double (color band + outlined echo) — v2 · modern
    The section root is itself `.lp-marquee` (its type class) and so is the
    MarqueeTrack primitive's root: root rules use `.lp-section.lp-marquee`,
    track rules are scoped under `.lp-marquee__stage`. A side effect we rely on:

@@ -1,5 +1,5 @@
 /**
- * Fallback copy library — complete, hand-written page copy in ar / fr / en for 16 product families.
+ * Fallback copy library: complete, hand-written page copy in ar / fr / en for 16 product families.
  * Guarantees a great page without any AI: `libraryCopy()` always returns a valid PageCopy.
  *
  *   const copy = libraryCopy({ category: "kids", locale: "fr", seed: 42, productName: "Abaya de prière", hasWhatsapp: false });
@@ -10,13 +10,47 @@
  */
 import type { Locale, Market, ProductCategory } from "@/lib/page/schema";
 import { createT } from "@/landing/i18n";
+import { articleCheck, registerOf, structureOf } from "@/lib/design/cliche";
+import type { HeadlineStructure } from "@/lib/design/genome";
 import { PageCopy } from "../copy-schema";
 import { AR } from "./ar";
 import { EN } from "./en";
 import { FR } from "./fr";
-import type { Benefit, CompareRow, Facet, FacetCopy, Family, FamilyCopy, LocaleLibrary, Pain, Qa, Step } from "./types";
+import { articleFor, productRef, type ArticleSlot, type ProductRef } from "./product-ref";
+import type { Benefit, CompareRow, Facet, FacetCopy, Family, FamilyCopy, Line, LocaleLibrary, Pain, Qa, Step } from "./types";
 
-export { FACETS, FAMILIES, WORD_FAMILIES, type Facet, type Family } from "./types";
+export { FACETS, FAMILIES, WORD_FAMILIES, type Facet, type Family, type Line } from "./types";
+export { articleFor, productRef, type ProductRef } from "./product-ref";
+
+/** The text of a tagged line. */
+export const lineText = (l: Line): string => (typeof l === "string" ? l : l.t);
+
+/** A line's tags (DES-§9.5): the explicit ones, else the heuristic taggers' reading of the plain string. */
+export function lineTag(l: Line, locale: Locale): { t: string; s: HeadlineStructure; r: "msa" | "darija" | "mixed" | "none" } {
+  if (typeof l !== "string") return { t: l.t, s: l.s, r: l.r ?? (locale === "ar" ? registerOf(l.t) : "none") };
+  return { t: l, s: structureOf(l, locale), r: locale === "ar" ? registerOf(l) : "none" };
+}
+
+/**
+ * A French template made article-safe for one product (DES-§9.5 D4): the lint's fix applied (a gendered slot for a
+ * determiner, a contraction, an elision), gendered slots resolved through `articleFor`, and a bare `{product}` inside a
+ * sentence given the lower-case article the name was typed with ("choisi l’huile d’argan"). null when only a
+ * name-free alternative fits (the gender is unknown).
+ */
+export function frTemplate(template: string, ref: ProductRef): string | null {
+  if (!template.includes("{product")) return template;
+  const chk = articleCheck(template, ref);
+  const t = chk.ok ? template : chk.fixed;
+  if (t === null) return null;
+  const typo = (v: string) => v.replace(/^(l|à l|de l)'/i, "$1’");
+  return t
+    .replace(/(?<![\p{L}’'])(d|qu)'\{product\}/giu, "$1’{product}")
+    .replace(/\{product:(le|ce|de|un|a)\}/g, (_m, a: ArticleSlot) => {
+      const v = articleFor(ref, a);
+      return v === null ? "{product}" : typo(v);
+    })
+    .replace(/(^|[.!?]\s+)?\{product\}/g, (m, start: string | undefined) => (start !== undefined || !ref.article ? m : typo(articleFor(ref, "bare")!)));
+}
 
 const FAMILY_OF: Record<ProductCategory, Family> = {
   beauty: "skincare",
@@ -236,7 +270,7 @@ export function fitText(text: string, max: number): string {
   if (s.length <= max) return s;
   const cut = s.slice(0, Math.max(0, max - 1));
   const at = cut.lastIndexOf(" ");
-  const base = (at > max * 0.55 ? cut.slice(0, at) : cut).replace(/[\s,;:.\-–—(]+$/u, "");
+  const base = (at > max * 0.55 ? cut.slice(0, at) : cut).replace(/[\s,;:.\-\u2013\u2014(]+$/u, "");
   // never leave an unbalanced *emphasis* marker behind
   const balanced = (base.match(/\*/g)?.length ?? 0) % 2 === 0 ? base : base.replace(/\*(?!.*\*)/u, "");
   return `${balanced}…`;
@@ -244,7 +278,7 @@ export function fitText(text: string, max: number): string {
 
 /** Product name usable inside copy: no markup characters, collapsed spaces. */
 export function cleanName(name: string): string {
-  return name.replace(/[*_<>{}[\]\\]/g, "").replace(/\s+/g, " ").trim() || "—";
+  return name.replace(/[*_<>{}[\]\\]/g, "").replace(/\s+/g, " ").trim() || "-";
 }
 
 export interface Slots {
@@ -348,10 +382,10 @@ function resolveFamily(fam: FamilyCopy, facets: readonly Facet[], named: readonl
   const unnamed = copyOf(facets.filter((f) => !named.includes(f)));
   const pool = (key: Pool, from: readonly FacetCopy[] = active): string[] => {
     const extra = uniq(
-      from.flatMap((f) => f[key] ?? []),
+      from.flatMap((f) => (f[key] ?? []).map(lineText)),
       (s) => s,
     );
-    return extra.length ? extra : fam[key];
+    return extra.length ? extra : fam[key].map(lineText);
   };
   // benefits: each facet's first one leads, then the family's own first one; the rest shuffle
   const facetBenefits = uniq(
@@ -401,7 +435,7 @@ export interface LibraryInput {
   productName: string;
   /**
    * the product's other words (tagline, description, merchant facts): with the name, they pick the
-   * family's refinements — a prayer abaya for girls, in lace (see copyFamily)
+   * family's refinements: a prayer abaya for girls, in lace (see copyFamily)
    */
   keywords?: string | null;
   /** store delivery line (Settings → Defaults); market default when empty */
@@ -444,14 +478,17 @@ export function libraryCopy(input: LibraryInput): PageCopy {
     where: market === "MA" ? c.where.MA : c.where.other,
     whatsapp: input.hasWhatsapp === true,
   };
-  /** French elision before a product name that starts with a vowel ("l’idée d’Abaya…", never "de Abaya") */
-  const elide = input.locale === "fr" && /^[aeiouyàâäéèêëîïôöùûüœæ]/i.test(slots.product);
+  /**
+   * French articles (D4): the elision before a vowel ("l’idée d’Abaya…", never "de Abaya"), a typed article lower-cased
+   * inside a sentence and contracted ("de l’huile", never "de L'huile"), gendered slots resolved; the merchant's own
+   * name keeps its spelling
+   */
+  const ref = input.locale === "fr" ? productRef(slots.product, "fr") : null;
   /** a library string, typeset, with its slots filled */
-  const F = (s: string) =>
-    fill(
-      typeset(input.locale, elide ? s.replace(/\b(de|que|le|la) \{product\}/g, (_, w: string) => `${w === "que" ? "qu" : w[0]}’{product}`) : s),
-      slots,
-    );
+  const F = (s: string) => {
+    const t = typeset(input.locale, s);
+    return fill(ref ? (frTemplate(t, ref) ?? t) : t, slots);
+  };
   const seed = Math.abs(Math.trunc(input.seed)) >>> 0;
   /** pick one alternative that fits `max` after filling (shortest as last resort) */
   const one = (key: string, list: readonly string[], max: number): string => {
@@ -493,7 +530,7 @@ export function libraryCopy(input: LibraryInput): PageCopy {
     tagline: one("tagline", fam.tagline, 90),
     hero: {
       kicker: one("kicker", kickers.length ? kickers : ["{product}"], 60),
-      headline: one("headline", fam.headline, 110),
+      headline: one("headline", fam.headline.map(lineText), 110),
       sub: one("sub", fam.sub, 220),
       cta: one("hero-cta", voice.heroCta ?? c.heroCta, 40),
       bigWord: one("big-word", fam.bigWord, 16),

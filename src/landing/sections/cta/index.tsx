@@ -4,11 +4,14 @@
  *  banner  a contrasting color panel the product breaks out of (a cutout standing on the panel
  *          floor or a tall framed photo crossing its top edge; a landscape photo slides out of its
  *          side) with real rating / saving chips
- *  stamp   “the orb”: the order button as a round disc inside a turning ring of reassurance
- *          text (Arabic set upright), overlapping the product's lit disc, balanced by a frosted
- *          live-price chip
- *  poster  giant headline with the product photo set inline as a pill, on a soft aurora of the
- *          product hues, closing on the big order button with the live price
+ *  stamp   (id kept for saved pages) the quiet close: a start-aligned copy column with the one
+ *          order button beside the product in a plain tinted disc; no ring of text, no turning
+ *          disc (design.md DES-§5.13 S8, owner rule 2)
+ *  poster  giant headline with the product photo set inline as a pill, on the flat colour field of
+ *          its block (no mesh of lights: core D60, V40), closing on the big order button with the
+ *          live price
+ * The primary button carries data-hero-cta (Cta's `hero` prop, DES-§5.9), so the frozen sticky bar
+ * hides while it is on screen.
  * The button is always the Cta primitive (href="#order", data-action="order"): it scrolls to the
  * order form and works without JS. Every default line restates a built-in COD promise.
  */
@@ -21,6 +24,7 @@ import { COMMON, defaultPoints, langOf, pick, titlesFor } from "./copy";
 import { schema, type CtaData, type ViewProps } from "./model";
 import { Poster } from "./poster";
 import { Stamp } from "./stamp";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   banner: Banner,
@@ -28,7 +32,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   poster: Poster,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "cta",
   label: "Final call to action",
   labelFr: "Appel à l’action",
@@ -42,14 +46,14 @@ export default defineSection({
     },
     {
       id: "stamp",
-      label: "Badge CTA",
-      description: "The order button as a round disc inside a rotating ring of reassurances, over the product in a lit disc.",
+      label: "Quiet close",
+      description: "A quiet close: the headline, one order button and the cash-on-delivery promise beside the product in a plain disc.",
       archetypes: ["maison", "souk", "playground", "hearth", "bloom"],
     },
     {
       id: "poster",
       label: "Poster",
-      description: "A giant headline with the product photo set inline, on a soft aurora of the product colors.",
+      description: "A giant headline with the product photo set inline, on a flat field of the product color.",
       archetypes: ["maison", "apothecary", "playground", "kinetic", "circuit", "bloom", "field", "editorial", "garage"],
     },
   ],
@@ -155,4 +159,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

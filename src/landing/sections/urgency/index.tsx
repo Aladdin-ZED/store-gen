@@ -46,6 +46,7 @@ import { defineSection, type RenderContext, type ResolvedAsset } from "../../typ
 import { photoPlan } from "../orderForm/fit";
 import { PlannedPhoto } from "../orderForm/photo";
 import { dotLegend, endParts, ofTemplate, routeStops, stockLabel, stockUnit, untilTemplate, urgencyCopy, type RouteStop } from "./copy";
+import { withRevealScope } from "../reveal-scope";
 
 const VARIANT_IDS = ["countdown", "stock", "banner"] as const;
 type Variant = (typeof VARIANT_IDS)[number];
@@ -489,7 +490,7 @@ function render({ id, variant, bg, data, ctx }: { id: string; variant: string; b
   );
 }
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "urgency",
   label: "Urgency",
   labelFr: "Urgence",
@@ -604,4 +605,4 @@ export default defineSection({
     },
   ],
   render,
-});
+}));

@@ -14,6 +14,7 @@ import { defaults, schema } from "./model";
 import { Stack } from "./stack";
 import { Summary } from "./summary";
 import { Wall } from "./wall";
+import { withRevealScope } from "../reveal-scope";
 
 const RENDER = { wall: Wall, carousel: Carousel, summary: Summary, notes: Stack } as const;
 
@@ -125,4 +126,4 @@ const def = defineSection({
   render: (props) => (RENDER[props.variant as keyof typeof RENDER] ?? Wall)(props),
 });
 
-export default def;
+export default withRevealScope(def);

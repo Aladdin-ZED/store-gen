@@ -18,6 +18,7 @@ import { faqDefaults } from "./copy";
 import type { ViewProps } from "./parts";
 import { schema, type Data } from "./schema";
 import { TwoCol } from "./two-col";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   accordion: Accordion,
@@ -25,7 +26,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   chat: Chat,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "faq",
   label: "FAQ",
   labelFr: "Questions fréquentes",
@@ -127,4 +128,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

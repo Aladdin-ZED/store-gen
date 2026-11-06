@@ -24,6 +24,7 @@ import { schema, type Data, type ViewProps } from "./model";
 import { Slider } from "./slider";
 import { Timeline } from "./timeline";
 import { garmentOf } from "../garment";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   slider: Slider,
@@ -108,7 +109,7 @@ const momentFields = (path: "before" | "after", name: string) => ({
   ],
 });
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "beforeAfter",
   label: "Before / after",
   labelFr: "Avant / après",
@@ -307,4 +308,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

@@ -1,0 +1,78 @@
+/* gallery · contact — rules only this variant renders (design.md DES-§5.13 S3): photos on a 2 px gap of the section's
+   ground, one height per row on a 6-column track (contact.tsx data-p on phones and with cols="2", data-d on three
+   columns from 48rem). No captions, no frames, no shadows. */
+
+.lp-gallery__cs {
+  display: grid;
+  gap: clamp(1.5rem, 1rem + 2vw, 2.75rem);
+}
+
+.lp-gallery__cs-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 2px;
+  overflow: hidden;
+  border-radius: var(--lp-sq-media);
+  corner-shape: var(--lp-corner);
+}
+
+.lp-gallery__cs-cell {
+  min-inline-size: 0;
+  margin: 0;
+  background-color: var(--mx-tint);
+}
+
+.lp-gallery__cs-pic,
+.lp-gallery__cs-pic .lp-pic__img {
+  border-radius: 0;
+}
+
+.lp-gallery__cs-cell[data-p="2"] {
+  grid-column: span 2;
+}
+
+.lp-gallery__cs-cell[data-p="2"] .lp-gallery__cs-pic {
+  aspect-ratio: 2 / 3;
+}
+
+.lp-gallery__cs-cell[data-p="3"] {
+  grid-column: span 3;
+}
+
+.lp-gallery__cs-cell[data-p="6"] {
+  grid-column: 1 / -1;
+}
+
+.lp-gallery__cs-cell[data-p="6"] .lp-gallery__cs-pic {
+  aspect-ratio: 4 / 3;
+}
+
+@media (min-width: 48rem) {
+  .lp-gallery__cs-grid[data-cols="3"] > .lp-gallery__cs-cell[data-d="2"] {
+    grid-column: span 2;
+  }
+
+  .lp-gallery__cs-grid[data-cols="3"] > .lp-gallery__cs-cell[data-d="3"] {
+    grid-column: span 3;
+  }
+
+  .lp-gallery__cs-grid[data-cols="3"] > .lp-gallery__cs-cell[data-d="6"] {
+    grid-column: 1 / -1;
+  }
+
+  .lp-gallery__cs-grid[data-cols="3"] > .lp-gallery__cs-cell[data-d="2"] .lp-gallery__cs-pic {
+    aspect-ratio: 1;
+  }
+
+  .lp-gallery__cs-grid[data-cols="3"] > .lp-gallery__cs-cell[data-d="3"] .lp-gallery__cs-pic {
+    aspect-ratio: 3 / 2;
+  }
+
+  .lp-gallery__cs-grid[data-cols="3"] > .lp-gallery__cs-cell[data-d="6"] .lp-gallery__cs-pic {
+    aspect-ratio: 2;
+  }
+
+  .lp-gallery__cs-grid[data-cols="3"] {
+    max-inline-size: 72rem;
+  }
+}

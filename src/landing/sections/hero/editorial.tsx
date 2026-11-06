@@ -4,8 +4,8 @@
  * header already shows it — an oversized headline with one emphasized word, a tall arch/rounded
  * figure running the full height of the spread (it settles into its mask and, for a product with
  * room around it, drifts inside it on scroll), a glass caption straddling the figure's foot (never
- * over a hand or the product), a measured lead, the buy box, and numbered cover lines on hairlines —
- * a contents strip of three columns on desktop. Generous whitespace, strict 12-column grid.
+ * over a hand or the product), a measured lead, the buy box, and two or three unnumbered cover lines on
+ * hairlines (design.md DES-§5.13 H2, S15: no list numbering) — a contents strip of columns on desktop. Generous whitespace, strict 12-column grid.
  *
  * The photo is fitted to the figure's exact mask and aspect (4:5 on phones, the 7:10 spread on
  * desktop); a product lying on its side gets a landscape figure in a rounded mask instead, so it is
@@ -33,8 +33,6 @@ import {
   type HeroProps,
 } from "./parts";
 
-const pad = (k: number) => String(k + 1).padStart(2, "0");
-
 /** A header already sets the store's name as the page's wordmark: the masthead does not repeat it. */
 const headerShowsName = (ctx: HeroProps["ctx"]): boolean =>
   ctx.doc.sections.some((s) => s.type === "header" && !s.hidden && s.variant !== "none");
@@ -57,7 +55,7 @@ function drifts(asset: ResolvedAsset | null): boolean {
 export function EditorialHero({ id, variant, bg, data, ctx }: HeroProps): ReactElement {
   const asset = mainAsset(ctx, data);
   const cutout = !!asset?.alpha;
-  const lines = heroNotes(data, 3);
+  const lines = heroNotes(data, data.coverLines ?? 3);
   const issue = data.issue.trim();
   const store = headerShowsName(ctx) || !hasStoreName(ctx) ? "" : ctx.store.name.trim();
   const facts = visualFacts(asset);
@@ -122,17 +120,14 @@ export function EditorialHero({ id, variant, bg, data, ctx }: HeroProps): ReactE
         </div>
 
         {lines.length ? (
-          <ol className="lp-hero__lines" role="list" data-n={lines.length} data-stagger="110">
-            {lines.map(({ note, i }, k) => (
+          <ul className="lp-hero__lines" role="list" data-n={lines.length} data-stagger="110">
+            {lines.map(({ note, i }) => (
               <li key={i} className="lp-hero__line" {...reveal("rise")}>
-                <span className="lp-hero__line-n" aria-hidden="true">
-                  {pad(k)}
-                </span>
                 <NoteText ctx={ctx} text={note.title} className="lp-hero__line-t" editPath={`notes.${i}.title`} />
                 {note.detail.trim() ? <NoteText ctx={ctx} text={note.detail} className="lp-hero__line-d" editPath={`notes.${i}.detail`} /> : null}
               </li>
             ))}
-          </ol>
+          </ul>
         ) : null}
       </div>
     </SectionShell>

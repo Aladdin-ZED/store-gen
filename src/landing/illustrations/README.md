@@ -6,7 +6,7 @@ a **pure component**: no hooks, no context, no `Math.random`, so the same props 
 byte-identical markup (publish, admin preview, static export).
 
 ```tsx
-import { Aurora, Badge, Divider, GlassChip, GlowOrb, LeaderLine, Swoosh } from "@/landing/illustrations";
+import { Badge, Divider, GlassChip, GlowOrb, LeaderLine, Swoosh } from "@/landing/illustrations";
 ```
 
 Styles: `illustrations.css` is bundled into the landing base stylesheet by
@@ -19,7 +19,7 @@ Styles: `illustrations.css` is bundled into the landing base stylesheet by
 | **Seed** | `seed: number \| string`. Derive it from the page seed + section id + a local key: ``seed={`${ctx.seed}:${id}:leader`}``. Same seed, same drawing; another key, another drawing. Seeds only vary composition (positions, widths, which side), never smoothness: every curve is an exact cubic. |
 | **uid** | Pieces that emit XML ids (gradients, clip paths, text arcs, patterns) take a required `uid`: section id + local key (``uid={`${id}-badge`}``). Ids become `lpi-<uid>-<local>`. |
 | **Color** | Never hard-coded. `tone` (primary, painted as `currentColor`), `tone2`, `tone3` map to theme tokens: `--sec-*` inside a `[data-bg]` section, `--lp-*` elsewhere. Tones: `current ink soft line accent accent-ink accent-soft accent-strong pop pop-ink bg card card-ink chip dark highlight glow` (`paper` = `card`, kept for older call sites); `tone3`: `bg card chip ink accent pop dark`. `glow` = the section's product light. `highlight` = the kit's hue-true accent tint `--mx-tint-2` (the accent mixed into the drained ground, never into the ground itself — that is how a crimson on cream turns peach; keeps the section ink legible). |
-| **Light** | Glows (GlowOrb, Aurora, the Spotlight cone) use the theme's aurora lights `--lp-aurora-1/2/3`, which the theme re-solves on every `[data-bg]` block (pale glow on light grounds, deeper bloom on mid-tones in the block's own hue, dim colored glow on near-black) at a contrast-safe alpha. Product stages (the Halo disc, the Spotlight pool) use `--lp-stage-glow`, the theme's ambient glow behind a cutout. `intensity` multiplies that light: `subtle` .4 · `soft` .65 · `medium` .85 · `strong` 1 (exactly the light the theme guarantees text over). Beams use a pale tint of the product hue at ~70% of that. An explicit `tone` replaces the theme light with that token. No SVG or blur filters: gradients + masks only, animated with transform/opacity. |
+| **Light** | Glows (GlowOrb, the Spotlight cone) use the block's one product light (`--ill-glow`: the accent tint at ≤ 10 % alpha, DES-§3.2 S06). There is no mesh of lights and no grain on a generated page (core D60 rev 3, V40): the `Aurora` and `Grain` pieces are gone. Product stages (the Halo disc, the Spotlight pool) use `--lp-stage-glow`, the theme's ambient glow behind a cutout. `intensity` multiplies that light: `subtle` .4 · `soft` .65 · `medium` .85 · `strong` 1 (exactly the light the theme guarantees text over). Beams use a pale tint of the product hue at ~70% of that. An explicit `tone` replaces the theme light with that token. No SVG or blur filters: gradients + masks only, animated with transform/opacity. |
 | **Size** | SVG pieces: `size` sets the width (number → px, or a CSS length string); height follows the viewBox. HTML-hosted pieces take CSS lengths: `size` prop or `--badge-size`, `--sticker-size`. Light layers fill their host (`layer`, default) or a `size` box. |
 | **Decorative** | Everything is `aria-hidden` and ignores pointer events. Words that matter (badge text, sticker text) must also exist as real text nearby. `GlassChip`, `Dimension` and `Sticker` host real HTML text. |
 | **Draw reveal** | Strokes carry `pathLength="1"` + `.lp-draw`. `reveal` puts `data-reveal="draw"` on the piece (`delay` in ms → `data-delay`); the runtime sets `data-in` and `styles/base.css` draws the strokes. Multi-part pieces stage themselves with `data-d="1..4"` (line → end dot, stem → leaves → buds) and solid bits (`.lp-draw-pop`) pop with a spring on their stage. |
@@ -54,11 +54,9 @@ All components accept `className`. Archetype tags show where a piece shines (DES
 | Component | Props (beyond className) | Notes |
 | --- | --- | --- |
 | `GlowOrb` | `size` (60%), `shape` circle / wide / tall, `tone` (glow), `intensity`, `place`, `idle` float / drift / pulse | Soft gaussian light behind a product or headline. All archetypes. |
-| `Aurora` | `seed`, `intensity` (soft), `drift`, `grain` auto / true / false, `solved`, `layer` | Mesh light: three large soft lights, one per aurora hue, composed like the theme's solver (start-high, end-high, low-wide). `solved` paints the theme's own `--lp-aurora` field (defaults to `strong`): use it under body text. `grain: "auto"` adds film grain only when the theme chose `data-texture="grain"`. Posters, CTAs, hero stages; bloom, playground, apothecary. |
 | `Halo` | `size` (80%), `rings` 0–3, `orbit`, `seed`, `tone`, `intensity`, `place`, `idle` pulse / float | Disc of stage light (`--lp-stage-glow`) + 1px accent hairline rings + optional orbiting dot. Maison, bloom, apothecary. |
 | `Beam` | `seed`, `origin` top / top-start / top-end / bottom, `count` 1–7, `angle`, `spread`, `fan` (64°), `tone`, `intensity`, `layer` | One soft stage beam, or a fan of 2–7 discrete beams from one source with seeded widths, reach and strength (a stage rig, never a sunburst). Kinetic, maison, playground. |
-| `Spotlight` | `origin` top / top-start / top-end, `pool`, `tone`, `intensity` (medium), `layer` | Stage cone (aurora light 1) + pool of light on the floor under a cutout (`--lp-stage-glow`). Maison, circuit, hero `stage`. |
-| `Grain` | `opacity` (≤ 0.03, default .025), `blend` soft-light / overlay / normal | Static film grain for gradient and dark fields only (breaks banding). |
+| `Spotlight` | `origin` top / top-start / top-end, `pool`, `tone`, `intensity` (medium), `layer` | Stage cone (the block's product light) + pool of light on the floor under a cutout (`--lp-stage-glow`). Maison, circuit, hero `stage`. |
 | `GlassChip` | `glass` auto / dark, `size` s / m, children | Frosted pill with real content: spec callouts, captions over media. |
 
 ### Precise lines — `lines.tsx`
@@ -166,13 +164,13 @@ page gap, never by a full-bleed edge.
 | --- | --- |
 | maison | Spotlight, Halo (rings), GlowOrb, hairline LeaderLine + GlassChip, Badge outline, one Sparkle |
 | apothecary | DotGrid, Halo, LeaderLine + GlassChip, Leaf, CheckMark ring, Sparkline |
-| souk | ZelligeLines (≤ 6%), ArchFrame, warm Aurora, Leaf olive, Badge solid with `star8` |
-| playground | Shape3D, Sticker cookie / burst, Aurora, Beam fan, DotGrid |
+| souk | ZelligeLines (≤ 6%), ArchFrame, Leaf olive, Badge solid with `star8` |
+| playground | Shape3D, Sticker cookie / burst, Beam fan, DotGrid |
 | kinetic | Beam, SpeedLines, Swoosh sweep, GridLines |
 | circuit | GridLines major, DotGrid, LeaderLine elbow, GlassChip, Rings, Sparkline |
 | hearth | GlowOrb, Sticker blob, Swoosh arc, Leaf |
-| bloom | Halo + orbit, Aurora, Shape3D gloss, Sparkle twin |
-| field | Leaf, Aurora (soft), Swoosh |
+| bloom | Halo + orbit, Shape3D gloss, Sparkle twin |
+| field | Leaf, Swoosh |
 | editorial | GridLines (edges), CircleMark, LeaderLine, Dimension |
 | garage | GridLines, Beam, Ruler, Dimension, Shape3D pill |
 

@@ -17,6 +17,7 @@ import { COMMON, FAMILY_ROWS, garmentRows } from "./copy";
 import { schema, type ComparisonData, type ViewProps } from "./model";
 import { Table } from "./table";
 import { Versus } from "./versus";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   table: Table,
@@ -24,7 +25,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   checklist: Checklist,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "comparison",
   label: "Comparison",
   labelFr: "Comparatif",
@@ -128,4 +129,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

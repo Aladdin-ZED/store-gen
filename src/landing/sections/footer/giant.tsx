@@ -8,8 +8,9 @@
  * The estimate keeps that correction within a few percent, so the letterforms never look stretched.
  *
  * Long names stack on two lines (phones from 10 characters, every width beyond 20); both lines share
- * one size, each fitted to its own estimate. The bottom of the last line sinks under the section edge,
- * its letters melting from the page ink into the product accent.
+ * one size, each fitted to its own estimate. The word is never clipped (design.md DES-§4.5.4 footer:big, S24): the
+ * plate keeps room under the last baseline for descenders (Arabic letters dip deepest), and the letters are one
+ * solid ink (no gradient text, S01; no fade into the edge).
  */
 import type { ReactElement } from "react";
 import { cssVars } from "../../primitives";
@@ -292,7 +293,8 @@ function Svg({
     ? face.asc * 92
     : face.cap * (lines.some((l) => ACCENTED_CAP.test(l)) ? 128 : 108);
   const pitch = rtl ? 132 : caps ? face.cap * 132 : face.cap * 100 + 30;
-  const sink = rtl ? -6 : face.cap * 14;
+  // room under the last baseline (negative = below it): Arabic bowls and tails, Latin descenders, else a hairline
+  const sink = rtl ? -46 : lines.some((l) => /[gjpqyQ,;]/.test(l)) ? -24 : -6;
   const firstBase = top;
   const lastBase = firstBase + pitch * (lines.length - 1);
   const H = lastBase - sink;

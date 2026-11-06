@@ -6,8 +6,14 @@
  *
  * "Ad tracking for this page" (docs/OFFERS.md §A.4, per-page pixels): PX's required answer sits
  * above the directions; until it is given (`gate`), "Use this direction" stays disabled and says why.
+ *
+ * Each card is a DirectionView (design.md DES-§14.1, GN-1, SF-02, GH-1): its four DNA chips as separate chips, the why
+ * line, the three novelty words (bands only, never a number; "Uniqueness check unavailable right now" when the check
+ * did not answer), the Director's hint marker, and on the exhaustion path the niche note with its one-tap
+ * differentiators (the type pairing, the colours, a second photo). While the pipeline runs, the ghosts carry a
+ * progress line naming the real step.
  */
-import { ArrowRightIcon, Loader2Icon, Maximize2Icon, MonitorIcon, PaletteIcon, RefreshCwIcon, ShuffleIcon, SmartphoneIcon, SparklesIcon, SquareIcon, TriangleAlertIcon } from "lucide-react";
+import { ArrowRightIcon, ImagePlusIcon, Loader2Icon, Maximize2Icon, MonitorIcon, PaletteIcon, RefreshCwIcon, ShuffleIcon, SmartphoneIcon, SparklesIcon, SquareIcon, TriangleAlertIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { Segmented } from "@/components/admin/common/segmented";
@@ -16,11 +22,14 @@ import { LandingPreview, type PreviewAssets } from "@/components/preview";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { UseAi } from "@/lib/ai/client";
-import type { Direction } from "@/lib/generator";
-import { fontData } from "@/lib/theme";
+import { useT } from "@/lib/i18n/admin/client";
+import type { MessageKey } from "@/lib/i18n/admin";
 import { cn } from "@/lib/utils";
 import type { StoreInfo } from "@/landing/context";
 import { AiProgress } from "./parts";
+import type { PipelineDirection, PipelineStep } from "./pipeline";
+
+type Direction = PipelineDirection;
 
 export type CopyState =
   /** the copy library writes the page (AI copy off or unavailable) */
@@ -55,21 +64,24 @@ export interface StepDirectionsProps {
   tracking: { value: TrackingChoice | undefined; onChange(v: TrackingChoice): void; canCreate: boolean } | null;
   /** why a direction can't be used yet (e.g. no tracking answer) */
   gate: string | null;
+  /** the pipeline's state: the progress step, whether the uniqueness check answered, the Director's refinement */
+  run: { status: "idle" | "analysing" | "revealed" | "error"; step: PipelineStep | null; novelty: "checked" | "unavailable" | "skipped"; refined: boolean };
+  /** the exhaustion path's one-tap differentiators */
+  onDifferentiate(index: number, kind: "pairing" | "colour" | "photo"): void;
 }
 
-const fontName = (id: string) => fontData(id)?.family ?? id;
-
-/** "Best match · natural + clinical" — why this style was proposed. */
+/** "Best match: natural, clinical" — why this style was proposed. */
 function matchText({ match }: Direction): string {
   const head = match.forced ? "Another style" : match.rank === 0 ? "Best match" : match.rank <= 2 ? "Strong match" : "Fresh take";
-  return match.vibes.length ? `${head} · ${match.vibes.join(" + ")}` : head;
+  return match.vibes.length ? `${head}: ${match.vibes.join(", ")}` : head;
 }
 
 /** Phones scroll sideways (one card per snap), large screens show the three side by side. */
 const ROW = "-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 adm-scroll lg:mx-0 lg:grid lg:grid-cols-3 lg:gap-5 lg:overflow-visible lg:px-0 lg:pb-0";
 const CELL = "w-[min(86vw,22rem)] shrink-0 snap-center lg:w-auto";
 
-export function StepDirections({ directions, error, assets, store, seedBase, creating, onUse, onRegenerate, onOtherStyles, canOtherStyles, ai, copy, onStopCopy, onRetryCopy, tracking, gate }: StepDirectionsProps) {
+export function StepDirections({ directions, error, assets, store, seedBase, creating, onUse, onRegenerate, onOtherStyles, canOtherStyles, ai, copy, onStopCopy, onRetryCopy, tracking, gate, run, onDifferentiate }: StepDirectionsProps) {
+  const t = useT();
   const [full, setFull] = useState<number | null>(null);
   const busy = creating !== null;
   const blocked = busy || !!gate;
@@ -97,6 +109,20 @@ export function StepDirections({ directions, error, assets, store, seedBase, cre
       </div>
 
       <CopyBanner ai={ai} copy={copy} onStop={onStopCopy} onRetry={onRetryCopy} />
+      {/* the run's quiet lines: the Director's refinement (crossfaded in), an unavailable uniqueness check */}
+      <AnimatePresence initial={false}>
+        {directions && (run.refined || run.novelty === "unavailable") ? (
+          <motion.div key={`${run.refined}-${run.novelty}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }} className="flex flex-wrap items-center gap-3 text-[0.8rem] text-muted-foreground">
+            {run.refined ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 font-medium text-brand">
+                <SparklesIcon className="size-3.5" />
+                {t("design.wizard.refined")}
+              </span>
+            ) : null}
+            {run.novelty === "unavailable" ? <span>{t("design.wizard.uniqueUnavailable")}</span> : null}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
       {/* "Ad tracking for this page" (PX's answer; "Use this direction" waits for it) */}
       {tracking ? <PageTrackingChoice value={tracking.value} onChange={tracking.onChange} canCreate={tracking.canCreate} /> : null}
 
@@ -114,7 +140,7 @@ export function StepDirections({ directions, error, assets, store, seedBase, cre
           </Button>
         </div>
       ) : directions ? (
-        <ul className={ROW}>
+        <ul className={ROW} key={run.refined ? "refined" : "first"}>
           {directions.map((d, i) => (
             <motion.li
               key={d.archetype}
@@ -134,19 +160,27 @@ export function StepDirections({ directions, error, assets, store, seedBase, cre
                 gate={gate}
                 onUse={() => onUse(i)}
                 onFull={() => setFull(i)}
+                novelty={run.novelty}
+                onDifferentiate={(kind) => onDifferentiate(i, kind)}
               />
             </motion.li>
           ))}
         </ul>
       ) : (
-        // ghosts of the cards in their own row: same header, stage and footer, so nothing jumps
-        <ul className={ROW} aria-busy="true" aria-label="Designing three directions">
-          {[0, 1, 2].map((i) => (
-            <li key={i} className={CELL}>
-              <DirectionGhost index={i} />
-            </li>
-          ))}
-        </ul>
+        // ghosts of the cards in their own row: same header, stage and footer, so nothing jumps; the line names the real step
+        <div className="grid gap-3">
+          <p className="flex items-center gap-2 text-[0.8rem] text-muted-foreground" aria-live="polite">
+            <span aria-hidden="true" className="size-1.5 animate-pulse rounded-full bg-brand" />
+            {t(`design.reveal.progress.${run.step ?? "photos"}` as MessageKey)}
+          </p>
+          <ul className={ROW} aria-busy="true" aria-label="Designing three directions">
+            {[0, 1, 2].map((i) => (
+              <li key={i} className={CELL}>
+                <DirectionGhost index={i} />
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <FullPreview direction={full === null ? null : (directions?.[full] ?? null)} index={full ?? 0} assets={assets} store={store} onClose={() => setFull(null)} onUse={() => full !== null && !gate && onUse(full)} disabled={blocked} />
@@ -245,6 +279,8 @@ function DirectionCard({
   gate,
   onUse,
   onFull,
+  novelty,
+  onDifferentiate,
 }: {
   index: number;
   direction: Direction;
@@ -257,10 +293,11 @@ function DirectionCard({
   gate: string | null;
   onUse: () => void;
   onFull: () => void;
+  novelty: "checked" | "unavailable" | "skipped";
+  onDifferentiate: (kind: "pairing" | "colour" | "photo") => void;
 }) {
+  const t = useT();
   const { doc } = direction;
-  const ar = doc.locale === "ar";
-  const fonts = [...new Set([fontName(ar ? doc.theme.fonts.displayAr : doc.theme.fonts.display), fontName(ar ? doc.theme.fonts.bodyAr : doc.theme.fonts.body)])];
   const accent = doc.theme.palette.accent;
   const pop = doc.theme.palette.pop;
   // the strongest match carries the accent; the others stay ink, so the eye lands on the recommendation
@@ -284,18 +321,25 @@ function DirectionCard({
             ))}
           </div>
         </div>
-        {/* always two lines tall, so the three phone stages start on one line */}
-        <p className="line-clamp-2 min-h-[2lh] text-[0.8rem] leading-relaxed text-pretty text-muted-foreground">{direction.description}</p>
-        {/* one row: both chips truncate when narrow (the type pairing first) */}
-        <div className="flex min-w-0 gap-1.5 text-[0.7rem]">
-          <span className={cn("inline-flex min-w-0 items-center gap-1 rounded-full px-2.5 py-1 font-medium", best ? "bg-brand-soft text-brand" : "bg-foreground/[0.05] text-foreground/75")}>
-            <PaletteIcon className="size-3 shrink-0" />
-            <span className="truncate">{matchText(direction)}</span>
-          </span>
-          <span className="min-w-[4.5rem] shrink-[3] truncate rounded-full bg-foreground/[0.05] px-2.5 py-1 text-muted-foreground" title={fonts.join(" · ")}>
-            {fonts.join(" · ")}
-          </span>
-        </div>
+        {/* the why line (GN-1): always three lines tall, so the three phone stages start on one line */}
+        <p className="line-clamp-3 min-h-[3lh] text-[0.8rem] leading-relaxed text-pretty text-muted-foreground" title={t("design.wizard.why")}>
+          {t(direction.why.key, direction.why.vars)}
+        </p>
+        {/* the four DNA chips, each its own chip (never joined with a dot); the Director's hint first when it shaped it */}
+        <ul className="flex min-w-0 flex-wrap gap-1.5 text-[0.7rem]">
+          {direction.hinted ? (
+            <li className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 font-medium text-brand">
+              <SparklesIcon className="size-3 shrink-0" />
+              {t("design.wizard.hinted")}
+            </li>
+          ) : null}
+          {direction.chips.map((chip, n) => (
+            <li key={chip.gene} className={cn("max-w-full truncate rounded-full px-2.5 py-1 font-medium", n === 0 && best ? "bg-brand-soft text-brand" : "bg-foreground/[0.05] text-foreground/75")}>
+              {t(chip.key, chip.vars)}
+            </li>
+          ))}
+        </ul>
+        <NoveltyWords direction={direction} novelty={novelty} onDifferentiate={onDifferentiate} />
       </header>
 
       {/* a neutral photo-table stage (like the builder canvas): the page's own colors stay inside the
@@ -334,6 +378,50 @@ function DirectionCard({
   );
 }
 
+/** The three novelty words (bands only, DS7) and, on the exhaustion path, the niche note with its differentiators. */
+function NoveltyWords({ direction, novelty, onDifferentiate }: { direction: Direction; novelty: "checked" | "unavailable" | "skipped"; onDifferentiate: (kind: "pairing" | "colour" | "photo") => void }) {
+  const t = useT();
+  const b = direction.bands;
+  if (novelty !== "checked" || !b) return null;
+  const words = (
+    [
+      ["platform", b.platform],
+      ["niche", b.niche],
+      ["own", b.own],
+    ] as const
+  ).filter(([, band]) => band !== "too_close");
+  return (
+    <div className="grid gap-2">
+      <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[0.72rem] text-muted-foreground">
+        {words.map(([kind, band]) => (
+          <li key={kind} className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true" className={cn("size-1.5 rounded-full", band === "close" ? "bg-warn-ink/70" : "bg-brand")} />
+            {t(`design.novelty.${kind}.${band}` as MessageKey)}
+          </li>
+        ))}
+      </ul>
+      {direction.exhausted ? (
+        <div className="grid gap-2 rounded-xl bg-foreground/[0.04] p-3 text-[0.75rem]">
+          <p className="text-pretty text-foreground/80">{t("design.novelty.niche.fallback")}</p>
+          <div className="flex flex-wrap gap-1.5">
+            <Button variant="outline" size="sm" className="h-11 rounded-full px-3 text-[0.75rem]" onClick={() => onDifferentiate("pairing")}>
+              {t("design.wizard.diff.pairing")}
+            </Button>
+            <Button variant="outline" size="sm" className="h-11 rounded-full px-3 text-[0.75rem]" onClick={() => onDifferentiate("colour")}>
+              <PaletteIcon />
+              {t("design.wizard.diff.colour")}
+            </Button>
+            <Button variant="outline" size="sm" className="h-11 rounded-full px-3 text-[0.75rem]" onClick={() => onDifferentiate("photo")}>
+              <ImagePlusIcon />
+              {t("design.wizard.diff.photo")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function FullPreview({
   direction,
   index,
@@ -363,7 +451,7 @@ function FullPreview({
                   <span className="me-2 font-mono text-xs text-muted-foreground">0{index + 1}</span>
                   {direction.label}
                 </DialogTitle>
-                <DialogDescription className="truncate text-[0.8rem]">{matchText(direction)} · {direction.description}</DialogDescription>
+                <DialogDescription className="truncate text-[0.8rem]">{matchText(direction)}</DialogDescription>
               </div>
               <Segmented<"mobile" | "desktop">
                 label="Preview device"

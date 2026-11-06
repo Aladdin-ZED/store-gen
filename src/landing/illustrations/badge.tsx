@@ -11,7 +11,8 @@
  * round once, and a set of phrases too long for the ring keeps its first ones. Every phrase of a
  * ring shares one size. Size: --badge-size (default 8.5rem) or the `size` prop.
  *
- * Arabic rings (and any ring with `upright`) are set like a printed seal: arcs over the top run
+ * Arabic phrases never go on the ring (RTL3, design.md DES-§3.4: Arabic is never set on a circle); they are dropped
+ * and the core alone shows. Rings with `upright` are set like a printed seal: arcs over the top run
  * clockwise, arcs under the bottom counter-clockwise, so every phrase reads upright; such a ring sways
  * (±6°) instead of spinning, because upright text turned upside down is unreadable. Bidi: Latin and numeric strings are set
  * left-to-right in their own isolate ("−25%" stays "−25%" on RTL pages), and numbers inside Arabic
@@ -220,7 +221,8 @@ export function Badge({
   // the ring evenly) only while it stays large enough, a long one goes round once instead of twice.
   // When all the phrases only read on a large badge, a compact ring (the first phrase alone, larger)
   // is drawn too and the badge switches between them by its own size (container query, CSS).
-  const phrases = (typeof text === "string" ? [text] : [...text]).map((s) => s.trim()).filter(Boolean).slice(0, 4);
+  // Arabic is never set on a circle (RTL3, design.md DES-§3.4): an Arabic phrase leaves the ring, the core still shows
+  const phrases = (typeof text === "string" ? [text] : [...text]).map((s) => s.trim()).filter((s) => s && !hasArabic(s)).slice(0, 4);
   const seal = uprightProp ?? phrases.some(hasArabic);
   const px = minPx && Number.isFinite(minPx) && minPx > 24 ? minPx : 0;
   const rich = ringLayout(phrases, seal, illId(uid, "r"), px);

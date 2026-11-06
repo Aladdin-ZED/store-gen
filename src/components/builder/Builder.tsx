@@ -1,7 +1,8 @@
 "use client";
 /**
  * The page builder: top bar, left rail + panels, live canvas, inspector. Owns the per-page store,
- * persistence (autosave/serial server calls), media picker and keyboard shortcuts.
+ * persistence (autosave/serial server calls), media picker and keyboard shortcuts. The Design check (P6, DES-§15.1)
+ * runs in its own provider; its right-rail panel's open state is that provider's component state.
  *
  *   <Builder boot={await loadBootstrap(scope, pageId, user)} />
  */
@@ -13,12 +14,14 @@ import { useOpenedOnce, usePrefetchOnIdle } from "@/components/admin/lib/lazy";
 import type { EditorBootstrap } from "@/lib/editor/types";
 import { Canvas } from "./Canvas";
 import { EditorProvider, useEditor } from "./context";
+import { DesignCheckProvider } from "./design/check-context";
 import { ConflictDialog, ShortcutsDialog } from "./dialogs";
 import { EnvProvider, type BuilderEnv } from "./env";
 import { Inspector } from "./Inspector";
 import { LeftRail } from "./LeftRail";
 import { MediaProvider } from "./media";
 import { AddSectionDialog, BUILDER_PREFETCH } from "./on-demand";
+import { DesignCheckRail } from "./panels/DesignCheckPanel";
 import { PersistenceProvider } from "./persistence";
 import { useBuilderShortcuts } from "./shortcuts";
 import { TopBar } from "./topbar/TopBar";
@@ -34,7 +37,9 @@ export function Builder({ boot }: { boot: EditorBootstrap }) {
         <EnvProvider value={env}>
           <PersistenceProvider>
             <MediaProvider>
-              <Shell notices={boot.notices} />
+              <DesignCheckProvider>
+                <Shell notices={boot.notices} />
+              </DesignCheckProvider>
             </MediaProvider>
           </PersistenceProvider>
         </EnvProvider>
@@ -79,6 +84,7 @@ function Shell({ notices }: { notices: string[] }) {
         <LeftRail overlay={narrow} />
         <Canvas hostRef={canvasHost} onShowShortcuts={() => setShortcutsOpen(true)} />
         <Inspector overlay={narrow} />
+        <DesignCheckRail />
       </div>
       {libraryMounted ? <AddSectionDialog /> : null}
       <ConflictDialog />

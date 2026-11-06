@@ -185,7 +185,11 @@ export type Action =
   | { type: "reseed"; seed: number }
   | { type: "reset"; state: WizardState };
 
-export const newSeed = () => Math.floor(Math.random() * 2_147_483_647);
+/**
+ * The regeneration count (DS5): the run's seeds come from the store's brand seed and the input hash, never from
+ * Math.random; "Regenerate" adds one and the count enters the brand seed (`<brandSeed>:r<n>`).
+ */
+export const FIRST_SEED = 0;
 
 export function initialState(defaults: { locale: PageLocale; market: Market; aiCopy: boolean }): WizardState {
   return {
@@ -214,7 +218,7 @@ export function initialState(defaults: { locale: PageLocale; market: Market; aiC
       offersOff: [],
       look: "auto",
     },
-    seedBase: newSeed(),
+    seedBase: FIRST_SEED,
   };
 }
 
@@ -295,15 +299,15 @@ export function keepPhotos(d: Details, kept: ReadonlySet<string>): Details {
 /* ------------------------------------------------------------------ */
 
 /**
- * The wizard's session keys, per store and member (GEN-03, §E.6): `sg:<storeId>:<userId>:generate:v2`, so a draft of
+ * The wizard's session keys, per store and member (GEN-03, §E.6; DES-§23.3 v3): `sg:gen:<storeId>:<userId>:v3`, so a draft of
  * store A (its photos are A's files) never comes back in store B's generator in the same tab, nor in the generator of
  * the next member who signs in on this device (the shell also clears every `sg:*` key at sign-out,
  * src/components/admin/lib/drafts.ts). `owner` is `<storeId>:<userId>`. The single-tenant keys
  * (`cod-studio:generate:*`) are only ever cleared.
  */
-const storageKey = (owner: string) => `sg:${owner}:generate:v2`;
-/** drafts saved before the Offers step (4 steps): restored, the directions step moves to 4 */
-const storageKeyV1 = (owner: string) => `sg:${owner}:generate:v1`;
+const storageKey = (owner: string) => `sg:gen:${owner}:v3`;
+/** v3 drafts carry the engine's seeds and novelty verdicts: older drafts are discarded (DES-§23.3, client-only) */
+const discardedKeys = (owner: string) => [`sg:${owner}:generate:v2`, `sg:${owner}:generate:v1`];
 const LEGACY_KEYS = ["cod-studio:generate:v2", "cod-studio:generate:v1"];
 
 /** A stored option group: v1 drafts saved choice groups without a kind (text). */
@@ -363,16 +367,10 @@ const Stored = z.object({
 /** The member's saved wizard in this store (photos that finished uploading only), or null. Browser only. */
 export function loadState(owner: string): WizardState | null {
   try {
-    for (const k of LEGACY_KEYS) sessionStorage.removeItem(k);
+    for (const k of [...LEGACY_KEYS, ...discardedKeys(owner)]) sessionStorage.removeItem(k);
     const raw = sessionStorage.getItem(storageKey(owner));
-    const old = raw ? null : sessionStorage.getItem(storageKeyV1(owner));
-    if (!raw && !old) return null;
-    const json = JSON.parse((raw ?? old)!) as { step?: number; reached?: number };
-    // v1 had 4 steps: its directions step (3) is now 4, the Offers step comes before it
-    if (!raw && json && typeof json === "object") {
-      if (json.step === 3) json.step = 4;
-      if (json.reached === 3) json.reached = 4;
-    }
+    if (!raw) return null;
+    const json = JSON.parse(raw) as { step?: number; reached?: number };
     const parsed = Stored.safeParse(json);
     if (!parsed.success) return null;
     const s = parsed.data;
@@ -400,8 +398,9 @@ export function saveState(owner: string, state: WizardState): void {
 
 export function clearState(owner: string): void {
   try {
-    sessionStorage.removeItem(storageKeyV1(owner));
+    for (const k of discardedKeys(owner)) sessionStorage.removeItem(k);
     sessionStorage.removeItem(storageKey(owner));
+    sessionStorage.removeItem(`${storageKey(owner)}:novelty`);
   } catch {
     // ignore
   }

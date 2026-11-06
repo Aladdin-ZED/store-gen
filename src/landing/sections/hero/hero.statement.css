@@ -1,0 +1,155 @@
+/* hero · statement — rules only this variant renders (design.md DES-§5.13 H10): the title first at display size, then
+   the product as a framed thumbnail ≥ 160 px (or a small cut-out on a plinth), the action line and the lead. From
+   48rem the row runs thumbnail · lead · action; from 64rem lead · thumbnail · action under a title up to 96 px. */
+
+.lp-hero__st {
+  container-type: inline-size;
+  display: grid;
+  gap: clamp(1.25rem, 0.9rem + 1.6vw, 3rem);
+}
+
+.lp-hero--statement .lp-hero__title {
+  max-inline-size: 15ch;
+  font-size: min(calc(var(--lp-step-5) * 0.92 * var(--lp-script-scale-display)), 12.3vw, 6rem);
+  line-height: 1.02;
+}
+
+[lang="ar"] .lp-hero--statement .lp-hero__title {
+  max-inline-size: 16ch;
+  line-height: 1.25;
+}
+
+.lp-hero__st-word,
+.lp-hero__st-sub,
+.lp-hero__st-line {
+  display: block;
+}
+
+/* the big word fills ≈ 88 % of the column at most: its letter count × the face's advance (never clipped, S12) */
+.lp-hero__st-word {
+  font-size: min(1.7em, 88cqi / (var(--wl, 6) * var(--wadv, 0.55)));
+  line-height: 0.95;
+  white-space: nowrap;
+}
+
+.lp-hero__st-sub {
+  max-inline-size: 24ch;
+  margin-block-start: 0.7rem;
+  font-family: var(--lp-font-body);
+  font-size: calc(var(--lp-step-2) * var(--lp-script-scale));
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-transform: none;
+  color: var(--sec-ink-soft);
+}
+
+.lp-hero__st-line--2 {
+  color: var(--sec-ink-soft);
+}
+
+.lp-hero__st-row {
+  display: grid;
+  gap: clamp(1.1rem, 0.9rem + 1vw, 2rem);
+  justify-items: start;
+}
+
+.lp-hero__st-thumb {
+  position: relative;
+  inline-size: 10rem;
+  margin: 0;
+  padding: 0.4rem;
+  border-radius: var(--lp-sq-media);
+  corner-shape: var(--lp-corner);
+  background-color: var(--sec-card);
+  box-shadow: inset 0 0 0 var(--lp-hairline) var(--mx-line);
+}
+
+.lp-hero__st-pic {
+  border-radius: max(0.2rem, calc(var(--lp-sq-media) * 0.6));
+  corner-shape: var(--lp-corner);
+}
+
+/* a real cut-out on a flat plinth: no mat, the slab under it */
+.lp-hero__st-thumb[data-kind="cutout"] {
+  padding: 0 0 0.55rem;
+  background: none;
+  box-shadow: none;
+}
+
+.lp-hero__st-thumb[data-kind="cutout"]::after {
+  content: "";
+  position: absolute;
+  inset-inline: -6%;
+  inset-block-end: 0;
+  block-size: 0.85rem;
+  border-radius: calc(var(--lp-sq-m) * 0.6);
+  background-color: var(--mx-tint-2, var(--mx-tint));
+  box-shadow: inset 0 var(--lp-hairline) 0 var(--mx-line);
+}
+
+.lp-hero__st-thumb[data-kind="cutout"] .lp-hero__st-pic {
+  position: relative;
+  z-index: 1;
+}
+
+.lp-hero__st-lead {
+  max-inline-size: 34rem;
+}
+
+.lp-hero__act {
+  display: grid;
+  gap: 0.8rem;
+  justify-items: start;
+  inline-size: 100%;
+}
+
+.lp-hero__act-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  inline-size: 100%;
+}
+
+/* the button beside the price when both fit at their natural width, else under it at full width */
+.lp-hero__act-row .lp-hero__cta {
+  flex: 1 1 auto;
+  inline-size: auto;
+  min-inline-size: 0;
+  max-inline-size: 26rem;
+}
+
+/* the cluster is price, reference and chip; the spelled-out saving stays with the form */
+.lp-hero__act .lp-price__save-amt {
+  display: none;
+}
+
+@media (min-width: 48rem) {
+  .lp-hero__st-row {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) minmax(0, 3fr);
+    grid-template-areas: "img lead act";
+    align-items: end;
+    column-gap: clamp(1.5rem, 3vw, 3rem);
+  }
+
+  .lp-hero__st-thumb {
+    grid-area: img;
+    inline-size: min(100%, 16rem);
+  }
+
+  .lp-hero__st-lead {
+    grid-area: lead;
+  }
+
+  .lp-hero__st-act {
+    grid-area: act;
+  }
+}
+
+@media (min-width: 64rem) {
+  .lp-hero__st-row {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 3fr) minmax(0, 5fr);
+    grid-template-areas: "lead img act";
+  }
+}

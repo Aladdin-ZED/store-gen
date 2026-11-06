@@ -8,6 +8,10 @@
  * The gallery takes the lead photo's shape: 4:5 for people and tall products (a garment is shown
  * whole), square for the rest on phones, landscape (up to 13:10) for a product lying on its side —
  * every slide and thumbnail fitted subject-first to that exact frame.
+ *
+ * Sheet H5 (design.md DES-§5.13, G3): `ratio` sets the media : text columns from 64rem (5:7 → media 7, text 5; 4:8;
+ * 1:1) and `mediaSide` their logical order (`end` puts the media at the inline end, so on the left in Arabic). Absent,
+ * both keep today's composition.
  */
 import type { ReactElement } from "react";
 import { offerViews } from "../../offers/model";
@@ -107,7 +111,11 @@ export function SplitHero({ id, variant, bg, data, ctx }: HeroProps): ReactEleme
 
   return (
     <SectionShell id={id} ctx={ctx} type="hero" variant={variant} bg={bg} labelledBy={titleId(id)}>
-      <div className="lp-container lp-hero__grid">
+      <div
+        className="lp-container lp-hero__grid"
+        data-ratio={data.ratio && data.ratio !== "4:5" ? data.ratio : undefined}
+        data-side={data.mediaSide === "end" ? "end" : undefined}
+      >
         <div
           className="lp-hero__gallery"
           data-gallery=""

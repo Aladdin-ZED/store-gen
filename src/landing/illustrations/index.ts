@@ -11,19 +11,15 @@ export type { Pt } from "./core/geom";
 
 /* light & depth */
 export {
-  Aurora,
   Beam,
   GlassChip,
   GlowOrb,
-  Grain,
   Halo,
   Spotlight,
-  type AuroraProps,
   type BeamOrigin,
   type BeamProps,
   type GlassChipProps,
   type GlowOrbProps,
-  type GrainProps,
   type HaloProps,
   type Intensity,
   type LightPlace,

@@ -213,6 +213,11 @@
   column-gap: 1.75rem;
 }
 
+/* "Report this store" closes the legal row at its inline end (CRIT15) */
+.lp-footer__legal-report {
+  grid-column-end: -1;
+}
+
 .lp-footer__legal-link,
 .lp-footer__top {
   display: inline-flex;

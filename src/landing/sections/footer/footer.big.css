@@ -274,26 +274,9 @@
   position: relative;
   z-index: 0;
   margin-block-start: clamp(2.5rem, 1.5rem + 4vw, 4.5rem);
+  /* the word sits whole inside the section, never cut by its edge (S24) */
+  padding-block-end: clamp(1rem, 0.6rem + 1.6vw, 2rem);
   view-timeline-name: --ft-end;
-}
-
-/* a horizon of the product's light, centered on the bottom edge, behind the letters */
-.lp-footer__glow {
-  position: absolute;
-  z-index: 0;
-  inset-inline: -14%;
-  inset-block-end: -60%;
-  block-size: 120%;
-  background: radial-gradient(closest-side, var(--sec-accent), transparent);
-  opacity: 0.34;
-  pointer-events: none;
-}
-
-/* on a light block the letters carry the hue on their own: a glow would read as a pale shelf */
-:root:not([data-base="dark"])
-  :is([data-bg="base"], [data-bg="soft"], [data-bg="surface"])
-  .lp-footer__glow {
-  display: none;
 }
 
 .lp-footer__giant-word {
@@ -336,19 +319,9 @@
   text-transform: none;
 }
 
-/* the fill: page ink, then the product accent thinning out into the edge */
-.lp-footer__gs--ink {
+/* the fill: one solid page ink (no gradient text, S01; the word never fades into the edge, S24) */
+.lp-footer__gs {
   stop-color: var(--sec-ink);
-}
-
-.lp-footer__gs--mid {
-  stop-color: var(--sec-accent);
-  stop-opacity: 0.95;
-}
-
-.lp-footer__gs--edge {
-  stop-color: var(--sec-accent);
-  stop-opacity: 0.3;
 }
 @media (prefers-reduced-motion: no-preference) {
 
@@ -357,18 +330,12 @@
       calc(var(--d, 0ms) + 120ms) backwards;
   }
 
-  /* the giant word rises out of the bottom edge as the page reaches its end (scroll-linked) */
+  /* the giant word settles into place as the page reaches its end (scroll-linked, opacity and a short rise) */
   @supports (animation-timeline: view()) {
-    html:not(.lp-qa, [data-motion="off"])
-      :is(.lp-footer__giant-word, .lp-footer__glow) {
+    html:not(.lp-qa, [data-motion="off"]) .lp-footer__giant-word {
       animation: lp-ft-rise linear both;
       animation-timeline: --ft-end;
       animation-range: entry 0% entry 100%;
-    }
-
-    html:not(.lp-qa, [data-motion="off"]) .lp-footer__glow {
-      animation-name: lp-ft-glow;
-      animation-range: entry 10% entry 100%;
     }
   }
 }
@@ -387,12 +354,6 @@
 @keyframes lp-ft-rise {
   from {
     opacity: 0.2;
-    transform: translateY(42%);
-  }
-}
-
-@keyframes lp-ft-glow {
-  from {
-    opacity: 0;
+    transform: translateY(12%);
   }
 }

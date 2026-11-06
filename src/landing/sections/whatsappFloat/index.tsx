@@ -6,6 +6,8 @@
  *             into a glass capsule that unveils the line;
  *  - tab    — a slim glass pill floating just off the page edge: the disc on top, the glass runs
  *             down from it with the line set vertically; it leans toward the page under the pointer.
+ *             Arabic is never rotated or set vertically (RTL3, design.md DES-§4.5.4): on an ar page the
+ *             tab is a horizontal pill, the disc at the inline start and the line beside it.
  * Number: the form's WhatsApp setting, else the store's (./wa.ts). No number → renders nothing.
  * With a sticky order bar on the page: phones show the float together with the bar (never over the
  * hero button or the form), and up to wide screens the bubble glides above the bar while it is shown.
@@ -16,6 +18,7 @@ import { Icon, RichText, cx, plainText } from "../../primitives";
 import { holdRanges } from "../orderForm/text";
 import { defineSection, type DefaultsInput, type SectionProps } from "../../types";
 import { inLocale, questionMessage, whatsappHref, whatsappNumber } from "./wa";
+import { withRevealScope } from "../reveal-scope";
 
 const schema = z.object({
   /** visible line; empty → the kit's "Une question ? Écrivez-nous" */
@@ -27,6 +30,11 @@ const schema = z.object({
   tone: z.enum(["green", "accent", "ink"]).default("green"),
   /** bubble: open once by itself a few seconds after the page loads */
   peek: z.boolean().default(true),
+  /**
+   * tab: a shorter line for the tab (P6 DESIGN, design.md DES-§4.5.4; optional with no default, so a saved page keeps
+   * its checksum); absent → the visible line above
+   */
+  tabLabel: z.string().max(30).optional(),
 });
 type Data = z.infer<typeof schema>;
 
@@ -51,12 +59,14 @@ function render({ id, variant, bg, data, ctx }: SectionProps<Data>): ReactElemen
   if (!number) return null;
   const v = variant === "tab" ? "tab" : "bubble";
   // one plain line (no *markup* in a floating chip); French gets its no-break space before ? !
-  const line = plainText(data.label) || ctx.t("whatsapp.float");
+  const line = (v === "tab" ? plainText(data.tabLabel ?? "") : "") || plainText(data.label) || ctx.t("whatsapp.float");
   const label = ctx.locale === "fr" ? frenchSpaces(line) : line;
   const href = whatsappHref(number, data.message.trim() || questionMessage(ctx.locale, ctx.product.name));
 
   // a number range stays one unbroken run, and never reads "18–9" on Arabic pages (RichText isolates)
-  const text = <RichText as="span" className="lp-wa__text" text={holdRanges(ctx, label)} ctx={ctx} decorate={false} editPath="label" />;
+  const text = (
+    <RichText as="span" className="lp-wa__text" text={holdRanges(ctx, label)} ctx={ctx} decorate={false} editPath={v === "tab" && data.tabLabel?.trim() ? "tabLabel" : "label"} />
+  );
   const disc = (
     <span className="lp-wa__disc" aria-hidden="true">
       <Icon name="whatsapp" size="1em" strokeWidth={1.8} />
@@ -104,7 +114,7 @@ function render({ id, variant, bg, data, ctx }: SectionProps<Data>): ReactElemen
   );
 }
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "whatsappFloat",
   label: "WhatsApp button",
   labelFr: "Bouton WhatsApp",
@@ -121,7 +131,7 @@ export default defineSection({
     {
       id: "tab",
       label: "Side tab",
-      description: "Slim glass pill on the page edge: the disc on top, your line set vertically below it.",
+      description: "Slim glass pill on the page edge: the disc on top, your line set vertically below it (a horizontal pill on Arabic pages).",
       archetypes: ["editorial", "maison"],
     },
   ],
@@ -139,6 +149,13 @@ export default defineSection({
           max: 60,
           placeholder: "Une question ? Écrivez-nous",
           help: "Keep it short (about 30 characters). Empty = the default line. The number comes from the form's WhatsApp setting, else Settings → Store.",
+        },
+        {
+          kind: "text",
+          path: "tabLabel",
+          label: "Shorter line for the side tab",
+          max: 30,
+          help: "Side tab only. Empty = the line above. On Arabic pages the tab is a horizontal pill, so a few words read best.",
         },
         {
           kind: "textarea",
@@ -185,4 +202,4 @@ export default defineSection({
     },
   ],
   render,
-});
+}));

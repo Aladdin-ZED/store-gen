@@ -17,6 +17,7 @@ import { Big } from "./big";
 import { COD_LINES, HEADINGS, lang, TAGLINES } from "./copy";
 import { FooterSchema, type FooterData } from "./model";
 import { Simple } from "./simple";
+import { withRevealScope } from "../reveal-scope";
 
 const pick = <T,>(list: readonly T[], rng: () => number): T =>
   list[Math.min(list.length - 1, Math.floor(rng() * list.length))]!;
@@ -141,7 +142,7 @@ const fields: FieldSpec[] = [
   },
 ];
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "footer",
   label: "Footer",
   labelFr: "Pied de page",
@@ -196,4 +197,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

@@ -77,7 +77,8 @@ export function SpecHero({ id, variant, bg, data, ctx }: HeroProps): ReactElemen
   const kind = facts.kind;
   // a square set; a product photo lying on its side gets a landscape one (up to 13:10) so it shows whole
   const R = frameAspect(facts, 1, 1.3);
-  const specs = heroNotes(data, 4);
+  // ≤ 3 callouts on the page (DES-§5.13 H4), merchant facts only
+  const specs = heroNotes(data, 3);
   // a reference is printed only when the merchant has one: never a made-up code
   const ref = ctx.lead.sku?.trim() ?? "";
   const kicker = data.kicker.trim();

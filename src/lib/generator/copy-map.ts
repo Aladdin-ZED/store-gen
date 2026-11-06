@@ -3,8 +3,100 @@
  * a value only where the section's schema has a compatible field, and validates every write.
  */
 import type { PageCopy } from "@/lib/ai/copy-schema";
+import type { ProductRef } from "@/lib/ai/copy-library/product-ref";
+import type { DesignCopyFacts } from "@/lib/design/cliche";
+import type { CopyDirectives } from "@/lib/design/compile";
+import { composeLines, SKELETONS, type CopyFamily } from "@/lib/design/copy-gen";
+import type { Angle, HeadlineStructure } from "@/lib/design/genome";
+import { shingles } from "@/lib/design/text/shingles";
 import type { IconName } from "@/landing/primitives/icons";
+import type { Locale } from "@/lib/page/schema";
 import type { PatchEntry, SemanticItem } from "./overlay";
+import { rngFor } from "./rng";
+
+/** What the engine composes over the library copy (DES-§9.12): PageCopy path, section, field, the field's limit. */
+const COMPOSED: readonly { path: [keyof PageCopy, string]; section: string; field: "title" | "lead"; max: number }[] = [
+  { path: ["hero", "headline"], section: "hero", field: "title", max: 110 },
+  { path: ["hero", "sub"], section: "hero", field: "lead", max: 220 },
+  { path: ["benefits", "title"], section: "benefits", field: "title", max: 110 },
+  { path: ["benefits", "lead"], section: "benefits", field: "lead", max: 220 },
+  { path: ["faq", "title"], section: "faq", field: "title", max: 110 },
+  { path: ["offer", "title"], section: "offer", field: "title", max: 110 },
+  { path: ["offer", "lead"], section: "offer", field: "lead", max: 220 },
+  { path: ["guarantee", "title"], section: "guarantee", field: "title", max: 110 },
+  { path: ["cta", "title"], section: "cta", field: "title", max: 110 },
+  { path: ["cta", "text"], section: "cta", field: "lead", max: 200 },
+];
+
+export interface ComposeCopyCtx {
+  locale: Locale;
+  family: CopyFamily;
+  ref: ProductRef;
+  facts: DesignCopyFacts;
+  directives: CopyDirectives;
+  seed: number;
+  /** H28 rung 2: the hero title held to 2 lines */
+  titleLines?: 2;
+  /** skeleton ids the composed lines avoid (the sibling directions, the store's last pages, the headline check's `close` lines) */
+  avoid?: ReadonlySet<string>;
+  /**
+   * DES-§14.2 step 7: a line the headline check still found `close` after three recompositions. "neutral" = the
+   * name-led neutral skeleton (hero title only; other fields keep the library line), "library" = the library line.
+   */
+  fallback?: Readonly<Record<string, "neutral" | "library">>;
+}
+
+export interface EngineCopy {
+  copy: PageCopy;
+  /** the skeleton id per composed PageCopy path ("hero.headline" → "fr.t.np-fact") */
+  skeletons: Record<string, string>;
+  /** the composed line per path: its text, structure (G29) and angle (the copy-gene tags of the chosen row) */
+  lines: Record<string, { t: string; s: HeadlineStructure; angle: Angle }>;
+}
+
+/** Every skeleton id: avoiding them all leaves a hero title only the neutral skeleton (DES-§9.12 step 7). */
+const ALL_SKELETONS: ReadonlySet<string> = new Set(Object.values(SKELETONS).flatMap((byFamily) => Object.values(byFamily).flatMap((list) => list.map((sk) => sk.id))));
+
+/**
+ * The engine-only copy (DES-§9.12): composed hero, section titles and leads over the library copy, the library line
+ * kept wherever nothing is fillable (a product with no facts: the wizard asks for one before the reveal). Seeded per
+ * field (`copy:<section>:<field>`), so a remix of one field never moves the others.
+ */
+export function composeCopy(library: PageCopy, ctx: ComposeCopyCtx): EngineCopy {
+  const copy = structuredClone(library);
+  const skeletons: Record<string, string> = {};
+  const lines: EngineCopy["lines"] = {};
+  const taken = new Set<string>();
+  const facts = [...ctx.facts.facts].filter(Boolean).sort((a, b) => b.length - a.length);
+  const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  /** the line's 3-grams with the facts and the name masked, those of skeleton words only */
+  const frame = (t: string) =>
+    shingles(facts.reduce((acc, f) => acc.replace(new RegExp(escape(f), "giu"), " {x} "), t), ctx.locale, { product: ctx.ref.text }).filter((g) => !/^(§\w+ ?)+$/.test(g) && g.split(" ").filter((w) => !w.startsWith("§")).length >= 2);
+  const base = { ref: ctx.ref, facts: ctx.facts, directives: ctx.directives, locale: ctx.locale, family: ctx.family };
+  for (const c of COMPOSED) {
+    const rng = rngFor(ctx.seed, `copy:${c.section}:${c.field}`);
+    const hero = c.section === "hero" && c.field === "title";
+    const key = c.path.join(".");
+    const fallback = ctx.fallback?.[key];
+    // the library line stays (the last fallback, and the neutral skeleton exists for the hero title only)
+    if (fallback === "library" || (fallback === "neutral" && !hero)) continue;
+    const avoid = fallback === "neutral" ? ALL_SKELETONS : ctx.avoid;
+    // the avoid list holds hero skeleton ids and the checked lines' own ids: the other pools never lose a line to it
+    const req = { ...base, section: c.section, field: c.field, maxWordChars: ctx.locale === "ar" ? 12 : 14, ...(avoid ? { avoid } : {}) };
+    let found = composeLines({ ...req, ...(hero && ctx.titleLines ? { maxLines: ctx.titleLines } : {}) }, rng, 5);
+    // the fold's 2-line hold found nothing: the shortest composed title, the fold's ladder sizes the rest
+    if (!found.length && hero && ctx.titleLines) found = composeLines(req, rngFor(ctx.seed, "copy:hero:title:any"), 5).sort((a, b) => a.t.length - b.t.length);
+    // a line never repeats the skeleton words of a line composed before it on the page (the hero lead under its
+    // title: "for one reason" twice); the merchant's facts may come back
+    const line = found.find((l) => l.t.length <= c.max && !frame(l.t).some((g) => taken.has(g)));
+    if (!line) continue;
+    (copy[c.path[0]] as Record<string, unknown>)[c.path[1]] = line.t;
+    skeletons[key] = line.skeleton;
+    lines[key] = { t: line.t, s: line.s, angle: line.angle };
+    for (const g of frame(line.t)) taken.add(g);
+  }
+  return { copy, skeletons, lines };
+}
 
 export interface CopyExtras {
   /** merchant facts (bullets) — used as product callouts */

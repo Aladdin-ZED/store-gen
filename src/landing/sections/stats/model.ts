@@ -85,6 +85,17 @@ export function scaleEnd(ctx: RenderContext, it: StatItem): string {
   return `${ctx.num(round(whole, decimalsOf(whole)))}${unit}`;
 }
 
+/**
+ * The figures a page may show (design.md DES-§5.13 S7, DS42; honesty D2): the merchant's own. While `sample` is on the
+ * items are library examples (the editor shows them as placeholders), so only a figure that is the product's real
+ * rating stays; a stats section with fewer than two merchant figures renders nothing (and ships no stylesheet).
+ */
+export function merchantFigures(ctx: RenderContext, data: Data): StatItem[] {
+  if (!data.sample) return data.items;
+  const r = ctx.product.rating;
+  return r ? data.items.filter((it) => it.value === r.value && it.suffix.trim() === "/5") : [];
+}
+
 /** The product visual: the section's own image, else the product cutout, else its first photo. */
 export function statsVisual(ctx: RenderContext, data: Data) {
   if (!data.showImage) return null;

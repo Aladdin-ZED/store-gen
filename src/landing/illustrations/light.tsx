@@ -2,9 +2,10 @@
  * Light & depth — soft product-tinted light built from CSS gradients and masks (no SVG filters,
  * no blur): cheap to paint, smooth at any size, animated only through transform/opacity.
  *
- * Colors are section-aware (illustrations.css): the default light ("glow") is the product hue —
- * --lp-aurora-1..3 when the theme emits them, else the accent/pop pair — and beams/spotlights use a
- * pale tint that reads as light on dark blocks and as a soft tinted wash on light ones.
+ * Colors are section-aware (illustrations.css): the default light ("glow") is the block's action colour at ≤ 10 %
+ * alpha, and beams/spotlights use a pale tint that reads as light on dark blocks and as a soft tinted wash on light
+ * ones. No mesh of lights and no film grain (core D60 rev 3, V40; design.md DES-§4.10.1): a section that wants light
+ * gets one product-tinted radial (GlowOrb, a Halo, the stage glow) or a flat slab of its own colour.
  * Every piece is decorative (aria-hidden) and ignores pointer events.
  */
 import type { ReactElement, ReactNode } from "react";
@@ -54,78 +55,6 @@ export function GlowOrb({ size, shape = "circle", tone, intensity = "soft", plac
       aria-hidden="true"
     >
       <span className={cx("lp-orb__core", idle && `lp-idle-${idle}`)} />
-    </span>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Aurora                                                              */
-/* ------------------------------------------------------------------ */
-
-export interface AuroraProps extends Omit<LightBase, "tone" | "place"> {
-  seed?: Seed;
-  /**
-   * Paint the theme's own contrast-solved field (--lp-aurora) instead of a seeded composition:
-   * use it when body text sits on the light (the theme guarantees AA over that exact field). Its
-   * intensity defaults to "strong" (the full solved field); seeded auroras default to "soft".
-   */
-  solved?: boolean;
-  /** slow ambient drift of the light (motion-gated) */
-  drift?: boolean;
-  /**
-   * ultra-subtle film grain on top (breaks gradient banding): "auto" (default) follows the theme
-   * (html[data-texture="grain"]), true always, false never
-   */
-  grain?: boolean | "auto";
-  /** absolute full-bleed layer (default) — false = block sized by your CSS */
-  layer?: boolean;
-}
-
-/**
- * Composition of the seeded mesh — the same model the theme's contrast solver uses (one light high on
- * the start side, one on the end side, one low and wide; one light per aurora hue, never doubled), so
- * the overlaps it produces are the kind the theme already keeps text-safe. Ranges in % of the box.
- */
-const AURORA_FIELDS: readonly { x: [number, number]; y: [number, number]; w: [number, number]; h: [number, number] }[] = [
-  { x: [8, 30], y: [8, 30], w: [104, 140], h: [96, 128] },
-  { x: [70, 92], y: [14, 42], w: [84, 120], h: [80, 116] },
-  { x: [34, 66], y: [76, 96], w: [120, 164], h: [84, 116] },
-];
-
-/**
- * Mesh light: three large soft lights in the product's hues (--lp-aurora-1/2/3, solved per section by
- * the theme), low contrast, overlapping — the modern backdrop for posters, CTAs and hero stages.
- * Seeded composition (positions, sizes, mirrored or not); drift is a slow transform loop per light.
- */
-export function Aurora({ seed = 1, solved = false, intensity, drift = false, grain = "auto", layer = true, className }: AuroraProps): ReactElement {
-  const rng = createRng(seed, "aurora");
-  const mirror = rng.chance(0.5);
-  const fields = solved
-    ? [<span key="f" className="lp-aurora__field" />]
-    : AURORA_FIELDS.map((f, i) => {
-        const x = rng.range(f.x[0], f.x[1]);
-        return (
-          <span
-            key={i}
-            className="lp-aurora__f"
-            data-n={i + 1}
-            style={vars({
-              "--x": `${rnd(mirror ? 100 - x : x)}%`,
-              "--y": `${rnd(rng.range(f.y[0], f.y[1]))}%`,
-              "--w": `${rnd(rng.range(f.w[0], f.w[1]))}%`,
-              "--h": `${rnd(rng.range(f.h[0], f.h[1]))}%`,
-            })}
-          />
-        );
-      });
-  return (
-    <span
-      className={cx("lp-ill lp-light lp-aurora", layer && "lp-layer", drift && "lp-aurora--drift", className)}
-      data-i={intensity ?? (solved ? "strong" : "soft")}
-      aria-hidden="true"
-    >
-      {fields}
-      {grain ? <span className="lp-grain" data-auto={grain === "auto" ? "" : undefined} /> : null}
     </span>
   );
 }
@@ -269,36 +198,6 @@ export function Spotlight({ origin = "top", pool = true, tone, intensity = "medi
       data-i={intensity}
       data-origin={origin}
       data-pool={pool ? "" : undefined}
-      aria-hidden="true"
-    />
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Grain                                                               */
-/* ------------------------------------------------------------------ */
-
-export interface GrainProps {
-  /** layer opacity, 0–0.03 (default 0.025): film grain is felt, never seen */
-  opacity?: number;
-  /** blend with what is under it (default soft-light) */
-  blend?: "soft-light" | "overlay" | "normal";
-  className?: string;
-  /** kept for older call sites: the grain is a shared CSS texture and needs no id */
-  uid?: string;
-}
-
-/**
- * Ultra-subtle film grain for gradient and dark fields (breaks banding, adds a premium tooth).
- * A static, tiled noise image from illustrations.css — no live SVG filter.
- */
-export function Grain({ opacity, blend = "soft-light", className }: GrainProps): ReactElement {
-  const o = opacity === undefined ? undefined : rnd(clamp(opacity, 0, 0.03), 3);
-  return (
-    <span
-      className={cx("lp-grain lp-layer", className)}
-      data-blend={blend === "soft-light" ? undefined : blend}
-      style={vars({ "--ill-grain": o })}
       aria-hidden="true"
     />
   );

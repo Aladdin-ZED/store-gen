@@ -1,13 +1,12 @@
 /**
  * ugc — customers' stories as 9:16 frames: progress bars, avatar with a story ring, name · city · age,
  * a clean caption sticker that pops in, the reply bar. A story without a photo becomes a type-only
- * story on a color block lit by the product's aurora.
+ * story on the flat colour of its block (no mesh of lights: core D60, V40).
  * Desktop: a spotlight reel — the first photo story plays large in the middle (product-lit ring, its
  * bar filling, a soft halo behind it) and the others step down in size on both sides.
  * Mobile: a snap strip led by that story.
  */
 import type { ReactElement } from "react";
-import { Aurora } from "../../illustrations";
 import { Container, Icon, Picture, RichText, SectionShell, cssVars, editAttr, frameRegions, pictureCrop, reveal, round, seededRotation } from "../../primitives";
 import type { RenderContext, ResolvedAsset, SectionBg } from "../../types";
 import { coverOf } from "../reviews/frames";
@@ -130,9 +129,7 @@ function StoryFrame({
           className="lp-sp__shot"
           alt={asset.alt || ctx.product.name}
         />
-      ) : (
-        <Aurora seed={`${ctx.seed}:${id}:aura${i}`} intensity="strong" grain={false} className="lp-sp__aura" />
-      )}
+      ) : null}
       <span className="lp-sp__scrim" aria-hidden="true" />
       <span className="lp-sp__prog" aria-hidden="true">
         {Array.from({ length: segs }, (_, k) => (

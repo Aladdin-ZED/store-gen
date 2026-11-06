@@ -67,7 +67,8 @@ export function Chip({
 /**
  * Sticker shapes. v2 has no die-cut outlines: `pill` and `label` are clean chips, `circle` a round
  * disc for a short figure (“−30%”). `burst` and `scallop` are kept for saved pages and render as
- * the circle.
+ * the circle. No sticker sets its text on a path or turns it out of the line (design.md DES-§4.5.4 Badge, S17, RTL3):
+ * the primitives draw no textPath ring, and Arabic is never on a path, with or without a look.
  */
 export type StickerShape = "burst" | "scallop" | "circle" | "pill" | "label";
 

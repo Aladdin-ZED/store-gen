@@ -39,6 +39,8 @@ export function OrderButton({ ctx, data, size = "xl" }: { ctx: RenderContext; da
       label={label}
       size={size}
       withPrice={data.showPrice}
+      // the final call's primary button: the frozen sticky bar hides while it is on screen (DES-§5.9)
+      hero
       wide
       icon="arrow-right"
       className={cx("lp-cta__btn", long && "lp-cta__btn--long", mid && "lp-cta__btn--mid")}

@@ -23,6 +23,8 @@ export const schema = z.object({
   items: z.array(Item).min(2).max(6),
   cta: z.boolean().default(false),
   ctaLabel: opt(60),
+  /** hanging (sheet S1): false = the numbered ledger without thumbnails; absent = thumbnails when every row has a photo */
+  thumbs: z.boolean().optional(),
 });
 
 export type Data = z.infer<typeof schema>;

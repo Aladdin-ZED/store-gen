@@ -3,9 +3,8 @@
  *  chips   → glass dock: one frosted capsule on a band of product light, split into one segment per
  *          promise. A solid accent "thumb" marks the lead promise and glides to the segment under the
  *          pointer with a spring (segmented-control morph). Bento tiles inside the glass on phones.
- *  stamps  → badges: medals on a hairline that draws through their centers, a pulse of light running
- *          along it. Latin: a rotating text ring; Arabic: the words arched upright over the disc
- *          (curved Arabic only reads when it never turns upside down). The lead medal is solid accent.
+ *  stamps  (id kept for saved pages) renders as the chips row: no medals, no ring text (design.md
+ *          DES-§5.13 S8, owner rule 2, S17, RTL3); see index.tsx REDRAWN.
  *  ledger  Swiss columns: the frame rules draw across, the dividers grow down, an accent bar on each
  *          column's top rule stretches across its column on hover. A precise list on phones.
  *  ribbon  a color band: the lead promise pinned at the start as an inverted capsule, the other
@@ -13,7 +12,7 @@
  *          a touch on playful archetypes, and runs past the panel edge to the screen edges.
  */
 import type { ReactElement } from "react";
-import { Badge, GlowOrb, isolateNumbers } from "@/landing/illustrations";
+import { GlowOrb } from "@/landing/illustrations";
 import { cssVars, cx, Icon, MarqueeTrack, pad2, reveal, RichText, seededRotation } from "@/landing/primitives";
 import type { Archetype, SectionBg } from "@/lib/page/schema";
 import { glueRanges, type Claim, type Data, type ViewProps } from "./model";
@@ -90,108 +89,6 @@ export function Chips({ ctx, data, claims, titleId }: ViewProps): ReactElement {
               </span>
             </li>
           ))}
-        </ul>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* stamps → badges                                                     */
-/* ------------------------------------------------------------------ */
-
-const ARABIC = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
-
-/**
- * Arc geometry (viewBox 200): text radius, arc span and the preferred / smallest type size. The band
- * of a full-size line (r ± fs/2 = 68.5 … 89.5) clears the disc edge (100), and the descenders of
- * final letters (م ن ي) stay outside the inner rule (61). 21 units sets the words at ~11–15px on the
- * 6.5–10rem medals: the smallest size Arabic stays comfortably readable at.
- */
-const ARC = { r: 79, span: (236 * Math.PI) / 180, fs: 21, min: 11 } as const;
-
-const pt = (a: number, r: number) => `${(100 + r * Math.cos(a)).toFixed(2)} ${(100 + r * Math.sin(a)).toFixed(2)}`;
-
-/**
- * Arabic ring text, arched upright over the disc: one clockwise arc centered on 12 o'clock, so the
- * words never tilt past the horizontal. Sized from a conservative width estimate (Arabic is never
- * letter-spaced) over a fine inner rule. Returns null when the phrase cannot stay legible.
- */
-function ArcText({ uid, text }: { uid: string; text: string }): ReactElement | null {
-  const em = Math.max(1, [...text].length * 0.52);
-  const fs = Math.min(ARC.fs, (ARC.span * ARC.r) / (em * 1.12));
-  if (fs < ARC.min) return null;
-  const top = -Math.PI / 2;
-  const d = `M${pt(top - ARC.span / 2, ARC.r)}A${ARC.r} ${ARC.r} 0 1 1 ${pt(top + ARC.span / 2, ARC.r)}`;
-  return (
-    <svg className="lp-trustBar__arc" viewBox="0 0 200 200" aria-hidden="true" focusable="false">
-      <defs>
-        <path id={uid} d={d} fill="none" />
-      </defs>
-      <circle className="lp-trustBar__arcrule" cx="100" cy="100" r="61" fill="none" stroke="currentColor" vectorEffect="non-scaling-stroke" />
-      {/* numeric runs ("24–48") are isolated left-to-right, or the range reads backwards on the arc */}
-      <text
-        className="lp-trustBar__arctext"
-        fill="currentColor"
-        fontSize={fs.toFixed(1)}
-        textAnchor="middle"
-        dominantBaseline="central"
-        direction="rtl"
-        unicodeBidi="isolate"
-      >
-        <textPath href={`#${uid}`} startOffset="50%">
-          {isolateNumbers(text)}
-        </textPath>
-      </text>
-    </svg>
-  );
-}
-
-export function Badges({ id, ctx, data, claims, titleId }: ViewProps): ReactElement {
-  return (
-    <div className="lp-container lp-trustBar__wrap">
-      <Heading ctx={ctx} data={data} titleId={titleId} />
-      <div className="lp-trustBar__stage" data-reveal="draw">
-        <span className="lp-trustBar__track" aria-hidden="true" />
-        <ul className="lp-trustBar__list" role="list" data-stagger="110" data-n={claims.length} style={count(claims)}>
-          {claims.map((c, k) => {
-            const lead = k === 0;
-            const uid = `${id}-ring${c.i}`;
-            // each ring starts at its own angle, so the words never line up across the row
-            const turn = Math.round(ctx.rng(`${id}:turn:${c.i}`)() * 360);
-            const ring = ARABIC.test(c.ring) ? (
-              <ArcText uid={uid} text={c.ring} />
-            ) : (
-              <span className="lp-trustBar__ringbox" style={cssVars({ "--turn": `${turn}deg` })}>
-                <Badge
-                  uid={uid}
-                  className="lp-trustBar__ring"
-                  text={c.ring}
-                  glyph="none"
-                  sep="dot"
-                  variant="outline"
-                  tone={lead ? "accent-ink" : "accent"}
-                  spin
-                  size="100%"
-                />
-              </span>
-            );
-            return (
-              <li key={c.i} className={cx("lp-trustBar__item", lead && "lp-trustBar__item--lead")}>
-                <span className="lp-trustBar__medal" {...reveal("stamp")}>
-                  <span className="lp-trustBar__disc" aria-hidden="true" />
-                  {ring}
-                  <span className="lp-trustBar__icon" aria-hidden="true">
-                    <Icon name={c.icon} size="100%" strokeWidth={1.6} />
-                  </span>
-                </span>
-                <span className="lp-trustBar__copy" {...reveal("rise")}>
-                  <Name ctx={ctx} c={c} />
-                  <Detail ctx={ctx} c={c} />
-                </span>
-              </li>
-            );
-          })}
         </ul>
       </div>
     </div>

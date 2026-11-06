@@ -6,7 +6,8 @@
  *               legend whose keys light their ring on hover
  *  ticker       figures gliding across a full-bleed band at display size, an outlined echo row the
  *               other way, and a still scoreboard that rolls up underneath
- * Defaults are examples flagged `sample: true`; the product's real rating (when set) is used as-is.
+ * Defaults are examples flagged `sample: true`: they stay in the editor as placeholders and never reach the page (only
+ * the product's real rating, used as-is, does); the section shows two to four merchant figures or nothing (DS42, S7).
  */
 import type { ReactElement, ReactNode } from "react";
 import { SectionShell } from "@/landing/primitives";
@@ -14,10 +15,11 @@ import { defineSection, type SectionProps } from "../../types";
 import { copyLang, familyOf, fill, pick, shortName } from "../benefits/kit";
 import { BigNumbers } from "./big-numbers";
 import { COMMON, STATS } from "./copy";
-import { schema, type Data, type StatItem, type ViewProps } from "./model";
+import { merchantFigures, schema, type Data, type StatItem, type ViewProps } from "./model";
 import { Rings } from "./rings";
 import { Ticker } from "./ticker";
 import { garmentOf } from "../garment";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   "big-numbers": BigNumbers,
@@ -25,7 +27,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   ticker: Ticker,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "stats",
   label: "Numbers",
   labelFr: "Chiffres",
@@ -80,7 +82,7 @@ export default defineSection({
     } satisfies Data;
   },
   fields: [
-    { kind: "toggle", path: "sample", label: "Example numbers", help: "On while these are sample figures. Replace every number with a real, checkable one, then switch it off." },
+    { kind: "toggle", path: "sample", label: "Example numbers", help: "On while these are sample figures: the page does not show them. Replace every number with a real, checkable one, then switch it off." },
     {
       kind: "group",
       label: "Heading",
@@ -125,13 +127,16 @@ export default defineSection({
       ],
     },
   ],
-  render: ({ id, variant, bg, data, ctx }: SectionProps<Data>): ReactElement => {
+  render: ({ id, variant, bg, data, ctx }: SectionProps<Data>): ReactElement | null => {
     const titleId = `${id}-title`;
     const View = VIEWS[variant] ?? BigNumbers;
+    // merchant figures only (DS42): example numbers never reach the page, and one figure is no stats section
+    const items = merchantFigures(ctx, data);
+    if (items.length < 2) return null;
     return (
       <SectionShell id={id} ctx={ctx} type="stats" variant={VIEWS[variant] ? variant : "big-numbers"} bg={bg} labelledBy={titleId}>
-        <View ctx={ctx} data={data} id={id} bg={bg} titleId={titleId} />
+        <View ctx={ctx} data={items === data.items ? data : { ...data, items }} id={id} bg={bg} titleId={titleId} />
       </SectionShell>
     );
   },
-});
+}));

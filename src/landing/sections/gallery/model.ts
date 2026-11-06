@@ -25,12 +25,14 @@ export const schema = z.object({
   fill: z.boolean().default(true),
   cta: z.boolean().default(true),
   ctaLabel: text(60),
+  /** contact (sheet S3): columns from 48rem, 2 or 3 (absent = 3; phones always 2) */
+  cols: z.union([z.literal(2), z.literal(3)]).optional(),
 });
 
 export type Data = z.infer<typeof schema>;
 
 /** Most photos each composition shows (bento templates exist for 1–8, lookbook = 3 spreads). */
-export const MAX_SHOTS: Record<string, number> = { carousel: 12, masonry: 8, filmstrip: 12, lookbook: 9 };
+export const MAX_SHOTS: Record<string, number> = { carousel: 12, masonry: 8, filmstrip: 12, lookbook: 9, contact: 6 };
 
 export interface Shot {
   /** null only for preview placeholders (product without photos) */

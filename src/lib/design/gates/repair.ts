@@ -48,3 +48,6 @@ export type RepairOp =
 /** The closed subset the Director may propose (rethink-ai §1.2); ai.md validates against it. */
 export const AI_REPAIR_OPS = ["swapVariant", "changeGene", "rewriteLine", "dropKicker", "setOpener", "setAlign", "moveSection", "trimCopy", "swapHeroFamily"] as const satisfies readonly RepairOp["op"][];
 export type AiRepairOp = Extract<RepairOp, { op: (typeof AI_REPAIR_OPS)[number] }>;
+
+/** The ops on a sandbox copy and the deterministic repair loop (step 8, ./apply.ts). */
+export { applyOps, repairDoc, trimWords, type ApplyCtx } from "./apply";

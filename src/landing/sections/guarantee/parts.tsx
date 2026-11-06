@@ -1,15 +1,11 @@
 /**
- * Pieces shared by the guarantee views: the promise list, the rotating badge (its material tuned
- * per archetype), the closing row (order button + link to the delivery & returns policy) and the
- * product photo pick.
+ * Pieces shared by the guarantee views: the promise list, the COD fact ("0 DH" in the page's own order), the
+ * closing row (order button + link to the delivery & returns policy) and the product photo pick.
  */
 import type { ReactElement } from "react";
-import type { Archetype } from "@/lib/page/schema";
-import { Badge, type BadgeVariant, type GlyphKind, type Tone } from "@/landing/illustrations";
 import { Cta, Icon, RichText, reveal } from "@/landing/primitives";
 import type { RenderContext, ResolvedAsset } from "../../types";
-import { UI, langOf } from "./copy";
-import { ringPhrases, typo, type GuaranteeData, type PromiseLine } from "./model";
+import { typo, type GuaranteeData, type PromiseLine } from "./model";
 
 /* ------------------------------------------------------------------ */
 /* Promise list                                                        */
@@ -52,101 +48,17 @@ export function PromiseList({ ctx, lines, delay = 160, step = 90, iconSize = "1.
 }
 
 /* ------------------------------------------------------------------ */
-/* Badge                                                               */
+/* The COD fact                                                        */
 /* ------------------------------------------------------------------ */
 
-interface BadgeLook {
-  variant: BadgeVariant;
-  sep: GlyphKind;
-}
-
-/** The badge's material per archetype: quiet hairline for luxury/editorial, glass for precise, solid elsewhere. */
-const LOOK: Record<Archetype, BadgeLook> = {
-  maison: { variant: "outline", sep: "diamond" },
-  apothecary: { variant: "glass", sep: "dot" },
-  souk: { variant: "solid", sep: "star8" },
-  playground: { variant: "solid", sep: "spark" },
-  kinetic: { variant: "solid", sep: "diamond" },
-  circuit: { variant: "glass", sep: "dot" },
-  hearth: { variant: "solid", sep: "dot" },
-  bloom: { variant: "solid", sep: "spark" },
-  field: { variant: "solid", sep: "leaf" },
-  editorial: { variant: "outline", sep: "dot" },
-  garage: { variant: "solid", sep: "diamond" },
-};
-
-/** Disc color: the section accent (re-solved per color block, so it never melts into the ground); line color otherwise. */
-const badgeTone = (look: BadgeLook): Tone => (look.variant === "solid" ? "accent" : "ink");
-
-interface SealProps {
-  ctx: RenderContext;
-  data: GuaranteeData;
-  lines: readonly PromiseLine[];
-  uid: string;
-  delay?: number;
-}
-
 /** “0 DH” split into the number and the currency, in the page's own order (“€0”, “0 درهم”). */
-function zeroAmount(ctx: RenderContext): { n: string; cur: string; before: boolean } {
+export function zeroAmount(ctx: RenderContext): { n: string; cur: string; before: boolean } {
   const n = ctx.num(0);
   // bidi marks some locales wrap around the symbol would only add invisible width
   const m = ctx.money(0).replace(/[\u200e\u200f\u061c]/g, "");
   const i = m.indexOf(n);
   if (i < 0) return { n: m.trim(), cur: "", before: false };
   return { n, cur: (m.slice(0, i) + m.slice(i + n.length)).trim(), before: i > 0 };
-}
-
-/**
- * The rotating badge: ring of short promises (merchant text or the promise titles) around a center
- * that is either a giant “0” with the page currency set small and “d'avance” under it (the real COD
- * fact, typeset in HTML so the numeral gets the display face at full size), a check mark, or the
- * merchant's own word. Decorative (aria-hidden): every word on it is also in the section text.
- * The wrapper owns the spring pop so the ring and the center land as one object.
- */
-export function GuaranteeBadge({ ctx, data, lines, uid, delay = 260 }: SealProps): ReactElement {
-  const look = LOOK[ctx.archetype] ?? LOOK.souk;
-  const ring = ringPhrases(data, lines);
-  const ui = UI[langOf(ctx.locale)];
-  const own = data.badgeLabel.trim();
-  const zero = data.badgeCenter === "zero" ? zeroAmount(ctx) : null;
-  const center =
-    data.badgeCenter === "text" && own
-      ? { label: own, sub: data.badgeSub.trim() || undefined, glyph: "none" as const }
-      : zero
-        ? { label: undefined, sub: undefined, glyph: "none" as const }
-        : { label: undefined, sub: undefined, glyph: "check" as const };
-  const cur = zero?.cur ? (
-    <span className="lp-guarantee__cur" data-long={zero.cur.length > 2 ? "" : undefined}>
-      {zero.cur}
-    </span>
-  ) : null;
-  return (
-    <span className="lp-guarantee__badge" data-look={look.variant} {...reveal("stamp", delay)}>
-      <Badge
-        uid={uid}
-        text={ring.length ? ring : [ctx.t("trust.cod"), ctx.t("trust.check")]}
-        label={center.label}
-        sublabel={center.sub}
-        glyph={center.glyph}
-        sep={look.sep}
-        variant={look.variant}
-        tone={badgeTone(look)}
-        tone2="accent"
-        spin
-        size="100%"
-      />
-      {zero ? (
-        <span className="lp-guarantee__core">
-          <span className="lp-guarantee__amount">
-            {zero.before ? cur : null}
-            <span className="lp-guarantee__zero">{zero.n}</span>
-            {zero.before ? null : cur}
-          </span>
-          <span className="lp-guarantee__upfront">{data.badgeSub.trim() || ui.upfront}</span>
-        </span>
-      ) : null}
-    </span>
-  );
 }
 
 /* ------------------------------------------------------------------ */

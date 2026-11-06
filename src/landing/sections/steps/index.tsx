@@ -16,6 +16,7 @@ import { Illustrated } from "./illustrated";
 import { schema, type Data, type ViewProps } from "./model";
 import { Strip } from "./strip";
 import { Timeline } from "./timeline";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   timeline: Timeline,
@@ -24,7 +25,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   strip: Strip,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "steps",
   label: "How it works",
   labelFr: "Comment ça marche",
@@ -111,4 +112,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

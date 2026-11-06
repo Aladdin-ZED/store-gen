@@ -5,5 +5,8 @@
  * once. While this is `false` the Shell draws its fallback row `<p class="lp-report">` on every such document; P6
  * sets it to `true` in the same change that makes `legalLinks(ctx)` append `ctx.links.report` to both footer
  * variants, and from then on the Shell draws the row only for a document whose footer is hidden or absent.
+ *
+ * P6 step 4 (section kit redraws): `legalLinks(ctx)` in ./parts.tsx appends the link for both footer variants, so this
+ * is `true`.
  */
-export const FOOTER_RENDERS_REPORT: boolean = false;
+export const FOOTER_RENDERS_REPORT: boolean = true;

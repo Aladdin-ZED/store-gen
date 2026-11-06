@@ -148,6 +148,102 @@
   inset-inline-end: -9%;
 }
 
+/* H1 at 390 (DES-§5.13): product first, then the title, the price cluster and the action, the COD line */
+@media (max-width: 63.99rem) {
+  .lp-hero--stage .lp-hero__visual {
+    order: -1;
+  }
+
+  .lp-hero--stage .lp-hero__stage {
+    max-block-size: 46vh;
+    max-inline-size: min(84%, 34rem, 46vh * var(--stage-ratio, 0.8));
+  }
+
+  :lang(ar) .lp-hero--stage .lp-hero__stage {
+    max-block-size: 42vh;
+    max-inline-size: min(84%, 34rem, 42vh * var(--stage-ratio, 0.8));
+  }
+}
+
+/* --- stage presets (DES-§4.11.1): glow · contact · plinth ---------------------------------------- */
+.lp-hero__preset {
+  position: relative;
+  isolation: isolate;
+  inline-size: 100%;
+  margin-inline: auto;
+  aspect-ratio: var(--stage-ratio, 0.8);
+}
+
+/* the product: ≤ 72 % of the slot's height, standing on the slot's floor line */
+.lp-hero__preset-obj {
+  position: absolute;
+  inset-block: 10% 12%;
+  inset-inline: 14%;
+  display: grid;
+  align-items: end;
+}
+
+.lp-hero__preset[data-kind="photo"] .lp-hero__preset-obj {
+  inset-block: 6% 12%;
+  inset-inline: 10%;
+}
+
+.lp-hero__preset-pic {
+  position: relative;
+  z-index: 1;
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.lp-hero__preset[data-kind="cutout"] .lp-hero__preset-pic .lp-pic__img {
+  object-position: 50% 100%;
+  filter: var(--lp-shadow-product-filter, none);
+}
+
+/* framed-stage: the true-colour photo framed whole, a quiet media corner and a device hairline */
+.lp-hero__preset[data-kind="photo"] .lp-hero__preset-pic {
+  overflow: hidden;
+  border-radius: var(--lp-radius-media, var(--lp-sq-media));
+  box-shadow: inset 0 0 0 var(--lp-hairline) var(--mx-edge, var(--mx-hair));
+}
+
+/* glow: one product-tinted radial centred a little under the product's middle, feathered out (≤ 10 % alpha) */
+.lp-hero__preset[data-preset="glow"] .lp-hero__preset-set {
+  position: absolute;
+  inset: 4% -12% -6%;
+  z-index: -1;
+  background: var(--lp-stage-glow-2, none) 50% 62% / 50% 60% no-repeat, var(--lp-stage-glow, radial-gradient(closest-side, var(--mx-tint), transparent)) 50% 62% / 100% 90% no-repeat;
+}
+
+/* contact: a soft ellipse where the product meets the floor, drawn on its own layer (never a filter on the image) */
+.lp-hero__contact {
+  position: absolute;
+  inset-inline: 8%;
+  inset-block-end: -3%;
+  block-size: 7%;
+  border-radius: 50%;
+  background: var(--lp-stage-contact, var(--mx-contact, rgb(0 0 0 / 0.22)));
+  filter: blur(clamp(6px, 1.6vw, 14px));
+}
+
+/* plinth: a flat tinted slab under the product, a hairline at its top edge; the framed photo overlaps it a little */
+.lp-hero__preset[data-preset="plinth"] .lp-hero__preset-set {
+  position: absolute;
+  inset-block-end: calc(12% - clamp(12px, 3.2vw, 28px) + 1.5%);
+  inset-inline: max(0%, 50% - max(80px, 41%));
+  z-index: 0;
+  block-size: clamp(12px, 3.2vw, 28px);
+  border-radius: var(--lp-radius-control, var(--lp-sq-s));
+  background-color: var(--lp-stage-plinth, var(--mx-stage, var(--sec-card)));
+  box-shadow: inset 0 1px 0 var(--lp-stage-plinth-line, var(--mx-hair));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html.lp-js:not([data-motion="off"]) .lp-hero__preset[data-preset="plinth"] .lp-hero__preset-set[data-reveal]:not([data-in]) {
+    scale: 0.6 1;
+  }
+}
+
 @media (min-width: 64rem) {
   /* stage · collage · poster: copy column (head over buy box) beside the visual */
   :is(.lp-hero--stage, .lp-hero--scrapbook, .lp-hero--poster) .lp-hero__grid {

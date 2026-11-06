@@ -3,9 +3,8 @@
  * sections. The moving tracks are decoration (aria-hidden, paused off-screen and on hover); a
  * visually hidden list carries the same words once for assistive tech.
  *
- *   tape    → bold strip: the section itself is the color band — large display type, a crisp
- *             archetype mark or a product-photo pill between the words, and depth-of-field edges
- *             where the words blur out as they leave (wide screens)
+ *   tape    (id kept for saved pages) renders as the outline strip: whole items duplicated, no tape
+ *             texture, no rotation (design.md DES-§5.13 S8, I7)
  *   outline → giant hairline-outlined words gliding slowly through a lens at the center: a light
  *             veil (calm pages), a frosted glass capsule or a solid ink capsule (bold pages) in
  *             which each word turns solid and product photos come to full color
@@ -23,6 +22,7 @@ import { cssVars, cx, MarqueeTrack, Picture, reveal, RichText, SectionShell } fr
 import { defineSection, type FieldSpec, type RenderContext, type ResolvedAsset } from "../../types";
 import { asPictureFrame, bestShot, STRIP_PILL } from "../cta/fit";
 import { defaultWords } from "./copy";
+import { withRevealScope } from "../reveal-scope";
 
 const Word = z.object({
   /** may be empty while the merchant types — empty words are skipped */
@@ -42,7 +42,7 @@ const Schema = z.object({
 
 type Data = z.infer<typeof Schema>;
 type Speed = Exclude<Data["speed"], "auto">;
-type Variant = "tape" | "outline" | "double";
+type Variant = "outline" | "double";
 
 const fields: FieldSpec[] = [
   {
@@ -212,14 +212,11 @@ function lensOf(ctx: RenderContext): "ink" | "veil" | "glass" {
 /** What sits between the words: one mark, the product photo, both in turn, or space only. */
 type SepMode = "mark" | "photo" | "mixed" | "none";
 
-/** Warm, product-led archetypes: their bold strip alternates marks with product photos by default. */
-const WARM: ReadonlySet<Archetype> = new Set(["souk", "playground", "hearth", "bloom", "field"]);
-
 function sepMode(ctx: RenderContext, data: Data, v: Variant, photo: ResolvedAsset | null): SepMode {
   if (data.separator === "none") return "none";
   if (data.separator === "glyph" || !photo) return "mark";
   if (data.separator === "product" || v === "outline") return "photo";
-  return v === "tape" && WARM.has(ctx.archetype) ? "mixed" : "mark";
+  return "mark";
 }
 
 interface Parts {
@@ -307,17 +304,6 @@ function Edges(): ReactElement {
 /* Variants                                                            */
 /* ------------------------------------------------------------------ */
 
-function Tape({ p }: { p: Parts }): ReactElement {
-  return (
-    <div className="lp-marquee__band">
-      <div className="lp-marquee__flow" {...reveal("blur-in")}>
-        <Track p={p} list={p.words} reverse={p.data.reverse} minItems={8} />
-      </div>
-      <Edges />
-    </div>
-  );
-}
-
 /**
  * Two identical tracks stacked: outlined words below, filled words above, the filled layer clipped
  * to the lens capsule at the center. Same items, same speed, same pause triggers (the section root
@@ -363,7 +349,7 @@ function Double({ p, bg }: { p: Parts; bg: SectionBg }): ReactElement {
 /* Definition                                                          */
 /* ------------------------------------------------------------------ */
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "marquee",
   label: "Marquee strip",
   labelFr: "Bande défilante",
@@ -372,8 +358,8 @@ export default defineSection({
   variants: [
     {
       id: "tape",
-      label: "Bold strip",
-      description: "A solid color band with large display words, crisp marks or product photos between them; the words blur softly out at the ends.",
+      label: "Bold strip (shown as the outline strip)",
+      description: "Kept for saved pages: it now shows as the giant outline strip, whole words only, without tape or rotation.",
       archetypes: ["souk", "playground", "kinetic", "hearth", "field", "garage"],
     },
     {
@@ -401,14 +387,15 @@ export default defineSection({
   render: ({ id, variant, bg, data, ctx }) => {
     const list = wordsOf(data);
     if (!list.length) return null;
-    const v: Variant = variant === "outline" || variant === "double" ? variant : "tape";
+    // the bold strip (tape) is redrawn as the outline strip (S8, owner rule 2); an unknown id takes it too
+    const v: Variant = variant === "double" ? "double" : "outline";
     const photo = productThumb(ctx);
     const p: Parts = { ctx, data, words: list, speed: speedOf(ctx, data, v), sep: sepMode(ctx, data, v, photo), photo };
     return (
       <SectionShell id={id} ctx={ctx} type="marquee" variant={v} bg={bg} as="div">
         {/* the moving strip is decoration: the same words are read once from the list below */}
         <div className="lp-marquee__stage" aria-hidden="true">
-          {v === "outline" ? <Outline p={p} /> : v === "double" ? <Double p={p} bg={bg} /> : <Tape p={p} />}
+          {v === "double" ? <Double p={p} bg={bg} /> : <Outline p={p} />}
         </div>
         <ul className="lp-visually-hidden" role="list">
           {list.map((w) => (
@@ -420,4 +407,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

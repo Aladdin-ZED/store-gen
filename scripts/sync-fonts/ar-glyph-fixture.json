@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "about": "The known-glyph fixture of design.md DES-§1.4 DG-08 and DES-R21 (rev 5, CRIT2-7): Tajawal 400, measured once from its untransformed WOFF 1.0 file (per-table zlib; each glyph header stores xMin, yMin, xMax, yMax directly). theme:check compares the manifest's measured metrics.ar with it once the maintainer's sync step writes them, and compares the WOFF2 reconstruction of the shipped .woff2 with it now.",
+  "face": "tajawal",
+  "weight": 400,
+  "source": "node_modules/@fontsource/tajawal/files/tajawal-arabic-400-normal.woff",
+  "shipped": "public/fonts/tajawal/tajawal-arabic-400-normal.woff2",
+  "unitsPerEm": 1000,
+  "alefHeight": 645,
+  "glyphs": {
+    "U+0627": { "name": "alef", "box": [90, 0, 157, 645] },
+    "U+0628": { "name": "beh", "box": [90, -187, 779, 428] }
+  }
+}

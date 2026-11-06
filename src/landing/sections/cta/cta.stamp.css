@@ -1,331 +1,81 @@
 /* cta · stamp — rules only this variant renders (inlined after cta.css on pages whose markup
    carries .lp-cta--stamp; the admin preview loads every variant). Shared rules live in cta.css. */
 
-.lp-cta .lp-cta__head {
-  margin-block-end: 0;
-}
-
 /* ==========================================================================
-   stamp → badge CTA — “the orb”
+   stamp → the quiet close (design.md DES-§5.13 S8): no ring, no stamp, no
+   circular type. A start-aligned copy column (title ≤ 2 lines, one primary
+   button with the live price, the COD points) and the product in a plain
+   tinted disc at the inline end from 48rem; on phones the disc follows the
+   copy, smaller. Logical properties only: the deck mirrors in Arabic.
    ========================================================================== */
-.lp-cta--stamp .lp-cta__wrap {
+.lp-cta--stamp .lp-cta__deck {
   display: grid;
-  gap: clamp(2rem, 1.2rem + 3.4vw, 3.75rem);
-  justify-items: center;
+  gap: clamp(2rem, 1.4rem + 2.4vw, 3.5rem);
+  align-items: center;
 }
 
-.lp-cta__stage {
+.lp-cta--stamp .lp-cta__copy {
+  display: grid;
+  gap: clamp(1.25rem, 1rem + 1vw, 1.75rem);
+  justify-items: start;
+  min-inline-size: 0;
+}
+
+.lp-cta--stamp .lp-cta__head {
+  margin-block-end: 0;
+  max-inline-size: 34rem;
+}
+
+.lp-cta--stamp .lp-cta__actions {
+  inline-size: 100%;
+  max-inline-size: 26rem;
+}
+
+.lp-cta--stamp .lp-cta__foot {
+  justify-content: flex-start;
+}
+
+/* the disc: one calm frame in the block's stage tint, a hairline edge, no light loop */
+.lp-cta--stamp .lp-cta__disc {
   position: relative;
-  inline-size: min(100% - 1rem, 34rem);
+  justify-self: center;
+  inline-size: min(100%, 18rem);
   aspect-ratio: 1;
-  margin-block-end: 0.5rem;
-}
-
-.lp-cta__halo {
-  position: absolute;
-  inset: -4%;
-  z-index: 0;
-  pointer-events: none;
-}
-
-/* hairline orbits around the disc; a bead travels the outer one (lively pages) */
-.lp-cta__orbit {
-  position: absolute;
-  inset: 0;
-}
-
-.lp-cta__orbit i {
-  position: absolute;
-  inset: 11%;
-  border: 1px solid var(--mx-line);
-  border-radius: 50%;
-}
-
-.lp-cta__orbit i:nth-child(1) {
-  inset: 9.5%;
-}
-
-.lp-cta__orbit i:nth-child(2) {
-  inset: 4.5%;
-  border-color: var(--mx-hair);
-}
-
-.lp-cta__orbit i:nth-child(3) {
-  /* the bead rests low on the start side, the one quadrant the price chip and the orb leave free */
-  --orbit-a: calc(var(--lp-x) * -38deg);
-  inset: -0.5%;
-  border-color: var(--mx-hair);
-  rotate: var(--orbit-a);
-}
-
-.lp-cta__orbit b {
-  position: absolute;
-  inset-block-start: 50%;
-  inset-inline-start: -4px;
-  inline-size: 7px;
-  aspect-ratio: 1;
-  margin-block-start: -3.5px;
-  border-radius: 50%;
-  background-color: var(--sec-accent);
-  box-shadow: 0 0 0 4px var(--mx-tint), 0 0 14px 2px color-mix(in oklab, var(--sec-accent) 45%, transparent);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  html[data-motion="lively"] .lp-cta__orbit i:nth-child(3) {
-    animation: lp-cta-orbit 36s linear infinite;
-  }
-}
-
-.lp-cta__halo .lp-cta__ambient {
-  -webkit-mask-image: radial-gradient(closest-side, black 55%, transparent);
-  mask-image: radial-gradient(closest-side, black 55%, transparent);
-}
-
-.lp-cta__disc {
-  position: absolute;
-  inset: 11%;
-  z-index: 1;
   overflow: hidden;
   border-radius: 50%;
-  background-color: var(--mx-stage);
-  background-image: radial-gradient(80% 70% at 50% 18%, var(--mx-stage-hi), var(--mx-stage) 55%, var(--mx-stage-lo));
-  box-shadow: var(--lp-highlight), var(--lp-shadow-l);
+  background-color: var(--mx-stage, var(--sec-card));
+  box-shadow: inset 0 0 0 1px var(--mx-hair);
 }
 
-/* a crisp lens rim over a photo (inset shadows paint under an image, so it rides on top) */
-.lp-cta__stage[data-media="photo"] .lp-cta__disc::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16), inset 0 1.5px 0 rgb(255 255 255 / 0.22);
-  pointer-events: none;
-}
-
-.lp-cta__disc-pic {
+.lp-cta--stamp .lp-cta__disc-pic {
   inline-size: 100%;
   block-size: 100%;
 }
 
-.lp-cta__disc-name {
-  display: grid;
-  place-items: center;
-  block-size: 100%;
-  padding: 18%;
-  font-family: var(--lp-font-display);
-  font-size: clamp(1.25rem, 0.9rem + 1.6vw, 2rem);
-  font-weight: var(--lp-display-weight);
-  letter-spacing: var(--lp-display-tracking);
-  text-transform: var(--lp-display-case);
-  line-height: 1.12;
-  text-align: center;
-  text-wrap: balance;
-  overflow-wrap: anywhere;
-}
-
-:lang(ar) .lp-cta__disc-name {
-  letter-spacing: 0;
-  line-height: 1.5;
-}
-
-/* a cutout rises out of the top of its disc */
-.lp-cta__stage[data-media="cutout"] .lp-cta__disc {
-  overflow: visible;
-  box-shadow: var(--lp-highlight), inset 0 0 0 1px var(--mx-hair), var(--lp-shadow-l);
-}
-
-.lp-cta__stage[data-media="cutout"] .lp-cta__disc-pic {
+/* a cutout stands inside its disc, resting on the lower third */
+.lp-cta--stamp .lp-cta__deck[data-media="cutout"] .lp-cta__disc-pic {
   position: absolute;
-  inset: -16% 10% 8%;
+  inset: 12% 14% 10%;
   inline-size: auto;
   block-size: auto;
 }
 
-.lp-cta__stage[data-media="cutout"] .lp-cta__disc-pic .lp-pic__img {
+.lp-cta--stamp .lp-cta__deck[data-media="cutout"] .lp-cta__disc-pic .lp-pic__img {
   object-position: 50% 100%;
   filter: var(--lp-shadow-product-filter);
 }
 
-.lp-cta__orb {
-  position: absolute;
-  z-index: 3;
-  inset-block-end: -3%;
-  inset-inline-end: -2%;
-  inline-size: clamp(11rem, 46%, 14.5rem);
-  aspect-ratio: 1;
-}
-
-/* phones, where the orb is largest against the disc: over a product photo that fills the disc it
-   hangs lower off the disc's edge, so it covers the corner of the shot rather than the product
-   (the stage keeps the room under it) */
-@container (max-width: 39.99rem) {
-  .lp-cta__stage[data-fill] {
-    margin-block-end: calc(0.5rem + 15cqi);
+@container (min-width: 48rem) {
+  .lp-cta--stamp .lp-cta__deck {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
   }
 
-  .lp-cta__stage[data-fill] .lp-cta__orb {
-    inset-block-end: -18%;
-    inset-inline-end: -4%;
-  }
-}
-
-/* the ring: a frosted disc carrying the text, the core button sits in its middle */
-.lp-cta__ring {
-  --wind: 80deg;
-  position: absolute;
-  inset: 0;
-  display: block;
-  border-radius: 50%;
-  box-shadow: var(--lp-highlight), var(--lp-shadow-l);
-  transition: rotate calc(var(--lp-dur-l) * 2.2) var(--lp-smooth);
-}
-
-.lp-cta__ring[data-turn="sway"] {
-  --wind: 22deg;
-}
-
-.lp-cta__ring-svg {
-  position: absolute;
-  inset: 0;
-  inline-size: 100%;
-  block-size: 100%;
-  overflow: visible;
-}
-
-.lp-cta__ring-t {
-  font-family: var(--lp-font-body);
-  font-weight: var(--lp-strong-weight);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-:lang(ar) .lp-cta__ring-t {
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.lp-cta__ring-rule {
-  stroke: currentColor;
-  stroke-opacity: 0.26;
-}
-
-.lp-cta__ring-sep {
-  color: var(--sec-accent);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  html:not([data-motion="off"]) .lp-cta__ring[data-turn="spin"] .lp-cta__ring-svg {
-    animation: lp-cta-spin 42s linear infinite;
+  .lp-cta--stamp .lp-cta__deck[data-media="none"] {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  html:not([data-motion="off"]) .lp-cta__ring[data-turn="sway"] .lp-cta__ring-svg {
-    animation: lp-cta-sway 6.5s var(--lp-sway) infinite alternate;
-  }
-}
-
-/* the order button as the orb's core: a lit accent disc, label over the arrow */
-.lp-cta .lp-cta__orb-btn {
-  --btn-bg: var(--sec-accent);
-  --btn-ink: var(--sec-accent-ink);
-  --btn-line: transparent;
-  --btn-radius: 50%;
-  position: absolute;
-  inset: 21%;
-  flex-direction: column;
-  gap: 0.4em;
-  min-block-size: 0;
-  padding: 0.6em;
-  border-radius: 50%;
-  font-size: clamp(0.92rem, 0.85rem + 0.35vw, 1.06rem);
-  line-height: 1.1;
-}
-
-.lp-cta .lp-cta__orb-btn .lp-btn__label {
-  max-inline-size: 7.5em;
-}
-
-:root[data-btn="pill"] .lp-cta .lp-cta__orb-btn {
-  padding-inline-end: 0.6em;
-}
-
-.lp-cta__tag {
-  position: absolute;
-  z-index: 3;
-  inset-block-start: 5%;
-  inset-inline-start: -1%;
-  display: grid;
-  justify-items: start;
-  gap: 0.35rem;
-  padding-block: 0.75rem 0.8rem;
-  padding-inline: 1rem 1.15rem;
-  border-radius: var(--lp-sq-l);
-  corner-shape: var(--lp-corner);
-}
-
-/* the free corner of the disc (cta/fit.ts tagZone): the opposite top corner, or the start side
-   lower down when a face or a cutout's neck fills both top corners */
-.lp-cta__tag[data-zone="top-end"] {
-  inset-inline: auto -1%;
-}
-
-.lp-cta__tag[data-zone="mid-start"] {
-  inset-block-start: 36%;
-  inset-inline-start: -6%;
-}
-
-.lp-cta__tag .lp-price {
-  line-height: 1.05;
-}
-
-.lp-cta__tag-sub {
-  font-size: calc(var(--lp-step--1) * 0.92 * var(--lp-script-scale));
-  font-weight: 500;
-  line-height: 1.35;
-}
-
-/* centered layouts: one centered row on wide screens, a centered column of aligned items on phones */
-.lp-cta--stamp .lp-cta__foot {
-  display: grid;
-  justify-content: center;
-  justify-items: start;
-}
-
-@container (min-width: 40rem) {
-  .lp-cta--stamp .lp-cta__foot {
-    display: flex;
-  }
-}
-
-@media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  html:not([data-motion="off"]) .lp-cta__orb:hover .lp-cta__ring,
-  html:not([data-motion="off"]) .lp-cta__orb:focus-within .lp-cta__ring {
-    rotate: calc(var(--lp-x) * var(--wind));
-  }
-}
-
-@keyframes lp-cta-orbit {
-  from {
-    rotate: var(--orbit-a);
-  }
-
-  to {
-    rotate: calc(var(--orbit-a) + 1turn);
-  }
-}
-
-@keyframes lp-cta-spin {
-  to {
-    rotate: 1turn;
-  }
-}
-
-@keyframes lp-cta-sway {
-  from {
-    rotate: -6deg;
-  }
-
-  to {
-    rotate: 6deg;
+  .lp-cta--stamp .lp-cta__disc {
+    justify-self: end;
+    inline-size: min(100%, 26rem);
   }
 }

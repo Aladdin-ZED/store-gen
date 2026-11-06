@@ -1,8 +1,7 @@
 /**
  * Social proof — what customers send back, three ways:
- *  whatsapp  recreated WhatsApp threads in modern phones (bubbles, read ticks, times, a photo
- *            message whose glass note steps out of the frame), a 3D triptych on desktop, popping in
- *            message by message
+ *  whatsapp  (id kept) the customers' own words as plain quote cards, name and city under each; no
+ *            phone mock-up, no bubbles, no times (design.md DES-§5.13 S6, S21)
  *  ugc       9:16 story frames: progress bars, avatar ring, name · city · age, caption stickers; the
  *            first photo story plays large in the middle and the others step down beside it
  *  counter   one big real order counter on a lit poster card, the product's real rating, delivery cities
@@ -17,6 +16,7 @@ import { CounterView } from "./counter";
 import { schema, type ChatData, type Data, type StoryData } from "./schema";
 import { UgcView } from "./ugc";
 import { WhatsAppView } from "./whatsapp";
+import { withRevealScope } from "../reveal-scope";
 
 /* ------------------------------------------------------------------ */
 /* Defaults                                                            */
@@ -119,15 +119,11 @@ function defaults({ locale, product, rng }: DefaultsInput): Data {
 const RENDER = { whatsapp: WhatsAppView, ugc: UgcView, counter: CounterView } as const;
 
 /**
- * Recreated WhatsApp threads say "talk to us on WhatsApp": on a store without a WhatsApp number they
- * would promise a channel that does not exist. There the section tells the same proof another way —
- * the customers' stories when they carry photos, the real order counter otherwise.
+ * The saved variant, or the quote cards for an unknown id. The quote cards promise no WhatsApp channel (no phone
+ * mock-up since the S6 redraw), so a store without a WhatsApp number keeps the variant its owner chose.
  */
 function viewFor(props: Parameters<typeof WhatsAppView>[0]): keyof typeof RENDER {
-  const v = (props.variant in RENDER ? props.variant : "whatsapp") as keyof typeof RENDER;
-  if (v !== "whatsapp" || props.ctx.store.whatsapp) return v;
-  const photos = props.data.stories.some((s) => props.ctx.asset(s.image));
-  return photos || props.data.count <= 0 ? "ugc" : "counter";
+  return (props.variant in RENDER ? props.variant : "whatsapp") as keyof typeof RENDER;
 }
 
 const def = defineSection({
@@ -135,13 +131,13 @@ const def = defineSection({
   label: "Social proof (chats & UGC)",
   labelFr: "Preuve sociale",
   category: "proof",
-  description: "What customers send back: WhatsApp chats in phones, story frames, or a real order counter with delivery cities.",
+  description: "What customers send back: their own words as quote cards, story frames, or a real order counter with delivery cities.",
   variants: [
     {
       id: "whatsapp",
-      label: "WhatsApp chats",
+      label: "Quote cards",
       description:
-        "Recreated WhatsApp threads in modern phones, turned toward the customer's photo thread on desktop; messages pop in one by one and a glass note steps out from the customer's photo.",
+        "What your customers wrote to you, set as quiet quote cards with their name and city. Only their own messages are quoted, never your replies.",
     },
     {
       id: "ugc",
@@ -258,4 +254,4 @@ const def = defineSection({
   },
 });
 
-export default def;
+export default withRevealScope(def);

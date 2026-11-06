@@ -2,7 +2,7 @@
  * generateDirections — product + photos (+ optional AI analysis and copy) → three complete,
  * art-directed PageDocs in three different archetypes, ready to preview and publish.
  */
-import { libraryCopy } from "@/lib/ai/copy-library";
+import { copyFamily, libraryCopy, productRef } from "@/lib/ai/copy-library";
 import type { PageCopy } from "@/lib/ai/copy-schema";
 import { getMarket } from "@/lib/markets/info";
 import {
@@ -19,10 +19,21 @@ import {
 import { validateDoc } from "@/lib/page/validate";
 import { garmentOf } from "@/landing/sections/garment";
 import { ARCHETYPE_DEFS, rankArchetypes, type ExtractedPalette } from "@/lib/theme";
-import type { CopyExtras } from "./copy-map";
-import { calmBands, chooseOrder, chooseVariant, finishPlan, fullOrder, type PlanContext } from "./plan";
-import { CatalogInputError, directionCatalog, displayInput, pickOfferDisplay, safeSelection } from "./offers";
-import { deriveSeed } from "./rng";
+import { getSection } from "@/landing/registry";
+import { compileGenome, compileLook, type Compiled, type PlanDirectives } from "@/lib/design/compile";
+import { budgetBreach, type BudgetBreach } from "@/lib/design/budget-estimate";
+import { distanceView, genomeDistance, nicheKey, packView, type DistanceView } from "@/lib/design/distance";
+import { GenomeError, type DesignGenome, type SampleInput, type SampleOpts } from "@/lib/design/genome";
+import type { GeneHints } from "@/lib/design/hints";
+import type { NicheShares } from "@/lib/design/novelty.server";
+import type { PhotoFacts } from "@/lib/design/photo-facts";
+import { PRIORS_VERSION } from "@/lib/design/priors";
+import { directionArchetype, sampleGenome } from "@/lib/design/solve";
+import type { BrandSetting } from "@/lib/settings/keys/brand";
+import { composeCopy, type ComposeCopyCtx, type CopyExtras, type EngineCopy } from "./copy-map";
+import { calmBands, chooseOrder, chooseVariant, finishPlan, fullOrder, planDesign, type DesignPlan, type PlanContext } from "./plan";
+import { CatalogInputError, directionCatalog, displayInput, drawOfferDisplay, pickOfferDisplay, safeSelection } from "./offers";
+import { deriveSeed, hash32 } from "./rng";
 import { directSections } from "./direct";
 import { garmentDetails, garmentPhoto, modestBigWord, type PhotoInfo } from "./garment";
 import { glueDeep, glueEmphasis } from "./glue";
@@ -95,6 +106,40 @@ export interface GenerateInput {
    * The page is created with exactly this tracking: nothing is added when saving.
    */
   tracking?: unknown;
+  /*
+   * The design engine's inputs (design.md DES-§14.2; all optional: a caller without them gets the same engine with
+   * neutral shares and seeds derived from `seedBase`).
+   */
+  /** the store's brand seed (`stores.brand_seed`, DS5); absent → `seed:<seedBase>` */
+  brandSeed?: string;
+  /** sha256(sorted asset ids, product name, category, locale) from the wizard (step 1); absent → `inputHashOf` */
+  inputHash?: string;
+  /** the store's brand kit (locks, DES-§12.3) */
+  brand?: BrandSetting | null;
+  /** the niche key (DES-§7.3); absent → nicheKey(market, category) */
+  niche?: string;
+  /** the niche's shares (`nicheSharesAction`, cached per session; k ≥ 10 or neutral) for H33 and the 4-gram rule */
+  shares?: NicheShares | null;
+  /**
+   * The niche's archetype shares of live stores (H33 on G1, N5; k ≥ 10, rounded to 10 %). Until `NicheShares` carries
+   * them (CCR r1-p6-7) the caller passes them here; absent = neutral.
+   */
+  vibeShares?: { n: number; shares: Record<string, number> } | null;
+  /** the wizard's photo facts pass (DES-§4.11); absent → from `photos`, the cutout and the palette */
+  photoFacts?: PhotoFacts;
+  /** the release flag `design_new_heroes` (default on) */
+  newHeroes?: boolean;
+  /** the store's own pages as in-flow section tokens (the 4-gram rule, DES-§5.1) */
+  ownPages?: number[][];
+  /**
+   * The owner's proof material (I6, DS42): customer reviews or messages, and the number of merchant figures
+   * (`allowedNumbers`). Without them no reviews, social proof or stats section is planned.
+   */
+  proof?: { reviews?: boolean; figures?: number };
+  /** Director hints (GH-1, flag `ai_director_brief`), validated by the caller (validateHints) */
+  hints?: GeneHints;
+  /** the hero-title skeleton ids of the store's last 5 pages (DES-§9.12 rotation); absent = none known */
+  ownSkeletons?: readonly string[];
 }
 
 export interface Direction {
@@ -108,6 +153,12 @@ export interface Direction {
   match: DirectionMatch;
   seed: number;
   doc: PageDoc;
+  /** the planned genome (sections, rhythm genes, G24); null when the direction fell back to the archetype plan */
+  genome?: DesignGenome | null;
+  /** the engine-composed copy fields and their skeleton ids ("hero.headline" → "fr.t.np-fact"); absent = library or AI copy */
+  skeletons?: Record<string, string>;
+  /** the composed lines (text, G29 structure, angle) by PageCopy path; absent = library or AI copy */
+  lines?: EngineCopy["lines"];
 }
 
 export interface DirectionMatch {
@@ -160,17 +211,52 @@ function moodOf(input: Pick<GenerateInput, "product" | "palette" | "aiVibe" | "f
   return { reading: readMood({ keywords, category: product?.category ?? "other", palette: input.palette, aiVibe: input.aiVibe }), keywords };
 }
 
-/** OKLab distance from which two accents read as two different color voices (plum vs mocha ≈ 0.07). */
-const DISTINCT_ACCENT = 0.065;
-
 /** Section types whose variant sets the composition of a page (spread across the three directions). */
 const SPREAD_TYPES = new Set(["hero", "benefits", "problem", "steps", "showcase", "reviews", "socialProof", "orderForm", "offer"]);
 
+/** A direction's design: the sampled genome and its compilation (DES-§14.2 step 3). */
+export interface DirectionDesign {
+  genome: DesignGenome;
+  compiled: Compiled;
+  /** hero-title skeletons the sibling directions already use (DES-§9.5 rotation), plus the `close` lines' own ids */
+  copyAvoid?: ReadonlySet<string>;
+  /** DES-§14.2 step 7: the lines still `close` after three recompositions (neutral skeleton, then the library line) */
+  fallback?: ComposeCopyCtx["fallback"];
+}
+
+/** A built direction: its document and, on the design path, the planned genome (sections, rhythm genes, G24). */
+export interface BuiltDirection {
+  doc: PageDoc;
+  genome: DesignGenome | null;
+  plan: DesignPlan | null;
+  /** the engine-composed copy paths and their skeleton ids (DES-§9.12); null = library or AI copy */
+  skeletons?: Record<string, string> | null;
+  /** the composed lines by path (text, structure, angle); null = library or AI copy */
+  lines?: EngineCopy["lines"] | null;
+}
+
+/** The section schema accepts a top-level field (an unknown key would be stripped by the section's zod object). */
+function accepts(type: string, field: string): boolean {
+  const shape = (getSection(type)?.schema as { shape?: Record<string, unknown> } | undefined)?.shape;
+  return !!shape && Object.prototype.hasOwnProperty.call(shape, field);
+}
+
+/** The colour-moment budget of a planned page: its G10 moments and the final CTA, ≤ 2 (colour-field ≤ 4; I4). */
+const momentBudget = (g: DesignGenome, d: PlanDirectives) => Math.max(1, Math.min(g.brand.G9 === "color-field" ? 4 : 2, d.colorMoments + 1));
+
 /**
  * Build one complete document for an archetype. `avoid` lists variants sibling directions already
- * use (made less likely, never forbidden).
+ * use (made less likely, never forbidden). With `design` (the sampled and compiled genome) the page
+ * is planned by the engine (DES-§5.5): grammar pools, the choreography, the rhythm planners and the
+ * fold, the theme with its look; without it, today's archetype plan (kept for callers outside the
+ * wizard and for old documents).
  */
-export function buildDirection(input: GenerateInput, archetype: Archetype, seed: number, avoid?: ReadonlyMap<string, ReadonlySet<string>>): PageDoc {
+export function buildDirection(input: GenerateInput, archetype: Archetype, seed: number, avoid?: ReadonlyMap<string, ReadonlySet<string>>, design?: DirectionDesign): PageDoc {
+  return buildDirectionWithGenome(input, archetype, seed, avoid, design).doc;
+}
+
+/** buildDirection with the planned genome (the design path) for the distance check and the reveal. */
+export function buildDirectionWithGenome(input: GenerateInput, archetype: Archetype, seed: number, avoid?: ReadonlyMap<string, ReadonlySet<string>>, design?: DirectionDesign): BuiltDirection {
   // the story (name, category, photos); without `items`, the v1 product is also the one item "main"
   const parsedProduct = Product.safeParse(input.product);
   if (!parsedProduct.success) throw new GeneratorError(input.items ? "The product is incomplete: a name is required." : "The product is incomplete: name and price are required.");
@@ -184,7 +270,7 @@ export function buildDirection(input: GenerateInput, archetype: Archetype, seed:
   // a garment filed under kids / traditional gets garment copy (cut, fabric, size), not toy or terroir copy
   const copyCat = copyCategory(parsedProduct.data.category, keywords);
   const hasWhatsapp = /^\+?[0-9]{8,15}$/.test(input.whatsapp?.replace(/[\s().-]/g, "") ?? "");
-  const copy: PageCopy =
+  let copy: PageCopy =
     input.copy?.[input.locale] ??
     libraryCopy({
       // the library reads the family from the catalog category and the product's words: a girl's
@@ -207,7 +293,8 @@ export function buildDirection(input: GenerateInput, archetype: Archetype, seed:
     description: story.description || (facts.length ? factsToDescription(facts) : undefined),
   };
   // the items (options as typed: the order form, rendered by every direction, shows their pickers)
-  // and the offers: the wizard's verbatim, else suggested from the items' prices and group photos
+  // and the offers: the wizard's verbatim, else suggested from the items' prices and group photos.
+  // F2: nothing here adds a per-piece option the owner did not type
   let catalog: ReturnType<typeof directionCatalog>;
   try {
     catalog = directionCatalog(input, { currency, product, copy });
@@ -216,9 +303,11 @@ export function buildDirection(input: GenerateInput, archetype: Archetype, seed:
   }
   const { items, bundles } = catalog;
 
-  const theme = productTheme({ category: product.category, palette: input.palette, aiVibe: input.aiVibe, keywords, mood: reading.mood, archetype, seed, locale: input.locale });
-  // the owner's "Look" for every direction, else the archetype's pick for these offers (§E.5)
-  const display = displayInput(input.display) ?? pickOfferDisplay(archetype, bundles, seed);
+  let theme = design ? design.compiled.theme : productTheme({ category: product.category, palette: input.palette, aiVibe: input.aiVibe, keywords, mood: reading.mood, archetype, seed, locale: input.locale });
+  // the owner's "Look" for every direction, else the page's draw over the archetype's prior (§E.5, DES-§8.12 #8)
+  const display =
+    displayInput(input.display) ??
+    (design ? drawOfferDisplay(archetype, bundles, seed, { grammar: design.genome.page.G2, ladder: design.genome.brand.G12 }) : pickOfferDisplay(archetype, bundles, seed));
   const offers: PageDoc["offers"] = {
     bundles,
     display,
@@ -244,6 +333,60 @@ export function buildDirection(input: GenerateInput, archetype: Archetype, seed:
     ...(avoid ? { avoid } : {}),
   };
 
+  // the engine's plan (DES-§5.5): order, variants, rhythm genes and fold, from the compiled genome
+  let plan: DesignPlan | null = null;
+  let skeletons: Record<string, string> | null = null;
+  let lines: EngineCopy["lines"] | null = null;
+  const formCounts = { offers: bundles.length, groups: (items[0]?.groups ?? []).filter((g) => g.kind !== "field").length, bump: false };
+  if (design) {
+    const photoFacts = photoFactsOf(input, product);
+    plan = planDesign(ctx, design.genome, {
+      directives: design.compiled.plan,
+      locale: input.locale,
+      has: {
+        ownerProof: !!input.proof?.reviews,
+        video: false,
+        photos: product.images.length,
+        endDate: false,
+        whatsapp: hasWhatsapp,
+        storeName: ctx.storeName === true,
+        figures: Math.max(0, Math.floor(input.proof?.figures ?? 0)),
+        beforeAfter: false,
+        offers: bundles.length,
+        facts: facts.length >= 2,
+        garment,
+      },
+      photos: photoFacts,
+      assets: product.images.map((img) => ({ id: img.id, width: input.photos?.find((p) => p.id === img.id)?.width ?? 0 })),
+      cutout: product.cutout?.id ?? null,
+      fonts: theme.fonts,
+      picker: display.picker,
+      form: formCounts,
+      shares: input.shares ?? null,
+      newHeroes: input.newHeroes !== false,
+      ...(input.ownPages ? { own: input.ownPages } : {}),
+    });
+    // the look after the planners: the reveal scope (G35) and the fold's dmax (H28) are part of it
+    theme = { ...theme, look: compileLook(plan.genome, { photos: photoFacts }) };
+    // engine-only copy (DES-§9.12): composed from the merchant's facts over the library, never over AI copy
+    if (!input.copy?.[input.locale]) {
+      const engine = composeCopy(copy, {
+        locale: input.locale,
+        family: copyFamily({ category: parsedProduct.data.category, productName: parsedProduct.data.name, keywords }).family,
+        ref: productRef(parsedProduct.data.name, input.locale),
+        facts: { facts, productName: parsedProduct.data.name, price: (parsedProduct.data as { price?: number }).price ?? null, deliveryText: input.deliveryText ?? null },
+        directives: design.compiled.copy,
+        seed,
+        ...(plan.fold.titleLines ? { titleLines: plan.fold.titleLines } : {}),
+        avoid: new Set([...(design.copyAvoid ?? []), ...(input.ownSkeletons ?? [])]),
+        ...(design.fallback ? { fallback: design.fallback } : {}),
+      });
+      copy = engine.copy;
+      skeletons = engine.skeletons;
+      lines = engine.lines;
+    }
+  }
+
   // sections: build data first, then lay out backgrounds/dividers over the ones that exist
   // section defaults are content too, written from the real product: the sections read a garment
   // from its name whatever the category (garmentOf), and a girl's abaya filed under kids keeps its
@@ -262,28 +405,39 @@ export function buildDirection(input: GenerateInput, archetype: Archetype, seed:
     whatsapp: hasWhatsapp,
     ...(reading.modest ? { bigWord: modestBigWord(input.locale, keywords) } : {}),
   };
+  const order: { type: string; variant: string }[] = plan
+    ? fullOrder(ctx, plan.inFlow.map((s) => s.type)).map((type) => ({ type, variant: plan.inFlow.find((s) => s.type === type)?.variant ?? plan.variants.get(type) ?? chooseVariant(type, ctx) }))
+    : fullOrder(ctx, chooseOrder(ctx)).map((type) => ({ type, variant: chooseVariant(type, ctx) }));
+  const formAt = order.findIndex((o) => o.type === "orderForm");
   const taken = new Set<string>();
   const chosen: { type: string; variant: string; id: string; data: Record<string, unknown> }[] = [];
-  for (const type of fullOrder(ctx, chooseOrder(ctx))) {
+  for (const [at, { type, variant }] of order.entries()) {
     const id = sectionId(type, taken);
     let data = sectionData(type, id, basics, copy, extras);
     // the details were pinned on another photo than the main one: the showcase shows that photo
     // (only while the pins are the generator's own — merchant facts carry no positions to match)
     if (data && type === "showcase" && pinned && pinned.ref.id !== product.images[0]?.id && facts.length < 2) data = { ...data, image: pinned.ref };
-    if (data) chosen.push({ type, variant: chooseVariant(type, ctx), id, data });
+    if (data && plan) data = designData(type, data, plan, at < formAt);
+    if (data) chosen.push({ type, variant, id, data });
     else taken.delete(id);
   }
   // one scrolling band in the page body
   const built = calmBands(chosen, ctx);
   // backgrounds judged on the theme's real colors; transitions left to the renderer ("auto")
-  const plan = finishPlan(built, archetype, seed, themeTones(theme, input.locale), { mood: reading.mood });
+  const moments = plan
+    ? plan.genome.page.G24.moments.map((i) => built.findIndex((b) => b.type === plan!.inFlow[i]?.type)).filter((i) => i >= 0)
+    : undefined;
+  const finished = finishPlan(built, archetype, seed, themeTones(theme, input.locale), {
+    mood: reading.mood,
+    ...(plan && design ? { budget: momentBudget(design.genome, design.compiled.plan), moments, heights: { dens: design.compiled.plan.density.l, space: plan.genome.page.G21, form: formCounts } } : {}),
+  });
   const planned: SectionInstance[] = built.map((b, i) => ({
     id: b.id,
     type: b.type,
     variant: b.variant,
-    bg: plan[i]!.bg,
-    divider: plan[i]!.divider,
-    spacing: plan[i]!.spacing,
+    bg: finished[i]!.bg,
+    divider: finished[i]!.divider,
+    spacing: finished[i]!.spacing,
     hidden: false,
     // a fragment written flush against an emphasis ("و*ساترة*", "*X*:") shares its word box (glue.ts)
     data: glueDeep(b.data, input.locale),
@@ -327,7 +481,39 @@ export function buildDirection(input: GenerateInput, archetype: Archetype, seed:
 
   const { doc, issues } = validateDoc(draft);
   if (!doc) throw new GeneratorError(issues[0]?.message ?? "The generated page is invalid.");
-  return doc;
+  if (!plan) return { doc, genome: null, plan: null, skeletons: null, lines: null };
+  // the genome's sections, now that the ids exist (the hero's arrangement for the distance view and H33)
+  const flowSeq = doc.sections.filter((s) => !s.hidden && !["announcement", "header", "footer", "stickyCta", "whatsappFloat"].includes(s.type)).map((s) => `${s.type}:${s.variant}`);
+  const genome: DesignGenome = {
+    ...plan.genome,
+    page: { ...plan.genome.page, G24: { ...plan.genome.page.G24, seq: flowSeq.slice(0, 40) } },
+    sections: doc.sections.slice(0, 40).map((s) => ({ id: s.id, type: s.type, variant: s.variant, ...(s.type === "hero" && plan!.heroArrange ? { arrange: plan!.heroArrange } : {}) })),
+  };
+  return { doc, genome, plan, skeletons, lines };
+}
+
+/**
+ * The planned data of a section (DES-§5.8, §5.9, §5.13): the hero's composition fields; the opener where the section
+ * schema has the field; the kicker string only where the opener is a kicker (the hero keeps its own, V30); the `cta`
+ * toggle off outside the primary CTAs; a pre-form FAQ held to 3 questions (the Objection production). Every field is
+ * written optional, without a default; prices, items and offers are never touched.
+ */
+function designData(type: string, data: Record<string, unknown>, plan: DesignPlan, beforeForm: boolean): Record<string, unknown> {
+  const out = { ...data };
+  if (type === "hero") {
+    for (const [k, v] of Object.entries(plan.heroData)) if (accepts("hero", k)) out[k] = v;
+    if (plan.fold.repairs.includes("kicker") && typeof out.kicker === "string") out.kicker = "";
+    return out;
+  }
+  const at = plan.inFlow.filter((s) => s.type !== "hero").findIndex((s) => s.type === type);
+  if (at >= 0) {
+    const opener = plan.openers[at];
+    if (opener && accepts(type, "opener")) out.opener = opener;
+    if (opener && opener !== "kicker" && typeof out.kicker === "string") out.kicker = "";
+  }
+  if (plan.ctaOff.has(type) && typeof out.cta === "boolean") out.cta = false;
+  if (type === "faq" && beforeForm && Array.isArray(out.items)) out.items = out.items.slice(0, 3);
+  return out;
 }
 
 /**
@@ -386,9 +572,88 @@ export function rankDirections(input: Pick<GenerateInput, "product" | "palette" 
   return out.sort((a, b) => b.score - a.score || a.at - b.at).map(({ archetype, score, reason }) => ({ archetype, score, reason }));
 }
 
-/** Three different archetypes for the product, best match first (forced archetypes lead). */
+/** The run's seeds (DS5): the store's brand seed and the hash of the product's inputs. */
+function runSeeds(input: GenerateInput): { brandSeed: string; inputHash: string } {
+  return { brandSeed: input.brandSeed?.trim() || `seed:${input.seedBase}`, inputHash: input.inputHash?.trim() || inputHashOf(input) };
+}
+
+/**
+ * The product's input hash (DES-§14.2 step 1, DS5): the wizard computes sha256(sorted asset ids, product name,
+ * category, locale) with WebCrypto and passes it; without one, a 32-bit FNV hash of the same fields stands in, so the
+ * product's facts still enter the rng (N6).
+ */
+export function inputHashOf(input: Pick<GenerateInput, "product" | "locale">): string {
+  const parsed = Product.safeParse(input.product);
+  const p = parsed.success ? parsed.data : null;
+  const ids = [...(p?.images ?? []).map((i) => i.id), ...(p?.cutout ? [p.cutout.id] : [])].sort();
+  return hash32([ids.join(","), p?.name ?? "", p?.category ?? "", input.locale].join("|")).toString(16).padStart(8, "0");
+}
+
+/**
+ * What the sampler reads about the photos (DES-§4.4 PhotoFacts): the wizard's facts pass when given, else built from
+ * the media library's sizes (`photos`), the cutout and the photo palette. An unknown width reads as 0 (no tight crop,
+ * no full-bleed treatment is planned on it).
+ */
+export function photoFactsOf(input: Pick<GenerateInput, "photoFacts" | "photos" | "palette">, product: Pick<PageDoc["product"], "images" | "cutout">): PhotoFacts {
+  if (input.photoFacts) return input.photoFacts;
+  const widths = product.images.map((img) => input.photos?.find((p) => p.id === img.id)?.width ?? 0);
+  const alpha = !!product.cutout || product.images.some((img) => input.photos?.find((p) => p.id === img.id)?.alpha === true);
+  const top = input.palette?.colors[0];
+  return {
+    count: product.images.length,
+    maxWidth: Math.max(0, ...widths),
+    hasCutout: alpha,
+    dominant: top?.hex ?? null,
+    background: { luminance: top?.lightness ?? 0.8, uniform: !!input.palette?.background },
+    sharp: true,
+  };
+}
+
+/** One direction's sample input (DES-§4.4 SampleInput). */
+function sampleInputOf(input: GenerateInput, archetype: Archetype, i: 0 | 1 | 2, attempt: number, ranked: RankedDirection[], mood: MoodReading): SampleInput {
+  const parsed = Product.safeParse(input.product);
+  const product = parsed.success ? parsed.data : { images: [], category: "other" as const, cutout: undefined };
+  return {
+    archetype,
+    ...runSeeds(input),
+    directionIndex: i,
+    attempt,
+    mood,
+    locale: input.locale,
+    market: input.market,
+    photos: photoFactsOf(input, product),
+    niche: input.niche ?? nicheKey(input.market, product.category),
+    brand: input.brand ?? null,
+    ranked,
+    shares: input.shares ?? null,
+    priorsV: PRIORS_VERSION,
+  };
+}
+
+/**
+ * One direction drawn with fixed genes (DES-§17.2 designer seeds, the studio's locks): the archetype's sample with
+ * `opts.locks` (and hints or a pin), compiled against the product theme and planned like a wizard direction. Pure;
+ * throws GeneratorError on an incomplete product and GenomeError when a locked colour cannot leave orange (H24).
+ */
+export function designDirection(input: GenerateInput, archetype: Archetype, opts: SampleOpts = {}, i: 0 | 1 | 2 = 0): BuiltDirection {
+  const { reading, keywords } = moodOf(input);
+  const parsed = Product.safeParse(input.product);
+  const category = parsed.success ? parsed.data.category : "other";
+  const sin = sampleInputOf(input, archetype, i, 0, rankDirections(input), reading);
+  const genome = sampleGenome(sin, opts);
+  const theme = productTheme({ category, palette: input.palette, aiVibe: input.aiVibe, keywords, mood: reading.mood, archetype, seed: genome.seed, locale: input.locale });
+  const compiled = compileGenome(genome, { theme, locale: input.locale, mood: reading.mood, brand: input.brand ?? null, photos: sin.photos, numbers: (input.proof?.figures ?? 0) >= 2 });
+  return buildDirectionWithGenome(input, archetype, genome.seed, undefined, { genome, compiled });
+}
+
+/**
+ * The three directions' archetypes (DES-§4.3 G1, rev 3 QUAL-35; DES-§8.12 root cause 1): forced archetypes (admin
+ * choice) lead; then direction 1 is the best fit of `rankDirections` (mood-filtered) after the anti-concentration factor
+ * on the niche's archetype shares (H33 on G1, `vibeShares`), directions 2 and 3 are drawn — seeded by the brand seed and the input hash (DS5) — from the next five
+ * by score + 0.02, distinct. The fixed top 3 is retired.
+ */
 export function pickArchetypes(
-  input: Pick<GenerateInput, "product" | "palette" | "aiVibe" | "archetypes" | "facts">,
+  input: Pick<GenerateInput, "product" | "palette" | "aiVibe" | "archetypes" | "facts" | "brandSeed" | "inputHash" | "seedBase" | "locale" | "vibeShares">,
 ): { archetype: Archetype; reason: string; match: DirectionMatch }[] {
   const ranked = rankDirections(input);
   const { reading } = moodOf(input);
@@ -401,6 +666,13 @@ export function pickArchetypes(
   };
   const forced = (input.archetypes ?? []).filter((a, i, all) => all.indexOf(a) === i).map((a) => entry(a, true));
   const out = forced.slice(0, 3);
+  const rest = ranked.filter((r) => !out.some((o) => o.archetype === r.archetype));
+  const seeds = runSeeds(input as GenerateInput);
+  for (let k = 0; out.length < 3 && k < 3 && rest.length; k++) {
+    const { archetype } = directionArchetype({ ranked: rest, ...seeds, directionIndex: k as 0 | 1 | 2, vibeShares: input.vibeShares ?? null });
+    if (!out.some((o) => o.archetype === archetype)) out.push(entry(archetype, false));
+  }
+  // fewer than three drawn (a short mood-filtered ranking): the ranking's order fills
   for (const r of ranked) {
     if (out.length >= 3) break;
     if (!out.some((o) => o.archetype === r.archetype)) out.push(entry(r.archetype, false));
@@ -408,64 +680,151 @@ export function pickArchetypes(
   return out;
 }
 
-/** What an earlier direction looks like, for the next one to differ from. */
-interface Look {
-  base: string;
-  accent: string;
+/** OKLab distance from which two accents read as two different color voices (plum vs mocha ≈ 0.07). */
+const DISTINCT_ACCENT = 0.065;
+/** Two directions of one run differ at least this much (DES-§14.2 step 3, hard by construction; DS25). */
+export const DIRECTION_MIN_D = 0.25;
+/** Attempts per direction (DES-§14.2 step 3: attempts 0-3). */
+const ATTEMPTS = 4;
+
+/** One sampled, planned and built attempt of a direction (DES-§14.2 step 3): what the novelty check and the keep rule read. */
+export interface DirectionCandidate {
+  /** "<direction>:<attempt>:<view hash>": stable for the same inputs, new when an earlier direction's pick changed */
+  key: string;
+  i: 0 | 1 | 2;
+  attempt: number;
+  archetype: Archetype;
+  seed: number;
+  built: BuiltDirection;
+  /** null on the archetype fallback (no genome) */
+  view: DistanceView | null;
+  /** the distance to the earlier directions' picks (1 for the first direction) */
+  d: number;
+  /** 0 when a calm product's accent repeats an earlier direction's */
+  voice: number;
+  /** the first hard budget row the estimate breaches (opts.budget), else null */
+  breach: BudgetBreach | null;
+  /** what built this document: the copy recomposition of step 7 rebuilds it with another `copyAvoid` / `fallback` */
+  design: DirectionDesign | null;
+  avoid: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
-/**
- * Seed of direction `i`. A few alternative seeds are tried when the first one would repeat what the
- * earlier directions already show:
- *   - every earlier direction on the same page mood (light, tinted or dark) → another mood;
- *   - a calm product: the engine draws its accent from a few quiet partners (plum, dusty rose, sage,
- *     ink, the product's own deepened hue) — two directions in the same accent read as one proposal,
- *     so a seed with a clearly different accent is preferred.
- * The theme engine still decides what the archetype and the product colors allow.
- */
-function directionSeed(input: GenerateInput, archetype: Archetype, i: number, looks: readonly Look[]): number {
-  const first = deriveSeed(input.seedBase, `direction:${i}:${archetype}`);
-  if (looks.length === 0) return first;
-  const { reading, keywords } = moodOf(input);
-  const sameMood = new Set(looks.map((l) => l.base)).size === 1;
-  const calm = reading.mood === "calm";
-  if (!sameMood && !calm) return first;
-  const product = Product.safeParse(input.product);
-  const category = product.success ? product.data.category : "other";
-  const score = (theme: ThemeSpec) =>
-    (sameMood && theme.palette.base !== looks[0]!.base ? 1 : 0) +
-    (calm && looks.every((l) => colorDistance(l.accent, theme.palette.accent) >= DISTINCT_ACCENT) ? 2 : 0);
-  const goal = (sameMood ? 1 : 0) + (calm ? 2 : 0);
-  let best = { seed: first, score: -1 };
-  // ~6 ms per try; the quiet partners are few, a dozen draws all but guarantee a distinct one
-  for (let k = 0; k < (calm ? 12 : 6); k++) {
-    const seed = k === 0 ? first : deriveSeed(input.seedBase, `direction:${i}:${archetype}:${k}`);
-    const theme = productTheme({ category, palette: input.palette, aiVibe: input.aiVibe, keywords, mood: reading.mood, archetype, seed, locale: input.locale }, { scout: true });
-    const s = score(theme);
-    if (s > best.score) best = { seed, score: s };
-    if (s >= goal) break;
-  }
-  return best.seed;
+export interface DirectionEntry {
+  archetype: Archetype;
+  reason: string;
+  match: DirectionMatch;
+  /** every attempt built, in order */
+  candidates: DirectionCandidate[];
+  /** the kept attempt (the first at d ≥ 0.25 with its own accent and within the budgets, else the most distant) */
+  pick: DirectionCandidate;
 }
 
+export interface CandidateOpts {
+  /** keys the novelty check refused (`too_close`, DS6): never kept, their direction keeps sampling */
+  refused?: ReadonlySet<string>;
+  /** the explore re-sample (DES-§14.2 step 5): 4 more attempts for a direction whose attempts were all refused */
+  explore?: boolean;
+  /** skip attempts whose estimates breach a hard budget row (budget-limits.ts), DES-§14.2 step 3 */
+  budget?: boolean;
+  /** GH-1 (DES-§14.6): the Director's hints and pin for some directions (1 and 2); the others sample as usual */
+  hinted?: { hints: GeneHints; pins?: SampleOpts["pins"]; directions: readonly number[] };
+  /** the photo-led pin of one direction (the wizard's explore slot when the photos have a cutout, DES-§14.8) */
+  photoPin?: { pins: NonNullable<SampleOpts["pins"]>; direction: number };
+}
+
+/** The view's key part: a short hash of the packed vector. */
+const viewKey = (v: DistanceView | null) => (v ? hash32(packView(v).join(",")).toString(36) : "x");
+
 /**
- * Three art-directed directions (distinct archetypes), deterministic per `seedBase`. Built in
- * order: each one steers away from the hero and section compositions of the ones before it.
+ * Every direction's attempts (DES-§14.2 step 3), deterministic per (brand seed, input hash, inputs): forced archetypes
+ * lead, each direction samples its genome (DES-§4.4), compiles it, plans the page (choreography, rhythm planners, fold)
+ * and builds the document; an attempt whose distance to an earlier direction's pick is < 0.25 (or whose accent repeats
+ * one, for a calm product, or that breaches a budget, or that the novelty check refused) is not kept and the next is
+ * tried (≤ 4, ≤ 8 with `explore`), the most distant kept otherwise. Built in order: each one steers away from the hero
+ * and section compositions of the picks before it.
  */
-export function generateDirections(input: GenerateInput): Direction[] {
+export function directionCandidates(input: GenerateInput, opts: CandidateOpts = {}): DirectionEntry[] {
   const avoid = new Map<string, Set<string>>();
-  const looks: Look[] = [];
+  const views: DistanceView[] = [];
+  const accents: string[] = [];
+  // the hero-title skeletons of the directions already built: two directions of one run never share it (DES-§9.5)
+  const copyAvoid = new Set<string>();
+  const ranked = rankDirections(input);
+  const { reading, keywords } = moodOf(input);
+  const parsed = Product.safeParse(input.product);
+  const category = parsed.success ? parsed.data.category : "other";
+  const refused = opts.refused ?? new Set<string>();
   return pickArchetypes(input).map(({ archetype, reason, match }, i) => {
-    const seed = directionSeed(input, archetype, i, looks);
-    const doc = buildDirection(input, archetype, seed, avoid);
-    looks.push({ base: doc.theme.palette.base, accent: doc.theme.palette.accent });
+    const candidates: DirectionCandidate[] = [];
+    let best: { c: DirectionCandidate; rank: number } | null = null;
+    const turnAvoid: ReadonlyMap<string, ReadonlySet<string>> = new Map([...avoid].map(([k, v]) => [k, new Set(v)] as const));
+    const attempts = opts.explore ? ATTEMPTS * 2 : ATTEMPTS;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const sin = sampleInputOf(input, archetype, i as 0 | 1 | 2, attempt, ranked, reading);
+      let built: BuiltDirection;
+      let seed: number;
+      let design: DirectionDesign;
+      try {
+        const hinted = opts.hinted?.directions.includes(i) ? opts.hinted : null;
+        const pin = opts.photoPin?.direction === i ? opts.photoPin.pins : null;
+        const genome = sampleGenome(sin, hinted ? { hints: hinted.hints, ...(hinted.pins ? { pins: hinted.pins } : {}) } : { ...(input.hints ? { hints: input.hints } : {}), ...(pin ? { pins: pin } : {}) });
+        seed = genome.seed;
+        const theme = productTheme({ category, palette: input.palette, aiVibe: input.aiVibe, keywords, mood: reading.mood, archetype, seed, locale: input.locale });
+        const compiled = compileGenome(genome, { theme, locale: input.locale, mood: reading.mood, brand: input.brand ?? null, photos: sin.photos, numbers: (input.proof?.figures ?? 0) >= 2 });
+        design = { genome, compiled, copyAvoid: new Set(copyAvoid) };
+        built = buildDirectionWithGenome(input, archetype, seed, turnAvoid, design);
+      } catch (e) {
+        // a locked brand colour the no-orange repair would move fails the candidate (H24): the next attempt
+        if (e instanceof GenomeError) continue;
+        throw e;
+      }
+      const view = distanceView(built.genome!, { theme: built.doc.theme }, input.locale);
+      const d = views.length ? Math.min(...views.map((v) => genomeDistance(v, view))) : 1;
+      // a calm product draws its accent from a few quiet partners: two directions in one accent read as one proposal
+      const voice = reading.mood !== "calm" || accents.every((a) => colorDistance(a, built.doc.theme.palette.accent) >= DISTINCT_ACCENT) ? 1 : 0;
+      const breach = opts.budget ? budgetBreach(built.doc) : null;
+      const c: DirectionCandidate = { key: `${i}:${attempt}:${viewKey(view)}`, i: i as 0 | 1 | 2, attempt, archetype, seed, built, view, d, voice, breach, design, avoid: turnAvoid };
+      candidates.push(c);
+      if (refused.has(c.key)) continue;
+      // within the budgets first, then the accent, then the distance
+      const rank = (breach ? 0 : 2) + voice;
+      if (!best || rank > best.rank || (rank === best.rank && d > best.c.d)) best = { c, rank };
+      if (d >= DIRECTION_MIN_D && voice && !breach) break;
+    }
+    if (!best) {
+      // every attempt refused (locked colours, or the novelty check): the archetype's plan without a look
+      const seed = deriveSeed(hash32(`${runSeeds(input).brandSeed}|${runSeeds(input).inputHash}`), `direction:${i}:fallback`);
+      const built: BuiltDirection = { doc: buildDirection(input, archetype, seed, turnAvoid), genome: null, plan: null };
+      best = { c: { key: `${i}:fallback:x`, i: i as 0 | 1 | 2, attempt: -1, archetype, seed, built, view: null, d: 0, voice: 0, breach: null, design: null, avoid: turnAvoid }, rank: 0 };
+      candidates.push(best.c);
+    }
+    const pick = best.c;
+    if (pick.view) views.push(pick.view);
+    const heroSkeleton = pick.built.skeletons?.["hero.headline"];
+    if (heroSkeleton) copyAvoid.add(heroSkeleton);
+    const doc = pick.built.doc;
+    accents.push(doc.theme.palette.accent);
     for (const s of doc.sections) {
       if (!SPREAD_TYPES.has(s.type)) continue;
       const used = avoid.get(s.type) ?? new Set<string>();
       used.add(s.variant);
       avoid.set(s.type, used);
     }
-    const def = ARCHETYPE_DEFS[archetype];
-    return { archetype, label: def.label, description: def.description, reason, match, seed, doc };
+    return { archetype, reason, match, candidates, pick };
   });
+}
+
+/** A direction from its entry and the candidate shown (the pick unless the novelty keep rule chose another). */
+export function directionOf(entry: Pick<DirectionEntry, "archetype" | "reason" | "match">, c: DirectionCandidate): Direction {
+  const def = ARCHETYPE_DEFS[entry.archetype];
+  const b = c.built;
+  return { archetype: entry.archetype, label: def.label, description: def.description, reason: entry.reason, match: entry.match, seed: c.seed, doc: b.doc, genome: b.genome, ...(b.skeletons ? { skeletons: b.skeletons } : {}), ...(b.lines ? { lines: b.lines } : {}) };
+}
+
+/**
+ * Three art-directed directions (distinct archetypes), deterministic per (brand seed, input hash, inputs): the picks of
+ * `directionCandidates`. The wizard runs the whole DES-§14.2 path (novelty, repairs, headline check) on top of them.
+ */
+export function generateDirections(input: GenerateInput): Direction[] {
+  return directionCandidates(input).map((e) => directionOf(e, e.pick));
 }

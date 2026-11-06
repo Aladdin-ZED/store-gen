@@ -23,6 +23,7 @@ import { Fullbleed } from "./fullbleed";
 import { resolveMedia, schema, type Data, type ViewProps } from "./model";
 import { Phone } from "./phone";
 import { garmentOf } from "../garment";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   framed: Framed,
@@ -30,7 +31,7 @@ const VIEWS: Record<string, (p: ViewProps) => ReactElement> = {
   fullbleed: Fullbleed,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "video",
   label: "Video",
   labelFr: "Vidéo",
@@ -166,4 +167,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

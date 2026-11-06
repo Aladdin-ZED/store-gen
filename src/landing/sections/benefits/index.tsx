@@ -5,6 +5,7 @@
  *  zigzag    alternating rows: masked photos opening on reveal, a glass chip floating across each edge
  *  icons     compact "at a glance" panel: product photo column + hairline-ruled cells with tinted squircle icons
  *  stack     sticky stacking cards that recede into a deck as the next one arrives
+ *  hanging   numbered rows on hairlines, the thumbnails hanging at the copy column's edge (sheet S1; look pages only)
  * Product photos are never repeated inside one section: past the pool, rows use figures or lit plates.
  */
 import type { ReactElement, ReactNode } from "react";
@@ -12,12 +13,14 @@ import { SectionShell } from "@/landing/primitives";
 import { defineSection, type SectionProps } from "../../types";
 import { Bento } from "./bento";
 import { COMMON, rowsFor, typo } from "./copy";
+import { Hanging } from "./hanging";
 import { Icons } from "./icons";
 import { copyLang, fill, pick, shortName } from "./kit";
 import { schema, type Data, type ViewProps } from "./model";
 import { Numbered } from "./numbered";
 import { Stack } from "./stack";
 import { Zigzag } from "./zigzag";
+import { withRevealScope } from "../reveal-scope";
 
 const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   numbered: Numbered,
@@ -25,9 +28,10 @@ const VIEWS: Record<string, (p: ViewProps) => ReactNode> = {
   zigzag: Zigzag,
   icons: Icons,
   stack: Stack,
+  hanging: Hanging,
 };
 
-export default defineSection({
+export default withRevealScope(defineSection({
   type: "benefits",
   label: "Benefits",
   labelFr: "Bénéfices",
@@ -58,6 +62,12 @@ export default defineSection({
       label: "Stacking cards",
       description: "Big color cards that pin and stack as you scroll, the ones behind receding into a deck.",
       archetypes: ["kinetic", "playground", "bloom", "garage"],
+    },
+    {
+      id: "hanging",
+      label: "Hanging rows",
+      description: "Numbered rows on fine lines, a small photo hanging at the edge of each one. No icons.",
+      archetypes: [],
     },
   ],
   schema,
@@ -133,4 +143,4 @@ export default defineSection({
       </SectionShell>
     );
   },
-});
+}));

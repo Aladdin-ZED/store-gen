@@ -26,9 +26,11 @@ import { buildChecklist, type CheckFix, type CheckItem, type Checklist } from "@
 import type { LeftTab } from "@/lib/editor/store";
 import { messageOf } from "@/lib/i18n/admin";
 import { useT } from "@/lib/i18n/admin/client";
+import type { RepairOp } from "@/lib/design/gates/repair";
 import type { GateItem } from "@/lib/tenancy/types";
 import { cn } from "@/lib/utils";
 import { useEditor, useEditorStore } from "./context";
+import { useDesignCheck } from "./design/check-context";
 import { useEnv } from "./env";
 import { usePersistence } from "./persistence";
 import { EASE } from "./ui";
@@ -76,6 +78,18 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const blocked = list.errors.length > 0 || (needsConfirm && !confirmReal) || !user.canPublish;
   const gateHard = gateItems.filter((i) => i.level === "hard");
   const gateSoft = gateItems.filter((i) => i.level === "soft");
+  // a design refusal's one fix (DES-§15.1): the same id in the builder's Design check, its RepairOps as one edit
+  const design = useDesignCheck();
+  const repairOf = (item: GateItem): readonly RepairOp[] | null => {
+    if (!item.id.startsWith("design:") || !design?.model) return null;
+    const rows = Object.values(design.model.groups).flat().filter((r) => r.id === item.id && r.fix?.length);
+    const row = rows.find((r) => (r.section ?? null) === (item.sectionId ?? null)) ?? rows[0];
+    return row?.fix ?? null;
+  };
+  const repair = (item: GateItem) => {
+    const ops = repairOf(item);
+    if (ops && design?.fix(ops)) setGateItems((list) => list.filter((x) => x !== item));
+  };
   // the page's public address in its store (storeUrl: "/s/<h>/<slug>" on the platform host, P mode)
   const url = storeView.live(page.slug);
 
@@ -206,8 +220,8 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               <div className="bld-scroll max-h-[min(60vh,28rem)] overflow-y-auto px-6 py-4">
                 {gateItems.length ? (
                   <>
-                    <GateGroup title="The server refused to publish" items={gateHard} tone="error" onFix={goFix} />
-                    <GateGroup title="Notes from the server" items={gateSoft} tone="warning" onFix={goFix} />
+                    <GateGroup title="The server refused to publish" items={gateHard} tone="error" onFix={goFix} repairable={(i) => !!repairOf(i)} onRepair={repair} />
+                    <GateGroup title="Notes from the server" items={gateSoft} tone="warning" onFix={goFix} repairable={(i) => !!repairOf(i)} onRepair={repair} />
                   </>
                 ) : null}
                 {list.errors.length === 0 && list.warnings.length === 0 && !gateItems.length ? (
@@ -265,7 +279,10 @@ export function PublishDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   );
 }
 
-function CheckGroup({ title, items, tone, onFix }: { title: string; items: CheckItem[]; tone: "error" | "warning"; onFix: (fix: CheckFix | undefined) => void }) {
+/** A row with the design repair of DES-§15.2 (one undoable edit) in place of the go-to fix. */
+type RepairableItem = CheckItem & { repair?: () => void };
+
+function CheckGroup({ title, items, tone, onFix }: { title: string; items: RepairableItem[]; tone: "error" | "warning"; onFix: (fix: CheckFix | undefined) => void }) {
   const storeView = useStore();
   if (!items.length) return null;
   return (
@@ -292,7 +309,11 @@ function CheckGroup({ title, items, tone, onFix }: { title: string; items: Check
               <p className="text-[13px] font-medium leading-snug text-foreground">{item.title}</p>
               {item.detail ? <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{item.detail}</p> : null}
             </div>
-            {item.fix?.href ? (
+            {item.repair ? (
+              <Button variant="secondary" size="xs" className="shrink-0" onClick={item.repair}>
+                Fix
+              </Button>
+            ) : item.fix?.href ? (
               <Button variant="ghost" size="xs" className="shrink-0 opacity-70 group-hover:opacity-100" asChild>
                 <a href={resolveStoreHref(storeView, item.fix.href)} target="_blank" rel="noopener noreferrer" title="Opens in a new tab">
                   Open
@@ -329,10 +350,24 @@ const GATE_FALLBACK: Record<string, string> = {
 };
 
 /** One row per gate item (§M.1 rule 2): the title and detail from the item's message keys, with its fix. */
-function GateGroup({ title, items, tone, onFix }: { title: string; items: GateItem[]; tone: "error" | "warning"; onFix: (fix: CheckFix | undefined) => void }) {
+function GateGroup({
+  title,
+  items,
+  tone,
+  onFix,
+  repairable,
+  onRepair,
+}: {
+  title: string;
+  items: GateItem[];
+  tone: "error" | "warning";
+  onFix: (fix: CheckFix | undefined) => void;
+  repairable: (item: GateItem) => boolean;
+  onRepair: (item: GateItem) => void;
+}) {
   const t = useT();
   if (!items.length) return null;
-  const rows: CheckItem[] = items.map((item, i) => {
+  const rows: RepairableItem[] = items.map((item, i) => {
     const known = messageOf(item.title) !== undefined;
     const prefix = item.id.split(":")[0] ?? "";
     return {
@@ -342,6 +377,7 @@ function GateGroup({ title, items, tone, onFix }: { title: string; items: GateIt
       title: known ? t(item.title, item.vars) : (GATE_FALLBACK[prefix] ?? "This needs a change before publishing"),
       detail: item.detail && messageOf(item.detail) !== undefined ? t(item.detail, item.vars) : undefined,
       fix: gateFix(item) ?? undefined,
+      ...(repairable(item) ? { repair: () => onRepair(item) } : {}),
     };
   });
   return <CheckGroup title={title} items={rows} tone={tone} onFix={onFix} />;

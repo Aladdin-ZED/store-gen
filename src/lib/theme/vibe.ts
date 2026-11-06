@@ -22,6 +22,8 @@ import { parseExtractedPalette } from "./extract";
 import { accentPopClean, cleanAccentPop, HARMONY_RECIPES, leaveOrange, pageBackground, shapeAccent } from "./palette";
 import { pick, pickWeighted, range, rngFor, shuffle } from "./rng";
 import type { ArchetypeScore, ExtractedPalette, ThemeFromProductInput } from "./types";
+// the Arabic proclitics stripped before stem matching: the one list of the copy normaliser (design.md DES-§9.1)
+import { AR_PREFIXES } from "@/lib/design/text/normalize";
 
 type Table = Partial<Record<Archetype, number>>;
 
@@ -187,9 +189,6 @@ const KEYWORD_GROUPS: readonly KeywordGroup[] = [
     deltas: { field: 0.35, souk: 0.28, hearth: 0.08 },
   },
 ];
-
-/** Arabic proclitics stripped before stem matching (the article, and/with/for…). */
-const AR_PREFIXES = ["وال", "بال", "فال", "كال", "لل", "ال", "و", "ب", "ل", "ف", "ك"];
 
 /**
  * Lowercase, fold Latin accents (NFKD + combining marks), and normalize Arabic: harakat, hamza marks
