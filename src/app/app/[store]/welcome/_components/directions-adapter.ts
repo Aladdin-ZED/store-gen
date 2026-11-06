@@ -8,8 +8,9 @@
  * stock, no review is ever put on it. No model runs here (core D59): the generator is pure browser code.
  */
 import { buildRevealDirections, type RevealInput } from "@/components/generate/reveal/directions";
-import type { RevealDirections } from "@/components/generate/reveal/RevealFolds";
+import type { RevealDirection, RevealDirections } from "@/components/generate/reveal/RevealFolds";
 import type { PhotoFacts } from "@/lib/design/photo-facts";
+import { toCents } from "@/lib/page/money";
 import type { Locale, ProductCategory } from "@/lib/page/schema";
 import type { ExtractedPalette } from "@/lib/theme";
 import { keptCompareAt } from "./flow-logic";
@@ -54,7 +55,20 @@ export function revealInputOf(draft: RevealDraft, c: RevealContext): RevealInput
   };
 }
 
+/**
+ * Honesty (PD23, PLA-§22.2 "only the owner-typed price"): the generator suggests packs (2 for …, 3 for …) with their
+ * "popular" / "best" badges, prices the owner never typed. The reveal keeps the one-piece offer at the typed price; the
+ * owner adds packs in the builder. A direction without such an offer is left as the generator made it.
+ */
+export function typedOffersOnly(d: RevealDirection, priceMinor: number): RevealDirection {
+  const bundles = d.doc.offers.bundles;
+  const single = bundles.filter((o) => o.lines.reduce((n, l) => n + l.qty, 0) === 1 && toCents(o.price) === priceMinor);
+  if (!single.length || (single.length === bundles.length && single.every((o) => o.badge === "none"))) return d;
+  return { ...d, doc: { ...d.doc, offers: { ...d.doc.offers, bundles: single.map((o) => ({ ...o, badge: "none" as const })) } } };
+}
+
 /** The three directions of one round (P6's call; rejects when the generator refuses the product). */
-export function loadRevealDirections(draft: RevealDraft, c: RevealContext): Promise<RevealDirections> {
-  return buildRevealDirections(revealInputOf(draft, c));
+export async function loadRevealDirections(draft: RevealDraft, c: RevealContext): Promise<RevealDirections> {
+  const [a, b, d] = await buildRevealDirections(revealInputOf(draft, c));
+  return [typedOffersOnly(a, draft.priceMinor), typedOffersOnly(b, draft.priceMinor), typedOffersOnly(d, draft.priceMinor)];
 }

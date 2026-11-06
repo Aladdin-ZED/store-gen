@@ -1778,6 +1778,10 @@ async function welcomeChecks(): Promise<void> {
   check("no rating, stock or review is put on the product", !["rating", "stock", "reviews", "sold"].some((k) => k in product));
   check("the typed fact is the only fact", input.facts.join() === "100 ml" && A.revealInputOf({ ...draft, fact: null }, ctxOf).facts.length === 0);
   check("the photos are the draft's", JSON.stringify(product.images) === JSON.stringify([{ id: "a1b2c3d4e5f6a7b8", alt: "" }]) && input.seedBase === 7 && input.category === "beauty");
+  const packs = { id: "bloom", label: "Bloom", card: null, doc: { offers: { bundles: [{ lines: [{ qty: 1 }], price: 149, badge: "none" }, { lines: [{ qty: 2 }], price: 269, badge: "popular" }, { lines: [{ qty: 3 }], price: 349, badge: "best" }] } } } as unknown as Parameters<typeof A.typedOffersOnly>[0];
+  const kept = A.typedOffersOnly(packs, 14_900).doc.offers.bundles;
+  check("the reveal keeps the one-piece offer at the typed price, never a suggested pack or badge", kept.length === 1 && kept[0]!.price === 149 && kept[0]!.badge === "none", kept);
+  check("a direction without a typed one-piece offer is left as made", A.typedOffersOnly(packs, 15_000) === packs);
   const base = W.revealSeed("brand-seed-1");
   check("the seed is stable per store and differs per round", base === W.revealSeed("brand-seed-1") && base !== W.revealSeed("brand-seed-2") && new Set([0, 1, 2].map((r) => W.roundSeed(base, r))).size === 3 && W.roundSeed(base, 5) < 2_147_483_647);
 

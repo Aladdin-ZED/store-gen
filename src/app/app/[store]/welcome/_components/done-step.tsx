@@ -62,7 +62,7 @@ export function DoneStep({ view: v, pageId, canPages, mode }: DoneStepProps) {
               </p>
             </div>
             {pageId && canPages && (
-              <Link href={href(`/pages/${pageId}/edit`)} className={cn(buttonVariants({ size: "lg" }), "h-12 justify-self-start rounded-full px-6 text-[0.95rem]", FOCUS_RING)}>
+              <Link href={href(`/pages/${pageId}/edit`)} className={cn(buttonVariants({ size: "lg", variant: "outline" }), "h-12 justify-self-start rounded-full px-6 text-[0.95rem]", FOCUS_RING)}>
                 <PencilRulerIcon aria-hidden="true" />
                 {tr("onboarding.reveal.builder")}
               </Link>

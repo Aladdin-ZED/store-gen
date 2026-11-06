@@ -366,7 +366,10 @@ export function WelcomeFlow(p: WelcomeFlowProps) {
                 <label className="adm-surface flex cursor-pointer items-center justify-between gap-4 px-4 py-3.5">
                   {/* the masked number is isolated left to right inside the sentence (LRI … PDI), so ar keeps its order */}
                   <span className="text-[0.95rem] leading-snug">{t("onboarding.contact.use_phone", { phone: `\u2066${p.phoneMasked}\u2069` })}</span>
-                  <Switch checked={useOwn} onCheckedChange={(on) => setUseOwn(on)} />
+                  {/* ui/switch moves its thumb with a physical translate: kept left to right until CCR r1-p2-9 §2 lands */}
+                  <span dir="ltr" className="inline-flex shrink-0">
+                    <Switch checked={useOwn} onCheckedChange={(on) => setUseOwn(on)} />
+                  </span>
                 </label>
               )}
               {!useOwn && (

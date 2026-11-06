@@ -169,7 +169,7 @@ export function PhotoStrip({ slots, onFiles, onRemove, onRetry }: { slots: reado
           </li>
         )}
       </ul>
-      <p className="min-h-5 text-[0.8rem] text-muted-foreground" aria-live="polite">
+      <p className={cn("text-[0.8rem] text-muted-foreground", slots.length ? "min-h-5" : "sr-only")} aria-live="polite">
         {uploading > 0 ? (
           <span className="inline-flex items-center gap-1.5">
             <Loader2Icon className="size-3.5 animate-spin" aria-hidden="true" />
