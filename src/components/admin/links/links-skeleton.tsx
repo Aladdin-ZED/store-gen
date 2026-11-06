@@ -1,8 +1,9 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-/** The column template of the links list on wide screens (header, rows and skeleton share it). */
-export const LINK_COLUMNS = "xl:grid-cols-[minmax(8rem,1.1fr)_minmax(8rem,1.3fr)_minmax(5rem,0.7fr)_minmax(7rem,1.1fr)_4rem_6rem_5.5rem_auto]";
+/** The column template of the links list on wide screens (header, rows and skeleton share it; every track has a fixed
+ * floor or width, so the header row, whose actions cell is empty, lines up with the link rows). */
+export const LINK_COLUMNS = "xl:grid-cols-[minmax(8rem,1.1fr)_minmax(8rem,1.3fr)_minmax(5rem,0.7fr)_minmax(7rem,1.1fr)_4rem_6rem_5.5rem_7.5rem]";
 
 /**
  * Placeholder rows in the final shape of the links list: two lines on a phone (code and clicks, then target and
