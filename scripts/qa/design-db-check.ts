@@ -35,6 +35,14 @@
  *  - reservation transitions (suspend, restore, close, purge, expiry), retention and the cap, the backfill;
  *  - two stores' identical cart templates: no pool row and no N1; designHealth and the design search.
  *
+ * Step 13 adds the brand kit (BK-1, DES-§12, DS17):
+ *  - the brand actions are `storeAction("brand.write", …)` (each exported action of src/app/app/[store]/brand);
+ *  - `bindLogo` refuses another store's asset (`assertOwned` → not_found), an SVG and a < 256 px file; binds a raster
+ *    logo with `colors.fromLogo` allowed and ≤ 6, `asset_refs` (owner_kind 'brand') = the logo slots, unbind clears them;
+ *  - an orange accent is stored moved with its ColorMove; an unknown gene value is dropped and named;
+ *  - a logo change enqueues one `render_jobs` row (reason 'brand') per live page once P8's `enqueueRenders` is in
+ *    (its P0 stub throws: the write stands and the queue is left to P8's merge).
+ *
  *   npm run test:design-db [-- --db cod_test_p6_design] [--keep]
  *
  * Creates a throwaway database on the local MariaDB (root, no password, 127.0.0.1:3306; the name must be cod_test_*),
@@ -209,6 +217,7 @@ async function main() {
 
   await noveltyChecks();
   await publishChecks();
+  await brandChecks();
 
   console.log(`design-db: ${pass} passed, ${failures.length} failed`);
   for (const f of failures) console.log(`  ✗ ${f}`);
@@ -830,6 +839,96 @@ async function publishChecks() {
   const revived = await J.backfillStore(bf, 50);
   ok("backfill revives the current version's row instead of deriving a new one", revived.done === 1 && (await db.select({ id: designGenomes.id }).from(designGenomes).where(eq(designGenomes.storeId, ids[17]!))).length === 2 && (await G.pageGenomes(bf, bp[0]!.pageId))[0]!.live);
   ok("the shingles verify job finds nothing to rewrite right after the backfill", (await H.verifyShingles(bf)) === 0);
+}
+
+/* ------------------------------------------------------------------ */
+/* step 13: the brand kit (BK-1)                                       */
+/* ------------------------------------------------------------------ */
+
+async function brandChecks() {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const { eq, and } = load<typeof import("drizzle-orm")>("drizzle-orm");
+  const { assets, assetRefs, pages, renderJobs, stores } = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId, newPublicKey } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const { systemCtx, systemScope } = load<typeof import("@/lib/jobs/scope")>("@/lib/jobs/scope");
+  const { getFixture } = load<typeof import("@/lib/page/fixtures")>("@/lib/page/fixtures");
+  const { getStoreSetting } = load<typeof import("@/lib/settings")>("@/lib/settings");
+  const { nearOrange, toOklch } = load<typeof import("@/lib/theme/color")>("@/lib/theme/color");
+  const K = load<typeof import("@/lib/design/brand-kit.server")>("@/lib/design/brand-kit.server");
+
+  // the actions: every export is storeAction("brand.write", …)
+  const src = readFileSync(join(__dirname, "..", "..", "src", "app", "app", "[store]", "brand", "actions.ts"), "utf8");
+  const exported = [...src.matchAll(/export async function (\w+)/g)].map((m) => m[1]);
+  const guarded = [...src.matchAll(/return storeAction\(\s*"brand\.write"/g)].length;
+  ok("every brand action requires brand.write", exported.length === 5 && guarded === exported.length, { exported, guarded });
+
+  const S1 = "0000000000000000000000BR01";
+  const S2 = "0000000000000000000000BR02";
+  for (const [id, handle] of [
+    [S1, "brand-a"],
+    [S2, "brand-b"],
+  ] as const)
+    await db.insert(stores).values({ id, handle, name: handle, status: "active", brandSeed: "0123456789abcdef", category: "skincare" });
+  const ctx = systemCtx("qa.design_db");
+  const A = systemScope(ctx, S1);
+  const B = systemScope(ctx, S2);
+  const actor = { id: "system", ip: null };
+  const asset = async (storeId: string, opts: { mime?: string; w?: number; alpha?: boolean } = {}) => {
+    const id = newId().toLowerCase().replace(/[^a-f0-9]/g, "a").padEnd(32, "a").slice(0, 32);
+    await db.insert(assets).values({
+      id,
+      storeId,
+      kind: "image",
+      mime: opts.mime ?? "image/png",
+      width: opts.w ?? 512,
+      height: opts.w ?? 512,
+      bytes: 1000,
+      alpha: opts.alpha ?? true,
+      dominant: "#1d4f45",
+      palette: { colors: [{ hex: "#e07a2f", weight: 0.5, chroma: 0.15, lightness: 0.6, hue: 50 }, { hex: "#1d4f45", weight: 0.4, chroma: 0.06, lightness: 0.4, hue: 170 }], background: null, transparent: true, colorfulness: 0.3, brightness: 0.4, warmth: 0 } as never,
+      variants: [{ key: `${id}-512.webp`, w: 512, h: 512, fmt: "webp" }] as never,
+    });
+    return id;
+  };
+  const logoA = await asset(S1);
+  const logoB = await asset(S2);
+  const svg = await asset(S2, { mime: "image/svg+xml" });
+  const tiny = await asset(S2, { w: 120 });
+  const code = async (f: () => Promise<unknown>) => {
+    try {
+      await f();
+      return "ok";
+    } catch (err) {
+      return (err as { code?: string }).code ?? "error";
+    }
+  };
+  ok("B binding A's asset answers not_found", (await code(() => K.bindLogo(B, actor, "MAD", "primary", logoA))) === "not_found");
+  ok("an SVG and a < 256 px file are refused", (await code(() => K.bindLogo(B, actor, "MAD", "primary", svg))) !== "ok" && (await code(() => K.bindLogo(B, actor, "MAD", "primary", tiny))) !== "ok");
+
+  // two live pages for the identity re-render
+  const doc = getFixture("massage").doc;
+  for (let i = 0; i < 2; i++) {
+    const pageId = newId();
+    await db.insert(pages).values({ storeId: S2, id: pageId, slug: `br-${i}`, name: `p${i}`, status: "published", locale: doc.locale, publicKey: newPublicKey(), draft: doc as never });
+  }
+  const bound = await K.bindLogo(B, actor, "MAD", "primary", logoB);
+  ok("a raster logo binds with an allowed palette ≤ 6", bound.view.brand.logo.primary === logoB && bound.view.brand.colors.fromLogo.length >= 1 && bound.view.brand.colors.fromLogo.length <= 6 && bound.view.brand.colors.fromLogo.every((h) => !nearOrange(toOklch(h))), bound.view.brand.colors);
+  const refs = await db.select().from(assetRefs).where(and(eq(assetRefs.storeId, S2), eq(assetRefs.ownerKind, "brand")));
+  ok("asset_refs (owner_kind brand) = the bound logo, live", refs.length === 1 && refs[0]!.assetId === logoB && refs[0]!.live && refs[0]!.ownerId === "brand", refs);
+  const jobs = await db.select().from(renderJobs).where(and(eq(renderJobs.storeId, S2), eq(renderJobs.reason, "brand")));
+  // P8's enqueueRenders is a throwing stub until its merge: 0 rows then, one per live page after
+  ok("the identity change queues one brand render per live page (after P8), never a row of another store", jobs.length === 0 || jobs.length === 2, { jobs: jobs.length });
+  ok("A's brand is untouched", (await getStoreSetting(A, "brand")).logo.primary === null);
+
+  const moved = await K.saveColors(B, actor, "MAD", { role: "accent", value: "#e07a2f" });
+  const stored = await getStoreSetting(B, "brand");
+  ok("an orange accent is stored moved with its ColorMove", !!moved.moved && stored.colors.accent !== "#e07a2f" && !nearOrange(toOklch(stored.colors.accent!)) && stored.colors.moves.some((m) => m.role === "accent" && m.from === "#e07a2f" && m.to === stored.colors.accent), stored.colors);
+  const genes = await K.saveGenes(B, actor, "MAD", { G9: "duotone", G1: "not-a-vibe" });
+  ok("an unknown gene value is dropped and named", genes.dropped.includes("G1=not-a-vibe") && (await getStoreSetting(B, "brand")).genes.G9 === "duotone" && !(await getStoreSetting(B, "brand")).genes.G1, genes.dropped);
+  await K.bindLogo(B, actor, "MAD", "primary", null);
+  ok("unbinding clears the brand refs", (await db.select().from(assetRefs).where(and(eq(assetRefs.storeId, S2), eq(assetRefs.ownerKind, "brand")))).length === 0);
 }
 
 main()

@@ -12,6 +12,28 @@ import type { WriteScope } from "@/lib/tenancy/types";
 
 export const cases: TenancyCase[] = [
   {
+    // DES-§12.5, core §E.3 rule 5 (step 13): B binds A's asset id as its logo → not_found, and nothing of A changes
+    name: "design: B binds A's asset as its logo and gets not_found; B's brand refs stay B's",
+    async run({ check, scope, fx, snapshotA }) {
+      const K = await import("@/lib/design/brand-kit.server");
+      const B = scope("B", "system") as WriteScope;
+      const before = await snapshotA();
+      let code: string | null = null;
+      try {
+        await K.bindLogo(B, { id: "system", ip: null }, "MAD", "primary", fx.A.asset.photo);
+      } catch (err) {
+        code = (err as { code?: string }).code ?? (err instanceof Error ? err.message : String(err));
+      }
+      check("binding A's asset answers not_found", code === "not_found", { code });
+      check("A's rows are unchanged", (await snapshotA()) === before);
+      const { db } = await import("@/lib/db/client");
+      const { assetRefs } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+      const refs = await db.select().from(assetRefs).where(eq(assetRefs.assetId, fx.A.asset.photo));
+      check("no brand ref of B points at A's asset", refs.every((r) => r.storeId !== B.storeId), refs.length);
+    },
+  },
+  {
     // DES-§2.2, §22 (step 7): headline_shingles has no store id; a store's sync writes only its own owner tag from its
     // own live pages; the cross-store check answers { verdict, band } and never an owner tag, a count or a number
     name: "design: headline shingles are written by owner tag only, and the check never names another store",
@@ -241,5 +263,57 @@ export const actions: TrackActionCase[] = [
     write: true,
     victim: () => [{ gene: "G9", on: true, value: "duotone" }],
     own: () => [{ gene: "G9", on: false, value: null }],
+  },
+  // step 13: the brand page (brand.write). The logo bind names A's asset: `assertOwned` answers not_found; the other
+  // writes name no record (the store is the request's) and write only the caller's own `brand` / `store_ai` keys
+  {
+    file: "src/app/app/[store]/brand/actions.ts",
+    name: "bindLogoAction",
+    area: "settings",
+    path: "/brand",
+    permission: ["brand.write"],
+    write: true,
+    victim: (fx) => [{ slot: "primary", assetId: fx.A.asset.photo }],
+    own: () => [{ slot: "mark", assetId: null }],
+  },
+  {
+    file: "src/app/app/[store]/brand/actions.ts",
+    name: "saveBrandColorAction",
+    area: "settings",
+    path: "/brand",
+    permission: ["brand.write"],
+    write: true,
+    victim: () => [{ role: "accent", value: "#1d4f45" }],
+    own: () => [{ role: "accent", lock: false }],
+  },
+  {
+    file: "src/app/app/[store]/brand/actions.ts",
+    name: "saveBrandFontsAction",
+    area: "settings",
+    path: "/brand",
+    permission: ["brand.write"],
+    write: true,
+    victim: () => [{ pairing: null }],
+    own: () => [{ locked: false }],
+  },
+  {
+    file: "src/app/app/[store]/brand/actions.ts",
+    name: "saveBrandGenesAction",
+    area: "settings",
+    path: "/brand",
+    permission: ["brand.write"],
+    write: true,
+    victim: () => [{ G9: "duotone" }],
+    own: () => [{ G9: null }],
+  },
+  {
+    file: "src/app/app/[store]/brand/actions.ts",
+    name: "saveBrandVoiceAction",
+    area: "settings",
+    path: "/brand",
+    permission: ["brand.write"],
+    write: true,
+    victim: () => [{ darija: "cta" }],
+    own: () => [{ darija: "cta" }],
   },
 ];
