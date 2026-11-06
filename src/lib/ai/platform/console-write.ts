@@ -619,8 +619,8 @@ export async function retryBatchItems(ctx: PlatformCtx, input: unknown): Promise
     .set({ state: "queued", batchId: null })
     .where(and(eq(aiBatchItems.batchId, batchId), inArray(aiBatchItems.state, ["errored", "expired", "dropped"])));
   const items = (res as { affectedRows?: number }).affectedRows ?? 0;
-  // audited under its own name once CCR r1-p7-15 adds `platform.ai.batch_retried` to the shared union
-  await auditFrom(ctx, "platform.ai.settings_changed", { target: batchId, meta: { op: "batch_retry", items } });
+  // audited under its own name (CCR r1-p7-15)
+  await auditFrom(ctx, "platform.ai.batch_retried", { target: batchId, meta: { items } });
   return done({ items });
 }
 

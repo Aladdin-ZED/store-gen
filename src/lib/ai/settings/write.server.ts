@@ -175,7 +175,7 @@ export function startProbe(ctx: StoreCtx, input: unknown): Promise<{ jobId: stri
   return once(ctx.scope.storeId, key, async () => {
     const r = await enqueueProbeJob(ctx);
     if (!r.ok) return fail(r.code === "forbidden" ? "ai.settings.probe.staff_only" : "ai.settings.readonly.impersonation");
-    await auditFrom(ctx, "platform.ai.probe_recorded", { target: r.jobId, meta: { phase: "started", kind: "detached_job" } });
+    await auditFrom(ctx, "platform.ai.probe_started", { target: r.jobId, meta: { kind: "detached_job" } });
     return { jobId: r.jobId };
   });
 }

@@ -999,6 +999,10 @@ export interface Fresh {
   invite(store: StoreFx): Promise<string>;
   /** a new user, member of the store with `role` (user id) */
   member(store: StoreFx, role: Role): Promise<string>;
+  /** a finished ai_runs row of the store, no customer column (CCR r1-p7-11) */
+  aiRunOf(store: StoreFx): Promise<string>;
+  /** a queued probe job of the store (sleep stages, no model, no credit), read with advance=0 (CCR r1-p7-11) */
+  aiJobOf(store: StoreFx): Promise<string>;
   updatedAt(pageId: string): Promise<number>;
   doc(store: StoreFx, opts?: { assetId?: string }): Promise<unknown>;
 }
@@ -1070,7 +1074,6 @@ export const ACTION_CASES: ActionCase[] = [
   // settings
   act(SETTINGS, "saveStoreAction", "settings", "/settings/general", "settings.write", true, (fx) => [storeForm(fx.A, fx.A.asset.photo)], (fx) => [storeForm(fx.B)]),
   act(SETTINGS, "saveDefaultsAction", "settings", "/settings/market", "settings.write", true, () => [{ market: "MA", locale: "fr", currency: "MAD", phoneCountry: "MA", shippingFee: 0, deliveryText: "Livraison 48h" }], () => [{ market: "MA", locale: "ar", currency: "MAD", phoneCountry: "MA", shippingFee: 0, deliveryText: "" }]),
-  act(SETTINGS, "saveAiAction", "settings", "/settings/ai", "settings.write", true, () => [{ enabled: false, tier: "lite", bgRemoval: false }], () => [{ enabled: true, tier: "lite", bgRemoval: true }]),
   act(SETTINGS, "loadAuditAction", "audit", "/settings/audit", "audit.read", false, (fx) => [{ beforeId: fx.A.auditId + 1 }], () => [{}]),
   // the store's export key
   act(SHEETS, "saveExportKeyAction", "sheets", "/integrations/sheets", "integrations.manage", true, () => [serviceAccountJson("attack@other.iam.gserviceaccount.com")], () => [serviceAccountJson("own@b.iam.gserviceaccount.com")]),
@@ -1373,6 +1376,25 @@ function freshFactory(fx: Fixtures): Fresh {
       await db.insert(S.storeMembers).values({ storeId: store.id, userId: id, role });
       return register(store, id);
     },
+    async aiRunOf(store) {
+      const { insertRun } = load<typeof import("@/lib/ai/store/runs")>("@/lib/ai/store/runs");
+      const { sha256Hex } = load<typeof import("@/lib/ai/prompts/sha256")>("@/lib/ai/prompts/sha256");
+      const id = await insertRun(writeScope(store.id), { userId: store.members.owner, task: "copy.hero", provider: "server", via: "interactive",
+        inputHash: sha256Hex(`sweep-${store.id}-${randomBytes(4).toString("hex")}`), finished: { status: "ok", ms: 1, credits: 0, costMicros: 0, output: { headline: "sweep" } } });
+      return register(store, id);
+    },
+    async aiJobOf(store) {
+      const { insertJob } = load<typeof import("@/lib/ai/store/jobs")>("@/lib/ai/store/jobs");
+      const { probePlan } = load<typeof import("@/lib/ai/jobs/stages")>("@/lib/ai/jobs/stages");
+      const { sha256Hex } = load<typeof import("@/lib/ai/prompts/sha256")>("@/lib/ai/prompts/sha256");
+      const plan = probePlan(2_000, 1_000);
+      const id = newId();
+      await insertJob(writeScope(store.id), { id, kind: "probe", task: "probe.sleep", inputHash: sha256Hex(`sweep-job|${id}`),
+        progress: { done: 0, total: plan.stages.length, stages: {}, plan: plan.stages.map((st) => st.id) }, class: "director_deep",
+        doc: { runIds: [], input: { totalMs: 2_000, stageMs: 1_000 }, plan: [...plan.stages], reservation: null },
+        reservedCredits: 0, createdBy: store.members.owner, now: new Date() });
+      return register(store, id);
+    },
     async updatedAt(pageId) {
       const [r] = await db.select({ u: S.pages.updatedAt }).from(S.pages).where(eq(S.pages.id, pageId)).limit(1);
       return r?.u.getTime() ?? 0;
@@ -1624,6 +1646,23 @@ export async function callRoute(
   });
 }
 
+/** A pulse answer without `body.counts` (timing-bound contributors, see the route sweep). */
+function withoutPulseCounts(x: unknown): unknown {
+  if (!x || typeof x !== "object" || !("body" in x)) return x;
+  const body = (x as { body: unknown }).body;
+  if (!body || typeof body !== "object") return x;
+  const { counts: _counts, ...rest } = body as Record<string, unknown>;
+  return { ...(x as object), body: rest };
+}
+
+/** The JSON paths where two answers differ (the failure detail of a "same answer" check). */
+function diffPaths(a: unknown, b: unknown, at = "", out: string[] = []): string[] {
+  if (out.length >= 8) return out;
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) diffPaths((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${at}.${k}`, out);
+  } else if (JSON.stringify(a) !== JSON.stringify(b)) out.push(`${at}: ${String(JSON.stringify(a)).slice(0, 60)} ≠ ${String(JSON.stringify(b)).slice(0, 60)}`);
+  return out;
+}
 const routeAnswer = (o: Outcome<RouteAnswer>) => (o.ok ? { status: o.value!.status, location: o.value!.location, body: normalizeBody(o.value!.body) } : answerOf(o));
 function normalizeBody(body: string): unknown {
   try {
@@ -1746,7 +1785,11 @@ export async function routeSuite(kit: Kit): Promise<void> {
         const real = await callRoute(armed(who.userId), route, method, { store: fx.B.handle, ...ids }, plan);
         const ghost = await callRoute(armed(who.userId), route, method, { store: fx.B.handle, ...ghostify(fx, ids) }, ghostify(fx, plan));
         const lb = `${method} ${route.template} · ${who.label} · B's handle, A's ids`;
-        if (ranReal(lb, real, ghost)) check(`${lb}: same answer as a missing id`, text(routeAnswer(real)) === text(unghost(fx, routeAnswer(ghost))), { real: routeAnswer(real), ghost: routeAnswer(ghost) });
+        // the pulse's contributor counts are B's own and each answers within 50 ms or is left out (pulse/compose.ts), so
+        // two identical requests may differ there on a loaded machine (seen at the P7 merge): compared without them;
+        // the leak check below still reads the whole body
+        const stable = (x: unknown) => (route.template === "/api/app/[store]/pulse" ? withoutPulseCounts(x) : x);
+        if (ranReal(lb, real, ghost)) check(`${lb}: same answer as a missing id`, text(stable(routeAnswer(real))) === text(stable(unghost(fx, routeAnswer(ghost)))), { differs: diffPaths(stable(routeAnswer(real)), stable(unghost(fx, routeAnswer(ghost)))), real: routeAnswer(real) });
         const leaked = leaks(fx, routeAnswer(real), { sent: [plan, ids] });
         check(`${lb}: no canary of A`, leaked.length === 0, leaked);
       }
@@ -1785,6 +1828,9 @@ async function ownRoutePlan(fx: Fixtures, fresh: Fresh, method: string, template
   if (key === "DELETE /api/app/[store]/media") return { ids: {}, plan: { query: { id: await fresh.asset(B), force: "1" } } };
   if (key === "DELETE /api/app/[store]/export/[id]") return { ids: { id: await fresh.exportOf(B) }, plan: {} };
   if (key === "GET /api/app/[store]/exports/[jobId]/[part]") return { ids: { jobId: B.exportJob, part: "1" }, plan: { query: { t: B.exportToken } } };
+  // CCR r1-p7-11: B's own run and job, read-only (advance=0 never runs a stage inside the sweep)
+  if (key === "GET /api/app/[store]/ai/runs/[id]") return { ids: { id: await fresh.aiRunOf(B) }, plan: { query: { after: "-1" } } };
+  if (key === "GET /api/app/[store]/ai/jobs/[id]") return { ids: { id: await fresh.aiJobOf(B) }, plan: { query: { advance: "0" } } };
   const plans: Record<string, RoutePlan> = {
     "GET /api/app/[store]/media": { query: { sourceAssetId: B.asset.photo } },
     "POST /api/app/[store]/media": { multipart: true },
@@ -1947,6 +1993,16 @@ export async function pageSuite(kit: Kit): Promise<void> {
     const dataFree = page.kind === "layout" && !/requireStoreMember\(|memberCtx\(/.test(source);
     const name = `${page.template}${page.kind === "layout" ? " (layout)" : ""}`;
     const ids: Record<string, string> = page.template.includes("[id]") ? { id: fx.A.page.live } : {};
+    // CCR r1-p7-12: a page that gates itself on a test seam before the store seam (the AI component harness) answers
+    // the neutral 404 to every caller while the seam is off, A's owner included; its positive controls do not apply
+    const seamGate = /if \(!testSeam\("[a-z-]+"\)\) notFound\(\);/.exec(source);
+    if (seamGate && !source.slice(0, seamGate.index).includes("requireStoreMember({")) {
+      for (const who of [{ userId: fx.A.members.owner, label: "A owner" }, ...attackers(fx)]) {
+        const r = await renderPage({ userId: who.userId }, page, { store: fx.A.handle, ...ids });
+        check(`${name} · ${who.label} · seam off: 404`, r.kind === "notFound", r);
+      }
+      continue;
+    }
     // A's owner: the screen renders and carries A's data (the scan below is not blind)
     const mine = await renderPage({ userId: fx.A.members.owner }, page, { store: fx.A.handle, ...ids });
     const sees = ownerSees(fx, page.template);

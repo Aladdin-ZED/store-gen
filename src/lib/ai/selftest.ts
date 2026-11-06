@@ -29,7 +29,7 @@
  * prompts-registry, prompts-text, prompts-blocks, prompts-voice, prompts-policies, prompts-canary, prompts-isolation,
  * prompts-pii, prompts-fixtures, prompts-library (and prompts-strict).
  * Sections (step 5, the eval harness v1; ./selftest-eval.ts): eval-pairwise, eval-gate, eval-canary, eval-jury,
- * eval-scorers, eval-scorecard, eval-recorded, novelty-pass (and, with --slow, eval-niche-corpus).
+ * eval-scorers, eval-scorecard, eval-recorded, novelty-pass (and, with --slow, eval-recorded-gate and eval-niche-corpus).
  * Sections (step 6, the policy; ./selftest-policy.ts): policy-order. The metering, the repositories and aiPolicyFor
  * against a database are test:ai-db (scripts/qa/ai-db-check.ts).
  * Sections (step 7, the server provider; ./selftest-server.ts): server-errors, server-breaker, server-semaphore,

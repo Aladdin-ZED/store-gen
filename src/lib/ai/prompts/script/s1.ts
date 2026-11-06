@@ -5,7 +5,7 @@
  * variables ({customer_first_name}, {city}, {address}) the agent console fills per order. Saved as a draft a manager
  * approves.
  */
-import { TEMPLATE_VARS } from "@/lib/integrations/templates";
+import { TEMPLATE_VARS } from "@/lib/integrations/template-lang";
 import { CALL_SCRIPT_LOOSE_JSON, CallScriptLoose, OBJECTION_IDS, OBJECTION_VARS, type CallScriptInput } from "../../schema/tasks/callcenter-script";
 import { LOCALE_NAME, jsonBlock, priceText, text } from "../blocks";
 import { CONSTITUTION, DARIJA_LEVELS, DATA_RULE, HONESTY, OUTPUT_RULE, OWNER_RULES, darijaGuideText, section } from "../common";

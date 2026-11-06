@@ -326,6 +326,25 @@ them (build note item 2), the maintainer runs the timed `npm run test:budget`, a
   with no `baseURL` of its own; `test:security` sections 11 and 12 stay green.
 - Chain `test:ai` into `npm test`; `test:ai-eval`, `test:ai:slow` into `test:slow`; `test:ai-db` into `test:db`;
   `qa:wizard-e2e`, `qa:ai-stream` into `test:e2e`.
+- **Done at the P7 merge (2026-11-06, speed mode):** P7-6 applied (`syncPromptVersions` is boot task step "prompt
+  versions" in src/lib/db/boot-tasks.ts, after the flags seed; test:migrate expects it); P7-7 counted (the
+  `src/lib/ai/platform/**` pin is 44, CCRs r1-p7-8 / r1-p7-15); P7-10 checked (`/admin/ai` and its nav item exist);
+  P7-13 applied (src/components/admin/settings/ai-settings.tsx, `saveAiAction` and its tenancy case deleted, with its
+  admin-motion row); P0-3 applied (the Director `Equals` rows in r1-p0.ts); Review F-1 checked (src/lib/ai/server/client.ts
+  spreads `anthropicEndpoint()`); the suites chained as listed. Deferred to the integration: P7-11 (the onboarding and
+  reveal mounts need the wizard's `useAiTask` / `DirectorPassApi` state wired through P2's and P6's files; the
+  components run in the seam-gated harness), and P6's GH-1 `design.plan` call, which still sends the R1.0 shape (a
+  documented cast in src/components/generate/use-design-run.ts; the server refuses it and the run keeps its drawn
+  directions) until the wizard builds the full `DirectorBrief`. Integration fix: P2's onboarding `analyze` call now
+  sends the photos (`analyzeImagesOf` in welcome/_components/photo-upload.ts) instead of asset ids. Other integration
+  fixes: P7's `TEMPLATE_VARS` imports read the isomorphic `integrations/template-lang` (not the server-only
+  `templates.ts`); P5's template scanner groups "1 299" like guard v2; P2's shell selftest knows the first owner item
+  that replaces an interim one and checks the welcome page code without the lazy worker chunk; test:ai's stale
+  hoursText stub case reads P4's real text, and the recorded copy.page gate comparison (≈ 13 s against P6's real
+  library) moved to `--slow` (test:ai 7.9 s of 15 s); test:tenancy compares the pulse without its timing-bound
+  contributor counts and the ai cases wait for A's rows to settle before a read-only window; qa:action-replay expects
+  the staff-only probe refusal for A's owner. Prompt hashes re-frozen (`freeze.ts --vocab`: director.plan@s1,
+  director.critique@s1 against P6's vocabulary).
 
 ### P6 merge
 

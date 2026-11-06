@@ -9,6 +9,7 @@ import { MAX_INPUT_MB, preparePhoto } from "@/components/generate/photos";
 import { estimateAlpha, type PhotoFacts } from "@/lib/design/photo-facts";
 import { extractPalette, type ExtractedPalette } from "@/lib/theme";
 import { apiHref } from "@/lib/urls";
+import type { AnalyzeImage } from "@/lib/ai/schema/tasks/analyze";
 
 /** The longest side the alpha estimate reads (DES-§4.11: confirmed at 1024 px). */
 const ALPHA_SIDE = 1024;
@@ -134,4 +135,41 @@ export function photoFactsOf(photos: readonly Pick<UploadedPhoto, "width" | "pal
     background: { luminance: p.palette?.brightness ?? 0.5, uniform: p.cutout === "estimated" },
     sharp: false,
   }));
+}
+
+/**
+ * The `analyze` task's images (P7 AI, ai.md AI-§A.3): at most 3 of the library thumbnails, re-encoded in the browser at
+ * ≤ 1,024 px (webp 0.82, jpeg where the browser cannot encode webp), ≤ 400 KB each, base64 without a data: prefix.
+ * A photo that does not load is skipped; [] when none does (the caller then asks nothing).
+ */
+export async function analyzeImagesOf(photos: readonly UploadedPhoto[]): Promise<AnalyzeImage[]> {
+  const out: AnalyzeImage[] = [];
+  for (const ph of photos) {
+    if (out.length >= 3) break;
+    if (!ph.thumbUrl) continue;
+    try {
+      const res = await fetch(ph.thumbUrl, { credentials: "same-origin" });
+      if (!res.ok) continue;
+      const bmp = await createImageBitmap(await res.blob());
+      const k = Math.min(1, 1024 / Math.max(bmp.width, bmp.height, 1));
+      const w = Math.max(1, Math.round(bmp.width * k));
+      const h = Math.max(1, Math.round(bmp.height * k));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d")?.drawImage(bmp, 0, 0, w, h);
+      bmp.close();
+      const encode = (type: string, q: number) => new Promise<Blob | null>((r) => canvas.toBlob(r, type, q));
+      let blob = await encode("image/webp", 0.82);
+      if (!blob || blob.type !== "image/webp" || blob.size > 400_000) blob = await encode("image/jpeg", 0.8);
+      if (!blob || blob.size > 400_000 || (blob.type !== "image/webp" && blob.type !== "image/jpeg")) continue;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      out.push({ mediaType: blob.type === "image/webp" ? "image/webp" : "image/jpeg", data: btoa(bin), w, h });
+    } catch {
+      // a photo that does not load is skipped
+    }
+  }
+  return out;
 }

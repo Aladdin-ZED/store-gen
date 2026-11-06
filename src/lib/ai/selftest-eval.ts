@@ -20,7 +20,8 @@
  *   eval-recorded   the committed recordings: one per family's server seed version, well-formed, synthetic runs
  *                   each with a why, on the current fixtures hash, equal to what ./eval/synthetic.ts writes; the
  *                   groups the acceptance names (injection × 3, misread 4, the Director's 24 core + JPEG, 50 briefs,
- *                   the broken version's 60); the broken version blocked and s1 clean on the same fixtures
+ *                   the broken version's 60)
+ *   eval-recorded-gate (--slow, P7 merge) the broken version blocked and s1 clean on the same fixtures
  *   novelty-pass    rule 13 with a stub check: a high band → one re-ask → still high → the engine line (origin
  *                   engine); the library when the engine has none; a clean re-ask kept; advisory when the check throws;
  *                   only AI lines are checked
@@ -365,19 +366,29 @@ export function registerEvalSections(t: SelftestApi): void {
     check(["pu-bag", "glass-bottle", "polyester-scarf", "plated-ring"].every((k) => fam("copy.page")?.runs[`copy.page/misread-${k}`]), "the 4 misread-material fixtures");
     const judgeFile = fam("judge");
     check(judgeFile?.runs["judge/core-blender-en-verbosity"]?.[0]?.swapped === true, "the verbosity pair, shown swapped");
-
-    // the broken version is blocked; s1 is clean on the same 60 fixtures (the full proof prints in test:ai-eval)
     const broken = readRecorded("copy.page", BROKEN_VERSION);
-    const s1 = fam("copy.page");
-    const base = readBaseline("copy.page");
-    if (!broken || !s1 || !base) return void check(false, "the broken version, s1 and the copy.page baseline are committed");
-    const only = new Set(Object.keys(broken.runs));
-    eq(only.size, BROKEN_SIZE, "the broken version is recorded over 60 fixtures");
-    const b = evaluate(broken, base, { only });
-    const ok = evaluate(s1, base, { only });
-    check(!b.gate.pass && b.gate.hard.some((h) => h.includes("raw output of unplanted")), `the gate blocks the broken version (AI-07 (6)): ${b.gate.hard.join("; ")}`);
-    eq(ok.gate.hard, [], "copy.page@s1 holds every hard metric on the same fixtures");
+    check(broken !== null && readBaseline("copy.page") !== null, "the broken version and the copy.page baseline are committed");
+    eq(Object.keys(broken?.runs ?? {}).length, BROKEN_SIZE, "the broken version is recorded over 60 fixtures");
   });
+
+  // P7 merge: scoring 2 × 60 recordings against P6's real library page takes ≈ 13 s, so the gate comparison runs with
+  // --slow (test:ai:slow) and in test:ai-eval --offline (test:slow), which prints the full proof
+  section(
+    "eval-recorded-gate",
+    () => {
+      // the broken version is blocked; s1 is clean on the same 60 fixtures
+      const broken = readRecorded("copy.page", BROKEN_VERSION);
+      const s1 = readRecorded("copy.page", SEED_VERSIONS["copy.page"].server);
+      const base = readBaseline("copy.page");
+      if (!broken || !s1 || !base) return void check(false, "the broken version, s1 and the copy.page baseline are committed");
+      const only = new Set(Object.keys(broken.runs));
+      const b = evaluate(broken, base, { only });
+      const ok = evaluate(s1, base, { only });
+      check(!b.gate.pass && b.gate.hard.some((h) => h.includes("raw output of unplanted")), `the gate blocks the broken version (AI-07 (6)): ${b.gate.hard.join("; ")}`);
+      eq(ok.gate.hard, [], "copy.page@s1 holds every hard metric on the same fixtures");
+    },
+    { slow: true },
+  );
 
   section("novelty-pass", async () => {
     const high: NoveltyVerdict = { verdict: "ok", band: "high" };

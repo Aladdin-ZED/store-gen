@@ -20,7 +20,7 @@ import { updateStoreProfile } from "@/lib/admin-data/store-profile";
 import { rerenderLive } from "@/lib/landing/rerender.server";
 import { invalidateStoreRender } from "@/lib/render/cache.server";
 import { getStoreSettings, updateStoreSetting } from "@/lib/settings";
-import { AiSettings, DefaultsSettings, StoreSettings, type SettingInput } from "@/lib/settings/schemas";
+import { DefaultsSettings, StoreSettings, type SettingInput } from "@/lib/settings/schemas";
 import { storeAction } from "@/lib/tenancy/seam";
 import type { ActionResult, WriteCtx } from "@/lib/tenancy/types";
 
@@ -106,21 +106,6 @@ export async function saveDefaultsAction(input: SettingInput<"defaults">): Promi
       settingsActor(ctx.actor),
     );
     refreshSettings(ctx.store.handle);
-    return null;
-  });
-}
-
-/* ------------------------------------------------------------------ */
-/* local AI                                                            */
-/* ------------------------------------------------------------------ */
-
-/** Settings → Local AI: the form's `{ enabled, tier, bgRemoval }` are `store_ai`'s local fields (§D.8 step 3). */
-export async function saveAiAction(input: SettingInput<"ai">): Promise<ActionResult<null>> {
-  return storeAction("settings.write", async (ctx) => {
-    const v = AiSettings.parse(input);
-    await updateStoreSetting(ctx.scope, "store_ai", { localEnabled: v.enabled, localTierCeiling: v.tier, bgRemoval: v.bgRemoval }, settingsActor(ctx.actor));
-    refreshSettings(ctx.store.handle);
-    revalidateStore(ctx.store.handle, "/media");
     return null;
   });
 }

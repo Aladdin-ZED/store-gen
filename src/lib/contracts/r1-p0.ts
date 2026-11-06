@@ -22,6 +22,7 @@ import type { AiJobInput, AiJobKind } from "@/lib/ai/jobs/enqueue";
 import type * as aiPulse from "@/lib/ai/jobs/pulse";
 import type { AiPolicy, CloudBlock } from "@/lib/ai/policy";
 import type { AiFailCode, AiFailure, AiOutcome, AiResult, AiRunOpts, AiTaskInput, AiTaskOutput } from "@/lib/ai/provider/types";
+import type { Critique, CritiqueInput, DirectorPlan, DirectorPlanInput } from "@/lib/ai/director/types";
 import type * as aiRouter from "@/lib/ai/router/server";
 import type * as aiSummary from "@/lib/ai/summary.server";
 import type { AiHealth, AiStoreSummary, AiUsageSummary } from "@/lib/ai/summary.server";
@@ -919,6 +920,11 @@ export type P7Router = [
   Assert<Equals<AiProviderId, "server" | "local" | "library">>,
   Assert<Equals<AiTaskInput<"injection.screen">, { text: string; source: "import" | "sheet" | "note" }>>,
   Assert<Equals<AiTaskOutput<"injection.screen">, { suspicious: boolean; reason: string }>>,
+  // P0b P0-3 / CCR r1-p7-5 item 7 (P7 merge): the Director tasks' narrowed shapes
+  Assert<Equals<AiTaskInput<"design.plan">, DirectorPlanInput>>,
+  Assert<Equals<AiTaskOutput<"design.plan">, DirectorPlan>>,
+  Assert<Equals<AiTaskInput<"design.critique">, CritiqueInput>>,
+  Assert<Equals<AiTaskOutput<"design.critique">, Critique>>,
   Assert<Equals<AiOutcome<string>, AiResult<string> | AiFailure>>,
   Assert<
     Equals<

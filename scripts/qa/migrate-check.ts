@@ -887,8 +887,9 @@ interface BootResult {
 
 function bootOk(label: string, r: BootResult, applied: number): void {
   check(`${label}: migrations ${applied ? `applied ${applied}` : "up to date"}`, r.migrate.applied === applied && r.migrate.total === TOTAL, r.migrate);
-  // §H.4 step 5 in order; "legal templates" joined with CCR r1.0-t1-3 item 1 (a no-op while LEGAL_SEED_VERSION = 0)
-  const names = ["published checksums", "store #1 conversion", "protected brands", "legal templates", "flags"];
+  // §H.4 step 5 in order; "legal templates" joined with CCR r1.0-t1-3 item 1 (a no-op while LEGAL_SEED_VERSION = 0);
+  // "prompt versions" joined at the P7 merge (P0b P7-6)
+  const names = ["published checksums", "store #1 conversion", "protected brands", "legal templates", "flags", "prompt versions"];
   check(`${label}: every boot task ran and succeeded`, r.boot.ran && r.boot.steps.map((s) => s.name).join("|") === names.join("|") && r.boot.steps.every((s) => s.ok), r.boot.steps);
   check(`${label}: tenancy gate 0 problems`, r.tenancy.mode === "tenancy" && r.tenancy.problems.length === 0, r.tenancy.problems);
   check(`${label}: offers upgrade gate passes`, r.offersOk);

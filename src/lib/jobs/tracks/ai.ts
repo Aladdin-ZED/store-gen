@@ -20,7 +20,7 @@ import { submitQueued } from "@/lib/ai/batch/submit";
 import { recoverOrphans } from "@/lib/ai/jobs/recover";
 import { aiRetention, reconcileAbandoned } from "@/lib/ai/platform/maintenance";
 import { canaryRollups, raiseAlarms } from "@/lib/ai/platform/rollups";
-import { writeScopeOf } from "@/lib/ai/router/write-scope";
+import { writeScopeOf } from "@/lib/tenancy/seam";
 import { creditNotifications, rollupStoreUsage } from "@/lib/ai/store/usage-daily";
 import type { Job, JobCtx, JobResult } from "../runner";
 import { forEachStore } from "../scope";

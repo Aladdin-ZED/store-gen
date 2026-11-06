@@ -36,7 +36,7 @@ import type { AiFailure, AiResult, AiTaskInput } from "../provider/types";
 import { AI_RATES, aiReportBucket } from "../quota/buckets";
 import { creditsFor } from "../quota/cost";
 import { runServerTask, type ServerTaskOpts } from "../router/run.server";
-import { writeScopeOf } from "../router/write-scope";
+import { writeScopeOf } from "@/lib/tenancy/seam";
 import { aiFlagsFor } from "../server/flags";
 import { getRunFinal, insertReportRows, LocalReport } from "../store/runs";
 import type { AiJobView } from "../store/jobs";

@@ -432,9 +432,9 @@ export function registerGuardSections(t: SelftestApi): void {
     const m11 = mergeAiCopy(lib, promised, none);
     check(m11.rejected.includes("sub") && m11.rejected.includes("cta_text") && m11.copy.cta.text === lib.cta.text, "AI-02 (11): configured: false → every stated hour loses its line");
     check(!/\d{1,2}[:h]\d{2}|dans l'heure/.test(JSON.stringify(m11.copy)), "AI-02 (11): no hours text in the guarded copy");
-    // a saved window with P4's stub hoursText (throws until P4 merges) is "unavailable": no text, no promise
+    // a saved window reads P4's real hoursText (merged before P7; its P0 stub threw and gave no text)
     const saved: EffectiveWindow = { ...fresh.window, configured: true };
-    eq(callingHoursFor(saved, "fr", "fr-MA", new Date(fresh.at), 2).text, null, "a throwing hoursText is unavailable (no text)");
+    eq(callingHoursFor(saved, "fr", "fr-MA", new Date(fresh.at), 2).text, "09:30-13:00, 14:30-21:00", "a saved window states P4's hours text");
     eq(clockTimesIn("09:30-13:00, 14:30-21:00"), [570, 780, 870, 1260], "clockTimesIn reads the hours text");
     eq(policyClaimsIn("On vous appelle dans l'heure.", "fr").map((c) => [c.kind, c.within]), [["call_timing", [1]]], "dans l'heure = within 1");
 

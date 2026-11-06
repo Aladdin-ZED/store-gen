@@ -127,6 +127,15 @@ export function memberWriteCtx(ctx: StoreCtx): WriteCtx {
   return { ...ctx, scope: memberWriteScope(ctx) };
 }
 
+/**
+ * The write scope of a scope the seam minted writable (member, public, system), or null for a read-only one
+ * (impersonation, platform). For the frozen entry points that take a StoreScope and write the store's own rows
+ * (P7 `runAi`, CCR r1-p7-7); a caller treats null as `state`.
+ */
+export function writeScopeOf(scope: StoreScope): WriteScope | null {
+  return scope.kind === "member" || scope.kind === "public" || scope.kind === "system" ? (scope as WriteScope) : null;
+}
+
 /* ------------------------------------------------------------------ */
 /* Errors and results                                                  */
 /* ------------------------------------------------------------------ */

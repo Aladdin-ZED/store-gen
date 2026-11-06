@@ -1277,8 +1277,8 @@ class Lint {
       if (!this.bucket) this.report(call, "L5", "string-bucket", `${ref.name}() takes a string bucket; build it with platformBucket() / storeBucket() (§E.8)`);
       else if (!arg || !this.isUsable(this.checker.getTypeAtLocation(arg)) || !this.checker.isTypeAssignableTo(this.checker.getTypeAtLocation(arg), this.bucket))
         this.report(call, "L5", "string-bucket", `${ref.name}() bucket is not a Bucket; build it with platformBucket() / storeBucket() (§E.8)`);
-    } else if (ref.file === F.platformSeam && ref.name === "platformScope" && !f.startsWith("src/app/admin/") && !f.startsWith("src/lib/platform/"))
-      this.report(call, "L6", "platform-scope", "platformScope() outside src/app/admin/** and src/lib/platform/**");
+    } else if (ref.file === F.platformSeam && ref.name === "platformScope" && !f.startsWith("src/app/admin/") && !f.startsWith("src/lib/platform/") && f !== "src/lib/ai/platform/summary.ts")
+      this.report(call, "L6", "platform-scope", "platformScope() outside src/app/admin/**, src/lib/platform/** and the AI store summary (CCR r1-p7-15)");
     else if (ref.file === F.platformSeam && ref.name === "platformRevealScope") {
       if (!isRevealSite(f)) this.report(call, "L6", "reveal-scope", `platformRevealScope() outside ${REVEAL_SITE}: the staff write scope is recordPlatformReveal's only (D71, PLA-§7.4)`);
       else this.onRevealResult(call);

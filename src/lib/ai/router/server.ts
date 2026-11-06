@@ -23,7 +23,7 @@ import type { AiTaskId } from "../tasks";
 import { aiProbes } from "../server/models";
 import { impersonationInputs, loadPolicyInputs } from "./policy.server";
 import { runServerTask } from "./run.server";
-import { writeScopeOf } from "./write-scope";
+import { writeScopeOf } from "@/lib/tenancy/seam";
 import { AiQueueError, queueStoreOrPlatform } from "../batch/queue";
 
 export interface RunAiServerOpts extends AiRunOpts {

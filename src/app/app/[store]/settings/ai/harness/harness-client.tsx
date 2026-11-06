@@ -63,7 +63,7 @@ const WHY: Record<"fr" | "ar" | "en", [string, string, string]> = {
   ar: ["عمود واضح وصورة كبيرة للقنينة: المنتج كيهضر قبل النص.", "تباين قوي وتصميم على اليمين كيبان مختلف على صفحات العناية.", "تركيب كثيف ومنظم كيبين كل فائدة من النظرة الأولى."],
   en: [
     "A clear column and a large shot of the bottle: the product speaks before the text.",
-    "A bold contrast and a right-aligned layout that stands apart from other skincare pages.",
+    "A bold contrast and an asymmetric layout that stands apart from other skincare pages.",
     "A dense, steady rhythm that shows each benefit at a glance.",
   ],
 };

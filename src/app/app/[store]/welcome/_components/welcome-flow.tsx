@@ -27,13 +27,13 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import type { AiPolicy } from "@/lib/ai/policy";
 import { useAiTask, useDeviceInfo } from "@/lib/ai/router/client";
-import { useT } from "@/lib/i18n/admin/client";
+import { useAdminLocale, useT } from "@/lib/i18n/admin/client";
 import type { MessageKey } from "@/lib/i18n/admin";
 import { PRODUCT_CATEGORIES, type Locale, type Market, type ProductCategory } from "@/lib/page/schema";
 import { cn } from "@/lib/utils";
 import type { RevealContext, RevealDraft } from "./directions-adapter";
 import { canSkip, detailsErrors, keptCompareAt, nextView, parsePrice, previousView, priceText, progressOf, reachedStep, typedWhatsapp, type DetailsDraft, type DetailsField, type FlowStep, type SavedStep } from "./flow-logic";
-import { paletteFromUrl, photoFactsOf, PhotoUploadError, uploadPhoto, type UploadedPhoto } from "./photo-upload";
+import { analyzeImagesOf, paletteFromUrl, photoFactsOf, PhotoUploadError, uploadPhoto, type UploadedPhoto } from "./photo-upload";
 import { DetailsForm, PHOTOS_MAX, PhotosStep, PhotoStrip, type PhotoSlot } from "./step-photos";
 import { RevealStep } from "./step-reveal";
 import { WelcomeHeader } from "./welcome-header";
@@ -219,6 +219,7 @@ export function WelcomeFlow(p: WelcomeFlowProps) {
   /* ---- P7's analyze (suggestions only; the stub answers "disabled") ---- */
   const device = useDeviceInfo();
   const analyze = useAiTask("analyze", { handle: store.handle, policy: p.aiPolicy, device });
+  const adminLocale = useAdminLocale();
   const [suggested, setSuggested] = useState<{ category: ProductCategory | null; name: string | null }>({ category: p.suggestedCategory, name: null });
   const analysed = useRef<string>("");
   const runAnalyze = analyze.run;
@@ -227,13 +228,16 @@ export function WelcomeFlow(p: WelcomeFlowProps) {
     const ids = donePhotos.map((ph) => ph.id).join(",");
     if (analysed.current === ids) return;
     analysed.current = ids;
-    void runAnalyze({ assetIds: donePhotos.map((ph) => ph.id), locale: p.pageLocale }, { surface: "onboarding", locale: p.pageLocale }).then((out) => {
-      if (!out.ok || !out.value || typeof out.value !== "object") return;
-      const v = out.value as { category?: unknown; productName?: unknown; name?: unknown };
-      const name = typeof v.productName === "string" ? v.productName : typeof v.name === "string" ? v.name : null;
-      setSuggested((cur) => ({ category: isCategory(v.category) ? v.category : cur.category, name: name ? name.slice(0, 120) : cur.name }));
-    });
-  }, [view, uploading, donePhotos, runAnalyze, p.pageLocale]);
+    // P7 merge: the analyze task takes the photos themselves (≤ 3, ≤ 1,024 px, base64), not asset ids
+    void analyzeImagesOf(donePhotos)
+      .then((images) => (images.length ? runAnalyze({ images, adminLocale, product: { name: null, category: null } }, { surface: "onboarding", locale: p.pageLocale }) : null))
+      .then((out) => {
+        if (!out || !out.ok || !out.value || typeof out.value !== "object") return;
+        const v = out.value as { category?: unknown; productName?: unknown; name?: unknown };
+        const name = typeof v.productName === "string" ? v.productName : typeof v.name === "string" ? v.name : null;
+        setSuggested((cur) => ({ category: isCategory(v.category) ? v.category : cur.category, name: name ? name.slice(0, 120) : cur.name }));
+      });
+  }, [view, uploading, donePhotos, runAnalyze, p.pageLocale, adminLocale]);
 
   /* ---- steps ---- */
   const reached = reachedStep(saved, view);

@@ -26,7 +26,7 @@ import "server-only";
  * call (each statement takes and returns a pool connection), and the reconcile and the run-row update run after it.
  */
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
-import { writeScopeOf } from "./write-scope";
+import { writeScopeOf } from "@/lib/tenancy/seam";
 import { CURRENT_RELEASE } from "@/lib/auth/permissions";
 import { newId } from "@/lib/db/ids";
 import { notify } from "@/lib/platform/notify";
@@ -121,8 +121,8 @@ const UNBILLED: ReadonlySet<AiFailCode> = new Set<AiFailCode>(["busy", "rate_lim
 /** Failures after which the library is not asked (an invisible task, a bad input, a caller's abort, impersonation). */
 const NO_LIBRARY: ReadonlySet<AiFailCode> = new Set<AiFailCode>(["flag_off", "input_invalid", "cancelled", "state"]);
 
-/** The write scope of a run (./write-scope.ts; CCR r1-p7-7). */
-export { writeScopeOf } from "./write-scope";
+/** The write scope of a run (src/lib/tenancy/seam.ts; CCR r1-p7-7). */
+export { writeScopeOf } from "@/lib/tenancy/seam";
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {

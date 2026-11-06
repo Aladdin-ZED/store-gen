@@ -50,8 +50,10 @@ const BIDI = /[‎‏؜‪-‮⁦-⁩]/;
 // guard.ts does not export `numbersIn` / `allowedNumbers` (CCR r1-p5-1 asks P7 to); these are the same rules, and
 // `scannerParity` below proves them equal to the guard's own refusal through its exported `cleanAiText`.
 const ASCII_DIGITS = (s: string) => s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
+// P7 merge: guard v2 (src/lib/ai/guard-numbers.ts `tokenize`) reads a space-grouped figure as one number ("1 299" is
+// 1299, a group of exactly three digits after a space, NBSP or narrow NBSP), so the scanner groups the same way
 function numbersIn(s: string): string[] {
-  return ASCII_DIGITS(s).match(/\d+(?:[.,]\d+)?/g)?.map((n) => n.replace(",", ".")) ?? [];
+  return ASCII_DIGITS(s).match(/\d{1,3}(?:[\s\u00A0\u202F]\d{3}(?!\d))+|\d+(?:[.,]\d+)?/g)?.map((n) => n.replace(/[\s\u00A0\u202F]/g, "").replace(",", ".")) ?? [];
 }
 function allowedFrom(facts: readonly (string | number | null | undefined)[]): Set<string> {
   const out = new Set<string>();

@@ -55,6 +55,7 @@ import type { PromptMemoryRow } from "@/lib/ai/prompts/store-block";
 import { PROMPTS } from "@/lib/ai/prompts/registry";
 import type { AiTaskInput } from "@/lib/ai/provider/types";
 import { finalizeCtxFor } from "@/lib/ai/schema/tasks/ctx.server";
+import { callingWindowFor } from "@/lib/callcenter/window.server";
 import { linkAiRuns } from "@/lib/ai/feedback.server";
 import { sha256Hex } from "@/lib/ai/prompts/sha256";
 import { cacheExpiry, cacheLookup, cacheWrite } from "@/lib/ai/store/cache";
@@ -127,6 +128,21 @@ const copyHero = ALL_FIXTURES.find((f) => f.task === "copy.hero")!;
 const recordedHero = (): unknown =>
   (JSON.parse(readFileSync(path.join(ROOT, "src/lib/ai/eval/sets/copy.hero/recorded/copy.hero@s1.json"), "utf8")) as { runs: Record<string, { output: unknown }[]> }).runs[copyHero.id]![0]!.output;
 const passIds = () => ({ session: `sess${randomBytes(6).toString("hex")}`, id: `pass${randomBytes(6).toString("hex")}` });
+
+/**
+ * A's fingerprint once it holds still (P7 merge): an earlier case's `after()` work (a run finishing, a usage row) may
+ * still land on a loaded machine, so a read-only case starts its window only when two snapshots 250 ms apart agree.
+ */
+async function settledSnapshotA(kit: TenancyKit): Promise<string> {
+  let last = await kit.snapshotA();
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    const now = await kit.snapshotA();
+    if (now === last) return now;
+    last = now;
+  }
+  return last;
+}
 
 /** A queued probe job of A (sleep stages of `stageMs`, no model, no credit): what the job routes drive. */
 async function probeJobOf(scope: WriteScope, owner: string, stageMs = 1_500): Promise<string> {
@@ -248,7 +264,7 @@ const routeCases: TenancyCase[] = [
       sink.emit({ t: "start", runId: liveId, provider: "server", class: "worker", model: "claude-sonnet-5-5", effort: "low" });
       sink.emit({ t: "field", path: "headline", value: `ai-route-buffer-${tag}` });
       const jobId = await probeJobOf(a, ownerA);
-      const before = { snap: await kit.snapshotA(), job: await jobState(jobId) };
+      const before = { snap: await settledSnapshotA(kit), job: await jobState(jobId) };
       const onB = (r: RouteFile, method: string, id: string, plan: { query?: Record<string, string> } = {}) => kit.callRoute(ownerB, r, method, { store: kit.fx.B.handle, id }, plan);
 
       for (const [label, id] of [
@@ -382,14 +398,16 @@ export const cases: TenancyCase[] = [
         await setStoreSetting(scope, "policies", { returns: { accepted: key === "A", windowDays: key === "A" ? 23 : null } }, actor);
       }
       const input = { locale: "fr" as const, productName: "Sérum", facts: [] };
-      const before = await kit.snapshotA();
+      const before = await settledSnapshotA(kit);
 
       const asB = await finalizeCtxFor(kit.scope("B"), input);
       kit.check("ai/finalizeCtxFor(B): B's banned words", asB.wordsAvoid?.includes(avoid.B) === true, asB.wordsAvoid);
       kit.check("ai/finalizeCtxFor(B): none of A's banned words", !JSON.stringify(asB).includes(avoid.A), asB.wordsAvoid);
       kit.check("ai/finalizeCtxFor(B): B's policies, not A's", asB.policies.returns.accepted === false && asB.policies.returns.windowDays === null, asB.policies.returns);
       kit.check("ai/finalizeCtxFor(B): no canary of A", kit.leaks(asB).length === 0, kit.leaks(asB));
-      kit.check("ai/finalizeCtxFor(B): no hours from an unsaved window", asB.callingHours.text === null, asB.callingHours);
+      // P7 merge: P4's fixtures save B's calling window, so B's hours are B's own (none from an unsaved one)
+      const wB = await callingWindowFor(kit.scope("B"));
+      kit.check("ai/finalizeCtxFor(B): the hours come from B's own window (none from an unsaved one)", wB.configured ? asB.callingHours.text !== null && kit.leaks(asB.callingHours).length === 0 : asB.callingHours.text === null, { configured: wB.configured, hours: asB.callingHours });
 
       const asA = await finalizeCtxFor(kit.scope("A"), input);
       kit.check("ai/finalizeCtxFor(A): A's own banned words and policies (the check is not blind)", asA.wordsAvoid?.includes(avoid.A) === true && asA.policies.returns.windowDays === 23, { wordsAvoid: asA.wordsAvoid, returns: asA.policies.returns });
@@ -411,7 +429,7 @@ export const cases: TenancyCase[] = [
       const store = { market: "MA" as const, currency: "MAD", primaryLocale: "fr" as const };
       const row = (storeId: string, text: string): PromptMemoryRow => ({ id: `mem-${tag}`, storeId, kind: "prefer", text, locale: null, source: "explicit", active: true, pinned: false, evidence: null });
       const memoryOf = (scope: { storeId: string }) => [row(scope.storeId, `note ${scope.storeId === kit.scope("A").storeId ? avoid.A : avoid.B}`)];
-      const before = await kit.snapshotA();
+      const before = await settledSnapshotA(kit);
       const input: AiTaskInput<"copy.page"> = { locale: "fr", market: "MA", product: { name: "Sérum", category: "skincare", priceMinor: 19_900, currency: "MAD", facts: [] }, analysis: null, deliveryText: null, direction: null, kickers: null };
       const p = PROMPTS["copy.page@s1"]!;
 
@@ -458,7 +476,7 @@ export const cases: TenancyCase[] = [
       const memId = await addMemory(a, { kind: "prefer", text: `ai-mem-${tag} parler du terroir` }, owner);
       const jobId = newId();
       await db.insert(aiJobs).values(storeValues(a, { id: jobId, kind: "director_deep" as const, task: "design.critique", status: "running" as const, active: "1", inputHash: hash, createdBy: owner }));
-      const before = await kit.snapshotA();
+      const before = await settledSnapshotA(kit);
 
       kit.check("ai/getRunMeta(B, A's run): null", (await getRunMeta(b, runId)) === null);
       kit.check("ai/recentRuns(B): none of A's", !(await recentRuns(b)).some((r) => r.id === runId));
@@ -490,7 +508,7 @@ export const cases: TenancyCase[] = [
       await db.insert(aiJobs).values(
         storeValues(a, { id: jobId, kind: "director_deep" as const, task: "design.critique", status: "queued" as const, active: "1", inputHash: hash, progress: { done: 0, total: 1, stages: {}, plan: ["critique"] }, result: { runIds: [] }, createdBy: owner, createdAt: now, updatedAt: now }),
       );
-      const before = await kit.snapshotA();
+      const before = await settledSnapshotA(kit);
       kit.check("ai/advanceJob(B, A's job): null, nothing run", (await advanceJob(b, jobId, "poll", 90_000)) === null);
       const claim = await claimStage(b, jobId, "poll");
       kit.check("ai/claimStage(B, A's job): no stage (terminal: not B's)", "none" in claim && claim.none === "terminal", claim);
@@ -504,7 +522,7 @@ export const cases: TenancyCase[] = [
   {
     name: "ai: runAi under impersonation is refused before anything moves; B's run writes nothing of A's",
     async run(kit) {
-      const before = await kit.snapshotA();
+      const before = await settledSnapshotA(kit);
       const owner = kit.fx.A.members.owner;
       const input: AiTaskInput<"injection.screen"> = { text: `ai-run-${randomBytes(4).toString("hex")}`, source: "note" };
       const actor = { kind: "impersonation" as const, userId: owner, impersonatorId: owner, ip: null };
@@ -547,7 +565,7 @@ export const cases: TenancyCase[] = [
     async run(kit) {
       const actions = await import("@/app/admin/(console)/ai/actions");
       const ownerB = user(kit.fx.B.members.owner);
-      const before = await kit.snapshotA();
+      const before = await settledSnapshotA(kit);
       const runId = newId();
       const calls: [string, () => Promise<{ ok: boolean }>][] = [
         ["saveAiSettingsAction", () => actions.saveAiSettingsAction({ enabled: false })],
@@ -655,5 +673,5 @@ export const actions: TrackActionCase[] = [
     own: async (fx) => [{ key: idem(), id: await memoryRow(fx.B.id, fx.B.members.owner), pinned: true }],
   },
   // staff only inside the body (a seller gets the staff-only answer, never a job); membership through the seam
-  { file: SETTINGS_AI, name: "runProbeAction", area: "settings", path: "/settings/ai", permission: ["settings.read"], write: true, victim: () => [{ key: idem() }], own: () => [{ key: idem() }] },
+  { file: SETTINGS_AI, name: "runProbeAction", live: { expect: "invalid", why: "the detached-job probe is staff only (D56, ai.settings.probe.staff_only): A's owner is not platform staff" }, area: "settings", path: "/settings/ai", permission: ["settings.read"], write: true, victim: () => [{ key: idem() }], own: () => [{ key: idem() }] },
 ];

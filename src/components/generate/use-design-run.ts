@@ -22,6 +22,7 @@ import { checkHeadlinesAction, nicheSharesAction } from "@/lib/design/actions";
 import type { NicheShares, NoveltyVerdict } from "@/lib/design/novelty.server";
 import { mergePhotoFacts, photoFacts, type PhotoFacts } from "@/lib/design/photo-facts";
 import type { AiPolicy } from "@/lib/ai/policy";
+import type { AiTaskInput } from "@/lib/ai/provider/types";
 import { useAiTask, useDeviceInfo } from "@/lib/ai/router/client";
 import type { Direction, GenerateInput } from "@/lib/generator/directions";
 import type { Locale } from "@/lib/page/schema";
@@ -156,7 +157,10 @@ export function useDesignRun(opts: DesignRunOpts): DesignRun {
     // GH-1: the Director plans in parallel with the draw; nothing waits for it (D59)
     const brief = directorOn
       ? settle(
-          planTask.run({ niche, locale: input.locale, market: input.market, product: input.product, facts: input.facts ?? [] }, { surface: "wizard" }).then((o) => (o.ok ? o.value : null)),
+          // P7 merge: `design.plan` takes the full DirectorBrief (AI-§A.8.2, src/lib/ai/director/types.ts). Until the
+          // wizard builds it (the integration, behind the ai_director_brief flag), this R1.0 shape fails the server's
+          // input check and the run keeps its three drawn directions (the null branch below), never an invented brief.
+          planTask.run({ niche, locale: input.locale, market: input.market, product: input.product, facts: input.facts ?? [] } as unknown as AiTaskInput<"design.plan">, { surface: "wizard" }).then((o) => (o.ok ? o.value : null)),
           DIRECTOR_WAIT_MS,
           null,
         )

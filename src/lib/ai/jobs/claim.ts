@@ -25,7 +25,7 @@ import { queueStoreItem } from "../batch/queue";
 import { promptFor } from "../prompts/registry";
 import { reconcile, release, reservationFrom, reservationJson } from "../quota/reserve";
 import { creditsFor } from "../quota/cost";
-import { writeScopeOf } from "../router/write-scope";
+import { writeScopeOf } from "@/lib/tenancy/seam";
 import { casJob, claimableCond, docOf, heartbeatJob, leaseCond, batchStageCond, readJob, type JobDoc, type JobRow, type JobSet } from "../store/jobs";
 import { jobCost } from "../store/runs";
 import { TASKS, routeFor, type AiTaskId } from "../tasks";

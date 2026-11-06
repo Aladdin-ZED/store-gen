@@ -127,7 +127,7 @@ type PlatformAction =
   | "platform.breakglass.reviewed"
   | "platform.design.changed"
   | "platform.abuse.reported" // meta { storeId, reason }, no reporter data
-  | `platform.ai.${"settings_changed" | "key_set" | "key_removed" | "model_changed" | "model_emergency_switch" | "prompt_activated" | "prompt_rolled_back" | "cap_changed" | "eval_started" | "batch_canceled" | "transport_changed" | "director_default_changed" | "prompt_canaried" | "preference_recorded" | "calibration_recorded" | "screen_cleared" | "probe_recorded"}`;
+  | `platform.ai.${"settings_changed" | "key_set" | "key_removed" | "model_changed" | "model_emergency_switch" | "prompt_activated" | "prompt_rolled_back" | "cap_changed" | "eval_started" | "batch_canceled" | "transport_changed" | "director_default_changed" | "prompt_canaried" | "preference_recorded" | "calibration_recorded" | "screen_cleared" | "probe_recorded" | "probe_started" | "batch_retried"}`;
 
 /** Known actions (dot-namespaced, §F.5). Other areas may log their own namespaced actions too. */
 export type AuditAction = AuthAction | StoreAction | StoreAreaAction | PlatformAction | (string & {});

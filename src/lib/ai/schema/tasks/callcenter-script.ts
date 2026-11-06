@@ -18,7 +18,7 @@
  */
 import { z } from "zod";
 import { ScriptDoc } from "@/lib/callcenter/script";
-import { TEMPLATE_VARS } from "@/lib/integrations/templates";
+import { TEMPLATE_VARS } from "@/lib/integrations/template-lang";
 import { allowedNumbersFor, guardText } from "../../guard";
 import { foldWithMap } from "../../guard-claims";
 import { scanPii } from "../../safety/pii";

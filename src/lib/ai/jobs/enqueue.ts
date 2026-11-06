@@ -29,7 +29,7 @@ import { AiQuotaError, release, reservationJson, reserve } from "../quota/reserv
 import { sha256Hex } from "../prompts/sha256";
 import { canonicalJson } from "../prompts/text";
 import { serverGate } from "../router/run.server";
-import { writeScopeOf } from "../router/write-scope";
+import { writeScopeOf } from "@/lib/tenancy/seam";
 import { gateInput } from "../safety/pii";
 import { parseTaskInput } from "../schema/tasks/inputs";
 import { activeJobByInput, getAiJob as readJobView, hasActiveDeepJob, insertJob, readJob, type AiJobView } from "../store/jobs";

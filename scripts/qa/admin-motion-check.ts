@@ -136,7 +136,6 @@ const PENDING: PendingEntry[] = [
   { path: "src/components/admin/media/**", rule: "spring", owner: UNOWNED, ccr: "r1-p2-1 §1" },
   { path: "src/components/admin/media/**", rule: "duration", owner: UNOWNED, ccr: "r1-p2-1 §1" },
   { path: "src/components/admin/media/**", rule: "overshoot", owner: UNOWNED, ccr: "r1-p2-1 §1" },
-  { path: "src/components/admin/settings/ai-settings.tsx", rule: "spring", owner: UNOWNED, ccr: "r1-p2-1 §1" },
   { path: "src/components/admin/settings/form-kit.tsx", rule: "spring", owner: UNOWNED, ccr: "r1-p2-1 §1" },
   { path: "src/components/admin/variants/options-field.tsx", rule: "spring", owner: UNOWNED, ccr: "r1-p2-1 §1" },
   { path: "src/components/admin/variants/options-field.tsx", rule: "duration", owner: UNOWNED, ccr: "r1-p2-1 §1" },

@@ -21,7 +21,8 @@ import "server-only";
  *  - seedLegalTemplates(): the legal templates of src/lib/platform/data/legal (P1's from R1 product), marker
  *    `legal_seed` = LEGAL_SEED_VERSION (CCR r1.0-t1-3); each entry inserted as version 1 draft, needs_legal_review,
  *    INSERT IGNORE on ld_kind_loc_ver_uq, the marker last. R1.0 ships version 0 and no entry, so it is a no-op.
- *  - not yet: syncPromptVersions (P7, R1 product) joins this list with its file.
+ *  - syncPromptVersions() (P7 AI, P0b P7-6): every registered prompt version upserted into prompt_versions, the seed
+ *    versions active (src/lib/ai/platform/prompt-versions.ts).
  * Step 6 never writes: bootUpgradeCheck() (Offers v2 dry run) and bootTenancyCheck() (./upgrade-check.ts).
  */
 import { createHash } from "node:crypto";
@@ -213,6 +214,12 @@ export async function runBootTasks(opts: { lockTimeoutSec?: number; migrationsFo
       await step("flags", async () => {
         const r = await seedFlags();
         return r.inserted || r.archived || r.restored ? `flags: ${r.inserted} added, ${r.archived} archived, ${r.restored} restored.` : null;
+      });
+      // P7 AI (P0b P7-6): the prompt registry's versions upserted into prompt_versions (the seed versions active)
+      await step("prompt versions", async () => {
+        const { syncPromptVersions } = await import("@/lib/ai/platform/prompt-versions");
+        await syncPromptVersions();
+        return null;
       });
       return steps;
     }, { timeoutSec: opts.lockTimeoutSec });

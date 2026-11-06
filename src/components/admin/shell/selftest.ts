@@ -1405,7 +1405,11 @@ async function paletteChecks(): Promise<void> {
   const merged = shellContributions([...shellNav, p4Orders, p3Pages]);
   const mergedIds = merged.map((c) => c.item.id);
   check("an interim item yields to the owner's item with the same link or the same id", !mergedIds.includes("orders") && mergedIds.includes("orders-list") && mergedIds.filter((id) => id === "pages").length === 1 && mergedIds.includes("generate"));
-  check("with no owner items yet every interim item shows exactly once", INTERIM_NAV.every((c) => shellContributions().filter((x) => x.item.id === c.item.id).length === 1));
+  // P7 merge: Settings → AI (`settings-ai`, /settings/ai) is the first owner item to replace an interim one ("Local AI")
+  const live = shellContributions();
+  const owned = (c: NavContribution) => live.some((x) => !INTERIM_NAV.includes(x) && (x.item.id === c.item.id || x.item.href("probe") === c.item.href("probe")));
+  check("every interim item shows exactly once until its owner contributes the item, then never", INTERIM_NAV.every((c) => live.filter((x) => x === c).length === (owned(c) ? 0 : 1)));
+  check("with no owner items every interim item shows exactly once", INTERIM_NAV.every((c) => shellContributions(shellNav).filter((x) => x.item.id === c.item.id).length === 1));
 
   // the sidebar folds the settings group; the tabs come from the registry in its order
   const ownerNav = storeNav({ handle: "atlas", mode: "landing", can: roleCan("owner") });
@@ -1693,7 +1697,11 @@ async function dashboardChecks(): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 /** Files a module graph reaches from `entries`: relative and `@/` specifiers resolved, bare ones kept by name. */
-function importGraph(entries: readonly string[]): { files: Set<string>; bare: Set<string> } {
+/**
+ * `workers: false` (P7 merge) leaves out the `new Worker(new URL(…))` edges: the bundler emits a worker as its own chunk,
+ * fetched only when the worker is constructed (src/lib/ai/client.ts, on the first local AI run), never with the page.
+ */
+function importGraph(entries: readonly string[], opts: { workers?: boolean } = {}): { files: Set<string>; bare: Set<string> } {
   const root = process.cwd();
   const files = new Set<string>();
   const bare = new Set<string>();
@@ -1722,6 +1730,7 @@ function importGraph(entries: readonly string[]): { files: Set<string>; bare: Se
     if (/^\s*["']use server["']/.test(src)) continue;
     for (const m of src.matchAll(/(import|export)(\s+type)?\s[^'"`;]*?from\s*["']([^"']+)["']|import\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)|new URL\(\s*["']([^"']+)["']/g)) {
       if (m[2]) continue; // type-only: erased
+      if (m[6] && opts.workers === false) continue; // a worker chunk, not page code
       const spec = m[3] ?? m[4] ?? m[5] ?? m[6]!;
       const target = resolve(file, spec);
       if (target === null) bare.add(spec);
@@ -1799,7 +1808,12 @@ async function welcomeChecks(): Promise<void> {
   const dir = "src/app/app/[store]/welcome/_components";
   const graph = importGraph([`${dir}/welcome-flow.tsx`, `${dir}/welcome-header.tsx`]);
   check("the welcome client graph reaches the reveal and the generator", ["src/components/generate/reveal/RevealFolds.tsx", "src/components/generate/reveal/directions.ts", "src/components/generate/kit.ts"].every((f) => graph.files.has(f)), [...graph.files].filter((f) => f.includes("generate")));
-  check("the welcome client graph imports no local model, worker, transformers, SigLIP or VLM code", modelImports(graph).length === 0, modelImports(graph));
+  // P7 merge: the onboarding's `useAiTask("analyze")` (ai.md AI-§R.1 item 7, the in-flow README §6) reaches the local
+  // rung's worker only through src/lib/ai/client.ts's `new Worker(new URL(…))`: its own chunk, constructed on a local
+  // run after the reveal's inputs, never loaded with the page. The page's own code imports no model.
+  const pageGraph = importGraph([`${dir}/welcome-flow.tsx`, `${dir}/welcome-header.tsx`], { workers: false });
+  check("the welcome page code imports no local model, worker, transformers, SigLIP or VLM code", modelImports(pageGraph).length === 0, modelImports(pageGraph));
+  check("the welcome graph reaches a model only through the lazy worker chunk of src/lib/ai/client.ts", modelImports(graph).every((f) => !pageGraph.files.has(f) && !pageGraph.bare.has(f)) && (modelImports(graph).length === 0 || graph.files.has("src/lib/ai/client.ts")), modelImports(graph));
   check("the import-graph check catches a model worker (control)", modelImports(importGraph(["src/lib/ai/client.ts"])).length > 0);
 
   // the onboarding copy exists in ar, fr and en
