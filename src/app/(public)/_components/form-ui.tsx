@@ -1,18 +1,24 @@
 "use client";
 
 import { AlertCircleIcon, EyeIcon, EyeOffIcon, Loader2Icon } from "lucide-react";
-import { useId, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-/** Form-level error (role="alert", so it is announced when it appears). */
+import { CONTROL_CLASS } from "./control";
+
+/** Form-level error (role="alert", so it is announced when it appears); scrolled into view above the fields. */
 export function FormAlert({ message }: { message?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (message) ref.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [message]);
   if (!message) return null;
   return (
-    <Alert variant="destructive" className="border-destructive/30 bg-destructive/5">
+    <Alert ref={ref} variant="destructive" className="scroll-mt-4 border-destructive/30 bg-destructive/5">
       <AlertCircleIcon aria-hidden="true" />
       <AlertDescription className="text-destructive">{message}</AlertDescription>
     </Alert>
@@ -40,7 +46,7 @@ export function SubmitButton({
       size="lg"
       variant={variant}
       disabled={pending || disabled}
-      className={cn("h-10 w-full text-[0.9rem]", className)}
+      className={cn(CONTROL_CLASS, "w-full font-medium", className)}
     >
       {pending ? (
         <>
@@ -74,7 +80,9 @@ export function TextField({ label, name, error, hint, labelAside, endAdornment, 
   return (
     <div className="grid gap-2">
       <div className="flex items-baseline justify-between gap-3">
-        <Label htmlFor={id}>{label}</Label>
+        <Label htmlFor={id} className="text-[13px] font-medium">
+          {label}
+        </Label>
         {labelAside}
       </div>
       <div className="relative">
@@ -83,7 +91,7 @@ export function TextField({ label, name, error, hint, labelAside, endAdornment, 
           name={name}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
-          className={cn("h-10 bg-card px-3 text-[0.95rem] md:text-[0.9rem]", endAdornment ? "pe-11" : null, className)}
+          className={cn(CONTROL_CLASS, "bg-card px-3.5", endAdornment ? "pe-12" : null, className)}
           {...props}
         />
         {endAdornment && <div className="absolute inset-y-0 end-1.5 flex items-center">{endAdornment}</div>}
@@ -115,7 +123,7 @@ export function PasswordField({ toggleLabel = "Show password", ...props }: Omit<
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
+          size="icon"
           // A toggle keeps one label; its pressed state says whether the password is visible.
           aria-label={toggleLabel}
           aria-pressed={visible}

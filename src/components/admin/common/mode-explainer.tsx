@@ -25,6 +25,8 @@ export interface ModeCardsProps {
   modes?: readonly StoreMode[];
   /** the field name for a surrounding form (a hidden input carries the value) */
   name?: string;
+  /** narrow forms (/signup): the selected card spans the row with its bullets; the others sit as two tiles below */
+  compact?: boolean;
 }
 
 export function ModeCards(p: ModeCardsProps) {
@@ -51,11 +53,11 @@ export function ModeCards(p: ModeCardsProps) {
   };
 
   return (
-    <div className="grid gap-3">
+    <div className="@container grid gap-3">
       <p id={labelId} className="sr-only">
         {t("auth.signup.mode.title")}
       </p>
-      <div role="radiogroup" aria-labelledby={labelId} className="grid gap-2.5 md:grid-cols-3">
+      <div role="radiogroup" aria-labelledby={labelId} className={cn("grid gap-2.5", p.compact ? "grid-cols-2" : "@xl:grid-cols-3")}>
         {modes.map((mode, i) => {
           const s = modeSummary(mode);
           const selectable = modeSelectable(mode);
@@ -78,12 +80,13 @@ export function ModeCards(p: ModeCardsProps) {
                 "focus-visible:ring-2 focus-visible:ring-ring",
                 checked ? "bg-brand-soft ring-2 ring-brand" : "bg-card ring-border hover:bg-muted/60",
                 !selectable && "cursor-not-allowed opacity-75 hover:bg-card",
+                p.compact && (checked ? "col-span-2" : "gap-2 p-3"),
               )}
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className={cn("flex items-start justify-between gap-3", p.compact && !checked && "flex-col-reverse gap-1.5")}>
                 <div className="grid gap-1">
                   <p className="text-sm font-semibold tracking-[-0.006em]">{t(s.title)}</p>
-                  <p className="text-[13px] leading-snug text-pretty text-muted-foreground">{t(s.line)}</p>
+                  <p className={cn("leading-snug text-pretty text-muted-foreground", p.compact && !checked ? "text-xs" : "text-[13px]")}>{t(s.line)}</p>
                 </div>
                 {selectable ? (
                   <span
@@ -99,6 +102,7 @@ export function ModeCards(p: ModeCardsProps) {
                   <span className="inline-flex h-5 shrink-0 items-center rounded-[var(--r-chip)] bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">{t("auth.signup.mode.soon")}</span>
                 )}
               </div>
+              {(!p.compact || checked) && (
               <ul className="grid gap-1.5">
                 {s.get.map((key) => (
                   <li key={key} className="flex items-start gap-2 text-[13px] leading-snug">
@@ -107,6 +111,7 @@ export function ModeCards(p: ModeCardsProps) {
                   </li>
                 ))}
               </ul>
+              )}
               {checked && <span className="sr-only">{t("shell.mode.selected")}</span>}
             </div>
           );

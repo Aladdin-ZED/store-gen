@@ -1,3 +1,4 @@
+import type { CountryCode } from "libphonenumber-js/min";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -5,10 +6,11 @@ import { getCspNonce, getSignedInUser, LOGIN_PATH } from "@/lib/auth";
 import { storeHomePath } from "@/lib/auth/landing";
 import { authTranslator } from "@/lib/auth/i18n";
 import { viewerLocale } from "@/lib/auth/locale";
-import { killSwitchTripped, platformTurnstileKeys } from "@/lib/auth/platform-config";
+import { killSwitchTripped, platformSetting, platformTurnstileKeys } from "@/lib/auth/platform-config";
 import { inviteLanding, type InvitePreview } from "@/lib/tenancy/invites";
 import { AuthHeading } from "../../_components/auth-heading";
 import { Monogram } from "../../_components/kit";
+import { legalDocsFor } from "../../_lib/legal-docs";
 import { switchAccountAction } from "./actions";
 import { AcceptForm } from "./accept-form";
 
@@ -32,7 +34,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
     return (
       <>
         <AuthHeading title={t("team.invite.invalid_title")}>{t("team.invite.invalid")}</AuthHeading>
-        <Button asChild size="lg" variant="outline" className="h-10 w-full">
+        <Button asChild size="lg" variant="outline" className="h-13 w-full text-base md:h-12 md:text-[0.95rem]">
           <Link href={LOGIN_PATH}>{t("auth.signup.sign_in")}</Link>
         </Button>
       </>
@@ -47,7 +49,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
       <>
         <AuthHeading title={t("team.invite.already_title", { store: preview.storeName })}>{t("team.invite.already_lead")}</AuthHeading>
         {heading}
-        <Button asChild size="lg" variant="brand" className="mt-6 h-10 w-full">
+        <Button asChild size="lg" variant="brand" className="mt-6 h-13 w-full text-base md:h-12 md:text-[0.95rem]">
           <Link href={storeHomePath({ handle: landing.storeHandle, role: preview.role })}>{t("team.invite.open_store")}</Link>
         </Button>
       </>
@@ -66,7 +68,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
         {heading}
         <form action={switchAccountAction} className="mt-6">
           <input type="hidden" name="token" value={token} />
-          <Button type="submit" size="lg" variant="outline" className="h-10 w-full">
+          <Button type="submit" size="lg" variant="outline" className="h-13 w-full text-base md:h-12 md:text-[0.95rem]">
             {t("team.invite.switch_account")}
           </Button>
         </form>
@@ -84,14 +86,14 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
           </bdi>
         </AuthHeading>
         {heading}
-        <Button asChild size="lg" variant="brand" className="mt-6 h-10 w-full">
+        <Button asChild size="lg" variant="brand" className="mt-6 h-13 w-full text-base md:h-12 md:text-[0.95rem]">
           <Link href={`${LOGIN_PATH}?next=${encodeURIComponent(`/invite/${token}`)}`}>{t("team.invite.sign_in")}</Link>
         </Button>
       </>
     );
   }
 
-  const [widget, nonce, closed] = await Promise.all([platformTurnstileKeys(), getCspNonce(), killSwitchTripped("signups_enabled")]);
+  const [widget, nonce, closed, setting] = await Promise.all([platformTurnstileKeys(), getCspNonce(), killSwitchTripped("signups_enabled"), platformSetting()]);
   if (closed) {
     // §H.8: the signups_enabled kill switch closes the accept form too
     return (
@@ -107,7 +109,17 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
         {t(landing.state === "accept" ? "team.invite.accept_lead" : "team.invite.sign_up_lead")}
       </AuthHeading>
       {heading}
-      <AcceptForm token={token} mode={landing.state === "accept" ? "accept" : "sign_up"} emailMasked={preview.emailMasked} locale={locale} siteKey={widget?.siteKey ?? null} nonce={nonce} />
+      <AcceptForm
+        token={token}
+        mode={landing.state === "accept" ? "accept" : "sign_up"}
+        emailMasked={preview.emailMasked}
+        locale={locale}
+        siteKey={widget?.siteKey ?? null}
+        nonce={nonce}
+        phoneCountry={(setting.signup.allowedMarkets[0] ?? "MA") as CountryCode}
+        legalRequired={landing.state === "sign_up" && setting.legal.requireAcceptance}
+        legalDocs={landing.state === "sign_up" && setting.legal.requireAcceptance ? await legalDocsFor(locale) : []}
+      />
     </>
   );
 }

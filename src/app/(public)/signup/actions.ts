@@ -16,6 +16,7 @@ import { setSessionCookie } from "@/lib/auth/cookies";
 import { signupAccount, type SignupForm } from "@/lib/auth/signup";
 import { newHandleProblem } from "@/lib/auth/stores";
 import { isAdminLocale } from "@/lib/i18n/admin";
+import { STORE_MODES, type StoreMode } from "@/lib/tenancy/mode";
 import type { ActionResult } from "@/lib/tenancy/types";
 import { field, type FormState } from "../_lib/form-state";
 
@@ -31,6 +32,11 @@ export async function signupAction(data: FormData): Promise<ActionResult<SignupS
       for (const name of VALUES) values[name] = field(data, name, name === "note" ? 600 : 200);
       const locale = field(data, "locale", 4);
       const formMs = Number(field(data, "formMs", 12));
+      // the mode cards (PD30, PD72): an unknown value reads as the default; a mode not selectable yet is refused by
+      // signupAccount with `auth.signup.mode_unavailable`
+      const rawMode = field(data, "mode", 16);
+      const mode: StoreMode = (STORE_MODES as readonly string[]).includes(rawMode) ? (rawMode as StoreMode) : "landing";
+      const interest = field(data, "modeInterest", 16);
       const form: SignupForm = {
         name: values.name,
         email: values.email,
@@ -38,7 +44,8 @@ export async function signupAction(data: FormData): Promise<ActionResult<SignupS
         phone: values.phone || undefined,
         storeName: values.storeName,
         handle: values.handle,
-        mode: "landing",
+        mode,
+        modeInterest: interest === "store" || interest === "both" ? interest : null,
         market: values.market || undefined,
         inviteCode: values.inviteCode || undefined,
         acceptLegal: field(data, "acceptLegal", 8) === "on",

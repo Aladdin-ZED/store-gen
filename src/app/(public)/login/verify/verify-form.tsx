@@ -29,7 +29,7 @@ export function VerifyForm({ next }: { next: string | null }) {
   }, [state]);
 
   return (
-    <form ref={formRef} action={action} noValidate className="grid gap-6">
+    <form ref={formRef} action={action} noValidate className="grid gap-5">
       <input type="hidden" name="method" value={method} />
       {next && <input type="hidden" name="next" value={next} />}
       <FormAlert message={error?.message ? t(error.message) : undefined} />
@@ -79,7 +79,7 @@ export function VerifyForm({ next }: { next: string | null }) {
           setMethod((m) => (m === "totp" ? "recovery" : "totp"));
           setCode("");
         }}
-        className="justify-self-center rounded-sm text-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="inline-flex min-h-11 items-center justify-self-center rounded-sm text-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         {t(method === "totp" ? "auth.verify.use_recovery" : "auth.verify.use_totp")}
       </button>

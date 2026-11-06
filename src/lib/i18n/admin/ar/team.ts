@@ -174,4 +174,6 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "team.role.cannot.reports": "رؤية أرقام لوحة التحكم",
   "team.role.can.callcenter": "إعداد مركز الاتصال",
   "team.role.cannot.callcenter": "إعداد مركز الاتصال",
+  "team.invite.full_title": "لا يوجد مكان شاغر",
+  "team.invite.joined_lead": "جارٍ فتح المتجر…",
 };

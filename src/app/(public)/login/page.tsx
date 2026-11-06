@@ -5,7 +5,7 @@ import { getCspNonce, getPendingMfa, getSignedInUser, landingPathFor, listMember
 import { authTranslator } from "@/lib/auth/i18n";
 import { viewerLocale } from "@/lib/auth/locale";
 import { signInVerifyUrl } from "@/lib/auth/paths";
-import { effectiveSignupMode, killSwitchTripped, platformTurnstileKeys } from "@/lib/auth/platform-config";
+import { effectiveSignupMode, killSwitchTripped, platformSetting, platformTurnstileKeys } from "@/lib/auth/platform-config";
 import { AuthHeading } from "../_components/auth-heading";
 import { Notice } from "../_components/kit";
 import { LoginForm } from "./login-form";
@@ -19,7 +19,7 @@ const NOTICES = {
   "signed-out": "auth.login.notice.signed_out",
   "mfa-locked": "auth.login.notice.mfa_locked",
   "mfa-expired": "auth.login.notice.mfa_expired",
-  "password-reset": "auth.login.notice.password_reset",
+  "password-reset": "auth.reset.done",
   deleted: "auth.account.deleted",
 } as const;
 
@@ -39,16 +39,16 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
   const noticeKey = params.deleted === "1" ? "deleted" : (str(params.notice) ?? "");
   const notice = Object.hasOwn(NOTICES, noticeKey) ? NOTICES[noticeKey as keyof typeof NOTICES] : null;
   const fromInvite = next?.startsWith("/invite/") ?? false;
-  const [widget, nonce, mode, killed] = await Promise.all([platformTurnstileKeys(), getCspNonce(), effectiveSignupMode(), killSwitchTripped("signups_enabled")]);
+  const [widget, nonce, mode, killed, setting] = await Promise.all([platformTurnstileKeys(), getCspNonce(), effectiveSignupMode(), killSwitchTripped("signups_enabled"), platformSetting()]);
   const signupOpen = !killed && mode.mode !== "closed";
 
   return (
     <>
       <AuthHeading title={t("auth.login.title")}>{t(fromInvite ? "auth.login.lead_invite" : "auth.login.lead")}</AuthHeading>
       {notice && <Notice className="mb-5">{t(notice)}</Notice>}
-      <LoginForm next={next} siteKey={widget?.siteKey ?? null} nonce={nonce} />
+      <LoginForm next={next} siteKey={widget?.siteKey ?? null} nonce={nonce} supportWhatsapp={setting.brand.supportWhatsapp ?? null} />
       {signupOpen && !fromInvite && (
-        <p className="mt-8 text-center text-sm text-muted-foreground">
+        <p className="mt-6 text-center text-sm text-muted-foreground">
           {t("auth.login.new_here")}{" "}
           <Link href={SIGNUP_PATH} className="font-medium text-foreground underline underline-offset-4">
             {t("auth.login.create_store")}

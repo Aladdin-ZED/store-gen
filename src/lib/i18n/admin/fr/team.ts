@@ -174,4 +174,6 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "team.role.cannot.reports": "Voir les chiffres du tableau de bord",
   "team.role.can.callcenter": "Configurer le centre d'appels",
   "team.role.cannot.callcenter": "Configurer le centre d'appels",
+  "team.invite.full_title": "Aucune place libre",
+  "team.invite.joined_lead": "Ouverture de la boutique…",
 };

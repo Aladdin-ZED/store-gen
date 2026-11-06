@@ -27,7 +27,7 @@ export function OtpField({
 }) {
   const id = useId();
   const errorId = `${id}-error`;
-  const slotClass = "size-11 bg-card text-lg font-medium tabular-nums md:size-12";
+  const slotClass = "size-11 bg-card text-lg font-medium tabular-nums min-[380px]:size-12 md:size-12";
   return (
     <div className="grid gap-3">
       <Label htmlFor={id}>{label}</Label>

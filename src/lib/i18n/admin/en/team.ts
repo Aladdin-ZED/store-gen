@@ -171,4 +171,6 @@ export const messages = {
   "team.role.cannot.reports": "See the dashboard numbers",
   "team.role.can.callcenter": "Set up the call center",
   "team.role.cannot.callcenter": "Set up the call center",
+  "team.invite.full_title": "No free seat",
+  "team.invite.joined_lead": "Opening the store…",
 } as const satisfies Record<string, string>;
