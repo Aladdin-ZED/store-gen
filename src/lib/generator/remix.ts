@@ -67,7 +67,7 @@ const isTop = (s: SectionInstance) => getSection(s.type)?.category === "top";
  * The page's product mood, read again from the product's words (the photo palette is not stored in
  * the page). A page whose archetype a calm product would never get (chosen by hand) is not calmed.
  */
-function moodOfDoc(doc: PageDocT): { reading: MoodReading; keywords: string } {
+export function moodOfDoc(doc: PageDocT): { reading: MoodReading; keywords: string } {
   const keywords = productKeywords(doc.product, factsFromDescription(doc.product.description));
   const reading = readMood({ keywords, category: doc.product.category, palette: null });
   return { reading: moodFit(doc.theme.archetype, reading) === null ? { ...reading, mood: "neutral" } : reading, keywords };
@@ -121,12 +121,12 @@ function reflow(doc: PageDocT, sections: SectionInstance[], seed: number): Secti
 /* ------------------------------------------------------------------ */
 
 /** What the solver knows about a saved page's photos (no facts pass in the builder: sizes unknown). */
-function photosOfDoc(doc: PageDocT): PhotoFacts {
+export function photosOfDoc(doc: PageDocT): PhotoFacts {
   return { count: doc.product.images.length, maxWidth: 0, hasCutout: !!doc.product.cutout, dominant: null, background: { luminance: 0.8, uniform: false }, sharp: true };
 }
 
 /** The sample input of a remix (DS5: the remix seed is the brand seed, the page's inputs the hash). */
-function remixInput(doc: PageDocT, seed: number, g: DesignGenome): SampleInput {
+export function remixInput(doc: PageDocT, seed: number, g: DesignGenome): SampleInput {
   const { reading } = moodOfDoc(doc);
   return {
     archetype: g.brand.G1,
@@ -147,7 +147,7 @@ function remixInput(doc: PageDocT, seed: number, g: DesignGenome): SampleInput {
 }
 
 /** The current values of the bold genes, as locks. */
-function boldLocks(g: DesignGenome, except: readonly BoldGene[] = []): Partial<Record<GeneKey, string>> {
+export function boldLocks(g: DesignGenome, except: readonly BoldGene[] = []): Partial<Record<GeneKey, string>> {
   const all: Record<BoldGene, string> = { G1: g.brand.G1, G2: g.page.G2, G9: g.brand.G9, G4: g.brand.G4, G18: g.page.G18, G23: g.brand.G23.f, G28: g.brand.G28 };
   const out: Partial<Record<GeneKey, string>> = {};
   for (const [k, v] of Object.entries(all) as [BoldGene, string][]) if (!except.includes(k)) out[k] = v;

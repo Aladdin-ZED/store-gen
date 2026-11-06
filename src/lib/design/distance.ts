@@ -311,9 +311,35 @@ const K = 1000;
 /** Fixed head length: v, kind, locale, 17 cats, 3 + 3 colours, 6 nums, hero, 7 tags, 6 openers, crops, seq length. */
 const HEAD = 3 + CAT_KEYS.length + 6 + NUM_KEYS.length + 1 + 7 + 6 + 1 + 1;
 
-/** The `design_genomes.vec` layout: integers only (colours and fractions × 1,000), ≤ 400 B as JSON. */
-export function packView(v: DistanceView): number[] {
+/**
+ * The offsets of the packed layout (the novelty pool reads the cheap components straight from the packed `Int16Array`,
+ * DS57): `cat` + the index of a `CAT_KEYS` name, `num` + the index of a `NUM_KEYS` name.
+ */
+export const VEC = {
+  kind: 1,
+  locale: 2,
+  cat: 3,
+  accent: 3 + CAT_KEYS.length,
+  pop: 6 + CAT_KEYS.length,
+  num: 9 + CAT_KEYS.length,
+  hero: 9 + CAT_KEYS.length + NUM_KEYS.length,
+  tags: 10 + CAT_KEYS.length + NUM_KEYS.length,
+  openers: 17 + CAT_KEYS.length + NUM_KEYS.length,
+  crops: 23 + CAT_KEYS.length + NUM_KEYS.length,
+  n: 24 + CAT_KEYS.length + NUM_KEYS.length,
+  seq: HEAD,
+} as const;
+export const VEC_CAT: Readonly<Record<(typeof CAT_KEYS)[number], number>> = Object.fromEntries(CAT_KEYS.map((k, i) => [k, VEC.cat + i])) as Record<(typeof CAT_KEYS)[number], number>;
+export const VEC_NUM: Readonly<Record<(typeof NUM_KEYS)[number], number>> = Object.fromEntries(NUM_KEYS.map((k, i) => [k, VEC.num + i])) as Record<(typeof NUM_KEYS)[number], number>;
+
+/**
+ * The `design_genomes.vec` layout: integers only (colours and fractions × 1,000), ≤ 400 B as JSON. `devices` (the
+ * bitmask of the S26 tell devices on the page, `tellsMask`) is appended after the sequence when given: the niche
+ * shares' `ghost` and `tells` maps read it from the pool (it is not part of the view or of any distance).
+ */
+export function packView(v: DistanceView, devices?: number): number[] {
   const q = (x: number) => Math.round(x * K);
+  const tail = devices === undefined ? [] : [Math.max(0, Math.min(0x7fff, Math.trunc(devices)))];
   return [
     v.v,
     v.kind === "page" ? 0 : 1,
@@ -328,10 +354,17 @@ export function packView(v: DistanceView): number[] {
     v.crops,
     Math.min(SEQ_MAX, v.seq.length),
     ...v.seq.slice(0, SEQ_MAX),
+    ...tail,
   ];
 }
 
-/** The view of a packed vector; throws on a malformed one. */
+/** The tell-device bitmask a packed vector carries after its sequence (0 when it carries none). */
+export function devicesOfVec(vec: ArrayLike<number>): number {
+  const n = vec[VEC.n] ?? 0;
+  return vec.length === HEAD + n + 1 ? (vec[HEAD + n] ?? 0) : 0;
+}
+
+/** The view of a packed vector (a trailing device mask is ignored); throws on a malformed one. */
 export function unpackView(vec: readonly number[]): DistanceView {
   if (!Array.isArray(vec) || vec.length < HEAD || vec[0] !== 2 || !vec.every((x) => Number.isInteger(x))) throw new Error("distance view: not a v2 vector");
   let i = 3;
@@ -346,7 +379,7 @@ export function unpackView(vec: readonly number[]): DistanceView {
   const openers = Array.from({ length: 6 }, () => next() / K);
   const crops = next();
   const n = next();
-  if (n < 0 || n > SEQ_MAX || vec.length !== HEAD + n) throw new Error("distance view: bad sequence length");
+  if (n < 0 || n > SEQ_MAX || (vec.length !== HEAD + n && vec.length !== HEAD + n + 1)) throw new Error("distance view: bad sequence length");
   const seq = vec.slice(HEAD, HEAD + n);
   const locale = LOCALES_V[vec[2]!];
   if (!locale || (vec[1] !== 0 && vec[1] !== 1)) throw new Error("distance view: bad kind or locale");

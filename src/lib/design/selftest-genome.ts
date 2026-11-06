@@ -612,7 +612,7 @@ registerDesignGroup({
 /* ------------------------------------------------------------------ */
 
 /** A random distance view (property tests): every component exercised, the costly ones included. */
-function randomView(rng: () => number): DistanceView {
+export function randomView(rng: () => number): DistanceView {
   const int = (n: number) => Math.floor(rng() * n);
   const pick = (n: number) => (rng() < 0.08 ? -1 : int(n));
   const hist = (n: number) => {
