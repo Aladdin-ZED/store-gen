@@ -142,6 +142,14 @@ export const cases: TenancyCase[] = [
       }
       const byName = await asBOwner(kit, (ctx) => C.listCustomers(B, ctx, { search: kit.fx.A.customer.name }));
       kit.check("listCustomers(B, q = A's customer name): no canary of A", byName.ok && kit.leaks(answer(byName), { sent: kit.fx.A.customer.name }).length === 0, answer(byName));
+      // step 11: the agent page, the agents list and the Blocked tab of B never reach A's member or blocklist
+      const AG11 = load<typeof import("@/lib/callcenter/agents.server")>("@/lib/callcenter/agents.server");
+      await same(kit, "agentDetail(B, A's agent)", await asBOwner(kit, () => AG11.agentDetail(B, kit.fx.A.members.agent)), await asBOwner(kit, () => AG11.agentDetail(B, ghostId26())));
+      const overview = await asBOwner(kit, () => AG11.agentsOverview(B));
+      const aMembers = Object.values(kit.fx.A.members).filter((m) => !Object.values(kit.fx.B.members).includes(m));
+      kit.check("agentsOverview(B): none of A's members", overview.ok && !JSON.stringify(answer(overview)).match(new RegExp(aMembers.join("|") || "^$")), answer(overview));
+      const blockedB = await asBOwner(kit, (ctx) => C.listBlocked(B, ctx));
+      kit.check("listBlocked(B): none of A's blocklist ids", blockedB.ok && !JSON.stringify(answer(blockedB)).includes(kit.fx.A.block.phone), answer(blockedB));
       const dup = await kit.call({ anonymous: true }, "/", () => D.duplicatesFor(B, { id: ghosts.order, phone: a.phone, isTest: false }));
       kit.check("duplicatesFor(B, A's phone): B's orders only (none)", dup.ok && Array.isArray(dup.value) && dup.value.length === 0, answer(dup));
     },
@@ -687,6 +695,7 @@ export const actions: TrackActionCase[] = [
   { file: CUSTOMERS, name: "blockPreviewAction", area: "blocklist", path: "/customers", permission: ["blocklist.write"], write: true, victim: (fx) => [{ orderId: fx.A.order.main }], own: (fx) => [{ orderId: fx.B.order.main }] },
   { file: CUSTOMERS, name: "blockPhoneAndCancelAction", area: "blocklist", path: "/customers", permission: ["blocklist.write"], write: true, victim: (fx) => [{ orderId: fx.A.order.main, openOrders: "fake" }], own: () => [{ phone: `+2126${String(Math.floor(Math.random() * 9e7) + 1e7)}`, openOrders: "keep" }] },
   { file: CUSTOMERS, name: "unblockAction", area: "blocklist", path: "/customers", permission: ["blocklist.write"], write: true, victim: (fx) => [fx.A.block.phone], own: (fx, fresh) => fresh.block(fx.B).then((id) => [id]) },
+  { file: CUSTOMERS, name: "listCustomersAction", area: "orders", path: "/customers", permission: ["customers.read"], write: false, victim: (fx) => [{ search: fx.A.customer.name }, ""], own: () => [{}, ""] },
   { file: CUSTOMERS, name: "saveCustomerNoteAction", area: "orders", path: "/customers", permission: ["orders.write"], write: true, victim: async (fx) => [await customerOf(fx.A.order.main), "pwned"], own: async (fx) => [await customerOf(fx.B.order.main), "Client fidèle"] },
   // P4 step 6: the list's bulk, undo, saved views, Carrier file columns and test-order delete
   { file: ORDERS, name: "bulkAssignAction", area: "orders", path: "/orders", permission: ["orders.assign"], write: true, victim: (fx) => [[fx.A.order.main], null, NO_CACHE], own: async (fx, fresh) => [[await fresh.order(fx.B)], null, NO_CACHE] },

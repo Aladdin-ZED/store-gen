@@ -8,11 +8,12 @@
  *   blockPhoneAndCancelAction  blocklist.write (+ orders.write to move the open orders, checked by the function)
  *   unblockAction              blocklist.write, audited
  *   saveCustomerNoteAction     customers.read + orders.write, ≤ 300 characters
+ *   listCustomersAction        customers.read: the next keyset page of the list ("Show more")
  */
 import { z } from "zod";
 import { revalidateStore } from "@/lib/admin-data/shell";
 import { blockPhoneAndCancel, blockPreview, unblock } from "@/lib/orders/admin";
-import { saveCustomerNote } from "@/lib/orders/customers";
+import { listCustomers, saveCustomerNote } from "@/lib/orders/customers";
 import { cleanInput } from "@/lib/orders/validate";
 import { storeAction } from "@/lib/tenancy/seam";
 import type { ActionResult } from "@/lib/tenancy/types";
@@ -60,5 +61,15 @@ export async function saveCustomerNoteAction(customerId: string, note: string) {
     const res = await saveCustomerNote(ctx, Id26.parse(customerId), z.string().max(2_000).parse(note));
     if (res.ok) refresh(ctx.store.handle);
     return res;
+  });
+}
+
+/** customers.read: the next page of /customers for the same search and filter (agents: their own customers only). */
+export async function listCustomersAction(q: { search?: string; filter?: string }, cursor: string) {
+  return storeAction("customers.read", async (ctx) => {
+    const i = z
+      .strictObject({ search: z.string().max(80).optional(), filter: z.enum(["refused_returned", "blocked", "repeat"]).optional() })
+      .parse({ search: q.search || undefined, filter: q.filter || undefined });
+    return listCustomers(ctx.scope, ctx, i, { cursor: z.string().max(80).parse(cursor) });
   });
 }

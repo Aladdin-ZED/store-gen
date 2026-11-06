@@ -23,7 +23,7 @@ import type { AnyMySqlColumn } from "drizzle-orm/mysql-core";
 import { inboundIdsOf, ownQueueViewer, seesAllOrders, type OrderViewer } from "@/lib/callcenter/visibility";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
-import { blocklist, customers, orders } from "@/lib/db/schema";
+import { blocklist, customers, orders, users } from "@/lib/db/schema";
 import { toCents } from "@/lib/finance/lite/cents";
 import { toAsciiDigits } from "@/lib/markets/phone";
 import { maskIfImpersonation } from "@/lib/platform/mask";
@@ -380,6 +380,8 @@ export interface CustomerDetail {
   counts: { orders: number; confirmed: number; delivered: number; refused: number; returned: number; cancelled: number; fake: number; test: number };
   note: string | null;
   blocked: boolean;
+  /** the blocklist entry of the number (Unblock), null when not blocked */
+  blockId: string | null;
   /** the customer's orders, newest first (≤ 50); null for agents (OD12) */
   orders: { id: string; createdAt: string; productName: string; status: OrderStatus; totalCents: number; currency: string; isTest: boolean }[] | null;
 }
@@ -435,6 +437,7 @@ export async function getCustomer(scope: StoreScope, viewer: StoreCtx, id: strin
     },
     note: all ? s.note : null,
     blocked: !!block,
+    blockId: block?.id ?? null,
     orders:
       list?.map((o) => ({
         id: o.id,
@@ -446,6 +449,43 @@ export async function getCustomer(scope: StoreScope, viewer: StoreCtx, id: strin
         isTest: o.isTest,
       })) ?? null,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* the Blocked tab (OPE-§9.5)                                          */
+/* ------------------------------------------------------------------ */
+
+/** One blocklist entry as /customers?tab=blocked shows it: the phone always masked, an IP as its hash prefix. */
+export interface BlockedRow {
+  id: string;
+  kind: "phone" | "ip";
+  /** "+212 6•• ••• •78" or "ip 3f9a1c0d…" */
+  shown: string;
+  reason: string | null;
+  by: string | null;
+  createdAt: string;
+}
+
+export const BLOCKED_MAX = 200;
+
+/** The store's blocklist, newest first (≤ 200); `customers.read`, the author named by their member name. */
+export async function listBlocked(scope: StoreScope, viewer: StoreCtx): Promise<BlockedRow[]> {
+  if (!viewer.can("customers.read")) return [];
+  const rows = await db
+    .select({ id: blocklist.id, kind: blocklist.kind, value: blocklist.value, reason: blocklist.reason, createdBy: blocklist.createdBy, createdAt: blocklist.createdAt, by: users.name })
+    .from(blocklist)
+    .leftJoin(users, eq(users.id, blocklist.createdBy))
+    .where(whereStore(blocklist, scope))
+    .orderBy(desc(blocklist.createdAt))
+    .limit(BLOCKED_MAX);
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    shown: r.kind === "phone" ? maskPhone(r.value) : `${r.value.slice(0, 8)}…`,
+    reason: r.reason,
+    by: r.createdBy ? (r.by ?? null) : null,
+    createdAt: r.createdAt.toISOString(),
+  }));
 }
 
 /* ------------------------------------------------------------------ */
