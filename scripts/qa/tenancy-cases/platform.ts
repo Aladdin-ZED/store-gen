@@ -314,6 +314,18 @@ export const cases: TenancyCase[] = [
       k.check("step 10: A's owner · pagePreviewAction → refused", refused(await run(ownerA, "pagePreviewAction", { storeId: A.id, pageId: A.page.live })));
       k.check("step 10: staff · pagePreviewAction with B's id and A's page → not_found", (await run(analyst, "pagePreviewAction", { storeId: k.fx.B.id, pageId: A.page.live })) === "not_found");
       k.check("step 10: staff · pagePreviewAction with a malformed page id → not_found", (await run(analyst, "pagePreviewAction", { storeId: A.id, pageId: "../x" })) === "not_found");
+      // step 12: the settings additions (design gates, the Turnstile test, the backup download) refuse analysts, support and tenants
+      const settingsActions = (await import(specOf("src/app/admin/(console)/settings/actions.ts"))) as ActionModule;
+      const step12: [string, unknown][] = [
+        ["savePlatformDesignAction", { value: {} }],
+        ["testTurnstileAction", { token: "x" }],
+        ["prepareBackupDownloadAction", { day: "2026-11-01", reason: "other" }],
+      ];
+      for (const [fn, input] of step12) {
+        k.check(`step 12: analyst · ${fn} → forbidden`, (await run(analyst, fn, input, settingsActions)) === "forbidden");
+        k.check(`step 12: support · ${fn} → forbidden`, (await run(support, fn, input, settingsActions)) === "forbidden");
+        k.check(`step 12: A's owner · ${fn} → refused`, refused(await run(ownerA, fn, input, settingsActions)));
+      }
       k.check("cases 2, 3, 11: A's rows are unchanged", (await k.snapshotA()) === before);
     },
   },

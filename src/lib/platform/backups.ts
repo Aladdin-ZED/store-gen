@@ -66,6 +66,11 @@ export async function backupsView(ctx: PlatformCtx, now: Date = new Date()): Pro
   };
 }
 
+/** Why a staff member downloads a backup (PLA-§17 "Download ↑ with a reason"; recorded in the audit meta). */
+export const BACKUP_DOWNLOAD_REASONS = ["offsite_copy", "restore_test", "incident", "other"] as const;
+export type BackupDownloadReason = (typeof BACKUP_DOWNLOAD_REASONS)[number];
+export const isBackupDownloadReason = (v: unknown): v is BackupDownloadReason => typeof v === "string" && (BACKUP_DOWNLOAD_REASONS as readonly string[]).includes(v);
+
 export const RetentionInput = z.object({ daily: z.number().int().min(3).max(30), weekly: z.number().int().min(1).max(12) });
 
 /** `backups.manage` ↑: the retention (core `platform_backup` bounds); audit `platform.settings.updated`. */
@@ -91,12 +96,12 @@ export async function backupDayFiles(ctx: PlatformCtx, day: string): Promise<{ n
 }
 
 /** After a completed download: audit `platform.backup.downloaded` and the reminder's `lastDownloadAt`. */
-export async function recordBackupDownload(ctx: PlatformCtx, day: string, now: Date = new Date()): Promise<void> {
+export async function recordBackupDownload(ctx: PlatformCtx, day: string, now: Date = new Date(), reason: BackupDownloadReason | null = null): Promise<void> {
   requireManage(ctx);
   if (!DAY_RE.test(day)) throw new FieldsError({ day: "console.backups.day_invalid" });
   const platform = await getPlatformSetting("platform");
   await setPlatformSetting("platform", { ...platform, backup: { ...platform.backup, lastDownloadAt: now.toISOString() } }, { id: ctx.user.id, ip: ctx.actor.ip, kind: "platform" });
-  await auditFrom(ctx, "platform.backup.downloaded", { target: day, meta: { day } });
+  await auditFrom(ctx, "platform.backup.downloaded", { target: day, meta: { day, ...(reason ? { reason } : {}) } });
 }
 
 /* ------------------------------------------------------------------ */
@@ -122,7 +127,7 @@ const README = [
  * part outside `DATA_DIR/backups/` or missing on disk ends the answer as the neutral 404 (null). When the archive has
  * been fully produced, the download is recorded (`recordBackupDownload`: audit and `lastDownloadAt`).
  */
-export async function backupArchive(ctx: PlatformCtx, day: string, now: Date = new Date()): Promise<{ stream: ReadableStream<Uint8Array>; filename: string } | null> {
+export async function backupArchive(ctx: PlatformCtx, day: string, now: Date = new Date(), reason: BackupDownloadReason | null = null): Promise<{ stream: ReadableStream<Uint8Array>; filename: string } | null> {
   const files = await backupDayFiles(ctx, day);
   const root = process.env.DATA_DIR?.trim();
   if (!files || !root) return null;
@@ -164,7 +169,7 @@ export async function backupArchive(ctx: PlatformCtx, day: string, now: Date = n
   const stream = zipStream(entries, {
     mtime: now,
     onDone: () => {
-      void recordBackupDownload(ctx, day).catch((err: unknown) => recordPlatformError("backup download record", err));
+      void recordBackupDownload(ctx, day, now, reason).catch((err: unknown) => recordPlatformError("backup download record", err));
     },
   });
   return { stream, filename: `store-gen-backup-${day}.zip` };

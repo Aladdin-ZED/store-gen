@@ -351,3 +351,57 @@ export async function openPlatformRequests(storeId: string | null): Promise<Plat
   return readRequests(storeId ? and(inStore(platformRequests, ledgerScope(storeId)), open)! : and(isNull(platformRequests.storeId), open)!, 50);
 }
 
+
+/** One pending or confirmed request as the break-glass view lists it (PLA-§14.3: on top, with Confirm and Cancel). */
+export interface OpenRequestView {
+  id: string;
+  kind: PlatformRequestRow["kind"];
+  mode: PlatformRequestRow["mode"];
+  status: PlatformRequestRow["status"];
+  store: { id: string; handle: string | null; name: string } | null;
+  /** staff_super_admin: the account to promote */
+  target: { id: string; name: string } | null;
+  requestedBy: { id: string; name: string | null };
+  requestedAt: string;
+  executeAfter: string | null;
+  reasonCode: string;
+  reasonNote: string | null;
+  confirmedBy: string | null;
+  /** the viewer made it (Confirm is someone else's; Cancel stays theirs) */
+  mine: boolean;
+}
+
+/** `audit.platform`: every open request, store ones and store-less ones, oldest first (≤ 50; preq_due_idx). */
+export async function listOpenPlatformRequests(ctx: PlatformCtx): Promise<OpenRequestView[]> {
+  if (!ctx.can("audit.platform")) throw new AuthRefusal("forbidden");
+  const rows = (await readRequests(inArray(platformRequests.status, ["pending", "confirmed"]), 50)).sort((a, b) => a.requestedAt.getTime() - b.requestedAt.getTime());
+  const storeIds = [...new Set(rows.map((r) => r.storeId).filter((x): x is string => !!x))];
+  const userIds = [...new Set(rows.flatMap((r) => [r.requestedBy, r.confirmedBy, r.payload?.targetUserId]).filter((x): x is string => typeof x === "string" && /^[0-9A-Z]{26}$/.test(x)))];
+  const [storeRows, userRows] = await Promise.all([
+    // tenancy: platform the ledger's stores (handle and name for the row's link)
+    storeIds.length ? db.select({ id: stores.id, handle: stores.handle, name: stores.name }).from(stores).where(inArray(stores.id, storeIds)) : Promise.resolve([]),
+    // tenancy: platform the ledger's staff (names of requesters, confirmers and promotion targets)
+    userIds.length ? db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, userIds)) : Promise.resolve([]),
+  ]);
+  const storeOf = new Map(storeRows.map((s) => [s.id, s]));
+  const nameOf = new Map(userRows.map((u) => [u.id, u.name]));
+  return rows.map((r) => {
+    const s = r.storeId ? storeOf.get(r.storeId) : undefined;
+    const targetId = typeof r.payload?.targetUserId === "string" ? r.payload.targetUserId : null;
+    return {
+      id: r.id,
+      kind: r.kind,
+      mode: r.mode,
+      status: r.status,
+      store: r.storeId ? { id: r.storeId, handle: s?.handle ?? null, name: s?.name ?? "" } : null,
+      target: targetId ? { id: targetId, name: nameOf.get(targetId) ?? "" } : null,
+      requestedBy: { id: r.requestedBy, name: nameOf.get(r.requestedBy) ?? null },
+      requestedAt: r.requestedAt.toISOString(),
+      executeAfter: r.executeAfter ? r.executeAfter.toISOString() : null,
+      reasonCode: r.reasonCode,
+      reasonNote: r.reasonNote,
+      confirmedBy: r.confirmedBy ? (nameOf.get(r.confirmedBy) ?? null) : null,
+      mine: r.requestedBy === ctx.user.id,
+    };
+  });
+}

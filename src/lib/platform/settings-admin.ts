@@ -212,3 +212,27 @@ export async function checkBrandName(ctx: PlatformCtx, input: unknown): Promise<
   const [storeName, handle] = await Promise.all([brandMatches("store_name", parsed.data.value), brandMatches("handle", parsed.data.value)]);
   return { storeName, handle };
 }
+
+/* ------------------------------------------------------------------ */
+/* Design gates (PLA-§13.1; P6's field group, DES-R8, DES-R15)         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `platform.settings`: P6's `platform_design` group saved whole (its own schema validates it; a refused value answers
+ * `console.settings.invalid`). Audit `platform.design.changed` with the changed paths (values are thresholds, not
+ * secrets). The mirror into the ops flag `design_publish_gates` is P6's (PLA-§12.2), at its merge.
+ */
+export async function savePlatformDesign(ctx: PlatformCtx, input: unknown): Promise<{ changed: string[] }> {
+  if (!ctx.can("platform.settings")) throw new AuthRefusal("forbidden");
+  const current = await getPlatformSetting("platform_design", { fresh: true });
+  const changed = changedPaths(current, input);
+  if (!changed.length) return { changed };
+  try {
+    await setPlatformSetting("platform_design", input as typeof current, { id: ctx.user.id, ip: ctx.actor.ip, kind: "platform" });
+  } catch (err) {
+    if (err instanceof z.ZodError) throw new FieldsError({ design: "console.settings.invalid" });
+    throw err;
+  }
+  await auditFrom(ctx, "platform.design.changed", { target: "platform_design", meta: { key: "platform_design", changed } });
+  return { changed };
+}

@@ -2043,6 +2043,49 @@ async function main(): Promise<void> {
     checkD(en["console.lookup.not_found"] === "No order with this id" && en["console.user.not_found"] === "No person with this id" && en["console.reset.wa_text"]?.includes("{url}"), "the lookup and profile miss lines, and the WhatsApp text carries the link");
   }
 
+  /* ---- step 12: settings, security, health, domains and the public pages (PLA-§3.2, §13-§17, §24.2) ---- */
+  {
+    const sr = await import("./settings-rules");
+    const dmr = await import("./domain-move-rules");
+    const ai12 = await import("./abuse-input");
+    const { t: fmt12 } = await import("@/lib/i18n/admin");
+    const en = enConsole as Record<string, string>;
+    const MiB12 = 1024 * 1024;
+    // the ceilings card from seeded counters (PD68): "1,240 of 5,000 MiB used by 31 pending stores", "Today: 12 / 50 sandboxes"
+    const media12 = fmt12("console.signup.media_meter", sr.pendingMediaVars({ usedBytes: 1_240 * MiB12, limitBytes: 5_000 * MiB12, pendingStores: 31 }));
+    const one12 = fmt12("console.signup.media_meter", sr.pendingMediaVars({ usedBytes: 300, limitBytes: 5_000 * MiB12, pendingStores: 1 }));
+    const sand12 = fmt12("console.signup.sandbox_meter", sr.sandboxVars({ used: 12, limit: 50 }));
+    checkD(media12 === "1,240 of 5,000 MiB used by 31 pending stores" && one12 === "1 of 5,000 MiB used by 1 pending store" && sand12 === "Today: 12 / 50 sandboxes", "the ceilings card formats the seeded counters", [media12, one12, sand12]);
+    checkD(sr.meterTone(79, 100) === "ok" && sr.meterTone(80, 100) === "warn" && sr.meterTone(95, 100) === "danger" && sr.meterTone(1, 0) === "ok", "the pending-budget meter turns yellow at 80 % and red at 95 %");
+    const bands12 = sr.thresholdBands({ fastLaneMax: 24, holdMin: 60, rejectCandidateMin: 85 });
+    checkD(bands12.map((b) => `${b.band}:${b.from}-${b.to}`).join(",") === "fast:0-24,review:25-59,hold:60-84,reject_candidate:85-100" && !sr.thresholdsOrdered({ fastLaneMax: 60, holdMin: 60, rejectCandidateMin: 85 }), "the thresholds bar draws four bands and refuses an unordered set");
+    // the domain checklist says "restart", never "rebuild" (PLA-§16.3 rev 4, ENGC-26)
+    const env12 = dmr.DOMAIN_STEPS.find((x) => x.id === "env_replace");
+    const texts12 = dmr.DOMAIN_STEPS.map((x) => `${x.title} ${x.detail}`).join(" ");
+    checkD(!!env12 && /restart/i.test(`${env12.title} ${env12.detail}`) && !/rebuild/i.test(texts12) && /ADMIN_HOST=console\./.test(env12.detail), "the env step reads restart, never rebuild, and names ADMIN_HOST");
+    // the report page's ?p= sanitiser: a same-host path without its query, else nothing
+    const p12 = [ai12.sameHostPath("/offers/x?fbclid=1#top"), ai12.sameHostPath("https://evil.example/x"), ai12.sameHostPath("//evil.example/x"), ai12.sameHostPath("/a b"), ai12.sameHostPath(null), ai12.sameHostPath(`/${"a".repeat(400)}`)];
+    checkD(p12[0] === "/offers/x" && p12.slice(1).every((x) => x === null), "the report path keeps a same-host path without its query and drops the rest", p12);
+    // the step's copy families (en, and the public pages in ar / fr / en)
+    const families12: [string, readonly string[]][] = [
+      ["console.signup.mode.", ["closed", "invite", "approval", "waitlist", "open"]],
+      ["console.signup.because.", ["domain", "turnstile", "v13", "ready"]],
+      ["console.weight.", band.SIGNUP_FLAG_CODES],
+      ["console.codes.state.", ["active", "used_up", "expired", "revoked"]],
+      ["console.backups.reason.", ["offsite_copy", "restore_test", "incident", "other"]],
+      ["console.domains.outcome.", ["passed", "failed", "skipped", "needs_input"]],
+      ["console.brands.kind.", ["brand", "bank", "carrier", "gov", "platform", "offensive"]],
+      ["console.health.state.", ["ok", "red", "yellow"]],
+    ];
+    const missing12 = families12.flatMap(([prefix, list]) => list.map((v) => `${prefix}${v}`).filter((k) => typeof en[k] !== "string"));
+    checkD(missing12.length === 0, "every settings, security, health and domains copy family has a key per value", missing12);
+    const pub12 = Object.keys(en).filter((k) => k.startsWith("report.") || k.startsWith("console.staff_invite."));
+    const fr12 = frConsole as Record<string, string | undefined>;
+    const ar12 = arConsole as Record<string, string | undefined>;
+    const gaps12 = pub12.filter((k) => !fr12[k] || !ar12[k]);
+    checkD(pub12.length > 40 && gaps12.length === 0, "the public report and staff-invite pages are complete in ar, fr and en", gaps12);
+  }
+
   const ms = Math.round(performance.now() - t0);
   for (const s of skips) console.log(`  SKIP ${s}`);
   if (failures > 0) {

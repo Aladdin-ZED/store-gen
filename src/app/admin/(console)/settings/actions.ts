@@ -11,13 +11,18 @@
  * The typed confirmations (`open`, `allow orange`, `publish unreviewed`) and the Turnstile gate of Approval / Open
  * (`turnstile_required`) are checked on the server, in src/lib/platform/settings-admin.ts and legal.ts.
  */
+import { headers } from "next/headers";
+import { AuthRefusal } from "@/lib/auth/errors";
+import { platformTurnstileKeys } from "@/lib/auth/platform-config";
+import { verifyTurnstile } from "@/lib/orders/turnstile";
+import { isBackupDownloadReason, saveBackupRetention } from "@/lib/platform/backups";
 import type { BrandMatch } from "@/lib/platform/brand-check";
-import { saveBackupRetention } from "@/lib/platform/backups";
 import { markLegalReviewed, publishLegal, retireLegal, saveLegalDraft } from "@/lib/platform/legal";
 import { done, opOf, withOp } from "@/lib/platform/op-dedupe";
 import { platformAction } from "@/lib/platform/seam";
-import { checkBrandName, deleteProtectedBrand, savePlatformSettings, saveProtectedBrand, saveTurnstile, type SettingsSection } from "@/lib/platform/settings-admin";
+import { checkBrandName, deleteProtectedBrand, savePlatformDesign, savePlatformSettings, saveProtectedBrand, saveTurnstile, type SettingsSection } from "@/lib/platform/settings-admin";
 import { createInviteCode, dropWaitlist, inviteWaitlist, revokeInviteCode, type WaitlistInvite } from "@/lib/platform/signup-admin";
+import { clientIp } from "@/lib/security/ip";
 import type { ActionResult } from "@/lib/tenancy/types";
 
 type Op = { opId?: string };
@@ -31,9 +36,28 @@ export async function savePlatformSettingsAction(input: { section: SettingsSecti
   return platformAction("platform.settings", (ctx) => withOp(ctx, opOf(input), async () => done(await savePlatformSettings(ctx, input))));
 }
 
+/** `platform.settings`: P6's design gates group (`platform_design`, validated by its own schema; audited `platform.design.changed`). */
+export async function savePlatformDesignAction(input: { value: unknown } & Op): Promise<ActionResult<{ changed: string[] }>> {
+  return platformAction("platform.settings", (ctx) => withOp(ctx, opOf(input), async () => done(await savePlatformDesign(ctx, input?.value))));
+}
+
 /** `platform.settings` ↑: the platform Turnstile widget keys (an empty secret keeps the stored one). */
 export async function saveTurnstileAction(input: { siteKey: string; secretKey?: string } & Op): Promise<ActionResult<{ siteKey: string; secret: "set" | "not_set" }>> {
   return platformAction("platform.settings", (ctx) => withOp(ctx, opOf(input), async () => done(await saveTurnstile(ctx, input))), { stepUp: true });
+}
+
+/**
+ * `platform.settings` (PLA-§13.2 Turnstile tab "Test"): verifies a token from the embedded test widget against the
+ * stored secret (`not_set` without a configured widget); nothing is stored.
+ */
+export async function testTurnstileAction(input: { token: string }): Promise<ActionResult<{ result: "ok" | "failed" | "unverified" | "not_set" }>> {
+  return platformAction("platform.settings", async () => {
+    const keys = await platformTurnstileKeys();
+    if (!keys) return done({ result: "not_set" as const });
+    const token = typeof input?.token === "string" ? input.token.slice(0, 2_048) : "";
+    if (!token) throw new AuthRefusal("invalid", "console.turnstile.no_token");
+    return done({ result: await verifyTurnstile(keys.secretKey, token, clientIp(await headers())) });
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -115,4 +139,22 @@ export async function retireLegalAction(input: { id: string } & Op): Promise<Act
 /** `backups.manage` ↑: the retention (daily 3-30, weekly 1-12). */
 export async function saveBackupRetentionAction(input: { daily: number; weekly: number } & Op): Promise<ActionResult<{ changed: boolean }>> {
   return platformAction("backups.manage", (ctx) => withOp(ctx, opOf(input), async () => done(await saveBackupRetention(ctx, input))), { stepUp: true });
+}
+
+/**
+ * `backups.manage` ↑ (PLA-§17 "Download ↑ with a reason"): the step-up happens here, then the browser follows the
+ * answered URL (`GET /api/admin/backups/<day>?reason=`), whose guard checks the fresh step-up again and records the
+ * download with its reason.
+ */
+export async function prepareBackupDownloadAction(input: { day: string; reason: string }): Promise<ActionResult<{ url: string }>> {
+  return platformAction(
+    "backups.manage",
+    async () => {
+      const day = typeof input?.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.day) ? input.day : null;
+      if (!day) throw new AuthRefusal("invalid", "console.backups.day_invalid");
+      if (!isBackupDownloadReason(input?.reason)) throw new AuthRefusal("invalid", "console.backups.reason_required");
+      return done({ url: `/api/admin/backups/${day}?reason=${input.reason}` });
+    },
+    { stepUp: true },
+  );
 }

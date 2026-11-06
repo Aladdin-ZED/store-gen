@@ -6,7 +6,7 @@
  */
 import { AuthRefusal } from "@/lib/auth/errors";
 import { apiHeaders, json } from "@/lib/orders/http";
-import { backupArchive } from "@/lib/platform/backups";
+import { backupArchive, isBackupDownloadReason } from "@/lib/platform/backups";
 import { isNotImplemented } from "@/lib/platform/panel";
 import { platformGuard } from "@/lib/platform/seam";
 
@@ -19,7 +19,8 @@ export async function GET(req: Request, { params }: Params): Promise<Response> {
   if (!g.ok) return g.response;
   const { day } = await params;
   try {
-    const archive = await backupArchive(g.ctx, day);
+    const reason = new URL(req.url).searchParams.get("reason");
+    const archive = await backupArchive(g.ctx, day, new Date(), isBackupDownloadReason(reason) ? reason : null);
     if (!archive) return json({ ok: false, error: "not_found" }, 404, PRIVATE);
     return new Response(archive.stream, {
       status: 200,

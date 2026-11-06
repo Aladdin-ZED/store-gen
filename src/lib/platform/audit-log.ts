@@ -10,9 +10,12 @@ import "server-only";
  * value is masked too), the IP hash is cut to 8 characters, and the export itself is audited
  * `platform.audit.exported { rows, truncated, filter }`.
  */
+import { inArray } from "drizzle-orm";
 import { z } from "zod";
 import { auditFrom, listPlatformAudit, type AuditEntry } from "@/lib/audit";
 import { AuthRefusal, FieldsError } from "@/lib/auth/errors";
+import { db } from "@/lib/db/client";
+import { stores, users } from "@/lib/db/schema";
 import type { PlatformCtx } from "@/lib/tenancy/types";
 import { csvCell } from "./console-rules";
 import { isoWeek } from "./health-score";
@@ -118,4 +121,160 @@ export async function markBreakGlassReviewed(ctx: PlatformCtx, input: unknown, n
   if (marks.some((m) => m.target === week)) return { week, changed: false };
   await auditFrom(ctx, "platform.breakglass.reviewed", { target: week, meta: { week } });
   return { week, changed: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* The console views (PLA-§14.3: /admin/security/audit, /break-glass)  */
+/* ------------------------------------------------------------------ */
+
+const ID26 = /^[0-9A-Z]{26}$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** rows shown per page, rows scanned per page at most (the staff and date filters run over the scanned rows) */
+const VIEW_PAGE = 50;
+const VIEW_SCAN = 3_000;
+
+/** The page's filters: the CSV's, plus the staff member and a date range (UTC days, `to` inclusive). */
+export interface AuditViewFilter extends AuditFilter {
+  userId?: string;
+  from?: string;
+  to?: string;
+}
+
+/** The view's filters from the URL; an invalid field is dropped. */
+export function parseAuditViewFilter(params: Record<string, string | string[] | undefined>): AuditViewFilter {
+  const one = (k: string) => {
+    const v = params[k];
+    return Array.isArray(v) ? v[0] : v;
+  };
+  const out: AuditViewFilter = parseAuditFilter(Object.fromEntries(["storeId", "actorKind", "area"].map((k) => [k, one(k)])));
+  const userId = one("userId");
+  if (userId && ID26.test(userId)) out.userId = userId;
+  for (const k of ["from", "to"] as const) {
+    const v = one(k);
+    if (v && DATE_RE.test(v) && Number.isFinite(Date.parse(`${v}T00:00:00Z`))) out[k] = v;
+  }
+  return out;
+}
+
+export interface AuditViewRow {
+  id: number;
+  at: string;
+  action: string;
+  actorKind: AuditEntry["actorKind"];
+  actor: { id: string | null; name: string | null; role: string | null };
+  impersonator: string | null;
+  store: { id: string; handle: string | null } | null;
+  /** the target as stored, with e-mails and phones masked; `userTarget` when it is an account id */
+  target: string | null;
+  userTarget: string | null;
+  /** redacted meta (JSON, ≤ 4,000 characters) */
+  meta: string;
+  ip8: string | null;
+}
+
+export interface AuditViewPage {
+  rows: AuditViewRow[];
+  /** the keyset of the next page (the last scanned id), null at the end */
+  next: number | null;
+  /** the scan stopped at its bound before filling the page: "Older rows" continues it */
+  partial: boolean;
+}
+
+async function enrich(entries: AuditEntry[]): Promise<AuditViewRow[]> {
+  const userIds = [...new Set(entries.map((e) => e.userId).filter((x): x is string => !!x && ID26.test(x)))].slice(0, 200);
+  const storeIds = [...new Set(entries.map((e) => e.storeId).filter((x): x is string => !!x && ID26.test(x)))].slice(0, 200);
+  const [roles, handles] = await Promise.all([
+    // tenancy: platform audit actors (accounts are platform rows): the platform role beside each actor's name
+    userIds.length ? db.select({ id: users.id, role: users.platformRole }).from(users).where(inArray(users.id, userIds)) : Promise.resolve([]),
+    // tenancy: platform audit targets: the handle of each store a row names, for its link (no store data beyond the handle)
+    storeIds.length ? db.select({ id: stores.id, handle: stores.handle }).from(stores).where(inArray(stores.id, storeIds)) : Promise.resolve([]),
+  ]);
+  const roleOf = new Map(roles.map((r) => [r.id, r.role]));
+  const handleOf = new Map(handles.map((h) => [h.id, h.handle]));
+  return entries.map((e) => ({
+    id: e.id,
+    at: e.createdAt.toISOString(),
+    action: e.action,
+    actorKind: e.actorKind,
+    actor: { id: e.userId, name: e.actorName, role: e.userId ? (roleOf.get(e.userId) ?? null) : null },
+    impersonator: e.impersonatorName,
+    store: e.storeId ? { id: e.storeId, handle: handleOf.get(e.storeId) ?? null } : null,
+    target: e.target ? redactText(e.target) : null,
+    userTarget: e.target && ID26.test(e.target) && !e.storeId ? e.target : null,
+    meta: redactedMeta(e.meta),
+    ip8: e.ipHash ? e.ipHash.slice(0, 8) : null,
+  }));
+}
+
+/** Scans newest first from `beforeId`, keeping the rows `keep` accepts, up to one page or the scan bound. */
+async function scan(ctx: PlatformCtx, base: AuditFilter, beforeId: number | null, keep: (e: AuditEntry) => boolean | "stop"): Promise<{ hits: AuditEntry[]; next: number | null; partial: boolean }> {
+  const hits: AuditEntry[] = [];
+  let cursor = beforeId ?? undefined;
+  let scanned = 0;
+  for (;;) {
+    const page = await listPlatformAudit(ctx, { ...base, beforeId: cursor, limit: PAGE });
+    for (const e of page) {
+      scanned++;
+      cursor = e.id;
+      const k = keep(e);
+      if (k === "stop") return { hits, next: null, partial: false };
+      if (k) hits.push(e);
+      if (hits.length >= VIEW_PAGE) return { hits, next: e.id, partial: false };
+    }
+    if (page.length < PAGE) return { hits, next: null, partial: false };
+    if (scanned >= VIEW_SCAN) return { hits, next: cursor ?? null, partial: true };
+  }
+}
+
+/** `audit.platform`: one page of the filtered log (PLA-§14.3), newest first. */
+export async function listAuditPage(ctx: PlatformCtx, filter: AuditViewFilter, beforeId: number | null = null): Promise<AuditViewPage> {
+  if (!ctx.can("audit.platform")) throw new AuthRefusal("forbidden");
+  const from = filter.from ? Date.parse(`${filter.from}T00:00:00Z`) : null;
+  const to = filter.to ? Date.parse(`${filter.to}T00:00:00Z`) + 86_400_000 : null;
+  const { storeId, actorKind, area } = filter;
+  const res = await scan(ctx, { storeId, actorKind, area }, beforeId, (e) => {
+    const at = e.createdAt.getTime();
+    if (from !== null && at < from) return "stop";
+    if (to !== null && at >= to) return false;
+    return !filter.userId || e.userId === filter.userId;
+  });
+  return { rows: await enrich(res.hits), next: res.next, partial: res.partial };
+}
+
+/** The break-glass actions (PLA-§14.3, SE-04): names ending with "." or "_" are prefixes, the rest exact. */
+export const BREAK_GLASS_ACTIONS = [
+  "platform.pii.revealed",
+  "platform.impersonation.",
+  "platform.store.purge_",
+  "platform.kill.changed",
+  "platform.backup.downloaded",
+  "platform.user.2fa_reset",
+  "platform.user.reset_link",
+  "platform.order.lookup",
+  "platform.staff.changed",
+] as const;
+
+/** A break-glass row: one of the listed actions, or a store export a staff member made. */
+export function isBreakGlass(action: string, actorKind: string): boolean {
+  if (action.startsWith("store.export_")) return actorKind === "platform";
+  return BREAK_GLASS_ACTIONS.some((a) => (a.endsWith(".") || a.endsWith("_") ? action.startsWith(a) : action === a));
+}
+
+/** `audit.platform`: one page of the break-glass log. */
+export async function listBreakGlassPage(ctx: PlatformCtx, beforeId: number | null = null): Promise<AuditViewPage> {
+  if (!ctx.can("audit.platform")) throw new AuthRefusal("forbidden");
+  const res = await scan(ctx, {}, beforeId, (e) => isBreakGlass(e.action, e.actorKind));
+  return { rows: await enrich(res.hits), next: res.next, partial: res.partial };
+}
+
+/** The weekly review (PLA-§14.3): this ISO week, whether it is marked, and the latest marks (newest first). */
+export async function breakGlassReview(ctx: PlatformCtx, now: Date = new Date()): Promise<{ week: string; reviewed: boolean; marks: { week: string; at: string; by: string | null }[] }> {
+  if (!ctx.can("audit.platform")) throw new AuthRefusal("forbidden");
+  const marks = await listPlatformAudit(ctx, { area: "platform.breakglass.reviewed", limit: 12 });
+  const week = isoWeek(now);
+  return {
+    week,
+    reviewed: marks.some((m) => m.target === week),
+    marks: marks.filter((m) => m.target).map((m) => ({ week: m.target!, at: m.createdAt.toISOString(), by: m.actorName })),
+  };
 }
