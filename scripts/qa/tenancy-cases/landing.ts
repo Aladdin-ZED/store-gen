@@ -26,13 +26,18 @@
  * intent: the uniform not_found, nothing written on A's order); A's signed link under B's handle answers 404 with
  * nothing of A; B's scope loads nothing of A's order. Each case checks its positive control on A's own host.
  *
+ * Settings screens (p3-w1-settings-screens): every action of /settings/{delivery,checkout,policies} joins the
+ * harness's `ACTION_CASES` (`actions` below), so `qa:action-replay` replays A's bodies as B's members, a member of
+ * both, an outsider, staff and staff viewing B, and proves A's zones, calendar, policies, confirmation block,
+ * templates and switches stay byte-identical while A's own call works. Each body carries a fresh op id.
+ *
  * Runtime add-ons (p3-w1-addons): A's `customer_confirm` row is never B's `templateFor` text; B's `loadRenderAddons`
  * blocks (live, preview, test, connected export, and with A's page id) carry none of A's template, zones or caller
  * phone, while A's own blocks carry all three (the control).
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import type { TenancyCase, TenancyKit } from "../tenancy-check";
+import type { TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
 import type { WriteCtx, WriteScope } from "@/lib/tenancy/types";
 
 const load = <T>(id: string): T => createRequire(__filename)(id) as T;
@@ -240,6 +245,8 @@ async function gateCases(kit: TenancyKit): Promise<void> {
   const docB = await docOf(pageB);
   const reviewedAt = new Date().toISOString();
 
+  // B starts unreviewed: the settings actions' cases (`actions` below) post their bodies on B's own path as B's members
+  await S.updateStoreSetting(B, "policies", { returns: { accepted: null, windowDays: null }, reviewedAt: null }, { id: fx.B.members.owner });
   // A: reviewed policies (7-day returns), zones on with one zone, an attested fact and an attested proof section
   await S.updateStoreSetting(A, "policies", { returns: { accepted: true, windowDays: 7 }, reviewedAt }, { id: fx.A.members.owner });
   await S.updateStoreSetting(A, "checkout", { zonesEnabled: true }, { id: fx.A.members.owner });
@@ -581,4 +588,60 @@ export const cases: TenancyCase[] = [
   { name: "landing: slug history 308s with the raw query, a reused slug serves the new page, B never redirects into A", run: slugCases },
   { name: "landing: B's host reads A's order by no tracking proof; A's signed link under B's handle answers 404", run: trackCases },
   { name: "landing: A's confirm template, zones and caller phone never reach B's add-on blocks (loadRenderAddons, templateFor)", run: addonCases },
+];
+
+/* ------------------------------------------------------------------ */
+/* server actions of the settings screens (p3-w1-settings-screens)     */
+/* ------------------------------------------------------------------ */
+
+const op = () => randomUUID().replace(/-/g, "");
+const DELIVERY = "src/app/app/[store]/settings/delivery/actions.ts";
+const CHECKOUT = "src/app/app/[store]/settings/checkout/actions.ts";
+const POLICIES = "src/app/app/[store]/settings/policies/actions.ts";
+const year = () => new Date().getUTCFullYear();
+const zoneBody = (name: string) => [
+  { name, cities: ["fes", "meknes"], feeCents: 2_500, freeFromCents: null, etaMinDays: 1, etaMaxDays: 2, notServed: false, note: null },
+  { name: `${name} rest`, cities: ["*"], feeCents: 3_500, freeFromCents: null, etaMinDays: 2, etaMaxDays: 4, notServed: false, note: null },
+];
+const policiesBody = (line: string) => ({
+  inspection: "allowed",
+  delivery: { coverage: "national", typicalDays: null, freeFromCents: null },
+  returns: { accepted: true, windowDays: 7, whoPays: "customer", condition: { fr: line } },
+  exchange: { accepted: null, windowDays: null },
+  refund: { method: "unset", withinDays: null },
+  warranty: { months: null },
+  contact: { channels: ["phone"] },
+  extras: [{ id: "replay-line", text: { fr: line } }],
+});
+/**
+ * `own` (the role matrix in B's store) defaults to the victim's body; the writes whose result B's read cases above check
+ * (B has no zones, no own template, no reviewed policies) pass a body that leaves B as it was: an empty zone list, the
+ * default text, a policies body the schema refuses (the body still runs: `invalid`, never a seam refusal).
+ */
+const settingsCase = (file: string, name: string, path: `/${string}`, permission: TrackActionCase["permission"], body: () => unknown[], ownBody: () => unknown[] = body): TrackActionCase => ({
+  file,
+  name,
+  area: "settings",
+  path,
+  permission,
+  write: true,
+  victim: () => [op(), ...body()],
+  own: () => [op(), ...ownBody()],
+});
+
+export const actions: TrackActionCase[] = [
+  settingsCase(DELIVERY, "saveZonesAction", "/settings/delivery", ["checkout.write"], () => [zoneBody(`Replay ${Date.now().toString(36)}`)], () => [[]]),
+  settingsCase(DELIVERY, "saveCalendarAction", "/settings/delivery", ["checkout.write"], () => [{ workdays: [1, 2, 3, 4, 5], cutoffHour: 15, confirmationLeadDays: 1 }]),
+  settingsCase(DELIVERY, "addFixedHolidaysAction", "/settings/delivery", ["checkout.write"], () => [year() + 1]),
+  settingsCase(DELIVERY, "markHolidaysReviewedAction", "/settings/delivery", ["checkout.write"], () => [year()]),
+  settingsCase(DELIVERY, "applyLeadSuggestionAction", "/settings/delivery", ["checkout.write"], () => []),
+  settingsCase(DELIVERY, "setZonesEnabledAction", "/settings/delivery", ["checkout.write"], () => [true]),
+  settingsCase(DELIVERY, "setLineOnLandingAction", "/settings/delivery", ["checkout.write"], () => [false]),
+  settingsCase(DELIVERY, "saveTypicalDaysAction", "/settings/delivery", ["settings.write"], () => [[1, 3]], () => [null]),
+  settingsCase(CHECKOUT, "saveThankYouAction", "/settings/checkout", ["settings.write"], () => [{ confirmWhatsapp: true, expectation: false, trackLink: true }]),
+  settingsCase(CHECKOUT, "saveConfirmationAction", "/settings/checkout", ["settings.write"], () => [{ callerPhone: "0612345678", whatsapp: null, withinHours: 2 }]),
+  settingsCase(CHECKOUT, "saveConfirmTemplateAction", "/settings/checkout", ["settings.write"], () => ["fr", "Replay {order_id} {total}"], () => ["fr", null]),
+  settingsCase(CHECKOUT, "saveCheckoutOptionsAction", "/settings/checkout", ["checkout.write"], () => [{ notServedWhatsapp: false, addressMode: "optional" }]),
+  settingsCase(CHECKOUT, "saveLandingOptionsAction", "/settings/checkout", ["settings.write"], () => [{ trackingRequests: false }]),
+  settingsCase(POLICIES, "savePoliciesAction", "/settings/policies", ["settings.write"], () => [policiesBody(`Replay ${Date.now().toString(36)}`)], () => [{ ...policiesBody("own"), inspection: "sometimes" }]),
 ];

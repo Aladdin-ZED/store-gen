@@ -91,3 +91,14 @@ export function waConfirmText(store: StoreRow & { confirmation: z.output<typeof 
     name: firstWord(order.name),
   });
 }
+
+/** `{var}` names a template uses that its kind does not offer (the editors refuse the save and name them). */
+export function unknownTemplateVars(kind: LandingTemplateKind, body: string): string[] {
+  const allowed = new Set(TEMPLATE_KIND_VARS[kind]);
+  const out: string[] = [];
+  for (const m of body.replace(/\{\{|\}\}/g, "").matchAll(/\{(\w+)\}/g)) {
+    const name = m[1]!;
+    if (!allowed.has(name) && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
