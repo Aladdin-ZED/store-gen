@@ -7,8 +7,9 @@ import L from "./living.module.css";
 /*
  * INTEGRATIONS: the Dock (spec §6.7). A 2.5D drawing in plain SVG (no CSS 3D, no glow, no spin): a floor plate, an
  * orbit ring with projected ticks, the platform as three extruded plates carrying the wordmark glyph, and four threads
- * to Google Sheets, Meta Conversions API, Telegram and WhatsApp. The Lead and Purchase tags sit on the Meta thread
- * (the real event names, PIXEL_EVENTS.meta). Anchor sides mirror in Arabic like the rest of the page.
+ * to Google Sheets, Meta Conversions API, Telegram and WhatsApp. The Lead and Purchase tags (the real event names,
+ * PIXEL_EVENTS.meta) hang as one row under the Meta tile, either side of its leader, clear of the threads and the core.
+ * Anchor sides mirror in Arabic like the rest of the page.
  */
 
 const TILE_W = 168;
@@ -33,11 +34,6 @@ const ANCHORS = [
   { id: "telegram", deg: 25, glyph: "sg-plane", name: "Telegram" },
   { id: "whatsapp", deg: 155, glyph: "sg-bubble", name: "WhatsApp" },
 ] as const;
-
-function quadAt(a: Pt, c: Pt, b: Pt, t: number): Pt {
-  const u = 1 - t;
-  return [u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]];
-}
 
 function DockSvg({ g, d, rtl, cls }: { g: Geo; d: HomeData; rtl: boolean; cls: string }) {
   const { W, cx, s } = g;
@@ -68,10 +64,19 @@ function DockSvg({ g, d, rtl, cls }: { g: Geo; d: HomeData; rtl: boolean; cls: s
     const segs: Seg[] = [{ k: "Q", a: top, c, b: an.p }];
     return { an, c, segs, pts: samplePath(segs, 24) };
   });
-  const meta = threads[1];
-  const tagAt = (t: number) => quadAt(top, meta.c, meta.an.p, t);
-  const lead = tagAt(0.32);
-  const purchase = tagAt(0.7);
+  // tiles: upright pills, back ones above their anchor, front ones below
+  const tileOf = (p: Pt) => {
+    const back = p[1] < ringY;
+    return { back, ty: back ? p[1] - 50 - TILE_H : p[1] + 20, x0: Math.max(4, Math.min(W - 4 - TILE_W, p[0] - TILE_W / 2)) };
+  };
+  // the Meta events: one row 8 units under the Meta tile, Lead on the inline-start side of the leader, Purchase after it
+  const meta = threads[1].an;
+  const tagY = tileOf(meta.p).ty + TILE_H + 8;
+  const dir = rtl ? -1 : 1;
+  const tags = [
+    { label: d.events.lead, w: 38, x: meta.p[0] - dir * 6 - (rtl ? 0 : 38) },
+    { label: d.events.purchase, w: 64, x: meta.p[0] + dir * 6 - (rtl ? 64 : 0) },
+  ];
   const rhombus = (y: number) => `M${f(cx - hw)} ${f(y)}L${f(cx)} ${f(y - hh)}L${f(cx + hw)} ${f(y)}L${f(cx)} ${f(y + hh)}Z`;
   const side = (y: number) => `M${f(cx - hw)} ${f(y)}L${f(cx)} ${f(y + hh)}L${f(cx + hw)} ${f(y)}V${f(y + th)}L${f(cx)} ${f(y + hh + th)}L${f(cx - hw)} ${f(y + th)}Z`;
   // the glyph lies flat on the top plate: rotated 45° then squashed to the plate's ratio
@@ -118,29 +123,10 @@ function DockSvg({ g, d, rtl, cls }: { g: Geo; d: HomeData; rtl: boolean; cls: s
           <circle cx={0} cy={0} r={3} data-pkt={ptsAttr(th0.pts)} style={cv({ "--i": i })} className={L.packet} />
         </g>
       ))}
-      {/* the Meta events, on the Meta thread */}
-      {g.tiles ? (
-        <g className={L.dkTags}>
-          {[
-            { p: lead, label: d.events.lead, w: 38 },
-            { p: purchase, label: d.events.purchase, w: 64 },
-          ].map((tg, i) => (
-            <g key={tg.label} style={cv({ "--i": i })} className={L.dkTag}>
-              <rect x={f(tg.p[0] - tg.w / 2)} y={f(tg.p[1] - 9)} width={tg.w} height={18} rx={9} className={L.tagLight} />
-              <text x={f(tg.p[0])} y={f(tg.p[1] + 3.5)} textAnchor="middle" direction="ltr" className={`${L.mono10} ${L.kmF}`}>
-                {tg.label}
-              </text>
-            </g>
-          ))}
-        </g>
-      ) : null}
-      {/* tiles: upright pills, back ones above their anchor, front ones below */}
+      {/* tiles */}
       {g.tiles
         ? threads.map(({ an }) => {
-            const back = an.p[1] < ringY;
-            const ty = back ? an.p[1] - 50 - TILE_H : an.p[1] + 20;
-            const tx = an.p[0] - TILE_W / 2;
-            const x0 = Math.max(4, Math.min(W - 4 - TILE_W, tx));
+            const { back, ty, x0 } = tileOf(an.p);
             const gx = rtl ? x0 + TILE_W - 14 - 16 : x0 + 14;
             const nx = rtl ? x0 + TILE_W - 38 : x0 + 38;
             return (
@@ -156,6 +142,19 @@ function DockSvg({ g, d, rtl, cls }: { g: Geo; d: HomeData; rtl: boolean; cls: s
             );
           })
         : null}
+      {/* the Meta events, under the Meta tile */}
+      {g.tiles ? (
+        <g className={L.dkTags}>
+          {tags.map((tg, i) => (
+            <g key={tg.label} style={cv({ "--i": i })} className={L.dkTag}>
+              <rect x={f(tg.x)} y={f(tagY)} width={tg.w} height={18} rx={9} className={L.tagLight} />
+              <text x={f(tg.x + tg.w / 2)} y={f(tagY + 12.5)} textAnchor="middle" direction="ltr" className={`${L.mono10} ${L.kmF}`}>
+                {tg.label}
+              </text>
+            </g>
+          ))}
+        </g>
+      ) : null}
     </svg>
   );
 }

@@ -6,9 +6,10 @@ import L from "./living.module.css";
 
 /*
  * OPERATIONS: the six bento illustrations (spec §6.6). Quiet line drawings in --mk-draw at 1.25 px, with jade only on
- * the one live element of each. Static: the only motion is a hover micro-step (secondary detail 2), never a loop.
+ * the one live element of each. Each view box is about its cell's width, so the drawings fill their cells at close to
+ * 1:1 (the strokes never scale up). Static: the only motion is a hover micro-step (secondary detail 2), never a loop.
  * No figure anywhere: the tracking line carries the real status labels, the profit bars show margin = sales − costs
- * by length alone, the health ring has no score.
+ * by length alone, the health ring has no score, the backups are four snapshots on a time axis with no times.
  */
 
 type P = { t: MarketingCopy; rtl: boolean };
@@ -76,8 +77,8 @@ export function TrackingArt({ t, rtl, d }: P & { d: HomeData }) {
 /* 2. delivery zones and days                                          */
 /* ------------------------------------------------------------------ */
 
-const HEX_R = 22;
-function hexPath(cx: number, cy: number, r = HEX_R): string {
+/** A flat-top hexagon of circumradius r centred on (cx, cy). */
+function hexPath(cx: number, cy: number, r: number): string {
   let d = "";
   for (let i = 0; i < 6; i++) {
     const a = (Math.PI / 3) * i;
@@ -86,40 +87,81 @@ function hexPath(cx: number, cy: number, r = HEX_R): string {
   return `${d}Z`;
 }
 
+const HEX_R = 16;
+const SQ3 = Math.sqrt(3);
+/** Axial cells (q, r) of the delivery map: a radius-4 field with a ragged coast (ring-4 cells left out by index). */
+const COAST_GAPS = new Set([1, 2, 6, 9, 10, 11, 15, 19, 20, 22]);
+const HEX_CELLS: readonly { q: number; r: number; ring: number; zone: number }[] = (() => {
+  const out: { q: number; r: number; ring: number; zone: number }[] = [];
+  const dirs = [
+    [1, 0],
+    [0, 1],
+    [-1, 1],
+    [-1, 0],
+    [0, -1],
+    [1, -1],
+  ];
+  const zoneOf = (q: number, r: number, ring: number) => {
+    if (ring <= 1) return 0;
+    // three districts around the centre, by the cell's angle on the map
+    const x = 1.5 * q;
+    const y = SQ3 * (r + q / 2);
+    const deg = ((Math.atan2(y, x) * 180) / Math.PI + 360 + 30) % 360;
+    return 1 + Math.floor(deg / 120);
+  };
+  out.push({ q: 0, r: 0, ring: 0, zone: 0 });
+  for (let ring = 1; ring <= 4; ring++) {
+    // start at direction 4 × ring, then walk the six sides
+    let q = dirs[4][0] * ring;
+    let r = dirs[4][1] * ring;
+    let n = 0;
+    for (let side = 0; side < 6; side++) {
+      for (let step = 0; step < ring; step++) {
+        if (!(ring === 4 && COAST_GAPS.has(n))) out.push({ q, r, ring, zone: zoneOf(q, r, ring) });
+        q += dirs[side][0];
+        r += dirs[side][1];
+        n++;
+      }
+    }
+  }
+  return out;
+})();
+/** Steel tints of the four zones (the centre, then three districts): fill opacity only, no figure. */
+const ZONE_TINT = [0.34, 0.22, 0.12, 0.28];
+
 export function DeliveryArt({ t, rtl }: P) {
-  const W = 320;
-  const X = (x: number) => f(mx(x, W, rtl));
-  const counts = [2, 3, 4, 3, 2];
-  const dx = HEX_R * 1.5;
-  const dy = HEX_R * Math.sqrt(3);
-  const cx0 = 160;
-  const cy0 = 190;
-  const tints = [0.22, 0.12, 0.34, 0.12, 0.22, 0.34, 0.12, 0.22, 0.12, 0.34, 0.22, 0.12, 0.34, 0.22];
-  const cells: { x: number; y: number }[] = [];
-  counts.forEach((n, q) => {
-    for (let k = 0; k < n; k++) cells.push({ x: cx0 + (q - 2) * dx, y: cy0 + (k - (n - 1) / 2) * dy });
-  });
-  const zone = cells[6];
-  const next = cells[10];
+  // the field's box: the map's bounds plus a margin; the SVG fills whatever height its cell gives it (meet)
+  const W = 236;
+  const H = 260;
+  const cx0 = W / 2;
+  const cy0 = H / 2;
+  const at = (q: number, r: number) => ({ x: mx(cx0 + 1.5 * HEX_R * q, W, rtl), y: cy0 + SQ3 * HEX_R * (r + q / 2) });
+  const zone = at(1, -1);
+  const next = at(2, -1);
   // a week starting Monday (ISO): filled pills are delivery days, outlined pills are closed (no letters: they don't localize)
   const open = [true, true, true, true, true, true, false];
   return (
-    <svg viewBox={`0 0 ${W} 290`} className={`${L.svg} ${L.art} ${L.artDelivery}`} aria-hidden="true" focusable="false">
-      {open.map((o, i) => (
-        <rect key={i} x={f(mxRect(24 + i * 40, 32, W, rtl))} y={20} width={32} height={14} rx={7} className={o ? L.dayOn : L.dayOff} />
-      ))}
-      <text x={X(24)} y={56} textAnchor={anchor(rtl, "start")} className={`${L.lab} ${L.ksF}`}>
-        {t.home.ops.delivery.days}
-      </text>
-      {cells.map((c, i) => (
-        <path key={i} d={hexPath(mx(c.x, W, rtl), c.y, HEX_R - 1.5)} className={L.hex} fillOpacity={tints[i]} />
-      ))}
-      <path
-        d={hexPath(mx(zone.x, W, rtl), zone.y, HEX_R - 1.5)}
-        className={`${L.hexZone} ${L.hoverStep}`}
-        style={cv({ "--hx": `${f(mx(next.x, W, rtl) - mx(zone.x, W, rtl))}px`, "--hy": `${f(next.y - zone.y)}px` })}
-      />
-    </svg>
+    <>
+      <div className={L.days} aria-hidden="true">
+        <span className={L.dayRow}>
+          {open.map((o, i) => (
+            <span key={i} className={o ? L.dayPillOn : L.dayPillOff} />
+          ))}
+        </span>
+        <span className={L.dayLabel}>{t.home.ops.delivery.days}</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className={`${L.svg} ${L.deliveryField}`} aria-hidden="true" focusable="false">
+        {HEX_CELLS.map((c, i) => {
+          const p = at(c.q, c.r);
+          return <path key={i} d={hexPath(p.x, p.y, HEX_R - 1)} className={L.hex} fillOpacity={ZONE_TINT[c.zone]} />;
+        })}
+        <path
+          d={hexPath(zone.x, zone.y, HEX_R - 1)}
+          className={`${L.hexZone} ${L.hoverStep}`}
+          style={cv({ "--hx": `${f(next.x - zone.x)}px`, "--hy": `${f(next.y - zone.y)}px` })}
+        />
+      </svg>
+    </>
   );
 }
 
@@ -128,29 +170,30 @@ export function DeliveryArt({ t, rtl }: P) {
 /* ------------------------------------------------------------------ */
 
 export function ProfitArt({ t, rtl }: P) {
-  const W = 320;
+  const W = 360;
   const X = (x: number) => f(mx(x, W, rtl));
   const R = (x: number, w: number) => f(mxRect(x, w, W, rtl));
   const a = anchor(rtl, "start");
-  const sales = 272;
-  const costs = 172;
+  const x0 = 1;
+  const sales = 336;
+  const costs = 212;
   const rows = [
-    { label: t.home.ops.profit.sales, y: 20 },
-    { label: t.home.ops.profit.costs, y: 70 },
-    { label: t.home.ops.profit.margin, y: 120 },
+    { label: t.home.ops.profit.sales, y: 15 },
+    { label: t.home.ops.profit.costs, y: 71 },
+    { label: t.home.ops.profit.margin, y: 127 },
   ];
   return (
-    <svg viewBox={`0 0 ${W} 156`} className={`${L.svg} ${L.art}`} aria-hidden="true" focusable="false">
+    <svg viewBox={`0 0 ${W} 160`} className={`${L.svg} ${L.art}`} aria-hidden="true" focusable="false">
       {rows.map((r) => (
-        <text key={r.label} x={X(24)} y={r.y} textAnchor={a} className={`${L.lab} ${L.ksF}`}>
+        <text key={r.label} x={X(x0)} y={r.y} textAnchor={a} fontSize={14} className={`${L.lab} ${L.ksF}`}>
           {r.label}
         </text>
       ))}
-      <rect x={R(24, sales)} y={30} width={sales} height={10} rx={5} className={L.barDraw} />
-      <rect x={R(24, costs)} y={80} width={costs} height={10} rx={5} className={L.barDraw} />
-      <path d={`M${X(24 + costs)} 94V126M${X(24 + sales)} 44V126`} className={L.guide} />
-      <rect x={R(24 + costs, sales - costs)} y={130} width={sales - costs} height={10} rx={5} className={L.jdF} />
-      <path d={`M${X(24 + sales + 6)} 128V142`} className={`${L.marginTick} ${L.hoverStep}`} style={cv({ "--hx": `${rtl ? -4 : 4}px` })} />
+      <rect x={R(x0, sales)} y={26} width={sales} height={14} rx={7} className={L.barDraw} />
+      <rect x={R(x0, costs)} y={82} width={costs} height={14} rx={7} className={L.barDraw} />
+      <path d={`M${X(x0 + costs)} 100V134M${X(x0 + sales)} 44V134`} className={L.guide} />
+      <rect x={R(x0 + costs, sales - costs)} y={138} width={sales - costs} height={14} rx={7} className={L.jdF} />
+      <path d={`M${X(x0 + sales + 8)} 135V155`} className={`${L.marginTick} ${L.hoverStep}`} style={cv({ "--hx": `${rtl ? -4 : 4}px` })} />
     </svg>
   );
 }
@@ -190,20 +233,29 @@ export function HealthArt({ t, rtl }: P) {
 /* 5. team roles                                                       */
 /* ------------------------------------------------------------------ */
 
-export function RolesArt({ t, rtl, d }: P & { d: HomeData }) {
-  const W = 300;
+/** The roles' cascade at one width: wide (cells 360 px and up) and compact, so the labels stay near 13 px. */
+function RolesSvg({ t, rtl, d, W, TW, TH, dy, cls }: P & { d: HomeData; W: number; TW: number; TH: number; dy: number; cls: string }) {
   const a = anchor(rtl, "start");
+  const n = d.roles.length;
+  const step = (W - 2 - TW - 8) / (n - 1);
+  const H = 1 + (n - 1) * dy + TH + 14;
   return (
-    <svg viewBox={`0 0 ${W} 150`} className={`${L.svg} ${L.art}`} aria-hidden="true" focusable="false">
+    <svg viewBox={`0 0 ${W} ${H}`} className={`${L.svg} ${L.art} ${cls}`} aria-hidden="true" focusable="false">
       {d.roles.map((role, i) => {
-        const x = mxRect(20 + i * 40, 136, W, rtl);
-        const y = 14 + i * 30;
-        const hole = rtl ? x + 136 - 16 : x + 16;
+        const x = mxRect(1 + i * step, TW, W, rtl);
+        const y = 1 + i * dy;
+        const hole = rtl ? x + TW - 20 : x + 20;
         return (
           <g key={role} className={L.roleTag} style={cv({ "--i": i, "--hx": `${(rtl ? -1 : 1) * i * 5}px`, "--hy": `${-i * 3}px` })}>
-            <rect x={f(x)} y={y} width={136} height={38} rx={10} className={i === 0 ? L.tagLive : L.tagDraw} />
-            <circle cx={f(hole)} cy={y + 19} r={4} className={L.drawLine} />
-            <text x={f(rtl ? x + 136 - 30 : x + 30)} y={y + 23.5} textAnchor={a} className={`${L.lab} ${L.kF}`}>
+            {[
+              { a: 0.05, dy: 6, g: 2 },
+              { a: 0.035, dy: 12, g: 6 },
+            ].map((s, k) => (
+              <rect key={k} x={f(x - s.g / 2)} y={y + s.dy} width={TW + s.g} height={TH} rx={12 + k * 2} className={L.shade} fillOpacity={s.a} />
+            ))}
+            <rect x={f(x)} y={y} width={TW} height={TH} rx={12} className={i === 0 ? L.tagLive : L.tagDraw} />
+            <circle cx={f(hole)} cy={y + TH / 2} r={4.5} className={i === 0 ? L.jadeRing : L.drawLine} />
+            <text x={f(rtl ? x + TW - 36 : x + 36)} y={y + TH / 2 + 5} textAnchor={a} fontSize={14} className={`${L.lab} ${L.kF}`}>
               {t.home.roles[role]}
             </text>
           </g>
@@ -213,24 +265,83 @@ export function RolesArt({ t, rtl, d }: P & { d: HomeData }) {
   );
 }
 
+export function RolesArt({ t, rtl, d }: P & { d: HomeData }) {
+  return (
+    <>
+      <RolesSvg t={t} rtl={rtl} d={d} W={440} TW={180} TH={44} dy={36} cls={L.w360} />
+      <RolesSvg t={t} rtl={rtl} d={d} W={300} TW={188} TH={40} dy={38} cls={L.c360} />
+    </>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* 6. backups                                                          */
 /* ------------------------------------------------------------------ */
 
-export function BackupsArt({ rtl }: { rtl: boolean }) {
-  const W = 320;
+interface BackupsGeo {
+  W: number;
+  CW: number;
+  CH: number;
+  glyph: number;
+  bars: readonly [number, number];
+  tick: number;
+  cls: string;
+}
+
+/** Four snapshots on a time axis, the past at the inline start, the latest (jade) at the inline end. No times. */
+function BackupsSvg({ rtl, g }: { rtl: boolean; g: BackupsGeo }) {
+  const { W, CW, CH, glyph } = g;
   const X = (x: number) => f(mx(x, W, rtl));
+  const R = (x: number, w: number) => f(mxRect(x, w, W, rtl));
+  const top = 18;
+  const axis = top + CH + 38;
+  const gap = (W - 2 - 4 * CW) / 3;
+  const xs = [0, 1, 2, 3].map((i) => 1 + i * (CW + gap));
+  const fade = [0.45, 0.62, 0.8, 1];
+  const pad = Math.round(CW * 0.12);
+  // the time axis: a quiet ruler of fine ticks
+  let ruler = "";
+  for (let x = 1 + g.tick / 2; x < W - 4; x += g.tick) ruler += `M${X(x)} ${axis + 4}v4`;
   return (
-    <svg viewBox={`0 0 ${W} 150`} className={`${L.svg} ${L.art}`} aria-hidden="true" focusable="false">
-      {[3, 2, 1].map((k) => (
-        <rect key={k} x={f(mxRect(56 + k * 8, 208, W, rtl))} y={44 + k * 12} width={208} height={56} rx={12} className={L.slab} fillOpacity={1 - k * 0.12} />
-      ))}
-      <g className={L.hoverStep} style={cv({ "--hy": "-4px" })}>
-        <rect x={f(mxRect(56, 208, W, rtl))} y={44} width={208} height={56} rx={12} className={L.slabLive} />
-        <use href="#sg-clock" x={X(rtl ? 74 + 20 : 74)} y={62} width={20} height={20} className={L.jadeGlyph} />
-        <rect x={f(mxRect(106, 96, W, rtl))} y={64} width={96} height={4} rx={2} className={L.inkBar} />
-        <rect x={f(mxRect(106, 60, W, rtl))} y={74} width={60} height={4} rx={2} className={L.inkBar} fillOpacity={0.6} />
-      </g>
+    <svg viewBox={`0 0 ${W} ${axis + 18}`} className={`${L.svg} ${L.art} ${g.cls}`} aria-hidden="true" focusable="false">
+      <path d={`M${X(1)} ${axis + 0.5}H${X(W - 1)}`} className={L.drawSoft} />
+      <path d={ruler} className={L.ruler} />
+      {xs.map((x0, i) => {
+        const live = i === xs.length - 1;
+        const cx = x0 + CW / 2;
+        const body = (
+          <>
+            <rect x={R(x0, CW)} y={top} width={CW} height={CH} rx={12} className={live ? L.slabLive : L.slab} />
+            <use href="#sg-clock" x={X(rtl ? x0 + pad + glyph : x0 + pad)} y={top + pad} width={glyph} height={glyph} className={live ? L.jadeGlyph : L.dkGlyph} />
+            <rect x={R(x0 + pad, g.bars[0])} y={top + CH - pad - 14} width={g.bars[0]} height={4} rx={2} className={L.inkBar} />
+            <rect x={R(x0 + pad, g.bars[1])} y={top + CH - pad - 4} width={g.bars[1]} height={4} rx={2} className={L.inkBar} fillOpacity={0.6} />
+            <path d={`M${X(cx)} ${top + CH + 1}V${axis - (live ? 9 : 5)}`} className={live ? L.stemLive : L.drawSoft} />
+          </>
+        );
+        return live ? (
+          <g key={i}>
+            <g className={L.hoverStep} style={cv({ "--hy": "-4px" })}>
+              {body}
+            </g>
+            <circle cx={X(cx)} cy={axis + 0.5} r={8} className={L.jadeRing} />
+            <circle cx={X(cx)} cy={axis + 0.5} r={3.5} className={L.jdF} />
+          </g>
+        ) : (
+          <g key={i} opacity={fade[i]}>
+            {body}
+            <circle cx={X(cx)} cy={axis + 0.5} r={3.5} className={L.dotDone} />
+          </g>
+        );
+      })}
     </svg>
+  );
+}
+
+export function BackupsArt({ rtl }: { rtl: boolean }) {
+  return (
+    <>
+      <BackupsSvg rtl={rtl} g={{ W: 560, CW: 116, CH: 76, glyph: 20, bars: [72, 48], tick: 21, cls: L.w360 }} />
+      <BackupsSvg rtl={rtl} g={{ W: 320, CW: 68, CH: 60, glyph: 16, bars: [40, 26], tick: 16, cls: L.c360 }} />
+    </>
   );
 }

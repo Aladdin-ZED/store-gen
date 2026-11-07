@@ -69,18 +69,19 @@ interface Geo {
   nameSize: number;
 }
 
+// the covers show the whole page (the hero frame at 0.6 scale: 300×552 → 180×331), CTA and note included
 const WIDE: Geo = {
   W: 1200,
-  H: 392,
+  H: 463,
   id: "w",
   token: { cx: 120, cy: 220, w: 64, h: 112, plinth: 286, label: 330, size: 13, crop: [64, 146, 176, 302], from: [120, 134] },
   covers: [420, 660, 900],
   cy: 60,
   cw: 180,
-  ch: 260,
+  ch: 331,
   r: 14,
-  name: 350,
-  tick: { y: 366, w: 2, h: 10, gap: 4 },
+  name: 421,
+  tick: { y: 437, w: 2, h: 10, gap: 4 },
   ray: (x) => [{ k: "C", a: [120, 134], c1: [120, 0], c2: [x, 0], b: [x, 60] }],
   nameSize: 13,
 };

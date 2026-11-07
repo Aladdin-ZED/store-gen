@@ -6,8 +6,9 @@ import L from "./living.module.css";
 /*
  * CONSOLE: one screen for every call (spec §6.5b). The agent's queue, the script with the current line, and the
  * outcome pad: ATTEMPT_OUTCOMES in order, each with its state mark (ok: a filled jade dot; waiting: a steel ring;
- * stopped: a hollow neutral ring with a strike, never red). No names, no numbers. SSR = the still frame (the card in
- * the script, line two current, Confirmed set); the runtime loops it (./controllers.ts) when it is the most visible.
+ * stopped: a hollow neutral ring and a muted label, never red, never struck through). No names, no numbers. SSR =
+ * the still frame (the card in the script, line two current, Confirmed set); the runtime loops it (./controllers.ts)
+ * when it is the most visible.
  */
 
 function Mark({ kind, cx, cy }: { kind: StateKind; cx: number; cy: number }) {
@@ -53,7 +54,6 @@ function Pad({ d, t, x0, y0, cw, ch, gap, rtl, W, size, max }: { d: HomeData; t:
                 {ln}
               </text>
             ))}
-            {o.kind === "stop" ? <path d={ly.map((b) => `M${f(x + 8)} ${f(b - size * 0.32)}H${f(x + cw - 8)}`).join("")} className={L.strike} /> : null}
           </g>
         );
       })}
@@ -160,7 +160,7 @@ function Compact({ d, t, rtl }: { d: HomeData; t: MarketingCopy; rtl: boolean })
         <rect key={k} x={R(24, w)} y={248 + 26 * k} width={w} height={6} rx={3} className={L.scriptBar} />
       ))}
       <path d={`M1 352.5H${W - 1}`} className={L.panelLine} />
-      <Pad d={d} t={t} x0={12} y0={364} cw={104} ch={40} gap={8} rtl={rtl} W={W} size={12} max={14} />
+      <Pad d={d} t={t} x0={12} y0={364} cw={104} ch={40} gap={8} rtl={rtl} W={W} size={12} max={10} />
     </svg>
   );
 }

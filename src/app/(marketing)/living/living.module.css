@@ -41,12 +41,23 @@
 
 /* variants: the inactive one is display:none through @container (no JS, no layout shift) */
 .vCompact,
+.c360,
 .c480,
 .c560,
 .c600,
 .c640,
 .c720 {
   display: none;
+}
+
+@container (max-width: 359.98px) {
+  .w360 {
+    display: none;
+  }
+
+  .c360 {
+    display: block;
+  }
 }
 
 @container (max-width: 479.98px) {
@@ -569,12 +580,12 @@
 
   :root:not([data-motion="off"]) .loom .inGate {
     animation: lvDraw 220ms var(--mk-ease) both;
-    animation-delay: calc(1817ms + var(--k, 0) * 122ms);
+    animation-delay: calc(1696ms + var(--k, 0) * 122ms);
   }
 
   :root:not([data-motion="off"]) .loom .inGateHl {
     animation: lvFlash 300ms linear both;
-    animation-delay: calc(1817ms + var(--k, 0) * 122ms);
+    animation-delay: calc(1696ms + var(--k, 0) * 122ms);
   }
 
   :root:not([data-motion="off"]) .loom .inSlot {
@@ -760,7 +771,7 @@
 @container (min-width: 560px) {
   .loom .radios {
     position: absolute;
-    top: 61%;
+    top: 55%;
     inset-inline-start: 75.3%;
     width: 22.35%;
     flex-direction: column;
@@ -768,6 +779,16 @@
     align-items: stretch;
     margin: 0;
     transform: translate(calc(var(--dx, 0) * 9px), calc(var(--dy, 0) * 9px));
+  }
+
+  /* a hairline between the gates (checks) and the radios (a control), so the pills never read as more gates */
+  .loom .radios::before {
+    content: "";
+    position: absolute;
+    top: -15px;
+    inset-inline: 0;
+    height: 1px;
+    background: var(--mk-stage-line);
   }
 
   .loom .radio {
@@ -979,10 +1000,23 @@
   opacity: 1;
 }
 
+/* unchosen covers recede a step, never "disabled" */
 .fan:has(input[value="best_fit"]:checked) [data-dim]:not([data-dim="best_fit"]),
 .fan:has(input[value="contrast"]:checked) [data-dim]:not([data-dim="contrast"]),
 .fan:has(input[value="explore"]:checked) [data-dim]:not([data-dim="explore"]) {
-  opacity: 0.55;
+  opacity: 0.82;
+}
+
+/* wide: one radio centred under each cover (covers at 35, 55 and 75 % of the figure, each 15 % wide) */
+@container (min-width: 720px) {
+  .fan .radios {
+    display: grid;
+    grid-template-columns: repeat(3, 15cqi);
+    column-gap: 5cqi;
+    justify-content: start;
+    justify-items: center;
+    margin-inline-start: 35cqi;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1127,13 +1161,6 @@
   stroke-width: 1;
 }
 
-.strike {
-  fill: none;
-  stroke: var(--mk-stage-ink-soft);
-  stroke-opacity: 0.4;
-  stroke-width: 1;
-}
-
 /* solid (opaque) jade and steel washes on stage-2, so the state underneath never shows through */
 .chipOk {
   fill: oklch(0.3 0.045 168);
@@ -1254,7 +1281,7 @@
 }
 
 .art {
-  max-width: 320px;
+  max-width: 100%;
   margin-inline: auto;
 }
 
@@ -1266,8 +1293,51 @@
   max-width: 176px;
 }
 
-.artDelivery {
-  max-width: 400px;
+/* delivery: the days as HTML (crisp at any size), then the zone map, which fills the rest of its cell from 768 px
+   (a two-row cell from 1024 px) and keeps its own proportions on a phone */
+.days {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+
+.dayRow {
+  display: flex;
+  gap: 6px;
+}
+
+.dayPillOn,
+.dayPillOff {
+  width: 28px;
+  height: 12px;
+  border-radius: 999px;
+}
+
+.dayPillOn {
+  background: var(--mk-ink);
+  opacity: 0.66;
+}
+
+.dayPillOff {
+  box-shadow: inset 0 0 0 1.25px var(--mk-draw);
+}
+
+.dayLabel {
+  color: var(--mk-ink-soft);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.deliveryField {
+  margin-block-start: 20px;
+}
+
+@media (min-width: 768px) {
+  .deliveryField {
+    flex: 1 1 0;
+    min-height: 120px;
+  }
 }
 
 .drawSoft {
@@ -1304,27 +1374,18 @@
   fill-opacity: 0.2;
 }
 
-.dayOn {
-  fill: var(--mk-ink);
-  fill-opacity: 0.66;
-}
-
-.dayOff {
-  fill: none;
-  stroke: var(--mk-draw);
-  stroke-width: 1.25;
-}
-
 .hex {
   fill: var(--mk-steel);
   stroke: var(--mk-surface-2);
   stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
 }
 
 .hexZone {
   fill: var(--mk-jade-wash);
   stroke: var(--mk-jade);
   stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
 }
 
 .barDraw {
@@ -1400,6 +1461,19 @@
 
 .jadeGlyph {
   color: var(--mk-jade);
+}
+
+.ruler {
+  fill: none;
+  stroke: var(--mk-ink);
+  stroke-opacity: 0.18;
+  stroke-width: 1;
+}
+
+.stemLive {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 1.25;
 }
 
 /* hover micro-steps (secondary detail 2): fine pointers, motion on */

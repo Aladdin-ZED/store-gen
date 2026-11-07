@@ -132,7 +132,7 @@ async function main(): Promise<void> {
   for (let i = 0; i < names.length; i++)
     for (let j = i + 1; j < names.length; j++) for (let k = 0; k < 4; k++) for (let m = 0; m < 4; m++) pairs.push([`${names[i]}[${k}]×${names[j]}[${m}]`, palettes[names[i]][k], palettes[names[j]][m]]);
   const jade = [hex(0.8, 0.11, 166), hex(0.5, 0.1, 168), hex(0.66, 0.12, 168)];
-  const grounds = [hex(0.985, 0.002, 265), hex(0.155, 0.005, 265), hex(0.165, 0.006, 265), hex(0.125, 0.006, 265), hex(0.205, 0.008, 265), hex(1, 0, 0), hex(0, 0, 0)];
+  const grounds = [hex(0.985, 0.002, 265), hex(0.155, 0.005, 265), hex(0.165, 0.006, 265), hex(0.2, 0.006, 265), hex(0.205, 0.008, 265), hex(0.235, 0.008, 265), hex(0.27, 0.009, 265), hex(1, 0, 0), hex(0, 0, 0)];
   for (const j of jade) for (const g of grounds) pairs.push([`jade ${j} over ${g}`, j, g]);
   const steel = [hex(0.74, 0.08, 220), hex(0.55, 0.05, 235), hex(0.7, 0.05, 235)];
   for (const s of steel) for (const g of grounds) pairs.push([`steel ${s} over ${g}`, s, g]);

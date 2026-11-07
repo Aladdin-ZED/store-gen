@@ -279,6 +279,14 @@ const CHECK = "M1.5 6.6l3.2 3.2L11 2.6";
 /* the wide variant (680×600)                                          */
 /* ------------------------------------------------------------------ */
 
+/* The seven gene chips (48 tall) and the three gates (40 tall) sit high enough that, with the frame crossing the
+   stage's bottom edge by 56 px on a two-column hero, the rail, the gates and the radios under them (living.module.css,
+   top 55 %) all stay on the stage. The gates' intro and loop timings follow the scan line to GATE_Y (+20, their centre):
+   living.module.css (.inGate) and controllers.ts (the re-check). */
+const RAIL_Y = 44;
+const RAIL_STEP = 66;
+const GATE_Y = 140;
+
 function Wide({ d, t, rtl }: { d: HomeData; t: MarketingCopy; rtl: boolean }) {
   const W = 680;
   const chipX = mxRect(6, 136, W, rtl);
@@ -296,7 +304,7 @@ function Wide({ d, t, rtl }: { d: HomeData; t: MarketingCopy; rtl: boolean }) {
       {/* traces: straight, never crossing, state-independent */}
       <g className={L.depthRail}>
         {d.rail.map((g, i) => {
-          const y = 76 + 72 * i;
+          const y = RAIL_Y + 24 + RAIL_STEP * i;
           const x0 = mx(142, W, rtl);
           const x1 = mx(185, W, rtl);
           return (
@@ -308,7 +316,7 @@ function Wide({ d, t, rtl }: { d: HomeData; t: MarketingCopy; rtl: boolean }) {
           );
         })}
         {d.rail.map((g, i) => {
-          const y = 52 + 72 * i;
+          const y = RAIL_Y + RAIL_STEP * i;
           const gx = chipX + (rtl ? 136 - 112 - 16 : 112);
           return (
             <g key={g} className={L.inChip} style={cv({ "--i": i })}>
@@ -328,7 +336,7 @@ function Wide({ d, t, rtl }: { d: HomeData; t: MarketingCopy; rtl: boolean }) {
         {d.slots.map((s) => (
           <g key={s} data-state={s} data-sl="rail" className={L.state}>
             {d.rail.map((g, i) => {
-              const y = 52 + 72 * i;
+              const y = RAIL_Y + RAIL_STEP * i;
               const gx = chipX + (rtl ? 136 - 112 - 16 : 112);
               return (
                 <g key={g}>
@@ -367,7 +375,7 @@ function Wide({ d, t, rtl }: { d: HomeData; t: MarketingCopy; rtl: boolean }) {
       {/* gates */}
       <g className={L.depthGates}>
         {gates.map((label, k) => {
-          const y = 196 + 56 * k;
+          const y = GATE_Y + 56 * k;
           const lx0 = mx(488, W, rtl);
           const lx1 = mx(512, W, rtl);
           return (

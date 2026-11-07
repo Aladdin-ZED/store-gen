@@ -285,7 +285,7 @@ function Compact({ d, t, rtl }: { d: HomeData; t: MarketingCopy; rtl: boolean })
   ];
   const spur = (tile: (typeof tiles)[number]): Seg[] => {
     const y0 = SY[tile.from] + 26;
-    return mirrorSegs(orthoPath([[86, y0], [212, y0], [212, tile.y + TILE_H / 2], [220, tile.y + TILE_H / 2]], 8), W, rtl);
+    return mirrorSegs(orthoPath([[86, y0], [196, y0], [196, tile.y + TILE_H / 2], [204, tile.y + TILE_H / 2]], 8), W, rtl);
   };
   const a = anchor(rtl, "start");
   return (
@@ -314,8 +314,8 @@ function Compact({ d, t, rtl }: { d: HomeData; t: MarketingCopy; rtl: boolean })
             <circle cx={h.X(18)} cy={y} r={3.5} className={set ? L.notchSet : L.notchOpen} />
             {set ? (
               <g>
-                <rect x={h.R(100, 72)} y={y + 16} width={72} height={20} rx={10} className={L.tag} />
-                <text x={h.X(136)} y={y + 29.5} textAnchor="middle" direction="ltr" className={`${L.mono10} ${L.tSoft}`}>
+                <rect x={h.R(100, 72)} y={y + 34} width={72} height={20} rx={10} className={L.tag} />
+                <text x={h.X(136)} y={y + 47.5} textAnchor="middle" direction="ltr" className={`${L.mono10} ${L.tSoft}`}>
                   {d.events.purchase}
                 </text>
               </g>
@@ -324,7 +324,7 @@ function Compact({ d, t, rtl }: { d: HomeData; t: MarketingCopy; rtl: boolean })
         );
       })}
       {tiles.map((tl) => (
-        <Tile key={tl.id} h={h} x={220} y={tl.y} w={132} id={tl.id} name={tl.name} tag={tl.tag} />
+        <Tile key={tl.id} h={h} x={204} y={tl.y} w={148} id={tl.id} name={tl.name} tag={tl.tag} />
       ))}
       {SY.map((y, i) => (
         <g key={i} data-on={i} className={L.on}>

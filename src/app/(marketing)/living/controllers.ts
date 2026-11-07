@@ -121,7 +121,7 @@ export function loomLoop(root: HTMLElement, firstDelay: number): Loop {
     // proof: the scan re-sweeps the frame and the three gates re-check
     add(q("[data-scan]"), [{ transform: "translateY(0px)", opacity: 1 }, { transform: "translateY(530px)", opacity: 1, offset: 0.94 }, { transform: "translateY(552px)", opacity: 0 }], { duration: 900, delay: 1200 });
     for (const g of [0, 1, 2]) {
-      const at = 1200 + 900 * (0.348 + 0.101 * g);
+      const at = 1200 + 900 * (0.246 + 0.101 * g); // the scan reaches gate g's centre (GATE_Y + 20 + 56g in the 552 frame)
       add(q(`[data-gc="${g}"]`), [{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: 220, delay: at, easing: EXPO, fill: "backwards" });
       add(q(`[data-gb="${g}"]`), [{ opacity: 0 }, { opacity: 1, offset: 0.3 }, { opacity: 0 }], { duration: 600, delay: at });
     }

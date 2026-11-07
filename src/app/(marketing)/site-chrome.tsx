@@ -1,17 +1,22 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { preload } from "react-dom";
 import { getCspNonce } from "@/lib/auth/request";
 import type { PlatformDocKind } from "@/lib/render/platform-docs.server";
 import { COPY, localeHref, MARKETING_LOCALES, type MarketingLocale } from "./copy";
-import { readexArabic } from "./fonts";
 import styles from "./marketing.module.css";
 
 /*
  * Header and footer of the marketing pages (src/app/(marketing)/**): the platform's name, the language switch
  * (one URL per language), sign-in and sign-up, and the platform documents that have a published version. The frame
- * carries the marketing tokens (light, dark from prefers-color-scheme), Readex Pro in Arabic only, and the pre-paint
- * motion script: a returning visitor who paused motion never sees the intro (spec §5.6).
+ * carries the marketing tokens (light, dark from prefers-color-scheme), the pre-paint motion script (a returning
+ * visitor who paused motion never sees the intro, spec §5.6) and, on the Arabic home only, the preload of Readex Pro:
+ * the Arabic h1 is the page's LCP text, so its face must be there for the first paint (the @font-face, display
+ * optional, is in marketing.module.css; French and English never reference it, so they never download it).
  */
+
+/** The Arabic display face (Readex Pro, Arabic subset, variable weight), self-hosted from public/fonts. */
+const READEX_AR = "/fonts/readex-pro/readex-pro-arabic-wght-normal.woff2";
 
 const DOC_LINKS: { kind: PlatformDocKind; path: `/${string}`; label: "terms" | "privacy" | "aup" }[] = [
   { kind: "tos", path: "/terms", label: "terms" },
@@ -29,7 +34,7 @@ export function Wordmark({ name }: { name: string }) {
           <path d="M3 10.5 8 13l5-2.5M3 7.5 8 10l5-2.5M8 3 3 5.5 8 8l5-2.5L8 3Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
         </svg>
       </span>
-      {name}
+      <span className={styles.brandName}>{name}</span>
     </span>
   );
 }
@@ -116,10 +121,13 @@ export function SiteFooter({ locale, brand, docs, motion = false }: { locale: Ma
   );
 }
 
-export async function MarketingFrame({ locale, children }: { locale: MarketingLocale; children: ReactNode }) {
+/** `display`: the page sets its h1 in the display face (the home), so an Arabic view preloads Readex Pro. */
+export async function MarketingFrame({ locale, display = false, children }: { locale: MarketingLocale; display?: boolean; children: ReactNode }) {
   const nonce = await getCspNonce();
+  // React hoists it into <head> as <link rel="preload" as="font" type="font/woff2" crossorigin> (Next docs: ReactDOM.preload)
+  if (display && locale === "ar") preload(READEX_AR, { as: "font", type: "font/woff2", crossOrigin: "" });
   return (
-    <div lang={locale} dir={COPY[locale].dir} className={`${styles.root} ${locale === "ar" ? readexArabic.variable : ""}`}>
+    <div lang={locale} dir={COPY[locale].dir} className={styles.root}>
       <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: MOTION_PREPAINT }} />
       {children}
     </div>

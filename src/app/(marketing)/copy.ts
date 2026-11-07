@@ -60,7 +60,7 @@ export interface HomeCopy {
     roles: { title: string; body: string };
     backups: { title: string; body: string };
   };
-  dock: { title: string; lead: string; list: readonly [string, string, string, string]; caption: string };
+  dock: { title: string; lead: string; caption: string };
   mirror: { title: string; lead: string; caption: string };
   steps: { title: string };
   final: { title: string };
@@ -166,7 +166,6 @@ export const COPY: Record<MarketingLocale, MarketingCopy> = {
       dock: {
         title: "Branché sur les outils que vous utilisez déjà.",
         lead: "Les nouvelles commandes peuvent partir vers Google Sheets et Telegram, vos agents envoient des modèles de messages WhatsApp, et l'API Conversions de Meta reçoit vos événements Lead et Purchase depuis le serveur.",
-        list: ["Google Sheets", "API Conversions de Meta", "Telegram", "Modèles de messages WhatsApp"],
         caption: `Illustration${NB}: la plateforme au centre, reliée à Google Sheets, à l'API Conversions de Meta, à Telegram et à WhatsApp.`,
       },
       mirror: {
@@ -262,7 +261,6 @@ export const COPY: Record<MarketingLocale, MarketingCopy> = {
       dock: {
         title: `مربوط بالأدوات اللي كتخدم بيها من${NB}قبل.`,
         lead: "الطلبات الجديدة تقدر توصل لـ Google Sheets وTelegram، والوكلاء يرسلون قوالب رسائل WhatsApp، وMeta Conversions API تستقبل أحداث Lead وPurchase من السيرفر.",
-        list: ["Google Sheets", "Meta Conversions API", "Telegram", "قوالب رسائل WhatsApp"],
         caption: "رسم توضيحي: المنصة في الوسط، مربوطة بـ Google Sheets وMeta Conversions API وTelegram وWhatsApp.",
       },
       mirror: {
@@ -359,7 +357,6 @@ export const COPY: Record<MarketingLocale, MarketingCopy> = {
       dock: {
         title: "Plugged into the tools you already use.",
         lead: "New orders can go to Google Sheets and Telegram, your agents send WhatsApp message templates, and Meta Conversions API receives your Lead and Purchase events from the server.",
-        list: ["Google Sheets", "Meta Conversions API", "Telegram", "WhatsApp message templates"],
         caption: "Illustration: the platform at the centre, connected to Google Sheets, Meta Conversions API, Telegram and WhatsApp.",
       },
       mirror: {

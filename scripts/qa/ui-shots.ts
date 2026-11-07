@@ -322,6 +322,8 @@ async function shoot(
     await page.waitForTimeout(opts.wait);
     finalUrl = page.url().replace(base, "").replace(opts.gate ?? "\u0000", "<gate>");
     file = join(opts.out, `${opts.actor}-${opts.locale}-${opts.scheme}-${opts.width}x${opts.height}-${slug(path)}.png`);
+    // a full-page capture paints the whole document: sections skipped by content-visibility would come out blank
+    if (opts.full) await page.addStyleTag({ content: "*{content-visibility:visible!important}" });
     await page.screenshot({ path: file, fullPage: opts.full });
   } catch (err) {
     pageErrors.push(`navigation: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);

@@ -76,8 +76,6 @@ function iso(text: string, rtl: boolean): ReactNode {
   return out;
 }
 
-const DOCK_GLYPHS = ["sg-sheet", "sg-pulse", "sg-plane", "sg-bubble"] as const;
-
 function CheckRing({ className }: { className: string }) {
   return (
     <svg viewBox="0 0 20 20" className={className} aria-hidden="true" focusable="false">
@@ -96,7 +94,7 @@ export default async function MarketingHome({ searchParams }: { searchParams: Se
   const [brand, docs] = await Promise.all([platformBrandName(), docKinds()]);
 
   return (
-    <MarketingFrame locale={locale}>
+    <MarketingFrame locale={locale} display>
       <SiteHeader locale={locale} brand={brand} path="/" />
       <main className={styles.main}>
         <Sprite t={t} rtl={rtl} />
@@ -276,16 +274,6 @@ export default async function MarketingHome({ searchParams }: { searchParams: Se
                   </h2>
                   <p className={styles.lead}>{iso(h.dock.lead, rtl)}</p>
                 </div>
-                <ul className={styles.integrationList}>
-                  {h.dock.list.map((name, i) => (
-                    <li key={name} className={styles.integrationItem}>
-                      <svg viewBox="0 0 24 24" className={styles.integrationGlyph} aria-hidden="true" focusable="false">
-                        <use href={`#${DOCK_GLYPHS[i]}`} width={24} height={24} />
-                      </svg>
-                      <span>{iso(name, rtl)}</span>
-                    </li>
-                  ))}
-                </ul>
               </div>
               <div className={styles.split57Model}>
                 <Dock d={d} t={t} rtl={rtl} />
