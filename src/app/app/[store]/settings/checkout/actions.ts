@@ -138,11 +138,14 @@ export async function saveCheckoutOptionsAction(opId: string, patch: CheckoutOpt
   );
 }
 
-const LandingOptions = z.object({ leadsCapture: z.enum(["market_default", "on", "off"]), trackingRequests: z.boolean() }).partial();
+const LandingOptions = z.object({ leadsCapture: z.enum(["market_default", "on", "off"]), trackingRequests: z.boolean(), waOrder: z.boolean() }).partial();
 export type LandingOptionsInput = z.input<typeof LandingOptions>;
-export type LandingOptionsValue = { leadsCapture: LandingSetting["leads"]["capture"]; trackingRequests: boolean };
+export type LandingOptionsValue = { leadsCapture: LandingSetting["leads"]["capture"]; trackingRequests: boolean; waOrder: boolean };
 
-/** Lead capture (`landing.leads.capture`) and the tracking page's requests (`landing.tracking.requests`). */
+/**
+ * Lead capture (`landing.leads.capture`), the tracking page's requests (`landing.tracking.requests`) and Order on
+ * WhatsApp (`landing.waOrder.enabled`, LP-11). The live pages re-render: the WhatsApp order changes their `assist` data.
+ */
 export async function saveLandingOptionsAction(opId: string, patch: LandingOptionsInput): Promise<ActionResult<LandingOptionsValue>> {
   return storeAction("settings.write", (ctx) =>
     onceForStore(ctx.scope, opId, async () => {
@@ -153,12 +156,13 @@ export async function saveLandingOptionsAction(opId: string, patch: LandingOptio
         (cur) => ({
           ...(p.leadsCapture !== undefined ? { leads: { ...cur.leads, capture: p.leadsCapture } } : {}),
           ...(p.trackingRequests !== undefined ? { tracking: { ...cur.tracking, requests: p.trackingRequests } } : {}),
+          ...(p.waOrder !== undefined ? { waOrder: { ...cur.waOrder, enabled: p.waOrder } } : {}),
         }),
         settingsActor(ctx.actor),
       );
       await auditFrom(ctx, "store.landing_settings.updated", { meta: { fields: Object.keys(p) } });
       await done(ctx, "landing options");
-      return { leadsCapture: v.leads.capture, trackingRequests: v.tracking.requests };
+      return { leadsCapture: v.leads.capture, trackingRequests: v.tracking.requests, waOrder: v.waOrder.enabled };
     }),
   );
 }

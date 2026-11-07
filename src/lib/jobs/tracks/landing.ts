@@ -10,15 +10,21 @@
  * `leads.followups` (slot 6, hourly, 2 s; LAN-§10.4): one in-app digest per assignee whose leads came due in the last
  * hour ("5 leads to follow up", kind `leads.followups_due`, batched per 60 min), with the count of every lead due for
  * them now. Test leads and closed leads are left out; nothing is ever sent to a shopper (LD10).
+ *
+ * `links.flush` (slot 7, every tick, 1 s; LAN-§12.1): writes the short-link click counters kept in memory by the
+ * `/go/<code>` route (src/lib/links/clicks.ts) store by store, each with that store's system scope; the route's own
+ * `after()` writes a store's counts once they are 30 s old, so a quiet cron loses no more than the process does.
  */
 import { holidaysReviewStep } from "@/lib/delivery/holidays-review.server";
 import { followUpsDue } from "@/lib/leads/followups.server";
+import { flushClicks } from "@/lib/links/clicks";
 import { notify } from "@/lib/platform/notify";
-import { forEachStore } from "../scope";
+import { forEachStore, systemScope } from "../scope";
 import type { Job } from "../runner";
 
 const HOLIDAYS_REVIEW_MS = 2_000;
 const FOLLOWUPS_MS = 2_000;
+const LINKS_FLUSH_MS = 1_000;
 
 const holidaysReview: Job = {
   name: "delivery.holidays_review",
@@ -58,4 +64,15 @@ const leadFollowUps: Job = {
   },
 };
 
-export const jobs: Job[] = [holidaysReview, leadFollowUps];
+const linksFlush: Job = {
+  name: "links.flush",
+  every: "tick",
+  budgetMs: LINKS_FLUSH_MS,
+  async run(ctx) {
+    const deadline = Math.min(Date.now() + LINKS_FLUSH_MS, ctx.deadline);
+    const r = await flushClicks((storeId) => systemScope(ctx, storeId), { deadline });
+    return { done: r.done, summary: { stores: r.stores, rows: r.rows } };
+  },
+};
+
+export const jobs: Job[] = [holidaysReview, leadFollowUps, linksFlush];

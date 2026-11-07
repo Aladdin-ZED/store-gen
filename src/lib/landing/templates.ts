@@ -5,7 +5,8 @@
  * `templateFor` (./templates.server.ts), which falls back to these defaults.
  *
  *   customer_confirm   the thank-you prefill        {order_id} {offer} {total} {name}
- *   wa_order           the WhatsApp order (LP-11)   {offer} {total} {delivery} {ref}
+ *   wa_order           the WhatsApp order (LP-11)   {offer} {total} {delivery} {ref} (+ {units} {options_to_confirm}
+ *                                                    {product} {eta_text}, LAN-§11.4 rev 2)
  *   lead_recovery      agent → lead                 {name} {store} {offer} {total} {eta_text} (LAN-§10.3)
  *   track_link         agent → customer             {name} {order_id} {track_url}
  *
@@ -35,7 +36,7 @@ export type LandingTemplateKind = (typeof LANDING_TEMPLATE_KINDS)[number];
 /** The variables each kind may use (the template editors offer them as chips and refuse any other at save). */
 export const TEMPLATE_KIND_VARS: Readonly<Record<LandingTemplateKind, readonly string[]>> = {
   customer_confirm: ["order_id", "offer", "total", "name"],
-  wa_order: ["offer", "total", "delivery", "ref"],
+  wa_order: ["offer", "total", "delivery", "ref", "units", "options_to_confirm", "product", "eta_text"],
   lead_recovery: ["name", "store", "offer", "total", "eta_text"],
   track_link: ["name", "order_id", "track_url"],
 };
@@ -61,6 +62,16 @@ export const DEFAULT_TEMPLATES: Readonly<Record<LandingTemplateKind, Readonly<Re
     fr: "Bonjour {name}, suivez votre commande {order_id} ici : {track_url}",
     en: "Hello {name}, follow your order {order_id} here: {track_url}",
   },
+};
+
+/**
+ * Operations' `wa_order_reply` quick reply (LAN-§11.5): what an agent answers an intent with in the chat the shopper
+ * opened. The owner's own row of that kind wins (`ownTemplate(scope, "wa_order_reply", locale)`); these are the defaults.
+ */
+export const WA_ORDER_REPLY: Readonly<Record<ShopperLocale, string>> = {
+  ar: "توصلنا بالطلب ديالك {ref}: {offer} بـ{total}. عافاك صيفط لينا الاسم، المدينة والعنوان باش نأكدو.",
+  fr: "Nous avons bien reçu votre demande {ref} : {offer} à {total}. Votre nom, votre ville et votre adresse, s'il vous plaît, et nous confirmons.",
+  en: "Received your request {ref}: {offer} at {total}. Your name, city and address, please, and we confirm.",
 };
 
 /** The default text of a kind in a page or template locale (every locale other than ar and fr reads the English). */

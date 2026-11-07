@@ -36,6 +36,7 @@ import {
   type LeadViewer,
   type LostReason,
   LOST_REASONS,
+  MERGED_REASON,
 } from "./types";
 
 const DAY_MS = 86_400_000;
@@ -145,7 +146,7 @@ async function riskOf(scope: StoreScope, phones: readonly string[]): Promise<Map
 }
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
-const lostReasonOf = (v: string | null): LostReason | null => ((LOST_REASONS as readonly string[]).includes(v ?? "") ? (v as LostReason) : null);
+const lostReasonOf = (v: string | null): LeadRow["lostReason"] => (v === MERGED_REASON || (LOST_REASONS as readonly string[]).includes(v ?? "") ? (v as LostReason) : null);
 
 /** Raw rows → inbox rows: risk, masked phone, then the scope's mask (the one call site of `maskIfImpersonation`). */
 async function toRows(scope: StoreScope, raw: readonly RawLead[]): Promise<LeadRow[]> {
@@ -288,7 +289,8 @@ function median(sorted: readonly number[]): number {
 
 /**
  * The inbox header over the last 30 days (LAN-§10.3): leads, contacted, recovered (n, % of contacted, and the
- * confirmed and delivered orders among them, never blended), converted without contact, first-contact p50. Test leads
+ * confirmed and delivered orders among them, never blended), converted without contact, first-contact p50, and the
+ * WhatsApp intents with their conversion rate (LAN-§11.5). Test leads
  * are excluded from every count; a % or a median below n = 20 is null. An agent's header counts what they see.
  */
 export async function leadCounts(scope: StoreScope, viewer: LeadViewer, now: Date = new Date()): Promise<LeadCounts> {
@@ -302,6 +304,8 @@ export async function leadCounts(scope: StoreScope, viewer: LeadViewer, now: Dat
         recoveredConfirmed: sql<number>`COALESCE(SUM(${leads.status} = 'recovered' AND ${orders.confirmState} = 'confirmed'), 0)`,
         recoveredDelivered: sql<number>`COALESCE(SUM(${leads.status} = 'recovered' AND ${orders.shipState} = 'delivered'), 0)`,
         convertedWithoutContact: sql<number>`COALESCE(SUM(${leads.status} = 'converted' AND ${leads.attempts} = 0), 0)`,
+        intents: sql<number>`COALESCE(SUM(${leads.kind} = 'whatsapp'), 0)`,
+        intentsConverted: sql<number>`COALESCE(SUM(${leads.kind} = 'whatsapp' AND ${leads.convertedOrderId} IS NOT NULL), 0)`,
       })
       .from(leads)
       .leftJoin(orders, and(eq(orders.id, leads.convertedOrderId), inStore(orders, scope)))
@@ -315,6 +319,8 @@ export async function leadCounts(scope: StoreScope, viewer: LeadViewer, now: Dat
   ]);
   const contacted = Number(agg?.contacted ?? 0);
   const recovered = Number(agg?.recovered ?? 0);
+  const intents = Number(agg?.intents ?? 0);
+  const intentsConverted = Number(agg?.intentsConverted ?? 0);
   const minutes = waits.map((w) => Math.max(0, Number(w.s)) / 60).sort((a, b) => a - b);
   return {
     days: LEAD_WINDOW_DAYS,
@@ -329,6 +335,7 @@ export async function leadCounts(scope: StoreScope, viewer: LeadViewer, now: Dat
     convertedWithoutContact: Number(agg?.convertedWithoutContact ?? 0),
     firstContactP50Min: minutes.length >= LEAD_MIN_N ? median(minutes) : null,
     firstContactN: minutes.length,
+    intents: { n: intents, converted: intentsConverted, pct: intents >= LEAD_MIN_N ? Math.round((intentsConverted / intents) * 1000) / 10 : null },
   };
 }
 

@@ -6,13 +6,17 @@
  * Kinds (wave 1): `wa-ref` (a typed `WA-XXXXXX` opens its intent), `lead` (phone digits or a name prefix) and `page`
  * (slug or title). Lead and ref hits come from the lead read repository (src/lib/leads/read.ts `searchLeads`), so they
  * are masked under impersonation (D70) and an agent finds only the leads they see. Pages are the store's own, archived
- * ones left out. Campaign and short-link kinds arrive with wave 2. Within the 120 ms budget of the registry.
+ * ones left out. Wave 2: `link` (a short link's code prefix, "abc" or "go/abc", opens the links screen) and `campaign`
+ * (a kit by name or slug, opens it). Agents (no `pages.read`) get no link or campaign hits. Within the 120 ms budget
+ * of the registry.
  */
 import { desc, like, ne, or } from "drizzle-orm";
 import { likeEscape } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { pages } from "@/lib/db/schema";
+import { searchCampaigns } from "@/lib/campaigns/read.server";
 import { searchLeads } from "@/lib/leads/read";
+import { searchLinkCodes } from "@/lib/links/read";
 import { getStoreById } from "@/lib/tenancy/public";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope } from "@/lib/tenancy/types";
@@ -34,13 +38,19 @@ async function pageHits(scope: StoreScope, q: string, handle: string): Promise<S
 
 export const provider: SearchProvider = {
   id: "landing",
-  kinds: ["lead", "wa-ref", "page"],
+  kinds: ["lead", "wa-ref", "page", "link", "campaign"],
   async search(scope, q, viewer) {
     const text = q.trim().slice(0, 80);
     if (!text) return [];
     const store = await getStoreById(scope.storeId);
     if (!store) return [];
-    const [found, pagesFound] = await Promise.all([searchLeads(scope, text, viewer), pageHits(scope, text, store.handle)]);
+    const agent = viewer.role === "agent";
+    const [found, pagesFound, links, kits] = await Promise.all([
+      searchLeads(scope, text, viewer),
+      pageHits(scope, text, store.handle),
+      agent ? Promise.resolve([]) : searchLinkCodes(scope, text),
+      agent ? Promise.resolve([]) : searchCampaigns(scope, text),
+    ]);
     const leadHits: SearchHit[] = found.rows.map((l) => ({
       id: l.id,
       kind: found.byRef ? "wa-ref" : "lead",
@@ -49,6 +59,21 @@ export const provider: SearchProvider = {
       href: `/app/${store.handle}/leads?lead=${l.id}`,
       group: "landing.search.group.leads",
     }));
-    return [...leadHits, ...pagesFound];
+    const linkHits: SearchHit[] = links.map((l) => ({
+      id: l.id,
+      kind: "link",
+      title: `/go/${l.code}`,
+      href: `/app/${store.handle}/links`,
+      group: "landing.search.group.links",
+    }));
+    const kitHits: SearchHit[] = kits.map((c) => ({
+      id: c.id,
+      kind: "campaign",
+      title: c.name,
+      subtitle: `utm_campaign=${c.slug}`,
+      href: `/app/${store.handle}/campaigns/${c.id}`,
+      group: "landing.search.group.campaigns",
+    }));
+    return [...leadHits, ...pagesFound, ...linkHits, ...kitHits];
   },
 };

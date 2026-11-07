@@ -19,7 +19,9 @@ import {
   markLeadLost,
   reopenLeadAction,
   setLeadFollowUp,
+  setLeadPhoneAction,
   takeNextLead,
+  waReplyAction,
 } from "./actions";
 
 export const metadata: Metadata = { title: "Leads" };
@@ -101,6 +103,8 @@ export default async function LeadsPage({ params, searchParams }: { params: Para
             reopen: reopenLeadAction,
             followUp: setLeadFollowUp,
             convert: convertLead,
+            setPhone: setLeadPhoneAction,
+            reply: waReplyAction,
           }}
         />
       </Screen>

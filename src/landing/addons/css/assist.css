@@ -114,3 +114,22 @@ form[data-lp-dz-state="ns"] .lp-of__go {
     transition: none;
   }
 }
+
+/* Order on WhatsApp (LP-11): the "message ready · Ref." line under the form's WhatsApp link, and the preview's note */
+.lp-of__wa-note {
+  margin: -0.25rem 0 0;
+  max-inline-size: 32rem;
+  font-size: var(--lp-step--1, 0.875rem);
+  line-height: 1.45;
+  text-align: center;
+  color: var(--lp-ink-soft, #4b5058);
+  text-wrap: balance;
+}
+
+.lp-of__wa-note bdi {
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--lp-strong-weight, 600);
+  letter-spacing: 0.02em;
+  color: var(--lp-ink, #16181b);
+}

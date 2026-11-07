@@ -28,7 +28,7 @@ import { useStoreStepUp } from "../shell/step-up";
 import { useStore } from "../shell/store-context";
 import { ageText, failText, intFmt, moneyText } from "./format";
 import { Assignee, ContactButtons, InboxContext, isOpen, KindMark, LeadMenu, MaskedPhone, OpsContext, StatusPill, TestChip, useOps, type LeadInboxCtx, type LeadMember, type LeadOps } from "./lead-parts";
-import { ConvertSheet, LeadSheet, LostSheet } from "./lead-sheet";
+import { ConvertSheet, LeadSheet, LostSheet, SetPhoneSheet } from "./lead-sheet";
 import { LEAD_ROW_GRID, LeadRowsSkeleton } from "./leads-skeleton";
 
 export interface LeadActions {
@@ -40,6 +40,9 @@ export interface LeadActions {
   reopen: (id: string, nextAt: string | null, opId?: string) => Promise<ActionResult<null>>;
   followUp: (id: string, at: string | null, opId?: string) => Promise<ActionResult<null>>;
   convert: (id: string, input: ConvertLeadInput, opId?: string) => Promise<ActionResult<ConvertOutcome>>;
+  /** WhatsApp intents (LP-11) */
+  setPhone: (id: string, phone: string, opId?: string) => Promise<ActionResult<{ lead: LeadRow | null; merged: number }>>;
+  reply: (id: string) => Promise<ActionResult<{ text: string }>>;
 }
 
 export interface LeadsInboxProps {
@@ -89,6 +92,7 @@ export function LeadsInbox(p: LeadsInboxProps) {
   const [sheet, setSheet] = useState<LeadRow | null>(p.focus);
   const [converting, setConverting] = useState<{ lead: LeadRow; idem: string } | null>(null);
   const [losing, setLosing] = useState<LeadRow[] | null>(null);
+  const [phoning, setPhoning] = useState<LeadRow | null>(null);
   const clock = useNow();
   const now = clock ? clock.getTime() : Date.parse(p.renderedAt);
 
@@ -180,6 +184,22 @@ export function LeadsInbox(p: LeadsInboxProps) {
         router.refresh();
       },
       convert: (lead) => setConverting({ lead, idem: newUuid() }),
+      setPhone: (lead) => setPhoning(lead),
+      reply: (lead) => {
+        // the clipboard write starts inside the tap (Safari keeps the gesture through a pending ClipboardItem)
+        const text = call(() => p.actions.reply(lead.id)).then((res) => {
+          if (!res.ok) throw new Error(failText(res, t));
+          return res.data.text;
+        });
+        const write =
+          typeof ClipboardItem === "function" && navigator.clipboard?.write
+            ? navigator.clipboard.write([new ClipboardItem({ "text/plain": text.then((v) => new Blob([v], { type: "text/plain" })) })])
+            : text.then((v) => navigator.clipboard.writeText(v));
+        write.then(
+          () => toast.success(t("landing.leads.toast.replyCopied")),
+          () => toast.error(t("landing.leads.toast.replyFailed")),
+        );
+      },
       lost: (leads) => setLosing(leads.filter(isOpen)),
       followUp: (lead, at) => {
         const iso = at ? at.toISOString() : null;
@@ -233,6 +253,16 @@ export function LeadsInbox(p: LeadsInboxProps) {
     if (!out.ok) return failText(out, t);
     patch([lead.id], (r) => ({ ...r, status: "recovered", convertedOrderId: out.orderId, convertedVia: "agent", nextAt: null }));
     toast.success(t(out.already ? "landing.leads.toast.alreadyConverted" : "landing.leads.toast.converted", { id: out.orderId.slice(-6) }));
+    router.refresh();
+    return null;
+  };
+
+  const savePhone = async (lead: LeadRow, phone: string): Promise<string | null> => {
+    const res = await call(() => p.actions.setPhone(lead.id, phone, newOpId()));
+    if (!res.ok) return failText(res, t);
+    const fresh = res.data.lead;
+    if (fresh) patch([lead.id], () => fresh);
+    toast.success(res.data.merged ? t("landing.leads.toast.phoneMerged", { n: res.data.merged }) : t("landing.leads.toast.phoneSet"));
     router.refresh();
     return null;
   };
@@ -440,6 +470,7 @@ export function LeadsInbox(p: LeadsInboxProps) {
         <LeadSheet lead={sheet} now={now} onClose={() => setSheet(null)} />
         {converting && <ConvertSheet key={converting.idem} lead={converting.lead} idem={converting.idem} onClose={() => setConverting(null)} onSubmit={submitConvert} />}
         {losing && losing.length > 0 && <LostSheet key={losing.map((l) => l.id).join()} leads={losing} onClose={() => setLosing(null)} onConfirm={confirmLost} />}
+        {phoning && <SetPhoneSheet key={phoning.id} lead={phoning} onClose={() => setPhoning(null)} onSave={savePhone} />}
       </OpsContext.Provider>
     </InboxContext.Provider>
   );
@@ -570,8 +601,16 @@ function Stats({ counts }: { counts: LeadCounts }) {
     );
   };
   const r = counts.recovered;
+  // WhatsApp intents (LP-11) add a sixth tile once there is one: two even rows on a phone, one row from lg
+  const wa = counts.intents.n > 0;
   return (
-    <section aria-label={t("landing.leads.window", { days: counts.days })} className="adm-surface grid grid-cols-2 divide-border/60 sm:grid-cols-3 lg:grid-cols-5 lg:divide-x rtl:lg:divide-x-reverse [&>*]:border-border/60 max-sm:[&>*:last-child]:col-span-2 max-sm:[&>*:nth-child(-n+4)]:border-b sm:max-lg:[&>*:nth-child(-n+3)]:border-b">
+    <section
+      aria-label={t("landing.leads.window", { days: counts.days })}
+      className={cn(
+        "adm-surface grid grid-cols-2 divide-border/60 sm:grid-cols-3 lg:divide-x rtl:lg:divide-x-reverse [&>*]:border-border/60 sm:max-lg:[&>*:nth-child(-n+3)]:border-b",
+        wa ? "lg:grid-cols-6 max-sm:[&>*:nth-child(-n+4)]:border-b" : "lg:grid-cols-5 max-sm:[&>*:last-child]:col-span-2 max-sm:[&>*:nth-child(-n+4)]:border-b",
+      )}
+    >
       {tile(t("landing.leads.stat.leads"), num.format(counts.leads), t("landing.leads.window", { days: counts.days }))}
       {tile(t("landing.leads.stat.contacted"), num.format(counts.contacted), t("landing.leads.stat.n", { n: num.format(counts.leads) }))}
       {tile(
@@ -586,6 +625,12 @@ function Stats({ counts }: { counts: LeadCounts }) {
         counts.firstContactP50Min === null ? "…" : t("landing.leads.stat.minutes", { n: num.format(counts.firstContactP50Min) }),
         counts.firstContactP50Min === null ? t("landing.leads.stat.needsMore") : t("landing.leads.stat.n", { n: num.format(counts.firstContactN) }),
       )}
+      {wa &&
+        tile(
+          t("landing.leads.stat.intents"),
+          num.format(counts.intents.n),
+          counts.intents.pct === null ? t("landing.leads.stat.needsMore") : t("landing.leads.stat.intentsPct", { pct: pct.format(counts.intents.pct / 100) }),
+        )}
     </section>
   );
 }

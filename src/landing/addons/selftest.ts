@@ -54,6 +54,7 @@ import { fmtCents } from "@/landing/runtime/money";
 import { skey, type W } from "@/landing/runtime/core";
 import { ORDER_ID_RE } from "@/landing/runtime/order-store";
 import { storageKey, storePrefix } from "@/landing/runtime/addons/storage";
+import { serialiseSelection } from "../runtime/addons/select";
 import { addonsFor, type AddonInput, type AssistData, type AssistTyData } from "./plan";
 import { noAddons, type RenderAddons } from "./types";
 
@@ -73,6 +74,8 @@ function check(name: string, fn: () => void): void {
 }
 /** CCR r1-p3-9: the `assist-ty` budget the maintainer records in budgets.json (the measured chunk plus margin). */
 const ASSIST_TY_BUDGET = 3_600;
+/** CCR r1-p3-14: the `assist` budget with Order on WhatsApp (LP-11: the serialiser and the intent, ≈ 1,200 B gz). */
+const ASSIST_BUDGET = 4_000;
 const gz = (s: string) => gzipSync(Buffer.from(s, "utf8"), { level: 9 }).length;
 
 /* ------------------------------------------------------------------ */
@@ -134,10 +137,12 @@ function inputOf(o: {
   tpl?: string | null;
   trackBase?: string;
   now?: Date;
+  /** `landing.waOrder.enabled` (LP-11) */
+  waOrder?: boolean;
 }): AddonInput {
   const doc = o.doc ?? docOf();
   const checkout = CheckoutSetting.parse({ zonesEnabled: o.zonesEnabled ?? true, lineOnLanding: o.lineOnLanding ?? true, confirmationCall: o.confirmationCall ?? true, notServed: { whatsapp: o.notServedWa ?? true } });
-  const landing = LandingSetting.parse({ thankYou: { confirmWhatsapp: true, expectation: true, trackLink: true, ...o.thankYou } });
+  const landing = LandingSetting.parse({ thankYou: { confirmWhatsapp: true, expectation: true, trackLink: true, ...o.thankYou }, waOrder: { enabled: !!o.waOrder } });
   return {
     page: o.page ?? "landing",
     mode: o.mode ?? "live",
@@ -222,6 +227,8 @@ class FakeText {
 }
 
 const SEL = /^([a-z]+)?((?:\[[a-z-]+(?:="[^"]*")?\])*)(:checked)?$/;
+/** `tag.class` (the WhatsApp link of LP-11, `a.lp-of__wa`, `.lp-of__wa-note`) */
+const SEL_CLASS = /^([a-z]+)?\.([\w-]+)$/;
 const ATTR = /\[([a-z-]+)(?:="([^"]*)")?\]/g;
 
 class FakeEl {
@@ -300,7 +307,27 @@ class FakeEl {
         yield* c.walk();
       }
   }
+  get type() {
+    return this.attrs.get("type") ?? (this.tagName === "select" ? "select-one" : this.tagName === "textarea" ? "textarea" : this.tagName === "input" ? "text" : "");
+  }
+  get disabled() {
+    return this.attrs.has("disabled");
+  }
+  /** a form's controls, in document order */
+  get elements(): FakeEl[] {
+    return [...this.walk()].filter((el) => el.tagName === "input" || el.tagName === "select" || el.tagName === "textarea");
+  }
+  appendChild(node: FakeEl) {
+    this.append(node);
+    return node;
+  }
+  remove() {
+    if (this.parentNode) this.parentNode.children = this.parentNode.children.filter((c) => c !== this);
+    this.parentNode = null;
+  }
   matches(sel: string): boolean {
+    const c = SEL_CLASS.exec(sel);
+    if (c) return (!c[1] || c[1] === this.tagName) && this.className.split(" ").includes(c[2]!);
     const m = SEL.exec(sel);
     if (!m) throw new Error(`fake DOM: unsupported selector ${sel}`);
     if (m[1] && m[1] !== this.tagName) return false;
@@ -354,21 +381,40 @@ interface Run {
   storage: Map<string, string>;
   fetches: { url: string; init: Record<string, unknown> }[];
   warnings: unknown[];
+  /** the tabs `window.open` returned (LP-11) and the timers set */
+  opened: { opener: unknown; location: { href: string } }[];
+  timers: { fn: () => void; ms: number }[];
+  location: { href?: string };
 }
 
 /** Runs a bundled chunk over `doc` at `now` with `location` and `sessionStorage` faked. */
-function runChunk(js: string, doc: FakeDoc, o: { path: string; search?: string; now: Date; storage?: Map<string, string> }): Run {
+function runChunk(js: string, doc: FakeDoc, o: { path: string; search?: string; now: Date; storage?: Map<string, string>; reply?: unknown; ua?: string }): Run {
   const storage = o.storage ?? new Map<string, string>();
   const fetches: Run["fetches"] = [];
   const warnings: unknown[] = [];
+  const opened: Run["opened"] = [];
+  const timers: Run["timers"] = [];
   const sandbox: Record<string, unknown> = {
     document: doc,
     location: { pathname: o.path, search: o.search ?? "", hash: "" },
     sessionStorage: { getItem: (k: string) => (storage.has(k) ? storage.get(k)! : null), setItem: (k: string, v: string) => void storage.set(k, String(v)) },
     fetch: (url: string, init: Record<string, unknown>) => {
       fetches.push({ url, init });
-      return Promise.resolve({ json: () => Promise.resolve({ ok: true }) });
+      if (o.reply === "reject") return Promise.reject(new Error("offline"));
+      if (o.reply === "hang") return new Promise(() => undefined);
+      return Promise.resolve({ json: () => Promise.resolve(o.reply ?? { ok: true }) });
     },
+    navigator: { userAgent: o.ua ?? "Mozilla/5.0 (Linux; Android 14) Chrome/130.0 Mobile Safari/537.36" },
+    open: () => {
+      const tab = { opener: {}, location: { href: "" } };
+      opened.push(tab);
+      return tab;
+    },
+    setTimeout: (fn: () => void, ms: number) => {
+      timers.push({ fn, ms });
+      return timers.length;
+    },
+    clearTimeout: () => undefined,
     console: { warn: (...a: unknown[]) => warnings.push(a), log: () => undefined },
     URLSearchParams,
     CustomEvent: FakeEvent,
@@ -378,7 +424,7 @@ function runChunk(js: string, doc: FakeDoc, o: { path: string; search?: string; 
   const ctx = vm.createContext(sandbox);
   vm.runInContext("const __RD = Date; globalThis.Date = class extends __RD { constructor(...a) { if (a.length) super(...a); else super(__NOW); } static now() { return __NOW; } };", ctx);
   vm.runInContext(js, ctx);
-  return { doc, storage, fetches, warnings };
+  return { doc, storage, fetches, warnings, opened, timers, location: sandbox.location as { href?: string } };
 }
 
 const json = (doc: FakeDoc, id: string, value: unknown) => doc.add("script", { type: "application/json", id }, JSON.stringify(value));
@@ -785,16 +831,16 @@ async function main(): Promise<void> {
     assert.equal(r.doc.querySelector('[data-lp-ty="track"]')!.href, "/s/nour/track?o=CMD-PREVIEW");
   });
 
-  check("every fetch of track and assist-ty passes referrerPolicy same-origin", () => {
-    for (const name of ["track", "assist-ty"]) {
+  check("every fetch of track, assist-ty and assist (the WhatsApp intent, LP-11) passes referrerPolicy same-origin", () => {
+    for (const name of ["track", "assist-ty", "assist"]) {
       const src = readFileSync(join(ROOT, "src", "landing", "runtime", "addons", `${name}.ts`), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
       const calls = src.split(/\bfetch\(/).length - 1;
       assert.ok(calls > 0, `${name}: a fetch`);
       assert.equal(src.split('referrerPolicy: "same-origin"').length - 1, calls, `${name}: ${calls} fetch call(s)`);
     }
-    for (const [name, js] of [["track", trackJs], ["assist-ty", assistTyJs]] as const)
+    for (const [name, js] of [["track", trackJs], ["assist-ty", assistTyJs], ["assist", assistJs]] as const)
       assert.equal(js.split("fetch(").length - 1, js.split('referrerPolicy:"same-origin"').length - 1, `${name} bundle`);
-    assert.ok(!assistJs.includes("fetch("), "assist makes no network call");
+    assert.equal(assistJs.split("fetch(").length - 1, 1, "assist's one network call is the WhatsApp intent");
   });
 
   /* 8. the assist line over the DOM ------------------------------------------- */
@@ -929,13 +975,192 @@ async function main(): Promise<void> {
     }
   });
 
+  /* 8b. Order on WhatsApp (LP-11): the plan, the serialiser, the upgraded link ------------------------------ */
+
+  /** a page whose form shows the WhatsApp link from the store's number (no `form.whatsapp` block) */
+  const waDoc = () => {
+    const d = docOf();
+    delete (d.form as { whatsapp?: unknown }).whatsapp;
+    return d;
+  };
+  check("wa order: `wo` only with the setting and a number; the API on live, the note in the preview, nothing in test or exports", () => {
+    const wo = (o: Parameters<typeof inputOf>[0]) => data<AssistData>(addonsFor(inputOf({ doc: waDoc(), ...o })), "lp-assist")?.wo;
+    assert.deepEqual(wo({ waOrder: true }), { e: "/api/public/wa", r: WA.fr.ready });
+    assert.deepEqual(wo({ waOrder: true, mode: "preview" }), { n: WA.fr.liveOnly });
+    for (const mode of ["test", "export-static", "export-connected", "export-php", "export-whatsapp"] as const) assert.equal(wo({ waOrder: true, mode }), undefined, mode);
+    assert.equal(wo({ waOrder: false }), undefined, "setting off");
+    assert.equal(wo({ waOrder: true, whatsapp: "" }), undefined, "no number");
+    assert.equal(wo({ waOrder: true, doc: docOf() }), undefined, "the form's own WhatsApp link turned off");
+    // the setting off changes no byte: the same add-ons as before LP-11
+    assert.deepEqual(addonsFor(inputOf({})), addonsFor(inputOf({ waOrder: false })));
+    assert.deepEqual(addonsFor(inputOf({ ...OFF, waOrder: false })).body, [], "every add-on off: no assist");
+    assert.deepEqual(addonsFor(inputOf({ ...OFF, waOrder: true, doc: waDoc() })).body, ["assist"], "the WhatsApp order alone brings assist");
+  });
+
+  const SEL_CFG = {
+    defaultBundleId: "duo",
+    bundles: [
+      { id: "duo", units: [{ line: 0, item: "cream" }, { line: 0, item: "cream" }] },
+      { id: "mix", units: [{ line: 0, choices: ["cream", "serum"] }, { line: 1, item: "serum" }] },
+    ],
+  } as unknown as Parameters<typeof serialiseSelection>[1];
+  const selForm = (build: (form: FakeEl) => void) => {
+    const doc = new FakeDoc();
+    const form = doc.add("form", { "data-lp-form": "" });
+    build(form);
+    return form as unknown as HTMLFormElement;
+  };
+  const radio = (form: FakeEl, name: string, value: string, on: boolean) => (form.add("input", { type: "radio", name, value }).checked = on);
+
+  check("wa order: the serialiser reads offers, units, matrix dims, shared groups, extras, the bump and the city", () => {
+    const form = selForm((f) => {
+      radio(f, "bundle", "duo", false);
+      radio(f, "bundle", "mix", true);
+      f.add("input", { name: "name", value: "Salma Idrissi" });
+      f.add("input", { name: "phone", type: "tel", value: "0612345678" });
+      f.add("textarea", { name: "address", value: "12 rue des Roses" });
+      f.add("input", { name: "city", value: "casablanca" });
+      radio(f, "u.0.@item", "cream", false);
+      radio(f, "u.0.@item", "serum", true);
+      radio(f, "u.0.color", "red", false);
+      radio(f, "u.0.color", "blue", true);
+      f.add("input", { name: "u.1.mx.size", type: "hidden", value: "M" });
+      f.add("input", { name: "u.1.mx.color", type: "hidden", value: "black" });
+      f.add("input", { name: "u.1.engrave", type: "text", value: "Salma" });
+      f.add("input", { name: "s.serum.scent", type: "hidden", value: "rose" });
+      f.add("select", { name: "x.wrap", value: "gift" });
+      f.add("input", { type: "checkbox", name: "bump", value: "1" }).checked = true;
+      f.add("input", { name: "b.size", type: "hidden", value: "S" });
+      f.add("input", { name: "u.7.color", value: "x", disabled: "" });
+      f.add("input", { name: "u.99.color", value: "x" });
+      f.add("input", { name: "z.color", value: "x" });
+      f.add("input", { name: "website", value: "" });
+    });
+    const out = serialiseSelection(form, SEL_CFG);
+    assert.deepEqual(out, {
+      units: [
+        { item: "serum", o: { color: "blue", scent: "rose" }, f: {} },
+        { o: { mx: "size=M|color=black", scent: "rose" }, f: { engrave: "Salma" } },
+      ],
+      extras: { wrap: "gift" },
+      bundleId: "mix",
+      city: "casablanca",
+      bump: true,
+      b: { o: { size: "S" }, f: {} },
+    });
+    const text = JSON.stringify(out);
+    for (const secret of ["Salma Idrissi", "0612345678", "Roses"]) assert.ok(!text.includes(secret), `never reads ${secret}`);
+  });
+
+  check("wa order: the serialiser is bounded like UnitIn and drops an unticked bump's options", () => {
+    const form = selForm((f) => {
+      for (let k = 0; k < 25; k++) f.add("input", { name: `u.${k}.color`, type: "hidden", value: "red" });
+      for (let g = 0; g < 12; g++) f.add("input", { name: `u.0.g${g}x`, type: "hidden", value: "v" });
+      for (let g = 0; g < 6; g++) f.add("input", { name: `u.0.t${g}x`, type: "text", value: "t" });
+      f.add("input", { type: "checkbox", name: "bump", value: "1" });
+      f.add("input", { name: "b.size", type: "hidden", value: "S" });
+    });
+    const out = serialiseSelection(form, SEL_CFG);
+    assert.equal(out.bundleId, "duo", "no offer checked: the default");
+    assert.equal(out.units.length, 20);
+    assert.equal(Object.keys(out.units[0]!.o).length, 8);
+    assert.equal(Object.keys(out.units[0]!.f).length, 4);
+    assert.ok(!("b" in out) && !out.bump, "no bump");
+  });
+
+  const waLanding = (block: AssistData) => {
+    const { doc, form } = landingDoc({ block });
+    const alt = form.add("div", { class: "lp-of__alt" });
+    const link = alt.add("a", { class: "lp-of__wa", target: "_blank" });
+    link.href = "https://wa.me/212661000000?text=Bonjour";
+    form.add("input", { name: "name", value: "Salma" });
+    form.add("input", { name: "phone", type: "tel", value: "0612345678" });
+    form.add("input", { name: "u.0.color", type: "hidden", value: "red" });
+    return { doc, form, link };
+  };
+  const flush = () => new Promise<void>((done) => setImmediate(done));
+  const click = (link: FakeEl) => {
+    const e = new FakeEvent("click", { bubbles: true });
+    link.dispatchEvent(e);
+    return e;
+  };
+  const waBlock = data<AssistData>(addonsFor(inputOf({ ...OFF, waOrder: true, doc: waDoc() })), "lp-assist")!;
+  const reply = { ok: true, ref: "WA-7K3Q9X", number: "212661000000", text: "Pack Duo 299 DH\nWA-7K3Q9X" };
+
+  const waOk = waLanding(waBlock);
+  const runOk = runChunk(assistJs, waOk.doc, { path: "/s/nour/serum", now: NOW, reply });
+  const firstClick = click(waOk.link);
+  await flush();
+  await flush();
+  const second = click(waOk.link);
+  await flush();
+  const waErr = waLanding(waBlock);
+  const runErr = runChunk(assistJs, waErr.doc, { path: "/serum", now: NOW, reply: { ok: false, error: "unavailable" } });
+  click(waErr.link);
+  await flush();
+  await flush();
+  const waSlow = waLanding(waBlock);
+  const runSlow = runChunk(assistJs, waSlow.doc, { path: "/serum", now: NOW, reply: "hang" });
+  click(waSlow.link);
+  const waIab = waLanding(waBlock);
+  const runIab = runChunk(assistJs, waIab.doc, { path: "/serum", now: NOW, reply, ua: "Mozilla/5.0 (iPhone) Instagram 300.0" });
+  click(waIab.link);
+  await flush();
+  await flush();
+
+  check("wa order: a click posts the choice (no name, no phone), opens wa.me with the server's text and shows the ref", () => {
+    assert.deepEqual(runOk.warnings, []);
+    assert.equal(waOk.link.getAttribute("data-lp-wa-order"), "");
+    assert.ok(firstClick.defaultPrevented, "the plain link is held");
+    assert.equal(runOk.fetches.length, 1, "one intent");
+    const f = runOk.fetches[0]!;
+    assert.equal(f.url, "/api/public/wa");
+    const body = JSON.parse(String(f.init.body)) as Record<string, unknown>;
+    assert.equal(body.pageKey, "pk-serum");
+    assert.ok(!JSON.stringify(body).includes("Salma") && !JSON.stringify(body).includes("0612345678"), JSON.stringify(body));
+    assert.deepEqual(body.units, [{ o: { color: "red" }, f: {} }]);
+    assert.ok(!/price|total|"st"/.test(String(f.init.body)), "no price in the body");
+    assert.equal(runOk.opened.length, 2, "a tab per tap");
+    assert.equal(runOk.opened[0]!.location.href, `https://wa.me/212661000000?text=${encodeURIComponent(reply.text)}`);
+    assert.equal(runOk.timers[0]?.ms, 4000, "the 4 s timeout");
+    const note = waOk.doc.querySelector(".lp-of__wa-note")!;
+    assert.equal(note.textContent, fill(WA.fr.ready, { ref: "WA-7K3Q9X" }));
+    assert.equal(note.querySelector("bdi")?.dir, "ltr");
+  });
+
+  check("wa order: a second tap within 30 s reopens the same message without a new intent", () => {
+    assert.ok(second.defaultPrevented);
+    assert.equal(runOk.fetches.length, 1);
+    assert.equal(runOk.opened[1]!.location.href, runOk.opened[0]!.location.href);
+  });
+
+  check("wa order: an error opens the plain link; a 4 s timeout too; in-app browsers navigate the same tab", () => {
+    assert.equal(runErr.opened[0]!.location.href, "https://wa.me/212661000000?text=Bonjour", "error → plain link");
+    assert.equal(waErr.doc.querySelector(".lp-of__wa-note"), null, "no ready line");
+    assert.equal(runSlow.opened[0]!.location.href, "", "still waiting");
+    runSlow.timers.find((t) => t.ms === 4000)!.fn();
+    assert.equal(runSlow.opened[0]!.location.href, "https://wa.me/212661000000?text=Bonjour", "timeout → plain link");
+    assert.equal(runIab.opened.length, 0, "no new tab inside Instagram");
+    assert.equal(runIab.location.href, `https://wa.me/212661000000?text=${encodeURIComponent(reply.text)}`);
+  });
+
+  check("wa order: the preview shows the note and leaves the link alone; no `wo`, no change", () => {
+    const pv = waLanding(data<AssistData>(addonsFor(inputOf({ ...OFF, waOrder: true, mode: "preview", doc: waDoc() })), "lp-assist")!);
+    runChunk(assistJs, pv.doc, { path: "/preview/x", now: NOW });
+    assert.equal(pv.doc.querySelector(".lp-of__wa-note")?.textContent, WA.fr.liveOnly);
+    assert.ok(click(pv.link).defaultPrevented === false && !pv.link.hasAttribute("data-lp-wa-order"));
+    const plain = waLanding(data<AssistData>(addonsFor(inputOf({})), "lp-assist")!);
+    const r = runChunk(assistJs, plain.doc, { path: "/serum", now: NOW });
+    assert.ok(click(plain.link).defaultPrevented === false && r.fetches.length === 0 && !plain.link.hasAttribute("data-lp-wa-order"));
+  });
+
   /* 9. sizes, copy, grammar ------------------------------------------------ */
 
-  check("the chunks' gzip sizes stay inside budgets.json (+5 %, render-check's rule; assist-ty: CCR r1-p3-9's budget)", () => {
+  check("the chunks' gzip sizes stay inside budgets.json (+5 %, render-check's rule; assist-ty: CCR r1-p3-9's budget; assist: CCR r1-p3-14's)", () => {
     const budgets = JSON.parse(readFileSync(join(ROOT, "src", "landing", "runtime", "budgets.json"), "utf8")) as Record<string, number>;
     // operations' nextCallableAt alone gzips to ≈ 1,040 B, so `assist-ty` cannot meet the 1,500 B the spec estimated
     // (≈ 300 B for it): CCR r1-p3-9 records 3,600 B; this check holds the chunk to the larger of the two until it lands
-    const want: Record<string, number> = { ...budgets, "assist-ty": Math.max(budgets["assist-ty"] ?? 0, ASSIST_TY_BUDGET) };
+    const want: Record<string, number> = { ...budgets, "assist-ty": Math.max(budgets["assist-ty"] ?? 0, ASSIST_TY_BUDGET), assist: Math.max(budgets.assist ?? 0, ASSIST_BUDGET) };
     const sizes = { assist: gz(assistJs), "assist-ty": gz(assistTyJs), track: gz(trackJs) };
     console.log(`  chunks: ${Object.entries(sizes).map(([k, v]) => `${k} ${v}/${want[k]} B gz`).join(" · ")}`);
     for (const [k, v] of Object.entries(sizes)) assert.ok(v <= want[k]! * 1.05, `${k} ${v} B gz over ${want[k]} + 5%`);

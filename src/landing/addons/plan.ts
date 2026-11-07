@@ -6,7 +6,10 @@
  * The "when" column of LAN-§5.2:
  *   assist     (landing)   the delivery line (zones on, the line on, ≥ 1 zone with days or not served, an order form),
  *                          or the idem capture the thank-you needs (its tracking link or its confirm pill on, live and
- *                          test documents only: the idem is what proves the order to /track and to the intent beacon)
+ *                          test documents only: the idem is what proves the order to /track and to the intent beacon),
+ *                          or Order on WhatsApp (LP-11, `wo`: `landing.waOrder.enabled`, a WhatsApp number and the
+ *                          form's WhatsApp link; the intent API on live documents only, the "works on the live page"
+ *                          note in the preview, nothing in test documents and exports)
  *   assist-ty  (thanks)    any `landing.thankYou` block on with its data: the confirm pill (a WhatsApp number and the
  *                          template), the expectation (the caller phone), the tracking link (a document with /track)
  * and the mode matrix of LAN-§5.3:
@@ -26,7 +29,7 @@ import { shopperPromiseAllowed, type EffectiveWindow } from "@/lib/callcenter/wi
 import { localParts } from "@/lib/delivery/eta";
 import type { ZoneTable } from "@/lib/delivery/types";
 import { fmtCents } from "@/landing/runtime/money";
-import { DZ, plural, shopperLocaleOf, TY, type DzCopy, type ShopperLocale } from "@/lib/landing/copy";
+import { DZ, plural, shopperLocaleOf, TY, WA, type DzCopy, type ShopperLocale } from "@/lib/landing/copy";
 import { windowIsEmpty, type WhenWords } from "@/lib/landing/hours";
 import { OTHER_CITY } from "@/lib/markets/cities-ma";
 import { moneyFormat } from "@/lib/markets/info";
@@ -36,6 +39,7 @@ import { whatsappDigits, whatsappNumber } from "@/lib/render/config";
 import type { CheckoutSetting } from "@/lib/settings/keys/checkout";
 import type { LandingSetting } from "@/lib/settings/keys/landing";
 import type { StoreConfirmation } from "@/lib/settings/keys/store";
+import { WA_API } from "@/lib/wa-order/contract";
 import type { AddonMode } from "./load.server";
 import { noAddons, type RenderAddons } from "./types";
 
@@ -84,6 +88,8 @@ export interface AssistData {
   wa?: string;
   /** write the attempt's idem on `lp:order` (sessionStorage `lp:<h>:idem:<pageKey>`) */
   k?: 1;
+  /** Order on WhatsApp (LAN-§11): live, the intent API and the `wa.ready` line; preview, the `wa.liveOnly` note */
+  wo?: { e: string; r: string } | { n: string };
 }
 
 /** `lp-assist-ty.expect.win`: operations' window as JSON, never with a live "Open calls now" (LAN-§8.2). */
@@ -158,7 +164,8 @@ export function assistData(i: AddonInput): AssistData | null {
   const line = !!t && checkout.zonesEnabled && checkout.lineOnLanding && t.zones.some((z) => z.ns || !!z.d);
   const ty = landing.thankYou;
   const k = live(i.mode) && (ty.trackLink || (ty.confirmWhatsapp && !!confirmNumber(i) && !!i.templates.customer_confirm));
-  if (!line && !k) return null;
+  const wo = waOrderData(i);
+  if (!line && !k && !wo) return null;
   const out: AssistData = { v: 1 };
   if (line && t) {
     const l = shopperLocaleOf(i.doc.locale);
@@ -172,7 +179,22 @@ export function assistData(i: AddonInput): AssistData | null {
     Object.assign(out, { dz: t, s, l, o: OTHER_CITY.value }, checkout.confirmationCall ? { c: 1 } : {}, f ? { f } : {}, wa ? { wa } : {});
   }
   if (k) out.k = 1;
+  if (wo) out.wo = wo;
   return out;
+}
+
+/**
+ * Order on WhatsApp (LAN-§11.1, §5.3): the form shows its WhatsApp link (`WhatsAppAlt`: not turned off, a number) and
+ * the store turned the intent on. Live documents get the API and the ready line; the preview gets the note; test
+ * documents and exports keep today's plain link.
+ */
+function waOrderData(i: AddonInput): AssistData["wo"] | null {
+  const fw = i.doc.form.whatsapp;
+  if (!i.settings.landing.waOrder.enabled || (fw && !fw.enabled) || !whatsappNumber(i.doc, i.settings.whatsapp)) return null;
+  const c = WA[shopperLocaleOf(i.doc.locale)];
+  if (i.mode === "live") return { e: WA_API, r: c.ready };
+  if (i.mode === "preview") return { n: c.liveOnly };
+  return null;
 }
 
 /** The `lp-assist-ty` block of a thank-you document, or null (no `assist-ty` chunk). */

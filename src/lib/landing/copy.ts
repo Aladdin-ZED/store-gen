@@ -415,12 +415,16 @@ export interface WaCopy {
   toConfirm: string;
   /** the builder preview's note under the button (LAN-§5.3) */
   liveOnly: string;
+  /** the message's delivery line label, and `{delivery}` of the `wa_order` template ({fee}: the page's fee) */
+  delivery: string;
+  deliveryFee: string;
+  deliveryFree: string;
 }
 
 export const WA: Readonly<Record<ShopperLocale, WaCopy>> = {
-  ar: { button: "دير الطلب فواتساب", ready: "الرسالة واجدة فواتساب · المرجع {ref}", toConfirm: "باقي خاصنا نعرفو: {list}", liveOnly: "كيخدم غير فالصفحة المنشورة" },
-  fr: { button: "Commander sur WhatsApp", ready: "Votre message est prêt dans WhatsApp · Réf. {ref}", toConfirm: "À préciser : {list}", liveOnly: "Fonctionne sur la page en ligne" },
-  en: { button: "Order on WhatsApp", ready: "Your message is ready in WhatsApp · Ref. {ref}", toConfirm: "To confirm: {list}", liveOnly: "Works on the live page" },
+  ar: { button: "دير الطلب فواتساب", ready: "الرسالة واجدة فواتساب · المرجع {ref}", toConfirm: "باقي خاصنا نعرفو: {list}", liveOnly: "كيخدم غير فالصفحة المنشورة", delivery: "التوصيل", deliveryFee: "التوصيل {fee}", deliveryFree: "التوصيل فابور" },
+  fr: { button: "Commander sur WhatsApp", ready: "Votre message est prêt dans WhatsApp · Réf. {ref}", toConfirm: "À préciser : {list}", liveOnly: "Fonctionne sur la page en ligne", delivery: "Livraison", deliveryFee: "livraison {fee}", deliveryFree: "livraison gratuite" },
+  en: { button: "Order on WhatsApp", ready: "Your message is ready in WhatsApp · Ref. {ref}", toConfirm: "To confirm: {list}", liveOnly: "Works on the live page", delivery: "Delivery", deliveryFee: "delivery {fee}", deliveryFree: "free delivery" },
 };
 
 /* ------------------------------------------------------------------ */
@@ -432,6 +436,8 @@ export interface LpCopy {
   testBanner: string;
   /** `link.inactive`: a short link or a test link that no longer works */
   linkInactive: string;
+  /** `link.home`: the inactive link page's way back to the store home */
+  linkHome: string;
   /** `lp.report`: the same words as the storefront's `footer.report` */
   report: string;
   /** `lp.reload` (R2) */
@@ -439,7 +445,7 @@ export interface LpCopy {
 }
 
 export const LP: Readonly<Record<ShopperLocale, LpCopy>> = {
-  ar: { testBanner: "طلب تجريبي: ما كيتحسبش", linkInactive: "هاد الرابط ما بقاش خدام.", report: "بلّغ على هاد المتجر", reload: "عاود حمّل الصفحة" },
-  fr: { testBanner: "Commande test : non comptée", linkInactive: "Ce lien n'est plus actif.", report: "Signaler cette boutique", reload: "Recharger la page" },
-  en: { testBanner: "Test order: not counted", linkInactive: "This link is no longer active.", report: "Report this store", reload: "Reload the page" },
+  ar: { testBanner: "طلب تجريبي: ما كيتحسبش", linkInactive: "هاد الرابط ما بقاش خدام.", linkHome: "سير للصفحة الرئيسية ديال المتجر", report: "بلّغ على هاد المتجر", reload: "عاود حمّل الصفحة" },
+  fr: { testBanner: "Commande test : non comptée", linkInactive: "Ce lien n'est plus actif.", linkHome: "Aller à l'accueil de la boutique", report: "Signaler cette boutique", reload: "Recharger la page" },
+  en: { testBanner: "Test order: not counted", linkInactive: "This link is no longer active.", linkHome: "Go to the store home", report: "Report this store", reload: "Reload the page" },
 };

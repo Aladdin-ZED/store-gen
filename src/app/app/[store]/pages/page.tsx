@@ -1,10 +1,11 @@
 import { SparklesIcon } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { AddressCard } from "@/components/admin/common/address-card";
 import { PageHeader } from "@/components/admin/common/page-header";
+import { TestOrderSlot } from "@/components/admin/landing/address-slots";
 import { LocaleScope } from "@/components/admin/landing/locale-scope";
 import { Screen } from "@/components/admin/common/screen";
-import { PagesAddress } from "@/components/admin/pages/pages-address";
 import type { RowVitals } from "@/components/admin/pages/pages-table";
 import { PagesView } from "@/components/admin/pages/pages-view";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,7 @@ export default async function PagesPage({ params, searchParams }: { params: Para
   const t = translator(locale);
   const total = counts.draft + counts.published;
   const homeLive = pages.some((p) => p.isHome && p.status === "published");
+  const homeId = pages.find((p) => p.isHome && p.status === "published")?.id ?? null;
 
   return (
     <LocaleScope locale={locale}>
@@ -90,7 +92,18 @@ export default async function PagesPage({ params, searchParams }: { params: Para
           )
         }
       >
-        {total > 0 && <PagesAddress live={homeLive} className="mt-4 max-w-xl" />}
+        {total > 0 && (
+          <div className="mt-4 max-w-2xl">
+            <AddressCard
+              compact
+              store={ctx.store}
+              live={homeLive}
+              pageId={homeId}
+              // P3's test-order entry (SF-05): the home page when it is live, else the latest published page
+              slots={{ testOrder: ctx.can("pages.publish") ? <TestOrderSlot pageId={homeId} live={counts.published > 0} /> : undefined }}
+            />
+          </div>
+        )}
       </PageHeader>
       <PagesView
         pages={pages}
