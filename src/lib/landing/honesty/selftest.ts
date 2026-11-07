@@ -288,7 +288,12 @@ async function gateChecks(): Promise<void> {
     console.error = logged;
   }
   check(!threw, "gate: the publish listener never throws");
-  check((await L.markKitsStaleFor(publisher.scope, publisher.pageId, fx.ctx.doc)) === undefined, "gate: markKitsStaleFor is the wave 1 no-op");
+  // wave 2: the kits' read needs the database (test:kit holds its DB cases); here it answers or fails, never hangs
+  const kits = await L.markKitsStaleFor(publisher.scope, publisher.pageId, fx.ctx.doc).then(
+    () => "done",
+    () => "no-db",
+  );
+  check(kits === "done" || kits === "no-db", "gate: markKitsStaleFor settles (the listener's step isolates a failure)");
 
   // 5. the catalogs: every key an item names, and every landing key in the three locales
   const { messageOf } = await import("@/lib/i18n/admin");

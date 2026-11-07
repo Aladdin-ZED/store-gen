@@ -11,6 +11,8 @@
  * sheet open, `?new=1`) and "Open a test order of this page" (`pages.publish`, LAN-§14.1): the builder's page when the
  * builder is on screen, else the store's home page (or its latest published page); the 2-hour link opens in a new tab,
  * and a refusal lands on the pages list. Distinct from P4's `ops.open_test_order` (the latest published landing).
+ * "Campaigns" (jump) and "Create a campaign" (create group, `campaigns.write`: the campaigns screen with its create
+ * sheet open, the builder's page preselected when the builder is on screen; LAN-§13.1).
  */
 import { appHref } from "@/lib/urls";
 import type { CommandDef } from "./types";
@@ -37,6 +39,18 @@ export const commands: CommandDef[] = [
   jump("after-order", "landing.cmd.afterOrder", "/settings/checkout"),
   jump("links", "landing.cmd.links", "/links", { permission: "pages.read", mode: "landing" }),
   jump("new-link", "landing.cmd.newLink", "/links?new=1", { group: "create", permission: "campaigns.write", mode: "landing" }),
+  jump("campaigns", "landing.cmd.campaigns", "/campaigns", { permission: "pages.read", mode: "landing" }),
+  {
+    id: "landing.new_campaign",
+    label: "landing.cmd.newCampaign",
+    group: "create",
+    permission: "campaigns.write",
+    mode: "landing",
+    run: (ctx) => {
+      const pageId = typeof window === "undefined" ? null : builderPageId(window.location.pathname);
+      ctx.navigate(appHref(ctx.store.handle, pageId ? `/campaigns?new=1&page=${pageId}` : "/campaigns?new=1"));
+    },
+  },
   {
     id: "landing.test_order",
     label: "landing.cmd.testOrder",

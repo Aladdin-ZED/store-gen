@@ -10,6 +10,7 @@ import {
   GlobeIcon,
   HomeIcon,
   LinkIcon,
+  MegaphoneIcon,
   MoreHorizontalIcon,
   PackageOpenIcon,
   PencilIcon,
@@ -269,6 +270,13 @@ export function PageMenu({
         <DropdownMenuItem onSelect={() => onAction("copy-link", page)}>
           <LinkIcon /> {t("landing.pages.menu.copyLink")}
         </DropdownMenuItem>
+        {live && storeView.can("campaigns.write") && (
+          <DropdownMenuItem asChild>
+            <Link href={storeView.href(`/campaigns?new=1&page=${page.id}`)}>
+              <MegaphoneIcon /> {t("landing.pages.menu.campaign")}
+            </Link>
+          </DropdownMenuItem>
+        )}
 
         {can.publish && !archived && (
           <>

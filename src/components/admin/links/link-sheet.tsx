@@ -41,7 +41,7 @@ function targetSlug(t: LinkTarget | null, pages: readonly LinkPageOption[]): str
   return pages.find((p) => p.id === t.pageId)?.slug ?? null;
 }
 
-function Field({ id, label, hint, error, children, className }: { id: string; label: ReactNode; hint?: ReactNode; error?: string; children: ReactNode; className?: string }) {
+export function Field({ id, label, hint, error, children, className }: { id: string; label: ReactNode; hint?: ReactNode; error?: string; children: ReactNode; className?: string }) {
   return (
     <div className={cn("grid content-start gap-1.5", className)}>
       <Label htmlFor={id} className="text-[0.8125rem] font-medium">
@@ -103,7 +103,7 @@ export function TargetPicker({ id, value, onChange, pages, invalid }: { id: stri
   );
 }
 
-function SheetShell({ open, onClose, title, description, children, footer }: { open: boolean; onClose: () => void; title: ReactNode; description: ReactNode; children: ReactNode; footer: ReactNode }) {
+export function SheetShell({ open, onClose, title, description, children, footer }: { open: boolean; onClose: () => void; title: ReactNode; description: ReactNode; children: ReactNode; footer: ReactNode }) {
   const t = useT();
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>

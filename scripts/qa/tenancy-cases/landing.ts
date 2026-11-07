@@ -182,11 +182,14 @@ async function zoneCases(kit: TenancyKit): Promise<void> {
   check("zones: zoneFeesFor(B) has no fee of A", JSON.stringify(bFees) === JSON.stringify({ fes: null, agadir: null }), bFees);
 
   // writes by B: A's ids, then an empty list; A's rows (and everything else of A) unchanged
+  const H = load<typeof import("../tenancy-check")>("../tenancy-check");
+  const tablesBefore = (await H.snapshot(fx.A.id)).tables;
   const before = await kit.snapshotA();
   const savedB = await Z.saveZones(ownerCtx(kit, "B"), [{ ...zoneInput("Zone B", ["fes"], { days: [1, 1] }), id: aIds[0] }, { ...zoneInput("Zone B2", ["rabat"]), id: aIds[1] }]);
   check("zones: saveZones(B, A's zone ids) writes B's own rows under new ids", savedB.problems.length === 0 && savedB.zones.length === 2 && savedB.zones.every((z) => !aIds.includes(z.id)), savedB.zones);
   await Z.saveZones(ownerCtx(kit, "B"), []);
-  check("zones: saveZones(B, …) never changes A's data", (await kit.snapshotA()) === before);
+  const tablesAfter = (await H.snapshot(fx.A.id)).tables;
+  check("zones: saveZones(B, …) never changes A's data", (await kit.snapshotA()) === before, Object.keys(tablesAfter).filter((t) => tablesAfter[t] !== tablesBefore[t]));
   const aAfter = await Z.listZones(A);
   check("zones: A still has its zones with their ids", aAfter.map((z) => z.id).join() === aIds.join() && aAfter[0]!.name === marker, aAfter);
   check("zones: B's list is its own (empty after its last save)", (await Z.listZones(B)).length === 0);
@@ -703,6 +706,93 @@ async function linkCases(kit: TenancyKit): Promise<void> {
   check("test orders: the test-render bucket is the store's own (s:<sid>:test-render)", bucketA === `s:${fx.A.id}:test-render` && bucketB === `s:${fx.B.id}:test-render`, [bucketA, bucketB]);
 }
 
+/* ------------------------------------------------------------------ */
+/* Campaign Kit (p3-w2-campaign-kit, LP-18 = SF-01)                    */
+/* ------------------------------------------------------------------ */
+
+/** A kit with no store datum in it: enough for the reads, the share page and the actions' replays. */
+function fixtureKit(slug: string) {
+  const t = { ar: slug, fr: slug, en: slug };
+  return {
+    v: 1 as const,
+    compiledAt: new Date().toISOString(),
+    locales: ["fr" as const],
+    facts: { product: slug, offers: [], fee: null, eta: null },
+    links: [],
+    whatsappConfirm: t,
+    script: { steps: [] },
+    brief: { angles: [], doNotSay: [], compliance: [], source: "library" as const },
+    pixelPlan: { pixels: [], trigger: "order" as const, events: [], testHint: false },
+  };
+}
+
+/** A campaign row of the store (a direct row: the replays must not spend the store's gauges on fixtures). */
+async function freshCampaign(store: StoreFx, status: "draft" | "live" | "paused" = "draft", shareHash: string | null = null): Promise<string> {
+  const { db } = load<typeof import("@/lib/db/client")>("@/lib/db/client");
+  const T = load<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const { newId } = load<typeof import("@/lib/db/ids")>("@/lib/db/ids");
+  const id = newId();
+  const slug = `kit-${randomBytes(4).toString("hex")}`;
+  await db.insert(T.campaigns).values({
+    id,
+    storeId: store.id,
+    name: `Kit ${store.handle} ${slug}`,
+    slug,
+    pageId: store.page.live,
+    pageVersionId: null,
+    productRef: { kind: "landing_items", id: store.page.live },
+    channels: ["meta"],
+    kit: fixtureKit(slug),
+    offersHash: "0000000000000000",
+    shareTokenHash: shareHash,
+    status,
+  });
+  return id;
+}
+
+async function campaignCases(kit: TenancyKit): Promise<void> {
+  const { fx, check } = kit;
+  const { createHash } = load<typeof import("node:crypto")>("node:crypto");
+  const R = load<typeof import("@/lib/campaigns/read.server")>("@/lib/campaigns/read.server");
+  const Sh = load<typeof import("@/lib/campaigns/share.server")>("@/lib/campaigns/share.server");
+  const Sv = load<typeof import("@/lib/campaigns/service.server")>("@/lib/campaigns/service.server");
+  const Search = load<typeof import("@/lib/admin-data/search/landing")>("@/lib/admin-data/search/landing");
+  const ctxA = ownerCtx(kit, "A");
+  const ctxB = ownerCtx(kit, "B");
+  const attempt = async (fn: () => Promise<unknown>): Promise<string> => {
+    try {
+      await fn();
+      return "ok";
+    } catch (err) {
+      return (err as { code?: string }).code ?? (err as Error).name ?? "error";
+    }
+  };
+  const token = randomBytes(32).toString("base64url");
+  const a = await freshCampaign(fx.A, "live", createHash("sha256").update(token).digest("hex"));
+  const rowA = await R.campaignDetail(ctxA.scope, ctxA.store, a);
+  check("campaigns: A reads its own kit (the control)", rowA?.row.id === a);
+  check("campaigns: B's scope reads no kit of A (detail answers null)", (await R.campaignDetail(ctxB.scope, ctxB.store, a)) === null);
+  check("campaigns: B's list holds no kit of A", !(await R.listCampaigns(ctxB.scope)).some((r) => r.id === a));
+  const byName = await R.searchCampaigns(ctxB.scope, rowA?.row.slug ?? "kit-");
+  check("campaigns: ⌘K search through B finds no kit of A by its slug", !byName.some((r) => r.id === a), byName);
+  const hits = await Search.provider.search(ctxB.scope, rowA?.row.slug ?? "kit-", { userId: fx.B.members.owner, role: "owner", impersonating: false } as never);
+  check("campaigns: the landing ⌘K provider of B returns no hit of A", !hits.some((h) => h.id === a || h.href.includes(fx.A.handle)), hits);
+  const tries = {
+    live: await attempt(() => Sv.setCampaignLive(ctxB, a)),
+    pause: await attempt(() => Sv.pauseCampaign(ctxB, a)),
+    end: await attempt(() => Sv.endCampaign(ctxB, a)),
+    recompile: await attempt(() => Sv.recompileCampaign(ctxB, a)),
+    share: await attempt(() => Sh.createShare(ctxB, a)),
+    revoke: await attempt(() => Sh.revokeShare(ctxB, a)),
+  };
+  check("campaigns: B's live, pause, end, recompile, share and revoke of A's kit → not_found", Object.values(tries).every((x) => x === "not_found"), tries);
+  check("campaigns: createCampaign by B with A's page id → not_found", (await attempt(() => Sv.createCampaign(ctxB, { pageId: fx.A.page.live, channels: ["meta"], name: "steal" }))) === "not_found");
+  const shared = await Sh.kitForShare(token);
+  check("campaigns: A's share token opens A's kit with A's store only", shared?.campaign.id === a && shared.store.id === fx.A.id, shared?.store.id);
+  await Sh.revokeShare(ctxA, a);
+  check("campaigns: after A revokes, the token answers nothing (the page's 404)", (await Sh.kitForShare(token)) === null);
+}
+
 export const cases: TenancyCase[] = [
   { name: "landing: delivery zones, lead suggestion and holiday reminder of A never reach B", run: zoneCases },
   { name: "landing: A's attested facts, proof, zones and policies never reach B's gate or Store Health", run: gateCases },
@@ -711,6 +801,7 @@ export const cases: TenancyCase[] = [
   { name: "landing: B's host reads A's order by no tracking proof; A's signed link under B's handle answers 404", run: trackCases },
   { name: "landing: A's confirm template, zones and caller phone never reach B's add-on blocks (loadRenderAddons, templateFor)", run: addonCases },
   { name: "landing: A's short links answer 404 on B's host and are never B's to create, pause, edit or delete; A's test token is an ordinary visit on B", run: linkCases },
+  { name: "landing: A's campaign kits and share tokens are unreachable from B (reads, ⌘K, writes); a revoked token answers nothing", run: campaignCases },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -903,4 +994,32 @@ actions.push(
   inboxCase("setLeadPhoneAction", ["leads.write"], true, (s) => freshIntent(s).then((id) => [id, "0661234567", op()])),
   // the quick reply: text only, A's intent never readable from B
   inboxCase("waReplyAction", ["leads.read"], false, (s) => freshIntent(s).then((id) => [id])),
+);
+
+/* ------------------------------------------------------------------ */
+/* Campaign Kit actions (p3-w2-campaign-kit)                           */
+/* ------------------------------------------------------------------ */
+
+const CAMPAIGNS = "src/app/app/[store]/campaigns/actions.ts";
+
+const campaignCase = (name: string, args: (s: StoreFx) => Promise<unknown[]> | unknown[]): TrackActionCase => ({
+  file: CAMPAIGNS,
+  name,
+  area: "pages",
+  path: "/campaigns",
+  permission: ["campaigns.write"],
+  write: true,
+  victim: (fx) => args(fx.A),
+  own: (fx) => args(fx.B),
+});
+
+actions.push(
+  campaignCase("createCampaignAction", (s) => [{ pageId: s.page.live, channels: ["meta"], name: `Replay ${randomBytes(3).toString("hex")}` }]),
+  campaignCase("recompileCampaignAction", (s) => freshCampaign(s).then((id) => [id])),
+  campaignCase("goLiveAction", (s) => freshCampaign(s, "paused").then((id) => [id])),
+  campaignCase("pauseCampaignAction", (s) => freshCampaign(s, "live").then((id) => [id])),
+  campaignCase("endCampaignAction", (s) => freshCampaign(s).then((id) => [id])),
+  campaignCase("shareCampaignAction", (s) => freshCampaign(s).then((id) => [id])),
+  campaignCase("revokeShareAction", (s) => freshCampaign(s).then((id) => [id])),
+  campaignCase("refineKitAction", (s) => freshCampaign(s).then((id) => [id])),
 );

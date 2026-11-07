@@ -42,6 +42,7 @@ import type { StoreSettingValue } from "@/lib/settings/store-registry";
 import { getStoreById } from "@/lib/tenancy/public";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { GateItem, StoreScope, WriteScope } from "@/lib/tenancy/types";
+import { markKitsStale } from "@/lib/campaigns/service.server";
 import { originFrom } from "../origin";
 import { generationRecordFor, registerPrePublishCheck, registerPublishListener, type GenerationRecord, type PrePublishCtx, type PrePublishResult } from "../prepublish";
 
@@ -253,13 +254,12 @@ export async function landingCheck(ctx: PrePublishCtx): Promise<PrePublishResult
 }
 
 /**
- * Campaign kits built from this page learn it changed (LAN-§13.1 "page changed since", by `offers_hash`). Wave 2
- * (p3-w2-campaign-kit) fills it; until then there is no kit to tell.
+ * Campaign kits built from this page learn it changed (LAN-§13.3 "page changed since", by `offers_hash`): inside the
+ * publish's listener, no job. Every kit of the page that is not ended compares the published pricing fingerprint
+ * with the one it was compiled from (src/lib/campaigns/service.server.ts `markKitsStale`).
  */
 export async function markKitsStaleFor(scope: WriteScope, pageId: string, doc: PageDoc): Promise<void> {
-  void scope;
-  void pageId;
-  void doc;
+  await markKitsStale(scope, pageId, doc);
 }
 
 /**
