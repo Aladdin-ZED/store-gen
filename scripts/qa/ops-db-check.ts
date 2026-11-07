@@ -1511,7 +1511,12 @@ async function main(): Promise<number> {
     eq("opsAggregates: the city cells equal a direct recount (test and honeypot orders excluded)", [...agg.cells.city].sort((x, y) => x.key.localeCompare(y.key)).map((c) => [c.key, c.placed]), direct2.map((r) => [r.k, Number(r.n)]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))));
     const cmp = await AG.opsAggregates(Cs, { from: W.addDaysYmd(today, -6), to: today, dims: ["source"], compareWith: "previous" });
     ok("opsAggregates: compareWith previous fills the delta", cmp.cells.source.every((c) => !!c.delta && typeof c.delta.prevPlaced === "number"), cmp.cells.source[0]);
-    ok("opsAggregates: the R2 carrier dim answers no cell", (await AG.opsAggregates(Cs, { from, to: today, dims: ["carrier"] })).cells.carrier.length === 0);
+    // R2 contract step C2-E (S4 #57): the carrier dim keys on orders.carrier_label ('*' = none), suppressed like the key dims
+    const byCarrier = await AG.opsAggregates(Cs, { from, to: today, dims: ["carrier"] });
+    const [directCarrier] = (await db.execute(
+      sql`SELECT COALESCE(NULLIF(LEFT(carrier_label, 60), ''), '*') AS k, COUNT(*) AS n FROM orders WHERE store_id = ${STORE_D} AND is_test = 0 AND (flags IS NULL OR flags NOT LIKE '%"honeypot"%') AND created_at >= ${IS.dayBounds(tz, from, from)[0]!.from} GROUP BY k HAVING n >= 5 ORDER BY k`,
+    )) as unknown as [{ k: string; n: number }[]];
+    eq("opsAggregates: the carrier cells equal a direct recount of orders.carrier_label ('*' = none)", [...byCarrier.cells.carrier].sort((x, y) => x.key.localeCompare(y.key)).map((c) => [c.key, c.placed]), directCarrier.map((r) => [r.k, Number(r.n)]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))));
     let threw = false;
     try {
       await AG.opsAggregates(Cs, { from, to: today, dims: ["page", "city", "source", "agent", "offer", "campaign", "angle"] });
