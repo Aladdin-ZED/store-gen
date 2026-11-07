@@ -25,6 +25,14 @@ import { defaultTemplate, type LandingTemplateKind } from "./templates";
 const MAX_TEMPLATE_CHARS = 1_000;
 
 export async function templateFor(scope: StoreScope, kind: LandingTemplateKind, locale: string): Promise<string> {
+  return (await ownTemplate(scope, kind, locale)) ?? defaultTemplate(kind, shopperLocaleOf(locale));
+}
+
+/**
+ * The owner's own active store-wide text of a kind (or of another WhatsApp kind, such as operations' `wa_order_reply`)
+ * in a page language, or null when they kept the default (the WhatsApp order composes its own message then, LAN-§11.4).
+ */
+export async function ownTemplate(scope: StoreScope, kind: LandingTemplateKind | "wa_order_reply", locale: string): Promise<string | null> {
   const loc = shopperLocaleOf(locale);
   const [row] = await db
     .select({ body: messageTemplates.body })
@@ -39,7 +47,7 @@ export async function templateFor(scope: StoreScope, kind: LandingTemplateKind, 
     .orderBy(asc(messageTemplates.position), desc(messageTemplates.updatedAt))
     .limit(1);
   const body = row?.body.trim();
-  return body && body.length <= MAX_TEMPLATE_CHARS ? body : defaultTemplate(kind, loc);
+  return body && body.length <= MAX_TEMPLATE_CHARS ? body : null;
 }
 
 const LOCALES: readonly ShopperLocale[] = ["ar", "fr", "en"];

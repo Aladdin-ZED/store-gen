@@ -70,7 +70,7 @@ export default async function CheckoutSettingsPage({ params }: { params: Params 
       notServedWhatsapp: checkout.notServed.whatsapp,
       confirmationCall: checkout.confirmationCall,
     },
-    landing: { leadsCapture: landing.leads.capture, trackingRequests: landing.tracking.requests },
+    landing: { leadsCapture: landing.leads.capture, trackingRequests: landing.tracking.requests, waOrder: landing.waOrder.enabled },
   };
   return (
     <>

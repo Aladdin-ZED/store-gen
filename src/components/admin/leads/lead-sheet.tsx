@@ -4,9 +4,9 @@
  * docs/STORE-SAAS.md §I.8 rule 6: drawers become full-height sheets on a phone, every swipe has a tap alternative).
  * The lead sheet shows what the read repository returned (masked phone, masked names under "View as store") and every
  * action of the row; the convert sheet sends only what the agent confirmed (the selection and the phone are read on
- * the server); the lost sheet asks for the reason.
+ * the server); the lost sheet asks for the reason; the set-phone sheet takes the number a WhatsApp chat revealed.
  */
-import { CalendarClockIcon, ShoppingBagIcon, XCircleIcon, XIcon } from "lucide-react";
+import { CalendarClockIcon, PhoneIncomingIcon, ShoppingBagIcon, XCircleIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -285,6 +285,64 @@ export function ConvertSheet({
           </span>
           <Switch checked={confirmed} onCheckedChange={setConfirmed} className="mt-0.5" />
         </label>
+      </div>
+    </ConfirmSheet>
+  );
+}
+
+/**
+ * "Set phone" on a WhatsApp intent (LAN-§10.3, LP-11): the number the chat shows, in an LTR field. The server checks it
+ * against the store's market and links a form lead of the same person (24 h); a refusal shows inline.
+ */
+export function SetPhoneSheet({ lead, onClose, onSave }: { lead: LeadRow | null; onClose: () => void; onSave: (lead: LeadRow, phone: string) => Promise<string | null> }) {
+  const t = useT();
+  const locale = useAdminLocale();
+  const [phone, setPhone] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  if (!lead) return null;
+  const total = moneyText(lead.totalCents, lead.currency, locale);
+  return (
+    <ConfirmSheet
+      open
+      onOpenChange={(o) => !o && onClose()}
+      icon={<PhoneIncomingIcon />}
+      title={t("landing.leads.setPhone.title")}
+      description={t("landing.leads.setPhone.description")}
+      confirmLabel={t("landing.leads.setPhone.save")}
+      cancelLabel={t("landing.leads.convert.cancel")}
+      error={error}
+      disabled={phone.replace(/\D/g, "").length < 6}
+      onConfirm={async () => {
+        setError(null);
+        const problem = await onSave(lead, phone.trim());
+        if (problem) setError(problem);
+        return !problem;
+      }}
+    >
+      <div className="grid gap-4">
+        <div className="flex items-start justify-between gap-3 rounded-xl bg-foreground/[0.03] px-3.5 py-3 ring-1 ring-foreground/[0.06] ring-inset">
+          <span className="grid min-w-0 gap-1">
+            <KindMark lead={lead} />
+            <span dir="auto" className="text-sm text-pretty">
+              {lead.selection || "…"}
+            </span>
+          </span>
+          {total && <span className="shrink-0 text-sm font-semibold tabular-nums">{total}</span>}
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="sp-phone">{t("landing.leads.setPhone.label")}</Label>
+          <Input
+            id="sp-phone"
+            dir="ltr"
+            type="tel"
+            inputMode="tel"
+            autoComplete="off"
+            value={phone}
+            maxLength={24}
+            onChange={(e) => setPhone(e.target.value)}
+            className="h-11 rounded-xl font-mono tracking-tight tabular-nums"
+          />
+        </div>
       </div>
     </ConfirmSheet>
   );

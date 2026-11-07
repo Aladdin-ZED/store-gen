@@ -17,6 +17,8 @@ export type LeadKind = (typeof LEAD_KINDS)[number];
 /** `leads.lost_reason` (LAN-§2.1) */
 export const LOST_REASONS = ["no_answer", "not_interested", "wrong_number", "already_ordered", "price", "other"] as const;
 export type LostReason = (typeof LOST_REASONS)[number];
+/** The reason of a form lead linked to the WhatsApp intent of the same person ("Set phone", never picked by hand). */
+export const MERGED_REASON = "merged";
 
 /** The inbox views (LAN-§10.3): New · Follow-up due · Contacted · Recovered · Lost · All. */
 export const LEAD_VIEWS = ["new", "due", "contacted", "recovered", "lost", "all"] as const;
@@ -92,7 +94,7 @@ export interface LeadRow {
   assigneeId: string | null;
   contactedAt: string | null;
   nextAt: string | null;
-  lostReason: LostReason | null;
+  lostReason: LostReason | typeof MERGED_REASON | null;
   convertedOrderId: string | null;
   convertedVia: "idem" | "phone" | "agent" | null;
   isTest: boolean;
@@ -109,6 +111,8 @@ export interface LeadCounts {
   /** minutes from capture to the first attempt; null below n = 20 contacted leads */
   firstContactP50Min: number | null;
   firstContactN: number;
+  /** WhatsApp intents (LP-11): how many, how many became an order, the rate (null below n = 20) */
+  intents: { n: number; converted: number; pct: number | null };
 }
 
 /** What the convert sheet sends (the rest comes from the lead row). */

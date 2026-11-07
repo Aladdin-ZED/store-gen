@@ -9,8 +9,9 @@
  * (`shopperPromiseAllowed`). Variables show as named chips, never as made-up values.
  *
  * `CheckoutOptionsCard`: the address field, the new-page form defaults, the not-served WhatsApp button, the
- * confirmation call, lead capture (with the EU note) and the tracking page's requests. `landing.waOrder.enabled` stays
- * hidden until wave 2.
+ * confirmation call, lead capture (with the EU note), the tracking page's requests and Order on WhatsApp
+ * (`landing.waOrder.enabled`, LP-11; with the `wa:no-number` guidance while the store has no WhatsApp number: a page
+ * can still carry its own in the order form, and the publish checklist holds each page to one).
  *
  * TODO(p3-w1-verify): mount P4's `CallingWindowEditor` (src/components/admin/callcenter/calling-window.tsx) with
  * `saveCallingWindowAction` and its "Use these hours" under the caller phone once P4 is on the branch; until then the
@@ -62,7 +63,7 @@ export interface AfterOrderData {
   templates: Record<Loc, string | null>;
   defaults: Readonly<Record<Loc, string>>;
   checkout: Pick<CheckoutSetting, "addressMode" | "newPageForm" | "confirmationCall"> & { notServedWhatsapp: boolean };
-  landing: { leadsCapture: LandingSetting["leads"]["capture"]; trackingRequests: boolean };
+  landing: { leadsCapture: LandingSetting["leads"]["capture"]; trackingRequests: boolean; waOrder: boolean };
 }
 
 type Confirmation = AfterOrderData["confirmation"];
@@ -407,12 +408,18 @@ export interface CheckoutOptionsActions {
   saveLanding: (opId: string, patch: Partial<AfterOrderData["landing"]>) => Promise<ActionResult<AfterOrderData["landing"]>>;
 }
 
-function OptionRow({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+function OptionRow({ label, hint, note, children }: { label: string; hint?: ReactNode; note?: string; children: ReactNode }) {
   return (
     <div className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-6">
       <div className="grid gap-0.5">
         <span className="text-sm font-medium">{label}</span>
         {hint && <span className="text-xs leading-relaxed text-muted-foreground">{hint}</span>}
+        {note && (
+          <span className="mt-1 inline-flex items-start gap-1.5 text-xs leading-relaxed font-medium text-foreground/80">
+            <span aria-hidden="true" className="mt-[0.4rem] size-1.5 shrink-0 rounded-full bg-brand" />
+            {note}
+          </span>
+        )}
       </div>
       <div className="min-w-0">{children}</div>
     </div>
@@ -498,6 +505,13 @@ export function CheckoutOptionsCard({ data, actions }: { data: AfterOrderData; a
         </OptionRow>
         <OptionRow label={t("landing.opts.requests")} hint={t("landing.opts.requestsHint")}>
           {switchCtl(la.trackingRequests, data.canWrite, (v) => setLa({ trackingRequests: v }), t("landing.opts.requests"))}
+        </OptionRow>
+        <OptionRow
+          label={t("landing.checkout.waOrder.title")}
+          hint={`${t("landing.checkout.waOrder.description")} ${t("landing.checkout.waOrder.liveOnly")}`}
+          note={!data.storeWhatsapp ? t("landing.checkout.waOrder.noNumber") : undefined}
+        >
+          {switchCtl(la.waOrder, data.canWrite, (v) => setLa({ waOrder: v }), t("landing.checkout.waOrder.title"))}
         </OptionRow>
       </div>
     </SettingsSection>

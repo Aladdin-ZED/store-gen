@@ -387,6 +387,8 @@ async function leadCases(kit: TenancyKit): Promise<void> {
 
   // B's header before A's leads arrive (the inbox action cases may have left contacted leads in B)
   const bBase = await R.leadCounts(B, ownerB);
+  // B's own intents (the inbox action cases of LP-11 replay on B's fresh intents) are B's: the pulse is compared to this
+  const pulseBase = await PU.contributor.contribute(B, ownerB);
   // A's fresh lead (inside the 30-day window) carries A's customer canaries; B gets its own control lead
   const leadA = newId();
   const idemA = `${newId()}-lead-a`.slice(0, 36);
@@ -411,7 +413,7 @@ async function leadCases(kit: TenancyKit): Promise<void> {
     check(`leads: ⌘K of B for A's ${label} finds nothing of A`, !hits.some((h) => h.id === leadA || h.id === intentA) && kit.leaks(hits).length === 0, hits);
   }
   const pulseB = await PU.contributor.contribute(B, ownerB);
-  check("leads: B's pulse never counts A's due lead or intent", pulseB.leadsDue === 0 && pulseB.waIntentsNew === 0, pulseB);
+  check("leads: B's pulse never counts A's due lead or intent", pulseB.leadsDue === pulseBase.leadsDue && pulseB.waIntentsNew === pulseBase.waIntentsNew, { pulseB, pulseBase });
 
   // impersonation of A: A's lead, masked
   const imp = kit.scope("A", "impersonation");
@@ -429,13 +431,14 @@ async function leadCases(kit: TenancyKit): Promise<void> {
     assign: await W.assignLeads(B, byB, [leadA, intentA], fx.B.members.agent),
     lost: await W.markLost(B, byB, leadA, "price"),
     followUp: await W.setFollowUp(B, byB, leadA, null),
+    setPhone: await W.setLeadPhone(B, byB, intentA, "0661234567", "MA"),
     take: await W.takeNextLead(B, byB),
     converted: await L.markLeadConverted(B, leadA, fx.A.order.main, "agent"),
     convertedOwnOrder: await L.markLeadConverted(B, leadA, fx.B.order.main, "agent"),
   };
   check(
     "leads: B's writes on A's lead ids answer not_found or touch nothing",
-    !tries.attempt.ok && (tries.assign.ok ? tries.assign.n === 0 : true) && !tries.lost.ok && !tries.followUp.ok && tries.take !== leadA && tries.take !== intentA && !tries.converted.ok && !tries.convertedOwnOrder.ok,
+    !tries.attempt.ok && (tries.assign.ok ? tries.assign.n === 0 : true) && !tries.lost.ok && !tries.followUp.ok && !tries.setPhone.ok && tries.take !== leadA && tries.take !== intentA && !tries.converted.ok && !tries.convertedOwnOrder.ok,
     tries,
   );
   check("leads: A is byte-identical after B's writes", (await kit.snapshotA()) === before);
@@ -886,4 +889,18 @@ actions.push(
     victim: (fx) => [fx.A.page.live],
     own: (fx) => [fx.B.page.live],
   },
+);
+
+/* ------------------------------------------------------------------ */
+/* Order on WhatsApp (p3-w2-wa-order, LP-11)                           */
+/* ------------------------------------------------------------------ */
+
+/** A fresh WhatsApp intent of the store (no phone, a `WA-` ref of its own). */
+const freshIntent = (s: StoreFx) => freshLead(s, { kind: "whatsapp", phone: null, ref: `WA-${randomBytes(3).toString("hex").toUpperCase().replace(/[ILOU]/g, "7")}`.slice(0, 9) });
+
+actions.push(
+  // "Set phone": B's write on A's intent answers not_found and links nothing of A
+  inboxCase("setLeadPhoneAction", ["leads.write"], true, (s) => freshIntent(s).then((id) => [id, "0661234567", op()])),
+  // the quick reply: text only, A's intent never readable from B
+  inboxCase("waReplyAction", ["leads.read"], false, (s) => freshIntent(s).then((id) => [id])),
 );

@@ -12,16 +12,18 @@ import "server-only";
  *   takeNextLead   the oldest unassigned `new` lead, claimed by `UPDATE … WHERE assignee_id IS NULL`
  *   markLost       `lost` with a reason; no follow-up
  *   setFollowUp    the next follow-up, or none
+ *   setLeadPhone   "Set phone" on a WhatsApp intent; links the form lead of the same person (24 h)
  * No message is ever sent to a shopper by the platform (LD10): the inbox opens wa.me or tel: on the agent's device.
  */
-import { and, asc, eq, gte, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { affected, auditIn } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { leads, storeMembers } from "@/lib/db/schema";
+import { normalizePhone } from "@/lib/markets/phone";
 import { getStoreSetting } from "@/lib/settings";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { Actor, WriteScope } from "@/lib/tenancy/types";
-import { LEAD_WINDOW_DAYS, LOST_REASONS, type LostReason } from "./types";
+import { LEAD_WINDOW_DAYS, LOST_REASONS, MERGED_REASON, type LostReason } from "./types";
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -176,4 +178,57 @@ export async function reopenLead(scope: WriteScope, by: LeadWriter, leadId: stri
     .set({ status: sql`IF(${leads.attempts} > 0, 'contacted', 'new')`, lostReason: null, nextAt, updatedAt: now })
     .where(whereStore(leads, scope, eq(leads.id, leadId), eq(leads.status, "lost"), gte(leads.createdAt, new Date(now.getTime() - LEAD_WINDOW_DAYS * DAY_MS)), guard));
   return affected(res) === 1 ? { ok: true } : NOT_FOUND;
+}
+
+/** How far apart an intent and a form lead of the same phone are one person (LAN-§10.3 "Set phone"). */
+export const MERGE_WINDOW_MS = 24 * HOUR_MS;
+
+/**
+ * "Set phone" on a WhatsApp intent (LAN-§10.3, §11.5): the agent types the number the chat revealed. The intent gains
+ * the E.164 phone (the store market's format), so the order hook can match the form order that follows (LAN-§10.4
+ * step 2) and Convert can run. An open `form` lead of the same phone captured within 24 h of the intent is linked to
+ * it: `lost` with the reason `merged` and no follow-up, so one person is one open row (adapter until the `merged_into`
+ * column of CCR r1-p3-14 lands). Audited `lead.phone_set` (the phone is never written in the audit).
+ */
+export async function setLeadPhone(
+  scope: WriteScope,
+  by: LeadWriter,
+  leadId: string,
+  raw: string,
+  country: string,
+  now: Date = new Date(),
+): Promise<{ ok: true; merged: number } | NotFound | { ok: false; error: "invalid" }> {
+  if (!ID_RE.test(leadId)) return NOT_FOUND;
+  const phone = typeof raw === "string" && raw.length <= 40 ? normalizePhone(raw, country) : null;
+  if (!phone) return { ok: false, error: "invalid" };
+  const [lead] = await db
+    .select({ id: leads.id, createdAt: leads.createdAt, isTest: leads.isTest })
+    .from(leads)
+    .where(whereStore(leads, scope, eq(leads.id, leadId), eq(leads.kind, "whatsapp"), isNull(leads.convertedOrderId), writableBy(by)))
+    .limit(1);
+  if (!lead) return NOT_FOUND;
+  const res = await db
+    .update(leads)
+    .set({ phone: phone.e164, updatedAt: now })
+    .where(whereStore(leads, scope, eq(leads.id, leadId), eq(leads.kind, "whatsapp"), isNull(leads.convertedOrderId), writableBy(by)));
+  if (affected(res) !== 1) return NOT_FOUND;
+  const at = lead.createdAt.getTime();
+  const merged = await db
+    .update(leads)
+    .set({ status: "lost", lostReason: MERGED_REASON, nextAt: null, updatedAt: now })
+    .where(
+      whereStore(
+        leads,
+        scope,
+        eq(leads.kind, "form"),
+        eq(leads.phone, phone.e164),
+        eq(leads.isTest, !!lead.isTest),
+        isNull(leads.convertedOrderId),
+        inArray(leads.status, [...OPEN]),
+        gte(leads.createdAt, new Date(at - MERGE_WINDOW_MS)),
+        lte(leads.createdAt, new Date(at + MERGE_WINDOW_MS)),
+      ),
+    );
+  await auditIn(scope, by.actor, "lead.phone_set", { target: leadId, meta: { leadId, merged: affected(merged) } });
+  return { ok: true, merged: affected(merged) };
 }

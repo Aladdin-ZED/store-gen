@@ -1,4 +1,4 @@
-// proves: LP-06, LP-22, SF-06
+// proves: LP-06, LP-22, SF-06, LP-11
 /**
  * test:leads (P3 LANDING; landing.md LAN-§10.6, §15.2, §23.8, §25.2; docs/STORE-SAAS.md D54, D70, §I.4):
  *
@@ -28,7 +28,12 @@
  *     first name and the store, tel:), agent isolation of every write and of the conversion, convert idempotency (a
  *     double submit and two parallel submits of one sheet give one order), the Undo of "Mark lost", the CSV (masked
  *     phones, BOM, formula-safe, selection, agent and store scoped), the lead cities, Set as home's published-page rule
- *     and the LAN-§4 `inStoreMode` fallback (once, audited, store mode only).
+ *     and the LAN-§4 `inStoreMode` fallback (once, audited, store mode only);
+ * 10. Order on WhatsApp (LP-11): `createWaIntent` stores a whatsapp lead (no phone, a `WA-` ref, the server total of
+ *     the resolved selection, sel v2, version, city, utm; a test token's is_test; an incomplete choice at the "from"
+ *     total), 50 parallel intents get 50 distinct refs, "Set phone" (E.164, the 24 h form lead linked, B's, older and
+ *     test leads untouched, the agent guard, audited), the dedupe of a form order by the phone set or the note's ref
+ *     (never across stores) and the header's intent counts.
  * Exits 1 on any failure.
  */
 import { randomBytes, randomUUID } from "node:crypto";
@@ -453,7 +458,7 @@ async function main(): Promise<number> {
     for (let i = 0; i < 2; i++) await lead("B", { isTest: true, status: "contacted", attempts: 1, contactedAt: new Date(now), nextAt: new Date(now - 60_000) });
     const ownerB = { userId: fx.B.members.owner, role: "owner" };
     const counts = await R.leadCounts(B, ownerB);
-    const want = { days: 30, leads: 30, contacted: 20, recovered: { n: 4, pct: 20, confirmed: 2, delivered: 1 }, convertedWithoutContact: 3, firstContactP50Min: 20, firstContactN: 20 };
+    const want = { days: 30, leads: 30, contacted: 20, recovered: { n: 4, pct: 20, confirmed: 2, delivered: 1 }, convertedWithoutContact: 3, firstContactP50Min: 20, firstContactN: 20, intents: { n: 2, converted: 0, pct: null } };
     check("header: the 30-day counts, test leads excluded", JSON.stringify(counts) === JSON.stringify(want), { counts, want });
     await db.update(S.leads).set({ contactedAt: null }).where(and(eq(S.leads.storeId, fx.B.id), sql`${S.leads.id} = ${recovered[0]!}`));
     const fewer = await R.leadCounts(B, ownerB);
@@ -666,6 +671,73 @@ async function main(): Promise<number> {
     check("in-store mode: B's setting is untouched", !(await SET.getStoreSetting(B, "landing", { fresh: true })).inStoreMode);
     await SET.updateStoreSetting(A, "landing", { inStoreMode: false }, { id: "system", ip: null });
   }
+  /* --------------------------------------------- 10. Order on WhatsApp (LP-11, p3-w2-wa-order) */
+  {
+    suite("10. Order on WhatsApp: intents, refs, Set phone, the dedupe");
+    const { resolvePublicTarget } = load<typeof import("@/lib/tenancy/public")>("@/lib/tenancy/public");
+    const WC = load<typeof import("@/lib/wa-order/create.server")>("@/lib/wa-order/create.server");
+    const { WaOrderRequest, WA_REF_RE } = load<typeof import("@/lib/wa-order/contract")>("@/lib/wa-order/contract");
+    const { resolveSelection } = load<typeof import("@/lib/orders/validate")>("@/lib/orders/validate");
+    const { orderTotals } = load<typeof import("@/lib/page/pricing")>("@/lib/page/pricing");
+    const W = load<typeof import("@/lib/leads/write")>("@/lib/leads/write");
+    const R = load<typeof import("@/lib/leads/read")>("@/lib/leads/read");
+    const { runOrderHooks } = load<typeof import("@/lib/orders/hooks")>("@/lib/orders/hooks");
+    const [page] = await db.select({ key: S.pages.publicKey }).from(S.pages).where(eq(S.pages.id, fx.A.page.live)).limit(1);
+    const target = (await resolvePublicTarget(page!.key, { purpose: "order" }))!;
+    const offer = target.doc.offers.bundles[0]!;
+    const body = (o: Record<string, unknown> = {}) => WaOrderRequest.parse({ pageKey: page!.key, bundleId: offer.id, units: [{ o: { usage: "face" } }], city: "Casablanca", utm: { source: "facebook" }, ...o });
+
+    const one = await WC.createWaIntent({ target, req: body(), test: false });
+    const row = await leadRow(one.leadId);
+    const r = resolveSelection(target.doc, offer, { offerId: offer.id, units: [{ o: { usage: "face" }, f: {} }], extras: {}, bump: false });
+    const want = orderTotals(target.doc, r.selection)!.total;
+    check("intent: a whatsapp lead of A, no phone, a WA- ref, status new", row?.storeId === fx.A.id && row.kind === "whatsapp" && row.phone === null && WA_REF_RE.test(row.ref ?? "") && row.status === "new" && row.isTest === false, row);
+    check("intent: the server total of the resolved selection", Number(row?.totalCents) === want && one.price.resolved, { got: row?.totalCents, want });
+    check("intent: sel v2, version, city and utm kept", row?.sel?.v === 2 && (row.sel as { bundleId?: string }).bundleId === offer.id && row.versionId === target.versionId && row.city === "Casablanca" && row.utm?.source === "facebook", row);
+    const test = await WC.createWaIntent({ target, req: body(), test: true });
+    check("intent: a test token's intent is is_test", (await leadRow(test.leadId))?.isTest === true);
+    const partial = await WC.createWaIntent({ target, req: body({ units: [] }), test: false });
+    check("intent: an incomplete choice is stored with the offer's from total and the group to confirm", !partial.price.resolved && partial.price.toConfirm.length > 0 && Number((await leadRow(partial.leadId))?.totalCents) === partial.price.total, partial.price);
+
+    const many = await Promise.all(Array.from({ length: 50 }, () => WC.createWaIntent({ target, req: body(), test: false })));
+    check("intent: 50 parallel intents → 50 distinct refs", new Set(many.map((m) => m.ref)).size === 50 && many.every((m) => WA_REF_RE.test(m.ref)), many.length);
+
+    // Set phone: the form lead of the same person (24 h) joins the intent; one 30 h earlier, B's and a test one do not
+    const writer = { actor: { kind: "user" as const, userId: managerA, impersonatorId: null, ip: null }, role: "manager" };
+    const local = `06${String(Math.floor(10_000_000 + Math.random() * 89_999_999))}`;
+    const e164 = `+212${local.slice(1)}`;
+    const near1 = await lead("A", { phone: e164, createdAt: new Date(Date.now() - 2 * HOUR) });
+    const far = await lead("A", { phone: e164, createdAt: new Date(Date.now() - 30 * HOUR) });
+    const inB = await lead("B", { phone: e164, createdAt: new Date(Date.now() - HOUR) });
+    const testLead = await lead("A", { phone: e164, isTest: true, createdAt: new Date(Date.now() - HOUR) });
+    check("set phone: a malformed number is refused", (await W.setLeadPhone(A, writer, one.leadId, "12", "MA")).ok === false);
+    check("set phone: a form lead is not an intent", (await W.setLeadPhone(A, writer, near1, local, "MA")).ok === false);
+    const set = await W.setLeadPhone(A, writer, one.leadId, local, "MA");
+    check("set phone: the intent gains the E.164 phone", set.ok && (await leadRow(one.leadId))?.phone === e164, set);
+    check("set phone: the form lead of the last 24 h is linked (lost, merged)", set.ok && set.merged === 1 && (await leadRow(near1))?.status === "lost" && (await leadRow(near1))?.lostReason === "merged", await leadRow(near1));
+    check("set phone: a lead 30 h earlier, B's lead and a test lead stay open", (await leadRow(far))?.status === "new" && (await leadRow(inB))?.status === "new" && (await leadRow(testLead))?.status === "new");
+    const agentOther = { actor: { kind: "user" as const, userId: agentA, impersonatorId: null, ip: null }, role: "agent" };
+    const owned = await lead("A", { kind: "whatsapp", phone: null, ref: `WA-${tag()}`, assigneeId: managerA, status: "contacted" });
+    check("set phone: an agent cannot set the phone of someone else's intent", (await W.setLeadPhone(A, agentOther, owned, local, "MA")).ok === false);
+    const audits = await db.select().from(S.auditLog).where(and(eq(S.auditLog.storeId, fx.A.id), eq(S.auditLog.action, "lead.phone_set")));
+    check("set phone: audited without the phone", audits.length >= 1 && !JSON.stringify(audits.map((a) => a.meta)).includes(local.slice(2)), audits.map((a) => a.meta));
+
+    // the dedupe (LAN-§10.4 step 2): a form order within 72 h carrying the phone the agent set, or the ref in its note
+    const run = (o: typeof S.orders.$inferSelect) => runOrderHooks("created", "afterCommit", A, { on: "created", order: o, conversion: null, target: { pageId: o.pageId, versionId: o.versionId, source: o.source } });
+    const byPhone = await order("A", { phone: e164, createdAt: new Date(Date.now() + 60_000) } as never);
+    await run(byPhone);
+    const after = await leadRow(one.leadId);
+    check("dedupe: a form order with the phone set on the intent marks it converted", after?.convertedOrderId === byPhone.id && after.status === "converted", after);
+    const byRef = await order("A", { note: `client WhatsApp ${many[0]!.ref.toLowerCase()}`, createdAt: new Date(Date.now() + 60_000) } as never);
+    await run(byRef);
+    const refRow = await leadRow(many[0]!.leadId);
+    check("dedupe: an order whose note carries the WA- ref marks that intent converted", refRow?.convertedOrderId === byRef.id && refRow.status === "converted", refRow);
+    const bOrder = await order("B", { note: `ref ${many[1]!.ref}`, createdAt: new Date(Date.now() + 60_000) } as never);
+    await runOrderHooks("created", "afterCommit", B, { on: "created", order: bOrder, conversion: null, target: { pageId: bOrder.pageId, versionId: bOrder.versionId, source: bOrder.source } });
+    check("dedupe: B's order with A's ref never touches A's intent", (await leadRow(many[1]!.leadId))?.convertedOrderId === null);
+    const counts = await R.leadCounts(A, { userId: managerA, role: "manager" });
+    check("header: the intents and their conversions are counted (rate hidden below n = 20 when so)", counts.intents.n >= 50 && counts.intents.converted >= 2 && (counts.intents.n >= 20 ? counts.intents.pct !== null : counts.intents.pct === null), counts.intents);
+  }
   return 0;
 }
 
@@ -693,7 +765,7 @@ void (async () => {
     check("the suite ran to the end", false, e instanceof Error ? e.stack : e);
   } finally {
     const left = await T.dropDatabase().catch((e: unknown) => [`cleanup failed: ${e instanceof Error ? e.message : String(e)}`]);
-    const fails = T.report("test:leads (LP-06, LP-22, SF-06)", [`database ${T.DB_NAME} dropped; cod_test_* left: ${left.length ? left.join(", ") : "none"}`, `${Math.round((Date.now() - started) / 1000)} s`]);
+    const fails = T.report("test:leads (LP-06, LP-22, SF-06, LP-11)", [`database ${T.DB_NAME} dropped; cod_test_* left: ${left.length ? left.join(", ") : "none"}`, `${Math.round((Date.now() - started) / 1000)} s`]);
     process.exit(fails || failed ? 1 : 0);
   }
 })();

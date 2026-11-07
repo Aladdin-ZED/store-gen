@@ -19,6 +19,15 @@
  *   slot that appears grows and fades in within 180 ms (none under reduced motion, assist.css). No
  *   IntersectionObserver, no attribute on <html>.
  *
+ * Order on WhatsApp (LP-11, LAN-§11.2): with `wo.e` (a live page of a store with `landing.waOrder.enabled` and a
+ * number) the form's WhatsApp alternative (`a.lp-of__wa`) gets `data-lp-wa-order` and a click becomes a priced intent:
+ * the default is prevented, the choice serialised (./select.ts, never the name, phone or address), posted to `wo.e`
+ * (4 s timeout) and `wa.me` opened with the server's message (a new tab, opened inside the tap; the same tab inside
+ * in-app browsers, the rule of entry-whatsapp.ts), then the `wa.ready` line with the reference shows under the link.
+ * One intent per page view per 30 s (a second tap reopens the same message). Any error or the timeout opens the link's
+ * own plain `wa.me` address: the shopper is never stuck. With `wo.n` (the builder preview) only the "works on the live
+ * page" note shows; without `wo` the link is untouched.
+ *
  * The idem (LAN-§8.3 step 4): with `k`, each `lp:order` (detail `{ idem }`, form.ts) writes "<idem>.<ms>" to
  * sessionStorage `lp:<h>:idem:<pageKey>` (./storage.ts), which `assist-ty` turns into the tracking link's proof and the
  * intent beacon's key.
@@ -27,7 +36,8 @@ import type { ZoneTable } from "../../../lib/delivery/types";
 import { composeLineWith } from "../../../lib/delivery/line";
 import type { DzCopy, ShopperLocale } from "../../../lib/landing/copy";
 import type { LandingRuntimeConfig } from "../config";
-import { sessionSet, storageKey } from "./storage";
+import { serialiseSelection } from "./select";
+import { sessionGet, sessionSet, storageKey } from "./storage";
 
 interface Data {
   v: 1;
@@ -40,6 +50,8 @@ interface Data {
   f?: string;
   wa?: string;
   k?: 1;
+  /** Order on WhatsApp: the intent API and the `wa.ready` line ({ref}), or the preview's note */
+  wo?: { e?: string; r?: string; n?: string };
 }
 
 (function () {
@@ -57,6 +69,74 @@ interface Data {
       });
 
     const form = d.querySelector<HTMLFormElement>("form[data-lp-form]");
+    const wo = a.wo;
+    const wl = wo && form && form.querySelector<HTMLAnchorElement>("a.lp-of__wa");
+    if (wo && wl) {
+      const note = (text: string, ref?: string) => {
+        const el = d.createElement("p");
+        const b = d.createElement("bdi");
+        const parts = text.split("{ref}");
+        el.className = "lp-of__wa-note";
+        el.setAttribute("aria-live", "polite");
+        b.dir = "ltr";
+        b.textContent = ref || "";
+        el.append(parts[0]!, b, parts[1] || "");
+        const old = wl.parentNode!.querySelector(".lp-of__wa-note");
+        if (old) old.remove();
+        wl.parentNode!.appendChild(el);
+      };
+      if (wo.n) note(wo.n);
+      if (wo.e) {
+        const ep = wo.e;
+        const iab = /FBAN|FBAV|FB_IAB|Instagram|Line\/|TikTok|musical_ly|Bytedance|Snapchat|; wv\)/i.test(navigator.userAgent);
+        let last = 0;
+        let lastHref = "";
+        wl.setAttribute("data-lp-wa-order", "");
+        wl.addEventListener("click", (e) => {
+          e.preventDefault();
+          let tab: Window | null = null;
+          try {
+            tab = iab ? null : window.open("", "_blank");
+            if (tab) tab.opener = null;
+          } catch {
+            /* blocked */
+          }
+          let done = 0;
+          const go = (href: string) => {
+            if (done++) return 0;
+            if (tab) tab.location.href = href;
+            else location.href = href;
+            return 1;
+          };
+          if (Date.now() - last < 30000) return go(lastHref);
+          setTimeout(() => go(wl.href), 4000);
+          let utm = {};
+          try {
+            utm = JSON.parse(sessionGet(storageKey(location.pathname, "utm"))!) || {};
+          } catch {
+            /* none or corrupted */
+          }
+          fetch(ep, {
+            method: "POST",
+            credentials: "same-origin",
+            referrerPolicy: "same-origin",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ pageKey: cfg.pageKey, ver: cfg.ver || undefined, utm, locale: a.l, ...serialiseSelection(form!, cfg) }),
+          })
+            .then((r) => r.json())
+            .then((j: { ok?: boolean; ref: string; number: string; text: string }) => {
+              const href = "https://wa.me/" + j.number + "?text=" + encodeURIComponent(j.text);
+              if (!j.ok) throw 0;
+              if (go(href)) {
+                last = Date.now();
+                lastHref = href;
+                note(wo.r!, j.ref);
+              }
+            })
+            .catch(() => go(wl.href));
+        });
+      }
+    }
     const table = a.dz;
     const c = a.s;
     if (!form || !table || !c) return;

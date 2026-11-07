@@ -2,10 +2,11 @@
 /**
  * The pieces every lead surface shares (P3 LANDING; landing.md LAN-§10.3; docs/STORE-SAAS.md §I.8 rules 6 to 8): the
  * inbox context (grants, the read-only reason, the team), the status pill, the kind mark, the masked phone in an LTR
- * isolate, the WhatsApp and Call buttons (44 px on a phone) and the row menu (convert, lost, follow-up, assign). Every
- * write button is disabled with the read-only reason under "View as store".
+ * isolate, the WhatsApp and Call buttons (44 px on a phone) and the row menu (convert, lost, follow-up, assign). A
+ * WhatsApp intent without a phone (LP-11) shows "Copy reply" (operations' `wa_order_reply`) and "Set phone" in their
+ * place. Every write button is disabled with the read-only reason under "View as store".
  */
-import { CalendarClockIcon, ClipboardListIcon, MessageCircleIcon, MoreHorizontalIcon, PhoneIcon, ShoppingBagIcon, UserRoundIcon, XCircleIcon } from "lucide-react";
+import { CalendarClockIcon, ClipboardListIcon, CopyIcon, MessageCircleIcon, MoreHorizontalIcon, PhoneIcon, PhoneIncomingIcon, ShoppingBagIcon, UserRoundIcon, XCircleIcon } from "lucide-react";
 import { createContext, useContext } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +49,9 @@ export interface LeadOps {
   lost(leads: LeadRow[]): void;
   followUp(lead: LeadRow, at: Date | null): void;
   assign(leads: LeadRow[], userId: string | null): void;
+  /** WhatsApp intents (LP-11): type the phone the chat revealed; copy the quick reply */
+  setPhone(lead: LeadRow): void;
+  reply(lead: LeadRow): void;
 }
 
 export const InboxContext = createContext<LeadInboxCtx | null>(null);
@@ -66,6 +70,8 @@ export function useOps(): LeadOps {
 
 const OPEN: readonly LeadStatus[] = ["new", "contacted"];
 export const isOpen = (lead: LeadRow) => OPEN.includes(lead.status);
+/** A WhatsApp intent the team still has to finish (no order yet): its phone can be set. */
+export const isWaIntent = (lead: LeadRow) => lead.kind === "whatsapp" && !lead.convertedOrderId;
 
 export function StatusPill({ status, className }: { status: LeadStatus; className?: string }) {
   const t = useT();
@@ -127,7 +133,7 @@ export function Assignee({ id, compact }: { id: string | null; compact?: boolean
   );
 }
 
-/** WhatsApp and Call: the two main actions, on the card on a phone (44 px). */
+/** WhatsApp and Call: the two main actions, on the card on a phone (44 px). An intent without a phone: Copy reply and Set phone. */
 export function ContactButtons({ lead, size = "row" }: { lead: LeadRow; size?: "row" | "sheet" }) {
   const t = useT();
   const { can, readOnly } = useInbox();
@@ -138,6 +144,42 @@ export function ContactButtons({ lead, size = "row" }: { lead: LeadRow; size?: "
     size === "sheet"
       ? "h-11 flex-1 rounded-xl px-4 text-sm"
       : "size-11 rounded-full p-0 lg:size-8 [&_svg]:size-[1.05rem] lg:[&_svg]:size-4";
+  if (lead.kind === "whatsapp" && !lead.phone) {
+    const ring = size === "row" && "text-foreground/80 ring-1 ring-foreground/10 ring-inset hover:bg-foreground/[0.04]";
+    return (
+      <div className={cn("flex shrink-0 items-center gap-1.5", size === "sheet" && "w-full gap-2")}>
+        <Button
+          type="button"
+          variant={size === "sheet" ? "brand" : "ghost"}
+          title={t("landing.leads.action.reply")}
+          aria-label={t("landing.leads.action.reply")}
+          className={cn(base, ring)}
+          onClick={(e) => {
+            e.stopPropagation();
+            ops.reply(lead);
+          }}
+        >
+          <CopyIcon />
+          {size === "sheet" && t("landing.leads.action.reply")}
+        </Button>
+        <Button
+          type="button"
+          variant={size === "sheet" ? "outline" : "ghost"}
+          disabled={!!readOnly || !can.write || !isWaIntent(lead)}
+          title={readOnly ?? t("landing.leads.action.setPhone")}
+          aria-label={t("landing.leads.action.setPhone")}
+          className={cn(base, ring)}
+          onClick={(e) => {
+            e.stopPropagation();
+            ops.setPhone(lead);
+          }}
+        >
+          <PhoneIncomingIcon />
+          {size === "sheet" && t("landing.leads.action.setPhone")}
+        </Button>
+      </div>
+    );
+  }
   return (
     <div className={cn("flex shrink-0 items-center gap-1.5", size === "sheet" && "w-full gap-2")}>
       <Button
@@ -213,6 +255,16 @@ export function LeadMenu({ lead, className }: { lead: LeadRow; className?: strin
         <DropdownMenuItem disabled={off || !can.convert || !open || !lead.phone} onSelect={() => ops.convert(lead)}>
           <ShoppingBagIcon /> {t("landing.leads.action.convert")}
         </DropdownMenuItem>
+        {lead.kind === "whatsapp" && (
+          <>
+            <DropdownMenuItem disabled={off || !can.write || !isWaIntent(lead)} onSelect={() => ops.setPhone(lead)}>
+              <PhoneIncomingIcon /> {t("landing.leads.action.setPhone")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => ops.reply(lead)}>
+              <CopyIcon /> {t("landing.leads.action.reply")}
+            </DropdownMenuItem>
+          </>
+        )}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger disabled={off || !can.write || !open}>
             <CalendarClockIcon /> {t("landing.leads.action.followUp")}

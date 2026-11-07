@@ -9,7 +9,8 @@ import "server-only";
 import { zoneLineFor } from "@/lib/delivery/zones.server";
 import { shopperLocaleOf } from "@/lib/landing/copy";
 import { cutAtWord, fillTemplate, firstWord } from "@/lib/landing/template-text";
-import { templateFor } from "@/lib/landing/templates.server";
+import { WA_ORDER_REPLY } from "@/lib/landing/templates";
+import { ownTemplate, templateFor } from "@/lib/landing/templates.server";
 import { formatMoney } from "@/lib/markets/money";
 import { cityKey } from "@/lib/orders/address";
 import { errorSummary } from "@/lib/orders/log";
@@ -55,4 +56,20 @@ export async function contactHref(scope: StoreScope, storeName: string, lead: Pi
   if (!digits) return null;
   if (channel === "call") return `tel:+${digits}`;
   return `https://wa.me/${digits}?text=${encodeURIComponent(await recoveryText(scope, storeName, lead))}`;
+}
+
+/**
+ * The quick reply of a WhatsApp intent (operations' `wa_order_reply`, LAN-§11.5): what the agent answers in the chat
+ * the shopper opened, with the intent's `{ref}`, `{offer}` (the selection text) and `{total}`. The owner's own active
+ * row of that kind wins; else the default of the lead's page language. No customer data.
+ */
+export async function waReplyText(scope: StoreScope, lead: Pick<LeadRow, "ref" | "locale" | "selection" | "totalCents" | "currency">): Promise<string> {
+  const loc = shopperLocaleOf(lead.locale);
+  const tpl = (await ownTemplate(scope, "wa_order_reply", loc)) ?? WA_ORDER_REPLY[loc];
+  const text = fillTemplate(tpl, {
+    ref: lead.ref ?? "",
+    offer: cutAtWord((lead.selection ?? "").replace(/\s+/g, " ").trim(), 140),
+    total: lead.totalCents === null ? "" : formatMoney(lead.totalCents / 100, lead.currency, loc),
+  });
+  return cutAtWord(text.replace(/[ \t]+/g, " ").trim(), WA_TEXT_MAX);
 }

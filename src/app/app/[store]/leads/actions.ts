@@ -11,11 +11,11 @@
 import { z } from "zod";
 import { fail } from "@/lib/admin-data/action";
 import { onceForStore } from "@/lib/landing/op-once.server";
-import { contactHref } from "@/lib/leads/contact.server";
+import { contactHref, waReplyText } from "@/lib/leads/contact.server";
 import { ConvertLeadInput, convertLeadFor, type ConvertOutcome } from "@/lib/leads/convert.server";
 import { getLeadRow, leadCounts, listLeadRows } from "@/lib/leads/read";
 import { LOST_REASONS, LeadQuery, type LeadCounts, type LeadRow, type LostReason } from "@/lib/leads/types";
-import { assignLeads as assignLeadRows, logAttempt, markLost, reopenLead, setFollowUp, takeNextLead as claimNextLead, type LeadWriter } from "@/lib/leads/write";
+import { assignLeads as assignLeadRows, logAttempt, markLost, reopenLead, setFollowUp, setLeadPhone, takeNextLead as claimNextLead, type LeadWriter } from "@/lib/leads/write";
 import { storeAction } from "@/lib/tenancy/seam";
 import type { ActionResult, StoreCtx } from "@/lib/tenancy/types";
 
@@ -117,6 +117,30 @@ export async function setLeadFollowUp(leadId: string, at: string | null, opId?: 
       return null;
     }),
   );
+}
+
+/**
+ * "Set phone" on a WhatsApp intent (`leads.write`): the number the chat revealed, in the store market's format; a form
+ * lead of the same person (24 h) is linked to the intent. Answers the refreshed row (its phone masked).
+ */
+export async function setLeadPhoneAction(leadId: string, phone: string, opId?: string): Promise<ActionResult<{ lead: LeadRow | null; merged: number }>> {
+  return storeAction("leads.write", (ctx) =>
+    once(ctx, opId, async () => {
+      const id = LeadId.parse(leadId);
+      const res = await setLeadPhone(ctx.scope, writerOf(ctx), id, z.string().max(40).parse(phone), ctx.store.market);
+      if (!res.ok) return fail(res.error === "invalid" ? "landing.leads.setPhone.invalid" : "landing.leads.notFound");
+      return { lead: await getLeadRow(ctx.scope, id, viewerOf(ctx)), merged: res.merged };
+    }),
+  );
+}
+
+/** The `wa_order_reply` quick reply of an intent (`leads.read`): text only, nothing is sent (LD10). */
+export async function waReplyAction(leadId: string): Promise<ActionResult<{ text: string }>> {
+  return storeAction("leads.read", async (ctx) => {
+    const lead = await getLeadRow(ctx.scope, LeadId.parse(leadId), viewerOf(ctx));
+    if (!lead || lead.kind !== "whatsapp") return fail("landing.leads.notFound");
+    return { text: await waReplyText(ctx.scope, lead) };
+  });
 }
 
 /**
