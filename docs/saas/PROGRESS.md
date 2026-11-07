@@ -44,6 +44,36 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **DEPLOY 4 LIVE 2026-11-07 ~04:47: P3 wave 2 (R1 complete)**. Merge run wf_cdcb4be9-8e3: ab32a79 (no conflicts) + a90cc68
+  (CCRs r1-p3-13/14/15 applied except 13.5, 14.2 leads.merged_into migration, 14.5 P5's wa_order_reply kind, 15.4 → the
+  integration; new nightly job campaigns.share_expiry slot 6 04:35; gate green: tsc, npm test, test:migrate, test:tenancy,
+  qa:action-replay, test:render, test:public-api, build; test:db: only the pre-existing failures listed in r1-p0b-report.md
+  Integration). Deploy: gate-ok a90cc68 → archive 16.9 MiB → the 02:05 upload key had expired (create 403; nothing uploaded,
+  the guard held) → new key → `_sgdeploy/.htaccess` (403) → `_sgdeploy/sg-22f77e1f1e1f.zip` (403) → build
+  01a1b450-7f26-7094-a0e7-84b02843aed9 → live id `GQ0CpVkp` (~4.5 min). Smoke: health ok, / /login /signup 200, /admin 404,
+  archive 404; wave-2 public routes: /kit/<bad> 404 page, /s/x/go/<bad> 404, /track/<bad> 404, GET /api/public/wa 405,
+  POST {} 422. Admin wave-2 screens not checked (needs a seller login). POLISH: the /kit not-found page shows fr+ar 404 text
+  inside the auth split layout with an English marketing panel (title flips to "Campaign kit"): give it its own minimal
+  bilingual layout (S6 or a quick fix).
+
+- **P3 WAVE 2 DONE → MERGE RUNNING 2026-11-07 ~03:37** (DONE: see deploy 4 above): run wf_57d1f61c-71b finished 14/14 (step 14 = 922cf8c on r1/p3w2;
+  40/41 checks; test:render's `assist` budget waits on CCR r1-p3-14; report docs/saas/ccr/r1-p3-w2-report.md; screens not
+  shot (RAM) → check /go, /kit, /track, campaigns, links, WhatsApp order on the live site after deploy 4). Merge: task
+  `wazf61ds9` run `wf_cdcb4be9-8e3` (qa/lead/r1-merge-fast.js, args key p3w2, mergeId "P3 wave 2", stubBuild false, merged
+  all 8, note: report/CCR names, CCRs 13-15, wave-2 suites into npm test / test:db, test:render + test:public-api + test:db,
+  no dev servers). Do NOT commit PROGRESS.md while it runs (it works in main). THEN: gate-ok → deploy 4 (same steps as
+  deploy 3 below) → live check of the wave-2 screens.
+
+- **R2 PLANNING DONE 2026-11-07 ~03:43** (21 agents, 0 errors; every plan critiqued and revised): 7 tracks, 102 steps (S1 16,
+  S2 14, S3 15, S4 12, S5 12, S6 18, S7 15), 122 sharedNeeds. Extracted with scratchpad r2/extract.cjs into
+  qa/lead/r2-plans.json (740 KB, git-ignored) + qa/lead/r2-plan-index.json + briefs qa/lead/briefs/s<k>-<nn>.md (102).
+  Owner inputs named by the plans: real carrier statement/tracking files (S3/S4), Hostinger SMTP mailbox (S5), the domain +
+  Cloudflare zone/Worker (S6), an Anthropic key (S7 live checks), an Arabic reader for the logo goldens (S2), the go-ahead to
+  flip releaseOn('R2'). NEXT: the R2 contract step = qa/lead/r2-c0.js (written, syntax-checked): C2-A schema/0006 → B1 frozen
+  contracts → B2 shared code → C stubs → D scripts/budgets/ownership/packages → E the 122 needs → F verify + r2-c0-report.md →
+  2 reviews → H fix. Launch in a HEARTBEAT turn after deploy 4: Workflow({scriptPath: "C:\\Users\\SICO\\store-gen\\qa\\lead\\
+  r2-c0.js"}); relaunch with args {done: [finished step tags]} (cache keys include the turn framing).
+
 - **R2 PLANNING STARTED 2026-11-07 ~02:25** (heartbeat turn; usage 81%; read-only, alongside P3 wave 2): task `w5q7eizqj`
   run `wf_5266ec9d-bd7`, script `r2-plan-tracks-wf_5266ec9d-bd7.js` (session workflows/scripts). Seven planners S1-S7 (core
   §K.4 rows; speed mode: no e2e/demo steps, 5-12 steps per track) → one completeness critic each → a revise round when gaps.
