@@ -44,6 +44,25 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **DEPLOY 3 LIVE 2026-11-07 ~02:10: the homepage redesign** (build 1824f15 + polish 700fe43, run `wf_502d15d3-a19`
+  done: tsc, npm test and test:marketing-home 390/390 green, orange scan clean, en/fr/ar, light/dark, pause control).
+  Deployed HEAD 700fe43: gate-ok → archive 16.7 MiB → `_sgdeploy/.htaccess` re-uploaded (403 verified) →
+  `_sgdeploy/sg-51ffc349227e.zip` (403) → build 01a1b3c1-d39a-73e2-8cb0-14b8107cf981 → live build id `U_hKt_p0` about
+  4.5 min after start. Smoke: health ok (db ok), / 200 (469 KB HTML, 40 inline SVGs), /login /signup 200, /admin 404,
+  archive 404; live check in a browser: fonts load, illustrations and the pause control render, no console errors or
+  CSP blocks. Env names not re-listed (no env change since deploy 2). Homepage paths were added to the maintainer row of
+  docs/STORE-SAAS.md's ownership list by the build agent (kept). Next: P3 wave 2 → merge → deploy 4.
+
+- **HOMEPAGE ELEVATION 2026-11-06 ~22:05** (DONE, live in deploy 3 above) (owner: futurist, high-level homepage with animated illustrations, "in a serious
+  way"): workflow task `w19rx079t` run `wf_f8e80e64-478` (script saved under the session's workflows/scripts,
+  platform-homepage-elevation-*.js): 2 concepts (living product / spatial futurist) → judge → build in main
+  src/app/(marketing)/ → critique → polish, commit + push. Hand-built SVG/CSS only, no new packages, no orange, en/fr/ar.
+  Runs alongside P3 wave 2 (r1/p3w2, attempt 3 of step 11 after two Anthropic server_error deaths). Deploy both when done.
+  ~23:45: its build and critique agents died on server errors (no retries in that script); stopped it. The judge's FINAL
+  BUILD SPEC is saved in qa/lead/homepage-spec.md (64 KB); the dead build agent's work is uncommitted in main
+  (copy.ts, marketing.module.css, src/app/(marketing)/living/). Relaunched with retries: task `wajh01i2s` run
+  `wf_502d15d3-a19` (build from spec + WIP → critique → polish → push).
+
 - **DEPLOY 2 LIVE 2026-11-06 ~20:33: the design gate WARN default** (15c4671; deployed HEAD 6a8037d: gate-ok → archive
   16.6 MiB sha256 dc4bbdc2… → `_sgdeploy/.htaccess` re-uploaded (the previous sync removed it; 403 verified) →
   `_sgdeploy/sg-9f4b053869d9.zip` (403) → build 01a1b28c-3d02-73fc-a5bc-409077ea8da1 → live build id `-C-xyiPD`; health ok,
