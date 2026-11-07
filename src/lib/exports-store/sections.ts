@@ -24,7 +24,8 @@ import { agentStatsDaily, aiMemory, assets, auditLog, campaigns, customers, deli
 import { storageFor, StoredFileError, type StoredFile } from "@/lib/media/storage";
 import { getStoreHealth } from "@/lib/platform/health-snapshot";
 import { getStoreSettings } from "@/lib/settings";
-import { redactStoreSetting, STORE_SETTING_KEYS, STORE_SETTINGS, type StoreSettingKey } from "@/lib/settings/store-registry";
+import { releaseOn } from "@/lib/auth/permissions";
+import { redactStoreSetting, STORE_SETTING_KEYS, STORE_SETTING_RELEASE, STORE_SETTINGS, type StoreSettingKey } from "@/lib/settings/store-registry";
 import { byId, inStore, whereStore } from "@/lib/tenancy/sql";
 import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { EXPORT_TABLES, mediaExt, pickColumns, slugName, stripRunIds, stripSecretKeys, type ExportTable, type PickedColumns } from "./columns";
@@ -359,7 +360,8 @@ const settingsSection: Section = {
   async slice(c) {
     // every secret key omitted whole (tracking_secrets, turnstile, telegram, export_key, …); the others redacted like
     // the browser gets them, then any key naming a secret dropped at any depth
-    const keys = STORE_SETTING_KEYS.filter((k) => !STORE_SETTINGS[k].secret);
+    // a key of a later release (R2's `storefront`) is listed only once its release is on (C2-E)
+    const keys = STORE_SETTING_KEYS.filter((k) => !STORE_SETTINGS[k].secret && releaseOn(STORE_SETTING_RELEASE[k] ?? "R1"));
     const values = await getStoreSettings(c.scope, keys);
     const out: Record<string, unknown> = {};
     for (const k of keys) out[k] = stripSecretKeys(redactStoreSetting(k as StoreSettingKey, values[k] as never), AUDIT_SECRET_KEY_RE);

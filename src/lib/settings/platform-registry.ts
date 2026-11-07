@@ -16,6 +16,7 @@ import { PlatformDesign } from "./keys/platform-design";
 import { PlatformAi } from "./keys/platform_ai";
 import { PlatformAiSecret } from "./keys/platform_ai_secret";
 import { PlatformBackupSetting } from "./keys/platform_backup";
+import { PlatformMailSetting } from "./keys/platform_mail";
 import { TurnstileSetting } from "./keys/turnstile";
 
 export const PLATFORM_SETTINGS = {
@@ -45,6 +46,8 @@ export const PLATFORM_SETTINGS = {
   }),
   /** retention, tables, last download (core, §H.6) */
   platform_backup: def({ schema: PlatformBackupSetting, secret: false, defaults: () => ({}) }),
+  /** R2 (§D.10, PLA-§13.5; contract step C2-E, S5 refines the validation): the SMTP transport and its caps */
+  platform_mail: def({ schema: PlatformMailSetting, secret: true, defaults: () => ({}), sensitive: ["password"] }),
 } as const;
 
 export type PlatformSettingKey = keyof typeof PLATFORM_SETTINGS;

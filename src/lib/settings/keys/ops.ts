@@ -34,6 +34,28 @@ export const LadderStep = z.discriminatedUnion("kind", [
 ]);
 export type LadderStep = z.output<typeof LadderStep>;
 
+/**
+ * One assignment rule (OPE-§5.6, OP-18; R2, S4): `ops.assignmentRules`, ≤ 20, first match wins, evaluated by S4's
+ * `assignByRules` before the mode. Frozen verbatim from the spec at the R2 contract step (C2-E).
+ */
+export const AssignmentRule = z.object({
+  id: z.string().length(8),
+  name: z.string().max(40),
+  enabled: z.boolean(),
+  when: z.object({
+    pageIds: z.array(id26).max(50).optional(),
+    cityKeys: z.array(CityKeyZ).max(100).optional(),
+    locales: z.array(z.enum(["ar", "fr", "en"])).optional(),
+    minRisk: z.number().int().min(0).max(100).optional(),
+    minTotalCents: z.number().int().min(0).optional(),
+  }),
+  /** round-robin among these live agents */
+  to: z.object({ userIds: z.array(id26).min(1).max(30) }),
+  /** wait = assign to the list's first agent with a long lease (2 h) */
+  fallback: z.enum(["pool", "wait"]).default("pool"),
+});
+export type AssignmentRule = z.output<typeof AssignmentRule>;
+
 export const OpsSetting = z.object({
   callingWindow: z
     .object({
@@ -105,6 +127,11 @@ export const OpsSetting = z.object({
   revealAlarmPerHour: z.number().int().min(10).max(500).default(OPS_DEFAULTS.revealAlarmPerHour),
   /** R3 (OP-25) */
   leaderboard: z.enum(["off", "managers", "everyone"]).default("off"),
+  /**
+   * R2 (OP-18, S4; C2-E): the assignment rules. Optional (absent = []) rather than the spec's `.default([])`, so an
+   * R1 store's `ops` value, its form and its export stay exactly as they were; S4 reads `assignmentRules ?? []`.
+   */
+  assignmentRules: z.array(AssignmentRule).max(20).optional(),
 });
 export type OpsSetting = z.output<typeof OpsSetting>;
 

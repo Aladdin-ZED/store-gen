@@ -75,10 +75,19 @@ const R1_KEYS: Record<string, { level: "S" | "P"; secret: boolean }> = {
   telegram: { level: "S", secret: true },
   export_key: { level: "S", secret: true },
 };
+/** R2 keys, registered at the R2 contract step C2-E (§D.10 "Level" and "Secret" columns). */
+const R2_KEYS: Record<string, { level: "S" | "P"; secret: boolean }> = {
+  storefront: { level: "S", secret: false },
+  carrier_credentials: { level: "S", secret: true },
+  sheets_sa: { level: "S", secret: true },
+  platform_mail: { level: "P", secret: true },
+};
+/** Every registered key of this build (R1 + R2). */
+const KEYS: Record<string, { level: "S" | "P"; secret: boolean }> = { ...R1_KEYS, ...R2_KEYS };
 /** Removed in R1.0 (`ai` split, `home` → stores.home_page_id, `pixels` read once by the conversion). */
 const REMOVED_KEYS = ["ai", "home", "pixels"];
-/** Added by the contract step of their release, not before. */
-const LATER_KEYS = ["platform_push", "platform_mail", "platform_cloudflare", "storefront", "carrier_credentials", "sheets_sa", "whatsapp_cloud", "feeds", "reviews"];
+/** Added by the contract step of their release, not before (R3: whatsapp_cloud, feeds, reviews, push, Cloudflare). */
+const LATER_KEYS = ["platform_push", "platform_cloudflare", "whatsapp_cloud", "feeds", "reviews"];
 /** Keys whose value is not an object by design (markers, the "platform:id" → entry map). */
 const NOT_OBJECT_KEYS = new Set(["doc_schema", "legal_seed", "tenancy_v1", "pixel_health"]);
 
@@ -122,7 +131,7 @@ const defaultOf = <T = Record<string, unknown>>(key: string): T => value<T>(key,
 /* 1. registries vs the table                                          */
 /* ------------------------------------------------------------------ */
 
-for (const [key, row] of Object.entries(R1_KEYS)) {
+for (const [key, row] of Object.entries(KEYS)) {
   const inStore = Object.hasOwn(storeDefs, key);
   const inPlatform = Object.hasOwn(platformDefs, key);
   check(row.level === "S" ? inStore && !inPlatform : inPlatform && !inStore, `${key}: registered once, at level ${row.level}`);
@@ -131,14 +140,14 @@ for (const [key, row] of Object.entries(R1_KEYS)) {
   check(d.secret === row.secret, `${key}: secret = ${row.secret}`);
   if (row.secret) check((d.sensitive?.length ?? 0) > 0, `${key}: a secret key names its sensitive fields`);
 }
-for (const key of [...Object.keys(storeDefs), ...Object.keys(platformDefs)]) check(Object.hasOwn(R1_KEYS, key), `${key}: registered but not an R1 key of §D.10`);
+for (const key of [...Object.keys(storeDefs), ...Object.keys(platformDefs)]) check(Object.hasOwn(KEYS, key), `${key}: registered but not an R1 / R2 key of §D.10`);
 for (const key of [...REMOVED_KEYS, ...LATER_KEYS]) check(!defOf(key), `${key}: not registered in R1`);
 
 /* ------------------------------------------------------------------ */
 /* 2. real objects, defaults parse and re-parse                        */
 /* ------------------------------------------------------------------ */
 
-for (const key of Object.keys(R1_KEYS)) {
+for (const key of Object.keys(KEYS)) {
   const d = defOf(key);
   if (!d) continue;
   if (!NOT_OBJECT_KEYS.has(key)) {
@@ -464,7 +473,7 @@ for (const sample of SECRET_SAMPLES) {
   }
   check(Object.keys(red as Obj).length === Object.keys(v).length, `${sample.key}: redaction keeps the value's shape`);
 }
-for (const [key, row] of Object.entries(R1_KEYS)) {
+for (const [key, row] of Object.entries(KEYS)) {
   if (row.secret) continue;
   const v = defaultOf(key);
   check(redact(key, v) === v, `${key}: a non-secret key is returned as is`);

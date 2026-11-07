@@ -33,6 +33,29 @@ export type PageKind = "landing" | StorePageKind;
 /** A row id (ULID, Crockford alphabet: src/lib/db/ids.ts newId). */
 export const Ulid = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/);
 
+/** The store's served policy pages (`/policies/<kind>`, STO-§7.5; core §C.4.1). R2 contract step C2-E. */
+export const STORE_POLICY_KINDS = ["privacy", "terms", "shipping", "returns", "contact"] as const;
+export type StorePolicyKind = (typeof STORE_POLICY_KINDS)[number];
+
+/**
+ * A menu or announcement link, resolved at render by S1's `resolveLinks` (STO-§8.2; frozen at the R2 contract step
+ * C2-E for the `storefront` setting's first schema): a dead target (archived, deleted, unpublished) is dropped from the
+ * rendered menu and listed as a warning. `url` is https only (external, `rel="noopener"` + `target="_blank"`).
+ */
+export const LinkRefSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("home") }),
+  z.object({ kind: z.literal("search") }),
+  z.object({ kind: z.literal("cart") }),
+  z.object({ kind: z.literal("track") }),
+  z.object({ kind: z.literal("collection"), id: Ulid }),
+  z.object({ kind: z.literal("product"), id: Ulid }),
+  z.object({ kind: z.literal("page"), id: Ulid }),
+  z.object({ kind: z.literal("landing"), id: Ulid }),
+  z.object({ kind: z.literal("policy"), policy: z.enum(STORE_POLICY_KINDS) }),
+  z.object({ kind: z.literal("url"), url: z.url({ protocol: /^https$/ }).max(500) }),
+]);
+export type LinkRef = z.infer<typeof LinkRefSchema>;
+
 export const StoreSectionInstance = SectionInstance.extend({
   /** product context for a landing section on a product-free kind (home, page): the product it talks about */
   bind: z.object({ productId: Ulid }).strict().optional(),

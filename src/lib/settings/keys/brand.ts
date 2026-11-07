@@ -24,6 +24,11 @@ export const BrandSetting = z.object({
       wordmark: assetId.nullable().default(null),
       /** light-on-dark version (optional) */
       inverse: assetId.nullable().default(null),
+      /**
+       * R2 (DES-§18, DES-R14; C2-E, S2): the e-mail-safe PNG of the primary logo (the designer's primary-png 128, or
+       * a PNG rendition of an uploaded logo, stored with `keepPng`). Optional so existing values parse and save unchanged.
+       */
+      png: assetId.nullable().optional(),
       source: z.enum(["upload", "designer"]).default("upload"),
     })
     .prefault({}),

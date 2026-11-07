@@ -13,10 +13,13 @@
  * contract step of their release.
  */
 import type { z } from "zod";
+import type { Release } from "@/lib/auth/permissions";
 import { def, redactFields } from "./fields";
 import { AccountingSetting } from "./keys/accounting";
 import { BrandSetting } from "./keys/brand";
+import { CarrierCredentialsSetting } from "./keys/carrier_credentials";
 import { CheckoutSetting } from "./keys/checkout";
+import { CheckoutStore } from "./keys/checkout-store";
 import { ConversionsSetting } from "./keys/conversions";
 import { DefaultsSetting } from "./keys/defaults";
 import { ExportKeySetting } from "./keys/export_key";
@@ -28,8 +31,10 @@ import { PixelHealthSettings } from "./keys/pixel_health";
 import { PixelLibrarySettings } from "./keys/pixel_library";
 import { PoliciesSetting } from "./keys/policies";
 import { SheetsSetting } from "./keys/sheets";
+import { SheetsSaSetting } from "./keys/sheets_sa";
 import { StoreSetting } from "./keys/store";
 import { StoreAi } from "./keys/store_ai";
+import { StorefrontSettings } from "./keys/storefront";
 import { TelegramSetting } from "./keys/telegram";
 import { TrackingSecretsSettings } from "./keys/tracking_secrets";
 import { TurnstileSetting } from "./keys/turnstile";
@@ -64,8 +69,11 @@ export const STORE_SETTINGS = {
   landing: def({ schema: LandingSetting, secret: false, defaults: () => ({}) }),
   /** policy facts, the single source of promises (landing, P3) */
   policies: def({ schema: PoliciesSetting, secret: false, defaults: () => ({}) }),
-  /** zones, calendar, address mode (landing, P3; storefront merges its R2 block) */
-  checkout: def({ schema: CheckoutSetting, secret: false, defaults: () => ({}) }),
+  /**
+   * zones, calendar, address mode (landing, P3); R2 (STO-R16, contract step C2-E): storefront's `store` block
+   * (src/lib/settings/keys/checkout-store.ts), optional so an R1 value parses, saves and exports unchanged
+   */
+  checkout: def({ schema: CheckoutSetting.extend({ store: CheckoutStore.optional() }), secret: false, defaults: () => ({}) }),
   /** Profit lite inputs (operations, P4) */
   accounting: def({ schema: AccountingSetting, secret: false, defaults: () => ({}) }),
   /** the call centre and the one calling window (operations, P4) */
@@ -78,7 +86,24 @@ export const STORE_SETTINGS = {
   telegram: def({ schema: TelegramSetting, secret: true, defaults: () => ({}), sensitive: ["botToken"] }),
   /** the store-owned Google key of PHP exports (operations, P5) */
   export_key: def({ schema: ExportKeySetting, secret: true, defaults: () => ({}), sensitive: ["privateKey"] }),
+  // R2 keys (§D.10; the R2 contract step C2-E registered them, the owning tracks refine the validation, never the shape)
+  /** menus, header / footer, announcement bar, home storyline, card style (storefront, S1; STO-§10.1) */
+  storefront: def({ schema: StorefrontSettings, secret: false, defaults: () => ({}) }),
+  /** adapter credentials per carrier account (operations, S4; OPE-§17.3) */
+  carrier_credentials: def({ schema: CarrierCredentialsSetting, secret: true, defaults: () => ({}), sensitive: ["accounts"] }),
+  /** a store-owned Google service account (operations, S5; IN-09, OPE Q.3d) */
+  sheets_sa: def({ schema: SheetsSaSetting, secret: true, defaults: () => ({}), sensitive: ["json"] }),
 } as const;
+
+/**
+ * The release a store key belongs to when it is not R1 (§D.10 "Release" column): readers of every key (the store
+ * export's settings.json) skip a key whose release is off, so an R1 build's output never lists an R2 key.
+ */
+export const STORE_SETTING_RELEASE: Readonly<Partial<Record<keyof typeof STORE_SETTINGS, Release>>> = Object.freeze({
+  storefront: "R2",
+  carrier_credentials: "R2",
+  sheets_sa: "R2",
+});
 
 export type StoreSettingKey = keyof typeof STORE_SETTINGS;
 export type StoreSettingValue<K extends StoreSettingKey> = z.output<(typeof STORE_SETTINGS)[K]["schema"]>;

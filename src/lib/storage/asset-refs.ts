@@ -40,8 +40,8 @@ export const ASSET_OWNER_KINDS: readonly AssetOwnerKind[] = assetRefs.ownerKind.
 /** An asset id as documents and rows carry it (32 lowercase hex today; 16-64 accepted, like ASSET_ID_RE). */
 const ASSET_ID = /^[a-f0-9]{16,64}$/;
 const OWNER_ID = /^[A-Za-z0-9_.:-]{1,64}$/;
-/** The logo roles of the `brand` setting (DES-R16). */
-const LOGO_ROLES = ["primary", "mark", "wordmark", "inverse"] as const;
+/** The logo roles of the `brand` setting (DES-R16; R2 C2-E: `png`, the e-mail-safe PNG of DES-R14). */
+const LOGO_ROLES = ["primary", "mark", "wordmark", "inverse", "png"] as const;
 /** keys of an AssetRef (src/lib/page/schema.ts): an object with an asset id and only these keys is a reference */
 const REF_KEYS: ReadonlySet<string> = new Set(["id", "alt", "fx", "fy", "box"]);
 /** the generic walk's bounds (themes, other settings): depth, visited values */
