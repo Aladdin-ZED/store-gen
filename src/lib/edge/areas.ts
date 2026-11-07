@@ -22,6 +22,7 @@ export type Area =
   | "public-api" // /api/public/**, /api/health, /api/hooks/** (R2)
   | "api-v1" // /api/v1/** (R3: platform host only, bearer api_keys only)
   | "cron" // /api/cron/**
+  | "edge-api" // /api/edge/** (R2, OS-13: the Worker's beacon; platform host only, cookieless; C2-E)
   | "gate" // the ADMIN_GATE segment
   | "other";
 
@@ -52,6 +53,7 @@ export function areaOf(pathname: string): Area {
   if (under(path, "/api/public") || path === "/api/health" || under(path, "/api/hooks")) return "public-api";
   if (under(path, "/api/v1")) return "api-v1";
   if (under(path, "/api/cron")) return "cron";
+  if (under(path, "/api/edge")) return "edge-api";
   if (under(path, "/app")) return "app";
   if (AUTH.some((p) => under(path, p))) return "auth";
   if (under(path, "/kit")) return "kit";

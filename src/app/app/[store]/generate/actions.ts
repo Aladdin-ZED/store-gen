@@ -22,6 +22,9 @@
 import { after } from "next/server";
 import { z } from "zod";
 import { fail } from "@/lib/admin-data/action";
+import { GenerationFeedbackInput, recordGenerationFeedback } from "@/lib/ai/generation-feedback.server";
+import { releaseOn } from "@/lib/auth/permissions";
+import { attachNewLanding } from "@/lib/landing/attach.server";
 import { countStoreAssets, previewAssetsFor } from "@/lib/admin-data/assets";
 import { createPageFromDirections, slugify } from "@/lib/admin-data/pages";
 import { revalidateStore } from "@/lib/admin-data/shell";
@@ -145,6 +148,10 @@ const Input = z
         niche: Niche.optional(),
       })
       .optional(),
+    /** R2 (LAN-§17.2, STO-§17.5; contract step C2-E): the product the wizard started from (`?product=`), attached after create */
+    productId: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/).optional(),
+    /** R2 (AI-12 (5), AI-19; C2-E): what the Director pass showed and the member chose (S7's feedback, never blocking) */
+    ai: GenerationFeedbackInput.optional(),
   })
   .refine((i) => i.chosen < i.directions.length, { error: "Pick one of the directions." });
 
@@ -157,8 +164,9 @@ export type CreateFromDirectionsInput = z.input<typeof Input>;
 const slugBase = (name: string, category: string) => (slugify(name) !== "page" ? name : category);
 
 export async function createFromDirectionsAction(input: CreateFromDirectionsInput): Promise<ActionResult<{ id: string; slug: string }>> {
-  return storeAction("pages.write", async ({ scope, actor, store }) => {
-    const { name, chosen, directions, facts, design } = Input.parse(input);
+  return storeAction("pages.write", async (ctx) => {
+    const { scope, actor, store } = ctx;
+    const { name, chosen, directions, facts, design, productId, ai } = Input.parse(input);
 
     // each doc keeps the tracking the wizard answered (pixels or "No pixel"): nothing is added here
     const docs: { label: string; doc: PageDoc }[] = [];
@@ -192,6 +200,17 @@ export async function createFromDirectionsAction(input: CreateFromDirectionsInpu
     } catch (err) {
       // the page exists: a design row that fails to write never undoes it (the publish check derives one)
       console.warn("[generate] the chosen design row was not recorded", err instanceof Error ? err.message : err);
+    }
+    if (releaseOn("R2")) {
+      // R2 (C2-E): a page made from a product is attached to it (S1); the Director pass feedback is recorded (S7)
+      if (productId) await attachNewLanding(ctx, created.id, productId);
+      if (ai) {
+        try {
+          await recordGenerationFeedback(scope, actor, created.id, ai);
+        } catch (err) {
+          console.warn("[generate] the generation feedback was not recorded", err instanceof Error ? err.message : err);
+        }
+      }
     }
     revalidateStore(store.handle, "/pages", "/history", "");
     return created;

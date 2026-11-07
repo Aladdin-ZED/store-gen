@@ -16,6 +16,8 @@ import "server-only";
  * invalidatePublished() (deprecated) clears every store of this process for the single-tenant callers.
  * Deliberately free of the renderer and the database so admin actions can import it cheaply.
  */
+import { releaseOn } from "@/lib/auth/permissions";
+import { requestEdgePurge } from "@/lib/edge-cache/purge";
 import { scopedCache } from "@/lib/tenancy/cache";
 
 /** Entries older than this are reloaded (other processes may have changed the database). */
@@ -57,6 +59,15 @@ export function cacheSet<T>(storeId: string, key: string, value: T | null, bytes
 export function invalidateStoreRender(storeId: string): void {
   pagesCache.delete(storeId);
   missCache.delete(storeId);
+  // R2 (OS-12, §C.5; contract step C2-E): the one "what visitors get changed" point also purges the Worker's HTML cache
+  // (S6's requestEdgePurge: synchronous, never throws; guarded anyway); R1 never calls it
+  if (releaseOn("R2")) {
+    try {
+      requestEdgePurge(storeId, { reason: "render" });
+    } catch {
+      // the purge is best effort: the edge copy expires within its s-maxage (≤ 300 s)
+    }
+  }
 }
 
 /** @deprecated single-tenant callers (they do not know the store yet): forgets every store's entries in this process. */

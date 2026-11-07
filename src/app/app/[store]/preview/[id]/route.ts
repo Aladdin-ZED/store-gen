@@ -6,13 +6,19 @@
  * the page's add-ons for the preview mode (P3's `loadRenderAddons`), and nothing is cached or indexed.
  *
  * The landing runtime's inline <script> gets the request's CSP nonce when the proxy set one (see renderDraftPreview).
+ *
+ * R2 (STO-§7.7; wired at the R2 contract step C2-E): a page whose kind is not `landing` (a store template, with
+ * `?product=` / `?collection=` / `?v=`) is S1's `serveStoreTemplatePreview`; R1 never reaches it.
  */
 import type { NextRequest } from "next/server";
 import { getCspNonce } from "@/lib/auth";
+import { releaseOn } from "@/lib/auth/permissions";
 import { previewSource } from "@/lib/editor/pages.server";
 import { renderDraftPreview } from "@/lib/editor/preview.server";
 import { loadRenderAddons } from "@/landing/addons/load.server";
 import { loadStoreRenderContext, storeAssetResolver } from "@/lib/render/store-context.server";
+import { pageKindOf } from "@/lib/render/store-routes.server";
+import { serveStoreTemplatePreview } from "@/lib/storefront/preview.server";
 import { storeGuard } from "@/lib/tenancy/seam";
 
 type Ctx = { params: Promise<{ store: string; id: string }> };
@@ -34,6 +40,11 @@ export async function GET(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   const versionId = req.nextUrl.searchParams.get("v");
   if (!ROW_ID.test(id) || (versionId !== null && !ROW_ID.test(versionId))) return plain(404, "Not found");
+
+  if (releaseOn("R2")) {
+    const kind = await pageKindOf(scope, id);
+    if (kind && kind !== "landing") return serveStoreTemplatePreview(req, { scope, store, via: "admin", nonce: await getCspNonce() }, id, req.nextUrl.searchParams);
+  }
 
   // the store's page and version only: another store's ids are the same 404 as missing ones
   const found = await previewSource(scope, id, versionId);

@@ -83,6 +83,15 @@ export async function register(): Promise<void> {
       console.error("[boot] ops samplers failed:", err instanceof Error ? err.message : err);
     }
 
+    // R2 (OS-12; contract step C2-E): S6's edge-cache registrations (`onStoreInvalidated("edge-purge", …)`) load here,
+    // so src/lib/tenancy/cache.ts gains no static database import; R1 loads nothing
+    try {
+      const { releaseOn } = await import("./lib/auth/permissions");
+      if (releaseOn("R2")) await import("./lib/edge-cache/register.server");
+    } catch (err) {
+      console.error("[boot] edge cache registration failed:", err instanceof Error ? err.message : err);
+    }
+
     // 3. media storage check (§G.2, ENGC-14): DATA_DIR absolute, outside the app and public_html, owner marker,
     // probe write; a failure keeps media in the database and turns the health tile red, it never stops the app
     try {

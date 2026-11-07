@@ -62,14 +62,15 @@ interface Ctx {
 const EDGE_KEEP: ReadonlySet<string> = new Set(Object.values(EDGE_HEADERS));
 
 /** Areas a store (or custom) host never serves (§C.3 `store` row). */
-const STORE_REFUSED: ReadonlySet<Area> = new Set(["console", "console-api", "app", "app-api", "auth", "kit", "internal", "preview", "api-v1", "cron", "gate"]);
+const STORE_REFUSED: ReadonlySet<Area> = new Set(["console", "console-api", "app", "app-api", "auth", "kit", "internal", "preview", "api-v1", "cron", "gate", "edge-api"]);
 const STORE_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD", "POST", "OPTIONS"]);
 
 /** Areas a legacy host answers with the 404 rather than a move to the platform (§C.4: console, preview, /d, api-v1). */
-const LEGACY_REFUSED: ReadonlySet<Area> = new Set(["console", "console-api", "gate", "internal", "preview", "api-v1"]);
+const LEGACY_REFUSED: ReadonlySet<Area> = new Set(["console", "console-api", "gate", "internal", "preview", "api-v1", "edge-api"]);
 
 /** Platform areas that never need a cookie: the Cookie header is deleted before the handler runs (SEC-2). */
-const COOKIELESS: ReadonlySet<Area> = new Set(["store", "preview", "public-api", "api-v1"]);
+/** R2 (C2-E): `edge-api` (/api/edge/**, the Worker's beacon) is platform-only and cookieless; every other host class refuses it. */
+const COOKIELESS: ReadonlySet<Area> = new Set(["store", "preview", "public-api", "api-v1", "edge-api"]);
 
 /** Proxy areas rendered as platform UI (nonce CSP, §F.6 "Platform UI"). */
 const UI_AREA: Partial<Record<Area, PlatformUiArea>> = {
@@ -233,6 +234,7 @@ function onConsole(ctx: Ctx): NextResponse {
   const { area } = ctx;
   if (area === "gate") return gate(ctx, () => neutral(ctx));
   if (area === "console" || area === "console-api") return consoleArea(ctx);
+  if (area === "edge-api") return neutral(ctx);
   // staff sign in where the console is (its host-only session cookie never reaches the platform host)
   if (area === "auth") return platformUi(ctx, "auth");
   if (isFrameworkPath(ctx.pathname)) return pass(ctx);

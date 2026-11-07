@@ -43,7 +43,7 @@ import { loadGeneratorKit, useGeneratorKit } from "./kit-loader";
 import { PAGE_LOCALES, type PageLocale } from "./labels";
 import { AiChip, StepFooter, StepRail, stepMotion } from "./parts";
 import { bestCutoutCandidate, fetchImage, MAX_INPUT_MB, paletteOfBlob, preparePhoto } from "./photos";
-import { focalPoint, initialState, loadState, photoAssetFrom, photosKey, reducer, saveState, clearState, toAssetRef, toAssetRow, toPhotoInfo, type Photo, type Step } from "./state";
+import { focalPoint, initialState, loadState, photoAssetFrom, photosKey, reducer, saveState, clearState, toAssetRef, toAssetRow, toPhotoInfo, type Photo, type Step, type WizardState } from "./state";
 import { StepAnalysis, type JobState } from "./step-analysis";
 import { MAX_FACTS, parsePrice, StepDetails } from "./step-details";
 import { StepDirections, type CopyState } from "./step-directions";
@@ -74,6 +74,11 @@ export interface GenerateWizardProps {
    * (`brandView`), the AI policy and `ai_director_brief` (GH-1), the store handle for the AI router.
    */
   design: { brandSeed: string; brand: (import("@/lib/settings/keys/brand").BrandView) | null; director: boolean; aiPolicy: AiPolicy; handle: string };
+  /**
+   * R2 (LAN-§17.2, STO-§17.5; contract step C2-E): the product the page is made from (`?product=`): S1's seed is applied
+   * once with `reset`, and the created page is attached to the product. Absent in R1.
+   */
+  fromProduct?: { id: string; seed: WizardState };
 }
 
 const MAX_PHOTOS = 12;
@@ -207,7 +212,7 @@ function linesOf(value: unknown, out: string[] = []): string[] {
   return out;
 }
 
-function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCreatePixels = false, design, afterSkeleton }: GenerateWizardProps & { afterSkeleton: boolean }) {
+function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCreatePixels = false, design, fromProduct, afterSkeleton }: GenerateWizardProps & { afterSkeleton: boolean }) {
   const router = useRouter();
   const storeView = useStore();
   // the drafts of this tab are the member's own in this store (GEN-03, §E.6): another member's go first
@@ -217,7 +222,8 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
   const manager = getAi();
   const [state, dispatch] = useReducer(reducer, undefined, () => {
     purgeForeignDrafts(storeView.id, storeView.viewerId);
-    return loadState(owner) ?? initialState({ locale: defaults.locale, market: defaults.market, aiCopy: aiSettings.enabled });
+    // R2 (C2-E): a page made from a product starts from S1's seed, not from this tab's saved draft
+    return fromProduct?.seed ?? loadState(owner) ?? initialState({ locale: defaults.locale, market: defaults.market, aiCopy: aiSettings.enabled });
   });
   const { details } = state;
 
@@ -872,6 +878,8 @@ function Wizard({ ai: aiSettings, defaults, store, storeAssets, canUpload, canCr
           facts,
           // the page's tracking answer (or the Details step's store-pixel ticks) is final
           ...((pagePixels ? !!details.tracking : !!pixelStore.summary) ? { pixels: "chosen" as const } : {}),
+          // R2 (C2-E): the product this page is made from
+          ...(fromProduct ? { productId: fromProduct.id } : {}),
         }),
         { success: "Page created — opening the builder" },
       );

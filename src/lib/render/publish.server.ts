@@ -26,6 +26,9 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { audit } from "@/lib/audit";
+import { releaseOn } from "@/lib/auth/permissions";
+import { effectiveTheme } from "@/lib/design/effective";
+import { activeThemeFor } from "@/lib/design/store-theme.server";
 import { PixelError, enforceLibraryRule } from "@/lib/pixels/library.server";
 import { idsOnly, maskPixelId, sameIds, trackingDiff, type PixelRef } from "@/lib/pixels/library";
 import { invalidatePixelUsage } from "@/lib/pixels/usage.server";
@@ -413,9 +416,11 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
   const versionId = newId();
   // R2 (C2-B2): LP-16's zones when the page charges delivery by city, an attached page's product key; {} in R1
   const extras = await landingRenderExtras(scope, page.id, "publish");
-  const landing = await renderLandingHtml(doc, { ...storeRenderOptions(rc, input), ver: versionId, ...extras });
+  // R2 (DES-R4; C2-E): a store / campaign page renders and gates with its effective theme; `doc` is what is stored
+  const view = await themedDoc(scope, page.id, doc);
+  const landing = await renderLandingHtml(view, { ...storeRenderOptions(rc, input), ver: versionId, ...extras });
   if (landing.blocking.length) throw blockingError(landing.blocking);
-  const thanks = await renderThankYouHtml(doc, { ...storeRenderOptions(rc, { ...input, page: "thanks" }), ...extras });
+  const thanks = await renderThankYouHtml(view, { ...storeRenderOptions(rc, { ...input, page: "thanks" }), ...extras });
   const runtimeV = landing.runtimeV ?? 1;
 
   // §M.1: every registered gate runs before the version row; a refusal names its items
@@ -425,7 +430,7 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
     pageId: page.id,
     doc,
     prev: await publishedDoc(scope, page.publishedVersionId),
-    theme: buildTheme(doc.theme, doc.locale),
+    theme: buildTheme(view.theme, doc.locale),
     assets: assetMeta(rows),
     actor,
     now: new Date(),
@@ -541,6 +546,21 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
 }
 
 /**
+ * DES-R4 (DES-§11.5, LP-08; R2 contract step C2-E): the document as rendered and gated. A page whose `theme_mode`
+ * (0006) is `store` or `campaign` takes S2's `effectiveTheme(doc, mode, activeThemeFor(scope))`; the stored doc, its
+ * checksum and runtime_v stay unchanged (D50). Every other page, and every page while `releaseOn("R2")` is false, is
+ * the doc itself (no read).
+ */
+async function themedDoc(scope: StoreScope, pageId: string, doc: PageDoc): Promise<PageDoc> {
+  if (!releaseOn("R2")) return doc;
+  const [row] = await db.select({ themeMode: pages.themeMode }).from(pages).where(and(inStore(pages, scope), eq(pages.id, pageId))).limit(1);
+  const mode = row?.themeMode ?? null;
+  if (!mode) return doc;
+  const theme = effectiveTheme(doc, mode, await activeThemeFor(scope));
+  return theme === doc.theme ? doc : { ...doc, theme };
+}
+
+/**
  * Takes a page offline in its store: `status` back to draft, the version rows and `first_published_at` kept, the
  * store's render cache dropped, audit `page.unpublished`, publish listeners told ("unpublished", §M.1). False when
  * the page is not live in this store (another store's id included).
@@ -561,7 +581,7 @@ export async function unpublishPage(scope: WriteScope, pageId: string, actor: Ac
       pageId,
       doc,
       prev: doc,
-      theme: buildTheme(doc.theme, doc.locale),
+      theme: buildTheme((await themedDoc(scope, pageId, doc)).theme, doc.locale),
       assets: new Map(),
       actor,
       now: new Date(),
@@ -751,11 +771,13 @@ export async function rerenderInPlace(scope: WriteScope, pageId: string, opts: {
   const input = { slug: live.slug, pageKey: live.publicKey, assets: resolver };
   // R2 (C2-B2): a runtime_v 3 version (LP-16) re-renders with the store's current zones, a v2 one without; {} in R1
   const extras = await landingRenderExtras(scope, pageId, live.runtimeV);
-  const landing = await renderLandingHtml(doc, { ...storeRenderOptions(rc, input), ver: versionId, ...extras });
+  // R2 (DES-R4; C2-E): a theme activation re-renders store / campaign pages with the new effective theme (D50)
+  const view = await themedDoc(scope, pageId, doc);
+  const landing = await renderLandingHtml(view, { ...storeRenderOptions(rc, input), ver: versionId, ...extras });
   if (landing.blocking.length) throw blockingError(landing.blocking);
   // runtime_v stays: it must keep describing the bytes an open tab posts against
   if ((landing.runtimeV ?? 1) !== live.runtimeV) throw new PublishError("invalid", "This page's runtime changed since it was published. Publish it again to update it.");
-  const thanks = await renderThankYouHtml(doc, { ...storeRenderOptions(rc, { ...input, page: "thanks" }), ...extras });
+  const thanks = await renderThankYouHtml(view, { ...storeRenderOptions(rc, { ...input, page: "thanks" }), ...extras });
 
   const gate = await runPrePublishChecks({
     scope,
@@ -764,7 +786,7 @@ export async function rerenderInPlace(scope: WriteScope, pageId: string, opts: {
     doc,
     // the version being re-rendered is the one live
     prev: doc,
-    theme: buildTheme(doc.theme, doc.locale),
+    theme: buildTheme(view.theme, doc.locale),
     assets: assetMeta(rows),
     actor: opts.actor,
     now: new Date(),

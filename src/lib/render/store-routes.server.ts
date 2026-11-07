@@ -22,6 +22,9 @@ import "server-only";
  */
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { releaseOn } from "@/lib/auth/permissions";
+import { catalogSitemapEntries } from "@/lib/catalog/seo.server";
+import { storeRobotsDisallow } from "@/lib/catalog/seo";
 import { db } from "@/lib/db/client";
 import { pages } from "@/lib/db/schema";
 import { effectiveHost, type EffectiveHost } from "@/lib/edge/host";
@@ -40,9 +43,11 @@ import {
   resolveTestToken,
   type StoreHandleLookup,
 } from "@/lib/tenancy/public";
+import { modeAllows } from "@/lib/tenancy/mode";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { StoreRow, StoreScope, WriteScope } from "@/lib/tenancy/types";
-import { addressMode, platformOrigin, storePath, storeUrl, type StoreAddress } from "@/lib/urls";
+import { addressMode, platformOrigin, storeBase, storePath, storeUrl, type StoreAddress } from "@/lib/urls";
+import { serveStoreTemplatePreview } from "@/lib/storefront/preview.server";
 import { isLegalKind } from "@/landing/context";
 import { renderLandingHtml } from "./core";
 import { openPreviewToken } from "./preview-token";
@@ -125,10 +130,29 @@ export function isCanonicalHost(eff: Pick<EffectiveHost, "cls" | "label">, store
 
 const log = (what: string, err: unknown) => console.error(`[store] ${what}:`, errorSummary(err));
 
-/** Serve one store route (GET / HEAD; the route files answer every other method with the neutral 404). */
-export async function serveStoreRoute(req: Request, handleParam: string, route: StoreRoute, deps: RouteDeps = {}): Promise<Response> {
+/** What `storeRequestGate` answers: the store to serve, or the neutral answer to send as is. */
+export type StoreGate =
+  | { ok: true; store: StoreRow; scope: ReturnType<typeof publicScope>; address: StoreAddress; eff: EffectiveHost }
+  | { ok: false; response: Response };
+
+/** How the route's own path compares with its canonical form (the store routes' slug rules). */
+export interface GateOpts extends RouteDeps {
+  /** the path as requested is already its canonical form (default true); false = 308 to `rest` */
+  exact?: boolean;
+  /** the path has no canonical form at all: answer the neutral 404 instead of the 308 */
+  notFoundIfInexact?: boolean;
+}
+
+/**
+ * The request gate of every store route (STO-§7.2 steps 1-3, PUB-23; exported at the R2 contract step C2-E so S1's
+ * store pages answer byte-identical neutral responses without a second copy): the host class (platform, store,
+ * legacy), the handle lookup (503 when it fails, 404 unknown, 410 retired), the store's public answer (404 / 503),
+ * then the canonical address (handle case, host, path; `rest` is the canonical path below the store base, the raw
+ * query kept) answered with a 308. A store that passes is handed over with its public scope and address.
+ */
+export async function storeRequestGate(req: Request, handleParam: string, rest: "" | `/${string}`, deps: GateOpts = {}): Promise<StoreGate> {
   const eff = effectiveHost(req.headers);
-  if (eff.cls !== "platform" && eff.cls !== "store" && eff.cls !== "legacy") return notFoundResponse(req);
+  if (eff.cls !== "platform" && eff.cls !== "store" && eff.cls !== "legacy") return { ok: false, response: notFoundResponse(req) };
   const handle = handleParam.toLowerCase();
   let found = deps.found;
   if (found === undefined) {
@@ -139,24 +163,39 @@ export async function serveStoreRoute(req: Request, handleParam: string, route: 
       found = "error";
     }
   }
-  if (found === "error") return unavailableResponse(req);
-  if (!found) return notFoundResponse(req);
-  if (found.kind === "gone") return goneResponse(req);
+  if (found === "error") return { ok: false, response: unavailableResponse(req) };
+  if (!found) return { ok: false, response: notFoundResponse(req) };
+  if (found.kind === "gone") return { ok: false, response: goneResponse(req) };
   const store = found.store;
   const address = addressOf(store);
   try {
     const answer = await publicStoreAnswer(store);
-    if (answer === "not_found") return notFoundResponse(req);
-    if (answer === "unavailable") return unavailableResponse(req, 86_400);
+    if (answer === "not_found") return { ok: false, response: notFoundResponse(req) };
+    if (answer === "unavailable") return { ok: false, response: unavailableResponse(req, 86_400) };
+  } catch (err) {
+    log("store route failed", err);
+    return { ok: false, response: unavailableResponse(req) };
+  }
+  const canonical = found.kind === "current" && handle === handleParam && isCanonicalHost(eff, address) && (deps.exact ?? true);
+  if (!canonical) {
+    if (deps.notFoundIfInexact) return { ok: false, response: notFoundResponse(req) };
+    return { ok: false, response: permanentRedirect(req, storeUrl(address, rest || "/") + rawQuery(req)) };
+  }
+  return { ok: true, store, scope: publicScope(store), address, eff };
+}
 
-    const lowerRoute = lowerSlug(route);
-    const canonical = found.kind === "current" && handle === handleParam && isCanonicalHost(eff, address) && lowerRoute === route;
-    if (!canonical) {
-      // an upper-case slug that is not a store slug even in lower case is a 404 on every address
-      if (lowerRoute !== route && "slug" in lowerRoute && !isStoreSlug(lowerRoute.slug)) return notFoundResponse(req);
-      return permanentRedirect(req, storeUrl(address, restOf(lowerRoute) || "/") + rawQuery(req));
-    }
-    const scope = publicScope(store);
+/** Serve one store route (GET / HEAD; the route files answer every other method with the neutral 404). */
+export async function serveStoreRoute(req: Request, handleParam: string, route: StoreRoute, deps: RouteDeps = {}): Promise<Response> {
+  const lowerRoute = lowerSlug(route);
+  const gate = await storeRequestGate(req, handleParam, restOf(lowerRoute), {
+    ...deps,
+    exact: lowerRoute === route,
+    // an upper-case slug that is not a store slug even in lower case is a 404 on every address
+    notFoundIfInexact: lowerRoute !== route && "slug" in lowerRoute && !isStoreSlug(lowerRoute.slug),
+  });
+  if (!gate.ok) return gate.response;
+  const { store, scope } = gate;
+  try {
     switch (route.page) {
       case "home":
         return await serveHome(req, scope, store);
@@ -256,7 +295,10 @@ export function storeRobotsText(store: StoreRow, hasPage: boolean): string {
 }
 
 async function storeRobots(req: Request, scope: StoreScope, store: StoreRow): Promise<Response> {
-  return seoFileResponse(req, storeRobotsText(store, await storeHasPublishedPage(scope, store)), "text/plain");
+  const text = storeRobotsText(store, await storeHasPublishedPage(scope, store));
+  // R2 (STO-§20.5; C2-E): a store / both store's private paths (S1's lines), inside the one `User-agent: *` group
+  const extra = releaseOn("R2") && text.includes("Allow: /") && modeAllows(store.mode, "storefront") ? storeRobotsDisallow(storeBase(addressOf(store))) : [];
+  return seoFileResponse(req, extra.length ? text.replace("Allow: /\n", `Allow: /\n${extra.join("\n")}\n`) : text, "text/plain");
 }
 
 const xmlEscape = (s: string) => s.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -273,7 +315,10 @@ export function sitemapXml(entries: readonly { loc: string; lastmod?: Date }[]):
 async function storeSitemap(req: Request, scope: StoreScope, store: StoreRow): Promise<Response> {
   const address = addressOf(store);
   const list = store.status === "active" ? await listSitemapPages(scope, store) : [];
-  return seoFileResponse(req, sitemapXml(list.map((p) => ({ loc: storeUrl(address, `/${p.slug}`), lastmod: p.lastmod }))), "application/xml");
+  const entries: { loc: string; lastmod?: Date }[] = list.map((p) => ({ loc: storeUrl(address, `/${p.slug}`), lastmod: p.lastmod }));
+  // R2 (STO-§20.5; C2-E): the catalog's entries (products, collections, custom pages, policies; S1)
+  if (releaseOn("R2") && store.status === "active") entries.push(...(await catalogSitemapEntries(scope, store)));
+  return seoFileResponse(req, sitemapXml(entries), "application/xml");
 }
 
 /**
@@ -347,6 +392,11 @@ export async function servePreview(req: Request, token: string): Promise<Respons
     const store = await getStoreById(opened.storeId);
     if (!store || !previewServable(store.status)) return notFoundResponse(req);
     const scope = publicScope(store);
+    // R2 (STO-§7.7, STO-R15; C2-E): a store page draft (any kind but landing) previews through S1's renderer
+    if (releaseOn("R2")) {
+      const kind = await pageKindOf(scope, opened.pageId);
+      if (kind && kind !== "landing") return await serveStoreTemplatePreview(req, { scope, store, via: "token" }, opened.pageId, new URL(req.url).searchParams);
+    }
     const page = await previewPage(scope, opened.pageId);
     if (!page) return notFoundResponse(req);
     const doc = validateDoc(page.draft).doc ?? (await getPublishedPage(scope, store, page.slug).then((p) => (p ? validateDoc(p.doc).doc : null)));
@@ -369,6 +419,12 @@ async function previewPage(scope: StoreScope, pageId: string) {
     .where(whereStore(pages, scope, eq(pages.id, pageId), eq(pages.kind, "landing")))
     .limit(1);
   return page ?? null;
+}
+
+/** A page's kind in the scope's store (null: none), for the R2 preview dispatch (C2-E). */
+export async function pageKindOf(scope: StoreScope, pageId: string): Promise<string | null> {
+  const [row] = await db.select({ kind: pages.kind }).from(pages).where(whereStore(pages, scope, eq(pages.id, pageId))).limit(1);
+  return row?.kind ?? null;
 }
 
 /** The route's handle lookup failed (the database): logged once here, answered as the neutral 503 by serveStoreRoute. */

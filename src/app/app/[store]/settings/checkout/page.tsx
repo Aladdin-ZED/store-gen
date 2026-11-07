@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { AfterOrderCard, CheckoutOptionsCard, type AfterOrderData } from "@/components/admin/landing/after-order-card";
+import { CheckoutStoreBlock } from "@/components/admin/storefront/checkout-store-block";
+import { releaseOn } from "@/lib/auth/permissions";
 import { viewerLocale } from "@/lib/auth/locale";
 import { shopperPromiseAllowed } from "@/lib/callcenter/window";
 import { callingWindowFor } from "@/lib/callcenter/window.server";
@@ -10,6 +12,8 @@ import { ownTemplates } from "@/lib/landing/templates.server";
 import { EU_LEAD_MARKETS } from "@/lib/landing/lead-capture";
 import { moneySpec } from "@/lib/markets/money";
 import { getStoreSettings } from "@/lib/settings";
+import { CHECKOUT_STORE_DEFAULTS } from "@/lib/settings/keys/checkout-store";
+import { modeAllows } from "@/lib/tenancy/mode";
 import { requireStoreMember } from "@/lib/tenancy/seam";
 import { appHref } from "@/lib/urls";
 import {
@@ -76,6 +80,10 @@ export default async function CheckoutSettingsPage({ params }: { params: Params 
     <>
       <AfterOrderCard data={data} actions={{ saveThankYou: saveThankYouAction, saveConfirmation: saveConfirmationAction, saveTemplate: saveConfirmTemplateAction }} />
       <CheckoutOptionsCard data={data} actions={{ saveCheckout: saveCheckoutOptionsAction, saveLanding: saveLandingOptionsAction }} />
+      {/* R2 (STO-§23.1; contract step C2-E): S1's "Boutique" block for store / both stores */}
+      {releaseOn("R2") && modeAllows(store.mode, "storefront") ? (
+        <CheckoutStoreBlock value={checkout.store ?? CHECKOUT_STORE_DEFAULTS} canWrite={ctx.can("checkout.write")} currency={store.currency || "MAD"} hasWhatsapp={!!contacts.whatsapp} />
+      ) : null}
     </>
   );
 }

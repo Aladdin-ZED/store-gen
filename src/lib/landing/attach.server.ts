@@ -17,11 +17,23 @@ import "server-only";
 import type { RenderReason } from "@/lib/jobs/renders";
 import { recordError } from "@/lib/jobs/errors";
 import type { RerenderResult } from "@/lib/render/publish.server";
-import type { Actor, WriteScope } from "@/lib/tenancy/types";
+import type { Actor, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 
 /** The render job handler of an attached page (S1, R2; LAN Q24, STO-R41). Contract seam: the in-place re-render. */
 export async function republishAttached(scope: WriteScope, pageId: string, opts: { reason: RenderReason; actor: Actor }): Promise<RerenderResult> {
   recordError("renders", null, { code: "attached_in_place", storeId: scope.storeId, route: `renders:${opts.reason}` });
   const { rerenderInPlace } = await import("@/lib/render/publish.server");
   return rerenderInPlace(scope, pageId, opts);
+}
+
+/**
+ * The new landing the generate wizard created from a product (LAN-§17.2, STO-§17.5; frozen at the R2 contract step
+ * C2-E for the maintainer's seam in P6's `createFromDirectionsAction`, R2 only, after the page row exists). S1's body:
+ * `pages.product_id`, `attach_opts.indexable = false`, and in `both` mode `runtime_v` 3 with charge-by-city on (LP-16,
+ * D75, `setChargeByCity`). Contract body until S1 merges: nothing (the page stays an unattached landing).
+ */
+export async function attachNewLanding(ctx: WriteCtx, pageId: string, productId: string): Promise<void> {
+  void ctx;
+  void pageId;
+  void productId;
 }
