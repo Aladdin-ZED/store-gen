@@ -44,6 +44,15 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **R2 PLANNING STARTED 2026-11-07 ~02:25** (heartbeat turn; usage 81%; read-only, alongside P3 wave 2): task `w5q7eizqj`
+  run `wf_5266ec9d-bd7`, script `r2-plan-tracks-wf_5266ec9d-bd7.js` (session workflows/scripts). Seven planners S1-S7 (core
+  §K.4 rows; speed mode: no e2e/demo steps, 5-12 steps per track) → one completeness critic each → a revise round when gaps.
+  It returns compact summaries; the full plans (briefs, featureCoverage, sharedNeeds, ownerInputs) are in the run's
+  journal.jsonl: extract them to qa/r2-plans.json (git-ignored) and write qa/lead/briefs/s<k>-<nn>.md from it. Resume:
+  `Workflow({scriptPath, resumeFromRunId: "wf_5266ec9d-bd7"})`. NEXT after deploy 4: the R2 contract step on main (core
+  §K.4 contract paragraph + STO-§27.1 + the sharedNeeds triage, P0b-style; absorb the R1 deferred CCRs it touches), then
+  worktrees sg-wt/s1..s7 on r2/<key> and the tracks run (r1-tracks.js with the R2 args).
+
 - **DEPLOY 3 LIVE 2026-11-07 ~02:10: the homepage redesign** (build 1824f15 + polish 700fe43, run `wf_502d15d3-a19`
   done: tsc, npm test and test:marketing-home 390/390 green, orange scan clean, en/fr/ar, light/dark, pause control).
   Deployed HEAD 700fe43: gate-ok → archive 16.7 MiB → `_sgdeploy/.htaccess` re-uploaded (403 verified) →
