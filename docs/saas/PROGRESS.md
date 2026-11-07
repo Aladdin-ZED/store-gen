@@ -44,6 +44,14 @@ review of terms/privacy (before public launch).
 
 (updated by the lead session; each entry: what, workflow run id, script path, how to resume)
 
+- **R2 CONTRACT STEP RUNNING 2026-11-07 ~04:52** (heartbeat turn; usage 85%): task `wb5vrxo8a` run `wf_e6f18401-e6f`,
+  script qa/lead/r2-c0.js (C2-A schema/0006 → B1 → B2 → C stubs → D scripts/budgets/ownership/packages → E 122 needs → F
+  verify + docs/saas/ccr/r2-c0-report.md → 2 reviews → H fix). Works in MAIN: commit PROGRESS.md only with a pathspec
+  (git commit -m ... -- docs/saas/PROGRESS.md). Relaunch after a stop: in a heartbeat turn, Workflow({scriptPath:
+  "C:\\Users\\SICO\\store-gen\\qa\\lead\\r2-c0.js", args: {done: [the C2 tags whose "R2 contract (C2-x)" commits exist]}}).
+  THEN: R2 track runner (adapt r1-tracks.js → r2-tracks.js: branches r2/<key>, worktrees sg-wt/s1..s7, the r2-c0 report's
+  START HERE sections, no dev-mode ui-shots), worktrees, launch with maxParallel 3-4.
+
 - **DEPLOY 4 LIVE 2026-11-07 ~04:47: P3 wave 2 (R1 complete)**. Merge run wf_cdcb4be9-8e3: ab32a79 (no conflicts) + a90cc68
   (CCRs r1-p3-13/14/15 applied except 13.5, 14.2 leads.merged_into migration, 14.5 P5's wa_order_reply kind, 15.4 → the
   integration; new nightly job campaigns.share_expiry slot 6 04:35; gate green: tsc, npm test, test:migrate, test:tenancy,
