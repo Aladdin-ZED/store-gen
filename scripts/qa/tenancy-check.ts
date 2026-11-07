@@ -3480,6 +3480,8 @@ export interface TenancyKit extends Kit {
   renderPage: typeof renderPage;
   leaks: (value: unknown, opts?: Parameters<typeof leaks>[2]) => string[];
   snapshotA: () => Promise<string>;
+  /** the per-table digests behind snapshotA (a failing check names the tables that moved) */
+  snapshotATables: () => Promise<Record<string, string>>;
   ghostify: <T>(value: T) => T;
   scope: (store: "A" | "B", kind?: StoreScope["kind"]) => StoreScope;
 }
@@ -3509,6 +3511,7 @@ export async function pluginSuite(kit: Kit): Promise<void> {
     renderPage,
     leaks: (value, opts) => leaks(kit.fx, value, opts),
     snapshotA: async () => (await snapshot(kit.fx.A.id)).hash,
+    snapshotATables: async () => (await snapshot(kit.fx.A.id)).tables,
     ghostify: (value) => ghostify(kit.fx, value),
     scope: (store, kind = "member") => scopeOf(kit.fx[store].id, kind),
   };

@@ -190,3 +190,7 @@ test:platform-db 11, test:integrations-db 1, test:ops-db 2 — stale R1 stub exp
 unavailable on this branch", "P4's stubs not merged yet", "waits for P5's renderer", the lead's `converted_via`); they
 were never in a merge gate and are left for the R2 integration (not an R2 contract item). C2-E's own test change:
 ops-db-check's carrier dim now recounts `orders.carrier_label` (S4 #57).
+
+C2-F (r2-c0-report.md): the four red suites above are green; their stale stub expectations now assert the merged R1,
+and the `converted_via` one was an R1 defect (an agent's lead conversion credited as a phone match), fixed in
+`src/lib/orders/hooks/landing.ts`.

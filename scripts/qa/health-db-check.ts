@@ -117,7 +117,9 @@ async function checks(conn: Conn): Promise<void> {
   const { mintScope } = await import("@/lib/tenancy/seam");
   const run = await import("@/lib/health/run");
   const { DEFAULT_SOURCES } = await import("@/lib/health/inputs");
-  const { HEALTH_RULES } = await import("@/lib/health/registry");
+  // P1's machinery is checked against its own rules: since the R1 merges the registry also carries the shell, landing,
+  // ops and integrations rules (each proven by its fixtures in `test:health`), whose issues would move every score here
+  const { rules: PLATFORM_RULES } = await import("@/lib/health/rules/platform");
   const { HEALTH_STATE_KEY } = await import("@/lib/health/window");
   const snapshot = await import("@/lib/platform/health-snapshot");
   const alarms = await import("@/lib/platform/alarms");
@@ -194,7 +196,7 @@ async function checks(conn: Conn): Promise<void> {
           }
         : null,
   };
-  const rules = [...HEALTH_RULES, p5Stand];
+  const rules = [...PLATFORM_RULES, p5Stand];
 
   const ctxFor = (budgetMs: number): JobCtx => ({
     ...systemCtx("platform.health"),

@@ -253,13 +253,14 @@ async function case6(fx: Fixtures): Promise<void> {
   ok("a seller never reads the staff feed", !(await ids(consoleOf(fx.outsider, "none"))).some((id) => [forAdmins, forAll, forSuper].includes(id)));
   ok("staff reading a store's centre never get the staff feed there", !(await ids(member(fx.staff.admin, null))).includes(forAdmins));
 
-  // 50 parallel batched inserts → one row with count 50 (the kind's batch, and a caller's batch on a store row)
+  // 50 parallel batched inserts → one row with count 50 (the kind's batch, and a caller's batch on a store row); since P4's
+  // merge `ops.new_orders` has its vars schema, so the store row carries valid vars (an empty object logs a platform error)
   await awayFromHourEdge();
   await Promise.all(Array.from({ length: 50 }, () => notify({ audience: "platform_staff", minRole: "admin" }, "staff.signup_new", { store: B.handle })));
   const batched = await rows<{ vars: string }>(fx.conn, "SELECT vars FROM notifications WHERE kind = 'staff.signup_new' AND dedupe_key LIKE 'staff.signup_new:%'");
   ok("50 parallel staff.signup_new → one row", batched.length === 1, batched.length);
   ok("with count 50", JSON.parse(batched[0]?.vars ?? "{}").count === 50, batched[0]?.vars);
-  await Promise.all(Array.from({ length: 50 }, () => notify({ audience: "store_role", storeId: A.id, roles: ["owner"] }, "ops.new_orders", {}, { batch: { windowMin: 60 } })));
+  await Promise.all(Array.from({ length: 50 }, () => notify({ audience: "store_role", storeId: A.id, roles: ["owner"] }, "ops.new_orders", { count: 1, sinceTime: "14:02" }, { batch: { windowMin: 60 } })));
   const storeBatched = await rows<{ vars: string }>(fx.conn, "SELECT vars FROM notifications WHERE kind = 'ops.new_orders' AND store_id = ?", [A.id]);
   ok("50 parallel store-row batch inserts → one row with count 50", storeBatched.length === 1 && JSON.parse(storeBatched[0]!.vars).count === 50, storeBatched.map((r) => r.vars));
 
@@ -485,9 +486,14 @@ async function case15(fx: Fixtures): Promise<void> {
 /* case 5: the health job (PL-18; PLA-§6.3.4)                          */
 /* ------------------------------------------------------------------ */
 
-/** One `platform.health` run with a test JobCtx (P8's runner is a stub on r1/p1), store A's pages quota at 85 %. */
+/**
+ * One `platform.health` run with a test JobCtx, store A's pages quota at 85 %. P1's own rules only: since the R1 merges the
+ * registry also carries the shell, landing, ops and integrations rules (each proven by its fixtures in `test:health`), whose
+ * issues on these bare fixtures would move every score this case pins.
+ */
 async function healthTick(fx: Fixtures, budgetMs = 60_000): Promise<{ order: string[]; summary: Record<string, unknown>; done: boolean }> {
   const { runHealthTick } = await import("@/lib/health/run");
+  const { rules: platformRules } = await import("@/lib/health/rules/platform");
   const { DEFAULT_SOURCES } = await import("@/lib/health/inputs");
   const { systemCtx } = await import("@/lib/jobs/scope");
   const A = fx.stores.A.id;
@@ -496,6 +502,7 @@ async function healthTick(fx: Fixtures, budgetMs = 60_000): Promise<{ order: str
     { ...systemCtx("platform.health"), deadline: Date.now() + budgetMs, tickId: "platform-check", cursor: "", setCursor: async () => undefined, yield: () => new Promise((r) => setImmediate(r)), lagMs: () => 0 },
     {
       sources: { ...DEFAULT_SOURCES, usage: async (scope, store, now) => (store.id === A ? [{ metric: "pages", period: "total", used: 17, limit: 20 }] : DEFAULT_SOURCES.usage(scope, store, now)) },
+      rules: platformRules,
       onStore: (r) => order.push(r.storeId),
     },
   );
@@ -708,7 +715,8 @@ async function case1(fx: Fixtures): Promise<void> {
   const gDetail = await queue.getReviewDetail(ops, gRow);
   const previewIn = gDetail.evidence.preview ? new Date(gDetail.evidence.preview.expiresAt).getTime() - Date.now() : 0;
   ok("draft evidence: Draft ready, the newest page, a staff preview link living 10 minutes", gDetail.evidence.readiness === "draft" && gDetail.evidence.pageId === draftPage && previewIn > 9 * 60_000 && previewIn <= 10 * 60_000, gDetail.evidence);
-  ok("draft evidence: no Design check yet → no design chip; AI use with no invented limit, untinted", gDetail.evidence.design === null && gDetail.evidence.genomeBand === null && gDetail.evidence.ai?.creditsLimit === null && gDetail.evidence.ai.tint === false, gDetail.evidence);
+  // since P7's merge the AI line is aiStoreSummary's: a pending store reads the pending cap (a real setting), never 0
+  ok("draft evidence: no Design check yet → no design chip; AI use against the pending cap (or none), untinted", gDetail.evidence.design === null && gDetail.evidence.genomeBand === null && gDetail.evidence.ai?.creditsUsed === 0 && (gDetail.evidence.ai.creditsLimit === null || gDetail.evidence.ai.creditsLimit > 0) && gDetail.evidence.ai.tint === false, gDetail.evidence);
   ok("the hold-class flag is explained, and the list row says Draft ready", gDetail.scoreCard.flags.some((f) => f.code === "linked_banned" && f.text.length > 0) && (await queue.listQueue(ops, "review")).rows.find((r) => r.id === gRow)?.readiness === "draft");
   ok("support can't decide (signups.decide is admin+)", (await codeOf(queue.approveReview(help, { reviewId: fRow }))) === "forbidden");
 
@@ -939,7 +947,8 @@ async function case11(fx: Fixtures): Promise<void> {
   const p = await preview.lifecyclePreview(help, S1.id, "restricted", { reason: "fake_orders" });
   ok("preview: support may read it, but can't take the edge (permission)", p.allowed === false && p.blockedBy === "permission" && p.requires?.permission === "stores.lifecycle");
   ok("preview: the agents holding a lease (2) and leasesReleased", p.affects.agentsWithLease === 2 && p.willWrite.leasesReleased === true, p.affects);
-  ok("preview: unavailable sources are named, never a guessed 0 (P4 / P5 / P8 stubs)", p.affects.openOrders === null && p.affects.unavailable.includes("queue") && p.affects.unavailable.includes("integrations") && p.affects.unavailable.includes("renders"), p.affects.unavailable);
+  // since the R1 merges P4's queueCounts, P5's integrationHealth and P8's renderSummary are real: every source answers
+  ok("preview: every source answers (none unavailable), open orders a real count", p.affects.unavailable.length === 0 && Number.isInteger(p.affects.openOrders), p.affects);
   ok("preview: nothing written (no audit row, no notification)", JSON.stringify(await counts(S1.id)) === JSON.stringify(before));
   ok("preview: a queue edge is blocked with use_queue", (await preview.lifecyclePreview(root, S2.id, "active")).blockedKey === "console.lifecycle.use_queue");
 
@@ -1582,7 +1591,7 @@ async function case12(fx: Fixtures): Promise<void> {
   const ops = await staffCtx(fx, "admin");
   const before = await consolePulse(ops);
   ok("ConsolePulse: v 1, no view-as yet, the queue counts and the audit head are numbers", before.v === 1 && before.impersonation === null && Number.isInteger(before.queue.review) && Number.isInteger(before.auditHead) && before.auditHead >= 0, before);
-  ok("ConsolePulse: P8's render summary is unavailable on this branch, so `renders` is null (never a made-up 0)", before.renders === null);
+  ok("ConsolePulse: P8's render summary (merged) answers with counts", before.renders !== null && Number.isInteger(before.renders.pending) && Number.isInteger(before.renders.failed), before.renders);
   const t0 = Date.now();
   await imp.startImpersonation(ops, { storeId: fx.stores.A.id, reason: "ticket", ticketRef: "T-12" });
   const during = await consolePulse(ops);
@@ -1679,7 +1688,7 @@ async function case10(fx: Fixtures): Promise<void> {
   const snap = await overview.queueSnapshotBlock(root);
   ok("queue snapshot: the counts and at most five oldest reviews", snap.oldest.length <= 5 && Number.isInteger(snap.snapshot.counts.review) && Number.isInteger(snap.snapshot.answered));
   const sys = await overview.systemSummary(root);
-  ok("system: P8's machinery is unavailable on this branch, the health engine answers", sys.machine.state === "unavailable" && sys.health.state === "ok", sys);
+  ok("system: P8's machinery (merged) and the health engine answer", sys.machine.state === "ok" && sys.health.state === "ok", sys);
 
   // the stores list (PLA-§6.1)
   const created = await list.listStores(root, {});
@@ -1707,7 +1716,7 @@ async function case10(fx: Fixtures): Promise<void> {
   ok("the ten strips: each answers ok or unavailable (a later track's stub), none errors", Object.values(all).every((p) => p.state === "ok" || p.state === "unavailable") && all.identity.state === "ok" && all.risk.state === "ok" && all.usage.state === "ok" && all.team.state === "ok" && all.timeline.state === "ok", states);
   ok("the strips carry no customer canary and no full seller e-mail for support", leaks(all).length === 0, leaks(all));
   const kpis = await strips.getStoreOverview(support, A.id, 30);
-  ok("the KPI row: stats_daily answers, P4's orders are unavailable here, delivery waits for R2", kpis.stats.state === "ok" && kpis.orders.state === "unavailable" && kpis.deliveryR2 === true && kpis.from < kpis.to, kpis);
+  ok("the KPI row: stats_daily and P4's orders (merged) answer, delivery waits for R2", kpis.stats.state === "ok" && kpis.orders.state === "ok" && kpis.deliveryR2 === true && kpis.from < kpis.to, { stats: kpis.stats.state, orders: kpis.orders, deliveryR2: kpis.deliveryR2 });
   const u = await usage.getStoreUsage(root, A.id);
   ok("usage tab: one line per entitlement key, effective values from T1, the meters", !!u && u.entitlements.length >= 30 && u.meters.length === usage.METERS.length && u.entitlements.some((l) => l.key === "media_bytes" && l.effective !== undefined), u?.meters);
   const t = await team.getStoreTeam(analyst, A.id);
@@ -1715,7 +1724,8 @@ async function case10(fx: Fixtures): Promise<void> {
   const tl = await timeline.listStoreTimeline(root, A.id, { limit: 50 });
   ok("timeline: newest first, merged from the four sources", tl.events.every((e, i, a) => i === 0 || a[i - 1]!.at >= e.at), tl.events.slice(0, 3));
   ok("activity tab: audit.platform rows of the store (analysts refused)", (await codeOf(activity.listStoreActivity(analyst, A.id))) === "forbidden" && Array.isArray((await activity.listStoreActivity(root, A.id)).rows));
-  ok("orders tab: P4's console read is unavailable here (its stub), never a guess", (await codeOf(orders.listStoreOrders(root, A.id))).startsWith("threw:not implemented"));
+  const ordersTab = await orders.listStoreOrders(root, A.id);
+  ok("orders tab: P4's console read (merged) answers masked rows, no customer canary", Array.isArray(ordersTab.items) && leaks(ordersTab).length === 0, leaks(ordersTab));
   ok("reveal: an analyst is refused; staff without a fresh step-up answer step_up", (await codeOf(orders.revealOrderPii(analyst, { storeId: A.id, orderId: fx.order, reason: "ticket" }))) === "forbidden" && (await codeOf(orders.revealOrderPii(root, { storeId: A.id, orderId: fx.order, reason: "ticket" }))) === "step_up");
 
   // people (PLA-§11)
@@ -1768,9 +1778,9 @@ async function case10(fx: Fixtures): Promise<void> {
   ok("messageStores: the live store gets staff.message, the purged one is skipped, one audit row per store", sent.sent.length === 1 && sent.skipped.includes(fx.stores.D.id) && (await count(fx.conn, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'platform.store.messaged' AND store_id = ?", [A.id])) === 1, sent);
   ok("messageStores: support may message one store at a time", (await codeOf(messages.messageStores(support, { storeIds: [A.id, fx.stores.C.id], text: "Hi" }))) === "forbidden");
   const bv = await backups.backupsView(root);
-  ok("backups: P8's runs unavailable here, the retention and the reminder read", bv.runs.state === "unavailable" && bv.retention.daily >= 3 && bv.remind === false, bv);
+  ok("backups: P8's runs (merged) answer, the retention and the reminder read", bv.runs.state === "ok" && bv.retention.daily >= 3 && bv.remind === false, bv);
   const sh = await system.systemHealthView(root);
-  ok("system health glue: the machine unavailable, the engine and the ceilings answer", sh.machine.state === "unavailable" && sh.engine.state === "ok" && sh.sandboxes.state === "ok" && sh.pendingMedia.state === "ok", { m: sh.machine.state, e: sh.engine.state });
+  ok("system health glue: the machine (P8, merged), the engine and the ceilings answer", sh.machine.state === "ok" && sh.engine.state === "ok" && sh.sandboxes.state === "ok" && sh.pendingMedia.state === "ok", { m: sh.machine.state, e: sh.engine.state });
 }
 
 /* ------------------------------------------------------------------ */

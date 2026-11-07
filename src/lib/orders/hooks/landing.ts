@@ -56,8 +56,16 @@ async function candidates(scope: WriteScope, order: OrderRow): Promise<Attributi
     .limit(20);
 }
 
-/** Applies LD12 to one new order; the attribution written, or null. */
+/** a manual order an agent converted from a lead carries `ref = "lead:<id>"` (src/lib/orders/manual.ts, OPE-§11.4) */
+const AGENT_LEAD_REF = /^lead:[0-9A-Z]{26}$/;
+
+/**
+ * Applies LD12 to one new order; the attribution written, or null. An agent's conversion (`ref = "lead:<id>"`) is not
+ * matched here: `convertLeadToOrder` credits that lead through `markLeadConverted` (`converted_via = 'agent'`, status
+ * `recovered`, LAN-§10.4, OPE-§11.4), which an idem / phone match run first in the `created` hook would pre-empt.
+ */
 export async function attributeLead(scope: WriteScope, order: OrderRow): Promise<(Attribution & { assigneeId: string | null }) | null> {
+  if (order.ref && AGENT_LEAD_REF.test(order.ref)) return null;
   const found = attributeOrder(
     { idem: order.idem, phone: order.phone, isTest: order.isTest, createdAt: order.createdAt, note: order.note },
     (await candidates(scope, order)).map((l) => ({ ...l, attempts: Number(l.attempts), isTest: !!l.isTest })),

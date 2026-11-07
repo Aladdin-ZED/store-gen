@@ -927,9 +927,9 @@ async function main(): Promise<number> {
     eq("card: the other open order of the phone is a possible duplicate", card.duplicates.map((d) => [d.id, d.status]), [[c1, "new"]]);
     eq("card: the store's own confirm template replaces the built-in", card.templates.map((x) => x.id), [tplA, "builtin:wa:missed_call", "builtin:wa:address"]);
     eq(
-      "card: the store-wide script row is picked; its text waits for P5's renderer (unavailable, no step)",
-      [card.script.source, card.script.templateId, card.script.locale, card.script.unavailable, card.script.steps.length],
-      ["store", scriptA, "fr", true, 0],
+      "card: the store-wide script row is picked and rendered by P5's renderer (merged): one step, nothing unavailable",
+      [card.script.source, card.script.templateId, card.script.locale, card.script.unavailable ?? null, card.script.steps.length],
+      ["store", scriptA, "fr", null, 1],
     );
     eq("card: no ETA while P3's zone line is its stub; no calibration below 30", [card.eta, card.risk.calibration], [{ text: null, cityKey: "fes" }, null]);
     ok("card: money in cents, no full phone, ≤ 6 KB gzipped", card.totalCents === 24_990 && !JSON.stringify(card).includes(pc.slice(1)) && K.cardGzBytes(card) <= 6_144, K.cardGzBytes(card));
@@ -1156,7 +1156,8 @@ async function main(): Promise<number> {
         eq("the converted order: source, phone, name, total of the duo", [cr.source, cr.phone, cr.name, toCents(cr.total)], ["whatsapp", lp, "Nadia Lead", 24900]);
         eq("the created event carries the lead id", (await eventsOf(cid, "created")).map((e) => (e.meta as { leadId?: string }).leadId), [leadId]);
         const lead = (await db.select().from(S.leads).where(deq(S.leads.id, leadId)))[0]!;
-        eq("the lead: converted by an agent", [lead.convertedOrderId, lead.convertedVia, lead.status], [cid, "agent", "converted"]);
+        // P3's markLeadConverted (merged): an agent's conversion is a recovery (LAN-§10.4); its phone match never pre-empts it
+        eq("the lead: converted by an agent (a recovery)", [lead.convertedOrderId, lead.convertedVia, lead.status], [cid, "agent", "recovered"]);
       }
       const again = await M.convertLeadToOrder(owner, leadId, { ...conv, idem: randomUUID() });
       ok("a second conversion: already_converted with the order id", !again.ok && again.error === "already_converted" && (again as { orderId?: string }).orderId === cid, again);

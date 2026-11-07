@@ -167,7 +167,7 @@ export const cases: TenancyCase[] = [
       const T = load<typeof import("@/lib/orders/transition")>("@/lib/orders/transition");
       const E = load<typeof import("@/lib/orders/events")>("@/lib/orders/events");
       const D = load<typeof import("@/lib/orders/duplicates")>("@/lib/orders/duplicates");
-      const before = await kit.snapshotA();
+      const before = await kit.snapshotATables();
       const real = { order: kit.fx.A.order.main, other: kit.fx.A.order.failed, note: a.noteId };
       const ghost = { order: kit.ghostify(kit.fx.A.order.main), other: kit.ghostify(kit.fx.A.order.failed), note: GHOST_EVENT };
       const attacks: [string, (x: typeof real) => ReturnType<typeof asBOwner>][] = [
@@ -182,8 +182,9 @@ export const cases: TenancyCase[] = [
         ["dismissDuplicate(B, A's orders)", (x) => asBOwner(kit, (_c, w) => D.dismissDuplicate(w, x.order, x.other))],
       ];
       for (const [label, fn] of attacks) await same(kit, label, await fn(real), await fn(ghost));
-      const after = await kit.snapshotA();
-      kit.check("ops writes: A's rows unchanged by every attempt", after === before);
+      const after = await kit.snapshotATables();
+      const moved = Object.keys({ ...before, ...after }).filter((t) => before[t] !== after[t]);
+      kit.check("ops writes: A's rows unchanged by every attempt", moved.length === 0, moved);
     },
   },
   {

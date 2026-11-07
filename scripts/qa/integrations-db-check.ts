@@ -1545,7 +1545,8 @@ async function bindPullSuite(k: BindPullKit): Promise<void> {
   await push.pushStore(Q.scope, { maxCalls: 3, trigger: "tick" });
   eq2("pull: a cleared Tracking keeps tracking_ref; a later Agent cell relabels while nobody is credited", [(await o(q12)).tracking, (await o(q1)).byLabel, (await o(q1)).by], ["TRK-123", "Nadia", null]);
 
-  // run 4: P4's P0 stubs throw "not implemented" → the status cell takes the R1.0 path, the rest waits in the sheet
+  // run 4: without the double, P4's real functions (merged since R1; they were P0 stubs that threw on r1/p5): the status
+  // cell, the note and the tracking all land, nothing waits in the sheet
   pull.setPullDoubleForTests(null);
   const q15 = await synced(Q);
   const q16 = await synced(Q);
@@ -1557,9 +1558,9 @@ async function bindPullSuite(k: BindPullKit): Promise<void> {
   const r4 = await push.pushStore(Q.scope, { maxCalls: 3, trigger: "tick" });
   const ev16 = await db.select().from(orderEvents).where(and(eq(orderEvents.storeId, Q.id), eq(orderEvents.orderId, q16)));
   eq2(
-    "pull: P4's stubs not merged yet → the status cell applied as R1.0 did (status and sheet_label); the note and the tracking deferred, nothing logged as an error",
+    "pull: P4's real functions → the status cell applied (status and sheet_label), the note one order event, the tracking written, nothing deferred",
     [(await o(q15)).status, (await o(q15)).label, ev16.length, (await o(q17)).tracking, r4.pullDeferred, r4.ok],
-    ["confirmed", "confirmed", 0, null, 2, true],
+    ["confirmed", "confirmed", 1, "TRK-9", 0, true],
   );
   pull.setPullDoubleForTests({ applyExternalStatus: spyApply, appendOrderEvent: spyEvent });
 
