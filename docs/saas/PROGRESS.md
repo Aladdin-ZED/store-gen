@@ -52,6 +52,11 @@ review of terms/privacy (before public launch).
   `Workflow({scriptPath, resumeFromRunId: "wf_5266ec9d-bd7"})`. NEXT after deploy 4: the R2 contract step on main (core
   §K.4 contract paragraph + STO-§27.1 + the sharedNeeds triage, P0b-style; absorb the R1 deferred CCRs it touches), then
   worktrees sg-wt/s1..s7 on r2/<key> and the tracks run (r1-tracks.js with the R2 args).
+  RAM LESSON (~03:05): P3w2 step 13's dev-mode ui-shots of the merged app (next dev --webpack on 3463) reached 4.2 GB of the
+  laptop's 7.7 GB, timed out at 180 s per page and crashed, three times (~13 min of heavy lock each); the lead stopped that
+  server (pids 2428/17864, the agent's own, not 3400/3450) and appended a no-ui-shots LEAD NOTE to briefs/p3-14.md. R2 track
+  notes must say: no dev-mode ui-shots; screens only from one production build (`next build` + `next start`, through the
+  mutex) at the verify step, or on the live site after a deploy.
 
 - **DEPLOY 3 LIVE 2026-11-07 ~02:10: the homepage redesign** (build 1824f15 + polish 700fe43, run `wf_502d15d3-a19`
   done: tsc, npm test and test:marketing-home 390/390 green, orange scan clean, en/fr/ar, light/dark, pause control).
