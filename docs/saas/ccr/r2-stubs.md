@@ -144,13 +144,34 @@ kind `api`, hand-set, AI R45).
 
 S1 imports them from these paths and writes nothing in `src/lib/delivery/**` or `src/lib/callcenter/**`.
 
-## Left to C2-E (stub with its seam)
+## Written at C2-E (stub with its seam)
 
-These callees exist only for a maintainer seam in a FINISHED R1 file; C2-E (the shared needs) writes each stub with its
-call line so R1 byte-identity is proven once per seam: S1's `wizardSeedFromProduct` / `attachNewLanding` (P6 generate
-wizard), `serveStoreTemplatePreview` (preview route), `catalogSitemapEntries` (+ the maintainer's `storeRequestGate`),
-`CheckoutStoreBlock`, `AttachedItemsBanner` / `isMirroredPath` / `AttachSheet` (builder); S4's `RevealAlarmBadge`,
-`AssignmentRulesEditor`, `MergeDialog`, `ShipmentPanel`, `shipmentsCsv`; S3's `FINANCE_EXPORT_TABLES` /
-`receiptEntries`; S7's `recordGenerationFeedback` and the wizard Director adapters; P3's `savePolicies` (an extraction
-from `savePoliciesAction`, not a stub); the `AiJobKind` widening to `catalog_from_photos` (S7's stage plan and P7's
-exhaustive switches move with it); the job handler and extension-file registrations (C2-D).
+The shared-needs step (C2-E, docs/saas/ccr/r2-c0-needs.md) wrote these stubs together with their call lines; every call
+line is reached only while `releaseOn("R2")` is true (R1 renders, prices and answers byte-identically).
+
+| Function / export | File | Owner | Stub | Seam (maintainer call line) | Source |
+|---|---|---|---|---|---|
+| `catalogSitemapEntries(scope, store)`; `SitemapEntry` | `src/lib/catalog/seo.server.ts` | S1 | `[]` | `store-routes.server.ts` sitemap branch | STO-§20.5 |
+| `storeRobotsDisallow(base)` | `src/lib/catalog/seo.ts` | S1 | `[]` | `store-routes.server.ts` robots (store / both) | STO-§20.5 |
+| `serveStoreTemplatePreview(req, ctx, pageId, params)`; `StorePreviewCtx` | `src/lib/storefront/preview.server.ts` | S1 | the neutral 404 | `servePreview` (token) and `/app/<h>/preview/[id]` for a non-landing kind | STO-§7.7, STO-R15 |
+| `storeRequestGate(req, handle, rest, opts)`; `StoreGate`, `GateOpts` | `src/lib/render/store-routes.server.ts` | maintainer (real, extracted) | — | `serveStoreRoute` uses it; S1's store pages call it | STO-§7.2, PUB-23 |
+| `CheckoutStoreBlock(props)`; `CheckoutStoreBlockProps` | `src/components/admin/storefront/checkout-store-block.tsx` | S1 | renders null | Settings → Checkout & delivery | STO-§23.1 |
+| `wizardSeedFromProduct(scope, productId)` → `WizardState \| null` | `src/lib/catalog/wizard-seed.server.ts` | S1 | null | `generate/page.tsx` `?product=`; the wizard starts from the seed | LAN-§17.2, STO-§17.5 |
+| `attachNewLanding(ctx, pageId, productId)` | `src/lib/landing/attach.server.ts` | S1 | no-op | `createFromDirectionsAction` after create | LAN-§17.2, D75 |
+| `upsertLeadV3(target, lead, { ip })`; `StoreLeadV3` | `src/lib/orders/leads.ts` | maintainer (real) | — | S1's `/api/public/store/lead` route | STO-§15.11, §15.13, STO-R9 |
+| `recordGenerationFeedback(scope, actor, pageId, input)`; `GenerationFeedbackInput` | `src/lib/ai/generation-feedback.server.ts` | S7 | no-op | `createFromDirectionsAction`'s optional `ai` block | AI-12 (5), AI-19 |
+| `RevealAlarmBadge(props)` | `src/components/admin/shipping/ops/reveal-alarm.tsx` | S4 | renders null | queue board agent rows (`revealAlarm`) | OPE-§8.4, OP-19 |
+| `AssignmentRulesEditor(props)` | `src/components/admin/shipping/ops/assignment-rules.tsx` | S4 | renders null | call centre "Retries and assignment" tab | OPE-§5.6, OP-18 |
+| `MergeDialog(props)` | `src/components/admin/orders/manual/merge-dialog.tsx` | S4 | renders null | order drawer duplicate banner | OPE-§9.4, OP-06 |
+| `ShipmentPanel(props)` | `src/components/admin/shipping/shipment-panel.tsx` | S4 | renders null | order drawer, in place of the tracking block when a shipment exists | OPE-§17.4, OD55 |
+| `readWoff2(buf)` | `scripts/fonts/woff2-sfnt.mjs` | S2 | throws `not implemented: S2 (readWoff2)` | S2's `build-logo-fonts.mjs` | CCR r1-p6-1 §3, DES-§13.3 |
+
+Seams wired at C2-E to C2-C's stubs: `activeShipmentFacts` (transition, inside the transaction), `assignByRules`
+(`assignOnCreate`, first, every mode), `revealGate` / `noteReveal` / `revealAlarmStates` (reveal, board),
+`replayCommissionsFor` (`backfillMappedLabel`), `earningsStatement` + `EarningsStatement` (`/queue/me`, commissions on),
+`MoneySlot` (drawer `MoneyBlock`), `createManualOrderV3` (`convertLeadToOrder`, a v3 lead), `effectiveTheme` /
+`activeThemeFor` (DES-R4: publish, re-render, unpublish listeners), `requestEdgePurge` (`invalidateStoreRender`),
+`register.server.ts` (instrumentation, R2). The `AiJobKind` widening to `catalog_from_photos` landed with
+`AiJobInput<"catalog_from_photos">.input = CatalogFromPhotosJobInput` (`planForJob` refuses the kind until S7's stage
+plan). Left for the owners' merges (see r2-c0-needs.md): the builder attach mounts, the wizard Director mounts, the
+Design check panel's Director review, the store export's R2 tables, the asset-refs product owner kind.

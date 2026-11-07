@@ -254,7 +254,7 @@ script PLA-§O does not define.
 | PL-04 | Approval queue | R1 | P1 | §3.5 | Each of `A` / `I` / `R` / `S` decides the focused row with one key and writes exactly one audit row and one store notification; two concurrent decisions on one row → one wins, the other answers `already_decided`; `Shift+A` approves only fast-lane rows without a hold-class flag (≤ 50 per call); the counterfactual line equals `bandFor()` re-scored without the pivot flag; tenant HTML renders only in the sandboxed iframe; a second appeal on one rejection is refused. | `test:platform` (`explainBand` vs `bandFor` on every fixture) · `test:db` case 1 · attack case 1 · e2e step 1 · `qa:wow-demo` persona 2 (1:25) |
 | PL-05 | Platform pulse overview | R1 | P1 | §5 | KPI row, needs-attention, activity feed render from real data only; each panel fails independently. | `test:db` case 10 (`EXPLAIN` + `--perf` overview ≤ 800 ms p95, one throwing panel) · attack case 2 (k-suppression) |
 | PL-06 | Stores list | R1 | P1 | §6 | Filters status/mode/plan/market/band/flag/dormant; health chips; sort by health; ≤ 300 ms p95 on 2,000 stores. | `test:db` case 10 (stores list ≤ 300 ms p95 on 2,000 stores; the CSV has no `@` outside its header) |
-| PL-07 | Store profile | R1 (6 tabs); Catalog & pages, Integrations health, Domains, Risk, Media, Ops R2; Support R3 | P1 (S6, D5) | §7 | R1: Overview with ten detail strips (PD55), Orders (masked), Team, Activity (+ Timeline view), Usage & plan, Notes; PII masked; reveal ↑ with reason; every strip and tab has loading / empty / error states; deferred tabs are honest lines, never placeholder numbers. | attack case 1 (canaries absent per tab and strip) · `test:db` case 10 (Overview ≤ 900 ms with one strip throwing) · e2e step 6 (states at 1280 / 360) |
+| PL-07 | Store profile | R1 (6 tabs); Catalog & pages, Integrations health, Domains, Risk, Media, Ops, AI R2 (C2-E); Support R3 | P1 (S6, D5) | §7 | R1: Overview with ten detail strips (PD55), Orders (masked), Team, Activity (+ Timeline view), Usage & plan, Notes; PII masked; reveal ↑ with reason; every strip and tab has loading / empty / error states; deferred tabs are honest lines, never placeholder numbers. | attack case 1 (canaries absent per tab and strip) · `test:db` case 10 (Overview ≤ 900 ms with one strip throwing) · e2e step 6 (states at 1280 / 360) |
 | PL-08 | Lifecycle actions | R1 | T1, P1 | §8 | Every core §A.5.1 edge available with reason codes, step-up where marked, notification and audit. | `test:platform` (`lifecyclePreview` pure parts) · `test:db` cases 3 and 11 · e2e step 12 |
 | PL-09 | Store export ZIP (UI) | R1 | P8 (engine), P1, P2 | §7.14, §22.11 | Owner requests and downloads from Danger zone; super_admin from the profile with reason; both audited. | attack case 7 (tampered / foreign signature, no step-up) · e2e step 19 (step-up ladder on the export) |
 | PL-10 | Read-only "View as store" | R1 | T2, P1, P2 | §10 | Start writes one `store.impersonation_started` notification with reason and window; every store action during the session answers `impersonation_read_only` and audits `platform.impersonation.write_refused`; the ribbon's countdown differs by < 1 s across two tabs; the session ends itself at expiry (fake clock); End lands on the profile's Activity tab with the session listed; no customer canary appears in any tenant route's HTML or RSC payload. | `test:db` cases 9, 12 and 14 · attack case 15 · e2e step 3 |
@@ -1455,7 +1455,9 @@ console's own not-found state "No store with this id" (staff may know ids; no or
 Tabs (`[[...tab]]`, default `overview`). **R1 (rev 2, PD32):** `overview` · `orders` · `team` · `activity` (with the
 `?view=timeline` preset) · `usage` · `notes`; keyboard `1`…`6` jump to them; the tab bar scrolls horizontally at
 360 px with the active tab kept in view. **R2 (S6):** `pages` (Catalog & pages), `integrations`, `domains`, `risk`,
-`media`, `ops`; **R3 (D5):** `support`. A deferred tab's path answers the console's own "Arrives with R2" page (a
+`media`, `ops`, `ai` (PLA-§7.11; R2 contract step C2-E, S6 shared need #100); the R2 tab order is overview · orders ·
+team · activity · usage · notes · pages · integrations · ops · domains · risk · media · ai, keys `1`…`6` unchanged and
+`7`…`9` for the next three visible tabs; **R3 (D5):** `support`. A deferred tab's path answers the console's own "Arrives with R2" page (a
 sentence and a link to the Overview strip that already shows its R1 data), never a 404 and never placeholder numbers.
 
 ### PLA-§7.2 Masking (`src/lib/platform/mask.ts`, pure, shared by every console projection)
@@ -2303,7 +2305,12 @@ during a tick) · `health_stale` and `health_job_slow` with the measured-cycle r
 `sheets_backlog` with the scaled threshold `max(15, 5 × ceil(activeSheetsStores / 16))` min · **(rev 6, core §H.5 rev 5,
 CRIT2-13)** `signup_unguarded` (red: a stored `approval` / `open` signup mode with no configured `platform_turnstile`,
 so `signupAction` treats it as `invite`, core §B.2; PLA-§3.1). It pairs with the refusal code `turnstile_required`
-(not an alarm: `savePlatformSettingsAction` refuses `approval` / `open` without a configured widget). The AI alarms are raised
+(not an alarm: `savePlatformSettingsAction` refuses `approval` / `open` without a configured widget). **(R2, OS-13, S6;
+R2 contract step C2-E, core §C.5 amendment)** from the Worker's beacon counters (`edge_reports`, per minute):
+`edge_5xx` (origin 5xx ≥ 5 % of ≥ 200 requests over 10 min), `edge_origin_down` (origin-down counts in 3 consecutive
+minutes), `edge_worker_error` (`internalError` > 0 in 2 of the last 5 minutes), `edge_purge_fail` (≥ 3 failed purges in
+an hour), `edge_quota_80` / `edge_quota_95` (the day's Worker requests vs the plan's daily quota); each deduped per hour
+like every alarm; a beacon gap is `edge_silent`'s case. The AI alarms are raised
 by P7's `aiHealth()` flags and only relayed here, so one notification path exists; the machinery alarms (`no_tick`,
 `pool_wait`, `tick_lag`, `edge_*`, `gate_mismatch`, `data_dir_*`) are computed from `getHealth()` (P8's data), the
 store-level ones from `store_health` and `platform_usage` (P1).
@@ -2363,9 +2370,13 @@ linked from the banner because they become the sandbox's only bound once anyone 
 
 ### PLA-§16.4 R2 (OS-12, OS-13, S6)
 
-Edge cache tile (purge requests sent / failed in 24 h, the last purge error), Worker alerts (5xx rate from the Worker
-analytics the owner pastes or the alert e-mails, **[unverified]** which Cloudflare data is reachable without an API
-token).
+Edge cache tile (purge requests sent / failed in 24 h, the last purge error) and Worker alerts, **rewritten to the beacon
+design at the R2 contract step (C2-E, S6 shared need #100; core §C.5 amendment):** the Worker self-reports its
+per-minute counters to `POST /api/edge/beacon` (`edge_reports`, 14-day retention): requests, cache hit / miss / bypass,
+origin 5xx, origin down, internal errors, purges ok / failed, the cache mode and the last purge error. No pasted
+analytics and no Cloudflare API token are read for alerts; the counts are lower bounds (an isolate that dies before its
+beacon loses its last minute), and Cloudflare's own notification e-mails stay the second channel for Worker crashes
+(error 1101). The alarm codes are PLA-§15.2's `edge_*`.
 
 ### PLA-§16.5 R3 (OS-14 … OS-18, D1)
 
@@ -3641,6 +3652,13 @@ per month; the console reads them for the ceilings card, the Storage and AI pane
 ## PLA-§N. Copy keys
 
 ### PLA-§N.1 Catalogs, owners, rules
+
+**R2 rule (R2 contract step C2-E, S6 shared need #103; core §I.5):** from R2 every admin key exists in `fr`
+(`test:i18n-coverage` rule `fr-r2`) and no admin surface holds a UI literal (rule `literal`); a literal in another
+owner's file is a PENDING entry naming that owner, zero PENDING at the R2 exit. The builder canvas is French in R2
+(S6's `editor.*` keys in `<locale>/ux.ts`, applied to the builder files through S6's CCRs). The console renders `fr`
+for `fr` viewers in R2; `ar` viewers get `en` there until UX-08 (R3). `fr/ai.ts` stays S7's (S7 ships `fr` for its R2
+keys).
 
 | File (`src/lib/i18n/admin/<locale>/…`) | Owner | Locales in R1 | Prefixes |
 |---|---|---|---|
