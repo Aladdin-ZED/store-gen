@@ -36,6 +36,7 @@ import { headers as requestHeaders } from "next/headers";
 import { notFound, redirect, unstable_rethrow } from "next/navigation";
 import { ZodError } from "zod";
 import { ActionError } from "@/lib/admin-data/action";
+import { markCustomerMasked } from "@/lib/admin-data/mask";
 import { auditFrom } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth";
 import { readSessionToken } from "@/lib/auth/cookies";
@@ -501,6 +502,8 @@ async function resolveMember(opts: RequireStoreOpts, via: Via): Promise<Resolved
     if (!row || row.status !== "active") throw new SeamError("not_found");
     membership = { role: row.role, status: row.status };
     lastActiveAt = row.lastActiveAt;
+    // core §A.3.2, TN-12 (R2 contract step C2-E): an accountant reads orders and customers masked
+    if (row.role === "accountant") markCustomerMasked(scope);
   }
 
   // 4. require 2FA for members (the staff branch already holds TOTP)

@@ -6,9 +6,10 @@ import "server-only";
  * Multi-tenant (docs/STORE-SAAS.md §E.3, ADM-22, ADM-23): counts and details are the scope's store only (another
  * store's order id answers like a missing one) and day ranges use the store's time zone, never the platform's.
  */
-import { count, desc, eq, gte, inArray, isNull, lt, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNull, lt, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { blocklist, leads, orderEvents, orders, pageVersions, storeMembers, users } from "@/lib/db/schema";
+import { releaseOn } from "@/lib/auth/permissions";
+import { blocklist, carrierAccounts, leads, orderEvents, orders, pageVersions, remittances, shipments, storeMembers, users } from "@/lib/db/schema";
 import { orderView, type OrderView, type SwatchOf } from "@/components/admin/orders/parts";
 import type { OrderItems, OrderSource } from "@/lib/db/schema";
 import { getOrder, isOrderStatus, type OrderFilters, type OrderRecord } from "@/lib/orders";
@@ -598,6 +599,54 @@ export interface OrderDrawerJson extends OrderDetailJson {
   money: { settlement: "at_delivery" | "statement"; deliveredAt: string | null };
   /** owner and admin (OPE-§12.7 "Ad events"): the order's Conversions API events, newest first */
   adEvents: { id: number; at: string; type: "capi_sent" | "capi_stale" | "capi_failed"; platform: string | null; event: string | null; reason: string | null }[];
+  /**
+   * R2 (contract step C2-E; absent while `releaseOn("R2")` is false): what the drawer's R2 mounts read: S3's
+   * `MoneySlot` (OD51, OD59, OPE-§16.7: collected and refunded cents, the settlement of the order's shipment account
+   * else "my carrier", the statement line that remitted it) and S4's `ShipmentPanel` (an order with a shipment shows it
+   * in place of the R1 tracking block) and `MergeDialog`.
+   */
+  r2?: OrderDrawerR2;
+}
+
+export interface OrderDrawerR2 {
+  collectedCents: number | null;
+  refundCents: number | null;
+  settlement: "statement" | "at_delivery" | null;
+  remitted: { statementRef: string; line: number | null; at: string } | null;
+  hasShipment: boolean;
+}
+
+/** The R2 block of the drawer (OD51, OD52, OD59, OPE-§16.7, §17.4): four indexed reads of the order's own store. */
+async function drawerR2(scope: StoreScope, id: string, mySettlement: "statement" | "at_delivery"): Promise<OrderDrawerR2> {
+  const [[money], [ship], [rem]] = await Promise.all([
+    db.select({ collectedCents: orders.collectedCents, refundCents: orders.refundCents }).from(orders).where(byId(orders, scope, id)).limit(1),
+    db
+      .select({ id: shipments.id, settlement: carrierAccounts.settlement })
+      .from(shipments)
+      .leftJoin(carrierAccounts, and(inStore(carrierAccounts, scope), eq(carrierAccounts.id, shipments.carrierAccountId)))
+      .where(whereStore(shipments, scope, eq(shipments.orderId, id)))
+      .orderBy(desc(shipments.createdAt))
+      .limit(1),
+    db
+      .select({ at: orderEvents.at, meta: orderEvents.meta })
+      .from(orderEvents)
+      .where(whereStore(orderEvents, scope, eq(orderEvents.orderId, id), eq(orderEvents.type, "state_changed"), eq(orderEvents.toState, "remitted")))
+      .orderBy(desc(orderEvents.id))
+      .limit(1),
+  ]);
+  const meta = (rem?.meta ?? null) as { remittanceId?: unknown; lineNo?: unknown } | null;
+  let remitted: OrderDrawerR2["remitted"] = null;
+  if (rem && meta && typeof meta.remittanceId === "string") {
+    const [r] = await db.select({ statementRef: remittances.statementRef }).from(remittances).where(byId(remittances, scope, meta.remittanceId)).limit(1);
+    if (r) remitted = { statementRef: r.statementRef, line: typeof meta.lineNo === "number" ? meta.lineNo : null, at: rem.at.toISOString() };
+  }
+  return {
+    collectedCents: money?.collectedCents ?? null,
+    refundCents: money?.refundCents ?? null,
+    settlement: ship ? (ship.settlement ?? null) : mySettlement,
+    remitted,
+    hasShipment: !!ship,
+  };
 }
 
 /** The drawer of one order the member may see (OD12, inbound lookups included); null = missing, hidden or another store's. */
@@ -672,6 +721,7 @@ export async function orderDrawerJson(ctx: StoreCtx, id: string): Promise<OrderD
     confirmedByName: row.confirmedBy ? (names.get(row.confirmedBy) ?? null) : null,
     confirmedByLabel: row.confirmedByLabel,
     money: { settlement: accounting.myCarrier.settlement, deliveredAt: row.deliveredAt ? row.deliveredAt.toISOString() : null },
+    ...(releaseOn("R2") ? { r2: await drawerR2(scope, id, accounting.myCarrier.settlement) } : {}),
     adEvents: capi.map((e) => {
       const m = (e.meta ?? {}) as Record<string, unknown>;
       return {

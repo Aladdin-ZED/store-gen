@@ -109,6 +109,8 @@ const SLOT_OF_NAME: Readonly<Record<string, SlotId>> = Object.freeze({
   "catalog.stock_reconcile": "6",
   "catalog.collections": "6",
   "catalog.bestsellers": "6",
+  // R2 (contract step C2-E, S2 DES-§24.1): the hourly brand.assets job (logo exports and PNG renditions, ≤ 3 s)
+  "brand.assets": "6",
   // 7 lifecycle and the small tick jobs
   lifecycle: "7",
   "renders.fanout": "7", // the platform-wide re-render's store-by-store enqueue (PLA-§16.2, P8 step 5)

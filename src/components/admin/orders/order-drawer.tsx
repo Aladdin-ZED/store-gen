@@ -55,6 +55,8 @@ import {
   undoMoveAction,
 } from "@/app/app/[store]/orders/actions";
 import { markCashReceivedAction } from "@/app/app/[store]/finance/actions";
+import { MoneySlot } from "@/components/admin/finance/drawer-money";
+import { ShipmentPanel } from "@/components/admin/shipping/shipment-panel";
 import { queueScriptAction, recordOutcomeAction, releaseOrderAction, revealPhoneAction, takeOrderAction } from "@/app/app/[store]/queue/actions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -76,6 +78,7 @@ import { HistoryBlock } from "../queue/parts";
 import { DateSheet, ReasonSheet, WaSheet, type PickReason } from "../queue/pickers";
 import { ScriptPanel } from "../queue/script-panel";
 import { ago, money, ymdLabel } from "../queue/time";
+import { MergeDialog } from "./manual/merge-dialog";
 import { OrderContents } from "./order-contents";
 import { CONFIRM_TONE, MONEY_TONE, moveEntries, newIdem, settle, SHIP_TONE, viewerMovePerms } from "./ops-ui";
 import { MoveMenu, type MovePick } from "./status-menu";
@@ -604,6 +607,8 @@ function CustomerBlock({ order, perms, locale, write }: { order: OrderDrawerJson
                   <Button size="sm" variant="ghost" className="h-7 rounded-full" onClick={() => void write("dup", dismissDuplicateAction(order.id, d.id), t("ops.drawer.keptBoth"))}>
                     {t("ops.dup.keep")}
                   </Button>
+                  {/* R2 (OP-06 merge; contract step C2-E): S4's dialog for orders.edit + orders.assign holders */}
+                  {order.r2 && perms.edit && perms.assign ? <MergeDialog keepId={order.id} dupId={d.id} onDone={() => void write("merge", Promise.resolve({ ok: true, data: null }))} /> : null}
                 </span>
               )}
             </li>
@@ -691,7 +696,9 @@ function DeliveryBlock({ order, perms, tz, locale, write, busy }: { order: Order
           </button>
         ) : null}
 
-        {(order.trackingRef || order.carrierLabel || perms.ship) && (
+        {/* R2 (OD55, OPE-§17.4; contract step C2-E): the shipment is the truth, S4's panel replaces the tracking block */}
+        {order.r2?.hasShipment ? <ShipmentPanel orderId={order.id} onChanged={() => void write("shipment", Promise.resolve({ ok: true, data: null }))} /> : null}
+        {!order.r2?.hasShipment && (order.trackingRef || order.carrierLabel || perms.ship) && (
           <div className="grid gap-1.5 rounded-xl bg-foreground/[0.03] px-3 py-2">
             {tracking ? (
               <form
@@ -792,6 +799,20 @@ function MoneyBlock({ order, perms, locale, write, busy }: { order: OrderDrawerJ
           {busy === "cash" ? <Loader2Icon className="animate-spin" /> : <CheckIcon />} {t("ops.drawer.markCash")}
         </Button>
       )}
+      {/* R2 (OD51, OD59, OPE-§16.7; contract step C2-E): S3's money slot */}
+      {order.r2 ? (
+        <MoneySlot
+          orderId={order.id}
+          money={order.states.money}
+          ship={order.states.ship}
+          totalCents={Math.round(order.total * 100)}
+          collectedCents={order.r2.collectedCents}
+          refundCents={order.r2.refundCents}
+          currency={order.currency}
+          settlement={order.r2.settlement}
+          remitted={order.r2.remitted}
+        />
+      ) : null}
     </Block>
   );
 }

@@ -33,16 +33,20 @@ const MANIFEST_SOURCES = ["order_id", "name", "phone", "city", "address", "landm
 
 const STARTER: ManifestSource[] = ["order_id", "name", "phone", "city", "address", "cod_amount", "content", "qty"];
 
-/** Download the Carrier file of `ids` (the spec must exist); true when a file was saved. */
+/**
+ * Download the Carrier file of `ids` (the spec must exist); true when a file was saved. R2 (OPS-27, OPE-§M.2; contract
+ * step C2-E): `format: "xlsx"` asks S4's route for the Excel file (S3's writer); the default is today's CSV.
+ */
 export function useCarrierDownload() {
   const storeView = useStore();
   const stepUp = useStoreStepUp();
   const t = useT();
-  return async (ids: readonly string[], heldIds: readonly string[]): Promise<boolean> => {
+  return async (ids: readonly string[], heldIds: readonly string[], format: "csv" | "xlsx" = "csv"): Promise<boolean> => {
     const go = ids.filter((id) => !heldIds.includes(id));
     if (heldIds.length) toast.message(t("ops.carrier.heldLeftOut", { n: heldIds.length }));
     if (!go.length) return false;
-    return downloadFile(`${storeView.api("/orders/carrier-csv")}?ids=${go.join(",")}&partial=1`, stepUp, "carrier.csv");
+    const xlsx = format === "xlsx" ? "&format=xlsx" : "";
+    return downloadFile(`${storeView.api("/orders/carrier-csv")}?ids=${go.join(",")}&partial=1${xlsx}`, stepUp, xlsx ? "carrier.xlsx" : "carrier.csv");
   };
 }
 

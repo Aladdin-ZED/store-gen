@@ -23,6 +23,8 @@ import "server-only";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { auditIn } from "@/lib/admin-data/store-audit";
+import { releaseOn } from "@/lib/auth/permissions";
+import { createManualOrderV3 } from "@/lib/catalog/order-v3.server";
 import { db } from "@/lib/db/client";
 import { blocklist, leads, orders, pages } from "@/lib/db/schema";
 import { offerAvailable } from "@/lib/page/catalog";
@@ -479,7 +481,25 @@ export async function convertLeadToOrder(ctx: WriteCtx, leadId: string, input: O
   if (!lead) return refuse("not_found");
   if (lead.convertedOrderId) return refuse("already_converted", { orderId: lead.convertedOrderId });
   const sel = lead.sel;
-  if (sel?.v === 3) return refuse("invalid", { text: "This lead is a catalog order. Catalog orders by phone arrive in a later release." });
+  // R2 (OPE-§11.4 rev 3, STO-R30; wired at the R2 contract step C2-E): a catalog (v3) lead converts through S1's v3
+  // manual create, which re-prices every line; R1 keeps the refusal
+  if (sel?.v === 3) {
+    if (!releaseOn("R2")) return refuse("invalid", { text: "This lead is a catalog order. Catalog orders by phone arrive in a later release." });
+    const v3 = await createManualOrderV3(ctx, {
+      lines: sel.lines.map((l) => ({ pk: l.pk, bundleId: l.bundleId, units: l.units, extras: l.extras, n: l.n })),
+      customer: { ...input.customer, name: input.customer.name || lead.name || "", phone: input.customer.phone || lead.phone || "", city: input.customer.city || lead.city || "" },
+      source: lead.kind === "whatsapp" ? "whatsapp" : "manual",
+      confirmed: input.confirmed,
+      ...(input.adjustCents !== undefined ? { adjustCents: input.adjustCents } : {}),
+      ...(input.adjustReason !== undefined ? { adjustReason: input.adjustReason } : {}),
+      fromLead: { leadId },
+      ...(input.allowDuplicate !== undefined ? { allowDuplicate: input.allowDuplicate } : {}),
+      idem: input.idem,
+    });
+    if (!v3.ok) return v3;
+    await markConverted(scope, leadId, v3.data.orderId);
+    return { ok: true, data: { orderId: v3.data.orderId } };
+  }
 
   // pre-fill: what the agent typed wins, the lead fills the blanks (its selection is re-priced anyway)
   const typed = input.selection;

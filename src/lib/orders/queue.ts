@@ -26,7 +26,8 @@ import "server-only";
  */
 import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { can, type StoreRole, STORE_ROLES } from "@/lib/auth/permissions";
+import { can, releaseOn, type StoreRole, STORE_ROLES } from "@/lib/auth/permissions";
+import { assignByRules } from "@/lib/callcenter/rules";
 import { callingWindowFor } from "@/lib/callcenter/window.server";
 import { withIdem } from "@/lib/callcenter/idem";
 import { affectedRows, isLive, opsNow, profileOf, releaseClaims, renewHeldLease, touchAgent, writePresence } from "@/lib/callcenter/presence";
@@ -587,11 +588,17 @@ export async function assignOrders(ctx: WriteCtx, ids: readonly string[], userId
  * daily cap, smooth weighted round-robin (`rr_credit += weight`; the highest wins; its credit − Σ weights), under
  * `storeLock(sid, "rr")` with a 1 s wait; the order gets the agent and a lease of `rebalanceMinutes` (event
  * `assigned`, by "rr"). The lock not acquired, or nobody live → the order stays in the pool. `pull` and `manual`:
- * nothing. Test orders are assigned like any order (they are claimable, OD31). Rules (OP-18) are R2.
+ * nothing. Test orders are assigned like any order (they are claimable, OD31). Rules (OP-18, R2; S4's `assignByRules`,
+ * wired at the R2 contract step C2-E) run first, in every mode: a rule that handles the order ends the assignment.
  */
 export async function assignOnCreate(scope: WriteScope, order: { id: string; isTest: boolean }): Promise<{ assigned: string | null }> {
   const ops = await getStoreSetting(scope, "ops");
-  if (ops.assignment !== "round_robin" || !validId(order.id)) return { assigned: null };
+  if (!validId(order.id)) return { assigned: null };
+  if (releaseOn("R2")) {
+    const ruled = await assignByRules(scope, order);
+    if (ruled.handled) return { assigned: ruled.assigned };
+  }
+  if (ops.assignment !== "round_robin") return { assigned: null };
   const store = await getStoreById(scope.storeId);
   const tz = store?.timezone || "Africa/Casablanca";
   const r = await withNamedLock(storeLock(scope.storeId, "rr"), RR_LOCK_SEC, () => assignRoundRobin(scope, order.id, ops, tz));

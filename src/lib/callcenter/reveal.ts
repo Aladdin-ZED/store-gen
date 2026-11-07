@@ -20,9 +20,14 @@ import "server-only";
  *
  * The number is never cached, logged, stored in web storage or put in an app URL; it lives in the open card's
  * component state only (OPE-§8.2).
+ *
+ * R2 (OP-19, OPE-§8.4; seams wired at the R2 contract step C2-E, S4's `reveal-alarm.ts`): after the rate limit,
+ * `revealGate` may answer `reveal_paused` (HTTP 429 with the code); after the events, `noteReveal` counts the reveal
+ * toward the alarm. Neither runs while `releaseOn("R2")` is false.
  */
 import { and, desc, eq } from "drizzle-orm";
 import { parsePhoneNumberFromString } from "libphonenumber-js/max";
+import { releaseOn } from "@/lib/auth/permissions";
 import { db } from "@/lib/db/client";
 import { messageTemplates, orderEvents, orders } from "@/lib/db/schema";
 import { orderTemplateValues, renderTemplate } from "@/lib/integrations/templates";
@@ -33,6 +38,7 @@ import { getStoreSetting } from "@/lib/settings";
 import { byId, whereStore } from "@/lib/tenancy/sql";
 import type { ActionResult, WriteCtx } from "@/lib/tenancy/types";
 import { CARD, firstNameOf, type CardRow } from "./card";
+import { noteReveal, revealGate } from "./reveal-alarm";
 import { withIdem } from "./idem";
 import { opsNow, renewHeldLease } from "./presence";
 import type { ScriptLocale } from "./script";
@@ -60,7 +66,7 @@ export const REVEAL_RECENT_MS = 30 * 60_000;
 const ORDER_ID_RE = /^[A-Z0-9]{2,8}-[A-Z0-9]{4,12}$/;
 
 /** What the idempotency cache keeps (no number, OPE-§8.2). */
-type RevealRef = { ok: true; orderId: string; why: RevealWhy; templateId: string | null } | { ok: false; error: "not_found" | "forbidden" | "invalid" | "rate_limited" };
+type RevealRef = { ok: true; orderId: string; why: RevealWhy; templateId: string | null } | { ok: false; error: "not_found" | "forbidden" | "invalid" | "rate_limited" | "reveal_paused" };
 
 /** The order's number for `why` (see the header). */
 export async function revealPhone(ctx: WriteCtx, orderId: string, why: RevealWhy, opts: { templateId?: string; idem?: string } = {}): Promise<ActionResult<Revealed>> {
@@ -96,7 +102,7 @@ export async function revealPhone(ctx: WriteCtx, orderId: string, why: RevealWhy
   return { ok: true, data: await answer(ctx, row, ref.why, ref.templateId, hit.src) };
 }
 
-const REVEAL_ERRORS: readonly string[] = ["not_found", "forbidden", "invalid", "rate_limited"];
+const REVEAL_ERRORS: readonly string[] = ["not_found", "forbidden", "invalid", "rate_limited", "reveal_paused"];
 
 /** A stored answer of this very request: the same order, reason and template, or one of the reveal's own refusals. */
 function sameReveal(stored: unknown, orderId: string, why: RevealWhy, templateId: string | null): stored is RevealRef {
@@ -111,7 +117,11 @@ type RunResult = { ok: true; row: CardRow; src: string | null } | Extract<Reveal
 async function run(ctx: WriteCtx, orderId: string, why: RevealWhy, templateId: string | null): Promise<RunResult> {
   const { scope } = ctx;
   const uid = ctx.user.id;
-  if (!(await rateLimit(storeBucket(scope, "reveal", uid), REVEAL_LIMIT, REVEAL_WINDOW_SEC)).ok) return { ok: false, error: "rate_limited" };
+  const rate = await rateLimit(storeBucket(scope, "reveal", uid), REVEAL_LIMIT, REVEAL_WINDOW_SEC);
+  if (!rate.ok) return { ok: false, error: "rate_limited" };
+  const r2 = releaseOn("R2");
+  // R2 (OP-19): an agent paused by the reveal alarm opens no number until a manager lifts the pause
+  if (r2 && !(await revealGate(scope, uid)).ok) return { ok: false, error: "reveal_paused" };
   const [row] = await db.select(CARD).from(orders).where(byId(orders, scope, orderId)).limit(1);
   if (!row) return { ok: false, error: "not_found" };
   const now = opsNow();
@@ -130,6 +140,7 @@ async function run(ctx: WriteCtx, orderId: string, why: RevealWhy, templateId: s
   const events: NewOrderEvent[] = [{ orderId, actorKind: "user", actorId: uid, type: "phone_revealed", meta: { why }, at: now }];
   if (why === "whatsapp" && templateId !== null) events.push({ orderId, actorKind: "user", actorId: uid, type: "whatsapp_sent", meta: { template: templateId, locale }, at: now });
   await appendEvents(db, scope, events);
+  if (r2) await noteReveal(scope, uid, rate.count);
   if (holds) {
     const { leaseMinutes } = await getStoreSetting(scope, "ops");
     await renewHeldLease(scope, uid, now, leaseMinutes, orderId);

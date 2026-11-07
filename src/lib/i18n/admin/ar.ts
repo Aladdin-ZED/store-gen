@@ -61,6 +61,7 @@ export const messages: Partial<BaseMessages> = {
   "error.honesty_blocked": "بعض المعلومات في الصفحة تحتاج إلى مصدر قبل النشر.",
   "error.budget_blocked": "الصفحة طويلة أو ثقيلة جدًا للنشر.",
   "error.rate_limited": "محاولات كثيرة. انتظر بضع دقائق ثم أعد المحاولة.",
+  "error.reveal_paused": "فتحت أرقاماً كثيرة. اطلب من المسؤول.",
   "error.conflict": "تم تعديل هذا العنصر في مكان آخر. أعد التحميل ثم حاول مجددًا.",
   "error.server": "حدث خطأ من جهتنا. يرجى المحاولة مرة أخرى.",
   "error.session_ended": "انتهت جلستك. سجّل الدخول من جديد.",

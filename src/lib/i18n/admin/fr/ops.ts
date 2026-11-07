@@ -192,6 +192,8 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "ops.tl.carrier_status": "Mise à jour du transporteur",
   "ops.tl.remitted": "Argent reversé par le transporteur",
   "ops.tl.merged": "Fusionnée",
+  "ops.tl.shipment_cancelled": "Envoi annulé avant l’enlèvement",
+  "ops.tl.carrier_notified": "Transporteur prévenu du changement",
   "ops.tl.detail.forced": "Forcé",
   "ops.tl.detail.implied": "Déduit d'une étape suivante",
   "ops.tl.detail.auto": "Automatique",

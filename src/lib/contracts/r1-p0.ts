@@ -198,6 +198,8 @@ export type P4Transition = [
         collectedCents?: number;
         lines?: { i: number; state: "delivered" | "refused" | "pending"; qty: number }[];
         inbound?: boolean;
+        // R2 contract step C2-E (OD59, additive)
+        refundCents?: number;
       }
     >
   >,
@@ -216,9 +218,10 @@ export type P4Transition = [
       (
         scope: WriteScope,
         orderId: string,
-        ext: { legacy?: OrderStatus; ship?: ShipState; money?: MoneyState; at?: Date },
-        // P0b (CCR P4-2 / P5-2, OD54): the sheet's Agent cell, additive
-        src: { kind: "sheet" | "carrier" | "import" | "api"; ref?: string; agentLabel?: string },
+        // R2 contract step C2-E (S3 / S4 / S5 shared needs, additive): returnReason, shipAfter, collectedCents
+        ext: { legacy?: OrderStatus; ship?: ShipState; money?: MoneyState; at?: Date; returnReason?: ReturnReason; shipAfter?: Date | null; collectedCents?: number },
+        // P0b (CCR P4-2 / P5-2, OD54): the sheet's Agent cell, additive; C2-E: meta, reconciliation
+        src: { kind: "sheet" | "carrier" | "import" | "api"; ref?: string; agentLabel?: string; meta?: Record<string, string | number>; reconciliation?: true },
       ) => Promise<TransitionResult | { ok: true; changed: false; noop: true }>
     >
   >,
@@ -566,7 +569,8 @@ export type P8Outbox = [
   Assert<Equals<SendResult, { ok: true; status?: number } | { ok: false; retry: boolean; status?: number; error: string }>>,
   // P0b (CCR P5-1): `paused` (§H.8 capi_enabled) and `batch` (OPE-§21.3 Telegram) are optional, so today's handlers
   // compile unchanged
-  Assert<Equals<keyof OutboxHandler<unknown>, "kind" | "maxPerTick" | "perStorePerTick" | "timeoutMs" | "send" | "paused" | "batch">>,
+  // R2 contract step C2-E (S5, additive): + gate
+  Assert<Equals<keyof OutboxHandler<unknown>, "kind" | "maxPerTick" | "perStorePerTick" | "timeoutMs" | "send" | "paused" | "batch" | "gate">>,
   Assert<Equals<OutboxHandler<unknown>["send"], (item: ClaimedItem<unknown>) => Promise<SendResult>>>,
   Assert<Equals<OutboxHandler<unknown>["paused"], (() => Promise<boolean>) | undefined>>,
   Assert<
@@ -583,7 +587,8 @@ export type P8Outbox = [
   Assert<Equals<typeof outbox.OUTBOX_BACKOFF_MS, readonly [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000, 86_400_000]>>,
   Assert<Equals<typeof outbox.isFinalFailure, (item: Pick<ClaimedItem, "attempts">, result: SendResult) => boolean>>,
   Assert<Equals<typeof outbox.registerOutboxHandler, <P>(h: OutboxHandler<P>) => void>>,
-  Assert<Equals<typeof outbox.drainOutbox, (opts: { budgetMs: number; storeId?: string; kinds?: OutboxKind[] }) => Promise<DrainReport>>>,
+  // R2 contract step C2-E (S6, additive): + platformOnly
+  Assert<Equals<typeof outbox.drainOutbox, (opts: { budgetMs: number; storeId?: string; kinds?: OutboxKind[]; platformOnly?: true }) => Promise<DrainReport>>>,
   Assert<Equals<typeof outbox.replay, (ctx: StoreCtx | PlatformCtx, id: string) => Promise<void>>>,
   Assert<Equals<typeof outbox.outboxSummary, (scope: StoreScope) => Promise<OutboxSummary>>>,
   Assert<Equals<typeof renders.enqueueRenders, (scope: WriteScope, pageIds: readonly string[] | "all-live", reason: RenderReason, priority?: number) => Promise<{ enqueued: number }>>>,
@@ -967,7 +972,8 @@ export type P7Router = [
 ];
 
 export type P7Jobs = [
-  Assert<Equals<AiJobKind, "director_deep" | "store_blueprint" | "logo_system" | "health_report">>,
+  // R2 contract step C2-E (S1 / S7, STO-§4.7): + catalog_from_photos (its input is S1's CatalogFromPhotosJobInput)
+  Assert<Equals<AiJobKind, "director_deep" | "store_blueprint" | "logo_system" | "health_report" | "catalog_from_photos">>,
   Assert<Equals<AiJobInput<"director_deep">, { kind: "director_deep"; task: AiTaskId; input: unknown; instant?: unknown }>>,
   Assert<
     Equals<typeof aiEnqueue.enqueueAiJob, <K extends AiJobKind>(ctx: StoreCtx, job: AiJobInput<K>) => Promise<{ ok: true; jobId: string; deduped: boolean } | { ok: false; code: AiFailCode }>>

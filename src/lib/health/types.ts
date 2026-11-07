@@ -58,8 +58,11 @@ export interface HealthInputs {
   brand: { storeName: string; legalName: string | null; whatsappName: string | null; policyTexts: string[] } | null;
   /** abuse_reports counts for the store (ar_store_idx) */
   abuseReports: { new24h: number; total: number } | null;
-  /** orderKpis, queueCounts, orderRiskMix (P4) */
-  orders: (OrderKpis & { risky7d: number; firstTouchP50Ms: number | null; unattempted2h: number; unreachable7d: number; unreachable28d: number }) | null;
+  /**
+   * orderKpis, queueCounts, orderRiskMix (P4). R2 (C2-E, S4's `ops:reveals` rule, OPE-§27.2): `revealAlarms7d` = agents
+   * whose `agent_profiles.reveal_alarm_at` is within 7 days; absent while `releaseOn("R2")` is false.
+   */
+  orders: (OrderKpis & { risky7d: number; firstTouchP50Ms: number | null; unattempted2h: number; unreachable7d: number; unreachable28d: number; revealAlarms7d?: number }) | null;
   /** integrationHealth (P5) */
   integrations: IntegrationHealthRow[] | null;
   /** sheetsBacklog (P5) */

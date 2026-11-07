@@ -61,6 +61,7 @@ export const messages: Partial<BaseMessages> = {
   "error.honesty_blocked": "Certaines affirmations de la page doivent être justifiées avant la publication.",
   "error.budget_blocked": "La page est trop longue ou trop lourde pour être publiée.",
   "error.rate_limited": "Trop de tentatives. Patientez quelques minutes puis réessayez.",
+  "error.reveal_paused": "Trop de numéros ouverts. Demandez à votre responsable.",
   "error.conflict": "Cet élément a été modifié ailleurs. Rechargez puis réessayez.",
   "error.server": "Un problème est survenu de notre côté. Veuillez réessayer.",
   "error.session_ended": "Votre session a expiré. Reconnectez-vous.",

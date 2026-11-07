@@ -180,6 +180,8 @@ export function purgeSections(h: Harness, d: PurgeSectionDeps): void {
       dailyUsage: "2026-10-27",
       passwordResets: "2026-10-04T12:00:00.000Z",
       staffInvites: "2026-10-04T12:00:00.000Z",
+      // R2 contract step C2-E (S6, OS-13): the Worker's per-minute counters, 14 days
+      edgeReports: "2026-10-20T12:00:00.000Z",
     });
     t.check("every statement deletes, is bounded by LIMIT 2000 and compares with its cutoff", RT.RETENTION_RULES.every((r) => /^DELETE FROM [a-z_]+ WHERE /.test(r.sql) && r.sql.endsWith(" LIMIT 2000") && r.sql.includes("< ?") && r.sql.includes(`FROM ${r.table} `)));
     t.eq("names unique", new Set(RT.RETENTION_RULES.map((r) => r.name)).size, RT.RETENTION_RULES.length);

@@ -30,6 +30,7 @@ import { useAdminLocale, useT } from "@/lib/i18n/admin/client";
 import { cityKey, cityLabel, type CityKey } from "@/lib/orders/address";
 import { cn } from "@/lib/utils";
 import { settle } from "../orders/ops-ui";
+import { AssignmentRulesEditor } from "../shipping/ops/assignment-rules";
 import { BestHours } from "../queue/board";
 import { clock } from "../queue/time";
 import { CallingWindowEditor, cloneWeek, WEEKDAYS, WeekTable, weekValid, type WeekDays } from "./calling-window";
@@ -408,6 +409,8 @@ function RetriesTab({ view, canEdit }: { view: View; canEdit: boolean }) {
         {form.assignment === "round_robin" && (
           <NumField id={`${uid}-reb`} label={t("ops.cc.assign.rebalance")} hint={t("ops.cc.assign.rebalanceHint")} value={form.rebalanceMinutes} min={5} max={240} onChange={(v) => f("rebalanceMinutes", v)} disabled={d} unit={t("ops.cc.unit.min")} />
         )}
+        {/* R2 (OP-18; contract step C2-E): S4's rules, evaluated before the mode */}
+        {view.assignmentRules ? <AssignmentRulesEditor rules={view.assignmentRules.rules} agents={view.assignmentRules.agents} pages={view.pages} canEdit={canEdit} /> : null}
       </Section>
 
       <Section id="cc-timing" title={t("ops.cc.timing.title")}>

@@ -26,7 +26,7 @@ import { newId } from "@/lib/db/ids";
 import { blocklist, customers, orders, users } from "@/lib/db/schema";
 import { toCents } from "@/lib/finance/lite/cents";
 import { toAsciiDigits } from "@/lib/markets/phone";
-import { maskIfImpersonation } from "@/lib/platform/mask";
+import { maskForViewer } from "@/lib/admin-data/mask";
 import { getStoreSetting } from "@/lib/settings";
 import { byId, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreCtx, StoreScope, WriteCtx, WriteScope } from "@/lib/tenancy/types";
@@ -286,7 +286,7 @@ const viewerOf = (ctx: StoreCtx): OrderViewer => ({ kind: "user", userId: ctx.us
 
 /** The customer fields a scope may see (OD61): the name and the internal note masked under impersonation. */
 function shown<T extends { name: string | null; note?: string | null; city: string | null }>(scope: StoreScope, row: T): { name: string | null; note: string | null } {
-  const m = maskIfImpersonation(scope, { name: row.name, phone: null, address: null, city: row.city, landmark: null, note: row.note ?? null });
+  const m = maskForViewer(scope, { name: row.name, phone: null, address: null, city: row.city, landmark: null, note: row.note ?? null });
   return { name: m.name === null ? null : String(m.name), note: m.note === null ? null : String(m.note) };
 }
 

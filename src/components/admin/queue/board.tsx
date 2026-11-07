@@ -23,6 +23,7 @@ import { mapAgentLabelAction } from "@/app/app/[store]/team/agents/actions";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { BoardAgentRow, BoardState, BestHourCell } from "@/lib/callcenter/board.server";
+import { RevealAlarmBadge } from "../shipping/ops/reveal-alarm";
 import type { MessageKey } from "@/lib/i18n/admin";
 import { useAdminLocale, useT } from "@/lib/i18n/admin/client";
 import type { Kpi } from "@/lib/orders/profile";
@@ -315,6 +316,7 @@ function AgentsTable({
                     <div className="grid gap-0.5">
                       <span className="font-medium text-foreground">{a.name}</span>
                       <PresenceText a={a} />
+                      {a.revealAlarm ? <RevealAlarmBadge userId={a.userId} state={a.revealAlarm} canLift={canAct} /> : null}
                     </div>
                   </td>
                   <td className="q-xs">
@@ -357,6 +359,7 @@ function AgentsTable({
                   <span className="min-w-0 truncate font-medium text-foreground">{a.name}</span>
                   <PresenceText a={a} />
                 </div>
+                {a.revealAlarm ? <RevealAlarmBadge userId={a.userId} state={a.revealAlarm} canLift={canAct} /> : null}
                 <p className="q-xs q-num text-muted-foreground">
                   {t("ops.board.phoneLine", { decided: num(a.decided, locale), confirmed: num(a.confirmed, locale), attempts: num(a.attempts, locale) })}
                   {a.current && (

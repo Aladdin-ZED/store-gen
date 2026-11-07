@@ -237,6 +237,24 @@ async function sendClaimRows(deps: DrainDeps, owner: WriteScope | null, h: Outbo
         return handled;
       }
     }
+    // the handler's own cap (C2-E, OutboxHandler.gate): this unit waits, the next units still go
+    if (h.gate) {
+      const head = unit.items[0]!;
+      let gate: { ok: true } | { ok: false; retryAt: number };
+      try {
+        gate = await h.gate({ storeId: head.storeId, targetId: head.targetId, topic: head.topic }, deps.now());
+      } catch (err) {
+        deps.recordError("outbox", err, { storeId: head.storeId, route: `outbox:${h.kind}:gate` });
+        gate = { ok: false, retryAt: deps.now() + 60_000 };
+      }
+      if (!gate.ok) {
+        const ids = unit.items.map((it) => it.id);
+        await deps.store.release(owner, ids, claim, gate.retryAt);
+        for (const id of ids) settled.add(id);
+        st.rescheduled += ids.length;
+        continue;
+      }
+    }
     const t0 = deps.now();
     const result = await sendWithin(h.timeoutMs, (signal) => (unit.batch && batchSend ? batchSend.call(h.batch, unit.items, signal) : send.call(h, unit.items[0]!, signal)));
     const ms = Math.max(0, deps.now() - t0);

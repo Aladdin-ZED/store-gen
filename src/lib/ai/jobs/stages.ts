@@ -23,8 +23,8 @@ import type { AiJobKind } from "./enqueue";
 
 /** what a stage runs: a task, or the probe's model-free sleep */
 export type StageTask = AiTaskId | "probe.sleep";
-/** every `ai_jobs.kind`, the staff-only probe included (and 0006's catalog_from_photos, not enqueuable yet) */
-export type JobRowKind = AiJobKind | "probe" | "catalog_from_photos";
+/** every `ai_jobs.kind`, the staff-only probe included (0006's catalog_from_photos is an AiJobKind from C2-E) */
+export type JobRowKind = AiJobKind | "probe";
 
 /** every stage is a pattern-A-sized call (core §H.12) */
 export const STAGE_DEADLINE_MS = 90_000;
@@ -111,6 +111,9 @@ export function stageInputOf(stageId: string, jobInput: unknown): unknown {
 /** The logical parts of each kind (AI-§A.2 estimates, [estimate ±2×]). */
 function partsFor(kind: AiJobKind, input: unknown): Part[] {
   switch (kind) {
+    case "catalog_from_photos":
+      // R2 (STO-§4.7, C2-E): S7 writes this kind's stage plan around S1's runCatalogFromPhotosJob; planForJob refuses it until then
+      throw new Error("ai jobs: catalog_from_photos has no stage plan yet");
     case "store_blueprint":
       // brand kit + collections, home sections + policy drafts (17,000), then one critique of the previews (6,000)
       return [

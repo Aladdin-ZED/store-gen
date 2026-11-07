@@ -16,7 +16,7 @@ import "server-only";
  * only as the masked first name + initial and a masked phone, through maskIfImpersonation (OD61).
  */
 import { asc, eq, gt, inArray, isNotNull, lte } from "drizzle-orm";
-import { can } from "@/lib/auth/permissions";
+import { can, releaseOn } from "@/lib/auth/permissions";
 import { db } from "@/lib/db/client";
 import { agentProfiles, orders, storeMembers, users } from "@/lib/db/schema";
 import { maskPhone } from "@/lib/orders/masking";
@@ -31,6 +31,7 @@ import { inboundLookupsThisHour } from "./inbound";
 import { agentsToday, type AgentDayStats } from "./kpis.server";
 import { confirmationRate, contactRate, firstTouchP50 } from "./kpis";
 import { isLive, opsNow } from "./presence";
+import { revealAlarmStates, type RevealAlarmState } from "./reveal-alarm";
 import { callingWindowFor } from "./window.server";
 import { sheetAgents, type SheetAgentRow } from "./labels";
 
@@ -52,6 +53,8 @@ export interface BoardAgentRow {
   dailyCap: number | null;
   /** inbound lookups this hour (OPE-§5.7) */
   lookupsHour: number;
+  /** R2 (OP-19; contract step C2-E): the agent's reveal alarm (S4's `revealAlarmStates`), only when in alarm or paused */
+  revealAlarm?: RevealAlarmState;
 }
 
 export interface BestHourCell {
@@ -144,6 +147,8 @@ export async function boardState(scope: StoreScope): Promise<BoardState> {
       scope,
       agents.map((a) => a.userId),
     );
+    // R2 (OP-19): the agents in alarm or paused; R1 never calls the stub
+    const alarms = releaseOn("R2") ? await revealAlarmStates(scope, agents.map((a) => a.userId)) : {};
     const prof = new Map(profiles.map((p) => [p.userId, p]));
     const fig = new Map<string, AgentDayStats>(figures.map((f) => [f.userId, f]));
     const holding = new Map<string, { orderId: string; since: string }>();
@@ -170,6 +175,7 @@ export async function boardState(scope: StoreScope): Promise<BoardState> {
         firstTouchP50Min: firstTouchP50(f?.firstTouchMin ?? [], "agent"),
         dailyCap: p?.dailyCap ?? null,
         lookupsHour: lookups[a.userId] ?? 0,
+        ...(alarms[a.userId] ? { revealAlarm: alarms[a.userId] } : {}),
       };
     });
     rows.sort((x, y) => Number(y.live) - Number(x.live) || y.decided - x.decided || x.name.localeCompare(y.name));

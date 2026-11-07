@@ -20,9 +20,15 @@ import "server-only";
  *
  * External sources (a sheet, a carrier file, an import, the API) go through `applyExternalStatus`: never forced, never
  * role-checked, legality, implication and terminal protection kept (OD5); a refused move writes `external_rejected`
- * and sets `sheet_dirty |= 1` so the app's label returns to the sheet. R1 limits (0005 schema): the money state
- * `refunded` and the partial-delivery `lines` are R2 (0006) and answer `illegal`; `collectedCents` is validated and kept
- * in the event meta only (the column arrives with 0006).
+ * and sets `sheet_dirty |= 1` so the app's label returns to the sheet. Release gate (R2 contract step C2-E, S3 / S4
+ * shared needs): the money state `refunded` (with `refundCents`, OD59) and the partial-delivery `lines` (OD51, written
+ * as `line_outcome` in the same transaction as the `delivered` move) answer `illegal` while `releaseOn("R2")` is false;
+ * `orders.collected_cents` (0006) is written at `delivered` (the input's amount, else the total), and from R2 every
+ * `delivered` event carries it in its meta. From R2 the transition reads S4's `activeShipmentFacts` inside its
+ * transaction: an open shipment pins the parcel (`locked_ship`) and its carrier account's settlement replaces
+ * `accounting.myCarrier` (OD52). `applyExternalStatus` (C2-E, additive): `ext.returnReason` / `shipAfter` /
+ * `collectedCents`, `src.meta` (an import's statement facts on its own moves) and `src.reconciliation` (actor kind
+ * `reconciliation`, AI R37).
  *
  * The scope is a `WriteScope` (D71). The order hooks receive the same scope.
  *
@@ -40,13 +46,16 @@ import type { AttemptOutcome, DeliveryOutcome } from "@/lib/callcenter/outcomes"
 import { db } from "@/lib/db/client";
 import { orders } from "@/lib/db/schema";
 import { toCents } from "@/lib/finance/lite/cents";
+import { releaseOn } from "@/lib/auth/permissions";
 import { getStoreSetting } from "@/lib/settings";
 import type { OpsSetting } from "@/lib/settings/keys/ops";
+import { activeShipmentFacts } from "@/lib/shipping/active";
 import { getStoreById } from "@/lib/tenancy/public";
 import { byId } from "@/lib/tenancy/sql";
 import type { StoreCtx, SystemCtx, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 import type { OrderStatus } from "./contract";
 import { appendEvents, countRescueCalls, type NewOrderEvent } from "./events";
+import { isItemsV3 } from "./items-v3";
 import { runOrderHooks, type OrderHookEvent, type OrderRow, type Tx } from "./hooks";
 import { logError } from "./log";
 import {
@@ -109,6 +118,8 @@ export interface TransitionInput {
   lines?: { i: number; state: "delivered" | "refused" | "pending"; qty: number }[];
   /** OD53: the customer called; relaxes the OD12 visibility rule for a looked-up order */
   inbound?: boolean;
+  /** R2 (OD59; C2-E, additive): the amount of a move to money `refunded`, 0 < x ≤ the collected cents */
+  refundCents?: number;
 }
 
 export type TransitionError = "not_found" | "illegal" | "conflict" | "reason_required" | "forbidden" | "locked_ship" | "bad_due" | "bad_duplicate" | "bad_hold" | "bad_amount";
@@ -148,6 +159,7 @@ const CUR = {
   deliveryAttempts: orders.deliveryAttempts,
   priority: orders.priority,
   shippedAt: orders.shippedAt,
+  collectedCents: orders.collectedCents,
   firstTouchAt: orders.firstTouchAt,
   dueAt: orders.dueAt,
   createdAt: orders.createdAt,
@@ -211,7 +223,7 @@ interface Job {
   /** request fields that depend on the current row (a legacy no_answer's attempt, a callback's due time) */
   shapeOf?: (row: CurRow, pre: Preload, now: Date) => Pick<TransitionInput, "attempt" | "extra" | "dueAt" | "reason" | "note">;
   /** an external source: the label it wanted, its reference and the sheet's Agent cell */
-  external?: { wanted: string; ref?: string; agentLabel?: string; at?: Date };
+  external?: { wanted: string; ref?: string; agentLabel?: string; at?: Date; meta?: Record<string, string | number> };
   /** a "noop" answers the external shape */
   noopShape?: boolean;
   pre: Preload;
@@ -300,8 +312,9 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
   }
   const perms = withGrant(movePermsOf(actor, input.source), job.grant);
   if (want === "reject") return perms.external ? rejected(tx, job, row, "illegal") : fail("illegal");
-  // R2 (0006): partial deliveries and refunds have no columns yet
-  if (input.lines?.length || want.money === "refunded") return fail("illegal");
+  // partial deliveries and refunds are R2 (OD51, OD59): refused while the release is off
+  const r2 = releaseOn("R2");
+  if (!r2 && (input.lines?.length || want.money === "refunded")) return fail("illegal");
   if (input.duplicateOf !== undefined) {
     const [dup] = await tx
       .select({ id: orders.id })
@@ -311,6 +324,8 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
     if (!dup || dup.id === row.id) return fail("bad_duplicate");
   }
   const rescueCallsSoFar = want.ship === "attempt_failed" ? await countRescueCalls(tx, scope, row.id) : 0;
+  // R2 (OPE-§3.2, OD51, OD52): S4's shipment facts, read inside the transaction; no R1 path calls the stub
+  const shipment = r2 ? await activeShipmentFacts(scope, row.id, tx) : null;
 
   const plan = planTransition(
     {
@@ -322,20 +337,46 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
       deliveryAttempts: row.deliveryAttempts,
       priority: row.priority,
       shippedAt: row.shippedAt,
+      ...(r2 ? { collectedCents: row.collectedCents, shipmentOpen: !!shipment?.open } : {}),
     },
-    { want, source: input.source, reason: input.reason, dueAt: input.dueAt, duplicateOf: input.duplicateOf, force: input.force, extra: input.extra, returnReason: input.returnReason, shipAfter: input.shipAfter, collectedCents: input.collectedCents },
+    {
+      want,
+      source: input.source,
+      reason: input.reason,
+      dueAt: input.dueAt,
+      duplicateOf: input.duplicateOf,
+      force: input.force,
+      extra: input.extra,
+      returnReason: input.returnReason,
+      shipAfter: input.shipAfter,
+      collectedCents: input.collectedCents,
+      ...(input.refundCents !== undefined ? { refundCents: input.refundCents } : {}),
+    },
     perms,
-    { now, settlement: job.pre.settlement, rescueCallsSoFar, maxCalls: job.pre.maxCalls, userId: actor.kind === "user" ? actor.userId : null },
+    { now, settlement: shipment?.settlement ?? job.pre.settlement, rescueCallsSoFar, maxCalls: job.pre.maxCalls, userId: actor.kind === "user" ? actor.userId : null },
   );
   if (!plan.ok) return perms.external && plan.error === "illegal" ? rejected(tx, job, row, plan.hint === "external_rejected" ? "terminal" : "illegal") : fail(plan.error);
-  if (plan.moves.some((m) => m.axis === "money" && m.to === "refunded")) return fail("illegal");
+  if (!r2 && plan.moves.some((m) => m.axis === "money" && m.to === "refunded")) return fail("illegal");
+  // R2 (OD51): the outcome of each line rides the `delivered` move of the same write, never alone
+  const lineOutcomes = input.lines?.length ? input.lines : undefined;
+  if (lineOutcomes) {
+    if (!plan.moves.some((m) => m.axis === "ship" && m.to === "delivered")) return fail("illegal");
+    const [it] = await tx.select({ items: orders.items }).from(orders).where(byId(orders, scope, row.id)).limit(1);
+    const count = it && isItemsV3(it.items) ? it.items.lines.length : 1;
+    const seen = new Set<number>();
+    if (lineOutcomes.length > 50) return fail("bad_amount");
+    for (const l of lineOutcomes) {
+      if (!Number.isInteger(l.i) || l.i < 0 || l.i >= count || seen.has(l.i) || !Number.isInteger(l.qty) || l.qty < 0 || l.qty > 10_000) return fail("bad_amount");
+      seen.add(l.i);
+    }
+  }
   const extraGiven = Object.values(input.extra ?? {}).some((v) => v !== undefined);
   if (!plan.changed && !input.attempt && !extraGiven) return { kind: "done", result: { ok: true, ...current, eventIds: [], changed: false } };
 
-  /* the column set (0005's columns only) */
+  /* the column set (0005's columns + 0006's collected / refund columns, OD51 / OD59) */
   const s = plan.set;
   const set: Record<string, unknown> = {};
-  const COLS = ["status", "confirmState", "shipState", "moneyState", "confirmedBy", "confirmedAt", "dueAt", "leaseUntil", "claimToken", "assigneeId", "attempts", "firstTouchAt", "priority", "cancelReason", "mergedInto", "deliveryAttempts", "shipAfter", "returnReason", "shippedAt", "deliveredAt", "finalAt"] as const;
+  const COLS = ["status", "confirmState", "shipState", "moneyState", "confirmedBy", "confirmedAt", "dueAt", "leaseUntil", "claimToken", "assigneeId", "attempts", "firstTouchAt", "priority", "cancelReason", "mergedInto", "deliveryAttempts", "shipAfter", "returnReason", "shippedAt", "deliveredAt", "finalAt", "collectedCents", "refundCents", "refundedAt"] as const;
   for (const k of COLS) if (s[k] !== undefined) set[k] = s[k];
   if (input.attempt && row.firstTouchAt === null && set.firstTouchAt === undefined) set.firstTouchAt = now;
   // an external source dates its own change (a carrier's "livré le …"): the milestones carry that moment
@@ -395,6 +436,9 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
     if (m.axis === "confirm" && m.to === "duplicate" && input.duplicateOf) meta.duplicateOf = input.duplicateOf;
     if (m.axis === "confirm" && m.to === "confirmed" && agentLabel) meta.agentLabel = agentLabel;
     if (m.axis === "ship" && m.to === "delivered" && input.collectedCents !== undefined) meta.collectedCents = input.collectedCents;
+    // R2: every delivered event names what collected_cents holds (OD51), every refund its amount (OD59)
+    else if (r2 && m.axis === "ship" && m.to === "delivered" && typeof set.collectedCents === "number") meta.collectedCents = set.collectedCents;
+    if (r2 && m.axis === "money" && m.to === "refunded" && typeof set.refundCents === "number") meta.refundCents = set.refundCents;
     if (m.axis === "ship" && m.to === "attempt_failed") {
       if (plan.flags.deliveryLane) meta.deliveryLane = true;
       if (plan.flags.rescueExhausted) meta.rescueExhausted = true;
@@ -405,6 +449,8 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
     else if (m.axis === "money" && m.to === "remitted" && !m.auto && own && actor.kind === "user" && (input.source === "ui" || input.source === "bulk")) meta.settlement = "manual";
     if (own && input.inbound) meta.inbound = true;
     if (own && job.external?.ref) meta.ref = job.external.ref.slice(0, 80);
+    // an import's statement facts (S3, OPE-§16.7: remittanceId, lineNo, codCents, feeCents) on its own moves
+    if (own && job.external?.meta) for (const [k, v] of Object.entries(job.external.meta)) if (!(k in meta)) meta[k] = v;
     const reasonCode = m.auto ? null : m.axis === "ship" && (m.to === "refused" || m.to === "returned" || m.to === "lost") ? (input.returnReason ?? null) : m.axis === "confirm" ? (coded ?? null) : null;
     const note = own && !noteUsed && freeText ? freeText : null;
     if (note) noteUsed = true;
@@ -413,11 +459,17 @@ async function attempt(tx: Tx, job: Job): Promise<Attempt> {
   if (plan.flags.hold !== undefined) {
     events.push({ ...base, actorKind: actor.kind, actorId: actor.userId, type: "hold_set", meta: { shipAfter: plan.flags.hold === null ? null : plan.flags.hold.toISOString() } });
   }
+  if (lineOutcomes) {
+    const collected = typeof set.collectedCents === "number" ? set.collectedCents : toCents(row.total);
+    events.push({ ...base, actorKind: actor.kind, actorId: actor.userId, type: "line_outcome", meta: { lines: lineOutcomes.map((l) => ({ i: l.i, state: l.state, qty: l.qty })), collectedCents: collected } });
+  }
   if (job.events) events.push(...job.events(base));
   const eventIds = await appendEvents(tx, scope, events);
 
   /* the inTx hooks (customer counters, outbox items) */
   const after = snapshotOf(row, { ...(set as Partial<PlanSet>), rev, states: plan.states });
+  // R2 (OD51): S1's stock hook reads the partial delivery's lines (OPE-§3.6)
+  if (lineOutcomes) after.lineOutcomes = lineOutcomes.map((l) => ({ i: l.i, state: l.state, qty: l.qty }));
   const hook: OrderHookEvent = { on: "transition", before: snapshotOf(row), after, moves: plan.moves, actor, source: input.source };
   await runOrderHooks("transition", "inTx", scope, hook, tx);
 
@@ -531,8 +583,12 @@ function legacyShape(label: OrderStatus | undefined, sourceNote: string | undefi
 export async function applyExternalStatus(
   scope: WriteScope,
   orderId: string,
-  ext: { legacy?: OrderStatus; ship?: ShipState; money?: MoneyState; at?: Date },
-  src: { kind: "sheet" | "carrier" | "import" | "api"; ref?: string; agentLabel?: string },
+  // R2 contract step C2-E (S3 / S4 / S5, additive): the coded return reason (OD50), the carrier's postponement date
+  // (OD49), the amount collected (OD51)
+  ext: { legacy?: OrderStatus; ship?: ShipState; money?: MoneyState; at?: Date; returnReason?: ReturnReason; shipAfter?: Date | null; collectedCents?: number },
+  // C2-E (S3, additive): `meta` (≤ 2 KB) joins the state_changed meta of the source's own moves; `reconciliation`
+  // records the actor kind `reconciliation` (a reconciled carrier statement, AI R37)
+  src: { kind: "sheet" | "carrier" | "import" | "api"; ref?: string; agentLabel?: string; meta?: Record<string, string | number>; reconciliation?: true },
 ): Promise<TransitionResult | { ok: true; changed: false; noop: true }> {
   if (!validId(orderId)) return { ok: false, error: "not_found" };
   const label = ext.legacy;
@@ -543,16 +599,25 @@ export async function applyExternalStatus(
     labels: !!src.agentLabel,
     ladder: label === "no_answer" || label === "callback",
   });
-  const actor: OrderActor = { kind: src.kind === "sheet" ? "sheet" : src.kind === "carrier" ? "carrier" : "api", userId: null };
+  const actor: OrderActor = { kind: src.reconciliation ? "reconciliation" : src.kind === "sheet" ? "sheet" : src.kind === "carrier" ? "carrier" : "api", userId: null };
   const at = ext.at instanceof Date && !Number.isNaN(ext.at.getTime()) ? ext.at : undefined;
+  const meta = src.meta && JSON.stringify(src.meta).length <= 2048 ? src.meta : undefined;
   const wanted = (label ?? (ext.ship ? `ship:${ext.ship}` : ext.money ? `money:${ext.money}` : "")).slice(0, 24);
   return run({
     actor,
     scope,
     pre,
     noopShape: true,
-    input: { orderId, want: {}, source: src.kind, ...(src.ref ? { ref: src.ref } : {}) },
-    external: { wanted, ...(src.ref ? { ref: src.ref } : {}), ...(src.agentLabel ? { agentLabel: src.agentLabel } : {}), ...(at ? { at } : {}) },
+    input: {
+      orderId,
+      want: {},
+      source: src.kind,
+      ...(src.ref ? { ref: src.ref } : {}),
+      ...(ext.returnReason !== undefined ? { returnReason: ext.returnReason } : {}),
+      ...(ext.shipAfter !== undefined ? { shipAfter: ext.shipAfter } : {}),
+      ...(ext.collectedCents !== undefined ? { collectedCents: ext.collectedCents } : {}),
+    },
+    external: { wanted, ...(src.ref ? { ref: src.ref } : {}), ...(src.agentLabel ? { agentLabel: src.agentLabel } : {}), ...(at ? { at } : {}), ...(meta ? { meta } : {}) },
     wantOf: (cur) => {
       const fromLabel = label ? legacyToWanted(label, cur) : {};
       if (fromLabel === "reject") return "reject";

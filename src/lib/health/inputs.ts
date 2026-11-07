@@ -33,10 +33,10 @@ import "server-only";
 import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { listPagesForConsole } from "@/lib/admin-data/pages";
 import { aiUsageForStore } from "@/lib/ai/summary.server";
-import { can } from "@/lib/auth/permissions";
+import { can, releaseOn } from "@/lib/auth/permissions";
 import { opsAggregates } from "@/lib/callcenter/aggregates";
 import { db } from "@/lib/db/client";
-import { abuseReports, orders, pages, pageVersions, signupReviews, storeUsage } from "@/lib/db/schema";
+import { abuseReports, agentProfiles, orders, pages, pageVersions, signupReviews, storeUsage } from "@/lib/db/schema";
 import { zoneFeesFor, zonesForCheckout } from "@/lib/delivery/zones.server";
 import { designHealth } from "@/lib/design/health.server";
 import { integrationHealth, sheetsBacklog } from "@/lib/integrations/health";
@@ -76,6 +76,15 @@ async function riskyOrders7d(scope: StoreScope, now: Date): Promise<number> {
     .select({ n: count() })
     .from(orders)
     .where(whereStore(orders, scope, eq(orders.isTest, false), gte(orders.createdAt, new Date(now.getTime() - 7 * DAY)), gte(orders.riskScore, 70)));
+  return Number(row?.n ?? 0);
+}
+
+/** R2 (OP-19): agents of the store whose reveal alarm fired in the last 7 days (`agent_profiles.reveal_alarm_at`). */
+async function revealAlarms(scope: StoreScope, now: Date): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(agentProfiles)
+    .where(whereStore(agentProfiles, scope, gte(agentProfiles.revealAlarmAt, new Date(now.getTime() - 7 * DAY))));
   return Number(row?.n ?? 0);
 }
 
@@ -126,7 +135,13 @@ export const DEFAULT_SOURCES: HealthSources = {
     return { new24h: Number(row?.new24h ?? 0), total: Number(row?.total ?? 0) };
   },
   async orders(scope, _store, now) {
-    const [k7, k28, queue, risky7d] = await Promise.all([orderKpis(scope, "7d"), orderKpis(scope, "28d"), queueCounts(scope), riskyOrders7d(scope, now)]);
+    const [k7, k28, queue, risky7d, revealAlarms7d] = await Promise.all([
+      orderKpis(scope, "7d"),
+      orderKpis(scope, "28d"),
+      queueCounts(scope),
+      riskyOrders7d(scope, now),
+      releaseOn("R2") ? revealAlarms(scope, now) : Promise.resolve(undefined),
+    ]);
     return {
       ...k7,
       risky7d,
@@ -134,6 +149,7 @@ export const DEFAULT_SOURCES: HealthSources = {
       unattempted2h: queue.firstTouchBreaches,
       unreachable7d: rate(k7.unreachableRate),
       unreachable28d: rate(k28.unreachableRate),
+      ...(revealAlarms7d !== undefined ? { revealAlarms7d } : {}),
     };
   },
   async integrations(scope) {

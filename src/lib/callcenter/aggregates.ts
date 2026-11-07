@@ -14,8 +14,9 @@ import "server-only";
  *                       city slug ("*" for none), source, agent = `confirmed_by` (a member id; "*" = nobody confirmed
  *                       it yet), offer = the bundle id, campaign / angle = `utm_campaign` / `utm_content` ("*" = none),
  *                       hour / weekday = the store-local hour (0-23) / ISO weekday (1-7) of creation, folded from
- *                       15-minute UTC slots like `attemptStats`; carrier is R2 and answers no cell. Cached 5 min per
- *                       (store, query).
+ *                       15-minute UTC slots like `attemptStats`; carrier = `orders.carrier_label` ("*" for none; R2:
+ *                       S4's shipments mirror the account label into it; filled at the R2 contract step C2-E, OPE-§27.6),
+ *                       suppressed like the other key dims. Cached 5 min per (store, query).
  *   cancelReasonMix     (OPE-§14.3) the moves into `cancelled` of the trailing store-local days per coded reason
  *   returnReasonMix     (OD50) refused + returned + lost of the window per `return_reason` (null = no reason given),
  *                       for the store or one city / carrier label / agent (`confirmed_by`)
@@ -138,7 +139,7 @@ export function suppressCells(rows: readonly AggCounts[], who: KpiWho = "store")
 }
 
 /** The SQL key of a key dim (hour and weekday are folded from 15-minute UTC slots, see readDims). */
-function dimKey(dim: Exclude<AggDim, "carrier" | "hour" | "weekday">): SQL<string> {
+function dimKey(dim: Exclude<AggDim, "hour" | "weekday">): SQL<string> {
   switch (dim) {
     case "page":
       return sql<string>`${orders.pageId}`;
@@ -154,10 +155,12 @@ function dimKey(dim: Exclude<AggDim, "carrier" | "hour" | "weekday">): SQL<strin
       return sql<string>`COALESCE(NULLIF(LEFT(JSON_UNQUOTE(JSON_EXTRACT(${orders.utm}, '$.utm_campaign')), 80), ''), '*')`;
     case "angle":
       return sql<string>`COALESCE(NULLIF(LEFT(JSON_UNQUOTE(JSON_EXTRACT(${orders.utm}, '$.utm_content')), 80), ''), '*')`;
+    case "carrier":
+      return sql<string>`COALESCE(NULLIF(LEFT(${orders.carrierLabel}, 60), ''), '*')`;
   }
 }
 
-type KeyDim = Exclude<AggDim, "carrier" | "hour" | "weekday">;
+type KeyDim = Exclude<AggDim, "hour" | "weekday">;
 type TimeDim = "hour" | "weekday";
 const isTimeDim = (d: AggDim): d is TimeDim => d === "hour" || d === "weekday";
 const blankCounts = (key: string): AggCounts => ({ key, placed: 0, confirmed: 0, cancelled: 0, unreachable: 0, fake: 0, delivered: 0, refused: 0, returned: 0, lost: 0 });
@@ -184,7 +187,7 @@ function addTo(c: AggCounts, cs: string, ss: string, n: number): void {
  *          weekday (exact through DST and Ramadan shifts: every real UTC offset is a multiple of 15 minutes)
  */
 async function readDims(scope: StoreScope, dims: readonly AggDim[], from: Date, to: Date, tz: string): Promise<Map<AggDim, AggCounts[]>> {
-  const keyDims = dims.filter((d): d is KeyDim => d !== "carrier" && !isTimeDim(d));
+  const keyDims = dims.filter((d): d is KeyDim => !isTimeDim(d));
   const timeDims = dims.filter(isTimeDim);
   const range = whereStore(orders, scope, gte(orders.createdAt, from), lt(orders.createdAt, to), realOrder);
   const out = new Map<AggDim, Map<string, AggCounts>>(dims.map((d) => [d, new Map()]));
@@ -257,7 +260,6 @@ export async function opsAggregates(
     const prevSpan = prev.length ? spanOf(prev) : null;
     const [current, before] = await Promise.all([readDims(scope, dims, from, to, tz), prevSpan ? readDims(scope, dims, prevSpan.from, prevSpan.to, tz) : Promise.resolve(null)]);
     for (const dim of dims) {
-      if (dim === "carrier") continue; // R2 (S4): the carrier of a shipment
       const who: KpiWho = dim === "agent" ? "agent" : "store";
       const kept = suppressCells(current.get(dim) ?? [], who);
       suppressed += kept.suppressed;

@@ -33,6 +33,7 @@ import { writeScopeOf } from "@/lib/tenancy/seam";
 import { gateInput } from "../safety/pii";
 import { parseTaskInput } from "../schema/tasks/inputs";
 import { activeJobByInput, getAiJob as readJobView, hasActiveDeepJob, insertJob, readJob, type AiJobView } from "../store/jobs";
+import type { CatalogFromPhotosJobInput } from "@/lib/catalog/from-photos.server";
 import type { AiTaskId } from "../tasks";
 import { cancelJobRow } from "./claim";
 import { abortJobStage, scheduleDetachedJob } from "./run";
@@ -40,15 +41,16 @@ import { isCritiqueJob, jobClassFor, planForJob, stageInputOf, stagePlanFor, PRO
 
 /**
  * probe: the staff-only detached-job probe of AI-§B.13 / core §H.12 rule 1, never enqueued through enqueueAiJob.
- * catalog_from_photos (0006, STO-§4.7) joins the enqueuable kinds with its stage plan (S1 / S7, R2); until then no
- * path can enqueue it.
+ * catalog_from_photos (0006, STO-§4.7; frozen at the R2 contract step C2-E with its input, S1's
+ * `CatalogFromPhotosJobInput`): an enqueuable kind whose stage plan is S7's (`planForJob` refuses it until then, and
+ * no R1 path enqueues it).
  */
-export type AiJobKind = Exclude<(typeof aiJobs.$inferSelect)["kind"], "probe" | "catalog_from_photos">;
+export type AiJobKind = Exclude<(typeof aiJobs.$inferSelect)["kind"], "probe">;
 
 export interface AiJobInput<K extends AiJobKind> {
   kind: K;
   task: AiTaskId;
-  input: unknown;
+  input: K extends "catalog_from_photos" ? CatalogFromPhotosJobInput : unknown;
   /** the engine result kept on failure */
   instant?: unknown;
 }

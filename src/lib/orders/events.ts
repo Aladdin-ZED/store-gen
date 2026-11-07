@@ -22,7 +22,7 @@ import { brandName } from "@/lib/auth/platform-config";
 import { viewerSeesOrder, type OrderViewer } from "@/lib/callcenter/visibility";
 import { db } from "@/lib/db/client";
 import { orderEvents, orders, users } from "@/lib/db/schema";
-import { maskIfImpersonation } from "@/lib/platform/mask";
+import { maskForViewer } from "@/lib/admin-data/mask";
 import { byId, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreCtx, StoreScope, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 import type { Tx } from "./hooks";
@@ -70,6 +70,8 @@ export const ORDER_EVENT_TYPES = [
   "carrier_status", // R2 (S4)
   "remitted", // R2 (S3)
   "merged", // R2 (S4)
+  "shipment_cancelled", // R2 (S4, OPE-§17.5; R2 contract step C2-E)
+  "carrier_notified", // R2 (S4, OPE-§17.4 step 8; C2-E)
 ] as const;
 export type OrderEventType = (typeof ORDER_EVENT_TYPES)[number];
 export const isOrderEventType = (v: unknown): v is OrderEventType => typeof v === "string" && (ORDER_EVENT_TYPES as readonly string[]).includes(v);
@@ -115,6 +117,13 @@ export const ORDER_EVENT_META = {
     /** OD52: "at_delivery" = cash at the door (auto); "manual" = Mark cash received */
     settlement: z.enum(["at_delivery", "manual"]).optional(),
     collectedCents: z.number().int().min(0).optional(),
+    /** R2 (OD59): the amount of a move to money `refunded` */
+    refundCents: z.number().int().min(1).optional(),
+    /** R2 (S3, OPE-§16.7): a statement line's facts on the moves it makes ("Remitted · statement … · line …") */
+    remittanceId: z.string().regex(/^[0-9A-Za-z]{1,26}$/).optional(),
+    lineNo: z.number().int().min(1).max(1_000_000).optional(),
+    codCents: z.number().int().min(0).optional(),
+    feeCents: z.number().int().min(0).optional(),
     shipAfter: ISO.nullable().optional(),
     inbound: z.literal(true).optional(),
     agentLabel: label(60).optional(),
@@ -173,6 +182,10 @@ export const ORDER_EVENT_META = {
   carrier_status: OTHER,
   remitted: OTHER,
   merged: OTHER,
+  /** a pre-pickup shipment cancelled (OPE-§17.5) */
+  shipment_cancelled: z.strictObject({ shipmentId: ID26, tracking: label(64).optional() }),
+  /** the Done tick of "Changes to pass on" (OPE-§17.4 step 8): the in-transit edit or recall the carrier was told about */
+  carrier_notified: z.strictObject({ of: z.enum(["field_edited", "recall_requested"]), eventId: z.number().int().positive() }),
 } as const satisfies Record<OrderEventType, z.ZodType>;
 
 /** Keys a meta may never carry, at any depth (OPE-§2.2: tokens, IP addresses, user agents). */
@@ -353,6 +366,8 @@ export const TIMELINE_FILTERS: Readonly<Record<Exclude<TimelineFilter, "all">, r
     "carrier_status",
     "remitted",
     "merged",
+    "shipment_cancelled",
+    "carrier_notified",
   ],
   notes: ["note", "customer_request"],
 };
@@ -367,7 +382,7 @@ type EventRow = typeof orderEvents.$inferSelect;
 
 /** A free text as a reader may see it: phones masked for everyone (OD11), hidden under impersonation (OD61). */
 function shownText(scope: StoreScope, text: string, country: string): string {
-  const masked = maskIfImpersonation(scope, { name: null, phone: null, address: null, city: null, landmark: null, note: text }).note;
+  const masked = maskForViewer(scope, { name: null, phone: null, address: null, city: null, landmark: null, note: text }).note;
   return scope.kind === "impersonation" ? String(masked) : maskPhonesIn(text, country);
 }
 
@@ -375,7 +390,7 @@ function shownText(scope: StoreScope, text: string, country: string): string {
 function shownField(scope: StoreScope, f: string, value: string | null, country: string): string | null {
   if (value === null) return null;
   if (scope.kind !== "impersonation") return maskPhonesIn(value, country);
-  const m = maskIfImpersonation(scope, {
+  const m = maskForViewer(scope, {
     name: f === "name" ? value : null,
     phone: f === "phone" ? value : null,
     address: f === "address" ? value : null,

@@ -16,13 +16,14 @@ import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import type { TemplateVar } from "@/lib/integrations/templates";
 import { orderTemplateValues } from "@/lib/integrations/templates";
 import { db } from "@/lib/db/client";
-import { messageTemplates, orders, pages, pageVersions } from "@/lib/db/schema";
+import { can, releaseOn } from "@/lib/auth/permissions";
+import { messageTemplates, orders, pages, pageVersions, storeMembers, users } from "@/lib/db/schema";
 import { t } from "@/lib/i18n/admin";
 import { formatMoney } from "@/lib/markets/money";
 import { logError } from "@/lib/orders/log";
 import { itemName, leadItem } from "@/lib/page/catalog";
 import { getStoreSetting } from "@/lib/settings";
-import type { OpsSetting } from "@/lib/settings/keys/ops";
+import type { AssignmentRule, OpsSetting } from "@/lib/settings/keys/ops";
 import { byId, whereStore } from "@/lib/tenancy/sql";
 import type { StoreCtx, StoreScope } from "@/lib/tenancy/types";
 import { attemptStats } from "./aggregates";
@@ -70,6 +71,8 @@ export interface CallCenterView {
   scripts: ScriptRowView[];
   /** per script language, the sentences the owner's policy facts allow (empty when no fact is set) */
   policySnippets: Record<ScriptLocale, { id: string; text: string }[]>;
+  /** R2 (OP-18; contract step C2-E): S4's assignment rules editor's data; absent while `releaseOn("R2")` is false */
+  assignmentRules?: { rules: AssignmentRule[]; agents: { id: string; name: string }[] };
 }
 
 const parseDoc = (body: string): ScriptDoc | null => {
@@ -160,7 +163,19 @@ export async function callCenterView(scope: StoreScope, tz: string): Promise<Cal
     pages: live,
     scripts,
     policySnippets: { ar: snippetsOf(policies, "ar"), fr: snippetsOf(policies, "fr"), en: snippetsOf(policies, "en") },
+    ...(releaseOn("R2") ? { assignmentRules: { rules: ops.assignmentRules ?? [], agents: await callAgents(scope) } } : {}),
   };
+}
+
+/** R2: active members who take calls (display names only), for the rules editor. */
+async function callAgents(scope: StoreScope): Promise<{ id: string; name: string }[]> {
+  const rows = await db
+    .select({ id: storeMembers.userId, role: storeMembers.role, name: users.name })
+    .from(storeMembers)
+    .innerJoin(users, eq(users.id, storeMembers.userId))
+    .where(whereStore(storeMembers, scope, eq(storeMembers.status, "active")))
+    .limit(500);
+  return rows.filter((r) => can(r.role, "agents.self")).map((r) => ({ id: r.id, name: r.name }));
 }
 
 /* ------------------------------------------------------------------ */

@@ -22,8 +22,9 @@ import { eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { orders, storeMembers } from "@/lib/db/schema";
 import { auditFrom } from "@/lib/audit";
-import { can } from "@/lib/auth/permissions";
+import { can, releaseOn } from "@/lib/auth/permissions";
 import { settingsActor } from "@/lib/admin-data/store-audit";
+import { replayCommissionsFor } from "@/lib/finance/commissions/replay.server";
 import { appendEvents, type NewOrderEvent } from "@/lib/orders/events";
 import { markHealthDirty } from "@/lib/platform/health-snapshot";
 import { getStoreSetting, updateStoreSetting } from "@/lib/settings";
@@ -141,6 +142,9 @@ export async function backfillMappedLabel(ctx: WriteCtx, rawLabel: unknown, user
     return ids;
   });
   if (touched.length) await rollupAgentStats(ctx.scope);
+  // R2 (OPE-§15.3, OD54; S3's seam, wired at C2-E): the orders now attributed to the member accrue their commissions
+  // (idempotent; a no-op without the commissions entitlement)
+  if (touched.length && releaseOn("R2")) await replayCommissionsFor(ctx.scope, touched);
   forgetAgentKpis(ctx.scope);
   forgetSheetAgents(ctx.scope);
   await auditFrom(ctx, "callcenter.label_mapped", { target: userId, meta: { label, count: touched.length } });

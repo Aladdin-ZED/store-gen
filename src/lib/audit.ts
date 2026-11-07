@@ -76,6 +76,8 @@ type StoreAction =
   | `store.storefront.${string}`
   | `store.coupon.${string}`
   | `store.ai.${"settings_updated" | "voice_updated" | "memory_added" | "memory_deleted" | "memory_pinned" | "proposal_executed"}`
+  // R2 contract step C2-E (S7, AI-09 / AI-10): drafts applied on the owner's behalf, the queued fill and translate jobs
+  | `store.ai.${"drafts_applied" | "drafts_dismissed" | "fill_queued" | "translate_queued"}`
   | "store.brand.updated"
   | "store.theme.activated"
   | "store.brand_term.refused"; // meta { field }, never the matched term (D76)
@@ -85,9 +87,15 @@ type StoreAreaAction =
   | `orders.${"status_forced" | "exported" | "test_deleted" | "carrier_exported" | "refunded"}`
   | `integrations.${"sheets.connected" | "sheets.disconnected" | "telegram.changed" | "conversions.changed" | "outbox.replayed"}`
   | `callcenter.${"settings.updated" | "calls_opened" | "label_mapped"}`
+  // R2 contract step C2-E (S4, OP-19): a manager lifts an agent's reveal pause (meta { agentId }); the R2 manifest and
+  // print views keep `orders.carrier_exported` with meta `kind: "manifest" | "manifest_print" | "labels"`
+  | "callcenter.reveal_pause_lifted"
   | `finance.${"costs.updated" | "ad_spend.updated" | "settings.updated" | "period_closed" | "period_reopened" | "cost.saved" | "carrier_rate.saved" | "ad_spend.saved"}`
+  // R2 contract step C2-E (S3, core §F.5): every sensitive finance write
+  | `finance.${"expense.saved" | "expense.deleted" | "import.committed" | "snapshot.recomputed" | "exported" | "probable.confirmed"}`
   | "commissions.rule_changed"
-  | `payouts.${"approved" | "paid"}`
+  | "commissions.rules_assigned"
+  | `payouts.${"approved" | "paid" | "drafted" | "cancelled"}`
   | "webhooks.endpoint_changed"
   | "carriers.account_changed"
   | `api_keys.${"created" | "revoked"}`

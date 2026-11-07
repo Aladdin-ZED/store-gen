@@ -26,7 +26,7 @@ import type { z } from "zod";
 import { affected, auditIn } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { newId } from "@/lib/db/ids";
-import { leads, orders, type LeadSelectionV2 } from "@/lib/db/schema";
+import { leads, orders, type LeadLineV3, type LeadSelectionV2, type LeadSelectionV3 } from "@/lib/db/schema";
 import { leadCaptureOn } from "@/lib/landing/lead-capture";
 import { LEAD_SEL_MAX_BYTES } from "@/lib/leads/types";
 import { findCity, getMarket } from "@/lib/markets";
@@ -36,7 +36,7 @@ import type { PageDoc } from "@/lib/page/schema";
 import { hashIp } from "@/lib/security/crypto";
 import { rateLimit, storeBucket } from "@/lib/security/rate-limit";
 import { getStoreSetting } from "@/lib/settings";
-import type { PublicPageTarget } from "@/lib/tenancy/public";
+import type { PublicContextTarget, PublicPageTarget } from "@/lib/tenancy/public";
 import { storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { Actor, WriteScope } from "@/lib/tenancy/types";
 import type { LeadPayload, UnitIn } from "./contract";
@@ -144,6 +144,88 @@ async function storeLead(scope: WriteScope, payload: Lead, ctx: UpsertLeadContex
   // lead hook; R1 runs nothing
   if (res.affectedRows === 1 && releaseOn("R2")) await leadInserted(scope, id);
   return { stored: true };
+}
+
+/**
+ * The store's catalog lead (STO-§15.11, §15.13; STO-R9 accepted; R2 contract step C2-E): an abandoned checkout
+ * (`kind: "form"`) or a WhatsApp order intent (`kind: "whatsapp"`, no phone, its 9-character `ref` and the server
+ * total). `page_id` is NULL (0006) and `sel = { v: 3, lines, ctxPageId }`. S1's public route parses
+ * `LeadPayloadV3` (each line `LineIn.omit({ ls })`, bad entries dropped), prices a WhatsApp intent with `priceLine`,
+ * reads `resolveTestToken`, and hands the normalized fields here; this function owns the storage rules landing's
+ * `upsertLead` follows: LD11 capture gate (form leads only), the per-IP budget `s:<sid>:lead:ip:<hash>` 30 / 10 min,
+ * no lead for an idem that already ordered, one row per idem updated only while it is this store's unconverted page-less
+ * lead, and `onLeadCreated` on a new row (R2 only). Unreachable while `releaseOn("R2")` is false.
+ */
+export interface StoreLeadV3 {
+  kind: "form" | "whatsapp";
+  idem: string;
+  /** E.164 (the route normalized it with the store market's phone country); null only for kind "whatsapp" */
+  phone: string | null;
+  name: string | null;
+  city: string | null;
+  lines: LeadLineV3[];
+  /** the server total of the lines (display only; a conversion re-prices), null while it does not resolve */
+  totalCents: number | null;
+  /** kind "whatsapp": the intent's reference (9 characters) */
+  ref?: string;
+  utm: Record<string, string>;
+  test?: boolean;
+}
+
+export async function upsertLeadV3(target: PublicContextTarget, lead: StoreLeadV3, ctx: { ip: string }): Promise<{ stored: boolean; id: string | null }> {
+  if (!releaseOn("R2")) return { stored: false, id: null };
+  const { scope } = target;
+  if (lead.kind === "form") {
+    const landing = await getStoreSetting(scope, "landing");
+    if (!leadCaptureOn(target.store.market, landing.leads.capture)) return { stored: false, id: null };
+    if (!lead.phone) return { stored: false, id: null };
+  }
+  const gate = await rateLimit(storeBucket(scope, "lead:ip", hashIp(ctx.ip)), 30, 600);
+  if (!gate.ok) return { stored: false, id: null };
+  const [ordered] = await db.select({ id: orders.id }).from(orders).where(whereStore(orders, scope, eq(orders.idem, lead.idem))).limit(1);
+  if (ordered) return { stored: false, id: null };
+
+  const sel: LeadSelectionV3 = { v: 3, lines: lead.lines.slice(0, 20), ctxPageId: target.page.id };
+  const selOk = Buffer.byteLength(JSON.stringify(sel), "utf8") <= LEAD_SEL_MAX_BYTES;
+  const utm = Object.fromEntries(Object.entries(lead.utm).filter(([, v]) => typeof v === "string" && v));
+  const own = sql`\`store_id\` = ${scope.storeId} AND \`page_id\` IS NULL AND \`converted_order_id\` IS NULL`;
+  const now = new Date();
+  const id = newId();
+  const [res] = await db
+    .insert(leads)
+    .values(
+      storeValues(scope, {
+        id,
+        pageId: null,
+        idem: lead.idem,
+        phone: lead.phone,
+        name: lead.name,
+        city: lead.city,
+        utm: Object.keys(utm).length ? utm : null,
+        isTest: !!lead.test,
+        kind: lead.kind,
+        ...(lead.ref ? { ref: lead.ref } : {}),
+        sel: selOk ? sel : null,
+        totalCents: selOk ? lead.totalCents : null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    )
+    .onDuplicateKeyUpdate({
+      set: {
+        phone: sql`IF(${own}, COALESCE(VALUES(\`phone\`), \`phone\`), \`phone\`)`,
+        name: sql`IF(${own}, COALESCE(VALUES(\`name\`), \`name\`), \`name\`)`,
+        city: sql`IF(${own}, COALESCE(VALUES(\`city\`), \`city\`), \`city\`)`,
+        totalCents: sql`IF(${own} AND VALUES(\`sel\`) IS NOT NULL, VALUES(\`total_cents\`), \`total_cents\`)`,
+        sel: sql`IF(${own}, COALESCE(VALUES(\`sel\`), \`sel\`), \`sel\`)`,
+        updatedAt: sql`IF(${own}, VALUES(\`updated_at\`), \`updated_at\`)`,
+      },
+    });
+  if (res.affectedRows === 1) {
+    await leadInserted(scope, id);
+    return { stored: true, id };
+  }
+  return { stored: true, id: null };
 }
 
 /** `onLeadCreated` with the row just inserted (read back in the scope's store). */

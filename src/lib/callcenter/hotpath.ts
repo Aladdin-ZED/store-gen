@@ -56,6 +56,7 @@ export function statusOf(error: string): number {
     case "step_up":
       return 403;
     case "rate_limited":
+    case "reveal_paused":
       return 429;
     case "invalid":
     case "too_short":

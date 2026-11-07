@@ -13,6 +13,7 @@ import "server-only";
  * its own `store_usage` gauges, recomputed from their sources by recomputeStoreGauges below.
  */
 import type { RowDataPacket } from "mysql2/promise";
+import { releaseOn, type Release } from "@/lib/auth/permissions";
 import { logError } from "@/lib/orders/log";
 import type { UsageMetricName } from "@/lib/tenancy/entitlement-keys";
 import type { WriteScope } from "@/lib/tenancy/types";
@@ -85,9 +86,13 @@ const GAUGE_SOURCES = {
   pages: "SELECT COUNT(*) AS n FROM pages WHERE store_id = ?",
   members: "SELECT COUNT(*) AS n FROM store_members WHERE store_id = ?",
   agents: "SELECT COUNT(*) AS n FROM store_members WHERE store_id = ? AND role = 'agent'",
+  /** R2 (§D.7, IN-07; contract step C2-E): S5 charges an endpoint on create and refunds it on delete */
+  webhooks: "SELECT COUNT(*) AS n FROM webhook_endpoints WHERE store_id = ?",
 } as const satisfies Partial<Record<UsageMetricName, string>>;
 export type StoreGauge = keyof typeof GAUGE_SOURCES;
-export const STORE_GAUGES = Object.keys(GAUGE_SOURCES) as StoreGauge[];
+/** Gauges of a later release, recomputed only once it is on (an R1 build writes no `webhooks` row). */
+const GAUGE_RELEASE: Readonly<Partial<Record<StoreGauge, Release>>> = { webhooks: "R2" };
+export const STORE_GAUGES = (Object.keys(GAUGE_SOURCES) as StoreGauge[]).filter((g) => releaseOn(GAUGE_RELEASE[g] ?? "R1"));
 
 export interface GaugeDrift {
   before: number;

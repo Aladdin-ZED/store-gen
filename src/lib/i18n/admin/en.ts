@@ -62,6 +62,7 @@ export const messages = {
   "error.honesty_blocked": "Some claims on the page need a source before publishing.",
   "error.budget_blocked": "The page is too long or too heavy to publish.",
   "error.rate_limited": "Too many attempts. Wait a few minutes and try again.",
+  "error.reveal_paused": "Too many numbers opened. Ask your manager.",
   "error.conflict": "This was changed somewhere else. Reload and try again.",
   "error.server": "Something went wrong on our side. Please try again.",
   "error.session_ended": "Your session has ended. Sign in again.",

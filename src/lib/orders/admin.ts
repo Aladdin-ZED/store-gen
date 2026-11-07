@@ -1420,7 +1420,9 @@ export function idsParam(raw: string | null | undefined, max = CARRIER_CSV_MAX_O
 }
 
 export type CarrierExport =
-  | { ok: true; csv: string; exported: string[]; packed: string[]; refused: { held: string[]; notFound: string[] } }
+  // R2 (OPE-§M.2, OPS-27; contract step C2-E): `rows` = the exported manifest rows, so S4's route writes the same rows
+  // as CSV or XLSX from one export path (events and packing identical for both formats)
+  | { ok: true; csv: string; rows: ManifestRow[]; exported: string[]; packed: string[]; refused: { held: string[]; notFound: string[] } }
   | { ok: false; error: "not_configured" | "invalid" | "refused"; held?: string[]; notFound?: string[]; exportable?: number };
 
 /**
@@ -1500,7 +1502,7 @@ export async function carrierExport(ctx: WriteCtx, ids: readonly string[], opts:
       if (res.ok && res.changed) packed.push(r.orderId);
     }
   }
-  return { ok: true, csv, exported, packed, refused: { held: plan.held, notFound } };
+  return { ok: true, csv, rows: plan.ok.map(({ shipState: _s, ...m }) => m), exported, packed, refused: { held: plan.held, notFound } };
 }
 
 /** One order slip (OPE-§12.8): what the warehouse packs, never a full phone. */

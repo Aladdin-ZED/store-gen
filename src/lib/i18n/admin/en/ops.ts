@@ -191,6 +191,8 @@ export const messages = {
   "ops.tl.carrier_status": "Carrier update",
   "ops.tl.remitted": "Cash remitted by the carrier",
   "ops.tl.merged": "Merged",
+  "ops.tl.shipment_cancelled": "Shipment cancelled before pickup",
+  "ops.tl.carrier_notified": "Carrier told about the change",
   "ops.tl.detail.forced": "Forced",
   "ops.tl.detail.implied": "Implied by a later step",
   "ops.tl.detail.auto": "Automatic",

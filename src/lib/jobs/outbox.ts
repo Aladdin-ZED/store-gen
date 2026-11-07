@@ -33,6 +33,7 @@ import "server-only";
  */
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Tx } from "@/lib/orders/hooks";
+import { releaseOn } from "@/lib/auth/permissions";
 import { outbox } from "@/lib/db/schema";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { PlatformCtx, StoreCtx, StoreScope, SystemCtx, WriteScope } from "@/lib/tenancy/types";
@@ -104,6 +105,13 @@ export interface OutboxHandler<P> {
     key(item: ClaimedItem<P>): string | null;
     send(items: readonly ClaimedItem<P>[]): Promise<SendResult>;
   };
+  /**
+   * A per-send cap of the handler's own (R2 contract step C2-E, S5's request; OPE-§L: 2,000 webhook deliveries per
+   * store per hour). The drainer asks it for each unit just before the send, like mail's platform caps: `{ ok: false,
+   * retryAt }` gives the unit's items back with `next_at = retryAt` and attempts untouched (counted `rescheduled`); a
+   * gate that throws counts as `{ ok: false, retryAt: now + 60 s }` and is recorded. A batch unit asks for its first item.
+   */
+  gate?(item: { storeId: string | null; targetId: string | null; topic: string }, now: number): Promise<{ ok: true } | { ok: false; retryAt: number }>;
 }
 
 export interface DrainReport {
@@ -233,6 +241,19 @@ let missingLogged = 0;
 let missingProbeAt = -Infinity;
 
 /** The drainer over the app's database, handlers, kill switch and mail caps. */
+/** `platform_mail.perMinute` / `perHour` (R2), clamped to 1-30 and 1-2,000; the R1 constants when unreadable. */
+async function mailCaps(perMinute: number, perHour: number): Promise<{ perMinute: number; perHour: number }> {
+  try {
+    const { getPlatformSetting } = await import("@/lib/settings");
+    const mail = await getPlatformSetting("platform_mail");
+    const clamp = (v: unknown, lo: number, hi: number, d: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.trunc(v))) : d);
+    return { perMinute: clamp(mail.perMinute, 1, 30, perMinute), perHour: clamp(mail.perHour, 1, 2_000, perHour) };
+  } catch (err) {
+    recordError("outbox", err, { route: "outbox:mail:caps" });
+    return { perMinute, perHour };
+  }
+}
+
 async function appDeps(yieldLoop: () => Promise<void>): Promise<DrainDeps> {
   const [{ dbDrainStore }, { newId }, crypto, { killSwitchTripped }, { markHealthDirty }, rate, usage] = await Promise.all([
     import("./outbox/sql"),
@@ -245,16 +266,18 @@ async function appDeps(yieldLoop: () => Promise<void>): Promise<DrainDeps> {
     import("./registry"), // the handler files register themselves at import (src/lib/jobs/registry.ts)
   ]);
   const { MAIL_PER_HOUR, MAIL_PER_MINUTE, nextHourStart } = await import("./outbox/rules");
+  // R2 (PLA-§13.5; contract step C2-E): the caps the mail screen edits (`platform_mail`), clamped; R1 keeps the constants
+  const caps = releaseOn("R2") ? await mailCaps(MAIL_PER_MINUTE, MAIL_PER_HOUR) : { perMinute: MAIL_PER_MINUTE, perHour: MAIL_PER_HOUR };
   return {
     store: dbDrainStore,
     handler: outboxHandler,
     now: Date.now,
     killed: async (kind) => kind === "capi" && (await killSwitchTripped("capi_enabled")),
     async mailGate(now) {
-      const minute = await rate.rateLimit(rate.platformBucket("outbox:mail"), MAIL_PER_MINUTE, 60);
+      const minute = await rate.rateLimit(rate.platformBucket("outbox:mail"), caps.perMinute, 60);
       if (!minute.ok) return { ok: false, retryAt: now + Math.max(1, minute.retryAfter) * 1000 };
       try {
-        await usage.chargePlatformUsage("mail_sent", usage.platformPeriodOf("hour", new Date(now)), 1, { limit: MAIL_PER_HOUR });
+        await usage.chargePlatformUsage("mail_sent", usage.platformPeriodOf("hour", new Date(now)), 1, { limit: caps.perHour });
       } catch (err) {
         if (err instanceof usage.QuotaError) return { ok: false, retryAt: nextHourStart(now) };
         throw err;
@@ -334,7 +357,11 @@ function kindsOf(kinds: readonly OutboxKind[] | undefined): OutboxKind[] {
  * items, then every store with due items (`active` / `restricted`), round robin. Never throws: a failure is logged,
  * counted in the error ring and reported as `more`.
  */
-export async function drainOutbox(opts: { budgetMs: number; storeId?: string; kinds?: OutboxKind[] }): Promise<DrainReport> {
+/**
+ * `platformOnly` (R2 contract step C2-E, S6's request): drain only the platform items (owner null: S6's `edge_purge`
+ * rows, scope "platform", target_id = the store), skipping the per-store pass; S6 drains them right after enqueueing.
+ */
+export async function drainOutbox(opts: { budgetMs: number; storeId?: string; kinds?: OutboxKind[]; platformOnly?: true }): Promise<DrainReport> {
   const started = Date.now();
   const { newDrainState, drainOwner } = await import("./outbox/drain");
   const st = newDrainState();
@@ -345,7 +372,8 @@ export async function drainOutbox(opts: { budgetMs: number; storeId?: string; ki
     const deps = await appDeps(setImmediateLoop);
     const { systemCtx, systemScope } = await import("./scope");
     const ctx = systemCtx("outbox");
-    if (opts.storeId !== undefined) await drainOwner(deps, systemScope(ctx, opts.storeId), kinds, deadline, st);
+    if (opts.platformOnly) await drainOwner(deps, null, kinds, deadline, st);
+    else if (opts.storeId !== undefined) await drainOwner(deps, systemScope(ctx, opts.storeId), kinds, deadline, st);
     else await drainEverything(deps, ctx, kinds, deadline, st);
   } catch (err) {
     st.more = true;

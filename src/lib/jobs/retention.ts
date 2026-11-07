@@ -58,6 +58,8 @@ export const RETENTION_RULES: readonly RetentionRule[] = Object.freeze([
   { name: "dailyUsage", table: "store_usage", days: 7, cutoff: "day", sql: "DELETE FROM store_usage WHERE metric IN (?) AND period < ? LIMIT 2000" }, // tenancy: platform §H.11 retention: store_usage rows of every daily metric after 7 days, every store
   { name: "passwordResets", table: "password_resets", days: 30, cutoff: "date", sql: "DELETE FROM password_resets WHERE expires_at < ? LIMIT 2000" },
   { name: "staffInvites", table: "staff_invites", days: 30, cutoff: "date", sql: "DELETE FROM staff_invites WHERE expires_at < ? LIMIT 2000" },
+  // R2 contract step C2-E (S6, OS-13): the Worker's per-minute counters, a platform table (no store_id), 14 days
+  { name: "edgeReports", table: "edge_reports", days: 14, cutoff: "date", sql: "DELETE FROM edge_reports WHERE minute < ? LIMIT 2000" },
 ] satisfies RetentionRule[]).map((r) => Object.freeze(r));
 
 /** The value bound to a rule's cutoff `?` at `nowMs`: rows older than it go. */

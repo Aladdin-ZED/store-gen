@@ -193,6 +193,8 @@ export const messages: Partial<Record<keyof typeof en, string>> = {
   "ops.tl.carrier_status": "تحديث من شركة التوصيل",
   "ops.tl.remitted": "شركة التوصيل رجعات الفلوس",
   "ops.tl.merged": "تجمعات",
+  "ops.tl.shipment_cancelled": "الإرسالية تلغات قبل ما يتشدّ الكولي",
+  "ops.tl.carrier_notified": "شركة التوصيل تعلمات بالتبديل",
   "ops.tl.detail.forced": "تبدّل بالقوة",
   "ops.tl.detail.implied": "جا من خطوة من بعد",
   "ops.tl.detail.auto": "أوتوماتيكي",
