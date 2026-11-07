@@ -153,7 +153,8 @@ const createdEvent = (order: OrderRow, conversion: PurchaseConversion | null): O
   on: "created",
   order,
   conversion,
-  target: { pageId: order.pageId, versionId: order.versionId, source: order.source },
+  // 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one ('' until the R2 OrderDraft widening)
+  target: { pageId: order.pageId ?? "", versionId: order.versionId, source: order.source },
 });
 
 /**

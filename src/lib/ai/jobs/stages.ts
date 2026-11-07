@@ -23,8 +23,8 @@ import type { AiJobKind } from "./enqueue";
 
 /** what a stage runs: a task, or the probe's model-free sleep */
 export type StageTask = AiTaskId | "probe.sleep";
-/** every `ai_jobs.kind`, the staff-only probe included */
-export type JobRowKind = AiJobKind | "probe";
+/** every `ai_jobs.kind`, the staff-only probe included (and 0006's catalog_from_photos, not enqueuable yet) */
+export type JobRowKind = AiJobKind | "probe" | "catalog_from_photos";
 
 /** every stage is a pattern-A-sized call (core §H.12) */
 export const STAGE_DEADLINE_MS = 90_000;
@@ -174,6 +174,8 @@ export function probePlan(totalMs: number = PROBE_TOTAL_MS, stageMs: number = PR
 
 /** Every kind's plan: the probe's sleeps, else `stagePlanFor`. */
 export function planForJob(kind: JobRowKind, input: unknown, probe: ProbeResult | null): StagePlan {
+  // 0006 (STO-§4.7): the kind exists in the table; its stage plan arrives with S1 / S7 (R2), and no path enqueues it before
+  if (kind === "catalog_from_photos") throw new Error("ai jobs: catalog_from_photos has no stage plan yet");
   if (kind === "probe") {
     const i = isRecord(input) ? input : {};
     return probePlan(typeof i.totalMs === "number" ? i.totalMs : PROBE_TOTAL_MS, typeof i.stageMs === "number" ? i.stageMs : PROBE_STAGE_MS);

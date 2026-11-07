@@ -292,7 +292,7 @@ export function outboxSections(h: Harness, x: OutboxSectionDeps): void {
     } catch (err) {
       t.check("checkItems: the refusal never quotes the payload", !String((err as Error).message).includes("212612345678"));
     }
-    t.eq("the 0005 enum stores six kinds (push arrives with 0007)", [...RU.STORED_KINDS].sort(), ["capi", "carrier", "mail", "telegram", "webhook", "whatsapp"]);
+    t.eq("the 0006 enum stores seven kinds (edge_purge appended in 0006; push arrives with 0007)", [...RU.STORED_KINDS].sort(), ["capi", "carrier", "edge_purge", "mail", "telegram", "webhook", "whatsapp"]);
 
     const masked = RU.cleanLastError(`Bad Request: chat 4433221100 not found for ali@example.ma\n${"x".repeat(400)}`);
     t.check("cleanLastError: e-mail and long digit runs masked, one line", masked.startsWith("Bad Request: chat <n> not found for <email> x") && !/\n/.test(masked), masked.slice(0, 60));

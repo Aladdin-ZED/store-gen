@@ -53,8 +53,9 @@ async function homeSource(scope: StoreScope, store: StoreRow): Promise<TrackDocS
 }
 
 /** The document of an order's view: its own version, else the home page, else the latest published page. */
-export async function orderDocSource(scope: StoreScope, store: StoreRow, order: { pageId: string; versionId: string | null }): Promise<TrackDocSource | null> {
-  return (order.versionId ? await versionSource(scope, order.pageId, order.versionId) : null) ?? (await homeSource(scope, store)) ?? (await latestPublished(scope));
+export async function orderDocSource(scope: StoreScope, store: StoreRow, order: { pageId: string | null; versionId: string | null }): Promise<TrackDocSource | null> {
+  // 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one
+  return (order.versionId && order.pageId ? await versionSource(scope, order.pageId, order.versionId) : null) ?? (await homeSource(scope, store)) ?? (await latestPublished(scope));
 }
 
 /** The document of the lookup form: the home page, else the latest published page. */

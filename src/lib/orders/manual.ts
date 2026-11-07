@@ -498,7 +498,7 @@ export async function convertLeadToOrder(ctx: WriteCtx, leadId: string, input: O
     ...input,
     selection,
     customer,
-    pageId: lead.pageId,
+    pageId: lead.pageId ?? "", // 0006: a store (v3) lead has no landing page (page_id NULL); R1 leads always carry one
     source: lead.kind === "whatsapp" ? "whatsapp" : "manual",
     fromLead: { leadId },
   });

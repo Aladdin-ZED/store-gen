@@ -36,7 +36,8 @@ const realOrder = and(eq(orders.isTest, false), notHoneypot)!;
 const FAILED = new Set(["refused", "returned", "lost"]);
 
 interface CohortRow {
-  pageId: string;
+  /** 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one */
+  pageId: string | null;
   total: string | number;
   items: OrderItems;
   cityKey: string | null;
@@ -112,7 +113,7 @@ export async function breakEvenFor(scope: StoreScope, opts: { pageId?: string } 
   const counts = countsOf(rows);
   const delivered = rows
     .filter((r) => r.shipState === "delivered")
-    .map((r) => ({ totalCents: toCents(r.total), cogsCents: orderCogsCents(index, { pageId: r.pageId, items: r.items }), cityKey: r.cityKey }));
+    .map((r) => ({ totalCents: toCents(r.total), cogsCents: orderCogsCents(index, { pageId: r.pageId ?? "", items: r.items }), cityKey: r.cityKey }));
   const failed = rows.filter((r) => FAILED.has(r.shipState)).map((r) => ({ cityKey: r.cityKey }));
   const result = breakEven({ counts, delivered, failed, packagingCents: accounting.packagingCents, rates });
   const storePlaced = storeRows ? storeRows.length : counts.placed;

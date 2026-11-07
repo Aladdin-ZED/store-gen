@@ -43,6 +43,13 @@
       "when": 1793129126167,
       "tag": "0005_r1",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1794028684355,
+      "tag": "0006_r2",
+      "breakpoints": true
     }
   ]
 }

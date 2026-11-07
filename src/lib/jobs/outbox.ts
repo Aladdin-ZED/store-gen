@@ -44,7 +44,7 @@ import { DRAIN_ORDER, OUTBOX_SEAL_PURPOSE, PAYLOAD_MAX_BYTES, checkItems, replay
 export { OUTBOX_BACKOFF_MS, OUTBOX_CANCELLED_PREFIX, isFinalFailure } from "./outbox/rules";
 export { httpRetryable, resendKey } from "./outbox/rules";
 
-export type OutboxKind = "webhook" | "capi" | "telegram" | "whatsapp" | "mail" | "carrier" | "push" /* 0007, PLA Q.21 */;
+export type OutboxKind = "webhook" | "capi" | "telegram" | "whatsapp" | "mail" | "carrier" | "edge_purge" /* 0006, OS-12 (S6) */ | "push" /* 0007, PLA Q.21 */;
 export type OutboxState = (typeof outbox.$inferSelect)["state"];
 
 export interface OutboxItem<P = unknown> {

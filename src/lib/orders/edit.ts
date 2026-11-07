@@ -142,7 +142,7 @@ async function reprice(ctx: StoreCtx, row: OrderRow, sel: NonNullable<OrderPatch
   let versionId = row.versionId;
   let pricedWith: Repriced["pricedWith"] = "order_version";
   if (!doc || !versionId) {
-    const page = await livePage(scope, row.pageId);
+    const page = row.pageId ? await livePage(scope, row.pageId) : null; // 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one
     if (!page) return refuse("invalid", { text: "This order's page is no longer published, so its lines can't be re-priced." });
     doc = page.doc;
     versionId = page.versionId;

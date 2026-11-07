@@ -246,7 +246,7 @@ async function main(): Promise<number> {
     // a replayed creation hook (the same order twice) writes nothing again: no second event, count or flag
     const H = load<typeof import("@/lib/orders/hooks")>("@/lib/orders/hooks");
     const eventsBefore = await countEvents(o1);
-    await H.runOrderHooks("created", "afterCommit", A, { on: "created", order: await rowOf(o1), conversion: null, target: { pageId: r1.pageId, versionId: null, source: "live" } });
+    await H.runOrderHooks("created", "afterCommit", A, { on: "created", order: await rowOf(o1), conversion: null, target: { pageId: r1.pageId!, versionId: null, source: "live" } });
     eq("creation: a replayed hook writes nothing again", [await countEvents(o1), (await customerOf(r1.phone))?.ordersCount], [eventsBefore, 1]);
 
     // CAS (OD4)

@@ -321,7 +321,8 @@ export interface TimelineItem {
   id: number;
   at: string;
   type: OrderEventType;
-  actor: { kind: OrderActor["kind"] | "platform"; name: string | null };
+  /** 0006 (AI R37): `integration` (a carrier adapter) and `reconciliation` (a matched statement line) are written in R2 */
+  actor: { kind: OrderActor["kind"] | "platform" | "integration" | "reconciliation"; name: string | null };
   text: MessageRef;
   detail?: MessageRef[];
   masked: true;

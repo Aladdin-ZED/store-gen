@@ -102,7 +102,7 @@ export async function listVersions(scope: StoreScope, filters: VersionFilters = 
       pageName: r.pageName,
       pageSlug: r.pageSlug,
       pageStatus: r.pageStatus,
-      kind: r.kind,
+      kind: r.kind === "sync" ? "publish" : r.kind, // 0006: a `sync` version (an attached landing republished by a product change, LAN Q24) lists as a publish
       label: r.label,
       starred: r.starred,
       createdAt: r.createdAt.toISOString(),
@@ -125,7 +125,7 @@ export async function versionKindCounts(scope: StoreScope, pageId?: string): Pro
     db.select({ n: count() }).from(pageVersions).where(whereStore(pageVersions, scope, ofPage, eq(pageVersions.starred, true))),
   ]);
   const out = { generation: 0, save: 0, publish: 0, restore: 0, import: 0, autosave: 0, starred: Number(starred?.n ?? 0) };
-  for (const r of rows) out[r.kind] = Number(r.n);
+  for (const r of rows) out[r.kind === "sync" ? "publish" : r.kind] += Number(r.n); // 0006: a `sync` version (an attached landing republished by a product change, LAN Q24) lists as a publish
   return out;
 }
 
@@ -137,13 +137,14 @@ export async function setVersionStarred(scope: WriteScope, id: string, starred: 
 }
 
 async function getVersion(scope: StoreScope, id: string) {
-  const [row] = await db
+  const [found] = await db
     .select({ id: pageVersions.id, pageId: pageVersions.pageId, kind: pageVersions.kind, doc: pageVersions.doc, createdAt: pageVersions.createdAt, pageName: pages.name })
     .from(pageVersions)
     .innerJoin(pages, pageOfVersion(scope))
     .where(byId(pageVersions, scope, id))
     .limit(1);
-  return row ?? null;
+  // 0006: a `sync` version (an attached landing republished by a product change, LAN Q24) reads as a publish
+  return found ? { ...found, kind: found.kind === "sync" ? ("publish" as const) : found.kind } : null;
 }
 
 const KIND_LABEL: Record<VersionKind, string> = {

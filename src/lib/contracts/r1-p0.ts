@@ -558,7 +558,8 @@ export type P3Landing = [
 /* ------------------------------------------------------------------ */
 
 export type P8Outbox = [
-  Assert<Equals<OutboxKind, "webhook" | "capi" | "telegram" | "whatsapp" | "mail" | "carrier" | "push">>,
+  // R2 contract step C2-A: "edge_purge" appended in 0006 (OS-12, S6)
+  Assert<Equals<OutboxKind, "webhook" | "capi" | "telegram" | "whatsapp" | "mail" | "carrier" | "edge_purge" | "push">>,
   Assert<Equals<OutboxItem, { kind: OutboxKind; topic: string; targetId?: string; dedupeKey: string; payload: unknown; pii?: boolean; notBefore?: Date }>>,
   Assert<Equals<SendResult, { ok: true; status?: number } | { ok: false; retry: boolean; status?: number; error: string }>>,
   // P0b (CCR P5-1): `paused` (§H.8 capi_enabled) and `batch` (OPE-§21.3 Telegram) are optional, so today's handlers

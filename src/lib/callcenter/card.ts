@@ -273,7 +273,7 @@ export async function buildQueueOrder(scope: StoreScope, row: CardRow, viewer: S
   const [history, duplicates, rows, bands, eta, rescues] = await Promise.all([
     historyOf(scope, row.customerId),
     duplicatesFor(scope, { id: row.id, phone: row.phone, isTest: row.isTest }),
-    templateRows(scope, row.pageId, locale),
+    templateRows(scope, row.pageId ?? "", locale), // 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one
     riskBandOutcomes(scope),
     etaText(scope, row.cityKey as CityKey | null, locale),
     lane === "delivery" ? countRescueCalls(db, scope, row.id) : Promise.resolve(0),
@@ -334,7 +334,7 @@ export function assembleCard(scope: StoreScope, row: CardRow, o: CardOpts, p: Ca
     risk: { score: row.riskScore, level: risk.level, reasons: risk.reasons, positive: risk.positive, calibration: band ? { badShareBp: band.badShareBp, n: band.decided } : null },
     duplicates: p.duplicates.map((d) => ({ id: d.id, createdAt: d.createdAt.toISOString(), status: projectStatus({ confirm: d.confirmState, ship: d.shipState }) })),
     script: p.script,
-    templates: templateList(p.templates, row.pageId, lane, p.ui),
+    templates: templateList(p.templates, row.pageId ?? "", lane, p.ui),
     eta: { text: p.eta, cityKey },
     leaseUntil: iso(o.leaseUntil),
     mine: o.mine,

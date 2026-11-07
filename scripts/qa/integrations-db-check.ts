@@ -1849,7 +1849,7 @@ async function capiSuite(): Promise<void> {
   await setConv(SA, { purchaseTrigger: "order", manualOrders: false });
   const created = async (o: string) => {
     const [row] = await db.select().from(orders).where(eq(orders.id, o));
-    await db.transaction(async (tx) => runOrderHooks("created", "inTx", SA.scope, { on: "created", order: row!, conversion: null, target: { pageId: row!.pageId, versionId: row!.versionId, source: row!.source } }, tx));
+    await db.transaction(async (tx) => runOrderHooks("created", "inTx", SA.scope, { on: "created", order: row!, conversion: null, target: { pageId: row!.pageId!, versionId: row!.versionId, source: row!.source } }, tx));
     return (await rowsOf(o)).length;
   };
   const m1 = await capiOrder(SA, { source: "manual" });
@@ -2135,7 +2135,7 @@ async function telegramSuite(): Promise<void> {
     attempts,
     createdAt: row.createdAt,
   });
-  const createdEvent = (row: OrderRow) => ({ on: "created" as const, order: row, conversion: null, target: { pageId: row.pageId, versionId: null, source: row.source } });
+  const createdEvent = (row: OrderRow) => ({ on: "created" as const, order: row, conversion: null, target: { pageId: row.pageId!, versionId: null, source: row.source } });
   const created = async (s: typeof SA, row: OrderRow) => db.transaction(async (tx) => runOrderHooks("created", "inTx", s.scope, createdEvent(row), tx));
 
   /* ---------------- 9.1 the hook: new orders on the order's transaction ---------------- */

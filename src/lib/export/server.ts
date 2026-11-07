@@ -236,7 +236,7 @@ export async function getExportContext(scope: StoreScope, pageId: string, opts: 
   }
   const versions: ExportVersionJson[] = versionRows.map((v) => ({
     id: v.id,
-    kind: v.kind,
+    kind: v.kind === "sync" ? "publish" : v.kind, // 0006: a `sync` version (an attached landing republished by a product change, LAN Q24) lists as a publish
     label: v.label,
     createdAt: v.createdAt.toISOString(),
     published: v.id === page.publishedVersionId,

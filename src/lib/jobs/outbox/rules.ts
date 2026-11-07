@@ -33,10 +33,10 @@ export function isFinalFailure(item: Pick<ClaimedItem, "attempts">, result: Send
   return !result.ok && (!result.retry || item.attempts >= OUTBOX_BACKOFF_MS.length);
 }
 
-/** The kinds the 0005 `outbox.kind` enum stores ("push" arrives with 0007, PLA Q.21): anything else is refused. */
+/** The kinds the `outbox.kind` enum stores (0006 appended "edge_purge"; "push" arrives with 0007, PLA Q.21): anything else is refused. */
 export const STORED_KINDS: readonly OutboxKind[] = outbox.kind.enumValues;
-/** Every kind of the frozen type, in the order the drainer serves them inside one store (seller-facing first). */
-export const DRAIN_ORDER: readonly OutboxKind[] = ["telegram", "capi", "webhook", "carrier", "whatsapp", "push", "mail"];
+/** Every kind of the frozen type, in the order the drainer serves them inside one store (seller-facing first; the edge purge, S6, last). */
+export const DRAIN_ORDER: readonly OutboxKind[] = ["telegram", "capi", "webhook", "carrier", "whatsapp", "push", "mail", "edge_purge"];
 
 export const TOPIC_MAX = 48;
 export const DEDUPE_MAX = 160;

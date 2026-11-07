@@ -279,7 +279,7 @@ export async function runUpgradeCheck(conn: Connection, opts: { batch?: number }
 export type TableLevel = "T" | "P*" | "P-opt" | "P" | "root";
 
 /**
- * Every table of the schema up to 0005 with its §D.3 level (the 0000 tables per §D.2). A new table is added here in
+ * Every table of the schema up to 0006 with its §D.3 level (the 0000 tables per §D.2). A new table is added here in
  * the release that cuts it; test:migrate compares this list with the §D.3 rows of the document.
  * CCR r1.0-t1-3 item 2 split the §D.3 rows of `legal_acceptances` (P (opt. store), PLA-§2.1) and
  * `notification_reads` (P, no store_id) to match the schema; CCR r1.0-t1-1 moved `platform_usage` (P) to 0004.
@@ -370,16 +370,44 @@ export const TABLE_LEVELS: Readonly<Record<string, TableLevel>> = {
   prompt_versions: "P",
   design_genomes: "T",
   headline_shingles: "P", // cross-tenant MinHash, no store id (R-D37, D35)
+  // 0006 (§D.3; R2 contract step C2-A)
+  products: "T",
+  collections: "T",
+  collection_products: "T",
+  inventory_levels: "T",
+  catalog_redirects: "T",
+  inventory_moves: "T",
+  store_themes: "T",
+  expenses: "T",
+  finance_daily: "T",
+  carrier_accounts: "T",
+  shipments: "T",
+  shipment_events: "T",
+  remittances: "T",
+  remittance_lines: "T",
+  import_mappings: "T",
+  import_runs: "T",
+  commission_rules: "T",
+  agent_earnings: "T",
+  payouts: "T",
+  webhook_endpoints: "T",
+  stats_version_daily: "T",
+  ai_feedback: "T",
+  notification_prefs: "P-opt", // store_id NOT NULL DEFAULT '' (a PK column): '' = every store, no FK (PLA Q.22)
+  edge_reports: "P", // the Worker's per-minute counters, no store (OS-13, S6)
 };
 
-/** Every schema.ts table and its store_id column ("required" NOT NULL, "optional", or none). */
-export function schemaStoreColumns(): { table: string; storeId: "required" | "optional" | null }[] {
-  const out: { table: string; storeId: "required" | "optional" | null }[] = [];
+/**
+ * Every schema.ts table and its store_id column: "required" (NOT NULL, no default: a tenant row), "optional" (NULL-able),
+ * "dimension" (NOT NULL DEFAULT '': a key column where '' = every store, notification_prefs, 0006), or none.
+ */
+export function schemaStoreColumns(): { table: string; storeId: "required" | "optional" | "dimension" | null }[] {
+  const out: { table: string; storeId: "required" | "optional" | "dimension" | null }[] = [];
   for (const value of Object.values(schema)) {
     if (!is(value, MySqlTable)) continue;
     const config = getTableConfig(value);
     const column = config.columns.find((c) => c.name === "store_id");
-    out.push({ table: config.name, storeId: column ? (column.notNull ? "required" : "optional") : null });
+    out.push({ table: config.name, storeId: column ? (!column.notNull ? "optional" : column.hasDefault && column.default === "" ? "dimension" : "required") : null });
   }
   return out.sort((a, b) => a.table.localeCompare(b.table));
 }
@@ -393,6 +421,7 @@ export function tenantSetProblems(): string[] {
     if (!level) problems.push(`table ${table} is in schema.ts but has no §D.3 level (TABLE_LEVELS)`);
     else if (storeId === "required" && level !== "T" && level !== "P*") problems.push(`${table}: store_id NOT NULL, but §D.3 says ${level}`);
     else if (storeId === "optional" && level !== "P-opt") problems.push(`${table}: store_id NULL-able, but §D.3 says ${level}`);
+    else if (storeId === "dimension" && level !== "P-opt") problems.push(`${table}: store_id NOT NULL DEFAULT '' (every store), but §D.3 says ${level}`);
     else if (storeId === null && (level === "T" || level === "P*" || level === "P-opt")) problems.push(`${table}: no store_id, but §D.3 says ${level}`);
   }
   const known = new Set(tables.map((t) => t.table));

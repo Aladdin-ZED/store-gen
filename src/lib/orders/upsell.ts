@@ -102,7 +102,8 @@ export async function acceptUpsell(scope: WriteScope, input: { orderId: string; 
 
   // honeypot rows (sheet disabled) and test orders (D54) stay out of the stats and the sheet
   const quiet = order.sheetStatus === "disabled" || order.isTest;
-  if (!quiet) {
+  if (!quiet && order.pageId) {
+    // 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one
     await bumpOrderStats(scope, order.pageId, order.createdAt, { revenue: price }).catch((err) => logError("orders:upsell-stats", err));
   }
   return {

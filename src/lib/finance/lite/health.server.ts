@@ -50,11 +50,13 @@ async function uncostedSkus(scope: StoreScope): Promise<number> {
     .from(orders)
     .where(whereStore(orders, scope, gte(orders.createdAt, from), realOrder))
     .limit(200);
-  if (!withOrders.length) return 0;
+  // 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one
+  const pageIds = withOrders.flatMap((p) => (p.pageId ? [p.pageId] : []));
+  if (!pageIds.length) return 0;
   const live = await db
     .select({ id: pages.id, versionId: pages.publishedVersionId })
     .from(pages)
-    .where(whereStore(pages, scope, eq(pages.status, "published"), isNotNull(pages.publishedVersionId), inArray(pages.id, withOrders.map((p) => p.pageId))))
+    .where(whereStore(pages, scope, eq(pages.status, "published"), isNotNull(pages.publishedVersionId), inArray(pages.id, pageIds)))
     .orderBy(desc(pages.updatedAt))
     .limit(50);
   if (!live.length) return 0;

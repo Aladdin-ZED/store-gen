@@ -234,7 +234,7 @@ async function main(): Promise<number> {
     // the hook on real rows, through the order-hook registry
     const { runOrderHooks } = load<typeof import("@/lib/orders/hooks")>("@/lib/orders/hooks");
     const run = (row: typeof S.orders.$inferSelect, scope: WriteScope = A) =>
-      runOrderHooks("created", "afterCommit", scope, { on: "created", order: row, conversion: null, target: { pageId: row.pageId, versionId: row.versionId, source: row.source } });
+      runOrderHooks("created", "afterCommit", scope, { on: "created", order: row, conversion: null, target: { pageId: row.pageId!, versionId: row.versionId, source: row.source } });
     const idem = randomUUID();
     const h1 = await lead("A", { idem, attempts: 2, status: "contacted" });
     const o1 = await order("A", { idem });
@@ -723,7 +723,7 @@ async function main(): Promise<number> {
     check("set phone: audited without the phone", audits.length >= 1 && !JSON.stringify(audits.map((a) => a.meta)).includes(local.slice(2)), audits.map((a) => a.meta));
 
     // the dedupe (LAN-§10.4 step 2): a form order within 72 h carrying the phone the agent set, or the ref in its note
-    const run = (o: typeof S.orders.$inferSelect) => runOrderHooks("created", "afterCommit", A, { on: "created", order: o, conversion: null, target: { pageId: o.pageId, versionId: o.versionId, source: o.source } });
+    const run = (o: typeof S.orders.$inferSelect) => runOrderHooks("created", "afterCommit", A, { on: "created", order: o, conversion: null, target: { pageId: o.pageId!, versionId: o.versionId, source: o.source } });
     const byPhone = await order("A", { phone: e164, createdAt: new Date(Date.now() + 60_000) } as never);
     await run(byPhone);
     const after = await leadRow(one.leadId);
@@ -733,7 +733,7 @@ async function main(): Promise<number> {
     const refRow = await leadRow(many[0]!.leadId);
     check("dedupe: an order whose note carries the WA- ref marks that intent converted", refRow?.convertedOrderId === byRef.id && refRow.status === "converted", refRow);
     const bOrder = await order("B", { note: `ref ${many[1]!.ref}`, createdAt: new Date(Date.now() + 60_000) } as never);
-    await runOrderHooks("created", "afterCommit", B, { on: "created", order: bOrder, conversion: null, target: { pageId: bOrder.pageId, versionId: bOrder.versionId, source: bOrder.source } });
+    await runOrderHooks("created", "afterCommit", B, { on: "created", order: bOrder, conversion: null, target: { pageId: bOrder.pageId!, versionId: bOrder.versionId, source: bOrder.source } });
     check("dedupe: B's order with A's ref never touches A's intent", (await leadRow(many[1]!.leadId))?.convertedOrderId === null);
     const counts = await R.leadCounts(A, { userId: managerA, role: "manager" });
     check("header: the intents and their conversions are counted (rate hidden below n = 20 when so)", counts.intents.n >= 50 && counts.intents.converted >= 2 && (counts.intents.n >= 20 ? counts.intents.pct !== null : counts.intents.pct === null), counts.intents);

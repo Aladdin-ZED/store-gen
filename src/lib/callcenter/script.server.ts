@@ -84,8 +84,9 @@ const stub = (err: unknown) => err instanceof Error && err.message.startsWith("n
 /** The order's script for `viewer` (see the header). `rows`: the card's read of the store's active script rows. */
 export async function compileScript(scope: StoreScope, order: OrderRow, viewer: StoreCtx, opts: { locale?: ScriptLocale; rows?: readonly ScriptRow[] } = {}): Promise<CompiledScript> {
   const locale = opts.locale ?? scriptLocaleOf(order.locale, viewer.store.defaultLocale);
-  const rows = opts.rows ?? (await scriptRows(scope, order.pageId, locale));
-  const { doc, source, templateId } = pickScript(rows, order.pageId, locale);
+  // 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one: the store-wide scripts apply
+  const rows = opts.rows ?? (await scriptRows(scope, order.pageId ?? "", locale));
+  const { doc, source, templateId } = pickScript(rows, order.pageId ?? "", locale);
   const meta = { locale, source, templateId };
   let values: TemplateValues;
   try {

@@ -338,6 +338,7 @@ async function orderDoc(scope: StoreScope, pageId: string, versionId: string | n
  * order's version (its pixels, the lead content id, the market) and no client data. Null when no version is known.
  */
 async function serverOnlyContextOf(scope: StoreScope, o: HookOrder): Promise<CapiContext | null> {
+  if (!o.pageId) return null; // 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one
   const found = await orderDoc(scope, o.pageId, o.versionId);
   if (!found) return null;
   const { doc, pageKey } = found;

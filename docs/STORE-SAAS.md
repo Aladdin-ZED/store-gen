@@ -140,7 +140,7 @@ marked **deviates R-Dx** or **refines R-Dx** changes or sharpens a settled decis
 | D10 | **Invites are bound to the invited e-mail.** 32-byte link token, sha256 at rest, shown once, 7 days, single use, revocable; R1 hands the link over by copy (R-D51). | A forwarded or leaked link can't be redeemed by a different account; the inviter never sees a password (AUTH-07). |
 | D11 | **Password reset in R1 = a staff-made one-time link** (`password_resets`, 60 min, hashed), sent by the staff member over WhatsApp. Never a temporary password. R2 self-service e-mail uses the same table. | No e-mail exists yet (R-D51); closes AUTH-08. |
 | D12 | **"Require 2FA for members" is enforced in the seam from R1** (column `stores.require_member_2fa`, UI in R1). **Deviates** from RESEARCH placing TN-13 in R3. | The check lives in `requireStoreMember`, which freezes in R1.0; adding it later means reopening the frozen seam. It is ~10 lines. |
-| D13 | Login throttling per **(e-mail, network)** bucket plus a Turnstile challenge after 3 failures; never a global account lock. `users.failed_logins` / `locked_until` are retired (written by nothing, dropped in 0006). | AUTH-25 (anyone could lock any account out of every store), AUTH-27. |
+| D13 | Login throttling per **(e-mail, network)** bucket plus a Turnstile challenge after 3 failures; never a global account lock. `users.failed_logins` / `locked_until` are retired (written by nothing; the drop moved from 0006 to 0007 at the R2 contract step, §D.2). | AUTH-25 (anyone could lock any account out of every store), AUTH-27. |
 | D14 | **scrypt semaphore:** 2 concurrent hashes per process, 16 waiting, 4 s wait, then a generic 503 "busy, retry". | AUTH-26: each hash takes 64 MiB on a 3 GB plan shared with COD Studio. |
 | D15 | **Impersonation = the staff member's own session tagged with `sessions.impersonation_id`.** The seam builds a synthetic read-only membership for that one store; every write permission is refused in `storeAction` / `storeGuard`. | R-D14; nobody ever signs in as the seller; one code path enforces read-only. |
 | D16 | **Custom-domain rewrite prefix is `/d/<host>`, not `/_d/`. Deviates R-D6 naming.** | Folders starting with `_` are private (non-routable) in the App Router (`node_modules/next/dist/docs/01-app/01-getting-started/02-project-structure.md:257-259`). |
@@ -728,7 +728,7 @@ inside the D69 ceilings.
   account-wide bucket `p:login:acct` only ever raises the challenge and never refuses** (rev 3, SEC-22: a refusal at 20
   would let five networks lock any account out of every store again, the AUTH-25 problem D13 closes); refusals come
   from `p:login:ip` and `p:login:acctnet` only (`test:security`). No hard account lock; `failed_logins`/`locked_until`
-  are no longer read or written (dropped in 0006).
+  are no longer read or written (dropped in 0007, §D.2).
 - **scrypt semaphore** `withScryptSlot(fn)` in `src/lib/auth/password.ts`: 2 concurrent, 16 waiting, 4 s max wait →
   `AuthBusyError` → HTTP 503 with the generic busy message. Used by login, signup, invite accept, reset, password
   change. Unknown e-mails still burn the dummy hash (`DUMMY_HASH`, `password.ts:24`) inside the semaphore.
@@ -1312,7 +1312,7 @@ const storeRefOpt = () => varchar("store_id", { length: 26 }).references(() => s
 |---|---|---|
 | `users` | 0004 | + `platform_role enum('none','super_admin','admin','support','analyst') NOT NULL DEFAULT 'none'` (index `users_prole_idx`), + `locale varchar(5) NULL` (admin UI locale, ADM-40), + `phone varchar(24) NULL` (signup phone, E.164), + `disabled_reason varchar(200) NULL`, + `disabled_at datetime(3) NULL`. `disabled` = platform ban only (AUTH-12). `role` becomes **legacy** (read only by the conversion, §D.8). `failed_logins`, `locked_until` unused. |
 | `users` | 0005 | + index `users_name_idx (name)` (console people list, PLA Q.10). |
-| `users` | 0006 | drop `role`, `failed_logins`, `locked_until`. |
+| `users` | 0007 | drop `role`, `failed_logins`, `locked_until` (**moved from 0006 at the R2 contract step C2-A**: the store #1 conversion, a §H.4 boot task that runs after every migration on a legacy install, still reads `role`, and 0006 stays additive so an R1 build can still run against an upgraded database). |
 | `sessions` | 0004 | + `last_store_id varchar(26) NULL` (hint, D1), + `impersonation_id varchar(26) NULL` (§B.8), + `step_up_at datetime(3) NULL` (§B.7). |
 | `pages` | 0004 | + `store_id` (storeRef); unique `pages_store_slug_uq (store_id, slug)` **replaces** `pages_slug_uq`; `pages_key_uq (public_key)` stays global; + `kind enum('landing','home','product','collection','page','policy','search','cart','checkout','not_found') NOT NULL DEFAULT 'landing'` (only `landing` until R2); + `product_id varchar(26) NULL` (R2 LP-07); index `pages_store_status_idx (store_id, status, updated_at)`; `is_home` copied to `stores.home_page_id` then **dropped** (DB-02). **Rev 5 (CRIT2-5): + `first_published_at datetime(3) NULL`**, the page's first publish instant: set **once** by T3's `publishPage` in the version-row transaction (`first_published_at = COALESCE(first_published_at, <publish instant>)`, never reset by unpublish, republish, restore or a re-render), backfilled in 0004 step 5 from the page's oldest `page_versions` row of `kind = 'publish'`; it is the first-come key of design's novelty rule (DES-§2.1, §7.8, QUAL-19) and lives on the core table because version and genome rows are pruned by retention while this key must not be. In **0004**, not 0005, because T3's R1.0 publish path writes it (the ENGC-1 rule for `is_test`). |
 | `pages` | 0006 | + `theme_mode enum('store','campaign') NULL` (R-D41, LP-08); + `attach_opts longtext NULL` (attached-landing options, STO-R6). From 0006 `pages.draft` is typed `jsonText<PageDoc \| StorePageDoc>` and every landing reader filters `kind = 'landing'` or goes through `readPageDoc()` (STO-R2, lint L11). |
@@ -1412,11 +1412,12 @@ Owner = the part spec allowed to refine its columns (§D.9).
 | 0006 | `store_themes` | T | design | Brand Genome + logo parameters per store |
 | 0006 | `expenses`, `finance_daily` | T | operations | accounting (`product_costs`, `ad_spend_daily`, `carrier_rates` moved to 0005) |
 | 0006 | `carrier_accounts`, `shipments`, `shipment_events` | T | operations | carriers and shipments |
-| 0006 | `notification_prefs` | P | platform | per-user channel preferences (PLA Q.22) |
+| 0006 | `notification_prefs` | P (opt. store) | platform | per-user channel preferences (PLA Q.22); `store_id NOT NULL DEFAULT ''` is a PK column, '' = every store, no FK (C2-A) |
 | 0006 | `remittances`, `remittance_lines`, `import_mappings`, `import_runs` | T | operations | COD reconciliation, CSV importers |
 | 0006 | `commission_rules`, `agent_earnings`, `payouts` | T | operations | commissions |
 | 0006 | `webhook_endpoints` | T | operations | signed webhooks |
 | 0006 | `stats_version_daily`, `ai_feedback` | T | ai | outcome plumbing (AI-12) |
+| 0006 | `edge_reports` | P | platform | the Worker's per-minute counters per worker version, no store, no PII (OS-13, S6; R2 contract step C2-A) |
 | 0007 | `store_domains` | T | core | custom domains |
 | 0007 | `support_grants` | T | platform | owner grants |
 | 0007 | `tickets`, `ticket_messages` | P (opt. store) | platform | support inbox |
@@ -1981,6 +1982,21 @@ Shapes at contract level (types as in §D.1; every `store_id` is `storeRef()`; m
 spec writes the final column list before the release's migration is cut. **Rev 2:** `product_costs`, `carrier_rates`
 and `ad_spend_daily` moved to 0005 (§D.5); `short_links` moved to 0005; the refinements accepted in §Q are recorded
 per row below.
+
+**0006 as cut (R2 contract step C2-A; `src/lib/db/schema.ts` and `drizzle/0006_r2.sql` are the truth).** Where a row
+below and the cited part list differ, the part list won (§D.9): STO-§3.2 / §3.3 (`inventory_levels.stock_key`, the
+`collection_products` PK starting with `store_id`, the `products` / `collections` derived columns), DES-§2.3,
+OPE-§2.7 (`carrier_accounts.settlement enum('statement','at_delivery') DEFAULT 'statement'`, the R1 words; the
+`remittance_lines.match` values `matched, amount_diff, fee_diff, unknown, duplicate, probable`; `phone_digits
+varchar(16)`; `payouts.state` + `cancelled`; `ae_uq (store_id, ref, rule_id, user_id, entry)`), AI-§M.3
+(`stats_version_daily.utm_source` in the PK, `delivered_evidence`; `ai_feedback` + the genome index). The R2 plans'
+contract requests are cut too: `shipments.batch_id` + `sh_batch_idx`, `shipment_events.source`, `at` without a default
+and `se_dedupe_uq (store_id, shipment_id, at, carrier_status)` (which also serves OPE's `se_ship_idx` lookups, so no
+second index), `agent_profiles.reveal_alarm_at` / `reveal_paused_until` (S4); `import_runs.carrier_account_id`
+(`NOT NULL DEFAULT ''`), `context`, `state` + `committing` (S3); `webhook_endpoints.name` (S5); `outbox.kind` +
+`edge_purge` and the platform table `edge_reports` (S6, §D.3); `ai_feedback (store_id, page_id, kind)` (S7);
+`ai_jobs.kind` + `catalog_from_photos` (S1), `ai_jobs.input` / `reservation` (CCR r1-p7-9); `products.i18n` /
+`collections.i18n` moved here from 0007 (STO-§19.7, for AI-10's drafts; sibling pages stay R3).
 
 | Table | Columns (key ones) | Keys / indexes |
 |---|---|---|

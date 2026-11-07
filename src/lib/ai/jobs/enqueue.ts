@@ -38,8 +38,12 @@ import { cancelJobRow } from "./claim";
 import { abortJobStage, scheduleDetachedJob } from "./run";
 import { isCritiqueJob, jobClassFor, planForJob, stageInputOf, stagePlanFor, PROBE_STAGE_MS, PROBE_TOTAL_MS } from "./stages";
 
-/** probe: the staff-only detached-job probe of AI-§B.13 / core §H.12 rule 1, never enqueued through enqueueAiJob */
-export type AiJobKind = Exclude<(typeof aiJobs.$inferSelect)["kind"], "probe">;
+/**
+ * probe: the staff-only detached-job probe of AI-§B.13 / core §H.12 rule 1, never enqueued through enqueueAiJob.
+ * catalog_from_photos (0006, STO-§4.7) joins the enqueuable kinds with its stage plan (S1 / S7, R2); until then no
+ * path can enqueue it.
+ */
+export type AiJobKind = Exclude<(typeof aiJobs.$inferSelect)["kind"], "probe" | "catalog_from_photos">;
 
 export interface AiJobInput<K extends AiJobKind> {
   kind: K;

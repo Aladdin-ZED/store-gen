@@ -120,7 +120,7 @@ export async function listVersionSummaries(
   return {
     items: rows.slice(0, limit).map((r) => ({
       id: r.id,
-      kind: r.kind,
+      kind: r.kind === "sync" ? "publish" : r.kind, // 0006: a `sync` version (an attached landing republished by a product change, LAN Q24) lists as a publish
       label: r.label,
       createdAt: r.createdAt.getTime(),
       author: r.author ?? null,
@@ -528,5 +528,6 @@ export async function versionsByIds(scope: StoreScope, ids: string[]): Promise<V
     .from(pageVersions)
     .leftJoin(users, eq(users.id, pageVersions.createdBy))
     .where(whereStore(pageVersions, scope, inArray(pageVersions.id, ids)));
-  return rows.map((r) => ({ id: r.id, kind: r.kind, label: r.label, createdAt: r.createdAt.getTime(), author: r.author ?? null, starred: r.starred }));
+  // 0006: a `sync` version (an attached landing republished by a product change, LAN Q24) lists as a publish
+  return rows.map((r) => ({ id: r.id, kind: r.kind === "sync" ? "publish" : r.kind, label: r.label, createdAt: r.createdAt.getTime(), author: r.author ?? null, starred: r.starred }));
 }

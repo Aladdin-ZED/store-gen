@@ -34,7 +34,7 @@ import { STORE_ROLES, type PlatformRole, type StoreRole } from "@/lib/auth/permi
 import type { HealthFlag, HealthGroup, HealthIssue, HealthMetrics, Milestone } from "@/lib/health/types";
 import type { AssetFocus } from "@/lib/media/focus";
 import type { UnitIn } from "@/lib/orders/contract";
-import type { PageDoc } from "@/lib/page/schema";
+import type { AssetRef, PageDoc, SectionInstance } from "@/lib/page/schema";
 import type { EntitlementKey } from "@/lib/tenancy/entitlement-keys";
 import type { StoreMode } from "@/lib/tenancy/mode";
 import type { StoreStatus } from "@/lib/tenancy/types";
@@ -198,6 +198,11 @@ export const pages = mysqlTable(
      * (COALESCE; never reset by unpublish, republish, restore or a re-render); design's first-come key
      */
     firstPublishedAt: ts("first_published_at"),
+    // 0006 (§D.2; storefront.md STO-§3.1, §17.1; R-D41)
+    /** LP-08 (R-D41): read only on `landing` rows; NULL = the store default (design's effectiveTheme, DES-§11.5) */
+    themeMode: mysqlEnum("theme_mode", ["store", "campaign"]),
+    /** STO-R6: options of a landing attached to a product (`product_id` set); overrides are computed, never stored */
+    attachOpts: jsonText<AttachOpts>("attach_opts"),
   },
   (t) => [
     uniqueIndex("pages_store_slug_uq").on(t.storeId, t.slug),
@@ -214,7 +219,8 @@ export const pageVersions = mysqlTable(
     /** denormalised from pages (DB-03) */
     storeId: legacyStoreRef(),
     pageId: varchar("page_id", { length: 26 }).notNull(),
-    kind: mysqlEnum("kind", ["generation", "save", "publish", "restore", "import", "autosave"]).notNull(),
+    /** 0006 (§D.2, LAN Q24) appended `sync`: an attached landing republished by a product change (pruned first) */
+    kind: mysqlEnum("kind", ["generation", "save", "publish", "restore", "import", "autosave", "sync"]).notNull(),
     label: varchar("label", { length: 160 }),
     doc: jsonText<PageDoc>("doc").notNull(),
     /** rendered landing HTML (publish versions) */
@@ -235,6 +241,9 @@ export const pageVersions = mysqlTable(
     generationSource: mysqlEnum("generation_source", ["manual", "instant", "director", "deep"]),
     /** ≤ 2 KB, never page text */
     criticPicks: jsonText<CriticPicks>("critic_picks"),
+    /** 0006 (STO-R6): the products.rev a published or `sync` version of an attached landing was materialised against;
+     *  an in-place re-render for another reason rewrites it too (§H.3, D50) */
+    productRev: char("product_rev", { length: 26 }),
   },
   (t) => [index("pv_page_idx").on(t.pageId, t.createdAt), index("pv_store_idx").on(t.storeId, t.createdAt), storeFk("page_versions", t.storeId)],
 );
@@ -364,13 +373,22 @@ export interface OrderItems {
   upsell?: { title: string; price: number; item?: string; confirmOptions?: true };
 }
 
+/**
+ * The ship axis in DATABASE order (orders.ship_state since 0005 and shipments.state since 0006): attempt_failed and
+ * postponed are the rev 3 delivery-rescue lane (OPE Q.27a, OPS-2), appended at the end. SHIP_STATES in
+ * src/lib/orders/state.ts is a display order (test:state compares the sets).
+ */
+export const SHIP_STATE_VALUES = ["none", "to_pack", "packed", "shipped", "in_transit", "out_for_delivery", "delivered", "refused", "returned", "lost", "attempt_failed", "postponed"] as const;
+
 export const orders = mysqlTable(
   "orders",
   {
     /** human friendly, e.g. "CMD-7K3Q9X"; global (D28) */
     id: varchar("id", { length: 20 }).primaryKey(),
     storeId: legacyStoreRef(),
-    pageId: varchar("page_id", { length: 26 }).notNull(),
+    /** NULL-able from 0006 (ORD-19, the one guarded type change of 0006): a store (v3) order has no landing page */
+    pageId: varchar("page_id", { length: 26 }),
+    /** NULL for a store (v3) order (STO-§16.4) and for manual orders */
     versionId: varchar("version_id", { length: 26 }),
     exportId: varchar("export_id", { length: 26 }),
     /** 0005 (D42) appended manual, api, storefront, whatsapp */
@@ -418,10 +436,9 @@ export const orders = mysqlTable(
      */
     confirmState: mysqlEnum("confirm_state", ["new", "attempting", "callback", "confirmed", "cancelled", "fake", "duplicate", "unreachable"]).notNull().default("new"),
     /** attempt_failed and postponed are the rev 3 delivery-rescue lane (OPE Q.27a, OPS-2), at the end of the enum */
-    shipState: mysqlEnum("ship_state", ["none", "to_pack", "packed", "shipped", "in_transit", "out_for_delivery", "delivered", "refused", "returned", "lost", "attempt_failed", "postponed"])
-      .notNull()
-      .default("none"),
-    moneyState: mysqlEnum("money_state", ["unpaid", "collected", "remitted", "disputed", "written_off"]).notNull().default("unpaid"),
+    shipState: mysqlEnum("ship_state", SHIP_STATE_VALUES).notNull().default("none"),
+    /** `refunded` appended in 0006 (OD59, OPE Q.27b) */
+    moneyState: mysqlEnum("money_state", ["unpaid", "collected", "remitted", "disputed", "written_off", "refunded"]).notNull().default("unpaid"),
     /** the agent who owns the order now (claimed, assigned, callback owner) or last worked it; NULL = pool */
     assigneeId: id26("assignee_id"),
     leaseUntil: ts("lease_until"),
@@ -472,6 +489,21 @@ export const orders = mysqlTable(
     returnReason: varchar("return_reason", { length: 32 }),
     /** the Sheet's "Agent" cell when no member is mapped (OD54); confirmed_by wins */
     confirmedByLabel: varchar("confirmed_by_label", { length: 60 }),
+    /*
+     * 0006 (§D.2; OPE-§2.1, §16.3; STO-§16.4; AI-12): every column NULL-able. Written by S1 (catalog_version of a v3
+     * order), S3 (cost_snapshot at ship → shipped, refunds), S4 / S3 through transitionOrder (collected_cents).
+     */
+    /** stores.catalog_version the store (v3) order was priced against (STO-§16.4); NULL for landing orders */
+    catalogVersion: int("catalog_version"),
+    /** AC-01: written once at ship → shipped (hook money.snapshot); later cost edits never change it */
+    costSnapshot: jsonText<CostSnapshot>("cost_snapshot"),
+    /** AI-12 / LAN Q32: the page variant or experiment arm key the order came from (orders_store_variant_idx is 0007) */
+    variantKey: varchar("variant_key", { length: 40 }),
+    /** OD51: cash the courier collected; NULL until delivered, then total in cents unless a person or a statement says otherwise */
+    collectedCents: cents("collected_cents"),
+    /** OD59: cash handed back after delivery (money → refunded) */
+    refundCents: cents("refund_cents"),
+    refundedAt: ts("refunded_at"),
   },
   (t) => [
     uniqueIndex("orders_idem_uq").on(t.idem),
@@ -505,7 +537,8 @@ export const leads = mysqlTable(
   {
     id: varchar("id", { length: 26 }).primaryKey(),
     storeId: legacyStoreRef(),
-    pageId: varchar("page_id", { length: 26 }).notNull(),
+    /** NULL-able from 0006 (STO-R9): an abandoned-checkout lead of store mode has no landing page (sel.v = 3) */
+    pageId: varchar("page_id", { length: 26 }),
     idem: char("idem", { length: 36 }).notNull(),
     /** E.164; NULL-able from 0005 (LAN Q2, the one guarded type change of 0005): a WhatsApp intent has no phone yet */
     phone: varchar("phone", { length: 24 }),
@@ -1725,7 +1758,11 @@ export const orderEvents = mysqlTable(
     storeId: storeRef(),
     orderId: varchar("order_id", { length: 20 }).notNull(),
     at: ts("at").notNull().default(now3),
-    actorKind: mysqlEnum("actor_kind", ["user", "system", "customer", "sheet", "carrier", "api", "platform", "bot"]).notNull(),
+    /**
+     * 0006 (AI R37, R45) appended `integration` (a carrier adapter only: a carrier-confirmed delivery) and
+     * `reconciliation` (a matched remittance line); the Sheets sync writes `sheet`, the store API `api` (hand-set)
+     */
+    actorKind: mysqlEnum("actor_kind", ["user", "system", "customer", "sheet", "carrier", "api", "platform", "bot", "integration", "reconciliation"]).notNull(),
     actorId: varchar("actor_id", { length: 26 }),
     type: varchar("type", { length: 32 }).notNull(),
     fromState: varchar("from_state", { length: 24 }),
@@ -1801,6 +1838,11 @@ export const agentProfiles = mysqlTable(
     /** rev 3 (ENGC-17): born as the JSON array (OPE Q.25), no rename later */
     commissionRuleIds: jsonText<string[]>("commission_rule_ids"),
     updatedAt: updatedAt(),
+    // 0006 (S4, OP-19 reveal-rate alarm, OPE-§8.4): the alarm and its pause survive a restart and can be lifted
+    /** when the reveal-rate alarm last fired for this agent (NULL = never, or cleared) */
+    revealAlarmAt: ts("reveal_alarm_at"),
+    /** reveals refused until this instant (the alarm's pause); NULL = not paused */
+    revealPausedUntil: ts("reveal_paused_until"),
   },
   (t) => [primaryKey({ columns: [t.storeId, t.userId] }), index("ap_presence_idx").on(t.storeId, t.presence), storeFk("agent_profiles", t.storeId)],
 );
@@ -2035,7 +2077,8 @@ export const aiJobs = mysqlTable(
     id: id26().primaryKey(),
     storeId: storeRef(),
     /** "probe": the staff-only detached-job probe (AI-§B.13 step 5, §H.12 rule 1), appended last */
-    kind: mysqlEnum("kind", ["director_deep", "store_blueprint", "logo_system", "health_report", "probe"]).notNull(),
+    /** 0006 appended `catalog_from_photos` (STO-§4.7, STO-D38: more than 6 photos run as a pattern-B job, S1 / S7) */
+    kind: mysqlEnum("kind", ["director_deep", "store_blueprint", "logo_system", "health_report", "probe", "catalog_from_photos"]).notNull(),
     /** the AiTaskId of the first stage */
     task: varchar("task", { length: 32 }).notNull(),
     status: mysqlEnum("status", ["queued", "running", "done", "failed", "cancelled"]).notNull().default("queued"),
@@ -2067,6 +2110,11 @@ export const aiJobs = mysqlTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     doneAt: ts("done_at"),
+    // 0006 (CCR r1-p7-9): the stage input and the one reservation live in the row, not inside `result`
+    /** the redacted job input (stage inputs by stage base), ≤ 1 MB; NULL from the terminal write on (AI-§B.13) */
+    input: jsonText<unknown>("input"),
+    /** the job's one reservation of every stage (AI-§C.2), reconciled when the last stage ends */
+    reservation: jsonText<Record<string, unknown>>("reservation"),
   },
   (t) => [
     index("aj_store_idx").on(t.storeId, t.status, t.createdAt),
@@ -2491,7 +2539,8 @@ export const outbox = mysqlTable(
   {
     id: id26().primaryKey(),
     storeId: storeRefOpt(),
-    kind: mysqlEnum("kind", ["webhook", "capi", "telegram", "whatsapp", "mail", "carrier"]).notNull(),
+    /** 0006 appended `edge_purge` (OS-12: Worker edge-cache purges ride the outbox, S6) */
+    kind: mysqlEnum("kind", ["webhook", "capi", "telegram", "whatsapp", "mail", "carrier", "edge_purge"]).notNull(),
     /** "order.created", "Purchase", "ConfirmedOrder", "new_order"… */
     topic: varchar("topic", { length: 48 }).notNull(),
     /** endpoint id, "meta:<pixelId>", adapter id, chat id hash */
@@ -2590,4 +2639,832 @@ export const backupRuns = mysqlTable(
     error: varchar("error", { length: 200 }),
   },
   (t) => [uniqueIndex("br_kind_day_uq").on(t.kind, t.day)],
+);
+
+/* ------------------------------------------------------------------ */
+/* JSON shapes of the R2 tables and columns (0006)                     */
+/* ------------------------------------------------------------------ */
+/*
+ * Frozen at the R2 contract step (C2-A) with the columns that store them, by the 0005 rule: each owning track's types
+ * file re-exports the shapes it owns; a shape the spec leaves open is the loosest type its prose allows, and the owner
+ * narrows it through the maintainer. `pages.draft` (PageDoc | StorePageDoc, STO-R2) and `orders.items` (OrderItems |
+ * OrderItemsV3, STO-R8) are widened by the contract step that freezes those documents (src/storefront/types.ts,
+ * src/lib/orders/contract-v3.ts); their columns do not change.
+ */
+
+/** pages.attach_opts (STO-§3.1, §17.1; STO-R6): `indexable` defaults to landing.attach.noindexDefault (LAN-§2.3) */
+export interface AttachOpts {
+  v: 1;
+  indexable: boolean;
+  keepNames: boolean;
+  keepPhotos: boolean;
+}
+
+/** The ship axis (orders.ship_state, shipments.state) */
+export type ShipStateValue = (typeof SHIP_STATE_VALUES)[number];
+
+/** orders.cost_snapshot (OPE-§16.3, AC-01): written once at ship → shipped; accountId '' = "my carrier" */
+export interface CostSnapshot {
+  v: 1;
+  at: string;
+  currency: string;
+  lines: { itemId: string; productId?: string; variantKey: string; qty: number; unitCostCents: number | null }[];
+  packagingCents: number | null;
+  carrier: {
+    accountId: string;
+    cityKey: CityKey | null;
+    deliveryFeeCents: number | null;
+    returnFeeCents: number | null;
+    codFeeBp: number;
+    codFeeMinCents: number | null;
+    codFeeFlatCents: number;
+    codFeeCents: number | null;
+    settlement: CarrierSettlement;
+  };
+}
+
+/** products.doc (STO-§4.1): a landing page's Offers v2 product, items and offers, priced by src/lib/page/pricing.ts
+ *  unchanged; S1's zod `ProductDocJson` (src/lib/catalog/schema.ts) parses to this shape */
+export type ProductDocJson = Pick<PageDoc, "product" | "items" | "offers">;
+/** products.content (STO-§4.2): landing section instances eligible on the product kind, ≤ 20 */
+export interface ProductContent {
+  v: 1;
+  sections: SectionInstance[];
+}
+/** products.seo / collections.seo (STO-§3.2, the StorePageSeo fields) */
+export interface CatalogSeo {
+  title?: string;
+  description?: string;
+  ogImage?: AssetRef;
+  noindex: boolean;
+}
+/** One stock axis per item (STO-§5.1); a missing item = { kind: "none" } */
+export type StockAxis = { kind: "none" } | { kind: "item" } | { kind: "matrix"; groupId: string } | { kind: "choice"; groupId: string };
+/** products.stock (STO-§5.1) */
+export interface StockConfig {
+  /** item id → axis */
+  axes: Record<string, StockAxis>;
+  /** shopper line "Plus que {n} en stock" */
+  showLow: boolean;
+  /** shopper line threshold, 1-10 (alerts read inventory_levels.low_at) */
+  lowAt: number;
+}
+/** collections.rules (STO-§4.6): manual in R2, automatic in R3 (ST-11) */
+export type CollectionRules =
+  | { kind: "manual" }
+  | {
+      kind: "auto";
+      match: "all" | "any";
+      conds: (
+        | { f: "tag"; op: "is"; v: string }
+        | { f: "price"; op: "lte" | "gte"; cents: number }
+        | { f: "available"; v: true }
+        | { f: "created"; op: "within_days"; n: number }
+      )[];
+    };
+/** products.i18n (STO-§19.7; moved from 0007 to 0006 for AI-10's drafts, S7): text overlays per locale; prices, ids
+ *  and stock are shared; missing text falls back to the default locale */
+export type ProductI18n = Record<
+  string,
+  {
+    product?: { name?: string; tagline?: string; description?: string };
+    items?: Record<string, { name?: string; short?: string }>;
+    groups?: Record<string, Record<string, { name?: string; options?: Record<string, string> }>>;
+    offers?: Record<string, { title?: string; short?: string }>;
+  }
+>;
+/** collections.i18n (STO-§19.7): per locale */
+export type CollectionI18n = Record<string, { name?: string; description?: string }>;
+
+/** carrier_accounts.settlement (OD52): who collects the cash; R1's accounting.myCarrier.settlement uses the same words */
+export type CarrierSettlement = "statement" | "at_delivery";
+/** A carrier status label mapped to the ship axis (OPE-§2.7; OD48, OD50); `reason` = a RETURN_REASONS code */
+export type StatusMapEntry = ShipStateValue | "ignore" | { state: ShipStateValue; reason?: string };
+/** carrier_accounts.settings (OPE-§2.7): never a credential (those are the sealed setting carrier_credentials) */
+export interface CarrierAccountSettings {
+  statusMap: Record<string, StatusMapEntry>;
+  manifestMappingId?: string;
+  trackingMappingId?: string;
+  statusMappingId?: string;
+  remittanceMappingId?: string;
+  /** "https://…{tracking}" */
+  trackingUrl?: string;
+}
+/** expenses.recurring_rule (OPE-§2.7): template rows only */
+export interface ExpenseRecurrence {
+  every: "month" | "week";
+  /** 1-31 for month, 0-6 for week */
+  day: number;
+  until?: string;
+}
+/** import_mappings.columns: S3's MappingSpec (OPE-§18.3; the manifest kind lists output columns) */
+export type ImportMappingSpec = { v: 1 } & Record<string, unknown>;
+/** commission_rules.params (OPE-§15.2) */
+export type CommissionParams = Record<string, unknown>;
+/** notification_prefs.channels (PLA-§2.3, Q.22): in-app is always on */
+export interface NotificationChannels {
+  inapp: true;
+  push: boolean;
+  email: boolean;
+}
+
+/* ------------------------------------------------------------------ */
+/* R2 tables (0006, §D.6). The cited part sections are the column      */
+/* lists (§D.9): STO-§3.2 / §3.3, DES-§2.3, OPE-§2.7, AI-§M.3,          */
+/* PLA-§2.3, plus the R2 plans' contract requests (C2-A).               */
+/* ------------------------------------------------------------------ */
+
+// storefront (STO-§3.2, §3.3)
+
+/** The catalog (ST-01, STO-§3.2). `rev` = a new ULID on every priced or availability change (STO-§4.3). */
+export const products = mysqlTable(
+  "products",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    /** SLUG_RE; never a STORE_RESERVED_SLUG */
+    slug: varchar("slug", { length: 80 }).notNull(),
+    status: mysqlEnum("status", ["draft", "active", "archived"]).notNull().default("draft"),
+    /** = doc.product.name (lists, search, Sheets) */
+    name: varchar("name", { length: 160 }).notNull(),
+    /** same generator as pages.public_key; global (STO-R1) */
+    publicKey: varchar("public_key", { length: 40 }).notNull(),
+    rev: char("rev", { length: 26 }).notNull(),
+    doc: jsonText<ProductDocJson>("doc").notNull(),
+    content: jsonText<ProductContent>("content").notNull(),
+    seo: jsonText<CatalogSeo>("seo").notNull(),
+    stock: jsonText<StockConfig>("stock").notNull(),
+    /** "related" source; breadcrumbs (R3) */
+    primaryCollectionId: id26("primary_collection_id"),
+    /** ≤ 20 tags × ≤ 32 chars */
+    tags: jsonText<string[]>("tags"),
+    /** folded text (STO-§13.3) */
+    searchText: varchar("search_text", { length: 1000 }).notNull().default(""),
+    /** min / max `from` over the available offers */
+    priceMinCents: cents("price_min_cents").notNull().default(0),
+    priceMaxCents: cents("price_max_cents").notNull().default(0),
+    /** ≥ 1 available offer after stock */
+    available: boolean("available").notNull().default(true),
+    /** STO-D22 */
+    sold30d: int("sold_30d").notNull().default(0),
+    /** "featured" order */
+    position: int("position").notNull().default(0),
+    /** stores.catalog_version written by the last save */
+    catalogVersion: int("catalog_version").notNull().default(0),
+    /** first activation */
+    publishedAt: ts("published_at"),
+    /** STO-§19.7 text overlays per locale (0006 for AI-10's drafts; sibling pages stay R3) */
+    i18n: jsonText<ProductI18n>("i18n"),
+    createdBy: id26("created_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("pr_store_slug_uq").on(t.storeId, t.slug),
+    uniqueIndex("pr_key_uq").on(t.publicKey),
+    index("pr_store_status_pos_idx").on(t.storeId, t.status, t.position),
+    index("pr_store_status_sold_idx").on(t.storeId, t.status, t.sold30d),
+    index("pr_store_status_price_idx").on(t.storeId, t.status, t.priceMinCents),
+    index("pr_store_updated_idx").on(t.storeId, t.updatedAt),
+    storeFk("products", t.storeId),
+  ],
+);
+
+/** Collections (STO-§3.2, §4.6): manual in R2. */
+export const collections = mysqlTable(
+  "collections",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    slug: varchar("slug", { length: 80 }).notNull(),
+    name: varchar("name", { length: 120 }).notNull(),
+    /** RichText ≤ 4,000 chars */
+    description: text("description"),
+    /** header image */
+    media: jsonText<AssetRef | null>("media"),
+    rules: jsonText<CollectionRules>("rules").notNull(),
+    sort: mysqlEnum("sort", ["manual", "newest", "bestsellers", "price_asc", "price_desc"]).notNull().default("manual"),
+    status: mysqlEnum("status", ["draft", "active", "archived"]).notNull().default("draft"),
+    seo: jsonText<CatalogSeo>("seo").notNull(),
+    position: int("position").notNull().default(0),
+    /** active members (denormalised) */
+    productCount: int("product_count").notNull().default(0),
+    /** STO-§19.7 (0006 with products.i18n) */
+    i18n: jsonText<CollectionI18n>("i18n"),
+    createdBy: id26("created_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("co_store_slug_uq").on(t.storeId, t.slug),
+    index("co_store_status_pos_idx").on(t.storeId, t.status, t.position),
+    storeFk("collections", t.storeId),
+  ],
+);
+
+/** Collection members (STO-§3.2): the PK starts with store_id (refines §D.6's (collection_id, product_id), §D.1). */
+export const collectionProducts = mysqlTable(
+  "collection_products",
+  {
+    storeId: storeRef(),
+    collectionId: id26("collection_id").notNull(),
+    productId: id26("product_id").notNull(),
+    position: int("position").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.storeId, t.collectionId, t.productId] }),
+    index("cp_store_product_idx").on(t.storeId, t.productId),
+    index("cp_store_coll_pos_idx").on(t.storeId, t.collectionId, t.position),
+    storeFk("collection_products", t.storeId),
+  ],
+);
+
+/** Stock counters per stock key (STO-§3.2, §5.2; `stock_key` refines §D.6's `sku`). */
+export const inventoryLevels = mysqlTable(
+  "inventory_levels",
+  {
+    storeId: storeRef(),
+    productId: id26("product_id").notNull(),
+    stockKey: varchar("stock_key", { length: 64 }).notNull(),
+    /** NULL = not counted (flags only) */
+    onHand: int("on_hand"),
+    /** R3 soft holds (stays 0 in R2) */
+    held: int("held").notNull().default(0),
+    /** owner threshold for alerts and the optional shopper line */
+    lowAt: int("low_at"),
+    updatedBy: id26("updated_by"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.storeId, t.productId, t.stockKey] }), storeFk("inventory_levels", t.storeId)],
+);
+
+/** Slug history of products and collections (STO-R4, STO-D21): an old slug 308s to the row's current one. */
+export const catalogRedirects = mysqlTable(
+  "catalog_redirects",
+  {
+    storeId: storeRef(),
+    kind: mysqlEnum("kind", ["product", "collection"]).notNull(),
+    fromSlug: varchar("from_slug", { length: 80 }).notNull(),
+    toId: id26("to_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.storeId, t.kind, t.fromSlug] }), index("crd_store_to_idx").on(t.storeId, t.toId), storeFk("catalog_redirects", t.storeId)],
+);
+
+/**
+ * Every stock change (STO-R5, STO-§5.4). im_order_uq makes an order-driven move idempotent; NULL order ids (manual,
+ * import) never collide. `by` is an SQL keyword: raw SQL backquotes it.
+ */
+export const inventoryMoves = mysqlTable(
+  "inventory_moves",
+  {
+    id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+    storeId: storeRef(),
+    productId: id26("product_id").notNull(),
+    stockKey: varchar("stock_key", { length: 64 }).notNull(),
+    delta: int("delta").notNull(),
+    reason: mysqlEnum("reason", ["manual", "shipped", "returned_restock", "import", "hold", "release", "correction"]).notNull(),
+    /** NULL for manual / import moves */
+    orderId: varchar("order_id", { length: 20 }),
+    note: varchar("note", { length: 200 }),
+    at: ts("at").notNull().default(now3),
+    by: id26("by"),
+  },
+  (t) => [
+    uniqueIndex("im_order_uq").on(t.storeId, t.orderId, t.productId, t.stockKey, t.reason),
+    index("im_store_product_idx").on(t.storeId, t.productId, t.at),
+    storeFk("inventory_moves", t.storeId),
+  ],
+);
+
+// design (DES-§2.3)
+
+/**
+ * Versioned store themes (DG-11, DES-§2.3): ≤ 30 versions per store. Activation is one transaction (archive the active
+ * row: status 'archived', active 0, active_key NULL; then activate: status 'active', active 1, active_key = store_id),
+ * so st_active_uq makes two concurrent activations fail cleanly (the loser answers `conflict`).
+ */
+export const storeThemes = mysqlTable(
+  "store_themes",
+  {
+    storeId: storeRef(),
+    version: int("version").notNull(),
+    status: mysqlEnum("status", ["draft", "active", "archived"]).notNull().default("draft"),
+    /** = store_id while active, else NULL */
+    activeKey: varchar("active_key", { length: 26 }),
+    /** BrandGenome JSON (DES-§11.2) */
+    genome: longtext("genome").notNull(),
+    /** compiled brand ThemeSpec incl. look (brand genes) */
+    themeSpec: longtext("theme_spec").notNull(),
+    /** BrandLocks (DES-§12.3) */
+    locks: longtext("locks").notNull(),
+    /** LogoSystem: params + export asset ids (DES-§13.12) */
+    logo: longtext("logo"),
+    /** "Accent changed", shown in the history list */
+    note: varchar("note", { length: 200 }),
+    /** core column, kept equal to (status = 'active') */
+    active: boolean("active").notNull().default(false),
+    createdBy: id26("created_by"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.storeId, t.version] }),
+    uniqueIndex("st_active_uq").on(t.activeKey),
+    index("st_store_status_idx").on(t.storeId, t.status, t.version),
+    storeFk("store_themes", t.storeId),
+  ],
+);
+
+// operations (OPE-§2.7 is the cut list; user references carry no FK)
+
+/** Carrier accounts (OPE-§2.7, §17.3): `manual` (CSV portal) and `self` (own couriers) in R2; credentials are the
+ *  sealed store setting carrier_credentials, never a column. `self` accounts default to settlement `at_delivery`. */
+export const carrierAccounts = mysqlTable(
+  "carrier_accounts",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    adapter: varchar("adapter", { length: 32 }).notNull(),
+    label: varchar("label", { length: 60 }).notNull(),
+    status: mysqlEnum("status", ["active", "disabled"]).notNull().default("active"),
+    /** OD52 (OPE-§2.7 wins over §D.6's at_delivery / remittance wording: the R1 words) */
+    settlement: mysqlEnum("settlement", ["statement", "at_delivery"]).notNull().default("statement"),
+    /** sha256 of the inbound hook key (R3 webhooks) */
+    hookKeyHash: char("hook_key_hash", { length: 64 }),
+    settings: jsonText<CarrierAccountSettings>("settings").notNull(),
+    createdBy: id26("created_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("ca_label_uq").on(t.storeId, t.adapter, t.label),
+    uniqueIndex("ca_hook_uq").on(t.hookKeyHash),
+    storeFk("carrier_accounts", t.storeId),
+  ],
+);
+
+/**
+ * Shipments (OPE-§2.7, §17.4, §17.5): one active primary shipment per order plus at most one active `partial` child;
+ * `state` mirrors orders.ship_state for the primary ('none' = cancelled before pickup). `batch_id` groups the shipments
+ * of one "Create shipments" for the print views and the manifest (S4).
+ */
+export const shipments = mysqlTable(
+  "shipments",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    orderId: varchar("order_id", { length: 20 }).notNull(),
+    carrierAccountId: id26("carrier_account_id").notNull(),
+    /** NULL until known; sh_track_uq never collides on NULL */
+    tracking: varchar("tracking", { length: 64 }),
+    state: mysqlEnum("state", SHIP_STATE_VALUES).notNull().default("to_pack"),
+    /** partial = the pending lines of a partial delivery (R2, OD51); reship = OP-22 (R3) */
+    kind: mysqlEnum("kind", ["full", "partial", "reship"]).notNull().default("full"),
+    feeCents: cents("fee_cents"),
+    codCents: cents("cod_cents").notNull(),
+    returnFeeCents: cents("return_fee_cents"),
+    labelRef: varchar("label_ref", { length: 120 }),
+    /** the shipment this one continues (partial in R2, reship in R3) */
+    parentId: id26("parent_id"),
+    batchId: id26("batch_id"),
+    createdBy: id26("created_by"),
+    createdAt: createdAt(),
+    shippedAt: ts("shipped_at"),
+    deliveredAt: ts("delivered_at"),
+    returnedAt: ts("returned_at"),
+    remittanceId: id26("remittance_id"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("sh_track_uq").on(t.storeId, t.carrierAccountId, t.tracking),
+    index("sh_order_idx").on(t.storeId, t.orderId),
+    index("sh_state_idx").on(t.storeId, t.state, t.createdAt),
+    index("sh_unremitted_idx").on(t.storeId, t.remittanceId, t.deliveredAt),
+    index("sh_batch_idx").on(t.storeId, t.batchId),
+    storeFk("shipments", t.storeId),
+  ],
+);
+
+/**
+ * Carrier status lines per shipment (OPE-§2.7). `at` has no default: a status import always writes a deterministic
+ * instant, so se_dedupe_uq makes a re-imported line a no-op (S4, OPE-§18.5); it also serves OPE's se_ship_idx lookups
+ * (same leading columns), which is therefore not a second index. `raw` is nulled after 30 days.
+ */
+export const shipmentEvents = mysqlTable(
+  "shipment_events",
+  {
+    id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+    storeId: storeRef(),
+    shipmentId: id26("shipment_id").notNull(),
+    at: ts("at").notNull(),
+    carrierStatus: varchar("carrier_status", { length: 80 }).notNull(),
+    mappedState: varchar("mapped_state", { length: 24 }),
+    source: mysqlEnum("source", ["csv", "webhook", "poll", "manual"]).notNull(),
+    raw: jsonText<Record<string, unknown>>("raw"),
+  },
+  (t) => [uniqueIndex("se_dedupe_uq").on(t.storeId, t.shipmentId, t.at, t.carrierStatus), storeFk("shipment_events", t.storeId)],
+);
+
+/** Carrier statements (OPE-§2.7, §16.7): only `statement` accounts import them (OD52). */
+export const remittances = mysqlTable(
+  "remittances",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    carrierAccountId: id26("carrier_account_id").notNull(),
+    statementRef: varchar("statement_ref", { length: 80 }).notNull(),
+    periodFrom: date("period_from", { mode: "string" }),
+    periodTo: date("period_to", { mode: "string" }),
+    paidAt: ts("paid_at"),
+    grossCents: cents("gross_cents").notNull().default(0),
+    feesCents: cents("fees_cents").notNull().default(0),
+    netCents: cents("net_cents").notNull().default(0),
+    lines: int("lines").notNull().default(0),
+    matched: int("matched").notNull().default(0),
+    state: mysqlEnum("state", ["imported", "matched", "disputed", "closed"]).notNull().default("imported"),
+    importRunId: id26("import_run_id").notNull(),
+    createdBy: id26("created_by"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("rm_ref_uq").on(t.storeId, t.carrierAccountId, t.statementRef), storeFk("remittances", t.storeId)],
+);
+
+/**
+ * Statement lines (OPE-§2.7, §16.7). `probable` exists only between preview and commit (the owner's tick makes it
+ * `matched`). `phone_digits` = national digits for the probable match, never shown. `match` is an SQL keyword.
+ */
+export const remittanceLines = mysqlTable(
+  "remittance_lines",
+  {
+    id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+    storeId: storeRef(),
+    remittanceId: id26("remittance_id").notNull(),
+    rowNo: int("row_no").notNull(),
+    tracking: varchar("tracking", { length: 64 }),
+    orderId: varchar("order_id", { length: 20 }),
+    shipmentId: id26("shipment_id"),
+    phoneDigits: varchar("phone_digits", { length: 16 }),
+    codCents: cents("cod_cents").notNull(),
+    feeCents: cents("fee_cents"),
+    returnFeeCents: cents("return_fee_cents"),
+    netCents: cents("net_cents"),
+    match: mysqlEnum("match", ["matched", "amount_diff", "fee_diff", "unknown", "duplicate", "probable"]).notNull(),
+    diffCents: cents("diff_cents"),
+    note: varchar("note", { length: 200 }),
+  },
+  (t) => [
+    index("rl_rem_idx").on(t.storeId, t.remittanceId),
+    index("rl_track_idx").on(t.storeId, t.tracking),
+    index("rl_order_idx").on(t.storeId, t.orderId),
+    storeFk("remittance_lines", t.storeId),
+  ],
+);
+
+/** The import kinds (D38; `manifest`, `expenses` appended, OPE Q.10): import_mappings.kind and import_runs.kind */
+export const IMPORT_KINDS = ["remittance", "tracking", "status", "ad_spend", "products", "reviews", "manifest", "expenses"] as const;
+
+/** Saved column mappings per kind (D38, OPE-§18.3). */
+export const importMappings = mysqlTable(
+  "import_mappings",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    kind: mysqlEnum("kind", IMPORT_KINDS).notNull(),
+    name: varchar("name", { length: 60 }).notNull(),
+    columns: jsonText<ImportMappingSpec>("columns").notNull(),
+    carrierAccountId: id26("carrier_account_id"),
+    createdBy: id26("created_by"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("im_name_uq").on(t.storeId, t.kind, t.name), storeFk("import_mappings", t.storeId)],
+);
+
+/**
+ * One file import (OPE-§2.7, §18.1): a preview, then a resumable commit (`committing` while the job's slices run, S3).
+ * `context` = the MappingSpec snapshot, constants, confirmRerun, the ticked probable row numbers and the job cursor;
+ * `carrier_account_id` '' = no account (S3). `rows` is an SQL keyword.
+ */
+export const importRuns = mysqlTable(
+  "import_runs",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    kind: mysqlEnum("kind", IMPORT_KINDS).notNull(),
+    /** NULL = a one-off mapping (its spec is in `context`) */
+    mappingId: id26("mapping_id"),
+    carrierAccountId: varchar("carrier_account_id", { length: 26 }).notNull().default(""),
+    /** path under DATA_DIR/imports/<storeId>/ */
+    fileRef: varchar("file_ref", { length: 200 }).notNull(),
+    fileSha256: char("file_sha256", { length: 64 }).notNull(),
+    rows: int("rows").notNull().default(0),
+    ok: int("ok").notNull().default(0),
+    failed: int("failed").notNull().default(0),
+    skipped: int("skipped").notNull().default(0),
+    state: mysqlEnum("state", ["previewed", "committing", "committed", "failed"]).notNull().default("previewed"),
+    /** ≤ 200 row errors */
+    report: jsonText<Record<string, unknown>>("report"),
+    context: jsonText<Record<string, unknown>>("context"),
+    createdBy: id26("created_by"),
+    createdAt: createdAt(),
+    committedAt: ts("committed_at"),
+  },
+  (t) => [
+    index("ir_kind_idx").on(t.storeId, t.kind, t.createdAt),
+    index("ir_sha_idx").on(t.storeId, t.kind, t.fileSha256),
+    storeFk("import_runs", t.storeId),
+  ],
+);
+
+/** Expenses (OPE-§2.7, §16.5): a recurring template row (recurring_rule set) and its occurrences (parent_id, occurrence). */
+export const expenses = mysqlTable(
+  "expenses",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    day: date("day", { mode: "string" }).notNull(),
+    category: varchar("category", { length: 40 }).notNull(),
+    amountCents: cents("amount_cents").notNull(),
+    note: varchar("note", { length: 200 }),
+    recurringRule: jsonText<ExpenseRecurrence>("recurring_rule"),
+    parentId: id26("parent_id"),
+    occurrence: date("occurrence", { mode: "string" }),
+    /** under DATA_DIR/receipts/<storeId>/ (§G.7) */
+    attachmentRef: varchar("attachment_ref", { length: 200 }),
+    createdBy: id26("created_by"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ex_day_idx").on(t.storeId, t.day), uniqueIndex("ex_occ_uq").on(t.storeId, t.parentId, t.occurrence), storeFk("expenses", t.storeId)],
+);
+
+/**
+ * The profit rollup per placed day (store tz) and dimension (OPE-§2.7, §16.6): dim_key = total, product:<id>,
+ * page:<id>, campaign:<k>, city:<CityKey>, carrier:<id> (and S3's late:<YYYY-MM>). Amounts in store cents;
+ * delivered_cents = Σ collected_cents (OD51); net = delivered − refunds − costs; expense_cents only on 'total'.
+ */
+export const financeDaily = mysqlTable(
+  "finance_daily",
+  {
+    storeId: storeRef(),
+    day: date("day", { mode: "string" }).notNull(),
+    dimKey: varchar("dim_key", { length: 160 }).notNull(),
+    placed: int("placed").notNull().default(0),
+    confirmed: int("confirmed").notNull().default(0),
+    cancelled: int("cancelled").notNull().default(0),
+    fake: int("fake").notNull().default(0),
+    shipped: int("shipped").notNull().default(0),
+    delivered: int("delivered").notNull().default(0),
+    refused: int("refused").notNull().default(0),
+    returned: int("returned").notNull().default(0),
+    lost: int("lost").notNull().default(0),
+    placedCents: cents("placed_cents").notNull().default(0),
+    deliveredCents: cents("delivered_cents").notNull().default(0),
+    refundCents: cents("refund_cents").notNull().default(0),
+    cogsCents: cents("cogs_cents").notNull().default(0),
+    packagingCents: cents("packaging_cents").notNull().default(0),
+    shippingCostCents: cents("shipping_cost_cents").notNull().default(0),
+    returnCostCents: cents("return_cost_cents").notNull().default(0),
+    codFeeCents: cents("cod_fee_cents").notNull().default(0),
+    commissionCents: cents("commission_cents").notNull().default(0),
+    /** store cents after the owner's rate (OD56) */
+    adSpendCents: cents("ad_spend_cents").notNull().default(0),
+    expenseCents: cents("expense_cents").notNull().default(0),
+    netCents: cents("net_cents").notNull().default(0),
+    /** open orders at the store's rates */
+    expectedNetCents: cents("expected_net_cents").notNull().default(0),
+    /** orders without a cost */
+    missingCosts: int("missing_costs").notNull().default(0),
+    /** ad rows without a rate that day */
+    missingRates: int("missing_rates").notNull().default(0),
+    computedAt: ts("computed_at").notNull().default(now3),
+  },
+  (t) => [primaryKey({ columns: [t.storeId, t.day, t.dimKey] }), storeFk("finance_daily", t.storeId)],
+);
+
+/** Commission rules (OPE-§2.7, §15.2). */
+export const commissionRules = mysqlTable(
+  "commission_rules",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    name: varchar("name", { length: 60 }).notNull(),
+    kind: mysqlEnum("kind", ["per_delivered", "per_confirmed", "percent_upsell", "tier_bonus", "fixed"]).notNull(),
+    amountCents: cents("amount_cents"),
+    percentBp: int("percent_bp"),
+    params: jsonText<CommissionParams>("params").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdBy: id26("created_by"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("cr_active_idx").on(t.storeId, t.active), storeFk("commission_rules", t.storeId)],
+);
+
+/**
+ * The earnings ledger (OPE-§2.7, §15.3; R-D20). ae_uq (store_id, ref, rule_id, user_id, entry) replaces §D.6's
+ * (store_id, order_id, rule_id, user_id): ref = the order id, or period:<YYYY-MM> for bonuses and fixed lines.
+ * Clawbacks are negative; period = the month it was earned (store tz).
+ */
+export const agentEarnings = mysqlTable(
+  "agent_earnings",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    userId: id26("user_id").notNull(),
+    ref: varchar("ref", { length: 40 }).notNull(),
+    orderId: varchar("order_id", { length: 20 }),
+    ruleId: id26("rule_id").notNull(),
+    entry: mysqlEnum("entry", ["accrual", "clawback", "bonus", "fixed"]).notNull(),
+    amountCents: cents("amount_cents").notNull(),
+    state: mysqlEnum("state", ["pending", "earned", "void", "paid"]).notNull().default("pending"),
+    period: char("period", { length: 7 }).notNull(),
+    payoutId: id26("payout_id"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("ae_uq").on(t.storeId, t.ref, t.ruleId, t.userId, t.entry),
+    index("ae_user_idx").on(t.storeId, t.userId, t.state, t.period),
+    storeFk("agent_earnings", t.storeId),
+  ],
+);
+
+/** Agent payouts (OPE-§2.7, §15.4). */
+export const payouts = mysqlTable(
+  "payouts",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    userId: id26("user_id").notNull(),
+    periodFrom: date("period_from", { mode: "string" }).notNull(),
+    periodTo: date("period_to", { mode: "string" }).notNull(),
+    totalCents: cents("total_cents").notNull().default(0),
+    entries: int("entries").notNull().default(0),
+    state: mysqlEnum("state", ["draft", "approved", "paid", "cancelled"]).notNull().default("draft"),
+    approvedBy: id26("approved_by"),
+    approvedAt: ts("approved_at"),
+    paidAt: ts("paid_at"),
+    method: mysqlEnum("method", ["cash", "transfer", "other"]),
+    ref: varchar("ref", { length: 80 }),
+    note: varchar("note", { length: 200 }),
+    createdBy: id26("created_by"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("po_user_idx").on(t.storeId, t.userId, t.periodFrom), storeFk("payouts", t.storeId)],
+);
+
+/**
+ * Signed outbound webhooks (IN-07, OPE-§2.7, §23; Standard Webhooks). Secrets are envelope v2; `name` (S5) lets the
+ * owner tell endpoints apart without showing a URL path, which often carries a token.
+ */
+export const webhookEndpoints = mysqlTable(
+  "webhook_endpoints",
+  {
+    id: id26().primaryKey(),
+    storeId: storeRef(),
+    name: varchar("name", { length: 60 }).notNull().default(""),
+    url: varchar("url", { length: 500 }).notNull(),
+    /** WebhookEvent[] (OPE-§23.1) */
+    events: jsonText<string[]>("events").notNull(),
+    secretEnc: text("secret_enc").notNull(),
+    secretPrevEnc: text("secret_prev_enc"),
+    secretPrevUntil: ts("secret_prev_until"),
+    includePhone: boolean("include_phone").notNull().default(false),
+    status: mysqlEnum("status", ["active", "paused", "disabled"]).notNull().default("active"),
+    failingSince: ts("failing_since"),
+    createdBy: id26("created_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("we_store_idx").on(t.storeId), storeFk("webhook_endpoints", t.storeId)],
+);
+
+// ai (AI-§M.3)
+
+/**
+ * Outcomes per published version (AI-12, AI-§M.3): utm_source is in the key so the market reward can be UTM-stratified
+ * (AI-§G.4); delivered_evidence = deliveries confirmed by a carrier source or past the 7-day return window (QUAL-16),
+ * the only delivery column the learning reads. Test traffic is never counted (D54).
+ */
+export const statsVersionDaily = mysqlTable(
+  "stats_version_daily",
+  {
+    storeId: storeRef(),
+    pageId: id26("page_id").notNull(),
+    versionId: id26("version_id").notNull(),
+    variantKey: varchar("variant_key", { length: 40 }).notNull().default(""),
+    utmSource: varchar("utm_source", { length: 40 }).notNull().default(""),
+    day: date("day", { mode: "string" }).notNull(),
+    views: int("views").notNull().default(0),
+    uniques: int("uniques").notNull().default(0),
+    formStarts: int("form_starts").notNull().default(0),
+    orders: int("orders").notNull().default(0),
+    confirmed: int("confirmed").notNull().default(0),
+    delivered: int("delivered").notNull().default(0),
+    returned: int("returned").notNull().default(0),
+    fake: int("fake").notNull().default(0),
+    refused: int("refused").notNull().default(0),
+    cancelled: int("cancelled").notNull().default(0),
+    deliveredEvidence: int("delivered_evidence").notNull().default(0),
+  },
+  // named: drizzle's generated name is longer than MariaDB's 64-character identifier limit
+  (t) => [primaryKey({ name: "stats_version_daily_pk", columns: [t.storeId, t.pageId, t.versionId, t.variantKey, t.utmSource, t.day] }), storeFk("stats_version_daily", t.storeId)],
+);
+
+/**
+ * The AiEvent log (AI-§G.1, AI-§M.3; core §D.6 is the column list). Columns an event kind does not carry are NULL
+ * (a `shown` has no field, an editor `kept` has no version yet). Never customer data; texts ≤ 1,000 chars.
+ */
+export const aiFeedback = mysqlTable(
+  "ai_feedback",
+  {
+    id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+    storeId: storeRef(),
+    runId: id26("run_id"),
+    pageId: id26("page_id"),
+    versionId: id26("version_id"),
+    field: varchar("field", { length: 80 }),
+    kind: mysqlEnum("kind", [
+      "kept",
+      "edited",
+      "rejected",
+      "regenerated",
+      "chosen",
+      "not_chosen",
+      "shown",
+      "director_requested",
+      "repair_applied",
+      "repair_reverted",
+      "repair_rejected",
+      "published",
+      "unpublished",
+      "exemplar_used",
+      "memory_deleted",
+      "rewritten",
+      "reverted",
+    ]).notNull(),
+    beforeText: varchar("before_text", { length: 1000 }),
+    afterText: varchar("after_text", { length: 1000 }),
+    editRatioBp: int("edit_ratio_bp"),
+    userId: id26("user_id"),
+    surface: varchar("surface", { length: 16 }),
+    locale: varchar("locale", { length: 5 }),
+    genomeId: id26("genome_id"),
+    directionSlot: mysqlEnum("direction_slot", ["best_fit", "contrast", "explore"]),
+    promptVersion: varchar("prompt_version", { length: 32 }),
+    /** ≤ 1 KB JSON: the event's extra fields */
+    context: jsonText<Record<string, unknown>>("context"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("af_store_created_idx").on(t.storeId, t.createdAt),
+    index("af_store_kind_idx").on(t.storeId, t.kind, t.createdAt),
+    index("af_store_genome_idx").on(t.storeId, t.genomeId, t.kind),
+    index("af_store_page_idx").on(t.storeId, t.pageId, t.kind),
+    storeFk("ai_feedback", t.storeId),
+  ],
+);
+
+// platform (PLA-§2.3; S6)
+
+/**
+ * P (opt. store): per-user channel preferences per notification group (PLA Q.22). store_id '' = every store (a PK
+ * column cannot be NULL), so there is no FK; a purge deletes the store's rows. Read and written by platform code only.
+ */
+export const notificationPrefs = mysqlTable(
+  "notification_prefs",
+  {
+    userId: id26("user_id").notNull(),
+    storeId: varchar("store_id", { length: 26 }).notNull().default(""),
+    /** `group` is an SQL keyword: raw SQL backquotes it */
+    group: varchar("group", { length: 16 }).notNull(),
+    channels: jsonText<NotificationChannels>("channels").notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.storeId, t.group] })],
+);
+
+/**
+ * P: the Worker's per-minute counters (OS-13, S6), stored additively per (minute, worker version) so alerts on origin
+ * 5xx, origin down, Worker errors, purge failures and the daily quota need no Cloudflare API token. No store, no PII.
+ * er_minute_ver_uq also serves the minute range scans (no second index on minute).
+ */
+export const edgeReports = mysqlTable(
+  "edge_reports",
+  {
+    id: id26().primaryKey(),
+    minute: ts("minute").notNull(),
+    workerVersion: varchar("worker_version", { length: 64 }).notNull(),
+    requests: int("requests", { unsigned: true }).notNull().default(0),
+    cacheHit: int("cache_hit", { unsigned: true }).notNull().default(0),
+    cacheMiss: int("cache_miss", { unsigned: true }).notNull().default(0),
+    cacheBypass: int("cache_bypass", { unsigned: true }).notNull().default(0),
+    origin5xx: int("origin_5xx", { unsigned: true }).notNull().default(0),
+    originDown: int("origin_down", { unsigned: true }).notNull().default(0),
+    internalError: int("internal_error", { unsigned: true }).notNull().default(0),
+    purgeOk: int("purge_ok", { unsigned: true }).notNull().default(0),
+    purgeFail: int("purge_fail", { unsigned: true }).notNull().default(0),
+    cacheMode: mysqlEnum("cache_mode", ["on", "off"]).notNull().default("off"),
+    lastPurgeError: varchar("last_purge_error", { length: 64 }),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("er_minute_ver_uq").on(t.minute, t.workerVersion)],
 );

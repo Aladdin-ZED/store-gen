@@ -467,7 +467,7 @@ async function leadCases(kit: TenancyKit): Promise<void> {
     idem: idemA,
   } as never);
   const [rowB] = await db.select().from(T.orders).where(eq(T.orders.id, orderB)).limit(1);
-  await HK.runOrderHooks("created", "afterCommit", B, { on: "created", order: rowB!, conversion: null, target: { pageId: rowB!.pageId, versionId: rowB!.versionId, source: rowB!.source } });
+  await HK.runOrderHooks("created", "afterCommit", B, { on: "created", order: rowB!, conversion: null, target: { pageId: rowB!.pageId!, versionId: rowB!.versionId, source: rowB!.source } });
   const [after] = await db.select({ o: T.leads.convertedOrderId, s: T.leads.status }).from(T.leads).where(eq(T.leads.id, leadA)).limit(1);
   check("attribution: B's order (A's phone, A's idem) never credits A's lead", after?.o === null && after.s === "contacted", after);
   // B's order carries A's customer's phone by design (the same shopper at two stores): remove it and what the hooks

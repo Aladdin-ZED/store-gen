@@ -438,7 +438,8 @@ function toListRow(scope: StoreScope, r: ListSel): OrderListRow {
     total: Number(r.total),
     totalCents: toCents(r.total),
     currency: r.currency,
-    pageId: r.pageId,
+    // 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one
+    pageId: r.pageId ?? "",
     pageName: r.pageName ?? null,
     source: r.source,
     sheetStatus: r.sheetStatus,
@@ -653,8 +654,9 @@ export async function orderStatsByPage(
   type Row = { pageId: string; pageName: string | null; currency: string; orders: number; revenue: number; byStatus: Partial<Record<OrderStatus, number>> };
   const out = new Map<string, Row>();
   for (const r of rows) {
-    const key = `${r.pageId}:${r.currency}`;
-    const e = out.get(key) ?? { pageId: r.pageId, pageName: r.pageName ?? null, currency: r.currency, orders: 0, revenue: 0, byStatus: {} };
+    const pageId = r.pageId ?? ""; // 0006: a store (v3) order has no landing page (page_id NULL); R1 rows always carry one
+    const key = `${pageId}:${r.currency}`;
+    const e = out.get(key) ?? { pageId, pageName: r.pageName ?? null, currency: r.currency, orders: 0, revenue: 0, byStatus: {} };
     const n = Number(r.n);
     e.orders += n;
     if (r.status !== "cancelled" && r.status !== "fake" && r.status !== "returned") e.revenue += Number(r.revenue);
