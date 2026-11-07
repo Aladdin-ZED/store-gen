@@ -17,13 +17,15 @@ import "server-only";
  * `publicApiAnswer` (the APIs) and `mediaServable` (media), from the §A.5.3 table.
  *
  * T3 implements the bodies in R1.0 (§K.1, ENGC-27); the maintainer owns the file from P0. `resolveProductKey` and
- * `resolveContextKey` arrive with the R2 contract step (their row types do not exist yet).
+ * `resolveContextKey` (STO-R1, D28: `products.public_key` is a global random key) came with the R2 contract step
+ * (C2-B2); nothing in R1 calls them (no product, no store page kind exists before R2).
  */
 import { createHash } from "node:crypto";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { campaigns, exportsTable, mediaFiles, orders, pages, pageVersions, storeHandleHistory, stores } from "@/lib/db/schema";
+import { campaigns, exportsTable, mediaFiles, orders, pages, pageVersions, products, storeHandleHistory, stores, type ProductRow } from "@/lib/db/schema";
 import { PAGE_KEY_RE, versionDoc, type PageTarget, type ResolvePurpose } from "@/lib/orders/resolve";
+import type { StorePageKind } from "@/storefront/schema";
 import { safeEqual, sign } from "@/lib/security/crypto";
 import { scopedCache } from "./cache";
 import { isHandle } from "./handles";
@@ -233,13 +235,16 @@ const pageKeys = scopedCache<KeyTarget | null>({ name: "public-keys", maxEntries
 async function lookupPageKey(pageKey: string): Promise<KeyTarget | null> {
   // tenancy: public-key pageKey (pages.public_key is unique across stores)
   const [page] = await db
-    .select({ id: pages.id, storeId: pages.storeId, status: pages.status, versionId: pages.publishedVersionId })
+    .select({ id: pages.id, storeId: pages.storeId, status: pages.status, versionId: pages.publishedVersionId, kind: pages.kind, productId: pages.productId })
     .from(pages)
     .where(eq(pages.publicKey, pageKey))
     .limit(1);
   if (page) {
-    if (page.status !== "published" || !page.versionId) return null;
-    return { storeId: page.storeId, base: { kind: "page", storeId: page.storeId, pageId: page.id, versionId: page.versionId, exportId: null, exportMode: null, allowedOrigins: [], source: "live" } };
+    // a store page kind (R2) is no landing target: its key is resolveContextKey's
+    if (page.status !== "published" || !page.versionId || page.kind !== "landing") return null;
+    const base: KeyTarget["base"] = { kind: "page", storeId: page.storeId, pageId: page.id, versionId: page.versionId, exportId: null, exportMode: null, allowedOrigins: [], source: "live" };
+    // STO-R12 (b): an attached landing (R2, `pages.product_id`) is priced through attachedDocFor by orderVersion
+    return { storeId: page.storeId, base: page.productId ? { ...base, productId: page.productId } : base };
   }
   // tenancy: public-key exportKey (exports.public_key is unique across stores)
   const [exp] = await db
@@ -283,6 +288,60 @@ export async function resolvePublicTarget(pageKey: string, opts: { purpose?: Res
   const doc = await versionDoc(scope, found.base.versionId);
   if (!doc) return null;
   return { ...found.base, doc, store, scope };
+}
+
+/* ------------------------------------------------------------------ */
+/* Product and store-page keys (R2, STO-R1)                            */
+/* ------------------------------------------------------------------ */
+
+/** A resolved product key: the store, its public scope and the active product (the v3 order, cart, lead and event APIs). */
+export type PublicProductTarget = PublicTarget & { scope: PublicScope; product: ProductRow };
+
+/** A resolved store-page key (`ctx` of payload v3): a non-landing page of the store. */
+export type PublicContextTarget = PublicTarget & { scope: PublicScope; page: { id: string; kind: StorePageKind } };
+
+const productKeys = scopedCache<ProductRow | null>({ name: "public-product-keys", maxEntries: 2_000, ttlMs: 15_000 });
+const contextKeys = scopedCache<{ storeId: string; id: string; kind: StorePageKind } | null>({ name: "public-context-keys", maxEntries: 2_000, ttlMs: 15_000 });
+
+async function lookupProductKey(key: string): Promise<ProductRow | null> {
+  // tenancy: public-key productKey (products.public_key is unique across stores, D28)
+  const [row] = await db.select().from(products).where(eq(products.publicKey, key)).limit(1);
+  return row && row.status === "active" ? row : null;
+}
+
+/**
+ * productKey → the store and the ACTIVE product a v3 request names (STO-R1; `pk` of payload v3, the cart re-price, the
+ * lead and event beacons). `purpose` as `resolvePublicTarget`: "order" (default) reads the row fresh, so a price, a
+ * stock or a status change is seen at once (`priceLine` compares `rev`); "event" uses the 15 s key cache. Null for an
+ * unknown key, a draft or archived product, and a store that is closed, deleted or rejected; pending, restricted and
+ * suspended stores return their target and `publicApiAnswer` decides.
+ */
+export async function resolveProductKey(key: string, opts: { purpose?: ResolvePurpose } = {}): Promise<PublicProductTarget | null> {
+  if (!PAGE_KEY_RE.test(key)) return null;
+  const product = opts.purpose === "event" ? await productKeys.getOrLoad(P, key, () => lookupProductKey(key)) : await lookupProductKey(key);
+  if (!product) return null;
+  const store = await getStoreById(product.storeId);
+  if (!store || !TARGET_STATES.has(store.status)) return null;
+  return { store, scope: publicScope(store), product };
+}
+
+/**
+ * A store page's key (`ctx` of payload v3, STO-§16.2 step 3) → the store and the page's id and kind; landing keys
+ * answer null (they are `resolvePublicTarget`'s). The page's kind and store never change, so the answer is cached 15 s;
+ * its publish state is not part of it (a context only attributes an order, it never prices one).
+ */
+export async function resolveContextKey(key: string): Promise<PublicContextTarget | null> {
+  if (!PAGE_KEY_RE.test(key)) return null;
+  const found = await contextKeys.getOrLoad(P, key, async () => {
+    // tenancy: public-key pageKey (pages.public_key is unique across stores; a store page kind's key, R2)
+    const [row] = await db.select({ id: pages.id, storeId: pages.storeId, kind: pages.kind }).from(pages).where(eq(pages.publicKey, key)).limit(1);
+    if (!row || row.kind === "landing" || row.kind === "policy") return null;
+    return { storeId: row.storeId, id: row.id, kind: row.kind };
+  });
+  if (!found) return null;
+  const store = await getStoreById(found.storeId);
+  if (!store || !TARGET_STATES.has(store.status)) return null;
+  return { store, scope: publicScope(store), page: { id: found.id, kind: found.kind } };
 }
 
 /* ------------------------------------------------------------------ */

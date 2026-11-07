@@ -26,6 +26,7 @@ import { CITY_KEYS, type CityKey } from "@/lib/orders/address";
 import { errorSummary } from "@/lib/orders/log";
 import { getStoreSetting } from "@/lib/settings";
 import { scopedCache } from "@/lib/tenancy/cache";
+import { bumpCatalogVersion } from "@/lib/tenancy/catalog-version";
 import { getStoreById } from "@/lib/tenancy/public";
 import { storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteCtx } from "@/lib/tenancy/types";
@@ -222,6 +223,8 @@ export async function saveZones(ctx: WriteCtx, input: readonly ZoneInput[]): Pro
   });
   if (!r.ran) return { zones: await listZones(scope), problems: [], busy: true };
   zonesCache.delete(scope.storeId);
+  // STO-R19 (core §K.4 R2 contract step C2-B2): store pages quote the zones (PDP, cart, checkout, footer)
+  await bumpCatalogVersion(scope, "zones");
 
   await auditFrom(ctx, "store.delivery.updated", {
     meta: {

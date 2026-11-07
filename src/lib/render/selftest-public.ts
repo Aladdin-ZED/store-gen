@@ -715,6 +715,64 @@ async function database(): Promise<void> {
     assert.equal(await pub.resolvePublicTarget("bad key!"), null);
   });
 
+  await check("R2 contract (C2-B2): resolveProductKey / resolveContextKey, catalog_version bumps, the charge-by-city toggle", async () => {
+    const { newId } = await import("@/lib/db/ids");
+    const cv = await import("@/lib/tenancy/catalog-version");
+    const lv3 = await import("@/lib/render/landing-v3.server");
+    const conn = await (await import("mysql2/promise")).default.createConnection({ uri: process.env.DATABASE_URL!, charset: "utf8mb4_unicode_ci", timezone: "Z" });
+    try {
+      const product = async (storeId: string, status: string) => {
+        const id = newId();
+        const key = `pk_${randomBytes(12).toString("base64url")}`;
+        await conn.query(
+          "INSERT INTO products (id, store_id, slug, status, name, public_key, rev, doc, content, seo, stock) VALUES (?, ?, ?, ?, 'Huile', ?, ?, '{}', '{}', '{}', '{}')",
+          [id, storeId, `p-${id.slice(-6).toLowerCase()}`, status, key, newId()],
+        );
+        return { id, key };
+      };
+      const active = await product(s.A, "active");
+      const draft = await product(s.A, "draft");
+      const closed = await product(s.E, "active");
+      const t = await pub.resolveProductKey(active.key);
+      assert.equal(t?.store.id, s.A);
+      assert.equal(t?.scope.kind, "public");
+      assert.equal(t?.product.id, active.id);
+      assert.equal((await pub.resolveProductKey(active.key, { purpose: "event" }))?.product.id, active.id);
+      assert.equal(await pub.resolveProductKey(draft.key), null, "a draft product");
+      assert.equal(await pub.resolveProductKey(closed.key), null, "a closed store");
+      assert.equal(await pub.resolveProductKey("pk_unknown_key_123"), null);
+      assert.equal(await pub.resolveProductKey("bad key!"), null);
+      // a store page kind's key: resolveContextKey's, never a landing target
+      const homeKey = `pk_${randomBytes(12).toString("base64url")}`;
+      await conn.query("INSERT INTO pages (id, store_id, slug, name, status, locale, public_key, draft, kind) VALUES (?, ?, '@home', 'Home', 'draft', 'fr', ?, '{}', 'home')", [newId(), s.A, homeKey]);
+      assert.deepEqual((await pub.resolveContextKey(homeKey))?.page.kind, "home");
+      assert.equal((await pub.resolveContextKey(homeKey))?.store.id, s.A);
+      assert.equal(await pub.resolvePublicTarget(homeKey), null, "a store page is no landing target");
+      assert.equal(await pub.resolveContextKey(s.keyA), null, "a landing key is no context");
+      // catalog_version: one bump per call, the cached row follows; the cutout bump only for an active product's asset
+      const scopeA = mintScope("system", s.A);
+      const before = (await pub.getStoreById(s.A))!.catalogVersion;
+      await cv.bumpCatalogVersion(scopeA, "zones");
+      assert.equal((await pub.getStoreById(s.A))!.catalogVersion, before + 1);
+      await conn.query("INSERT INTO asset_refs (store_id, asset_id, owner_kind, owner_id, live) VALUES (?, 'asset-active-0001', 'product', ?, 1), (?, 'asset-draft-00001', 'product', ?, 1)", [s.A, active.id, s.A, draft.id]);
+      assert.equal(await cv.bumpCatalogVersionForAsset(scopeA, "asset-active-0001"), true);
+      assert.equal(await cv.bumpCatalogVersionForAsset(scopeA, "asset-draft-00001"), false, "a draft product's asset");
+      assert.equal(await cv.bumpCatalogVersionForAsset(mintScope("system", s.B), "asset-active-0001"), false, "another store");
+      assert.equal((await pub.getStoreById(s.A))!.catalogVersion, before + 2);
+      // the toggle seam writes attach_opts.chargeByCity (a landing of the store only); read as off until R2 ships
+      assert.equal(await lv3.setChargeByCity(scopeA, s.pageA, true), true);
+      const [rows] = await conn.query("SELECT attach_opts FROM pages WHERE id = ?", [s.pageA]);
+      assert.equal(JSON.parse((rows as { attach_opts: string }[])[0]!.attach_opts).chargeByCity, true);
+      assert.equal(await lv3.setChargeByCity(mintScope("system", s.B), s.pageA, true), false, "another store's page");
+      assert.equal(await lv3.chargesByCity(scopeA, s.pageA), (await import("@/lib/auth/permissions")).releaseOn("R2"));
+      assert.equal(await lv3.setChargeByCity(scopeA, s.pageA, false), true);
+      const [after] = await conn.query("SELECT attach_opts FROM pages WHERE id = ?", [s.pageA]);
+      assert.equal(JSON.parse((after as { attach_opts: string }[])[0]!.attach_opts).chargeByCity, undefined);
+    } finally {
+      await conn.end();
+    }
+  });
+
   await check("resolveOrderForTracking: the order's store; a signed link checked inside; non-servable stores answer null", async () => {
     const plain = await pub.resolveOrderForTracking(s.orderA, null);
     assert.equal(plain?.store.id, s.A);

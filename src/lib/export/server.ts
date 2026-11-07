@@ -50,12 +50,22 @@ import { storeExportKey, type ExportKey } from "./service-account";
 import type { ExportContextResponse, ExportEstimateResponse, ExportRecordJson, ExportVersionJson } from "./types";
 import { zipStream } from "./zip";
 import { legalPolicyFor } from "@/landing/legal/policy.server";
+import { releaseOn } from "@/lib/auth/permissions";
+import { zonesForCheckout } from "@/lib/delivery/zones.server";
+import { versionRuntimeV } from "@/lib/orders/resolve";
+import { RUNTIME_V_ZONES } from "@/lib/render/landing-v3.server";
+
+/** LP-16 (core D75, LAN-§20.4): the PHP export of a "charge delivery by city" (runtime_v 3) version, until template v3 (R3). */
+export const EXPORT_RUNTIME_V3_UNSUPPORTED = "export:runtime_v3_unsupported";
+const RUNTIME_V3_PHP_MESSAGE = "This page charges delivery by city; the PHP export supports it in the next release. Switch the page to a flat fee to export it now.";
 
 export class ExportError extends Error {
   constructor(
     readonly code: "not_found" | "invalid" | "forbidden" | "unavailable",
     message: string,
     readonly fields?: Partial<Record<ExportRequestField, string>>,
+    /** the item id of a refusal that has one (`export:runtime_v3_unsupported`) */
+    readonly item?: typeof EXPORT_RUNTIME_V3_UNSUPPORTED,
   ) {
     super(message);
     this.name = "ExportError";
@@ -287,6 +297,10 @@ interface Prepared {
 async function prepare(scope: StoreScope, req: ExportRequest): Promise<Prepared> {
   const version = await loadVersion(scope, req.versionId);
   const doc = validDoc(version.doc);
+  // LP-16 (D75, R2): a runtime_v 3 version ships the `landing-v3` chunk and the store's ZoneTable in the static,
+  // connected and WhatsApp exports; the PHP template v3 comes with R3, so the PHP export refuses it until then
+  const zones = releaseOn("R2") && (await versionRuntimeV(scope, version.id)) === RUNTIME_V_ZONES ? await zonesForCheckout(scope) : undefined;
+  if (zones && req.mode === "php") throw new ExportError("unavailable", RUNTIME_V3_PHP_MESSAGE, { mode: RUNTIME_V3_PHP_MESSAGE }, EXPORT_RUNTIME_V3_UNSUPPORTED);
   const [store, brand] = await Promise.all([storeInfoOf(scope), platformBrandName()]);
 
   let apiOrigin: string | undefined;
@@ -335,6 +349,7 @@ async function prepare(scope: StoreScope, req: ExportRequest): Promise<Prepared>
         : [],
       addons,
       legalPolicy,
+      ...(zones ? { zones } : {}),
     },
   };
 }
@@ -385,6 +400,8 @@ async function orderVersionFor(scope: WriteScope, p: Prepared, actor: Actor): Pr
       pageId: p.version.pageId,
       kind: "save" as const,
       label: "Export snapshot",
+      // a v3 version's snapshot keeps runtime_v 3: the exported page charges by city, so must its orders (LP-16)
+      ...(p.input.zones ? { runtimeV: RUNTIME_V_ZONES } : {}),
       doc: p.doc,
       checksum: createHash("sha256").update(JSON.stringify(p.doc), "utf8").digest("hex"),
       createdBy: actor.userId,

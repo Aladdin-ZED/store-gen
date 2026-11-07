@@ -27,6 +27,7 @@ import { newId } from "@/lib/db/ids";
 import { agentProfiles, messageTemplates, pages, storeMembers } from "@/lib/db/schema";
 import { markHealthDirty } from "@/lib/platform/health-snapshot";
 import { updateStoreSetting } from "@/lib/settings";
+import { bumpCatalogVersion } from "@/lib/tenancy/catalog-version";
 import { OpsSetting, WeekRanges } from "@/lib/settings/keys/ops";
 import { byId, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { ActionResult, WriteCtx } from "@/lib/tenancy/types";
@@ -55,6 +56,9 @@ function rangesOk(days: z.output<typeof WeekRanges>): boolean {
 
 async function writeOps(ctx: WriteCtx, patch: Partial<z.input<typeof OpsSetting>>, fields: string[], action = "callcenter.settings.updated"): Promise<void> {
   await updateStoreSetting(ctx.scope, "ops", patch, settingsActor(ctx.actor));
+  // core §K.4 (rev 4, STO C6; R2 contract step C2-B2): the store footer, the contact hours and the checkout's call
+  // window are rendered from the window (closed dates inside it) and its dated overrides
+  if (patch.callingWindow !== undefined || patch.windowOverrides !== undefined) await bumpCatalogVersion(ctx.scope, "ops");
   await markHealthDirty(ctx.store.id);
   await auditFrom(ctx, action, { target: "ops", meta: { fields } });
 }

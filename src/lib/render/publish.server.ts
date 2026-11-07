@@ -45,6 +45,7 @@ import { renderLandingHtml, renderThankYouHtml, type RenderIssue } from "./core"
 import { runPrePublishChecks, runPublishListeners, type AssetMeta, type PrePublishCode, type PrePublishCtx } from "./prepublish";
 import { designGateMode } from "./prepublish/design";
 import { loadStoreRenderContext, storeAssetResolver, storeRenderOptions } from "./store-context.server";
+import { landingRenderExtras } from "./landing-v3.server";
 import { isLandingDoc } from "@/storefront/schema";
 
 export { invalidateStoreRender } from "./cache.server";
@@ -410,9 +411,11 @@ async function commitInStore(scope: WriteScope, pageId: string, doc: PageDoc, op
   const input = { slug, pageKey: page.publicKey, assets: resolver };
   // the version id is known before rendering: #lp-config carries it as `ver` (§G.1)
   const versionId = newId();
-  const landing = await renderLandingHtml(doc, { ...storeRenderOptions(rc, input), ver: versionId });
+  // R2 (C2-B2): LP-16's zones when the page charges delivery by city, an attached page's product key; {} in R1
+  const extras = await landingRenderExtras(scope, page.id, "publish");
+  const landing = await renderLandingHtml(doc, { ...storeRenderOptions(rc, input), ver: versionId, ...extras });
   if (landing.blocking.length) throw blockingError(landing.blocking);
-  const thanks = await renderThankYouHtml(doc, storeRenderOptions(rc, { ...input, page: "thanks" }));
+  const thanks = await renderThankYouHtml(doc, { ...storeRenderOptions(rc, { ...input, page: "thanks" }), ...extras });
   const runtimeV = landing.runtimeV ?? 1;
 
   // §M.1: every registered gate runs before the version row; a refusal names its items
@@ -746,11 +749,13 @@ export async function rerenderInPlace(scope: WriteScope, pageId: string, opts: {
   const rc = await loadStoreRenderContext(scope, store, { pageId, addons: { doc, mode: "live" } });
   const { resolver, rows } = await storeAssetResolver(scope, rc, doc);
   const input = { slug: live.slug, pageKey: live.publicKey, assets: resolver };
-  const landing = await renderLandingHtml(doc, { ...storeRenderOptions(rc, input), ver: versionId });
+  // R2 (C2-B2): a runtime_v 3 version (LP-16) re-renders with the store's current zones, a v2 one without; {} in R1
+  const extras = await landingRenderExtras(scope, pageId, live.runtimeV);
+  const landing = await renderLandingHtml(doc, { ...storeRenderOptions(rc, input), ver: versionId, ...extras });
   if (landing.blocking.length) throw blockingError(landing.blocking);
   // runtime_v stays: it must keep describing the bytes an open tab posts against
   if ((landing.runtimeV ?? 1) !== live.runtimeV) throw new PublishError("invalid", "This page's runtime changed since it was published. Publish it again to update it.");
-  const thanks = await renderThankYouHtml(doc, storeRenderOptions(rc, { ...input, page: "thanks" }));
+  const thanks = await renderThankYouHtml(doc, { ...storeRenderOptions(rc, { ...input, page: "thanks" }), ...extras });
 
   const gate = await runPrePublishChecks({
     scope,

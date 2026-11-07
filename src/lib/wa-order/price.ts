@@ -8,9 +8,10 @@
  * unresolved group is named in `toConfirm`, so the message never shows a number the order would not charge. Nothing
  * here reads a price from the request: an unknown offer falls back to the page's default offer.
  */
+import { landingZoneFee, type ZoneFee } from "@/lib/catalog/delivery";
 import { UnitIn, type SelectionInput } from "@/lib/orders/contract";
 import { unitsText, type TextExtra } from "@/lib/orders/text";
-import { resolveSelection } from "@/lib/orders/validate";
+import { resolveSelection, zonedTotals } from "@/lib/orders/validate";
 import { defaultOfferId, itemName, offerName } from "@/lib/page/catalog";
 import { bumpOffered, effectiveFree, offerMath, orderTotals, toCents, type Cents } from "@/lib/page/pricing";
 import type { Offer, PageDoc } from "@/lib/page/schema";
@@ -88,7 +89,7 @@ function extrasText(doc: PageDoc, chosen: Record<string, string>): TextExtra[] {
  * Prices the shopper's choice on `doc` (the version they saw, OFFERS D8). Resolved: `orderTotals` of the resolved
  * selection. Not resolved: the offer's "from" total, the bump when ticked and offered, and the offer's delivery fee.
  */
-export function priceWaSelection(doc: PageDoc, sel: Pick<WaOrderRequest, "bundleId" | "bump" | "units" | "extras" | "b">): WaPrice {
+export function priceWaSelection(doc: PageDoc, sel: Pick<WaOrderRequest, "bundleId" | "bump" | "units" | "extras" | "b">, zone?: { zone: ZoneFee | null }): WaPrice {
   const input = waSelectionInput(doc, sel);
   const offer = doc.offers.bundles.find((o) => o.id === input.offerId) ?? doc.offers.bundles[0]!;
   const r = resolveSelection(doc, offer, input);
@@ -96,7 +97,9 @@ export function priceWaSelection(doc: PageDoc, sel: Pick<WaOrderRequest, "bundle
   const text = (bumpUnit = r.bumpUnit) =>
     unitsText({ units: r.units, multi: doc.items.length > 1, gift: offer.gift ?? null, bump: bumpUnit ? { unit: bumpUnit } : null, extras: extrasText(doc, r.selection.extras) }, "customer");
 
-  const totals = r.errors.length ? null : orderTotals(doc, r.selection);
+  // LP-16 (D75, R2): a runtime_v 3 version's zone delivery (`zone` from landingShippingZone); absent: the page fee
+  const priced = r.errors.length ? null : orderTotals(doc, r.selection);
+  const totals = priced ? zonedTotals(doc, offer, priced, zone) : null;
   if (totals) return { offer, offerLabel, resolved: true, subtotal: totals.subtotal, shipping: totals.shipping, total: totals.total, toConfirm: [], units: text(), input };
 
   const names: string[] = [];
@@ -105,8 +108,12 @@ export function priceWaSelection(doc: PageDoc, sel: Pick<WaOrderRequest, "bundle
     if (n && !names.includes(n)) names.push(n);
   }
   const bump = input.bump && bumpOffered(doc, offer.id) ? toCents(doc.offers.orderBump!.price) : 0;
-  const shipping = effectiveFree(doc, offer) ? 0 : toCents(doc.offers.shippingFee);
   const subtotal = offerMath(doc, offer).from + bump;
+  const shipping = zone
+    ? landingZoneFee({ zone: zone.zone, pageFeeCents: toCents(doc.offers.shippingFee), subtotalCents: subtotal, allLinesFree: effectiveFree(doc, offer) })
+    : effectiveFree(doc, offer)
+      ? 0
+      : toCents(doc.offers.shippingFee);
   return { offer, offerLabel, resolved: false, subtotal, shipping, total: subtotal + shipping, toConfirm: names.length ? names : [offerLabel], units: text(), input };
 }
 

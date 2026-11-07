@@ -51,6 +51,8 @@ import { fsFilePresent } from "./storage/fs";
 import { sha256hex } from "./storage/io";
 import { insertFsFileRows, keysWithRows, type FileToStore } from "./store";
 import { inspectVideo } from "./video";
+import { releaseOn } from "@/lib/auth/permissions";
+import { bumpCatalogVersionForAsset } from "@/lib/tenancy/catalog-version";
 
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
@@ -67,7 +69,17 @@ export interface ProcessOptions {
   sourceAssetId?: string | null;
   createdBy?: string | null;
   tags?: string[];
+  /**
+   * DES-R14 (core §K.4 R2 contract step C2-B2; S2's logo exports and the PNG of an uploaded logo, read by iOS, e-mail
+   * clients and WhatsApp): a PNG of at most KEEP_PNG_MAX (1200 × 630 px, 300 KB) is stored as given, one `png` file,
+   * no WebP or AVIF variants, mime image/png; anything else is refused (`unsupported` for another format,
+   * `png_too_large` above the limits).
+   */
+  keepPng?: boolean;
 }
+
+/** The `keepPng` limits (DES-R14). */
+export const KEEP_PNG_MAX = { width: 1200, height: 630, bytes: 300 * 1024 } as const;
 
 export interface UploadResult {
   asset: AssetRecord;
@@ -302,6 +314,9 @@ async function afterResponse(fn: () => Promise<void>): Promise<void> {
 function enqueueCutoutRenders(scope: WriteScope, sourceAssetId: string): Promise<void> {
   return afterResponse(async () => {
     try {
+      // STO-D47 (core §K.4 R2 contract step C2-B2): an active product showing the photo makes the store's catalogue
+      // view stale: one catalog_version bump for the store (R2: products exist only from then)
+      if (releaseOn("R2")) await bumpCatalogVersionForAsset(scope, sourceAssetId);
       const pageIds = await livePagesUsing(scope, sourceAssetId);
       if (!pageIds.length) return;
       // loaded on use: the render queue (and the renderer behind it) stays out of the upload route's module graph
@@ -415,6 +430,7 @@ export async function persistUpload(scope: WriteScope, store: MediaStore, prepar
 
 async function prepareImage(scope: WriteScope, file: Buffer, format: "jpeg" | "png" | "webp" | "avif", originalName: string, opts: ProcessOptions): Promise<Prepared> {
   if (file.length > MAX_IMAGE_BYTES) throw new MediaError("too_large");
+  if (opts.keepPng) return preparePng(scope, file, format, originalName, opts);
   let img = await decodeImage(file, format);
   let alpha = hasTransparency(img);
   if (opts.cutout && alpha) {
@@ -462,6 +478,41 @@ async function prepareImage(scope: WriteScope, file: Buffer, format: "jpeg" | "p
       asset: { id, kind: "image", mime: MIME.webp, width: img.width, height: img.height, bytes: masterWebp.length, alpha, dominant, palette, focus, variants, files },
       originalName,
       opts,
+    },
+  };
+}
+
+/** DES-R14 `keepPng`: the PNG as given (one `png` file at its own width), within KEEP_PNG_MAX. */
+async function preparePng(scope: WriteScope, file: Buffer, format: "jpeg" | "png" | "webp" | "avif", originalName: string, opts: ProcessOptions): Promise<Prepared> {
+  if (format !== "png") throw new MediaError("unsupported");
+  if (file.length > KEEP_PNG_MAX.bytes) throw new MediaError("png_too_large");
+  const img = await decodeImage(file, format);
+  if (img.width > KEEP_PNG_MAX.width || img.height > KEEP_PNG_MAX.height) throw new MediaError("png_too_large");
+  const alpha = hasTransparency(img);
+  const id = mediaAssetId(scope, file);
+  const existing = await getAsset(scope, id);
+  if (existing) return { done: { asset: await refreshFocus(scope, existing, img, alpha), deduped: true } };
+  const key = variantKey(id, img.width, "png");
+  const [{ palette, dominant }, focus] = await Promise.all([paletteOf(img, alpha), focusOf(img, alpha)]);
+  return {
+    ready: {
+      storeId: scope.storeId,
+      asset: {
+        id,
+        kind: "image",
+        mime: MIME.png,
+        width: img.width,
+        height: img.height,
+        bytes: file.length,
+        alpha,
+        dominant,
+        palette,
+        focus,
+        variants: [{ key, w: img.width, h: img.height, fmt: "png", bytes: file.length }],
+        files: [{ key, mime: MIME.png, data: file }],
+      },
+      originalName,
+      opts: { ...opts, cutout: false },
     },
   };
 }

@@ -46,12 +46,25 @@ export type TransitionSource = "ui" | "bulk" | "outcome" | "sheet" | "carrier" |
 export type MoveClass = "W" /* orders.write */ | "A" /* orders.assign */ | "L" /* shipments.write */ | "M" /* finance.write */ | "S" /* system only */;
 
 /** Who moves an order (OPE-§3.5). Defined here so the pure plan can read it; ./transition.ts re-exports it. */
+/**
+ * Who moved an order (`order_events.actor_kind`). R2 contract step C2-B2 (AI R37, R45; core §K.4): `integration` is a
+ * carrier ADAPTER only (S4's `CarrierAdapter` status sync) and `reconciliation` a reconciled carrier statement (S3);
+ * the Sheets sync (D74) writes `sheet` and the store's own API and uploaded files `api`, both hand-set, so a typed
+ * "Livré" in a Sheet is never read as a carrier-confirmed delivery (`DELIVERY_EVIDENCE_ACTORS`).
+ */
 export interface OrderActor {
-  kind: "user" | "system" | "api" | "bot" | "customer" | "sheet" | "carrier";
+  kind: "user" | "system" | "api" | "bot" | "customer" | "sheet" | "carrier" | "integration" | "reconciliation";
   userId: string | null;
   can?: (p: StorePermission) => boolean;
   role?: StoreRole;
 }
+
+/**
+ * The actor kinds whose `delivered` is learning evidence (ai.md AI-§G.4, QUAL-16, OPS-9; AI R45): a carrier, a carrier
+ * adapter (`integration`) or a reconciled statement. Every other kind is hand-set and counts only after the 7-day
+ * return window.
+ */
+export const DELIVERY_EVIDENCE_ACTORS: ReadonlySet<OrderActor["kind"]> = new Set<OrderActor["kind"]>(["carrier", "integration", "reconciliation"]);
 
 /** One move on one axis, as `planTransition` plans it and the transition hooks receive it (OPE-§3.2, §3.6). */
 export type Move = (
@@ -279,7 +292,7 @@ export interface MovePerms {
 const ALL_BUT_SYSTEM: readonly MoveClass[] = ["W", "A", "L", "M"];
 
 export function movePermsOf(actor: OrderActor, source: TransitionSource): MovePerms {
-  if (EXTERNAL_SOURCES.has(source) || actor.kind === "sheet" || actor.kind === "carrier" || actor.kind === "api") {
+  if (EXTERNAL_SOURCES.has(source) || actor.kind === "sheet" || actor.kind === "carrier" || actor.kind === "api" || actor.kind === "integration" || actor.kind === "reconciliation") {
     return { classes: new Set(ALL_BUT_SYSTEM), force: false, external: true };
   }
   if (actor.kind === "system" || source === "system") return { classes: new Set([...ALL_BUT_SYSTEM, "S"]), force: false, external: false };

@@ -40,7 +40,8 @@ import { offerAvailable } from "@/lib/page/catalog";
 import { fromCents } from "@/lib/page/money";
 import type { PageDoc } from "@/lib/page/schema";
 import type { LandingRuntimeConfig, RuntimeFeature } from "./runtime/config";
-import { buildRuntimeConfig, inlineJson, type RuntimeEndpoints } from "@/lib/render/config";
+import { buildRuntimeConfig, inlineJson, withZones, type RuntimeEndpoints } from "@/lib/render/config";
+import type { ZoneTable } from "@/lib/delivery/types";
 import { brandIcon } from "@/lib/logo/favicon";
 import { buildTheme, fontFaceCss, fontPreloads, type BuiltTheme } from "@/lib/theme";
 
@@ -81,6 +82,13 @@ export interface DocumentProps {
   purchaseInBrowser?: boolean;
   /** false: no pixel on either page (test renders, D54) */
   pixels?: boolean;
+  /**
+   * LP-16 (core D75, R2 contract step C2-B2): the store's `ZoneTable` of a "charge delivery by city" page: the landing
+   * document embeds runtime config v3 and the `landing-v3` chunk instead of `landing`. Omitted: today's bytes.
+   */
+  zones?: ZoneTable;
+  /** R2 (STO-R12 (c)): an attached landing's product key, the root of its ad content ids. Omitted: the page key. */
+  productKey?: string;
 }
 
 /** The stylesheet needs of a rendered page body. */
@@ -320,9 +328,10 @@ const hasPixels = (p: LandingRuntimeConfig["pixels"]) => Object.values(p ?? {}).
  * themselves on `window.__lpx`, then the core chunk ("landing" / "thanks") runs them at init. A
  * single-bundle build ships one script (runtimeJs).
  */
-export function runtimeScripts(page: "landing" | "thanks", cfg: Pick<LandingRuntimeConfig, "features" | "pixels" | "mode" | "turnstileSiteKey">): string[] {
+export function runtimeScripts(page: "landing" | "thanks", cfg: Pick<LandingRuntimeConfig, "features" | "pixels" | "mode" | "turnstileSiteKey"> & { v?: number }): string[] {
   const chunks = runtimeChunks();
-  const core = chunks?.[page];
+  // LP-16 (D75): a v3 landing config runs on the `landing-v3` chunk (an add-on build entry) in place of the core
+  const core = page === "landing" && cfg.v === 3 ? generatedMap("addon")["landing-v3"] : chunks?.[page];
   if (!chunks || !core) return runtimeJs ? [runtimeJs] : [];
   const out: string[] = [];
   const add = (name: RuntimeChunkName) => {
@@ -490,11 +499,14 @@ function configFor(props: DocumentProps, page: "landing" | "thanks") {
     turnstileSiteKey: props.turnstileSiteKey,
     ver: props.ver,
     formVariant: doc.sections.find((x) => x.type === "orderForm" && !x.hidden)?.variant,
+    ...(props.productKey ? { productKey: props.productKey } : {}),
   });
   // no pixel at all on a test render; no browser Purchase when the store sends it at another trigger (the pixels
   // chunk is added only for a config with pixel ids, so an empty map ships zero pixel bytes; the v2 shape stays)
   const noPixels = props.pixels === false || (page === "thanks" && props.purchaseInBrowser === false);
-  return noPixels ? { ...cfg, pixels: {} } : cfg;
+  const out = noPixels ? { ...cfg, pixels: {} } : cfg;
+  // LP-16: the landing document of a "charge delivery by city" page carries config v3 (the thank-you page stays v2)
+  return page === "landing" && props.zones ? withZones(out, props.zones) : out;
 }
 
 export function LandingDocument(props: DocumentProps): ReactElement {

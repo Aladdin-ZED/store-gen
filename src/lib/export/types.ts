@@ -72,6 +72,8 @@ export interface ExportErrorResponse {
   error: "invalid" | "not_found" | "forbidden" | "unavailable" | "rate_limited" | "server" | string;
   message?: string;
   fields?: Partial<Record<ExportRequestField, string>>;
+  /** the refusal's item id when it has one (LP-16: `export:runtime_v3_unsupported`, core D75) */
+  item?: "export:runtime_v3_unsupported";
 }
 
 /** Response headers of a successful POST (the dialog shows progress against the estimate). */

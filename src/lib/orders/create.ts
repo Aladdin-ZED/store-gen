@@ -53,6 +53,7 @@ import { purchaseConversion, type PurchaseConversion } from "./conversions";
 import { ORDER_HOOKS, runOrderHooks, type OrderHookEvent, type OrderRow, type Tx } from "./hooks";
 import { logError } from "./log";
 import { orderVersion, type PageTarget } from "./resolve";
+import { landingShippingZone } from "@/lib/render/landing-v3.server";
 import { scoreRisk } from "./risk";
 import { checkCaptcha, type TurnstileKeys } from "./turnstile";
 import { validateOrder } from "./validate";
@@ -314,7 +315,9 @@ async function placeOrder(scope: WriteScope, payload: OrderPayload, ctx: CreateO
   const { doc } = target;
   const honeypot = !!payload.website || !!ctx.honeypot;
   const decoy = (): CreateOrderResult => ({ response: decoyResponse(doc, payload.bundleId, store), sync: false });
-  const v = validateOrder(payload, doc, { fallback: version.fallback });
+  // LP-16 (D75, R2): a runtime_v 3 version charges the shopper's zone fee (undefined: the flat page fee, R1's rule)
+  const zone = await landingShippingZone(scope, version.versionId, payload.city);
+  const v = validateOrder(payload, doc, { fallback: version.fallback, ...(zone ? { zone } : {}) });
   if (!v.ok) {
     if (honeypot) return decoy();
     if (v.stale) return { response: { ok: false, error: "stale" }, sync: false };

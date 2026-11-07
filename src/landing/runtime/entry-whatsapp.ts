@@ -46,7 +46,9 @@ interface Handoff {
   };
   const wa = data<{ v: number; endpoint: string; number: string; labels: WaLabels }>("lp-wa");
   const cfg = data<LandingRuntimeConfig>("lp-config");
-  if (!wa || wa.v !== 1 || !wa.labels || !cfg || cfg.v !== 2) return;
+  // v3 (LP-16, core D75): the "charge delivery by city" config; the bridge reads only the total the core showed
+  const cv = cfg ? (cfg as { v: number }).v : 0;
+  if (!wa || wa.v !== 1 || !wa.labels || !cfg || (cv !== 2 && cv !== 3)) return;
   const L = wa.labels;
 
   const newId = () => {

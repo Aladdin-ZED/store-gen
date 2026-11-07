@@ -33,7 +33,8 @@ import type { FoldItem, HeightReport } from "@/lib/design/types.frozen";
 import type { PageDoc } from "@/lib/page/schema";
 import type { BuiltTheme } from "@/lib/theme/types";
 import type { GateItem, MessageKey } from "@/lib/tenancy/types";
-import { registerPrePublishCheck, type PrePublishCtx, type PrePublishResult } from "../prepublish";
+// the limits before the registry: a track file that registers a profile at import (./storefront.ts) can be evaluated
+// while this module still is (the circular import of ../prepublish), and must find them bound
 import {
   COLOUR_MOMENTS,
   D52_CEILINGS,
@@ -49,6 +50,7 @@ import {
   STUB_LOCK_MESSAGE,
   type BudgetProfile,
 } from "./budget-limits";
+import { registerPrePublishCheck, type PrePublishCtx, type PrePublishResult } from "../prepublish";
 
 export { LANDING_PROFILE, type BudgetProfile } from "./budget-limits";
 
@@ -79,7 +81,10 @@ function profiles(): Map<Exclude<PageKind, "landing">, BudgetProfile> {
   return (globalThis.__sgBudgetProfiles ??= new Map());
 }
 
-const clampPair = (p: { soft: number; hard: number }, ceiling: number) => ({ soft: Math.min(p.soft, ceiling), hard: Math.min(p.hard, ceiling) });
+/** A function declaration (hoisted) for the same reason as `profiles()`. */
+function clampPair(p: { soft: number; hard: number }, ceiling: number): { soft: number; hard: number } {
+  return { soft: Math.min(p.soft, ceiling), hard: Math.min(p.hard, ceiling) };
+}
 
 /** Per-kind thresholds (D66): every hard value is clamped to the D52 ceilings; a second registration of a kind throws. */
 export function registerBudgetProfile(kind: Exclude<PageKind, "landing">, profile: BudgetProfile): void {

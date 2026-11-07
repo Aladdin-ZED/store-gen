@@ -26,6 +26,7 @@ import { getMarket } from "@/lib/markets/info";
 import type { PageDoc } from "@/lib/page/schema";
 import { inlineJson, type RuntimeEndpoints } from "@/lib/render/config";
 import { renderLandingHtml, renderLegalHtml, renderThankYouHtml, type RenderIssue } from "@/lib/render/core";
+import type { ZoneTable } from "@/lib/delivery/types";
 import { buildTheme } from "@/lib/theme";
 import { buildIcons, monogramLetter, webManifest } from "./favicon";
 import { folderHtaccess, headersFile, immutableHtaccess, rootHtaccess, vercelJson, type HostPolicies } from "./hostconfig";
@@ -107,6 +108,8 @@ export interface BundleInput {
    * only when it is not empty, so an export without add-ons keeps today's bytes). Absent: none.
    */
   addons?: { landing?: RenderAddons; thanks?: RenderAddons };
+  /** LP-16 (core D75, R2): the store's ZoneTable of a runtime_v 3 version: the page ships config v3 and `landing-v3` */
+  zones?: ZoneTable;
 }
 
 export interface BundleFile extends ZipEntry {
@@ -213,6 +216,7 @@ export async function buildBundle(input: BundleInput): Promise<ExportBundle> {
     base: "./",
     origin,
     ...(input.addons?.landing ? { addons: input.addons.landing } : {}),
+    ...(input.zones ? { zones: input.zones } : {}),
   });
   const thanks = await renderThankYouHtml(doc, {
     ...common,

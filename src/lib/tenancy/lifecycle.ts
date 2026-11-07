@@ -17,12 +17,13 @@ import "server-only";
  * console's `status_changed` when someone else changed the store meanwhile, PLA-§8.0). The R1 product hooks of the
  * edge (agent leases released for restricted / suspended / closed, OPE Q.8 `releaseAllLeases`; `ensureTemplateSet`
  * for a store / both go-live, §A.2) join `afterCommit` when their owners' functions exist (P4, P2); neither exists in
- * R1.0. A purge (scheduled_deletion / rejected → purged, written by the purge job after the data is gone, §H.9)
+ * R1.0. The R2 contract step (C2-B2) wired `ensureTemplateSet` (S1, STO-R17) into `pending → active` of a store / both
+ * store, with a system scope, while `releaseOn("R2")`. A purge (scheduled_deletion / rejected → purged, written by the purge job after the data is gone, §H.9)
  * leaves the tombstone: `handle = NULL`, `name = '(purged)'`, the handle quarantined 180 days in
  * `store_handle_history` (R-D53).
  */
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
-import type { PlatformPermission } from "@/lib/auth/permissions";
+import { releaseOn, type PlatformPermission } from "@/lib/auth/permissions";
 import { auditFrom, type AuditAction } from "@/lib/audit";
 import { pool } from "@/lib/db/client";
 import type { NotificationKind } from "@/lib/notify/registry";
@@ -370,6 +371,16 @@ async function afterCommit(ctx: Ctx, storeId: string, store: StoreFacts, to: Sto
   }
   // a purged store keeps no store_health row (the purge deleted it last): no dirty stub is planted back
   if (to !== "purged") await step("markHealthDirty", () => markHealthDirty(storeId));
+  if (from === "pending" && to === "active" && releaseOn("R2")) {
+    // §A.2, STO-R17 (R2): a store / both store's page kinds exist before its first public request (S1's templates)
+    await step("ensureTemplateSet", async () => {
+      // tenancy: platform the lifecycle reads the store row itself by id
+      const [rows] = await pool().query<RowDataPacket[]>("SELECT mode FROM stores WHERE id = ?", [storeId]);
+      if (!rows[0] || rows[0].mode === "landing") return;
+      const [{ ensureTemplateSet }, { systemCtx, systemScope }] = await Promise.all([import("@/lib/storefront/templates.server"), import("@/lib/jobs/scope")]);
+      await ensureTemplateSet(systemScope(systemCtx("store.lifecycle"), storeId));
+    });
+  }
   if (from === "pending" || to === "pending") {
     // D69: the store's bytes leave the shared sandbox budget when it leaves pending, and join it again when it
     // re-enters pending (an appeal, a staff reopen), so the next exit never refunds bytes it no longer holds there

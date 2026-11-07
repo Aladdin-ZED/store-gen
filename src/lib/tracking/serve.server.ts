@@ -64,7 +64,12 @@ interface RenderInput {
   source: TrackDocSource | null;
   state: (locale: ShopperLocale, whatsapp: string | null) => Promise<TrackState>;
   signed?: { o: string; s: string };
+  /** R2 (core §K.4, STO-R36): the store chrome around the document (`wrapInStoreChrome`, passed by the route file only) */
+  chrome?: StoreChrome;
 }
+
+/** `wrapInStoreChrome` of src/lib/storefront/chrome.server.ts (S1, R2), handed in by the track route file. */
+export type StoreChrome = (scope: StoreScope, html: string, kind: "track") => Promise<string>;
 
 /** The document and its hash CSP. */
 export async function renderTrackDocument(input: RenderInput): Promise<{ html: string; csp: string }> {
@@ -112,7 +117,9 @@ export async function renderTrackDocument(input: RenderInput): Promise<{ html: s
     trackPath,
   };
   const { renderToStaticMarkup } = await import("react-dom/server");
-  const html = `<!DOCTYPE html>${renderToStaticMarkup(createElement(TrackDocument, props))}`;
+  const raw = `<!DOCTYPE html>${renderToStaticMarkup(createElement(TrackDocument, props))}`;
+  // the chrome is applied before the hashes, so whatever it inlines is in the document's CSP
+  const html = input.chrome ? await input.chrome(scope, raw, "track") : raw;
   const { scripts, styles } = inlineHashes(html);
   const csp = buildLandingCsp({
     mode: "live",
@@ -128,14 +135,14 @@ export async function renderTrackDocument(input: RenderInput): Promise<{ html: s
 /** A view is "closed" for requests once the parcel left: the note replaces the request list. */
 const closedFor = (current: string) => current === "shipped" || current === "out_for_delivery";
 
-async function document(req: Request, scope: StoreScope, store: StoreRow, address: StoreAddress): Promise<Response> {
+async function document(req: Request, scope: StoreScope, store: StoreRow, address: StoreAddress, chrome?: StoreChrome): Promise<Response> {
   const url = new URL(req.url);
   const o = url.searchParams.get("o");
   const s = url.searchParams.get("s");
   const id = o && ORDER_ID_RE.test(o) ? o : null;
   const lookup = async (notice: "not_found" | null) => {
     const source = await lookupDocSource(scope, store);
-    const doc = await renderTrackDocument({ scope, store, address, source, state: async (_l, whatsapp) => ({ kind: "lookup", o: id, notice, whatsapp }) });
+    const doc = await renderTrackDocument({ scope, store, address, source, state: async (_l, whatsapp) => ({ kind: "lookup", o: id, notice, whatsapp }), ...(chrome ? { chrome } : {}) });
     const res = await documentResponse(req, { html: doc.html, csp: doc.csp }, { kind: "thanks", store: address });
     return notice ? new Response(res.body, { status: 404, headers: res.headers }) : res;
   };
@@ -151,6 +158,7 @@ async function document(req: Request, scope: StoreScope, store: StoreRow, addres
     address,
     source,
     signed: { o: id, s },
+    ...(chrome ? { chrome } : {}),
     state: async (locale) => {
       const view = await buildTrackView(scope, order, { locale, doc: source?.doc ?? null });
       return { kind: "view", view, closed: closedFor(view.current) };
@@ -162,6 +170,8 @@ async function document(req: Request, scope: StoreScope, store: StoreRow, addres
 export interface TrackRouteDeps {
   /** the handle as the route resolved it first (`resolveStoreByHandle(params.store, { detail: true })`, lint L13), or "error" */
   found?: StoreHandleLookup | null | "error";
+  /** R2: the store chrome (`wrapInStoreChrome`), passed by the route file while `releaseOn("R2")` */
+  chrome?: StoreChrome;
 }
 
 /** Serve `GET <base>/track` (the route file answers every other method with the neutral 404). */
@@ -190,7 +200,7 @@ export async function serveTrack(req: Request, handleParam: string, deps: TrackR
     if (!(found.kind === "current" && handle === handleParam && isCanonicalHost(eff, address))) {
       return permanentRedirect(req, storeUrl(address, "/track") + rawQuery(req));
     }
-    return await document(req, publicScope(store), store, address);
+    return await document(req, publicScope(store), store, address, deps.chrome);
   } catch (err) {
     log("track route failed", err);
     return unavailableResponse(req);

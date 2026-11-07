@@ -242,13 +242,21 @@ async function main() {
 
   await check("profiles: clamped to the D52 ceilings; a second registration and 'landing' are refused; unregistered kinds use the landing profile", () => {
     const loose = { ...limits.LANDING_PROFILE, sections: { soft: 30, hard: 40 }, htmlGz: { soft: 300_000, hard: 400_000 }, ctas: { soft: 9, hard: 20 } };
-    budget.registerBudgetProfile("product", loose);
-    const p = budget.budgetProfileFor("product");
-    assert.deepEqual([p.sections.hard, p.htmlGz.hard, p.ctas.hard], [16, 140 * 1024, 8]);
-    assert.throws(() => budget.registerBudgetProfile("product", loose), /already registered/);
-    assert.throws(() => budget.registerBudgetProfile("landing" as "product", loose), /never re-registered/);
-    assert.equal(budget.budgetProfileFor("cart"), limits.LANDING_PROFILE);
+    // R2 contract step C2-B2: ./prepublish/storefront.ts registers the STO-§6.1 kinds at import; set "product" aside
+    const registered = globalThis.__sgBudgetProfiles?.get("product");
     globalThis.__sgBudgetProfiles?.delete("product");
+    try {
+      budget.registerBudgetProfile("product", loose);
+      const p = budget.budgetProfileFor("product");
+      assert.deepEqual([p.sections.hard, p.htmlGz.hard, p.ctas.hard], [16, 140 * 1024, 8]);
+      assert.throws(() => budget.registerBudgetProfile("product", loose), /already registered/);
+      assert.throws(() => budget.registerBudgetProfile("landing" as "product", loose), /never re-registered/);
+      // `policy` has no profile (reserved kind): the landing profile
+      assert.equal(budget.budgetProfileFor("policy"), limits.LANDING_PROFILE);
+    } finally {
+      globalThis.__sgBudgetProfiles?.delete("product");
+      if (registered) globalThis.__sgBudgetProfiles?.set("product", registered);
+    }
   });
 
   await check("lock: assertStubBuildAllowed throws in production without SG_STUB_BUILD_OK=1 and never otherwise", () => {
@@ -295,6 +303,103 @@ async function main() {
     assert.match(gateFileProblem({ sha: "b".repeat(40), at }, { head, now: nowMs }) ?? "", /not HEAD/);
     assert.match(gateFileProblem({ sha: head, at }, { head, now: nowMs + 25 * 3_600_000 }) ?? "", /h old/);
     assert.match(gateFileProblem(null, { head, now: nowMs }) ?? "", /no commit/);
+  });
+
+  /* ---- R2 contract step C2-B2 (core §K.4): the store profiles, the fee rule, LP-16's config v3, content ids ---- */
+
+  await check("C2-B2 profiles: prepublish/storefront.ts registers the STO-§6.1 kinds inside the D52 ceilings; policy keeps none", async () => {
+    const sf = await import("./prepublish/storefront");
+    const c = limits.D52_CEILINGS;
+    for (const [kind, p] of Object.entries(sf.STORE_BUDGET_PROFILES)) {
+      for (const k of ["sections", "heightPx", "ctas", "glass", "reveals", "photoReuse", "htmlGz"] as const) {
+        assert.ok(p[k].soft <= p[k].hard, `${kind}.${k} soft ≤ hard`);
+        assert.ok(p[k].hard <= c[k], `${kind}.${k} ≤ D52`);
+      }
+      // "product" may be set aside by the profile check above; every other kind is registered at import
+      if (kind !== "product") assert.deepEqual(budget.budgetProfileFor(kind as "home"), p, `${kind} registered`);
+    }
+    assert.equal(sf.STORE_BUDGET_PROFILES.cart.htmlGz.hard, 45 * 1024);
+    assert.deepEqual(sf.STORE_BUDGET_PROFILES.home.sections, { soft: 10, hard: 12 });
+    assert.deepEqual(sf.STORE_BUDGET_PROFILES.product.glass, { soft: 0, hard: 0 });
+    assert.equal(budget.budgetProfileFor("policy"), limits.LANDING_PROFILE);
+  });
+
+  await check("C2-B2 fee rule: storeDeliveryFee's six branches, zoneFeeOfTable's value / star lookup, landingZoneFee's page-fee fallback", async () => {
+    const { storeDeliveryFee, zoneFeeOfTable, landingZoneFee } = await import("@/lib/catalog/delivery");
+    const z = (feeCents: number | null, freeFromCents: number | null = null, notServed = false) => ({ feeCents, freeFromCents, notServed });
+    assert.deepEqual(storeDeliveryFee({ zone: z(2_000), fallbackFeeCents: 3_500, subtotalCents: 10_000, allLinesFree: true }), { ok: true, cents: 0, rule: "free_offer", zone: z(2_000) });
+    assert.deepEqual(storeDeliveryFee({ zone: z(2_000, null, true), fallbackFeeCents: 3_500, subtotalCents: 10_000, allLinesFree: false }), { ok: false, reason: "not_served" });
+    assert.equal(storeDeliveryFee({ zone: z(2_000, 30_000), fallbackFeeCents: 3_500, subtotalCents: 30_000, allLinesFree: false }).ok && "free_threshold", "free_threshold");
+    assert.deepEqual(storeDeliveryFee({ zone: z(2_000, 30_000), fallbackFeeCents: 3_500, subtotalCents: 29_999, allLinesFree: false }), { ok: true, cents: 2_000, rule: "zone", zone: z(2_000, 30_000) });
+    assert.deepEqual(storeDeliveryFee({ zone: z(null), fallbackFeeCents: 3_500, subtotalCents: 100, allLinesFree: false }), { ok: true, cents: 3_500, rule: "fallback", zone: z(null) });
+    assert.deepEqual(storeDeliveryFee({ zone: null, fallbackFeeCents: null, subtotalCents: 100, allLinesFree: false }), { ok: false, reason: "not_set" });
+    const table = {
+      v: 1 as const,
+      zones: [
+        { n: "Casa", fee: 2_000, freeFrom: null, d: [1, 2] as [number, number], ns: false },
+        { n: "Autres", fee: 3_500, freeFrom: 50_000, d: null, ns: false },
+        { n: "Sud", fee: null, freeFrom: null, d: null, ns: true },
+      ],
+      city: { Casablanca: 0, Dakhla: 2 } as Record<string, number>,
+      star: 1,
+      cal: { tz: "Africa/Casablanca", cutoffHour: 12, workdays: [1, 2, 3, 4, 5, 6], holidays: [] },
+    } as unknown as import("@/lib/delivery/types").ZoneTable;
+    assert.equal(zoneFeeOfTable(table, "Casablanca")?.feeCents, 2_000);
+    assert.equal(zoneFeeOfTable(table, "Fès")?.feeCents, 3_500, "an absent value → the * zone");
+    assert.equal(zoneFeeOfTable(table, "constructor")?.feeCents, 3_500, "no prototype key is a city");
+    assert.equal(zoneFeeOfTable({ ...table, star: null }, "Fès"), null);
+    assert.equal(landingZoneFee({ zone: zoneFeeOfTable(table, "Casablanca"), pageFeeCents: 3_000, subtotalCents: 20_000, allLinesFree: false }), 2_000);
+    assert.equal(landingZoneFee({ zone: zoneFeeOfTable(table, "Fès"), pageFeeCents: 3_000, subtotalCents: 50_000, allLinesFree: false }), 0, "free threshold");
+    assert.equal(landingZoneFee({ zone: zoneFeeOfTable(table, "Dakhla"), pageFeeCents: 3_000, subtotalCents: 100, allLinesFree: false }), 3_000, "not served: the page fee (LD6)");
+    assert.equal(landingZoneFee({ zone: null, pageFeeCents: 3_000, subtotalCents: 100, allLinesFree: false }), 3_000);
+    assert.equal(landingZoneFee({ zone: zoneFeeOfTable(table, "Casablanca"), pageFeeCents: 3_000, subtotalCents: 100, allLinesFree: true }), 0);
+  });
+
+  await check("C2-B2 LP-16 + content ids: zones render config v3 with the landing-v3 chunk (runtimeV 3), no option keeps today's bytes, productKey roots the content ids", async () => {
+    const { contentIdOf } = await import("./config");
+    const { addonChunks, runtimeChunks } = await import("@/landing/generated/assets");
+    assert.equal(contentIdOf({ id: "main", sku: "" }, "pk_ABC123xyz"), "pk_ABC123xyz");
+    assert.equal(contentIdOf({ id: "it2", sku: "" }, "pk_ABC123xyz"), "pk_ABC123xyz.it2");
+    assert.equal(contentIdOf({ id: "it2", sku: "SKU-9" }, "pk_ABC123xyz"), "SKU-9");
+    const fx = getFixture("argan", { now, locale: "fr" });
+    const d = validateDoc(fx.doc).doc!;
+    const opts = {
+      mode: "live" as const,
+      assets: fixtureAssets("/"),
+      pageKey: fx.pageKey,
+      store: fx.store,
+      urls: { landing: "/s/qa/argan", thankYou: "/s/qa/argan/merci", endpoints: { order: "/api/public/order", lead: "/api/public/lead", event: "/api/public/event" } },
+      links: storePageLinks("/s/qa", "argan", "https://platform.example/report/qa?p=%2Fs%2Fqa%2Fargan"),
+      now,
+    };
+    const zones = {
+      v: 1 as const,
+      zones: [{ n: "Casa", fee: 2_000, freeFrom: null, d: null, ns: false }],
+      city: { Casablanca: 0 },
+      star: null,
+      cal: { tz: "Africa/Casablanca", cutoffHour: 12, workdays: [1, 2, 3, 4, 5, 6], holidays: [] },
+    } as unknown as import("@/lib/delivery/types").ZoneTable;
+    const v2 = await renderLandingHtml(d, opts);
+    const again = await renderLandingHtml(d, { ...opts, zones: undefined, productKey: undefined });
+    assert.equal(again.html, v2.html, "absent options: identical bytes");
+    assert.equal(v2.runtimeV, 2);
+    const v3 = await renderLandingHtml(d, { ...opts, zones });
+    assert.equal(v3.runtimeV, 3);
+    assert.ok(addonChunks["landing-v3"], "the asset build emits the landing-v3 chunk");
+    assert.ok(v3.html.includes(addonChunks["landing-v3"]!) && !v3.html.includes(runtimeChunks.landing), "v3 runs landing-v3 in place of landing");
+    assert.ok(v2.html.includes(runtimeChunks.landing) && !v2.html.includes(addonChunks["landing-v3"]!), "v2 keeps landing");
+    const cfgOf = (html: string) => {
+      const m = /<script type="application\/json" id="lp-config">([^<]*)<\/script>/.exec(html);
+      assert.ok(m, "#lp-config present");
+      return JSON.parse(m[1]!) as { v: number; zones?: unknown; product: { contentId: string }; items: { contentId: string }[] };
+    };
+    assert.deepEqual(cfgOf(v3.html).zones, zones);
+    const keyed = cfgOf((await renderLandingHtml(d, { ...opts, productKey: "pk_ABC123xyz" })).html);
+    const plain = cfgOf(v2.html);
+    plain.items.forEach((it, k) => {
+      const want = it.contentId === fx.pageKey ? "pk_ABC123xyz" : it.contentId.startsWith(`${fx.pageKey}.`) ? `pk_ABC123xyz${it.contentId.slice(fx.pageKey.length)}` : it.contentId;
+      assert.equal(keyed.items[k]!.contentId, want, `item ${k}: the product key replaces the page key, a SKU stays`);
+    });
   });
 
   console.log(failures ? `test:prepublish: ${failures} FAILED, ${passed} passed` : `test:prepublish: all ${passed} checks passed`);

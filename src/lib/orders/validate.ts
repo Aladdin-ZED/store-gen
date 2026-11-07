@@ -24,7 +24,8 @@ import {
   ruleLock,
   type Combo,
 } from "@/lib/page/options";
-import { bumpOffered, fromCents, orderTotals, type OrderTotals, type Selection, type UnitChoice } from "@/lib/page/pricing";
+import { bumpOffered, effectiveFree, fromCents, orderTotals, toCents, type OrderTotals, type Selection, type UnitChoice } from "@/lib/page/pricing";
+import { landingZoneFee, type ZoneFee } from "@/lib/catalog/delivery";
 import { isChoiceGroup, isFieldGroup, isMatrixGroup, LOCALES, type ChoiceGroup, type ExtraGroup, type FieldGroup, type Item, type LineRule, type MatrixGroup, type Offer, type OptionGroup, type PageDoc } from "@/lib/page/schema";
 import { isPayloadV2, toSelectionInput, type OrderPayload, type SelectionInput, type UnitError, type UnitFieldKey, type UnitIn, type VariantError, type VariantFieldKey } from "./contract";
 import { orderUnitOf } from "./text";
@@ -315,6 +316,19 @@ export interface ValidateOptions {
    * from the one shown (v2 `st`), answers "stale" so the page reloads.
    */
   fallback?: boolean;
+  /**
+   * LP-16 (core D75, R2 contract step C2-B2): the version is `runtime_v = 3` ("charge delivery by city"): the delivery
+   * is `landingZoneFee` over the shopper's zone (src/lib/render/landing-v3.server.ts `landingShippingZone`) instead of
+   * the flat page fee, with today's stale and compare rules. Absent: today's rule.
+   */
+  zone?: { zone: ZoneFee | null };
+}
+
+/** The totals with LP-16's zone delivery (`opts.zone`), or the totals as `orderTotals` priced them. */
+export function zonedTotals(doc: PageDoc, offer: Offer, totals: OrderTotals, zone: { zone: ZoneFee | null } | undefined): OrderTotals {
+  if (!zone) return totals;
+  const shipping = landingZoneFee({ zone: zone.zone, pageFeeCents: toCents(doc.offers.shippingFee), subtotalCents: totals.subtotal, allLinesFree: effectiveFree(doc, offer) });
+  return { ...totals, shipping, total: totals.subtotal + shipping };
 }
 
 export function validateOrder(p: OrderPayload, doc: PageDoc, opts: ValidateOptions = {}): ValidationResult {
@@ -341,7 +355,8 @@ export function validateOrder(p: OrderPayload, doc: PageDoc, opts: ValidateOptio
       }
     }
   }
-  const totals = resolved && offer ? orderTotals(doc, resolved.selection) : null;
+  const priced = resolved && offer ? orderTotals(doc, resolved.selection) : null;
+  const totals = priced && offer ? zonedTotals(doc, offer, priced, opts.zone) : null;
 
   // the page the shopper saw is gone: any offer or unit error, or another total → reload ("stale")
   if (opts.fallback) {

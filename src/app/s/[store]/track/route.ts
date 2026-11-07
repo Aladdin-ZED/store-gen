@@ -9,6 +9,9 @@ import { notFoundResponse } from "@/lib/render/serve.server";
 import { handleLookupFailed } from "@/lib/render/store-routes.server";
 import { resolveStoreByHandle } from "@/lib/tenancy/public";
 import { serveTrack } from "@/lib/tracking/serve.server";
+import { releaseOn } from "@/lib/auth/permissions";
+// core §K.4 (STO-R36): the store chrome through this one import (S1's file, R2); R1 documents keep their bytes
+import { wrapInStoreChrome } from "@/lib/storefront/chrome.server";
 
 type Params = { params: Promise<{ store: string }> };
 
@@ -17,7 +20,7 @@ async function serve(req: NextRequest, ctx: Params): Promise<Response> {
   const { store } = await ctx.params;
   // the store of the URL first (lint L13); serveTrack answers per host class, state and address
   const found = await resolveStoreByHandle(store, { detail: true }).catch(handleLookupFailed);
-  return serveTrack(req, store, { found });
+  return serveTrack(req, store, { found, ...(releaseOn("R2") ? { chrome: wrapInStoreChrome } : {}) });
 }
 
 export function GET(req: NextRequest, ctx: Params): Promise<Response> {

@@ -28,6 +28,7 @@ import type { EffectiveWindow } from "@/lib/callcenter/window";
 import { db } from "@/lib/db/client";
 import { pages, pageVersions } from "@/lib/db/schema";
 import { citiesOfMarket, listZones, topCityKeysFor, zoneFeesFor } from "@/lib/delivery/zones.server";
+import { chargesByCity } from "@/lib/render/landing-v3.server";
 import type { DeliveryZoneRow } from "@/lib/delivery/types";
 import { attestedProofFor, factsFor, factTexts } from "@/lib/landing/honesty/facts.server";
 import { foldOrigin, gateFactsOf as factsOfInputs, gateItemsOf, type GateFacts, type GeneratedSnapshot, type HonestyGateId, type LiveFacts } from "@/lib/landing/honesty/gate";
@@ -212,7 +213,8 @@ export async function loadLandingGateInputs(scope: StoreScope, pageId: string, d
     topCityKeysFor(scope),
   ]);
   const attested = await attestedProofFor(scope, pageId, doc.product.rating ?? null);
-  const feesByTopCity = top.keys.length ? await zoneFeesFor(scope, top.keys) : {};
+  // LP-16 (D75, R2): a page that charges delivery by city quotes the zone fee itself: no `delivery:fee_mismatch`
+  const feesByTopCity = top.keys.length && !(await chargesByCity(scope, pageId)) ? await zoneFeesFor(scope, top.keys) : {};
   const market = store?.market ?? doc.market;
   return {
     zones,

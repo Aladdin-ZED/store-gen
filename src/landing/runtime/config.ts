@@ -13,6 +13,7 @@
  *    publish once the v2 runtime ships.
  */
 import type { RenderMode } from "../types";
+import type { ZoneTable } from "../../lib/delivery/types";
 
 /* ------------------------------------------------------------------ */
 /* v2 (Offers v2 contract)                                             */
@@ -142,6 +143,19 @@ export interface LandingRuntimeConfig {
   /** optional chunks embedded in this page */
   features: RuntimeFeature[];
 }
+
+/* ------------------------------------------------------------------ */
+/* v3 (LP-16 "charge delivery by city", core D75; R2 contract step)    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Runtime config v3: the v2 contract plus the store's value-keyed `ZoneTable` (the object `#sg-config` and `lp-assist`
+ * embed, `zonesForCheckout`, LAN-§7.1). Only the `landing-v3` chunk (./entry-v3.ts, which replaces `landing` on
+ * `runtime_v = 3` pages) reads it: the shown total adds the zone fee of the chosen city (`landingZoneFee`,
+ * src/lib/catalog/delivery.ts), the payload keeps the v2 shape and the server prices the same rule. The frozen v2
+ * runtime refuses a v3 config (`readConfig` checks `v === 2`), so a v3 document can never run on the v2 chunk.
+ */
+export type LandingRuntimeConfigV3 = Omit<LandingRuntimeConfig, "v"> & { v: 3; zones: ZoneTable };
 
 /* ------------------------------------------------------------------ */
 /* v1 (pages published before Offers v2, and the current runtime)      */

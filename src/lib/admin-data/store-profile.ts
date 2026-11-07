@@ -5,9 +5,13 @@ import "server-only";
  * legacy `defaults` key, plus the platform category and the time zone (CCR r1-p2-4 §1, PLA-§22.10.1). Writes take a `WriteScope` and touch only the scope's row; the store caches forget it
  * (`invalidateStore`) and the change is audited in the store.
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { AuthRefusal } from "@/lib/auth/errors";
 import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
+import { systemCtx, systemScope } from "@/lib/jobs/scope";
+import { ensureTemplateSet } from "@/lib/storefront/templates.server";
+import type { StoreMode } from "@/lib/tenancy/mode";
 import { checkBrandTerms } from "@/lib/platform/brand-check";
 import { invalidateStoreRender } from "@/lib/render/cache.server";
 import { invalidateStore } from "@/lib/tenancy/cache";
@@ -76,4 +80,30 @@ export async function updateStoreProfile(scope: WriteScope, current: StoreRow, p
   invalidateStoreRender(scope.storeId);
   await auditIn(scope, actor, "store.profile_updated", { target: scope.storeId, meta: { fields } });
   return fields;
+}
+
+/**
+ * The core's mode writer (§A.2; CCR r1-p2-4 §2, R2 contract step C2-B2): `stores.mode` of the scope's own row, with
+ * `address_version` + 1 (a mode change moves the store's addresses, §C.6), the caches dropped and `store.mode_changed`
+ * audited. Switching to `store` / `both` requires `stores.category` (ENGP-25; refused `category_required`, nothing
+ * written) and then runs `ensureTemplateSet` with a system scope (S1, STO-R17) so the store page kinds exist before the
+ * first request reaches them. False when the mode is already `mode`. The caller is P2's `setStoreModeAction`, which
+ * reaches it only while `releaseOn("R2")` (R1 sells `landing` only, PD30).
+ */
+export async function updateStoreMode(scope: WriteScope, current: StoreRow, mode: StoreMode, actor: Actor): Promise<boolean> {
+  if (current.id !== scope.storeId) throw new Error("updateStoreMode: the row is not the scope's store");
+  if (mode === current.mode) return false;
+  if (mode !== "landing") {
+    const [row] = await db.select({ category: stores.category }).from(stores).where(eq(stores.id, scope.storeId)).limit(1);
+    if (!row?.category) throw new AuthRefusal("category_required", "error.category_required");
+  }
+  await db
+    .update(stores)
+    .set({ mode, addressVersion: sql`${stores.addressVersion} + 1` })
+    .where(eq(stores.id, scope.storeId));
+  invalidateStore(scope.storeId);
+  invalidateStoreRender(scope.storeId);
+  await auditIn(scope, actor, "store.mode_changed", { target: scope.storeId, meta: { from: current.mode, to: mode } });
+  if (mode !== "landing") await ensureTemplateSet(systemScope(systemCtx("store.mode"), scope.storeId), { actor });
+  return true;
 }

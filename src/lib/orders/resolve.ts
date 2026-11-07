@@ -11,7 +11,10 @@ import "server-only";
  *
  * orderVersion(scope, target, payload) — which published version an order is validated against
  * (docs/OFFERS.md §G.2): the version the shopper saw while it was replaced less than 72 h ago, else
- * the current one with `fallback` (the validation then answers "stale" on any mismatch).
+ * the current one with `fallback` (the validation then answers "stale" on any mismatch). An attached landing (R2,
+ * `pages.product_id`; STO-R12 (b), R2 contract step C2-B2) is priced against the live product: the chosen version's
+ * doc goes through `attachedDocFor` (S1, src/lib/catalog/attach.server.ts) and the comparison is always `fallback`.
+ * versionRuntimeV(scope, versionId) — the runtime contract of a version's HTML (`page_versions.runtime_v`; 3 = LP-16).
  */
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -22,6 +25,8 @@ import { byId, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope } from "@/lib/tenancy/types";
 import { chooseOrderVersion, orderDocOf } from "./versions";
 import { isLandingDoc } from "@/storefront/schema";
+import { attachedDocFor } from "@/lib/catalog/attach.server";
+import { releaseOn } from "@/lib/auth/permissions";
 
 export const PAGE_KEY_RE = /^[a-zA-Z0-9_-]{8,80}$/;
 
@@ -37,6 +42,8 @@ export interface PageTarget {
   allowedOrigins: string[];
   doc: PageDoc;
   source: "live" | "export";
+  /** R2 (STO-R12 (b)): the product an attached landing sells (`pages.product_id`); absent on exports and unattached pages */
+  productId?: string;
 }
 
 /** "order": orders/leads/upsells (connected exports only) · "event": analytics (any active export). */
@@ -77,6 +84,15 @@ export interface OrderVersion {
  * current version without `fallback` (v1 behaviour). Every read stays in the scope's store.
  */
 export async function orderVersion(scope: StoreScope, target: PageTarget, payload: { v?: unknown; ver?: unknown }, now = Date.now()): Promise<OrderVersion> {
+  const chosen = await chooseVersion(scope, target, payload, now);
+  // STO-R12 (b): the live product's items and stock overlaid on the version's offers, always compared as fallback (an
+  // R1 page is never attached, and no R1 path reaches the R2 overlay)
+  if (target.kind !== "page" || !target.productId || !releaseOn("R2")) return chosen;
+  const doc = await attachedDocFor(scope, { pageId: target.pageId, productId: target.productId, versionId: chosen.versionId, doc: chosen.doc });
+  return { versionId: chosen.versionId, doc, fallback: true };
+}
+
+async function chooseVersion(scope: StoreScope, target: PageTarget, payload: { v?: unknown; ver?: unknown }, now: number): Promise<OrderVersion> {
   const current: OrderVersion = { versionId: target.versionId, doc: target.doc, fallback: false };
   if (target.kind === "export") return current;
   if (payload.v === 2 && payload.ver === target.versionId) return current;
@@ -95,6 +111,21 @@ export async function orderVersion(scope: StoreScope, target: PageTarget, payloa
     console.error("[orders] version lookup failed, using the current version:", err instanceof Error ? err.message : "unknown error");
     return current;
   }
+}
+
+/** `page_versions.runtime_v` per (store, version id): versions never change it (an in-place re-render keeps it). */
+const runtimes = scopedCache<number | null>({ name: "version-runtime", maxEntries: 2_000, ttlMs: 60 * 60_000 });
+
+/**
+ * The runtime contract of a version's HTML in the scope's store (1, 2, or 3 for an LP-16 "charge delivery by city"
+ * version, core D75), null for an unknown version. Cached: a version's runtime never changes.
+ */
+export async function versionRuntimeV(scope: StoreScope, versionId: string): Promise<number | null> {
+  const hit = runtimes.get(scope.storeId, versionId);
+  if (hit !== undefined) return hit;
+  const [row] = await db.select({ runtimeV: pageVersions.runtimeV }).from(pageVersions).where(byId(pageVersions, scope, versionId)).limit(1);
+  const v = row ? row.runtimeV : null;
+  return runtimes.set(scope.storeId, versionId, v, v === null ? { ttlMs: MISS_TTL_MS } : undefined);
 }
 
 /** Does the published HTML of this version (in the scope's store) embed the Turnstile widget for `siteKey`? (cached) */

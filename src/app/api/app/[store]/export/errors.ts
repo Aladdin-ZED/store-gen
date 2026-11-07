@@ -7,7 +7,7 @@ const STATUS: Record<ExportError["code"], number> = { not_found: 404, invalid: 4
 
 export function exportErrorResponse(err: unknown, scope: string): Response {
   if (err instanceof ExportError) {
-    return json({ ok: false, error: err.code, message: err.message, fields: err.fields } satisfies ExportErrorResponse, STATUS[err.code]);
+    return json({ ok: false, error: err.code, message: err.message, fields: err.fields, ...(err.item ? { item: err.item } : {}) } satisfies ExportErrorResponse, STATUS[err.code]);
   }
   logError(scope, err);
   return json({ ok: false, error: "server", message: "The export failed. Please try again." } satisfies ExportErrorResponse, 500);

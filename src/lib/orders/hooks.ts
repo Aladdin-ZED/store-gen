@@ -16,7 +16,8 @@ import "server-only";
  * paths) holds one.
  */
 import type { db } from "@/lib/db/client";
-import type { orders } from "@/lib/db/schema";
+import type { leads, orders } from "@/lib/db/schema";
+import { leadCreatedWebhooks } from "@/lib/webhooks/lead";
 import { logError } from "@/lib/orders/log";
 import type { WriteScope } from "@/lib/tenancy/types";
 import type { PurchaseConversion } from "./conversions-core";
@@ -26,6 +27,7 @@ import { hooks as landingHooks } from "./hooks/landing";
 import { hooks as opsHooks } from "./hooks/ops";
 
 export type OrderRow = typeof orders.$inferSelect;
+export type LeadRow = typeof leads.$inferSelect;
 /** The handle of the order's transaction (inTx hooks write with it). */
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -64,5 +66,21 @@ export async function runOrderHooks(on: OrderHookEvent["on"], phase: OrderHook["
       logError(`orders:hook:${hook.name}`, err);
       if (phase === "inTx") throw err;
     }
+  }
+}
+
+/**
+ * The lead hook (OPE Q.18, core §K.4 R2 contract step C2-B2): runs right after a lead row is INSERTED (not on the
+ * upsert's update of an existing lead), with the insert's transaction when it has one. A test lead (`is_test`, D54) runs
+ * nothing. S5's `lead.created` webhooks join here (src/lib/webhooks/lead.ts). Never throws into the caller: a failure is
+ * recorded under `orders:hook:lead.created`. The callers (the landing lead beacon, the WhatsApp order intent, S1's v3
+ * leads) call it only while `releaseOn("R2")`.
+ */
+export async function onLeadCreated(scope: WriteScope, lead: LeadRow, tx?: Tx): Promise<void> {
+  if (lead.isTest) return;
+  try {
+    await leadCreatedWebhooks(scope, lead, tx);
+  } catch (err) {
+    logError("orders:hook:lead.created", err);
   }
 }

@@ -23,6 +23,8 @@ import { platformBucket, rateLimit, rateLimitReached, storeBucket } from "@/lib/
 import { getStoreById } from "@/lib/tenancy/public";
 import { storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
+import { releaseOn } from "@/lib/auth/permissions";
+import { bumpVersionStats, utmBucket, type VersionStatsDelta } from "./version";
 
 /** The single-tenant day zone (APP_TIMEZONE); store days use the store's own timezone (storeTimeZone). */
 export const STATS_TZ = process.env.APP_TIMEZONE || "Africa/Casablanca";
@@ -96,7 +98,7 @@ const UNIQUES_PER_NETWORK = 50;
  * Count an analytics beacon for a resolved page. "view" → views (+ unique visitor), "form_start" →
  * unique form starts per visitor/day. Other event types are accepted but not stored.
  */
-type StatsEvent = Pick<z.output<typeof EventPayload>, "type" | "vid">;
+type StatsEvent = Pick<z.output<typeof EventPayload>, "type" | "vid"> & { utm?: Partial<Record<string, string>> };
 
 /** A resolved page's beacon in its store: the store's day, `stats_daily.store_id`, the per-page unique credit. */
 async function recordInStore(scope: WriteScope, pageId: string, e: StatsEvent, ip: string, now: Date): Promise<void> {
@@ -115,9 +117,22 @@ async function recordInStore(scope: WriteScope, pageId: string, e: StatsEvent, i
   if (e.type === "view") {
     const unique = await credit("v:");
     await bump(scope, pageId, day, { views: 1, uniques: unique ? 1 : 0 });
+    await versionBump(scope, pageId, day, e, { views: 1, uniques: unique ? 1 : 0 });
   } else if (await credit("fs:")) {
     await bump(scope, pageId, day, { formStarts: 1 });
+    await versionBump(scope, pageId, day, e, { formStarts: 1 });
   }
+}
+
+/**
+ * The same counts on the page's published version (AI R22, LAN Q26; R2 contract step C2-B2): S7's
+ * `bumpVersionStats` on the row of the version live at the event, its utm source bucketed. Only while
+ * `releaseOn("R2")` and only when a published version exists; R1 writes nothing.
+ */
+async function versionBump(scope: WriteScope, pageId: string, day: string, e: StatsEvent, delta: VersionStatsDelta): Promise<void> {
+  if (!releaseOn("R2")) return;
+  const [page] = await db.select({ versionId: pages.publishedVersionId }).from(pages).where(whereStore(pages, scope, eq(pages.id, pageId))).limit(1);
+  if (page?.versionId) await bumpVersionStats(scope, pageId, page.versionId, day, utmBucket(e.utm?.source), delta);
 }
 
 /**

@@ -294,7 +294,7 @@ export interface AppendOrderEventInput {
 }
 export type AppendOrderEventResult = { ok: true; id: number } | { ok: false; error: "not_found" | "bad_type" | "bad_meta" };
 
-const ACTOR_KINDS: ReadonlySet<string> = new Set(["user", "system", "api", "bot", "customer", "sheet", "carrier"]);
+const ACTOR_KINDS: ReadonlySet<string> = new Set(["user", "system", "api", "bot", "customer", "sheet", "carrier", "integration", "reconciliation"]);
 
 /** One event outside a transition; never changes `rev`. An order of another store answers `not_found`. */
 export async function appendOrderEvent(scope: WriteScope, orderId: string, e: AppendOrderEventInput): Promise<AppendOrderEventResult> {
@@ -473,6 +473,7 @@ async function actorNames(rows: readonly EventRow[], carrierLabel: string | null
       case "sheet":
         return typeof m.agentLabel === "string" && m.agentLabel ? `Google Sheet · ${m.agentLabel}` : "Google Sheet";
       case "carrier":
+      case "integration": // R2: a carrier adapter's status sync (AI R45)
         return carrierLabel;
       case "system":
         return brand;

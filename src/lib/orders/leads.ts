@@ -41,6 +41,8 @@ import { storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { Actor, WriteScope } from "@/lib/tenancy/types";
 import type { LeadPayload, UnitIn } from "./contract";
 import { orderVersion } from "./resolve";
+import { onLeadCreated } from "./hooks";
+import { releaseOn } from "@/lib/auth/permissions";
 import { leadSelectionText } from "./lead-text";
 import { cleanInput, resolveSelection, validName } from "./validate";
 
@@ -101,11 +103,12 @@ async function storeLead(scope: WriteScope, payload: Lead, ctx: UpsertLeadContex
   // only this store's, this page's unconverted lead may be updated through its idem
   const own = sql`\`store_id\` = ${scope.storeId} AND \`page_id\` = ${target.pageId} AND \`converted_order_id\` IS NULL`;
   const now = new Date();
-  await db
+  const id = newId();
+  const [res] = await db
     .insert(leads)
     .values(
       storeValues(scope, {
-        id: newId(),
+        id,
         pageId: target.pageId,
         idem: payload.idem,
         phone: phone.e164,
@@ -137,7 +140,16 @@ async function storeLead(scope: WriteScope, payload: Lead, ctx: UpsertLeadContex
         updatedAt: sql`IF(${own}, VALUES(\`updated_at\`), \`updated_at\`)`,
       },
     });
+  // OPE Q.18 (R2 contract step C2-B2): a new row (1 affected; an update of the visitor's lead counts 2) runs the
+  // lead hook; R1 runs nothing
+  if (res.affectedRows === 1 && releaseOn("R2")) await leadInserted(scope, id);
   return { stored: true };
+}
+
+/** `onLeadCreated` with the row just inserted (read back in the scope's store). */
+export async function leadInserted(scope: WriteScope, id: string): Promise<void> {
+  const [row] = await db.select().from(leads).where(whereStore(leads, scope, eq(leads.id, id))).limit(1);
+  if (row) await onLeadCreated(scope, row);
 }
 
 /** The structured choice of a lead (`leads.sel`, LAN-§2.1), or null when it would pass 8 KB. */

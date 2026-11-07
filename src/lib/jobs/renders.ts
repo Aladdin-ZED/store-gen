@@ -287,16 +287,20 @@ export async function rendersFanoutJob(ctx: JobCtx): Promise<JobResult> {
 /* ------------------------------------------------------------------ */
 
 /**
- * The port in the app: `rerenderInPlace` for every job. The attached-page branch (§H.3 rev 5, `republishAttached`,
- * S1 R2) needs `pages.product_id` (0006); this guard reads the column only once the schema has it, and until S1 wires
- * its handler such a page is still rendered in place, counted as `attached_in_place`.
+ * The port in the app: `rerenderInPlace` for every job, except the jobs of an attached page (`pages.product_id`, R2):
+ * those run S1's `republishAttached` whatever their reason (§H.3 rev 5, CRIT2-17; LAN Q24, STO-R41; registered at the
+ * R2 contract step C2-B2), which decides `sync` vs in place by the diff of the mirror's priced fields. R1 has no
+ * attached page, so every R1 job takes the in-place path as before.
  */
 async function appPort(): Promise<RenderDeps["port"]> {
   const { rerenderInPlace } = await import("@/lib/render/publish.server");
   const productId = (getTableColumns(pages) as Record<string, AnyMySqlColumn | undefined>).productId;
   return {
     async rerenderInPlace(scope: WriteScope, pageId: string, opts: { reason: RenderReason; actor: Actor }) {
-      if (productId && (await attachedPage(scope, pageId, productId))) recordError("renders", null, { code: "attached_in_place", storeId: scope.storeId, route: `renders:${opts.reason}` });
+      if (productId && (await attachedPage(scope, pageId, productId))) {
+        const { republishAttached } = await import("@/lib/landing/attach.server");
+        return republishAttached(scope, pageId, opts);
+      }
       return rerenderInPlace(scope, pageId, opts);
     },
   };

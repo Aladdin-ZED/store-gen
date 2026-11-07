@@ -8,7 +8,9 @@ export type MediaErrorCode =
   | "invalid_video"
   | "video_codec"
   | "video_track"
-  | "busy";
+  | "busy"
+  /** DES-R14 (R2): a `keepPng` upload that is not a PNG of ≤ 1200 × 630 and ≤ 300 KB */
+  | "png_too_large";
 
 const MESSAGES: Record<MediaErrorCode, string> = {
   too_large: "File is too large (images ≤ 15 MB, videos ≤ 25 MB).",
@@ -21,6 +23,7 @@ const MESSAGES: Record<MediaErrorCode, string> = {
   video_track:
     "This video carries a GPS/telemetry data track that cannot be removed safely. Export it again as a plain MP4 (H.264) and upload it.",
   busy: "The server is busy with other uploads. Try again in a few seconds.",
+  png_too_large: "Keep this PNG within 1200 × 630 px and 300 KB.",
 };
 
 export class MediaError extends Error {

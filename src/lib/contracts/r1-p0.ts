@@ -174,7 +174,8 @@ export type P4StateMachine = [
 ];
 
 export type P4Transition = [
-  Assert<Equals<OrderActor, { kind: "user" | "system" | "api" | "bot" | "customer" | "sheet" | "carrier"; userId: string | null; can?: (p: StorePermission) => boolean; role?: StoreRole }>>,
+  // R2 contract step C2-B2 (AI R37, R45): + "integration" (a carrier adapter only) | "reconciliation"
+  Assert<Equals<OrderActor, { kind: "user" | "system" | "api" | "bot" | "customer" | "sheet" | "carrier" | "integration" | "reconciliation"; userId: string | null; can?: (p: StorePermission) => boolean; role?: StoreRole }>>,
   Assert<Equals<typeof transition.actorFrom, (ctx: StoreCtx | SystemCtx, kind?: OrderActor["kind"]) => OrderActor>>,
   Assert<
     Equals<

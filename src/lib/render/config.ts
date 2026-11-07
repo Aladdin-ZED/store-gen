@@ -7,20 +7,26 @@
  * physical piece, k = array index, `line` = the line it comes from); the page extras, the bump, the
  * resolved fill (§E.1, once per page) and the optional runtime chunks the page embeds (`features`).
  * Pages published before keep their own embedded v1 runtime + config.
+ *
+ * R2 contract step (C2-B2): `contentIdOf(item, productKey)` (STO-R12 (c), LAN Q25): an attached landing's ad content
+ * ids are the catalog's, so the landing, the PDP and the cart report one catalogue (`opts.productKey`, set only for a
+ * page with `pages.product_id`); `withZones(cfg, zones)` is runtime config v3 (LP-16, core D75), the v2 config plus
+ * the store's value-keyed `ZoneTable`, read by the `landing-v3` chunk only. Without either option the bytes are today's.
  */
-import type { LandingRuntimeConfig, RuntimeFeature, RuntimeGroup, RuntimeOffer, RuntimeOfferLine } from "@/landing/runtime/config";
+import type { LandingRuntimeConfig, LandingRuntimeConfigV3, RuntimeFeature, RuntimeGroup, RuntimeOffer, RuntimeOfferLine } from "@/landing/runtime/config";
 import { RUNTIME_EXTRA_KEYS, RUNTIME_UI_KEYS } from "@/landing/runtime/strings";
 import { CAPTCHA_STRING } from "@/landing/runtime/turnstile";
 import { samePieces } from "@/landing/offers/model";
 import { offerNameT } from "@/landing/sections/orderForm/copy";
 import type { RenderContext, RenderMode } from "@/landing/types";
 import { moneyFormat, phoneSpec } from "@/lib/markets/info";
-import { contentIdOf, expandUnits, isLegacyOffer, itemById, itemName, itemShort, leadItem, offerAvailable, offerName, offerShort, offerUnits } from "@/lib/page/catalog";
+import { contentIdOf as pageContentIdOf, expandUnits, isLegacyOffer, itemById, itemName, itemShort, leadItem, offerAvailable, offerName, offerShort, offerUnits } from "@/lib/page/catalog";
 import { resolveDisplay } from "@/lib/page/display";
 import { cellKey, groupCombos } from "@/lib/page/options";
 import { defaultOfferId, effectiveFree, offersMath, toCents } from "@/lib/page/pricing";
 import { isChoiceGroup, isFieldGroup, isMatrixGroup, type ExtraGroup, type Item, type Locale, type Offer, type OptionGroup, type PageDoc } from "@/lib/page/schema";
 import { runtimePixels } from "@/lib/pixels/tracking";
+import type { ZoneTable } from "@/lib/delivery/types";
 
 /** The page money format (shared with ctx.money — see moneyFormat() in @/lib/markets/info). */
 export { moneyFormat };
@@ -48,6 +54,25 @@ export interface RuntimeConfigOptions {
   ver?: string;
   /** order form variant (resolveDisplay context) */
   formVariant?: string;
+  /**
+   * R2 (STO-R12 (c), LAN Q25): the public key of the product an attached landing sells (`pages.product_id`): the
+   * item content ids become the catalog's (`contentIdOf(item, productKey)`). Absent: the page key, as in R1.
+   */
+  productKey?: string;
+}
+
+/**
+ * Ad content id of an item under a key (STO-§16.6, STO-R12 (c)): its SKU, else `<key>` for "main", else
+ * `<key>.<itemId>`. The key is the product's public key on an attached landing, the PDP and the cart (one catalogue,
+ * LND-11), the page key on every other landing (`@/lib/page/catalog`'s rule, unchanged).
+ */
+export function contentIdOf(item: Pick<Item, "id" | "sku">, productKey: string): string {
+  return pageContentIdOf(null, item, productKey);
+}
+
+/** Runtime config v3 (LP-16, core D75): the v2 config and the store's `ZoneTable` (`zonesForCheckout`, LAN-§7.1). */
+export function withZones(cfg: LandingRuntimeConfig, zones: ZoneTable): LandingRuntimeConfigV3 {
+  return { ...cfg, v: 3, zones };
 }
 
 /** "x2 · Pack Duo" (or just "x2"): the offer's unit count and title. */
@@ -247,6 +272,8 @@ export function buildRuntimeConfig(doc: PageDoc, ctx: RenderContext, opts: Runti
   const nameCtx = { doc, t: offerNameT(doc.locale) };
   const bump = offers.orderBump?.enabled ? offers.orderBump : undefined;
   const upsell = offers.upsell?.enabled ? offers.upsell : undefined;
+  // the key content ids hang off (STO-R12 (c)): an attached landing's product key, else the page key
+  const idKey = opts.productKey || opts.pageKey;
 
   const bundles: RuntimeOffer[] = offers.bundles.map((b, i) => {
     const m = maths[i]!;
@@ -296,13 +323,13 @@ export function buildRuntimeConfig(doc: PageDoc, ctx: RenderContext, opts: Runti
     ...(wa ? { whatsapp: { number: wa, text: `${ctx.t("form.whatsapp")}: ${product.name}` } } : {}),
     ...(turnstile ? { turnstileSiteKey: turnstile } : {}),
     shippingFee: toCents(offers.shippingFee),
-    product: { name: product.name, contentId: contentIdOf(doc, lead, opts.pageKey) },
+    product: { name: product.name, contentId: contentIdOf(lead, idKey) },
     items: doc.items.map((it) => ({
       id: it.id,
       name: itemName(doc, it),
       short: itemShort(doc, it),
       price: toCents(it.price),
-      contentId: contentIdOf(doc, it, opts.pageKey),
+      contentId: contentIdOf(it, idKey),
       groups: it.groups.map(runtimeGroup),
     })),
     bundles,

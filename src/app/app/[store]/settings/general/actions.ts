@@ -10,15 +10,17 @@
  *                                            it for staff); then the store is marked for a health recompute
  *   modeSwitchPlanAction    store.mode       (read) P3's landingModeSwitchPlan: what a switch would hide and show
  *   setStoreModeAction      store.mode       R1 sells `landing` only (PD30): `store` and `both` answer feature_off
- *                                            with the release reason
+ *                                            with the release reason; from R2 the core's mode writer
  *
  * The category and the time zone go through the core's store-row writer (CCR r1-p2-4 §1, applied at the P2 merge). The
- * mode waits for the core (CCR r1-p2-4 §2: no core mode writer exists; from R2 it needs the category, runs
- * `ensureTemplateSet` and audits `store.mode_changed`).
+ * mode goes through the core's mode writer `updateStoreMode` (CCR r1-p2-4 §2, R2 contract step C2-B2: it needs the
+ * category for store / both, runs `ensureTemplateSet` and audits `store.mode_changed`), reached only while
+ * `releaseOn("R2")`.
  */
 import { revalidateStore } from "@/lib/admin-data/shell";
 import { settingsActor } from "@/lib/admin-data/store-audit";
-import { updateStoreProfile } from "@/lib/admin-data/store-profile";
+import { updateStoreMode, updateStoreProfile } from "@/lib/admin-data/store-profile";
+import { releaseOn } from "@/lib/auth/permissions";
 import { AuthRefusal } from "@/lib/auth/errors";
 import { landingModeSwitchPlan } from "@/lib/landing/mode-plan";
 import { markHealthDirty } from "@/lib/platform/health-snapshot";
@@ -62,9 +64,22 @@ export async function setStoreModeAction(input: unknown): Promise<ActionResult<{
   return storeAction("store.mode", async (ctx) => {
     const v = parseInput(StoreModeInput, input);
     if (v.mode === ctx.store.mode) return { mode: v.mode };
-    // PD30: full stores ship in R2; the mode cards show the release reason (limit sheet, feature variant)
-    if (v.mode !== "landing") throw new AuthRefusal("feature_off", "shell.limit.reason.release");
-    // a seeded store / both shop back to landing: the core's mode writer (CCR r1-p2-4 §2)
-    throw new AuthRefusal("unavailable", "error.unavailable");
+    if (!releaseOn("R2")) {
+      // PD30: full stores ship in R2; the mode cards show the release reason (limit sheet, feature variant)
+      if (v.mode !== "landing") throw new AuthRefusal("feature_off", "shell.limit.reason.release");
+      // a seeded store / both shop back to landing: the core's mode writer (CCR r1-p2-4 §2)
+      throw new AuthRefusal("unavailable", "error.unavailable");
+    }
+    // R2 (core §A.2; R2 contract step C2-B2): switching to `store` with live sales pages keeps them answering
+    // (`landing.inStoreMode`) unless the owner unticked it; the core's writer needs the category for store / both
+    // (`category_required`, ENGP-25) and runs ensureTemplateSet
+    if (v.mode === "store") {
+      const plan = await crossTrack(() => landingModeSwitchPlan(ctx.scope));
+      await updateStoreSetting(ctx.scope, "landing", { inStoreMode: v.keepSalesPages && plan.livePages > 0 }, settingsActor(ctx.actor));
+    }
+    await updateStoreMode(ctx.scope, ctx.store, v.mode, ctx.actor);
+    await markHealthDirty(ctx.store.id);
+    revalidateStore(ctx.store.handle, { path: "/settings", type: "layout" }, "");
+    return { mode: v.mode };
   });
 }

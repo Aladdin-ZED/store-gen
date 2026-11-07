@@ -18,6 +18,9 @@ import { validateDoc } from "@/lib/page/validate";
 import { renderLandingHtml, renderThankYouHtml, type RenderedHtml } from "./core";
 import type { PublishedPage } from "./store-pages.server";
 import { loadStoreRenderContext, storeAssetResolver, storeDocumentUrls, storeRenderOptions } from "./store-context.server";
+import { landingRenderExtras } from "./landing-v3.server";
+import { versionRuntimeV } from "@/lib/orders/resolve";
+import { releaseOn } from "@/lib/auth/permissions";
 
 export { TEST_PARAM };
 
@@ -42,6 +45,8 @@ export async function renderTestDocument(scope: StoreScope, store: StoreRow, pag
     },
   };
   const addons = { ...(kind === "landing" ? rc.addons : rc.thanksAddons), banner: "test" as const };
-  const opts = { ...base, urls, ver: page.versionId, pixels: false, addons };
+  // R2 (C2-B2): the live version's runtime (LP-16 v3 renders with the store's zones) and an attached page's product key
+  const extras = releaseOn("R2") ? await landingRenderExtras(scope, page.pageId, await versionRuntimeV(scope, page.versionId)) : {};
+  const opts = { ...base, urls, ver: page.versionId, pixels: false, addons, ...extras };
   return kind === "landing" ? renderLandingHtml(doc, opts) : renderThankYouHtml(doc, opts);
 }

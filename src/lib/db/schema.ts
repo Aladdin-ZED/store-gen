@@ -2663,6 +2663,14 @@ export interface AttachOpts {
   indexable: boolean;
   keepNames: boolean;
   keepPhotos: boolean;
+  /**
+   * LP-16 (core D75, R2 contract step C2-B2): "Charge delivery by city". The one key of this column read on every
+   * landing row, attached or not (0006 adds no column for LP-16, LAN-§2.4); the page's next publish renders
+   * `runtime_v = 3` (the `landing-v3` chunk, config v3 with the store's `ZoneTable`, zone shipping on the server).
+   * Written and read only through src/lib/render/landing-v3.server.ts (`setChargeByCity`, `chargesByCity`); a detach
+   * keeps it. Absent = off.
+   */
+  chargeByCity?: boolean;
 }
 
 /** The ship axis (orders.ship_state, shipments.state) */
@@ -2834,6 +2842,9 @@ export const products = mysqlTable(
     storeFk("products", t.storeId),
   ],
 );
+
+/** A `products` row (STO-R1: the type `resolveProductKey` answers with; R2 contract step C2-B2). */
+export type ProductRow = typeof products.$inferSelect;
 
 /** Collections (STO-§3.2, §4.6): manual in R2. */
 export const collections = mysqlTable(

@@ -28,6 +28,9 @@ import { cityKey } from "@/lib/orders/address";
 import { checkOrigin, clientContext, json, logError, readJson } from "@/lib/orders/http";
 import { leadSelectionText } from "@/lib/orders/lead-text";
 import { orderVersion } from "@/lib/orders/resolve";
+import { leadInserted } from "@/lib/orders/leads";
+import { releaseOn } from "@/lib/auth/permissions";
+import { landingShippingZone } from "@/lib/render/landing-v3.server";
 import { cleanInput } from "@/lib/orders/validate";
 import type { PageDoc } from "@/lib/page/schema";
 import { addressOf } from "@/lib/render/store-context.server";
@@ -100,7 +103,9 @@ export function createWaIntent(input: WaIntentInput): Promise<WaIntent> {
 async function storeIntent(scope: WriteScope, { target, req, test, now = new Date() }: WaIntentInput): Promise<WaIntent> {
   const seen = await orderVersion(scope, target, { v: 2, ver: req.ver });
   const doc = seen.doc;
-  const price = priceWaSelection(doc, req);
+  // LP-16 (D75, R2): the zone delivery of a runtime_v 3 version (undefined: the page fee)
+  const zone = await landingShippingZone(scope, seen.versionId, req.city);
+  const price = priceWaSelection(doc, req, zone);
   const city = cityOf(target, req.city, doc);
   const utm = Object.fromEntries(Object.entries(req.utm ?? {}).filter((e): e is [string, string] => typeof e[1] === "string" && !!e[1]));
   const sel: LeadSelectionV2 = {
@@ -140,6 +145,8 @@ async function storeIntent(scope: WriteScope, { target, req, test, now = new Dat
           updatedAt: now,
         }),
       );
+      // OPE Q.18 (R2 contract step C2-B2): the lead hook of the new intent; R1 runs nothing
+      if (releaseOn("R2")) await leadInserted(scope, id);
       return { leadId: id, doc, ref, price, versionId: seen.versionId, city };
     } catch (err) {
       if (dbErrorCode(err) !== "ER_DUP_ENTRY" || attempt >= WA_REF_TRIES) throw err;

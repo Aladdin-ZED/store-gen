@@ -25,6 +25,7 @@ import { LandingDocument, LegalDocument, ThankYouDocument, variantChunksIn, type
 import type { LegalPolicyInput } from "@/landing/legal";
 import { renderPageBody } from "@/landing/page";
 import type { PageLinks, RenderMode } from "@/landing/types";
+import type { ZoneTable } from "@/lib/delivery/types";
 import type { PageDoc } from "@/lib/page/schema";
 import { trackingFlags } from "@/lib/pixels/tracking";
 import { pageCapIssues, runtimeConfigOf, type BlockingIssue } from "./caps";
@@ -67,6 +68,13 @@ export interface RenderHtmlOptions extends RenderHookFields {
   shopper?: ShopperFacts;
   /** origins media is loaded from besides 'self' (S / C modes: the platform host, docs/STORE-SAAS.md §C.9) */
   mediaOrigins?: readonly string[];
+  /**
+   * LP-16 (core D75, R2 contract step C2-B2): the store's `ZoneTable` for a "charge delivery by city" page; the
+   * landing document then embeds runtime config v3 and the `landing-v3` chunk (`runtimeV` 3). Absent: today's bytes.
+   */
+  zones?: ZoneTable;
+  /** R2 (STO-R12 (c), LAN Q25): an attached landing's product key, the root of its ad content ids. Absent: the page key. */
+  productKey?: string;
 }
 
 export interface LegalHtmlOptions {
@@ -330,6 +338,9 @@ function documentProps(doc: PageDoc, ctx: LandingRenderContext, opts: RenderHtml
     ...(opts.addons ? { addons: opts.addons } : {}),
     ...(opts.purchaseInBrowser === false ? { purchaseInBrowser: false } : {}),
     ...(opts.pixels === false ? { pixels: false } : {}),
+    // R2 (C2-B2): passed only when set, so a v2 document renders today's bytes
+    ...(opts.zones ? { zones: opts.zones } : {}),
+    ...(opts.productKey ? { productKey: opts.productKey } : {}),
   };
 }
 
