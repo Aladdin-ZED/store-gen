@@ -30,6 +30,7 @@ import { appendEvents } from "./events";
 import { logError } from "./log";
 import { versionDoc } from "./resolve";
 import { orderText } from "./text";
+import { isItemsV3, orderItemsView } from "@/lib/orders/items-v3";
 
 export type UpsellResponse =
   | { ok: true; orderId: string; total: number; currency: string }
@@ -54,7 +55,7 @@ export async function acceptUpsell(scope: WriteScope, input: { orderId: string; 
 
   const [order] = await db.select().from(orders).where(byId(orders, scope, input.orderId)).limit(1);
   const hash = upsellTokenHash(input.token);
-  if (!order?.upsellTokenHash || !sameHash(order.upsellTokenHash, hash) || order.items.upsell) {
+  if (!order?.upsellTokenHash || !sameHash(order.upsellTokenHash, hash) || isItemsV3(order.items) || order.items.upsell) {
     return { response: { ok: false, error: "invalid" }, sync: false };
   }
   // the call center already closed this order (cancelled / fake): nothing to add to
@@ -67,7 +68,7 @@ export async function acceptUpsell(scope: WriteScope, input: { orderId: string; 
   if (Date.now() - order.createdAt.getTime() > windowMs) return { response: { ok: false, error: "expired" }, sync: false };
 
   const price = round2(offer.price);
-  const items: OrderItems = { ...order.items, upsell: upsellRecord(doc, offer, price) };
+  const items: OrderItems = { ...orderItemsView(order.items), upsell: upsellRecord(doc, offer, price) };
   // P0b P4-9 (applied at the P4 merge): the line change bumps `rev`, marks the sheet's line cells (`sheet_dirty |= 4`)
   // and writes one `field_edited` event (actor customer) in the same transaction (OPE-§11.3).
   const cut = (v: string) => (v ? Array.from(v).slice(0, 300).join("") : null);
@@ -93,7 +94,7 @@ export async function acceptUpsell(scope: WriteScope, input: { orderId: string; 
         actorKind: "customer",
         type: "field_edited",
         rev: order.rev + 1,
-        meta: { fields: [{ f: "items", before: cut(orderText(order.items, { mode: "customer" })), after: cut(orderText(items, { mode: "customer" })) }] },
+        meta: { fields: [{ f: "items", before: cut(orderText(orderItemsView(order.items), { mode: "customer" })), after: cut(orderText(items, { mode: "customer" })) }] },
       },
     ]);
     return true;

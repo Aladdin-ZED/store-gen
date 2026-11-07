@@ -3928,7 +3928,7 @@ or `ai_feedback`; a second agent pressing `N` does not get the same order; the t
 Writes from this spec (every item accepted in core §Q.2 and listed in core §K.4's contract step): the §STO-3 tables and
 columns into `src/lib/db/schema.ts` and `drizzle/0006_r2.sql` (incl. `catalog_redirects`, `inventory_moves`,
 `pages.attach_opts`, `page_versions.product_rev`, `page_versions.kind` + `'sync'`, `leads.page_id` NULL-able);
-`src/lib/orders/contract-v3.ts` (STO-§16.1 incl. `test`, §16.4, §15.11 incl. `kind`); `src/storefront/types.ts`,
+`src/lib/orders/contract-v3.ts` (STO-§16.1 incl. `test`, §16.4, §15.11 incl. `kind`) with its zod-free half `src/lib/orders/items-v3.ts` (`isItemsV3`, `orderItemsView`; C2-B1); `src/storefront/types.ts`,
 `src/storefront/schema.ts`, `src/storefront/kinds.ts` and `src/storefront/fold.ts` (`FoldLayout`, STO-§9.5) as frozen
 contracts; the budget keys (core §H.13); the package scripts (core §J); `resolveProductKey` / `resolveContextKey`;
 `attachedDocFor` applied by `orderVersion`, `contentIdOf` (STO-R12 (b), (c)); the **widening of `OrderDraft`** for v3

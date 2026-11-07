@@ -181,7 +181,7 @@ export async function replacePixelAction(
       const r: ReplacePageResult = { pageId, name: "", draft: "unchanged", live: v.live ? "unchanged" : "skipped" };
       results.push(r);
       // draft: compare-and-swap on its stamp (an editor saving meanwhile wins: "conflict")
-      const [row] = await db.select({ name: pages.name, draft: pages.draft, updatedAt: pages.updatedAt, status: pages.status }).from(pages).where(byId(pages, scope, pageId)).limit(1);
+      const [row] = await db.select({ name: pages.name, draft: pages.draft, updatedAt: pages.updatedAt, status: pages.status }).from(pages).where(and(byId(pages, scope, pageId), eq(pages.kind, "landing"))).limit(1);
       if (!row) {
         r.draft = "not_found";
         r.live = v.live ? "not_live" : "skipped";
@@ -256,7 +256,7 @@ export async function pagePixelsAction(pageId: string): Promise<ActionResult<Pag
 export async function applyLiveTrackingAction(input: { pageId: string; baseVersionId: string }): Promise<ActionResult<{ versionId: string; live: Tracking }>> {
   return storeAction("pages.publish", async ({ scope, actor, store }) => {
     const v = z.object({ pageId: PageIdSchema, baseVersionId: PageIdSchema }).parse(input);
-    const [row] = await db.select({ draft: pages.draft }).from(pages).where(byId(pages, scope, v.pageId)).limit(1);
+    const [row] = await db.select({ draft: pages.draft }).from(pages).where(and(byId(pages, scope, v.pageId), eq(pages.kind, "landing"))).limit(1);
     if (!row) fail("This page no longer exists.");
     const tracking = ((row!.draft as unknown as { tracking?: Tracking } | null)?.tracking ?? {}) as Tracking;
     const res = await guarded(() => publishTrackingOnly(scope, v.pageId, tracking, v.baseVersionId, { actor }));

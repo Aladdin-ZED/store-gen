@@ -83,6 +83,7 @@ import {
 } from "./plan";
 import { applyPullDecisions, pullDue, selectPullOrders, sheetNoteHashes, takePullToken } from "./pull";
 import { sheetColumnsOf, type Cell, type SheetColumns } from "./row";
+import { orderItemsView, type AnyOrderItems } from "@/lib/orders/items-v3";
 
 /* ------------------------------------------------------------------ */
 /* limits                                                              */
@@ -286,6 +287,9 @@ export function appendPredicate(now: Date, force: boolean): SQL {
   )!;
 }
 
+/** R2 contract step (C2-B1, STO-R8): the rows' items as their v1 / v2 view (a v3 store order as one v2-shaped record). */
+const withItemsView = <R extends { items: AnyOrderItems }>(rows: R[]) => rows.map((r) => ({ ...r, items: orderItemsView(r.items) }));
+
 /**
  * The store's orders the push may append, oldest first (`limit` default 100, at most 101: the planner sees one more
  * than it takes): its own (whereStore), never a test order, pending or failed past the backoff.
@@ -296,7 +300,8 @@ export function selectAppendWork(scope: StoreScope, opts: { now?: Date; force?: 
     .from(orders)
     .where(whereStore(orders, scope, eq(orders.isTest, false), appendPredicate(opts.now ?? new Date(), !!opts.force)))
     .orderBy(asc(orders.createdAt), asc(orders.id))
-    .limit(Math.max(1, Math.min(APPEND_MAX + 1, opts.limit ?? APPEND_MAX)));
+    .limit(Math.max(1, Math.min(APPEND_MAX + 1, opts.limit ?? APPEND_MAX)))
+    .then(withItemsView);
 }
 
 /** The store's synced orders with a change to write (`orders_dirty_idx`), oldest first, never a test order. */
@@ -306,7 +311,8 @@ function selectUpdateWork(scope: StoreScope, limit: number): Promise<PlanOrder[]
     .from(orders)
     .where(whereStore(orders, scope, eq(orders.isTest, false), eq(orders.sheetStatus, "synced"), gt(orders.sheetDirty, 0)))
     .orderBy(asc(orders.createdAt), asc(orders.id))
-    .limit(limit);
+    .limit(limit)
+    .then(withItemsView);
 }
 
 /** Display names of the members who confirmed orders of this batch (the "Agent" cell). */

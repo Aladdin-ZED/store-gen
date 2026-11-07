@@ -34,10 +34,12 @@ import { STORE_ROLES, type PlatformRole, type StoreRole } from "@/lib/auth/permi
 import type { HealthFlag, HealthGroup, HealthIssue, HealthMetrics, Milestone } from "@/lib/health/types";
 import type { AssetFocus } from "@/lib/media/focus";
 import type { UnitIn } from "@/lib/orders/contract";
+import type { OrderItemsV3 } from "@/lib/orders/contract-v3";
 import type { AssetRef, PageDoc, SectionInstance } from "@/lib/page/schema";
 import type { EntitlementKey } from "@/lib/tenancy/entitlement-keys";
 import type { StoreMode } from "@/lib/tenancy/mode";
 import type { StoreStatus } from "@/lib/tenancy/types";
+import type { StorePageDoc } from "@/storefront/schema";
 
 /* ------------------------------------------------------------------ */
 /* custom column types                                                 */
@@ -182,7 +184,8 @@ export const pages = mysqlTable(
     locale: varchar("locale", { length: 5 }).notNull().default("ar"),
     /** public key used by the order API (pageKey); unique across stores */
     publicKey: varchar("public_key", { length: 40 }).notNull(),
-    draft: jsonText<PageDoc>("draft").notNull(),
+    /** STO-R2 (R2 contract step C2-B1): a landing PageDoc or a StorePageDoc by `kind`; read through readPageDoc() or a kind filter (lint L11) */
+    draft: jsonText<PageDoc | StorePageDoc>("draft").notNull(),
     publishedVersionId: varchar("published_version_id", { length: 26 }),
     createdBy: varchar("created_by", { length: 26 }),
     createdAt: createdAt(),
@@ -222,7 +225,8 @@ export const pageVersions = mysqlTable(
     /** 0006 (§D.2, LAN Q24) appended `sync`: an attached landing republished by a product change (pruned first) */
     kind: mysqlEnum("kind", ["generation", "save", "publish", "restore", "import", "autosave", "sync"]).notNull(),
     label: varchar("label", { length: 160 }),
-    doc: jsonText<PageDoc>("doc").notNull(),
+    /** STO-R2 (R2 contract step C2-B1): the published PageDoc or StorePageDoc of the page's kind (lint L11) */
+    doc: jsonText<PageDoc | StorePageDoc>("doc").notNull(),
     /** rendered landing HTML (publish versions) */
     html: longtext("html"),
     thankYouHtml: longtext("thank_you_html"),
@@ -403,7 +407,8 @@ export const orders = mysqlTable(
     note: varchar("note", { length: 400 }),
     email: varchar("email", { length: 160 }),
     productName: varchar("product_name", { length: 160 }).notNull(),
-    items: jsonText<OrderItems>("items").notNull(),
+    /** STO-R8 (R2 contract step C2-B1): v1 / v2 OrderItems, or OrderItemsV3 for a store order (`v: 3`, src/lib/orders/contract-v3.ts) */
+    items: jsonText<OrderItems | OrderItemsV3>("items").notNull(),
     qty: int("qty").notNull(),
     subtotal: money("subtotal").notNull(),
     shipping: money("shipping").notNull(),

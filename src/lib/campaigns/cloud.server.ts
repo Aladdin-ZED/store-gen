@@ -29,6 +29,7 @@ import type { WriteCtx } from "@/lib/tenancy/types";
 import { kitText, taggedSections, distinctTags, type Loc } from "./compile";
 import { saveCloudBrief } from "./service.server";
 import type { AdBrief } from "./types";
+import { isLandingDoc } from "@/storefront/schema";
 
 const ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -55,7 +56,7 @@ export async function refineKitWithCloud(ctx: WriteCtx, id: string): Promise<Clo
   if (!policy.cloud.available || policy.mode === "local") return library;
 
   const [v] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(byId(pageVersions, ctx.scope, row.versionId)).limit(1);
-  const parsed = v ? PageDoc.safeParse(v.doc) : null;
+  const parsed = v && isLandingDoc(v.doc) ? PageDoc.safeParse(v.doc) : null;
   if (!parsed?.success) return library;
   const doc = parsed.data;
   const docLoc: Loc = doc.locale === "ar" || doc.locale === "fr" ? doc.locale : "en";

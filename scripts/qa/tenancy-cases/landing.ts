@@ -50,6 +50,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import type { TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
 import type { WriteCtx, WriteScope } from "@/lib/tenancy/types";
+import type { PageDoc } from "@/lib/page/schema";
 
 const load = <T>(id: string): T => createRequire(__filename)(id) as T;
 
@@ -118,7 +119,7 @@ async function addonCases(kit: TenancyKit): Promise<void> {
     check("templates: templateFor(B, customer_confirm, fr) is the default, never A's text", !tb.includes(marker) && tb.startsWith("Bonjour"), tb);
     check("templates: templateFor(B, platform scope) never reads A's row either", !(await Tpl.templateFor(kit.scope("B", "platform"), "customer_confirm", "fr")).includes(marker));
 
-    const docOf = async (versionId: string) => (await db.select({ doc: T.pageVersions.doc }).from(T.pageVersions).where(eq(T.pageVersions.id, versionId)))[0]!.doc;
+    const docOf = async (versionId: string) => (await db.select({ doc: T.pageVersions.doc }).from(T.pageVersions).where(eq(T.pageVersions.id, versionId)))[0]!.doc as PageDoc; // the fixture's landing versions (R2 typed union, C2-B1)
     const [docA, docB] = await Promise.all([docOf(fx.A.version.live), docOf(fx.B.version.live)]);
     const frA = { ...docA, locale: "fr" as const };
     const frB = { ...docB, locale: "fr" as const };
@@ -254,7 +255,7 @@ async function gateCases(kit: TenancyKit): Promise<void> {
   const ctxB = ownerCtx(kit, "B");
   const pageA = await kit.fresh.page(fx.A, "published");
   const pageB = await kit.fresh.page(fx.B, "published");
-  const docOf = async (id: string) => (await db.select({ d: T.pages.draft }).from(T.pages).where(eq(T.pages.id, id)).limit(1))[0]!.d;
+  const docOf = async (id: string) => (await db.select({ d: T.pages.draft }).from(T.pages).where(eq(T.pages.id, id)).limit(1))[0]!.d as PageDoc; // the fixture's landing pages (R2 typed union, C2-B1)
   const docA = await docOf(pageA);
   const docB = await docOf(pageB);
   const reviewedAt = new Date().toISOString();

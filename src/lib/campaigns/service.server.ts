@@ -47,6 +47,7 @@ import { storeUrl } from "@/lib/urls";
 import { compileKit, type CompileKitInput, type CompileKitResult, type Loc } from "./compile";
 import { pricingFingerprint } from "./fingerprint";
 import { CAMPAIGN_NAME_MAX, KIT_CHANNELS, kitLinkUtm, slugOf, SLUG_MAX, type AdBrief, type CampaignStatus, type KitChannel } from "./types";
+import { isLandingDoc } from "@/storefront/schema";
 
 const ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const GAUGE = { metric: "campaigns", period: "total" } as const;
@@ -82,7 +83,7 @@ async function livePage(scope: StoreScope, pageId: string): Promise<LivePage> {
   if (!page) throw new SeamError("not_found");
   if (page.status !== "published" || !page.versionId) throw new FieldsError({ pageId: "landing.campaigns.error.unpublished" });
   const [version] = await db.select({ doc: pageVersions.doc, createdAt: pageVersions.createdAt }).from(pageVersions).where(byId(pageVersions, scope, page.versionId)).limit(1);
-  const parsed = version ? PageDoc.safeParse(version.doc) : null;
+  const parsed = version && isLandingDoc(version.doc) ? PageDoc.safeParse(version.doc) : null;
   if (!version || !parsed?.success) throw new FieldsError({ pageId: "landing.campaigns.error.unpublished" });
   return { id: page.id, versionId: page.versionId, doc: parsed.data, publishedAt: new Date(version.createdAt).toISOString() };
 }

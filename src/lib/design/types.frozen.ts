@@ -6,10 +6,32 @@
  * from P6's files, so an additive field P6 adds to `VariantFeatures` never changes a frozen shape (`test:design`
  * asserts every `VariantFeatures` resolves to `VariantFeaturesResolved`). A change is a CCR; the R2 contract step
  * widens `FoldItem` (store kinds) and the doc types of the functions that take them (DES-R27).
+ *
+ * R2 contract step (C2-B1, maintainer; core §K.4, ENGP-1 / DES-R27, STO-R29, DES-§8.13): the additive widening done.
+ * `FoldItem` gains "name" | "identity" | "collections" (landing keeps filling its four keys; store kinds add theirs),
+ * `FoldReport.items` keeps its `Partial<Record<FoldItem, number>>` shape over the wider key set, and
+ * `VariantFeaturesResolved.fold` gains the optional `layout` through which a store hero family's `FoldLayout`
+ * (src/storefront/fold.ts, STO-§9.5) reaches the one height model (DS33). Frozen again in src/lib/contracts/r2-contract.ts.
  */
 
-/** The fold items of a landing hero family (R1); widened additively to | "name" | "identity" | "collections" at the R2 contract step. */
-export type FoldItem = "image" | "price" | "cta" | "cod";
+/** The fold items: a landing hero family's four (R1) and the store kinds' three (R2, STO-§9.5). */
+export type FoldItem = "image" | "price" | "cta" | "cod" | "name" | "identity" | "collections";
+
+/**
+ * A store hero family's declared fold layout as the height model reads it (STO-§9.5 `FoldLayout`, data only; the
+ * storefront's src/storefront/fold.ts names it `FoldLayout`). `bottoms` are px from the page top at 390 of each
+ * `mustShow` item's bottom edge for the sampled name and picker; the model derives each item's estimated top.
+ */
+export interface FoldLayoutData {
+  /** the items that must sit inside the first 844 px at 390 (the server gate, budget:C2, with its error band) */
+  mustShow: FoldItem[];
+  bottoms: Partial<Record<FoldItem, number>>;
+  /** px added per extra name line (ar: × 1.06) and per extra offer card in a `stack` / `tiers` picker */
+  perNameLine: number;
+  perOfferCard: number;
+  /** where the hero's single text block sits */
+  text: "column" | "statement" | "overlap";
+}
 
 /** The fold contract of the chosen hero family at 390 × 844 (DES-§5.12, core §M.2 row C2). */
 export interface FoldReport {
@@ -68,7 +90,11 @@ export interface VariantFeaturesResolved {
   revealNodes: number;
   slots?: { name: string; cssWidth1440: number; cssWidth390: number; aspect: "4:5" | "3:4" | "1:1" | "2:3" | "16:9" | "21:9" | "free"; role: "hero" | "detail" | "context" | "proof" | "offer" | "thumb" }[];
   /** hero families only (DES-§5.12) */
-  fold?: { rows: { el: "image" | "title" | "price" | "cta" | "cod" | "callouts" | "facts" | "band" | "grid"; vh?: number; lines?: number }[] } | null;
+  fold?: {
+    rows: { el: "image" | "title" | "price" | "cta" | "cod" | "callouts" | "facts" | "band" | "grid"; vh?: number; lines?: number }[];
+    /** R2 (store hero families, STO-§9.5): the family's FoldLayout, which the height model reads instead of `rows` */
+    layout?: FoldLayoutData;
+  } | null;
   openers?: ("bare" | "caption" | "number" | "quote" | "image" | "kicker")[];
   textRuns?: ("display" | "marquee" | "badge" | "ghost")[];
   /** height override in screens; the fixed form skips density, spacingFor and G21 (DES-§5.3, LAN R12) */

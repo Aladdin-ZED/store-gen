@@ -27,7 +27,7 @@ async function versionSource(scope: StoreScope, pageId: string, versionId: strin
     .select({ doc: pageVersions.doc, slug: pages.slug })
     .from(pageVersions)
     .innerJoin(pages, and(eq(pages.id, pageVersions.pageId), eq(pages.storeId, pageVersions.storeId)))
-    .where(whereStore(pageVersions, scope, eq(pageVersions.id, versionId), eq(pageVersions.pageId, pageId)))
+    .where(whereStore(pageVersions, scope, eq(pageVersions.id, versionId), eq(pageVersions.pageId, pageId), eq(pages.kind, "landing")))
     .limit(1);
   if (!row) return null;
   const { doc } = validateDoc(row.doc);

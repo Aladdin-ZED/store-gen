@@ -42,7 +42,7 @@ import { checkNovelty, exhaustionTest, type NoveltyVerdict } from "@/lib/design/
 import { factsFor } from "@/lib/landing/honesty/facts.server";
 import { errorSummary } from "@/lib/orders/log";
 import { recordError } from "@/lib/jobs/errors";
-import type { PageDoc } from "@/lib/page/schema";
+import { MARKETS, type Market, type PageDoc } from "@/lib/page/schema";
 import { markHealthDirty } from "@/lib/platform/health-snapshot";
 import { getPlatformSetting } from "@/lib/settings";
 import { scopedCache } from "@/lib/tenancy/cache";
@@ -90,7 +90,9 @@ export async function gateCtxFrom(ctx: PrePublishCtx): Promise<GateInputCtx> {
   const assets = gateAssets(ctx.assets);
   if (!isPageDoc(doc)) {
     // a store template (R2): the store theme comes resolved in ctx.theme; no product, facts or proof lines
-    return { kind: doc.kind, theme: ctx.theme, look: null, assets, locale: doc.locale, context: "publish", origin: new Map(), facts: { facts: [] }, ownerProof: false };
+    // (the store's market: a StorePageDoc carries none, R2 contract step C2-B1)
+    const market = (MARKETS as readonly string[]).includes(ctx.store.market) ? (ctx.store.market as Market) : "INTL";
+    return { kind: doc.kind, theme: ctx.theme, look: null, assets, locale: doc.locale, context: "publish", origin: new Map(), facts: { facts: [] }, ownerProof: false, market };
   }
   const [gen, attested] = await Promise.all([generationRecordFor(ctx.scope, ctx.pageId), factsFor(ctx.scope, ctx.pageId).catch(() => [])]);
   const origin = originFrom(ctx.prev, doc, gen);
@@ -105,7 +107,7 @@ export async function gateCtxFrom(ctx: PrePublishCtx): Promise<GateInputCtx> {
 /** The doc's niche (DES-§7.3): a landing's product family, a store template's store category. */
 export async function nicheOfDoc(scope: StoreScope, doc: PageDoc | StorePageDoc): Promise<string> {
   const store = await storeNicheOf(scope);
-  return isPageDoc(doc) ? docNiche(doc, store) : nicheKey(doc.market ?? store.market, store.category);
+  return isPageDoc(doc) ? docNiche(doc, store) : nicheKey(store.market, store.category);
 }
 
 /** Every title and lead of the doc with its path, the product name masked as the engine composes it (`{product}`). */

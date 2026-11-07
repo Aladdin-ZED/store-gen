@@ -51,6 +51,7 @@ import { entitlement } from "@/lib/tenancy/entitlements";
 import { getStoreById } from "@/lib/tenancy/public";
 import { whereStore } from "@/lib/tenancy/sql";
 import type { WriteScope } from "@/lib/tenancy/types";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 const LOG = "[telegram]";
 /** A dropped item (CCR r1-p5-9, the `capi` handler's prefix): `cancelled`, never `dead`, never a dead notice. */
@@ -144,10 +145,11 @@ async function ordersOf(scope: WriteScope, ids: readonly string[], market: strin
   return rows
     .filter((r) => !(r.flags ?? []).includes("honeypot"))
     .map((r) => {
-      const label = r.items?.bundleLabel && !/^\d+$/.test(r.items.bundleLabel.trim()) ? r.items.bundleLabel.trim() : r.productName;
+      const items = orderItemsView(r.items);
+      const label = items?.bundleLabel && !/^\d+$/.test(items.bundleLabel.trim()) ? items.bundleLabel.trim() : r.productName;
       let units = "";
       try {
-        units = orderText(r.items, { mode: "warehouse", orderId: r.id, productName: r.productName }).trim();
+        units = orderText(items, { mode: "warehouse", orderId: r.id, productName: r.productName }).trim();
       } catch {
         units = "";
       }

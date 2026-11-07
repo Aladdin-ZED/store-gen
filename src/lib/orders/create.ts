@@ -73,7 +73,12 @@ export const STORE_FLOOD_LIMIT = 600;
 /* The one order insert (D72)                                          */
 /* ------------------------------------------------------------------ */
 
-/** The order's own columns; the id, the store, the test flag, the upsell hash and the timestamps are createOrderRow's. */
+/**
+ * The order's own columns; the id, the store, the test flag, the upsell hash and the timestamps are createOrderRow's.
+ * R2 contract step (C2-B1; STO-R12 (a), ENGC-13): widened for the v3 paths through the columns it is read from: `items`
+ * is `OrderItems | OrderItemsV3` (STO-R8), `pageId` / `versionId` may be NULL (a store order, 0006) and
+ * `catalogVersion` is the version a store order was priced against (STO-§16.4); frozen in src/lib/contracts/r2-contract.ts.
+ */
 export type OrderDraft = Omit<typeof orders.$inferInsert, "id" | "storeId" | "isTest" | "upsellTokenHash" | "createdAt" | "updatedAt">;
 
 export interface CreateOrderRowCtx {

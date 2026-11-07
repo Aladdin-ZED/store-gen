@@ -128,7 +128,8 @@ import type * as state from "@/lib/orders/state";
 import type { CancelReason, ConfirmState, MoneyState, OrderStates, ReturnReason, ShipState, TransitionSource } from "@/lib/orders/state";
 import type * as transition from "@/lib/orders/transition";
 import type { OrderActor, TransitionError, TransitionInput, TransitionResult } from "@/lib/orders/transition";
-import type { Locale, PageDoc, ThemeLook } from "@/lib/page/schema";
+import type { Locale, Market, PageDoc, ThemeLook } from "@/lib/page/schema";
+import type { StorePageDoc } from "@/storefront/schema";
 import type * as platformHealth from "@/lib/platform/health";
 import type { PlatformHealth } from "@/lib/platform/health";
 import type { PulseContributor, StorePulse } from "@/lib/pulse/types";
@@ -730,7 +731,8 @@ export type P2Shell = [
 /* ------------------------------------------------------------------ */
 
 export type P6Measurement = [
-  Assert<Equals<FoldItem, "image" | "price" | "cta" | "cod">>,
+  // widened additively by the R2 contract step (C2-B1; core §K.4, DES-R27, STO-R29): the store kinds' three items
+  Assert<Equals<FoldItem, "image" | "price" | "cta" | "cod" | "name" | "identity" | "collections">>,
   Assert<Equals<FoldReport, { family: string; ok: boolean; items: Partial<Record<FoldItem, number>>; limit: 844 }>>,
   Assert<
     Equals<
@@ -791,7 +793,8 @@ export type P6Measurement = [
   Assert<
     Equals<
       typeof heights.estimateHeights,
-      (doc: PageDoc, opts: { look: ThemeLook | null; locale: Locale; features: (type: string, variant: string, data: unknown) => VariantFeaturesResolved }) => HeightReport
+      // R2 contract step (C2-B1): the doc widened to the union (DES-§8.13 point 2)
+      (doc: PageDoc | StorePageDoc, opts: { look: ThemeLook | null; locale: Locale; features: (type: string, variant: string, data: unknown) => VariantFeaturesResolved }) => HeightReport
     >
   >,
   Assert<Equals<typeof heights.HEIGHT_MODEL_VERSION, number>>,
@@ -815,7 +818,8 @@ export type P6Genome = [
   Assert<Equals<SampleInput["photos"], PhotoFacts>>,
   Assert<Equals<SampleInput["shares"], NicheShares | null>>,
   Assert<Equals<keyof DesignGenome, "v" | "seed" | "priorsV" | "brand" | "page" | "sections" | "why" | "hints">>,
-  Assert<Equals<typeof derive.genomeOf, (doc: PageDoc, opts?: { photos?: PhotoFacts }) => DesignGenome>>,
+  // R2 contract step (C2-B1): the doc widened to the union; a StorePageDoc reads the store look and market (DES-§8.13)
+  Assert<Equals<typeof derive.genomeOf, (doc: PageDoc | StorePageDoc, opts?: { photos?: PhotoFacts; look?: ThemeLook | null; market?: Market }) => DesignGenome>>,
   Assert<Equals<typeof cliche.clicheScore, (text: string, locale: Locale) => { score: number; hits: ClicheHit[] }>>,
   Assert<Equals<ClicheHit, { p: string; w: 1 | 2 | 3; k: "word" | "phrase" | "frame"; at: number }>>,
   Assert<Equals<typeof distance.genomeDistance, (a: DistanceView, b: DistanceView, scope?: "full" | "page" | "brand") => number>>,

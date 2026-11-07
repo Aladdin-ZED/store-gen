@@ -61,7 +61,8 @@ const pageOfVersion = (scope: StoreScope) => and(eq(pages.id, pageVersions.pageI
 export async function listVersions(scope: StoreScope, filters: VersionFilters = {}): Promise<{ items: VersionItem[]; total: number; page: number; pageSize: number }> {
   const page = Math.max(1, Math.floor(filters.page ?? 1));
   const pageSize = Math.min(60, Math.max(1, Math.floor(filters.pageSize ?? 24)));
-  const where: SQL[] = [];
+  // STO-R2 (L11): the landing pages' history; store templates keep their own (S1)
+  const where: SQL[] = [eq(pages.kind, "landing")];
   if (filters.pageId) where.push(eq(pageVersions.pageId, filters.pageId));
   if (filters.kind) where.push(eq(pageVersions.kind, filters.kind));
   else if (!filters.includeAutosave) where.push(ne(pageVersions.kind, "autosave"));
@@ -141,7 +142,7 @@ async function getVersion(scope: StoreScope, id: string) {
     .select({ id: pageVersions.id, pageId: pageVersions.pageId, kind: pageVersions.kind, doc: pageVersions.doc, createdAt: pageVersions.createdAt, pageName: pages.name })
     .from(pageVersions)
     .innerJoin(pages, pageOfVersion(scope))
-    .where(byId(pageVersions, scope, id))
+    .where(and(byId(pageVersions, scope, id), eq(pages.kind, "landing")))
     .limit(1);
   // 0006: a `sync` version (an attached landing republished by a product change, LAN Q24) reads as a publish
   return found ? { ...found, kind: found.kind === "sync" ? ("publish" as const) : found.kind } : null;

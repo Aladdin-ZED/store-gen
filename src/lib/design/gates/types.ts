@@ -7,7 +7,8 @@
  */
 import type { GateId, GateSummary, OriginClass } from "@/lib/db/schema";
 import type { MessageKey } from "@/lib/tenancy/types";
-import type { Locale, Market, PageDoc, SectionInstance } from "@/lib/page/schema";
+import type { Locale, PageDoc } from "@/lib/page/schema";
+import type { StorePageDoc as StoreDoc, StorePageKind as StoreKind } from "@/storefront/schema";
 import type { BuiltTheme } from "@/lib/theme/types";
 import type { HeightReport, VariantFeaturesResolved } from "../types.frozen";
 import type { CopyReport, FactsArg } from "../cliche";
@@ -85,21 +86,19 @@ export interface AssetMeta {
   focus?: { x: number; y: number } | null;
 }
 
-/** The store page kinds (STO-§6.2, `pages.kind`); `landing` is the R1 kind. */
-export type StorePageKind = "home" | "page" | "product" | "collection" | "search" | "cart" | "checkout" | "not_found" | "policy";
+/**
+ * The design gate kinds besides `landing` (DES-§8.13 `KIND_GATES` rows): storefront's eight page kinds (STO-§6.2,
+ * `pages.kind`) plus `policy`, the policy pages rendered in the store chrome without a page row (STO-§3.1, §6.5).
+ * R2 contract step (C2-B1): the page kinds are storefront's frozen `StorePageKind` (src/storefront/schema.ts).
+ */
+export type StorePageKind = StoreKind | "policy";
 
 /**
- * The store template document (STO-§6.2) as this part reads it: sections and locale, no theme, product, items, offers
- * or form. Storefront owns the type from R2; until its contract step this is the placeholder the adapter and the gates
- * are typed against (the structural subset storefront's type must keep), so the R2 swap is an import change.
+ * The store template document: storefront's frozen `StorePageDoc` v1 (src/storefront/schema.ts, STO-§6.2): sections,
+ * locale, title and seo; no theme, product, items, offers, form or market (the adapter takes the store's look and
+ * market from its context). R2 contract step (C2-B1): the P6 placeholder swapped for the import.
  */
-export interface StorePageDoc {
-  v: 1;
-  kind: StorePageKind;
-  locale: Locale;
-  market: Market;
-  sections: SectionInstance[];
-}
+export type StorePageDoc = StoreDoc;
 
 /** One cross-store headline verdict (DES-§9.8; the publish path passes the headline service's answer per field). */
 export interface HeadlineVerdict {

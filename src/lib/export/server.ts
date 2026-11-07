@@ -101,7 +101,7 @@ async function loadVersion(scope: StoreScope, versionId: string): Promise<Versio
     })
     .from(pageVersions)
     .innerJoin(pages, and(eq(pages.id, pageVersions.pageId), inStore(pages, scope)))
-    .where(byId(pageVersions, scope, versionId))
+    .where(and(byId(pageVersions, scope, versionId), eq(pages.kind, "landing")))
     .limit(1);
   if (!row) throw new ExportError("not_found", "This version no longer exists.", { versionId: "Choose another version." });
   return {
@@ -216,7 +216,7 @@ export async function getExportContext(scope: StoreScope, pageId: string, opts: 
   const [page] = await db
     .select({ id: pages.id, name: pages.name, slug: pages.slug, status: pages.status, publishedVersionId: pages.publishedVersionId, draft: pages.draft })
     .from(pages)
-    .where(byId(pages, scope, pageId))
+    .where(and(byId(pages, scope, pageId), eq(pages.kind, "landing")))
     .limit(1);
   if (!page) throw new ExportError("not_found", "Page not found.");
 

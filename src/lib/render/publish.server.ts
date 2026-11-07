@@ -45,6 +45,7 @@ import { renderLandingHtml, renderThankYouHtml, type RenderIssue } from "./core"
 import { runPrePublishChecks, runPublishListeners, type AssetMeta, type PrePublishCode, type PrePublishCtx } from "./prepublish";
 import { designGateMode } from "./prepublish/design";
 import { loadStoreRenderContext, storeAssetResolver, storeRenderOptions } from "./store-context.server";
+import { isLandingDoc } from "@/storefront/schema";
 
 export { invalidateStoreRender } from "./cache.server";
 export { PUBLIC_ENDPOINTS } from "./store-context.server";
@@ -291,7 +292,7 @@ async function publishedDoc(scope: StoreScope, versionId: string | null): Promis
     .from(pageVersions)
     .where(and(inStore(pageVersions, scope), eq(pageVersions.id, versionId)))
     .limit(1);
-  return row?.doc ? validateDoc(row.doc).doc : null;
+  return row?.doc && isLandingDoc(row.doc) ? validateDoc(row.doc).doc : null;
 }
 
 /** What the gates know about the document's assets (no bytes). */
@@ -305,7 +306,7 @@ async function liveIdsInStore(scope: StoreScope, pageId: string): Promise<Tracki
     .select({ doc: pageVersions.doc, status: pages.status })
     .from(pages)
     .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
-    .where(and(inStore(pages, scope), eq(pages.id, pageId)))
+    .where(and(inStore(pages, scope), eq(pages.id, pageId), eq(pages.kind, "landing")))
     .limit(1);
   if (!row || row.status !== "published") return null;
   return idsOnly((row.doc as { tracking?: Record<string, unknown> } | null)?.tracking ?? null);
@@ -345,7 +346,7 @@ async function publishInStoreOnce(scope: WriteScope, pageId: string, opts: Scope
   const [page] = await db
     .select({ id: pages.id, slug: pages.slug, draft: pages.draft, updatedAt: pages.updatedAt })
     .from(pages)
-    .where(and(inStore(pages, scope), eq(pages.id, pageId)))
+    .where(and(inStore(pages, scope), eq(pages.id, pageId), eq(pages.kind, "landing")))
     .limit(1);
   if (!page) throw notFound();
   const readStamp = page.updatedAt.getTime();
@@ -645,7 +646,7 @@ async function trackingOnlyInStore(
     .select({ status: pages.status, publishedVersionId: pages.publishedVersionId, doc: pageVersions.doc })
     .from(pages)
     .leftJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
-    .where(whereStore(pages, scope, eq(pages.id, pageId)))
+    .where(whereStore(pages, scope, eq(pages.id, pageId), eq(pages.kind, "landing")))
     .limit(1);
   if (!row) throw notFound();
   if (row.status !== "published" || !row.publishedVersionId || !row.doc) throw new PublishError("not_live", "This page isn't live. Publish it first.");
@@ -673,7 +674,7 @@ async function trackingOnlyInStore(
     const [d] = await db
       .select({ draft: pages.draft, updatedAt: pages.updatedAt })
       .from(pages)
-      .where(whereStore(pages, scope, eq(pages.id, pageId)))
+      .where(whereStore(pages, scope, eq(pages.id, pageId), eq(pages.kind, "landing")))
       .limit(1);
     if (!d || !d.draft || typeof d.draft !== "object") break;
     const current = (d.draft as { tracking?: Record<string, unknown> }).tracking ?? {};
@@ -732,7 +733,7 @@ export async function rerenderInPlace(scope: WriteScope, pageId: string, opts: {
     .select({ slug: pages.slug, publicKey: pages.publicKey, status: pages.status, versionId: pageVersions.id, doc: pageVersions.doc, runtimeV: pageVersions.runtimeV })
     .from(pages)
     .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
-    .where(whereStore(pages, scope, eq(pages.id, pageId)))
+    .where(whereStore(pages, scope, eq(pages.id, pageId), eq(pages.kind, "landing")))
     .limit(1);
   if (!live || live.status !== "published") return { status: "not_live", notes: [] };
   const versionId = live.versionId;

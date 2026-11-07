@@ -21,6 +21,7 @@ import { landingGateFactsFor } from "@/lib/render/prepublish/landing";
 import type { CheckContextData, CityKey } from "./check-context";
 import { callingWindowFacts, factsOf, numeralsIn, originOf, stockChangedAtOf } from "./check-facts";
 import { factsFor } from "./facts.server";
+import { isLandingDoc } from "@/storefront/schema";
 
 /** The settings keys the checklist reads (one `getStoreSettings` call with the builder's own keys). */
 export const CHECK_SETTING_KEYS = ["store", "policies", "checkout", "landing", "ops"] as const;
@@ -71,7 +72,7 @@ async function generatedDoc(scope: StoreScope, pageId: string): Promise<PageDoc 
     .where(whereStore(pageVersions, scope, eq(pageVersions.pageId, pageId), eq(pageVersions.kind, "generation")))
     .orderBy(desc(pageVersions.createdAt), desc(pageVersions.id))
     .limit(1);
-  const parsed = row ? PageDocSchema.safeParse(row.doc) : null;
+  const parsed = row && isLandingDoc(row.doc) ? PageDocSchema.safeParse(row.doc) : null;
   return parsed?.success ? parsed.data : null;
 }
 

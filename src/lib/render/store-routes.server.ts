@@ -366,7 +366,7 @@ async function previewPage(scope: StoreScope, pageId: string) {
   const [page] = await db
     .select({ id: pages.id, slug: pages.slug, publicKey: pages.publicKey, draft: pages.draft })
     .from(pages)
-    .where(whereStore(pages, scope, eq(pages.id, pageId)))
+    .where(whereStore(pages, scope, eq(pages.id, pageId), eq(pages.kind, "landing")))
     .limit(1);
   return page ?? null;
 }

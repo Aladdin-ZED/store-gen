@@ -363,7 +363,7 @@ export async function pagesWithoutLiveRow(scope: StoreScope, limit: number): Pro
     .select({ pageId: pages.id, versionId: pages.publishedVersionId, doc: pageVersions.doc })
     .from(pages)
     .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
-    .where(whereStore(pages, scope, eq(pages.status, "published"), sql`${pages.id} NOT IN (${live})`))
+    .where(whereStore(pages, scope, eq(pages.status, "published"), eq(pages.kind, "landing"), sql`${pages.id} NOT IN (${live})`))
     .orderBy(asc(pages.id))
     .limit(Math.max(1, Math.min(200, limit)));
   return rows.filter((r): r is { pageId: string; versionId: string; doc: PageDoc } => !!r.versionId && !!r.doc);

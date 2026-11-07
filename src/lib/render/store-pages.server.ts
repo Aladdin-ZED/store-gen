@@ -26,6 +26,7 @@ import { renderLegalHtml, type RenderedHtml } from "./core";
 import { legalPolicyFor } from "@/landing/legal/policy.server";
 import { isStoreSlug } from "./publish.server";
 import { loadStoreRenderContext, storeAssetRows, storeReportUrl, storeResolver } from "./store-context.server";
+import { isLandingDoc } from "@/storefront/schema";
 
 export interface PublishedPage {
   pageId: string;
@@ -68,9 +69,9 @@ async function loadPublished(scope: StoreScope, where: SQL): Promise<PublishedPa
     })
     .from(pages)
     .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
-    .where(whereStore(pages, scope, where, eq(pages.status, "published")))
+    .where(whereStore(pages, scope, where, eq(pages.status, "published"), eq(pages.kind, "landing")))
     .limit(1);
-  if (!row || !row.html || !row.csp || !row.etag || !row.thankYouHtml || !row.thankYouCsp) return null;
+  if (!row || !row.html || !row.csp || !row.etag || !row.thankYouHtml || !row.thankYouCsp || !isLandingDoc(row.doc)) return null;
   return {
     pageId: row.pageId,
     versionId: row.versionId,

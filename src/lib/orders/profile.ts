@@ -48,6 +48,7 @@ import { maskPhone } from "./masking";
 import { CONFIRM_STATES, projectStatus, SHIP_STATES, type ConfirmState, type MoneyState, type OrderStates, type ShipState } from "./state";
 import { orderText } from "./text";
 import type { OrderActor } from "./transition";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 /** a rate never travels without its n (OD38); below `min` the value is withheld */
 export type Kpi = { value: number; n: number; min: number } | { n: number; min: number; insufficient: true };
@@ -431,7 +432,7 @@ export async function getOrderForConsole(scope: StoreScope, orderId: string): Pr
   ]);
   return {
     ...consoleRow(r as ConsoleRaw),
-    itemsText: orderText(r.items, { mode: "warehouse", orderId: r.id, productName: r.productName }),
+    itemsText: orderText(orderItemsView(r.items), { mode: "warehouse", orderId: r.id, productName: r.productName }),
     timeline: events.map((e) => ({
       id: e.id,
       at: e.at.toISOString(),

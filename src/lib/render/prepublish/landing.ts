@@ -45,6 +45,7 @@ import type { GateItem, StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { markKitsStale } from "@/lib/campaigns/service.server";
 import { originFrom } from "../origin";
 import { generationRecordFor, registerPrePublishCheck, registerPublishListener, type GenerationRecord, type PrePublishCtx, type PrePublishResult } from "../prepublish";
+import { isLandingDoc } from "@/storefront/schema";
 
 export type { GateFacts, HonestyGateId } from "@/lib/landing/honesty/gate";
 
@@ -163,7 +164,7 @@ async function generatedSnapshotFor(scope: StoreScope, pageId: string): Promise<
     .where(whereStore(pageVersions, scope, eq(pageVersions.pageId, pageId), eq(pageVersions.kind, "generation")))
     .orderBy(desc(pageVersions.createdAt), desc(pageVersions.id))
     .limit(1);
-  const doc = row?.doc as unknown as { offers?: { urgency?: Record<string, unknown> }; product?: { rating?: unknown }; sections?: unknown } | undefined;
+  const doc = (row && isLandingDoc(row.doc) ? row.doc : undefined) as unknown as { offers?: { urgency?: Record<string, unknown> }; product?: { rating?: unknown }; sections?: unknown } | undefined;
   if (!doc || typeof doc !== "object") return null;
   const urgency = doc.offers?.urgency ?? {};
   const rating = doc.product?.rating as { value?: unknown; count?: unknown } | undefined;

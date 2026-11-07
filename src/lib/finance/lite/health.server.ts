@@ -27,6 +27,7 @@ import { skuCost, unitCost } from "./cost-lookup";
 import { costIndex } from "./costs.server";
 import { financeLiteOn } from "./flag.server";
 import { spendBetween } from "./spend.server";
+import { isLandingDoc } from "@/storefront/schema";
 
 export interface FinHealthFacts {
   on: boolean;
@@ -56,7 +57,7 @@ async function uncostedSkus(scope: StoreScope): Promise<number> {
   const live = await db
     .select({ id: pages.id, versionId: pages.publishedVersionId })
     .from(pages)
-    .where(whereStore(pages, scope, eq(pages.status, "published"), isNotNull(pages.publishedVersionId), inArray(pages.id, pageIds)))
+    .where(whereStore(pages, scope, eq(pages.status, "published"), isNotNull(pages.publishedVersionId), inArray(pages.id, pageIds), eq(pages.kind, "landing")))
     .orderBy(desc(pages.updatedAt))
     .limit(50);
   if (!live.length) return 0;
@@ -64,7 +65,7 @@ async function uncostedSkus(scope: StoreScope): Promise<number> {
     .select({ id: pageVersions.id, doc: pageVersions.doc })
     .from(pageVersions)
     .where(whereStore(pageVersions, scope, inArray(pageVersions.id, live.map((p) => p.versionId!))));
-  const docOf = new Map(docs.map((d) => [d.id, d.doc]));
+  const docOf = new Map(docs.flatMap((d) => (isLandingDoc(d.doc) ? [[d.id, d.doc] as const] : [])));
   const index = await costIndex(scope);
   const missing = new Set<string>();
   for (const p of live) {

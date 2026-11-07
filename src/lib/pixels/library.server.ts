@@ -312,7 +312,7 @@ export async function liveTracking(scope: StoreScope, pageId: string): Promise<{
     .select({ versionId: pageVersions.id, doc: pageVersions.doc })
     .from(pages)
     .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), inStore(pageVersions, scope)))
-    .where(whereStore(pages, scope, eq(pages.id, pageId), eq(pages.status, "published")))
+    .where(whereStore(pages, scope, eq(pages.id, pageId), eq(pages.status, "published"), eq(pages.kind, "landing")))
     .limit(1);
   if (!row) return null;
   const t = (row.doc as { tracking?: unknown } | null)?.tracking;

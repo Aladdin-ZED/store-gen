@@ -127,13 +127,19 @@ export function slopDoc(locale: "ar" | "fr" = "fr"): PageDoc {
   });
 }
 
-/** A `defaultTemplate`-style store document of a kind (STO-§6.2 shape: sections and locale only). */
+/**
+ * A `defaultTemplate`-style store document of a gate kind (STO-§6.2 shape: sections, locale, title, seo). `policy` has
+ * no page row (STO-§3.1): its document is a custom `page` the gates run under the `policy` row (R2 contract step C2-B1:
+ * storefront's frozen `StorePageDoc` has no `market`; the gate context passes the store's, STORE_TEMPLATE_MARKET).
+ */
+export const STORE_TEMPLATE_MARKET = "MA" as const;
 export function storeTemplate(kind: StorePageKind, locale: "ar" | "fr" = "fr"): StorePageDoc {
   return {
     v: 1,
-    kind,
+    kind: kind === "policy" ? "page" : kind,
     locale,
-    market: "MA",
+    title: "",
+    seo: { noindex: false },
     sections: [section("header", "header", "minimal", "base"), section("main", "faq", "accordion", "soft", { title: kind === "policy" ? "Livraison et retours" : "Questions", items: [] }), section("footer", "footer", "simple", "base")],
   };
 }

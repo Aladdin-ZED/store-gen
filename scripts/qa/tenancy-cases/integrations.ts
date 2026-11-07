@@ -51,6 +51,7 @@ import { createRequire } from "node:module";
 import type { Fixtures, TenancyCase, TenancyKit, TrackActionCase } from "../tenancy-check";
 import type { PullDecision } from "@/lib/sheets/plan";
 import type { WriteScope } from "@/lib/tenancy/types";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 const nodeRequire = createRequire(__filename);
 const load = <T>(id: string): T => nodeRequire(id) as T;
@@ -170,13 +171,13 @@ export const cases: TenancyCase[] = [
         storeValues(a, { id: versionId, pageId: kit.fx.A.page.live, kind: "save" as const, doc: { offers: { upsell: { enabled: true, title: "Savon noir 200 g", price: 59 } } } as never, checksum: "0".repeat(64) }),
       );
       try {
-        const noTaken = { ...orderA, versionId, items: { ...orderA.items, upsell: undefined } };
+        const noTaken = { ...orderA, versionId, items: { ...orderItemsView(orderA.items), upsell: undefined } };
         const withUpsell = await orderTemplateValues(kit.scope("A"), noTaken, { firstName: null, locale: "fr" });
         kit.check("templates: the upsell of the order's version doc", withUpsell.upsell_title === "Savon noir 200 g" && !!withUpsell.upsell_price?.includes("59"), withUpsell);
-        const taken = await orderTemplateValues(kit.scope("A"), { ...noTaken, items: { ...orderA.items, upsell: { title: "Savon noir 200 g", price: 59 } } }, { firstName: null, locale: "fr" });
+        const taken = await orderTemplateValues(kit.scope("A"), { ...noTaken, items: { ...orderItemsView(orderA.items), upsell: { title: "Savon noir 200 g", price: 59 } } }, { firstName: null, locale: "fr" });
         kit.check("templates: an upsell already taken is not offered again", !("upsell_title" in taken), taken);
         const [orderB] = await db.select().from(orders).where(byId(orders, kit.scope("B"), kit.fx.B.order.main)).limit(1);
-        const foreignDoc = orderB ? await orderTemplateValues(kit.scope("B"), { ...orderB, versionId, items: { ...orderB.items, upsell: undefined } }, { firstName: null, locale: "fr" }) : null;
+        const foreignDoc = orderB ? await orderTemplateValues(kit.scope("B"), { ...orderB, versionId, items: { ...orderItemsView(orderB.items), upsell: undefined } }, { firstName: null, locale: "fr" }) : null;
         kit.check("templates: B's order naming A's version id reads no upsell", !!foreignDoc && foreignDoc.order_id === orderB!.id && !("upsell_title" in foreignDoc), foreignDoc);
       } finally {
         await db.delete(pageVersions).where(byId(pageVersions, a, versionId));

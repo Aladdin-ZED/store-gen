@@ -29,6 +29,7 @@ import type { StoreConfirmation } from "@/lib/settings/keys/store";
 import type { StoreRow } from "@/lib/tenancy/types";
 import { shopperLocaleOf, type ShopperLocale } from "./copy";
 import { confirmText, firstWord } from "./template-text";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 export const LANDING_TEMPLATE_KINDS = ["customer_confirm", "wa_order", "lead_recovery", "track_link"] as const;
 export type LandingTemplateKind = (typeof LANDING_TEMPLATE_KINDS)[number];
@@ -86,8 +87,9 @@ const SHEET_COUNT = /\s*\(x\d+\)$/;
  * The `{offer}` line of a stored order, as the thank-you page has it: the offer's name (the stored sheet label without
  * its unit count) and the order bump's title after " + ".
  */
-export function confirmOffer(items: OrderRow["items"] | null | undefined): string {
-  if (!items) return "";
+export function confirmOffer(stored: OrderRow["items"] | null | undefined): string {
+  if (!stored) return "";
+  const items = orderItemsView(stored);
   const offer = (items.bundleLabel ?? "").replace(SHEET_COUNT, "").trim();
   const bump = items.bump?.title?.trim();
   return bump ? `${offer} + ${bump}` : offer;

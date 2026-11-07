@@ -125,7 +125,16 @@ const NAV_OR_STICKY = new Set(["header", "stickyCta"]);
 /** I1: the sticky and form thumbnails are excluded from the photo count (DES-§5.10) */
 const PHOTO_EXCLUDED = new Set(["stickyCta", "orderForm"]);
 const ASSET_ID = /^[a-f0-9]{16,64}$/;
-const FOLD_TITLES: Record<FoldItem, MessageKey> = { image: "budget.C2.image", price: "budget.C2.price", cta: "budget.C2.cta", cod: "budget.C2.cod" };
+const FOLD_TITLES: Record<FoldItem, MessageKey> = {
+  image: "budget.C2.image",
+  price: "budget.C2.price",
+  cta: "budget.C2.cta",
+  cod: "budget.C2.cod",
+  // R2 contract step (C2-B1): the store kinds' fold items (STO-§9.5)
+  name: "budget.C2.name",
+  identity: "budget.C2.identity",
+  collections: "budget.C2.collections",
+};
 
 const item = (rule: string, level: GateItem["level"], title: MessageKey, vars: Record<string, string | number>): GateItem => ({ id: `budget:${rule}`, level, title, vars });
 

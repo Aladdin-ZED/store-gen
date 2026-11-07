@@ -33,7 +33,7 @@ import { boldnessStep, remixDoc } from "@/lib/generator/remix";
 import { genomeOf } from "./derive";
 import { critiqueSummary, genomeCard, GenomeCardSchema, renderDigest } from "./digest";
 import { explainGenome, whyText } from "./explain";
-import { baselineDoc, cleanDoc, directionsOf, factsOf, FIXTURE_META, fixtureInput, gateInputOf, insertAfterHero, mutate, NOVELTY_OK, slopDoc, storeTemplate } from "./fixtures/prepublish";
+import { baselineDoc, cleanDoc, directionsOf, factsOf, FIXTURE_META, fixtureInput, gateInputOf, insertAfterHero, mutate, NOVELTY_OK, slopDoc, STORE_TEMPLATE_MARKET, storeTemplate } from "./fixtures/prepublish";
 import { gateInputFor, KIND_GATES } from "./gate-input";
 import { applyOps, gateItemsOf, pageView, qScore, repairDoc, runGates, toGateItem } from "./gates";
 import type { DesignGateItem, GateInput, GateReport, StorePageKind } from "./gates/types";
@@ -480,7 +480,7 @@ registerDesignGroup({
       for (const locale of ["fr", "ar"] as const) {
         const doc = storeTemplate(kind, locale);
         const theme = themes[locale];
-        const input = gateInputFor(doc, { kind, theme, look: null, assets: new Map(), locale, context: "publish", origin: new Map(), facts: [], ownerProof: false });
+        const input = gateInputFor(doc, { kind, theme, look: null, assets: new Map(), locale, context: "publish", origin: new Map(), facts: [], ownerProof: false, market: STORE_TEMPLATE_MARKET });
         check(input.register === KIND_GATES[kind].register, `${kind}: register ${input.register}`);
         const r = runGates(input);
         check(r.hard.length === 0, `${kind}/${locale}: hard ${r.hard.map((i) => i.id).join(", ")}`);
@@ -490,7 +490,7 @@ registerDesignGroup({
     // a home with glass on a commerce island is a design hard item for the commerce kinds
     const glassy = storeTemplate("product");
     glassy.sections.splice(1, 0, sec("isl", "trustBar", "chips", "surface"));
-    const r = runGates(gateInputFor(glassy, { kind: "product", theme, look: null, assets: new Map(), locale: "fr", context: "publish", origin: new Map(), facts: [], ownerProof: false }));
+    const r = runGates(gateInputFor(glassy, { kind: "product", theme, look: null, assets: new Map(), locale: "fr", context: "publish", origin: new Map(), facts: [], ownerProof: false, market: STORE_TEMPLATE_MARKET }));
     check(r.hard.some((i) => i.id === "V06"), "glass on a product page is not hard");
   },
 });

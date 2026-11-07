@@ -32,6 +32,8 @@ import { getStoreSetting } from "@/lib/settings";
 import { isChoiceGroup, isMatrixGroup, type PageDoc } from "@/lib/page/schema";
 import { orderTextOf } from "@/lib/sheets/row";
 import { addDays, dayKey, dayStart, isDay } from "./time";
+import { orderItemsView } from "@/lib/orders/items-v3";
+import { isLandingDoc } from "@/storefront/schema";
 
 export type RangeKey = "today" | "7d" | "30d" | "90d" | "all" | "custom";
 export const RANGE_KEYS: RangeKey[] = ["today", "7d", "30d", "90d", "all", "custom"];
@@ -354,8 +356,8 @@ export function toOrderRow(o: OrderRecord & { pageName: string | null }): OrderR
     phone: o.phone,
     city: o.city,
     productName: o.productName,
-    bundleLabel: o.items?.bundleLabel ?? "",
-    options: orderTextOf(o.items, { mode: "customer", max: 240 }),
+    bundleLabel: orderItemsView(o.items)?.bundleLabel ?? "",
+    options: orderTextOf(orderItemsView(o.items), { mode: "customer", max: 240 }),
     qty: o.qty,
     total: Number(o.total),
     currency: o.currency,
@@ -406,6 +408,7 @@ export interface OrderDetailJson extends OrderRow {
 export async function orderDetailJson(scope: StoreScope, id: string): Promise<OrderDetailJson | null> {
   const o = await getOrder(scope, id);
   if (!o) return null;
+  const items = orderItemsView(o.items);
   return {
     ...toOrderRow({ ...o, pageName: o.page?.name ?? null }),
     updatedAt: o.updatedAt.toISOString(),
@@ -416,18 +419,18 @@ export async function orderDetailJson(scope: StoreScope, id: string): Promise<Or
     subtotal: Number(o.subtotal),
     shipping: Number(o.shipping),
     items: {
-      bundleLabel: o.items.bundleLabel,
-      qty: o.items.qty,
-      unitPrice: Number(o.items.unitPrice),
-      variants: o.items.variants ?? [],
-      bump: o.items.bump ? { title: o.items.bump.title, price: o.items.bump.price } : null,
-      upsell: o.items.upsell ? { title: o.items.upsell.title, price: o.items.upsell.price } : null,
-      price: typeof o.items.price === "number" ? o.items.price : null,
-      deltas: typeof o.items.deltas === "number" ? o.items.deltas : null,
-      reasons: o.items.reasons ?? [],
+      bundleLabel: items.bundleLabel,
+      qty: items.qty,
+      unitPrice: Number(items.unitPrice),
+      variants: items.variants ?? [],
+      bump: items.bump ? { title: items.bump.title, price: items.bump.price } : null,
+      upsell: items.upsell ? { title: items.upsell.title, price: items.upsell.price } : null,
+      price: typeof items.price === "number" ? items.price : null,
+      deltas: typeof items.deltas === "number" ? items.deltas : null,
+      reasons: items.reasons ?? [],
     },
-    view: orderView(o.items, { swatchOf: await swatches(scope, o.versionId, o.items) }),
-    warehouseText: orderTextOf(o.items, { mode: "warehouse", orderId: o.id }),
+    view: orderView(items, { swatchOf: await swatches(scope, o.versionId, items) }),
+    warehouseText: orderTextOf(items, { mode: "warehouse", orderId: o.id }),
     utm: o.utm ?? {},
     ref: o.ref,
     sheetAttempts: o.sheetAttempts,
@@ -459,7 +462,7 @@ async function swatches(scope: StoreScope, versionId: string | null, items: Orde
 /** The document of one of the store's versions (repaired like the order path reads it), or null. */
 async function versionDocIn(scope: StoreScope, versionId: string): Promise<PageDoc | null> {
   const [row] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(byId(pageVersions, scope, versionId)).limit(1);
-  return row ? orderDocOf(row.doc, versionId) : null;
+  return row && isLandingDoc(row.doc) ? orderDocOf(row.doc, versionId) : null;
 }
 
 export function swatchesOf(doc: Pick<PageDoc, "items">): SwatchOf {

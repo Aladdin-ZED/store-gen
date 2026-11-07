@@ -30,6 +30,7 @@ import { bestHoursOf, hoursOf, type BestHourCell } from "./board.server";
 import { opsNow } from "./presence";
 import { ScriptDoc, isScriptLocale, type ScriptLocale } from "./script";
 import { effectiveWindow, hoursText, type EffectiveWindow } from "./window";
+import { isLandingDoc } from "@/storefront/schema";
 
 const PAGES_MAX = 100;
 const SCRIPT_ROWS_MAX = 120;
@@ -176,7 +177,7 @@ async function sampleValues(ctx: StoreCtx, pageId: string | null, locale: Script
   const [page] = await db
     .select({ versionId: pages.publishedVersionId })
     .from(pages)
-    .where(pageId ? byId(pages, ctx.scope, pageId) : whereStore(pages, ctx.scope, eq(pages.status, "published"), isNotNull(pages.publishedVersionId)))
+    .where(pageId ? and(byId(pages, ctx.scope, pageId), eq(pages.kind, "landing")) : whereStore(pages, ctx.scope, eq(pages.status, "published"), isNotNull(pages.publishedVersionId), eq(pages.kind, "landing")))
     .orderBy(desc(pages.updatedAt))
     .limit(1);
   const values: Partial<Record<TemplateVar, string>> = {
@@ -189,7 +190,7 @@ async function sampleValues(ctx: StoreCtx, pageId: string | null, locale: Script
   if (hours) values.confirm_hours = hours;
   if (!page?.versionId) return { source: "sample", values };
   const [v] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(byId(pageVersions, ctx.scope, page.versionId)).limit(1);
-  if (!v?.doc) return { source: "sample", values };
+  if (!v?.doc || !isLandingDoc(v.doc)) return { source: "sample", values };
   try {
     const lead = leadItem(v.doc);
     values.product = itemName(v.doc, lead);

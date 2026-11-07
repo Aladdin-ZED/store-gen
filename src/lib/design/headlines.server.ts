@@ -31,6 +31,7 @@ import { nicheKey } from "./distance";
 import { bottomK, SKETCH_K } from "./text/minhash";
 import { guessLocale } from "./text/normalize";
 import { shingles } from "./text/shingles";
+import { isLandingDoc } from "@/storefront/schema";
 
 export type HeadlineVerdict = { verdict: "ok" | "close"; band: "low" | "mid" | "high" | null };
 
@@ -165,8 +166,8 @@ export async function syncShingles(scope: WriteScope, niche: string): Promise<nu
     .select({ doc: pageVersions.doc })
     .from(pages)
     .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
-    .where(whereStore(pages, scope, eq(pages.status, "published")));
-  const docs = live.map((r) => r.doc).filter((d) => docNiche(d, store) === niche);
+    .where(whereStore(pages, scope, eq(pages.status, "published"), eq(pages.kind, "landing")));
+  const docs = live.flatMap((r) => (isLandingDoc(r.doc) ? [r.doc] : [])).filter((d) => docNiche(d, store) === niche);
   const rows = sketchRows(niche, docs);
   const owner = ownerTagFor(scope.storeId);
   await db.transaction(async (tx) => {
@@ -188,9 +189,10 @@ export async function verifyShingles(scope: WriteScope): Promise<number> {
     .select({ doc: pageVersions.doc })
     .from(pages)
     .innerJoin(pageVersions, and(eq(pageVersions.id, pages.publishedVersionId), eq(pageVersions.storeId, pages.storeId)))
-    .where(whereStore(pages, scope, eq(pages.status, "published")));
+    .where(whereStore(pages, scope, eq(pages.status, "published"), eq(pages.kind, "landing")));
   const docs = new Map<string, PageDoc[]>();
   for (const { doc } of live) {
+    if (!isLandingDoc(doc)) continue;
     const niche = docNiche(doc, store);
     docs.set(niche, [...(docs.get(niche) ?? []), doc]);
   }

@@ -18,6 +18,7 @@ import type { StoreRow, StoreScope } from "@/lib/tenancy/types";
 import { storeUrl } from "@/lib/urls";
 import { ordersBySlug } from "./results.server";
 import type { CampaignChannel, CampaignRow, CampaignStatus } from "./types";
+import { isLandingDoc } from "@/storefront/schema";
 
 const ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const LIST_MAX = 200;
@@ -131,7 +132,7 @@ export async function campaignDetail(scope: StoreScope, store: StoreRow, id: str
   let doc: PageDoc | null = null;
   if (page?.live && page.versionId) {
     const [v] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(byId(pageVersions, scope, page.versionId)).limit(1);
-    const parsed = v ? PageDoc.safeParse(v.doc) : null;
+    const parsed = v && isLandingDoc(v.doc) ? PageDoc.safeParse(v.doc) : null;
     doc = parsed?.success ? parsed.data : null;
   }
   return {

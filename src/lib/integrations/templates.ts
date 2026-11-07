@@ -34,6 +34,7 @@ import { storeOrigin } from "@/lib/urls";
 import { confirmHoursFor, templateValuesFrom } from "./template-values";
 import type { TemplateVar } from "./template-lang";
 import { templateLocaleOf } from "./whatsapp/builtins";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 export { TEMPLATE_VARS, TEMPLATE_SRC_MAX, compileTemplate, isTemplateVar, parseTemplate, renderCompiled, renderTemplate, templateVars } from "./template-lang";
 export type { CompiledTemplate, TemplateError, TemplateParse, TemplatePart, TemplateValues, TemplateVar } from "./template-lang";
@@ -53,7 +54,7 @@ async function optional<T>(area: string, read: () => Promise<T> | T, fallback: T
  * not the whole document (tens of kilobytes).
  */
 async function upsellOf(scope: StoreScope, order: OrderRow): Promise<{ title: string; price: number } | null> {
-  if (!order.versionId || order.items?.upsell) return null;
+  if (!order.versionId || orderItemsView(order.items)?.upsell) return null;
   const [row] = await db
     .select({ upsell: sql<unknown>`JSON_EXTRACT(${pageVersions.doc}, '$.offers.upsell')` })
     .from(pageVersions)
@@ -83,7 +84,7 @@ export async function orderTemplateValues(scope: StoreScope, order: OrderRow, vi
   ]);
   const trackingLink = settings.landing.thankYou.trackLink ? await optional("track", () => `${storeOrigin(store)}${signedTrackPath(store, order.id)}`, null) : null;
   return templateValuesFrom({
-    order,
+    order: { ...order, items: orderItemsView(order.items) },
     locale: viewer.locale,
     store: { name: store.name, market: store.market, timezone: store.timezone },
     viewerName: viewer.firstName,

@@ -57,6 +57,7 @@ import ts from "typescript";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { recordSuiteTime } from "@/lib/callcenter/suite-clock";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 const started = performance.now();
 const ROOT = process.cwd();
@@ -871,7 +872,7 @@ async function card(): Promise<void> {
       ...base,
       customer_first_name: row.name.split(" ")[0]!,
       order_id: row.id,
-      offer_label: row.items.bundleLabel,
+      offer_label: orderItemsView(row.items).bundleLabel,
       units_text: `Huile d'argan × ${qty}`,
       eta_text: i % 2 ? "demain ou après-demain" : "",
       upsell_title: upsell ? "Savon noir beldi" : "",

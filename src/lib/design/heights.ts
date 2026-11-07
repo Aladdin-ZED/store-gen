@@ -25,7 +25,8 @@
  */
 import type { Locale, PageDoc, ThemeLook } from "@/lib/page/schema";
 import { fontData } from "@/lib/theme/fonts";
-import { genomeOf } from "./derive";
+import type { StorePageDoc } from "@/storefront/schema";
+import { genomeOf, storeDocShell } from "./derive";
 import { foldLayout, GAP, ROW, sheetOf, type FoldStep, type FoldType, type TypeStep } from "./sheets";
 import type { FoldItem, HeightReport, VariantFeaturesResolved } from "./types.frozen";
 import { arabicMetrics, typeTokens, type TypeLook } from "./typography";
@@ -274,10 +275,68 @@ function stepsFromRows(rows: NonNullable<VariantFeaturesResolved["fold"]>["rows"
   return steps;
 }
 
-const FOLD_ITEMS: readonly FoldItem[] = ["image", "price", "cta", "cod"];
+/** the landing hero family's four fold items (the store kinds' three come from their FoldLayout) */
+const FOLD_ITEMS: readonly ("image" | "price" | "cta" | "cod")[] = ["image", "price", "cta", "cod"];
 
-/** ≤ 1 ms. `doc` is widened to PageDoc | StorePageDoc at the R2 contract step (DES-R27). */
+/**
+ * A store fold item's own height at 390 (STO-§9.5 rev 4: the estimated top = the declared bottom − the item's own
+ * height; CTA 56, price cluster 40). An item without a stated height is judged by its bottom edge (top = bottom), the
+ * conservative reading: the gate can only be stricter, never laxer, until storefront's layouts state more.
+ */
+const STORE_FOLD_OWN_PX: Partial<Record<FoldItem, number>> = { cta: 56, price: 40 };
+
+/**
+ * A store document (STO-§6.2) through the same model (R2 contract step C2-B1, DES-§8.13 point 2, DS33): the section
+ * heights as for a landing page (the store registry's `features.h`, the density and spacing genes of the store look,
+ * no order form), and the fold from the first section whose features carry a `fold.layout` (the store hero family's
+ * FoldLayout, which src/storefront/fold.ts `checkFold` passes with the sampled name and picker): each `mustShow` item's
+ * estimated top = the section top + its declared bottom − its own height.
+ */
+function estimateStoreHeights(doc: StorePageDoc, opts: { look: ThemeLook | null; locale: Locale; features: (type: string, variant: string, data: unknown) => VariantFeaturesResolved }): HeightReport {
+  const p = heightParams(storeDocShell(doc, opts.look, "INTL"), opts.look);
+  const sections: HeightReport["sections"] = [];
+  let top = 0;
+  let hero: { variant: string; top: number; layout: NonNullable<NonNullable<VariantFeaturesResolved["fold"]>["layout"]> } | null = null;
+  for (const s of doc.sections) {
+    if (s.hidden) continue;
+    const f = opts.features(s.type, s.variant, s.data);
+    if (f.fixed !== null) continue;
+    const height = sectionPxOf(f, s.type, s.variant, s.spacing, p, { offers: 0, groups: 0, bump: false }, !!opts.look);
+    if (!hero && f.fold?.layout) hero = { variant: s.variant, top, layout: f.fold.layout };
+    sections.push({ id: s.id, type: s.type, variant: s.variant, top, height });
+    top += height;
+  }
+  const items: Partial<Record<FoldItem, number>> = {};
+  if (hero) {
+    for (const k of hero.layout.mustShow) {
+      const bottom = hero.layout.bottoms[k];
+      if (bottom !== undefined) items[k] = Math.round(hero.top + bottom - (STORE_FOLD_OWN_PX[k] ?? 0));
+    }
+  }
+  const tops = Object.values(items).filter((v): v is number => v !== undefined);
+  return {
+    v: 1,
+    viewport: VIEWPORT,
+    sections,
+    total: top,
+    screens: Math.round((top / SCREEN) * 100) / 100,
+    formTop: null,
+    formHeight: null,
+    fold: { family: hero?.variant ?? "", ok: tops.every((t) => t <= SCREEN), items, limit: SCREEN },
+    inFlow: sections.length,
+  };
+}
+
+/** ≤ 1 ms. `doc` widened to PageDoc | StorePageDoc at the R2 contract step (C2-B1, DES-R27): a store document takes estimateStoreHeights. */
 export function estimateHeights(
+  doc: PageDoc | StorePageDoc,
+  opts: { look: ThemeLook | null; locale: Locale; features: (type: string, variant: string, data: unknown) => VariantFeaturesResolved },
+): HeightReport {
+  if (typeof (doc as { kind?: unknown }).kind === "string") return estimateStoreHeights(doc as StorePageDoc, opts);
+  return estimateLandingHeights(doc as PageDoc, opts);
+}
+
+function estimateLandingHeights(
   doc: PageDoc,
   opts: { look: ThemeLook | null; locale: Locale; features: (type: string, variant: string, data: unknown) => VariantFeaturesResolved },
 ): HeightReport {

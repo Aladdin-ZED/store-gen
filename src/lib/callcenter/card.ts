@@ -46,6 +46,7 @@ import { compileScript, scriptLocaleOf, type ScriptRow } from "./script.server";
 import { viewerSeesOrder } from "./visibility";
 import { builtinWaId, WA_KINDS_BY_LANE } from "./wa";
 import { isoWeekday } from "./window";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 /* ------------------------------------------------------------------ */
 /* the card (OPE-§5.3)                                                 */
@@ -315,8 +316,8 @@ export function assembleCard(scope: StoreScope, row: CardRow, o: CardOpts, p: Ca
     attempts: row.attempts,
     dueAt: iso(row.dueAt),
     product: row.productName,
-    offerLabel: row.items?.bundleLabel ?? "",
-    unitsText: orderText(row.items, { mode: "warehouse", productName: row.productName }),
+    offerLabel: orderItemsView(row.items)?.bundleLabel ?? "",
+    unitsText: orderText(orderItemsView(row.items), { mode: "warehouse", productName: row.productName }),
     totalCents: toCents(row.total),
     shippingCents: toCents(row.shipping),
     currency: row.currency,

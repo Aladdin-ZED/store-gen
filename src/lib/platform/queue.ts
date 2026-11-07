@@ -462,7 +462,7 @@ async function newestPage(scope: StoreScope) {
   const [row] = await db
     .select({ id: pages.id, draft: pages.draft, publishedVersionId: pages.publishedVersionId, status: pages.status })
     .from(pages)
-    .where(whereStore(pages, scope))
+    .where(whereStore(pages, scope, eq(pages.kind, "landing")))
     .orderBy(desc(pages.updatedAt), desc(pages.id))
     .limit(1);
   return row ?? null;

@@ -62,6 +62,7 @@ import {
   type UndoCols,
   type UndoEntry,
 } from "./transition";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 export type OrderRecord = typeof orders.$inferSelect;
 export type LeadRecord = typeof leads.$inferSelect;
@@ -432,8 +433,8 @@ function toListRow(scope: StoreScope, r: ListSel): OrderListRow {
     city: m.city ?? null,
     cityKey: r.cityKey,
     productName: r.productName,
-    bundleLabel: r.items?.bundleLabel ?? "",
-    options: orderTextOf(r.items, { mode: "customer", max: 240 }),
+    bundleLabel: orderItemsView(r.items)?.bundleLabel ?? "",
+    options: orderTextOf(orderItemsView(r.items), { mode: "customer", max: 240 }),
     qty: r.qty,
     total: Number(r.total),
     totalCents: toCents(r.total),
@@ -934,8 +935,8 @@ export function orderCsvCells(o: OrderRecord, pageName: string | null, names: Re
     o.city,
     o.address,
     o.productName,
-    o.items.bundleLabel,
-    variantCell(o),
+    orderItemsView(o.items).bundleLabel,
+    variantCell({ ...o, items: orderItemsView(o.items) }),
     o.qty,
     o.subtotal,
     o.shipping,
@@ -949,8 +950,8 @@ export function orderCsvCells(o: OrderRecord, pageName: string | null, names: Re
     o.utm?.campaign,
     o.riskScore,
     (o.flags ?? []).join(" "),
-    surchargesText(o.items),
-    skuCell(o),
+    surchargesText(orderItemsView(o.items)),
+    skuCell({ ...o, items: orderItemsView(o.items) }),
     o.confirmState,
     o.shipState,
     o.moneyState,
@@ -1469,7 +1470,7 @@ export async function carrierExport(ctx: WriteCtx, ids: readonly string[], opts:
       address: r.address,
       landmark: r.landmark,
       totalCents: toCents(r.total),
-      content: packText(r.items, r.productName, r.qty),
+      content: packText(orderItemsView(r.items), r.productName, r.qty),
       qty: r.qty,
       note: r.note,
       shipAfter: r.shipAfter,
@@ -1552,7 +1553,7 @@ export async function slipsFor(ctx: StoreCtx, ids: readonly string[], now = new 
     const slip: SlipRow = {
       id: r.id,
       createdAt: r.createdAt.toISOString(),
-      items: packText(r.items, r.productName, r.qty, r.id),
+      items: packText(orderItemsView(r.items), r.productName, r.qty, r.id),
       qty: r.qty,
       city: m.city ?? null,
       phoneMasked: scope.kind === "impersonation" ? (m.phone ?? "") : maskPhone(r.phone),

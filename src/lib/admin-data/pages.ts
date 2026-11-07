@@ -25,6 +25,7 @@ import { byId, inStore, storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope, WriteScope } from "@/lib/tenancy/types";
 import { affected, auditIn, likeEscape, type Actor } from "./store-audit";
 import { addDays, dayKey, STATS_TZ } from "./time";
+import { isLandingDoc } from "@/storefront/schema";
 
 export type { Actor };
 
@@ -70,7 +71,8 @@ export async function homePageId(scope: StoreScope): Promise<string | null> {
 }
 
 export async function listPages(scope: StoreScope, filters: PageFilters = {}): Promise<PageListItem[]> {
-  const where: SQL[] = [];
+  // STO-R2 (L11): the landing pages list; store templates are listed by the storefront (S1)
+  const where: SQL[] = [eq(pages.kind, "landing")];
   const status = filters.status ?? "active";
   if (status === "active") where.push(ne(pages.status, "archived"));
   else if (status !== "all") where.push(eq(pages.status, status));
@@ -206,7 +208,7 @@ export async function uniqueSlug(scope: StoreScope, base: string): Promise<strin
 /* ------------------------------------------------------------------ */
 
 async function getPageRow(scope: StoreScope, id: string) {
-  const [row] = await db.select().from(pages).where(byId(pages, scope, id)).limit(1);
+  const [row] = await db.select().from(pages).where(and(byId(pages, scope, id), eq(pages.kind, "landing"))).limit(1);
   return row ?? null;
 }
 
@@ -349,7 +351,7 @@ export async function createPageFromDirections(
 
 export async function duplicatePage(scope: WriteScope, id: string, actor: Actor): Promise<{ id: string; slug: string } | null> {
   const page = await getPageRow(scope, id);
-  if (!page) return null;
+  if (!page || !isLandingDoc(page.draft)) return null;
   const created = await createPageFromDoc(scope, { name: `${page.name} (copy)`, doc: page.draft, versionLabel: `Duplicated from “${page.name}”`, copiedFrom: page.name }, actor);
   await auditIn(scope, actor, "page.duplicated", { target: created.id, meta: { from: id } });
   return created;

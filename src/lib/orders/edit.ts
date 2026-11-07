@@ -43,6 +43,7 @@ import { orderText } from "./text";
 import { actorFrom, runAfterCommit, transitionOrder, type TransitionError } from "./transition";
 import { upsellRecord } from "./upsell";
 import { cleanInput, validateOrder, validName, type ValidationFields } from "./validate";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 export interface OrderPatch {
   name?: string;
@@ -174,7 +175,7 @@ async function reprice(ctx: StoreCtx, row: OrderRow, sel: NonNullable<OrderPatch
   }
   let items: OrderItems = v.value.items;
   let upsellCents = 0;
-  const keep = sel.upsell === undefined ? row.items.upsell : undefined;
+  const keep = sel.upsell === undefined ? orderItemsView(row.items).upsell : undefined;
   if (sel.upsell === true) {
     const offer = doc.offers.upsell;
     if (!offer?.enabled) return refuse("invalid", { text: "This page has no upsell to add." });
@@ -274,7 +275,7 @@ export async function editOrder(ctx: WriteCtx, orderId: string, patch: OrderPatc
     const r = await reprice(ctx, row, patch.selection, newPhone ?? row.phone);
     if ("ok" in r) return r;
     pricedWith = r.pricedWith;
-    const beforeText = orderText(row.items, { mode: "customer" }) || null;
+    const beforeText = orderText(orderItemsView(row.items), { mode: "customer" }) || null;
     const afterText = orderText(r.items, { mode: "customer" }) || null;
     if (JSON.stringify(r.items) !== JSON.stringify(row.items) || r.subtotalCents !== subtotal || r.shippingCents !== shipping) {
       linesChanged = true;

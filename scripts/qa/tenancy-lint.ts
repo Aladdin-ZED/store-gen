@@ -1,6 +1,6 @@
 /**
- * Tenancy lint: the static isolation gate of docs/STORE-SAAS.md §F.1 (rules L1-L10, L12, L13; L11 arrives with
- * R2's contract step). TypeScript compiler API (typescript 5.9.3, D47) over src/**\/*.{ts,tsx}; no database, no
+ * Tenancy lint: the static isolation gate of docs/STORE-SAAS.md §F.1 (rules L1-L13; L11 added by the R2 contract step
+ * C2-B1, STO-R2). TypeScript compiler API (typescript 5.9.3, D47) over src/**\/*.{ts,tsx}; no database, no
  * network, no build:
  *
  *   npm run test:tenancy-lint                            (exit code 1 on any violation, 2 when the lint is broken)
@@ -49,6 +49,14 @@
  *   globalThis property is judged too, and so is any globalThis.__cod… / __sg… access whatever its cast (F9).
  * - The standalone selftests are also outside L10 (raw SQL) and L6's forged-scope checks: they seed and fake stores on
  *   purpose, and the app never imports them; every other rule applies to them.
+ * - L11 (R2 contract step C2-B1, STO-R2): `pages.draft` / `page_versions.doc` hold a landing `PageDoc` or a
+ *   `StorePageDoc` by `pages.kind`. A read of either column (the column named in a select, or a `select()` of every
+ *   column from / joined with `pages` / `pageVersions`; not inside a sql`…` template, where the database computes on the
+ *   JSON and no document reaches TypeScript) must sit in a function that also filters on `pages.kind` or
+ *   reads the document through `readPageDoc()` / `isLandingDoc()` / `isStorePageDoc()` (src/storefront/schema.ts);
+ *   the outermost enclosing function is judged (a query inside a callback counts for its function). Outside the rule:
+ *   src/lib/storefront/** and src/storefront/** (the store's own readers), and the allow file's `docReads` (file +
+ *   function, maintainer only: kind-agnostic readers that only walk the JSON, such as asset-reference scans).
  * - The lint checks itself first: built-in fixtures (virtual files compiled in the same program, against the real
  *   schema, helpers and seam types) carry `//! <rules>` markers, and every rule must fire on exactly the marked lines,
  *   or the run stops with exit code 2 before src is judged.
@@ -92,6 +100,7 @@ const RULES = {
   L8: "hand-built /admin path or live URL (use appHref / storeUrl)",
   L9: "server action whose body does not start with return storeAction/platformAction/userAction/publicAction(",
   L10: "raw SQL on a tenant table without store_id = as a conjunct of its level's WHERE, or with a table name the lint cannot read",
+  L11: "a read of pages.draft / page_versions.doc in a function that neither filters pages.kind nor reads through readPageDoc() / isLandingDoc() / isStorePageDoc()",
   L12: "publish path without runPrePublishChecks(), or a public order/lead handler without resolveTestToken()",
   L13: "route handler that does not pass its seam first",
   PIN: "more queries exempted by tenancy annotations than the allow file pins",
@@ -182,6 +191,8 @@ interface Config {
   allow: AllowEntry[];
   /** L9: exported server actions that cannot take a seam wrapper, by file and name, each with its reason (m-3) */
   actions: AllowEntry[];
+  /** L11: kind-agnostic readers of the page document columns, by file and outermost function name (C2-B1) */
+  docReads: AllowEntry[];
   pins: Pin[];
   /** functions that commit a rendered version (L12) */
   publishSinks: FnRef[];
@@ -204,6 +215,8 @@ const AllowFile = z
     $comment: z.union([z.string(), z.array(z.string())]).optional(),
     entries: z.array(z.object({ file: z.string().min(1), symbol: z.string().min(1), reason: z.string().min(8) }).strict()),
     actions: z.array(z.object({ file: z.string().min(1), symbol: z.string().min(1), reason: z.string().min(8) }).strict()).default([]),
+    /** L11: kind-agnostic readers of pages.draft / page_versions.doc (file + enclosing function), maintainer only */
+    docReads: z.array(z.object({ file: z.string().min(1), symbol: z.string().min(1), reason: z.string().min(8) }).strict()).default([]),
     pins: z.array(z.object({ files: z.array(z.string().min(1)).min(1), max: z.number().int().min(0), reason: z.string().min(4) }).strict()),
   })
   .strict();
@@ -211,6 +224,7 @@ const AllowFile = z
 const REAL_CONFIG = (allow: z.infer<typeof AllowFile>): Config => ({
   allow: allow.entries,
   actions: allow.actions,
+  docReads: allow.docReads,
   pins: allow.pins,
   publishSinks: [
     { file: F.publish, name: "publishPage" },
@@ -1214,11 +1228,13 @@ class Lint {
   }
 
   unusedAllowEntries(): AllowEntry[] {
-    return [...this.cfg.allow, ...this.cfg.actions].filter((e) => !this.usedAllow.has(e));
+    return [...this.cfg.allow, ...this.cfg.actions, ...this.cfg.docReads].filter((e) => !this.usedAllow.has(e));
   }
 
   private visit(n: ts.Node): void {
     const f = this.relFile;
+    if (ts.isPropertyAccessExpression(n) && (n.name.text === "draft" || n.name.text === "doc")) this.onDocColumn(n);
+    if (ts.isCallExpression(n)) this.onDocSelectAll(n);
     if (ts.isCallExpression(n)) this.onCall(n);
     else if (ts.isTaggedTemplateExpression(n)) this.onTaggedTemplate(n);
     else if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) this.onLiteral(n);
@@ -1907,6 +1923,73 @@ class Lint {
       this.report(n, "L6", "cast", "a cast or assertion to WriteScope (or a ctx carrying one) outside src/lib/tenancy/seam.ts (D71)");
   }
 
+  /* ---------------- page documents: L11 (R2 contract step C2-B1, STO-R2) ---------------- */
+
+  private readonly docGuards = new Map<ts.Node, boolean>();
+
+  /** `pages.draft` / `pageVersions.doc` named (in a select, a returning list, anywhere) */
+  private onDocColumn(n: ts.PropertyAccessExpression): void {
+    const t = this.tenantTableOf(n.expression);
+    if (!((n.name.text === "draft" && t === "pages") || (n.name.text === "doc" && t === "page_versions"))) return;
+    // inside a sql`…` template the database computes on the JSON (LENGTH, JSON_EXTRACT): no document reaches TypeScript
+    for (let p: ts.Node | undefined = n.parent; p && !isFnLike(p); p = p.parent) if (ts.isTaggedTemplateExpression(p)) return;
+    this.docRead(n, `${t}.${n.name.text}`);
+  }
+
+  /** `select()` (every column) from or joined with pages / pageVersions */
+  private onDocSelectAll(call: ts.CallExpression): void {
+    const callee = call.expression;
+    if (!ts.isPropertyAccessExpression(callee) || !["from", "innerJoin", "leftJoin", "rightJoin", "fullJoin"].includes(callee.name.text)) return;
+    const t = this.tenantTableOf(call.arguments[0]);
+    if (t !== "pages" && t !== "page_versions") return;
+    for (let e: ts.Expression = callee.expression; ; ) {
+      e = unwrap(e);
+      if (!ts.isCallExpression(e) || !ts.isPropertyAccessExpression(e.expression)) return;
+      const name = e.expression.name.text;
+      if (name === "select" || name === "selectDistinct") {
+        if (e.arguments.length === 0) this.docRead(call, `every column of ${t}`);
+        return;
+      }
+      e = e.expression.expression;
+    }
+  }
+
+  private docRead(at: ts.Node, what: string): void {
+    const f = this.relFile;
+    if (f === F.schema || f.startsWith("src/lib/storefront/") || f.startsWith("src/storefront/")) return;
+    // the self-check fixtures of the other rules read pages as tables, not as documents; docs.ts is L11's own fixture
+    if (f.includes(`/${FX}/`) && !f.endsWith(`/${FX}/docs.ts`)) return;
+    const fns = enclosingFns(at);
+    const scope: ts.Node = fns[fns.length - 1] ?? this.file;
+    if (this.hasDocGuard(scope)) return;
+    const name = fns.length ? fnName(fns[fns.length - 1]!) : null;
+    const allowed = name ? this.cfg.docReads.find((a) => a.file === f && a.symbol === name) : undefined;
+    if (allowed) {
+      this.usedAllow.add(allowed);
+      return;
+    }
+    this.report(at, "L11", "page-doc", `${what} read without a pages.kind filter or readPageDoc() in ${name ?? "module scope"} (a landing reader must never parse a StorePageDoc as a PageDoc; STO-R2)`);
+  }
+
+  /** the subtree filters on pages.kind or reads through storefront's document guards */
+  private hasDocGuard(scope: ts.Node): boolean {
+    const known = this.docGuards.get(scope);
+    if (known !== undefined) return known;
+    let hit = false;
+    const walk = (n: ts.Node): void => {
+      if (hit) return;
+      if (ts.isPropertyAccessExpression(n) && n.name.text === "kind" && this.tenantTableOf(n.expression) === "pages") hit = true;
+      else if (ts.isCallExpression(n)) {
+        const r = this.calleeRef(n);
+        if (r && r.file === "src/storefront/schema.ts" && ["readPageDoc", "isLandingDoc", "isStorePageDoc"].includes(r.name)) hit = true;
+      }
+      if (!hit) ts.forEachChild(n, walk);
+    };
+    walk(scope);
+    this.docGuards.set(scope, hit);
+    return hit;
+  }
+
   private onFunction(fn: FnLike): void {
     const f = this.relFile;
     if (fn.type && ts.isTypePredicateNode(fn.type) && fn.type.type && f !== F.seam) {
@@ -2528,6 +2611,35 @@ class Lint {
  */
 const FX = "__tenancy_lint_fixture__";
 const FIXTURES: Record<string, string> = {
+  [`src/lib/${FX}/docs.ts`]: `
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { pages, pageVersions } from "@/lib/db/schema";
+import { byId, whereStore } from "@/lib/tenancy/sql";
+import type { StoreScope } from "@/lib/tenancy/types";
+import { isLandingDoc, readPageDoc } from "@/storefront/schema";
+
+export async function filtered(scope: StoreScope) {
+  return db.select({ draft: pages.draft }).from(pages).where(whereStore(pages, scope, eq(pages.kind, "landing")));
+}
+export async function guarded(scope: StoreScope, id: string) {
+  const [v] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(byId(pageVersions, scope, id));
+  return v && isLandingDoc(v.doc) ? v.doc : null;
+}
+export async function parsedInCallback(scope: StoreScope, id: string) {
+  const load = async () => db.select({ kind: pages.status, draft: pages.draft }).from(pages).where(byId(pages, scope, id));
+  return (await load()).map((r) => readPageDoc("landing", r.draft));
+}
+export async function unfiltered(scope: StoreScope) {
+  return db.select({ draft: pages.draft }).from(pages).where(whereStore(pages, scope)); //! L11
+}
+export async function everyColumn(scope: StoreScope, id: string) {
+  return db.select().from(pageVersions).where(byId(pageVersions, scope, id)); //! L11
+}
+export async function scanned(scope: StoreScope) {
+  return db.select({ doc: pageVersions.doc }).from(pageVersions).where(whereStore(pageVersions, scope));
+}
+`,
   [`src/lib/${FX}/repo.ts`]: `
 import { and, eq, or, sql, type SQL } from "drizzle-orm";
 import type { MySqlTable } from "drizzle-orm/mysql-core";
@@ -3062,6 +3174,7 @@ const FIXTURE_CONFIG = (real: Config): Config => ({
     { file: `src/lib/${FX}/cache.ts`, symbol: "__sgFixtureAllowed", reason: "fixture: an allow-listed global" },
   ],
   actions: [{ file: `src/app/${FX}/actions.ts`, symbol: "allowedAction", reason: "fixture: an allow-listed action body" }],
+  docReads: [{ file: `src/lib/${FX}/docs.ts`, symbol: "scanned", reason: "fixture: a kind-agnostic reader" }],
   pins: [
     { files: [`src/lib/platform/${FX}/**`], max: 2, reason: "fixture pin" },
     { files: [`src/lib/jobs/${FX}/**`], max: 3, reason: "fixture pin: queries, not comment lines" },

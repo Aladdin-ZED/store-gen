@@ -9,10 +9,11 @@
  *    has one, the archetype defaults otherwise), the register is the kind's (landing → marketing);
  *  - a `StorePageDoc` (R2, STO-§6.2): the theme and the look are the store theme's for the kind's register, resolved
  *    by the caller and passed in `ctx.theme` / `ctx.look`; the sections resolve through the store registry's features
- *    (`ctx.storeFeatures`); there is no product, offer or form, so the landing-only gates skip (KIND_GATES). The store
- *    template type is the placeholder of ./gates/types.ts until storefront's contract step widens the frozen shapes.
+ *    (`ctx.storeFeatures`), the store's market comes in `ctx.market`; there is no product, offer or form, so the
+ *    landing-only gates skip (KIND_GATES). The store template type is storefront's frozen `StorePageDoc` (R2 contract
+ *    step C2-B1, src/storefront/schema.ts).
  */
-import type { Locale, PageDoc, ThemeLook } from "@/lib/page/schema";
+import type { Locale, Market, PageDoc, ThemeLook } from "@/lib/page/schema";
 import type { BuiltTheme } from "@/lib/theme/types";
 import { genomeOf } from "./derive";
 import type { FactsArg } from "./cliche";
@@ -40,28 +41,18 @@ export interface GateInputCtx {
   /** the core's CopyFacts (the facts as typed) or the richer DesignCopyFacts */
   facts: FactsArg;
   ownerProof: boolean;
+  /** StorePageDoc: the store's market (the document carries none; R2 contract step C2-B1); "INTL" when absent */
+  market?: Market;
   /** StorePageDoc: the store registry's features (STO-§6.1) */
   storeFeatures?: (type: string, variant: string, data: unknown) => VariantFeaturesResolved;
   novelty?: NoveltyVerdict | null;
-}
-
-/** A store template as the genome reader's document: its sections, locale and market, the store look (R2 interim). */
-function storeShell(doc: StorePageDoc, look: ThemeLook | null): PageDoc {
-  return {
-    v: 2,
-    locale: doc.locale,
-    market: doc.market,
-    currency: "MAD",
-    sections: doc.sections,
-    theme: { archetype: "editorial", seed: 0, palette: { accent: "#2f4f4f", pop: "#8fbcbc", base: "light", harmony: "ink-accent" }, fonts: { display: "fraunces", body: "inter", displayAr: "readex-pro", bodyAr: "readex-pro" }, ...(look ? { look } : {}) },
-  } as unknown as PageDoc;
 }
 
 /** rev 3 (DS52): one adapter for both document types (DES-§8.13); pure, isomorphic. */
 export function gateInputFor(doc: PageDoc | StorePageDoc, ctx: GateInputCtx): GateInput {
   const kind = ctx.kind;
   void KIND_GATES[kind];
-  const genome = isPageDoc(doc) ? genomeOf(doc) : genomeOf(storeShell(doc, ctx.look));
+  const genome = isPageDoc(doc) ? genomeOf(doc) : genomeOf(doc, { look: ctx.look, market: ctx.market ?? "INTL" });
   return {
     doc,
     kind,

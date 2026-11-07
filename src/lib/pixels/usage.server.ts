@@ -70,13 +70,13 @@ async function scan(scope: StoreScope, filter?: { draft: SQL; version: SQL }): P
     db
       .select({ id: pages.id, name: pages.name, slug: pages.slug, tracking: trackingOf(pages.draft) })
       .from(pages)
-      .where(whereStore(pages, scope, ne(pages.status, "archived"), filter?.draft))
+      .where(whereStore(pages, scope, ne(pages.status, "archived"), eq(pages.kind, "landing"), filter?.draft))
       .limit(PAGE_LIMIT),
     db
       .select({ id: pages.id, name: pages.name, slug: pages.slug, tracking: trackingOf(pageVersions.doc) })
       .from(pages)
       .innerJoin(pageVersions, liveJoin(scope))
-      .where(whereStore(pages, scope, eq(pages.status, "published"), filter?.version))
+      .where(whereStore(pages, scope, eq(pages.status, "published"), eq(pages.kind, "landing"), filter?.version))
       .limit(PAGE_LIMIT),
     db
       .select({ pageId: exportsTable.pageId, name: pages.name, slug: pages.slug, tracking: trackingOf(pageVersions.doc) })
@@ -140,7 +140,7 @@ export async function livePagePixels(scope: StoreScope): Promise<Record<string, 
     .select({ id: pages.id, tracking: trackingOf(pageVersions.doc) })
     .from(pages)
     .innerJoin(pageVersions, liveJoin(scope))
-    .where(whereStore(pages, scope, eq(pages.status, "published")))
+    .where(whereStore(pages, scope, eq(pages.status, "published"), eq(pages.kind, "landing")))
     .limit(PAGE_LIMIT);
   const out: Record<string, LivePagePixels> = {};
   for (const r of rows) {
@@ -161,7 +161,7 @@ export async function recentPagesWithPixels(scope: StoreScope, limit = 8): Promi
   const rows = await db
     .select({ id: pages.id, name: pages.name, tracking: trackingOf(pages.draft) })
     .from(pages)
-    .where(whereStore(pages, scope, ne(pages.status, "archived")))
+    .where(whereStore(pages, scope, ne(pages.status, "archived"), eq(pages.kind, "landing")))
     .orderBy(desc(pages.updatedAt))
     .limit(60);
   const out: RecentPagePixels[] = [];

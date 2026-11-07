@@ -26,6 +26,7 @@ import Module from "node:module";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { and, desc, eq, sql } from "drizzle-orm";
+import type { PageDoc } from "@/lib/page/schema";
 
 // the modules under test are marked `import "server-only"`; outside Next that import throws
 {
@@ -345,7 +346,7 @@ async function main() {
   /* ---------------- duplicate keeps the store ---------------- */
   const dup = await duplicatePage(A, pA, actor(ownerA));
   const [dupRow] = await db.select().from(pages).where(eq(pages.id, dup!.id));
-  ok("duplicate: same ids, copiedFrom = source page, in A", dupRow?.storeId === STORE_A && JSON.stringify(dupRow.draft.tracking) === JSON.stringify({ metaPixelId: [META_A], copiedFrom: "Argan" }), dupRow?.draft.tracking);
+  ok("duplicate: same ids, copiedFrom = source page, in A", dupRow?.storeId === STORE_A && JSON.stringify((dupRow.draft as PageDoc).tracking) === JSON.stringify({ metaPixelId: [META_A], copiedFrom: "Argan" }), (dupRow?.draft as PageDoc | undefined)?.tracking);
   ok("duplicate: B can't duplicate A's page", (await duplicatePage(B, pA, actor(ownerB))) === null);
 
   /* ---------------- Sheets per store ---------------- */
@@ -437,7 +438,7 @@ async function main() {
   // the pixels-only commit runs the landing gate too: the live page passed it through above, so this one does as well
   const only = await withoutLandingGate(() => publishTrackingOnly(A, pB, { metaPixelId: [META_X] }, pub.versionId, { actor: actor(editorA) }));
   const [liveRow] = await db.select({ v: pages.publishedVersionId, draft: pages.draft }).from(pages).where(eq(pages.id, pB));
-  ok("pixels only: an editor swaps to a known id; the live version and the draft follow", liveRow?.v === only.versionId && only.draftUpdated && JSON.stringify(liveRow.draft.tracking) === JSON.stringify({ metaPixelId: [META_X] }), { only, tracking: liveRow?.draft.tracking });
+  ok("pixels only: an editor swaps to a known id; the live version and the draft follow", liveRow?.v === only.versionId && only.draftUpdated && JSON.stringify((liveRow.draft as PageDoc).tracking) === JSON.stringify({ metaPixelId: [META_X] }), { only, tracking: (liveRow?.draft as PageDoc | undefined)?.tracking });
   const onlyAudit = await db.select().from(auditLog).where(and(eq(auditLog.action, "page.published"), eq(auditLog.target, pB))).orderBy(desc(auditLog.id));
   ok("pixels only: audited in A by the editor", onlyAudit[0]?.storeId === STORE_A && onlyAudit[0]?.userId === editorA.id && (onlyAudit[0]?.meta as { pixelsOnly?: boolean } | null)?.pixelsOnly === true, onlyAudit[0]);
   void trackingRefs;

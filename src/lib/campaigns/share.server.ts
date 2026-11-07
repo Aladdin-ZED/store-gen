@@ -26,6 +26,7 @@ import { SeamError } from "@/lib/tenancy/seam";
 import { byId, whereStore } from "@/lib/tenancy/sql";
 import type { Actor, StoreRow, StoreScope, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 import type { CampaignStatus } from "./types";
+import { isLandingDoc } from "@/storefront/schema";
 
 const ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const sha256 = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
@@ -88,7 +89,7 @@ async function sharedKitOf(scope: StoreScope, campaignId: string): Promise<Omit<
   let doc: PageDoc | null = null;
   if (page?.status === "published" && page.versionId) {
     const [v] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(byId(pageVersions, scope, page.versionId)).limit(1);
-    const parsed = v ? PageDoc.safeParse(v.doc) : null;
+    const parsed = v && isLandingDoc(v.doc) ? PageDoc.safeParse(v.doc) : null;
     doc = parsed?.success ? parsed.data : null;
   }
   return { campaign: { id: row.id, name: row.name, status: row.status, kit: row.kit }, doc };

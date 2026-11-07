@@ -21,6 +21,7 @@ import { scopedCache } from "@/lib/tenancy/cache";
 import { byId, whereStore } from "@/lib/tenancy/sql";
 import type { StoreScope } from "@/lib/tenancy/types";
 import { chooseOrderVersion, orderDocOf } from "./versions";
+import { isLandingDoc } from "@/storefront/schema";
 
 export const PAGE_KEY_RE = /^[a-zA-Z0-9_-]{8,80}$/;
 
@@ -49,7 +50,7 @@ const MISS_TTL_MS = 10_000;
 
 async function loadDoc(scope: StoreScope, versionId: string): Promise<PageDoc | null> {
   const [row] = await db.select({ doc: pageVersions.doc }).from(pageVersions).where(byId(pageVersions, scope, versionId)).limit(1);
-  return row ? orderDocOf(row.doc, versionId) : null;
+  return row && isLandingDoc(row.doc) ? orderDocOf(row.doc, versionId) : null;
 }
 
 /** Parsed, validated document of a page version of the scope's store (cached; versions never change). */

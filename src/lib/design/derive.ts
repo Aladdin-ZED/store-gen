@@ -1,7 +1,9 @@
 /**
  * Back-derivation (P6 DESIGN; design.md DES-§4.7, DES-§4.2 "Back-derive" column, DS52, DES-R27; docs/STORE-SAAS.md
  * §K.2 P0 design stubs, R2): the genome of an existing document, pure and total (never throws). Frozen at P0
- * (src/lib/contracts/r1-p0.ts); the doc type is widened to `PageDoc | StorePageDoc` at the R2 contract step.
+ * (src/lib/contracts/r1-p0.ts); the doc type is widened to `PageDoc | StorePageDoc` at the R2 contract step (done in C2-B1,
+ * through the contract step's CCR: a store document is read through `storeDocShell` with the store look and market
+ * the caller passes, src/lib/contracts/r2-contract.ts).
  *
  *  - With `doc.theme.look` the look's genes are read back exactly; G1, G4, G9 come from the spec; sections from
  *    `doc.sections`; the copy genes from the library tags (`noun-phrase` until the copy step tags them).
@@ -12,7 +14,8 @@
  * `buildTheme(doc.theme)` emits today, outside the `[data-look]`-scoped ones) holds by construction: every attribute
  * the look replaces (button, card, mask, glyph, emphasis, density, radius kind) is read from the archetype here.
  */
-import { ARCHETYPES, type Archetype, type Locale, type Market, type PageDoc, type SectionInstance, type ThemeSpec } from "@/lib/page/schema";
+import { ARCHETYPES, type Archetype, type Locale, type Market, type PageDoc, type SectionInstance, type ThemeLook, type ThemeSpec } from "@/lib/page/schema";
+import type { StorePageDoc } from "@/storefront/schema";
 import { ARCHETYPE_DEFS, EASE, findPairing, type ArchetypeDef } from "@/lib/theme/archetypes";
 import { accentRole } from "@/lib/theme/fonts";
 import { COLOR_PLANS } from "@/lib/theme/palette";
@@ -326,8 +329,33 @@ function readGenome(doc: PageDoc, opts?: { photos?: PhotoFacts }): DesignGenome 
   return { v: 1, seed: theme.seed, priorsV: PRIORS_VERSION, brand, page, sections: sectionGenes(doc), why };
 }
 
-/** The genome of an existing document (DES-§4.7): pure and total, never throws (a reading that fails is the archetype's). */
-export function genomeOf(doc: PageDoc, opts?: { photos?: PhotoFacts }): DesignGenome {
+/**
+ * A store template (STO-§6.2: sections and locale, no theme, product, items, offers or form) as the genome reader's
+ * document: its sections and locale, the store's market and the store theme's look (DES-§8.13; the caller resolves
+ * both from the store, the document carries neither). Pure.
+ */
+export function storeDocShell(doc: StorePageDoc, look: ThemeLook | null, market: Market): PageDoc {
+  return {
+    v: 2,
+    locale: doc.locale,
+    market,
+    currency: "MAD",
+    sections: doc.sections,
+    theme: { archetype: "editorial", seed: 0, palette: { accent: "#2f4f4f", pop: "#8fbcbc", base: "light", harmony: "ink-accent" }, fonts: { display: "fraunces", body: "inter", displayAr: "readex-pro", bodyAr: "readex-pro" }, ...(look ? { look } : {}) },
+  } as unknown as PageDoc;
+}
+
+/**
+ * The genome of an existing document (DES-§4.7): pure and total, never throws (a reading that fails is the archetype's).
+ * R2 (DES-§8.13): a `StorePageDoc` is read through `storeDocShell` with `opts.look` (the store theme's) and
+ * `opts.market` (the store's; "INTL" when absent); both options are ignored for a `PageDoc`.
+ */
+export function genomeOf(doc: PageDoc | StorePageDoc, opts?: { photos?: PhotoFacts; look?: ThemeLook | null; market?: Market }): DesignGenome {
+  if (typeof (doc as { kind?: unknown })?.kind === "string") return genomeOf(storeDocShell(doc as StorePageDoc, opts?.look ?? null, opts?.market ?? "INTL"), opts?.photos ? { photos: opts.photos } : undefined);
+  return landingGenomeOf(doc as PageDoc, opts);
+}
+
+function landingGenomeOf(doc: PageDoc, opts?: { photos?: PhotoFacts }): DesignGenome {
   try {
     return readGenome(doc, opts);
   } catch {

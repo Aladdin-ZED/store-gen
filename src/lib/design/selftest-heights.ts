@@ -25,7 +25,6 @@ import { estimateHeights, foldType, HEIGHT_MODEL_VERSION, heightParams, PRE_SHEE
 import { HEIGHTS_CALIBRATION } from "./heights-calibration";
 import { registerDesignGroup } from "./selftest";
 import { FOLD_TARGET, foldLayout, nominalType, SHEETS, type FoldLayout } from "./sheets";
-import type { FoldItem } from "./types";
 
 const q = (xs: number[], p: number) => {
   const s = [...xs].sort((a, b) => a - b);
@@ -64,7 +63,7 @@ registerDesignGroup({
       check(r.inFlow === page.sections.length, `${page.fixture}/${page.arch ?? "default"}/${page.locale}: ${r.inFlow} in-flow sections, ${page.sections.length} measured`);
       ratios.push(r.total / page.total);
       const key = `${page.hero}/${page.locale === "ar" ? "ar" : "lat"}`;
-      for (const k of ["image", "price", "cta", "cod"] as FoldItem[]) {
+      for (const k of ["image", "price", "cta", "cod"] as const) {
         const m = page.fold[k];
         const e = r.fold.items[k];
         if (m === undefined || m <= 0) continue;

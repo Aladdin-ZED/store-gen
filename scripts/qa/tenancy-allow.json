@@ -60,6 +60,12 @@
     { "file": "src/app/admin/(auth)/setup/actions.ts", "symbol": "setupAction", "reason": "the first-run gate (§B.11): no account exists yet; the admin gate, the origin, the setup token and p:setup:ip run first (CCR r1.0-m-3)" },
     { "file": "src/app/admin/(auth)/setup/store/actions.ts", "symbol": "setupStoreAction", "reason": "the first-run gate (§B.11): the super_admin's first store before any membership; the admin gate and the origin run first (CCR r1.0-m-3)" }
   ],
+  "docReads": [
+    { "file": "src/lib/exports-store/sections.ts", "symbol": "slice", "reason": "L11 (R2 contract step C2-B1): the store data export copies every pages / page_versions row of the store as stored, whatever its kind; no document is parsed" },
+    { "file": "src/lib/storage/asset-refs.ts", "symbol": "reconcileStoreRefs", "reason": "L11 (C2-B1): asset references are collected from both document types (AssetRef-shaped values at any depth); kind-agnostic by design" },
+    { "file": "src/lib/render/selftest-public.ts", "symbol": "database", "reason": "L11 (C2-B1): a standalone selftest that seeds and reads its own landing rows" },
+    { "file": "src/lib/testing/selftest.ts", "symbol": "main", "reason": "L11 (C2-B1): a standalone selftest that seeds and reads its own landing rows" }
+  ],
   "pins": [
     { "files": ["src/lib/design/**", "src/lib/jobs/tracks/design.ts"], "max": 3, "reason": "DES-R9: novelty.server.ts and the design-reserve job together" },
     { "files": ["src/lib/health/**"], "max": 1, "reason": "§E.3 rule 6: the one store_health upsert" },

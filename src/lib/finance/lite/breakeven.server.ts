@@ -27,6 +27,7 @@ import { myCarrierRates } from "./carrier.server";
 import { toCents } from "./cents";
 import { costIndex, orderCogsCents } from "./costs.server";
 import { spendBetween, storeCurrencyOf } from "./spend.server";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 export const BE_DAYS = 28;
 /** orders of a 28-day cohort read at most (beyond it the answer says `capped`) */
@@ -50,7 +51,8 @@ async function cohort(scope: StoreScope, from: Date, to: Date, pageId?: string):
     .select({ pageId: orders.pageId, total: orders.total, items: orders.items, cityKey: orders.cityKey, confirmState: orders.confirmState, shipState: orders.shipState })
     .from(orders)
     .where(whereStore(orders, scope, gte(orders.createdAt, from), lt(orders.createdAt, to), pageId ? eq(orders.pageId, pageId) : undefined, realOrder))
-    .limit(COHORT_MAX);
+    .limit(COHORT_MAX)
+    .then((rows) => rows.map((r) => ({ ...r, items: orderItemsView(r.items) })));
 }
 
 export function countsOf(rows: readonly Pick<CohortRow, "confirmState" | "shipState">[]): BreakEvenCounts {

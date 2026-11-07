@@ -27,6 +27,7 @@ import { scopedCache } from "@/lib/tenancy/cache";
 import { storeValues, whereStore } from "@/lib/tenancy/sql";
 import type { ActionResult, StoreScope, WriteCtx } from "@/lib/tenancy/types";
 import { buildCostIndex, costUnitsOf, skuCost, unitCost, unitsCogsCents, variantKeyOf, type CostIndex, type CostRow } from "./cost-lookup";
+import { isLandingDoc } from "@/storefront/schema";
 
 /** a store's cost rows read at most (history included); beyond it the oldest rows drop out of the index */
 const ROWS_MAX = 5_000;
@@ -120,7 +121,7 @@ export async function costsOverview(scope: StoreScope, currency: string): Promis
     db
       .select({ id: pages.id, name: pages.name, versionId: pages.publishedVersionId })
       .from(pages)
-      .where(whereStore(pages, scope, eq(pages.status, "published"), isNotNull(pages.publishedVersionId)))
+      .where(whereStore(pages, scope, eq(pages.status, "published"), isNotNull(pages.publishedVersionId), eq(pages.kind, "landing")))
       .orderBy(desc(pages.updatedAt))
       .limit(LIVE_PAGES_MAX),
   ]);
@@ -128,7 +129,7 @@ export async function costsOverview(scope: StoreScope, currency: string): Promis
   const docs = versionIds.length
     ? await db.select({ id: pageVersions.id, doc: pageVersions.doc }).from(pageVersions).where(whereStore(pageVersions, scope, inArray(pageVersions.id, versionIds)))
     : [];
-  const docOf = new Map(docs.map((d) => [d.id, d.doc]));
+  const docOf = new Map(docs.flatMap((d) => (isLandingDoc(d.doc) ? [[d.id, d.doc] as const] : [])));
   const skuItems = new Map<string, number>();
   const outPages: CostsOverview["pages"] = [];
   for (const p of live) {

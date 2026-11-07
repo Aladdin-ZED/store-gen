@@ -30,6 +30,7 @@ import type { StoreScope } from "@/lib/tenancy/types";
 import type { TrackView } from "./contract";
 import { firstNameOf, maskPhoneLast4, trackDay } from "./format";
 import { effectiveAxes, pendingRequests, requestsOpen, trackSteps, type ConfirmState, type ShipState, type TrackEvent } from "./steps";
+import { orderItemsView } from "@/lib/orders/items-v3";
 
 const DEFAULT_TZ = "Africa/Casablanca";
 
@@ -152,7 +153,7 @@ export async function buildTrackView(scope: StoreScope, order: TrackOrderRow, op
     maskedPhone: maskPhoneLast4(order.phone),
     summary: {
       offer: order.productName,
-      units: orderText(order.items, { mode: "customer", orderId: order.id, productName: order.productName }),
+      units: orderText(orderItemsView(order.items), { mode: "customer", orderId: order.id, productName: order.productName }),
       total: formatMoney(Number(order.total), order.currency, opts.doc?.locale ?? locale),
     },
     steps,

@@ -35,6 +35,7 @@ import type { ActionErrorCode, EditorAsset, EditorBootstrap, EditorPageMeta, Pag
 import { jsonBytes, MAX_DOC_BYTES } from "./types";
 import { CHECK_SETTING_KEYS, loadCheckContext } from "./check-context.server";
 import { recordSlugMove, releaseOldSlug } from "./slug-history";
+import { isLandingDoc } from "@/storefront/schema";
 
 export const AUTOSAVE_EVERY_MS = 10 * 60_000;
 export const AUTOSAVE_KEEP = 20;
@@ -64,7 +65,7 @@ function affectedRows(res: unknown): number {
 
 /** The scope's page `id` (another store's id = null). */
 async function pageRow(scope: StoreScope, id: string) {
-  const [row] = await db.select().from(pages).where(byId(pages, scope, id)).limit(1);
+  const [row] = await db.select().from(pages).where(and(byId(pages, scope, id), eq(pages.kind, "landing"))).limit(1);
   return row ?? null;
 }
 
@@ -136,7 +137,7 @@ async function versionRow(scope: StoreScope, pageId: string, versionId: string) 
     .from(pageVersions)
     .where(and(byId(pageVersions, scope, versionId), eq(pageVersions.pageId, pageId)))
     .limit(1);
-  return row ?? null;
+  return row && isLandingDoc(row.doc) ? row : null;
 }
 
 /**
@@ -160,6 +161,7 @@ export async function loadBootstrap(ctx: Pick<StoreCtx, "scope" | "store" | "use
       .orderBy(desc(pageVersions.createdAt))
       .limit(25);
     for (const v of recent) {
+      if (!isLandingDoc(v.doc)) continue;
       const res = validateDoc(v.doc);
       if (res.doc) {
         doc = res.doc;
@@ -217,7 +219,7 @@ export async function loadBootstrap(ctx: Pick<StoreCtx, "scope" | "store" | "use
  * of its versions. Both are looked up in the scope's store, so another store's page or version answers null.
  */
 export async function previewSource(scope: StoreScope, pageId: string, versionId: string | null): Promise<{ slug: string; doc: unknown } | null> {
-  const [page] = await db.select({ slug: pages.slug, draft: pages.draft }).from(pages).where(byId(pages, scope, pageId)).limit(1);
+  const [page] = await db.select({ slug: pages.slug, draft: pages.draft }).from(pages).where(and(byId(pages, scope, pageId), eq(pages.kind, "landing"))).limit(1);
   if (!page) return null;
   if (!versionId) return { slug: page.slug, doc: page.draft };
   const [v] = await db
