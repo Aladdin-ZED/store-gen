@@ -6,6 +6,8 @@ import type { NextConfig } from "next";
  *  - Hostinger forces `output: "standalone"` itself; we don't set it here
  */
 const nextConfig: NextConfig = {
+  // R2 contract step C2-E: `ui-shots --prod` builds and serves its own copy (SG_DIST_DIR=.next-ui-<prefix>); unset = .next
+  ...(process.env.SG_DIST_DIR ? { distDir: process.env.SG_DIST_DIR } : {}),
   poweredByHeader: false,
   reactStrictMode: true,
   // landing pages are served by route handlers; admin uses plain <img> — no image optimizer surface

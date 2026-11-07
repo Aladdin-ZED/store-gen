@@ -53,3 +53,5 @@ next-env.d.ts
 
 # the logo engine fonts (S2, DES-R7): TTF subsets, manifest.json and hb.wasm, written by scripts/build-logo-fonts.mjs
 /public/logo-fonts/
+# ui-shots --prod (R2 contract step C2-E): its own production build, removed after the run unless --keep
+/.next-ui-*/

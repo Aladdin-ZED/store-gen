@@ -7,7 +7,7 @@
  *   npx tsx scripts/qa/ui-shots.ts --prefix p2 --port 3462 --paths "/app/{a},/app/{a}/settings/general"
  *        [--as ownerA|managerA|agentA|ownerB|staff|outsider|anon]  [--locale en,ar]  [--dark]  [--full]
  *        [--viewports 1440x900,390x844]  [--seed <file.ts>[#export]]  [--console]  [--out qa/ui-shots/p2]
- *        [--wait 600]  [--keep]  [--turbopack]
+ *        [--wait 600]  [--keep]  [--turbopack]  [--prod]  [--scan-orange]  [--exec <script>]
  *
  * Run it through the machine-wide mutex (it starts a dev server): node C:/Users/SICO/sg-wt/heavy.mjs <dir> "npx tsx …".
  *
@@ -26,13 +26,23 @@
  * - Motion: the context uses `reducedMotion: "reduce"` and collapses transitions, so shots show final states.
  * - next dev runs with `--webpack` when node_modules is a junction (the track worktrees: Turbopack refuses files outside
  *   the workspace root), else with Turbopack; `--turbopack` forces Turbopack.
+ * - R2 contract step C2-E (the S3 / S5 / S6 shared needs; the 2026-11-07 RAM lesson bans dev-mode shots in R2 tracks):
+ *   `--prod` builds once (`npm run build`, the production build with every prebuild step) into a separate distDir
+ *   `.next-ui-<prefix>` (next.config reads SG_DIST_DIR; git-ignored, removed afterwards unless --keep) and serves it
+ *   with `next start` on the chosen port, against the same throwaway database, seed and actors (production cookie
+ *   names). Run it through the heavy mutex: node C:/Users/SICO/sg-wt/heavy.mjs <tree> "npx tsx scripts/qa/ui-shots.ts --prod …".
+ *   `--scan-orange` runs scripts/qa/ui-shots-orange.mjs in every shot (light and dark) and fails on any hit (OKLCH
+ *   hue 25-75 with chroma > 0.06). `--exec <script>` runs `node --import tsx <script>` after the shots, before the
+ *   teardown, with BASE_URL, DATABASE_URL and UI_COOKIES_FILE (a JSON file: the session cookie name and every
+ *   actor's token) in its environment; a non-zero exit fails the run. Actor `accountantA`: an accountant of store A
+ *   (the role is granted from R2, TN-12).
  *
  * Never 3400 / 3450 (the owner's dev servers). The session tokens are random values for the throwaway database and are
  * never printed. The database name is cod_test_<prefix>_ui.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection as tcpConnect } from "node:net";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -44,12 +54,14 @@ import { runMigrations } from "@/lib/db/migrate";
 
 const ROOT = resolve(__dirname, "..", "..");
 const OWNER_PORTS = new Set([3400, 3450]);
-const SESSION_COOKIE = "cs"; // src/lib/auth/config.ts outside production
-const LOCALE_COOKIE = "sgl"; // src/lib/auth/locale.ts outside production
+const PROD = process.argv.includes("--prod");
+// src/lib/auth/config.ts and src/lib/auth/locale.ts: `__Host-` names (Secure) under NODE_ENV=production
+const SESSION_COOKIE = PROD ? "__Host-cs" : "cs";
+const LOCALE_COOKIE = PROD ? "__Host-sgl" : "sgl";
 const SERVER_READY_MS = 300_000;
 const NAV_TIMEOUT_MS = 180_000;
 const GUARDED_FILES = ["next-env.d.ts", "AGENTS.md", "CLAUDE.md", "tsconfig.json"];
-const ACTORS = ["ownerA", "managerA", "agentA", "ownerB", "staff", "outsider", "anon"] as const;
+const ACTORS = ["ownerA", "managerA", "agentA", "accountantA", "ownerB", "staff", "outsider", "anon"] as const;
 type ActorName = (typeof ACTORS)[number];
 const LOCALES = ["en", "fr", "ar"] as const;
 type Locale = (typeof LOCALES)[number];
@@ -134,6 +146,7 @@ async function baseSeed(conn: mysql.Connection, url: string): Promise<UiSeedCont
     ownerA: await actor("salma@atlas-argan.test", "Salma Benali"),
     managerA: await actor("youssef@atlas-argan.test", "Youssef Amrani"),
     agentA: await actor("hajar@atlas-argan.test", "Hajar Idrissi"),
+    accountantA: await actor("compta@atlas-argan.test", "Imane Berrada"),
     ownerB: await actor("karim@baraka-home.test", "Karim Tazi"),
     staff: await actor("ops@store-gen.test", "Platform Ops", "super_admin"),
     outsider: await actor("visitor@example.test", "Nadia Visitor"),
@@ -143,6 +156,7 @@ async function baseSeed(conn: mysql.Connection, url: string): Promise<UiSeedCont
   await member(a.id, actors.ownerA.userId, "owner");
   await member(a.id, actors.managerA.userId, "manager");
   await member(a.id, actors.agentA.userId, "agent");
+  await member(a.id, actors.accountantA.userId, "accountant");
   await member(b.id, actors.ownerB.userId, "owner");
   return { conn, databaseUrl: url, stores: { a, b }, actors, newId };
 }
@@ -200,13 +214,31 @@ function prepareAssets(): void {
   }
 }
 
-function startServer(port: number, databaseUrl: string, webpack: boolean, log: string[]): ChildProcess {
+/** `--prod`: one production build into its own distDir (the shared .next of the owner's dev server is never touched). */
+function buildProd(distDir: string, port: number, databaseUrl: string): void {
+  const r = spawnSync("npm", ["run", "build"], {
+    cwd: ROOT,
+    shell: true,
+    encoding: "utf8",
+    env: { ...process.env, SG_DIST_DIR: distDir, DATABASE_URL: databaseUrl, PLATFORM_URL: `http://localhost:${port}`, NEXT_TELEMETRY_DISABLED: "1" },
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (r.status !== 0) fail(`npm run build (--prod) failed:\n${(r.stdout + r.stderr).split(/\r?\n/).slice(-40).join("\n")}`);
+}
+
+function startServer(port: number, databaseUrl: string, webpack: boolean, log: string[], distDir: string | null = null): ChildProcess {
   const next = join(ROOT, "node_modules", "next", "dist", "bin", "next");
-  const args = [next, "dev", "-p", String(port)];
-  if (webpack) args.push("--webpack");
+  const args = distDir ? [next, "start", "-p", String(port)] : [next, "dev", "-p", String(port)];
+  if (webpack && !distDir) args.push("--webpack");
   const child = spawn(process.execPath, args, {
     cwd: ROOT,
-    env: { ...process.env, DATABASE_URL: databaseUrl, PLATFORM_URL: `http://localhost:${port}`, NEXT_TELEMETRY_DISABLED: "1" },
+    env: {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+      PLATFORM_URL: `http://localhost:${port}`,
+      NEXT_TELEMETRY_DISABLED: "1",
+      ...(distDir ? { SG_DIST_DIR: distDir, NODE_ENV: "production" } : {}),
+    },
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32",
   });
@@ -276,6 +308,8 @@ interface ShotResult {
   consoleErrors: string[];
   pageErrors: string[];
   failedRequests: string[];
+  /** `--scan-orange`: the forbidden-orange hits of the page (empty = clean) */
+  orange?: { el: string; prop: string; color: string; oklch: string; text: string }[];
   ms: number;
 }
 
@@ -283,7 +317,7 @@ const slug = (p: string) => (p.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9]+/
 
 async function shoot(
   browser: Browser,
-  opts: { port: number; actor: ActorName; token: string | null; locale: Locale; scheme: "light" | "dark"; width: number; height: number; full: boolean; wait: number; gate: string | null; out: string },
+  opts: { port: number; actor: ActorName; token: string | null; locale: Locale; scheme: "light" | "dark"; width: number; height: number; full: boolean; wait: number; gate: string | null; out: string; scan?: () => unknown[] },
   path: string,
 ): Promise<ShotResult> {
   const t0 = Date.now();
@@ -298,8 +332,8 @@ async function shoot(
     locale: opts.locale === "ar" ? "ar-MA" : opts.locale === "fr" ? "fr-MA" : "en-US",
     extraHTTPHeaders: { "accept-language": opts.locale },
   });
-  const cookies: { name: string; value: string; url: string }[] = [{ name: LOCALE_COOKIE, value: opts.locale, url: base }];
-  if (opts.token) cookies.push({ name: SESSION_COOKIE, value: opts.token, url: base });
+  const cookies: { name: string; value: string; url: string; secure?: boolean }[] = [{ name: LOCALE_COOKIE, value: opts.locale, url: base, ...(PROD ? { secure: true } : {}) }];
+  if (opts.token) cookies.push({ name: SESSION_COOKIE, value: opts.token, url: base, ...(PROD ? { secure: true } : {}) });
   await context.addCookies(cookies);
   await context.addInitScript(`(() => { const s = document.createElement("style"); s.textContent = ${JSON.stringify(QA_CSS)}; document.addEventListener("DOMContentLoaded", () => document.head.appendChild(s)); })();`);
   const page = await context.newPage();
@@ -314,6 +348,7 @@ async function shoot(
   let status: number | null = null;
   let file: string | null = null;
   let finalUrl: string | null = null;
+  let orange: ShotResult["orange"];
   try {
     if (opts.gate) await page.goto(`${base}/${opts.gate}`, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
     const res = await page.goto(base + path, { waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS });
@@ -325,12 +360,13 @@ async function shoot(
     // a full-page capture paints the whole document: sections skipped by content-visibility would come out blank
     if (opts.full) await page.addStyleTag({ content: "*{content-visibility:visible!important}" });
     await page.screenshot({ path: file, fullPage: opts.full });
+    if (opts.scan) orange = (await page.evaluate(opts.scan)) as ShotResult["orange"];
   } catch (err) {
     pageErrors.push(`navigation: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
   } finally {
     await context.close();
   }
-  return { path, actor: opts.actor, locale: opts.locale, scheme: opts.scheme, viewport: `${opts.width}x${opts.height}`, file, status, finalUrl, consoleErrors, pageErrors, failedRequests, ms: Date.now() - t0 };
+  return { path, actor: opts.actor, locale: opts.locale, scheme: opts.scheme, viewport: `${opts.width}x${opts.height}`, file, status, finalUrl, consoleErrors, pageErrors, failedRequests, ...(orange ? { orange } : {}), ms: Date.now() - t0 };
 }
 
 /* ------------------------------------------------------------------ */
@@ -360,6 +396,9 @@ async function main(): Promise<number> {
   const out = resolve(ROOT, arg("out") ?? join("qa", "ui-shots", prefix));
   const wait = Math.max(0, Number(arg("wait") ?? 600) || 0);
   const webpack = !flag("turbopack") && nodeModulesIsLink();
+  const distDir = PROD ? `.next-ui-${prefix}` : null;
+  const scan = flag("scan-orange") ? ((await import(pathToFileURL(join(ROOT, "scripts", "qa", "ui-shots-orange.mjs")).href)) as { scanOrange: () => unknown[] }).scanOrange : undefined;
+  const execScript = arg("exec");
   const dbName = `cod_test_${prefix}_ui`;
   const url = `mysql://root@127.0.0.1:3306/${dbName}`;
   mkdirSync(out, { recursive: true });
@@ -396,13 +435,14 @@ async function main(): Promise<number> {
     const resolved = paths.map((p) => p.replaceAll("{a}", ctx.stores.a.handle).replaceAll("{b}", ctx.stores.b.handle));
 
     prepareAssets();
-    child = startServer(port, url, webpack, log);
+    if (distDir) buildProd(distDir, port, url);
+    child = startServer(port, url, webpack, log, distDir);
     if (!(await waitReady(port, child))) {
-      console.log(`✗ next dev did not answer within ${SERVER_READY_MS / 1000} s`);
+      console.log(`✗ next ${distDir ? "start" : "dev"} did not answer within ${SERVER_READY_MS / 1000} s`);
       failed = true;
       return 1;
     }
-    console.log(`next dev ready on ${port} (${webpack ? "webpack" : "turbopack"}); shooting ${resolved.length} path(s) as ${actor}`);
+    console.log(`next ${distDir ? `start (${distDir})` : `dev (${webpack ? "webpack" : "turbopack"})`} ready on ${port}; shooting ${resolved.length} path(s) as ${actor}`);
     const gate = flag("console") ? adminGate() : null;
     if (flag("console") && !gate) console.log("  (--console: no ADMIN_GATE in .env.local; console paths will 404)");
     browser = await chromium.launch({ channel: "msedge" });
@@ -415,14 +455,33 @@ async function main(): Promise<number> {
       for (const scheme of schemes)
         for (const vp of viewports)
           for (const p of resolved) {
-            const r = await shoot(browser, { port, actor, token, locale, scheme, width: vp.width, height: vp.height, full: flag("full"), wait, gate, out }, p);
+            const r = await shoot(browser, { port, actor, token, locale, scheme, width: vp.width, height: vp.height, full: flag("full"), wait, gate, out, scan }, p);
             results.push(r);
-            const bad = !r.file || r.pageErrors.length > 0 || (r.status !== null && r.status >= 500);
+            const bad = !r.file || r.pageErrors.length > 0 || (r.status !== null && r.status >= 500) || (r.orange?.length ?? 0) > 0;
+            if (r.orange?.length) for (const o of r.orange.slice(0, 5)) console.log(`    orange: ${o.el} ${o.prop} ${o.color} (${o.oklch})`);
             if (bad) failed = true;
             console.log(
               `${bad ? "✗" : "✓"} ${p} [${locale} ${scheme} ${r.viewport}] → ${r.status ?? "-"} ${r.finalUrl ?? ""}${r.consoleErrors.length ? ` · ${r.consoleErrors.length} console error(s)` : ""}${r.pageErrors.length ? ` · ${r.pageErrors[0]}` : ""}${r.file ? `\n    ${r.file}` : ""}`,
             );
           }
+    }
+    if (execScript) {
+      // the actors' sessions for the script (a temp file, removed below; tokens of a throwaway database)
+      const cookieFile = join(tmpdir(), `ui-shots-cookies-${prefix}-${port}.json`);
+      const tokens = Object.fromEntries(Object.entries(ctx.actors).map(([name, a]) => [name, a.token]));
+      writeFileSync(cookieFile, JSON.stringify({ sessionCookie: SESSION_COOKIE, localeCookie: LOCALE_COOKIE, actors: tokens }));
+      try {
+        const abs = isAbsolute(execScript) ? execScript : resolve(ROOT, execScript);
+        const r = spawnSync(process.execPath, ["--import", "tsx", abs], {
+          cwd: ROOT,
+          stdio: "inherit",
+          env: { ...process.env, BASE_URL: `http://localhost:${port}`, DATABASE_URL: url, UI_COOKIES_FILE: cookieFile },
+        });
+        console.log(`${r.status === 0 ? "✓" : "✗"} --exec ${execScript} → exit ${r.status}`);
+        if (r.status !== 0) failed = true;
+      } finally {
+        rmSync(cookieFile, { force: true });
+      }
     }
     return failed ? 1 : 0;
   } finally {
@@ -443,6 +502,7 @@ async function main(): Promise<number> {
       console.log(`--- next dev (last lines; the whole log: ${logFile}) ---\n${log.filter((l) => !/^\s*$/.test(l)).slice(-30).join("\n")}`);
     }
     if (!flag("keep")) await dropDatabase(dbName).catch(() => undefined);
+    if (distDir && !flag("keep")) rmSync(join(ROOT, distDir), { recursive: true, force: true });
   }
 }
 
