@@ -1,20 +1,36 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BadgeCheckIcon, FileSpreadsheetIcon, ImagesIcon, LayersIcon, RadarIcon, ShieldCheckIcon, SmartphoneIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { platformBrandName, publishedPlatformKinds, type PlatformDocKind } from "@/lib/render/platform-docs.server";
 import { COPY, localeHref, MARKETING_LOCALES, marketingLocale } from "./copy";
+import { BackupsArt, DeliveryArt, HealthArt, ProfitArt, RolesArt, TrackingArt } from "./living/bento-art";
+import { Console } from "./living/console";
+import { homeData } from "./living/data";
+import { Dock } from "./living/dock";
+import { DirectorFan } from "./living/fan";
+import { LivingIsland } from "./living/island";
+import { Ledger } from "./living/ledger";
+import L from "./living/living.module.css";
+import { Loom } from "./living/loom";
+import { Mirror } from "./living/mirror";
+import { FinalArt, Rail } from "./living/rail";
+import { Route } from "./living/route";
+import { Sprite } from "./living/sprite";
 import styles from "./marketing.module.css";
-import { MarketingFrame, SiteFooter, SiteHeader } from "./site-chrome";
+import { MarketingFrame, PauseButton, SiteFooter, SiteHeader } from "./site-chrome";
 
 /*
  * The platform home `/` (docs/STORE-SAAS.md §C.4: replaces the root landing route; indexable, overriding the root
  * layout's noindex, PUB-22). On a store host the proxy rewrites `/` to the store's home instead, and a legacy host
  * answers 308 here. French by default, `?lang=ar|en` for the other languages (hreflang alternates).
+ *
+ * The page is the "living product" homepage (qa/lead/homepage-spec.md): every section shows a real module of the
+ * product working, as a hand-built inline SVG model fed by the product's own constants (./living/data.ts). Server
+ * components only; ./living/island.tsx boots the small client runtime after load. Every model's SSR markup is its
+ * final frame, so the page is complete without JavaScript and under reduced motion.
  */
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-const FEATURE_ICONS = [ImagesIcon, SmartphoneIcon, LayersIcon, FileSpreadsheetIcon, RadarIcon, ShieldCheckIcon];
 
 export async function generateMetadata({ searchParams }: { searchParams: SearchParams }): Promise<Metadata> {
   const locale = marketingLocale((await searchParams).lang);
@@ -41,104 +57,295 @@ async function docKinds(): Promise<PlatformDocKind[]> {
   }
 }
 
+/** Latin product and event names inside Arabic text, as LTR isolates. */
+function iso(text: string, rtl: boolean): ReactNode {
+  if (!rtl) return text;
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(/[A-Za-z][A-Za-z ]*[A-Za-z]|[A-Za-z]/g)) {
+    const i = m.index ?? 0;
+    if (i > last) out.push(text.slice(last, i));
+    out.push(
+      <bdi key={i} dir="ltr">
+        {m[0]}
+      </bdi>,
+    );
+    last = i + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+const DOCK_GLYPHS = ["sg-sheet", "sg-pulse", "sg-plane", "sg-bubble"] as const;
+
+function CheckRing({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 20 20" className={className} aria-hidden="true" focusable="false">
+      <circle cx="10" cy="10" r="9.25" fill="none" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.25" />
+      <path d="M6.2 10.3 8.7 12.8 13.9 7.4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export default async function MarketingHome({ searchParams }: { searchParams: SearchParams }) {
   const locale = marketingLocale((await searchParams).lang);
   const t = COPY[locale];
+  const h = t.home;
+  const rtl = t.dir === "rtl";
+  const d = homeData();
   const [brand, docs] = await Promise.all([platformBrandName(), docKinds()]);
 
   return (
     <MarketingFrame locale={locale}>
       <SiteHeader locale={locale} brand={brand} path="/" />
-      <main className="flex-1">
-        <section className="mx-auto w-full max-w-6xl px-3 sm:px-5">
-          <div className={`${styles.hero} rounded-[1.75rem] sm:rounded-[2.25rem]`}>
-            <div className="grid items-center gap-12 px-6 py-14 sm:px-12 sm:py-20 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] lg:gap-8 lg:px-16 lg:py-24">
-              <div>
-                <p className={`${styles.eyebrow} inline-flex items-center gap-2.5 rounded-full px-3.5 py-1.5 text-[0.8125rem] font-medium`}>
-                  <span aria-hidden="true" className={styles.dot} />
+      <main className={styles.main}>
+        <Sprite t={t} rtl={rtl} />
+
+        {/* HERO: the genome loom (stage 1) */}
+        <section className={styles.stageWrap} aria-labelledby="home-title">
+          <div className={`${styles.stage} ${styles.hero}`} data-depth="">
+            <div className={styles.heroGrid}>
+              <div className={styles.heroText}>
+                <p className={styles.eyebrow}>
+                  <span aria-hidden="true" className={styles.eyebrowDot} />
                   {t.hero.eyebrow}
                 </p>
-                <h1 className="mt-7 max-w-[15ch] text-[2.5rem] leading-[1.04] font-semibold tracking-[-0.038em] text-balance sm:text-[3.4rem] lg:text-[4rem]">
-                  {t.hero.title}
+                <h1 id="home-title" className={styles.h1}>
+                  <span className={styles.h1Line}>{t.hero.title[0]}</span> <span className={styles.h1Line}>{t.hero.title[1]}</span>
                 </h1>
-                <p className={`${styles.lead} mt-6 max-w-[34rem] text-[1.0625rem] leading-relaxed text-pretty sm:text-lg`}>{t.hero.lead}</p>
-                <div className="mt-9 flex flex-wrap items-center gap-3">
-                  <Link href="/signup" className={`${styles.ctaPrimary} inline-flex h-12 items-center rounded-full px-6 text-[0.95rem] font-semibold`}>
+                <p className={`${styles.lead} ${styles.heroLead}`}>{t.hero.lead}</p>
+                <div className={styles.ctaRow}>
+                  <Link href="/signup" className={styles.ctaPrimary}>
                     {t.hero.primary}
                   </Link>
-                  <Link href="/login" className={`${styles.ctaGhost} inline-flex h-12 items-center rounded-full px-6 text-[0.95rem] font-medium`}>
+                  <Link href="/login" className={styles.ctaGhost}>
                     {t.hero.secondary}
                   </Link>
                 </div>
               </div>
-              <div className={styles.stage} aria-hidden="true">
-                <div className={styles.phone}>
-                  <div className={styles.screen}>
-                    <div className={styles.visual} />
-                    <div className={`${styles.bar} w-3/4`} />
-                    <div className={`${styles.bar} w-1/2`} />
-                    <div className="mt-1 flex flex-col gap-2">
-                      <div className={styles.field}>{t.mock.name}</div>
-                      <div className={styles.field}>{t.mock.phone}</div>
-                      <div className={styles.field}>{t.mock.city}</div>
-                    </div>
-                    <div className={styles.order}>{t.mock.order}</div>
-                    <p className={`${styles.note} flex items-center justify-center gap-1.5 text-[0.72rem] font-medium`}>
-                      <BadgeCheckIcon className="size-3.5" />
-                      {t.mock.note}
-                    </p>
-                  </div>
+              <div className={styles.heroModel}>
+                <Loom d={d} t={t} rtl={rtl} />
+              </div>
+            </div>
+            <PauseButton locale={locale} className={styles.heroPause} />
+          </div>
+        </section>
+
+        {/* ENGINE: the gene ledger and the exploded page */}
+        <section className={`${styles.section} ${styles.afterHero} ${styles.below}`} aria-labelledby="home-engine">
+          <div className={styles.container}>
+            <div className={styles.split}>
+              <div className={`${styles.split75Model} ${styles.modelAfter}`}>
+                <div className={styles.well}>
+                  <Ledger d={d} t={t} rtl={rtl} />
                 </div>
+              </div>
+              <div className={styles.split75Text}>
+                <div className={`${styles.head} ${styles.reveal}`} data-reveal="">
+                  <h2 id="home-engine" className={styles.h2}>
+                    {h.engine.title}
+                  </h2>
+                  <p className={styles.lead}>{h.engine.lead}</p>
+                </div>
+                <ul className={styles.rows}>
+                  {h.engine.rows.map((r) => (
+                    <li key={r.name} className={styles.row}>
+                      <CheckRing className={styles.rowMark} />
+                      <span className={styles.rowName}>{r.name}</span>
+                      <span className={styles.rowBody}>{r.body}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           </div>
         </section>
 
-        <section className="mx-auto w-full max-w-6xl px-5 pt-24 pb-6 sm:px-8 sm:pt-28">
-          <h2 className="max-w-[26ch] text-[1.75rem] leading-tight font-semibold tracking-[-0.03em] text-balance sm:text-[2.25rem]">{t.featuresTitle}</h2>
-          <ul className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {t.features.map((f, i) => {
-              const Icon = FEATURE_ICONS[i] ?? LayersIcon;
-              return (
-                <li key={f.title} className={`${styles.card} rounded-2xl border border-border bg-card p-6`}>
-                  <span className={`${styles.icon} grid size-10 place-items-center rounded-xl`} aria-hidden="true">
-                    <Icon className="size-[1.15rem]" strokeWidth={1.75} />
-                  </span>
-                  <h3 className="mt-5 text-[1.0625rem] font-semibold tracking-[-0.015em]">{f.title}</h3>
-                  <p className="mt-2 text-[0.95rem] leading-relaxed text-muted-foreground text-pretty">{f.body}</p>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-
-        <section className="mx-auto w-full max-w-6xl px-5 py-20 sm:px-8">
-          <div className="grid gap-10 border-t border-border pt-14 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,2fr)]">
-            <h2 className="text-[1.5rem] font-semibold tracking-[-0.025em]">{t.stepsTitle}</h2>
-            <ol className="grid gap-8 sm:grid-cols-3">
-              {t.steps.map((step, i) => (
-                <li key={step} className="flex flex-col gap-3">
-                  <span className={`${styles.stepNumber} font-mono text-sm tabular-nums`} dir="ltr">
-                    {String(i + 1).padStart(2, "0")}
-                  </span>
-                  <p className="text-[1.0625rem] leading-snug font-medium tracking-[-0.01em] text-balance">{step}</p>
-                </li>
-              ))}
-            </ol>
-          </div>
-          <p className="mt-14 text-center text-sm text-muted-foreground">{t.languages}</p>
-        </section>
-
-        <section className="mx-auto w-full max-w-6xl px-3 pb-20 sm:px-5">
-          <div className={`${styles.band} flex flex-col items-start gap-6 rounded-[1.75rem] px-6 py-12 sm:flex-row sm:items-center sm:justify-between sm:px-12`}>
-            <h2 className="text-[1.6rem] leading-tight font-semibold tracking-[-0.03em] text-balance sm:text-[2rem]">{t.final.title}</h2>
-            <Link href="/signup" className={`${styles.ctaPrimary} inline-flex h-12 shrink-0 items-center rounded-full px-6 text-[0.95rem] font-semibold`}>
-              {t.final.cta}
-            </Link>
+        {/* DIRECTOR: three directions, you pick one */}
+        <section className={`${styles.section} ${styles.below}`} aria-labelledby="home-director">
+          <div className={styles.container}>
+            <div className={`${styles.head} ${styles.headCaption} ${styles.reveal}`} data-reveal="">
+              <h2 id="home-director" className={styles.h2}>
+                {h.director.title}
+              </h2>
+              <p className={styles.lead}>{h.director.lead}</p>
+            </div>
+            <div className={styles.figure}>
+              <DirectorFan d={d} t={t} rtl={rtl} />
+            </div>
           </div>
         </section>
+
+        {/* ROUTE + CONSOLE (stage 2) */}
+        <div className={`${styles.stageWrap} ${styles.below}`}>
+          <div className={`${styles.stage} ${styles.stageQuiet} ${styles.stage2}`}>
+            <div className={styles.stageInner}>
+              <section aria-labelledby="home-route">
+                <div className={`${styles.head} ${styles.headHalf} ${styles.reveal}`} data-reveal="">
+                  <h2 id="home-route" className={styles.h2}>
+                    {h.route.title}
+                  </h2>
+                  <p className={styles.lead}>{h.route.lead}</p>
+                </div>
+                <div className={styles.figure}>
+                  <Route d={d} t={t} rtl={rtl} />
+                </div>
+              </section>
+              <div className={styles.stageGap} aria-hidden="true" />
+              <section aria-labelledby="home-console" className={`${styles.split} ${styles.consoleSplit}`}>
+                <div className={`${styles.split75Model} ${styles.modelAfter}`}>
+                  <Console d={d} t={t} rtl={rtl} />
+                </div>
+                <div className={styles.split75Text}>
+                  <div className={`${styles.head} ${styles.reveal}`} data-reveal="">
+                    <h2 id="home-console" className={styles.h2}>
+                      {h.console.title}
+                    </h2>
+                    <p className={styles.lead}>{h.console.lead}</p>
+                  </div>
+                  <p className={styles.note}>{h.console.note}</p>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+
+        {/* OPERATIONS: the bento */}
+        <section className={`${styles.section} ${styles.below}`} aria-labelledby="home-ops">
+          <div className={styles.container}>
+            <div className={`${styles.head} ${styles.reveal}`} data-reveal="">
+              <h2 id="home-ops" className={`${styles.h2} ${styles.h2Wide}`}>
+                {h.ops.title}
+              </h2>
+            </div>
+            <ul className={styles.bento}>
+              <li className={`${styles.cell} ${styles.cellTracking} ${L.cellHover}`}>
+                <h3 className={styles.h3}>{h.ops.tracking.title}</h3>
+                <p className={styles.body}>{h.ops.tracking.body}</p>
+                <div className={`${styles.cellArt} ${L.artBox}`}>
+                  <TrackingArt t={t} rtl={rtl} d={d} />
+                </div>
+              </li>
+              <li className={`${styles.cell} ${styles.cellDelivery} ${L.cellHover}`}>
+                <h3 className={styles.h3}>{h.ops.delivery.title}</h3>
+                <p className={styles.body}>{h.ops.delivery.body}</p>
+                <div className={`${styles.cellArt} ${L.artBox}`}>
+                  <DeliveryArt t={t} rtl={rtl} />
+                </div>
+              </li>
+              <li className={`${styles.cell} ${styles.cellProfit} ${L.cellHover}`}>
+                <h3 className={styles.h3}>{h.ops.profit.title}</h3>
+                <p className={styles.body}>{h.ops.profit.body}</p>
+                <div className={`${styles.cellArt} ${L.artBox}`}>
+                  <ProfitArt t={t} rtl={rtl} />
+                </div>
+              </li>
+              <li className={`${styles.cell} ${styles.cellHealth} ${L.cellHover}`}>
+                <h3 className={styles.h3}>{h.ops.health.title}</h3>
+                <p className={styles.body}>{h.ops.health.body}</p>
+                <div className={`${styles.cellArt} ${L.artBox}`}>
+                  <HealthArt t={t} rtl={rtl} />
+                </div>
+              </li>
+              <li className={`${styles.cell} ${styles.cellRoles} ${L.cellHover}`}>
+                <h3 className={styles.h3}>{h.ops.roles.title}</h3>
+                <p className={styles.body}>{h.ops.roles.body}</p>
+                <div className={`${styles.cellArt} ${L.artBox}`}>
+                  <RolesArt t={t} rtl={rtl} d={d} />
+                </div>
+              </li>
+              <li className={`${styles.cell} ${styles.cellBackups} ${L.cellHover}`}>
+                <h3 className={styles.h3}>{h.ops.backups.title}</h3>
+                <p className={styles.body}>{h.ops.backups.body}</p>
+                <div className={`${styles.cellArt} ${L.artBox}`}>
+                  <BackupsArt rtl={rtl} />
+                </div>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        {/* INTEGRATIONS: the Dock */}
+        <section className={`${styles.section} ${styles.below}`} aria-labelledby="home-dock">
+          <div className={styles.container}>
+            <div className={styles.split}>
+              <div className={styles.split57Text}>
+                <div className={`${styles.head} ${styles.reveal}`} data-reveal="">
+                  <h2 id="home-dock" className={styles.h2}>
+                    {h.dock.title}
+                  </h2>
+                  <p className={styles.lead}>{iso(h.dock.lead, rtl)}</p>
+                </div>
+                <ul className={styles.integrationList}>
+                  {h.dock.list.map((name, i) => (
+                    <li key={name} className={styles.integrationItem}>
+                      <svg viewBox="0 0 24 24" className={styles.integrationGlyph} aria-hidden="true" focusable="false">
+                        <use href={`#${DOCK_GLYPHS[i]}`} width={24} height={24} />
+                      </svg>
+                      <span>{iso(name, rtl)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className={styles.split57Model}>
+                <Dock d={d} t={t} rtl={rtl} />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* LANGUAGES: the Mirror */}
+        <section className={`${styles.section} ${styles.below}`} aria-labelledby="home-mirror">
+          <div className={styles.container}>
+            <div className={`${styles.head} ${styles.headCentered} ${styles.reveal}`} data-reveal="">
+              <h2 id="home-mirror" className={styles.h2}>
+                {h.mirror.title}
+              </h2>
+              <p className={styles.lead}>{h.mirror.lead}</p>
+            </div>
+            <div className={`${styles.figure} ${styles.mirrorFigure}`}>
+              <Mirror locale={locale} t={t} />
+            </div>
+          </div>
+        </section>
+
+        {/* STEPS: the rail */}
+        <section className={`${styles.section} ${styles.below}`} aria-labelledby="home-steps">
+          <div className={styles.container}>
+            <div className={styles.stepsGrid}>
+              <div className={`${styles.stepsHead} ${styles.reveal}`} data-reveal="">
+                <h2 id="home-steps" className={styles.h2}>
+                  {h.steps.title}
+                </h2>
+              </div>
+              <div className={styles.stepsRail}>
+                <Rail t={t} />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* FINAL (stage 3) */}
+        <section className={`${styles.stageWrap} ${styles.finalWrap} ${styles.below}`} aria-labelledby="home-final">
+          <div className={`${styles.stage} ${styles.final}`}>
+            <div className={styles.finalGrid}>
+              <div className={styles.finalText}>
+                <h2 id="home-final" className={styles.h2}>
+                  {h.final.title}
+                </h2>
+                <Link href="/signup" className={styles.ctaPrimary}>
+                  {t.final.cta}
+                </Link>
+              </div>
+              <div className={`${styles.finalFigure} ${styles.reveal}`} data-reveal="">
+                <FinalArt t={t} rtl={rtl} />
+              </div>
+            </div>
+          </div>
+        </section>
+        <LivingIsland />
       </main>
-      <SiteFooter locale={locale} brand={brand} docs={docs} />
+      <SiteFooter locale={locale} brand={brand} docs={docs} motion />
     </MarketingFrame>
   );
 }

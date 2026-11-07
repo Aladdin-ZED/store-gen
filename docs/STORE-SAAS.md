@@ -4541,7 +4541,9 @@ metrics step and the seven `@fontsource` faces of DES-R21 are a maintainer CCR a
 moved out of `sync-fonts.mjs:71-115` plus the W3C WOFF2 §5.1-5.4 `glyf` / `loca` / `hmtx` reconstruction, written in R1
 for the Arabic metrics step because every shipped Arabic WOFF2 stores transformed `glyf` / `loca` and the variable
 packages ship no `.woff`; S2's `build-logo-fonts.mjs` imports it in R2; the known-glyph fixture
-`scripts/sync-fonts/ar-glyph-fixture.json` is P6's), `docs/STORE-SAAS.md`. A track needing a change files
+`scripts/sync-fonts/ar-glyph-fixture.json` is P6's), **`src/app/(marketing)/**`** (the platform homepage and the
+platform documents' frame after R1.0: the lead's homepage redesign of 2026-11-06, qa/lead/homepage-spec.md) and its check
+**`scripts/qa/marketing-home-check.ts`** (`test:marketing-home`), `docs/STORE-SAAS.md`. A track needing a change files
 `docs/saas/ccr/<release>-<track>-<n>.md` (what, why, exact diff); the maintainer applies CCRs serially, the same day, and
 notifies the other tracks.
 

@@ -23,6 +23,7 @@
     "test:runtime": "tsx src/landing/runtime/selftest.ts",
     "test:generator": "tsx src/lib/generator/selftest.ts",
     "test:render": "tsx scripts/qa/render-check.ts",
+    "test:marketing-home": "tsx scripts/qa/marketing-home-check.ts",
     "test:money": "tsx scripts/qa/money-parity.ts",
     "test:turnstile": "tsx scripts/qa/turnstile-e2e.ts",
     "test:pixels": "tsx scripts/qa/pixels-e2e.ts",

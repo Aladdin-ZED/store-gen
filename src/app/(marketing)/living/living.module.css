@@ -1,0 +1,2100 @@
+/*
+ * The homepage's living models (src/app/(marketing)/living/*): SVG node classes, the variant switches (@container),
+ * the hero's CSS intro, the once-models' armed/played states (the runtime sets [data-armed] then [data-in]), the
+ * radios' :has() state switches, the bento hover steps, reduced-motion and data-motion gating.
+ * Page tokens (--mk-*) come from .root in ../marketing.module.css. OKLCH only, no orange: every colour here is a
+ * neutral, the jade family (hue 166-170), the steel family (220-235) or a direction palette (108-232).
+ * Motion: transform, opacity and stroke-dashoffset (pathLength 1) only. Text is never animated by position.
+ */
+
+/* ------------------------------------------------------------------ */
+/* shared                                                              */
+/* ------------------------------------------------------------------ */
+
+.sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-feature-settings: "tnum";
+}
+
+/* variants: the inactive one is display:none through @container (no JS, no layout shift) */
+.vCompact,
+.c480,
+.c560,
+.c600,
+.c640,
+.c720 {
+  display: none;
+}
+
+@container (max-width: 479.98px) {
+  .w480 {
+    display: none;
+  }
+
+  .c480 {
+    display: block;
+  }
+}
+
+@container (max-width: 559.98px) {
+  .vWide,
+  .w560 {
+    display: none;
+  }
+
+  .vCompact,
+  .c560 {
+    display: block;
+  }
+}
+
+@container (max-width: 599.98px) {
+  .w600 {
+    display: none;
+  }
+
+  .c600 {
+    display: block;
+  }
+}
+
+@container (max-width: 639.98px) {
+  .w640 {
+    display: none;
+  }
+
+  .c640 {
+    display: block;
+  }
+}
+
+@container (max-width: 719.98px) {
+  .w720 {
+    display: none;
+  }
+
+  .c720 {
+    display: block;
+  }
+}
+
+.loom,
+.ledger,
+.fan,
+.route,
+.console,
+.dock,
+.mirror,
+.artBox {
+  position: relative;
+  container-type: inline-size;
+}
+
+/* type inside models */
+.lab {
+  font-weight: 500;
+}
+
+.mt:lang(ar),
+.lab:lang(ar),
+.small:lang(ar),
+.stationLab:lang(ar),
+.chipText:lang(ar) {
+  font-family: var(--font-arabic), var(--font-sans), sans-serif;
+}
+
+.small {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.stationLab {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.chipText {
+  font-weight: 500;
+}
+
+.mono,
+.mono10 {
+  font-family: var(--font-mono), ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 450;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  unicode-bidi: isolate;
+}
+
+.mono10 {
+  font-size: 10px;
+}
+
+.tileName,
+.tileName13 {
+  font-family: var(--font-sans), sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  unicode-bidi: isolate;
+}
+
+.tileName13 {
+  font-size: 13px;
+}
+
+/* fills: stage inks, page inks, jade */
+.tInk {
+  fill: var(--mk-stage-ink);
+}
+
+.tSoft {
+  fill: var(--mk-stage-ink-soft);
+}
+
+.tMute {
+  fill: var(--mk-stage-ink-mute);
+}
+
+.kF {
+  fill: var(--mk-ink);
+}
+
+.ksF {
+  fill: var(--mk-ink-soft);
+}
+
+.kmF {
+  fill: var(--mk-ink-mute);
+}
+
+.jdF {
+  fill: var(--mk-jade);
+}
+
+.jsF {
+  fill: var(--mk-jade-signal);
+}
+
+/* a line drawn with pathLength="1": drawn at rest, armed at 1 */
+.drawn {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* miniature pages: the three direction palettes (depiction only)      */
+/* ------------------------------------------------------------------ */
+
+.pal_best {
+  --p-g: oklch(0.985 0.004 165);
+  --p-i: oklch(0.22 0.012 170);
+  --p-a: oklch(0.52 0.1 168);
+  --p-s: oklch(0.94 0.02 166);
+  --p-ai: oklch(0.99 0.004 168);
+}
+
+.pal_contrast {
+  --p-g: oklch(0.36 0.06 232);
+  --p-i: oklch(0.97 0.006 230);
+  --p-a: oklch(0.86 0.07 196);
+  --p-s: oklch(0.43 0.06 232);
+  --p-ai: oklch(0.22 0.03 230);
+}
+
+.pal_explore {
+  --p-g: oklch(0.945 0.026 108);
+  --p-i: oklch(0.27 0.03 118);
+  --p-a: oklch(0.47 0.09 124);
+  --p-s: oklch(0.9 0.035 110);
+  --p-ai: oklch(0.98 0.01 110);
+}
+
+.fg {
+  fill: var(--p-g);
+}
+
+.fi {
+  fill: var(--p-i);
+}
+
+.fa {
+  fill: var(--p-a);
+}
+
+.fs {
+  fill: var(--p-s);
+}
+
+.fai {
+  fill: var(--p-ai);
+}
+
+.sa {
+  fill: none;
+  stroke: var(--p-a);
+  stroke-width: 1;
+}
+
+.si {
+  fill: none;
+  stroke: var(--p-i);
+  stroke-width: 1;
+}
+
+.mt {
+  font-family: var(--font-sans), sans-serif;
+}
+
+.cropTick,
+.cropTickLight {
+  fill: none;
+  stroke: var(--mk-steel);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+.fieldBox {
+  fill: none;
+  stroke: var(--p-i);
+  stroke-opacity: 0.22;
+  stroke-width: 1;
+}
+
+.swatchEdge {
+  stroke: var(--p-i);
+  stroke-opacity: 0.2;
+  stroke-width: 1;
+}
+
+.noteCheck {
+  fill: none;
+  stroke: var(--p-a);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.frameHi {
+  fill: none;
+  stroke: oklch(1 0 0 / 0.5);
+  stroke-width: 1;
+}
+
+.target {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1;
+}
+
+.target rect {
+  opacity: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* HERO: the genome loom (on stage 1)                                  */
+/* ------------------------------------------------------------------ */
+
+.loomBox {
+  position: relative;
+}
+
+.loomGlow {
+  position: absolute;
+  z-index: -1;
+  top: 40%;
+  inset-inline-start: 24%;
+  width: 72%;
+  aspect-ratio: 1;
+  translate: 0 -50%;
+  background: radial-gradient(closest-side, oklch(0.66 0.12 168 / 0.1), transparent 72%);
+  pointer-events: none;
+}
+
+.loomPlate {
+  position: absolute;
+  z-index: -1;
+  top: 4%;
+  inset-inline-start: 27.65%;
+  width: 44.12%;
+  height: 92%;
+  border-radius: 20px;
+  box-shadow:
+    0 40px 80px -24px oklch(0 0 0 / 0.55),
+    0 12px 24px -12px oklch(0 0 0 / 0.4);
+  translate: calc(var(--dx, 0) * 6px) calc(var(--dy, 0) * 6px);
+  pointer-events: none;
+}
+
+@container (max-width: 559.98px) {
+  .loomPlate {
+    inset-inline-start: 15%;
+    top: 10.67%;
+    width: 70%;
+    height: 77.3%;
+    translate: none;
+  }
+}
+
+.chip {
+  fill: var(--mk-stage-2);
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.chipHl {
+  fill: var(--mk-stage-3);
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1;
+  opacity: 0;
+}
+
+.port {
+  fill: var(--mk-stage-line-strong);
+}
+
+.trace {
+  fill: none;
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.traceOn {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1.25;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  opacity: 0.35;
+}
+
+.glyphUse {
+  color: var(--mk-stage-ink-soft);
+}
+
+.gl {
+  fill: none;
+  stroke: var(--mk-stage-ink-soft);
+  stroke-width: 1.25;
+}
+
+.glFill,
+.gl .glFill {
+  fill: var(--mk-stage-ink-soft);
+}
+
+.dotEdge {
+  stroke: oklch(1 0 0 / 0.28);
+  stroke-width: 1;
+}
+
+.glAxis {
+  fill: none;
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.glCurve {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.scan {
+  opacity: 0;
+}
+
+.scanLine {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1;
+}
+
+.scanStop {
+  stop-color: var(--mk-jade-signal);
+}
+
+.gate {
+  fill: var(--mk-stage-2);
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.gateHl {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1;
+  opacity: 0;
+}
+
+.check,
+.checkStatic {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.check {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.gateSet {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-opacity: 0.45;
+  stroke-width: 1;
+}
+
+/* the three direction states: the checked radio shows its state, by CSS alone */
+.state {
+  opacity: 0;
+  transition: opacity 600ms var(--mk-ease);
+}
+
+.state[data-sl="rail"] {
+  transition-duration: 240ms;
+}
+
+.loom:has(input[value="best_fit"]:checked) [data-state="best_fit"],
+.loom:has(input[value="contrast"]:checked) [data-state="contrast"],
+.loom:has(input[value="explore"]:checked) [data-state="explore"] {
+  opacity: 1;
+}
+
+@supports not selector(:has(*)) {
+  .loom [data-state="best_fit"] {
+    opacity: 1;
+  }
+}
+
+/* the flipping blocks: CSS transforms in their own user space (origin 0 0), like the transform attribute */
+.loom [data-b] {
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+
+/* pointer depth (secondary detail 1): the runtime lerps --dx/--dy in -1..1 */
+.depthRail {
+  transform: translate(calc(var(--dx, 0) * 3px), calc(var(--dy, 0) * 3px));
+}
+
+.depthFrame {
+  transform: translate(calc(var(--dx, 0) * 6px), calc(var(--dy, 0) * 6px));
+}
+
+.depthGates {
+  transform: translate(calc(var(--dx, 0) * 9px), calc(var(--dy, 0) * 9px));
+}
+
+.inFrame {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* the hero intro: pure CSS from first paint, the text is never animated (LCP) */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion="off"]) .loom .inChip {
+    animation: lvRise 360ms var(--mk-ease) both;
+    animation-delay: calc(200ms + var(--i, 0) * 60ms);
+  }
+
+  :root:not([data-motion="off"]) .loom .inFrame {
+    animation: lvFrame 700ms var(--mk-ease) 300ms both;
+  }
+
+  :root:not([data-motion="off"]) .loom .inTrace {
+    animation: lvDraw 360ms var(--mk-ease) both;
+    animation-delay: calc(480ms + var(--k, 0) * 80ms);
+  }
+
+  :root:not([data-motion="off"]) .loom [data-sl="frame"] [data-b] {
+    animation: lvSettle 520ms var(--mk-ease) both;
+  }
+
+  :root:not([data-motion="off"]) .loom [data-sl="frame"] [data-b="1"] {
+    animation-delay: 840ms;
+  }
+
+  :root:not([data-motion="off"]) .loom [data-sl="frame"] [data-b="2"] {
+    animation-delay: 920ms;
+  }
+
+  :root:not([data-motion="off"]) .loom [data-sl="frame"] [data-b="3"] {
+    animation-delay: 1000ms;
+  }
+
+  :root:not([data-motion="off"]) .loom [data-sl="frame"] [data-b="4"] {
+    animation-delay: 1080ms;
+  }
+
+  :root:not([data-motion="off"]) .loom [data-sl="frame"] [data-b="5"] {
+    animation-delay: 1160ms;
+  }
+
+  :root:not([data-motion="off"]) .loom [data-sl="frame"] [data-b="6"] {
+    animation-delay: 1240ms;
+  }
+
+  :root:not([data-motion="off"]) .loom .scan {
+    animation: lvScan 1200ms linear 1400ms forwards;
+  }
+
+  :root:not([data-motion="off"]) .loom .inGate {
+    animation: lvDraw 220ms var(--mk-ease) both;
+    animation-delay: calc(1817ms + var(--k, 0) * 122ms);
+  }
+
+  :root:not([data-motion="off"]) .loom .inGateHl {
+    animation: lvFlash 300ms linear both;
+    animation-delay: calc(1817ms + var(--k, 0) * 122ms);
+  }
+
+  :root:not([data-motion="off"]) .loom .inSlot {
+    animation: lvFade 240ms var(--mk-ease) 2400ms both;
+  }
+}
+
+@keyframes lvRise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lvFrame {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lvDraw {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes lvSettle {
+  from {
+    opacity: 0;
+    transform: translateX(calc(-12px * var(--mk-dir, 1)));
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lvScan {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  94% {
+    opacity: 1;
+    transform: translateY(530px);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(552px);
+  }
+}
+
+@keyframes lvFlash {
+  0%,
+  100% {
+    opacity: 0;
+  }
+
+  30% {
+    opacity: 1;
+  }
+}
+
+@keyframes lvFade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* direction radios: native inputs, 40 px pills */
+.radios {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 24px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.radio {
+  position: relative;
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 16px;
+  border: 1px solid var(--mk-stage-line-strong);
+  border-radius: 999px;
+  color: var(--mk-stage-ink-soft);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    background-color 200ms var(--mk-ease-ui),
+    border-color 200ms var(--mk-ease-ui),
+    color 200ms var(--mk-ease-ui);
+}
+
+@media (max-width: 479.98px) {
+  .radio {
+    padding-inline: 12px;
+    font-size: 0.8125rem;
+  }
+
+  .radios {
+    gap: 6px;
+  }
+}
+
+.radio:hover {
+  color: var(--mk-stage-ink);
+  border-color: oklch(1 0 0 / 0.26);
+}
+
+.radioInput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: inherit;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.radio:has(.radioInput:checked) {
+  border-color: var(--mk-jade-signal);
+  background: var(--mk-jade-wash);
+  color: var(--mk-stage-ink);
+}
+
+.radio:has(.radioInput:focus-visible) {
+  outline: 2px solid var(--mk-jade-signal);
+  outline-offset: 3px;
+}
+
+.radiosLight .radio {
+  border-color: var(--mk-line-strong);
+  color: var(--mk-ink-soft);
+}
+
+.radiosLight .radio:hover {
+  border-color: var(--mk-ink-mute);
+  color: var(--mk-ink);
+}
+
+.radiosLight .radio:has(.radioInput:checked) {
+  border-color: var(--mk-jade);
+  background: var(--mk-jade-wash);
+  color: var(--mk-ink);
+}
+
+.radiosLight .radio:has(.radioInput:focus-visible) {
+  outline-color: var(--mk-focus);
+}
+
+/* wide hero: the radios stand in the gates' column, under the three gates */
+@container (min-width: 560px) {
+  .loom .radios {
+    position: absolute;
+    top: 61%;
+    inset-inline-start: 75.3%;
+    width: 22.35%;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    margin: 0;
+    transform: translate(calc(var(--dx, 0) * 9px), calc(var(--dy, 0) * 9px));
+  }
+
+  .loom .radio {
+    padding-inline: 10px;
+    font-size: 0.8125rem;
+    text-align: center;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* ENGINE: the gene ledger and the exploded page (light, in a well)    */
+/* ------------------------------------------------------------------ */
+
+.baseLine {
+  fill: none;
+  stroke: var(--mk-line-strong);
+}
+
+.bar {
+  fill: var(--mk-ink-mute);
+  fill-opacity: 0.5;
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+
+.barBold {
+  fill: var(--mk-jade);
+  fill-opacity: 1;
+}
+
+.bar.barSoft {
+  fill-opacity: 0.22;
+}
+
+.cursor {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 1;
+  opacity: 0;
+}
+
+.planeGrid,
+.planeLayout {
+  fill: var(--mk-surface);
+  stroke: var(--mk-ink);
+  stroke-opacity: 0.22;
+  stroke-width: 1;
+}
+
+.planeCols {
+  fill: none;
+  stroke: var(--mk-ink);
+  stroke-opacity: 0.14;
+  stroke-width: 1;
+}
+
+.planeInk {
+  fill: var(--mk-ink);
+  fill-opacity: 0.7;
+}
+
+.planeInk .planeBox,
+.planeBox {
+  fill: none;
+  stroke: var(--mk-ink);
+  stroke-opacity: 0.32;
+  stroke-width: 1;
+}
+
+.planeEdge {
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.ledger [data-pa] {
+  opacity: 0;
+}
+
+.feed {
+  fill: none;
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.feedOn {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 1.25;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.leader {
+  fill: none;
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.gateRail {
+  fill: none;
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.notch {
+  stroke: var(--mk-ink-mute);
+  stroke-width: 1.25;
+}
+
+.checkLight {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.token {
+  fill: var(--mk-jade);
+  opacity: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* DIRECTOR: the fan (light, on the ground)                            */
+/* ------------------------------------------------------------------ */
+
+.floorLine {
+  fill: none;
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.plinth {
+  fill: var(--mk-ink);
+  fill-opacity: 0.06;
+}
+
+.capsule {
+  fill: var(--mk-surface-2);
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.capEdge {
+  fill: none;
+  stroke: var(--lv-cap-edge);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.ray {
+  fill: none;
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.rayOn {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 1.25;
+  opacity: 0;
+  transition: opacity 200ms var(--mk-ease-ui);
+}
+
+.shade {
+  fill: var(--lv-shade);
+}
+
+.coverEdge {
+  fill: none;
+  stroke: var(--mk-cover-edge);
+  stroke-width: 1;
+}
+
+.dim {
+  transition: opacity 200ms var(--mk-ease-ui);
+}
+
+.ring {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 2;
+  opacity: 0;
+  transform: scale(1.04);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity 200ms var(--mk-ease-ui),
+    transform 200ms var(--mk-ease-ui);
+}
+
+.ticks {
+  fill: var(--mk-ink);
+  fill-opacity: 0.5;
+}
+
+.fan:has(input[value="best_fit"]:checked) [data-ring="best_fit"],
+.fan:has(input[value="contrast"]:checked) [data-ring="contrast"],
+.fan:has(input[value="explore"]:checked) [data-ring="explore"] {
+  opacity: 1;
+  transform: none;
+}
+
+.fan:has(input[value="best_fit"]:checked) [data-ray="best_fit"],
+.fan:has(input[value="contrast"]:checked) [data-ray="contrast"],
+.fan:has(input[value="explore"]:checked) [data-ray="explore"] {
+  opacity: 1;
+}
+
+.fan:has(input[value="best_fit"]:checked) [data-dim]:not([data-dim="best_fit"]),
+.fan:has(input[value="contrast"]:checked) [data-dim]:not([data-dim="contrast"]),
+.fan:has(input[value="explore"]:checked) [data-dim]:not([data-dim="explore"]) {
+  opacity: 0.55;
+}
+
+/* ------------------------------------------------------------------ */
+/* ROUTE (stage 2)                                                     */
+/* ------------------------------------------------------------------ */
+
+.obj {
+  fill: var(--mk-stage-2);
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.objBack {
+  fill: var(--mk-stage-2);
+  stroke: var(--mk-stage-line);
+  stroke-width: 1;
+}
+
+.objRaised {
+  fill: var(--mk-stage-3);
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.objSoft {
+  fill: var(--mk-stage-3);
+}
+
+.objLine {
+  fill: oklch(1 0 0 / 0.2);
+}
+
+.objLineStroke {
+  fill: none;
+  stroke: oklch(1 0 0 / 0.16);
+  stroke-width: 1;
+}
+
+.objDot {
+  fill: var(--mk-stage-ink-mute);
+}
+
+.objLit {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1.25;
+}
+
+.tileGlyph {
+  color: var(--mk-stage-ink-soft);
+}
+
+.tile {
+  fill: var(--mk-stage-2);
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.tag {
+  fill: var(--mk-stage);
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.spur {
+  fill: none;
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.spurOn {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1.25;
+  stroke-opacity: 0.75;
+}
+
+.routeBase {
+  fill: none;
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.routeOn {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-width: 2;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.trail {
+  fill: none;
+  stroke: var(--mk-jade-signal);
+  stroke-opacity: 0.35;
+  stroke-width: 6;
+  stroke-linecap: round;
+  opacity: 0;
+}
+
+.stem {
+  fill: none;
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.node {
+  fill: var(--mk-stage);
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1.5;
+}
+
+.nodeOn {
+  fill: var(--mk-jade-signal);
+  stroke: var(--mk-stage);
+  stroke-width: 2;
+}
+
+.road {
+  fill: none;
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.roadDash {
+  fill: none;
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+  stroke-dasharray: 6 6;
+}
+
+.moveRing {
+  fill: none;
+  stroke: var(--mk-stage-move);
+  stroke-width: 1.5;
+}
+
+.stopRing {
+  fill: none;
+  stroke: var(--mk-stage-ink-mute);
+  stroke-width: 1;
+}
+
+.strike {
+  fill: none;
+  stroke: var(--mk-stage-ink-soft);
+  stroke-opacity: 0.4;
+  stroke-width: 1;
+}
+
+/* solid (opaque) jade and steel washes on stage-2, so the state underneath never shows through */
+.chipOk {
+  fill: oklch(0.3 0.045 168);
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1;
+}
+
+.chipWait {
+  fill: oklch(0.29 0.03 228);
+  stroke: var(--mk-stage-move);
+  stroke-width: 1;
+  opacity: 0;
+}
+
+.notchSet {
+  fill: var(--mk-jade-signal);
+}
+
+.notchOpen {
+  fill: var(--mk-stage);
+  stroke: var(--mk-stage-ink-mute);
+  stroke-width: 1.25;
+}
+
+.railLine {
+  fill: none;
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.checkDisc {
+  fill: var(--mk-jade-signal);
+}
+
+.checkInk {
+  color: var(--mk-jade-ink);
+}
+
+.dotOff {
+  fill: var(--mk-stage-2);
+  stroke: oklch(1 0 0 / 0.3);
+  stroke-width: 1;
+}
+
+.tokenBody {
+  fill: var(--mk-stage-3);
+  stroke: var(--mk-jade-signal);
+  stroke-width: 1;
+}
+
+.sheetRow {
+  fill: var(--mk-jade-signal);
+}
+
+/* ------------------------------------------------------------------ */
+/* CONSOLE (stage 2)                                                   */
+/* ------------------------------------------------------------------ */
+
+.panel {
+  fill: var(--mk-stage-2);
+  stroke: var(--mk-stage-line-strong);
+  stroke-width: 1;
+}
+
+.panelLine {
+  fill: none;
+  stroke: var(--mk-stage-line);
+  stroke-width: 1;
+}
+
+.clockFace {
+  fill: none;
+  stroke: var(--mk-stage-move);
+  stroke-width: 1.25;
+}
+
+.clockHand {
+  fill: none;
+  stroke: var(--mk-stage-move);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  transform-box: view-box;
+}
+
+.slot {
+  fill: none;
+  stroke: oklch(1 0 0 / 0.16);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+
+.lineBand {
+  fill: oklch(1 0 0 / 0.05);
+}
+
+.scriptBar {
+  fill: oklch(1 0 0 / 0.22);
+}
+
+.cardIn {
+  fill: var(--mk-stage-3);
+  stroke: var(--mk-jade-signal);
+  stroke-opacity: 0.55;
+  stroke-width: 1;
+}
+
+.padChip {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* OPERATIONS: bento illustrations (light; health on a stage cell)     */
+/* ------------------------------------------------------------------ */
+
+.artBox {
+  width: 100%;
+}
+
+.art {
+  max-width: 320px;
+  margin-inline: auto;
+}
+
+.w480 {
+  max-width: 560px;
+}
+
+.artHealth {
+  max-width: 176px;
+}
+
+.artDelivery {
+  max-width: 400px;
+}
+
+.drawSoft {
+  fill: none;
+  stroke: var(--mk-ink);
+  stroke-opacity: 0.28;
+  stroke-width: 1.25;
+}
+
+.drawLine {
+  fill: none;
+  stroke: var(--mk-draw);
+  stroke-width: 1.25;
+}
+
+.dotDone {
+  fill: var(--mk-ink-mute);
+}
+
+.dotTodo {
+  fill: var(--mk-surface);
+  stroke: var(--mk-draw);
+  stroke-width: 1.25;
+}
+
+.jadeRing {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 1.5;
+}
+
+.inkBar {
+  fill: var(--mk-ink);
+  fill-opacity: 0.2;
+}
+
+.dayOn {
+  fill: var(--mk-ink);
+  fill-opacity: 0.66;
+}
+
+.dayOff {
+  fill: none;
+  stroke: var(--mk-draw);
+  stroke-width: 1.25;
+}
+
+.hex {
+  fill: var(--mk-steel);
+  stroke: var(--mk-surface-2);
+  stroke-width: 1.5;
+}
+
+.hexZone {
+  fill: var(--mk-jade-wash);
+  stroke: var(--mk-jade);
+  stroke-width: 1.5;
+}
+
+.barDraw {
+  fill: var(--mk-ink);
+  fill-opacity: 0.05;
+  stroke: var(--mk-draw);
+  stroke-width: 1.25;
+}
+
+.guide {
+  fill: none;
+  stroke: var(--mk-ink);
+  stroke-opacity: 0.25;
+  stroke-dasharray: 2 3;
+  stroke-width: 1;
+}
+
+.marginTick {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.healthInner {
+  fill: oklch(1 0 0 / 0.03);
+  stroke: var(--mk-stage-line);
+  stroke-width: 1;
+}
+
+.segOk,
+.segWait {
+  fill: none;
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+
+.segOk {
+  stroke: var(--mk-jade-signal);
+}
+
+.segWait {
+  stroke: var(--mk-stage-move);
+}
+
+.hoverShow {
+  opacity: 0;
+}
+
+.tagDraw,
+.tagLive {
+  fill: var(--mk-surface);
+  stroke: var(--mk-draw);
+  stroke-width: 1.25;
+}
+
+.tagLive {
+  stroke: var(--mk-jade);
+  stroke-width: 1.5;
+}
+
+.slab,
+.slabLive {
+  fill: var(--mk-surface);
+  stroke: var(--mk-draw);
+  stroke-width: 1.25;
+}
+
+.slabLive {
+  stroke: var(--mk-jade);
+  stroke-width: 1.5;
+}
+
+.jadeGlyph {
+  color: var(--mk-jade);
+}
+
+/* hover micro-steps (secondary detail 2): fine pointers, motion on */
+.hoverStep,
+.roleTag,
+.hoverShow {
+  transition:
+    transform 240ms var(--mk-ease),
+    opacity 240ms var(--mk-ease);
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion="off"]) .cellHover:hover .hoverStep,
+  :root:not([data-motion="off"]) .cellHover:hover .roleTag {
+    transform: translate(var(--hx, 0px), var(--hy, 0px));
+  }
+
+  :root:not([data-motion="off"]) .cellHover:hover .hoverShow {
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* INTEGRATIONS: the Dock (light, on the ground)                       */
+/* ------------------------------------------------------------------ */
+
+.dock {
+  max-width: 640px;
+  margin-inline: auto;
+}
+
+.floorRing {
+  fill: none;
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.contact {
+  fill: var(--mk-ink);
+  fill-opacity: 0.06;
+}
+
+.beam {
+  fill: none;
+  stroke: var(--mk-ink);
+  stroke-opacity: 0.12;
+  stroke-width: 1;
+}
+
+.orbit {
+  fill: none;
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.orbitTicks {
+  fill: none;
+  stroke: var(--mk-ink);
+  stroke-opacity: 0.18;
+  stroke-width: 1;
+}
+
+.thread {
+  fill: none;
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.threadOn {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 1.25;
+  opacity: 0.6;
+}
+
+.sideBase {
+  fill: var(--lv-side-base);
+}
+
+.sideMid {
+  fill: var(--lv-side-mid);
+}
+
+.sideTop {
+  fill: var(--lv-side-top);
+}
+
+.plateBase {
+  fill: var(--mk-surface-2);
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.plateMid {
+  fill: var(--lv-plate-mid);
+  stroke: var(--mk-jade);
+  stroke-opacity: 0.35;
+  stroke-width: 1;
+}
+
+.plateTop {
+  fill: var(--mk-jade-signal);
+}
+
+.plateHi {
+  fill: none;
+  stroke: oklch(1 0 0 / 0.35);
+  stroke-width: 1;
+}
+
+.plateGlyph {
+  color: var(--mk-jade-ink);
+}
+
+.packet {
+  fill: var(--mk-jade);
+  opacity: 0;
+}
+
+.tagLight {
+  fill: var(--mk-ground);
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.leaderLight {
+  fill: none;
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.dkTile {
+  fill: var(--mk-surface);
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.dkTileHl {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 1.25;
+  opacity: 0;
+}
+
+.dkGlyph {
+  color: var(--mk-ink-soft);
+}
+
+.dockList {
+  display: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+@container (max-width: 559.98px) {
+  .dockList {
+    display: grid;
+  }
+}
+
+.dockItem {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 14px;
+  border: 1px solid var(--mk-line-strong);
+  border-radius: 999px;
+  background: var(--mk-surface);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.dockItemGlyph {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--mk-ink-soft);
+}
+
+/* ------------------------------------------------------------------ */
+/* LANGUAGES: the Mirror (light)                                       */
+/* ------------------------------------------------------------------ */
+
+.mirror {
+  max-width: 680px;
+  margin-inline: auto;
+}
+
+.mpPage {
+  fill: var(--mk-surface);
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.mpInk {
+  fill: var(--mk-ink);
+  fill-opacity: 0.82;
+}
+
+.mpInkSoft {
+  fill: var(--mk-ink);
+  fill-opacity: 0.28;
+}
+
+.mpWell {
+  fill: var(--mk-surface-2);
+}
+
+.mpShadow {
+  fill: var(--mk-ink);
+  fill-opacity: 0.07;
+}
+
+.mpCapsule {
+  fill: var(--mk-surface);
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.mpField {
+  fill: none;
+  stroke: var(--mk-line-strong);
+  stroke-width: 1;
+}
+
+.mpText {
+  fill: var(--mk-ink-soft);
+  font-size: 9px;
+}
+
+.mpLat {
+  font-family: var(--font-sans), sans-serif;
+}
+
+.mpAr {
+  font-family: var(--font-arabic), sans-serif;
+  font-size: 9.5px;
+}
+
+.mpOut {
+  opacity: 0;
+}
+
+.mpCta {
+  fill: var(--mk-ink);
+}
+
+.mpText.mpCtaText {
+  fill: var(--mk-ground);
+  font-weight: 600;
+}
+
+.mpNote {
+  fill: var(--mk-ink-mute);
+  font-size: 8.5px;
+}
+
+.caret {
+  fill: var(--mk-jade);
+  opacity: 0;
+}
+
+.axis {
+  fill: none;
+  stroke: var(--mk-jade);
+  stroke-width: 1;
+}
+
+.reflect {
+  fill: none;
+  stroke: var(--mk-ink);
+  stroke-opacity: 0.12;
+  stroke-width: 1;
+}
+
+.ghost {
+  opacity: 0.35;
+}
+
+.mirror [data-flip] {
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* STEPS: the rail (HTML)                                              */
+/* ------------------------------------------------------------------ */
+
+.rail {
+  display: grid;
+  gap: 32px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.railStep {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 4px 20px;
+  align-items: start;
+}
+
+.railRing {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  grid-row: span 2;
+  place-items: center;
+  border: 1px solid var(--mk-jade);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--mk-surface) 86%, var(--mk-jade));
+  color: var(--mk-jade);
+}
+
+.railRing svg {
+  width: 14px;
+  height: 14px;
+}
+
+.railNum {
+  color: var(--mk-ink-mute);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 28px;
+}
+
+.railText {
+  margin: 0;
+  color: var(--mk-ink);
+  font-size: 1.0625rem;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  text-wrap: pretty;
+}
+
+.railText:lang(ar) {
+  letter-spacing: 0;
+  line-height: 1.7;
+}
+
+/* the line between rings: a hairline, then the jade drawn over it */
+.railStep:not(:last-child)::before,
+.railStep:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 28px;
+  inset-inline-start: 13.5px;
+  width: 1px;
+  height: calc(100% + 32px - 28px);
+  background: var(--mk-line-strong);
+  transform-origin: top;
+}
+
+.railStep:not(:last-child)::after {
+  background: var(--mk-jade);
+}
+
+@media (min-width: 768px) {
+  .rail {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+  }
+
+  .railStep {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .railRing {
+    grid-row: auto;
+  }
+
+  .railNum {
+    line-height: 1;
+    margin-block-start: 6px;
+  }
+
+  .railStep:not(:last-child)::before,
+  .railStep:not(:last-child)::after {
+    top: 13.5px;
+    inset-inline-start: 28px;
+    width: calc(100% + 24px - 28px);
+    height: 1px;
+    transform-origin: left;
+  }
+
+  .railStep:not(:last-child):dir(rtl)::before,
+  .railStep:not(:last-child):dir(rtl)::after {
+    transform-origin: right;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* FINAL band figure (stage 3)                                         */
+/* ------------------------------------------------------------------ */
+
+.finalArt {
+  position: relative;
+  isolation: isolate;
+  max-width: 420px;
+  margin-inline: auto;
+}
+
+.finalGlow {
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  inset-inline-start: -8%;
+  width: 70%;
+  aspect-ratio: 1;
+  translate: 0 -50%;
+  background: radial-gradient(closest-side, oklch(0.66 0.12 168 / 0.1), transparent 72%);
+  pointer-events: none;
+}
+
+.finalPlate {
+  position: absolute;
+  z-index: -1;
+  top: 4%;
+  inset-inline-start: 4.76%;
+  width: 47.62%;
+  height: 92%;
+  border-radius: 15px;
+  box-shadow:
+    0 40px 80px -24px oklch(0 0 0 / 0.55),
+    0 12px 24px -12px oklch(0 0 0 / 0.4);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* once models: armed (start frame) and played ([data-in])             */
+/* the runtime arms only when motion is on; SSR is always the final    */
+/* ------------------------------------------------------------------ */
+
+/* engine ledger */
+.ledger[data-armed] .bar {
+  transform: scaleY(var(--from, 1));
+}
+
+.ledger[data-armed] .planeLift {
+  transform: translateY(var(--off, 0px));
+}
+
+.ledger[data-armed] [data-pa] {
+  opacity: 1;
+}
+
+.ledger[data-armed] [data-pb] {
+  opacity: 0;
+}
+
+.ledger[data-armed] :is(.feedOn, .checkLight) {
+  stroke-dashoffset: 1;
+}
+
+/* director fan */
+.fan[data-armed] :is(.ray, .rayOn) {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+
+.fan[data-armed] .cover {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.fan[data-armed] .ticks {
+  opacity: 0;
+}
+
+.fan[data-armed] .ring {
+  opacity: 0 !important;
+  transform: scale(1.04) !important;
+}
+
+.fan[data-armed] .dim {
+  opacity: 1 !important;
+}
+
+/* dock */
+.dock[data-armed] :is(.dkFloor, .orbitTicks, .dkTag) {
+  opacity: 0;
+}
+
+.dock[data-armed] :is(.orbit, .threadOn) {
+  stroke-dashoffset: 1;
+}
+
+.dock[data-armed] .plate {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+/* mirror */
+.mirror[data-armed] :is(.axis, .reflect) {
+  stroke-dashoffset: 1;
+}
+
+.mirror[data-armed] [data-flip] {
+  transform: translateX(var(--fx, 0px));
+}
+
+.mirror[data-armed] .mpOut {
+  opacity: 1;
+}
+
+.mirror[data-armed] .mpIn {
+  opacity: 0;
+}
+
+/* rail */
+.rail[data-armed] .railStep::after {
+  transform: scaleY(0);
+}
+
+.rail[data-armed] .railRing {
+  border-color: var(--mk-line-strong);
+  background: var(--mk-surface);
+  color: var(--mk-ink-mute);
+}
+
+@media (min-width: 768px) {
+  .rail[data-armed] .railStep::after {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion="off"]) .ledger[data-in] .bar {
+    transition: transform 420ms var(--mk-ease) calc(var(--i, 0) * 40ms);
+  }
+
+  :root:not([data-motion="off"]) .ledger[data-in] .cursor {
+    animation: lvCursor 1400ms linear both;
+  }
+
+  :root:not([data-motion="off"]) .ledger[data-in] .planeLift {
+    transition: transform 800ms var(--mk-ease) 200ms;
+  }
+
+  :root:not([data-motion="off"]) .ledger[data-in] :is([data-pa], [data-pb]) {
+    transition: opacity 400ms var(--mk-ease);
+  }
+
+  :root:not([data-motion="off"]) .ledger[data-in] [data-plane="2"] :is([data-pa], [data-pb]) {
+    transition-delay: 80ms;
+  }
+
+  :root:not([data-motion="off"]) .ledger[data-in] [data-plane="1"] :is([data-pa], [data-pb]) {
+    transition-delay: 40ms;
+  }
+
+  :root:not([data-motion="off"]) .ledger[data-in] [data-plane="0"] :is([data-pa], [data-pb]) {
+    transition-delay: 320ms;
+  }
+
+  :root:not([data-motion="off"]) .ledger[data-in] .feedOn {
+    transition: stroke-dashoffset 600ms var(--mk-ease-mask) calc(1400ms + var(--i, 0) * 60ms);
+  }
+
+  :root:not([data-motion="off"]) .ledger[data-in] .checkLight {
+    transition: stroke-dashoffset 220ms var(--mk-ease) calc(2000ms + var(--at, 0) * 1200ms);
+  }
+
+  :root:not([data-motion="off"]) .fan[data-in] :is(.ray, .rayOn) {
+    transition:
+      stroke-dashoffset 900ms var(--mk-ease-mask) calc(var(--i, 0) * 120ms),
+      opacity 200ms var(--mk-ease-ui);
+  }
+
+  :root:not([data-motion="off"]) .fan[data-in] .cover {
+    transition:
+      opacity 640ms var(--mk-ease) calc(300ms + var(--i, 0) * 90ms),
+      transform 640ms var(--mk-ease) calc(300ms + var(--i, 0) * 90ms);
+  }
+
+  :root:not([data-motion="off"]) .fan[data-in] .ticks {
+    transition: opacity 360ms linear calc(1100ms + var(--i, 0) * 60ms);
+  }
+
+  :root:not([data-motion="off"]) .fan[data-in] .ring {
+    transition:
+      opacity 520ms var(--mk-ease) 1500ms,
+      transform 520ms var(--mk-ease) 1500ms;
+  }
+
+  :root:not([data-motion="off"]) .fan[data-in] .dim {
+    transition: opacity 400ms var(--mk-ease) 1500ms;
+  }
+
+  :root:not([data-motion="off"]) .dock[data-in] .dkFloor {
+    transition: opacity 300ms var(--mk-ease);
+  }
+
+  :root:not([data-motion="off"]) .dock[data-in] .orbit {
+    transition: stroke-dashoffset 900ms var(--mk-ease-mask) 200ms;
+  }
+
+  :root:not([data-motion="off"]) .dock[data-in] .orbitTicks {
+    transition: opacity 400ms var(--mk-ease) 650ms;
+  }
+
+  :root:not([data-motion="off"]) .dock[data-in] .plate {
+    transition:
+      opacity 600ms var(--mk-ease) calc(600ms + var(--i, 0) * 80ms),
+      transform 600ms var(--mk-ease) calc(600ms + var(--i, 0) * 80ms);
+  }
+
+  :root:not([data-motion="off"]) .dock[data-in] .threadOn {
+    transition: stroke-dashoffset 500ms var(--mk-ease) calc(1100ms + var(--i, 0) * 80ms);
+  }
+
+  :root:not([data-motion="off"]) .dock[data-in] .dkTag {
+    transition: opacity 300ms var(--mk-ease) calc(2300ms + var(--i, 0) * 200ms);
+  }
+
+  :root:not([data-motion="off"]) .mirror[data-in] .axis {
+    transition: stroke-dashoffset 600ms var(--mk-ease-mask);
+  }
+
+  :root:not([data-motion="off"]) .mirror[data-in] [data-flip] {
+    transition: transform 700ms var(--mk-ease) 500ms;
+  }
+
+  :root:not([data-motion="off"]) .mirror[data-in] :is(.mpOut, .mpIn) {
+    transition: opacity 240ms var(--mk-ease) 1250ms;
+  }
+
+  :root:not([data-motion="off"]) .mirror[data-in] .reflect {
+    transition: stroke-dashoffset 300ms var(--mk-ease) calc(1500ms + var(--i, 0) * 60ms);
+  }
+
+  :root:not([data-motion="off"]) .mirror[data-in] .caret {
+    animation: lvBlink 500ms steps(1, end) 1900ms 4;
+  }
+
+  :root:not([data-motion="off"]) .rail[data-in] .railStep::after {
+    transition: transform 450ms var(--mk-ease) calc(var(--i, 0) * 450ms + 120ms);
+  }
+
+  :root:not([data-motion="off"]) .rail[data-in] .railRing {
+    transition:
+      border-color 200ms var(--mk-ease-ui) calc(var(--i, 0) * 450ms),
+      background-color 200ms var(--mk-ease-ui) calc(var(--i, 0) * 450ms),
+      color 200ms var(--mk-ease-ui) calc(var(--i, 0) * 450ms);
+  }
+}
+
+@keyframes lvCursor {
+  0% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  96% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(var(--cx, 0px));
+  }
+}
+
+@keyframes lvBlink {
+  0% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+/* reduced motion: final frames; state switches are 120 ms opacity crossfades */
+@media (prefers-reduced-motion: reduce) {
+  .state,
+  .dim,
+  .ring,
+  .rayOn,
+  .radio {
+    transition: opacity 120ms linear;
+  }
+
+  .ring {
+    transform: none;
+  }
+}
