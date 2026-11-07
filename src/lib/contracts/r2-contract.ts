@@ -17,6 +17,10 @@
  * bumps (STO-R19, STO-D47), `republishAttached` as the attached pages' render handler (LAN Q24, STO-R41),
  * `onLeadCreated` / `leadCreatedWebhooks` (OPE Q.18), `bumpVersionStats` (LAN Q26, AI R22), the actor kinds (AI R37,
  * R45), `keepPng` (DES-R14) and LP-16's runtime config v3, toggle seam and server zone (D75).
+ *
+ * Step C2-C (typed stubs for cross-track calls): every function one R2 track calls in another track's file, frozen with
+ * a stub body (a typed empty value, or `NotBuiltYet` from ./not-built.ts naming the owner), and the STO-R19 functions of
+ * finished R1 modules S1 consumes: checked in ./r2-stubs.ts, listed with owners and callers in docs/saas/ccr/r2-stubs.md.
  */
 import type { ReactElement } from "react";
 import type { z } from "zod";
