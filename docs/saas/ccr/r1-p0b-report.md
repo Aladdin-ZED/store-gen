@@ -368,10 +368,26 @@ them (build note item 2), the maintainer runs the timed `npm run test:budget`, a
 - **P3-13** Verify P2's `TestOrderSlot` / `CampaignSlot` mounts render P3's real buttons; add the two-line slots prop
   if P2 did not.
 - Chain `test:leads`' LP-11 cases.
+- **Done at the P3 wave 2 merge (2026-11-07, speed mode):** P3-13 checked, no change (P2's dashboard, welcome done
+  step, address settings and the pages list mount `TestOrderSlot` / `CampaignSlot`, which now render P3's real
+  buttons); `test:leads` (with its LP-11 cases) was already in `test:db`. CCRs r1-p3-13 items 1-2, r1-p3-14 items 1, 3,
+  4, 6 and r1-p3-15 items 1-2 applied; r1-p3-13 item 5, r1-p3-14 items 2 and 5, r1-p3-15 item 4 deferred to the
+  integration (reasons in each CCR's merge note). `test:wa-price` and `test:kit -- --offline` join `npm test`;
+  `test:links`, `test:test-orders` and `test:kit` join `test:db` after `test:leads`. Stale stub expectations fixed in
+  `test:storage` (P7's ai section), `test:store` (P6's footer draws the report link) and `test:pixels-publish` (the
+  pixels-only commit runs the landing gate).
 
 ### Integration
 
 - **P4-10** Rewire P8's ZIP job to P4's writers.
+- From the P3 wave 2 merge's `test:db` run (2026-11-07), failing before this merge and left for the integration:
+  `test:platform-db` (11 cases: P1's "unavailable on this branch" expectations for P4 / P5 / P8, the case-5 health
+  scores and the error tile, which now count P2's and P3's real health contributors), `test:health-db` (7: the expected
+  scores ignore P2's `shell:*` and P3's `landing:*` issues on the bare fixtures), `test:integrations-db` (1: the
+  Sheets pull still expects P4's stubs), `test:ops-db` (3: P5's script renderer now answers; a lead converted by an
+  agent is attributed `phone` because the landing order hook runs before `markConverted`; the 50,000-order aggregate
+  timing on this laptop), `test:design-db` (1: gene differencing). `test:tenancy` failed once on the two Sheets-push
+  snapshot cases of `integrations` and passed on its rerun (a flake to watch).
 - **P0-1** Narrow `MessageKey` and `NotificationKind` to strict unions.
 - **P0-5** Remove the `_productName` lint warning (dead-code pass).
 - **P0-6** Re-render every live page at the integration deploy (`forEachStore` → `enqueueRenders(scope, 'all-live',

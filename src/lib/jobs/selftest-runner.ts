@@ -172,7 +172,7 @@ export function runnerSections(h: Harness, x: RunnerSectionDeps): void {
       ["sheets.push", "1"], ["sheets.pull", "2"], ["outbox", "3"], ["renders", "4"], ["ai.batches", "4b"], ["ai.jobs", "4c"],
       ["exports", "5"], ["backup", "5"], ["purge", "5"], ["imports.commit", "5"],
       ["media.migrate", "6"], ["usage.reconcile", "6"], ["ops.rollup", "6"], ["ops.customers_reconcile", "6"], ["fin.alerts", "6"], ["ai.rollups", "6"],
-      ["ai.reconcile", "6"], ["ai.retention", "6"], ["design.retention", "6"], ["design.shingles", "6"], ["leads.followups", "6"], ["delivery.holidays_review", "6"],
+      ["ai.reconcile", "6"], ["ai.retention", "6"], ["design.retention", "6"], ["design.shingles", "6"], ["leads.followups", "6"], ["delivery.holidays_review", "6"], ["campaigns.share_expiry", "6"],
       ["lifecycle", "7"], ["ops.presence", "7"], ["sheets.bind_legacy", "7"], ["int.telegram_daily", "7"], ["links.flush", "7"], ["design.reserve", "7"], ["design.backfill", "7"],
       ["housekeeping", "8"], ["ops.capi_ctx_purge", "8"],
       ["platform.health", "9"], ["platform.alarms", "9"], ["platform.requests", "9"], ["platform.entitlements", "9"],

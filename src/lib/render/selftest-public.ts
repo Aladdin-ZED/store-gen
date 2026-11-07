@@ -204,7 +204,7 @@ async function pure(): Promise<void> {
     const r = await renderLandingHtml(doc!, optsFor(rc));
     const href = "https://platform.test/report/atlas-argan?p=%2Fs%2Fatlas-argan%2Fargan";
     assert.equal(r.html.split(`href="${href}"`).length - 1, 1, "one report link on the landing page");
-    assert.ok(r.html.includes('<p class="lp-report">'), "the Shell row (until P6's footer draws the link)");
+    assert.ok(!r.html.includes('<p class="lp-report">'), "P6's footer draws the link (FOOTER_RENDERS_REPORT), so no Shell row");
     assert.equal(ctxMod.thankYouLinks(rc, "argan").report, "https://platform.test/report/atlas-argan?p=%2Fs%2Fatlas-argan%2Fargan%2Fmerci");
     assert.equal(ctxMod.storeReportUrl(rc, "/policies/terms"), "https://platform.test/report/atlas-argan?p=%2Fs%2Fatlas-argan%2Fpolicies%2Fterms");
   });

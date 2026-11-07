@@ -434,7 +434,8 @@ async function main() {
   eq2("pixels only: B can't update A's live page", await code(() => publishTrackingOnly(B, pB, { metaPixelId: [META_X] }, pub.versionId, { actor: actor(ownerB) })), "not_found");
   eq2("pixels only: an editor is refused an unknown id", await code(() => publishTrackingOnly(A, pB, { metaPixelId: [META_Z] }, pub.versionId, { actor: actor(editorA) })), "pixel_not_in_library");
   eq2("pixels only: a stale base version is refused", await code(() => publishTrackingOnly(A, pB, { metaPixelId: [META_X] }, vA, { actor: actor(editorA) })), "live_changed");
-  const only = await publishTrackingOnly(A, pB, { metaPixelId: [META_X] }, pub.versionId, { actor: actor(editorA) });
+  // the pixels-only commit runs the landing gate too: the live page passed it through above, so this one does as well
+  const only = await withoutLandingGate(() => publishTrackingOnly(A, pB, { metaPixelId: [META_X] }, pub.versionId, { actor: actor(editorA) }));
   const [liveRow] = await db.select({ v: pages.publishedVersionId, draft: pages.draft }).from(pages).where(eq(pages.id, pB));
   ok("pixels only: an editor swaps to a known id; the live version and the draft follow", liveRow?.v === only.versionId && only.draftUpdated && JSON.stringify(liveRow.draft.tracking) === JSON.stringify({ metaPixelId: [META_X] }), { only, tracking: liveRow?.draft.tracking });
   const onlyAudit = await db.select().from(auditLog).where(and(eq(auditLog.action, "page.published"), eq(auditLog.target, pB))).orderBy(desc(auditLog.id));

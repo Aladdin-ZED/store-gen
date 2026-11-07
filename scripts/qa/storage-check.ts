@@ -2768,7 +2768,7 @@ async function main(): Promise<number> {
     const before = await H.getHealthReport(staff(true));
     t.check("dataDir before the first walk: walk null, the backend and the check still reported", before.dataDir !== null && before.dataDir.walk === null && !!before.dataDir.check, JSON.stringify(before.dataDir));
     t.eq("…and the frozen shape names it no_snapshot", (await H.getHealth(staff(true))).sectionErrors.dataDir, "no_snapshot");
-    t.eq("every section reads on the seeded database (ai is P7's stub until it merges)", Object.keys(before.sectionErrors), ["ai"]);
+    t.eq("every section reads on the seeded database (P7's ai section included since its merge)", Object.keys(before.sectionErrors), []);
 
     // commerce: a real order, then two test orders after it
     await order("Real Buyer", "+212600000777", false, 2);

@@ -94,9 +94,9 @@ type StoreAreaAction =
   | `blocklist.${"added" | "removed"}`
   | `page.${"proof_attested" | "fact_attested" | "countdown_extended" | "test_link_created" | "slug_moved" | "attached" | "detached" | "copied_out" | "copied_in" | "scheduled_publish"}`
   | `page.publish.${"design_override" | "budget_override"}`
-  | `lead.${"phone_revealed" | "converted"}`
+  | `lead.${"phone_revealed" | "converted" | "phone_set"}`
   | `campaign.${"created" | "shared" | "share_revoked"}`
-  | `link.${"created" | "paused"}`
+  | `link.${"created" | "paused" | "resumed" | "deleted" | "target_changed"}`
   | `experiment.${"started" | "stopped" | "applied"}`;
 
 /** Platform (staff) events; a row about one store also carries its `store_id`. */

@@ -36,6 +36,8 @@ export const BURST_LIMITS = {
   event: { limit: 240, windowSec: 60 },
   /** abandoned-lead capture: the database keeps 30 per 10 min per network */
   lead: { limit: 60, windowSec: 60 },
+  /** Order on WhatsApp intents (LAN-§11.4, CCR r1-p3-14 item 4): the database keeps 10 per 10 min per store and 30 per 10 min per network */
+  wa: { limit: 60, windowSec: 60 },
   /** one-click upsell: the database keeps 20 per 10 min per network */
   upsell: { limit: 40, windowSec: 60 },
   /** cron key guesses: the database keeps 60 per 10 min per network; the real job calls twice */

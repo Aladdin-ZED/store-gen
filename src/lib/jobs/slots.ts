@@ -104,6 +104,7 @@ const SLOT_OF_NAME: Readonly<Record<string, SlotId>> = Object.freeze({
   "design.archive": "6",
   "leads.followups": "6",
   "delivery.holidays_review": "6",
+  "campaigns.share_expiry": "6",
   "experiments.weights": "6",
   "catalog.stock_reconcile": "6",
   "catalog.collections": "6",

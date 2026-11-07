@@ -10,7 +10,7 @@ import "server-only";
  *                                 insert and refunded when the insert fails; `QuotaError` reaches the action, which
  *                                 opens the limit sheet. A generated code retries on a collision; a chosen one that
  *                                 is taken answers the field error. Audit `link.created`.
- *   pauseShortLink / resumeShortLink   status only (a paused link answers 410); audit `link.paused` on pause.
+ *   pauseShortLink / resumeShortLink   status only (a paused link answers 410); audit `link.paused` / `link.resumed`.
  *   deleteShortLink               deletes the row and refunds the gauge.
  *   editTarget                    the same pickers as create, nothing typed.
  * Each write drops the store's entry of `scopedCache("links")` (the route's 60 s lookup by code).
@@ -219,9 +219,9 @@ export async function pauseShortLink(ctx: WriteCtx, id: string): Promise<void> {
   if (await setStatus(ctx, id, "paused")) await auditIn(ctx.scope, ctx.actor, "link.paused", { target: id, meta: { paused: true } });
 }
 
-/** Resumes a paused link (audited as `link.paused` with `paused: false`: the action list has no resume of its own). */
+/** Resumes a paused link; audit `link.resumed` (CCR r1-p3-13). */
 export async function resumeShortLink(ctx: WriteCtx, id: string): Promise<void> {
-  if (await setStatus(ctx, id, "active")) await auditIn(ctx.scope, ctx.actor, "link.paused", { target: id, meta: { paused: false } });
+  if (await setStatus(ctx, id, "active")) await auditIn(ctx.scope, ctx.actor, "link.resumed", { target: id });
 }
 
 /** Deletes a link and refunds the `short_links` gauge. Another store's id answers not_found. */
@@ -231,6 +231,7 @@ export async function deleteShortLink(ctx: WriteCtx, id: string): Promise<void> 
   if (!affected(res)) throw new SeamError("not_found");
   dropLinksCache(ctx.scope);
   await refundUsage(ctx.scope, GAUGE, 1);
+  await auditIn(ctx.scope, ctx.actor, "link.deleted", { target: id });
 }
 
 /** Points a link at another target (the same pickers as create); answers like create for the target's checks. */
@@ -242,4 +243,5 @@ export async function editTarget(ctx: WriteCtx, id: string, rawTarget: z.input<t
   const columns = await targetColumns(ctx, target);
   await db.update(shortLinks).set(columns).where(byId(shortLinks, ctx.scope, id));
   dropLinksCache(ctx.scope);
+  await auditIn(ctx.scope, ctx.actor, "link.target_changed", { target: id, meta: { targetKind: columns.targetKind } });
 }

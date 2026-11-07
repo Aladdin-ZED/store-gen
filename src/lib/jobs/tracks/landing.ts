@@ -1,5 +1,6 @@
 /**
- * Jobs of the landing track (P3): leads.followups, delivery.holidays_review, links.flush (landing.md LAN-§23.4).
+ * Jobs of the landing track (P3): leads.followups, delivery.holidays_review, links.flush, campaigns.share_expiry
+ * (landing.md LAN-§23.4).
  * Extension file (docs/STORE-SAAS.md §H.2, §K.3) imported by src/lib/jobs/registry.ts; slot 6 (nightly / hourly) for
  * the first two, slot 7 for links.flush.
  *
@@ -14,7 +15,11 @@
  * `links.flush` (slot 7, every tick, 1 s; LAN-§12.1): writes the short-link click counters kept in memory by the
  * `/go/<code>` route (src/lib/links/clicks.ts) store by store, each with that store's system scope; the route's own
  * `after()` writes a store's counts once they are 30 s old, so a quiet cron loses no more than the process does.
+ *
+ * `campaigns.share_expiry` (slot 6, daily 04:35, 2 s; core §H.11, LAN-§13.5, CCR r1-p3-15 item 2): the read-only kit
+ * links of campaigns ended more than 90 days ago stop working (`expireShares`, one statement per store).
  */
+import { expireShares } from "@/lib/campaigns/share.server";
 import { holidaysReviewStep } from "@/lib/delivery/holidays-review.server";
 import { followUpsDue } from "@/lib/leads/followups.server";
 import { flushClicks } from "@/lib/links/clicks";
@@ -25,6 +30,7 @@ import type { Job } from "../runner";
 const HOLIDAYS_REVIEW_MS = 2_000;
 const FOLLOWUPS_MS = 2_000;
 const LINKS_FLUSH_MS = 1_000;
+const SHARE_EXPIRY_MS = 2_000;
 
 const holidaysReview: Job = {
   name: "delivery.holidays_review",
@@ -75,4 +81,19 @@ const linksFlush: Job = {
   },
 };
 
-export const jobs: Job[] = [holidaysReview, leadFollowUps, linksFlush];
+const shareExpiry: Job = {
+  name: "campaigns.share_expiry",
+  every: { dailyAt: "04:35" },
+  budgetMs: SHARE_EXPIRY_MS,
+  async run(ctx) {
+    let revoked = 0;
+    const now = new Date();
+    const budgetMs = Math.max(1, Math.min(SHARE_EXPIRY_MS, ctx.deadline - Date.now()));
+    const r = await forEachStore(ctx, { job: "campaigns.share_expiry", states: ["active", "restricted"], budgetMs }, async (_scope, store) => {
+      revoked += await expireShares(systemScope(ctx, store.id), ctx.actor, now);
+    });
+    return { done: r.done, summary: { visited: r.visited, revoked } };
+  },
+};
+
+export const jobs: Job[] = [holidaysReview, leadFollowUps, linksFlush, shareExpiry];

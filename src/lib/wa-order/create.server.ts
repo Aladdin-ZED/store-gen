@@ -161,7 +161,7 @@ async function etaTextFor(target: PublicPageTarget, city: string | null, locale:
 
 async function answer(req: Request): Promise<Answer> {
   const client = clientContext(req);
-  if (!burstLimit("lead", client.ip).ok) return RATE_LIMITED;
+  if (!burstLimit("wa", client.ip).ok) return RATE_LIMITED;
   const body = await readJson(req, WA_BODY_MAX);
   if (!body.ok) return invalid(body.status);
   const parsed = WaOrderRequest.safeParse(body.value);

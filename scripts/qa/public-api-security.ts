@@ -999,6 +999,19 @@ async function scenarios(s: Seed) {
   const waLead = async (storeId: string, ref: unknown) => (await db.select().from(leads).where(and(eq(leads.storeId, storeId), eq(leads.ref, String(ref)))).limit(1))[0];
   const waLeads = async (storeId: string) => Number((await db.select({ n: sql<number>`COUNT(*)` }).from(leads).where(and(eq(leads.storeId, storeId), eq(leads.kind, "whatsapp"))))[0]?.n);
 
+  // CCR r1-p3-14 item 3: the route answers `unavailable` until the store turns `landing.waOrder.enabled` on and a
+  // WhatsApp number exists; the fixture stores start with the setting off.
+  await routeCheck("route /wa: the setting off → unavailable, nothing stored", "src/app/api/public/wa/route.ts", async (route) => {
+    const before = await waLeads(s.A);
+    assert.deepEqual((await postAs(route, "/api/public/wa", waBody(s.keyA), newIp())).body, { ok: false, error: "unavailable" });
+    assert.equal(await waLeads(s.A), before, "no intent stored while the setting is off");
+  });
+  const { updateStoreSetting } = await import("@/lib/settings");
+  for (const sc of [tA.scope, tB.scope]) {
+    await updateStoreSetting(sc, "landing", { waOrder: { enabled: true } }, { id: "system", ip: null });
+    await updateStoreSetting(sc, "store", { whatsapp: "+212661000000" }, { id: "system", ip: null });
+  }
+
   // LAN-§11.4 steps 1 and 4, core §E.8
   await routeCheck("route /wa: a priced intent in the page's store; per-store buckets (s:<sid>:wa:ip:<h> 10/10 min) under the platform floor (p:wa:ip:<h> 30/10 min)", "src/app/api/public/wa/route.ts", async (route) => {
     const ip = newIp();

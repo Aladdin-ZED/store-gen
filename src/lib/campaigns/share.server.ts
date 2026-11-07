@@ -7,11 +7,15 @@ import "server-only";
  *
  *   createShare(ctx, id)   → { token }   audit `campaign.shared`
  *   revokeShare(ctx, id)                 audit `campaign.share_revoked`
+ *   expireShares(scope, actor, now)      the nightly `campaigns.share_expiry` (core §H.11, CCR r1-p3-15 item 2): the
+ *                                        links of kits ended more than 90 days ago, audit `campaign.share_revoked`
+ *                                        with `meta.reason = "expired"`
  *   kitForShare(token)                   the public page's read: the shared kit, its store and the page's live doc for
  *                                        the thumbnail, through `resolveKitShare`'s public scope; null for anything
  *                                        else (malformed, unknown, revoked, a store that is not servable)
  */
 import { createHash } from "node:crypto";
+import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import { auditIn } from "@/lib/admin-data/store-audit";
 import { db } from "@/lib/db/client";
 import { newToken } from "@/lib/db/ids";
@@ -19,8 +23,8 @@ import { campaigns, pages, pageVersions, type CampaignKit } from "@/lib/db/schem
 import { PageDoc } from "@/lib/page/schema";
 import { resolveKitShare } from "@/lib/tenancy/public";
 import { SeamError } from "@/lib/tenancy/seam";
-import { byId } from "@/lib/tenancy/sql";
-import type { StoreRow, StoreScope, WriteCtx } from "@/lib/tenancy/types";
+import { byId, whereStore } from "@/lib/tenancy/sql";
+import type { Actor, StoreRow, StoreScope, WriteCtx, WriteScope } from "@/lib/tenancy/types";
 import type { CampaignStatus } from "./types";
 
 const ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -46,6 +50,22 @@ export async function revokeShare(ctx: WriteCtx, id: string): Promise<void> {
   const cid = await own(ctx, id);
   await db.update(campaigns).set({ shareTokenHash: null }).where(byId(campaigns, ctx.scope, cid));
   await auditIn(ctx.scope, ctx.actor, "campaign.share_revoked", { target: cid });
+}
+
+const SHARE_TTL_AFTER_END_MS = 90 * 86_400_000;
+
+/** Revokes the share links of this store's kits that ended more than 90 days before `now`; answers how many. */
+export async function expireShares(scope: WriteScope, actor: Actor, now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - SHARE_TTL_AFTER_END_MS);
+  const due = await db
+    .select({ id: campaigns.id })
+    .from(campaigns)
+    .where(whereStore(campaigns, scope, and(eq(campaigns.status, "ended"), lt(campaigns.endsAt, cutoff), isNotNull(campaigns.shareTokenHash))));
+  if (!due.length) return 0;
+  const ids = due.map((r) => r.id);
+  await db.update(campaigns).set({ shareTokenHash: null }).where(whereStore(campaigns, scope, inArray(campaigns.id, ids)));
+  for (const id of ids) await auditIn(scope, actor, "campaign.share_revoked", { target: id, meta: { reason: "expired" } });
+  return ids.length;
 }
 
 export interface SharedKit {
