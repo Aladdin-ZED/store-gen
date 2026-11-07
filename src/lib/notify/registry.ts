@@ -12,8 +12,11 @@ import type { z } from "zod";
 import { kinds as aiKinds } from "./kinds/ai";
 import { kinds as integrationsKinds } from "./kinds/integrations";
 import { kinds as landingKinds } from "./kinds/landing";
+import { kinds as logisticsKinds } from "./kinds/logistics";
+import { kinds as moneyKinds } from "./kinds/money";
 import { kinds as opsKinds } from "./kinds/ops";
 import { kinds as platformKinds } from "./kinds/platform";
+import { kinds as storefrontKinds } from "./kinds/storefront";
 
 export type NotificationGroup = "store" | "security" | "orders" | "team" | "integrations" | "ai" | "health" | "platform" | (string & {});
 export type NotificationSeverity = "info" | "success" | "warn" | "danger";
@@ -36,7 +39,7 @@ export type NotificationKind = string;
 export type NotificationVars<K extends NotificationKind> = K extends NotificationKind ? Record<string, string | number | boolean | null> : never;
 
 /** Every declared kind, in track order (P1, P3, P4, P5, P7; written at P0, `scripts/qa/registries-check.ts` proves none is left out). */
-export const NOTIFICATION_KINDS: readonly NotificationKindDef[] = [...platformKinds, ...landingKinds, ...opsKinds, ...integrationsKinds, ...aiKinds];
+export const NOTIFICATION_KINDS: readonly NotificationKindDef[] = [...platformKinds, ...landingKinds, ...opsKinds, ...integrationsKinds, ...aiKinds, ...storefrontKinds, ...moneyKinds, ...logisticsKinds];
 
 export function notificationKind(kind: string): NotificationKindDef | undefined {
   return NOTIFICATION_KINDS.find((k) => k.kind === kind);

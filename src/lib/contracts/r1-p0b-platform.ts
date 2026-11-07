@@ -227,7 +227,7 @@ export type P1Platform = [
 /* ------------------------------------------------------------------ */
 
 export type HealthFixtures = [
-  Assert<Equals<HealthRuleFile, "platform" | "shell" | "landing" | "ops" | "integrations" | "design" | "ai">>,
+  Assert<Equals<HealthRuleFile, "platform" | "shell" | "landing" | "ops" | "integrations" | "design" | "ai" | /* R2, C2-D */ "storefront" | "money" | "logistics">>,
   Assert<Equals<typeof healthTypes.HEALTH_RULE_PREFIXES, Readonly<Record<HealthRuleFile, readonly string[]>>>>,
   Assert<
     Equals<HealthRuleFixture, { rule: string; fires: Partial<HealthInputs>; silent: Partial<HealthInputs>; expect?: { severity?: 1 | 2 | 3; metric?: string } }>

@@ -9,10 +9,11 @@ import "server-only";
 import { provider as design } from "./design";
 import { provider as landing } from "./landing";
 import { provider as ops } from "./ops";
+import { provider as storefront } from "./storefront";
 import type { SearchProvider } from "./types";
 
 export type { SearchHit, SearchProvider } from "./types";
 export { SEARCH_BUDGET_MS } from "./types";
 
 /** Every provider, in track order (P3, P4, P6). */
-export const SEARCH_PROVIDERS: readonly SearchProvider[] = [landing, ops, design];
+export const SEARCH_PROVIDERS: readonly SearchProvider[] = [landing, ops, design, storefront];

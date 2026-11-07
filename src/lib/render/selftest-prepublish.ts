@@ -402,6 +402,12 @@ async function main() {
     });
   });
 
+  /* ---- R2 contract step C2-D (core §K.4, STO-§27.2): S1's per-kind fixtures, run by this harness ---- */
+
+  const { storefrontGateFixtures } = await import("./prepublish/storefront.fixtures");
+  if (!storefrontGateFixtures.length) console.log("  - storefront fixtures (S1, prepublish/storefront.fixtures.ts): not built yet");
+  for (const fx of storefrontGateFixtures) await check(`storefront${fx.kind ? ` ${fx.kind}` : ""}: ${fx.name}`, () => fx.run());
+
   console.log(failures ? `test:prepublish: ${failures} FAILED, ${passed} passed` : `test:prepublish: all ${passed} checks passed`);
   process.exit(failures ? 1 : 0);
 }

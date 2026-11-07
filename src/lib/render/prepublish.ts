@@ -38,6 +38,8 @@ import "./prepublish/design";
 import "./prepublish/landing";
 // R2 contract step C2-B2 (STO-R25, D66): storefront's checks and the per-kind budget profiles of STO-§6.1
 import "./prepublish/storefront";
+import "./prepublish/brand";
+import "./prepublish/ai";
 
 export type { GateItem } from "@/lib/tenancy/types";
 export { hash16, originFrom, textFieldsOf, type GenerationRecord, type OriginClass } from "./origin";

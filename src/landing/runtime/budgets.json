@@ -1,5 +1,5 @@
 {
-  "//": "gzip -9 bytes per runtime chunk, measured 2026-10-17 (docs/OFFERS.md §F.9); render-check fails above budget + 5%, except the frozen landing chunk (tolerance 0). Page caps (page, thanks-page) are the scripts of one document; the chunks each cap sums are listed in compositions (docs/STORE-SAAS.md §H.13, ENGP-12), so a new chunk needs no harness change. assist, assist-ty and track are the R1 add-on chunks of LAN-§5.2 (P3); page 32000 -> 34800 makes room for assist. landing re-measured at the R1.0 integration (2026-10-27): 24196 B, its sha256 pinned in landing.sha256, no re-freeze (docs/STORE-SAAS.md §P.5). css, css-base and css-variants (DES-R5, DS24, DES-§19): inlined CSS, gzip -9 bytes, measured 2026-10-28 by render-check over the live landing document of every fixture in ar, fr and en; render-check fails above each key. css = P + 4096, P = the heaviest whole inline stylesheet of one page, 102581 B (fixture duo/ar); css-base = B + 1536, B = the shared base stylesheet, 22071 B; css-variants = V + 2765, V = the heaviest section and variant chunk CSS of one page, 77013 B. assist-ty 1500 -> 3600 (CCR r1-p3-9, measured 2026-11-03: 3434 B): the thank-you {when} bundles operations' nextCallableAt (about 1,040 B gz alone), not the about 300 B LAN-§5.2 estimated. assist 2600 -> 4000 and page 34800 -> 36100 (CCR r1-p3-14, measured 2026-11-07: 3,909 B): Order on WhatsApp (LP-11) bundles the LAN-§11.3 serialiser and the intent click into assist. landing-v3 (core D75, LP-16; R2 contract step C2-B2): the landing chunk re-measured at the R2 contract step (24196 B, unchanged since R1.0) + 500 B = 24696, the core chunk of runtime_v 3 documents (built from addons/landing-v3.ts = entry-v3.ts); page-v3 = page + 500 B, the heaviest v3 page (landing-v3 in place of landing).",
+  "//": "gzip -9 bytes per runtime chunk, measured 2026-10-17 (docs/OFFERS.md §F.9); render-check fails above budget + 5%, except the frozen landing chunk (tolerance 0). Page caps (page, thanks-page) are the scripts of one document; the chunks each cap sums are listed in compositions (docs/STORE-SAAS.md §H.13, ENGP-12), so a new chunk needs no harness change. assist, assist-ty and track are the R1 add-on chunks of LAN-§5.2 (P3); page 32000 -> 34800 makes room for assist. landing re-measured at the R1.0 integration (2026-10-27): 24196 B, its sha256 pinned in landing.sha256, no re-freeze (docs/STORE-SAAS.md §P.5). css, css-base and css-variants (DES-R5, DS24, DES-§19): inlined CSS, gzip -9 bytes, measured 2026-10-28 by render-check over the live landing document of every fixture in ar, fr and en; render-check fails above each key. css = P + 4096, P = the heaviest whole inline stylesheet of one page, 102581 B (fixture duo/ar); css-base = B + 1536, B = the shared base stylesheet, 22071 B; css-variants = V + 2765, V = the heaviest section and variant chunk CSS of one page, 77013 B. assist-ty 1500 -> 3600 (CCR r1-p3-9, measured 2026-11-03: 3434 B): the thank-you {when} bundles operations' nextCallableAt (about 1,040 B gz alone), not the about 300 B LAN-§5.2 estimated. assist 2600 -> 4000 and page 34800 -> 36100 (CCR r1-p3-14, measured 2026-11-07: 3,909 B): Order on WhatsApp (LP-11) bundles the LAN-§11.3 serialiser and the intent click into assist. landing-v3 (core D75, LP-16; R2 contract step C2-B2): the landing chunk re-measured at the R2 contract step (24196 B, unchanged since R1.0) + 500 B = 24696, the core chunk of runtime_v 3 documents (built from addons/landing-v3.ts = entry-v3.ts); page-v3 = page + 500 B, the heaviest v3 page (landing-v3 in place of landing). Store chunks (R2 contract step C2-D; core §H.13, R-D43, STO-R13): pdp 23500, store 2500, cart 6000, checkout 8000, store-pixels 4200, store-thanks 3000, search 5000, built by scripts/build-store-assets.mjs (S1) and checked by test:store-runtime; store-page = the derived cap ceil500(pdp + checkout + store-pixels + units-matrix + units-fields + fill-steps-box) = ceil500(40650) = 41000 (ENGP-31), its chunks in compositions[\"store-page\"]; build-store-assets.mjs fails when store-page is below the sum.",
   "landing": 24200,
   "thanks": 6650,
   "pixels": 3900,
@@ -18,9 +18,18 @@
   "css-variants": 79778,
   "landing-v3": 24696,
   "page-v3": 36600,
+  "pdp": 23500,
+  "store": 2500,
+  "cart": 6000,
+  "checkout": 8000,
+  "store-pixels": 4200,
+  "store-thanks": 3000,
+  "search": 5000,
+  "store-page": 41000,
   "compositions": {
     "page": ["pixels", "turnstile", "units-matrix", "units-fields", "fill-steps-box", "assist", "landing"],
     "thanks-page": ["thanks", "pixels", "assist-ty"],
-    "page-v3": ["pixels", "turnstile", "units-matrix", "units-fields", "fill-steps-box", "assist", "landing-v3"]
+    "page-v3": ["pixels", "turnstile", "units-matrix", "units-fields", "fill-steps-box", "assist", "landing-v3"],
+    "store-page": ["pdp", "checkout", "store-pixels", "units-matrix", "units-fields", "fill-steps-box"]
   }
 }

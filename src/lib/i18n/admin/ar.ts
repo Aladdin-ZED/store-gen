@@ -11,11 +11,16 @@ import { messages as financeMessages } from "./ar/finance";
 import { messages as healthMessages } from "./ar/health";
 import { messages as integrationsMessages } from "./ar/integrations";
 import { messages as landingMessages } from "./ar/landing";
+import { messages as logisticsMessages } from "./ar/logistics";
+import { messages as logoMessages } from "./ar/logo";
 import { messages as notifyMessages } from "./ar/notify";
 import { messages as onboardingMessages } from "./ar/onboarding";
 import { messages as opsMessages } from "./ar/ops";
 import { messages as shellMessages } from "./ar/shell";
+import { messages as storefrontMessages } from "./ar/storefront";
 import { messages as teamMessages } from "./ar/team";
+import { messages as uxMessages } from "./ar/ux";
+import { messages as webhooksMessages } from "./ar/webhooks";
 import type { BaseMessages } from "./index";
 
 export const messages: Partial<BaseMessages> = {
@@ -36,6 +41,12 @@ export const messages: Partial<BaseMessages> = {
   ...integrationsMessages,
   ...designMessages,
   ...aiMessages,
+  // R2 (contract step C2-D): S1 storefront, S2 logo, S4 logistics, S5 webhooks, S6 ux (S3 keeps finance)
+  ...storefrontMessages,
+  ...logoMessages,
+  ...logisticsMessages,
+  ...webhooksMessages,
+  ...uxMessages,
   "error.invalid": "بعض الحقول تحتاج إلى تصحيح.",
   "error.not_found": "هذا العنصر غير موجود أو لم يعد متاحًا.",
   "error.forbidden": "دورك لا يسمح بهذا الإجراء.",

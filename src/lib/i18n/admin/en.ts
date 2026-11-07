@@ -13,11 +13,16 @@ import { messages as financeMessages } from "./en/finance";
 import { messages as healthMessages } from "./en/health";
 import { messages as integrationsMessages } from "./en/integrations";
 import { messages as landingMessages } from "./en/landing";
+import { messages as logisticsMessages } from "./en/logistics";
+import { messages as logoMessages } from "./en/logo";
 import { messages as notifyMessages } from "./en/notify";
 import { messages as onboardingMessages } from "./en/onboarding";
 import { messages as opsMessages } from "./en/ops";
 import { messages as shellMessages } from "./en/shell";
+import { messages as storefrontMessages } from "./en/storefront";
 import { messages as teamMessages } from "./en/team";
+import { messages as uxMessages } from "./en/ux";
+import { messages as webhooksMessages } from "./en/webhooks";
 
 export const messages = {
   // the tracks' files ./en/<file>.ts (D67; spread here at P0, `scripts/qa/registries-check.ts` proves none is left out):
@@ -37,6 +42,12 @@ export const messages = {
   ...integrationsMessages,
   ...designMessages,
   ...aiMessages,
+  // R2 (contract step C2-D): S1 storefront, S2 logo, S4 logistics, S5 webhooks, S6 ux (S3 keeps finance)
+  ...storefrontMessages,
+  ...logoMessages,
+  ...logisticsMessages,
+  ...webhooksMessages,
+  ...uxMessages,
   "error.invalid": "Some fields need a fix.",
   "error.not_found": "This item doesn't exist or is no longer available.",
   "error.forbidden": "Your role doesn't allow this action.",

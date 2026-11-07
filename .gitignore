@@ -50,3 +50,6 @@ next-env.d.ts
 /qa/design-corpus/*
 !/qa/design-corpus/labels.json
 !/qa/design-corpus/cliche-fixture.*.json
+
+# the logo engine fonts (S2, DES-R7): TTF subsets, manifest.json and hb.wasm, written by scripts/build-logo-fonts.mjs
+/public/logo-fonts/

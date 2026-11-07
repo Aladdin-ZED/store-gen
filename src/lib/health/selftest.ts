@@ -80,6 +80,10 @@ async function main(): Promise<void> {
     integrations: await import("./rules/integrations"),
     design: await import("./rules/design"),
     ai: await import("./rules/ai"),
+    // R2 (contract step C2-D)
+    storefront: await import("./rules/storefront"),
+    money: await import("./rules/money"),
+    logistics: await import("./rules/logistics"),
   };
 
   type HealthIssue = import("./types").HealthIssue;

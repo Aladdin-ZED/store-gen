@@ -12,7 +12,9 @@ import { nav as consoleNav } from "./console";
 import { nav as designNav } from "./design";
 import { nav as integrationsNav } from "./integrations";
 import { nav as landingNav } from "./landing";
+import { nav as logisticsNav } from "./logistics";
 import { nav as opsNav } from "./ops";
+import { nav as storefrontNav } from "./storefront";
 import { nav as t4Nav } from "./t4";
 import type { NavContribution, NavGroup, NavGroupId, NavItem, StaffNavItem } from "./types";
 
@@ -35,7 +37,7 @@ export const NAV_GROUPS: readonly { id: NavGroupId; label: NavGroup["label"] }[]
  * (written at P0; `scripts/qa/registries-check.ts` proves no file is left out). P1's `./console.ts` is not a sidebar
  * contribution (PD36): its staff entry is `STAFF_NAV` below.
  */
-export const NAV_CONTRIBUTIONS: readonly NavContribution[] = [...t4Nav, ...landingNav, ...opsNav, ...integrationsNav, ...designNav, ...aiNav];
+export const NAV_CONTRIBUTIONS: readonly NavContribution[] = [...t4Nav, ...landingNav, ...opsNav, ...integrationsNav, ...designNav, ...aiNav, ...storefrontNav, ...logisticsNav];
 
 /** The staff entries of the tenant shell (PD36): the store switcher renders them only for `platformRole` not "none". */
 export const STAFF_NAV: readonly StaffNavItem[] = consoleNav;

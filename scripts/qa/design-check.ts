@@ -27,6 +27,8 @@ import "@/lib/design/selftest-wizard";
 import "@/lib/design/selftest-builder";
 // step 13 (brand kit): the grid monogram, the favicon order, the brand kit rules, the UX-05 QR size
 import "@/lib/design/selftest-brand";
+// R2 (contract step C2-D): S2's store-theme groups (DES-§26), empty until S2 builds them
+import "@/lib/design/selftest-store-theme";
 import { registerDesignGroup } from "@/lib/design/selftest";
 
 // step 4 (section kit redraws): the 41 baseline documents against their goldens (--full; test:render runs the 14

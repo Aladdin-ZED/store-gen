@@ -46,6 +46,7 @@ import { gzipSync } from "node:zlib";
 import { cases as aiCases } from "./render-cases/ai";
 import { cases as designCases } from "./render-cases/design";
 import { cases as landingCases } from "./render-cases/landing";
+import { cases as storefrontCases } from "./render-cases/storefront";
 /** Same values as PUBLIC_ENDPOINTS in src/lib/render/store-context.server.ts (server-only, not importable here). */
 const PUBLIC_ENDPOINTS = { order: "/api/public/order", lead: "/api/public/lead", event: "/api/public/event", upsell: "/api/public/upsell" };
 
@@ -127,6 +128,7 @@ const RENDER_CASES: readonly (readonly [track: string, cases: readonly RenderCas
   ["landing", landingCases],
   ["design", designCases],
   ["ai", aiCases],
+  ["storefront", storefrontCases], // R2 (C2-D): S1's store fixtures (STO-§27.2)
 ];
 
 async function main() {

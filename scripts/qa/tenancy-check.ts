@@ -3491,7 +3491,7 @@ export interface TenancyKit extends Kit {
  * P0b (CCR X-1): `shell.ts` (P2) holds the action cases of P2's own store actions; P1 keeps the PLA-§O.3 special
  * cases, the shell's included, in `platform.ts`.
  */
-export const TENANCY_CASE_FILES = ["platform", "shell", "landing", "ops", "integrations", "design", "ai"] as const;
+export const TENANCY_CASE_FILES = ["platform", "shell", "landing", "ops", "integrations", "design", "ai", /* R2, C2-D */ "storefront", "brand", "money", "logistics", "webhooks"] as const;
 
 export async function pluginSuite(kit: Kit): Promise<void> {
   const dir = path.join(ROOT, "scripts", "qa", "tenancy-cases");

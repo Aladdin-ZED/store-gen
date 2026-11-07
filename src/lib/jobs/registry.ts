@@ -9,21 +9,28 @@ import "server-only";
  * request) loads this registry first. The import lines are written at P0 (`scripts/qa/registries-check.ts`).
  */
 import "./handlers/capi";
+import "./handlers/edge-purge";
+import "./handlers/mail";
 import "./handlers/telegram";
+import "./handlers/webhook";
 import type { Job } from "./runner";
 import { jobs as aiJobs } from "./tracks/ai";
+import { jobs as brandJobs } from "./tracks/brand";
 import { jobs as coreJobs } from "./tracks/core";
 import { jobs as designJobs } from "./tracks/design";
 import { jobs as integrationsJobs } from "./tracks/integrations";
 import { jobs as landingJobs } from "./tracks/landing";
+import { jobs as logisticsJobs } from "./tracks/logistics";
+import { jobs as moneyJobs } from "./tracks/money";
 import { jobs as opsJobs } from "./tracks/ops";
 import { jobs as platformJobs } from "./tracks/platform";
+import { jobs as storefrontJobs } from "./tracks/storefront";
 
 /** The guaranteed slices of one tick (§H.2: 95 s of the 100 s budget; the last 5 s is the leftover slot). */
 export const TICK_GUARANTEED_MS = 95_000;
 
 /** Every registered job (the runner orders them by the §H.2 slots: Sheets first, platform last). */
-export const JOBS: readonly Job[] = [...integrationsJobs, ...coreJobs, ...aiJobs, ...opsJobs, ...landingJobs, ...designJobs, ...platformJobs];
+export const JOBS: readonly Job[] = [...integrationsJobs, ...coreJobs, ...aiJobs, ...opsJobs, ...landingJobs, ...designJobs, ...platformJobs, ...storefrontJobs, ...brandJobs, ...moneyJobs, ...logisticsJobs];
 
 export function jobNamed(name: string): Job | undefined {
   return JOBS.find((j) => j.name === name);

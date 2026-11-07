@@ -11,11 +11,16 @@ import { messages as financeMessages } from "./fr/finance";
 import { messages as healthMessages } from "./fr/health";
 import { messages as integrationsMessages } from "./fr/integrations";
 import { messages as landingMessages } from "./fr/landing";
+import { messages as logisticsMessages } from "./fr/logistics";
+import { messages as logoMessages } from "./fr/logo";
 import { messages as notifyMessages } from "./fr/notify";
 import { messages as onboardingMessages } from "./fr/onboarding";
 import { messages as opsMessages } from "./fr/ops";
 import { messages as shellMessages } from "./fr/shell";
+import { messages as storefrontMessages } from "./fr/storefront";
 import { messages as teamMessages } from "./fr/team";
+import { messages as uxMessages } from "./fr/ux";
+import { messages as webhooksMessages } from "./fr/webhooks";
 import type { BaseMessages } from "./index";
 
 export const messages: Partial<BaseMessages> = {
@@ -36,6 +41,12 @@ export const messages: Partial<BaseMessages> = {
   ...integrationsMessages,
   ...designMessages,
   ...aiMessages,
+  // R2 (contract step C2-D): S1 storefront, S2 logo, S4 logistics, S5 webhooks, S6 ux (S3 keeps finance)
+  ...storefrontMessages,
+  ...logoMessages,
+  ...logisticsMessages,
+  ...webhooksMessages,
+  ...uxMessages,
   "error.invalid": "Certains champs sont à corriger.",
   "error.not_found": "Cet élément n'existe pas ou n'est plus disponible.",
   "error.forbidden": "Votre rôle ne permet pas cette action.",

@@ -22,9 +22,14 @@ import { logError } from "@/lib/orders/log";
 import type { WriteScope } from "@/lib/tenancy/types";
 import type { PurchaseConversion } from "./conversions-core";
 import type { Move, OrderActor, OrderSnapshot, TransitionSource } from "./state";
+import { hooks as aiHooks } from "./hooks/ai";
 import { hooks as integrationsHooks } from "./hooks/integrations";
 import { hooks as landingHooks } from "./hooks/landing";
+import { hooks as logisticsHooks } from "./hooks/logistics";
+import { hooks as moneyHooks } from "./hooks/money";
 import { hooks as opsHooks } from "./hooks/ops";
+import { hooks as storefrontHooks } from "./hooks/storefront";
+import { hooks as webhooksHooks } from "./hooks/webhooks";
 
 export type OrderRow = typeof orders.$inferSelect;
 export type LeadRow = typeof leads.$inferSelect;
@@ -49,8 +54,11 @@ export interface OrderHook {
  * Every contributed hook, in run order (written at P0; `scripts/qa/registries-check.ts` proves no file is left out):
  * operations first (OPE-§3.6: `ops.created` sets `customer_id` and `city_key`, which landing's attribution and
  * `zone_not_served` read), then landing, then integrations (the CAPI and Telegram outbox items, the Sheets push).
+ * R2 (contract step C2-D): S4's logistics (assignment rules), S1's storefront (stock moves) and S3's money
+ * (commissions) right after operations, so they read `customer_id` / `city_key`; S7's ai (version stats) after
+ * integrations; S5's webhooks last, so an event reflects every other hook's write.
  */
-export const ORDER_HOOKS: readonly OrderHook[] = [...opsHooks, ...landingHooks, ...integrationsHooks];
+export const ORDER_HOOKS: readonly OrderHook[] = [...opsHooks, ...logisticsHooks, ...storefrontHooks, ...moneyHooks, ...landingHooks, ...integrationsHooks, ...aiHooks, ...webhooksHooks];
 
 /**
  * Runs the hooks registered for (`on`, `phase`) in order. An `inTx` failure is rethrown so the caller's transaction

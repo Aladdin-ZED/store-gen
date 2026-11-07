@@ -89,7 +89,7 @@ export interface HealthRule {
 }
 
 /** The rules files of src/lib/health/rules (one per track, P0b: CCR P5-8, P6-13). */
-export type HealthRuleFile = "platform" | "shell" | "landing" | "ops" | "integrations" | "design" | "ai";
+export type HealthRuleFile = "platform" | "shell" | "landing" | "ops" | "integrations" | "design" | "ai" | /* R2, C2-D */ "storefront" | "money" | "logistics";
 
 /**
  * PD79: a rule id is `<prefix>:<rule>`, and its prefix is one of its own file's (P1's `test:health` checks every
@@ -103,6 +103,11 @@ export const HEALTH_RULE_PREFIXES: Readonly<Record<HealthRuleFile, readonly stri
   integrations: ["int", "conv"],
   design: ["design"],
   ai: ["ai"],
+  // R2 (contract step C2-D): S1's STO-§23.8 rules; S3 takes OPE-§27.2's `fin:*` R2 rules and `ops:cash_held`; S4 takes
+  // `ops:reveals` (the reveal alarm) and its shipping rules under `ship:`
+  storefront: ["storefront"],
+  money: ["fin", "ops"],
+  logistics: ["ops", "ship"],
 };
 
 /**

@@ -367,9 +367,6 @@ export const messages = {
   "brand.voice.darija.cta": "Buttons only",
   "brand.voice.darija.light": "A light touch",
   "brand.voice.words": "Words to use and avoid",
-  "logo.trademark": "We can't check trademarks. Make sure the name and the logo are yours to use.",
-  "logo.moreLikeThis": "More like this",
-  "logo.use": "Use this logo",
   "design.healthFixture.title": "Store Health: design rules",
   // the console's platform_design field group (PlatformDesignFields, P6-17, DES-§2.7)
   "design.platform.novelty": "Novelty check",
